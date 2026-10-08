@@ -467,9 +467,10 @@ export async function remove(sku: string): Promise<boolean> {
  * tombstone renamed onward) just retires `from` and returns the live part.
  *
  * Written through upsertDoc, not writePart/upsert, so `pricedAt` is carried
- * as-is: a rename is not a price change.
+ * as-is: a rename is not a price change. #313: a non-blank `mfr` re-files the
+ * new copy under that manufacturer (the recovery branches never touch it).
  */
-export async function renamePartDocs(from: string, to: string, model: string): Promise<CatalogPart | null> {
+export async function renamePartDocs(from: string, to: string, model: string, mfr?: string): Promise<CatalogPart | null> {
   if (!from || !to) return null;
   if (from === to) return getDoc<CatalogPart>("catalog_parts", to); // #304: nothing to move — the live part, else null
   const [oldRow, toRow] = await getDocRows<CatalogPart>("catalog_parts", [from, to]).then((rows) => [
@@ -504,6 +505,7 @@ export async function renamePartDocs(from: string, to: string, model: string): P
     ...old,
     id: to,
     sku: to,
+    ...(mfr?.trim() ? { mfr: mfr.trim() } : {}),
     manufacturerModelNumber: model,
     manufacturerPartNumber: old.manufacturerPartNumber || orderNumberOf(from),
     formerSkus: [...new Set([...(old.formerSkus ?? []), from])],

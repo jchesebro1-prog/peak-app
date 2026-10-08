@@ -11332,3 +11332,27 @@ on a real estimate and compare prices to "+ Add part from catalog".
 - A fractional category quantity (2.5) lands correctly, but the Estimator's line qty box (`setQty`, `parseInt`) rounds it down
   if edited — pre-existing. (D678)
 - The phone Estimator is view-only, so the modal is desktop and tablet only.
+
+## 313. Model numbers can move a part to a new manufacturer — DONE 2026-10-08 (D679)
+
+Jeff's 377 "Music Tribe" parts are really six brands (Tannoy, Lab.gruppen, Turbosound, Midas, Klark Teknik, Lake). The
+Catalog → Model numbers rename (#304) always kept the part's manufacturer; a crosswalk row can now also move it.
+
+- An optional **New manufacturer** column (also "New mfr" / "New brand") on the crosswalk sheet. The new SKU is
+  `NewManufacturer:Model`, and the part's manufacturer becomes the new one. A sheet without the column renames exactly as before.
+- The row's **Manufacturer** column must still match the part's CURRENT manufacturer (else "Manufacturer mismatch").
+- The preview shows a New manufacturer column when any planned row moves a part.
+- The rename log records `mfr` / `fromMfr` on a moved part; a new manufacturer with no price-list effective date takes the old one's.
+
+**Verification.** Gates: `tsc --noEmit`, scoped eslint, `test:specs` (new `#313` checks), `next build` — numbers in the session report.
+
+**Jeff to try.** Add a New manufacturer column to the Music Tribe crosswalk (Tannoy, Turbosound, …), Preview, and check the
+column and the new `Brand:Model` SKUs before applying. Back up first: `npm run db:export`.
+
+**After the Music Tribe run.** The vendor that claims "Music Tribe" (Supplied by) does not follow the parts: set Supplied by on each new
+manufacturer's page (Catalog → Manufacturers). Ready-made files: `output/Music Tribe split/` (crosswalk for the 377 parts; per-brand
+catalog import files with MFR P/N = order code, used for Behringer X Series and for future price lists). Dry run of the planner on
+the crosswalk: 377 rename, 0 skipped.
+
+**Open (minor, not blocking).** A row whose new `Brand:Model` SKU equals the part's current SKU reads "The SKU already is the
+model" and does not change the manufacturer.

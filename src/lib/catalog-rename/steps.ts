@@ -68,6 +68,7 @@ export function cleanCrosswalkRows(raw: unknown): CrosswalkRow[] {
         sku: s(r.sku),
         model: s(r.model),
         notes: s(r.notes),
+        newManufacturer: s(r.newManufacturer),
       };
     });
 }

@@ -10756,6 +10756,36 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
     const dp = cr304Plan(dupSheet.rows, [{ sku: "80-0500", mfr: "Symetrix" }], []);
     ok(dp.rows.length === 2 && dp.rows.every((x) => x.outcome === "skip:duplicate") && dp.renames.length === 0, "#304 plan: same SKU, two different models → both skip:duplicate");
   } else ok(false, "#304 plan: duplicate-SKU sheet parses");
+
+  // #313 — the optional New manufacturer column re-brands the part.
+  {
+    const plain = cr304Rows([["Manufacturer", "SKU", "Model #"], ["Music Tribe", "0301-A", "TS-1"]]);
+    ok(plain.ok && plain.rows[0].newManufacturer === "", "#313 crosswalk: a sheet without the column still parses, newManufacturer is blank");
+    for (const h of ["New Manufacturer", " new mfr ", "NEW BRAND"]) {
+      const g = cr304Rows([["Manufacturer", "SKU", "Model #", h], ["Music Tribe", "0301-A", "TS-1", " Tannoy "], ["Music Tribe", "0301-B", "TS-2", ""]]);
+      ok(g.ok && g.rows[0].newManufacturer === "Tannoy" && g.rows[1].newManufacturer === "", `#313 crosswalk: the "${h.trim()}" header is read (trimmed), a blank cell stays blank`);
+    }
+    const capped = cr304Rows([["Manufacturer", "SKU", "Model #", "New manufacturer"], ["Music Tribe", "0301-A", "TS-1", "x".repeat(3000)]]);
+    ok(capped.ok && capped.rows[0].newManufacturer.length === 2048, "#313 crosswalk: the New manufacturer cell is capped like the others");
+    const mt = [{ sku: "0301-A", mfr: "Music Tribe" }];
+    const planOf = (manufacturer: string, newMfr: string, live = mt) => {
+      const g = cr304Rows([["Manufacturer", "SKU", "Model #", "New manufacturer"], [manufacturer, "0301-A", "TS-1", newMfr]]);
+      if (!g.ok) throw new Error("#313 sheet");
+      return cr304Plan(g.rows, live, []);
+    };
+    const mv = planOf("Music Tribe", "Tannoy");
+    ok(mv.rows[0].outcome === "rename" && mv.rows[0].to === "Tannoy:TS-1" && mv.rows[0].mfr === "Tannoy" && mv.renames[0]?.mfr === "Tannoy" && mv.renames[0].to === "Tannoy:TS-1",
+      "#313 plan: Manufacturer = current + New manufacturer plans Tannoy:<model> with mfr Tannoy");
+    ok(planOf("Tannoy", "Tannoy").rows[0].outcome === "skip:mfr-mismatch", "#313 plan: a Manufacturer cell holding the NEW brand is still skip:mfr-mismatch (the check uses the current manufacturer)");
+    const same = planOf("Music Tribe", " music  tribe ");
+    ok(same.rows[0].outcome === "rename" && same.rows[0].mfr === undefined && same.renames[0].mfr === undefined && !("mfr" in same.renames[0]),
+      "#313 plan: a New manufacturer equal to the current one (any case/spacing) gives no mfr");
+    const none = planOf("Music Tribe", "");
+    ok(none.rows[0].outcome === "rename" && none.rows[0].to === "Music Tribe:TS-1" && none.rows[0].mfr === undefined && JSON.stringify(none.renames[0]) === JSON.stringify({ from: "0301-A", to: "Music Tribe:TS-1", model: "TS-1" }),
+      "#313 plan: a plain #304 row is unchanged");
+    const taken = planOf("Music Tribe", "Tannoy", [...mt, { sku: "Tannoy:TS-1", mfr: "Tannoy" }]);
+    ok(taken.rows[0].outcome === "skip:taken" && taken.rows[0].mfr === undefined && taken.renames.length === 0, "#313 plan: a new SKU already held by another part is skip:taken");
+  }
 }
 
 /* --- #304 search: the spec picker, typeahead, datasheets and Displays API --- */
@@ -11267,7 +11297,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   // Step labels cover every step; outcome labels every outcome.
   ok(["parts", ...cr304RefSteps, "done"].every((st) => cr304IsStep(st) && !!cr304StepLabel[st as keyof typeof cr304StepLabel]) && Object.keys(cr304StepLabel).length === cr304RefSteps.length + 2, "#304 page: every rename step has a plain-words label");
   ok(cr304StepLabel.parts === "Renaming parts" && cr304StepLabel.quotes === "Updating quotes" && !cr304IsStep("bogus") && !cr304IsStep("toString") && !cr304IsStep(3), "#304 page: step labels read plainly; unknown steps (incl. prototype keys) are refused");
-  const planned304 = cr304Plan([{ rowNumber: 2, manufacturer: "X", mfrPart: "", sku: "a", model: "b", notes: "" }], [], []);
+  const planned304 = cr304Plan([{ rowNumber: 2, manufacturer: "X", mfrPart: "", sku: "a", model: "b", notes: "", newManufacturer: "" }], [], []);
   ok(Object.keys(planned304.counts).every((o) => !!cr304OutcomeLabel[o as keyof typeof cr304OutcomeLabel]) && Object.keys(cr304OutcomeLabel).length === Object.keys(planned304.counts).length, "#304 page: every plan outcome has a chip label");
 
   // Untrusted batch rows.
@@ -53141,6 +53171,20 @@ async function modelSku304StoreAsyncChecks(): Promise<void> {
   ok(JSON.stringify(second?.formerSkus) === JSON.stringify([p1, to]) && second?.manufacturerPartNumber === p1.slice(p1.indexOf(":") + 1), "#304 store: a second rename accumulates formerSkus and keeps the first MFR P/N");
   ok((await Cat.get(p1))?.sku === to2, "#304 store: a two-hop redirect resolves to the live part");
 
+  // #313 — an optional 4th argument re-files the new copy under another manufacturer.
+  const m1 = fixtureId(313, "p1");
+  const m2 = fixtureId(313, "p2");
+  const m1To = "Tannoy:" + fixtureId(313, "model-a");
+  const m2To = "Symetrix:" + fixtureId(313, "model-b");
+  for (const id of [m1, m2, m1To, m2To]) registerFixture("catalog_parts", id);
+  await DS.upsertDoc("catalog_parts", { ...base, id: m1, sku: m1, mfr: "Music Tribe", pricedAt: 222 } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: m2, sku: m2, mfr: "Music Tribe" } as never);
+  const moved = await Cat.renamePartDocs(m1, m1To, "Fixture 313 A", "Tannoy");
+  ok(moved?.sku === m1To && moved.mfr === "Tannoy" && (await Cat.get(m1To))?.mfr === "Tannoy" && moved.pricedAt === 222 && JSON.stringify(moved.formerSkus) === JSON.stringify([m1]),
+    "#313 store: renamePartDocs(…, mfr) writes the new manufacturer on the new part and still carries pricedAt + formerSkus");
+  const kept = await Cat.renamePartDocs(m2, m2To, "Fixture 313 B");
+  ok(kept?.mfr === "Music Tribe" && (await Cat.get(m2To))?.mfr === "Music Tribe", "#313 store: without the 4th argument the manufacturer is kept");
+
   // The rename log.
   ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("a") === "c", "#304 store: renameMapOf collapses a→b→c to a→c");
   ok(Ren.renameMapOf([{ from: "a", to: "b", model: "m", at: 1, by: "u" }, { from: "b", to: "c", model: "m", at: 2, by: "u" }]).get("b") === "c", "#304 store: renameMapOf keeps b→c");
@@ -53304,7 +53348,7 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
   const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, blobIds));
   const settingsBefore = await Settings.getSettingsPatchStrict();
   const wireBefore = settingsBefore.wireTypes;
-  const rows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: A, model, notes: "" }];
+  const rows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: A, model, notes: "", newManufacturer: "" }];
   type R304 = Extract<Awaited<ReturnType<typeof Apply.runRenameBatch>>, { ok: true }>;
   const runAll = async (refsOnly = false, from: import("@/lib/catalog-rename/apply").RenameStep = "parts"): Promise<R304[]> => {
     const out: R304[] = [];
@@ -53413,7 +53457,7 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
     for (const id of [HF, HT]) registerFixture("catalog_parts", id);
     await DS.upsertDoc("catalog_parts", { ...base, id: HF, sku: HF } as never);
     await DS.upsertDoc("catalog_parts", { ...base, id: HT, sku: HT, manufacturerModelNumber: HM, formerSkus: [HF] } as never);
-    const hfRows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: HF, model: HM, notes: "" }];
+    const hfRows = [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: HF, model: HM, notes: "", newManufacturer: "" }];
     const hf = await Apply.runRenameBatch({ rows: hfRows, step: "parts" }, "Test", 45_000);
     const hfRow = (await DS.getDocRows<D304>("catalog_parts", [HF]))[0];
     const hfLive = (await Cat.list()).filter((p) => p.sku === HT || p.sku === HF);
@@ -53428,7 +53472,7 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
     const RLN = "Symetrix:" + RLM;
     registerFixture("catalog_parts", RLN);
     await DS.upsertDoc("catalog_parts", { ...base, id: RLN, sku: RLN, manufacturerModelNumber: RLM, formerSkus: [RLO] } as never);
-    const rl = await Apply.runRenameBatch({ rows: [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: RLBARE, model: RLM, notes: "" }], step: "parts" }, "Test", 45_000);
+    const rl = await Apply.runRenameBatch({ rows: [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: RLBARE, model: RLM, notes: "", newManufacturer: "" }], step: "parts" }, "Test", 45_000);
     const rlLog = await Ren.allSkuRenames();
     ok(rl.ok && rl.plan?.rows[0].outcome === "already" && rlLog.some((e) => e.from === RLO && e.to === RLN) && !rlLog.some((e) => e.from === RLBARE),
       "#304 apply: re-logging an already row matched via a prefixed former SKU logs the real former SKU, not the bare sheet SKU");
@@ -53444,8 +53488,53 @@ async function modelSku304ApplyAsyncChecks(): Promise<void> {
     const sdCtx = await Apply.loadPlanContext();
     const sdRetired = sdCtx.retired.find((r) => r.sku === SDT);
     ok(!!sdRetired && sdRetired.renamedTo === undefined, "#304 apply: loadPlanContext lists every soft-deleted part, renamedTo only when set");
-    const sd = await Apply.runRenameBatch({ rows: [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: SDF, model: SDM, notes: "" }], step: "parts" }, "Test", 45_000);
+    const sd = await Apply.runRenameBatch({ rows: [{ rowNumber: 2, manufacturer: "Symetrix", mfrPart: "", sku: SDF, model: SDM, notes: "", newManufacturer: "" }], step: "parts" }, "Test", 45_000);
     ok(sd.ok && sd.plan?.rows[0].outcome === "skip:taken" && sd.renamed === 0 && (await Cat.get(SDF))?.sku === SDF, "#304 apply: a soft-deleted part holding the new SKU plans as skip:taken and nothing is renamed");
+
+    // ---- #313: a crosswalk row can move the part to a new manufacturer ----
+    const { mfrKey: mk313 } = await import("@/lib/catalog-books");
+    const oldA = "T313 Old A";
+    const oldB = "T313 Old B";
+    const newA = "T313 New A";
+    const newB = "T313 New B";
+    const newC = "T313 New C";
+    const dateKeys = [oldA, oldB, newA, newB, newC].map(mk313);
+    const moves = [
+      { from: fixtureId(313, "ap-a"), mfr: oldA, to: newA, model: fixtureId(313, "ap-ma") },
+      { from: fixtureId(313, "ap-b"), mfr: oldA, to: newB, model: fixtureId(313, "ap-mb") },
+      { from: fixtureId(313, "ap-c"), mfr: oldB, to: newC, model: fixtureId(313, "ap-mc") },
+    ];
+    for (const mv of moves) {
+      registerFixture("catalog_parts", mv.from);
+      registerFixture("catalog_parts", `${mv.to}:${mv.model}`);
+      await DS.upsertDoc("catalog_parts", { ...base, id: mv.from, sku: mv.from, mfr: mv.mfr } as never);
+    }
+    const pleBefore = (await Settings.getSettings()).priceListEffective ?? {};
+    try {
+      await Settings.setPriceListEffective(mk313(oldA), 1_700_000_000_000);
+      await Settings.setPriceListEffective(mk313(newB), 1_600_000_000_000);
+      const mvRows = moves.map((mv, i) => ({ rowNumber: i + 2, manufacturer: mv.mfr, mfrPart: "", sku: mv.from, model: mv.model, notes: "", newManufacturer: mv.to }));
+      const mr = await Apply.runRenameBatch({ rows: mvRows, step: "parts" }, "Test", 45_000);
+      ok(mr.ok && mr.renamed === 3 && mr.plan?.counts.rename === 3 && mr.plan.rows.every((r) => !!r.mfr), "#313 apply: three rows with a New manufacturer rename and the plan carries each move");
+      const landed = await Promise.all(moves.map((mv) => Cat.get(`${mv.to}:${mv.model}`)));
+      ok(landed.every((p, i) => p?.mfr === moves[i].to && p.sku === `${moves[i].to}:${moves[i].model}`), "#313 apply: each part is live under its new manufacturer + Brand:Model SKU");
+      const log313 = await Ren.allSkuRenames();
+      const e0 = log313.find((e) => e.from === moves[0].from);
+      ok(e0?.mfr === newA && e0.fromMfr === oldA && e0.to === `${newA}:${moves[0].model}`, "#313 apply: the rename-log entry records the new and previous manufacturer");
+      const ple = (await Settings.getSettings()).priceListEffective ?? {};
+      ok(ple[mk313(newA)] === 1_700_000_000_000, "#313 apply: a new manufacturer with no price-list date takes the previous manufacturer's");
+      ok(ple[mk313(newB)] === 1_600_000_000_000, "#313 apply: an existing price-list date is never overwritten");
+      ok(ple[mk313(newC)] === undefined, "#313 apply: nothing is copied when the previous manufacturer has no date");
+      // A plain row (no New manufacturer) logs no manufacturer fields.
+      const plainRow = log313.find((e) => e.from === A);
+      ok(!!plainRow && !("mfr" in plainRow) && !("fromMfr" in plainRow), "#313 apply: a plain #304 rename logs no mfr / fromMfr");
+    } finally {
+      const restore = (await Settings.getSettings()).priceListEffective ?? {};
+      for (const k of dateKeys) {
+        if (pleBefore[k] == null) await Settings.setPriceListEffective(k, null);
+        else if (restore[k] !== pleBefore[k]) await Settings.setPriceListEffective(k, pleBefore[k]);
+      }
+    }
   } finally {
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);

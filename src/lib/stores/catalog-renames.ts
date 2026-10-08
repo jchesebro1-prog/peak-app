@@ -9,7 +9,11 @@ import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
  * `formerSkus` / `renamedTo`, so the log is the audit trail and the lookup
  * for data (customer files, spreadsheets) that never sees a part doc.
  */
-export type SkuRename = { from: string; to: string; model: string; at: number; by: string };
+export type SkuRename = {
+  from: string; to: string; model: string; at: number; by: string;
+  /** #313 — only when the rename also moved the part: its new and previous manufacturer. */
+  mfr?: string; fromMfr?: string;
+};
 
 export const SKU_RENAMES_BLOB = "catalog_sku_renames";
 

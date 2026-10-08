@@ -7,7 +7,7 @@ import { cleanModel, modelSku } from "./sku";
  * exactly one outcome; only `rename` rows are ever applied.
  */
 
-export type CrosswalkRow = { rowNumber: number; manufacturer: string; mfrPart: string; sku: string; model: string; notes: string };
+export type CrosswalkRow = { rowNumber: number; manufacturer: string; mfrPart: string; sku: string; model: string; notes: string; newManufacturer: string };
 export const CROSSWALK_MAX_ROWS = 5000;
 export const CROSSWALK_CELL_MAX = 2048;
 
@@ -17,12 +17,13 @@ const HEADERS: Record<keyof Omit<CrosswalkRow, "rowNumber">, string[]> = {
   sku: ["sku"],
   model: ["model #", "model number", "mfr m/n", "model"],
   notes: ["notes", "note"],
+  newManufacturer: ["new manufacturer", "new mfr", "new brand"],
 };
 
 export function crosswalkRowsFromGrid(grid: string[][]): { ok: true; rows: CrosswalkRow[] } | { ok: false; error: string } {
   const head = (grid[0] ?? []).map((h) => String(h ?? "").trim().toLowerCase());
   const col = (k: keyof typeof HEADERS) => head.findIndex((h) => HEADERS[k].includes(h));
-  const at = { manufacturer: col("manufacturer"), mfrPart: col("mfrPart"), sku: col("sku"), model: col("model"), notes: col("notes") };
+  const at = { manufacturer: col("manufacturer"), mfrPart: col("mfrPart"), sku: col("sku"), model: col("model"), notes: col("notes"), newManufacturer: col("newManufacturer") };
   if (at.sku < 0 || at.model < 0 || at.manufacturer < 0) return { ok: false, error: "The sheet needs Manufacturer, SKU and Model # columns (the crosswalk's own headers)." };
   const body = grid.slice(1);
   if (body.length > CROSSWALK_MAX_ROWS) return { ok: false, error: `The sheet has more than ${CROSSWALK_MAX_ROWS.toLocaleString()} rows.` };
@@ -30,15 +31,16 @@ export function crosswalkRowsFromGrid(grid: string[][]): { ok: true; rows: Cross
   body.forEach((cells, i) => {
     const v = (c: number) => (c < 0 ? "" : String(cells?.[c] ?? "").trim().slice(0, CROSSWALK_CELL_MAX));
     if (!v(at.sku) && !v(at.model)) return;
-    rows.push({ rowNumber: i + 2, manufacturer: v(at.manufacturer), mfrPart: v(at.mfrPart), sku: v(at.sku), model: v(at.model), notes: v(at.notes) });
+    rows.push({ rowNumber: i + 2, manufacturer: v(at.manufacturer), mfrPart: v(at.mfrPart), sku: v(at.sku), model: v(at.model), notes: v(at.notes), newManufacturer: v(at.newManufacturer) });
   });
   return { ok: true, rows };
 }
 
 export type RenameOutcome = "rename" | "already" | "skip:no-model" | "skip:not-found" | "skip:mfr-mismatch" | "skip:bad-model" | "skip:taken" | "skip:duplicate" | "skip:same";
-export type PlannedRow = { row: CrosswalkRow; outcome: RenameOutcome; from: string; to: string | null; model: string; reason: string };
+/** `mfr` (#313): the new manufacturer, set only when the rename also moves the part to another one. */
+export type PlannedRow = { row: CrosswalkRow; outcome: RenameOutcome; from: string; to: string | null; model: string; reason: string; mfr?: string };
 export type PlanPart = { sku: string; mfr?: string; formerSkus?: string[] };
-export type RenamePlan = { rows: PlannedRow[]; counts: Record<RenameOutcome, number>; renames: Array<{ from: string; to: string; model: string }> };
+export type RenamePlan = { rows: PlannedRow[]; counts: Record<RenameOutcome, number>; renames: Array<{ from: string; to: string; model: string; mfr?: string }> };
 
 const REASON: Record<RenameOutcome, string> = {
   rename: "",
@@ -89,8 +91,11 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
       if (cands.length > 1) return mk("skip:not-found");
       if (cands.length === 1) part = cands[0];
     }
-    const brand = part?.mfr || row.manufacturer;
+    // #313: a New manufacturer cell re-brands the part; the mismatch check below still compares the CURRENT one.
+    const newMfr = cleanModel(row.newManufacturer);
+    const brand = newMfr || part?.mfr || row.manufacturer;
     const to = modelSku(brand, model);
+    const moves = !!part && !!newMfr && mfrKey(newMfr) !== mfrKey(part.mfr);
     if (!part) {
       // `from` is the REAL former SKU (a prefixed "Brand:80-0043" when the
       // sheet says "80-0043"), so a re-log names what the old data holds.
@@ -113,9 +118,10 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
     // A half-finished rename (the copy at `to` was written, then the call died
     // before `from` was retired): the copy lists `from` among its former SKUs.
     // Plan it as a rename — renamePartDocs's recovery branch retires `from`.
-    if (owner && owner.sku !== part.sku && (owner.formerSkus ?? []).includes(part.sku)) return mk("rename", owner.sku, part.sku);
+    const withMfr = (r: PlannedRow): PlannedRow => (moves ? { ...r, mfr: newMfr } : r);
+    if (owner && owner.sku !== part.sku && (owner.formerSkus ?? []).includes(part.sku)) return withMfr(mk("rename", owner.sku, part.sku));
     if ((owner && owner.sku !== part.sku) || formerUpper.has(to.toUpperCase()) || retiredUpper.has(to.toUpperCase())) return mk("skip:taken", to);
-    return mk("rename", to, part.sku);
+    return withMfr(mk("rename", to, part.sku));
   });
   const byTo = new Map<string, number>();
   const byFrom = new Map<string, number>();
@@ -127,6 +133,6 @@ export function planRenames(rows: CrosswalkRow[], live: PlanPart[], retired: Arr
   const out = first.map((r) => (dup(r) ? { ...r, outcome: "skip:duplicate" as const, reason: REASON["skip:duplicate"] } : r));
   const counts = Object.fromEntries(Object.keys(REASON).map((k) => [k, 0])) as Record<RenameOutcome, number>;
   for (const r of out) counts[r.outcome]++;
-  const renames = out.filter((r) => r.outcome === "rename" && r.to).map((r) => ({ from: r.from, to: r.to!, model: r.model }));
+  const renames = out.filter((r) => r.outcome === "rename" && r.to).map((r) => ({ from: r.from, to: r.to!, model: r.model, ...(r.mfr ? { mfr: r.mfr } : {}) }));
   return { rows: out, counts, renames };
 }
