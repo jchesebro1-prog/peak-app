@@ -11333,7 +11333,7 @@ on a real estimate and compare prices to "+ Add part from catalog".
   if edited — pre-existing. (D678)
 - The phone Estimator is view-only, so the modal is desktop and tablet only.
 
-## 313. Model numbers can move a part to a new manufacturer — DONE 2026-10-08 (D-NEXT)
+## 313. Model numbers can move a part to a new manufacturer — DONE 2026-10-08 (D679)
 
 Jeff's 377 "Music Tribe" parts are really six brands (Tannoy, Lab.gruppen, Turbosound, Midas, Klark Teknik, Lake). The
 Catalog → Model numbers rename (#304) always kept the part's manufacturer; a crosswalk row can now also move it.
@@ -11348,6 +11348,11 @@ Catalog → Model numbers rename (#304) always kept the part's manufacturer; a c
 
 **Jeff to try.** Add a New manufacturer column to the Music Tribe crosswalk (Tannoy, Turbosound, …), Preview, and check the
 column and the new `Brand:Model` SKUs before applying. Back up first: `npm run db:export`.
+
+**After the Music Tribe run.** The vendor that claims "Music Tribe" (Supplied by) does not follow the parts: set Supplied by on each new
+manufacturer's page (Catalog → Manufacturers). Ready-made files: `output/Music Tribe split/` (crosswalk for the 377 parts; per-brand
+catalog import files with MFR P/N = order code, used for Behringer X Series and for future price lists). Dry run of the planner on
+the crosswalk: 377 rename, 0 skipped.
 
 **Open (minor, not blocking).** A row whose new `Brand:Model` SKU equals the part's current SKU reads "The SKU already is the
 model" and does not change the manufacturer.

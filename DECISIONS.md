@@ -9972,7 +9972,7 @@ A category quantity may be fractional (say 2.5 for cable by the foot) and lands 
 fixed here: the Estimator's line quantity box (`setQty`) uses `parseInt`, so editing such a line rounds it down to a whole
 number. That behavior pre-dates Phase 6 and applies to any fractional quantity; it is logged on #311 rather than changed.
 
-## D-NEXT. Model numbers can move a part to a new manufacturer (#313, 2026-10-08)
+## D679. Model numbers can move a part to a new manufacturer (#313, 2026-10-08)
 
 The crosswalk gains an optional **New manufacturer** column (headers "new manufacturer", "new mfr", "new brand"; a missing
 column is blank on every row, so a plain #304 sheet behaves as before). The "manufacturer must match" check still compares
