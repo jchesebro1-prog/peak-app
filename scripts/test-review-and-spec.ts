@@ -56377,3 +56377,141 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     }
   }
 }
+
+// ---- #P4 pure: Customer review — labor summary + review-comment rules ----
+import { computeLabor as p4ComputeLabor, makeLaborRate as p4MakeRate } from "@/app/(app)/estimator/pricing";
+import { laborSummary as p4LaborSummary } from "@/lib/estimate-review/labor";
+import {
+  canAddComment as p4CanAdd, canDelete as p4CanDelete, canResolve as p4CanResolve, COMMENT_BODY_MAX as P4_BODY_MAX,
+  numberComments as p4Number, sanitizeComment as p4Sanitize, sendBackNote as p4Note, type ReviewComment as P4Comment,
+} from "@/lib/estimate-review/comments";
+import type { LaborDraft as P4Draft, SpecSection as P4Section } from "@/app/(app)/estimator/types";
+
+function p4PureChecks(): void {
+  const rate = p4MakeRate({});
+  const mob = (o: Record<string, unknown>) => ({
+    name: "Mob", nameCustom: false, tripType: "local", tripAuto: false, people: "2", days: "1", hoursPerDay: "8", otHrs: "0",
+    sup: true, milesRT: "0", lift: false, ...o,
+  });
+  // Group A: mob1 2 people × 3 days × 10 h → 48 straight (incl. 24 supervision) + 12 OT; mob2 3 × 1 × 8 → 24; PM auto 10% of 72 = 7; shop 5; drafting manual 2.
+  const draftA = {
+    discipline: "RIG", margin: "30", mobs: [mob({ people: "2", days: "3", hoursPerDay: "10" }), mob({ people: "3", days: "1", hoursPerDay: "8" })],
+    pmHrs: "0", pmAuto: true, shopHrs: "5", drfHrs: "2", drfAuto: false, misc: "0",
+  } as unknown as P4Draft;
+  const calcA = p4ComputeLabor(draftA, rate);
+  const line = (o: Record<string, unknown>) => ({ id: 1, sku: "LAB-X", desc: "Labor", qty: 1, unit: "ea", cost: 0, price: 0, labor: true, ...o });
+  const secA = {
+    id: "s-a", name: "Stage Rigging", kind: "materials", items: [line({ id: 1, price: calcA.totalPrice, laborGroup: "g1" })],
+    laborGroups: { g1: { draft: draftA, lines: 1 } },
+  } as unknown as P4Section;
+  const sumA = p4LaborSummary([secA], rate);
+  const gA = sumA.groups[0];
+  ok(sumA.groups.length === 1 && gA.id === "g1" && gA.label === "Stage Rigging · Rigging" && gA.hours === 98 && gA.cost > 0 && gA.cost === Math.round(calcA.totalCost * 100) / 100,
+    "#P4 pure: a configured group reports hours = Σ mob (straight incl. supervision + OT) + PM + shop + drafting (48+12+24+7+5+2 = 98; supervision not double counted), its configured cost, and a 'system · discipline' label");
+  ok(calcA.mobs[0].supHrs === 24 && calcA.mobs[0].supHrs < calcA.mobs[0].reg && calcA.totalReg === 72 && calcA.pmHrs === 7 && gA.hours === 72 + 12 + 7 + 5 + 2,
+    "#P4 pure: the formula uses MobCalc.reg + otHrs (supHrs is a subset of reg, totalReg is Σ reg)");
+  ok(Math.abs(gA.sell - calcA.totalPrice) < 0.01 && gA.edited === false, "#P4 pure: lines that still sum to the configured price are not 'edited'");
+  ok(sumA.crew.maxCrew === 3 && sumA.crew.days === 4 && sumA.crew.otHours === 12, "#P4 pure: crew line — max crew 3, Σ days 4, Σ OT hours 12");
+
+  // Edited: a hand edit pushes the lines > $1 away from the configured price (both directions); exactly $1 away is not edited.
+  const secEdited = { ...secA, items: [line({ id: 1, price: calcA.totalPrice }), line({ id: 2, price: 500 })].map((l) => ({ ...l, laborGroup: "g1" })) } as unknown as P4Section;
+  const gE = p4LaborSummary([secEdited], rate).groups[0];
+  ok(gE.edited === true && Math.abs(gE.sell - (calcA.totalPrice + 500)) < 0.01, "#P4 pure: a group whose lines were raised after configuring is 'edited', sell = the CURRENT line sells");
+  const secLow = { ...secA, items: [line({ id: 1, price: calcA.totalPrice - 40, laborGroup: "g1" })] } as unknown as P4Section;
+  ok(p4LaborSummary([secLow], rate).groups[0].edited === true, "#P4 pure: lowered lines are 'edited' too");
+  const secWithin = { ...secA, items: [line({ id: 1, qty: 2, price: 0, extSellOverride: calcA.totalPrice + 0.9, laborGroup: "g1" })] } as unknown as P4Section;
+  ok(p4LaborSummary([secWithin], rate).groups[0].edited === false, "#P4 pure: a $0.90 difference (and an ext-sell override) is within the $1 tolerance");
+  const secGone = { ...secA, items: [] } as unknown as P4Section;
+  const gGone = p4LaborSummary([secGone], rate).groups[0];
+  ok(gGone.sell === 0 && gGone.edited === true && gGone.hours === 98, "#P4 pure: a group whose lines were all deleted keeps its configured hours/cost, sells $0 and reads edited");
+
+  // A second discipline in another system; hand-added hourly lines (loose), incl. one whose group record is gone.
+  const draftB = {
+    discipline: "LIG", margin: "25", mobs: [mob({ people: "4", days: "2", hoursPerDay: "9" })],
+    pmHrs: "3", pmAuto: false, shopHrs: "0", drfHrs: "0", drfAuto: false, misc: "0",
+  } as unknown as P4Draft;
+  const calcB = p4ComputeLabor(draftB, rate);
+  const secB = {
+    id: "s-b", name: "House Lights", kind: "materials",
+    items: [
+      line({ id: 3, price: calcB.totalPrice, laborGroup: "g2" }),
+      line({ id: 4, qty: 4, unit: "hr", cost: 50, price: 80 }),
+      line({ id: 5, qty: 2.5, unit: " HR ", cost: 40, price: 70, laborGroup: "orphan" }),
+      line({ id: 6, qty: 9, unit: "ea", cost: 10, price: 20 }),
+      line({ id: 7, qty: 6, unit: "hr", cost: 1, price: 2, labor: false }),
+    ],
+    laborGroups: { g2: { draft: draftB, lines: 1 } },
+  } as unknown as P4Section;
+  const both = p4LaborSummary([secA, secB], rate);
+  ok(both.groups.length === 2 && both.groups[1].label === "House Lights · Lighting" && both.groups[1].hours === 4 * 2 * 8 + 4 * 2 * 1 + 3,
+    "#P4 pure: groups come in system order; Lighting group hours = 64 straight + 8 OT + 3 manual PM");
+  ok(both.loose !== null && both.loose.hours === 6.5 && both.loose.cost === 4 * 50 + 2.5 * 40 && both.loose.sell === 4 * 80 + 2.5 * 70,
+    "#P4 pure: hand-added labor lines with unit hr count their qty as hours (a group-less or orphaned one too); non-hr and non-labor lines are ignored");
+  ok(both.totals.hours === 98 + 75 + 6.5 && Math.abs(both.totals.cost - (both.groups[0].cost + both.groups[1].cost + 300)) < 0.011 && Math.abs(both.totals.sell - (both.groups[0].sell + both.groups[1].sell + 495)) < 0.011,
+    "#P4 pure: totals = groups + loose");
+  ok(both.crew.maxCrew === 4 && both.crew.days === 6 && both.crew.otHours === 12 + 4 * 2 * 1, "#P4 pure: crew spans every group (max 4, days 3+1+2 = 6, OT 20)");
+
+  const empty = p4LaborSummary([], rate);
+  const bare = p4LaborSummary([{ id: "x", name: "No labor", kind: "materials", items: [line({ id: 1, unit: "ea" })] } as unknown as P4Section], rate);
+  ok(empty.groups.length === 0 && empty.loose === null && empty.totals.hours === 0 && empty.totals.cost === 0 && empty.totals.sell === 0 && empty.crew.maxCrew === 0 && empty.crew.days === 0 && empty.crew.otHours === 0 &&
+     bare.groups.length === 0 && bare.loose === null && bare.totals.hours === 0,
+    "#P4 pure: an estimate with no labor is all zeros — no groups, no loose row");
+}
+p4PureChecks();
+
+// ---- #P4 comments: numbering, the send-back note, permissions ----
+function p4CommentChecks(): void {
+  const secs = [{ id: "s1", name: "Rigging" }, { id: "s2", name: "Lighting" }, { id: "s3", name: "" }];
+  const c = (id: string, sectionId: string | null, at: number, body: string, o: Partial<P4Comment> = {}): P4Comment => ({ id, sectionId, body, by: "Ann Lee", at, ...o });
+  const list: P4Comment[] = [
+    c("c1", "s2", 100, "Lights need a cut sheet"),
+    c("c2", null, 300, "Add the venue address"),
+    c("c3", "s1", 200, "Confirm truss span"),
+    c("c4", "s1", 150, "Two\nlines", { resolvedAt: 400, resolvedBy: "Bo" }),
+    c("c5", "s1", 120, "Hoist count?"),
+    c("c6", null, 50, "Whole thing: tone"),
+    c("c7", "gone", 60, "Pinned to a deleted system"),
+    c("c8", "s3", 70, "Unnamed system note"),
+  ];
+  const n = p4Number(list, secs);
+  ok(n.map((r) => r.comment.id).join() === "c6,c7,c2,c5,c3,c1,c8" && n.every((r, i) => r.n === i + 1) && n.length === 7,
+    "#P4 comments: open comments only, numbered 1…n — whole-estimate first, then system order, then time (a deleted system's comment reads as whole-estimate)");
+  ok(n[0].system === "Whole estimate" && n[1].system === "Whole estimate" && n[3].system === "Rigging" && n[6].system === "Untitled system",
+    "#P4 comments: each row names its system (Whole estimate / the name / Untitled system)");
+  ok(p4Number([], secs).length === 0 && p4Number(null, secs).length === 0 && p4Number([c("x", "s1", 1, "r", { resolvedAt: 2 })], secs).length === 0, "#P4 comments: none / all-resolved numbers to nothing");
+  const tie = p4Number([c("b", "s1", 5, "x"), c("a", "s1", 5, "y")], secs);
+  ok(tie[0].comment.id === "a", "#P4 comments: equal timestamps break on id (stable)");
+
+  const note = p4Note(list, secs, "  Please fix before Friday.  ");
+  ok(note === [
+    "7 comments to address:",
+    "1. Whole estimate — Whole thing: tone",
+    "2. Whole estimate — Pinned to a deleted system",
+    "3. Whole estimate — Add the venue address",
+    "4. Rigging — Hoist count?",
+    "5. Rigging — Confirm truss span",
+    "6. Lighting — Lights need a cut sheet",
+    "7. Untitled system — Unnamed system note",
+    "",
+    "Please fix before Friday.",
+  ].join("\n"), "#P4 comments: send-back note — '<n> comments to address:', numbered 'System — body' lines, a blank line, the approver's text");
+  const one = p4Note([c("z", "s2", 1, "Line one\nline two")], secs, "");
+  ok(one === "1 comment to address:\n1. Lighting — Line one line two", "#P4 comments: one comment is singular, a multi-line body stays on one line, no trailing blank without extra text");
+  ok(p4Note([], secs, " just this ") === "just this" && p4Note([c("r", "s1", 1, "x", { resolvedAt: 2 })], secs, "") === "", "#P4 comments: with no open comments the note is only the approver's text");
+
+  ok(p4Sanitize("  hi there \r\n") === "hi there" && p4Sanitize("a\u0000b\u0007c") === "abc" && p4Sanitize("") === null && p4Sanitize("   \n ") === null && p4Sanitize(5) === null && p4Sanitize(null) === null &&
+     p4Sanitize("x".repeat(P4_BODY_MAX)) !== null && p4Sanitize("x".repeat(P4_BODY_MAX + 1)) === null && p4Sanitize("  " + "y".repeat(P4_BODY_MAX) + "  ") !== null,
+    "#P4 comments: sanitize trims, strips control characters, needs 1–2,000 characters (trimmed length)");
+
+  const open = c("o", "s1", 1, "x", { by: "Ann Lee" });
+  const done = c("d", "s1", 1, "x", { by: "Ann Lee", resolvedAt: 9, resolvedBy: "Bo" });
+  const roles = { admin: ["Admin"], mgr: ["Manager"], est: ["Estimator"], rev: ["Reviewer"], none: [] as string[] };
+  ok(p4CanAdd(roles.admin) && p4CanAdd(roles.mgr) && p4CanAdd(roles.est) && p4CanAdd(roles.rev) && !p4CanAdd(roles.none) && !p4CanAdd(null) && !p4CanAdd(undefined) && !p4CanAdd(["Nobody"]),
+    "#P4 comments: add = create | send | approve (Admin, Manager, Estimator, Reviewer yes; no roles no)");
+  ok(p4CanResolve(roles.admin, open) && p4CanResolve(roles.mgr, open) && p4CanResolve(roles.est, open) && !p4CanResolve(roles.rev, open) && !p4CanResolve(roles.none, open) && !p4CanResolve(roles.est, done),
+    "#P4 comments: resolve = create, on an open comment only (a Reviewer cannot)");
+  ok(p4CanDelete(roles.est, open, "ann lee") && !p4CanDelete(roles.est, open, "Bo Park") && !p4CanDelete(roles.est, done, "Ann Lee") && p4CanDelete(roles.rev, open, "Bo Park") && p4CanDelete(roles.mgr, done, "Bo Park") &&
+     p4CanDelete(roles.admin, done, "Bo Park") && !p4CanDelete(roles.none, open, "Bo Park") && !p4CanDelete(roles.est, open, ""),
+    "#P4 comments: delete = the author while unresolved (name match, case-blind), or anyone with approve at any time");
+}
+p4CommentChecks();
