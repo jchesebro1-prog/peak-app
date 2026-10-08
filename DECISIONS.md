@@ -9984,3 +9984,48 @@ optional, so the old log still reads. After a batch that moved parts, every new 
 date takes the previous manufacturer's (never overwriting a date, silent when the old one has none). Known consequence: a
 LATER price list filed under the OLD manufacturer name (say "Music Tribe") whose SKUs now resolve to the new brand is
 refused by the import guard as foreign SKUs, so future lists are imported per brand with the order code in **MFR P/N**.
+
+## D680. Removable atoms and the system price line (#312, 2026-10-08)
+
+The price table and the page break gain a `Remove` button (hover or selected). A new `systemTotal` node, the system price line
+(`System price · live` in the editor), prints the system's name left and `systemSellTotal` right, bold, with a rule above; an
+alternate system adds " — priced separately"; an unnamed system reads "Untitled system". A line for a system that no longer
+exists prints nothing and shows amber `removed` plus a Gaps row "A price for a removed system"; one whose system exists but does
+not print in the body prints nothing and shows a muted "Not printed" note. New documents place it at the bottom of each system
+(heading, intro, key products, price line), replacing the price-chip paragraph under the heading; older documents are not
+rewritten. BOM `+ Price line` inserts at the cursor on click and drags like other BOM items (the inner drag stops propagation);
+a BOM system insert is heading + an empty paragraph (the cursor lands there) + price line. Jeff chose this over a price chip.
+
+## D681. The product image node and its print rules (#312, 2026-10-08)
+
+A `productImage` node is just the photo, with `Left` `Right` `Full` and `Size` 25–100 % (default right, 34 %); text wraps beside
+it and it drags anywhere. Print rules: an image clears earlier floats, so consecutive photos never sit side by side; headings
+and price lines clear it; the picture is held to its alignment edge (`object-position`); a very large side image is capped at
+2.4 in tall (blank space beside it is a known limit). Sources match product blocks: the part's own photo, then the kind
+placeholder, then nothing; it still prints when the line is no longer in the BOM. In the editor the image sits above the blocks
+that follow it (`position: relative`, z-index) so it can be clicked. Product paragraphs become words only. Every sku walker, the
+#304 rename rewrite and `reanchor.ts` `LINE_ANCHORED_NODES` include images. Jeff chose a separate image piece over an
+option inside the product block.
+
+## D682. Insert paths and old product blocks (#312, 2026-10-08)
+
+Start the document, a BOM insert and `+ Key product` now insert an image followed by the words. Older product blocks that carry
+a photo print exactly as they did and show `Separate photo` (turns the photo into an image node); words-only blocks show `Add
+photo`, offered only when a photo resolves for the line and the line has no image yet. No stored document is migrated. Known
+limit: on the package page, old words-only blocks lose about 10 px of spacing above the datasheet link.
+
+## D683. Editing a custom part in place (#312, 2026-10-08)
+
+A custom part line on Build is click-to-edit (the description or ✎): the Custom part form re-opens pre-filled with `Save
+changes` / `Cancel`. The line keeps its id, position and `lineOrder`; fields the form does not own are preserved; an untouched
+sell is kept exactly (no cent drift from recomputing); a quantity of 0 is kept on edit. If the line was removed in the
+meantime, nothing changes and the message reads "That line was removed — nothing was changed." Changing the SKU re-anchors the
+line's key-product star (unless another line already has that SKU) and the package document's product block and image for that
+line; the catalog is re-saved only if the box is ticked. Known limits: on a duplicate SKU the document re-anchors while the star
+stays "changed"; the catalog-saved message is dropped if the line is removed during the save.
+
+## D684. The per-line Spec select moves to Customer review (#312, 2026-10-08)
+
+The Spec select left Build (the line rows and the Custom part form). It lives in a `Specs` card in Customer review's internal
+sidebar, for custom and curtain lines, saving through the same `specKey` path as before. The phone review has no sidebar, so
+Specs is desktop only.

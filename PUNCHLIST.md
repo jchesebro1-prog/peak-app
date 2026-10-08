@@ -11333,6 +11333,56 @@ on a real estimate and compare prices to "+ Add part from catalog".
   if edited — pre-existing. (D678)
 - The phone Estimator is view-only, so the modal is desktop and tablet only.
 
+## 312. Package document: images, price lines, removable tables; edit custom parts; Specs in review — DONE 2026-10-08 (D680–D684)
+
+Jeff's 2026-10-08 feedback on #310's package document and the Build tab; he picked "System price line" and "Separate image
+piece" when asked. Plan `docs/superpowers/plans/2026-10-08-package-doc-images-price-lines-312.md`. No migration, no AI.
+
+What shipped:
+- **Removable atoms** — the price table and the page break have a `Remove` button (on hover or when selected). (D680)
+- **System price line** — a `systemTotal` node, `System price · live` in the editor: system name left, the system's sell total
+  right, bold, a rule above; an alternate adds " — priced separately". New documents put it at the bottom of each system
+  (heading, intro, key products, price line) in place of the price-chip paragraph under the heading; older documents are
+  unchanged. BOM `+ Price line` (click inserts at the cursor, drag works); a BOM system insert is heading + an empty
+  paragraph (cursor lands there) + price line. A removed system prints nothing (amber `removed`, Gaps row "A price for a
+  removed system"); an existing system that does not print in the body prints nothing and shows a muted "Not printed" note.
+  (D680; 32d961da, e87466d4)
+- **Product image** — a `productImage` node holding just the photo: `Left` `Right` `Full`, `Size` 25–100 % (default right
+  34 %), text wraps beside it, drag anywhere. Consecutive photos never sit side by side; headings and price lines clear it;
+  the picture is held to its alignment edge. Same sources as product blocks (own photo, then the kind placeholder, then
+  nothing); it still prints when the line is no longer in the BOM. Product paragraphs are words only. (D681; fb00efea,
+  71f2033f, 1df10b65, b2fa6434)
+- **Inserting and old documents** — Start the document, BOM and `+ Key product` insert image + words. Photo'd product blocks
+  from before print exactly as they did and get `Separate photo`; words-only blocks get `Add photo` (only when a photo resolves
+  and the line has no image yet). Every sku walker, the #304 rename rewrite and `reanchor.ts` include images. (D682)
+- **Edit a custom part** — a custom line on Build is click-to-edit (description or ✎): the Custom part form re-opens
+  pre-filled with `Save changes` / `Cancel`; same id, position and line order; an untouched sell is kept exactly; qty 0 is kept;
+  a line removed meanwhile reads "That line was removed — nothing was changed." Changing the SKU moves its key-product star
+  and the document's product block and image with it. (D683; 0fb98d37, 21d255a9)
+- **Specs in review** — the per-line Spec select left Build (rows and the Custom part form) and is the `Specs` card in Customer
+  review's internal sidebar, for custom and curtain lines. (D684)
+
+**Verification.** Gates: `tsc --noEmit` 0; scoped eslint clean; `test:specs` 14,198 PASS / 0 FAIL (after merging main);
+`next build` OK; `test:smoke` ALL PASSED. Browser pass (scratch DB, 2026-10-08): added a custom part, clicked it, changed qty
+3 to 4 and the description in place (still one line); no Spec select on Build; Specs card in the review sidebar; Start the
+document seeded heading, price line, table; BOM added an image and words; clicking the image set Left and the text wrapped;
+dragged it above the intro; the Size slider went 34 to 78 without moving the node; Remove on the price table; Save; the staff
+preview package page shows the image left with wrapped text, the system price line at the bottom and no table.
+
+**Jeff to try.** On a real estimate: Start the document, move a photo left and right, drag it between paragraphs, remove the
+table, then print and check page breaks; click a custom part and change its SKU.
+
+**New copy for Jeff to approve:** "System price · live", "+ Price line", "Remove", "Not printed", "Separate photo", "Add photo",
+"Save changes", "That line was removed — nothing was changed.", "A price for a removed system", "Specs".
+
+**Open (minor, not blocking).**
+- Keeping an image with its words across a PDF page break is best effort for floated images; not verified in a real print.
+- A very large left or right image (height capped at 2.4 in) leaves blank space beside the picture; the editor shows the same.
+- On a duplicate SKU the document re-anchors while the key-product star stays "changed".
+- The catalog-saved message is dropped if the line is removed during the save.
+- On the package page, old words-only product blocks lose about 10 px of spacing above the datasheet link.
+- The phone review has no sidebar, so Specs is desktop only.
+
 ## 313. Model numbers can move a part to a new manufacturer — DONE 2026-10-08 (D679)
 
 Jeff's 377 "Music Tribe" parts are really six brands (Tannoy, Lab.gruppen, Turbosound, Midas, Klark Teknik, Lake). The

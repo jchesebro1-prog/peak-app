@@ -786,7 +786,7 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
-42. ✅ **Estimator in four steps** (#305, D643–D678) — Phase 1 ✅ (the frame): the
+42. ✅ **Estimator in four steps** (#305, D643–D684) — Phase 1 ✅ (the frame): the
     Estimator is Build · Build package · Customer review · Send & track on one URL
     (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
     readiness line under each tab (never blocking), the status select and Daylite
@@ -819,6 +819,10 @@ See `.env.example`.
     time from the live catalog at the tier margin, as a system named after it; catalog renames follow. Remaining is
     Jeff-gated: filling each category's typical items in Estimating Rules → System categories, and the exact repro for
     "Send → Home" (PUNCHLIST #305, #311).
+    Follow-up ✅ (#312, D680–D684): the package document gains removable price tables and page breaks, a live "system price
+    line" per system (`systemTotal`) and a separate `productImage` node (Left / Right / Full, 25–100 %, text wraps beside it;
+    older photo'd product blocks print as before and offer Separate photo); a custom part line on Build is click-to-edit in
+    place; and the per-line Spec select moved to Customer review's internal sidebar (PUNCHLIST #312).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
