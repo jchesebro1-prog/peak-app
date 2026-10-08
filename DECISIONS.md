@@ -9971,3 +9971,16 @@ page and in the modal, where it cannot be ticked. Items are picked with the shar
 A category quantity may be fractional (say 2.5 for cable by the foot) and lands that way on the new line. Known limit, not
 fixed here: the Estimator's line quantity box (`setQty`) uses `parseInt`, so editing such a line rounds it down to a whole
 number. That behavior pre-dates Phase 6 and applies to any fractional quantity; it is logged on #311 rather than changed.
+
+## D-NEXT. Model numbers can move a part to a new manufacturer (#313, 2026-10-08)
+
+The crosswalk gains an optional **New manufacturer** column (headers "new manufacturer", "new mfr", "new brand"; a missing
+column is blank on every row, so a plain #304 sheet behaves as before). The "manufacturer must match" check still compares
+the row's Manufacturer with the part's CURRENT manufacturer (`skip:mfr-mismatch` otherwise); the new SKU's brand is the new
+manufacturer, else the part's own. A planned rename carries `mfr` only when the new manufacturer is non-blank and its
+`mfrKey` differs from the part's, and `renamePartDocs(from, to, model, mfr?)` writes that onto the new copy (the recovery
+branches are untouched). Each rename-log entry for a moved part also records `mfr` (new) and `fromMfr` (previous); both are
+optional, so the old log still reads. After a batch that moved parts, every new manufacturer with no price-list effective
+date takes the previous manufacturer's (never overwriting a date, silent when the old one has none). Known consequence: a
+LATER price list filed under the OLD manufacturer name (say "Music Tribe") whose SKUs now resolve to the new brand is
+refused by the import guard as foreign SKUs, so future lists are imported per brand with the order code in **MFR P/N**.
