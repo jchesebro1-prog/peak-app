@@ -442,3 +442,21 @@ text). A block whose line left the BOM gets an amber `No longer in BOM` flag (ke
   price table; Alternates follow under an "Alternates" heading. **Remove document** returns the quote to today's
   output (confirm inline).
 - The document saves with the estimate (Save); the PDF goes stale when it changes.
+
+## 13. Phase 6 — System categories (detailed, 2026-10-08)
+
+Jeff named the default categories (Controls, Fixtures, Rigging, Video, Infrastructure, Wireless, Communications)
+and will supply the typical items; Phase 6 builds the machinery so the items can be filled in by an admin at any
+time (no code change needed when the content arrives).
+
+- **Data:** settings blob `system_categories` `{ categories: Array<{ id; name; discipline?: lighting|rigging|curtain|av;
+  items: Array<{ sku; qty; note? }> }> }`, seeded with the seven defaults (empty item lists) when missing; ≤ 40
+  categories, ≤ 100 items each, qty 0.01–100,000, ids `cat-<base36>`.
+- **Admin:** Estimating Rules → **System categories** (`manage_users`): add / rename / reorder / delete categories,
+  optional discipline, typical items picked from the catalog (the existing PartPicker) with a default qty and an
+  optional note; live part description, unit and cost shown; retired/missing SKUs flagged.
+- **Estimator:** both "+ Add system" buttons open **Add a system**: a grid of categories (name, item count) plus
+  **Blank system** (today's behaviour). Picking a category shows its typical items as a checklist (all ticked;
+  qty editable; missing parts unticked and flagged); **Add system** creates a system named after the category
+  (its discipline set when the category has one), joining the active system's group, with the ticked parts priced
+  exactly like "+ Add part from catalog" (`catalogAddPrice` at the customer's tier margin).
