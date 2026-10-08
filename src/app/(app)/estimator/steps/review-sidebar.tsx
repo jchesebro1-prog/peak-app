@@ -1,18 +1,19 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { nsSendBackAction } from "@/app/(app)/quotes/review-actions";
-import { canAddComment, canDelete, canResolve, COMMENT_BODY_MAX, numberComments, sendBackNote, type ReviewComment } from "@/lib/estimate-review/comments";
+import { canAddComment, canDelete, canResolve, COMMENT_BODY_MAX, numberComments, type ReviewComment } from "@/lib/estimate-review/comments";
 import { laborSummary, type LaborSummaryGroup } from "@/lib/estimate-review/labor";
 import {
-  canSendBackFromReview, checklistRows, commentTargets, commentTime, crewLine, REVIEW_UI_COPY as COPY, sendBackEnabled, sendBackLabel,
+  canSendBackFromReview, checklistRows, commentActionLabel, commentTargets, commentTime, crewLine, REVIEW_UI_COPY as COPY, sendBackEnabled, sendBackLabel,
+  sendBackNoteFromNumbered, withoutSendBack,
 } from "@/lib/estimate-review/review-ui";
 import type { StepBadge } from "@/lib/estimate-steps/readiness";
 import { fmt } from "../pricing";
 import { ReviewCostSummary } from "../review-cost-summary";
-import { addReviewCommentAction, deleteReviewCommentAction, resolveReviewCommentAction, type ReviewCommentsResult, type ReviewDocsResult } from "../review-actions";
+import { addReviewCommentAction, deleteReviewCommentAction, listReviewCommentsAction, resolveReviewCommentAction, type ReviewCommentsResult, type ReviewDocsResult } from "../review-actions";
 import type { EstimatorState } from "../use-estimator-state";
 
 const TITLE: CSSProperties = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 };
@@ -50,7 +51,27 @@ export function ReviewSidebar({
   docs: ReviewDocsResult | null;
   packageBadge: StepBadge;
 }) {
-  const { applySync, loadedId, pdfDirty, saveNow, sections, setActionError, setGateRefused, statusChanging, t, tierResolving, next } = s;
+  const { applySync, loadedId, pdfDirty, refreshReviewComments, saveNow, sections, setActionError, setGateRefused, statusChanging, t, tierResolving, next } = s;
+  const sendBackHere = canSendBackFromReview(next);
+  /* The panel's own "Send back…" is modal and typed-text only (it would drop the
+     comments), so while this sidebar offers the comment-aware one, the panel doesn't. */
+  const panelView = useMemo(() => (next && sendBackHere ? withoutSendBack(next) : next), [next, sendBackHere]);
+
+  /* Keep the comments fresh: read on opening the step, and again (debounced) when the tab regains focus. */
+  useEffect(() => {
+    if (!loadedId) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const kick = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void refreshReviewComments(), 400);
+    };
+    kick();
+    window.addEventListener("focus", kick);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("focus", kick);
+    };
+  }, [loadedId, refreshReviewComments]);
 
   return (
     <aside
@@ -58,10 +79,10 @@ export function ReviewSidebar({
       className="est-scroll"
       style={{ width: 340, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 18, padding: 18, background: "#fff", borderLeft: "1px solid #ececf0" }}
     >
-      {loadedId && next && (
+      {loadedId && next && panelView && (
         <QuoteNextStep
           quoteId={loadedId}
-          view={next}
+          view={panelView}
           variant="panel"
           savedOnly={pdfDirty}
           disabled={statusChanging || tierResolving}
@@ -80,7 +101,7 @@ export function ReviewSidebar({
           }}
         />
       )}
-      {loadedId && canSendBackFromReview(next) && <SendBackWithComments s={s} onActed={onActed} />}
+      {loadedId && sendBackHere && <SendBackWithComments s={s} onActed={onActed} />}
       <ReviewCostSummary sections={sections} totals={t} />
       <LaborTable s={s} />
       <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />
@@ -91,21 +112,33 @@ export function ReviewSidebar({
 
 /** The approver's send-back built from the open comments (sendBackNote) plus optional text. */
 function SendBackWithComments({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {
-  const { applySync, loadedId, next, reviewComments, sections, setActionError, setGateRefused, statusChanging, tierResolving } = s;
+  const { applySync, loadedId, next, pdfDirty, reviewComments, sections, setActionError, setGateRefused, setReviewComments, statusChanging, tierResolving } = s;
   const [open, setOpen] = useState(false);
   const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const openCount = numberComments(reviewComments, sections).length;
   const label = sendBackLabel(openCount);
-  const canSubmit = sendBackEnabled(openCount, extra) && !busy && !statusChanging && !tierResolving;
+  const canSubmit = sendBackEnabled(openCount, extra) && !busy && !statusChanging && !tierResolving && !pdfDirty;
+  const saveFirst = pdfDirty ? COPY.sendBackSaveFirst : undefined;
 
   const submit = async () => {
     if (!loadedId || !next || !canSubmit) return;
     setBusy(true);
     setErr(null);
     try {
-      const r = await nsSendBackAction(loadedId, sendBackNote(reviewComments, sections, extra), next.asOf);
+      /* The note follows the SAVED estimate's numbering: read the server's list first. */
+      const fresh = await listReviewCommentsAction(loadedId);
+      if (!fresh.ok) {
+        setErr(fresh.error);
+        return;
+      }
+      setReviewComments(fresh.comments);
+      if (!sendBackEnabled(fresh.numbered.length, extra)) {
+        setErr(COPY.sendBackNoComments);
+        return;
+      }
+      const r = await nsSendBackAction(loadedId, sendBackNoteFromNumbered(fresh.numbered, extra), next.asOf);
       applySync(r);
       if (r.ok) {
         setActionError(null);
@@ -124,7 +157,13 @@ function SendBackWithComments({ s, onActed }: { s: EstimatorState; onActed: (a: 
   return (
     <div>
       {!open ? (
-        <button type="button" onClick={() => setOpen(true)} disabled={statusChanging || tierResolving} style={{ ...BTN, width: "100%", color: "#b4543a", background: "#fbeceb" }}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          disabled={statusChanging || tierResolving || pdfDirty}
+          title={saveFirst}
+          style={{ ...BTN, width: "100%", color: "#b4543a", background: "#fbeceb", cursor: pdfDirty ? "not-allowed" : "pointer", opacity: pdfDirty ? 0.6 : 1 }}
+        >
           {label}
         </button>
       ) : (
@@ -141,7 +180,7 @@ function SendBackWithComments({ s, onActed }: { s: EstimatorState; onActed: (a: 
           />
           {err && <div style={{ ...SMALL, color: "#9b3a2a" }}>{err}</div>}
           <div style={{ display: "flex", gap: 6 }}>
-            <button type="button" onClick={submit} disabled={!canSubmit} style={{ ...BTN, color: "#fff", background: canSubmit ? "#b4543a" : "#dba99b", cursor: canSubmit ? "pointer" : "not-allowed" }}>
+            <button type="button" onClick={submit} disabled={!canSubmit} title={saveFirst} style={{ ...BTN, color: "#fff", background: canSubmit ? "#b4543a" : "#dba99b", cursor: canSubmit ? "pointer" : "not-allowed" }}>
               {COPY.sendBackConfirm}
             </button>
             <button type="button" onClick={() => setOpen(false)} disabled={busy} style={BTN}>
@@ -281,15 +320,15 @@ function ReviewComments({ s }: { s: EstimatorState }) {
     void run("add", () => addReviewCommentAction(loadedId, target || null, body), () => setBody(""));
   };
 
-  const actions = (c: ReviewComment) => (
+  const actions = (c: ReviewComment, n: number | null) => (
     <span style={{ display: "inline-flex", gap: 10 }}>
       {canResolve(viewerRoles, c) && (
-        <button type="button" onClick={() => loadedId && run("r:" + c.id, () => resolveReviewCommentAction(loadedId, c.id))} disabled={!!busy} style={LINK_BTN}>
+        <button type="button" onClick={() => loadedId && run("r:" + c.id, () => resolveReviewCommentAction(loadedId, c.id))} disabled={!!busy} aria-label={commentActionLabel("resolve", n)} style={LINK_BTN}>
           {COPY.resolve}
         </button>
       )}
       {canDelete(viewerRoles, c, viewerName) && (
-        <button type="button" onClick={() => loadedId && run("d:" + c.id, () => deleteReviewCommentAction(loadedId, c.id))} disabled={!!busy} style={{ ...LINK_BTN, color: "#9b3a2a" }}>
+        <button type="button" onClick={() => loadedId && run("d:" + c.id, () => deleteReviewCommentAction(loadedId, c.id))} disabled={!!busy} aria-label={commentActionLabel("delete", n)} style={{ ...LINK_BTN, color: "#9b3a2a" }}>
           {COPY.delete}
         </button>
       )}
@@ -322,7 +361,7 @@ function ReviewComments({ s }: { s: EstimatorState }) {
                       <span>
                         {comment.by} · {commentTime(comment.at)}
                       </span>
-                      {actions(comment)}
+                      {actions(comment, n)}
                     </div>
                   </div>
                 </li>
@@ -343,7 +382,7 @@ function ReviewComments({ s }: { s: EstimatorState }) {
                         {c.by} · {COPY.resolved.toLowerCase()} by {c.resolvedBy || "—"}
                         {c.resolvedAt ? ` · ${commentTime(c.resolvedAt)}` : ""}
                       </span>
-                      {actions(c)}
+                      {actions(c, null)}
                     </div>
                   </li>
                 ))}

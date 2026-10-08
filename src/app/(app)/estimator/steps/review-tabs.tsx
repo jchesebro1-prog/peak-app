@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
-  datasheetCell, frameKey, frameSrc, frameWidth, framedTab, REVIEW_DEVICE_LABEL, REVIEW_DEVICES, REVIEW_TAB_LABEL, REVIEW_TABS,
+  datasheetCell, frameKey, frameSrc, frameWidth, framedTab, nextReviewTab, reviewPanelId, reviewTabId, REVIEW_DEVICE_LABEL, REVIEW_DEVICES, REVIEW_TAB_LABEL, REVIEW_TABS,
   REVIEW_UI_COPY as COPY, tabNeedsSave, type ReviewDevice, type ReviewTab,
 } from "@/lib/estimate-review/review-ui";
 import type { DocLinkView, ReviewDatasheetRow, ReviewDrawingRow } from "@/lib/estimate-output/package-preview";
@@ -53,6 +53,14 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
   const [device, setDevice] = useState<ReviewDevice>("desktop");
   const framed = framedTab(tab);
   const src = frameSrc(loadedId, tab);
+  const tabRefs = useRef<Partial<Record<ReviewTab, HTMLButtonElement | null>>>({});
+  const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+    const to = nextReviewTab(tab, e.key);
+    if (!to) return;
+    e.preventDefault();
+    setTab(to);
+    tabRefs.current[to]?.focus();
+  };
 
   let body: ReactNode;
   if (tab === "document") {
@@ -116,7 +124,21 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
       >
         <div role="tablist" aria-label="What the client sees" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {REVIEW_TABS.map((t) => (
-            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} style={TAB_BTN(tab === t)}>
+            <button
+              key={t}
+              ref={(el) => {
+                tabRefs.current[t] = el;
+              }}
+              id={reviewTabId(t)}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              aria-controls={reviewPanelId(t)}
+              tabIndex={tab === t ? 0 : -1}
+              onClick={() => setTab(t)}
+              onKeyDown={onTabKey}
+              style={TAB_BTN(tab === t)}
+            >
               {REVIEW_TAB_LABEL[t]}
             </button>
           ))}
@@ -147,7 +169,9 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
           </button>
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{body}</div>
+      <div id={reviewPanelId(tab)} role="tabpanel" aria-labelledby={reviewTabId(tab)} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        {body}
+      </div>
     </div>
   );
 }

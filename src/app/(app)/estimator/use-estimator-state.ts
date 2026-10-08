@@ -311,8 +311,10 @@ export function useEstimatorState(props: EstimatorProps) {
     }
   }, [loadedId]);
   useEffect(() => {
-    if (!loadedId) return;
+    /* A different (or no) quote: drop the old list and any read still in flight before refetching. */
     const seq = ++reviewSeqRef.current;
+    setReviewCommentsState([]);
+    if (!loadedId) return;
     listReviewCommentsAction(loadedId)
       .then((r) => {
         if (seq === reviewSeqRef.current && r.ok) setReviewCommentsState(r.comments);

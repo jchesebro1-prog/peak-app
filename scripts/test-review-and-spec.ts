@@ -56874,8 +56874,8 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
   ok(/savedOnly=\{pdfDirty\}\s+disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/.test(side) && side.includes("onActed(action);"),
     "#P4 review UI: the sidebar's QuoteNextStep keeps its wiring (savedOnly, disabled, beforeAction, onActed on ok)");
   const sb = side.slice(side.indexOf("function SendBackWithComments"), side.indexOf("function LaborTable"));
-  ok(sb.includes("nsSendBackAction(loadedId, sendBackNote(reviewComments, sections, extra), next.asOf)") && /applySync\(r\);\s*if \(r\.ok\) \{[\s\S]{0,160}onActed\("sendBack"\);/.test(sb) &&
-     sb.includes("sendBackEnabled(openCount, extra)") && sb.includes("sendBackLabel(openCount)") && side.includes("{loadedId && canSendBackFromReview(next) && <SendBackWithComments"),
+  ok(sb.includes("nsSendBackAction(loadedId, sendBackNoteFromNumbered(fresh.numbered, extra), next.asOf)") && /applySync\(r\);\s*if \(r\.ok\) \{[\s\S]{0,160}onActed\("sendBack"\);/.test(sb) &&
+     sb.includes("sendBackEnabled(openCount, extra)") && sb.includes("sendBackLabel(openCount)") && side.includes("const sendBackHere = canSendBackFromReview(next);") && side.includes("{loadedId && sendBackHere && <SendBackWithComments"),
     "#P4 review UI: Send back posts sendBackNote(open comments, systems, extra) at the shown asOf, syncs, and moves on only on success");
   ok(side.includes("laborSummary(sections, rate)") && side.includes("crewLine(sum.crew)") && side.includes("{g.edited && <span") && side.includes("COPY.alternates") &&
      side.includes("<ReviewCostSummary sections={sections} totals={t} />") && side.includes("checklistRows(gaps, packageBadge)"),
@@ -56897,4 +56897,67 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
   ok(pg.includes(rule) && !pg.includes("estimatorShouldRedirect") && r4("src/app/api/quotes/[id]/package-files/[fileId]/route.ts").includes(rule) &&
      r4(`${EST_DIR}/review-actions.ts`).includes(rule) && r4("src/app/print/quote/[id]/page.tsx").includes(rule),
     "#P4 review UI: the preview page, the staff file route and reviewDocsAction share the print route's system-estimate rule");
+}
+
+// ---- #P4 review UI fix: one comment-aware send-back, note from the saved numbering, accessible tabs ----
+{
+  const fnsIn: Parameters<typeof p4rNextStep>[0] = { status: "draft", review: { state: "in_review", reviewer: null, submittedBy: "Sam Est", decidedBy: null, note: "" }, holds: true, chip: null,
+    owner: "Sam Est", viewer: "Jeff Boss", viewerCanApprove: true, viewerCanCreate: true, viewerCanSend: true, submittedAgo: "", reviewers: [] };
+  // 1. The panel's own Send back… is removed from a COPY; the original keeps it.
+  const nx = p4rNextStep({ ...fnsIn, review: { ...fnsIn.review! } });
+  const filtered = p4r.withoutSendBack(nx);
+  ok(nx.secondary.some((a) => a.action === "sendBack") && !filtered.secondary.some((a) => a.action === "sendBack") && filtered !== nx &&
+     filtered.secondary.length === nx.secondary.length - 1 && filtered.primary === nx.primary && filtered.asOf === nx.asOf,
+    "#P4 review UI fix: the panel's view loses only the modal Send back… (a copy — the original still offers it)");
+  ok(p4r.canSendBackFromReview(nx) === true && p4r.canSendBackFromReview(filtered) === false,
+    "#P4 review UI fix: the sidebar decides from the unfiltered view (the filtered copy no longer qualifies)");
+
+  // 2. The note comes from the server's numbered list.
+  const mk = (n: number, id: string, sectionId: string | null, system: string, body: string, at: number) =>
+    ({ n, system, comment: { id, sectionId, body, by: "Jeff Boss", at } });
+  const numbered = [mk(1, "c2", null, "Whole estimate", "Check terms", 5), mk(2, "c9", "gone", "Whole estimate", "Orphan", 9), mk(3, "c4", "s1", "Rigging", "Add a\nhoist", 2), mk(4, "c1", "s2", "Lighting", "Swap the dimmer", 3)];
+  ok(p4r.sendBackNoteFromNumbered(numbered, "  Thanks  ") === "4 comments to address:\n1. Whole estimate — Check terms\n2. Whole estimate — Orphan\n3. Rigging — Add a hoist\n4. Lighting — Swap the dimmer\n\nThanks",
+    "#P4 review UI fix: the adapter formats the server's open comments like sendBackNote");
+  const simple = [numbered[0], { ...numbered[2], n: 2 }, { ...numbered[3], n: 3 }];
+  ok(p4r.sendBackNoteFromNumbered(simple, "") === "3 comments to address:\n1. Whole estimate — Check terms\n2. Rigging — Add a hoist\n3. Lighting — Swap the dimmer" &&
+     p4r.sendBackNoteFromNumbered([], " just this ") === "just this" && p4r.sendBackNoteFromNumbered([], "") === "",
+    "#P4 review UI fix: the adapter keeps the server's numbering and order, and with no comments is just the typed text");
+  ok(p4rNote(simple.map((r) => r.comment), [{ id: "s1", name: "Rigging" }, { id: "s2", name: "Lighting" }], "x") === p4r.sendBackNoteFromNumbered(simple, "x"),
+    "#P4 review UI fix: the adapter's note equals sendBackNote over the same saved systems");
+
+  // 3. Tab keyboard model + comment aria-labels.
+  ok(p4r.nextReviewTab("document", "ArrowRight") === "package" && p4r.nextReviewTab("drawings", "ArrowRight") === "document" &&
+     p4r.nextReviewTab("document", "ArrowLeft") === "drawings" && p4r.nextReviewTab("bom", "ArrowLeft") === "package" &&
+     p4r.nextReviewTab("bom", "Home") === "document" && p4r.nextReviewTab("bom", "End") === "drawings" && p4r.nextReviewTab("bom", "a") === null,
+    "#P4 review UI fix: Left/Right move between tabs (wrapping), Home/End jump, other keys do nothing");
+  ok(p4r.reviewTabId("bom") === "review-tab-bom" && p4r.reviewPanelId("bom") === "review-panel-bom" &&
+     p4r.commentActionLabel("resolve", 2) === "Resolve comment 2" && p4r.commentActionLabel("delete", 3) === "Delete comment 3" && p4r.commentActionLabel("delete", null) === "Delete resolved comment",
+    "#P4 review UI fix: tab/panel ids and the per-comment aria-labels read exactly");
+  ok(p4r.REVIEW_UI_COPY.sendBackSaveFirst === "Save first — the note numbers follow the saved estimate.", "#P4 review UI fix: the dirty-disable title is exact");
+
+  // Source pins.
+  const rf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const tabsSrc = rf(`${EST_DIR}/steps/review-tabs.tsx`);
+  const sideSrc = rf(`${EST_DIR}/steps/review-sidebar.tsx`);
+  const hookSrc = rf(`${EST_DIR}/use-estimator-state.ts`);
+  ok(sideSrc.includes("withoutSendBack(next)") && /<QuoteNextStep\s+quoteId=\{loadedId\}\s+view=\{panelView\}/.test(sideSrc),
+    "#P4 review UI fix: the sidebar's QuoteNextStep renders the filtered copy while the comment-aware Send back is available");
+  const sbf = sideSrc.slice(sideSrc.indexOf("function SendBackWithComments"), sideSrc.indexOf("function LaborTable"));
+  const iList = sbf.indexOf("listReviewCommentsAction(loadedId)");
+  const iSet = sbf.indexOf("setReviewComments(fresh.comments)");
+  const iSend = sbf.indexOf("nsSendBackAction(loadedId, sendBackNoteFromNumbered(fresh.numbered, extra), next.asOf)");
+  ok(iList > 0 && iSet > iList && iSend > iSet && !sbf.includes("sendBackNote(reviewComments"),
+    "#P4 review UI fix: Send back reads the server's list, refreshes the shared comments, then posts the note built from that list");
+  ok(sbf.includes("!pdfDirty") && sbf.includes("title={saveFirst}") && (sbf.match(/title=\{saveFirst\}/g) || []).length === 2 && sbf.includes("disabled={statusChanging || tierResolving || pdfDirty}"),
+    "#P4 review UI fix: while the estimate is unsaved both Send back buttons are disabled with the save-first title");
+  ok(sideSrc.includes("refreshReviewComments()") && sideSrc.includes('addEventListener("focus", kick)') && sideSrc.includes("setTimeout(() => void refreshReviewComments(), 400)"),
+    "#P4 review UI fix: the review comments refresh when the step opens and (debounced) on focus");
+  ok(tabsSrc.includes('role="tablist"') && tabsSrc.includes('role="tab"') && tabsSrc.includes("aria-selected={tab === t}") && tabsSrc.includes("aria-controls={reviewPanelId(t)}") &&
+     tabsSrc.includes("id={reviewTabId(t)}") && tabsSrc.includes('role="tabpanel"') && tabsSrc.includes("aria-labelledby={reviewTabId(tab)}") && tabsSrc.includes("id={reviewPanelId(tab)}") &&
+     tabsSrc.includes("onKeyDown={onTabKey}") && tabsSrc.includes("nextReviewTab(tab, e.key)") && tabsSrc.includes("tabIndex={tab === t ? 0 : -1}"),
+    "#P4 review UI fix: the tabs are a tablist/tab/tabpanel with aria-selected, aria-controls, aria-labelledby, roving tabindex and arrow keys");
+  ok(sideSrc.includes('aria-label={commentActionLabel("resolve", n)}') && sideSrc.includes('aria-label={commentActionLabel("delete", n)}') && sideSrc.includes("actions(comment, n)") && sideSrc.includes("actions(c, null)"),
+    "#P4 review UI fix: Resolve / Delete carry per-comment aria-labels");
+  ok(/setReviewCommentsState\(\[\]\);\s+if \(!loadedId\) return;\s+listReviewCommentsAction\(loadedId\)/.test(hookSrc),
+    "#P4 review UI fix: the hook clears the comments (and drops an in-flight read) when loadedId changes, before refetching");
 }

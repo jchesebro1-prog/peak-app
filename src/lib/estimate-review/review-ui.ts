@@ -2,7 +2,7 @@ import { previewPath, type PreviewTab, type ReviewDatasheetRow } from "@/lib/est
 import type { StepBadge } from "@/lib/estimate-steps/readiness";
 import { STEP_LABEL } from "@/lib/estimate-steps/steps";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
-import { WHOLE_ESTIMATE } from "./comments";
+import { sendBackNote, WHOLE_ESTIMATE, type NumberedComment } from "./comments";
 
 /**
  * Estimator Phase 4 (spec §11) — the Customer review step's pure view rules:
@@ -37,6 +37,8 @@ export const REVIEW_UI_COPY = {
   commentPlaceholder: "What should change?",
   sendBackExtra: "Anything else? (optional)",
   sendBackConfirm: "Send back",
+  sendBackSaveFirst: "Save first — the note numbers follow the saved estimate.",
+  sendBackNoComments: "There are no open comments to send — add one or type a note.",
   cancel: "Cancel",
   noDatasheets: "No catalog parts print on this estimate.",
   noDrawings: "No drawings on this estimate.",
@@ -145,4 +147,52 @@ export function commentTargets(sections: ReadonlyArray<{ id: string; name?: stri
 /** A comment's time, short ("Oct 7, 3:04 PM"), Chicago. */
 export function commentTime(at: number): string {
   return new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" });
+}
+
+/**
+ * The Review sidebar owns the comment-aware Send back, so the panel's own
+ * modal "Send back…" (typed text only — it would drop the comments) is
+ * removed from the view it renders. Returns a COPY; `next` is untouched.
+ */
+export function withoutSendBack<T extends Pick<QuoteNextStepView, "secondary">>(next: T): T {
+  return { ...next, secondary: next.secondary.filter((a) => a.action !== "sendBack") };
+}
+
+/**
+ * The send-back note from the SERVER's numbered list (open comments, numbered
+ * against the saved estimate's systems): the same sendBackNote text, so the
+ * numbers an approver reads on a pin are the numbers the estimator is sent.
+ * Each numbered row keeps its position; systems are rebuilt from the rows in
+ * order (first appearance), a row whose system is gone reads Whole estimate.
+ */
+export function sendBackNoteFromNumbered(numbered: ReadonlyArray<NumberedComment>, extra: string): string {
+  const sections: Array<{ id: string; name: string }> = [];
+  const comments = (numbered || []).map(({ comment, system }) => {
+    const whole = system === WHOLE_ESTIMATE || comment.sectionId === null;
+    if (whole) return { ...comment, sectionId: null };
+    if (!sections.some((s) => s.id === comment.sectionId)) sections.push({ id: comment.sectionId as string, name: system });
+    return comment;
+  });
+  return sendBackNote(comments, sections, extra);
+}
+
+/** The tab strip's DOM ids (aria-controls / aria-labelledby). */
+export const reviewTabId = (tab: ReviewTab) => `review-tab-${tab}`;
+export const reviewPanelId = (tab: ReviewTab) => `review-panel-${tab}`;
+
+/** Arrow-key navigation across the tabs: Left/Right wrap, Home/End jump; any other key → null. */
+export function nextReviewTab(current: ReviewTab, key: string): ReviewTab | null {
+  const i = REVIEW_TABS.indexOf(current);
+  const n = REVIEW_TABS.length;
+  if (key === "ArrowRight") return REVIEW_TABS[(i + 1) % n];
+  if (key === "ArrowLeft") return REVIEW_TABS[(i - 1 + n) % n];
+  if (key === "Home") return REVIEW_TABS[0];
+  if (key === "End") return REVIEW_TABS[n - 1];
+  return null;
+}
+
+/** "Resolve comment 2" / "Delete comment 2"; a resolved comment has no number → "Delete resolved comment". */
+export function commentActionLabel(kind: "resolve" | "delete", n: number | null): string {
+  const verb = kind === "resolve" ? "Resolve" : "Delete";
+  return n == null ? `${verb} resolved comment` : `${verb} comment ${n}`;
 }
