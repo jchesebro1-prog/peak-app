@@ -42,7 +42,7 @@ export async function loadPackageViewProps(
 }
 
 /** Never fails the page: a catalog read error leaves Manufacturer / Part blank. */
-async function catalogFor(skus: string[]): Promise<Map<string, BomCatalogPart>> {
+export async function catalogFor(skus: string[]): Promise<Map<string, BomCatalogPart>> {
   const out = new Map<string, BomCatalogPart>();
   if (!skus.length) return out;
   try {

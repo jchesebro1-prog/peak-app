@@ -345,6 +345,12 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/estimator/cut-sheets?id=Q-2041" },
   { route: "/estimator/cut-sheets?id=Q-2041&style=client" },
   { route: "/estimator/cut-sheets?id=Q-0000", reject: "Application error" },
+  // Estimator Phase 4 — the staff preview the Customer review step frames (outside the (app) layout).
+  { route: "/estimator-preview/Q-2041?tab=package" },
+  { route: "/estimator-preview/Q-2041?tab=bom" },
+  { route: "/estimator-preview/Q-2041?tab=cutsheets" },
+  { route: "/estimator-preview/Q-0000", expectNotFound: true },
+  { route: "/api/quotes/Q-2041/package-files/PF-000000000000", expectNotFound: true },
   // #296 — no rack is seeded, so the staff submittal preview is checked on its
   // not-found path: the module compiles and an unknown id is a clean 404, not a 500.
   { route: "/design/assemblies/rack/SA-NOPE", expectNotFound: true },

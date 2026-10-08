@@ -26198,8 +26198,9 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   ok(/QUOTE_PDF_ORIGIN/.test(s222("DEPLOY.md")) && /QUOTE_PDF_ORIGIN/.test(s222(".env.example")), "#222 QUOTE_PDF_ORIGIN is documented for production");
   // #245 Task 11 adds the one other same-origin framing exception: the
   // portal part sidebar's inline datasheet viewer (/portal/catalog/doc/:id).
-  ok(!/\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 2 && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && /"\/portal\/catalog\/doc\/:id",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg),
-    "#222 next.config: the framing exceptions are the PDF route's and (#245) the portal doc viewer's alone");
+  // Estimator Phase 4 adds a third, the staff preview (/estimator-preview/:path*, pinned by "#P4 preview").
+  ok(!/source: "\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 3 && /"\/estimator-preview\/:path\*",\s*headers: \[\s*\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}/.test(cfg) && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && /"\/portal\/catalog\/doc\/:id",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg),
+    "#222 next.config: the framing exceptions are the PDF route's, (#245) the portal doc viewer's and (Phase 4) the staff preview's alone");
 }
 
 async function quotePdfRoutes222AsyncChecks(): Promise<void> {
@@ -56663,3 +56664,119 @@ function p4AltOptionChecks(): void {
   ok(oo.sell === 0 && oo.edited === true && oo.hours === only.groups[0].hours, "#P4 pure fix: a group whose configured lines are all optioned sells $0 and reads edited");
 }
 p4AltOptionChecks();
+
+// ---- #P4 preview: the staff preview route, the live package loader's links, the staff file route, the Datasheets/Drawings rows ----
+import {
+  PREVIEW_COPY as p4pCopy, previewHeaderLine as p4pHeader, previewPath as p4pPath, previewTab as p4pTab, reviewDatasheetRows as p4pDsRows,
+  reviewDrawingRows as p4pDrawRows, staffPackageExtras as p4pExtras, staffPackageFile as p4pFile,
+} from "@/lib/estimate-output/package-preview";
+import { packageFileRows as p4pFileRows, type PackageFile as P4pFile } from "@/lib/estimate-output/package-files";
+import type { PackageSkuDocs as P4pSkuDocs } from "@/lib/part-docs/package";
+function p4PreviewChecks(): void {
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  // Pure: tabs, paths, header line.
+  ok(p4pTab(undefined) === "package" && p4pTab("bom") === "bom" && p4pTab(["cutsheets"]) === "cutsheets" && p4pTab("nope") === "package",
+    "#P4 preview: ?tab= reads package | bom | cutsheets, anything else is the package page");
+  ok(p4pPath("Q-2041") === "/estimator-preview/Q-2041?tab=package" && p4pPath("Q-2041", "package", "bom") === "/estimator-preview/Q-2041?tab=package&view=bom" &&
+     p4pPath("Q 1", "bom", "bom") === "/estimator-preview/Q%201?tab=bom",
+    "#P4 preview: the preview path keeps the package page's Narrative / BOM toggle on the package tab");
+  const stamp = Date.UTC(2026, 9, 7, 17);
+  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", revisions: [{}, {}], updatedAt: stamp }) === "EST-1005 · Rev 2 · saved Oct 7, 2026" &&
+     p4pHeader({ id: "Q-9", revisions: [], updatedAt: stamp }).startsWith("Q-9 · Rev 1 · saved"),
+    "#P4 preview: the header line is the saved estimate's own number, Rev and date (no sent revision needed)");
+
+  // Pure: the package page's extras point at staff routes only, with no zip.
+  const file = (o: Partial<P4pFile>): P4pFile => ({
+    id: "PF-aaaaaaaaaaaa", kind: "plan", name: "Plan.pdf", blobPath: "estimate-files/Q-1/UP-0123456789abcdef/plan.pdf", contentType: "application/pdf",
+    size: 2048, source: "upload", addedAt: 1, addedBy: "Ann", ...o,
+  });
+  const files = [
+    file({}),
+    file({ id: "PF-bbbbbbbbbbbb", kind: "plan", name: "Grid plan.pdf", blobPath: "estimate-files/Q-1/grid/plan.pdf", source: "grid" }),
+    file({ id: "PF-cccccccccccc", kind: "riser", name: "Riser.png", blobPath: "estimate-files/Q-1/grid/riser.png", contentType: "image/png", source: "grid" }),
+  ];
+  const sku = (o: Partial<P4pSkuDocs>): P4pSkuDocs => ({ datasheet: null, datasheetCoveredBy: [], datasheetOk: false, specsheet: null, manual: null, ...o });
+  const bySku = new Map<string, P4pSkuDocs>([
+    ["FIX-1", sku({ datasheet: { documentId: "PD-1", name: "fix.pdf" }, datasheetOk: true, manual: { documentId: "PD-3", name: "fix-manual.pdf" } })],
+    ["LENS-1", sku({ datasheet: { documentId: "PD-1", name: "fix.pdf" }, datasheetCoveredBy: ["FIX-1"], datasheetOk: true })],
+    ["CBL-1", sku({ specsheet: { documentId: "PD-2", name: "cable spec.pdf" } })],
+  ]);
+  const documents = [
+    { documentId: "PD-1", name: "fix.pdf", kind: "datasheet" as const },
+    { documentId: "PD-2", name: "cable spec.pdf", kind: "specsheet" as const },
+    { documentId: "PD-3", name: "fix-manual.pdf", kind: "manual" as const },
+  ];
+  const x = p4pExtras({ bySku, moved: new Map([["OLD-FIX", "FIX-1"]]), documents }, true, files, "Q-1");
+  ok(x.datasheets["FIX-1"]?.href === "/api/part-documents/PD-1" && x.datasheets["OLD-FIX"]?.href === "/api/part-documents/PD-1" && !x.datasheets["CBL-1"],
+    "#P4 preview: key-product datasheets link to the staff part-document route (a renamed SKU too)");
+  ok(!!x.downloads && x.downloads.files.length === 2 && x.downloads.files.every((f) => f.href.startsWith("/api/part-documents/")) && x.downloads.specifications &&
+     !("zipHref" in x.downloads) && !x.downloads.files.some((f) => f.name === "fix-manual.pdf"),
+    "#P4 preview: Downloads lists datasheets + spec sheets (never manuals) through staff links, and has no zip");
+  ok(x.plans.length === 2 && x.plans[0].href === "/api/quotes/Q-1/package-files/PF-aaaaaaaaaaaa" && x.plans[1].href === "/api/quotes/Q-1/package-files/PF-cccccccccccc" && x.plans[1].isImage,
+    "#P4 preview: plans are the client's visible drawings (an upload hides the Grid plan), linked to the staff file route");
+  const none = p4pExtras(null, false, files, "Q-1");
+  ok(Object.keys(none.datasheets).length === 0 && none.downloads === null && none.plans.length === 2, "#P4 preview: a failed document read leaves datasheets and Downloads out, the plans still show");
+  ok(JSON.stringify([x, none]).indexOf("/share/") < 0 && JSON.stringify([x, none]).indexOf("estimate-files/") < 0, "#P4 preview: no share path and no blob path in the preview's links");
+
+  // Pure: the staff file route's rule.
+  ok(p4pFile(files, "PF-aaaaaaaaaaaa")?.name === "Plan.pdf" && p4pFile(files, "PF-bbbbbbbbbbbb") === null && p4pFile(files, "PF-dddddddddddd") === null &&
+     p4pFile(files, "../x") === null && p4pFile(null, "PF-aaaaaaaaaaaa") === null,
+    "#P4 preview: the file route serves only a visible file on this quote's own list (a hidden Grid file, an unknown id or a bad id is a 404)");
+
+  // Pure: the Datasheets / Drawings rows.
+  const rows = p4pDsRows([{ sku: "FIX-1", desc: "Fixture" }, { sku: "NOCAT", desc: "Custom" }, { sku: "LENS-1", desc: "" }, { sku: "FIX-1", desc: "Again" }, { sku: "CBL-1", desc: " Cable " }], bySku);
+  ok(rows.length === 3 && rows.map((r) => r.sku).join() === "FIX-1,LENS-1,CBL-1" && rows[1].label === "LENS-1" && rows[2].label === "Cable",
+    "#P4 preview: one Datasheets row per catalog part in BOM order (non-catalog lines out, the SKU when there's no description)");
+  ok(rows[0].datasheet?.href === "/api/part-documents/PD-1" && rows[0].manual?.href === "/api/part-documents/PD-3" && rows[1].datasheetCoveredBy.join() === "FIX-1" &&
+     rows[1].datasheetOk && rows[2].datasheet === null && rows[2].specsheet?.name === "cable spec.pdf" && !rows[2].datasheetOk,
+    "#P4 preview: each row carries its datasheet (or covering fixture), spec sheet and manual as staff links");
+  const draw = p4pDrawRows("Q-1", p4pFileRows(files));
+  ok(draw.length === 2 && draw[0].href === "/api/quotes/Q-1/package-files/PF-aaaaaaaaaaaa" && draw[0].kindLabel === "Plan" && draw[0].sizeLabel.length > 0 && !draw.some((d) => d.id === "PF-bbbbbbbbbbbb"),
+    "#P4 preview: Drawings lists the files the client sees, linked to the staff file route");
+
+  // Source pins: the route.
+  const PAGE = "src/app/estimator-preview/[id]/page.tsx";
+  ok(existsSync(join(process.cwd(), PAGE)) && !existsSync(join(process.cwd(), "src/app/(app)/estimator-preview")), "#P4 preview: the route lives outside the (app) group (no Nav)");
+  const page = rd(PAGE);
+  ok(page.includes("await requireUser();") && page.indexOf("await requireUser();") < page.indexOf("await getQuote(") && page.includes("if (!q || estimatorShouldRedirect(q)) notFound();"),
+    "#P4 preview: signed-in only, and a missing or non-Estimator quote is a 404");
+  ok(!/OpenBeacon|ScopeSelection|QuestionForm|package-slots|\/share\/|sharePath|zipHref/.test(page) && page.includes("PREVIEW_COPY.actionsNote") &&
+     p4pCopy.actionsNote === "Client scope choices and questions appear here on the client's page.",
+    "#P4 preview: no open beacon, no client action forms, no token links — an inert note where the client acts");
+  ok(page.includes("loadLivePackagePreview(q,") && page.includes("<QuoteDocument {...bomViewProps(doc)} layout=\"web\" />") && page.includes("<style>{QUOTE_WEB_CSS}</style>") &&
+     page.includes('loadCutSheets(q.id, { images: "url" })') && page.includes('style="client"') && !page.includes("CLIENT_PRINT_CSS") && page.includes("PREVIEW_COPY.noCurtains") &&
+     p4pCopy.noCurtains === "This estimate has no curtains.",
+    "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
+  const loader = rd("src/lib/estimate-output/package-live-loader.ts");
+  ok(loader.includes("quoteDocumentDataFor(q, cust, settings)") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
+     loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref)") && loader.includes("coverSummary: q.coverSummary") &&
+     !/sharePath|resolveSharedPackage|loadQuoteDocumentProps|"\/share\//.test(loader),
+    "#P4 preview: the live loader builds from the saved quote (the print route's calls) with staff photo links — never a share token or a sent revision");
+  ok(rd("src/lib/estimate-output/package-loader.ts").includes("export async function catalogFor("), "#P4 preview: catalogFor is shared with the share loader");
+
+  // Source pins: the frame exception, this path only, after the global DENY.
+  const cfg = rd("next.config.ts");
+  const deny = cfg.indexOf('{ key: "X-Frame-Options", value: "DENY" }');
+  const prev = cfg.indexOf('source: "/estimator-preview/:path*"');
+  const prevBlock = cfg.slice(prev, cfg.indexOf("},\n", cfg.indexOf("],", prev)));
+  ok(deny > 0 && deny < cfg.indexOf('source: "/api/quotes/:id/pdf"') && deny < prev && cfg.indexOf('source: "/:path*"') < deny &&
+     (cfg.match(/source: "\/estimator-preview/g) || []).length === 1 && prevBlock.includes('{ key: "X-Frame-Options", value: "SAMEORIGIN" }') &&
+     prevBlock.includes('{ key: "X-Robots-Tag", value: "noindex" }') && !/source: "\/estimator\/|source: "\/estimator"/.test(cfg),
+    "#P4 preview: SAMEORIGIN only for /estimator-preview (noindex), the global DENY still first");
+
+  // Source pins: the staff file route and the docs action.
+  const route = rd("src/app/api/quotes/[id]/package-files/[fileId]/route.ts");
+  ok(route.includes("await requireUser();") && route.indexOf("await requireUser();") < route.indexOf("await getQuote(") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("staffPackageFile(q.packageFiles, fileId)") && route.includes("return servePackageFile(req, file);"),
+    "#P4 preview: the staff file route is signed-in only and serves a visible file of THAT quote through servePackageFile");
+  const act = rd("src/app/(app)/estimator/review-actions.ts");
+  const docsAct = act.slice(act.indexOf("export async function reviewDocsAction("));
+  ok(docsAct.length > 40 && docsAct.indexOf("await requireUser();") > 0 && docsAct.indexOf("await requireUser();") < docsAct.indexOf("getQuote(") &&
+     docsAct.includes("specPackageDocs(q.spec)") && docsAct.includes("loadPackagePanel(q, false,") && docsAct.includes("reviewDatasheetRows(docs.bom, docs.bySku)") &&
+     docsAct.includes("reviewDrawingRows(q.id, panel.files)") && docsAct.includes("gaps: panel.gaps"),
+    "#P4 preview: reviewDocsAction is signed-in only and maps the saved quote's documents, drawings and gaps");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(["package", "bom", "cutsheets"].every((t) => smoke.includes(`{ route: "/estimator-preview/Q-2041?tab=${t}" }`)), "#P4 preview: the smoke run requests all three preview tabs");
+}
+p4PreviewChecks();

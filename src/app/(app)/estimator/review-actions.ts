@@ -4,6 +4,10 @@ import {
   canAddComment, canDelete, canResolve, numberComments, REVIEW_COMMENT_COPY as COPY,
   type NumberedComment, type ReviewComment,
 } from "@/lib/estimate-review/comments";
+import { specPackageDocs, type RevisionPackageDocs } from "@/lib/estimate-output/package-docs-server";
+import { loadPackagePanel } from "@/lib/estimate-output/package-panel-server";
+import { reviewDatasheetRows, reviewDrawingRows, type ReviewDocsView } from "@/lib/estimate-output/package-preview";
+import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { requireUser } from "@/lib/session";
 import {
   addReviewComment, deleteReviewComment, get as getQuote, resolveReviewComment,
@@ -74,4 +78,35 @@ export async function deleteReviewCommentAction(quoteId: string, commentId: stri
   const user = await requireUser();
   const id = String(quoteId || "");
   return finish(id, await deleteReviewComment(id, String(commentId || ""), (c) => canDelete(user.roles, c, user.name)));
+}
+
+export type ReviewDocsResult = ({ ok: true } & ReviewDocsView) | { ok: false; error: string };
+
+/**
+ * The Customer review step's Datasheets and Drawings tabs (spec §11.1) — any
+ * signed-in team member, from the SAVED quote: every printed catalog part
+ * with its datasheet / spec sheet / manual state (specPackageDocs, the
+ * client package's own coverage rule), the drawings the client sees, and the
+ * package gaps (loadPackagePanel's chips, its datasheet count taken from the
+ * same read). Every link is a staff route (package-preview.ts).
+ */
+export async function reviewDocsAction(quoteId: string): Promise<ReviewDocsResult> {
+  await requireUser();
+  const q = await getQuote(String(quoteId || ""));
+  if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: COPY.gone };
+  let docs: RevisionPackageDocs | null = null;
+  try {
+    docs = await specPackageDocs(q.spec);
+  } catch (e) {
+    console.warn("[review] package documents unavailable", e instanceof Error ? e.message : e);
+  }
+  const panel = await loadPackagePanel(q, false, {
+    datasheetGaps: async () => (docs ? [...docs.bySku.values()].filter((x) => !x.datasheetOk).length : 0),
+  });
+  return {
+    ok: true,
+    datasheets: docs ? reviewDatasheetRows(docs.bom, docs.bySku) : [],
+    drawings: reviewDrawingRows(q.id, panel.files),
+    gaps: panel.gaps,
+  };
 }

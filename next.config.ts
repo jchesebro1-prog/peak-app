@@ -85,6 +85,17 @@ const nextConfig: NextConfig = {
         source: "/portal/catalog/doc/:id",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
+      // Estimator Phase 4: the Customer review step frames the staff preview
+      // of the saved estimate (package page, BOM, cut sheets) — this path
+      // only. Staff-only, so never indexed and no Referer beyond the origin.
+      {
+        source: "/estimator-preview/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Referrer-Policy", value: "same-origin" },
+          { key: "X-Robots-Tag", value: "noindex" },
+        ],
+      },
       // #293 slice 3: the client share page carries its token in the path —
       // never pass it on in a Referer, and never index it.
       {
