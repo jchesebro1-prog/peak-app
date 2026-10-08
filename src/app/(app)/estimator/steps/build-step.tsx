@@ -17,6 +17,7 @@ import SystemLibraryModal from "../system-library-modal";
 import AiScopeModal from "../ai-scope-modal";
 import CurtainModal from "../curtain-modal";
 import FixtureModal from "../fixture-modal";
+import AddSystemModal from "../add-system-modal";
 import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
@@ -48,6 +49,9 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     addLabor,
     addMob,
     addPart,
+    addSystemFromCategory,
+    addSystemOpen,
+    setAddSystemOpen,
     addSystem,
     addTrack,
     addVendorLine,
@@ -548,7 +552,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
           <button
             type="button"
             className="est-addsys"
-            onClick={addSystem}
+            onClick={() => setAddSystemOpen(true)}
             style={{
               width: "100%",
               padding: 14,
@@ -585,6 +589,17 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
           >
             + From library…
           </button>
+          {addSystemOpen && (
+            <AddSystemModal
+              categories={initial.systemCategories}
+              onBlank={() => {
+                setAddSystemOpen(false);
+                addSystem();
+              }}
+              onAdd={addSystemFromCategory}
+              onClose={() => setAddSystemOpen(false)}
+            />
+          )}
           {libraryOpen && (
             <SystemLibraryModal mode="load" tierMargin={tierMargin} onLoaded={placeLibrarySystem} onClose={() => setLibraryOpen(false)} />
           )}
@@ -817,7 +832,7 @@ function SystemsRail({
   const {
     activeId,
     addGroupAction,
-    addSystem,
+    setAddSystemOpen,
     blocks,
     groups,
     isBuilt,
@@ -1180,7 +1195,7 @@ function SystemsRail({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
-            onClick={addSystem}
+            onClick={() => setAddSystemOpen(true)}
             style={{
               fontSize: 11,
               fontWeight: 600,

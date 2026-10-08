@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { get as getQuote, type Quote, type QuoteReview } from "@/lib/stores/quotes";
 import { quoteBuilderHref, estimatorShouldRedirect } from "@/lib/quote-links";
-import { byCategory, fabricParts, list as catalogList } from "@/lib/stores/catalog";
+import { byCategory, fabricParts, getManyBySku, list as catalogList } from "@/lib/stores/catalog";
 import { allAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
@@ -23,6 +23,8 @@ import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
+import { getSystemCategories } from "@/lib/stores/system-categories";
+import type { CategoryOption } from "@/lib/system-categories";
 import { listIntros } from "@/lib/stores/narrative-intros";
 import { seriesSkus } from "@/lib/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
@@ -111,10 +113,12 @@ function vendorQuotesOf(q: QuoteDoc | null): VendorQuote[] {
 async function initialFrom(
   q: QuoteDoc | null,
   customers: CustomerLite[],
-  userName: string
+  userName: string,
+  systemCategories: CategoryOption[]
 ): Promise<InitialQuote> {
   if (!q) {
     return {
+      systemCategories,
       loadedId: null,
       quoteId: FALLBACK.quoteId,
       status: "draft",
@@ -177,6 +181,7 @@ async function initialFrom(
       ? normalizeSystemOrder(spec.sections as SpecSection[], groups)
       : null;
   return {
+    systemCategories,
     loadedId: q.id,
     // #223: the header label — the estimate number; `loadedId` stays the key.
     quoteId: displayQuoteNumber(q),
@@ -244,6 +249,27 @@ async function initialFrom(
           }
         : null,
   };
+}
+
+/** Estimator Phase 6 — the admin-set categories with each item's live catalog part (live sku, desc, unit, cost, list). */
+async function loadSystemCategoryOptions(): Promise<CategoryOption[]> {
+  const categories = await getSystemCategories();
+  const skus = [...new Set(categories.flatMap((c) => c.items.map((i) => i.sku)))];
+  const found = skus.length ? await getManyBySku(skus) : new Map();
+  return categories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    ...(c.discipline ? { discipline: c.discipline } : {}),
+    items: c.items.map((i) => {
+      const p = found.get(i.sku);
+      return {
+        sku: i.sku,
+        qty: i.qty,
+        ...(i.note ? { note: i.note } : {}),
+        part: p ? { sku: p.sku, desc: p.desc || p.sku, unit: p.unit || "ea", cost: Number(p.cost) || 0, list: Number(p.list) || 0 } : null,
+      };
+    }),
+  }));
 }
 
 export default async function EstimatorPage({
@@ -369,7 +395,10 @@ export default async function EstimatorPage({
     })),
   }));
 
-  const initial = await initialFrom(q, customers, user.name);
+  // Phase 6: the Add a system modal's categories, each typical part resolved against the live catalog
+  // (a retired SKU follows its rename; a part that left the catalog is `part: null`). Read-only.
+  const systemCategories = await loadSystemCategoryOptions();
+  const initial = await initialFrom(q, customers, user.name, systemCategories);
 
   // Seed the customer/venue/contact picked in the guided intake (quotes/new).
   // A venue/contact not on the customer falls back to its primary (#160).

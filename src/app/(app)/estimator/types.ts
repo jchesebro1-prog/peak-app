@@ -8,6 +8,7 @@ import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemb
 import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
+import type { CategoryOption } from "@/lib/system-categories";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
@@ -529,6 +530,9 @@ export type PortalPanelData = {
 };
 
 export type InitialQuote = {
+  /** Estimator Phase 6 — the admin-set system categories with each typical part resolved against the live catalog
+   *  (the Add a system modal). Read-only server data, never saved with the quote. */
+  systemCategories: CategoryOption[];
   loadedId: string | null;
   quoteId: string;
   status: QuoteStatus;

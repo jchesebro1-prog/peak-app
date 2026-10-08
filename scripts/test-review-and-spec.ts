@@ -372,6 +372,7 @@ const ESTIMATOR_FILES = [
   "step-tabs.tsx",
   "review-cost-summary.tsx",
   "steps/build-step.tsx",
+  "add-system-modal.tsx",
   "steps/package-step.tsx",
   "steps/review-step.tsx",
   "steps/send-step.tsx",
@@ -58332,4 +58333,47 @@ async function p6CategoriesAsyncChecks(): Promise<void> {
   ok(applySrc.includes("[SYSTEM_CATEGORIES_BLOB, (raw) => RW.rewriteSystemCategories(raw, m)]"), "#P6 rename: the catalog-rename blob sweep includes system_categories");
   ok(rules.includes('href="/estimating-rules/system-categories"') && rules.includes("<div style={{ fontSize: 14, fontWeight: 600 }}>System categories</div>") && rules.includes("Typical parts that pre-fill a new system on the Estimator."),
     "#P6 admin: Estimating Rules has a System categories card with its one-line description");
+}
+
+// ---- #P6 estimator: Add a system from a category ----
+import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-reprice";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const addPrice = p6eAddPrice;
+  const mk = (sku: string, over: Record<string, unknown> = {}) => ({ sku: "OLD-" + sku, qty: 2, part: { sku, desc: "Part " + sku, unit: "ea", cost: 100, list: 250 }, ...over });
+  const cat: p6c.CategoryOption = {
+    id: "cat-t", name: "Controls", discipline: "lighting",
+    items: [
+      mk("LIVE-A"),
+      mk("LIVE-B", { qty: 1, part: { sku: "LIVE-B", desc: "No cost", unit: "", cost: 0, list: 80 } }),
+      { sku: "GONE", qty: 3, part: null },
+    ],
+  };
+  let n = 10;
+  const ctx = { nextId: () => ++n, tierMargin: 0.4 as number | null, price: addPrice, groupId: "g-abc" as string | undefined, freightPct: 7, priceRound: 25 };
+  const sec = p6c.systemFromCategory(cat, [{ sku: "OLD-LIVE-A", qty: 4 }, { sku: "OLD-LIVE-B", qty: 1 }, { sku: "GONE", qty: 3 }], ctx);
+  ok(sec.name === "Controls" && sec.discipline === "lighting" && sec.kind === "materials" && sec.id === "sys11" && sec.freightPct === 7 && sec.freightAuto === true && sec.priceRound === 25,
+    "#P6 estimator: the new system is named after the category, carries its discipline and addSystem's defaults");
+  ok(sec.items.length === 2 && sec.items[0].sku === "LIVE-A" && sec.items[1].sku === "LIVE-B" && !sec.items.some((i) => i.sku.startsWith("OLD-") || i.sku === "GONE"),
+    "#P6 estimator: lines use the LIVE part sku (never the stored one); a part missing from the catalog is skipped");
+  ok(sec.items[0].qty === 4 && sec.items[0].cost === 100 && sec.items[0].price === addPrice(100, 250, 0.4) && sec.items[1].price === 80 && sec.items[1].unit === "ea" && sec.items[0].id === 12 && sec.items[1].id === 13 && sec.items[0].desc === "Part LIVE-A",
+    "#P6 estimator: lines are priced exactly like '+ Add part from catalog' (catalogAddPrice at the tier margin; no cost → list) with the picked qty");
+  ok(sec.groupId === "g-abc" && p6c.systemFromCategory(cat, [], { ...ctx, groupId: undefined }).groupId === undefined && !("groupId" in p6c.systemFromCategory(cat, [], { ...ctx, groupId: undefined })),
+    "#P6 estimator: the system joins the active system's group; no group → none");
+  const plain = p6c.systemFromCategory({ id: "cat-p", name: "Video", items: [] }, [], ctx);
+  ok(plain.items.length === 0 && plain.name === "Video" && !("discipline" in plain),
+    "#P6 estimator: a category with no items gives an empty system, no discipline unless the category has one");
+  const pick = p6c.systemFromCategory(cat, [{ sku: "OLD-LIVE-B", qty: 1 }, { sku: "NOPE", qty: 1 }, { sku: "OLD-LIVE-B", qty: 9 }], ctx);
+  ok(pick.items.length === 1 && pick.items[0].sku === "LIVE-B", "#P6 estimator: only the picked items come in; an unknown sku and a repeated pick are ignored");
+
+  const modal = rd(`${EST_DIR}/add-system-modal.tsx`), build = rd(`${EST_DIR}/steps/build-step.tsx`), page = rd(`${EST_DIR}/page.tsx`), hook = rd(`${EST_DIR}/use-estimator-state.ts`);
+  ok(modal.includes('title="Add a system"') && modal.includes("Blank system") && modal.includes("Add system") && modal.includes("Not in the catalog") && modal.includes('e.key === "Escape"') && modal.includes("disabled={missing}") && modal.includes("<ConfigModal"),
+    "#P6 estimator: the modal has the exact copy (Add a system / Blank system / Add system / Not in the catalog), closes on Escape, and a missing part can't be ticked");
+  ok(ESTIMATOR_FILES.includes("add-system-modal.tsx") && (build.match(/onClick=\{\(\) => setAddSystemOpen\(true\)\}/g) || []).length === 2 && !/onClick=\{addSystem\}/.test(build) && build.includes("<AddSystemModal") && build.includes("onBlank={() => {") && build.includes("addSystem();") && build.includes("onAdd={addSystemFromCategory}") && build.includes("categories={initial.systemCategories}"),
+    "#P6 estimator: both + Add system and the rail + Add open the modal; Blank system is today's addSystem; the modal reads initial.systemCategories");
+  ok(page.includes("loadSystemCategoryOptions()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") && page.includes("sku: p.sku") && page.includes("part: p ? {") && page.includes(": null,"),
+    "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
+  ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
+     (hook.match(/setSectionsState\(/g) || []).length === 5 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
+    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count unchanged; `next` stays last");
 }

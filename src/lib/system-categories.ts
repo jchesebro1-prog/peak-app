@@ -1,4 +1,5 @@
-import { sanitizeDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
+import { sanitizeDiscipline, withDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
+import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 
 /**
  * Estimator Phase 6 — System categories (spec §13). Admin-editable categories
@@ -191,4 +192,67 @@ export function moveItem(list: List, id: string, sku: string, dir: -1 | 1): List
     const items = swap(c.items, c.items.findIndex((it) => it.sku === sku), dir);
     return items === c.items ? c : { ...c, items: items as CategoryItem[] };
   });
+}
+
+/* ---------------- the Estimator's "Add a system" (spec §13) ---------------- */
+
+/** A category item as the Estimator modal sees it: the stored item plus the
+ *  live catalog part behind it (`sku` is the LIVE sku — the stored one may be
+ *  retired and renamed, #304), or `null` when the part is gone. */
+export type CategoryOptionItem = {
+  sku: string;
+  qty: number;
+  note?: string;
+  part: { sku: string; desc: string; unit: string; cost: number; list: number } | null;
+};
+export type CategoryOption = { id: string; name: string; discipline?: ScopeDiscipline; items: CategoryOptionItem[] };
+
+/** What the new system needs from the Estimator: the id source, the tier margin
+ *  and sell rule (catalogAddPrice), and the defaults `addSystem` stamps. */
+export type SystemFromCategoryCtx = {
+  nextId: () => number;
+  tierMargin: number | null | undefined;
+  price: (cost: number, list: number, m: number | null | undefined) => number;
+  /** The active system's group — the new system joins it. */
+  groupId?: string;
+  freightPct: number;
+  priceRound: number;
+};
+
+/**
+ * The new system for "Add system" on a category: named after it (its
+ * discipline set when it has one), joining the active system's group, with the
+ * PICKED parts as lines built exactly like "+ Add part from catalog" (addPart):
+ * sell = `price(cost, list, tierMargin)`. A pick whose item is not in the
+ * category, or whose part is not in the catalog, is skipped; lines carry the
+ * part's LIVE sku. Qty is the pick's, floored to 0.01.
+ */
+export function systemFromCategory(
+  category: CategoryOption,
+  picks: ReadonlyArray<{ sku: string; qty: number }>,
+  ctx: SystemFromCategoryCtx,
+): SpecSection {
+  const id = "sys" + ctx.nextId();
+  const items: SpecItem[] = [];
+  const seen = new Set<string>();
+  for (const pick of picks) {
+    const item = category.items.find((i) => i.sku === pick.sku);
+    if (!item || !item.part || seen.has(item.sku)) continue;
+    seen.add(item.sku);
+    const p = item.part;
+    const qty = Number.isFinite(pick.qty) && pick.qty > 0 ? Math.round(pick.qty * 100) / 100 || QTY_MIN : 1;
+    items.push({ id: ctx.nextId(), sku: p.sku, desc: p.desc, qty, unit: p.unit || "ea", cost: p.cost, price: ctx.price(p.cost, p.list, ctx.tierMargin) });
+  }
+  const base: SpecSection = {
+    id,
+    name: category.name,
+    kind: "materials",
+    mfr: "",
+    freightPct: ctx.freightPct,
+    freightAuto: true,
+    priceRound: ctx.priceRound,
+    items,
+    ...(ctx.groupId ? { groupId: ctx.groupId } : {}),
+  };
+  return withDiscipline(base, category.discipline);
 }

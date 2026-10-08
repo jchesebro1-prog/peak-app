@@ -47,6 +47,7 @@ import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import { countCutSheetTypes } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import { vendorDraftTotal, vendorDraftTotalSource, vendorKeptLines, vendorLinesTotal } from "./vendor-quote-modal";
+import { systemFromCategory } from "@/lib/system-categories";
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 
@@ -362,6 +363,8 @@ export function useEstimatorState(props: EstimatorProps) {
   const [intros, setIntros] = useState(narrativeIntros);
   /** #293 slice 2: the system library modal (Load system). */
   const [libraryOpen, setLibraryOpen] = useState(false);
+  /** Phase 6: the "Add a system" modal. */
+  const [addSystemOpen, setAddSystemOpen] = useState(false);
   const narrRef = useRef<HTMLTextAreaElement | null>(null);
   /** Bumped by a card's snippet — the effect focuses the textarea once the
    *  column (and the newly active system) has rendered, caret at the end.
@@ -1654,6 +1657,26 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputMethod("catalog", id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(id)));
   };
+  /** Phase 6: "Add a system" on a category — the pure builder makes the system
+   *  (named after the category, its discipline, the picked parts priced like
+   *  addPart, joining the active system's group); placement is addSystem's. */
+  const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>) => {
+    const category = initial.systemCategories.find((c) => c.id === categoryId);
+    if (!category) return;
+    const groupId = sections.find((s) => s.id === activeId)?.groupId;
+    const sec = systemFromCategory(category, picks, {
+      nextId,
+      tierMargin,
+      price: catalogAddPrice,
+      groupId,
+      freightPct: freightDefault.pct,
+      priceRound: SYSTEM_PRICE_STEP,
+    });
+    setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
+    setActiveId(sec.id);
+    setAddSystemOpen(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(sec.id)));
+  };
   /* ---------------- Phase 2a: groups, moves, built ---------------- */
   /** Every reorder writes through here: the Rewards credit re-pins to the new
    *  last system, exactly like deleteSystem. A no-op (same reference) writes nothing. */
@@ -2691,6 +2714,9 @@ export function useEstimatorState(props: EstimatorProps) {
     addMob,
     addPart,
     addSystem,
+    addSystemFromCategory,
+    addSystemOpen,
+    setAddSystemOpen,
     addTrack,
     addVendorLine,
     aiAdded,
