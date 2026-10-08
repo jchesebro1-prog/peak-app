@@ -44,7 +44,7 @@ export function OnlineEstimateView({
   pdfHref: string | null;
   backHref: string | null;
 }) {
-  const offers = offersBomView(docProps.sections, docProps.detail);
+  const offers = offersBomView(docProps.sections, docProps.detail, docProps.document);
   const showBom = offers && view === "bom";
   const shown = showBom ? bomViewProps(docProps) : docProps;
   return (

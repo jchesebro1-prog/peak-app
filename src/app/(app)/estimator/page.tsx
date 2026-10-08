@@ -37,6 +37,7 @@ import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
+import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type {
@@ -89,7 +90,7 @@ type QuoteDoc = Quote & {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown } | null;
+  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown; document?: unknown } | null;
 };
 
 /**
@@ -140,6 +141,7 @@ async function initialFrom(
       tierMargin: null,
       sections: null,
       groups: [],
+      document: null,
       vendorQuotes: [],
       replaces: "",
       pdfOptions: { ...DEFAULT_PDF_OPTIONS },
@@ -211,6 +213,8 @@ async function initialFrom(
     tierMargin: q.tierMargin ?? null,
     sections,
     groups,
+    // Estimator Phase 5 — the Build package document, re-validated on read.
+    document: sanitizePackageDoc(spec?.document),
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),

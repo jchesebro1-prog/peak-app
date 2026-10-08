@@ -8,6 +8,8 @@ import { addOptions, alternatesListView, coverSummaryText, coverTotals, notInclu
 import type { AlternatesListView } from "./scopes";
 import { packageBomRows, type BomCatalogPart, type PackageBomRow } from "./bom";
 import { PACKAGE_COPY, packageBanner, type PackageBanner, type VisiblePackageState } from "@/lib/quote-share/package-view";
+import { documentApplies } from "@/lib/package-doc/print";
+import { resolvePackageDoc, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 
 /**
  * #301 slice B — the estimate package page's props (spec §5), built from the
@@ -73,6 +75,11 @@ export type PackageViewProps = {
    *  present only when the revision has printed alternates. */
   alternates?: AlternatesListView;
   notIncluded: string[];
+  /** Estimator Phase 5 — the Build package document, resolved (strings
+   *  only: names, system sell prices, quantities, photo links). Present only
+   *  when the quote has one; the Narrative view then draws it in place of the
+   *  scope cards (the BOM view is unchanged). */
+  document?: ResolvedPackageDoc;
 };
 
 export type PackageViewInput = {
@@ -140,5 +147,8 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     options: addOptions(d).map((o) => ({ label: o.label, desc: o.desc, reason: o.reason, price: fmt(o.price) })),
     ...(alternates.length ? { alternates } : {}),
     notIncluded: notIncludedItems(i.frozen.notIncluded),
+    ...(documentApplies(d.document)
+      ? { document: resolvePackageDoc(d.document, { sections: d.sections, t: d.t, quoteId: d.quoteId, taxRatePct: d.taxRatePct, totalLabel: t.totalLabel, photos: i.photos }) }
+      : {}),
   };
 }

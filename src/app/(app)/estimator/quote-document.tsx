@@ -8,6 +8,9 @@ import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./na
 import { alternateGroupsForPrint, appendixSystemIds, printedGroupHeadings } from "./quote-document-view";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
+import PackageDocView from "@/components/package-doc/package-doc-view";
+import { documentApplies } from "@/lib/package-doc/print";
+import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -88,6 +91,12 @@ export type QuoteDocumentProps = {
    *  sheet's 740px, with QUOTE_WEB_CSS's phone rules. Absent / "sheet" renders
    *  byte-for-byte as before (the PDF and the baseline fixture). */
   layout?: "sheet" | "web";
+  /** Estimator Phase 5 — the Build package document (spec.document,
+   *  sanitized). When it has printable content (documentApplies) it REPLACES
+   *  every In-total system band (group headings, bands, narrative / key
+   *  products / itemized lines) — prices live in its chips and price table.
+   *  Absent / null / empty renders byte-for-byte as before. */
+  document?: PackageDoc | null;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -609,7 +618,12 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   // labor means no "includes installation", same for freight at $0.
   const inclusions = inclusionsLine(p.t);
   // #293: the Itemized appendix — the systems the body left un-itemized.
-  const appendixIds = p.pdfItemizedAppendix ? new Set(appendixSystemIds(p.sections, p.detail)) : null;
+  // Phase 5: the package document (when it applies) replaces EVERY In-total
+  // band, so the body itemizes nothing — the appendix then lists every
+  // printed In-total system (appendixSystemIds' "sectioned" rule), still only
+  // when Show on PDF → Itemized appendix is on.
+  const docOn = documentApplies(p.document);
+  const appendixIds = p.pdfItemizedAppendix ? new Set(appendixSystemIds(p.sections, docOn ? "sectioned" : p.detail)) : null;
   const appendixSections = appendixIds ? previewSections.filter((ps) => appendixIds.has(ps.id)) : [];
   const appendixCols = ["1fr", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
 
@@ -778,16 +792,39 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
             </div>
           )}
 
-          {/* sections */}
-          {previewSections.map((ps) => (
-            <div key={ps.num + ps.name}>
-              {groupHeadings.has(ps.id) && (
-                <GroupHeading name={groupHeadings.get(ps.id)!.name} subtotalLabel={fmt(groupHeadings.get(ps.id)!.subtotal)} />
-              )}
-              <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-              <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} />
+          {/* sections — Phase 5: a package document replaces ALL In-total
+              system bands (itemized ones too: prices live in its chips and
+              price table). Kept unchanged around it: the header, the
+              investment band, the cover note, the Alternates block (its
+              bands stay the priced record of the alternates, even when the
+              document also writes about them), Optional additions, the
+              totals, terms, signature, the Itemized appendix and the
+              assumptions. */}
+          {docOn ? (
+            <div className="est-pkgdoc" style={{ fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55 }}>
+              <PackageDocView
+                doc={p.document!}
+                ctx={{
+                  sections: p.sections,
+                  t: p.t,
+                  quoteId: p.quoteId,
+                  taxRatePct: p.taxRatePct,
+                  totalLabel: anyPorPrinted ? "Total (excludes items pending price)" : "Total",
+                  photos: p.keyProductPhotos,
+                }}
+              />
             </div>
-          ))}
+          ) : (
+            previewSections.map((ps) => (
+              <div key={ps.num + ps.name}>
+                {groupHeadings.has(ps.id) && (
+                  <GroupHeading name={groupHeadings.get(ps.id)!.name} subtotalLabel={fmt(groupHeadings.get(ps.id)!.subtotal)} />
+                )}
+                <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
+                <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} />
+              </div>
+            ))
+          )}
 
           {/* Phase 2b: alternates — each Alternate group (heading + subtotal) and
               its systems as bands A1, A2…, priced separately, never in the total */}

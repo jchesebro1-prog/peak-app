@@ -9,6 +9,7 @@ import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
+import type { PackageDoc } from "@/lib/package-doc/types";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
@@ -565,6 +566,8 @@ export type InitialQuote = {
   sections: SpecSection[] | null;
   /** Phase 2a: named system groups (spec.groups) — [] when none. */
   groups: SystemGroup[];
+  /** Estimator Phase 5 — the Build package document (spec.document, sanitized); null = none. */
+  document: PackageDoc | null;
   /** Imported vendor quotes (#143) — top-level on the doc, not in spec. */
   vendorQuotes: VendorQuote[];
   /** #160 / D205 — the draft this new estimate replaces ("Change type"); "" otherwise.

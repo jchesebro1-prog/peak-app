@@ -44,11 +44,11 @@ export function qd293Sections(): SpecSection[] {
   ];
 }
 
-export function qd293Props(opts: { sections?: SpecSection[]; groups?: unknown; pdfOptions?: Record<string, unknown> } = {}): QuoteDocumentProps {
+export function qd293Props(opts: { sections?: SpecSection[]; groups?: unknown; pdfOptions?: Record<string, unknown>; document?: unknown } = {}): QuoteDocumentProps {
   const quote = {
     id: "Q-293", name: "Narrative test", customer: "Walk-in", customerId: null, owner: "Pat Estimator", preparedBy: "",
     updatedAt: AT, createdAt: AT, revisions: [], quoteNote: "Cover note.", assumptions: "Assume access.", paymentTerms: "Net 30",
-    spec: { sections: opts.sections ?? qd293Sections(), ...(opts.groups !== undefined ? { groups: opts.groups } : {}) },
+    spec: { sections: opts.sections ?? qd293Sections(), ...(opts.groups !== undefined ? { groups: opts.groups } : {}), ...(opts.document !== undefined ? { document: opts.document } : {}) },
     vendorQuotes: [{ id: "VQ-1", vendor: "Acme", quoteNumber: "Q9", description: "Motors", display: "itemized", lines: [{ id: 1, description: "Motor", qty: 2, unit: "ea", amount: 100 }], terms: "", notes: "", total: 100, includesFreight: false }],
     pdfOptions: { ...(opts.pdfOptions || {}) },
   };
@@ -81,4 +81,30 @@ export function qdP2bNoAltCases(): Record<string, QuoteDocumentProps> {
     portalPor: { ...qd293Props({ sections: por() }), isPortalCatalog: true },
     ungroupedWeb: { ...qd293Props(), layout: "web" },
   };
+}
+
+/** Estimator Phase 5 — quotes WITHOUT a package document: every #293 / #P2b
+ *  case plus key products with photos (print + web), alternates and the
+ *  appendix. The document work must leave each one byte-for-byte as it was;
+ *  scripts/qdp5-baseline.ts wrote their pre-change render once. */
+export function qdP5NoDocCases(): Record<string, QuoteDocumentProps> {
+  const G = [{ id: "g-a", name: "Stage", alternate: false }, { id: "g-x", name: "Upgrades", alternate: true }];
+  const withKp = (): SpecSection[] =>
+    qd293Sections().map((s) =>
+      s.id === "s2"
+        ? { ...s, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five para.\n\n- a\n- b", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six para.", photo: false }] }
+        : s
+    );
+  const alt = { id: "a1", name: "LED Upgrade", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", presentation: "narrative", narrative: "Alt intro.", items: [line(11)] } as unknown as SpecSection;
+  const grouped = (): SpecSection[] => [...withKp().map((s) => (s.id === "s2" ? { ...s, groupId: "g-a" } : s)), alt];
+  const photos = { "SKU-5": { src: "data:image/png;base64,AAAA", alt: "Five" } };
+  const out: Record<string, QuoteDocumentProps> = {};
+  for (const [k, v] of Object.entries(qd293Cases())) out["p293-" + k] = v;
+  for (const [k, v] of Object.entries(qdP2bNoAltCases())) out["p2b-" + k] = v;
+  out.keyProductsPrint = { ...qd293Props({ sections: withKp() }), keyProductPhotos: photos };
+  out.keyProductsWeb = { ...qd293Props({ sections: withKp() }), keyProductPhotos: photos, layout: "web" };
+  out.alternatesPrint = { ...qd293Props({ sections: grouped(), groups: G }), keyProductPhotos: photos };
+  out.alternatesWebAppendix = { ...qd293Props({ sections: grouped(), groups: G, pdfOptions: { pdfItemizedAppendix: true } }), keyProductPhotos: photos, layout: "web" };
+  out.sectionedAppendix = qd293Props({ sections: withKp(), pdfOptions: { detail: "sectioned", pdfItemizedAppendix: true } });
+  return out;
 }

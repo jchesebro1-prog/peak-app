@@ -8,6 +8,7 @@ import { normalizePdfOptions } from "./pdf-options";
 import { documentRevStamp } from "./state";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 
 /**
  * A saved quote → the props of the customer QuoteDocument (#222). Mirrors what
@@ -65,7 +66,7 @@ export function quoteDocumentDataFor(
   cust: DocCustomer | null,
   settings: Pick<AppSettingsData, "companyName" | "logoDark">
 ): QuoteDocumentProps {
-  const spec = (q.spec || null) as { sections?: unknown; groups?: unknown } | null;
+  const spec = (q.spec || null) as { sections?: unknown; groups?: unknown; document?: unknown } | null;
   const groups = sanitizeGroups(spec?.groups);
   // Phase 2a: the printed order is always normalised (same reference when already valid).
   const sections = normalizeSystemOrder(spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [], groups);
@@ -117,6 +118,9 @@ export function quoteDocumentDataFor(
     sections,
     // Phase 2a — read from the same spec (live quote or a frozen revision) as `sections`.
     groups,
+    // Estimator Phase 5 — the Build package document from the same spec,
+    // re-validated on read (an invalid one is null = today's output).
+    document: sanitizePackageDoc(spec?.document),
     vendorQuotes,
     t: totals(sections, TAX_RATE_PCT),
     taxRatePct: TAX_RATE_PCT,

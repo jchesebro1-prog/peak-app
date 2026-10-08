@@ -5,6 +5,9 @@ import { getBlobStream } from "@/lib/blob";
 import { manufacturerFallbackSkusOf, photoSkusOf } from "@/app/(app)/estimator/narrative";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { PartDocument } from "@/lib/part-docs/types";
+import { docManufacturerFallbackSkus, documentApplies, keyProductPrintSections } from "@/lib/package-doc/print";
+import { docPhotoSkus } from "@/lib/package-doc/text";
+import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
  * #293 — key-product photos for the customer document. The photo is the
@@ -42,9 +45,17 @@ export type PhotoReader = (blobKey: string, maxBytes: number, signal?: AbortSign
 export type PhotoCaps = { perImage: number; total: number; concurrency: number; deadlineMs?: number };
 
 /** sku → primary visible image doc (else the manufacturer's image), for the
- *  photo-on blocks of narrative systems. */
-export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<string, PartDocument>> {
-  const skus = photoSkusOf(sections);
+ *  photo-on blocks of narrative systems.
+ *  Estimator Phase 5 — with a package document (`document`, sanitized) the
+ *  set is what that output prints: the document's photo-on product blocks
+ *  (docPhotoSkus) plus the key products of the systems still printed as
+ *  bands (the alternates — keyProductPrintSections). Without one, exactly
+ *  as before. */
+export async function keyProductPhotoDocs(sections: SpecSection[], document?: PackageDoc | null): Promise<Map<string, PartDocument>> {
+  const kpSections = keyProductPrintSections(sections, document);
+  const docSkus = documentApplies(document) ? docPhotoSkus(document) : [];
+  const skus = [...photoSkusOf(kpSections)];
+  for (const s of docSkus) if (!skus.includes(s)) skus.push(s);
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
   // #304: keyed by the sku the section names — a sent revision keeps a
@@ -56,7 +67,7 @@ export async function keyProductPhotoDocs(sections: SpecSection[]): Promise<Map<
   }
   // No photo of its own: the part's manufacturer image (never for a legacy
   // allowance/custom block — its placeholder comes first).
-  const fallbackOk = new Set(manufacturerFallbackSkusOf(sections));
+  const fallbackOk = new Set([...manufacturerFallbackSkusOf(kpSections), ...(docSkus.length ? docManufacturerFallbackSkus(document, sections) : [])]);
   const missing = skus.filter((s) => parts.has(s) && !out.has(s) && fallbackOk.has(s));
   if (missing.length) {
     const look = manufacturerImageLookup(await listManufacturers());
@@ -173,9 +184,9 @@ export async function inlinePhotos(
 }
 
 /** The print route's call: sku → { src: data URI, alt }. Never throws. */
-export async function keyProductPhotoDataUris(sections: SpecSection[]): Promise<Record<string, { src: string; alt: string }>> {
+export async function keyProductPhotoDataUris(sections: SpecSection[], document?: PackageDoc | null): Promise<Record<string, { src: string; alt: string }>> {
   try {
-    return await inlinePhotos(await keyProductPhotoDocs(sections), readBlobCapped);
+    return await inlinePhotos(await keyProductPhotoDocs(sections, document), readBlobCapped);
   } catch (e) {
     console.warn("[narrative] key-product photos unavailable", e instanceof Error ? e.message : e);
     return {};

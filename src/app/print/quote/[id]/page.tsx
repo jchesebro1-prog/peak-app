@@ -53,7 +53,8 @@ export default async function PrintQuotePage({
   const doc = quoteDocumentDataFor(q, cust, settings);
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.
-  const keyProductPhotos = await keyProductPhotoDataUris(doc.sections);
+  // Phase 5: plus the package document's photo-on product blocks.
+  const keyProductPhotos = await keyProductPhotoDataUris(doc.sections, doc.document);
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>

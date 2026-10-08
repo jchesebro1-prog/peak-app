@@ -23,7 +23,7 @@ export async function loadPackageViewProps(
   const doc = await loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href } });
   if (!doc) return null;
   const [photos, catalog, defaults] = await Promise.all([
-    keyProductPhotoLinks(packagePhotoSections(doc.sections), href),
+    keyProductPhotoLinks(packagePhotoSections(doc.sections), href, doc.document),
     catalogFor(packageBomSkus(doc.sections)),
     getEstimateOutputDefaults(),
   ]);

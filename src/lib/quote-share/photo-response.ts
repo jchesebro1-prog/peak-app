@@ -6,6 +6,8 @@ import type { QuoteRevision } from "@/lib/stores/quotes";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { PartDocument } from "@/lib/part-docs/types";
 import { normalizeSystemOrder, sanitizeGroups, type SystemGroup } from "@/lib/estimate-groups/groups";
+import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
+import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
  * #293 slice 3 (spec §5.4) — the online pages' photos. Both photo routes
@@ -25,6 +27,12 @@ export function revisionSections(rev: QuoteRevision): SpecSection[] {
   return spec && Array.isArray(spec.sections) ? (spec.sections as SpecSection[]) : [];
 }
 
+/** Estimator Phase 5 — the revision's package document (sanitized; null = none). */
+export function revisionDocument(rev: QuoteRevision): PackageDoc | null {
+  const spec = rev.spec as { document?: unknown } | null | undefined;
+  return sanitizePackageDoc(spec ? spec.document : undefined);
+}
+
 /** Estimator Phase 2b — the revision's systems as the customer document
  *  prints them (normalised + alternate-stamped against its own groups, as
  *  quoteDocumentDataFor does), with those groups: the scope picker's input. */
@@ -36,7 +44,8 @@ export function revisionGroupedSections(rev: QuoteRevision): { sections: SpecSec
 
 export async function photoDocForRevision(rev: QuoteRevision, docId: string): Promise<PartDocument | null> {
   if (typeof docId !== "string" || !docId) return null;
-  const docs = await keyProductPhotoDocs(revisionSections(rev));
+  // Phase 5: the package document's photo-on product blocks are servable too.
+  const docs = await keyProductPhotoDocs(revisionSections(rev), revisionDocument(rev));
   for (const d of docs.values()) if (d.id === docId) return d;
   return null;
 }
@@ -45,7 +54,7 @@ export async function photoDocForRevision(rev: QuoteRevision, docId: string): Pr
  *  products, whatever its presentation (package-model.ts packagePhotoSections). */
 export async function packagePhotoDocForRevision(rev: QuoteRevision, docId: string): Promise<PartDocument | null> {
   if (typeof docId !== "string" || !docId) return null;
-  const docs = await keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)));
+  const docs = await keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)), revisionDocument(rev));
   for (const d of docs.values()) if (d.id === docId) return d;
   return null;
 }

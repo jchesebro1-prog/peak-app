@@ -57,7 +57,7 @@ export async function loadLivePackagePreview(
 ): Promise<{ model: PackageViewProps; extras: StaffPackageExtras }> {
   const doc = await liveQuoteDocumentProps(q);
   const [photos, catalog, defaults, extras] = await Promise.all([
-    keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref),
+    keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref, doc.document),
     catalogFor(packageBomSkus(doc.sections)),
     getEstimateOutputDefaults(),
     liveExtras(q),

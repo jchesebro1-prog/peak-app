@@ -2,6 +2,8 @@ import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecSection } from "./types";
 import type { QuoteDocumentProps } from "./quote-document";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
+import { documentApplies } from "@/lib/package-doc/print";
+import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
  * #293 — QuoteDocument's pure view helpers, kept out of quote-document.tsx
@@ -85,6 +87,8 @@ export function appendixSystemIds(sections: SpecSection[], detail: "itemized" | 
 export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
   return {
     ...p,
+    // Phase 5: the BOM view is the itemized bands — never the package document.
+    document: null,
     detail: "itemized",
     pdfQty: true,
     pdfNotes: true,
@@ -94,7 +98,9 @@ export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
 }
 
 /** The Narrative / BOM toggle is offered only when the body left some
- *  system un-itemized — otherwise the document already is the BOM. */
-export function offersBomView(sections: SpecSection[], detail: "itemized" | "sectioned"): boolean {
-  return appendixSystemIds(sections, detail).length > 0;
+ *  system un-itemized — otherwise the document already is the BOM. Phase 5:
+ *  a package document itemizes nothing, so it always offers the BOM view
+ *  (when any system prints). */
+export function offersBomView(sections: SpecSection[], detail: "itemized" | "sectioned", document?: PackageDoc | null): boolean {
+  return appendixSystemIds(sections, documentApplies(document) ? "sectioned" : detail).length > 0;
 }

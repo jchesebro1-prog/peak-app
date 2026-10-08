@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import type { NarrativeBlock } from "@/app/(app)/estimator/narrative";
 import type { PackageScopeView, PackageViewProps } from "@/lib/estimate-output/package-model";
 import { PACKAGE_COPY } from "@/lib/quote-share/package-view";
+import { ResolvedPackageDocView } from "@/components/package-doc/package-doc-view";
 
 /**
  * #301 slice B — the estimate package page (spec §5): a server component
@@ -213,9 +214,17 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           {PACKAGE_COPY.bom}
         </a>
       </nav>
-      {m.scopes.map((s) => (
-        <Scope key={s.id} s={s} bom={bom} extra={extra} />
-      ))}
+      {/* Estimator Phase 5: the Narrative view draws the package document,
+          when the quote has one, in place of the scope cards (each key
+          product's slot extras follow its product block); the BOM view keeps
+          the scope cards. */}
+      {!bom && m.document ? (
+        <section className="pkg-card pkg-document">
+          <ResolvedPackageDocView resolved={m.document} productExtra={extra} />
+        </section>
+      ) : (
+        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} />)
+      )}
       <section className="pkg-card">
         {m.totals.creditLabel && m.totals.creditAmount && (
           <div className="pkg-row">

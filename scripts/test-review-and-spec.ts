@@ -11394,6 +11394,7 @@ seeded()
   .then(() => p3TrackFixAsyncChecks())
   .then(() => p3FinalReviewAsyncChecks())
   .then(() => p4CommentsAsyncChecks())
+  .then(() => p5RenderPhotoAsyncChecks())
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
@@ -48645,7 +48646,7 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
      loader.includes("Promise<QuoteDocumentProps | null>"),
     "#293t loader: the web path fails closed — only a sent revision that is this quote's own object renders; anything else is null");
   const pr = rd("src/lib/quote-share/photo-response.ts");
-  ok(pr.includes("keyProductPhotoDocs(revisionSections(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
+  ok(pr.includes("keyProductPhotoDocs(revisionSections(rev), revisionDocument(rev))") && pr.includes("PHOTO_TYPES.has(doc.contentType)") && pr.includes('"x-content-type-options": "nosniff"') &&
      pr.includes('"private, max-age=3600"') && pr.includes('createHash("sha1").update(doc.blobKey)'),
     "#293t photos: only the sent revision's printed photo docs, PNG/JPEG/WebP, nosniff, private 1 h, ETag on id + blobKey hash");
 
@@ -48810,7 +48811,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
     "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
   ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
     "#293t portal page: every miss is a 200 card; the page never writes");
-  ok(comp.includes("<QuoteDocument {...shown} layout=\"web\" />") && comp.includes("bomViewProps(docProps)") && comp.includes("offersBomView(docProps.sections, docProps.detail)") &&
+  ok(comp.includes("<QuoteDocument {...shown} layout=\"web\" />") && comp.includes("bomViewProps(docProps)") && comp.includes("offersBomView(docProps.sections, docProps.detail, docProps.document)") &&
      (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
     "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
   const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
@@ -51782,7 +51783,7 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
     "#301 model: the scope price only — never a line or unit price, cost, internal note or room (§10)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys"|@\/lib\/catalog-rename\/sku")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
-     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback")/m.test(rd("src/lib/estimate-output/package-model.ts")),
+     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)")/m.test(rd("src/lib/estimate-output/package-model.ts")),
     "#301 purity: bom.ts and package-model.ts are pure and client-safe");
 }
 
@@ -51826,7 +51827,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     "#301 view: phone rules, a print stylesheet, and a BOM that scrolls inside its card (no page-wide horizontal scroll)");
   const comp = readFileSync(join(process.cwd(), "src/components/estimate-output/package-view.tsx"), "utf8");
   ok(!comp.includes('"use client"') && !/\buse(State|Effect|Ref|Transition)\(/.test(comp) && !comp.includes("onClick=") && !comp.includes(".jpg") && !comp.includes("next/link") &&
-     !/^import (?!type)[^\n]*from "(?!react"|@\/lib\/quote-share\/package-view")/m.test(comp),
+     !/^import (?!type)[^\n]*from "(?!react"|@\/lib\/quote-share\/package-view"|@\/components\/package-doc\/package-doc-view")/m.test(comp),
     "#301 view: a server component with pure props — no hooks, handlers, image import or server module");
 }
 
@@ -51865,7 +51866,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     "#301 page: the package page resolves, loads, renders PackageView with the Slice C mounts empty, one inactive card; read-only, no session");
   const loader = rd("src/lib/estimate-output/package-loader.ts");
   ok(loader.includes("loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href } })") && loader.includes("packageFrozenFields(hit.rev.docFields,") &&
-     loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), href)") && !loader.includes("quoteAsOfRevision") && !/\bq\.(coverSummary|notIncluded|packageFiles)\b/.test(loader),
+     loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), href, doc.document)") && !loader.includes("quoteAsOfRevision") && !/\bq\.(coverSummary|notIncluded|packageFiles)\b/.test(loader),
     "#301 loader: the sent revision through the web loader; cover fields from the pinned revision only (R12); every scope's photos");
   const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
   ok(photo.indexOf("rateLimit(") < photo.indexOf("isShareTokenV2(token)") && photo.indexOf("isShareTokenV2(token)") < photo.indexOf("resolveSharedQuote(") &&
@@ -51875,7 +51876,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
      photo.slice(photo.indexOf("} catch (e) {")).includes("console.warn(") && photo.slice(photo.indexOf("} catch (e) {")).includes('return new Response("Not found", { status: 404 })') && photo.includes("return await servePackagePhotoForRevision("),
     "#301 photos fix: a DB error resolving a v2 photo link is the same uniform 404, logged (never a 500)");
   const pr = rd("src/lib/quote-share/photo-response.ts");
-  ok(pr.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)))") && pr.includes("async function serveDoc("), "#301 photos: one serving path, two photo sets");
+  ok(pr.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)), revisionDocument(rev))") && pr.includes("async function serveDoc("), "#301 photos: one serving path, two photo sets");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes(`"/share/quote/Q-2041/1.1.${"A".repeat(43)}",`) && smoke.includes(`"/share/quote/Q-2041/1.1.${"A".repeat(43)}?view=bom",`) &&
      smoke.includes(`{ route: "/share/quote/Q-2041/1.1.${"A".repeat(43)}/photo/PD-1", expectNotFound: true }`),
@@ -54153,8 +54154,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
 
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
-  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
-  ok(/\.\.\.withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
+  ok(/\.\.\.withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
   ok(/spec: \{ sections: withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\), mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
@@ -54225,7 +54226,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const ret = hook.slice(hook.lastIndexOf("  return {\n    ...props,"));
   ok(["groups", "blocks", "addGroupAction", "renameGroupAction", "moveGroupByAction", "removeGroupAction", "moveSystemToAction", "moveSystemByAction", "setSystemGroup", "markBuilt", "isBuilt", "isExpanded", "toggleExpand"].every((n) => new RegExp(`\\n    ${n},\\n`).test(ret))
     && /\n    next,\n  \};\n\}/.test(ret), "#P2a hook: the state returns every group/built name, with next still last");
-  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups \}/.test(actionsSrc),
+  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc),
     "#P2a hook: move-to-existing normalises the merged sections against the same sanitised groups it writes");
 }
 
@@ -54376,7 +54377,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the heading row is uppercase name + subtotal, and keeps with its band (est-secband break rules)");
   ok(view.includes("export function printedGroupHeadings(") && view.includes("systemPrintsInBody(sec)") && !/from "@\/lib\/(stores|db)\/|from "server-only"/.test(view),
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
-  ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown }"),
+  ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown; document?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
   ok(loader.includes("quoteDocumentDataFor(src, cust, settings)") && printPage.includes("quoteDocumentDataFor(q, cust, settings)"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
@@ -54412,7 +54413,7 @@ import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-
   const norm = acts.indexOf("normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups)");
   const settle = acts.indexOf("await settleRewardCredit(sellSanitized,");
   ok(norm > 0 && settle > norm, "#P2a hardening: saveQuoteAction normalises the sections (and sanitises built/groupId) before the Rewards credit is settled");
-  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups }"), "#P2a hardening: the final write stays normalised");
+  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) }"), "#P2a hardening: the final write stays normalised");
 }
 
 /* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt, the Rewards credit pin and the approval fingerprint. */
@@ -56757,7 +56758,7 @@ function p4PreviewChecks(): void {
     "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
   const loader = rd("src/lib/estimate-output/package-live-loader.ts");
   ok(loader.includes("quoteDocumentDataFor(q, cust, settings)") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
-     loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref)") && loader.includes("coverSummary: q.coverSummary") &&
+     loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref, doc.document)") && loader.includes("coverSummary: q.coverSummary") &&
      !/sharePath|resolveSharedPackage|loadQuoteDocumentProps|"\/share\//.test(loader),
     "#P4 preview: the live loader builds from the saved quote (the print route's calls) with staff photo links — never a share token or a sent revision");
   ok(rd("src/lib/estimate-output/package-loader.ts").includes("export async function catalogFor("), "#P4 preview: catalogFor is shared with the share loader");
@@ -57251,4 +57252,252 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
   const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { dependencies: Record<string, string> };
   ok(["@tiptap/react", "@tiptap/pm", "@tiptap/starter-kit"].every((d) => /^\^3\./.test(pkg.dependencies[d] || "")) && !Object.keys(pkg.dependencies).some((d) => d.startsWith("@tiptap-pro")),
     "#P5 model: TipTap 3.x core dependencies, no @tiptap-pro packages");
+}
+
+/* ======================================================================
+   #P5 render — Estimator Phase 5 Task 2: the package document PRINTS and
+   SAVES. PackageDocView (server-safe) inside QuoteDocument in place of the
+   In-total bands; loaders, photo sets, the package page, save rules and
+   the PDF doc key. No document → byte-for-byte as before (base fixture).
+   ====================================================================== */
+import { qd293Props as p5rProps, qd293Sections as p5rSections, qdP5NoDocCases as p5rNoDoc, renderQuoteDocument293 as p5rRender } from "./qd293-cases";
+import { bomViewProps as p5rBom, offersBomView as p5rOffers } from "@/app/(app)/estimator/quote-document-view";
+import { documentApplies as p5rApplies, docManufacturerFallbackSkus as p5rMfrSkus, keyProductPrintSections as p5rKpSecs, docBlockPlaceholder as p5rPh } from "@/lib/package-doc/print";
+import { packageDocForSave as p5rSave, PACKAGE_DOC_TOO_LARGE as p5rTooLarge } from "@/lib/package-doc/save";
+import { resolvePackageDoc as p5rResolve } from "@/lib/package-doc/resolve";
+import { PACKAGE_DOC_CSS as p5rCss } from "@/components/package-doc/package-doc-view";
+import { pdfDocKey as p5rKey } from "@/app/(app)/estimator/pdf-doc-key";
+import { packageViewModel as p5rModel } from "@/lib/estimate-output/package-model";
+import PackageView5r from "@/components/estimate-output/package-view";
+import { createElement as p5rEl } from "react";
+import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  type Sec = ReturnType<typeof p5rSections>[number];
+  const T = (text: string, marks?: Array<{ type: string }>) => ({ type: "text", text, ...(marks ? { marks } : {}) });
+  const P = (...content: unknown[]) => ({ type: "paragraph", ...(content.length ? { content } : {}) });
+  const H = (level: number, text: string) => ({ type: "heading", attrs: { level }, content: [T(text)] });
+  const C = (kind: string, ref = "") => ({ type: "chip", attrs: { kind, ref } });
+  const PB = (sectionId: string, lineKey: string, sku: string, text: string, photo: Record<string, unknown> = {}) =>
+    ({ type: "productBlock", attrs: { sectionId, lineKey, sku, photo: { show: true, align: "right", width: 34, ...photo } }, content: [P(T(text))] });
+  const doc = (content: unknown[]) => ({ type: "doc", version: 1, content });
+  const photos = { "SKU-5": { src: "data:image/png;base64,P5R5", alt: "Five" }, "SKU-6": { src: "data:image/png;base64,P5R6", alt: "Six" }, "SKU-1": { src: "data:image/png;base64,P5R1", alt: "One" } };
+  const fixtureDoc = doc([
+    H(1, "Your stage package"),
+    P(T("Prepared for "), C("quoteNumber"), T(" — total "), C("grandTotal"), T(".")),
+    H(2, "Rigging"),
+    P(C("systemName", "s1"), T(" at "), C("systemPrice", "s1"), T(", qty "), C("lineQty", "s1:1"), T(" missing:"), C("systemPrice", "s9"), C("lineQty", "s1:99")),
+    H(3, "Detail"),
+    { type: "bulletList", content: [{ type: "listItem", content: [P(T("Bold", [{ type: "bold" }]), T(" and "), T("ital", [{ type: "italic" }]))] }] },
+    { type: "orderedList", content: [{ type: "listItem", content: [P(T("first"))] }] },
+    PB("s2", "5", "SKU-5", "Five words.", { align: "right", width: 40 }),
+    PB("s2", "6", "SKU-6", "Six words.", { align: "left", width: 30 }),
+    PB("s1", "1", "SKU-1", "One words.", { align: "full", width: 60 }),
+    PB("s1", "4", "SKU-4", "Hidden photo.", { show: false }),
+    PB("s1", "2", "SKU-2", "Allowance words."),
+    PB("s1", "77", "GONE-77", "Orphan words."),
+    P(T("<script>alert(1)</script>"), { type: "hardBreak" }, T("after break")),
+    { type: "pageBreak" },
+    { type: "priceTable" },
+  ]);
+  const props = (extra: Record<string, unknown> = {}, sections?: Sec[], groups?: unknown): ReturnType<typeof p5rProps> =>
+    ({ ...p5rProps({ sections: sections ?? p5rSections(), groups, document: fixtureDoc, ...(extra.pdfOptions ? { pdfOptions: extra.pdfOptions as Record<string, unknown> } : {}) }), keyProductPhotos: photos, ...(extra.layout ? { layout: extra.layout as "web" } : {}) });
+  const pr = props();
+  const html = p5rRender(pr);
+
+  ok(pr.document !== null && pr.document !== undefined && pr.document.content.length === 16 && p5rApplies(pr.document), "#P5 render: quoteDocumentDataFor carries spec.document, sanitized");
+  ok(p5rProps().document === null && p5rProps({ document: { type: "doc", content: "junk" } }).document === null, "#P5 render: no / invalid spec.document → document null (today's output)");
+
+  // headings
+  ok(/<h2 style="[^"]*font-size:1.32em[^"]*">Your stage package<\/h2>/.test(html) && /<h3 style="[^"]*font-size:1.14em[^"]*">Rigging<\/h3>/.test(html) && /<h4 style="[^"]*font-size:1em[^"]*">Detail<\/h4>/.test(html),
+    "#P5 render: heading levels 1/2/3 print as h2/h3/h4 on the PDF type scale (em of the 12.5px body)");
+  // chips
+  const s1 = pr.sections.find((s) => s.id === "s1")!;
+  const chips = [...html.matchAll(/<span class="pd-chip">([^<]*)<\/span>/g)].map((m) => m[1]);
+  ok(JSON.stringify(chips) === JSON.stringify(["Q-293", p5fmt(pr.t.grand), "Rigging", p5fmt(p5Sell(s1)), "2 ea"]),
+    `#P5 render: chips resolve live — quote number, grand total, system name, system price, line qty (got ${chips.join(" | ")})`);
+  ok(html.includes(" missing:</p>") && !html.includes("s9") , "#P5 render: a chip whose system/line no longer exists prints nothing");
+  ok(html.includes("<strong>Bold</strong>") && html.includes("<em>ital</em>") && /<ul style="[^"]*list-style-type:disc/.test(html) && /<ol style="[^"]*list-style-type:decimal/.test(html) && html.includes("<li><p"),
+    "#P5 render: bold / italic marks, bullet and numbered lists");
+  ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;<br/>after break") && !html.includes("<script>alert"), "#P5 render: text is escaped; a hard break is <br/>");
+  // product blocks
+  const blk = (sku: string) => { const i = html.indexOf(`data-sku="${sku}"`); return html.slice(i, html.indexOf("</p></div>", i) + 10); };
+  ok(/<img src="data:image\/png;base64,P5R5" alt="Five" style="float:right;width:40%;max-height:2.4in/.test(blk("SKU-5")) && blk("SKU-5").includes(">Line 5</div>") && blk("SKU-5").includes("Five words."),
+    "#P5 render: product block — the line's heading, its own paragraphs, the photo floated right at its width %");
+  ok(/style="float:left;width:30%;[^"]*margin:0 14px 8px 0"/.test(blk("SKU-6")), "#P5 render: product block photo floated left at 30 %");
+  ok(/<img src="data:image\/png;base64,P5R1" alt="One" style="display:block;width:60%;max-height:4in;object-fit:contain;margin:0 auto 10px"\/>/.test(blk("SKU-1")) && !blk("SKU-1").includes("float"),
+    "#P5 render: a full photo prints block-level above the text (its width %, centred), not floated");
+  ok(!blk("SKU-4").includes("<img") && blk("SKU-4").includes("Hidden photo."), "#P5 render: photo hidden → no image, words kept");
+  ok(blk("SKU-2").includes('src="/placeholders/allowance.webp"') && blk("SKU-2").includes(">Budget allowance — Line 2</div>"), "#P5 render: an allowance line with no photo prints the allowance placeholder (the key-product rule)");
+  ok(blk("GONE-77").includes("Orphan words.") && !/fontWeight|font-weight:600/.test(blk("GONE-77")) && !blk("GONE-77").includes("<img"),
+    "#P5 render: a block whose line left the BOM prints its words with no heading (the amber flag is editor-only)");
+  // price table
+  const iTable = html.indexOf('class="pd-price"');
+  const table = html.slice(iTable, html.indexOf("</table>", iTable));
+  const printed = pr.sections.filter((s) => s.alternate !== true && (p5Sell(s) > 0));
+  const rows = [...table.matchAll(/<tr><td[^>]*>([^<]*)<\/td><td[^>]*>([^<]*)<\/td><\/tr>/g)].map((m) => [m[1], m[2]]);
+  const totalsTotal = (html.match(/>Total<\/span><span style="font-family:var\(--font-mono\);font-size:18px;font-weight:600">([^<]*)</) || [])[1];
+  ok(JSON.stringify(rows) === JSON.stringify(printed.map((s) => [s.name, p5fmt(p5Sell(s))])) && rows.length === 4,
+    "#P5 render: price table — every printed In-total system, name · systemSellTotal, in document order");
+  ok(table.includes('class="pd-price-total"') && table.includes(">Total</td>") && table.includes(">" + p5fmt(pr.t.grand) + "</td>") && totalsTotal === p5fmt(pr.t.grand) &&
+     Math.abs(printed.reduce((a, s) => a + p5Sell(s), 0) - pr.t.grand) < 0.005,
+    "#P5 render: price table Total = t.grand = the totals block's Total, and the rows add up to it");
+  // page break + css
+  ok(/<div class="pd-pagebreak" aria-hidden="true" style="break-after:page;page-break-after:always;height:0;border-top:1px dashed #d5d8de;margin:16px 0"><\/div>/.test(html) &&
+     p5rCss.includes("@media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }") && html.includes('<div class="pd-doc"><style>\n.pd-doc .pd-product { display: flow-root'),
+    "#P5 render: a page break is break-after: page in print (the dashed rule hidden), a rule on screen; the doc CSS rides with it");
+
+  // replace / keep
+  const body = html.slice(html.indexOf('class="est-pkgdoc"'), html.indexOf('class="est-totals"'));
+  ok(!html.includes('class="est-secband"') && !html.includes(">01<") && !html.includes("Intro para.") && !body.slice(0, body.indexOf("Optional additions")).includes('class="est-line"') && !body.includes("Customer note") && !html.includes("System scope and pricing are included"),
+    "#P5 render: the document replaces ALL In-total bands — no band, numbering, narrative, key products or itemized lines (itemized systems too)");
+  ok(html.includes(">QUOTE</div>") && html.includes("Total investment") && html.includes("4 systems · 7 line items · 1 optional") && html.includes("Cover note.") && html.includes("Optional additions") &&
+     html.includes('class="est-totals"') && html.includes('class="est-terms"') && html.includes('class="est-accept"') && html.includes("Assumptions &amp; exceptions") && body.length > 1000,
+    "#P5 render: kept — header, investment band (counts unchanged), cover note, Optional additions, totals, terms, signature, assumptions");
+  ok(html.indexOf('class="est-pkgdoc"') < html.indexOf("Optional additions") && html.indexOf("Cover note.") < html.indexOf('class="est-pkgdoc"'), "#P5 render: the document sits where the bands were (after the cover note, before Optional additions)");
+  const apxOff = p5rRender(props());
+  const apxOn = p5rRender(props({ pdfOptions: { pdfItemizedAppendix: true } }));
+  const apx = apxOn.slice(apxOn.indexOf('class="est-appendix"'));
+  ok(!apxOff.includes("est-appendix") && ["Rigging", "Lighting", "Install", "Empty narrative"].every((n) => apx.includes(">" + n + "<")) && apx.includes('class="est-line"') && apx.includes("Customer note"),
+    "#P5 render: the Itemized appendix still follows its toggle; with a document it lists every printed In-total system (the body itemized none)");
+  // alternates keep their block
+  const G = [{ id: "g-a", name: "Stage", alternate: false }, { id: "g-x", name: "Upgrades", alternate: true }];
+  const alt = { id: "a1", name: "LED Upgrade", kind: "materials", mfr: "", freightPct: 0, groupId: "g-x", items: [{ id: 11, sku: "SKU-11", desc: "Line 11", qty: 1, unit: "ea", cost: 100, price: 400 }] } as unknown as Sec;
+  const altP = props({}, [...p5rSections().map((s) => (s.id === "s2" ? { ...s, groupId: "g-a" } : s)), alt], G);
+  const ah = p5rRender(altP);
+  const altTable = ah.slice(ah.indexOf('class="pd-price pd-price-alts"'), ah.indexOf("</table>", ah.indexOf('class="pd-price pd-price-alts"')));
+  ok(ah.includes('class="est-alts"') && ah.includes(">A1<") && ah.slice(ah.indexOf('class="est-alts"')).includes(">Line 11</span>") && !ah.slice(0, ah.indexOf('class="est-alts"')).includes("est-grouphead"),
+    "#P5 render: the Alternates block keeps its bands (the priced record) — the body's group headings are replaced with the In-total bands");
+  ok(altTable.includes(">LED Upgrade<span") && altTable.includes(" — priced separately") && altTable.includes(">$400.00</td>") && !ah.slice(ah.indexOf('class="pd-price"'), ah.indexOf('class="pd-price-total"')).includes("LED Upgrade"),
+    "#P5 render: alternates list after the price table as priced separately — never a row above its Total");
+  // web layout
+  const web = p5rRender(props({ layout: "web" }));
+  ok(web.includes('class="est-doc est-web"') && web.includes('class="pd-doc"') && web.includes(p5rCss.split("\n").find((l) => l.includes("max-width: 480px"))!.trim()) && web.includes('data-sku="SKU-5"'),
+    "#P5 render: layout=\"web\" draws the same document (phone rule puts product photos full width)");
+  // empty / absent document → as before
+  const plain = p5rProps();
+  ok(p5rRender(p5rProps({ document: doc([P(T("   ")), { type: "pageBreak" }]) })) === p5rRender(plain) && p5rRender({ ...plain, document: undefined }) === p5rRender(plain),
+    "#P5 render: an empty document (only blank paragraphs / page breaks) prints exactly as no document");
+  const baseline = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
+  const cases = p5rNoDoc();
+  ok(Object.keys(cases).length === 15 && Object.keys(cases).every((k) => typeof baseline[k] === "string"), "#P5 render: every no-document baseline case is in the committed fixture (captured from base)");
+  for (const [k, c] of Object.entries(cases)) ok(c.document === null && p5rRender(c) === baseline[k], `#P5 render: a quote without a document renders byte-for-byte as before (${k})`);
+
+  // BOM view + offers
+  const itemizedOnly = p5rSections().map((s) => ({ ...s, presentation: "itemized" as const }));
+  ok(p5rBom(pr).document === null && !p5rRender(p5rBom(pr)).includes("pd-doc") && p5rRender(p5rBom(pr)).includes(">Line 1<") && p5rRender(p5rBom(pr)).includes('class="est-secband"'), "#P5 render: the online BOM view drops the document (itemized bands)");
+  ok(!p5rOffers(itemizedOnly, "itemized") && p5rOffers(itemizedOnly, "itemized", pr.document) && !p5rOffers(itemizedOnly, "itemized", p5San(doc([P()]))),
+    "#P5 render: with a document the Narrative / BOM toggle is always offered (an empty one changes nothing)");
+
+  // photo sets (pure)
+  const kpSecs = p5rSections().map((s) => (s.id === "s2" ? { ...s, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "x", photo: true }] } : s));
+  ok(p5rKpSecs(kpSecs, null).length === 4 && p5rKpSecs(kpSecs, pr.document).length === 0 && p5rKpSecs([...kpSecs, { ...alt, alternate: true } as Sec], pr.document).map((s) => s.id).join() === "a1",
+    "#P5 render: with a document only the alternates' key products still print (the photo set follows)");
+  ok(JSON.stringify(p5rMfrSkus(pr.document, pr.sections)) === JSON.stringify(["SKU-5", "SKU-6", "SKU-1", "GONE-77"]) && p5rPh(pr.document!.content[11] as P5PB, pr.sections) === "allowance",
+    "#P5 render: document photo skus may take the manufacturer image except an allowance/custom block (its placeholder first)");
+  const ph = rd("src/lib/narrative/photos.ts");
+  ok(ph.includes("export async function keyProductPhotoDocs(sections: SpecSection[], document?: PackageDoc | null)") && ph.includes("const kpSections = keyProductPrintSections(sections, document);") &&
+     ph.includes("const docSkus = documentApplies(document) ? docPhotoSkus(document) : [];") && ph.includes("inlinePhotos(await keyProductPhotoDocs(sections, document), readBlobCapped)"),
+    "#P5 render: one photo resolver — key products of printed bands + the document's photo-on blocks, inline (print) or as links (web)");
+  const printRoute = rd("src/app/print/quote/[id]/page.tsx");
+  const loader = rd("src/lib/quote-pdf/document-loader.ts");
+  const prSrc = rd("src/lib/quote-share/photo-response.ts");
+  ok(printRoute.includes("keyProductPhotoDataUris(doc.sections, doc.document)") && loader.includes("keyProductPhotoDataUris(doc.sections, doc.document)") && loader.includes("keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document)") &&
+     prSrc.includes("keyProductPhotoDocs(revisionSections(rev), revisionDocument(rev))") && prSrc.includes("keyProductPhotoDocs(packagePhotoSections(revisionSections(rev)), revisionDocument(rev))") &&
+     rd("src/lib/quote-pdf/quote-document-data.ts").includes("document: sanitizePackageDoc(spec?.document),"),
+    "#P5 render: print route, web loader and both photo routes read the same (revision's) document's photos");
+
+  // server-safe renderer
+  const view = rd("src/components/package-doc/package-doc-view.tsx");
+  const res = rd("src/lib/package-doc/resolve.ts") + rd("src/lib/package-doc/print.ts") + rd("src/lib/package-doc/save.ts");
+  ok(!view.startsWith('"use client"') && !/^import [^\n]*(@tiptap|prosemirror)/m.test(view) && !/\buse(State|Effect|Ref|Memo)\(|onClick=/.test(view) && /^import [^\n]*from "@\/lib\/package-doc\/resolve";$/m.test(view) && !/from "(@\/db|@\/lib\/stores|@\/lib\/session|server-only|next\/|react|@tiptap|prosemirror)/.test(res),
+    "#P5 render: PackageDocView is server-safe (no client hooks, no TipTap/ProseMirror); resolve/print/save are pure");
+  ok(rd("src/app/(app)/estimator/quote-document.tsx").includes("{docOn ? (") && (rd("src/app/(app)/estimator/quote-document.tsx").match(/<PackageDocView\b/g) || []).length === 1,
+    "#P5 render: QuoteDocument draws the document in one place, instead of the band loop");
+
+  // save rules
+  const stored = p5San(doc([P(T("stored"))]));
+  const big = doc(Array.from({ length: 60 }, (_, i) => P(T("x".repeat(19000) + i))));
+  const s1r = p5rSave(undefined, stored), s2r = p5rSave(null, stored), s3r = p5rSave(doc([P(T("new")), { type: "bogus" }]), stored), s4r = p5rSave(big, stored), s5r = p5rSave(undefined, undefined);
+  ok(s1r.ok && JSON.stringify(s1r.document) === JSON.stringify(stored), "#P5 save: an older client (no document key) keeps the stored document");
+  ok(s2r.ok && s2r.document === null, "#P5 save: document null removes it");
+  ok(s3r.ok && JSON.stringify(s3r.document) === JSON.stringify(p5San(doc([P(T("new"))]))), "#P5 save: a posted document is sanitized (unknown nodes dropped)");
+  ok(!s4r.ok && s4r.error === p5rTooLarge && p5rTooLarge === "The document is too large to save — shorten it." && p5San(big) === null, "#P5 save: a document over the caps refuses the save with the exact message (never wipes the stored one)");
+  ok(s5r.ok && s5r.document === null, "#P5 save: no document posted and none stored → none");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
+  ok(fn.indexOf("const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);") > 0 &&
+     fn.indexOf("if (!docSave.ok) {") < fn.indexOf("await settleRewardCredit(") && fn.indexOf("error: docSave.error,") > 0 && fn.indexOf("error: docSave.error,") < fn.indexOf("await settleRewardCredit(") &&
+     fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}) }") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
+     acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };"),
+    "#P5 save: saveQuoteAction decides the document first (a refusal writes nothing, before the credit or the patch) and writes spec.document");
+  ok(acts.includes("const existingDoc = sanitizePackageDoc(existingSpec?.document);") && acts.includes("groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) }"),
+    "#P5 save: moving a system into another estimate keeps that estimate's document");
+  ok(rd("src/lib/catalog-rename/rewrite.ts").includes("return overlay(spec, patch);"), "#P5 save: the #304 rename rewrite overlays the spec (spec.document survives quoteSpecFollowingRenames)");
+  const page = rd("src/app/(app)/estimator/page.tsx");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(page.includes("document: sanitizePackageDoc(spec?.document),") && page.includes("      document: null,") && rd("src/app/(app)/estimator/types.ts").includes("document: PackageDoc | null;"),
+    "#P5 save: page.tsx loads initial.document (sanitized; a new quote null)");
+  ok(hook.includes("const [packageDoc, setPackageDoc] = useState<PackageDoc | null>(initial.document ?? null);") && hook.includes("document: packageDoc,\n    }),") &&
+     hook.includes("          document: packageDoc,\n        });") && /\n    packageDoc,\n    setPackageDoc,\n/.test(hook) && /\n    next,\n  \};\n\}/.test(hook),
+    "#P5 save: the hook holds packageDoc, puts it in docInput and the save payload, returns packageDoc / setPackageDoc with next still last");
+  const kb = { quoteNumber: "Q", projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", paymentTerms: "Net 30", sections: [], vendorQuotes: [], pdfOptions: {} } as unknown as Parameters<typeof p5rKey>[0];
+  ok(p5rKey(kb) === p5rKey({ ...kb, document: null }) && p5rKey(kb) !== p5rKey({ ...kb, document: stored }) && p5rKey({ ...kb, document: stored }) !== p5rKey({ ...kb, document: p5San(doc([P(T("stored!"))])) }),
+    "#P5 save: the PDF doc key includes the document — an edit makes the saved PDF stale");
+
+  // package page
+  const okState = { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never;
+  const mIn = (view: "narrative" | "bom", d = pr) => p5rModel({ doc: d, photos: { "SKU-5": { src: "/p/5", alt: "Five" } }, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: okState,
+    headerLine: "x", currentHref: null, view, base: "/b", letterheadSrc: "/lh" });
+  const m = mIn("narrative");
+  const leaves: unknown[] = [];
+  const walk = (x: unknown): void => { if (Array.isArray(x)) x.forEach(walk); else if (x && typeof x === "object") Object.values(x).forEach(walk); else leaves.push(x); };
+  walk(m.document);
+  const odd = leaves.filter((v) => !(v === null || typeof v === "string" || typeof v === "boolean" || v === 1 || v === 2 || v === 3 || v === 40 || v === 30 || v === 60 || v === 34));
+  ok(!!m.document && m.document.blocks.length === 16 && odd.length === 0 &&
+     !JSON.stringify(m.document).includes('"cost"') && mIn("narrative", p5rProps()).document === undefined,
+    `#P5 package: the model carries the document resolved — strings only (names, sell prices, qty, photo links), never a cost or raw line price; none without one (odd: ${JSON.stringify(odd)}, blocks ${m.document?.blocks.length})`);
+  const pv = (mm: typeof m) => p5rMarkup(p5rEl(PackageView5r, { model: mm, slots: { keyProductExtra: { "SKU-5": p5rEl("a", { href: "/ds/5" }, "Datasheet") } } }));
+  const nh = pv(m), bh = pv(mIn("bom"));
+  ok(nh.includes('class="pkg-card pkg-document"') && nh.includes('class="pd-doc"') && !nh.includes('class="pkg-card pkg-scope"') && nh.includes('<img src="/p/5" alt="Five"') && nh.includes('<a href="/ds/5">Datasheet</a>') && nh.includes("Your stage package"),
+    "#P5 package: the Narrative view draws the document in place of the scope cards (photo links, key-product slot extras under the product block)");
+  ok(!bh.includes("pd-doc") && bh.includes('class="pkg-card pkg-scope"') && bh.includes("pkg-bom"), "#P5 package: the BOM view is unchanged (scope cards + parts tables)");
+  ok(JSON.stringify(p5rResolve(pr.document!, { sections: pr.sections, t: pr.t, quoteId: pr.quoteId }).blocks.find((b) => b.t === "price")) === JSON.stringify(m.document!.blocks.find((b) => b.t === "price")),
+    "#P5 package: the package page's price table is the PDF's (same resolver, same numbers)");
+}
+
+/** #P5 render — the photo routes serve a document product block's photo (scratch DB). */
+async function p5RenderPhotoAsyncChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const D = await import("@/lib/stores/part-documents");
+  const Q = await import("@/lib/stores/quotes");
+  const { keyProductPhotoDocs } = await import("@/lib/narrative/photos");
+  const { photoDocForRevision, packagePhotoDocForRevision, revisionDocument } = await import("@/lib/quote-share/photo-response");
+  const SKU = fixtureId("p5r", "doc-photo");
+  registerFixture("catalog_parts", SKU);
+  await DS.upsertDoc("catalog_parts", { id: SKU, sku: SKU, desc: "P5 doc photo", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "" } as never);
+  const img = await D.createDocument({ kind: "image", fileName: "p5r.webp", contentType: "image/webp", size: 1000, blobKey: "part-docs/PD-fixture-p5r/p5r.webp", sourceUrl: null, source: "upload", by: "Test" });
+  if (!img) throw new Error("#P5 render: fixture document failed");
+  registerFixture("part_documents", img.id);
+  await D.attachDocument(img.id, [SKU], "Test");
+  registerFixture("part_document_links", D.documentLinkId(SKU, img.id));
+  const sec = { id: "s1", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: SKU, desc: "Gear line", qty: 1, unit: "ea", cost: 20, price: 40 }] };
+  const document = { type: "doc", version: 1, content: [{ type: "productBlock", attrs: { sectionId: "s1", lineKey: "1", sku: SKU, photo: { show: true, align: "right", width: 34 } }, content: [{ type: "paragraph", content: [{ type: "text", text: "Gear." }] }] }] };
+  const mk = async (slug: string, spec: Record<string, unknown>) => {
+    const id = fixtureId("p5r", slug);
+    await Q.create({ id, name: "#P5 photo " + slug, customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec } as never);
+    registerFixture("quotes", id);
+    await Q.update(id, { status: "sent" });
+    return (await Q.addQuoteRevision(id, { by: "Test", reason: "sent" }))!;
+  };
+  const withDoc = await mk("with-doc", { sections: [sec], mobs: [], document });
+  const without = await mk("without-doc", { sections: [sec], mobs: [] });
+  ok(revisionDocument(withDoc)?.content.length === 1 && revisionDocument(without) === null, "#P5 photos: the sent revision freezes its own document");
+  ok((await keyProductPhotoDocs([sec] as never, revisionDocument(withDoc))).get(SKU)?.id === img.id && (await keyProductPhotoDocs([sec] as never)).size === 0,
+    "#P5 photos: keyProductPhotoDocs includes a document product block's photo (an itemized system with no key products has none)");
+  ok((await photoDocForRevision(withDoc, img.id))?.id === img.id && (await packagePhotoDocForRevision(withDoc, img.id))?.id === img.id,
+    "#P5 photos: the share / portal and package photo routes serve the document's product photo");
+  ok((await photoDocForRevision(without, img.id)) === null && (await packagePhotoDocForRevision(without, img.id)) === null,
+    "#P5 photos: without a document that photo is not servable (the allowlist only widens by the document)");
 }

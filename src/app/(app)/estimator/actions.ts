@@ -36,6 +36,9 @@ import {
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { copySectionForTarget } from "./copy-system";
 import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, withoutGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
+import { packageDocForSave } from "@/lib/package-doc/save";
+import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
+import type { PackageDoc } from "@/lib/package-doc/types";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
@@ -130,7 +133,7 @@ type QuoteExtras = {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[] };
+  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };
   /** #143: top-level, NOT inside `spec` — the attachment proxy route reads
    *  `quote.vendorQuotes`, and file bytes buried in `spec` would be copied
    *  into every revision snapshot. */
@@ -166,6 +169,11 @@ export type SavePayload = {
   mobs: SpecMob[];
   /** Phase 2a: the named system groups. Optional — an older caller that omits it keeps the stored groups. */
   groups?: SystemGroup[];
+  /** Estimator Phase 5 — the Build package document (spec.document). Absent /
+   *  undefined (an older caller) keeps the stored one; null removes it; a
+   *  document is sanitized, and one that sanitizes to nothing (over the caps)
+   *  refuses the save — never wipes the stored document (packageDocForSave). */
+  document?: PackageDoc | null;
   /** Always sent in full (#143) — the stored list is replaced, so removing a
    *  vendor quote in the builder actually removes it from the doc. */
   vendorQuotes: VendorQuote[];
@@ -389,6 +397,24 @@ export async function saveQuoteAction(
   // portal-service quote redirects to its own builder before reaching here)
   // keeps its source across this save exactly like before.
   const savedSource = sourceForSave(prior?.source, "estimator");
+  // Estimator Phase 5: the package document is decided first — a posted one
+  // over the caps refuses the WHOLE save (nothing written), so a too-large
+  // edit can never wipe the stored document.
+  const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
+  if (!docSave.ok) {
+    return {
+      ok: false,
+      id: loadedId,
+      number: prior ? displayQuoteNumber(prior) : null,
+      revNum: Math.max(1, prior?.revisions?.length || 1),
+      updatedAt: prior?.updatedAt ?? Date.now(),
+      review: prior?.review ?? null,
+      status: prior?.status ?? null,
+      pipelineId: prior?.pipelineId ?? null,
+      stage: prior?.stage ?? null,
+      error: docSave.error,
+    };
+  }
   // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
@@ -465,7 +491,7 @@ export async function saveQuoteAction(
     pricingTier: tier.tier,
     tierMargin: tier.margin,
     source: savedSource,
-    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups },
+    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
@@ -821,9 +847,11 @@ async function placeSystemInEstimate(
       return { ok: false, error: "That estimate could not be found." };
     }
     const existingSpec = existing.spec as
-      | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[] }
+      | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown }
       | null
       | undefined;
+    // Estimator Phase 5: the target keeps its own package document.
+    const existingDoc = sanitizePackageDoc(existingSpec?.document);
     // Phase 2a: the target keeps its own (sanitised) groups; the moved system lands ungrouped.
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
@@ -836,7 +864,7 @@ async function placeSystemInEstimate(
       ? await storeVendorQuotes(target.quoteId, placedVq)
       : [];
     const updated = await update(target.quoteId, {
-      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups },
+      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) },
       value: t.grand,
       margin: t.margin,
       ...(carried.length

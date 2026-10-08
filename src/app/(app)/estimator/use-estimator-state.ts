@@ -27,6 +27,7 @@ import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, a
 import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, snapshotLaborDraft, withLaborGroup } from "./labor-group";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
+import type { PackageDoc } from "@/lib/package-doc/types";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
 import type { InputKind } from "./section-card";
@@ -261,6 +262,9 @@ export function useEstimatorState(props: EstimatorProps) {
   /** Phase 2a — the quote's named system groups (spec.groups). Sections stay
    *  stored ungrouped-first, then each group in this order (normalizeSystemOrder). */
   const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? []);
+  /** Estimator Phase 5 — the Build package document (spec.document); null = none.
+   *  Rides every Save (null removes it) and the PDF doc key. */
+  const [packageDoc, setPackageDoc] = useState<PackageDoc | null>(initial.document ?? null);
   const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups]);
 
   const defaultFabric = fabrics.some((f) => f.sku === "RB-MV-MN")
@@ -795,8 +799,9 @@ export function useEstimatorState(props: EstimatorProps) {
       groups,
       vendorQuotes,
       pdfOptions: pdfOpts,
+      document: packageDoc,
     }),
-    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, groups, vendorQuotes, pdfOpts]
+    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, packageDoc, sections, groups, vendorQuotes, pdfOpts]
   );
   const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
   // #267: when the load-time $25 stamp moved a system's price, the saved PDF
@@ -1092,6 +1097,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // #301 (R14): the cover fields ride every Save.
           coverSummary,
           notIncluded,
+          // Estimator Phase 5: the package document rides every Save (null = remove it).
+          document: packageDoc,
         });
         // #181: adopt the id whenever the server hands one back, even when
         // `ok` is false — the create branch mints the quote FIRST and only
@@ -2905,6 +2912,8 @@ export function useEstimatorState(props: EstimatorProps) {
     wonMetaGuard,
     trackSummary,
     setTrackSummary,
+    packageDoc,
+    setPackageDoc,
     reviewComments,
     setReviewComments,
     refreshReviewComments,

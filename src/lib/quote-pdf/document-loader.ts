@@ -8,6 +8,7 @@ import { quoteDocumentDataFor } from "./quote-document-data";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import type { SpecSection } from "@/app/(app)/estimator/types";
+import type { PackageDoc } from "@/lib/package-doc/types";
 
 /**
  * #293 slice 3 (spec §5.1) — the customer QuoteDocument's props, for the
@@ -42,10 +43,11 @@ function webRevisionOk(q: Quote, rev: QuoteRevision | null | undefined): boolean
   return !!rev && rev.reason === "sent" && Array.isArray(q.revisions) && q.revisions.includes(rev);
 }
 
-/** sku → { src: href(docId), alt } for the printed photo-on blocks. Never throws. */
-export async function keyProductPhotoLinks(sections: SpecSection[], href: (docId: string) => string): Promise<Record<string, { src: string; alt: string }>> {
+/** sku → { src: href(docId), alt } for the printed photo-on blocks (and,
+ *  Phase 5, the package document's product blocks). Never throws. */
+export async function keyProductPhotoLinks(sections: SpecSection[], href: (docId: string) => string, document?: PackageDoc | null): Promise<Record<string, { src: string; alt: string }>> {
   try {
-    const docs = await keyProductPhotoDocs(sections);
+    const docs = await keyProductPhotoDocs(sections, document);
     const out: Record<string, { src: string; alt: string }> = {};
     for (const [sku, d] of docs) if (d.blobKey && PHOTO_TYPES.has(d.contentType)) out[sku] = { src: href(d.id), alt: d.title || sku };
     return out;
@@ -66,6 +68,6 @@ export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOp
   ]);
   const doc = quoteDocumentDataFor(src, cust, settings);
   const keyProductPhotos =
-    opts.photos === "inline" ? await keyProductPhotoDataUris(doc.sections) : await keyProductPhotoLinks(doc.sections, opts.photos.href);
+    opts.photos === "inline" ? await keyProductPhotoDataUris(doc.sections, doc.document) : await keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document);
   return { ...doc, keyProductPhotos, rewardsLine: purchasePerksDocLine(perks) };
 }
