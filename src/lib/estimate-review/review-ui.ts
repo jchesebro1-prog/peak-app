@@ -20,6 +20,8 @@ export const REVIEW_UI_COPY = {
   internalOnly: "Internal only",
   labor: "Labor",
   checklist: "Package checklist",
+  specs: "Specs",
+  specsHint: "Pick the spec each custom or curtain line specs as.",
   comments: "Comments",
   wholeEstimate: WHOLE_ESTIMATE,
   addComment: "Add comment",
@@ -196,4 +198,21 @@ export function nextReviewTab(current: ReviewTab, key: string): ReviewTab | null
 export function commentActionLabel(kind: "resolve" | "delete", n: number | null): string {
   const verb = kind === "resolve" ? "Resolve" : "Delete";
   return n == null ? `${verb} resolved comment` : `${verb} comment ${n}`;
+}
+
+/** #312 — one custom or curtain line on the review step's Specs card. */
+export type SpecLineRow<I> = { system: string; item: I };
+
+/**
+ * #312 — every custom and curtain line, in system order then line order, with its system's name.
+ * The Spec select moved here from the Build step; empty (no card) when there are none.
+ */
+export function specLineRows<I extends { custom?: boolean; curtain?: boolean }>(
+  sections: ReadonlyArray<{ name: string; items: ReadonlyArray<I> }>,
+): SpecLineRow<I>[] {
+  const rows: SpecLineRow<I>[] = [];
+  for (const sec of sections) {
+    for (const item of sec.items) if (item.custom || item.curtain) rows.push({ system: sec.name || "System", item });
+  }
+  return rows;
 }

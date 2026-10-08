@@ -83,6 +83,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     curtainSewingPct,
     curtainTrack,
     customDraft,
+    customEdit,
     customError,
     dec,
     deleteSystem,
@@ -109,6 +110,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     moveItem,
     moveSystem,
     openCurtainEdit,
+    openCustomEdit,
     openInput,
     openInputMethod,
     openLaborEdit,
@@ -142,7 +144,6 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     setFreightPct,
     setItemExtSell,
     setItemPrice,
-    setItemSpecKey,
     setLabor,
     setLibraryOpen,
     setMarginAll,
@@ -160,7 +161,6 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     setVendorField,
     setVendorLine,
     sideOpen,
-    specKeys,
     status,
     t,
     tierMargin,
@@ -498,8 +498,6 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                     onSetQty={setQty}
                     onSetPrice={setItemPrice}
                     onSetExtSell={setItemExtSell}
-                    specKeys={specKeys}
-                    onSetSpecKey={setItemSpecKey}
                     onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                     onRemoveItem={removeItem}
                     onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
@@ -517,6 +515,8 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                     onEditLabor={(group) => openLaborEdit(sec.id, group)}
                     onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
                     onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
+                    onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}
+                    customEditing={!!customEdit}
                     onSetCustomDraft={setCustomField}
                     onAddCustomPart={() => addCustomPart(sec.id)}
                     customError={customError}

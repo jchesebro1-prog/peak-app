@@ -20,9 +20,9 @@ import {
 import { CUSTOM_PART_MARGIN } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import { isCustomLineEditable } from "./custom-part-edit";
 import { isLaborLineEditable } from "./labor-group";
 import CatalogPicker from "./catalog-picker";
-import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
 import { DISCIPLINES, DISCIPLINE_LABEL, autoDisciplineLabel, type ScopeDiscipline } from "@/lib/estimate-output/fields";
@@ -158,10 +158,6 @@ export type SectionCardProps = {
   onSetQty: (id: number, v: string) => void;
   onSetPrice: (id: number, v: string) => void;
   onSetExtSell: (id: number, v: string) => void;
-  /** Spec records design §6 — the Spec select's options (system match keys,
-   *  read on the server) and its setter, for custom and curtain lines. */
-  specKeys: string[];
-  onSetSpecKey: (id: number, v: string) => void;
   onMoveItem: (id: number, direction: -1 | 1) => void;
   onRemoveItem: (id: number) => void;
   /** #293: ★ — mark / unmark this line as a key product (narrative block). */
@@ -193,6 +189,10 @@ export type SectionCardProps = {
   onEditTrack?: (lineId: number) => void;
   /** #292: reopen the curtain configurator on a curtain line (by line id). */
   onEditCurtain?: (lineId: number) => void;
+  /** #312: reopen the Custom part form on a custom line, pre-filled (by line id). */
+  onEditCustom?: (lineId: number) => void;
+  /** #312: the open Custom part form is editing a line (Save changes) rather than adding one. */
+  customEditing?: boolean;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
   onMoveToNew: () => void;
   /** Moves this system into an already-existing estimate, by id. */
@@ -1022,12 +1022,16 @@ export default function SectionCard(p: SectionCardProps) {
                  the same description click (openLine) and its own ✎ — a line
                  is never both a track and a curtain. */
               const curtainEditable = isInternal && !!p.onEditCurtain && !!it.curtain;
+              /* #312: a hand-entered custom part reopens the Custom part form,
+                 pre-filled, through the same description click and its own ✎. */
+              const customEditable = isInternal && !!p.onEditCustom && isCustomLineEditable(it);
               const openTrack = (e: { detail: number }) => {
                 if (e.detail > 1) return;
                 if (trackEditable) p.onEditTrack?.(it.id);
                 else if (curtainEditable) p.onEditCurtain?.(it.id);
+                else if (customEditable) p.onEditCustom?.(it.id);
               };
-              const lineEditable = laborEditable || trackEditable || curtainEditable;
+              const lineEditable = laborEditable || trackEditable || curtainEditable || customEditable;
               const openLine = laborEditable ? openLabor : openTrack;
               return (
                 <div
@@ -1045,7 +1049,7 @@ export default function SectionCard(p: SectionCardProps) {
                 >
                   <div style={{ minWidth: 0 }}>
                     <div
-                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : lineDesc}
+                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : customEditable ? lineDesc + " — click to edit this custom part" : lineDesc}
                       onClick={lineEditable ? openLine : undefined}
                       style={{
                         lineHeight: 1.3,
@@ -1156,18 +1160,6 @@ export default function SectionCard(p: SectionCardProps) {
                     >
                       {it.sku}
                     </div>
-                    {isInternal && (it.custom || it.curtain) && (
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: 10.5, color: "#aab0bb" }}>
-                        Spec
-                        <SpecKeySelect
-                          value={it.specKey || ""}
-                          options={p.specKeys}
-                          auto={autoSpecKeyFor(it)}
-                          onChange={(v) => p.onSetSpecKey(it.id, v)}
-                          style={{ fontFamily: "var(--font-ui)", fontSize: 11, color: "#5b616e", border: "1px solid #e4e7ec", borderRadius: 5, padding: "1px 4px", background: "#fff", maxWidth: 240 }}
-                        />
-                      </label>
-                    )}
                     {!!vq && (
                       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
                         {/* #144: every field on the quote is editable in place —
@@ -1412,6 +1404,9 @@ export default function SectionCard(p: SectionCardProps) {
                     {curtainEditable && (
                       <button type="button" className="est-action-btn" onClick={openLine} title="Edit curtain — reopens the curtain configurator" aria-label={`Edit curtain ${it.desc}`} style={ACTION_BTN}>✎</button>
                     )}
+                    {customEditable && (
+                      <button type="button" className="est-action-btn" onClick={openLine} title="Edit custom part — reopens the Custom part form" aria-label={`Edit custom part ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
                     {kpStar !== "none" && (
                       <button
                         type="button"
@@ -1630,7 +1625,7 @@ export default function SectionCard(p: SectionCardProps) {
                       textTransform: "uppercase",
                     }}
                   >
-                    Custom part
+                    {p.customEditing ? "Edit custom part" : "Custom part"}
                   </span>
                   <span style={{ fontSize: 11, color: "#aab0bb" }}>
                     Not in catalog — entered for this quote
@@ -1753,18 +1748,6 @@ export default function SectionCard(p: SectionCardProps) {
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                   <label style={{ ...LBL, margin: 0 }}>Price good through</label>
                   <input type="date" className="est-input est-field" value={cd.priceGoodThrough} onChange={(e) => p.onSetCustomDraft("priceGoodThrough", e.target.value)} style={{ ...PORTAL_FIELD, width: 150 }} />
-                  {/* Spec records design §6: an uncataloged custom part (acoustic
-                      shell, pit filler, drapes, hoists) specs through a system
-                      record's match key. */}
-                  <label htmlFor={`custom-spec-${sec.id}`} style={{ ...LBL, margin: "0 0 0 14px" }}>Spec</label>
-                  <SpecKeySelect
-                    id={`custom-spec-${sec.id}`}
-                    value={cd.specKey}
-                    options={p.specKeys}
-                    auto={null}
-                    onChange={(v) => p.onSetCustomDraft("specKey", v)}
-                    style={{ ...PORTAL_FIELD, width: 260 }}
-                  />
                 </div>
 
                 <div
@@ -1868,7 +1851,7 @@ export default function SectionCard(p: SectionCardProps) {
                           : { background: "#e7e9ee", color: "#aab0bb", cursor: "not-allowed" }),
                       }}
                     >
-                      {p.savingCustom ? "Saving\u2026" : "Add custom part"}
+                      {p.savingCustom ? "Saving\u2026" : p.customEditing ? "Save changes" : "Add custom part"}
                     </button>
                   </div>
                 </div>

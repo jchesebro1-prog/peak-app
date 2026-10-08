@@ -42,6 +42,7 @@ import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
 import { downloadCsv, fileStem } from "../design/export";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
+import { customDraftFromLine, isCustomLineEditable, replaceCustomLine } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH } from "@/lib/curtain-cut-sheets/vocab";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
@@ -560,6 +561,10 @@ export function useEstimatorState(props: EstimatorProps) {
   const [customError, setCustomError] = useState("");
   const [savingCustom, setSavingCustom] = useState(false);
   const savingCustomRef = useRef(false);
+  /* #312: the custom line the open form edits in place (null = adding), and the
+     draft staged for the next open — consumed by seedDraft like curtainEditRef. */
+  const [customEdit, setCustomEdit] = useState<{ lineId: number } | null>(null);
+  const customEditRef = useRef<{ lineId: number; draft: CustomDraft } | null>(null);
   const [curtainDraft, setCurtainDraft] = useState<CurtainDraft>(() =>
     freshCurtain(defaultFabric)
   );
@@ -1974,6 +1979,8 @@ export function useEstimatorState(props: EstimatorProps) {
     if (kind === "custom") {
       setCustomDraft(freshCustom());
       setCustomError("");
+      customEditRef.current = null;
+      setCustomEdit(null);
     } else if (kind === "curtain") {
       setCurtainDraft(freshCurtain(defaultFabric));
       setCurtainTrack(null);
@@ -2002,7 +2009,10 @@ export function useEstimatorState(props: EstimatorProps) {
   /** Seed the incoming method's draft (the prototype defaults each had). */
   const seedDraft = (kind: InputKind, secId: string) => {
     if (kind === "custom") {
-      setCustomDraft(freshCustom());
+      const edit = customEditRef.current;
+      customEditRef.current = null;
+      setCustomEdit(edit ? { lineId: edit.lineId } : null);
+      setCustomDraft(edit ? edit.draft : freshCustom());
       setCustomError("");
     } else if (kind === "curtain") {
       const edit = curtainEditRef.current;
@@ -2137,6 +2147,16 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputMethod("track", secId);
   };
 
+  /** #312: reopen the Custom part form on a hand-entered custom line, pre-filled —
+   *  the same close-then-seed dance as the configurators above. */
+  const openCustomEdit = (secId: string, lineId: number) => {
+    const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
+    if (!it || !isCustomLineEditable(it)) return;
+    closeInput();
+    customEditRef.current = { lineId, draft: customDraftFromLine(it) };
+    openInputMethod("custom", secId);
+  };
+
   /** #292: reopen the curtain configurator on a curtain line. */
   const openCurtainEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
@@ -2248,9 +2268,9 @@ export function useEstimatorState(props: EstimatorProps) {
         setSavingCustom(false);
       }
     }
-    pushItems(secId, [
-      {
-        id: nextId(),
+    const editId = customEdit?.lineId;
+    const customItem: SpecItem = {
+        id: editId ?? 0,
         sku: d.allowance ? "" : ((d.sku || "").trim() || "CUSTOM"),
         desc,
         qty,
@@ -2264,8 +2284,11 @@ export function useEstimatorState(props: EstimatorProps) {
         link: (d.link || "").trim() || undefined,
         allowance: d.allowance ? true : undefined,
         specKey: d.specKey || undefined,
-      },
-    ]);
+    };
+    // #312: Save changes replaces the line in place; a line deleted meanwhile adds fresh.
+    if (editId != null && sections.find((x) => x.id === secId)?.items.some((x) => x.id === editId)) {
+      setSections((ss) => ss.map((x) => (x.id === secId ? replaceCustomLine(x, editId, customItem) : x)));
+    } else pushItems(secId, [{ ...customItem, id: nextId() }]);
     closeInput(); // closing discards, so the draft reseed happens there
     return savedMessage;
   };
@@ -2709,6 +2732,8 @@ export function useEstimatorState(props: EstimatorProps) {
     addAiLine,
     addCurtain,
     addCustomPart,
+    customEdit,
+    openCustomEdit,
     addFixture,
     addGroupAction,
     addGroupForSystem,

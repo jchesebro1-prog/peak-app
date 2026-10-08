@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { NextStepAction } from "@/lib/quote-next-step";
+import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { nsSendBackAction } from "@/app/(app)/quotes/review-actions";
 import { canAddComment, canDelete, canResolve, COMMENT_BODY_MAX, numberComments, type ReviewComment } from "@/lib/estimate-review/comments";
 import { laborSummary, type LaborSummaryGroup } from "@/lib/estimate-review/labor";
 import {
   canSendBackFromReview, checklistRows, commentActionLabel, commentTargets, commentTime, crewLine, REVIEW_UI_COPY as COPY, sendBackEnabled, sendBackLabel,
-  sendBackNoteFromNumbered, withoutSendBack,
+  sendBackNoteFromNumbered, specLineRows, withoutSendBack,
 } from "@/lib/estimate-review/review-ui";
 import type { StepBadge } from "@/lib/estimate-steps/readiness";
 import { fmt } from "../pricing";
@@ -105,6 +106,7 @@ export function ReviewSidebar({
       {loadedId && sendBackHere && <SendBackWithComments s={s} onActed={onActed} />}
       <ReviewCostSummary sections={sections} totals={t} />
       <LaborTable s={s} />
+      <SpecsCard s={s} />
       <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />
       <ReviewComments s={s} />
     </aside>
@@ -262,6 +264,38 @@ function LaborTable({ s }: { s: EstimatorState }) {
           <div style={{ ...SMALL, marginTop: 6 }}>{crewLine(sum.crew)}</div>
         </>
       )}
+    </div>
+  );
+}
+
+/** #312 — the per-line Spec select moved here from the Build step: every custom and curtain line, grouped by system. */
+function SpecsCard({ s }: { s: EstimatorState }) {
+  const { sections, setItemSpecKey, specKeys } = s;
+  const rows = specLineRows(sections);
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <div style={TITLE}>{COPY.specs}</div>
+      <div style={{ ...SMALL, marginBottom: 6 }}>{COPY.specsHint}</div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        {rows.map((r) => (
+          <li key={r.item.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <label htmlFor={`review-spec-${r.item.id}`} style={SMALL}>
+              <span style={{ color: "#8c919c" }}>{r.system}</span>
+              {" · "}
+              <span style={{ color: "#16181d" }}>{r.item.desc}</span>
+            </label>
+            <SpecKeySelect
+              id={`review-spec-${r.item.id}`}
+              value={r.item.specKey || ""}
+              options={specKeys}
+              auto={autoSpecKeyFor(r.item)}
+              onChange={(v) => setItemSpecKey(r.item.id, v)}
+              style={FIELD}
+            />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

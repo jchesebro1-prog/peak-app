@@ -34424,13 +34424,14 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
   ok(/specKey: d\.specKey \|\| undefined/.test(addCustom), "spec pickers: the custom-part path writes SpecItem.specKey from the form");
   const addCurtain = client.slice(client.indexOf("const addCurtain = (secId: string)"), client.indexOf("const setFixture ="));
   ok(/specKey: curtainSpecKey\(undefined, name\) \|\| undefined/.test(addCurtain), "spec pickers: an estimator curtain add defaults its specKey from the curtain name");
-  ok(/const setItemSpecKey = /.test(client) && /onSetSpecKey=\{setItemSpecKey\}/.test(client) && /specKeys=\{specKeys\}/.test(client),
-    "spec pickers: the estimator hands the section card its Spec options and setter");
+  ok(/const setItemSpecKey = /.test(client) && /setItemSpecKey\(r\.item\.id, v\)/.test(client) && /options=\{specKeys\}/.test(client),
+    "spec pickers: the Spec options and setter reach the review sidebar's Specs card (#312 moved them off the Build rows)");
   ok(/specKey: "",/.test(client.slice(client.indexOf("const freshCustom ="), client.indexOf("const freshCustom =") + 600)), "spec pickers: a fresh custom-part draft starts with no spec key");
   const card = src("src/app/(app)/estimator/section-card.tsx");
-  ok(/isInternal && \(it\.custom \|\| it\.curtain\) && \(/.test(card) && /auto=\{autoSpecKeyFor\(it\)\}/.test(card) && /p\.onSetSpecKey\(it\.id, v\)/.test(card),
-    "spec pickers: custom and curtain lines get a Spec select (Auto placeholder for a curtain)");
-  ok(/p\.onSetCustomDraft\("specKey", v\)/.test(card), "spec pickers: the custom-part form offers the Spec select");
+  const sidebar = src("src/app/(app)/estimator/steps/review-sidebar.tsx");
+  ok(/item\.custom \|\| item\.curtain/.test(src("src/lib/estimate-review/review-ui.ts")) && /auto=\{autoSpecKeyFor\(r\.item\)\}/.test(sidebar) && /value=\{r\.item\.specKey \|\| ""\}/.test(sidebar),
+    "spec pickers: custom and curtain lines get a Spec select on Customer review (Auto placeholder for a curtain) — moved from the Build rows in #312");
+  ok(!/SpecKeySelect|onSetSpecKey/.test(card), "spec pickers: the custom-part form and Build rows no longer offer the Spec select (#312)");
   const sel = src("src/components/spec-key-select.tsx");
   ok(/`Auto: \$\{auto\}`/.test(sel) && /"— none —"/.test(sel), "spec pickers: the empty option reads Auto: <key> or — none —");
 
@@ -58401,4 +58402,85 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(mod.includes("const onCloseRef = useRef(onClose);") && mod.includes("onCloseRef.current = onClose;") && mod.includes("onCloseRef.current();") && mod.includes("e.stopImmediatePropagation();") && mod.includes("e.preventDefault();") &&
      mod.includes('window.addEventListener("keydown", onKey, true);') && mod.includes('window.removeEventListener("keydown", onKey, true);') && mod.includes("}, []);") && !mod.includes("}, [onClose]);"),
     "#P6 estimator: the modal's Escape binds once (onClose in a ref), in capture on window, and stops other Escape handlers");
+}
+
+// ---- #312 estimator: edit custom parts in place; Specs move to Customer review ----
+import * as cpe312 from "@/app/(app)/estimator/custom-part-edit";
+import * as tr312 from "@/app/(app)/estimator/tier-reprice";
+import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const build = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  const side = rd("src/app/(app)/estimator/steps/review-sidebar.tsx");
+  const base = { id: 7, sku: "CUSTOM", desc: "Bracket", qty: 2, unit: "ea", cost: 100, price: 142.86, custom: true } as const;
+  type Item = Parameters<typeof cpe312.customDraftFromLine>[0];
+  const it = (o: Partial<Item> = {}): Item => ({ ...base, ...o } as Item);
+
+  ok(cpe312.isCustomLineEditable(it()) && cpe312.isCustomLineEditable(it({ allowance: true, sku: "" })),
+    "#312 estimator: a hand-entered custom part and a custom allowance are click-to-edit");
+  ok(!cpe312.isCustomLineEditable(it({ custom: false })) && !cpe312.isCustomLineEditable(it({ labor: true })) && !cpe312.isCustomLineEditable(it({ curtain: true })) &&
+     !cpe312.isCustomLineEditable(it({ fixture: true })) && !cpe312.isCustomLineEditable(it({ vendorQuoteId: "vq1" })) && !cpe312.isCustomLineEditable(it({ por: true })) &&
+     !cpe312.isCustomLineEditable(it({ rackId: "R1" })),
+    "#312 estimator: catalog, labor, curtain, fixture, vendor-quote, price-on-request and rack lines are not custom-editable");
+
+  const d = cpe312.customDraftFromLine(it({ manufacturer: "ETC", link: "https://x.test", priceGoodThrough: "2026-11-01" }), "2026-10-08");
+  ok(d.desc === "Bracket" && d.qty === "2" && d.cost === "100" && d.price === "142.86" && d.manufacturer === "ETC" && d.link === "https://x.test" && d.priceGoodThrough === "2026-11-01" &&
+     d.sku === "" && d.addToCatalog === "" && d.allowance === "",
+    "#312 estimator: the draft fills from the line; the CUSTOM placeholder SKU shows blank; Add to catalog starts unticked");
+  ok(cpe312.customDraftFromLine(it({ price: 123.45 })).priceAuto === "" && cpe312.customDraftFromLine(it({ price: tr312.customPartSell(100) })).priceAuto === "1",
+    "#312 estimator: a hand-set sell stops following cost; the auto sell keeps following it");
+  ok(cpe312.customDraftFromLine(it({ sku: "ABC-1" })).sku === "ABC-1" && cpe312.customDraftFromLine(it({ allowance: true, sku: "" })).allowance === "1",
+    "#312 estimator: a real SKU and the allowance flag round-trip into the draft");
+
+  const sec = {
+    id: "s1", name: "Rigging", items: [
+      it({ id: 1, sku: "A", custom: false, desc: "first" }),
+      it({ id: 7, lineOrder: 5, comment: "c", internalNote: "n", option: true, specKey: "SK", link: "https://x.test", manufacturer: "ETC" }),
+      it({ id: 9, sku: "B", custom: false, desc: "last" }),
+    ],
+  } as unknown as Parameters<typeof cpe312.replaceCustomLine>[0];
+  const fresh = { id: 7, sku: "NEW-1", desc: "Bracket v2", qty: 3, unit: "ea", cost: 90, price: 130, custom: true, specKey: undefined } as Item;
+  const out = cpe312.replaceCustomLine(sec, 7, fresh);
+  const rep = out.items[1];
+  ok(out.items.length === 3 && out.items[0].id === 1 && out.items[2].id === 9 && rep.id === 7 && rep.sku === "NEW-1" && rep.desc === "Bracket v2" && rep.qty === 3 && rep.price === 130 && rep.cost === 90,
+    "#312 estimator: Save changes replaces the line's fields at the same id and position");
+  ok(rep.lineOrder === 5 && rep.comment === "c" && rep.internalNote === "n" && rep.option === true && rep.specKey === "SK" && rep.custom === true,
+    "#312 estimator: lineOrder, comment, internal note, option and specKey survive an edit");
+  ok(!("link" in rep) && !("manufacturer" in rep), "#312 estimator: a field the form cleared is removed, not left stale");
+  ok(cpe312.replaceCustomLine(sec, 999, fresh) === sec, "#312 estimator: a line deleted while the form was open leaves the system unchanged");
+  const ov = cpe312.replaceCustomLine({ ...sec, items: [it({ id: 7, extSellOverride: 500 })] } as typeof sec, 7, it({ id: 7, price: 130, qty: 2 }));
+  const ov2 = cpe312.replaceCustomLine({ ...sec, items: [it({ id: 7, extSellOverride: 500 })] } as typeof sec, 7, it({ id: 7 }));
+  ok(!("extSellOverride" in ov.items[0]) && ov2.items[0].extSellOverride === 500,
+    "#312 estimator: a hand extended-sell survives only while unit sell and qty are unchanged");
+
+  ok(/const customEditable = isInternal && !!p\.onEditCustom && isCustomLineEditable\(it\);/.test(card) && card.includes('lineDesc + " — click to edit this custom part"') &&
+     /else if \(customEditable\) p\.onEditCustom\?\.\(it\.id\);/.test(card) && card.includes("curtainEditable || customEditable") &&
+     card.includes("aria-label={`Edit custom part ${it.desc}`}") && card.includes("✎"),
+    "#312 estimator: a custom line's description (title '… — click to edit this custom part') and a ✎ button reopen the form");
+  ok(card.includes('p.customEditing ? "Save changes" : "Add custom part"') && card.includes('p.customEditing ? "Edit custom part" : "Custom part"') && card.includes("onClick={handleToggleCustom}") && card.includes("Cancel"),
+    "#312 estimator: the form's button reads Save changes while editing (Add custom part otherwise), with Cancel");
+  ok(!card.includes("SpecKeySelect") && !card.includes("onSetSpecKey") && !card.includes("specKeys") && !build.includes("setItemSpecKey") && !build.includes("specKeys="),
+    "#312 estimator: the Build rows and the Custom part form no longer carry the Spec select");
+  ok(build.includes("onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}") && build.includes("customEditing={!!customEdit}"),
+    "#312 estimator: the Build step wires the custom edit to the section card");
+  ok(hook.includes("const openCustomEdit = (secId: string, lineId: number)") && hook.includes("customEditRef.current = { lineId, draft: customDraftFromLine(it) };") && hook.includes("closeInput();\n    customEditRef.current") &&
+     hook.includes("const edit = customEditRef.current;") && hook.includes("replaceCustomLine(x, editId, customItem)") && hook.includes("else pushItems(secId, [{ ...customItem, id: nextId() }]);"),
+    "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
+  ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
+    "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
+  ok((hook.match(/setSectionsState\(/g) || []).length === 5 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
+    "#312 estimator: setSectionsState( count stays 5; `next` stays last in the hook's return");
+
+  type R312 = { id: number; custom?: boolean; curtain?: boolean };
+  const rows = specLineRows312<R312>([
+    { name: "Drapes", items: [{ id: 1, custom: false }, { id: 2, curtain: true }] },
+    { name: "", items: [{ id: 3, custom: true }, { id: 4 }] },
+  ]);
+  ok(rows.length === 2 && rows[0].system === "Drapes" && rows[0].item.id === 2 && rows[1].system === "System" && rows[1].item.id === 3 && specLineRows312<R312>([{ name: "X", items: [{ id: 1 }] }]).length === 0,
+    "#312 estimator: the Specs card lists every custom and curtain line with its system, nothing when there are none");
+  ok(side.includes("<SpecsCard s={s} />") && side.includes("if (rows.length === 0) return null;") && side.includes("COPY.specs") && side.includes("onChange={(v) => setItemSpecKey(r.item.id, v)}") &&
+     side.includes("value={r.item.specKey || \"\"}") && side.includes("options={specKeys}") && side.includes("auto={autoSpecKeyFor(r.item)}") && /specs: "Specs"/.test(rd("src/lib/estimate-review/review-ui.ts")),
+    "#312 estimator: Customer review's internal sidebar gains a 'Specs' card (SpecKeySelect, auto key, setItemSpecKey), hidden when empty");
 }
