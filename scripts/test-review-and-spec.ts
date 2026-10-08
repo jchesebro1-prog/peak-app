@@ -56996,3 +56996,14 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
   ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 5, "#P4 pins: setSectionsState( count unchanged");
 }
+
+// ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
+{
+  const rf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pinSrc = rf(`${EST_DIR}/comment-pins.tsx`);
+  const pkgSrc = rf(`${EST_DIR}/steps/package-step.tsx`);
+  ok(/if \(count === 0 && open\) setOpen\(false\)/.test(pinSrc), "#P4 polish: the popover closes (open reset) when its comment list becomes empty");
+  ok(pinSrc.includes("window.innerHeight") && pinSrc.includes("r.top - 6 - h") && pinSrc.includes("useLayoutEffect"), "#P4 polish: the popover flips above the badge when it would overflow the viewport bottom");
+  ok(/e\.key === "Escape"\) \{\s+e\.stopPropagation\(\);/.test(pinSrc), "#P4 polish: Escape in the popover stops propagation");
+  ok(!/<span\s+aria-label=|<span aria-label=/.test(pkgSrc) && pkgSrc.includes("VISUALLY_HIDDEN"), "#P4 polish: the nav comment counts use visually-hidden text, not aria-label on a span");
+}

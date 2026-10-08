@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { NumberedComment } from "@/lib/estimate-review/comments";
 import { commentActionLabel, commentTime, REVIEW_UI_COPY } from "@/lib/estimate-review/review-ui";
 import { resolveReviewCommentAction } from "./review-actions";
@@ -51,6 +51,7 @@ export function useResolveComment(s: EstimatorState): (commentId: string) => Pro
 }
 
 const POP_W = 320;
+const POP_MAX_H = 320;
 
 export function CommentPin({
   label,
@@ -75,13 +76,21 @@ export function CommentPin({
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
 
+  // The last comment resolving leaves nothing to show; drop `open` so the listeners detach and a later comment doesn't pop open by itself.
+  const count = comments.length;
+  if (count === 0 && open) setOpen(false);
+
   useEffect(() => {
     if (!open) return;
     const place = () => {
       const r = btnRef.current?.getBoundingClientRect();
       if (!r) return;
       const left = Math.max(8, Math.min(r.left, window.innerWidth - POP_W - 8));
-      setPos({ top: r.bottom + 6, left });
+      // Flip above the badge when the popover would run off the bottom of the viewport.
+      const h = Math.min(popRef.current?.offsetHeight ?? POP_MAX_H, POP_MAX_H);
+      const below = r.bottom + 6;
+      const top = below + h > window.innerHeight - 8 ? Math.max(8, r.top - 6 - h) : below;
+      setPos({ top, left });
     };
     place();
     const onDoc = (e: PointerEvent) => {
@@ -91,6 +100,7 @@ export function CommentPin({
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.stopPropagation();
         setOpen(false);
         btnRef.current?.focus();
       }
@@ -106,6 +116,17 @@ export function CommentPin({
       window.removeEventListener("scroll", place, true);
     };
   }, [open]);
+
+  // Re-measure once the popover is in the DOM (and when its list changes) so the flip uses its real height.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    const h = Math.min(popRef.current?.offsetHeight ?? POP_MAX_H, POP_MAX_H);
+    if (!r) return;
+    const below = r.bottom + 6;
+    const top = below + h > window.innerHeight - 8 ? Math.max(8, r.top - 6 - h) : below;
+    setPos((p) => (p.top === top ? p : { ...p, top }));
+  }, [open, count]);
 
   if (comments.length === 0) return null;
   const n = comments.length;
@@ -152,7 +173,7 @@ export function CommentPin({
             top: pos.top,
             left: pos.left,
             width: POP_W,
-            maxHeight: 320,
+            maxHeight: POP_MAX_H,
             overflowY: "auto",
             zIndex: 60,
             background: "#fff",

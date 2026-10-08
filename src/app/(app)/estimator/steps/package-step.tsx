@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type CSSProperties } from "react";
 import { commentsBySection, numberComments } from "@/lib/estimate-review/comments";
 import { useCommentsFocusRefresh } from "../comment-pins";
 import NarrativeColumn from "../narrative-column";
@@ -10,6 +10,17 @@ import { PackageStaffPanel } from "../package-staff-panel";
 import { PAYMENT_TERMS } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import type { EstimatorState } from "../use-estimator-state";
+
+/** Screen-reader-only text (an aria-label on a plain span isn't reliably announced). */
+const VISUALLY_HIDDEN: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
+};
 
 /** #305 — Build package: what the client receives. Narrative for the picked system (left), output options (right). */
 export function PackageStep({ s }: { s: EstimatorState }) {
@@ -63,7 +74,8 @@ export function PackageStep({ s }: { s: EstimatorState }) {
       <nav aria-label="Systems" className="est-scroll" style={{ width: 220, flexShrink: 0, overflowY: "auto", background: "#fff", borderRight: "1px solid #ececf0", padding: "16px 10px" }}>
         {pinned.whole.length > 0 && (
           <div style={{ padding: "0 10px 8px", fontSize: 11.5, fontWeight: 600, color: ACCENT_INK }}>
-            <span aria-label={`${pinned.whole.length} review comment${pinned.whole.length === 1 ? "" : "s"} on the whole estimate`}>💬 {pinned.whole.length} on the whole estimate</span>
+            <span aria-hidden="true">💬 {pinned.whole.length} on the whole estimate</span>
+            <span style={VISUALLY_HIDDEN}>{`${pinned.whole.length} review comment${pinned.whole.length === 1 ? "" : "s"} on the whole estimate`}</span>
           </div>
         )}
         {sections.map((x) => (
@@ -90,11 +102,9 @@ export function PackageStep({ s }: { s: EstimatorState }) {
           >
             {x.name || "Untitled"}
             {(pinned.bySection[x.id]?.length ?? 0) > 0 && (
-              <span
-                aria-label={`${pinned.bySection[x.id].length} review comment${pinned.bySection[x.id].length === 1 ? "" : "s"}`}
-                style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: ACCENT_INK }}
-              >
-                💬 {pinned.bySection[x.id].length}
+              <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: ACCENT_INK }}>
+                <span aria-hidden="true">💬 {pinned.bySection[x.id].length}</span>
+                <span style={VISUALLY_HIDDEN}>{` — ${pinned.bySection[x.id].length} review comment${pinned.bySection[x.id].length === 1 ? "" : "s"}`}</span>
               </span>
             )}
           </button>
