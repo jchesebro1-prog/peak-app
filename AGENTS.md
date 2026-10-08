@@ -786,7 +786,7 @@ See `.env.example`.
     Jeff-gated: back up, run Symetrix on production, then Biamp/EAW/Meyer when their
     sheets come back (PUNCHLIST #304).
 
-42. 🚧 **Estimator in four steps** (#305, D643–D663) — Phase 1 ✅ (the frame): the
+42. 🚧 **Estimator in four steps** (#305, D643–D668) — Phase 1 ✅ (the frame): the
     Estimator is Build · Build package · Customer review · Send & track on one URL
     (`?step=`, pushState, Build canonical), one shared header with a More ▾ menu, a
     readiness line under each tab (never blocking), the status select and Daylite
@@ -804,9 +804,12 @@ See `.env.example`.
     Phase 3 ✅ (#308, D658–D663): the Send & track tab sends the estimate from the sender's personal Gmail
     (ordered action: preflight, claim, attachments, mark sent, link, thread, record, follow-up task; PDFs by reference),
     keeps the Open in Inbox / Mark sent / Copy link escape hatches, and tracks it in an Activity card (replies, Reply,
-    Mark read, link opens) and a Send badge. Next: Phase 4 (Customer review: client's-eye tabs, cost/margin/labor sidebar,
-    pinned comments, approve/send back), 5 package document editor (TipTap),
-    6 system categories (Jeff-gated content). Remaining is Jeff-gated: Phase 6
+    Mark read, link opens) and a Send badge.
+    Phase 4 ✅ (#309, D664–D668): Customer review gains client's-eye tabs (Document, Package page, BOM, Cut sheets,
+    Datasheets, Drawings; Desktop/Phone) served by a saved-quote staff preview route, an internal sidebar (cost, labor,
+    package checklist), store-owned numbered review comments with pins on Build / Build package, and one send-back that
+    lists them. Next: Phase 5 (Build package document editor — TipTap, live chips, product-linked paragraphs, Save to
+    product, image placement, drag from BOM, PDF from the document; older quotes ignored), 6 system categories (Jeff-gated content). Remaining is Jeff-gated: Phase 6
     typical items per category, and the exact repro for "Send → Home" (PUNCHLIST #305).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults

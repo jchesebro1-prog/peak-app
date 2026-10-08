@@ -11201,3 +11201,44 @@ signature and `{link}` line. Approve or reword.
   new composer inputs.
 - A tiny window remains between an Inbox- or Estimator-sent email going out and its hold-back stamp (`holdOutbound`): a send
   landing in that gap could still push it. Best effort, logged on failure.
+
+## 309. Estimator Phase 4 — Customer review — DONE 2026-10-07 (D664–D668)
+
+Part of #305's roadmap (see #305, #306, #307, #308): Phase 4 turns the Customer review tab into the client's-eye check plus
+an internal sidebar, with review comments and one send-back. Spec `docs/superpowers/specs/2026-10-07-estimator-four-steps-design.md`
+§11; plan `docs/superpowers/plans/2026-10-07-estimator-phase4-customer-review.md`.
+
+What shipped (no migration, no AI):
+- **Client's-eye tabs** — Document · Package page · BOM · Cut sheets · Datasheets · Drawings, Desktop / Phone (100% / 390 px),
+  keyed to the saved version, with an "Unsaved changes" banner. A new staff preview route `/estimator-preview/[id]` (saved
+  quote, live package loader, no token / beacon / client actions) and a staff package-file route. (D664, D665)
+- **Internal sidebar** — Internal only (cost summary) · Labor (hours, cost, sell per group, `edited` marker, hand-added hr lines,
+  alternates apart, crew line) · Package checklist (gap chips + Build package badge) · Comments. (D666)
+- **Review comments** — numbered, store-owned (`Quote.reviewComments`, cap 200), Add / Resolve / Delete by permission, pins on
+  the Build cards and the Build package nav, shared list refreshed on focus. (D667)
+- **Send back with comments** — one control on Review; the note lists the numbered open comments from the saved estimate. (D668)
+- The system-estimate predicate is now `pdfKindForQuoteType` everywhere (preview page, file route, docs action, print route).
+
+**Verification.** Gates: `tsc --noEmit` 0; scoped eslint clean (`src/app/(app)/estimator`; the 56k-line harness overflows the
+react-hooks rule's stack and is not linted); `test:specs` 13,794 PASS / 0 FAIL (baseline 13,706 at Phase 4 start); `next build` OK;
+`test:smoke` ALL PASSED (the three preview tabs 200, the two unknown ids 404). Controller browser pass (scratch DB): all six
+tabs; the Package page iframe renders the saved draft ("saved <date>", inert actions note) and Phone narrows to 390 px; the
+sidebar's Internal only / Labor / Package checklist / Comments; a comment on a system numbered 1; the Build card pin "💬 1" with
+a Resolve popover. **Send back was verified by the harness only** — after a self-submit the submitter is not in approver mode,
+so the button never appeared in the browser. **Jeff to try with two users:** Jena submits an estimate with comments, Jeff sends
+it back with them, and Jena should see the note and the strip.
+
+**New copy for Jeff to approve** (beyond the spec's list): "Hand-added labor (hr)", "Alternates (priced separately)",
+"Nothing missing.", "Checking the package…", "No open comments.", "Resolved (N)", "What should change?", "Anything else?
+(optional)", "Send back", "No catalog parts print on this estimate.", "No drawings on this estimate.", "Missing", the Save
+button on the unsaved banner, "Client scope choices and questions appear here on the client's page." (preview inert note),
+"saved <date>" (the client's page says "sent"), "This estimate has no curtains." (Cut sheets tab).
+
+**Open (minor, not blocking).**
+- An approver may delete a resolved comment (literal reading of the delete rule).
+- A comment on a deleted system reads "Whole estimate".
+- The sidebar numbers against the live (possibly unsaved) systems; the send-back note uses the saved numbering.
+- The checklist can show a gap twice (the saved gap chip plus the live Build package badge count).
+- `staffPackageExtras` repeats helpers from the package-extras model (drift risk); the Cut sheets tab loads the quote twice.
+- Datasheet links in the Package page preview use `download`, so a click downloads rather than navigating the frame.
+- Key-product and file links open in a new tab (the staff routes keep the global frame DENY).

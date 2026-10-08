@@ -9805,3 +9805,57 @@ When the quote is `sent` the Send badge reads `Sent · Rev N`, then ` · 👁 N`
 for unread replies; with no track data it is unchanged. "Revise with these scopes ->" (turning a client's scope choice into a
 revision) is parked for Phase 4. Composer copy beyond the plan's list, for Jeff to approve: "Email the estimate", "Client link
 opened N time(s)", "N new".
+
+## D664. Staff preview route (#309, 2026-10-07)
+
+The client's-eye tabs load `/estimator-preview/[id]?tab=package|bom|cutsheets`, a route OUTSIDE the `(app)` layout so it
+renders as a bare page inside an iframe. It is `requireUser`, saved-quote only (it reads the SAVED row, never the unsaved
+draft), and 404s for any quote the Estimator does not build as a system estimate. `X-Frame-Options: SAMEORIGIN` is a third,
+path-scoped exception in `next.config.ts` (global DENY stays first; the #222 framing check now allows exactly this one beside
+the PDF routes). The Package page tab runs the live package loader (`loadLivePackagePreview`): the same `PackageView` the client
+gets, built from the saved quote with no token, no open beacon, no scope-choice or question forms (an inert note instead), staff
+links for datasheets and files, and no zip. The "is this a system estimate" predicate was unified on `pdfKindForQuoteType(q.quoteType)
+=== "quote"` across the page, the file route, `reviewDocsAction` and the print route (it had differed between
+`estimatorShouldRedirect` and `pdfKindForQuoteType`).
+
+## D665. Review tabs and the staff package-file route (#309, 2026-10-07)
+
+Customer review reads Document · Package page · BOM · Cut sheets · Datasheets · Drawings. Document is the existing PDF pane;
+Package page, BOM and Cut sheets are iframes of the preview route with a Desktop / Phone toggle (100% / 390 px), keyed to the
+saved version (`savedAt` + `asOf`) so a save reloads them; Datasheets and Drawings are tables from one `reviewDocsAction`
+read shared with the checklist. When the draft differs from the saved quote every tab but Document shows "Unsaved changes — Save
+to refresh what the client sees." with a Save button (disabled while a status change or tier lookup is running); an unsaved quote
+reads "Save the estimate first." Plans and drawings open through a new staff route `/api/quotes/[id]/package-files/[fileId]`
+(`requireUser`, system quotes only, this quote's own visible files only, served by the existing `servePackageFile`); they open in a
+new tab because the staff routes keep the global frame DENY.
+
+## D666. Labor table rules (#309, 2026-10-07)
+
+Pure `laborSummary(sections, rate)` (`src/lib/estimate-review/labor.ts`). Per group: hours = Σ over the mobilizations of
+(regular + overtime hours) + PM + shop + drafting hours from `computeLabor` (supervision hours are INSIDE regular, so they are
+not added again); cost = the configured `totalCost`; sell = Σ the group's CURRENT line ext sells (`laborGroup === id`); a row
+shows `edited` when that differs from the configured `totalPrice` by more than $1. Hand-added labor lines with unit `hr` (and
+groups whose draft record is gone) are "Hand-added labor (hr)": hours = qty. Alternate-group labor is bucketed separately under
+"Alternates (priced separately)"; option-flagged lines are excluded. The summary line is max crew, Σ days, Σ OT hours. The
+table can differ from `totals().lab` by any system price adjustment, because it adds lines, not adjustments.
+
+## D667. Review comments (#309, 2026-10-07)
+
+`Quote.reviewComments` is store-owned like `estimateEmails`: written only by the quotes-store functions under the row lock,
+dropped by `update()`, not a content field, no `updatedAt` bump; cap 200 (a full list evicts the oldest RESOLVED comment, and
+refuses when all are open); body trimmed, 1–2,000 characters; a comment targets the whole estimate or a system in the saved
+estimate. Permissions are pure and shared with the client: add = `create` | `send` | `approve`; resolve = `create`; delete = the
+author while unresolved, or `approve`. Numbering: open comments 1…n by system order (whole-estimate first), then time; a
+comment on a deleted system reads "Whole estimate". Pins: a "💬 N" badge on each Build system card (popover with Resolve),
+one whole-estimate pin above the cards, and per-system counts in the Build package nav. The list is shared state in the
+estimator hook, refreshed on window focus. Minor: an approver may delete a resolved comment (literal reading of the rule).
+
+## D668. Send back with comments (#309, 2026-10-07)
+
+Customer review has ONE comment-aware send-back: the approver's "Send back with N comment(s)" opens a box for optional extra
+text, and the note is built from the SERVER's numbered list of open comments against the SAVED estimate
+(`<n> comment(s) to address:` then `N. <System | Whole estimate> — <body>`, a blank line, then the extra text), so it always
+matches what the commenters saw. `QuoteNextStep`'s own send-back is hidden on Review (it stays elsewhere); the button is
+disabled while the draft is unsaved so the numbering cannot drift. A submitter cannot send back their own submission (the
+control appears only in approver mode on a quote in review). The sidebar list numbers against the live systems and the pins
+match the cards; the note is built from the saved numbering — they differ only for systems added or removed since the last save.
