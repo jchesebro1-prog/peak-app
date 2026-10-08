@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { EditorContent, useEditor, type JSONContent } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
 import type { ParagraphSaveResponse } from "@/app/(app)/estimator/narrative";
@@ -24,7 +24,12 @@ import DocToolbar from "./toolbar";
  *    sanitizePackageDoc (docSizeState) and, when it differs from what the
  *    editor last stood for, onChange(doc). A document over the caps is NEVER
  *    emitted — the warning bar says so — so a cut copy can't replace the
- *    stored one.
+ *    stored one; onOverChange(true) tells the estimator, whose Save then
+ *    refuses ("The document is too large to save — shorten it.") instead of
+ *    storing the last valid copy and saying "Saved ✓".
+ *  - unmount: emits what's pending, unless `discardRef` is set (Remove
+ *    document unmounts the editor — its flush must not bring the document
+ *    back); the over flag clears (the estimator keeps the last valid copy).
  *  - in: a `value` the editor didn't emit (Remove / Start / an outside
  *    change) re-sets the content without an update event, keeping the cursor
  *    where the new document still has room for it.
@@ -35,6 +40,10 @@ export const CHANGE_DEBOUNCE_MS = 300;
 export type PackageDocEditorProps = {
   value: PackageDoc;
   onChange: (doc: PackageDoc) => void;
+  /** true while the editor holds more than the caps allow (nothing emitted). */
+  onOverChange?: (over: boolean) => void;
+  /** Set by Remove document: skip the unmount flush. */
+  discardRef?: RefObject<boolean>;
   ctx: PackageDocCtx;
   library: KeyProductLibrary;
   canWriteLibrary: boolean;
@@ -57,12 +66,16 @@ const PROSE_CSS = `
 .pd-ed-prose .ProseMirror-selectednode { outline: 2px solid #6b8fd1; }
 `;
 
-export default function PackageDocEditor({ value, onChange, ctx, library, canWriteLibrary, onSaveToProduct }: PackageDocEditorProps) {
+const EDITOR_PROPS = { attributes: { class: "pd-ed-prose", role: "textbox", "aria-multiline": "true", "aria-label": "Client document" } };
+
+export default function PackageDocEditor({ value, onChange, onOverChange, discardRef, ctx, library, canWriteLibrary, onSaveToProduct }: PackageDocEditorProps) {
   const extensions = useMemo(() => editorExtensions(), []);
   const onChangeRef = useRef(onChange);
+  const onOverRef = useRef(onOverChange);
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
+    onOverRef.current = onOverChange;
+  }, [onChange, onOverChange]);
   /** JSON of the stored document the editor currently stands for ("" until the editor exists). */
   const knownRef = useRef("");
   /** The latest editor JSON not yet emitted. */
@@ -80,6 +93,7 @@ export default function PackageDocEditor({ value, onChange, ctx, library, canWri
     pendingRef.current = null;
     const st = docSizeState(raw);
     setSize(st.level === "ok" ? null : st);
+    onOverRef.current?.(st.level === "over");
     // Over the caps: never emit — a cut document must not replace the stored one.
     if (!st.doc) return;
     const str = JSON.stringify(st.doc);
@@ -93,7 +107,7 @@ export default function PackageDocEditor({ value, onChange, ctx, library, canWri
     content: toEditorContent(value),
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
-    editorProps: { attributes: { class: "pd-ed-prose", role: "textbox", "aria-multiline": "true", "aria-label": "Client document" } },
+    editorProps: EDITOR_PROPS,
     onUpdate: ({ editor: ed }) => {
       pendingRef.current = ed.getJSON();
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -102,8 +116,18 @@ export default function PackageDocEditor({ value, onChange, ctx, library, canWri
     onBlur: () => flush(),
   });
 
-  // Unmount (step change, Narrative fields…): emit what's pending.
-  useEffect(() => () => flush(), [flush]);
+  // Unmount (step change…): emit what's pending — never after Remove document.
+  useEffect(
+    () => () => {
+      if (discardRef?.current) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = null;
+        pendingRef.current = null;
+      } else flush();
+      onOverRef.current?.(false);
+    },
+    [flush, discardRef]
+  );
 
   // Outside changes to `value` (not our own echo) re-set the content.
   useEffect(() => {
@@ -135,6 +159,7 @@ export default function PackageDocEditor({ value, onChange, ctx, library, canWri
       })
       .run();
     setSize(null);
+    onOverRef.current?.(false);
   }, [editor, value]);
 
   const env = useMemo<PackageDocEditorEnv>(() => ({ ctx, library, canWriteLibrary, onSaveToProduct }), [ctx, library, canWriteLibrary, onSaveToProduct]);

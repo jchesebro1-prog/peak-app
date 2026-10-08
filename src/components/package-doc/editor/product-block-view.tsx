@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type CSSProperties } from "react";
+import { useRef, useState, useTransition, type CSSProperties } from "react";
 import { NodeViewContent, NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { productBlockInBom } from "@/lib/package-doc/gaps";
 import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package-doc/schema";
@@ -8,12 +8,13 @@ import { productBlockText } from "@/lib/package-doc/text";
 import type { PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
 import { usePackageDocEnv } from "./editor-context";
 import { deleteNodeAt, revertProductBlock, setBlockPhoto } from "./editor-commands";
-import { isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, withPhoto } from "./editor-model";
+import { customLineTagText, isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, SAVED_TO_PRODUCT_MS, withPhoto } from "./editor-model";
 
 /**
  * Estimator Phase 5 — a product-linked block: one BOM line's paragraph(s).
  * Dashed outline while hovered or holding the cursor; a tag
- * `<label> · from product` / `<label> · edited here`; Save to product
+ * `<label> · from product` / `<label> · edited here` (a custom / allowance
+ * line: `<label> · custom line`, no Save or Revert); Save to product
  * (create permission, stale-checked against the library row's stamp) and
  * Revert (the library paragraph); amber `No longer in BOM` while its line is
  * gone (kept until deleted); the photo preview with Left / Right / Full, size
@@ -23,6 +24,7 @@ import { isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState
 const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer" };
 const ASK: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 11.5, color: "#3a3f4a", background: "#fbf3dd", borderRadius: 6, padding: "5px 8px", marginBottom: 6 };
 const FAILED = "Could not reach the server. Try again.";
+const SAVED = "Saved to the product.";
 const ALIGNS: Array<[PhotoAlign, string]> = [["left", "Left"], ["right", "Right"], ["full", "Full"]];
 
 export default function ProductBlockView({ node, editor, getPos, selected, selectionInside }: ReactNodeViewProps) {
@@ -31,6 +33,10 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
   const [ask, setAsk] = useState<null | "replace" | "stale">(null);
   const [stale, setStale] = useState<{ paragraph: string | null; updatedAt: number | null } | null>(null);
   const [msg, setMsg] = useState("");
+  /** The words "Saved to the product." refers to — it shows only while the
+   *  block still holds them, and for SAVED_TO_PRODUCT_MS. */
+  const [savedFor, setSavedFor] = useState<string | null>(null);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pending, start] = useTransition();
 
   const block = node.toJSON() as PDProductBlock;
@@ -48,6 +54,7 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
   const preview = productPhotoPreview(block, sections, row);
   const active = selected || !!selectionInside;
   const outlined = active || hover;
+  const note = msg || (savedFor !== null && savedFor === text ? SAVED : "");
 
   const pos = () => {
     const p = getPos();
@@ -72,11 +79,14 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
     start(async () => {
       if (!env) return;
       setMsg("");
+      setSavedFor(null);
       try {
         const out = await env.onSaveToProduct(sku, text, expect);
         if (out.ok) {
           setAsk(null);
-          setMsg("Saved to the product.");
+          setSavedFor(text);
+          if (savedTimer.current) clearTimeout(savedTimer.current);
+          savedTimer.current = setTimeout(() => setSavedFor(null), SAVED_TO_PRODUCT_MS);
         } else if (out.stale) {
           setStale(out.stale);
           setAsk("stale");
@@ -128,11 +138,11 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
         <span data-drag-handle="" title="Drag to move" aria-hidden="true" style={{ cursor: "grab", color: "#aab0bb", fontSize: 12 }}>
           ⋮⋮
         </span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: state === "from" ? "#1f7a52" : "#5b616e" }}>{productTagText(label, state)}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: state === "from" ? "#1f7a52" : "#5b616e" }}>{isLine ? customLineTagText(label) : productTagText(label, state)}</span>
         {!inBom && (
           <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 8px" }}>No longer in BOM</span>
         )}
-        {(outlined || ask || msg) && (
+        {(outlined || ask || note) && (
           <span style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
             {!isLine && (
               <button type="button" style={{ ...BTN, opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }} disabled={!canSave || pending} title={saveTitle} onClick={onSave}>
@@ -170,9 +180,9 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
           <button type="button" style={BTN} onClick={() => setAsk(null)}>Cancel</button>
         </div>
       )}
-      {msg && (
-        <div contentEditable={false} style={{ fontSize: 11, marginBottom: 4, color: msg.startsWith("Saved") ? "#1f7a52" : "#b4543a" }}>
-          {msg}
+      {note && (
+        <div contentEditable={false} style={{ fontSize: 11, marginBottom: 4, color: note === SAVED ? "#1f7a52" : "#b4543a" }}>
+          {note}
         </div>
       )}
 

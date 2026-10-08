@@ -57723,7 +57723,7 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
   const edSrc = rd(`${ED}/package-doc-editor.tsx`);
   ok(edSrc.includes("export const CHANGE_DEBOUNCE_MS = 300;") && edSrc.includes("timerRef.current = setTimeout(flush, CHANGE_DEBOUNCE_MS);") &&
      edSrc.includes("const st = docSizeState(raw);") && /if \(!st\.doc\) return;/.test(edSrc) && edSrc.includes("if (str === knownRef.current) return;") &&
-     edSrc.includes("onChangeRef.current(st.doc);") && edSrc.includes("onBlur: () => flush()") && edSrc.includes("useEffect(() => () => flush(), [flush]);") &&
+     edSrc.includes("onChangeRef.current(st.doc);") && edSrc.includes("onBlur: () => flush()") && /useEffect\(\s*\(\) => \(\) => \{[\s\S]*?\} else flush\(\);/.test(edSrc) &&
      edSrc.includes("immediatelyRender: false") && edSrc.includes("setContent(toEditorContent(value), { emitUpdate: false })"),
     "#P5 editor: edits emit through docSizeState → sanitizePackageDoc after 300 ms (or on blur / unmount), only when changed, never over the caps; an outside value re-sets without an update event");
   const modelSrc = rd(`${ED}/editor-model.ts`);
@@ -57805,4 +57805,112 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
     "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count unchanged");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
+}
+
+// ---- #P5 editor fix: over-limit Save refused, list depth capped, list items match the editor, custom-line tag ----
+import { EditorState as P5fState, TextSelection as P5fSel } from "@tiptap/pm/state";
+import { maxListLevel as p5fMaxLevel, MAX_LIST_LEVELS as P5F_MAX_LEVELS, sinkListItemCapped as p5fSink, buildExtensions as p5fBuild } from "@/components/package-doc/editor/schema-nodes";
+import * as p5fm from "@/components/package-doc/editor/editor-model";
+import { getSchema as p5fGetSchema } from "@tiptap/react";
+import { sanitizePackageDoc as p5xSan } from "@/lib/package-doc/sanitize";
+import { PACKAGE_DOC_TOO_LARGE as P5F_TOO_LARGE } from "@/lib/package-doc/save";
+import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const J = JSON.stringify;
+  const ED = "src/components/package-doc/editor";
+  const T = (text: string) => ({ type: "text", text });
+  const P = (...content: unknown[]) => ({ type: "paragraph", ...(content.length ? { content } : {}) });
+  const LI = (...content: unknown[]) => ({ type: "listItem", content });
+  const UL = (...items: unknown[]) => ({ type: "bulletList", content: items });
+  const schema = p5fGetSchema(p5fBuild());
+  const passes = (json: unknown) => { try { schema.nodeFromJSON(json as Record<string, unknown>).check(); return true; } catch { return false; } };
+
+  // (1) An over-limit document: the editor reports it; the estimator's Save refuses with the server's words, nothing written.
+  const hook = rd(`${EST_DIR}/use-estimator-state.ts`), edSrc = rd(`${ED}/package-doc-editor.tsx`), pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
+  const saveNowBody = hook.slice(hook.indexOf("const saveNow = async (): Promise<number | false> => {"), hook.indexOf("const doSave = () => {"));
+  const refuse = saveNowBody.indexOf("if (packageDoc && packageDocOver) {");
+  ok(hook.includes("const [packageDocOver, setPackageDocOver] = useState(false);") && refuse > 0 && refuse < saveNowBody.indexOf("saveQuoteAction(") &&
+     /if \(packageDoc && packageDocOver\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(PACKAGE_DOC_TOO_LARGE\);\s*return false;\s*\}/.test(saveNowBody) &&
+     hook.includes('import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";') && /startTransition\(async \(\) => \{\s*await saveNow\(\);/.test(hook),
+    "#P5 editor fix: Save (doSave → saveNow, the next-step control's saveNow too) refuses while the editor's document is over the caps — the action-error banner, no saveQuoteAction call");
+  ok(P5F_TOO_LARGE === "The document is too large to save — shorten it." && p5fm.TOO_LARGE === P5F_TOO_LARGE,
+    "#P5 editor fix: the refusal copy is the server's own ('The document is too large to save — shorten it.')");
+  ok(edSrc.includes("onOverChange?: (over: boolean) => void;") && /setSize\(st\.level === "ok" \? null : st\);\s*onOverRef\.current\?\.\(st\.level === "over"\);\s*\/\/ Over the caps/.test(edSrc) &&
+     /setSize\(null\);\s*onOverRef\.current\?\.\(false\);/.test(edSrc) && /\} else flush\(\);\s*onOverRef\.current\?\.\(false\);/.test(edSrc),
+    "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content or it unmounts");
+  ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
+     /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
+     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 5,
+    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count unchanged");
+
+  // (2) Remove document: the unmount flush never brings the removed document back.
+  ok(pkgStep.includes("const discardRef = useRef(false);") && /const removeDocument = \(\) => \{\s*discardRef\.current = true;/.test(pkgStep) &&
+     /const startDocument = \(\) => \{\s*discardRef\.current = false;/.test(pkgStep) && pkgStep.includes("discardRef={discardRef}") &&
+     /if \(discardRef\?\.current\) \{[\s\S]*?pendingRef\.current = null;\s*\} else flush\(\);/.test(edSrc),
+    "#P5 editor fix: Remove sets a discard ref before clearing the document; the editor's unmount skips the flush then (and drops what's pending)");
+  ok(/^const EDITOR_PROPS = \{ attributes: \{ class: "pd-ed-prose"/m.test(edSrc) && edSrc.includes("editorProps: EDITOR_PROPS,"),
+    "#P5 editor fix: editorProps is one module constant (no new object per render)");
+
+  // (3) List depth: Tab refuses to indent past 5 levels; a deeper document reads over.
+  const nest = (level: number, max: number): unknown =>
+    level === max ? UL(LI(P(T("a"))), LI(P(T("target")))) : UL(LI(P(T("x" + level)), nest(level + 1, max)));
+  const stateFor = (json: unknown) => {
+    const doc = schema.nodeFromJSON({ type: "doc", content: [json] });
+    let at = -1;
+    doc.descendants((n, pos) => { if (n.isText && n.text === "target") at = pos; });
+    return P5fState.create({ schema, doc, selection: P5fSel.create(doc, at + 1) });
+  };
+  const trySink = (json: unknown) => {
+    const st = stateFor(json);
+    let out: P5fState | null = null;
+    const okd = p5fSink(schema.nodes.listItem)(st, (tr) => { out = st.apply(tr); });
+    return { okd, out: out as P5fState | null, before: st };
+  };
+  const at4 = trySink(nest(1, 4)), at5 = trySink(nest(1, 5));
+  ok(P5F_MAX_LEVELS === 5 && at4.okd && !!at4.out && p5fMaxLevel(at4.out.doc) === 5 && !at5.okd && at5.out === null && p5fMaxLevel(at5.before.doc) === 5,
+    "#P5 editor fix: Tab indents a level-4 item to level 5; at level 5 it is refused (nothing dispatched)");
+  const deepKids = UL(LI(P(T("c")), UL(LI(P(T("d"))))));
+  const level3 = UL(LI(P(T("a"))), LI(P(T("target")), deepKids));
+  const withKids = UL(LI(P(T("x1")), UL(LI(P(T("x2")), level3))));
+  const kids = trySink(withKids);
+  ok(p5fMaxLevel(kids.before.doc) === 5 && !kids.okd,
+    "#P5 editor fix: an item whose own sub-lists would land on a 6th level can't be indented either");
+  const nodesSrc = rd(`${ED}/schema-nodes.ts`);
+  ok(/Tab: \(\) => \{\s*const \{ view \} = this\.editor;\s*return sinkListItemCapped\(this\.type\)\(view\.state, view\.dispatch\) \|\| this\.editor\.isActive\(this\.name\);/.test(nodesSrc) &&
+     !nodesSrc.includes("commands.sinkListItem("),
+    "#P5 editor fix: PDListItem's Tab goes through sinkListItemCapped (a refused Tab inside a list is swallowed)");
+  const doc5 = { type: "doc", content: [nest(1, 5)] }, doc6 = { type: "doc", content: [nest(1, 6)] };
+  const s5 = p5fm.docSizeState(doc5), s6 = p5fm.docSizeState(doc6);
+  ok(s5.level === "ok" && !!s5.doc && J(s5.doc.content) === J(doc5.content) && p5fm.rawDepth(doc5) === P5F_MAX_DEPTH &&
+     s6.level === "over" && s6.doc === null && s6.message === P5F_TOO_LARGE && p5fm.rawDepth(doc6) > P5F_MAX_DEPTH,
+    "#P5 editor fix: a 5-level list keeps every word (depth 12 = the validator's limit); a 6-level document reads over and is never emitted");
+
+  // (4) The validator's list item is the editor's: `paragraph (bulletList | orderedList)*`.
+  const messy = p5xSan({ type: "doc", content: [UL(LI(P(T("one")), P(T("two")), UL(LI(P(T("sub")))), P(), P(T("three"))))] })!;
+  ok(J(messy.content) === J([UL(LI(P(T("one"), { type: "hardBreak" }, T("two"), { type: "hardBreak" }, { type: "hardBreak" }, T("three")), UL(LI(P(T("sub"))))))]),
+    "#P5 editor fix: a list item's extra paragraphs merge into its first, joined with a hard break; nested lists follow it");
+  const longs = p5xSan({ type: "doc", content: [UL(LI(P(T("a".repeat(15000))), P(T("b".repeat(15000)))))] })!;
+  const lp = ((longs.content[0] as { content: { content: { content: { text?: string }[] }[] }[] }).content[0].content[0].content);
+  ok(lp.reduce((n, k) => n + (k.text || "").length, 0) === 20000,
+    "#P5 editor fix: merged list-item text is still capped at 20,000 characters per paragraph");
+  const reps: unknown[] = [
+    messy,
+    p5xSan({ type: "doc", content: [UL(LI(UL(LI(P(T("only a list"))))))] }),
+    p5xSan({ type: "doc", content: [{ type: "orderedList", content: [LI(P(T("x")), P(T("y"))), LI()] }, P(T("after"))] }),
+    p5xSan({ type: "doc", content: [UL(LI(P(T("a")), { type: "heading", attrs: { level: 1 }, content: [T("h")] }, P(T("b"))))] }),
+    p5xSan(doc5),
+    p5xSan({ type: "doc", content: [{ type: "productBlock", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU-1" }, content: [P(T("p")), UL(LI(P(T("dropped"))))] }] }),
+  ];
+  ok(reps.every((d) => !!d && passes(p5fm.toEditorContent(d as never))),
+    "#P5 editor fix: representative validator output (merged items, list-only items, empty items, dropped headings, 5 levels, product blocks) passes the editor schema's check()");
+
+  // (5) Product block: custom / allowance lines say so; "Saved to the product." doesn't linger.
+  ok(p5fm.customLineTagText("Budget allowance — Line 2") === "Budget allowance — Line 2 · custom line" && p5fm.SAVED_TO_PRODUCT_MS > 0 && p5fm.SAVED_TO_PRODUCT_MS <= 6000,
+    "#P5 editor fix: a line-token block's tag is exactly '<label> · custom line'");
+  const pbSrc = rd(`${ED}/product-block-view.tsx`);
+  ok(pbSrc.includes("{isLine ? customLineTagText(label) : productTagText(label, state)}") && /\{!isLine && \(\s*<button/.test(pbSrc) &&
+     pbSrc.includes('const note = msg || (savedFor !== null && savedFor === text ? SAVED : "");') &&
+     pbSrc.includes("savedTimer.current = setTimeout(() => setSavedFor(null), SAVED_TO_PRODUCT_MS);") && !pbSrc.includes('setMsg("Saved to the product.")'),
+    "#P5 editor fix: custom lines show no Save to product (Revert needs a library row); 'Saved to the product.' clears after a few seconds or as soon as the words change");
 }

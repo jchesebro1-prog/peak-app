@@ -39,8 +39,10 @@ import type { PackageDoc, PDBlock, PDMark, PDMarkType, PhotoAttrs } from "./type
  *    deeper than MAX_DEPTH are dropped; reading stops after MAX_RAW_VISITS raw
  *    nodes; a result whose JSON is longer than MAX_JSON_CHARS → null.
  *  - Structure is repaired: empty lists are dropped, a list item / product
- *    block with no paragraph gets an empty one, an empty doc gets one empty
- *    paragraph. Empty text nodes are dropped (ProseMirror rejects them).
+ *    block with no paragraph gets an empty one, a list item's extra
+ *    paragraphs merge into its first (joined with a hard break) so it reads
+ *    `paragraph (bulletList | orderedList)*` like the editor, an empty doc
+ *    gets one empty paragraph. Empty text nodes are dropped (ProseMirror rejects them).
  *
  * Iterative (an explicit stack), never recursive, so hostile nesting can't
  * blow the call stack. Pure; client-safe.
@@ -226,8 +228,30 @@ export function sanitizePackageDoc(raw: unknown): PackageDoc | null {
         if (at >= 0) parent.content.splice(at, 1);
       }
     } else if (kind === "listItem") {
-      const first = content[0] as { type?: string } | undefined;
-      if (!first || first.type !== "paragraph") content.unshift({ type: "paragraph" });
+      // The editor's list item is `paragraph (bulletList | orderedList)*`:
+      // one paragraph first, then lists. Extra paragraphs merge into the
+      // first, each joined with a hard break (text still capped per block).
+      const paras = content.filter((k) => (k as { type?: string }).type === "paragraph") as { type: string; content?: unknown[] }[];
+      const lists = content.filter((k) => (k as { type?: string }).type !== "paragraph");
+      const merged: unknown[] = [];
+      let left = MAX_BLOCK_TEXT;
+      paras.forEach((para, i) => {
+        if (i > 0) merged.push({ type: "hardBreak" });
+        for (const k of para.content || []) {
+          const tx = k as { type?: string; text?: string };
+          if (tx.type !== "text" || typeof tx.text !== "string") {
+            merged.push(k);
+            continue;
+          }
+          if (left <= 0) continue;
+          const text = tx.text.slice(0, left);
+          left -= text.length;
+          merged.push(text === tx.text ? k : { ...tx, text });
+        }
+      });
+      const first: { type: string; content?: unknown[] } = { type: "paragraph" };
+      if (merged.length) first.content = merged;
+      content.splice(0, content.length, first, ...lists);
     } else if (kind === "productBlock") {
       if (!content.length) content.push({ type: "paragraph" });
     }

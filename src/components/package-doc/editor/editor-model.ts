@@ -4,7 +4,7 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
 import { findLine, findSection } from "@/lib/package-doc/chips";
 import { productBlockInBom } from "@/lib/package-doc/gaps";
 import { docBlockPlaceholder } from "@/lib/package-doc/print";
-import { clampPhotoWidth, isPhotoAlign, MAX_BLOCK_TEXT, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
+import { clampPhotoWidth, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
 import { countNodes, sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { normalizeProductText } from "@/lib/package-doc/text";
 import type { PackageDoc, PDProductBlock, PhotoAttrs } from "@/lib/package-doc/types";
@@ -19,7 +19,8 @@ import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
  *    the library row is still loading.
  *  - docSizeState: the editor's raw JSON against the server caps — "near"
  *    within 10 % of the node cap or the 200 KB cap, "over" when the
- *    validator would drop or refuse anything (the editor then never emits:
+ *    validator would drop or refuse anything — node cap, a long block,
+ *    nesting deeper than MAX_DEPTH, or 200 KB (the editor then never emits:
  *    a silently cut document must never replace the stored one).
  *  - productBlockLabel / productPhotoPreview: what the product block's tag and
  *    photo preview show (the same photo order as the narrative column).
@@ -45,6 +46,16 @@ export function productTagText(label: string, state: ProductTagState | null): st
 }
 
 export const isLineTokenSku = (sku: string): boolean => /^line:\d+$/.test(sku);
+
+/** A line-token block (a custom or allowance line — no catalog part, no
+ *  library paragraph) never claims "from product" / "edited here":
+ *  `<label> · custom line`, with no Save to product or Revert. */
+export function customLineTagText(label: string): string {
+  return `${label} · custom line`;
+}
+
+/** How long "Saved to the product." stays (it also clears on the next edit). */
+export const SAVED_TO_PRODUCT_MS = 4000;
 
 /** The block's name: the line's printed heading while it is in the BOM,
  *  else the library description, else the sku. */
@@ -110,13 +121,30 @@ function longestTextblock(raw: unknown): number {
   return max;
 }
 
+/** Deepest node in a raw editor JSON tree, counted like the validator (the
+ *  doc's own children are depth 1). Iterative. */
+export function rawDepth(raw: unknown): number {
+  let max = 0;
+  const stack: [unknown, number][] = [];
+  const kids0 = raw && typeof raw === "object" && Array.isArray((raw as { content?: unknown }).content) ? ((raw as { content: unknown[] }).content) : [];
+  for (const k of kids0) stack.push([k, 1]);
+  while (stack.length) {
+    const [n, d] = stack.pop()!;
+    if (!n || typeof n !== "object") continue;
+    if (d > max) max = d;
+    const kids = (n as { content?: unknown }).content;
+    if (Array.isArray(kids)) for (const k of kids) stack.push([k, d + 1]);
+  }
+  return max;
+}
+
 const kb = (chars: number) => Math.round(chars / 1024);
 
 /** The editor's raw JSON against the server caps. */
 export function docSizeState(raw: unknown): DocSizeState {
   const content = raw && typeof raw === "object" && Array.isArray((raw as { content?: unknown }).content) ? ((raw as { content: unknown[] }).content) : [];
   const nodes = countNodes(content);
-  const doc = nodes > MAX_NODES || longestTextblock(raw) > MAX_BLOCK_TEXT ? null : sanitizePackageDoc(raw);
+  const doc = nodes > MAX_NODES || longestTextblock(raw) > MAX_BLOCK_TEXT || rawDepth(raw) > MAX_DEPTH ? null : sanitizePackageDoc(raw);
   const jsonChars = doc ? JSON.stringify(doc).length : JSON.stringify(raw ?? null).length;
   if (!doc) return { doc: null, nodes, jsonChars, level: "over", message: TOO_LARGE };
   if (nodes >= MAX_NODES * NEAR_CAP || jsonChars >= MAX_JSON_CHARS * NEAR_CAP)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { commentsBySection, numberComments } from "@/lib/estimate-review/comments";
 import { useCommentsFocusRefresh } from "../comment-pins";
@@ -72,6 +72,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
     setDetail,
     setIntros,
     setPackageDoc,
+    setPackageDocOver,
     setPaymentTerms,
     setSystemPresentation,
     t,
@@ -94,13 +95,23 @@ export function PackageStep({ s }: { s: EstimatorState }) {
   useEffect(() => {
     focusNarrIfPending();
   }, [focusNarrIfPending, showNarrative]);
+  /** Set by Remove: the editor unmounts because the document is gone, so its
+   *  unmount flush must not hand the removed document back. */
+  const discardRef = useRef(false);
+  useEffect(() => {
+    if (packageDoc) discardRef.current = false;
+  }, [packageDoc]);
   const startDocument = () => {
+    discardRef.current = false;
     setNarrOpen(false);
+    setPackageDocOver(false);
     setPackageDoc(seedPackageDoc({ sections, groups }));
   };
   const removeDocument = () => {
+    discardRef.current = true;
     setAskRemove(false);
     setNarrOpen(false);
+    setPackageDocOver(false);
     setPackageDoc(null);
   };
   const docCtx = useMemo<PackageDocCtx>(() => ({ sections, t, quoteId: quoteId || "", taxRatePct: 0 }), [sections, t, quoteId]);
@@ -264,6 +275,8 @@ export function PackageStep({ s }: { s: EstimatorState }) {
             <PackageDocEditor
               value={packageDoc}
               onChange={setPackageDoc}
+              onOverChange={setPackageDocOver}
+              discardRef={discardRef}
               ctx={docCtx}
               library={kpLib}
               canWriteLibrary={canWriteNarrativeLibrary}

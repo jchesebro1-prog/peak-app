@@ -1,5 +1,7 @@
 import { getSchema, mergeAttributes, Node, type AnyExtension, type Editor, type NodeViewRenderer } from "@tiptap/react";
-import { TextSelection } from "@tiptap/pm/state";
+import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
+import { sinkListItem } from "@tiptap/pm/schema-list";
+import { TextSelection, type Command, type Transaction } from "@tiptap/pm/state";
 import StarterKit, { type StarterKitOptions } from "@tiptap/starter-kit";
 import { CHIP_KINDS, clampPhotoWidth, DEFAULT_PHOTO, HEADING_LEVELS, isChipKind, isPhotoAlign } from "@/lib/package-doc/schema";
 import type { PhotoAttrs } from "@/lib/package-doc/types";
@@ -36,7 +38,39 @@ export const STARTER_KIT_OPTIONS: Partial<StarterKitOptions> = {
   heading: { levels: [...HEADING_LEVELS] },
 };
 
-/** List item: a paragraph, then nested lists only. */
+/** Deepest list nesting the editor allows. The validator drops nodes deeper
+ *  than MAX_DEPTH (12) — a 6th list level's paragraph sits at depth 13 — so
+ *  Tab refuses to indent past this, and docSizeState calls a deeper (pasted)
+ *  document "over". */
+export const MAX_LIST_LEVELS = 5;
+
+/** The deepest list-item nesting in a ProseMirror document (iterative). */
+export function maxListLevel(doc: PMNode): number {
+  let max = 0;
+  const stack: [PMNode, number][] = [[doc, 0]];
+  while (stack.length) {
+    const [n, lv] = stack.pop()!;
+    const here = n.type.name === "listItem" ? lv + 1 : lv;
+    if (here > max) max = here;
+    n.forEach((k) => stack.push([k, here]));
+  }
+  return max;
+}
+
+/** sinkListItem, refused when the result would nest lists deeper than
+ *  MAX_LIST_LEVELS (the sunk item's own sub-lists count). */
+export function sinkListItemCapped(itemType: NodeType): Command {
+  return (state, dispatch) => {
+    let out = null as Transaction | null;
+    if (!sinkListItem(itemType)(state, (tr) => (out = tr))) return false;
+    if (!out || maxListLevel(out.doc) > MAX_LIST_LEVELS) return false;
+    if (dispatch) dispatch(out);
+    return true;
+  };
+}
+
+/** List item: a paragraph, then nested lists only. Tab indents up to
+ *  MAX_LIST_LEVELS (a refused Tab inside a list is swallowed, not focus-moving). */
 export const PDListItem = Node.create({
   name: "listItem",
   content: "paragraph (bulletList | orderedList)*",
@@ -50,7 +84,10 @@ export const PDListItem = Node.create({
   addKeyboardShortcuts() {
     return {
       Enter: () => this.editor.commands.splitListItem(this.name),
-      Tab: () => this.editor.commands.sinkListItem(this.name),
+      Tab: () => {
+        const { view } = this.editor;
+        return sinkListItemCapped(this.type)(view.state, view.dispatch) || this.editor.isActive(this.name);
+      },
       "Shift-Tab": () => this.editor.commands.liftListItem(this.name),
     };
   },

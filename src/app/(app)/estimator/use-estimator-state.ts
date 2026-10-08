@@ -28,6 +28,7 @@ import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, s
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";
 import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
@@ -266,6 +267,9 @@ export function useEstimatorState(props: EstimatorProps) {
   /** Estimator Phase 5 — the Build package document (spec.document); null = none.
    *  Rides every Save (null removes it) and the PDF doc key. */
   const [packageDoc, setPackageDoc] = useState<PackageDoc | null>(initial.document ?? null);
+  /** Phase 5 fix — the editor holds more than the caps allow (it never emits
+   *  that copy), so a Save would only store the last valid document: refuse. */
+  const [packageDocOver, setPackageDocOver] = useState(false);
   const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups]);
 
   const defaultFabric = fabrics.some((f) => f.sku === "RB-MV-MN")
@@ -1060,6 +1064,14 @@ export function useEstimatorState(props: EstimatorProps) {
   const saveNow = async (): Promise<number | false> => {
     // #254 fix wave 2: never save while a tier lookup is in flight.
     if (tierResolvingRef.current) return false;
+    // Phase 5 fix: the editor's document is over the caps — nothing is written
+    // (a Save would otherwise store the last valid copy and say "Saved ✓").
+    if (packageDoc && packageDocOver) {
+      setActionNotice(null);
+      setGateRefused(false);
+      setActionError(PACKAGE_DOC_TOO_LARGE);
+      return false;
+    }
     const docAtSave = docInput;
     const repriceSeqAtSave = tierRepriceSeqRef.current;
     const cname = customerId
@@ -2914,6 +2926,8 @@ export function useEstimatorState(props: EstimatorProps) {
     viewerCanApprove,
     viewerName,
     wonMetaGuard,
+    packageDocOver,
+    setPackageDocOver,
     trackSummary,
     setTrackSummary,
     packageDoc,
