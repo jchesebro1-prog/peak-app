@@ -55939,7 +55939,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(/onSync=\{\(r, action\) => \{\s+applySync\(r\);\s+if \(r\.ok\) \{[\s\S]{0,120}onActed\(action\);/.test(step), "#P3 send UI: the Status panel's QuoteNextStep still moves steps only on r.ok");
   ok(/trackSummary,\s+setTrackSummary,\s+next,\s+\};\s+\}/.test(hook) && hook.includes("useState<{ opens: number; newReplies: number } | null>(null)"), "#P3 send UI: the hook holds trackSummary (next stays last in its return)");
   ok(act.includes("sendTrackAction(quoteId)") && act.includes('window.addEventListener("focus", refresh)') && act.includes("}, [quoteId, refreshKey]);"), "#P3 send UI: Activity reads on mount, on window focus and after a send");
-  ok(act.includes("onTrackRef.current({ opens: r.opens.total, newReplies: r.newReplies })"), "#P3 send UI: Activity lifts opens + new replies to the shell");
+  ok(act.includes("onTrackRef.current({ opens, newReplies: newRepliesOf(emails) })"), "#P3 send UI: Activity lifts opens + new replies to the shell");
   ok(/e\.textHidden \? \(\s*<div[^>]*>\{SEND_UI_COPY\.textHidden\(e\.ownerName\)\}/.test(act), "#P3 send UI: hidden text shows the explanation instead of messages");
   ok(act.includes("{e.canReply && (") && act.includes("{e.canReply && replyOpen && (") && /\{e\.canReply && \([\s\S]{0,400}\{SEND_UI_COPY\.reply\}[\s\S]{0,200}e\.unread > 0 &&[\s\S]{0,200}\{SEND_UI_COPY\.markRead\}/.test(act),
     "#P3 send UI: Reply and Mark read (unread > 0) only when canReply");
@@ -55950,4 +55950,50 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(!/#[0-9a-f]{3,6}"?\s*\/\*\s*accent/i.test(comp + act) && !comp.includes("est-doc") && !act.includes("window.print"), "#P3 send UI: no hardcoded accent, no preview-doc forbidden strings");
   ok(ESTIMATOR_FILES.includes("steps/send-composer.tsx") && ESTIMATOR_FILES.includes("steps/send-activity.tsx") && PREVIEW_FILES.includes("steps/send-composer.tsx") && PREVIEW_FILES.includes("steps/send-activity.tsx"),
     "#P3 send UI: the new step files are in the joined-source lists");
+}
+
+// ---- #P3 send UI fix: Activity refresh/patch race, constraint copy, fresh version on a stale refusal, labelled actions ----
+{
+  const C = p3ui.SEND_UI_COPY;
+  ok(C.deliveredLocal === "Sent locally (Gmail not connected)" && C.deliveredGmail === "Sent through Gmail", "#P3 send UI fix: Activity delivery copy is the constraint strings");
+  ok(!JSON.stringify(C).includes("Saved here only"), "#P3 send UI fix: the old 'Saved here only' copy is gone");
+  ok(C.replyTo("Estimate 1001") === 'Reply to "Estimate 1001"' && C.markReadOf("") === 'Mark read "(no subject)"', "#P3 send UI fix: labelled Reply / Mark read copy (subject, blank-subject fallback)");
+
+  // applyLoad — only the latest read, and only if no local patch committed since it started.
+  ok(p3ui.applyLoad({ seq: 3, latestSeq: 3, startedVersion: 0, version: 0 }), "#P3 send UI fix: the latest read with no newer patch applies");
+  ok(!p3ui.applyLoad({ seq: 2, latestSeq: 3, startedVersion: 0, version: 0 }), "#P3 send UI fix: a superseded read is dropped");
+  ok(!p3ui.applyLoad({ seq: 3, latestSeq: 3, startedVersion: 0, version: 1 }), "#P3 send UI fix: a read that began before a reply / Mark read commit can't overwrite it");
+  ok(p3ui.applyLoad({ seq: 4, latestSeq: 4, startedVersion: 1, version: 1 }), "#P3 send UI fix: a read that began after the patch applies");
+
+  // shouldFocusLoad — debounced, and skipped while a read is in flight.
+  ok(p3ui.FOCUS_DEBOUNCE_MS >= 1000, "#P3 send UI fix: focus debounce is at least 1 s");
+  ok(p3ui.shouldFocusLoad({ now: 5000, lastAt: 0, inFlight: 0 }) && !p3ui.shouldFocusLoad({ now: 5500, lastAt: 5000, inFlight: 0 }) && p3ui.shouldFocusLoad({ now: 6000, lastAt: 5000, inFlight: 0 }) && !p3ui.shouldFocusLoad({ now: 9000, lastAt: 0, inFlight: 1 }),
+    "#P3 send UI fix: a focus read is debounced and skipped while one is in flight");
+
+  // patchEmail is pure and per-thread; the badge total follows the result.
+  const before: Array<{ threadId: string; unread: number }> = [{ threadId: "a", unread: 2 }, { threadId: "b", unread: 1 }];
+  const after = p3ui.patchEmail(before, "a", { unread: 0 });
+  ok(!!after && after[0].unread === 0 && after[1].unread === 1 && before[0].unread === 2 && p3ui.newRepliesOf(after) === 1 && p3ui.patchEmail<{ threadId: string; unread: number }>(null, "a", { unread: 0 }) === null,
+    "#P3 send UI fix: patchEmail changes one thread without mutating; the total recomputes from the result");
+
+  // A stale-version refusal that carries the fresh view still syncs.
+  const freshNext = { asOf: 99 } as unknown as import("@/lib/quote-next-step").QuoteNextStepView;
+  const sStale = p3ui.sendSync({ ok: false, error: "This quote changed since you opened it — reload to review the current version.", status: "draft", next: freshNext });
+  ok(!!sStale && !sStale.ok && sStale.next === freshNext && sStale.status === "draft", "#P3 send UI fix: a refusal carrying next syncs (the retry uses the new asOf)");
+  ok(p3ui.sendSync({ ok: false, error: "Add a subject." }) === null, "#P3 send UI fix: a refusal with no next still syncs nothing");
+
+  const rdF = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const act = rdF("src/app/(app)/estimator/steps/send-activity.tsx");
+  const actions = rdF("src/app/(app)/estimator/send-actions.ts");
+  const server = rdF("src/lib/estimate-email/send-server.ts");
+  ok(act.includes("setEmails((prev) => patchEmail(prev, threadId, next));") && !act.includes("{ ...e, ...next }") && act.includes("versionRef.current += 1;"),
+    "#P3 send UI fix: patches are functional setEmails and bump the version");
+  ok(act.includes("const seq = ++seqRef.current;") && act.includes("applyLoad({ seq, latestSeq: seqRef.current, startedVersion, version: versionRef.current })") && act.includes("inFlightRef.current += 1;") && (act.match(/inFlightRef\.current -= 1;/g) || []).length === 2,
+    "#P3 send UI fix: reads carry a sequence + version guard and track in-flight");
+  ok(act.includes("shouldFocusLoad({ now, lastAt: lastFocusRef.current, inFlight: inFlightRef.current })") && act.includes("lastFocusRef.current = now;"), "#P3 send UI fix: focus reads are debounced and skip while one is in flight");
+  ok(/useEffect\(\(\) => \{\s+if \(emails\) onTrackRef\.current\(\{ opens, newReplies: newRepliesOf\(emails\) \}\);\s+\}, \[emails, opens\]\);/.test(act),
+    "#P3 send UI fix: the lifted summary recomputes from the resulting state");
+  ok(act.includes("aria-label={SEND_UI_COPY.replyTo(e.subject)}") && act.includes("aria-label={SEND_UI_COPY.markReadOf(e.subject)}"), "#P3 send UI fix: Reply and Mark read name their email");
+  ok(server.includes("export const SEND_COPY") && actions.includes("r.error === SEND_COPY.changedSince") && (actions.match(/if \(!r\.ok && !r\.markedSent && !isStaleRefusal\(r\)\) return r;/g) || []).length === 2,
+    "#P3 send UI fix: both send actions attach the fresh view to the stale-version refusal");
 }

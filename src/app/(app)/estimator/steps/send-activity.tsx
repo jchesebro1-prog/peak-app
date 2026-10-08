@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { TrackedEmail } from "@/lib/estimate-email/track-server";
-import { activityTime, newRepliesOf, SEND_UI_COPY } from "@/lib/estimate-email/send-ui";
+import { activityTime, applyLoad, newRepliesOf, patchEmail, SEND_UI_COPY, shouldFocusLoad } from "@/lib/estimate-email/send-ui";
 import { markEstimateEmailReadAction, replyToEstimateEmailAction, sendTrackAction } from "../send-actions";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 
@@ -45,29 +45,44 @@ export function SendActivity({
   useEffect(() => {
     onTrackRef.current = onTrack;
   }, [onTrack]);
+  // Read bookkeeping: `seq` numbers each read (only the latest may apply), `version`
+  // bumps on every local patch (a read that started before it must not overwrite it),
+  // `inFlight` lets a focus skip while a read is running, `lastFocus` debounces focus.
+  const seqRef = useRef(0);
+  const versionRef = useRef(0);
+  const inFlightRef = useRef(0);
+  const lastFocusRef = useRef(0);
 
   useEffect(() => {
     let live = true;
-    const load = () =>
-      sendTrackAction(quoteId).then(
+    const load = () => {
+      const seq = ++seqRef.current;
+      const startedVersion = versionRef.current;
+      inFlightRef.current += 1;
+      return sendTrackAction(quoteId).then(
         (r) => {
-          if (!live) return;
+          inFlightRef.current -= 1;
+          if (!live || !applyLoad({ seq, latestSeq: seqRef.current, startedVersion, version: versionRef.current })) return;
           if (r.ok) {
             setEmails(r.emails);
             setOpens(r.opens.total);
             setErr(null);
-            onTrackRef.current({ opens: r.opens.total, newReplies: r.newReplies });
           } else setErr(r.error);
         },
         () => {
+          inFlightRef.current -= 1;
           // A failed re-read keeps what's shown.
           if (live) setErr((e) => e ?? SEND_UI_COPY.failed);
         }
       );
+    };
     void load();
     // Re-read on focus: a reply may have arrived (Gmail import) while the tab was away.
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (!shouldFocusLoad({ now, lastAt: lastFocusRef.current, inFlight: inFlightRef.current })) return;
+      lastFocusRef.current = now;
       void load();
     };
     window.addEventListener("focus", refresh);
@@ -77,12 +92,15 @@ export function SendActivity({
     };
   }, [quoteId, refreshKey]);
 
-  /** One email changed in place (a reply or Mark read); the badge follows. */
+  // The Send badge follows the resulting state — after a read AND after a local patch.
+  useEffect(() => {
+    if (emails) onTrackRef.current({ opens, newReplies: newRepliesOf(emails) });
+  }, [emails, opens]);
+
+  /** One email changed in place (a reply or Mark read). */
   const patch = (threadId: string, next: Partial<TrackedEmail>) => {
-    if (!emails) return;
-    const out = emails.map((e) => (e.threadId === threadId ? { ...e, ...next } : e));
-    setEmails(out);
-    onTrackRef.current({ opens, newReplies: newRepliesOf(out) });
+    versionRef.current += 1;
+    setEmails((prev) => patchEmail(prev, threadId, next));
   };
 
   return (
@@ -197,12 +215,12 @@ function EmailRow({ quoteId, email: e, onPatch }: { quoteId: string; email: Trac
       {e.canReply && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
           {!replyOpen && (
-            <button type="button" disabled={pending} onClick={() => setReplyOpen(true)} style={BTN}>
+            <button type="button" disabled={pending} onClick={() => setReplyOpen(true)} aria-label={SEND_UI_COPY.replyTo(e.subject)} style={BTN}>
               {SEND_UI_COPY.reply}
             </button>
           )}
           {e.unread > 0 && (
-            <button type="button" disabled={pending} onClick={markRead} style={{ ...BTN, opacity: pending ? 0.55 : 1 }}>
+            <button type="button" disabled={pending} onClick={markRead} aria-label={SEND_UI_COPY.markReadOf(e.subject)} style={{ ...BTN, opacity: pending ? 0.55 : 1 }}>
               {SEND_UI_COPY.markRead}
             </button>
           )}

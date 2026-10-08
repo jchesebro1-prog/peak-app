@@ -37,7 +37,9 @@ export const SEND_UI_COPY = {
   cancel: "Cancel",
   markRead: "Mark read",
   deliveredGmail: "Sent through Gmail",
-  deliveredLocal: "Saved here only — not through Gmail",
+  deliveredLocal: "Sent locally (Gmail not connected)",
+  replyTo: (subject: string) => `Reply to "${subject || "(no subject)"}"`,
+  markReadOf: (subject: string) => `Mark read "${subject || "(no subject)"}"`,
   textHidden: (owner: string) => `Message text is visible to ${owner || "the mailbox owner"}, approvers and the lead estimator.`,
   opens: (n: number) => `Client link opened ${n} time${n === 1 ? "" : "s"}`,
 } as const;
@@ -120,10 +122,12 @@ export function sendResultMessage(r: SendLikeResult): SendNotice {
   return { tone: "error", text: r.error || SEND_UI_COPY.failed, ...(r.href ? { href: r.href } : {}) };
 }
 
-/** The editor's applySync payload — on success, and on a failure that still
- *  marked the quote sent; null = nothing on the quote changed. */
+/** The editor's applySync payload — on success, on a failure that still
+ *  marked the quote sent, and on any result that carries a fresh `next`
+ *  (the stale-version refusal); null = nothing on the quote changed. */
 export function sendSync(r: SendLikeResult): { ok: boolean; review: null; status: QuoteStatus | null; next?: QuoteNextStepView | null } | null {
-  if (!r.ok && !r.markedSent) return null;
+  // A stale-version refusal carries the fresh view (`next`) so the retry uses the new asOf.
+  if (!r.ok && !r.markedSent && r.next === undefined) return null;
   return { ok: r.ok, review: null, status: r.status ?? null, ...(r.next !== undefined ? { next: r.next } : {}) };
 }
 
@@ -136,4 +140,27 @@ export function activityTime(ms: number): string {
 /** Unread customer replies across the tracked emails (after a local Mark read / Reply). */
 export function newRepliesOf(emails: ReadonlyArray<{ unread: number }>): number {
   return emails.reduce((n, e) => n + (Number.isFinite(e.unread) && e.unread > 0 ? e.unread : 0), 0);
+}
+
+/** Refocus re-reads are debounced to this (ms). */
+export const FOCUS_DEBOUNCE_MS = 1000;
+
+/** Window focus re-reads Activity unless one is already in flight or the last focus read was < FOCUS_DEBOUNCE_MS ago. */
+export function shouldFocusLoad(o: { now: number; lastAt: number; inFlight: number }): boolean {
+  return o.inFlight === 0 && o.now - o.lastAt >= FOCUS_DEBOUNCE_MS;
+}
+
+/**
+ * A finished Activity read may replace the shown state only if it is still the
+ * latest read (`seq`) AND no local patch (reply / Mark read) committed since it
+ * started (`startedVersion` vs the current `version`) — otherwise it would
+ * overwrite newer state with an older server snapshot.
+ */
+export function applyLoad(l: { seq: number; latestSeq: number; startedVersion: number; version: number }): boolean {
+  return l.seq === l.latestSeq && l.startedVersion === l.version;
+}
+
+/** One email changed in place — pure, so it can run inside a functional state update. */
+export function patchEmail<E extends { threadId: string }>(emails: E[] | null, threadId: string, patch: Partial<E>): E[] | null {
+  return emails ? emails.map((e) => (e.threadId === threadId ? { ...e, ...patch } : e)) : emails;
 }

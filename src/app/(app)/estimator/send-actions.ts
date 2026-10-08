@@ -67,6 +67,9 @@ async function requestWhere(): Promise<{ origin: string; host: string | null; pr
   return "error" in where ? { error: where.error } : { origin: where.origin, host, proto };
 }
 
+/** The "changed since you opened it" refusal — the client needs the fresh view to retry against. */
+const isStaleRefusal = (r: { ok: boolean; error?: string }) => !r.ok && r.error === SEND_COPY.changedSince;
+
 async function freshView(quoteId: string, user: SessionUser): Promise<{ status?: QuoteStatus; next: QuoteNextStepView | null }> {
   revalidatePath("/", "layout");
   try {
@@ -88,7 +91,7 @@ export async function sendEstimateEmailAction(quoteId: string, input: unknown): 
   const id = String(quoteId || "");
   const actor = { id: user.id, name: user.name, roles: user.roles, email: user.email ?? null };
   const r = await sendEstimateEmail(liveEstimateEmailDeps({ ...where, actor }), actor, id, cleanInput(input));
-  if (!r.ok && !r.markedSent) return r;
+  if (!r.ok && !r.markedSent && !isStaleRefusal(r)) return r;
   return { ...r, ...(await freshView(id, user)) };
 }
 
@@ -101,7 +104,7 @@ export async function openEstimateInInboxAction(quoteId: string, input: unknown)
   const id = String(quoteId || "");
   const actor = { id: user.id, name: user.name, roles: user.roles, email: user.email ?? null };
   const r = await openEstimateInInbox(liveEstimateEmailDeps({ ...where, actor }), actor, id, cleanInput(input));
-  if (!r.ok && !r.markedSent) return r;
+  if (!r.ok && !r.markedSent && !isStaleRefusal(r)) return r;
   return { ...r, ...(await freshView(id, user)) };
 }
 
