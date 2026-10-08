@@ -26,6 +26,8 @@ import SpecKeySelect, { autoSpecKeyFor } from "@/components/spec-key-select";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
 import { DISCIPLINES, DISCIPLINE_LABEL, autoDisciplineLabel, type ScopeDiscipline } from "@/lib/estimate-output/fields";
+import { CommentPin } from "./comment-pins";
+import type { NumberedComment } from "@/lib/estimate-review/comments";
 import { GROUPS_MAX, type SystemGroup } from "@/lib/estimate-groups/groups";
 
 /** Phase 2a: the Group select's "+ New group" option value (never a group id — those are g-…). */
@@ -118,6 +120,12 @@ export type SectionCardProps = {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onToggleExpand: () => void;
   onRename: (name: string) => void;
+  /** Phase 4: this system's OPEN review comments (numbered) — the header pin lists them. */
+  comments: NumberedComment[];
+  /** Phase 4: the viewer may resolve a comment (`canResolve`). */
+  canResolveComments: boolean;
+  /** Phase 4: resolve one comment; resolves to an error message or null. */
+  onResolveComment: (commentId: string) => Promise<string | null>;
   /** #281: the narrative is written in the estimator's right column — the
    *  card's snippet button asks the parent to open + focus it for this system. */
   onEditNarrative: () => void;
@@ -403,6 +411,13 @@ export default function SectionCard(p: SectionCardProps) {
                   flex: 1,
                   minWidth: 0,
                 }}
+              />
+              <CommentPin
+                label={`💬 ${p.comments.length}`}
+                system={sec.name || "Untitled system"}
+                comments={p.comments}
+                mayResolve={p.canResolveComments}
+                onResolve={p.onResolveComment}
               />
               {p.built && (
                 <span

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { commentsBySection, numberComments } from "@/lib/estimate-review/comments";
+import { useCommentsFocusRefresh } from "../comment-pins";
 import NarrativeColumn from "../narrative-column";
 import { PdfOptionsPanel } from "../preview-doc";
 import { CoverPackagePanel } from "../cover-package-panel";
@@ -46,6 +48,11 @@ export function PackageStep({ s }: { s: EstimatorState }) {
     togglePdf,
     updateSection,
   } = s;
+  useCommentsFocusRefresh(s);
+  const pinned = useMemo(
+    () => commentsBySection(numberComments(s.reviewComments, sections), sections.map((x) => x.id)),
+    [s.reviewComments, sections]
+  );
   // A card's narrative snippet on Build asked for focus before this step (and its textarea) existed.
   useEffect(() => {
     focusNarrIfPending();
@@ -54,6 +61,11 @@ export function PackageStep({ s }: { s: EstimatorState }) {
   return (
     <div className="est-body" style={{ flex: 1, display: "flex", minHeight: 0 }}>
       <nav aria-label="Systems" className="est-scroll" style={{ width: 220, flexShrink: 0, overflowY: "auto", background: "#fff", borderRight: "1px solid #ececf0", padding: "16px 10px" }}>
+        {pinned.whole.length > 0 && (
+          <div style={{ padding: "0 10px 8px", fontSize: 11.5, fontWeight: 600, color: ACCENT_INK }}>
+            <span aria-label={`${pinned.whole.length} review comment${pinned.whole.length === 1 ? "" : "s"} on the whole estimate`}>💬 {pinned.whole.length} on the whole estimate</span>
+          </div>
+        )}
         {sections.map((x) => (
           <button
             key={x.id}
@@ -77,6 +89,14 @@ export function PackageStep({ s }: { s: EstimatorState }) {
             }}
           >
             {x.name || "Untitled"}
+            {(pinned.bySection[x.id]?.length ?? 0) > 0 && (
+              <span
+                aria-label={`${pinned.bySection[x.id].length} review comment${pinned.bySection[x.id].length === 1 ? "" : "s"}`}
+                style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: ACCENT_INK }}
+              >
+                💬 {pinned.bySection[x.id].length}
+              </span>
+            )}
           </button>
         ))}
       </nav>

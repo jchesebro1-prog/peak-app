@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { Fragment, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { withDiscipline } from "@/lib/estimate-output/fields";
 import { GROUPS_MAX } from "@/lib/estimate-groups/groups";
+import { canResolve, commentsBySection, numberComments, type NumberedComment } from "@/lib/estimate-review/comments";
 import { pointsLabel } from "@/lib/rewards/points";
 import { SIDE_TOGGLE } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
@@ -11,6 +12,7 @@ import { fmt, short, systemSellTotal } from "../pricing";
 import { vendorAttachmentLoad } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import SectionCard from "../section-card";
+import { CommentPin, useCommentsFocusRefresh, useResolveComment } from "../comment-pins";
 import SystemLibraryModal from "../system-library-modal";
 import AiScopeModal from "../ai-scope-modal";
 import CurtainModal from "../curtain-modal";
@@ -25,6 +27,8 @@ import { PortalPanel } from "../portal-panel";
  * the system cards and every configurator modal. A card's narrative snippet
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
+const NO_COMMENTS: NumberedComment[] = [];
+
 export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNarrative: () => void }) {
   /** Phase 2a: the rail group whose name is being edited (a new group opens in rename). */
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -180,6 +184,14 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     vendors,
     venueRoomName,
   } = s;
+  /* Phase 4 — open review comments pinned to the systems (the shared list is loaded by the hook). */
+  const pinned = useMemo(
+    () => commentsBySection(numberComments(s.reviewComments, sections), sections.map((x) => x.id)),
+    [s.reviewComments, sections]
+  );
+  const mayResolveComments = canResolve(s.viewerRoles, {});
+  const resolveComment = useResolveComment(s);
+  useCommentsFocusRefresh(s);
 
   return (
     <div
@@ -375,6 +387,17 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
           }}
         >
           {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
+          {pinned.whole.length > 0 && (
+            <div style={{ margin: "0 0 12px" }}>
+              <CommentPin
+                label={`💬 ${pinned.whole.length} on the whole estimate`}
+                system="the whole estimate"
+                comments={pinned.whole}
+                mayResolve={mayResolveComments}
+                onResolve={resolveComment}
+              />
+            </div>
+          )}
           {/* Phase 2a: cards stack in `blocks` order (= the stored order) with a divider per group. */}
           {blocks.map((b, bi) => {
             const first = blocks.slice(0, bi).reduce((n, x) => n + x.sections.length, 0);
@@ -445,6 +468,9 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                     }}
                     onToggleExpand={() => toggleExpand(sec.id)}
                     onRename={(name) => renameSystem(sec.id, name)}
+                    comments={pinned.bySection[sec.id] || NO_COMMENTS}
+                    canResolveComments={mayResolveComments}
+                    onResolveComment={resolveComment}
                     onEditNarrative={() => {
                       // #281/#305: make this system active, open Build package, focus its narrative there.
                       setActiveId(sec.id);

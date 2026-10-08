@@ -56961,3 +56961,38 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
   ok(/setReviewCommentsState\(\[\]\);\s+if \(!loadedId\) return;\s+listReviewCommentsAction\(loadedId\)/.test(hookSrc),
     "#P4 review UI fix: the hook clears the comments (and drops an in-flight read) when loadedId changes, before refetching");
 }
+
+// ---- #P4 pins: review comment pins on the Build cards and the Build package nav ----
+import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/estimate-review/comments";
+{
+  const secs = [{ id: "a", name: "Audio" }, { id: "b", name: "Video" }];
+  const mk = (id: string, sectionId: string | null, at: number, resolvedAt?: number) => ({ id, sectionId, body: "b" + id, by: "Jeff", at, ...(resolvedAt ? { resolvedAt } : {}) });
+  const numbered = p4pNumber([mk("c1", "b", 3), mk("c2", null, 5), mk("c3", "a", 1), mk("c4", "gone", 2), mk("c5", "a", 4, 99)], secs);
+  const g = p4pBy(numbered, secs.map((x) => x.id));
+  ok(g.whole.map((r) => r.comment.id).join() === "c2,c4" || g.whole.map((r) => r.comment.id).join() === "c4,c2",
+    "#P4 pins: commentsBySection puts whole-estimate comments and those on a deleted system together");
+  ok(g.bySection.a?.map((r) => r.comment.id).join() === "c3" && g.bySection.b?.map((r) => r.comment.id).join() === "c1" && !g.bySection.c5,
+    "#P4 pins: commentsBySection groups open comments per existing system and drops resolved ones");
+  ok(g.whole.length + Object.values(g.bySection).reduce((n, l) => n + l.length, 0) === numbered.length && numbered.every((r, i) => r.n === i + 1),
+    "#P4 pins: every open comment lands in exactly one group, numbering kept");
+  ok(p4pBy([], ["a"]).whole.length === 0 && Object.keys(p4pBy([], ["a"]).bySection).length === 0, "#P4 pins: no comments → no pins");
+
+  const rf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pinSrc = rf(`${EST_DIR}/comment-pins.tsx`);
+  const cardSrc = rf(`${EST_DIR}/section-card.tsx`);
+  const buildSrc = rf(`${EST_DIR}/steps/build-step.tsx`);
+  const pkgSrc = rf(`${EST_DIR}/steps/package-step.tsx`);
+  ok(pinSrc.includes("aria-expanded={open}") && pinSrc.includes("review comment${n === 1 ? \"\" : \"s\"} on ${system}`") && pinSrc.includes('e.key === "Escape"') &&
+     pinSrc.includes('document.addEventListener("pointerdown", onDoc, true)') && pinSrc.includes("ACCENT_SOFT") && pinSrc.includes("ACCENT_INK"),
+    "#P4 pins: the badge is a button with aria-expanded and an 'N review comments on <system>' label; Escape / outside click close the popover; accent from the shared tokens");
+  ok(pinSrc.includes("{mayResolve && (") && pinSrc.includes("resolveReviewCommentAction(loadedId, commentId)") && pinSrc.includes("setReviewComments(r.comments)") && pinSrc.includes("commentActionLabel(\"resolve\", num)"),
+    "#P4 pins: Resolve is gated on mayResolve, calls the resolve action and publishes the fresh shared list");
+  ok(buildSrc.includes("canResolve(s.viewerRoles, {})") && buildSrc.includes("commentsBySection(numberComments(s.reviewComments, sections)") && buildSrc.includes("comments={pinned.bySection[sec.id] || NO_COMMENTS}") &&
+     buildSrc.includes("on the whole estimate`") && buildSrc.includes("useCommentsFocusRefresh(s)"),
+    "#P4 pins: Build passes each card its numbered comments, shows one whole-estimate pin and refreshes on focus");
+  ok(cardSrc.includes("<CommentPin") && cardSrc.includes("comments: NumberedComment[]") && cardSrc.includes("onResolveComment: (commentId: string)"), "#P4 pins: the system card header renders the pin");
+  ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
+    "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
+  ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 5, "#P4 pins: setSectionsState( count unchanged");
+}

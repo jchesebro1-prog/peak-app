@@ -76,6 +76,26 @@ export function numberComments(
 }
 
 /**
+ * Group the numbered OPEN comments for the Build pins: `whole` = whole-estimate
+ * comments (and any whose system is gone), `bySection` = per existing system id.
+ * Keeps the numbering order inside each group.
+ */
+export function commentsBySection(
+  numbered: ReadonlyArray<NumberedComment>,
+  sectionIds: ReadonlyArray<string>
+): { whole: NumberedComment[]; bySection: Record<string, NumberedComment[]> } {
+  const known = new Set(sectionIds);
+  const whole: NumberedComment[] = [];
+  const bySection: Record<string, NumberedComment[]> = {};
+  for (const r of numbered || []) {
+    const id = r.comment.sectionId;
+    if (id !== null && known.has(id)) (bySection[id] ||= []).push(r);
+    else whole.push(r);
+  }
+  return { whole, bySection };
+}
+
+/**
  * The approver's send-back note:
  *   `<n> comment(s) to address:` then `N. <System | Whole estimate> — <body>`
  *   per open comment, then a blank line and the approver's own text. With no
