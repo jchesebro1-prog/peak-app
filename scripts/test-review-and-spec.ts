@@ -11530,6 +11530,7 @@ seeded()
   .then(() => sheetAdjust318StaleSheetChecks())
   .then(() => pagesAsSheets319PureChecks())
   .then(() => pagesAsSheets319BytesChecks())
+  .then(() => pagesAsSheets319StoreChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59305,7 +59306,7 @@ import {
   ok(addOpt.includes("quoteId: null, createdAt: at") && !addOpt.includes("estimateOwned"),
     "#314 pin: a copied option starts with no quote and no estimate link (the existing quoteId copy rule)");
   ok(rd("src/lib/design/grid-auto-fill.ts").includes("const baseId = project.intake?.baseSheetId;") && store.includes("p.intake.baseSheetId = sheet.id;") &&
-     store.includes("p.sheetIds = input.first ? [sheet.id, ...(p.sheetIds || [])] : [...(p.sheetIds || []), sheet.id];"),
+     store.includes("p.sheetIds = opts.first ? [...ids, ...(p.sheetIds || [])] : [...(p.sheetIds || []), ...ids];"),
     "#314 pin: an intake plan view goes first, so Auto fill finds the generated base sheet by its stamped id");
   ok(rd("src/app/api/grid-sheets/upload/route.ts").includes('String(form.get("position") || "") === "first"'), "#314 pin: the sheet upload route takes position=first (same route, same checks)");
   const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
@@ -60246,4 +60247,88 @@ async function pagesAsSheets319BytesChecks(): Promise<void> {
   const broken = await X.splitPdfPages(new TextEncoder().encode("%PDF-1.7 not really a pdf"));
   ok(!tooBig.ok && tooBig.reason === "too-big" && !broken.ok && broken.reason === "unreadable",
     "#319 split output over the byte budget is 'too-big'; a broken PDF is 'unreadable'");
+}
+
+/* ---------------- #319: retire the generated plan + addSheets (store) ---------------- */
+async function pagesAsSheets319StoreChecks(): Promise<void> {
+  // In-database sheets only (data-URLs): this suite never writes to Blob.
+  const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  try {
+    const G = await import("@/lib/stores/grid-projects");
+    const DS = await import("@/db/doc-store");
+    const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+    const J = (v: unknown) => JSON.stringify(v);
+    const by = "Test Harness";
+    const SVG = "data:image/svg+xml,<svg/>";
+    const PNG = "data:image/png;base64,iVBORw0KGgo=";
+    const square = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }];
+    const line = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }];
+    /** A design whose intake stamped a generated plan, plus one uploaded plan. */
+    const setup = async (label: string) => {
+      const gp = await G.createProject({ name: `#319 ${label}`, customer: "Spec fixture", customerId: null, by });
+      registerFixture("grid_projects", gp.id);
+      const base = (await G.addSheet(gp.id, { name: "Generated base plan", mime: "image/svg+xml", dataUrl: SVG, by }))!;
+      registerFixture("grid_sheets", base.id);
+      await G.saveGridIntake(gp.id, { complete: true, measurementBased: true, venueName: "V", locationName: "L", address: "", notes: "", baseSheetId: base.id });
+      const plan = (await G.addSheet(gp.id, { name: "Plan.png", mime: "image/png", dataUrl: PNG, by }))!;
+      registerFixture("grid_sheets", plan.id);
+      return { gp, base, plan };
+    };
+
+    // Spaces only → removed, after one automatic revision; another sheet's Space stays.
+    const s1 = await setup("spaces only");
+    await G.addSpace(s1.gp.id, { sheetId: s1.base.id, page: 1, name: "Stage", points: square, by });
+    await G.addSpace(s1.gp.id, { sheetId: s1.plan.id, page: 1, name: "Keep", points: square, by });
+    const revs1 = ((await G.getProject(s1.gp.id))!.revisions || []).length;
+    const out1 = await G.retireBaseSheet(s1.gp.id, by);
+    const p1 = (await G.getProject(s1.gp.id))!;
+    ok(out1 === "removed" && J(p1.sheetIds) === J([s1.plan.id]) && (p1.spaces || []).length === 1 && (p1.spaces || [])[0].sheetId === s1.plan.id,
+      "#319 retireBaseSheet: a generated plan with only Spaces is removed, its Spaces with it (another sheet's stays)");
+    const rev = (p1.revisions || []).at(-1);
+    ok((p1.revisions || []).length === revs1 + 1 && rev?.reason === "manual" && rev.note === "Auto-saved before removing the generated plan" && rev.by === by && rev.sheetIds.includes(s1.base.id),
+      "#319 retireBaseSheet cuts one automatic revision first (it still lists the generated plan)");
+    ok(p1.intake?.baseSheetId === s1.base.id && !!(await DS.getDoc("grid_sheets", s1.base.id)),
+      "#319 intake.baseSheetId is kept (Auto fill keys off it) and the sheet doc stays readable (revisions name it)");
+    ok((await G.retireBaseSheet(s1.gp.id, by)) === null, "#319 a second retire is a no-op (the generated plan is no longer listed)");
+
+    // An empty generated plan → removed with no revision (nothing to recover).
+    const s0 = await setup("empty");
+    const revs0 = ((await G.getProject(s0.gp.id))!.revisions || []).length;
+    ok((await G.retireBaseSheet(s0.gp.id, by)) === "removed" && ((await G.getProject(s0.gp.id))!.revisions || []).length === revs0,
+      "#319 an empty generated plan is removed without a revision (like Delete sheet)");
+
+    // A device → kept; a wire only → kept as wires.
+    const s2 = await setup("device");
+    await G.addPlacement(s2.gp.id, { sheetId: s2.base.id, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by });
+    await G.addRoute(s2.gp.id, { sheetId: s2.base.id, page: 1, partId: "TEST-WIRE", points: line, aspect: 1, optionId: DEFAULT_OPTION_ID, by });
+    ok(J(await G.retireBaseSheet(s2.gp.id, by)) === J({ kept: 1, what: "devices" }) && (await G.getProject(s2.gp.id))!.sheetIds.includes(s2.base.id),
+      "#319 a generated plan with a device on it stays: {kept: 1, what: devices} (devices counted before wires)");
+    const s3 = await setup("wire");
+    await G.addRoute(s3.gp.id, { sheetId: s3.base.id, page: 1, partId: "TEST-WIRE", points: line, aspect: 1, optionId: DEFAULT_OPTION_ID, by });
+    ok(J(await G.retireBaseSheet(s3.gp.id, by)) === J({ kept: 1, what: "wires" }), "#319 with only a wire on it, it stays and the wires are counted");
+
+    // No generated plan, or no design → null.
+    const plain = await G.createProject({ name: "#319 plain", customer: "Spec fixture", customerId: null, by });
+    registerFixture("grid_projects", plain.id);
+    ok((await G.retireBaseSheet(plain.id, by)) === null && (await G.retireBaseSheet("GRD-0", by)) === null, "#319 no generated plan (or no design) → nothing retired");
+
+    // addSheets: a run appended in order, or put FIRST in order; the split stamp is stored.
+    const ab = await G.addSheets(plain.id, [
+      { name: "Set.pdf — p.1", mime: "application/pdf", dataUrl: PNG, split: { from: "Set.pdf", page: 1, pages: 2 } },
+      { name: "Set.pdf — p.2", mime: "application/pdf", dataUrl: PNG, split: { from: "Set.pdf", page: 2, pages: 2 } },
+    ], { by });
+    const ff = await G.addSheets(plain.id, [{ name: "F1", mime: "image/png", dataUrl: PNG }, { name: "F2", mime: "image/png", dataUrl: PNG }], { by, first: true });
+    for (const s of [...(ab || []), ...(ff || [])]) registerFixture("grid_sheets", s.id);
+    const pp = (await G.getProject(plain.id))!;
+    const doc1 = ab ? await DS.getDoc<import("@/lib/stores/grid-projects").GridSheet>("grid_sheets", ab[0].id) : null;
+    ok(!!ab && !!ff && J(pp.sheetIds) === J([ff[0].id, ff[1].id, ab[0].id, ab[1].id]) && J(doc1?.split) === J({ from: "Set.pdf", page: 1, pages: 2 }) &&
+       doc1?.addedBy === by && ab.every((s) => /^gs-[0-9a-f]{12}$/.test(s.id)),
+      "#319 addSheets appends a run in order, or puts the whole run FIRST in order; the split stamp is stored");
+    ok((await G.addSheets("GRD-0", [{ name: "x", mime: "image/png", dataUrl: PNG }], { by })) === null && J(await G.addSheets(plain.id, [], { by })) === "[]",
+      "#319 addSheets: no design → null; nothing to add → []");
+  } finally {
+    if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+  }
 }

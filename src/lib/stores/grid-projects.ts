@@ -34,6 +34,7 @@ import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-draw
 import { cleanSymbolDisplay, type SymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { cleanIntakeNotices, MAX_INTAKE_NOTICES, type GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import { blockedPages, remapSheetRefs, type SheetAdjust } from "@/lib/design/sheet-adjust";
+import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import {
@@ -338,6 +339,10 @@ export type GridSheet = {
    *  ORIGINAL upload it was made from (always the root, never a chain) and
    *  the per-page spec (lib/design/sheet-adjust). Absent on an upload. */
   adjust?: SheetAdjust;
+  /** #319: set on each sheet split from a multi-page PDF upload — the file it
+   *  came from and which page (display/provenance only). Each is its own root
+   *  for Adjust sheet (no `adjust`). Absent on any other sheet. */
+  split?: SheetSplit;
   addedBy: string;
   at: number;
 };
@@ -604,6 +609,9 @@ export async function setLinesetDesign(projectId: string, designId: string | nul
   });
 }
 
+/** One new sheet's file — exactly one of dataUrl / blobPath carries the bytes. */
+export type NewSheetFile = { name: string; mime: string; dataUrl?: string; url?: string; blobPath?: string; split?: SheetSplit };
+
 /** Upload one plan background and append it to the project's sheet order.
  *  Exactly one of dataUrl/url should carry the file (the action decides —
  *  Blob when the token exists, in-database otherwise). `first` (#314, the
@@ -620,25 +628,37 @@ export async function addSheet(
     first?: boolean;
   }
 ): Promise<GridSheet | null> {
+  const { by, first, ...file } = input;
+  return (await addSheets(projectId, [file], { by, first }))?.[0] ?? null;
+}
+
+/** #319: several new sheets as one run (a split PDF's pages) — every doc
+ *  written, then ONE patch puts their ids at the end of the sheet order, or
+ *  (`first`) at the front, in the order given. Null = no such design. */
+export async function addSheets(projectId: string, files: readonly NewSheetFile[], opts: { by: string; first?: boolean }): Promise<GridSheet[] | null> {
   const project = await getProject(projectId);
   if (!project) return null;
-  const sheet: GridSheet = {
+  if (!files.length) return [];
+  const at = Date.now();
+  const sheets: GridSheet[] = files.map((f) => ({
     id: rid("gs-"),
     projectId,
-    name: input.name || "Plan sheet",
-    mime: input.mime,
-    dataUrl: input.dataUrl || "",
-    ...(input.url ? { url: input.url } : {}),
-    ...(input.blobPath ? { blobPath: input.blobPath } : {}),
-    addedBy: input.by,
-    at: Date.now(),
-  };
-  await upsertDoc<GridSheet>("grid_sheets", sheet);
+    name: f.name || "Plan sheet",
+    mime: f.mime,
+    dataUrl: f.dataUrl || "",
+    ...(f.url ? { url: f.url } : {}),
+    ...(f.blobPath ? { blobPath: f.blobPath } : {}),
+    ...(f.split ? { split: f.split } : {}),
+    addedBy: opts.by,
+    at,
+  }));
+  for (const s of sheets) await upsertDoc<GridSheet>("grid_sheets", s);
+  const ids = sheets.map((s) => s.id);
   await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.sheetIds = input.first ? [sheet.id, ...(p.sheetIds || [])] : [...(p.sheetIds || []), sheet.id];
+    p.sheetIds = opts.first ? [...ids, ...(p.sheetIds || [])] : [...(p.sheetIds || []), ...ids];
     p.updatedAt = Date.now();
   });
-  return sheet;
+  return sheets;
 }
 
 /** The project's sheets in display order. */
@@ -682,10 +702,7 @@ export async function removeSheet(
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
   if (!(project.sheetIds || []).includes(sheetId)) return { ok: false, reason: "no-such-sheet" };
-  const blocks = (p: GridProject) =>
-    (p.placements || []).some((pl) => pl.sheetId === sheetId) ||
-    (p.routes || []).some((r) => r.sheetId === sheetId);
-  if (blocks(project)) return { ok: false, reason: "in-use" };
+  if (sheetHolds(project, sheetId)) return { ok: false, reason: "in-use" };
   const sheet = await getDoc<GridSheet>("grid_sheets", sheetId);
   const sheetName = sheet?.name?.trim() || "Plan sheet";
   // Re-checked on the doc patchDoc hands us: a placement/route added
@@ -694,22 +711,67 @@ export async function removeSheet(
   let spacesRemoved = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!(p.sheetIds || []).includes(sheetId)) { refused = "no-such-sheet"; return; }
-    if (blocks(p)) { refused = "in-use"; return; }
-    const dropped = new Set((p.spaces || []).filter((sp) => sp.sheetId === sheetId).map((sp) => sp.id));
-    if (dropped.size) {
-      pushRevision(p, by, "manual", `Auto-saved before deleting sheet "${sheetName}"`);
-      p.spaces = (p.spaces || []).filter((sp) => !dropped.has(sp.id));
-      if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: dropped });
-    }
-    spacesRemoved = dropped.size;
-    p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
-    p.updatedAt = Date.now();
+    if (sheetHolds(p, sheetId)) { refused = "in-use"; return; }
+    spacesRemoved = dropSheetInPatch(p, sheetId, by, `Auto-saved before deleting sheet "${sheetName}"`);
   });
   if (!updated) return { ok: false, reason: "not-found" };
   // (Assigned inside the callback, which TS's flow analysis can't see.)
   const refusal = refused as "no-such-sheet" | "in-use" | null;
   if (refusal) return { ok: false, reason: refusal };
   return { ok: true, spacesRemoved };
+}
+
+/** What keeps a sheet on the design (#317, #319): its devices — else its
+ *  wires — on ANY option. Null = nothing drawn on it. */
+function sheetHolds(p: GridProject, sheetId: string): { kept: number; what: "devices" | "wires" } | null {
+  const devices = (p.placements || []).filter((pl) => pl.sheetId === sheetId).length;
+  if (devices) return { kept: devices, what: "devices" };
+  const wires = (p.routes || []).filter((r) => r.sheetId === sheetId).length;
+  return wires ? { kept: wires, what: "wires" } : null;
+}
+
+/** Drop a sheet inside a patch (#317): every Space on it (any page) goes with
+ *  it — after ONE automatic revision named `note`, so it can be restored —
+ *  riser boxes/links pruned like removeSpace. The caller has checked
+ *  sheetHolds. Returns how many Spaces went. */
+function dropSheetInPatch(p: GridProject, sheetId: string, by: string, note: string): number {
+  const dropped = new Set((p.spaces || []).filter((sp) => sp.sheetId === sheetId).map((sp) => sp.id));
+  if (dropped.size) {
+    pushRevision(p, by, "manual", note);
+    p.spaces = (p.spaces || []).filter((sp) => !dropped.has(sp.id));
+    if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: dropped });
+  }
+  p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
+  p.updatedAt = Date.now();
+  return dropped.size;
+}
+
+/**
+ * #319 (D696): a real plan landed — remove the generated plan
+ * (`intake.baseSheetId`) exactly like Delete sheet (#317) when no device or
+ * wire on any option is on it: its Spaces go after one automatic revision,
+ * riser boxes pruned. With devices (or, failing that, wires) on it, it stays
+ * and the answer says how many. `intake.baseSheetId` is never cleared — Auto
+ * fill keys off it, and its refusal already names a missing base sheet.
+ * Null = nothing to retire (no generated plan, already gone, no such design).
+ * Checked before and again inside the patch (removeSheet's pattern).
+ */
+export async function retireBaseSheet(projectId: string, by: string): Promise<BaseSheetOutcome | null> {
+  const project = await getProject(projectId);
+  const baseId = project?.intake?.baseSheetId;
+  if (!project || !baseId || !sheetOnProject(project, baseId)) return null;
+  const pre = sheetHolds(project, baseId);
+  if (pre) return pre;
+  let out: BaseSheetOutcome | null = null;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (p.intake?.baseSheetId !== baseId || !sheetOnProject(p, baseId)) return;
+    const holds = sheetHolds(p, baseId);
+    if (holds) { out = holds; return; }
+    dropSheetInPatch(p, baseId, by, "Auto-saved before removing the generated plan");
+    out = "removed";
+  });
+  // (Assigned inside the callback, which TS's flow analysis can't see.)
+  return updated ? (out as BaseSheetOutcome | null) : null;
 }
 
 /**
