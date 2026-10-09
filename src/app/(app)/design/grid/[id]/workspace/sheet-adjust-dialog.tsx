@@ -33,7 +33,8 @@ const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr:
 
 const PAD = 40;
 const BTN: CSSProperties = { border: "1px solid #4d5057", background: "#55585f", color: "#e6e8ec", borderRadius: 7, padding: "6px 11px", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap" };
-const PRIMARY: CSSProperties = { ...BTN, background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" };
+const PRIMARY: CSSProperties = { ...BTN, background: "var(--accent)", border: "1px solid var(--accent)", color: "#fff" };
+const dim = (s: CSSProperties, off: boolean): CSSProperties => (off ? { ...s, opacity: 0.45, cursor: "default" } : s);
 const HANDLES: CropHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const HANDLE_CURSOR: Record<CropHandle, string> = { move: "move", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", ne: "nesw-resize", sw: "nesw-resize", nw: "nwse-resize", se: "nwse-resize" };
 
@@ -216,23 +217,23 @@ export default function SheetAdjustDialog({
         </div>
         <span style={{ fontSize: 12, color: "#aeb3bc" }}>Crop to the plan and turn it upright, then calibrate.</span>
         <span style={{ flex: 1 }} />
-        <button type="button" style={BTN} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "ccw"))} title="Turn the page a quarter turn to the left">⟲ Rotate left</button>
-        <button type="button" style={BTN} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "cw"))} title="Turn the page a quarter turn to the right">⟳ Rotate right</button>
-        <button type="button" style={BTN} disabled={!!locked || saving || isIdentity(cur)} onClick={() => apply(IDENTITY_ADJUST)} title="Back to the full, unturned page">Reset</button>
-        <button type="button" style={BTN} disabled={saving} onClick={onCancel}>{afterUpload ? "Skip" : "Cancel"}</button>
+        <button type="button" style={dim(BTN, !!locked || saving)} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "ccw"))} title="Turn the page a quarter turn to the left">⟲ Rotate left</button>
+        <button type="button" style={dim(BTN, !!locked || saving)} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "cw"))} title="Turn the page a quarter turn to the right">⟳ Rotate right</button>
+        <button type="button" style={dim(BTN, !!locked || saving || isIdentity(cur))} disabled={!!locked || saving || isIdentity(cur)} onClick={() => apply(IDENTITY_ADJUST)} title="Back to the full, unturned page">Reset</button>
+        <button type="button" style={dim(BTN, saving)} disabled={saving} onClick={onCancel}>{afterUpload ? "Skip" : "Cancel"}</button>
         {stuck ? (
           <button type="button" style={PRIMARY} onClick={() => window.location.reload()} title="Your crop and rotation are saved — reload to open the new sheet">
             Reload
           </button>
         ) : (
-          <button type="button" style={PRIMARY} disabled={saving} onClick={() => void done()}>{saving ? "Saving…" : "Done"}</button>
+          <button type="button" style={dim(PRIMARY, saving)} disabled={saving} onClick={() => void done()}>{saving ? "Saving…" : "Done"}</button>
         )}
       </div>
       {isPdf && pageCount > 1 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 14px", borderBottom: "1px solid #3d4047", fontSize: 12.5 }}>
-          <button type="button" style={BTN} aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button>
+          <button type="button" style={dim(BTN, page <= 1)} aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button>
           <span>{page} / {pageCount}</span>
-          <button type="button" style={BTN} aria-label="Next page" disabled={page >= pageCount} onClick={() => setPage(page + 1)}>›</button>
+          <button type="button" style={dim(BTN, page >= pageCount)} aria-label="Next page" disabled={page >= pageCount} onClick={() => setPage(page + 1)}>›</button>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 8 }}>
             <input
               type="checkbox"
