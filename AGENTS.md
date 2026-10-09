@@ -712,6 +712,12 @@ See `.env.example`.
     actions (`movePlacementsAction` … `restoreItemsAction`, one `patchDoc` each).
     No migration; Blank designs don't Auto fill (D603, Jeff). Remaining:
     try it on a real Auto-filled, large design in production. Punch item #299.
+    ✅ Follow-up (#318, D692–D694): plan sheets upload straight to Blob up to
+    25 MB (the 4 MB route stays when Blob is off), and every new sheet opens in
+    **Adjust sheet** — crop to the plan, turn it upright in quarter turns, per
+    page, only while the page is empty — which derives a new sheet from the
+    original upload (`src/lib/design/sheet-adjust*.ts`); later via the tab's ⋯ →
+    Crop & rotate…. Punch item #318.
 
 39. ✅ **Object symbols + size slider** (#300, D605–D612) — a Grid design saves
     its own symbol size (25–400 %) and Generic / Object mode (`symbolDisplay`,

@@ -10121,3 +10121,51 @@ stored, so nothing is orphaned. Because the delete now discards visible work, wh
 `removeSheet` cuts a "manual" revision first, in the same patch ("Auto-saved before deleting sheet "<name>""); restoring it
 re-adds the sheet (restoreRevision already brings back a removed sheet the restored spaces reference) and its Spaces. An
 empty sheet still deletes without a revision. The in-use check is repeated on the doc being patched.
+
+## D692. Grid plan sheets upload straight to Blob, up to 25 MB (#318, 2026-10-09)
+
+Jeff had to shrink an architect's PDF to get under the 4 MB plan-sheet ceiling (the Vercel function body limit, D173).
+With Blob on, a sheet now goes from the browser straight to private Blob through a token broker
+(`/api/grid-sheets/upload-url`, the Plans & risers pattern): one path per upload, `grid-sheets/<design>/<uploadKey>/<safe
+name>`, ≤ 25 MB, PDF/PNG/JPEG/WebP/GIF, random suffix. `commitSheetUploadAction` treats the returned `blobPath` as
+untrusted (the browser sends it to the commit action; it is re-checked server-side) — scope, never a path a sheet
+already holds, the stored size from `getBlobHead`, and a magic-byte sniff — and deletes a refused upload's blob; a
+plan-view upload keeps #314's FIRST position, plan lock and upload-id idempotency. This is the upgrade D173 named: the
+path now round-trips through the browser, guarded like the documents and package-file brokers. Without Blob the 4 MB
+multipart route is unchanged. The client picks the path from a server flag (`blobUploads = blobEnabled()`), not by
+trying the broker: `@vercel/blob/client` reports every token refusal with the same message. Broker sheets store no `url`
+(provenance only).
+
+Sniff rule (shipped): a `%PDF-` header anywhere in the first 1 KB is a PDF (accepted even with XMP after it); markup
+BEFORE the header refuses. Otherwise the bytes must carry a real PNG/JPEG/WebP/GIF signature; markup and SVG refuse.
+Encrypted PDFs refuse with their own message (pdf-lib's error is recognised by message, not name), and an image over
+sharp's pixel cap refuses as too big. GIF re-encodes as PNG when adjusted.
+
+## D693. Adjust sheet derives a new sheet; nothing transforms at view time (#318, 2026-10-09)
+
+Crop + rotate writes new bytes and a new `grid_sheets` doc, so every consumer (editor, drawing set, print, package,
+riser Connect) keeps reading a sheet's frame from its own file. `GridSheet.adjust = { fromSheetId, pages }`:
+`fromSheetId` is always the ROOT upload (re-adjusting re-derives from it, so crops are never lossy); per page, `rotate`
+is the quarter turns added to the root page's own `/Rotate`, `crop` is normalized in the root page as displayed after
+that turn. PDFs keep vector content — pdf-lib sets `/CropBox` (CropBox ∩ MediaBox math checked against pdf.js) and
+`/Rotate` on changed pages only; images are EXIF-oriented, turned, cropped and re-encoded by sharp (JPEG q92, WebP q90,
+PNG; GIF → PNG). Allowed only while a changed page is empty (no device, space, wire or scale, any option) — checked
+before and again inside the one patch that puts the new id at the old one's position and moves every reference
+(placements, spaces, routes, calibrations, the intake's plan view, drawing-set keys). Never on the generated base sheet.
+The old doc stays (revisions may name it); restoring a revision cut before an adjustment re-adds the old sheet beside
+the new one — accepted, its content lands in its own frame. "Reset" points the new sheet at the root's own file (no new
+bytes; the root id itself is never put back in the list). Without Blob, an adjusted file is stored in-database up to
+6 MB.
+
+## D694. The Adjust sheet dialog (#318, 2026-10-09)
+
+Every new sheet (the `+` tab, the intake's plan view — uploaded or copied, via `?adjust=` — and the notice banner's
+re-upload) opens in a full-window Adjust sheet: the root page with a crop box (corner/edge handles, drag to move,
+dimmed outside), ⟲ / ⟳ quarter turns, Reset, per-page ‹ n / N › and a "Same for all pages" checkbox (copies the current
+page to every unlocked page and keeps doing so while ticked). A page with content shows Locked with what is on it. Done
+saves and opens the new sheet (the Calibrate banner follows); Cancel — "Skip" after an upload — leaves the sheet as it
+is. While the dialog is open the editor's keys stand down and the workspace is `inert`. Saving… retries the refresh at
+6 s and offers Reload at 15 s; after Done the editor stays on the old sheet until the refreshed list contains the new
+id, so sheet 1 never flashes. The tab's ⋯ menu gains Crop & rotate…, hidden on the base sheet and disabled when every
+page is known to be locked (an image, or the PDF on screen — another PDF opens and shows its locks). `PdfCanvas` gained
+`rotateBy`, added to the page's own rotation (pdf.js's viewport rotation is absolute); absent = unchanged.
