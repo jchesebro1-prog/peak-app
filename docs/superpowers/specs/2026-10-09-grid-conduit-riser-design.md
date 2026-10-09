@@ -351,18 +351,36 @@ a cable with no symbol prints `?` and the editor warns by name.
 6. **Power controls** — ID · device name (model / description) · contents,
    for tagged devices of device type `dimming-power`.
 
-**DXF** (`dxf.ts`): DXF R2000 (AC1015) ASCII, `$INSUNITS` = inches, 1:1 sheet
+**DXF** (`dxf.ts`): DXF R12 (AC1009) ASCII (see Deviations), inches, 1:1 sheet
 size, **no title block**. Layers `PK-RISER-TAG`, `PK-RISER-CONDUIT`,
 `PK-RISER-CABLEMGMT` (DASHED linetype), `PK-RISER-SIGNAL`, `PK-RISER-LEVEL`,
 `PK-RISER-TEXT`, `PK-RISER-TABLE`. Blocks with ATTDEFs: `PK_TAG` (ID, LOC, PD,
 BOX, FACE, MOUNT, HT), `PK_SIGNAL` (SYM), `PK_POWER` (PWR), `PK_STUB` (LABEL);
-inserts carry ATTRIBs. Text style `STANDARD` (Arial). Handles allocated
-sequentially; every section balanced.
+inserts carry ATTRIBs. Text style `STANDARD` (Arial); every section balanced.
 
 **Download DXF**: on the riser page and beside E-502 in the drawing set; one
 file per sheet, `<project>-E-502-lighting-control-riser.dxf`; route
 `GET /api/grid/[id]/conduit-riser/dxf?option=&sheet=`, `requireUser` + the
 Grid view permission, `Content-Disposition: attachment`.
+
+## Deviations found while building the engine (Plan A, 2026-10-09)
+
+1. **DXF R12 (AC1009), not R2000.** R12 has no handles or object
+   dictionaries to get wrong and every CAD package reads it; blocks with
+   ATTDEF/ATTRIB, named layers and the DASHED linetype are all R12 features.
+   ezdxf's auditor reads the sample with 0 errors.
+2. **A run's free coordinate is `laneX`, not a `bend` point.** Runs are
+   orthogonal; the only thing a drag can change is the vertical lane's x.
+3. **Signal bubbles and the size label sit at the device end**, beside the
+   drop into each tag (bubbles left, size right) — Bray's look, and it keeps
+   the head-end bundle uncluttered. Chain hops print the size below the line.
+4. **Priced conduit length = the longest member wire** (measured route or
+   typed link alike), else the typed run length.
+5. **A stub follows its device**: a stub whose run ends on a device in
+   another detail is drawn in that device's detail.
+6. **The engine takes a plain input** (`input.ts`: devices with their
+   display designator already formatted, wires with signal + length) — it
+   never imports #320 or a store, so it builds and tests ahead of #320.
 
 ## Out of scope (v1)
 
