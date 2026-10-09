@@ -11467,7 +11467,10 @@ Jeff: shorten the cover PDF; set who signs it without opening Quote details.
   small "Drawings for EST-xxxx" line. One server rule, #314's `estimateLinkOf`, via `estimateLinksForDesigns`
   (`src/lib/design/estimate-links-server.ts`): one `getProjects` + one `quoteNumbersFor` per page load, passed down as a
   plain `estimateLinks` map. The server refusals in `createDraftQuoteAction` are unchanged.
-- **Design in the Grid saves first**: `PackageStaffPanel` takes an optional `beforeGrid`; Build package passes
-  `pdfDirty ? saveNow : undefined`, so the Grid's From-estimate tray (which reads the SAVED quote) sees the latest BOM. A
-  failed save stops the navigation ("Save the estimate first — it didn't save…"; the cause is in the Estimator's own
-  banner); the button reads "Saving…" meanwhile. Not covered: the existing-design "Open Grid design →" link does not save.
+- **Every trip to the Grid from the Estimator saves first** (Jeff): `PackageStaffPanel` takes an optional `beforeGrid`;
+  Build package passes `pdfDirty ? saveNow : undefined`, so the Grid's From-estimate tray (which reads the SAVED quote)
+  sees the latest BOM. It covers **Design in the Grid →** and the existing-design **Open Grid design →**, which stays a
+  real link (middle-click, copy link, meta/ctrl/shift/alt-click are left to the browser) — a plain left click is
+  intercepted, saved, then `router.push`ed. A failed save stops the navigation ("Save the estimate first — it didn't
+  save…"; the cause is in the Estimator's own banner); the control reads "Saving…" meanwhile. No other Estimator
+  source links into `/design/grid/<id>` (pinned). A modified click opens the Grid without saving.

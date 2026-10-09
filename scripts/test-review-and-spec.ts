@@ -59242,12 +59242,25 @@ import {
   const pstep = rd("src/app/(app)/estimator/steps/package-step.tsx");
   ok(pstep.includes("beforeGrid={pdfDirty ? saveNow : undefined}") && pstep.includes("    saveNow,\n") && !rd("src/app/(app)/estimator/steps/send-step.tsx").includes("beforeGrid") && !rd("src/app/(app)/estimator/client-link-panel.tsx").includes("beforeGrid"),
     "#316 pin: Build package passes the Estimator's awaitable saveNow behind pdfDirty (the PrintButton pattern); the other PackageStaffPanel mounts do not");
+  const sbg = panel.slice(panel.indexOf("const saveBeforeGrid = async"), panel.indexOf("const openLinkedGrid = "));
   const dig = panel.slice(panel.indexOf("const designInGrid = () =>"), panel.indexOf("const rebuild = () =>"));
-  ok(panel.includes("beforeGrid?: () => Promise<number | false>") && dig.includes("await beforeGrid()") && dig.indexOf("await beforeGrid()") < dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
-     /if \(saved === false\) \{\s*setErr\(GRID_LINK_COPY\.saveFailed\);\s*return;\s*\}/.test(dig) && dig.indexOf("setErr(GRID_LINK_COPY.saveFailed)") < dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
-     dig.includes("router.push(") && dig.indexOf("router.push(") > dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
+  ok(panel.includes("beforeGrid?: () => Promise<number | false>") && sbg.includes("if (!beforeGrid) return true;") && sbg.includes("await beforeGrid()") &&
+     /if \(saved === false\) \{\s*setErr\(GRID_LINK_COPY\.saveFailed\);\s*return false;\s*\}/.test(sbg) &&
+     dig.includes("if (!(await saveBeforeGrid())) return;") && dig.indexOf("await saveBeforeGrid()") < dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
+     dig.indexOf("router.push(") > dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
      panel.includes("gridSaving ? GRID_LINK_COPY.saving : gridPending ? GRID_LINK_COPY.opening : GRID_LINK_COPY.design"),
-    "#316 pin: Design in the Grid awaits beforeGrid before openGridDesignForQuoteAction, stops (no navigation) on false with the save-first message, and reads 'Saving…' meanwhile");
+    "#316 pin: Design in the Grid awaits beforeGrid (saveBeforeGrid) before openGridDesignForQuoteAction, stops (no navigation) on false with the save-first message, and reads 'Saving…' meanwhile");
+  const oig = panel.slice(panel.indexOf("const openLinkedGrid = "), panel.indexOf("/** #314 — open (or start)"));
+  ok(oig.includes("if (!beforeGrid) return;") && oig.includes("e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey") &&
+     oig.indexOf("e.preventDefault()") > oig.indexOf("e.altKey") && oig.indexOf("e.preventDefault()") < oig.indexOf("await saveBeforeGrid()") &&
+     /if \(!\(await saveBeforeGrid\(\)\)\) return;\s*router\.push\(href\);/.test(oig) &&
+     panel.includes("<Link\n                  href={`/design/grid/${encodeURIComponent(panel.grid.projectId)}`}\n                  onClick={(e) => openLinkedGrid(e,") &&
+     panel.includes("gridSaving ? GRID_LINK_COPY.saving : GRID_LINK_COPY.open"),
+    "#316 pin: 'Open Grid design →' stays a real link; a plain left click saves first (stop with the save-first message on failure, else router.push) and a modified or middle click is left to the browser");
+  // Every in-Estimator trip into the Grid (anchor or router.push) lives in the panel that saves first — no other estimator file links to /design/grid/<id>.
+  const estFiles316 = gemReaddir5("src/app/(app)/estimator", { recursive: true }).map(String).filter((f) => /\.tsx?$/.test(f) && !f.endsWith("package-staff-panel.tsx"));
+  ok(estFiles316.length > 20 && estFiles316.every((f) => !/["'`]\/design\/grid\/\$?\{?/.test(rd("src/app/(app)/estimator/" + f))),
+    "#316 pin: no other Estimator source links into /design/grid/<id> — the package panel is the only way in, and it saves first");
   ok(rd("src/lib/design/estimate-grid-link.ts").includes("didn't save, so the Grid would miss your latest changes."),
     "#316 copy: the save-failed sentence names why the Grid did not open");
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { openGridDesignForQuoteAction } from "./grid-design-actions";
@@ -131,28 +131,47 @@ export function PackageStaffPanel({
       await reload();
     });
 
+  /** #316: the Grid reads the SAVED estimate, so unsaved edits are written before ANY trip to it.
+   *  saveNow reports its own cause in the Estimator's banner; this says why the Grid did not open.
+   *  True = go ahead (nothing to save, or it saved). */
+  const saveBeforeGrid = async (): Promise<boolean> => {
+    if (!beforeGrid) return true;
+    setGridSaving(true);
+    let saved: number | false = false;
+    try {
+      saved = await beforeGrid();
+    } catch {
+      saved = false;
+    } finally {
+      setGridSaving(false);
+    }
+    if (saved === false) {
+      setErr(GRID_LINK_COPY.saveFailed);
+      return false;
+    }
+    return true;
+  };
+
+  /** #316: "Open Grid design →" stays a real link (middle-click, copy link) — a plain left click saves first. */
+  const openLinkedGrid = (e: MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!beforeGrid) return;
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (gridPending) return;
+    startGrid(async () => {
+      setErr(null);
+      setNote(null);
+      if (!(await saveBeforeGrid())) return;
+      router.push(href);
+    });
+  };
+
   /** #314 — open (or start) the Grid design that draws this estimate. */
   const designInGrid = () =>
     startGrid(async () => {
       setErr(null);
       setNote(null);
-      // #316: the Grid reads the SAVED estimate, so unsaved edits are written first.
-      // saveNow reports its own cause in the Estimator's banner; this says why the Grid did not open.
-      if (beforeGrid) {
-        setGridSaving(true);
-        let saved: number | false = false;
-        try {
-          saved = await beforeGrid();
-        } catch {
-          saved = false;
-        } finally {
-          setGridSaving(false);
-        }
-        if (saved === false) {
-          setErr(GRID_LINK_COPY.saveFailed);
-          return;
-        }
-      }
+      if (!(await saveBeforeGrid())) return;
       let r: Awaited<ReturnType<typeof openGridDesignForQuoteAction>>;
       try {
         r = await openGridDesignForQuoteAction(quoteId);
@@ -262,8 +281,13 @@ export function PackageStaffPanel({
           {panel.gridEligible && (
             <div data-testid="package-grid-design" style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
               {panel.grid ? (
-                <Link href={`/design/grid/${encodeURIComponent(panel.grid.projectId)}`} style={{ ...btn, textDecoration: "none", alignSelf: "flex-start" }}>
-                  {GRID_LINK_COPY.open}
+                <Link
+                  href={`/design/grid/${encodeURIComponent(panel.grid.projectId)}`}
+                  onClick={(e) => openLinkedGrid(e, `/design/grid/${encodeURIComponent(panel.grid!.projectId)}`)}
+                  aria-busy={gridPending}
+                  style={{ ...btn, textDecoration: "none", alignSelf: "flex-start", ...(gridPending ? { opacity: 0.55 } : {}) }}
+                >
+                  {gridSaving ? GRID_LINK_COPY.saving : GRID_LINK_COPY.open}
                 </Link>
               ) : (
                 <button
