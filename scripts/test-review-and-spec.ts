@@ -11533,6 +11533,9 @@ seeded()
   .then(() => pagesAsSheets319StoreChecks())
   .then(() => pagesAsSheets319UploadChecks())
   .then(() => pagesAsSheets319UiPins())
+  .then(() => square322ImageChecks())
+  .then(() => square322BatchChecks())
+  .then(() => square322Pins())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60682,4 +60685,189 @@ async function pagesAsSheets319UiPins(): Promise<void> {
   const finishBody = hook.slice(hook.indexOf("const finishAdjust = useCallback("), hook.indexOf("const adjustAvailability = useCallback("));
   ok(/switchSheet\(nextId\);\s*return;[\s\S]*setAdjusting\(null\);\s*dropAdjustParam\(\);/.test(closeBody) && finishBody.includes("dropAdjustParam();"),
     "#319 fix: the walk's end (Skip the rest, Skip/Escape on the last sheet, any Done) drops ?adjust= so a reload doesn't restart it");
+}
+
+// ---------------------------------------------------------------------------
+// #322 — product photos are squared (1600×1600, padded) on the way in; a one-time batch redoes the old ones.
+// ---------------------------------------------------------------------------
+import sq322Sharp from "sharp";
+import { squareProductImage as sq322Square, SQUARE_EDGE as sq322Edge, SQUARE_MARGIN as sq322Margin, SHRINK_UNREADABLE as sq322Unreadable } from "@/lib/part-docs/shrink";
+import { squareCandidates as sq322Candidates, squareExistingPhotos as sq322Run, type SquareBatchDeps as Sq322Deps } from "@/lib/part-docs/square-batch";
+import { shrinkStoredImage as sq322Upload } from "@/lib/part-docs/shrink-upload";
+import { createDocument as sq322Create, getDocument as sq322Get, attachDocument as sq322Attach, replaceDocumentFile as sq322Replace, setDocumentLinkDisplay as sq322SetDisplay, visibleImagesForParts as sq322Visible, documentLinkId as sq322LinkId } from "@/lib/stores/part-documents";
+import type { PartDocument as Sq322Doc } from "@/lib/part-docs/types";
+
+async function sq322Pixel(bytes: Buffer, x: number, y: number): Promise<number[]> {
+  const { data, info } = await sq322Sharp(bytes).raw().toBuffer({ resolveWithObject: true });
+  const i = (y * info.width + x) * info.channels;
+  return [...data.subarray(i, i + info.channels)];
+}
+
+async function square322ImageChecks(): Promise<void> {
+  ok(sq322Edge === 1600 && sq322Margin === 64, "#322 square: 1600 px canvas, 64 px margin");
+
+  const wide = await sq322Sharp({ create: { width: 3000, height: 500, channels: 3, background: { r: 200, g: 30, b: 30 } } }).jpeg().toBuffer();
+  const a = await sq322Square(wide);
+  const aMeta = a.ok ? await sq322Sharp(a.bytes).metadata() : null;
+  ok(a.ok && a.width === 1600 && a.height === 1600 && a.contentType === "image/webp" && aMeta?.format === "webp" && aMeta.width === 1600 && aMeta.height === 1600 && !aMeta.hasAlpha,
+    "#322 square: a wide 3000×500 JPEG comes out an opaque 1600×1600 WebP");
+  if (a.ok) {
+    const centre = await sq322Pixel(a.bytes, 800, 800);
+    ok(centre[0] > 180 && centre[1] < 60, "#322 square: the product sits in the middle");
+    ok((await sq322Pixel(a.bytes, 800, 100)).every((v) => v === 255) && (await sq322Pixel(a.bytes, 800, 1500)).every((v) => v === 255), "#322 square: above and below the wide product is opaque white");
+    ok((await sq322Pixel(a.bytes, 70, 800))[1] < 60 && (await sq322Pixel(a.bytes, 30, 800)).every((v) => v === 255), "#322 square: the wide product spans the 1472 px box — a 64 px white margin each side (and an untrimmable uniform image still works)");
+  }
+
+  const cutout = await sq322Sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="900"><ellipse cx="150" cy="450" rx="60" ry="400" fill="blue"/></svg>')).png().toBuffer();
+  const b = await sq322Square(cutout);
+  const bMeta = b.ok ? await sq322Sharp(b.bytes).metadata() : null;
+  ok(b.ok && b.width === 1600 && b.height === 1600 && !!bMeta?.hasAlpha, "#322 square: a tall transparent cut-out comes out 1600×1600 and keeps its alpha");
+  if (b.ok) {
+    ok((await sq322Pixel(b.bytes, 800, 800))[3] === 255 && (await sq322Pixel(b.bytes, 100, 800))[3] === 0 && (await sq322Pixel(b.bytes, 800, 10))[3] === 0,
+      "#322 square: the cut-out's padding is transparent, the product opaque");
+  }
+
+  const tiny = await sq322Sharp({ create: { width: 100, height: 100, channels: 3, background: "#369" } }).png().toBuffer();
+  const c = await sq322Square(tiny);
+  ok(c.ok && c.width === 1600 && c.height === 1600, "#322 square: a tiny 100×100 image is enlarged to fill — still 1600×1600");
+
+  const red = await sq322Sharp({ create: { width: 200, height: 100, channels: 3, background: { r: 255, g: 0, b: 0 } } }).png().toBuffer();
+  const bordered = await sq322Sharp({ create: { width: 1000, height: 1000, channels: 3, background: "#fff" } }).composite([{ input: red, left: 400, top: 450 }]).png().toBuffer();
+  const d = await sq322Square(bordered);
+  ok(d.ok && (await sq322Pixel(d.bytes, 200, 800))[1] < 60 && (await sq322Pixel(d.bytes, 30, 800)).every((v) => v === 255),
+    "#322 square: a big white border is trimmed — the product box grows to fill the frame");
+  const plain = await sq322Sharp({ create: { width: 200, height: 100, channels: 3, background: { r: 255, g: 0, b: 0 } } }).png().toBuffer();
+  const e = await sq322Square(plain);
+  ok(e.ok && (await sq322Pixel(e.bytes, 800, 800))[1] < 60, "#322 square: an image with nothing to trim is used whole");
+
+  const rotated = await sq322Sharp({ create: { width: 200, height: 100, channels: 3, background: "#000" } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  const f = await sq322Square(rotated);
+  ok(f.ok && f.width === 1600 && f.height === 1600, "#322 square: an EXIF-rotated photo still comes out 1600×1600");
+
+  const bad = await sq322Square(new Uint8Array(Buffer.from("definitely not an image")));
+  ok(!bad.ok && bad.error === sq322Unreadable, "#322 square: garbage bytes refuse with the same save-as-JPEG message");
+
+  // Upload path: shrinkStoredImage squares and marks the file only when asked.
+  const photo = await sq322Sharp({ create: { width: 2400, height: 1800, channels: 3, background: "#369" } }).jpeg().toBuffer();
+  const store = new Map<string, Uint8Array>();
+  const deps = {
+    read: async (p: string) => store.get(p) ?? null,
+    put: async (p: string, bytes: Buffer) => { store.set(p, bytes); return { pathname: p }; },
+    remove: async (p: string) => { store.delete(p); },
+  };
+  for (const square of [true, false]) {
+    const key = `part-docs/PD-322aaaaaaaaa/orig${square ? "S" : "P"}.jpg`;
+    store.set(key, photo);
+    const r = await sq322Upload("PD-322aaaaaaaaa", { blobKey: key, fileName: "orig.jpg", contentType: "image/jpeg", size: photo.byteLength }, deps, square ? { square: true } : {});
+    const meta = r.ok ? await sq322Sharp(Buffer.from(store.get(r.file.blobKey)!)).metadata() : null;
+    ok(r.ok && (square ? r.file.squared === true && meta?.width === 1600 && meta.height === 1600 : r.file.squared === undefined && meta?.width === 1600 && meta.height === 1200),
+      `#322 upload: shrinkStoredImage ${square ? "{square:true} stores a marked 1600×1600 square" : "without the option still just shrinks (drawings, manufacturer logos)"}`);
+  }
+}
+
+function sq322Doc(over: Partial<Sq322Doc> & { id: string }): Sq322Doc {
+  return { kind: "image", title: "t", fileName: "p.jpg", contentType: "image/jpeg", size: 1, blobKey: `part-docs/${over.id}/p.jpg`, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "T", history: [], ...over };
+}
+
+async function square322BatchChecks(): Promise<void> {
+  const mk = (id: string, over: Partial<Sq322Doc> = {}) => sq322Doc({ id, ...over });
+  const docs = [
+    mk("PD-322000000003"), mk("PD-322000000001"), mk("PD-322000000002", { squared: true }),
+    mk("PD-322000000004", { source: "manufacturer" }), mk("PD-322000000005", { kind: "datasheet", contentType: "application/pdf" }),
+    mk("PD-322000000006", { blobKey: null }), mk("PD-322000000007", { kind: "symbol" }), mk("PD-322000000008", { source: "datasheet-render" }),
+  ];
+  ok(sq322Candidates(docs).map((d) => d.id).join() === "PD-322000000001,PD-322000000003,PD-322000000008",
+    "#322 batch candidates: images with a file that aren't squared or manufacturer ones — squared, manufacturer, datasheets, link-only and drawings are skipped; oldest id first");
+  ok(sq322Candidates(docs, ["PD-322000000001"]).map((d) => d.id).join() === "PD-322000000003,PD-322000000008", "#322 batch candidates: ids that already failed this run are skipped");
+
+  // The batch against fake storage: success, an unreadable file, and re-running.
+  const good = await sq322Sharp({ create: { width: 800, height: 400, channels: 3, background: "#a33" } }).jpeg().toBuffer();
+  const blobs = new Map<string, Uint8Array>([
+    ["part-docs/PD-322000000001/p.jpg", good],
+    ["part-docs/PD-322000000003/p.jpg", new Uint8Array(Buffer.from("not an image"))],
+  ]);
+  const live = new Map<string, Sq322Doc>([
+    ["PD-322000000001", mk("PD-322000000001", { uploadedAt: 77, uploadedBy: "Jeff" })],
+    ["PD-322000000003", mk("PD-322000000003")],
+  ]);
+  let n = 0;
+  const fake: Sq322Deps = {
+    read: async (p) => blobs.get(p) ?? null,
+    put: async (p, bytes) => { const k = `${p}-${++n}`; blobs.set(k, bytes); return { pathname: k }; },
+    get: async (id) => live.get(id) ?? null,
+    replace: async (id, file, by, at, o) => {
+      const d = live.get(id)!;
+      const next = { ...d, ...file, history: [...d.history, { blobKey: d.blobKey!, fileName: d.fileName, size: d.size, replacedAt: at, replacedBy: by }], ...(o.keepStamp ? {} : { uploadedAt: at, uploadedBy: by }) } as Sq322Doc;
+      live.set(id, next);
+      return next;
+    },
+    now: () => 1000,
+  };
+  const run1 = await sq322Run([...live.values()], "Admin", { budgetMs: 45_000 }, fake);
+  const one = live.get("PD-322000000001")!;
+  const squaredMeta = await sq322Sharp(Buffer.from(blobs.get(one.blobKey!)!)).metadata();
+  ok(run1.done === 1 && run1.failed === 1 && run1.remaining === 0 && run1.failedIds.join() === "PD-322000000003", "#322 batch: one squared, the unreadable one counted failed, nothing left to try");
+  ok(one.squared === true && squaredMeta.width === 1600 && squaredMeta.height === 1600 && one.history.length === 1 && one.history[0].blobKey === "part-docs/PD-322000000001/p.jpg" && blobs.has("part-docs/PD-322000000001/p.jpg"),
+    "#322 batch: the document points at the new square; the original blob is kept and is on history");
+  ok(one.uploadedAt === 77 && one.uploadedBy === "Jeff", "#322 batch: uploadedAt/uploadedBy are kept (they break gallery-order ties)");
+  ok(live.get("PD-322000000003")!.history.length === 0 && !live.get("PD-322000000003")!.squared, "#322 batch: an unreadable photo is left exactly as it was");
+  const run2 = await sq322Run([...live.values()], "Admin", { budgetMs: 45_000, skip: run1.failedIds }, fake);
+  ok(run2.done === 0 && run2.failed === 0 && run2.remaining === 0 && n === 1, "#322 batch: re-running is a no-op — a squared photo is never redone");
+
+  // Budget: after the first photo, a call with no room left stops and reports the rest.
+  const many = ["PD-322000000011", "PD-322000000012", "PD-322000000013"].map((id) => { blobs.set(`part-docs/${id}/p.jpg`, good); live.set(id, mk(id)); return live.get(id)!; });
+  let tick = 0;
+  const slow: Sq322Deps = { ...fake, now: () => (tick += 10_000) };
+  const part = await sq322Run(many, "Admin", { budgetMs: 45_000 }, slow);
+  ok(part.done === 2 && part.remaining === 1, "#322 batch: stops when the budget has no room for another photo and says how many are left");
+
+  // The real store: replaceDocumentFile keeps links, order, hidden and (with keepStamp) the upload stamp.
+  const skuA = fixtureId(322, "sku-a");
+  const first = await sq322Create({ kind: "image", fileName: "a.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-322storea/a.jpg", sourceUrl: null, source: "upload", by: "Test", at: 5 });
+  const second = await sq322Create({ kind: "image", fileName: "b.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-322storeb/b.jpg", sourceUrl: null, source: "upload", by: "Test", at: 6 });
+  if (!first || !second) throw new Error("#322 store: fixture documents failed to create");
+  registerFixture("part_documents", first.id);
+  registerFixture("part_documents", second.id);
+  await sq322Attach(first.id, [skuA], "Test");
+  await sq322Attach(second.id, [skuA], "Test");
+  registerFixture("part_document_links", sq322LinkId(skuA, first.id));
+  registerFixture("part_document_links", sq322LinkId(skuA, second.id));
+  await sq322SetDisplay(second.id, skuA, { hidden: true });
+  const before = (await sq322Visible([skuA])).get(skuA) ?? [];
+  const swapped = await sq322Replace(first.id, { blobKey: "part-docs/PD-322storea/a-sq.webp", fileName: "a.webp", contentType: "image/webp", size: 5, squared: true }, "Batch", 99, { keepStamp: true });
+  const after = (await sq322Visible([skuA])).get(skuA) ?? [];
+  ok(!!swapped && swapped.squared === true && swapped.blobKey === "part-docs/PD-322storea/a-sq.webp" && swapped.uploadedAt === 5 && swapped.uploadedBy === "Test" &&
+    swapped.history.length === 1 && swapped.history[0].blobKey === "part-docs/PD-322storea/a.jpg" && swapped.history[0].replacedBy === "Batch",
+    "#322 store: replaceDocumentFile with keepStamp marks the document squared, moves the old file to history and keeps the stamp");
+  ok(before.map((d) => d.id).join() === after.map((d) => d.id).join() && after.map((d) => d.id).join() === first.id, "#322 store: the part still shows the same visible images in the same order (the hidden one stays hidden)");
+  const stamped = await sq322Replace(first.id, { blobKey: "part-docs/PD-322storea/a-2.jpg", fileName: "a.jpg", contentType: "image/jpeg", size: 7 }, "Human", 100);
+  ok(!!stamped && stamped.squared === undefined && stamped.uploadedAt === 100 && stamped.uploadedBy === "Human" && (await sq322Get(first.id))?.squared === undefined,
+    "#322 store: a later non-squared replacement clears the squared mark and stamps as usual");
+  const withMark = await sq322Create({ kind: "image", fileName: "c.webp", contentType: "image/webp", size: 1, blobKey: "part-docs/PD-322storec/c.webp", sourceUrl: null, source: "fetch", squared: true, by: "Test" });
+  if (withMark) registerFixture("part_documents", withMark.id);
+  ok(withMark?.squared === true && (await sq322Get(withMark!.id))?.squared === true, "#322 store: createDocument stores the squared mark");
+}
+
+async function square322Pins(): Promise<void> {
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const sheet = read("src/lib/part-docs/photo-sheet-import.ts");
+  const drive = read("src/lib/part-docs/drive-photo-sync.ts");
+  const thumb = read("src/lib/part-docs/thumbnail.ts");
+  const actions = read("src/app/(app)/catalog/documents/actions.ts");
+  const addUrl = actions.slice(actions.indexOf("export async function addImageFromUrlAction"), actions.indexOf("export async function renderThumbnailsAction"));
+  ok(sheet.includes("squareProductImage(bytes)") && !sheet.includes("shrinkImage") && sheet.includes("squared: true"), "#322 pin: the photo sheet import squares and marks its images");
+  ok(drive.includes("squareProductImage(bytes)") && !drive.includes("shrinkImage") && drive.includes("squared: true as const"), "#322 pin: Drive photo sync squares and marks its images (new and updated)");
+  ok(addUrl.includes("squareProductImage(") && !addUrl.includes("shrinkImage(") && addUrl.includes("squared: true"), "#322 pin: Add image from URL squares and marks its image");
+  ok(thumb.includes("squareProductImage(png)") && !thumb.includes("shrinkImage"), "#322 pin: datasheet page-1 thumbnails are squared too");
+  ok(actions.includes("shrinkStoredImage(input.documentId, file, undefined, { square: true })") && actions.includes('{ square: doc.source !== "manufacturer" }'),
+    "#322 pin: direct uploads and replacements square a product photo, but never a manufacturer image");
+  const mfr = read("src/app/(app)/catalog/manufacturers/actions.ts");
+  ok(mfr.includes("shrinkStoredImage(input.documentId, checked.file)") && !mfr.includes("square") && !mfr.includes("squareProductImage"), "#322 pin: manufacturer images (logos) are not squared");
+  const drawing = read("src/lib/part-docs/drawing-upload.ts");
+  const cut = read("src/lib/curtain-cut-sheets/load.ts");
+  ok(!drawing.includes("square") && !drawing.includes("squareProductImage") && !cut.includes("squareProductImage") && cut.includes("shrinkImage(bytes, { maxEdge: CUT_SHEET_PHOTO_EDGE_PX })"),
+    "#322 pin: drawings and cut-sheet tiles keep shrinkImage");
+  const page = read("src/app/(app)/catalog/documents/page.tsx");
+  ok(page.includes('can("manage_users", user.roles) && <SquarePhotosButton />') && /export async function squarePhotosAction[\s\S]*?requirePerm\("manage_users"\)/.test(actions),
+    "#322 pin: Make photos uniform is admin-only on the page and in the action");
 }
