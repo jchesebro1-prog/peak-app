@@ -60115,7 +60115,7 @@ async function views319(bytes: Uint8Array): Promise<Array<{ view: number[]; rota
 
 /** #319: a 3-page plan set — page 1 is 200×100 with an offset CropBox; page 2 is
  *  300×200 with its own /Rotate 90; page 3 has no MediaBox of its own and
- *  inherits the page tree's 612×792. Pages 1 and 3 inherit the tree's /Rotate 180. */
+ *  inherits the page tree's offset MediaBox [50,60,650,460]; the tree also carries a CropBox [60,70,300,200] that pages 2 and 3 inherit (page 1 has its own). Pages 1 and 3 inherit the tree's /Rotate 180. */
 async function pdf319Set(): Promise<Uint8Array> {
   const { PDFDocument, PDFName, PDFNumber, degrees } = await import("pdf-lib");
   const doc = await PDFDocument.create();
@@ -60124,7 +60124,8 @@ async function pdf319Set(): Promise<Uint8Array> {
   const p2 = doc.addPage([300, 200]);
   p2.setRotation(degrees(90));
   const p3 = doc.addPage([400, 500]);
-  doc.catalog.Pages().set(PDFName.of("MediaBox"), doc.context.obj([0, 0, 612, 792]));
+  doc.catalog.Pages().set(PDFName.of("MediaBox"), doc.context.obj([50, 60, 650, 460]));
+  doc.catalog.Pages().set(PDFName.of("CropBox"), doc.context.obj([60, 70, 300, 200]));
   doc.catalog.Pages().set(PDFName.of("Rotate"), PDFNumber.of(180));
   p3.node.delete(PDFName.of("MediaBox"));
   return doc.save();
@@ -60199,8 +60200,8 @@ async function pagesAsSheets319BytesChecks(): Promise<void> {
   const J = (v: unknown) => JSON.stringify(v);
   const set = await pdf319Set();
   const srcViews = await views319(set);
-  ok(J(srcViews) === J([{ view: [10, 20, 160, 80], rotate: 180 }, { view: [0, 0, 300, 200], rotate: 90 }, { view: [0, 0, 612, 792], rotate: 180 }]),
-    "#319 fixture: page 3 inherits the MediaBox, pages 1 and 3 inherit /Rotate 180 (pdf.js reads the source so)");
+  ok(J(srcViews) === J([{ view: [10, 20, 160, 80], rotate: 180 }, { view: [60, 70, 300, 200], rotate: 90 }, { view: [60, 70, 300, 200], rotate: 180 }]),
+    "#319 fixture: pages 2 and 3 inherit the tree CropBox (page 3 also the offset MediaBox), pages 1 and 3 inherit /Rotate 180 (pdf.js reads the source so)");
   const r = await X.splitPdfPages(set);
   const got = r.ok ? await Promise.all(r.pages.map((p) => views319(p))) : [];
   ok(r.ok && r.pages.length === 3 && got.every((v) => v.length === 1) && J(got.map((v) => v[0])) === J(srcViews),
@@ -60216,6 +60217,12 @@ async function pagesAsSheets319BytesChecks(): Promise<void> {
   ok(!r61.ok && r61.reason === "too-many-pages" && r61.pageCount === 61 && r60.ok && r60.pages.length === 60,
     "#319 61 pages is over the cap (with its count); exactly 60 still splits");
   const tooBig = await X.splitPdfPages(set, { maxTotalBytes: 10 });
+  // A cap between one page's size and the full total: the running total must trip it mid-loop.
+  const sizes = r.ok ? r.pages.map((p) => p.byteLength) : [];
+  const mid = Math.max(...sizes) + 1;
+  const tripped = await X.splitPdfPages(set, { maxTotalBytes: mid });
+  ok(sizes.length === 3 && mid < sizes.reduce((a, b) => a + b, 0) && !tripped.ok && tripped.reason === "too-big" && tripped.pageCount === 3,
+    "#319 a cap above any one page but below the total still refuses (the running total trips it mid-loop)");
   const broken = await X.splitPdfPages(new TextEncoder().encode("%PDF-1.7 not really a pdf"));
   ok(!tooBig.ok && tooBig.reason === "too-big" && !broken.ok && broken.reason === "unreadable",
     "#319 split output over the byte budget is 'too-big'; a broken PDF is 'unreadable'");
