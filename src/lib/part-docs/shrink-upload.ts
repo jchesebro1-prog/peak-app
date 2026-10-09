@@ -9,7 +9,7 @@
  */
 import { deleteBlob, getBlobStream, putBlob } from "@/lib/blob";
 import type { StoredFile } from "@/lib/stores/part-documents";
-import { shrinkImage, webpFileName } from "./shrink";
+import { shrinkImage, squareProductImage, webpFileName } from "./shrink";
 import { partDocBlobPath } from "./types";
 
 export type ShrinkUploadDeps = {
@@ -31,8 +31,9 @@ export async function shrinkStoredImage(
   documentId: string,
   file: StoredFile,
   deps: ShrinkUploadDeps = liveShrinkUploadDeps,
-  /** `maxEdge` — #300 object drawings shrink to ≤ 1024 px (default 1600, shrink.ts). */
-  opts: { maxEdge?: number } = {}
+  /** `maxEdge` — #300 object drawings shrink to ≤ 1024 px (default 1600, shrink.ts). `square` — #322 product photos
+   *  become a padded 1600×1600 square (squareProductImage) and the file is marked `squared`. */
+  opts: { maxEdge?: number; square?: boolean } = {}
 ): Promise<{ ok: true; file: StoredFile } | { ok: false; error: string }> {
   const removeQuietly = async (pathname: string) => {
     try {
@@ -48,7 +49,7 @@ export async function shrinkStoredImage(
     bytes = null;
   }
   if (!bytes) return { ok: false, error: "Couldn't read the uploaded file — try again" };
-  const shrunk = await shrinkImage(bytes, opts);
+  const shrunk = opts.square ? await squareProductImage(bytes) : await shrinkImage(bytes, opts);
   if (!shrunk.ok) {
     await removeQuietly(file.blobKey);
     return shrunk;
@@ -62,5 +63,8 @@ export async function shrinkStoredImage(
     return { ok: false, error: "Could not store the file." };
   }
   await removeQuietly(file.blobKey);
-  return { ok: true, file: { blobKey: stored.pathname, fileName, contentType: shrunk.contentType, size: shrunk.bytes.byteLength } };
+  return {
+    ok: true,
+    file: { blobKey: stored.pathname, fileName, contentType: shrunk.contentType, size: shrunk.bytes.byteLength, ...(opts.square ? { squared: true as const } : {}) },
+  };
 }

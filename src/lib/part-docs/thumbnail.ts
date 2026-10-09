@@ -12,7 +12,7 @@ import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { carriesBypass, chromeLaunch, landedOnRequested, RENDER_LAUNCH_TIMEOUT_MS, RENDER_STEP_TIMEOUT_MS } from "@/lib/quote-pdf/render";
 import { signPrintToken } from "@/lib/quote-pdf/token";
 import { attachDocument, createDocument, getDocument } from "@/lib/stores/part-documents";
-import { shrinkImage } from "./shrink";
+import { squareProductImage } from "./shrink";
 import { isDocumentId, newDocumentId, partDocBlobPath, safeDocFileName } from "./types";
 
 export type RenderThumbnailResult = { ok: true; documentId: string } | { ok: false; error: string };
@@ -130,7 +130,8 @@ export async function renderDatasheetThumbnail(
 
   // #283 — store the thumbnail as WebP like every other image; a shrink
   // failure (never expected for Chrome's own PNG) falls back to the PNG.
-  const shrunk = await shrinkImage(png);
+  // #322 — squared like every product photo (a portal product image).
+  const shrunk = await squareProductImage(png);
   const outBytes = shrunk.ok ? shrunk.bytes : png;
   const outType = shrunk.ok ? shrunk.contentType : "image/png";
   const newId = newDocumentId();
@@ -152,6 +153,7 @@ export async function renderDatasheetThumbnail(
     sourceUrl: null,
     source: "datasheet-render",
     sourceRef: datasheetId,
+    ...(shrunk.ok ? { squared: true as const } : {}),
     by,
   });
   if (!created) {

@@ -78,6 +78,8 @@ export type NewPartDocument = {
   language?: string;
   /** What the SVG sanitizer stripped (#300, drawing kinds only). */
   svgRemoved?: string[];
+  /** The file is a #322 padded square. */
+  squared?: true;
   by: string;
   at?: number;
 };
@@ -98,6 +100,7 @@ function buildDocument(input: NewPartDocument): PartDocument {
     ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
     ...(input.language ? { language: input.language } : {}),
     ...(input.svgRemoved?.length ? { svgRemoved: [...input.svgRemoved] } : {}),
+    ...(input.squared ? { squared: true as const } : {}),
     uploadedAt: input.at ?? Date.now(),
     uploadedBy: input.by,
     history: [],
@@ -132,29 +135,33 @@ export async function createDocuments(
 }
 
 /** `svgRemoved` (#300): what sanitizeSvg stripped from this file, when it is a sanitized drawing SVG. */
-export type StoredFile = { blobKey: string; fileName: string; contentType: string; size: number; svgRemoved?: string[] };
+export type StoredFile = { blobKey: string; fileName: string; contentType: string; size: number; svgRemoved?: string[]; squared?: true };
 
 /**
  * Point a document at a new stored file. The file it held (if any) moves to
  * `history` — the blob itself is never deleted (spec §2.4). Also how a
- * link-only document becomes a stored one after a fetch.
+ * link-only document becomes a stored one after a fetch. `squared` (#322)
+ * describes the CURRENT file, so a replacement that isn't squared clears it.
+ * `keepStamp` (#322 batch) leaves uploadedAt/uploadedBy alone — uploadedAt is
+ * the gallery's tiebreak, so re-squaring must not reorder photos.
  */
-export async function replaceDocumentFile(id: string, file: StoredFile, by: string, at = Date.now()): Promise<PartDocument | null> {
+export async function replaceDocumentFile(id: string, file: StoredFile, by: string, at = Date.now(), opts: { keepStamp?: boolean } = {}): Promise<PartDocument | null> {
   return patchDoc<PartDocument>("part_documents", id, (d) => {
     const history = [...(d.history || [])];
     if (d.blobKey) history.push({ blobKey: d.blobKey, fileName: d.fileName, size: d.size, replacedAt: at, replacedBy: by, ...(d.svgRemoved?.length ? { svgRemoved: d.svgRemoved } : {}) });
     // #300 — the stripped list describes the CURRENT file only; it moves to history with it.
-    const { svgRemoved: _previous, ...rest } = d;
+    const { svgRemoved: _previous, squared: _squared, ...rest } = d;
     void _previous;
+    void _squared;
     return {
       ...rest,
       ...(file.svgRemoved?.length ? { svgRemoved: [...file.svgRemoved] } : {}),
+      ...(file.squared ? { squared: true as const } : {}),
       blobKey: file.blobKey,
       fileName: file.fileName,
       contentType: file.contentType,
       size: file.size,
-      uploadedAt: at,
-      uploadedBy: by,
+      ...(opts.keepStamp ? {} : { uploadedAt: at, uploadedBy: by }),
       history,
     };
   });
