@@ -129,15 +129,19 @@ export function sortValue(r: DeviceRow, key: DeviceColumnKey): string | number {
   }
 }
 
-/** null = reading order. Ties keep reading order. */
+/** null = reading order. Ties keep reading order; blank text cells sort last in both directions. */
 export function sortDeviceRows(rows: readonly DeviceRow[], sort: DeviceSort): DeviceRow[] {
   const out = [...rows];
   if (!sort) return out.sort((a, b) => a.order - b.order);
   return out.sort((a, b) => {
     const x = sortValue(a, sort.key);
     const y = sortValue(b, sort.key);
-    const c = typeof x === "number" && typeof y === "number" ? x - y : byText(String(x), String(y));
-    return c * sort.dir || a.order - b.order;
+    if (typeof x === "number" && typeof y === "number") return (x - y) * sort.dir || a.order - b.order;
+    // A blank cell (no designator, no category…) sorts last whichever way the column runs.
+    const xb = String(x) === "";
+    const yb = String(y) === "";
+    if (xb !== yb) return xb ? 1 : -1;
+    return byText(String(x), String(y)) * sort.dir || a.order - b.order;
   });
 }
 

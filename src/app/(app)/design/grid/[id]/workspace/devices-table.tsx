@@ -26,8 +26,9 @@ import type { GridEditor } from "../use-grid-editor";
  * Spreadsheet → Devices (#320): one row per device on the active option
  * (curtains keep their names and stay off it), in reading order.
  * Designator and Category edit in place: click the cell, then Enter / Tab
- * save and move down / right (Shift goes back); Esc — or clicking away —
- * discards. Filters by type, space and sheet; a header click sorts (again
+ * save and move down / right (Shift goes back); Esc discards. There is no
+ * blur handler: clicking elsewhere leaves the cell open with what was typed,
+ * and a refused save keeps it open too. Filters by type, space and sheet; a header click sorts (again
  * reverses, a third time returns to reading order). A row click selects the
  * device and shows its sheet on the plan (Shift / ⌘ adds to the selection).
  * The columns come from DEVICE_COLUMNS, so a later slice adds a field there.
@@ -53,8 +54,23 @@ const TH: React.CSSProperties = {
   color: "#8c919c",
   borderBottom: "1.5px solid #1a1a1a",
   padding: "4px 8px 5px 0",
-  cursor: "pointer",
   userSelect: "none",
+  whiteSpace: "nowrap",
+};
+/** The sortable header's real button: looks like the header text, reachable by keyboard. */
+const TH_BUTTON: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  margin: 0,
+  padding: 0,
+  border: "none",
+  background: "none",
+  cursor: "pointer",
+  font: "inherit",
+  letterSpacing: "inherit",
+  textTransform: "inherit",
+  color: "inherit",
+  textAlign: "left",
   whiteSpace: "nowrap",
 };
 const TD: React.CSSProperties = {
@@ -142,7 +158,8 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
         // A refused save keeps the cell open with what was typed; the status line says why.
         if ((cleanDesignator(cur.draft) ?? "") !== row.designator && !(await saveDesignators([{ id: row.id, designator: cur.draft }]))) return;
       } else if ((normalizeCategory(cur.draft) ?? "") !== row.category) {
-        await saveCategory(row.id, cur.draft);
+        // Same as the designator path: a refused save keeps the cell open.
+        if (!(await saveCategory(row.id, cur.draft))) return;
       }
     }
     const next = nextCell(shown, cur.id, cur.col, move);
@@ -198,7 +215,11 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
           items={[
             { label: "All devices", onSelect: () => renumber({ all: true }, "all devices") },
             {
-              label: filterType && filterCode ? `${filterType.label} (${filterCode})` : "This type — pick a type filter first",
+              label: filterType && filterCode
+                ? `${filterType.label} (${filterCode})`
+                : filter.type
+                  ? "This type — no code for this type"
+                  : "This type — pick a type filter first",
               disabled: !filterCode,
               onSelect: () => {
                 if (filterType && filterCode) renumber({ code: filterCode }, filterType.label);
@@ -225,14 +246,11 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
           <thead>
             <tr>
               {DEVICE_COLUMNS.map((c) => (
-                <th
-                  key={c.key}
-                  style={TH}
-                  onClick={() => sortBy(c.key)}
-                  aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-                >
-                  {c.label}
-                  {sort?.key === c.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
+                <th key={c.key} style={TH} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+                  <button type="button" style={TH_BUTTON} onClick={() => sortBy(c.key)}>
+                    {c.label}
+                    {sort?.key === c.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
+                  </button>
                 </th>
               ))}
             </tr>

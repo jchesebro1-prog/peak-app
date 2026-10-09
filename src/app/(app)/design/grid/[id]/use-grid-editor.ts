@@ -1811,10 +1811,10 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
 
   /** Persist a placement's user-defined category (punch #48). "" clears it. */
-  async function saveCategory(placementId: string, label: string) {
+  async function saveCategory(placementId: string, label: string): Promise<boolean> {
     // The batch setter with one item (same category rule as the single one)
     // hands back the previous label, so the edit is one undo step (#299).
-    if (!(await flushNudge())) return;
+    if (!(await flushNudge())) return false;
     setBusy(true);
     const items = [{ id: placementId, category: label }];
     let r: Awaited<ReturnType<typeof setPlacementsCategoryAction>>;
@@ -1823,17 +1823,19 @@ function useGridEditorImpl(props: GridEditorProps) {
     } catch {
       setBusy(false);
       setErr(SAVE_FAILED);
-      return;
+      return false;
     }
     setBusy(false);
     setCategoryDraft(null);
-    if (!r.ok) setErr(r.error);
-    else {
-      noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
-      if (r.previous.some((pv) => pv.category !== label.trim().slice(0, 40)))
-        record({ label: stepLabel("set category", 1), forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
-      router.refresh();
+    if (!r.ok) {
+      setErr(r.error);
+      return false;
     }
+    noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
+    if (r.previous.some((pv) => pv.category !== label.trim().slice(0, 40)))
+      record({ label: stepLabel("set category", 1), forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
+    router.refresh();
+    return true;
   }
 
   /** Persist a catalog ENTRY's icon/colour override (#131 → stock symbols).

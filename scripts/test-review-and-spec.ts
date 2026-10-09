@@ -60413,6 +60413,9 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(R.sortDeviceRows(rows, { key: "designator", dir: 1 }).map((r) => r.id).join(",") === "d,b,a,c" && R.sortDeviceRows(rows, { key: "designator", dir: -1 }).map((r) => r.id).join(",") === "c,a,b,d" &&
      R.sortDeviceRows(rows, { key: "qty", dir: -1 })[0].id === "c" && R.sortDeviceRows(R.sortDeviceRows(rows, { key: "qty", dir: -1 }), null).map((r) => r.id).join(",") === "b,d,a,c",
     "#320 Devices: header sort (designators in number order), and back to reading order");
+  const blankA = rows.map((r) => (r.id === "a" ? { ...r, designator: "" } : r));
+  ok(R.sortDeviceRows(blankA, { key: "designator", dir: 1 }).map((r) => r.id).join(",") === "d,b,c,a" && R.sortDeviceRows(blankA, { key: "designator", dir: -1 }).map((r) => r.id).join(",") === "c,b,d,a",
+    "#320 Devices: a blank designator sorts last in both directions");
   const J = (v: unknown) => JSON.stringify(v);
   ok(J(R.nextCell(rows, "b", "designator", "right")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "b", "category", "right")) === J({ id: "d", col: "designator" }) &&
      R.nextCell(rows, "c", "designator", "down") === null && J(R.nextCell(rows, "d", "designator", "left")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "d", "designator", "up")) === J({ id: "b", col: "designator" }),
