@@ -11531,6 +11531,7 @@ seeded()
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
+  .then(() => designators320DeviceRowsChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60378,4 +60379,52 @@ async function designators320EditorChecks(): Promise<void> {
   ok(hook.includes('case "designator": {') && hook.includes("setDesignatorsAction(project.id, c.items, { keepAuto: c.keepAuto === true })") &&
      hook.includes("const designatorDupes = useMemo(() => duplicates(placements), [placements]);") && hook.includes("keepAuto: true"),
     "#320 hook: duplicates per option, edits and Renumber are undoable steps (Renumber keeps the auto tag)");
+}
+
+/* ---------------- #320: Spreadsheet Devices tab ---------------- */
+async function designators320DeviceRowsChecks(): Promise<void> {
+  const R = await import("@/lib/design/grid-device-rows");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const sp = { id: "sp1", sheetId: "s1", page: 1, name: "Stage", color: "#000", points: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 1 }, { x: 0, y: 1 }], by: "t", at: 1 };
+  const pls = [
+    { id: "a", sheetId: "s1", page: 1, x: 0.7, y: 0.1, partId: "SPK1", designator: "SPK-2", by: "t", at: 1 },
+    { id: "b", sheetId: "s1", page: 1, x: 0.2, y: 0.5, partId: "MIC1", designator: "MIC-10", category: "FOH", by: "t", at: 1 },
+    { id: "c", sheetId: "s2", page: 2, x: 0.1, y: 0.1, partId: "PIPE", designator: "TR-1", qty: 24, by: "t", at: 1 },
+    { id: "d", sheetId: "s1", page: 1, x: 0.3, y: 0.6, partId: "MIC1", designator: "MIC-2", by: "t", at: 1 },
+    { id: "e", sheetId: "s1", page: 1, x: 0.4, y: 0.4, partId: "FAB", curtain: { name: "Main" }, by: "t", at: 1 },
+  ];
+  const typeOf: Record<string, string> = { SPK1: "speakers", MIC1: "microphones", PIPE: "truss-pipe" };
+  const rows = R.deviceRows({
+    placements: pls as never,
+    sheets: [{ id: "s1", name: "Floor" }, { id: "s2", name: "Ceiling" }],
+    spaces: [sp] as never,
+    typeKeyOf: (pl) => typeOf[pl.partId],
+    typeLabelOf: (k) => k,
+    modelOf: (pl) => pl.partId,
+    descOf: () => "d",
+    duplicates: new Set(["d"]),
+  });
+  ok(rows.map((r) => r.id).join(",") === "b,d,a,c", "#320 Devices: one row per device (curtains left out), in reading order");
+  ok(rows[3].display === "TR-1–24" && rows[3].sheet === "Ceiling · p2" && rows[3].qty === 24 && rows[0].space === "Stage" && rows[2].space === "—" && rows[0].category === "FOH" && rows[1].duplicate,
+    "#320 Devices: lot range, sheet · page, space, category, duplicate flag");
+  ok(R.filterDeviceRows(rows, { type: "microphones" }).map((r) => r.id).join(",") === "b,d" && R.filterDeviceRows(rows, { space: R.NO_SPACE }).map((r) => r.id).join(",") === "a,c" &&
+     R.filterDeviceRows(rows, { sheet: "s2" }).map((r) => r.id).join(",") === "c",
+    "#320 Devices: filter by type, space (incl. No space) and sheet");
+  ok(R.sortDeviceRows(rows, { key: "designator", dir: 1 }).map((r) => r.id).join(",") === "d,b,a,c" && R.sortDeviceRows(rows, { key: "designator", dir: -1 }).map((r) => r.id).join(",") === "c,a,b,d" &&
+     R.sortDeviceRows(rows, { key: "qty", dir: -1 })[0].id === "c" && R.sortDeviceRows(R.sortDeviceRows(rows, { key: "qty", dir: -1 }), null).map((r) => r.id).join(",") === "b,d,a,c",
+    "#320 Devices: header sort (designators in number order), and back to reading order");
+  const J = (v: unknown) => JSON.stringify(v);
+  ok(J(R.nextCell(rows, "b", "designator", "right")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "b", "category", "right")) === J({ id: "d", col: "designator" }) &&
+     R.nextCell(rows, "c", "designator", "down") === null && J(R.nextCell(rows, "d", "designator", "left")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "d", "designator", "up")) === J({ id: "b", col: "designator" }),
+    "#320 Devices: Enter moves down, Tab moves right (wrapping to the next row), Shift goes back");
+  ok(R.DEVICE_COLUMNS.map((c) => c.key).join(",") === "designator,type,model,desc,space,sheet,qty,category" && R.DEVICE_COLUMNS.filter((c) => c.editable).map((c) => c.key).join(",") === "designator,category",
+    "#320 Devices: the column list (Designator and Category editable)");
+
+  const view = rd("src/app/(app)/design/grid/[id]/workspace/spreadsheet-view.tsx");
+  const table = rd("src/app/(app)/design/grid/[id]/workspace/devices-table.tsx");
+  ok(view.includes('useState<Tab>("devices")') && view.includes('role="tablist"') && view.includes("<DevicesTable ed={ed} />") && view.includes("<ScheduleTable schedule={schedule}"),
+    "#320 Spreadsheet: Devices (default) and Schedule tabs");
+  ok(table.startsWith('"use client"') && table.includes("data-no-nudge") && table.includes("nextCell(shown, cur.id, cur.col, move)") && table.includes("focusPlacements(ids, r.id)") &&
+     table.includes("renumberDesignators(target, what)") && table.includes("Selected rows") && !/from\s+"@\/lib\/stores\//.test(table) && !table.includes("designators-server"),
+    "#320 Devices tab: inline edit moves cell to cell, a row click selects on the plan, Renumber menu; no store import");
 }
