@@ -28,6 +28,9 @@ export type DeviceType = {
    *  (`PD-…`) every part of this type falls back to when it has no drawing
    *  of its own (resolveObjectSymbol). Kept only when the id is well formed. */
   symbolDocId?: string;
+  /** #320: the designator prefix for this type's devices (MIC → MIC-1).
+   *  1–6 of A–Z/0–9, stored uppercased; absent = effectiveTypeCode's default. */
+  code?: string;
 };
 
 export type TypeMapEntry = { typeKey: string | null; by: "auto" | "admin"; at: number };
@@ -102,6 +105,58 @@ export const DEFAULT_TYPE_ICONS: Record<string, string> = {
   "parts-consumables": "kit",
 };
 
+/** #320: the shipped designator code per seeded type (spec table). A type's
+ *  own `code` wins; a type not listed here derives one from its label. */
+export const DEFAULT_TYPE_CODES: Record<string, string> = {
+  fixtures: "LX",
+  "dimming-power": "DIM",
+  "control-networking": "LCN",
+  "lighting-accessories": "LA",
+  "hoists-motors": "HST",
+  "truss-pipe": "TR",
+  "rigging-hardware": "RH",
+  "rigging-control": "RC",
+  drapery: "DR",
+  "tracks-hardware": "TRK",
+  speakers: "SPK",
+  microphones: "MIC",
+  "mixing-processing": "MIX",
+  amplifiers: "AMP",
+  "assistive-listening": "ALS",
+  intercom: "COM",
+  "displays-projectors": "DSP",
+  "screens-lifts": "SCR",
+  cameras: "CAM",
+  "switching-distribution": "SW",
+  "cable-connectors": "CBL",
+  "racks-cases": "RACK",
+  "power-distribution": "PD",
+  networking: "NET",
+  "parts-consumables": "PRT",
+};
+
+export const TYPE_CODE_RE = /^[A-Z0-9]{1,6}$/;
+
+/** A stored/typed code, trimmed and uppercased; null unless 1–6 of A–Z/0–9. */
+export function cleanTypeCode(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const c = raw.trim().toUpperCase();
+  return TYPE_CODE_RE.test(c) ? c : null;
+}
+
+/** First letters of up to three words, or the first three letters of a
+ *  one-word label ("Fog & Haze" → FH, "Hazers" → HAZ). */
+export function derivedTypeCode(label: string): string {
+  const words = label.toUpperCase().replace(/&/g, " ").split(/[^A-Z0-9]+/).filter(Boolean);
+  const code = words.length >= 2 ? words.slice(0, 3).map((w) => w[0]).join("") : (words[0] || "").slice(0, 3);
+  return code || "DEV";
+}
+
+/** The code a type's designators use: its own, else the shipped default, else derived. */
+export function effectiveTypeCode(t: { key: string; label: string; code?: string | null }): string {
+  return cleanTypeCode(t.code) ?? (Object.hasOwn(DEFAULT_TYPE_CODES, t.key) ? DEFAULT_TYPE_CODES[t.key] : derivedTypeCode(t.label));
+}
+
 const KEY_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const ICON_RE = /^[a-z0-9-]{1,40}$/;
 const byOrder = (a: DeviceType, b: DeviceType) => a.order - b.order || a.label.localeCompare(b.label);
@@ -124,6 +179,8 @@ function cleanType(raw: unknown): DeviceType | null {
   if (r.archived === true) t.archived = true;
   if (typeof r.icon === "string" && ICON_RE.test(r.icon)) t.icon = r.icon;
   if (isDocumentId(r.symbolDocId)) t.symbolDocId = r.symbolDocId;
+  const code = cleanTypeCode(r.code);
+  if (code) t.code = code;
   return t;
 }
 
@@ -533,13 +590,30 @@ export function cleanDeviceTypesInput(
     const archived = r.archived === true;
     const lower = label.toLowerCase();
     if (!archived && labels.has(lower)) return { ok: false, error: `Two device types are called "${label}".` };
+    // #320: an absent `code` keeps the stored one (an older client); "" clears it.
+    let code: string | undefined = r.code === undefined ? existing?.code : undefined;
+    if (typeof r.code === "string" && r.code.trim()) {
+      const c = cleanTypeCode(r.code);
+      if (!c) return { ok: false, error: `The code for "${label}" must be 1–6 letters or digits.` };
+      code = c;
+    }
     keys.add(key);
     if (!archived) labels.add(lower);
     const t: DeviceType = { key, label, scope, order: (i + 1) * 10 };
     if (archived) t.archived = true;
     if (existing?.icon) t.icon = existing.icon;
     if (existing?.symbolDocId) t.symbolDocId = existing.symbolDocId;
+    if (code) t.code = code;
     out.push(t);
+  }
+  // #320: two active types numbering into one code would read as one series.
+  const codeOwner = new Map<string, string>();
+  for (const t of out) {
+    if (t.archived) continue;
+    const c = effectiveTypeCode(t);
+    const other = codeOwner.get(c);
+    if (other) return { ok: false, error: `"${other}" and "${t.label}" both use the code ${c} — give one of them its own code.` };
+    codeOwner.set(c, t.label);
   }
   for (const t of current) if (!keys.has(t.key)) out.push({ ...t, archived: true, order: (out.length + 1) * 10 });
   return { ok: true, types: out };

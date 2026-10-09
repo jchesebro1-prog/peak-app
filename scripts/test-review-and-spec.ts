@@ -11528,6 +11528,7 @@ seeded()
   .then(() => sheetAdjust318UiPins())
   .then(() => sheetAdjust318DialogGuardPins())
   .then(() => sheetAdjust318StaleSheetChecks())
+  .then(() => designators320PureChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60094,4 +60095,126 @@ async function sheetAdjust318StaleSheetChecks(): Promise<void> {
     if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
     else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
   }
+}
+
+/* ---------------- #320: Grid device designators — pure rules ---------------- */
+async function designators320PureChecks(): Promise<void> {
+  const D = await import("@/lib/design/designators");
+  const T = await import("@/lib/design/device-types");
+  const J = (v: unknown) => JSON.stringify(v);
+  const pl = (id: string, x: number, y: number, extra: Record<string, unknown> = {}) => ({ id, sheetId: "s1", page: 1, x, y, partId: "P", ...extra });
+
+  // clean / parse / format
+  ok(D.cleanDesignator("  MIC \u0007 -1 ") === "MIC -1" && D.cleanDesignator("x".repeat(30)) === "x".repeat(24) && D.cleanDesignator("   ") === null && D.cleanDesignator(5) === null,
+    "#320 cleanDesignator: trims, collapses spaces, strips control chars, caps at 24; blank/non-text → null");
+  ok(D.cleanDesignator("LX-1–24") === "LX-1" && D.cleanDesignator("LX-1 – 24") === "LX-1", "#320 cleanDesignator: a typed range keeps its first number");
+  ok(J(D.parseDesignator("MIC-12")) === J({ code: "MIC", n: 12 }) && D.parseDesignator("mic-3")?.code === "mic" && J(D.parseDesignator("A-1-2")) === J({ code: "A-1", n: 2 }),
+    "#320 parseDesignator: <code>-<number>, code kept as written");
+  ok(D.parseDesignator("FOH-AMP") === null && D.parseDesignator("MIC-0") === null && D.parseDesignator("MIC-1234567") === null && D.parseDesignator(undefined) === null,
+    "#320 parseDesignator: anything else is custom (null)");
+  ok(D.formatDesignator("LX-1", 24) === "LX-1–24" && D.formatDesignator("LX-1", 1) === "LX-1" && D.formatDesignator("FOH-AMP", 5) === "FOH-AMP" && D.formatDesignator(undefined, 3) === "",
+    "#320 formatDesignator: a lot reads as its range; custom text and singles as stored; none → \"\"");
+
+  // occupied / nextFree
+  const occ = D.occupied([pl("a", 0, 0, { designator: "MIC-1" }), pl("b", 0, 0, { designator: "LX-1", qty: 24 }), pl("c", 0, 0, { designator: "mic-3" }),
+    pl("d", 0, 0, { designator: "MIC-2", curtain: { name: "Main" } }), pl("e", 0, 0, { designator: "FOH" })]);
+  ok(J(occ.get("MIC")) === J([{ from: 1, to: 1 }, { from: 3, to: 3 }]) && J(occ.get("LX")) === J([{ from: 1, to: 24 }]) && !occ.has("FOH") && occ.size === 2,
+    "#320 occupied: per code (case-insensitive), a lot holds its block; curtains and custom text hold nothing");
+  ok(D.nextFree([{ from: 1, to: 1 }, { from: 3, to: 3 }]) === 2 && D.nextFree([{ from: 1, to: 1 }, { from: 3, to: 3 }], 2) === 4 && D.nextFree([], 3) === 1 &&
+     D.nextFree([{ from: 2, to: 5 }]) === 1 && D.nextFree([{ from: 1, to: 24 }]) === 25 && D.nextFree([{ from: 1, to: 5 }, { from: 2, to: 3 }]) === 6,
+    "#320 nextFree: the lowest n with n…n+qty−1 all free");
+
+  // reading order: sheet, page, space (project order, none last), row band, x
+  const box = (id: string, x0: number, x1: number) => ({ id, sheetId: "s1", page: 1, points: [{ x: x0, y: 0 }, { x: x1, y: 0 }, { x: x1, y: 0.8 }, { x: x0, y: 0.8 }] });
+  const ctx = { sheetIds: ["s1", "s2"], spaces: [box("stage", 0.5, 1), box("house", 0, 0.5)] };
+  const scattered = [
+    { ...pl("a", 0.1, 0.1), sheetId: "s2" }, pl("b", 0.9, 0.51), pl("c", 0.2, 0.5), pl("d", 0.6, 0.515), { ...pl("e", 0.5, 0.5), page: 2 }, pl("f", 0.7, 0.1), pl("g", 0.1, 0.9),
+  ];
+  ok(D.readingOrder(scattered, ctx).map((p) => p.id).join(",") === "f,d,b,c,g,e,a",
+    "#320 readingOrder: sheet order, page, space in project order (no space last), then rows top-down, then left-right");
+
+  // assignMissing
+  const am = [pl("a", 0.1, 0.05, { partId: "MIC", designator: "MIC-1" }), pl("b", 0.1, 0.1, { partId: "MIC", qty: 3 }), pl("c", 0.1, 0.2, { partId: "MIC" }),
+    pl("d", 0.1, 0.3, { partId: "MIC", curtain: { name: "Main" } }), pl("e", 0.1, 0.4, { partId: "LX", designator: "LX-5" })];
+  const got = D.assignMissing(am, (p) => p.partId, { sheetIds: ["s1"], spaces: [] });
+  ok(J([...got.entries()]) === J([["b", "MIC-2"], ["c", "MIC-5"]]), "#320 assignMissing: reading order, a lot takes a whole block, never a curtain or a numbered device");
+  ok(J([...D.assignMissing(am, (p) => p.partId, { sheetIds: ["s1"], spaces: [] }, new Set(["c"])).entries()]) === J([["c", "MIC-2"]]),
+    "#320 assignMissing: `only` numbers just the given devices");
+
+  // renumber
+  const rn = [pl("x1", 0.1, 0.1, { designator: "MIC-3" }), pl("x2", 0.1, 0.2, { designator: "MIC-7", qty: 2 }), pl("x3", 0.1, 0.3, { designator: "MIC-1" }),
+    pl("x4", 0.1, 0.4, { designator: "FOH" }), pl("x5", 0.1, 0.5, { designator: "LX-2" })];
+  const rctx = { sheetIds: ["s1"], spaces: [] };
+  ok(J([...D.renumber(rn, rctx, { all: true }).entries()]) === J([["x1", "MIC-1"], ["x2", "MIC-2"], ["x3", "MIC-4"], ["x5", "LX-1"]]),
+    "#320 renumber all: each code from 1 in reading order, lots keep their block; custom untouched; only changes returned");
+  ok(J([...D.renumber(rn, rctx, { code: "lx" }).entries()]) === J([["x5", "LX-1"]]), "#320 renumber one code (case-insensitive)");
+  ok(J([...D.renumber(rn, rctx, { ids: ["x2"] }).entries()]) === J([["x2", "MIC-4"]]),
+    "#320 renumber a selection: it takes the lowest numbers not held by the rest of its code");
+
+  // duplicates
+  const dup = D.duplicates([pl("a", 0, 0, { designator: "MIC-1", qty: 3 }), pl("b", 0, 0, { designator: "MIC-2" }), pl("c", 0, 0, { designator: "MIC-4" }),
+    pl("d", 0, 0, { designator: "foh" }), pl("e", 0, 0, { designator: "FOH " }), pl("f", 0, 0, { designator: "Rack" }), pl("g", 0, 0, { designator: "MIC-4", curtain: { name: "x" } })]);
+  ok([...dup].sort().join(",") === "a,b,d,e", "#320 duplicates: overlapping blocks of one code, or equal custom text (case-insensitive); curtains ignored");
+
+  // designatorList
+  ok(D.designatorList([{ designator: "MIC-1" }, { designator: "MIC-2" }, { designator: "MIC-3" }, { designator: "MIC-4" }, { designator: "MIC-7" }, { designator: "FOH" },
+    { designator: "LX-1", qty: 24 }, { designator: "AMP-2" }, {}]) === "AMP-2, LX-1–24, MIC-1–4, MIC-7, FOH",
+    "#320 designatorList: per code, consecutive runs as ranges, custom ones after");
+
+  // device-type codes
+  ok(T.SEED_DEVICE_TYPES.every((t) => !!T.DEFAULT_TYPE_CODES[t.key]) && new Set(Object.values(T.DEFAULT_TYPE_CODES)).size === 25 &&
+     T.DEFAULT_TYPE_CODES.microphones === "MIC" && T.DEFAULT_TYPE_CODES.fixtures === "LX" && T.DEFAULT_TYPE_CODES["racks-cases"] === "RACK",
+    "#320 DEFAULT_TYPE_CODES: one distinct code per seeded type (spec table)");
+  ok(T.effectiveTypeCode({ key: "fog-haze", label: "Fog & Haze" }) === "FH" && T.effectiveTypeCode({ key: "x", label: "Hazers" }) === "HAZ" &&
+     T.effectiveTypeCode({ key: "x", label: "Video Wall Processing Units" }) === "VWP" && T.effectiveTypeCode({ key: "speakers", label: "Loudspeakers", code: "ls" }) === "LS" &&
+     T.effectiveTypeCode({ key: "speakers", label: "Loudspeakers" }) === "SPK",
+    "#320 effectiveTypeCode: own code, else the shipped default, else derived from the label");
+  const fromBlob = T.deviceTypesFrom([{ key: "speakers", label: "Speakers", scope: "Audio", order: 1, code: "ls" }, { key: "amplifiers", label: "Amplifiers", scope: "Audio", order: 2, code: "TOOLONG7" }]);
+  ok(fromBlob.find((t) => t.key === "speakers")?.code === "LS" && !("code" in fromBlob.find((t) => t.key === "amplifiers")!), "#320 cleanType keeps a valid code (uppercased), drops a bad one");
+  const seeds = T.deviceTypesFrom(undefined);
+  const asInput = (patch: Record<string, Record<string, unknown>> = {}) => seeds.map((t) => ({ key: t.key, label: t.label, scope: t.scope, ...(patch[t.key] || {}) }));
+  const withCode = T.cleanDeviceTypesInput(asInput({ speakers: { code: " spk2 " } }), seeds);
+  ok(withCode.ok && withCode.types.find((t) => t.key === "speakers")?.code === "SPK2" && !("code" in withCode.types.find((t) => t.key === "amplifiers")!),
+    "#320 types: a code saves uppercased; no code stores none");
+  const badCode = T.cleanDeviceTypesInput(asInput({ speakers: { code: "SP K!" } }), seeds);
+  ok(!badCode.ok && /1–6 letters or digits/.test(badCode.error), "#320 types: a code that isn't 1–6 letters/digits is refused");
+  const clash = T.cleanDeviceTypesInput(asInput({ speakers: { code: "MIC" } }), seeds);
+  const archivedClash = T.cleanDeviceTypesInput(asInput({ speakers: { code: "MIC" }, microphones: { archived: true } }), seeds);
+  ok(!clash.ok && clash.error.includes("MIC") && archivedClash.ok, "#320 types: two active types can't share a code; an archived type doesn't count");
+  const current = seeds.map((t) => (t.key === "speakers" ? { ...t, code: "LS" } : t));
+  const kept = T.cleanDeviceTypesInput(asInput(), current);
+  const cleared = T.cleanDeviceTypesInput(asInput({ speakers: { code: "" } }), current);
+  ok(kept.ok && kept.types.find((t) => t.key === "speakers")?.code === "LS" && cleared.ok && !("code" in cleared.types.find((t) => t.key === "speakers")!),
+    "#320 types: a save that sends no code keeps the stored one; an empty code clears it");
+
+  // code resolution
+  const tctx = { types: T.SEED_DEVICE_TYPES, map: { "wireless mics": { typeKey: "microphones", by: "admin" as const, at: 1 } } };
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers" }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers" }, { ...tctx, types: T.SEED_DEVICE_TYPES.map((t) => (t.key === "speakers" ? { ...t, code: "LS" } : t)) }) === "LS",
+    "#320 codeOfPlacement: the part's device type code (its own code wins)");
+  ok(D.codeOfPlacement({}, { id: "P2", deviceType: null, category: "Wireless Mics" }, tctx) === "MIC" && D.codeOfPlacement({ category: "Wireless Mics" }, undefined, tctx) === "MIC",
+    "#320 codeOfPlacement: an unmapped part falls back to the placement's then the part's category");
+  ok(D.codeOfPlacement({}, { id: "asm:fx1", kind: "device", gridScope: "Audio" }, tctx) === "A" && D.codeOfPlacement({}, { id: "allow:x", allowance: true, gridScope: "Rigging" }, tctx) === "R" &&
+     D.codeOfPlacement({}, { id: "c", gridScope: "Curtains" }, tctx) === "R" && D.codeOfPlacement({}, undefined, tctx) === "G" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers" }, { ...tctx, types: T.SEED_DEVICE_TYPES.map((t) => (t.key === "speakers" ? { ...t, archived: true } : t)) }) === "G",
+    "#320 codeOfPlacement: assemblies, allowances, archived types and unknowns use the system letter (L/A/V/R/G)");
+  ok(D.designatorCodeOf(new Map([["P1", { id: "P1", deviceType: "microphones" }]]), tctx)({ partId: "P1" }) === "MIC", "#320 designatorCodeOf: the part-by-id resolver");
+
+  // doc helpers
+  const doc = { sheetIds: ["s1"], spaces: [] as never[], placements: [
+    { ...pl("a", 0.1, 0.1, { partId: "MIC", designator: "MIC-1" }), optionId: "o1" }, { ...pl("b", 0.1, 0.2, { partId: "MIC" }), optionId: "o1" },
+    { ...pl("c", 0.1, 0.3, { partId: "MIC" }), optionId: "o2" }, { ...pl("d", 0.1, 0.4, { partId: "F", curtain: { name: "x" } }), optionId: "o1" },
+  ] as Array<ReturnType<typeof pl> & { optionId: string; designator?: string }> };
+  const codeByPart = (p: { partId: string }) => p.partId;
+  ok(D.needsDesignators(doc.placements) && D.stampDesignators(doc, "o1", codeByPart) === 1 && doc.placements[1].designator === "MIC-2" && !doc.placements[2].designator && !doc.placements[3].designator,
+    "#320 stampDesignators: numbers one option's missing devices, nothing else");
+  ok(D.stampNewDesignators(doc, new Set(["c"]), codeByPart) === 1 && doc.placements[2].designator === "MIC-1" && !D.needsDesignators(doc.placements),
+    "#320 stampNewDesignators: each option numbers on its own");
+  ok(D.needsDesignators([pl("z", 0, 0, { designator: "X", curtain: { name: "c" } })]), "#320 needsDesignators: a curtain carrying one needs stripping");
+  const raw = [pl("a", 0.1, 0.1, { partId: "MIC", designator: "MIC-1" }), pl("b", 0.1, 0.2, { partId: "MIC" })];
+  const filled = D.fillDesignators(raw, codeByPart, { sheetIds: ["s1"], spaces: [] });
+  ok((filled[1] as { designator?: string }).designator === "MIC-2" && !("designator" in raw[1]), "#320 fillDesignators: fills a copy, never the input");
+  ok(!D.keepsDesignatorOnSwap("L-1", "L", "A") && D.keepsDesignatorOnSwap("FOH-1", "L", "A") && D.keepsDesignatorOnSwap("Rack", "L", "A") &&
+     !D.keepsDesignatorOnSwap(undefined, "L", "A") && D.keepsDesignatorOnSwap("L-1", "L", "L"),
+    "#320 keepsDesignatorOnSwap: only a number issued in the old type's code is re-issued, and only when the code changes");
 }
