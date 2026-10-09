@@ -11521,6 +11521,7 @@ seeded()
   .then(() => modelSku304LiveWritersAsyncChecks())
   .then(() => modelSku304PageAsyncChecks())
   .then(() => estimateGrid314AsyncChecks())
+  .then(() => sheetAdjust318PureChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59481,4 +59482,123 @@ async function estimateGrid314AsyncChecks(): Promise<void> {
 }
 function J314(v: unknown): string {
   return JSON.stringify(v);
+}
+
+/* ---------------- #318: Grid sheet crop + rotate — pure rules ---------------- */
+async function sheetAdjust318PureChecks(): Promise<void> {
+  const A = await import("@/lib/design/sheet-adjust");
+  const J = (v: unknown) => JSON.stringify(v);
+  const near = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+
+  ok(A.snapTurn(89) === 90 && A.snapTurn(-90) === 270 && A.snapTurn(450) === 90 && A.snapTurn(44) === 0 && A.snapTurn("x") === 0,
+    "#318 snapTurn: any angle snaps to the nearest quarter turn in 0..270");
+  ok(A.pdfPageTurn(-90) === 270 && A.pdfPageTurn(450) === 90 && A.pdfPageTurn(45) === 0 && A.pdfPageTurn(undefined) === 0,
+    "#318 pdfPageTurn reads a PDF /Rotate the way pdf.js does (not a multiple of 90 → 0)");
+  ok(J(A.sanitizeCrop({ x: -1, y: 0.5, w: 2, h: 0.9 })) === J({ x: 0, y: 0.1, w: 1, h: 0.9 }),
+    "#318 sanitizeCrop clamps to the unit square, keeping the size and moving the box back in");
+  ok(J(A.sanitizeCrop({ x: 0.995, y: 0, w: 0, h: 0.001 })) === J({ x: 0.98, y: 0, w: 0.02, h: 0.02 }) && J(A.sanitizeCrop("junk")) === J(A.IDENTITY_CROP),
+    "#318 sanitizeCrop: each side is at least MIN_CROP; junk is the full page");
+  const X = { rotate: 90 as const, crop: A.IDENTITY_CROP };
+  const Y = { rotate: 0 as const, crop: { x: 0.1, y: 0, w: 0.5, h: 1 } };
+  ok(J(A.sanitizeAdjustPages({ "1": { rotate: 0, crop: { x: 0, y: 0, w: 1, h: 1 } }, "2": { rotate: 91, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } }, "0": X, a: X, "03": X })) ===
+     J({ "2": { rotate: 90, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } } }) && J(A.sanitizeAdjustPages([X])) === "{}",
+    "#318 sanitizeAdjustPages drops identity pages and junk keys and snaps rotation");
+  ok(J(A.changedPages({ "1": X, "3": Y }, { "1": X, "2": Y })) === J([2, 3]) && J(A.changedPages(undefined, {})) === "[]",
+    "#318 changedPages lists the pages whose adjust differs (a missing page is identity)");
+  const c = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+  ok(J(A.rotateCrop(c, "cw")) === J({ x: 0.4, y: 0.1, w: 0.4, h: 0.3 }) && J(A.rotateCrop(A.rotateCrop(c, "cw"), "ccw")) === J(c) &&
+     J(A.rotateCrop(A.rotateCrop(A.rotateCrop(A.rotateCrop(c, "cw"), "cw"), "cw"), "cw")) === J(c),
+    "#318 rotateCrop: the crop turns with the page (cw then ccw, or four cw, is where it started)");
+  ok(A.turnAdjust({ rotate: 270, crop: A.IDENTITY_CROP }, "cw").rotate === 0 && A.turnAdjust({ rotate: 0, crop: A.IDENTITY_CROP }, "ccw").rotate === 270,
+    "#318 turnAdjust wraps 270 ⟳ to 0 and 0 ⟲ to 270");
+  const box = { x: 0.1, y: 0.1, w: 0.5, h: 0.5 };
+  ok(J(A.dragCrop(box, "move", 0.9, -0.5)) === J({ x: 0.5, y: 0, w: 0.5, h: 0.5 }) && J(A.dragCrop(box, "se", 0.1, 0.2)) === J({ x: 0.1, y: 0.1, w: 0.6, h: 0.7 }) &&
+     J(A.dragCrop(box, "nw", 0.9, 0.9)) === J({ x: 0.58, y: 0.58, w: 0.02, h: 0.02 }) && J(A.dragCrop(box, "e", -1, 0)) === J({ x: 0.1, y: 0.1, w: 0.02, h: 0.5 }),
+    "#318 dragCrop: move stays on the page, a corner resizes, and a side never crosses the opposite one");
+
+  // PDF boxes — the worked checks in the plan.
+  const view: [number, number, number, number] = [10, 20, 160, 80];
+  const crop = { x: 0.2, y: 0.25, w: 0.5, h: 0.5 };
+  const want: Record<number, number[]> = { 0: [40, 35, 115, 65], 90: [47.5, 32, 122.5, 62], 180: [55, 35, 130, 65], 270: [47.5, 38, 122.5, 68] };
+  ok(([0, 90, 180, 270] as const).every((R) => { const r = A.cropToPdfBox(view, 0, { rotate: R, crop }); return near(r.box, want[R]) && r.rotate === R; }),
+    "#318 cropToPdfBox: the four total rotations give the hand-derived CropBoxes");
+  ok(near(A.cropToPdfBox(view, 90, { rotate: 90, crop }).box, want[180]) && A.cropToPdfBox(view, 90, { rotate: 90, crop }).rotate === 180 &&
+     near(A.cropToPdfBox(view, -90, { rotate: 90, crop }).box, want[0]) && A.cropToPdfBox(view, -90, { rotate: 90, crop }).rotate === 0,
+    "#318 cropToPdfBox folds the root page's own /Rotate in first");
+  ok(near(A.effectiveBox([0, 0, 200, 100], [10, 20, 160, 80]), view) && near(A.effectiveBox([200, 100, 0, 0], [160, 80, 10, 20]), view) &&
+     near(A.effectiveBox([0, 0, 200, 100], [300, 300, 400, 400]), [0, 0, 200, 100]) && near(A.effectiveBox([0, 0, 200, 100], [-50, 20, 160, 500]), [0, 20, 160, 100]) &&
+     near(A.effectiveBox([0, 0, 200, 100], null), [0, 0, 200, 100]),
+    "#318 effectiveBox is pdf.js's view: CropBox ∩ MediaBox, normalized, else the MediaBox");
+
+  // The same math, checked against pdf.js itself.
+  const { PDFDocument, degrees } = await import("pdf-lib");
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await PDFDocument.create();
+  const p1 = doc.addPage([200, 100]);
+  p1.setCropBox(10, 20, 150, 60);
+  p1.setRotation(degrees(90));
+  doc.addPage([300, 200]).setRotation(degrees(270));
+  const task = pdfjs.getDocument({ data: new Uint8Array(await doc.save()), isEvalSupported: false, disableFontFace: true });
+  const pdf = await task.promise;
+  let agree = true;
+  for (const n of [1, 2]) {
+    const pg = await pdf.getPage(n);
+    const pv = A.normalizeBox(pg.view);
+    for (const R of [0, 90, 180, 270] as const) {
+      const vp = pg.getViewport({ scale: 1, rotation: R });
+      for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1], [0.2, 0.75]]) {
+        const [ex, ey] = vp.convertToPdfPoint(u * vp.width, v * vp.height);
+        const [gx, gy] = A.displayToPdf(pv, R, u, v);
+        if (Math.abs(ex - gx) > 1e-6 || Math.abs(ey - gy) > 1e-6) agree = false;
+      }
+    }
+  }
+  await task.destroy();
+  ok(agree, "#318 displayToPdf agrees with pdf.js's own viewport (convertToPdfPoint) at every rotation, with an offset CropBox and a root /Rotate");
+
+  ok(J(A.cropToPixels(400, 200, { rotate: 90, crop: { x: 0.1, y: 0.25, w: 0.5, h: 0.5 } })) === J({ left: 20, top: 100, width: 100, height: 200 }) &&
+     J(A.cropToPixels(3, 3, { rotate: 0, crop: { x: 0.98, y: 0.98, w: 0.02, h: 0.02 } })) === J({ left: 2, top: 2, width: 1, height: 1 }) &&
+     J(A.rotatedSize(400, 200, 90)) === J([200, 400]) && J(A.rotatedSize(400, 200, 180)) === J([400, 200]),
+    "#318 cropToPixels works in the turned image's pixels, at least 1 px each way");
+
+  // The gate.
+  const proj = {
+    placements: [{ sheetId: "gs-a", page: 1 }, { sheetId: "gs-a", page: 1 }, { sheetId: "gs-b", page: 2 }],
+    spaces: [{ sheetId: "gs-a", page: 2 }],
+    routes: [{ sheetId: "gs-a", page: 1 }],
+    calibrations: [{ docId: "gs-a", page: 3 }],
+  };
+  const locks = A.pageLocks(proj, "gs-a");
+  ok(locks[1] === "This page has 2 devices and 1 wire on it — crop and rotate only work on an empty page." &&
+     locks[2] === "This page has 1 space on it — crop and rotate only work on an empty page." &&
+     locks[3] === "This page has a scale on it — crop and rotate only work on an empty page." && !locks[4],
+    "#318 pageLocks names what sits on each page (devices, spaces, wires, a scale) — another sheet's content doesn't count");
+  ok(A.lockReason({ devices: 3, spaces: 1, wires: 0, scale: true }) === "This page has 3 devices, 1 space and a scale on it — crop and rotate only work on an empty page.",
+    "#318 lockReason lists three things with commas and 'and'");
+  ok(J(A.blockedPages(proj, "gs-a", [4, 3, 1, 1])) === J([1, 3]) && J(A.blockedPages(proj, "gs-b", [1])) === "[]",
+    "#318 blockedPages: of the changed pages, the ones with content");
+  ok(A.allPagesLocked(locks, 3) && !A.allPagesLocked(locks, 4) && !A.allPagesLocked(locks, 0) && !A.allPagesLocked({}, 1),
+    "#318 allPagesLocked only when every one of a known page count is locked");
+
+  // The remap.
+  const doc2 = {
+    sheetIds: ["gs-x", "gs-a", "gs-y"],
+    placements: [{ id: "p1", sheetId: "gs-a", page: 2 }, { id: "p2", sheetId: "gs-x", page: 1 }],
+    spaces: [{ id: "s1", sheetId: "gs-a", page: 2 }],
+    routes: [{ id: "r1", sheetId: "gs-a", page: 2 }],
+    calibrations: [{ docId: "gs-a", page: 2, scale: 1 }, { docId: "gs-x", page: 1, scale: 2 }],
+    intake: { planSheetId: "gs-a", baseSheetId: "gs-x" },
+    drawingSet: { excluded: ["plan:lighting:gs-a:2", "plan:audio:gs-x:1", "riser"] },
+  };
+  A.remapSheetRefs(doc2, "gs-a", "gs-n");
+  ok(J(doc2.sheetIds) === J(["gs-x", "gs-n", "gs-y"]) && J(doc2.placements) === J([{ id: "p1", sheetId: "gs-n", page: 2 }, { id: "p2", sheetId: "gs-x", page: 1 }]) &&
+     doc2.spaces[0].sheetId === "gs-n" && doc2.routes[0].sheetId === "gs-n" && J(doc2.calibrations) === J([{ docId: "gs-n", page: 2, scale: 1 }, { docId: "gs-x", page: 1, scale: 2 }]) &&
+     doc2.intake.planSheetId === "gs-n" && doc2.intake.baseSheetId === "gs-x" && J(doc2.drawingSet.excluded) === J(["plan:lighting:gs-n:2", "plan:audio:gs-x:1", "riser"]),
+    "#318 remapSheetRefs moves every reference (same position in sheetIds, items keep their other fields, calibration docId, plan view, drawing-set keys) and nothing else");
+  ok(A.isBaseSheet({ id: "gs-x", mime: "image/png" }, { baseSheetId: "gs-x" }) && A.isBaseSheet({ id: "gs-q", mime: "image/svg+xml" }) && !A.isBaseSheet({ id: "gs-q", mime: "application/pdf" }, { baseSheetId: "gs-x" }),
+    "#318 isBaseSheet: the stamped base sheet, or any SVG (pre-#314 designs)");
+  ok(A.adjustRefusalText("in-use", [2]) === "Page 2 has devices, spaces, wires or a scale on it — crop and rotate only work on an empty page." &&
+     A.adjustRefusalText("in-use", [1, 3]) === "Pages 1, 3 have devices, spaces, wires or a scale on them — crop and rotate only work on an empty page." &&
+     A.adjustRefusalText("base-sheet") === "The generated base plan can't be cropped or rotated.",
+    "#318 adjustRefusalText names the pages that block");
 }
