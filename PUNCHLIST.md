@@ -11514,7 +11514,7 @@ to the plan, spin it upright, then calibrate"; and he had to shrink the file to 
   adjustment re-adds the old sheet beside the new one (accepted, D693). Jeff-gated: try a real 36×24 PDF and check the
   dialog in Safari.
 
-## 322. Every product photo comes out the same size — DONE 2026-10-09 (D-NEXT)
+## 322. Every product photo comes out the same size — DONE 2026-10-09 (D695)
 
 Jeff: tall column speakers, wide consoles and square mixers all end up different shapes in tiles and documents; he
 does not want to pre-resize photos.

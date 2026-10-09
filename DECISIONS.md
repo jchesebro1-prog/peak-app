@@ -10175,7 +10175,7 @@ id, so sheet 1 never flashes. The tab's ⋯ menu gains Crop & rotate…, hidden 
 page is known to be locked (an image, or the PDF on screen — another PDF opens and shows its locks). `PdfCanvas` gained
 `rotateBy`, added to the page's own rotation (pdf.js's viewport rotation is absolute); absent = unchanged.
 
-## D-NEXT. Product photos are squared 1600×1600, padded (#322, 2026-10-09)
+## D695. Product photos are squared 1600×1600, padded (#322, 2026-10-09)
 
 Jeff wants every catalog product photo the same size so tiles, portal grids and documents line up and nobody pre-resizes
 a photo before uploading. `squareProductImage` (`src/lib/part-docs/shrink.ts`) replaces `shrinkImage` for product
