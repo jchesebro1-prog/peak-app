@@ -11528,6 +11528,8 @@ seeded()
   .then(() => sheetAdjust318UiPins())
   .then(() => sheetAdjust318DialogGuardPins())
   .then(() => sheetAdjust318StaleSheetChecks())
+  .then(() => pagesAsSheets319PureChecks())
+  .then(() => pagesAsSheets319BytesChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60094,4 +60096,127 @@ async function sheetAdjust318StaleSheetChecks(): Promise<void> {
     if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
     else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
   }
+}
+
+/* ---------------- #319: one sheet per PDF page — fixtures ---------------- */
+/** #319: what pdf.js shows for each page (its view box and rotation). */
+async function views319(bytes: Uint8Array): Promise<Array<{ view: number[]; rotate: number }>> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true });
+  const pdf = await task.promise;
+  const out: Array<{ view: number[]; rotate: number }> = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const pg = await pdf.getPage(n);
+    out.push({ view: [...pg.view], rotate: pg.rotate });
+  }
+  await task.destroy();
+  return out;
+}
+
+/** #319: a 3-page plan set — page 1 is 200×100 with an offset CropBox; page 2 is
+ *  300×200 with its own /Rotate 90; page 3 has no MediaBox of its own and
+ *  inherits the page tree's 612×792. Pages 1 and 3 inherit the tree's /Rotate 180. */
+async function pdf319Set(): Promise<Uint8Array> {
+  const { PDFDocument, PDFName, PDFNumber, degrees } = await import("pdf-lib");
+  const doc = await PDFDocument.create();
+  const p1 = doc.addPage([200, 100]);
+  p1.setCropBox(10, 20, 150, 60);
+  const p2 = doc.addPage([300, 200]);
+  p2.setRotation(degrees(90));
+  const p3 = doc.addPage([400, 500]);
+  doc.catalog.Pages().set(PDFName.of("MediaBox"), doc.context.obj([0, 0, 612, 792]));
+  doc.catalog.Pages().set(PDFName.of("Rotate"), PDFNumber.of(180));
+  p3.node.delete(PDFName.of("MediaBox"));
+  return doc.save();
+}
+
+/** #319: an n-page PDF of 100×100 pages. */
+async function pagesPdf319(n: number): Promise<Uint8Array> {
+  const { PDFDocument } = await import("pdf-lib");
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < n; i++) doc.addPage([100, 100]);
+  return doc.save();
+}
+
+/** #319: a 2-page PDF with an /Encrypt dictionary (the #318 recipe) — pdf-lib refuses it as encrypted. */
+async function encryptedPdf319(): Promise<Uint8Array> {
+  const text = Buffer.from(await pagesPdf319(2)).toString("latin1");
+  const rootAt = text.lastIndexOf("/Root");
+  const enc = text.slice(0, rootAt) + "/Encrypt << /Filter /Standard /V 1 /R 2 /O <" + "00".repeat(32) + "> /U <" + "00".repeat(32) + "> /P -4 >> /Root" + text.slice(rootAt + 5);
+  return new Uint8Array(Buffer.from(enc, "latin1"));
+}
+
+/* ---------------- #319: one sheet per PDF page — pure rules ---------------- */
+async function pagesAsSheets319PureChecks(): Promise<void> {
+  const S = await import("@/lib/design/grid-sheet-split");
+  const J = (v: unknown) => JSON.stringify(v);
+  ok(S.GRID_SHEET_SPLIT_MAX_PAGES === 60, "#319 the split cap is 60 pages");
+  ok(S.splitSheetName("Set.pdf", 2, 5) === "Set.pdf — p.2" && S.splitSheetName("Set.pdf", 1, 1) === "Set.pdf" && S.splitSheetName("  ", 1, 3) === "Plan sheet — p.1",
+    "#319 splitSheetName: '<file name> — p.<n>'; a 1-page PDF keeps its name; a blank name is Plan sheet");
+  const long = S.splitSheetName("x".repeat(200), 60, 60);
+  ok(long.length === 120 && long.endsWith(" — p.60"), "#319 splitSheetName keeps the page suffix inside the 120-character name cap");
+  ok(J(S.cleanBaseSheetOutcome("removed")) === J("removed") && J(S.cleanBaseSheetOutcome({ kept: 2, what: "devices" })) === J({ kept: 2, what: "devices" }) &&
+     S.cleanBaseSheetOutcome({ kept: 0, what: "devices" }) === null && S.cleanBaseSheetOutcome({ kept: 1, what: "spaces" }) === null && S.cleanBaseSheetOutcome(null) === null,
+    "#319 cleanBaseSheetOutcome: removed, or a positive count of devices / wires");
+  ok(S.baseSheetKeptText({ kept: 3, what: "devices" }) === "Generated plan kept — it has 3 devices on it." &&
+     S.baseSheetKeptText({ kept: 1, what: "devices" }) === "Generated plan kept — it has 1 device on it." &&
+     S.baseSheetKeptText({ kept: 1, what: "wires" }) === "Generated plan kept — it has 1 wire on it.",
+    "#319 the kept sentence counts devices (or wires) with the right noun");
+  ok(S.uploadNote("Set.pdf", { sheetIds: ["gs-1", "gs-2", "gs-3"], baseSheet: "removed" }) === "Uploaded Set.pdf as 3 sheets · removed the generated plan" &&
+     S.uploadNote("Plan.png", { sheetIds: ["gs-1"] }) === "Uploaded Plan.png" &&
+     S.uploadNote("Plan.png", { sheetIds: ["gs-1"], baseSheet: { kept: 2, what: "devices" } }) === "Uploaded Plan.png · Generated plan kept — it has 2 devices on it." &&
+     S.uploadNote("Big.pdf", { sheetIds: ["gs-1"], note: S.splitFallbackNote("too-many-pages", 75) }) === "Uploaded Big.pdf · This PDF has 75 pages — more than 60 — so it was kept as one sheet.",
+    "#319 uploadNote: how many sheets, what happened to the generated plan, and why a PDF wasn't split");
+  ok((["too-many-pages", "encrypted", "unreadable", "too-big", "failed"] as const).every((r) => S.splitFallbackNote(r, 61).endsWith("so it was kept as one sheet.")) &&
+     new Set((["too-many-pages", "encrypted", "unreadable", "too-big", "failed"] as const).map((r) => S.splitFallbackNote(r, 61))).size === 5 &&
+     S.splitFallbackNote("encrypted").includes("password-protected"),
+    "#319 every split fallback has its own sentence ending 'kept as one sheet'");
+  const a = "gs-aaaaaaaaaaaa", b = "gs-bbbbbbbbbbbb", c = "gs-cccccccccccc";
+  ok(J(S.parseSheetsLanded({ ok: true, sheetId: a, sheetIds: [a, b], baseSheet: "removed", note: " n " })) === J({ sheetId: a, sheetIds: [a, b], baseSheet: "removed", note: "n" }) &&
+     J(S.parseSheetsLanded({ ok: true, sheetId: a })) === J({ sheetId: a, sheetIds: [a] }) &&
+     J(S.parseSheetsLanded({ ok: true, sheetId: a, sheetIds: ["../x", b], baseSheet: { kept: -1, what: "devices" } })) === J({ sheetId: b, sheetIds: [b] }) &&
+     S.parseSheetsLanded({ ok: false, error: "x" }) === null && S.parseSheetsLanded({ ok: true, sheetId: "nope" }) === null && S.parseSheetsLanded("x") === null,
+    "#319 parseSheetsLanded: the 4 MB route's reply — junk ids and outcomes dropped; an old single-sheet reply still reads");
+  const seventy = Array.from({ length: 70 }, (_, i) => `gs-${String(i).padStart(12, "0")}`);
+  ok(J(S.parseAdjustParam(`${b},${a},zz,${b}`, [a, b])) === J([b, a]) && J(S.parseAdjustParam(undefined, [a])) === "[]" &&
+     J(S.parseAdjustParam(["x"], [a])) === "[]" && J(S.parseAdjustParam(a, [a])) === J([a]) && S.parseAdjustParam(seventy.join(","), seventy).length === 60,
+    "#319 parseAdjustParam: listed ids only, in the order asked, no repeats, at most 60; one id still works");
+  ok(J(S.adjustQueueStep([a, b, c], a, [a, b, c])) === J({ position: { index: 0, total: 3 }, next: b }) &&
+     J(S.adjustQueueStep([a, b, c], b, [a, c])) === J({ position: { index: 1, total: 3 }, next: c }) &&
+     J(S.adjustQueueStep([a, b, c], a, [a, c])) === J({ position: { index: 0, total: 3 }, next: c }) &&
+     J(S.adjustQueueStep([a, b, c], c, [a, b, c])) === J({ position: { index: 2, total: 3 }, next: null }) &&
+     J(S.adjustQueueStep([a], a, [a])) === J({ position: null, next: null }) && J(S.adjustQueueStep(undefined, a, [a])) === J({ position: null, next: null }) &&
+     J(S.adjustQueueStep([a, b], c, [a, b, c])) === J({ position: null, next: null }),
+    "#319 adjustQueueStep: 'Sheet n of N', and the next sheet still listed (a removed one is skipped; the last has none)");
+  ok(J(S.landed([a, b], "removed", "")) === J({ sheetId: a, sheetIds: [a, b], baseSheet: "removed" }) && J(S.landed([a], null, null)) === J({ sheetId: a, sheetIds: [a] }),
+    "#319 landed: the first sheet is the sheetId; empty extras are left off");
+}
+
+/* ---------------- #319: one sheet per PDF page — the splitter ---------------- */
+async function pagesAsSheets319BytesChecks(): Promise<void> {
+  const X = await import("@/lib/design/sheet-split-bytes");
+  const sharp = (await import("sharp")).default;
+  const J = (v: unknown) => JSON.stringify(v);
+  const set = await pdf319Set();
+  const srcViews = await views319(set);
+  ok(J(srcViews) === J([{ view: [10, 20, 160, 80], rotate: 180 }, { view: [0, 0, 300, 200], rotate: 90 }, { view: [0, 0, 612, 792], rotate: 180 }]),
+    "#319 fixture: page 3 inherits the MediaBox, pages 1 and 3 inherit /Rotate 180 (pdf.js reads the source so)");
+  const r = await X.splitPdfPages(set);
+  const got = r.ok ? await Promise.all(r.pages.map((p) => views319(p))) : [];
+  ok(r.ok && r.pages.length === 3 && got.every((v) => v.length === 1) && J(got.map((v) => v[0])) === J(srcViews),
+    "#319 splitPdfPages: three one-page PDFs in page order, each shown exactly as its source page (CropBox, own and inherited /Rotate, inherited MediaBox)");
+  const r1 = await X.splitPdfPages(await pagesPdf319(1));
+  const png = new Uint8Array(await sharp({ create: { width: 4, height: 4, channels: 3, background: "#ffffff" } }).png().toBuffer());
+  const rp = await X.splitPdfPages(png);
+  ok(!r1.ok && r1.reason === "single" && !rp.ok && rp.reason === "not-pdf", "#319 a 1-page PDF is 'single' and an image is 'not-pdf' (both stay one sheet)");
+  const enc = await X.splitPdfPages(await encryptedPdf319());
+  ok(!enc.ok && enc.reason === "encrypted", "#319 an encrypted PDF is 'encrypted' (matched by pdf-lib's message)");
+  const r61 = await X.splitPdfPages(await pagesPdf319(61));
+  const r60 = await X.splitPdfPages(await pagesPdf319(60));
+  ok(!r61.ok && r61.reason === "too-many-pages" && r61.pageCount === 61 && r60.ok && r60.pages.length === 60,
+    "#319 61 pages is over the cap (with its count); exactly 60 still splits");
+  const tooBig = await X.splitPdfPages(set, { maxTotalBytes: 10 });
+  const broken = await X.splitPdfPages(new TextEncoder().encode("%PDF-1.7 not really a pdf"));
+  ok(!tooBig.ok && tooBig.reason === "too-big" && !broken.ok && broken.reason === "unreadable",
+    "#319 split output over the byte budget is 'too-big'; a broken PDF is 'unreadable'");
 }
