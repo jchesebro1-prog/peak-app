@@ -136,3 +136,78 @@ export function planCopyVerdict(head: Uint8Array, size: number): { ok: true; typ
   if (!type || !(PACKAGE_FILE_TYPES as readonly string[]).includes(type) || sheetMimeVerdict(type) !== "ok") return { ok: false, error: GRID_PLAN_COPY.wrongType };
   return { ok: true, type };
 }
+
+/* ------------------------------ intake notices ------------------------------ */
+
+/**
+ * A warning the intake save leaves for the editor (#314 review): the save
+ * re-renders the route, the intake unmounts and the editor takes over, so a
+ * warning held in the intake's own state was never seen. Notices live on the
+ * project (`intake.notices`) until Retry succeeds or the designer dismisses
+ * them. `retry`: copy = re-run the on-file plan copy; upload = pick the file
+ * again (a dropped File doesn't survive the swap).
+ */
+export type GridIntakeNotice = {
+  id: string;
+  message: string;
+  retry?: { kind: "copy"; candidateId: string } | { kind: "upload" };
+  at: number;
+};
+
+export const MAX_INTAKE_NOTICES = 5;
+export const INTAKE_NOTICE_MAX_CHARS = 600;
+const NOTICE_ID_RE = /^ntc-[0-9a-z]{4,24}$/;
+const CANDIDATE_ID_RE = /^(pf:PF-[0-9a-f]{12}|doc:[A-Za-z0-9_-]{1,64})$/;
+const UPLOAD_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+
+export function newNoticeId(): string {
+  return "ntc-" + globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
+export function isPlanCandidateId(v: unknown): v is string {
+  return typeof v === "string" && CANDIDATE_ID_RE.test(v);
+}
+
+export function isPlanUploadId(v: unknown): v is string {
+  return typeof v === "string" && UPLOAD_ID_RE.test(v);
+}
+
+/** Notice text: control characters out, trimmed, capped. */
+export function cleanNoticeText(raw: unknown): string {
+  return typeof raw === "string" ? raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, INTAKE_NOTICE_MAX_CHARS) : "";
+}
+
+/** Every read of stored notices: junk and duplicate ids dropped, text capped, the newest 5 kept. */
+export function cleanIntakeNotices(raw: unknown): GridIntakeNotice[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GridIntakeNotice[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    if (!v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    if (typeof o.id !== "string" || !NOTICE_ID_RE.test(o.id) || seen.has(o.id)) continue;
+    const message = cleanNoticeText(o.message);
+    if (!message) continue;
+    const r = o.retry && typeof o.retry === "object" ? (o.retry as Record<string, unknown>) : null;
+    const retry: GridIntakeNotice["retry"] =
+      r && r.kind === "copy" && isPlanCandidateId(r.candidateId) ? { kind: "copy", candidateId: r.candidateId } : r && r.kind === "upload" ? { kind: "upload" } : undefined;
+    seen.add(o.id);
+    const at = Number(o.at);
+    out.push({ id: o.id, message, ...(retry ? { retry } : {}), at: Number.isFinite(at) ? at : 0 });
+  }
+  return out.slice(-MAX_INTAKE_NOTICES);
+}
+
+/** The intake plan view's source key — what makes a retried copy / upload a no-op (#314 review). */
+export function planSourceKey(kind: "copy" | "upload", id: string): string {
+  return `${kind}:${id}`;
+}
+
+/** The sheet a source already landed as, if it is still on the design — else null (attach it). */
+export function attachedPlanSheet(
+  intake: { planSource?: string; planSheetId?: string } | undefined | null,
+  sheetIds: readonly string[],
+  source: string
+): string | null {
+  return intake?.planSource === source && intake.planSheetId && sheetIds.includes(intake.planSheetId) ? intake.planSheetId : null;
+}

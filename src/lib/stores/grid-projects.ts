@@ -32,6 +32,7 @@ import {
 } from "@/lib/design/grid-riser-doc";
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import { cleanSymbolDisplay, type SymbolDisplay } from "@/lib/design/grid-symbol-display";
+import { cleanIntakeNotices, MAX_INTAKE_NOTICES, type GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import {
@@ -267,6 +268,14 @@ export type GridProject = {
      *  sheetIds, so Auto (re-)fill reads this, never sheetIds[0]. Absent on
      *  designs drawn before #314 — their base sheet is still sheetIds[0]. */
     baseSheetId?: string;
+    /** #314 review: warnings the intake save left for the editor (plan view
+     *  failures, Auto fill) — shown as a banner until retried or dismissed. */
+    notices?: GridIntakeNotice[];
+    /** #314 review: the sheet the intake's plan view landed as, and its source
+     *  ("copy:<candidate id>" / "upload:<upload id>") — a retried copy or
+     *  upload of the same source is a no-op; the editor opens on this sheet. */
+    planSheetId?: string;
+    planSource?: string;
   };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
@@ -524,9 +533,49 @@ export async function saveGridIntake(
       ...input,
       baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate,
       baseSheetMovables: input.baseSheetMovables ?? p.intake?.baseSheetMovables,
-      // #314: a re-save never forgets which sheet is the generated base.
+      // #314: a re-save never forgets which sheet is the generated base, the
+      // intake's plan view, or a notice still waiting for the editor.
       ...(input.baseSheetId ?? p.intake?.baseSheetId ? { baseSheetId: input.baseSheetId ?? p.intake?.baseSheetId } : {}),
+      ...(p.intake?.planSheetId ? { planSheetId: p.intake.planSheetId } : {}),
+      ...(p.intake?.planSource ? { planSource: p.intake.planSource } : {}),
+      ...(p.intake?.notices?.length ? { notices: p.intake.notices } : {}),
     };
+    p.updatedAt = Date.now();
+  });
+}
+
+/** #314 review: leave notices for the editor (appended; the newest 5 kept). */
+export async function addIntakeNotices(projectId: string, notices: GridIntakeNotice[]): Promise<GridProject | null> {
+  const add = cleanIntakeNotices(notices);
+  if (!add.length) return getProject(projectId);
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!p.intake) return;
+    p.intake.notices = cleanIntakeNotices([...(p.intake.notices || []), ...add]).slice(-MAX_INTAKE_NOTICES);
+    p.updatedAt = Date.now();
+  });
+}
+
+/** #314 review: drop one notice (Dismiss, or its Retry succeeded). Returns the removed notice, or null. */
+export async function removeIntakeNotice(projectId: string, noticeId: string): Promise<GridIntakeNotice | null> {
+  let removed: GridIntakeNotice | null = null;
+  await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const list = cleanIntakeNotices(p.intake?.notices);
+    removed = list.find((n) => n.id === noticeId) ?? null;
+    if (!removed || !p.intake) return;
+    const rest = list.filter((n) => n.id !== noticeId);
+    if (rest.length) p.intake.notices = rest;
+    else delete p.intake.notices;
+    p.updatedAt = Date.now();
+  });
+  return removed;
+}
+
+/** #314 review: record which sheet the intake's plan view landed as, and from what source. */
+export async function recordIntakePlan(projectId: string, sheetId: string, source: string): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!p.intake) return;
+    p.intake.planSheetId = sheetId;
+    p.intake.planSource = source;
     p.updatedAt = Date.now();
   });
 }
@@ -1964,7 +2013,16 @@ export async function restoreRevision(
     doc.options = target.options
       ? target.options.map((o) => {
           const cur = current.get(o.id);
-          if (!cur) return { ...o };
+          // #314 review: an estimate-owned option that was removed since comes
+          // back WITHOUT its link (the copy rule) — the estimate may have
+          // started another design meanwhile, and two designs must never
+          // claim one estimate. "Design in the Grid" re-links on demand.
+          if (!cur) {
+            if (o.estimateOwned !== true) return { ...o };
+            const { estimateOwned: _gone, ...unlinked } = o;
+            void _gone;
+            return { ...unlinked, quoteId: null };
+          }
           const { estimateOwned: _drop, ...rest } = o;
           void _drop;
           return { ...rest, quoteId: cur.quoteId, ...(cur.estimateOwned ? { estimateOwned: true as const } : {}) };

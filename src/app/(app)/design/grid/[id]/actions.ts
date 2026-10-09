@@ -52,11 +52,13 @@ import {
   saveCustomItem,
   saveGridIntake,
   setAutoEstimate,
+  addIntakeNotices,
+  removeIntakeNotice,
 } from "@/lib/stores/grid-projects";
 import { defaultOptionId, estimateLinkOf, estimateOwnedRefusal, hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { attachPlanCandidate, planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
 import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
-import { publicPlanCandidates, type PlanCandidate } from "@/lib/design/grid-plan-intake";
+import { cleanNoticeText, newNoticeId, publicPlanCandidates, type GridIntakeNotice, type PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
 import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
 import type { IntakeCustomerChoice } from "@/app/(app)/quotes/new/types";
@@ -437,6 +439,7 @@ export async function saveGridIntakeAction(input: {
   // first-save gate above is untouched) and put first. A failure never loses
   // the intake — the plan opens with a warning and a retry (the #211 rule).
   let planRetry: string | undefined;
+  let planWarning: string | undefined;
   if (isFirstSave && typeof input.planCandidateId === "string" && input.planCandidateId) {
     let attached: Awaited<ReturnType<typeof attachPlanCandidate>>;
     try {
@@ -447,13 +450,22 @@ export async function saveGridIntakeAction(input: {
     }
     if (!attached.ok) {
       planRetry = input.planCandidateId;
-      const planWarning = `The plan is ready, but the plan view wasn't added: ${attached.error}`;
-      warning = warning ? `${warning} ${planWarning}` : planWarning;
+      planWarning = `The plan is ready, but the plan view wasn't added: ${attached.error}`;
     }
   }
+  // #314 review: the warnings are PERSISTED before the revalidate below — that
+  // re-render swaps the intake for the editor, so a warning held only in the
+  // intake's state was never seen (#211's Auto warning included). The editor
+  // shows them as a banner until Retry succeeds or they are dismissed.
+  const notices: GridIntakeNotice[] = [];
+  const at = Date.now();
+  if (warning) notices.push({ id: newNoticeId(), message: warning, at });
+  if (planWarning) notices.push({ id: newNoticeId(), message: planWarning, ...(planRetry ? { retry: { kind: "copy" as const, candidateId: planRetry } } : {}), at });
+  if (notices.length) await addIntakeNotices(input.projectId, notices);
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
-  return { ok: true, ...(warning ? { warning } : {}), ...(planRetry ? { planRetry } : {}) };
+  const allWarnings = [warning, planWarning].filter(Boolean).join(" ");
+  return { ok: true, ...(allWarnings ? { warning: allWarnings } : {}), ...(planRetry ? { planRetry } : {}) };
 }
 
 /** #314: the refusal sentence for an estimate-linked design, naming the estimate. */
@@ -482,12 +494,40 @@ export async function planCandidatesAction(
   }
 }
 
-/** #314: retry copying an on-file plan into a saved design (the intake's warning). */
-export async function attachPlanAction(projectId: string, candidateId: string): Promise<Result> {
+/** #314 review: the editor banner's Retry for an on-file plan copy. Idempotent
+ *  per source (attachPlanCandidate): a retry after a copy that landed is a
+ *  no-op. Success drops the notice. */
+export async function retryGridNoticeAction(projectId: string, noticeId: string): Promise<Result> {
   const user = await requireUser();
-  const r = await attachPlanCandidate(String(projectId || ""), String(candidateId || ""), user.name);
+  const project = await getProject(String(projectId || ""));
+  if (!project) return { ok: false, error: "Design not found." };
+  const notice = (project.intake?.notices || []).find((n) => n.id === noticeId);
+  if (!notice || notice.retry?.kind !== "copy") return { ok: false, error: "There's nothing to retry." };
+  const r = await attachPlanCandidate(project.id, notice.retry.candidateId, user.name);
   if (!r.ok) return { ok: false, error: r.error };
+  await removeIntakeNotice(project.id, noticeId);
+  revalidatePath(editorPath(project.id));
+  return { ok: true };
+}
+
+/** #314 review: Dismiss on the editor banner (also the upload Retry's last step). */
+export async function dismissGridNoticeAction(projectId: string, noticeId: string): Promise<Result> {
+  await requireUser();
+  const removed = await removeIntakeNotice(String(projectId || ""), String(noticeId || ""));
+  if (!removed) return { ok: false, error: "That notice is already gone." };
   revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/** #314 review: the intake's dropped plan failed to upload AFTER the intake
+ *  saved — leave a notice for the editor (Retry = pick the file again). */
+export async function notePlanUploadFailedAction(projectId: string, error: string): Promise<Result> {
+  await requireUser();
+  const project = await getProject(String(projectId || ""));
+  if (!project) return { ok: false, error: "Design not found." };
+  const why = cleanNoticeText(error).slice(0, 300) || "the upload didn't finish.";
+  await addIntakeNotices(project.id, [{ id: newNoticeId(), message: `The plan is ready, but the plan view wasn't uploaded: ${why}`, retry: { kind: "upload" }, at: Date.now() }]);
+  revalidatePath(editorPath(project.id));
   return { ok: true };
 }
 

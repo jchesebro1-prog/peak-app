@@ -11422,6 +11422,9 @@ estimate; the estimate keeps parts and prices.
 - **Plan view** (D690, every Grid design): optional plan PDF/image on the intake becomes the first sheet; on-file plans
   (estimate Plans & risers, company Drawings) offered pre-attached and copied Blob to Blob; failures open the plan with a
   warning + retry; base sheet still generated behind it; Auto fill finds the base sheet by id.
+- **Review fixes:** intake warnings (plan view and #211 Auto fill) are persisted on the project and shown as an editor
+  banner (Retry / Dismiss), since the intake save swaps straight into the editor; the editor opens on the plan view sheet;
+  a retried copy/upload of the same source is a no-op; a restored estimate-owned option comes back unlinked.
 
 **Files.** `src/app/(app)/estimator/grid-design-actions.ts`, `src/lib/design/estimate-tray.ts` (+ `-server.ts`),
 `src/lib/design/estimate-grid-link.ts`, `src/lib/design/grid-plan-intake.ts` (+ `-server.ts`),
@@ -11431,13 +11434,14 @@ actions, Product Library, quote button, BOM panel, Outputs menu, `grid-projects.
 (`copyBlob`), the sheet upload route (`position=first`), the package panel and the Build package step. No migration.
 
 **Verification.** Gates: `tsc --noEmit`, scoped eslint, `test:specs` (new `#314` checks, fixture
-`docs/test-fixtures/314-estimate-tray.json`), `next build` — numbers in the session report. Not clicked locally: no upload or
+`docs/test-fixtures/314-estimate-tray.json`; 50 checks after the review fixes), `next build` — numbers in the session report. Not clicked locally: no upload or
 copy was exercised (next dev loads the real Blob token).
 
 **Jeff to try (on a preview deploy).** On a saved system estimate: Build package → Design in the Grid → (double-click it once);
 check the intake is prefilled and has no Auto; drop a plan PDF and continue — the plan should open first with the Calibrate
 scale prompt; place a few tray parts and watch the counts; try Add to quotes (it should read Open estimate →); then Generate
-from Grid on Build package. On a job with a plan in Plans & risers or company Drawings, check "Use plan from …" copies it.
+from Grid on Build package. On a job with a plan in Plans & risers or company Drawings, check "Use plan from …" copies it. To see the warning
+banner, try a plan file that the route refuses (over 4 MB): the editor should open with the notice and `Choose the plan again…`.
 
 **Open (minor, not blocking).** The Designs dashboard still offers Add to Quotes → for an estimate-linked design (refused with
 the sentence) and prices its budget from the Grid BOM. The tray reads the SAVED quote — save the estimate before switching to

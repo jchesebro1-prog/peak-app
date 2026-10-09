@@ -10053,7 +10053,10 @@ linked one (conservative: "that design" is drawings-only). The Grid's `Add to qu
 estimate →`; Outputs names the estimate instead of "View in Quotes"; "Spec from this design" builds from the quote, not the
 Grid BOM. Copy and restore follow the existing `quoteId` rules: a copied option starts with no quote and no estimate link (it
 gets no tray, and still can't quote while the link exists); a revision restore keeps each option's current link, like
-`quoteId`. Removing the linked option removes the link. Known gap: the Designs dashboard still shows `Add to Quotes →` for
+`quoteId`. Removing the linked option removes the link, and restoring a revision that brings that option back brings it
+back unlinked (no `quoteId`, no `estimateOwned` — the copy rule; review fix), since the estimate may have started another
+design meanwhile and two designs must never claim one estimate. "Design in the Grid" re-links on demand. A plain Grid quote
+on a restored option keeps the old rule (its snapshot `quoteId` comes back). Known gap: the Designs dashboard still shows `Add to Quotes →` for
 such a design (the server refuses it with the sentence above), and its budget is still the Grid BOM's price.
 
 ## D687. The From estimate tray (#314, 2026-10-09)
@@ -10097,5 +10100,13 @@ drawings or CAD), company-wide or for the design's venue. The client only ever s
 list from the saved design and copies Blob to Blob (`copyBlob`, no bytes through the browser or a function body), re-checking
 the source by magic bytes (PDF/PNG/JPEG/WebP, never SVG) and size. The copy's cap is 25 MB, not the upload's 4 MB: the 4 MB
 cap is the Vercel function body limit, which a Blob-to-Blob copy never crosses, and 25 MB is the cap the source file already
-passed. A plan step that fails never loses the intake (the #211 rule): the plan opens with a warning, `Retry the plan view`
-and `Open the plan →`. Note: the upload route still checks the declared type only (no magic-byte sniff), as before.
+passed. A plan step that fails never loses the intake (the #211 rule). Review fix: the intake save re-renders straight into
+the editor, so warnings can't live in the intake's state. The save persists them on the project (`intake.notices`, at most
+5) before it revalidates; a dropped plan that fails to upload after the save is added the same way
+(`notePlanUploadFailedAction`). The editor shows them as a banner over the plan: `Retry the plan view` (a copy, re-run on
+the server), `Choose the plan again…` (an upload — the dropped file doesn't survive the swap) and `Dismiss`; success or
+Dismiss removes the notice. #211's Auto fill warnings ride the same banner (they were lost the same way). The editor opens
+on the plan view sheet (`intake.planSheetId`), also when it lands after the editor mounted. Attaching is idempotent per
+source: the copy records `copy:<candidate id>` and the upload `upload:<upload id>` (`intake.planSource`), and under a
+per-design advisory lock (namespace 3141) a repeat of a source whose sheet is still on the design returns that sheet
+instead of adding it twice. Note: the upload route still checks the declared type only (no magic-byte sniff), as before.

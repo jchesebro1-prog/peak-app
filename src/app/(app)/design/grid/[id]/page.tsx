@@ -6,7 +6,7 @@ import { defaultOptionId, estimateLinkOf, resolveOptionId } from "@/lib/design/g
 import { coverFromVenue } from "@/lib/design/grid-intake";
 import { loadEstimateTray } from "@/lib/design/estimate-tray-server";
 import { planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
-import { publicPlanCandidates, type PlanCandidate } from "@/lib/design/grid-plan-intake";
+import { cleanIntakeNotices, publicPlanCandidates, type PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { quoteBuilderHref } from "@/lib/quote-links";
@@ -367,6 +367,9 @@ export default async function GridEditorPage({
       recent={recent}
       estimateLink={estimateTray ? { quoteId: estimateTray.quoteId, quoteNumber: estimateTray.quoteNumber, href: estimateTray.href } : estimateLink}
       estimateTray={estimateTray}
+      // #314 review: what the intake save left for the editor, and the plan view to open on.
+      intakeNotices={cleanIntakeNotices(project.intake?.notices)}
+      focusSheetId={project.intake?.planSheetId && (project.sheetIds || []).includes(project.intake.planSheetId) ? project.intake.planSheetId : null}
     />
     </CanMapProvider>
   );

@@ -26,9 +26,10 @@ import CustomerVenueContactPicker, {
   initialCustomerVenueContact,
   type CustomerVenueContact,
 } from "@/components/customer-venue-contact-picker";
-import { attachPlanAction, planCandidatesAction, saveGridIntakeAction } from "./actions";
+import { notePlanUploadFailedAction, planCandidatesAction, saveGridIntakeAction } from "./actions";
+import { newPlanUploadId, planFileProblem, uploadPlanFirst } from "@/lib/design/grid-plan-upload";
 import Link from "next/link";
-import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL, sheetMimeVerdict } from "@/lib/grid-sheet-file";
+import { GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import type { PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { estimateIntakeNote, GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import ScopePicker from "./scope-picker";
@@ -47,34 +48,6 @@ import { EquipmentCards, useAutoPreview } from "./equipment-card";
 
 type Start = "auto" | "blank";
 type Cover = { locationName: string; venueName: string; address: string };
-
-/** #314 — the plan view's file: the same checks the editor's sheet upload runs
- *  before posting (the route re-checks — this is the courtesy, not the rule). */
-function planFileProblem(file: File): string | null {
-  if (file.size === 0) return "That file is empty.";
-  if (file.size > GRID_SHEET_MAX_BYTES) return `That file is larger than ${GRID_SHEET_MAX_LABEL}. Print the drawing to a smaller PDF (one sheet per file) and try again.`;
-  const v = sheetMimeVerdict(file.type || "");
-  if (v === "svg") return "SVG plan sheets aren't supported — export the drawing as a PDF or PNG instead.";
-  if (v !== "ok") return "PDF or image files only — print DWGs to PDF first.";
-  return null;
-}
-
-/** #314 — post the plan view to the existing sheet upload route (#146), asking
- *  for the FIRST position. Only ever called after the intake saved. */
-async function uploadPlanFirst(projectId: string, file: File): Promise<{ ok: true } | { ok: false; error: string }> {
-  const body = new FormData();
-  body.append("projectId", projectId);
-  body.append("name", file.name);
-  body.append("position", "first");
-  body.append("file", file);
-  try {
-    const res = await fetch("/api/grid-sheets/upload", { method: "POST", body });
-    const r = (await res.json()) as { ok?: boolean; sheetId?: string; error?: string };
-    return r?.ok && r.sheetId ? { ok: true } : { ok: false, error: r?.error || "That plan could not be uploaded." };
-  } catch {
-    return { ok: false, error: "That plan could not be uploaded. Check your connection and try again." };
-  }
-}
 
 function initialState(value?: AState): AState {
   if (value) return { ...value, sys: { ...value.sys } };
@@ -140,14 +113,12 @@ export default function GridIntake({
   const [dragOver, setDragOver] = useState(false);
   const planInput = useRef<HTMLInputElement>(null);
   const candidateReq = useRef(0);
-  /** After a save whose plan step failed: what Retry re-runs. */
-  const [planRetry, setPlanRetry] = useState<{ kind: "copy"; id: string } | { kind: "upload"; file: File } | null>(null);
-  const [retrying, startRetry] = useTransition();
+  /** One id per picked file — the upload route makes a repeat of it a no-op. */
+  const [planUploadId, setPlanUploadId] = useState("");
   const [notes, setNotes] = useState("");
   const [a, setA] = useState<AState>(() => initialState(initialAutoConfig));
   const [estimate, setEstimate] = useState<AutoEstimate>({ tierByScope: {}, overrides: {} });
   const [error, setError] = useState("");
-  const [warning, setWarning] = useState("");
   const preview = useAutoPreview();
   const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
   const scopeInputs = intakeScopeInputs(a);
@@ -222,6 +193,7 @@ export default function GridIntake({
     const problem = planFileProblem(file);
     if (problem) return setPlanError(problem);
     setPlanFile(file);
+    setPlanUploadId(newPlanUploadId());
     setUsePlan(false);
   };
   const candidateId = usePlan && !planFile && candidates.some((c) => c.id === planPick) ? planPick : null;
@@ -244,31 +216,17 @@ export default function GridIntake({
         planCandidateId: candidateId,
       });
       if (!saved.ok) return setError(saved.error);
-      // #314: the intake is saved from here on — a plan view that fails to
-      // land never loses it; the design opens with a warning and a retry.
-      const warnings: string[] = saved.warning ? [saved.warning] : [];
-      let retry: typeof planRetry = saved.planRetry ? { kind: "copy", id: saved.planRetry } : null;
-      if (planFile) {
-        const up = await uploadPlanFirst(projectId, planFile);
-        if (!up.ok) {
-          warnings.push(`The plan is ready, but the plan view wasn't uploaded: ${up.error}`);
-          retry = { kind: "upload", file: planFile };
-        }
+      // #314 review: the intake is saved from here on, and the save's own
+      // re-render has already swapped this intake for the editor — so nothing
+      // below may rely on this component's state. The server persisted its
+      // warnings (Auto fill, the on-file plan copy) as notices the editor
+      // shows; a dropped plan that fails to upload leaves one the same way.
+      // Locals only: these keep working after this component unmounts.
+      if (planFile && planUploadId) {
+        const up = await uploadPlanFirst(projectId, planFile, planUploadId);
+        if (!up.ok) await notePlanUploadFailedAction(projectId, up.error).catch(() => null);
       }
-      setPlanRetry(retry);
-      if (warnings.length) setWarning(warnings.join(" "));
-      else router.refresh();
-    });
-  };
-  const retryPlan = () => {
-    if (!planRetry) return;
-    startRetry(async () => {
-      const r = planRetry.kind === "copy" ? await attachPlanAction(projectId, planRetry.id).catch(() => ({ ok: false as const, error: "Couldn't copy the plan — try again." })) : await uploadPlanFirst(projectId, planRetry.file);
-      if (r.ok) {
-        setPlanRetry(null);
-        setWarning("");
-        router.refresh();
-      } else setWarning(`The plan is ready, but the plan view still wasn't added: ${r.error}`);
+      router.refresh();
     });
   };
   const next = () => {
@@ -566,9 +524,7 @@ export default function GridIntake({
               )}
 
               {error && <div style={{ marginTop: 12, color: "#b4543a", fontSize: 12 }}>{error}</div>}
-              {warning ? (
-                <PlanWarning warning={warning} canRetry={!!planRetry} retrying={retrying} onRetry={retryPlan} onOpen={() => router.refresh()} />
-              ) : start && (
+              {start && (
                 <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
                   <button type="button" onClick={next} disabled={busy} style={{ ...primary(busy), flex: 1 }}>
                     {start === "auto" ? "Next: equipment →" : busy ? "Setting up your plan…" : "Continue to The Grid →"}
@@ -589,39 +545,15 @@ export default function GridIntake({
                 </div>
               )}
               {error && <div style={{ marginTop: 12, color: "#b4543a", fontSize: 12 }}>{error}</div>}
-              {warning ? (
-                <PlanWarning warning={warning} canRetry={!!planRetry} retrying={retrying} onRetry={retryPlan} onOpen={() => router.refresh()} />
-              ) : (
-                <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-                  <button type="button" onClick={() => { setError(""); setStep("setup"); }} disabled={busy} style={ghost}>← Back</button>
-                  <button type="button" onClick={save} disabled={busy || !preview.cards} style={{ ...primary(busy), flex: 1 }}>
-                    {busy ? "Building your plan…" : "Build the plan →"}
-                  </button>
-                </div>
-              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+                <button type="button" onClick={() => { setError(""); setStep("setup"); }} disabled={busy} style={ghost}>← Back</button>
+                <button type="button" onClick={save} disabled={busy || !preview.cards} style={{ ...primary(busy), flex: 1 }}>
+                  {busy ? "Building your plan…" : "Build the plan →"}
+                </button>
+              </div>
             </>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/** The saved-with-a-warning panel (#211's "the plan still opens"; #314 adds a
- *  plan-view Retry). The intake is already saved when this shows. */
-function PlanWarning({ warning, canRetry, retrying, onRetry, onOpen }: { warning: string; canRetry: boolean; retrying: boolean; onRetry: () => void; onOpen: () => void }) {
-  return (
-    <div role="alert" style={{ marginTop: 16, border: "1px solid #f0dcbb", background: "#fdf4e7", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, color: "#7a5a1c" }}>
-      {warning}
-      <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {canRetry && (
-          <button type="button" onClick={onRetry} disabled={retrying} style={ghost}>
-            {retrying ? "Retrying…" : "Retry the plan view"}
-          </button>
-        )}
-        <button type="button" onClick={onOpen} disabled={retrying} style={primary(false)}>
-          Open the plan →
-        </button>
       </div>
     </div>
   );

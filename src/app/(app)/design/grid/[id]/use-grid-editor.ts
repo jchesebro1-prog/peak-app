@@ -46,6 +46,7 @@ import type { SellCard } from "@/lib/design/auto-estimate";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, RemovedBundle } from "@/lib/stores/grid-projects";
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
+import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import {
   addRouteAction,
   addSpaceAction,
@@ -351,6 +352,10 @@ export type GridEditorProps = {
   /** #314: the From estimate tray for the ACTIVE option, when it is the
    *  estimate-owned one — lines read live from the quote's saved spec. */
   estimateTray?: EstimateTrayData | null;
+  /** #314 review: notices the intake save left (plan view / Auto fill), until retried or dismissed. */
+  intakeNotices?: GridIntakeNotice[];
+  /** #314 review: the intake's plan view sheet — the editor opens on it, even when it lands after mount. */
+  focusSheetId?: string | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -379,6 +384,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   } = props;
   const estimateLink = props.estimateLink ?? null;
   const estimateTray = props.estimateTray ?? null;
+  const intakeNotices = props.intakeNotices ?? [];
   const router = useRouter();
   const pathname = usePathname();
   /** #299 multi-select: every selected device, in the order picked. The
@@ -426,11 +432,23 @@ function useGridEditorImpl(props: GridEditorProps) {
   );
   // Two-step arm/confirm; this app doesn't use window.confirm.
   const [armDelete, setArmDelete] = useState(false);
-  const [activeSheetId, setActiveSheetId] = useState(sheets[0]?.id || "");
+  // #314 review: open on the intake's plan view. It can land AFTER the editor
+  // mounted (the intake's save re-renders into the editor, then the dropped
+  // file uploads), so a new focus sheet is applied once it shows up in
+  // `sheets` — adjusted during render, never in an effect.
+  const focusSheetId = props.focusSheetId ?? null;
+  const focusHere = !!focusSheetId && sheets.some((s) => s.id === focusSheetId);
+  const [activeSheetId, setActiveSheetId] = useState((focusHere ? focusSheetId : sheets[0]?.id) || "");
+  const [focusApplied, setFocusApplied] = useState<string | null>(focusHere ? focusSheetId : null);
   const sheet = sheets.find((s) => s.id === activeSheetId) || sheets[0];
   const isPdf = sheet?.mime === "application/pdf" || sheet?.name.toLowerCase().endsWith(".pdf");
 
   const [page, setPage] = useState(1);
+  if (focusHere && focusSheetId !== focusApplied) {
+    setFocusApplied(focusSheetId);
+    setActiveSheetId(focusSheetId!);
+    setPage(1);
+  }
   const [pages, setPages] = useState(1);
   const [zoom, setZoom] = useState(1.25);
   const [size, setSize] = useState({ w: 900, h: 1200 });
@@ -2567,6 +2585,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     router,
     estimateLink,
     estimateTray,
+    intakeNotices,
     project,
     symbolDisplay,
     setSymbolScale,

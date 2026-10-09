@@ -12,6 +12,7 @@ import PropertyEditor from "./workspace/property-editor";
 import SystemStatus, { Targets } from "./workspace/system-status";
 import RightPane from "./workspace/right-pane";
 import CalibratePrompt from "./workspace/calibrate-prompt";
+import IntakeNotices from "./workspace/intake-notices";
 
 /**
  * The Grid editor (D108) — device painting on plan sheets, in the markup
@@ -45,6 +46,7 @@ export default function GridEditor(props: GridEditorProps) {
       center={
         <>
           <SheetTabs ed={ed} />
+          <IntakeNotices ed={ed} />
           <CalibratePrompt ed={ed} />
           {/* The plan stays mounted while the Spreadsheet view shows, so the
               PDF render, zoom and scroll survive the round trip. */}

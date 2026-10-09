@@ -59057,6 +59057,9 @@ import {
   planCandidatesFrom as t314Cands,
   planCopyVerdict as t314Verdict,
   publicPlanCandidates as t314Public,
+  cleanIntakeNotices as t314CleanNotices,
+  attachedPlanSheet as t314Attached,
+  planSourceKey as t314SourceKey,
 } from "@/lib/design/grid-plan-intake";
 {
   const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -59132,6 +59135,18 @@ import {
      J(t314Verdict(enc("GIF89a"), 10)) === J({ ok: false, error: "That plan isn't a PDF, PNG, JPEG or WebP file." }),
     "#314 plan view: the copy re-checks the source by magic bytes (PDF/PNG/JPEG/WebP only, never SVG) and size (25 MB — the copy never crosses the 4 MB function body)");
 
+  // (4b) #314 review: intake notices + plan-source idempotency (pure).
+  const nOk = { id: "ntc-abcd1234", message: "  Saved.\u0007  ", at: 5 };
+  const cleaned = t314CleanNotices([nOk, { id: "ntc-abcd1234", message: "dup", at: 6 }, { id: "nope", message: "x", at: 1 }, { id: "ntc-zzzz9999", message: "", at: 1 },
+    { id: "ntc-cccc0000", message: "Copy failed", retry: { kind: "copy", candidateId: "doc:DOC-9" }, at: 7 }, { id: "ntc-dddd0000", message: "Bad retry", retry: { kind: "copy", candidateId: "../x" }, at: 8 }]);
+  ok(J(cleaned) === J([{ id: "ntc-abcd1234", message: "Saved.", at: 5 }, { id: "ntc-cccc0000", message: "Copy failed", retry: { kind: "copy", candidateId: "doc:DOC-9" }, at: 7 }, { id: "ntc-dddd0000", message: "Bad retry", at: 8 }]) &&
+     t314CleanNotices(Array.from({ length: 9 }, (_, i) => ({ id: `ntc-n${i}xxx`, message: `m${i}`, at: i }))).map((n) => n.message).join() === "m4,m5,m6,m7,m8" && t314CleanNotices("junk").length === 0,
+    "#314 review: stored notices are cleaned on every read — junk / duplicate ids and empty text dropped, a bad retry target dropped, the newest 5 kept");
+  ok(t314Attached({ planSource: "copy:doc:D1", planSheetId: "gs-1" }, ["gs-1", "gs-2"], "copy:doc:D1") === "gs-1" && t314Attached({ planSource: "copy:doc:D1", planSheetId: "gs-1" }, ["gs-2"], "copy:doc:D1") === null &&
+     t314Attached({ planSource: "copy:doc:D1", planSheetId: "gs-1" }, ["gs-1"], "copy:doc:D2") === null && t314Attached(undefined, ["gs-1"], "copy:doc:D1") === null &&
+     t314SourceKey("upload", "u-123456789") === "upload:u-123456789",
+    "#314 review: a source counts as attached only while its sheet is still on the design (a removed plan can be attached again)");
+
   // (5) Source pins: server refusals, auto-mode refusal, requirePerm, lock, store backstops, order of operations.
   const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
   const draft = acts.slice(acts.indexOf("export async function createDraftQuoteAction("));
@@ -59160,10 +59175,37 @@ import {
     "#314 pin: an intake plan view goes first, so Auto fill finds the generated base sheet by its stamped id");
   ok(rd("src/app/api/grid-sheets/upload/route.ts").includes('String(form.get("position") || "") === "first"'), "#314 pin: the sheet upload route takes position=first (same route, same checks)");
   const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
-  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const retryPlan = () => {"));
-  ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadPlanFirst(projectId, planFile)") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
-     gi.includes('body.append("position", "first");') && gi.includes("{linkedEstimate ? (") && gi.includes("estimateIntakeNote(linkedEstimate.quoteNumber)") && gi.includes('useState<Start | null>(linkedEstimate ? "blank" : null)'),
+  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const next = () => {"));
+  ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadPlanFirst(projectId, planFile, planUploadId)") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
+     rd("src/lib/design/grid-plan-upload.ts").includes('body.append("position", "first");') && gi.includes("{linkedEstimate ? (") && gi.includes("estimateIntakeNote(linkedEstimate.quoteNumber)") && gi.includes('useState<Start | null>(linkedEstimate ? "blank" : null)'),
     "#314 pin: the intake uploads a dropped plan only after the intake saved; an estimate-linked intake hides Auto and starts Blank");
+  // #314 review (1): the intake's save re-renders into the editor, so after a successful save the intake may not
+  // hold anything in its own state — warnings live on the project and the editor shows them.
+  const afterSave = saveBody.slice(saveBody.indexOf("if (!saved.ok) return setError(saved.error);") + "if (!saved.ok) return setError(saved.error);".length);
+  ok(!/\bset[A-Z]\w*\(/.test(afterSave) && afterSave.includes("await notePlanUploadFailedAction(projectId, up.error)") && afterSave.trim().endsWith("router.refresh();\n    });\n  };".trim()) &&
+     !gi.includes("setWarning") && !gi.includes("PlanWarning") && !gi.includes("planRetry"),
+    "#314 review: after a successful save the intake sets no state of its own (it has been swapped for the editor) — an upload failure is persisted as a notice, then the route refreshes");
+  const intakeAct = acts.slice(acts.indexOf("export async function saveGridIntakeAction("), acts.indexOf("async function estimateRefusal("));
+  ok(intakeAct.indexOf("await addIntakeNotices(input.projectId, notices)") > 0 && intakeAct.indexOf("await addIntakeNotices(input.projectId, notices)") < intakeAct.indexOf("revalidatePath(editorPath(input.projectId))") &&
+     intakeAct.includes("if (warning) notices.push(") && intakeAct.includes('retry: { kind: "copy" as const, candidateId: planRetry }'),
+    "#314 review: saveGridIntakeAction persists its warnings (#211 Auto fill and the plan copy, with its Retry) BEFORE the revalidate that swaps in the editor");
+  const ed314 = rd("src/app/(app)/design/grid/[id]/editor.tsx"), hook314 = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts"), page314 = rd("src/app/(app)/design/grid/[id]/page.tsx");
+  const banner = rd("src/app/(app)/design/grid/[id]/workspace/intake-notices.tsx");
+  ok(ed314.includes("<IntakeNotices ed={ed} />") && page314.includes("intakeNotices={cleanIntakeNotices(project.intake?.notices)}") && page314.includes("focusSheetId={project.intake?.planSheetId") &&
+     banner.includes("retryGridNoticeAction(project.id, n.id)") && banner.includes("dismissGridNoticeAction(project.id, n.id)") && banner.includes("uploadPlanFirst(project.id, file, newPlanUploadId())") && !banner.includes("blobPath"),
+    "#314 review: the editor shows the intake's notices as a banner — Retry (copy on the server; upload = choose the file again) and Dismiss");
+  ok(hook314.includes("useState((focusHere ? focusSheetId : sheets[0]?.id) || \"\")") && /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);\s*setActiveSheetId\(focusSheetId!\);/.test(hook314),
+    "#314 review: the editor opens on the intake's plan view sheet — at mount, and when it lands after mount (adjusted during render)");
+  const route = rd("src/app/api/grid-sheets/upload/route.ts");
+  ok(route.includes("if (first && !isPlanUploadId(uploadId))") && route.includes("withPlanLock(projectId, async () => {") && route.indexOf("attachedPlanSheet(now.intake") < route.indexOf("storeSheet(projectId, name, mime, bytes, user.name, true)") &&
+     route.includes("await recordIntakePlan(projectId, r, source);") && rd("src/lib/design/grid-plan-upload.ts").includes('body.append("planUploadId", uploadId);'),
+    "#314 review (3): a plan-view upload carries an upload id; under the plan lock, a repeat of one that already landed returns its sheet instead of adding it twice");
+  const pis = rd("src/lib/design/grid-plan-intake-server.ts");
+  ok(pis.includes("return withPlanLock(projectId, () => attachPlanCandidateLocked(projectId, candidateId, by));") && pis.indexOf("attachedPlanSheet(current.intake") < pis.indexOf("copyBlob(") && pis.includes("await recordIntakePlan(projectId, sheet.id, source);"),
+    "#314 review (3): attachPlanCandidate is idempotent per candidate under the plan lock — a retry after a copy that landed returns the sheet it made");
+  const rr = store.slice(store.indexOf("export async function restoreRevision("));
+  ok(/if \(!cur\) \{\s*if \(o\.estimateOwned !== true\) return \{ \.\.\.o \};[^]*?return \{ \.\.\.unlinked, quoteId: null \};/.test(rr),
+    "#314 review (2): restoring a revision that brings back a removed estimate-owned option brings it back unlinked (the copy rule)");
   const panel = rd("src/app/(app)/estimator/package-staff-panel.tsx");
   ok(panel.includes("GRID_LINK_COPY.generateNeedsDesign") && !panel.includes("Link a Grid design to this quote first.") && panel.includes("openGridDesignForQuoteAction(quoteId)") &&
      panel.includes("disabled={gridPending || !panel.canCreate}") && rd("src/app/(app)/estimator/steps/package-step.tsx").includes("title={GRID_LINK_COPY.saveFirst}"),
@@ -59228,6 +59270,44 @@ async function estimateGrid314AsyncChecks(): Promise<void> {
   ok((await T.estimateTrayParts((await Q.get(QID))!)).map((p) => p.sku).join() === NEW, "#314 (DB): estimateTrayParts — the live catalog parts behind the tray (what gets a Grid library entry)");
   const gone = await T.loadEstimateTray(fixtureId(314, "no-such-quote"), []);
   ok(gone.gone && gone.lines.length === 0, "#314 (DB): a deleted estimate reads as an empty, gone tray");
+
+  // #314 review (2): a removed estimate-owned option restored from a revision comes back unlinked.
+  const pr = await G.createProject({ name: "#314 restore", customer: "Spec fixture", customerId: null, by: "Test" });
+  registerFixture("grid_projects", pr.id);
+  const optB = await G.addOption(pr.id, { name: "Linked", by: "Test" });
+  const bId = optB.ok ? optB.option.id : "";
+  await G.linkOptionToEstimate(pr.id, bId, QID);
+  await G.addRevision(pr.id, { by: "Test", note: "with link" });
+  const rev = ((await G.getProject(pr.id))!.revisions || []).length;
+  await G.removeOption(pr.id, bId, "Test");
+  ok(O.estimateLinkOf((await G.getProject(pr.id))!) === null, "#314 review (DB): removing the linked option removes the link");
+  await G.restoreRevision(pr.id, rev, "Test");
+  const back = (await G.getProject(pr.id))!.options!.find((o) => o.id === bId);
+  ok(!!back && back.quoteId === null && back.estimateOwned === undefined && O.estimateLinkOf((await G.getProject(pr.id))!) === null,
+    "#314 review (DB): restoring the revision brings the option back WITHOUT its quote or estimate link — two designs never claim one estimate");
+
+  // #314 review (1): notices survive the intake save and leave only when removed.
+  const PI = await import("@/lib/design/grid-plan-intake");
+  const pn = await G.createProject({ name: "#314 notices", customer: "Spec fixture", customerId: null, by: "Test" });
+  registerFixture("grid_projects", pn.id);
+  const n1 = { id: "ntc-aaaa1111", message: "Auto could not fill it.", at: 1 };
+  const n2 = { id: "ntc-bbbb2222", message: "The plan view wasn't added.", retry: { kind: "copy" as const, candidateId: "doc:DOC-1" }, at: 2 };
+  await G.addIntakeNotices(pn.id, [n1, n2, { id: "bad", message: "x", at: 3 } as never]);
+  await G.saveGridIntake(pn.id, { complete: true, measurementBased: true, venueName: "V", locationName: "L", address: "", notes: "" });
+  const pnRead = (await G.getProject(pn.id))!;
+  ok(J314(PI.cleanIntakeNotices(pnRead.intake?.notices)) === J314([n1, n2]) && pnRead.intake?.complete === true,
+    "#314 review (DB): notices are stored (junk dropped) and a later intake save keeps them");
+  const removedN = await G.removeIntakeNotice(pn.id, n1.id);
+  ok(removedN?.id === n1.id && J314(PI.cleanIntakeNotices((await G.getProject(pn.id))!.intake?.notices)) === J314([n2]) && (await G.removeIntakeNotice(pn.id, n1.id)) === null,
+    "#314 review (DB): Dismiss / a successful Retry removes exactly that notice; a second remove is a no-op");
+
+  // #314 review (3): an attached source is never attached twice.
+  const sh = await G.addSheet(pn.id, { name: "Plan.png", mime: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=", by: "Test", first: true });
+  await G.recordIntakePlan(pn.id, sh!.id, PI.planSourceKey("copy", "doc:DOC-1"));
+  const before = (await G.getProject(pn.id))!.sheetIds.length;
+  const again = await (await import("@/lib/design/grid-plan-intake-server")).attachPlanCandidate(pn.id, "doc:DOC-1", "Test");
+  ok(again.ok && again.sheetId === sh!.id && again.already === true && (await G.getProject(pn.id))!.sheetIds.length === before && (await G.getProject(pn.id))!.sheetIds[0] === sh!.id,
+    "#314 review (DB): retrying a plan copy that already landed returns its sheet — no second sheet");
 }
 function J314(v: unknown): string {
   return JSON.stringify(v);

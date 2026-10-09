@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { blobEnabled, putBlob, safeName } from "@/lib/blob";
-import { addSheet, getProject } from "@/lib/stores/grid-projects";
+import { addSheet, getProject, recordIntakePlan } from "@/lib/stores/grid-projects";
+import { withPlanLock } from "@/lib/design/grid-plan-intake-server";
+import { attachedPlanSheet, isPlanUploadId, planSourceKey } from "@/lib/design/grid-plan-intake";
 import {
   GRID_SHEET_BLOB_PREFIX,
   GRID_SHEET_MAX_BYTES,
@@ -102,7 +104,36 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const name = String(form.get("name") || file.name || "Plan sheet").slice(0, 120);
   const bytes = Buffer.from(await file.arrayBuffer());
+  // #314: the Grid intake's plan view asks to go FIRST (the editor opens on
+  // it, in front of the generated base sheet); every other upload appends.
+  // It carries an upload id, so a retry of an upload that already landed
+  // (the response was lost) returns that sheet instead of adding it twice.
+  const first = String(form.get("position") || "") === "first";
+  const uploadId = form.get("planUploadId");
+  if (first && !isPlanUploadId(uploadId)) {
+    return NextResponse.json({ ok: false, error: "Bad upload id." }, { status: 400 });
+  }
+  if (first) {
+    const source = planSourceKey("upload", uploadId as string);
+    return withPlanLock(projectId, async () => {
+      const now = await getProject(projectId);
+      const done = now ? attachedPlanSheet(now.intake, now.sheetIds || [], source) : null;
+      if (done) return NextResponse.json({ ok: true, sheetId: done, already: true });
+      const r = await storeSheet(projectId, name, mime, bytes, user.name, true);
+      if (r instanceof NextResponse) return r;
+      await recordIntakePlan(projectId, r, source);
+      revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
+      return NextResponse.json({ ok: true, sheetId: r });
+    });
+  }
+  const r = await storeSheet(projectId, name, mime, bytes, user.name, false);
+  if (r instanceof NextResponse) return r;
+  revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
+  return NextResponse.json({ ok: true, sheetId: r });
+}
 
+/** Bytes to storage + the grid_sheets doc; the new sheet id, or the error response. */
+async function storeSheet(projectId: string, name: string, mime: string, bytes: Buffer, by: string, first: boolean): Promise<string | NextResponse> {
   // Blob storage when the token exists (D116); in-database data-URL otherwise,
   // which is the whole dev story (AGENTS.md: `npm run dev` needs no cloud) and
   // is unchanged from the action this replaces.
@@ -128,12 +159,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     stored = { dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
   }
 
-  // #314: the Grid intake's plan view asks to go FIRST (the editor opens on
-  // it, in front of the generated base sheet); every other upload appends.
-  const first = String(form.get("position") || "") === "first";
-  const sheet = await addSheet(projectId, { name, mime, ...stored, by: user.name, ...(first ? { first: true } : {}) });
+  const sheet = await addSheet(projectId, { name, mime, ...stored, by, ...(first ? { first: true } : {}) });
   if (!sheet) return NextResponse.json({ ok: false, error: "Design not found." }, { status: 404 });
-
-  revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
-  return NextResponse.json({ ok: true, sheetId: sheet.id });
+  return sheet.id;
 }
