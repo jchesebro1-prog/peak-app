@@ -26,7 +26,12 @@ import CustomerVenueContactPicker, {
   initialCustomerVenueContact,
   type CustomerVenueContact,
 } from "@/components/customer-venue-contact-picker";
-import { saveGridIntakeAction } from "./actions";
+import { notePlanUploadFailedAction, planCandidatesAction, saveGridIntakeAction } from "./actions";
+import { newPlanUploadId, planFileProblem, uploadPlanFirst } from "@/lib/design/grid-plan-upload";
+import Link from "next/link";
+import { GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
+import type { PlanCandidate } from "@/lib/design/grid-plan-intake";
+import { estimateIntakeNote, GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import ScopePicker from "./scope-picker";
 import { EquipmentCards, useAutoPreview } from "./equipment-card";
 
@@ -68,6 +73,9 @@ export default function GridIntake({
   customers,
   venueTypes,
   initialCustomer,
+  estimate: linkedEstimate = null,
+  initialCover,
+  planCandidates: initialCandidates = [],
 }: {
   projectId: string;
   projectName: string;
@@ -77,23 +85,40 @@ export default function GridIntake({
   venueTypes: VenueType[];
   /** #244 — a customer/venue/contact already on the project, pre-picked. */
   initialCustomer: { customerId: string; locationId: string; contactName: string };
+  /** #314: the estimate this design draws — Auto is hidden, parts come from its tray. */
+  estimate?: { quoteId: string; quoteNumber: string; href: string } | null;
+  /** #314: the picked venue's cover fields, pre-filled (an estimate's venue). */
+  initialCover?: Cover;
+  /** #314: plans already on file for this job ("Use plan from …"). */
+  planCandidates?: PlanCandidate[];
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [step, setStep] = useState<"setup" | "equipment">("setup");
   // No preselection (#244): the venue section drops down once one is chosen.
-  const [start, setStart] = useState<Start | null>(null);
+  // #314: an estimate-linked design has one start — Blank (Auto is refused server-side too).
+  const [start, setStart] = useState<Start | null>(linkedEstimate ? "blank" : null);
   const [title, setTitle] = useState(projectName.trim() && projectName.trim() !== UNTITLED_GRID_DESIGN ? projectName : "");
   const [pick, setPick] = useState<CustomerVenueContact>(() => initialCustomerVenueContact(initialCustomer, venueTypes));
-  const [cover, setCover] = useState<Cover>({ locationName: "", venueName: "", address: "" });
+  const [cover, setCover] = useState<Cover>(() => initialCover ?? { locationName: "", venueName: "", address: "" });
   // What the last picked venue filled in — a field still holding it may be
   // replaced by the next pick; anything typed is never overwritten.
-  const autoFilled = useRef<Cover>({ locationName: "", venueName: "", address: "" });
+  const autoFilled = useRef<Cover>(initialCover ?? { locationName: "", venueName: "", address: "" });
+  // #314 — the plan view: an on-file plan (pre-attached, on by default) or a dropped file.
+  const [candidates, setCandidates] = useState<PlanCandidate[]>(initialCandidates);
+  const [usePlan, setUsePlan] = useState(initialCandidates.length > 0);
+  const [planPick, setPlanPick] = useState(initialCandidates[0]?.id ?? "");
+  const [planFile, setPlanFile] = useState<File | null>(null);
+  const [planError, setPlanError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const planInput = useRef<HTMLInputElement>(null);
+  const candidateReq = useRef(0);
+  /** One id per picked file — the upload route makes a repeat of it a no-op. */
+  const [planUploadId, setPlanUploadId] = useState("");
   const [notes, setNotes] = useState("");
   const [a, setA] = useState<AState>(() => initialState(initialAutoConfig));
   const [estimate, setEstimate] = useState<AutoEstimate>({ tierByScope: {}, overrides: {} });
   const [error, setError] = useState("");
-  const [warning, setWarning] = useState("");
   const preview = useAutoPreview();
   const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
   const scopeInputs = intakeScopeInputs(a);
@@ -121,9 +146,28 @@ export default function GridIntake({
   };
   const setCoverField = (field: keyof Cover, value: string) => setCover((c) => ({ ...c, [field]: value }));
 
+  /** #314: the plans on file for a (new) customer + venue pick — newest request wins. */
+  const refreshCandidates = (customerId: string, locationId: string) => {
+    const req = ++candidateReq.current;
+    planCandidatesAction(projectId, { customerId, locationId }).then(
+      (r) => {
+        if (req !== candidateReq.current || !r.ok) return;
+        setCandidates(r.candidates);
+        setPlanPick((cur) => (r.candidates.some((c) => c.id === cur) ? cur : r.candidates[0]?.id ?? ""));
+        setUsePlan((on) => (r.candidates.length ? (planFile ? false : on || !candidates.length) : false));
+      },
+      () => {
+        /* keep what is shown — the drop field still works */
+      }
+    );
+  };
+
   /** A picked customer venue pre-fills the cover page's empty fields. */
   const changePick = (next: CustomerVenueContact) => {
     setPick(next);
+    if (next.customerId !== pick.customerId || next.locationId !== pick.locationId || next.customerMode !== pick.customerMode) {
+      refreshCandidates(next.customerMode === "pick" ? next.customerId : "", next.customerMode === "pick" && next.locationMode === "pick" ? next.locationId : "");
+    }
     const venuePicked = next.customerMode === "pick" && next.locationMode === "pick" && !!next.locationId;
     const changed = next.locationId !== pick.locationId || next.customerId !== pick.customerId || pick.locationMode !== "pick";
     if (!venuePicked || !changed) return;
@@ -143,6 +187,17 @@ export default function GridIntake({
     setEstimate(next);
     preview.run(scopeInputs, next, delay);
   };
+  const pickFile = (file: File | null | undefined) => {
+    setPlanError("");
+    if (!file) return;
+    const problem = planFileProblem(file);
+    if (problem) return setPlanError(problem);
+    setPlanFile(file);
+    setPlanUploadId(newPlanUploadId());
+    setUsePlan(false);
+  };
+  const candidateId = usePlan && !planFile && candidates.some((c) => c.id === planPick) ? planPick : null;
+
   const save = () => {
     if (!start) return;
     startTransition(async () => {
@@ -158,10 +213,20 @@ export default function GridIntake({
         notes,
         autoConfig: { ...a, venueType: pickedVenueType },
         ...(start === "auto" ? { estimate } : {}),
+        planCandidateId: candidateId,
       });
-      if (!saved.ok) setError(saved.error);
-      else if (saved.warning) setWarning(saved.warning);
-      else router.refresh();
+      if (!saved.ok) return setError(saved.error);
+      // #314 review: the intake is saved from here on, and the save's own
+      // re-render has already swapped this intake for the editor — so nothing
+      // below may rely on this component's state. The server persisted its
+      // warnings (Auto fill, the on-file plan copy) as notices the editor
+      // shows; a dropped plan that fails to upload leaves one the same way.
+      // Locals only: these keep working after this component unmounts.
+      if (planFile && planUploadId) {
+        const up = await uploadPlanFirst(projectId, planFile, planUploadId);
+        if (!up.ok) await notePlanUploadFailedAction(projectId, up.error).catch(() => null);
+      }
+      router.refresh();
     });
   };
   const next = () => {
@@ -190,7 +255,7 @@ export default function GridIntake({
     <div style={{ minHeight: "100%", background: "#f7f8fa", padding: "42px 22px" }}>
       <div style={{ maxWidth: 1040, margin: "0 auto" }}>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--accent)" }}>
-          Design · New system design{start === "auto" ? ` · Step ${step === "setup" ? 1 : 2} of 2` : ""}
+          Design · New system design{linkedEstimate ? ` · from estimate ${linkedEstimate.quoteNumber}` : ""}{start === "auto" ? ` · Step ${step === "setup" ? 1 : 2} of 2` : ""}
         </div>
         <h1 style={{ margin: "10px 0 8px", fontSize: 30, letterSpacing: "-.025em" }}>{title.trim() || autoName || projectName}</h1>
         <p style={{ margin: 0, color: "#737985", fontSize: 14, lineHeight: 1.55, maxWidth: 720 }}>{subtitle}</p>
@@ -214,6 +279,21 @@ export default function GridIntake({
                 </div>
               </div>
 
+              {linkedEstimate ? (
+                <div style={section}>
+                  <div style={label}>Start from</div>
+                  {/* #314: no Auto for a design drawn from an estimate — its parts are the estimate's. */}
+                  <div data-testid="intake-estimate-note" style={{ ...card(true), cursor: "default" }}>
+                    <span style={{ display: "block", fontSize: 13.5, fontWeight: 700 }}>Blank plan from estimate {linkedEstimate.quoteNumber}</span>
+                    <span style={{ display: "block", color: "#737985", fontSize: 12, marginTop: 3, lineHeight: 1.5 }}>
+                      {estimateIntakeNote(linkedEstimate.quoteNumber)} Prices stay in the Estimator.{" "}
+                      <Link href={linkedEstimate.href} style={{ color: "var(--accent)", fontWeight: 600 }}>
+                        {GRID_LINK_COPY.openEstimate}
+                      </Link>
+                    </span>
+                  </div>
+                </div>
+              ) : (
               <div style={section}>
                 <div style={label}>Start from</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -231,6 +311,114 @@ export default function GridIntake({
                   </button>
                 </div>
               </div>
+              )}
+
+              {start && (
+                <div style={section}>
+                  <div style={label}>Plan view (optional)</div>
+                  <div style={{ maxWidth: 620, display: "grid", gap: 10 }}>
+                    <span style={{ color: "#737985", fontSize: 12, lineHeight: 1.5 }}>
+                      A PDF or image of the venue&apos;s plan opens as the first sheet; the scaled venue drawing is still made behind it. You set the plan&apos;s scale on the canvas (Calibrate).
+                    </span>
+                    {candidates.length > 0 && (
+                      <div data-testid="intake-plan-candidates" style={{ display: "grid", gap: 6 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}>
+                          <input
+                            type="checkbox"
+                            checked={usePlan && !planFile}
+                            onChange={(e) => {
+                              setUsePlan(e.target.checked);
+                              if (e.target.checked) setPlanFile(null);
+                            }}
+                          />
+                          {candidates.length === 1
+                            ? `Use plan from ${candidates[0].from}: ${candidates[0].name}`
+                            : "Use a plan already on file"}
+                        </label>
+                        {candidates.length > 1 && (
+                          <select
+                            aria-label="Plan on file"
+                            value={planPick}
+                            disabled={!usePlan || !!planFile}
+                            onChange={(e) => setPlanPick(e.target.value)}
+                            style={{ ...input, padding: "8px 10px" }}
+                          >
+                            {candidates.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.from}: {c.name} ({c.sizeLabel})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
+                    <div
+                      data-testid="intake-plan-drop"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => planInput.current?.click()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          planInput.current?.click();
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOver(true);
+                      }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setDragOver(false);
+                        pickFile(e.dataTransfer.files?.[0]);
+                      }}
+                      style={{
+                        border: `1.5px dashed ${dragOver ? "var(--accent)" : "#d6dae1"}`,
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                        fontSize: 12.5,
+                        color: "#5b616e",
+                        background: dragOver ? "color-mix(in srgb, var(--accent) 6%, #fff)" : "#fbfbfc",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {planFile ? (
+                        <span>
+                          <strong style={{ color: "#16181d" }}>{planFile.name}</strong> — uploads when you continue.{" "}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPlanFile(null);
+                              if (candidates.length) setUsePlan(true);
+                            }}
+                            style={{ border: "none", background: "none", padding: 0, color: "#a33a2b", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5 }}
+                          >
+                            Remove
+                          </button>
+                        </span>
+                      ) : (
+                        <span>
+                          {candidates.length ? "Or drop a different plan here" : "Drop a plan here"} (PDF or image, up to {GRID_SHEET_MAX_LABEL}), or click to choose one.
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      ref={planInput}
+                      type="file"
+                      accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        pickFile(f);
+                      }}
+                    />
+                    {planError && <div style={{ color: "#b4543a", fontSize: 12 }}>{planError}</div>}
+                  </div>
+                </div>
+              )}
 
               {start && (
                 <div style={section}>
@@ -357,21 +545,12 @@ export default function GridIntake({
                 </div>
               )}
               {error && <div style={{ marginTop: 12, color: "#b4543a", fontSize: 12 }}>{error}</div>}
-              {warning ? (
-                <div style={{ marginTop: 16, border: "1px solid #f0dcbb", background: "#fdf4e7", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, color: "#7a5a1c" }}>
-                  {warning}
-                  <div style={{ marginTop: 10 }}>
-                    <button type="button" onClick={() => router.refresh()} style={primary(false)}>Open the plan →</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-                  <button type="button" onClick={() => { setError(""); setStep("setup"); }} disabled={busy} style={ghost}>← Back</button>
-                  <button type="button" onClick={save} disabled={busy || !preview.cards} style={{ ...primary(busy), flex: 1 }}>
-                    {busy ? "Building your plan…" : "Build the plan →"}
-                  </button>
-                </div>
-              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+                <button type="button" onClick={() => { setError(""); setStep("setup"); }} disabled={busy} style={ghost}>← Back</button>
+                <button type="button" onClick={save} disabled={busy || !preview.cards} style={{ ...primary(busy), flex: 1 }}>
+                  {busy ? "Building your plan…" : "Build the plan →"}
+                </button>
+              </div>
             </>
           )}
         </div>

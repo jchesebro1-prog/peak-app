@@ -1,4 +1,4 @@
-import { BlobNotFoundError, del, get, head, list, put } from "@vercel/blob";
+import { BlobNotFoundError, copy, del, get, head, list, put } from "@vercel/blob";
 
 /**
  * Vercel Blob seam (D116, MASTER-HOWTO §9) — file bytes out of the
@@ -33,6 +33,16 @@ export async function putBlob(
     contentType,
     addRandomSuffix: true,
   });
+  return { url: res.url, pathname: res.pathname };
+}
+
+/**
+ * #314 — copy a private blob to a new pathname inside the store (the Grid
+ * intake's "Use plan from …"): Blob to Blob, no bytes through the function.
+ * Random suffix like putBlob, so the RETURNED pathname is the one to store.
+ */
+export async function copyBlob(fromPathname: string, toPathname: string, contentType: string): Promise<{ url: string; pathname: string }> {
+  const res = await copy(fromPathname, toPathname, { access: "private", contentType, addRandomSuffix: true });
   return { url: res.url, pathname: res.pathname };
 }
 

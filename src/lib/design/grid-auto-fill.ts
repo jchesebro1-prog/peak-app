@@ -19,7 +19,7 @@ export type FillResult =
 /**
  * Auto fill (#211, spec §5): price the project's Auto choices from the
  * Equipment map + live catalog, lay them out by rule on the generated base
- * sheet (sheetIds[0]) using the geometry it was drawn from (intake.autoConfig),
+ * sheet (intake.baseSheetId, else sheetIds[0]) using the geometry it was drawn from (intake.autoConfig),
  * and replace the untouched auto devices of `scopes` in `optionId` — hand-
  * touched ones stay. Mapped catalog parts get a Grid library entry first so
  * the editor resolves them. Called only from user actions (the intake's first
@@ -38,7 +38,9 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   const { a, stamp } = fillGeometry(project.intake);
   const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
   if (!inputs || !a || !est) return { ok: false, error: "This design has no Auto choices to fill from." };
-  const sheetId = project.sheetIds[0];
+  // #314: the generated base sheet by id — an intake plan view sits in front of it.
+  const baseId = project.intake?.baseSheetId;
+  const sheetId = baseId && project.sheetIds.includes(baseId) ? baseId : project.sheetIds[0];
   if (!sheetId) return { ok: false, error: "No plan sheet to fill yet." };
   const refs = overrideRefs(est);
   const [{ map, ctx, catalogParts }, rules] = await Promise.all([

@@ -7,6 +7,7 @@ import { datasheetGapCount } from "./package-docs-server";
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./package-gaps";
 import { cleanPackageFiles, packageFileRows, visiblePackageFiles, type PackageFileRow } from "./package-files";
 import { responseRows, type ResponseRow } from "./responses";
+import { quoteQualifiesForGrid } from "@/lib/design/estimate-grid-link";
 
 /**
  * #301 slice C (spec §6, §7) — the staff side of the Client link panel:
@@ -15,8 +16,20 @@ import { responseRows, type ResponseRow } from "./responses";
  * as "Rev N". Server-only. `deps` exists for the spec harness.
  */
 
-/** `grid` — the linked Grid design's label (Task 9: "Generate from Grid"), or null when none is linked. */
-export type PackagePanel = { canSend: boolean; uploads: boolean; files: PackageFileRow[]; responses: ResponseRow[]; gaps: string[]; grid: { label: string } | null };
+/** `grid` — the linked Grid design (Task 9: "Generate from Grid"; #314: its id for "Open Grid design →" and
+ *  whether it is the estimate-owned, drawings-only kind), or null when none is linked. `gridEligible` (#314):
+ *  this quote may start a Grid design (quoteQualifiesForGrid). `canCreate` is the action's to fill (the
+ *  "Design in the Grid" button needs create); loadPackagePanel itself always reports false. */
+export type PackagePanel = {
+  canSend: boolean;
+  uploads: boolean;
+  files: PackageFileRow[];
+  responses: ResponseRow[];
+  gaps: string[];
+  grid: { label: string; projectId: string; estimateOwned: boolean } | null;
+  gridEligible: boolean;
+  canCreate: boolean;
+};
 
 type PanelDeps = {
   datasheetGaps: (spec: unknown) => Promise<number>;
@@ -45,7 +58,11 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
     const hit = await d.findGrid(q.id);
     if (hit) {
       const opt = (hit.project.options || []).find((o) => o.id === hit.optionId);
-      grid = { label: `${hit.project.name}${(hit.project.options || []).length > 1 && opt ? ` — ${opt.name}` : ""}` };
+      grid = {
+        label: `${hit.project.name}${(hit.project.options || []).length > 1 && opt ? ` — ${opt.name}` : ""}`,
+        projectId: hit.project.id,
+        estimateOwned: opt?.estimateOwned === true,
+      };
     }
   } catch (e) {
     console.warn("[package] grid lookup failed", e instanceof Error ? e.message : e);
@@ -66,5 +83,7 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
       scopesNoGoals: scopesWithoutGoals(sections),
     }),
     grid,
+    gridEligible: quoteQualifiesForGrid(q),
+    canCreate: false,
   };
 }

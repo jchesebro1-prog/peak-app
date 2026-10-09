@@ -823,6 +823,11 @@ See `.env.example`.
     line" per system (`systemTotal`) and a separate `productImage` node (Left / Right / Full, 25–100 %, text wraps beside it;
     older photo'd product blocks print as before and offer Separate photo); a custom part line on Build is click-to-edit in
     place; and the per-line Spec select moved to Customer review's internal sidebar (PUNCHLIST #312).
+    Follow-up ✅ (#314, D685–D690): Build package gains `Design in the Grid →` — a Grid design linked to the estimate
+    (one per estimate, `estimateOwned` base option; the estimate owns parts and prices, every grid→quote write refuses and the
+    Grid shows `Open estimate →`), a prefilled Blank-only intake, and a From estimate tray in the Product Library (placed /
+    needed per part, arm-to-place, alternates & options collapsed). Every Grid intake gains an optional Plan view (upload, or
+    a plan already on file copied Blob to Blob) that opens as the first sheet; failures open the plan with a retry (PUNCHLIST #314).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

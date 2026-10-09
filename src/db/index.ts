@@ -254,6 +254,11 @@ export async function withQuoteLock<T>(quoteId: string, fn: () => Promise<T>): P
 /** Advisory-lock namespace for a company's Rewards balance (#282 perks+points). */
 export const REWARDS_LOCK_NAMESPACE = 282;
 
+/** Advisory-lock namespace for "Design in the Grid" (#314): one Grid design per estimate, even on a double-click. */
+export const GRID_ESTIMATE_LOCK_NAMESPACE = 314;
+/** Advisory-lock namespace for the Grid intake's plan view (#314 review): one attach per source, even on a retry. */
+export const GRID_PLAN_LOCK_NAMESPACE = 3141;
+
 /**
  * Run `fn` inside a transaction holding the Postgres advisory lock
  * `(namespace, hashtext(key))` — the same bounded-poll shape as

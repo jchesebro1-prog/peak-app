@@ -49,7 +49,9 @@ export async function packagePanelAction(quoteId: string): Promise<{ ok: true; p
   try {
     const q = await getQuote(String(quoteId || ""));
     if (!q) return { ok: false, error: ONLINE_COPY.gone };
-    return { ok: true, panel: await loadPackagePanel(q, can("send", user.roles)) };
+    // #314: the panel's "Design in the Grid" needs create.
+    const panel = await loadPackagePanel(q, can("send", user.roles));
+    return { ok: true, panel: { ...panel, canCreate: can("create", user.roles) } };
   } catch (e) {
     console.error("[package] panel read failed", e);
     return { ok: false, error: PACKAGE_FILES_COPY.failed };
