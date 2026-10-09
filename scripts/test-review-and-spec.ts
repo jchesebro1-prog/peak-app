@@ -11529,6 +11529,7 @@ seeded()
   .then(() => sheetAdjust318DialogGuardPins())
   .then(() => sheetAdjust318StaleSheetChecks())
   .then(() => designators320PureChecks())
+  .then(() => designators320StoreChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60217,4 +60218,110 @@ async function designators320PureChecks(): Promise<void> {
   ok(!D.keepsDesignatorOnSwap("L-1", "L", "A") && D.keepsDesignatorOnSwap("FOH-1", "L", "A") && D.keepsDesignatorOnSwap("Rack", "L", "A") &&
      !D.keepsDesignatorOnSwap(undefined, "L", "A") && D.keepsDesignatorOnSwap("L-1", "L", "L"),
     "#320 keepsDesignatorOnSwap: only a number issued in the old type's code is re-issued, and only when the code changes");
+}
+
+/* ---------------- #320: Grid device designators — store ---------------- */
+async function designators320StoreChecks(): Promise<void> {
+  type G320Project = import("@/lib/stores/grid-projects").GridProject;
+  const G = await import("@/lib/stores/grid-projects");
+  const GR = await import("@/lib/stores/grid-riser");
+  const D = await import("@/lib/design/designators");
+  const DS = await import("@/db/doc-store");
+  const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+  const { UNASSIGNED_KEY } = await import("@/lib/design/grid-riser-doc");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { registerFixture } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = DEFAULT_OPTION_ID;
+  // Allowances resolve with no catalog and carry their row's scope: L… and A….
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+  const NOPART = "TEST-320-NOPART";
+
+  const gp = await G.createProject({ name: "#320 designators project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#320 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const sheetId = sh.id;
+  const proj = async () => (await G.getProject(gp.id))!;
+  const des = async (id: string) => (await proj()).placements.find((pl) => pl.id === id)?.designator;
+  const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+
+  const a1 = await place(LIGHT, 0.1, 0.1);
+  const a2 = await place(LIGHT, 0.1, 0.2);
+  const g1 = await place(NOPART, 0.1, 0.3);
+  ok(a1.designator === "L-1" && a2.designator === "L-2" && g1.designator === "G-1", "#320 addPlacement numbers per code: L-1, L-2; an unknown part uses the general letter G-1");
+  const many = (await G.addPlacements(gp.id, { sheetId, page: 1, optionId: opt, by, items: [{ x: 0.2, y: 0.4, partId: LIGHT, qty: 24 }, { x: 0.2, y: 0.5, partId: AUDIO }] }))!;
+  const lot = many.placements.at(-2)!;
+  const aud = many.placements.at(-1)!;
+  ok(lot.designator === "L-3" && aud.designator === "A-1", "#320 addPlacements: a lot of 24 takes L-3 (its block is L-3–26); another code starts at 1");
+  const a3 = await place(LIGHT, 0.1, 0.6);
+  ok(a3.designator === "L-27", "#320 the next device continues after the lot's block");
+  const cur = (await G.addCurtainPlacement(gp.id, { sheetId, page: 1, x: 0.3, y: 0.3, curtain: { type: "Draw", name: "Main", widthFt: 20, heightFt: 10, fullnessPct: 50, fabricSku: "TEST-320-FAB" }, optionId: opt, by }))!.placements.at(-1)!;
+  ok(cur.designator === undefined, "#320 a curtain never gets a designator");
+
+  await G.removePlacements(gp.id, [a2.id]);
+  const a4 = await place(LIGHT, 0.1, 0.7);
+  ok(a4.designator === "L-2", "#320 a delete leaves a gap; the next device takes the lowest free number");
+  const pasted = await G.pastePlacements(gp.id, { sheetId, page: 1, optionId: opt, by, items: [{ srcId: a1.id, x: 0.3, y: 0.8, partId: LIGHT }], routeIds: [] });
+  const pz = pasted.ok ? pasted.value.placements[0] : null;
+  ok(!!pz && pz.designator === "L-28" && (await des(pz.id)) === "L-28", "#320 paste gets a fresh number (the copy never carries one) — in the stored doc and the returned record");
+  const rm = await G.removePlacements(gp.id, [a3.id]);
+  const back = rm.ok ? await G.restoreItems(gp.id, rm.value) : null;
+  ok(!!back?.ok && (await des(a3.id)) === "L-27", "#320 undo of a delete restores the device with its designator");
+
+  // Replace part: re-code only a number issued in the old type's code.
+  const sw = await G.setPlacementsPart(gp.id, [{ id: a1.id, partId: AUDIO }]);
+  ok(sw.ok && (await des(a1.id)) === "A-2" && sw.value[0].designator === "L-1", "#320 Replace part re-issues L-1 in the new code (A-2); previous carries L-1");
+  const hand = await G.setPlacementsDesignator(gp.id, [{ id: a4.id, designator: "  FOH-1 " }]);
+  const swHand = await G.setPlacementsPart(gp.id, [{ id: a4.id, partId: AUDIO }]);
+  ok(hand.ok && hand.value[0].designator === "L-2" && swHand.ok && (await des(a4.id)) === "FOH-1", "#320 a hand-renamed designator is kept through Replace part");
+  const undoSw = sw.ok ? await G.setPlacementsPart(gp.id, sw.value) : null;
+  ok(!!undoSw?.ok && (await des(a1.id)) === "L-1" && (await proj()).placements.find((pl) => pl.id === a1.id)!.partId === LIGHT, "#320 undo of Replace part puts the old designator back exactly");
+
+  // Hand edits
+  const re = await G.setPlacementsDesignator(gp.id, [{ id: g1.id, designator: "" }]);
+  ok(re.ok && (await des(g1.id)) === "G-1", "#320 an empty designator re-issues the next free number");
+  const curRefused = await G.setPlacementsDesignator(gp.id, [{ id: cur.id, designator: "X-1" }]);
+  ok(!curRefused.ok && (await des(cur.id)) === undefined, "#320 a curtain's designator can't be set");
+  const dupSet = await G.setPlacementsDesignator(gp.id, [{ id: a3.id, designator: "L-5" }]);
+  const own = (await proj()).placements.filter((pl) => pl.optionId === opt);
+  ok(dupSet.ok && D.duplicates(own).has(a3.id) && D.duplicates(own).has(lot.id), "#320 a hand-typed duplicate is allowed and flagged (L-5 sits inside the lot's L-3–26)");
+
+  // Renumber all: L closes up in reading order; G, A and custom stay.
+  const rn = await G.renumberDesignators(gp.id, opt, { all: true });
+  ok(rn.ok && (await des(a1.id)) === "L-1" && (await des(lot.id)) === "L-2" && (await des(a3.id)) === "L-26" && (await des(pz!.id)) === "L-27" &&
+     (await des(g1.id)) === "G-1" && (await des(aud.id)) === "A-1" && (await des(a4.id)) === "FOH-1" && rn.value.next.length === 3 && rn.value.previous.length === 3,
+    "#320 renumber all: L-1, lot L-2–25, L-26, L-27; G, A and custom unchanged; previous/next hold only the changes");
+  const rnGone = await G.renumberDesignators(gp.id, "opt-gone", { all: true });
+  ok(!rnGone.ok, "#320 renumber refuses an option that no longer exists");
+
+  // Riser "+ Device"
+  const rd = await GR.addDevicesToNode(gp.id, { optionId: opt, nodeKey: UNASSIGNED_KEY, partId: AUDIO, qty: 2, by });
+  const riserNew = (await proj()).placements.slice(-2).map((pl) => pl.designator).sort().join(",");
+  ok(rd.ok && riserNew === "A-2,A-3", "#320 the riser's + Device numbers what it adds");
+
+  // Option copy keeps designators (per-option numbering).
+  const alt = await G.addOption(gp.id, { name: "Alt", copyFromOptionId: opt, by });
+  const p2 = await proj();
+  const ds = (o: string) => p2.placements.filter((pl) => pl.optionId === o).map((pl) => pl.designator ?? "").sort().join(",");
+  ok(alt.ok && ds(alt.option.id) === ds(opt), "#320 a copied option keeps the same designators");
+
+  // ensureDesignators: numbers a pre-#320 design once; then a no-op with no write.
+  await DS.patchDoc<G320Project>("grid_projects", gp.id, (p) => {
+    for (const pl of p.placements) delete pl.designator;
+  });
+  const stripped = await proj();
+  const ensured = await G.ensureDesignators(stripped);
+  const optSlice = (p: G320Project, o: string) => p.placements.filter((pl) => pl.optionId === o);
+  ok(ensured !== stripped && ensured.placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)) &&
+     D.duplicates(optSlice(ensured, opt)).size === 0 && alt.ok && D.duplicates(optSlice(ensured, alt.option.id)).size === 0 && ensured.updatedAt === stripped.updatedAt,
+    "#320 ensureDesignators numbers every device of every option, no duplicates, without bumping updatedAt");
+  const reread = await proj();
+  ok((await G.ensureDesignators(reread)) === reread, "#320 ensureDesignators is a no-op (same object, no write) when nothing is missing");
+
+  // Two adds at once never hand out the same number among what landed.
+  await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
+  ok(D.duplicates(optSlice(await proj(), opt)).size === 0, "#320 concurrent adds: numbers come from the doc each patch read — no duplicate among the survivors");
 }

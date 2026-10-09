@@ -34,6 +34,17 @@ import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-draw
 import { cleanSymbolDisplay, type SymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { cleanIntakeNotices, MAX_INTAKE_NOTICES, type GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import { blockedPages, remapSheetRefs, type SheetAdjust } from "@/lib/design/sheet-adjust";
+import {
+  cleanDesignator,
+  keepsDesignatorOnSwap,
+  needsDesignators,
+  readingCtxOf,
+  renumber,
+  stampDesignators,
+  stampNewDesignators,
+  type RenumberTarget,
+} from "@/lib/design/designators";
+import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import {
@@ -114,6 +125,14 @@ export type GridPlacement = {
    * Absent on every pre-#48 placement, read as "no category".
    */
   category?: string;
+  /**
+   * #320: the device's designator — its type code + number (`MIC-1`) or
+   * custom text. Stored trimmed, ≤ 24 chars; a lot stores its FIRST number
+   * (`LX-1`, shown `LX-1–24`). Assigned inside every create path's patch
+   * (lib/design/designators); absent = not yet assigned (a pre-#320 device —
+   * ensureDesignators numbers it). Never on a curtain.
+   */
+  designator?: string;
   /**
    * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
    * is a priced line, not a catalog unit: it is sized and specced here and
@@ -767,13 +786,16 @@ export async function addPlacement(
   projectId: string,
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
 ): Promise<GridProject | null> {
+  // #320: resolved before the patch; the number is handed out inside it.
+  const { codeOf } = await designatorContext([input.partId]);
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
+    const id = rid("gp-");
     p.placements = [
       ...(p.placements || []),
       {
-        id: rid("gp-"),
+        id,
         sheetId: input.sheetId,
         page: input.page,
         x: input.x,
@@ -784,6 +806,7 @@ export async function addPlacement(
         at: Date.now(),
       },
     ];
+    stampNewDesignators(p, new Set([id]), codeOf);
     p.updatedAt = Date.now();
   });
   return refused ? null : updated;
@@ -808,6 +831,7 @@ export async function addPlacements(
   }
 ): Promise<GridProject | null> {
   if (!input.items.length) return getProject(projectId);
+  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
   const at = Date.now();
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -828,6 +852,7 @@ export async function addPlacements(
       at,
     }));
     p.placements = [...(p.placements || []), ...added];
+    stampNewDesignators(p, new Set(added.map((pl) => pl.id)), codeOf);
     p.updatedAt = at;
   });
   return refused ? null : updated;
@@ -856,6 +881,7 @@ export async function replaceAutoPlacements(
   projectId: string,
   input: { optionId: string; scopes: SysKey[]; sheetId: string; page: number; items: AutoPlacementInput[]; by: string }
 ): Promise<{ removed: number; added: number } | null> {
+  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
   const at = Date.now();
   const scopes = new Set(input.scopes);
   let refused = false;
@@ -896,6 +922,8 @@ export async function replaceAutoPlacements(
       ];
     });
     p.placements = [...kept, ...fresh];
+    // #320: the removed Auto devices' numbers are free again, so a re-fill renumbers its scope.
+    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
     removed = gone.size;
     added = fresh.length;
@@ -1228,18 +1256,30 @@ const CURTAIN_PART_REFUSAL = "Curtains can't change part — edit the curtain in
  */
 export async function setPlacementsPart(
   projectId: string,
-  items: { id: string; partId: string; qty?: number }[]
-): Promise<BatchResult<{ id: string; partId: string; qty?: number }[]>> {
+  items: { id: string; partId: string; qty?: number; designator?: string }[]
+): Promise<BatchResult<{ id: string; partId: string; qty?: number; designator?: string }[]>> {
   const next = byId(items);
+  // #320: codes for the old AND the new parts — a number issued in the old
+  // type's code is re-issued in the new one (keepsDesignatorOnSwap).
+  const before = await getProject(projectId);
+  const oldParts = (before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId);
+  const { codeOf } = await designatorContext([...oldParts, ...items.map((it) => it.partId)]);
   return batchEdit(
     projectId,
     items.map((it) => it.id),
     (p) => {
-      const previous: { id: string; partId: string; qty?: number }[] = [];
+      ensureOptions(p);
+      const previous: { id: string; partId: string; qty?: number; designator?: string }[] = [];
+      const reissue = new Set<string>();
       p.placements = (p.placements || []).map((pl) => {
         const it = next.get(pl.id);
         if (!it) return pl;
-        previous.push({ id: pl.id, partId: pl.partId, ...(pl.qty !== undefined ? { qty: pl.qty } : {}) });
+        previous.push({
+          id: pl.id,
+          partId: pl.partId,
+          ...(pl.qty !== undefined ? { qty: pl.qty } : {}),
+          ...(pl.designator !== undefined ? { designator: pl.designator } : {}),
+        });
         if (it.partId === pl.partId) return pl;
         const swapped: GridPlacement = withoutAuto({ ...pl, partId: it.partId });
         // An item carrying qty (undo of a swap) restores its lot through the
@@ -1247,8 +1287,17 @@ export async function setPlacementsPart(
         const { qty } = lotAndTag(it.qty, undefined);
         if (qty !== undefined) swapped.qty = qty;
         else delete swapped.qty;
+        // #320: an undo carries the old designator back exactly; otherwise
+        // keepsDesignatorOnSwap decides.
+        const carried = it.designator !== undefined ? cleanDesignator(it.designator) : null;
+        if (carried) swapped.designator = carried;
+        else if (!keepsDesignatorOnSwap(pl.designator, codeOf(pl), codeOf(swapped))) {
+          delete swapped.designator;
+          reissue.add(pl.id);
+        }
         return swapped;
       });
+      stampNewDesignators(p, reissue, codeOf);
       return previous;
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_PART_REFUSAL : null)
@@ -1293,6 +1342,8 @@ export async function pastePlacements(
   if (!before) return { ok: false, error: "Design not found." };
   if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
   if (!sheetOnProject(before, input.sheetId)) return { ok: false, error: PASTE_SHEET_GONE };
+  // #320: a paste never carries a designator — every copy gets a fresh number.
+  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
 
   let refused = false;
   let sheetGone = false;
@@ -1364,9 +1415,11 @@ export async function pastePlacements(
       });
     }
     p.placements = [...(p.placements || []), ...pasted];
+    stampNewDesignators(p, new Set(pasted.map((pl) => pl.id)), codeOf);
+    const stamped = byId(p.placements);
     if (routes.length) p.routes = [...(p.routes || []), ...routes];
     p.updatedAt = at;
-    value = { placements: pasted, routes, skippedWires };
+    value = { placements: pasted.map((pl) => stamped.get(pl.id) ?? pl), routes, skippedWires };
   });
   if (!updated) return { ok: false, error: "Design not found." };
   if (sheetGone) return { ok: false, error: PASTE_SHEET_GONE };
@@ -1406,12 +1459,17 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   if (!before) return { ok: false, error: "Design not found." };
   const early = refusalFor(before);
   if (early) return { ok: false, error: early };
+  // #320: a restored device keeps its designator; one restored without
+  // (a bundle from before #320) is numbered like a new device.
+  const unnumbered = placements.filter((pl) => !pl.curtain && !cleanDesignator(pl.designator));
+  const codeOf = unnumbered.length ? (await designatorContext(unnumbered.map((pl) => pl.partId))).codeOf : null;
 
   let refusal = null as string | null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     refusal = refusalFor(p);
     if (refusal) return;
     p.placements = [...(p.placements || []), ...placements];
+    if (codeOf) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), codeOf);
     const first = defaultOptionId(p);
     const optionOf = new Map(p.placements.map((pl) => [pl.id, pl.optionId || first]));
     const removed = cleanRiserRemoved(bundle?.riser, new Set(ensureOptions(p).options.map((o) => o.id)));
@@ -1441,6 +1499,119 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   if (!updated) return { ok: false, error: "Design not found." };
   if (refusal) return { ok: false, error: refusal };
   return { ok: true, project: updated, value: { ids } };
+}
+
+/* ------------------------------ designators (#320) ------------------------------ */
+
+const CURTAIN_DESIGNATOR_REFUSAL = "Curtains keep their names — they don't take a designator.";
+
+/**
+ * Set many devices' designators in one all-or-nothing write (batchEdit). Each
+ * value goes through cleanDesignator; an empty one re-issues the next free
+ * number for the device's code. A hand edit clears the #211 auto tag (a
+ * re-fill then keeps the device) unless `keepAuto` — Renumber's undo/redo.
+ * Curtains are refused (the whole batch). Returns the previous values ("" when none).
+ */
+export async function setPlacementsDesignator(
+  projectId: string,
+  items: { id: string; designator: string }[],
+  opts: { keepAuto?: boolean } = {}
+): Promise<BatchResult<{ id: string; designator: string }[]>> {
+  const next = byId(items);
+  const needCodes = items.some((it) => !cleanDesignator(it.designator));
+  let codeOf: ((pl: { partId: string; category?: string }) => string) | null = null;
+  if (needCodes) {
+    const before = await getProject(projectId);
+    codeOf = (await designatorContext((before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId))).codeOf;
+  }
+  return batchEdit(
+    projectId,
+    items.map((it) => it.id),
+    (p) => {
+      ensureOptions(p);
+      const previous: { id: string; designator: string }[] = [];
+      const reissue = new Set<string>();
+      p.placements = (p.placements || []).map((pl) => {
+        const it = next.get(pl.id);
+        if (!it) return pl;
+        previous.push({ id: pl.id, designator: pl.designator || "" });
+        const text = cleanDesignator(it.designator);
+        if (text && text === pl.designator) return pl;
+        const edited: GridPlacement = opts.keepAuto ? { ...pl } : withoutAuto({ ...pl });
+        if (text) edited.designator = text;
+        else {
+          delete edited.designator;
+          reissue.add(pl.id);
+        }
+        return edited;
+      });
+      if (codeOf) stampNewDesignators(p, reissue, codeOf);
+      return previous;
+    },
+    (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_DESIGNATOR_REFUSAL : null)
+  );
+}
+
+/**
+ * Renumber… (#320): close the gaps of one option — every code, one code, or
+ * the given devices — in reading order, in ONE patch (designators.renumber).
+ * Leaves the auto tag alone (bookkeeping, not a hand edit). Returns the
+ * changed devices' previous and new values, for one undo step.
+ */
+export async function renumberDesignators(
+  projectId: string,
+  optionId: string,
+  target: RenumberTarget
+): Promise<BatchResult<{ previous: { id: string; designator: string }[]; next: { id: string; designator: string }[] }>> {
+  let gone = false as boolean;
+  const previous: { id: string; designator: string }[] = [];
+  const next: { id: string; designator: string }[] = [];
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, optionId)) {
+      gone = true;
+      return;
+    }
+    const own = (p.placements || []).filter((pl) => pl.optionId === optionId);
+    const changes = renumber(own, readingCtxOf(p), target);
+    if (!changes.size) return;
+    p.placements = (p.placements || []).map((pl) => {
+      const d = changes.get(pl.id);
+      if (d === undefined) return pl;
+      previous.push({ id: pl.id, designator: pl.designator || "" });
+      next.push({ id: pl.id, designator: d });
+      return { ...pl, designator: d };
+    });
+    p.updatedAt = Date.now();
+  });
+  if (!updated) return { ok: false, error: "Design not found." };
+  if (gone) return { ok: false, error: PASTE_OPTION_GONE };
+  return { ok: true, project: updated, value: { previous, next } };
+}
+
+/**
+ * Existing designs (#320): number every device that has no designator yet,
+ * every option on its own, and strip any a curtain carries — in ONE patch.
+ * A no-op (no read, no write) when nothing is missing, so the editor page
+ * calls it on every load. Doesn't bump `updatedAt`: numbering is
+ * bookkeeping, not an edit. Returns the numbered project (or the one given).
+ */
+export async function ensureDesignators(project: GridProject, preload?: DesignatorPreload): Promise<GridProject> {
+  if (!needsDesignators(project.placements || [])) return project;
+  const { codeOf } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
+  let wrote = false as boolean;
+  const updated = await patchDoc<GridProject>("grid_projects", project.id, (p) => {
+    if (!needsDesignators(p.placements || [])) return;
+    const doc = ensureOptions(p);
+    doc.placements = (doc.placements || []).map((pl) => {
+      if (!pl.curtain || pl.designator === undefined) return pl;
+      const stripped = { ...pl };
+      delete stripped.designator;
+      return stripped;
+    });
+    for (const o of doc.options) stampDesignators(doc, o.id, codeOf);
+    wrote = true;
+  });
+  return updated && wrote ? ensureOptions(updated) : project;
 }
 
 /** Set (or replace) the scale for one page of one sheet. null = the project
