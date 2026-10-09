@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { newPlanUploadId, planFileProblem } from "@/lib/design/grid-plan-upload";
-import { GRID_SHEET_DIRECT_MAX_LABEL } from "@/lib/design/grid-sheet-upload";
+import { GRID_SHEET_ACCEPT, GRID_SHEET_DIRECT_MAX_LABEL } from "@/lib/design/grid-sheet-upload";
 import { uploadGridSheet } from "../sheet-upload";
 import { GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { dismissGridNoticeAction, retryGridNoticeAction } from "../actions";
@@ -97,7 +97,7 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
       <input
         ref={input}
         type="file"
-        accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.pdf,.png,.jpg,.jpeg,.webp,.gif"
+        accept={GRID_SHEET_ACCEPT}
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];

@@ -11527,6 +11527,7 @@ seeded()
   .then(() => sheetUpload318Checks())
   .then(() => sheetAdjust318UiPins())
   .then(() => sheetAdjust318DialogGuardPins())
+  .then(() => sheetAdjust318StaleSheetChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -24536,7 +24537,10 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   ok(!!onlyLine && onlyLine.qty === 2 && onlyLine.price === unit && !onlyLine.allowance && onlyLine.desc === "TEST230 speaker bracket",
     "#230 quote: the accessory is a real catalog line on the spec, never an allowance");
 
-  await GP.addPlacement(gp.id, { sheetId: "TEST230:sheet", page: 1, x: 0.5, y: 0.5, partId: PART, optionId: base, by: "Test Harness" });
+  // #318: a placement needs a sheet the design lists.
+  const sheet230 = await GP.addSheet(gp.id, { name: "TEST230 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness" });
+  if (sheet230) registerFixture("grid_sheets", sheet230.id);
+  await GP.addPlacement(gp.id, { sheetId: sheet230?.id ?? "", page: 1, x: 0.5, y: 0.5, partId: PART, optionId: base, by: "Test Harness" });
   const both = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const same = both.ok ? both.build.spec.lines.filter((l) => l.sku === PART) : [];
   ok(same.length === 2 && same[0].price === unit && same[1].price === unit && same.map((l) => l.qty).sort().join() === "1,2",
@@ -50389,7 +50393,10 @@ async function gridBatchAsyncChecks299(): Promise<void> {
   const gp = await GP.createProject({ name: "TEST299 batch grid project", customer: "Test Customer 299", customerId: null, by: "Test Harness" });
   registerFixture("grid_projects", gp.id);
   const optionId = (await GP.getProject(gp.id))!.options![0].id;
-  const sheetId = "gs-fixture299";
+  // #318: a placement needs a sheet the design lists.
+  const sheet299 = await GP.addSheet(gp.id, { name: "TEST299 batch sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness" });
+  if (sheet299) registerFixture("grid_sheets", sheet299.id);
+  const sheetId = sheet299?.id ?? "";
   const add = async (x: number, y: number) => (await GP.addPlacement(gp.id, { sheetId, page: 1, x, y, partId: fixtureId(299, "part"), optionId, by: "t" }))!;
   await add(0.1, 0.1); await add(0.2, 0.2); await add(0.3, 0.3);
   let p = (await GP.getProject(gp.id))!;
@@ -53958,7 +53965,9 @@ async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
   const gp = await GP.createProject({ name: "#304 live writers grid", customer: "Spec fixture", customerId: null, by: "Test" });
   registerFixture("grid_projects", gp.id);
   const opt = (await GP.getProject(gp.id))!.options![0].id;
-  await GP.addPlacement(gp.id, { sheetId: "sheet-304", page: 1, x: 0.5, y: 0.5, partId: OLD, optionId: opt, by: "Test" });
+  const sheet304 = await GP.addSheet(gp.id, { name: "#304 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test" }); // #318: a listed sheet
+  if (sheet304) registerFixture("grid_sheets", sheet304.id);
+  await GP.addPlacement(gp.id, { sheetId: sheet304?.id ?? "", page: 1, x: 0.5, y: 0.5, partId: OLD, optionId: opt, by: "Test" });
   const gRev = (await GP.addRevision(gp.id, { by: "Test", note: "before the rename" }))!;
   const gSnap = JSON.stringify((await GP.getProject(gp.id))!.revisions!.find((r) => r.rev === gRev.rev));
 
@@ -59317,7 +59326,7 @@ import {
   ok(ed314.includes("<IntakeNotices ed={ed} />") && page314.includes("intakeNotices={cleanIntakeNotices(project.intake?.notices)}") && page314.includes("focusSheetId={project.intake?.planSheetId") &&
      banner.includes("retryGridNoticeAction(project.id, n.id)") && banner.includes("dismissGridNoticeAction(project.id, n.id)") && banner.includes("uploadGridSheet(project.id, file, { blobUploads, planUploadId: newPlanUploadId() })") && !banner.includes("blobPath"),
     "#314 review: the editor shows the intake's notices as a banner — Retry (copy on the server; upload = choose the file again) and Dismiss");
-  ok(hook314.includes("useState((focusHere ? focusSheetId : sheets[0]?.id) || \"\")") && /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);\s*setActiveSheetId\(focusSheetId!\);/.test(hook314),
+  ok(hook314.includes("useState((focusHere ? focusSheetId : sheets[0]?.id) || \"\")") && /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);[\s\S]{0,400}?setActiveSheetId\(focusSheetId!\);/.test(hook314),
     "#314 review: the editor opens on the intake's plan view sheet — at mount, and when it lands after mount (adjusted during render)");
   const route = rd("src/app/api/grid-sheets/upload/route.ts");
   ok(route.includes("if (first && !isPlanUploadId(uploadId))") && route.includes("withPlanLock(projectId, async () => {") && route.indexOf("attachedPlanSheet(now.intake") < route.indexOf("storeSheet(projectId, name, mime, bytes, user.name, true)") &&
@@ -59423,7 +59432,9 @@ async function estimateGrid314AsyncChecks(): Promise<void> {
   const afterRestore = (await G.getProject(project.id))!;
   ok(restored.ok && afterRestore.options!.find((o) => o.id === baseOpt)?.estimateOwned === true && afterRestore.options!.find((o) => o.id === baseOpt)?.quoteId === QID,
     "#314 (DB): a revision restore keeps the current estimate link (bookkeeping, like quoteId)");
-  await G.addPlacements(project.id, { sheetId: "gs-x", page: 1, optionId: baseOpt, items: [{ x: 0.1, y: 0.1, partId: NEW, qty: 2 }, { x: 0.2, y: 0.2, partId: OLD }], by: "Test" });
+  const sheet314 = await G.addSheet(project.id, { name: "#314 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test" }); // #318: a listed sheet
+  if (sheet314) registerFixture("grid_sheets", sheet314.id);
+  await G.addPlacements(project.id, { sheetId: sheet314?.id ?? "", page: 1, optionId: baseOpt, items: [{ x: 0.1, y: 0.1, partId: NEW, qty: 2 }, { x: 0.2, y: 0.2, partId: OLD }], by: "Test" });
   const p2 = (await G.getProject(project.id))!;
   const tray = await T.loadEstimateTray(QID, p2.placements.filter((p) => p.optionId === baseOpt).map((p) => p.partId));
   const { trayRows } = await import("@/lib/design/estimate-tray");
@@ -59611,6 +59622,7 @@ async function sheetAdjust318PureChecks(): Promise<void> {
 /* ---------------- #318: Grid sheet crop + rotate — byte transforms ---------------- */
 async function sheetAdjust318BytesChecks(): Promise<void> {
   const B = await import("@/lib/design/sheet-adjust-bytes");
+  const A = await import("@/lib/design/sheet-adjust");
   const { PDFDocument, degrees } = await import("pdf-lib");
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const sharp = (await import("sharp")).default;
@@ -59710,10 +59722,13 @@ async function sheetAdjust318BytesChecks(): Promise<void> {
   const closeTo = (c: number[], want: number[]) => c.every((v, k) => Math.abs(v - want[k]) < 40);
   ok(rq.ok && pq?.info.width === 40 && pq?.info.height === 20 && closeTo(corner(1, 1), [255, 255, 255]) && closeTo(corner(38, 1), [0, 0, 255]) && closeTo(corner(38, 18), [255, 0, 0]) && closeTo(corner(1, 18), [0, 255, 0]),
     "#318 EXIF orientation 6 + a 90 turn: 40 x 20 and the corners land where the pixels went (white, blue / green, red)");
-  // An image over SHRINK_MAX_INPUT_PIXELS is "too-big", not "unreadable" (a solid colour PNG is small to build and to hold).
+  // An image over SHRINK_MAX_INPUT_PIXELS is "too-many-pixels" — not "unreadable", and not the no-Blob storage "too-big" (a solid colour PNG is small to build and to hold).
   const bigPng = await sharp({ create: { width: 10001, height: 10001, channels: 3, background: "#ffffff" } }).png().toBuffer();
   const rbig = await B.adjustSheetBytes(bigPng, { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
-  ok(!rbig.ok && rbig.reason === "too-big", "#318 an image over the pixel cap is too-big");
+  ok(!rbig.ok && rbig.reason === "too-many-pixels", "#318 an image over the pixel cap is too-many-pixels (not the storage too-big)");
+  ok(A.adjustRefusalText("too-many-pixels") === "That image has too many pixels to crop here — export it at a lower resolution and upload again." &&
+     !A.adjustRefusalText("too-many-pixels").includes("file storage") && A.adjustRefusalText("too-big").includes("file storage"),
+    "#318 the pixel cap has its own sentence — never \"without file storage\" when Blob is on");
 }
 
 /* ---------------- #318: Grid sheet crop + rotate — store + orchestrator ---------------- */
@@ -59829,7 +59844,7 @@ async function sheetAdjust318StoreChecks(): Promise<void> {
       "#318 replaceSheetWithAdjusted re-checks the gate on the doc it patches; a refusal soft-deletes the sheet it wrote");
     // Task 1 review minors: every refusal has wording (even with no page list), and the shared identity can't be corrupted.
     const AD = await import("@/lib/design/sheet-adjust");
-    const reasons: Array<import("@/lib/design/sheet-adjust").AdjustRefusal> = ["not-found", "no-such-sheet", "base-sheet", "in-use", "unsupported", "encrypted", "unreadable", "too-big", "failed"];
+    const reasons: Array<import("@/lib/design/sheet-adjust").AdjustRefusal> = ["not-found", "no-such-sheet", "base-sheet", "in-use", "unsupported", "encrypted", "unreadable", "too-big", "too-many-pixels", "failed"];
     ok(reasons.every((r) => AD.adjustRefusalText(r).length > 10) && !/Page\s{2}/.test(AD.adjustRefusalText("in-use", [])) && !AD.adjustRefusalText("in-use", []).includes("Page  "),
       "#318 every refusal reason has a sentence, and an in-use refusal with no page list doesn't print a blank page number");
     const idn = AD.pageAdjustOf({}, 1);
@@ -59924,6 +59939,20 @@ async function sheetUpload318Checks(): Promise<void> {
     "#318 commit: a retried plan-view upload returns the sheet that landed and deletes its own duplicate blob");
   const badId = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("b.pdf"), name: "b.pdf", position: "first", planUploadId: "x" }, by, deps(pdf, 10));
   ok(!badId.ok && badId.error === U.GRID_SHEET_UPLOAD_COPY.badUploadId, "#318 commit: a plan-view upload needs a valid upload id");
+  const nameless = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("nameless.pdf"), name: "  " }, by, deps(pdf, 10));
+  if (nameless.ok) registerFixture("grid_sheets", nameless.sheetId);
+  const named = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("file.pdf"), name: "file" }, by, deps(pdf, 10));
+  if (named.ok) registerFixture("grid_sheets", named.sheetId);
+  const namelessDoc = nameless.ok ? await DS.getDoc<import("@/lib/stores/grid-projects").GridSheet>("grid_sheets", nameless.sheetId) : null;
+  const namedDoc = named.ok ? await DS.getDoc<import("@/lib/stores/grid-projects").GridSheet>("grid_sheets", named.sheetId) : null;
+  ok(namelessDoc?.name === "Plan sheet" && namedDoc?.name === "file",
+    "#318 fix: a nameless upload is saved as \"Plan sheet\" (not displayFileName's \"file\"); a file really named \"file\" keeps its name");
+  const accept = U.GRID_SHEET_ACCEPT;
+  const pick = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(accept === "application/pdf,image/png,image/jpeg,image/webp,image/gif,.pdf,.png,.jpg,.jpeg,.webp,.gif" &&
+     ["src/app/(app)/design/grid/[id]/workspace/sheet-tabs.tsx", "src/app/(app)/design/grid/[id]/workspace/intake-notices.tsx", "src/app/(app)/design/grid/[id]/grid-intake.tsx"]
+       .every((f) => pick(f).includes("accept={GRID_SHEET_ACCEPT}") && !pick(f).includes('accept="application/pdf,image/*"')),
+    "#318 fix: the + tab, the notices banner and the intake pick the same five types (one GRID_SHEET_ACCEPT)");
 
   // Wiring pins.
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -59983,8 +60012,86 @@ async function sheetAdjust318DialogGuardPins(): Promise<void> {
   ok(dlg.includes("root.focus();") && dlg.includes('e.key === "Tab"') && dlg.includes("window.location.reload()") &&
      dlg.includes("setTimeout(() => setStuck(true), 15000)") && dlg.includes("setTimeout(() => router.refresh(), 6000)"),
     "#318 fix: focus stays in the dialog (re-focused when a control disables; Tab cycles) and a stuck Saving… becomes Reload after 15 s");
-  ok(hook.includes("if (from && from === focusSheetId) setFocusApplied(newSheetId);") &&
+  ok(!hook.includes("setFocusApplied(newSheetId)") &&
+     /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);[\s\S]{0,400}?if \(adjustSwap\?\.to !== focusSheetId\) \{\s*setActiveSheetId\(focusSheetId!\);\s*setPage\(1\);/.test(hook) &&
+     hook.indexOf("if (focusHere && focusSheetId !== focusApplied)") < hook.indexOf("if (adjustSwap && (sheets.some((s) => s.id === adjustSwap.to)") &&
      hook.includes("const locksBySheet = useMemo(") && hook.includes("allPagesLocked(locksBySheet.get(s.id) ?? {}, count)") &&
      /const openAdjust = useCallback\(\(sheetId: string, afterUpload = false\) => \{[\s\S]{0,120}setSelectedIds\(\[\]\);/.test(hook),
     "#318 fix: adjusting the intake plan view keeps its page; locks are scanned once per project change; opening clears the selection");
+}
+
+/* ---------------- #318 final fix: writes to a retired sheet id are refused ---------------- */
+async function sheetAdjust318StaleSheetChecks(): Promise<void> {
+  // In-database sheets only (data-URLs): this suite never writes to Blob.
+  const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  try {
+    const G = await import("@/lib/stores/grid-projects");
+    const S = await import("@/lib/design/sheet-adjust-server");
+    const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+    const { registerFixture } = await import("./test-fixtures");
+    const sharp = (await import("sharp")).default;
+    const J = (v: unknown) => JSON.stringify(v);
+    const by = "Test Harness";
+    const png = await sharp({ create: { width: 40, height: 20, channels: 3, background: "#ffffff" } }).png().toBuffer();
+    const gp = await G.createProject({ name: "#318 stale sheet project", customer: "Spec fixture", customerId: null, by });
+    registerFixture("grid_projects", gp.id);
+    const a = (await G.addSheet(gp.id, { name: "#318 stale A", mime: "image/png", dataUrl: `data:image/png;base64,${png.toString("base64")}`, by }))!;
+    registerFixture("grid_sheets", a.id);
+    const swap = await S.adjustSheet(gp.id, a.id, { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } }, by);
+    if (swap.ok) registerFixture("grid_sheets", swap.sheetId);
+    const a2 = swap.ok ? swap.sheetId : "";
+    const listed = (await G.getProject(gp.id))!;
+    ok(swap.ok && a2 !== a.id && J(listed.sheetIds) === J([a2]), "#318 stale setup: Adjust sheet swapped A for A'");
+
+    const square = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }];
+    const line = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }];
+    const snap = (p: import("@/lib/stores/grid-projects").GridProject) =>
+      J({ placements: p.placements, spaces: p.spaces, routes: p.routes, calibrations: p.calibrations, sheetIds: p.sheetIds, updatedAt: p.updatedAt });
+    const before = snap(listed);
+    const curtain = { name: "Main", widthFt: 20, heightFt: 10, fullness: 0.5, fabricSku: "TEST-FAB" } as unknown as import("@/lib/design/grid-bom").GridCurtain;
+    const stale = {
+      addPlacement: await G.addPlacement(gp.id, { sheetId: a.id, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by }),
+      addPlacements: await G.addPlacements(gp.id, { sheetId: a.id, page: 1, optionId: DEFAULT_OPTION_ID, by, items: [{ x: 0.2, y: 0.2, partId: "TEST-PART" }] }),
+      addCurtainPlacement: await G.addCurtainPlacement(gp.id, { sheetId: a.id, page: 1, x: 0.3, y: 0.3, curtain, optionId: DEFAULT_OPTION_ID, by }),
+      replaceAutoPlacements: await G.replaceAutoPlacements(gp.id, { optionId: DEFAULT_OPTION_ID, scopes: ["lighting"], sheetId: a.id, page: 1, items: [], by }),
+      addRoute: await G.addRoute(gp.id, { sheetId: a.id, page: 1, partId: "TEST-WIRE", points: line, aspect: 1, optionId: DEFAULT_OPTION_ID, by }),
+      addSpace: await G.addSpace(gp.id, { sheetId: a.id, page: 1, name: "Stage", points: square, by }),
+      setSheetCalibration: await G.setSheetCalibration(gp.id, { docId: a.id, page: 1, scale: 100, unit: "ft", refLength: 10, by, at: 1 }),
+    };
+    const paste = await G.pastePlacements(gp.id, { sheetId: a.id, page: 1, optionId: DEFAULT_OPTION_ID, by, items: [{ srcId: "gp-x", x: 0.5, y: 0.5, partId: "TEST-PART" }], routeIds: [] });
+    const refusedAll = Object.entries(stale).filter(([, v]) => v !== null).map(([k]) => k);
+    ok(refusedAll.length === 0, `#318 a write naming the retired sheet A is refused (null) by every store writer${refusedAll.length ? ` — accepted: ${refusedAll.join(", ")}` : ""}`);
+    ok(!paste.ok && paste.error === G.SHEET_GONE, "#318 paste onto the retired sheet answers SHEET_GONE");
+    ok(snap((await G.getProject(gp.id))!) === before, "#318 the refused writes leave the project unchanged (no record, no updatedAt bump)");
+
+    const live = {
+      addPlacement: await G.addPlacement(gp.id, { sheetId: a2, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by }),
+      addRoute: await G.addRoute(gp.id, { sheetId: a2, page: 1, partId: "TEST-WIRE", points: line, aspect: 1, optionId: DEFAULT_OPTION_ID, by }),
+      addSpace: await G.addSpace(gp.id, { sheetId: a2, page: 1, name: "Stage", points: square, by }),
+      setSheetCalibration: await G.setSheetCalibration(gp.id, { docId: a2, page: 1, scale: 100, unit: "ft", refLength: 10, by, at: 1 }),
+    };
+    const after = (await G.getProject(gp.id))!;
+    ok(Object.values(live).every((v) => v !== null) && after.placements.length === 1 && after.placements[0].sheetId === a2 &&
+       after.routes?.length === 1 && after.routes[0].sheetId === a2 && after.spaces?.length === 1 && after.spaces[0].sheetId === a2 &&
+       after.calibrations.length === 1 && after.calibrations[0].docId === a2,
+      "#318 the same writes on the new sheet A' succeed");
+    ok(G.sheetOnProject(after, a2) && !G.sheetOnProject(after, a.id) && !G.sheetOnProject(null, a2), "#318 sheetOnProject: listed ids only");
+
+    // The editor's actions say why (one sentence) instead of a silent no-op; the riser reuses addRouteAction/addSpaceAction.
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+    const body = (name: string) => { const i = src.indexOf(`export async function ${name}(`); if (i < 0) return ""; const j = src.indexOf("export async function", i + 10); return src.slice(i, j < 0 ? undefined : j); };
+    const pre = "if (!sheetOnProject(project, input.sheetId)) return { ok: false, error: SHEET_GONE };";
+    ok(body("placeDeviceAction").includes(pre) && body("placeCurtainAction").includes(pre) &&
+       body("addRouteAction").includes(pre) && body("addRouteAction").indexOf(pre) < body("addRouteAction").indexOf("findCalibration(") &&
+       ["placeDeviceAction", "placeCurtainAction", "calibrateAction", "addSpaceAction", "addRouteAction"].every((n) => body(n).includes("await sheetGoneOr(projectId, input.sheetId,")),
+      "#318 actions: place / curtain / route pre-check the sheet; every stale-sheet refusal (incl. a racing one) reads SHEET_GONE");
+    const riser = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx"), "utf8");
+    ok(riser.includes('import { addRouteAction, addSpaceAction, removeRouteAction } from "../actions";'), "#318 the riser page writes routes/spaces through the guarded actions");
+    const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
+    ok(fill.includes("!sheetOnProject(now, sheetId) ? SHEET_GONE"), "#318 Auto fill names a racing sheet swap instead of 'option removed'");
+  } finally {
+    if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+  }
 }

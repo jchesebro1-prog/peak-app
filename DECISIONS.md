@@ -10153,7 +10153,12 @@ PNG; GIF → PNG). Allowed only while a changed page is empty (no device, space,
 before and again inside the one patch that puts the new id at the old one's position and moves every reference
 (placements, spaces, routes, calibrations, the intake's plan view, drawing-set keys). Never on the generated base sheet.
 The old doc stays (revisions may name it); restoring a revision cut before an adjustment re-adds the old sheet beside
-the new one — accepted, its content lands in its own frame. "Reset" points the new sheet at the root's own file (no new
+the new one — accepted, its content lands in its own frame. That re-add happens only when the restored placements,
+spaces or routes reference the old sheet, so a page that had only a calibration keeps that calibration in the new
+sheet's history but not on the restored old sheet. Because every Done retires a sheet id, every store writer that
+records a new device, curtain, Auto-fill lot, space, wire or scale on a client-named sheet refuses an id no longer in
+`sheetIds` inside its patch (the paste rule), and the editor's actions answer "That sheet is no longer on this design —
+reload and try again." — so a stale tab or the riser page can't price an invisible device onto the old sheet. "Reset" points the new sheet at the root's own file (no new
 bytes; the root id itself is never put back in the list). Without Blob, an adjusted file is stored in-database up to
 6 MB.
 

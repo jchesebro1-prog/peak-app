@@ -469,8 +469,14 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [page, setPage] = useState(1);
   if (focusHere && focusSheetId !== focusApplied) {
     setFocusApplied(focusSheetId);
-    setActiveSheetId(focusSheetId!);
-    setPage(1);
+    // #318: the focus sheet (intake.planSheetId) is the one Adjust sheet just
+    // replaced — the server remapped it to the new id. finishAdjust already
+    // opened that sheet on the page in view; adopting it must not jump to
+    // page 1. Runs before the swap-clear below, so adjustSwap is still set.
+    if (adjustSwap?.to !== focusSheetId) {
+      setActiveSheetId(focusSheetId!);
+      setPage(1);
+    }
   }
   // #318: Adjust sheet (crop + rotate). Opened from the tab's ⋯ menu, right
   // after an upload (the + tab, the notice banner's re-upload), or by the
@@ -2073,9 +2079,11 @@ function useGridEditorImpl(props: GridEditorProps) {
       const from = adjusting?.sheetId ?? null;
       if (from) setAdjustSwap({ from, to: newSheetId });
       else setAdjusting(null);
-      // The server remaps intake.planSheetId too: the refreshed focus sheet is
-      // the new id — already applied, so focus adoption doesn't jump to page 1.
-      if (from && from === focusSheetId) setFocusApplied(newSheetId);
+      // The server remaps intake.planSheetId too, so the refreshed focus
+      // sheet is the new id. focusApplied is left alone here (setting it
+      // while the prop is still the old id would flip back to the old sheet,
+      // page 1): the render-time adoption sees adjustSwap.to === the new
+      // focus id and only records it — the page in view is kept.
       if (from !== sheet?.id) setPage(1);
       setActiveSheetId(newSheetId);
       resetSheetState();
@@ -2085,7 +2093,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       // the undo stack's recorded bundles would restore onto the old one.
       onStructuralChange();
     },
-    [adjustTarget, adjusting, focusSheetId, sheet?.id, resetSheetState, noteAction, dropAdjustParam, onStructuralChange]
+    [adjustTarget, adjusting, sheet?.id, resetSheetState, noteAction, dropAdjustParam, onStructuralChange]
   );
 
   /** #318: the ⋯ menu's Crop & rotate… for one tab — never on the generated

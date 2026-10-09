@@ -1,6 +1,7 @@
 "use client";
 
 import { ConfirmButton } from "@/components/confirm-button";
+import { GRID_SHEET_ACCEPT } from "@/lib/design/grid-sheet-upload";
 import { removeSheetAction } from "../actions";
 import type { GridEditor } from "../use-grid-editor";
 import Menu from "./menu";
@@ -133,7 +134,7 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
       <input
         ref={fileRef}
         type="file"
-        accept="application/pdf,image/*"
+        accept={GRID_SHEET_ACCEPT}
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files?.[0];

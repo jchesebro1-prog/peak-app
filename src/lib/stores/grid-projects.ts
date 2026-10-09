@@ -348,6 +348,18 @@ function rid(prefix: string): string {
   return prefix + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** #318: the one sentence for a write aimed at a sheet the design no longer
+ *  lists — Adjust sheet retires the old id on every Done, so a stale tab (or
+ *  the riser page) can still post it. */
+export const SHEET_GONE = "That sheet is no longer on this design — reload and try again.";
+
+/** #318: whether `sheetId` is one of the design's live sheets. Every store
+ *  writer that stores a NEW record on a client-named sheet checks this INSIDE
+ *  its patch, so nothing can land invisible-but-priced on a retired sheet. */
+export function sheetOnProject(p: Pick<GridProject, "sheetIds"> | null | undefined, sheetId: string): boolean {
+  return !!p && (p.sheetIds || []).includes(sheetId);
+}
+
 /** All live projects, newest activity first. */
 export async function listProjects(): Promise<GridProject[]> {
   const list = await listDocs<GridProject>("grid_projects");
@@ -757,7 +769,7 @@ export async function addPlacement(
 ): Promise<GridProject | null> {
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    if (!hasOption(p, input.optionId)) { refused = true; return; }
+    if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
     p.placements = [
       ...(p.placements || []),
       {
@@ -799,7 +811,7 @@ export async function addPlacements(
   const at = Date.now();
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    if (!hasOption(p, input.optionId)) { refused = true; return; }
+    if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
     const added: GridPlacement[] = input.items.map((item) => ({
       id: rid("gp-"),
       sheetId: input.sheetId,
@@ -838,7 +850,7 @@ function lotAndTag(qty: unknown, auto: unknown): { qty?: number; auto?: AutoTag 
  * `scopes` is removed (its riser links go with it, as removePlacement does),
  * then `items` (only those whose auto.scope is in `scopes`) are added.
  * Hand-touched devices (auto cleared) and other options are never touched.
- * null = the project or the option is gone.
+ * null = the project or the option is gone, or (#318) the sheet is no longer listed.
  */
 export async function replaceAutoPlacements(
   projectId: string,
@@ -850,7 +862,7 @@ export async function replaceAutoPlacements(
   let removed = 0;
   let added = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    if (!hasOption(p, input.optionId)) {
+    if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) {
       refused = true;
       return;
     }
@@ -941,7 +953,7 @@ export async function addCurtainPlacement(
 ): Promise<GridProject | null> {
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    if (!hasOption(p, input.optionId)) { refused = true; return; }
+    if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
     p.placements = [
       ...(p.placements || []),
       {
@@ -1247,7 +1259,7 @@ export async function setPlacementsPart(
 
 /** OPTION_GONE's copy in the editor actions — the option a paste targets was removed. */
 const PASTE_OPTION_GONE = "That option was removed — refresh the page.";
-const PASTE_SHEET_GONE = "That sheet is no longer on this design — reload and try again.";
+const PASTE_SHEET_GONE = SHEET_GONE;
 const PASTE_NOTHING = "Nothing to paste.";
 const PASTE_TOO_MANY = "Paste 2,000 items or fewer.";
 const RESTORE_STALE = "Couldn't undo — the design changed.";
@@ -1280,7 +1292,7 @@ export async function pastePlacements(
   const before = await getProject(projectId);
   if (!before) return { ok: false, error: "Design not found." };
   if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
-  if (!(before.sheetIds || []).includes(input.sheetId)) return { ok: false, error: PASTE_SHEET_GONE };
+  if (!sheetOnProject(before, input.sheetId)) return { ok: false, error: PASTE_SHEET_GONE };
 
   let refused = false;
   let sheetGone = false;
@@ -1290,7 +1302,7 @@ export async function pastePlacements(
       refused = true;
       return;
     }
-    if (!(p.sheetIds || []).includes(input.sheetId)) {
+    if (!sheetOnProject(p, input.sheetId)) {
       sheetGone = true;
       return;
     }
@@ -1431,18 +1443,22 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   return { ok: true, project: updated, value: { ids } };
 }
 
-/** Set (or replace) the scale for one page of one sheet. */
+/** Set (or replace) the scale for one page of one sheet. null = the project
+ *  is gone, or (#318) the sheet is no longer on it. */
 export async function setSheetCalibration(
   projectId: string,
   cal: Calibration
 ): Promise<GridProject | null> {
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!sheetOnProject(p, cal.docId)) { refused = true; return; }
     p.calibrations = [
       ...(p.calibrations || []).filter((c) => !(c.docId === cal.docId && c.page === cal.page)),
       cal,
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 export async function clearSheetCalibration(
@@ -1593,7 +1609,10 @@ export async function addSpace(
   projectId: string,
   input: { sheetId: string; page: number; name: string; points: Point[]; by: string }
 ): Promise<GridProject | null> {
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    // #318: never on a sheet the design no longer lists (null, like a missing project).
+    if (!sheetOnProject(p, input.sheetId)) { refused = true; return; }
     const spaces = p.spaces || [];
     p.spaces = [
       ...spaces,
@@ -1610,6 +1629,7 @@ export async function addSpace(
     ];
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
 }
 
 export async function renameSpace(
@@ -1656,7 +1676,7 @@ export async function addRoute(
 ): Promise<GridProject | null> {
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    if (!hasOption(p, input.optionId)) { refused = true; return; }
+    if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
     p.routes = [
       ...(p.routes || []),
       {

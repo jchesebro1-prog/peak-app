@@ -11,7 +11,7 @@
  */
 import { deleteBlob, getBlobHead } from "@/lib/blob";
 import { listDocsByField } from "@/db/doc-store";
-import { displayFileName, isUploadKey } from "@/lib/document-files";
+import { baseName, cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
 import { addSheet, getProject, recordIntakePlan, type GridSheet } from "@/lib/stores/grid-projects";
 import { withPlanLock } from "@/lib/design/grid-plan-intake-server";
 import { attachedPlanSheet, isPlanUploadId, planSourceKey } from "@/lib/design/grid-plan-intake";
@@ -35,7 +35,9 @@ export async function commitSheetUpload(projectId: string, input: unknown, by: s
   const blobPath = inp.blobPath;
   const first = inp.position === "first";
   if (first && !isPlanUploadId(inp.planUploadId)) return { ok: false, error: COPY.badUploadId };
-  const name = displayFileName(inp.name).slice(0, 120) || "Plan sheet";
+  // displayFileName falls back to "file" for a blank name — check the cleaned
+  // base name first so a nameless upload is called "Plan sheet" (#318).
+  const name = cleanText(baseName(inp.name), 180) ? displayFileName(inp.name).slice(0, 120) : "Plan sheet";
   const source = first ? planSourceKey("upload", inp.planUploadId as string) : null;
   const run = () => commitLocked(project.id, blobPath, name, by, source, d);
   return source ? withPlanLock(project.id, run) : run();

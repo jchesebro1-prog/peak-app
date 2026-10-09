@@ -46,6 +46,8 @@ import {
   setLinesetDesign,
   setLaborOverride,
   setSheetCalibration,
+  SHEET_GONE,
+  sheetOnProject,
   setVenue,
   setProjectCustomer,
   saveAccessory,
@@ -144,6 +146,14 @@ function editorPath(projectId: string): string {
 }
 
 const OPTION_GONE = "That option was removed — refresh the page.";
+
+/** #318: why a store write that names a sheet came back null — a stale tab's
+ *  sheet that Adjust sheet (or Remove) retired gets SHEET_GONE, anything else
+ *  keeps the caller's own sentence. */
+async function sheetGoneOr(projectId: string, sheetId: string, fallback: string): Promise<string> {
+  const p = await getProject(projectId);
+  return p && !sheetOnProject(p, sheetId) ? SHEET_GONE : fallback;
+}
 
 export async function createGridAssemblyAction(input: {
   name: string;
@@ -603,10 +613,11 @@ export async function placeDeviceAction(
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
+  if (!sheetOnProject(project, input.sheetId)) return { ok: false, error: SHEET_GONE };
   const p = await addPlacement(projectId, { ...input, by: user.name });
   // The new record is the last placement of the doc this patch wrote (#299).
   const placement = p?.placements.at(-1);
-  if (!placement) return { ok: false, error: "Design not found." };
+  if (!placement) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   // #226: Recent is the placer's own last-40 list — a convenience, so a
   // failed write never fails the placement that already landed.
   try {
@@ -671,6 +682,7 @@ export async function placeCurtainAction(
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
+  if (!sheetOnProject(project, input.sheetId)) return { ok: false, error: SHEET_GONE };
 
   const p = await addCurtainPlacement(projectId, {
     sheetId: input.sheetId,
@@ -683,7 +695,7 @@ export async function placeCurtainAction(
     by: user.name,
   });
   const placement = p?.placements.at(-1);
-  if (!placement) return { ok: false, error: "Design not found." };
+  if (!placement) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   revalidatePath(editorPath(projectId));
   return { ok: true, placement };
 }
@@ -1003,7 +1015,7 @@ export async function calibrateAction(
     at: Date.now(),
   };
   const p = await setSheetCalibration(projectId, cal);
-  if (!p) return { ok: false, error: "Design not found." };
+  if (!p) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }
@@ -1035,7 +1047,7 @@ export async function addSpaceAction(
   if (polygonArea(input.points) < 1e-6)
     return { ok: false, error: "That outline has no area — draw the room's corners again." };
   const p = await addSpace(projectId, { ...input, by: user.name });
-  if (!p) return { ok: false, error: "Design not found." };
+  if (!p) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }
@@ -1146,6 +1158,8 @@ export async function addRouteAction(
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
+  // #318: before the calibration check — a retired sheet would otherwise read "Calibrate this page".
+  if (!sheetOnProject(project, input.sheetId)) return { ok: false, error: SHEET_GONE };
   if (!findCalibration(project.calibrations || [], input.sheetId, input.page))
     return { ok: false, error: "Calibrate this page before routing wire — lengths need a scale." };
 
@@ -1183,7 +1197,7 @@ export async function addRouteAction(
     connectionType,
     by: user.name,
   });
-  if (!p) return { ok: false, error: "Design not found." };
+  if (!p) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }

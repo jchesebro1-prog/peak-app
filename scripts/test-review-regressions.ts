@@ -4361,7 +4361,8 @@ async function main() {
     const addManual = async (n: number) => {
       for (let i = 0; i < n; i++) {
         const p = await GP.createProject({ name: `GEMW3 grid ${i}`, customer: "", customerId: null, by });
-        await GP.addPlacement(p.id, { sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "GEMW3-DEV", optionId: resolveOptionId(p, null), by });
+        const s = await GP.addSheet(p.id, { name: `GEMW3 sheet ${i}`, mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }); // #318: a listed sheet
+        await GP.addPlacement(p.id, { sheetId: s?.id ?? "", page: 1, x: 0.5, y: 0.5, partId: "GEMW3-DEV", optionId: resolveOptionId(p, null), by });
         await Designs.createDesign({ name: `GEMW3 grid ${i}`, owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: p.id });
       }
     };

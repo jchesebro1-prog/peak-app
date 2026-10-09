@@ -289,7 +289,7 @@ export function isBaseSheet(sheet: { id: string; mime: string }, intake?: { base
 
 /* --------------------------------- copy --------------------------------- */
 
-export type AdjustRefusal = "not-found" | "no-such-sheet" | "base-sheet" | "in-use" | "unsupported" | "encrypted" | "unreadable" | "too-big" | "failed";
+export type AdjustRefusal = "not-found" | "no-such-sheet" | "base-sheet" | "in-use" | "unsupported" | "encrypted" | "unreadable" | "too-big" | "too-many-pixels" | "failed";
 
 export function adjustRefusalText(reason: AdjustRefusal, pages: readonly number[] = []): string {
   switch (reason) {
@@ -312,6 +312,8 @@ export function adjustRefusalText(reason: AdjustRefusal, pages: readonly number[
       return "Couldn't read this sheet's file — upload it again and try once more.";
     case "too-big":
       return "The adjusted sheet is too large to store without file storage — crop it tighter or use a smaller file.";
+    case "too-many-pixels":
+      return "That image has too many pixels to crop here — export it at a lower resolution and upload again.";
     default:
       return "Couldn't save the adjusted sheet — try again.";
   }

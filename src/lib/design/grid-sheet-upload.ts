@@ -16,6 +16,8 @@ export const GRID_SHEET_DIRECT_MAX_BYTES = 25 * 1024 * 1024;
 export const GRID_SHEET_DIRECT_MAX_LABEL = "25 MB";
 export const GRID_SHEET_DIRECT_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 export type GridSheetDirectType = (typeof GRID_SHEET_DIRECT_TYPES)[number];
+/** #318: the file pickers' `accept` — exactly the five types the commit sniffs for (+ their extensions). */
+export const GRID_SHEET_ACCEPT = [...GRID_SHEET_DIRECT_TYPES, ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"].join(",");
 /** Bytes read from the uploaded blob to tell what it really is. */
 export const GRID_SHEET_SNIFF_BYTES = 1024;
 

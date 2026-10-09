@@ -1,5 +1,5 @@
 import { compute, defaultAState, type SysKey } from "@/app/(app)/design/quick/engine";
-import { getProject, replaceAutoPlacements, type GridProject } from "@/lib/stores/grid-projects";
+import { getProject, replaceAutoPlacements, SHEET_GONE, sheetOnProject, type GridProject } from "@/lib/stores/grid-projects";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { ensureGridSymbolsFor } from "@/lib/stores/grid-catalog";
@@ -66,7 +66,11 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   // #249/#255: the frame of the drawing the base sheet was stamped with; an unstamped (pre-template) sheet keeps its old frame.
   const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: !stamp, template: stamp ?? null });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
-  if (!res) return { ok: false, error: "That option was removed — refresh the page." };
+  if (!res) {
+    // #318: the store also refuses a sheet the design no longer lists (a racing Adjust sheet).
+    const now = await getProject(projectId);
+    return { ok: false, error: now && !sheetOnProject(now, sheetId) ? SHEET_GONE : "That option was removed — refresh the page." };
+  }
   return {
     ok: true,
     ...res,
