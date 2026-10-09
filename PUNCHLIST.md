@@ -11513,3 +11513,22 @@ to the plan, spin it upright, then calibrate"; and he had to shrink the file to 
   not exercised locally — check it on a preview/prod deploy with Blob on; a revision restored from before an
   adjustment re-adds the old sheet beside the new one (accepted, D693). Jeff-gated: try a real 36×24 PDF and check the
   dialog in Safari.
+
+## 322. Every product photo comes out the same size — DONE 2026-10-09 (D-NEXT)
+
+Jeff: tall column speakers, wide consoles and square mixers all end up different shapes in tiles and documents; he
+does not want to pre-resize photos.
+
+- **On the way in:** `squareProductImage` (`src/lib/part-docs/shrink.ts`) trims empty borders, fits the product inside a
+  1472 px box (small photos are enlarged) and centres it on a 1600×1600 canvas — a 64 px margin — white for opaque
+  photos, transparent for real cut-outs, WebP q80. Used by uploads/replacements (`shrinkStoredImage({ square: true })`),
+  the photo sheet import, Drive photo sync, Add image from URL and datasheet page-1 thumbnails; each document gets
+  `squared: true`. Manufacturer images, object drawings and curtain cut-sheet tiles are unchanged.
+- **Existing photos:** Catalog → Datasheets → **Make photos uniform** (admin) — 45 s resumable passes
+  (`squarePhotosAction`, `src/lib/part-docs/square-batch.ts`), progress "Squared N · M failed · K left", re-click to
+  continue. Originals stay on each photo's history; links, order, primary and visibility are untouched.
+- Spec harness: `#322` assertions (wide / tall-transparent / tiny / bordered images, the upload option, the batch
+  candidate filter, fake-storage batch run incl. failure, idempotence and budget, the real store swap keeping links and
+  order, source pins for the squared and unsquared paths).
+- Remaining / Jeff-gated: click Make photos uniform on production after a `db:export` backup and spot-check a few
+  parts in the portal and on a client PDF; the first run will take several clicks on a large catalog.
