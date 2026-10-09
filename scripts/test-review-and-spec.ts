@@ -60139,6 +60139,18 @@ async function pagesPdf319(n: number): Promise<Uint8Array> {
   return doc.save();
 }
 
+/** #319: 3 pages that set neither box nor rotation — the page tree alone carries an offset
+ *  MediaBox [50,60,650,460] (no CropBox anywhere) and /Rotate 90, so only inheritance can reproduce them. */
+async function pdf319InheritedBox(): Promise<Uint8Array> {
+  const { PDFDocument, PDFName, PDFNumber } = await import("pdf-lib");
+  const doc = await PDFDocument.create();
+  const pages = [doc.addPage([100, 100]), doc.addPage([100, 100]), doc.addPage([100, 100])];
+  doc.catalog.Pages().set(PDFName.of("MediaBox"), doc.context.obj([50, 60, 650, 460]));
+  doc.catalog.Pages().set(PDFName.of("Rotate"), PDFNumber.of(90));
+  for (const pg of pages) pg.node.delete(PDFName.of("MediaBox"));
+  return doc.save();
+}
+
 /** #319: a 2-page PDF with an /Encrypt dictionary (the #318 recipe) — pdf-lib refuses it as encrypted. */
 async function encryptedPdf319(): Promise<Uint8Array> {
   const text = Buffer.from(await pagesPdf319(2)).toString("latin1");
@@ -60201,11 +60213,19 @@ async function pagesAsSheets319BytesChecks(): Promise<void> {
   const set = await pdf319Set();
   const srcViews = await views319(set);
   ok(J(srcViews) === J([{ view: [10, 20, 160, 80], rotate: 180 }, { view: [60, 70, 300, 200], rotate: 90 }, { view: [60, 70, 300, 200], rotate: 180 }]),
-    "#319 fixture: pages 2 and 3 inherit the tree CropBox (page 3 also the offset MediaBox), pages 1 and 3 inherit /Rotate 180 (pdf.js reads the source so)");
+    "#319 fixture: pdf.js reads page 1 with its own CropBox, pages 2 and 3 with the tree CropBox, and /Rotate 90 own / 180 inherited");
   const r = await X.splitPdfPages(set);
   const got = r.ok ? await Promise.all(r.pages.map((p) => views319(p))) : [];
   ok(r.ok && r.pages.length === 3 && got.every((v) => v.length === 1) && J(got.map((v) => v[0])) === J(srcViews),
-    "#319 splitPdfPages: three one-page PDFs in page order, each shown exactly as its source page (CropBox, own and inherited /Rotate, inherited MediaBox)");
+    "#319 splitPdfPages: three one-page PDFs in page order, each shown exactly as its source page (own and inherited CropBox, own and inherited /Rotate)");
+  const inh = await pdf319InheritedBox();
+  const inhViews = await views319(inh);
+  const ri = await X.splitPdfPages(inh);
+  const inhGot = ri.ok ? await Promise.all(ri.pages.map((p) => views319(p))) : [];
+  const want = { view: [50, 60, 650, 460], rotate: 90 };
+  ok(J(inhViews) === J([want, want, want]), "#319 fixture: pdf.js reads each box-less page as the tree's offset MediaBox [50,60,650,460], rotated 90");
+  ok(ri.ok && ri.pages.length === 3 && inhGot.every((v) => v.length === 1 && J(v[0]) === J(want)),
+    "#319 splitPdfPages carries an inherited offset MediaBox and inherited /Rotate onto pages that set neither (no CropBox involved)");
   const r1 = await X.splitPdfPages(await pagesPdf319(1));
   const png = new Uint8Array(await sharp({ create: { width: 4, height: 4, channels: 3, background: "#ffffff" } }).png().toBuffer());
   const rp = await X.splitPdfPages(png);
