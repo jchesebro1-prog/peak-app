@@ -11446,3 +11446,14 @@ banner, try a plan file that the route refuses (over 4 MB): the editor should op
 **Open (minor, not blocking).** The Designs dashboard still offers Add to Quotes → for an estimate-linked design (refused with
 the sentence) and prices its budget from the Grid BOM. The tray reads the SAVED quote — save the estimate before switching to
 the Grid. The upload route still trusts the declared file type (no magic-byte sniff), as before.
+
+## 315. Cover header as a table; Lead estimator on Build package — DONE 2026-10-09
+
+Jeff: shorten the cover PDF; set who signs it without opening Quote details.
+
+- **Cover header**: Customer / Attn / Venue (left) and Project / Estimate / Date (right) print as one bordered
+  two-pair table — three rows instead of six (`cover-document.tsx`, `.cov-head`). The #P2b no-alternates baseline
+  (`docs/superpowers/fixtures/p2b-outputs-no-alternates.json`) was regenerated; only `coverHtml` changed.
+- **Lead estimator / Prepared by** on Build package, above Cover & package: one shared `QuotePeopleFields` (dark in the
+  header's Quote details, light on the step), same `changePeople` guard — only an approver hands a quote off. The cover
+  signs as the Lead estimator, else Prepared by (`resolveCoverSigner`, unchanged).
