@@ -33,6 +33,7 @@ import {
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import { cleanSymbolDisplay, type SymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { cleanIntakeNotices, MAX_INTAKE_NOTICES, type GridIntakeNotice } from "@/lib/design/grid-plan-intake";
+import { blockedPages, remapSheetRefs, type SheetAdjust } from "@/lib/design/sheet-adjust";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import {
@@ -333,6 +334,10 @@ export type GridSheet = {
   url?: string;
   /** Blob pathname the proxy streams by (set together with url). */
   blobPath?: string;
+  /** #318: set on a sheet derived by Adjust sheet (crop + rotate) — the
+   *  ORIGINAL upload it was made from (always the root, never a chain) and
+   *  the per-page spec (lib/design/sheet-adjust). Absent on an upload. */
+  adjust?: SheetAdjust;
   addedBy: string;
   at: number;
 };
@@ -693,6 +698,57 @@ export async function removeSheet(
   const refusal = refused as "no-such-sheet" | "in-use" | null;
   if (refusal) return { ok: false, reason: refusal };
   return { ok: true, spacesRemoved };
+}
+
+/**
+ * #318 — put an adjusted (cropped / turned) copy of a sheet in its place.
+ * Writes the new grid_sheets doc, then ONE patch that re-checks, on the doc
+ * patchDoc hands us, that the old sheet is still listed, is not the generated
+ * base sheet, and that no page in `changed` has anything on it (any option) —
+ * the removeSheet pattern — then moves every reference to the new id
+ * (remapSheetRefs: same position in sheetIds, placements / spaces / routes /
+ * calibrations, the intake's plan view, drawing-set keys). A refusal
+ * soft-deletes the doc it wrote. The old doc stays: revisions may name it, and
+ * restoring one cut before the adjust re-adds it (restoreRevision's rule —
+ * accepted, D693). Revisions are never rewritten.
+ */
+export async function replaceSheetWithAdjusted(
+  projectId: string,
+  oldSheetId: string,
+  input: { name: string; mime: string; dataUrl?: string; url?: string; blobPath?: string; adjust: SheetAdjust; by: string },
+  changed: readonly number[]
+): Promise<{ ok: true; sheet: GridSheet } | { ok: false; reason: "not-found" | "no-such-sheet" | "base-sheet" | "in-use"; pages?: number[] }> {
+  const sheet: GridSheet = {
+    id: rid("gs-"),
+    projectId,
+    name: input.name || "Plan sheet",
+    mime: input.mime,
+    dataUrl: input.dataUrl || "",
+    ...(input.url ? { url: input.url } : {}),
+    ...(input.blobPath ? { blobPath: input.blobPath } : {}),
+    adjust: input.adjust,
+    addedBy: input.by,
+    at: Date.now(),
+  };
+  await upsertDoc<GridSheet>("grid_sheets", sheet);
+  let refused: { reason: "no-such-sheet" | "base-sheet" | "in-use"; pages?: number[] } | null = null;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!(p.sheetIds || []).includes(oldSheetId)) { refused = { reason: "no-such-sheet" }; return; }
+    if (p.intake?.baseSheetId === oldSheetId) { refused = { reason: "base-sheet" }; return; }
+    const blocked = blockedPages(p, oldSheetId, changed);
+    if (blocked.length) { refused = { reason: "in-use", pages: blocked }; return; }
+    remapSheetRefs(p, oldSheetId, sheet.id);
+    p.updatedAt = Date.now();
+  });
+  // (Assigned inside the callback, which TS's flow analysis can't see.)
+  const refusal = (updated ? refused : { reason: "not-found" }) as
+    | { reason: "not-found" | "no-such-sheet" | "base-sheet" | "in-use"; pages?: number[] }
+    | null;
+  if (refusal) {
+    await softDeleteDoc("grid_sheets", sheet.id);
+    return { ok: false, ...refusal };
+  }
+  return { ok: true, sheet };
 }
 
 export async function addPlacement(

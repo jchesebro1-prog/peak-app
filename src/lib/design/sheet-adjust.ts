@@ -19,8 +19,8 @@ export type PageAdjust = { rotate: QuarterTurn; crop: CropRect };
 export type AdjustPages = Record<string, PageAdjust>;
 export type SheetAdjust = { fromSheetId: string; pages: AdjustPages };
 
-export const IDENTITY_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 };
-export const IDENTITY_ADJUST: PageAdjust = { rotate: 0, crop: IDENTITY_CROP };
+export const IDENTITY_CROP: Readonly<CropRect> = Object.freeze({ x: 0, y: 0, w: 1, h: 1 });
+export const IDENTITY_ADJUST: Readonly<PageAdjust> = Object.freeze({ rotate: 0, crop: IDENTITY_CROP });
 /** Smallest crop side, as a fraction of the page side (2 %). */
 export const MIN_CROP = 0.02;
 /** Most pages one adjust may carry (a 500-page plan set is not a plan sheet). */
@@ -82,7 +82,8 @@ export function sanitizeAdjustPages(raw: unknown): AdjustPages {
 }
 
 export function pageAdjustOf(pages: AdjustPages | null | undefined, page: number): PageAdjust {
-  return pages?.[String(page)] ?? IDENTITY_ADJUST;
+  // A fresh identity each time: IDENTITY_ADJUST is shared, and a caller must not be able to corrupt it.
+  return pages?.[String(page)] ?? { rotate: 0, crop: { ...IDENTITY_CROP } };
 }
 
 export function samePageAdjust(a: PageAdjust, b: PageAdjust): boolean {
@@ -299,9 +300,10 @@ export function adjustRefusalText(reason: AdjustRefusal, pages: readonly number[
     case "base-sheet":
       return "The generated base plan can't be cropped or rotated.";
     case "in-use":
+      if (!pages.length) return "A page has devices, spaces, wires or a scale on it — crop and rotate only work on an empty page.";
       return pages.length > 1
         ? `Pages ${pages.join(", ")} have devices, spaces, wires or a scale on them — crop and rotate only work on an empty page.`
-        : `Page ${pages[0] ?? ""} has devices, spaces, wires or a scale on it — crop and rotate only work on an empty page.`;
+        : `Page ${pages[0]} has devices, spaces, wires or a scale on it — crop and rotate only work on an empty page.`;
     case "unsupported":
       return "This sheet's file type can't be cropped — upload it as a PDF, PNG, JPEG, WebP or GIF.";
     case "encrypted":

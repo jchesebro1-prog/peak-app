@@ -57,6 +57,8 @@ import {
 } from "@/lib/stores/grid-projects";
 import { defaultOptionId, estimateLinkOf, estimateOwnedRefusal, hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { attachPlanCandidate, planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
+import { adjustSheet } from "@/lib/design/sheet-adjust-server";
+import { adjustRefusalText } from "@/lib/design/sheet-adjust";
 import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
 import { cleanNoticeText, newNoticeId, publicPlanCandidates, type GridIntakeNotice, type PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
@@ -1082,6 +1084,21 @@ export async function removeSheetAction(
   }
   revalidatePath(editorPath(projectId));
   return { ok: true, spacesRemoved: r.spacesRemoved };
+}
+
+/** #318: crop + rotate a sheet's pages. A NEW sheet, derived from the original
+ *  upload, replaces it in place (D693); refused while a changed page has
+ *  devices, spaces, wires or a scale on it, and never on the base sheet. */
+export async function adjustSheetAction(
+  projectId: string,
+  sheetId: string,
+  pages: unknown
+): Promise<{ ok: true; sheetId: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await adjustSheet(String(projectId || ""), String(sheetId || ""), pages, user.name);
+  if (!r.ok) return { ok: false, error: adjustRefusalText(r.reason, r.pages) };
+  revalidatePath(editorPath(projectId));
+  return { ok: true, sheetId: r.sheetId };
 }
 
 /* ------------------------------ routes (D110) ------------------------------ */

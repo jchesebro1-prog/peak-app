@@ -11523,6 +11523,7 @@ seeded()
   .then(() => estimateGrid314AsyncChecks())
   .then(() => sheetAdjust318PureChecks())
   .then(() => sheetAdjust318BytesChecks())
+  .then(() => sheetAdjust318StoreChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59710,4 +59711,130 @@ async function sheetAdjust318BytesChecks(): Promise<void> {
   const bigPng = await sharp({ create: { width: 10001, height: 10001, channels: 3, background: "#ffffff" } }).png().toBuffer();
   const rbig = await B.adjustSheetBytes(bigPng, { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
   ok(!rbig.ok && rbig.reason === "too-big", "#318 an image over the pixel cap is too-big");
+}
+
+/* ---------------- #318: Grid sheet crop + rotate — store + orchestrator ---------------- */
+async function sheetAdjust318StoreChecks(): Promise<void> {
+  type G318Sheet = import("@/lib/stores/grid-projects").GridSheet;
+  // In-database sheets only (data-URLs): this suite never writes to Blob.
+  const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  try {
+    const G = await import("@/lib/stores/grid-projects");
+    const S = await import("@/lib/design/sheet-adjust-server");
+    const DS = await import("@/db/doc-store");
+    const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+    const { decodeDataUrl } = await import("@/lib/grid-sheet-file");
+    const { PDFDocument, degrees } = await import("pdf-lib");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const J = (v: unknown) => JSON.stringify(v);
+    const near = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+    const by = "Test Harness";
+    const views = async (dataUrl: string) => {
+      const task = pdfjs.getDocument({ data: new Uint8Array(decodeDataUrl(dataUrl)!.bytes), disableFontFace: true });
+      const pdf = await task.promise;
+      const out: Array<{ view: number[]; rotate: number }> = [];
+      for (let n = 1; n <= pdf.numPages; n++) { const pg = await pdf.getPage(n); out.push({ view: [...pg.view], rotate: pg.rotate }); }
+      await task.destroy();
+      return out;
+    };
+
+    const doc = await PDFDocument.create();
+    const p1 = doc.addPage([200, 100]);
+    p1.setCropBox(10, 20, 150, 60);
+    p1.setRotation(degrees(90));
+    doc.addPage([300, 200]);
+    const pdfUrl = `data:application/pdf;base64,${Buffer.from(await doc.save()).toString("base64")}`;
+    const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+    const gp = await G.createProject({ name: "#318 test grid project", customer: "Spec fixture", customerId: null, by });
+    registerFixture("grid_projects", gp.id);
+    const add = async (name: string, mime: string, dataUrl: string) => {
+      const sh = await G.addSheet(gp.id, { name, mime, dataUrl, by });
+      if (sh) registerFixture("grid_sheets", sh.id);
+      return sh!;
+    };
+    const before = await add("#318 Before", "image/png", PNG);
+    const plan = await add("#318 Plan.pdf", "application/pdf", pdfUrl);
+    const after = await add("#318 After", "image/png", PNG);
+    const square = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }];
+    // Everything sits on page 2; page 1 is empty.
+    await G.addPlacement(gp.id, { sheetId: plan.id, page: 2, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by });
+    await G.addSpace(gp.id, { sheetId: plan.id, page: 2, name: "Stage", points: square, by });
+    await G.addRoute(gp.id, { sheetId: plan.id, page: 2, partId: "TEST-WIRE", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }], aspect: 1, optionId: DEFAULT_OPTION_ID, by });
+    await G.setSheetCalibration(gp.id, { docId: plan.id, page: 2, scale: 100, unit: "ft", refLength: 10, by, at: 1 });
+    await G.recordIntakePlan(gp.id, plan.id, "upload:00000000-0000-4000-8000-000000000318");
+    await G.setDrawingSet(gp.id, { excluded: [`plan:lighting:${plan.id}:2`, "riser"] });
+    const revsBefore = ((await G.getProject(gp.id))!.revisions || []).length;
+
+    const busy = await S.adjustSheet(gp.id, plan.id, { "2": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } }, by);
+    ok(!busy.ok && busy.reason === "in-use" && J(busy.pages) === "[2]", "#318 adjustSheet refuses a page with content on it, naming the page");
+    const same = await S.adjustSheet(gp.id, plan.id, {}, by);
+    ok(same.ok && same.sheetId === plan.id && same.unchanged === true, "#318 an adjust that changes nothing is a no-op on the same sheet");
+
+    const A1 = { rotate: 90, crop: { x: 0.2, y: 0.25, w: 0.5, h: 0.5 } };
+    const r1 = await S.adjustSheet(gp.id, plan.id, { "1": A1 }, by);
+    if (r1.ok) registerFixture("grid_sheets", r1.sheetId);
+    const id1 = r1.ok ? r1.sheetId : "";
+    const proj = (await G.getProject(gp.id))!;
+    ok(r1.ok && id1 !== plan.id && J(proj.sheetIds) === J([before.id, id1, after.id]), "#318 the derived sheet takes the old one's place in the sheet order");
+    ok(proj.placements.every((pl) => pl.sheetId === id1) && (proj.spaces || []).every((sp) => sp.sheetId === id1) &&
+       (proj.routes || []).every((r) => r.sheetId === id1) && proj.calibrations.every((c) => c.docId === id1 && c.page === 2),
+      "#318 devices, spaces, wires and the scale on the untouched page 2 follow to the new sheet");
+    ok(proj.intake?.planSheetId === id1 && J(proj.drawingSet?.excluded) === J([`plan:lighting:${id1}:2`, "riser"]),
+      "#318 the intake's plan view and the drawing-set keys follow too");
+    ok((proj.revisions || []).length === revsBefore, "#318 an adjust cuts no revision");
+    ok(!!(await DS.getDoc("grid_sheets", plan.id)), "#318 the original sheet doc stays readable (revisions may name it)");
+    const n1 = (await DS.getDoc<G318Sheet>("grid_sheets", id1))!;
+    // (JSONB reorders object keys, so the stored spec is compared field by field.)
+    const pg1 = n1.adjust?.pages["1"];
+    ok(n1.adjust?.fromSheetId === plan.id && Object.keys(n1.adjust.pages).join() === "1" && pg1?.rotate === 90 && near([pg1.crop.x, pg1.crop.y, pg1.crop.w, pg1.crop.h], [0.2, 0.25, 0.5, 0.5]) &&
+       n1.name === plan.name && n1.mime === "application/pdf" && !n1.blobPath,
+      "#318 the new sheet records its root and the page spec (stored in-database with Blob off)");
+    const v1 = await views(n1.dataUrl);
+    ok(near(v1[0].view, [55, 35, 130, 65]) && v1[0].rotate === 180 && near(v1[1].view, [0, 0, 300, 200]) && v1[1].rotate === 0,
+      "#318 the stored PDF shows page 1 cropped and turned, page 2 untouched (pdf.js reads it)");
+
+    const r2 = await S.adjustSheet(gp.id, id1, { "1": { rotate: 0, crop: { x: 0, y: 0, w: 0.5, h: 1 } } }, by);
+    if (r2.ok) registerFixture("grid_sheets", r2.sheetId);
+    const n2 = r2.ok ? await DS.getDoc<G318Sheet>("grid_sheets", r2.sheetId) : null;
+    const v2 = n2 ? await views(n2.dataUrl) : [];
+    ok(r2.ok && n2?.adjust?.fromSheetId === plan.id && near(v2[0]?.view ?? [], [10, 20, 160, 50]) && v2[0]?.rotate === 90,
+      "#318 re-adjusting an adjusted sheet derives from the original upload again (never a chain)");
+
+    const r3 = r2.ok ? await S.adjustSheet(gp.id, r2.sheetId, {}, by) : null;
+    if (r3?.ok) registerFixture("grid_sheets", r3.sheetId);
+    const n3 = r3?.ok ? await DS.getDoc<G318Sheet>("grid_sheets", r3.sheetId) : null;
+    ok(!!r3?.ok && n3?.adjust?.fromSheetId === plan.id && J(n3?.adjust?.pages) === "{}" && n3?.dataUrl === plan.dataUrl,
+      "#318 Reset everything makes a sheet that points at the original file (no new bytes)");
+
+    const base = await add("#318 Base", "image/svg+xml", "data:image/svg+xml,<svg/>");
+    const rb = await S.adjustSheet(gp.id, base.id, { "1": A1 }, by);
+    const gone = await S.adjustSheet(gp.id, plan.id, { "1": A1 }, by);
+    const noProj = await S.adjustSheet("GRD-0", plan.id, { "1": A1 }, by);
+    ok(!rb.ok && rb.reason === "base-sheet" && !gone.ok && gone.reason === "no-such-sheet" && !noProj.ok && noProj.reason === "not-found",
+      "#318 the base sheet, a sheet no longer listed and an unknown design are refused");
+    const junk = await add("#318 Junk", "image/png", `data:image/png;base64,${Buffer.from("hello").toString("base64")}`);
+    const rj = await S.adjustSheet(gp.id, junk.id, { "1": A1 }, by);
+    ok(!rj.ok && rj.reason === "unsupported", "#318 a file that is neither a PDF nor a known image is refused as unsupported");
+
+    // The store's own backstop: content that lands after the pre-check refuses inside the patch.
+    await G.addPlacement(gp.id, { sheetId: after.id, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by });
+    const late = await G.replaceSheetWithAdjusted(gp.id, after.id, { name: "#318 late", mime: "image/png", dataUrl: PNG, adjust: { fromSheetId: after.id, pages: { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } } }, by }, [1]);
+    ok(!late.ok && late.reason === "in-use" && J(late.pages) === "[1]" && (await G.getProject(gp.id))!.sheetIds.includes(after.id) &&
+       (await DS.listDocsByField("grid_sheets", "name", ["#318 late"])).length === 0,
+      "#318 replaceSheetWithAdjusted re-checks the gate on the doc it patches; a refusal soft-deletes the sheet it wrote");
+    // Task 1 review minors: every refusal has wording (even with no page list), and the shared identity can't be corrupted.
+    const AD = await import("@/lib/design/sheet-adjust");
+    const reasons: Array<import("@/lib/design/sheet-adjust").AdjustRefusal> = ["not-found", "no-such-sheet", "base-sheet", "in-use", "unsupported", "encrypted", "unreadable", "too-big", "failed"];
+    ok(reasons.every((r) => AD.adjustRefusalText(r).length > 10) && !/Page\s{2}/.test(AD.adjustRefusalText("in-use", [])) && !AD.adjustRefusalText("in-use", []).includes("Page  "),
+      "#318 every refusal reason has a sentence, and an in-use refusal with no page list doesn't print a blank page number");
+    const idn = AD.pageAdjustOf({}, 1);
+    (idn.crop as { w: number }).w = 0.5;
+    ok(AD.pageAdjustOf({}, 1).crop.w === 1 && AD.IDENTITY_ADJUST.crop.w === 1 && Object.isFrozen(AD.IDENTITY_CROP),
+      "#318 pageAdjustOf hands back a fresh identity; the shared one is frozen");
+  } finally {
+    if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+  }
 }
