@@ -7,6 +7,7 @@ import { useCommentsFocusRefresh } from "../comment-pins";
 import NarrativeColumn from "../narrative-column";
 import { PdfOptionsPanel } from "../preview-doc";
 import { CoverPackagePanel } from "../cover-package-panel";
+import { QuotePeopleFields } from "../quote-people-fields";
 import { PackageStaffPanel } from "../package-staff-panel";
 import { PAYMENT_TERMS } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
@@ -337,6 +338,10 @@ export function PackageStep({ s }: { s: EstimatorState }) {
           setPaymentTerms={setPaymentTerms}
           togglePdf={togglePdf}
         />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 7 }}>
+          <QuotePeopleFields s={s} tone="light" />
+          <span style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.45 }}>Signs the cover PDF — the Lead estimator, else Prepared by.</span>
+        </div>
         <CoverPackagePanel
           savedQuoteId={loadedId}
           canEdit

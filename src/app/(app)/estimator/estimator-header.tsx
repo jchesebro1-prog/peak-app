@@ -8,6 +8,7 @@ import { wonEditMessage } from "@/app/(app)/quotes/new/handoff";
 import { fmt } from "./pricing";
 import type { EstimateStep } from "@/lib/estimate-steps/steps";
 import { HeaderMoreMenu } from "./header-more-menu";
+import { QuotePeopleFields } from "./quote-people-fields";
 import { canSendBackFromReview, withoutSendBack } from "@/lib/estimate-review/review-ui";
 
 /**
@@ -32,7 +33,6 @@ export function EstimatorHeader({
     assumptionLibrary,
     assumptions,
     category,
-    changePeople,
     checkedAssumptions,
     closeQd,
     closeTitle,
@@ -51,14 +51,10 @@ export function EstimatorHeader({
     onInstallTimeframe,
     onQuoteNote,
     openTitle,
-    ownerValue,
     pdfDirty,
-    peopleBusy,
-    peopleOptions,
     pickContact,
     pickCustomer,
     pickVenue,
-    preparedValue,
     projectName,
     qdChipLabel,
     qdChipRef,
@@ -67,7 +63,6 @@ export function EstimatorHeader({
     quoteId,
     quoteNote,
     revNum,
-    samePerson,
     saveNow,
     setActionError,
     setCategory,
@@ -85,8 +80,6 @@ export function EstimatorHeader({
     titleEditing,
     toggleAssumption,
     venueOptions,
-    viewerCanApprove,
-    viewerName,
     wonMetaGuard,
   } = s;
   return (
@@ -469,51 +462,7 @@ export function EstimatorHeader({
                 />
               </section>
               <section style={META_SECTION}>
-                <span style={CTX_LABEL}>Lead estimator</span>
-                <select
-                  value={ownerValue}
-                  onChange={(e) => changePeople({ owner: e.target.value })}
-                  disabled={!loadedId || peopleBusy}
-                  aria-label="Lead estimator"
-                  title={
-                    viewerCanApprove
-                      ? "Owns the quote — their review limit applies and it lists under them on the Quotes hub"
-                      : "Only an approver can hand a quote to someone else"
-                  }
-                  style={{ ...DARK_SELECT, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
-                >
-                  {peopleOptions(ownerValue).map((o) => {
-                    const locked = !viewerCanApprove && !samePerson(o.value, viewerName) && o.value !== ownerValue;
-                    return (
-                      <option
-                        key={o.value || "__none"}
-                        value={o.value}
-                        disabled={locked || !o.value}
-                        title={locked ? "Only an approver can hand a quote to someone else" : undefined}
-                      >
-                        {o.label}
-                      </option>
-                    );
-                  })}
-                </select>
-                <span style={{ ...CTX_LABEL, marginTop: 4 }}>Prepared by</span>
-                <select
-                  value={preparedValue}
-                  onChange={(e) => changePeople({ preparedBy: e.target.value })}
-                  disabled={!loadedId || peopleBusy}
-                  aria-label="Prepared by"
-                  title="Prints under Prepared by on the customer document"
-                  style={{ ...DARK_SELECT, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
-                >
-                  {peopleOptions(preparedValue).map((o) => (
-                    <option key={o.value || "__none"} value={o.value} disabled={!o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <span style={META_HINT}>
-                  {loadedId ? "Saved as you pick" : "Save the quote to change these"}
-                </span>
+                <QuotePeopleFields s={s} tone="dark" />
               </section>
               <section style={{ ...META_SECTION, borderBottom: "none" }}>
                 <span style={CTX_LABEL}>Suggested install timeframe</span>

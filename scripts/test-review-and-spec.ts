@@ -367,6 +367,7 @@ const ESTIMATOR_FILES = [
   "use-estimator-state.ts",
   "estimator-styles.ts",
   "estimator-header.tsx",
+  "quote-people-fields.tsx",
   "header-more-menu.tsx",
   "estimator-banners.tsx",
   "step-tabs.tsx",
@@ -42391,13 +42392,21 @@ import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-docum
   ok(people.includes("await requireUser()") && people.includes("setQuotePeopleAs(id, user,") && people.includes("quoteNextStepFor(q, user)") && people.includes("scheduleQuotePdf(q.id)"),
     "#287 B action: setQuotePeopleAction runs the guarded op as the session user, returns the fresh next step and re-renders the PDF");
   const est = estimatorSource();
-  ok(est.includes('<span style={CTX_LABEL}>Lead estimator</span>') && est.includes('<span style={{ ...CTX_LABEL, marginTop: 4 }}>Prepared by</span>')
+  ok(est.includes('<span style={label}>Lead estimator</span>') && est.includes('<span style={{ ...label, marginTop: 4 }}>Prepared by</span>')
     && est.includes("const r = await setQuotePeopleAction(id, patch);") && est.includes("if (r.next !== undefined) setNext(r.next ?? null);")
     && est.includes("setActionError(r.error ||"),
     "#287 B Estimator: Lead estimator + Prepared by selects save through setQuotePeopleAction, refresh the next step, errors to the banner");
   ok(est.includes("const locked = !viewerCanApprove && !samePerson(o.value, viewerName) && o.value !== ownerValue;")
     && (est.match(/Only an approver can hand a quote to someone else/g) || []).length === 2,
     "#287 B Estimator: a non-approver sees other names disabled (titled) and keeps their own");
+  {
+    const rd = (f: string) => readFileSync(join(process.cwd(), EST_DIR, f), "utf8");
+    const peopleFields = rd("quote-people-fields.tsx");
+    ok(estimatorSource().includes("<QuotePeopleFields s={s} tone=\"dark\" />") && peopleFields.includes('aria-label="Lead estimator"') && peopleFields.includes('aria-label="Prepared by"'),
+      "Lead estimator + Prepared by are one shared QuotePeopleFields, used by the header's Quote details");
+    ok(rd("steps/package-step.tsx").includes('<QuotePeopleFields s={s} tone="light" />') && peopleFields.includes("Save the quote to change these"),
+      "Build package renders QuotePeopleFields (the Lead estimator signs the cover PDF) with the same locked-save hint");
+  }
   const page = src("src/app/(app)/estimator/page.tsx");
   ok(page.includes('viewerCanApprove={can("approve", user.roles)}') && page.includes('preparedBy: q.preparedBy || "",') && page.includes("preparedBy: userName,"),
     "#287 B page: the Estimator gets the viewer's approve flag and the stored preparedBy (a new quote: its creator)");
