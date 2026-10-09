@@ -28,7 +28,16 @@ const btn: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12.5, fontW
 const off: CSSProperties = { cursor: "not-allowed", opacity: 0.55 };
 const linkBtn: CSSProperties = { background: "none", border: "none", padding: 0, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 
-export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: string; section?: "all" | "package" | "responses" }) {
+export function PackageStaffPanel({
+  quoteId,
+  section = "all",
+  beforeGrid,
+}: {
+  quoteId: string;
+  section?: "all" | "package" | "responses";
+  /** #316: saves the estimate's unsaved edits first (the Estimator's awaitable `saveNow`) — the Grid's From-estimate tray reads the SAVED quote. Resolves to false when nothing was written. Omitted = nothing to save. */
+  beforeGrid?: () => Promise<number | false>;
+}) {
   const [panel, setPanel] = useState<PackagePanel | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -37,6 +46,8 @@ export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: strin
   const [pending, start] = useTransition();
   /** #314: "Design in the Grid" runs on its own, so the drawings controls stay usable meanwhile. */
   const [gridPending, startGrid] = useTransition();
+  /** #316: the save that runs before the Grid opens (label reads "Saving…" meanwhile). */
+  const [gridSaving, setGridSaving] = useState(false);
   const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -125,6 +136,23 @@ export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: strin
     startGrid(async () => {
       setErr(null);
       setNote(null);
+      // #316: the Grid reads the SAVED estimate, so unsaved edits are written first.
+      // saveNow reports its own cause in the Estimator's banner; this says why the Grid did not open.
+      if (beforeGrid) {
+        setGridSaving(true);
+        let saved: number | false = false;
+        try {
+          saved = await beforeGrid();
+        } catch {
+          saved = false;
+        } finally {
+          setGridSaving(false);
+        }
+        if (saved === false) {
+          setErr(GRID_LINK_COPY.saveFailed);
+          return;
+        }
+      }
       let r: Awaited<ReturnType<typeof openGridDesignForQuoteAction>>;
       try {
         r = await openGridDesignForQuoteAction(quoteId);
@@ -245,7 +273,7 @@ export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: strin
                   title={panel.canCreate ? "Start a Grid design from this estimate — place its parts on the plan" : "You can't create designs."}
                   style={{ ...btn, alignSelf: "flex-start", ...(gridPending || !panel.canCreate ? off : {}) }}
                 >
-                  {gridPending ? GRID_LINK_COPY.opening : GRID_LINK_COPY.design}
+                  {gridSaving ? GRID_LINK_COPY.saving : gridPending ? GRID_LINK_COPY.opening : GRID_LINK_COPY.design}
                 </button>
               )}
               <span style={small}>

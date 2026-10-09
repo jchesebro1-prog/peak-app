@@ -76,6 +76,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
     packageDocFlushRef,
     packageDocOverDraft,
     quoteId,
+    saveNow,
     sections,
     setActiveId,
     setDetail,
@@ -354,7 +355,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
           notIncludedDefault={notIncludedDefault}
         />
         {loadedId ? (
-          <PackageStaffPanel quoteId={loadedId} section="package" />
+          <PackageStaffPanel quoteId={loadedId} section="package" beforeGrid={pdfDirty ? saveNow : undefined} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
             <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate to add drawings.</div>

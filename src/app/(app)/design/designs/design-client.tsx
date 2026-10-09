@@ -32,6 +32,7 @@ import { designRefreshHint, needsPartCount, targetsFromSystems } from "@/lib/des
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
 import { effectiveTemplateFor } from "@/lib/design/venue-templates";
 import type { VenueType } from "@/lib/venue-types";
+import { GRID_LINK_COPY, drawingsForEstimateHint, openEstimateTitle, type EstimateLinkInfo } from "@/lib/design/estimate-grid-link";
 import {
   getAccentHex,
   getAccentHexServer,
@@ -99,6 +100,7 @@ export default function DesignClient({
   canApprove,
   canCreate,
   designs: initialDesigns,
+  estimateLinks,
   selectedId,
   roster,
   prices,
@@ -115,6 +117,8 @@ export default function DesignClient({
   /** Gates delete — a Reviewer approves designs but has never made one. */
   canCreate: boolean;
   designs: DesignRecord[];
+  /** #316: designs that draw an Estimator quote (design id → estimate) — "Open estimate →" replaces Add to Quotes. */
+  estimateLinks: Record<string, EstimateLinkInfo>;
   selectedId: string | null;
   roster: RosterEntry[];
   prices: EquipmentPriceTable;
@@ -471,6 +475,16 @@ export default function DesignClient({
                   >
                     {sel.layoutMode === "manual" ? "Open in The Grid" : "Open in Quick Design"}
                   </Link>
+                  {estimateLinks[sel.id] ? (
+                    <Link
+                      href={estimateLinks[sel.id].href}
+                      title={openEstimateTitle(estimateLinks[sel.id].number)}
+                      className="dd-accent-btn"
+                      style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, textDecoration: "none" }}
+                    >
+                      {GRID_LINK_COPY.openEstimate}
+                    </Link>
+                  ) : (
                   <button
                     onClick={() => promoteDesign(sel.id)}
                     disabled={pending || selIncomplete}
@@ -480,6 +494,7 @@ export default function DesignClient({
                   >
                     {sel.quoteId ? "Update quote →" : "Add to Quotes →"}
                   </button>
+                  )}
                   {canCreate && (
                     armedDelete === sel.id ? (
                       <span style={{ display: "inline-flex", gap: 6 }}>
@@ -773,6 +788,9 @@ export default function DesignClient({
                       {designRefreshHint(d)} →
                     </Link>
                   )}
+                  {estimateLinks[d.id] && (
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#5b616e", marginTop: 5 }}>{drawingsForEstimateHint(estimateLinks[d.id].number)}</div>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11, paddingBottom: 14, borderBottom: "1px solid #f2f3f5" }}>
                     <span title={d.owner} style={{ width: 24, height: 24, borderRadius: "50%", background: colorOf(d.owner), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, fontWeight: 600, flexShrink: 0 }}>
                       {initialsOf(d.owner)}
@@ -815,6 +833,16 @@ export default function DesignClient({
                       >
                         Open
                       </Link>
+                      {estimateLinks[d.id] ? (
+                        <Link
+                          href={estimateLinks[d.id].href}
+                          title={openEstimateTitle(estimateLinks[d.id].number)}
+                          className="dd-accent-btn"
+                          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "10px 12px", borderRadius: 8, textDecoration: "none" }}
+                        >
+                          {GRID_LINK_COPY.openEstimate}
+                        </Link>
+                      ) : (
                       <button
                         onClick={() => promoteDesign(d.id)}
                         disabled={pending || incomplete}
@@ -824,6 +852,7 @@ export default function DesignClient({
                       >
                         {d.quoteId ? "Update quote →" : "Add to Quotes →"}
                       </button>
+                      )}
                       {/* #268 — rename + delete right on the card */}
                       {canCreate && (
                         <>

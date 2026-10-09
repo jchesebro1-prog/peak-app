@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { NewDesignButton } from "@/components/design/new-design-button";
 import { promoteDesignAction } from "./home-actions";
+import { GRID_LINK_COPY, drawingsForEstimateHint, openEstimateTitle } from "@/lib/design/estimate-grid-link";
 
 /**
  * "My designs" sandbox strip — port of Home.dc.html's Design Dashboard card.
@@ -28,6 +29,8 @@ export type DesignCard = {
   systemsLabel: string;
   edited: string;
   openHref: string;
+  /** #316: the design draws this Estimator quote — "Open estimate →" replaces Add to Quotes. */
+  estimate?: { number: string; href: string };
 };
 
 const ACCENT_SOFT = "var(--accent-soft)";
@@ -227,6 +230,9 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 6 }}>
                 {d.systemsLabel} · {d.edited}
               </div>
+              {d.estimate && (
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#5b616e", marginTop: 6 }}>{drawingsForEstimateHint(d.estimate.number)}</div>
+              )}
               {d.hint && (
                 <Link href={d.openHref} style={{ display: "block", fontSize: 11, lineHeight: 1.35, fontWeight: 600, color: "#a0442b", marginTop: 6, textDecoration: "none" }}>
                   {d.hint} →
@@ -258,6 +264,30 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
               >
                 Open
               </Link>
+              {d.estimate ? (
+                <Link
+                  href={d.estimate.href}
+                  title={openEstimateTitle(d.estimate.number)}
+                  className="pkh-accbtn"
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: "#fff",
+                    background: "var(--accent)",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    textDecoration: "none",
+                  }}
+                >
+                  {GRID_LINK_COPY.openEstimate}
+                </Link>
+              ) : (
               <button
                 onClick={() => promote(d.id)}
                 disabled={pendingId !== null || !!d.incomplete}
@@ -282,6 +312,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
               >
                 Add to Quotes →
               </button>
+              )}
             </div>
             {promoteError?.id === d.id && (
               <div style={{ padding: "0 14px 12px", fontSize: 11.5, lineHeight: 1.4, color: "#b4543a" }}>{promoteError.msg}</div>

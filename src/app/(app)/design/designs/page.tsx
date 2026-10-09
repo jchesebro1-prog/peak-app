@@ -10,6 +10,7 @@ import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
 import { getSettings } from "@/lib/settings";
 import { venueTypesFrom } from "@/lib/venue-types";
+import { estimateLinksForDesigns } from "@/lib/design/estimate-links-server";
 import DesignClient from "./design-client";
 import "./design.css";
 
@@ -47,6 +48,8 @@ export default async function Page({
   // D149/#118 — the selected design's rows from the shared tasks collection
   // (tasks.ts's designId pointer, added alongside this feature — no design
   // task UI existed before it). Mirrors the estimator page's tasksForQuote.
+  // #316: designs drawing an Estimator quote offer "Open estimate →", not Add to Quotes (one batched read).
+  const estimateLinks = await estimateLinksForDesigns(designs);
   const designTasks = sp.id ? await tasksForDesign(sp.id) : [];
 
   // Derived, not stored: the design record carries no back-pointer, so the
@@ -69,6 +72,7 @@ export default async function Page({
       canApprove={can("approve", user.roles)}
       canCreate={can("create", user.roles)}
       designs={designs}
+      estimateLinks={estimateLinks}
       selectedId={sp.id || null}
       roster={roster.map((u) => ({ name: u.name, initials: u.initials, color: u.color }))}
       prices={prices}

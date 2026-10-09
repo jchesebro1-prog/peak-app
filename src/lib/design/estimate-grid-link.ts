@@ -19,6 +19,9 @@ export const GRID_LINK_COPY = {
   open: "Open Grid design →",
   opening: "Opening the Grid…",
   saveFirst: "Save the estimate first.",
+  /** #316: the estimate's unsaved edits are written before the Grid opens. */
+  saving: "Saving…",
+  saveFailed: "Save the estimate first — it didn't save, so the Grid would miss your latest changes.",
   notSystem: "Only system estimates can be drawn in the Grid.",
   /** "Generate from Grid" with no linked design yet. */
   generateNeedsDesign: "Design in the Grid first.",
@@ -44,4 +47,13 @@ export function openEstimateTitle(quoteNumber: string): string {
 /** The intake's note where the Auto card would be. */
 export function estimateIntakeNote(quoteNumber: string): string {
   return `Parts come from estimate ${quoteNumber} — place them from the From estimate tray.`;
+}
+
+/** #316: a design that draws an Estimator quote — what the Designs dashboard and
+ *  Home → My designs show in place of "Add to Quotes" (plain data, client-safe). */
+export type EstimateLinkInfo = { quoteId: string; number: string; href: string };
+
+/** #316: the tooltip/hint on a design card whose parts and prices live in an estimate. */
+export function drawingsForEstimateHint(number: string): string {
+  return `Drawings for ${number}`;
 }

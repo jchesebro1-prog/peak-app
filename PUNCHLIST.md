@@ -11457,3 +11457,17 @@ Jeff: shorten the cover PDF; set who signs it without opening Quote details.
 - **Lead estimator / Prepared by** on Build package, above Cover & package: one shared `QuotePeopleFields` (dark in the
   header's Quote details, light on the step), same `changePeople` guard — only an approver hands a quote off. The cover
   signs as the Lead estimator, else Prepared by (`resolveCoverSigner`, unchanged).
+
+## 316. Grid link polish: no Add to Quotes on an estimate-linked design; Design in the Grid saves first — DONE 2026-10-09
+
+#314 follow-ups; no decision taken.
+
+- **Add to Quotes hidden** for a design whose Grid project is estimate-linked: the Designs dashboard (selected panel and
+  card) and Home → My designs show **Open estimate →** (the estimate's Estimator URL, tooltip names the estimate) and a
+  small "Drawings for EST-xxxx" line. One server rule, #314's `estimateLinkOf`, via `estimateLinksForDesigns`
+  (`src/lib/design/estimate-links-server.ts`): one `getProjects` + one `quoteNumbersFor` per page load, passed down as a
+  plain `estimateLinks` map. The server refusals in `createDraftQuoteAction` are unchanged.
+- **Design in the Grid saves first**: `PackageStaffPanel` takes an optional `beforeGrid`; Build package passes
+  `pdfDirty ? saveNow : undefined`, so the Grid's From-estimate tray (which reads the SAVED quote) sees the latest BOM. A
+  failed save stops the navigation ("Save the estimate first — it didn't save…"; the cause is in the Estimator's own
+  banner); the button reads "Saving…" meanwhile. Not covered: the existing-design "Open Grid design →" link does not save.

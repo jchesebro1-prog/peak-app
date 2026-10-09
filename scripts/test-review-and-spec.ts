@@ -59222,6 +59222,34 @@ import {
   const qb = rd("src/app/(app)/design/grid/[id]/workspace/quote-button.tsx");
   ok(qb.indexOf("if (estimateLink) {") < qb.indexOf("runQuote(false)") && rd("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx").includes("{estimateLink ? ("),
     "#314 pin: the Grid swaps Add to quotes / Create draft quote for Open estimate → on an estimate-linked design");
+
+  // #316: Add to Quotes is not offered on an estimate-linked design; the estimate is opened instead; Design in the Grid saves first.
+  const links316 = rd("src/lib/design/estimate-links-server.ts");
+  ok(links316.includes("estimateLinkOf(p)") && links316.includes("await getProjects(") && links316.includes("await quoteNumbersFor(") && !links316.includes("getProject("),
+    "#316 pin: the link lookup reuses estimateLinkOf and batches — one getProjects, one quoteNumbersFor, never a read per design");
+  const dpage = rd("src/app/(app)/design/designs/page.tsx"), dclient = rd("src/app/(app)/design/designs/design-client.tsx");
+  ok(dpage.includes("await estimateLinksForDesigns(designs)") && dpage.includes("estimateLinks={estimateLinks}") && dclient.includes("estimateLinks: Record<string, EstimateLinkInfo>") &&
+     dclient.includes("{estimateLinks[sel.id] ? (") && dclient.includes("{estimateLinks[d.id] ? (") &&
+     dclient.indexOf("{estimateLinks[sel.id] ? (") < dclient.indexOf("promoteDesign(sel.id)") && dclient.indexOf("{estimateLinks[d.id] ? (") < dclient.indexOf("promoteDesign(d.id)") &&
+     dclient.split("GRID_LINK_COPY.openEstimate").length === 3,
+    "#316 pin: the Designs dashboard (selected panel and card) renders Open estimate → instead of the Add to Quotes / Update quote button for an estimate-linked design, loaded in one batch by the page");
+  const hcards = rd("src/app/(app)/_dashboard/widgets/home-cards.tsx"), hmine = rd("src/app/(app)/home-my-designs.tsx");
+  ok(hcards.includes("await estimateLinksForDesigns(mine)") && hcards.includes("estimate: estimateLinks[d.id] ?") && hmine.includes("{d.estimate ? (") &&
+     hmine.indexOf("{d.estimate ? (") < hmine.indexOf("onClick={() => promote(d.id)}") && hmine.includes("GRID_LINK_COPY.openEstimate"),
+    "#316 pin: Home → My designs renders Open estimate → instead of Add to Quotes for an estimate-linked design, loaded in one batch by the widget");
+  ok(acts.includes("estimateRefusal(estimateLink.quoteId)") && rd("src/app/(app)/design/designs/actions.ts").includes("createDraftQuoteAction(d.gridProjectId, null)") && rd("src/app/(app)/home-actions.ts").includes("promoteDesignAction"),
+    "#316 pin: the server refusals stay — both dashboards' promote still goes through createDraftQuoteAction, which refuses an estimate-linked design");
+  const pstep = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  ok(pstep.includes("beforeGrid={pdfDirty ? saveNow : undefined}") && pstep.includes("    saveNow,\n") && !rd("src/app/(app)/estimator/steps/send-step.tsx").includes("beforeGrid") && !rd("src/app/(app)/estimator/client-link-panel.tsx").includes("beforeGrid"),
+    "#316 pin: Build package passes the Estimator's awaitable saveNow behind pdfDirty (the PrintButton pattern); the other PackageStaffPanel mounts do not");
+  const dig = panel.slice(panel.indexOf("const designInGrid = () =>"), panel.indexOf("const rebuild = () =>"));
+  ok(panel.includes("beforeGrid?: () => Promise<number | false>") && dig.includes("await beforeGrid()") && dig.indexOf("await beforeGrid()") < dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
+     /if \(saved === false\) \{\s*setErr\(GRID_LINK_COPY\.saveFailed\);\s*return;\s*\}/.test(dig) && dig.indexOf("setErr(GRID_LINK_COPY.saveFailed)") < dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
+     dig.includes("router.push(") && dig.indexOf("router.push(") > dig.indexOf("await openGridDesignForQuoteAction(quoteId)") &&
+     panel.includes("gridSaving ? GRID_LINK_COPY.saving : gridPending ? GRID_LINK_COPY.opening : GRID_LINK_COPY.design"),
+    "#316 pin: Design in the Grid awaits beforeGrid before openGridDesignForQuoteAction, stops (no navigation) on false with the save-first message, and reads 'Saving…' meanwhile");
+  ok(rd("src/lib/design/estimate-grid-link.ts").includes("didn't save, so the Grid would miss your latest changes."),
+    "#316 copy: the save-failed sentence names why the Grid did not open");
 }
 
 async function estimateGrid314AsyncChecks(): Promise<void> {
@@ -59317,6 +59345,18 @@ async function estimateGrid314AsyncChecks(): Promise<void> {
   const again = await (await import("@/lib/design/grid-plan-intake-server")).attachPlanCandidate(pn.id, "doc:DOC-1", "Test");
   ok(again.ok && again.sheetId === sh!.id && again.already === true && (await G.getProject(pn.id))!.sheetIds.length === before && (await G.getProject(pn.id))!.sheetIds[0] === sh!.id,
     "#314 review (DB): retrying a plan copy that already landed returns its sheet — no second sheet");
+
+  // #316: the dashboards' batched link lookup — the estimate-owned project only; a plain Grid project, a missing project and a quick design are absent.
+  const { estimateLinksForDesigns } = await import("@/lib/design/estimate-links-server");
+  const plain = await G.createProject({ name: "#316 plain", customer: "Spec fixture", customerId: null, by: "Test" });
+  registerFixture("grid_projects", plain.id);
+  const links = await estimateLinksForDesigns([
+    { id: "D-linked", gridProjectId: project.id }, { id: "D-plain", gridProjectId: plain.id },
+    { id: "D-gone", gridProjectId: "GP-does-not-exist" }, { id: "D-quick", gridProjectId: null }, { id: "D-quick2" },
+  ]);
+  ok(J314(Object.keys(links)) === J314(["D-linked"]) && links["D-linked"].quoteId === QID && links["D-linked"].href === "/estimator?id=" + encodeURIComponent(QID) && !!links["D-linked"].number,
+    "#316 (DB): only a design whose Grid project is estimate-linked gets an Open-estimate link (estimateLinkOf's rule); plain, missing and quick designs do not");
+  ok(J314(await estimateLinksForDesigns([])) === "{}", "#316 (DB): no designs, no reads, no links");
 }
 function J314(v: unknown): string {
   return JSON.stringify(v);

@@ -25,6 +25,7 @@ import HomeQueue, { type QueueRow } from "../../home-queue";
 import HomeInbox from "../../home-inbox";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "../../home-my-leads";
 import HomeMyDesigns, { type DesignCard } from "../../home-my-designs";
+import { estimateLinksForDesigns } from "@/lib/design/estimate-links-server";
 import HomePipeline, { type PipelineRow } from "../../home-pipeline";
 import HomeCatalog from "../../home-catalog";
 import HomeCalendar from "../../home-calendar";
@@ -132,7 +133,11 @@ export const HOME_RENDERERS = {
   /* ---- my designs (page.tsx 427-441) ---- */
   "my-designs": async (ctx) => {
     const designsAll = await ctx.data.designs();
-    const cards: DesignCard[] = designsAll.filter((d) => d.owner === ctx.user.name).map((d) => ({
+    const mine = designsAll.filter((d) => d.owner === ctx.user.name);
+    // #316: a design that draws an Estimator quote offers "Open estimate →", not Add to Quotes (one batched read).
+    const estimateLinks = await estimateLinksForDesigns(mine);
+    const cards: DesignCard[] = mine.map((d) => ({
+      estimate: estimateLinks[d.id] ? { number: estimateLinks[d.id].number, href: estimateLinks[d.id].href } : undefined,
       id: d.id, venue: d.venue || "—", name: d.name,
       tier: (d.tier || "better").replace(/^./, (c) => c.toUpperCase()),
       // #211 final review I1: the shared label — "Incomplete" while any line
