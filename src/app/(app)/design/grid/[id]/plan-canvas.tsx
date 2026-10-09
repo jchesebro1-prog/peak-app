@@ -11,6 +11,7 @@ import { ObjectSymbol } from "@/components/design/object-symbol";
 import { polygonCentroid } from "@/lib/design/grid-geometry";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { markerBox } from "@/lib/design/grid-symbol-display";
+import { DESIGNATOR_DUPLICATE_COLOR, formatDesignator } from "@/lib/design/designators";
 import CurtainDrop from "./curtain-drop";
 import PlanLegend from "./plan-legend";
 import type { GridEditor } from "./use-grid-editor";
@@ -75,6 +76,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     symbolCtx,
     symbolDisplay,
     symbolUrls,
+    designatorDupes,
     selectedIds,
     marquee,
     cancelGesture,
@@ -511,13 +513,18 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
               // with — reads far better on the plan than the raw
               // placeholder partId.
               const q = placementQty(pl);
-              const label =
-                (pl.curtain
-                  ? pl.curtain.name
-                  : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category : undefined) || pl.partId) +
-                (q > 1 ? ` ×${q}` : "");
+              const name = part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category : undefined) || pl.partId;
+              // #320: a device reads by its designator — a lot by its range, so
+              // no ×N; a device not yet numbered falls back to its description.
+              // Curtains keep their name.
+              const tag = pl.curtain ? "" : formatDesignator(pl.designator, q);
+              const label = pl.curtain ? pl.curtain.name + (q > 1 ? ` ×${q}` : "") : tag || name + (q > 1 ? ` ×${q}` : "");
+              const ink = !pl.curtain && designatorDupes.has(pl.id) ? DESIGNATOR_DUPLICATE_COLOR : c;
+              const model = part?.virtual ? "" : part?.modelNumber || part?.sku || "";
+              const hover = pl.curtain ? pl.curtain.name : [tag, model !== name ? model : "", name].filter(Boolean).join(" · ");
               return (
                 <g key={pl.id}>
+                  <title>{hover}</title>
                   {pl.curtain ? (
                     <>
                       <rect x={x - 11 * s} y={y - 8 * s} width={22 * s} height={16 * s} rx={2 * s} fill={c} opacity={0.92} />
@@ -570,8 +577,8 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                       })()}
                     </>
                   )}
-                  <rect x={x + 12 * s} y={y - 8} width={Math.max(30, label.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={c} strokeWidth={1} opacity={0.95} />
-                  <text x={x + 12 * s + 4} y={y + 4} fill={c} fontSize={10.5} fontWeight={700} style={{ fontFamily: "inherit" }}>
+                  <rect x={x + 12 * s} y={y - 8} width={Math.max(22, label.length * 6.4) + 8} height={16} rx={4} fill="#fff" stroke={ink} strokeWidth={1} opacity={0.95} />
+                  <text x={x + 12 * s + 4} y={y + 4} fill={ink} fontSize={10.5} fontWeight={700} style={{ fontFamily: "inherit" }}>
                     {label}
                   </text>
                   {on && (

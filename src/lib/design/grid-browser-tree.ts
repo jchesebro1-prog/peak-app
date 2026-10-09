@@ -44,16 +44,19 @@ export type BrowserTreeInput = {
   membersOf: (pl: GridPlacement) => string[];
   /** A wire run's part desc. */
   wireName: (r: GridRoute) => string;
+  /** #320: a device leaf's own label (`MIC-1 · SM57`); null/absent → the
+   *  name (×qty for a lot), as before. Groups keep the name. */
+  leafLabel?: (pl: GridPlacement) => string | null;
 };
 
 const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-function deviceNode(pl: GridPlacement, name: string, members: string[]): TreeNode {
+function deviceNode(pl: GridPlacement, name: string, members: string[], leaf?: string | null): TreeNode {
   const qty = placementQty(pl);
   const node: TreeNode = {
     key: `pl:${pl.id}`,
     kind: "device",
-    label: qty > 1 ? `${name} ×${qty}` : name,
+    label: leaf || (qty > 1 ? `${name} ×${qty}` : name),
     sheetId: pl.sheetId,
     page: pl.page,
     placementIds: [pl.id],
@@ -83,7 +86,7 @@ function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeIn
   return [...byName.entries()]
     .sort(([a], [b]) => byText(a, b))
     .map(([name, list]) => {
-      if (list.length === 1) return deviceNode(list[0], name, i.membersOf(list[0]));
+      if (list.length === 1) return deviceNode(list[0], name, i.membersOf(list[0]), i.leafLabel?.(list[0]));
       const sum = list.reduce((n, pl) => n + placementQty(pl), 0);
       return {
         key: `group:${containerKey}:${name}`,
@@ -93,7 +96,7 @@ function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeIn
         sheetId: list[0].sheetId,
         page: list[0].page,
         placementIds: list.map((pl) => pl.id),
-        children: list.map((pl) => deviceNode(pl, name, i.membersOf(pl))),
+        children: list.map((pl) => deviceNode(pl, name, i.membersOf(pl), i.leafLabel?.(pl))),
       };
     });
 }

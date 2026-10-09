@@ -60,7 +60,9 @@ import {
   placeCurtainAction,
   placeDeviceAction,
   removePlacementsAction,
+  renumberDesignatorsAction,
   replacePlacementsPartAction,
+  setDesignatorsAction,
   restoreItemsAction,
   setPlacementsCategoryAction,
   setSymbolDisplayAction,
@@ -72,6 +74,7 @@ import {
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
+import { duplicates, type RenumberTarget } from "@/lib/design/designators";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
@@ -431,6 +434,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   const active = useMemo(() => optionSlice(project, activeOptionId), [project, activeOptionId]);
   const placements = active.placements;
   const routes = active.routes;
+  /** #320: devices whose designator another device of this option also holds — drawn amber. */
+  const designatorDupes = useMemo(() => duplicates(placements), [placements]);
   const optionCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const pl of project.placements) m.set(pl.optionId || project.options[0].id, (m.get(pl.optionId || project.options[0].id) || 0) + 1);
@@ -2272,6 +2277,89 @@ function useGridEditorImpl(props: GridEditorProps) {
     [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge, record]
   );
 
+  /* ------------------------- designators (#320) ------------------------- */
+
+  /** Set (or, with "", re-issue) designators — one write, one undo step.
+   *  Resolves true when it saved. */
+  const saveDesignators = useCallback(
+    async (items: { id: string; designator: string }[]): Promise<boolean> => {
+      if (!items.length) return false;
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setDesignatorsAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        const one = items.length === 1 ? items[0].designator.trim() : "";
+        noteAction(items.length > 1 ? `Set ${items.length} designators` : one ? `Designator ${one}` : "Re-issued a designator");
+        record({ label: stepLabel("set designator", items.length), forward: { kind: "designator", items }, inverse: { kind: "designator", items: r.previous } });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, router, noteAction, flushNudge, record]
+  );
+
+  /** Renumber… on the active option: `what` names the target in the status bar. */
+  const renumberDesignators = useCallback(
+    async (target: RenumberTarget, what: string): Promise<boolean> => {
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await renumberDesignatorsAction(project.id, activeOptionId, target);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        if (!r.next.length) {
+          noteAction(`Renumber ${what}: already in order`);
+          return true;
+        }
+        noteAction(`Renumbered ${what} — ${r.next.length} changed`);
+        record({
+          label: stepLabel("renumber", r.next.length),
+          forward: { kind: "designator", items: r.next, keepAuto: true },
+          inverse: { kind: "designator", items: r.previous, keepAuto: true },
+        });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, activeOptionId, router, noteAction, flushNudge, record]
+  );
+
+  /** Select devices from a list (the Devices tab) and show the focused one's
+   *  sheet and page on the plan. */
+  const focusPlacements = useCallback(
+    (ids: string[], focusId?: string) => {
+      const target = placements.find((pl) => pl.id === (focusId ?? ids[0]));
+      if (target && (target.sheetId !== activeSheetId || target.page !== page)) {
+        setActiveSheetId(target.sheetId);
+        setPage(target.page);
+        resetSheetState();
+      }
+      setSelectedIds(ids);
+      setSelectedSpaceId(null);
+      setSelectedRouteId(null);
+      setCategoryDraft(null);
+    },
+    [placements, activeSheetId, page, resetSheetState]
+  );
+
   /* ------------------------- clipboard (#299) ------------------------- */
 
   /** The copied devices. The ref is what handlers read (duplicate copies
@@ -2514,6 +2602,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         }
         case "part": {
           const r = await replacePlacementsPartAction(project.id, c.items);
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
+        case "designator": {
+          const r = await setDesignatorsAction(project.id, c.items, { keepAuto: c.keepAuto === true });
           if (!r.ok) return r;
           router.refresh();
           return { ok: true };
@@ -2896,6 +2990,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     distributeSelected,
     setCategoryForSelected,
     replacePartForSelected,
+    designatorDupes,
+    saveDesignators,
+    renumberDesignators,
+    focusPlacements,
     clipboard,
     copySelected,
     cutSelected,

@@ -11,6 +11,7 @@ import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { TIERS } from "@/app/(app)/design/quick/engine";
 import { UNMAPPED_TYPE } from "@/lib/design/device-types";
+import { cleanDesignator, DESIGNATOR_DUPLICATE_COLOR, DESIGNATOR_MAX, designatorList, formatDesignator } from "@/lib/design/designators";
 import type { GridPlacement, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import SymbolLookPanel from "../symbol-look-panel";
 import { Breakdown, SpaceEditor } from "../spaces-panel";
@@ -263,6 +264,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   return (
     <>
       <PropSection title={selectedPlacement.curtain ? "Selected curtain" : "Selected device"} />
+      {!selectedPlacement.curtain && <DesignatorRow key={selectedPlacement.id} ed={ed} pl={selectedPlacement} />}
       <PropRow label={selectedPlacement.curtain ? "Curtain" : "Part"}>
         <strong style={{ fontWeight: 600 }}>
           {selectedPlacement.curtain
@@ -431,6 +433,68 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   );
 }
 
+/** #320: the device's designator — click to edit; Enter saves, Esc cancels;
+ *  an empty value re-issues the next free number. Keyed by the device, so
+ *  the draft resets when the selection changes. */
+function DesignatorRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
+  const { busy, designatorDupes, saveDesignators } = ed;
+  const [draft, setDraft] = useState<string | null>(null);
+  const qty = placementQty(pl);
+  const shown = formatDesignator(pl.designator, qty);
+  const dupe = designatorDupes.has(pl.id);
+  const save = async () => {
+    if (draft === null) return;
+    if ((cleanDesignator(draft) ?? "") === (pl.designator ?? "")) {
+      setDraft(null);
+      return;
+    }
+    if (await saveDesignators([{ id: pl.id, designator: draft }])) setDraft(null);
+  };
+  return (
+    <PropRow label="Designator" title={qty > 1 ? `A lot of ${qty} holds ${shown}` : "Click to rename — leave it empty to take the next free number"}>
+      {draft === null ? (
+        <button
+          type="button"
+          style={{
+            ...BTN,
+            width: "100%",
+            padding: "3px 7px",
+            fontSize: 11,
+            fontWeight: 700,
+            textAlign: "left",
+            fontFamily: "var(--font-mono)",
+            ...(dupe ? { color: DESIGNATOR_DUPLICATE_COLOR, borderColor: DESIGNATOR_DUPLICATE_COLOR } : {}),
+          }}
+          onClick={() => setDraft(pl.designator ?? "")}
+        >
+          {shown || "+ Add a designator"}
+        </button>
+      ) : (
+        <span style={{ display: "flex", gap: 5 }}>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={DESIGNATOR_MAX}
+            placeholder="Blank = next free number"
+            aria-label="Designator"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setDraft(null);
+              if (e.key === "Enter" && !busy) void save();
+            }}
+            style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", minWidth: 0, fontFamily: "var(--font-mono)" }}
+            autoFocus
+          />
+          <button type="button" style={{ ...BTN, padding: "3px 8px", fontSize: 11 }} disabled={busy} onClick={() => void save()}>
+            Save
+          </button>
+        </span>
+      )}
+      {dupe && draft === null && <div style={{ fontSize: 10.5, color: DESIGNATOR_DUPLICATE_COLOR, marginTop: 3 }}>Another device uses this designator.</div>}
+    </PropRow>
+  );
+}
+
+
 /* ------------------------------ several at once ------------------------------ */
 
 /** One value when every item agrees, else null (the row reads "Mixed"). */
@@ -485,6 +549,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
     categoryCounts,
     setCategoryForSelected,
     replacePartForSelected,
+    renumberDesignators,
     removeSelected,
   } = ed;
   const n = pls.length;
@@ -550,6 +615,26 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
           </button>
         </span>
       </PropRow>
+
+      {curtainCount < n && (
+        <PropRow label="Designators" title="Renumber the selected devices in reading order — they take the lowest free numbers of their codes">
+          <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
+            <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {designatorList(pls.filter((pl) => !pl.curtain)) || "—"}
+            </span>
+            <button
+              type="button"
+              style={{ ...BTN, padding: "3px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" }}
+              disabled={busy}
+              onClick={() => void renumberDesignators({ ids: pls.filter((pl) => !pl.curtain).map((pl) => pl.id) }, "the selection")}
+            >
+              Renumber selection
+            </button>
+          </span>
+        </PropRow>
+      )}
+
+      {/* A curtain's part is its fabric — the server refuses the swap, so
 
       {/* A curtain's part is its fabric — the server refuses the swap, so
           Replace is offered only on a devices-only selection. */}

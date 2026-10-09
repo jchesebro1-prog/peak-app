@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { blobEnabled } from "@/lib/blob";
 import { can } from "@/lib/team";
-import { getProject, listSheets } from "@/lib/stores/grid-projects";
+import { ensureDesignators, getProject, listSheets } from "@/lib/stores/grid-projects";
 import { defaultOptionId, estimateLinkOf, resolveOptionId } from "@/lib/design/grid-options";
 import { coverFromVenue } from "@/lib/design/grid-intake";
 import { loadEstimateTray } from "@/lib/design/estimate-tray-server";
@@ -233,6 +233,13 @@ export default async function GridEditorPage({
     console.error("[grid] object symbol lookup failed:", e);
     return {};
   });
+  // #320: number every device that has no designator yet (a design drawn
+  // before #320) — one write, none at all when nothing is missing, codes from
+  // the parts this request already built. Never fatal.
+  const designed = await ensureDesignators(project, { parts, deviceTypes }).catch((e: unknown) => {
+    console.error("[grid] designators failed:", e);
+    return project;
+  });
 
 
   /**
@@ -289,7 +296,7 @@ export default async function GridEditorPage({
   // (catalog fallback + virtual parts + riser view), so the two never differ.
   // A schedule fault must not take the editor down with it either — the view
   // says it couldn't be built and points at the printable page's own error.
-  const schedule = await scheduleForOption(project, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded }).catch(
+  const schedule = await scheduleForOption(designed, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded }).catch(
     (e: unknown) => {
       console.error("[grid] schedule build failed:", e);
       return null;
@@ -333,7 +340,7 @@ export default async function GridEditorPage({
         quoteId: project.quoteId,
         options: project.options || [],
         scopeInputs: project.scopeInputs || null,
-        placements: project.placements || [],
+        placements: designed.placements || [],
         calibrations: project.calibrations || [],
         spaces: project.spaces || [],
         routes: project.routes || [],

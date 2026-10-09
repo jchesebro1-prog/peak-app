@@ -11530,6 +11530,7 @@ seeded()
   .then(() => sheetAdjust318StaleSheetChecks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
+  .then(() => designators320EditorChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60324,4 +60325,57 @@ async function designators320StoreChecks(): Promise<void> {
   // Two adds at once never hand out the same number among what landed.
   await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
   ok(D.duplicates(optSlice(await proj(), opt)).size === 0, "#320 concurrent adds: numbers come from the doc each patch read — no duplicate among the survivors");
+}
+
+/* ---------------- #320: Grid device designators — editor wiring ---------------- */
+async function designators320EditorChecks(): Promise<void> {
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const D = await import("@/lib/design/designators");
+  const TR = await import("@/lib/design/grid-browser-tree");
+  const U = await import("@/lib/design/grid-undo");
+
+  const tree = TR.browserTree({
+    designName: "D",
+    sheets: [{ id: "s1", name: "Base" }],
+    placements: [
+      { id: "a", sheetId: "s1", page: 1, x: 0.1, y: 0.1, partId: "P", designator: "MIC-1", by: "t", at: 1 },
+      { id: "b", sheetId: "s1", page: 1, x: 0.2, y: 0.1, partId: "P", designator: "MIC-2", qty: 3, by: "t", at: 1 },
+    ] as never,
+    spaces: [],
+    routes: [],
+    nameOf: () => "Shure SM57 dynamic mic",
+    membersOf: () => [],
+    wireName: () => "",
+    leafLabel: (pl) => `${D.formatDesignator(pl.designator, pl.qty)} · SM57`,
+  });
+  const group = tree.children![0].children![0].children![0];
+  ok(group.label === "Shure SM57 dynamic mic ×4" && group.children!.map((n) => n.label).join("|") === "MIC-1 · SM57|MIC-2–4 · SM57",
+    "#320 Browser tree: device leaves read designator · model (a lot by its range); groups keep the description");
+  const entry = { label: "set designator (1 device)", forward: { kind: "designator" as const, items: [{ id: "a", designator: "MIC-9" }] }, inverse: { kind: "designator" as const, items: [{ id: "a", designator: "MIC-1" }], keepAuto: true } };
+  ok(U.pushUndo(U.emptyUndo(), entry).past[0].inverse.kind === "designator", "#320 undo: a designator edit is one undo step");
+
+  const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  const body = (name: string) => { const i = acts.indexOf(`export async function ${name}(`); if (i < 0) return ""; const j = acts.indexOf("export async function", i + 10); return acts.slice(i, j < 0 ? undefined : j); };
+  ok(["setDesignatorsAction", "renumberDesignatorsAction"].every((n) => body(n).includes("await requireUser();")) &&
+     body("setDesignatorsAction").includes("setPlacementsDesignator(") && body("renumberDesignatorsAction").includes("renumberDesignators("),
+    "#320 actions: both designator actions are authed like every placement edit and write through the store");
+  const clean = acts.slice(acts.indexOf("async function cleanRestoredPlacement("), acts.indexOf("export async function restoreItemsAction("));
+  ok(clean.includes("const designator = curtain ? null : cleanDesignator(raw.designator);") && clean.includes("...(designator ? { designator } : {}),"),
+    "#320 undo restore keeps a device's designator (whitelisted, cleaned; never on a curtain)");
+  ok(body("replacePlacementsPartAction").includes("...(it.designator !== undefined ? { designator: it.designator } : {})"), "#320 Replace part's undo carries the designator back");
+  const page = rd("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(page.includes("await ensureDesignators(project, { parts, deviceTypes })") && page.includes("placements: designed.placements || [],") && page.includes("scheduleForOption(designed, activeOptionId,"),
+    "#320 page: the editor numbers any device missing a designator before it renders");
+  const canvas = rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
+  ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
+    "#320 plan: a device is labelled by its designator (a lot by its range, no ×N), with a hover title; duplicates drawn amber");
+  const prop = rd("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
+  ok(prop.includes('<PropRow label="Designator"') && prop.includes("<DesignatorRow key={selectedPlacement.id}") && prop.includes("Renumber selection"),
+    "#320 Property Editor: an editable Designator row; several selected → Renumber selection");
+  const btree = rd("src/app/(app)/design/grid/[id]/workspace/browser-tree.tsx");
+  ok(btree.includes("leafLabel: (pl: GridPlacement) =>"), "#320 the Browser tab passes the designator leaf label");
+  const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes('case "designator": {') && hook.includes("setDesignatorsAction(project.id, c.items, { keepAuto: c.keepAuto === true })") &&
+     hook.includes("const designatorDupes = useMemo(() => duplicates(placements), [placements]);") && hook.includes("keepAuto: true"),
+    "#320 hook: duplicates per option, edits and Renumber are undoable steps (Renumber keeps the auto tag)");
 }
