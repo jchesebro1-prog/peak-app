@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   changedPages,
@@ -86,6 +87,30 @@ export default function SheetAdjustDialog({
   useEffect(() => {
     rootRef.current?.focus();
   }, []);
+  // Focus never leaves the dialog: a clicked control that then disables (Reset
+  // at identity, Done while saving, ‹ › at the ends) drops focus to <body>, where
+  // Escape would stop cancelling. After every render, pull it back to the root.
+  useEffect(() => {
+    const root = rootRef.current;
+    const a = document.activeElement;
+    if (root && (!a || !root.contains(a) || (a instanceof HTMLButtonElement && a.disabled) || (a instanceof HTMLInputElement && a.disabled))) root.focus();
+  });
+
+  /* Done succeeded: the editor closes this once the refreshed sheet list carries
+     the new sheet. If that refresh never lands, retry it once, then offer Reload
+     (safe — the swap is already saved). */
+  const router = useRouter();
+  const [awaitingSwap, setAwaitingSwap] = useState(false);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (!awaitingSwap) return;
+    const retry = setTimeout(() => router.refresh(), 6000);
+    const giveUp = setTimeout(() => setStuck(true), 15000);
+    return () => {
+      clearTimeout(retry);
+      clearTimeout(giveUp);
+    };
+  }, [awaitingSwap, router]);
 
   /* PDF: rendered at `zoom`; the canvas size it reports gives the page's size at zoom 1. */
   const [zoom, setZoom] = useState(0.5);
@@ -150,6 +175,7 @@ export default function SheetAdjustDialog({
     }
     // Stays "Saving…" — the editor closes this dialog once the refreshed
     // sheet list carries the new sheet, so nothing acts on the old one meanwhile.
+    setAwaitingSwap(true);
     onDone(r.sheetId);
   };
 
@@ -168,6 +194,18 @@ export default function SheetAdjustDialog({
         if (e.key === "Escape" && !saving) {
           e.preventDefault();
           onCancel();
+        } else if (e.key === "Tab") {
+          // Tab cycles inside the dialog (the workspace behind it is inert).
+          const els = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled])"));
+          const a = document.activeElement;
+          if (!els.length) e.preventDefault();
+          else if (e.shiftKey && (a === els[0] || a === e.currentTarget)) {
+            e.preventDefault();
+            els[els.length - 1].focus();
+          } else if (!e.shiftKey && a === els[els.length - 1]) {
+            e.preventDefault();
+            els[0].focus();
+          }
         }
       }}
       style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", flexDirection: "column", background: "#2b2d31", color: "#e6e8ec", outline: "none" }}
@@ -182,7 +220,13 @@ export default function SheetAdjustDialog({
         <button type="button" style={BTN} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "cw"))} title="Turn the page a quarter turn to the right">⟳ Rotate right</button>
         <button type="button" style={BTN} disabled={!!locked || saving || isIdentity(cur)} onClick={() => apply(IDENTITY_ADJUST)} title="Back to the full, unturned page">Reset</button>
         <button type="button" style={BTN} disabled={saving} onClick={onCancel}>{afterUpload ? "Skip" : "Cancel"}</button>
-        <button type="button" style={PRIMARY} disabled={saving} onClick={() => void done()}>{saving ? "Saving…" : "Done"}</button>
+        {stuck ? (
+          <button type="button" style={PRIMARY} onClick={() => window.location.reload()} title="Your crop and rotation are saved — reload to open the new sheet">
+            Reload
+          </button>
+        ) : (
+          <button type="button" style={PRIMARY} disabled={saving} onClick={() => void done()}>{saving ? "Saving…" : "Done"}</button>
+        )}
       </div>
       {isPdf && pageCount > 1 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 14px", borderBottom: "1px solid #3d4047", fontSize: 12.5 }}>

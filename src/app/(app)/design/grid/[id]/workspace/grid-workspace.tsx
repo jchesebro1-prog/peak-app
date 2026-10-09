@@ -115,7 +115,9 @@ export default function GridWorkspace({
     // The wrapper takes the main area's full height (.pk-main is the shell's
     // flex:1 item, so 100% resolves); the grid inside is pinned to it, so no
     // pane's content can ever stretch the page into scrolling.
-    <div style={{ position: "relative", height: "100%", minHeight: 480, overflow: "hidden", background: "#fff" }}>
+    // #318: inert under the Adjust sheet dialog (rendered beside, not inside,
+    // this tree) — no Tab, click or key reaches the editor behind it.
+    <div inert={ed.adjustOpen} style={{ position: "relative", height: "100%", minHeight: 480, overflow: "hidden", background: "#fff" }}>
       <div
         data-grid-tool={ed.tool}
         style={{

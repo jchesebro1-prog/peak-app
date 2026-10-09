@@ -482,6 +482,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   if (requestedAdjust && requestedAdjust !== adjustApplied && sheets.some((s) => s.id === requestedAdjust)) {
     setAdjustApplied(requestedAdjust);
     setAdjusting({ sheetId: requestedAdjust, afterUpload: true });
+    setSelectedIds([]);
     setActiveSheetId(requestedAdjust);
     setPage(1);
   }
@@ -491,11 +492,19 @@ function useGridEditorImpl(props: GridEditorProps) {
     setAdjustSwap(null);
     setAdjusting(null);
   }
-  const openAdjust = useCallback((sheetId: string, afterUpload = false) => setAdjusting({ sheetId, afterUpload }), []);
+  const openAdjust = useCallback((sheetId: string, afterUpload = false) => {
+    // Defence in depth: nothing stays selected behind the dialog.
+    setSelectedIds([]);
+    setAdjusting({ sheetId, afterUpload });
+  }, []);
   /** The sheet open in Adjust sheet — null until a just-uploaded sheet arrives in `sheets`. */
   const adjustTarget = adjusting ? (sheets.find((s) => s.id === adjusting.sheetId) ?? null) : null;
+  /** The dialog is on screen (Saving… included): the editor's key handlers stand down. */
+  const adjustOpen = !!adjustTarget;
   const adjustAfterUpload = adjusting?.afterUpload ?? false;
-  const adjustLocks = useMemo(() => (adjustTarget ? pageLocks(project, adjustTarget.id) : {}), [project, adjustTarget]);
+  /** Page locks per listed sheet — one scan per project/sheets change, not per tab per render. */
+  const locksBySheet = useMemo(() => new Map(sheets.map((s) => [s.id, pageLocks(project, s.id)] as const)), [project, sheets]);
+  const adjustLocks = useMemo(() => (adjustTarget ? (locksBySheet.get(adjustTarget.id) ?? {}) : {}), [locksBySheet, adjustTarget]);
   const [pages, setPages] = useState(1);
   const [zoom, setZoom] = useState(1.25);
   const [size, setSize] = useState({ w: 900, h: 1200 });
@@ -1282,6 +1291,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   // otherwise lose its arrow keys, hence the editable-target bail-out. Inert
   // while any drawing mode owns the canvas.
   useEffect(() => {
+    // #318: never under the Adjust sheet dialog, wherever focus fell.
+    if (adjustOpen) return;
     if (!selectedPlacements.length) return;
     // #299: the plan is hidden in Spreadsheet view — nothing to nudge there.
     if (view !== "plan") return;
@@ -1371,6 +1382,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     spaceDrawing,
     wireDrawing,
     view,
+    adjustOpen,
   ]);
 
   // A pending nudge must not outlive the editor.
@@ -2061,6 +2073,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       const from = adjusting?.sheetId ?? null;
       if (from) setAdjustSwap({ from, to: newSheetId });
       else setAdjusting(null);
+      // The server remaps intake.planSheetId too: the refreshed focus sheet is
+      // the new id — already applied, so focus adoption doesn't jump to page 1.
+      if (from && from === focusSheetId) setFocusApplied(newSheetId);
       if (from !== sheet?.id) setPage(1);
       setActiveSheetId(newSheetId);
       resetSheetState();
@@ -2070,7 +2085,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       // the undo stack's recorded bundles would restore onto the old one.
       onStructuralChange();
     },
-    [adjustTarget, adjusting, sheet?.id, resetSheetState, noteAction, dropAdjustParam, onStructuralChange]
+    [adjustTarget, adjusting, focusSheetId, sheet?.id, resetSheetState, noteAction, dropAdjustParam, onStructuralChange]
   );
 
   /** #318: the ⋯ menu's Crop & rotate… for one tab — never on the generated
@@ -2081,11 +2096,11 @@ function useGridEditorImpl(props: GridEditorProps) {
       const sheetIsPdf = s.mime === "application/pdf" || s.name.toLowerCase().endsWith(".pdf");
       // A PDF's page count is known only for the sheet on screen; any other PDF opens and shows its locked pages.
       const count = !sheetIsPdf ? 1 : s.id === sheet?.id ? pages : 0;
-      return allPagesLocked(pageLocks(project, s.id), count)
+      return allPagesLocked(locksBySheet.get(s.id) ?? {}, count)
         ? { hidden: false, disabled: true, title: "Every page of this sheet has devices, spaces, wires or a scale on it — crop and rotate only work on an empty page." }
         : { hidden: false, disabled: false, title: "Crop the sheet to the plan and turn it upright — pages with anything on them stay as they are" };
     },
-    [project, sheet?.id, pages]
+    [locksBySheet, sheet?.id, pages]
   );
 
   /** Zoom from the toolbar's % field — clamped, rounded to whole percent. */
@@ -2567,6 +2582,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   // device. Same guards as the arrow-key nudge: never while typing, never
   // under a dialog or a data-no-nudge element, never with a modifier.
   useEffect(() => {
+    // #318: never under the Adjust sheet dialog — a click on a control that then
+    // disables drops focus to <body>, outside [role="dialog"].
+    if (adjustOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const t = e.target instanceof Element ? e.target : null;
@@ -2649,7 +2667,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo]);
+  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo, adjustOpen]);
 
   return {
     router,
@@ -2884,6 +2902,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     record,
     onStructuralChange,
     adjustTarget,
+    adjustOpen,
     adjustAfterUpload,
     adjustLocks,
     openAdjust,

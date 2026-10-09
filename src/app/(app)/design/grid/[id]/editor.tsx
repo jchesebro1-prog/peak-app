@@ -32,44 +32,47 @@ import SheetAdjustDialog from "./workspace/sheet-adjust-dialog";
 export default function GridEditor(props: GridEditorProps) {
   const ed = useGridEditor(props);
   return (
-    <GridWorkspace
-      ed={ed}
-      toolbar={<Toolbar ed={ed} />}
-      left={
-        <>
-          <PropertyEditor ed={ed} />
-          <SystemStatus ed={ed} />
-          <Targets ed={ed} />
-        </>
-      }
-      right={<RightPane ed={ed} />}
-      bottom={<ProductLibrary ed={ed} />}
-      center={
-        <>
-          <SheetTabs ed={ed} />
-          <IntakeNotices ed={ed} />
-          <CalibratePrompt ed={ed} />
-          {/* The plan stays mounted while the Spreadsheet view shows, so the
-              PDF render, zoom and scroll survive the round trip. */}
-          <div style={{ display: ed.view === "plan" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0 }}>
-            <PlanCanvas ed={ed} onDropPart={ed.placeAt} />
-          </div>
-          {ed.view === "sheet" && <SpreadsheetView ed={ed} />}
-          <ViewTabs ed={ed} />
-          {ed.adjustTarget && (
-            <SheetAdjustDialog
-              key={ed.adjustTarget.id}
-              projectId={ed.project.id}
-              sheet={ed.adjustTarget}
-              locks={ed.adjustLocks}
-              afterUpload={ed.adjustAfterUpload}
-              onCancel={ed.closeAdjust}
-              onDone={ed.finishAdjust}
-            />
-          )}
-        </>
-      }
-      status={<StatusBar ed={ed} />}
-    />
+    <>
+      <GridWorkspace
+        ed={ed}
+        toolbar={<Toolbar ed={ed} />}
+        left={
+          <>
+            <PropertyEditor ed={ed} />
+            <SystemStatus ed={ed} />
+            <Targets ed={ed} />
+          </>
+        }
+        right={<RightPane ed={ed} />}
+        bottom={<ProductLibrary ed={ed} />}
+        center={
+          <>
+            <SheetTabs ed={ed} />
+            <IntakeNotices ed={ed} />
+            <CalibratePrompt ed={ed} />
+            {/* The plan stays mounted while the Spreadsheet view shows, so the
+                PDF render, zoom and scroll survive the round trip. */}
+            <div style={{ display: ed.view === "plan" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0 }}>
+              <PlanCanvas ed={ed} onDropPart={ed.placeAt} />
+            </div>
+            {ed.view === "sheet" && <SpreadsheetView ed={ed} />}
+            <ViewTabs ed={ed} />
+          </>
+        }
+        status={<StatusBar ed={ed} />}
+      />
+      {/* #318: beside the workspace, which goes inert while this is open. */}
+      {ed.adjustTarget && (
+        <SheetAdjustDialog
+          key={ed.adjustTarget.id}
+          projectId={ed.project.id}
+          sheet={ed.adjustTarget}
+          locks={ed.adjustLocks}
+          afterUpload={ed.adjustAfterUpload}
+          onCancel={ed.closeAdjust}
+          onDone={ed.finishAdjust}
+        />
+      )}
+    </>
   );
 }

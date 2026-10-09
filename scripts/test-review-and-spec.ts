@@ -11526,6 +11526,7 @@ seeded()
   .then(() => sheetAdjust318StoreChecks())
   .then(() => sheetUpload318Checks())
   .then(() => sheetAdjust318UiPins())
+  .then(() => sheetAdjust318DialogGuardPins())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59965,4 +59966,25 @@ async function sheetAdjust318UiPins(): Promise<void> {
     "#318 pin: the intake finishes by opening its plan view (uploaded or copied) in Adjust sheet");
   const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(ed.includes("{ed.adjustTarget && (") && ed.includes("onDone={ed.finishAdjust}"), "#318 pin: the editor renders the dialog for the sheet being adjusted");
+}
+
+/* ---------------- #318: Adjust sheet — fix round 1 (keys, focus, reload, locks) ---------------- */
+async function sheetAdjust318DialogGuardPins(): Promise<void> {
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.split("if (adjustOpen) return;").length === 3 && hook.includes("const adjustOpen = !!adjustTarget;") &&
+     hook.includes("view,\n    adjustOpen,\n  ]);") && hook.includes("undo, redo, adjustOpen]);"),
+    "#318 fix: both editor key handlers (nudge + shortcuts) stand down while Adjust sheet is open, wherever focus fell");
+  const ws = rd("src/app/(app)/design/grid/[id]/workspace/grid-workspace.tsx");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ws.includes("inert={ed.adjustOpen}") && ed.indexOf("<SheetAdjustDialog") > ed.indexOf("status={<StatusBar ed={ed} />}"),
+    "#318 fix: the workspace goes inert under the dialog, which renders beside it (not inside the inert tree)");
+  const dlg = rd("src/app/(app)/design/grid/[id]/workspace/sheet-adjust-dialog.tsx");
+  ok(dlg.includes("root.focus();") && dlg.includes('e.key === "Tab"') && dlg.includes("window.location.reload()") &&
+     dlg.includes("setTimeout(() => setStuck(true), 15000)") && dlg.includes("setTimeout(() => router.refresh(), 6000)"),
+    "#318 fix: focus stays in the dialog (re-focused when a control disables; Tab cycles) and a stuck Saving… becomes Reload after 15 s");
+  ok(hook.includes("if (from && from === focusSheetId) setFocusApplied(newSheetId);") &&
+     hook.includes("const locksBySheet = useMemo(") && hook.includes("allPagesLocked(locksBySheet.get(s.id) ?? {}, count)") &&
+     /const openAdjust = useCallback\(\(sheetId: string, afterUpload = false\) => \{[\s\S]{0,120}setSelectedIds\(\[\]\);/.test(hook),
+    "#318 fix: adjusting the intake plan view keeps its page; locks are scanned once per project change; opening clears the selection");
 }
