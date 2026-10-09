@@ -228,11 +228,14 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
       const rightward = B.rect.x >= A.rect.x;
       const end = rightward ? B.rect.x : right(B.rect);
       path = rightward ? [{ x: right(A.rect), y: ya }, { x: end, y: ya }] : [{ x: A.rect.x, y: ya }, { x: end, y: ya }];
-      sizeAt = { x: (path[0].x + end) / 2, y: ya + 0.08 };
+      // Centred over the open part of the hop — past the head end's lane
+      // bundle — and lifted above the tags when the bubbles don't fit.
+      const lanesEnd = A.key === headKey && rightward ? right(A.rect) + TRUNK * 0.5 + laneIndex.size * LANE + 0.05 : path[0].x;
+      const from = rightward ? Math.max(path[0].x, Math.min(lanesEnd, end - 0.2)) : path[0].x;
+      const mid = (from + end) / 2;
+      sizeAt = { x: mid, y: ya + 0.08 };
       sizeAnchor = "middle";
-      // Centred over the hop; too many for the gap → lifted above the tags.
-      const mid = (path[0].x + end) / 2;
-      const fits = symbols.length * 0.17 <= Math.abs(end - path[0].x) - 0.06;
+      const fits = symbols.length * 0.17 <= Math.abs(end - from) - 0.06;
       const by = fits ? ya - 0.13 : Math.min(A.rect.y, B.rect.y) - 0.1;
       bubbles = symbols.map((symbol, i) => ({ c: { x: mid - (symbols.length - 1) * 0.085 + i * 0.17, y: by }, symbol }));
     } else {
