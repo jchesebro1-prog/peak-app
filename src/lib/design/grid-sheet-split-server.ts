@@ -71,14 +71,20 @@ const liveDeps: SplitStoreDeps = {
   retire: retireBaseSheet,
 };
 
+/** Whether any sheet holds this blob path — strict: a failed lookup throws.
+ *  For an answer to the user (the broker commit's "already saved" pre-check). */
+export async function sheetHoldsBlobStrict(pathname: string): Promise<boolean> {
+  return (await listDocsByField<GridSheet>("grid_sheets", "blobPath", [pathname])).length > 0;
+}
+
 /**
- * Whether any sheet holds this blob path — such a blob is never deleted. A
- * failed lookup counts as held (the safe direction). Shared with the broker's
- * commit (grid-sheet-upload-server).
+ * Whether any sheet holds this blob path, for deciding a DELETE — such a blob
+ * is never deleted, and a failed lookup counts as held (the safe direction).
+ * Shared with the broker's commit (grid-sheet-upload-server).
  */
 export async function sheetHoldsBlob(pathname: string): Promise<boolean> {
   try {
-    return (await listDocsByField<GridSheet>("grid_sheets", "blobPath", [pathname])).length > 0;
+    return await sheetHoldsBlobStrict(pathname);
   } catch {
     return true;
   }

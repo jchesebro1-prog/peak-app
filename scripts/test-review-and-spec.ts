@@ -60546,6 +60546,15 @@ async function pagesAsSheets319UploadChecks(): Promise<void> {
     });
     if (c10.ok) await sheetsOf(c10.sheetIds);
     ok(c10.ok && c10.sheetIds.length === 3 && raceRemoved.length === 0, "#319 commit: a split never deletes an original some other sheet holds (a concurrent double-submit recorded it whole)");
+    // A failed lookup at the pre-check is not "already saved" — nothing was stored; the upload isn't deleted.
+    const lookRemoved: string[] = [];
+    const c10b = await C.commitSheetUpload(d10.gp.id, { uploadKey: key, blobPath: pathOf(d10.gp.id, "look.pdf"), name: "Look.pdf" }, by, {
+      ...deps(set),
+      held: async () => { throw new Error("lookup failed"); },
+      remove: async (p: string) => { lookRemoved.push(p); },
+    });
+    ok(!c10b.ok && c10b.error === U.GRID_SHEET_UPLOAD_COPY.unreadable && lookRemoved.length === 0,
+      "#319 commit: a lookup that fails at the pre-check answers 'try again', never 'already on this design', and deletes nothing");
     // A plan-view (locked) commit drops the original only after the lock's transaction.
     const d11 = await designWithBase("drop after lock");
     const lockDrops: Array<{ p: string; inTx: boolean }> = [];

@@ -21,7 +21,7 @@ import { withPlanLock } from "@/lib/design/grid-plan-intake-server";
 import { attachedPlanSheet, isPlanUploadId, planSourceKey } from "@/lib/design/grid-plan-intake";
 import { GRID_SHEET_DIRECT_MAX_BYTES, GRID_SHEET_SNIFF_BYTES, GRID_SHEET_UPLOAD_COPY as COPY, gridSheetPathInScope, sniffSheetFile } from "./grid-sheet-upload";
 import { readBlobCapped } from "./sheet-adjust-server";
-import { sheetHoldsBlob, storeUploadAsSheets } from "./grid-sheet-split-server";
+import { sheetHoldsBlob, sheetHoldsBlobStrict, storeUploadAsSheets } from "./grid-sheet-split-server";
 import type { SheetsLanded } from "./grid-sheet-split";
 
 type CommitDeps = {
@@ -29,8 +29,10 @@ type CommitDeps = {
   remove: (pathname: string) => Promise<void>;
   /** #319: the whole uploaded file, to split a PDF (null = unreadable → one sheet). */
   read: (pathname: string) => Promise<Uint8Array | null>;
+  /** Strict "does a sheet hold this path" for the pre-check (a failed lookup throws). */
+  held: (pathname: string) => Promise<boolean>;
 };
-const liveDeps: CommitDeps = { head: getBlobHead, remove: deleteBlob, read: (p) => readBlobCapped(p) };
+const liveDeps: CommitDeps = { head: getBlobHead, remove: deleteBlob, read: (p) => readBlobCapped(p), held: sheetHoldsBlobStrict };
 
 export type CommitSheetResult = ({ ok: true; already?: true } & SheetsLanded) | { ok: false; error: string };
 /** commitLocked's answer: `split` = no sheet holds the original upload any more. */
@@ -80,7 +82,15 @@ async function commitLocked(projectId: string, blobPath: string, name: string, b
       return { ok: true, sheetId: done, sheetIds: [done], already: true };
     }
   }
-  if (await sheetHoldsBlob(blobPath)) return { ok: false, error: COPY.alreadySaved };
+  // A failed lookup is not "already saved" (nothing was stored) — say so and let them retry.
+  // Deletes (dropOrphan) keep the safe reading: a failed lookup counts as held.
+  let held: boolean;
+  try {
+    held = await d.held(blobPath);
+  } catch {
+    return { ok: false, error: COPY.unreadable };
+  }
+  if (held) return { ok: false, error: COPY.alreadySaved };
   const refuse = async (error: string): Promise<LockedResult> => {
     await dropOrphan(blobPath, d);
     return { ok: false, error };
