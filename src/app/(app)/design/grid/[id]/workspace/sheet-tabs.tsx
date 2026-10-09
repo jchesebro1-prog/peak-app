@@ -40,7 +40,7 @@ const NAV_BTN: React.CSSProperties = {
 };
 
 export default function SheetTabs({ ed }: { ed: GridEditor }) {
-  const { project, sheets, sheet, switchSheet, busy, fileRef, upload, isPdf, page, pages, goToPage, noteAction, onStructuralChange } = ed;
+  const { project, sheets, sheet, switchSheet, busy, fileRef, upload, isPdf, page, pages, goToPage, noteAction, onStructuralChange, openAdjust, adjustAvailability } = ed;
   return (
     <div
       style={{
@@ -56,6 +56,7 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
       <div role="tablist" aria-label="Plan sheets" style={{ display: "flex", alignItems: "flex-end", flexWrap: "wrap", gap: 3, minWidth: 0 }}>
         {sheets.map((s) => {
           const on = s.id === sheet?.id;
+          const avail = adjustAvailability(s);
           return (
             <div
               key={s.id}
@@ -89,6 +90,7 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
                 label="⋯"
                 title={`${s.name} — sheet actions`}
                 chevron={false}
+                items={avail.hidden ? [] : [{ label: "Crop & rotate…", onSelect: () => openAdjust(s.id), disabled: avail.disabled, title: avail.title }]}
                 triggerStyle={{ height: 22, padding: "0 5px", border: "none", background: "transparent", color: "inherit", fontSize: 13 }}
               >
                 <ConfirmButton

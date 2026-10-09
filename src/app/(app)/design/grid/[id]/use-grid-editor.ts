@@ -37,6 +37,7 @@ import { distToPolyline, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import type { GridLaborLine } from "@/lib/design/wire-labor";
 import { uploadGridSheet } from "./sheet-upload";
+import { allPagesLocked, pageLocks, type SheetAdjust } from "@/lib/design/sheet-adjust";
 import { optionSlice } from "@/lib/design/grid-options";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -268,7 +269,16 @@ function snappedPlacement(
   );
 }
 
-export type SheetLite = { id: string; name: string; mime: string; dataUrl: string };
+export type SheetLite = {
+  id: string;
+  name: string;
+  mime: string;
+  dataUrl: string;
+  /** #318: how this sheet was derived from its original upload (Adjust sheet); null/absent = an upload. */
+  adjust?: SheetAdjust | null;
+  /** #318: the generated base sheet — never cropped or rotated. */
+  base?: boolean;
+};
 export type ProjectLite = {
   id: string;
   name: string;
@@ -358,6 +368,8 @@ export type GridEditorProps = {
   focusSheetId?: string | null;
   /** #318: file storage is on — sheets upload straight to Blob (≤ 25 MB); off = the 4 MB route. */
   blobUploads?: boolean;
+  /** #318: `?adjust=<sheetId>` — the intake's plan view, opened in Adjust sheet once it is listed. */
+  adjustSheetId?: string | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -443,7 +455,15 @@ function useGridEditorImpl(props: GridEditorProps) {
   const focusHere = !!focusSheetId && sheets.some((s) => s.id === focusSheetId);
   const [activeSheetId, setActiveSheetId] = useState((focusHere ? focusSheetId : sheets[0]?.id) || "");
   const [focusApplied, setFocusApplied] = useState<string | null>(focusHere ? focusSheetId : null);
-  const sheet = sheets.find((s) => s.id === activeSheetId) || sheets[0];
+  /** #318: Done in Adjust sheet swapped `from` for `to` on the server; until the
+   *  refreshed `sheets` lists `to`, the old sheet stays on screen — under the
+   *  still-open dialog, which blocks every edit — instead of falling back to
+   *  the first sheet. */
+  const [adjustSwap, setAdjustSwap] = useState<{ from: string; to: string } | null>(null);
+  const sheet =
+    sheets.find((s) => s.id === activeSheetId) ||
+    (adjustSwap?.to === activeSheetId ? sheets.find((s) => s.id === adjustSwap.from) : undefined) ||
+    sheets[0];
   const isPdf = sheet?.mime === "application/pdf" || sheet?.name.toLowerCase().endsWith(".pdf");
 
   const [page, setPage] = useState(1);
@@ -452,6 +472,30 @@ function useGridEditorImpl(props: GridEditorProps) {
     setActiveSheetId(focusSheetId!);
     setPage(1);
   }
+  // #318: Adjust sheet (crop + rotate). Opened from the tab's ⋯ menu, right
+  // after an upload (the + tab, the notice banner's re-upload), or by the
+  // intake's swap into the editor through `?adjust=<sheetId>` — adopted during
+  // render once that sheet is in `sheets`, like the focus sheet above.
+  const [adjusting, setAdjusting] = useState<{ sheetId: string; afterUpload: boolean } | null>(null);
+  const requestedAdjust = props.adjustSheetId ?? null;
+  const [adjustApplied, setAdjustApplied] = useState<string | null>(null);
+  if (requestedAdjust && requestedAdjust !== adjustApplied && sheets.some((s) => s.id === requestedAdjust)) {
+    setAdjustApplied(requestedAdjust);
+    setAdjusting({ sheetId: requestedAdjust, afterUpload: true });
+    setActiveSheetId(requestedAdjust);
+    setPage(1);
+  }
+  // The swap has landed (the new sheet is listed — or the old one is gone,
+  // whatever the refresh brought): close the dialog on the new sheet.
+  if (adjustSwap && (sheets.some((s) => s.id === adjustSwap.to) || !sheets.some((s) => s.id === adjustSwap.from))) {
+    setAdjustSwap(null);
+    setAdjusting(null);
+  }
+  const openAdjust = useCallback((sheetId: string, afterUpload = false) => setAdjusting({ sheetId, afterUpload }), []);
+  /** The sheet open in Adjust sheet — null until a just-uploaded sheet arrives in `sheets`. */
+  const adjustTarget = adjusting ? (sheets.find((s) => s.id === adjusting.sheetId) ?? null) : null;
+  const adjustAfterUpload = adjusting?.afterUpload ?? false;
+  const adjustLocks = useMemo(() => (adjustTarget ? pageLocks(project, adjustTarget.id) : {}), [project, adjustTarget]);
   const [pages, setPages] = useState(1);
   const [zoom, setZoom] = useState(1.25);
   const [size, setSize] = useState({ w: 900, h: 1200 });
@@ -1413,6 +1457,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     setActiveSheetId(r.sheetId);
     setPage(1);
     noteAction(`Uploaded ${file.name}`);
+    openAdjust(r.sheetId, true);
     clearUndo();
     router.refresh();
   }
@@ -1992,6 +2037,55 @@ function useGridEditorImpl(props: GridEditorProps) {
       resetSheetState();
     },
     [page, pages, resetSheetState]
+  );
+
+  /** #318: drop `?adjust=` once the dialog it asked for closes, so a reload doesn't open it again. */
+  const dropAdjustParam = useCallback(() => {
+    if (requestedAdjust) router.replace(`${pathname}?option=${encodeURIComponent(activeOptionId)}`, { scroll: false });
+  }, [requestedAdjust, router, pathname, activeOptionId]);
+
+  /** #318: Cancel / Skip — the sheet stays as it is. Skip after an upload opens that sheet's plan. */
+  const closeAdjust = useCallback(() => {
+    if (adjusting?.afterUpload && adjusting.sheetId !== sheet?.id && sheets.some((s) => s.id === adjusting.sheetId)) switchSheet(adjusting.sheetId);
+    setAdjusting(null);
+    dropAdjustParam();
+  }, [adjusting, sheet?.id, sheets, switchSheet, dropAdjustParam]);
+
+  /** #318: Done in Adjust sheet — the new sheet took the old one's place; open it.
+   *  The active id moves now; the dialog stays up ("Saving…") until the
+   *  refreshed sheet list carries the new sheet (adopted during render above),
+   *  so nothing can act on the old, now-unlisted sheet in between. */
+  const finishAdjust = useCallback(
+    (newSheetId: string) => {
+      const name = adjustTarget?.name || "the sheet";
+      const from = adjusting?.sheetId ?? null;
+      if (from) setAdjustSwap({ from, to: newSheetId });
+      else setAdjusting(null);
+      if (from !== sheet?.id) setPage(1);
+      setActiveSheetId(newSheetId);
+      resetSheetState();
+      noteAction(`Cropped & rotated ${name}`);
+      dropAdjustParam();
+      // Device / space / wire ids are unchanged but now name the new sheet —
+      // the undo stack's recorded bundles would restore onto the old one.
+      onStructuralChange();
+    },
+    [adjustTarget, adjusting, sheet?.id, resetSheetState, noteAction, dropAdjustParam, onStructuralChange]
+  );
+
+  /** #318: the ⋯ menu's Crop & rotate… for one tab — never on the generated
+   *  base sheet; disabled, with why, once every page is known to have content. */
+  const adjustAvailability = useCallback(
+    (s: SheetLite): { hidden: boolean; disabled: boolean; title: string } => {
+      if (s.base) return { hidden: true, disabled: true, title: "" };
+      const sheetIsPdf = s.mime === "application/pdf" || s.name.toLowerCase().endsWith(".pdf");
+      // A PDF's page count is known only for the sheet on screen; any other PDF opens and shows its locked pages.
+      const count = !sheetIsPdf ? 1 : s.id === sheet?.id ? pages : 0;
+      return allPagesLocked(pageLocks(project, s.id), count)
+        ? { hidden: false, disabled: true, title: "Every page of this sheet has devices, spaces, wires or a scale on it — crop and rotate only work on an empty page." }
+        : { hidden: false, disabled: false, title: "Crop the sheet to the plan and turn it upright — pages with anything on them stay as they are" };
+    },
+    [project, sheet?.id, pages]
   );
 
   /** Zoom from the toolbar's % field — clamped, rounded to whole percent. */
@@ -2789,6 +2883,13 @@ function useGridEditorImpl(props: GridEditorProps) {
     redo,
     record,
     onStructuralChange,
+    adjustTarget,
+    adjustAfterUpload,
+    adjustLocks,
+    openAdjust,
+    closeAdjust,
+    finishAdjust,
+    adjustAvailability,
   };
 }
 

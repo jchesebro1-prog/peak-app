@@ -299,7 +299,7 @@ export async function saveGridIntakeAction(input: {
   estimate?: AutoEstimate;
   /** #314: an on-file plan to copy in as the FIRST sheet ("Use plan from …") — a candidate id, never a path. */
   planCandidateId?: string | null;
-}): Promise<{ ok: true; warning?: string; planRetry?: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; warning?: string; planRetry?: string; planSheetId?: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (input.mode !== "manual" && input.mode !== "auto") return { ok: false, error: "Choose Auto or Blank." };
   // #314: a design drawn from an estimate takes its parts from the estimate —
@@ -443,6 +443,7 @@ export async function saveGridIntakeAction(input: {
   // the intake — the plan opens with a warning and a retry (the #211 rule).
   let planRetry: string | undefined;
   let planWarning: string | undefined;
+  let planSheetId: string | undefined;
   if (isFirstSave && typeof input.planCandidateId === "string" && input.planCandidateId) {
     let attached: Awaited<ReturnType<typeof attachPlanCandidate>>;
     try {
@@ -454,7 +455,7 @@ export async function saveGridIntakeAction(input: {
     if (!attached.ok) {
       planRetry = input.planCandidateId;
       planWarning = `The plan is ready, but the plan view wasn't added: ${attached.error}`;
-    }
+    } else planSheetId = attached.sheetId;
   }
   // #314 review: the warnings are PERSISTED before the revalidate below — that
   // re-render swaps the intake for the editor, so a warning held only in the
@@ -468,7 +469,7 @@ export async function saveGridIntakeAction(input: {
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
   const allWarnings = [warning, planWarning].filter(Boolean).join(" ");
-  return { ok: true, ...(allWarnings ? { warning: allWarnings } : {}), ...(planRetry ? { planRetry } : {}) };
+  return { ok: true, ...(allWarnings ? { warning: allWarnings } : {}), ...(planRetry ? { planRetry } : {}), ...(planSheetId ? { planSheetId } : {}) };
 }
 
 /** #314: the refusal sentence for an estimate-linked design, naming the estimate. */

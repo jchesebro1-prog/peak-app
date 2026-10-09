@@ -52,6 +52,7 @@ import { scheduleForOption } from "@/lib/design/grid-schedule-server";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
+import { isBaseSheet } from "@/lib/design/sheet-adjust";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
@@ -71,11 +72,11 @@ export default async function GridEditorPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ option?: string }>;
+  searchParams: Promise<{ option?: string; adjust?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
-  const { option: requestedOption } = await searchParams;
+  const { option: requestedOption, adjust: requestedAdjust } = await searchParams;
   const project = await getProject(decodeURIComponent(id));
 
   if (!project) {
@@ -348,6 +349,9 @@ export default async function GridEditorPage({
         // Blob-stored sheets stream through the authenticated proxy (the
         // store is private, D116); in-database sheets pass their data-URL.
         dataUrl: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
+        // #318: how the sheet was derived (Adjust sheet) and whether it is the generated base sheet.
+        adjust: s.adjust ?? null,
+        base: isBaseSheet(s, project.intake),
       }))}
       parts={parts}
       fabrics={fabrics}
@@ -373,6 +377,7 @@ export default async function GridEditorPage({
       intakeNotices={cleanIntakeNotices(project.intake?.notices)}
       focusSheetId={project.intake?.planSheetId && (project.sheetIds || []).includes(project.intake.planSheetId) ? project.intake.planSheetId : null}
       blobUploads={blobEnabled()}
+      adjustSheetId={requestedAdjust && (project.sheetIds || []).includes(requestedAdjust) ? requestedAdjust : null}
     />
     </CanMapProvider>
   );

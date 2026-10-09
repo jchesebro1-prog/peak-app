@@ -30,7 +30,7 @@ const BTN: React.CSSProperties = {
 };
 
 export default function IntakeNotices({ ed }: { ed: GridEditor }) {
-  const { intakeNotices, project, router, blobUploads } = ed;
+  const { intakeNotices, project, router, blobUploads, openAdjust } = ed;
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const fileFor = useRef<string | null>(null);
@@ -59,6 +59,7 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
     run(async () => {
       const up = await uploadGridSheet(project.id, file, { blobUploads, planUploadId: newPlanUploadId() });
       if (!up.ok) return up;
+      openAdjust(up.sheetId, true);
       return dismissGridNoticeAction(project.id, noticeId);
     });
   };

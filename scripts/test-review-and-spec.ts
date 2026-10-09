@@ -11525,6 +11525,7 @@ seeded()
   .then(() => sheetAdjust318BytesChecks())
   .then(() => sheetAdjust318StoreChecks())
   .then(() => sheetUpload318Checks())
+  .then(() => sheetAdjust318UiPins())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59303,7 +59304,7 @@ import {
   // #314 review (1): the intake's save re-renders into the editor, so after a successful save the intake may not
   // hold anything in its own state — warnings live on the project and the editor shows them.
   const afterSave = saveBody.slice(saveBody.indexOf("if (!saved.ok) return setError(saved.error);") + "if (!saved.ok) return setError(saved.error);".length);
-  ok(!/\bset[A-Z]\w*\(/.test(afterSave) && afterSave.includes("await notePlanUploadFailedAction(projectId, up.error)") && afterSave.trim().endsWith("router.refresh();\n    });\n  };".trim()) &&
+  ok(!/\bset[A-Z]\w*\(/.test(afterSave) && afterSave.includes("await notePlanUploadFailedAction(projectId, up.error)") && afterSave.trim().endsWith("else router.refresh();\n    });\n  };".trim()) &&
      !gi.includes("setWarning") && !gi.includes("PlanWarning") && !gi.includes("planRetry"),
     "#314 review: after a successful save the intake sets no state of its own (it has been swapped for the editor) — an upload failure is persisted as a notice, then the route refreshes");
   const intakeAct = acts.slice(acts.indexOf("export async function saveGridIntakeAction("), acts.indexOf("async function estimateRefusal("));
@@ -59936,4 +59937,32 @@ async function sheetUpload318Checks(): Promise<void> {
   const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
   ok(hook.includes("await uploadGridSheet(project.id, file, { blobUploads })") && !hook.includes('fetch("/api/grid-sheets/upload"'), "#318 pin: the + tab uploads through uploadGridSheet");
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").split("blobUploads={blobEnabled()}").length === 3, "#318 pin: the page tells both the intake and the editor whether Blob uploads are on");
+}
+
+/* ---------------- #318: Adjust sheet — dialog wiring pins ---------------- */
+async function sheetAdjust318UiPins(): Promise<void> {
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const pdfc = rd("src/components/design/pdf-canvas.tsx");
+  ok(pdfc.includes("rotateBy?: number;") && pdfc.includes("const turn = rotateBy ? { rotation: (((pg.rotate + rotateBy) % 360) + 360) % 360 } : {};") &&
+     pdfc.includes("pg.getViewport({ scale, ...turn })") && pdfc.includes("printBox?.w, printBox?.h, rotateBy]"),
+    "#318 pin: PdfCanvas adds rotateBy to the page's own rotation (pdf.js's rotation is absolute); absent = unchanged");
+  const dlg = rd("src/app/(app)/design/grid/[id]/workspace/sheet-adjust-dialog.tsx");
+  ok(dlg.includes('role="dialog"') && dlg.includes("const src = `/api/grid-sheets/${encodeURIComponent(rootId)}`;") && dlg.includes("const rootId = sheet.adjust?.fromSheetId || sheet.id;") &&
+     dlg.includes("await adjustSheetAction(projectId, sheet.id, next)") && dlg.includes("if (!changedPages(initial, next).length) return onCancel();") &&
+     dlg.includes('{afterUpload ? "Skip" : "Cancel"}') && dlg.includes("Same for all pages") && dlg.includes("rotateBy={cur.rotate}") && !dlg.includes("blobPath"),
+    "#318 pin: the dialog shows the ROOT file with the current spec, saves only a real change, and Skip/Cancel leaves the sheet as is");
+  const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes("openAdjust(r.sheetId, true);") && /if \(requestedAdjust && requestedAdjust !== adjustApplied && sheets\.some\(\(s\) => s\.id === requestedAdjust\)\) \{\s*setAdjustApplied\(requestedAdjust\);/.test(hook) &&
+     hook.includes("if (s.base) return { hidden: true, disabled: true, title: \"\" };") && !hook.includes("blobPath"),
+    "#318 pin: an upload opens Adjust sheet; ?adjust= is adopted during render once the sheet arrives; never on the base sheet");
+  const tabs = rd("src/app/(app)/design/grid/[id]/workspace/sheet-tabs.tsx");
+  ok(tabs.includes('label: "Crop & rotate…"') && tabs.includes("const avail = adjustAvailability(s);"), "#318 pin: the sheet tab's ⋯ menu offers Crop & rotate…");
+  const page = rd("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(page.includes("adjustSheetId={requestedAdjust && (project.sheetIds || []).includes(requestedAdjust) ? requestedAdjust : null}") && page.includes("base: isBaseSheet(s, project.intake),") && page.includes("adjust: s.adjust ?? null,"),
+    "#318 pin: the page passes ?adjust= (only for a listed sheet) and each sheet's adjust spec and base flag");
+  const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
+  ok(gi.includes("if (adjustId) router.replace(`/design/grid/${encodeURIComponent(projectId)}?adjust=${encodeURIComponent(adjustId)}`);") && gi.includes("let adjustId = saved.planSheetId ?? null;"),
+    "#318 pin: the intake finishes by opening its plan view (uploaded or copied) in Adjust sheet");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("{ed.adjustTarget && (") && ed.includes("onDone={ed.finishAdjust}"), "#318 pin: the editor renders the dialog for the sheet being adjusted");
 }

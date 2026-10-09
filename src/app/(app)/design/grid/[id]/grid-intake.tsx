@@ -227,11 +227,15 @@ export default function GridIntake({
       // warnings (Auto fill, the on-file plan copy) as notices the editor
       // shows; a dropped plan that fails to upload leaves one the same way.
       // Locals only: these keep working after this component unmounts.
+      // #318: the plan view (copied above, or uploaded here) opens in Adjust sheet.
+      let adjustId = saved.planSheetId ?? null;
       if (planFile && planUploadId) {
         const up = await uploadGridSheet(projectId, planFile, { blobUploads, planUploadId });
         if (!up.ok) await notePlanUploadFailedAction(projectId, up.error).catch(() => null);
+        else adjustId = up.sheetId;
       }
-      router.refresh();
+      if (adjustId) router.replace(`/design/grid/${encodeURIComponent(projectId)}?adjust=${encodeURIComponent(adjustId)}`);
+      else router.refresh();
     });
   };
   const next = () => {

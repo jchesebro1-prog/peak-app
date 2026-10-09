@@ -13,6 +13,7 @@ import SystemStatus, { Targets } from "./workspace/system-status";
 import RightPane from "./workspace/right-pane";
 import CalibratePrompt from "./workspace/calibrate-prompt";
 import IntakeNotices from "./workspace/intake-notices";
+import SheetAdjustDialog from "./workspace/sheet-adjust-dialog";
 
 /**
  * The Grid editor (D108) — device painting on plan sheets, in the markup
@@ -55,6 +56,17 @@ export default function GridEditor(props: GridEditorProps) {
           </div>
           {ed.view === "sheet" && <SpreadsheetView ed={ed} />}
           <ViewTabs ed={ed} />
+          {ed.adjustTarget && (
+            <SheetAdjustDialog
+              key={ed.adjustTarget.id}
+              projectId={ed.project.id}
+              sheet={ed.adjustTarget}
+              locks={ed.adjustLocks}
+              afterUpload={ed.adjustAfterUpload}
+              onCancel={ed.closeAdjust}
+              onDone={ed.finishAdjust}
+            />
+          )}
         </>
       }
       status={<StatusBar ed={ed} />}

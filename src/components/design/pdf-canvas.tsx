@@ -25,7 +25,9 @@ import { printZoom } from "@/lib/design/drawing-labels";
 type PdfDoc = {
   numPages: number;
   getPage: (n: number) => Promise<{
-    getViewport: (o: { scale: number }) => { width: number; height: number };
+    /** The page's own /Rotate, as pdf.js normalized it (0/90/180/270). */
+    rotate: number;
+    getViewport: (o: { scale: number; rotation?: number }) => { width: number; height: number };
     render: (o: { canvasContext: CanvasRenderingContext2D; viewport: unknown; canvas: HTMLCanvasElement }) => { promise: Promise<void>; cancel: () => void };
   }>;
 };
@@ -79,6 +81,7 @@ export default function PdfCanvas({
   page,
   zoom,
   printBox,
+  rotateBy,
   onLoaded,
   onSize,
   onRendered,
@@ -91,6 +94,10 @@ export default function PdfCanvas({
    *  rasterized at about 200 dpi across the width it prints at inside this
    *  inch box, capped at 12 MP (drawing-labels printZoom). */
   printBox?: { w: number; h: number };
+  /** #318: quarter turns ADDED to the page's own rotation (the Adjust sheet
+   *  preview turns the root page live). Absent or 0 = the page exactly as
+   *  stored — every other caller is unaffected. */
+  rotateBy?: number;
   onLoaded: (pages: number) => void;
   onSize: (w: number, h: number) => void;
   /** Fired once the requested page has actually finished painting to the
@@ -152,9 +159,12 @@ export default function PdfCanvas({
       try {
         const pg = await doc.getPage(Math.min(page, doc.numPages));
         if (cancelled) return;
-        const base = printBox ? pg.getViewport({ scale: 1 }) : null;
+        // #318: an extra turn renders at an absolute rotation (pdf.js's
+        // `rotation` replaces the page's own, so the two are added here).
+        const turn = rotateBy ? { rotation: (((pg.rotate + rotateBy) % 360) + 360) % 360 } : {};
+        const base = printBox ? pg.getViewport({ scale: 1, ...turn }) : null;
         const scale = base && printBox ? printZoom(base.width, base.height, printBox.w, printBox.h) : zoom;
-        const viewport = pg.getViewport({ scale });
+        const viewport = pg.getViewport({ scale, ...turn });
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         canvas.width = Math.floor(viewport.width);
@@ -183,7 +193,7 @@ export default function PdfCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, zoom, loading, printBox?.w, printBox?.h]);
+  }, [page, zoom, loading, printBox?.w, printBox?.h, rotateBy]);
 
   if (err) {
     return (
