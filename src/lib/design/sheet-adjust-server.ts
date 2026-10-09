@@ -22,7 +22,9 @@ export const SHEET_ADJUST_READ_MAX_BYTES = 30 * 1024 * 1024;
 export const SHEET_ADJUST_DATAURL_MAX_BYTES = 6 * 1024 * 1024;
 
 export type AdjustSheetResult = { ok: true; sheetId: string; unchanged?: true } | { ok: false; reason: AdjustRefusal; pages?: number[] };
-type StoredFile = { mime: string; dataUrl: string; url?: string; blobPath?: string };
+/** A stored sheet file — exactly one of dataUrl / blobPath carries the bytes (#319 reuses it). */
+export type StoredSheetFile = { mime: string; dataUrl: string; url?: string; blobPath?: string };
+type StoredFile = StoredSheetFile;
 
 export async function adjustSheet(projectId: string, sheetId: string, rawPages: unknown, by: string): Promise<AdjustSheetResult> {
   const project = await getProject(projectId);
@@ -66,8 +68,14 @@ export async function adjustSheet(projectId: string, sheetId: string, rawPages: 
  *  Grid editor's actions don't pull the rack submittal's import graph. */
 async function readSheetBytes(sheet: GridSheet): Promise<Uint8Array | null> {
   if (!sheet.blobPath) return decodeDataUrl(sheet.dataUrl)?.bytes ?? null;
+  return readBlobCapped(sheet.blobPath);
+}
+
+/** A private blob's whole file, or null when it is missing, unreadable or
+ *  over `max` (#319 reads an upload back with it to split it into pages). */
+export async function readBlobCapped(pathname: string, max = SHEET_ADJUST_READ_MAX_BYTES): Promise<Uint8Array | null> {
   try {
-    const stream = await getBlobStream(sheet.blobPath);
+    const stream = await getBlobStream(pathname);
     if (!stream) return null;
     const reader = (stream as ReadableStream<Uint8Array>).getReader();
     const chunks: Uint8Array[] = [];
@@ -76,7 +84,7 @@ async function readSheetBytes(sheet: GridSheet): Promise<Uint8Array | null> {
       const { done, value } = await reader.read();
       if (done) break;
       n += value.byteLength;
-      if (n > SHEET_ADJUST_READ_MAX_BYTES) {
+      if (n > max) {
         await reader.cancel().catch(() => {});
         return null;
       }
@@ -88,7 +96,7 @@ async function readSheetBytes(sheet: GridSheet): Promise<Uint8Array | null> {
   }
 }
 
-async function storeSheetFile(projectId: string, name: string, bytes: Uint8Array, mime: string): Promise<{ ok: true; file: StoredFile } | { ok: false; reason: "too-big" | "failed" }> {
+export async function storeSheetFile(projectId: string, name: string, bytes: Uint8Array, mime: string): Promise<{ ok: true; file: StoredFile } | { ok: false; reason: "too-big" | "failed" }> {
   if (blobEnabled()) {
     try {
       const up = await putBlob(`${GRID_SHEET_BLOB_PREFIX}${projectId}/${safeName(name)}`, Buffer.from(bytes), mime);

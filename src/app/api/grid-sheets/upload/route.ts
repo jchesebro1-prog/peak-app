@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { blobEnabled, putBlob, safeName } from "@/lib/blob";
-import { addSheet, getProject, recordIntakePlan } from "@/lib/stores/grid-projects";
+import { getProject, recordIntakePlan } from "@/lib/stores/grid-projects";
 import { withPlanLock } from "@/lib/design/grid-plan-intake-server";
 import { attachedPlanSheet, isPlanUploadId, planSourceKey } from "@/lib/design/grid-plan-intake";
-import {
-  GRID_SHEET_BLOB_PREFIX,
-  GRID_SHEET_MAX_BYTES,
-  GRID_SHEET_MAX_LABEL,
-  sheetMimeVerdict,
-} from "@/lib/grid-sheet-file";
+import { storeSheetFile } from "@/lib/design/sheet-adjust-server";
+import { storeUploadAsSheets, type StoreSheetsResult } from "@/lib/design/grid-sheet-split-server";
+import { landed } from "@/lib/design/grid-sheet-split";
+import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL, sheetMimeVerdict } from "@/lib/grid-sheet-file";
 
 /**
  * Plan-sheet upload (#146, D173). Shape copied from
@@ -26,13 +23,18 @@ import {
  * Route handlers are not bound by that cap.
  *
  * Unlike the vendor-quote route this does the WHOLE job — bytes to storage and
- * the `grid_sheets` doc written here — and returns only the new sheet id. That
- * is the deliberate difference (D173): a vendor quote hangs off an estimate
- * that may not be saved yet, so its `blobPath` has to round-trip through the
- * browser and be re-validated on the way back (ownsVendorQuoteBlobPath). A
- * plan sheet belongs to a project that already exists, so the path never
- * leaves the server and there is no untrusted `blobPath` to guard: the sheet
- * proxy (/api/grid-sheets/<id>) keeps reading a value only this route wrote.
+ * the `grid_sheets` docs written here — and returns only the new sheet ids.
+ * That is the deliberate difference (D173): a vendor quote hangs off an
+ * estimate that may not be saved yet, so its `blobPath` has to round-trip
+ * through the browser and be re-validated on the way back
+ * (ownsVendorQuoteBlobPath). A plan sheet belongs to a project that already
+ * exists, so the path never leaves the server and there is no untrusted
+ * `blobPath` to guard: the sheet proxy (/api/grid-sheets/<id>) keeps reading a
+ * value only this route wrote.
+ *
+ * #319: storing goes through storeUploadAsSheets — a multi-page PDF becomes one
+ * sheet per page, and a real plan retires the generated plan — the same step
+ * the Blob broker's commit and the intake's copy take.
  *
  * Auth is requireUser(), matching both the old action and the sibling GET
  * proxy — any designer may add a sheet to a design they can open.
@@ -42,7 +44,7 @@ import {
  * `gs-<hex>`, so the two can never collide.
  */
 
-// One file in, then a Blob write — nowhere near this, but a slow uplink on a
+// One file in, then Blob writes — nowhere near this, but a slow uplink on a
 // venue's wifi must not have the function expire while the body is arriving.
 export const maxDuration = 60;
 
@@ -113,53 +115,41 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (first && !isPlanUploadId(uploadId)) {
     return NextResponse.json({ ok: false, error: "Bad upload id." }, { status: 400 });
   }
+  // Blob storage when the token exists (D116); an in-database data-URL
+  // otherwise — the whole dev story (AGENTS.md: `npm run dev` needs no cloud).
+  const storeAsSheets = (atFront: boolean) =>
+    storeUploadAsSheets(
+      projectId,
+      {
+        name,
+        mime,
+        readBytes: async () => new Uint8Array(bytes),
+        storeWhole: async () => {
+          const r = await storeSheetFile(projectId, name, bytes, mime);
+          return r.ok ? r.file : null;
+        },
+      },
+      { by: user.name, first: atFront, intakeNotices: atFront }
+    );
+  const reply = (r: StoreSheetsResult) =>
+    r.ok
+      ? NextResponse.json({ ok: true, ...landed(r.sheetIds, r.baseSheet, r.note) })
+      : NextResponse.json({ ok: false, error: r.error }, { status: r.reason === "gone" ? 404 : 502 });
   if (first) {
     const source = planSourceKey("upload", uploadId as string);
     return withPlanLock(projectId, async () => {
       const now = await getProject(projectId);
       const done = now ? attachedPlanSheet(now.intake, now.sheetIds || [], source) : null;
-      if (done) return NextResponse.json({ ok: true, sheetId: done, already: true });
-      const r = await storeSheet(projectId, name, mime, bytes, user.name, true);
-      if (r instanceof NextResponse) return r;
-      await recordIntakePlan(projectId, r, source);
-      revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
-      return NextResponse.json({ ok: true, sheetId: r });
+      if (done) return NextResponse.json({ ok: true, sheetId: done, sheetIds: [done], already: true });
+      const r = await storeAsSheets(true);
+      if (r.ok) {
+        await recordIntakePlan(projectId, r.sheetIds[0], source);
+        revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
+      }
+      return reply(r);
     });
   }
-  const r = await storeSheet(projectId, name, mime, bytes, user.name, false);
-  if (r instanceof NextResponse) return r;
-  revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
-  return NextResponse.json({ ok: true, sheetId: r });
-}
-
-/** Bytes to storage + the grid_sheets doc; the new sheet id, or the error response. */
-async function storeSheet(projectId: string, name: string, mime: string, bytes: Buffer, by: string, first: boolean): Promise<string | NextResponse> {
-  // Blob storage when the token exists (D116); in-database data-URL otherwise,
-  // which is the whole dev story (AGENTS.md: `npm run dev` needs no cloud) and
-  // is unchanged from the action this replaces.
-  let stored: { dataUrl?: string; url?: string; blobPath?: string };
-  if (blobEnabled()) {
-    try {
-      const up = await putBlob(
-        `${GRID_SHEET_BLOB_PREFIX}${projectId}/${safeName(name)}`,
-        bytes,
-        mime
-      );
-      // putBlob adds a random suffix, so the RETURNED pathname is the only one
-      // that resolves — never store the path we asked for.
-      stored = { url: up.url, blobPath: up.pathname };
-    } catch (e) {
-      console.error("[grid] blob upload failed:", e);
-      return NextResponse.json(
-        { ok: false, error: "Upload to file storage failed — check the Blob token, or try again." },
-        { status: 502 }
-      );
-    }
-  } else {
-    stored = { dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
-  }
-
-  const sheet = await addSheet(projectId, { name, mime, ...stored, by, ...(first ? { first: true } : {}) });
-  if (!sheet) return NextResponse.json({ ok: false, error: "Design not found." }, { status: 404 });
-  return sheet.id;
+  const r = await storeAsSheets(false);
+  if (r.ok) revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);
+  return reply(r);
 }

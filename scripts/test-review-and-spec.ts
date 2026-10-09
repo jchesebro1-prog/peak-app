@@ -11531,6 +11531,7 @@ seeded()
   .then(() => pagesAsSheets319PureChecks())
   .then(() => pagesAsSheets319BytesChecks())
   .then(() => pagesAsSheets319StoreChecks())
+  .then(() => pagesAsSheets319UploadChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59332,11 +59333,11 @@ import {
   ok(hook314.includes("useState((focusHere ? focusSheetId : sheets[0]?.id) || \"\")") && /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);[\s\S]{0,400}?setActiveSheetId\(focusSheetId!\);/.test(hook314),
     "#314 review: the editor opens on the intake's plan view sheet — at mount, and when it lands after mount (adjusted during render)");
   const route = rd("src/app/api/grid-sheets/upload/route.ts");
-  ok(route.includes("if (first && !isPlanUploadId(uploadId))") && route.includes("withPlanLock(projectId, async () => {") && route.indexOf("attachedPlanSheet(now.intake") < route.indexOf("storeSheet(projectId, name, mime, bytes, user.name, true)") &&
-     route.includes("await recordIntakePlan(projectId, r, source);") && rd("src/lib/design/grid-plan-upload.ts").includes('body.append("planUploadId", uploadId);'),
+  ok(route.includes("if (first && !isPlanUploadId(uploadId))") && route.includes("withPlanLock(projectId, async () => {") && route.indexOf("attachedPlanSheet(now.intake") > 0 && route.indexOf("attachedPlanSheet(now.intake") < route.indexOf("await storeAsSheets(true)") &&
+     route.includes("await recordIntakePlan(projectId, r.sheetIds[0], source);") && rd("src/lib/design/grid-plan-upload.ts").includes('body.append("planUploadId", uploadId);'),
     "#314 review (3): a plan-view upload carries an upload id; under the plan lock, a repeat of one that already landed returns its sheet instead of adding it twice");
   const pis = rd("src/lib/design/grid-plan-intake-server.ts");
-  ok(pis.includes("return withPlanLock(projectId, () => attachPlanCandidateLocked(projectId, candidateId, by));") && pis.indexOf("attachedPlanSheet(current.intake") < pis.indexOf("copyBlob(") && pis.includes("await recordIntakePlan(projectId, sheet.id, source);"),
+  ok(pis.includes("return withPlanLock(projectId, () => attachPlanCandidateLocked(projectId, candidateId, by));") && pis.indexOf("attachedPlanSheet(current.intake") < pis.indexOf("copyBlob(") && pis.includes("await recordIntakePlan(projectId, r.sheetIds[0], source);"),
     "#314 review (3): attachPlanCandidate is idempotent per candidate under the plan lock — a retry after a copy that landed returns the sheet it made");
   const rr = store.slice(store.indexOf("export async function restoreRevision("));
   ok(/if \(!cur\) \{\s*if \(o\.estimateOwned !== true\) return \{ \.\.\.o \};[^]*?return \{ \.\.\.unlinked, quoteId: null \};/.test(rr),
@@ -59909,7 +59910,7 @@ async function sheetUpload318Checks(): Promise<void> {
   registerFixture("grid_projects", gp.id);
   const path = (n: string) => U.gridSheetBlobPath(gp.id, key, n).replace(/(\.[a-z]+)$/, "-Sfx01$1");
   const removed: string[] = [];
-  const deps = (bytes: Uint8Array, size: number) => ({ head: async () => ({ bytes, size }), remove: async (p: string) => { removed.push(p); } });
+  const deps = (bytes: Uint8Array, size: number) => ({ head: async () => ({ bytes, size }), read: async () => null, remove: async (p: string) => { removed.push(p); } });
   const pdf = enc("%PDF-1.7 fixture");
   const okRes = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("plan.pdf"), name: "Plan.pdf" }, by, deps(pdf, 20 * 1024 * 1024));
   if (okRes.ok) registerFixture("grid_sheets", okRes.sheetId);
@@ -60327,6 +60328,217 @@ async function pagesAsSheets319StoreChecks(): Promise<void> {
       "#319 addSheets appends a run in order, or puts the whole run FIRST in order; the split stamp is stored");
     ok((await G.addSheets("GRD-0", [{ name: "x", mime: "image/png", dataUrl: PNG }], { by })) === null && J(await G.addSheets(plain.id, [], { by })) === "[]",
       "#319 addSheets: no design → null; nothing to add → []");
+  } finally {
+    if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+  }
+}
+
+/* ---------------- #319: one sheet per PDF page — every upload path ---------------- */
+async function pagesAsSheets319UploadChecks(): Promise<void> {
+  // In-database sheets only (data-URLs): this suite never writes to Blob.
+  const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  try {
+    const G = await import("@/lib/stores/grid-projects");
+    const SS = await import("@/lib/design/grid-sheet-split-server");
+    const S = await import("@/lib/design/grid-sheet-split");
+    const C = await import("@/lib/design/grid-sheet-upload-server");
+    const U = await import("@/lib/design/grid-sheet-upload");
+    const DS = await import("@/db/doc-store");
+    const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+    const { decodeDataUrl } = await import("@/lib/grid-sheet-file");
+    const sharp = (await import("sharp")).default;
+    type Sheet = import("@/lib/stores/grid-projects").GridSheet;
+    const J = (v: unknown) => JSON.stringify(v);
+    const by = "Test Harness";
+    const SVG = "data:image/svg+xml,<svg/>";
+    const square = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }];
+    const set = await pdf319Set();
+    const setViews = await views319(set);
+    const onePdf = await pagesPdf319(1);
+    const manyPdf = await pagesPdf319(61);
+    const encPdf = await encryptedPdf319();
+    const png = new Uint8Array(await sharp({ create: { width: 8, height: 8, channels: 3, background: "#ffffff" } }).png().toBuffer());
+    const b64 = (b: Uint8Array) => Buffer.from(b).toString("base64");
+
+    /** A design whose generated plan (the intake's base sheet) holds only a Space. */
+    const designWithBase = async (label: string) => {
+      const gp = await G.createProject({ name: `#319 ${label}`, customer: "Spec fixture", customerId: null, by });
+      registerFixture("grid_projects", gp.id);
+      const base = (await G.addSheet(gp.id, { name: "Generated base plan", mime: "image/svg+xml", dataUrl: SVG, by }))!;
+      registerFixture("grid_sheets", base.id);
+      await G.saveGridIntake(gp.id, { complete: true, measurementBased: true, venueName: "V", locationName: "L", address: "", notes: "", baseSheetId: base.id });
+      await G.addSpace(gp.id, { sheetId: base.id, page: 1, name: "Stage", points: square, by });
+      return { gp, base };
+    };
+    /** Register and read back sheets by id. */
+    const sheetsOf = async (ids: readonly string[]) => {
+      const out: Sheet[] = [];
+      for (const id of ids) {
+        registerFixture("grid_sheets", id);
+        const s = await DS.getDoc<Sheet>("grid_sheets", id);
+        if (s) out.push(s);
+      }
+      return out;
+    };
+    /** The 4 MB route's source: bytes in hand, stored whole as a data-URL when not split. */
+    const bytesSource = (name: string, mime: string, bytes: Uint8Array) => ({
+      name,
+      mime,
+      readBytes: async () => bytes,
+      storeWhole: async () => ({ mime, dataUrl: `data:${mime};base64,${b64(bytes)}` }),
+    });
+
+    // 1. A 3-page PDF → three sheets, appended in page order, each one page shown as its source page.
+    const d1 = await designWithBase("split append");
+    const keep = (await G.addSheet(d1.gp.id, { name: "Existing.png", mime: "image/png", dataUrl: `data:image/png;base64,${b64(png)}`, by }))!;
+    registerFixture("grid_sheets", keep.id);
+    const r1 = await SS.storeUploadAsSheets(d1.gp.id, bytesSource("Set.pdf", "application/pdf", set), { by });
+    const s1 = r1.ok ? await sheetsOf(r1.sheetIds) : [];
+    const v1 = await Promise.all(s1.map((s) => views319(decodeDataUrl(s.dataUrl)!.bytes)));
+    const p1 = (await G.getProject(d1.gp.id))!;
+    ok(r1.ok && r1.sheetIds.length === 3 && r1.sheetId === r1.sheetIds[0] && J(p1.sheetIds) === J([keep.id, ...r1.sheetIds]),
+      "#319 a 3-page PDF becomes three sheets, appended after the existing ones in page order");
+    ok(J(s1.map((s) => s.name)) === J(["Set.pdf — p.1", "Set.pdf — p.2", "Set.pdf — p.3"]) &&
+       s1.every((s, i) => s.mime === "application/pdf" && J(s.split) === J({ from: "Set.pdf", page: i + 1, pages: 3 }) && !s.adjust),
+      "#319 split sheets are named '— p.n', stamped with where they came from, and are their own Adjust-sheet roots");
+    ok(v1.length === 3 && v1.every((v) => v.length === 1) && J(v1.map((v) => v[0])) === J(setViews),
+      "#319 each split sheet is one page that pdf.js shows exactly as the source page (inherited box + rotation included)");
+    ok(r1.ok && r1.baseSheet === "removed" && !r1.note && !p1.sheetIds.includes(d1.base.id) && (p1.spaces || []).length === 0,
+      "#319 the real plan retires the generated plan (Spaces only) and says so");
+
+    // 2. FIRST position (the intake's plan view): the whole run goes in front, in order.
+    const d2 = await designWithBase("split first");
+    const later = (await G.addSheet(d2.gp.id, { name: "Later.png", mime: "image/png", dataUrl: `data:image/png;base64,${b64(png)}`, by }))!;
+    registerFixture("grid_sheets", later.id);
+    const r2 = await SS.storeUploadAsSheets(d2.gp.id, bytesSource("Set.pdf", "application/pdf", set), { by, first: true });
+    if (r2.ok) await sheetsOf(r2.sheetIds);
+    ok(r2.ok && J((await G.getProject(d2.gp.id))!.sheetIds) === J([...r2.sheetIds, later.id]), "#319 position first puts every split sheet in front, in page order");
+
+    // 3. A 1-page PDF and an image: one sheet under their own name; an image is never read; both retire the generated plan.
+    const d3 = await designWithBase("one page");
+    const r3 = await SS.storeUploadAsSheets(d3.gp.id, bytesSource("Single.pdf", "application/pdf", onePdf), { by });
+    let read4 = 0;
+    const d4 = await designWithBase("image");
+    const r4 = await SS.storeUploadAsSheets(d4.gp.id, { ...bytesSource("Plan.png", "image/png", png), readBytes: async () => { read4++; return png; } }, { by });
+    const [s3] = r3.ok ? await sheetsOf(r3.sheetIds) : [];
+    const [s4] = r4.ok ? await sheetsOf(r4.sheetIds) : [];
+    ok(r3.ok && r3.sheetIds.length === 1 && s3?.name === "Single.pdf" && !s3.split && !r3.note && r4.ok && r4.sheetIds.length === 1 && s4?.name === "Plan.png" && read4 === 0,
+      "#319 a 1-page PDF and an image stay one sheet under their own name (an image is never read for splitting)");
+    ok(r3.ok && r3.baseSheet === "removed" && r4.ok && r4.baseSheet === "removed", "#319 an image (or a 1-page PDF) also retires the generated plan");
+    const dBlank = await designWithBase("blank split");
+    const rBlank = await SS.storeUploadAsSheets(dBlank.gp.id, bytesSource("Set.pdf", "application/pdf", set), { by, first: true });
+    if (rBlank.ok) await sheetsOf(rBlank.sheetIds);
+    ok(r3.ok && J((await G.getProject(d3.gp.id))!.sheetIds) === J(r3.sheetIds) && r4.ok && J((await G.getProject(d4.gp.id))!.sheetIds) === J(r4.sheetIds) &&
+       rBlank.ok && rBlank.baseSheet === "removed" && J((await G.getProject(dBlank.gp.id))!.sheetIds) === J(rBlank.sheetIds),
+      "#319 a design holding only its generated plan ends with exactly the plan's sheets — the retire never leaves it empty");
+
+    // 4. Encrypted / over the cap / unreadable → one sheet, unchanged, with a note.
+    const d5 = await G.createProject({ name: "#319 fallbacks", customer: "Spec fixture", customerId: null, by });
+    registerFixture("grid_projects", d5.id);
+    const r5 = await SS.storeUploadAsSheets(d5.id, bytesSource("Locked.pdf", "application/pdf", encPdf), { by });
+    const r6 = await SS.storeUploadAsSheets(d5.id, bytesSource("Huge.pdf", "application/pdf", manyPdf), { by });
+    const r7 = await SS.storeUploadAsSheets(d5.id, { ...bytesSource("Gone.pdf", "application/pdf", set), readBytes: async () => null }, { by });
+    const [s5] = r5.ok ? await sheetsOf(r5.sheetIds) : [];
+    const [s6] = r6.ok ? await sheetsOf(r6.sheetIds) : [];
+    if (r7.ok) await sheetsOf(r7.sheetIds);
+    ok(r5.ok && r5.sheetIds.length === 1 && r5.note === S.splitFallbackNote("encrypted") && s5?.name === "Locked.pdf" && decodeDataUrl(s5.dataUrl)!.bytes.length === encPdf.length,
+      "#319 an encrypted PDF is kept as one sheet, unchanged, with a note (never refused)");
+    ok(r6.ok && r6.sheetIds.length === 1 && r6.note === S.splitFallbackNote("too-many-pages", 61) && s6?.name === "Huge.pdf",
+      "#319 a 61-page PDF is kept as one sheet with a note naming its page count");
+    ok(r7.ok && r7.sheetIds.length === 1 && r7.note === S.splitFallbackNote("unreadable") && r5.ok && r5.baseSheet === undefined,
+      "#319 a PDF whose bytes can't be read back is kept as one sheet; no generated plan → nothing to retire");
+
+    // 5. A page that fails to store: the pages already written are deleted and the upload lands whole.
+    const dropped: string[] = [];
+    let calls = 0;
+    const r8 = await SS.storeUploadAsSheets(d5.id, bytesSource("Flaky.pdf", "application/pdf", set), { by }, {
+      storePage: async () => (++calls === 1 ? { mime: "application/pdf", dataUrl: "", blobPath: "grid-sheets/T319/p1.pdf" } : null),
+      removeBlob: async (p: string) => { dropped.push(p); },
+    });
+    if (r8.ok) await sheetsOf(r8.sheetIds);
+    ok(r8.ok && r8.sheetIds.length === 1 && r8.note === S.splitFallbackNote("failed") && J(dropped) === J(["grid-sheets/T319/p1.pdf"]),
+      "#319 a page that fails to store rolls back the pages written and keeps the upload as one sheet");
+    const r9 = await SS.storeUploadAsSheets(d5.id, { ...bytesSource("x.png", "image/png", png), storeWhole: async () => null }, { by });
+    const r10 = await SS.storeUploadAsSheets("GRD-0", bytesSource("Set.pdf", "application/pdf", set), { by });
+    ok(!r9.ok && r9.reason === "storage" && r9.error === S.GRID_SHEET_SPLIT_COPY.storage && !r10.ok && r10.reason === "gone",
+      "#319 a storage failure is 'storage' (the route answers 502); an unknown design is 'gone'");
+    const goneDrops: string[] = [];
+    const r10b = await SS.storeUploadAsSheets("GRD-0", { ...bytesSource("x.png", "image/png", png), storeWhole: async () => ({ mime: "image/png", dataUrl: "", blobPath: "grid-sheets/T319/whole.png" }) }, { by },
+      { removeBlob: async (p: string) => { goneDrops.push(p); } });
+    ok(!r10b.ok && r10b.reason === "gone" && J(goneDrops) === J(["grid-sheets/T319/whole.png"]), "#319 an unknown design drops the whole file's unrecorded blob");
+
+    // 6. Devices on the generated plan → kept; on the intake path the kept sentence and the split note become notices.
+    const d7 = await designWithBase("kept");
+    for (const x of [0.3, 0.6]) await G.addPlacement(d7.gp.id, { sheetId: d7.base.id, page: 1, x, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by });
+    const r11 = await SS.storeUploadAsSheets(d7.gp.id, bytesSource("Huge.pdf", "application/pdf", manyPdf), { by, first: true, intakeNotices: true });
+    if (r11.ok) await sheetsOf(r11.sheetIds);
+    const n7 = ((await G.getProject(d7.gp.id))!.intake?.notices || []).map((n) => n.message);
+    ok(r11.ok && J(r11.baseSheet) === J({ kept: 2, what: "devices" }) && (await G.getProject(d7.gp.id))!.sheetIds.includes(d7.base.id) &&
+       n7.includes("Generated plan kept — it has 2 devices on it.") && n7.includes(S.splitFallbackNote("too-many-pages", 61)),
+      "#319 a generated plan with devices stays; on the intake path the kept sentence and the split note are left as notices");
+    const r12 = await SS.storeUploadAsSheets(d7.gp.id, bytesSource("Plan.png", "image/png", png), { by });
+    if (r12.ok) await sheetsOf(r12.sheetIds);
+    ok(r12.ok && ((await G.getProject(d7.gp.id))!.intake?.notices || []).length === n7.length, "#319 off the intake path no notice is added");
+
+    // 7. The Blob broker commit: the original upload's blob is dropped after a split; a 1-page PDF / image / encrypted PDF keeps it.
+    const key = "UP-0000000000000319";
+    const pathOf = (projectId: string, n: string) => U.gridSheetBlobPath(projectId, key, n).replace(/(\.[a-z]+)$/, "-Sfx19$1");
+    const removed: string[] = [];
+    const deps = (bytes: Uint8Array) => ({
+      head: async () => ({ bytes: bytes.subarray(0, U.GRID_SHEET_SNIFF_BYTES), size: bytes.length }),
+      read: async () => bytes,
+      remove: async (p: string) => { removed.push(p); },
+    });
+    const d8 = await designWithBase("broker");
+    const c1 = await C.commitSheetUpload(d8.gp.id, { uploadKey: key, blobPath: pathOf(d8.gp.id, "set.pdf"), name: "Set.pdf" }, by, deps(set));
+    const cs1 = c1.ok ? await sheetsOf(c1.sheetIds) : [];
+    ok(c1.ok && c1.sheetIds.length === 3 && J(cs1.map((s) => s.name)) === J(["Set.pdf — p.1", "Set.pdf — p.2", "Set.pdf — p.3"]) &&
+       cs1.every((s) => s.blobPath !== pathOf(d8.gp.id, "set.pdf")) && J(removed) === J([pathOf(d8.gp.id, "set.pdf")]) && c1.baseSheet === "removed",
+      "#319 commit: a 3-page PDF lands as three sheets, the original upload's blob is deleted, and the generated plan is retired");
+    const replay = await C.commitSheetUpload(d8.gp.id, { uploadKey: key, blobPath: pathOf(d8.gp.id, "set.pdf"), name: "Set.pdf" }, by, { ...deps(set), head: async () => null });
+    ok(!replay.ok && replay.error === U.GRID_SHEET_UPLOAD_COPY.noArrival && (await G.getProject(d8.gp.id))!.sheetIds.length === 3,
+      "#319 commit: a replay after a split fails its head read instead of splitting twice");
+    const c2 = await C.commitSheetUpload(d8.gp.id, { uploadKey: key, blobPath: pathOf(d8.gp.id, "one.pdf"), name: "One.pdf" }, by, deps(onePdf));
+    const c3 = await C.commitSheetUpload(d8.gp.id, { uploadKey: key, blobPath: pathOf(d8.gp.id, "plan.png"), name: "Plan.png" }, by,
+      { ...deps(png), read: async () => { throw new Error("an image is never read"); } });
+    const c4 = await C.commitSheetUpload(d8.gp.id, { uploadKey: key, blobPath: pathOf(d8.gp.id, "locked.pdf"), name: "Locked.pdf" }, by, deps(encPdf));
+    const [cs2] = c2.ok ? await sheetsOf(c2.sheetIds) : [];
+    const [cs3] = c3.ok ? await sheetsOf(c3.sheetIds) : [];
+    const [cs4] = c4.ok ? await sheetsOf(c4.sheetIds) : [];
+    ok(c2.ok && cs2?.blobPath === pathOf(d8.gp.id, "one.pdf") && cs2.name === "One.pdf" && c3.ok && !c3.note && cs3?.blobPath === pathOf(d8.gp.id, "plan.png") && cs3.mime === "image/png" &&
+       c4.ok && c4.note === S.splitFallbackNote("encrypted") && cs4?.blobPath === pathOf(d8.gp.id, "locked.pdf") && removed.length === 1,
+      "#319 commit: a 1-page PDF, an image and an encrypted PDF are recorded as uploaded (their blob kept)");
+    const heldDrops: string[] = [];
+    const heldPath = cs2?.blobPath || "";
+    const r10c = await SS.storeUploadAsSheets("GRD-0", { ...bytesSource("x.png", "image/png", png), storeWhole: async () => ({ mime: "image/png", dataUrl: "", blobPath: heldPath }) }, { by },
+      { removeBlob: async (p: string) => { heldDrops.push(p); } });
+    ok(!!heldPath && !r10c.ok && heldDrops.length === 0, "#319 a whole-file blob some sheet already holds is never deleted, even when its design is gone");
+
+    // 8. A plan-view commit (FIRST): page 1 becomes the intake's plan; a retry returns it without splitting again.
+    const d9 = await designWithBase("broker first");
+    const uid = "00000000-0000-4000-8000-000000000319";
+    const f1 = await C.commitSheetUpload(d9.gp.id, { uploadKey: key, blobPath: pathOf(d9.gp.id, "first.pdf"), name: "First.pdf", position: "first", planUploadId: uid }, by, deps(set));
+    if (f1.ok) await sheetsOf(f1.sheetIds);
+    const p9 = (await G.getProject(d9.gp.id))!;
+    ok(f1.ok && f1.sheetIds.length === 3 && J(p9.sheetIds.slice(0, 3)) === J(f1.sheetIds) && p9.intake?.planSheetId === f1.sheetIds[0] && p9.intake?.planSource === `upload:${uid}`,
+      "#319 commit: a plan-view PDF goes FIRST as its pages, and page 1 is recorded as the intake's plan");
+    const f2 = await C.commitSheetUpload(d9.gp.id, { uploadKey: key, blobPath: pathOf(d9.gp.id, "first2.pdf"), name: "First.pdf", position: "first", planUploadId: uid }, by, deps(set));
+    ok(f1.ok && f2.ok && f2.already === true && J(f2.sheetIds) === J([f1.sheetIds[0]]) && (await G.getProject(d9.gp.id))!.sheetIds.length === p9.sheetIds.length,
+      "#319 commit: a retried plan-view upload returns the sheet that landed (no second split)");
+
+    // 9. Wiring pins.
+    const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+    const route = rd("src/app/api/grid-sheets/upload/route.ts");
+    ok(route.includes("storeUploadAsSheets(") && !route.includes("putBlob(") && !route.includes("addSheet(") && route.includes("await recordIntakePlan(projectId, r.sheetIds[0], source);"),
+      "#319 pin: the 4 MB route stores through storeUploadAsSheets (split + retire), never on its own");
+    const pis = rd("src/lib/design/grid-plan-intake-server.ts");
+    ok(pis.includes("storeUploadAsSheets(") && pis.includes("readBytes: () => readBlobCapped(pick.blobPath)") && !pis.includes("dropOriginal") && !pis.includes("addSheet("),
+      "#319 pin: the on-file plan copy splits through storeUploadAsSheets and never deletes the customer's own file");
+    const commit = rd("src/lib/design/grid-sheet-upload-server.ts");
+    ok(commit.includes("dropOriginal: () => d.remove(blobPath)") && !commit.includes("addSheet("), "#319 pin: the broker commit drops its original blob only through a successful split");
+    ok(rd("src/app/(app)/design/grid/[id]/actions.ts").includes("planSheetIds = attached.sheetIds;"), "#319 pin: the intake save hands back every sheet a copied plan became");
   } finally {
     if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
     else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;

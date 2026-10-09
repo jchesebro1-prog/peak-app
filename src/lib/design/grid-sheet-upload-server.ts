@@ -3,27 +3,35 @@
  * #318 — record a sheet the browser uploaded straight to Blob (the
  * Plans & risers order, package-files-server.ts): path scope → never a path a
  * sheet already holds → the head Blob really holds (size ≤ 25 MB, sniffed
- * type) → addSheet. The client's `blobPath` is untrusted throughout; a
- * refusal deletes the unrecorded blob. A plan-view upload (`position:
- * "first"`) runs under the design's plan lock with its upload id, so a retry
- * of one that landed returns that sheet (#314's rule). `deps` exists for the
- * spec harness.
+ * type) → storeUploadAsSheets. The client's `blobPath` is untrusted
+ * throughout; a refusal deletes the unrecorded blob. A plan-view upload
+ * (`position: "first"`) runs under the design's plan lock with its upload id,
+ * so a retry of one that landed returns that sheet (#314's rule).
+ * #319: a multi-page PDF is read back and split into one sheet per page, and
+ * the original upload's blob is then deleted (a replayed commit fails its head
+ * read instead of splitting twice); a real plan retires the generated plan.
+ * `deps` exists for the spec harness.
  */
 import { deleteBlob, getBlobHead } from "@/lib/blob";
 import { listDocsByField } from "@/db/doc-store";
 import { baseName, cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
-import { addSheet, getProject, recordIntakePlan, type GridSheet } from "@/lib/stores/grid-projects";
+import { getProject, recordIntakePlan, type GridSheet } from "@/lib/stores/grid-projects";
 import { withPlanLock } from "@/lib/design/grid-plan-intake-server";
 import { attachedPlanSheet, isPlanUploadId, planSourceKey } from "@/lib/design/grid-plan-intake";
 import { GRID_SHEET_DIRECT_MAX_BYTES, GRID_SHEET_SNIFF_BYTES, GRID_SHEET_UPLOAD_COPY as COPY, gridSheetPathInScope, sniffSheetFile } from "./grid-sheet-upload";
+import { readBlobCapped } from "./sheet-adjust-server";
+import { storeUploadAsSheets } from "./grid-sheet-split-server";
+import type { SheetsLanded } from "./grid-sheet-split";
 
 type CommitDeps = {
   head: (pathname: string, max: number) => Promise<{ bytes: Uint8Array; size: number } | null>;
   remove: (pathname: string) => Promise<void>;
+  /** #319: the whole uploaded file, to split a PDF (null = unreadable → one sheet). */
+  read: (pathname: string) => Promise<Uint8Array | null>;
 };
-const liveDeps: CommitDeps = { head: getBlobHead, remove: deleteBlob };
+const liveDeps: CommitDeps = { head: getBlobHead, remove: deleteBlob, read: (p) => readBlobCapped(p) };
 
-export type CommitSheetResult = { ok: true; sheetId: string; already?: true } | { ok: false; error: string };
+export type CommitSheetResult = ({ ok: true; already?: true } & SheetsLanded) | { ok: false; error: string };
 
 export async function commitSheetUpload(projectId: string, input: unknown, by: string, deps: Partial<CommitDeps> = {}): Promise<CommitSheetResult> {
   const d: CommitDeps = { ...liveDeps, ...deps };
@@ -61,7 +69,7 @@ async function commitLocked(projectId: string, blobPath: string, name: string, b
     const done = now ? attachedPlanSheet(now.intake, now.sheetIds || [], source) : null;
     if (done) {
       await dropOrphan();
-      return { ok: true, sheetId: done, already: true };
+      return { ok: true, sheetId: done, sheetIds: [done], already: true };
     }
   }
   if (await referenced(blobPath)) return { ok: false, error: COPY.alreadySaved };
@@ -80,8 +88,19 @@ async function commitLocked(projectId: string, blobPath: string, name: string, b
   if (head.size > GRID_SHEET_DIRECT_MAX_BYTES) return refuse(COPY.tooBig);
   const type = sniffSheetFile(head.bytes);
   if (!type) return refuse(COPY.wrongType);
-  const sheet = await addSheet(projectId, { name, mime: type, blobPath, by, ...(source ? { first: true } : {}) });
-  if (!sheet) return refuse(COPY.gone);
-  if (source) await recordIntakePlan(projectId, sheet.id, source);
-  return { ok: true, sheetId: sheet.id };
+  const landed = await storeUploadAsSheets(
+    projectId,
+    {
+      name,
+      mime: type,
+      readBytes: () => d.read(blobPath),
+      // Not split: the uploaded blob IS the sheet's file (no `url` — provenance only, D692).
+      storeWhole: async () => ({ mime: type, dataUrl: "", blobPath }),
+      dropOriginal: () => d.remove(blobPath),
+    },
+    { by, first: !!source, intakeNotices: !!source }
+  );
+  if (!landed.ok) return refuse(landed.reason === "gone" ? COPY.gone : landed.error);
+  if (source) await recordIntakePlan(projectId, landed.sheetIds[0], source);
+  return landed;
 }
