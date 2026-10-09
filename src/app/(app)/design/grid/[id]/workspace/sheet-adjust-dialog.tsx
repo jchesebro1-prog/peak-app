@@ -48,8 +48,10 @@ export default function SheetAdjustDialog({
   sheet,
   locks,
   afterUpload,
+  queue = null,
   onCancel,
   onDone,
+  onSkipRest,
 }: {
   projectId: string;
   sheet: { id: string; name: string; mime: string; adjust?: SheetAdjust | null };
@@ -57,8 +59,12 @@ export default function SheetAdjustDialog({
   locks: Record<number, string>;
   /** Opened right after an upload: Cancel reads "Skip". */
   afterUpload: boolean;
+  /** #319: this sheet's place in a multi-sheet upload ("Sheet 2 of 5"); null = a single sheet. */
+  queue?: { index: number; total: number } | null;
   onCancel: () => void;
   onDone: (newSheetId: string) => void;
+  /** #319: Skip the rest — end the walk on this sheet. */
+  onSkipRest?: () => void;
 }) {
   const rootId = sheet.adjust?.fromSheetId || sheet.id;
   const src = `/api/grid-sheets/${encodeURIComponent(rootId)}`;
@@ -215,11 +221,17 @@ export default function SheetAdjustDialog({
         <div style={{ fontSize: 14, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360 }} title={sheet.name}>
           Adjust sheet — {sheet.name}
         </div>
+        {queue && <span style={{ fontSize: 12.5, fontWeight: 600, color: "#e6e8ec", whiteSpace: "nowrap" }}>Sheet {queue.index + 1} of {queue.total}</span>}
         <span style={{ fontSize: 12, color: "#aeb3bc" }}>Crop to the plan and turn it upright, then calibrate.</span>
         <span style={{ flex: 1 }} />
         <button type="button" style={dim(BTN, !!locked || saving)} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "ccw"))} title="Turn the page a quarter turn to the left">⟲ Rotate left</button>
         <button type="button" style={dim(BTN, !!locked || saving)} disabled={!!locked || saving} onClick={() => apply(turnAdjust(cur, "cw"))} title="Turn the page a quarter turn to the right">⟳ Rotate right</button>
         <button type="button" style={dim(BTN, !!locked || saving || isIdentity(cur))} disabled={!!locked || saving || isIdentity(cur)} onClick={() => apply(IDENTITY_ADJUST)} title="Back to the full, unturned page">Reset</button>
+        {queue && onSkipRest && queue.index < queue.total - 1 && (
+          <button type="button" style={dim(BTN, saving)} disabled={saving} onClick={() => onSkipRest()} title="Leave this and the remaining sheets as they are">
+            Skip the rest
+          </button>
+        )}
         <button type="button" style={dim(BTN, saving)} disabled={saving} onClick={onCancel}>{afterUpload ? "Skip" : "Cancel"}</button>
         {stuck ? (
           <button type="button" style={PRIMARY} onClick={() => window.location.reload()} title="Your crop and rotation are saved — reload to open the new sheet">

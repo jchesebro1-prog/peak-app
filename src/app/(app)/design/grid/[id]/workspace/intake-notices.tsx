@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { newPlanUploadId, planFileProblem } from "@/lib/design/grid-plan-upload";
 import { GRID_SHEET_ACCEPT, GRID_SHEET_DIRECT_MAX_LABEL } from "@/lib/design/grid-sheet-upload";
 import { uploadGridSheet } from "../sheet-upload";
+import { uploadNote } from "@/lib/design/grid-sheet-split";
 import { GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { dismissGridNoticeAction, retryGridNoticeAction } from "../actions";
 import type { GridEditor } from "../use-grid-editor";
@@ -30,7 +31,7 @@ const BTN: React.CSSProperties = {
 };
 
 export default function IntakeNotices({ ed }: { ed: GridEditor }) {
-  const { intakeNotices, project, router, blobUploads, openAdjust } = ed;
+  const { intakeNotices, project, router, blobUploads, openAdjust, noteAction } = ed;
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const fileFor = useRef<string | null>(null);
@@ -59,7 +60,8 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
     run(async () => {
       const up = await uploadGridSheet(project.id, file, { blobUploads, planUploadId: newPlanUploadId() });
       if (!up.ok) return up;
-      openAdjust(up.sheetId, true);
+      noteAction(uploadNote(file.name, up));
+      openAdjust(up.sheetId, true, up.sheetIds);
       return dismissGridNoticeAction(project.id, noticeId);
     });
   };

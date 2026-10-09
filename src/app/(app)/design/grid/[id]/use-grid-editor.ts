@@ -37,6 +37,7 @@ import { distToPolyline, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import type { GridLaborLine } from "@/lib/design/wire-labor";
 import { uploadGridSheet } from "./sheet-upload";
+import { adjustQueueStep, uploadNote } from "@/lib/design/grid-sheet-split";
 import { allPagesLocked, pageLocks, type SheetAdjust } from "@/lib/design/sheet-adjust";
 import { optionSlice } from "@/lib/design/grid-options";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
@@ -368,8 +369,8 @@ export type GridEditorProps = {
   focusSheetId?: string | null;
   /** #318: file storage is on — sheets upload straight to Blob (≤ 25 MB); off = the 4 MB route. */
   blobUploads?: boolean;
-  /** #318: `?adjust=<sheetId>` — the intake's plan view, opened in Adjust sheet once it is listed. */
-  adjustSheetId?: string | null;
+  /** #318/#319: `?adjust=<id>,<id>,…` — the sheets the intake's plan view became, walked in Adjust sheet once the first is listed. */
+  adjustSheetIds?: string[] | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -480,34 +481,45 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
   // #318: Adjust sheet (crop + rotate). Opened from the tab's ⋯ menu, right
   // after an upload (the + tab, the notice banner's re-upload), or by the
-  // intake's swap into the editor through `?adjust=<sheetId>` — adopted during
-  // render once that sheet is in `sheets`, like the focus sheet above.
-  const [adjusting, setAdjusting] = useState<{ sheetId: string; afterUpload: boolean } | null>(null);
-  const requestedAdjust = props.adjustSheetId ?? null;
+  // intake's swap into the editor through `?adjust=<id>,<id>,…` — adopted during
+  // render once the first sheet is in `sheets`, like the focus sheet above.
+  /** #319: `queue` = every sheet one upload made (≥ 2, in order) — Adjust sheet walks them one at a time. */
+  const [adjusting, setAdjusting] = useState<{ sheetId: string; afterUpload: boolean; queue?: string[] } | null>(null);
+  const requestedIds = props.adjustSheetIds?.length ? props.adjustSheetIds : null;
+  /** The request as one string — a fresh array arrives every render. */
+  const requestedAdjust = requestedIds ? requestedIds.join(",") : null;
   const [adjustApplied, setAdjustApplied] = useState<string | null>(null);
-  if (requestedAdjust && requestedAdjust !== adjustApplied && sheets.some((s) => s.id === requestedAdjust)) {
+  if (requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && sheets.some((s) => s.id === requestedIds[0])) {
     setAdjustApplied(requestedAdjust);
-    setAdjusting({ sheetId: requestedAdjust, afterUpload: true });
+    setAdjusting({ sheetId: requestedIds[0], afterUpload: true, ...(requestedIds.length > 1 ? { queue: requestedIds } : {}) });
     setSelectedIds([]);
-    setActiveSheetId(requestedAdjust);
+    setActiveSheetId(requestedIds[0]);
     setPage(1);
   }
   // The swap has landed (the new sheet is listed — or the old one is gone,
-  // whatever the refresh brought): close the dialog on the new sheet.
+  // whatever the refresh brought): close the dialog on the new sheet — or,
+  // #319, in a multi-sheet upload, open the next one.
   if (adjustSwap && (sheets.some((s) => s.id === adjustSwap.to) || !sheets.some((s) => s.id === adjustSwap.from))) {
     setAdjustSwap(null);
-    setAdjusting(null);
+    const nextId = adjustQueueStep(adjusting?.queue, adjustSwap.from, sheets.map((s) => s.id)).next;
+    if (adjusting?.queue && nextId) {
+      setAdjusting({ sheetId: nextId, afterUpload: true, queue: adjusting.queue });
+      setActiveSheetId(nextId);
+      setPage(1);
+    } else setAdjusting(null);
   }
-  const openAdjust = useCallback((sheetId: string, afterUpload = false) => {
+  const openAdjust = useCallback((sheetId: string, afterUpload = false, queue?: readonly string[]) => {
     // Defence in depth: nothing stays selected behind the dialog.
     setSelectedIds([]);
-    setAdjusting({ sheetId, afterUpload });
+    setAdjusting({ sheetId, afterUpload, ...(queue && queue.length > 1 ? { queue: [...queue] } : {}) });
   }, []);
   /** The sheet open in Adjust sheet — null until a just-uploaded sheet arrives in `sheets`. */
   const adjustTarget = adjusting ? (sheets.find((s) => s.id === adjusting.sheetId) ?? null) : null;
   /** The dialog is on screen (Saving… included): the editor's key handlers stand down. */
   const adjustOpen = !!adjustTarget;
   const adjustAfterUpload = adjusting?.afterUpload ?? false;
+  /** #319: this sheet's place in a multi-sheet upload's walk ("Sheet 2 of 5"); null = a single sheet. */
+  const adjustQueue = adjusting?.queue ? adjustQueueStep(adjusting.queue, adjusting.sheetId, []).position : null;
   /** Page locks per listed sheet — one scan per project/sheets change, not per tab per render. */
   const locksBySheet = useMemo(() => new Map(sheets.map((s) => [s.id, pageLocks(project, s.id)] as const)), [project, sheets]);
   const adjustLocks = useMemo(() => (adjustTarget ? (locksBySheet.get(adjustTarget.id) ?? {}) : {}), [locksBySheet, adjustTarget]);
@@ -1474,8 +1486,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
     setActiveSheetId(r.sheetId);
     setPage(1);
-    noteAction(`Uploaded ${file.name}`);
-    openAdjust(r.sheetId, true);
+    noteAction(uploadNote(file.name, r));
+    openAdjust(r.sheetId, true, r.sheetIds);
     clearUndo();
     router.refresh();
   }
@@ -2062,12 +2074,25 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (requestedAdjust) router.replace(`${pathname}?option=${encodeURIComponent(activeOptionId)}`, { scroll: false });
   }, [requestedAdjust, router, pathname, activeOptionId]);
 
-  /** #318: Cancel / Skip — the sheet stays as it is. Skip after an upload opens that sheet's plan. */
-  const closeAdjust = useCallback(() => {
-    if (adjusting?.afterUpload && adjusting.sheetId !== sheet?.id && sheets.some((s) => s.id === adjusting.sheetId)) switchSheet(adjusting.sheetId);
-    setAdjusting(null);
-    dropAdjustParam();
-  }, [adjusting, sheet?.id, sheets, switchSheet, dropAdjustParam]);
+  /** #318: Cancel / Skip — the sheet stays as it is. Skip after an upload opens that sheet's plan.
+   *  #319: in a multi-sheet upload, Skip (Escape, or Done with nothing changed) opens the next
+   *  sheet still listed; Skip the rest (`rest`) ends the walk on this one. */
+  const closeAdjustWith = useCallback(
+    (rest: boolean) => {
+      const nextId = rest ? null : adjustQueueStep(adjusting?.queue, adjusting?.sheetId ?? "", sheets.map((s) => s.id)).next;
+      if (adjusting?.queue && nextId) {
+        setAdjusting({ sheetId: nextId, afterUpload: true, queue: adjusting.queue });
+        switchSheet(nextId);
+        return;
+      }
+      if (adjusting?.afterUpload && adjusting.sheetId !== sheet?.id && sheets.some((s) => s.id === adjusting.sheetId)) switchSheet(adjusting.sheetId);
+      setAdjusting(null);
+      dropAdjustParam();
+    },
+    [adjusting, sheet?.id, sheets, switchSheet, dropAdjustParam]
+  );
+  const closeAdjust = useCallback(() => closeAdjustWith(false), [closeAdjustWith]);
+  const skipRestAdjust = useCallback(() => closeAdjustWith(true), [closeAdjustWith]);
 
   /** #318: Done in Adjust sheet — the new sheet took the old one's place; open it.
    *  The active id moves now; the dialog stays up ("Saving…") until the
@@ -2912,9 +2937,11 @@ function useGridEditorImpl(props: GridEditorProps) {
     adjustTarget,
     adjustOpen,
     adjustAfterUpload,
+    adjustQueue,
     adjustLocks,
     openAdjust,
     closeAdjust,
+    skipRestAdjust,
     finishAdjust,
     adjustAvailability,
   };

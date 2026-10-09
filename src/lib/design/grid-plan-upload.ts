@@ -1,5 +1,6 @@
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL, sheetMimeVerdict } from "@/lib/grid-sheet-file";
 import { GRID_SHEET_DIRECT_MAX_BYTES, GRID_SHEET_DIRECT_TYPES, GRID_SHEET_UPLOAD_COPY } from "@/lib/design/grid-sheet-upload";
+import { parseSheetsLanded, type SheetUploadResult } from "@/lib/design/grid-sheet-split";
 
 /**
  * #314 — the Grid plan view's browser half, shared by the intake, the editor's
@@ -32,8 +33,9 @@ export function newPlanUploadId(): string {
   return globalThis.crypto.randomUUID();
 }
 
-/** The 4 MB multipart route (no Blob). `uploadId` = a plan-view upload: FIRST position, idempotent. */
-export async function postSheetMultipart(projectId: string, file: File, uploadId?: string): Promise<{ ok: true; sheetId: string } | { ok: false; error: string }> {
+/** The 4 MB multipart route (no Blob). `uploadId` = a plan-view upload: FIRST position, idempotent.
+ *  #319: answers every sheet the upload became (a multi-page PDF splits) and what happened to the generated plan. */
+export async function postSheetMultipart(projectId: string, file: File, uploadId?: string): Promise<SheetUploadResult> {
   const body = new FormData();
   body.append("projectId", projectId);
   body.append("name", file.name);
@@ -44,8 +46,11 @@ export async function postSheetMultipart(projectId: string, file: File, uploadId
   body.append("file", file);
   try {
     const res = await fetch("/api/grid-sheets/upload", { method: "POST", body });
-    const r = (await res.json()) as { ok?: boolean; sheetId?: string; error?: string };
-    return r?.ok && r.sheetId ? { ok: true, sheetId: r.sheetId } : { ok: false, error: r?.error || "That plan could not be uploaded." };
+    const r = (await res.json()) as unknown;
+    const landedSheets = parseSheetsLanded(r);
+    if (landedSheets) return { ok: true, ...landedSheets };
+    const error = (r as { error?: unknown } | null)?.error;
+    return { ok: false, error: typeof error === "string" && error ? error : "That plan could not be uploaded." };
   } catch {
     // A dropped connection or a non-JSON reply (a proxy's own 413 page).
     return { ok: false, error: "That plan could not be uploaded. Check your connection and try again." };

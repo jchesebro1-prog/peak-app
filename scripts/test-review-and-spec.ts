@@ -11532,6 +11532,7 @@ seeded()
   .then(() => pagesAsSheets319BytesChecks())
   .then(() => pagesAsSheets319StoreChecks())
   .then(() => pagesAsSheets319UploadChecks())
+  .then(() => pagesAsSheets319UiPins())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59986,16 +59987,16 @@ async function sheetAdjust318UiPins(): Promise<void> {
      dlg.includes('{afterUpload ? "Skip" : "Cancel"}') && dlg.includes("Same for all pages") && dlg.includes("rotateBy={cur.rotate}") && !dlg.includes("blobPath"),
     "#318 pin: the dialog shows the ROOT file with the current spec, saves only a real change, and Skip/Cancel leaves the sheet as is");
   const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
-  ok(hook.includes("openAdjust(r.sheetId, true);") && /if \(requestedAdjust && requestedAdjust !== adjustApplied && sheets\.some\(\(s\) => s\.id === requestedAdjust\)\) \{\s*setAdjustApplied\(requestedAdjust\);/.test(hook) &&
+  ok(hook.includes("openAdjust(r.sheetId, true, r.sheetIds);") && /if \(requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && sheets\.some\(\(s\) => s\.id === requestedIds\[0\]\)\) \{\s*setAdjustApplied\(requestedAdjust\);/.test(hook) &&
      hook.includes("if (s.base) return { hidden: true, disabled: true, title: \"\" };") && !hook.includes("blobPath"),
     "#318 pin: an upload opens Adjust sheet; ?adjust= is adopted during render once the sheet arrives; never on the base sheet");
   const tabs = rd("src/app/(app)/design/grid/[id]/workspace/sheet-tabs.tsx");
   ok(tabs.includes('label: "Crop & rotate…"') && tabs.includes("const avail = adjustAvailability(s);"), "#318 pin: the sheet tab's ⋯ menu offers Crop & rotate…");
   const page = rd("src/app/(app)/design/grid/[id]/page.tsx");
-  ok(page.includes("adjustSheetId={requestedAdjust && (project.sheetIds || []).includes(requestedAdjust) ? requestedAdjust : null}") && page.includes("base: isBaseSheet(s, project.intake),") && page.includes("adjust: s.adjust ?? null,"),
+  ok(page.includes("adjustSheetIds={parseAdjustParam(requestedAdjust, project.sheetIds || [])}") && page.includes("base: isBaseSheet(s, project.intake),") && page.includes("adjust: s.adjust ?? null,"),
     "#318 pin: the page passes ?adjust= (only for a listed sheet) and each sheet's adjust spec and base flag");
   const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
-  ok(gi.includes("if (adjustId) router.replace(`/design/grid/${encodeURIComponent(projectId)}?adjust=${encodeURIComponent(adjustId)}`);") && gi.includes("let adjustId = saved.planSheetId ?? null;"),
+  ok(gi.includes('if (adjustIds.length) router.replace(`/design/grid/${encodeURIComponent(projectId)}?adjust=${adjustIds.map(encodeURIComponent).join(",")}`);') && gi.includes("let adjustIds = saved.planSheetIds ?? [];"),
     "#318 pin: the intake finishes by opening its plan view (uploaded or copied) in Adjust sheet");
   const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(ed.includes("{ed.adjustTarget && (") && ed.includes("onDone={ed.finishAdjust}"), "#318 pin: the editor renders the dialog for the sheet being adjusted");
@@ -60020,7 +60021,7 @@ async function sheetAdjust318DialogGuardPins(): Promise<void> {
      /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);[\s\S]{0,400}?if \(adjustSwap\?\.to !== focusSheetId\) \{\s*setActiveSheetId\(focusSheetId!\);\s*setPage\(1\);/.test(hook) &&
      hook.indexOf("if (focusHere && focusSheetId !== focusApplied)") < hook.indexOf("if (adjustSwap && (sheets.some((s) => s.id === adjustSwap.to)") &&
      hook.includes("const locksBySheet = useMemo(") && hook.includes("allPagesLocked(locksBySheet.get(s.id) ?? {}, count)") &&
-     /const openAdjust = useCallback\(\(sheetId: string, afterUpload = false\) => \{[\s\S]{0,120}setSelectedIds\(\[\]\);/.test(hook),
+     /const openAdjust = useCallback\(\(sheetId: string, afterUpload = false, queue\?: readonly string\[\]\) => \{[\s\S]{0,120}setSelectedIds\(\[\]\);/.test(hook),
     "#318 fix: adjusting the intake plan view keeps its page; locks are scanned once per project change; opening clears the selection");
 }
 
@@ -60639,4 +60640,35 @@ async function pagesAsSheets319UploadChecks(): Promise<void> {
     if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
     else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
   }
+}
+
+/* ---------------- #319: client wiring pins (result shapes + the Adjust queue) ---------------- */
+async function pagesAsSheets319UiPins(): Promise<void> {
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes("openAdjust(r.sheetId, true, r.sheetIds);") && hook.includes("noteAction(uploadNote(file.name, r));"),
+    "#319 pin: the + tab notes how many sheets landed (and the generated plan) and walks every new sheet in Adjust sheet");
+  ok(hook.includes("const nextId = adjustQueueStep(adjusting?.queue, adjustSwap.from, sheets.map((s) => s.id)).next;") &&
+     hook.includes("const closeAdjust = useCallback(() => closeAdjustWith(false), [closeAdjustWith]);") &&
+     hook.includes("const skipRestAdjust = useCallback(() => closeAdjustWith(true), [closeAdjustWith]);") &&
+     hook.includes("adjustSheetIds?: string[] | null;") && !hook.includes("adjustSheetId?:") && !hook.includes("blobPath"),
+    "#319 pin: Done and Skip move to the next sheet of a multi-sheet upload; Skip the rest ends the walk; ?adjust= is a list");
+  const dlg = rd("src/app/(app)/design/grid/[id]/workspace/sheet-adjust-dialog.tsx");
+  ok(dlg.includes("Sheet {queue.index + 1} of {queue.total}") && dlg.includes("Skip the rest") && dlg.includes('{afterUpload ? "Skip" : "Cancel"}') && dlg.includes("onSkipRest?: () => void;"),
+    "#319 pin: the dialog shows 'Sheet n of N' and offers Skip the rest");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("queue={ed.adjustQueue}") && ed.includes("onSkipRest={ed.skipRestAdjust}"), "#319 pin: the editor hands the queue to the dialog");
+  ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("adjustSheetIds={parseAdjustParam(requestedAdjust, project.sheetIds || [])}"),
+    "#319 pin: the page passes ?adjust= as a list of listed sheet ids");
+  const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
+  ok(gi.includes("let adjustIds = saved.planSheetIds ?? [];") && gi.includes("else adjustIds = up.sheetIds;") && gi.includes('?adjust=${adjustIds.map(encodeURIComponent).join(",")}'),
+    "#319 pin: the intake finishes by queueing every sheet its plan view became");
+  const banner = rd("src/app/(app)/design/grid/[id]/workspace/intake-notices.tsx");
+  ok(banner.includes("openAdjust(up.sheetId, true, up.sheetIds);") && banner.includes("noteAction(uploadNote(file.name, up));"),
+    "#319 pin: the banner's re-upload queues every new sheet and notes the result");
+  ok(rd("src/lib/design/grid-plan-upload.ts").includes("const landedSheets = parseSheetsLanded(r);") &&
+     rd("src/app/(app)/design/grid/[id]/sheet-upload.ts").includes('import type { SheetUploadResult } from "@/lib/design/grid-sheet-split";'),
+    "#319 pin: both upload paths answer one result shape (sheetIds + baseSheet + note)");
+  const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  ok(!acts.includes("planSheetId?: string") && acts.includes("planSheetIds?: string[]"), "#319 pin: the intake save answers planSheetIds only");
 }
