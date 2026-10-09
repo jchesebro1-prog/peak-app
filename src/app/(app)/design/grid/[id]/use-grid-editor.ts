@@ -45,6 +45,7 @@ import type { ScopeTargets, ScopeTargetsByTier } from "@/lib/design/scope-target
 import type { SellCard } from "@/lib/design/auto-estimate";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, RemovedBundle } from "@/lib/stores/grid-projects";
+import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import {
   addRouteAction,
   addSpaceAction,
@@ -344,6 +345,12 @@ export type GridEditorProps = {
    *  built server-side by scheduleForOption — the /schedule page's own helper.
    *  null when the build threw: the view says so instead of showing nothing. */
   schedule: ScheduleData | null;
+  /** #314: the estimate this design draws (any option of it) — the quote
+   *  button becomes "Open estimate →"; null for an ordinary design. */
+  estimateLink?: { quoteId: string; quoteNumber: string; href: string } | null;
+  /** #314: the From estimate tray for the ACTIVE option, when it is the
+   *  estimate-owned one — lines read live from the quote's saved spec. */
+  estimateTray?: EstimateTrayData | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -370,6 +377,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     schedule,
     symbolUrls,
   } = props;
+  const estimateLink = props.estimateLink ?? null;
+  const estimateTray = props.estimateTray ?? null;
   const router = useRouter();
   const pathname = usePathname();
   /** #299 multi-select: every selected device, in the order picked. The
@@ -2556,6 +2565,8 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   return {
     router,
+    estimateLink,
+    estimateTray,
     project,
     symbolDisplay,
     setSymbolScale,

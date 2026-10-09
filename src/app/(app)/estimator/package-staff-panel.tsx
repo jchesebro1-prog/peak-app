@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { openGridDesignForQuoteAction } from "./grid-design-actions";
+import { GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import { addPackageFileAction, generateGridDrawingsAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction } from "./package-actions";
 import { putPackageFile } from "./package-file-upload";
 import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKAGE_FILES_COPY, type PackageFileKind } from "@/lib/estimate-output/package-files";
@@ -31,6 +35,9 @@ export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: strin
   const [kind, setKind] = useState<PackageFileKind>("drawing");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  /** #314: "Design in the Grid" runs on its own, so the drawings controls stay usable meanwhile. */
+  const [gridPending, startGrid] = useTransition();
+  const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -111,6 +118,25 @@ export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: strin
       setNote(r.ok ? GRID_SET_COPY.generated : null);
       if (!r.ok) setErr(r.error);
       await reload();
+    });
+
+  /** #314 — open (or start) the Grid design that draws this estimate. */
+  const designInGrid = () =>
+    startGrid(async () => {
+      setErr(null);
+      setNote(null);
+      let r: Awaited<ReturnType<typeof openGridDesignForQuoteAction>>;
+      try {
+        r = await openGridDesignForQuoteAction(quoteId);
+      } catch {
+        setErr(FAILED);
+        return;
+      }
+      if (!r.ok) {
+        setErr(r.error);
+        return;
+      }
+      router.push(`/design/grid/${encodeURIComponent(r.projectId)}`);
     });
 
   const rebuild = () =>
@@ -197,13 +223,40 @@ export function PackageStaffPanel({ quoteId, section = "all" }: { quoteId: strin
               type="button"
               onClick={generate}
               disabled={!canUpload || !panel.grid}
-              title={panel.grid ? `From ${panel.grid.label}` : "Link a Grid design to this quote first."}
+              title={panel.grid ? `From ${panel.grid.label}` : GRID_LINK_COPY.generateNeedsDesign}
               style={{ ...btn, ...(canUpload && panel.grid ? {} : off) }}
             >
               Generate from Grid
             </button>
           </div>
           {!panel.uploads && <span style={small}>{PACKAGE_FILES_COPY.noStorage}</span>}
+          {/* #314 — draw this estimate's plans in the Grid; the estimate keeps its parts and prices. */}
+          {panel.gridEligible && (
+            <div data-testid="package-grid-design" style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
+              {panel.grid ? (
+                <Link href={`/design/grid/${encodeURIComponent(panel.grid.projectId)}`} style={{ ...btn, textDecoration: "none", alignSelf: "flex-start" }}>
+                  {GRID_LINK_COPY.open}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={designInGrid}
+                  disabled={gridPending || !panel.canCreate}
+                  title={panel.canCreate ? "Start a Grid design from this estimate — place its parts on the plan" : "You can't create designs."}
+                  style={{ ...btn, alignSelf: "flex-start", ...(gridPending || !panel.canCreate ? off : {}) }}
+                >
+                  {gridPending ? GRID_LINK_COPY.opening : GRID_LINK_COPY.design}
+                </button>
+              )}
+              <span style={small}>
+                {panel.grid
+                  ? panel.grid.estimateOwned
+                    ? `${panel.grid.label} — drawings only; parts and prices stay here.`
+                    : `${panel.grid.label}`
+                  : "Plans, riser and drawing set from this estimate's parts. Parts and prices stay here."}
+              </span>
+            </div>
+          )}
         </>
       )}
 

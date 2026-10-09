@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { EquipmentMapLink } from "@/components/design/equipment-map-link";
+import { GRID_LINK_COPY, openEstimateTitle } from "@/lib/design/estimate-grid-link";
 import type { GridEditor } from "../use-grid-editor";
 import { BTN } from "./toolbar-style";
 
@@ -10,7 +12,20 @@ import { BTN } from "./toolbar-style";
  * needing a part. Split out of toolbar.tsx unchanged.
  */
 export default function QuoteButton({ ed }: { ed: GridEditor }) {
-  const { busy, bomEmpty, runQuote, incompleteQuote, setIncompleteQuote, activeOption, quoteNumbers } = ed;
+  const { busy, bomEmpty, runQuote, incompleteQuote, setIncompleteQuote, activeOption, quoteNumbers, estimateLink } = ed;
+  // #314: a design drawn from an estimate never writes a quote — the button
+  // opens the estimate instead (the server refuses createDraftQuoteAction too).
+  if (estimateLink) {
+    return (
+      <Link
+        href={estimateLink.href}
+        title={openEstimateTitle(estimateLink.quoteNumber)}
+        style={{ ...BTN, display: "inline-flex", alignItems: "center", textDecoration: "none", background: "#16181d", color: "#fff", borderColor: "#16181d" }}
+      >
+        {GRID_LINK_COPY.openEstimate}
+      </Link>
+    );
+  }
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button

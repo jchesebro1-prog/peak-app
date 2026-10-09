@@ -37,6 +37,12 @@ export type GridOption = {
    *  labor line; $0 leaves it off the quote. Absent on older options; always
    *  read through sanitizeLaborOverrides(). */
   laborOverrides?: LaborOverrides;
+  /** #314: set when "Design in the Grid" on an Estimator quote created this
+   *  option — `quoteId` is then the ESTIMATE, which owns parts and prices.
+   *  The option is drawings-only: every grid→quote write refuses for its
+   *  project (estimateLinkOf). Never copied by addOption (a copy starts with
+   *  quoteId null, D-#314); kept like quoteId across a revision restore. */
+  estimateOwned?: true;
 };
 
 export const DEFAULT_OPTION_ID = "opt-base";
@@ -114,6 +120,21 @@ export function syncQuoteMirror<T extends OptionsDoc>(doc: T): T {
   const opts = ensureOptions(doc).options;
   doc.quoteId = opts[0]?.quoteId ?? null;
   return doc;
+}
+
+/** #314: the option that draws an Estimator quote — the first option flagged
+ *  `estimateOwned` that still carries its quote id — or null. The link is
+ *  project-wide: while it exists no option of the project may write a quote. */
+export function estimateLinkOf(doc: OptionsDoc): { optionId: string; quoteId: string } | null {
+  for (const o of ensureOptions(doc).options) {
+    if (o.estimateOwned === true && typeof o.quoteId === "string" && o.quoteId) return { optionId: o.id, quoteId: o.quoteId };
+  }
+  return null;
+}
+
+/** #314: the server refusal for any grid→quote write on an estimate-linked design. */
+export function estimateOwnedRefusal(quoteNumber: string): string {
+  return `This design draws estimate ${quoteNumber} — prices live in the Estimator.`;
 }
 
 /**

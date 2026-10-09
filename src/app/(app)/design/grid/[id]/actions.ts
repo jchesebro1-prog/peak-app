@@ -53,7 +53,10 @@ import {
   saveGridIntake,
   setAutoEstimate,
 } from "@/lib/stores/grid-projects";
-import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-options";
+import { defaultOptionId, estimateLinkOf, estimateOwnedRefusal, hasOption, resolveOptionId } from "@/lib/design/grid-options";
+import { attachPlanCandidate, planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
+import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
+import { publicPlanCandidates, type PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
 import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
 import type { IntakeCustomerChoice } from "@/app/(app)/quotes/new/types";
@@ -69,7 +72,7 @@ import { getSite, sitesForCompany } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { getMany as getCatalogParts } from "@/lib/stores/catalog";
-import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, ensureGridSymbolsFor, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
 import { pushGridRecent, toggleGridFavorite } from "@/lib/stores/device-types";
 import { autoNeedsPart, fillAutoScopes } from "@/lib/design/grid-auto-fill";
 import {
@@ -289,9 +292,18 @@ export async function saveGridIntakeAction(input: {
   notes: string;
   autoConfig: AState;
   estimate?: AutoEstimate;
-}): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
+  /** #314: an on-file plan to copy in as the FIRST sheet ("Use plan from …") — a candidate id, never a path. */
+  planCandidateId?: string | null;
+}): Promise<{ ok: true; warning?: string; planRetry?: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (input.mode !== "manual" && input.mode !== "auto") return { ok: false, error: "Choose Auto or Blank." };
+  // #314: a design drawn from an estimate takes its parts from the estimate —
+  // Auto (equations) would invent a second BOM, so it is refused here too.
+  if (input.mode === "auto") {
+    const p = await getProject(input.projectId);
+    const link = p ? estimateLinkOf(p) : null;
+    if (link) return { ok: false, error: `Auto isn't offered for a design drawn from an estimate — ${await estimateRefusal(link.quoteId)}` };
+  }
   if (!input.customer) return { ok: false, error: "Pick a customer, or add a new one." };
   const customerCheck = validateIntakeCustomer(input.customer);
   if (!customerCheck.ok) return { ok: false, error: customerCheck.error };
@@ -421,9 +433,78 @@ export async function saveGridIntakeAction(input: {
         warning = `${res.needsPart} line${res.needsPart === 1 ? "" : "s"} still need${res.needsPart === 1 ? "s" : ""} a part in the Equipment map and ${res.needsPart === 1 ? "was" : "were"} left off the plan.`;
     }
   }
+  // #314: the plan view on file, copied in LAST (after the base sheet, so the
+  // first-save gate above is untouched) and put first. A failure never loses
+  // the intake — the plan opens with a warning and a retry (the #211 rule).
+  let planRetry: string | undefined;
+  if (isFirstSave && typeof input.planCandidateId === "string" && input.planCandidateId) {
+    let attached: Awaited<ReturnType<typeof attachPlanCandidate>>;
+    try {
+      attached = await attachPlanCandidate(input.projectId, input.planCandidateId, user.name);
+    } catch (error) {
+      console.error("saveGridIntakeAction: plan copy threw", error);
+      attached = { ok: false, error: "Couldn't copy the plan — try again." };
+    }
+    if (!attached.ok) {
+      planRetry = input.planCandidateId;
+      const planWarning = `The plan is ready, but the plan view wasn't added: ${attached.error}`;
+      warning = warning ? `${warning} ${planWarning}` : planWarning;
+    }
+  }
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
-  return { ok: true, ...(warning ? { warning } : {}) };
+  return { ok: true, ...(warning ? { warning } : {}), ...(planRetry ? { planRetry } : {}) };
+}
+
+/** #314: the refusal sentence for an estimate-linked design, naming the estimate. */
+async function estimateRefusal(quoteId: string): Promise<string> {
+  const q = await getQuote(quoteId).catch(() => null);
+  return estimateOwnedRefusal(q ? displayQuoteNumber(q) : quoteId);
+}
+
+/** #314: the intake's plan view — the plans this job already has on file for
+ *  the picked customer + venue (and the design's estimate). Labels only. */
+export async function planCandidatesAction(
+  projectId: string,
+  pick: { customerId: string; locationId: string }
+): Promise<{ ok: true; candidates: PlanCandidate[] } | { ok: false; error: string }> {
+  await requireUser();
+  const project = await getProject(String(projectId || ""));
+  if (!project) return { ok: false, error: "That design could not be found." };
+  const customerId = typeof pick?.customerId === "string" ? pick.customerId.trim() : "";
+  const locationId = typeof pick?.locationId === "string" ? pick.locationId.trim() : "";
+  try {
+    const list = await planCandidatesFor({ customerId: customerId || null, siteLocId: locationId || null, quoteId: estimateLinkOf(project)?.quoteId ?? null });
+    return { ok: true, candidates: publicPlanCandidates(list) };
+  } catch (e) {
+    console.error("planCandidatesAction failed", e);
+    return { ok: true, candidates: [] };
+  }
+}
+
+/** #314: retry copying an on-file plan into a saved design (the intake's warning). */
+export async function attachPlanAction(projectId: string, candidateId: string): Promise<Result> {
+  const user = await requireUser();
+  const r = await attachPlanCandidate(String(projectId || ""), String(candidateId || ""), user.name);
+  if (!r.ok) return { ok: false, error: r.error };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/** #314: give every placeable part of the linked estimate a Grid library entry
+ *  (the estimate may have grown since "Design in the Grid") — the tray's Sync parts. */
+export async function syncEstimatePartsAction(projectId: string): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't add parts to the Grid library." };
+  const project = await getProject(String(projectId || ""));
+  if (!project) return { ok: false, error: "Design not found." };
+  const link = estimateLinkOf(project);
+  if (!link) return { ok: false, error: "This design isn't drawn from an estimate." };
+  const q = await getQuote(link.quoteId);
+  if (!q) return { ok: false, error: "That estimate no longer exists." };
+  const added = await ensureGridSymbolsFor(await estimateTrayParts(q), user.name);
+  revalidatePath(editorPath(project.id));
+  return { ok: true, added };
 }
 
 /** Link the Grid to a saved Lineset Builder design. The schedule remains a
@@ -1272,6 +1353,11 @@ export async function createDraftQuoteAction(
   const user = await requireUser();
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
+  // #314: a design drawn from an estimate is drawings-only — the estimate owns
+  // parts and prices, so no option of it may mint or update a quote. The one
+  // choke point: the editor, the Designs dashboard and Home all land here.
+  const estimateLink = estimateLinkOf(project);
+  if (estimateLink) return { ok: false, error: await estimateRefusal(estimateLink.quoteId) };
   const resolvedOptionId = resolveOptionId(project, optionId);
   if (optionId && resolvedOptionId !== optionId) return { ok: false, error: OPTION_GONE };
   const option = project.options!.find((o) => o.id === resolvedOptionId)!;

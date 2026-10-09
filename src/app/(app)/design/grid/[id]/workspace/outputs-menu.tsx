@@ -2,6 +2,7 @@
 
 import { cutSheetsUnreadableNote } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import type { GridEditor } from "../use-grid-editor";
+import { GRID_LINK_COPY, specFromDesignHref } from "@/lib/design/estimate-grid-link";
 import Menu from "./menu";
 import { BTN, FIELD_LABEL } from "./toolbar-style";
 
@@ -48,10 +49,11 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
         // Same links the BOM panel shows under the quote button (#299).
         ...(activeOption.quoteId
           ? [
-              { label: "View in Quotes →", href: "/quotes" },
+              // #314: an estimate-linked design names its estimate instead of the hub.
+              ed.estimateLink ? { label: GRID_LINK_COPY.openEstimate, href: ed.estimateLink.href } : { label: "View in Quotes →", href: "/quotes" },
               {
                 label: "Spec from this design →",
-                href: `/design/specs/new?grid=${encodeURIComponent(project.id)}&quote=${encodeURIComponent(activeOption.quoteId)}`,
+                href: specFromDesignHref(project.id, activeOption.quoteId, !!ed.estimateLink),
               },
             ]
           : []),

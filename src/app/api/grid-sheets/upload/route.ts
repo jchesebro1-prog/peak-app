@@ -128,7 +128,10 @@ export async function POST(req: Request): Promise<NextResponse> {
     stored = { dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
   }
 
-  const sheet = await addSheet(projectId, { name, mime, ...stored, by: user.name });
+  // #314: the Grid intake's plan view asks to go FIRST (the editor opens on
+  // it, in front of the generated base sheet); every other upload appends.
+  const first = String(form.get("position") || "") === "first";
+  const sheet = await addSheet(projectId, { name, mime, ...stored, by: user.name, ...(first ? { first: true } : {}) });
   if (!sheet) return NextResponse.json({ ok: false, error: "Design not found." }, { status: 404 });
 
   revalidatePath(`/design/grid/${encodeURIComponent(projectId)}`);

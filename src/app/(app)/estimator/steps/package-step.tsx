@@ -8,6 +8,7 @@ import NarrativeColumn from "../narrative-column";
 import { PdfOptionsPanel } from "../preview-doc";
 import { CoverPackagePanel } from "../cover-package-panel";
 import { PackageStaffPanel } from "../package-staff-panel";
+import { GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import { PAYMENT_TERMS } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import { saveProductParagraphAction } from "../narrative-actions";
@@ -350,7 +351,13 @@ export function PackageStep({ s }: { s: EstimatorState }) {
         {loadedId ? (
           <PackageStaffPanel quoteId={loadedId} section="package" />
         ) : (
-          <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate to add drawings.</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate to add drawings.</div>
+            {/* #314 — disabled until the quote is saved: the Grid design links to a saved estimate. */}
+            <button type="button" disabled title={GRID_LINK_COPY.saveFirst} style={{ ...BAR_BTN, cursor: "not-allowed", opacity: 0.55 }}>
+              {GRID_LINK_COPY.design}
+            </button>
+          </div>
         )}
       </aside>
     </div>

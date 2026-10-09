@@ -11519,6 +11519,7 @@ seeded()
   .then(() => modelSku304FrozenAsyncChecks())
   .then(() => modelSku304LiveWritersAsyncChecks())
   .then(() => modelSku304PageAsyncChecks())
+  .then(() => estimateGrid314AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59044,4 +59045,190 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   ok(hook.includes("costUntouched(d, cur)") && hook.includes("costUntouched(d, at)).section") &&
      hook.includes("reanchorDocLine(packageDocOverDraft as PackageDoc | null, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("if (od) setPackageDocOverDraft(od);"),
     "#312 final: the custom-part save passes costUntouched and re-anchors the over-cap draft alongside the document");
+}
+
+// ---- #314: Design in the Grid from an estimate — tray, ownership, intake plan view ----
+import { estimateTrayLines as t314Lines, trayRows as t314Rows, trayFootnote as t314Foot } from "@/lib/design/estimate-tray";
+import { estimateLinkOf as t314Link, estimateOwnedRefusal as t314Refusal } from "@/lib/design/grid-options";
+import { GRID_LINK_COPY as T314_COPY, quoteQualifiesForGrid as t314Qualifies, specFromDesignHref as t314SpecHref, estimateIntakeNote as t314Note } from "@/lib/design/estimate-grid-link";
+import {
+  GRID_PLAN_COPY_MAX_BYTES as T314_PLAN_MAX,
+  isPlanCategory as t314PlanCat,
+  planCandidatesFrom as t314Cands,
+  planCopyVerdict as t314Verdict,
+  publicPlanCandidates as t314Public,
+} from "@/lib/design/grid-plan-intake";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const J = JSON.stringify;
+  const fx = JSON.parse(rd("docs/test-fixtures/314-estimate-tray.json")) as { sections: unknown[]; groups: unknown[] };
+
+  // (1) Tray lines: exclusions, alternates/options, renames, the catalog predicate.
+  const r = t314Lines(fx.sections, fx.groups, { resolve: { "OLD-PAR": "NEW-PAR" }, placeable: (s) => s !== "FAB-1" });
+  ok(J(r.lines.map((l) => [l.sku, l.qty, l.alt])) === J([["NEW-PAR", 12, false], ["DMX-NODE", 2, false], ["NEW-PAR", 4, false], ["HAZER", 1, true], ["SPOT-1", 6, true]]),
+    "#314 tray: placeable lines in order — a renamed SKU resolves to the live one; an add-option line and an Alternate group's system are `alt`; a labor system and a qty-0 line are skipped");
+  ok(r.excluded === 7 && J(r.excludedBy) === J({ labor: 1, allowance: 2, curtain: 1, "no-part": 2, "per-length": 1 }),
+    "#314 tray: labor, allowance, vendor-quote, curtain, CUSTOM / blank SKU, wire by the foot and a catalog-rejected SKU (fabric) are left out and counted");
+  ok(t314Foot(r) === "7 lines aren't placed here: labor, allowances, curtains, wire by the foot (draw it as a run), lines with no Grid part." && t314Foot({ excluded: 0, excludedBy: {} }) === "" &&
+     t314Foot({ excluded: 1, excludedBy: { curtain: 1 } }) === "1 line isn't placed here: curtains.",
+    "#314 tray: the footnote names what was left out, singular and plural");
+  ok(t314Lines(null, null).lines.length === 0 && t314Lines([{ kind: "materials", items: "junk" }], "junk").lines.length === 0,
+    "#314 tray: a missing or malformed spec reads as an empty tray, never a throw");
+
+  // (2) Rows: aggregation, lots, renamed placements, over-placement, alternates after the main need, extras.
+  const pl = (partId: string, qty?: number, extra: Record<string, unknown> = {}) => ({ partId, ...(qty ? { qty } : {}), ...extra });
+  const v = t314Rows(r.lines, [pl("NEW-PAR", 10), pl("OLD-PAR"), pl("OLD-PAR"), pl("DMX-NODE"), pl("HAZER"), pl("HAZER"), pl("STRAY"), pl("NEW-PAR", 0, { curtain: { type: "Main" } })], { "OLD-PAR": "NEW-PAR" });
+  const row = (rows: typeof v.main, sku: string) => rows.find((x) => x.sku === sku);
+  ok(J(row(v.main, "NEW-PAR")) === J({ sku: "NEW-PAR", label: "LED PAR", model: "PAR-1", needed: 16, placed: 12, remaining: 4, overBy: 0 }),
+    "#314 tray: two estimate lines of one part are one row; a lot marker counts its qty and a placement under the OLD (renamed) SKU counts toward the live one — never twice; a curtain placement never counts");
+  ok(J(row(v.main, "DMX-NODE")) === J({ sku: "DMX-NODE", label: "DMX node", model: "", needed: 2, placed: 1, remaining: 1, overBy: 0 }) &&
+     J(v.alternates.map((x) => [x.sku, x.placed, x.remaining, x.overBy])) === J([["HAZER", 2, 0, 1], ["SPOT-1", 0, 6, 0]]),
+    "#314 tray: alternates & options sit in their own list; a part only listed there takes the overflow as `overBy`");
+  ok(J(v.extras) === J([{ sku: "STRAY", placed: 1 }]) && J(v.totals) === J({ needed: 18, placed: 13, remaining: 5 }),
+    "#314 tray: a placed part the estimate doesn't list is an extra (drawings only); totals count the In-total list");
+  const both = t314Rows([{ sku: "A", label: "A", model: "", qty: 2, alt: false }, { sku: "A", label: "A", model: "", qty: 1, alt: true }], [pl("A", 5)]);
+  ok(J(both.main[0]) === J({ sku: "A", label: "A", model: "", needed: 2, placed: 4, remaining: 0, overBy: 2 }) && J(both.alternates[0]) === J({ sku: "A", label: "A", model: "", needed: 1, placed: 1, remaining: 0, overBy: 0 }),
+    "#314 tray: placements fill the In-total need first, then the alternate's; past both, the In-total row reports `overBy`");
+
+  // (3) Ownership: the link, the refusal sentence, qualifying quotes, the spec link.
+  const doc = { options: [{ id: "opt-a", name: "Design", quoteId: "Q-1", createdAt: 1 }, { id: "opt-b", name: "Copy", quoteId: "Q-2", createdAt: 2, estimateOwned: true as const }] };
+  ok(J(t314Link(doc)) === J({ optionId: "opt-b", quoteId: "Q-2" }) && t314Link({ options: [{ id: "x", name: "D", quoteId: null, createdAt: 1, estimateOwned: true }] }) === null && t314Link({}) === null,
+    "#314 ownership: estimateLinkOf finds the estimate-owned option that still carries its quote — a plain Grid quote is not a link");
+  ok(t314Refusal("EST-1042") === "This design draws estimate EST-1042 — prices live in the Estimator." && t314Note("EST-1042") === "Parts come from estimate EST-1042 — place them from the From estimate tray.",
+    "#314 ownership: the refusal and the intake note name the estimate");
+  ok(t314Qualifies({ id: "Q-1", quoteType: "system" }) && t314Qualifies({ id: "Q-2" }) && !t314Qualifies({ id: "Q-3", quoteType: "flame_test" }) && !t314Qualifies({ id: "Q-4", quoteType: "consulting" }) && !t314Qualifies({ id: "" }) && !t314Qualifies(null),
+    "#314 ownership: a quote qualifies exactly when its builder is the Estimator");
+  ok(t314SpecHref("GRD-5001", "Q-9", true) === "/design/specs/new?quote=Q-9" && t314SpecHref("GRD-5001", "Q-9", false) === "/design/specs/new?grid=GRD-5001&quote=Q-9",
+    "#314 ownership: Spec from this design reads the estimate (not the Grid BOM) when the design draws an estimate");
+  ok(T314_COPY.generateNeedsDesign === "Design in the Grid first." && T314_COPY.design === "Design in the Grid →" && T314_COPY.open === "Open Grid design →" && T314_COPY.openEstimate === "Open estimate →",
+    "#314 copy: the button labels and the Generate from Grid tooltip");
+
+  // (4) Plan view candidates (pure).
+  const cats = [{ key: "drawings", label: "Drawings", order: 0 }, { key: "arch_plans", label: "Arch plans", order: 1 }, { key: "photos", label: "Photos", order: 2 }, { key: "other", label: "Other", order: 3 }];
+  ok(t314PlanCat(cats[0]) && t314PlanCat(cats[1]) && !t314PlanCat(cats[2]) && !t314PlanCat(cats[3]) && t314PlanCat({ key: "x", label: "CAD" }),
+    "#314 plan view: a plan-like category is the seeded `drawings` key or a label naming plans, drawings or CAD");
+  const pf = (id: string, kind: string, source: string, addedAt: number, size = 100) => ({ id, kind, name: `${id}.pdf`, blobPath: `estimate-files/Q-1/UP-0123456789abcdef/${id}.pdf`, contentType: "application/pdf", size, source, addedAt, addedBy: "T" });
+  const d = (id: string, category: string, extra: Record<string, unknown> = {}) => ({ id, title: id, fileName: `${id}.pdf`, mime: "application/pdf", size: 2000, blobPath: `documents/C/UP-x/${id}.pdf`, category, siteId: null, uploadedAt: 5, ...extra });
+  const list = t314Cands({
+    quoteNumber: "EST-1042",
+    packageFiles: [pf("PF-000000000001", "plan", "upload", 1), pf("PF-000000000002", "drawing", "upload", 3), pf("PF-000000000003", "riser", "upload", 4), pf("PF-000000000004", "drawing", "grid", 9)],
+    documents: [
+      d("DOC-1", "drawings"), d("DOC-2", "arch_plans", { siteId: "L-1", uploadedAt: 9 }), d("DOC-3", "drawings", { siteId: "L-OTHER" }), d("DOC-4", "photos"),
+      d("DOC-5", "drawings", { mime: "image/svg+xml", fileName: "x.svg" }), d("DOC-6", "drawings", { size: T314_PLAN_MAX + 1 }), d("DOC-7", "drawings", { deleted: true }),
+      d("DOC-8", "drawings", { mime: "", fileName: "Floor.PNG" }),
+    ],
+    categories: cats,
+    siteLocId: "L-1",
+  });
+  ok(J(list.map((c) => c.id)) === J(["pf:PF-000000000002", "pf:PF-000000000001", "doc:DOC-2", "doc:DOC-1", "doc:DOC-8"]) &&
+     list[0].from === "EST-1042 · Plans & risers" && list[2].from === "Company files · Arch plans",
+    "#314 plan view: the estimate's uploaded plans and drawing sets first (never a riser or a Grid-generated set), then the company's plan-category files for this venue or company-wide — another venue's, SVG, oversize, deleted and photo files never");
+  ok(t314Cands({ documents: [d("DOC-1", "drawings", { siteId: "L-1" })], categories: cats, siteLocId: "" }).length === 0 && t314Cands({ packageFiles: [pf("PF-000000000001", "plan", "upload", 1)] }).length === 0,
+    "#314 plan view: no venue → only company-wide files; no estimate → no package files");
+  ok(J(Object.keys(t314Public(list)[0]).sort()) === J(["from", "id", "name", "sizeLabel", "source"]) && !J(t314Public(list)).includes("blobPath") && !J(t314Public(list)).includes("estimate-files/"),
+    "#314 plan view: what the client sees never carries a blob path");
+  const enc = (t: string) => new TextEncoder().encode(t);
+  ok(t314Verdict(enc("%PDF-1.7 x"), 10).ok && !t314Verdict(enc("<svg xmlns='x'>"), 10).ok && J(t314Verdict(enc("%PDF-1.7"), T314_PLAN_MAX + 1)) === J({ ok: false, error: "That plan is over 25 MB." }) &&
+     J(t314Verdict(enc("GIF89a"), 10)) === J({ ok: false, error: "That plan isn't a PDF, PNG, JPEG or WebP file." }),
+    "#314 plan view: the copy re-checks the source by magic bytes (PDF/PNG/JPEG/WebP only, never SVG) and size (25 MB — the copy never crosses the 4 MB function body)");
+
+  // (5) Source pins: server refusals, auto-mode refusal, requirePerm, lock, store backstops, order of operations.
+  const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  const draft = acts.slice(acts.indexOf("export async function createDraftQuoteAction("));
+  ok(draft.indexOf("estimateLinkOf(project)") > 0 && draft.indexOf("estimateLinkOf(project)") < draft.indexOf("buildGridQuote(") && draft.indexOf("estimateRefusal(estimateLink.quoteId)") < draft.indexOf("createQuote("),
+    "#314 pin: createDraftQuoteAction (editor, Designs dashboard, Home) refuses an estimate-linked design before it prices or writes anything");
+  const intake = acts.slice(acts.indexOf("export async function saveGridIntakeAction("));
+  ok(/if \(input\.mode === "auto"\) \{\s*const p = await getProject\(input\.projectId\);\s*const link = p \? estimateLinkOf\(p\) : null;\s*if \(link\) return \{ ok: false/.test(intake) && intake.indexOf("estimateLinkOf(p)") < intake.indexOf("setProjectCustomer("),
+    "#314 pin: saveGridIntakeAction refuses mode auto for an estimate-linked design, before any write");
+  ok(intake.indexOf("generateBaseSheet(") < intake.indexOf("attachPlanCandidate(") && intake.includes("isFirstSave && typeof input.planCandidateId === \"string\"") && intake.includes("planRetry = input.planCandidateId;"),
+    "#314 pin: the plan view is copied after the base sheet (the first-save gate is untouched), first save only, and a failure returns a warning + retry instead of an error");
+  const gda = rd("src/app/(app)/estimator/grid-design-actions.ts");
+  const gfn = gda.slice(gda.indexOf("export async function openGridDesignForQuoteAction("));
+  ok(gda.startsWith('"use server";') && gfn.indexOf('await requirePerm("create")') > 0 && gfn.indexOf('await requirePerm("create")') < gfn.indexOf("getQuote(") &&
+     gfn.includes("withAdvisoryLock(GRID_ESTIMATE_LOCK_NAMESPACE, q.id,") && gfn.indexOf("gridProjectForQuote(q.id)") > gfn.indexOf("withAdvisoryLock(") && gfn.indexOf("gridProjectForQuote(q.id)") < gfn.indexOf("createProject(") &&
+     gfn.includes("quoteQualifiesForGrid(q)") && gfn.includes("linkOptionToEstimate(project.id, defaultOptionId(project), q.id)") && gfn.includes('layoutMode: "manual", gridProjectId: project.id'),
+    "#314 pin: Design in the Grid needs create, re-checks for an existing design under a per-quote advisory lock, and creates the design like New design, linked estimate-owned");
+  const store = rd("src/lib/stores/grid-projects.ts");
+  const soq = store.slice(store.indexOf("export async function setOptionQuote("), store.indexOf("export async function linkOptionToEstimate("));
+  ok(soq.includes("if (estimateLinkOf(project)) return null;") && soq.includes("if (estimateLinkOf(doc)) { refused = true; return; }"),
+    "#314 pin: setOptionQuote — the store's own backstop — never writes a Grid quote onto an estimate-linked design");
+  const addOpt = store.slice(store.indexOf("export async function addOption("), store.indexOf("export async function renameOption("));
+  ok(addOpt.includes("quoteId: null, createdAt: at") && !addOpt.includes("estimateOwned"),
+    "#314 pin: a copied option starts with no quote and no estimate link (the existing quoteId copy rule)");
+  ok(rd("src/lib/design/grid-auto-fill.ts").includes("const baseId = project.intake?.baseSheetId;") && store.includes("p.intake.baseSheetId = sheet.id;") &&
+     store.includes("p.sheetIds = input.first ? [sheet.id, ...(p.sheetIds || [])] : [...(p.sheetIds || []), sheet.id];"),
+    "#314 pin: an intake plan view goes first, so Auto fill finds the generated base sheet by its stamped id");
+  ok(rd("src/app/api/grid-sheets/upload/route.ts").includes('String(form.get("position") || "") === "first"'), "#314 pin: the sheet upload route takes position=first (same route, same checks)");
+  const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
+  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const retryPlan = () => {"));
+  ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadPlanFirst(projectId, planFile)") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
+     gi.includes('body.append("position", "first");') && gi.includes("{linkedEstimate ? (") && gi.includes("estimateIntakeNote(linkedEstimate.quoteNumber)") && gi.includes('useState<Start | null>(linkedEstimate ? "blank" : null)'),
+    "#314 pin: the intake uploads a dropped plan only after the intake saved; an estimate-linked intake hides Auto and starts Blank");
+  const panel = rd("src/app/(app)/estimator/package-staff-panel.tsx");
+  ok(panel.includes("GRID_LINK_COPY.generateNeedsDesign") && !panel.includes("Link a Grid design to this quote first.") && panel.includes("openGridDesignForQuoteAction(quoteId)") &&
+     panel.includes("disabled={gridPending || !panel.canCreate}") && rd("src/app/(app)/estimator/steps/package-step.tsx").includes("title={GRID_LINK_COPY.saveFirst}"),
+    "#314 pin: Build package — Design in the Grid (pending state, needs create, disabled until saved); Generate from Grid's tooltip reads 'Design in the Grid first.'");
+  const qb = rd("src/app/(app)/design/grid/[id]/workspace/quote-button.tsx");
+  ok(qb.indexOf("if (estimateLink) {") < qb.indexOf("runQuote(false)") && rd("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx").includes("{estimateLink ? ("),
+    "#314 pin: the Grid swaps Add to quotes / Create draft quote for Open estimate → on an estimate-linked design");
+}
+
+async function estimateGrid314AsyncChecks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const G = await import("@/lib/stores/grid-projects");
+  const Q = await import("@/lib/stores/quotes");
+  const DS = await import("@/db/doc-store");
+  const O = await import("@/lib/design/grid-options");
+  const T = await import("@/lib/design/estimate-tray-server");
+  const QID = fixtureId(314, "estimate");
+  const QG = fixtureId(314, "grid-quote");
+  const NEW = fixtureId(314, "new-par");
+  const OLD = fixtureId(314, "old-par");
+  const FAB = fixtureId(314, "fabric");
+  const base = { desc: "LED PAR", category: "Lighting", unit: "ea", list: 100, cost: 50 };
+  for (const id of [NEW, OLD, FAB]) registerFixture("catalog_parts", id);
+  await DS.upsertDoc("catalog_parts", { ...base, id: NEW, sku: NEW, formerSkus: [OLD] } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: OLD, sku: OLD, renamedTo: NEW } as never);
+  await DS.softDeleteDoc("catalog_parts", OLD);
+  await DS.upsertDoc("catalog_parts", { ...base, id: FAB, sku: FAB, desc: "IFR velour", category: "Fabric", unit: "sq ft" } as never);
+  await Q.create({ id: QID, name: "#314 estimate", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [
+      { id: 1, sku: OLD, desc: "LED PAR", qty: 6, unit: "ea", cost: 50, price: 100 },
+      { id: 2, sku: FAB, desc: "Velour", qty: 40, unit: "sq ft", cost: 5, price: 9 },
+      { id: 3, sku: "GHOST-" + QID, desc: "Not a catalog part", qty: 1, unit: "ea", cost: 1, price: 2 },
+    ] }], mobs: [] } });
+  registerFixture("quotes", QID);
+  await Q.create({ id: QG, name: "#314 grid quote", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "grid", spec: { sections: [], mobs: [] } });
+  registerFixture("quotes", QG);
+
+  const project = await G.createProject({ name: "#314 design", customer: "Spec fixture", customerId: null, by: "Test" });
+  registerFixture("grid_projects", project.id);
+  const baseOpt = O.defaultOptionId(project);
+  const linked = await G.linkOptionToEstimate(project.id, baseOpt, QID);
+  ok(!!linked && J314(O.estimateLinkOf(linked!)) === J314({ optionId: baseOpt, quoteId: QID }) && linked!.quoteId === QID && (await G.gridProjectForQuote(QID))?.project.id === project.id,
+    "#314 (DB): linkOptionToEstimate marks the base option estimate-owned; the project mirror and gridProjectForQuote (Generate from Grid) find it");
+  ok((await G.linkOptionToEstimate(project.id, baseOpt, QG)) === null && (await G.setOptionQuote(project.id, baseOpt, QG)) === null,
+    "#314 (DB): the option can't be re-pointed at another quote, and setOptionQuote refuses a Grid quote on it");
+  const added = await G.addOption(project.id, { name: "Copy", copyFromOptionId: baseOpt, by: "Test" });
+  ok(added.ok && added.option.quoteId === null && added.option.estimateOwned === undefined && (await G.setOptionQuote(project.id, added.ok ? added.option.id : "", QG)) === null,
+    "#314 (DB): a copied option keeps the quoteId copy rule (no quote, no estimate link) — and the design stays drawings-only on every option");
+  await G.addRevision(project.id, { by: "Test", note: "snap" });
+  const restored = await G.restoreRevision(project.id, 1, "Test");
+  const afterRestore = (await G.getProject(project.id))!;
+  ok(restored.ok && afterRestore.options!.find((o) => o.id === baseOpt)?.estimateOwned === true && afterRestore.options!.find((o) => o.id === baseOpt)?.quoteId === QID,
+    "#314 (DB): a revision restore keeps the current estimate link (bookkeeping, like quoteId)");
+  await G.addPlacements(project.id, { sheetId: "gs-x", page: 1, optionId: baseOpt, items: [{ x: 0.1, y: 0.1, partId: NEW, qty: 2 }, { x: 0.2, y: 0.2, partId: OLD }], by: "Test" });
+  const p2 = (await G.getProject(project.id))!;
+  const tray = await T.loadEstimateTray(QID, p2.placements.filter((p) => p.optionId === baseOpt).map((p) => p.partId));
+  const { trayRows } = await import("@/lib/design/estimate-tray");
+  const view = trayRows(tray.lines, p2.placements.filter((p) => p.optionId === baseOpt), tray.renames);
+  ok(!tray.gone && tray.quoteNumber.length > 0 && tray.href === `/estimator?id=${encodeURIComponent(QID)}` && J314(tray.lines.map((l) => [l.sku, l.qty])) === J314([[NEW, 6]]) &&
+     tray.excluded === 2 && tray.renames[OLD] === NEW && J314(view.main.map((r) => [r.sku, r.placed, r.remaining])) === J314([[NEW, 3, 3]]),
+    "#314 (DB): the tray reads the quote's saved spec live — the renamed line resolves through the catalog, fabric and unknown SKUs are left out, and an OLD-SKU placement counts once toward the live part");
+  ok((await T.estimateTrayParts((await Q.get(QID))!)).map((p) => p.sku).join() === NEW, "#314 (DB): estimateTrayParts — the live catalog parts behind the tray (what gets a Grid library entry)");
+  const gone = await T.loadEstimateTray(fixtureId(314, "no-such-quote"), []);
+  ok(gone.gone && gone.lines.length === 0, "#314 (DB): a deleted estimate reads as an empty, gone tray");
+}
+function J314(v: unknown): string {
+  return JSON.stringify(v);
 }

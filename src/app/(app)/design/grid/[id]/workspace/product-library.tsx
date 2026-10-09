@@ -12,6 +12,7 @@ import { ObjectSymbolImg } from "@/components/design/object-symbol";
 import { useCanMap } from "@/components/design/equipment-map-link";
 import { toggleGridFavoriteAction } from "../actions";
 import AssembliesPanel from "../assemblies-panel";
+import EstimateTray from "./estimate-tray";
 import { GRID_PART_MIME } from "../plan-canvas";
 import type { GridEditor } from "../use-grid-editor";
 
@@ -355,6 +356,10 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
   const [mfr, setMfr] = useState("");
   const [starErr, setStarErr] = useState<string | null>(null);
   const [, startStar] = useTransition();
+  // #314: a design drawn from an estimate opens on its From estimate tray.
+  const hasTray = !!ed.estimateTray;
+  const [trayOn, setTrayOn] = useState(true);
+  const showTray = hasTray && trayOn;
 
   const activeTypes = useMemo(() => deviceTypes.filter((t) => !t.archived), [deviceTypes]);
   const favSet = useMemo(() => new Set(favorites), [favorites]);
@@ -384,6 +389,7 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
   const armedPart = armedPartId ? parts.find((p) => p.id === armedPartId) ?? null : null;
 
   const pick = (s: LibrarySel) => {
+    setTrayOn(false);
     setSel(s);
     setMfr("");
     if (s.kind === "scope" || s.kind === "type") setExpanded(s.scope);
@@ -430,7 +436,32 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0,1fr)", height: "100%", minHeight: 0, overflow: "hidden" }}>
       <nav aria-label="Library categories" style={{ minHeight: 0, overflowY: "auto", borderRight: "1px solid #edeff3", padding: "6px 4px", background: "#fff" }}>
-        <TreeRows nodes={tree} depth={0} selected={selKey(current)} expanded={expanded} onPick={pick} onToggle={toggleScope} />
+        {hasTray && (
+          <button
+            type="button"
+            onClick={() => setTrayOn(true)}
+            aria-current={showTray ? "true" : undefined}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              width: "100%",
+              border: "none",
+              borderRadius: 6,
+              background: showTray ? SELECTED_BG : "transparent",
+              padding: "4px 6px 4px 18px",
+              marginBottom: 2,
+              fontFamily: "inherit",
+              fontSize: 12,
+              fontWeight: showTray ? 600 : 500,
+              color: "#16181d",
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            From estimate
+          </button>
+        )}
+        <TreeRows nodes={tree} depth={0} selected={showTray ? "" : selKey(current)} expanded={expanded} onPick={pick} onToggle={toggleScope} />
       </nav>
 
       <div style={{ minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -490,7 +521,9 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
           )}
           {starErr && <div style={{ marginBottom: 8, fontSize: 11, color: "#a0442b" }}>{starErr}</div>}
 
-          {current.kind === "curtains" ? (
+          {showTray ? (
+            <EstimateTray ed={ed} />
+          ) : current.kind === "curtains" ? (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
                 {GRID_CURTAIN_TYPES.map((t, i) => {

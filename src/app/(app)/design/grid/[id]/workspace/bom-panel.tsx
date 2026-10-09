@@ -8,6 +8,7 @@ import { AccessoryPicker, AccessoryRow } from "../accessories";
 import CustomItemsSection from "../custom-items";
 import { LaborLineRow } from "../labor-lines";
 import type { GridEditor } from "../use-grid-editor";
+import { GRID_LINK_COPY, openEstimateTitle, specFromDesignHref } from "@/lib/design/estimate-grid-link";
 
 /**
  * The bill of materials (#299) — the right pane's BOM tab: one heading per
@@ -84,6 +85,7 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
     setAddingTo,
     pickerOpenFor,
     quoteNumbers,
+    estimateLink,
   } = ed;
   // The one "+ Custom item" (at the BOM's foot); saved items print under their heading.
   const customSection = (
@@ -286,6 +288,16 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
           </div>
         )}
       </div>
+      {/* #314: a design drawn from an estimate is drawings-only — open the estimate, never write a quote. */}
+      {estimateLink ? (
+        <Link
+          href={estimateLink.href}
+          title={openEstimateTitle(estimateLink.quoteNumber)}
+          style={{ ...BTN, display: "block", marginTop: 10, width: "100%", boxSizing: "border-box", textAlign: "center", textDecoration: "none", background: "#16181d", color: "#fff", borderColor: "#16181d" }}
+        >
+          {GRID_LINK_COPY.openEstimate}
+        </Link>
+      ) : (
       <button
         style={{
           ...BTN,
@@ -300,6 +312,7 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
       >
         {activeOption.quoteId ? `Update draft quote ${quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId}` : "Create draft quote"}
       </button>
+      )}
       {incompleteQuote && (
         <div style={{ marginTop: 8, background: "#fbf0ea", border: "1px solid #f0d6cd", borderRadius: 8, padding: "8px 10px", fontSize: 11.5, color: "#a0442b", lineHeight: 1.45 }}>
           <div>{incompleteQuote}</div>
@@ -343,7 +356,7 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
           {tierFallbackLines.length > 4 ? ` +${tierFallbackLines.length - 4} more` : ""}
         </div>
       )}
-      {activeOption.quoteId && (
+      {activeOption.quoteId && !estimateLink && (
         <Link
           href="/quotes"
           style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}
@@ -353,7 +366,11 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
       )}
       {activeOption.quoteId && (
         <Link
-          href={`/design/specs/new?grid=${encodeURIComponent(project.id)}&quote=${encodeURIComponent(activeOption.quoteId)}`}
+          href={
+            estimateLink
+              ? specFromDesignHref(project.id, activeOption.quoteId, true)
+              : `/design/specs/new?grid=${encodeURIComponent(project.id)}&quote=${encodeURIComponent(activeOption.quoteId)}`
+          }
           style={{ display: "block", marginTop: 3, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}
         >
           Spec from this design →

@@ -1,0 +1,34 @@
+{
+  "_note": "#314 spec fixture: an Estimator quote's spec.sections + spec.groups for the Grid's From estimate tray (scripts/test-review-and-spec.ts).",
+  "groups": [
+    { "id": "g-main", "name": "Main", "alternate": false },
+    { "id": "g-alt", "name": "Upgrades", "alternate": true }
+  ],
+  "sections": [
+    {
+      "id": "s1", "name": "Stage lighting", "kind": "materials", "mfr": "", "freightPct": 0, "groupId": "g-main",
+      "items": [
+        { "id": 1, "sku": "OLD-PAR", "desc": "LED PAR", "manufacturerModelNumber": "PAR-1", "qty": 12, "unit": "ea", "cost": 50, "price": 100 },
+        { "id": 2, "sku": "LAB-INST", "desc": "Install", "qty": 16, "unit": "hr", "cost": 40, "price": 80, "labor": true },
+        { "id": 3, "sku": "", "desc": "Truss allowance", "qty": 1, "unit": "ea", "cost": 500, "price": 900, "allowance": true },
+        { "id": 4, "sku": "VQ-LINE", "desc": "Vendor package", "qty": 1, "unit": "ea", "cost": 900, "price": 1200, "vendorQuoteId": "VQ-1" },
+        { "id": 5, "sku": "CRT-MAIN", "desc": "Main curtain", "qty": 1, "unit": "ea", "cost": 2000, "price": 3000, "curtain": true },
+        { "id": 6, "sku": "CUSTOM", "desc": "Custom bracket", "qty": 3, "unit": "ea", "cost": 10, "price": 20, "custom": true },
+        { "id": 7, "sku": "DMX-CABLE", "desc": "DMX cable", "qty": 300, "unit": "ft", "cost": 1, "price": 2 },
+        { "id": 8, "sku": "DMX-NODE", "desc": "DMX node", "qty": 2, "unit": "ea", "cost": 300, "price": 500 },
+        { "id": 9, "sku": "NEW-PAR", "desc": "LED PAR (FOH)", "manufacturerModelNumber": "PAR-1", "qty": 4, "unit": "ea", "cost": 50, "price": 100 },
+        { "id": 10, "sku": "ZERO", "desc": "Zero-quantity line", "qty": 0, "unit": "ea", "cost": 1, "price": 2 },
+        { "id": 11, "sku": "HAZER", "desc": "Hazer", "qty": 1, "unit": "ea", "cost": 800, "price": 1200, "option": true },
+        { "id": 12, "sku": "FAB-1", "desc": "Velour", "qty": 20, "unit": "sq ft", "cost": 5, "price": 9 }
+      ]
+    },
+    {
+      "id": "s2", "name": "Labor", "kind": "labor", "mfr": "", "freightPct": 0,
+      "items": [{ "id": 20, "sku": "LAB-PM", "desc": "Project management", "qty": 8, "unit": "hr", "cost": 50, "price": 100 }]
+    },
+    {
+      "id": "s3", "name": "Moving lights", "kind": "materials", "mfr": "", "freightPct": 0, "groupId": "g-alt",
+      "items": [{ "id": 30, "sku": "SPOT-1", "desc": "Moving spot", "qty": 6, "unit": "ea", "cost": 1500, "price": 2400 }]
+    }
+  ]
+}

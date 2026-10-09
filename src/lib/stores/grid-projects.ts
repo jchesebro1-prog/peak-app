@@ -14,6 +14,7 @@ import {
   DEFAULT_OPTION_ID,
   defaultOptionId,
   ensureOptions,
+  estimateLinkOf,
   hasOption,
   syncQuoteMirror,
   type GridOption,
@@ -262,6 +263,10 @@ export type GridProject = {
     baseSheetTemplate?: string;
     /** #255: where the sheet's movable rooms were drawn (wall + 0..1); the sheet never moves them afterwards. */
     baseSheetMovables?: Record<string, { wall: string; t: number }>;
+    /** #314: the generated base sheet's id. An intake plan view is put FIRST in
+     *  sheetIds, so Auto (re-)fill reads this, never sheetIds[0]. Absent on
+     *  designs drawn before #314 — their base sheet is still sheetIds[0]. */
+    baseSheetId?: string;
   };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
@@ -495,16 +500,18 @@ export async function generateBaseSheet(
   for (const sp of starterSpaces(a, kind, sheet.id, id)) {
     await addSpace(projectId, { ...sp, by });
   }
-  if (id && family) {
-    // #255: stamp the template and where its movable rooms sit on this sheet (a later intake edit never moves them).
-    const placed = stretchById(id, familyDims(a, id)).movables;
-    const movables = Object.fromEntries(Object.entries(placed).map(([k, m]) => [k, { wall: m.wall, t: m.t }]));
-    await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-      if (!p.intake) return;
+  // #255: stamp the template and where its movable rooms sit on this sheet (a later intake edit never moves them).
+  const placed = id && family ? stretchById(id, familyDims(a, id)).movables : {};
+  const movables = Object.fromEntries(Object.entries(placed).map(([k, m]) => [k, { wall: m.wall, t: m.t }]));
+  await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!p.intake) return;
+    // #314: remember WHICH sheet is the base — an intake plan view goes first.
+    p.intake.baseSheetId = sheet.id;
+    if (id && family) {
       p.intake.baseSheetTemplate = id;
       if (Object.keys(movables).length) p.intake.baseSheetMovables = movables;
-    });
-  }
+    }
+  });
   return sheet;
 }
 
@@ -513,7 +520,13 @@ export async function saveGridIntake(
   input: NonNullable<GridProject["intake"]>
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.intake = { ...input, baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate, baseSheetMovables: input.baseSheetMovables ?? p.intake?.baseSheetMovables };
+    p.intake = {
+      ...input,
+      baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate,
+      baseSheetMovables: input.baseSheetMovables ?? p.intake?.baseSheetMovables,
+      // #314: a re-save never forgets which sheet is the generated base.
+      ...(input.baseSheetId ?? p.intake?.baseSheetId ? { baseSheetId: input.baseSheetId ?? p.intake?.baseSheetId } : {}),
+    };
     p.updatedAt = Date.now();
   });
 }
@@ -527,7 +540,8 @@ export async function setLinesetDesign(projectId: string, designId: string | nul
 
 /** Upload one plan background and append it to the project's sheet order.
  *  Exactly one of dataUrl/url should carry the file (the action decides —
- *  Blob when the token exists, in-database otherwise). */
+ *  Blob when the token exists, in-database otherwise). `first` (#314, the
+ *  intake's plan view) puts it at the FRONT instead, so the editor opens on it. */
 export async function addSheet(
   projectId: string,
   input: {
@@ -537,6 +551,7 @@ export async function addSheet(
     url?: string;
     blobPath?: string;
     by: string;
+    first?: boolean;
   }
 ): Promise<GridSheet | null> {
   const project = await getProject(projectId);
@@ -554,7 +569,7 @@ export async function addSheet(
   };
   await upsertDoc<GridSheet>("grid_sheets", sheet);
   await patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.sheetIds = [...(p.sheetIds || []), sheet.id];
+    p.sheetIds = input.first ? [sheet.id, ...(p.sheetIds || [])] : [...(p.sheetIds || []), sheet.id];
     p.updatedAt = Date.now();
   });
   return sheet;
@@ -1318,12 +1333,39 @@ export async function setOptionQuote(
 ): Promise<GridProject | null> {
   const project = await getProject(projectId);
   if (!project || !hasOption(project, optionId)) return null;
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  // #314: an estimate-linked design never takes a Grid-minted quote — on ANY
+  // option (the actions refuse first; this is the store's backstop).
+  if (estimateLinkOf(project)) return null;
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     const doc = ensureOptions(p);
+    if (estimateLinkOf(doc)) { refused = true; return; }
     doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, quoteId } : o));
     syncQuoteMirror(doc);
     p.updatedAt = Date.now();
   });
+  return refused ? null : updated;
+}
+
+/**
+ * #314 — "Design in the Grid" from an Estimator quote: link ONE option to the
+ * estimate and mark it estimate-owned (drawings only; the estimate owns parts
+ * and prices). Refuses (null) when the option is gone or the project already
+ * carries a Grid-minted quote or another estimate link.
+ */
+export async function linkOptionToEstimate(projectId: string, optionId: string, quoteId: string): Promise<GridProject | null> {
+  if (!quoteId) return null;
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    const opt = doc.options.find((o) => o.id === optionId);
+    const other = estimateLinkOf(doc);
+    if (!opt || (opt.quoteId && opt.quoteId !== quoteId) || (other && other.quoteId !== quoteId)) { refused = true; return; }
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, quoteId, estimateOwned: true as const } : o));
+    syncQuoteMirror(doc);
+    p.updatedAt = Date.now();
+  });
+  return refused ? null : updated;
 }
 
 export async function setVenue(
@@ -1917,9 +1959,16 @@ export async function restoreRevision(
     // Quote links are bookkeeping, not design state: a restore brings back
     // the option LIST and membership, but every option that still exists
     // keeps its CURRENT quote link, and the project mirror is re-derived.
-    const currentQuotes = new Map(ensureOptions(doc).options.map((o) => [o.id, o.quoteId]));
+    // #314: the estimate link (estimateOwned) is bookkeeping too — it follows quoteId.
+    const current = new Map(ensureOptions(doc).options.map((o) => [o.id, o]));
     doc.options = target.options
-      ? target.options.map((o) => ({ ...o, quoteId: currentQuotes.has(o.id) ? currentQuotes.get(o.id)! : o.quoteId }))
+      ? target.options.map((o) => {
+          const cur = current.get(o.id);
+          if (!cur) return { ...o };
+          const { estimateOwned: _drop, ...rest } = o;
+          void _drop;
+          return { ...rest, quoteId: cur.quoteId, ...(cur.estimateOwned ? { estimateOwned: true as const } : {}) };
+        })
       : undefined;
     ensureOptions(doc);
     // Auto choices come back with the placements they describe (#211,

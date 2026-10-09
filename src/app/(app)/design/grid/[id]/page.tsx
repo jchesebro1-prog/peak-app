@@ -2,7 +2,14 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
-import { defaultOptionId, resolveOptionId } from "@/lib/design/grid-options";
+import { defaultOptionId, estimateLinkOf, resolveOptionId } from "@/lib/design/grid-options";
+import { coverFromVenue } from "@/lib/design/grid-intake";
+import { loadEstimateTray } from "@/lib/design/estimate-tray-server";
+import { planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
+import { publicPlanCandidates, type PlanCandidate } from "@/lib/design/grid-plan-intake";
+import { get as getQuote } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
+import { quoteBuilderHref } from "@/lib/quote-links";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
@@ -89,6 +96,28 @@ export default async function GridEditorPage({
     const known = project.customerId ? customers.find((c) => c.id === project.customerId) : null;
     const knownSite = known && project.siteId ? (await sitesForCompany(known.id)).find((s) => s.id === project.siteId) : null;
     const knownLocId = knownSite ? docLocId(knownSite) : "";
+    // #314: a design drawn from an estimate — the intake is short and
+    // prefilled (customer, venue, title came from the quote at creation);
+    // Auto is not offered. Its estimate number names the source.
+    const link = estimateLinkOf(project);
+    const linkedQuote = link ? await getQuote(link.quoteId) : null;
+    const estimate = link
+      ? { quoteId: link.quoteId, quoteNumber: linkedQuote ? displayQuoteNumber(linkedQuote) : link.quoteId, href: quoteBuilderHref({ id: link.quoteId, quoteType: linkedQuote?.quoteType ?? "system" }) }
+      : null;
+    // #314: the plan view — plans this job already has on file. Never fatal.
+    const planCandidates: PlanCandidate[] = await planCandidatesFor({
+      customerId: known ? known.id : null,
+      siteLocId: knownSite ? knownLocId : null,
+      quoteId: link?.quoteId ?? null,
+    })
+      .then(publicPlanCandidates)
+      .catch((e: unknown) => {
+        console.error("[grid] plan candidates failed:", e);
+        return [];
+      });
+    const initialCover = knownSite && known
+      ? coverFromVenue({ label: knownSite.name, locationName: knownSite.locationName, address: knownSite.address, city: knownSite.city, state: knownSite.state }, known.name)
+      : undefined;
     return (
       <CanMapProvider canMap={can("manage_users", user.roles)}>
         <GridIntake
@@ -102,6 +131,9 @@ export default async function GridEditorPage({
             locationId: known && known.locations.some((l) => l.id === knownLocId) ? knownLocId : "",
             contactName: known && known.contacts.some((c) => c.name === project.contactName) ? project.contactName || "" : "",
           }}
+          estimate={estimate}
+          initialCover={initialCover}
+          planCandidates={planCandidates}
         />
       </CanMapProvider>
     );
@@ -264,6 +296,24 @@ export default async function GridEditorPage({
   // #223 — each option's draft quote by its estimate number.
   const quoteNumbers = Object.fromEntries(await quoteNumbersFor((project.options || []).map((o) => o.quoteId)));
 
+  // #314: a design drawn from an estimate — the quote button becomes "Open
+  // estimate →" for every option, and the estimate-owned option gets the
+  // From estimate tray, read LIVE from the quote's saved spec. Never fatal.
+  const link = estimateLinkOf(project);
+  const estimateLink = link
+    ? { quoteId: link.quoteId, quoteNumber: quoteNumbers[link.quoteId] ?? link.quoteId, href: quoteBuilderHref({ id: link.quoteId, quoteType: "system" }) }
+    : null;
+  const estimateTray =
+    link && link.optionId === activeOptionId
+      ? await loadEstimateTray(
+          link.quoteId,
+          (project.placements || []).filter((pl) => pl.optionId === activeOptionId).map((pl) => pl.partId)
+        ).catch((e: unknown) => {
+          console.error("[grid] estimate tray failed:", e);
+          return null;
+        })
+      : null;
+
   return (
     <CanMapProvider canMap={can("manage_users", user.roles)}>
     <GridEditor
@@ -315,6 +365,8 @@ export default async function GridEditorPage({
       symbolUrls={symbolUrls}
       favorites={favorites}
       recent={recent}
+      estimateLink={estimateTray ? { quoteId: estimateTray.quoteId, quoteNumber: estimateTray.quoteNumber, href: estimateTray.href } : estimateLink}
+      estimateTray={estimateTray}
     />
     </CanMapProvider>
   );
