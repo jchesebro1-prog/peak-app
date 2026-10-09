@@ -58,6 +58,7 @@ import {
 import { defaultOptionId, estimateLinkOf, estimateOwnedRefusal, hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { attachPlanCandidate, planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
 import { adjustSheet } from "@/lib/design/sheet-adjust-server";
+import { commitSheetUpload } from "@/lib/design/grid-sheet-upload-server";
 import { adjustRefusalText } from "@/lib/design/sheet-adjust";
 import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
 import { cleanNoticeText, newNoticeId, publicPlanCandidates, type GridIntakeNotice, type PlanCandidate } from "@/lib/design/grid-plan-intake";
@@ -1097,6 +1098,20 @@ export async function adjustSheetAction(
   const user = await requireUser();
   const r = await adjustSheet(String(projectId || ""), String(sheetId || ""), pages, user.name);
   if (!r.ok) return { ok: false, error: adjustRefusalText(r.reason, r.pages) };
+  revalidatePath(editorPath(projectId));
+  return { ok: true, sheetId: r.sheetId };
+}
+
+/** #318 (D692): record a sheet the browser uploaded straight to Blob (≤ 25 MB).
+ *  Everything in `input` is untrusted — commitSheetUpload re-checks the path,
+ *  the stored size and the bytes, and deletes a refused upload's blob. */
+export async function commitSheetUploadAction(
+  projectId: string,
+  input: { blobPath: string; uploadKey: string; name: string; position?: "first"; planUploadId?: string }
+): Promise<{ ok: true; sheetId: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await commitSheetUpload(String(projectId || ""), input, user.name);
+  if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   return { ok: true, sheetId: r.sheetId };
 }

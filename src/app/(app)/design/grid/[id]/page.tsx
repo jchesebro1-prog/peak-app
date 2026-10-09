@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { blobEnabled } from "@/lib/blob";
 import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { defaultOptionId, estimateLinkOf, resolveOptionId } from "@/lib/design/grid-options";
@@ -134,6 +135,7 @@ export default async function GridEditorPage({
           estimate={estimate}
           initialCover={initialCover}
           planCandidates={planCandidates}
+          blobUploads={blobEnabled()}
         />
       </CanMapProvider>
     );
@@ -370,6 +372,7 @@ export default async function GridEditorPage({
       // #314 review: what the intake save left for the editor, and the plan view to open on.
       intakeNotices={cleanIntakeNotices(project.intake?.notices)}
       focusSheetId={project.intake?.planSheetId && (project.sheetIds || []).includes(project.intake.planSheetId) ? project.intake.planSheetId : null}
+      blobUploads={blobEnabled()}
     />
     </CanMapProvider>
   );

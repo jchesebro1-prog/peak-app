@@ -36,7 +36,7 @@ import { curtainPriceEach, type FabricSell } from "@/lib/curtain-geom";
 import { distToPolyline, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import type { GridLaborLine } from "@/lib/design/wire-labor";
-import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
+import { uploadGridSheet } from "./sheet-upload";
 import { optionSlice } from "@/lib/design/grid-options";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -356,6 +356,8 @@ export type GridEditorProps = {
   intakeNotices?: GridIntakeNotice[];
   /** #314 review: the intake's plan view sheet — the editor opens on it, even when it lands after mount. */
   focusSheetId?: string | null;
+  /** #318: file storage is on — sheets upload straight to Blob (≤ 25 MB); off = the 4 MB route. */
+  blobUploads?: boolean;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -385,6 +387,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   const estimateLink = props.estimateLink ?? null;
   const estimateTray = props.estimateTray ?? null;
   const intakeNotices = props.intakeNotices ?? [];
+  const blobUploads = props.blobUploads ?? false;
   const router = useRouter();
   const pathname = usePathname();
   /** #299 multi-select: every selected device, in the order picked. The
@@ -1392,46 +1395,19 @@ function useGridEditorImpl(props: GridEditorProps) {
   }, [sheetKey, size, fit]);
 
   /**
-   * Post the sheet to /api/grid-sheets/upload (#146, D173) rather than through
-   * a server action. The action took the file as a base64 data-URL, which
-   * next.config.ts's 1200kb `serverActions.bodySizeLimit` cut down to a ~900 kB
-   * real ceiling while the code advertised 8 MB — and an over-limit body was
-   * rejected by Next before the action ran, so the user saw an unhandled
-   * rejection instead of a sentence telling them what to do. Route handlers
-   * carry no such cap, and raw multipart bytes skip base64's 4/3 inflation
-   * entirely.
-   *
-   * The response carries only the new sheet id: the stored blob path stays
-   * server-side, so nothing here can name a file for the sheet proxy to read.
+   * Upload one plan sheet (#146, D173; #318, D692): straight to private Blob
+   * up to 25 MB through the token broker when file storage is on, else the
+   * 4 MB multipart route — uploadGridSheet picks, preflights and never
+   * throws. The reply carries only the new sheet id; nothing here names a
+   * stored path.
    */
   async function upload(file: File) {
     setErr(null);
-    if (file.size > GRID_SHEET_MAX_BYTES) {
-      // Refuse before the upload so an oversize file costs no uplink time. The
-      // route re-checks: this is the courtesy, not the enforcement.
-      setErr(
-        `That file is larger than ${GRID_SHEET_MAX_LABEL}. Print the drawing to a smaller PDF (one sheet per file) and try again.`
-      );
-      return;
-    }
-    const body = new FormData();
-    body.append("projectId", project.id);
-    body.append("name", file.name);
-    body.append("file", file);
     setBusy(true);
-    type UploadReply = { ok?: boolean; sheetId?: string; error?: string };
-    let r: UploadReply | null = null;
-    try {
-      const res = await fetch("/api/grid-sheets/upload", { method: "POST", body });
-      r = (await res.json()) as UploadReply;
-    } catch {
-      // A dropped connection or a non-JSON reply (a proxy's own 413 page) must
-      // still say something useful rather than leaving the spinner up.
-      r = null;
-    }
+    const r = await uploadGridSheet(project.id, file, { blobUploads });
     setBusy(false);
-    if (!r?.ok || !r.sheetId) {
-      setErr(r?.error || "That sheet could not be uploaded. Check your connection and try again.");
+    if (!r.ok) {
+      setErr(r.error);
       return;
     }
     setActiveSheetId(r.sheetId);
@@ -2586,6 +2562,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     estimateLink,
     estimateTray,
     intakeNotices,
+    blobUploads,
     project,
     symbolDisplay,
     setSymbolScale,

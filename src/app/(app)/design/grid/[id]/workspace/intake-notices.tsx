@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { newPlanUploadId, planFileProblem, uploadPlanFirst } from "@/lib/design/grid-plan-upload";
+import { newPlanUploadId, planFileProblem } from "@/lib/design/grid-plan-upload";
+import { GRID_SHEET_DIRECT_MAX_LABEL } from "@/lib/design/grid-sheet-upload";
+import { uploadGridSheet } from "../sheet-upload";
 import { GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { dismissGridNoticeAction, retryGridNoticeAction } from "../actions";
 import type { GridEditor } from "../use-grid-editor";
@@ -28,7 +30,7 @@ const BTN: React.CSSProperties = {
 };
 
 export default function IntakeNotices({ ed }: { ed: GridEditor }) {
-  const { intakeNotices, project, router } = ed;
+  const { intakeNotices, project, router, blobUploads } = ed;
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const fileFor = useRef<string | null>(null);
@@ -52,10 +54,10 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
     const noticeId = fileFor.current;
     fileFor.current = null;
     if (!file || !noticeId) return;
-    const problem = planFileProblem(file);
+    const problem = planFileProblem(file, blobUploads);
     if (problem) return setErr(problem);
     run(async () => {
-      const up = await uploadPlanFirst(project.id, file, newPlanUploadId());
+      const up = await uploadGridSheet(project.id, file, { blobUploads, planUploadId: newPlanUploadId() });
       if (!up.ok) return up;
       return dismissGridNoticeAction(project.id, noticeId);
     });
@@ -79,7 +81,7 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
                 fileFor.current = n.id;
                 input.current?.click();
               }}
-              title={`Choose the plan again — PDF or image, up to ${GRID_SHEET_MAX_LABEL}`}
+              title={`Choose the plan again — PDF or image, up to ${blobUploads ? GRID_SHEET_DIRECT_MAX_LABEL : GRID_SHEET_MAX_LABEL}`}
               style={BTN}
             >
               {pending ? "Uploading…" : "Choose the plan again…"}
@@ -94,7 +96,7 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
       <input
         ref={input}
         type="file"
-        accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp"
+        accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.pdf,.png,.jpg,.jpeg,.webp,.gif"
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];

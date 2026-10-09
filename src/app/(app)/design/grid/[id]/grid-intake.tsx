@@ -27,7 +27,9 @@ import CustomerVenueContactPicker, {
   type CustomerVenueContact,
 } from "@/components/customer-venue-contact-picker";
 import { notePlanUploadFailedAction, planCandidatesAction, saveGridIntakeAction } from "./actions";
-import { newPlanUploadId, planFileProblem, uploadPlanFirst } from "@/lib/design/grid-plan-upload";
+import { newPlanUploadId, planFileProblem } from "@/lib/design/grid-plan-upload";
+import { GRID_SHEET_DIRECT_MAX_LABEL } from "@/lib/design/grid-sheet-upload";
+import { uploadGridSheet } from "./sheet-upload";
 import Link from "next/link";
 import { GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import type { PlanCandidate } from "@/lib/design/grid-plan-intake";
@@ -76,6 +78,7 @@ export default function GridIntake({
   estimate: linkedEstimate = null,
   initialCover,
   planCandidates: initialCandidates = [],
+  blobUploads = false,
 }: {
   projectId: string;
   projectName: string;
@@ -91,6 +94,8 @@ export default function GridIntake({
   initialCover?: Cover;
   /** #314: plans already on file for this job ("Use plan from …"). */
   planCandidates?: PlanCandidate[];
+  /** #318: file storage is on — the dropped plan uploads straight to Blob (≤ 25 MB). */
+  blobUploads?: boolean;
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -190,7 +195,7 @@ export default function GridIntake({
   const pickFile = (file: File | null | undefined) => {
     setPlanError("");
     if (!file) return;
-    const problem = planFileProblem(file);
+    const problem = planFileProblem(file, blobUploads);
     if (problem) return setPlanError(problem);
     setPlanFile(file);
     setPlanUploadId(newPlanUploadId());
@@ -223,7 +228,7 @@ export default function GridIntake({
       // shows; a dropped plan that fails to upload leaves one the same way.
       // Locals only: these keep working after this component unmounts.
       if (planFile && planUploadId) {
-        const up = await uploadPlanFirst(projectId, planFile, planUploadId);
+        const up = await uploadGridSheet(projectId, planFile, { blobUploads, planUploadId });
         if (!up.ok) await notePlanUploadFailedAction(projectId, up.error).catch(() => null);
       }
       router.refresh();
@@ -400,14 +405,14 @@ export default function GridIntake({
                         </span>
                       ) : (
                         <span>
-                          {candidates.length ? "Or drop a different plan here" : "Drop a plan here"} (PDF or image, up to {GRID_SHEET_MAX_LABEL}), or click to choose one.
+                          {candidates.length ? "Or drop a different plan here" : "Drop a plan here"} (PDF or image, up to {blobUploads ? GRID_SHEET_DIRECT_MAX_LABEL : GRID_SHEET_MAX_LABEL}), or click to choose one.
                         </span>
                       )}
                     </div>
                     <input
                       ref={planInput}
                       type="file"
-                      accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp"
+                      accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,.pdf,.png,.jpg,.jpeg,.webp,.gif"
                       hidden
                       onChange={(e) => {
                         const f = e.target.files?.[0];

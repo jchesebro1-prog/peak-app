@@ -11524,6 +11524,7 @@ seeded()
   .then(() => sheetAdjust318PureChecks())
   .then(() => sheetAdjust318BytesChecks())
   .then(() => sheetAdjust318StoreChecks())
+  .then(() => sheetUpload318Checks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59296,7 +59297,7 @@ import {
   ok(rd("src/app/api/grid-sheets/upload/route.ts").includes('String(form.get("position") || "") === "first"'), "#314 pin: the sheet upload route takes position=first (same route, same checks)");
   const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
   const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const next = () => {"));
-  ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadPlanFirst(projectId, planFile, planUploadId)") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
+  ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadGridSheet(projectId, planFile, { blobUploads, planUploadId })") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
      rd("src/lib/design/grid-plan-upload.ts").includes('body.append("position", "first");') && gi.includes("{linkedEstimate ? (") && gi.includes("estimateIntakeNote(linkedEstimate.quoteNumber)") && gi.includes('useState<Start | null>(linkedEstimate ? "blank" : null)'),
     "#314 pin: the intake uploads a dropped plan only after the intake saved; an estimate-linked intake hides Auto and starts Blank");
   // #314 review (1): the intake's save re-renders into the editor, so after a successful save the intake may not
@@ -59312,7 +59313,7 @@ import {
   const ed314 = rd("src/app/(app)/design/grid/[id]/editor.tsx"), hook314 = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts"), page314 = rd("src/app/(app)/design/grid/[id]/page.tsx");
   const banner = rd("src/app/(app)/design/grid/[id]/workspace/intake-notices.tsx");
   ok(ed314.includes("<IntakeNotices ed={ed} />") && page314.includes("intakeNotices={cleanIntakeNotices(project.intake?.notices)}") && page314.includes("focusSheetId={project.intake?.planSheetId") &&
-     banner.includes("retryGridNoticeAction(project.id, n.id)") && banner.includes("dismissGridNoticeAction(project.id, n.id)") && banner.includes("uploadPlanFirst(project.id, file, newPlanUploadId())") && !banner.includes("blobPath"),
+     banner.includes("retryGridNoticeAction(project.id, n.id)") && banner.includes("dismissGridNoticeAction(project.id, n.id)") && banner.includes("uploadGridSheet(project.id, file, { blobUploads, planUploadId: newPlanUploadId() })") && !banner.includes("blobPath"),
     "#314 review: the editor shows the intake's notices as a banner — Retry (copy on the server; upload = choose the file again) and Dismiss");
   ok(hook314.includes("useState((focusHere ? focusSheetId : sheets[0]?.id) || \"\")") && /if \(focusHere && focusSheetId !== focusApplied\) \{\s*setFocusApplied\(focusSheetId\);\s*setActiveSheetId\(focusSheetId!\);/.test(hook314),
     "#314 review: the editor opens on the intake's plan view sheet — at mount, and when it lands after mount (adjusted during render)");
@@ -59837,4 +59838,102 @@ async function sheetAdjust318StoreChecks(): Promise<void> {
     if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
     else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
   }
+}
+
+/* ---------------- #318: plan sheets up to 25 MB, direct to Blob ---------------- */
+async function sheetUpload318Checks(): Promise<void> {
+  const U = await import("@/lib/design/grid-sheet-upload");
+  const C = await import("@/lib/design/grid-sheet-upload-server");
+  const P = await import("@/lib/design/grid-plan-upload");
+  const G = await import("@/lib/stores/grid-projects");
+  const DS = await import("@/db/doc-store");
+  const J = (v: unknown) => JSON.stringify(v);
+  const by = "Test Harness";
+  const key = "UP-0000000000000318";
+
+  // Pure rules.
+  ok(U.gridSheetBlobPath("GRD-5001", key, "My Plan (rev 2).pdf") === "grid-sheets/GRD-5001/UP-0000000000000318/My_Plan_rev_2_.pdf",
+    "#318 gridSheetBlobPath: grid-sheets/<design>/<uploadKey>/<safe name>");
+  const pre = U.gridSheetUploadPrefix("GRD-5001", key);
+  ok(U.gridSheetPathInScope(`${pre}plan-Sfx01.pdf`, "GRD-5001", key) &&
+     !U.gridSheetPathInScope(`grid-sheets/GRD-5002/${key}/plan.pdf`, "GRD-5001", key) &&
+     !U.gridSheetPathInScope(`grid-sheets/GRD-5001/UP-1111111111111111/plan.pdf`, "GRD-5001", key) &&
+     !U.gridSheetPathInScope(`${pre}../x.pdf`, "GRD-5001", key) && !U.gridSheetPathInScope(`${pre}a/b.pdf`, "GRD-5001", key) &&
+     !U.gridSheetPathInScope(`${pre}`, "GRD-5001", key) && !U.gridSheetPathInScope(`${pre}x.pdf`, "GRD-5001", "UP-nope") && !U.gridSheetPathInScope(42, "GRD-5001", key),
+    "#318 gridSheetPathInScope: only one file directly under this design's upload key");
+  ok(J(U.parseSheetUploadPayload(JSON.stringify({ uploadKey: key, projectId: "GRD-5001" }))) === J({ uploadKey: key, projectId: "GRD-5001" }) &&
+     U.parseSheetUploadPayload("{") === null && U.parseSheetUploadPayload(JSON.stringify({ uploadKey: key })) === null &&
+     U.parseSheetUploadPayload(JSON.stringify({ uploadKey: key, projectId: "GRD/1" })) === null && U.parseSheetUploadPayload(null) === null,
+    "#318 parseSheetUploadPayload: {uploadKey, projectId} or null");
+  const enc = (s: string) => new TextEncoder().encode(s);
+  const gif = Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0]);
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  ok(U.sniffSheetFile(enc("%PDF-1.7 x")) === "application/pdf" && U.sniffSheetFile(png) === "image/png" &&
+     U.sniffSheetFile(gif) === "image/gif" && U.sniffSheetFile(enc("<svg xmlns='http://www.w3.org/2000/svg'/>")) === null &&
+     U.sniffSheetFile(Uint8Array.from([...gif, ...enc("<script>")])) === null && U.sniffSheetFile(Uint8Array.from([...png, ...enc("<html>")])) === null &&
+     U.sniffSheetFile(enc("<!doctype html><html><body>hi</body></html>")) === null && U.sniffSheetFile(enc("hello")) === null,
+    "#318 sniffSheetFile: PNG/JPEG/WebP/GIF by their bytes; SVG, HTML and markup in an image's head refuse");
+  const xmpPdf = enc(`%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<< /Type /Metadata /Subtype /XML >>\nstream\n<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF/></x:xmpmeta>\n<?xpacket end="w"?>\nendstream`);
+  ok(U.sniffSheetFile(xmpPdf) === "application/pdf" && U.sniffSheetFile(Uint8Array.from([...enc("junk ".repeat(40)), ...enc("%PDF-1.4 x")])) === "application/pdf" &&
+     U.sniffSheetFile(Uint8Array.from([...new Uint8Array(1100), ...enc("%PDF-1.4")])) === null &&
+     U.sniffSheetFile(enc("<html><body>%PDF-1.4</body></html>")) === null,
+    "#318 sniffSheetFile: a PDF header in the first KB wins (XMP/XML metadata after it is fine); markup BEFORE the header, or a header past 1 KB, refuses");
+  const f = (size: number, type: string) => ({ size, type });
+  ok(P.planFileProblem(f(5 * 1024 * 1024, "application/pdf"), true) === null && P.planFileProblem(f(26 * 1024 * 1024, "application/pdf"), true) === U.GRID_SHEET_UPLOAD_COPY.tooBig &&
+     (P.planFileProblem(f(5 * 1024 * 1024, "application/pdf")) || "").includes("4 MB") && P.planFileProblem(f(10, "image/heic"), true) === U.GRID_SHEET_UPLOAD_COPY.wrongType &&
+     P.planFileProblem(f(10, "image/heic")) === null && P.planFileProblem(f(0, "application/pdf"), true) === "That file is empty.",
+    "#318 planFileProblem: 25 MB and five types on the Blob path, 4 MB on the old route");
+
+  // The commit (fake Blob head/remove).
+  const gp = await G.createProject({ name: "#318 upload project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const path = (n: string) => U.gridSheetBlobPath(gp.id, key, n).replace(/(\.[a-z]+)$/, "-Sfx01$1");
+  const removed: string[] = [];
+  const deps = (bytes: Uint8Array, size: number) => ({ head: async () => ({ bytes, size }), remove: async (p: string) => { removed.push(p); } });
+  const pdf = enc("%PDF-1.7 fixture");
+  const okRes = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("plan.pdf"), name: "Plan.pdf" }, by, deps(pdf, 20 * 1024 * 1024));
+  if (okRes.ok) registerFixture("grid_sheets", okRes.sheetId);
+  const sheet = okRes.ok ? await DS.getDoc<import("@/lib/stores/grid-projects").GridSheet>("grid_sheets", okRes.sheetId) : null;
+  ok(okRes.ok && !!sheet && sheet.mime === "application/pdf" && sheet.blobPath === path("plan.pdf") && sheet.name === "Plan.pdf" && sheet.dataUrl === "" &&
+     (await G.getProject(gp.id))!.sheetIds.at(-1) === sheet.id && removed.length === 0,
+    "#318 commit: a real 20 MB PDF under this design's key becomes the last sheet, typed by its bytes");
+  const again = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("plan.pdf"), name: "x.pdf" }, by, deps(pdf, 10));
+  ok(!again.ok && again.error === U.GRID_SHEET_UPLOAD_COPY.alreadySaved && removed.length === 0, "#318 commit: replaying a recorded path is refused and never deletes that blob");
+  const svg = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("x.svg"), name: "x.svg" }, by, deps(enc("<svg/>"), 6));
+  const big = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("big.pdf"), name: "big.pdf" }, by, deps(pdf, U.GRID_SHEET_DIRECT_MAX_BYTES + 1));
+  const empty = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("e.pdf"), name: "e.pdf" }, by, deps(pdf, 0));
+  ok(!svg.ok && svg.error === U.GRID_SHEET_UPLOAD_COPY.wrongType && !big.ok && big.error === U.GRID_SHEET_UPLOAD_COPY.tooBig && !empty.ok && empty.error === U.GRID_SHEET_UPLOAD_COPY.empty &&
+     J(removed) === J([path("x.svg"), path("big.pdf"), path("e.pdf")]),
+    "#318 commit: SVG, oversize and empty uploads are refused and their unrecorded blobs deleted");
+  const foreign = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: `grid-sheets/GRD-OTHER/${key}/a.pdf`, name: "a.pdf" }, by, deps(pdf, 10));
+  const missing = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("m.pdf"), name: "m.pdf" }, by, { head: async () => null, remove: async (p: string) => { removed.push(p); } });
+  const noProj = await C.commitSheetUpload("GRD-0", { uploadKey: key, blobPath: path("n.pdf"), name: "n.pdf" }, by, deps(pdf, 10));
+  ok(!foreign.ok && foreign.error === U.GRID_SHEET_UPLOAD_COPY.notThisDesign && !missing.ok && missing.error === U.GRID_SHEET_UPLOAD_COPY.noArrival &&
+     !noProj.ok && noProj.error === U.GRID_SHEET_UPLOAD_COPY.gone && removed.length === 3,
+    "#318 commit: another design's path, a blob that never arrived and an unknown design are refused without deleting anything");
+  const uid = "00000000-0000-4000-8000-000000000318";
+  const first = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("first.pdf"), name: "First.pdf", position: "first", planUploadId: uid }, by, deps(pdf, 10));
+  if (first.ok) registerFixture("grid_sheets", first.sheetId);
+  const proj = (await G.getProject(gp.id))!;
+  ok(first.ok && proj.sheetIds[0] === first.sheetId && proj.intake?.planSheetId === first.sheetId && proj.intake?.planSource === `upload:${uid}`,
+    "#318 commit: a plan-view upload goes FIRST and is recorded as the intake's plan");
+  const retry = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("first2.pdf"), name: "First.pdf", position: "first", planUploadId: uid }, by, deps(pdf, 10));
+  ok(retry.ok && first.ok && retry.sheetId === first.sheetId && retry.already === true && (await G.getProject(gp.id))!.sheetIds.length === proj.sheetIds.length && removed.at(-1) === path("first2.pdf"),
+    "#318 commit: a retried plan-view upload returns the sheet that landed and deletes its own duplicate blob");
+  const badId = await C.commitSheetUpload(gp.id, { uploadKey: key, blobPath: path("b.pdf"), name: "b.pdf", position: "first", planUploadId: "x" }, by, deps(pdf, 10));
+  ok(!badId.ok && badId.error === U.GRID_SHEET_UPLOAD_COPY.badUploadId, "#318 commit: a plan-view upload needs a valid upload id");
+
+  // Wiring pins.
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const route = rd("src/app/api/grid-sheets/upload-url/route.ts");
+  ok(route.includes('reason: "blob-disabled"') && route.includes("maximumSizeInBytes: GRID_SHEET_DIRECT_MAX_BYTES") && route.includes("addRandomSuffix: true") &&
+     route.includes("gridSheetPathInScope(pathname, project.id, p.uploadKey)") && route.includes('body.type !== "blob.generate-client-token"'),
+    "#318 pin: the token route grants one in-scope path, ≤ 25 MB, random suffix, token events only, 503 without Blob");
+  const helper = rd("src/app/(app)/design/grid/[id]/sheet-upload.ts");
+  ok(helper.includes('access: "private"') && helper.includes('handleUploadUrl: "/api/grid-sheets/upload-url"') && helper.includes("if (!opts.blobUploads) return postSheetMultipart(projectId, file, opts.planUploadId);") &&
+     helper.includes("commitSheetUploadAction(projectId,"),
+    "#318 pin: the client helper uploads privately through the broker and commits, or uses the 4 MB route without Blob");
+  const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes("await uploadGridSheet(project.id, file, { blobUploads })") && !hook.includes('fetch("/api/grid-sheets/upload"'), "#318 pin: the + tab uploads through uploadGridSheet");
+  ok(rd("src/app/(app)/design/grid/[id]/page.tsx").split("blobUploads={blobEnabled()}").length === 3, "#318 pin: the page tells both the intake and the editor whether Blob uploads are on");
 }
