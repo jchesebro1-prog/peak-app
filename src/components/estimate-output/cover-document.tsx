@@ -20,6 +20,9 @@ nextjs-portal { display: none !important; }
 .cov { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10.5pt; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .cov-page { width: 100%; border-collapse: collapse; }
 .cov-page td { padding: 0; vertical-align: top; }
+.cov-head { width: 100%; border-collapse: collapse; margin-bottom: 14pt; font-size: 9.5pt; line-height: 1.3; break-inside: avoid; page-break-inside: avoid; }
+.cov-page .cov-head td { border: 1px solid #bbb; padding: 3pt 6pt; vertical-align: top; }
+.cov-page .cov-head td.cov-head-k { color: #555; background: #f3f3f3; width: 1%; white-space: nowrap; }
 .cov-foot-space { height: 0.45in; }
 .cov-foot { position: fixed; left: 0; right: 0; bottom: 0; height: 0.35in; box-sizing: border-box; padding-top: 5pt; border-top: 1px solid #bbb; text-align: center; font-size: 8pt; color: #555; background: #fff; }
 .cov-scope, .cov-totals, .cov-opt, .cov-alt, .cov-sig { break-inside: avoid; page-break-inside: avoid; }
@@ -27,17 +30,19 @@ nextjs-portal { display: none !important; }
 `;
 
 const row: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12 };
-const label: CSSProperties = { color: "#555", width: 90, flexShrink: 0 };
 
 export default function CoverDocument(p: CoverDocumentProps) {
-  const project: Array<[string, string]> = [
+  const left: Array<[string, string]> = [
     ["Customer", p.project.customer],
     ["Attn", p.project.attn],
     ["Venue", p.project.venue],
+  ].filter(([, v]) => !!(v || "").trim()) as Array<[string, string]>;
+  const right: Array<[string, string]> = [
     ["Project", p.project.project],
     ["Estimate", p.project.number],
     ["Date", p.project.date],
   ].filter(([, v]) => !!(v || "").trim()) as Array<[string, string]>;
+  const headRows = Math.max(left.length, right.length);
   return (
     <div className="cov">
       <table className="cov-page" role="presentation">
@@ -52,14 +57,21 @@ export default function CoverDocument(p: CoverDocumentProps) {
               />
               <h1 style={{ textAlign: "center", textDecoration: "underline", fontSize: "15pt", fontWeight: 700, margin: "18pt 0 12pt" }}>{p.title}</h1>
 
-              <div style={{ marginBottom: "14pt" }}>
-                {project.map(([k, v]) => (
-                  <div key={k} style={{ display: "flex", gap: 8 }}>
-                    <span style={label}>{k}</span>
-                    <span>{v}</span>
-                  </div>
-                ))}
-              </div>
+              {/* Project header as a two-pair table — three rows instead of six. */}
+              {headRows > 0 && (
+                <table className="cov-head">
+                  <tbody>
+                    {Array.from({ length: headRows }, (_, i) => (
+                      <tr key={i}>
+                        <td className={left[i] ? "cov-head-k" : undefined}>{left[i]?.[0] ?? ""}</td>
+                        <td>{left[i]?.[1] ?? ""}</td>
+                        <td className={right[i] ? "cov-head-k" : undefined}>{right[i]?.[0] ?? ""}</td>
+                        <td>{right[i]?.[1] ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
 
               {p.scopes.map((s) => (
                 <div key={s.id} className="cov-scope" style={{ marginBottom: "10pt" }}>
