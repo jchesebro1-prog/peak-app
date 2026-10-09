@@ -102,7 +102,7 @@ export async function storeSheetFile(projectId: string, name: string, bytes: Uin
       const up = await putBlob(`${GRID_SHEET_BLOB_PREFIX}${projectId}/${safeName(name)}`, Buffer.from(bytes), mime);
       return { ok: true, file: { mime, dataUrl: "", url: up.url, blobPath: up.pathname } };
     } catch (e) {
-      console.error("[grid] adjusted sheet upload failed:", e);
+      console.error("[grid] sheet file upload failed:", e);
       return { ok: false, reason: "failed" };
     }
   }

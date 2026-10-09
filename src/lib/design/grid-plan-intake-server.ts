@@ -6,7 +6,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { getProject, recordIntakePlan } from "@/lib/stores/grid-projects";
 import { readBlobCapped } from "./sheet-adjust-server";
 import { storeUploadAsSheets } from "./grid-sheet-split-server";
-import type { SheetsLanded } from "./grid-sheet-split";
+import { landed, type SheetsLanded } from "./grid-sheet-split";
 import { GRID_PLAN_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";
 import { estimateLinkOf } from "@/lib/design/grid-options";
 import { displayQuoteNumber } from "@/lib/estimate-number";
@@ -108,7 +108,7 @@ async function attachPlanCandidateLocked(projectId: string, candidateId: string,
     );
     if (!r.ok) return { ok: false, error: r.reason === "gone" ? "That design could not be found." : GRID_PLAN_COPY.failed };
     await recordIntakePlan(projectId, r.sheetIds[0], source);
-    return { ...r, name };
+    return { ok: true, ...landed(r.sheetIds, r.baseSheet, r.note), name };
   } catch (e) {
     if (isBlobNotFound(e)) return { ok: false, error: GRID_PLAN_COPY.gone };
     console.error("[grid] plan copy failed:", e);

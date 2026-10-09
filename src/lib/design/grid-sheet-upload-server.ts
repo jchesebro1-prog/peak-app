@@ -8,19 +8,20 @@
  * (`position: "first"`) runs under the design's plan lock with its upload id,
  * so a retry of one that landed returns that sheet (#314's rule).
  * #319: a multi-page PDF is read back and split into one sheet per page, and
- * the original upload's blob is then deleted (a replayed commit fails its head
- * read instead of splitting twice); a real plan retires the generated plan.
+ * the original upload's blob is then deleted — after the plan lock's
+ * transaction has committed, and only if no sheet holds it (a replayed commit
+ * fails its head read instead of splitting twice); a real plan retires the
+ * generated plan.
  * `deps` exists for the spec harness.
  */
 import { deleteBlob, getBlobHead } from "@/lib/blob";
-import { listDocsByField } from "@/db/doc-store";
 import { baseName, cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
-import { getProject, recordIntakePlan, type GridSheet } from "@/lib/stores/grid-projects";
+import { getProject, recordIntakePlan } from "@/lib/stores/grid-projects";
 import { withPlanLock } from "@/lib/design/grid-plan-intake-server";
 import { attachedPlanSheet, isPlanUploadId, planSourceKey } from "@/lib/design/grid-plan-intake";
 import { GRID_SHEET_DIRECT_MAX_BYTES, GRID_SHEET_SNIFF_BYTES, GRID_SHEET_UPLOAD_COPY as COPY, gridSheetPathInScope, sniffSheetFile } from "./grid-sheet-upload";
 import { readBlobCapped } from "./sheet-adjust-server";
-import { storeUploadAsSheets } from "./grid-sheet-split-server";
+import { sheetHoldsBlob, storeUploadAsSheets } from "./grid-sheet-split-server";
 import type { SheetsLanded } from "./grid-sheet-split";
 
 type CommitDeps = {
@@ -32,6 +33,8 @@ type CommitDeps = {
 const liveDeps: CommitDeps = { head: getBlobHead, remove: deleteBlob, read: (p) => readBlobCapped(p) };
 
 export type CommitSheetResult = ({ ok: true; already?: true } & SheetsLanded) | { ok: false; error: string };
+/** commitLocked's answer: `split` = no sheet holds the original upload any more. */
+type LockedResult = ({ ok: true; already?: true; split?: boolean } & SheetsLanded) | { ok: false; error: string };
 
 export async function commitSheetUpload(projectId: string, input: unknown, by: string, deps: Partial<CommitDeps> = {}): Promise<CommitSheetResult> {
   const d: CommitDeps = { ...liveDeps, ...deps };
@@ -48,33 +51,38 @@ export async function commitSheetUpload(projectId: string, input: unknown, by: s
   const name = cleanText(baseName(inp.name), 180) ? displayFileName(inp.name).slice(0, 120) : "Plan sheet";
   const source = first ? planSourceKey("upload", inp.planUploadId as string) : null;
   const run = () => commitLocked(project.id, blobPath, name, by, source, d);
-  return source ? withPlanLock(project.id, run) : run();
+  const out = source ? await withPlanLock(project.id, run) : await run();
+  if (!out.ok) return out;
+  const { split, ...result } = out;
+  // #319: after a split no page holds the original upload. It is dropped only
+  // now — once the plan lock's transaction has committed (an abort rolls the
+  // pages back, and a retry needs the original) — and only if no sheet holds
+  // it (a concurrent double-submit may have recorded it whole).
+  if (split) await dropOrphan(blobPath, d);
+  return result;
 }
 
-async function referenced(blobPath: string): Promise<boolean> {
-  return (await listDocsByField<GridSheet>("grid_sheets", "blobPath", [blobPath])).length > 0;
+/** Drop an upload's blob unless some sheet already holds that path (a replay names a real file). */
+async function dropOrphan(blobPath: string, d: CommitDeps): Promise<void> {
+  try {
+    if (!(await sheetHoldsBlob(blobPath))) await d.remove(blobPath);
+  } catch {
+    /* best effort — the answer stands either way */
+  }
 }
 
-async function commitLocked(projectId: string, blobPath: string, name: string, by: string, source: string | null, d: CommitDeps): Promise<CommitSheetResult> {
-  /** Drop this upload's blob unless some sheet already holds that path (a replay names a real file). */
-  const dropOrphan = async () => {
-    try {
-      if (!(await referenced(blobPath))) await d.remove(blobPath);
-    } catch {
-      /* best effort — the answer stands either way */
-    }
-  };
+async function commitLocked(projectId: string, blobPath: string, name: string, by: string, source: string | null, d: CommitDeps): Promise<LockedResult> {
   if (source) {
     const now = await getProject(projectId);
     const done = now ? attachedPlanSheet(now.intake, now.sheetIds || [], source) : null;
     if (done) {
-      await dropOrphan();
+      await dropOrphan(blobPath, d);
       return { ok: true, sheetId: done, sheetIds: [done], already: true };
     }
   }
-  if (await referenced(blobPath)) return { ok: false, error: COPY.alreadySaved };
-  const refuse = async (error: string): Promise<CommitSheetResult> => {
-    await dropOrphan();
+  if (await sheetHoldsBlob(blobPath)) return { ok: false, error: COPY.alreadySaved };
+  const refuse = async (error: string): Promise<LockedResult> => {
+    await dropOrphan(blobPath, d);
     return { ok: false, error };
   };
   let head: { bytes: Uint8Array; size: number } | null;
@@ -96,7 +104,6 @@ async function commitLocked(projectId: string, blobPath: string, name: string, b
       readBytes: () => d.read(blobPath),
       // Not split: the uploaded blob IS the sheet's file (no `url` — provenance only, D692).
       storeWhole: async () => ({ mime: type, dataUrl: "", blobPath }),
-      dropOriginal: () => d.remove(blobPath),
     },
     { by, first: !!source, intakeNotices: !!source }
   );

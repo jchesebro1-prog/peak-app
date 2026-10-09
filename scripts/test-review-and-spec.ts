@@ -60528,6 +60528,90 @@ async function pagesAsSheets319UploadChecks(): Promise<void> {
     ok(f1.ok && f2.ok && f2.already === true && J(f2.sheetIds) === J([f1.sheetIds[0]]) && (await G.getProject(d9.gp.id))!.sheetIds.length === p9.sheetIds.length,
       "#319 commit: a retried plan-view upload returns the sheet that landed (no second split)");
 
+    // 8b. Fix round 1 — when the original is dropped, page storage order, and aborts.
+    const { getDb, inTransaction } = await import("@/db");
+    const { withPlanLock } = await import("@/lib/design/grid-plan-intake-server");
+    // A concurrent commit records the same upload whole while this one splits: the original stays.
+    const d10 = await designWithBase("double submit");
+    const raceRemoved: string[] = [];
+    const racePath = pathOf(d10.gp.id, "race.pdf");
+    const c10 = await C.commitSheetUpload(d10.gp.id, { uploadKey: key, blobPath: racePath, name: "Race.pdf" }, by, {
+      ...deps(set),
+      read: async () => {
+        const whole = (await G.addSheet(d10.gp.id, { name: "Race.pdf", mime: "application/pdf", blobPath: racePath, by }))!;
+        registerFixture("grid_sheets", whole.id);
+        return set;
+      },
+      remove: async (p: string) => { raceRemoved.push(p); },
+    });
+    if (c10.ok) await sheetsOf(c10.sheetIds);
+    ok(c10.ok && c10.sheetIds.length === 3 && raceRemoved.length === 0, "#319 commit: a split never deletes an original some other sheet holds (a concurrent double-submit recorded it whole)");
+    // A plan-view (locked) commit drops the original only after the lock's transaction.
+    const d11 = await designWithBase("drop after lock");
+    const lockDrops: Array<{ p: string; inTx: boolean }> = [];
+    const c11 = await C.commitSheetUpload(d11.gp.id, { uploadKey: key, blobPath: pathOf(d11.gp.id, "lock.pdf"), name: "Lock.pdf", position: "first", planUploadId: "00000000-0000-4000-8000-000000000320" }, by, {
+      ...deps(set),
+      remove: async (p: string) => { lockDrops.push({ p, inTx: inTransaction() }); },
+    });
+    if (c11.ok) await sheetsOf(c11.sheetIds);
+    ok(c11.ok && c11.sheetIds.length === 3 && J(lockDrops) === J([{ p: pathOf(d11.gp.id, "lock.pdf"), inTx: false }]) && !("split" in c11),
+      "#319 commit: a plan-view split drops the original upload after the plan lock's transaction, not inside it");
+    // Pages are stored four at a time, and still land in page order.
+    const six = await pagesPdf319(6);
+    const d12 = await G.createProject({ name: "#319 concurrency", customer: "Spec fixture", customerId: null, by });
+    registerFixture("grid_projects", d12.id);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const urlFor = new Map<string, string>();
+    const r12c = await SS.storeUploadAsSheets(d12.id, bytesSource("Six.pdf", "application/pdf", six), { by }, {
+      storePage: async (_pid: string, name: string, bytes: Uint8Array) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const page = Number(name.split("p.").pop());
+        await new Promise((r) => setTimeout(r, (7 - page) * 5));
+        inFlight--;
+        const dataUrl = `data:application/pdf;base64,${b64(bytes)}#${page}`;
+        urlFor.set(name, dataUrl);
+        return { mime: "application/pdf", dataUrl };
+      },
+    });
+    const s12c = r12c.ok ? await sheetsOf(r12c.sheetIds) : [];
+    ok(r12c.ok && maxInFlight === SS.GRID_SHEET_SPLIT_STORE_CONCURRENCY && s12c.length === 6 &&
+       s12c.every((sh, i) => sh.name === `Six.pdf — p.${i + 1}` && sh.dataUrl === urlFor.get(sh.name) && sh.split?.page === i + 1),
+      "#319 split pages are stored four at a time and still land in page order, each sheet holding its own page");
+    // Under the plan lock, a retire that aborts the transaction fails the upload: the sheets roll back and the page blobs written are deleted.
+    const d13 = await designWithBase("abort");
+    const before13 = J((await G.getProject(d13.gp.id))!.sheetIds);
+    const abortDrops: string[] = [];
+    let pageN = 0;
+    const fakePage = async () => ({ mime: "application/pdf", dataUrl: "", blobPath: `grid-sheets/T319/abort-${++pageN}.pdf` });
+    let threw = false;
+    try {
+      await withPlanLock(d13.gp.id, () => SS.storeUploadAsSheets(d13.gp.id, bytesSource("Set.pdf", "application/pdf", set), { by, first: true, intakeNotices: true }, {
+        storePage: fakePage,
+        removeBlob: async (p: string) => { abortDrops.push(p); },
+        retire: async () => {
+          await (await getDb()).execute(sql`select 1/0`).catch(() => {});
+          throw new Error("retire failed mid-transaction");
+        },
+      }));
+    } catch {
+      threw = true;
+    }
+    ok(threw && J((await G.getProject(d13.gp.id))!.sheetIds) === before13 && J([...abortDrops].sort()) === J(["grid-sheets/T319/abort-1.pdf", "grid-sheets/T319/abort-2.pdf", "grid-sheets/T319/abort-3.pdf"]),
+      "#319 a retire that aborts the plan lock's transaction fails the upload — the new sheets roll back and their page blobs are deleted");
+    // A retire that throws without aborting anything never fails the upload — under the lock or off it.
+    const d14 = await designWithBase("retire throws");
+    const boom = async (): Promise<null> => { throw new Error("retire failed"); };
+    const r14a = await withPlanLock(d14.gp.id, () => SS.storeUploadAsSheets(d14.gp.id, bytesSource("Plan.png", "image/png", png), { by, first: true }, { retire: boom }));
+    const r14b = await SS.storeUploadAsSheets(d14.gp.id, bytesSource("Set.pdf", "application/pdf", set), { by }, { retire: boom });
+    if (r14a.ok) await sheetsOf(r14a.sheetIds);
+    if (r14b.ok) await sheetsOf(r14b.sheetIds);
+    const p14 = (await G.getProject(d14.gp.id))!;
+    ok(r14a.ok && r14b.ok && r14a.baseSheet === undefined && r14b.baseSheet === undefined && p14.sheetIds.includes(d14.base.id) &&
+       r14a.sheetIds.every((id) => p14.sheetIds.includes(id)) && r14b.sheetIds.every((id) => p14.sheetIds.includes(id)),
+      "#319 a retire that fails without aborting the transaction leaves the generated plan and never fails the upload");
+
     // 9. Wiring pins.
     const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
     const route = rd("src/app/api/grid-sheets/upload/route.ts");
@@ -60537,7 +60621,10 @@ async function pagesAsSheets319UploadChecks(): Promise<void> {
     ok(pis.includes("storeUploadAsSheets(") && pis.includes("readBytes: () => readBlobCapped(pick.blobPath)") && !pis.includes("dropOriginal") && !pis.includes("addSheet("),
       "#319 pin: the on-file plan copy splits through storeUploadAsSheets and never deletes the customer's own file");
     const commit = rd("src/lib/design/grid-sheet-upload-server.ts");
-    ok(commit.includes("dropOriginal: () => d.remove(blobPath)") && !commit.includes("addSheet("), "#319 pin: the broker commit drops its original blob only through a successful split");
+    ok(commit.includes("if (split) await dropOrphan(blobPath, d);") && commit.indexOf("await withPlanLock(project.id, run)") > 0 &&
+       commit.indexOf("await withPlanLock(project.id, run)") < commit.indexOf("if (split) await dropOrphan(blobPath, d);") &&
+       !commit.includes("dropOriginal") && !commit.includes("addSheet("),
+      "#319 pin: the broker commit drops its original blob only after a successful split, after the plan lock, and only when no sheet holds it");
     ok(rd("src/app/(app)/design/grid/[id]/actions.ts").includes("planSheetIds = attached.sheetIds;"), "#319 pin: the intake save hands back every sheet a copied plan became");
   } finally {
     if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
