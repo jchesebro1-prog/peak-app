@@ -60156,7 +60156,7 @@ async function conduitRiser321Checks(): Promise<void> {
   ok(step({ op: "updateRun", id: rid, priceWire: true, lengthFt: 12.34, laneX: 3 }) && doc.runs[0].priceWire === true && doc.runs[0].lengthFt === 12.3 &&
      step({ op: "updateRun", id: rid, priceWire: null, lengthFt: null }) && doc.runs[0].priceWire === undefined && doc.runs[0].lengthFt === undefined,
     "#321 updateRun: per-run overrides set and clear back to the design default (null)");
-  ok(!step({ op: "removeDetail", id: "dt-main" }) && step({ op: "addDetail", name: "Lobby", spaceIds: [] }) && doc.details[1].n === "2" &&
+  ok(!step({ op: "removeDetail", id: "dt-main" }) && step({ op: "addDetail", name: "Lobby", allSpaces: true, spaceIds: [] }) && doc.details[1].n === "2" &&
      step({ op: "moveTag", placementId: "gp-1", x: 2, y: 3, detailId: "dt-main" }) && step({ op: "moveLevel", detailId: "dt-main", levelId: "lv-1", y: 4 }) &&
      step({ op: "resetLayout", detailId: "dt-main" }) && !doc.tags["gp-1"] && !doc.levelY["dt-main"] && doc.runs[0].laneX === undefined,
     "#321 the last detail can't be removed; a new detail numbers next; Reset layout clears pins, level moves and lanes in that detail");
@@ -60246,8 +60246,8 @@ async function conduitRiser321Checks(): Promise<void> {
   const stubRun = det.runs.find((r) => r.run.id === "cr-stub")!;
   ok(J(c1.signals.map((s) => s.symbol)) === J(["D", "N"]) && J(stubRun.signals.map((s) => s.symbol)) === J(["CC"]) && !stubRun.empty,
     "#321 a run's bubbles are its wires' signal symbols, sorted; a stub run shows its display-only signals");
-  const split = { ...cr, details: [...cr.details, { id: "dt-2", n: "2", name: "Pit", spaceIds: ["sp-pit"] }], alwaysShow: [] as string[] };
-  split.details[0] = { ...split.details[0], spaceIds: ["sp-1"] };
+  const split = { ...cr, details: [...cr.details, { id: "dt-2", n: "2", name: "Pit", allSpaces: false, spaceIds: ["sp-pit"] }], alwaysShow: [] as string[] };
+  split.details[0] = { ...split.details[0], allSpaces: false, spaceIds: ["sp-1"] };
   const view2 = D.deriveView({ ...input, doc: split, devices: devices.map((d) => (d.id === "gp-c2" ? { ...d, spaceId: "sp-pit" } : d)) });
   const ref = view2.details[0].runs.find((r) => r.run.routeIds.includes("w3"))!;
   const inPit = view2.details[1];
@@ -60260,7 +60260,7 @@ async function conduitRiser321Checks(): Promise<void> {
   ok(wbo.routeIds.has("w1") && wbo.linkIds.has("w5") && P.wireByOthers(cr, true).routeIds.size === 0 &&
      !P.wireByOthers({ ...cr, defaults: { ...cr.defaults, priceWire: true } }, false).routeIds.has("w1"),
     "#321 wire in conduit is by others by default; turning the design default on prices it; an estimate-owned option excludes nothing");
-  const priced = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true } : r.id === "cr-stub" ? { ...r, priceConduit: true } : r)) };
+  const priced = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true } : r.id === "cr-stub" ? { ...r, priceConduit: true, style: "conduit" as const } : r)) };
   const label = (e: import("@/lib/design/conduit-riser/model").RunEnd) => (e.kind === "placement" ? devices.find((d) => d.id === e.placementId)!.label : "TO JB1");
   const dem = P.conduitDemand({ doc: priced, estimateOwned: false, wires, sizes: [{ size: '3/4"', partId: "EMT-34" }], labelOf: label });
   ok(J(dem.lines) === J([{ partId: "EMT-34", size: '3/4"', feet: 63 }]) && J(dem.refusals) === J(["CRO-02 → TO JB1 needs a length"]),
@@ -60341,4 +60341,93 @@ async function conduitRiser321Checks(): Promise<void> {
     "#321 DXF: named PK-RISER layers in use; text is ASCII with AutoCAD's %%c/%%d codes");
   ok(geo.filter((x) => x.t === "poly" && x.layer === "CABLEMGMT").length === 1 && svg.includes("stroke-dasharray"),
     "#321 the cable-management run draws dashed in both outputs");
+
+  // ---- review fixes
+  {
+    let d2 = M.emptyConduitRiserDoc();
+    d2 = M.patchConduitRiser(d2, { op: "addConduitRun", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-2" } }, makeId, ids).doc;
+    d2 = M.patchConduitRiser(d2, { op: "updateRun", id: d2.runs[0].id, laneX: 5 }, makeId, ids).doc;
+    const reset = M.patchConduitRiser(d2, { op: "resetLayout", detailId: "dt-main", runIds: [d2.runs[0].id] }, makeId, ids).doc;
+    ok(reset.runs[0].laneX === undefined, "#321 Reset layout clears a dragged lane between two unpinned tags (the view passes the detail's run ids)");
+  }
+  {
+    const scoped = M.normalizeConduitRiserDoc({ details: [{ id: "dt-a", n: "1", name: "PAC", allSpaces: false, spaceIds: ["sp-x"] }, { id: "dt-b", n: "2", name: "All", allSpaces: true }] });
+    const gone = M.pruneConduitRiser(scoped, { placementIds: new Set(), routeIds: new Set(), linkIds: new Set(), spaceIds: new Set() });
+    const v = D.deriveView({ doc: gone, devices: [dev("gp-er", "ER-01", "racks-cases", null)], wires: [], levels, wireTypes: wt });
+    ok(gone.details[0].allSpaces === false && gone.details[0].spaceIds.length === 0 && v.details[0].tags.length === 0 && v.details[1].tags.length === 1 &&
+       M.normalizeConduitRiserDoc({ details: [{ id: "dt-x", n: "1", name: "Old", spaceIds: [] }] }).details[0].allSpaces === true,
+      "#321 a scoped detail whose spaces are all deleted covers nothing — it never turns into 'every space'; an older empty list still reads as all");
+  }
+  {
+    const moved = wires.map((w) => (w.id === "w1" ? { ...w, to: "gp-c2" } : w));
+    const v = D.deriveView({ ...input, wires: moved });
+    const c1run = v.details[0].runs.find((r) => r.run.routeIds.includes("w1"))!;
+    const s2 = S.suggestions(cr, moved).items.find((x) => x.key === "gp-c2|gp-er");
+    const ends = new Map(moved.map((w) => [`${w.kind}:${w.id}`, w.from && w.to ? M.pairKey(w.from, w.to) : null] as const));
+    const live2 = { placementIds: new Set(devices.map((x) => x.id)), routeIds: new Set(moved.filter((w) => w.kind === "route").map((w) => w.id)), linkIds: new Set(moved.filter((w) => w.kind === "link").map((w) => w.id)), spaceIds: new Set(["sp-1"]), wireEnds: ends };
+    ok(!c1run.members.some((w) => w.id === "w1") && s2?.kind === "join" && s2.routeIds.includes("w1") &&
+       !M.pruneConduitRiser(cr, live2).runs.some((r) => r.routeIds.includes("w1") && M.runPairKey(r) === "gp-c1|gp-er"),
+      "#321 a plan wire re-snapped to other devices leaves its old conduit, is suggested for its new pair, and prune drops it from the old run");
+  }
+  {
+    const forged = { key: "x|y", a: "gp-er", b: "gp-er", routeIds: ["zz"], linkIds: [], kind: "new" as const };
+    const liveIds = new Set(devices.map((x) => x.id));
+    ok(!S.acceptSuggestion(cr, forged, makeId, liveIds).changed &&
+       !S.acceptSuggestion(cr, { ...forged, key: "gp-er|gp-nope", b: "gp-nope" }, makeId, liveIds).changed &&
+       !S.acceptSuggestion(cr, { ...forged, key: "gp-c1|gp-dr", b: "gp-c1" }, makeId, liveIds).changed,
+      "#321 accept refuses a self-loop, a key that doesn't match its ends, and a device that isn't live");
+  }
+  {
+    let d3 = M.emptyConduitRiserDoc();
+    for (let i = 0; i < M.CR_CAPS.levelsPerDetail + 5; i++) d3 = M.patchConduitRiser(d3, { op: "moveLevel", detailId: "dt-main", levelId: `lv-${i}`, y: i }, makeId, ids).doc;
+    const proto = M.normalizeConduitRiserDoc(JSON.parse('{"tags":{"__proto__":{"x":1,"y":2,"detailId":"dt-main"}}}'));
+    ok(Object.keys(d3.levelY["dt-main"]).length === M.CR_CAPS.levelsPerDetail && Object.keys(proto.tags).length === 0 &&
+       !M.patchConduitRiser(d3, { op: "unpinTag", placementId: "constructor" }, makeId, ids).changed &&
+       Object.getPrototypeOf(proto.tags) === Object.prototype,
+      "#321 level positions are capped per detail; reserved keys (__proto__, constructor) never become map entries");
+  }
+  {
+    const typed = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true, lengthFt: 10.5 } : r)) };
+    const cm = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true, style: "cableMgmt" as const } : r)) };
+    const sizes = [{ size: '3/4"', partId: "EMT-34" }];
+    ok(J(P.conduitDemand({ doc: typed, estimateOwned: false, wires, sizes, labelOf: label }).lines) === J([{ partId: "EMT-34", size: '3/4"', feet: 11 }]) &&
+       P.conduitDemand({ doc: cm, estimateOwned: false, wires, sizes, labelOf: label }).lines.length === 0,
+      "#321 a typed run length overrides the measured wire; a cable-management run never puts conduit on the quote");
+  }
+  {
+    // 30 home runs over two levels — no conduit segment may pass through a tag it doesn't end on.
+    const many: Dev[] = [dev("gp-h", "ER-01", "racks-cases", "lv-stage")];
+    const mw: Wire[] = [];
+    for (let i = 1; i <= 30; i++) {
+      const id = `gp-${i}`;
+      many.push(dev(id, `CRO-${String(i).padStart(2, "0")}`, "control-networking", i % 2 ? "lv-cat" : "lv-stage"));
+      mw.push(wire(`m${i}`, "gp-h", id, i % 3 ? "dmx" : "net"));
+    }
+    let md = M.emptyConduitRiserDoc();
+    for (const sgn of S.suggestions(md, mw).items) md = S.acceptSuggestion(md, sgn, makeId).doc;
+    const mv = D.deriveView({ doc: md, devices: many, wires: mw, levels, wireTypes: wt }).details[0];
+    const ml = L.layoutDetail(mv, md);
+    const tagsById = new Map(ml.items.map((it) => [it.key, it]));
+    let crossings = 0;
+    for (const r of ml.runs) {
+      const vr = mv.runs.find((x) => x.run.id === r.runId)!;
+      const mine = new Set([vr.a, vr.b].map((e) => L.endKey(e)));
+      for (let i = 1; i < r.path.length; i++) {
+        const [p, q] = [r.path[i - 1], r.path[i]];
+        for (const [k, it] of tagsById) {
+          if (mine.has(k)) continue;
+          const x0 = Math.min(p.x, q.x), x1 = Math.max(p.x, q.x), y0 = Math.min(p.y, q.y), y1 = Math.max(p.y, q.y);
+          if (x0 < it.rect.x + it.rect.w - 1e-6 && x1 > it.rect.x + 1e-6 && y0 < it.rect.y + it.rect.h - 1e-6 && y1 > it.rect.y + 1e-6) crossings++;
+        }
+      }
+    }
+    ok(crossings === 0 && ml.w < 25, `#321 30 home runs: no conduit runs through another tag (${crossings} crossings), rows wrap inside the sheet (${ml.w}" wide)`);
+  }
+  {
+    const long = G.composeSheets({ details: [], tables: [], notes: [{ id: "n", n: 1, text: "word ".repeat(120) }], area: { w: 33, h: 21 } })[0].geo;
+    const texts = long.filter((x) => x.t === "text").map((x) => (x.t === "text" ? x.s : ""));
+    ok(texts.length > 3 && texts.every((t) => t.length <= 90) && G.fitText("ETC RESPONSE MK2 GATEWAY 8 PORT TERMINAL WITH POE", 1, 0.06).endsWith("...") &&
+       !SV.escapeXml("A\u000bB<").includes("\u000b") && SV.escapeXml("A\u000bB<") === "AB&lt;",
+      "#321 long notes wrap, an over-long table cell is cut with '...', and XML-illegal control characters are stripped from the SVG");
+  }
 }

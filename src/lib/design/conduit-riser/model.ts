@@ -48,7 +48,9 @@ export type RiserDetail = {
   /** Detail number as printed: "1", "1.1", "2". */
   n: string;
   name: string;
-  /** Spaces this detail covers; [] = every space. */
+  /** true = every space (the default detail). Otherwise only `spaceIds` —
+   *  an emptied list covers nothing rather than silently becoming "all". */
+  allSpaces: boolean;
   spaceIds: string[];
 };
 
@@ -88,6 +90,8 @@ export const CR_CAPS = {
   powerTypes: 20,
   notes: 100,
   alwaysShow: 30,
+  /** Dragged level lines kept per detail. */
+  levelsPerDetail: 50,
 } as const;
 
 const LIMIT = { id: 100, n: 8, name: 60, label: 60, size: 12, note: 500, letter: 2, ptType: 40, ptText: 60 } as const;
@@ -117,7 +121,13 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 export function crText(v: unknown, max: number): string {
   return typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
 }
-const idOf = (v: unknown) => crText(v, LIMIT.id);
+/** Keys that are properties of every object — never usable as a map key. */
+const RESERVED = new Set(["__proto__", "constructor", "prototype", "toString", "valueOf", "hasOwnProperty"]);
+const idOf = (v: unknown) => {
+  const s = crText(v, LIMIT.id);
+  return RESERVED.has(s) ? "" : s;
+};
+const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const inches = (v: unknown): number | null => {
   const n = num(v);
@@ -141,7 +151,7 @@ export function sameEnd(x: RunEnd, y: RunEnd): boolean {
 export function emptyConduitRiserDoc(): ConduitRiserDoc {
   return {
     system: "lighting",
-    details: [{ id: "dt-main", n: "1", name: DEFAULT_DETAIL_NAME, spaceIds: [] }],
+    details: [{ id: "dt-main", n: "1", name: DEFAULT_DETAIL_NAME, allSpaces: true, spaceIds: [] }],
     tags: {},
     stubs: [],
     runs: [],
@@ -216,7 +226,10 @@ function cleanDetail(v: unknown): RiserDetail | null {
   const id = idOf(v.id);
   const name = crText(v.name, LIMIT.name);
   if (!id || !name) return null;
-  return { id, n: crText(v.n, LIMIT.n) || "1", name, spaceIds: cleanIds(v.spaceIds, 500) };
+  const spaceIds = cleanIds(v.spaceIds, 500);
+  // Older/hand-shaped detail without the flag: an empty list meant "all".
+  const allSpaces = typeof v.allSpaces === "boolean" ? v.allSpaces : spaceIds.length === 0;
+  return { id, n: crText(v.n, LIMIT.n) || "1", name, allSpaces, spaceIds: allSpaces ? [] : spaceIds };
 }
 
 function cleanStub(v: unknown): RiserStub | null {
@@ -320,6 +333,7 @@ export function normalizeConduitRiserDoc(raw: unknown): ConduitRiserDoc {
       if (!detailIds.has(dk) || !isObj(row)) continue;
       const out: Record<string, number> = {};
       for (const [lk, y] of Object.entries(row)) {
+        if (Object.keys(out).length >= CR_CAPS.levelsPerDetail) break;
         const id = idOf(lk);
         const v = inches(y);
         if (id && v !== null) out[id] = v;
@@ -368,6 +382,11 @@ export type LiveIds = {
   routeIds: ReadonlySet<string>;
   linkIds: ReadonlySet<string>;
   spaceIds: ReadonlySet<string>;
+  /** Project levels — dragged positions of deleted levels are dropped. */
+  levelIds?: ReadonlySet<string>;
+  /** Each live wire's device pair ("route:wr-1" → pairKey, null when an end
+   *  is free). A member wire re-snapped to other devices leaves its run. */
+  wireEnds?: ReadonlyMap<string, string | null>;
 };
 
 /**
@@ -386,8 +405,10 @@ export function pruneConduitRiser(doc: ConduitRiserDoc, live: LiveIds): ConduitR
       changed = true;
       continue;
     }
-    const routeIds = r.routeIds.filter((id) => live.routeIds.has(id));
-    const linkIds = r.linkIds.filter((id) => live.linkIds.has(id));
+    const pair = runPairKey(r);
+    const matches = (key: string) => !live.wireEnds || !pair || live.wireEnds.get(key) === pair;
+    const routeIds = r.routeIds.filter((id) => live.routeIds.has(id) && matches(`route:${id}`));
+    const linkIds = r.linkIds.filter((id) => live.linkIds.has(id) && matches(`link:${id}`));
     if (routeIds.length !== r.routeIds.length || linkIds.length !== r.linkIds.length) {
       changed = true;
       runs.push({ ...r, routeIds, linkIds });
@@ -409,15 +430,26 @@ export function pruneConduitRiser(doc: ConduitRiserDoc, live: LiveIds): ConduitR
     if (!keep) changed = true;
     return keep;
   });
-  return changed ? { ...doc, runs, tags, details, dismissed } : doc;
+  let levelY = doc.levelY;
+  if (live.levelIds) {
+    const next: Record<string, Record<string, number>> = {};
+    for (const [dk, row] of Object.entries(doc.levelY)) {
+      const kept = Object.fromEntries(Object.entries(row).filter(([lk]) => live.levelIds!.has(lk)));
+      if (Object.keys(kept).length !== Object.keys(row).length) changed = true;
+      if (Object.keys(kept).length) next[dk] = kept;
+    }
+    levelY = next;
+  }
+  return changed ? { ...doc, runs, tags, details, dismissed, levelY } : doc;
 }
 
 export type CROp =
   | { op: "moveTag"; placementId: string; x: number; y: number; detailId: string }
   | { op: "unpinTag"; placementId: string }
-  | { op: "resetLayout"; detailId: string }
-  | { op: "addDetail"; name: string; spaceIds: string[] }
-  | { op: "updateDetail"; id: string; name?: string; n?: string; spaceIds?: string[] }
+  /** `runIds` = the runs the derived view draws in this detail (their lanes reset too). */
+  | { op: "resetLayout"; detailId: string; runIds?: string[] }
+  | { op: "addDetail"; name: string; allSpaces: boolean; spaceIds: string[] }
+  | { op: "updateDetail"; id: string; name?: string; n?: string; allSpaces?: boolean; spaceIds?: string[] }
   | { op: "removeDetail"; id: string }
   | { op: "addStub"; label: string; detailId: string }
   | { op: "updateStub"; id: string; label?: string; x?: number; y?: number }
@@ -478,11 +510,11 @@ export function patchConduitRiser(
       const x = inches(op.x);
       const y = inches(op.y);
       if (!placementIds.has(op.placementId) || x === null || y === null || !hasDetail(op.detailId)) return same;
-      if (!doc.tags[op.placementId] && Object.keys(doc.tags).length >= CR_CAPS.tags) return same;
+      if (!own(doc.tags, op.placementId) && Object.keys(doc.tags).length >= CR_CAPS.tags) return same;
       return ok({ ...doc, tags: { ...doc.tags, [op.placementId]: { x, y, detailId: op.detailId } } });
     }
     case "unpinTag": {
-      if (!doc.tags[op.placementId]) return same;
+      if (!own(doc.tags, op.placementId)) return same;
       const tags = { ...doc.tags };
       delete tags[op.placementId];
       return ok({ ...doc, tags });
@@ -493,10 +525,13 @@ export function patchConduitRiser(
       const stubs = doc.stubs.map((s) => (s.detailId === op.detailId ? { id: s.id, label: s.label, detailId: s.detailId } : s));
       const levelY = { ...doc.levelY };
       delete levelY[op.detailId];
-      const inDetail = new Set([...Object.keys(doc.tags).filter((k) => doc.tags[k].detailId === op.detailId)]);
+      const inDetail = new Set(Object.keys(doc.tags).filter((k) => doc.tags[k].detailId === op.detailId));
+      const listed = new Set(cleanIds(op.runIds, CR_CAPS.runs));
       const runs = doc.runs.map((r) => {
         if (r.laneX === undefined) return r;
-        const touches = [r.a, r.b].some((e) => (e.kind === "placement" ? inDetail.has(e.placementId) : stubs.some((s) => s.id === e.stubId && s.detailId === op.detailId)));
+        const touches =
+          listed.has(r.id) ||
+          [r.a, r.b].some((e) => (e.kind === "placement" ? inDetail.has(e.placementId) : stubs.some((s) => s.id === e.stubId && s.detailId === op.detailId)));
         if (!touches) return r;
         const { laneX: _drop, ...rest } = r;
         void _drop;
@@ -507,7 +542,8 @@ export function patchConduitRiser(
     case "addDetail": {
       const name = crText(op.name, LIMIT.name);
       if (!name || doc.details.length >= CR_CAPS.details) return same;
-      const detail: RiserDetail = { id: makeId("dt-"), n: nextDetailN(doc.details), name, spaceIds: cleanIds(op.spaceIds, 500) };
+      const all = op.allSpaces === true;
+      const detail: RiserDetail = { id: makeId("dt-"), n: nextDetailN(doc.details), name, allSpaces: all, spaceIds: all ? [] : cleanIds(op.spaceIds, 500) };
       return ok({ ...doc, details: [...doc.details, detail] });
     }
     case "updateDetail": {
@@ -524,7 +560,9 @@ export function patchConduitRiser(
         if (!n) return same;
         next.n = n;
       }
+      if (op.allSpaces !== undefined) next.allSpaces = op.allSpaces === true;
       if (op.spaceIds !== undefined) next.spaceIds = cleanIds(op.spaceIds, 500);
+      if (next.allSpaces) next.spaceIds = [];
       return ok({ ...doc, details: doc.details.map((d) => (d.id === op.id ? next : d)) });
     }
     case "removeDetail": {
@@ -612,13 +650,14 @@ export function patchConduitRiser(
     }
     case "moveLevel": {
       if (!hasDetail(op.detailId) || !idOf(op.levelId)) return same;
-      const row = { ...(doc.levelY[op.detailId] || {}) };
+      const row = { ...(own(doc.levelY, op.detailId) ? doc.levelY[op.detailId] : {}) };
       if (op.y === null) {
-        if (!(op.levelId in row)) return same;
+        if (!own(row, op.levelId)) return same;
         delete row[op.levelId];
       } else {
         const y = inches(op.y);
         if (y === null) return same;
+        if (!own(row, op.levelId) && Object.keys(row).length >= CR_CAPS.levelsPerDetail) return same;
         row[op.levelId] = y;
       }
       const levelY = { ...doc.levelY };

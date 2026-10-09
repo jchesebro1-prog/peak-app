@@ -23,7 +23,7 @@ export const LINE_SOLID = "\u0000solid";
 export const LINE_DASHED = "\u0000dashed";
 
 const U = (s: string) => s.toUpperCase();
-const byNum = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+const byNum = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
 
 export function riserTables(input: {
   view: CRView;

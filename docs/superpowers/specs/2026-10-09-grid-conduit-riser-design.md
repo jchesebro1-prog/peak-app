@@ -374,11 +374,22 @@ Grid view permission, `Content-Disposition: attachment`.
 3. **Signal bubbles and the size label sit at the device end**, beside the
    drop into each tag (bubbles left, size right) — Bray's look, and it keeps
    the head-end bundle uncluttered. Chain hops print the size below the line.
-4. **Priced conduit length = the longest member wire** (measured route or
-   typed link alike), else the typed run length.
+4. **Priced conduit length = the run's typed length, else its longest member
+   wire** (a measured route and a typed link count alike).
 5. **A stub follows its device**: a stub whose run ends on a device in
    another detail is drawn in that device's detail.
-6. **The engine takes a plain input** (`input.ts`: devices with their
+6. **A detail carries `allSpaces`.** `spaceIds: []` alone was ambiguous — a
+   scoped detail whose spaces were all deleted would have become "every
+   space" and swallowed every device. Now an emptied scoped detail covers
+   nothing; the default detail is `allSpaces: true`.
+7. **A cable-management run never prices conduit** — the line legend says
+   it's provided by others.
+8. **A member wire re-snapped to other devices leaves its run**: derive and
+   suggestions ignore it in the old run, and `pruneConduitRiser` drops it
+   when the store passes each wire's device pair (`wireEnds`).
+9. **Reset layout takes the detail's run ids** from the view, so lanes on
+   runs between unpinned tags reset too.
+10. **The engine takes a plain input** (`input.ts`: devices with their
    display designator already formatted, wires with signal + length) — it
    never imports #320 or a store, so it builds and tests ahead of #320.
 

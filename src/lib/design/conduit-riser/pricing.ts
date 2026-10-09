@@ -17,13 +17,22 @@ export function effectivePricing(run: ConduitRun, defaults: ConduitRiserDefaults
   return { wire: run.priceWire ?? defaults.priceWire, conduit: run.priceConduit ?? defaults.priceConduit };
 }
 
+/** A run whose device ends still exist (callers normally pass a pruned doc;
+ *  this keeps an unpruned one from pricing a ghost). */
+const runLive = (r: ConduitRun, placementIds?: ReadonlySet<string>) =>
+  !placementIds || [r.a, r.b].every((e) => e.kind === "stub" || placementIds.has(e.placementId));
+
 /** Wire ids (routes and links) that are by others — excluded from priced footage. */
-export function wireByOthers(doc: ConduitRiserDoc, estimateOwned: boolean): { routeIds: Set<string>; linkIds: Set<string> } {
+export function wireByOthers(
+  doc: ConduitRiserDoc,
+  estimateOwned: boolean,
+  placementIds?: ReadonlySet<string>
+): { routeIds: Set<string>; linkIds: Set<string> } {
   const routeIds = new Set<string>();
   const linkIds = new Set<string>();
   if (estimateOwned) return { routeIds, linkIds };
   for (const r of doc.runs) {
-    if (effectivePricing(r, doc.defaults).wire) continue;
+    if (!runLive(r, placementIds) || effectivePricing(r, doc.defaults).wire) continue;
     r.routeIds.forEach((id) => routeIds.add(id));
     r.linkIds.forEach((id) => linkIds.add(id));
   }
@@ -54,6 +63,7 @@ export function conduitDemand(input: {
   wires: readonly CRWire[];
   sizes: readonly ConduitSize[];
   labelOf: (e: RunEnd) => string;
+  placementIds?: ReadonlySet<string>;
 }): ConduitDemand {
   if (input.estimateOwned) return { lines: [], refusals: [] };
   const wireByKey = new Map(input.wires.map((w) => [`${w.kind}:${w.id}`, w]));
@@ -62,7 +72,8 @@ export function conduitDemand(input: {
   const unmapped = new Set<string>();
   const refusals: string[] = [];
   for (const run of input.doc.runs) {
-    if (!effectivePricing(run, input.doc.defaults).conduit) continue;
+    // Cable management is provided by others — never conduit on our quote.
+    if (run.style === "cableMgmt" || !runLive(run, input.placementIds) || !effectivePricing(run, input.doc.defaults).conduit) continue;
     const partId = partBySize.get(run.size);
     if (!partId) {
       unmapped.add(run.size);

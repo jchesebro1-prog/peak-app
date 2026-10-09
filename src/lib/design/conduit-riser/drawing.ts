@@ -116,6 +116,34 @@ export function detailGeometry(layout: DetailLayout, view: ViewDetail): { geo: G
 }
 
 const ROW_H = 0.17;
+/** Average Arial character width per inch of cap height (the SVG draws at 1.4 × h). */
+const CHAR_W = 1.4 * 0.55;
+
+/** Text cut to fit `width` inches at cap height `h`, ending "..." when cut. */
+export function fitText(s: string, width: number, h: number): string {
+  const max = Math.max(3, Math.floor(width / (h * CHAR_W)));
+  return s.length <= max ? s : `${s.slice(0, max - 3).trimEnd()}...`;
+}
+
+/** Word-wrap to lines of at most `max` characters (a longer word is hard-cut). */
+export function wrapText(s: string, max: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const word of s.split(/\s+/).filter(Boolean)) {
+    for (let w = word; w; ) {
+      const piece = w.slice(0, max);
+      w = w.slice(max);
+      if (!line) line = piece;
+      else if (line.length + 1 + piece.length <= max) line += ` ${piece}`;
+      else {
+        out.push(line);
+        line = piece;
+      }
+    }
+  }
+  if (line) out.push(line);
+  return out.length ? out : [""];
+}
 const HEAD_H = 0.18;
 const TITLE_H = 0.22;
 
@@ -137,7 +165,7 @@ export function tableGeometry(t: TableModel, at: Pt): { geo: Geo[]; w: number; h
       if (cell === LINE_SOLID || cell === LINE_DASHED) {
         geo.push({ t: "line", a: { x: r4(x + 0.08), y: r4(top + h / 2) }, b: { x: r4(x + cw - 0.08), y: r4(top + h / 2) }, layer: "TABLE", dashed: cell === LINE_DASHED || undefined });
       } else if (cell) {
-        geo.push({ t: "text", at: { x: r4(x + 0.05), y: r4(top + h / 2) }, s: cell, h: size, anchor: "start", layer: "TABLE" });
+        geo.push({ t: "text", at: { x: r4(x + 0.05), y: r4(top + h / 2) }, s: fitText(cell, cw - 0.1, size), h: size, anchor: "start", layer: "TABLE" });
       }
       x += cw;
     });
@@ -198,11 +226,14 @@ export function composeSheets(input: {
     return { geo: probe.geo, w: probe.w, h: probe.h, place: (x, yy) => tableGeometry(t, { x, y: yy }).geo };
   });
   if (input.notes.length) {
-    const lines = input.notes.map((n) => `${n.n}. ${U(n.text)}`);
+    const NOTE_W = 4;
+    const lines = input.notes.flatMap((n) =>
+      wrapText(`${n.n}. ${U(n.text)}`, Math.floor(NOTE_W / (0.06 * CHAR_W))).map((l, i) => (i === 0 ? l : `    ${l}`))
+    );
     const h = TITLE_H + lines.length * ROW_H;
     blocks.push({
       geo: [],
-      w: 4,
+      w: NOTE_W,
       h,
       place: (x, yy) => [
         { t: "text", at: { x, y: r4(yy + 0.09) }, s: "GENERAL NOTES", h: 0.1, anchor: "start", layer: "TEXT" } as Geo,

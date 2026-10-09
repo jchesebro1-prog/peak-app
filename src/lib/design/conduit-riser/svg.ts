@@ -11,7 +11,8 @@ const U = 100;
 const n = (v: number) => String(Math.round(v * U * 100) / 100);
 
 export function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // XML 1.0 forbids most C0 controls — a stray one from an import would break the SVG.
+  return s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 const STROKE: Record<string, string> = {

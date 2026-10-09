@@ -4,7 +4,7 @@
  * signals, oriented head-end-first. Pure; no layout, no geometry.
  */
 
-import { compareDetailN, type ConduitRiserDoc, type ConduitRun, type RiserDetail, type RiserStub, type RunEnd } from "./model";
+import { compareDetailN, pairKey, runPairKey, type ConduitRiserDoc, type ConduitRun, type RiserDetail, type RiserStub, type RunEnd } from "./model";
 import type { CRDevice, CRLevel, CRSignal, CRWire, CRWireType } from "./input";
 
 export type ViewEnd =
@@ -52,7 +52,15 @@ export type DeriveInput = {
 
 export const UNLEVELLED_ID = "__unlevelled";
 
-const byLabel = (a: CRDevice, b: CRDevice) => a.label.localeCompare(b.label, undefined, { numeric: true }) || a.id.localeCompare(b.id);
+/** Does a member wire still join this run's two devices? (A stub run has no pair to check.) */
+export function wireFits(run: ConduitRun, w: CRWire): boolean {
+  const pair = runPairKey(run);
+  return !pair || (!!w.from && !!w.to && pairKey(w.from, w.to) === pair);
+}
+
+/** Fixed locale so the browser editor and the server's DXF sort identically. */
+export const byNumeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
+const byLabel = (a: CRDevice, b: CRDevice) => byNumeric(a.label, b.label) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function deriveView(input: DeriveInput): CRView {
   const { doc } = input;
@@ -76,7 +84,7 @@ export function deriveView(input: DeriveInput): CRView {
   const detailOf = new Map<string, string>();
   for (const id of tagged) {
     const dev = deviceById.get(id)!;
-    const hit = details.find((d) => d.spaceIds.length === 0 || (dev.spaceId !== null && d.spaceIds.includes(dev.spaceId)));
+    const hit = details.find((d) => d.allSpaces || (dev.spaceId !== null && d.spaceIds.includes(dev.spaceId)));
     if (hit) detailOf.set(id, hit.id);
     else warnings.push(`${dev.label} is in no detail — add its space to one`);
   }
@@ -102,7 +110,8 @@ export function deriveView(input: DeriveInput): CRView {
     // in another detail becomes a "TO <label>" ref.
     const local = runs.filter((r) => endDetail(r.a) === detail.id || endDetail(r.b) === detail.id);
     const toView = (e: RunEnd, other: RunEnd): ViewEnd => {
-      if (endDetail(e) !== detail.id) return { kind: "ref", key: `${detail.id}:${endLabel(e)}:${endLabel(other)}`, label: `TO ${endLabel(e)}` };
+      // A stub already reads "TO …"; a device in another detail becomes "TO <ID>".
+      if (endDetail(e) !== detail.id) return { kind: "ref", key: `${detail.id}:${endLabel(e)}:${endLabel(other)}`, label: e.kind === "stub" ? endLabel(e) : `TO ${endLabel(e)}` };
       return e.kind === "placement" ? { kind: "tag", id: e.placementId } : { kind: "stub", id: e.stubId };
     };
 
@@ -146,10 +155,11 @@ export function deriveView(input: DeriveInput): CRView {
       const da = dist.get(endKey(a)) ?? Infinity;
       const db = dist.get(endKey(b)) ?? Infinity;
       if (db < da) [a, b] = [b, a];
+      // A member re-snapped to other devices no longer belongs to this conduit.
       const members = [
         ...run.routeIds.map((id) => wireByKey.get(`route:${id}`)),
         ...run.linkIds.map((id) => wireByKey.get(`link:${id}`)),
-      ].filter((w): w is CRWire => !!w);
+      ].filter((w): w is CRWire => !!w && wireFits(run, w));
       const sig = new Map<string, CRSignal>();
       const unknown = new Set<string>();
       for (const w of members) {

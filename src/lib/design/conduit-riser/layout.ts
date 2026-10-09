@@ -95,7 +95,7 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
     adj.set(b, [...(adj.get(b) || []), a]);
   }
   const labelOf = (k: string) => pending.get(k)?.label ?? k;
-  const cmp = (a: string, b: string) => labelOf(a).localeCompare(labelOf(b), undefined, { numeric: true }) || a.localeCompare(b);
+  const cmp = (a: string, b: string) => labelOf(a).localeCompare(labelOf(b), "en", { numeric: true }) || (a < b ? -1 : a > b ? 1 : 0);
   const order = new Map<string, number>();
   const headKey = d.headEndId ? `tag:${d.headEndId}` : null;
   const visit = (start: string) => {
@@ -120,6 +120,14 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
   const headRuns = headKey ? d.runs.filter((r) => endKey(r.a) === headKey) : [];
   const trunkReserve = headKey ? TAG_W + TRUNK + headRuns.length * LANE + 0.3 : 0;
   const pinnedRects = [...pending.values()].filter((p) => p.pinned).map((p) => p.pinned!);
+  // Room for the buses that turn beside a band's rows: one lane per run that
+  // ends in the band (an upper bound), so a bus never runs through a tag.
+  const into = new Map<string, number>();
+  for (const r of d.runs) {
+    const b = pending.get(endKey(r.b));
+    if (b) into.set(b.level, (into.get(b.level) || 0) + 1);
+  }
+  const clearance = (band: string) => BUS_GAP + (into.get(band) || 0) * LANE + 0.15;
   const placed = new Map<string, LaidItem>();
   const levels: LaidLevel[] = [];
   let cursor = MARGIN;
@@ -135,7 +143,7 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
     } else if (headKey) x = MARGIN + trunkReserve;
     const rowStart = x;
     for (const p of items) {
-      if (x + p.w > MAX_ROW_W && x > rowStart) {
+      if (x + p.w > rowStart + MAX_ROW_W && x > rowStart) {
         row++;
         x = rowStart;
       }
@@ -143,12 +151,15 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
       x += p.w + GAP_X;
     }
     const rows = rel.length ? Math.max(...rel.map((r) => r.row)) + 1 : 1;
-    const bandH = PAD_TOP + rows * TAG_H + (rows - 1) * ROW_GAP + PAD_BOTTOM;
+    const c = clearance(band);
+    const padTop = Math.max(PAD_TOP, c);
+    const rowGap = Math.max(ROW_GAP, c);
+    const bandH = padTop + rows * TAG_H + (rows - 1) * rowGap + Math.max(PAD_BOTTOM, c);
     const stored = band !== UNLEVELLED_ID ? doc.levelY[detailId]?.[band] : undefined;
     const lineY = stored ?? cursor + bandH;
     const top = lineY - bandH;
     for (const { p, x: rx, row: rr } of rel) {
-      const rowY = top + PAD_TOP + rr * (TAG_H + ROW_GAP);
+      const rowY = top + padTop + rr * (TAG_H + rowGap);
       // A stub's middle lines up with a tag's location row, so a hop between them is level.
       let rect: Rect = { x: rx, y: p.kind === "tag" ? rowY : rowY + TAG_HEAD + TAG_MID / 2 - p.h / 2, w: p.w, h: p.h };
       // Step around pinned items (and anything already placed).
@@ -219,7 +230,11 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
       path = rightward ? [{ x: right(A.rect), y: ya }, { x: end, y: ya }] : [{ x: A.rect.x, y: ya }, { x: end, y: ya }];
       sizeAt = { x: (path[0].x + end) / 2, y: ya + 0.08 };
       sizeAnchor = "middle";
-      bubbles = symbols.map((symbol, i) => ({ c: { x: rightward ? end - 0.12 - i * 0.17 : end + 0.12 + i * 0.17, y: ya - 0.13 }, symbol }));
+      // Centred over the hop; too many for the gap → lifted above the tags.
+      const mid = (path[0].x + end) / 2;
+      const fits = symbols.length * 0.17 <= Math.abs(end - path[0].x) - 0.06;
+      const by = fits ? ya - 0.13 : Math.min(A.rect.y, B.rect.y) - 0.1;
+      bubbles = symbols.map((symbol, i) => ({ c: { x: mid - (symbols.length - 1) * 0.085 + i * 0.17, y: by }, symbol }));
     } else {
       const slot = busSlot.get(r.run.id) || 0;
       const dropX = B.rect.x + B.rect.w / 2;
