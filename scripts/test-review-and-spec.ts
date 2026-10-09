@@ -59987,7 +59987,7 @@ async function sheetAdjust318UiPins(): Promise<void> {
      dlg.includes('{afterUpload ? "Skip" : "Cancel"}') && dlg.includes("Same for all pages") && dlg.includes("rotateBy={cur.rotate}") && !dlg.includes("blobPath"),
     "#318 pin: the dialog shows the ROOT file with the current spec, saves only a real change, and Skip/Cancel leaves the sheet as is");
   const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
-  ok(hook.includes("openAdjust(r.sheetId, true, r.sheetIds);") && /if \(requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && sheets\.some\(\(s\) => s\.id === requestedIds\[0\]\)\) \{\s*setAdjustApplied\(requestedAdjust\);/.test(hook) &&
+  ok(hook.includes("openAdjust(r.sheetId, true, r.sheetIds);") && /if \(requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && !adjusting && sheets\.some\(\(s\) => s\.id === requestedIds\[0\]\)\) \{\s*setAdjustApplied\(requestedAdjust\);/.test(hook) &&
      hook.includes("if (s.base) return { hidden: true, disabled: true, title: \"\" };") && !hook.includes("blobPath"),
     "#318 pin: an upload opens Adjust sheet; ?adjust= is adopted during render once the sheet arrives; never on the base sheet");
   const tabs = rd("src/app/(app)/design/grid/[id]/workspace/sheet-tabs.tsx");
@@ -60671,4 +60671,15 @@ async function pagesAsSheets319UiPins(): Promise<void> {
     "#319 pin: both upload paths answer one result shape (sheetIds + baseSheet + note)");
   const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
   ok(!acts.includes("planSheetId?: string") && acts.includes("planSheetIds?: string[]"), "#319 pin: the intake save answers planSheetIds only");
+  // Review fix: ?adjust= is adopted ONCE — keyed on the raw param (the filtered list shrinks as Done
+  // retires sheets) and never while a walk/dialog is open; the walk's end drops the param.
+  ok(hook.includes("const requestedAdjust = requestedIds ? (props.adjustKey || requestedIds.join(\",\")) : null;") &&
+     /requestedAdjust !== adjustApplied && !adjusting && sheets\.some/.test(hook) && hook.includes("adjustKey?: string | null;"),
+    "#319 fix: ?adjust= is adopted once (raw-param key) and never re-adopted while Adjust sheet is open");
+  ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes('adjustKey={typeof requestedAdjust === "string" && requestedAdjust ? requestedAdjust : null}'),
+    "#319 fix: the page passes the raw ?adjust= as the adoption key");
+  const closeBody = hook.slice(hook.indexOf("const closeAdjustWith = useCallback("), hook.indexOf("const closeAdjust = useCallback("));
+  const finishBody = hook.slice(hook.indexOf("const finishAdjust = useCallback("), hook.indexOf("const adjustAvailability = useCallback("));
+  ok(/switchSheet\(nextId\);\s*return;[\s\S]*setAdjusting\(null\);\s*dropAdjustParam\(\);/.test(closeBody) && finishBody.includes("dropAdjustParam();"),
+    "#319 fix: the walk's end (Skip the rest, Skip/Escape on the last sheet, any Done) drops ?adjust= so a reload doesn't restart it");
 }

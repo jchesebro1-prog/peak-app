@@ -371,6 +371,9 @@ export type GridEditorProps = {
   blobUploads?: boolean;
   /** #318/#319: `?adjust=<id>,<id>,…` — the sheets the intake's plan view became, walked in Adjust sheet once the first is listed. */
   adjustSheetIds?: string[] | null;
+  /** #319: the raw `?adjust=` string — what adoption keys on. The filtered list above shrinks
+   *  as Done retires sheets (revalidate re-renders the same URL); this does not. */
+  adjustKey?: string | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -486,10 +489,12 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** #319: `queue` = every sheet one upload made (≥ 2, in order) — Adjust sheet walks them one at a time. */
   const [adjusting, setAdjusting] = useState<{ sheetId: string; afterUpload: boolean; queue?: string[] } | null>(null);
   const requestedIds = props.adjustSheetIds?.length ? props.adjustSheetIds : null;
-  /** The request as one string — a fresh array arrives every render. */
-  const requestedAdjust = requestedIds ? requestedIds.join(",") : null;
+  /** The request's adoption key: the raw param (stable while Done retires its sheets), never the filtered list. */
+  const requestedAdjust = requestedIds ? (props.adjustKey || requestedIds.join(",")) : null;
   const [adjustApplied, setAdjustApplied] = useState<string | null>(null);
-  if (requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && sheets.some((s) => s.id === requestedIds[0])) {
+  // Adopted once per param, and never while the dialog / a walk is open — a
+  // re-render mid-walk must not re-key the open (or Saving…) dialog.
+  if (requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && !adjusting && sheets.some((s) => s.id === requestedIds[0])) {
     setAdjustApplied(requestedAdjust);
     setAdjusting({ sheetId: requestedIds[0], afterUpload: true, ...(requestedIds.length > 1 ? { queue: requestedIds } : {}) });
     setSelectedIds([]);
@@ -503,6 +508,9 @@ function useGridEditorImpl(props: GridEditorProps) {
     setAdjustSwap(null);
     const nextId = adjustQueueStep(adjusting?.queue, adjustSwap.from, sheets.map((s) => s.id)).next;
     if (adjusting?.queue && nextId) {
+      // No resetSheetState() here (not callable during render, and not needed):
+      // finishAdjust already reset the sheet state on Done, and the workspace has
+      // been inert under the Saving… dialog ever since, so nothing new accrued.
       setAdjusting({ sheetId: nextId, afterUpload: true, queue: adjusting.queue });
       setActiveSheetId(nextId);
       setPage(1);

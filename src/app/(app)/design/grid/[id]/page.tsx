@@ -379,6 +379,8 @@ export default async function GridEditorPage({
       focusSheetId={project.intake?.planSheetId && (project.sheetIds || []).includes(project.intake.planSheetId) ? project.intake.planSheetId : null}
       blobUploads={blobEnabled()}
       adjustSheetIds={parseAdjustParam(requestedAdjust, project.sheetIds || [])}
+      // #319: the RAW ?adjust= is the adoption key — the list above shrinks as Done retires sheets.
+      adjustKey={typeof requestedAdjust === "string" && requestedAdjust ? requestedAdjust : null}
     />
     </CanMapProvider>
   );
