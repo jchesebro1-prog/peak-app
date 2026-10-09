@@ -59684,4 +59684,30 @@ async function sheetAdjust318BytesChecks(): Promise<void> {
   const mg = rg.ok ? await sharp(rg.bytes).metadata() : null;
   ok(B.sheetKindOf(gif) === "image/gif" && rg.ok && rg.mime === "image/png" && mg?.format === "png" && mg?.width === 200 && mg?.height === 200,
     "#318 a GIF is read and comes back as a PNG");
+  // Review round 1: an encrypted PDF is "encrypted" (pdf-lib's error class name is just "Error", so the message decides).
+  const plain = await PDFDocument.create();
+  plain.addPage([100, 100]);
+  const plainText = Buffer.from(await plain.save()).toString("latin1");
+  const rootAt = plainText.lastIndexOf("/Root");
+  const encText = plainText.slice(0, rootAt) + "/Encrypt << /Filter /Standard /V 1 /R 2 /O <" + "00".repeat(32) + "> /U <" + "00".repeat(32) + "> /P -4 >> /Root" + plainText.slice(rootAt + 5);
+  const enc = await B.adjustSheetBytes(Buffer.from(encText, "latin1"), { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+  ok(rootAt > 0 && !enc.ok && enc.reason === "encrypted", "#318 an encrypted PDF is refused as encrypted (not just unreadable)");
+  // EXIF orientation 6 then a 90 turn: 40 x 20 stored -> 20 x 40 shown -> 40 x 20 after the turn; corners follow the pixels.
+  const quad = Buffer.alloc(40 * 20 * 3);
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 40; x++) {
+    const i = (y * 40 + x) * 3;
+    const col = x < 20 ? (y < 10 ? [255, 0, 0] : [0, 0, 255]) : y < 10 ? [0, 255, 0] : [255, 255, 255];
+    quad[i] = col[0]; quad[i + 1] = col[1]; quad[i + 2] = col[2];
+  }
+  const jpgQ = await sharp(quad, { raw: { width: 40, height: 20, channels: 3 } }).jpeg({ quality: 100, chromaSubsampling: "4:4:4" }).withMetadata({ orientation: 6 }).toBuffer();
+  const rq = await B.adjustSheetBytes(jpgQ, { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+  const pq = rq.ok ? await sharp(rq.bytes).raw().toBuffer({ resolveWithObject: true }) : null;
+  const corner = (x: number, y: number) => (pq ? [...pq.data.subarray((y * pq.info.width + x) * pq.info.channels, (y * pq.info.width + x) * pq.info.channels + 3)] : [-999, -999, -999]);
+  const closeTo = (c: number[], want: number[]) => c.every((v, k) => Math.abs(v - want[k]) < 40);
+  ok(rq.ok && pq?.info.width === 40 && pq?.info.height === 20 && closeTo(corner(1, 1), [255, 255, 255]) && closeTo(corner(38, 1), [0, 0, 255]) && closeTo(corner(38, 18), [255, 0, 0]) && closeTo(corner(1, 18), [0, 255, 0]),
+    "#318 EXIF orientation 6 + a 90 turn: 40 x 20 and the corners land where the pixels went (white, blue / green, red)");
+  // An image over SHRINK_MAX_INPUT_PIXELS is "too-big", not "unreadable" (a solid colour PNG is small to build and to hold).
+  const bigPng = await sharp({ create: { width: 10001, height: 10001, channels: 3, background: "#ffffff" } }).png().toBuffer();
+  const rbig = await B.adjustSheetBytes(bigPng, { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+  ok(!rbig.ok && rbig.reason === "too-big", "#318 an image over the pixel cap is too-big");
 }

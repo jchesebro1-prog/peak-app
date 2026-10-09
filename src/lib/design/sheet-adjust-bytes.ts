@@ -13,7 +13,7 @@ import { SHRINK_MAX_INPUT_PIXELS } from "@/lib/part-docs/shrink";
 import { cropToPdfBox, cropToPixels, effectiveBox, pageAdjustOf, type AdjustPages } from "./sheet-adjust";
 
 export type SheetKind = "pdf" | "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-export type AdjustBytesResult = { ok: true; bytes: Uint8Array; mime: string } | { ok: false; reason: "unsupported" | "encrypted" | "unreadable" };
+export type AdjustBytesResult = { ok: true; bytes: Uint8Array; mime: string } | { ok: false; reason: "unsupported" | "encrypted" | "too-big" | "unreadable" };
 
 /** What a sheet's bytes really are (the stored mime is not trusted for this). */
 export function sheetKindOf(bytes: Uint8Array): SheetKind | null {
@@ -35,7 +35,9 @@ async function adjustPdf(bytes: Uint8Array, pages: AdjustPages): Promise<AdjustB
   try {
     doc = await PDFDocument.load(bytes, { updateMetadata: false });
   } catch (e) {
-    return { ok: false, reason: e instanceof Error && e.name === "EncryptedPDFError" ? "encrypted" : "unreadable" };
+    // pdf-lib 1.17 builds its errors with tslib's ES5 __extends(Error), so `e.name` is
+    // just "Error" — the class name never shows; its message is the only tell.
+    return { ok: false, reason: /encrypted/i.test(String((e as { message?: unknown } | null)?.message)) ? "encrypted" : "unreadable" };
   }
   try {
     const list = doc.getPages();
@@ -68,7 +70,8 @@ async function adjustImage(bytes: Uint8Array, kind: Exclude<SheetKind, "pdf">, p
     if (kind === "image/jpeg") return { ok: true, bytes: await img.jpeg({ quality: 92 }).toBuffer(), mime: "image/jpeg" };
     if (kind === "image/webp") return { ok: true, bytes: await img.webp({ quality: 90 }).toBuffer(), mime: "image/webp" };
     return { ok: true, bytes: await img.png().toBuffer(), mime: "image/png" };
-  } catch {
-    return { ok: false, reason: "unreadable" };
+  } catch (e) {
+    // sharp refuses an over-limit image with "Input image exceeds pixel limit".
+    return { ok: false, reason: /pixel limit/i.test(String((e as { message?: unknown } | null)?.message)) ? "too-big" : "unreadable" };
   }
 }
