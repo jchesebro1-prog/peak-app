@@ -11406,3 +11406,39 @@ the crosswalk: 377 rename, 0 skipped.
 
 **Open (minor, not blocking).** A row whose new `Brand:Model` SKU equals the part's current SKU reads "The SKU already is the
 model" and does not change the manufacturer.
+
+## 314. Design in the Grid from an estimate; plan view on the Grid intake — DONE 2026-10-09 (D685–D690)
+
+Jeff: draw plans from an estimate's BOM. Build package → `Design in the Grid →` starts (or opens) a Grid design linked to the
+estimate; the estimate keeps parts and prices.
+
+- **Button** (D685): Build package's Drawings controls; needs `create`, a saved, Estimator-built quote; one design per estimate
+  (advisory lock); `Open Grid design →` once linked; "Generate from Grid" tooltip now "Design in the Grid first.".
+- **Ownership** (D686): the base option is `estimateOwned`; every grid→quote write for the project is refused server-side
+  (`createDraftQuoteAction` + the `setOptionQuote` backstop); the Grid shows `Open estimate →` instead of Add to quotes.
+- **Tray** (D687, D688): Product Library → From estimate; placed / needed per part, live from the saved quote; arm-to-place;
+  alternates & options in a collapsed list; renamed SKUs count once; Sync parts for parts not yet in the Grid library.
+- **Intake** (D689): prefilled from the quote, Blank only (Auto hidden and refused server-side).
+- **Plan view** (D690, every Grid design): optional plan PDF/image on the intake becomes the first sheet; on-file plans
+  (estimate Plans & risers, company Drawings) offered pre-attached and copied Blob to Blob; failures open the plan with a
+  warning + retry; base sheet still generated behind it; Auto fill finds the base sheet by id.
+
+**Files.** `src/app/(app)/estimator/grid-design-actions.ts`, `src/lib/design/estimate-tray.ts` (+ `-server.ts`),
+`src/lib/design/estimate-grid-link.ts`, `src/lib/design/grid-plan-intake.ts` (+ `-server.ts`),
+`src/app/(app)/design/grid/[id]/workspace/estimate-tray.tsx`, `calibrate-prompt.tsx`; changes to the Grid page, intake,
+actions, Product Library, quote button, BOM panel, Outputs menu, `grid-projects.ts` (`linkOptionToEstimate`, `addSheet`
+`first`, `intake.baseSheetId`), `grid-options.ts` (`estimateOwned`, `estimateLinkOf`), `grid-auto-fill.ts`, `blob.ts`
+(`copyBlob`), the sheet upload route (`position=first`), the package panel and the Build package step. No migration.
+
+**Verification.** Gates: `tsc --noEmit`, scoped eslint, `test:specs` (new `#314` checks, fixture
+`docs/test-fixtures/314-estimate-tray.json`), `next build` — numbers in the session report. Not clicked locally: no upload or
+copy was exercised (next dev loads the real Blob token).
+
+**Jeff to try (on a preview deploy).** On a saved system estimate: Build package → Design in the Grid → (double-click it once);
+check the intake is prefilled and has no Auto; drop a plan PDF and continue — the plan should open first with the Calibrate
+scale prompt; place a few tray parts and watch the counts; try Add to quotes (it should read Open estimate →); then Generate
+from Grid on Build package. On a job with a plan in Plans & risers or company Drawings, check "Use plan from …" copies it.
+
+**Open (minor, not blocking).** The Designs dashboard still offers Add to Quotes → for an estimate-linked design (refused with
+the sentence) and prices its budget from the Grid BOM. The tray reads the SAVED quote — save the estimate before switching to
+the Grid. The upload route still trusts the declared file type (no magic-byte sniff), as before.

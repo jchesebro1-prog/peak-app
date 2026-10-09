@@ -10029,3 +10029,73 @@ stays "changed"; the catalog-saved message is dropped if the line is removed dur
 The Spec select left Build (the line rows and the Custom part form). It lives in a `Specs` card in Customer review's internal
 sidebar, for custom and curtain lines, saving through the same `specKey` path as before. The phone review has no sidebar, so
 Specs is desktop only.
+
+## D685. Design in the Grid from an estimate (#314, 2026-10-09)
+
+Build package (the Drawings controls of the staff package panel) gains `Design in the Grid →`, or `Open Grid design →` once a
+design draws the quote. It needs `create` (`requirePerm`), a saved quote, and a quote whose builder is the Estimator
+(`quoteQualifiesForGrid`: system quotes, Estimator-built portal quotes, Quick Design promotes, Grid quotes opened in the
+Estimator; never flame-test, repair, inspection, consulting or rental). Unsaved, the step shows the button disabled ("Save
+the estimate first."). The first click makes the design exactly like Design → New design (a Grid project + a manual-layout
+design record), named from the quote, with the quote's customer, contact and venue already linked; it then gives every
+placeable BOM part a Grid library entry. One design per estimate: the check-then-create runs under a per-quote advisory lock
+(`GRID_ESTIMATE_LOCK_NAMESPACE` 314), so a double-click opens the same design. A quote already minted from a Grid design opens
+that design instead. "Generate from Grid" reads "Design in the Grid first." until a design exists, and works unchanged after
+(it finds the design through the option's `quoteId`).
+
+## D686. The estimate owns parts and prices (#314, 2026-10-09)
+
+The design's base option carries `quoteId` = the estimate plus `estimateOwned: true` (`linkOptionToEstimate`). While a project
+has such an option (`estimateLinkOf`), the project is drawings-only: `createDraftQuoteAction` (the editor, the Designs
+dashboard and Home all land there) refuses with "This design draws estimate EST-xxxx — prices live in the Estimator.", and
+`setOptionQuote` refuses on its own as the store's backstop. The refusal covers every option of the project, not only the
+linked one (conservative: "that design" is drawings-only). The Grid's `Add to quotes` / `Create draft quote` become `Open
+estimate →`; Outputs names the estimate instead of "View in Quotes"; "Spec from this design" builds from the quote, not the
+Grid BOM. Copy and restore follow the existing `quoteId` rules: a copied option starts with no quote and no estimate link (it
+gets no tray, and still can't quote while the link exists); a revision restore keeps each option's current link, like
+`quoteId`. Removing the linked option removes the link. Known gap: the Designs dashboard still shows `Add to Quotes →` for
+such a design (the server refuses it with the sentence above), and its budget is still the Grid BOM's price.
+
+## D687. The From estimate tray (#314, 2026-10-09)
+
+The design opens with nothing placed. A `From estimate` entry tops the Product Library (selected by default); it lists the
+estimate's placeable lines read LIVE from the quote's saved spec on every editor load (unsaved Estimator edits are not seen).
+Each row: label, model · SKU, `placed / needed`, and "N to place" / "all placed" / "N over". Clicking a row arms the existing
+Place tool (painter mode, Esc stops); dragging drops one unit. Nothing is auto-placed. Rules (`src/lib/design/estimate-tray.ts`):
+materials systems only; left out and counted in a footnote — labor (and overhead/travel), allowances and vendor quotes,
+curtains (the Grid has its own curtain drop-in), blank or placeholder SKUs, per-length wire (drawn as a run), and SKUs the
+catalog can't place (fabric, Labor, unknown). Rows aggregate by the RESOLVED SKU: the catalog's #304 `renamedTo` resolution
+(`getManyBySku`) maps every SKU the lines and the placements name, so a renamed part counts once. Placed units count lot `qty`
+and skip curtain placements. Placed parts the estimate doesn't list show as a one-line "On the plan but not on the estimate"
+note. A row whose part has no Grid library entry is disabled; `Sync parts` (needs `create`) adds the entries.
+
+## D688. Alternates and add-options in the tray (#314, 2026-10-09)
+
+Lines in an Alternate group's systems and add-option lines (`option`) appear in a separate, collapsed "Alternates & options"
+list; everything else is In total and drives the "N of M placed" headline. Placements of a part fill its In-total need first,
+then its alternate need; past both, the In-total row (or the alternate row when the part is only an alternate) reports
+`overBy`.
+
+## D689. The short intake for an estimate-linked design (#314, 2026-10-09)
+
+The intake opens prefilled — title, customer, contact and venue from the quote (cover fields from the venue) — and starts on
+Blank: the Auto card is replaced by "Parts come from estimate EST-xxxx — place them from the From estimate tray." with a link to
+the estimate. The designer still picks the venue type and key dimensions, so the venue-template background is right.
+`saveGridIntakeAction` refuses mode `auto` for an estimate-linked design before any write.
+
+## D690. Plan view on the Grid intake (#314, 2026-10-09)
+
+Every Grid intake (not only estimate-linked) gains an optional Plan view: a PDF/PNG/JPEG/WebP drop or picker. After the intake
+saves, the file goes through the existing `/api/grid-sheets/upload` route (same 4 MB cap and type checks) with
+`position=first`, so it becomes the first sheet and the editor opens on it. The venue-template base sheet is still generated
+(no rule limits a design to one sheet), behind the plan; the generated sheet's id is now stamped as `intake.baseSheetId` and
+Auto fill reads it instead of `sheetIds[0]` (older designs fall back to `sheetIds[0]`). Calibration stays manual: a one-line
+"Calibrate scale" prompt shows over any uncalibrated page. When the job already has a plan on file, the intake offers it ("Use
+plan from …", on by default; a picker when several): the estimate's Plans & risers uploads (Plan or Drawing set, never a riser
+or a Grid-generated set), then the company's `documents` in a plan-like category (`drawings`, or a label naming plans,
+drawings or CAD), company-wide or for the design's venue. The client only ever sends a candidate id; the server re-derives the
+list from the saved design and copies Blob to Blob (`copyBlob`, no bytes through the browser or a function body), re-checking
+the source by magic bytes (PDF/PNG/JPEG/WebP, never SVG) and size. The copy's cap is 25 MB, not the upload's 4 MB: the 4 MB
+cap is the Vercel function body limit, which a Blob-to-Blob copy never crosses, and 25 MB is the cap the source file already
+passed. A plan step that fails never loses the intake (the #211 rule): the plan opens with a warning, `Retry the plan view`
+and `Open the plan →`. Note: the upload route still checks the declared type only (no magic-byte sniff), as before.
