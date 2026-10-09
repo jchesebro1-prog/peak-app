@@ -11522,6 +11522,7 @@ seeded()
   .then(() => modelSku304PageAsyncChecks())
   .then(() => estimateGrid314AsyncChecks())
   .then(() => sheetAdjust318PureChecks())
+  .then(() => sheetAdjust318BytesChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -59601,4 +59602,86 @@ async function sheetAdjust318PureChecks(): Promise<void> {
      A.adjustRefusalText("in-use", [1, 3]) === "Pages 1, 3 have devices, spaces, wires or a scale on them — crop and rotate only work on an empty page." &&
      A.adjustRefusalText("base-sheet") === "The generated base plan can't be cropped or rotated.",
     "#318 adjustRefusalText names the pages that block");
+}
+
+/* ---------------- #318: Grid sheet crop + rotate — byte transforms ---------------- */
+async function sheetAdjust318BytesChecks(): Promise<void> {
+  const B = await import("@/lib/design/sheet-adjust-bytes");
+  const { PDFDocument, degrees } = await import("pdf-lib");
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const sharp = (await import("sharp")).default;
+  const near = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  const views = async (bytes: Uint8Array) => {
+    const task = pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true });
+    const pdf = await task.promise;
+    const out: Array<{ view: number[]; rotate: number }> = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const pg = await pdf.getPage(n);
+      out.push({ view: [...pg.view], rotate: pg.rotate });
+    }
+    await task.destroy();
+    return out;
+  };
+
+  // A two-page PDF: page 1 has an offset CropBox and its own /Rotate 90; page 2 is plain.
+  const doc = await PDFDocument.create();
+  const p1 = doc.addPage([200, 100]);
+  p1.setCropBox(10, 20, 150, 60);
+  p1.setRotation(degrees(90));
+  doc.addPage([300, 200]);
+  const src = await doc.save();
+  ok(B.sheetKindOf(src) === "pdf" && B.sheetKindOf(new TextEncoder().encode("hello")) === null, "#318 sheetKindOf: a PDF is a PDF; text is nothing");
+
+  const r1 = await B.adjustSheetBytes(src, { "1": { rotate: 90, crop: { x: 0.2, y: 0.25, w: 0.5, h: 0.5 } } });
+  const v1 = r1.ok ? await views(r1.bytes) : [];
+  ok(r1.ok && r1.mime === "application/pdf" && v1.length === 2 && near(v1[0].view, [55, 35, 130, 65]) && v1[0].rotate === 180 && near(v1[1].view, [0, 0, 300, 200]) && v1[1].rotate === 0,
+    "#318 a PDF page is cropped (CropBox) and turned (/Rotate = own 90 + 90) as pdf.js reads it back; the untouched page keeps its boxes");
+  if (r1.ok) {
+    const back = await PDFDocument.load(r1.bytes);
+    const cb = back.getPage(0).getCropBox();
+    ok(near([cb.x, cb.y, cb.width, cb.height], [55, 35, 75, 30]) && back.getPage(0).getRotation().angle === 180 && back.getPage(0).getMediaBox().width === 200,
+      "#318 pdf-lib reads back the same CropBox and /Rotate, and the MediaBox is untouched (vector stays vector)");
+  }
+  const r2 = await B.adjustSheetBytes(src, { "2": { rotate: 270, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+  const v2 = r2.ok ? await views(r2.bytes) : [];
+  ok(r2.ok && near(v2[0].view, [10, 20, 160, 80]) && v2[0].rotate === 90 && near(v2[1].view, [0, 0, 300, 200]) && v2[1].rotate === 270,
+    "#318 turning page 2 only leaves page 1 exactly as it was");
+  const r3 = await B.adjustSheetBytes(src, { "9": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+  ok(r3.ok && (await views(r3.bytes)).every((v, i) => v.rotate === [90, 0][i]), "#318 a page the file doesn't have is ignored");
+  const r3b = await B.adjustSheetBytes(src, { "9999": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } }, "3": { rotate: 180, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } } });
+  ok(r3b.ok && (await views(r3b.bytes)).every((v, i) => v.rotate === [90, 0][i] && near(v.view, i === 0 ? [10, 20, 160, 80] : [0, 0, 300, 200])), "#318 page keys past the file's real page count (3, 9999) are ignored, not an error");
+  const bad = await B.adjustSheetBytes(new TextEncoder().encode("%PDF-1.7 not really a pdf"), { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+  const none = await B.adjustSheetBytes(new TextEncoder().encode("hello"), {});
+  ok(!bad.ok && bad.reason === "unreadable" && !none.ok && none.reason === "unsupported", "#318 a broken PDF is unreadable; an unknown file is unsupported");
+
+  // A 400 × 200 PNG in quadrants: top-left red, top-right green, bottom-left blue, bottom-right white.
+  const raw = Buffer.alloc(400 * 200 * 3);
+  for (let y = 0; y < 200; y++) for (let x = 0; x < 400; x++) {
+    const i = (y * 400 + x) * 3;
+    const col = x < 200 ? (y < 100 ? [255, 0, 0] : [0, 0, 255]) : y < 100 ? [0, 255, 0] : [255, 255, 255];
+    raw[i] = col[0]; raw[i + 1] = col[1]; raw[i + 2] = col[2];
+  }
+  const png = await sharp(raw, { raw: { width: 400, height: 200, channels: 3 } }).png().toBuffer();
+  // Turned 90° clockwise the image is 200 × 400 with red at the top right; the crop's
+  // top-left pixel (20, 100) comes from the original's bottom-left (blue), its
+  // top-right pixel (119, 100) from the original's top-left (red).
+  const ri = await B.adjustSheetBytes(png, { "1": { rotate: 90, crop: { x: 0.1, y: 0.25, w: 0.5, h: 0.5 } } });
+  const px = ri.ok ? await sharp(ri.bytes).raw().toBuffer({ resolveWithObject: true }) : null;
+  const at = (x: number) => (px ? [...px.data.subarray(x * px.info.channels, x * px.info.channels + 3)] : []);
+  ok(ri.ok && ri.mime === "image/png" && px?.info.width === 100 && px?.info.height === 200 && JSON.stringify(at(0)) === "[0,0,255]" && JSON.stringify(at(99)) === "[255,0,0]",
+    "#318 an image is turned, then cropped in the turned image's pixels, and stays a PNG");
+  const jpg = await sharp(Buffer.alloc(40 * 20 * 3, 128), { raw: { width: 40, height: 20, channels: 3 } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  const rj = await B.adjustSheetBytes(jpg, { "1": { rotate: 0, crop: { x: 0, y: 0, w: 1, h: 0.5 } } });
+  const mj = rj.ok ? await sharp(rj.bytes).metadata() : null;
+  ok(rj.ok && rj.mime === "image/jpeg" && mj?.width === 20 && mj?.height === 20 && !mj?.orientation,
+    "#318 a JPEG is EXIF-oriented first (orientation 6: 40 × 20 shows 20 × 40), stays a JPEG, and drops the orientation tag");
+  const webp = await sharp(raw, { raw: { width: 400, height: 200, channels: 3 } }).webp().toBuffer();
+  const rw = await B.adjustSheetBytes(webp, { "1": { rotate: 0, crop: { x: 0, y: 0, w: 0.5, h: 1 } } });
+  const mw = rw.ok ? await sharp(rw.bytes).metadata() : null;
+  ok(rw.ok && rw.mime === "image/webp" && mw?.format === "webp" && mw?.width === 200 && mw?.height === 200, "#318 a WebP stays a WebP");
+  const gif = await sharp(raw, { raw: { width: 400, height: 200, channels: 3 } }).gif().toBuffer();
+  const rg = await B.adjustSheetBytes(gif, { "1": { rotate: 180, crop: { x: 0, y: 0, w: 0.5, h: 1 } } });
+  const mg = rg.ok ? await sharp(rg.bytes).metadata() : null;
+  ok(B.sheetKindOf(gif) === "image/gif" && rg.ok && rg.mime === "image/png" && mg?.format === "png" && mg?.width === 200 && mg?.height === 200,
+    "#318 a GIF is read and comes back as a PNG");
 }
