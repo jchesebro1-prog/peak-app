@@ -637,8 +637,15 @@ export async function listSheets(projectId: string): Promise<GridSheet[]> {
 
 /**
  * Remove one sheet from the project's display order. Refuses when any LIVE
- * placement/space/route still references it — those would otherwise paint
- * against a background that's no longer reachable. Deliberately does NOT
+ * placement or route still references it — those would otherwise paint
+ * against a background that's no longer reachable. Spaces do NOT block
+ * (#317, D691): the base sheet's starter Spaces are auto-generated
+ * outlines, and a device's space is computed, never stored, so dropping
+ * them orphans nothing. Every space on the sheet (any page) goes with it,
+ * its riser boxes/links pruned exactly like removeSpace; when at least one
+ * space is dropped a "manual" revision is cut FIRST, in the same patch, so
+ * the delete is recoverable from Revisions (restoreRevision re-adds a
+ * removed sheet the restored spaces reference). Deliberately does NOT
  * softDeleteDoc the `grid_sheets` record: it stays a normal, readable doc
  * (dropped only from `sheetIds`), so an older GridRevision that still lists
  * this sheet in its own `sheetIds` can still resolve it by id through
@@ -649,21 +656,43 @@ export async function listSheets(projectId: string): Promise<GridSheet[]> {
  */
 export async function removeSheet(
   projectId: string,
-  sheetId: string
-): Promise<{ ok: true } | { ok: false; reason: "not-found" | "no-such-sheet" | "in-use" }> {
+  sheetId: string,
+  by: string
+): Promise<
+  | { ok: true; spacesRemoved: number }
+  | { ok: false; reason: "not-found" | "no-such-sheet" | "in-use" }
+> {
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
   if (!(project.sheetIds || []).includes(sheetId)) return { ok: false, reason: "no-such-sheet" };
-  const inUse =
-    (project.placements || []).some((pl) => pl.sheetId === sheetId) ||
-    (project.spaces || []).some((sp) => sp.sheetId === sheetId) ||
-    (project.routes || []).some((r) => r.sheetId === sheetId);
-  if (inUse) return { ok: false, reason: "in-use" };
+  const blocks = (p: GridProject) =>
+    (p.placements || []).some((pl) => pl.sheetId === sheetId) ||
+    (p.routes || []).some((r) => r.sheetId === sheetId);
+  if (blocks(project)) return { ok: false, reason: "in-use" };
+  const sheet = await getDoc<GridSheet>("grid_sheets", sheetId);
+  const sheetName = sheet?.name?.trim() || "Plan sheet";
+  // Re-checked on the doc patchDoc hands us: a placement/route added
+  // between the pre-check and the write still refuses (no mutation).
+  let refused: "no-such-sheet" | "in-use" | null = null;
+  let spacesRemoved = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!(p.sheetIds || []).includes(sheetId)) { refused = "no-such-sheet"; return; }
+    if (blocks(p)) { refused = "in-use"; return; }
+    const dropped = new Set((p.spaces || []).filter((sp) => sp.sheetId === sheetId).map((sp) => sp.id));
+    if (dropped.size) {
+      pushRevision(p, by, "manual", `Auto-saved before deleting sheet "${sheetName}"`);
+      p.spaces = (p.spaces || []).filter((sp) => !dropped.has(sp.id));
+      if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: dropped });
+    }
+    spacesRemoved = dropped.size;
     p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
     p.updatedAt = Date.now();
   });
-  return updated ? { ok: true } : { ok: false, reason: "not-found" };
+  if (!updated) return { ok: false, reason: "not-found" };
+  // (Assigned inside the callback, which TS's flow analysis can't see.)
+  const refusal = refused as "no-such-sheet" | "in-use" | null;
+  if (refusal) return { ok: false, reason: refusal };
+  return { ok: true, spacesRemoved };
 }
 
 export async function addPlacement(

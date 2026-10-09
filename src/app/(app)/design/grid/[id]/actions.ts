@@ -1062,25 +1062,26 @@ export async function removeSpaceAction(
 
 /** Delete a plan sheet from the editor's sheet list (the sheet's own doc
  *  stays put — see removeSheet, grid-projects.ts — so an older revision can
- *  still resolve it). Refuses while a placement/space/route on the LIVE
- *  design still references it. */
+ *  still resolve it). Refuses while a placement or route on the LIVE design
+ *  still references it; Spaces on it go with it (#317, D691), after an
+ *  automatic revision, and `spacesRemoved` says how many. */
 export async function removeSheetAction(
   projectId: string,
   sheetId: string
-): Promise<Result> {
-  await requireUser();
-  const r = await removeSheet(projectId, sheetId);
+): Promise<{ ok: true; spacesRemoved: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const r = await removeSheet(projectId, sheetId, user.name);
   if (!r.ok) {
     return {
       ok: false,
       error:
         r.reason === "in-use"
-          ? "This sheet still has devices, spaces, or wires on it — remove those first."
+          ? "This sheet still has devices or wires on it — remove those first."
           : "That sheet could not be found.",
     };
   }
   revalidatePath(editorPath(projectId));
-  return { ok: true };
+  return { ok: true, spacesRemoved: r.spacesRemoved };
 }
 
 /* ------------------------------ routes (D110) ------------------------------ */

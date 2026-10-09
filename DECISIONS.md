@@ -10110,3 +10110,14 @@ on the plan view sheet (`intake.planSheetId`), also when it lands after the edit
 source: the copy records `copy:<candidate id>` and the upload `upload:<upload id>` (`intake.planSource`), and under a
 per-design advisory lock (namespace 3141) a repeat of a source whose sheet is still on the design returns that sheet
 instead of adding it twice. Note: the upload route still checks the declared type only (no magic-byte sniff), as before.
+
+## D691. Spaces don't block deleting a Grid sheet (#317, 2026-10-09)
+
+Delete sheet used to refuse while any placement, space or route referenced the sheet, so the auto-generated base plan
+could not be deleted without first deleting each starter Space (Court, Booth, Electrical Room…) by hand. Now only devices
+(placements) and wires (routes) block; the sheet's Spaces, on any page, go with it, and their riser boxes and links are
+pruned exactly as `removeSpace` does. Starter Spaces are auto-generated outlines, and a device's space is computed, never
+stored, so nothing is orphaned. Because the delete now discards visible work, when at least one Space is dropped
+`removeSheet` cuts a "manual" revision first, in the same patch ("Auto-saved before deleting sheet "<name>""); restoring it
+re-adds the sheet (restoreRevision already brings back a removed sheet the restored spaces reference) and its Spaces. An
+empty sheet still deletes without a revision. The in-use check is repeated on the doc being patched.

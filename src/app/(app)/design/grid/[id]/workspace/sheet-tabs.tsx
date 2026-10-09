@@ -96,11 +96,16 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
                   label="Delete sheet"
                   confirmLabel="Confirm"
                   style={{ fontSize: 11.5, padding: "6px 10px" }}
-                  title="Deletes this sheet from the design; refused while it still has devices, spaces, or wires on it. Not undoable; use Revisions."
+                  title="Deletes this sheet from the design, along with any Spaces drawn on it (saved as a revision first); refused while it still has devices or wires on it."
                   onConfirm={async () => {
                     const r = await removeSheetAction(project.id, s.id);
                     if (!r.ok) throw new Error(r.error);
-                    noteAction(`Deleted sheet ${s.name}`);
+                    const n = r.spacesRemoved;
+                    noteAction(
+                      n > 0
+                        ? `Deleted sheet ${s.name} (and ${n} space${n === 1 ? "" : "s"} — saved as a revision)`
+                        : `Deleted sheet ${s.name}`
+                    );
                     onStructuralChange();
                   }}
                 />

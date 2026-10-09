@@ -16727,7 +16727,7 @@ async function deletePartBAsyncChecks(): Promise<void> {
        come back on the next template/coverage pass — insertDocIfAbsent
        conflicts on the deterministic autoTaskId whether or not the row is
        tombstoned, since the row still physically exists;
-     - removeSheet must refuse while a live placement/space/route still
+     - removeSheet must refuse while a live placement/route (not a space — #317) still
        references the sheet, succeed once nothing does, and — because it
        deliberately never softDeleteDoc's the grid_sheets record itself —
        an OLDER revision that still references the sheet must be able to
@@ -16935,7 +16935,7 @@ async function deleteRound2AsyncChecks(): Promise<void> {
       ok(!!placementId, "DELR2 grid sheets setup: the placement landed on sheet A");
 
       // Sheet B has nothing on it — remove should succeed outright.
-      const removeB = await GridProj2.removeSheet(gp.id, sheetB.id);
+      const removeB = await GridProj2.removeSheet(gp.id, sheetB.id, "Test Harness");
       ok(removeB.ok === true, "DELR2 grid sheets: removeSheet succeeds for an unreferenced sheet");
       proj = await GridProj2.getProject(gp.id);
       ok(!(proj?.sheetIds || []).includes(sheetB.id), "DELR2 grid sheets: the removed sheet drops out of sheetIds");
@@ -16945,7 +16945,7 @@ async function deleteRound2AsyncChecks(): Promise<void> {
       );
 
       // Sheet A still has the live placement — remove should refuse.
-      const removeARefused = await GridProj2.removeSheet(gp.id, sheetA.id);
+      const removeARefused = await GridProj2.removeSheet(gp.id, sheetA.id, "Test Harness");
       ok(
         !removeARefused.ok && removeARefused.reason === "in-use",
         "DELR2 grid sheets: removeSheet refuses a sheet a live placement still references"
@@ -16959,7 +16959,7 @@ async function deleteRound2AsyncChecks(): Promise<void> {
       const rev = await GridProj2.addRevision(gp.id, { by: "Test Harness", reason: "manual", note: "DELR2 pre-remove snapshot" });
       ok(!!rev && rev.sheetIds.includes(sheetA.id), "DELR2 grid sheets: the revision snapshot carries sheet A");
       if (placementId) await GridProj2.removePlacement(gp.id, placementId);
-      const removeANow = await GridProj2.removeSheet(gp.id, sheetA.id);
+      const removeANow = await GridProj2.removeSheet(gp.id, sheetA.id, "Test Harness");
       ok(removeANow.ok === true, "DELR2 grid sheets: removeSheet succeeds once its last reference is gone");
 
       if (rev) {
@@ -16984,6 +16984,114 @@ async function deleteRound2AsyncChecks(): Promise<void> {
           "DELR2 grid sheets: the re-added sheet is visible again in listSheets() — not just sheetIds"
         );
       }
+    }
+  }
+
+  /* ---------------- #317: Spaces don't block deleting a sheet (D691) ---------------- */
+  {
+    const GridProj3 = await import("../src/lib/stores/grid-projects");
+    const { DEFAULT_OPTION_ID } = await import("../src/lib/design/grid-options");
+
+    const gp = await GridProj3.createProject({
+      name: "#317 test grid project",
+      customer: "Test Customer 317",
+      customerId: null,
+      by: "Test Harness",
+    });
+    registerFixture("grid_projects", gp.id);
+    const mk = async (name: string) => {
+      const sh = await GridProj3.addSheet(gp.id, {
+        name, mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness",
+      });
+      if (sh) registerFixture("grid_sheets", sh.id);
+      return sh;
+    };
+    const spaceSheet = await mk("#317 Base plan");
+    const devSheet = await mk("#317 Device sheet");
+    const wireSheet = await mk("#317 Wire sheet");
+    const emptySheet = await mk("#317 Empty sheet");
+    ok(!!spaceSheet && !!devSheet && !!wireSheet && !!emptySheet, "#317 setup: all four fixture sheets were added");
+
+    if (spaceSheet && devSheet && wireSheet && emptySheet) {
+      const square = [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }];
+      await GridProj3.addSpace(gp.id, { sheetId: spaceSheet.id, page: 1, name: "Court", points: square, by: "Test Harness" });
+      await GridProj3.addSpace(gp.id, { sheetId: spaceSheet.id, page: 2, name: "Booth", points: square, by: "Test Harness" });
+      // A space elsewhere survives the delete.
+      await GridProj3.addSpace(gp.id, { sheetId: emptySheet.id, page: 1, name: "Keep me", points: square, by: "Test Harness" });
+      await GridProj3.addPlacement(gp.id, {
+        sheetId: devSheet.id, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by: "Test Harness",
+      });
+      await GridProj3.addRoute(gp.id, {
+        sheetId: wireSheet.id, page: 1, partId: "TEST-WIRE", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }],
+        aspect: 1, optionId: DEFAULT_OPTION_ID, by: "Test Harness",
+      });
+      let proj = await GridProj3.getProject(gp.id);
+      const droppedIds = (proj?.spaces || []).filter((sp) => sp.sheetId === spaceSheet.id).map((sp) => sp.id);
+      const keepId = (proj?.spaces || []).find((sp) => sp.sheetId === emptySheet.id)?.id;
+      ok(droppedIds.length === 2 && !!keepId, "#317 setup: two spaces on the base plan (pages 1 and 2) and one elsewhere");
+      ok(!!(proj?.routes || []).some((r) => r.sheetId === wireSheet.id), "#317 setup: the route landed on the wire sheet");
+      const revsBefore = (proj?.revisions || []).length;
+
+      // A sheet with a placement still refuses.
+      const devRefused = await GridProj3.removeSheet(gp.id, devSheet.id, "Test Harness");
+      ok(!devRefused.ok && devRefused.reason === "in-use", "#317 removeSheet still refuses a sheet with a device on it");
+      // A sheet with a route still refuses.
+      const wireRefused = await GridProj3.removeSheet(gp.id, wireSheet.id, "Test Harness");
+      ok(!wireRefused.ok && wireRefused.reason === "in-use", "#317 removeSheet still refuses a sheet with a wire on it");
+      proj = await GridProj3.getProject(gp.id);
+      ok(
+        (proj?.sheetIds || []).includes(devSheet.id) && (proj?.sheetIds || []).includes(wireSheet.id),
+        "#317 refused sheets stay listed"
+      );
+      ok((proj?.revisions || []).length === revsBefore, "#317 a refused delete cuts no revision");
+      const missing = await GridProj3.removeSheet(gp.id, "gs-not-a-sheet", "Test Harness");
+      ok(!missing.ok && missing.reason === "no-such-sheet", "#317 removeSheet still returns no-such-sheet for an unknown sheet");
+      const noProj = await GridProj3.removeSheet("GP-not-a-project", spaceSheet.id, "Test Harness");
+      ok(!noProj.ok && noProj.reason === "not-found", "#317 removeSheet still returns not-found for an unknown design");
+
+      // A sheet with only spaces on it deletes, taking its spaces along.
+      const removed = await GridProj3.removeSheet(gp.id, spaceSheet.id, "Test Harness");
+      ok(removed.ok === true && removed.spacesRemoved === 2, "#317 removeSheet succeeds on a sheet with only Spaces on it and reports 2 removed");
+      proj = await GridProj3.getProject(gp.id);
+      ok(!(proj?.sheetIds || []).includes(spaceSheet.id), "#317 the deleted sheet drops out of sheetIds");
+      ok(
+        !(proj?.spaces || []).some((sp) => droppedIds.includes(sp.id)),
+        "#317 the sheet's spaces (every page) are gone from the live design"
+      );
+      ok(!!(proj?.spaces || []).some((sp) => sp.id === keepId), "#317 a space on another sheet survives");
+      const revs = proj?.revisions || [];
+      ok(revs.length === revsBefore + 1, "#317 exactly one automatic revision was cut");
+      const autoRev = revs[revs.length - 1];
+      ok(
+        !!autoRev && autoRev.reason === "manual" && autoRev.note.includes("#317 Base plan") && autoRev.by === "Test Harness",
+        "#317 the automatic revision names the deleted sheet and who deleted it"
+      );
+      ok(
+        !!autoRev && droppedIds.every((id) => autoRev.spaces.some((sp) => sp.id === id)) && autoRev.sheetIds.includes(spaceSheet.id),
+        "#317 the automatic revision holds the dropped spaces and the sheet"
+      );
+
+      // Restoring that revision brings the sheet and its spaces back.
+      if (autoRev) {
+        const restored = await GridProj3.restoreRevision(gp.id, autoRev.rev, "Test Harness");
+        ok(restored.ok === true, "#317 restoreRevision of the automatic revision succeeds");
+        proj = await GridProj3.getProject(gp.id);
+        ok((proj?.sheetIds || []).includes(spaceSheet.id), "#317 restore re-adds the deleted sheet to sheetIds");
+        ok(
+          droppedIds.every((id) => (proj?.spaces || []).some((sp) => sp.id === id && sp.sheetId === spaceSheet.id)),
+          "#317 restore brings back the dropped spaces"
+        );
+      }
+
+      // An empty sheet deletes without cutting a revision. Clear the one
+      // space on emptySheet first so it really has nothing on it.
+      if (keepId) await GridProj3.removeSpace(gp.id, keepId);
+      const revsBeforeEmpty = ((await GridProj3.getProject(gp.id))?.revisions || []).length;
+      const removedEmpty = await GridProj3.removeSheet(gp.id, emptySheet.id, "Test Harness");
+      ok(removedEmpty.ok === true && removedEmpty.spacesRemoved === 0, "#317 an empty sheet deletes and reports 0 spaces removed");
+      proj = await GridProj3.getProject(gp.id);
+      ok(!(proj?.sheetIds || []).includes(emptySheet.id), "#317 the empty sheet drops out of sheetIds");
+      ok((proj?.revisions || []).length === revsBeforeEmpty, "#317 deleting an empty sheet cuts NO revision");
     }
   }
 }
