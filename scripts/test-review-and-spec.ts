@@ -59538,7 +59538,7 @@ async function sheetAdjust318PureChecks(): Promise<void> {
   p1.setCropBox(10, 20, 150, 60);
   p1.setRotation(degrees(90));
   doc.addPage([300, 200]).setRotation(degrees(270));
-  const task = pdfjs.getDocument({ data: new Uint8Array(await doc.save()), isEvalSupported: false, disableFontFace: true });
+  const task = pdfjs.getDocument({ data: new Uint8Array(await doc.save()), disableFontFace: true });
   const pdf = await task.promise;
   let agree = true;
   for (const n of [1, 2]) {
