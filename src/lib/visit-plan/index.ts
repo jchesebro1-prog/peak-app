@@ -6,3 +6,4 @@ export * from "./hours";
 export * from "./busy";
 export * from "./check";
 export * from "./nearby";
+export * from "./pick-day";

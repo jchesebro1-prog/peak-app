@@ -6,21 +6,19 @@ import { requireUser } from "@/lib/session";
 import { getVisit, updateVisitBooking } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
 import { dispatchVisitInvite, type RecipientResult } from "@/lib/visit-invite";
-import type { Conflict } from "@/lib/visit-plan/check";
 import { cleanBookingInput } from "@/lib/visit-plan/input";
 import { cleanAttendees } from "@/lib/visit-plan/people";
 import type { BookingCheckResult } from "@/lib/visit-plan/types";
 
 /**
  * Spec 2026-10-09 site-visit scheduling — the booking screen's live check
- * (nearby days + conflicts), editing a scheduled visit, and the visit
- * conflict badges. Conflicts never block a save. The check actions are
- * read-only and always view as the signed-in user, so other people's Google
- * event titles stay hidden.
+ * (nearby days + conflicts) and editing a scheduled visit. Conflicts never
+ * block a save. The check always views as the signed-in user, so other
+ * people's Google event titles stay hidden. (The company record's conflict
+ * badges are a GET route, /api/visits/conflicts, so they never queue behind
+ * these actions.)
  */
 
-/** Total wall-clock budget for one visitConflictSummariesAction call. */
-const BADGE_TOTAL_BUDGET_MS = 20_000;
 const CHECK_FAILED = "Couldn't check conflicts — you can still schedule.";
 
 export async function bookingCheckAction(raw: unknown): Promise<BookingCheckResult | { error: string }> {
@@ -67,40 +65,4 @@ export async function updateVisitAction(
   const report = await dispatchVisitInvite(fresh, { id: me.id, name: me.name });
   revalidatePath("/", "layout");
   return { ok: true, invites: report.recipients };
-}
-
-/** Conflict badges for visits on a page (the company record). Computed on
- *  load, for every person on each visit; at most 10 visits per call. */
-export async function visitConflictSummariesAction(raw: unknown): Promise<Record<string, Conflict[]>> {
-  const me = await requireUser();
-  const ids = Array.isArray(raw)
-    ? [...new Set(raw.filter((x): x is string => typeof x === "string" && !!x && x.length <= 40))].slice(0, 10)
-    : [];
-  const out: Record<string, Conflict[]> = {};
-  if (!ids.length) return out;
-  const { loadBookingCheck } = await import("@/lib/visit-plan/load");
-  // One shared deadline for the whole call: each check has its own routing
-  // budget, so without this ten visits could run for minutes. Once spent, the
-  // remaining visits are simply not checked (no badge).
-  const deadline = Date.now() + BADGE_TOTAL_BUDGET_MS;
-  for (const id of ids) {
-    if (Date.now() >= deadline) {
-      console.warn("[visit-booking] badge budget spent; remaining visits not checked");
-      break;
-    }
-    const v = await getVisit(id);
-    if (!v || v.stage !== "scheduled" || v.startAt == null || v.endAt == null) continue;
-    try {
-      const r = await loadBookingCheck(
-        { visitId: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address, startAt: v.startAt, endAt: v.endAt, lead: v.assignedTo, attendees: v.attendees },
-        { viewerId: me.id, nearby: false }
-      );
-      const many = r.people.length > 1;
-      const list = r.people.flatMap((p) => p.conflicts.map((c) => ({ kind: c.kind, text: many ? `${p.person}: ${c.text}` : c.text })));
-      if (list.length) out[id] = list;
-    } catch (err) {
-      console.error("[visit-booking] badge check failed:", id, err);
-    }
-  }
-  return out;
 }

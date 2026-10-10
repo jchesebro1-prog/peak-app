@@ -8,6 +8,7 @@ import { claimVisitAction, releaseVisitAction, removeVisitAction, scheduleVisitA
 import { ConfirmButton } from "@/components/confirm-button";
 import AddressFlagBadge, { type AddressFlagVM } from "@/components/address-fix/address-flag";
 import BookingPanel from "@/components/visit-booking/booking-panel";
+import { pickDayTimes } from "@/lib/visit-plan/pick-day";
 
 /**
  * #34 — the open-visit queue rows above the survey cards. Unclaimed rows
@@ -98,19 +99,9 @@ function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[
   // an hour after the start when only the end is blank). The end is always
   // after the start on the same day: clamped to start + 1 h (max 23:59).
   const pickDay = (dayKey: string) => {
-    const hm = (v: string) => (/^\d{2}:\d{2}$/.test(v.slice(11, 16)) ? v.slice(11, 16) : "");
-    const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-    const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-    const last = 23 * 60 + 59;
-    const endT = hm(end);
-    // Start blank but an end exists: start an hour before that end. The start
-    // stops at 23:58 so a later end always exists the same day.
-    const startMin = Math.min(last - 1, hm(start) ? mins(hm(start)) : endT ? Math.max(0, mins(endT) - 60) : mins("09:00"));
-    // Keep the rep's end when it is after the start; otherwise start + 1 h.
-    const endMin = Math.min(last, endT && mins(endT) > startMin ? mins(endT) : startMin + 60);
-    const st = clock(startMin);
-    setStart(`${dayKey}T${st}`);
-    setEnd(`${dayKey}T${clock(endMin)}`);
+    const t = pickDayTimes(start.slice(11, 16), end.slice(11, 16));
+    setStart(`${dayKey}T${t.start}`);
+    setEnd(`${dayKey}T${t.end}`);
   };
 
   // Plan-review minor: check the action result instead of refreshing

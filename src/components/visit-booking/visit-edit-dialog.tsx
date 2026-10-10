@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useId, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { updateVisitAction } from "@/app/(app)/visit-booking-actions";
 import { inviteSummary } from "@/lib/visit-invite-plan";
@@ -30,6 +30,7 @@ const LENGTHS = [30, 60, 90, 120, 180, 240];
  *  every invite (add / update / cancel). Nothing blocks Save. */
 export default function VisitEditDialog({ visit, team, onClose }: { visit: VisitEditVM; team: string[]; onClose: () => void }) {
   const router = useRouter();
+  const uid = useId();
   const [pending, startTransition] = useTransition();
   const initialLen = Math.max(15, Math.round((visit.endAt - visit.startAt) / 60_000));
   const [date, setDate] = useState(localDate(visit.startAt));
@@ -43,6 +44,16 @@ export default function VisitEditDialog({ visit, team, onClose }: { visit: Visit
   const okStart = Number.isFinite(startMs) ? startMs : null;
   const lengths = LENGTHS.includes(initialLen) ? LENGTHS : [...LENGTHS, initialLen].sort((a, b) => a - b);
   const leads = team.includes(visit.assignedTo) ? team : [visit.assignedTo, ...team];
+
+  // Escape closes, but never mid-save (the invites are being sent).
+  useEffect(() => {
+    if (pending) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pending, onClose]);
 
   const save = () => {
     if (okStart == null) {
@@ -62,7 +73,7 @@ export default function VisitEditDialog({ visit, team, onClose }: { visit: Visit
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(22,24,29,.4)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+    <div onClick={() => { if (!pending) onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(22,24,29,.4)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
       <div
         role="dialog"
         aria-modal="true"
@@ -90,16 +101,16 @@ export default function VisitEditDialog({ visit, team, onClose }: { visit: Visit
           <>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               <div>
-                <label style={lbl}>Date</label>
-                <input type="date" style={inStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+                <label htmlFor={`${uid}-date`} style={lbl}>Date</label>
+                <input id={`${uid}-date`} type="date" style={inStyle} value={date} onChange={(e) => setDate(e.target.value)} />
               </div>
               <div>
-                <label style={lbl}>Start</label>
-                <input type="time" style={inStyle} value={time} onChange={(e) => setTime(e.target.value)} />
+                <label htmlFor={`${uid}-start`} style={lbl}>Start</label>
+                <input id={`${uid}-start`} type="time" style={inStyle} value={time} onChange={(e) => setTime(e.target.value)} />
               </div>
               <div>
-                <label style={lbl}>Length</label>
-                <select style={inStyle} value={durationMin} onChange={(e) => setDurationMin(Number(e.target.value))}>
+                <label htmlFor={`${uid}-length`} style={lbl}>Length</label>
+                <select id={`${uid}-length`} style={inStyle} value={durationMin} onChange={(e) => setDurationMin(Number(e.target.value))}>
                   {lengths.map((m) => (
                     <option key={m} value={m}>
                       {m < 60 ? `${m} min` : `${Math.round((m / 60) * 10) / 10} hr${m > 60 ? "s" : ""}`}
@@ -108,8 +119,9 @@ export default function VisitEditDialog({ visit, team, onClose }: { visit: Visit
                 </select>
               </div>
             </div>
-            <label style={lbl}>Lead</label>
+            <label htmlFor={`${uid}-lead`} style={lbl}>Lead</label>
             <select
+              id={`${uid}-lead`}
               style={inStyle}
               value={lead}
               onChange={(e) => {
@@ -119,8 +131,8 @@ export default function VisitEditDialog({ visit, team, onClose }: { visit: Visit
               }}
             >
               {leads.map((n) => (
-                <option key={n} value={n}>
-                  {n}
+                <option key={n} value={n} disabled={!n}>
+                  {n || "Pick a lead"}
                 </option>
               ))}
             </select>

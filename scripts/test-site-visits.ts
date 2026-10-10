@@ -28,6 +28,7 @@ import { BOOKING_ROUTE_BUDGET_MS, bookingRouteMode, loadBookingCheck, NEW_VISIT_
 import type { BookingCheckInput } from "@/lib/visit-plan/types";
 import { cleanBookingInput } from "@/lib/visit-plan/input";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
+import { pickDayTimes } from "@/lib/visit-plan/pick-day";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { blobs } from "@/db/schema";
@@ -843,7 +844,7 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
     "site-visits input: junk is empty; a range over 24 h is untimed");
 
   const ba = readFileSync("src/app/(app)/visit-booking-actions.ts", "utf8");
-  for (const name of ["bookingCheckAction", "updateVisitAction", "visitConflictSummariesAction"])
+  for (const name of ["bookingCheckAction", "updateVisitAction"])
     ok(firstAwait(fnBody(ba, name), "requireUser()"), `site-visits actions: ${name} checks the session first`);
   const upd = fnBody(ba, "updateVisitAction");
   ok(upd.indexOf("after(") > 0 && upd.indexOf("after(") < upd.indexOf("await dispatchVisitInvite(") && /resyncForVisitChange\(prevVisit, nextVisit\)\.catch\(/.test(upd),
@@ -851,12 +852,19 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
   ok(/cleanAttendees\(/.test(upd) && /updateVisitBooking\(/.test(upd) && /roster\.includes\(lead\)/.test(upd), "site-visits actions: an edit cleans attendees and refuses a lead not on the team");
   ok(upd.indexOf('v.stage !== "scheduled"') > 0 && upd.indexOf('v.stage !== "scheduled"') < upd.indexOf("updateVisitBooking("),
     "site-visits actions: editing refuses any visit that isn't scheduled, before updateVisitBooking (no claim-model bypass)");
-  const badges = fnBody(ba, "visitConflictSummariesAction");
-  ok(/Date\.now\(\) \+ BADGE_TOTAL_BUDGET_MS/.test(badges) && /BADGE_TOTAL_BUDGET_MS = 20_000/.test(ba) && badges.indexOf("Date.now() >= deadline") > 0 && badges.indexOf("Date.now() >= deadline") < badges.indexOf("loadBookingCheck("),
-    "site-visits actions: conflict badges share one 20 s deadline and stop starting new visits once it is spent");
-  ok(/\.slice\(0, 10\)/.test(badges) && /nearby: false/.test(badges), "site-visits actions: conflict badges check at most 10 visits and skip nearby days");
-  ok(/viewerId: me\.id/.test(fnBody(ba, "bookingCheckAction")) && /viewerId: me\.id/.test(badges) && (ba.match(/viewerId:/g) ?? []).length === 2,
-    "site-visits actions: the booking check always views as the signed-in user (others' event titles stay hidden)");
+  ok(!ba.includes("visitConflictSummariesAction"), "site-visits actions: the conflict badges are not a server action (it would queue Edit's check, Save and Delete)");
+  const route = readFileSync("src/app/api/visits/conflicts/route.ts", "utf8");
+  const get = route.slice(route.indexOf("export async function GET("));
+  ok(/export const maxDuration = 60/.test(route) && /export async function GET\(/.test(route) && !/export async function POST\(/.test(route),
+    "site-visits badges: a GET route with a 60 s ceiling");
+  ok(firstAwait(get, "requireUser()") && /const me = await requireUser\(\)/.test(get), "site-visits badges: the route checks the session first");
+  ok(/Date\.now\(\) \+ BADGE_TOTAL_BUDGET_MS/.test(get) && /BADGE_TOTAL_BUDGET_MS = 20_000/.test(route) && get.indexOf("Date.now() >= deadline") > 0 && get.indexOf("Date.now() >= deadline") < get.indexOf("loadBookingCheck("),
+    "site-visits badges: conflict badges share one 20 s deadline and stop starting new visits once it is spent");
+  ok(/\.slice\(0, MAX_IDS\)/.test(get) && /MAX_IDS = 10/.test(route) && /nearby: false/.test(get), "site-visits badges: at most 10 visits per call, nearby days skipped");
+  ok(/viewerId: me\.id/.test(get) && (route.match(/viewerId:/g) ?? []).length === 1 && /viewerId: me\.id/.test(fnBody(ba, "bookingCheckAction")) && (ba.match(/viewerId:/g) ?? []).length === 1,
+    "site-visits badges: the route and the booking check always view as the signed-in user (others' event titles stay hidden)");
+  const mw = readFileSync("src/middleware.ts", "utf8");
+  ok(!/api\/visits/.test(mw), "site-visits badges: the middleware does not exempt /api/visits (a signed-out call never reaches the route)");
   const va = readFileSync("src/app/(app)/venue-assessments/visit-actions.ts", "utf8");
   const sched = fnBody(va, "scheduleVisitAction");
   ok(/cleanAttendees\(input\.attendees/.test(sched) && /scheduleVisit\(id, input\.startAt, input\.endAt, attendees\)/.test(sched),
@@ -911,8 +919,18 @@ export async function siteVisitsEditPins(ok: Ok): Promise<void> {
     "site-visits edit: editing shows the booking panel for that visit and saves time, lead and attendees");
   ok(!/disabled=\{[^}]*(check|conflict)/i.test(dialog), "site-visits edit: conflicts never disable Save");
   const chips = read("src/components/visit-booking/visit-conflict-chips.tsx");
-  ok(chips.includes("visitConflictSummariesAction") && /if \(live\)/.test(chips), "site-visits edit: badges load once per list, after the page renders");
+  ok(chips.includes("/api/visits/conflicts") && !chips.includes("visitConflictSummariesAction") && !chips.includes("@/app/"),
+    "site-visits edit: badges load once per list from the GET route, never a server action");
+  ok(chips.includes("new AbortController()") && /return \(\) => ctl\.abort\(\)/.test(chips) && chips.includes("signal: ctl.signal") && chips.includes("ctl.signal.aborted"),
+    "site-visits edit: a superseded or unmounted badge fetch is aborted and its answer dropped");
   ok(chips.includes(".catch(") && !/throw /.test(chips), "site-visits edit: a failed badge load shows no badge and breaks nothing");
+  ok(/fetched\?\.key === key/.test(chips) && /sig && fetched/.test(chips) && chips.includes("version"),
+    "site-visits edit: a fetched map counts only for its ids + version, and an empty list shows no badge");
+  const dlg = dialog;
+  ok(["date", "start", "length", "lead"].every((f) => dlg.includes(`htmlFor={\`\${uid}-${f}\`}`) && dlg.includes(`id={\`\${uid}-${f}\`}`)),
+    "site-visits edit: Date, Start, Length and Lead labels are tied to their controls");
+  ok(/e\.key === "Escape"/.test(dlg) && /if \(pending\) return;/.test(dlg) && /if \(!pending\) onClose\(\)/.test(dlg) && /disabled=\{!n\}/.test(dlg),
+    "site-visits edit: Escape closes unless saving, a backdrop click is ignored while saving, an empty lead is not pickable");
   const badge = read("src/components/visit-booking/conflict-badge.tsx");
   ok(/aria-label=\{all\}/.test(badge) && /title=\{all\}/.test(badge) && !badge.includes("useState"), "site-visits edit: the badge carries every conflict in its title and label, and has no hooks");
 
@@ -920,8 +938,29 @@ export async function siteVisitsEditPins(ok: Ok): Promise<void> {
   const vr = read("src/app/(app)/venue-assessments/visit-requests.tsx");
   ok(/attendees: string\[\]/.test(vr) && /useState<string\[\]>\(row\.attendees\)/.test(vr) && /touched \? attendees : undefined/.test(vr),
     "site-visits booking: the scheduler starts from the row's attendees and sends none when they were not touched");
-  ok(/Math\.max\(/.test(vr.slice(vr.indexOf("const pickDay"), vr.indexOf("const run"))) && vr.includes("23:59"),
-    "site-visits booking: a picked day always ends after it starts");
+  ok(vr.includes("pickDayTimes(start.slice(11, 16), end.slice(11, 16))"), "site-visits booking: picking a nearby day takes its times from pickDayTimes");
+  const cases: Array<[string, string, string, string]> = [
+    ["", "", "09:00", "10:00"],
+    ["13:15", "", "13:15", "14:15"],
+    ["", "11:00", "10:00", "11:00"],
+    ["", "00:30", "00:00", "00:30"],
+    ["10:00", "10:00", "10:00", "11:00"],
+    ["10:00", "09:00", "10:00", "11:00"],
+    ["10:00", "10:30", "10:00", "10:30"],
+    ["08:30", "17:45", "08:30", "17:45"],
+    ["23:30", "", "23:30", "23:59"],
+    ["23:30", "23:00", "23:30", "23:59"],
+    ["23:59", "", "23:58", "23:59"],
+    ["23:59", "23:59", "23:58", "23:59"],
+    ["09:00", "00:00", "09:00", "10:00"],
+    ["", "00:00", "00:00", "01:00"],
+    ["junk", "25:99", "09:00", "10:00"],
+  ];
+  for (const [s, e, ws, we] of cases) {
+    const r = pickDayTimes(s, e);
+    ok(r.start === ws && r.end === we && r.end > r.start && r.end <= "23:59",
+      `site-visits booking: pickDayTimes("${s}", "${e}") = ${r.start}-${r.end} (want ${ws}-${we}), end after start`);
+  }
   const hook = read("src/components/visit-booking/use-booking-check.ts");
   ok(/state\.forSig === sig \? state\.error : ""/.test(hook), "site-visits booking: a stale failure is not shown while a new check loads");
   const strip = read("src/components/visit-booking/nearby-strip.tsx");
