@@ -11,6 +11,10 @@ import { mergeTodos, noteParentFor, suggestTodoKind } from "@/lib/meetings/todos
 import { rematchMeeting, syncRepMeetings, type SyncDeps } from "@/lib/meetings/sync";
 import { chicagoDayRange } from "@/lib/meetings/chicago-day";
 import { createKrispClient } from "@/lib/krisp/client";
+import * as MA from "@/lib/meetings/actions-core";
+import { allTasks, getTask } from "@/lib/stores/tasks";
+import { getNote } from "@/lib/stores/notes";
+import { activeUsers } from "@/lib/users";
 import { KrispApiError, KrispAuthError, KrispRateLimitError } from "@/lib/krisp/errors";
 import type { RecordingRecord } from "@/lib/stores/recordings";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -491,6 +495,7 @@ export async function meetings323SyncChecks(ok: Ok): Promise<void> {
   const first = await slow;
   ok(!second.complete && second.error === null && second.listed === 0 && first.complete,
     "#323 a second concurrent sync for the same rep returns at once (complete:false), the first finishes");
+  ok(second.busy === true && !first.busy, "#323 the run the in-flight guard turned away says busy; the real run does not");
   const third = await syncRepMeetings("u13", "recent", { ...deps("u13"), client: { ...deps("u13").client,
     listMeetings: async () => { throw new DOMException("The operation timed out.", "TimeoutError"); } } });
   const clientSrc = readFileSync(join(process.cwd(), "src/lib/krisp/client.ts"), "utf8");
@@ -516,4 +521,170 @@ export async function meetings323SyncChecks(ok: Ok): Promise<void> {
     return /^\s*["']use client["']/.test(src) && /@\/lib\/meetings\/(index-build|sync|sync-state)["']/.test(src);
   });
   ok(offenders.length === 0, "#323 no client module imports the match index, the sync engine or its state");
+}
+
+/* ---------- Task 5: mutations (actions-core) ---------- */
+
+export async function meetings323ActionChecks(ok: Ok): Promise<void> {
+  const me = { id: "u1", name: "Jeff Chesebro" };
+  const outsider = { id: "u-out323", name: "Out Sider" };
+  let n = 0;
+  const mk = async (over: Partial<MeetingRecord> = {}): Promise<MeetingRecord> => {
+    const kid = "TEST323act" + String(++n).padStart(22, "0");
+    const base = meetingFixture323({ krispMeetingId: kid });
+    const m = meetingFixture323({ krispMeetingId: kid, ...over, krisp: { ...base.krisp, title: "Osakis scope", ...(over.krisp || {}) } });
+    registerFixture("meetings", m.id);
+    return MS.saveMeeting(m);
+  };
+  const rejects = async (p: Promise<unknown>, cls?: new (...a: never[]) => Error): Promise<boolean> => {
+    try { await p; return false; } catch (e) { return cls ? e instanceof cls : e instanceof Error && !(e instanceof MA.MeetingAccessError); }
+  };
+  const sug = (kind: MeetingRecord["suggestions"][number]["kind"], id: string, strength: "strong" | "weak") =>
+    ({ kind, id, label: id, score: strength === "strong" ? 90 : 50, strength, reasons: ["t"] });
+  const CO = "TEST323-co", SITE = "TEST323-site";
+
+  // (1) confirm strong only; weak-only untouched by Confirm all
+  const a = await mk({ suggestions: [sug("company", CO, "strong"), sug("venue", SITE, "strong"), sug("contact", "c-tom", "weak")] });
+  const a2 = await MA.confirmSuggestions(a.id, "strong", me);
+  ok(a2.links.customerId === CO && a2.links.siteId === SITE && a2.links.contactIds.length === 0 && !!a2.filedAt && a2.filedBy === "Jeff Chesebro",
+    "#323 confirmSuggestions(strong) applies only the strong suggestions and files the meeting");
+  const weakOnly = await mk({ suggestions: [sug("company", "monte", "weak")] });
+  const strongTop = await mk({ suggestions: [sug("company", CO, "strong")] });
+  const all = await MA.confirmAllStrong([weakOnly.id, strongTop.id], me);
+  const w2 = await MS.getMeeting(weakOnly.id), s2 = await MS.getMeeting(strongTop.id);
+  ok(all.filed === 1 && w2?.filedAt === null && w2.links.customerId === null && s2?.links.customerId === CO && !!s2.filedAt,
+    "#323 confirmAllStrong files the strong-top row and leaves a weak-only meeting unchanged");
+  const picked = await mk({ suggestions: [sug("company", "oshkosh", "weak"), sug("company", "oshct", "weak")], links: { ...emptyLinks(), customerId: CO, siteId: SITE } });
+  const p2 = await MA.confirmSuggestions(picked.id, [{ kind: "company", id: "oshct" }], me);
+  ok(p2.links.customerId === "oshct" && p2.links.siteId === null, "#323 picking a different company replaces it and drops the old company's venue");
+
+  // (2) outsider on a private meeting → MeetingAccessError from every action
+  const priv = await mk({ todos: [{ key: "k", title: "x", assigneeLabel: null, dueDate: null, suggested: "note", decision: null }] });
+  const denied = await Promise.all([
+    rejects(MA.confirmSuggestions(priv.id, "strong", outsider), MA.MeetingAccessError),
+    rejects(MA.confirmAllStrong([priv.id], outsider), MA.MeetingAccessError),
+    rejects(MA.setLinks(priv.id, { customerId: CO }, outsider), MA.MeetingAccessError),
+    rejects(MA.setSpeaker(priv.id, "1", null, outsider), MA.MeetingAccessError),
+    rejects(MA.addAttendee(priv.id, { name: "Pat", email: null }, outsider), MA.MeetingAccessError),
+    rejects(MA.removeAttendee(priv.id, "name:pat", outsider), MA.MeetingAccessError),
+    rejects(MA.decideTodo(priv.id, "k", "note", {}, outsider), MA.MeetingAccessError),
+    rejects(MA.decideAllTodos(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.shareWithCustomer(priv.id, "s", outsider), MA.MeetingAccessError),
+    rejects(MA.stopSharing(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.setNoise(priv.id, false, outsider), MA.MeetingAccessError),
+    rejects(MA.refreshFromKrisp(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.confirmSuggestions("km-TEST323-missing", "strong", me), MA.MeetingAccessError),
+  ]);
+  ok(denied.every(Boolean) && (await MS.getMeeting(priv.id))?.links.customerId === null,
+    `#323 an outsider gets MeetingAccessError from every action on a private meeting (${denied.map((d) => (d ? 1 : 0)).join("")})`);
+
+  // (3) contact cap; internal-only link → internal scope
+  const lk = await mk();
+  ok(await rejects(MA.setLinks(lk.id, { contactIds: Array.from({ length: 26 }, (_, i) => `c-${i}`) }, me)),
+    "#323 setLinks refuses 26 contacts");
+  const lk2 = await MA.setLinks(lk.id, { internalUserIds: ["u2"] }, me);
+  ok(meetingScope(lk2) === "internal" && !!lk2.filedAt && canSeeMeeting(lk2, "u2"), "#323 linking only an internal person → internal scope, filed");
+
+  // (4) share guard
+  const sh = await mk();
+  await MA.setLinks(sh.id, { customerId: CO }, me);
+  const shared = await MA.shareWithCustomer(sh.id, "  Scope recap  ", me);
+  ok(shared.share?.summary === "Scope recap" && shared.share.sharedBy === "Jeff Chesebro", "#323 shareWithCustomer trims and stamps the summary");
+  ok(await rejects(MA.setLinks(sh.id, { customerId: null }, me), MA.MeetingShareGuardError) && !!(await MS.getMeeting(sh.id))?.share,
+    "#323 unlinking the last external link of a shared meeting throws MeetingShareGuardError and changes nothing");
+  const unshared = await MA.setLinks(sh.id, { customerId: null }, me, { confirmUnshare: true });
+  ok(unshared.share === null && unshared.links.customerId === null, "#323 confirmUnshare unlinks and clears the share");
+  const sh2 = await mk({ links: { ...emptyLinks(), customerId: CO } });
+  await MA.shareWithCustomer(sh2.id, "Recap", me);
+  ok(await rejects(MA.setLinks(sh2.id, { customerId: "oshkosh" }, me), MA.MeetingShareGuardError),
+    "#323 re-pointing a shared meeting at another company also needs the unshare confirmation");
+  ok(await rejects(MA.shareWithCustomer(sh2.id, "   ", me)) && await rejects(MA.shareWithCustomer(sh2.id, "x".repeat(8001), me)),
+    "#323 an empty or > 8000-char summary is refused");
+  const stopped = await MA.stopSharing(sh2.id, me);
+  ok(stopped.share === null && stopped.links.customerId === CO, "#323 stopSharing clears the share, keeps the link");
+
+  // (5) no customer → no share
+  ok(await rejects(MA.shareWithCustomer(lk.id, "Recap", me)), "#323 shareWithCustomer needs a linked company");
+
+  // (6) task: one task, linked; idempotent (also under a double click)
+  const jeff = (await activeUsers()).find((u) => u.name === "Jeff Chesebro");
+  const todo = (key: string, title: string, assigneeLabel: string | null, dueDate: string | null, suggested: "task" | "waiting" | "note") =>
+    ({ key, title, assigneeLabel, dueDate, suggested, decision: null });
+  const tm = await mk({
+    filedAt: 1, filedBy: "Jeff Chesebro",
+    links: { ...emptyLinks(), customerId: CO, siteId: SITE, contactIds: ["c-tom"], work: { type: "lead", id: "TEST323-lead", label: "Lead" } },
+    krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis scope",
+      segments: [{ speaker: "2", text: "Speaker 2 will send it", start: 0, end: 1 }] },
+    speakerMap: { "2": { contactId: "c-tom", name: "Tom Ellis" } },
+    todos: [todo("k1", "Send drawings", "Jeff Chesebro", "2026-10-15", "task"), todo("k1b", "Book lift", "Jeff", null, "task"),
+      todo("k2", "Send the rigging plot", "Speaker 2", null, "waiting")],
+  });
+  const before = (await allTasks()).length;
+  const d1 = await MA.decideTodo(tm.id, "k1", "task", {}, me);
+  const tid = d1.todos.find((t) => t.key === "k1")?.decision?.createdId || "";
+  if (tid) registerFixture("tasks", tid);
+  const task = await getTask(tid);
+  ok(!!task && task.meetingId === tm.id && task.customerId === CO && task.siteId === SITE && task.leadId === "TEST323-lead" &&
+     (task.contactIds || []).join() === "c-tom" && !!jeff && task.assigneeUserId === jeff.id && task.dueAt === Date.UTC(2026, 9, 15, 22),
+    "#323 decideTodo(task) creates a task carrying meeting/company/venue/lead/contacts, the resolved assignee, due 17:00 Chicago");
+  const d1again = await MA.decideTodo(tm.id, "k1", "task", {}, me);
+  ok(d1again.todos.find((t) => t.key === "k1")?.decision?.createdId === tid && (await allTasks()).length === before + 1,
+    "#323 decideTodo is idempotent: the same createdId, no second task");
+  const [r1, r2] = await Promise.all([MA.decideTodo(tm.id, "k1b", "task", {}, me), MA.decideTodo(tm.id, "k1b", "task", {}, me)]);
+  const b1 = r1.todos.find((t) => t.key === "k1b")?.decision?.createdId, b2 = r2.todos.find((t) => t.key === "k1b")?.decision?.createdId;
+  if (b1) registerFixture("tasks", b1);
+  ok(!!b1 && b1 === b2 && (await allTasks()).length === before + 2, "#323 two concurrent decides of one to-do create one task");
+
+  // (7) waiting on the customer
+  const t0 = Date.now();
+  const d2 = await MA.decideTodo(tm.id, "k2", "waiting", {}, me);
+  const wid = d2.todos.find((t) => t.key === "k2")?.decision?.createdId || "";
+  if (wid) registerFixture("tasks", wid);
+  const wt = await getTask(wid);
+  const WEEK = 7 * 86_400_000;
+  ok(!!wt && wt.waitingOn?.name === "Tom Ellis" && wt.waitingOn.contactId === "c-tom" && wt.assigneeUserId === "u1" &&
+     wt.dueAt != null && wt.dueAt >= t0 + WEEK && wt.dueAt <= Date.now() + WEEK && wt.meetingId === tm.id,
+    "#323 decideTodo(waiting) → task waiting on the mapped speaker, owned by the rep, due in 7 days");
+
+  // (8) note on the venue
+  const nm = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), customerId: CO, siteId: "TEST323-site2" },
+    todos: [todo("k3", "Ceiling height", null, null, "note")] });
+  const d3 = await MA.decideTodo(nm.id, "k3", "note", {}, me);
+  const nid = d3.todos.find((t) => t.key === "k3")?.decision?.createdId || "";
+  if (nid) registerFixture("notes", nid);
+  const note = await getNote(nid);
+  ok(!!note && note.parentKind === "site" && note.parentId === "TEST323-site2" && note.customerId === CO, "#323 decideTodo(note) on a venue-linked meeting → a site note");
+
+  // (9) unfiled → refused
+  const uf = await mk({ todos: [todo("k4", "x", null, null, "note")] });
+  ok(await rejects(MA.decideTodo(uf.id, "k4", "dismiss", {}, me)), "#323 decideTodo refuses an unfiled meeting");
+
+  // (10) speaker map
+  const sp = await mk({ krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis",
+    segments: [{ speaker: "2", text: "hi", start: 0, end: 1 }] } });
+  const names = { contact: () => null, user: () => null };
+  const sp1 = await MA.setSpeaker(sp.id, "2", { contactId: "c-tom", name: "Tom Ellis" }, me);
+  const sp2 = await MA.setSpeaker(sp.id, "2", null, me);
+  ok(renderMeeting(sp1, names).segments[0].speakerName === "Tom Ellis" && renderMeeting(sp2, names).segments[0].speakerName === "Speaker 2" &&
+     !("2" in sp2.speakerMap), "#323 setSpeaker maps a speaker; null clears it");
+  ok(await rejects(MA.setSpeaker(sp.id, "9", { name: "Nobody" }, me)), "#323 setSpeaker refuses an unknown speaker index");
+
+  // (11) remove keeps the row, a later merge keeps it removed; add re-instates
+  const at = await mk({ attendees: [{ key: "tom@osakis.k12.mn.us", name: "Tom Ellis", email: "tom@osakis.k12.mn.us", sources: ["krisp"], removed: false, contactId: null, userId: null }] });
+  const rm = await MA.removeAttendee(at.id, "tom@osakis.k12.mn.us", me);
+  const merged = mergeAttendees(rm.attendees, [{ email: "tom@osakis.k12.mn.us", firstName: "Tom", lastName: "Ellis" }], null);
+  ok(rm.attendees.length === 1 && rm.attendees[0].removed && merged.length === 1 && merged[0].removed,
+    "#323 removeAttendee flags (never deletes); a later sync merge keeps it removed");
+  const ad = await MA.addAttendee(at.id, { name: "Pat Lee", email: "Pat@Example.com", contactId: "c-pat" }, me);
+  const back = await MA.addAttendee(at.id, { name: "Tom Ellis", email: "tom@osakis.k12.mn.us" }, me);
+  const pat = ad.attendees.find((x) => x.key === "pat@example.com");
+  ok(!!pat && pat.sources.join() === "manual" && pat.contactId === "c-pat" && back.attendees.find((x) => x.email === "tom@osakis.k12.mn.us")?.removed === false,
+    "#323 addAttendee adds a manual attendee, and re-adding a removed one restores it");
+
+  // noise override
+  const nz = await mk({ krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis quick", durationSec: 45 }, noise: true });
+  const nz2 = await MA.setNoise(nz.id, false, me);
+  const nz3 = await MA.setNoise(nz.id, true, me);
+  ok(nz2.noise === false && nz2.noiseOverride === true && nz3.noise === true && nz3.noiseOverride === false,
+    "#323 setNoise(false) overrides a short meeting out of Noise; setNoise(true) puts it back");
 }

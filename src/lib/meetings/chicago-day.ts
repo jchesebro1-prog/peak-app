@@ -21,10 +21,10 @@ function chicagoOffsetMs(at: number): number {
   return wallAsUtc - Math.floor(at / 1000) * 1000;
 }
 
-/** Epoch ms of 00:00 America/Chicago on the given calendar date. Two passes:
+/** Epoch ms of `hour`:00 (default 00:00) America/Chicago on the given calendar date. Two passes:
  *  the offset at the first guess can sit on the far side of a DST change. */
-function chicagoMidnight(y: number, m: number, d: number): number {
-  const wall = Date.UTC(y, m - 1, d);
+function chicagoMidnight(y: number, m: number, d: number, hour = 0): number {
+  const wall = Date.UTC(y, m - 1, d, hour);
   let t = wall - chicagoOffsetMs(wall);
   t = wall - chicagoOffsetMs(t);
   return t;
@@ -40,4 +40,13 @@ export function chicagoDayRange(ymd: string | null | undefined): [number, number
   if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null;
   const next = new Date(Date.UTC(y, mo - 1, d + 1));
   return [chicagoMidnight(y, mo, d), chicagoMidnight(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate())];
+}
+
+/** "YYYY-MM-DD" (an ISO datetime's date part is read the same way) → epoch ms
+ *  of `hour`:00 America/Chicago that day; anything that isn't a real date → null.
+ *  A Krisp to-do's due date becomes 17:00 Chicago (#323). */
+export function chicagoAt(ymd: string | null | undefined, hour: number): number | null {
+  const p = /^(\d{4})-(\d{2})-(\d{2})/.exec((ymd || "").trim());
+  if (!p || !chicagoDayRange(p[0])) return null;
+  return chicagoMidnight(+p[1], +p[2], +p[3], hour);
 }

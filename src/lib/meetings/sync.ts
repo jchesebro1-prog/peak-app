@@ -67,7 +67,11 @@ export type SyncDeps = {
   budgetMs: number;
 };
 
-export type SyncResult = { listed: number; created: number; detailed: number; complete: boolean; error: string | null };
+export type SyncResult = {
+  listed: number; created: number; detailed: number; complete: boolean; error: string | null;
+  /** set when another sync for this rep was already running in this process, so this one did nothing */
+  busy?: boolean;
+};
 
 const PACE_MS = 220; // ≤ 5 req/s per Krisp account
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -181,7 +185,7 @@ function isTimeout(e: unknown): boolean {
 const inFlight = new Set<string>();
 
 export async function syncRepMeetings(userId: string, mode: "recent" | "backfill", deps: SyncDeps): Promise<SyncResult> {
-  if (inFlight.has(userId)) return { listed: 0, created: 0, detailed: 0, complete: false, error: null };
+  if (inFlight.has(userId)) return { listed: 0, created: 0, detailed: 0, complete: false, error: null, busy: true };
   inFlight.add(userId);
   try {
     return await syncRepMeetingsOnce(userId, mode, deps);
