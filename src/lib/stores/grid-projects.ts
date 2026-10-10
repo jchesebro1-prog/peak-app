@@ -48,6 +48,8 @@ import {
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
+import { copyConduitRiserDoc, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import { pruneConduitRisersIn } from "@/lib/design/conduit-riser/live";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -243,6 +245,9 @@ export type GridRevision = {
    *  Absent on older snapshots — restore then leaves the current values. */
   levels?: GridLevel[];
   sheetLevels?: Record<string, string>;
+  /** Conduit riser documents at snapshot time (#321). Absent on older
+   *  snapshots — restore then clears them. */
+  conduitRiser?: Record<string, ConduitRiserDoc>;
 };
 
 /**
@@ -349,6 +354,10 @@ export type GridProject = {
   /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
+  /** Conduit riser document per option id (#321) — what the plan can't
+   *  know: details, pinned tags, stubs, accepted conduit runs, dismissals,
+   *  power types, notes and pricing defaults. Devices and wires stay derived. */
+  conduitRiser?: Record<string, ConduitRiserDoc>;
   /** Riser levels (#321) — the floor lines device tags sit on, in `order`. */
   levels?: GridLevel[];
   /** Default level per sheet id (#321); a device's space level wins. On the
@@ -392,6 +401,11 @@ function rid(prefix: string): string {
   const bytes = new Uint8Array(6);
   crypto.getRandomValues(bytes);
   return prefix + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Conduit riser ids (#321): prefix + 12 hex characters. */
+function crId(prefix: string): string {
+  return prefix + crypto.randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
 /** #318: the one sentence for a write aimed at a sheet the design no longer
@@ -781,6 +795,7 @@ function dropSheetInPatch(p: GridProject, sheetId: string, by: string, note: str
     pushRevision(p, by, "manual", note);
     p.spaces = (p.spaces || []).filter((sp) => !dropped.has(sp.id));
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: dropped });
+    pruneConduitRisersIn(p);
   }
   p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
   if (p.sheetLevels && sheetId in p.sheetLevels) {
@@ -1018,6 +1033,7 @@ export async function replaceAutoPlacements(
     // #320: the removed Auto devices' numbers are free again, so a re-fill renumbers its scope.
     stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    if (gone.size) pruneConduitRisersIn(p);
     removed = gone.size;
     added = fresh.length;
     p.updatedAt = at;
@@ -1202,6 +1218,8 @@ export async function removePlacement(
     p.placements = (p.placements || []).filter((pl) => pl.id !== placementId);
     // A riser link or conduit that ended on this device goes with it (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
+    // Its conduit runs and pinned tag go too (#321).
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -1312,6 +1330,7 @@ export async function removePlacements(projectId: string, ids: string[]): Promis
       p.riser = pruneRisers(p.riser, { placementIds: gone });
       riser = riserRemovedBetween(before, p.riser);
     }
+    pruneConduitRisersIn(p);
     return { placements, riser };
   });
 }
@@ -2006,6 +2025,8 @@ export async function setLevels(projectId: string, raw: unknown): Promise<GridPr
       if (Object.keys(next).length) p.sheetLevels = next;
       else delete p.sheetLevels;
     }
+    // A removed level's dragged line positions go with it (#321).
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -2068,6 +2089,7 @@ export async function removeSpace(
     p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
     // Its riser box, and any link/conduit ending on it, go too (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: new Set([spaceId]) });
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -2120,6 +2142,8 @@ export async function removeRoute(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.routes = (p.routes || []).filter((r) => r.id !== routeId);
+    // A conduit keeps standing when its last wire goes — only the member drops (#321).
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -2169,7 +2193,14 @@ export async function addOption(
       // at the copied placements (#209).
       const srcRiser = doc.riser?.[input.copyFromOptionId];
       if (srcRiser) {
-        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
+        // copied.idMap also learns old → new link ids, for the conduit riser below.
+        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, copied.idMap) };
+      }
+      // …and its own conduit riser, runs re-pointed at the copied devices,
+      // wires and links (#321).
+      const srcConduit = doc.conduitRiser?.[input.copyFromOptionId];
+      if (srcConduit) {
+        doc.conduitRiser = { ...doc.conduitRiser, [option.id]: copyConduitRiserDoc(srcConduit, copied.idMap, (prefix) => crId(prefix)) };
       }
       // The copied placements keep their auto tags, so the copy carries the
       // source option's Auto choices with them (#211, D312).
@@ -2236,6 +2267,11 @@ export async function removeOption(
       const riser = { ...doc.riser };
       delete riser[optionId];
       doc.riser = riser;
+    }
+    if (doc.conduitRiser && optionId in doc.conduitRiser) {
+      const conduit = { ...doc.conduitRiser };
+      delete conduit[optionId];
+      doc.conduitRiser = conduit;
     }
     // A legacy single estimate belongs to the pre-removal first option (#211, D312).
     if (doc.autoEstimate) {
@@ -2429,6 +2465,8 @@ function snapshotOf(
     routes: [...(p.routes || [])],
     // Deep copy: the riser document is nested and patched in place later.
     riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
+    // The conduit riser is design state too (#321) — deep-copied the same way.
+    ...(p.conduitRiser ? { conduitRiser: JSON.parse(JSON.stringify(p.conduitRiser)) as Record<string, ConduitRiserDoc> } : {}),
     // Riser levels are design state too (#321); a space's level rides in `spaces`.
     levels: (p.levels || []).map((l) => ({ ...l })),
     sheetLevels: { ...(p.sheetLevels || {}) },
@@ -2572,6 +2610,14 @@ export async function restoreRevision(
     // still holds the current ones).
     const restoredEsts = autoEstimatesOf(target.autoEstimate, doc.options![0].id);
     const liveOptionIds = new Set(doc.options!.map((o) => o.id));
+    // The conduit riser comes back with the plan it annotates (#321), kept
+    // only for options that exist after the restore; a snapshot cut before
+    // it existed clears it (the snapshot just pushed above holds the current one).
+    const restoredConduit = Object.fromEntries(
+      Object.entries(target.conduitRiser || {}).filter(([k]) => liveOptionIds.has(k)).map(([k, v]) => [k, JSON.parse(JSON.stringify(v)) as ConduitRiserDoc])
+    );
+    if (Object.keys(restoredConduit).length) doc.conduitRiser = restoredConduit;
+    else delete doc.conduitRiser;
     for (const k of Object.keys(restoredEsts)) if (!liveOptionIds.has(k)) delete restoredEsts[k];
     if (Object.keys(restoredEsts).length) doc.autoEstimate = restoredEsts;
     else delete doc.autoEstimate;

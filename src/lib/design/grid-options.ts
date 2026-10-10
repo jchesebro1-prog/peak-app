@@ -166,6 +166,7 @@ export function copyOptionMembers<
     .filter((r) => r.optionId === input.fromOptionId)
     .map((r) => {
       const next = { ...r, id: input.makeId("wr-"), optionId: input.toOptionId, by: input.by, at: input.at } as R;
+      idMap.set(r.id, next.id);
       if (r.fromPlacementId) {
         const m = idMap.get(r.fromPlacementId);
         if (m) next.fromPlacementId = m; else delete next.fromPlacementId;
@@ -176,7 +177,8 @@ export function copyOptionMembers<
       }
       return next;
     });
-  // idMap (old placement id → copied id) lets the caller re-point anything
-  // else that references devices — the riser document's links (#209).
+  // idMap (old placement and route id → copied id) lets the caller re-point
+  // anything else that references devices or wires — the riser document's
+  // links (#209), the conduit riser's runs (#321).
   return { placements, routes, idMap };
 }

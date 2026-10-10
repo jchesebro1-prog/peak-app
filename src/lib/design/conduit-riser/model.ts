@@ -698,3 +698,66 @@ export function patchConduitRiser(
     }
   }
 }
+
+/**
+ * A copied design option's riser document (option copy, the copyRiserDoc
+ * idiom). `idMap` maps the source option's placement, route and RiserLink
+ * ids to the copy's; ends, member wires, pinned tags and dismissals are
+ * re-pointed through it and anything unmapped is dropped. Details, stubs,
+ * runs and notes get new ids (stub ends, tag and stub `detailId`s and
+ * dragged level positions follow). Spaces and levels belong to the project,
+ * not the option, so their ids are kept. Pure; never mutates `src`.
+ */
+export function copyConduitRiserDoc(src: unknown, idMap: ReadonlyMap<string, string>, makeId: MakeId): ConduitRiserDoc {
+  const d = normalizeConduitRiserDoc(src);
+  const detailMap = new Map(d.details.map((x) => [x.id, makeId("dt-")]));
+  const stubMap = new Map(d.stubs.map((x) => [x.id, makeId("st-")]));
+  const details = d.details.map((x) => ({ ...x, id: detailMap.get(x.id)!, spaceIds: [...x.spaceIds] }));
+  const stubs = d.stubs.map((x) => ({ ...x, id: stubMap.get(x.id)!, detailId: detailMap.get(x.detailId)! }));
+  const tags: Record<string, TagPos> = {};
+  for (const [id, pos] of Object.entries(d.tags)) {
+    const next = idMap.get(id);
+    if (next) tags[next] = { ...pos, detailId: detailMap.get(pos.detailId)! };
+  }
+  const mapEnd = (e: RunEnd): RunEnd | null => {
+    if (e.kind === "placement") {
+      const next = idMap.get(e.placementId);
+      return next ? { kind: "placement", placementId: next } : null;
+    }
+    const next = stubMap.get(e.stubId);
+    return next ? { kind: "stub", stubId: next } : null;
+  };
+  const mapIds = (ids: readonly string[]) => ids.flatMap((id) => idMap.get(id) ?? []);
+  const runs: ConduitRun[] = [];
+  for (const r of d.runs) {
+    const a = mapEnd(r.a);
+    const b = mapEnd(r.b);
+    if (!a || !b) continue;
+    runs.push({ ...r, id: makeId("cr-"), a, b, routeIds: mapIds(r.routeIds), linkIds: mapIds(r.linkIds), ...(r.signals ? { signals: [...r.signals] } : {}) });
+  }
+  const dismissed: Dismissal[] = [];
+  for (const x of d.dismissed) {
+    const [p, q] = x.key.split("|");
+    const np = idMap.get(p);
+    const nq = idMap.get(q);
+    if (np && nq) dismissed.push({ key: pairKey(np, nq), ids: mapIds(x.ids) });
+  }
+  const levelY: Record<string, Record<string, number>> = {};
+  for (const [dk, row] of Object.entries(d.levelY)) {
+    const next = detailMap.get(dk);
+    if (next) levelY[next] = { ...row };
+  }
+  return normalizeConduitRiserDoc({
+    ...d,
+    details,
+    tags,
+    stubs,
+    runs,
+    dismissed,
+    levelY,
+    alwaysShow: [...d.alwaysShow],
+    powerTypes: d.powerTypes.map((p) => ({ ...p })),
+    notes: d.notes.map((n) => ({ ...n, id: makeId("nt-") })),
+    defaults: { ...d.defaults },
+  });
+}

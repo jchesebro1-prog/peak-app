@@ -24,6 +24,7 @@ import { planRowQty } from "@/lib/design/grid-riser";
 import { AUTO_QTY_MAX, sanitizeAutoOrigin, withoutAuto } from "@/lib/design/grid-auto-model";
 import { keepsDesignatorOnSwap, stampNewDesignators } from "@/lib/design/designators";
 import { designatorContext } from "@/lib/design/designators-server";
+import { pruneConduitRisersIn } from "@/lib/design/conduit-riser/live";
 import type { GridPlacement, GridProject } from "./grid-projects";
 
 /**
@@ -150,6 +151,8 @@ export async function patchRiser(
       return;
     }
     p.riser = { ...(p.riser || {}), [optionId]: res.doc };
+    // A removed RiserLink leaves any conduit it was a member of (#321).
+    if (op.op === "removeLink") pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
@@ -369,6 +372,7 @@ export async function removeNodeDevices(
     }
     p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    pruneConduitRisersIn(p);
     removed = gone.size;
     p.updatedAt = Date.now();
   });
