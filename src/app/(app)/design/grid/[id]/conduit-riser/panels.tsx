@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
 import { FIELD, INPUT, PartPicker, type RiserPartOption } from "../riser/riser-panels";
 import { BRAY_POWER_TYPES, MAX_RUN_FT, type ConduitRiserDefaults, type PowerType, type RiserDetail, type RiserNote, type RiserStub } from "@/lib/design/conduit-riser/model";
-import { TAG_LIMITS, type EffectiveTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
+import { TAG_LIMITS, tagPanelPatch, type EffectiveTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import type { CRBoxType, CRDevice, CRWireType } from "@/lib/design/conduit-riser/input";
 import type { ViewRun } from "@/lib/design/conduit-riser/derive";
 import type { GridLevel } from "@/lib/design/grid-levels";
@@ -103,6 +103,7 @@ const TAG_FIELDS: { key: keyof EffectiveTag; label: string; width: number; list?
 
 export function TagPanel({
   device,
+  overrides,
   powerTypes,
   pinned,
   planHref,
@@ -112,6 +113,8 @@ export function TagPanel({
   onClose,
 }: {
   device: CRDevice;
+  /** The placement's own tag fields — what a save compares against. */
+  overrides: PlacementTag | undefined;
   powerTypes: PowerType[];
   pinned: boolean;
   planHref: string;
@@ -122,8 +125,8 @@ export function TagPanel({
 }) {
   const [v, setV] = useState<EffectiveTag>(device.tag);
   const set = (k: keyof EffectiveTag, x: string) => setV((cur) => ({ ...cur, [k]: x }));
-  const patch: TagPatch = {};
-  for (const k of Object.keys(v) as (keyof EffectiveTag)[]) if (v[k] !== device.tag[k]) patch[k] = v[k];
+  // A cleared field reverts (null); retyping what it inherits sets nothing.
+  const patch = tagPanelPatch(v, device.tag, overrides);
   const dirty = Object.keys(patch).length > 0;
   const letters = powerTypes.map((p) => p.letter);
   if (v.power && !letters.includes(v.power)) letters.push(v.power);

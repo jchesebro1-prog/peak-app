@@ -16,6 +16,7 @@ import { conduitRiserSheetNumber, drawingArea, resolveSheetSize } from "@/lib/de
 import { layoutDetail } from "@/lib/design/conduit-riser/layout";
 import { detailGeometry, tableGeometry } from "@/lib/design/conduit-riser/drawing";
 import { LIGHTING_ALWAYS_SHOW } from "@/lib/design/conduit-riser/model";
+import { cleanPlacementTag } from "@/lib/design/conduit-riser/tags";
 import { ConduitRiserFigure } from "@/components/drawing/conduit-riser-figure";
 import ConduitRiserEditor, { type SuggestionRow } from "./conduit-riser-editor";
 
@@ -200,6 +201,12 @@ export default async function ConduitRiserPage({
         }))}
         placements={slice.placements.filter((pl) => !pl.curtain).map((pl) => ({ id: pl.id, sheetId: pl.sheetId, page: pl.page, x: pl.x, y: pl.y }))}
         calibrations={(project.calibrations || []).map((c) => ({ docId: c.docId, page: c.page }))}
+        tagOverrides={Object.fromEntries(
+          slice.placements.flatMap((pl) => {
+            const t = pl.curtain ? undefined : cleanPlacementTag(pl.tag);
+            return t ? [[pl.id, t] as const] : [];
+          })
+        )}
       />
 
       {tables.length > 0 && (

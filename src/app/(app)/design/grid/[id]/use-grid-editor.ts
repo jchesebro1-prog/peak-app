@@ -50,6 +50,7 @@ import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, Rem
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import { riserPromptForRouteAction } from "./conduit-riser/actions";
+import { placementSystem } from "@/lib/design/grid-drawing-set";
 import {
   addRouteAction,
   addSpaceAction,
@@ -575,7 +576,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** #321: "Add to the lighting control riser?" after a device-to-device wire.
    *  One at a time — a newer wire's prompt replaces an older one; the ticket
    *  drops an answer that arrives after it was replaced or dismissed. */
-  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean } | null>(null);
+  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean; byOthers: boolean } | null>(null);
   const riserTicket = useRef(0);
   const hideRiserPrompt = useCallback(() => {
     riserTicket.current++;
@@ -586,7 +587,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     setRiserPrompt(null);
     riserPromptForRouteAction(project.id, optionId, routeId)
       .then((r) => {
-        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins });
+        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins, byOthers: r.byOthers });
       })
       .catch(() => {});
   }, [project.id]);
@@ -1715,7 +1716,14 @@ function useGridEditorImpl(props: GridEditorProps) {
             clearUndo();
             router.refresh();
             // After the refresh is on its way — the check never holds drawing up.
-            if (fromPlacementId && toPlacementId) askRiserPrompt(activeOptionId, r.routeId);
+            // Only a pair with a lighting device can ever be offered — any
+            // other pair skips the server round trip (#321 final review).
+            if (
+              fromPlacement &&
+              toPlacement &&
+              (placementSystem(fromPlacement, partById) === "lighting" || placementSystem(toPlacement, partById) === "lighting")
+            )
+              askRiserPrompt(activeOptionId, r.routeId);
           }
         });
         return;

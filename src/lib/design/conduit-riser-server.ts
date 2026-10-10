@@ -2,14 +2,16 @@
 // riser settings blobs. Never import from a "use client" file.
 import { designatorDigitsOf, getSettings, type AppSettingsData } from "@/lib/settings";
 import type { GridPlacement, GridProject, GridRoute } from "@/lib/stores/grid-projects";
-import { list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
+import { getMany as getCatalogParts, getManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { listGridSymbols, type GridSymbol } from "@/lib/stores/grid-catalog";
+import { getDocRows } from "@/db/doc-store";
+import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { resolveWireTypes, type WireType } from "@/lib/catalog-connect";
 import { hasOption, optionSlice } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
-import { loadDeviceTypeContext } from "@/lib/stores/device-types";
+import { getDeviceTypes, getTypeMap, loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { getFixture } from "@/lib/stores/fixtures";
 import { fixtureLineParts } from "@/lib/fixture-assemblies";
 import { parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
@@ -30,7 +32,7 @@ import { deriveView, type CRView, type DeriveInput } from "@/lib/design/conduit-
 import { suggestions, type SuggestResult } from "@/lib/design/conduit-riser/suggest";
 import { riserTables, type TableModel } from "@/lib/design/conduit-riser/tables";
 import { effectiveTag } from "@/lib/design/conduit-riser/tags";
-import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
+import { effectivePricing, type ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { layoutDetail } from "@/lib/design/conduit-riser/layout";
 import { composeSheets, detailGeometry, type SheetPage } from "@/lib/design/conduit-riser/drawing";
 
@@ -65,45 +67,100 @@ export type RiserPartsContext = {
 
 export const RACK_TYPE_KEY = "racks-cases";
 
-/** Parts (catalog, Grid library, virtual), device types, digits, wire types
- *  and rack contents — the drawing-set-data parts, plus racks. */
-export async function loadRiserPartsContext(
+/** Every part id the project's riser can read: devices, wires and RiserLinks
+ *  across all options (curtains never reach the riser). */
+function riserPartIds(project: GridProject): string[] {
+  const ids = new Set<string>();
+  for (const pl of project.placements || []) if (!pl.curtain && pl.partId) ids.add(pl.partId);
+  for (const r of project.routes || []) if (r.partId) ids.add(r.partId);
+  for (const doc of Object.values(project.riser || {})) for (const l of normalizeRiserDoc(doc).links) if (l.partId) ids.add(l.partId);
+  return [...ids];
+}
+
+/**
+ * Only the parts this project names (#321 final review): their Grid-library
+ * docs by id, the catalog rows behind them (and behind each symbol's pricing
+ * part), and the virtual Auto parts — never the whole book. Read-only: the
+ * stored type map is read as is, so a click never writes the type-map blob.
+ * Modelled on `designatorContext`; the same `gridPartsFrom` builds each part,
+ * so a device or wire reads exactly as it does from the full catalog.
+ */
+async function scopedRiserParts(
   project: GridProject,
-  deps: ConduitRiserDeps = {}
-): Promise<RiserPartsContext & { settings: AppSettingsData; catalog: CatalogPart[] }> {
-  const [catalog, gridSymbols, settings] = await Promise.all([
-    deps.catalog ?? listCatalog(),
-    deps.gridSymbols ?? listGridSymbols(),
-    deps.settings ?? getSettings(),
+  settings: AppSettingsData,
+  deviceTypesIn: DeviceTypeContext | undefined
+): Promise<{ parts: PartLite[]; deviceTypes: DeviceTypeContext }> {
+  const ids = riserPartIds(project);
+  const virtualIds = ids.filter((id) => parseVirtualPartId(id));
+  const realIds = ids.filter((id) => !parseVirtualPartId(id) && !isSeedPlaceholder(id));
+  const [types, map, symbolRows, virtual] = await Promise.all([
+    deviceTypesIn ? Promise.resolve(deviceTypesIn.types) : getDeviceTypes(),
+    deviceTypesIn ? Promise.resolve(deviceTypesIn.map) : getTypeMap(),
+    realIds.length ? getDocRows<GridSymbol>("grid_catalog", realIds) : Promise.resolve([]),
+    virtualIds.length ? loadVirtualParts(virtualIds) : Promise.resolve([]),
   ]);
-  const deviceTypes = deps.deviceTypes ?? (await loadDeviceTypeContext(catalog));
-  const parts = [
-    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
-    ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
-  ];
+  const symbols = symbolRows.filter((r) => !r.deleted).map((r) => r.doc);
+  const pricingIds = [...new Set([...realIds, ...symbols.flatMap((s) => (s.pricingPartId ? [s.pricingPartId] : []))])];
+  const catalog = pricingIds.length ? await getCatalogParts(pricingIds) : [];
+  const deviceTypes = { types, map };
+  return {
+    parts: [...gridPartsFrom(symbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }), ...virtual],
+    deviceTypes,
+  };
+}
+
+/** Parts (catalog, Grid library, virtual), device types, digits, wire types
+ *  and rack contents — the drawing-set-data parts, plus racks. With
+ *  `deps.catalog` (a page that already loaded the book) it builds from that;
+ *  otherwise only the parts this project names are read (scoped mode). */
+export async function loadRiserPartsContext(project: GridProject, deps: ConduitRiserDeps = {}): Promise<RiserPartsContext & { settings: AppSettingsData }> {
+  const settings = deps.settings ?? (await getSettings());
+  let parts: PartLite[];
+  let deviceTypes: DeviceTypeContext;
+  const full = deps.catalog;
+  if (full) {
+    const gridSymbols = deps.gridSymbols ?? (await listGridSymbols());
+    deviceTypes = deps.deviceTypes ?? (await loadDeviceTypeContext(full));
+    parts = [
+      ...gridPartsFrom(gridSymbols, full, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
+      ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), full)),
+    ];
+  } else {
+    ({ parts, deviceTypes } = await scopedRiserParts(project, settings, deps.deviceTypes));
+  }
   const partById = new Map(parts.map((p) => [p.id, p]));
   // A rack is an `asm:` part whose fixture record is kind "rack" (#296) —
   // one fixture read per distinct assembly placed.
   const asmIds = [...new Set((project.placements || []).filter((pl) => !pl.curtain).map((pl) => pl.partId))].filter(
     (id) => parseVirtualPartId(id)?.kind === "assembly"
   );
-  const bySku = new Map(catalog.map((p) => [p.sku, p]));
+  const rackFixtures = (
+    await Promise.all(
+      asmIds.map(async (partId) => {
+        const ref = parseVirtualPartId(partId);
+        const f = ref?.kind === "assembly" ? await getFixture(ref.id) : null;
+        return f && f.kind === "rack" ? { partId, lines: fixtureLineParts(f).filter(({ slot, line }) => slot === "rack" && line.qty > 0).map(({ line }) => line) } : null;
+      })
+    )
+  ).filter((x): x is NonNullable<typeof x> => !!x);
+  // Each rack line's description: the catalog row behind its SKU — only the
+  // member SKUs in scoped mode.
+  const memberSkus = [...new Set(rackFixtures.flatMap((r) => r.lines.map((l) => l.sku)).filter(Boolean))];
+  const bySku: ReadonlyMap<string, CatalogPart> = full
+    ? new Map(full.map((p) => [p.sku, p]))
+    : memberSkus.length
+      ? await getManyBySku(memberSkus)
+      : new Map();
   const racks = new Map<string, { desc: string; qty: number }[]>();
-  await Promise.all(
-    asmIds.map(async (partId) => {
-      const ref = parseVirtualPartId(partId);
-      const f = ref?.kind === "assembly" ? await getFixture(ref.id) : null;
-      if (!f || f.kind !== "rack") return;
-      const items = new Map<string, number>();
-      for (const { slot, line } of fixtureLineParts(f)) {
-        if (slot !== "rack" || !(line.qty > 0)) continue;
-        const desc = bySku.get(line.sku)?.desc || line.label || line.sku;
-        items.set(desc, (items.get(desc) || 0) + line.qty);
-      }
-      racks.set(partId, [...items].map(([desc, qty]) => ({ desc, qty })));
-    })
-  );
-  return { partById, deviceTypes, digits: designatorDigitsOf(settings), wireTypes: resolveWireTypes(settings.wireTypes), racks, settings, catalog };
+  for (const { partId, lines } of rackFixtures) {
+    const items = new Map<string, number>();
+    for (const line of lines) {
+      const desc = bySku.get(line.sku)?.desc || line.label || line.sku;
+      items.set(desc, (items.get(desc) || 0) + line.qty);
+    }
+    racks.set(partId, [...items].map(([desc, qty]) => ({ desc, qty })));
+  }
+  return { partById, deviceTypes, digits: designatorDigitsOf(settings), wireTypes: resolveWireTypes(settings.wireTypes), racks, settings };
 }
 
 /** Wire types the riser can print a bubble for (a non-empty symbol). */
@@ -262,14 +319,26 @@ export async function conduitRiserSheetPages(project: GridProject, optionId: str
   return conduitRiserPagesOf(await loadConduitRiser(project, optionId, deps), drawingArea(size));
 }
 
-export type RiserPrompt = { show: false } | { show: true; key: string; label: string; joins: boolean };
+export type RiserPrompt =
+  | { show: false }
+  | {
+      show: true;
+      key: string;
+      label: string;
+      joins: boolean;
+      /** The pair's wire would be listed "by others" — its effective wire
+       *  pricing (the run's override ?? the doc default; a new run takes the
+       *  default) is off. Never on an estimate-owned option. */
+      byOthers: boolean;
+    };
 
 /**
  * The plan's "Add to the lighting control riser?" (#321): shown only when
  * the engine offers a suggestion that includes this route — so an audio
  * pair, a loose wire, a wire already in a run and a dismissed pair say
  * nothing. `label` names the ends in the direction the wire was drawn;
- * `joins` means the pair already has a run, so Add extends it.
+ * `joins` means the pair already has a run, so Add extends it; `byOthers`
+ * says its wire won't be priced.
  */
 export async function riserPromptFor(project: GridProject, optionId: string, routeId: string, deps: ConduitRiserDeps = {}): Promise<RiserPrompt> {
   const none: RiserPrompt = { show: false };
@@ -282,5 +351,7 @@ export async function riserPromptFor(project: GridProject, optionId: string, rou
   const from = label(wire?.from ?? s.a);
   const to = label(wire?.to ?? s.b);
   if (!from || !to) return none;
-  return { show: true, key: s.key, label: `${from} → ${to}`, joins: s.kind === "join" };
+  const run = s.kind === "join" ? data.doc.runs.find((r) => r.id === s.runId) : undefined;
+  const byOthers = !data.estimateOwned && !(run ? effectivePricing(run, data.doc.defaults).wire : data.doc.defaults.priceWire);
+  return { show: true, key: s.key, label: `${from} → ${to}`, joins: s.kind === "join", byOthers };
 }

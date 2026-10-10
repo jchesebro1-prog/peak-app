@@ -253,7 +253,7 @@ export async function buildGridQuote(
     placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
     labelOf: riserEndLabeler(conduitDoc, placements, (id) => descById.get(id), digits),
   });
-  if (riser.refusals.length) return { ok: false, error: riser.refusals.join(" ") };
+  if (riser.refusals.length) return { ok: false, error: riser.refusals.map((s) => s + ".").join(" ") };
   const wires = riser.wires;
   const conduit = riser.conduit;
 

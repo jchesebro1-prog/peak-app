@@ -929,8 +929,9 @@ See `.env.example`.
     default, parts carry a Designator code and Riser tag defaults, devices override
     per field, levels live on spaces and `sheetLevels` on the project; wire types
     gain Symbol/Signal, and `riser_box_types` / `conduit_sizes` are settings blobs.
-    Pricing is opt-in per run (wire and conduit both default off; unpriced wire is
-    "by others"; refusals block promote; estimate-owned options ignore it). Remaining
+    Pricing: wire and conduit are both off by default per design, with a per-run
+    override (unpriced wire is "by others"; refusals block promote; estimate-owned
+    options ignore it). Remaining
     is Jeff-gated: fill Estimating Rules → Conduit sizes, set wire-type symbols and
     part tag defaults, set levels on a real job, open the DXF in AutoCAD/Vectorworks,
     decide 24×36 scaling and a read-only phone view. Later: AV/video risers, computed

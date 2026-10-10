@@ -397,6 +397,11 @@ Grid view permission, `Content-Disposition: attachment`.
 11. **`sheetLevels` lives on the project, not `GridSheet.defaultLevelId`** (Plan B,
    D767): sheet replace, delete and revision restore carry the map, which a field
    on the sheet record lost.
+12. **The DXF route takes `?option=&size=&page=`, not `?sheet=`** (Plan B, Task 9):
+   one DXF per printed E-50x page of an option at a sheet size, computed by the
+   same `conduitRiserSheetPages` as the drawing set, so the page index is the
+   key. It gates with `requireUser()` like every Grid route — no separate view
+   permission.
 
 ## Out of scope (v1)
 

@@ -314,8 +314,8 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
           </div>
         )}
         {/* #321: what the conduit riser needs before the quote can price — the quote refuses with these same sentences. */}
-        {riser.refusals.map((r) => (
-          <div key={r} style={{ fontSize: 10.5, color: "#a0442b" }}>
+        {riser.refusals.map((r, i) => (
+          <div key={`${i}:${r}`} style={{ fontSize: 10.5, color: "#a0442b" }}>
             {r}.
           </div>
         ))}

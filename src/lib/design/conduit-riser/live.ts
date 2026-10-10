@@ -133,8 +133,9 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
  * normalizer against the option's current details and stubs; a run only
  * with a store-shaped `cr-` id; every device it names must be a non-curtain
  * device of THAT option (a stub end must name a stub that still exists);
- * nothing already present comes back twice (run id, run pair, tag device,
- * dismissal pair). Ends with pruneConduitRisersIn — normalized and capped.
+ * nothing already present comes back twice (run id, a pair that already
+ * has a run, tag device, dismissal pair) — two runs the bundle carries for
+ * one pair both come back. Ends with pruneConduitRisersIn — normalized and capped.
  */
 export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown): void {
   if (!isObj(raw)) return;
@@ -156,6 +157,9 @@ export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown): void {
       dismissed: Array.isArray(entry.dismissed) ? entry.dismissed.slice(0, CR_CAPS.dismissed) : [],
     });
     const runIds = new Set(current.runs.map((r) => r.id));
+    // Pairs are checked only against runs that were already there: a pair
+    // that had two runs when it was deleted gets both back (#321 final
+    // review). Run ids still dedupe within the bundle.
     const pairs = new Set(current.runs.map(runPairKey).filter((x): x is string => !!x));
     const runs: ConduitRun[] = [];
     for (const r of asked.runs) {
@@ -164,7 +168,6 @@ export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown): void {
       if (!RUN_ID.test(r.id) || runIds.has(r.id) || (pair && pairs.has(pair)) || !endsOwn) continue;
       runs.push(r);
       runIds.add(r.id);
-      if (pair) pairs.add(pair);
     }
     const tags = Object.fromEntries(Object.entries(asked.tags).filter(([id]) => own(id) && !Object.prototype.hasOwnProperty.call(current.tags, id)));
     const haveKeys = new Set(current.dismissed.map((d) => d.key));

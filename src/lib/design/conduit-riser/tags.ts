@@ -3,7 +3,8 @@
  * P/D, plus location, power-type letter and power-controls contents.
  *
  * A catalog part carries defaults (`tagDefaults`); a placement overrides per
- * field (`tag`). An empty-string override is a deliberate blank. Pure.
+ * field (`tag`). An empty-string override is a deliberate blank (the store
+ * keeps one if written; the Tag panel never writes one in v1). Pure.
  */
 
 import { crText } from "./model";
@@ -102,9 +103,47 @@ export type TagFieldKey = (typeof TAG_FIELD_KEYS)[number];
  *  is a deliberate blank), null = remove that field's override. */
 export type TagPatch = Partial<Record<TagFieldKey, string | null>>;
 
-/** True when `v` is a well-formed patch: an object whose keys are tag fields and values string | null. */
+/** True when `v` is a well-formed patch: an object whose keys are tag fields
+ *  and values string | null — and a `pd` string is a real P/D cell ("", "P",
+ *  "D" or "P/D", any case or spacing), never silently dropped. */
 export function isTagPatch(v: unknown): v is TagPatch {
-  return isObj(v) && Object.entries(v).every(([k, x]) => (TAG_FIELD_KEYS as readonly string[]).includes(k) && (x === null || typeof x === "string"));
+  return (
+    isObj(v) &&
+    Object.entries(v).every(
+      ([k, x]) => (TAG_FIELD_KEYS as readonly string[]).includes(k) && (x === null || (typeof x === "string" && (k !== "pd" || cleanPd(x) !== undefined)))
+    )
+  );
+}
+
+/** Fields the store upper-cases on write (cleanPlacementTag). */
+const UPPER_FIELDS: ReadonlySet<TagFieldKey> = new Set(["box", "face", "mount", "power", "pd"]);
+const sameValue = (k: TagFieldKey, a: string, b: string) =>
+  UPPER_FIELDS.has(k) ? a.trim().toUpperCase() === b.trim().toUpperCase() : a.trim() === b.trim();
+
+/**
+ * The riser Tag panel's save (#321 final review). `values` is what the form
+ * shows, `effective` what it started from, `overrides` the placement's own
+ * fields. Per field: a value still matching what it showed (any case for the
+ * upper-cased fields) sends nothing — so retyping the inherited default never
+ * creates an override; a cleared field the device overrides sends `null` —
+ * revert to the part default (or the space name) — never `""`; clearing an
+ * inherited value sends nothing. A deliberate blank isn't offered in v1. Pure.
+ */
+export function tagPanelPatch(values: EffectiveTag, effective: EffectiveTag, overrides: PlacementTag | undefined): TagPatch {
+  const own = (overrides || {}) as Partial<Record<TagFieldKey, string>>;
+  const patch: TagPatch = {};
+  for (const k of TAG_FIELD_KEYS) {
+    const v = values[k] ?? "";
+    const cur = own[k];
+    // Untouched — what it showed (a stored blank included) — is never a write.
+    if (sameValue(k, v, effective[k] ?? "")) continue;
+    if (!v.trim()) {
+      if (cur !== undefined) patch[k] = null;
+    } else if (cur === undefined || !sameValue(k, v, cur)) {
+      patch[k] = v;
+    }
+  }
+  return patch;
 }
 
 /**

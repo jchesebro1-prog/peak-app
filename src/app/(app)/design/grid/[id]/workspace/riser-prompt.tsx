@@ -8,7 +8,8 @@ import type { GridEditor } from "../use-grid-editor";
  * #321 — "Add ER-01 → CRO-04 to the lighting control riser?" One line over
  * the plan right after a wire is drawn between two devices the riser would
  * show. Add puts the pair on the riser (or, when the pair already has a run,
- * joins this wire to it); Later hides it. It never blocks drawing: the next
+ * joins this wire to it); Later hides it. When the pair's wire won't be
+ * priced, the line says it will be listed as by others. It never blocks drawing: the next
  * canvas click, Escape or a newer wire's prompt replaces it. A failed Add
  * keeps the prompt and reports in the status bar.
  */
@@ -42,7 +43,9 @@ export default function RiserPrompt({ ed }: { ed: GridEditor }) {
         noteAction(r.error);
         return;
       }
-      noteAction("Added to the riser");
+      // Nothing accepted: the pair went on the riser elsewhere (another tab,
+      // the riser page) — say so instead of claiming an add.
+      noteAction(r.accepted > 0 ? "Added to the riser" : "Already on the riser");
       hideRiserPrompt();
       router.refresh();
     });
@@ -57,6 +60,7 @@ export default function RiserPrompt({ ed }: { ed: GridEditor }) {
         {riserPrompt.joins
           ? `${riserPrompt.label} joins the existing run — add this wire?`
           : `Add ${riserPrompt.label} to the lighting control riser?`}
+        {riserPrompt.byOthers ? " — its wire will be listed as by others" : ""}
       </span>
       <button type="button" disabled={pending} onClick={add} style={BTN}>
         {pending ? "Adding…" : "Add"}

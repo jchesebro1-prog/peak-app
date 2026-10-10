@@ -10592,7 +10592,9 @@ shows unpadded until Renumber. A per-part **Designator code** (catalog part edit
 
 A tag's ID/LOC/P-D/box/face/mount/height come from the **part's Riser tag defaults**, overridden per device
 (`GridPlacement.tag`). Edits go in as per-field patches (`setTagFieldsAction`, merged under the row lock) so fast Tab
-entry in the Devices spreadsheet cannot drop a field; an empty string clears an override back to the part default.
+entry in the Devices spreadsheet cannot drop a field; a `null` field reverts that override to the part default (or,
+for location, the space name). The riser Tag panel sends `null` for a cleared field and compares against the device's
+own overrides, so retyping the inherited value creates no override; a deliberate blank isn't offered in v1.
 Curtain placements never take tag fields (refused on write, ignored on read). The Devices tab gains the tag columns.
 
 ## D770. Box types and conduit sizes are admin-edited blobs (#321, 2026-10-10)
@@ -10617,7 +10619,9 @@ with the schedules).
 After a wire is drawn between two devices, a one-line bar over the plan offers Add — or, when the pair already has a
 run, "joins the existing run — add this wire?" — and Later (hides it; nothing is stored). It shows only when the
 engine's suggestions include that route, so an audio pair, a loose wire, a wire already in a run and a pair dismissed
-on the riser page say nothing, and it never blocks drawing. The riser page lists the same suggestions with
+on the riser page say nothing, and it never blocks drawing. When the pair's wire won't be priced (wire pricing off for
+the run, or by default for a new one) the bar adds "— its wire will be listed as by others"; the plan only asks the
+server when one end is a lighting device. The riser page lists the same suggestions with
 Accept / Dismiss (dismissals are stored with the riser and can be un-dismissed).
 
 ## D773. Riser pricing: both defaults off; by others is listed, never priced (#321, 2026-10-10)
@@ -10634,5 +10638,6 @@ the quote prices at tier.
 
 `removePlacements` prunes the riser, so its undo bundle also carries the removed runs, pinned tags and suggestion
 dismissals (`RemovedBundle.conduit`); `restoreItems` puts them back with the devices, and the untrusted bundle is
-cleaned server-side (known ids, runs re-validated, qty prune applied) like the plan items. Two runs between the same
-device pair in one bundle restore only the first — a known limit.
+cleaned server-side (known ids, runs re-validated, qty prune applied) like the plan items. A run is skipped when its
+id is already present or its device pair already had a run before the restore; two runs the bundle carries for one
+pair both come back.

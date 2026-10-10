@@ -38,6 +38,7 @@ export type RiserBom<R, L> = {
   conduit: BomLine[];
   conduitValue: number;
   conduitCost: number;
+  /** Each sentence once (two runs can share a missing size), no final period. */
   refusals: string[];
 };
 
@@ -87,7 +88,7 @@ export function riserBom<R extends RouteLite, L extends { id: string; partId: st
     conduitCost += d.feet * part.cost;
     return { partId: d.partId, desc: part.desc, unit: part.unit, qty: d.feet, list: part.list, ext };
   });
-  return { routes, links, wires: routeLines(routes, parts, cals, links), byOthers, conduit, conduitValue, conduitCost, refusals: demand.refusals };
+  return { routes, links, wires: routeLines(routes, parts, cals, links), byOthers, conduit, conduitValue, conduitCost, refusals: [...new Set(demand.refusals)] };
 }
 
 /**

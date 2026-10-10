@@ -11,7 +11,7 @@ import { detailGeometry, type Geo } from "@/lib/design/conduit-riser/drawing";
 import type { ViewDetail, ViewEnd } from "@/lib/design/conduit-riser/derive";
 import type { CRBoxType, CRWireType } from "@/lib/design/conduit-riser/input";
 import type { GridLevel } from "@/lib/design/grid-levels";
-import type { TagPatch } from "@/lib/design/conduit-riser/tags";
+import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { pairKey, type ConduitRiserDoc, type CROp, type RunEnd } from "@/lib/design/conduit-riser/model";
 import {
   applyLayoutOps,
@@ -115,6 +115,8 @@ export default function ConduitRiserEditor(props: {
   sheets: SheetLite[];
   placements: { id: string; sheetId: string; page: number; x: number; y: number }[];
   calibrations: { docId: string; page: number }[];
+  /** Each device's own tag fields (placement.tag) — the Tag panel saves against these. */
+  tagOverrides: Record<string, PlacementTag>;
 }) {
   const { projectId, optionId, view, doc, planHref } = props;
   const detailId = view.detail.id;
@@ -261,6 +263,13 @@ export default function ConduitRiserEditor(props: {
       return;
     }
     void commitLayout(d.op);
+  }
+
+  /** The browser took the pointer (a scroll, a system gesture): drop the
+   *  drag and its preview — never commit a move the user didn't finish. */
+  function onCancel() {
+    drag.current = null;
+    setDragOp(null);
   }
 
   function pickEnd(it: LaidItem) {
@@ -490,7 +499,7 @@ export default function ConduitRiserEditor(props: {
             svgProps={{
               onPointerMove: onMove,
               onPointerUp: onUp,
-              onPointerCancel: onUp,
+              onPointerCancel: onCancel,
               onPointerDown: () => {
                 if (tool === "select") setSel(null);
               },
@@ -570,6 +579,7 @@ export default function ConduitRiserEditor(props: {
             <TagPanel
               key={`tag-${selTag.id}-${JSON.stringify(selTag.tag)}`}
               device={selTag}
+              overrides={props.tagOverrides[selTag.id]}
               powerTypes={doc.powerTypes}
               pinned={Object.prototype.hasOwnProperty.call(doc.tags, selTag.id)}
               planHref={planHref}
