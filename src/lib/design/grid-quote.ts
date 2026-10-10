@@ -95,8 +95,8 @@ export type GridQuoteInputs = {
   conduitSizes?: ConduitSize[];
   /** #321: digits a designator prints with, for a refusal's run names — read when absent. */
   designatorDigits?: 1 | 2;
-  /** #321 polish: what a run-end label's designator code needs (the category map and the device-type context) — read when absent. */
-  labelCtx?: { categoryMap: CategoryMap; deviceTypes: DeviceTypeContext };
+  /** #321 polish: what a run-end label's designator code needs (the category map and the device-type context). Required so a hand-built inputs object can't silently fall back to extra reads. */
+  labelCtx: { categoryMap: CategoryMap; deviceTypes: DeviceTypeContext };
 };
 
 /**

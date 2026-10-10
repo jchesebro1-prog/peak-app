@@ -291,6 +291,7 @@ export default async function GridEditorPage({
     groupParts: parts,
     conduitSizes,
     designatorDigits: designatorDigitsOf(settings),
+    labelCtx: { categoryMap, deviceTypes },
   };
   // A pricing fault must not take the editor down with it — the quote
   // action reports it where the person can act on it.

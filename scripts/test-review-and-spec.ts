@@ -64368,6 +64368,11 @@ async function riserPolish3Checks(): Promise<void> {
   const gq = srcOf("src/lib/design/grid-quote.ts");
   ok(gq.includes("await fillDesignatorsInMemory(project, nonCurtain, digits, { parts: labelParts, deviceTypes: labelCtx.deviceTypes })") && gq.includes("inputs?.labelCtx ??") && gq.includes("riserEndLabeler(conduitDoc, labelPlacements,"), "#321 polish labels: buildGridQuote names run ends through the filled placements");
 
+  const editorPage = srcOf("src/app/(app)/design/grid/[id]/page.tsx");
+  const qi = editorPage.slice(editorPage.indexOf("const quoteInputs: GridQuoteInputs = {"), editorPage.indexOf("// A pricing fault must not take the editor down"));
+  ok(qi.includes("labelCtx: { categoryMap, deviceTypes },") && /\n  labelCtx: \{/.test(gq.slice(gq.indexOf("export type GridQuoteInputs"), gq.indexOf("export type GridQuoteInputs") + 4000)) && !/labelCtx\?:/.test(gq),
+    "#321 polish labels: the editor page's hand-built quote inputs carry labelCtx, and GridQuoteInputs.labelCtx is required");
+
   // ---- 5. restoreRevision drops a default level the restored levels don't have
   const gp3 = await G.createProject({ name: "#321 polish restore", customer: "Spec fixture", customerId: null, by });
   reg("grid_projects", gp3.id);
