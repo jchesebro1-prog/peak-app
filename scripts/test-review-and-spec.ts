@@ -11536,6 +11536,7 @@ seeded()
   .then(() => conduitRiser321B5Checks())
   .then(() => conduitRiser321B6Checks())
   .then(() => conduitRiser321B7Checks())
+  .then(() => conduitRiser321B8Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -18472,9 +18473,9 @@ import {
 /* --- #209 grid drawing set — Task 4: RiserLinks reach the quote and the editor BOM --- */
 {
   const gdsQuoteSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
-  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && gdsQuoteSrc.includes("routeLines(routes, tierCatalog, project.calibrations || [], riserLinks)"), "#209 quote: RiserLinks price as wire lines on the draft quote");
+  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && /riserBom\(\{[^}]*routes,\s*links: riserLinks,\s*cals: project\.calibrations \|\| \[\],\s*parts: tierCatalog,/.test(gdsQuoteSrc) /* #321: through riserBom */, "#209 quote: RiserLinks price as wire lines on the draft quote");
   const gdsEditorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
-  ok(gdsEditorSrc.includes("routeLines(routes || [], parts, project.calibrations, riserLinks)"), "#209 editor: the live BOM sidebar counts RiserLinks too");
+  ok(/riserBom\(\{[^}]*routes: routes \|\| \[\],\s*links: riserLinks,\s*cals: project\.calibrations,\s*parts,/.test(gdsEditorSrc) /* #321: through riserBom */, "#209 editor: the live BOM sidebar counts RiserLinks too");
   const gdsStoreSrc = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
   ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#209 revisions: snapshotOf copies the riser document");
   const gdsActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/actions.ts"), "utf8");
@@ -24376,7 +24377,7 @@ import type { PartLite as P230 } from "@/lib/design/grid-bom";
 
 {
   // --- groups + the grouping rule
-  ok(g230Groups.map((g) => g.label).join("|") === "Rigging|Curtains|Lighting|Audio|Video|Controls|General", "#230 groups: seven headings in Jeff's order");
+  ok(g230Groups.map((g) => g.label).join("|") === "Rigging|Curtains|Lighting|Audio|Video|Controls|General|Conduit", "#230 groups: seven headings in Jeff's order (then #321's Conduit)");
   ok(g230IsKey("controls") && g230IsKey("general") && !g230IsKey("Controls") && !g230IsKey("acoustical"), "#230 groups: keys are the lower-case system keys");
   ok(g230GroupOf({ gridScope: "Audio", deviceType: "speakers" }) === "audio" && g230GroupOf({ gridScope: "Unscoped", deviceType: "cable-connectors" }) === "general" && g230GroupOf(undefined) === "general",
     "#230 groups: a part files by its (device-type) scope; Unscoped → General");
@@ -63256,4 +63257,212 @@ async function conduitRiser321B7Checks(): Promise<void> {
     "#321 B7 RiserPrompt: a status strip with Add / Later; Add success notes + hides, a failure notes and keeps the prompt");
   const edr = srcOf("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(edr.includes("<IntakeNotices ed={ed} />") && edr.includes("<RiserPrompt ed={ed} />") && edr.indexOf("<IntakeNotices") < edr.indexOf("<RiserPrompt"), "#321 B7 the prompt is mounted beside the intake notices");
+}
+
+/* #321 B8 — riser pricing: wire by others, priced conduit, refusals (pure + scratch DB). */
+async function conduitRiser321B8Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const M = await import("@/lib/design/conduit-riser/model");
+  const RB = await import("@/lib/design/conduit-riser/bom");
+  const GB = await import("@/lib/design/grid-bom");
+  const BG = await import("@/lib/design/grid-bom-groups");
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  const EMT_SENTENCE = 'Conduit 3/4" has no part — set it in Estimating Rules → Conduit sizes';
+
+  // --- riserBom (pure) ---
+  const cals = [{ docId: "sh", page: 1, scale: 100, unit: "ft", refLength: 100, by: "t", at: 1 }] as import("@/lib/annotations").Calibration[];
+  const rt = (id: string, partId: string, pts: [number, number][]) => ({ id, sheetId: "sh", page: 1, aspect: 1, partId, points: pts.map(([x, y]) => ({ x, y })) });
+  const rIn1 = rt("wr-in1", "DMX", [[0, 0], [0.3, 0]]);
+  const rIn2 = rt("wr-in2", "DMX", [[0, 0], [0, 0.2], [0.3, 0.2], [0.3, 0]]);
+  const rOut = rt("wr-out", "SPK", [[0, 0.5], [0.25, 0.5]]);
+  const lkIn = { id: "lk-in", partId: "DMX", lengthFt: 12 };
+  const parts = [
+    { id: "DMX", sku: "DMX", desc: "DMX cable", category: "Cable", unit: "ft", list: 1, cost: 0.5 },
+    { id: "SPK", sku: "SPK", desc: "Speaker cable", category: "Cable", unit: "ft", list: 2, cost: 1 },
+  ];
+  const emt = new Map([["EMT34", { desc: "3/4 in EMT", unit: "ft", list: 4, cost: 2 }]]);
+  const pids = new Set(["gp-a", "gp-b", "gp-c"]);
+  const runOf = (extra: Record<string, unknown> = {}) => ({
+    id: "cr-000000000001", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "placement", placementId: "gp-b" },
+    routeIds: ["wr-in1", "wr-in2"], linkIds: ["lk-in"], size: '3/4"', style: "conduit", ...extra,
+  });
+  const docOf = (runs: unknown[], defaults?: Record<string, unknown>) =>
+    M.normalizeConduitRiserDoc({ runs, ...(defaults ? { defaults: { size: '3/4"', priceWire: false, priceConduit: false, ...defaults } } : {}) });
+  const labelOf = RB.riserEndLabeler(
+    { stubs: [{ id: "st-1", label: "TO FACP", detailId: "dt-main" }] },
+    [{ id: "gp-a", partId: "DMX", designator: "CRO-4" }, { id: "gp-b", partId: "NODE", designator: "LX-1", qty: 24 }, { id: "gp-c", partId: "NODE" }],
+    (id) => (id === "NODE" ? "DMX node" : undefined),
+    2
+  );
+  ok(labelOf({ kind: "placement", placementId: "gp-a" }) === "CRO-4" && labelOf({ kind: "placement", placementId: "gp-b" }) === "LX-01–24" &&
+     labelOf({ kind: "placement", placementId: "gp-c" }) === "DMX node" && labelOf({ kind: "stub", stubId: "st-1" }) === "TO FACP",
+    "#321 B8 riserEndLabeler: a designator (a lot's range), else the part's description; a stub prints its label");
+  const base = { estimateOwned: false, routes: [rIn1, rIn2, rOut], links: [lkIn], cals, parts, conduitParts: emt, sizes: [{ size: '3/4"', partId: "EMT34" }], placementIds: pids, labelOf };
+  const all = GB.routeLines([rIn1, rIn2, rOut], parts, cals, [lkIn]);
+  const none = RB.riserBom({ ...base, doc: null });
+  ok(J2(none.wires) === J2(all) && none.byOthers.length === 0 && none.conduit.length === 0 && none.refusals.length === 0,
+    "#321 B8 riserBom: no conduit riser leaves every wire priced, nothing by others, no conduit");
+  const ft = (r: typeof rIn1) => GB.routeLengthFt(r, cals)!;
+  const off = RB.riserBom({ ...base, doc: docOf([runOf()]) });
+  const spkLine = all.lines.find((l) => l.partId === "SPK");
+  ok(J2(off.wires.lines) === J2([spkLine]) && J2(off.routes.map((r) => r.id)) === J2(["wr-out"]) && off.links.length === 0,
+    "#321 B8 riserBom: defaults off — the run's routes and links leave the priced wire; the other wire is unchanged");
+  ok(J2(off.byOthers) === J2([{ partId: "DMX", desc: "DMX cable", feet: Math.ceil(ft(rIn1) + ft(rIn2) + 12) }]) && off.conduit.length === 0 && off.refusals.length === 0,
+    "#321 B8 riserBom: the run's wire is listed by others, footage rounded up once per part; no conduit priced");
+  const wireOn = RB.riserBom({ ...base, doc: docOf([runOf({ priceWire: true })]) });
+  ok(J2(wireOn.wires) === J2(all) && wireOn.byOthers.length === 0, "#321 B8 riserBom: priceWire on the run brings its wire back, priced exactly as before");
+  const defOn = RB.riserBom({ ...base, doc: docOf([runOf()], { priceWire: true }) });
+  ok(J2(defOn.wires) === J2(all), "#321 B8 riserBom: the design default turned on prices every run's wire");
+  const longest = Math.max(ft(rIn1), ft(rIn2), 12);
+  const cOn = RB.riserBom({ ...base, doc: docOf([runOf({ priceConduit: true })]) });
+  const want = Math.ceil(longest);
+  ok(J2(cOn.conduit) === J2([{ partId: "EMT34", desc: "3/4 in EMT", unit: "ft", qty: want, list: 4, ext: want * 4 }]) && cOn.conduitValue === want * 4 && cOn.conduitCost === want * 2 && cOn.refusals.length === 0,
+    `#321 B8 riserBom: priceConduit adds one Conduit line = ceil(longest member) feet of the mapped part (${want} ft)`);
+  ok(J2(cOn.byOthers) === J2(off.byOthers), "#321 B8 riserBom: pricing the conduit alone leaves the wire by others");
+  const typed = RB.riserBom({ ...base, doc: docOf([runOf({ priceConduit: true, lengthFt: 80.2 })]) });
+  ok(typed.conduit[0]?.qty === 81, "#321 B8 riserBom: a typed run length wins over the members");
+  const unmapped = RB.riserBom({ ...base, sizes: [{ size: '3/4"' }], doc: docOf([runOf({ priceConduit: true })]) });
+  ok(unmapped.conduit.length === 0 && J2(unmapped.refusals) === J2([EMT_SENTENCE]), "#321 B8 riserBom: an unmapped size refuses with the exact sentence");
+  const ghostPart = RB.riserBom({ ...base, conduitParts: new Map(), doc: docOf([runOf({ priceConduit: true })]) });
+  ok(J2(ghostPart.refusals) === J2([EMT_SENTENCE]), "#321 B8 riserBom: a size mapped to a part that has left the catalog refuses like an unmapped one");
+  const noLen = RB.riserBom({ ...base, routes: [rOut], links: [], doc: docOf([runOf({ priceConduit: true, routeIds: [], linkIds: [] })]) });
+  ok(J2(noLen.refusals) === J2(["CRO-4 → LX-01–24 needs a length"]), "#321 B8 riserBom: a priced run with no measured member and no typed length refuses by its ends' names");
+  const cm = RB.riserBom({ ...base, doc: docOf([runOf({ priceConduit: true, style: "cableMgmt" })]) });
+  ok(cm.conduit.length === 0 && cm.refusals.length === 0 && J2(cm.byOthers) === J2(off.byOthers), "#321 B8 riserBom: a cable-management run never adds conduit (its wire still follows priceWire)");
+  const owned = RB.riserBom({ ...base, estimateOwned: true, sizes: [], doc: docOf([runOf({ priceConduit: true })]) });
+  ok(J2(owned.wires) === J2(all) && owned.byOthers.length === 0 && owned.conduit.length === 0 && owned.refusals.length === 0,
+    "#321 B8 riserBom: an estimate-owned option ignores the riser — every wire priced, no conduit, no refusal");
+  const ghost = RB.riserBom({ ...base, placementIds: new Set(["gp-a"]), doc: docOf([runOf({ priceConduit: true })]) });
+  ok(J2(ghost.wires) === J2(all) && ghost.conduit.length === 0 && ghost.refusals.length === 0, "#321 B8 riserBom: a run to a device that is gone prices nothing");
+
+  // --- the Conduit BOM heading ---
+  ok(BG.BOM_GROUPS.at(-1)!.key === "conduit" && BG.BOM_GROUPS.at(-1)!.label === "Conduit" && BG.isBomGroupKey("conduit") && !BG.isEditableBomGroupKey("conduit") &&
+     BG.isEditableBomGroupKey("general") && !BG.EDITABLE_BOM_GROUPS.some((g) => (g.key as string) === "conduit") && !("conduit" in BG.CUSTOM_SYSTEM_OF_GROUP),
+    "#321 B8 groups: Conduit is the last BOM heading; it takes no accessory, labor override or custom item");
+  const grp = (conduit: import("@/lib/design/grid-bom").BomLine[]) => BG.bomGroups(BG.groupedBomLines({ devices: [], wires: off.wires.lines, curtains: [], custom: [], customItems: [], accessories: [], parts, placements: [], conduit }));
+  const g0 = grp([]);
+  const g1 = grp(cOn.conduit);
+  ok(g0.length === 7 && !g0.some((g) => g.key === "conduit"), "#321 B8 groups: an empty Conduit heading is left out (it can't take an accessory)");
+  const cg = g1.find((g) => g.key === "conduit");
+  ok(g1.length === 8 && !!cg && cg.lines.length === 1 && cg.lines[0].source === "conduit" && cg.value === want * 4, "#321 B8 groups: conduit lines print under Conduit with source conduit");
+  const { sanitizeAccessory } = await import("@/lib/design/grid-accessories");
+  ok(!sanitizeAccessory({ partId: "DMX", qty: 1, scope: "conduit" }, "ba-000000000001").ok, "#321 B8 accessories: none can be added under Conduit");
+
+  // --- buildGridQuote on a scratch project ---
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const DS = await import("@/db/doc-store");
+  const { buildGridQuote } = await import("@/lib/design/grid-quote");
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const { isTierPriced } = await import("@/lib/tier-pricing");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { saveConduitSizes } = await import("@/lib/stores/conduit-sizes");
+  const { CONDUIT_SIZES_BLOB } = await import("@/lib/conduit-sizes");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const C1 = fid(321, "b8-dmx-cable");
+  const C2 = fid(321, "b8-spk-cable");
+  const EMT = fid(321, "b8-emt-34");
+  await mergeUpsert(C1, { desc: "Test321 B8 DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5 });
+  await mergeUpsert(C2, { desc: "Test321 B8 speaker cable", category: "Test321 Cable", unit: "ft", list: 2, cost: 1 });
+  await mergeUpsert(EMT, { desc: "Test321 B8 3/4 in EMT", category: "Test321 Conduit", unit: "ft", list: 4, cost: 2 });
+  for (const c of [C1, C2, EMT]) reg("catalog_parts", c);
+  const sizesBlobBefore = await DS.getBlob<Record<string, unknown>>(CONDUIT_SIZES_BLOB, {});
+  try {
+    await DS.setBlob(CONDUIT_SIZES_BLOB, {});
+    const gp = await G.createProject({ name: "#321 B8 riser pricing", customer: "Spec fixture", customerId: null, by });
+    reg("grid_projects", gp.id);
+    const sh = (await G.addSheet(gp.id, { name: "#321 B8 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    reg("grid_sheets", sh.id);
+    await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+    const live = async () => (await G.getProject(gp.id))!;
+    const place = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: "T321-B8-DEV", optionId: opt, by }))!.placements.at(-1)!;
+    const a = await place(0.1, 0.1);
+    const b = await place(0.4, 0.1);
+    const c = await place(0.1, 0.8);
+    const d = await place(0.4, 0.8);
+    type Pl = { id: string; x: number; y: number };
+    const draw = async (p: Pl, q: Pl, partId: string, via: { x: number; y: number }[] = []) =>
+      (await G.addRouteWithId(gp.id, { sheetId: sh.id, page: 1, partId, points: [{ x: p.x, y: p.y }, ...via, { x: q.x, y: q.y }], aspect: 1, optionId: opt, by, fromPlacementId: p.id, toPlacementId: q.id }))!.routeId;
+    const w1 = await draw(a, b, C1);
+    const w2 = await draw(a, b, C1, [{ x: 0.1, y: 0.3 }, { x: 0.4, y: 0.3 }]);
+    await draw(c, d, C2);
+    const quote = async () => {
+      const r = await buildGridQuote(await live(), opt);
+      if (!r.ok) return { ok: false as const, error: r.error, lines: [] as import("@/lib/design/grid-bom").BomLine[], spec: [] as { sku: string; qty: number; ext: number; unit: string }[], labor: [] as unknown[], value: 0 };
+      return { ok: true as const, error: "", lines: r.build.lines, spec: r.build.spec.lines, labor: r.build.labor, value: r.build.value };
+    };
+    const lineOf = (q: Awaited<ReturnType<typeof quote>>, sku: string) => q.spec.find((l) => l.sku === sku);
+    const b0 = await quote();
+    ok(b0.ok && !!lineOf(b0, C1) && !!lineOf(b0, C2), "#321 B8 quote: before the riser, both wires price");
+
+    const runId = "cr-0000000000b8";
+    await DS.patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", gp.id, (p) => {
+      p.conduitRiser = { [opt]: M.normalizeConduitRiserDoc({ runs: [{ id: runId, a: { kind: "placement", placementId: a.id }, b: { kind: "placement", placementId: b.id }, routeIds: [w1, w2], linkIds: [], size: '3/4"', style: "conduit" }] }) };
+    });
+    const b1 = await quote();
+    ok(b1.ok && !lineOf(b1, C1) && J2(lineOf(b1, C2)) === J2(lineOf(b0, C2)) && !b1.spec.some((l) => l.sku === EMT),
+      "#321 B8 quote: defaults off — a routed DMX wire inside a run leaves the quote; the other wire line is unchanged");
+    const upd = (extra: Record<string, unknown>) => CR.patchConduitRiser(gp.id, opt, { op: "updateRun", id: runId, ...extra } as import("@/lib/design/conduit-riser/model").CROp);
+    await upd({ priceWire: true });
+    const b2 = await quote();
+    ok(b2.ok && J2(lineOf(b2, C1)) === J2(lineOf(b0, C1)) && J2(lineOf(b2, C2)) === J2(lineOf(b0, C2)), "#321 B8 quote: priceWire on the run brings its wire back");
+
+    await upd({ priceConduit: true });
+    const b3 = await quote();
+    ok(!b3.ok && b3.error === EMT_SENTENCE, `#321 B8 quote: priced conduit on an unmapped size refuses with the exact sentence (${b3.error})`);
+    const acts = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+    const draft = acts.slice(acts.indexOf("export async function createDraftQuoteAction("));
+    ok(draft.includes("const built = await buildGridQuote(project, resolvedOptionId);") && draft.includes("if (!built.ok) return built;"),
+      "#321 B8 quote: createDraftQuoteAction — the Designs dashboard and Home promote through it — returns the refusal");
+
+    const saved = await saveConduitSizes([{ size: '3/4"', partId: EMT }, { size: '1"' }]);
+    ok(saved.ok, "#321 B8 fixture: 3/4\" maps to the per-foot EMT part");
+    const b4 = await quote();
+    const pr = await live();
+    const len = Math.max(...pr.routes!.filter((r) => r.id === w1 || r.id === w2).map((r) => GB.routeLengthFt(r, pr.calibrations || [])!));
+    const tier = await resolveTier(null);
+    const emtList = isTierPriced(2, tier.margin) ? Math.round((2 / (1 - tier.margin)) * 100) / 100 : 4;
+    const emtLine = lineOf(b4, EMT);
+    ok(b4.ok && !!emtLine && emtLine.qty === Math.ceil(len) && emtLine.unit === "ft" && Math.abs(emtLine.ext - Math.ceil(len) * emtList) < 0.005,
+      `#321 B8 quote: priceConduit with a mapped 3/4" EMT part adds a Conduit line = ceil(longest member ft) at the tier price (${emtLine?.qty} ft)`);
+    ok(b4.ok && Math.abs(b4.value - b2.value - Math.ceil(len) * emtList) < 0.005, "#321 B8 quote: the conduit line is in the quote value");
+    ok(b4.ok && J2(b4.labor) === J2(b2.labor) && !b4.spec.some((l) => l.sku === "labor:conduit"),
+      "#321 B8 labor: labor rows never include the conduit group — the same labor with or without priced conduit");
+    ok(!(await G.setLaborOverride(gp.id, opt, "conduit", 5)).ok, "#321 B8 labor: a Conduit labor override is refused");
+
+    await upd({ style: "cableMgmt" });
+    const b5 = await quote();
+    ok(b5.ok && !lineOf(b5, EMT) && J2(lineOf(b5, C1)) === J2(lineOf(b0, C1)), "#321 B8 quote: a cable-management run never adds conduit");
+    await upd({ style: "conduit", priceWire: null, size: '1"' });
+    const b6 = await quote();
+    ok(!b6.ok && b6.error === 'Conduit 1" has no part — set it in Estimating Rules → Conduit sizes', "#321 B8 quote: the refusal names the run's own size");
+
+    await DS.patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", gp.id, (p) => {
+      p.options = (p.options || []).map((o) => (o.id === opt ? { ...o, estimateOwned: true as const } : o));
+    });
+    const b7 = await quote();
+    ok(b7.ok && J2(lineOf(b7, C1)) === J2(lineOf(b0, C1)) && !lineOf(b7, EMT), "#321 B8 quote: an estimate-owned option ignores all of it — its wire priced, no conduit, no refusal");
+  } finally {
+    await DS.setBlob(CONDUIT_SIZES_BLOB, sizesBlobBefore);
+  }
+  ok(J2(await DS.getBlob(CONDUIT_SIZES_BLOB, {})) === J2(sizesBlobBefore), "#321 B8 fixture: the conduit sizes blob is restored");
+
+  // --- wiring pins ---
+  const gq = srcOf("src/lib/design/grid-quote.ts");
+  ok(gq.includes("riserBom(") && gq.includes('error: riser.refusals.join(" ")') && gq.includes("liveConduitRiser(project, optionId)") && gq.includes("option.estimateOwned === true"),
+    "#321 B8 grid-quote: buildGridQuote prices through riserBom over the live, pruned doc and refuses with its sentences");
+  const pg = srcOf("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(pg.includes("conduitRiser={") && pg.includes("liveConduitRiser(designed, activeOptionId)") && pg.includes("conduitSizes={conduitSizes}") && pg.includes("conduitParts={"),
+    "#321 B8 page: the editor gets the option's pruned conduit riser, the conduit sizes and the conduit parts");
+  const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes("riserBom(") && hook.includes("riserEndLabeler(") && hook.includes("riser.wires") && hook.includes("riser.conduitValue") && hook.includes("conduit: riser.conduit"),
+    "#321 B8 editor: the live BOM runs the same riserBom — wire filtering, conduit lines and the total");
+  const panel = srcOf("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx");
+  ok(panel.includes("In conduit — by others") && panel.includes("riser.byOthers") && panel.includes("riser.refusals") && panel.includes('case "conduit":') &&
+     panel.indexOf("riser.refusals") > panel.indexOf("wires.unmeasured"),
+    "#321 B8 BOM panel: an In conduit — by others list, the refusal sentences beside the unmeasured-wire notice, and a Conduit row");
 }

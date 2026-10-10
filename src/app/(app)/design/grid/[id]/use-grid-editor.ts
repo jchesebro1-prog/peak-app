@@ -17,7 +17,6 @@ import {
   curtainLines,
   curtainSpecOf,
   isPerLengthUnit,
-  routeLines,
   type GridCurtain,
   type GridCurtainType,
   type PartLite,
@@ -82,6 +81,9 @@ import { duplicates, type RenumberTarget } from "@/lib/design/designators";
 import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
+import { riserBom, riserEndLabeler } from "@/lib/design/conduit-riser/bom";
+import type { ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 import type { SysKey } from "@/app/(app)/design/quick/engine";
 import { paletteView } from "@/lib/design/grid-palette";
@@ -359,6 +361,11 @@ export type GridEditorProps = {
   deviceTypes: DeviceType[];
   /** #321: digits a designator number prints with (Grid Settings → Designator numbers). */
   designatorDigits: 1 | 2;
+  /** #321: the active option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
+  conduitRiser?: ConduitRiserDoc | null;
+  /** #321: Estimating Rules → Conduit sizes, and each mapped size's catalog part. */
+  conduitSizes?: ConduitSize[];
+  conduitParts?: PartLite[];
   /** #300 (D609): partId → object drawing URLs, built server-side by
    *  symbolUrlsFor; a part absent here draws the generic symbol. */
   symbolUrls: Record<string, ObjectSymbolUrls>;
@@ -387,6 +394,10 @@ export type GridEditorProps = {
    *  as Done retires sheets (revalidate re-renders the same URL); this does not. */
   adjustKey?: string | null;
 };
+
+/** Stable empties for the optional #321 props (memo dependencies). */
+const NO_CONDUIT_SIZES: ConduitSize[] = [];
+const NO_PARTS: PartLite[] = [];
 
 function useGridEditorImpl(props: GridEditorProps) {
   const {
@@ -1090,10 +1101,34 @@ function useGridEditorImpl(props: GridEditorProps) {
   );
   const totals = useMemo(() => bomTotals(placements, parts), [placements, parts]);
   const riserLinks = useMemo(() => riserLinksOf(project.riser, activeOptionId), [project.riser, activeOptionId]);
-  const wires = useMemo(
-    () => routeLines(routes || [], parts, project.calibrations, riserLinks),
-    [routes, parts, project.calibrations, riserLinks]
+  /** #321: the conduit riser's effect on the BOM — buildGridQuote's own
+   *  riserBom: wire by others leaves the priced wire, priced conduit adds
+   *  Conduit lines, and its refusals are the quote's. An estimate-owned
+   *  option (#314) prices nothing from the riser. */
+  const conduitRiser = props.conduitRiser ?? null;
+  const conduitSizes = props.conduitSizes ?? NO_CONDUIT_SIZES;
+  const conduitPartList = props.conduitParts ?? NO_PARTS;
+  const conduitParts = useMemo(() => new Map(conduitPartList.map((p) => [p.id, p])), [conduitPartList]);
+  const estimateOwned = activeOption.estimateOwned === true;
+  const riser = useMemo(
+    () =>
+      riserBom({
+        doc: conduitRiser,
+        estimateOwned,
+        routes: routes || [],
+        links: riserLinks,
+        cals: project.calibrations,
+        parts,
+        conduitParts,
+        sizes: conduitSizes,
+        placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
+        labelOf: conduitRiser
+          ? riserEndLabeler(conduitRiser, placements, (id) => partById.get(id)?.desc, designatorDigits)
+          : () => "",
+      }),
+    [conduitRiser, estimateOwned, routes, riserLinks, project.calibrations, parts, conduitParts, conduitSizes, placements, partById, designatorDigits]
   );
+  const wires = riser.wires;
 
   /* ------------------------------ curtains (#49) ------------------------------ */
 
@@ -1156,8 +1191,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   const accessoryLines = useMemo(() => accessoryBomLines(accessories, parts), [accessories, parts]);
   const accessoryValue = accessoryLines.reduce((a, l) => a + l.ext, 0);
   const bomEmpty =
-    lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0 && accessoryLines.length === 0;
-  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue + accessoryValue;
+    lines.length === 0 && wires.lines.length === 0 && riser.conduit.length === 0 && curtains.length === 0 && customLines.length === 0 && accessoryLines.length === 0;
+  const grandValue = totals.value + wires.value + riser.conduitValue + laborValue + curtainValue + customValue + accessoryValue;
   /** #230: the BOM under its seven headings. */
   const bomGroupList = useMemo(
     () =>
@@ -1172,9 +1207,10 @@ function useGridEditorImpl(props: GridEditorProps) {
           parts,
           placements,
           labor: laborLines,
+          conduit: riser.conduit,
         })
       ),
-    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements, laborLines]
+    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements, laborLines, riser.conduit]
   );
   /** The heading whose accessory picker is open — per option, so switching options closes it. */
   const [addingTo, setAddingTo] = useState<{ optionId: string; group: BomGroupKey } | null>(null);
@@ -3020,6 +3056,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     totals,
     riserLinks,
     wires,
+    riser,
     fabricBySku,
     fabricNames,
     curtainPrices,

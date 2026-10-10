@@ -55,6 +55,8 @@ import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { isBaseSheet } from "@/lib/design/sheet-adjust";
 import { parseAdjustParam } from "@/lib/design/grid-sheet-split";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
+import { liveConduitRiser } from "@/lib/design/conduit-riser/live";
+import { getConduitSizes } from "@/lib/stores/conduit-sizes";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -145,7 +147,7 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct, companies, specRecords] = await Promise.all([
+  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct, companies, specRecords, conduitSizes] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
@@ -155,6 +157,7 @@ export default async function GridEditorPage({
     loadCurtainSewingPct(),
     allCompanies(),
     allSpecRecords(),
+    getConduitSizes(),
   ]);
   // #244 — the header's customer control: a lean list (id, name, type).
   const customerOptions = companies.map((c) => ({ id: c.id, name: c.name, ...(c.type ? { detail: c.type } : {}) }));
@@ -286,6 +289,8 @@ export default async function GridEditorPage({
     wireLabor,
     sewingPct,
     groupParts: parts,
+    conduitSizes,
+    designatorDigits: designatorDigitsOf(settings),
   };
   // A pricing fault must not take the editor down with it — the quote
   // action reports it where the person can act on it.
@@ -294,6 +299,15 @@ export default async function GridEditorPage({
     return null;
   });
   const laborLines = built?.ok ? built.build.labor : [];
+
+  // #321: the conduit riser's pricing inputs for the live BOM — the active
+  // option's riser (normalized and pruned against the plan), the conduit
+  // sizes and each mapped size's catalog part (the same slice the wire
+  // parts carry). The editor runs buildGridQuote's own riserBom over them.
+  const conduitPartIds = new Set(conduitSizes.flatMap((s) => (s.partId ? [s.partId] : [])));
+  const conduitParts: PartLite[] = catalog
+    .filter((p) => conduitPartIds.has(p.id))
+    .map((p) => ({ id: p.id, sku: p.sku, desc: p.desc, category: p.category, unit: p.unit, list: p.list, cost: p.cost }));
 
   // #299: the Spreadsheet view — the active option's equipment schedule,
   // built by the /schedule page's own helper over this request's reads
@@ -382,6 +396,9 @@ export default async function GridEditorPage({
       schedule={schedule}
       deviceTypes={deviceTypes.types}
       designatorDigits={designatorDigitsOf(settings)}
+      conduitRiser={liveConduitRiser(designed, activeOptionId)}
+      conduitSizes={conduitSizes}
+      conduitParts={conduitParts}
       symbolUrls={symbolUrls}
       favorites={favorites}
       recent={recent}

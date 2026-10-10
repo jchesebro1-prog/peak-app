@@ -69,7 +69,7 @@ import {
   type GridAccessory,
 } from "@/lib/design/grid-accessories";
 import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "@/lib/design/wire-labor";
-import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
+import { isEditableBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { get as getCatalogPart } from "@/lib/stores/catalog";
 import { liveRenameRefs } from "@/lib/stores/catalog-renames";
@@ -2369,7 +2369,7 @@ export async function setLaborOverride(
   system: string,
   amount: number | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!isBomGroupKey(system)) return { ok: false, error: "Unknown labor line." };
+  if (!isEditableBomGroupKey(system)) return { ok: false, error: "Unknown labor line." };
   if (amount !== null && !(typeof amount === "number" && Number.isFinite(amount) && amount >= 0 && amount <= LABOR_OVERRIDE_MAX))
     return { ok: false, error: "Enter a labor amount from $0 to $10,000,000." };
   const project = await getProject(projectId);

@@ -40,7 +40,7 @@ export function wireByOthers(
 }
 
 /** A run's conduit length: typed, else its longest member wire; null = unknown. */
-export function conduitLengthFt(run: ConduitRun, wireByKey: ReadonlyMap<string, CRWire>): number | null {
+export function conduitLengthFt(run: ConduitRun, wireByKey: ReadonlyMap<string, Pick<CRWire, "lengthFt">>): number | null {
   if (run.lengthFt && run.lengthFt > 0) return run.lengthFt;
   let best: number | null = null;
   for (const key of [...run.routeIds.map((id) => `route:${id}`), ...run.linkIds.map((id) => `link:${id}`)]) {
@@ -60,7 +60,8 @@ export type ConduitDemand = {
 export function conduitDemand(input: {
   doc: ConduitRiserDoc;
   estimateOwned: boolean;
-  wires: readonly CRWire[];
+  /** Only a wire's kind, id and length are read (bom.ts builds these from plain routes and links). */
+  wires: readonly Pick<CRWire, "id" | "kind" | "lengthFt">[];
   sizes: readonly ConduitSize[];
   labelOf: (e: RunEnd) => string;
   placementIds?: ReadonlySet<string>;

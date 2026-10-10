@@ -17,7 +17,7 @@
  * (the bomLines rule) — never dropped.
  */
 import { partLiteHaystack, type BomLine, type PartLite } from "./grid-bom";
-import { groupOfPart, isBomGroupKey, type BomGroupKey } from "./grid-bom-groups";
+import { groupOfPart, isEditableBomGroupKey, type BomGroupKey } from "./grid-bom-groups";
 import { isFabricPart } from "@/lib/fabric-part";
 
 export const ACCESSORY_QTY_MAX = 100_000;
@@ -80,7 +80,8 @@ export function sanitizeAccessory(
   const qty = cleanQty(r.qty);
   if (qty === null) return { ok: false, error: QTY_ERROR };
   const scope = r.scope;
-  if (!isBomGroupKey(scope)) return { ok: false, error: "Pick the BOM category the accessory belongs to." };
+  // #321: never under Conduit — that heading is priced from the conduit riser only.
+  if (!isEditableBomGroupKey(scope)) return { ok: false, error: "Pick the BOM category the accessory belongs to." };
   return { ok: true, item: { id, partId, qty, scope } };
 }
 
