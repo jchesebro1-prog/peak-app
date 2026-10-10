@@ -6,7 +6,7 @@ import { FEEDS } from "./feeds";
 import type { FeedCtx, TriageFeed } from "./feeds/context";
 import { TRIAGE_HOOKS } from "./hooks";
 import { loadClosedKeys } from "./liveness";
-import { getSnapshot, marksFor, saveSnapshot } from "./store";
+import { getSnapshot, insertSnapshotIfAbsent, marksFor, saveSnapshot } from "./store";
 import type { SnapshotRow, Slot, TriageSnapshot, TriageUser } from "./types";
 import { visibleRows } from "./view";
 
@@ -75,25 +75,59 @@ export type TriageView = { snapshot: TriageSnapshot; rows: SnapshotRow[]; note: 
 export async function loadTriageView(
   me: TriageUser,
   now: number,
-  opts: { feeds?: readonly TriageFeed[]; save?: (s: TriageSnapshot) => Promise<void> } = {}
+  opts: {
+    feeds?: readonly TriageFeed[];
+    /** Insert-if-absent writer for the lazy build (test seam). */
+    save?: (s: TriageSnapshot) => Promise<unknown>;
+    /** Snapshot reader (test seam). */
+    read?: (id: string) => Promise<TriageSnapshot | null>;
+  } = {}
 ): Promise<TriageView> {
   const { day, slot } = slotAt(now);
   const id = snapshotId(me.id, day, slot);
-  let snapshot = await getSnapshot(id).catch(() => null);
+  const read = opts.read ?? getSnapshot;
+  const live = async (): Promise<TriageSnapshot> => ({ ...(await computeSnapshot(me, { day, slot }, now, "lazy", { feeds: opts.feeds })), builtBy: "live" });
+  let snapshot: TriageSnapshot | null = null;
   let note: string | null = null;
-  if (!snapshot) {
-    snapshot = await computeSnapshot(me, { day, slot }, now, "lazy", { feeds: opts.feeds });
+  let readFailed = false;
+  try {
+    snapshot = await read(id);
+  } catch (err) {
+    // A failed READ is not a miss: never rebuild-and-save over a possibly good snapshot.
+    console.error("[triage] snapshot read failed", err);
+    readFailed = true;
+  }
+  if (readFailed) {
+    snapshot = await live();
+    note = LIVE_NOTE;
+  } else if (!snapshot) {
+    const built = await computeSnapshot(me, { day, slot }, now, "lazy", { feeds: opts.feeds });
     try {
-      await (opts.save ?? saveSnapshot)(snapshot);
+      // Insert only if absent, then use whatever is stored: concurrent first
+      // views converge and a lazy build never clobbers a cron snapshot.
+      await (opts.save ?? insertSnapshotIfAbsent)(built);
+      try {
+        snapshot = (await read(id)) ?? built;
+      } catch (err) {
+        console.error("[triage] snapshot re-read failed", err);
+        snapshot = built;
+      }
     } catch (err) {
       console.error("[triage] lazy snapshot save failed", err);
-      snapshot = { ...snapshot, builtBy: "live" };
+      snapshot = { ...built, builtBy: "live" };
       note = LIVE_NOTE;
     }
   }
+  const rows = snapshot.rows;
   const [marks, closed] = await Promise.all([
-    marksFor(me.id).catch(() => []),
-    loadClosedKeys(snapshot.rows, me, now).catch(() => new Set<string>()),
+    marksFor(me.id).catch((err) => {
+      console.error("[triage] marks load failed", err);
+      return [];
+    }),
+    loadClosedKeys(rows, me, now).catch((err) => {
+      console.error("[triage] liveness check failed", err);
+      return new Set<string>();
+    }),
   ]);
-  return { snapshot, rows: visibleRows(snapshot.rows, marks, closed, { snapshotId: id, day, slot }), note };
+  return { snapshot, rows: visibleRows(rows, marks, closed, { snapshotId: id, day, slot }), note };
 }

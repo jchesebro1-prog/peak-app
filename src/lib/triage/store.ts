@@ -1,4 +1,4 @@
-import { getDoc, listDocsByField, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertDocIfAbsent, listDocsByField, upsertDoc } from "@/db/doc-store";
 import type { TriageMark, TriageSnapshot } from "./types";
 
 /** Persistence for the two triage collections. Server-only. */
@@ -7,8 +7,14 @@ export async function getSnapshot(id: string): Promise<TriageSnapshot | null> {
   return getDoc<TriageSnapshot>("triage_snapshots", id);
 }
 
+/** The cron's deliberate rebuild: an upsert. */
 export async function saveSnapshot(s: TriageSnapshot): Promise<void> {
   await upsertDoc<TriageSnapshot>("triage_snapshots", s);
+}
+
+/** The lazy path: insert only if the slot has no snapshot (false = one already exists). Never overwrites a cron or concurrent snapshot. */
+export async function insertSnapshotIfAbsent(s: TriageSnapshot): Promise<boolean> {
+  return insertDocIfAbsent<TriageSnapshot>("triage_snapshots", s);
 }
 
 export function markId(userId: string, key: string): string {

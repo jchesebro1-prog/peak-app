@@ -13,7 +13,7 @@ import type { SnapshotRow, TriageSource, TriageUser } from "./types";
 export type LiveDocs = {
   tasks: ReadonlyMap<string, Pick<TaskRecord, "status">>;
   assignments: ReadonlyMap<string, Pick<Assignment, "done">>;
-  threads: ReadonlyMap<string, Pick<CommThread, "status" | "archived" | "assignedTo" | "deleted">>;
+  threads: ReadonlyMap<string, Pick<CommThread, "status" | "archived" | "assignedTo" | "deleted" | "gmailInboxed">>;
   recordings: ReadonlyMap<string, { actionItems: readonly { key: string; disposition: string }[] }>;
   quotes: ReadonlyMap<string, Quote>;
 };
@@ -21,7 +21,7 @@ export type LiveDocs = {
 /**
  * Spec "Snapshots and refresh": between runs the list is frozen, except rows
  * whose source is now done — task/assignment done, thread no longer waiting
- * on us (or archived / reassigned), call to-do decided, quote no longer
+ * on us (or archived / disposed in Gmail / reassigned), call to-do decided, quote no longer
  * waiting on me — are hidden on render. Lead / visit / renewal rows stay
  * until their marks or the next snapshot. Pure.
  */
@@ -44,7 +44,7 @@ export function closedKeys(rows: readonly SnapshotRow[], docs: LiveDocs, me: Tri
       }
       case "email": {
         const t = docs.threads.get(k.id);
-        if (!t || t.status !== "waiting_us" || t.archived || t.deleted || !sameName(t.assignedTo, me.name)) closed.add(r.key);
+        if (!t || t.status !== "waiting_us" || t.archived || t.deleted || t.gmailInboxed === false || !sameName(t.assignedTo, me.name)) closed.add(r.key);
         break;
       }
       case "call": {

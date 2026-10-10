@@ -46,8 +46,8 @@ import { normalizeTask, setTaskStatus, type TaskRecord } from "@/lib/stores/task
 import type { Assignment } from "@/lib/stores/assignments";
 import type { LeadRecord } from "@/lib/stores/leads";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
-import { getSnapshot, markId, setMark } from "@/lib/triage/store";
-import { buildSlotForAll, LIVE_NOTE, loadTriageView, type TriageView } from "@/lib/triage/service";
+import { getSnapshot, insertSnapshotIfAbsent, markId, saveSnapshot, setMark } from "@/lib/triage/store";
+import { buildSlotForAll, computeSnapshot, LIVE_NOTE, loadTriageView, type TriageView } from "@/lib/triage/service";
 import { closedKeys } from "@/lib/triage/liveness";
 import { markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
 import { gatherCandidates, toSnapshotRows } from "@/lib/triage/build";
@@ -537,7 +537,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   ok(rows.map((r) => r.key).join(",") === "lead:a,task:t" && rows[0].score === 60 && rows[0].reason === "First response overdue" && Array.isArray(rows[0].also), "build: rows are ranked, one per key, with score and reason");
 
   /* ---- pure: liveness ---- */
-  const lrows = ["task:T1", "task:T2", "asg:A1", "email:C1", "email:C2", "call:R1:k1", "call:R1:k2", "quote:Q1", "lead:L1"].map(row);
+  const lrows = ["task:T1", "task:T2", "asg:A1", "email:C1", "email:C2", "email:C3", "call:R1:k1", "call:R1:k2", "quote:Q1", "lead:L1"].map(row);
   const closed = closedKeys(
     lrows,
     {
@@ -546,6 +546,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
       threads: new Map([
         ["C1", { status: "replied" as const, archived: false, assignedTo: ME.name }],
         ["C2", { status: "waiting_us" as const, archived: false, assignedTo: ME.name }],
+        ["C3", { status: "waiting_us" as const, archived: false, assignedTo: ME.name, gmailInboxed: false }],
       ]),
       recordings: new Map([["R1", { actionItems: [{ key: "k1", disposition: "accepted" }, { key: "k2", disposition: "pending" }] }]]),
       quotes: new Map([["Q1", { id: "Q1", owner: "Someone Else", status: "draft", review: { state: "approved" } } as unknown as Quote]]),
@@ -553,7 +554,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
     ME,
     MON_10
   );
-  ok([...closed].sort().join(",") === "call:R1:k1,email:C1,quote:Q1,task:T1", "liveness: a done task, replied thread, decided to-do and approved quote are hidden; open ones and leads stay");
+  ok([...closed].sort().join(",") === "call:R1:k1,email:C1,email:C3,quote:Q1,task:T1", "liveness: a done task, replied or Gmail-disposed thread, decided to-do and approved quote are hidden; open ones and leads stay");
 
   /* ---- DB: lazy build, freeze, done-source, marks ---- */
   const U = { id: fixtureId("TRIAGE", "u1"), name: "Triage Tester", canApprove: false };
@@ -604,6 +605,38 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
     live.note === LIVE_NOTE && live.snapshot.builtBy === "live" && live.rows.length > 0 && !(await getSnapshot(snapshotId(U2.id, "2026-10-12", "morning"))),
     "snapshot: when the lazy build can't be saved the list is computed live, with a note"
   );
+
+  /* ---- DB: lazy build never clobbers; a read failure never rewrites ---- */
+  const U4 = { id: fixtureId("TRIAGE", "u4"), name: "Triage Four", canApprove: false };
+  const s4 = snapshotId(U4.id, "2026-10-12", "morning");
+  registerFixture("triage_snapshots", s4);
+  const cronSnap = await computeSnapshot(U4, { day: "2026-10-12", slot: "morning" }, MON_10 - H, "cron", { feeds, users: [] });
+  await saveSnapshot(cronSnap);
+  const v4 = await loadTriageView(U4, MON_10, { feeds: [] });
+  ok(v4.snapshot.builtBy === "cron" && v4.snapshot.builtAt === MON_10 - H && v4.snapshot.rows.length === cronSnap.rows.length, "snapshot: a stored snapshot is returned unchanged (not rebuilt)");
+  ok(!(await insertSnapshotIfAbsent({ ...cronSnap, builtAt: 1, builtBy: "lazy", rows: [] })) && (await getSnapshot(s4))?.builtAt === MON_10 - H, "snapshot: insert-if-absent never overwrites an existing snapshot");
+  const U5 = { id: fixtureId("TRIAGE", "u5"), name: "Triage Five", canApprove: false };
+  const s5 = snapshotId(U5.id, "2026-10-12", "morning");
+  registerFixture("triage_snapshots", s5);
+  const raced = await loadTriageView(U5, MON_10, {
+    feeds,
+    save: async (lazy) => {
+      // the cron lands between this view's miss and its save
+      await saveSnapshot({ ...lazy, builtBy: "cron", builtAt: MON_10 - H, rows: lazy.rows.slice(0, 1) });
+      await insertSnapshotIfAbsent(lazy);
+    },
+  });
+  ok(raced.snapshot.builtBy === "cron" && raced.snapshot.rows.length === 1 && (await getSnapshot(s5))?.builtBy === "cron", "snapshot: a lazy build that loses the race uses the stored snapshot and never clobbers it");
+  const U6 = { id: fixtureId("TRIAGE", "u6"), name: "Triage Six", canApprove: false };
+  const s6 = snapshotId(U6.id, "2026-10-12", "morning");
+  registerFixture("triage_snapshots", s6);
+  let wrote = 0;
+  const readFail = await loadTriageView(U6, MON_10, {
+    feeds,
+    read: async () => { throw new Error("read down"); },
+    save: async () => { wrote++; },
+  });
+  ok(readFail.note === LIVE_NOTE && readFail.snapshot.builtBy === "live" && readFail.rows.length > 0 && wrote === 0 && !(await getSnapshot(s6)), "snapshot: a failed snapshot READ returns the live list with a note and writes nothing");
 
   /* ---- DB: cron build ---- */
   const U3 = { id: fixtureId("TRIAGE", "u3"), name: "Triage Three", canApprove: false };
