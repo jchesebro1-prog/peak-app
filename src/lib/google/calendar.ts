@@ -2,7 +2,7 @@ import { accessTokenFor } from "@/lib/gmail/connections";
 import { accessTokenForConnection } from "./calendar-connections";
 import { presetFromRrule, rruleFor } from "./recurrence";
 import { findMeetingLink } from "./meeting-link";
-import { DRIVE_DAY_PROP, DRIVE_KEY_PROP, DRIVE_PROP } from "@/lib/drive-sync/diff";
+import { DRIVE_DAY_PROP, DRIVE_KEY_PROP, DRIVE_PROP } from "./drive-props";
 
 /**
  * Thin Google Calendar v3 client (D77) — plain fetch, bearer auth, zero deps,
@@ -221,27 +221,46 @@ export async function listUpcomingEvents(
 
 export type SyncCalendarEvent = CalendarEvent & { description: string };
 
+export type SyncRead = { events: SyncCalendarEvent[]; coveredThroughMs: number };
+export type EventPage = { items?: GoogleEvent[]; nextPageToken?: string };
+
+/** The page loop behind listEventsForSync, with the fetcher injected. When
+ *  the page cap ends the read before Google ran out, `coveredThroughMs` is
+ *  the start of the last event read (events come back ordered by start), so
+ *  the caller syncs only days that end at or before it; a complete read
+ *  covers the whole requested window. */
+export async function readSyncPages(
+  fetchPage: (pageToken?: string) => Promise<EventPage>,
+  opts: { timeMinMs: number; timeMaxMs: number; maxPages: number }
+): Promise<SyncRead> {
+  const events: SyncCalendarEvent[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < opts.maxPages; page++) {
+    const r = await fetchPage(pageToken);
+    const desc = new Map((r.items || []).map((e) => [e.id, e.description || ""]));
+    for (const ev of toCalendarEvents(r.items)) events.push({ ...ev, description: desc.get(ev.id) || "" });
+    if (!r.nextPageToken) return { events, coveredThroughMs: opts.timeMaxMs };
+    pageToken = r.nextPageToken;
+  }
+  const lastStart = events.reduce((m, e) => Math.max(m, e.startMs), opts.timeMinMs);
+  return { events, coveredThroughMs: Math.min(lastStart, opts.timeMaxMs) };
+}
+
 /** Every event in a window, with descriptions — the drive sync's read
- *  (tagged-event diff, stops, D144 cleanup). Pages up to 4 x 250. */
+ *  (tagged-event diff, stops, D144 cleanup). Pages up to 4 x 250; when that
+ *  isn't the whole window, `coveredThroughMs` says how far it got. */
 export async function listEventsForSync(
   mailboxKey: string,
   opts: { timeMinMs: number; timeMaxMs: number }
-): Promise<SyncCalendarEvent[]> {
-  const out: SyncCalendarEvent[] = [];
-  let pageToken = "";
-  for (let page = 0; page < 4; page++) {
-    const params = eventsListParams({ ...opts, maxResults: 250 });
-    if (pageToken) params.set("pageToken", pageToken);
-    const r = await gcal<{ items?: GoogleEvent[]; nextPageToken?: string }>(
-      mailboxKey,
-      "/calendars/primary/events?" + params.toString()
-    );
-    const desc = new Map((r.items || []).map((e) => [e.id, e.description || ""]));
-    for (const ev of toCalendarEvents(r.items)) out.push({ ...ev, description: desc.get(ev.id) || "" });
-    if (!r.nextPageToken) break;
-    pageToken = r.nextPageToken;
-  }
-  return out;
+): Promise<SyncRead> {
+  return readSyncPages(
+    (pageToken) => {
+      const params = eventsListParams({ ...opts, maxResults: 250 });
+      if (pageToken) params.set("pageToken", pageToken);
+      return gcal<EventPage>(mailboxKey, "/calendars/primary/events?" + params.toString());
+    },
+    { ...opts, maxPages: 4 }
+  );
 }
 
 /* ---- D148: an additional connected account's own calendars ------------ */

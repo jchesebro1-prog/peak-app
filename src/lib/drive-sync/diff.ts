@@ -4,10 +4,10 @@
  * rep made is invisible here. Leg key = rep + date + from-stop + to-stop.
  */
 import type { DriveLeg } from "@/lib/drive-plan/plan";
+import { addDays, chicagoDayStart } from "@/lib/drive-plan/day";
+import { DRIVE_DAY_PROP, DRIVE_KEY_PROP, DRIVE_PROP } from "@/lib/google/drive-props";
 
-export const DRIVE_PROP = "peakDrive";
-export const DRIVE_KEY_PROP = "peakDriveKey";
-export const DRIVE_DAY_PROP = "peakDriveDay";
+export { DRIVE_DAY_PROP, DRIVE_KEY_PROP, DRIVE_PROP };
 export const LEGACY_DESCRIPTION_PREFIX = "Auto-added travel time";
 const LEGACY_TITLE = /^Drive to .+ \(auto\)$/;
 
@@ -71,6 +71,13 @@ export function diffDriveEvents(desired: DesiredDriveEvent[], existing: Existing
   }
   for (const [key, list] of byKey) if (!wanted.has(key)) out.remove.push(...list);
   return out;
+}
+
+/** Days a paged calendar read saw in full: a Chicago day is kept only if it
+ *  ends at or before `coveredThroughMs` (the read's coverage). Pass just these
+ *  to diffDriveEvents — a day cut off mid-read would mis-insert/update/delete. */
+export function daysFullyCovered(days: string[], coveredThroughMs: number): string[] {
+  return days.filter((d) => chicagoDayStart(addDays(d, 1)) <= coveredThroughMs);
 }
 
 /** D144's "Drive to … (auto)" block, upcoming only, exact shape only. */

@@ -47,7 +47,7 @@ export type SaveScheduleDefaultsResult = { ok: true; driveBufferMin: number } | 
 /** Refuses blank / non-numeric input instead of silently storing the 15-minute fallback. */
 export async function saveScheduleDefaults(input: { driveBufferMin: unknown }): Promise<SaveScheduleDefaultsResult> {
   const driveBufferMin = cleanBufferMin(input?.driveBufferMin);
-  if (driveBufferMin == null) return { ok: false, error: `Enter whole minutes between 0 and ${MAX_DRIVE_BUFFER_MIN}.` };
+  if (driveBufferMin == null) return { ok: false, error: `Enter a number of minutes (0–${MAX_DRIVE_BUFFER_MIN}).` };
   await setBlob(SCHEDULE_DEFAULTS_BLOB, { driveBufferMin });
   return { ok: true, driveBufferMin };
 }

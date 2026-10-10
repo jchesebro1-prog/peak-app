@@ -44,6 +44,7 @@ import {
 } from "@/lib/address-verify/state";
 
 import {
+  daysFullyCovered,
   desiredFromLegs,
   diffDriveEvents,
   drivePrivateProps,
@@ -52,7 +53,7 @@ import {
   type DesiredDriveEvent,
   type ExistingDriveEvent,
 } from "@/lib/drive-sync/diff";
-import { eventWriteBody, toCalendarEvents } from "@/lib/google/calendar";
+import { eventWriteBody, readSyncPages, toCalendarEvents, type EventPage } from "@/lib/google/calendar";
 
 export type Ok = (c: boolean, m: string) => void;
 
@@ -742,10 +743,12 @@ export async function driveTimePrefsChecks(ok: Ok): Promise<void> {
     await markDriveStale([U]);
     const st = await getDriveSyncState(U);
     ok(st.lastSyncAt === 0 && st.legacyCleanedAt === 99, "drive-time prefs: markDriveStale zeroes lastSyncAt and keeps the legacy-cleanup stamp");
+    await saveScheduleDefaults({ driveBufferMin: 33 });
     const bad = await saveScheduleDefaults({ driveBufferMin: "abc" });
     const blank = await saveScheduleDefaults({ driveBufferMin: "" });
+    const afterRefused = (await getScheduleDefaults()).driveBufferMin;
     const good = await saveScheduleDefaults({ driveBufferMin: before.driveBufferMin });
-    ok(!bad.ok && !blank.ok && good.ok && good.driveBufferMin === before.driveBufferMin && (await getScheduleDefaults()).driveBufferMin === before.driveBufferMin,
+    ok(!bad.ok && !blank.ok && afterRefused === 33 && good.ok && good.driveBufferMin === before.driveBufferMin && (await getScheduleDefaults()).driveBufferMin === before.driveBufferMin,
       "drive-time prefs: the company default refuses blank / non-numeric input with an error and keeps the stored value");
   } finally {
     await db.delete(blobs).where(like(blobs.id, "%TESTdrive:%"));
@@ -795,4 +798,32 @@ export async function driveTimeDiffChecks(ok: Ok): Promise<void> {
     "drive-time calendar: app-written drive events carry peakDrive + leg key + day");
   ok((eventWriteBody({ title: "Mine", startMs: 1, endMs: 2 }) as { extendedProperties?: unknown }).extendedProperties === undefined,
     "drive-time calendar: ordinary event writes carry no extended properties");
+
+  // Paged sync read: a capped read reports how far it got.
+  const evItem = (id: string, hour: number) => ({ id, summary: id, description: "d-" + id, start: { dateTime: new Date(at(hour)).toISOString() }, end: { dateTime: new Date(at(hour) + 3_600_000).toISOString() } });
+  const stub = (pages: number): { fetch: (t?: string) => Promise<EventPage>; calls: () => number } => {
+    let n = 0;
+    return {
+      calls: () => n,
+      fetch: async (t?: string) => {
+        const i = t ? Number(t) : 0;
+        n++;
+        return { items: [evItem("p" + i, 1 + i)], nextPageToken: i + 1 < pages ? String(i + 1) : undefined };
+      },
+    };
+  };
+  const winMin = at(0), winMax = at(0) + 10 * 86_400_000;
+  const cut = stub(5);
+  const truncated = await readSyncPages(cut.fetch, { timeMinMs: winMin, timeMaxMs: winMax, maxPages: 4 });
+  ok(cut.calls() === 4 && truncated.events.length === 4 && truncated.coveredThroughMs === at(4) && truncated.events[3].description === "d-p3",
+    "drive-time sync read: hitting the page cap reports coveredThroughMs = start of the last event read");
+  const whole = await readSyncPages(stub(2).fetch, { timeMinMs: winMin, timeMaxMs: winMax, maxPages: 4 });
+  ok(whole.events.length === 2 && whole.coveredThroughMs === winMax, "drive-time sync read: a complete read covers the whole requested window");
+  const exact = await readSyncPages(stub(4).fetch, { timeMinMs: winMin, timeMaxMs: winMax, maxPages: 4 });
+  ok(exact.events.length === 4 && exact.coveredThroughMs === winMax, "drive-time sync read: finishing exactly on the cap is still complete");
+
+  const d1 = DAY, d2 = addDays(DAY, 1), d3 = addDays(DAY, 2);
+  ok(daysFullyCovered([d1, d2, d3], chicagoDayStart(d3)).join() === `${d1},${d2}` && daysFullyCovered([d1, d2], chicagoDayStart(d2) + 3_600_000).join() === d1 &&
+     daysFullyCovered([d1, d2], chicagoDayStart(d1)).length === 0 && daysFullyCovered([d1, d2, d3], Number.MAX_SAFE_INTEGER).length === 3,
+    "drive-time sync: a day is synced only when its Chicago day ends at or before the read's coverage");
 }
