@@ -3,6 +3,7 @@
  * imports ./types instead.
  */
 import { addressKey } from "./keys";
+import { samePlace } from "./same-place";
 import type { AddressState, GeoSource, GeoStatus, LatLng, PlaceRow } from "./types";
 import { GEO_STATUSES } from "./types";
 
@@ -55,15 +56,71 @@ export function typedStreet(text: string | null | undefined): string {
   return t(text).split(/[,\n]/)[0] ?? "";
 }
 
-/** Free text has no stated city to gate on, so — like the venue path's
- *  geocodedStatus(askedStreet, hit) — a hit verifies only when the TYPED
- *  text's street part AND the street the geocoder returned both lead with a
- *  house number. A name ("Starbucks", "Holiday Inn Express", "North HS") can
- *  geocode to a house-numbered POI hundreds of miles away: that is
- *  needs_check (flagged; a Fix/pin once and the place book remembers it). */
-export function statusOfFreeTextHit(typed: string | null | undefined, hit: { street: string } | null | undefined): GeoStatus {
+/** The first token of a street line, when that token is a house number. */
+function houseNumberOf(street: string): string | null {
+  return hasHouseNumber(street) ? (String(street).trim().split(/\s+/)[0] ?? null) : null;
+}
+
+/** Same house number: case-insensitive, and one side may carry one extra
+ *  trailing letter ("123" = "123A"; "123A" ≠ "123B"). */
+function sameHouseNumber(a: string, b: string): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  if (x === y) return true;
+  const plusLetter = (long: string, short: string) => long.length === short.length + 1 && long.startsWith(short) && /[a-z]$/.test(long) && /\d$/.test(short);
+  return plusLetter(x, y) || plusLetter(y, x);
+}
+
+/** A comma part's place name with a trailing state code / ZIP removed
+ *  ("Madison WI 53703" → "Madison"). */
+function placePart(part: string): string {
+  return part
+    .trim()
+    .replace(/\s*\b\d{5}(?:-\d{4})?$/, "")
+    .replace(/\s+[A-Za-z]{2}\.?$/, "")
+    .trim();
+}
+
+/** The duck type the free-text rule reads from a geocoder hit (GeoSearchHit). */
+export type FreeTextHit = { street: string; houseNumber?: string | null; city?: string | null; zip?: string | null };
+
+/**
+ * Free-text verification (D714 as amended in round 2). Verified only when
+ * ALL of these hold — anything else is needs_check (flagged; a Fix/pin once
+ * and the place book remembers it):
+ *   (a) the typed text's street part (first line / comma part) leads with a
+ *       house number;
+ *   (b) the hit's house number equals that typed first token (case-
+ *       insensitive, a trailing letter allowed — sameHouseNumber);
+ *   (c) the typed text carries a locality signal after the street — a comma
+ *       part or a 5-digit ZIP — AND that locality matches the hit: a comma
+ *       part samePlace() the hit's city (the venue path's helper), or the ZIP
+ *       equals the hit's postcode.
+ * So "100 Main St", "123", "53703", "4B Conference Room" and "1-800-FLOWERS"
+ * never verify, whatever house-numbered hit they geocode to; a name
+ * ("Starbucks") never does either. A hand pin is the only path that verifies
+ * without this.
+ */
+export function statusOfFreeTextHit(typed: string | null | undefined, hit: FreeTextHit | null | undefined): GeoStatus {
   if (!hit) return "unresolved";
-  return hasHouseNumber(typedStreet(typed)) && hasHouseNumber(hit.street || "") ? "verified" : "needs_check";
+  const parts = t(typed).split(/[,\n]/);
+  const typedNo = houseNumberOf(parts[0] ?? "");
+  const hitNo = hit.houseNumber ? String(hit.houseNumber).trim() : houseNumberOf(hit.street || "");
+  if (!typedNo || !hitNo || !hasHouseNumber(hit.street || hitNo) || !sameHouseNumber(typedNo, hitNo)) return "needs_check";
+  const rest = parts.slice(1).map((p) => p.trim()).filter(Boolean);
+  if (!rest.length) return "needs_check";
+  const cityOk = rest.some((p) => samePlace(placePart(p), hit.city));
+  const zips: string[] = rest.join(" ").match(/\b\d{5}(?=(?:-\d{4})?\b)/g) ?? [];
+  const hitZip = String(hit.zip ?? "").trim().slice(0, 5);
+  const zipOk = !!hitZip && zips.includes(hitZip);
+  return cityOk || zipOk ? "verified" : "needs_check";
+}
+
+/** A picked suggestion: the human chose that exact suggestion (its own
+ *  town included), so it is building-level when its street leads with a
+ *  house number. */
+export function statusOfPickedStreet(street: string | null | undefined): GeoStatus {
+  return hasHouseNumber(t(street)) ? "verified" : "needs_check";
 }
 
 export type VenueSpot = {
@@ -158,7 +215,7 @@ export function placeAddressState(text: string, row: PlaceRow | null | undefined
 export function placeRowFromHit(
   key: string,
   label: string,
-  hit: { street: string; lat: number; lng: number } | null | undefined,
+  hit: (FreeTextHit & { lat: number; lng: number }) | null | undefined,
   now: number
 ): PlaceRow {
   // A hit with no usable point is a hit with no point: never stored verified.

@@ -78,8 +78,8 @@ export async function addCalendarEventAction(
     const userId = grant.userId;
     const day = chicagoDayKey(input.startAt);
     after(async () => {
-      const { syncDriveDays, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
-      await syncDriveDays(userId, [day, addDays(day, 1)])
+      const { syncDriveDays, markStaleIfTriggerFailed, triggerDeadline } = await import("@/lib/drive-sync/sync");
+      await syncDriveDays(userId, [day, addDays(day, 1)], undefined, { deadlineMs: triggerDeadline() })
         .then((r) => markStaleIfTriggerFailed(userId, r))
         .catch((err) => markStaleIfTriggerFailed(userId, null, err));
     });
@@ -133,8 +133,8 @@ export async function updateCalendarEventAction(
   }
   const syncUser = grant.userId;
   after(async () => {
-    const { syncDriveForUser, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
-    await syncDriveForUser(syncUser)
+    const { syncDriveForUser, markStaleIfTriggerFailed, triggerDeadline } = await import("@/lib/drive-sync/sync");
+    await syncDriveForUser(syncUser, undefined, { deadlineMs: triggerDeadline() })
       .then((r) => markStaleIfTriggerFailed(syncUser, r))
       .catch((err) => markStaleIfTriggerFailed(syncUser, null, err));
   });
@@ -156,8 +156,8 @@ export async function deleteCalendarEventAction(
   }
   const syncUser = grant.userId;
   after(async () => {
-    const { syncDriveForUser, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
-    await syncDriveForUser(syncUser)
+    const { syncDriveForUser, markStaleIfTriggerFailed, triggerDeadline } = await import("@/lib/drive-sync/sync");
+    await syncDriveForUser(syncUser, undefined, { deadlineMs: triggerDeadline() })
       .then((r) => markStaleIfTriggerFailed(syncUser, r))
       .catch((err) => markStaleIfTriggerFailed(syncUser, null, err));
   });
@@ -178,8 +178,8 @@ export async function setStayOverAction(
   await setStayOver(me.id, dayKey, on === true);
   const userId = me.id;
   after(async () => {
-    const { syncDriveDays, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
-    await syncDriveDays(userId, [dayKey, addDays(dayKey, 1)])
+    const { syncDriveDays, markStaleIfTriggerFailed, triggerDeadline } = await import("@/lib/drive-sync/sync");
+    await syncDriveDays(userId, [dayKey, addDays(dayKey, 1)], undefined, { deadlineMs: triggerDeadline() })
       .then((r) => markStaleIfTriggerFailed(userId, r))
       .catch((err) => markStaleIfTriggerFailed(userId, null, err));
   });

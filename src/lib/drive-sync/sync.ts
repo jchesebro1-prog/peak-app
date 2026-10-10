@@ -432,7 +432,16 @@ export async function syncDriveIfStale(userId: string, deps?: Partial<DriveSyncD
   const state = await d.getState(userId);
   if (startMs - state.lastSyncAt < STALE_SYNC_MS) return null;
   await d.setState(userId, { lastSyncAt: startMs });
-  return syncWindow(userId, d, startMs);
+  return syncWindow(userId, d, startMs, { deadlineMs: triggerDeadline(startMs) });
+}
+
+/** A live trigger's work runs in after() inside a route capped at 60 s
+ *  (maxDuration): its planner gets this long from the trigger's start. */
+export const TRIGGER_DEADLINE_MS = 50_000;
+
+/** The deadline a live trigger hands syncDriveDays (D721). */
+export function triggerDeadline(startMs: number = Date.now()): number {
+  return startMs + TRIGGER_DEADLINE_MS;
 }
 
 /** The daily cron rider: every active rep with a connected calendar, least
@@ -516,14 +525,14 @@ export async function markStaleIfTriggerFailed(
   }
 }
 
-async function syncPeopleDays(map: Map<string, Set<string>>, d: DriveSyncDeps): Promise<void> {
+async function syncPeopleDays(map: Map<string, Set<string>>, d: DriveSyncDeps, deadlineMs: number): Promise<void> {
   if (!map.size) return;
   const users = await d.users();
   for (const [name, days] of map) {
     const u = users.find((x) => x.name === name && x.status === "active");
     if (!u) continue;
     try {
-      await markStaleIfTriggerFailed(u.id, await syncDriveDays(u.id, [...days], d), undefined, d);
+      await markStaleIfTriggerFailed(u.id, await syncDriveDays(u.id, [...days], d, { deadlineMs }), undefined, d);
     } catch (err) {
       await markStaleIfTriggerFailed(u.id, null, err, d);
     }
@@ -533,10 +542,11 @@ async function syncPeopleDays(map: Map<string, Set<string>>, d: DriveSyncDeps): 
 /** Visit created / moved / reassigned / unscheduled / deleted. */
 export async function resyncForVisitChange(before: VisitLike | null, after: VisitLike | null, deps?: Partial<DriveSyncDeps>): Promise<void> {
   const d = { ...defaultDeps(), ...deps };
+  const deadlineMs = triggerDeadline(d.now());
   const map = new Map<string, Set<string>>();
   addPersonDays(map, before);
   addPersonDays(map, after);
-  await syncPeopleDays(map, d);
+  await syncPeopleDays(map, d, deadlineMs);
 }
 
 /** An address was verified: re-sync upcoming visit legs touching it now; a
@@ -544,6 +554,7 @@ export async function resyncForVisitChange(before: VisitLike | null, after: Visi
  *  so every active rep is marked stale (next view / cron picks it up). */
 export async function resyncForAddress(pointKey: string, deps?: Partial<DriveSyncDeps>): Promise<void> {
   const d = { ...defaultDeps(), ...deps };
+  const deadlineMs = triggerDeadline(d.now());
   const window = syncWindowDays(d.now());
   const minMs = chicagoDayStart(window[0]);
   const maxMs = chicagoDayStart(addDays(window[window.length - 1], 1));
@@ -551,7 +562,7 @@ export async function resyncForAddress(pointKey: string, deps?: Partial<DriveSyn
   const states = await d.visitStates(upcoming.map(visitAddressInput), "cache");
   const map = new Map<string, Set<string>>();
   for (const v of upcoming) if (states.get(v.id)?.pointKey === pointKey) addPersonDays(map, v);
-  await syncPeopleDays(map, d);
+  await syncPeopleDays(map, d, deadlineMs);
   if (pointKey.startsWith("place:")) {
     const at = d.now();
     for (const u of await d.users()) if (u.status === "active") await d.setState(u.id, { lastSyncAt: 0, staleAt: at });

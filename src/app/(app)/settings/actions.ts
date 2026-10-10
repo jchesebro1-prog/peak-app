@@ -5,7 +5,6 @@ import { requirePerm } from "@/lib/session";
 import { getSettings, getSettingsStrict, setSettings, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
-  search as geoSearch,
   type GeoSearchHit,
   type LatLng,
 } from "@/lib/geo";
@@ -571,7 +570,10 @@ export async function disconnectMailboxAction(mailboxKey: string) {
 /** Live address search (Nominatim, server-side per Geo usage policy). */
 export async function searchAddressAction(query: string): Promise<GeoSearchHit[]> {
   await requirePerm("manage_users");
-  return geoSearch(query, { limit: 6 });
+  // A turn on the instance-wide Nominatim pacer; a type-ahead never waits
+  // long — a busy queue answers [] (the next keystroke asks again).
+  const { pacedSearch } = await import("@/lib/address-verify/nominatim-pacer");
+  return pacedSearch(query, { limit: 6 }, { maxWaitMs: 3_000 });
 }
 
 /** Offline city-level geocode for the "Auto-locate" button. */

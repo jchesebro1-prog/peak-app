@@ -345,6 +345,8 @@ export type EventWriteInput = {
   noReminders?: boolean;
   /** Mark the event busy (transparency opaque); omitted = not sent. */
   busy?: boolean;
+  /** Event status to write ("confirmed" restores a cancelled/deleted event on update); omitted = not sent. */
+  status?: "confirmed";
 };
 
 export function eventWriteBody(ev: EventWriteInput) {
@@ -362,6 +364,7 @@ export function eventWriteBody(ev: EventWriteInput) {
     extendedProperties: ev.privateProps ? { private: ev.privateProps } : undefined,
     reminders: ev.noReminders ? { useDefault: false, overrides: [] } : undefined,
     transparency: ev.busy ? "opaque" : undefined,
+    status: ev.status || undefined,
   };
 }
 
@@ -402,14 +405,14 @@ export async function updateEvent(
   mailboxKey: string,
   eventId: string,
   ev: EventWriteInput
-): Promise<{ id: string; htmlLink: string }> {
+): Promise<{ id: string; htmlLink: string; status?: string }> {
   const sendUpdates = ev.attendeeEmails?.length ? "all" : "none";
   const r = await gcal<GoogleEvent>(
     mailboxKey,
     "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=" + sendUpdates,
     { method: "PATCH", body: JSON.stringify(eventWriteBody(ev)) }
   );
-  return { id: r.id, htmlLink: r.htmlLink || "" };
+  return { id: r.id, htmlLink: r.htmlLink || "", status: r.status };
 }
 
 /** Delete an event (or, for a recurring instance id, cancel just that one

@@ -74,6 +74,8 @@ export type GeoSearchHit = {
   sub: string;
   name: string;
   street: string;
+  /** The geocoder's own house_number, when it gave one (free-text verification compares it). */
+  houseNumber?: string;
   city: string;
   state: string;
   zip: string;
@@ -398,6 +400,7 @@ function normalizeHit(h: NominatimHit | null | undefined): GeoSearchHit | null {
     sub,
     name: h.name || "",
     street,
+    ...(a.house_number ? { houseNumber: String(a.house_number).trim() } : {}),
     city,
     state,
     zip,
@@ -474,9 +477,27 @@ export async function searchCity(
   state: string | null | undefined,
   opts?: { limit?: number }
 ): Promise<GeoSearchHit[]> {
+  try {
+    return await searchCityOrThrow(city, state, opts);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * searchCity()'s structured lookup, but THROWS when Nominatim can't be
+ * reached or answers with an error ([] only for a real "no match" or a
+ * too-short city) — the venue re-check needs an outage to read as an outage,
+ * never as "the town doesn't match" (D724).
+ */
+export async function searchCityOrThrow(
+  city: string | null | undefined,
+  state: string | null | undefined,
+  opts?: { limit?: number }
+): Promise<GeoSearchHit[]> {
   const c = (city || "").trim();
   if (c.length < 2) return [];
-  if (!online()) return [];
+  if (!online()) throw new Error("offline");
   const limit = (opts && opts.limit) || 1;
   const params = new URLSearchParams({
     format: "jsonv2",
@@ -487,23 +508,19 @@ export async function searchCity(
   });
   const st = (state || "").trim();
   if (st) params.set("state", st);
-  try {
-    const res = await fetch(
-      "https://nominatim.openstreetmap.org/search?" + params.toString(),
-      {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "peak-app/1.0 (Peak Systems Group travel estimates)",
-        },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      }
-    );
-    if (!res.ok) return [];
-    const j = (await res.json()) as NominatimHit[] | null;
-    return (j || []).map(normalizeHit).filter((x): x is GeoSearchHit => !!x);
-  } catch {
-    return [];
-  }
+  const res = await fetch(
+    "https://nominatim.openstreetmap.org/search?" + params.toString(),
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "peak-app/1.0 (Peak Systems Group travel estimates)",
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    }
+  );
+  if (!res.ok) throw new Error("Nominatim " + res.status);
+  const j = (await res.json()) as NominatimHit[] | null;
+  return (j || []).map(normalizeHit).filter((x): x is GeoSearchHit => !!x);
 }
 
 /* ---------------- estimate ---------------- */

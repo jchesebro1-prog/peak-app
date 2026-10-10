@@ -30,6 +30,7 @@ import {
 import { geocodedStatus, hasHouseNumber, isValidPoint } from "@/lib/address-verify/state";
 import type { GeoStatus } from "@/lib/address-verify/types";
 import { geocodeVenue, newGeocodeCtx, type GeocodeFailure, type GeocodePrecision } from "@/lib/geo-backfill";
+import { pacedSearch, pacedSearchCity } from "@/lib/address-verify/nominatim-pacer";
 
 export type UnlocatedVenue = {
   siteId: string;
@@ -186,7 +187,14 @@ export async function locateVenue(
       state: clip(input.state, 40),
       zip: clip(input.zip, 20),
     };
-    const out = await geocodeVenue(fields, newGeocodeCtx(opts?.delayMs));
+    // Every lookup (free text + the town-centre check) takes a turn on the
+    // instance-wide Nominatim pacer, fail-soft; the pacer does the spacing.
+    const pace = opts?.delayMs != null ? { delayMs: opts.delayMs } : undefined;
+    const out = await geocodeVenue(fields, {
+      ...newGeocodeCtx(0),
+      search: (q, o) => pacedSearch(q, o, pace),
+      searchCity: (city, state, o) => pacedSearchCity(city, state, o, pace),
+    });
     if (!out.ok) return { ok: false, reason: out.reason, ...(out.got ? { got: out.got } : {}) };
     lat = out.lat;
     lng = out.lng;

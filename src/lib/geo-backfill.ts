@@ -52,6 +52,7 @@ import {
 } from "@/lib/geo";
 import type { Office } from "@/lib/settings";
 import { geocodedStatus } from "@/lib/address-verify/state";
+import { samePlace } from "@/lib/address-verify/same-place";
 
 /** Nominatim asks for <= 1 request/second. 1100ms leaves headroom. */
 export const GEOCODE_DELAY_MS = 1100;
@@ -71,34 +72,9 @@ export type GeocodeFailure = {
   got?: string;
 };
 
-/**
- * Compare place names the way a human would. Lowercase, drop the
- * "City of" / "Town of" / "Village of" prefixes Nominatim sometimes prepends
- * to a perfectly good match, then strip everything that isn't a letter or a
- * digit — so "LaCrosse" == "La Crosse" and "St. Paul" == "St Paul".
- *
- * Deliberately an EXACT comparison after normalizing, never a prefix test:
- * "Portage County" starts with "Portage" and is 64 miles from the City of
- * Portage. That near-miss is the whole reason this gate exists.
- */
-export function samePlace(a: string | null | undefined, b: string | null | undefined): boolean {
-  const norm = (s: string | null | undefined) =>
-    (s || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^(city|town|village|township) of\s+/, "")
-      // Expand the abbreviations place names are written with before the
-      // punctuation is stripped, or "Mt. Horeb" never equals "Mount Horeb"
-      // and "St. Cloud" never equals "Saint Cloud". The #147 run rejected
-      // five perfectly good matches on exactly this.
-      .replace(/\bmt\.?\s+/g, "mount ")
-      .replace(/\bst\.?\s+/g, "saint ")
-      .replace(/\bft\.?\s+/g, "fort ")
-      .replace(/[^a-z0-9]/g, "");
-  const x = norm(a);
-  const y = norm(b);
-  return !!x && !!y && x === y;
-}
+/** Place-name comparison (moved to a pure module so the client-safe
+ * address rules can share it; re-exported here for existing callers). */
+export { samePlace };
 
 export type BackfillReport = {
   /** Venues considered: missing coordinates, and carrying something to geocode. */
@@ -331,14 +307,16 @@ export const ZIP_GATE_MAX_MI = 25;
 async function townCentreFor(
   city: string | null | undefined,
   state: string | null | undefined,
-  centres: Map<string, GeoSearchHit | null>,
-  delayMs: number
+  ctx: GeocodeCtx
 ): Promise<GeoSearchHit | null> {
+  const centres = ctx.townCentres;
   const cleaned = cleanCity(city);
   const key = `${cleaned.toLowerCase()}|${(state || "").trim().toLowerCase()}`;
   if (!centres.has(key)) {
-    await sleep(delayMs);
-    const [c] = await searchCity(cleaned, state, { limit: 1 });
+    await sleep(ctx.delayMs);
+    // ctx.searchCity (the venue re-check's throwing, paced lookup) lets an
+    // outage propagate instead of reading as "no such town" (D724).
+    const [c] = await (ctx.searchCity ?? searchCity)(cleaned, state, { limit: 1 });
     centres.set(key, c && samePlace(cleaned, c.city) ? c : null);
   }
   return centres.get(key) ?? null;
@@ -348,10 +326,9 @@ async function townCentreFor(
 async function nearStatedTown(
   hit: GeoSearchHit,
   row: { city?: string | null; state?: string | null },
-  centres: Map<string, GeoSearchHit | null>,
-  delayMs: number
+  ctx: GeocodeCtx
 ): Promise<boolean> {
-  const centre = await townCentreFor(row.city, row.state, centres, delayMs);
+  const centre = await townCentreFor(row.city, row.state, ctx);
   const d = centre ? haversineMiles(hit, centre) : null;
   return d != null && d <= POSTAL_CITY_RADIUS_MI;
 }
@@ -375,12 +352,15 @@ async function venuesMissingCoords(): Promise<SiteRow[]> {
 }
 
 /** Per-run state for geocodeVenue(): pacing + the stated-town centre cache.
- *  `search` replaces the fail-soft free-text search (the venue re-check passes
- *  a paced searchOrThrow wrapper so it can tell an outage from a miss). */
+ *  `search` / `searchCity` replace the fail-soft free-text and structured
+ *  lookups (the venue re-check passes paced, THROWING wrappers so an outage —
+ *  including one during the town-centre lookup — is never read as a miss or
+ *  a town mismatch; the venue Fix retry passes the shared paced ones). */
 export type GeocodeCtx = {
   delayMs: number;
   townCentres: Map<string, GeoSearchHit | null>;
   search?: (q: string, opts?: { limit?: number }) => Promise<GeoSearchHit[]>;
+  searchCity?: (city: string | null | undefined, state: string | null | undefined, opts?: { limit?: number }) => Promise<GeoSearchHit[]>;
 };
 
 export function newGeocodeCtx(delayMs: number = GEOCODE_DELAY_MS): GeocodeCtx {
@@ -445,11 +425,11 @@ async function gateHit(
       // zip code can span a wide area, so "same zip" alone isn't proof once
       // we can actually check against a real centre. An unresolvable stated
       // town (a typo Nominatim also can't place) still gets the zip alone.
-      const centre = await townCentreFor(row.city, row.state, ctx.townCentres, ctx.delayMs);
+      const centre = await townCentreFor(row.city, row.state, ctx);
       const d = centre ? haversineMiles(hit, centre) : null;
       if (d != null && d > ZIP_GATE_MAX_MI)
         return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
-    } else if (!(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))) {
+    } else if (!(precision === "building" && (await nearStatedTown(hit, row, ctx)))) {
       return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
     }
   }
@@ -494,7 +474,7 @@ export async function geocodeVenue(
   const hits =
     precision === "building"
       ? await (ctx.search ?? search)(q, { limit: 1 })
-      : await searchCity(row.city, row.state, { limit: 1 });
+      : await (ctx.searchCity ?? searchCity)(row.city, row.state, { limit: 1 });
   const hit = hits[0];
   const attempt1: GeocodeOutcome = hit
     ? await (async (): Promise<GeocodeOutcome> => {

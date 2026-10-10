@@ -465,8 +465,13 @@ Fix (D712–D724).
   geocoder again. `npm run geo:recheck-venues` re-checks those (≈ 25–30 min,
   1 request/second; dry run first, then `-- --apply --yes` after a backup) and
   moves any whose address doesn't come back building-level — or comes back
-  more than half a mile from the stored point — to Needs check. ✦ run the
-  re-check in production after deploy ☐ accept backfilled venues as verified
+  more than half a mile from the stored point — to Needs check. Known limit:
+  venues pinned or picked by hand before #325 (Settings sidebar) are
+  indistinguishable from backfill rows and may be downgraded too — review the
+  dry run's needs_check list before `--apply`, save the ids of any that are
+  already right to a file and apply with `-- --apply --yes --skip <file>`.
+  ✦ run the re-check in production after deploy ☐ accept backfilled venues
+  as verified
 
 ---
 

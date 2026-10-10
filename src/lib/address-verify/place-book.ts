@@ -22,15 +22,17 @@ import { getDb } from "@/db";
 import { placeBook, type PlaceBookRow } from "@/db/schema";
 import { FETCH_TIMEOUT_MS, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import { addressKey } from "./keys";
-import { isGeoStatus, isValidPoint, placeAddressState, placeRowFromHit, statusOfFreeTextHit } from "./state";
+import { NOMINATIM_DELAY_MS, nominatimPacer } from "./nominatim-pacer";
+import { isGeoStatus, isValidPoint, placeAddressState, placeRowFromHit, statusOfFreeTextHit, statusOfPickedStreet } from "./state";
 import type { AddressState, GeoStatus, PlaceRow } from "./types";
 
 /** Nominatim asks for <= 1 request/second. */
-export const PLACE_DELAY_MS = 1100;
+export const PLACE_DELAY_MS = NOMINATIM_DELAY_MS;
 
-/** The instance-wide Nominatim turn queue: when the next request may start.
- *  Shared by every live place-book pass and Fix retry in this instance. */
-export const nominatimPacer = { nextAt: 0 };
+/** The instance-wide Nominatim turn queue (./nominatim-pacer), shared by
+ *  every live place-book pass and Fix retry, the venue Fix retry, the
+ *  Settings type-ahead and the venue re-check. */
+export { nominatimPacer };
 
 export type PlaceDeps = {
   search: (q: string) => Promise<GeoSearchHit[]>;
@@ -79,6 +81,11 @@ export async function getPlaces(keys: string[]): Promise<Map<string, PlaceRow>> 
   return out;
 }
 
+/** The label as stored: the text as first seen, capped at 300 characters. */
+export function storedLabel(text: string): string {
+  return String(text ?? "").trim().slice(0, 300);
+}
+
 /** Upsert one row. The label is the text as FIRST seen — never replaced. */
 export async function writePlace(row: PlaceRow, opts: { overwritePin: boolean }): Promise<void> {
   const db = await getDb();
@@ -122,11 +129,14 @@ export async function placeStatesWithRows(
   deps?: Partial<PlaceDeps>
 ): Promise<{ states: Map<string, AddressState>; rows: Map<string, PlaceRow> }> {
   const d = { ...defaultDeps(), ...deps };
+  // Keyed on the FULL text — the same key every reader computes
+  // (addressKey(e.location), addressKey(v.address)); only the stored label
+  // is truncated (storedLabel).
   const byKey = new Map<string, string>();
   for (const raw of texts) {
-    const label = String(raw ?? "").trim().slice(0, 300);
-    const k = addressKey(label);
-    if (k && !byKey.has(k)) byKey.set(k, label);
+    const text = String(raw ?? "").trim();
+    const k = addressKey(text);
+    if (k && !byKey.has(k)) byKey.set(k, text);
   }
   const known = await getPlaces([...byKey.keys()]);
   if (mode === "live") {
@@ -149,7 +159,7 @@ export async function placeStatesWithRows(
         continue; // outage: write nothing, the next live pass retries
       }
       // placeRowFromHit drops a hit with unusable coordinates (stored unresolved, never verified).
-      const row = placeRowFromHit(key, label, hits[0], d.now());
+      const row = placeRowFromHit(key, storedLabel(label), hits[0], d.now());
       await writePlace(row, { overwritePin: false });
       // Re-read: a pin dropped meanwhile wins over this geocode.
       known.set(key, (await getPlaces([key])).get(key) ?? row);
@@ -177,10 +187,13 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
   const d = { ...defaultDeps(), ...deps };
   const key = String(input.key ?? "");
   if (!key || addressKey(key) !== key) return { ok: false, reason: "invalid" };
-  const label = String(input.label ?? "").trim().slice(0, 300) || key;
   // The label must be the key's own text (like loadFixTarget), so a fix is
-  // never written under one record's key with another record's text.
-  if (addressKey(label) !== key) return { ok: false, reason: "invalid" };
+  // never written under one record's key with another record's text. Checked
+  // on the UNTRUNCATED label — a >300-char location keys on its full text —
+  // and truncated only for storage.
+  const fullLabel = String(input.label ?? "").trim();
+  if (addressKey(fullLabel || key) !== key) return { ok: false, reason: "invalid" };
+  const label = storedLabel(fullLabel) || key;
   const now = d.now();
   let lat: number;
   let lng: number;
@@ -218,8 +231,7 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
     } else {
       // The picked suggestion's own street decides: the human chose that
       // exact suggestion, so it is both the asked and the returned street.
-      const street = String(input.street ?? "");
-      status = statusOfFreeTextHit(street, { street });
+      status = statusOfPickedStreet(String(input.street ?? ""));
     }
   } else {
     return { ok: false, reason: "invalid" };

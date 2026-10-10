@@ -27,6 +27,8 @@ export type FixAddressInput =
 
 export type FixAddressResult = { ok: true; status: GeoStatus; pointKey: string } | { ok: false; reason: string; got?: string };
 
+/** Cap on a place Fix target's key/label (the stored label is 300). */
+const MAX_PLACE_TEXT = 2000;
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : null);
 
 /** Untrusted server-action input → a well-formed FixAddressInput, or null. */
@@ -68,8 +70,10 @@ export function cleanFixTarget(raw: unknown): FixTarget | null {
     return siteId ? { kind: "venue", siteId } : null;
   }
   if (t.kind === "place") {
-    const key = str(t.key, 300);
-    const label = str(t.label, 300);
+    // Not truncated to the stored 300: a long location keys on its full
+    // text, and fixPlace checks the label against the key before storing.
+    const key = str(t.key, MAX_PLACE_TEXT);
+    const label = str(t.label, MAX_PLACE_TEXT);
     return key && label != null ? { kind: "place", key, label } : null;
   }
   return null;

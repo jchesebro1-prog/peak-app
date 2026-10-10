@@ -23,9 +23,9 @@
 import { and, asc, eq, inArray, isNull, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites } from "@/db/schema";
-import { haversineMiles, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
+import { haversineMiles } from "@/lib/geo";
 import { GEOCODE_DELAY_MS, geocodeVenue, newGeocodeCtx, type GeocodeOutcome } from "@/lib/geo-backfill";
-import { nominatimPacer } from "./place-book";
+import { pacedSearchCityOrThrow, pacedSearchOrThrow, type PaceOpts } from "./nominatim-pacer";
 import { geocodedStatus, isValidPoint } from "./state";
 
 /** A fresh building-level hit farther than this from the stored point means
@@ -57,6 +57,8 @@ export type RecheckReport = {
   outage: number;
   /** Rows whose shape changed between the read and the write (a Fix ran meanwhile). */
   raced: number;
+  /** Backfill-shaped rows left alone because their id was in `skipIds`. */
+  skipped: number;
   changes: RecheckChange[];
 };
 
@@ -72,36 +74,34 @@ export function recheckVerdict(row: RecheckRow, out: GeocodeOutcome): { to: "ver
   return { to: "verified", reason: "confirmed" };
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Every Nominatim request through the shared pacer (≤ 1 per GEOCODE_DELAY_MS),
- *  throwing on an outage so the caller can tell it from a real miss. */
-async function pacedSearchOrThrow(q: string, opts?: { limit?: number }): Promise<GeoSearchHit[]> {
-  const now = Date.now();
-  const slot = Math.max(now, nominatimPacer.nextAt);
-  nominatimPacer.nextAt = slot + GEOCODE_DELAY_MS;
-  if (slot > now) await sleep(slot - now);
-  return searchOrThrow(q, opts);
+/**
+ * The re-check's geocoder: geocodeVenue (the venue path's own gates) with
+ * BOTH lookups — the free-text search and the structured town-centre lookup
+ * the city gate consults — paced on the shared Nominatim pacer and THROWING
+ * on failure. Any lookup failure therefore surfaces as "outage" (the venue is
+ * skipped and stays backfill-shaped for the next run), never as a miss or a
+ * town mismatch that would downgrade it. ctx.delayMs is 0: the pacer does
+ * the spacing.
+ */
+export function recheckGeocoder(pace?: PaceOpts): RecheckDeps["geocode"] {
+  return async (row) => {
+    const ctx = {
+      ...newGeocodeCtx(0),
+      search: (q: string, o?: { limit?: number }) => pacedSearchOrThrow(q, o, pace),
+      searchCity: (city: string | null | undefined, state: string | null | undefined, o?: { limit?: number }) =>
+        pacedSearchCityOrThrow(city, state, o, pace),
+    };
+    try {
+      return await geocodeVenue(row, ctx);
+    } catch {
+      return "outage";
+    }
+  };
 }
 
 function defaultDeps(): RecheckDeps {
   return {
-    geocode: async (row) => {
-      let outage = false;
-      const ctx = {
-        ...newGeocodeCtx(GEOCODE_DELAY_MS),
-        search: async (q: string, o?: { limit?: number }) => {
-          try {
-            return await pacedSearchOrThrow(q, o);
-          } catch {
-            outage = true;
-            return [];
-          }
-        },
-      };
-      const out = await geocodeVenue(row, ctx);
-      return outage ? "outage" : out;
-    },
+    geocode: recheckGeocoder({ delayMs: GEOCODE_DELAY_MS, maxWaitMs: 60_000 }),
     now: Date.now,
   };
 }
@@ -117,21 +117,38 @@ function backfillShape(): SQL {
 }
 
 export async function recheckBackfilledVenues(
-  opts: { apply: boolean; ids?: string[]; limit?: number; onProgress?: (done: number, total: number) => void },
+  opts: {
+    apply: boolean;
+    ids?: string[];
+    /** Site ids never re-geocoded or written (`--skip <file>`: venues reviewed from the dry run). */
+    skipIds?: ReadonlySet<string>;
+    limit?: number;
+    onProgress?: (done: number, total: number) => void;
+  },
   deps?: Partial<RecheckDeps>
 ): Promise<RecheckReport> {
   const d = { ...defaultDeps(), ...deps };
   const db = await getDb();
   const where = opts.ids ? and(backfillShape(), inArray(sites.id, opts.ids.length ? opts.ids : ["\u0000"])) : backfillShape();
-  let q = db
+  const q = db
     .select({ id: sites.id, address: sites.address, city: sites.city, state: sites.state, zip: sites.zip, lat: sites.lat, lng: sites.lng })
     .from(sites)
     .where(where)
-    .orderBy(asc(sites.id))
-    .$dynamic();
-  if (opts.limit && opts.limit > 0) q = q.limit(Math.floor(opts.limit));
-  const rows = await q;
-  const report: RecheckReport = { apply: opts.apply, candidates: rows.length, confirmed: 0, downgraded: 0, outage: 0, raced: 0, changes: [] };
+    .orderBy(asc(sites.id));
+  const skip = opts.skipIds ?? new Set<string>();
+  const shaped = await q;
+  const kept = shaped.filter((r) => !skip.has(r.id));
+  const rows = opts.limit && opts.limit > 0 ? kept.slice(0, Math.floor(opts.limit)) : kept;
+  const report: RecheckReport = {
+    apply: opts.apply,
+    candidates: rows.length,
+    confirmed: 0,
+    downgraded: 0,
+    outage: 0,
+    raced: 0,
+    skipped: shaped.length - kept.length,
+    changes: [],
+  };
   let done = 0;
   for (const row of rows) {
     const out = await d.geocode(row);
