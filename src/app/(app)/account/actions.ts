@@ -142,3 +142,14 @@ export async function saveMyDriveBufferAction(minutes: number | null) {
   revalidatePath("/", "layout");
   return { ok: true as const, driveBufferMin: prefs.driveBufferMin };
 }
+
+/** Spec 2026-10-09 site-visit scheduling — the signed-in person's own work
+ *  hours (null = company default). Only feeds conflict flags. */
+export async function saveMyWorkHoursAction(input: unknown) {
+  const me = await requireUser();
+  const { saveUserWorkHours } = await import("@/lib/stores/schedule-prefs");
+  const r = await saveUserWorkHours(me.id, input);
+  if (!r.ok) return { ok: false as const, error: r.error };
+  revalidatePath("/", "layout");
+  return { ok: true as const, workHours: r.workHours };
+}

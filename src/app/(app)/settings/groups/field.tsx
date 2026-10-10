@@ -4,6 +4,8 @@ import { useState } from "react";
 import { saveIntakeCatalogAction, saveVisitReasonsAction } from "../actions";
 import { VenueTypesCard } from "../venue-types-card";
 import { DriveDefaultsCard } from "../drive-defaults-card";
+import { SchedulingDefaultsCard } from "../scheduling-defaults-card";
+import type { SchedulingSettings } from "@/lib/visit-plan/settings";
 import type { VenueType } from "@/lib/venue-types";
 import { inputStyle, labelStyle, type Run } from "./shared";
 
@@ -15,12 +17,14 @@ import { inputStyle, labelStyle, type Run } from "./shared";
  */
 export function FieldGroup({
   driveDefaults,
+  scheduling,
   venueTypes,
   intakeCatalog,
   visitReasons,
   run,
 }: {
   driveDefaults: { driveBufferMin: number };
+  scheduling: SchedulingSettings;
   venueTypes: VenueType[];
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];
@@ -79,6 +83,7 @@ export function FieldGroup({
   return (
     <>
       <DriveDefaultsCard initial={driveDefaults.driveBufferMin} />
+      <SchedulingDefaultsCard initial={scheduling} />
           <VenueTypesCard
             key={venueTypes.map((t) => t.key).join("|")}
             types={venueTypes}

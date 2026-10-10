@@ -13,6 +13,30 @@ import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooki
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
 import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
+import { like } from "drizzle-orm";
+import { getDb } from "@/db";
+import { blobs } from "@/db/schema";
+import {
+  getScheduleDefaults,
+  getSchedulingSettings,
+  getUserSchedulePrefs,
+  getUserWorkHours,
+  saveSchedulingSettings,
+  saveUserSchedulePrefs,
+  saveUserWorkHours,
+  workHoursFor,
+} from "@/lib/stores/schedule-prefs";
+import {
+  cleanSchedulingInput,
+  cleanWorkHours,
+  clockToMin,
+  DEFAULT_SCHEDULING,
+  DEFAULT_WORK_HOURS,
+  fmtClock,
+  fmtWorkHours,
+  minToClock,
+  readSchedulingSettings,
+} from "@/lib/visit-plan/settings";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 
 export type Ok = (c: boolean, m: string) => void;
@@ -30,6 +54,19 @@ const sv = (id: string, over: Partial<SiteVisit>): SiteVisit => ({
 const rcpt = (name: string, over: Partial<VisitInviteRecipient> = {}): VisitInviteRecipient => ({
   name, to: name.toLowerCase() + "@peak.test", channel: "ics", eventId: null, sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: "personal:me", gmailId: null, ...over,
 });
+
+/** One exported function's source, up to the next top-level export. */
+function fnBody(src: string, name: string): string {
+  const start = src.indexOf(`export async function ${name}(`);
+  if (start < 0) return "";
+  const next = src.indexOf("\nexport ", start + 1);
+  return next < 0 ? src.slice(start) : src.slice(start, next);
+}
+/** True when `call` is the function body's first `await`. */
+function firstAwait(body: string, call: string): boolean {
+  const i = body.indexOf("await ");
+  return i >= 0 && body.startsWith("await " + call, i);
+}
 
 export async function siteVisitsAttendeeChecks(ok: Ok): Promise<void> {
   const roster = ["Dana", "Jeff", "Sam"];
@@ -294,4 +331,61 @@ export async function siteVisitsInviteChecks(ok: Ok): Promise<void> {
   const rm = va.slice(va.indexOf("export async function removeVisitAction("), va.indexOf("export async function scheduleVisitAction("));
   ok(rm.includes("await cancelVisitInvites(") && rm.indexOf("await cancelVisitInvites(") < rm.indexOf("await removeVisit(") && !rm.includes("deleteEvent("),
     "site-visits: deleting a visit cancels everyone's invite before the delete");
+}
+
+export async function siteVisitsSettingsChecks(ok: Ok): Promise<void> {
+  ok(cleanWorkHours({ days: [5, 1, 1, 9, 2.5, 3], startMin: 480, endMin: 1020 })?.days.join() === "1,3,5",
+    "site-visits settings: work days are whole 0–6, deduped and sorted");
+  ok(cleanWorkHours({ days: [], startMin: 480, endMin: 1020 }) === null && cleanWorkHours({ days: [1], startMin: 600, endMin: 600 }) === null &&
+     cleanWorkHours({ days: [1], startMin: -5, endMin: 600 }) === null && cleanWorkHours("x") === null,
+    "site-visits settings: no days, an end not after the start, or junk is refused");
+  ok(clockToMin("08:30") === 510 && clockToMin("24:00") === null && clockToMin("8:5") === null && minToClock(510) === "08:30" && minToClock(1440) === "23:59",
+    "site-visits settings: time inputs convert both ways");
+  ok(fmtClock(480) === "8:00" && fmtClock(1020) === "5:00" && fmtClock(750) === "12:30", "site-visits settings: clock times print 12-hour without am/pm");
+  ok(fmtWorkHours(DEFAULT_WORK_HOURS) === "Mon–Fri 8:00–5:00" && fmtWorkHours({ days: [1, 3, 5], startMin: 450, endMin: 990 }) === "Mon, Wed, Fri 7:30–4:30" &&
+     fmtWorkHours({ days: [0, 1, 2, 3, 4, 5, 6], startMin: 360, endMin: 1200 }) === "Every day 6:00–8:00",
+    "site-visits settings: work hours print as the spec writes them");
+  ok(JSON.stringify(readSchedulingSettings({})) === JSON.stringify(DEFAULT_SCHEDULING) &&
+     DEFAULT_SCHEDULING.sameAreaMin === 45 && DEFAULT_SCHEDULING.dailyDriveLimitMin === 300 && DEFAULT_SCHEDULING.nearbyLookaheadDays === 21,
+    "site-visits settings: defaults are Mon–Fri 8–5, 45 min same area, 5 h drive limit, 21 days");
+  const mixed = readSchedulingSettings({ sameAreaMin: "30", dailyDriveLimitMin: 9999, nearbyLookaheadDays: 14, workHours: { days: [] } });
+  ok(mixed.sameAreaMin === 30 && mixed.dailyDriveLimitMin === 300 && mixed.nearbyLookaheadDays === 14 && fmtWorkHours(mixed.workHours) === "Mon–Fri 8:00–5:00",
+    "site-visits settings: a stored value out of range falls back to its default, field by field");
+  const good = { workHours: { days: [1, 2, 3, 4], startMin: 420, endMin: 960 }, sameAreaMin: 30, dailyDriveLimitMin: 240, nearbyLookaheadDays: 14 };
+  ok(cleanSchedulingInput(good).ok && !cleanSchedulingInput({ ...good, sameAreaMin: 0 }).ok && !cleanSchedulingInput({ ...good, dailyDriveLimitMin: "" }).ok &&
+     !cleanSchedulingInput({ ...good, nearbyLookaheadDays: 90 }).ok && !cleanSchedulingInput({ ...good, workHours: { days: [], startMin: 1, endMin: 2 } }).ok,
+    "site-visits settings: the admin save refuses blank or out-of-range values instead of storing a fallback");
+
+  const db = await getDb();
+  const U = "TESTvisits:u1";
+  const snapshot = await getSchedulingSettings();
+  const bufferBefore = (await getScheduleDefaults()).driveBufferMin;
+  try {
+    const saved = await saveSchedulingSettings(good);
+    ok(saved.ok && JSON.stringify(await getSchedulingSettings()) === JSON.stringify(good), "site-visits settings: the company settings save and read back");
+    ok((await getScheduleDefaults()).driveBufferMin === bufferBefore, "site-visits settings: saving them leaves spec 1's company buffer alone (same blob, merged)");
+    const refused = await saveSchedulingSettings({ ...good, sameAreaMin: 999 });
+    ok(!refused.ok && (await getSchedulingSettings()).sameAreaMin === 30, "site-visits settings: a refused save keeps the stored values");
+    ok(JSON.stringify(await workHoursFor(U)) === JSON.stringify(good.workHours), "site-visits settings: a person without their own hours gets the company hours");
+    const mine = { days: [2], startMin: 600, endMin: 900 };
+    ok((await saveUserWorkHours(U, mine)).ok && JSON.stringify(await workHoursFor(U)) === JSON.stringify(mine), "site-visits settings: a person's own hours win");
+    await saveUserSchedulePrefs(U, { driveBufferMin: 20 });
+    ok(JSON.stringify(await getUserWorkHours(U)) === JSON.stringify(mine) && (await getUserSchedulePrefs(U)).driveBufferMin === 20,
+      "site-visits settings: own hours and own drive buffer share the prefs blob without clobbering each other");
+    ok(!(await saveUserWorkHours(U, { days: [] })).ok, "site-visits settings: bad personal hours are refused");
+    await saveUserWorkHours(U, null);
+    ok((await getUserWorkHours(U)) === null && JSON.stringify(await workHoursFor(U)) === JSON.stringify(good.workHours),
+      "site-visits settings: clearing personal hours falls back to the company default");
+  } finally {
+    await saveSchedulingSettings(snapshot);
+    await db.delete(blobs).where(like(blobs.id, "%TESTvisits:%"));
+  }
+
+  const settingsActions = readFileSync("src/app/(app)/settings/actions.ts", "utf8");
+  const accountActions = readFileSync("src/app/(app)/account/actions.ts", "utf8");
+  ok(firstAwait(fnBody(settingsActions, "saveSchedulingSettingsAction"), 'requirePerm("manage_users")'), "site-visits settings: the company save is admin-only (its first await)");
+  ok(firstAwait(fnBody(accountActions, "saveMyWorkHoursAction"), "requireUser()"), "site-visits settings: personal hours need a signed-in user (its first await)");
+  ok(readFileSync("src/app/(app)/settings/groups/field.tsx", "utf8").includes("<SchedulingDefaultsCard") &&
+     readFileSync("src/app/(app)/account/page.tsx", "utf8").includes("<WorkHoursCard"),
+    "site-visits settings: Settings → Field shows the company card; Account shows personal work hours");
 }

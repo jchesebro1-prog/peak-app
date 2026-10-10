@@ -3,7 +3,10 @@
  * and 3 extend the same blobs with optional fields). No table, no migration —
  * the dashboard_layouts:<userId> idiom:
  *   schedule_defaults            { driveBufferMin }        admin, Settings → Field
+ *                                (also { workHours, sameAreaMin, dailyDriveLimitMin,
+ *                                nearbyLookaheadDays } — spec 2026-10-09 site-visit scheduling)
  *   schedule_prefs:<userId>      { driveBufferMin | null } the rep, Account
+ *                                (also { workHours | null })
  *   stay_over:<userId>           { "YYYY-MM-DD": true }    one key per day
  *   drive_sync:<userId>          { lastSyncAt, legacyCleanedAt, staleAt,
  *                                  legacyRetry, legacyCursorMs, syncingUntil }
@@ -14,6 +17,13 @@ import { getDb } from "@/db";
 import { getBlob, setBlob } from "@/db/doc-store";
 import { blobs } from "@/db/doc-tables";
 import { isDayKey } from "@/lib/drive-plan/day";
+import {
+  cleanSchedulingInput,
+  cleanWorkHours,
+  readSchedulingSettings,
+  type SchedulingSettings,
+  type WorkHours,
+} from "@/lib/visit-plan/settings";
 
 export const SCHEDULE_DEFAULTS_BLOB = "schedule_defaults";
 export const DEFAULT_DRIVE_BUFFER_MIN = 15;
@@ -83,6 +93,47 @@ export async function saveUserSchedulePrefs(userId: string, input: { driveBuffer
 export async function driveBufferFor(userId: string): Promise<number> {
   const [defaults, prefs] = await Promise.all([getScheduleDefaults(), getUserSchedulePrefs(userId)]);
   return bufferMinFor(defaults, prefs);
+}
+
+/* ---- site-visit scheduling (spec 2026-10-09 site-visit scheduling) ------ */
+
+export async function getSchedulingSettings(): Promise<SchedulingSettings> {
+  return readSchedulingSettings(await getBlob<Record<string, unknown>>(SCHEDULE_DEFAULTS_BLOB, {}));
+}
+
+/** Admin save. setBlob merges top-level keys, so driveBufferMin is untouched. */
+export async function saveSchedulingSettings(
+  input: unknown
+): Promise<{ ok: true; settings: SchedulingSettings } | { ok: false; error: string }> {
+  const c = cleanSchedulingInput(input);
+  if (!c.ok) return c;
+  await setBlob(SCHEDULE_DEFAULTS_BLOB, { ...c.value });
+  return { ok: true, settings: c.value };
+}
+
+export async function getUserWorkHours(userId: string): Promise<WorkHours | null> {
+  const raw = await getBlob<Record<string, unknown>>(prefsId(userId), {});
+  return cleanWorkHours(raw.workHours);
+}
+
+/** null = use the company default. */
+export async function saveUserWorkHours(
+  userId: string,
+  input: unknown
+): Promise<{ ok: true; workHours: WorkHours | null } | { ok: false; error: string }> {
+  if (input === null) {
+    await setBlob(prefsId(userId), { workHours: null });
+    return { ok: true, workHours: null };
+  }
+  const h = cleanWorkHours(input, true);
+  if (!h) return { ok: false, error: "Pick at least one day and an end after the start." };
+  await setBlob(prefsId(userId), { workHours: h });
+  return { ok: true, workHours: h };
+}
+
+export async function workHoursFor(userId: string): Promise<WorkHours> {
+  const [s, own] = await Promise.all([getSchedulingSettings(), getUserWorkHours(userId)]);
+  return own ?? s.workHours;
 }
 
 /** Only the days switched on. */

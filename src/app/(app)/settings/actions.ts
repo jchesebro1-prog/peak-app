@@ -837,3 +837,15 @@ export async function saveDriveDefaultsAction(input: { driveBufferMin: unknown }
   revalidatePath("/", "layout");
   return { ok: true as const, driveBufferMin: saved.driveBufferMin };
 }
+
+/** Spec 2026-10-09 site-visit scheduling — company work hours, same-area
+ *  drive time, daily drive limit and Nearby-days look-ahead. Read live by the
+ *  booking check; nothing to re-sync. */
+export async function saveSchedulingSettingsAction(input: unknown) {
+  await requirePerm("manage_users");
+  const { saveSchedulingSettings } = await import("@/lib/stores/schedule-prefs");
+  const r = await saveSchedulingSettings(input);
+  if (!r.ok) return { ok: false as const, error: r.error };
+  revalidatePath("/", "layout");
+  return { ok: true as const, settings: r.settings };
+}
