@@ -67,7 +67,9 @@ export default async function ConduitRiserPage({
 
   const details = data.view.details;
   const active = details.find((d) => d.detail.id === requestedDetail) ?? details[0];
-  const layout = layoutDetail(active, data.doc);
+  // Laid out once: the editor draws the active detail, the DXF links count the sheets.
+  const layouts = details.map((d) => layoutDetail(d, data.doc));
+  const layout = layouts[details.indexOf(active)];
   const figure = detailGeometry(layout, active);
   const tables = data.tables.map((t) => ({ key: `${t.key}:${t.title}`, ...tableGeometry(t, { x: 0.05, y: 0.05 }) }));
 
@@ -96,7 +98,7 @@ export default async function ConduitRiserPage({
 
   // #321: E-502… as the drawing set prints them at its saved size — one DXF per page.
   const sheetSize = resolveSheetSize(null, project.drawingSet?.size);
-  const sheetPages = conduitRiserPagesOf(data, drawingArea(sheetSize));
+  const sheetPages = conduitRiserPagesOf(data, drawingArea(sheetSize), layouts);
   const dxfHref = (page: number) =>
     `/api/grid/${encodeURIComponent(project.id)}/conduit-riser/dxf${optionQuery}&size=${sheetSize}&page=${page}`;
 

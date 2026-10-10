@@ -205,9 +205,20 @@ export function transformGeo(g: Geo, s: number, dx: number, dy: number): Geo {
 export type SheetPage = { geo: Geo[]; w: number; h: number };
 
 /**
+ * The most a page's packed details grow past their natural size (#321
+ * polish). Bray's TL1.5 tags measure about 1.3–1.5× ours; the cap stops a
+ * small job's tags from ballooning on a 24×36 sheet.
+ */
+export const MAX_SHEET_SCALE = 1.5;
+
+/**
  * Pack the details (in order) onto sheet pages of `area` inches: tables and
  * notes stacked in a right-hand column on the first page, details shelf-
- * packed in what's left, each shrunk to fit if it alone is too big (NTS).
+ * packed in what's left. A detail too big for the page alone shrinks to fit
+ * (NTS). Each page's packed group then grows as one — never past
+ * MAX_SHEET_SCALE, never out of its area — so a small riser fills a 24×36
+ * sheet the way an 11×17 one is filled; the details keep their relative
+ * positions. Tables and notes always print at scale 1.
  */
 export function composeSheets(input: {
   details: readonly { geo: Geo[]; w: number; h: number }[];
@@ -266,6 +277,9 @@ export function composeSheets(input: {
   const firstW = Math.max(1, colX - GAP / 2);
 
   const pages: SheetPage[] = [{ geo: [...side], w: area.w, h: area.h }];
+  // Each page's details at their packed (scale ≤ 1) size, grown together afterwards.
+  type Packed = { geo: Geo[]; s: number; x: number; y: number };
+  const packed: { items: Packed[]; usedW: number; usedH: number }[] = [{ items: [], usedW: 0, usedH: 0 }];
   let page = 0;
   let x = 0;
   let shelfY = 0;
@@ -282,6 +296,7 @@ export function composeSheets(input: {
     }
     if (shelfY > 0 && shelfY + h > area.h) {
       pages.push({ geo: [], w: area.w, h: area.h });
+      packed.push({ items: [], usedW: 0, usedH: 0 });
       page++;
       x = 0;
       shelfY = 0;
@@ -290,9 +305,18 @@ export function composeSheets(input: {
       w = d.w * s;
       h = d.h * s;
     }
-    pages[page].geo.push(...d.geo.map((g) => transformGeo(g, s, x, shelfY)));
+    const pk = packed[page];
+    pk.items.push({ geo: d.geo, s, x, y: shelfY });
+    pk.usedW = Math.max(pk.usedW, x + w);
+    pk.usedH = Math.max(pk.usedH, shelfY + h);
     x += w + GAP;
     shelfH = Math.max(shelfH, h);
   }
+  packed.forEach((pk, i) => {
+    if (!pk.items.length) return;
+    const room = i === 0 ? firstW : area.w;
+    const f = Math.max(1, Math.min(MAX_SHEET_SCALE, room / pk.usedW, area.h / pk.usedH));
+    for (const it of pk.items) pages[i].geo.push(...it.geo.map((g) => transformGeo(g, it.s * f, it.x * f, it.y * f)));
+  });
   return pages;
 }

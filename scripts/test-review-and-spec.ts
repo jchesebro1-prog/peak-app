@@ -11635,6 +11635,7 @@ seeded()
   .then(() => autoCalHomeChecks(ok))
   .then(() => autoCalFormChecks(ok))
   .then(() => autoCalNobodyDoneChecks(ok))
+  .then(() => riserPolish1Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -63644,12 +63645,13 @@ async function conduitRiser321B9Checks(): Promise<void> {
 
   // --- wiring pins ---
   const route = srcOf("src/app/api/grid/[id]/conduit-riser/dxf/route.ts");
+  const crs = srcOf("src/lib/design/conduit-riser-server.ts");
   const iUser = route.indexOf("await requireUser()");
-  ok(iUser > 0 && iUser < route.indexOf("try {") && iUser < route.indexOf("getProject(projectId)") && route.indexOf("decodeURIComponent(id)") < route.indexOf("getProject(projectId)") && route.includes('export const dynamic = "force-dynamic"'),
-    "#321 B9 route: requireUser is awaited outside the try, before getProject (a signed-out request redirects)");
-  ok(route.includes("conduitRiserSheetPages(") && route.includes("geometryToDxf(page.geo, page)") && route.includes('"content-type": "application/dxf"') &&
-     route.includes("attachmentDisposition(") && route.includes("-lighting-control-riser.dxf") && route.includes("conduitRiserSheetNumber(") &&
-     route.includes('"cache-control": "private, no-store"') && route.includes("status: 404"),
+  ok(iUser > 0 && iUser < route.indexOf("conduitRiserDxfResponse(id") && route.includes('export const dynamic = "force-dynamic"') && !route.includes("try {"),
+    "#321 B9 route: requireUser is awaited first, outside any try, then the DXF comes from conduitRiserDxfResponse (a signed-out request redirects)");
+  ok(crs.includes("conduitRiserSheetPages(project, optionId, size)") && crs.includes("geometryToDxf(page.geo, page)") && crs.includes('"content-type": "application/dxf"') &&
+     crs.includes("attachmentDisposition(") && crs.includes("-lighting-control-riser.dxf") && crs.includes("conduitRiserSheetNumber(") &&
+     crs.includes('"cache-control": NO_STORE') && crs.includes("status: 404") && crs.indexOf("decodeURIComponent(id)") < crs.indexOf("getProject(projectId)"),
     "#321 B9 route: the DXF comes from the set's own pages, downloads as an attachment named by its sheet number, never cached; a miss is a 404");
   const dsd = srcOf("src/lib/design/drawing-set-data.ts");
   ok(dsd.includes("conduitRiserSheetPages(project, optionId, size,") && dsd.includes("conduitRiserPages: conduitRiserPages.length"),
@@ -63850,4 +63852,155 @@ async function conduitRiser321FinalFixChecks(): Promise<void> {
   const gb = srcOf("src/lib/design/grid-bom.ts");
   ok(/on the server\. \*\/\n\s*group\?: string \| null;/.test(gb) && /tagDefaults\?: TagFields;\n\s*\/\*\* Resolved beta group/.test(gb),
     "#321 final grid-bom: the Resolved beta group comment sits directly over group again");
+}
+
+/* #321 polish, Task 1 — the riser fits the sheet (grows to MAX_SHEET_SCALE on 24×36, still shrinks on 11×17) and the DXF route is testable. */
+async function riserPolish1Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => fs.readFileSync(f, "utf8");
+  const G = await import("@/lib/design/conduit-riser/drawing");
+  const TB = await import("@/lib/design/conduit-riser/tables");
+  const DSet = await import("@/lib/design/grid-drawing-set");
+  type Geo = import("@/lib/design/conduit-riser/drawing").SheetPage["geo"][number];
+  const areaB = DSet.drawingArea("b");
+  const areaD = DSet.drawingArea("d");
+  const box = (w: number, h: number) => ({ geo: [{ t: "rect", r: { x: 0, y: 0, w, h }, layer: "TAG" } as Geo], w, h });
+  const rects = (geo: Geo[]) => geo.flatMap((g) => (g.t === "rect" ? [g.r] : []));
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-3;
+  const none = { tables: [], notes: [] };
+
+  ok(G.MAX_SHEET_SCALE === 1.5, "#321 polish fit: MAX_SHEET_SCALE is 1.5");
+
+  // A small detail on 24×36 grows to exactly the cap and stays inside the area.
+  const small = G.composeSheets({ details: [box(4, 3)], ...none, area: areaD });
+  const sr = rects(small[0].geo)[0];
+  ok(small.length === 1 && near(sr.w, 6) && near(sr.h, 4.5) && sr.x === 0 && sr.y === 0 && sr.w <= areaD.w && sr.h <= areaD.h,
+    "#321 polish fit: a small detail on a 24×36 area scales up to exactly the 1.5 cap, inside the area");
+
+  // A wide detail grows only until it fills the width.
+  const wide = G.composeSheets({ details: [box(20, 3)], ...none, area: areaD });
+  const wr = rects(wide[0].geo)[0];
+  ok(near(wr.w, areaD.w - 0.2) && wr.w / 20 < 1.5 && wr.w / 20 > 1 && wr.h <= areaD.h,
+    "#321 polish fit: a wide detail on 24×36 grows only to the sheet width (below the cap)");
+
+  // A tall detail grows only until it fills the height.
+  const tall = G.composeSheets({ details: [box(3, 18)], ...none, area: areaD });
+  const tr = rects(tall[0].geo)[0];
+  ok(near(tr.h, areaD.h) && tr.h / 18 < 1.5 && tr.w <= areaD.w, "#321 polish fit: a tall detail on 24×36 grows only to the sheet height");
+
+  // 11×17 still shrinks a big detail, never grows past its natural size beyond fitting.
+  const big = G.composeSheets({ details: [box(30, 5)], ...none, area: areaB });
+  const br = rects(big[0].geo)[0];
+  ok(big.length === 1 && near(br.w, areaB.w - 0.2) && br.w < 30 && br.h <= areaB.h, "#321 polish fit: on an 11×17 area a big detail still shrinks to the width");
+  const tall2 = G.composeSheets({ details: [box(2, 30)], ...none, area: areaB });
+  ok(near(rects(tall2[0].geo)[0].h, areaB.h) && rects(tall2[0].geo)[0].w < 2, "#321 polish fit: on an 11×17 area a tall detail still shrinks to the height");
+  const smallB = G.composeSheets({ details: [box(4, 3)], ...none, area: areaB });
+  ok(near(rects(smallB[0].geo)[0].w, 6), "#321 polish fit: a small detail on 11×17 grows to the cap too, when it fits");
+
+  // Two details on one page keep their relative positions and grow together.
+  const two = G.composeSheets({ details: [box(2, 2), box(2, 2)], ...none, area: areaD });
+  const [ra, rb] = rects(two[0].geo);
+  ok(two.length === 1 && near(ra.w, 3) && near(rb.w, 3) && ra.x === 0 && near(rb.x, 3.6) && ra.y === rb.y && near(rb.x - ra.w, 0.4 * 1.5) && rb.x + rb.w <= areaD.w,
+    "#321 polish fit: two details on one page grow by one factor — the gap and the shelf order scale with them");
+  // A tall second shelf: both shelves scale by the same factor.
+  const shelves = G.composeSheets({ details: [box(14, 4), box(14, 4)], ...none, area: areaD });
+  const [s1, s2] = rects(shelves[0].geo);
+  const f = s1.w / 14;
+  ok(shelves.length === 1 && f > 1 && f <= 1.5 && near(s2.w, 14 * f) && near(s2.y, (4 + 0.4) * f) && s2.y + s2.h <= areaD.h + 1e-3 && s2.x + s2.w <= areaD.w + 1e-3,
+    "#321 polish fit: stacked shelves scale together and the group still fits the area");
+
+  // Tables and notes never scale: the side column is identical with or without details, on either size.
+  const tbl = [{ key: "t", title: "CONTROL WIRE LEGEND", columns: [{ head: "SYM", w: 0.8 }, { head: "WIRE", w: 2.4 }], rows: [["D", "DMX"], ["P", "Power"]] }] as unknown as Parameters<typeof G.composeSheets>[0]["tables"];
+  const notes = [{ id: "nt-1", n: 1, text: "Wire pull by others" }];
+  for (const [name, area] of [["24×36", areaD], ["11×17", areaB]] as const) {
+    const bare = G.composeSheets({ details: [], tables: tbl, notes, area })[0].geo;
+    const withD = G.composeSheets({ details: [box(2, 2)], tables: tbl, notes, area })[0].geo;
+    ok(withD.length > bare.length && J2(withD.slice(0, bare.length)) === J2(bare), `#321 polish fit: ${name} tables and notes print at scale 1, unmoved by the details beside them`);
+    const sideLeft = Math.min(...bare.map((g) => (g.t === "text" ? g.at.x : g.t === "line" ? g.a.x : g.t === "rect" ? g.r.x : Infinity)));
+    const d = rects(withD.slice(bare.length))[0];
+    ok(d.x + d.w <= sideLeft + 1e-3, `#321 polish fit: ${name} the grown detail stops short of the table column`);
+  }
+  void TB;
+
+  // Overflowing pages: every page of a pile of big details sits inside the area at both sizes.
+  const pile = Array.from({ length: 7 }, () => box(9, 6));
+  for (const [name, area] of [["24×36", areaD], ["11×17", areaB]] as const) {
+    const pg = G.composeSheets({ details: pile, ...none, area });
+    const all = pg.flatMap((p) => rects(p.geo));
+    ok(pg.length >= 1 && all.length === 7 && all.every((r) => r.x >= -1e-3 && r.y >= -1e-3 && r.x + r.w <= area.w + 1e-3 && r.y + r.h <= area.h + 1e-3),
+      `#321 polish fit: ${name} seven big details paginate and every one stays inside the area`);
+  }
+
+  // --- the testable DXF route, on a scratch-DB project with one accepted run ---
+  const GP = await import("@/lib/stores/grid-projects");
+  const CRS = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const X = await import("@/lib/design/conduit-riser/dxf");
+  const GO = await import("@/lib/design/grid-options");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getSettings } = await import("@/lib/settings");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const C1 = fid(321, "polish1-dmx-cable");
+  await mergeUpsert(C1, { desc: "Test321 polish1 DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5, manufacturerModelNumber: "T321-P1DMX" });
+  reg("catalog_parts", C1);
+  const settings = await getSettings();
+  const deps = { settings: { ...settings, wireTypes: [{ id: "t321-p1", label: "DMX", connectionTypes: ["T321-P1"], cableSku: C1, symbol: "D", signal: "DMX" }] } };
+  const gp = await GP.createProject({ name: "#321 polish riser fit", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await GP.addSheet(gp.id, { name: "#321 polish sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await GP.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const place = async (x: number, y: number) => (await GP.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  const a = await place(0.1, 0.1);
+  const b = await place(0.4, 0.4);
+  await GP.addRoute(gp.id, { sheetId: sh.id, page: 1, partId: C1, points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id });
+  const noRun = await L.conduitRiserDxfResponse(gp.id, new URLSearchParams());
+  ok(noRun.status === 404 && noRun.headers.get("cache-control") === "private, no-store", "#321 polish route: a design with no conduit run is a 404, never cached");
+  const acc = await CRS.acceptSuggestions(gp.id, opt, "all", deps);
+  ok(acc.ok && acc.accepted === 1, "#321 polish route fixture: one accepted run");
+
+  const q = (o: Record<string, string>) => new URLSearchParams(o);
+  const statuses = await Promise.all(["0", "abc", "1.5", "999", "-1", ""].map(async (page) => (await L.conduitRiserDxfResponse(gp.id, q({ page }))).status));
+  ok(statuses.every((st) => st === 404), "#321 polish route: page 0, abc, 1.5, 999, -1 and an empty page are all 404s");
+  const unknown = await L.conduitRiserDxfResponse("GRD-NOPE-9999", q({ page: "1" }));
+  const badEscape = await L.conduitRiserDxfResponse("%E0%A4%A", q({ page: "1" }));
+  ok(unknown.status === 404 && badEscape.status === 404 && (await unknown.json()).error === "Design not found.", "#321 polish route: an unknown design and a malformed escape are 404s");
+
+  const good = await L.conduitRiserDxfResponse(encodeURIComponent(gp.id), q({ page: "1", size: "d", option: opt }));
+  const body = await good.text();
+  ok(good.status === 200 && good.headers.get("content-type") === "application/dxf" && good.headers.get("cache-control") === "private, no-store" &&
+     /^attachment;/.test(good.headers.get("content-disposition") || "") && (good.headers.get("content-disposition") || "").includes("-E-502-lighting-control-riser.dxf"),
+    "#321 polish route: a good page is a 200 application/dxf attachment named for E-502, never cached");
+  const R = readDxf321(body);
+  ok(R.lines.length % 2 === 0 && R.zeros[R.zeros.length - 1] === "EOF" && R.count("SECTION") === 4 && R.count("ENDSEC") === 4 && R.count("BLOCK") === R.count("ENDBLK") &&
+     R.pairs.some(([c, v]) => c === 1 && v === "AC1009") && R.insertNames.filter((n) => n === "PK_TAG").length === 2,
+    "#321 polish route: the body parses as an R12 DXF with both tags");
+  const live = (await GP.getProject(gp.id))!;
+  const pagesD = await L.conduitRiserSheetPages(live, opt, "d"); // the route reads the saved settings, as the set does
+  ok(body === X.geometryToDxf(pagesD[0].geo, pagesD[0]), "#321 polish route: the file is the drawing set's own 24×36 page, byte for byte");
+  const second = await L.conduitRiserDxfResponse(gp.id, q({ page: "2", size: "d" }));
+  ok(second.status === (pagesD.length >= 2 ? 200 : 404), "#321 polish route: page 2 exists exactly when the set has a second riser sheet");
+  const viaB = await (await L.conduitRiserDxfResponse(gp.id, q({ size: "b" }))).text();
+  const pagesB = await L.conduitRiserSheetPages(live, opt, "b");
+  ok(viaB === X.geometryToDxf(pagesB[0].geo, pagesB[0]),
+    "#321 polish route: size=b and a missing page (page 1) read the 11×17 set page");
+
+  // The riser page lays each detail out once and shares the layouts with the sheet helper.
+  const data = await L.loadConduitRiser(live, opt);
+  const { layoutDetail } = await import("@/lib/design/conduit-riser/layout");
+  const layouts = data.view.details.map((v) => layoutDetail(v, data.doc));
+  ok(J2(L.conduitRiserPagesOf(data, areaD, layouts)) === J2(L.conduitRiserPagesOf(data, areaD)) && J2(L.conduitRiserPagesOf(data, areaD, layouts)) === J2(pagesD),
+    "#321 polish page: passing the already-built layouts gives byte-identical pages");
+  const page = srcOf("src/app/(app)/design/grid/[id]/conduit-riser/page.tsx");
+  ok((page.match(/layoutDetail\(/g) || []).length === 1 && page.includes("conduitRiserPagesOf(data, drawingArea(sheetSize), layouts)"),
+    "#321 polish page: the riser page lays the details out once and counts its DXF links from those layouts");
+  const route = srcOf("src/app/api/grid/[id]/conduit-riser/dxf/route.ts");
+  ok(route.indexOf("await requireUser()") > 0 && route.includes("return conduitRiserDxfResponse(id, new URL(request.url).searchParams)") && !route.includes("getProject"),
+    "#321 polish route: the route file is requireUser plus a call to the exported function");
 }

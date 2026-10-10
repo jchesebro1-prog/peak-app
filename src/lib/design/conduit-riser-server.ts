@@ -8,7 +8,7 @@ import { getDocRows } from "@/db/doc-store";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { resolveWireTypes, type WireType } from "@/lib/catalog-connect";
-import { hasOption, optionSlice } from "@/lib/design/grid-options";
+import { hasOption, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { getDeviceTypes, getTypeMap, loadDeviceTypeContext } from "@/lib/stores/device-types";
@@ -18,7 +18,10 @@ import { parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import { getRiserBoxTypes } from "@/lib/stores/riser-box-types";
 import { getConduitSizes } from "@/lib/stores/conduit-sizes";
 import { placementQty, routeLengthFt, type PartLite } from "@/lib/design/grid-bom";
-import { drawingArea, placementSystem, routeSystem, type SheetSizeKey } from "@/lib/design/grid-drawing-set";
+import { conduitRiserSheetNumber, drawingArea, placementSystem, resolveSheetSize, routeSystem, type SheetSizeKey } from "@/lib/design/grid-drawing-set";
+import { getProject } from "@/lib/stores/grid-projects";
+import { attachmentDisposition } from "@/lib/document-files";
+import { safeName } from "@/lib/blob";
 import { spaceOf } from "@/lib/design/grid-geometry";
 import { levelOfPlacement } from "@/lib/design/grid-levels";
 import { normalizeRiserDoc } from "@/lib/design/grid-riser-doc";
@@ -33,7 +36,8 @@ import { suggestions, type SuggestResult } from "@/lib/design/conduit-riser/sugg
 import { riserTables, type TableModel } from "@/lib/design/conduit-riser/tables";
 import { effectiveTag } from "@/lib/design/conduit-riser/tags";
 import { effectivePricing, type ConduitSize } from "@/lib/design/conduit-riser/pricing";
-import { layoutDetail } from "@/lib/design/conduit-riser/layout";
+import { layoutDetail, type DetailLayout } from "@/lib/design/conduit-riser/layout";
+import { geometryToDxf } from "@/lib/design/conduit-riser/dxf";
 import { composeSheets, detailGeometry, type SheetPage } from "@/lib/design/conduit-riser/drawing";
 
 /**
@@ -301,11 +305,17 @@ export async function loadConduitRiser(project: GridProject, optionId: string, d
 /**
  * The lighting control riser's printed pages (#321): every detail laid out,
  * packed with the tables and general notes into `area` inches. Nothing until
- * the riser has a conduit run.
+ * the riser has a conduit run. A caller that already laid the details out
+ * (the riser page does, for its editor) passes `layouts` — one per
+ * `view.details` entry, in order — so nothing is laid out twice.
  */
-export function conduitRiserPagesOf(data: Pick<ConduitRiserData, "doc" | "view" | "tables">, area: { w: number; h: number }): SheetPage[] {
+export function conduitRiserPagesOf(
+  data: Pick<ConduitRiserData, "doc" | "view" | "tables">,
+  area: { w: number; h: number },
+  layouts?: readonly DetailLayout[]
+): SheetPage[] {
   if (!data.doc.runs.length) return [];
-  const details = data.view.details.map((v) => detailGeometry(layoutDetail(v, data.doc), v));
+  const details = data.view.details.map((v, i) => detailGeometry(layouts?.[i] ?? layoutDetail(v, data.doc), v));
   return composeSheets({ details, tables: data.tables, notes: data.doc.notes, area });
 }
 
@@ -317,6 +327,47 @@ export function conduitRiserPagesOf(data: Pick<ConduitRiserData, "doc" | "view" 
 export async function conduitRiserSheetPages(project: GridProject, optionId: string, size: SheetSizeKey, deps: ConduitRiserDeps = {}): Promise<SheetPage[]> {
   if (!hasOption(project, optionId) || !liveConduitRiser(project, optionId).runs.length) return [];
   return conduitRiserPagesOf(await loadConduitRiser(project, optionId, deps), drawingArea(size));
+}
+
+const NO_STORE = "private, no-store";
+const dxfMiss = (error: string) => Response.json({ error }, { status: 404, headers: { "cache-control": NO_STORE } });
+
+/**
+ * The DXF download behind `/api/grid/[id]/conduit-riser/dxf` (#321) — one
+ * lighting control riser sheet (E-502, E-503…) as a CAD file. `option` resolves
+ * like the set, `size` (b|d) like the set (else the saved size), `page` is
+ * 1-based. The geometry is the drawing set's own page, so the printed sheet and
+ * the file can't disagree; no title block. The route authenticates first.
+ */
+export async function conduitRiserDxfResponse(id: string, query: URLSearchParams): Promise<Response> {
+  try {
+    let projectId: string;
+    try {
+      projectId = decodeURIComponent(id);
+    } catch {
+      return dxfMiss("Design not found."); // a malformed escape is just an unknown design
+    }
+    const project = await getProject(projectId);
+    if (!project) return dxfMiss("Design not found.");
+    const optionId = resolveOptionId(project, query.get("option"));
+    const size = resolveSheetSize(query.get("size"), project.drawingSet?.size);
+    const pages = await conduitRiserSheetPages(project, optionId, size);
+    if (!pages.length) return dxfMiss("This design has no lighting control riser yet — add a conduit run first.");
+    const n = Number(query.get("page") ?? "1");
+    if (!Number.isInteger(n) || n < 1 || n > pages.length) return dxfMiss("That riser sheet doesn't exist.");
+    const page = pages[n - 1];
+    const name = `${safeName(project.name || project.id)}-${conduitRiserSheetNumber(n - 1)}-lighting-control-riser.dxf`;
+    return new Response(geometryToDxf(page.geo, page), {
+      headers: {
+        "content-type": "application/dxf",
+        "content-disposition": attachmentDisposition(name),
+        "cache-control": NO_STORE,
+      },
+    });
+  } catch (e) {
+    console.error("[grid] conduit riser DXF failed", e);
+    return new Response("The DXF couldn't be built.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": NO_STORE } });
+  }
 }
 
 export type RiserPrompt =
