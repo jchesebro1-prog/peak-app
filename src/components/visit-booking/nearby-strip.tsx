@@ -32,7 +32,10 @@ export default function NearbyStrip({ nearby, loading, lead, onPick, error = "" 
         <span style={{ fontSize: 12, fontWeight: 600, color: "#16181d" }}>{nearbyLine(d)}</span>
         {d.others.length > 0 && (
           <span style={muted}>
-            {d.others.map((o) => `${o.person} ${o.status === "unknown" ? "— couldn't check" : o.status}${o.note ? ` (${o.note})` : ""}`).join(" · ")}
+            {d.others
+              // An unknown status is a failed calendar read: the spec's own words.
+              .map((o) => (o.status === "unknown" ? calendarNote(o.person, "failed") : `${o.person} ${o.status}${o.note ? ` (${o.note})` : ""}`))
+              .join(" · ")}
           </span>
         )}
       </button>
@@ -40,7 +43,7 @@ export default function NearbyStrip({ nearby, loading, lead, onPick, error = "" 
   return (
     <div aria-busy={loading}>
       <span style={lbl}>Nearby days</span>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, opacity: loading && nearby ? 0.6 : 1 }}>
+      <div aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: 6, opacity: loading && nearby ? 0.6 : 1 }}>
         {body}
         {notes.filter(Boolean).map((n) => (
           <span key={n} style={muted}>

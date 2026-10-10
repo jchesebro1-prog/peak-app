@@ -154,6 +154,7 @@ export default async function FieldSurveyPage({
       customerId: v.customerId,
       locationId: v.locationId,
       address: v.address,
+      attendees: v.attendees,
       addressFlag: (() => {
         const st = visitAddr.get(v.id);
         return st && st.status !== "verified" ? { text: FLAG_TEXT.unverified, fix: st.fix } : null;

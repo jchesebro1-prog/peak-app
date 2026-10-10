@@ -39,6 +39,7 @@ export function useBookingCheck(args: BookingCheckArgs): { loading: boolean; res
       clearTimeout(t);
     };
   }, [sig]);
-  // The last answer stays on screen (dimmed) while a newer one is on its way.
-  return { loading: state.forSig !== sig, result: state.result, error: state.error };
+  // The last answer stays on screen (dimmed) while a newer one is on its way;
+  // a failure belongs to the inputs it was for, so it never lingers over a new check.
+  return { loading: state.forSig !== sig, result: state.result, error: state.forSig === sig ? state.error : "" };
 }

@@ -38,6 +38,8 @@ export type VisitRequestVM = {
   customerId: string | null;
   locationId: string | null;
   address: string;
+  /** Spec 2026-10-09 — other Peak people already on the visit (never the lead). */
+  attendees: string[];
 };
 
 const chipBtn: CSSProperties = {
@@ -82,7 +84,10 @@ function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [err, setErr] = useState("");
-  const [attendees, setAttendees] = useState<string[]>([]);
+  // Seeded from the visit, so Schedule never silently clears who is already
+  // going; only an edit in the picker sends a list.
+  const [attendees, setAttendees] = useState<string[]>(row.attendees);
+  const [touched, setTouched] = useState(false);
   const parsed = (v: string) => {
     const t = v ? new Date(v).getTime() : NaN;
     return Number.isFinite(t) ? t : null;
@@ -90,12 +95,22 @@ function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[
   const startMs = parsed(start);
   const endMs = parsed(end);
   // A nearby day fills the date; the rep's times stay (or 9–10 when blank,
-  // an hour after the start when only the end is blank).
+  // an hour after the start when only the end is blank). The end is always
+  // after the start on the same day: clamped to start + 1 h (max 23:59).
   const pickDay = (dayKey: string) => {
-    const st = start.slice(11, 16) || "09:00";
-    const hour = Math.min(23, Number(st.slice(0, 2)) + 1);
+    const hm = (v: string) => (/^\d{2}:\d{2}$/.test(v.slice(11, 16)) ? v.slice(11, 16) : "");
+    const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+    const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const last = 23 * 60 + 59;
+    const endT = hm(end);
+    // Start blank but an end exists: start an hour before that end. The start
+    // stops at 23:58 so a later end always exists the same day.
+    const startMin = Math.min(last - 1, hm(start) ? mins(hm(start)) : endT ? Math.max(0, mins(endT) - 60) : mins("09:00"));
+    // Keep the rep's end when it is after the start; otherwise start + 1 h.
+    const endMin = Math.min(last, endT && mins(endT) > startMin ? mins(endT) : startMin + 60);
+    const st = clock(startMin);
     setStart(`${dayKey}T${st}`);
-    setEnd(`${dayKey}T${end.slice(11, 16) || `${String(hour).padStart(2, "0")}:${st.slice(3, 5)}`}`);
+    setEnd(`${dayKey}T${clock(endMin)}`);
   };
 
   // Plan-review minor: check the action result instead of refreshing
@@ -122,7 +137,7 @@ function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[
     }
     setErr("");
     startTransition(async () => {
-      const res = await scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees });
+      const res = await scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees: touched ? attendees : undefined });
       if (!res.ok) {
         setErr(res.error);
         return;
@@ -223,7 +238,10 @@ function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[
           lead={me}
           team={team}
           attendees={attendees}
-          onAttendeesChange={setAttendees}
+          onAttendeesChange={(next) => {
+            setTouched(true);
+            setAttendees(next);
+          }}
           onPickDay={pickDay}
         />
       )}

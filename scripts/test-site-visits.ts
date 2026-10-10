@@ -878,7 +878,7 @@ export async function siteVisitsBookingUiPins(ok: Ok): Promise<void> {
   const modal = read("src/app/(app)/inbox/site-visit-modal.tsx");
   ok(vr.includes("<BookingPanel") && modal.includes("<BookingPanel") && /onPickDay=\{/.test(vr) && /onPickDay=\{/.test(modal),
     "site-visits booking: the visit-requests scheduler and the Inbox dialog both show the booking panel; a nearby day fills the date");
-  ok(vr.includes("scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees })") && /createSiteVisitAction\(\{[\s\S]*?\battendees,[\s\S]*?\}\)/.test(modal),
+  ok(vr.includes("scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees: touched ? attendees : undefined })") && /createSiteVisitAction\(\{[\s\S]*?\battendees,[\s\S]*?\}\)/.test(modal),
     "site-visits booking: both save paths send the picked attendees");
   ok(!/disabled=\{[^}]*(check|conflict|nearby)/i.test(vr) && !/disabled=\{[^}]*(check|conflict|nearby)/i.test(modal),
     "site-visits booking: nothing about the check ever disables Schedule");
@@ -895,4 +895,37 @@ export async function siteVisitsBookingUiPins(ok: Ok): Promise<void> {
   const clientFiles = [...readdirSync("src/components/visit-booking").map((f) => join("src/components/visit-booking", f)), "src/app/(app)/venue-assessments/visit-requests.tsx", "src/app/(app)/inbox/site-visit-modal.tsx"];
   const leaky = clientFiles.filter((f) => /from "@\/(db|lib\/stores|lib\/visit-plan\/load|lib\/google|lib\/gmail|lib\/users)/.test(read(f)));
   ok(leaky.length === 0, "site-visits booking: client components import nothing that reaches the database" + (leaky.length ? " — " + leaky.join(", ") : ""));
+}
+
+export async function siteVisitsEditPins(ok: Ok): Promise<void> {
+  const read = (p: string) => readFileSync(p, "utf8");
+  const page = read("src/app/(app)/companies/[id]/page.tsx");
+  ok(page.includes("<EditVisitButton") && page.includes("<VisitConflictProvider") && page.includes("<VisitConflictChip"),
+    "site-visits edit: the company record's visit rows get Edit and a conflict badge");
+  ok(/v\.stage === "scheduled"[^?]*\?\s*\(?\s*<EditVisitButton/.test(page),
+    "site-visits edit: only a scheduled (not yet done) visit offers Edit");
+  ok(/\.slice\(0, 10\)/.test(page) && /v\.stage === "scheduled"/.test(page), "site-visits edit: badges are asked for at most 10 upcoming scheduled visits");
+  ok(/export const maxDuration = 60/.test(page), "site-visits edit: the company record keeps its 60 s ceiling");
+  const dialog = read("src/components/visit-booking/visit-edit-dialog.tsx");
+  ok(dialog.includes("<BookingPanel") && /visitId=\{visit\.id\}/.test(dialog) && /updateVisitAction\(visit\.id, \{[^}]*attendees[^}]*\}\)/.test(dialog),
+    "site-visits edit: editing shows the booking panel for that visit and saves time, lead and attendees");
+  ok(!/disabled=\{[^}]*(check|conflict)/i.test(dialog), "site-visits edit: conflicts never disable Save");
+  const chips = read("src/components/visit-booking/visit-conflict-chips.tsx");
+  ok(chips.includes("visitConflictSummariesAction") && /if \(live\)/.test(chips), "site-visits edit: badges load once per list, after the page renders");
+  ok(chips.includes(".catch(") && !/throw /.test(chips), "site-visits edit: a failed badge load shows no badge and breaks nothing");
+  const badge = read("src/components/visit-booking/conflict-badge.tsx");
+  ok(/aria-label=\{all\}/.test(badge) && /title=\{all\}/.test(badge) && !badge.includes("useState"), "site-visits edit: the badge carries every conflict in its title and label, and has no hooks");
+
+  // Task 8 review add-ons.
+  const vr = read("src/app/(app)/venue-assessments/visit-requests.tsx");
+  ok(/attendees: string\[\]/.test(vr) && /useState<string\[\]>\(row\.attendees\)/.test(vr) && /touched \? attendees : undefined/.test(vr),
+    "site-visits booking: the scheduler starts from the row's attendees and sends none when they were not touched");
+  ok(/Math\.max\(/.test(vr.slice(vr.indexOf("const pickDay"), vr.indexOf("const run"))) && vr.includes("23:59"),
+    "site-visits booking: a picked day always ends after it starts");
+  const hook = read("src/components/visit-booking/use-booking-check.ts");
+  ok(/state\.forSig === sig \? state\.error : ""/.test(hook), "site-visits booking: a stale failure is not shown while a new check loads");
+  const strip = read("src/components/visit-booking/nearby-strip.tsx");
+  ok(/calendarNote\(o\.person, "failed"\)/.test(strip), "site-visits booking: an attendee whose calendar failed reads \"Couldn't check <Name>'s calendar\"");
+  ok(read("src/components/visit-booking/conflicts-panel.tsx").includes('aria-live="polite"') && strip.includes('aria-live="polite"'),
+    "site-visits booking: the conflicts and nearby results are live regions");
 }

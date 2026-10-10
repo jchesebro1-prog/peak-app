@@ -37,7 +37,7 @@ export default function ConflictsPanel({ people, timed, loading, error }: { peop
   return (
     <div aria-busy={loading}>
       <span style={lbl}>Conflicts</span>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 11px", borderRadius: 9, background: "#fafbfc", border: "1px solid #eef0f3", opacity: loading && people.length ? 0.6 : 1 }}>
+      <div aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 11px", borderRadius: 9, background: "#fafbfc", border: "1px solid #eef0f3", opacity: loading && people.length ? 0.6 : 1 }}>
         {body}
       </div>
     </div>
