@@ -28,6 +28,7 @@ import {
 import { normalizedTitle, tokens } from "@/lib/triage/text";
 import { parseTriageKey, triageKey } from "@/lib/triage/keys";
 import { donePlan } from "@/lib/triage/actions-plan";
+import { initialTranscriptShown, parseRecordingDeepLink } from "@/lib/recording-deep-link";
 import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/triage/rank";
 import { feedErrorMessage, type SnapshotRow, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
 import { clipLine, formatTimestamp, matchTranscriptLine } from "@/lib/triage/transcript-match";
@@ -689,4 +690,28 @@ export async function triageActionChecks(ok: Ok): Promise<void> {
   const page = readFileSync("src/app/(app)/triage/page.tsx", "utf8");
   ok(/requireUser\(\)/.test(page) && /can\("manage_users", user\.roles\)/.test(page) && /readOnly=\{!viewingSelf\}/.test(page), "page: admins can view a teammate's list, read-only");
   ok(readFileSync("src/components/nav/nav-data.ts", "utf8").includes('"/triage": "dashboard"') && readFileSync("scripts/smoke-routes.ts", "utf8").includes('"/triage"'), "page: /triage lights Dashboard and is smoke-tested");
+}
+
+export async function triageHomeChecks(ok: Ok): Promise<void> {
+  ok(JSON.stringify(parseRecordingDeepLink({ tab: "transcript", seg: "12" })) === JSON.stringify({ tab: "transcript", seg: 12 }), "deep link: ?tab=transcript&seg=12 opens that segment");
+  ok(JSON.stringify(parseRecordingDeepLink({ seg: "3" })) === JSON.stringify({ tab: "transcript", seg: 3 }), "deep link: a segment implies the Transcript tab");
+  ok(JSON.stringify(parseRecordingDeepLink({ tab: "actions" })) === JSON.stringify({ tab: "actions", seg: null }), "deep link: ?tab=actions opens Action items");
+  ok(JSON.stringify(parseRecordingDeepLink({ tab: "nope", seg: "-1" })) === JSON.stringify({ tab: "summary", seg: null }) && parseRecordingDeepLink({ seg: ["4", "5"] }).seg === 4, "deep link: junk falls back to Summary; arrays take the first value");
+  ok(initialTranscriptShown(null, 200) === 200 && initialTranscriptShown(12, 200) === 200 && initialTranscriptShown(199, 200) === 200, "deep link: a segment inside the first page keeps the first page");
+  ok(initialTranscriptShown(200, 200) === 201 && initialTranscriptShown(450, 200) === 451, "deep link: a segment beyond the first 200 raises the shown count so the line is on screen");
+
+  const home = readFileSync("src/app/(app)/page.tsx", "utf8");
+  ok(/<StartHereCard user=\{user\} \/>/.test(home) && home.indexOf("<StartHereCard") < home.indexOf("<WidgetHost") && /<Suspense/.test(home), "home: the Start here card sits at the top of Home, above the widgets, behind Suspense");
+  const card = readFileSync("src/components/triage/start-here-card.tsx", "utf8");
+  ok(/HOME_LIMIT/.test(card) && /href="\/triage"/.test(card) && /See more/.test(card) && /built \{chicagoTime\(/.test(card) && /catch/.test(card), "home: top 10, slot label with build time, See more → /triage; a load failure never breaks Home");
+  const recPage = readFileSync("src/app/(app)/recordings/[id]/page.tsx", "utf8");
+  const detail = readFileSync("src/app/(app)/recordings/[id]/detail-client.tsx", "utf8");
+  ok(/parseRecordingDeepLink\(/.test(recPage) && /initialTab=\{link\.tab\}/.test(recPage) && /focusSeg=\{link\.seg\}/.test(recPage), "deep link: the recording page passes the tab + segment through");
+  ok(/useState<Tab>\(initialTab \?\? "summary"\)/.test(detail) && /id=\{`seg-\$\{i\}`\}/.test(detail) && /scrollIntoView/.test(detail) && /initialTranscriptShown\(focusSeg, TRANSCRIPT_PAGE\)/.test(detail), "deep link: the transcript shows, scrolls to and highlights the segment");
+
+  const actions = readFileSync("src/app/(app)/triage/actions.ts", "utf8");
+  ok((actions.match(/That item no longer exists\./g) || []).length === 1 && /getAssignment\(/.test(actions) && /setTaskStatus\(plan\.id, "done"\)/.test(actions) && /setThreadStatus\(plan\.id, "closed"\)/.test(actions), "actions: Done on a task / assignment / thread that is gone says so instead of recording a done mark");
+  const rowsSrc = readFileSync("src/components/triage/triage-rows.tsx", "utf8");
+  ok(/try \{/.test(rowsSrc) && /finally \{/.test(rowsSrc) && /setBusyKey\(null\)/.test(rowsSrc.slice(rowsSrc.indexOf("finally {"))), "rows: a rejected action still resets the busy state and shows an error");
+  ok(/aria-label=\{`Done: \$\{r\.title\}`\}/.test(rowsSrc) && /aria-label=\{`Snooze till tomorrow: \$\{r\.title\}`\}/.test(rowsSrc) && /aria-label=\{`Not mine: \$\{r\.title\}`\}/.test(rowsSrc), "rows: Done / Snooze / Not mine carry row-specific accessible names");
 }

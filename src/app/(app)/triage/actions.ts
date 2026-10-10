@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { setTaskStatus } from "@/lib/stores/tasks";
-import { setAssignmentDone } from "@/lib/stores/assignments";
+import { getAssignment, setAssignmentDone } from "@/lib/stores/assignments";
 import { assign as assignThread, setStatus as setThreadStatus } from "@/lib/stores/comms";
 import { getRecording } from "@/lib/stores/recordings";
 import { dismissActionItem } from "@/lib/krisp/write-back";
@@ -22,6 +22,8 @@ import { setMark } from "@/lib/triage/store";
  */
 
 type Result = { ok: true; open?: string } | { ok: false; error: string };
+
+const GONE = "That item no longer exists.";
 
 function currentSlot(userId: string) {
   const now = Date.now();
@@ -42,9 +44,15 @@ export async function triageDoneAction(key: string): Promise<Result> {
   if (plan.kind === "open") return { ok: true, open: plan.href };
   const cur = currentSlot(user.id);
   try {
-    if (plan.kind === "task") await setTaskStatus(plan.id, "done");
-    else if (plan.kind === "assignment") await setAssignmentDone(plan.id, true, "app");
-    else if (plan.kind === "thread") await setThreadStatus(plan.id, "closed");
+    // A record deleted since the snapshot was built: say so, never record a done mark for it.
+    if (plan.kind === "task") {
+      if (!(await setTaskStatus(plan.id, "done"))) return { ok: false, error: GONE };
+    } else if (plan.kind === "assignment") {
+      if (!(await getAssignment(plan.id))) return { ok: false, error: GONE };
+      await setAssignmentDone(plan.id, true, "app");
+    } else if (plan.kind === "thread") {
+      if (!(await setThreadStatus(plan.id, "closed"))) return { ok: false, error: GONE };
+    }
     await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
   } catch (error) {
     console.error("triageDoneAction failed", error);

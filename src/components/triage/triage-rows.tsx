@@ -59,18 +59,23 @@ export default function TriageRows({ rows, readOnly, teammates }: { rows: Snapsh
     setBusyKey(key);
     setErr(null);
     startTransition(async () => {
-      const r = await fn();
-      setBusyKey(null);
-      if (!r.ok) {
-        setErr(r.error);
-        return;
+      try {
+        const r = await fn();
+        if (!r.ok) {
+          setErr(r.error);
+          return;
+        }
+        if (r.open) {
+          router.push(r.open);
+          return;
+        }
+        setReassignKey(null);
+        router.refresh();
+      } catch {
+        setErr("Something went wrong — please try again.");
+      } finally {
+        setBusyKey(null);
       }
-      if (r.open) {
-        router.push(r.open);
-        return;
-      }
-      setReassignKey(null);
-      router.refresh();
     });
   };
 
@@ -107,16 +112,17 @@ export default function TriageRows({ rows, readOnly, teammates }: { rows: Snapsh
             </div>
             {!readOnly && (
               <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button style={BTN} disabled={busyKey === r.key} onClick={() => run(r.key, () => triageDoneAction(r.key))}>
+                <button style={BTN} disabled={busyKey === r.key} aria-label={`Done: ${r.title}`} onClick={() => run(r.key, () => triageDoneAction(r.key))}>
                   Done
                 </button>
-                <button style={BTN} disabled={busyKey === r.key} title="Snooze till tomorrow" onClick={() => run(r.key, () => triageSnoozeAction(r.key))}>
+                <button style={BTN} disabled={busyKey === r.key} title="Snooze till tomorrow" aria-label={`Snooze till tomorrow: ${r.title}`} onClick={() => run(r.key, () => triageSnoozeAction(r.key))}>
                   Snooze
                 </button>
                 <button
                   style={BTN}
                   disabled={busyKey === r.key}
                   title={r.source === "email" ? "Reassign or hide" : "Not mine / dismiss"}
+                  aria-label={`Not mine: ${r.title}`}
                   onClick={() => (r.source === "email" ? setReassignKey(r.key) : run(r.key, () => triageDismissAction(r.key)))}
                 >
                   Not mine
