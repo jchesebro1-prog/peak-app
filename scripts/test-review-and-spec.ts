@@ -62994,7 +62994,8 @@ async function conduitRiser321B5Checks(): Promise<void> {
   const runOf = (id: string, a: string, b: string, extra: Record<string, unknown> = {}) => ({ id, a: { kind: "placement", placementId: a }, b: { kind: "placement", placementId: b }, routeIds: [], linkIds: [], size: '1"', style: "conduit", ...extra });
   const between = LV.conduitRemovedBetween(
     { o1: { runs: [runOf(rid12("a"), "gp-1", "gp-2"), runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-2": { x: 1, y: 1, detailId: "dt-main" }, "gp-1": { x: 2, y: 2, detailId: "dt-main" } }, dismissed: [{ key: "gp-2|gp-3", ids: [] }] }, o2: { runs: [] } },
-    { o1: { runs: [runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-1": { x: 2, y: 2, detailId: "dt-main" } } }, o2: { runs: [] } }
+    { o1: { runs: [runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-1": { x: 2, y: 2, detailId: "dt-main" } } }, o2: { runs: [] } },
+    "lighting"
   );
   ok(J2(Object.keys(between)) === J2(["o1"]) && J2(between.o1.runs.map((r) => r.id)) === J2([rid12("a")]) && J2(Object.keys(between.o1.tags)) === J2(["gp-2"]) && J2(between.o1.dismissed.map((d) => d.key)) === J2(["gp-2|gp-3"]),
     "#321 conduitRemovedBetween: per option, the runs, pinned tags and dismissals that went; options with nothing removed are omitted");
@@ -63021,7 +63022,7 @@ async function conduitRiser321B5Checks(): Promise<void> {
     },
     o2: { runs: [runOf(rid12("9"), "gp-1", "gp-2")] }, // o1's devices under o2's key
     "opt-gone": { runs: [runOf(rid12("8"), "gp-1", "gp-2")] },
-  });
+  }, "lighting");
   const rd2 = rdoc2.conduitRiser.o1 as import("@/lib/design/conduit-riser/model").ConduitRiserDoc;
   ok(J2(rd2.runs.map((r) => r.id)) === J2([rid12("a"), rid12("c"), rid12("d"), rid12("2")]) && rd2.runs[0].b.kind === "placement" && (rd2.runs[0].b as { placementId: string }).placementId === "gp-2",
     "#321 restoreConduitItems: restores new runs (two on one pair both come back) and a run to a live stub; skips a pair that already had a run, an id already present, another option's device, a curtain, a hand-made id and a gone stub");
@@ -63029,8 +63030,8 @@ async function conduitRiser321B5Checks(): Promise<void> {
     "#321 restoreConduitItems: a pinned tag already present wins; other options' devices and curtains take nothing back");
   ok(!("o2" in rdoc2.conduitRiser) && !("opt-gone" in rdoc2.conduitRiser), "#321 restoreConduitItems: a key naming another option's devices, or a gone option, restores nothing");
   const untouched = { conduitRiser: undefined as Record<string, unknown> | undefined };
-  LV.restoreConduitItems(untouched, "junk");
-  LV.restoreConduitItems(untouched, null);
+  LV.restoreConduitItems(untouched, "junk", "lighting");
+  LV.restoreConduitItems(untouched, null, "lighting");
   ok(untouched.conduitRiser === undefined, "#321 restoreConduitItems: junk input writes nothing");
 
   // store: delete two devices joined by a run with a pinned tag → undo
@@ -63843,7 +63844,7 @@ async function conduitRiser321FinalFixChecks(): Promise<void> {
   const rid = (c: string) => "cr-" + c.repeat(12);
   const runOf = (id: string, a: string, b: string) => ({ id, a: { kind: "placement", placementId: a }, b: { kind: "placement", placementId: b }, routeIds: [], linkIds: [], size: '1"', style: "conduit" });
   const udoc = { options: [{ id: "o1" }], placements: [{ id: "gp-1", optionId: "o1" }, { id: "gp-2", optionId: "o1" }, { id: "gp-3", optionId: "o1" }], conduitRiser: { o1: { runs: [runOf(rid("a"), "gp-1", "gp-3")] } } as Record<string, unknown> };
-  LV.restoreConduitItems(udoc, { o1: { runs: [runOf(rid("b"), "gp-1", "gp-2"), runOf(rid("c"), "gp-2", "gp-1"), runOf(rid("b"), "gp-1", "gp-2"), runOf(rid("d"), "gp-3", "gp-1")] } });
+  LV.restoreConduitItems(udoc, { o1: { runs: [runOf(rid("b"), "gp-1", "gp-2"), runOf(rid("c"), "gp-2", "gp-1"), runOf(rid("b"), "gp-1", "gp-2"), runOf(rid("d"), "gp-3", "gp-1")] } }, "lighting");
   ok(J2((udoc.conduitRiser.o1 as { runs: { id: string }[] }).runs.map((r) => r.id)) === J2([rid("a"), rid("b"), rid("c")]),
     "#321 final undo: two runs the bundle carries for one pair both come back; a repeated id and a pair that already had a run don't");
   ok(srcOf("DECISIONS.md").includes("two runs the bundle carries for one\npair both come back") || srcOf("DECISIONS.md").includes("pair both come back."), "#321 final D774: the text says a pair's second run comes back");
@@ -65261,7 +65262,7 @@ async function riserPhase2C2Checks(): Promise<void> {
   const bare = { placements: [{ id: "gp-1" }, { id: "gp-2" }] };
   const missAv = LV.liveConduitRiser(bare, opt, "av");
   ok(missAv.system === "av" && missAv.details[0].name === M.DEFAULT_AV_DETAIL_NAME && missAv.showSignals === false &&
-     LV.storedConduitRiser(bare, opt, "av").system === "av" && LV.liveConduitRiser(bare, opt).system === "lighting",
+     LV.storedConduitRiser(bare, opt, "av").system === "av" && LV.liveConduitRiser(bare, opt, "lighting").system === "lighting",
     "#328 C2 read: a missing avRiser reads as an empty A/V doc (Audio/Visual, signals off); omitted system stays lighting");
   const crossed = { ...bare, avRiser: { [opt]: { system: "lighting", runs: [run("cr-00000000c201", "gp-1", "gp-2")] } }, conduitRiser: { [opt]: { system: "av" } } };
   ok(LV.liveConduitRiser(crossed, opt, "av").system === "av" && LV.liveConduitRiser(crossed, opt, "av").runs.length === 1 &&
@@ -65531,6 +65532,66 @@ async function riserPhase2C2Checks(): Promise<void> {
   }
   ok(J(await DS.getBlob(CONDUIT_SIZES_BLOB, {})) === J(sizesBlobBefore), "#328 C2 fixture: the conduit sizes blob is restored");
 
+  // ---- 6b. fix round 1: a wire belongs to one riser's conduit
+  {
+    const GR = await import("@/lib/stores/grid-riser");
+    const SUG = await import("@/lib/design/conduit-riser/suggest");
+    const { buildGridQuote: bq } = await import("@/lib/design/grid-quote");
+    const { saveConduitSizes: saveSizes } = await import("@/lib/stores/conduit-sizes");
+    const { CONDUIT_SIZES_BLOB: SIZES_BLOB } = await import("@/lib/conduit-sizes");
+    // pure: another riser's claims hide the wire here
+    const ws = [{ id: "lk-1", kind: "link" as const, from: "gp-1", to: "gp-2", partId: "c", cable: "c", signal: null, lengthFt: 30, inSystem: true, odIn: null }];
+    const other = M.normalizeConduitRiserDoc({ runs: [{ id: "cr-00000000c2f1", a: pe("gp-1"), b: pe("gp-2"), routeIds: [], linkIds: ["lk-1"], size: '3/4"', style: "conduit" }] }, "lighting");
+    ok(SUG.suggestions(M.emptyConduitRiserDoc("av"), ws).items.length === 1 && SUG.suggestions(M.emptyConduitRiserDoc("av"), ws, SUG.claimedBy([other], ws)).items.length === 0,
+      "#328 C2 fix1 suggestions: a wire inside a run on another riser is not suggested");
+    const now = Date.now();
+    const sym = async (slug: string, scope: string) => {
+      const id = fid(328, slug);
+      await DS.upsertDoc("grid_catalog", { id, name: `Test328 ${slug}`, manufacturer: "", modelNumber: "", scope, category: "Test328", width: 1, height: 1, ports: [], createdBy: by, createdAt: now, updatedAt: now });
+      reg("grid_catalog", id);
+      return id;
+    };
+    const SL = await sym("c2-sym-light", "Lighting");
+    const SA = await sym("c2-sym-audio", "Audio");
+    const XEMT = fid(328, "c2-x-emt");
+    await mergeUpsert(XEMT, { desc: "Test328 C2 x EMT", category: "Test328 Conduit", unit: "ft", list: 4, cost: 2 });
+    reg("catalog_parts", XEMT);
+    const gx = await G.createProject({ name: "#328 C2 cross-system link", customer: "Spec fixture", customerId: null, by });
+    reg("grid_projects", gx.id);
+    const xs = (await G.addSheet(gx.id, { name: "#328 C2 x sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    reg("grid_sheets", xs.id);
+    const xlive = async () => (await G.getProject(gx.id))!;
+    const x1 = (await G.addPlacement(gx.id, { sheetId: xs.id, page: 1, x: 0.1, y: 0.1, partId: SL, optionId: opt, by }))!.placements.at(-1)!;
+    const x2 = (await G.addPlacement(gx.id, { sheetId: xs.id, page: 1, x: 0.5, y: 0.1, partId: SA, optionId: opt, by }))!.placements.at(-1)!;
+    const lk = await GR.addRiserLink(gx.id, { optionId: opt, from: { kind: "placement", placementId: x1.id }, to: { kind: "placement", placementId: x2.id }, partId: CBL, lengthFt: 30, by });
+    if (!lk.ok) throw new Error("#328 C2 fix1: expected the riser link");
+    const kX = M.pairKey(x1.id, x2.id);
+    const offers = async (system: "lighting" | "av") => (await L.loadConduitRiser(await xlive(), opt, system)).suggestions.items.some((s) => s.key === kX && s.linkIds.includes(lk.id));
+    ok((await offers("lighting")) && (await offers("av")), "#328 C2 fix1 fixture: a lighting↔audio link is in-system on both risers and offered on both before any run");
+    const accL = await CR.acceptSuggestions(gx.id, opt, "lighting", [kX]);
+    ok(accL.ok && accL.accepted === 1 && (await xlive()).conduitRiser![opt].runs[0].linkIds.includes(lk.id), "#328 C2 fix1: accepted on the lighting riser");
+    ok(!(await offers("av")), "#328 C2 fix1 loader: once inside a lighting run, the link is not offered on the A/V riser");
+    const before = J(await xlive());
+    const forceKey = await CR.acceptSuggestions(gx.id, opt, "av", [kX]);
+    const forceAll = await CR.acceptSuggestions(gx.id, opt, "av", "all");
+    const forceDis = await CR.dismissSuggestion(gx.id, opt, "av", kX);
+    const after = await xlive();
+    ok(forceKey.ok && forceKey.accepted === 0 && forceAll.ok && forceAll.accepted === 0 && !forceDis.ok && J(after) === before && !(after.avRiser?.[opt]?.runs.length),
+      "#328 C2 fix1 store: forcing its key (or \"all\", or a dismissal) on the A/V riser changes nothing");
+    const sizesBefore = await DS.getBlob<Record<string, unknown>>(SIZES_BLOB, {});
+    try {
+      await DS.setBlob(SIZES_BLOB, {});
+      ok((await saveSizes([{ size: '3/4"', partId: XEMT }])).ok, "#328 C2 fix1 fixture: 3/4\" maps to the EMT part");
+      const runId = (await xlive()).conduitRiser![opt].runs[0].id;
+      await CR.patchConduitRiser(gx.id, opt, "lighting", { op: "updateRun", id: runId, priceConduit: true, size: '3/4"' } as import("@/lib/design/conduit-riser/model").CROp);
+      const q = await bq(await xlive(), opt);
+      const emt = q.ok ? q.build.spec.lines.find((l) => l.sku === XEMT) : undefined;
+      ok(q.ok && !!emt && emt.qty === 30, `#328 C2 fix1 quote: the link's conduit is priced once — 30 ft, not 60 (${q.ok ? emt?.qty : q.error})`);
+    } finally {
+      await DS.setBlob(SIZES_BLOB, sizesBefore);
+    }
+  }
+
   // ---- 6. wiring pins
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const gpSrc = src("src/lib/stores/grid-projects.ts");
@@ -65542,6 +65603,11 @@ async function riserPhase2C2Checks(): Promise<void> {
   ok(edSrc.includes("risers: [conduitRiser, avRiser]") && pgSrc.includes('avRiser={liveConduitRiser(designed, activeOptionId, "av")}'),
     "#328 C2 pins: the editor's live BOM runs riserBom over both risers the page hands it");
   const actSrc = src("src/app/(app)/design/grid/[id]/conduit-riser/actions.ts");
+  const rsSrc = src("src/lib/stores/grid-conduit-riser.ts");
+  const svSrc = src("src/lib/design/conduit-riser-server.ts");
+  ok((rsSrc.match(/claimedElsewhere\(p, optionId, system, wires\)/g) || []).length === 2 && svSrc.includes("suggestions(doc, wires, claimedElsewhere(project, optionId, system, wires))") &&
+     rsSrc.includes("CONDUIT_RISER_FIELDS.map((f) => f.system)"),
+    "#328 C2 fix1 pins: the loader and both store re-derivations pass the other risers' claims; isSystem derives from CONDUIT_RISER_FIELDS");
   ok(['patchConduitRiser(projectId, optionId, "lighting", op)', 'acceptSuggestions(projectId, optionId, "lighting", list)', 'dismissSuggestion(projectId, optionId, "lighting", key)', 'riserPromptFor(project, optionId, "lighting", routeId)'].every((x) => actSrc.includes(x)),
     "#328 C2 pins: the riser actions name the lighting system explicitly (the A/V page wiring is C3)");
 }

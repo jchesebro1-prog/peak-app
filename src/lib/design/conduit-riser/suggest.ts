@@ -47,8 +47,32 @@ function claimed(doc: ConduitRiserDoc, wires?: readonly CRWire[]): { routes: Set
   return { routes, links };
 }
 
-export function suggestions(doc: ConduitRiserDoc, wires: readonly CRWire[]): SuggestResult {
-  const taken = claimed(doc, wires);
+/** Wire ids claimed by runs on OTHER risers of the option (#328) — the same
+ *  rule as this riser's own claims (a re-snapped member doesn't count). */
+export type ClaimedWires = { routes: ReadonlySet<string>; links: ReadonlySet<string> };
+
+/** #328: every wire id inside a run on any of `docs` (the option's other risers). */
+export function claimedBy(docs: readonly ConduitRiserDoc[], wires: readonly CRWire[]): ClaimedWires {
+  const routes = new Set<string>();
+  const links = new Set<string>();
+  for (const d of docs) {
+    const c = claimed(d, wires);
+    c.routes.forEach((id) => routes.add(id));
+    c.links.forEach((id) => links.add(id));
+  }
+  return { routes, links };
+}
+
+/**
+ * Suggestions for one riser. `elsewhere` (#328): wires already inside a run
+ * on another riser of the option — a wire belongs to one riser's conduit, so
+ * it is never suggested here (and so can never be accepted here by key).
+ */
+export function suggestions(doc: ConduitRiserDoc, wires: readonly CRWire[], elsewhere?: ClaimedWires): SuggestResult {
+  const own = claimed(doc, wires);
+  const taken = elsewhere
+    ? { routes: new Set([...own.routes, ...elsewhere.routes]), links: new Set([...own.links, ...elsewhere.links]) }
+    : own;
   const loose: string[] = [];
   const groups = new Map<string, { a: string; b: string; routeIds: string[]; linkIds: string[] }>();
   for (const w of wires) {

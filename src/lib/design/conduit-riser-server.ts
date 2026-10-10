@@ -30,9 +30,9 @@ import { partModel } from "@/lib/catalog-rename/sku";
 import type { DeviceTypeContext } from "@/lib/design/device-types";
 import type { CRBoxType, CRDevice, CRLevel, CRSignal, CRWire, CRWireType } from "@/lib/design/conduit-riser/input";
 import type { ConduitRiserDoc, ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
-import { liveConduitRiser, riserSystemOf } from "@/lib/design/conduit-riser/live";
+import { CONDUIT_RISER_FIELDS, liveConduitRiser, riserSystemOf } from "@/lib/design/conduit-riser/live";
 import { deriveView, type CRView, type DeriveInput } from "@/lib/design/conduit-riser/derive";
-import { suggestions, type SuggestResult } from "@/lib/design/conduit-riser/suggest";
+import { claimedBy, suggestions, type ClaimedWires, type SuggestResult } from "@/lib/design/conduit-riser/suggest";
 import { riserTables, type TableModel } from "@/lib/design/conduit-riser/tables";
 import { effectiveTag } from "@/lib/design/conduit-riser/tags";
 import { effectivePricing, type ConduitSize } from "@/lib/design/conduit-riser/pricing";
@@ -266,6 +266,21 @@ export function riserWires(project: GridProject, optionId: string, ctx: RiserPar
   return wires;
 }
 
+/**
+ * #328: the wires already inside a run on the option's OTHER risers — a wire
+ * belongs to one riser's conduit, so `system`'s suggestions leave them out.
+ * Read from `p` as given (the store passes the doc its patch holds).
+ */
+export function claimedElsewhere(
+  p: Parameters<typeof liveConduitRiser>[0],
+  optionId: string,
+  system: ConduitRiserSystem,
+  wires: readonly CRWire[]
+): ClaimedWires {
+  const others = CONDUIT_RISER_FIELDS.filter((f) => f.system !== system).map((f) => liveConduitRiser(p, optionId, f.system));
+  return claimedBy(others, wires);
+}
+
 export type ConduitRiserData = {
   doc: ConduitRiserDoc;
   input: DeriveInput;
@@ -301,7 +316,7 @@ export async function loadConduitRiser(project: GridProject, optionId: string, s
     doc,
     input,
     view,
-    suggestions: suggestions(doc, wires),
+    suggestions: suggestions(doc, wires, claimedElsewhere(project, optionId, system, wires)),
     tables: riserTables({ view, doc, wireTypes, boxTypes }),
     boxTypes,
     sizes,

@@ -127,9 +127,9 @@ export function conduitLiveIds(p: ConduitLiveDoc, optionId: string): LiveIds {
   };
 }
 
-/** One option's stored document in `system`'s field (#328; lighting when
- *  omitted), normalized and pruned against the live plan. */
-export function liveConduitRiser(p: ConduitLiveDoc, optionId: string, system: ConduitRiserSystem = "lighting"): ConduitRiserDoc {
+/** One option's stored document in `system`'s field (#328), normalized and
+ *  pruned against the live plan. */
+export function liveConduitRiser(p: ConduitLiveDoc, optionId: string, system: ConduitRiserSystem): ConduitRiserDoc {
   return pruneConduitRiser(storedConduitRiser(p, optionId, system), conduitLiveIds(p, optionId));
 }
 
@@ -171,11 +171,11 @@ export type ConduitRemovedBySystem = Partial<Record<ConduitRiserSystem, ConduitR
 
 /** Per option: the runs (by id), pinned tags (by device) and dismissals (by
  *  pair) in `before` but not `after`. Options with nothing removed are
- *  omitted. Both sides read as `system`'s riser (lighting when omitted). */
+ *  omitted. Both sides read as `system`'s riser. */
 export function conduitRemovedBetween(
   before: Record<string, unknown> | undefined,
   after: Record<string, unknown> | undefined,
-  system: ConduitRiserSystem = "lighting"
+  system: ConduitRiserSystem
 ): ConduitRemoved {
   const out: ConduitRemoved = {};
   for (const k of Object.keys(before || {})) {
@@ -217,7 +217,7 @@ const RUN_ID = /^cr-[0-9a-f]{12}$/;
  * has a run, tag device, dismissal pair) — two runs the bundle carries for
  * one pair both come back. Ends with pruneConduitRisersIn — normalized and capped.
  */
-export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown, system: ConduitRiserSystem = "lighting"): void {
+export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown, system: ConduitRiserSystem): void {
   if (!isObj(raw)) return;
   const field = conduitRiserField(system);
   const optionIds = liveOptionIds(p);

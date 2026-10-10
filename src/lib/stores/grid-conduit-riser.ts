@@ -11,8 +11,8 @@ import {
   type MakeId,
 } from "@/lib/design/conduit-riser/model";
 import { acceptSuggestion, dismissSuggestion as dismissOne, suggestions } from "@/lib/design/conduit-riser/suggest";
-import { conduitLiveIds, conduitRiserField, liveConduitRiser, normalizeStoredRiser } from "@/lib/design/conduit-riser/live";
-import { loadRiserPartsContext, riserWires, type ConduitRiserDeps } from "@/lib/design/conduit-riser-server";
+import { CONDUIT_RISER_FIELDS, conduitLiveIds, conduitRiserField, liveConduitRiser, normalizeStoredRiser } from "@/lib/design/conduit-riser/live";
+import { claimedElsewhere, loadRiserPartsContext, riserWires, type ConduitRiserDeps } from "@/lib/design/conduit-riser-server";
 import type { Landed } from "@/lib/design/conduit-riser/edit";
 import { getProject, type GridProject } from "./grid-projects";
 
@@ -74,7 +74,8 @@ async function writeConduit(
 }
 
 /** The two riser systems, whitelisted — a forged system never reaches a field name. */
-const isSystem = (v: unknown): v is ConduitRiserSystem => v === "lighting" || v === "av";
+const SYSTEMS: readonly string[] = CONDUIT_RISER_FIELDS.map((f) => f.system);
+const isSystem = (v: unknown): v is ConduitRiserSystem => typeof v === "string" && SYSTEMS.includes(v);
 
 const isOp = (op: unknown): op is CROp =>
   !!op && typeof op === "object" && (CR_OP_NAMES as readonly string[]).includes((op as { op?: unknown }).op as string);
@@ -111,7 +112,9 @@ export async function acceptSuggestions(
   const r = await writeConduit(projectId, optionId, system, (p, doc, placementIds) => {
     let next = doc;
     accepted = 0;
-    for (const s of suggestions(doc, riserWires(p, optionId, ctx, system)).items) {
+    // #328: a wire already in a run on another riser of the option is never on offer here.
+    const wires = riserWires(p, optionId, ctx, system);
+    for (const s of suggestions(doc, wires, claimedElsewhere(p, optionId, system, wires)).items) {
       if (want && !want.has(s.key)) continue;
       const res = acceptSuggestion(next, s, makeId, placementIds);
       if (res.changed) {
@@ -137,7 +140,8 @@ export async function dismissSuggestion(
   if (!project) return { ok: false, reason: "not-found" };
   const ctx = await loadRiserPartsContext(project, deps);
   return writeConduit(projectId, optionId, system, (p, doc) => {
-    const s = suggestions(doc, riserWires(p, optionId, ctx, system)).items.find((x) => x.key === key);
+    const wires = riserWires(p, optionId, ctx, system);
+    const s = suggestions(doc, wires, claimedElsewhere(p, optionId, system, wires)).items.find((x) => x.key === key);
     if (!s) return null;
     const res = dismissOne(doc, s);
     return res.changed ? res.doc : null;
