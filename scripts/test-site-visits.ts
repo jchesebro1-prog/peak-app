@@ -849,7 +849,11 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
   ok(upd.indexOf("after(") > 0 && upd.indexOf("after(") < upd.indexOf("await dispatchVisitInvite(") && /resyncForVisitChange\(prevVisit, nextVisit\)\.catch\(/.test(upd),
     "site-visits actions: editing a visit re-syncs the old and new days (in after(), before the invites)");
   ok(/cleanAttendees\(/.test(upd) && /updateVisitBooking\(/.test(upd) && /roster\.includes\(lead\)/.test(upd), "site-visits actions: an edit cleans attendees and refuses a lead not on the team");
+  ok(upd.indexOf('v.stage !== "scheduled"') > 0 && upd.indexOf('v.stage !== "scheduled"') < upd.indexOf("updateVisitBooking("),
+    "site-visits actions: editing refuses any visit that isn't scheduled, before updateVisitBooking (no claim-model bypass)");
   const badges = fnBody(ba, "visitConflictSummariesAction");
+  ok(/Date\.now\(\) \+ BADGE_TOTAL_BUDGET_MS/.test(badges) && /BADGE_TOTAL_BUDGET_MS = 20_000/.test(ba) && badges.indexOf("Date.now() >= deadline") > 0 && badges.indexOf("Date.now() >= deadline") < badges.indexOf("loadBookingCheck("),
+    "site-visits actions: conflict badges share one 20 s deadline and stop starting new visits once it is spent");
   ok(/\.slice\(0, 10\)/.test(badges) && /nearby: false/.test(badges), "site-visits actions: conflict badges check at most 10 visits and skip nearby days");
   ok(/viewerId: me\.id/.test(fnBody(ba, "bookingCheckAction")) && /viewerId: me\.id/.test(badges) && (ba.match(/viewerId:/g) ?? []).length === 2,
     "site-visits actions: the booking check always views as the signed-in user (others' event titles stay hidden)");
@@ -857,6 +861,8 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
   const sched = fnBody(va, "scheduleVisitAction");
   ok(/cleanAttendees\(input\.attendees/.test(sched) && /scheduleVisit\(id, input\.startAt, input\.endAt, attendees\)/.test(sched),
     "site-visits actions: scheduling a request saves its cleaned attendees");
+  ok(/input\.attendees == null \? undefined/.test(sched) && !/input\.attendees === undefined/.test(sched),
+    "site-visits actions: null or omitted attendees leave the existing list alone (only an array changes it)");
   ok((va.match(/resyncForVisitChange\(/g) ?? []).length === 2, "site-visits actions: visit-actions still holds exactly two re-sync triggers");
   const inbox = readFileSync("src/app/(app)/inbox/site-visit-actions.ts", "utf8");
   ok(/attendees: cleanAttendees\(input\.attendees, input\.assignedTo, roster\)/.test(fnBody(inbox, "createSiteVisitAction")), "site-visits actions: the Inbox create saves cleaned attendees");

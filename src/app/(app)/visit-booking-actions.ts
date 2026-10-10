@@ -19,6 +19,8 @@ import type { BookingCheckResult } from "@/lib/visit-plan/types";
  * event titles stay hidden.
  */
 
+/** Total wall-clock budget for one visitConflictSummariesAction call. */
+const BADGE_TOTAL_BUDGET_MS = 20_000;
 const CHECK_FAILED = "Couldn't check conflicts — you can still schedule.";
 
 export async function bookingCheckAction(raw: unknown): Promise<BookingCheckResult | { error: string }> {
@@ -49,7 +51,9 @@ export async function updateVisitAction(
   if (!roster.includes(lead)) return { ok: false, error: "Pick who leads the visit." };
   const v = await getVisit(id);
   if (!v) return { ok: false, error: "Visit not found" };
-  if (v.stage === "done") return { ok: false, error: "Visit already completed" };
+  // Only a scheduled visit is edited here; open/requested/claimed visits go
+  // through the claim → schedule path, so this can't bypass the claim model.
+  if (v.stage !== "scheduled") return { ok: false, error: "Only a scheduled visit can be edited" };
   const fresh = await updateVisitBooking(id, { startAt, endAt, assignedTo: lead, attendees: cleanAttendees(r.attendees, lead, roster) });
   if (!fresh) return { ok: false, error: "Visit not found" };
   // Spec 2026-10-09 triggers: re-sync the old and new day for everyone on
@@ -75,7 +79,15 @@ export async function visitConflictSummariesAction(raw: unknown): Promise<Record
   const out: Record<string, Conflict[]> = {};
   if (!ids.length) return out;
   const { loadBookingCheck } = await import("@/lib/visit-plan/load");
+  // One shared deadline for the whole call: each check has its own routing
+  // budget, so without this ten visits could run for minutes. Once spent, the
+  // remaining visits are simply not checked (no badge).
+  const deadline = Date.now() + BADGE_TOTAL_BUDGET_MS;
   for (const id of ids) {
+    if (Date.now() >= deadline) {
+      console.warn("[visit-booking] badge budget spent; remaining visits not checked");
+      break;
+    }
     const v = await getVisit(id);
     if (!v || v.stage !== "scheduled" || v.startAt == null || v.endAt == null) continue;
     try {
