@@ -60440,6 +60440,8 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(table.startsWith('"use client"') && table.includes("data-no-nudge") && table.includes("nextCell(shown, cur.id, cur.col, move)") && table.includes("focusPlacements(ids, r.id)") &&
      table.includes("renumberDesignators(target, what)") && table.includes("Selected rows") && !/from\s+"@\/lib\/stores\//.test(table) && !table.includes("designators-server"),
     "#320 Devices tab: inline edit moves cell to cell, a row click selects on the plan, Renumber menu; no store import");
+  ok(!table.includes("#fdf4e3") && table.includes("color-mix(in srgb, ${DESIGNATOR_DUPLICATE_COLOR} 12%, transparent)") && table.includes("background: DESIGNATOR_DUPLICATE_TINT"),
+    "#320 Devices tab: a duplicate's tint is derived from DESIGNATOR_DUPLICATE_COLOR, not hard-coded");
 }
 
 /* ---------------- #320: designators on schedules and the drawing set ---------------- */

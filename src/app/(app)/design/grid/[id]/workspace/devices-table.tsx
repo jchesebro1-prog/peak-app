@@ -99,6 +99,9 @@ const CELL_BTN: React.CSSProperties = {
 
 type Editing = { id: string; col: EditCol; draft: string };
 
+/** A duplicate's cell tint — the duplicate amber, faded. */
+const DESIGNATOR_DUPLICATE_TINT = `color-mix(in srgb, ${DESIGNATOR_DUPLICATE_COLOR} 12%, transparent)`;
+
 export default function DevicesTable({ ed }: { ed: GridEditor }) {
   const {
     placements,
@@ -273,7 +276,7 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
                       style={{
                         ...TD,
                         ...(c.mono ? { fontFamily: "var(--font-mono)", fontSize: 11.5 } : {}),
-                        ...(dupe ? { color: DESIGNATOR_DUPLICATE_COLOR, fontWeight: 700, background: "#fdf4e3" } : {}),
+                        ...(dupe ? { color: DESIGNATOR_DUPLICATE_COLOR, fontWeight: 700, background: DESIGNATOR_DUPLICATE_TINT } : {}),
                       }}
                     >
                       {cell && col ? (
