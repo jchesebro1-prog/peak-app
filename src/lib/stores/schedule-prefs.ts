@@ -10,6 +10,7 @@
  *   stay_over:<userId>           { "YYYY-MM-DD": true }    one key per day
  *   drive_sync:<userId>          { lastSyncAt, legacyCleanedAt, staleAt,
  *                                  legacyRetry, legacyCursorMs, syncingUntil }
+ *   task_pins:<userId>           { "<itemKey>@<startMs>": { endMs, kind } }  spec 3 (src/lib/stores/task-pins.ts)
  * Blobs survive the go-live demo wipe.
  */
 import { and, eq, sql } from "drizzle-orm";

@@ -79,8 +79,16 @@ export function unfinishedRemainders(args: {
   return out.sort((a, b) => a.earliestMs - b.earliestMs || (a.item.key < b.item.key ? -1 : 1));
 }
 
-/** Pins this compute must persist: blocks that have begun, placed
- *  remainders, and the current block of each In-progress item with no live pin. */
+/** Pins this compute must persist:
+ *  - every block that has begun (startMs ≤ now);
+ *  - a placed remainder's chunks on its FIRST placed day only (the Chicago
+ *    day of its first chunk) — later chunks stay movable, and the next
+ *    morning recomputes the remainder from the pins;
+ *  - an In-progress item's current block: its earliest block that hasn't
+ *    ended, when that block isn't already a pin. A pin covering now is that
+ *    block, so it suppresses; a far-future hand pin isn't, so it doesn't;
+ *    and once the current block is pinned the rest stay movable (no ratchet
+ *    pinning one more chunk per compute). */
 export function newPinsFrom(args: {
   blocks: readonly PlanBlock[];
   items: readonly PlanItem[];
@@ -94,13 +102,19 @@ export function newPinsFrom(args: {
     const p: PlanPin = { itemKey: b.itemKey, startMs: b.startMs, endMs: b.endMs, kind: "started" };
     out.set(pinBlobKey(p), p);
   };
-  const unpinned = args.blocks.filter((b) => !persisted.has(b.key));
-  for (const b of unpinned) if (b.startMs <= args.nowMs || args.remainderKeys.has(b.itemKey)) add(b);
-  const live = new Set(args.pins.filter((p) => p.endMs > args.nowMs).map((p) => p.itemKey));
+  const byStart = (a: PlanBlock, b: PlanBlock) => a.startMs - b.startMs;
+  const unpinned = args.blocks.filter((b) => !persisted.has(b.key)).sort(byStart);
+  const remainderDay = new Map<string, string>();
+  for (const b of unpinned) {
+    if (args.remainderKeys.has(b.itemKey) && !remainderDay.has(b.itemKey)) remainderDay.set(b.itemKey, chicagoDayKey(b.startMs));
+  }
+  for (const b of unpinned) {
+    if (b.startMs <= args.nowMs || remainderDay.get(b.itemKey) === chicagoDayKey(b.startMs)) add(b);
+  }
   for (const item of args.items) {
-    if (!item.inProgress || live.has(item.key)) continue;
-    const first = unpinned.filter((b) => b.itemKey === item.key).sort((a, b) => a.startMs - b.startMs)[0];
-    if (first) add(first);
+    if (!item.inProgress) continue;
+    const current = args.blocks.filter((b) => b.itemKey === item.key && b.endMs > args.nowMs).sort(byStart)[0];
+    if (current && !persisted.has(current.key)) add(current);
   }
   return [...out.values()].sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : 1));
 }
@@ -129,4 +143,58 @@ export function cleanPinMove(input: unknown, nowMs: number): { ok: true; value: 
   const fromStartMs = fromRaw == null || fromRaw === "" ? null : Number(fromRaw);
   if (fromStartMs != null && !Number.isFinite(fromStartMs)) return { ok: false, error: "Unknown block." };
   return { ok: true, value: { ...ref, fromStartMs, startMs, minutes } };
+}
+
+/** PIN_MAX_PER_PERSON, enforced by the pin store (src/lib/stores/task-pins.ts).
+ *  Over the cap, prune — oldest first, and only until the count is back at
+ *  the cap — PAST pins (ended at or before now) that the plan from now on no
+ *  longer depends on:
+ *   1. past pins of items that aren't this person's open work any more (the
+ *      planner already ignores them and sweeps them as staleKeys);
+ *   2. past pins of an open item that would still have at least its size
+ *      pinned without them, never that item's latest-ending pin. Its
+ *      remainder is then "nothing left" (or the daily +30 for still-open
+ *      work) and its last pinned day stays put, so planPerson returns the
+ *      same blocks, new pins, At risk and finish times from now on; only
+ *      that old day's block stops showing.
+ *  Never a current or future pin, never a pin an item's remaining time still
+ *  depends on. Still over the cap → the rest is kept (the store logs it). */
+export function pinsToPrune(args: {
+  pins: readonly PlanPin[];
+  items: ReadonlyArray<Pick<PlanItem, "key" | "sizeMin">>;
+  nowMs: number;
+  max?: number;
+}): string[] {
+  const max = args.max ?? PIN_MAX_PER_PERSON;
+  let over = args.pins.length - max;
+  if (over <= 0) return [];
+  const size = new Map(args.items.map((i) => [i.key, i.sizeMin] as const));
+  const oldest = [...args.pins].sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0));
+  const past = oldest.filter((p) => p.endMs <= args.nowMs);
+  const out: string[] = [];
+  for (const p of past) {
+    if (over <= 0) return out;
+    if (size.has(p.itemKey)) continue;
+    out.push(pinBlobKey(p));
+    over--;
+  }
+  const pinned = new Map<string, number>();
+  const latest = new Map<string, PlanPin>();
+  for (const p of args.pins) {
+    if (!size.has(p.itemKey)) continue;
+    pinned.set(p.itemKey, (pinned.get(p.itemKey) ?? 0) + (p.endMs - p.startMs) / 60_000);
+    const l = latest.get(p.itemKey);
+    if (!l || p.endMs > l.endMs) latest.set(p.itemKey, p);
+  }
+  for (const p of past) {
+    if (over <= 0) break;
+    const sizeMin = size.get(p.itemKey);
+    if (sizeMin == null || latest.get(p.itemKey) === p) continue;
+    const left = (pinned.get(p.itemKey) ?? 0) - (p.endMs - p.startMs) / 60_000;
+    if (left < sizeMin) continue;
+    pinned.set(p.itemKey, left);
+    out.push(pinBlobKey(p));
+    over--;
+  }
+  return out;
 }

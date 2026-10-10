@@ -6,6 +6,7 @@ import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
 import { tierSizeOf } from "@/lib/task-plan/fields";
 import { autoDueAt } from "@/lib/task-plan/due";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
+import { clearPlanPinsFor } from "@/lib/stores/task-pins";
 
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
@@ -464,12 +465,14 @@ export async function createAutoTask(
 
 export async function setTaskStatus(id: string, status: TaskStatus): Promise<TaskRecord | null> {
   if (!(STATUSES as readonly string[]).includes(status)) return null;
-  return patchDoc<TaskRecord>("tasks", id, (t) => {
+  const t = await patchDoc<TaskRecord>("tasks", id, (t) => {
     t.status = status;
     t.doneAt = status === "done" ? now() : null;
     t.updatedAt = now();
     return t;
   });
+  if (t && status === "done") await clearPlanPinsFor("task", t.id, t.assigneeUserId);
+  return t;
 }
 
 export async function updateTask(
@@ -477,15 +480,24 @@ export async function updateTask(
   patch: Partial<Pick<TaskRecord, "title" | "section" | "assigneeUserId" | "assigneeName" | "dueAt" | "notes" | "priority" | "size">>,
 ): Promise<TaskRecord | null> {
   const { priority, size, ...rest } = patch;
-  return patchDoc<TaskRecord>("tasks", id, (t) => {
+  const prev = { assignee: null as string | null };
+  const t = await patchDoc<TaskRecord>("tasks", id, (t) => {
+    prev.assignee = t.assigneeUserId ?? null;
     Object.assign(t, rest, tierSizeOf({ priority, size })); // tier/size: only a valid value is written
     t.updatedAt = now();
     return t;
   });
+  // A hand-off leaves the old assignee's pins behind on their calendar — clear them.
+  if (t && "assigneeUserId" in patch && prev.assignee && prev.assignee !== (t.assigneeUserId ?? null)) {
+    await clearPlanPinsFor("task", id, prev.assignee);
+  }
+  return t;
 }
 
 export async function removeTask(id: string): Promise<void> {
+  const t = await getDoc<TaskRecord>("tasks", id);
   await softDeleteDoc("tasks", id);
+  if (t) await clearPlanPinsFor("task", id, t.assigneeUserId);
 }
 
 /**

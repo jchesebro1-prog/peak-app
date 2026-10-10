@@ -2,6 +2,7 @@ import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-s
 import { tierSizeOf } from "@/lib/task-plan/fields";
 import { autoDueAt } from "@/lib/task-plan/due";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
+import { clearPlanPinsForName } from "@/lib/stores/task-pins";
 
 /* ------------------------------------------------------------------ *
  * Assignments (D93) — the ONE new record behind My Queue.
@@ -110,11 +111,12 @@ export async function setAssignmentDone(
   done: boolean,
   via: "app" | "reminders" | "google-tasks" = "app"
 ): Promise<void> {
-  await patchDoc<Assignment>("assignments", id, (d) => {
+  const rec = await patchDoc<Assignment>("assignments", id, (d) => {
     d.done = done;
     d.doneAt = done ? Date.now() : null;
     d.doneVia = done ? via : null;
   });
+  if (rec && done) await clearPlanPinsForName("assignment", id, rec.assignee);
 }
 
 export async function updateAssignment(
@@ -122,12 +124,18 @@ export async function updateAssignment(
   patch: Partial<Pick<Assignment, "title" | "assignee" | "dueDate" | "link" | "priority" | "size">>
 ): Promise<void> {
   const { priority, size, ...rest } = patch;
-  await patchDoc<Assignment>("assignments", id, (d) => {
+  const prev = { assignee: "" };
+  const rec = await patchDoc<Assignment>("assignments", id, (d) => {
+    prev.assignee = d.assignee || "";
     const stored = tierSizeOf(d); // a junk stored tier/size is dropped, not kept
     delete d.priority;
     delete d.size;
     Object.assign(d, rest, stored, tierSizeOf({ priority, size })); // a patch writes tier/size only when valid
   });
+  // A hand-off leaves the old assignee's pins behind on their calendar — clear them.
+  if (rec && "assignee" in patch && prev.assignee && prev.assignee !== rec.assignee) {
+    await clearPlanPinsForName("assignment", id, prev.assignee);
+  }
 }
 
 export async function getAssignment(id: string): Promise<Assignment | null> {
@@ -138,5 +146,7 @@ export async function getAssignment(id: string): Promise<Assignment | null> {
 /** Delete an assignment (soft delete — doc-store tombstone, same as every
  *  other collection removal in this app). */
 export async function removeAssignment(id: string): Promise<void> {
+  const rec = await getDoc<Assignment>("assignments", id);
   await softDeleteDoc("assignments", id);
+  if (rec) await clearPlanPinsForName("assignment", id, rec.assignee);
 }

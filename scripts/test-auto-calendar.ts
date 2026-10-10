@@ -2,8 +2,13 @@
    (docs/superpowers/specs/2026-10-09-auto-task-calendar-design.md).
    Chained from test-review-and-spec.ts. */
 import { readFileSync } from "node:fs";
-import { autoTaskId, createAutoTask, createTask, createTaskOnce, getTask, normalizeTask, updateTask, type TaskRecord } from "@/lib/stores/tasks";
-import { allAssignments, createAssignment, getAssignment, updateAssignment, type Assignment } from "@/lib/stores/assignments";
+import { like } from "drizzle-orm";
+import { getDb } from "@/db";
+import { blobs } from "@/db/schema";
+import { activeUsers } from "@/lib/users";
+import { autoTaskId, createAutoTask, createTask, createTaskOnce, getTask, normalizeTask, removeTask, setTaskStatus, updateTask, type TaskRecord } from "@/lib/stores/tasks";
+import { addPins, clearItemPins, getPins, removePinKeys } from "@/lib/stores/task-pins";
+import { allAssignments, createAssignment, getAssignment, setAssignmentDone, updateAssignment, type Assignment } from "@/lib/stores/assignments";
 import { upsertDoc } from "@/db/doc-store";
 import { triageKey } from "@/lib/triage/keys";
 import { tierOf } from "@/lib/triage/feeds/tasks";
@@ -11,7 +16,7 @@ import { addDays, chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
 import { chunkFor, floorQuarter, freeDays } from "@/lib/task-plan/free";
 import { atRiskLabel, calendarNote, finishText, fmtBlockTime, GOOGLE_NOTE_ME, NOT_PLACED_TEXT } from "@/lib/task-plan/labels";
 import { planPerson } from "@/lib/task-plan/plan";
-import { cleanPinMove, pinBlobKey, pinBlobValue, pinsFromBlob, type PinMove } from "@/lib/task-plan/pins";
+import { cleanPinMove, PIN_MAX_PER_PERSON, pinBlobKey, pinBlobValue, pinsFromBlob, pinsToPrune, type PinMove } from "@/lib/task-plan/pins";
 import { chicagoWallMs, weekdayOf } from "@/lib/visit-plan/hours";
 import { DEFAULT_WORK_HOURS } from "@/lib/visit-plan/settings";
 import {
@@ -37,6 +42,7 @@ import {
   sizeMinutes,
   tierOrDefault,
   type BusyInterval,
+  type PinKind,
   type PlanInput,
   type PlanItem,
   type PlanPin,
@@ -588,10 +594,195 @@ export async function autoCalPinRuleChecks(ok: Ok): Promise<void> {
     "auto-cal plan (property): every placed chunk is ≥ 30 minutes and on the grid");
   ok(ms < 1000, `auto-cal plan (property): 200 items over 8 weeks plan in well under a second (${Math.round(ms)} ms)`);
 
+  /* Task 5 review add-ons (landed with Task 6) */
+  // (a) a remainder that runs past its first day is pinned on that day only
+  const NEXT_TUE = "2036-10-21";
+  const bigItem = item("BIG", { size: "l", sizeMin: 1200, dueMs: at("2036-10-31", 17) });
+  const friBig: PlanPin = { itemKey: "task:BIG", startMs: at(FRI, 8), endMs: at(FRI, 10), kind: "started" };
+  const longRem = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), busy: [{ startMs: at(NEXT_MON, 12), endMs: at(NEXT_MON, 13) }], pins: [friBig], items: [bigItem] }));
+  const remBlocks = blocksOf(longRem, "task:BIG").filter((b) => b.startMs > at(FRI, 23));
+  const monRem = remBlocks.filter((b) => chicagoDayKey(b.startMs) === NEXT_MON);
+  const laterRem = remBlocks.filter((b) => chicagoDayKey(b.startMs) > NEXT_MON);
+  ok(monRem.length === 2 && monRem.every((b) => b.pinned === "started") && laterRem.length > 0 && laterRem.every((b) => !b.pinned) &&
+    longRem.newPins.length === 2 && longRem.newPins.every((x) => chicagoDayKey(x.startMs) === NEXT_MON),
+    "auto-cal pins: a remainder that runs past its first day is pinned only on that day; its later chunks stay movable");
+  const tueRem = planPerson(baseInput({ nowMs: at(NEXT_TUE, 7, 30), pins: [friBig, ...longRem.newPins], items: [bigItem] }));
+  const pinnedBig = [friBig, ...longRem.newPins, ...tueRem.newPins].reduce((s, x) => s + (x.endMs - x.startMs) / MIN, 0);
+  ok(tueRem.newPins.length > 0 && tueRem.newPins.every((x) => chicagoDayKey(x.startMs) === NEXT_TUE) && pinnedBig <= 1200,
+    "auto-cal pins: the next morning recomputes the remainder from the pins and pins that day's share");
+  // (b) In progress: a far-future hand pin doesn't suppress the current block; no ratchet
+  const farHand = planPerson(baseInput({ pins: [{ itemKey: "task:IP", startMs: at(FRI, 13), endMs: at(FRI, 14), kind: "hand" }], items: [item("IP", { inProgress: true, size: "l", sizeMin: 120 })] }));
+  ok(farHand.newPins.some((x) => x.itemKey === "task:IP" && x.startMs === at(MON, 8) && x.endMs === at(MON, 9)),
+    "auto-cal pins: a far-future hand pin doesn't stop an In-progress item's current block from being pinned");
+  const splitIn = baseInput({ busy: [{ startMs: at(MON, 9), endMs: at(MON, 17) }], items: [item("IP2", { inProgress: true, size: "l", sizeMin: 240 })] });
+  const split1 = planPerson(splitIn);
+  const split2 = planPerson({ ...splitIn, nowMs: at(MON, 7, 15), pins: split1.newPins });
+  ok(split1.newPins.length === 1 && split1.newPins[0].startMs === at(MON, 8) && split2.newPins.length === 0 && blocksOf(split2, "task:IP2").some((b) => !b.pinned),
+    "auto-cal pins: In progress pins only the current block — the next compute leaves the rest movable");
+  const covering = planPerson(baseInput({ nowMs: at(MON, 8, 30), pins: [{ itemKey: "task:IP3", startMs: at(MON, 8), endMs: at(MON, 9), kind: "started" }], items: [item("IP3", { inProgress: true, size: "l", sizeMin: 120 })] }));
+  ok(covering.newPins.length === 0, "auto-cal pins: an In-progress item whose pin covers now gets no second pin");
+  // (c) futurePins includes this compute's new pins that haven't begun
+  ok(longRem.futurePins.some((x) => x.itemKey === "task:BIG" && x.startMs === at(NEXT_MON, 8)) && !longRem.futurePins.some((x) => x.startMs <= at(NEXT_MON, 7, 30)),
+    "auto-cal pins: a pin made by this compute that hasn't begun is offered to Unpin");
+  // (d) one key format
+  const planSrc = readFileSync("src/lib/task-plan/plan.ts", "utf8");
+  ok(!/\$\{[^}]*\}@\$\{/.test(planSrc) && /pinBlobKey\(/.test(planSrc), "auto-cal pins: plan.ts builds block/pin keys only through pinBlobKey");
+
+  // (e) save-and-recompute loop: compute every 15 min Sat → Wed, persist newPins, drop staleKeys
+  {
+    const SAT0 = SAT; // 2036-10-18
+    const THU = "2036-10-23";
+    const loopItems: PlanItem[] = [
+      item("L1", { size: "l", sizeMin: 240, dueMs: at("2036-10-21", 17) }),
+      item("BIG", { size: "l", sizeMin: 1200, dueMs: at("2036-10-31", 17) }),
+      item("IP", { inProgress: true, size: "l", sizeMin: 120 }),
+      item("H", { sizeMin: 60, dueMs: at("2036-10-22", 17) }),
+      item("DONE", { sizeMin: 60, tier: "high", dueMs: at("2036-10-21", 17) }),
+      item("N1", { size: "s", sizeMin: 30, tier: "high", dueMs: at("2036-10-20", 17) }),
+      item("N2", { sizeMin: 90, tier: "low", dueMs: at("2036-10-24", 17) }),
+      item("N3", { size: "l", sizeMin: 240, dueMs: at("2036-10-22", 17), createdAt: 5 }),
+      item("N4", { sizeMin: 45, dueMs: at("2036-10-19", 17), createdAt: 6 }),
+    ];
+    const loopBusy: BusyInterval[] = [
+      { startMs: at("2036-10-20", 10), endMs: at("2036-10-20", 11, 30) },
+      { startMs: at("2036-10-21", 13), endMs: at("2036-10-21", 15) },
+      { startMs: at("2036-10-22", 8), endMs: at("2036-10-22", 9) },
+    ];
+    const store = new Map<string, PlanPin>();
+    for (const x of [
+      { itemKey: "task:L1", startMs: at(FRI, 8), endMs: at(FRI, 10), kind: "started" },
+      { itemKey: "task:BIG", startMs: at(FRI, 13), endMs: at(FRI, 14), kind: "started" },
+      { itemKey: "task:H", startMs: at("2036-10-21", 14), endMs: at("2036-10-21", 15), kind: "hand" },
+      { itemKey: "task:DONE", startMs: at("2036-10-22", 15), endMs: at("2036-10-22", 16), kind: "hand" },
+    ] as PlanPin[]) store.set(pinBlobKey(x), x);
+    const sizeOf = new Map(loopItems.map((i) => [i.key, i.sizeMin] as const));
+    const total = (k: string) => [...store.values()].filter((x) => x.itemKey === k).reduce((s, x) => s + (x.endMs - x.startMs) / MIN, 0);
+    let dupFree = true, overlapFree = true, bounded = true, staleDropped = true, computes = 0;
+    let curDay = "";
+    const dayStart = new Map<string, number>();
+    for (let t = at(SAT0, 0); t < chicagoDayStart(THU); t += QUARTER_MS) {
+      const doneNow = t >= at("2036-10-21", 12);
+      const its = doneNow ? loopItems.filter((i) => i.id !== "DONE") : loopItems;
+      const day = chicagoDayKey(t);
+      if (day !== curDay) {
+        curDay = day;
+        for (const i of its) dayStart.set(i.key, total(i.key));
+      }
+      const r = planPerson(baseInput({ nowMs: t, busy: loopBusy, pins: [...store.values()], items: its }));
+      computes++;
+      const fresh = r.newPins.map(pinBlobKey);
+      if (new Set(fresh).size !== fresh.length || fresh.some((k) => store.has(k))) dupFree = false;
+      for (const x of r.newPins) store.set(pinBlobKey(x), x);
+      for (const k of r.staleKeys) store.delete(k);
+      if (doneNow && [...store.values()].some((x) => x.itemKey === "task:DONE")) staleDropped = false;
+      const sorted = [...store.values()].sort((a, b) => a.startMs - b.startMs);
+      if (!sorted.every((x, i) => i === 0 || sorted[i - 1].endMs <= x.startMs)) overlapFree = false;
+      for (const i of its) if (total(i.key) > Math.max((dayStart.get(i.key) ?? 0) + 30, (sizeOf.get(i.key) ?? 0) + 29)) bounded = false;
+    }
+    ok(computes === 5 * 96 && dupFree && store.size > 10, `auto-cal pins (save loop, ${computes} computes Sat → Wed): no compute re-adds a stored pin key or repeats one`);
+    ok(overlapFree, "auto-cal pins (save loop): stored pins never overlap");
+    ok(bounded, "auto-cal pins (save loop): an item's pinned minutes never pass its size (+ under one grid piece), except the one +30 per day for still-open work");
+    ok(staleDropped, "auto-cal pins (save loop): a done item's pins are dropped by the next compute");
+    ok(total("task:L1") >= 240 && total("task:N4") >= 45 && total("task:IP") >= 120, "auto-cal pins (save loop): by Wednesday night the week's work has all been pinned as it began");
+  }
+
   /* the planner stays client-safe; the harness's source helpers work (later tasks lean on them) */
-  const pure = ["pins.ts", "plan.ts", "free.ts", "labels.ts"].map((f) => readFileSync(`src/lib/task-plan/${f}`, "utf8")).join("\n").replace(/import type[^;]+;/g, "");
-  ok(!/from "@\/(db|lib\/stores\/|lib\/users")/.test(pure), "auto-cal pins: the pin rules and planner never import the database");
+  const pure = ["pins.ts", "plan.ts", "free.ts", "labels.ts", "due.ts", "urgency.ts", "types.ts"].map((f) => readFileSync(`src/lib/task-plan/${f}`, "utf8")).join("\n").replace(/import type[^;]+;/g, "");
+  ok(!/from "@\/(db|lib\/stores\/|lib\/users")/.test(pure), "auto-cal pins: the pin rules, planner, due, urgency and types never import the database");
   const demo = "export async function a() {\n  const s = await requireUser();\n}\nexport async function b() {\n  await other();\n  await requireUser();\n}\n";
   ok(firstAwait(fnBody(demo, "a"), "requireUser()") && !firstAwait(fnBody(demo, "b"), "requireUser()") && fnBody(demo, "c") === "",
     "auto-cal harness: fnBody/firstAwait find a function's first await");
+}
+
+/* ---- Task 6: pin store ---- */
+export async function autoCalPinStoreChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const U = "TESTautocal:pins-u1";
+  const U2 = "TESTautocal:pins-u2";
+  const t0 = floorQuarter(Date.now() + 86_400_000);
+  const pin = (itemKey: string, h: number, kind: PinKind = "hand"): PlanPin => ({ itemKey, startMs: t0 + h * 3_600_000, endMs: t0 + (h + 1) * 3_600_000, kind });
+  try {
+    await Promise.all([addPins(U, [pin("task:A", 0)]), addPins(U, [pin("task:B", 2)])]);
+    ok((await getPins(U)).length === 2, "auto-cal pin store: two pins added at once are both kept (one blob key each)");
+    await removePinKeys(U, [pinBlobKey(pin("task:A", 0))]);
+    ok((await getPins(U)).map((p) => p.itemKey).join() === "task:B", "auto-cal pin store: removing one pin leaves the rest");
+    ok((await clearItemPins(U, "task:B")) === 1 && (await getPins(U)).length === 0, "auto-cal pin store: clearing an item removes its pins");
+
+    const me = { id: U, name: "Auto Cal" };
+    const T = fixtureId("autocal", "pins-done");
+    const T2 = fixtureId("autocal", "pins-keep");
+    const T3 = fixtureId("autocal", "pins-handoff");
+    const T4 = fixtureId("autocal", "pins-delete");
+    for (const id of [T, T2, T3, T4]) {
+      await createTask({ id, title: id, assigneeUserId: U, assigneeName: "Auto Cal" }, me);
+      registerFixture("tasks", id);
+    }
+    await addPins(U, [pin(planItemKey("task", T), 0), pin(planItemKey("task", T2), 1), pin(planItemKey("task", T3), 2), pin(planItemKey("task", T4), 3)]);
+    const has = async (uid: string, id: string) => (await getPins(uid)).some((x) => x.itemKey === planItemKey("task", id));
+    await setTaskStatus(T, "done");
+    ok(!(await has(U, T)) && (await has(U, T2)), "auto-cal pin store: Done clears that task's pins, nobody else's");
+    await updateTask(T3, { assigneeUserId: U2, assigneeName: "Other" });
+    ok(!(await has(U, T3)), "auto-cal pin store: handing a task off clears its pins from the old calendar");
+    await removeTask(T4);
+    ok(!(await has(U, T4)), "auto-cal pin store: deleting a task clears its pins");
+    await setTaskStatus(T2, "in_progress");
+    ok(await has(U, T2), "auto-cal pin store: In progress keeps its pins");
+    await updateTask(T2, { title: "renamed", priority: "high" });
+    ok((await has(U, T2)) && (await getTask(T2))?.priority === "high", "auto-cal pin store: an edit that keeps the assignee keeps its pins (and still writes the tier)");
+
+    const roster = await activeUsers();
+    if (roster.length) {
+      const who = roster[0];
+      const a = await createAssignment({ title: "pins asg", assignee: who.name, createdBy: "Auto Cal" });
+      registerFixture("assignments", a.id);
+      const k = planItemKey("assignment", a.id);
+      await addPins(who.id, [pin(k, 4)]);
+      await setAssignmentDone(a.id, true, "app");
+      ok(!(await getPins(who.id)).some((x) => x.itemKey === k), "auto-cal pin store: a completed assignment's pins are cleared (also when Google Tasks completes it)");
+      await removePinKeys(who.id, [pinBlobKey(pin(k, 4))]);
+    }
+
+    /* (g) PIN_MAX_PER_PERSON: prune only past pins the plan no longer depends on */
+    const nowCap = at(WED, 7, 30);
+    const capItems = [item("KEEP", { sizeMin: 60 }), item("NEED", { size: "l", sizeMin: 600, dueMs: at("2036-10-31", 17) })];
+    const cp = (k: string, day: string, h: number, m = 0, kind: PinKind = "started"): PlanPin => ({ itemKey: `task:${k}`, startMs: at(day, h, m), endMs: at(day, h, m + 30), kind });
+    const capPins: PlanPin[] = [
+      cp("GONE", MON, 8), cp("GONE", MON, 9),
+      cp("KEEP", MON, 10), cp("KEEP", MON, 11), cp("KEEP", MON, 13, 0, "hand"), cp("KEEP", TUE, 8),
+      cp("NEED", MON, 14), cp("NEED", TUE, 9),
+      cp("KEEP", "2036-10-16", 9, 0, "hand"),
+    ];
+    const keysOf = (ps: PlanPin[]) => ps.map(pinBlobKey).join();
+    ok(pinsToPrune({ pins: capPins, items: capItems, nowMs: nowCap, max: 9 }).length === 0, "auto-cal pin cap: at or under the cap nothing is pruned");
+    const p5 = pinsToPrune({ pins: capPins, items: capItems, nowMs: nowCap, max: 5 });
+    ok(p5.join() === keysOf([cp("GONE", MON, 8), cp("GONE", MON, 9), cp("KEEP", MON, 10), cp("KEEP", MON, 11)]),
+      "auto-cal pin cap: over the cap, past pins of finished items go first, then the oldest past pins of an item already pinned past its size");
+    const p3 = pinsToPrune({ pins: capPins, items: capItems, nowMs: nowCap, max: 3 });
+    ok(p3.join() === keysOf([cp("GONE", MON, 8), cp("GONE", MON, 9), cp("KEEP", MON, 10), cp("KEEP", MON, 11), cp("KEEP", MON, 13, 0, "hand")]),
+      "auto-cal pin cap: never a future pin, never one an item's remaining time still depends on — still over the cap, the rest is kept");
+    const strip = (r: PlanResult) => JSON.stringify({ ...r, staleKeys: [], blocks: r.blocks.filter((b) => b.endMs > r.nowMs), finishMs: Object.entries(r.finishMs).sort() });
+    const pruned = new Set(p3);
+    const kept = capPins.filter((x) => !pruned.has(pinBlobKey(x)));
+    ok([nowCap, at(FRI, 7), at("2036-10-20", 7)].every((n) => strip(planPerson(baseInput({ nowMs: n, pins: capPins, items: capItems }))) === strip(planPerson(baseInput({ nowMs: n, pins: kept, items: capItems })))),
+      "auto-cal pin cap: pruning leaves the plan from now on exactly as it was");
+
+    const U3 = "TESTautocal:pins-cap";
+    const U4 = "TESTautocal:pins-cap-keep";
+    const nowMs = Date.now();
+    const hourAgo = floorQuarter(nowMs) - 3_600_000;
+    const past = (k: string, i: number): PlanPin => ({ itemKey: k, startMs: hourAgo - i * 3_600_000, endMs: hourAgo - i * 3_600_000 + 1_800_000, kind: "started" });
+    const futureX: PlanPin = { itemKey: "task:X", startMs: t0, endMs: t0 + 1_800_000, kind: "hand" };
+    const many = [...Array.from({ length: PIN_MAX_PER_PERSON + 3 }, (_, i) => past("task:X", i)), past("task:GONE", 600), past("task:GONE", 601), futureX];
+    await addPins(U3, many, { items: [item("X", { sizeMin: 60 })], nowMs });
+    const after = await getPins(U3);
+    ok(after.length === PIN_MAX_PER_PERSON && !after.some((x) => x.itemKey === "task:GONE") && after.some((x) => pinBlobKey(x) === pinBlobKey(futureX)) &&
+      !after.some((x) => pinBlobKey(x) === pinBlobKey(past("task:X", PIN_MAX_PER_PERSON + 2))) && after.some((x) => pinBlobKey(x) === pinBlobKey(past("task:X", 0))),
+      `auto-cal pin store: over ${PIN_MAX_PER_PERSON} pins, the store prunes the oldest past pins the plan no longer needs and keeps future ones`);
+    const needy = Array.from({ length: PIN_MAX_PER_PERSON + 1 }, (_, i) => past("task:Y", i));
+    await addPins(U4, needy, { items: [item("Y", { sizeMin: 100_000 })], nowMs });
+    await addPins(U4, [{ itemKey: "task:Y", startMs: t0, endMs: t0 + 1_800_000, kind: "hand" }]);
+    ok((await getPins(U4)).length === PIN_MAX_PER_PERSON + 2, "auto-cal pin store: pins the plan still depends on are never pruned, even over the cap");
+  } finally {
+    await db.delete(blobs).where(like(blobs.id, "task_pins:TESTautocal:%"));
+  }
 }

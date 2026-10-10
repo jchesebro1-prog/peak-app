@@ -13,7 +13,7 @@
 import { deadlineOf, effectiveDue } from "./due";
 import { ceilQuarter, chunkFor, floorQuarter, freeDays, type FreeDay } from "./free";
 import { atRiskLabel } from "./labels";
-import { newPinsFrom, stalePinKeys, unfinishedRemainders } from "./pins";
+import { newPinsFrom, pinBlobKey, stalePinKeys, unfinishedRemainders } from "./pins";
 import { sortByUrgency } from "./urgency";
 import {
   FILL_RATIO,
@@ -53,7 +53,7 @@ function dated(item: PlanItem): PlanItem {
 
 export function blockOf(item: PlanItem, s: BusyInterval, pinned: PinKind | null): PlanBlock {
   return {
-    key: `${item.key}@${s.startMs}`,
+    key: pinBlobKey({ itemKey: item.key, startMs: s.startMs }),
     itemKey: item.key,
     kind: item.kind,
     id: item.id,
@@ -152,7 +152,7 @@ export function planPerson(input: PlanInput): PlanResult {
   for (const b of blocks) b.atRisk = risky.has(b.itemKey);
 
   const newPins = newPinsFrom({ blocks, items: ordered, pins, nowMs: now, remainderKeys });
-  const fresh = new Set(newPins.map((p) => `${p.itemKey}@${p.startMs}`));
+  const fresh = new Set(newPins.map(pinBlobKey));
   for (const b of blocks) if (!b.pinned && fresh.has(b.key)) b.pinned = "started";
 
   return {
@@ -162,7 +162,10 @@ export function planPerson(input: PlanInput): PlanResult {
     atRisk,
     newPins,
     staleKeys: stalePinKeys(input.pins, new Set(byKey.keys())),
-    futurePins: pins.filter((p) => p.startMs > now),
+    // pins that haven't begun, this compute's new ones included (what Unpin can offer)
+    futurePins: [...pins, ...newPins]
+      .filter((p) => p.startMs > now)
+      .sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0)),
     finishMs,
   };
 }
