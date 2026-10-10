@@ -6,8 +6,8 @@ import { getStayOvers } from "@/lib/stores/schedule-prefs";
 import { googleConfigured } from "@/lib/gmail/config";
 import { activeUsers } from "@/lib/users";
 import { can, deriveInitials } from "@/lib/team";
-import { loadTaskPlans, savePlanPins, type PersonPlan } from "@/lib/task-plan/load";
-import { calendarPlanView, PLAN_FAILED_NOTE } from "@/lib/task-plan/calendar-view";
+import { loadTaskPlans, savePlanPins } from "@/lib/task-plan/load";
+import { composeCalendarPlan } from "@/lib/task-plan/calendar-view";
 import CalendarClient from "./calendar-client";
 import HomeTabs from "../home-tabs";
 
@@ -107,16 +107,15 @@ export default async function CalendarPage({
     }),
   ]);
 
-  // New "started" pins are saved after the response, never on the render path.
-  const planPlans: PersonPlan[] = plans ?? [];
-  if (plans) after(() => savePlanPins(plans).catch((err) => console.error("[task-plan] pin save failed:", err)));
-  const planView = calendarPlanView(planPlans, {
+  // New "started" pins are saved after the response, never on the render path
+  // (and not at all when the plan failed to load).
+  const { view: plan, toSave } = composeCalendarPlan(plans, {
     minMs,
     maxMs,
     initials: (id, name) => roster.find((u) => u.id === id)?.initials || deriveInitials(name),
     viewer: { id: user.id, admin: can("manage_users", user.roles) },
   });
-  const plan = plans ? planView : { ...planView, notes: [...planView.notes, PLAN_FAILED_NOTE] };
+  if (toSave.length) after(() => savePlanPins(toSave).catch((err) => console.error("[task-plan] pin save failed:", err)));
 
   return (
     <HomeTabs active="calendar" maxWidth={1120} style={{ padding: "24px 30px 64px" }}>

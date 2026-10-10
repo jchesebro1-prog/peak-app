@@ -177,14 +177,17 @@ const defaultStore: PinStore = {
 };
 
 /** Persist what a compute decided: new started pins (with the cap given the
- *  plan's own items), and stale keys dropped. Adds merge atomically and
+ *  plan's own items; none when that person's calendar wasn't read), and stale keys dropped. Adds merge atomically and
  *  removals are by key, so two tabs computing at once are safe. Never throws. */
 export async function savePlanPins(plans: readonly PersonPlan[], store: PinStore = defaultStore): Promise<void> {
   for (const p of plans) {
     // Separate tries: a failed add never skips the stale removal, nor the reverse.
-    if (p.result.newPins.length) {
+    // A plan that never saw the person's meetings (Google failed, timed out or isn't connected)
+    // would freeze its guesses as "started" pins, so those aren't saved — the next view re-plans them.
+    const fresh = p.calendar === "ok" ? p.result.newPins : p.result.newPins.filter((x) => x.kind !== "started");
+    if (fresh.length) {
       try {
-        await store.add(p.userId, p.result.newPins, p.items ? { items: p.items, nowMs: p.result.nowMs } : undefined);
+        await store.add(p.userId, fresh, p.items ? { items: p.items, nowMs: p.result.nowMs } : undefined);
       } catch (err) {
         console.error("[task-plan] pin save failed:", p.userId, err);
       }

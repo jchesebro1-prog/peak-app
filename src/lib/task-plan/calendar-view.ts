@@ -6,7 +6,7 @@
  */
 import { dayKeyDiff, localDayKey, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import { chicagoDayKey } from "@/lib/drive-plan/day";
-import { finishText } from "./labels";
+import { collapsedGoogleNote, finishText, isGoogleNote } from "./labels";
 import { parsePlanItemKey, planItemKey, type PinKind, type PlanItemKind, type PlanResult, type TaskSize, type TaskTier } from "./types";
 
 export type PlanForView = { userId: string; name: string; note: string | null; result: PlanResult };
@@ -45,7 +45,18 @@ export type CalendarAtRisk = {
   finishText: string;
 };
 
-export type CalendarFuturePin = { userId: string; itemKey: string; kind: PlanItemKind; id: string; title: string; startMs: number; endMs: number; pinKind: PinKind };
+export type CalendarFuturePin = {
+  userId: string;
+  itemKey: string;
+  kind: PlanItemKind;
+  id: string;
+  title: string;
+  startMs: number;
+  endMs: number;
+  pinKind: PinKind;
+  /** A hand pin that hasn't begun, for the plan's owner or an admin (what the server accepts). */
+  canUnpin: boolean;
+};
 
 export type CalendarPlanView = { blocks: CalendarPlanBlock[]; atRisk: CalendarAtRisk[]; futurePins: CalendarFuturePin[]; notes: string[]; plannedKeys: string[] };
 
@@ -61,13 +72,20 @@ export const PLAN_FAILED_NOTE = "Couldn't load the task plan right now — tasks
  */
 export function calendarPlanView(
   plans: readonly PlanForView[],
-  opts: { minMs: number; maxMs: number; initials: (userId: string, name: string) => string; viewer?: { id: string; admin: boolean } }
+  opts: ViewOpts
 ): CalendarPlanView {
   const view: CalendarPlanView = { blocks: [], atRisk: [], futurePins: [], notes: [], plannedKeys: [] };
   const planned = new Set<string>();
+  const googleNotes = new Map<string, string[]>(); // note → people it names
   for (const p of plans) {
     const now = p.result.nowMs;
-    if (p.note && !view.notes.includes(p.note)) view.notes.push(p.note);
+    if (p.note) {
+      if (isGoogleNote(p.note, p.name)) {
+        const who = googleNotes.get(p.note) ?? [];
+        if (!who.includes(p.name)) who.push(p.name);
+        googleNotes.set(p.note, who);
+      } else if (!view.notes.includes(p.note)) view.notes.push(p.note);
+    }
     const mayPin = !opts.viewer || opts.viewer.admin || opts.viewer.id === p.userId;
     const riskLabel = new Map(p.result.atRisk.map((a) => [a.itemKey, a.label] as const));
     const titleOf = new Map(p.result.blocks.map((b) => [b.itemKey, b.title] as const));
@@ -92,13 +110,26 @@ export function calendarPlanView(
     }
     for (const f of p.result.futurePins) {
       const ref = parsePlanItemKey(f.itemKey);
-      if (ref) view.futurePins.push({ userId: p.userId, itemKey: f.itemKey, kind: ref.kind, id: ref.id, title: titleOf.get(f.itemKey) ?? ref.id, startMs: f.startMs, endMs: f.endMs, pinKind: f.kind });
+      if (ref) view.futurePins.push({ userId: p.userId, itemKey: f.itemKey, kind: ref.kind, id: ref.id, title: titleOf.get(f.itemKey) ?? ref.id, startMs: f.startMs, endMs: f.endMs, pinKind: f.kind, canUnpin: mayPin && f.kind === "hand" && f.startMs > now });
     }
   }
+  // One Google note stays verbatim; several (Everyone) collapse to a single line naming the people.
+  if (googleNotes.size === 1) view.notes.push([...googleNotes.keys()][0]);
+  else if (googleNotes.size > 1) view.notes.push(collapsedGoogleNote([...new Set([...googleNotes.values()].flat())]));
   view.blocks.sort((a, b) => a.startMs - b.startMs || (a.key < b.key ? -1 : 1));
   view.futurePins.sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : 1));
   view.plannedKeys = [...planned].sort();
   return view;
+}
+
+type ViewOpts = { minMs: number; maxMs: number; initials: (userId: string, name: string) => string; viewer?: { id: string; admin: boolean } };
+
+/** What /calendar draws and saves for a plan load: `null` (the loader rejected)
+ *  draws nothing planned — every task keeps its old due-day chip — shows the
+ *  failure note, and has nothing to save. */
+export function composeCalendarPlan<P extends PlanForView>(plans: readonly P[] | null, opts: ViewOpts): { view: CalendarPlanView; toSave: readonly P[] } {
+  if (!plans) return { view: { ...calendarPlanView([], opts), notes: [PLAN_FAILED_NOTE] }, toSave: [] };
+  return { view: calendarPlanView(plans, opts), toSave: plans };
 }
 
 /** Month view: one chip per (item, day it is planned on); items with no
@@ -171,4 +202,21 @@ export function dragStartMs(args: { startMs: number; dyPx: number; dxPx: number;
   const d = new Date(args.startMs);
   d.setDate(d.getDate() + days);
   return d.getTime() + minutes * 60_000;
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+/** `datetime-local` value for a moment, in the browser's local time. */
+export function msToLocalInput(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** A `datetime-local` value as local epoch-ms, in 15-minute steps; null when blank or not a real time. */
+export function localInputToMs(v: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(v);
+  if (!m) return null;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number);
+  const t = new Date(y, mo - 1, d, h, Math.round(mi / 15) * 15);
+  const real = new Date(y, mo - 1, d, h, mi);
+  return real.getFullYear() === y && real.getMonth() === mo - 1 && real.getDate() === d && real.getHours() === h ? t.getTime() : null;
 }

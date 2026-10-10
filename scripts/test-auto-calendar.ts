@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import type { CalendarEvent } from "@/lib/google/calendar";
 import type { DriveLeg } from "@/lib/drive-plan/plan";
+import type { CalendarRead } from "@/lib/visit-plan/check";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import { TRIAGE_HOOKS } from "@/lib/triage/hooks";
 import { planItemsByPerson } from "@/lib/task-plan/items";
@@ -39,7 +40,7 @@ import {
 } from "@/lib/task-plan/due";
 import { overrunsEnd } from "@/lib/consulting-schedule";
 import { localDayKey, type CalendarTaskItem } from "@/lib/calendar-tasks";
-import { calendarPlanView, dragStartMs, layoutIntervals, monthChips, PLAN_FAILED_NOTE, stripTasks } from "@/lib/task-plan/calendar-view";
+import { calendarPlanView, composeCalendarPlan, dragStartMs, layoutIntervals, localInputToMs, monthChips, msToLocalInput, PLAN_FAILED_NOTE, stripTasks } from "@/lib/task-plan/calendar-view";
 import { runDueBackfill, setAssignmentDue, setTaskDue } from "@/lib/task-plan/backfill";
 import { readTierSize } from "@/lib/task-plan/fields";
 import {
@@ -927,6 +928,18 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
     { add: async (u, ps) => { added.push(`${u}:${ps.length}`); }, remove: async (u, ks) => { removed.push(`${u}:${ks.join()}`); } }
   );
   ok(added.join() === "u9:1" && removed.join() === "u9:task:B@5", "auto-cal loader: computing a plan persists its new started pins and drops stale ones");
+  // A plan built without the person's meetings must not freeze its guesses as "started" pins.
+  const addedBlind: string[] = [];
+  const removedBlind: string[] = [];
+  const blindPlan = (calendar: CalendarRead, newPins: PlanPin[]) => ({ userId: "u9", name: "X", calendar, note: null, result: { ...plan.result, newPins, staleKeys: ["task:B@5"] } });
+  const startedPin: PlanPin = { itemKey: "task:A", startMs: 1, endMs: 2, kind: "started" };
+  for (const c of ["failed", "no-calendar"] as const) {
+    await savePlanPins([blindPlan(c, [startedPin])], { add: async (u, ps) => { addedBlind.push(`${c}:${u}:${ps.length}`); }, remove: async (u, ks) => { removedBlind.push(`${c}:${ks.join()}`); } });
+  }
+  ok(addedBlind.length === 0 && removedBlind.length === 2, "auto-cal loader: when the person's Google calendar wasn't read, new started pins are not saved (stale removal still runs)");
+  const handPin: PlanPin = { itemKey: "task:H", startMs: 3, endMs: 4, kind: "hand" };
+  await savePlanPins([blindPlan("failed", [startedPin, handPin])], { add: async (u, ps) => { addedBlind.push(ps.map((x) => x.kind).join()); }, remove: async () => {} });
+  ok(addedBlind.join() === "hand", "auto-cal loader: a hand pin is unaffected by a failed calendar read");
 
   const noStore = { add: async () => {}, remove: async () => {} };
   const risky = Array.from({ length: 3 }, (_, i) => tk("R" + i, { size: "l", dueAt: at(MON, 17), createdAt: i }));
@@ -1189,11 +1202,59 @@ export async function autoCalCalendarViewChecks(ok: Ok): Promise<void> {
   ok(asOwner.blocks.find((b) => b.itemKey === "task:P")?.canUnpin === true && asAdmin.blocks.find((b) => b.itemKey === "task:P")?.draggable === true, "auto-cal view: the owner and an admin keep the controls");
   const noteView = calendarPlanView([{ userId: "u1", name: "Dana", note: GOOGLE_NOTE_ME, result: r }, { userId: "u2", name: "Sam", note: GOOGLE_NOTE_ME, result: r }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "X" });
   ok(noteView.notes.length === 1 && noteView.notes[0] === "Planned without your Google calendar — may overlap meetings", "auto-cal view: the Google note shows once, verbatim");
+  const note = (n: string, name: string, id: string) => ({ userId: id, name, note: n, result: r });
+  const opts = { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "X" };
+  const other = (n: string) => `Planned without ${n}'s Google calendar — may overlap meetings`;
+  ok(calendarPlanView([note(other("Dana"), "Dana", "u1")], opts).notes.join() === "Planned without Dana's Google calendar — may overlap meetings",
+    "auto-cal view: one other person's Google note stays as it is");
+  ok(calendarPlanView([note(other("Dana"), "Dana", "u1"), note(other("Sam"), "Sam", "u2"), note(other("Lee"), "Lee", "u3")], opts).notes.join() === "Planned without Google calendars for Dana, Sam, Lee — may overlap meetings",
+    "auto-cal view: Everyone collapses several Google notes into one line naming them");
+  const mixed = calendarPlanView([note(GOOGLE_NOTE_ME, "Me", "u0"), note(other("Sam"), "Sam", "u2"), note("Something else", "Lee", "u3"), note("Something else", "Kim", "u4")], opts);
+  ok(mixed.notes.length === 2 && mixed.notes.includes("Planned without Google calendars for Me, Sam — may overlap meetings") && mixed.notes.includes("Something else"),
+    "auto-cal view: the collapse covers the viewer's own note too; other notes still show once");
+  // The failed-load composition (note + fallback chips + skip the save) is one pure helper.
+  const okPlans = [{ userId: "u1", name: "Dana", note: null, result: r }];
+  const good = composeCalendarPlan(okPlans, opts);
+  ok(good.toSave === okPlans && good.view.blocks.length > 0 && !good.view.notes.includes(PLAN_FAILED_NOTE), "auto-cal view: a loaded plan is drawn and its pins are saved");
+  const failed = composeCalendarPlan(null, opts);
+  ok(failed.toSave.length === 0 && failed.view.blocks.length === 0 && failed.view.plannedKeys.length === 0 && failed.view.atRisk.length === 0 && failed.view.notes.join() === PLAN_FAILED_NOTE,
+    "auto-cal view: a failed plan load draws nothing planned (old due-day chips stay), shows the note and saves nothing");
+  const failedChips = monthChips(tasks, failed.view, { ...range, rangeEnd: localDayKey(at(FRI, 23)) });
+  ok(failedChips.some((c) => c.item.id === "A" && c.dayKey === localDayKey(at(FRI, 17))) && failedChips.some((c) => c.item.id === "BLK") && stripTasks(tasks, failed.view).length === tasks.length, "auto-cal view: with no plan every task keeps its due-day chip");
+  ok(/composeCalendarPlan\(/.test(page) && !/PLAN_FAILED_NOTE/.test(page), "auto-cal view: the page uses the pure helper for the failed-load note");
+  // Keyboard "Move to…" input <-> ms (local time, 15-minute steps).
+  const mv = new Date(2036, 9, 14, 10, 0).getTime();
+  ok(msToLocalInput(mv) === "2036-10-14T10:00" && localInputToMs("2036-10-14T10:00") === mv && localInputToMs("2036-10-14T10:07") === mv && localInputToMs("2036-10-14T10:08") === mv + 15 * MIN,
+    "auto-cal view: Move to… reads and writes local time in 15-minute steps");
+  ok(localInputToMs("") === null && localInputToMs("2036-02-31T10:00") === null && localInputToMs("nope") === null, "auto-cal view: Move to… refuses a blank or impossible time");
   ok(dragStartMs({ startMs: at(MON, 9), dyPx: 24, dxPx: 0, hourPx: 48, colPx: 100, dayCount: 7 }) === at(MON, 9, 30)
     && dragStartMs({ startMs: at(MON, 9), dyPx: 0, dxPx: 210, hourPx: 48, colPx: 100, dayCount: 7 }) === at(MON, 9) + 2 * 86_400_000
     && dragStartMs({ startMs: at(MON, 9), dyPx: 0, dxPx: 210, hourPx: 48, colPx: 100, dayCount: 1 }) === at(MON, 9),
     "auto-cal view: a drag snaps to 15 minutes and whole days (Week only)");
-  ok(/PLAN_FAILED_NOTE/.test(page) && PLAN_FAILED_NOTE.length > 0 && /Couldn.t load the task plan/.test(PLAN_FAILED_NOTE), "auto-cal view: a failed plan load shows a clear message and the page still renders");
+  ok(/Couldn.t load the task plan/.test(PLAN_FAILED_NOTE) && /\.catch\(\(err\) => \{\s*console\.error\("\[task-plan\] calendar plan failed:", err\);\s*return null;/.test(page), "auto-cal view: a failed plan load shows a clear message and the page still renders");
   ok(/viewer:/.test(page) && /can\("manage_users"/.test(page), "auto-cal view: the page tells the view who is looking (owner or admin only)");
   ok(/disabled=\{pending\}/.test(readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8")), "auto-cal view: the popover disables its actions while one is pending");
+}
+
+/* ---- Task 10: drag + At risk panel ---- */
+export async function autoCalDragPanelChecks(ok: Ok): Promise<void> {
+  const s = new Date(2036, 9, 14, 10, 0).getTime();
+  ok(dragStartMs({ startMs: s, dyPx: 72, dxPx: 0, hourPx: 48, colPx: 100, dayCount: 7 }) === new Date(2036, 9, 14, 11, 30).getTime(), "auto-cal drag: dragging down 1.5 hours moves the block 1.5 hours");
+  ok(dragStartMs({ startMs: s, dyPx: 13, dxPx: 0, hourPx: 48, colPx: 100, dayCount: 7 }) === new Date(2036, 9, 14, 10, 15).getTime(), "auto-cal drag: drops snap to 15 minutes");
+  ok(dragStartMs({ startMs: s, dyPx: 0, dxPx: 160, hourPx: 48, colPx: 100, dayCount: 7 }) === new Date(2036, 9, 16, 10, 0).getTime() &&
+     dragStartMs({ startMs: s, dyPx: 0, dxPx: 160, hourPx: 48, colPx: 100, dayCount: 1 }) === s,
+    "auto-cal drag: sideways moves whole days in Week view, never in Day view");
+  const layer = readFileSync("src/app/(app)/calendar/task-block-layer.tsx", "utf8");
+  ok(/onPointerDown/.test(layer) && /pinBlockAction\(/.test(layer) && /fromStartMs: b\.pinned \? b\.startMs : null/.test(layer), "auto-cal drag: dropping a block pins it (moving a pin replaces it)");
+  ok(/if \(!b\.draggable\)/.test(layer) && /disabled=\{busy\}/.test(layer) && /aria-label=/.test(layer), "auto-cal drag: only draggable blocks drag, drags are off while any action is pending, blocks are labelled");
+  ok(/if \(!r\.ok\) setError\(r\.error\);\s*\/\/[^\n]*\n\s*router\.refresh\(\)/.test(layer), "auto-cal drag: a refused or stale move (\"That block moved — refresh.\") shows the message and refreshes the view");
+  const panel = readFileSync("src/app/(app)/calendar/at-risk-panel.tsx", "utf8");
+  ok(["Push due date", "Hand off", "Unpin something"].every((t) => panel.includes(t)) && /pushDueDateAction\(/.test(panel) && /handOffAction\(/.test(panel) && /unpinBlockAction\(/.test(panel),
+    "auto-cal at risk: the panel's three one-click fixes");
+  const client = readFileSync("src/app/(app)/calendar/calendar-client.tsx", "utf8");
+  ok(client.includes("<AtRiskPanel") && !/void roster/.test(client), "auto-cal at risk: the panel shows on /calendar");
+  const pop = readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8");
+  ok(/\.focus\(/.test(pop) && /previouslyFocused|returnFocus/.test(pop) && /Move to/.test(pop), "auto-cal drag: the popover takes focus, gives it back on close, and offers a keyboard Move to…");
+  const noDb = (f: string) => !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/task-plan\/load"|lib\/task-plan\/write"|lib\/task-plan\/backfill")/m.test(readFileSync(f, "utf8"));
+  ok(["src/app/(app)/calendar/at-risk-panel.tsx", "src/app/(app)/calendar/task-block-layer.tsx", "src/app/(app)/calendar/task-block-popover.tsx"].every(noDb), "auto-cal drag: the new client files import pure modules only");
 }

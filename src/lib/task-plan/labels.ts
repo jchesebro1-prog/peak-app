@@ -26,6 +26,16 @@ export function calendarNote(status: CalendarRead, name: string, isMe: boolean):
   return isMe ? GOOGLE_NOTE_ME : `Planned without ${name}'s Google calendar — may overlap meetings`;
 }
 
+/** True when `note` is the Google-calendar note for `name` (their own, or "Planned without X's…"). */
+export function isGoogleNote(note: string, name: string): boolean {
+  return note === GOOGLE_NOTE_ME || note === calendarNote("failed", name, false);
+}
+
+/** Everyone view: one line in place of a note per person. */
+export function collapsedGoogleNote(names: readonly string[]): string {
+  return `Planned without Google calendars for ${names.join(", ")} — may overlap meetings`;
+}
+
 /** "8:00–9:00" (Chicago, the spec-2 clock style); a block ending at the next
  *  day's 00:00 reads "8:00–midnight", as spec 2 prints a 1440 end. */
 export function fmtBlockTime(startMs: number, endMs: number): string {

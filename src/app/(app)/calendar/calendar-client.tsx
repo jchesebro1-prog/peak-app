@@ -13,6 +13,7 @@ import AddressFlagBadge from "@/components/address-fix/address-flag";
 import ConflictBadge from "@/components/visit-booking/conflict-badge";
 import { groupPlacedByDay, localDayKey, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import TaskChip from "./task-chip";
+import AtRiskPanel from "./at-risk-panel";
 import TaskBlockLayer from "./task-block-layer";
 import TaskBlockPopover from "./task-block-popover";
 import { monthChips, stripTasks, type CalendarPlanBlock, type CalendarPlanView } from "@/lib/task-plan/calendar-view";
@@ -181,7 +182,9 @@ export default function CalendarClient({
   /** Active team (hand-off targets). */
   roster: { id: string; name: string }[];
 }) {
-  void roster; // used by the At risk panel (Task 10)
+  // One plan action at a time: a block drop and an At risk fix each switch the other off while pending.
+  const [dropBusy, setDropBusy] = useState(false);
+  const [fixBusy, setFixBusy] = useState(false);
   const router = useRouter();
   const [stayPending, startStay] = useTransition();
   // Optimistic stay-over state (until the refreshed prop catches up) + the
@@ -627,6 +630,8 @@ export default function CalendarClient({
                     dayCount={days.length}
                     showOwner={tasksEveryone}
                     onOpen={setOpenBlock}
+                    planBusy={fixBusy || dropBusy}
+                    onBusy={setDropBusy}
                   />
                   <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                     {positioned.map(({ it, col, cols }) => {
@@ -769,6 +774,7 @@ export default function CalendarClient({
           {n}
         </div>
       ))}
+      <AtRiskPanel items={plan.atRisk} futurePins={plan.futurePins} roster={roster} showOwner={tasksEveryone} busy={dropBusy} onBusy={setFixBusy} />
       {openBlock && <TaskBlockPopover block={openBlock} onClose={() => setOpenBlock(null)} />}
       <CalendarFilterRail
         open={railOpen}
