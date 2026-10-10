@@ -10369,3 +10369,51 @@ A call to-do matching open work (a task or assignment of mine) folds into the FI
 ## D711. Morning triage: access, storage and seams (#324, 2026-10-10)
 
 Admins (`manage_users`) can view a teammate's list at `/triage?user=<id>`, read-only; marks are always the signed-in user's own. Two new doc collections, `triage_snapshots` and `triage_marks` (migration 0036_triage), not syncable, wiped by the go-live reset (derived state), readable through `/api/sync/pull` like every collection. Specs 1–3 plug in through `TRIAGE_HOOKS` (`src/lib/triage/hooks.ts`: an at-risk provider and a visit-flag provider, both empty today) — one line each at their merge. Krisp #323 meetings plug in as a second `CallTodoSource` in `src/lib/triage/feeds/calls.ts`. `/recordings/[id]` accepts `?tab=` and `?seg=` so a call line opens at its transcript moment. A snapshot stores at most 150 rows (after ranking). No snapshot pruning yet (about 2 snapshots per person per day).
+
+## D712. Address verification: three states, venue columns, a JS backfill (#325, 2026-10-10)
+
+Every address is `verified`, `needs_check` or `unresolved`, and only `verified` gets drive time. Venues carry the stamp on four new `sites` columns (`geo_status`, `geo_source`, `geo_verified_by`, `geo_verified_at`; migration `0037_address_verification` — generated as 0036 and renumbered at merge because `0036_triage` landed first; hardened per D141). The rule is a **house number**, not `precisionOf`: a geocoded venue verifies only when both the asked street line and the hit's street carry a house number (`geocodedStatus`), and a usable point is a real number pair in range (`isValidPoint`; stored coordinates may be strings and read through `pointOf`). The one-time venue backfill is JS (`ensureVenueGeoStatus`, idempotent, chunked, run by the worklist and the daily drive cron) because SQL would drift from that rule; a NULL row reads through the same rule meanwhile. Any address edit resets the stamp (`geoStampForSave`): no usable coordinates → unresolved, caller-supplied coordinates → judged by the house-number rule; a zip-only edit doesn't move a venue.
+
+## D713. `geo_source = override`; a hand pin is never overwritten (#325, 2026-10-10)
+
+`geo_source` is `geocode` (the geocoder found it), `pin` (a person dropped it in the Fix dialog) or `override` (a person typed coordinates on a venue form or import, judged by the house-number rule). A pin keeps its coordinates even when a save sends different ones for the same address. The **kept-pin guard**: a Retry or pick that comes back weaker than verified never replaces a verified pin — on a venue (`locateVenue`) and in the place book (`fixPlace`, plus a `source <> 'pin'` guard on the write itself so a pin dropped while a Retry was in flight survives) — and the Fix dialog says "Kept your pin — the search found only a town-level match".
+
+## D714. Place book: exact keys, house-number gate, outages write nothing (#325, 2026-10-10)
+
+Every non-venue address (visit, lead, Google event location) lives in `place_book`, keyed by the exact normalized text (lowercase, punctuation stripped, whitespace collapsed) — no fuzzy or name matching. A free-text hit verifies only with a house number (there is no stated city to gate on); weaker results are stored as `needs_check`. A geocoder outage writes nothing (new `searchOrThrow`), so it is never stored as `unresolved`; a row with an empty answer is retried only by a Fix. A Fix is stored under the record's original text, so the next lookup of that text finds it.
+
+## D715. Base office for drive time (#325, 2026-10-10)
+
+A rep's day starts and ends at their "Based out of" office, else the company default office (`baseOffice`, as the Account picker already says). "No base set" shows only when no office has coordinates.
+
+## D716. Buffer and per-user state live in blobs (#325, 2026-10-10)
+
+Leg minutes = OSRM route minutes + the rep's buffer. The company default buffer is **15 min** (admin, Settings → Field → Drive time; a non-number is refused, a number is clamped to 0–120 and rounded); a rep may override it on Account. Per-user buffer, stay-over flags and sync state are blobs (`schedule_defaults`, `schedule_prefs:<id>`, `stay_over:<id>`, `drive_sync:<id>`) — no migration. The stay-over toggle ("Staying near last stop") accepts only days in the window **today − 1 … today + 14** (Chicago); a stored key outside it is refused.
+
+## D717. Stops (#325, 2026-10-10)
+
+Consecutive stops at the same point get no leg; a scheduled visit past its end (derived `done`) is still a stop on its day; a Google copy of a visit's own invite (.ics) is de-duplicated against the visit; all-day, self-declined, virtual (URL, video, phone-only) and Peak drive events are never stops. An unverified stop breaks the chain on both sides — its legs are flagged "Address not verified — no drive time", never estimated.
+
+## D718. Cache-mode views, live syncs, no straight line (#325, 2026-10-10)
+
+Page views (/calendar, Home) compute legs in cache mode (place book + `geo_cache` only, never a geocode or OSRM call); a missing route reads "Drive time unavailable — retrying" until a live sync routes it. Live syncs run in `after()`. Route minutes come only from `geo_cache` or live OSRM (paced per instance) — nothing under `drive-plan/` or `drive-sync/` may call the straight-line estimators (a source pin enforces it). `/venue-assessments` and `/companies/[id]` gain `maxDuration = 60` for the visit actions' `after()` re-sync, matching /calendar.
+
+## D719. D144 retired (#325, 2026-10-10)
+
+`addTravelBlock`, the "Traveling from" picker and `travelOriginOptionsAction` are removed; creating, editing or deleting an in-app event re-syncs the rep's drive chain instead. On each rep's first sync the legacy sweep deletes upcoming events titled `Drive to … (auto)` **and** described `Auto-added travel time…`, scanning **today → +180 days** (paged, capped reads, retried up to five times); past ones are left. The agenda hides `peakDrive`-tagged events so app drive blocks aren't doubled.
+
+## D720. Google sync safety (#325, 2026-10-10)
+
+The sync writes only events whose private `peakDrive` = `"1"`, keyed per leg; flagged legs get no event. It never writes past days or days beyond +14; the read window uses Chicago day starts and only fully covered days are diffed; a tagged-event read failure writes nothing; duplicate tagged events for one leg collapse to one. A leg flagged `route_unavailable` (a transient OSRM miss) **keeps** its existing event rather than deleting it. Each sync takes the rep's lease (one conditional write on `drive_sync:<id>`, 90 s, renewed before the first write and before the D144 phase; a lost lease writes nothing) and re-lists the tagged events right before diffing; a sync that finds the lease held reports `busy` and leaves the rep stale. A stale mark set during a sync survives that sync's `lastSyncAt` write.
+
+## D721. Triggers (#325, 2026-10-10)
+
+Scheduling, editing or deleting a visit re-syncs the affected days (registered in `after()` before the invite dispatch, so an invite error can't drop it); a stay-over toggle re-syncs its day and the next; a page load re-syncs a rep last synced over 10 min ago; a trigger-sync failure marks the rep stale. Verifying an address re-syncs upcoming visits on it immediately; since a place-book key may also be any rep's Google event location, every active rep is marked stale (next view or cron). The daily pass runs on its **own cron route**, `/api/drive/sync` at 11:00 UTC (CRON_SECRET via `cronAuthFailure`, middleware-exempt): it stamps venues, then re-syncs every rep, least recently synced first, not starting a rep past 50 s in, per-rep try/catch. It left the Gmail cron because that route's 60 s budget is already shared by the morning triage build and the photo sync.
+
+## D722. Fix dialog, worklist and booking warnings (#325, 2026-10-10)
+
+Fixing an address (retype → re-geocode, pick a suggestion, drop a pin) is open to **any signed-in user** — a venue Fix was widened from `manage_users` to match `saveVenueAction`; a venue fix writes the venue, anything else the place book. The worklist (Settings → Data → Addresses to verify) is admin-only: visits linked to a venue are covered by the venue row, and unchecked visit/lead addresses show "Not checked yet". While booking a visit (Inbox dialog, visit requests) the address check is debounced (≥ 600 ms, a superseded request dropped) and only warns, never blocks; the visit itself shows the same flag with its Fix.
+
+## D723. Morning triage flags today's unverified visits (#325, 2026-10-10)
+
+Spec 1 fills its `TRIAGE_HOOKS` seam (D711): `visitFlags` runs `unverifiedVisitFlags` (`src/lib/address-verify/triage-flags.ts`), which reads today's visits' address states in cache mode (never geocodes) and gives any that isn't verified the verbatim flag "Address not verified — no drive time". A lookup failure drops the flags, never the visits (the visit feed runs under `allSettled`). The at-risk provider stays empty for spec 3.

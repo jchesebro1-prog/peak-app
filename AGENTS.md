@@ -863,5 +863,28 @@ See `.env.example`.
 
 44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning) and `/api/triage/build` (midday, 17:00 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
 
+45. ✅ **Address verification + drive time** (#325, D712–D723) — every address
+    is `verified` / `needs_check` / `unresolved` (only verified gets drive
+    time): venues carry the stamp on four `sites` columns, every other address
+    lives in the new `place_book` (exact normalized key, house-number rule;
+    migration `0037_address_verification`), with the idempotent JS venue
+    backfill `ensureVenueGeoStatus`. Pure rules in `src/lib/address-verify/`
+    (keys, state, place book, targets, Fix, worklist) and
+    `src/lib/drive-plan/` (`planDay`, stops, Chicago days); a cache-mode
+    loader for page views and a live one for syncs (`geo_cache` or OSRM
+    only — no straight-line fallback). `src/lib/drive-sync/` writes
+    `peakDrive`-tagged Google events per leg (today → +14, leased, re-listed
+    before diffing, flagged legs get none) and sweeps D144's old blocks
+    (D144 retired). Triggers: visits, in-app events, stay-over, address
+    fixes, stale-on-load (10 min) and the daily `/api/drive/sync` cron
+    (11:00 UTC). A Fix dialog (any signed-in user), Settings → Data →
+    Addresses to verify (admin), booking warnings, drive blocks / flags /
+    day totals on `/calendar` and Home, a per-rep buffer (company default
+    15 min, Settings → Field) and Morning triage's unverified-visit flag
+    (`TRIAGE_HOOKS.visitFlags`). Specs 2–3 consume `planDay`,
+    `visitPeople`, `addressStatesForVisits` and the `schedule_*` blobs.
+    Remaining is Jeff-gated: confirm the drive cron fires, review the
+    worklist, connect rep calendars. Punch item #325.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
