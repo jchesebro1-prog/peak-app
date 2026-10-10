@@ -169,6 +169,26 @@ export async function acquireDriveSyncLease(userId: string, nowMs: number = Date
   return rows.length ? until : null;
 }
 
+/** Extends the lease — atomically, only while syncingUntil is still exactly
+ *  our token (another sync that took over an expired lease has a different
+ *  one). Returns the new token (always a new number, so a stale holder's
+ *  token can never match again) or null when the lease is no longer ours. */
+export async function renewDriveSyncLease(userId: string, token: number, nowMs: number = Date.now(), ttlMs: number = DRIVE_SYNC_LEASE_MS): Promise<number | null> {
+  const until = Math.max(Math.round(nowMs + ttlMs), Math.round(token) + 1);
+  const db = await getDb();
+  const rows = await db
+    .update(blobs)
+    .set({ data: sql`${blobs.data} || ${JSON.stringify({ syncingUntil: until })}::jsonb`, updatedAt: Date.now() })
+    .where(
+      and(
+        eq(blobs.id, syncId(userId)),
+        sql`case when jsonb_typeof(${blobs.data}->'syncingUntil') = 'number' then (${blobs.data}->>'syncingUntil')::numeric end = ${Math.round(token)}`
+      )
+    )
+    .returning({ id: blobs.id });
+  return rows.length ? until : null;
+}
+
 /** Frees the rep — only if the lease is still this token (an expired lease
  *  someone else has since taken is left alone). */
 export async function releaseDriveSyncLease(userId: string, token: number): Promise<void> {

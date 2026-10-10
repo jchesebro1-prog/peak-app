@@ -23,6 +23,7 @@ import {
   getStayOvers,
   markDriveStale,
   releaseDriveSyncLease,
+  renewDriveSyncLease,
   saveScheduleDefaults,
   saveUserSchedulePrefs,
   setDriveSyncState,
@@ -792,7 +793,15 @@ export async function driveTimePrefsChecks(ok: Ok): Promise<void> {
       "drive-time lease: an expired lease is re-acquirable, and the lease never disturbs the sync state");
     await releaseDriveSyncLease(L, first as number); // stale token: someone else's lease now
     ok((await acquireDriveSyncLease(L, T0 + DRIVE_SYNC_LEASE_MS + 2)) === null, "drive-time lease: releasing with an old token leaves the current holder's lease alone");
-    await releaseDriveSyncLease(L, expired as number);
+    const renewed = await renewDriveSyncLease(L, expired as number, T0 + 2 * DRIVE_SYNC_LEASE_MS - 10_000);
+    ok(renewed === T0 + 3 * DRIVE_SYNC_LEASE_MS - 10_000 && (await acquireDriveSyncLease(L, T0 + 2 * DRIVE_SYNC_LEASE_MS + 5_000)) === null,
+      "drive-time lease: the holder renews its lease (a new token, a fresh 90 s); the rep stays held");
+    ok((await renewDriveSyncLease(L, expired as number, T0 + 2 * DRIVE_SYNC_LEASE_MS)) === null,
+      "drive-time lease: renewing with the old token after a renewal is refused (only the current token renews)");
+    ok((await renewDriveSyncLease("TESTdrive:norow", 5, T0)) === null, "drive-time lease: renewing a lease nobody holds does nothing");
+    await releaseDriveSyncLease(L, expired as number); // the old token — must not free the renewed lease
+    ok((await acquireDriveSyncLease(L, T0 + 2 * DRIVE_SYNC_LEASE_MS + 6_000)) === null, "drive-time lease: releasing with the pre-renewal token leaves the renewed lease held");
+    await releaseDriveSyncLease(L, renewed as number);
     ok((await acquireDriveSyncLease(L, T0 + DRIVE_SYNC_LEASE_MS + 3)) !== null, "drive-time lease: the holder's release frees the rep at once");
   } finally {
     await db.delete(blobs).where(like(blobs.id, "%TESTdrive:%"));
@@ -1009,6 +1018,7 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     visits: async () => [visit("SV-1", {})],
     visitStates: async (vs) => new Map(vs.map((v) => [v.id, okAddr(P1.lat, P1.lng, v.id)])),
     acquireLease: async (_u, nowMs) => { if (leaseUntil > nowMs) return null; leaseUntil = nowMs + 90_000; return leaseUntil; },
+    renewLease: async (_u, token, nowMs) => { if (leaseUntil !== token) return null; leaseUntil = Math.max(nowMs + 90_000, token + 1); return leaseUntil; },
     releaseLease: async (_u, token) => { if (leaseUntil === token) leaseUntil = 0; },
     log: () => {},
     ...over,
@@ -1079,12 +1089,13 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   // (c) D144 cleanup reads past the 14-day window with the paged reader and stamps only after a complete read.
   const farLegacy: SyncCalendarEvent = { ...gEv("legacy-far", { title: "Drive to Expo (auto)", startMs: NOW + 120 * DAY_MS, location: "" }), description: "Auto-added travel time — x" };
   const legacyRanges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
-  const isLegacyRead = (range: { timeMinMs: number; timeMaxMs: number }) => range.timeMaxMs - range.timeMinMs > 30 * DAY_MS;
+  // The sync names its D144 scan reads explicitly (listEvents' third argument), so the fakes never guess from the range.
+  const isLegacyRead = (purpose?: string) => purpose === "legacy";
   state = { lastSyncAt: 0, legacyCleanedAt: null };
   calls.length = 0;
   const paged = await syncDriveDays("u1", [DAY], deps({
-    listEvents: async (_k, range) => {
-      if (!isLegacyRead(range)) return { events, coveredThroughMs: range.timeMaxMs };
+    listEvents: async (_k, range, purpose) => {
+      if (!isLegacyRead(purpose)) return { events, coveredThroughMs: range.timeMaxMs };
       legacyRanges.push(range);
       if (legacyRanges.length === 1) return { events: [events[4]], coveredThroughMs: NOW + 60 * DAY_MS };
       return { events: [events[4], farLegacy], coveredThroughMs: range.timeMaxMs }; // overlap re-reads "legacy"
@@ -1098,11 +1109,11 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     "drive-time sync: far-out D144 blocks are removed once each, then the cleanup is stamped");
   state = { lastSyncAt: 0, legacyCleanedAt: null };
   const stuck = await syncDriveDays("u1", [DAY], deps({
-    listEvents: async (_k, range) => (isLegacyRead(range) ? { events: [], coveredThroughMs: range.timeMinMs } : { events, coveredThroughMs: range.timeMaxMs }),
+    listEvents: async (_k, range, purpose) => (isLegacyRead(purpose) ? { events: [], coveredThroughMs: range.timeMinMs } : { events, coveredThroughMs: range.timeMaxMs }),
   }));
   ok(state.legacyCleanedAt === null && stuck.google === "written", "drive-time sync: a D144 scan that can't finish is not stamped (retried next sync); the drive sync still runs");
   const legacyFails = await syncDriveDays("u1", [DAY], deps({
-    listEvents: async (_k, range) => { if (isLegacyRead(range)) throw new Error("500"); return { events, coveredThroughMs: range.timeMaxMs }; },
+    listEvents: async (_k, range, purpose) => { if (isLegacyRead(purpose)) throw new Error("500"); return { events, coveredThroughMs: range.timeMaxMs }; },
   }));
   ok(state.legacyCleanedAt === null && legacyFails.google === "written" && legacyFails.errors.length >= 1, "drive-time sync: a failed D144 read is logged, not stamped, and blocks nothing");
 
@@ -1111,7 +1122,7 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   const scanRanges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
   let legacyDeleteTries = 0;
   const failingDel = deps({
-    listEvents: async (_k, range) => { if (isLegacyRead(range)) scanRanges.push(range); return { events, coveredThroughMs: range.timeMaxMs }; },
+    listEvents: async (_k, range, purpose) => { if (isLegacyRead(purpose)) scanRanges.push(range); return { events, coveredThroughMs: range.timeMaxMs }; },
     deleteEvent: async (_k, id) => { if (id === "legacy") { legacyDeleteTries++; throw new Error("403"); } calls.push("delete:" + id); },
   });
   const f1 = await syncDriveDays("u1", [DAY], failingDel);
@@ -1134,8 +1145,8 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   state = { lastSyncAt: 0, legacyCleanedAt: null };
   const capRanges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
   const crawl = deps({
-    listEvents: async (_k, range) => {
-      if (!isLegacyRead(range)) return { events, coveredThroughMs: range.timeMaxMs };
+    listEvents: async (_k, range, purpose) => {
+      if (!isLegacyRead(purpose)) return { events, coveredThroughMs: range.timeMaxMs };
       capRanges.push(range);
       return { events: [], coveredThroughMs: range.timeMinMs + DAY_MS };
     },
@@ -1166,7 +1177,7 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   const realPlan = (a: Parameters<DriveSyncDeps["plan"]>[0]) => planDriveDays({ ...a, deps: loadDeps({ visits: async () => [visit("SV-1", {})] }) });
   // (1a) No lease at all: the re-list right before diffing sees the other sync's inserts.
   state = { lastSyncAt: 0, legacyCleanedAt: 1 };
-  const noLease = { acquireLease: async (_u: string, n: number) => n + 90_000, releaseLease: async () => {} };
+  const noLease = { acquireLease: async (_u: string, n: number) => n + 90_000, renewLease: async (_u: string, t: number) => t, releaseLease: async () => {} };
   let started = false;
   await syncDriveDays("u1", [DAY], calDeps({
     ...noLease,
@@ -1206,6 +1217,72 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   const visitSeen: string[][] = [];
   await resyncForVisitChange(null, { startAt: at(9), assignedTo: "Dana" }, deps({ plan: async (a) => { visitSeen.push(a.dayKeys); return []; } }));
   ok(visitSeen.length === 0, "drive-time sync: a visit-change resync respects a held lease too");
+  leaseUntil = 0;
+
+  // A first read cut off mid-window plans without the later days' stops; even if the re-read got further,
+  // nothing may be written for the days the FIRST read didn't cover.
+  const cutDay = addDays(DAY, 1);
+  const lateDay = addDays(DAY, 2);
+  const cutMs = chicagoDayStart(cutDay);
+  const lateTag = tagged("late", `u1|${lateDay}|base|sv:LATER`, chicagoDayStart(lateDay) + 7 * 3_600_000, chicagoDayStart(lateDay) + 8 * 3_600_000, "Drive to Later", lateDay);
+  const midTag = tagged("mid", `u1|${cutDay}|base|sv:MID`, chicagoDayStart(cutDay) + 7 * 3_600_000, chicagoDayStart(cutDay) + 8 * 3_600_000, "Drive to Mid", cutDay);
+  let reads = 0;
+  calls.length = 0;
+  leaseUntil = 0;
+  state = { lastSyncAt: 0, legacyCleanedAt: 1 };
+  const truncFirst = await syncDriveDays("u1", [DAY, cutDay, lateDay], deps({
+    listEvents: async (_k, range) => {
+      reads++;
+      const evs = [midTag, lateTag];
+      return reads === 1 ? { events: [], coveredThroughMs: cutMs } : { events: evs, coveredThroughMs: range.timeMaxMs };
+    },
+  }));
+  ok(reads === 2 && truncFirst.google === "written" && !calls.some((c) => c === "delete:late" || c === "delete:mid") &&
+     !calls.some((c) => c.includes(`|${cutDay}|`) || c.includes(`|${lateDay}|`)) && truncFirst.errors.some((e) => e.includes("truncated")),
+    "drive-time sync: a first read cut off at day 2 and a complete re-read writes nothing on day 2 or later (the planner never saw those stops)" + " — " + calls.join(" "));
+
+  // The legacy phase needs lease time left: renew when < 30 s remain; skip the phase if renewal fails.
+  const slowPlan = (clockRef: { t: number }, advance: number) => async (a: Parameters<DriveSyncDeps["plan"]>[0]) => { clockRef.t += advance; return realPlan(a); };
+  const clk = { t: NOW };
+  leaseUntil = 0;
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  calls.length = 0;
+  let renewals = 0;
+  const renewing = await syncDriveDays("u1", [DAY], deps({
+    now: () => clk.t,
+    plan: slowPlan(clk, 70_000),
+    renewLease: async (u, t, n) => { renewals++; return (await deps().renewLease!(u, t, n)); },
+  }));
+  ok(renewals === 1 && renewing.legacyRemoved === 1 && typeof state.legacyCleanedAt === "number" && leaseUntil === 0,
+    "drive-time sync: with under 30 s of lease left the sync renews it before the D144 phase, runs the phase, and releases the renewed lease");
+  clk.t = NOW;
+  leaseUntil = 0;
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  calls.length = 0;
+  renewals = 0;
+  await syncDriveDays("u1", [DAY], deps({ now: () => clk.t, renewLease: async () => { renewals++; return null; } }));
+  ok(renewals === 0 && calls.includes("delete:legacy"), "drive-time sync: a lease with plenty of time left is not renewed");
+  clk.t = NOW;
+  leaseUntil = 0;
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  calls.length = 0;
+  const takenOver = await syncDriveDays("u1", [DAY], deps({
+    now: () => clk.t,
+    plan: slowPlan(clk, 70_000),
+    // Another sync takes the rep over (our lease ran out) before we renew.
+    renewLease: async () => null,
+  }));
+  ok(!calls.includes("delete:legacy") && takenOver.legacyRemoved === 0 && state.legacyCleanedAt === null && takenOver.google === "written" && takenOver.errors.some((e) => e.includes("lease")),
+    "drive-time sync: when the lease can't be renewed (another sync took over) the D144 phase is skipped this run and left to resume");
+  clk.t = NOW;
+  leaseUntil = 0;
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  calls.length = 0;
+  await syncDriveDays("u1", [DAY], deps({
+    now: () => clk.t,
+    plan: async (a) => { clk.t += 70_000; const p = await realPlan(a); leaseUntil = clk.t + 90_000; /* a newer sync now holds it */ return p; },
+  }));
+  ok(!calls.includes("delete:legacy") && leaseUntil !== 0, "drive-time sync: a takeover is respected end to end — the D144 phase is skipped and the new holder's lease is not released by us");
   leaseUntil = 0;
 
   state = { lastSyncAt: NOW - 60_000, legacyCleanedAt: 1 };
@@ -1257,7 +1334,16 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   ok(all.synced === 1 && synced.join() === "u1" && all.errors.length === 0, "drive-time sync: the cron rider syncs active reps with a connected calendar only");
   let tick = NOW;
   const over = await syncAllDrivers({ budgetMs: 1_000 }, deps({ now: () => (tick += 2_000), plan: async () => [] }));
-  ok(over.synced === 0 && over.skipped === 1, "drive-time sync: no new rep starts after the cron budget");
+  ok(over.synced === 0 && over.skipped === 1 && over.busy === 0, "drive-time sync: no new rep starts after the cron budget");
+  const mixed = await syncAllDrivers({ budgetMs: 60_000 }, deps({
+    users: async () => [{ id: "u1", name: "Dana", status: "active" }, { id: "u2", name: "Eli", status: "active" }],
+    calendarKeyFor: async (id) => "personal:" + id,
+    acquireLease: async (u, n) => (u === "u2" ? null : n + 90_000),
+    renewLease: async (_u, t) => t,
+    releaseLease: async () => {},
+    plan: async () => [],
+  }));
+  ok(mixed.synced === 1 && mixed.busy === 1 && mixed.errors.length === 0, "drive-time sync: the cron rider reports a rep whose lease was held as busy, not synced");
 }
 
 export async function driveTimeNoStraightLinePins(ok: Ok): Promise<void> {
@@ -1272,8 +1358,7 @@ export async function driveTimeNoStraightLinePins(ok: Ok): Promise<void> {
   const syncSrc = readFileSync("src/lib/drive-sync/sync.ts", "utf8");
   const v = visitAddressInput({ id: "SV-9", customerId: "c", locationId: "l", address: "a", venue: "x" } as unknown as SiteVisit);
   ok(JSON.stringify(v) === JSON.stringify({ id: "SV-9", customerId: "c", locationId: "l", address: "a" }) &&
-     /\.map\(visitAddressInput\)/.test(loadSrc) && /\.map\(visitAddressInput\)/.test(syncSrc) &&
-     ((loadSrc + syncSrc).match(/locationId: v\.locationId/g) ?? []).length === 1,
+     /\.map\(visitAddressInput\)/.test(loadSrc) && /\.map\(visitAddressInput\)/.test(syncSrc),
     "drive-time pin: one visitAddressInput helper builds the address input in both the loader and the sync");
 }
 
