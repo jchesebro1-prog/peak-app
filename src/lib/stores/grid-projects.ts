@@ -46,6 +46,7 @@ import {
   type RenumberTarget,
 } from "@/lib/design/designators";
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
+import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
@@ -203,6 +204,8 @@ export type GridSpace = {
   color: string;
   /** Normalized 0..1 polygon vertices, ≥3. */
   points: Point[];
+  /** #321: the riser level this room sits on (an id on `GridProject.levels`). */
+  levelId?: string;
   by: string;
   at: number;
 };
@@ -236,6 +239,10 @@ export type GridRevision = {
   /** Auto intake choices per option at snapshot time (#211, D312).
    *  Absent on older snapshots — restore then clears them. */
   autoEstimate?: AutoEstimates;
+  /** Riser levels and per-sheet default levels at snapshot time (#321).
+   *  Absent on older snapshots — restore then leaves the current values. */
+  levels?: GridLevel[];
+  sheetLevels?: Record<string, string>;
 };
 
 /**
@@ -342,6 +349,11 @@ export type GridProject = {
   /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
+  /** Riser levels (#321) — the floor lines device tags sit on, in `order`. */
+  levels?: GridLevel[];
+  /** Default level per sheet id (#321); a device's space level wins. On the
+   *  project, not the sheet document, so a level edit is one write. */
+  sheetLevels?: Record<string, string>;
   /** Drawing-set settings (#209) — size, drawn/checked by, excluded sheets,
    *  general notes, revision labels. Absent = defaults. */
   drawingSet?: DrawingSetSettings;
@@ -1971,6 +1983,73 @@ export async function renameSpace(
   });
 }
 
+/** Replace the riser level list (#321). A level that's gone is cleared off every space and sheet that named it. */
+export async function setLevels(projectId: string, raw: unknown): Promise<GridProject | null> {
+  const levels = cleanLevels(raw);
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const keep = new Set(levels.map((l) => l.id));
+    p.levels = levels;
+    p.spaces = (p.spaces || []).map((s) => {
+      if (!s.levelId || keep.has(s.levelId)) return s;
+      const rest = { ...s };
+      delete rest.levelId;
+      return rest;
+    });
+    if (p.sheetLevels) {
+      const next = Object.fromEntries(Object.entries(p.sheetLevels).filter(([, id]) => keep.has(id)));
+      if (Object.keys(next).length) p.sheetLevels = next;
+      else delete p.sheetLevels;
+    }
+    p.updatedAt = Date.now();
+  });
+}
+
+/** Set (or, with null, clear) the level a space sits on (#321). Null when the design is gone or the level isn't on its list. */
+export async function setSpaceLevel(
+  projectId: string,
+  spaceId: string,
+  levelId: string | null
+): Promise<GridProject | null> {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (levelId && !(p.levels || []).some((l) => l.id === levelId)) {
+      refused = true;
+      return;
+    }
+    p.spaces = (p.spaces || []).map((s) => {
+      if (s.id !== spaceId) return s;
+      if (levelId) return { ...s, levelId };
+      const rest = { ...s };
+      delete rest.levelId;
+      return rest;
+    });
+    p.updatedAt = Date.now();
+  });
+  return refused ? null : updated;
+}
+
+/** Set (or clear) a sheet's default level (#321). Null when the design is gone, the sheet isn't on it, or the level isn't on its list. */
+export async function setSheetLevel(
+  projectId: string,
+  sheetId: string,
+  levelId: string | null
+): Promise<GridProject | null> {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if ((levelId && !(p.levels || []).some((l) => l.id === levelId)) || !(p.sheetIds || []).includes(sheetId)) {
+      refused = true;
+      return;
+    }
+    const next = { ...(p.sheetLevels || {}) };
+    if (levelId) next[sheetId] = levelId;
+    else delete next[sheetId];
+    if (Object.keys(next).length) p.sheetLevels = next;
+    else delete p.sheetLevels;
+    p.updatedAt = Date.now();
+  });
+  return refused ? null : updated;
+}
+
 export async function removeSpace(
   projectId: string,
   spaceId: string
@@ -2340,6 +2419,9 @@ function snapshotOf(
     routes: [...(p.routes || [])],
     // Deep copy: the riser document is nested and patched in place later.
     riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
+    // Riser levels are design state too (#321); a space's level rides in `spaces`.
+    levels: (p.levels || []).map((l) => ({ ...l })),
+    sheetLevels: { ...(p.sheetLevels || {}) },
     // Auto choices are design state like the riser (#211, D312) —
     // normalized (a legacy single value lands as the first option's) and deep-copied.
     autoEstimate: JSON.parse(JSON.stringify(autoEstimatesOf(p.autoEstimate, p.options?.[0]?.id ?? DEFAULT_OPTION_ID))) as AutoEstimates,
@@ -2420,6 +2502,13 @@ export async function restoreRevision(
     // wholesale. A pre-#209 snapshot has none → back to the auto layout.
     if (target.riser) doc.riser = JSON.parse(JSON.stringify(target.riser)) as Record<string, RiserDoc>;
     else delete doc.riser;
+    // Levels (#321): restored with the spaces that name them; a snapshot cut
+    // before levels existed leaves the current ones alone.
+    if (target.levels) doc.levels = target.levels.map((l) => ({ ...l }));
+    if (target.sheetLevels) {
+      if (Object.keys(target.sheetLevels).length) doc.sheetLevels = { ...target.sheetLevels };
+      else delete doc.sheetLevels;
+    }
     // sheetIds themselves are still never restored wholesale from the
     // snapshot (a sheet added since, or removed for reasons unrelated to
     // this revision, should stay exactly as it is) — but a sheet that WAS

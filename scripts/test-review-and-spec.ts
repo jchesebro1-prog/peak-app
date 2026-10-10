@@ -11531,6 +11531,7 @@ seeded()
   .then(() => conduitRiser321Checks())
   .then(() => conduitRiser321B1Checks())
   .then(() => conduitRiser321B2Checks())
+  .then(() => conduitRiser321B3Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -62300,4 +62301,116 @@ async function conduitRiser321B2Checks(): Promise<void> {
   const catPage = src("src/app/(app)/catalog/page.tsx");
   ok(catPage.includes("<TagDefaultsField key={part?.sku ?? \"new\"}") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes("Riser tag defaults") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes('name="tag_pd"'),
     "#321 the part editor has a Riser tag defaults section");
+}
+
+/* ---------------- #321 Plan B task 3: levels on spaces and sheets ---------------- */
+async function conduitRiser321B3Checks(): Promise<void> {
+  const L = await import("@/lib/design/grid-levels");
+  const G = await import("@/lib/stores/grid-projects");
+  const fs = await import("node:fs");
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const J2 = (v: unknown) => JSON.stringify(v);
+
+  // cleanLevels
+  const many = L.cleanLevels(Array.from({ length: 40 }, (_, i) => ({ label: `L${i}` })));
+  ok(many.length === 30 && many.every((l, i) => l.order === i && /^lvl-[0-9a-f]{12}$/.test(l.id)), "#321 cleanLevels: caps at 30 and mints lvl- ids with orders 0..n-1");
+  const mixed = L.cleanLevels([{ label: "  Stage " , elevation: " +0'-0\" " }, { label: "   " }, { label: "" }, null, 7, { label: "Catwalk" }]);
+  ok(mixed.length === 2 && mixed[0].label === "Stage" && mixed[0].elevation === "+0'-0\"" && mixed[1].label === "Catwalk" && !("elevation" in mixed[1]) && mixed[1].order === 1,
+    "#321 cleanLevels: trims, drops blank labels and non-objects, renumbers order past the dropped rows");
+  const longRow = L.cleanLevels([{ label: "x".repeat(60), elevation: "9".repeat(40) }])[0];
+  ok(longRow.label.length === 40 && longRow.elevation!.length === 20, "#321 cleanLevels: label capped at 40, elevation at 20");
+  ok(L.cleanLevels("nope").length === 0 && L.cleanLevels(undefined).length === 0, "#321 cleanLevels: a non-array is an empty list");
+  const keep = L.cleanLevels([{ id: "lvl-0123456789ab", label: "A" }, { id: "lvl-0123456789ab", label: "B" }, { id: "bad", label: "C" }, { label: "D" }]);
+  ok(keep[0].id === "lvl-0123456789ab" && new Set(keep.map((l) => l.id)).size === 4 && keep.slice(1).every((l) => /^lvl-[0-9a-f]{12}$/.test(l.id)),
+    "#321 cleanLevels: keeps a valid incoming id, mints for a repeated, malformed or missing one");
+  const reordered = L.cleanLevels([{ id: "lvl-aaaaaaaaaaaa", label: "Top", order: 9 }, { id: "lvl-bbbbbbbbbbbb", label: "Bottom", order: 0 }]);
+  ok(reordered[0].order === 0 && reordered[1].order === 1 && reordered[0].label === "Top", "#321 cleanLevels: order follows array position, not the incoming order");
+
+  // levelOfPlacement
+  const proj = { levels: [{ id: "lvl-aaaaaaaaaaaa", label: "Stage", order: 0 }, { id: "lvl-bbbbbbbbbbbb", label: "Catwalk", order: 1 }], sheetLevels: { s1: "lvl-aaaaaaaaaaaa", s3: "lvl-gone00000000" } };
+  const pl = (sheetId: string) => ({ sheetId });
+  const inSpace = (levelId?: string) => () => ({ levelId });
+  const noSpace = () => null;
+  ok(L.levelOfPlacement(pl("s1"), inSpace("lvl-bbbbbbbbbbbb"), proj) === "lvl-bbbbbbbbbbbb", "#321 levelOfPlacement: the space's level beats the sheet's");
+  ok(L.levelOfPlacement(pl("s1"), inSpace(undefined), proj) === "lvl-aaaaaaaaaaaa", "#321 levelOfPlacement: a space with no level falls to the sheet's");
+  ok(L.levelOfPlacement(pl("s1"), noSpace, proj) === "lvl-aaaaaaaaaaaa", "#321 levelOfPlacement: no space falls to the sheet's default");
+  ok(L.levelOfPlacement(pl("s2"), noSpace, proj) === null, "#321 levelOfPlacement: neither -> null");
+  ok(L.levelOfPlacement(pl("s1"), inSpace("lvl-gone00000000"), proj) === "lvl-aaaaaaaaaaaa", "#321 levelOfPlacement: an unknown space level is ignored, the sheet's applies");
+  ok(L.levelOfPlacement(pl("s3"), noSpace, proj) === null, "#321 levelOfPlacement: an unknown sheet level is ignored");
+  ok(L.levelOfPlacement(pl("s1"), noSpace, {}) === null, "#321 levelOfPlacement: a project with no levels yields null");
+
+  // store
+  const { registerFixture } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const gp = await G.createProject({ name: "#321 levels project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh1 = (await G.addSheet(gp.id, { name: "#321 lvl sheet 1", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh1.id);
+  const sh2 = (await G.addSheet(gp.id, { name: "#321 lvl sheet 2", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh2.id);
+  const live = async () => (await G.getProject(gp.id))!;
+  const pts = [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }];
+  await G.addSpace(gp.id, { sheetId: sh1.id, page: 1, name: "Stage", points: pts, by });
+  await G.addSpace(gp.id, { sheetId: sh1.id, page: 1, name: "Pit", points: pts, by });
+  const [spA, spB] = (await live()).spaces!;
+
+  const noLevelsYet = await G.setSpaceLevel(gp.id, spA.id, "lvl-nothing0000");
+  ok(noLevelsYet === null && !(await live()).spaces!.some((s) => s.levelId), "#321 setSpaceLevel: a level that isn't on the list is refused");
+  const set = await G.setLevels(gp.id, [{ label: "Stage", elevation: "0'" }, { label: "  " }, { label: "Catwalk" }, { label: "Pit" }]);
+  const lv = (await live()).levels!;
+  ok(!!set && lv.length === 3 && lv.map((l) => l.label).join() === "Stage,Catwalk,Pit" && lv.every((l, i) => l.order === i), "#321 setLevels: stores the cleaned list");
+  const [stage, cat, pit] = lv;
+  ok(!!(await G.setSpaceLevel(gp.id, spA.id, stage.id)) && !!(await G.setSpaceLevel(gp.id, spB.id, pit.id)), "#321 setSpaceLevel: sets a listed level");
+  ok((await live()).spaces!.find((s) => s.id === spA.id)!.levelId === stage.id, "#321 setSpaceLevel: the space carries its levelId");
+  ok(!!(await G.setSheetLevel(gp.id, sh1.id, cat.id)) && !!(await G.setSheetLevel(gp.id, sh2.id, pit.id)) && (await live()).sheetLevels?.[sh1.id] === cat.id, "#321 setSheetLevel: sets a sheet default");
+  ok((await G.setSheetLevel(gp.id, "gs-not-on-design", cat.id)) === null && (await G.setSheetLevel(gp.id, sh1.id, "lvl-nothing0000")) === null, "#321 setSheetLevel: an unknown sheet or level is refused");
+  ok(!!(await G.setSheetLevel(gp.id, sh2.id, null)) && (await live()).sheetLevels?.[sh2.id] === undefined, "#321 setSheetLevel: null clears the default");
+  await G.setSheetLevel(gp.id, sh2.id, pit.id);
+
+  // revision round-trip
+  const rv = (await G.addRevision(gp.id, { by, note: "levels" }))!;
+  ok(J2(rv.levels) === J2(lv) && rv.sheetLevels?.[sh1.id] === cat.id && rv.spaces.find((s) => s.id === spA.id)!.levelId === stage.id, "#321 snapshot: carries levels, sheetLevels and the spaces' levelId");
+
+  // removing a level clears it from spaces and sheetLevels
+  await G.setLevels(gp.id, lv.filter((l) => l.id !== pit.id));
+  let after = await live();
+  ok(after.levels!.length === 2 && !after.spaces!.some((s) => s.levelId === pit.id) && !("levelId" in after.spaces!.find((s) => s.id === spB.id)!) && after.sheetLevels?.[sh2.id] === undefined,
+    "#321 setLevels: removing a level clears it from spaces and sheetLevels");
+  ok(after.spaces!.find((s) => s.id === spA.id)!.levelId === stage.id && after.sheetLevels?.[sh1.id] === cat.id, "#321 setLevels: levels that stay keep their references");
+  await G.setLevels(gp.id, []);
+  after = await live();
+  ok(after.levels!.length === 0 && !after.spaces!.some((s) => s.levelId) && after.sheetLevels === undefined, "#321 setLevels: an empty list clears every reference");
+
+  // restore brings them back
+  const back = await G.restoreRevision(gp.id, rv.rev, by);
+  after = await live();
+  ok(back.ok && J2(after.levels) === J2(lv) && after.sheetLevels?.[sh2.id] === pit.id && after.spaces!.find((s) => s.id === spB.id)!.levelId === pit.id, "#321 restoreRevision: levels, sheetLevels and space levels round-trip");
+
+  // an older snapshot (no levels fields) leaves the current ones alone
+  const older = (await G.addRevision(gp.id, { by, note: "older" }))!;
+  await (await import("@/db/doc-store")).patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", gp.id, (p) => {
+    const r = p.revisions!.find((x) => x.rev === older.rev)!;
+    delete r.levels;
+    delete r.sheetLevels;
+  });
+  await G.setLevels(gp.id, [{ id: "lvl-cccccccccccc", label: "Fly floor" }]);
+  await G.setSheetLevel(gp.id, sh1.id, "lvl-cccccccccccc");
+  const old = await G.restoreRevision(gp.id, older.rev, by);
+  after = await live();
+  ok(old.ok && after.levels!.length === 1 && after.levels![0].id === "lvl-cccccccccccc" && after.sheetLevels?.[sh1.id] === "lvl-cccccccccccc", "#321 restoreRevision: a snapshot without levels leaves the current levels alone");
+
+  // actions + UI pins
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  for (const [fn, call] of [["saveLevelsAction", "setLevels(projectId, levels)"], ["setSpaceLevelAction", "setSpaceLevel(projectId, spaceId, levelId)"], ["setSheetLevelAction", "setSheetLevel(projectId, sheetId, levelId)"]]) {
+    const body = acts.slice(acts.indexOf(`export async function ${fn}(`), acts.indexOf("export async function", acts.indexOf(`export async function ${fn}(`) + 10));
+    ok(body.includes("await requireUser();") && body.includes(call) && body.includes("revalidatePath(editorPath(projectId));") && body.includes("revalidatePath(riserPath(projectId));"), `#321 ${fn}: authed, writes through the store, revalidates the editor and the riser page`);
+  }
+  const panel = src("src/app/(app)/design/grid/[id]/spaces-panel.tsx");
+  ok(panel.includes("setSpaceLevelAction(projectId, selected.id, e.target.value || null)") && panel.includes("Levels are set on the conduit riser page.") && panel.includes("levels && levels.length > 0"),
+    "#321 SpaceEditor: a Level select, replaced by a hint when the design has no levels");
+  ok(src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx").includes("levels={project.levels}"), "#321 Property Editor passes the design's levels to the space editor");
+  const tabs = src("src/app/(app)/design/grid/[id]/workspace/sheet-tabs.tsx");
+  ok(tabs.includes("Default level") && tabs.includes("setSheetLevelAction(project.id, s.id, e.target.value || null)") && tabs.includes("Levels are set on the conduit riser page."),
+    "#321 sheet tab menu: a Default level select with the same hint");
+  ok(src("src/app/(app)/design/grid/[id]/page.tsx").includes("levels: project.levels || [],") && src("src/app/(app)/design/grid/[id]/page.tsx").includes("sheetLevels: project.sheetLevels || {},"), "#321 the editor page passes levels and sheetLevels to the client");
 }

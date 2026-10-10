@@ -2,7 +2,8 @@
 
 import { ConfirmButton } from "@/components/confirm-button";
 import { GRID_SHEET_ACCEPT } from "@/lib/design/grid-sheet-upload";
-import { removeSheetAction } from "../actions";
+import { sortedLevels } from "@/lib/design/grid-levels";
+import { removeSheetAction, setSheetLevelAction } from "../actions";
 import type { GridEditor } from "../use-grid-editor";
 import Menu from "./menu";
 
@@ -94,6 +95,30 @@ export default function SheetTabs({ ed }: { ed: GridEditor }) {
                 items={avail.hidden ? [] : [{ label: "Crop & rotate…", onSelect: () => openAdjust(s.id), disabled: avail.disabled, title: avail.title }]}
                 triggerStyle={{ height: 22, padding: "0 5px", border: "none", background: "transparent", color: "inherit", fontSize: 13 }}
               >
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, fontWeight: 600, padding: "4px 2px 8px" }}>
+                  Default level
+                  {project.levels && project.levels.length > 0 ? (
+                    <select
+                      value={project.levels.some((l) => l.id === project.sheetLevels?.[s.id]) ? project.sheetLevels?.[s.id] : ""}
+                      disabled={busy}
+                      onChange={async (e) => {
+                        const r = await setSheetLevelAction(project.id, s.id, e.target.value || null);
+                        if (!r.ok) ed.setErr(r.error);
+                        else onStructuralChange();
+                      }}
+                      style={{ fontSize: 11.5, padding: "3px 5px" }}
+                    >
+                      <option value="">— none —</option>
+                      {sortedLevels(project.levels).map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span style={{ fontWeight: 400, color: "#6b7280" }}>Levels are set on the conduit riser page.</span>
+                  )}
+                </label>
                 <ConfirmButton
                   className="pk-btn-danger"
                   label="Delete sheet"

@@ -352,6 +352,8 @@ export default async function GridEditorPage({
         linesetDesignId: project.linesetDesignId || null,
         riser: project.riser || {},
         symbolDisplay: cleanSymbolDisplay(project.symbolDisplay),
+        levels: project.levels || [],
+        sheetLevels: project.sheetLevels || {},
       }}
       sheets={sheets.map((s) => ({
         id: s.id,

@@ -1,5 +1,6 @@
 "use client";
 
+import type { GridLevel } from "@/lib/design/grid-levels";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -306,6 +307,9 @@ export type ProjectLite = {
   riser: Record<string, RiserDoc>;
   /** Symbol scale + mode (#300) — always cleaned by the page. */
   symbolDisplay: SymbolDisplay;
+  /** Riser levels and per-sheet default levels (#321). */
+  levels: GridLevel[];
+  sheetLevels: Record<string, string>;
 };
 
 type Pending =

@@ -42,6 +42,9 @@ import {
   renameOption,
   renameProject,
   renameSpace,
+  setLevels,
+  setSpaceLevel,
+  setSheetLevel,
   restoreRevision,
   setOptionQuote,
   setPlacementCategory,
@@ -1163,6 +1166,38 @@ export async function renameSpaceAction(
   const p = await renameSpace(projectId, spaceId, name);
   if (!p) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/* ------------------------------ levels (#321) ------------------------------ */
+
+const riserPath = (projectId: string) => `/design/grid/${projectId}/conduit-riser`;
+
+/** Replace the riser level list; a removed level is cleared off spaces and sheets. */
+export async function saveLevelsAction(projectId: string, levels: unknown): Promise<Result> {
+  await requireUser();
+  const p = await setLevels(projectId, levels);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(riserPath(projectId));
+  return { ok: true };
+}
+
+export async function setSpaceLevelAction(projectId: string, spaceId: string, levelId: string | null): Promise<Result> {
+  await requireUser();
+  const p = await setSpaceLevel(projectId, spaceId, levelId);
+  if (!p) return { ok: false, error: "That level isn't on this design any more — refresh and pick again." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(riserPath(projectId));
+  return { ok: true };
+}
+
+export async function setSheetLevelAction(projectId: string, sheetId: string, levelId: string | null): Promise<Result> {
+  await requireUser();
+  const p = await setSheetLevel(projectId, sheetId, levelId);
+  if (!p) return { ok: false, error: "That sheet or level isn't on this design any more — refresh and try again." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(riserPath(projectId));
   return { ok: true };
 }
 

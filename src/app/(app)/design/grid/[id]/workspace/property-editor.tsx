@@ -970,6 +970,7 @@ function SpaceProps({ ed, space }: { ed: GridEditor; space: GridSpace }) {
           key={space.id}
           projectId={project.id}
           selected={space}
+          levels={project.levels}
           busy={busy}
           onSelect={setSelectedSpaceId}
           onChanged={ed.onStructuralChange}
