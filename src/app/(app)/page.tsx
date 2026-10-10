@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { Suspense } from "react";
 import { requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
@@ -6,6 +7,7 @@ import { can, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { makeDashboardData } from "@/lib/dashboard/data";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor } from "@/lib/dashboard/home-metrics";
+import StartHereCard from "@/components/triage/start-here-card";
 import HomeTabs from "./home-tabs";
 import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
@@ -76,6 +78,10 @@ export default async function HomePage({
   void reconcileRecordingsIfStale().catch(() => {});
   // #323 Krisp meetings, > 10 min stale — after the response (after(), like #222's PDF render), never blocking Home
   after(() => syncMeetingsIfStale(user.id).catch(() => {}));
+  after(async () => {
+    const { syncDriveIfStale } = await import("@/lib/drive-sync/sync");
+    await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
+  });
   const now = Date.now();
   const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
@@ -115,6 +121,9 @@ export default async function HomePage({
     <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
       <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} meetingsToFile={meetingsToFile} />
+      <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Building your Start here list…</div>}>
+        <StartHereCard user={user} />
+      </Suspense>
       <WidgetHost user={user} surface="home" sp={sp} data={data} />
       {sheetQuote && <HomeStageSheet quote={sheetQuote} closeHref={closeHref} />}
     </HomeTabs>

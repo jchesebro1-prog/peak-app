@@ -23,6 +23,48 @@ export type InviteStatus =
   | "no-email"
   | "failed";
 
+type VisitEventWrite = { title: string; startMs: number; endMs: number; description?: string; location?: string; status?: "confirmed" };
+export type VisitCalendarApi = {
+  insertEvent(key: string, ev: VisitEventWrite): Promise<{ id: string }>;
+  updateEvent(key: string, id: string, ev: VisitEventWrite): Promise<{ id: string; status?: string }>;
+  deleteEvent(key: string, id: string): Promise<void>;
+};
+
+/**
+ * The visit's Google copy. A visit that already has one (a reschedule)
+ * updates it in place — inserting a second copy would leave the old one
+ * behind as a ghost stop that the drive sync then routes to. The update
+ * sends status "confirmed" (a rep-deleted copy comes back); if it fails or
+ * answers with any other status (deleted in Google, or on another calendar), the old copy is removed
+ * (best effort) before a fresh insert. Throws only if the insert fails.
+ */
+export async function writeVisitCalendarEvent(
+  key: string,
+  existingId: string | null | undefined,
+  ev: VisitEventWrite,
+  cal: VisitCalendarApi
+): Promise<{ id: string }> {
+  if (existingId) {
+    try {
+      // status "confirmed": a copy the rep deleted in Google is only
+      // cancelled there, and a PATCH without it would "update" an invisible
+      // event. Anything but a confirmed answer falls through to a fresh insert.
+      const r = await cal.updateEvent(key, existingId, { ...ev, status: "confirmed" });
+      if (r.status === "confirmed") return { id: r.id || existingId };
+      throw new Error("event status after update: " + (r.status ?? "none"));
+    } catch (err) {
+      console.error("[site-visit] calendar update failed — replacing the event:", err);
+      try {
+        await cal.deleteEvent(key, existingId);
+      } catch (e) {
+        console.error("[site-visit] old calendar event not removed:", e);
+      }
+    }
+  }
+  const r = await cal.insertEvent(key, ev);
+  return { id: r.id };
+}
+
 export async function dispatchVisitInvite(
   rec: SiteVisit,
   me: { id: string; name: string }
@@ -61,14 +103,14 @@ export async function dispatchVisitInvite(
     const info = await getConnectionInfo(akey);
     if (info && hasCalendarScope(info.scope)) {
       try {
-        const { insertEvent } = await import("@/lib/google/calendar");
-        const ev = await insertEvent(akey, {
+        const { insertEvent, updateEvent, deleteEvent } = await import("@/lib/google/calendar");
+        const ev = await writeVisitCalendarEvent(akey, rec.googleEventId, {
           title,
           startMs: rec.startAt,
           endMs: rec.endAt,
           description: body,
           location,
-        });
+        }, { insertEvent, updateEvent, deleteEvent });
         await stampGoogleEvent(rec.id, ev.id);
         return "calendar";
       } catch (err) {

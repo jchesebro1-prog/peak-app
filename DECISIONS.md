@@ -10350,118 +10350,189 @@ that, not the numbering, is why a real design can look generic at first. (2) The
 (undo, by contrast, restores the old designator exactly). (4) Designators are plan-and-schedule bookkeeping only: no
 quote, BOM, customer document or cut sheet prints one.
 
-## D-TBD. #323 Krisp meeting matcher (2026-10-10)
+## D707. Morning triage: who each feed belongs to (#324, 2026-10-10)
 
-Numbers assigned at merge from origin/main (other branches also claim D707+). K1–K13 are the spec's decision table
-(`docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md`); K14 onward are defaults taken during the build.
+Email = the bell's rule (status `waiting_us`, `assignedTo` me, not archived on either side, not in Deleted). Leads and portal quotes to review = mine **or unassigned**, matching the bell's `unownedOrMine` / `mineOrUnassigned` (so an unassigned lead with a breached SLA shows on everyone's list until someone takes it). Quotes = the #284 approval rules plus "sent back for changes" (an approved-and-holding draft is not on the list). Renewals = the #37 "To contact" worklists by job `owner`, past due or in the 60-day window, already-contacted excluded. Calls = pending action items from Recordings in the last 7 days that name me (matchAssignee), or that name no teammate on a recording I made; an ambiguous first name (matchAssignee returns null) falls to the recorder's list. Visits = today's not-done visits where I'm `assignedTo` or in `attendees` (spec 2's field, read as `?? []`).
 
-- **D-TBD (#323 K1). Pull every Krisp meeting into the app, internal ones too.** The app becomes where meeting notes
+## D708. Morning triage: ranking interpretation (#324, 2026-10-10)
+
+"Task overdue 40 + 5/day" counts from day 1 by Chicago calendar day (1 day = 45, capped at 70); a task due any time today is "due today", not overdue. "Customer waiting 40 + 10/extra business day" (1 day = 40, 4+ days = 70). Business time = elapsed time on Chicago Mon–Fri days (Fri 3 pm → Mon 10 am = 19 h = under one business day). A task's High/Low tier is read from spec 3's `priority` only when present — until spec 3 extends `normalizeTask` to carry it, tier contributes nothing. Ties: older first, then key; an unknown age sorts after known ones.
+
+## D709. Morning triage: slots and refresh (#324, 2026-10-10)
+
+Before noon Chicago reads the morning list, noon on reads midday. The morning build rides the daily Gmail cron (12:00 UTC = 7:00 CDT / 6:00 CST — still "today's morning" either way); the midday build is `/api/triage/build?slot=midday` at 17:00 UTC (noon CDT / 11:00 CST), defaulting to midday. Two once-a-day crons, Hobby-safe. The cron builds a slot only if nobody's lazy view already built it (cron and lazy view both insert-if-absent), so a list someone has opened never reorders under them; the cron shares one memoized read of each collection across all users, and stops starting users once its time budget is spent (30 s inside the Gmail cron so the photo sync keeps its window, 50 s on `/api/triage/build`) — skipped users build lazily on first view. A lazy build happens only when the slot has no snapshot; if a lazy build can't be saved the list is computed live with a note. Between runs the list is frozen except rows whose source is done — task/assignment done, thread no longer waiting on me (replied, closed, archived, reassigned), call to-do decided, quote no longer waiting on me. Lead / visit / renewal rows stay until marked or the next snapshot.
+
+## D710. Morning triage: duplicates and row actions (#324, 2026-10-10)
+
+A call to-do matching open work (a task or assignment of mine) folds into the FIRST on-list row among all same-title open items (title → list of keys) as "Also mentioned in …", and is dropped if none of them is on today's list (it's already tracked); a repeated to-do from the same meeting adds no self-referential line. Done writes the source for tasks, assignments (via `app`) and threads (→ closed), and also records a done mark; on a call to-do it opens the recording's Action items to accept/dismiss; elsewhere it is "Done for today" (hidden in this snapshot only; for a lead/quote/visit/renewal it records the mark even if the record has since been deleted — hidden anyway). Snooze → back at the next morning snapshot. Not mine → permanent; on a call to-do it also dismisses the item on its recording; on an email it offers Reassign (active teammates only) or Just hide. A dismiss is never downgraded by a later mark. On a surviving call row that folded duplicate call to-dos, Not mine dismisses the folded ones too (their keys ride the row as `alsoKeys`); every row action first confirms the key is a row of the signed-in user's own snapshot for today (morning or midday), else "That item isn't on your list."
+
+## D711. Morning triage: access, storage and seams (#324, 2026-10-10)
+
+Admins (`manage_users`) can view a teammate's list at `/triage?user=<id>`, read-only; marks are always the signed-in user's own. Two new doc collections, `triage_snapshots` and `triage_marks` (migration 0036_triage), not syncable, wiped by the go-live reset (derived state), readable through `/api/sync/pull` like every collection. Specs 1–3 plug in through `TRIAGE_HOOKS` (`src/lib/triage/hooks.ts`: an at-risk provider and a visit-flag provider, both empty today) — one line each at their merge. Krisp #323 meetings plug in as a second `CallTodoSource` in `src/lib/triage/feeds/calls.ts`. `/recordings/[id]` accepts `?tab=` and `?seg=` so a call line opens at its transcript moment. A snapshot stores at most 150 rows (after ranking). No snapshot pruning yet (about 2 snapshots per person per day).
+
+## D712. Address verification: three states, venue columns, a JS backfill (#325, 2026-10-10)
+
+Every address is `verified`, `needs_check` or `unresolved`, and only `verified` gets drive time. Venues carry the stamp on four new `sites` columns (`geo_status`, `geo_source`, `geo_verified_by`, `geo_verified_at`; migration `0037_address_verification` — generated as 0036 and renumbered at merge because `0036_triage` landed first; hardened per D141). The rule is a **house number**, not `precisionOf`: a geocoded venue verifies only when both the asked street line and the hit's street carry a house number (`geocodedStatus`), and a usable point is a real number pair in range (`isValidPoint`; stored coordinates may be strings and read through `pointOf`). The one-time venue backfill is JS (`ensureVenueGeoStatus`, idempotent, chunked, run by the worklist and the daily drive cron) because SQL would drift from that rule; a NULL row reads through the same rule meanwhile. Any address edit resets the stamp (`geoStampForSave`): no usable coordinates → unresolved, caller-supplied coordinates → judged by the house-number rule; a zip-only edit doesn't move a venue.
+
+## D713. `geo_source = override`; a hand pin is never overwritten (#325, 2026-10-10)
+
+`geo_source` is `geocode` (the geocoder found it), `pin` (a person dropped it in the Fix dialog) or `override` (a person typed coordinates on a venue form or import, judged by the house-number rule). A pin keeps its coordinates even when a save sends different ones for the same address. The **kept-pin guard**: a Retry or pick that comes back weaker than verified never replaces a verified pin — on a venue (`locateVenue`) and in the place book (`fixPlace`, plus a `source <> 'pin'` guard on the write itself so a pin dropped while a Retry was in flight survives) — and the Fix dialog says "Kept your pin — the search found only a town-level match".
+
+## D714. Place book: exact keys, house-number gate, outages write nothing (#325, 2026-10-10)
+
+Every non-venue address (visit, lead, Google event location) lives in `place_book`, keyed by the exact normalized text (lowercase, punctuation stripped, whitespace collapsed) — no fuzzy or name matching. A free-text hit verifies only when (a) the **typed** text's street part (its first line / comma part) leads with a house number, (b) the hit's house number (Nominatim's own `house_number`, else its street's first token) equals that typed number — case-insensitive, one trailing letter allowed (123 = 123A, 123A ≠ 123B) — and (c) the typed text carries a locality after the street, a comma part or a 5-digit ZIP, that matches the hit: a comma part `samePlace()` the hit's city (the venue gate's helper, now in `address-verify/same-place.ts`) or the ZIP equals the hit's postcode (`statusOfFreeTextHit(typed, hit)`, round 2). So "100 Main St", "123", "53703", "4B Conference Room" and "1-800-FLOWERS" never verify, whatever they geocode to. A name such as "Starbucks", "Holiday Inn Express" or "North HS" can geocode to a house-numbered POI hundreds of miles away; it is stored `needs_check` (flagged, no drive time) and a rep fixes or pins it once. A picked suggestion is judged on its own street (`statusOfPickedStreet` — the human chose that exact suggestion, its town included); a hand pin always verifies. A geocoder outage writes nothing (new `searchOrThrow`), so it is never stored as `unresolved`; a row with an empty answer is retried only by a Fix. A Fix is stored under the record's original text, so the next lookup of that text finds it, and `fixPlace` refuses a label whose key isn't the target key (as `loadFixTarget` does) — checked on the untruncated label: the book keys a location on its full text and truncates only the stored label to 300 characters, so a longer location can still be fixed. Every live Nominatim request — place-book passes and Fix retries, the venue Fix retry (free text and town-centre lookup), the Fix dialog, Settings and company-edit type-aheads and the venue re-check — takes a turn on one instance-wide pacer (`address-verify/nominatim-pacer.ts`, ≥ 1.1 s between request starts, like the OSRM pacer), each call keeping its own budget; a Fix retry facing a queue longer than its budget answers "unavailable", a type-ahead facing more than 3 s of queue answers no suggestions.
+
+## D715. Base office for drive time (#325, 2026-10-10)
+
+A rep's day starts and ends at their "Based out of" office, else the company default office (`baseOffice`, as the Account picker already says). "No base set" shows only when no office has coordinates.
+
+## D716. Buffer and per-user state live in blobs (#325, 2026-10-10)
+
+Leg minutes = OSRM route minutes + the rep's buffer. The company default buffer is **15 min** (admin, Settings → Field → Drive time; a non-number is refused, a number is clamped to 0–120 and rounded); a rep may override it on Account. Per-user buffer, stay-over flags and sync state are blobs (`schedule_defaults`, `schedule_prefs:<id>`, `stay_over:<id>`, `drive_sync:<id>`) — no migration. The stay-over toggle ("Staying near last stop") accepts only days in the window **today − 1 … today + 14** (Chicago); a stored key outside it is refused.
+
+## D717. Stops (#325, 2026-10-10)
+
+Consecutive stops at the same point get no leg, nor does a leg under **3 route minutes** (before buffer); a scheduled visit past its end (derived `done`) is still a stop on its day; a Google copy of a visit's own invite (.ics) is de-duplicated against the visit; all-day, self-declined, virtual (URL, video, phone-only) and Peak drive events are never stops. An unverified stop breaks the chain on both sides — its legs are flagged "Address not verified — no drive time", never estimated.
+
+## D718. Cache-mode views, live syncs, no straight line (#325, 2026-10-10)
+
+Page views (/calendar, Home) compute legs in cache mode (place book + `geo_cache` only, never a geocode or OSRM call); a missing route reads "Drive time unavailable — retrying" until a live sync routes it. Live syncs run in `after()`. Route minutes come only from `geo_cache` or live OSRM (paced per instance) — nothing under `drive-plan/` or `drive-sync/` may call the straight-line estimators (a source pin enforces it). `/venue-assessments` and `/companies/[id]` gain `maxDuration = 60` for the visit actions' `after()` re-sync, matching /calendar.
+
+## D719. D144 retired (#325, 2026-10-10)
+
+`addTravelBlock`, the "Traveling from" picker and `travelOriginOptionsAction` are removed; creating, editing or deleting an in-app event re-syncs the rep's drive chain instead. On each rep's first sync the legacy sweep deletes upcoming events titled `Drive to … (auto)` **and** described `Auto-added travel time…`, scanning **today → +180 days** (paged, capped reads, retried up to five times); past ones are left. The agenda hides `peakDrive`-tagged events so app drive blocks aren't doubled.
+
+## D720. Google sync safety (#325, 2026-10-10)
+
+The sync writes only events whose private `peakDrive` = `"1"`, keyed per leg; flagged legs get no event. It never writes past days or days beyond +14; the read window uses Chicago day starts and only fully covered days are diffed; a tagged-event read failure writes nothing; duplicate tagged events for one leg collapse to one. A leg flagged `route_unavailable` (a transient OSRM miss) **keeps** its existing event rather than deleting it. A leg whose route exceeds **360 minutes** is flagged `long_route` ("Over 6 h — check the address", with the stop's Fix) — no minutes, no event, and an existing event for it is removed like any other non-transient flag: a 6-hour drive between two of a rep's stops is almost always a wrong address. Known limit: a **genuine** trip over 6 h stays flagged on every sync — there is no acknowledgement path yet (a rep can't mark it "yes, really"), so that day gets no drive block until one is added. Only the rep's own legs (`<userId>|…` keys) are diffed, so a shared or delegated calendar can't make one rep's sync delete another's events. Drive events are written busy (opaque) with no reminders (`reminders.useDefault = false`, no overrides); drive and D144 deletes send `sendUpdates=none` (other callers of `deleteEvent` still send `all`). Each sync takes the rep's lease (one conditional write on `drive_sync:<id>`, 90 s, renewed before the first write and before the D144 phase; a lost lease writes nothing) and re-lists the tagged events right before diffing; a sync that finds the lease held reports `busy` and leaves the rep stale. A stale mark set during a sync survives that sync's `lastSyncAt` write.
+
+## D721. Triggers (#325, 2026-10-10)
+
+Scheduling, editing or deleting a visit re-syncs the affected days (registered in `after()` before the invite dispatch, so an invite error can't drop it); a stay-over toggle re-syncs its day and the next; a page load re-syncs a rep last synced over 10 min ago; a trigger-sync failure marks the rep stale. Verifying an address re-syncs upcoming visits on it immediately; since a place-book key may also be any rep's Google event location, every active rep is marked stale (next view or cron). The daily pass runs on its **own cron route**, `/api/drive/sync` at 11:00 UTC (CRON_SECRET via `cronAuthFailure`, middleware-exempt): it stamps venues, then re-syncs every rep, least recently synced first, not starting a rep past 50 s in, per-rep try/catch. The cron's deadline reaches each rep's live planner: every geocode / route lookup gets `min(20 s, deadline − now − 5 s)` and falls back to cache mode with less than one request's timeout left, and the D144 phase is skipped (it resumes next sync) with under 10 s left, so a rep started late can't push the route past `maxDuration = 60`. The live triggers (visit change, address verified, stale-on-load, calendar event, stay-over) hand the planner the same kind of deadline — their start + 50 s (`triggerDeadline`) — so their `after()` work stays inside the route's 60 s. Rescheduling a visit updates its existing Google copy (`writeVisitCalendarEvent`, sending `status: "confirmed"` so a copy the rep deleted in Google comes back; on a failed update, or one answered with any other status, the old copy is removed before a fresh insert) instead of inserting a second one that would become a ghost stop. It left the Gmail cron because that route's 60 s budget is already shared by the morning triage build and the photo sync.
+
+## D722. Fix dialog, worklist and booking warnings (#325, 2026-10-10)
+
+Fixing an address (retype → re-geocode, pick a suggestion, drop a pin) is open to **any signed-in user** — a venue Fix was widened from `manage_users` to match `saveVenueAction`; a venue fix writes the venue, anything else the place book. The worklist (Settings → Data → Addresses to verify) is admin-only: visits linked to a venue are covered by the venue row, and unchecked visit/lead addresses show "Not checked yet". While booking a visit (Inbox dialog, visit requests) the address check is debounced (≥ 600 ms, a superseded request dropped) and only warns, never blocks; the visit itself shows the same flag with its Fix.
+
+## D723. Morning triage flags today's unverified visits (#325, 2026-10-10)
+
+Spec 1 fills its `TRIAGE_HOOKS` seam (D711): `visitFlags` runs `unverifiedVisitFlags` (`src/lib/address-verify/triage-flags.ts`), which reads today's visits' address states in cache mode (never geocodes) and gives any that isn't verified the verbatim flag "Address not verified — no drive time". A lookup failure drops the flags, never the visits (the visit feed runs under `allSettled`). The at-risk provider stays empty for spec 3.
+
+## D724. Backfilled venue verifications are re-checked once (#325, 2026-10-10)
+
+The one-time backfill (`ensureVenueGeoStatus`) still marks a venue verified from what it holds — stored coordinates plus a house number in the street line — but those verifications stay identifiable: `geo_status = verified`, `geo_source = geocode`, `geo_verified_at` NULL (`isBackfillVerified`; every live verification, override and pin stamps `geo_verified_at`). No migration. `npm run geo:recheck-venues` (`scripts/geo-recheck-venues.ts` → `src/lib/address-verify/venue-recheck.ts`) re-geocodes exactly those venues through the venue path's own gates (`geocodeVenue`) at ≤ 1 request/second on the shared Nominatim pacer: a hit that passes `geocodedStatus` and lands within 0.5 mi of the stored point is confirmed (`geo_verified_at` stamped, so a re-run skips it); anything else — no hit, a gate failure, a town/street-level hit, or a building hit elsewhere — is downgraded to `needs_check` with its coordinates untouched; a geocoder outage leaves the row for the next run. Every write is conditioned on the backfill shape, so pins and human verifications are never touched. Dry run by default; `--apply` writes, `--yes` for a hosted database, and the target must be named explicitly (`DATABASE_URL` or `PGLITE_PATH` in the command's own environment — `.env.local` is not consulted for it). **Known limit — review before `--apply`:** venue pins and suggestion picks made before #325 (the Settings sidebar's Unlocated venues list, #175) stamped no verification fields, so they are **indistinguishable** from backfill rows and may be downgraded to `needs_check` like any other. Review the dry run's needs_check list first, save the ids of any venue a human already placed correctly to a file (one per line; the dry run's own `needs_check <id> …` lines paste as-is) and apply with `--skip <file>` so they are left alone. Every lookup in the re-check — the free-text search **and** the town-centre lookup the city gate consults (new optional `GeocodeCtx.searchCity`) — is paced and throwing, so any lookup failure counts as an outage (skipped), never as a mismatch that downgrades the venue. With only `PGLITE_PATH` set, a `DATABASE_URL` from `.env.local` is dropped (`resolveExplicitDbTarget`). Running it in production (≈ 25–30 min) or accepting the backfill as is is Jeff's call (MASTER-QUESTIONS Q1).
+## D725–D761. #323 Krisp meeting matcher (2026-10-10)
+
+D725–D737 are the spec's decision table K1–K13
+(`docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md`); D738 onward (K14+) are defaults taken during the build.
+
+- **D725. Pull every Krisp meeting into the app, internal ones too.** The app becomes where meeting notes
   live, not only the customer-facing ones.
-- **D-TBD (#323 K2). Personal until linked.** An unlinked meeting is visible only to the rep(s) whose Krisp account
+- **D726. Personal until linked.** An unlinked meeting is visible only to the rep(s) whose Krisp account
   lists it. Linking to an internal person shares it with that person only; linking to anything external (company,
   venue, external contact, a work record) makes it visible to all Peak staff.
-- **D-TBD (#323 K3). Customer portal only on an explicit "Share with customer".** Staff edit the summary first; the
+- **D727. Customer portal only on an explicit "Share with customer".** Staff edit the summary first; the
   transcript never reaches the portal.
-- **D-TBD (#323 K4). Always suggest, the rep confirms.** Nothing is linked (and so nothing shared) without a tap.
+- **D728. Always suggest, the rep confirms.** Nothing is linked (and so nothing shared) without a tap.
   Confirm all confirms every To-file row with a strong suggestion, applying exactly that row's strong picks.
-- **D-TBD (#323 K5). First sync = last 90 days; Load older pulls another 90 days per tap.**
-- **D-TBD (#323 K6). Krisp to-dos: choose per item, smart default.** Assignee is a Peak person → Task for them;
+- **D729. First sync = last 90 days; Load older pulls another 90 days per tap.**
+- **D730. Krisp to-dos: choose per item, smart default.** Assignee is a Peak person → Task for them;
   assignee is the customer → "Waiting on customer"; no owner → Note on the linked record. The rep can switch any
   before confirming.
-- **D-TBD (#323 K7). Lives in the Inbox** as a separate Meetings box (never mixed into mail), default tab To file,
+- **D731. Lives in the Inbox** as a separate Meetings box (never mixed into mail), default tab To file,
   built as a standalone component so it can move to its own nav page later.
-- **D-TBD (#323 K8). A new `meetings` collection** (migration 0036). Recordings keeps its audio pipeline and attaches
+- **D732. A new `meetings` collection** (migration 0038). Recordings keeps its audio pipeline and attaches
   to the meeting its Krisp import produced (`recording.meetingId`, `meeting.recordingId`).
-- **D-TBD (#323 K9). Attendees are corrected in the app.** Krisp's list ∪ the overlapping Google Calendar event's
+- **D733. Attendees are corrected in the app.** Krisp's list ∪ the overlapping Google Calendar event's
   invite list ∪ manual adds/removes, each resolved to a contact (or offered as new). Krisp's own copy cannot be
   edited (its API has no meeting write).
-- **D-TBD (#323 K10). Speaker mapping.** The rep maps "Speaker_2 → Tom Ellis" once; the app's copy of the transcript,
+- **D734. Speaker mapping.** The rep maps "Speaker_2 → Tom Ellis" once; the app's copy of the transcript,
   notes and to-do owners re-renders with real names. Find-and-replace, no AI.
-- **D-TBD (#323 K11). Matching signals in strength order:** venue/district name in the title → calendar event at that
+- **D735. Matching signals in strength order:** venue/district name in the title → calendar event at that
   time → attendee emails → speaker first names → names in the summary → the rep's scheduled site visit at that time.
   Jeff confirmed titles are usually the venue or district name.
-- **D-TBD (#323 K12). Recordings under 3 minutes are noise** — their own tab, no suggestions, never in To file. A rep
+- **D736. Recordings under 3 minutes are noise** — their own tab, no suggestions, never in To file. A rep
   can override either way (`noiseOverride`).
-- **D-TBD (#323 K13). No AI.** The matcher, the notes rebuild and the to-do defaults are deterministic; D89 holds.
-- **D-TBD (#323 K14). Sync window is a rolling 14 days, with gap widening.** Krisp's list has no last-modified cursor,
+- **D737. No AI.** The matcher, the notes rebuild and the to-do defaults are deterministic; D89 holds.
+- **D738. Sync window is a rolling 14 days, with gap widening.** Krisp's list has no last-modified cursor,
   so a normal sync re-lists `from = max(now − 90d, min(now − 14d, syncedAt − 1d))`: normally 14 days, reaching back a
   day before the last complete sync when that is older (a revoked key or two weeks of errors must not leave a gap),
   never past 90 days. Unchanged meetings are fingerprint-compared (sorted-key JSON, `updatedAt`/`krisp.fetchedAt`
   ignored) and not rewritten.
-- **D-TBD (#323 K15). The first sync is a resumable 90-day pass, then the rolling window.** A rep with no completed
+- **D739. The first sync is a resumable 90-day pass, then the rolling window.** A rep with no completed
   sync runs [`backfillFrom ?? now−90d`, open end) in budgeted batches; any stop (budget, 429, timeout) saves
   `backfillFrom` + `backfillCursor` and the next run (recent or Load older) resumes there. Only completion sets
   `syncedAt`; the first pass never flags meetings removed (its seen-set covers only the last batch). A cursor Krisp
   rejects (400) is dropped so Load older cannot wedge.
-- **D-TBD (#323 K16). Name cores.** A company/venue name is lowercased, de-punctuated and stripped of generic words
+- **D740. Name cores.** A company/venue name is lowercased, de-punctuated and stripped of generic words
   (school, district, high, elementary, isd, church, theatre, pac, inc, the, of…); a venue core also loses venue-type
   words (main, stage, studio, hall, gym, gymnasium, black, box, room…) and the words of the editable Venue types
   labels, and a bare direction (north/south/east/west) is refused. A core under 4 characters is unused. A venue core
   equal to its company's core is dropped, and a venue core shared by more than 3 companies' venues is skipped (a
   "Main Stage" must not name 150 companies). At most 3 weak company suggestions are returned.
-- **D-TBD (#323 K17). Scoring.** Per candidate company: Krisp title hits the core 50 (+10 when the hit came through a venue core), calendar title 30, an attendee
+- **D741. Scoring.** Per candidate company: Krisp title hits the core 50 (+10 when the hit came through a venue core), calendar title 30, an attendee
   email resolving to a contact at the company 60, an email domain mapped to the company 40, the rep's site
   visit/survey overlapping 40, summary text 20, a speaker first name matching a contact's 10. Top ≥ 80 and ≥ 30 ahead
   of the runner-up → strong; ≥ 40 → weak; below 40 → no company suggestion; a weak top also lists runners-up within 30 points, at most 3 companies in total, all weak.
   Internal-only meetings suggest the Peak users found (strong when one resolved by email).
-- **D-TBD (#323 K18). Work-link priority.** For the top company: exactly one overlapping visit/survey of the rep >
+- **D742. Work-link priority.** For the top company: exactly one overlapping visit/survey of the rep >
   the company's single open lead > single active engagement > single active project. Several overlapping visits
   (or several of any kind) suggest no work link and no venue fallback; the reason reads "during N of your visits".
-- **D-TBD (#323 K19). Note-parent priority** when a to-do becomes a note: venue > lead > project > engagement >
+- **D743. Note-parent priority** when a to-do becomes a note: venue > lead > project > engagement >
   customer. An internal-only meeting has no parent, so a note to-do there is refused (reported, not silently dropped).
-- **D-TBD (#323 K20). Sync never touches a filed meeting's links.** Krisp refresh updates the `krisp.*` header,
+- **D744. Sync never touches a filed meeting's links.** Krisp refresh updates the `krisp.*` header,
   transcript, notes and speakers, never `links`, attendee corrections or to-do decisions; it only recomputes
   suggestions. Marking noise on a filed meeting recomputes the flag only.
-- **D-TBD (#323 K21). Dead links never re-privatise.** Visibility follows the stored link ids
+- **D745. Dead links never re-privatise.** Visibility follows the stored link ids
   (`meetingScope`), and a link to a since-deleted record that stays put is left alone by link validation, so a
   meeting never silently falls back to personal when a company, venue or contact it was filed under is deleted; only
   newly added links are checked for existence.
-- **D-TBD (#323 K22). A first name matching both a Peak user and a contact → note,** not a task, because assigning
+- **D746. A first name matching both a Peak user and a contact → note,** not a task, because assigning
   to the wrong person is worse than a note to review. To-do people are scoped to the meeting itself: the users plus
   the linked/suggested company's contacts plus resolved attendee/speaker contacts, never every contact in the book.
-- **D-TBD (#323 K23). To-dos Krisp drops.** An undecided to-do that disappears from Krisp's list is removed from the
+- **D747. To-dos Krisp drops.** An undecided to-do that disappears from Krisp's list is removed from the
   app; a decided one (task/note/waiting/dismissed) is kept with its created record.
-- **D-TBD (#323 K24). Speaker relabel is one pass** over the app's copy (transcript, notes, to-do owners) against the
+- **D748. Speaker relabel is one pass** over the app's copy (transcript, notes, to-do owners) against the
   current speaker map, so a swap (A→B, B→A) cannot cascade; underscore-style labels normalise.
-- **D-TBD (#323 K25). The share guard also fires when re-pointing to another company.** Moving a customer-shared
+- **D749. The share guard also fires when re-pointing to another company.** Moving a customer-shared
   meeting to a different company asks to confirm and unshares unless confirmed, so a summary written for one customer
   never silently becomes visible to another.
-- **D-TBD (#323 K26). Venue and work links depend on their company.** A venue link requires its company, and a work
+- **D750. Venue and work links depend on their company.** A venue link requires its company, and a work
   link must belong to it; changing the company drops the old venue and work unless the same patch sets them. Every
   link id is validated (exists, active, right company) on `setLinks` and `confirmSuggestions`. A venue from search is
   a doc location id, so `linkVenueAction` resolves it to `sites.id` before linking.
-- **D-TBD (#323 K27). Deterministic record ids.** A to-do's task is `T-mtg-<hash>` and its note `N-mtg-<hash>`
+- **D751. Deterministic record ids.** A to-do's task is `T-mtg-<hash>` and its note `N-mtg-<hash>`
   (`todoRecordId(kind, meetingId, key)`, `createTaskOnce` / `addNoteRecord({id})` insert-if-absent), so a lost meeting
   write followed by a re-decide returns the same record instead of a duplicate. The `T-####` allocator's anchored
   regex ignores them.
-- **D-TBD (#323 K28). Refresh from Krisp uses the owner's key,** else a `seenBy` rep's key, since any staff member
+- **D752. Refresh from Krisp uses the owner's key,** else a `seenBy` rep's key, since any staff member
   who can open the meeting may press it. It clears `detailFetchedAt` and runs the recent sync; a meeting older than
   the rolling window is re-fetched only when a backfill covers it.
-- **D-TBD (#323 K29). An unmapped "Speaker N" owner on a waiting item** names the linked company (else "Customer")
+- **D753. An unmapped "Speaker N" owner on a waiting item** names the linked company (else "Customer")
   rather than the raw label.
-- **D-TBD (#323 K30). Meeting tasks join the rep's queue.** Open non-waiting tasks with a `meetingId` assigned to the
+- **D754. Meeting tasks join the rep's queue.** Open non-waiting tasks with a `meetingId` assigned to the
   rep appear on Home's queue, `/queue` and the one-way Google Tasks mirror as "Meeting to-do" rows (read-only, linking
   to the meeting reader); a task also listed as a project task is not duplicated.
-- **D-TBD (#323 K31). Waiting-on-customer tasks are excluded from the queue and Google Tasks.** They are the
+- **D755. Waiting-on-customer tasks are excluded from the queue and Google Tasks.** They are the
   customer's work, not the rep's; they show on Home under "Waiting on others" and on the company/venue page's
   Waiting on customer card (scoped to that card's customer so two companies sharing a legacy venue id do not mix).
-- **D-TBD (#323 K32). `/api/sync/pull` serves only the 7 offline field collections.** It previously accepted any
+- **D756. `/api/sync/pull` serves only the 7 offline field collections.** It previously accepted any
   table name from the query, which also shipped whole quote docs to any signed-in user. A pure
   `pullCollections(param)` (`src/lib/sync/pull-collections.ts`) filters to `SYNCABLE_COLLECTIONS`; the client engine
   only ever asked for `FIELD_COLLECTIONS`. Closes a pre-existing hole found by the final review.
-- **D-TBD (#323 K33). Hot paths read projections, never transcripts.** List rows, the To-file count, the Home badge,
+- **D757. Hot paths read projections, never transcripts.** List rows, the To-file count, the Home badge,
   ⌘K and the company/venue cards use store projections (`countToFile`, `meetingRowsVisibleTo`,
   `meetingRowsLinkedTo`) so no transcript JSON is loaded; ⌘K filters visibility in SQL before LIMIT and matches note
   text through a parameterised `jsonb_path_query`.
-- **D-TBD (#323 K34). Pages degrade if the meetings table is missing.** `meetingsReadOr(promise, fallback, where)`
+- **D758. Pages degrade if the meetings table is missing.** `meetingsReadOr(promise, fallback, where)`
   (`src/lib/meetings/safe-read.ts`) wraps the meetings reads on Home, Inbox, company/venue/people/lead/project/
   engagement/survey cards, the company feed and ⌘K, so a deploy ahead of its migration shows empty, not a 500.
-- **D-TBD (#323 K35). The per-rep sync guard is in-process.** A module-level `inFlight` set stops a rep's double
+- **D759. The per-rep sync guard is in-process.** A module-level `inFlight` set stops a rep's double
   click or overlapping cron/Home trigger; it assumes a single server instance. The task and note ids (K27) are the
   backstop if two instances ever do overlap.
-- **D-TBD (#323 K36). Cron and Home trigger.** The meetings rider runs after vendors and drive photos with
+- **D760. Cron and Home trigger.** The meetings rider runs after vendors and drive photos with
   `min(20 s, 40 s − elapsed)` of budget (reps skipped under 5 s) so a slow Krisp call still ends under the 60 s
   ceiling; Home kicks `syncMeetingsIfStale` through `after()` so it never delays render.
-- **D-TBD (#323 K37). User-facing errors are a closed family.** `MeetingUserError` (access, share-guard, partial,
+- **D761. User-facing errors are a closed family.** `MeetingUserError` (access, share-guard, partial,
   busy) messages reach the user; anything else is logged and returns "Something went wrong — try again." A
   partially applied Decide all to-dos throws `MeetingPartialError` after applying what it can.

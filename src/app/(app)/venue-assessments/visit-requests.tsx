@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { claimVisitAction, releaseVisitAction, removeVisitAction, scheduleVisitAction } from "./visit-actions";
 import { ConfirmButton } from "@/components/confirm-button";
+import AddressFlagBadge, { type AddressFlagVM } from "@/components/address-fix/address-flag";
 
 /**
  * #34 — the open-visit queue rows above the survey cards. Unclaimed rows
@@ -30,6 +31,8 @@ export type VisitRequestVM = {
   leadId: string | null;
   /** claimed by the signed-in user → inline scheduler + Release */
   mine: boolean;
+  /** Spec 2026-10-09 — set when the visit's address isn't verified (no drive time). */
+  addressFlag: AddressFlagVM | null;
 };
 
 const chipBtn: CSSProperties = {
@@ -135,6 +138,12 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
             {" · "}
             {row.requestedLine}
           </div>
+          {row.addressFlag && (
+            <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <AddressFlagBadge flag={row.addressFlag} />
+              {row.mine && <span style={{ fontSize: 11, color: "#9aa0ab" }}>You can still schedule it — it just won’t get drive time.</span>}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
             {row.surveyId && (
               <Link href={`/venue-assessments?id=${encodeURIComponent(row.surveyId)}`} style={linkStyle}>

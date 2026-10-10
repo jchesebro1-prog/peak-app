@@ -55,7 +55,7 @@ const VENDOR_TASK_SOURCE = "auto: vendor ";
  *  complete hooks landed). #122 added the "company" kind: the vendor
  *  price-list task lands on /vendors/<id>, where the Price lists tab is the
  *  screen that clears it. */
-function assignmentHref(link: AssignmentLink, source: string): string {
+export function assignmentHref(link: AssignmentLink, source: string): string {
   if (!link) return "/queue";
   switch (link.kind) {
     case "engagement":

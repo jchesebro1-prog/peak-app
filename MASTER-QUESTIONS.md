@@ -445,23 +445,50 @@ project and opportunity history (D241–D242).
   would be added as a Draft stage; you can also add it yourself in Settings →
   Pipelines)
 
-## P. Krisp meeting matcher (built 2026-10-10, #323)
+## P. Morning triage (built 2026-10-10, #324)
+
+The Start here card on Home and `/triage` rank what needs you each morning and
+midday (D707–D711).
+
+- **P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
+  quote later resubmitted for approval, or a dismissed lead that later
+  breaches its SLA, never returns to your list. ✦ keep permanent ☐ let a new
+  event (resubmit / SLA breach) bring it back: ______
+
+## Q. Address verification + drive time (built 2026-10-10, #325)
+
+Only verified addresses get drive time; the rest are flagged for a one-time
+Fix (D712–D724).
+
+- **Q1.** **Backfilled venues.** On first deploy every venue that already had
+  coordinates and a house number was marked verified without asking the
+  geocoder again. `npm run geo:recheck-venues` re-checks those (≈ 25–30 min,
+  1 request/second; dry run first, then `-- --apply --yes` after a backup) and
+  moves any whose address doesn't come back building-level — or comes back
+  more than half a mile from the stored point — to Needs check. Known limit:
+  venues pinned or picked by hand before #325 (Settings sidebar) are
+  indistinguishable from backfill rows and may be downgraded too — review the
+  dry run's needs_check list before `--apply`, save the ids of any that are
+  already right to a file and apply with `-- --apply --yes --skip <file>`.
+  ✦ run the re-check in production after deploy ☐ accept backfilled venues
+  as verified
+## R. Krisp meeting matcher (built 2026-10-10, #323)
 
 Meetings from Krisp are pulled into Inbox → Meetings, matched by rule, and filed by
-a tap (D-TBD K1–K37). Four calls I made that you may want different.
+a tap (D725–D761). Four calls I made that you may want different.
 
-- **P1.** **Waiting-on-customer tasks** are left out of `/queue` and the Google
+- **R1.** **Waiting-on-customer tasks** are left out of `/queue` and the Google
   Tasks mirror (they are the customer's work, not yours); they show on Home under
   "Waiting on others" and on the company/venue page. ✦ OK
   ☐ also list them in my queue: ______
-- **P2.** **A to-do filed from an internal-only meeting** (no company, so a Task,
+- **R2.** **A to-do filed from an internal-only meeting** (no company, so a Task,
   not a Note) becomes an ordinary task, and tasks are visible to all staff on
   `/calendar` Everyone. ✦ OK
   ☐ keep tasks from internal meetings private to the assignee: ______
-- **P3.** **Noise cut-off** — a recording under 3 minutes is "noise" (own tab, no
+- **R3.** **Noise cut-off** — a recording under 3 minutes is "noise" (own tab, no
   suggestions, never in To file; one tap overrides). ✦ 3 minutes is right
   ☐ use ______ minutes
-- **P4.** **Sharing with a customer** shows the meeting to every portal grant at
+- **R4.** **Sharing with a customer** shows the meeting to every portal grant at
   that customer, not only the person who was in the meeting. ✦ OK
   ☐ limit it to attendees' grants: ______
 

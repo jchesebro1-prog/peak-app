@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { createVisit } from "@/lib/stores/site-visits";
 import { update as updateThread } from "@/lib/stores/comms";
@@ -90,6 +91,13 @@ export async function createSiteVisitAction(
     console.error("createSiteVisitAction: visit mint failed", err);
     return { ok: false, error: "Couldn’t schedule that visit — please try again." };
   }
+
+  // Spec 2026-10-09 triggers: the new visit is a stop on its day's drive chain.
+  // Registered before the invite dispatch, so an invite error can't drop it.
+  after(async () => {
+    const { resyncForVisitChange } = await import("@/lib/drive-sync/sync");
+    await resyncForVisitChange(null, rec).catch((err) => console.error("[drive-sync] visit re-sync failed:", err));
+  });
 
   const inviteStatus: InviteStatus = await dispatchVisitInvite(rec, {
     id: me.id,

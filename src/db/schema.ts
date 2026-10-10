@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, bigint, integer, jsonb, index, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, bigint, integer, jsonb, index, primaryKey, doublePrecision } from "drizzle-orm/pg-core";
 
 export * from "./doc-tables";
 
@@ -371,6 +371,17 @@ export const sites = pgTable(
     nameAuto: boolean("name_auto").notNull().default(false),
     travelMiles: text("travel_miles"),
     travelMin: text("travel_min"),
+    /** Address verification (spec 2026-10-09): "verified" | "needs_check" |
+     *  "unresolved". NULL = never stamped — readers fall back to
+     *  venueGeoStatus() and ensureVenueGeoStatus() stamps it. Only
+     *  "verified" gets drive time. */
+    geoStatus: text("geo_status"),
+    /** "geocode" | "pin" | "override" — where lat/lng came from. A pin is
+     *  never overwritten by the geocoder. */
+    geoSource: text("geo_source"),
+    /** users.id of the person who verified it (a pin or a hand Fix). */
+    geoVerifiedBy: text("geo_verified_by"),
+    geoVerifiedAt: bigint("geo_verified_at", { mode: "number" }),
     /** Placeholder for the later Drive integration (§4.4) — free now. */
     driveFolderId: text("drive_folder_id"),
     deleted: boolean("deleted").notNull().default(false),
@@ -380,6 +391,7 @@ export const sites = pgTable(
   (t) => [
     index("sites_company_idx").on(t.companyId),
     index("sites_deleted_idx").on(t.deleted),
+    index("sites_geo_status_idx").on(t.geoStatus),
   ]
 );
 
@@ -391,3 +403,29 @@ export type ContactEmailRow = typeof contactEmails.$inferSelect;
 export type ContactPhoneRow = typeof contactPhones.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type NewSiteRow = typeof sites.$inferInsert;
+
+/**
+ * Place book (spec 2026-10-09) — every non-venue address the scheduler
+ * touches (site visits without a venue, lead addresses, Google event
+ * locations), one row per EXACT normalized key (lib/address-verify/keys
+ * addressKey). Fixing an address once fixes every record carrying that text.
+ * Not a doc collection: never wiped by the go-live reset, never synced.
+ */
+export const placeBook = pgTable(
+  "place_book",
+  {
+    key: text("key").primaryKey(),
+    /** Original text as first seen. */
+    label: text("label").notNull(),
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    status: text("status").notNull(),
+    /** "geocode" | "pin" */
+    source: text("source").notNull(),
+    verifiedBy: text("verified_by"),
+    verifiedAt: bigint("verified_at", { mode: "number" }),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => [index("place_book_status_idx").on(t.status)]
+);
+export type PlaceBookRow = typeof placeBook.$inferSelect;

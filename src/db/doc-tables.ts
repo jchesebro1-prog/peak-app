@@ -87,7 +87,7 @@ export const notes = docTable("notes"); // attachable note records — the custo
 export const equipmentItems = docTable("equipment_items"); // Rentals module — gear catalog + per-location stock (D129, no prototype ancestor)
 export const equipmentLocations = docTable("equipment_locations"); // Rentals module — warehouse/trailer locations gear stock lives at (D129)
 export const equipmentBookings = docTable("equipment_bookings"); // Rentals module — booking/reservation records against equipment items (D129, Task 2)
-export const meetings = docTable("meetings"); // #323 Krisp meetings synced per rep (docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md; migration 0036)
+export const meetings = docTable("meetings"); // #323 Krisp meetings synced per rep (docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md; migration 0038)
 export const recordings = docTable("recordings"); // in-app site-visit audio → Krisp transcription → write-back (docs/superpowers/specs/2026-09-21-krisp-recordings-design.md §1.1; migration 0021)
 export const vendorProfiles = docTable("vendor_profiles"); // Vendors module (#122) — one profile per vendor company, id = company id; migration 0024_vendor_profiles
 export const specArticles = docTable("spec_articles"); // Specs module (#205) — Part 2 category articles: manufacturers + the "A. General" clause; migration 0025_spec_library
@@ -103,6 +103,8 @@ export const documents = docTable("documents"); // Documents (#218) — company/
 export const portalCarts = docTable("portal_carts"); // Portal catalog (#245) — one cart per portal grant; never a quote row until Generate; migration 0032_portal_carts
 export const rewardLedger = docTable("reward_ledger"); // Customer Rewards (#282 phase 2) — append-only account-credit entries, one company each, deterministic ids (spec 2026-09-30-customer-rewards-design.md §4); migration 0034_reward_ledger
 export const manufacturers = docTable("manufacturers"); // Manufacturer section Part 1 — one record per mfrKey with its image (an unlinked part_documents image); spec 2026-10-02-manufacturer-images-placeholders-design.md; migration 0035_manufacturers
+export const triageSnapshots = docTable("triage_snapshots"); // Morning triage — one frozen ranked list per user per slot, id `<userId>:<YYYY-MM-DD>:<slot>` (spec 2026-10-09-morning-triage-design.md); migration 0036_triage
+export const triageMarks = docTable("triage_marks"); // Morning triage — Done / Snooze / Dismiss per user per item, id `<userId>:<itemKey>`; migration 0036_triage
 
 export const DOC_TABLES = {
   quotes,
@@ -147,6 +149,8 @@ export const DOC_TABLES = {
   spec_record_revisions: specRecordRevisions,
   reward_ledger: rewardLedger,
   manufacturers,
+  triage_snapshots: triageSnapshots,
+  triage_marks: triageMarks,
   meetings,
 } as const;
 

@@ -9433,6 +9433,7 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
  * `TEST187:`-marked (fixtureId / createFixture, D233) so the suite-level
  * teardown drops them — and the sweep catches what a quote spawns. */
 import { registerFixture } from "./test-fixtures";
+import { driveTimeKeysChecks, driveTimeStateChecks, driveTimeVenueStampChecks, driveTimePlaceBookChecks, driveTimeFixChecks, driveTimePlanChecks, driveTimePrefsChecks, driveTimeDiffChecks, driveTimeLoaderChecks, driveTimeSyncChecks, driveTimeNoStraightLinePins, driveTimeAgendaChecks, driveTimeTriggerPins, driveTimeWorklistChecks, driveTimeFixUiPins, driveTimeBookingPins, driveTimeTriageFlagChecks, driveTimeFinalFixChecks, driveTimeRound2Checks } from "./test-drive-time";
 import { meetings323StoreChecks, meetings323MatchChecks, meetings323VisibilityChecks, meetings323RenderChecks, meetings323SyncChecks, meetings323ActionChecks, meetings323UiPins, meetings323ProjectionChecks, meetings323EverywherePins, meetings323EverywhereChecks, meetings323FinalChecks } from "./test-meetings-323";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
@@ -11314,6 +11315,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 }
 
 
+import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -11544,6 +11546,35 @@ seeded()
   .then(() => square322ImageChecks())
   .then(() => square322BatchChecks())
   .then(() => square322Pins())
+  .then(() => driveTimeKeysChecks(ok))
+  .then(() => driveTimeStateChecks(ok))
+  .then(() => driveTimeVenueStampChecks(ok))
+  .then(() => driveTimePlaceBookChecks(ok))
+  .then(() => driveTimeFixChecks(ok))
+  .then(() => driveTimePlanChecks(ok))
+  .then(() => driveTimePrefsChecks(ok))
+  .then(() => driveTimeDiffChecks(ok))
+  .then(() => driveTimeLoaderChecks(ok))
+  .then(() => driveTimeSyncChecks(ok))
+  .then(() => driveTimeNoStraightLinePins(ok))
+  .then(() => driveTimeAgendaChecks(ok))
+  .then(() => driveTimeTriggerPins(ok))
+  .then(() => driveTimeWorklistChecks(ok))
+  .then(() => driveTimeFixUiPins(ok))
+  .then(() => driveTimeBookingPins(ok))
+  .then(() => driveTimeTriageFlagChecks(ok))
+  .then(() => driveTimeFinalFixChecks(ok))
+  .then(() => driveTimeRound2Checks(ok))
+  .then(() => triageFoundationChecks(ok))
+  .then(() => triageRankChecks(ok))
+  .then(() => triageMatchChecks(ok))
+  .then(() => triageFeedChecksA(ok))
+  .then(() => triageFeedChecksB(ok))
+  .then(() => triageCallChecks(ok))
+  .then(() => triageSnapshotChecks(ok))
+  .then(() => triageCronChecks(ok))
+  .then(() => triageActionChecks(ok))
+  .then(() => triageHomeChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .then(() => meetings323StoreChecks(ok))

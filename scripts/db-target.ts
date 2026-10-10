@@ -16,11 +16,11 @@
 import { readFileSync } from "node:fs";
 
 /** Load .env.local into process.env without clobbering ambient values. */
-export function loadEnvLocal(file = ".env.local"): void {
+export function loadEnvLocal(file = ".env.local", env: Record<string, string | undefined> = process.env): void {
   try {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       const m = /^([A-Z_][A-Z0-9_]*)="?([^"\n]*)"?$/.exec(line.trim());
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+      if (m && !env[m[1]]) env[m[1]] = m[2];
     }
   } catch {
     /* no .env.local: rely on the ambient environment */
@@ -49,6 +49,32 @@ export function resolveDbTarget(action: string): { hosted: boolean; label: strin
   const hosted = !!process.env.DATABASE_URL;
   const label = dbTargetLabel();
   console.log(`[db] ${action}: ${label}`);
+  return { hosted, label };
+}
+
+/**
+ * For scripts that need an EXPLICIT target (scripts/geo-recheck-venues.ts):
+ * DATABASE_URL or PGLITE_PATH must already be in this command's own
+ * environment — checked BEFORE .env.local is read, so a forgotten .env.local
+ * value can never pick the database. With only PGLITE_PATH set, a
+ * DATABASE_URL that .env.local supplies is removed afterwards (src/db/index.ts
+ * prefers DATABASE_URL, so leaving it would silently turn a local run into a
+ * hosted one). Returns null when no explicit target was given (nothing read).
+ * `env`, `load` and `log` are injectable for the spec harness.
+ */
+export function resolveExplicitDbTarget(
+  action: string,
+  env: Record<string, string | undefined> = process.env,
+  load: () => void = () => loadEnvLocal(".env.local", env),
+  log: (line: string) => void = (line) => console.log(line)
+): { hosted: boolean; label: string } | null {
+  const explicitUrl = !!env.DATABASE_URL;
+  if (!explicitUrl && !env.PGLITE_PATH) return null;
+  load();
+  if (!explicitUrl) delete env.DATABASE_URL;
+  const hosted = !!env.DATABASE_URL;
+  const label = hosted ? "HOSTED (DATABASE_URL)" : `LOCAL PGlite (${env.PGLITE_PATH})`;
+  log(`[db] ${action}: ${label}`);
   return { hosted, label };
 }
 

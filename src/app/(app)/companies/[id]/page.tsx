@@ -43,6 +43,7 @@ import { defsForType, resolveFieldDefs } from "@/lib/customer-fields";
 import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
 export const metadata = { title: "Company — Quartzite-6" };
+
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import { RewardsCard } from "./rewards-card";
@@ -68,6 +69,13 @@ import {
 } from "../lib";
 import type { SaveCustomerInput } from "../types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { addressStatesForVisits } from "@/lib/address-verify/targets";
+import type { AddressState } from "@/lib/address-verify/types";
+import { FLAG_TEXT } from "@/lib/drive-plan/plan";
+import AddressFlagBadge from "@/components/address-fix/address-flag";
+
+// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
+export const maxDuration = 60;
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -229,6 +237,16 @@ export default async function CustomerDetailPage({
 
   /* ---- site visits (D76) ---- */
   const visits = await visitsForCustomer(cust.id);
+  // Address flags are advisory: a failed lookup shows none, never breaks the page.
+  let visitAddr: Map<string, AddressState> = new Map();
+  try {
+    visitAddr = await addressStatesForVisits(
+      visits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
+      "cache"
+    );
+  } catch (err) {
+    console.error("[address-verify] company visit address states failed", err);
+  }
   // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
   const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
 
@@ -830,6 +848,7 @@ export default async function CustomerDetailPage({
                   searchPlaceholder="Search site visits…"
                   items={visits.map((v) => {
                     const sm = VISIT_STAGE_META[v.stage];
+                    const va = visitAddr.get(v.id);
                     return (
                       <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -864,6 +883,11 @@ export default async function CustomerDetailPage({
                           {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
                           {v.invite?.sentAt ? " · invite sent" : ""}
                         </div>
+                        {v.stage !== "done" && va && va.status !== "verified" && (
+                          <div style={{ marginTop: 3 }}>
+                            <AddressFlagBadge flag={{ text: FLAG_TEXT.unverified, fix: va.fix }} />
+                          </div>
+                        )}
                       </div>
                     );
                   })}

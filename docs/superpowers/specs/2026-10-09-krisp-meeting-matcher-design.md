@@ -30,7 +30,7 @@ customers). The AI question (D89) is reopened only in sub-project 1.
 | K12 | **Recordings under 3 minutes are "noise"** — own tab, no suggestions, never in To file. |
 | K13 | **No AI.** The matcher, the notes rebuild and the to-do defaults are all deterministic (D89 holds for this build). |
 
-Decision numbers (D7xx) are assigned at merge, recomputed from origin/main — other
+Decisions were numbered D725–D761 at merge (D725–D737 = K1–K13). Other
 in-flight branches (#320, #321) are also claiming D707+.
 
 ## Evidence that shaped the matcher

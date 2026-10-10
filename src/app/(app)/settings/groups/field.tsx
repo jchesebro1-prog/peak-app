@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { saveIntakeCatalogAction, saveVisitReasonsAction } from "../actions";
 import { VenueTypesCard } from "../venue-types-card";
+import { DriveDefaultsCard } from "../drive-defaults-card";
 import type { VenueType } from "@/lib/venue-types";
 import { inputStyle, labelStyle, type Run } from "./shared";
 
@@ -13,11 +14,13 @@ import { inputStyle, labelStyle, type Run } from "./shared";
  * Company).
  */
 export function FieldGroup({
+  driveDefaults,
   venueTypes,
   intakeCatalog,
   visitReasons,
   run,
 }: {
+  driveDefaults: { driveBufferMin: number };
   venueTypes: VenueType[];
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];
@@ -75,6 +78,7 @@ export function FieldGroup({
 
   return (
     <>
+      <DriveDefaultsCard initial={driveDefaults.driveBufferMin} />
           <VenueTypesCard
             key={venueTypes.map((t) => t.key).join("|")}
             types={venueTypes}

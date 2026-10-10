@@ -861,10 +861,38 @@ See `.env.example`.
     codes, then Renumber → Apply current type codes on designs already
     opened; try it on a real design in production. Punch item #320.
 
-43. ✅ **Krisp meeting matcher** (#323, D-TBD K1–K37) — every Krisp meeting,
+44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning) and `/api/triage/build` (midday, 17:00 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
+
+45. ✅ **Address verification + drive time** (#325, D712–D724) — every address
+    is `verified` / `needs_check` / `unresolved` (only verified gets drive
+    time): venues carry the stamp on four `sites` columns, every other address
+    lives in the new `place_book` (exact normalized key, house-number rule;
+    migration `0037_address_verification`), with the idempotent JS venue
+    backfill `ensureVenueGeoStatus`. Pure rules in `src/lib/address-verify/`
+    (keys, state, place book, targets, Fix, worklist) and
+    `src/lib/drive-plan/` (`planDay`, stops, Chicago days); a cache-mode
+    loader for page views and a live one for syncs (`geo_cache` or OSRM
+    only — no straight-line fallback). `src/lib/drive-sync/` writes
+    `peakDrive`-tagged Google events per leg (today → +14, leased, re-listed
+    before diffing, flagged legs get none) and sweeps D144's old blocks
+    (D144 retired). Triggers: visits, in-app events, stay-over, address
+    fixes, stale-on-load (10 min) and the daily `/api/drive/sync` cron
+    (11:00 UTC). A Fix dialog (any signed-in user), Settings → Data →
+    Addresses to verify (admin), booking warnings, drive blocks / flags /
+    day totals on `/calendar` and Home, a per-rep buffer (company default
+    15 min, Settings → Field) and Morning triage's unverified-visit flag
+    (`TRIAGE_HOOKS.visitFlags`). Specs 2–3 consume `planDay`,
+    `visitPeople`, `addressStatesForVisits` and the `schedule_*` blobs.
+    Free text verifies only with a typed house number; legs over 6 h are
+    flagged (`long_route`), under 3 min skipped; `npm run geo:recheck-venues`
+    re-checks backfilled venue verifications (D724). Remaining is
+    Jeff-gated: confirm the drive cron fires (a third daily cron), run or
+    waive the re-check, review the worklist, connect rep calendars. Punch
+    item #325.
+46. ✅ **Krisp meeting matcher** (#323, D725–D761) — every Krisp meeting,
     internal ones included, lands in the Inbox as a separate **Meetings** box
     (`/inbox?view=meetings`: To file · Filed · Noise, Sync now, Load older) backed
-    by a new `meetings` collection (migration 0036; `src/lib/stores/meetings.ts`,
+    by a new `meetings` collection (migration 0038; `src/lib/stores/meetings.ts`,
     `src/lib/meetings/`). A resumable 90-day first sync, then a rolling 14-day
     window (`sync.ts`; per-rep in-process guard, daily cron rider, Home
     `after()` trigger), and a deterministic matcher (`match.ts`, `names.ts`: name

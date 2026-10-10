@@ -11591,7 +11591,22 @@ does not want to pre-resize photos.
 - Remaining / Jeff-gated: click Make photos uniform on production after a `db:export` backup and spot-check a few
   parts in the portal and on a client PDF; the first run will take several clicks on a large catalog.
 
-## 323. Krisp meeting matcher — DONE 2026-10-10 (D-TBD K1–K37)
+## 324. Morning triage — "Start here" on Home — DONE 2026-10-10 (D707–D711)
+
+Spec: docs/superpowers/specs/2026-10-09-morning-triage-design.md · Plan: docs/superpowers/plans/2026-10-09-morning-triage.md
+
+Each person's ranked list at the top of Home (top 10, See more → /triage), built from seven feeds — email waiting on a reply, Recordings call to-dos (with the transcript line), tasks + Queue assignments, lead SLA / follow-ups, today's site visits, quotes awaiting you, renewals due — scored by a visible points table with a plain-words reason. Snapshots at 7:00 (Gmail cron rider) and 12:00 (new /api/triage/build cron) Central, lazily on first view, frozen between; Done / Snooze till tomorrow / Not mine per row; admins can view a teammate's list. Deterministic, no AI.
+
+Open: wire spec 3's at-risk provider and specs 1–2's visit flags into `TRIAGE_HOOKS` when those merge (and have spec 3's `normalizeTask` carry `priority`); add a #323 meetings `CallTodoSource` when that lands; check on production that the 17:00 UTC cron fires (`CRON_SECRET` is already set for the Gmail cron).
+
+## 325. Address verification + automatic drive time — DONE 2026-10-10 (D712–D724)
+
+Spec: docs/superpowers/specs/2026-10-09-address-verification-drive-time-design.md · Plan: docs/superpowers/plans/2026-10-09-address-verification-drive-time.md
+
+Every venue, visit, lead and Google event address is verified / needs check / unresolved (venue stamp on `sites`, everything else in the new `place_book`; migration `0037_address_verification`). Only verified addresses get drive time: a pure `planDay` lays drive-to / drive-back blocks (OSRM minutes + buffer, never a straight line) around each rep's stops, flags unverified addresses, a missing base, a route still being fetched and tight gaps, and shows day totals on /calendar and Home. Drive blocks sync to each rep's Google Calendar as `peakDrive`-tagged events (today → +14), re-synced on visit/event/stay-over changes, address fixes, stale page loads and the daily `/api/drive/sync` cron (11:00 UTC). D144's auto travel blocks are retired and swept. A Fix dialog (retype / pick / pin) for anyone signed in, Settings → Data → Addresses to verify for admins, warnings while booking, and the "Address not verified — no drive time" flag on today's visits in Morning triage. Deterministic, no AI. Final review: free text (a Google event "Starbucks", "Holiday Inn Express") verifies only when the typed street also leads with a house number — names are flagged for a one-time Fix; any leg over 6 h is flagged "Over 6 h — check the address" (no event); legs under 3 route minutes are skipped; one shared Nominatim pacer; the drive cron's deadline caps every lookup; a sync diffs only the rep's own legs; drive events are busy with no reminders and drive deletes notify no one; rescheduling a visit moves its Google copy instead of leaving a ghost; `npm run geo:recheck-venues` re-checks backfilled venue verifications (D724).
+
+Open (Jeff-gated): production venue backfill runs itself through the worklist and the drive cron (`ensureVenueGeoStatus`) — open Settings → Data once after deploy to confirm the counts; confirm on production that the 11:00 UTC `/api/drive/sync` cron fires (`CRON_SECRET` is already set); review Addresses to verify for rural schools (route/county-road addresses without a house number land in Needs check); connect each rep's calendar, set the company buffer (Settings → Field → Drive time, default 15 min) and check one real day's drive events in Google. Confirm the Vercel plan allows a **third daily cron** (`/api/drive/sync` joins the Gmail and triage crons). Tell the reps that drive blocks will start appearing on their Google calendars (busy, no reminders, "Drive to …" / "Drive back to …"). After deploy, run the backfill re-check (`DATABASE_URL=… npm run geo:recheck-venues`, then `-- --apply --yes` after `npm run db:export`; ≈ 25–30 min) or accept backfilled venues as verified (MASTER-QUESTIONS Q1).
+## 323. Krisp meeting matcher — DONE 2026-10-10 (D725–D761)
 
 Jeff: every Krisp meeting (customer, internal, site walk) should land in the app, be matched to the right company/
 venue/job/people, and turn its action items into tasks, waiting-on-customer items or notes — without re-typing.
@@ -11607,9 +11622,9 @@ venue/job/people, and turn its action items into tasks, waiting-on-customer item
 - **Spec / plan:** `docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md`,
   `docs/superpowers/plans/2026-10-09-krisp-meeting-matcher.md`. Core modules: `src/lib/meetings/` (`match.ts`,
   `names.ts`, `sync.ts`, `core.ts`, `safe-read.ts`), `src/lib/stores/meetings.ts`, `src/app/(app)/inbox/meetings/`,
-  portal meeting pages, migration 0036 (`meetings`).
+  portal meeting pages, migration 0038 (`meetings`).
 - **Also closed:** `/api/sync/pull` served any collection, including quote docs, to any signed-in user; it now serves
-  only the 7 offline field collections (D-TBD K32).
+  only the 7 offline field collections (D756).
 - **Gates:** `#323` spec checks 211; full `test:specs` 14,837 PASS / 0 FAIL; `tsc --noEmit` 0 errors; `next build` ok;
   `test:smoke` 233 ok. No new env vars (reuses the Krisp connection from #119 and the Gmail/Google OAuth client).
 - **Jeff-gated:**
@@ -11619,8 +11634,8 @@ venue/job/people, and turn its action items into tasks, waiting-on-customer item
   2. Confirm Krisp desktop auto-recorded meetings (not only in-app Recordings) list with their participants; Krisp's
      docs don't say, and the matcher is weaker without attendees.
   3. Review a week of suggestions; send any mis-matches (which meeting, what it picked, what it should have).
-  4. At merge the migration must be renumbered with a fresh journal `when` if `feat/drive-time` or
-     `feat/morning-triage` (both claim 0036) land first.
+  4. ✅ Done at merge: #324/#325 landed 0036/0037 first, so this migration is 0038 with a fresh journal
+     `when`; decisions numbered D725–D761.
 - **Follow-ups:** Krisp calling; a portal request list from Waiting on customer; Meetings as its own nav page; Krisp
   folders/tags as matching signals; sub-project 1 (the site-visit question loop); refresh stale wording about
   `/api/sync/pull` shipping whole quote docs in `src/lib/stores/quotes.ts:317`, `src/lib/quote-share/token.ts:9` and

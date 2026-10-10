@@ -3,6 +3,14 @@
     {
       "path": "/api/gmail/sync",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/triage/build?slot=midday",
+      "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/drive/sync",
+      "schedule": "0 11 * * *"
     }
   ]
 }

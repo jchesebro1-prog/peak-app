@@ -51,6 +51,8 @@ import {
   type GeoSearchHit,
 } from "@/lib/geo";
 import type { Office } from "@/lib/settings";
+import { geocodedStatus } from "@/lib/address-verify/state";
+import { samePlace } from "@/lib/address-verify/same-place";
 
 /** Nominatim asks for <= 1 request/second. 1100ms leaves headroom. */
 export const GEOCODE_DELAY_MS = 1100;
@@ -70,34 +72,9 @@ export type GeocodeFailure = {
   got?: string;
 };
 
-/**
- * Compare place names the way a human would. Lowercase, drop the
- * "City of" / "Town of" / "Village of" prefixes Nominatim sometimes prepends
- * to a perfectly good match, then strip everything that isn't a letter or a
- * digit — so "LaCrosse" == "La Crosse" and "St. Paul" == "St Paul".
- *
- * Deliberately an EXACT comparison after normalizing, never a prefix test:
- * "Portage County" starts with "Portage" and is 64 miles from the City of
- * Portage. That near-miss is the whole reason this gate exists.
- */
-export function samePlace(a: string | null | undefined, b: string | null | undefined): boolean {
-  const norm = (s: string | null | undefined) =>
-    (s || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^(city|town|village|township) of\s+/, "")
-      // Expand the abbreviations place names are written with before the
-      // punctuation is stripped, or "Mt. Horeb" never equals "Mount Horeb"
-      // and "St. Cloud" never equals "Saint Cloud". The #147 run rejected
-      // five perfectly good matches on exactly this.
-      .replace(/\bmt\.?\s+/g, "mount ")
-      .replace(/\bst\.?\s+/g, "saint ")
-      .replace(/\bft\.?\s+/g, "fort ")
-      .replace(/[^a-z0-9]/g, "");
-  const x = norm(a);
-  const y = norm(b);
-  return !!x && !!y && x === y;
-}
+/** Place-name comparison (moved to a pure module so the client-safe
+ * address rules can share it; re-exported here for existing callers). */
+export { samePlace };
 
 export type BackfillReport = {
   /** Venues considered: missing coordinates, and carrying something to geocode. */
@@ -330,14 +307,16 @@ export const ZIP_GATE_MAX_MI = 25;
 async function townCentreFor(
   city: string | null | undefined,
   state: string | null | undefined,
-  centres: Map<string, GeoSearchHit | null>,
-  delayMs: number
+  ctx: GeocodeCtx
 ): Promise<GeoSearchHit | null> {
+  const centres = ctx.townCentres;
   const cleaned = cleanCity(city);
   const key = `${cleaned.toLowerCase()}|${(state || "").trim().toLowerCase()}`;
   if (!centres.has(key)) {
-    await sleep(delayMs);
-    const [c] = await searchCity(cleaned, state, { limit: 1 });
+    await sleep(ctx.delayMs);
+    // ctx.searchCity (the venue re-check's throwing, paced lookup) lets an
+    // outage propagate instead of reading as "no such town" (D724).
+    const [c] = await (ctx.searchCity ?? searchCity)(cleaned, state, { limit: 1 });
     centres.set(key, c && samePlace(cleaned, c.city) ? c : null);
   }
   return centres.get(key) ?? null;
@@ -347,10 +326,9 @@ async function townCentreFor(
 async function nearStatedTown(
   hit: GeoSearchHit,
   row: { city?: string | null; state?: string | null },
-  centres: Map<string, GeoSearchHit | null>,
-  delayMs: number
+  ctx: GeocodeCtx
 ): Promise<boolean> {
-  const centre = await townCentreFor(row.city, row.state, centres, delayMs);
+  const centre = await townCentreFor(row.city, row.state, ctx);
   const d = centre ? haversineMiles(hit, centre) : null;
   return d != null && d <= POSTAL_CITY_RADIUS_MI;
 }
@@ -373,8 +351,17 @@ async function venuesMissingCoords(): Promise<SiteRow[]> {
     );
 }
 
-/** Per-run state for geocodeVenue(): pacing + the stated-town centre cache. */
-export type GeocodeCtx = { delayMs: number; townCentres: Map<string, GeoSearchHit | null> };
+/** Per-run state for geocodeVenue(): pacing + the stated-town centre cache.
+ *  `search` / `searchCity` replace the fail-soft free-text and structured
+ *  lookups (the venue re-check passes paced, THROWING wrappers so an outage —
+ *  including one during the town-centre lookup — is never read as a miss or
+ *  a town mismatch; the venue Fix retry passes the shared paced ones). */
+export type GeocodeCtx = {
+  delayMs: number;
+  townCentres: Map<string, GeoSearchHit | null>;
+  search?: (q: string, opts?: { limit?: number }) => Promise<GeoSearchHit[]>;
+  searchCity?: (city: string | null | undefined, state: string | null | undefined, opts?: { limit?: number }) => Promise<GeoSearchHit[]>;
+};
 
 export function newGeocodeCtx(delayMs: number = GEOCODE_DELAY_MS): GeocodeCtx {
   return { delayMs, townCentres: new Map() };
@@ -438,11 +425,11 @@ async function gateHit(
       // zip code can span a wide area, so "same zip" alone isn't proof once
       // we can actually check against a real centre. An unresolvable stated
       // town (a typo Nominatim also can't place) still gets the zip alone.
-      const centre = await townCentreFor(row.city, row.state, ctx.townCentres, ctx.delayMs);
+      const centre = await townCentreFor(row.city, row.state, ctx);
       const d = centre ? haversineMiles(hit, centre) : null;
       if (d != null && d > ZIP_GATE_MAX_MI)
         return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
-    } else if (!(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))) {
+    } else if (!(precision === "building" && (await nearStatedTown(hit, row, ctx)))) {
       return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
     }
   }
@@ -486,8 +473,8 @@ export async function geocodeVenue(
   // beats a confident wrong answer that misprices every quote on that venue.
   const hits =
     precision === "building"
-      ? await search(q, { limit: 1 })
-      : await searchCity(row.city, row.state, { limit: 1 });
+      ? await (ctx.search ?? search)(q, { limit: 1 })
+      : await (ctx.searchCity ?? searchCity)(row.city, row.state, { limit: 1 });
   const hit = hits[0];
   const attempt1: GeocodeOutcome = hit
     ? await (async (): Promise<GeocodeOutcome> => {
@@ -521,7 +508,7 @@ export async function geocodeVenue(
   const q2 = [street2, city2, [state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   if (q2 && q2 !== q) {
     await sleep(ctx.delayMs);
-    const [hit2] = await search(q2, { limit: 1 });
+    const [hit2] = await (ctx.search ?? search)(q2, { limit: 1 });
     if (hit2) {
       const gate2 = await gateHit(hit2, row, precision, ctx, { cityForCompare: city2, zip5, fallback: true });
       if (gate2.ok) return { ok: true, lat: hit2.lat, lng: hit2.lng, precision, hit: hit2 };
@@ -539,7 +526,7 @@ export async function geocodeVenue(
     // can leave q3 identical to q or q2 — skip the redundant request.
     if (q3 && q3 !== q && q3 !== q2) {
       await sleep(ctx.delayMs);
-      const [hit3] = await search(q3, { limit: 1 });
+      const [hit3] = await (ctx.search ?? search)(q3, { limit: 1 });
       if (hit3) {
         const gate3 = await gateHit(hit3, row, precision, ctx, { cityForCompare: city2, zip5, fallback: true });
         if (gate3.ok) return { ok: true, lat: hit3.lat, lng: hit3.lng, precision, hit: hit3 };
@@ -666,10 +653,26 @@ export async function backfillVenueCoords(opts?: {
 
     for (const r of rows) {
       if (!dryRun) {
+        // Address verification (spec 2026-10-09): a geocode verifies only
+        // when the venue's street line AND the street the geocoder returned
+        // both lead with a house number (and the point is usable); otherwise
+        // it is town/street level → needs_check. precisionOf is NOT the
+        // rule: it calls any non-empty address "building".
+        const status = geocodedStatus(r.address, out.hit);
         await db
           .update(sites)
-          .set({ lat: String(out.lat), lng: String(out.lng), updatedAt: Date.now() })
-          .where(eq(sites.id, r.id));
+          .set({
+            lat: String(out.lat),
+            lng: String(out.lng),
+            geoStatus: status,
+            geoSource: "geocode",
+            geoVerifiedBy: null,
+            geoVerifiedAt: status === "verified" ? Date.now() : null,
+            updatedAt: Date.now(),
+          })
+          // A pin always has coordinates, so it is never a candidate here —
+          // this guard keeps it that way if candidate selection changes.
+          .where(and(eq(sites.id, r.id), or(isNull(sites.geoSource), ne(sites.geoSource, "pin"))));
       }
       report.geocoded++;
       if (precisionOf(r) === "building") report.geocodedBuilding++;
