@@ -26,7 +26,7 @@ import { customItemBomLines, customItemsCost, customItemsOf } from "@/lib/design
 import { accessoriesCost, accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { groupedBomLines, isEditableBomGroupKey, type BomGroupKey, type GroupablePart } from "@/lib/design/grid-bom-groups";
-import { liveConduitRiser } from "@/lib/design/conduit-riser/live";
+import { CONDUIT_RISER_FIELDS, liveConduitRiser } from "@/lib/design/conduit-riser/live";
 import { riserBom, riserEndLabeler, type RiserBomPart } from "@/lib/design/conduit-riser/bom";
 import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { getConduitSizes } from "@/lib/stores/conduit-sizes";
@@ -237,9 +237,11 @@ export async function buildGridQuote(
   // part by the foot, tier-priced like every Grid line; anything that can't
   // price refuses the quote by name. The editor's live BOM runs the same
   // riserBom. An estimate-owned option (#314) prices nothing from the riser.
+  // #328: every riser of the option (lighting + A/V) — a design with no A/V
+  // riser prices exactly as before.
   const estimateOwned = option.estimateOwned === true;
-  const conduitDoc = liveConduitRiser(project, optionId);
-  const riserPriced = !estimateOwned && conduitDoc.runs.length > 0;
+  const conduitDocs = CONDUIT_RISER_FIELDS.map(({ system }) => liveConduitRiser(project, optionId, system));
+  const riserPriced = !estimateOwned && conduitDocs.some((d) => d.runs.length > 0);
   const conduitSizes = !riserPriced ? [] : inputs?.conduitSizes ?? (await getConduitSizes());
   const digits = !riserPriced ? 1 : inputs?.designatorDigits ?? designatorDigitsOf(await getSettings());
   const catalogById = new Map(catalog.map((p) => [p.id, p]));
@@ -269,7 +271,6 @@ export async function buildGridQuote(
     labelPlacements = await fillDesignatorsInMemory(project, nonCurtain, digits, { parts: labelParts, deviceTypes: labelCtx.deviceTypes });
   }
   const riser = riserBom({
-    doc: conduitDoc,
     estimateOwned,
     routes,
     links: riserLinks,
@@ -278,7 +279,7 @@ export async function buildGridQuote(
     conduitParts,
     sizes: conduitSizes,
     placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
-    labelOf: riserEndLabeler(conduitDoc, labelPlacements, (id) => descById.get(id), digits),
+    risers: conduitDocs.map((doc) => ({ doc, labelOf: riserEndLabeler(doc, labelPlacements, (id) => descById.get(id), digits) })),
   });
   if (riser.refusals.length) return { ok: false, error: riser.refusals.map((s) => s + ".").join(" ") };
   const wires = riser.wires;

@@ -29,8 +29,8 @@ import { designatorCodeOf, fillDesignators, formatDesignator, readingCtxOf } fro
 import { partModel } from "@/lib/catalog-rename/sku";
 import type { DeviceTypeContext } from "@/lib/design/device-types";
 import type { CRBoxType, CRDevice, CRLevel, CRSignal, CRWire, CRWireType } from "@/lib/design/conduit-riser/input";
-import type { ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
-import { liveConduitRiser } from "@/lib/design/conduit-riser/live";
+import type { ConduitRiserDoc, ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
+import { liveConduitRiser, riserSystemOf } from "@/lib/design/conduit-riser/live";
 import { deriveView, type CRView, type DeriveInput } from "@/lib/design/conduit-riser/derive";
 import { suggestions, type SuggestResult } from "@/lib/design/conduit-riser/suggest";
 import { riserTables, type TableModel } from "@/lib/design/conduit-riser/tables";
@@ -191,8 +191,10 @@ export function signalOf(partId: string, part: PartLite | undefined, connectionT
 
 const modelOf = (part: PartLite | undefined) => (part && !part.virtual ? partModel(part) : "");
 
-/** Every non-curtain device of the option, as the riser sees it. */
-export function riserDevices(project: GridProject, optionId: string, ctx: RiserPartsContext): CRDevice[] {
+/** Every non-curtain device of the option, as `system`'s riser sees it —
+ *  `inSystem` when its drawing system belongs on that riser (#328:
+ *  lighting → lighting, audio | video → av). */
+export function riserDevices(project: GridProject, optionId: string, ctx: RiserPartsContext, system: ConduitRiserSystem): CRDevice[] {
   const spaces = project.spaces || [];
   const raw = optionSlice(project, optionId).placements.filter((pl) => !pl.curtain);
   const filled = fillDesignators(raw, designatorCodeOf(ctx.partById, ctx.deviceTypes), readingCtxOf(project, ctx.digits));
@@ -207,7 +209,7 @@ export function riserDevices(project: GridProject, optionId: string, ctx: RiserP
       desc,
       model: modelOf(part),
       typeKey: rack ? RACK_TYPE_KEY : part && !part.virtual ? part.deviceType ?? null : null,
-      inSystem: placementSystem(pl, ctx.partById) === "lighting",
+      inSystem: riserSystemOf(placementSystem(pl, ctx.partById)) === system,
       spaceId: space?.id ?? null,
       spaceName: space?.name ?? "",
       levelId: levelOfPlacement(pl, (x) => spaceOf(x, spaces), project),
@@ -217,8 +219,10 @@ export function riserDevices(project: GridProject, optionId: string, ctx: RiserP
   });
 }
 
-/** Every plan wire of the option, plus its RiserLinks between two devices. */
-export function riserWires(project: GridProject, optionId: string, ctx: RiserPartsContext): CRWire[] {
+/** Every plan wire of the option, plus its RiserLinks between two devices —
+ *  `inSystem` for `system`'s riser: a route by its routeSystem, a link when
+ *  either end's device is (#328). */
+export function riserWires(project: GridProject, optionId: string, ctx: RiserPartsContext, system: ConduitRiserSystem): CRWire[] {
   const slice = optionSlice(project, optionId);
   const placementById = new Map<string, GridPlacement>(slice.placements.map((pl) => [pl.id, pl]));
   const cals = project.calibrations || [];
@@ -235,12 +239,12 @@ export function riserWires(project: GridProject, optionId: string, ctx: RiserPar
     cable: cable(r.partId),
     signal: signalOf(r.partId, ctx.partById.get(r.partId), r.connectionType, ctx.wireTypes),
     lengthFt: routeLengthFt(r, cals),
-    inSystem: routeSystem(r, placementById, ctx.partById) === "lighting",
+    inSystem: riserSystemOf(routeSystem(r, placementById, ctx.partById)) === system,
     odIn: ctx.partById.get(r.partId)?.cableOdIn ?? null,
   }));
   const lit = (id: string) => {
     const pl = placementById.get(id);
-    return !!pl && placementSystem(pl, ctx.partById) === "lighting";
+    return !!pl && riserSystemOf(placementSystem(pl, ctx.partById)) === system;
   };
   for (const l of normalizeRiserDoc(project.riser?.[optionId]).links) {
     if (l.from.kind !== "placement" || l.to.kind !== "placement") continue;
@@ -276,15 +280,18 @@ export type ConduitRiserData = {
   placementIds: Set<string>;
 };
 
-export async function loadConduitRiser(project: GridProject, optionId: string, deps: ConduitRiserDeps = {}): Promise<ConduitRiserData> {
+/** One option's riser for `system` (#328: "lighting" = the lighting control
+ *  riser, "av" = the A/V conduit riser) — the stored doc read from that
+ *  system's field, devices and wires flagged in or out of that system. */
+export async function loadConduitRiser(project: GridProject, optionId: string, system: ConduitRiserSystem, deps: ConduitRiserDeps = {}): Promise<ConduitRiserData> {
   const [ctx, boxTypes, sizes] = await Promise.all([
     loadRiserPartsContext(project, deps),
     deps.boxTypes ?? getRiserBoxTypes(),
     deps.sizes ?? getConduitSizes(),
   ]);
-  const doc = liveConduitRiser(project, optionId);
-  const devices = riserDevices(project, optionId, ctx);
-  const wires = riserWires(project, optionId, ctx);
+  const doc = liveConduitRiser(project, optionId, system);
+  const devices = riserDevices(project, optionId, ctx, system);
+  const wires = riserWires(project, optionId, ctx, system);
   const levels: CRLevel[] = (project.levels || []).map((l) => ({ id: l.id, label: l.label, ...(l.elevation ? { elevation: l.elevation } : {}), order: l.order }));
   const wireTypes = riserWireTypes(ctx.wireTypes);
   const input: DeriveInput = { doc, devices, wires, levels, wireTypes };
@@ -326,9 +333,15 @@ export function conduitRiserPagesOf(
  * set's sheets and the DXF download both read, so the printed sheet and the
  * CAD file can't disagree. Skips the loader when there is no run.
  */
-export async function conduitRiserSheetPages(project: GridProject, optionId: string, size: SheetSizeKey, deps: ConduitRiserDeps = {}): Promise<SheetPage[]> {
-  if (!hasOption(project, optionId) || !liveConduitRiser(project, optionId).runs.length) return [];
-  return conduitRiserPagesOf(await loadConduitRiser(project, optionId, deps), drawingArea(size));
+export async function conduitRiserSheetPages(
+  project: GridProject,
+  optionId: string,
+  system: ConduitRiserSystem,
+  size: SheetSizeKey,
+  deps: ConduitRiserDeps = {}
+): Promise<SheetPage[]> {
+  if (!hasOption(project, optionId) || !liveConduitRiser(project, optionId, system).runs.length) return [];
+  return conduitRiserPagesOf(await loadConduitRiser(project, optionId, system, deps), drawingArea(size));
 }
 
 const NO_STORE = "private, no-store";
@@ -353,7 +366,7 @@ export async function conduitRiserDxfResponse(id: string, query: URLSearchParams
     if (!project) return dxfMiss("Design not found.");
     const optionId = resolveOptionId(project, query.get("option"));
     const size = resolveSheetSize(query.get("size"), project.drawingSet?.size);
-    const pages = await conduitRiserSheetPages(project, optionId, size);
+    const pages = await conduitRiserSheetPages(project, optionId, "lighting", size);
     if (!pages.length) return dxfMiss("This design has no lighting control riser yet — add a conduit run first.");
     const n = Number(query.get("page") ?? "1");
     if (!Number.isInteger(n) || n < 1 || n > pages.length) return dxfMiss("That riser sheet doesn't exist.");
@@ -393,10 +406,16 @@ export type RiserPrompt =
  * `joins` means the pair already has a run, so Add extends it; `byOthers`
  * says its wire won't be priced.
  */
-export async function riserPromptFor(project: GridProject, optionId: string, routeId: string, deps: ConduitRiserDeps = {}): Promise<RiserPrompt> {
+export async function riserPromptFor(
+  project: GridProject,
+  optionId: string,
+  system: ConduitRiserSystem,
+  routeId: string,
+  deps: ConduitRiserDeps = {}
+): Promise<RiserPrompt> {
   const none: RiserPrompt = { show: false };
   if (!hasOption(project, optionId)) return none;
-  const data = await loadConduitRiser(project, optionId, deps);
+  const data = await loadConduitRiser(project, optionId, system, deps);
   const s = data.suggestions.items.find((x) => x.routeIds.includes(routeId));
   if (!s) return none;
   const wire = data.input.wires.find((w) => w.kind === "route" && w.id === routeId);

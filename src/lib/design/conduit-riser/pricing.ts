@@ -66,28 +66,45 @@ export function conduitDemand(input: {
   labelOf: (e: RunEnd) => string;
   placementIds?: ReadonlySet<string>;
 }): ConduitDemand {
+  return conduitDemandOf({ ...input, risers: [{ doc: input.doc, labelOf: input.labelOf }] });
+}
+
+/**
+ * #328: conduitDemand over several risers of one option (lighting + A/V) —
+ * each run priced by its own riser's defaults and named by its own riser's
+ * labeler; footage summed per part across all of them and rounded up once.
+ */
+export function conduitDemandOf(input: {
+  risers: ReadonlyArray<{ doc: ConduitRiserDoc; labelOf: (e: RunEnd) => string }>;
+  estimateOwned: boolean;
+  wires: readonly Pick<CRWire, "id" | "kind" | "lengthFt">[];
+  sizes: readonly ConduitSize[];
+  placementIds?: ReadonlySet<string>;
+}): ConduitDemand {
   if (input.estimateOwned) return { lines: [], refusals: [] };
   const wireByKey = new Map(input.wires.map((w) => [`${w.kind}:${w.id}`, w]));
   const partBySize = new Map(input.sizes.filter((s) => s.partId).map((s) => [s.size, s.partId!]));
   const feet = new Map<string, { size: string; ft: number }>();
   const unmapped = new Set<string>();
   const refusals: string[] = [];
-  for (const run of input.doc.runs) {
-    // Cable management is provided by others — never conduit on our quote.
-    if (run.style === "cableMgmt" || !runLive(run, input.placementIds) || !effectivePricing(run, input.doc.defaults).conduit) continue;
-    const partId = partBySize.get(run.size);
-    if (!partId) {
-      unmapped.add(run.size);
-      continue;
+  for (const { doc, labelOf } of input.risers) {
+    for (const run of doc.runs) {
+      // Cable management is provided by others — never conduit on our quote.
+      if (run.style === "cableMgmt" || !runLive(run, input.placementIds) || !effectivePricing(run, doc.defaults).conduit) continue;
+      const partId = partBySize.get(run.size);
+      if (!partId) {
+        unmapped.add(run.size);
+        continue;
+      }
+      const ft = conduitLengthFt(run, wireByKey);
+      if (ft === null) {
+        refusals.push(`${labelOf(run.a)} → ${labelOf(run.b)} needs a length`);
+        continue;
+      }
+      const cur = feet.get(partId) || { size: run.size, ft: 0 };
+      cur.ft += ft;
+      feet.set(partId, cur);
     }
-    const ft = conduitLengthFt(run, wireByKey);
-    if (ft === null) {
-      refusals.push(`${input.labelOf(run.a)} → ${input.labelOf(run.b)} needs a length`);
-      continue;
-    }
-    const cur = feet.get(partId) || { size: run.size, ft: 0 };
-    cur.ft += ft;
-    feet.set(partId, cur);
   }
   const sizeRefusals = [...unmapped].sort().map((size) => `Conduit ${size} has no part — set it in Estimating Rules → Conduit sizes`);
   const lines = [...feet.entries()]

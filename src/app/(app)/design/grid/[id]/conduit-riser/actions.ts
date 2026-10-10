@@ -57,7 +57,7 @@ export async function patchConduitRiserAction(projectId: string, optionId: strin
     if (!kept) return { ok: true };
     op = kept;
   }
-  const r = await patchConduitRiser(projectId, optionId, op);
+  const r = await patchConduitRiser(projectId, optionId, "lighting", op);
   if (!r.ok) return fail(r.reason);
   revalidateConduit(projectId);
   return { ok: true, landed: r.landed };
@@ -74,7 +74,7 @@ export async function acceptSuggestionsAction(
   if (!isStr(projectId) || !isStr(optionId)) return fail("invalid");
   const list = keys === "all" ? "all" : Array.isArray(keys) ? keys.filter(isKey).slice(0, 2000) : null;
   if (!list) return fail("invalid");
-  const r = await acceptSuggestions(projectId, optionId, list);
+  const r = await acceptSuggestions(projectId, optionId, "lighting", list);
   if (!r.ok) return fail(r.reason);
   if (r.accepted) revalidateConduit(projectId);
   return { ok: true, accepted: r.accepted, landed: r.landed };
@@ -85,7 +85,7 @@ export async function acceptSuggestionsAction(
 export async function dismissSuggestionAction(projectId: string, optionId: string, key: string): Promise<Result> {
   await requireUser();
   if (!isStr(projectId) || !isStr(optionId) || !isKey(key)) return fail("invalid");
-  const r = await dismissSuggestion(projectId, optionId, key);
+  const r = await dismissSuggestion(projectId, optionId, "lighting", key);
   if (!r.ok && r.reason !== "invalid") return fail(r.reason);
   revalidateConduit(projectId);
   return { ok: true, landed: r.ok ? r.landed : undefined };
@@ -100,7 +100,7 @@ export async function riserPromptForRouteAction(projectId: string, optionId: str
   if (!isStr(projectId) || !isStr(optionId) || !isStr(routeId)) return { show: false };
   try {
     const project = await getProject(projectId);
-    return project ? await riserPromptFor(project, optionId, routeId) : { show: false };
+    return project ? await riserPromptFor(project, optionId, "lighting", routeId) : { show: false };
   } catch {
     return { show: false };
   }

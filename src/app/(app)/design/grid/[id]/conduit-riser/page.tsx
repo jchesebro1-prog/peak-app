@@ -63,7 +63,7 @@ export default async function ConduitRiserPage({
   // Loaded once and handed to the loader, so nothing reads the catalog twice.
   const [sheets, catalog, gridSymbols, settings] = await Promise.all([listSheets(project.id), listCatalog(), listGridSymbols(), getSettings()]);
   const deviceTypes = await loadDeviceTypeContext(catalog);
-  const data = await loadConduitRiser(project, optionId, { catalog, gridSymbols, settings, deviceTypes });
+  const data = await loadConduitRiser(project, optionId, "lighting", { catalog, gridSymbols, settings, deviceTypes });
 
   const details = data.view.details;
   const active = details.find((d) => d.detail.id === requestedDetail) ?? details[0];

@@ -365,6 +365,8 @@ export type GridEditorProps = {
   designatorDigits: 1 | 2;
   /** #321: the active option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
   conduitRiser?: ConduitRiserDoc | null;
+  /** #328: the active option's A/V conduit riser, the same way; null = none. */
+  avRiser?: ConduitRiserDoc | null;
   /** #321: Estimating Rules → Conduit sizes, and each mapped size's catalog part. */
   conduitSizes?: ConduitSize[];
   conduitParts?: PartLite[];
@@ -1113,6 +1115,7 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  Conduit lines, and its refusals are the quote's. An estimate-owned
    *  option (#314) prices nothing from the riser. */
   const conduitRiser = props.conduitRiser ?? null;
+  const avRiser = props.avRiser ?? null;
   const conduitSizes = props.conduitSizes ?? NO_CONDUIT_SIZES;
   const conduitPartList = props.conduitParts ?? NO_PARTS;
   const conduitParts = useMemo(() => new Map(conduitPartList.map((p) => [p.id, p])), [conduitPartList]);
@@ -1120,7 +1123,6 @@ function useGridEditorImpl(props: GridEditorProps) {
   const riser = useMemo(
     () =>
       riserBom({
-        doc: conduitRiser,
         estimateOwned,
         routes: routes || [],
         links: riserLinks,
@@ -1129,11 +1131,13 @@ function useGridEditorImpl(props: GridEditorProps) {
         conduitParts,
         sizes: conduitSizes,
         placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
-        labelOf: conduitRiser
-          ? riserEndLabeler(conduitRiser, placements, (id) => partById.get(id)?.desc, designatorDigits)
-          : () => "",
+        // #328: both risers — the lighting control riser and the A/V conduit riser.
+        risers: [conduitRiser, avRiser].map((doc) => ({
+          doc,
+          labelOf: doc ? riserEndLabeler(doc, placements, (id) => partById.get(id)?.desc, designatorDigits) : () => "",
+        })),
       }),
-    [conduitRiser, estimateOwned, routes, riserLinks, project.calibrations, parts, conduitParts, conduitSizes, placements, partById, designatorDigits]
+    [conduitRiser, avRiser, estimateOwned, routes, riserLinks, project.calibrations, parts, conduitParts, conduitSizes, placements, partById, designatorDigits]
   );
   const wires = riser.wires;
 

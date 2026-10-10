@@ -3,15 +3,15 @@ import { ensureOptions, hasOption } from "@/lib/design/grid-options";
 import {
   CR_OP_NAMES,
   crMakeId,
-  normalizeConduitRiserDoc,
   patchConduitRiser as applyConduitOp,
   pruneConduitRiser,
   type ConduitRiserDoc,
+  type ConduitRiserSystem,
   type CROp,
   type MakeId,
 } from "@/lib/design/conduit-riser/model";
 import { acceptSuggestion, dismissSuggestion as dismissOne, suggestions } from "@/lib/design/conduit-riser/suggest";
-import { conduitLiveIds, liveConduitRiser } from "@/lib/design/conduit-riser/live";
+import { conduitLiveIds, conduitRiserField, liveConduitRiser, normalizeStoredRiser } from "@/lib/design/conduit-riser/live";
 import { loadRiserPartsContext, riserWires, type ConduitRiserDeps } from "@/lib/design/conduit-riser-server";
 import type { Landed } from "@/lib/design/conduit-riser/edit";
 import { getProject, type GridProject } from "./grid-projects";
@@ -27,6 +27,11 @@ import { getProject, type GridProject } from "./grid-projects";
  * project's `updatedAt` the write was applied over and the one it left
  * (`landed`; equal when nothing was written) — the editor's layout-undo
  * stack is tied to that version.
+ *
+ * #328: every write names its riser `system` — "lighting" (the lighting
+ * control riser, `conduitRiser`) or "av" (the A/V conduit riser,
+ * `avRiser`). The doc is read and written as that system whatever it says
+ * itself, and suggestions come only from that system's wires.
  */
 
 export type ConduitRiserResult = { ok: true; landed: Landed } | { ok: false; reason: "not-found" | "no-such-option" | "invalid" };
@@ -40,6 +45,7 @@ const SAME = Symbol("same");
 async function writeConduit(
   projectId: string,
   optionId: string,
+  system: ConduitRiserSystem,
   step: (p: GridProject, doc: ConduitRiserDoc, placementIds: ReadonlySet<string>) => ConduitRiserDoc | null | typeof SAME
 ): Promise<ConduitRiserResult> {
   let refusal: Refusal | null = null;
@@ -52,13 +58,14 @@ async function writeConduit(
     }
     ensureOptions(p);
     const live = conduitLiveIds(p, optionId);
-    const next = step(p, liveConduitRiser(p, optionId), live.placementIds);
+    const next = step(p, liveConduitRiser(p, optionId, system), live.placementIds);
     if (next === SAME) return;
     if (!next) {
       refusal = "invalid";
       return;
     }
-    p.conduitRiser = { ...(p.conduitRiser || {}), [optionId]: normalizeConduitRiserDoc(pruneConduitRiser(next, live)) };
+    const field = conduitRiserField(system);
+    p[field] = { ...(p[field] || {}), [optionId]: normalizeStoredRiser(pruneConduitRiser(next, live), system) };
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
@@ -66,13 +73,17 @@ async function writeConduit(
   return r ? { ok: false, reason: r } : { ok: true, landed: { before, after: updated.updatedAt || 0 } };
 }
 
+/** The two riser systems, whitelisted — a forged system never reaches a field name. */
+const isSystem = (v: unknown): v is ConduitRiserSystem => v === "lighting" || v === "av";
+
 const isOp = (op: unknown): op is CROp =>
   !!op && typeof op === "object" && (CR_OP_NAMES as readonly string[]).includes((op as { op?: unknown }).op as string);
 
 /** One layout / detail / stub / run / level / note / defaults edit. */
-export async function patchConduitRiser(projectId: string, optionId: string, op: CROp): Promise<ConduitRiserResult> {
+export async function patchConduitRiser(projectId: string, optionId: string, system: ConduitRiserSystem, op: CROp): Promise<ConduitRiserResult> {
   if (!isOp(op)) return { ok: false, reason: "invalid" };
-  return writeConduit(projectId, optionId, (_p, doc, placementIds) => {
+  if (!isSystem(system)) return { ok: false, reason: "invalid" };
+  return writeConduit(projectId, optionId, system, (_p, doc, placementIds) => {
     const res = applyConduitOp(doc, op, makeId, placementIds);
     return res.changed ? res.doc : null;
   });
@@ -87,18 +98,20 @@ export async function patchConduitRiser(projectId: string, optionId: string, op:
 export async function acceptSuggestions(
   projectId: string,
   optionId: string,
+  system: ConduitRiserSystem,
   keys: string[] | "all",
   deps: ConduitRiserDeps = {}
 ): Promise<{ ok: true; accepted: number; landed: Landed } | Extract<ConduitRiserResult, { ok: false }>> {
+  if (!isSystem(system)) return { ok: false, reason: "invalid" };
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
   const ctx = await loadRiserPartsContext(project, deps);
   let accepted = 0;
   const want = keys === "all" ? null : new Set(Array.isArray(keys) ? keys.filter((k) => typeof k === "string") : []);
-  const r = await writeConduit(projectId, optionId, (p, doc, placementIds) => {
+  const r = await writeConduit(projectId, optionId, system, (p, doc, placementIds) => {
     let next = doc;
     accepted = 0;
-    for (const s of suggestions(doc, riserWires(p, optionId, ctx)).items) {
+    for (const s of suggestions(doc, riserWires(p, optionId, ctx, system)).items) {
       if (want && !want.has(s.key)) continue;
       const res = acceptSuggestion(next, s, makeId, placementIds);
       if (res.changed) {
@@ -115,15 +128,16 @@ export async function acceptSuggestions(
 export async function dismissSuggestion(
   projectId: string,
   optionId: string,
+  system: ConduitRiserSystem,
   key: string,
   deps: ConduitRiserDeps = {}
 ): Promise<ConduitRiserResult> {
-  if (typeof key !== "string" || !key) return { ok: false, reason: "invalid" };
+  if (typeof key !== "string" || !key || !isSystem(system)) return { ok: false, reason: "invalid" };
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
   const ctx = await loadRiserPartsContext(project, deps);
-  return writeConduit(projectId, optionId, (p, doc) => {
-    const s = suggestions(doc, riserWires(p, optionId, ctx)).items.find((x) => x.key === key);
+  return writeConduit(projectId, optionId, system, (p, doc) => {
+    const s = suggestions(doc, riserWires(p, optionId, ctx, system)).items.find((x) => x.key === key);
     if (!s) return null;
     const res = dismissOne(doc, s);
     return res.changed ? res.doc : null;

@@ -50,7 +50,15 @@ import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
 import type { Landed } from "@/lib/design/conduit-riser/edit";
-import { conduitRemovedBetween, pruneConduitRisersIn, restoreConduitItems, type ConduitRemoved } from "@/lib/design/conduit-riser/live";
+import {
+  CONDUIT_RISER_FIELDS,
+  conduitRemovedAll,
+  conduitRisersSnapshot,
+  normalizeStoredRiser,
+  pruneConduitRisersIn,
+  restoreConduitBundle,
+  type ConduitRemovedBySystem,
+} from "@/lib/design/conduit-riser/live";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -249,6 +257,8 @@ export type GridRevision = {
   /** Conduit riser documents at snapshot time (#321). Absent on older
    *  snapshots — restore then clears them. */
   conduitRiser?: Record<string, ConduitRiserDoc>;
+  /** A/V conduit riser documents at snapshot time (#328) — same rule. */
+  avRiser?: Record<string, ConduitRiserDoc>;
 };
 
 /**
@@ -359,6 +369,10 @@ export type GridProject = {
    *  know: details, pinned tags, stubs, accepted conduit runs, dismissals,
    *  power types, notes and pricing defaults. Devices and wires stay derived. */
   conduitRiser?: Record<string, ConduitRiserDoc>;
+  /** The A/V conduit riser per option id (#328) — the same document, read
+   *  as system "av" (the field is authoritative). Every path that carries
+   *  a riser iterates CONDUIT_RISER_FIELDS. */
+  avRiser?: Record<string, ConduitRiserDoc>;
   /** Riser levels (#321) — the floor lines device tags sit on, in `order`. */
   levels?: GridLevel[];
   /** Default level per sheet id (#321); a device's space level wins. On the
@@ -1226,8 +1240,11 @@ export async function removePlacement(
 export type RemovedBundle = {
   placements: GridPlacement[];
   riser: RiserRemoved;
-  /** #321: conduit runs, pinned tags and dismissals the delete took, per option. Absent = none. */
-  conduit?: ConduitRemoved;
+  /** #321: conduit runs, pinned tags and dismissals the delete took, per
+   *  riser system then option (#328). Absent = none. A bundle cut before
+   *  #328 carries the bare lighting shape (per option) — restoreConduitBundle
+   *  reads both. */
+  conduit?: ConduitRemovedBySystem;
 };
 /** `landed` (batchEdit's writes): the project's `updatedAt` before and after — the conduit riser editor's undo stack follows it. */
 export type BatchResult<T> = { ok: true; project: GridProject; value: T; landed?: Landed } | { ok: false; error: string };
@@ -1334,9 +1351,9 @@ export async function removePlacements(projectId: string, ids: string[]): Promis
       p.riser = pruneRisers(p.riser, { placementIds: gone });
       riser = riserRemovedBetween(before, p.riser);
     }
-    const conduitBefore = p.conduitRiser ? (JSON.parse(JSON.stringify(p.conduitRiser)) as Record<string, ConduitRiserDoc>) : undefined;
+    const conduitBefore = conduitRisersSnapshot(p);
     pruneConduitRisersIn(p);
-    const conduit = conduitRemovedBetween(conduitBefore, p.conduitRiser);
+    const conduit = conduitRemovedAll(conduitBefore, p);
     return { placements, riser, ...(Object.keys(conduit).length ? { conduit } : {}) };
   });
 }
@@ -1616,7 +1633,7 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
     }
     // #321: the conduit runs, pinned tags and dismissals that went with them —
     // untrusted client input, cleaned and own-option-checked by the helper.
-    restoreConduitItems(p, bundle?.conduit);
+    restoreConduitBundle(p, bundle?.conduit);
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, error: "Design not found." };
@@ -2221,12 +2238,12 @@ export async function addOption(
       if (srcRiser) {
         doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, linkMap) };
       }
-      // …and its own conduit riser, runs re-pointed at the copied devices,
-      // wires and links (#321).
-      const srcConduit = doc.conduitRiser?.[input.copyFromOptionId];
-      if (srcConduit) {
-        const idMap = new Map([...copied.idMap, ...linkMap]);
-        doc.conduitRiser = { ...doc.conduitRiser, [option.id]: copyConduitRiserDoc(srcConduit, idMap, crMakeId) };
+      // …and its own conduit risers, runs re-pointed at the copied devices,
+      // wires and links (#321) — every system's (#328).
+      const conduitIdMap = new Map([...copied.idMap, ...linkMap]);
+      for (const { system, field } of CONDUIT_RISER_FIELDS) {
+        const srcConduit = doc[field]?.[input.copyFromOptionId];
+        if (srcConduit) doc[field] = { ...doc[field], [option.id]: copyConduitRiserDoc(normalizeStoredRiser(srcConduit, system), conduitIdMap, crMakeId) };
       }
       // The copied placements keep their auto tags, so the copy carries the
       // source option's Auto choices with them (#211, D312).
@@ -2294,10 +2311,13 @@ export async function removeOption(
       delete riser[optionId];
       doc.riser = riser;
     }
-    if (doc.conduitRiser && optionId in doc.conduitRiser) {
-      const conduit = { ...doc.conduitRiser };
-      delete conduit[optionId];
-      doc.conduitRiser = conduit;
+    for (const { field } of CONDUIT_RISER_FIELDS) {
+      const stored = doc[field];
+      if (stored && optionId in stored) {
+        const conduit = { ...stored };
+        delete conduit[optionId];
+        doc[field] = conduit;
+      }
     }
     // A legacy single estimate belongs to the pre-removal first option (#211, D312).
     if (doc.autoEstimate) {
@@ -2491,8 +2511,10 @@ function snapshotOf(
     routes: [...(p.routes || [])],
     // Deep copy: the riser document is nested and patched in place later.
     riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
-    // The conduit riser is design state too (#321) — deep-copied the same way.
-    ...(p.conduitRiser ? { conduitRiser: JSON.parse(JSON.stringify(p.conduitRiser)) as Record<string, ConduitRiserDoc> } : {}),
+    // The conduit risers are design state too (#321, every system #328) — deep-copied the same way.
+    ...Object.fromEntries(
+      CONDUIT_RISER_FIELDS.flatMap(({ field }) => (p[field] ? [[field, JSON.parse(JSON.stringify(p[field])) as Record<string, ConduitRiserDoc>]] : []))
+    ),
     // Riser levels are design state too (#321); a space's level rides in `spaces`.
     levels: (p.levels || []).map((l) => ({ ...l })),
     sheetLevels: { ...(p.sheetLevels || {}) },
@@ -2642,11 +2664,14 @@ export async function restoreRevision(
     // The conduit riser comes back with the plan it annotates (#321), kept
     // only for options that exist after the restore; a snapshot cut before
     // it existed clears it (the snapshot just pushed above holds the current one).
-    const restoredConduit = Object.fromEntries(
-      Object.entries(target.conduitRiser || {}).filter(([k]) => liveOptionIds.has(k)).map(([k, v]) => [k, JSON.parse(JSON.stringify(v)) as ConduitRiserDoc])
-    );
-    if (Object.keys(restoredConduit).length) doc.conduitRiser = restoredConduit;
-    else delete doc.conduitRiser;
+    // Every system's riser the same way (#328).
+    for (const { field } of CONDUIT_RISER_FIELDS) {
+      const restoredConduit = Object.fromEntries(
+        Object.entries(target[field] || {}).filter(([k]) => liveOptionIds.has(k)).map(([k, v]) => [k, JSON.parse(JSON.stringify(v)) as ConduitRiserDoc])
+      );
+      if (Object.keys(restoredConduit).length) doc[field] = restoredConduit;
+      else delete doc[field];
+    }
     for (const k of Object.keys(restoredEsts)) if (!liveOptionIds.has(k)) delete restoredEsts[k];
     if (Object.keys(restoredEsts).length) doc.autoEstimate = restoredEsts;
     else delete doc.autoEstimate;

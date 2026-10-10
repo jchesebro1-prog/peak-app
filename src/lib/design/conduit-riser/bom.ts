@@ -13,13 +13,18 @@
  *
  * An estimate-owned option (#314) prices nothing from the riser. Pure and
  * client-safe (the grid-bom rule).
+ *
+ * #328: an option carries up to two risers (lighting + A/V). `risers` lists
+ * every one — wire by others is the union of each riser's, conduit demand
+ * sums every riser's runs, refusals from all of them, each sentence once.
+ * The legacy single `doc` + `labelOf` still works (one riser).
  */
 
 import { routeLengthFt, routeLines, type BomLine, type PartLite, type RouteLite } from "../grid-bom";
 import { formatDesignator } from "../designators";
 import type { Calibration } from "@/lib/annotations";
 import type { ConduitRiserDoc, RunEnd } from "./model";
-import { conduitDemand, wireByOthers, type ConduitSize } from "./pricing";
+import { conduitDemandOf, wireByOthers, type ConduitSize } from "./pricing";
 
 /** A conduit part's priced slice (a catalog row — tier-priced on the server). */
 export type RiserBomPart = { desc: string; unit: string; list: number; cost: number };
@@ -42,9 +47,14 @@ export type RiserBom<R, L> = {
   refusals: string[];
 };
 
+/** One riser as riserBom reads it: normalized and pruned (liveConduitRiser), null = none, and its run-end labeler. */
+export type RiserBomRiser = { doc: ConduitRiserDoc | null; labelOf: (e: RunEnd) => string };
+
 export function riserBom<R extends RouteLite, L extends { id: string; partId: string; lengthFt: number }>(input: {
-  /** The option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
-  doc: ConduitRiserDoc | null;
+  /** Every riser of the option (#328) — wins over `doc`/`labelOf`. */
+  risers?: readonly RiserBomRiser[];
+  /** The option's (one) conduit riser, normalized and pruned (liveConduitRiser); null = none. */
+  doc?: ConduitRiserDoc | null;
   estimateOwned: boolean;
   routes: readonly R[];
   links: readonly L[];
@@ -56,15 +66,23 @@ export function riserBom<R extends RouteLite, L extends { id: string; partId: st
   sizes: readonly ConduitSize[];
   /** The option's non-curtain device ids — a run to anything else prices nothing. */
   placementIds: ReadonlySet<string>;
-  labelOf: (e: RunEnd) => string;
+  labelOf?: (e: RunEnd) => string;
 }): RiserBom<R, L> {
-  const { doc, estimateOwned, cals, parts } = input;
-  if (!doc || estimateOwned || !doc.runs.length) {
+  const { estimateOwned, cals, parts } = input;
+  const risers = (input.risers ?? [{ doc: input.doc ?? null, labelOf: input.labelOf ?? (() => "") }]).filter(
+    (r): r is { doc: ConduitRiserDoc; labelOf: (e: RunEnd) => string } => !!r.doc && r.doc.runs.length > 0
+  );
+  if (estimateOwned || !risers.length) {
     const routes = [...input.routes];
     const links = [...input.links];
     return { routes, links, wires: routeLines(routes, parts, cals, links), byOthers: [], conduit: [], conduitValue: 0, conduitCost: 0, refusals: [] };
   }
-  const off = wireByOthers(doc, false, input.placementIds);
+  const off = { routeIds: new Set<string>(), linkIds: new Set<string>() };
+  for (const { doc } of risers) {
+    const o = wireByOthers(doc, false, input.placementIds);
+    o.routeIds.forEach((id) => off.routeIds.add(id));
+    o.linkIds.forEach((id) => off.linkIds.add(id));
+  }
   const routes = input.routes.filter((r) => !off.routeIds.has(r.id));
   const links = input.links.filter((l) => !off.linkIds.has(l.id));
   const offRoutes = input.routes.filter((r) => off.routeIds.has(r.id));
@@ -78,7 +96,7 @@ export function riserBom<R extends RouteLite, L extends { id: string; partId: st
   ];
   // A size mapped to a part that has left the catalog prices like an unmapped one.
   const sizes = input.sizes.map((s) => (s.partId && !input.conduitParts.has(s.partId) ? { size: s.size } : s));
-  const demand = conduitDemand({ doc, estimateOwned: false, wires, sizes, labelOf: input.labelOf, placementIds: input.placementIds });
+  const demand = conduitDemandOf({ risers, estimateOwned: false, wires, sizes, placementIds: input.placementIds });
   let conduitValue = 0;
   let conduitCost = 0;
   const conduit: BomLine[] = demand.lines.map((d) => {

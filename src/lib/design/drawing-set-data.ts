@@ -140,7 +140,7 @@ export async function loadDrawingSetData(
   const sheetById = new Map(sheets.map((s) => [s.id, s]));
   // E-502… (#321): the lighting control riser, once the option has a conduit
   // run — the same pages the DXF download writes.
-  const conduitRiserPages = await conduitRiserSheetPages(project, optionId, size, { catalog, gridSymbols, settings, deviceTypes });
+  const conduitRiserPages = await conduitRiserSheetPages(project, optionId, "lighting", size, { catalog, gridSymbols, settings, deviceTypes });
   const { all, included } = buildSheetList({
     planGroups: groups,
     sourceNames,

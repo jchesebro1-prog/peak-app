@@ -397,7 +397,8 @@ export default async function GridEditorPage({
       schedule={schedule}
       deviceTypes={deviceTypes.types}
       designatorDigits={designatorDigitsOf(settings)}
-      conduitRiser={liveConduitRiser(designed, activeOptionId)}
+      conduitRiser={liveConduitRiser(designed, activeOptionId, "lighting")}
+      avRiser={liveConduitRiser(designed, activeOptionId, "av")}
       conduitSizes={conduitSizes}
       conduitParts={conduitParts}
       symbolUrls={symbolUrls}
