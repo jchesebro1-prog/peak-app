@@ -543,10 +543,12 @@ async function buildImportDedup(): Promise<Set<string>> {
       if (m.gmailId) known.add(m.gmailId);
     }
   }
-  for (const d of await listDocs<{ id: string; invite?: { gmailId?: string } }>(
+  for (const d of await listDocs<{ id: string; invite?: { gmailId?: string }; invites?: Array<{ gmailId?: string | null } | null> }>(
     "site_visits"
   )) {
     if (d.invite?.gmailId) known.add(d.invite.gmailId);
+    // Spec 2026-10-09 site-visit scheduling — one sent invite per recipient.
+    for (const r of Array.isArray(d.invites) ? d.invites : []) if (r?.gmailId) known.add(r.gmailId);
   }
   return known;
 }

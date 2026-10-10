@@ -4,10 +4,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { claimVisit, getVisit, releaseVisit, removeVisit, scheduleVisit } from "@/lib/stores/site-visits";
-import { dispatchVisitInvite, type InviteStatus } from "@/lib/visit-invite";
-import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
-import { getConnectionInfo } from "@/lib/gmail/connections";
-import { allUsers } from "@/lib/users";
+import { cancelVisitInvites, dispatchVisitInvite, type InviteStatus, type RecipientResult } from "@/lib/visit-invite";
 
 /**
  * #34 visit-queue mutations — the LEAD claim model (claimLeadAction:
@@ -41,43 +38,23 @@ export async function releaseVisitAction(id: string) {
   return { ok: true as const };
 }
 
-/** The person's opted-in calendar key, or null (mirrors schedule/actions.ts's
- *  private calendarKeyFor — kept a separate copy since that one is a
- *  scheduler-popover file this punch intentionally stays out of). */
-async function calendarKeyFor(person: string): Promise<string | null> {
-  if (!gmailEnabled() || !person) return null;
-  const user = (await allUsers()).find((u) => u.name === person);
-  if (!user) return null;
-  const key = personalKey(user.id);
-  const info = await getConnectionInfo(key);
-  return info && hasCalendarScope(info.scope) ? key : null;
-}
-
 /**
- * Delete a site visit. If it mirrored a direct Google Calendar event
- * (googleEventId, phase 2 — not yet written anywhere, but the field is
- * live), that event is removed best-effort first; a calendar failure never
- * blocks the delete. Called directly (not a form action) so the client
- * navigates/refreshes on success.
+ * Delete a site visit. Everyone invited (lead + attendees) gets a
+ * cancellation first — their calendar copy deleted, or a METHOD:CANCEL .ics
+ * with the same UID (spec 2026-10-09 site-visit scheduling); an invite
+ * failure never blocks the delete. Called directly (not a form action) so
+ * the client navigates/refreshes on success.
  */
 export async function removeVisitAction(
   id: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requireUser();
+  const me = await requireUser();
   if (!id) return { ok: false, error: "Missing visit id." };
   const v = await getVisit(id);
   if (!v) return { ok: false, error: "That visit could not be found." };
-  if (v.googleEventId) {
-    try {
-      const key = await calendarKeyFor(v.assignedTo);
-      if (key) {
-        const { deleteEvent } = await import("@/lib/google/calendar");
-        await deleteEvent(key, v.googleEventId);
-      }
-    } catch (error) {
-      console.error("[site-visits] calendar delete failed:", id, error);
-    }
-  }
+  // Spec 2026-10-09 site-visit scheduling — everyone invited gets a
+  // cancellation (calendar delete / METHOD:CANCEL). Never blocks the delete.
+  await cancelVisitInvites(v, { id: me.id, name: me.name });
   await removeVisit(id);
   // Spec 2026-10-09 triggers: the removed stop's day (and the next) re-syncs for everyone on it.
   const removed = v;
@@ -92,7 +69,7 @@ export async function removeVisitAction(
 export async function scheduleVisitAction(
   id: string,
   input: { startAt: number; endAt: number }
-): Promise<{ ok: true; inviteStatus: InviteStatus } | { ok: false; error: string }> {
+): Promise<{ ok: true; inviteStatus: InviteStatus; invites: RecipientResult[] } | { ok: false; error: string }> {
   const me = await requireUser();
   if (!(input.startAt > 0) || !(input.endAt > input.startAt))
     return { ok: false, error: "Bad time range" };
@@ -110,9 +87,7 @@ export async function scheduleVisitAction(
     const { resyncForVisitChange } = await import("@/lib/drive-sync/sync");
     await resyncForVisitChange(prevVisit, nextVisit).catch((err) => console.error("[drive-sync] visit re-sync failed:", err));
   });
-  const inviteStatus: InviteStatus = fresh
-    ? await dispatchVisitInvite(fresh, { id: me.id, name: me.name })
-    : "failed";
+  const report = fresh ? await dispatchVisitInvite(fresh, { id: me.id, name: me.name }) : null;
   revalidatePath("/", "layout");
-  return { ok: true, inviteStatus };
+  return { ok: true, inviteStatus: report?.status ?? "failed", invites: report?.recipients ?? [] };
 }

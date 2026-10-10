@@ -4,9 +4,13 @@
    Doc fixtures use fixtureId("visits", …) + createFixture and are dropped with
    dropFixtures("visits"); blob rows use TESTvisits: ids and are hard-deleted in
    each check's own finally. */
+import { readFileSync } from "node:fs";
 import type { AddressState, LatLng } from "@/lib/address-verify/types";
-import { stopsForDay, visitPeople } from "@/lib/drive-plan/stops";
-import { createVisit, getVisit, scheduleVisit, updateVisitBooking } from "@/lib/stores/site-visits";
+import { isVisitIcsCopy, stopsForDay, visitPeople } from "@/lib/drive-plan/stops";
+import { buildIcs } from "@/lib/ics";
+import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
+import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
+import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 
@@ -17,6 +21,14 @@ const DAY = "2036-10-15"; // a Wednesday, CDT (UTC-5), far in the future so "sch
 const at = (hh: number, mm = 0, plusDays = 0) => Date.UTC(2036, 9, 15 + plusDays, hh + 5, mm);
 const P1: LatLng = { lat: 44.0, lng: -88.0 };
 const okAddr = (p: LatLng, key: string): AddressState => ({ status: "verified", label: key, point: p, pointKey: "place:" + key, fix: null });
+const sv = (id: string, over: Partial<SiteVisit>): SiteVisit => ({
+  id, customerId: null, customer: "Cust " + id, locationId: null, venue: "Venue " + id, address: "addr " + id, contactName: "", contactEmail: "", contactPhone: "",
+  reason: "Site survey / measure", startAt: at(9), endAt: at(10), notes: "", assignedTo: "Dana", attendees: [], invites: [], createdBy: "x", createdAt: 1, updatedAt: 1,
+  stage: "scheduled", leadId: null, surveyId: null, preferredTiming: "", ...over,
+}) as SiteVisit;
+const rcpt = (name: string, over: Partial<VisitInviteRecipient> = {}): VisitInviteRecipient => ({
+  name, to: name.toLowerCase() + "@peak.test", channel: "ics", eventId: null, sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: "personal:me", gmailId: null, ...over,
+});
 
 export async function siteVisitsAttendeeChecks(ok: Ok): Promise<void> {
   const roster = ["Dana", "Jeff", "Sam"];
@@ -83,4 +95,158 @@ export async function siteVisitsAttendeeChecks(ok: Ok): Promise<void> {
     events: [],
   });
   ok(stops.map((s) => s.key).join() === "sv:SV-A", "site-visits: an attendee gets the visit as a stop on their own day (spec 1 seam)");
+}
+
+function inviteHarness(over: Partial<InviteDeps> = {}) {
+  const calls: string[] = [];
+  const mail: Array<{ to: string; subject: string; ics: string }> = [];
+  let saved: { invites: VisitInviteRecipient[]; lead: VisitInviteRecipient | null } | null = null;
+  let n = 0;
+  const deps: Partial<InviteDeps> = {
+    now: () => 5_000,
+    gmailEnabled: () => true,
+    users: async () => [
+      { id: "u-dana", name: "Dana", email: "dana@peak.test" },
+      { id: "u-jeff", name: "Jeff", email: "jeff@peak.test" },
+      { id: "u-sam", name: "Sam", email: "sam@peak.test" },
+    ],
+    invitesOn: async () => true,
+    calendarKeyFor: async (id) => (id === "u-dana" ? "personal:u-dana" : null),
+    insertEvent: async (key) => { calls.push("insert " + key); return { id: "g-" + ++n }; },
+    // Google answers an update with the event; "confirmed" = the copy is live (main's writeVisitCalendarEvent rule).
+    updateEvent: async (key, id) => { calls.push(`update ${key} ${id}`); return { id, status: "confirmed" }; },
+    deleteEvent: async (key, id) => { calls.push(`delete ${key} ${id}`); },
+    sendIcs: async (o) => { mail.push({ to: o.toAddr, subject: o.subject, ics: o.icsText }); return { gmailId: "m" + mail.length, gmailThreadId: "t", fromMailbox: "personal:me" }; },
+    saveInvites: async (_id, invites, lead) => { saved = { invites, lead }; },
+    log: () => {},
+    ...over,
+  };
+  return { deps, calls, mail, saved: () => saved };
+}
+
+export async function siteVisitsInviteChecks(ok: Ok): Promise<void> {
+  // The pure plan
+  const cur = [rcpt("Dana"), rcpt("Jeff"), rcpt("Sam", { startAt: at(8) })];
+  const p = planInviteChanges(cur, { people: ["Dana", "Sam", "Ann"], startAt: at(9), endAt: at(10) });
+  ok(p.add.join() === "Ann" && p.keep.map((e) => e.name).join() === "Dana" && p.update.map((e) => e.name).join() === "Sam" && p.cancel.map((e) => e.name).join() === "Jeff",
+    "site-visits invites: added → invite, removed → cancel, moved → update, unchanged → keep");
+  ok(planInviteChanges(cur, null).cancel.length === 3 && planInviteChanges(cur, { people: ["Dana"], startAt: null, endAt: null }).cancel.length === 3,
+    "site-visits invites: a deleted or unscheduled visit cancels everyone invited");
+
+  // Legacy single-recipient stamps read as one entry
+  const legacyIcs = normalizeInvites({ id: "SV-L", assignedTo: "Dana", startAt: at(9), endAt: at(10), invite: { sentAt: 7, to: "dana@peak.test", fromMailbox: "shared:sales", gmailId: "m9" } });
+  ok(legacyIcs.length === 1 && legacyIcs[0].name === "Dana" && legacyIcs[0].channel === "ics" && legacyIcs[0].startAt === at(9) && legacyIcs[0].gmailId === "m9",
+    "site-visits invites: an existing .ics stamp reads as one entry for the lead");
+  const legacyCal = normalizeInvites({ id: "SV-L", assignedTo: "Dana", startAt: at(9), endAt: at(10), googleEventId: "gold" });
+  ok(legacyCal.length === 1 && legacyCal[0].channel === "calendar" && legacyCal[0].eventId === "gold", "site-visits invites: an existing direct calendar event reads as one calendar entry");
+  ok(normalizeInvites({ id: "x", assignedTo: "Dana", startAt: null, endAt: null }).length === 0 &&
+     normalizeInvites({ id: "x", assignedTo: "Dana", startAt: null, endAt: null, invites: [{ name: "Dana", channel: "calendar" }, { name: "", channel: "ics" }, "junk"] }).length === 0,
+    "site-visits invites: no stamp → none; malformed entries are dropped");
+  ok(visitEventIds({ id: "x", assignedTo: "Dana", startAt: null, endAt: null, googleEventId: "g0", invites: [rcpt("Dana", { channel: "calendar", eventId: "g1" }), rcpt("Jeff")] }).join() === "g0,g1",
+    "site-visits invites: visitEventIds lists every calendar copy (legacy + per recipient)");
+  ok(visitUid("SV-7") === "sv-SV-7@peak-app", "site-visits invites: UID stays sv-<id>@peak-app");
+
+  // .ics: default output unchanged; cancel = METHOD:CANCEL + STATUS:CANCELLED, same UID
+  const base = { uid: "sv-SV-1@peak-app", title: "T", start: at(9), end: at(10), stampAt: 1 };
+  const plain = buildIcs(base);
+  ok(plain.includes("METHOD:PUBLISH") && !plain.includes("SEQUENCE:") && !plain.includes("STATUS:"), "site-visits ics: the default invite is unchanged (no SEQUENCE/STATUS)");
+  const cancel = buildIcs({ ...base, method: "CANCEL", sequence: 2 });
+  ok(cancel.includes("METHOD:CANCEL") && cancel.includes("STATUS:CANCELLED") && cancel.includes("SEQUENCE:2") && cancel.includes("UID:sv-SV-1@peak-app"),
+    "site-visits ics: a cancellation keeps the UID and carries METHOD:CANCEL, STATUS:CANCELLED and a higher SEQUENCE");
+
+  // dispatch: new visit, lead with calendar grant + attendee without
+  const me = { id: "u-me", name: "Me" };
+  const h1 = inviteHarness();
+  const v1 = sv("SV-T1", { attendees: ["Jeff"] });
+  const r1 = await dispatchVisitInvite(v1, me, h1.deps);
+  const s1 = h1.saved()!;
+  ok(r1.status === "calendar" && h1.calls.join() === "insert personal:u-dana" && h1.mail.length === 1 && h1.mail[0].to === "jeff@peak.test" &&
+     h1.mail[0].ics.includes("UID:sv-SV-T1@peak-app") && h1.mail[0].ics.includes("METHOD:PUBLISH"),
+    "site-visits invites: every person gets it — a calendar event where the Calendar grant exists, else the .ics");
+  ok(s1.invites.length === 2 && s1.invites[0].channel === "calendar" && s1.invites[0].eventId === "g-1" && s1.invites[1].channel === "ics" && s1.lead?.name === "Dana",
+    "site-visits invites: each recipient's send is recorded (channel, event id, times)");
+  ok(inviteSummary(r1.recipients) === "Added to Dana's Google Calendar. Invite emailed to Jeff.", "site-visits invites: the summary names each recipient");
+
+  // move: update everyone, same UID, SEQUENCE + 1
+  const h2 = inviteHarness();
+  const v2 = sv("SV-T1", { attendees: ["Jeff"], startAt: at(13), endAt: at(14), invites: s1.invites });
+  const r2 = await dispatchVisitInvite(v2, me, h2.deps);
+  const s2 = h2.saved()!;
+  ok(h2.calls.join() === "update personal:u-dana g-1" && h2.mail.length === 1 && h2.mail[0].ics.includes("SEQUENCE:1") && h2.mail[0].ics.includes("UID:sv-SV-T1@peak-app") &&
+     h2.mail[0].subject.startsWith("Updated: ") && r2.recipients.every((x) => x.action === "update"),
+    "site-visits invites: moving the visit updates every recipient (calendar PATCH; .ics with the same UID and SEQUENCE 1)");
+  ok(s2.invites.every((e) => e.startAt === at(13) && e.endAt === at(14) && e.sequence === 1), "site-visits invites: the record now holds the new times and sequence");
+
+  // A Google copy the person deleted answers the update non-confirmed: replaced, never doubled (main's drive-time rule, per recipient).
+  const goneCalls: string[] = [];
+  const h2b = inviteHarness({ updateEvent: async (key, id) => { goneCalls.push(`update ${key} ${id}`); return { id, status: "cancelled" }; } });
+  await dispatchVisitInvite(sv("SV-T1", { startAt: at(13), endAt: at(14), invites: [{ ...s1.invites[0], eventId: "g-old" }] }), me, h2b.deps);
+  ok([...goneCalls, ...h2b.calls].join() === "update personal:u-dana g-old,delete personal:u-dana g-old,insert personal:u-dana" && h2b.saved()!.invites[0].eventId === "g-1" &&
+     h2b.saved()!.invites[0].startAt === at(13),
+    "site-visits invites: a calendar update answered non-confirmed replaces that person's copy and records the new event id");
+
+  // remove Jeff: METHOD:CANCEL to Jeff only
+  const h3 = inviteHarness();
+  const v3 = sv("SV-T1", { attendees: [], startAt: at(13), endAt: at(14), invites: s2.invites });
+  await dispatchVisitInvite(v3, me, h3.deps);
+  ok(h3.calls.length === 0 && h3.mail.length === 1 && h3.mail[0].to === "jeff@peak.test" && h3.mail[0].ics.includes("METHOD:CANCEL") && h3.mail[0].ics.includes("SEQUENCE:2") &&
+     h3.mail[0].ics.includes("UID:sv-SV-T1@peak-app") && h3.saved()!.invites.map((e) => e.name).join() === "Dana",
+    "site-visits invites: removing a person sends them a cancellation with the same UID; the lead is left alone");
+
+  // delete: everyone cancelled
+  const h4 = inviteHarness();
+  await cancelVisitInvites(sv("SV-T1", { invites: h3.saved()!.invites }), me, h4.deps);
+  ok(h4.calls.join() === "delete personal:u-dana g-1" && h4.saved()!.invites.length === 0, "site-visits invites: deleting a visit removes it from every calendar");
+
+  // invites-off on add is not recorded (retried later); a failed update keeps the old entry
+  const h5 = inviteHarness({ invitesOn: async (n) => n !== "Sam" });
+  const r5 = await dispatchVisitInvite(sv("SV-T2", { attendees: ["Sam"] }), me, h5.deps);
+  ok(r5.recipients.find((x) => x.name === "Sam")?.status === "invites-off" && !h5.saved()!.invites.some((e) => e.name === "Sam"),
+    "site-visits invites: a person with invite emails off isn't recorded, so a later save retries them");
+  const h6 = inviteHarness({ sendIcs: async () => { throw new Error("smtp down"); } });
+  const before = [rcpt("Jeff")];
+  const r6 = await dispatchVisitInvite(sv("SV-T3", { assignedTo: "Jeff", startAt: at(15), endAt: at(16), invites: before }), me, h6.deps);
+  ok(r6.recipients[0].status === "failed" && h6.saved()!.invites[0].startAt === at(9), "site-visits invites: a failed update keeps the old entry so the next save retries it");
+  const h7 = inviteHarness({ users: async () => { throw new Error("db down"); } });
+  const r7 = await dispatchVisitInvite(sv("SV-T4", {}), me, h7.deps);
+  ok(r7.status === "failed", "site-visits invites: dispatch never throws");
+
+  // Store: a pre-spec-2 stamp is pinned to the times it was sent BEFORE a reschedule writes new ones,
+  // so the first move after deploy still updates the lead's copy; the old single fields mirror the lead exactly.
+  const LEG = fixtureId("visits", "sv-legacy-invite");
+  try {
+    await createFixture("site_visits", {
+      id: LEG, customerId: null, customer: "TESTvisits Invite", locationId: null, venue: "", address: "TESTvisits 5 Elm St",
+      contactName: "", contactEmail: "", contactPhone: "", reason: "Sales call", startAt: at(9), endAt: at(10), notes: "",
+      assignedTo: "Dana", createdBy: "x", createdAt: 1, updatedAt: 1, stage: "scheduled", leadId: null, surveyId: null, preferredTiming: "", googleEventId: "g-legacy",
+    });
+    ok((await getVisit(LEG))?.invites.map((e) => `${e.name}:${e.channel}:${e.eventId}`).join() === "Dana:calendar:g-legacy",
+      "site-visits invites: a stored pre-spec-2 calendar stamp reads as the lead's entry");
+    await scheduleVisit(LEG, at(13), at(14));
+    const moved = await getVisit(LEG);
+    ok(moved?.invites.length === 1 && moved.invites[0].startAt === at(9) && moved.invites[0].endAt === at(10) &&
+       planInviteChanges(moved.invites, { people: visitPeople(moved), startAt: moved.startAt, endAt: moved.endAt }).update.length === 1,
+      "site-visits invites: rescheduling a pre-spec-2 visit keeps the times the lead was told, so the move updates their copy");
+    await setVisitInvites(LEG, [], null);
+    const cleared = await getVisit(LEG);
+    ok(!!cleared && !cleared.googleEventId && !cleared.invite && cleared.invites.length === 0 && visitEventIds(cleared).length === 0,
+      "site-visits invites: once the lead holds no copy, the old googleEventId / invite fields are cleared too");
+    await setVisitInvites(LEG, [rcpt("Dana", { channel: "calendar", eventId: "g-new" }), rcpt("Jeff")], rcpt("Dana", { channel: "calendar", eventId: "g-new" }));
+    const mirrored = await getVisit(LEG);
+    ok(mirrored?.googleEventId === "g-new" && !mirrored.invite && visitEventIds(mirrored).join() === "g-new",
+      "site-visits invites: the lead's calendar entry is mirrored into googleEventId for older readers");
+  } finally {
+    await dropFixtures("visits");
+  }
+
+  // calendar copies dedupe on the drive chain
+  ok(isVisitIcsCopy({ id: "g-77", iCalUID: "" }, [{ id: "SV-9", eventIds: ["g-77"] }]) && !isVisitIcsCopy({ id: "g-78", iCalUID: "" }, [{ id: "SV-9", eventIds: ["g-77"] }]),
+    "site-visits: an attendee's direct calendar copy is recognised as the visit (counted once)");
+  ok(/eventIds: visitEventIds\(v\)/.test(readFileSync("src/lib/drive-plan/load.ts", "utf8")), "site-visits: the drive loader hands every calendar copy id to the stop builder");
+  const bridge = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+  ok(/d\.invites/.test(bridge) && /known\.add\(r\.gmailId\)/.test(bridge), "site-visits: per-recipient invite emails are skipped by the Gmail import like the old single stamp");
+  const va = readFileSync("src/app/(app)/venue-assessments/visit-actions.ts", "utf8");
+  const rm = va.slice(va.indexOf("export async function removeVisitAction("), va.indexOf("export async function scheduleVisitAction("));
+  ok(rm.includes("await cancelVisitInvites(") && rm.indexOf("await cancelVisitInvites(") < rm.indexOf("await removeVisit(") && !rm.includes("deleteEvent("),
+    "site-visits: deleting a visit cancels everyone's invite before the delete");
 }

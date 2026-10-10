@@ -1,5 +1,6 @@
 import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
+import { normalizeInvites, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { readAttendees } from "@/lib/visit-plan/people";
 
 /**
@@ -8,8 +9,8 @@ import { readAttendees } from "@/lib/visit-plan/people";
  * .ics calendar-invite email sent for it. No prototype ancestor — this is the
  * first post-rebuild collection (drizzle migration 0004).
  *
- * Phase 2 (deferred): direct Google Calendar write (googleEventId is already
- * reserved here) and the in-app calendar.
+ * Invites are per person since spec 2026-10-09 site-visit scheduling
+ * (`invites`, written by src/lib/visit-invite.ts through setVisitInvites).
  */
 
 export type SiteVisitInvite = {
@@ -47,7 +48,13 @@ export type SiteVisit = {
   createdAt: number;
   updatedAt: number;
   invite?: SiteVisitInvite | null;
-  googleEventId?: string; // phase 2
+  /** Spec 2026-10-09 site-visit scheduling — what each person on the visit
+   *  was sent (calendar event or .ics, and the times they were told).
+   *  Normalized on read: a pre-spec-2 `invite` / `googleEventId` reads as one
+   *  entry for the lead. `invite` / `googleEventId` keep mirroring the lead's
+   *  entry for older readers. */
+  invites: VisitInviteRecipient[];
+  googleEventId?: string; // the lead's direct calendar copy (D77)
   /** Optional consulting-engagement link (D90) — oversight visits list
    *  under the engagement's Oversight tab. */
   engagementId?: string | null;
@@ -96,6 +103,7 @@ function normalizeVisit(v: SiteVisit): SiteVisit {
   v.endAt = v.endAt ?? null;
   v.customerId = v.customerId ?? null;
   v.attendees = withoutLead(readAttendees(v.attendees), v.assignedTo);
+  v.invites = normalizeInvites(v);
   v.stage = deriveVisitStage(v, Date.now());
   v.leadId = v.leadId ?? null;
   v.surveyId = v.surveyId ?? null;
@@ -144,7 +152,7 @@ export async function linkVisitToEngagement(
 
 export type SiteVisitInput = Omit<
   SiteVisit,
-  "id" | "createdAt" | "updatedAt" | "invite" | "attendees"
+  "id" | "createdAt" | "updatedAt" | "invite" | "invites" | "attendees"
 > & { attendees?: string[] };
 
 export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
@@ -156,31 +164,33 @@ export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
     createdAt: now,
     updatedAt: now,
     invite: null,
+    invites: [],
   }));
 }
 
-/** Record the sent .ics invite on the visit (D76-I). */
-export async function stampInvite(
-  id: string,
-  invite: SiteVisitInvite
-): Promise<void> {
+/** Record what each person was sent (spec 2026-10-09 site-visit scheduling).
+ *  The lead's entry is mirrored into the old single fields for older readers
+ *  (the agenda's googleEventId dedupe, "invite sent" on the company record) —
+ *  exactly: a lead holding no copy of that kind clears the old field, so a
+ *  deleted or moved-away calendar copy never lingers as a dedupe key. */
+export async function setVisitInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    d.invite = invite;
+    d.invites = invites;
+    if (lead?.channel === "calendar" && lead.eventId) d.googleEventId = lead.eventId;
+    else delete d.googleEventId;
+    d.invite =
+      lead?.channel === "ics"
+        ? { sentAt: lead.sentAt, to: lead.to, fromMailbox: lead.fromMailbox ?? "", ...(lead.gmailId ? { gmailId: lead.gmailId } : {}) }
+        : null;
     d.updatedAt = Date.now();
   });
 }
 
-/** Record the directly-created Google Calendar event (D77). The dashboard
- *  agenda uses this to dedup: a visit with a googleEventId shows via Google,
- *  not as a second local row. */
-export async function stampGoogleEvent(
-  id: string,
-  googleEventId: string
-): Promise<void> {
-  await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    d.googleEventId = googleEventId;
-    d.updatedAt = Date.now();
-  });
+/** A pre-spec-2 doc has only the old single stamp, read as "told the visit's
+ *  current times". Pin it to those times BEFORE a write changes them, so the
+ *  dispatch that follows sees a move and updates the lead's copy. */
+function pinLegacyInvites(d: SiteVisit): void {
+  if (!Array.isArray(d.invites)) d.invites = normalizeInvites(d);
 }
 
 /* ---- #34 lifecycle mutations (the LEAD claim model — no approver gate) ---- */
@@ -207,6 +217,7 @@ export async function releaseVisit(id: string): Promise<void> {
 
 export async function scheduleVisit(id: string, startAt: number, endAt: number, attendees?: string[]): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    pinLegacyInvites(d);
     d.startAt = startAt;
     d.endAt = endAt;
     if (attendees) d.attendees = withoutLead(readAttendees(attendees), d.assignedTo);
@@ -221,6 +232,7 @@ export type VisitBookingPatch = { startAt: number; endAt: number; assignedTo: st
  *  lead and attendees in one write. The caller cleans the names. */
 export async function updateVisitBooking(id: string, patch: VisitBookingPatch): Promise<SiteVisit | null> {
   const saved = await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    pinLegacyInvites(d);
     d.startAt = patch.startAt;
     d.endAt = patch.endAt;
     d.assignedTo = patch.assignedTo;
@@ -246,8 +258,8 @@ export async function closeVisit(id: string): Promise<void> {
  * Delete a site visit (soft delete). Visits are never quote-spawned or
  * swept by a reconciliation job (unlike flame/repair/inspection jobs), so
  * there is no tombstone-coverage concern here — nothing recreates a
- * deleted visit. Any Google Calendar event the visit mirrored
- * (googleEventId, phase 2) is the caller's job to clear first, same
+ * deleted visit. Cancelling everyone's invite (calendar copies + .ics,
+ * cancelVisitInvites) is the caller's job first, same
  * separation the crew-booking removeBooking action keeps from
  * projects.removeCrew (src/app/(app)/schedule/actions.ts).
  */

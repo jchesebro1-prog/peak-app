@@ -2072,7 +2072,7 @@ export async function driveTimeFinalFixChecks(ok: Ok): Promise<void> {
     calls.length = 0;
     const gone = await writeVisitCalendarEvent("personal:u1", "g-old", ev, { ...cal, updateEvent: async (_k: string, id: string) => { calls.push("update:" + id); throw new Error("404"); } });
     ok(gone.id === "g-new" && calls.join() === "update:g-old,delete:g-old,insert:Gym — Survey", "drive-time final: an update that fails removes the old copy, then inserts");
-    ok(/writeVisitCalendarEvent\(akey, rec\.googleEventId/.test(read("src/lib/visit-invite.ts")), "drive-time final: dispatchVisitInvite writes through writeVisitCalendarEvent with the visit's googleEventId");
+    ok(/writeVisitCalendarEvent\(key, e\.eventId, write, cal\)/.test(read("src/lib/visit-invite.ts")), "drive-time final: dispatchVisitInvite updates each recipient's Google copy in place through writeVisitCalendarEvent");
   });
 
   await db.delete(placeBook).where(like(placeBook.key, "%testdrive%"));

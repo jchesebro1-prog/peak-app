@@ -23,9 +23,11 @@ export function visitPeople(v: { assignedTo: string; attendees?: readonly string
 
 export function isVisitIcsCopy(
   ev: { id: string; iCalUID: string },
-  visits: ReadonlyArray<{ id: string; googleEventId?: string | null }>
+  visits: ReadonlyArray<{ id: string; googleEventId?: string | null; eventIds?: readonly string[] | null }>
 ): boolean {
-  return visits.some((v) => ev.iCalUID === `sv-${v.id}@peak-app` || (!!v.googleEventId && v.googleEventId === ev.id));
+  return visits.some(
+    (v) => ev.iCalUID === `sv-${v.id}@peak-app` || (!!v.googleEventId && v.googleEventId === ev.id) || !!v.eventIds?.includes(ev.id)
+  );
 }
 
 export type StopSourceVisit = {
@@ -36,6 +38,8 @@ export type StopSourceVisit = {
   stage: string;
   people: string[];
   googleEventId?: string | null;
+  /** Spec 2026-10-09 site-visit scheduling — every person's direct calendar copy of the visit. */
+  eventIds?: string[] | null;
   address: AddressState;
 };
 

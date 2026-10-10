@@ -3,7 +3,9 @@
  * Plain string assembly, zero deps — same no-new-deps posture as the Gmail
  * client (D36). METHOD:PUBLISH and no ATTENDEE lines on purpose: the invite
  * goes only to the assignee's own mailbox (decision B — customers are never
- * auto-invited), so there is no RSVP round-trip.
+ * auto-invited), so there is no RSVP round-trip. An update re-sends PUBLISH
+ * with a higher SEQUENCE; a removal sends METHOD:CANCEL with the same UID
+ * (spec 2026-10-09 site-visit scheduling).
  */
 
 export type IcsEvent = {
@@ -14,6 +16,12 @@ export type IcsEvent = {
   start: number; // epoch-ms
   end: number; // epoch-ms
   stampAt: number; // epoch-ms (DTSTAMP — pass Date.now() from the caller)
+  /** Spec 2026-10-09 site-visit scheduling: "CANCEL" removes the event
+   *  (same UID). Omitted = PUBLISH, byte-identical to the original invite. */
+  method?: "PUBLISH" | "CANCEL";
+  /** RFC-5545 SEQUENCE — an update or cancel carries a higher number than
+   *  the last copy sent. Omitted = no SEQUENCE line. */
+  sequence?: number;
 };
 
 /** RFC-5545 TEXT escaping: backslash, semicolon, comma, newline. */
@@ -47,12 +55,14 @@ export function buildIcs(ev: IcsEvent): string {
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Peak Systems Group//Quartzite-6//EN",
-    "METHOD:PUBLISH",
+    "METHOD:" + (ev.method ?? "PUBLISH"),
     "BEGIN:VEVENT",
     "UID:" + esc(ev.uid),
     "DTSTAMP:" + utc(ev.stampAt),
+    ...(ev.sequence != null ? ["SEQUENCE:" + Math.max(0, Math.round(ev.sequence))] : []),
     "DTSTART:" + utc(ev.start),
     "DTEND:" + utc(ev.end),
+    ...(ev.method === "CANCEL" ? ["STATUS:CANCELLED"] : []),
     "SUMMARY:" + esc(ev.title),
     ...(ev.location ? ["LOCATION:" + esc(ev.location)] : []),
     ...(ev.description ? ["DESCRIPTION:" + esc(ev.description)] : []),
