@@ -102,16 +102,17 @@ export async function scheduleVisitAction(
   if (!v.assignedTo) return { ok: false, error: "Claim the visit first" };
   await scheduleVisit(id, input.startAt, input.endAt);
   const fresh = await getVisit(id);
-  const inviteStatus: InviteStatus = fresh
-    ? await dispatchVisitInvite(fresh, { id: me.id, name: me.name })
-    : "failed";
   // Spec 2026-10-09 triggers: re-sync the old and new day for everyone on it.
+  // Registered before the invite dispatch, so an invite error can't drop it.
   const prevVisit = v;
   const nextVisit = fresh;
   after(async () => {
     const { resyncForVisitChange } = await import("@/lib/drive-sync/sync");
     await resyncForVisitChange(prevVisit, nextVisit).catch((err) => console.error("[drive-sync] visit re-sync failed:", err));
   });
+  const inviteStatus: InviteStatus = fresh
+    ? await dispatchVisitInvite(fresh, { id: me.id, name: me.name })
+    : "failed";
   revalidatePath("/", "layout");
   return { ok: true, inviteStatus };
 }

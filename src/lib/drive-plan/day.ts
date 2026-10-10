@@ -7,6 +7,14 @@ export function isDayKey(v: unknown): v is string {
   return typeof v === "string" && DAY_RE.test(v) && addDays(v, 0) === v; // round-trip rejects 2026-02-31 etc.
 }
 
+/** The days a stay-over may be set on: yesterday (its last stop is today's
+ *  first origin) through today + 14 (the sync window), Chicago days. */
+export function isStayOverDay(v: unknown, nowMs: number): v is string {
+  if (!isDayKey(v)) return false;
+  const today = chicagoDayKey(nowMs);
+  return v >= addDays(today, -1) && v <= addDays(today, 14);
+}
+
 const WALL_FMT = new Intl.DateTimeFormat("en-US", {
   timeZone: DRIVE_TZ,
   year: "numeric",

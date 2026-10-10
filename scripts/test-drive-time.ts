@@ -10,7 +10,9 @@ import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
 import { locateVenue } from "@/lib/venue-locate";
 import { getPlaces, placeStatesFor, writePlace, fixPlace } from "@/lib/address-verify/place-book";
 import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/targets";
-import { cleanFixInput, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
+import { cleanFixInput, cleanFixTarget, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
+import { listAddressesToVerify } from "@/lib/address-verify/worklist";
+import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
 import { routeKey, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import {
   DRIVE_SYNC_LEASE_MS,
@@ -29,7 +31,7 @@ import {
   setDriveSyncState,
   setStayOver,
 } from "@/lib/stores/schedule-prefs";
-import { addDays, chicagoDayKey, chicagoDayStart, dayKeysBetween, isDayKey } from "@/lib/drive-plan/day";
+import { addDays, chicagoDayKey, chicagoDayStart, dayKeysBetween, isDayKey, isStayOverDay } from "@/lib/drive-plan/day";
 import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop, type StopSourceEvent, type StopSourceVisit } from "@/lib/drive-plan/stops";
 import { dayDriveTotal, fmtDur, neededRoutes, pairKey, planDay, type PlanDayInput } from "@/lib/drive-plan/plan";
 import type { AddressState } from "@/lib/address-verify/types";
@@ -61,6 +63,7 @@ import { eventWriteBody, readSyncPages, toCalendarEvents, type CalendarEvent, ty
 import { planDriveDays, routeMinutesFor, visitAddressInput, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import {
   LEGACY_LOOKAHEAD_MS,
+  markStaleIfTriggerFailed,
   resyncForAddress,
   resyncForVisitChange,
   syncAllDrivers,
@@ -69,12 +72,13 @@ import {
   syncDriveIfStale,
   syncWindowDays,
   type DriveSyncDeps,
+  type DriveSyncResult,
 } from "@/lib/drive-sync/sync";
 import { withoutAppDriveEvents } from "@/lib/agenda";
 import type { DriveSyncState } from "@/lib/stores/schedule-prefs";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import type { Office } from "@/lib/settings";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 export type Ok = (c: boolean, m: string) => void;
@@ -1352,6 +1356,37 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
   ok(addrSeen.length === 1 && addrSeen[0].join() === [DAY, addDays(DAY, 1)].join() && state.lastSyncAt === 0 && state.staleAt === NOW,
     "drive-time sync: a verified address re-syncs the upcoming visits on it and marks every rep stale (place keys can be Google locations)");
 
+  // A trigger sync that fails for a non-busy reason leaves the rep stale so the next view retries.
+  const visitMove = { startAt: at(9), assignedTo: "Dana" };
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await resyncForVisitChange(null, visitMove, deps({ plan: async () => [] }));
+  ok(state.lastSyncAt === NOW, "drive-time trigger: a trigger sync that succeeds leaves the rep fresh");
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await resyncForVisitChange(null, visitMove, deps({ listEvents: async () => { throw new Error("401"); } }));
+  ok(state.lastSyncAt === 0 && state.staleAt === NOW, "drive-time trigger: a visit re-sync whose calendar read failed marks the rep stale");
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await resyncForVisitChange(null, visitMove, deps({ plan: async () => { throw new Error("boom"); } }));
+  ok(state.lastSyncAt === 0 && state.staleAt === NOW && leaseUntil === 0, "drive-time trigger: a visit re-sync that throws marks the rep stale (lease still released)");
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await resyncForAddress("site:SV-1", deps({ visitStates: async (vs) => new Map(vs.map((v) => [v.id, { ...okAddr(P1.lat, P1.lng, v.id), pointKey: "site:SV-1" }])), insertEvent: async () => { throw new Error("quota"); } }));
+  ok(state.lastSyncAt === 0 && state.staleAt === NOW, "drive-time trigger: an address re-sync whose Google write failed marks the rep stale");
+  const res = (over: Partial<DriveSyncResult>): DriveSyncResult =>
+    ({ userId: "u1", days: [DAY], google: "written", inserted: 0, updated: 0, removed: 0, legacyRemoved: 0, flagged: 0, errors: [], ...over });
+  const markDeps = () => deps({ now: () => NOW + 5 });
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await markStaleIfTriggerFailed("u1", res({}), undefined, markDeps());
+  await markStaleIfTriggerFailed("u1", res({ errors: ["legacy: 403"] }), undefined, markDeps());
+  await markStaleIfTriggerFailed("u1", res({ google: "busy", errors: ["sync lease lost"] }), undefined, markDeps());
+  ok(state.lastSyncAt === NOW, "drive-time trigger: a clean result, a D144-cleanup-only error, or busy (already stale) does not re-mark the rep");
+  await markStaleIfTriggerFailed("u1", res({ google: "read-failed" }), undefined, markDeps());
+  ok(state.lastSyncAt === 0 && state.staleAt === NOW + 5, "drive-time trigger: an event/stay-over sync whose read failed marks the rep stale");
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await markStaleIfTriggerFailed("u1", null, new Error("boom"), markDeps());
+  ok(state.lastSyncAt === 0, "drive-time trigger: an event/stay-over sync that threw marks the rep stale");
+  let threw = false;
+  await markStaleIfTriggerFailed("u1", null, new Error("boom"), deps({ setState: async () => { throw new Error("db down"); } })).catch(() => { threw = true; });
+  ok(!threw, "drive-time trigger: marking stale never throws out of an after() callback");
+
   const synced: string[] = [];
   const all = await syncAllDrivers({ budgetMs: 60_000 }, deps({
     users: async () => [{ id: "u1", name: "Dana", status: "active" }, { id: "u2", name: "Old", status: "archived" }, { id: "u3", name: "NoCal", status: "active" }],
@@ -1414,6 +1449,22 @@ export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
     "drive-time agenda: both Google sources in loadAgendaRange go through the filter");
 }
 
+/** One exported function's source: from its `export async function` line up
+ *  to the next top-level `export` — so a pin can't be satisfied by a
+ *  neighbouring function's code. */
+function fnBody(src: string, name: string): string {
+  const start = src.indexOf(`export async function ${name}(`);
+  if (start < 0) return "";
+  const next = src.indexOf("\nexport ", start + 1);
+  return next < 0 ? src.slice(start) : src.slice(start, next);
+}
+
+/** True when the function's first `await` is `call` (the session check runs before anything else). */
+function firstAwait(body: string, call: string): boolean {
+  const i = body.indexOf("await ");
+  return i >= 0 && body.startsWith("await " + call, i);
+}
+
 export async function driveTimeTriggerPins(ok: Ok): Promise<void> {
   const read = (p: string) => readFileSync(p, "utf8");
   const cal = read("src/app/(app)/calendar-actions.ts");
@@ -1421,17 +1472,39 @@ export async function driveTimeTriggerPins(ok: Ok): Promise<void> {
     "drive-time D144: the create flow no longer adds a guessed travel block");
   ok(!cal.includes("looksLikePhysicalAddress") && !cal.includes("travelFrom") && !cal.includes("TravelFrom"),
     "drive-time D144: the calendar actions carry no travel-origin plumbing any more");
-  ok(/export async function setStayOverAction[\s\S]*?requireUser\(\)/.test(cal) && cal.includes("syncDriveDays"),
-    "drive-time: the stay-over toggle is signed-in only and re-syncs that day and the next");
-  ok(/export async function setStayOverAction[\s\S]*?isDayKey\(dayKey\)[\s\S]*?setStayOver\(/.test(cal),
-    "drive-time: the stay-over toggle validates its day key before storing anything");
+  const stay = fnBody(cal, "setStayOverAction");
+  ok(firstAwait(stay, "requireUser()") && stay.includes("syncDriveDays"),
+    "drive-time: the stay-over toggle is signed-in only (its first await) and re-syncs that day and the next");
+  ok(/isStayOverDay\(dayKey, Date\.now\(\)\)[\s\S]*?setStayOver\(/.test(stay) && !/isDayKey\(dayKey\)/.test(stay),
+    "drive-time: the stay-over toggle refuses a day outside yesterday … today + 14 before storing anything");
+  const T = Date.UTC(2026, 9, 14, 15); // 10:00 Chicago, 2026-10-14
+  ok(isStayOverDay("2026-10-13", T) && isStayOverDay("2026-10-14", T) && isStayOverDay("2026-10-28", T) &&
+     !isStayOverDay("2026-10-12", T) && !isStayOverDay("2026-10-29", T) && !isStayOverDay("2026-02-31", T) && !isStayOverDay(20261014, T),
+    "drive-time: stay-over days run from yesterday to today + 14 (Chicago), real dates only");
   ok((cal.match(/syncDriveForUser\(syncUser\)/g) ?? []).length === 2,
     "drive-time: editing or deleting a calendar event re-syncs the rep's chain after the response");
+  ok((cal.match(/after\(async \(\) => \{\s*const \{ (syncDriveDays|syncDriveForUser), markStaleIfTriggerFailed \} = await import\("@\/lib\/drive-sync\/sync"\);\s*await \1\([^;]*?\)\s*\.then\(\(r\) => markStaleIfTriggerFailed\([^;]*?\)\)\s*\.catch\(\(err\) => markStaleIfTriggerFailed\(/g) ?? []).length === 4,
+    "drive-time: all four calendar triggers (add, edit, delete, stay-over) run in after() and mark the rep stale when the sync fails");
   ok(!read("src/app/(app)/calendar/event-modal.tsx").includes("Traveling from") && !read("src/app/(app)/calendar/event-modal.tsx").includes("travelOriginOptionsAction"),
     "drive-time D144: the 'Traveling from' picker is gone");
   const va = read("src/app/(app)/venue-assessments/visit-actions.ts");
-  ok((va.match(/resyncForVisitChange/g) || []).length >= 3, "drive-time: scheduling and deleting a visit re-sync the affected days");
-  ok(read("src/app/(app)/inbox/site-visit-actions.ts").includes("resyncForVisitChange(null, rec)"), "drive-time: creating a visit from the Inbox re-syncs its day");
+  const inbox = read("src/app/(app)/inbox/site-visit-actions.ts");
+  const inAfter = /after\(async \(\) => \{\s*const \{ resyncForVisitChange \} = await import\("@\/lib\/drive-sync\/sync"\);\s*await resyncForVisitChange\([^;]*?\)\.catch\(/g;
+  ok((va.match(inAfter) ?? []).length === 2 && (va.match(/resyncForVisitChange\(/g) ?? []).length === 2,
+    "drive-time: scheduling and deleting a visit re-sync the affected days, each inside after() with a .catch");
+  ok((inbox.match(inAfter) ?? []).length === 1 && inbox.includes("resyncForVisitChange(null, rec)"), "drive-time: creating a visit from the Inbox re-syncs its day inside after() with a .catch");
+  const sched = fnBody(va, "scheduleVisitAction");
+  const createInbox = fnBody(inbox, "createSiteVisitAction");
+  ok(sched.indexOf("after(") > 0 && sched.indexOf("after(") < sched.indexOf("await dispatchVisitInvite(") &&
+     createInbox.indexOf("after(") > 0 && createInbox.indexOf("after(") < createInbox.indexOf("await dispatchVisitInvite("),
+    "drive-time: the visit re-sync is registered before the invite dispatch, so an invite error can't drop it");
+  for (const [file, src] of [["visit-actions", va], ["calendar-actions", cal]] as const) {
+    for (const m of src.matchAll(/export async function (\w+)\(/g)) {
+      const body = fnBody(src, m[1]);
+      if (/syncDrive|resyncFor/.test(body))
+        ok(firstAwait(body, "requireUser()") || firstAwait(body, "requireCalendarGrant()"), `drive-time pin: ${file} ${m[1]} checks the session (its first await) before it triggers a sync`);
+    }
+  }
   const cron = read("src/app/api/gmail/sync/route.ts");
   ok(cron.includes("syncAllDrivers") && cron.includes("ensureVenueGeoStatus") && cron.indexOf("syncAllDrivers(") > 0 && cron.indexOf("syncAllDrivers(") < cron.indexOf("syncDrivePhotos("),
     "drive-time: the daily cron re-syncs every rep (before the photo rider eats the budget) and stamps venue status");
@@ -1442,4 +1515,87 @@ export async function driveTimeTriggerPins(ok: Ok): Promise<void> {
     "drive-time: /calendar and Home re-sync a rep whose last sync is over 10 min old");
   ok(/after\(async \(\) => \{\s*const \{ syncDriveIfStale \}/.test(calPage) && /after\(async \(\) => \{\s*const \{ syncDriveIfStale \}/.test(home),
     "drive-time: the stale-on-load sync runs inside after(), never on the render path");
+  ok(!read("src/lib/travel-origin.ts").includes("choices for the New event form"), "drive-time: travel-origin no longer documents the retired 'Traveling from' picker");
+}
+
+export async function driveTimeWorklistChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const SITE = "TESTdrive:site-wl";
+  // Relative to the real clock: a visit's stored stage is derived against
+  // Date.now() (a past "scheduled" visit reads "done"), so a fixed date
+  // would start failing once the wall clock passed it.
+  const NOW = Date.now();
+  const visitText = "TESTdrive 12 Pine St, Appleton WI";
+  try {
+    await saveSite({ id: SITE, companyId: "TESTdrive:co-wl", name: "TESTdrive Hall", address: "", city: "Appleton", state: "WI", lat: "44.26", lng: "-88.41", venueKind: "proscenium" });
+    await createFixture("site_visits", {
+      id: fixtureId("drive", "sv-wl"), customerId: null, customer: "TESTdrive Cust", locationId: null, venue: "", address: visitText,
+      contactName: "", contactEmail: "", contactPhone: "", reason: "Sales call", startAt: NOW + 86_400_000, endAt: NOW + 90_000_000,
+      notes: "", assignedTo: "Dana", createdBy: "x", createdAt: 1, updatedAt: 1, stage: "scheduled", leadId: null, surveyId: null, preferredTiming: "",
+    });
+    await createFixture("site_visits", {
+      id: fixtureId("drive", "sv-old"), customerId: null, customer: "TESTdrive Old", locationId: null, venue: "", address: "TESTdrive 1 Gone Rd",
+      contactName: "", contactEmail: "", contactPhone: "", reason: "Sales call", startAt: NOW - 3 * 86_400_000, endAt: NOW - 3 * 86_400_000 + 3_600_000,
+      notes: "", assignedTo: "Dana", createdBy: "x", createdAt: 1, updatedAt: 1, stage: "scheduled", leadId: null, surveyId: null, preferredTiming: "",
+    });
+    await createFixture("leads", { id: fixtureId("drive", "lead-wl"), org: "TESTdrive Org", contact: "", email: "", phone: "", address: "TESTdrive 9 Oak St", city: "Appleton", state: "WI", stage: "new", createdAt: 1, updatedAt: 1 });
+
+    const all = await listAddressesToVerify({ q: "testdrive", now: NOW });
+    const kinds = all.rows.map((r) => r.kind).join(",");
+    ok(kinds === "visit,lead,venue" && all.counts.visit === 1 && all.counts.lead === 1 && all.counts.venue === 1,
+      "drive-time worklist: upcoming visits, open leads and venues in one list (visits first); past visits left out");
+    const venueRow = all.rows.find((r) => r.kind === "venue")!;
+    ok(venueRow.status === "needs_check" && venueRow.fix.kind === "venue", "drive-time worklist: a city-level venue shows needs_check with a venue fix");
+    const visitRow = all.rows.find((r) => r.kind === "visit")!;
+    ok(visitRow.status === "unresolved" && !visitRow.checked && visitRow.fix.kind === "place", "drive-time worklist: an unchecked visit address shows unresolved, not yet looked up");
+    ok((await listAddressesToVerify({ q: "testdrive", kind: "lead", now: NOW })).rows.every((r) => r.kind === "lead"), "drive-time worklist: kind filter");
+    ok((await listAddressesToVerify({ q: "testdrive", status: "needs_check", now: NOW })).rows.map((r) => r.kind).join() === "venue", "drive-time worklist: status filter");
+    const paged = await listAddressesToVerify({ q: "testdrive", offset: 1, limit: 1, now: NOW });
+    ok(paged.rows.length === 1 && paged.rows[0].kind === "lead" && paged.total === 3, "drive-time worklist: offset/limit page the list, total counts every match");
+
+    // Verifying the visit's text drops it from the list.
+    await fixPlace({ key: addressKey(visitText), label: visitText, mode: "pin", lat: 44.27, lng: -88.42 }, "u1");
+    ok(!(await listAddressesToVerify({ q: "testdrive", now: NOW })).rows.some((r) => r.kind === "visit"), "drive-time worklist: a verified address leaves the worklist");
+
+    ok(cleanFixTarget({ kind: "venue", siteId: "st-1" })?.kind === "venue" && cleanFixTarget({ kind: "place", key: "a b", label: "A B" })?.kind === "place" &&
+       cleanFixTarget({ kind: "place", key: "a" }) === null && cleanFixTarget(null) === null && cleanFixTarget({ kind: "venue", siteId: 7 }) === null &&
+       cleanFixTarget({ kind: "other", siteId: "x" }) === null,
+      "drive-time cleanFixTarget validates untrusted targets");
+  } finally {
+    await db.delete(sites).where(eq(sites.id, SITE));
+    await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
+    await dropFixtures("drive");
+  }
+}
+
+export async function driveTimeFixUiPins(ok: Ok): Promise<void> {
+  const read = (p: string) => readFileSync(p, "utf8");
+  const actions = read("src/app/(app)/address-actions.ts");
+  ok(actions.startsWith('"use server";'), "drive-time pin: address-actions is a server-action file");
+  for (const fn of ["fixAddressAction", "loadFixTargetAction", "searchAddressAction", "townCentreForFixAction", "addressStatusAction"]) {
+    ok(firstAwait(fnBody(actions, fn), "requireUser()"), `drive-time pin: ${fn} is signed-in only (its first await)`);
+  }
+  ok(firstAwait(fnBody(actions, "listAddressesToVerifyAction"), 'requirePerm("manage_users")'), "drive-time pin: the worklist is admin-only");
+  const fix = fnBody(actions, "fixAddressAction");
+  ok(/after\(async \(\) => \{[\s\S]*?await resyncForAddress\(pointKey\)\.catch\(/.test(fix) && fix.indexOf("after(") < fix.indexOf("return r;"),
+    "drive-time pin: verifying an address re-syncs the legs touching it, inside after() with a .catch");
+  const drawer = read("src/components/address-fix/address-fix-drawer.tsx");
+  ok(drawer.includes("LeafletMap") && drawer.includes("onPick") && drawer.includes("createPortal") && /dynamic\(\(\) => import\("@\/components\/map\/LeafletMap"\), \{\s*ssr: false/.test(drawer),
+    "drive-time pin: the Fix dialog drops/drags a pin on the shared Leaflet map, loaded client-only");
+  ok(read("src/components/address-fix/address-flag.tsx").includes("Address not verified — no drive time") || read("src/components/address-fix/address-flag.tsx").includes("flag.text"),
+    "drive-time pin: the flag badge shows the flag text");
+  ok(read("src/app/(app)/settings/groups/data.tsx").includes("AddressesToVerify"), "drive-time pin: Settings → Data shows Addresses to verify");
+  // Client components never import a module that reaches @/db (next build breaks).
+  const clientFiles = ["src/components/address-fix/address-fix-drawer.tsx", "src/components/address-fix/address-flag.tsx", "src/app/(app)/settings/addresses-to-verify.tsx"];
+  const allowed = /^(react|react-dom|next\/(dynamic|navigation)|@\/lib\/address-verify\/types|@\/app\/\(app\)\/address-actions|\.\.\/address-actions|\.\/address-fix-drawer|@\/components\/address-fix\/address-fix-drawer|@\/components\/map\/LeafletMap)$/;
+  const bad: string[] = [];
+  for (const f of clientFiles) {
+    const src = read(f);
+    if (!src.startsWith('"use client";')) bad.push(f + " (not a client component)");
+    for (const m of src.matchAll(/(?:from|import\()\s*"([^"]+)"/g)) if (!allowed.test(m[1])) bad.push(f + " → " + m[1]);
+  }
+  ok(bad.length === 0, "drive-time pin: the Fix UI imports only pure types and server actions" + (bad.length ? " — " + bad.join(", ") : ""));
+  ok(!existsSync("src/app/(app)/settings/unlocated-venues.tsx") && !existsSync("src/app/(app)/settings/venue-locate-drawer.tsx") &&
+     !/locateVenueAction|searchVenueAddressAction|townCentreAction|listUnlocatedVenuesAction/.test(read("src/app/(app)/settings/actions.ts")),
+    "drive-time: the old venue-only locate drawer, worklist and actions are gone");
 }

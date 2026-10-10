@@ -7,7 +7,7 @@ import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config"
 import { getConnectionInfo } from "@/lib/gmail/connections";
 import { searchPeople, type PersonMatch } from "@/lib/people-search";
 import type { EventDetail } from "@/lib/google/calendar";
-import { addDays, chicagoDayKey, isDayKey } from "@/lib/drive-plan/day";
+import { addDays, chicagoDayKey, isStayOverDay } from "@/lib/drive-plan/day";
 
 /** Resolves the signed-in user's own connected+granted mailbox key, or an
  *  error string explaining why calendar writes aren't available. Every
@@ -78,8 +78,10 @@ export async function addCalendarEventAction(
     const userId = grant.userId;
     const day = chicagoDayKey(input.startAt);
     after(async () => {
-      const { syncDriveDays } = await import("@/lib/drive-sync/sync");
-      await syncDriveDays(userId, [day, addDays(day, 1)]).catch((err) => console.error("[drive-sync] event add re-sync failed:", err));
+      const { syncDriveDays, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
+      await syncDriveDays(userId, [day, addDays(day, 1)])
+        .then((r) => markStaleIfTriggerFailed(userId, r))
+        .catch((err) => markStaleIfTriggerFailed(userId, null, err));
     });
   }
   revalidatePath("/", "layout");
@@ -131,8 +133,10 @@ export async function updateCalendarEventAction(
   }
   const syncUser = grant.userId;
   after(async () => {
-    const { syncDriveForUser } = await import("@/lib/drive-sync/sync");
-    await syncDriveForUser(syncUser).catch((err) => console.error("[drive-sync] event edit re-sync failed:", err));
+    const { syncDriveForUser, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
+    await syncDriveForUser(syncUser)
+      .then((r) => markStaleIfTriggerFailed(syncUser, r))
+      .catch((err) => markStaleIfTriggerFailed(syncUser, null, err));
   });
   revalidatePath("/", "layout");
   return { ok: true };
@@ -152,8 +156,10 @@ export async function deleteCalendarEventAction(
   }
   const syncUser = grant.userId;
   after(async () => {
-    const { syncDriveForUser } = await import("@/lib/drive-sync/sync");
-    await syncDriveForUser(syncUser).catch((err) => console.error("[drive-sync] event edit re-sync failed:", err));
+    const { syncDriveForUser, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
+    await syncDriveForUser(syncUser)
+      .then((r) => markStaleIfTriggerFailed(syncUser, r))
+      .catch((err) => markStaleIfTriggerFailed(syncUser, null, err));
   });
   revalidatePath("/", "layout");
   return { ok: true };
@@ -166,13 +172,16 @@ export async function setStayOverAction(
   on: boolean
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const me = await requireUser();
-  if (!isDayKey(dayKey)) return { ok: false, error: "Bad date" };
+  // Yesterday … today + 14 only: nothing outside the sync window is stored.
+  if (!isStayOverDay(dayKey, Date.now())) return { ok: false, error: "Bad date" };
   const { setStayOver } = await import("@/lib/stores/schedule-prefs");
   await setStayOver(me.id, dayKey, on === true);
   const userId = me.id;
   after(async () => {
-    const { syncDriveDays } = await import("@/lib/drive-sync/sync");
-    await syncDriveDays(userId, [dayKey, addDays(dayKey, 1)]).catch((err) => console.error("[drive-sync] stay-over re-sync failed:", err));
+    const { syncDriveDays, markStaleIfTriggerFailed } = await import("@/lib/drive-sync/sync");
+    await syncDriveDays(userId, [dayKey, addDays(dayKey, 1)])
+      .then((r) => markStaleIfTriggerFailed(userId, r))
+      .catch((err) => markStaleIfTriggerFailed(userId, null, err));
   });
   revalidatePath("/", "layout");
   return { ok: true };

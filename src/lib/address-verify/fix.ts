@@ -10,7 +10,9 @@ import { locateVenue } from "@/lib/venue-locate";
 import { addressKey } from "./keys";
 import { fixPlace, getPlaces, type PlaceDeps } from "./place-book";
 import { isValidPoint, venueGeoStatus } from "./state";
-import type { FixTarget, GeoStatus } from "./types";
+import type { FixTarget, FixTargetDetails, GeoStatus } from "./types";
+
+export type { FixTargetDetails };
 
 type VenueT = { kind: "venue"; siteId: string };
 type PlaceT = { kind: "place"; key: string; label: string };
@@ -31,14 +33,13 @@ const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0
 export function cleanFixInput(raw: unknown): FixAddressInput | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  const t = r.target as Record<string, unknown> | undefined;
-  if (!t || typeof t !== "object") return null;
+  const target = cleanFixTarget(r.target);
+  if (!target) return null;
   const mode = r.mode;
-  if (t.kind === "venue") {
-    const siteId = str(t.siteId, 200);
-    if (!siteId) return null;
-    const target: VenueT = { kind: "venue", siteId };
-    if (mode === "pin") return isValidPoint(r.lat, r.lng) ? { target, mode, lat: r.lat as number, lng: r.lng as number } : null;
+  const pin = mode === "pin" && isValidPoint(r.lat, r.lng) ? { mode: "pin" as const, lat: r.lat as number, lng: r.lng as number } : null;
+  if (mode === "pin" && !pin) return null;
+  if (target.kind === "venue") {
+    if (pin) return { target, ...pin };
     const f = { address: str(r.address, 300), city: str(r.city, 120), state: str(r.state, 60), zip: str(r.zip, 20) };
     if (f.address == null || f.city == null || f.state == null || f.zip == null) return null;
     const fields = f as { address: string; city: string; state: string; zip: string };
@@ -46,20 +47,30 @@ export function cleanFixInput(raw: unknown): FixAddressInput | null {
     if (mode === "pick") return isValidPoint(r.lat, r.lng) ? { target, mode, ...fields, lat: r.lat as number, lng: r.lng as number } : null;
     return null;
   }
+  if (pin) return { target, ...pin };
+  if (mode === "retry") {
+    const text = str(r.text, 300);
+    return text ? { target, mode, text } : null;
+  }
+  if (mode === "pick") {
+    const street = str(r.street, 300);
+    return street != null && isValidPoint(r.lat, r.lng) ? { target, mode, street, lat: r.lat as number, lng: r.lng as number } : null;
+  }
+  return null;
+}
+
+/** Untrusted target → FixTarget, or null. */
+export function cleanFixTarget(raw: unknown): FixTarget | null {
+  if (!raw || typeof raw !== "object") return null;
+  const t = raw as Record<string, unknown>;
+  if (t.kind === "venue") {
+    const siteId = str(t.siteId, 200);
+    return siteId ? { kind: "venue", siteId } : null;
+  }
   if (t.kind === "place") {
     const key = str(t.key, 300);
     const label = str(t.label, 300);
-    if (!key || label == null) return null;
-    const target: PlaceT = { kind: "place", key, label };
-    if (mode === "pin") return isValidPoint(r.lat, r.lng) ? { target, mode, lat: r.lat as number, lng: r.lng as number } : null;
-    if (mode === "retry") {
-      const text = str(r.text, 300);
-      return text ? { target, mode, text } : null;
-    }
-    if (mode === "pick") {
-      const street = str(r.street, 300);
-      return street != null && isValidPoint(r.lat, r.lng) ? { target, mode, street, lat: r.lat as number, lng: r.lng as number } : null;
-    }
+    return key && label != null ? { kind: "place", key, label } : null;
   }
   return null;
 }
@@ -89,15 +100,6 @@ export async function fixAddress(input: FixAddressInput, by: string, deps?: Part
         : await fixPlace({ key, label, mode: "retry", text: p.text }, by, deps);
   return r.ok ? { ok: true, status: r.status, pointKey: "place:" + key } : { ok: false, reason: r.reason };
 }
-
-export type FixTargetDetails = {
-  title: string;
-  sub: string;
-  href: string;
-  status: GeoStatus;
-  venue: { address: string; city: string; state: string; zip: string } | null;
-  placeText: string | null;
-};
 
 export async function loadFixTarget(target: FixTarget): Promise<FixTargetDetails | null> {
   if (target.kind === "venue") {

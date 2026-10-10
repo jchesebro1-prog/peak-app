@@ -37,3 +37,30 @@ export type PlaceRow = {
   verifiedAt: number | null;
   updatedAt: number;
 };
+
+/** What the Fix dialog shows about its target (loadFixTarget). */
+export type FixTargetDetails = {
+  title: string;
+  sub: string;
+  href: string;
+  status: GeoStatus;
+  venue: { address: string; city: string; state: string; zip: string } | null;
+  placeText: string | null;
+};
+
+/** "Addresses to verify" (Settings → Data) — the worklist's row shapes. */
+export type VerifyKind = "venue" | "visit" | "lead";
+export type VerifyStatusFilter = "unverified" | "needs_check" | "unresolved";
+export type VerifyRow = {
+  id: string;
+  kind: VerifyKind;
+  status: GeoStatus;
+  title: string;
+  sub: string;
+  address: string;
+  href: string;
+  fix: FixTarget;
+  /** false = never looked up yet (no place-book row). */
+  checked: boolean;
+};
+export type VerifyList = { rows: VerifyRow[]; total: number; counts: Record<VerifyKind, number>; noAddress: number };

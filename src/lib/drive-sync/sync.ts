@@ -453,6 +453,32 @@ function addPersonDays(map: Map<string, Set<string>>, v: VisitLike | null): void
   }
 }
 
+/**
+ * A trigger's sync (visit / address / calendar event / stay-over) that failed
+ * for a non-busy reason — it threw, its calendar read failed, or a drive
+ * write / truncated read left work undone — leaves the rep stale, so the next
+ * view or cron pass retries it. Busy already marked the rep stale itself; a
+ * D144-cleanup error alone retries on the next sync anyway. Never throws (it
+ * runs inside after() callbacks).
+ */
+export async function markStaleIfTriggerFailed(
+  userId: string,
+  result: DriveSyncResult | null,
+  err?: unknown,
+  deps?: Partial<DriveSyncDeps>
+): Promise<void> {
+  const d = { ...defaultDeps(), ...deps };
+  if (err !== undefined) d.log("[drive-sync] trigger re-sync failed " + userId, err);
+  const failed =
+    !result || (result.google !== "busy" && (result.google === "read-failed" || result.errors.some((e) => !e.startsWith("legacy:"))));
+  if (!failed) return;
+  try {
+    await d.setState(userId, { lastSyncAt: 0, staleAt: d.now() });
+  } catch (e) {
+    d.log("[drive-sync] could not mark " + userId + " stale", e);
+  }
+}
+
 async function syncPeopleDays(map: Map<string, Set<string>>, d: DriveSyncDeps): Promise<void> {
   if (!map.size) return;
   const users = await d.users();
@@ -460,9 +486,9 @@ async function syncPeopleDays(map: Map<string, Set<string>>, d: DriveSyncDeps): 
     const u = users.find((x) => x.name === name && x.status === "active");
     if (!u) continue;
     try {
-      await syncDriveDays(u.id, [...days], d);
+      await markStaleIfTriggerFailed(u.id, await syncDriveDays(u.id, [...days], d), undefined, d);
     } catch (err) {
-      d.log("[drive-sync] visit re-sync failed " + u.id, err);
+      await markStaleIfTriggerFailed(u.id, null, err, d);
     }
   }
 }

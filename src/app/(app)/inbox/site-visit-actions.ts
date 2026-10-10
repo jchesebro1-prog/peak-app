@@ -92,15 +92,16 @@ export async function createSiteVisitAction(
     return { ok: false, error: "Couldn’t schedule that visit — please try again." };
   }
 
-  const inviteStatus: InviteStatus = await dispatchVisitInvite(rec, {
-    id: me.id,
-    name: me.name,
-  });
-
   // Spec 2026-10-09 triggers: the new visit is a stop on its day's drive chain.
+  // Registered before the invite dispatch, so an invite error can't drop it.
   after(async () => {
     const { resyncForVisitChange } = await import("@/lib/drive-sync/sync");
     await resyncForVisitChange(null, rec).catch((err) => console.error("[drive-sync] visit re-sync failed:", err));
+  });
+
+  const inviteStatus: InviteStatus = await dispatchVisitInvite(rec, {
+    id: me.id,
+    name: me.name,
   });
 
   revalidatePath("/", "layout");
