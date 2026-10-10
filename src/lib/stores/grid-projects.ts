@@ -46,7 +46,7 @@ import {
   type RenumberTarget,
 } from "@/lib/design/designators";
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
-import { cleanPlacementTag, type PlacementTag } from "@/lib/design/conduit-riser/tags";
+import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -1634,29 +1634,31 @@ export async function setPlacementsDesignator(
 const CURTAIN_TAG_REFUSAL = "Curtains don't take riser tag fields.";
 
 /**
- * Set many devices' riser tag overrides in one all-or-nothing write
- * (batchEdit). Each `tag` goes through cleanPlacementTag; `null` (or a tag
- * that cleans to nothing) removes the overrides so the part defaults show. A
+ * Patch many devices' riser tag overrides in one all-or-nothing write
+ * (batchEdit). Each item is a per-field patch (applyTagPatch): a key absent
+ * is left alone, a string sets that field (cleaned; "" is a deliberate
+ * blank), null removes that override; an all-empty result deletes `tag`. A
  * hand edit clears the #211 auto tag, like a category edit. Curtains are
- * refused (the whole batch). Returns the previous tags (null when none).
+ * refused (the whole batch). `previous` is, per id, a patch that restores
+ * exactly the prior values of the touched fields — undo and redo are patches.
  */
 export async function setPlacementsTag(
   projectId: string,
-  items: { id: string; tag: PlacementTag | null }[]
-): Promise<BatchResult<{ previous: { id: string; tag: PlacementTag | null }[] }>> {
+  items: { id: string; patch: TagPatch }[]
+): Promise<BatchResult<{ previous: { id: string; patch: TagPatch }[] }>> {
   const next = byId(items);
   return batchEdit(
     projectId,
     items.map((it) => it.id),
     (p) => {
-      const previous: { id: string; tag: PlacementTag | null }[] = [];
+      const previous: { id: string; patch: TagPatch }[] = [];
       p.placements = (p.placements || []).map((pl) => {
         const it = next.get(pl.id);
         if (!it) return pl;
-        previous.push({ id: pl.id, tag: pl.tag ?? null });
-        const clean = it.tag ? cleanPlacementTag(it.tag) : undefined;
+        const r = applyTagPatch(pl.tag, it.patch);
+        previous.push({ id: pl.id, patch: r.previous });
         const edited = withoutAuto({ ...pl });
-        if (clean) edited.tag = clean;
+        if (r.tag) edited.tag = r.tag;
         else delete edited.tag;
         return edited;
       });

@@ -10,7 +10,7 @@ import { placementQty } from "./grid-bom";
 import { spaceOf } from "./grid-geometry";
 import { normalizeCategory } from "./grid-scopes";
 import { cleanDesignator, formatDesignator, readingOrder } from "./designators";
-import { cleanPlacementTag, effectiveTag, TAG_LIMITS, type EffectiveTag, type PlacementTag, type TagFields } from "./conduit-riser/tags";
+import { cleanPlacementTag, effectiveTag, TAG_FIELD_KEYS, TAG_LIMITS, type EffectiveTag, type PlacementTag, type TagFields, type TagPatch } from "./conduit-riser/tags";
 
 export type DeviceRow = {
   id: string;
@@ -40,7 +40,7 @@ export type DeviceRow = {
 };
 
 /** #321: the riser tag fields, in tag order — each is also a Devices column. */
-export const TAG_COLUMN_KEYS = ["box", "face", "mount", "height", "pd", "location", "power", "contents"] as const;
+export const TAG_COLUMN_KEYS = TAG_FIELD_KEYS;
 export type TagColumnKey = (typeof TAG_COLUMN_KEYS)[number];
 export const isTagColumn = (key: string): key is TagColumnKey => (TAG_COLUMN_KEYS as readonly string[]).includes(key);
 
@@ -218,42 +218,42 @@ export function parsePd(text: string): "P" | "D" | "P/D" | "" | null {
 }
 
 /**
- * One tag field edited on a device that already carries `own` overrides. A
- * blank removes that field's override (the part's default shows again); no
- * overrides left = `tag: null`. `changed` says whether anything differs, so a
- * click-away with no edit writes nothing.
+ * One tag field edited on a device that carries `own` overrides, as a
+ * single-field PATCH (never a whole tag, so a fast second edit can't undo the
+ * first). Typing text sets that field; typing nothing removes the device's
+ * override for it (`null`) whenever it has one — a stored "" included — so the
+ * part's default shows again. `patch: null` = nothing to write.
  */
-export function tagAfterEdit(
+export function tagPatchAfterEdit(
   own: PlacementTag | undefined,
   field: TagColumnKey,
   text: string
-): { ok: true; tag: PlacementTag | null; changed: boolean } | { ok: false; error: string } {
+): { ok: true; patch: TagPatch | null } | { ok: false; error: string } {
   let value = text;
   if (field === "pd") {
     const pd = parsePd(text);
     if (pd === null) return { ok: false, error: PD_PROBLEM };
     value = pd;
   }
-  const next: Record<string, string> = { ...(own || {}) };
-  const cleaned = value.trim() === "" ? undefined : (cleanPlacementTag({ [field]: value }) as Record<string, string> | undefined)?.[field];
-  if (cleaned === undefined || cleaned === "") delete next[field];
-  else next[field] = cleaned;
-  const tag = Object.keys(next).length ? (next as PlacementTag) : null;
-  return { ok: true, tag, changed: ((own as Record<string, string> | undefined)?.[field] ?? "") !== (next[field] ?? "") };
+  const current = (own as Record<string, string> | undefined)?.[field];
+  if (value.trim() === "") return { ok: true, patch: current !== undefined ? { [field]: null } : null };
+  const cleaned = (cleanPlacementTag({ [field]: value }) as Record<string, string> | undefined)?.[field];
+  if (cleaned === undefined || cleaned === current) return { ok: true, patch: null };
+  return { ok: true, patch: { [field]: cleaned } };
 }
 
-/** Set one tag field on several devices, each keeping its other fields. Only
- *  devices whose tag would change are returned. */
+/** Set one tag field on several devices as per-field patches. Only devices
+ *  whose value would change are returned. */
 export function bulkTagItems(
   pls: ReadonlyArray<{ id: string; tag?: PlacementTag }>,
   field: TagColumnKey,
   text: string
-): { ok: true; items: { id: string; tag: PlacementTag | null }[] } | { ok: false; error: string } {
-  const items: { id: string; tag: PlacementTag | null }[] = [];
+): { ok: true; items: { id: string; patch: TagPatch }[] } | { ok: false; error: string } {
+  const items: { id: string; patch: TagPatch }[] = [];
   for (const pl of pls) {
-    const r = tagAfterEdit(pl.tag, field, text);
+    const r = tagPatchAfterEdit(pl.tag, field, text);
     if (!r.ok) return r;
-    if (r.changed) items.push({ id: pl.id, tag: r.tag });
+    if (r.patch) items.push({ id: pl.id, patch: r.patch });
   }
   return { ok: true, items };
 }

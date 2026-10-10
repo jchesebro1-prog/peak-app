@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { cleanPlacementTag, type PlacementTag } from "@/lib/design/conduit-riser/tags";
+import { cleanPlacementTag, isTagPatch, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { clamp01, findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
 import { clampConfigDims, venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
 import { clampHouseFieldsFor } from "@/lib/design/venue-templates/house-dims";
@@ -1053,20 +1053,18 @@ export async function setDesignatorsAction(
   return { ok: true, previous: r.value };
 }
 
-/** Set (or, with null, clear) many devices' riser tag overrides in one write
- *  (#321). `previous` holds the old tags for undo; curtains are refused (store).
- *  Each tag is re-cleaned by the store (cleanPlacementTag). */
+/** Patch many devices' riser tag overrides in one write (#321). Each item is
+ *  a per-field patch (absent = leave alone, string = set, null = remove), so a
+ *  fast second edit never overwrites the first. `previous` holds the patches
+ *  that undo it; curtains are refused (store). */
 export async function setTagFieldsAction(
   projectId: string,
-  items: { id: string; tag: PlacementTag | null }[]
-): Promise<{ ok: true; previous: { id: string; tag: PlacementTag | null }[] } | { ok: false; error: string }> {
+  items: { id: string; patch: TagPatch }[]
+): Promise<{ ok: true; previous: { id: string; patch: TagPatch }[] } | { ok: false; error: string }> {
   await requireUser();
-  if (
-    !isStr(projectId) || !Array.isArray(items) ||
-    !items.every((it) => isObj(it) && isStr(it.id) && (it.tag === null || isObj(it.tag)))
-  )
+  if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && isTagPatch(it.patch)))
     return { ok: false, error: BATCH_INVALID };
-  const r = await setPlacementsTag(projectId, items.map((it) => ({ id: it.id, tag: it.tag })));
+  const r = await setPlacementsTag(projectId, items.map((it) => ({ id: it.id, patch: it.patch })));
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   return { ok: true, previous: r.value.previous };

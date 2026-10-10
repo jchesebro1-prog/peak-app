@@ -77,7 +77,7 @@ import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 import { duplicates, type RenumberTarget } from "@/lib/design/designators";
-import type { PlacementTag } from "@/lib/design/conduit-riser/tags";
+import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
@@ -2319,10 +2319,11 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   /* ------------------------- riser tags (#321) ------------------------- */
 
-  /** Set (or, with a null tag, clear) riser tag overrides — one write, one
-   *  undo step. Resolves true when it saved. */
+  /** Patch riser tag overrides per field — one write, one undo step (the
+   *  inverse is the previous values of only the touched fields). Resolves true
+   *  when it saved. */
   const saveTags = useCallback(
-    async (items: { id: string; tag: PlacementTag | null }[]): Promise<boolean> => {
+    async (items: { id: string; patch: TagPatch }[]): Promise<boolean> => {
       if (!items.length) return false;
       if (!(await flushNudge())) return false;
       setErr(null);

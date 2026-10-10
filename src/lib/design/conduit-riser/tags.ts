@@ -94,3 +94,34 @@ export function effectiveTag(
     contents: p.contents ?? "",
   };
 }
+
+/** Every tag field a placement can override — the keys a patch may carry. */
+export const TAG_FIELD_KEYS = ["box", "face", "mount", "height", "pd", "location", "power", "contents"] as const;
+export type TagFieldKey = (typeof TAG_FIELD_KEYS)[number];
+/** A per-field edit: a key absent = leave alone, a string = set (cleaned; ""
+ *  is a deliberate blank), null = remove that field's override. */
+export type TagPatch = Partial<Record<TagFieldKey, string | null>>;
+
+/** True when `v` is a well-formed patch: an object whose keys are tag fields and values string | null. */
+export function isTagPatch(v: unknown): v is TagPatch {
+  return isObj(v) && Object.entries(v).every(([k, x]) => (TAG_FIELD_KEYS as readonly string[]).includes(k) && (x === null || typeof x === "string"));
+}
+
+/**
+ * Apply a patch to a placement's overrides: merge per field, clean the result
+ * (cleanPlacementTag), and report `previous` — a patch that restores exactly
+ * the prior value of only the touched fields (their old string, or null when
+ * they had no override). An all-empty result is `tag: undefined`. Pure.
+ */
+export function applyTagPatch(current: PlacementTag | undefined, patch: TagPatch): { tag: PlacementTag | undefined; previous: TagPatch } {
+  const cur: Record<string, string> = { ...((current || {}) as Record<string, string>) };
+  const previous: TagPatch = {};
+  for (const key of TAG_FIELD_KEYS) {
+    if (!(key in patch) || patch[key] === undefined) continue;
+    previous[key] = cur[key] !== undefined ? cur[key] : null;
+    const v = patch[key];
+    if (v === null) delete cur[key];
+    else cur[key] = v;
+  }
+  return { tag: cleanPlacementTag(cur), previous };
+}

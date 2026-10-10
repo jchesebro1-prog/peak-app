@@ -60874,7 +60874,7 @@ async function designators320DeviceRowsChecks(): Promise<void> {
     "#320 Renumber menu and Renumber selection: an \"Apply current type codes\" checkbox (off by default) passes recode through");
   ok(!table.includes("#fdf4e3") && table.includes("color-mix(in srgb, ${DESIGNATOR_DUPLICATE_COLOR} 12%, transparent)") && table.includes("background: DESIGNATOR_DUPLICATE_TINT"),
     "#320 Devices tab: a duplicate's tint is derived from DESIGNATOR_DUPLICATE_COLOR, not hard-coded");
-  const inlineInput = table.slice(table.indexOf("<input\n                          autoFocus"), table.indexOf("value={cell.draft}"));
+  const inlineInput = table.slice(table.indexOf("<input\n                            autoFocus"), table.indexOf("value={cell.draft}"));
   ok(inlineInput.includes("autoFocus") && inlineInput.includes("onFocus={(e) => e.currentTarget.select()}") && propSrc.includes('aria-label="Designator"\n            onFocus={(e) => e.currentTarget.select()}'),
     "#320 Devices tab: the inline cell input (and the Property Editor designator input) select their text on focus, so typing replaces it");
   const tb = rd("src/app/(app)/design/grid/[id]/workspace/toolbar.tsx");
@@ -62133,28 +62133,45 @@ async function conduitRiser321B2Checks(): Promise<void> {
   ok(!!auto.auto, "#321 fixture: the auto-tagged device really carries an auto tag");
   const cur = (await G.addCurtainPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.3, y: 0.3, curtain: { type: "Draw", name: "Main", widthFt: 20, heightFt: 10, fullnessPct: 50, fabricSku: "TEST-321-FAB" }, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
 
-  const set1 = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: { box: " b9 ", location: "Booth", power: "ab", pd: "P" } }, { id: d2.id, tag: { contents: "Relay 4" } }]);
+  const set1 = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: " b9 ", location: "Booth", power: "ab", pd: "P" } }, { id: d2.id, patch: { contents: "Relay 4" } }]);
   ok(set1.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }) && J((await stored(d2.id)).tag) === J({ contents: "Relay 4" }),
-    "#321 setPlacementsTag: sets the cleaned tag on each device");
-  ok(set1.ok && J(set1.value.previous) === J([{ id: d1.id, tag: null }, { id: d2.id, tag: null }]), "#321 setPlacementsTag: previous is null where there was no tag");
-  const set2 = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: { face: "REAR" } }]);
-  ok(set2.ok && J(set2.value.previous) === J([{ id: d1.id, tag: { box: "B9", pd: "P", location: "Booth", power: "AB" } }]), "#321 setPlacementsTag: previous carries the old tag, ready for undo");
+    "#321 setPlacementsTag: a patch sets the cleaned fields on each device");
+  ok(set1.ok && J(set1.value.previous) === J([{ id: d1.id, patch: { box: null, location: null, power: null, pd: null } }, { id: d2.id, patch: { contents: null } }]),
+    "#321 setPlacementsTag: previous is null for every touched field that had no override");
+  const set2 = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { face: "REAR", box: "B1" } }]);
+  ok(set2.ok && J((await stored(d1.id)).tag) === J({ box: "B1", face: "REAR", pd: "P", location: "Booth", power: "AB" }), "#321 setPlacementsTag: untouched fields are left alone");
+  ok(set2.ok && J(set2.value.previous) === J([{ id: d1.id, patch: { face: null, box: "B9" } }]), "#321 setPlacementsTag: previous restores only the touched fields (old value, or null)");
   const back = await G.setPlacementsTag(gp.id, set2.ok ? set2.value.previous : []);
-  ok(back.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }), "#321 setPlacementsTag: replaying previous restores the tag");
-  const cleared = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: null }, { id: d2.id, tag: {} }]);
-  ok(cleared.ok && !("tag" in (await stored(d1.id))) && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: null (or an empty tag) clears the overrides");
-  const junk = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: { box: "ABCDEFGHI", pd: "Z", bogus: "x" } as never }]);
-  ok(junk.ok && J((await stored(d1.id)).tag) === J({ box: "ABCD" }), "#321 setPlacementsTag: junk is cleaned by cleanPlacementTag (long text capped, invalid P/D and unknown keys dropped)");
-  const hand = await G.setPlacementsTag(gp.id, [{ id: auto.id, tag: { box: "B1" } }]);
+  ok(back.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }), "#321 setPlacementsTag: replaying previous restores the tag exactly (undo is a patch)");
+  ok(back.ok && J(back.value.previous) === J([{ id: d1.id, patch: { face: "REAR", box: "B1" } }]), "#321 setPlacementsTag: the undo's own previous is the redo patch");
+  // the fast Tab flow: two single-field patches built from the same stale row both land
+  const fast1 = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "B2" } }]);
+  const fast2 = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { face: "FRONT" } }]);
+  ok(fast1.ok && fast2.ok && J((await stored(d2.id)).tag) === J({ contents: "Relay 4", box: "B2", face: "FRONT" }),
+    "#321 setPlacementsTag: two sequential single-field patches on one device keep both fields");
+  ok(fast2.ok && J(fast2.value.previous) === J([{ id: d2.id, patch: { face: null } }]), "#321 setPlacementsTag: the second edit's undo does not touch the first field");
+  const rm1 = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: null } }]);
+  ok(rm1.ok && J((await stored(d2.id)).tag) === J({ contents: "Relay 4", face: "FRONT" }) && J(rm1.value.previous) === J([{ id: d2.id, patch: { box: "B2" } }]),
+    "#321 setPlacementsTag: a null patch removes one override and leaves the others");
+  const blankSet = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { face: "" } }]);
+  ok(blankSet.ok && (await stored(d2.id)).tag?.face === "", "#321 setPlacementsTag: \"\" is a deliberate blank, kept");
+  const blankGone = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { face: null } }]);
+  ok(blankGone.ok && (await stored(d2.id)).tag?.face === undefined && !("face" in ((await stored(d2.id)).tag || {})), "#321 setPlacementsTag: null removes a stored deliberate blank");
+  const cleared = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: null, pd: null, location: null, power: null } }, { id: d2.id, patch: { contents: null } }]);
+  ok(cleared.ok && !("tag" in (await stored(d1.id))) && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: removing every override deletes the tag");
+  const junk = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: "ABCDEFGHI", pd: "Z" } }]);
+  ok(junk.ok && J((await stored(d1.id)).tag) === J({ box: "ABCD" }), "#321 setPlacementsTag: junk is cleaned by cleanPlacementTag (long text capped, invalid P/D dropped)");
+  await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: null } }]);
+  const hand = await G.setPlacementsTag(gp.id, [{ id: auto.id, patch: { box: "B1" } }]);
   const after = await stored(auto.id);
   ok(hand.ok && after.tag?.box === "B1" && !("auto" in after), "#321 setPlacementsTag: a hand edit clears the auto tag, like a category edit");
-  const withCurtain = await G.setPlacementsTag(gp.id, [{ id: d2.id, tag: { box: "ZZ" } }, { id: cur.id, tag: { box: "ZZ" } }]);
+  const withCurtain = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "ZZ" } }, { id: cur.id, patch: { box: "ZZ" } }]);
   ok(!withCurtain.ok && !("tag" in (await stored(d2.id))) && !("tag" in (await stored(cur.id))), "#321 setPlacementsTag: a curtain in the batch refuses the whole batch");
-  const missing = await G.setPlacementsTag(gp.id, [{ id: d2.id, tag: { box: "ZZ" } }, { id: "gp-nope", tag: { box: "ZZ" } }]);
+  const missing = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "ZZ" } }, { id: "gp-nope", patch: { box: "ZZ" } }]);
   ok(!missing.ok && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: a missing id refuses the whole batch");
 
   // paste keeps the tag, issues a new designator; a curtain item's tag is ignored
-  await G.setPlacementsTag(gp.id, [{ id: d2.id, tag: { box: "B4", location: "Lobby" } }]);
+  await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "B4", location: "Lobby" } }]);
   const src2 = await stored(d2.id);
   const clip = CB.copySelection(gp.id, (await G.getProject(gp.id))!.placements, [], [d2.id]);
   ok(!!clip && J(clip.items[0].tag) === J({ box: "B4", location: "Lobby" }) && !("designator" in clip.items[0]), "#321 clipboard: copy carries the tag, never the designator");
@@ -62179,12 +62196,12 @@ async function conduitRiser321B2Checks(): Promise<void> {
   ok(J(T.cleanPlacementTag({ box: "b1", pd: "p", rogue: 1 })) === J({ box: "B1", pd: "P" }) && T.cleanPlacementTag("junk") === undefined && T.cleanPlacementTag({ rogue: 1 }) === undefined,
     "#321 the restore cleaner keeps a cleaned tag and drops junk");
   const setAct = acts.slice(acts.indexOf("export async function setTagFieldsAction("), acts.indexOf("function cleanRenumberTarget("));
-  ok(setAct.includes("await requireUser();") && setAct.includes("setPlacementsTag(projectId,") && setAct.includes("revalidatePath(editorPath(projectId));") && setAct.includes("previous: r.value.previous"),
+  ok(setAct.includes("await requireUser();") && setAct.includes("isTagPatch(it.patch)") && setAct.includes("setPlacementsTag(projectId,") && setAct.includes("revalidatePath(editorPath(projectId));") && setAct.includes("previous: r.value.previous"),
     "#321 setTagFieldsAction: authed, writes through the store, revalidates, returns previous");
   ok(acts.includes("(it.tag === undefined || isObj(it.tag)) &&") && acts.includes("...(!curtain && it.tag ? { tag: it.tag } : {}),"), "#321 pastePlacementsAction: forwards a non-curtain item's tag");
 
   // undo
-  const entry = { label: "set riser tag (1 device)", forward: { kind: "tag" as const, items: [{ id: "a", tag: { box: "B1" } }] }, inverse: { kind: "tag" as const, items: [{ id: "a", tag: null }] } };
+  const entry = { label: "set riser tag (1 device)", forward: { kind: "tag" as const, items: [{ id: "a", patch: { box: "B1" } }] }, inverse: { kind: "tag" as const, items: [{ id: "a", patch: { box: null } }] } };
   ok(U.pushUndo(U.emptyUndo(), entry).past[0].inverse.kind === "tag", "#321 undo: a tag edit is one undo step");
   const hook = src("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
   ok(hook.includes('case "tag": {') && hook.includes("setTagFieldsAction(project.id, c.items)") && hook.includes('record({ label: stepLabel("set riser tag", items.length), forward: { kind: "tag", items }, inverse: { kind: "tag", items: r.previous } });') && hook.includes("    saveTags,"),
@@ -62234,40 +62251,51 @@ async function conduitRiser321B2Checks(): Promise<void> {
   ok(J(R.nextCell(rows, "a", "box", "down")) === J({ id: rows[1].id, col: "box" }) && R.nextCell(rows, "zzz", "box", "down") === null, "#321 nextCell: Enter moves down within the column");
 
   // edit rules
-  const e1 = R.tagAfterEdit({ box: "B7", location: "Booth" }, "face", " rear ");
-  ok(e1.ok && e1.changed && J(e1.tag) === J({ box: "B7", location: "Booth", face: "REAR" }), "#321 tagAfterEdit: sets one field, keeping the others");
-  const e2 = R.tagAfterEdit({ box: "B7" }, "box", "");
-  ok(e2.ok && e2.changed && e2.tag === null, "#321 tagAfterEdit: blank removes the override; none left = null");
-  const e3 = R.tagAfterEdit({ box: "B7", face: "REAR" }, "box", "  ");
-  ok(e3.ok && J(e3.tag) === J({ face: "REAR" }), "#321 tagAfterEdit: blank removes only that field");
-  const e4 = R.tagAfterEdit({ box: "B7" }, "box", "b7");
-  ok(e4.ok && !e4.changed, "#321 tagAfterEdit: retyping the same value changes nothing");
-  const e5 = R.tagAfterEdit(undefined, "box", "");
-  ok(e5.ok && !e5.changed && e5.tag === null, "#321 tagAfterEdit: blank on a device with no override is a no-op");
+  const e1 = R.tagPatchAfterEdit({ box: "B7", location: "Booth" }, "face", " rear ");
+  ok(e1.ok && J(e1.patch) === J({ face: "REAR" }), "#321 tagPatchAfterEdit: a typed value is a single-field patch (nothing else in it)");
+  const e2 = R.tagPatchAfterEdit({ box: "B7" }, "box", "");
+  ok(e2.ok && J(e2.patch) === J({ box: null }), "#321 tagPatchAfterEdit: blank on an overridden field removes that override");
+  const e3 = R.tagPatchAfterEdit({ box: "B7", face: "REAR" }, "box", "  ");
+  ok(e3.ok && J(e3.patch) === J({ box: null }), "#321 tagPatchAfterEdit: blank touches only that field");
+  const e4 = R.tagPatchAfterEdit({ box: "B7" }, "box", "b7");
+  ok(e4.ok && e4.patch === null, "#321 tagPatchAfterEdit: retyping the same value writes nothing");
+  const e5 = R.tagPatchAfterEdit(undefined, "box", "");
+  ok(e5.ok && e5.patch === null, "#321 tagPatchAfterEdit: blank on a device with no override is a no-op");
+  const e7 = R.tagPatchAfterEdit({ face: "" }, "face", "");
+  ok(e7.ok && J(e7.patch) === J({ face: null }), "#321 tagPatchAfterEdit: blank clears a stored deliberate blank (the UI can remove it)");
+  const e8 = R.tagPatchAfterEdit({ face: "" }, "face", "REAR");
+  ok(e8.ok && J(e8.patch) === J({ face: "REAR" }), "#321 tagPatchAfterEdit: a value replaces a deliberate blank");
   ok(R.parsePd("p/d") === "P/D" && R.parsePd(" P / D ") === "P/D" && R.parsePd("d") === "D" && R.parsePd("") === "" && R.parsePd("X") === null && R.parsePd("PD") === null,
     "#321 P/D cell: accepts P, D, P/D or blank — anything else is invalid");
-  const pdBad = R.tagAfterEdit({}, "pd", "Q");
-  ok(!pdBad.ok && pdBad.error === R.PD_PROBLEM, "#321 tagAfterEdit: an invalid P/D is refused with the message");
-  const e6 = R.tagAfterEdit({}, "pd", "p / d");
-  ok(e6.ok && J(e6.tag) === J({ pd: "P/D" }), "#321 tagAfterEdit: P/D is normalised");
+  const pdBad = R.tagPatchAfterEdit({}, "pd", "Q");
+  ok(!pdBad.ok && pdBad.error === R.PD_PROBLEM, "#321 tagPatchAfterEdit: an invalid P/D is refused with the message");
+  const e6 = R.tagPatchAfterEdit({}, "pd", "p / d");
+  ok(e6.ok && J(e6.patch) === J({ pd: "P/D" }), "#321 tagPatchAfterEdit: P/D is normalised");
+  // tags.ts patch helpers
+  ok(T.isTagPatch({ box: "B", face: null }) && T.isTagPatch({}) && !T.isTagPatch({ rogue: "x" }) && !T.isTagPatch({ box: 3 }) && !T.isTagPatch(null) && !T.isTagPatch([]),
+    "#321 isTagPatch: only tag fields with string | null values");
+  const ap = T.applyTagPatch({ box: "B1", face: "REAR" }, { box: null, mount: "SM" });
+  ok(J(ap.tag) === J({ face: "REAR", mount: "SM" }) && J(ap.previous) === J({ box: "B1", mount: null }), "#321 applyTagPatch: merges per field, previous covers only the touched fields");
+  ok(T.applyTagPatch({ box: "B1" }, { box: null }).tag === undefined, "#321 applyTagPatch: an all-empty result is no tag");
   ok(R.TAG_INPUT_MAX.box === T.TAG_LIMITS.box && R.TAG_INPUT_MAX.contents === T.TAG_LIMITS.contents && R.TAG_INPUT_MAX.pd === 3, "#321 Devices: input limits come from TAG_LIMITS");
   const bulk = R.bulkTagItems([{ id: "a" }, { id: "b", tag: { box: "B7", location: "Booth" } }, { id: "c", tag: { face: "REAR" } }], "face", "front");
-  ok(bulk.ok && J(bulk.items) === J([{ id: "a", tag: { face: "FRONT" } }, { id: "b", tag: { box: "B7", location: "Booth", face: "FRONT" } }, { id: "c", tag: { face: "FRONT" } }]),
-    "#321 bulk set: one field on every device, each keeping its other fields");
+  ok(bulk.ok && J(bulk.items) === J([{ id: "a", patch: { face: "FRONT" } }, { id: "b", patch: { face: "FRONT" } }, { id: "c", patch: { face: "FRONT" } }]),
+    "#321 bulk set: a single-field patch per device (each device's other fields untouched by construction)");
   const bulk2 = R.bulkTagItems([{ id: "a", tag: { face: "REAR" } }, { id: "b", tag: { face: "REAR", box: "B7" } }, { id: "c" }], "face", "");
-  ok(bulk2.ok && J(bulk2.items) === J([{ id: "a", tag: null }, { id: "b", tag: { box: "B7" } }]), "#321 bulk clear: removes that field only, skips devices with nothing to clear");
+  ok(bulk2.ok && J(bulk2.items) === J([{ id: "a", patch: { face: null } }, { id: "b", patch: { face: null } }]), "#321 bulk clear: removes that field only, skips devices with nothing to clear");
   const bulk3 = R.bulkTagItems([{ id: "a", tag: { face: "REAR" } }], "face", "REAR");
   ok(bulk3.ok && bulk3.items.length === 0, "#321 bulk set: unchanged devices are left out");
   ok(!R.bulkTagItems([{ id: "a" }], "pd", "nope").ok, "#321 bulk set: an invalid P/D refuses before any write");
 
   // UI pins
   const table = src("src/app/(app)/design/grid/[id]/workspace/devices-table.tsx");
-  ok(table.includes("const col: EditCol | null = c.editable ? (c.key as EditCol) : null;") && table.includes("saveTags([{ id: row.id, tag: edit.tag }])") &&
+  ok(table.includes("const col: EditCol | null = c.editable ? (c.key as EditCol) : null;") && table.includes("saveTags([{ id: row.id, patch: edit.patch }])") &&
      table.includes("tagDefaultsOf: (pl) => partById.get(pl.partId)?.tagDefaults,") && table.includes("TAG_INPUT_MAX[col]") && table.includes("setErr(edit.error);"),
     "#321 Devices table: the editable flag drives the cells, tag commits go through saveTags, an invalid P/D reports and stays open");
   const prop = src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
-  ok(prop.includes("<RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />") && prop.includes("<RiserTagRows ed={ed} pls={pls.filter((pl) => !pl.curtain)} />") &&
-     prop.includes('"(from part)"') && prop.includes("bulkTagItems(pls, field, draft)"),
+  ok(prop.includes("<RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />") && prop.includes("pls={pls.filter((pl) => !pl.curtain)} />") &&
+     prop.includes('"(from part)"') && prop.includes("bulkTagItems(pls, field, draft)") &&
+     prop.includes("if (!dirty && same(eff.map((e) => e[field])) === null) {") && prop.includes('<RiserTagRows key={pls.map((pl) => pl.id).sort().join("|")}'),
     "#321 Property Editor: a Riser tag section for one device and for several (Mixed + bulk set), never for a curtain");
   const catPage = src("src/app/(app)/catalog/page.tsx");
   ok(catPage.includes("<TagDefaultsField key={part?.sku ?? \"new\"}") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes("Riser tag defaults") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes('name="tag_pd"'),

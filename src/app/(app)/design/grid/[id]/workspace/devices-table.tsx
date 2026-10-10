@@ -14,7 +14,7 @@ import {
   isTagColumn,
   nextCell,
   sortDeviceRows,
-  tagAfterEdit,
+  tagPatchAfterEdit,
   TAG_INPUT_MAX,
   type DeviceColumnKey,
   type DeviceFilter,
@@ -171,12 +171,12 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
         if ((cleanDesignator(cur.draft) ?? "") !== row.designator && !(await saveDesignators([{ id: row.id, designator: cur.draft }]))) return;
       } else if (isTagColumn(cur.col)) {
         // #321: a blank removes this device's override (the part's default shows).
-        const edit = tagAfterEdit(row.own, cur.col, cur.draft);
+        const edit = tagPatchAfterEdit(row.own, cur.col, cur.draft);
         if (!edit.ok) {
           setErr(edit.error);
           return;
         }
-        if (edit.changed && !(await saveTags([{ id: row.id, tag: edit.tag }]))) return;
+        if (edit.patch && !(await saveTags([{ id: row.id, patch: edit.patch }]))) return;
       } else if ((normalizeCategory(cur.draft) ?? "") !== row.category) {
         // Same as the designator path: a refused save keeps the cell open.
         if (!(await saveCategory(row.id, cur.draft))) return;
@@ -269,96 +269,96 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
         <div style={{ fontSize: 13, color: "#8c919c", padding: "18px 0" }}>No devices on this option yet.</div>
       ) : (
         <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: DEVICE_COLUMNS.reduce((n, c) => n + c.width, 0) + 200, borderCollapse: "collapse", tableLayout: "fixed" }}>
-          <colgroup>
-            {DEVICE_COLUMNS.map((c) => (
-              <col key={c.key} style={c.width ? { width: c.width } : undefined} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
+          <table style={{ width: "100%", minWidth: DEVICE_COLUMNS.reduce((n, c) => n + c.width, 0) + 200, borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <colgroup>
               {DEVICE_COLUMNS.map((c) => (
-                <th key={c.key} style={TH} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-                  <button type="button" style={TH_BUTTON} onClick={() => sortBy(c.key)}>
-                    {c.label}
-                    {sort?.key === c.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
-                  </button>
-                </th>
+                <col key={c.key} style={c.width ? { width: c.width } : undefined} />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => (
-              <tr
-                key={r.id}
-                onClick={(e) => pick(r, e.shiftKey || e.metaKey || e.ctrlKey)}
-                style={{ background: selected.has(r.id) ? "#eef2fb" : undefined, cursor: "pointer" }}
-              >
-                {DEVICE_COLUMNS.map((c) => {
-                  const col: EditCol | null = c.editable ? (c.key as EditCol) : null;
-                  const cell = col && editing && editing.id === r.id && editing.col === col ? editing : null;
-                  const dupe = c.key === "designator" && r.duplicate;
-                  return (
-                    <td
-                      key={c.key}
-                      title={dupe ? "Another device uses this designator" : cellText(r, c.key)}
-                      style={{
-                        ...TD,
-                        ...(c.mono ? { fontFamily: "var(--font-mono)", fontSize: 11.5 } : {}),
-                        ...(dupe ? { color: DESIGNATOR_DUPLICATE_COLOR, fontWeight: 700, background: DESIGNATOR_DUPLICATE_TINT } : {}),
-                      }}
-                    >
-                      {cell && col ? (
-                        <input
-                          autoFocus
-                          onFocus={(e) => e.currentTarget.select()}
-                          value={cell.draft}
-                          maxLength={col === "designator" ? DESIGNATOR_MAX : isTagColumn(col) ? TAG_INPUT_MAX[col] : 40}
-                          list={col === "category" ? "grid-devices-category-suggestions" : undefined}
-                          aria-label={`${c.label} for ${r.desc}`}
-                          placeholder={col === "designator" ? "Blank = next free" : isTagColumn(col) ? r.tag[col] : ""}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => setEditing({ ...cell, draft: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") {
-                              e.preventDefault();
-                              setEditing(null);
-                            } else if (e.key === "Enter") {
-                              e.preventDefault();
-                              if (!busy) void commit(e.shiftKey ? "up" : "down");
-                            } else if (e.key === "Tab") {
-                              e.preventDefault();
-                              if (!busy) void commit(e.shiftKey ? "left" : "right");
-                            }
-                          }}
-                          style={{ ...CTRL, width: "100%", padding: "2px 6px", fontFamily: c.mono ? "var(--font-mono)" : "inherit" }}
-                        />
-                      ) : col ? (
-                        <button
-                          type="button"
-                          style={CELL_BTN}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            open(r, col);
-                          }}
-                        >
-                          {cellText(r, c.key) ? (
-                            // #321: a tag field the device doesn't override shows the part's default, muted.
-                            <span style={isTagColumn(c.key) && r.own[c.key] === undefined ? { color: "#9aa0ab" } : undefined}>{cellText(r, c.key)}</span>
-                          ) : (
-                            <span style={{ color: "#b6bac3" }}>—</span>
-                          )}
-                        </button>
-                      ) : (
-                        cellText(r, c.key)
-                      )}
-                    </td>
-                  );
-                })}
+            </colgroup>
+            <thead>
+              <tr>
+                {DEVICE_COLUMNS.map((c) => (
+                  <th key={c.key} style={TH} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+                    <button type="button" style={TH_BUTTON} onClick={() => sortBy(c.key)}>
+                      {c.label}
+                      {sort?.key === c.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
+                    </button>
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr
+                  key={r.id}
+                  onClick={(e) => pick(r, e.shiftKey || e.metaKey || e.ctrlKey)}
+                  style={{ background: selected.has(r.id) ? "#eef2fb" : undefined, cursor: "pointer" }}
+                >
+                  {DEVICE_COLUMNS.map((c) => {
+                    const col: EditCol | null = c.editable ? (c.key as EditCol) : null;
+                    const cell = col && editing && editing.id === r.id && editing.col === col ? editing : null;
+                    const dupe = c.key === "designator" && r.duplicate;
+                    return (
+                      <td
+                        key={c.key}
+                        title={dupe ? "Another device uses this designator" : cellText(r, c.key)}
+                        style={{
+                          ...TD,
+                          ...(c.mono ? { fontFamily: "var(--font-mono)", fontSize: 11.5 } : {}),
+                          ...(dupe ? { color: DESIGNATOR_DUPLICATE_COLOR, fontWeight: 700, background: DESIGNATOR_DUPLICATE_TINT } : {}),
+                        }}
+                      >
+                        {cell && col ? (
+                          <input
+                            autoFocus
+                            onFocus={(e) => e.currentTarget.select()}
+                            value={cell.draft}
+                            maxLength={col === "designator" ? DESIGNATOR_MAX : isTagColumn(col) ? TAG_INPUT_MAX[col] : 40}
+                            list={col === "category" ? "grid-devices-category-suggestions" : undefined}
+                            aria-label={`${c.label} for ${r.desc}`}
+                            placeholder={col === "designator" ? "Blank = next free" : isTagColumn(col) ? r.tag[col] : ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setEditing({ ...cell, draft: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setEditing(null);
+                              } else if (e.key === "Enter") {
+                                e.preventDefault();
+                                if (!busy) void commit(e.shiftKey ? "up" : "down");
+                              } else if (e.key === "Tab") {
+                                e.preventDefault();
+                                if (!busy) void commit(e.shiftKey ? "left" : "right");
+                              }
+                            }}
+                            style={{ ...CTRL, width: "100%", padding: "2px 6px", fontFamily: c.mono ? "var(--font-mono)" : "inherit" }}
+                          />
+                        ) : col ? (
+                          <button
+                            type="button"
+                            style={CELL_BTN}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              open(r, col);
+                            }}
+                          >
+                            {cellText(r, c.key) ? (
+                              // #321: a tag field the device doesn't override shows the part's default, muted.
+                              <span style={isTagColumn(c.key) && r.own[c.key] === undefined ? { color: "#9aa0ab" } : undefined}>{cellText(r, c.key)}</span>
+                            ) : (
+                              <span style={{ color: "#b6bac3" }}>—</span>
+                            )}
+                          </button>
+                        ) : (
+                          cellText(r, c.key)
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

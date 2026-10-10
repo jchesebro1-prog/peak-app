@@ -523,9 +523,16 @@ function RiserTagRows({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
   const { project, partById, busy, saveTags, setErr } = ed;
   const [editing, setEditing] = useState<TagColumnKey | null>(null);
   const [draft, setDraft] = useState("");
+  /** True once the text was actually changed — an untouched Mixed row never writes. */
+  const [dirty, setDirty] = useState(false);
   const spaces = project.spaces || [];
   const eff = pls.map((pl) => effectiveTag(pl.tag, partById.get(pl.partId)?.tagDefaults, spaceOf(pl, spaces)?.name ?? ""));
   const save = async (field: TagColumnKey) => {
+    // Opening a Mixed row and pressing Enter must not blank the field on every device.
+    if (!dirty && same(eff.map((e) => e[field])) === null) {
+      setEditing(null);
+      return;
+    }
     const r = bulkTagItems(pls, field, draft);
     if (!r.ok) {
       setErr(r.error);
@@ -552,6 +559,7 @@ function RiserTagRows({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
                 disabled={busy}
                 onClick={() => {
                   setDraft(ownValue ?? "");
+                  setDirty(false);
                   setEditing(field);
                 }}
               >
@@ -562,7 +570,10 @@ function RiserTagRows({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
               <span style={{ display: "flex", gap: 5 }}>
                 <input
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setDirty(true);
+                  }}
                   maxLength={TAG_INPUT_MAX[field]}
                   placeholder={shown ?? "Mixed"}
                   aria-label={TAG_ROW_LABEL[field]}
@@ -709,7 +720,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
         </span>
       </PropRow>
 
-      {curtainCount < n && <RiserTagRows ed={ed} pls={pls.filter((pl) => !pl.curtain)} />}
+      {curtainCount < n && <RiserTagRows key={pls.map((pl) => pl.id).sort().join("|")} ed={ed} pls={pls.filter((pl) => !pl.curtain)} />}
 
       {curtainCount < n && (
         <PropRow label="Designators" title="Renumber the selected devices in reading order — they take the lowest free numbers of their codes">
