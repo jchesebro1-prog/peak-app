@@ -652,10 +652,14 @@ export default function ConduitRiserEditor(props: {
                     const vr = runById.get(r.runId);
                     const f = vr ? viewRunFill(vr) : null;
                     if (!vr || !isOverfilled(f)) return null;
+                    // A straight hop's label is centred in a short gap between two tags, so the flag sits under it;
+                    // a drop's label starts right of the line, so the flag follows it.
                     const w = r.size.length * 0.112 * 0.56;
-                    const x = r.sizeAnchor === "middle" ? r.sizeAt.x + w / 2 + 0.05 : r.sizeAt.x + w + 0.05;
+                    const below = r.sizeAnchor === "middle";
+                    const x = below ? r.sizeAt.x : r.sizeAt.x + w + 0.05;
+                    const y = below ? r.sizeAt.y + 0.15 : r.sizeAt.y;
                     return (
-                      <text x={x * U} y={r.sizeAt.y * U} fontSize={0.13 * U} dominantBaseline="central" fill="#c47a00" fontWeight={700} pointerEvents="none" aria-hidden="true">
+                      <text className="pk-no-print" x={x * U} y={y * U} fontSize={0.13 * U} textAnchor={below ? "middle" : "start"} dominantBaseline="central" fill="#c47a00" fontWeight={700} pointerEvents="none" aria-hidden="true">
 ⚠
                       </text>
                     );

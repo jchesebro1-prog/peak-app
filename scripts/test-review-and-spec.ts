@@ -65011,7 +65011,8 @@ async function riserPhase2B2Checks(): Promise<void> {
   ok(F.EMT_AREAS.every((e) => near(e.area, (Math.PI / 4) * ID[e.size] ** 2, 0.0015)), "#328 B2 fill: each Table 4 area agrees with pi/4 x the EMT internal diameter squared");
   ok(F.allowedFillPct(1) === 53 && F.allowedFillPct(2) === 31 && F.allowedFillPct(3) === 40 && F.allowedFillPct(12) === 40, "#328 B2 fill: Table 1 allows 53 % for one cable, 31 % for two, 40 % for three or more");
   ok(F.normalizeEmtSize('3/4"') === '3/4"' && F.normalizeEmtSize("3/4") === '3/4"' && F.normalizeEmtSize("1 1/4 in") === '1-1/4"' && F.normalizeEmtSize('1-1/2" EMT') === '1-1/2"' && F.normalizeEmtSize("2 inch") === '2"' && F.normalizeEmtSize("4in") === '4"' && F.normalizeEmtSize(" 1/2\u2033 ") === '1/2"', "#328 B2 fill: a typed size normalizes to its EMT trade size");
-  ok(["", "5", '5"', "12", "1.25", "PVC", "ladder", "3/8", "0"].every((x) => F.normalizeEmtSize(x) === null), "#328 B2 fill: anything that is not an EMT trade size normalizes to nothing");
+  ok(F.normalizeEmtSize('3/4"C') === '3/4"' && F.normalizeEmtSize('1"C') === '1"' && F.normalizeEmtSize('1-1/4"C') === '1-1/4"' && F.normalizeEmtSize("2 C") === '2"' && F.normalizeEmtSize('\u00be"') === '3/4"' && F.normalizeEmtSize('\u00bd"') === '1/2"' && F.normalizeEmtSize('1\u00bc"') === '1-1/4"' && F.normalizeEmtSize('2\u00bd" EMT') === '2-1/2"', "#328 B2 fill: Bray's 3/4\"C / 1\"C and the unicode fractions read as EMT trade sizes");
+  ok(["", "5", '5"', "12", "1.25", "PVC", "ladder", "3/8", "0", '\u00bc"', '1"CC'].every((x) => F.normalizeEmtSize(x) === null), "#328 B2 fill: anything that is not an EMT trade size normalizes to nothing");
 
   // ---- 2. the math
   const two = F.runFill([od("A", 0.274), od("B", 0.19)], '3/4"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
@@ -65081,7 +65082,7 @@ async function riserPhase2B2Checks(): Promise<void> {
   ok((loader.match(/odIn: ctx\.partById\.get\((r|l)\.partId\)\?\.cableOdIn \?\? null/g) || []).length === 2, "#328 B2: the loader reads each route's and RiserLink's cable diameter from the cable part's cableOdIn");
   const editor = src("src/app/(app)/design/grid/[id]/conduit-riser/conduit-riser-editor.tsx");
   const panels = src("src/app/(app)/design/grid/[id]/conduit-riser/panels.tsx");
-  ok(editor.includes("viewRunFill") && editor.includes("\u26a0") && panels.includes("RunFillLine") && (panels.match(/<RunFillLine /g) || []).length === 2, "#328 B2: the editor flags an overfilled size label and both Run panels (edit and phone view) show the fill line");
+  ok(editor.includes("viewRunFill") && editor.includes("\u26a0") && /<text className="pk-no-print"[^>]*>\s*\u26a0/.test(editor) && panels.includes("RunFillLine") && (panels.match(/<RunFillLine /g) || []).length === 2, "#328 B2: the editor flags an overfilled size label and both Run panels (edit and phone view) show the fill line");
   ok(["src/lib/design/conduit-riser/drawing.ts", "src/lib/design/conduit-riser/svg.ts", "src/lib/design/conduit-riser/dxf.ts", "src/lib/design/conduit-riser/layout.ts", "src/components/drawing/conduit-riser-figure.tsx"].every((f) => !src(f).includes("\u26a0") && !/from "\.\/fill"/.test(src(f))), "#328 B2: the drawing, layout, SVG, DXF and figure never import the fill module or carry the warning sign");
   const sheet = src("src/lib/riser-data-sheet-server.ts");
   const loadCables = sheet.slice(sheet.indexOf("export async function loadCableExportRows"), sheet.indexOf("/** The \"Devices\" sheet"));

@@ -38,15 +38,20 @@ export function allowedFillPct(count: number): number {
 /**
  * A run's free-text size → the EMT trade size as printed in EMT_AREAS
  * (`3/4"`, `1-1/4"`), or null when it isn't an EMT trade size.
- * Accepts `3/4`, `3/4"`, `3/4 in`, `1 1/4"`, `1-1/4" EMT`, `2 inch`.
+ * Accepts `3/4`, `3/4"`, `3/4 in`, `1 1/4"`, `1-1/4" EMT`, `2 inch`, Bray's `3/4"C` / `1"C`
+ * and the unicode fractions `¾"`, `½"`, `1¼"`.
  */
 export function normalizeEmtSize(raw: string): string | null {
   const t = String(raw ?? "")
     .toLowerCase()
-    .replace(/[″”"]/g, "")
+    // Bray-style "3/4\"C" / "1\"C": a trailing C marks conduit.
+    .replace(/(?<=[\d"\u201d\u2033])\s*c\s*$/, "")
+    // Unicode fractions: ¾" → 3/4", 1½" → 1-1/2".
+    .replace(/(\d)?\s*([\u00bc\u00bd\u00be])/g, (_m, whole: string | undefined, f: string) => `${whole ? `${whole}-` : ""}${f === "\u00bc" ? "1/4" : f === "\u00bd" ? "1/2" : "3/4"}`)
+    .replace(/[\u2033\u201d"]/g, "")
     .replace(/emt/g, "")
     .replace(/(inches|inch|in)\b\.?/g, "")
-    .replace(/[‐-―]/g, "-")
+    .replace(/[\u2010-\u2015]/g, "-")
     .trim()
     .replace(/\s*-\s*/g, "-")
     .replace(/\s+/g, "-");

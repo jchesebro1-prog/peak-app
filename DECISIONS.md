@@ -11051,12 +11051,13 @@ Punch item #328.
 The conduit riser computes fill from its cables' diameters (`conduit-riser/fill.ts`, pure): each member wire counts once
 as a circle of its OD; the allowed share is NEC Chapter 9 **Table 1** (1 cable 53 %, 2 cables 31 %, 3 or more 40 %) of
 the **Table 4 EMT** total internal area (1/2" 0.304 … 4" 14.753 in², checked against π/4 × ID² and a published
-reproduction, cited in the module). EMT only: a run whose typed size is not an EMT trade size (and any cable-management
-line) shows the **suggestion only** — the smallest trade size that holds the cables. Jeff keeps control of the size:
+reproduction, cited in the module). EMT only: a run whose typed size is not an EMT trade size shows the **suggestion
+only** — the smallest trade size that holds the cables — and a cable-management line is not conduit, so it shows no fill
+at all. Bray's `3/4"C` and unicode `¾"` spellings read as EMT trade sizes. Jeff keeps control of the size:
 this advises, it never edits a size, and **never blocks a quote, a save or a print**. A run with any cable lacking a
 diameter reads "Fill unknown" and names those cables, so no overfill is claimed from partial data; an empty or
 stub-only run shows nothing. Shown in the Run panel (`Fill 28 % · suggests 3/4"`, or amber `Overfilled — 3/4" allows
-31 % for 2 cables`), as a ⚠ beside the run's size label **in the editor only**, and in the riser page's warnings list.
+31 % for 2 cables`), as a ⚠ under (or, on a drop, beside) the run's size label **in the editor only** (also marked print-hidden), and in the riser page's warnings list.
 The printed sheet, the drawing set and the DXF are unchanged: the ⚠ is an editor overlay and never reaches the
 geometry. Exactly the allowed percent is not an overfill. Punch item #328.
 
