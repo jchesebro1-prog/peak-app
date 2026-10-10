@@ -33,6 +33,11 @@ import { collapseDuplicates } from "@/lib/triage/dedupe";
 import { selectEmail, type DealIndex } from "@/lib/triage/feeds/email";
 import { selectTasks, tierOf } from "@/lib/triage/feeds/tasks";
 import { selectLeads } from "@/lib/triage/feeds/leads";
+import { selectVisits, todaysVisitsFor, visitAttendees } from "@/lib/triage/feeds/visits";
+import { selectQuotes } from "@/lib/triage/feeds/quotes";
+import { selectRenewals } from "@/lib/triage/feeds/renewals";
+import type { SiteVisit } from "@/lib/stores/site-visits";
+import type { Quote } from "@/lib/stores/quotes";
 import type { CommThread } from "@/lib/stores/comms";
 import { normalizeTask, type TaskRecord } from "@/lib/stores/tasks";
 import type { Assignment } from "@/lib/stores/assignments";
@@ -373,4 +378,81 @@ export async function triageFeedChecksA(ok: Ok): Promise<void> {
     "leads feed: SLA breached, SLA due within 4 h, next action overdue, stale"
   );
   ok(lr[4].sub.includes("unassigned") && lr[0].href === "/leads?lead=L1", "leads feed: unassigned is said; the row opens the lead");
+}
+
+export async function triageFeedChecksB(ok: Ok): Promise<void> {
+  /* ---- site visits ---- */
+  const MON_14 = Date.UTC(2026, 9, 12, 19);
+  const TUE_NOON = Date.UTC(2026, 9, 13, 17);
+  // Tue 01:00 UTC = Mon 20:00 Chicago: today by Chicago's calendar, tomorrow by UTC's.
+  const MON_20_CHI = Date.UTC(2026, 9, 13, 1);
+  // Mon 04:00 UTC = Sun 23:00 Chicago: today by UTC's calendar, yesterday by Chicago's.
+  const SUN_23_CHI = Date.UTC(2026, 9, 12, 4);
+  const visit = (id: string, startAt: number | null, extra: Record<string, unknown> = {}) =>
+    ({
+      id, customer: `Cust ${id}`, venue: "Main Stage", address: "1 Main St", reason: "Site survey / measure",
+      startAt, endAt: startAt ? startAt + H : null, assignedTo: ME.name, stage: "scheduled", ...extra,
+    }) as unknown as SiteVisit;
+  const vs = [
+    visit("V1", MON_14),
+    visit("V2", MON_14, { assignedTo: "Someone Else", attendees: ["dana tester"] }),
+    visit("V3", MON_14, { assignedTo: "Someone Else" }),
+    visit("V4", TUE_NOON),
+    visit("V5", MON_14, { stage: "done" }),
+    visit("V6", null, { stage: "open" }),
+    visit("V7", MON_20_CHI),
+    visit("V8", SUN_23_CHI),
+  ];
+  const mine = todaysVisitsFor(vs, ME.name, MON_10);
+  ok(mine.map((v) => v.id).join(",") === "V1,V2,V7", "visits feed: today's (Chicago day), not done, where I'm the lead or an attendee");
+  ok(!mine.some((v) => v.id === "V8"), "visits feed: 11 pm Sunday Chicago is yesterday even though it is Monday in UTC");
+  ok(visitAttendees(vs[0]).length === 0 && visitAttendees(vs[1]).join() === "dana tester", "visits feed: attendees are read only when present (pre-spec-2 visits have none)");
+  const vc = selectVisits(mine, new Map([["V2", ["Unverified address", "Overlaps SV-9"]]]));
+  ok(
+    JSON.stringify(vc[0].facts) === JSON.stringify([{ kind: "visit_today", startAt: MON_14 }]) &&
+      JSON.stringify(vc[1].facts[1]) === JSON.stringify({ kind: "visit_flag", label: "Unverified address · Overlaps SV-9" }) &&
+      vc[0].facts.length === 1,
+    "visits feed: one +10 flag fact only when a flag provider reports flags"
+  );
+  ok(vc[0].href === "/calendar?view=day" && vc[0].title === "Cust V1 — Main Stage" && vc[0].sub === "Site survey / measure · 1 Main St", "visits feed: the row opens today's calendar");
+
+  /* ---- quotes ---- */
+  const q = (id: string, extra: Record<string, unknown> = {}) =>
+    ({ id, name: `Quote ${id}`, customer: "Acme", owner: "Someone Else", status: "draft", value: 1000, sections: [], updatedAt: MON_10 - H, ...extra }) as unknown as Quote;
+  const qs = [
+    q("Q1", { review: { state: "in_review", submittedAt: MON_10 - 3 * H, submittedBy: "Someone Else" } }),
+    q("Q2", { owner: ME.name, review: { state: "changes", decidedBy: "Jeff Chesebro", note: "fix" } }),
+    q("Q3", { owner: ME.name, source: "portal-catalog", portalReview: { at: 1 } }),
+    q("Q4", { owner: ME.name, review: { state: "in_review", submittedAt: 1 } }),
+    q("Q5"),
+  ];
+  const approver = { ...ME, canApprove: true };
+  const qr = selectQuotes(qs, { me: approver, now: MON_10 });
+  ok(qr.map((c) => c.key).join(",") === "quote:Q1,quote:Q2,quote:Q3", "quotes feed: awaiting my approval, sent back to me, portal quote to review");
+  ok(qr[0].facts[0].kind === "quote_awaiting_approval" && qr[0].since === MON_10 - 3 * H && qr[0].href === "/estimator?id=Q1", "quotes feed: approval rows open the quote's own builder; age = submitted");
+  ok(qr[1].facts[0].kind === "quote_sent_back" && qr[2].facts[0].kind === "portal_quote_review" && qr[2].href.startsWith("/quotes/portal"), "quotes feed: sent-back and portal-review rows");
+  ok(!selectQuotes(qs, { me: ME, now: MON_10 }).some((c) => c.key === "quote:Q1"), "quotes feed: a non-approver doesn't see another's review unless assigned to them");
+  const both = selectQuotes(
+    [q("Q6", { owner: ME.name, source: "portal-catalog", portalReview: { at: 1 }, review: { state: "changes", decidedBy: "Jeff Chesebro" } })],
+    { me: ME, now: MON_10 }
+  );
+  ok(both.length === 1 && both[0].facts.map((f) => f.kind).join() === "quote_sent_back,portal_quote_review", "quotes feed: a quote matching two rules is one row carrying both facts");
+
+  /* ---- renewals ---- */
+  const rr = selectRenewals(
+    [
+      { kind: "flame", id: "FT-1", customer: "Acme", venue: "Main", owner: ME.name, contacted: false, renewal: { state: "overdue", days: 4, dueAt: MON_10 - 4 * D } },
+      { kind: "inspection", id: "INS-1", customer: "Beta", venue: "Gym", owner: ME.name, contacted: false, renewal: { state: "due_soon", days: 20, dueAt: MON_10 + 20 * D } },
+      { kind: "flame", id: "FT-2", customer: "C", venue: "", owner: ME.name, contacted: true, renewal: { state: "overdue", days: 2, dueAt: 1 } },
+      { kind: "flame", id: "FT-3", customer: "D", venue: "", owner: "Someone Else", contacted: false, renewal: { state: "overdue", days: 2, dueAt: 1 } },
+      { kind: "flame", id: "FT-4", customer: "E", venue: "", owner: ME.name, contacted: false, renewal: { state: "upcoming", days: 90, dueAt: 1 } },
+    ],
+    { me: ME, now: MON_10 }
+  );
+  ok(rr.map((c) => c.key).join(",") === "renewal:flame:FT-1,renewal:inspection:INS-1", "renewals feed: my un-contacted renewals in the outreach window or past due");
+  ok(
+    JSON.stringify(rr.map((c) => c.facts)) === JSON.stringify([[{ kind: "renewal_past_due", days: 4 }], [{ kind: "renewal_window", days: 20 }]]) &&
+      rr[0].href === "/flame-tests?rv=contact" && rr[1].href === "/inspections?rv=contact",
+    "renewals feed: past due vs in window; rows open the #37 to-contact worklist"
+  );
 }
