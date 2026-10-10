@@ -31,7 +31,9 @@ import {
   sizeMinutes,
   tierOrDefault,
   type PlanItem,
+  type TaskTier,
 } from "@/lib/task-plan/types";
+import { daysLeft, sortByUrgency, urgencyWeight, type UrgencyKey } from "@/lib/task-plan/urgency";
 import { fixtureId, registerFixture } from "./test-fixtures";
 
 export type Ok = (cond: boolean, msg: string) => void;
@@ -324,4 +326,27 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
   const junk2 = (await allAssignments()).find((x) => x.id === junkId);
   ok(!!junk1 && !!junk2 && !("priority" in junk1) && !("size" in junk1) && !("priority" in junk2) && !("size" in junk2),
     "auto-cal fields: a stored junk assignment tier/size reads back clean (getAssignment and allAssignments)");
+}
+
+/* ---- Task 3: urgency ---- */
+export async function autoCalUrgencyChecks(ok: Ok): Promise<void> {
+  const now = at(MON, 9);
+  const uk = (key: string, tier: TaskTier, day: string, createdAt = 1): UrgencyKey => ({ key, tier, dueMs: at(day, 17), createdAt });
+  const order = (...ks: UrgencyKey[]) => sortByUrgency(ks, now).map((k) => k.key).join(",");
+  ok(daysLeft(at(TUE, 17), now) === 1 && daysLeft(at(MON, 23), now) === 0 && daysLeft(at("2036-10-11", 9), now) === -2, "auto-cal urgency: days left by Chicago calendar day");
+  ok(order(uk("high-month", "high", "2036-11-12"), uk("low-tomorrow", "low", TUE)) === "low-tomorrow,high-month",
+    "auto-cal urgency: a Low task due tomorrow outranks a High task due in a month (required property)");
+  ok(order(uk("high-week", "high", "2036-10-20"), uk("low-tomorrow", "low", TUE)) === "low-tomorrow,high-week", "auto-cal urgency: …and a High task due next week");
+  ok(order(uk("low", "low", FRI), uk("high", "high", FRI), uk("normal", "normal", FRI)) === "high,normal,low", "auto-cal urgency: same due day → the tier decides");
+  ok(order(uk("high-3d", "high", "2036-10-16"), uk("normal-1d", "normal", TUE)) === "normal-1d,high-3d",
+    "auto-cal urgency: closeness rises steeply — Normal due tomorrow beats High due in 3 days");
+  ok(order(uk("high-today", "high", MON), uk("low-overdue", "low", "2036-10-12")) === "low-overdue,high-today", "auto-cal urgency: overdue outranks everything");
+  ok(order(uk("od1", "high", "2036-10-12"), uk("od5", "low", "2036-10-08")) === "od5,od1", "auto-cal urgency: most overdue first");
+  ok(order(uk("high-2d", "high", WED), uk("normal-1d", "normal", TUE)) === "normal-1d,high-2d", "auto-cal urgency: equal weight (3/3 = 2/2) → earlier due first");
+  ok(order(uk("b", "normal", FRI, 200), uk("a", "normal", FRI, 100)) === "a,b" && order(uk("z", "normal", FRI, 5), uk("y", "normal", FRI, 5)) === "y,z",
+    "auto-cal urgency: then older createdAt, then id");
+  const list = [uk("1", "low", TUE), uk("2", "high", "2036-11-12"), uk("3", "normal", FRI), uk("4", "high", "2036-10-10"), uk("5", "normal", FRI, 0)];
+  ok(order(...list) === order(...[...list].reverse()), "auto-cal urgency: the order never depends on input order");
+  ok(urgencyWeight("normal", 0) / urgencyWeight("normal", 3) === 4 && urgencyWeight("low", 1) > urgencyWeight("high", 30) && urgencyWeight("low", 1) > urgencyWeight("high", 7),
+    "auto-cal urgency: the curve is tier × 1/(days left + 1)");
 }
