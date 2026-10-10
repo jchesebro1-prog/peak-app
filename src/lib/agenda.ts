@@ -45,6 +45,13 @@ export type AgendaItem = {
   external?: { connectionId: string; calendarId: string; color: string };
 };
 
+/** The drive sync's own Google events (private peakDrive tag) are left out
+ *  of the Google feed — the app draws its drive blocks itself, so showing
+ *  both would double every drive. */
+export function withoutAppDriveEvents<T extends { peakDriveKey: string }>(evs: readonly T[]): T[] {
+  return evs.filter((e) => !e.peakDriveKey);
+}
+
 /** Home dashboard window: the next 14 days (small back-buffer for
  *  in-progress events). */
 export async function loadHomeAgenda(userId: string, me: string) {
@@ -70,11 +77,11 @@ export async function loadAgendaRange(
       calendarOn = !!info && hasCalendarScope(info.scope);
       if (calendarOn) {
         const { listUpcomingEvents } = await import("@/lib/google/calendar");
-        const evs = await listUpcomingEvents(personalKey(userId), {
+        const evs = withoutAppDriveEvents(await listUpcomingEvents(personalKey(userId), {
           timeMinMs: minMs,
           timeMaxMs: maxMs,
           maxResults: 250,
-        });
+        }));
         for (const e of evs) {
           fetchedIds.add(e.id);
           if (e.iCalUID) fetchedIcal.add(e.iCalUID);
@@ -115,11 +122,11 @@ export async function loadAgendaRange(
             .filter((c) => c.visible)
             .map(async (cal) => {
               try {
-                const evs = await listEventsForExternalCalendar(conn.id, cal.id, {
+                const evs = withoutAppDriveEvents(await listEventsForExternalCalendar(conn.id, cal.id, {
                   timeMinMs: minMs,
                   timeMaxMs: maxMs,
                   maxResults: 250,
-                });
+                }));
                 const color = cal.colorOverride || cal.backgroundColor || "#6b7280";
                 for (const e of evs) {
                   items.push({

@@ -5,7 +5,7 @@
  *   schedule_defaults            { driveBufferMin }        admin, Settings → Field
  *   schedule_prefs:<userId>      { driveBufferMin | null } the rep, Account
  *   stay_over:<userId>           { "YYYY-MM-DD": true }    one key per day
- *   drive_sync:<userId>          { lastSyncAt, legacyCleanedAt }
+ *   drive_sync:<userId>          { lastSyncAt, legacyCleanedAt, staleAt }
  * Blobs survive the go-live demo wipe.
  */
 import { getBlob, setBlob } from "@/db/doc-store";
@@ -17,7 +17,9 @@ export const MAX_DRIVE_BUFFER_MIN = 120;
 
 export type ScheduleDefaults = { driveBufferMin: number };
 export type UserSchedulePrefs = { driveBufferMin: number | null };
-export type DriveSyncState = { lastSyncAt: number; legacyCleanedAt: number | null };
+/** staleAt: when markDriveStale last ran — a sync that started before it
+ *  must not stamp the rep fresh (drive-sync compares it with its start). */
+export type DriveSyncState = { lastSyncAt: number; legacyCleanedAt: number | null; staleAt?: number };
 
 const prefsId = (userId: string) => `schedule_prefs:${userId}`;
 const stayId = (userId: string) => `stay_over:${userId}`;
@@ -88,19 +90,22 @@ export async function getDriveSyncState(userId: string): Promise<DriveSyncState>
   return {
     lastSyncAt: typeof raw.lastSyncAt === "number" ? raw.lastSyncAt : 0,
     legacyCleanedAt: typeof raw.legacyCleanedAt === "number" ? raw.legacyCleanedAt : null,
+    staleAt: typeof raw.staleAt === "number" ? raw.staleAt : 0,
   };
 }
 
 export async function setDriveSyncState(userId: string, patch: Partial<DriveSyncState>): Promise<void> {
   const clean: Record<string, unknown> = {};
   if (typeof patch?.lastSyncAt === "number" && Number.isFinite(patch.lastSyncAt)) clean.lastSyncAt = patch.lastSyncAt;
+  if (typeof patch?.staleAt === "number" && Number.isFinite(patch.staleAt)) clean.staleAt = patch.staleAt;
   if (patch && "legacyCleanedAt" in patch && (patch.legacyCleanedAt === null || (typeof patch.legacyCleanedAt === "number" && Number.isFinite(patch.legacyCleanedAt))))
     clean.legacyCleanedAt = patch.legacyCleanedAt;
   if (!Object.keys(clean).length) return;
   await setBlob(syncId(userId), clean);
 }
 
-/** Force the next calendar view / cron pass to re-sync these reps. */
-export async function markDriveStale(userIds: string[]): Promise<void> {
-  for (const id of userIds) await setDriveSyncState(id, { lastSyncAt: 0 });
+/** Force the next calendar view / cron pass to re-sync these reps. staleAt
+ *  lets a sync already in flight see the mark and leave the rep stale. */
+export async function markDriveStale(userIds: string[], nowMs: number = Date.now()): Promise<void> {
+  for (const id of userIds) await setDriveSyncState(id, { lastSyncAt: 0, staleAt: nowMs });
 }

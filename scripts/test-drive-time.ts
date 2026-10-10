@@ -53,7 +53,25 @@ import {
   type DesiredDriveEvent,
   type ExistingDriveEvent,
 } from "@/lib/drive-sync/diff";
-import { eventWriteBody, readSyncPages, toCalendarEvents, type EventPage } from "@/lib/google/calendar";
+import { eventWriteBody, readSyncPages, toCalendarEvents, type CalendarEvent, type EventPage, type SyncCalendarEvent } from "@/lib/google/calendar";
+import { planDriveDays, routeMinutesFor, type DriveLoadDeps } from "@/lib/drive-plan/load";
+import {
+  LEGACY_LOOKAHEAD_MS,
+  resyncForAddress,
+  resyncForVisitChange,
+  syncAllDrivers,
+  syncDriveDays,
+  syncDriveForUser,
+  syncDriveIfStale,
+  syncWindowDays,
+  type DriveSyncDeps,
+} from "@/lib/drive-sync/sync";
+import { withoutAppDriveEvents } from "@/lib/agenda";
+import type { DriveSyncState } from "@/lib/stores/schedule-prefs";
+import type { SiteVisit } from "@/lib/stores/site-visits";
+import type { Office } from "@/lib/settings";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 export type Ok = (c: boolean, m: string) => void;
 
@@ -740,9 +758,14 @@ export async function driveTimePrefsChecks(ok: Ok): Promise<void> {
     ok(stays["2026-10-14"] === true && !("2026-10-15" in stays), "drive-time prefs: stay-overs are per date; turning one off removes it");
 
     await setDriveSyncState(U, { lastSyncAt: 123, legacyCleanedAt: 99 });
+    await setDriveSyncState("TESTdrive:u2", { lastSyncAt: 456 });
+    const markedFrom = Date.now();
     await markDriveStale([U]);
     const st = await getDriveSyncState(U);
     ok(st.lastSyncAt === 0 && st.legacyCleanedAt === 99, "drive-time prefs: markDriveStale zeroes lastSyncAt and keeps the legacy-cleanup stamp");
+    ok((st.staleAt ?? 0) >= markedFrom, "drive-time prefs: markDriveStale stamps when it marked, so a sync already running can't erase it");
+    const other = await getDriveSyncState("TESTdrive:u2");
+    ok(other.lastSyncAt === 456 && !other.staleAt, "drive-time prefs: markDriveStale touches only the reps it names");
     await saveScheduleDefaults({ driveBufferMin: 33 });
     const bad = await saveScheduleDefaults({ driveBufferMin: "abc" });
     const blank = await saveScheduleDefaults({ driveBufferMin: "" });
@@ -826,4 +849,263 @@ export async function driveTimeDiffChecks(ok: Ok): Promise<void> {
   ok(daysFullyCovered([d1, d2, d3], chicagoDayStart(d3)).join() === `${d1},${d2}` && daysFullyCovered([d1, d2], chicagoDayStart(d2) + 3_600_000).join() === d1 &&
      daysFullyCovered([d1, d2], chicagoDayStart(d1)).length === 0 && daysFullyCovered([d1, d2, d3], Number.MAX_SAFE_INTEGER).length === 3,
     "drive-time sync: a day is synced only when its Chicago day ends at or before the read's coverage");
+}
+
+const visit = (id: string, over: Partial<SiteVisit>): SiteVisit => ({
+  id, customerId: null, customer: "Cust " + id, locationId: null, venue: "Venue " + id, address: "addr " + id, contactName: "", contactEmail: "", contactPhone: "",
+  reason: "Site survey / measure", startAt: at(9), endAt: at(10), notes: "", assignedTo: "Dana", createdBy: "x", createdAt: 1, updatedAt: 1,
+  stage: "scheduled", leadId: null, surveyId: null, preferredTiming: "", ...over,
+}) as SiteVisit;
+const office: Office = { id: "o1", name: "Madison Office", street: "", city: "Madison", state: "WI", zip: "", lat: BASE.lat, lng: BASE.lng, quoteDefault: true };
+const gEv = (id: string, over: Partial<CalendarEvent>): CalendarEvent => ({
+  id, iCalUID: id + "@google.com", title: id, startMs: at(13), endMs: at(14), allDay: false, location: "1 Elm St, Appleton WI", htmlLink: "", meetingUrl: "",
+  selfDeclined: false, peakDriveKey: "", peakDriveDay: "", ...over,
+});
+function loadDeps(over: Partial<DriveLoadDeps> = {}): Partial<DriveLoadDeps> {
+  return {
+    getUser: async (id) => (id === "u1" ? { id: "u1", name: "Dana", officeId: null } : null),
+    offices: async () => [office],
+    visits: async () => [visit("SV-1", {}), visit("SV-OTHER", { assignedTo: "Jeff" })],
+    bufferMin: async () => 15,
+    stayOvers: async () => ({}),
+    visitStates: async (vs) => new Map(vs.map((v) => [v.id, okAddr(P1.lat, P1.lng, v.id)])),
+    placeStates: async (texts) => new Map(texts.map((t) => [addressKey(t), okAddr(P2.lat, P2.lng, t)])),
+    routes: async (pairs) => new Map(pairs.map((p) => [pairKey(p.from, p.to), 30])),
+    ...over,
+  };
+}
+
+export async function driveTimeLoaderChecks(ok: Ok): Promise<void> {
+  const plans = await planDriveDays({ userId: "u1", dayKeys: [DAY], events: [gEv("meet", {}), gEv("zoom", { location: "Zoom" })], mode: "cache", deps: loadDeps() });
+  ok(plans.length === 1 && plans[0].stops.map((s) => s.key).join() === "sv:SV-1,g:meet",
+    "drive-time loader: the rep's own visit + their physical Google event are the stops");
+  ok(plans[0].legs.length === 3 && plans[0].legs.every((l) => l.minutes === 45) && plans[0].totalMin === 135,
+    "drive-time loader: base → visit → event → base, route + buffer each");
+  const noOffice = await planDriveDays({ userId: "u1", dayKeys: [DAY], events: [], mode: "cache", deps: loadDeps({ offices: async () => [] }) });
+  ok(noOffice[0].legs[0].flag?.text === "No base set", "drive-time loader: no office anywhere → No base set");
+  const noRoutes = await planDriveDays({ userId: "u1", dayKeys: [DAY], events: [], mode: "cache", deps: loadDeps({ routes: async () => new Map() }) });
+  ok(noRoutes[0].legs.every((l) => l.flag?.kind === "route_unavailable"), "drive-time loader: no cached route → 'retrying' flag, never a guess");
+  let seenMode = "";
+  const stays = await planDriveDays({
+    userId: "u1", dayKeys: [addDays(DAY, 1)], events: [], mode: "live",
+    deps: loadDeps({
+      stayOvers: async () => ({ [DAY]: true }),
+      visits: async () => [visit("SV-1", {}), visit("SV-2", { startAt: at(9) + 86_400_000, endAt: at(10) + 86_400_000 })],
+      // Different points, or the same-place rule would drop the leg.
+      visitStates: async (vs) => new Map(vs.map((v) => [v.id, v.id === "SV-1" ? okAddr(P2.lat, P2.lng, v.id) : okAddr(P1.lat, P1.lng, v.id)])),
+      routes: async (pairs, mode) => { seenMode = mode; return new Map(pairs.map((p) => [pairKey(p.from, p.to), 30])); },
+    }),
+  });
+  ok(stays[0].legs[0].from.kind === "prev_stop" && stays[0].legs[0].from.key === "sv:SV-1" && seenMode === "live",
+    "drive-time loader: the previous day's stay-over + last stop are loaded; the mode reaches the route lookup");
+  ok((await planDriveDays({ userId: "nobody", dayKeys: [DAY], events: null, mode: "cache", deps: loadDeps() })).length === 0,
+    "drive-time loader: an unknown rep has no plan");
+
+  // routeMinutesFor: cache only vs live
+  let liveCalls = 0;
+  const rdeps = {
+    cached: async (keys: string[]) => new Map(keys.filter((k) => k === pairKey(BASE, P1)).map((k) => [k, { miles: 50, minutes: 60 }])),
+    live: async (a: { lat: number; lng: number }) => { liveCalls++; return a.lat === P1.lat ? { miles: 30, minutes: 40 } : null; },
+    delayMs: 0, budgetMs: 60_000, now: () => 0, sleep: async () => {},
+  };
+  const pairs = [{ from: BASE, to: P1 }, { from: P1, to: P2 }, { from: P2, to: BASE }];
+  const cachedOnly = await routeMinutesFor(pairs, "cache", rdeps);
+  ok(cachedOnly.size === 1 && liveCalls === 0, "drive-time routes: cache mode never calls OSRM");
+  const live = await routeMinutesFor(pairs, "live", rdeps);
+  ok(live.get(pairKey(P1, P2)) === 40 && !live.has(pairKey(P2, BASE)) && liveCalls === 2,
+    "drive-time routes: live mode routes the misses; an OSRM failure stays missing");
+}
+
+export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
+  const NOW = at(6); // 06:00 on DAY
+  const DAY_MS = 86_400_000;
+  const calls: string[] = [];
+  let state: DriveSyncState = { lastSyncAt: 0, legacyCleanedAt: null };
+  const tagged = (id: string, key: string, s: number, e: number, title: string, day = DAY): SyncCalendarEvent =>
+    ({ ...gEv(id, { title, startMs: s, endMs: e, location: "", peakDriveKey: key, peakDriveDay: day }), description: "Drive time added by Quartzite" });
+  const legKeep = `u1|${DAY}|base|sv:SV-1`;
+  const events: SyncCalendarEvent[] = [
+    tagged("keep", legKeep, at(9) - 45 * 60_000, at(9), "Drive to Venue SV-1"),
+    tagged("orphan", `u1|${DAY}|base|sv:GONE`, at(7), at(8), "Drive to Gone"),
+    tagged("far", `u1|2026-11-30|base|sv:X`, 1, 2, "Drive to X", "2026-11-30"),
+    { ...gEv("mine", { title: "Lunch", location: "" }), description: "" },
+    { ...gEv("legacy", { title: "Drive to Board (auto)", startMs: NOW + 3_600_000, location: "" }), description: "Auto-added travel time — safe to delete or edit." },
+    { ...gEv("legacy-past", { title: "Drive to Old (auto)", startMs: NOW - 3_600_000, location: "" }), description: "Auto-added travel time — old" },
+  ];
+  const fullRead = (evs: SyncCalendarEvent[]) => async (_k: string, range: { timeMinMs: number; timeMaxMs: number }) => ({ events: evs, coveredThroughMs: range.timeMaxMs });
+  const deps = (over: Partial<DriveSyncDeps> = {}): Partial<DriveSyncDeps> => ({
+    now: () => NOW,
+    calendarKeyFor: async () => "personal:u1",
+    listEvents: fullRead(events),
+    insertEvent: async (_k, ev) => { calls.push("insert:" + ev.title + ":" + ev.privateProps?.peakDriveKey); return { id: "new" }; },
+    updateEvent: async (_k, id) => { calls.push("update:" + id); return {}; },
+    deleteEvent: async (_k, id) => { calls.push("delete:" + id); },
+    plan: (a) => planDriveDays({ ...a, deps: loadDeps({ visits: async () => [visit("SV-1", {})] }) }),
+    getState: async () => state,
+    setState: async (_u, p) => { state = { ...state, ...p }; },
+    users: async () => [{ id: "u1", name: "Dana", status: "active" }],
+    visits: async () => [visit("SV-1", {})],
+    visitStates: async (vs) => new Map(vs.map((v) => [v.id, okAddr(P1.lat, P1.lng, v.id)])),
+    log: () => {},
+    ...over,
+  });
+
+  ok(syncWindowDays(NOW).length === 15 && syncWindowDays(NOW)[0] === DAY && syncWindowDays(NOW)[14] === addDays(DAY, 14), "drive-time sync: window is today → +14");
+
+  const r = await syncDriveDays("u1", [DAY], deps());
+  ok(r.google === "written" && calls.includes("delete:orphan") && !calls.some((c) => c.endsWith(":far") || c === "delete:far" || c === "delete:mine" || c === "update:keep"),
+    "drive-time sync: orphans deleted; untagged, unchanged and out-of-scope events untouched");
+  ok(calls.filter((c) => c.startsWith("insert:")).length === 1 && calls.some((c) => c.startsWith("insert:Drive back to Madison Office:")),
+    "drive-time sync: the missing drive-back leg is inserted with its leg key");
+  ok(calls.includes("delete:legacy") && !calls.includes("delete:legacy-past") && r.legacyRemoved === 1 && typeof state.legacyCleanedAt === "number",
+    "drive-time sync: first sync deletes upcoming D144 blocks only, then remembers it did");
+  calls.length = 0;
+  await syncDriveDays("u1", [DAY], deps());
+  ok(!calls.includes("delete:legacy"), "drive-time sync: the D144 cleanup runs once per rep");
+
+  calls.length = 0;
+  const ro = await syncDriveDays("u1", [DAY], deps({ listEvents: async () => { throw new Error("401"); } }));
+  ok(ro.google === "read-failed" && calls.length === 0, "drive-time sync: a calendar read failure writes nothing");
+  const app = await syncDriveDays("u1", [DAY], deps({ calendarKeyFor: async () => null }));
+  ok(app.google === "no-calendar" && calls.length === 0, "drive-time sync: no connected calendar → app-only");
+  const wf = await syncDriveDays("u1", [DAY], deps({ insertEvent: async () => { throw new Error("quota"); } }));
+  ok(wf.errors.length >= 1 && wf.google === "written", "drive-time sync: a Google write failure is logged and counted, never thrown");
+  const past = await syncDriveDays("u1", [addDays(DAY, -1), addDays(DAY, 30)], deps());
+  ok(past.days.length === 0, "drive-time sync: past days and days beyond +14 are never written");
+
+  // (a) The read window is whole Chicago days; a truncated read syncs only the days it fully saw.
+  const D2 = addDays(DAY, 1);
+  const ranges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
+  calls.length = 0;
+  const twoDays = await syncDriveDays("u1", [DAY, D2], deps({
+    listEvents: async (_k, range) => {
+      ranges.push(range);
+      return {
+        events: [tagged("orphanA", `u1|${DAY}|base|sv:GONE`, at(7), at(8), "Drive to Gone"), tagged("orphanB", `u1|${D2}|base|sv:GONE`, at(7) + DAY_MS, at(8) + DAY_MS, "Drive to Gone", D2)],
+        coveredThroughMs: chicagoDayStart(D2) + 3_600_000, // cut off one hour into D2
+      };
+    },
+    plan: (a) => planDriveDays({ ...a, deps: loadDeps({ visits: async () => [visit("SV-1", {}), visit("SV-2", { startAt: at(9) + DAY_MS, endAt: at(10) + DAY_MS })] }) }),
+  }));
+  ok(ranges.length === 1 && ranges[0].timeMinMs === chicagoDayStart(addDays(DAY, -1)) && ranges[0].timeMaxMs === chicagoDayStart(addDays(D2, 1)),
+    "drive-time sync: the Google read window runs from a Chicago day start (the day before, for stay-over origins) to the start of the day after the last synced day");
+  ok(calls.includes("delete:orphanA") && calls.some((c) => c.includes(`|${DAY}|`)) && !calls.includes("delete:orphanB") && !calls.some((c) => c.includes(`|${D2}|`)) &&
+     twoDays.errors.some((e) => e.includes("truncated")),
+    "drive-time sync: a truncated read syncs only the fully covered days — no insert or delete on a day it cut off");
+
+  // (b) A transient route failure keeps the existing event; a genuinely flagged leg loses it.
+  const withLoad = (over: Partial<DriveLoadDeps>) => deps({ plan: (a) => planDriveDays({ ...a, deps: loadDeps({ visits: async () => [visit("SV-1", {})], ...over }) }) });
+  calls.length = 0;
+  const ru = await syncDriveDays("u1", [DAY], withLoad({ routes: async () => new Map() }));
+  ok(ru.flagged === 2 && !calls.includes("delete:keep") && !calls.some((c) => c.startsWith("insert:") || c.startsWith("update:")) && calls.includes("delete:orphan"),
+    "drive-time sync: a leg flagged 'retrying' (OSRM down) keeps its Google event; a leg that's gone still loses its event");
+  calls.length = 0;
+  await syncDriveDays("u1", [DAY], withLoad({ visitStates: async (vs) => new Map(vs.map((v) => [v.id, badAddr(v.id)])) }));
+  ok(calls.includes("delete:keep"), "drive-time sync: a leg flagged unverified loses its Google event");
+  calls.length = 0;
+  await syncDriveDays("u1", [DAY], withLoad({ offices: async () => [] }));
+  ok(calls.includes("delete:keep"), "drive-time sync: a leg flagged No base set loses its Google event");
+  calls.length = 0;
+  await syncDriveDays("u1", [DAY], withLoad({ visits: async () => [] }));
+  ok(calls.includes("delete:keep") && calls.includes("delete:orphan"), "drive-time sync: a removed stop's legs lose their events");
+
+  // (c) D144 cleanup reads past the 14-day window with the paged reader and stamps only after a complete read.
+  const farLegacy: SyncCalendarEvent = { ...gEv("legacy-far", { title: "Drive to Expo (auto)", startMs: NOW + 120 * DAY_MS, location: "" }), description: "Auto-added travel time — x" };
+  const legacyRanges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
+  const isLegacyRead = (range: { timeMinMs: number; timeMaxMs: number }) => range.timeMaxMs - range.timeMinMs > 30 * DAY_MS;
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  calls.length = 0;
+  const paged = await syncDriveDays("u1", [DAY], deps({
+    listEvents: async (_k, range) => {
+      if (!isLegacyRead(range)) return { events, coveredThroughMs: range.timeMaxMs };
+      legacyRanges.push(range);
+      if (legacyRanges.length === 1) return { events: [events[4]], coveredThroughMs: NOW + 60 * DAY_MS };
+      return { events: [events[4], farLegacy], coveredThroughMs: range.timeMaxMs }; // overlap re-reads "legacy"
+    },
+  }));
+  const end180 = chicagoDayStart(addDays(DAY, LEGACY_LOOKAHEAD_MS / DAY_MS));
+  ok(legacyRanges.length === 2 && legacyRanges[0].timeMinMs === chicagoDayStart(DAY) && legacyRanges[0].timeMaxMs === end180 &&
+     legacyRanges[1].timeMinMs === NOW + 60 * DAY_MS && legacyRanges[1].timeMaxMs === end180,
+    "drive-time sync: the D144 scan covers today → +180 days, continuing a truncated read where it stopped");
+  ok(calls.filter((c) => c === "delete:legacy").length === 1 && calls.includes("delete:legacy-far") && paged.legacyRemoved === 2 && typeof state.legacyCleanedAt === "number",
+    "drive-time sync: far-out D144 blocks are removed once each, then the cleanup is stamped");
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  const stuck = await syncDriveDays("u1", [DAY], deps({
+    listEvents: async (_k, range) => (isLegacyRead(range) ? { events: [], coveredThroughMs: range.timeMinMs } : { events, coveredThroughMs: range.timeMaxMs }),
+  }));
+  ok(state.legacyCleanedAt === null && stuck.google === "written", "drive-time sync: a D144 scan that can't finish is not stamped (retried next sync); the drive sync still runs");
+  const legacyFails = await syncDriveDays("u1", [DAY], deps({
+    listEvents: async (_k, range) => { if (isLegacyRead(range)) throw new Error("500"); return { events, coveredThroughMs: range.timeMaxMs }; },
+  }));
+  ok(state.legacyCleanedAt === null && legacyFails.google === "written" && legacyFails.errors.length >= 1, "drive-time sync: a failed D144 read is logged, not stamped, and blocks nothing");
+
+  state = { lastSyncAt: NOW - 60_000, legacyCleanedAt: 1 };
+  ok((await syncDriveIfStale("u1", deps())) === null, "drive-time sync: a sync under 10 min old is not repeated");
+  state = { lastSyncAt: NOW - 11 * 60_000, legacyCleanedAt: 1 };
+  const stale = await syncDriveIfStale("u1", deps());
+  ok(!!stale && stale.days.length === 15 && state.lastSyncAt === NOW, "drive-time sync: a stale rep re-syncs the whole window and is stamped");
+
+  // (e) A stale mark made while a sync runs survives that sync's lastSyncAt write.
+  let clock = NOW;
+  const markDuring = (over: Partial<DriveSyncDeps> = {}) => deps({
+    now: () => clock,
+    plan: async () => { clock += 5_000; state = { ...state, lastSyncAt: 0, staleAt: clock }; return []; },
+    ...over,
+  });
+  state = { lastSyncAt: 0, legacyCleanedAt: 1 };
+  await syncDriveForUser("u1", markDuring());
+  ok(state.lastSyncAt === 0, "drive-time sync: a stale mark made during a full sync keeps the rep stale");
+  clock = NOW;
+  state = { lastSyncAt: NOW - 11 * 60_000, legacyCleanedAt: 1 };
+  await syncDriveIfStale("u1", markDuring());
+  ok(state.lastSyncAt === 0, "drive-time sync: a stale mark made during a stale-on-load sync survives the claim + stamp");
+  clock = NOW;
+  state = { lastSyncAt: 0, legacyCleanedAt: 1, staleAt: NOW - 1_000 };
+  await syncDriveForUser("u1", deps({ now: () => clock }));
+  ok(state.lastSyncAt === NOW, "drive-time sync: a stale mark from before the sync started is cleared by it");
+
+  const seen: string[][] = [];
+  await resyncForVisitChange(
+    { startAt: at(9), assignedTo: "Dana" },
+    { startAt: at(9) + 2 * DAY_MS, assignedTo: "Dana", attendees: ["Ghost"] },
+    deps({ plan: async (a) => { seen.push(a.dayKeys); return []; } })
+  );
+  ok(seen.length === 1 && seen[0].join() === [DAY, addDays(DAY, 1), addDays(DAY, 2), addDays(DAY, 3)].join(),
+    "drive-time sync: a moved visit re-syncs the old and new days (+ the day after each, for stay-overs) for each person on it");
+
+  const addrSeen: string[][] = [];
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  await resyncForAddress("place:SV-1", deps({ plan: async (a) => { addrSeen.push(a.dayKeys); return []; } }));
+  ok(addrSeen.length === 1 && addrSeen[0].join() === [DAY, addDays(DAY, 1)].join() && state.lastSyncAt === 0 && state.staleAt === NOW,
+    "drive-time sync: a verified address re-syncs the upcoming visits on it and marks every rep stale (place keys can be Google locations)");
+
+  const synced: string[] = [];
+  const all = await syncAllDrivers({ budgetMs: 60_000 }, deps({
+    users: async () => [{ id: "u1", name: "Dana", status: "active" }, { id: "u2", name: "Old", status: "archived" }, { id: "u3", name: "NoCal", status: "active" }],
+    calendarKeyFor: async (id) => (id === "u3" ? null : "personal:" + id),
+    plan: async (a) => { synced.push(a.userId); return []; },
+  }));
+  ok(all.synced === 1 && synced.join() === "u1" && all.errors.length === 0, "drive-time sync: the cron rider syncs active reps with a connected calendar only");
+  let tick = NOW;
+  const over = await syncAllDrivers({ budgetMs: 1_000 }, deps({ now: () => (tick += 2_000), plan: async () => [] }));
+  ok(over.synced === 0 && over.skipped === 1, "drive-time sync: no new rep starts after the cron budget");
+}
+
+export async function driveTimeNoStraightLinePins(ok: Ok): Promise<void> {
+  const dirs = ["src/lib/drive-plan", "src/lib/drive-sync"];
+  const banned = /\b(estimate|estimateFromParts|driveMinutes|driveMiles|haversineMiles|minutesFromMiles)\b\s*\(/;
+  const offenders: string[] = [];
+  for (const dir of dirs) for (const f of readdirSync(dir)) if (banned.test(readFileSync(join(dir, f), "utf8"))) offenders.push(join(dir, f));
+  ok(offenders.length === 0, "drive-time pin: nothing on the drive path calls a straight-line estimate" + (offenders.length ? " — " + offenders.join(", ") : ""));
+  ok(readdirSync("src/lib/drive-plan").includes("load.ts") && readdirSync("src/lib/drive-sync").includes("sync.ts"),
+    "drive-time pin: the loader and the sync engine are inside the pinned directories");
+}
+
+export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
+  const kept = withoutAppDriveEvents([gEv("mine", {}), gEv("ours", { peakDriveKey: `u1|${DAY}|base|sv:SV-1`, peakDriveDay: DAY })]);
+  ok(kept.length === 1 && kept[0].id === "mine", "drive-time agenda: the app's own tagged drive events are hidden from the Google feed (the app draws its own)");
+  const src = readFileSync("src/lib/agenda.ts", "utf8");
+  ok((src.match(/withoutAppDriveEvents\(\s*await listUpcomingEvents\(/g) ?? []).length === 1 &&
+     (src.match(/withoutAppDriveEvents\(\s*await listEventsForExternalCalendar\(/g) ?? []).length === 1,
+    "drive-time agenda: both Google sources in loadAgendaRange go through the filter");
 }
