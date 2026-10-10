@@ -11,6 +11,8 @@ import { VenueAvailabilityCheck } from "@/components/venue-availability-check";
 import { addressStatusAction } from "../address-actions";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
 import type { FixTarget, GeoStatus } from "@/lib/address-verify/types";
+import BookingPanel from "@/components/visit-booking/booking-panel";
+import { inviteSummary } from "@/lib/visit-invite-plan";
 
 /**
  * Schedule-site-visit modal (D76 / PUNCHLIST #2 phase 1). Opened from the
@@ -140,6 +142,9 @@ export default function SiteVisitModal({
   const [time, setTime] = useState("09:00");
   const [durationMin, setDurationMin] = useState(60);
   const [assignee, setAssignee] = useState(visit.me);
+  const [attendees, setAttendees] = useState<string[]>([]);
+  const startMs = new Date(`${date}T${time}:00`).getTime();
+  const okStart = Number.isFinite(startMs) ? startMs : null;
   const [notes, setNotes] = useState("");
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -169,14 +174,13 @@ export default function SiteVisitModal({
         endAt: startAt + durationMin * 60_000,
         notes,
         assignedTo: assignee,
+        attendees,
       });
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      setDone(
-        `${res.id} saved. ` + inviteMessage(res.inviteStatus, assignee)
-      );
+      setDone(`${res.id} saved. ` + (inviteSummary(res.invites) || inviteMessage(res.inviteStatus, assignee)));
       router.refresh();
     });
   };
@@ -326,8 +330,16 @@ export default function SiteVisitModal({
               compact
             />
 
-            <label style={lbl}>Assigned to (gets the calendar invite)</label>
-            <select style={inStyle} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+            <label style={lbl}>Lead (everyone on the visit gets the calendar invite)</label>
+            <select
+              style={inStyle}
+              value={assignee}
+              onChange={(e) => {
+                const next = e.target.value;
+                setAssignee(next);
+                setAttendees((a) => a.filter((n) => n !== next));
+              }}
+            >
               {visit.team.map((n) => (
                 <option key={n} value={n}>
                   {n}
@@ -335,6 +347,19 @@ export default function SiteVisitModal({
                 </option>
               ))}
             </select>
+            <BookingPanel
+              visitId={null}
+              customerId={customerId}
+              locationId={venueId || null}
+              address={visit.venues.find((v) => v.id === venueId)?.address || ""}
+              startAt={okStart}
+              endAt={okStart != null ? okStart + durationMin * 60_000 : null}
+              lead={assignee}
+              team={visit.team}
+              attendees={attendees}
+              onAttendeesChange={setAttendees}
+              onPickDay={setDate}
+            />
 
             <label style={lbl}>Notes (optional)</label>
             <textarea

@@ -867,3 +867,32 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
   const inbox = readFileSync("src/app/(app)/inbox/site-visit-actions.ts", "utf8");
   ok(/attendees: cleanAttendees\(input\.attendees, input\.assignedTo, roster\)/.test(fnBody(inbox, "createSiteVisitAction")), "site-visits actions: the Inbox create saves cleaned attendees");
 }
+
+export async function siteVisitsBookingUiPins(ok: Ok): Promise<void> {
+  const read = (p: string) => readFileSync(p, "utf8");
+  const hook = read("src/components/visit-booking/use-booking-check.ts");
+  const debounce = Number(/BOOKING_CHECK_DEBOUNCE_MS = (\d+)/.exec(hook)?.[1]);
+  ok(debounce >= 600 && hook.includes("clearTimeout") && hook.includes("bookingCheckAction") && /if \(live\)/.test(hook),
+    "site-visits booking: the live check is debounced (>= 600 ms) and drops superseded answers");
+  const vr = read("src/app/(app)/venue-assessments/visit-requests.tsx");
+  const modal = read("src/app/(app)/inbox/site-visit-modal.tsx");
+  ok(vr.includes("<BookingPanel") && modal.includes("<BookingPanel") && /onPickDay=\{/.test(vr) && /onPickDay=\{/.test(modal),
+    "site-visits booking: the visit-requests scheduler and the Inbox dialog both show the booking panel; a nearby day fills the date");
+  ok(vr.includes("scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees })") && /createSiteVisitAction\(\{[\s\S]*?\battendees,[\s\S]*?\}\)/.test(modal),
+    "site-visits booking: both save paths send the picked attendees");
+  ok(!/disabled=\{[^}]*(check|conflict|nearby)/i.test(vr) && !/disabled=\{[^}]*(check|conflict|nearby)/i.test(modal),
+    "site-visits booking: nothing about the check ever disables Schedule");
+  const panel = read("src/components/visit-booking/conflicts-panel.tsx");
+  ok(/p\.calendar !== "failed"/.test(panel) && panel.includes("No conflicts") && panel.includes("Conflicts never block scheduling"),
+    "site-visits booking: an unreadable calendar never reads as 'No conflicts'");
+  const strip = read("src/components/visit-booking/nearby-strip.tsx");
+  ok(strip.includes("NEARBY_TEXT.unverified") && strip.includes("NEARBY_TEXT.unavailable") && strip.includes("nearbyLine("),
+    "site-visits booking: the strip shows the verify / unavailable copy and the spec's row format");
+  ok(strip.includes("nearby.note") && strip.includes('"no-calendar"') && strip.includes("calendarNote("),
+    "site-visits booking: the strip shows the lead's failed-calendar note and 'checked visits only' for a lead with no calendar");
+  const picker = read("src/components/visit-booking/attendee-picker.tsx");
+  ok(/team\.filter\(\(n\) => n !== lead/.test(picker), "site-visits booking: the lead is never offered as an attendee");
+  const clientFiles = [...readdirSync("src/components/visit-booking").map((f) => join("src/components/visit-booking", f)), "src/app/(app)/venue-assessments/visit-requests.tsx", "src/app/(app)/inbox/site-visit-modal.tsx"];
+  const leaky = clientFiles.filter((f) => /from "@\/(db|lib\/stores|lib\/visit-plan\/load|lib\/google|lib\/gmail|lib\/users)/.test(read(f)));
+  ok(leaky.length === 0, "site-visits booking: client components import nothing that reaches the database" + (leaky.length ? " — " + leaky.join(", ") : ""));
+}

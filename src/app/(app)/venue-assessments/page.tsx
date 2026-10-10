@@ -16,6 +16,7 @@ import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
 import { createSurvey, quoteFromSurvey } from "./actions";
 import CsvUploadForm from "./csv-upload-form";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
+import { activeUsers } from "@/lib/users";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import VisitRequests, { type VisitRequestVM } from "./visit-requests";
 import { RecordControl } from "@/components/recordings/record-control";
@@ -134,6 +135,7 @@ export default async function FieldSurveyPage({
     queueVisits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
     "cache"
   );
+  const team = (await activeUsers()).map((u) => u.name);
   const visitRows: VisitRequestVM[] = queueVisits.map((v) => {
     const sm = VISIT_STAGE_META[v.stage];
     return {
@@ -149,6 +151,9 @@ export default async function FieldSurveyPage({
       surveyId: v.surveyId,
       leadId: v.leadId,
       mine: v.stage === "claimed",
+      customerId: v.customerId,
+      locationId: v.locationId,
+      address: v.address,
       addressFlag: (() => {
         const st = visitAddr.get(v.id);
         return st && st.status !== "verified" ? { text: FLAG_TEXT.unverified, fix: st.fix } : null;
@@ -389,7 +394,7 @@ export default async function FieldSurveyPage({
       </div>
 
       {/* #34 — open-visit queue, ABOVE the survey cards */}
-      <VisitRequests rows={visitRows} />
+      <VisitRequests rows={visitRows} team={team} me={me} />
 
       {/* empty state */}
       {list.length === 0 && (

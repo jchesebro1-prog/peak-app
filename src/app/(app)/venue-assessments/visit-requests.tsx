@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { claimVisitAction, releaseVisitAction, removeVisitAction, scheduleVisitAction } from "./visit-actions";
 import { ConfirmButton } from "@/components/confirm-button";
 import AddressFlagBadge, { type AddressFlagVM } from "@/components/address-fix/address-flag";
+import BookingPanel from "@/components/visit-booking/booking-panel";
 
 /**
  * #34 — the open-visit queue rows above the survey cards. Unclaimed rows
@@ -33,6 +34,10 @@ export type VisitRequestVM = {
   mine: boolean;
   /** Spec 2026-10-09 — set when the visit's address isn't verified (no drive time). */
   addressFlag: AddressFlagVM | null;
+  /** Spec 2026-10-09 site-visit scheduling — the booking check's inputs. */
+  customerId: string | null;
+  locationId: string | null;
+  address: string;
 };
 
 const chipBtn: CSSProperties = {
@@ -71,12 +76,27 @@ const linkStyle: CSSProperties = {
   textDecoration: "none",
 };
 
-function VisitRequestRow({ row }: { row: VisitRequestVM }) {
+function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[]; me: string }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [err, setErr] = useState("");
+  const [attendees, setAttendees] = useState<string[]>([]);
+  const parsed = (v: string) => {
+    const t = v ? new Date(v).getTime() : NaN;
+    return Number.isFinite(t) ? t : null;
+  };
+  const startMs = parsed(start);
+  const endMs = parsed(end);
+  // A nearby day fills the date; the rep's times stay (or 9–10 when blank,
+  // an hour after the start when only the end is blank).
+  const pickDay = (dayKey: string) => {
+    const st = start.slice(11, 16) || "09:00";
+    const hour = Math.min(23, Number(st.slice(0, 2)) + 1);
+    setStart(`${dayKey}T${st}`);
+    setEnd(`${dayKey}T${end.slice(11, 16) || `${String(hour).padStart(2, "0")}:${st.slice(3, 5)}`}`);
+  };
 
   // Plan-review minor: check the action result instead of refreshing
   // silently — an { ok: false } (visit already scheduled/done out from under
@@ -102,7 +122,7 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
     }
     setErr("");
     startTransition(async () => {
-      const res = await scheduleVisitAction(row.id, { startAt: s, endAt: e });
+      const res = await scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees });
       if (!res.ok) {
         setErr(res.error);
         return;
@@ -192,12 +212,27 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
           onConfirm={() => run(() => removeVisitAction(row.id))}
         />
       </div>
+      {row.mine && (
+        <BookingPanel
+          visitId={row.id}
+          customerId={row.customerId}
+          locationId={row.locationId}
+          address={row.address}
+          startAt={startMs}
+          endAt={endMs}
+          lead={me}
+          team={team}
+          attendees={attendees}
+          onAttendeesChange={setAttendees}
+          onPickDay={pickDay}
+        />
+      )}
       {err && <div style={{ fontSize: 11.5, color: "#b4543a", fontWeight: 600, marginTop: 6 }}>{err}</div>}
     </div>
   );
 }
 
-export default function VisitRequests({ rows }: { rows: VisitRequestVM[] }) {
+export default function VisitRequests({ rows, team, me }: { rows: VisitRequestVM[]; team: string[]; me: string }) {
   if (!rows.length) return null;
   return (
     <div style={{ marginBottom: 16 }}>
@@ -223,7 +258,7 @@ export default function VisitRequests({ rows }: { rows: VisitRequestVM[] }) {
         }}
       >
         {rows.map((r) => (
-          <VisitRequestRow key={r.id} row={r} />
+          <VisitRequestRow key={r.id} row={r} team={team} me={me} />
         ))}
       </div>
     </div>
