@@ -615,9 +615,11 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
       "drive-time cleanFixInput: ids are trimmed and every field is truncated to its cap");
     const cEmpty = cleanFixInput({ target: V, mode: "retry", address: "", city: "", state: "", zip: "" });
     ok(cEmpty !== null && "address" in cEmpty && cEmpty.address === "", "drive-time cleanFixInput: blank venue fields are allowed (the retry decides)");
-    const cPlTrim = cleanFixInput({ target: { kind: "place", key: "k".repeat(2500), label: "  L  " }, mode: "retry", text: "  " + "t".repeat(400) });
-    ok(cPlTrim?.target.kind === "place" && cPlTrim.target.key.length === 2000 && cPlTrim.target.label === "L" && "text" in cPlTrim && cPlTrim.text.length === 300,
+    const cPlTrim = cleanFixInput({ target: { kind: "place", key: "k".repeat(900), label: "  L  " }, mode: "retry", text: "  " + "t".repeat(400) });
+    ok(cPlTrim?.target.kind === "place" && cPlTrim.target.key.length === 900 && cPlTrim.target.label === "L" && "text" in cPlTrim && cPlTrim.text.length === 300,
       "drive-time cleanFixInput: place key/label/text are trimmed and capped");
+    ok(cleanFixInput({ target: { kind: "place", key: "k".repeat(2500), label: "L" }, mode: "retry", text: "x" }) === null,
+      "drive-time cleanFixInput: a place key over 1000 chars is invalid, not silently capped");
     ok(cleanFixInput({ target: V, mode: "retry", address: "a", city: "c", state: "s" }) === null &&
        cleanFixInput({ target: V, mode: "retry", address: 1, city: "c", state: "s", zip: "z" }) === null &&
        cleanFixInput({ target: { kind: "venue", siteId: "   " }, mode: "pin", lat: 1, lng: 1 }) === null &&
@@ -2305,6 +2307,29 @@ export async function driveTimeRound2Checks(ok: Ok): Promise<void> {
     const live = await placeStatesFor([long], "cache");
     ok(live.get(key)?.status === "verified" && live.get(key)?.fix?.kind === "place" && (live.get(key)?.fix as { key: string }).key === key,
       "drive-time round2: the place book keys a long location on its full text, so the fixed row is found again");
+  });
+
+  // ---- 8b. Hardening: over-long keys and write failures ----
+  await group("long key hardening", async () => {
+    const huge = "1 TESTdrive Huge Rd, Hortonville WI — " + "x".repeat(1200);
+    const hugeKey = addressKey(huge);
+    const mid = "2 TESTdrive Mid Rd, Hortonville WI — " + "y".repeat(400);
+    const midKey = addressKey(mid);
+    const normal = "3 TESTdrive Normal Rd, Hortonville WI";
+    const queries: string[] = [];
+    const st = await placeStatesFor([huge, mid, normal], "live", fastDeps(async (q) => { queries.push(q); return [hit("Rd")]; }));
+    ok(hugeKey.length > 1000 && st.get(hugeKey)?.status === "unresolved" && !queries.some((q) => q.includes("Huge")) && !(await getPlaces([hugeKey])).has(hugeKey),
+      "drive-time hardening: a >1000-char key is unresolved, never searched, and no row is written");
+    ok(st.get(hugeKey)?.fix === null, "drive-time hardening: an over-long key offers no Fix target");
+    const midQ = queries.find((q) => q.includes("Mid Rd"));
+    ok(!!midQ && midQ.length <= 300 && (await getPlaces([midKey])).has(midKey) && midKey.length > 300,
+      "drive-time hardening: a 400-char location searches ≤300 chars but is keyed on its full text");
+    ok(queries.some((q) => q.includes("Normal Rd")), "drive-time hardening: the sync continues past an over-long key");
+    ok(cleanFixTarget({ kind: "place", key: hugeKey, label: huge }) === null && cleanFixTarget({ kind: "place", key: midKey, label: mid })?.kind === "place",
+      "drive-time hardening: cleanFixTarget rejects a >1000-char key and accepts a 400-char one");
+    ok(/try \{\s*await writePlace\(row, \{ overwritePin: false \}\);[\s\S]*?\} catch \(e\) \{/.test(read("src/lib/address-verify/place-book.ts")),
+      "drive-time hardening: a failing place-book write is caught per key, so one bad row can't fail the sync");
+    ok(cleanFixTarget({ kind: "place", key: "k", label: "y".repeat(1001) }) === null, "drive-time hardening: cleanFixTarget rejects a >1000-char label");
   });
 
   // ---- 9. D720 names the known long-route limit ----

@@ -81,6 +81,10 @@ export async function getPlaces(keys: string[]): Promise<Map<string, PlaceRow>> 
   return out;
 }
 
+/** Longest address key (full normalized text) the book will geocode, store or
+ *  fix. A longer "location" is notes, not an address: it stays unresolved. */
+export const MAX_PLACE_KEY = 1000;
+
 /** The label as stored: the text as first seen, capped at 300 characters. */
 export function storedLabel(text: string): string {
   return String(text ?? "").trim().slice(0, 300);
@@ -144,6 +148,7 @@ export async function placeStatesWithRows(
     let n = 0;
     for (const [key, label] of byKey) {
       if (known.has(key)) continue;
+      if (key.length > MAX_PLACE_KEY) continue; // not an address: unresolved, nothing written
       // Take the next shared turn — synchronously, so two passes can't take
       // the same one — unless it would land past this call's own budget.
       const now = d.now();
@@ -154,19 +159,28 @@ export async function placeStatesWithRows(
       n++;
       let hits: GeoSearchHit[];
       try {
-        hits = await d.search(label);
+        hits = await d.search(storedLabel(label));
       } catch {
         continue; // outage: write nothing, the next live pass retries
       }
       // placeRowFromHit drops a hit with unusable coordinates (stored unresolved, never verified).
       const row = placeRowFromHit(key, storedLabel(label), hits[0], d.now());
-      await writePlace(row, { overwritePin: false });
-      // Re-read: a pin dropped meanwhile wins over this geocode.
-      known.set(key, (await getPlaces([key])).get(key) ?? row);
+      try {
+        await writePlace(row, { overwritePin: false });
+        // Re-read: a pin dropped meanwhile wins over this geocode.
+        known.set(key, (await getPlaces([key])).get(key) ?? row);
+      } catch (e) {
+        // One bad row must not fail the whole sync; the next live pass retries.
+        console.error("[address-verify] place-book write failed", key.slice(0, 80), e);
+      }
     }
   }
   const out = new Map<string, AddressState>();
-  for (const [key, label] of byKey) out.set(key, placeAddressState(label, known.get(key)));
+  for (const [key, label] of byKey) {
+    const st = placeAddressState(label, known.get(key));
+    // An over-long key can't be fixed (cleanFixTarget refuses it): no Fix target.
+    out.set(key, key.length > MAX_PLACE_KEY ? { ...st, fix: null } : st);
+  }
   return { states: out, rows: known };
 }
 

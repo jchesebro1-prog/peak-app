@@ -172,7 +172,7 @@ export default function AddressFixDrawer({
         setDone(true);
         onFixed?.(r.status);
       } else if (r.ok) {
-        setMsg({ ok: false, text: "Found the town or street only — drop a pin on the building to verify." });
+        setMsg({ ok: false, text: "Found the town or street only — drop a pin on the building to verify, or include the town (Street, City, State)." });
         onFixed?.(r.status);
       } else {
         setMsg({ ok: false, text: reasonLabel(r.reason, r.got) + "." + (r.reason === "no-hit" ? " Try again, or drop a pin." : "") });

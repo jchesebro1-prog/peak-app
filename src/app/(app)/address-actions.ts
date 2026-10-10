@@ -91,7 +91,7 @@ export async function addressStatusAction(input: {
   const r = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const { addressStatesForVisits } = await import("@/lib/address-verify/targets");
   const states = await addressStatesForVisits(
-    [{ id: "check", customerId: text(r.customerId, 200) || null, locationId: text(r.locationId, 200) || null, address: text(r.address, 300) }],
+    [{ id: "check", customerId: text(r.customerId, 200) || null, locationId: text(r.locationId, 200) || null, address: text(r.address, 1000) }],
     "live"
   );
   const st = states.get("check");
