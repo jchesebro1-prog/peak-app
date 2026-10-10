@@ -9,17 +9,30 @@ export function attendeeKey(name: string, email: string | null): string {
 
 export function mergeAttendees(prev: MeetingAttendee[], krisp: KrispPerson[], calendar: MeetingCalendar | null): MeetingAttendee[] {
   const out = prev.map((a) => ({ ...a, sources: [...a.sources] }));
-  const add = (name: string, email: string | null, source: "krisp" | "calendar") => {
+  const addSource = (a: MeetingAttendee, source: "krisp" | "calendar") => { if (!a.sources.includes(source)) a.sources.push(source); };
+  const add = (rawName: string, rawEmail: string | null, source: "krisp" | "calendar") => {
+    const name = (rawName || "").trim();
+    const email = (rawEmail || "").trim().toLowerCase() || null;
     const key = attendeeKey(name || email || "", email);
     if (key === "name:") return;
     const hit = out.find((a) => a.key === key);
     if (hit) {
-      if (!hit.sources.includes(source)) hit.sources.push(source);
-      if (!hit.name && name) hit.name = name;
+      addSource(hit, source);
+      // a nameless guest is stored under its address; a real name from a later source replaces it
+      if (name && (!hit.name || (hit.email && hit.name.toLowerCase() === hit.email))) hit.name = name;
       return;
     }
-    out.push({ key, name: name || email || "", email: email ? email.trim().toLowerCase() : null, sources: [source],
-      removed: false, contactId: null, userId: null });
+    if (email && name) {
+      // the same person listed name-only by another source: adopt the email, keep the entry's state
+      const nameOnly = out.find((a) => a.email === null && normalizeText(a.name) === normalizeText(name));
+      if (nameOnly) {
+        nameOnly.email = email;
+        nameOnly.key = email;
+        addSource(nameOnly, source);
+        return;
+      }
+    }
+    out.push({ key, name: name || email || "", email, sources: [source], removed: false, contactId: null, userId: null });
   };
   for (const p of krisp) add(personName(p), p.email, "krisp");
   for (const a of calendar?.attendees || []) add(a.name || "", a.email, "calendar");
@@ -37,7 +50,7 @@ export function resolveAttendees(atts: MeetingAttendee[], byEmail: Map<string, {
 
 export function speakerIndexes(m: Pick<MeetingRecord, "krisp">): string[] {
   const set = new Set<string>([...Object.keys(m.krisp.speakers), ...m.krisp.segments.map((s) => String(s.speaker))]);
-  return [...set].sort((a, b) => Number(a) - Number(b));
+  return [...set].sort((a, b) => (/^\d+$/.test(a) && /^\d+$/.test(b) ? Number(a) - Number(b) : a.localeCompare(b)));
 }
 
 export function speakerLabel(m: Pick<MeetingRecord, "krisp">, idx: string): string {
@@ -47,15 +60,19 @@ export function speakerLabel(m: Pick<MeetingRecord, "krisp">, idx: string): stri
 
 function escapeRe(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-/** Whole-word replace; a "Speaker N" label also matches its "Speaker_N" spelling. */
+/** Whole-word replace; a "Speaker N" label also matches its "Speaker_N" spelling. Every pair applies in ONE pass,
+ *  so a mapped name that equals another speaker's label is never re-replaced, and `$` in a name is literal. */
 export function relabel(text: string, pairs: [string, string][]): string {
-  let out = text;
+  const target = new Map<string, string>();
   for (const [from, to] of pairs) {
     if (!from || from === to) continue;
-    const pattern = escapeRe(from).replace(/\\? /g, "[ _]");
-    out = out.replace(new RegExp(`(?<![\\w])${pattern}(?![\\w])`, "g"), to);
+    const k = from.replace(/_/g, " ");
+    if (!target.has(k)) target.set(k, to);
   }
-  return out;
+  if (!target.size) return text;
+  const alternation = [...target.keys()].sort((a, b) => b.length - a.length)
+    .map((k) => escapeRe(k).replace(/\\? /g, "[ _]")).join("|");
+  return text.replace(new RegExp(`(?<![\\w])(?:${alternation})(?![\\w])`, "g"), (m) => target.get(m.replace(/_/g, " ")) ?? m);
 }
 
 export type RenderNames = { contact: (id: string) => string | null; user: (id: string) => string | null };

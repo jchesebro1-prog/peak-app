@@ -5,16 +5,23 @@ import type { MeetingLinks, MeetingTodo, TodoKind } from "./types";
 
 type Named = { id: string; name: string };
 
-function nameMatches(label: string, full: string): boolean {
+const exact = (label: string, full: string) => normalizeText(label) === normalizeText(full);
+
+/** First-name match, either direction: "Tom" ↔ "Tom Ellis", or "Tom Ellis" ↔ a record stored only as "Tom". */
+function firstNameMatches(label: string, full: string): boolean {
   const l = normalizeText(label), f = normalizeText(full);
-  return !!l && (l === f || f.split(" ")[0] === l);
+  if (!l || !f) return false;
+  return f.split(" ")[0] === l || (!f.includes(" ") && l.split(" ")[0] === f);
 }
 
 export function suggestTodoKind(assignee: string | null, people: { users: Named[]; contacts: Named[] }): TodoKind {
-  if (!assignee) return "note";
-  if (people.users.some((u) => nameMatches(assignee, u.name))) return "task";
-  if (people.contacts.some((c) => nameMatches(assignee, c.name))) return "waiting";
-  return "note";
+  if (!assignee || !normalizeText(assignee)) return "note";
+  if (people.users.some((u) => exact(assignee, u.name))) return "task";
+  if (people.contacts.some((c) => exact(assignee, c.name))) return "waiting";
+  const user = people.users.some((u) => firstNameMatches(assignee, u.name));
+  const contact = people.contacts.some((c) => firstNameMatches(assignee, c.name));
+  if (user && contact) return "note"; // ambiguous first name — the rep decides
+  return user ? "task" : contact ? "waiting" : "note";
 }
 
 export function mergeTodos(prev: MeetingTodo[], derived: DerivedActionItem[], suggest: (assignee: string | null) => TodoKind): MeetingTodo[] {
@@ -27,7 +34,8 @@ export function mergeTodos(prev: MeetingTodo[], derived: DerivedActionItem[], su
     out.push({ key: d.key, title: d.title, assigneeLabel: d.assigneeName, dueDate: d.dueDate,
       suggested: suggest(d.assigneeName), decision: null });
   }
-  for (const rest of byKey.values()) out.push(rest); // never drop a to-do the app already holds
+  // Never lose a decision: a decided to-do Krisp no longer lists stays. An undecided one it dropped or reworded is removed.
+  for (const rest of byKey.values()) if (rest.decision) out.push(rest);
   return out;
 }
 

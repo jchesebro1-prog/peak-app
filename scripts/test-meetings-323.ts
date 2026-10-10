@@ -6,7 +6,7 @@ import * as MS from "@/lib/stores/meetings";
 import { nameCore, hitsCore, normalizeText } from "@/lib/meetings/names";
 import { canSeeMeeting, meetingScope, portalCanSee } from "@/lib/meetings/visibility";
 import { matchMeeting, type MatchIndex, type MatchInput } from "@/lib/meetings/match";
-import { mergeAttendees, relabel, renderMeeting, resolveAttendees, speakerLabel } from "@/lib/meetings/render";
+import { mergeAttendees, relabel, renderMeeting, resolveAttendees, speakerIndexes, speakerLabel } from "@/lib/meetings/render";
 import { mergeTodos, noteParentFor, suggestTodoKind } from "@/lib/meetings/todos";
 
 type Ok = (c: boolean, m: string) => void;
@@ -185,8 +185,24 @@ export async function meetings323RenderChecks(ok: Ok): Promise<void> {
   ok(a2.find((x) => x.key === "amy@osakis.k12.mn.us")?.removed === true && a2.some((x) => x.key === "name:seth" && x.contactId === "c-seth") &&
      a2.find((x) => x.key === "tom@osakis.k12.mn.us")?.sources.join() === "krisp,calendar",
     "#323 a re-merge keeps manual entries, removed flags and resolutions; drops nothing");
+  ok(a2.find((x) => x.key === "amy@osakis.k12.mn.us")?.name === "Amy", "#323 a nameless calendar guest (name = email) is upgraded when a later source supplies a real name");
+  // 2: same person name-only from Krisp, with an email from the calendar
+  const a3 = mergeAttendees([], [{ email: null, firstName: "Tom", lastName: "Ellis" }],
+    { eventId: "e2", title: "Osakis", attendees: [{ email: " Tom@Osakis.k12.mn.us ", name: "Tom Ellis" }, { email: "   ", name: "Pat Lee" }] });
+  ok(a3.length === 2 && a3[0].key === "tom@osakis.k12.mn.us" && a3[0].email === "tom@osakis.k12.mn.us" && a3[0].sources.join() === "krisp,calendar" &&
+     a3[1].key === "name:pat lee" && a3[1].email === null,
+    "#323 a name-only Krisp attendee and the same person with an email from the calendar become one entry; blank emails are null");
+  const a4 = mergeAttendees([{ key: "name:tom ellis", name: "Tom Ellis", email: null, sources: ["manual"], removed: true, contactId: "c-tom", userId: null }], [],
+    { eventId: "e3", title: "x", attendees: [{ email: "tom@osakis.k12.mn.us", name: "Tom Ellis" }] });
+  ok(a4.length === 1 && a4[0].key === "tom@osakis.k12.mn.us" && a4[0].removed && a4[0].contactId === "c-tom" && a4[0].sources.join() === "manual,calendar",
+    "#323 the adopted entry keeps its removed flag, resolution and unions the source");
   const r = resolveAttendees(a1, new Map([["tom@osakis.k12.mn.us", { contactId: "c-tom" }]]));
   ok(r[0].contactId === "c-tom" && r[1].contactId === null, "#323 resolveAttendees fills contact ids by email, never by name");
+  const pre = a1.map((x) => (x.key === "amy@osakis.k12.mn.us" ? { ...x, contactId: "c-pre" } : x));
+  const r2 = resolveAttendees(pre.concat([{ key: "name:zed", name: "Tom Ellis", email: "zed@x.org", sources: ["manual"], removed: false, contactId: null, userId: null }]),
+    new Map([["tom@osakis.k12.mn.us", { contactId: "c-tom" }], ["amy@osakis.k12.mn.us", { contactId: "c-other" }]]));
+  ok(r2[0].contactId === "c-tom" && r2[1].contactId === "c-pre" && r2[2].contactId === null && r2[2].userId === null,
+    "#323 resolveAttendees: only mapped addresses resolve (an unmapped one with the same name stays null) and a pre-resolved attendee is never overwritten");
 
   // K10 speaker relabel
   const m = meetingFixture323({ krispMeetingId: "r1" });
@@ -196,19 +212,35 @@ export async function meetings323RenderChecks(ok: Ok): Promise<void> {
   ok(speakerLabel(m, "0") === "Jeff Chesebro" && speakerLabel(m, "2") === "Speaker 2", "#323 speaker label: Krisp's name, else 'Speaker <idx>'");
   ok(relabel("Speaker_2 and Speaker 2 said; Speaker 22 didn't", [["Speaker 2", "Tom Ellis"]]) === "Tom Ellis and Tom Ellis said; Speaker 22 didn't",
     "#323 relabel replaces both spellings, whole-word only");
+  ok(relabel("A$AP said", [["A$AP", "Rocky"]]) === "Rocky said" && relabel("Speaker 1 said", [["Speaker 1", "Q$&A $1"]]) === "Q$&A $1 said",
+    "#323 relabel: $-patterns in a name are literal, not replacement tokens");
+  ok(relabel("Speaker 1 met Tom Ellis", [["Speaker 1", "Tom Ellis"], ["Tom Ellis", "Thomas Ellis"]]) === "Tom Ellis met Thomas Ellis",
+    "#323 relabel applies every pair in one pass (a mapped name is never re-replaced)");
+  m.krisp.speakers["10"] = { email: null, firstName: "Ten", lastName: "" };
+  m.krisp.speakers["abc"] = { email: null, firstName: "Abc", lastName: "" };
+  const idxs = speakerIndexes(m);
+  ok(idxs.indexOf("2") < idxs.indexOf("10") && idxs.indexOf("0") < idxs.indexOf("2") && idxs.indexOf("10") < idxs.indexOf("abc"),
+    "#323 speaker indexes sort numerically, non-numeric after, deterministically");
+  delete m.krisp.speakers["10"]; delete m.krisp.speakers["abc"];
   m.speakerMap = { "2": { contactId: "c-tom", name: "Tom Ellis" } };
+  m.todos = [{ key: "k", title: "Send the venue drawings", assigneeLabel: "Speaker_2", dueDate: null, suggested: "waiting", decision: null }];
   const view = renderMeeting(m, { contact: (id) => (id === "c-tom" ? "Tom Ellis" : null), user: () => null });
   ok(view.segments[1].speakerName === "Tom Ellis" && view.segments[1].text.startsWith("Tom Ellis here"),
     "#323 render: mapped speaker names the segment and replaces the label in its text");
-  ok(view.todos.length === 0 || view.todos[0].assigneeDisplay === "Tom Ellis", "#323 render: to-do owner follows the speaker map");
+  ok(view.todos.length === 1 && view.todos[0].assigneeDisplay === "Tom Ellis", "#323 render: to-do owner follows the speaker map");
   const refreshed = { ...m, krisp: { ...m.krisp, title: "Renamed in Krisp" } };
-  ok(renderMeeting(refreshed, { contact: () => "Tom Ellis", user: () => null }).segments[1].speakerName === "Tom Ellis",
-    "#323 a Krisp refresh never loses the speaker map (render starts from krisp.* every time)");
+  ok(renderMeeting(refreshed, { contact: () => null, user: () => null }).segments[1].speakerName === "Tom Ellis",
+    "#323 a Krisp refresh never loses the speaker map (name comes from speakerMap itself; render starts from krisp.* every time)");
 
   // K6 to-do defaults
   const people = { users: [{ id: "u1", name: "Jeff Chesebro" }], contacts: [{ id: "c-tom", name: "Tom Ellis" }] };
   ok(suggestTodoKind("Jeff Chesebro", people) === "task" && suggestTodoKind("Jeff", people) === "task", "#323 to-do for a Peak person → task (full or first name)");
   ok(suggestTodoKind("Tom Ellis", people) === "waiting", "#323 to-do for the customer → waiting");
+  const people2 = { users: [{ id: "u1", name: "Jeff Chesebro" }, { id: "u3", name: "Tom Xu" }], contacts: [{ id: "c-tom", name: "Tom Ellis" }] };
+  ok(suggestTodoKind("Tom", people2) === "note" && suggestTodoKind("Tom Ellis", people2) === "waiting" &&
+     suggestTodoKind("Tom Xu", people2) === "task" && suggestTodoKind("Jeff", people2) === "task",
+    "#323 to-do owner: exact full name first; a first name shared by a Peak user and a contact is ambiguous → note");
+  ok(suggestTodoKind("Tom Ellis", { users: [], contacts: [{ id: "c1", name: "Tom" }] }) === "waiting", "#323 a full label matches a contact stored by first name only");
   ok(suggestTodoKind(null, people) === "note" && suggestTodoKind("Someone Else", people) === "note", "#323 to-do with no known owner → note");
   const derived = [{ key: "k1", title: "Send drawings", assigneeName: "Tom Ellis", dueDate: null }, { key: "k2", title: "Price track", assigneeName: "Jeff", dueDate: "2026-10-20" }];
   const t1 = mergeTodos([], derived, (x) => suggestTodoKind(x, people));
@@ -217,7 +249,9 @@ export async function meetings323RenderChecks(ok: Ok): Promise<void> {
   const t2 = mergeTodos(decided, [{ ...derived[0], title: "Send the drawings (edited)" }, derived[1]], () => "note");
   ok(t2.find((t) => t.key === "k1")?.decision?.kind === "dismiss" && t2.find((t) => t.key === "k2")?.suggested === "note",
     "#323 a decided to-do is untouched by re-sync (dismissed stays dismissed); undecided ones re-suggest");
-  ok(mergeTodos(decided, [], () => "note").length === 2, "#323 a to-do Krisp dropped is kept once it exists in the app");
+  const orphaned = mergeTodos([...decided, { key: "k9", title: "Old wording", assigneeLabel: null, dueDate: null, suggested: "note", decision: null }], [], () => "note");
+  ok(orphaned.length === 1 && orphaned[0].key === "k1" && orphaned[0].decision?.kind === "dismiss",
+    "#323 a decided to-do Krisp no longer lists is kept; an undecided one it dropped or reworded is removed");
 
   // note parent priority venue > lead > project > engagement > customer
   const L = { customerId: "osakis", siteId: "st-1", contactIds: [], work: { type: "lead" as const, id: "L-1", label: "x" }, internalUserIds: [] };
