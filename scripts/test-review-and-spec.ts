@@ -11639,6 +11639,7 @@ seeded()
   .then(() => riserPolish2Checks())
   .then(() => riserPolish3Checks())
   .then(() => riserPhase2A1Checks())
+  .then(() => riserPhase2A2Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -64576,4 +64577,149 @@ async function riserPhase2A1Checks(): Promise<void> {
   const fs = await import("node:fs");
   const src = fs.readFileSync("src/lib/riser-data-sheet.ts", "utf8") + fs.readFileSync("src/lib/design/conduit-riser/suggest-tags.ts", "utf8");
   ok(!/from "@\/lib\/stores|from "@\/db|"server-only"/.test(src), "#328 A1: the rules and sheet model import no store, db or server-only code");
+}
+
+/** #328 A2 — Catalog → Riser data: preview model + Apply patch (pure), and the Devices export →
+ *  edit → upload → plan → apply round trip on the scratch DB (only designatorCode / tagDefaults,
+ *  renamed SKUs followed, a refused row writes nothing). */
+async function riserPhase2A2Checks(): Promise<void> {
+  const J = (v: unknown) => JSON.stringify(v);
+  const R = await import("@/lib/riser-data-sheet");
+  const V = await import("@/lib/riser-data-preview");
+
+  // ---- 1. pure preview + patch
+  type P = import("@/lib/riser-data-sheet").RiserPartLike;
+  const mk = (sku: string, extra: Partial<P> = {}): P => ({ sku, manufacturer: "ETC", desc: "x", category: "LC", ...extra });
+  const a = mk("ETC:A", { designatorCode: "CRO", tagDefaults: { face: "DMXO", height: '18"' } });
+  const b = mk("ETC:B");
+  const c2 = mk("ETC:C", { designatorCode: "EP" });
+  const H = ["SKU", "Designator code", "Face", "Height"];
+  const grid = [H, ["ETC:A", "CRN", "", ""], ["ETC:B", "", "", ""], ["ETC:OLD-C", "EP", "", ""], ["ETC:NOPE", "OCC", "", ""], ["ETC:D", "TOOLONG1", "", ""], ["ETC:E", "", "", "wall"]];
+  const parse = R.parseRiserDataSheet(grid);
+  const bySku = new Map<string, P>([["ETC:A", a], ["ETC:B", b], ["ETC:OLD-C", c2], ["ETC:E", mk("ETC:E")]]);
+  const pv = V.buildRiserPreview(parse, bySku);
+  ok(pv.changed.length === 2 && pv.changed[0].sku === "ETC:A" && pv.changed[1].sku === "ETC:E", "#328 A2 preview: only parts that change are listed as changed");
+  ok(J(pv.changed[0].changes) === J([{ label: "Designator code", from: "CRO", to: "CRN" }]), "#328 A2 preview: a change shows field, old and new");
+  ok(pv.changed[1].changes.length === 1 && pv.changed[1].changes[0].label === "Height" && pv.changed[1].changes[0].from === "" && pv.changed[1].changes[0].to === "wall", "#328 A2 preview: a set shows from blank");
+  ok(pv.unchanged.length === 2 && pv.unchanged.some((u) => u.sku === "ETC:B") && pv.unchanged.some((u) => u.sku === "ETC:OLD-C" && u.renamedTo === "ETC:C"), "#328 A2 preview: blank and same-value rows are unchanged (a renamed one shows where it landed)");
+  ok(pv.unknown.length === 1 && pv.unknown[0].sku === "ETC:NOPE" && pv.unknown[0].row === 5, "#328 A2 preview: an unknown SKU is listed with its sheet row");
+  ok(pv.errors.length === 1 && pv.errors[0].row === 6 && /Designator code/.test(pv.errors[0].message), "#328 A2 preview: a refused cell is listed per row");
+  ok(!pv.changed.some((r) => r.sku === "ETC:D") && !pv.unchanged.some((r) => r.sku === "ETC:D"), "#328 A2 preview: a refused row is in no list that writes");
+  const renamedPart = mk("ETC:NEW-C", { designatorCode: "EP" });
+  const pvRename = V.buildRiserPreview(R.parseRiserDataSheet([H, ["ETC:OLD-C", "OCC", "", ""]]), new Map([["ETC:OLD-C", renamedPart]]));
+  ok(pvRename.changed.length === 1 && pvRename.changed[0].renamedTo === "ETC:NEW-C" && pvRename.changed[0].sku === "ETC:OLD-C", "#328 A2 preview: a renamed SKU shows where it landed");
+  const clear = R.planRiserDataApply(R.parseRiserDataSheet([H, ["ETC:A", "-", "-", ""]]).rows, new Map([["ETC:A", a]]));
+  ok("designatorCode" in V.upsertPatchOf(clear.changes[0]) && V.upsertPatchOf(clear.changes[0]).designatorCode === undefined
+    && J(V.upsertPatchOf(clear.changes[0]).tagDefaults) === J({ height: '18"' }), "#328 A2 patch: '-' clears (undefined), a partial tag clear keeps the other fields");
+  const clearAll = R.planRiserDataApply(R.parseRiserDataSheet([H, ["ETC:A", "", "-", "-"]]).rows, new Map([["ETC:A", a]]));
+  const pAll = V.upsertPatchOf(clearAll.changes[0]);
+  ok(!("designatorCode" in pAll) && "tagDefaults" in pAll && pAll.tagDefaults === undefined, "#328 A2 patch: clearing every tag field clears tagDefaults and leaves designatorCode out");
+  ok(Object.keys(V.upsertPatchOf(clear.changes[0])).every((k) => k === "designatorCode" || k === "tagDefaults"), "#328 A2 patch: only designatorCode / tagDefaults can be written");
+
+  // ---- 2. scratch-DB round trip
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const DT = await import("@/lib/stores/device-types");
+  const SV = await import("@/lib/riser-data-sheet-server");
+  const ExcelJS = (await import("exceljs")).default;
+
+  const sku = (slug: string) => fixtureId(328, `a2-${slug}`);
+  const CAT = { ctl: "FX328 A2 Lighting Control", dim: "FX328 A2 Dimmers", spk: "FX328 A2 Speakers" };
+  const mkDoc = (slug: string, desc: string, category: string, extra: Record<string, unknown> = {}) => ({ id: sku(slug), sku: sku(slug), desc, category, unit: "ea", list: 10, cost: 5, mfr: "FX328", manufacturerModelNumber: `M-${slug}`, notes: `n-${slug}`, ...extra });
+  const seeds = [
+    mkDoc("dmxo", "5-pin DMX outlet panel", CAT.ctl),
+    mkDoc("dimmer", "Dimmer rack, 48 module", CAT.dim, { designatorCode: "DR", tagDefaults: { box: "B9", mount: "FM" } }),
+    mkDoc("speaker", "Line array speaker", CAT.spk),
+    mkDoc("old", "Keypad station", CAT.ctl, { designatorCode: "EP" }),
+    mkDoc("refuse", "Junction box", CAT.ctl),
+  ];
+  for (const d of seeds) {
+    registerFixture("catalog_parts", d.id);
+    await DS.upsertDoc("catalog_parts", d as never);
+  }
+  const NEW = sku("new");
+  registerFixture("catalog_parts", NEW);
+  ok((await DT.assignDeviceType([CAT.ctl], "control-networking")).ok && (await DT.assignDeviceType([CAT.dim], "dimming-power")).ok && (await DT.assignDeviceType([CAT.spk], "speakers")).ok,
+    "#328 A2 store: the scratch categories map to device types");
+
+  const { rows, types } = await SV.loadRiserExportRows();
+  const mine = rows.filter((r) => r.sku.startsWith(fixtureId(328, "a2-")));
+  ok(mine.length === 4 && !mine.some((r) => r.sku === sku("speaker")), "#328 A2 export: the DMX outlet, dimmer and others are listed, the speaker (not lighting scope) is not");
+  const byRow = (s: string) => mine.find((r) => r.sku === sku(s))!;
+  ok(byRow("dmxo").code === "CRO" && byRow("dmxo").source === "suggested" && byRow("dimmer").code === "DR" && byRow("dimmer").source === "current", "#328 A2 export: the outlet is pre-filled from the rules, the dimmer keeps its own values");
+  const buf = await SV.writeRiserDataSheet(mine, types);
+  const wb0 = new ExcelJS.Workbook();
+  await wb0.xlsx.load(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+  const ws0 = wb0.getWorksheet("Devices")!;
+  ok(ws0 && J((ws0.getRow(1).values as unknown[]).slice(1)) === J([...R.RISER_DEVICE_HEADERS]), "#328 A2 export: one Devices tab with A1's headers");
+
+  // Edit the workbook the way Jeff would: tweak the dimmer's face, clear its box, mistype one code, touch the speaker's SKU row (absent).
+  const colOf = (h: string) => R.RISER_DEVICE_HEADERS.indexOf(h as never) + 1;
+  const rowOfSku = (s: string) => { let found = 0; ws0.eachRow((r, n) => { if (n > 1 && r.getCell(colOf("SKU")).value === s) found = n; }); return found; };
+  ws0.getRow(rowOfSku(sku("dimmer"))).getCell(colOf("Face")).value = "FRONT";
+  ws0.getRow(rowOfSku(sku("dimmer"))).getCell(colOf("Box")).value = "-";
+  ws0.getRow(rowOfSku(sku("refuse"))).getCell(colOf("Designator code")).value = "WAYTOOLONGCODE";
+  ws0.getRow(rowOfSku(sku("refuse"))).getCell(colOf("Mount")).value = "SM";
+  const edited = Buffer.from(await wb0.xlsx.writeBuffer());
+
+  // Rename the keypad AFTER the export: the sheet still carries the old SKU.
+  const before = new Map((await Cat.list()).filter((p) => p.sku.startsWith(fixtureId(328, "a2-"))).map((p) => [p.sku, p] as const));
+  const renamed = await Cat.renamePartDocs(sku("old"), NEW, "Keypad A2", "FX328");
+  ok(renamed?.sku === NEW, "#328 A2 store: the keypad was renamed after the export");
+
+  const bad = await SV.readRiserSheetFile(edited, "riser.csv");
+  ok(!bad.ok, "#328 A2 upload: only .xlsx is read");
+  const big = await SV.readRiserSheetFile(Buffer.alloc(V.MAX_RISER_SHEET_BYTES + 1), "riser.xlsx");
+  ok(!big.ok && big.error === V.RISER_SHEET_TOO_BIG, "#328 A2 upload: the Photo sheet's size cap");
+  const read = await SV.readRiserSheetFile(edited, "riser.xlsx");
+  if (!read.ok) { ok(false, "#328 A2 upload: the edited workbook reads: " + read.error); return; }
+  ok(read.parse.rows.length === 3 && read.parse.errors.length === 1 && read.parse.errors[0].row === rowOfSku(sku("refuse")) && read.parse.notes.length === 0, "#328 A2 upload: three rows parse, the mistyped code is refused on its own row");
+
+  const parts = await SV.resolveSheetParts(read.parse);
+  const preview = V.buildRiserPreview(read.parse, parts);
+  const prevOld = preview.changed.find((c) => c.sku === sku("old"));
+  ok(prevOld?.renamedTo === NEW && prevOld.changes.some((f) => f.label === "Mount" && f.to === "FM"), "#328 A2 preview: the renamed keypad resolves to its new SKU and shows the suggested cells it would gain");
+  const chDim = preview.changed.find((c) => c.sku === sku("dimmer"));
+  ok(!!chDim && chDim.changes.some((f) => f.label === "Face" && f.from === "" && f.to === "FRONT") && chDim.changes.some((f) => f.label === "Box" && f.from === "B9" && f.to === ""), "#328 A2 preview: dimmer face set, box cleared");
+  ok(preview.changed.some((c) => c.sku === sku("dmxo")) && !preview.changed.some((c) => c.sku === sku("refuse")), "#328 A2 preview: the suggested outlet would be written; the refused row would not");
+
+  // The renamed part gets a real edit this time: change the keypad's code on a second upload of the same workbook.
+  ws0.getRow(rowOfSku(sku("old"))).getCell(colOf("Designator code")).value = "TS";
+  const edited2 = Buffer.from(await wb0.xlsx.writeBuffer());
+  const read2 = await SV.readRiserSheetFile(edited2, "riser.xlsx");
+  if (!read2.ok) { ok(false, "#328 A2 upload: second workbook reads"); return; }
+  const plan = await SV.planRiserSheet(read2.parse);
+  ok(plan.changes.some((c) => c.sku === NEW && c.patch.designatorCode === "TS") && !plan.changes.some((c) => c.sku === sku("old")), "#328 A2 plan: a renamed SKU's change lands on the renamed part");
+
+  const out = await SV.applyRiserChanges(plan.changes, 30_000);
+  ok(out.applied === plan.changes.length && out.failed.length === 0 && out.remaining === 0, "#328 A2 apply: every change applied, none failed, none remaining");
+  const after = new Map((await Cat.list()).filter((p) => p.sku.startsWith(fixtureId(328, "a2-"))).map((p) => [p.sku, p] as const));
+  const strip = (p: Record<string, unknown> | undefined) => { const { designatorCode, tagDefaults, updatedAt, renamedTo, ...rest } = (p ?? {}) as Record<string, unknown>; void designatorCode; void tagDefaults; void updatedAt; void renamedTo; return rest; };
+  ok(after.get(NEW)?.designatorCode === "TS", "#328 A2 apply: the renamed part's code is saved under its new SKU");
+  ok(!(await Cat.list()).some((p) => p.sku === sku("old")), "#328 A2 apply: the retired SKU stays retired (no revived duplicate)");
+  const dim = after.get(sku("dimmer"))!;
+  ok(dim.tagDefaults?.face === "FRONT" && dim.tagDefaults?.mount === "FM" && dim.tagDefaults?.box === undefined && dim.designatorCode === "DR", "#328 A2 apply: '-' cleared Box, the other tag fields and the code were kept");
+  const dmxo = after.get(sku("dmxo"))!;
+  ok(dmxo.designatorCode === "CRO" && dmxo.tagDefaults?.face === "DMXO" && dmxo.tagDefaults?.mount === "SM" && dmxo.tagDefaults?.pd === "P/D", "#328 A2 apply: the suggested outlet values were saved");
+  const refuse = after.get(sku("refuse"))!;
+  ok(refuse.designatorCode === undefined && refuse.tagDefaults === undefined && J(strip(refuse as never)) === J(strip(before.get(sku("refuse")) as never)), "#328 A2 apply: the refused row wrote nothing (not even its valid Mount cell)");
+  const untouched = ["speaker"] as const;
+  ok(untouched.every((s) => J(after.get(sku(s))) === J(before.get(sku(s)))), "#328 A2 apply: a part not on the sheet is byte-identical");
+  const only = (id: string) => J(strip(after.get(id) as never)) === J(strip(before.get(id) as never));
+  ok(only(sku("dmxo")) && only(sku("dimmer")), "#328 A2 apply: nothing but designatorCode / tagDefaults (and updatedAt) changed on written parts");
+  ok(after.get(NEW)?.tagDefaults?.mount === "FM" && after.get(NEW)?.formerSkus?.[0] === sku("old") && after.get(NEW)?.manufacturerModelNumber === "Keypad A2", "#328 A2 apply: the renamed part keeps its rename bookkeeping");
+  const again = await SV.planRiserSheet(read2.parse);
+  ok(again.changes.length === 0, "#328 A2 apply: re-planning the same sheet after Apply finds nothing left (resumable, idempotent)");
+  const skipTest = await SV.planRiserSheet(read2.parse, new Set([NEW]));
+  ok(!skipTest.changes.some((c) => c.sku === NEW), "#328 A2 plan: SKUs that failed earlier this run are skipped");
+
+  // ---- 3. wiring pins
+  const fs = await import("node:fs");
+  const act = fs.readFileSync("src/app/(app)/catalog/riser-data/actions.ts", "utf8") + fs.readFileSync("src/app/(app)/catalog/riser-data/page.tsx", "utf8") + fs.readFileSync("src/app/(app)/catalog/riser-data/export/route.ts", "utf8");
+  ok((act.match(/requirePerm\("manage_users"\)/g) ?? []).length === 4 && !/requirePerm\("create"\)/.test(act), "#328 A2: the page, export and both actions are admin only (manage_users)");
+  const srv = fs.readFileSync("src/lib/riser-data-sheet-server.ts", "utf8");
+  ok(/mergeUpsert\(c\.sku, upsertPatchOf\(c\)\)/.test(srv) && !/\bupsert\(/.test(srv.replace(/mergeUpsert/g, "")), "#328 A2: parts are written only through mergeUpsert with the two-field patch");
+  const cl = fs.readFileSync("src/app/(app)/catalog/riser-data/riser-data-client.tsx", "utf8");
+  ok(/Show unchanged/.test(cl) && /preview\.notes/.test(cl), "#328 A2: the preview hides unchanged rows behind a toggle and shows parse notes");
 }

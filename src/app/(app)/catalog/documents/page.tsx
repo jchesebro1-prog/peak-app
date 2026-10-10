@@ -123,6 +123,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           {can("manage_users", user.roles) && <SquarePhotosButton />}
           <Link href="/catalog/documents/photos" className="pk-btn-outline" style={{ textDecoration: "none" }}>Photo sheet</Link>
           <Link href="/catalog/rack-data" className="pk-btn-outline" style={{ textDecoration: "none" }}>Rack data sheet</Link>
+          {can("manage_users", user.roles) && <Link href="/catalog/riser-data" className="pk-btn-outline" style={{ textDecoration: "none" }}>Riser data</Link>}
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>
         </div>
       </div>
