@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireUser } from "@/lib/session";
+import { activeUsers } from "@/lib/users";
+import { cleanAttendees } from "@/lib/visit-plan/people";
 import { claimVisit, getVisit, releaseVisit, removeVisit, scheduleVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteStatus, type RecipientResult } from "@/lib/visit-invite";
 
@@ -68,7 +70,7 @@ export async function removeVisitAction(
 
 export async function scheduleVisitAction(
   id: string,
-  input: { startAt: number; endAt: number }
+  input: { startAt: number; endAt: number; attendees?: unknown }
 ): Promise<{ ok: true; inviteStatus: InviteStatus; invites: RecipientResult[] } | { ok: false; error: string }> {
   const me = await requireUser();
   if (!(input.startAt > 0) || !(input.endAt > input.startAt))
@@ -77,7 +79,11 @@ export async function scheduleVisitAction(
   if (!v) return { ok: false, error: "Visit not found" };
   if (v.stage === "done") return { ok: false, error: "Visit already completed" };
   if (!v.assignedTo) return { ok: false, error: "Claim the visit first" };
-  await scheduleVisit(id, input.startAt, input.endAt);
+  // Spec 2026-10-09 site-visit scheduling — attendees picked while booking.
+  // Omitted = leave any existing attendees alone.
+  const roster = (await activeUsers()).map((u) => u.name);
+  const attendees = input.attendees === undefined ? undefined : cleanAttendees(input.attendees, v.assignedTo, roster);
+  await scheduleVisit(id, input.startAt, input.endAt, attendees);
   const fresh = await getVisit(id);
   // Spec 2026-10-09 triggers: re-sync the old and new day for everyone on it.
   // Registered before the invite dispatch, so an invite error can't drop it.

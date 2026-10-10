@@ -26,6 +26,7 @@ import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, weekdayOf, workWindow }
 import { attendeeStatusOn, couldBeSameArea, MAX_NEARBY_DAYS, nearbyLine, nearbyPairs, straightLineMiles, suggestDays, VISITS_ONLY_NOTE, type LeadDay } from "@/lib/visit-plan/nearby";
 import { BOOKING_ROUTE_BUDGET_MS, bookingRouteMode, loadBookingCheck, NEW_VISIT_ID, readCalendarForBooking, type BookingDeps } from "@/lib/visit-plan/load";
 import type { BookingCheckInput } from "@/lib/visit-plan/types";
+import { cleanBookingInput } from "@/lib/visit-plan/input";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -828,4 +829,35 @@ export async function siteVisitsLoaderChecks(ok: Ok): Promise<void> {
   ok(leaky.length === 0 && serverOnly.test(readFileSync(join(dir, "load.ts"), "utf8")) && !/from "\.\/load"/.test(readFileSync(join(dir, "index.ts"), "utf8")),
     "site-visits pin: every visit-plan module but load.ts is client-safe, and the index never re-exports load" + (leaky.length ? " — " + leaky.join(", ") : ""));
   ok(!/^import (?!type)/m.test(readFileSync("src/lib/visit-invite-plan.ts", "utf8")), "site-visits pin: visit-invite-plan.ts has no runtime imports (client-safe)");
+}
+
+export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
+  const roster = ["Dana", "Jeff", "Sam"];
+  const c = cleanBookingInput({ visitId: " SV-1 ", customerId: "C-1", locationId: "", address: "  1 Elm St ", startAt: at(9), endAt: at(10), lead: "Dana", attendees: ["Jeff", "Dana", "Ghost"] }, roster);
+  ok(c.visitId === "SV-1" && c.customerId === "C-1" && c.locationId === null && c.address === "1 Elm St" && c.startAt === at(9) && c.endAt === at(10) && c.lead === "Dana" && c.attendees.join() === "Jeff",
+    "site-visits input: the booking check's input is trimmed and cleaned");
+  const bad = cleanBookingInput({ startAt: at(10), endAt: at(9), lead: "Ghost", attendees: "Jeff" }, roster);
+  ok(bad.startAt === null && bad.endAt === null && bad.lead === "" && bad.attendees.length === 0 && bad.visitId === null,
+    "site-visits input: a reversed range, an unknown lead and a non-list are dropped");
+  ok(cleanBookingInput(null, roster).address === "" && cleanBookingInput({ startAt: at(9), endAt: at(9) + 25 * 3_600_000 }, roster).startAt === null,
+    "site-visits input: junk is empty; a range over 24 h is untimed");
+
+  const ba = readFileSync("src/app/(app)/visit-booking-actions.ts", "utf8");
+  for (const name of ["bookingCheckAction", "updateVisitAction", "visitConflictSummariesAction"])
+    ok(firstAwait(fnBody(ba, name), "requireUser()"), `site-visits actions: ${name} checks the session first`);
+  const upd = fnBody(ba, "updateVisitAction");
+  ok(upd.indexOf("after(") > 0 && upd.indexOf("after(") < upd.indexOf("await dispatchVisitInvite(") && /resyncForVisitChange\(prevVisit, nextVisit\)\.catch\(/.test(upd),
+    "site-visits actions: editing a visit re-syncs the old and new days (in after(), before the invites)");
+  ok(/cleanAttendees\(/.test(upd) && /updateVisitBooking\(/.test(upd) && /roster\.includes\(lead\)/.test(upd), "site-visits actions: an edit cleans attendees and refuses a lead not on the team");
+  const badges = fnBody(ba, "visitConflictSummariesAction");
+  ok(/\.slice\(0, 10\)/.test(badges) && /nearby: false/.test(badges), "site-visits actions: conflict badges check at most 10 visits and skip nearby days");
+  ok(/viewerId: me\.id/.test(fnBody(ba, "bookingCheckAction")) && /viewerId: me\.id/.test(badges) && (ba.match(/viewerId:/g) ?? []).length === 2,
+    "site-visits actions: the booking check always views as the signed-in user (others' event titles stay hidden)");
+  const va = readFileSync("src/app/(app)/venue-assessments/visit-actions.ts", "utf8");
+  const sched = fnBody(va, "scheduleVisitAction");
+  ok(/cleanAttendees\(input\.attendees/.test(sched) && /scheduleVisit\(id, input\.startAt, input\.endAt, attendees\)/.test(sched),
+    "site-visits actions: scheduling a request saves its cleaned attendees");
+  ok((va.match(/resyncForVisitChange\(/g) ?? []).length === 2, "site-visits actions: visit-actions still holds exactly two re-sync triggers");
+  const inbox = readFileSync("src/app/(app)/inbox/site-visit-actions.ts", "utf8");
+  ok(/attendees: cleanAttendees\(input\.attendees, input\.assignedTo, roster\)/.test(fnBody(inbox, "createSiteVisitAction")), "site-visits actions: the Inbox create saves cleaned attendees");
 }

@@ -5,7 +5,9 @@ import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { createVisit } from "@/lib/stores/site-visits";
 import { update as updateThread } from "@/lib/stores/comms";
+import { activeUsers } from "@/lib/users";
 import { dispatchVisitInvite } from "@/lib/visit-invite";
+import { cleanAttendees } from "@/lib/visit-plan/people";
 
 /**
  * Schedule a site visit from an inbox thread (D76 / PUNCHLIST #2 phase 1).
@@ -33,6 +35,8 @@ export type CreateSiteVisitInput = {
   endAt: number;
   notes: string;
   assignedTo: string; // team-member name
+  /** Spec 2026-10-09 site-visit scheduling — other Peak people on the visit. */
+  attendees?: string[];
   /** Optional consulting-engagement link (D90). */
   engagementId?: string | null;
 };
@@ -65,6 +69,7 @@ export async function createSiteVisitAction(
   // budget (doc-store.ts). Rare, but this is a Schedule button — report it
   // through the failure shape this action already has instead of letting a
   // raw exception escape as a 500.
+  const roster = (await activeUsers()).map((u) => u.name);
   let rec: Awaited<ReturnType<typeof createVisit>>;
   try {
     rec = await createVisit({
@@ -81,6 +86,7 @@ export async function createSiteVisitAction(
       endAt: input.endAt,
       notes: input.notes,
       assignedTo: input.assignedTo,
+      attendees: cleanAttendees(input.attendees, input.assignedTo, roster),
       createdBy: me.name,
       engagementId: input.engagementId || null,
       stage: "scheduled",
