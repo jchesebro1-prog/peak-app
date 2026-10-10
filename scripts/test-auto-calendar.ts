@@ -38,6 +38,8 @@ import {
   type BackfillItem,
 } from "@/lib/task-plan/due";
 import { overrunsEnd } from "@/lib/consulting-schedule";
+import { localDayKey, type CalendarTaskItem } from "@/lib/calendar-tasks";
+import { calendarPlanView, dragStartMs, layoutIntervals, monthChips, PLAN_FAILED_NOTE, stripTasks } from "@/lib/task-plan/calendar-view";
 import { runDueBackfill, setAssignmentDue, setTaskDue } from "@/lib/task-plan/backfill";
 import { readTierSize } from "@/lib/task-plan/fields";
 import {
@@ -1114,7 +1116,15 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
     }
     await setTaskStatus(T, "done");
     ok(!(await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "done", "auto-cal write: a done task isn't reopened by In progress");
-    ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 60 }, OWN, now)).ok, "auto-cal write: a done task can't be pinned");
+    ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 60 }, OWN, now)).ok, "auto-cal write: a task handed off and done can't be pinned");
+    // The owner (not a stranger) pinning a done task is refused for being done.
+    const D = fixtureId("autocal", "w-done");
+    await createTask({ id: D, title: "finished", assigneeUserId: U, assigneeName: "Auto Cal" }, me);
+    registerFixture("tasks", D);
+    await setTaskStatus(D, "done");
+    const doneTry = await pinBlock({ kind: "task", id: D, fromStartMs: null, startMs: later, minutes: 60 }, OWN, now);
+    ok(!doneTry.ok && doneTry.error === "That item isn't open." && (await getPins(U)).every((p) => p.itemKey !== planItemKey("task", D)),
+      "auto-cal write: a done task can't be pinned (the owner is refused for being done, nothing stored)");
     ok(!(await pinBlock({ kind: "task", id: "T-missing-autocal", fromStartMs: null, startMs: later, minutes: 60 }, OWN, now)).ok, "auto-cal write: a missing item is refused");
     ok(!(await pinBlock({ kind: "bogus", id: T, fromStartMs: null, startMs: later, minutes: 60 }, OWN, now)).ok && !(await pinBlock(null, OWN, now)).ok, "auto-cal write: junk input is refused");
   } finally {
@@ -1125,4 +1135,65 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
     ok(firstAwait(fnBody(src, name), "requireUser()"), `auto-cal write: ${name} checks the session first`);
   }
   ok(!/google\/calendar/.test(readFileSync("src/lib/task-plan/write.ts", "utf8")), "auto-cal write: the plan's writes never touch Google Calendar");
+}
+
+/* ---- Task 9: calendar view ---- */
+export async function autoCalCalendarViewChecks(ok: Ok): Promise<void> {
+  const r = planPerson(baseInput({
+    nowMs: at(MON, 10, 7),
+    pins: [{ itemKey: "task:P", startMs: at(TUE, 9), endMs: at(TUE, 10), kind: "hand" }],
+    items: [
+      item("A"),
+      item("P"),
+      item("R1", { size: "l", sizeMin: 240, dueMs: at(MON, 17), createdAt: 8 }),
+      item("R2", { size: "l", sizeMin: 240, dueMs: at(MON, 17), createdAt: 9 }),
+      item("Z", { dueMs: at("2036-11-30", 17), createdAt: 10 }),
+    ],
+  }));
+  const view = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: r }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA" });
+  ok(view.blocks.every((b) => b.endMs >= at(MON, 0) && b.startMs <= at(TUE, 23)) && view.plannedKeys.includes("task:Z"),
+    "auto-cal view: blocks are cut to the visible window; planned keys cover the whole plan");
+  const p = view.blocks.find((b) => b.itemKey === "task:P")!;
+  ok(p.pinned === "hand" && p.canUnpin && p.draggable, "auto-cal view: a pin that hasn't begun can be unpinned and dragged");
+  const begun = view.blocks.find((b) => b.pinned === "started");
+  ok(!!begun && !begun.canUnpin && !begun.draggable, "auto-cal view: a block that has begun can't be unpinned or dragged");
+  ok(view.blocks.filter((b) => b.itemKey === "task:R2").every((b) => b.atRiskLabel === "At risk — due Mon") && view.atRisk[0]?.itemKey === "task:R2",
+    "auto-cal view: an at-risk block carries the badge text");
+  ok(view.atRisk[0]?.finishDayKey === TUE && view.atRisk[0]?.finishText === "Plan finishes Tue Oct 14",
+    "auto-cal view: the at-risk list gives the plan's finish day (Push due date's target)");
+  const tasks: CalendarTaskItem[] = [
+    { kind: "task", id: "A", title: "A", dueAt: at(FRI, 17), done: false, assigneeName: "Dana", assigneeInitials: "DA", href: "" },
+    { kind: "task", id: "BLK", title: "blocked", dueAt: at(MON, 12), done: false, assigneeName: "Dana", assigneeInitials: "DA", href: "" },
+  ];
+  const range = { today: localDayKey(at(MON, 10)), rangeStart: localDayKey(at(MON, 0)), rangeEnd: localDayKey(at(TUE, 23)) };
+  const chips = monthChips(tasks, view, range);
+  const aDays = [...new Set(view.blocks.filter((b) => b.itemKey === "task:A").map((b) => localDayKey(b.startMs)))].sort().join();
+  ok(chips.filter((c) => c.item.id === "A").map((c) => c.dayKey).sort().join() === aDays, "auto-cal view: month chips sit on each day the task is planned");
+  ok(stripTasks(tasks, view).map((t) => t.id).join() === "BLK" && chips.some((c) => c.item.id === "BLK"), "auto-cal view: an unplanned item (blocked) keeps its old chip");
+  const lay = layoutIntervals([{ key: "a", startMs: 0, endMs: 10 }, { key: "b", startMs: 5, endMs: 15 }, { key: "c", startMs: 20, endMs: 30 }]);
+  ok(lay.map((x) => `${x.it.key}${x.col}/${x.cols}`).join() === "a0/2,b1/2,c0/1", "auto-cal view: overlapping blocks (Everyone) sit side by side");
+
+  const page = readFileSync("src/app/(app)/calendar/page.tsx", "utf8");
+  const client = readFileSync("src/app/(app)/calendar/calendar-client.tsx", "utf8");
+  ok(/loadTaskPlans\(/.test(page) && /after\(\(\) => savePlanPins\(/.test(page), "auto-cal view: /calendar computes plans on view and saves pins after the response");
+  ok(client.includes("<TaskBlockLayer") && client.includes("monthChips(") && client.includes("plan.notes") && client.includes("<TaskBlockPopover"),
+    "auto-cal view: Week/Day draw task blocks, Month chips come from the plan, the Google note and block popover show");
+  const noDb = (f: string) => !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/task-plan\/load"|lib\/task-plan\/write")/m.test(readFileSync(f, "utf8"));
+  ok(["src/app/(app)/calendar/task-block-layer.tsx", "src/app/(app)/calendar/task-block-popover.tsx", "src/components/task-plan/tier-size-chips.tsx", "src/lib/task-plan/calendar-view.ts"].every(noDb),
+    "auto-cal view: client files never import a module that reaches the database");
+  // Viewer rules: pin controls are only for the plan's owner or an admin (the server enforces it too).
+  const asOther = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: r }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u2", admin: false } });
+  const asOwner = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: r }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u1", admin: false } });
+  const asAdmin = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: r }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u2", admin: true } });
+  ok(asOther.blocks.every((b) => !b.canUnpin && !b.draggable) && asOther.blocks.length === view.blocks.length, "auto-cal view: someone else's blocks can't be unpinned or dragged by a non-admin");
+  ok(asOwner.blocks.find((b) => b.itemKey === "task:P")?.canUnpin === true && asAdmin.blocks.find((b) => b.itemKey === "task:P")?.draggable === true, "auto-cal view: the owner and an admin keep the controls");
+  const noteView = calendarPlanView([{ userId: "u1", name: "Dana", note: GOOGLE_NOTE_ME, result: r }, { userId: "u2", name: "Sam", note: GOOGLE_NOTE_ME, result: r }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "X" });
+  ok(noteView.notes.length === 1 && noteView.notes[0] === "Planned without your Google calendar — may overlap meetings", "auto-cal view: the Google note shows once, verbatim");
+  ok(dragStartMs({ startMs: at(MON, 9), dyPx: 24, dxPx: 0, hourPx: 48, colPx: 100, dayCount: 7 }) === at(MON, 9, 30)
+    && dragStartMs({ startMs: at(MON, 9), dyPx: 0, dxPx: 210, hourPx: 48, colPx: 100, dayCount: 7 }) === at(MON, 9) + 2 * 86_400_000
+    && dragStartMs({ startMs: at(MON, 9), dyPx: 0, dxPx: 210, hourPx: 48, colPx: 100, dayCount: 1 }) === at(MON, 9),
+    "auto-cal view: a drag snaps to 15 minutes and whole days (Week only)");
+  ok(/PLAN_FAILED_NOTE/.test(page) && PLAN_FAILED_NOTE.length > 0 && /Couldn.t load the task plan/.test(PLAN_FAILED_NOTE), "auto-cal view: a failed plan load shows a clear message and the page still renders");
+  ok(/viewer:/.test(page) && /can\("manage_users"/.test(page), "auto-cal view: the page tells the view who is looking (owner or admin only)");
+  ok(/disabled=\{pending\}/.test(readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8")), "auto-cal view: the popover disables its actions while one is pending");
 }

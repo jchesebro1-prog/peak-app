@@ -4,6 +4,10 @@ import { loadAgendaRange } from "@/lib/agenda";
 import { loadCalendarTasks } from "@/lib/calendar-tasks-load";
 import { getStayOvers } from "@/lib/stores/schedule-prefs";
 import { googleConfigured } from "@/lib/gmail/config";
+import { activeUsers } from "@/lib/users";
+import { can, deriveInitials } from "@/lib/team";
+import { loadTaskPlans, savePlanPins, type PersonPlan } from "@/lib/task-plan/load";
+import { calendarPlanView, PLAN_FAILED_NOTE } from "@/lib/task-plan/calendar-view";
 import CalendarClient from "./calendar-client";
 import HomeTabs from "../home-tabs";
 
@@ -76,7 +80,7 @@ export default async function CalendarPage({
     maxMs = dateAnchor.getTime() + 2 * DAY;
   }
 
-  const [{ gmailOn, calendarOn, items }, calendarConnections, calendarTasks, stayOvers] = await Promise.all([
+  const [{ gmailOn, calendarOn, items }, calendarConnections, calendarTasks, stayOvers, plans, roster] = await Promise.all([
     loadAgendaRange(user.id, user.name, minMs, maxMs),
     // D148 — the filter rail's initial data; loadAgendaRange already fetched
     // the same connections internally to build `items`, but it doesn't
@@ -89,7 +93,30 @@ export default async function CalendarPage({
     })(),
     loadCalendarTasks({ id: user.id, name: user.name }, tasksEveryone),
     getStayOvers(user.id),
+    // Spec 2026-10-09 auto task calendar — computed on every view (cache-only
+    // drive layer); mine, or everyone's with ?tasks=all. The loader fails
+    // closed (it rejects rather than plan on a partial read), so a failure is
+    // caught here: /calendar still renders, with the old due-day chips and a note.
+    loadTaskPlans({ userIds: tasksEveryone ? "everyone" : [user.id], meId: user.id }).catch((err) => {
+      console.error("[task-plan] calendar plan failed:", err);
+      return null;
+    }),
+    activeUsers().catch((err) => {
+      console.error("[task-plan] roster failed:", err);
+      return [];
+    }),
   ]);
+
+  // New "started" pins are saved after the response, never on the render path.
+  const planPlans: PersonPlan[] = plans ?? [];
+  if (plans) after(() => savePlanPins(plans).catch((err) => console.error("[task-plan] pin save failed:", err)));
+  const planView = calendarPlanView(planPlans, {
+    minMs,
+    maxMs,
+    initials: (id, name) => roster.find((u) => u.id === id)?.initials || deriveInitials(name),
+    viewer: { id: user.id, admin: can("manage_users", user.roles) },
+  });
+  const plan = plans ? planView : { ...planView, notes: [...planView.notes, PLAN_FAILED_NOTE] };
 
   return (
     <HomeTabs active="calendar" maxWidth={1120} style={{ padding: "24px 30px 64px" }}>
@@ -111,6 +138,8 @@ export default async function CalendarPage({
         tasks={calendarTasks}
         tasksEveryone={tasksEveryone}
         stayOvers={stayOvers}
+        plan={plan}
+        roster={roster.map((u) => ({ id: u.id, name: u.name }))}
       />
     </HomeTabs>
   );

@@ -11,8 +11,11 @@ import { fmtDur, FLAG_TEXT } from "@/lib/drive-plan/plan";
 import { isStayOverDay } from "@/lib/drive-plan/day";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
 import ConflictBadge from "@/components/visit-booking/conflict-badge";
-import { groupPlacedByDay, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
+import { groupPlacedByDay, localDayKey, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import TaskChip from "./task-chip";
+import TaskBlockLayer from "./task-block-layer";
+import TaskBlockPopover from "./task-block-popover";
+import { monthChips, stripTasks, type CalendarPlanBlock, type CalendarPlanView } from "@/lib/task-plan/calendar-view";
 
 /**
  * Full-page calendar (S13 / D81, extended to day/week in the S13
@@ -150,6 +153,8 @@ export default function CalendarClient({
   tasks,
   tasksEveryone,
   stayOvers,
+  plan,
+  roster,
 }: {
   view: "month" | "week" | "day";
   year: number;
@@ -171,7 +176,12 @@ export default function CalendarClient({
   tasksEveryone: boolean;
   /** Spec 2026-10-09 — this rep's "Staying near last stop" days (YYYY-MM-DD → true). */
   stayOvers: Record<string, boolean>;
+  /** Spec 2026-10-09 auto task calendar — the plan for the visible window. */
+  plan: CalendarPlanView;
+  /** Active team (hand-off targets). */
+  roster: { id: string; name: string }[];
 }) {
+  void roster; // used by the At risk panel (Task 10)
   const router = useRouter();
   const [stayPending, startStay] = useTransition();
   // Optimistic stay-over state (until the refreshed prop catches up) + the
@@ -281,9 +291,25 @@ export default function CalendarClient({
         ? keyOfDate(weekDays[6])
         : keyOfDate(dayDate);
   const tasksByDay = useMemo(
-    () => groupPlacedByDay(placeTasks(tasks, { today: todayKey, rangeStart, rangeEnd })),
-    [tasks, todayKey, rangeStart, rangeEnd]
+    () =>
+      groupPlacedByDay(
+        view === "month"
+          ? monthChips(tasks, plan, { today: todayKey, rangeStart, rangeEnd })
+          : placeTasks(stripTasks(tasks, plan), { today: todayKey, rangeStart, rangeEnd })
+      ),
+    [view, tasks, plan, todayKey, rangeStart, rangeEnd]
   );
+  const blocksByDay = useMemo(() => {
+    const m = new Map<string, CalendarPlanBlock[]>();
+    for (const b of plan.blocks) {
+      const k = localDayKey(b.startMs);
+      const list = m.get(k);
+      if (list) list.push(b);
+      else m.set(k, [b]);
+    }
+    return m;
+  }, [plan]);
+  const [openBlock, setOpenBlock] = useState<CalendarPlanBlock | null>(null);
   const tasksQs = tasksEveryone ? "&tasks=all" : "";
 
   function dayViewHref(k: string): string {
@@ -594,6 +620,14 @@ export default function CalendarClient({
                       onClick={() => openCreateAt(d.getFullYear(), d.getMonth(), d.getDate(), HOUR_START + hi)}
                     />
                   ))}
+                  <TaskBlockLayer
+                    blocks={blocksByDay.get(k) ?? []}
+                    hourStart={HOUR_START}
+                    hourPx={HOUR_PX}
+                    dayCount={days.length}
+                    showOwner={tasksEveryone}
+                    onOpen={setOpenBlock}
+                  />
                   <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                     {positioned.map(({ it, col, cols }) => {
                       const startMin = new Date(it.startMs).getHours() * 60 + new Date(it.startMs).getMinutes();
@@ -730,6 +764,12 @@ export default function CalendarClient({
       </div>
 
       {modalTarget && <EventModal target={modalTarget} onClose={() => setModalTarget(null)} />}
+      {plan.notes.map((n) => (
+        <div key={n} role="status" className="pk-card" style={{ padding: "8px 12px", marginBottom: 12, fontSize: 12.5, color: "#8a5a1a", background: "#fdf3e7", border: "1px solid #f0d3a8" }}>
+          {n}
+        </div>
+      ))}
+      {openBlock && <TaskBlockPopover block={openBlock} onClose={() => setOpenBlock(null)} />}
       <CalendarFilterRail
         open={railOpen}
         onClose={() => setRailOpen(false)}
