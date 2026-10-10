@@ -10,7 +10,7 @@ import { dayKeysBetween } from "@/lib/drive-plan/day";
 import { planDriveDays, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import { FLAG_TEXT, type DriveLeg } from "@/lib/drive-plan/plan";
 import type { CalendarEvent } from "@/lib/google/calendar";
-import { allVisits } from "@/lib/stores/site-visits";
+import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { driveEventTitle } from "./diff";
 
 export type AddressFlag = { text: string; fix: FixTarget | null };
@@ -47,22 +47,29 @@ export async function driveAgendaLayer(args: {
   googleEvents: CalendarEvent[] | null;
   deps?: Partial<DriveLoadDeps>;
 }): Promise<{ items: AgendaItem[]; addressFlags: Map<string, AddressFlag> }> {
+  // One site_visits read for the planner AND the googleEventId lookup below.
+  const readVisits = args.deps?.visits ?? allVisits;
+  let visitsOnce: Promise<SiteVisit[]> | null = null;
+  const visits = () => (visitsOnce ??= readVisits());
   const plans = await planDriveDays({
     userId: args.userId,
     dayKeys: dayKeysBetween(args.minMs, args.maxMs),
     events: args.googleEvents,
     mode: "cache",
-    deps: args.deps,
+    deps: { ...args.deps, visits },
   });
-  const items = plans.flatMap((p) => p.legs.map(driveItemFromLeg));
+  // Plans span whole Chicago days; the agenda shows only its own window, so a
+  // block that already ended (or starts after it) and flags anchored outside it stay out.
+  const inWindow = (startMs: number, endMs: number) => endMs >= args.minMs && startMs <= args.maxMs;
+  const items = plans.flatMap((p) => p.legs.map(driveItemFromLeg)).filter((i) => inWindow(i.startMs, i.endMs));
   const addressFlags = new Map<string, AddressFlag>();
   // A visit pushed straight to Google (googleEventId) shows as that event.
   const needVisits = (args.googleEvents ?? []).length > 0 && plans.some((p) => p.stops.some((s) => s.kind === "visit" && s.address.status !== "verified"));
   const eventIdOf = new Map<string, string>();
-  if (needVisits) for (const v of await (args.deps?.visits ?? allVisits)()) if (v.googleEventId) eventIdOf.set(v.id, v.googleEventId);
+  if (needVisits) for (const v of await visits()) if (v.googleEventId) eventIdOf.set(v.id, v.googleEventId);
   for (const p of plans) {
     for (const s of p.stops) {
-      if (s.address.status === "verified") continue;
+      if (s.address.status === "verified" || !inWindow(s.startMs, s.endMs)) continue;
       const flag: AddressFlag = { text: FLAG_TEXT.unverified, fix: s.address.fix };
       if (s.kind === "visit") {
         const id = s.key.slice("sv:".length);

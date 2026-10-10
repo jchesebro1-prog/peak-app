@@ -20,9 +20,11 @@ export default function AddressFlagBadge({ flag, compact = false, style }: { fla
     <span
       onClick={(e) => e.stopPropagation()}
       title={flag.text}
+      role="group"
+      aria-label={flag.text}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: compact ? 10 : 11.5, fontWeight: 600, color: "#8a3a2a", ...style }}
     >
-      {/* Compact: short wording for an address flag; any other flag keeps its own copy. */}
+      {/* Compact: short wording for an address flag (verbatim text stays in title + aria-label); any other flag keeps its own copy. */}
       <span>⚠ {compact && flag.fix ? "Not verified" : flag.text}</span>
       {flag.fix && (
         <button

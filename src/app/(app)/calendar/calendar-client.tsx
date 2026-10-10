@@ -7,7 +7,8 @@ import type { AgendaItem } from "@/lib/agenda";
 import EventModal, { type EventModalTarget } from "./event-modal";
 import CalendarFilterRail from "./calendar-filter-rail";
 import { setStayOverAction, type CalendarConnectionView } from "../calendar-actions";
-import { fmtDur } from "@/lib/drive-plan/plan";
+import { fmtDur, FLAG_TEXT } from "@/lib/drive-plan/plan";
+import { isStayOverDay } from "@/lib/drive-plan/day";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
 import { groupPlacedByDay, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import TaskChip from "./task-chip";
@@ -79,9 +80,20 @@ function isExternal(it: AgendaItem): boolean {
 
 const isDrive = (it: AgendaItem) => it.source === "drive";
 const isDriveFlag = (it: AgendaItem) => it.source === "drive" && !!it.drive?.flag;
-/** Spec 2026-10-09 — the day header's total drive time (buffer included). */
-function driveTotal(list: AgendaItem[]): number {
-  return list.reduce((s, it) => s + (isDrive(it) && !it.drive?.flag ? it.drive?.minutes ?? 0 : 0), 0);
+/** Spec 2026-10-09 — total drive minutes (buffer included) per Chicago day.
+ *  Keyed by the leg's own `drive.dayKey`, not the browser-local date, so a
+ *  day's total is exactly one Chicago day however the browser is zoned. */
+function driveTotalsByChicagoDay(items: AgendaItem[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const it of items) {
+    if (!isDrive(it) || !it.drive || it.drive.flag) continue;
+    out.set(it.drive.dayKey, (out.get(it.drive.dayKey) ?? 0) + (it.drive.minutes ?? 0));
+  }
+  return out;
+}
+/** A leg flag's short form for the month grid (verbatim stays in title + aria-label). */
+function compactLegFlag(text: string): string {
+  return text === FLAG_TEXT.route_unavailable ? "Drive unavailable" : text;
 }
 function blockColors(it: AgendaItem, tint: (hex: string, a: number) => string): { bg: string; bd: string; ink: string } {
   if (isExternal(it)) { const c = it.external!.color; return { bg: tint(c, 0.14), bd: tint(c, 0.4), ink: c }; }
@@ -161,19 +173,44 @@ export default function CalendarClient({
 }) {
   const router = useRouter();
   const [stayPending, startStay] = useTransition();
+  // Optimistic stay-over state (until the refreshed prop catches up) + the
+  // last refusal per day, shown inline under the toggle.
+  // Tied to the `stayOvers` object it was set against: a refresh hands in a new one and retires it.
+  const [stayOptRaw, setStayOptRaw] = useState<{ src: Record<string, boolean>; map: Record<string, boolean> }>({ src: stayOvers, map: {} });
+  const stayOpt = stayOptRaw.src === stayOvers ? stayOptRaw.map : {};
+  const setStayOpt = (f: (o: Record<string, boolean>) => Record<string, boolean>) =>
+    setStayOptRaw((cur) => ({ src: stayOvers, map: f(cur.src === stayOvers ? cur.map : {}) }));
+  const [stayErr, setStayErr] = useState<Record<string, string>>({});
+  const isStay = (k: string) => stayOpt[k] ?? !!stayOvers[k];
   function toggleStay(k: string) {
+    const want = !isStay(k);
+    setStayErr((e) => ({ ...e, [k]: "" }));
+    setStayOpt((o) => ({ ...o, [k]: want }));
     startStay(async () => {
-      await setStayOverAction(k, !stayOvers[k]);
+      let res: Awaited<ReturnType<typeof setStayOverAction>>;
+      try {
+        res = await setStayOverAction(k, want);
+      } catch {
+        res = { ok: false, error: "Couldn't save — try again" };
+      }
+      if (!res.ok) {
+        setStayOpt((o) => Object.fromEntries(Object.entries(o).filter(([d]) => d !== k)));
+        setStayErr((e) => ({ ...e, [k]: res.error }));
+        return;
+      }
       router.refresh();
     });
   }
-  function renderDriveFlag(it: AgendaItem) {
+  // compact = month chips (short form); otherwise the flag prints verbatim
+  // (all-day strip). Either way the verbatim text is in title + aria-label.
+  function renderDriveFlag(it: AgendaItem, compact: boolean) {
+    const text = it.drive?.flag || "";
     return (
       <div key={it.key} onClick={(e) => e.stopPropagation()} style={{ fontSize: 10.5, lineHeight: 1.35, marginBottom: 3, padding: "2px 6px", borderRadius: 5, background: "#fbf0ee", border: "1px dashed #e8c9c0" }}>
         {it.drive?.fix ? (
-          <AddressFlagBadge flag={{ text: it.drive.flag || "", fix: it.drive.fix }} compact />
+          <AddressFlagBadge flag={{ text, fix: it.drive.fix }} compact={compact} />
         ) : (
-          <span style={{ fontWeight: 600, color: "#8a3a2a" }} title={`Drive to ${it.drive?.toLabel}`}>⚠ {it.drive?.flag}</span>
+          <span style={{ fontWeight: 600, color: "#8a3a2a" }} title={text} aria-label={text}>⚠ {compact ? compactLegFlag(text) : text}</span>
         )}
       </div>
     );
@@ -197,6 +234,7 @@ export default function CalendarClient({
       list.sort((a, b) => (a.allDay !== b.allDay ? (a.allDay ? -1 : 1) : a.startMs - b.startMs));
     return map;
   }, [items]);
+  const driveTotals = useMemo(() => driveTotalsByChicagoDay(items), [items]);
 
   const weeks = useMemo(() => {
     const first = new Date(year, month, 1);
@@ -319,7 +357,7 @@ export default function CalendarClient({
   // The Fix button sits beside the chip, never inside its link (a button
   // can't nest in an anchor).
   function renderMonthChip(it: AgendaItem) {
-    if (isDriveFlag(it)) return renderDriveFlag(it);
+    if (isDriveFlag(it)) return renderDriveFlag(it, true);
     if (!it.addressFlag) return renderMonthChipBody(it);
     return (
       <div key={it.key}>
@@ -453,18 +491,25 @@ export default function CalendarClient({
                 >
                   {d.getDate()}
                 </div>
-                {driveTotal(byDay.get(k) || []) > 0 && (
-                  <div style={{ fontSize: 10, color: "#5b616e", fontWeight: 600, marginTop: 2 }}>Drive {fmtDur(driveTotal(byDay.get(k) || []))}</div>
+                {/* The column key k is a date label; drive totals and the stay-over
+                    toggle treat it as the Chicago day it names (the leg's drive.dayKey). */}
+                {(driveTotals.get(k) ?? 0) > 0 && (
+                  <div style={{ fontSize: 10, color: "#5b616e", fontWeight: 600, marginTop: 2 }}>Drive {fmtDur(driveTotals.get(k) ?? 0)}</div>
                 )}
-                <button
-                  type="button"
-                  disabled={stayPending}
-                  onClick={() => toggleStay(k)}
-                  title="No drive back to base today; tomorrow starts from your last stop"
-                  style={{ marginTop: 3, fontSize: 9.5, fontWeight: 600, padding: "1px 6px", borderRadius: 10, border: "1px solid #e4e7ec", background: stayOvers[k] ? "var(--accent)" : "#fff", color: stayOvers[k] ? "#fff" : "#9aa0ab", cursor: "pointer" }}
-                >
-                  {stayOvers[k] ? "✓ Staying near last stop" : "Staying near last stop"}
-                </button>
+                {mounted && isStayOverDay(k, Date.now()) && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={stayPending}
+                      onClick={() => toggleStay(k)}
+                      title="No drive back to base today; tomorrow starts from your last stop"
+                      style={{ marginTop: 3, fontSize: 9.5, fontWeight: 600, padding: "1px 6px", borderRadius: 10, border: "1px solid #e4e7ec", background: isStay(k) ? "var(--accent)" : "#fff", color: isStay(k) ? "#fff" : "#9aa0ab", cursor: "pointer" }}
+                    >
+                      {isStay(k) ? "✓ Staying near last stop" : "Staying near last stop"}
+                    </button>
+                    {stayErr[k] && <div role="alert" style={{ marginTop: 2, fontSize: 10, color: "#a03b2e" }}>{stayErr[k]}</div>}
+                  </>
+                )}
               </div>
             );
           })}
@@ -510,7 +555,7 @@ export default function CalendarClient({
                     <div style={chipStyle(it)} title={it.title}>{it.title}</div>
                   </div>
                 ))}
-                {(byDay.get(k) || []).filter(isDriveFlag).map(renderDriveFlag)}
+                {(byDay.get(k) || []).filter(isDriveFlag).map((it) => renderDriveFlag(it, false))}
               </div>
             );
           })}
@@ -736,8 +781,8 @@ export default function CalendarClient({
                         {day.getDate()}
                       </div>
                       {renderTasks(k, 3)}
-                      {driveTotal(list) > 0 && (
-                        <div style={{ fontSize: 10, color: "#5b616e", fontWeight: 600, marginBottom: 2 }}>Drive {fmtDur(driveTotal(list))}</div>
+                      {(driveTotals.get(k) ?? 0) > 0 && (
+                        <div style={{ fontSize: 10, color: "#5b616e", fontWeight: 600, marginBottom: 2 }}>Drive {fmtDur(driveTotals.get(k) ?? 0)}</div>
                       )}
                       {(() => {
                         const shownList = list.filter((it) => !isDrive(it) || isDriveFlag(it));

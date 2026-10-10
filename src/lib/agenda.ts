@@ -179,7 +179,8 @@ export async function loadAgendaRange(
     console.error("[agenda] external calendar connections load failed:", err);
   }
 
-  for (const v of await allVisits()) {
+  const allVisitsList = await allVisits();
+  for (const v of allVisitsList) {
     if (v.assignedTo !== me) continue;
     // #34: unscheduled requests (null startAt) have no agenda slot yet.
     if (v.startAt == null) continue;
@@ -202,7 +203,14 @@ export async function loadAgendaRange(
   // Spec 2026-10-09 — drive blocks + address flags, from the same stops.
   try {
     const { driveAgendaLayer } = await import("@/lib/drive-sync/agenda");
-    const layer = await driveAgendaLayer({ userId, minMs, maxMs, googleEvents: calendarOn ? googleEvents : null });
+    const layer = await driveAgendaLayer({
+      userId,
+      minMs,
+      maxMs,
+      googleEvents: calendarOn ? googleEvents : null,
+      // The visits read above — the drive layer must not re-read site_visits.
+      deps: { visits: async () => allVisitsList },
+    });
     items.push(...layer.items);
     for (const it of items) {
       const f = layer.addressFlags.get(it.key);

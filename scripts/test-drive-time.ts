@@ -1517,11 +1517,42 @@ export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
     "drive-time agenda: verified legs render as timed drive blocks (no calendar connected → visits only)");
   const flagged = driveItemFromLeg(planDay(input({ stops: [stop("sv:Z", at(9), at(10), badAddr("z"))] }))[0]);
   ok(flagged.startMs === at(9) && flagged.endMs === at(9) && flagged.drive?.minutes === null, "drive-time agenda: a flag sits at its anchor with no minutes");
+  // Window trimming: Home must not list finished drive blocks or flags for earlier visits.
+  const badDeps = (over: Partial<DriveLoadDeps> = {}) => loadDeps({ visitStates: async (vs) => new Map(vs.map((v) => [v.id, badAddr(v.id)])), ...over });
+  const late = await driveAgendaLayer({ userId: "u1", minMs: at(12), maxMs: at(23), googleEvents: null, deps: badDeps() });
+  ok(late.items.every((i) => i.endMs >= at(12)) && !late.items.some((i) => i.drive?.flag) && !late.addressFlags.has("v-SV-1"),
+    "drive-time agenda: a window that starts after the visit drops its flags and its address flag");
+  const lateOk = await driveAgendaLayer({ userId: "u1", minMs: at(10, 15), maxMs: at(23), googleEvents: null, deps: loadDeps() });
+  ok(lateOk.items.length === 1 && lateOk.items[0].title === "Drive back to Madison Office",
+    "drive-time agenda: already-finished drive blocks (ended before the window) are left out; the later one stays");
+  const early = await driveAgendaLayer({ userId: "u1", minMs: at(0), maxMs: at(9), googleEvents: null, deps: loadDeps() });
+  ok(early.items.length === 1 && early.items[0].title === "Drive to Venue SV-1", "drive-time agenda: a leg that starts after the window is left out too");
+  // googleEventId path: a visit pushed straight to Google shows as that event; one visits read in all.
+  let visitReads = 0;
+  const pushed = await driveAgendaLayer({
+    userId: "u1",
+    minMs: at(0),
+    maxMs: at(23),
+    googleEvents: [gEv("gx1", { iCalUID: "gx1@google.com", startMs: at(9), endMs: at(10) }), gEv("meet", {})],
+    deps: badDeps({ visits: async () => { visitReads++; return [visit("SV-1", { googleEventId: "gx1" })]; } }),
+  });
+  ok(pushed.addressFlags.get("g-gx1")?.fix?.kind === "place" && pushed.addressFlags.get("v-SV-1") !== undefined && !pushed.addressFlags.has("g-meet"),
+    "drive-time agenda: a visit mirrored by googleEventId hands its address flag to that Google event");
+  ok(visitReads === 1, "drive-time agenda: the drive layer reads site_visits once (the googleEventId lookup reuses the planner's read)");
   const agendaSrc = readFileSync("src/lib/agenda.ts", "utf8");
-  ok(agendaSrc.includes("peakDriveKey") && agendaSrc.includes("driveAgendaLayer"), "drive-time agenda: Google copies of our drive events are hidden; computed legs are shown instead");
+  ok((agendaSrc.match(/await allVisits\(\)/g) ?? []).length === 1 && /deps:\s*\{\s*visits:\s*async \(\) => allV/.test(agendaSrc),
+    "drive-time agenda: loadAgendaRange reads site_visits once and hands that list to the drive layer");
   const client = readFileSync("src/app/(app)/calendar/calendar-client.tsx", "utf8");
   ok(client.includes("Staying near last stop") && client.includes("fmtDur(") && client.includes("AddressFlagBadge"),
     "drive-time calendar: stay-over toggle, day drive totals and Fix flags are on /calendar");
+  ok(/isStayOverDay\(k, Date\.now\(\)\)/.test(client) && /res\.ok/.test(client) && /stayErr/.test(client),
+    "drive-time calendar: the stay-over toggle shows only on days the server accepts and surfaces a refusal");
+  ok(/drive\??\.dayKey/.test(client) && !/driveTotal\(byDay/.test(client) && !/driveTotal\(list\)/.test(client),
+    "drive-time calendar: day drive totals bucket by the leg's Chicago day, not the browser-local date");
+  ok(/renderDriveFlag\(it, true\)/.test(client) && /renderDriveFlag\(it, false\)/.test(client),
+    "drive-time calendar: the all-day strip prints leg flags verbatim; month chips keep the compact form");
+  const flagBadge = readFileSync("src/components/address-fix/address-flag.tsx", "utf8");
+  ok(/aria-label=\{flag\.text\}/.test(flagBadge) && /title=\{flag\.text\}/.test(flagBadge), "drive-time flags: the compact badge carries the verbatim text in title and aria-label");
   ok(readFileSync("src/app/(app)/home-calendar.tsx", "utf8").includes('source === "drive"'), "drive-time agenda: the Home card renders drive rows");
 }
 
