@@ -936,6 +936,23 @@ See `.env.example`.
     part tag defaults, set levels on a real job, open the DXF in AutoCAD/Vectorworks,
     decide 24×36 scaling and a read-only phone view. Later: AV/video risers, computed
     conduit fill. Punch item #321.
+48. ✅ **Site-visit scheduling** (#326, D775–D781) — visits are fixed
+    appointments with a lead + `attendees` (never the lead; each gets their own
+    drive chain via `visitPeople`); per-recipient invites in `SiteVisit.invites`
+    (`src/lib/visit-invite-plan.ts` plans add/update/cancel; `visit-invite.ts`
+    delivers — a Google Calendar event when the mailbox has the grant, else .ics
+    with a real `method=CANCEL`, UID `sv-<id>@peak-app`; a legacy single invite
+    reads as the lead's entry); a pure engine `src/lib/visit-plan/` (work hours,
+    busy blocks, `checkVisit`, `suggestDays`, `agendaConflicts`) behind
+    `visit-plan/load.ts`, where other people's Google events read "a calendar
+    event"; the booking panel (`src/components/visit-booking/`) on the
+    visit-requests scheduler, the Inbox dialog and the company record's Edit
+    (scheduled visits only); conflict badges on the company record (GET
+    `/api/visits/conflicts`, 20 s budget), /calendar and Home; settings in
+    Settings → Field + Account. Nothing moves or blocks a visit; nothing is stored
+    for conflicts; no migration. Remaining is Jeff-gated: the settings values, a
+    real booking with attendees, and a real-mailbox CANCEL check in Gmail/Outlook/
+    Apple. Punch item #326.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

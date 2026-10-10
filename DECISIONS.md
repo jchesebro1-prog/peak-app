@@ -10641,3 +10641,72 @@ dismissals (`RemovedBundle.conduit`); `restoreItems` puts them back with the dev
 cleaned server-side (known ids, runs re-validated, qty prune applied) like the plan items. A run is skipped when its
 id is already present or its device pair already had a run before the restore; two runs the bundle carries for one
 pair both come back.
+
+## D775. Site-visit attendees and per-recipient invites (#326, 2026-10-10)
+
+Spec `docs/superpowers/specs/2026-10-09-site-visit-scheduling-design.md`. A visit keeps one lead (`assignedTo`) and
+gains `attendees: string[]` (roster names, at most 8, never the lead — the lead is filtered out on read and on every
+write through `cleanAttendees`), normalized on read — no migration. `visitPeople()` stays the one place that decides
+who a visit is a stop for, so every attendee gets their own drive chain and re-sync. Invites are recorded per
+recipient in `SiteVisit.invites` (channel, Google event id, the times that person was told, .ics SEQUENCE); a
+pre-spec-2 `invite`/`googleEventId` reads as one entry for the lead and survives the first reschedule (it is updated,
+not re-sent), and the lead's entry keeps mirroring into those fields for older readers. Each person gets a direct
+Google Calendar event when their mailbox has the Calendar grant (D77 kept), else the emailed .ics — the spec said .ics
+for everyone; D77 means people with the grant see it instantly, and the UID stays `sv-<id>@peak-app`. Add → invite,
+remove → calendar delete / `METHOD:CANCEL` (same UID), move → PATCH / .ics with SEQUENCE + 1. A CANCEL names the
+ORGANIZER (sending mailbox) and ATTENDEE (recipient) and goes out as `text/calendar; method=CANCEL` so mail clients
+act on it; PUBLISH invites are unchanged. Only a NEW recipient is subject to the Account invite toggle; updates and
+cancels always go to someone already holding a copy. A failed send is not recorded (retried on the next save); a failed
+update/cancel keeps the old entry (retried).
+
+## D776. What counts as busy, and the calendar-read notes (#326, 2026-10-10)
+
+Double-booked counts the person's scheduled visits and their accepted or own timed Google events (an event with no
+response status is the person's own). Tentative, unanswered, declined and all-day events, the app's drive events and
+any calendar copy of a visit are not busy (the spec said "accepted"; tentative is not accepted). An unreadable
+calendar says "Couldn't check Dana's calendar" and never shows "No conflicts"; a person with no connected calendar is
+checked against visits only and says "Dana has no connected calendar — checked visits only" (the spec named only the
+failure case) — the lead included, on the Nearby days strip too.
+
+## D777. Other people's Google events show as "a calendar event" (#326, 2026-10-10)
+
+The booking check reads every person's calendar, but only the signed-in viewer's own events keep their titles in
+conflict text and Nearby days; anyone else's read "a calendar event" (`OTHERS_EVENT_LABEL`, applied at one choke point
+in `loadBookingCheck` from the session `viewerId`). Visits — Peak's own records — always keep their labels. The check
+reveals only that a teammate is busy and when, never what the event is.
+
+## D778. Conflict rules in detail (#326, 2026-10-10)
+
+The drive-to block counts for Double-booked; the drive home counts for work hours only when the visit is the day's
+last stop. Each leg is gated on its own flags (an unverified leg skips its drive checks only). Back-to-back is not an
+overlap, and a tight gap against the preceding stop is not also reported as double-booked. Too much driving = the
+day's leg minutes with this visit, buffer included; flagged legs count 0. Work hours are Chicago wall-clock (DST-safe);
+a non-work day reads "Outside work hours — Saturday isn't a work day".
+
+## D779. Nearby days in detail (#326, 2026-10-10)
+
+Days run today → today + look-ahead − 1 (Chicago). Only the lead's verified stops count; minutes are stop → candidate,
+routed only (geo_cache / OSRM). A straight-line distance at an 80 mph bound skips stops too far to route and is never
+shown. Each other attendee's free/conflict is the chosen time of day moved to that date; with no time picked yet, free
+= a work day with nothing booked inside their work hours; an attendee with no connected calendar is checked against
+visits only. "Nearby days unavailable" when plausible stops had no drive time and nothing could be suggested.
+
+## D780. Where the checks run, what they cost, and who can edit (#326, 2026-10-10)
+
+Booking check: addresses in cache mode (the booking UI's own address check geocodes), each person's calendar read once,
+live OSRM under one 10 s budget, debounced 800 ms. /calendar and Home badge only the viewer's own visits — as lead or
+attendee — from the drive layer's existing plans (no other calendar read on a page view). The company record
+lazy-loads badges for up to 10 upcoming scheduled visits, for every person on each, from a GET route
+(`/api/visits/conflicts`) rather than a server action — Next runs a page's server actions one at a time, so a slow
+badge load would queue the Edit dialog's check, Save and Delete — under one shared 20 s deadline (visits left unchecked
+when it runs out simply show no badge). Editing lives on the company record (visits have no detail page) and only on
+**scheduled** visits (the server refuses anything else); a visit with no customer yet gains Edit once its lead
+converts. Leaving attendees untouched on save leaves them alone.
+
+## D781. Scheduling settings (#326, 2026-10-10)
+
+`schedule_defaults` gains `workHours` (Mon–Fri 8:00–5:00), `sameAreaMin` (45, 5–180), `dailyDriveLimitMin` (300,
+30–960), `nearbyLookaheadDays` (21, 1–60); `schedule_prefs:<userId>` gains `workHours | null`. Work hours are minutes
+from Chicago midnight; an end of 1440 ("midnight", an end-of-day checkbox) is allowed. Settings → Field (admin) and
+Account. Saves refuse bad input (strict: whole numbers in range, end after start) instead of storing a fallback; a bad
+stored value reads as its default.

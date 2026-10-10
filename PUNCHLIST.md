@@ -11670,3 +11670,27 @@ linked to the plan's devices, with wire (and sometimes conduit) priced as an opt
 - Decide whether **24×36 should scale the riser up** (today it draws at true size in the top-left of the sheet).
 - Confirm the **phone view** should be fully read-only (today the Tag panel still edits on a phone).
 - Later: AV/video conduit risers on the same engine; computed conduit fill (size is typed today).
+
+## 326. Site-visit scheduling — attendees, invites, conflicts, nearby days — DONE 2026-10-10 (D775–D781)
+
+Spec: docs/superpowers/specs/2026-10-09-site-visit-scheduling-design.md · Plan: docs/superpowers/plans/2026-10-10-site-visit-scheduling.md
+
+Visits stay fixed appointments with one lead plus `attendees` (each gets their own drive chain). Per-recipient invites
+in `SiteVisit.invites`: add → invite, remove → cancel, move → update, one UID `sv-<id>@peak-app` — a direct Google
+Calendar event when the person's mailbox has the Calendar grant, else an emailed .ics (CANCEL with ORGANIZER/ATTENDEE).
+Conflict flags — Double-booked, Tight, Outside work hours, Too much driving — plus Nearby days from the lead's verified
+stops over the next 21 days, in one booking panel on the visit-requests scheduler, the Inbox dialog and the company
+record's Edit visit (scheduled visits only). Conflict badges on the company record (GET `/api/visits/conflicts`),
+/calendar and Home (the viewer's own visits, as lead or attendee). Other people's Google events show only as "a
+calendar event". Settings → Field (company work hours, same-area minutes, daily drive limit, look-ahead) and Account
+(personal work hours). Nothing moves or blocks a visit; nothing is stored for conflicts. Deterministic, no AI, no
+migration.
+
+Open (Jeff-gated):
+- Real-mailbox check that an emailed CANCEL actually removes the event in Gmail, Outlook and Apple Calendar (and that
+  an update moves it rather than duplicating).
+- Review the work-hours defaults (Mon–Fri 8:00–5:00) and the three limits (45 min same area, 5 h daily drive incl.
+  buffer, 21-day look-ahead) in Settings → Field; each person checks their own hours in Account.
+- Try a booking with one attendee whose calendar is connected and one whose isn't.
+- Later (out of scope here): Morning triage could surface visit conflicts through `TRIAGE_HOOKS`
+  (`src/lib/triage/hooks.ts`).
