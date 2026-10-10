@@ -24,6 +24,10 @@ async function main(): Promise<void> {
   if (apply) requireHostedConfirmation(target.hosted, args);
   const r = await runDueBackfill({ apply });
   for (const p of r.plan.perPerson) console.log(`  ${p.name}: ${p.count} item(s), due ${p.firstDay} → ${p.lastDay}`);
+  if (r.skipped.length) {
+    console.log(`\nSkipped ${r.skipped.length} item(s) (assignee not on the active roster):`);
+    for (const k of r.skipped) console.log(`  ${k.kind} ${k.id} - ${k.assignee || "(no name)"} - ${k.reason}`);
+  }
   console.log(
     apply
       ? `\nApplied: ${r.updated} of ${r.planned} due date(s) written.`

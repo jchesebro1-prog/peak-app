@@ -11318,6 +11318,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks } from "./test-auto-calendar";
+import { defaultDueAt } from "@/lib/task-plan/due";
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -12818,10 +12819,10 @@ async function templateScheduleAsyncChecks(): Promise<void> {
     ok(projTasks145t3.length === 1, "#145 T3 omitting schedule still applies a template to a project target exactly as before");
     ok(
       projTasks145t3[0]?.startAt === null &&
-        typeof projTasks145t3[0]?.dueAt === "number" &&
+        projTasks145t3[0]?.dueAt === defaultDueAt(projTasks145t3[0].createdAt) &&
         projTasks145t3[0]?.schedule === null &&
         projTasks145t3[0]?.handScheduled === false,
-      "#145 T3 omitting schedule produces no dates, no schedule, and handScheduled false — the old behaviour exactly (a due date is the spec-3 +7 default for an assigned task)"
+      "#145 T3 omitting schedule produces no start date, no schedule, and handScheduled false — the old behaviour — plus only the spec-3 +7 due stamp (5 pm Chicago, 7 days out) on this assigned task"
     );
   } finally {
     // Teardown (#145 review round 3): this function must leave NO trace in

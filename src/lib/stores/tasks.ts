@@ -407,6 +407,10 @@ export async function getTask(id: string): Promise<TaskRecord | null> {
  *  is due in 7 days (an unassigned checklist row isn't planned, and an
  *  overdue unassigned row would reach every bell). */
 function withAutoDue<T extends Partial<TaskRecord>>(input: T, at: number): T {
+  // A task the consulting schedule engine placed (it carries a startAt and/or a
+  // `schedule`) is dated by the engine; a +7 stamp on a half-dated one could land
+  // before its start or past the engagement's end (`overrunsEnd`).
+  if (typeof input.startAt === "number" || input.schedule) return input;
   const assigned = !!(input.assigneeUserId || (input.assigneeName || "").trim());
   return { ...input, dueAt: autoDueAt(input.dueAt, assigned, at) };
 }
@@ -434,7 +438,7 @@ export async function createTaskOnce(
   me: { id: string; name: string },
 ): Promise<TaskRecord> {
   const at = now();
-  const t = normalizeTask({ ...input, createdBy: me.name, createdAt: at, updatedAt: at });
+  const t = normalizeTask({ ...withAutoDue(input, at), createdBy: me.name, createdAt: at, updatedAt: at });
   if (await insertDocIfAbsent<TaskRecord>("tasks", t)) return t;
   return (await getTask(input.id)) ?? t;
 }

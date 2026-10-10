@@ -2,7 +2,7 @@
    (docs/superpowers/specs/2026-10-09-auto-task-calendar-design.md).
    Chained from test-review-and-spec.ts. */
 import { readFileSync } from "node:fs";
-import { autoTaskId, createAutoTask, createTask, getTask, normalizeTask, updateTask, type TaskRecord } from "@/lib/stores/tasks";
+import { autoTaskId, createAutoTask, createTask, createTaskOnce, getTask, normalizeTask, updateTask, type TaskRecord } from "@/lib/stores/tasks";
 import { allAssignments, createAssignment, getAssignment, updateAssignment, type Assignment } from "@/lib/stores/assignments";
 import { upsertDoc } from "@/db/doc-store";
 import { triageKey } from "@/lib/triage/keys";
@@ -19,7 +19,8 @@ import {
   planDueBackfill,
   type BackfillItem,
 } from "@/lib/task-plan/due";
-import { runDueBackfill } from "@/lib/task-plan/backfill";
+import { overrunsEnd } from "@/lib/consulting-schedule";
+import { runDueBackfill, setAssignmentDue, setTaskDue } from "@/lib/task-plan/backfill";
 import { readTierSize } from "@/lib/task-plan/fields";
 import {
   cleanSize,
@@ -200,6 +201,96 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
   const b = await createAssignment({ title: "due asg dated", assignee: me.name, createdBy: me.name, dueDate: at(FRI, 12) });
   registerFixture("assignments", b.id);
   ok(expect(a.dueDate) && b.dueDate === at(FRI, 12), "auto-cal due: createAssignment gives an undated assignment a due date 7 days out");
+
+  // Fix round 1: createTaskOnce (Krisp #323 meeting to-dos) stamps the same default
+  const O1 = fixtureId("autocal", "once-assigned");
+  const O2 = fixtureId("autocal", "once-unassigned");
+  const O3 = fixtureId("autocal", "once-explicit");
+  for (const id of [O1, O2, O3]) registerFixture("tasks", id);
+  const o1 = await createTaskOnce({ id: O1, title: "once assigned", assigneeUserId: me.id, assigneeName: me.name }, me);
+  const o2 = await createTaskOnce({ id: O2, title: "once unassigned" }, me);
+  const o3 = await createTaskOnce({ id: O3, title: "once explicit", assigneeUserId: me.id, assigneeName: me.name, dueAt: at(FRI, 12) }, me);
+  ok(expect(o1.dueAt) && expect((await getTask(O1))?.dueAt), "auto-cal due: createTaskOnce gives an assigned, undated task the +7 stamp (returned and stored)");
+  ok(o2.dueAt === null && (await getTask(O2))?.dueAt === null, "auto-cal due: createTaskOnce leaves an unassigned task undated");
+  ok(o3.dueAt === at(FRI, 12) && (await getTask(O3))?.dueAt === at(FRI, 12), "auto-cal due: createTaskOnce keeps an explicit date");
+  const o1again = await createTaskOnce({ id: O1, title: "once assigned", assigneeUserId: me.id, assigneeName: me.name, dueAt: at(FRI, 12) }, me);
+  ok(o1again.dueAt === (await getTask(O1))?.dueAt && o1again.dueAt !== at(FRI, 12), "auto-cal due: a second createTaskOnce returns the stored row, never overwrites it");
+
+  // Fix round 1: consulting engagements — the schedule engine owns its dates
+  const ENG = "CE-autocal-fixture";
+  const E1 = fixtureId("autocal", "eng-manual");
+  const E2 = fixtureId("autocal", "eng-engine");
+  const E3 = fixtureId("autocal", "eng-startonly");
+  for (const id of [E1, E2, E3]) registerFixture("tasks", id);
+  await createTask({ id: E1, title: "eng manual", engagementId: ENG, assigneeUserId: me.id, assigneeName: me.name }, me);
+  await createTask({ id: E2, title: "eng engine", engagementId: ENG, assigneeUserId: me.id, assigneeName: me.name, startAt: at(MON, 12), dueAt: at(TUE, 12), schedule: { phaseId: "ph", startPct: 0, lengthPct: 100 } }, me);
+  await createTask({ id: E3, title: "eng start only", engagementId: ENG, assigneeUserId: me.id, assigneeName: me.name, startAt: at(MON, 12) }, me);
+  const e1 = await getTask(E1);
+  const e2 = await getTask(E2);
+  const e3 = await getTask(E3);
+  ok(expect(e1?.dueAt) && e1?.startAt === null, "auto-cal due: a manual engagement task gets +7 but has no startAt, so it never reaches the Gantt (which needs both dates) or its overrun flag");
+  ok(e2?.startAt === at(MON, 12) && e2?.dueAt === at(TUE, 12) && !overrunsEnd(e2, at(TUE, 12)), "auto-cal due: an engine-placed task keeps its own dates exactly");
+  ok(e3?.startAt === at(MON, 12) && e3?.dueAt === null, "auto-cal due: a task with a startAt but no dueAt is left to the engine, never stamped");
+
+  // Fix round 1: createTask's insertWithPrefixedId path (no caller-chosen id)
+  const p1 = await createTask({ title: "prefixed assigned", assigneeUserId: me.id, assigneeName: me.name }, me);
+  const p2 = await createTask({ title: "prefixed unassigned" }, me);
+  registerFixture("tasks", p1.id);
+  registerFixture("tasks", p2.id);
+  ok(/^T-\d+$/.test(p1.id) && expect(p1.dueAt) && expect((await getTask(p1.id))?.dueAt), "auto-cal due: createTask without an id (allocated T-####) stamps +7 on an assigned task");
+  ok(p2.dueAt === null && (await getTask(p2.id))?.dueAt === null, "auto-cal due: createTask without an id leaves an unassigned task undated");
+
+  // Fix round 1: the real backfill writers (readers over fixture rows, default writers)
+  const W1 = fixtureId("autocal", "bf-task");
+  const W2 = fixtureId("autocal", "bf-task-dated");
+  const WA1 = fixtureId("autocal", "bf-asg");
+  const WA2 = fixtureId("autocal", "bf-asg-dated");
+  registerFixture("tasks", W1);
+  registerFixture("tasks", W2);
+  registerFixture("assignments", WA1);
+  registerFixture("assignments", WA2);
+  const row = (id: string, over: Partial<TaskRecord> = {}) => normalizeTask({ id, title: id, createdAt: 10, updatedAt: 1, ...over });
+  await upsertDoc("tasks", row(W1));
+  await upsertDoc("tasks", row(W2, { dueAt: at(FRI, 17) }));
+  const asgRow = (id: string, dueDate: number): Assignment => ({ id, title: id, assignee: me.name, createdBy: me.name, createdAt: 10, dueDate, link: null, done: false, doneAt: null, doneVia: null, source: "" });
+  await upsertDoc("assignments", asgRow(WA1, 0));
+  await upsertDoc("assignments", asgRow(WA2, at(FRI, 17)));
+  // The readers claim all four are undated + assigned (a stale scan); only the writers' re-check can know better.
+  const readers = {
+    now: () => at(FRI, 10),
+    roster: async () => [{ id: me.id, name: me.name }],
+    tasks: async () => [row(W1, { assigneeUserId: me.id, assigneeName: me.name }), row(W2, { assigneeUserId: me.id, assigneeName: me.name })],
+    assignments: async () => [asgRow(WA1, 0), asgRow(WA2, 0)],
+    workHours: async () => DEFAULT_WORK_HOURS,
+  };
+  const real = await runDueBackfill({ apply: true, deps: readers });
+  const w1 = await getTask(W1);
+  const w2 = await getTask(W2);
+  const wa1 = await getAssignment(WA1);
+  const wa2 = await getAssignment(WA2);
+  const planned = new Map(real.plan.updates.map((u) => [u.id, u.dueAt]));
+  ok(real.planned === 4 && real.updated === 2, "auto-cal backfill: the default writers write the two still-undated items and report the two already-dated ones as not written");
+  ok(w1?.dueAt === planned.get(W1) && (w1?.dueAt ?? 0) > 0 && wa1?.dueDate === planned.get(WA1) && (wa1?.dueDate ?? 0) > 0, "auto-cal backfill: setTaskDue / setAssignmentDue store the planned 5 pm stamp");
+  ok(w2?.dueAt === at(FRI, 17) && w2.updatedAt === 1 && wa2?.dueDate === at(FRI, 17), "auto-cal backfill: an item dated since the scan is left untouched, with no write (updatedAt unchanged)");
+  ok((await setTaskDue(W1, 123)) === false && (await getTask(W1))?.dueAt === w1?.dueAt && (await setAssignmentDue(WA1, 123)) === false && (await getAssignment(WA1))?.dueDate === wa1?.dueDate && (await setTaskDue("T-no-such-row", 1)) === false,
+    "auto-cal backfill: the writers never overwrite a date and ignore a vanished row");
+
+  // Fix round 1: the dry run reports what it skipped
+  const ghostTasks = [
+    normalizeTask({ id: "T-g1", title: "g", assigneeUserId: "gone", assigneeName: "Ghost Person", createdAt: 1 }),
+    normalizeTask({ id: "T-g2", title: "unassigned", createdAt: 2 }),
+    normalizeTask({ id: "T-g3", title: "ok", assigneeUserId: "u1", assigneeName: "Dana", createdAt: 3 }),
+  ];
+  const ghostAsg = [asgRow("as-g1", 0)];
+  ghostAsg[0].assignee = "Nobody Here";
+  const skipRun = await runDueBackfill({
+    apply: false,
+    deps: { now: () => at(FRI, 10), roster: async () => [{ id: "u1", name: "Dana" }], tasks: async () => ghostTasks, assignments: async () => ghostAsg, workHours: async () => DEFAULT_WORK_HOURS },
+  });
+  ok(skipRun.planned === 1 && skipRun.skipped.length === 2 &&
+    skipRun.skipped.some((k) => k.kind === "task" && k.id === "T-g1" && k.assignee === "Ghost Person" && k.reason === "not on the active roster") &&
+    skipRun.skipped.some((k) => k.kind === "assignment" && k.id === "as-g1" && k.assignee === "Nobody Here"),
+    "auto-cal backfill: items whose assignee is off the roster are reported as skipped (an unassigned task is not)");
 
   // Task 1 review add-on: update paths validate tier/size; assignments normalize on read
   const TU = fixtureId("autocal", "update-validate");
