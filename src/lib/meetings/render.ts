@@ -32,6 +32,14 @@ export function mergeAttendees(prev: MeetingAttendee[], krisp: KrispPerson[], ca
         return;
       }
     }
+    if (!email && name && normalizeText(name)) {
+      // a name-only listing of someone an earlier source already has under an address: fold into that entry
+      const emailed = out.find((a) => a.email !== null && normalizeText(a.name) === normalizeText(name));
+      if (emailed) {
+        addSource(emailed, source);
+        return;
+      }
+    }
     out.push({ key, name: name || email || "", email, sources: [source], removed: false, contactId: null, userId: null });
   };
   for (const p of krisp) add(personName(p), p.email, "krisp");
@@ -50,7 +58,14 @@ export function resolveAttendees(atts: MeetingAttendee[], byEmail: Map<string, {
 
 export function speakerIndexes(m: Pick<MeetingRecord, "krisp">): string[] {
   const set = new Set<string>([...Object.keys(m.krisp.speakers), ...m.krisp.segments.map((s) => String(s.speaker))]);
-  return [...set].sort((a, b) => (/^\d+$/.test(a) && /^\d+$/.test(b) ? Number(a) - Number(b) : a.localeCompare(b)));
+  const numeric = (s: string) => /^\d+$/.test(s);
+  // numeric ids first (ascending by value), then the rest by locale; one total order so the sort is consistent
+  return [...set].sort((a, b) => {
+    const na = numeric(a), nb = numeric(b);
+    if (na && nb) return Number(a) - Number(b);
+    if (na !== nb) return na ? -1 : 1;
+    return a.localeCompare(b);
+  });
 }
 
 export function speakerLabel(m: Pick<MeetingRecord, "krisp">, idx: string): string {

@@ -192,6 +192,12 @@ export async function meetings323RenderChecks(ok: Ok): Promise<void> {
   ok(a3.length === 2 && a3[0].key === "tom@osakis.k12.mn.us" && a3[0].email === "tom@osakis.k12.mn.us" && a3[0].sources.join() === "krisp,calendar" &&
      a3[1].key === "name:pat lee" && a3[1].email === null,
     "#323 a name-only Krisp attendee and the same person with an email from the calendar become one entry; blank emails are null");
+  const a3b = mergeAttendees(a3, [{ email: null, firstName: "Tom", lastName: "Ellis" }],
+    { eventId: "e2", title: "Osakis", attendees: [{ email: " Tom@Osakis.k12.mn.us ", name: "Tom Ellis" }, { email: "   ", name: "Pat Lee" }] });
+  const tomRows = a3b.filter((x) => normalizeText(x.name) === "tom ellis");
+  ok(a3b.length === a3.length && tomRows.length === 1 && tomRows[0].key === "tom@osakis.k12.mn.us" &&
+     tomRows[0].sources.includes("krisp") && tomRows[0].sources.includes("calendar"),
+    "#323 a re-merge where Krisp stays name-only folds into the emailed entry (no duplicate)");
   const a4 = mergeAttendees([{ key: "name:tom ellis", name: "Tom Ellis", email: null, sources: ["manual"], removed: true, contactId: "c-tom", userId: null }], [],
     { eventId: "e3", title: "x", attendees: [{ email: "tom@osakis.k12.mn.us", name: "Tom Ellis" }] });
   ok(a4.length === 1 && a4[0].key === "tom@osakis.k12.mn.us" && a4[0].removed && a4[0].contactId === "c-tom" && a4[0].sources.join() === "manual,calendar",
