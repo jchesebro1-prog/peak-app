@@ -149,19 +149,44 @@ function applySync(
   return applyFetched(m, now, pre, index);
 }
 
-/** Detail, recording (once), attendees, to-dos, then rematch — shared by the batch and a single-meeting refresh. */
+/** The people a to-do's assignee is read against: the team, and only THIS meeting's outside people — contacts of
+ *  its linked or suggested companies, plus its attendees' and speakers' resolved contacts. Never every contact in
+ *  the book: a common first name at an unrelated customer must not turn a rep's own to-do into a "note". */
+export function todoPeople(m: MeetingRecord, index: MatchIndex): { users: { id: string; name: string }[]; contacts: { id: string; name: string }[] } {
+  const companies = new Set<string>();
+  if (m.links.customerId) companies.add(m.links.customerId);
+  for (const s of m.suggestions) if (s.kind === "company") companies.add(s.id);
+  const ids = new Set<string>([
+    ...m.links.contactIds,
+    ...m.attendees.filter((a) => !a.removed && a.contactId).map((a) => a.contactId!),
+    ...Object.values(m.speakerMap).filter((r) => r?.contactId).map((r) => r.contactId!),
+  ]);
+  const named = new Map<string, string>();
+  for (const c of index.contacts) {
+    if (ids.has(c.id) || (c.companyId && companies.has(c.companyId))) named.set(c.id, `${c.firstName} ${c.lastName}`.trim());
+  }
+  // a resolved contact the index doesn't hold (a just-created one) still counts by the name the meeting shows
+  for (const a of m.attendees) if (!a.removed && a.contactId && !named.has(a.contactId)) named.set(a.contactId, a.name);
+  for (const r of Object.values(m.speakerMap)) if (r?.contactId && !named.has(r.contactId)) named.set(r.contactId, r.name);
+  return {
+    users: index.users.map((u) => ({ id: u.id, name: u.name })),
+    contacts: [...named].map(([id, name]) => ({ id, name })),
+  };
+}
+
+/** Detail, recording (once), attendees, rematch, then to-dos — shared by the batch and a single-meeting refresh.
+ *  The rematch runs before the to-dos so their defaults read the meeting's own (suggested) company. */
 function applyFetched(cur: MeetingRecord, now: number, pre: Prefetched, index: MatchIndex): MeetingRecord {
   let m: MeetingRecord = pre.detail ? { ...cur, krisp: { ...cur.krisp, ...pre.detail, detailFetchedAt: now } } : cur;
   if (pre.recording && !m.recordingId) m = attachRecording(m, pre.recording.rec, pre.recording.siteId, now);
-  m = { ...m, attendees: resolveAttendees(mergeAttendees(m.attendees, m.krisp.participants, m.calendar), pre.emails) };
+  m = rematchMeeting({ ...m, attendees: resolveAttendees(mergeAttendees(m.attendees, m.krisp.participants, m.calendar), pre.emails) }, index);
   const pairs: [string, string][] = Object.entries(m.speakerMap).map(([idx, ref]) => [speakerLabel(m, idx), ref.name]);
-  const people = {
-    users: index.users.map((u) => ({ id: u.id, name: u.name })),
-    contacts: index.contacts.map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() })),
+  const people = todoPeople(m, index);
+  return {
+    ...m,
+    todos: mergeTodos(m.todos, deriveSummary(m.krisp.notes as { blocks: KrispNoteBlock[] } | null).actionItems,
+      (a) => suggestTodoKind(a ? relabel(a, pairs) : null, people)),
   };
-  m.todos = mergeTodos(m.todos, deriveSummary(m.krisp.notes as { blocks: KrispNoteBlock[] } | null).actionItems,
-    (a) => suggestTodoKind(a ? relabel(a, pairs) : null, people));
-  return rematchMeeting(m, index);
 }
 
 /** A Krisp meeting's detail payload → the stored shape. */
@@ -217,18 +242,24 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
   const res: SyncResult = { listed: 0, created: 0, detailed: 0, complete: false, error: null };
   const st = await deps.getState();
   const now = deps.now();
+  // The FIRST sync (never completed) covers the last 90 days as a resumable pass: its window start lives in
+  // backfillFrom and its position in backfillCursor between batches (any trigger — recent or Load older — resumes
+  // it), and only its completion sets syncedAt and switches the rep to the rolling window.
+  const first = st.syncedAt == null;
   const backfillFrom = st.backfillFrom ?? now - BACKFILL_STEP_MS;
   // recent: the rolling 14 days, reaching back to a day before the last complete sync when that is
   // older (a revoked key or two weeks of errors must not leave a gap), never past 90 days
-  const recentFrom = st.syncedAt == null
-    ? now - BACKFILL_STEP_MS
-    : Math.max(now - BACKFILL_STEP_MS, Math.min(now - ROLLING_WINDOW_MS, st.syncedAt - DAY_MS));
-  const window = mode === "recent"
-    ? { from: recentFrom, to: null as number | null, cursor: null as string | null }
-    : { from: backfillFrom - BACKFILL_STEP_MS, to: backfillFrom as number | null, cursor: st.backfillCursor };
+  const window = first
+    ? { from: st.backfillFrom ?? now - BACKFILL_STEP_MS, to: null as number | null, cursor: st.backfillCursor }
+    : mode === "recent"
+      ? { from: Math.max(now - BACKFILL_STEP_MS, Math.min(now - ROLLING_WINDOW_MS, st.syncedAt! - DAY_MS)), to: null as number | null, cursor: null as string | null }
+      : { from: backfillFrom - BACKFILL_STEP_MS, to: backfillFrom as number | null, cursor: st.backfillCursor };
+  /** first pass and Load older keep their position between batches; the rolling window starts over each time */
+  const resumable = first || mode === "backfill";
   const overBudget = () => deps.now() - started > deps.budgetMs;
   const stopEarly = async (cursor: string | null) => {
-    if (mode === "backfill") await deps.setState({ backfillCursor: cursor });
+    if (first) await deps.setState({ backfillFrom: window.from, backfillCursor: cursor });
+    else if (mode === "backfill") await deps.setState({ backfillCursor: cursor });
     return res;
   };
   const index = await deps.buildIndex();
@@ -288,11 +319,22 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
           out.recordingId = next.recordingId;
           return next;
         };
+        // the matcher runs once per meeting: the step over the snapshot decides "unchanged" and is reused by the
+        // write when the latest doc is still that snapshot (re-run only over a concurrent edit)
+        const snapFp = snap ? syncFingerprint(snap) : null;
+        const fromSnap = snap ? step(snap) : null;
+        const fromSnapRecording = out.recordingId;
         // nothing changed since the snapshot → no write at all (a concurrent edit is the latest doc already)
-        const unchanged = !!snap && syncFingerprint(step(snap)) === syncFingerprint(snap);
+        const unchanged = !!fromSnap && syncFingerprint(fromSnap) === snapFp;
         if (!unchanged) {
           // existing doc (or one another rep's sync created meanwhile) → patch the latest; else create
-          const patched = await MS.patchMeeting(id, step);
+          const patched = await MS.patchMeeting(id, (cur) => {
+            if (fromSnap && syncFingerprint(cur) === snapFp) {
+              out.recordingId = fromSnapRecording;
+              return fromSnap;
+            }
+            return step(cur);
+          });
           if (!patched) await MS.saveMeeting(step(blankMeeting(l, userId, now)));
         }
         // the recording → meeting back-pointer: (re-)asserted until it sticks; never fails the batch
@@ -310,9 +352,10 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
   } catch (e) {
     if (e instanceof KrispRateLimitError || isTimeout(e)) return stopEarly(cursor);
     if (e instanceof KrispApiError && e.status === 400 && cursor) {
-      // a cursor Krisp rejects (stale, expired) would wedge Load older forever: drop it, start the window fresh
+      // a cursor Krisp rejects (stale, expired) would wedge Load older (or the first pass) forever: drop it,
+      // start the window fresh
       res.error = `Krisp rejected the saved position (${e.message}) — starting this window over.`;
-      await deps.setState({ lastError: res.error, ...(mode === "backfill" ? { backfillCursor: null } : {}) });
+      await deps.setState({ lastError: res.error, ...(resumable ? { backfillCursor: null } : {}) });
       return res;
     }
     if (e instanceof KrispAuthError || e instanceof KrispForbiddenError) {
@@ -322,7 +365,11 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
     }
     throw e;
   }
-  if (mode === "recent") {
+  if (first) {
+    // the 90-day first pass is done (possibly over several batches, so `seen` holds only the last one's
+    // meetings — no removed-flagging here); from now on the rolling window
+    await deps.setState({ syncedAt: now, backfillFrom: window.from, backfillCursor: null, lastError: null });
+  } else if (mode === "recent") {
     // a meeting in this rep's window that Krisp no longer lists is flagged, never deleted — only by its
     // owner or its only viewer, so an un-share on one rep's side can't flip-flop it against another's
     const flagsIt = (r: { ownerUserId: string; seenBy: string[] }) =>
@@ -331,7 +378,7 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
       if (seen.has(r.krispMeetingId) || r.removedAt || !flagsIt(r)) continue;
       await MS.patchMeeting(r.id, (x) => (x.krisp.removedAt || !flagsIt(x) ? x : { ...x, krisp: { ...x.krisp, removedAt: now } }));
     }
-    await deps.setState({ syncedAt: now, lastError: null, ...(st.backfillFrom == null ? { backfillFrom: window.from } : {}) });
+    await deps.setState({ syncedAt: now, lastError: null });
   } else {
     await deps.setState({ backfillFrom: window.from, backfillCursor: null, lastError: null });
   }

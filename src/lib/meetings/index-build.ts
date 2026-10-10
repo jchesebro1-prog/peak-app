@@ -22,8 +22,10 @@ import { getAllProjects } from "@/lib/stores/projects";
 import { isActive } from "@/lib/pipelines";
 import { allEngagements } from "@/lib/stores/engagements";
 import { OPEN_ENGAGEMENT_STAGES } from "@/lib/consulting-stages";
+import { getSettings } from "@/lib/settings";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { chicagoDayRange } from "./chicago-day";
-import type { MatchIndex, MatchVisit, MatchWork } from "./match";
+import { prepareMatchIndex, type MatchIndex, type MatchVisit, type MatchWork } from "./match";
 
 /** Same rule as the inbox's INTERNAL_DOMAIN (lib/inbox-identity). */
 const INTERNAL_DOMAINS = ["peaksystemsgroup.com"];
@@ -31,10 +33,12 @@ const DEFAULT_VISIT_MS = 2 * 3600_000;
 
 export async function buildMatchIndex(): Promise<MatchIndex> {
   const db = await getDb();
-  const [companies, sites, contacts, users, visits, surveys, leads, projects, engagements, emailRows, domainRows] = await Promise.all([
+  const [companies, sites, contacts, users, visits, surveys, leads, projects, engagements, emailRows, domainRows, settings] = await Promise.all([
     allCompanies(), getAllSites(), allContacts(), activeUsers(), allVisits(), allSurveys(), openLeads(), getAllProjects(), allEngagements(),
     db.select({ contactId: contactEmails.contactId, email: contactEmails.email }).from(contactEmails),
     db.select({ domain: customerDomains.domain, customerId: customerDomains.customerId }).from(customerDomains),
+    // the venue-type labels ("Gym Stage", "Black box"…) are the type half of every derived venue name
+    getSettings().catch(() => null),
   ]);
   const liveCompany = new Set(companies.map((c) => c.id));
 
@@ -90,7 +94,8 @@ export async function buildMatchIndex(): Promise<MatchIndex> {
     if (!list.includes(r.customerId)) list.push(r.customerId);
   }
 
-  return {
+  // cores (company + venue, venue-type words stripped) are computed here once, not per meeting
+  return prepareMatchIndex({
     companies: companies.map((c) => ({ id: c.id, name: c.name, keywords: Array.isArray(c.keywords) ? c.keywords : [] })),
     sites: sites.map((s) => ({ id: s.id, companyId: s.companyId, name: s.name, locationName: s.locationName })),
     contacts: contacts.map((c) => ({
@@ -103,7 +108,7 @@ export async function buildMatchIndex(): Promise<MatchIndex> {
     domainCompanies,
     visits: mv,
     openWork: work,
-  };
+  }, venueTypesFrom(settings?.venueTypes).map((t) => t.label));
 }
 
 /** A doc record's `(customerId, locationId)` → `sites.id`, scoped to the company
