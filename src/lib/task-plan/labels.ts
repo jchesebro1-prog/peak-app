@@ -2,7 +2,7 @@
 import { chicagoDayKey, DRIVE_TZ } from "@/lib/drive-plan/day";
 import type { CalendarRead } from "@/lib/visit-plan/check";
 import { chicagoMinuteOfDay, fmtDayLabel } from "@/lib/visit-plan/hours";
-import { fmtClock } from "@/lib/visit-plan/settings";
+import { fmtClock, fmtEndClock } from "@/lib/visit-plan/settings";
 import { daysLeft } from "./urgency";
 
 const WEEKDAY = new Intl.DateTimeFormat("en-US", { timeZone: DRIVE_TZ, weekday: "short" });
@@ -26,9 +26,11 @@ export function calendarNote(status: CalendarRead, name: string, isMe: boolean):
   return isMe ? GOOGLE_NOTE_ME : `Planned without ${name}'s Google calendar — may overlap meetings`;
 }
 
-/** "8:00–9:00" (Chicago, the spec-2 clock style). */
+/** "8:00–9:00" (Chicago, the spec-2 clock style); a block ending at the next
+ *  day's 00:00 reads "8:00–midnight", as spec 2 prints a 1440 end. */
 export function fmtBlockTime(startMs: number, endMs: number): string {
-  return `${fmtClock(chicagoMinuteOfDay(startMs))}–${fmtClock(chicagoMinuteOfDay(endMs))}`;
+  const endMin = chicagoMinuteOfDay(endMs);
+  return `${fmtClock(chicagoMinuteOfDay(startMs))}–${endMin === 0 && endMs > startMs ? fmtEndClock(1440) : fmtClock(endMin)}`;
 }
 
 export const NOT_PLACED_TEXT = "Doesn't fit in the next 8 weeks";

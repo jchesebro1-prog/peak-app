@@ -13,10 +13,12 @@
 import { deadlineOf, effectiveDue } from "./due";
 import { ceilQuarter, chunkFor, floorQuarter, freeDays, type FreeDay } from "./free";
 import { atRiskLabel } from "./labels";
+import { newPinsFrom, stalePinKeys, unfinishedRemainders } from "./pins";
 import { sortByUrgency } from "./urgency";
 import {
   FILL_RATIO,
   GRID_MIN,
+  MIN_CHUNK_MIN,
   PLAN_HORIZON_DAYS,
   type AtRiskItem,
   type BusyInterval,
@@ -32,6 +34,14 @@ const MIN_MS = 60_000;
 export type QueueEntry = { item: PlanItem; minutes: number; earliestMs: number };
 
 const toGrid = (min: number): number => Math.ceil(Math.max(0, min) / GRID_MIN) * GRID_MIN;
+/** What's left to place: on the grid, and never a piece under 30 min (a 1–29
+ *  min leftover — e.g. a size cut below a partial pin — places as 30). */
+const placeable = (min: number): number => (min > 0 ? Math.max(MIN_CHUNK_MIN, toGrid(min)) : 0);
+/** horizonDays is capped at 8 weeks (spec "Horizon"). */
+const horizonOf = (days: number | undefined): number => {
+  const d = Math.floor(Number(days ?? PLAN_HORIZON_DAYS));
+  return Number.isFinite(d) ? Math.max(0, Math.min(PLAN_HORIZON_DAYS, d)) : PLAN_HORIZON_DAYS;
+};
 
 /** The urgency comparator takes dated items only (a dueMs of 0 would sort as
  *  maximally overdue), so an item without a usable due plans by its effective
@@ -99,7 +109,7 @@ export function planPerson(input: PlanInput): PlanResult {
     .sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0));
   const days = freeDays({
     startMs: start,
-    days: input.horizonDays ?? PLAN_HORIZON_DAYS,
+    days: horizonOf(input.horizonDays),
     hours: input.hours,
     busy: [...input.busy, ...pins],
     fillRatio: input.fillRatio ?? FILL_RATIO,
@@ -109,13 +119,15 @@ export function planPerson(input: PlanInput): PlanResult {
   const pinnedMin = new Map<string, number>();
   for (const p of pins) pinnedMin.set(p.itemKey, (pinnedMin.get(p.itemKey) ?? 0) + (p.endMs - p.startMs) / MIN_MS);
 
-  // QUEUE
-  const queue: QueueEntry[] = [];
+  // Unfinished started work goes first and is pinned where it lands (spec "Unfinished").
+  const remainders = unfinishedRemainders({ items: ordered, pins, nowMs: now, hours: input.hours });
+  const remainderKeys = new Set(remainders.map((r) => r.item.key));
+  const queue: QueueEntry[] = remainders.map((r) => ({ item: r.item, minutes: r.minutes, earliestMs: Math.max(start, r.earliestMs) }));
   for (const item of ordered) {
-    const minutes = toGrid(item.sizeMin - (pinnedMin.get(item.key) ?? 0));
+    if (remainderKeys.has(item.key)) continue;
+    const minutes = placeable(item.sizeMin - (pinnedMin.get(item.key) ?? 0));
     if (minutes > 0) queue.push({ item, minutes, earliestMs: Math.max(start, item.earliestMs ?? start) });
   }
-  // END QUEUE
 
   const unplaced = new Set<string>();
   for (const e of queue) {
@@ -125,26 +137,31 @@ export function planPerson(input: PlanInput): PlanResult {
   }
   blocks.sort((a, b) => a.startMs - b.startMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
+  // finishMs: a key only for items with work on the plan (null = doesn't fit
+  // in the horizon); an item with nothing left to place has no key at all.
   const finishMs: Record<string, number | null> = {};
-  for (const item of ordered) finishMs[item.key] = null;
   for (const b of blocks) finishMs[b.itemKey] = Math.max(finishMs[b.itemKey] ?? 0, b.endMs);
+  for (const k of unplaced) finishMs[k] = null;
   const atRisk: AtRiskItem[] = [];
   for (const item of ordered) {
-    if (unplaced.has(item.key)) finishMs[item.key] = null;
     const f = finishMs[item.key];
-    if (!unplaced.has(item.key) && (f == null || f <= deadlineOf(item.dueMs))) continue; // f null here = nothing to place
-    atRisk.push({ itemKey: item.key, kind: item.kind, id: item.id, userId: item.userId, title: item.title, href: item.href, dueMs: item.dueMs, finishMs: f, label: atRiskLabel(item.dueMs, now) });
+    if (!unplaced.has(item.key) && (f == null || f <= deadlineOf(item.dueMs))) continue; // no key here = nothing to place
+    atRisk.push({ itemKey: item.key, kind: item.kind, id: item.id, userId: item.userId, title: item.title, href: item.href, dueMs: item.dueMs, finishMs: f ?? null, label: atRiskLabel(item.dueMs, now) });
   }
   const risky = new Set(atRisk.map((a) => a.itemKey));
   for (const b of blocks) b.atRisk = risky.has(b.itemKey);
+
+  const newPins = newPinsFrom({ blocks, items: ordered, pins, nowMs: now, remainderKeys });
+  const fresh = new Set(newPins.map((p) => `${p.itemKey}@${p.startMs}`));
+  for (const b of blocks) if (!b.pinned && fresh.has(b.key)) b.pinned = "started";
 
   return {
     userId: input.userId,
     nowMs: now,
     blocks,
     atRisk,
-    newPins: [],
-    staleKeys: [],
+    newPins,
+    staleKeys: stalePinKeys(input.pins, new Set(byKey.keys())),
     futurePins: pins.filter((p) => p.startMs > now),
     finishMs,
   };

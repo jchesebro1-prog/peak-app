@@ -138,5 +138,7 @@ export type PlanResult = {
   staleKeys: string[];
   /** pins that haven't begun (what Unpin can offer) */
   futurePins: PlanPin[];
+  /** when each item's last block ends; null = doesn't fit in the horizon.
+   *  An item with nothing left to place has NO key (never a bare null). */
   finishMs: Record<string, number | null>;
 };

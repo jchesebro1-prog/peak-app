@@ -7,10 +7,11 @@ import { allAssignments, createAssignment, getAssignment, updateAssignment, type
 import { upsertDoc } from "@/db/doc-store";
 import { triageKey } from "@/lib/triage/keys";
 import { tierOf } from "@/lib/triage/feeds/tasks";
-import { chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
-import { chunkFor, freeDays } from "@/lib/task-plan/free";
+import { addDays, chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
+import { chunkFor, floorQuarter, freeDays } from "@/lib/task-plan/free";
 import { atRiskLabel, calendarNote, finishText, fmtBlockTime, GOOGLE_NOTE_ME, NOT_PLACED_TEXT } from "@/lib/task-plan/labels";
 import { planPerson } from "@/lib/task-plan/plan";
+import { cleanPinMove, pinBlobKey, pinBlobValue, pinsFromBlob, type PinMove } from "@/lib/task-plan/pins";
 import { chicagoWallMs, weekdayOf } from "@/lib/visit-plan/hours";
 import { DEFAULT_WORK_HOURS } from "@/lib/visit-plan/settings";
 import {
@@ -29,13 +30,16 @@ import {
   cleanSize,
   cleanTier,
   parsePlanItemKey,
+  PLAN_HORIZON_DAYS,
   planItemKey,
   QUARTER_MS,
   SIZE_MIN,
   sizeMinutes,
   tierOrDefault,
+  type BusyInterval,
   type PlanInput,
   type PlanItem,
+  type PlanPin,
   type PlanResult,
   type TaskTier,
 } from "@/lib/task-plan/types";
@@ -370,6 +374,8 @@ const blocksOf = (r: PlanResult, key: string) => r.blocks.filter((b) => b.itemKe
 const baseInput = (over: Partial<PlanInput> = {}): PlanInput => ({ userId: "u1", nowMs: at(MON, 7), hours: DEFAULT_WORK_HOURS, busy: [], pins: [], items: [], ...over });
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 
+const nothing0 = () => planPerson(baseInput({ items: [item("zero", { sizeMin: 0 })] }));
+
 export async function autoCalPlacementChecks(ok: Ok): Promise<void> {
   const one = planPerson(baseInput({ items: [item("A")] }));
   ok(one.blocks.length === 1 && one.blocks[0].startMs === at(MON, 8) && one.blocks[0].endMs === at(MON, 9) && !one.blocks[0].pinned,
@@ -428,12 +434,12 @@ export async function autoCalPlacementChecks(ok: Ok): Promise<void> {
   const undated = planPerson(baseInput({ items: [item("undated", { dueMs: 0, dueVirtual: true, createdAt: at(MON, 6) }), item("dated", { dueMs: at(TUE, 17), createdAt: 5 })] }));
   ok(undated.blocks[0].itemKey === "task:dated" && blocksOf(undated, "task:undated")[0]?.dueMs === defaultDueAt(at(MON, 6)) && !undated.atRisk.some((a) => a.itemKey === "task:undated"),
     "auto-cal plan: an undated item plans by its effective due (created + 7), never as overdue");
-  const nothing = planPerson(baseInput({ items: [item("zero", { sizeMin: 0 })] }));
+  const nothing = nothing0();
   ok(nothing.blocks.length === 0 && nothing.atRisk.length === 0, "auto-cal plan: an item with nothing left to place isn't flagged");
 
   const late20 = { days: EVERY_DAY, startMin: 20 * 60, endMin: 1440 };
   const mid = planPerson(baseInput({ hours: late20, fillRatio: 1, items: [item("A", { size: "l", sizeMin: 240 })] }));
-  ok(mid.blocks.length === 1 && mid.blocks[0].startMs === at(MON, 20) && mid.blocks[0].endMs === chicagoDayStart(TUE) && fmtBlockTime(mid.blocks[0].startMs, mid.blocks[0].endMs) === "8:00–12:00",
+  ok(mid.blocks.length === 1 && mid.blocks[0].startMs === at(MON, 20) && mid.blocks[0].endMs === chicagoDayStart(TUE) && fmtBlockTime(mid.blocks[0].startMs, mid.blocks[0].endMs) === "8:00–midnight",
     "auto-cal plan: work hours ending at midnight (1440) fill up to the next day's 00:00");
   const midCap = planPerson(baseInput({ hours: late20, items: [item("A", { size: "l", sizeMin: 240 })] }));
   ok(blocksOf(midCap, "task:A").map((b) => `${chicagoDayKey(b.startMs)} ${(b.endMs - b.startMs) / MIN}`).join(",") === `${MON} 180,${TUE} 60`,
@@ -463,4 +469,129 @@ export async function autoCalPlacementChecks(ok: Ok): Promise<void> {
   ok(fmtBlockTime(at(MON, 8), at(MON, 9)) === "8:00–9:00" && finishText(at(TUE, 10)) === "Plan finishes Tue Oct 14" &&
     finishText(chicagoDayStart(TUE)) === "Plan finishes Mon Oct 13" && finishText(null) === NOT_PLACED_TEXT && NOT_PLACED_TEXT === "Doesn't fit in the next 8 weeks",
     "auto-cal copy: block time, Plan finishes, Doesn't fit in the next 8 weeks");
+}
+
+/* ---- Task 5: pin lifecycle ---- */
+export async function autoCalPinRuleChecks(ok: Ok): Promise<void> {
+  const p: PlanPin = { itemKey: "task:T-1", startMs: at(MON, 10), endMs: at(MON, 11), kind: "hand" };
+  ok(pinBlobKey(p) === `task:T-1@${at(MON, 10)}` && JSON.stringify(pinsFromBlob({ [pinBlobKey(p)]: pinBlobValue(p) })) === JSON.stringify([p]),
+    "auto-cal pins: a pin is one blob key (<item>@<start>) → { endMs, kind }");
+  ok(pinsFromBlob({
+    "task:T-1@x": { endMs: 5, kind: "hand" },
+    "lead:1@5": { endMs: 9, kind: "hand" },
+    [`task:T-2@${at(MON, 10)}`]: { endMs: at(MON, 9), kind: "hand" },
+    [`asg:a@${at(MON, 10)}`]: { endMs: at(MON, 11), kind: "moved" },
+    [`task:T-3@${at(MON, 10)}`]: null,
+  }).length === 0, "auto-cal pins: junk keys and values are ignored");
+
+  const begun = planPerson(baseInput({ nowMs: at(MON, 10, 7), items: [item("A")] }));
+  ok(begun.blocks[0].startMs === at(MON, 10) && begun.blocks[0].pinned === "started" && begun.newPins.length === 1 && begun.newPins[0].kind === "started" && begun.newPins[0].endMs === at(MON, 11),
+    "auto-cal pins: a block that has begun when the plan is computed is pinned as started");
+  const notYet = planPerson(baseInput({ items: [item("A")] }));
+  ok(notYet.newPins.length === 0 && !notYet.blocks[0].pinned, "auto-cal pins: a block that hasn't begun stays movable");
+
+  const pins: PlanPin[] = [
+    { itemKey: "task:A", startMs: at(MON, 13), endMs: at(MON, 14), kind: "hand" },
+    { itemKey: "task:B", startMs: at(MON, 8), endMs: at(MON, 9), kind: "started" },
+  ];
+  const before = planPerson(baseInput({ nowMs: at(MON, 8, 30), pins, items: [item("A"), item("B")] }));
+  const after = planPerson(baseInput({ nowMs: at(MON, 8, 30), pins, items: [item("A"), item("B"), item("URGENT", { tier: "high", dueMs: at(MON, 17), size: "l", sizeMin: 240 })] }));
+  const pinnedAt = (r: PlanResult) => r.blocks.filter((b) => b.pinned).map((b) => b.key).join();
+  ok(pinnedAt(before) === pinnedAt(after) && blocksOf(after, "task:A")[0].startMs === at(MON, 13), "auto-cal pins: started and hand-pinned blocks never move when new work arrives");
+
+  const ip = planPerson(baseInput({ items: [item("A"), item("IP", { inProgress: true })] }));
+  const ipb = blocksOf(ip, "task:IP")[0];
+  ok(ipb.pinned === "started" && ip.newPins.some((x) => x.itemKey === "task:IP" && x.startMs === ipb.startMs), "auto-cal pins: a task marked In progress has its current block pinned");
+
+  const NEXT_MON = "2036-10-20";
+  const fri: PlanPin[] = [{ itemKey: "task:L", startMs: at(FRI, 8), endMs: at(FRI, 10), kind: "started" }];
+  const mon = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: fri, items: [item("OD", { tier: "high", dueMs: at(FRI, 17) }), item("L", { size: "l", sizeMin: 240 })] }));
+  const rem = blocksOf(mon, "task:L").filter((b) => b.startMs > at(FRI, 23));
+  ok(rem.length === 1 && rem[0].startMs === at(NEXT_MON, 8) && rem[0].endMs === at(NEXT_MON, 10) && rem[0].pinned === "started" && mon.newPins.some((x) => x.startMs === at(NEXT_MON, 8)),
+    "auto-cal pins: an unfinished started task's remaining time (4 h − 2 h) is pinned first thing the next work day (over the weekend)");
+  const whole: PlanPin[] = [...fri, { itemKey: "task:L", startMs: at(FRI, 10), endMs: at(FRI, 14), kind: "started" }];
+  const again = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: whole, items: [item("L", { size: "l", sizeMin: 240 })] }));
+  ok(blocksOf(again, "task:L").filter((b) => b.startMs > at(FRI, 23)).reduce((s, b) => s + b.endMs - b.startMs, 0) === 30 * MIN,
+    "auto-cal pins: still open after its whole size → 30 more minutes pinned the next morning");
+  const sameDay = planPerson(baseInput({ nowMs: at(NEXT_MON, 9), pins: [...fri, { itemKey: "task:L", startMs: at(NEXT_MON, 8), endMs: at(NEXT_MON, 10), kind: "started" }], items: [item("L", { size: "l", sizeMin: 240 })] }));
+  ok(sameDay.newPins.length === 0, "auto-cal pins: the remainder is pinned once, not again the same day");
+
+  const stale = planPerson(baseInput({ pins: [{ itemKey: "task:GONE", startMs: at(MON, 8), endMs: at(MON, 12), kind: "hand" }], items: [item("A")] }));
+  ok(stale.staleKeys.join() === `task:GONE@${at(MON, 8)}` && stale.blocks[0].startMs === at(MON, 8) && !stale.blocks.some((b) => b.itemKey === "task:GONE"),
+    "auto-cal pins: a done, deleted or handed-off item's pins are dropped and its time is free again");
+  ok(before.futurePins.map((x) => x.itemKey).join() === "task:A", "auto-cal pins: the pins that haven't begun are what Unpin offers");
+
+  const moved = cleanPinMove({ kind: "task", id: "T-1", startMs: at(MON, 10, 7), minutes: 60 }, at(MON, 9));
+  ok(moved.ok && (moved as { ok: true; value: PinMove }).value.startMs === at(MON, 10), "auto-cal pins: a drop snaps to the 15-minute grid");
+  ok(!cleanPinMove({ kind: "task", id: "T-1", startMs: at(MON, 8), minutes: 60 }, at(MON, 9)).ok &&
+     !cleanPinMove({ kind: "task", id: "T-1", startMs: at(MON, 10), minutes: 20 }, at(MON, 9)).ok &&
+     !cleanPinMove({ kind: "lead", id: "x", startMs: at(MON, 10), minutes: 60 }, at(MON, 9)).ok &&
+     !cleanPinMove({ kind: "task", id: "T-1", startMs: at(MON, 10), minutes: 600 }, at(MON, 9)).ok,
+    "auto-cal pins: a drop in the past, off the grid, over 8 h or on an unknown kind is refused");
+
+  /* Task 4 review add-ons */
+  const partial = planPerson(baseInput({ pins: [{ itemKey: "task:A", startMs: at(MON, 13), endMs: at(MON, 13, 45), kind: "hand" }], items: [item("A")] }));
+  const loose = blocksOf(partial, "task:A").filter((b) => !b.pinned);
+  ok(loose.length === 1 && loose[0].startMs === at(MON, 8) && loose[0].endMs === at(MON, 8, 30),
+    "auto-cal pins: a 15-minute remainder (1 h − a 45-minute hand pin) is placed as 30 minutes, never under 30");
+  const odd = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: [{ itemKey: "task:O", startMs: at(FRI, 8), endMs: at(FRI, 8, 50), kind: "started" }], items: [item("O")] }));
+  ok(blocksOf(odd, "task:O").filter((b) => b.startMs > at(FRI, 23)).map((b) => (b.endMs - b.startMs) / MIN).join() === "30",
+    "auto-cal pins: a 10-minute unfinished remainder is pinned as 30 minutes");
+  ok(!("task:zero" in nothing0().finishMs) && planPerson(baseInput({ horizonDays: 1, items: [item("A", { size: "l", sizeMin: 240 }), item("B", { size: "l", sizeMin: 240, createdAt: 2 })] })).finishMs["task:B"] === null,
+    "auto-cal plan: finishMs has no key for an item with nothing left to place; null still means it doesn't fit");
+  const huge = baseInput({ items: [item("H", { sizeMin: 20_000, dueMs: at("2036-12-31", 17) })] });
+  const capped = planPerson({ ...huge, horizonDays: 999 });
+  ok(JSON.stringify(capped) === JSON.stringify(planPerson(huge)) && capped.finishMs["task:H"] === null &&
+    capped.blocks.every((b) => b.endMs <= chicagoDayStart(addDays(MON, PLAN_HORIZON_DAYS))),
+    "auto-cal plan: horizonDays is capped at 8 weeks");
+
+  /* property check: a big, messy week-by-week load */
+  let seed = 327;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const nowMs = at(MON, 10, 7);
+  const sizes = [30, 45, 60, 90, 240, 600];
+  const tiers: TaskTier[] = ["high", "normal", "low"];
+  const bigItems = Array.from({ length: 200 }, (_, i) => item("P" + i, {
+    tier: tiers[i % 3],
+    sizeMin: sizes[Math.floor(rnd() * sizes.length)],
+    dueMs: at(addDays(MON, Math.floor(rnd() * 45) - 5), 17),
+    createdAt: i,
+    inProgress: i % 37 === 0,
+  }));
+  const bigBusy: BusyInterval[] = [];
+  for (let d = 0; d < PLAN_HORIZON_DAYS; d++) {
+    const day = addDays(MON, d);
+    for (let n = Math.floor(rnd() * 4); n > 0; n--) {
+      const s = at(day, 8 + Math.floor(rnd() * 6), Math.floor(rnd() * 60));
+      bigBusy.push({ startMs: s, endMs: s + (10 + Math.floor(rnd() * 110)) * MIN });
+    }
+  }
+  const bigPins: PlanPin[] = [
+    { itemKey: "task:P1", startMs: at("2036-10-10", 8), endMs: at("2036-10-10", 9), kind: "started" },
+    ...Array.from({ length: 10 }, (_, i): PlanPin => ({ itemKey: `task:P${10 + i * 7}`, startMs: at(addDays(MON, 1 + i), 16), endMs: at(addDays(MON, 1 + i), 17), kind: "hand" })),
+  ];
+  const bigIn = baseInput({ nowMs, busy: bigBusy, pins: bigPins, items: bigItems });
+  const t0 = performance.now();
+  const big = planPerson(bigIn);
+  const ms = performance.now() - t0;
+  const sorted = [...big.blocks].sort((a, b) => a.startMs - b.startMs);
+  ok(sorted.every((b, i) => i === 0 || sorted[i - 1].endMs <= b.startMs) &&
+    big.blocks.every((b) => bigBusy.every((x) => b.endMs <= x.startMs || b.startMs >= x.endMs)),
+    "auto-cal plan (property, 200 items × 8 weeks): no two blocks or pins overlap, and none overlaps busy time");
+  const pinKeys = new Set(bigPins.map(pinBlobKey));
+  const placed = big.blocks.filter((b) => !pinKeys.has(b.key));
+  const caps = new Map(freeDays({ startMs: floorQuarter(nowMs), days: PLAN_HORIZON_DAYS, hours: DEFAULT_WORK_HOURS, busy: [...bigBusy, ...bigPins] }).map((d) => [d.dayKey, d.capMin] as const));
+  const perDay = new Map<string, number>();
+  for (const b of placed) perDay.set(chicagoDayKey(b.startMs), (perDay.get(chicagoDayKey(b.startMs)) ?? 0) + (b.endMs - b.startMs) / MIN);
+  ok(placed.length > 100 && [...perDay].every(([k, m]) => m <= (caps.get(k) ?? 0)), "auto-cal plan (property): each Chicago day's placed minutes stay within its 80 % cap");
+  ok(placed.every((b) => b.endMs - b.startMs >= 30 * MIN && b.startMs % QUARTER_MS === 0 && b.endMs % QUARTER_MS === 0),
+    "auto-cal plan (property): every placed chunk is ≥ 30 minutes and on the grid");
+  ok(ms < 1000, `auto-cal plan (property): 200 items over 8 weeks plan in well under a second (${Math.round(ms)} ms)`);
+
+  /* the planner stays client-safe; the harness's source helpers work (later tasks lean on them) */
+  const pure = ["pins.ts", "plan.ts", "free.ts", "labels.ts"].map((f) => readFileSync(`src/lib/task-plan/${f}`, "utf8")).join("\n").replace(/import type[^;]+;/g, "");
+  ok(!/from "@\/(db|lib\/stores\/|lib\/users")/.test(pure), "auto-cal pins: the pin rules and planner never import the database");
+  const demo = "export async function a() {\n  const s = await requireUser();\n}\nexport async function b() {\n  await other();\n  await requireUser();\n}\n";
+  ok(firstAwait(fnBody(demo, "a"), "requireUser()") && !firstAwait(fnBody(demo, "b"), "requireUser()") && fnBody(demo, "c") === "",
+    "auto-cal harness: fnBody/firstAwait find a function's first await");
 }
