@@ -40,12 +40,14 @@ export const SCHEDULING_LIMITS = {
 
 export const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-/** `strict` (saves): a fractional value is refused instead of rounded. */
+/** `strict` (saves): only a real, whole number in range — a string or a
+ *  fractional value is refused. Lenient (reading stored data) tolerates
+ *  numeric strings and rounds. */
 function wholeIn(v: unknown, lo: number, hi: number, strict = false): number | null {
+  if (strict) return typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : null;
   if (typeof v === "string" && v.trim() === "") return null;
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   if (!Number.isFinite(n)) return null;
-  if (strict && !Number.isInteger(n)) return null;
   const r = Math.round(n);
   return r < lo || r > hi ? null : r;
 }
@@ -57,7 +59,7 @@ const validDay = (d: unknown): d is number => typeof d === "number" && Number.is
 export function cleanWorkHours(v: unknown, strict = false): WorkHours | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
-  if (strict && Array.isArray(o.days) && !o.days.every(validDay)) return null;
+  if (strict && (!Array.isArray(o.days) || !o.days.every(validDay))) return null;
   const days = Array.isArray(o.days) ? [...new Set(o.days.filter(validDay))].sort((a, b) => a - b) : [];
   const startMin = wholeIn(o.startMin, 0, 1439, strict);
   const endMin = wholeIn(o.endMin, 1, 1440, strict);
@@ -92,23 +94,27 @@ export function cleanSchedulingInput(input: unknown): { ok: true; value: Schedul
   return { ok: true, value: { workHours, sameAreaMin, dailyDriveLimitMin, nearbyLookaheadDays } };
 }
 
-/** "HH:MM" (24 h, from <input type="time">) → minutes, or null. */
+/** "HH:MM" (24 h) → minutes, or null. "24:00" is the end of the day (1440). */
 export function clockToMin(s: string): number | null {
   const m = /^(\d{2}):(\d{2})$/.exec(s || "");
   if (!m) return null;
   const h = Number(m[1]);
   const mm = Number(m[2]);
+  if (h === 24) return mm === 0 ? 1440 : null;
   return h > 23 || mm > 59 ? null : h * 60 + mm;
 }
 
-/** minutes → "HH:MM" for <input type="time"> (1440 shows as 23:59). */
+/** minutes → "HH:MM" (1440 = "24:00", the end of the day — not valid for
+ *  <input type="time">, so the editor handles it separately). */
 export function minToClock(min: number): string {
-  const v = Math.max(0, Math.min(1439, Math.round(min)));
+  const v = Math.max(0, Math.min(1440, Math.round(min)));
   return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`;
 }
 
-/** 480 → "8:00", 1020 → "5:00" (12-hour, no am/pm — the spec's style). */
+/** 480 → "8:00", 1020 → "5:00" (12-hour, no am/pm — the spec's style);
+ *  1440 → "12:00 AM (end of day)". */
 export function fmtClock(min: number): string {
+  if (Math.round(min) >= 1440) return "12:00 AM (end of day)";
   const h = Math.floor(min / 60) % 12 || 12;
   return `${h}:${String(Math.round(min) % 60).padStart(2, "0")}`;
 }

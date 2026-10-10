@@ -13,7 +13,7 @@ import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooki
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
 import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
-import { like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { blobs } from "@/db/schema";
 import {
@@ -339,8 +339,11 @@ export async function siteVisitsSettingsChecks(ok: Ok): Promise<void> {
   ok(cleanWorkHours({ days: [], startMin: 480, endMin: 1020 }) === null && cleanWorkHours({ days: [1], startMin: 600, endMin: 600 }) === null &&
      cleanWorkHours({ days: [1], startMin: -5, endMin: 600 }) === null && cleanWorkHours("x") === null,
     "site-visits settings: no days, an end not after the start, or junk is refused");
-  ok(clockToMin("08:30") === 510 && clockToMin("24:00") === null && clockToMin("8:5") === null && minToClock(510) === "08:30" && minToClock(1440) === "23:59",
-    "site-visits settings: time inputs convert both ways");
+  ok(clockToMin("08:30") === 510 && clockToMin("24:00") === 1440 && clockToMin("24:01") === null && clockToMin("25:00") === null && clockToMin("8:5") === null && minToClock(510) === "08:30" && minToClock(1440) === "24:00",
+    "site-visits settings: time inputs convert both ways; 24:00 is the end of the day, never clamped to 23:59");
+  ok(fmtClock(1440) === "12:00 AM (end of day)" && fmtWorkHours({ days: [1], startMin: 480, endMin: 1440 }) === "Mon 8:00–12:00 AM (end of day)" &&
+     cleanWorkHours({ days: [1], startMin: 480, endMin: 1440 }, true)?.endMin === 1440,
+    "site-visits settings: an end of midnight (1440) is kept and prints as the end of the day");
   ok(fmtClock(480) === "8:00" && fmtClock(1020) === "5:00" && fmtClock(750) === "12:30", "site-visits settings: clock times print 12-hour without am/pm");
   ok(fmtWorkHours(DEFAULT_WORK_HOURS) === "Mon–Fri 8:00–5:00" && fmtWorkHours({ days: [1, 3, 5], startMin: 450, endMin: 990 }) === "Mon, Wed, Fri 7:30–4:30" &&
      fmtWorkHours({ days: [0, 1, 2, 3, 4, 5, 6], startMin: 360, endMin: 1200 }) === "Every day 6:00–8:00",
@@ -356,9 +359,25 @@ export async function siteVisitsSettingsChecks(ok: Ok): Promise<void> {
      !cleanSchedulingInput({ ...good, nearbyLookaheadDays: 90 }).ok && !cleanSchedulingInput({ ...good, workHours: { days: [], startMin: 1, endMin: 2 } }).ok,
     "site-visits settings: the admin save refuses blank or out-of-range values instead of storing a fallback");
 
+  // Strict (save) path: a real whole number in range, nothing coerced or dropped.
+  const wh = { days: [1, 2], startMin: 480, endMin: 1020 };
+  ok(!cleanSchedulingInput({ ...good, workHours: { ...wh, days: [1, 9] } }).ok && !cleanSchedulingInput({ ...good, workHours: { ...wh, days: [1, 2.5] } }).ok &&
+     !cleanSchedulingInput({ ...good, workHours: { ...wh, days: [1, "2"] } }).ok && !cleanSchedulingInput({ ...good, workHours: { ...wh, startMin: 480.5 } }).ok &&
+     !cleanSchedulingInput({ ...good, workHours: { ...wh, endMin: 1020.5 } }).ok && !cleanSchedulingInput({ ...good, sameAreaMin: 30.5 }).ok &&
+     !cleanSchedulingInput({ ...good, dailyDriveLimitMin: 240.5 }).ok && !cleanSchedulingInput({ ...good, nearbyLookaheadDays: 14.5 }).ok &&
+     cleanSchedulingInput({ ...good, workHours: { ...wh, endMin: 1440 } }).ok,
+    "site-visits settings: the admin save refuses an unknown weekday, a string weekday and fractional numbers (midnight is allowed)");
+  ok(!cleanSchedulingInput({ ...good, sameAreaMin: "30" }).ok && !cleanSchedulingInput({ ...good, sameAreaMin: "1e1" }).ok && !cleanSchedulingInput({ ...good, sameAreaMin: "0x1A" }).ok &&
+     !cleanSchedulingInput({ ...good, dailyDriveLimitMin: "240" }).ok && !cleanSchedulingInput({ ...good, nearbyLookaheadDays: "14" }).ok &&
+     !cleanSchedulingInput({ ...good, workHours: { ...wh, startMin: "480" } }).ok && !cleanSchedulingInput({ ...good, sameAreaMin: NaN }).ok,
+    "site-visits settings: the admin save needs real numbers — \"30\", \"1e1\", \"0x1A\" are refused");
+  ok(cleanWorkHours({ days: [1, 9, 2], startMin: 480, endMin: 1020 })?.days.join() === "1,2" && cleanWorkHours({ days: [1, 9], startMin: 480, endMin: 1020 }, true) === null &&
+     readSchedulingSettings({ sameAreaMin: "1e1" }).sameAreaMin === 10,
+    "site-visits settings: reading stored data still drops a bad weekday and tolerates numeric strings");
+
   const db = await getDb();
   const U = "TESTvisits:u1";
-  const snapshot = await getSchedulingSettings();
+  const [rawRow] = await db.select().from(blobs).where(eq(blobs.id, "schedule_defaults")); // the raw blob, not the default-resolved value
   const bufferBefore = (await getScheduleDefaults()).driveBufferMin;
   try {
     const saved = await saveSchedulingSettings(good);
@@ -373,11 +392,16 @@ export async function siteVisitsSettingsChecks(ok: Ok): Promise<void> {
     ok(JSON.stringify(await getUserWorkHours(U)) === JSON.stringify(mine) && (await getUserSchedulePrefs(U)).driveBufferMin === 20,
       "site-visits settings: own hours and own drive buffer share the prefs blob without clobbering each other");
     ok(!(await saveUserWorkHours(U, { days: [] })).ok, "site-visits settings: bad personal hours are refused");
+    const before = JSON.stringify(await getUserWorkHours(U));
+    ok(!(await saveUserWorkHours(U, { days: [1, 9], startMin: 480, endMin: 1020 })).ok && !(await saveUserWorkHours(U, undefined)).ok &&
+       !(await saveUserWorkHours(U, { days: [1, "2"], startMin: 480, endMin: 1020 })).ok && JSON.stringify(await getUserWorkHours(U)) === before,
+      "site-visits settings: personal hours with an unknown weekday (or none given) are refused and nothing is stored");
     await saveUserWorkHours(U, null);
     ok((await getUserWorkHours(U)) === null && JSON.stringify(await workHoursFor(U)) === JSON.stringify(good.workHours),
       "site-visits settings: clearing personal hours falls back to the company default");
   } finally {
-    await saveSchedulingSettings(snapshot);
+    if (rawRow) await db.update(blobs).set({ data: rawRow.data, updatedAt: rawRow.updatedAt }).where(eq(blobs.id, "schedule_defaults"));
+    else await db.delete(blobs).where(eq(blobs.id, "schedule_defaults"));
     await db.delete(blobs).where(like(blobs.id, "%TESTvisits:%"));
   }
 

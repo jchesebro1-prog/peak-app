@@ -22,10 +22,16 @@ export function SchedulingDefaultsCard({ initial }: { initial: SchedulingSetting
     startTransition(async () => {
       setMsg("");
       setError("");
+      // The exact minutes — never rounded here; the server refuses a bad value.
+      const limitMin = limitH.trim() === "" ? "" : Math.round(Number(limitH) * 60 * 1e6) / 1e6;
+      if (limitMin !== "" && !Number.isInteger(limitMin)) {
+        setError("Daily drive limit must be a whole number of minutes (e.g. 4.5 hours).");
+        return;
+      }
       const r = await saveSchedulingSettingsAction({
         workHours: hours,
         sameAreaMin: sameArea.trim() === "" ? "" : Number(sameArea),
-        dailyDriveLimitMin: limitH.trim() === "" ? "" : Math.round(Number(limitH) * 60),
+        dailyDriveLimitMin: limitMin,
         nearbyLookaheadDays: look.trim() === "" ? "" : Number(look),
       });
       if (!r.ok) {
@@ -50,17 +56,17 @@ export function SchedulingDefaultsCard({ initial }: { initial: SchedulingSetting
       </div>
       <div style={row}>
         <span style={lbl}>Same area</span>
-        <input type="number" min={5} max={180} className="pk-input" style={{ width: 80, fontSize: 12.5 }} value={sameArea} onChange={(e) => setSameArea(e.target.value)} />
+        <input type="number" min={5} max={180} className="pk-input" style={{ width: 80, fontSize: 12.5 }} disabled={pending} value={sameArea} onChange={(e) => setSameArea(e.target.value)} />
         <span style={unit}>drive minutes</span>
       </div>
       <div style={row}>
         <span style={lbl}>Daily drive limit</span>
-        <input type="number" min={0.5} max={16} step={0.5} className="pk-input" style={{ width: 80, fontSize: 12.5 }} value={limitH} onChange={(e) => setLimitH(e.target.value)} />
+        <input type="number" min={0.5} max={16} step={0.5} className="pk-input" style={{ width: 80, fontSize: 12.5 }} disabled={pending} value={limitH} onChange={(e) => setLimitH(e.target.value)} />
         <span style={unit}>hours, buffer included</span>
       </div>
       <div style={row}>
         <span style={lbl}>Nearby days look ahead</span>
-        <input type="number" min={1} max={60} className="pk-input" style={{ width: 80, fontSize: 12.5 }} value={look} onChange={(e) => setLook(e.target.value)} />
+        <input type="number" min={1} max={60} className="pk-input" style={{ width: 80, fontSize: 12.5 }} disabled={pending} value={look} onChange={(e) => setLook(e.target.value)} />
         <span style={unit}>days</span>
       </div>
       <div style={{ ...row, marginTop: 14 }}>

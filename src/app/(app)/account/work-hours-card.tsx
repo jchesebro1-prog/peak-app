@@ -42,12 +42,13 @@ export default function WorkHoursCard({ initial, companyDefault }: { initial: Wo
           onChange={(e) => {
             setUseDefault(e.target.checked);
             if (e.target.checked) save(true, hours);
+            else setHours(companyDefault); // start editing from the hours shown
           }}
         />
         Company default ({fmtWorkHours(companyDefault)})
       </label>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-        <WorkHoursEditor value={hours} onChange={setHours} disabled={useDefault || pending} />
+        <WorkHoursEditor value={useDefault ? companyDefault : hours} onChange={setHours} disabled={useDefault || pending} />
         {!useDefault && (
           <button className="pk-btn-accent" style={{ fontSize: 12.5 }} disabled={pending} onClick={() => save(false, hours)}>
             {pending ? "Saving…" : "Save"}

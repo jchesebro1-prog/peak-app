@@ -6,6 +6,7 @@ const ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon first
 
 /** Work days (toggle chips) + start/end times. Controlled. */
 export default function WorkHoursEditor({ value, onChange, disabled = false }: { value: WorkHours; onChange: (next: WorkHours) => void; disabled?: boolean }) {
+  const midnight = value.endMin >= 1440;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       <div role="group" aria-label="Work days" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -52,13 +53,22 @@ export default function WorkHoursEditor({ value, onChange, disabled = false }: {
         aria-label="End"
         className="pk-input"
         style={{ width: 110, fontSize: 12.5 }}
-        disabled={disabled}
-        value={minToClock(value.endMin)}
+        disabled={disabled || midnight}
+        value={midnight ? "" : minToClock(value.endMin)}
         onChange={(e) => {
           const m = clockToMin(e.target.value);
           if (m != null) onChange({ ...value, endMin: m });
         }}
       />
+      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+        <input
+          type="checkbox"
+          checked={midnight}
+          disabled={disabled}
+          onChange={(e) => onChange({ ...value, endMin: e.target.checked ? 1440 : value.startMin < 1380 ? 1380 : 1439 })}
+        />
+        Midnight (12:00 AM, end of day)
+      </label>
     </div>
   );
 }
