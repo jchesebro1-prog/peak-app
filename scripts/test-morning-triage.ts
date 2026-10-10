@@ -28,6 +28,8 @@ import { normalizedTitle, tokens } from "@/lib/triage/text";
 import { parseTriageKey, triageKey } from "@/lib/triage/keys";
 import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/triage/rank";
 import { feedErrorMessage, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
+import { clipLine, formatTimestamp, matchTranscriptLine } from "@/lib/triage/transcript-match";
+import { collapseDuplicates } from "@/lib/triage/dedupe";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -193,4 +195,45 @@ export async function triageRankChecks(ok: Ok): Promise<void> {
   ]);
   ok(ranked.map((r) => r.key).join(",") === "top,old,a,b,undated", "rank: score desc → older first → key; an unknown age sorts after known ones");
   ok(ranked[0].score === 60 && ranked[0].reason === "First response overdue", "rank: ranked rows carry their score and reason");
+}
+
+export async function triageMatchChecks(ok: Ok): Promise<void> {
+  const segs = [
+    { speaker: 0, text: "Thanks everyone for coming out today.", start: 0, end: 4 },
+    { speaker: 1, text: "I'll send the revised rigging drawings to the architect by Friday.", start: 754, end: 760 },
+    { speaker: 0, text: "Drawings look good.", start: 800, end: 802 },
+  ];
+  const hit = matchTranscriptLine("Send revised rigging drawings to architect", segs);
+  ok(!!hit && hit.index === 1 && hit.start === 754 && hit.matched === 5 && hit.share === 1, "transcript: the best segment by word overlap wins");
+  ok(matchTranscriptLine("Order new motor controller for the fly system", segs) === null, "transcript: below the 0.5 share → no match");
+  ok(matchTranscriptLine("Drawings", segs) === null, "transcript: a one-word to-do never matches (≥ 2-token floor)");
+  ok(matchTranscriptLine("Review drawings with the team and the owner", segs) === null, "transcript: 1 matched token of 4 → miss");
+  const sw = matchTranscriptLine("the THE to send architect", [{ speaker: 2, text: "send it to the architect", start: 5, end: 6 }]);
+  ok(!!sw && sw.matched === 2 && sw.share === 1, "transcript: stopwords and case are ignored");
+  ok(matchTranscriptLine("Send architect drawings", []) === null, "transcript: no transcript → no match");
+  ok(formatTimestamp(754) === "12:34" && formatTimestamp(3725) === "1:02:05" && formatTimestamp(-3) === "0:00", "transcript: timestamps read m:ss / h:mm:ss");
+  ok(clipLine("a".repeat(200)).length === 140 && clipLine("a".repeat(200)).endsWith("…") && clipLine("  x   y ") === "x y", "transcript: lines are clipped and whitespace-collapsed");
+
+  const out = collapseDuplicates(
+    [
+      cand("task:T1", "task", [], 5, { title: "Send drawings to Bob" }),
+      cand("call:R1:k1", "call", [], 10, { title: "send Bob the drawings", mention: "Walkthrough (Oct 7)" }),
+      cand("call:R2:k1", "call", [], 20, { title: "Order motor", mention: "Call A (Oct 8)" }),
+      cand("call:R3:k2", "call", [], 30, { title: "order the motor!", mention: "Call B (Oct 9)" }),
+      cand("call:R4:k3", "call", [], 40, { title: "Book lift", mention: "Call C (Oct 9)" }),
+    ],
+    [
+      { key: "task:T1", title: "Send drawings to Bob" },
+      { key: "asg:A9", title: "Book lift" },
+    ]
+  );
+  ok(out.map((c) => c.key).join(",") === "task:T1,call:R2:k1", "dedupe: to-dos matching open work or an earlier to-do collapse away");
+  ok((out[0].also ?? []).join("|") === "Also mentioned in Walkthrough (Oct 7)", "dedupe: a to-do matching an open task shows on that task's row");
+  ok((out[1].also ?? []).join("|") === "Also mentioned in Call B (Oct 9)", "dedupe: a later duplicate to-do folds into the earliest one");
+  ok(!out.some((c) => c.key === "call:R4:k3"), "dedupe: a to-do already tracked as open work off the list is not repeated");
+  const blank = collapseDuplicates(
+    [cand("call:R5:k", "call", [], 1, { title: "the to", mention: "X" }), cand("call:R6:k", "call", [], 2, { title: "a the", mention: "Y" })],
+    []
+  );
+  ok(blank.length === 2, "dedupe: an all-stopword title never collapses");
 }
