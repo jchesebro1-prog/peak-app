@@ -65900,8 +65900,10 @@ async function riserPhase2C4Checks(): Promise<void> {
     return { gp, place, wire, live: async () => (await G.getProject(gp.id))! };
   };
   const P = await mk("#328 C4 both risers");
-  await P.wire(await P.place(LIGHT, 0.1, 0.1), await P.place(LIGHT, 0.4, 0.1));
-  await P.wire(await P.place(AUDIO, 0.1, 0.8), await P.place(VIDEO, 0.4, 0.8));
+  const pL1 = await P.place(LIGHT, 0.1, 0.1);
+  await P.wire(pL1, await P.place(LIGHT, 0.4, 0.1));
+  const pSpk = await P.place(AUDIO, 0.1, 0.8);
+  await P.wire(pSpk, await P.place(VIDEO, 0.4, 0.8));
   const q = (o: Record<string, string>) => new URLSearchParams(o);
   const accL = await CR.acceptSuggestions(P.gp.id, opt, "lighting", "all", deps);
   const avMiss = await L.conduitRiserDxfResponse(P.gp.id, q({ system: "av", size: "d" }));
@@ -65964,6 +65966,26 @@ async function riserPhase2C4Checks(): Promise<void> {
   ok(!avTables.includes("power") && !avTables.includes("controls") && avTables.includes("line") && avTables.includes("box"),
     "#328 C4 legend: the A/V riser still prints no power tables");
   ok(M.emptyConduitRiserDoc("av").showSignals === false, "#328 C4 legend: A/V bubbles (and so its wire legend) stay off by default");
+
+  // ---- 6b. the A/V riser ignores a device's own power letter (final review)
+  const tagged = await G.setPlacementsTag(P.gp.id, [{ id: pSpk.id, patch: { power: "A", contents: "(2) SPK" } }, { id: pL1.id, patch: { power: "A" } }]);
+  const { layoutDetail } = await import("@/lib/design/conduit-riser/layout");
+  const { detailGeometry } = await import("@/lib/design/conduit-riser/drawing");
+  const powerInserts = (d: Awaited<ReturnType<typeof L.loadConduitRiser>>) =>
+    d.view.details.flatMap((v) => detailGeometry(layoutDetail(v, d.doc), v).geo).filter((g) => g.t === "insert" && g.block === "PK_POWER").length;
+  const avData = await L.loadConduitRiser(await P.live(), opt, "av", deps);
+  const ltData = await L.loadConduitRiser(await P.live(), opt, "lighting", deps);
+  const spkAv = avData.input.devices.find((d) => d.id === pSpk.id)!;
+  const spkLt = ltData.input.devices.find((d) => d.id === pSpk.id)!;
+  ok(tagged.ok && (await P.live()).placements!.find((x) => x.id === pSpk.id)!.tag?.power === "A" &&
+     spkAv.tag.power === "" && spkAv.tag.contents === "" && spkLt.tag.power === "A" && spkLt.tag.contents === "(2) SPK",
+    "#328 C4 power: an A/V device's own power letter and contents read blank on the A/V riser, kept on the lighting riser's view of it");
+  ok(powerInserts(avData) === 0 && powerInserts(ltData) >= 1,
+    "#328 C4 power: the A/V detail draws no PK_POWER marker; the lighting device with power A still draws one");
+  const avDxf = await (await L.conduitRiserDxfResponse(P.gp.id, q({ system: "av", size: "d" }))).text();
+  const ltDxf = await (await L.conduitRiserDxfResponse(P.gp.id, q({ size: "d" }))).text();
+  ok(!readDxf321(avDxf).insertNames.includes("PK_POWER") && readDxf321(ltDxf).insertNames.includes("PK_POWER"),
+    "#328 C4 power: the A/V DXF inserts no PK_POWER; the lighting DXF still does");
 
   // ---- 7. pins: tag panel, sheets, riser page
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");

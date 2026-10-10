@@ -217,7 +217,10 @@ export function riserDevices(project: GridProject, optionId: string, ctx: RiserP
       spaceId: space?.id ?? null,
       spaceName: space?.name ?? "",
       levelId: levelOfPlacement(pl, (x) => spaceOf(x, spaces), project),
-      tag: effectiveTag(pl.tag, part?.tagDefaults, space?.name ?? ""),
+      // #328: the A/V riser has no power types or power controls, so it
+      // ignores a device's own power letter and contents (no PK_POWER marker
+      // pointing at a table it never prints); lighting unchanged.
+      tag: system === "av" ? { ...effectiveTag(pl.tag, part?.tagDefaults, space?.name ?? ""), power: "", contents: "" } : effectiveTag(pl.tag, part?.tagDefaults, space?.name ?? ""),
       ...(rack ? { rack: { items: rack } } : {}),
     };
   });

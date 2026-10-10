@@ -11089,7 +11089,8 @@ plates/boxes, displays/projectors, switching/distribution, networking, racks and
 riser. The A/V sheet prints conduit box types, the line legend and equipment rack contents, plus the wire legend only
 when bubbles are on. That legend is titled **WIRE LEGEND**, as on Bray's AV1.5; lighting keeps CONTROL WIRE LEGEND. The
 A/V riser has no power types or power controls. Its Tag panel and phone view hide Power type, Power controls contents
-and the "Add power types below…" hint. Tag fields, levels, box types, conduit sizes and fill are shared and unchanged.
+and the "Add power types below…" hint. The A/V riser ignores a device's own power letter and contents, so it never
+draws a power marker. Tag fields, levels, box types, conduit sizes and fill are shared and unchanged.
 Punch item #328.
 
 ## D820. The plan prompt picks the riser from the pair (#328 piece C, 2026-10-10)
