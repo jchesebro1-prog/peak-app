@@ -7,7 +7,7 @@
  * direct Google Calendar event when their mailbox has the Calendar grant
  * (D77), else an emailed .ics whose UID is always sv-<id>@peak-app.
  */
-export type InviteStatus = "calendar" | "sent" | "invites-off" | "gmail-off" | "no-mailbox" | "no-email" | "failed";
+export type InviteStatus = "calendar" | "sent" | "invites-off" | "gmail-off" | "no-mailbox" | "no-email" | "reconnect" | "failed";
 export type InviteChannel = "calendar" | "ics";
 
 /** What one person was last sent: startAt/endAt are the times THEY were told,
@@ -24,9 +24,22 @@ export type VisitInviteRecipient = {
   /** .ics SEQUENCE last sent (0 for the first invite) */
   sequence: number;
   fromMailbox: string | null;
-  /** the sent email's Gmail id (channel "ics") — the Gmail import skips it */
+  /** the latest sent email's Gmail id (channel "ics") */
   gmailId: string | null;
+  /** every Gmail id sent to this person for this visit — invite, updates and
+   *  cancellations — so the Gmail import (#97) never re-fetches them */
+  gmailIds: string[];
 };
+
+/** Most Gmail ids kept per recipient (the latest win). */
+export const MAX_RECIPIENT_GMAIL_IDS = 50;
+
+/** ids appended, de-duplicated, capped to the latest MAX_RECIPIENT_GMAIL_IDS. */
+export function withGmailId(ids: readonly string[], id: string | null | undefined): string[] {
+  const out = ids.filter((x) => x !== id);
+  if (id) out.push(id);
+  return out.slice(-MAX_RECIPIENT_GMAIL_IDS);
+}
 
 export type RecipientResult = {
   name: string;
@@ -45,6 +58,8 @@ export type InviteVisitShape = {
   invites?: readonly unknown[] | null;
   invite?: { sentAt?: number; to?: string; fromMailbox?: string; gmailId?: string } | null;
   googleEventId?: string | null;
+  /** Gmail ids of invite mail whose recipient entry is gone (a cancelled person) */
+  inviteGmailIds?: readonly unknown[] | null;
 };
 
 export function visitUid(id: string): string {
@@ -62,6 +77,10 @@ function readRecipient(raw: unknown): VisitInviteRecipient | null {
   if (!name || !channel) return null;
   const eventId = str(r.eventId) || null;
   if (channel === "calendar" && !eventId) return null;
+  const gmailId = str(r.gmailId) || null;
+  let gmailIds: string[] = [];
+  for (const id of Array.isArray(r.gmailIds) ? r.gmailIds : []) if (typeof id === "string" && id) gmailIds = withGmailId(gmailIds, id);
+  if (gmailId && !gmailIds.includes(gmailId)) gmailIds = withGmailId(gmailIds, gmailId);
   return {
     name,
     to: str(r.to),
@@ -72,7 +91,8 @@ function readRecipient(raw: unknown): VisitInviteRecipient | null {
     endAt: num(r.endAt),
     sequence: Math.max(0, Math.round(num(r.sequence))),
     fromMailbox: str(r.fromMailbox) || null,
-    gmailId: str(r.gmailId) || null,
+    gmailId,
+    gmailIds,
   };
 }
 
@@ -93,9 +113,9 @@ export function normalizeInvites(v: InviteVisitShape): VisitInviteRecipient[] {
   const startAt = v.startAt ?? 0;
   const endAt = v.endAt ?? 0;
   if (v.googleEventId)
-    return [{ name: lead, to: str(v.invite?.to), channel: "calendar", eventId: v.googleEventId, sentAt: num(v.invite?.sentAt), startAt, endAt, sequence: 0, fromMailbox: null, gmailId: null }];
+    return [{ name: lead, to: str(v.invite?.to), channel: "calendar", eventId: v.googleEventId, sentAt: num(v.invite?.sentAt), startAt, endAt, sequence: 0, fromMailbox: null, gmailId: null, gmailIds: [] }];
   if (v.invite && str(v.invite.to))
-    return [{ name: lead, to: str(v.invite.to), channel: "ics", eventId: null, sentAt: num(v.invite.sentAt), startAt, endAt, sequence: 0, fromMailbox: str(v.invite.fromMailbox) || null, gmailId: str(v.invite.gmailId) || null }];
+    return [{ name: lead, to: str(v.invite.to), channel: "ics", eventId: null, sentAt: num(v.invite.sentAt), startAt, endAt, sequence: 0, fromMailbox: str(v.invite.fromMailbox) || null, gmailId: str(v.invite.gmailId) || null, gmailIds: str(v.invite.gmailId) ? [str(v.invite.gmailId)] : [] }];
   return [];
 }
 
@@ -125,6 +145,30 @@ export function visitEventIds(v: InviteVisitShape): string[] {
   return out;
 }
 
+/** Every Gmail id of invite mail sent for this visit (a raw or normalized
+ *  doc): the old single stamp, each recipient's sends, and the sends to
+ *  people since removed. The Gmail import (#97) seeds its dedup with these. */
+export function visitInviteGmailIds(v: InviteVisitShape): string[] {
+  const out = new Set<string>();
+  if (v.invite?.gmailId) out.add(v.invite.gmailId);
+  for (const e of normalizeInvites(v)) for (const id of e.gmailIds) out.add(id);
+  for (const id of Array.isArray(v.inviteGmailIds) ? v.inviteGmailIds : []) if (typeof id === "string" && id) out.add(id);
+  return [...out];
+}
+
+/**
+ * Which connected mailbox sends a site-visit invite. An update or
+ * cancellation prefers the mailbox that sent that person's original invite
+ * (its ORGANIZER must not change mid-series) while it is still connected;
+ * otherwise the scheduler's personal mailbox, else the first shared box.
+ */
+export function pickInviteMailbox(keys: readonly string[], opts: { preferMailbox?: string | null; schedulerUserId: string | null }): string | null {
+  if (opts.preferMailbox && keys.includes(opts.preferMailbox)) return opts.preferMailbox;
+  const personal = opts.schedulerUserId ? "personal:" + opts.schedulerUserId : null;
+  if (personal && keys.includes(personal)) return personal;
+  return keys.find((k) => !k.startsWith("personal:")) ?? null;
+}
+
 export function recipientLine(r: RecipientResult): string {
   if (r.action === "keep") return "";
   const noun = r.action === "cancel" ? "cancellation" : r.action === "update" ? "update" : "invite";
@@ -141,6 +185,10 @@ export function recipientLine(r: RecipientResult): string {
       return `No connected mailbox to send ${r.name}'s ${noun}`;
     case "no-email":
       return `${r.name} has no email on the team roster`;
+    case "reconnect":
+      return r.action === "cancel"
+        ? `${r.name}'s calendar is disconnected — remove the visit from it by hand (Peak won't retry)`
+        : `${r.name}'s calendar is disconnected — reconnect it to update their copy`;
     case "failed":
       return `${r.name}'s ${noun} failed — save again to retry`;
   }

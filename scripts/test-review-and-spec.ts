@@ -9434,7 +9434,7 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
  * teardown drops them — and the sweep catches what a quote spawns. */
 import { registerFixture } from "./test-fixtures";
 import { driveTimeKeysChecks, driveTimeStateChecks, driveTimeVenueStampChecks, driveTimePlaceBookChecks, driveTimeFixChecks, driveTimePlanChecks, driveTimePrefsChecks, driveTimeDiffChecks, driveTimeLoaderChecks, driveTimeSyncChecks, driveTimeNoStraightLinePins, driveTimeAgendaChecks, driveTimeTriggerPins, driveTimeWorklistChecks, driveTimeFixUiPins, driveTimeBookingPins, driveTimeTriageFlagChecks, driveTimeFinalFixChecks, driveTimeRound2Checks } from "./test-drive-time";
-import { siteVisitsActionChecks, siteVisitsAgendaChecks, siteVisitsAttendeeChecks, siteVisitsBookingUiPins, siteVisitsConflictChecks, siteVisitsEditPins, siteVisitsInviteChecks, siteVisitsLoaderChecks, siteVisitsNearbyChecks, siteVisitsSettingsChecks } from "./test-site-visits";
+import { siteVisitsActionChecks, siteVisitsAgendaChecks, siteVisitsAttendeeChecks, siteVisitsBookingUiPins, siteVisitsConflictChecks, siteVisitsEditPins, siteVisitsFinalFixChecks, siteVisitsInviteChecks, siteVisitsLoaderChecks, siteVisitsNearbyChecks, siteVisitsSettingsChecks } from "./test-site-visits";
 import { meetings323StoreChecks, meetings323MatchChecks, meetings323VisibilityChecks, meetings323RenderChecks, meetings323SyncChecks, meetings323ActionChecks, meetings323UiPins, meetings323ProjectionChecks, meetings323EverywherePins, meetings323EverywhereChecks, meetings323FinalChecks } from "./test-meetings-323";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
@@ -11585,6 +11585,7 @@ seeded()
   .then(() => siteVisitsBookingUiPins(ok))
   .then(() => siteVisitsEditPins(ok))
   .then(() => siteVisitsAgendaChecks(ok))
+  .then(() => siteVisitsFinalFixChecks(ok))
   .then(() => driveTimeFinalFixChecks(ok))
   .then(() => driveTimeRound2Checks(ok))
   .then(() => triageFoundationChecks(ok))

@@ -5,7 +5,7 @@
  * declined, unanswered or tentative events, the app's drive events, and any
  * calendar copy of a visit (the visit itself is counted once, from its record).
  */
-import { isVisitIcsCopy, visitPeople } from "@/lib/drive-plan/stops";
+import { visitCopyIndex, visitPeople } from "@/lib/drive-plan/stops";
 import { visitEventIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
 import { addDays, chicagoDayKey, chicagoDayStart, DRIVE_TZ } from "@/lib/drive-plan/day";
 import { chicagoMinuteOfDay, fmtClockShort } from "./hours";
@@ -53,9 +53,9 @@ export function busyBlocks(args: {
     if (v.stage !== "scheduled" && v.stage !== "done") continue;
     out.push({ key: "sv:" + v.id, kind: "visit", label: v.label, startMs: v.startAt, endMs: Math.max(v.endAt ?? v.startAt, v.startAt) });
   }
-  const copies = args.visits.map((v) => ({ id: v.id, eventIds: v.eventIds }));
+  const copies = visitCopyIndex(args.visits);
   for (const e of args.events ?? []) {
-    if (!isBusyEvent(e) || isVisitIcsCopy(e, copies)) continue;
+    if (!isBusyEvent(e) || copies.has(e)) continue;
     out.push({ key: "g:" + e.id, kind: "event", label: e.title, startMs: e.startMs, endMs: e.endMs });
   }
   return out.sort((a, b) => a.startMs - b.startMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));

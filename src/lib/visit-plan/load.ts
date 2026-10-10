@@ -241,7 +241,13 @@ export async function loadBookingCheck(input: BookingCheckInput, opts: BookingCh
     const r = reads.get(userId);
     return r && r.status === "ok" ? r.events : null;
   };
-  const busyOf = (u: Person) => busyBlocks({ person: u.name, visits: busySrc, events: eventsOf(u.id), excludeVisitId: cand.id });
+  // Each person's blocks are built once (nearby days and the day check both ask).
+  const busyMemo = new Map<string, ReturnType<typeof busyBlocks>>();
+  const busyOf = (u: Person) => {
+    let b = busyMemo.get(u.id);
+    if (!b) busyMemo.set(u.id, (b = busyBlocks({ person: u.name, visits: busySrc, events: eventsOf(u.id), excludeVisitId: cand.id })));
+    return b;
+  };
   const routesFor = async (pairs: Array<{ from: LatLng; to: LatLng }>): Promise<Map<string, number>> => {
     try {
       return await d.routes(pairs, Math.max(0, deadline - d.now()));

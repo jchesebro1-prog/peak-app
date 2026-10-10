@@ -8,6 +8,7 @@ import { allUsers } from "@/lib/users";
 import {
   normalizeInvites,
   planInviteChanges,
+  withGmailId,
   visitUid,
   type InviteChannel,
   type InviteStatus,
@@ -90,10 +91,15 @@ export type InviteDeps = {
     toAddr: string;
     subject: string;
     body: string;
+    /** an update / cancellation: the mailbox that sent this person's invite
+     *  (used while still connected, so the ORGANIZER never changes) */
+    preferMailbox?: string | null;
     /** builds the .ics once the sending mailbox (its ORGANIZER) is known */
     ics: (organizerAddr: string) => string;
   }): Promise<{ gmailId: string; gmailThreadId: string; fromMailbox: string } | null>;
-  saveInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null): Promise<void>;
+  /** `retiredGmailIds`: Gmail ids sent to people whose entry is gone (kept on
+   *  the visit so the Gmail import never re-fetches them) */
+  saveInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null, retiredGmailIds?: string[]): Promise<void>;
   log(msg: string, err?: unknown): void;
 };
 
@@ -152,7 +158,7 @@ function leadStatus(rec: SiteVisit, results: RecipientResult[]): InviteStatus {
 }
 
 type Target = { people: string[]; startAt: number | null; endAt: number | null } | null;
-type Change = { status: InviteStatus; ok: boolean; gmailId: string | null; eventId: string | null };
+type Change = { status: InviteStatus; ok: boolean; gmailId: string | null; eventId: string | null; fromMailbox: string | null; drop?: boolean };
 type SendIcs = InviteDeps["sendIcs"];
 
 async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; name: string }, deps?: Partial<InviteDeps>): Promise<InviteReport> {
@@ -161,19 +167,41 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
   const results: RecipientResult[] = plan.keep.map((e) => ({ name: e.name, action: "keep", status: e.channel === "calendar" ? "calendar" : "sent" }));
   if (!plan.add.length && !plan.update.length && !plan.cancel.length) return { status: leadStatus(rec, results), recipients: results };
 
-  // Every send already made is persisted (finally), whatever a later person
-  // does: an update / cancel not yet attempted keeps its old entry, so the
-  // next save retries it and never repeats a recorded send.
+  // Every send is persisted as soon as it is made (after each person, so a
+  // drive sync running mid-dispatch sees the new event ids), and once more in
+  // `finally` as the safety net: an update / cancel not yet attempted keeps
+  // its old entry, so the next save retries it and never repeats a send.
   const next: VisitInviteRecipient[] = [...plan.keep];
   const pending = new Set<VisitInviteRecipient>([...plan.update, ...plan.cancel]);
+  const retired: string[] = [];
+  let dirty = false;
+  let savedOnce = false;
+  const persist = async () => {
+    if (!dirty) return;
+    dirty = false;
+    const saved = [...next, ...pending];
+    const lead = target ? saved.find((e) => e.name === rec.assignedTo) ?? null : null;
+    try {
+      await d.saveInvites(rec.id, saved, lead, [...retired]);
+      savedOnce = true;
+    } catch (err) {
+      dirty = true; // the finally tries again
+      d.log("[site-visit] invite stamp failed:", err);
+    }
+  };
   try {
     const users = await d.users();
     const userOf = (name: string) => users.find((u) => u.name === name) ?? null;
-    const keyOf = async (name: string): Promise<string | null> => {
+    // Throws when the grant lookup itself fails (a retryable error, never
+    // "no grant"); null = this person has no connected calendar.
+    const strictKeyOf = async (name: string): Promise<string | null> => {
       const u = userOf(name);
       if (!u || !d.gmailEnabled()) return null;
+      return await d.calendarKeyFor(u.id);
+    };
+    const keyOf = async (name: string): Promise<string | null> => {
       try {
-        return await d.calendarKeyFor(u.id);
+        return await strictKeyOf(name);
       } catch {
         return null;
       }
@@ -189,8 +217,8 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
     // ATTENDEE (RFC 5546 — required on a CANCEL); PUBLISH output is unchanged.
     const icsFor = (toAddr: string, method: "PUBLISH" | "CANCEL", sequence: number, s: number, e: number) => (organizer: string) =>
       buildIcs({ uid, title, description: body, location, start: s, end: e, stampAt: now, method, sequence, organizer, attendee: toAddr });
-    const email = (toAddr: string, subject: string, ics: Parameters<SendIcs>[0]["ics"]) =>
-      d.sendIcs({ siteVisitId: rec.id, schedulerUserId: me.id, toAddr, subject, body, ics });
+    const email = (toAddr: string, subject: string, ics: Parameters<SendIcs>[0]["ics"], preferMailbox: string | null = null) =>
+      d.sendIcs({ siteVisitId: rec.id, schedulerUserId: me.id, toAddr, subject, body, ics, ...(preferMailbox ? { preferMailbox } : {}) });
 
     for (const name of plan.add) {
       let status: InviteStatus = "failed";
@@ -206,7 +234,8 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
           if (key) {
             try {
               const ev = await d.insertEvent(key, write);
-              next.push({ name, to: toAddr, channel: "calendar", eventId: ev.id, sentAt: now, startAt, endAt, sequence: 0, fromMailbox: key, gmailId: null });
+              next.push({ name, to: toAddr, channel: "calendar", eventId: ev.id, sentAt: now, startAt, endAt, sequence: 0, fromMailbox: key, gmailId: null, gmailIds: [] });
+              dirty = true;
               status = "calendar";
               channel = "calendar";
               placed = true;
@@ -218,7 +247,8 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
             channel = "ics";
             const sent = await email(toAddr, title, icsFor(toAddr, "PUBLISH", 0, startAt, endAt));
             if (sent) {
-              next.push({ name, to: toAddr, channel: "ics", eventId: null, sentAt: now, startAt, endAt, sequence: 0, fromMailbox: sent.fromMailbox, gmailId: sent.gmailId });
+              next.push({ name, to: toAddr, channel: "ics", eventId: null, sentAt: now, startAt, endAt, sequence: 0, fromMailbox: sent.fromMailbox, gmailId: sent.gmailId, gmailIds: [sent.gmailId] });
+              dirty = true;
               status = "sent";
             } else status = "no-mailbox";
           }
@@ -228,33 +258,42 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
         status = "failed"; // not recorded — the next save retries this person
       }
       results.push({ name, action: "invite", status, ...(channel ? { channel } : {}) });
+      await persist();
     }
 
     // Update / cancel go to people already invited — no invites-toggle check:
     // they hold a copy that must not go stale.
     const change = async (e: VisitInviteRecipient, kind: "update" | "cancel"): Promise<Change> => {
-      const fail = (status: InviteStatus): Change => ({ status, ok: false, gmailId: null, eventId: null });
+      const fail = (status: InviteStatus): Change => ({ status, ok: false, gmailId: null, eventId: null, fromMailbox: null });
       try {
         if (!d.gmailEnabled()) return fail("gmail-off");
         if (e.channel === "calendar") {
-          const key = await keyOf(e.name);
-          if (!key || !e.eventId) return fail("failed");
+          const key = await strictKeyOf(e.name);
+          if (!key) {
+            // Their calendar grant is gone. An update waits for a reconnect
+            // (entry kept, retried); a removed person's copy can never be
+            // deleted by Peak now, so that entry is dropped and the summary says so.
+            return kind === "cancel" ? { ...fail("reconnect"), drop: true } : fail("reconnect");
+          }
+          if (!e.eventId) return fail("failed");
           if (kind === "cancel") {
             await d.deleteEvent(key, e.eventId);
-            return { status: "calendar", ok: true, gmailId: null, eventId: null };
+            return { status: "calendar", ok: true, gmailId: null, eventId: null, fromMailbox: key };
           }
           // Main's reschedule rule, per person: PATCH in place (re-confirmed);
           // a copy deleted in Google is replaced, never doubled.
           const ev = await writeVisitCalendarEvent(key, e.eventId, write, cal);
-          return { status: "calendar", ok: true, gmailId: null, eventId: ev.id };
+          return { status: "calendar", ok: true, gmailId: null, eventId: ev.id, fromMailbox: key };
         }
         const toAddr = e.to || userOf(e.name)?.email || "";
         if (!toAddr) return fail("no-email");
+        // From the mailbox that sent the invite while it is still connected —
+        // the ORGANIZER of an update / CANCEL must match the original.
         const sent =
           kind === "cancel"
-            ? await email(toAddr, `Cancelled: ${title}`, icsFor(toAddr, "CANCEL", e.sequence + 1, e.startAt, e.endAt))
-            : await email(toAddr, `Updated: ${title}`, icsFor(toAddr, "PUBLISH", e.sequence + 1, startAt, endAt));
-        return sent ? { status: "sent", ok: true, gmailId: sent.gmailId, eventId: null } : fail("no-mailbox");
+            ? await email(toAddr, `Cancelled: ${title}`, icsFor(toAddr, "CANCEL", e.sequence + 1, e.startAt, e.endAt), e.fromMailbox)
+            : await email(toAddr, `Updated: ${title}`, icsFor(toAddr, "PUBLISH", e.sequence + 1, startAt, endAt), e.fromMailbox);
+        return sent ? { status: "sent", ok: true, gmailId: sent.gmailId, eventId: null, fromMailbox: sent.fromMailbox } : fail("no-mailbox");
       } catch (err) {
         d.log(`[site-visit] ${e.channel === "calendar" ? "calendar" : "invite"} ${kind} failed:`, err);
         return fail("failed");
@@ -266,25 +305,38 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
       pending.delete(e);
       next.push(
         r.ok
-          ? { ...e, startAt, endAt, sentAt: now, sequence: e.sequence + 1, gmailId: r.gmailId ?? e.gmailId, eventId: r.eventId ?? e.eventId }
+          ? {
+              ...e,
+              startAt,
+              endAt,
+              sentAt: now,
+              sequence: e.sequence + 1,
+              gmailId: r.gmailId ?? e.gmailId,
+              gmailIds: withGmailId(e.gmailIds, r.gmailId),
+              eventId: r.eventId ?? e.eventId,
+              fromMailbox: r.fromMailbox ?? e.fromMailbox,
+            }
           : e // kept as last told, so the next save retries the update
       );
+      if (r.ok) dirty = true;
       results.push({ name: e.name, action: "update", status: r.status, channel: e.channel });
+      await persist();
     }
     for (const e of plan.cancel) {
       const r = await change(e, "cancel");
       pending.delete(e);
-      if (!r.ok) next.push(e); // kept, so the next save retries the cancellation
+      if (!r.ok && !r.drop) next.push(e); // kept, so the next save retries the cancellation
+      else {
+        // The entry goes; every Gmail id ever sent this person stays on the visit.
+        for (const id of withGmailId(e.gmailIds, r.gmailId)) if (!retired.includes(id)) retired.push(id);
+        dirty = true;
+      }
       results.push({ name: e.name, action: "cancel", status: r.status, channel: e.channel });
+      await persist();
     }
   } finally {
-    const saved = [...next, ...pending];
-    const lead = target ? saved.find((e) => e.name === rec.assignedTo) ?? null : null;
-    try {
-      await d.saveInvites(rec.id, saved, lead);
-    } catch (err) {
-      d.log("[site-visit] invite stamp failed:", err);
-    }
+    if (!savedOnce) dirty = true; // always written at least once
+    await persist();
   }
   return { status: leadStatus(rec, results), recipients: results };
 }
@@ -301,9 +353,16 @@ export async function dispatchVisitInvite(rec: SiteVisit, me: { id: string; name
   }
 }
 
-/** The visit is being deleted: everyone invited gets a cancellation. */
+/** The visit is being deleted: everyone invited gets a cancellation — unless
+ *  the visit is already over (D782): a past visit stays in people's calendar
+ *  history, and no one is emailed about deleting something that happened. */
 export async function cancelVisitInvites(rec: SiteVisit, me: { id: string; name: string }, deps?: Partial<InviteDeps>): Promise<InviteReport> {
   try {
+    const now = (deps?.now ?? Date.now)();
+    if ((rec.endAt ?? rec.startAt ?? 0) < now) {
+      const recipients: RecipientResult[] = normalizeInvites(rec).map((e) => ({ name: e.name, action: "keep", status: e.channel === "calendar" ? "calendar" : "sent", channel: e.channel }));
+      return { status: leadStatus(rec, recipients), recipients };
+    }
     return await syncInvites(rec, null, me, deps);
   } catch (err) {
     (deps?.log ?? defaultDeps().log)("[site-visit] invite cancel failed:", err);

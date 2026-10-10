@@ -1553,8 +1553,8 @@ export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
     maxMs: at(23),
     googleEvents: [gEv("gA", { startMs: at(9), endMs: at(10) }), gEv("meet", {})],
     deps: badDeps({ visits: async () => [visit("SV-1", { assignedTo: "Jeff", attendees: ["Dana"], googleEventId: "gL",
-      invites: [{ name: "Jeff", to: "", channel: "calendar", eventId: "gL", sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: null, gmailId: null },
-                { name: "Dana", to: "", channel: "calendar", eventId: "gA", sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: null, gmailId: null }] })] }),
+      invites: [{ name: "Jeff", to: "", channel: "calendar", eventId: "gL", sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: null, gmailId: null, gmailIds: [] },
+                { name: "Dana", to: "", channel: "calendar", eventId: "gA", sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: null, gmailId: null, gmailIds: [] }] })] }),
   });
   ok(asAttendee.addressFlags.get("g-gA")?.fix?.kind === "place" && !asAttendee.addressFlags.has("g-meet"),
     "drive-time agenda: an attendee's own Google copy of the visit carries its address flag too");

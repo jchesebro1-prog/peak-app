@@ -11,7 +11,7 @@ import type { AddressState, LatLng } from "@/lib/address-verify/types";
 import { addDays, chicagoDayStart } from "@/lib/drive-plan/day";
 import { planDriveDays, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import { pairKey, planDay } from "@/lib/drive-plan/plan";
-import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop } from "@/lib/drive-plan/stops";
+import { isVisitIcsCopy, stopsForDay, visitCopyIndex, visitPeople, type DriveStop } from "@/lib/drive-plan/stops";
 import { toCalendarEvents, type CalendarEvent } from "@/lib/google/calendar";
 import { gmailEnabled } from "@/lib/gmail/config";
 import { buildRaw } from "@/lib/gmail/mime";
@@ -19,14 +19,14 @@ import { buildIcs, icsMimeType } from "@/lib/ics";
 import type { Office } from "@/lib/settings";
 import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
-import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
-import { busyBlocks, fmtBusy, fmtBusyRange, OTHERS_EVENT_LABEL, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
+import { inviteSummary, normalizeInvites, pickInviteMailbox, planInviteChanges, visitEventIds, visitInviteGmailIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
+import { busyBlocks, fmtBusy, fmtBusyRange, OTHERS_EVENT_LABEL, toBusyVisit, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
 import { checkVisit, stopConflicts, type StopCheckInput } from "@/lib/visit-plan/check";
 import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, weekdayOf, workWindow } from "@/lib/visit-plan/hours";
 import { attendeeStatusOn, couldBeSameArea, MAX_NEARBY_DAYS, nearbyLine, nearbyPairs, straightLineMiles, suggestDays, VISITS_ONLY_NOTE, type LeadDay } from "@/lib/visit-plan/nearby";
 import { BOOKING_ROUTE_BUDGET_MS, bookingRouteMode, loadBookingCheck, NEW_VISIT_ID, readCalendarForBooking, type BookingDeps } from "@/lib/visit-plan/load";
 import type { BookingCheckInput } from "@/lib/visit-plan/types";
-import { cleanBookingInput } from "@/lib/visit-plan/input";
+import { cleanBookingInput, MAX_BOOKING_PARAM_CHARS, parseBookingCheckParam, validVisitSpan } from "@/lib/visit-plan/input";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { pickDayTimes } from "@/lib/visit-plan/pick-day";
 import { agendaConflicts } from "@/lib/visit-plan/agenda";
@@ -69,7 +69,7 @@ const sv = (id: string, over: Partial<SiteVisit>): SiteVisit => ({
   stage: "scheduled", leadId: null, surveyId: null, preferredTiming: "", ...over,
 }) as SiteVisit;
 const rcpt = (name: string, over: Partial<VisitInviteRecipient> = {}): VisitInviteRecipient => ({
-  name, to: name.toLowerCase() + "@peak.test", channel: "ics", eventId: null, sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: "personal:me", gmailId: null, ...over,
+  name, to: name.toLowerCase() + "@peak.test", channel: "ics", eventId: null, sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: "personal:me", gmailId: null, gmailIds: [], ...over,
 });
 
 const BASE = { name: "Madison Office", lat: 43.0731, lng: -89.4012 };
@@ -98,6 +98,13 @@ function fnBody(src: string, name: string): string {
   if (start < 0) return "";
   const next = src.indexOf("\nexport ", start + 1);
   return next < 0 ? src.slice(start) : src.slice(start, next);
+}
+/** Any top-level function (exported or not, sync or async): its text up to the closing "\n}\n". */
+function fnBlock(src: string, name: string): string {
+  const m = new RegExp(`\\nexport (?:async )?function ${name}\\(|\\n(?:async )?function ${name}\\(`).exec(src);
+  if (!m) return "";
+  const end = src.indexOf("\n}\n", m.index + 1);
+  return end < 0 ? src.slice(m.index) : src.slice(m.index, end + 2);
 }
 /** True when `call` is the function body's first `await`. */
 function firstAwait(body: string, call: string): boolean {
@@ -363,7 +370,7 @@ export async function siteVisitsInviteChecks(ok: Ok): Promise<void> {
     "site-visits: an attendee's direct calendar copy is recognised as the visit (counted once)");
   ok(/eventIds: visitEventIds\(v\)/.test(readFileSync("src/lib/drive-plan/load.ts", "utf8")), "site-visits: the drive loader hands every calendar copy id to the stop builder");
   const bridge = readFileSync("src/lib/gmail/bridge.ts", "utf8");
-  ok(/d\.invites/.test(bridge) && /known\.add\(r\.gmailId\)/.test(bridge), "site-visits: per-recipient invite emails are skipped by the Gmail import like the old single stamp");
+  ok(/visitInviteGmailIds\(d\)/.test(bridge), "site-visits: per-recipient invite emails are skipped by the Gmail import like the old single stamp");
   const va = readFileSync("src/app/(app)/venue-assessments/visit-actions.ts", "utf8");
   const rm = va.slice(va.indexOf("export async function removeVisitAction("), va.indexOf("export async function scheduleVisitAction("));
   ok(rm.includes("await cancelVisitInvites(") && rm.indexOf("await cancelVisitInvites(") < rm.indexOf("await removeVisit(") && !rm.includes("deleteEvent("),
@@ -845,8 +852,7 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
     "site-visits input: junk is empty; a range over 24 h is untimed");
 
   const ba = readFileSync("src/app/(app)/visit-booking-actions.ts", "utf8");
-  for (const name of ["bookingCheckAction", "updateVisitAction"])
-    ok(firstAwait(fnBody(ba, name), "requireUser()"), `site-visits actions: ${name} checks the session first`);
+  ok(firstAwait(fnBody(ba, "updateVisitAction"), "requireUser()"), "site-visits actions: updateVisitAction checks the session first");
   const upd = fnBody(ba, "updateVisitAction");
   ok(upd.indexOf("after(") > 0 && upd.indexOf("after(") < upd.indexOf("await dispatchVisitInvite(") && /resyncForVisitChange\(prevVisit, nextVisit\)\.catch\(/.test(upd),
     "site-visits actions: editing a visit re-syncs the old and new days (in after(), before the invites)");
@@ -862,8 +868,9 @@ export async function siteVisitsActionChecks(ok: Ok): Promise<void> {
   ok(/Date\.now\(\) \+ BADGE_TOTAL_BUDGET_MS/.test(get) && /BADGE_TOTAL_BUDGET_MS = 20_000/.test(route) && get.indexOf("Date.now() >= deadline") > 0 && get.indexOf("Date.now() >= deadline") < get.indexOf("loadBookingCheck("),
     "site-visits badges: conflict badges share one 20 s deadline and stop starting new visits once it is spent");
   ok(/\.slice\(0, MAX_IDS\)/.test(get) && /MAX_IDS = 10/.test(route) && /nearby: false/.test(get), "site-visits badges: at most 10 visits per call, nearby days skipped");
-  ok(/viewerId: me\.id/.test(get) && (route.match(/viewerId:/g) ?? []).length === 1 && /viewerId: me\.id/.test(fnBody(ba, "bookingCheckAction")) && (ba.match(/viewerId:/g) ?? []).length === 1,
-    "site-visits badges: the route and the booking check always view as the signed-in user (others' event titles stay hidden)");
+  const checkRoute = readFileSync("src/app/api/visits/check/route.ts", "utf8");
+  ok(/viewerId: me\.id/.test(get) && (route.match(/viewerId:/g) ?? []).length === 1 && /viewerId: me\.id/.test(checkRoute) && (checkRoute.match(/viewerId:/g) ?? []).length === 1 && !ba.includes("viewerId:"),
+    "site-visits badges: the badge route and the booking check route always view as the signed-in user (others' event titles stay hidden)");
   const mw = readFileSync("src/middleware.ts", "utf8");
   ok(!/api\/visits/.test(mw), "site-visits badges: the middleware does not exempt /api/visits (a signed-out call never reaches the route)");
   const va = readFileSync("src/app/(app)/venue-assessments/visit-actions.ts", "utf8");
@@ -881,7 +888,7 @@ export async function siteVisitsBookingUiPins(ok: Ok): Promise<void> {
   const read = (p: string) => readFileSync(p, "utf8");
   const hook = read("src/components/visit-booking/use-booking-check.ts");
   const debounce = Number(/BOOKING_CHECK_DEBOUNCE_MS = (\d+)/.exec(hook)?.[1]);
-  ok(debounce >= 600 && hook.includes("clearTimeout") && hook.includes("bookingCheckAction") && /if \(live\)/.test(hook),
+  ok(debounce >= 600 && hook.includes("clearTimeout") && hook.includes("/api/visits/check") && /if \(!ctl\.signal\.aborted\)/.test(hook),
     "site-visits booking: the live check is debounced (>= 600 ms) and drops superseded answers");
   const vr = read("src/app/(app)/venue-assessments/visit-requests.tsx");
   const modal = read("src/app/(app)/inbox/site-visit-modal.tsx");
@@ -1001,4 +1008,215 @@ export async function siteVisitsAgendaChecks(ok: Ok): Promise<void> {
   ok(/plans\b/.test(read("src/lib/drive-sync/agenda.ts").split("return {").pop() ?? ""), "site-visits agenda: the drive layer hands its plans back");
   ok(read("src/app/(app)/calendar/calendar-client.tsx").includes("<ConflictBadge") && read("src/app/(app)/home-calendar.tsx").includes("<ConflictBadge"),
     "site-visits agenda: /calendar and the Home agenda show the badge");
+}
+
+/* ---- final-review fix round (D782) ---- */
+export async function siteVisitsFinalFixChecks(ok: Ok): Promise<void> {
+  const me = { id: "u-me", name: "Me" };
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  // 1. Deleting a PAST visit leaves everyone's calendar history alone.
+  const pastInv = () => [rcpt("Dana", { channel: "calendar", eventId: "g-1" }), rcpt("Jeff")];
+  const hp = inviteHarness({ now: () => at(12) });
+  const rp = await cancelVisitInvites(sv("SV-P1", { invites: pastInv() }), me, hp.deps);
+  ok(hp.calls.length === 0 && hp.mail.length === 0 && inviteSummary(rp.recipients) === "" && rp.status !== "failed",
+    "site-visits fix: deleting a past visit sends no cancellation emails and deletes no calendar copies");
+  const hp2 = inviteHarness({ now: () => at(12) });
+  await cancelVisitInvites(sv("SV-P2", { startAt: at(9), endAt: null, invites: pastInv() }), me, hp2.deps);
+  ok(hp2.calls.length === 0 && hp2.mail.length === 0, "site-visits fix: a past visit with no end is judged by its start");
+  const hf = inviteHarness({ now: () => at(9, 30) });
+  await cancelVisitInvites(sv("SV-P3", { invites: pastInv() }), me, hf.deps);
+  ok(hf.calls.join() === "delete personal:u-dana g-1" && hf.mail.length === 1 && hf.mail[0].ics.includes("METHOD:CANCEL"),
+    "site-visits fix: deleting an ongoing (or future) visit still cancels everyone's copy");
+
+  // 2. Updates and cancels come from the mailbox that sent the original invite.
+  ok(pickInviteMailbox(["personal:u-jeff", "personal:u-bob", "sales"], { preferMailbox: "personal:u-jeff", schedulerUserId: "u-bob" }) === "personal:u-jeff" &&
+     pickInviteMailbox(["personal:u-bob", "sales"], { preferMailbox: "personal:u-jeff", schedulerUserId: "u-bob" }) === "personal:u-bob" &&
+     pickInviteMailbox(["personal:u-jeff", "sales"], { preferMailbox: null, schedulerUserId: "u-bob" }) === "sales" &&
+     pickInviteMailbox(["personal:u-jeff"], { schedulerUserId: "u-bob" }) === null,
+    "site-visits fix: the sending mailbox is the original sender while connected, else the scheduler's own, else a shared box");
+  const ADDR: Record<string, string> = { "personal:u-jeff": "jeff@peak.test", "personal:u-bob": "bob@peak.test", sales: "sales@peak.test" };
+  const mailboxHarness = (keys: string[]) => {
+    const sent: Array<{ prefer: string | null | undefined; from: string; ics: string; to: string }> = [];
+    const h = inviteHarness({
+      users: async () => [
+        { id: "u-jeff", name: "Jeff", email: "jeff@peak.test" },
+        { id: "u-bob", name: "Bob", email: "bob@peak.test" },
+        { id: "u-sam", name: "Sam", email: "sam@peak.test" },
+      ],
+      calendarKeyFor: async () => null,
+      // The bridge's own choice (pickInviteMailbox), the ORGANIZER from that mailbox.
+      sendIcs: async (o) => {
+        const key = pickInviteMailbox(keys, o);
+        if (!key) return null;
+        sent.push({ prefer: o.preferMailbox, from: key, ics: o.ics(ADDR[key]), to: o.toAddr });
+        return { gmailId: "m" + sent.length, gmailThreadId: "t", fromMailbox: key };
+      },
+    });
+    return { h, sent };
+  };
+  const bob = { id: "u-bob", name: "Bob" };
+  const jeffInv = [rcpt("Jeff", { fromMailbox: "personal:u-jeff", gmailId: "m0", gmailIds: ["m0"] }), rcpt("Sam", { fromMailbox: "personal:u-jeff" })];
+  const m1 = mailboxHarness(["personal:u-jeff", "personal:u-bob", "sales"]);
+  await dispatchVisitInvite(sv("SV-M1", { assignedTo: "Jeff", attendees: [], startAt: at(13), endAt: at(14), invites: jeffInv }), bob, m1.h.deps);
+  const upd = m1.sent.find((x) => x.to === "jeff@peak.test");
+  const can = m1.sent.find((x) => x.to === "sam@peak.test");
+  ok(upd?.prefer === "personal:u-jeff" && upd.from === "personal:u-jeff" && m1.h.saved()?.invites.find((e) => e.name === "Jeff")?.fromMailbox === "personal:u-jeff",
+    "site-visits fix: Bob rescheduling Jeff's visit sends Jeff's update from Jeff's mailbox (the one that sent the invite)");
+  ok(!!can && can.from === "personal:u-jeff" && can.ics.includes("ORGANIZER:mailto:jeff@peak.test"),
+    "site-visits fix: a cancellation's ORGANIZER is the original sending mailbox");
+  const m2 = mailboxHarness(["personal:u-bob", "sales"]);
+  await dispatchVisitInvite(sv("SV-M2", { assignedTo: "Jeff", attendees: [], startAt: at(13), endAt: at(14), invites: jeffInv }), bob, m2.h.deps);
+  ok(m2.sent.find((x) => x.to === "jeff@peak.test")?.from === "personal:u-bob" && m2.h.saved()?.invites.find((e) => e.name === "Jeff")?.fromMailbox === "personal:u-bob" &&
+     !!m2.sent.find((x) => x.to === "sam@peak.test")?.ics.includes("ORGANIZER:mailto:bob@peak.test"),
+    "site-visits fix: with the original mailbox disconnected it falls back, records the mailbox actually used, and names it as ORGANIZER");
+  const svSend = fnBlock(read("src/lib/gmail/bridge.ts"), "sendSiteVisitInvite");
+  ok(/pickInviteMailbox\(keys, opts\)/.test(svSend) && /preferMailbox\?: string \| null/.test(svSend) && /fromMailbox: key/.test(svSend),
+    "site-visits fix: the Gmail bridge picks the sending mailbox through pickInviteMailbox (preferred mailbox first)");
+
+  // 3. agendaConflicts: one busy build per call, Set-based copy lookups — same answers, linear-ish time.
+  const mkData = (nVisits: number, nEvents: number, nStops: number) => {
+    const visits: SiteVisit[] = [];
+    const stopsByDay = new Map<string, DriveStop[]>();
+    for (let i = 0; i < nVisits; i++) {
+      const day = i % 21;
+      const mine = i < nStops;
+      const h = 8 + (Math.floor(i / 21) % 9);
+      visits.push(sv("SV-X" + i, {
+        assignedTo: mine ? "Dana" : "Other" + (i % 7), attendees: !mine && i % 5 === 0 ? ["Dana"] : [],
+        startAt: at(h, 0, day), endAt: at(h + 1, 0, day),
+        invites: i % 3 === 0 ? [rcpt(mine ? "Dana" : "Other", { channel: "calendar", eventId: "gc-" + i })] : [],
+      }));
+      if (mine) {
+        const key = addDays(DAY, day);
+        stopsByDay.set(key, [...(stopsByDay.get(key) ?? []), vStop("sv:SV-X" + i, at(h, 0, day), at(h + 1, 0, day), okAddr(P1, "x" + i))]);
+      }
+    }
+    const events: CalendarEvent[] = [];
+    for (let j = 0; j < nEvents; j++) {
+      const day = j % 21;
+      const h = 8 + (j % 10);
+      const vi = (j * 3) % nVisits;
+      if (j % 4 === 0) events.push(gEvent("gc-" + (vi - (vi % 3)), at(h, 0, day), at(h + 1, 0, day)));
+      else if (j % 4 === 1) events.push(gEvent("ics-" + j, at(h, 0, day), at(h + 1, 0, day), { iCalUID: `sv-SV-X${j % nVisits}@peak-app` }));
+      else events.push(gEvent("ev-" + j, at(h, 30, day), at(h + 1, 30, day), { title: "Meeting " + j }));
+    }
+    const plans = [...stopsByDay].map(([dayKey, stops]) => ({ dayKey, stops: stops.sort((a, b) => a.startMs - b.startMs), legs: [] }));
+    return { visits, events, plans };
+  };
+  // Reference = the pre-fix algorithm, built from the public pieces.
+  const reference = (d: ReturnType<typeof mkData>) => {
+    const out = new Map<string, string>();
+    const bv = d.visits.map(toBusyVisit);
+    for (const p of d.plans) for (const s of p.stops) {
+      const id = s.key.slice(3);
+      const busy = busyBlocks({ person: "Dana", visits: bv, events: d.events, excludeVisitId: id });
+      const { conflicts } = stopConflicts({ stopKey: s.key, dayKey: p.dayKey, stops: p.stops, legs: p.legs, busy, hours: DEFAULT_WORK_HOURS, dailyDriveLimitMin: 300 });
+      if (!conflicts.length) continue;
+      out.set("v-" + id, JSON.stringify(conflicts));
+      const eventIds = bv.find((v) => v.id === id)?.eventIds ?? [];
+      for (const e of d.events) if (isVisitIcsCopy(e, [{ id, eventIds }])) out.set("g-" + e.id, JSON.stringify(conflicts));
+    }
+    return out;
+  };
+  const small = mkData(240, 80, 40);
+  const got = agendaConflicts({ me: "Dana", plans: small.plans, visits: small.visits, events: small.events, hours: DEFAULT_WORK_HOURS, dailyDriveLimitMin: 300 });
+  const want = reference(small);
+  ok(want.size > 10 && got.size === want.size && [...want].every(([k, v], i) => [...got.keys()][i] === k && JSON.stringify(got.get(k)) === v),
+    `site-visits fix: the faster agendaConflicts gives exactly the old answers, in the same order (${got.size} badges)`);
+  const big = mkData(2000, 400, 126);
+  const t0 = performance.now();
+  agendaConflicts({ me: "Dana", plans: big.plans, visits: big.visits, events: big.events, hours: DEFAULT_WORK_HOURS, dailyDriveLimitMin: 300 });
+  const ms = performance.now() - t0;
+  ok(big.plans.reduce((n, p) => n + p.stops.length, 0) === 126 && ms < 300,
+    `site-visits fix: agendaConflicts over 2,000 visits / 400 events / 126 stops runs in ${ms.toFixed(0)} ms (< 300)`);
+  const copyIdx = visitCopyIndex([{ id: "SV-1", googleEventId: "g-legacy" }, { id: "SV-2", eventIds: ["g-a", ""] }]);
+  ok(copyIdx.has({ id: "x", iCalUID: "sv-SV-1@peak-app" }) && copyIdx.has({ id: "g-legacy", iCalUID: "" }) && copyIdx.has({ id: "g-a", iCalUID: "" }) &&
+     !copyIdx.has({ id: "", iCalUID: "" }) && !copyIdx.has({ id: "g-b", iCalUID: "sv-SV-3@peak-app" }),
+    "site-visits fix: the copy index matches a visit's UID, legacy event id and per-person event ids — nothing else");
+  ok(/visitCopyIndex\(/.test(fnBlock(read("src/lib/visit-plan/busy.ts"), "busyBlocks")) && /visitCopyIndex\(/.test(fnBlock(read("src/lib/drive-plan/stops.ts"), "stopsForDay")),
+    "site-visits fix: busyBlocks and stopsForDay build the copy index once, not a visit scan per event");
+  ok(/busyMemo/.test(read("src/lib/visit-plan/load.ts")), "site-visits fix: the booking loader builds each person's busy blocks once");
+
+  // 4. The live booking check is a GET route, off the server-action queue.
+  const roster = ["Dana", "Jeff"];
+  const okParam = JSON.stringify({ visitId: "SV-1", address: "1 Elm", startAt: at(9), endAt: at(10), lead: "Dana", attendees: ["Jeff"] });
+  ok(parseBookingCheckParam(okParam, roster)?.attendees.join() === "Jeff" && parseBookingCheckParam(null, roster) === null &&
+     parseBookingCheckParam("{bad", roster) === null && parseBookingCheckParam("[1]", roster) === null &&
+     parseBookingCheckParam(JSON.stringify({ address: "x".repeat(MAX_BOOKING_PARAM_CHARS) }), roster) === null,
+    "site-visits fix: the check's input param is JSON, size-capped and validated (bad or oversized → refused)");
+  const checkRoute = read("src/app/api/visits/check/route.ts");
+  const cget = checkRoute.slice(checkRoute.indexOf("export async function GET("));
+  ok(/export const maxDuration = 60/.test(checkRoute) && !/export async function POST\(/.test(checkRoute) && firstAwait(cget, "requireUser()") &&
+     /const me = await requireUser\(\)/.test(cget) && /viewerId: me\.id/.test(cget) && (checkRoute.match(/viewerId:/g) ?? []).length === 1 && /parseBookingCheckParam\(/.test(cget),
+    "site-visits fix: GET /api/visits/check — session first, 60 s ceiling, validated input, always views as the signed-in user");
+  const hook = read("src/components/visit-booking/use-booking-check.ts");
+  ok(hook.includes("/api/visits/check") && hook.includes("new AbortController()") && /ctl\.abort\(\)/.test(hook) && hook.includes("signal: ctl.signal") && !hook.includes("@/app/"),
+    "site-visits fix: the hook fetches the GET route and aborts a superseded check");
+  ok(!read("src/app/(app)/visit-booking-actions.ts").includes("bookingCheckAction") && !hook.includes("bookingCheckAction"),
+    "site-visits fix: the booking check is no longer a server action (Save / Schedule never queue behind it)");
+
+  // 5. A calendar recipient whose grant is gone.
+  const hr = inviteHarness({ calendarKeyFor: async () => null });
+  const rr = await dispatchVisitInvite(sv("SV-R1", { startAt: at(13), endAt: at(14), invites: [rcpt("Dana", { channel: "calendar", eventId: "g-5" })] }), me, hr.deps);
+  ok(rr.recipients[0]?.status === "reconnect" && hr.saved()?.invites[0]?.startAt === at(9) &&
+     inviteSummary(rr.recipients) === "Dana's calendar is disconnected — reconnect it to update their copy.",
+    "site-visits fix: an update for a disconnected calendar says reconnect and keeps the entry (retried once reconnected)");
+  const hr2 = inviteHarness({ calendarKeyFor: async (id) => (id === "u-dana" ? "personal:u-dana" : null) });
+  const rr2 = await dispatchVisitInvite(sv("SV-R2", { attendees: [], invites: [rcpt("Dana", { channel: "calendar", eventId: "g-6" }), rcpt("Jeff", { channel: "calendar", eventId: "g-7" })] }), me, hr2.deps);
+  ok(rr2.recipients.find((x) => x.name === "Jeff")?.status === "reconnect" && hr2.saved()?.invites.map((e) => e.name).join() === "Dana" && hr2.calls.length === 0 &&
+     inviteSummary(rr2.recipients).includes("Jeff's calendar is disconnected — remove the visit from it by hand (Peak won't retry)"),
+    "site-visits fix: cancelling a removed person's calendar copy with no grant drops their entry and says so");
+  const hr3 = inviteHarness({ calendarKeyFor: async (id) => { if (id === "u-jeff") throw new Error("db blip"); return "personal:u-dana"; } });
+  const rr3 = await dispatchVisitInvite(sv("SV-R3", { attendees: [], invites: [rcpt("Dana", { channel: "calendar", eventId: "g-6" }), rcpt("Jeff", { channel: "calendar", eventId: "g-7" })] }), me, hr3.deps);
+  ok(rr3.recipients.find((x) => x.name === "Jeff")?.status === "failed" && hr3.saved()?.invites.map((e) => e.name).sort().join() === "Dana,Jeff",
+    "site-visits fix: a grant lookup that errors is a retryable failure, never a dropped entry");
+
+  // 6. Every sent Gmail id is kept and seeds the import dedup.
+  let retired: string[] = [];
+  const hg = inviteHarness({ saveInvites: async () => {} });
+  const savedG: VisitInviteRecipient[][] = [];
+  hg.deps.saveInvites = async (_id, invites, _lead, ret) => { savedG.push(invites); retired = ret ?? []; };
+  await dispatchVisitInvite(sv("SV-G1", { attendees: ["Jeff"] }), me, hg.deps);
+  const g1 = savedG[savedG.length - 1];
+  await dispatchVisitInvite(sv("SV-G1", { attendees: ["Jeff"], startAt: at(13), endAt: at(14), invites: g1 }), me, hg.deps);
+  const g2 = savedG[savedG.length - 1];
+  ok(g2.find((e) => e.name === "Jeff")?.gmailIds.join() === "m1,m2" && g2.find((e) => e.name === "Jeff")?.gmailId === "m2",
+    "site-visits fix: a recipient keeps every Gmail id sent them (invite + update)");
+  await dispatchVisitInvite(sv("SV-G1", { attendees: [], startAt: at(13), endAt: at(14), invites: g2 }), me, hg.deps);
+  ok(retired.join() === "m1,m2,m3" && !savedG[savedG.length - 1].some((e) => e.name === "Jeff"),
+    "site-visits fix: a removed person's ids (cancellation included) are kept on the visit");
+  ok(visitInviteGmailIds({ id: "SV-G", assignedTo: "Dana", startAt: 1, endAt: 2, invite: { gmailId: "m0" }, invites: [rcpt("Jeff", { gmailId: "m2", gmailIds: ["m1", "m2"] })], inviteGmailIds: ["m3", 7] })
+       .sort().join() === "m0,m1,m2,m3" &&
+     normalizeInvites({ id: "x", assignedTo: "D", startAt: 1, endAt: 2, invites: [{ name: "J", channel: "ics", gmailId: "m9" }] })[0].gmailIds.join() === "m9",
+    "site-visits fix: every invite Gmail id on a visit is listed (old stamp, per recipient, removed people); an older entry's gmailId counts");
+  const dedup = fnBlock(read("src/lib/gmail/bridge.ts"), "buildImportDedup");
+  ok(/visitInviteGmailIds\(d\)/.test(dedup), "site-visits fix: the Gmail import's dedup reads every sent invite / update / cancellation id");
+  ok(/inviteGmailIds/.test(fnBlock(read("src/lib/stores/site-visits.ts"), "setVisitInvites")), "site-visits fix: the store keeps a removed person's Gmail ids on the visit");
+
+  // 7. Scheduling refuses a span over 24 h, like editing.
+  ok(validVisitSpan(at(9), at(10)) && validVisitSpan(at(0), at(0) + 24 * 3_600_000) && !validVisitSpan(at(9), at(9) + 24 * 3_600_000 + 1) &&
+     !validVisitSpan(at(10), at(9)) && !validVisitSpan(0, 5) && !validVisitSpan(NaN, at(9)),
+    "site-visits fix: a visit spans more than nothing and at most 24 h");
+  const va = read("src/app/(app)/venue-assessments/visit-actions.ts");
+  const sched = fnBody(va, "scheduleVisitAction");
+  ok(/!validVisitSpan\(input\.startAt, input\.endAt\)/.test(sched) && sched.indexOf("validVisitSpan(") < sched.indexOf("getVisit("),
+    "site-visits fix: scheduleVisitAction refuses a span over 24 h before touching the visit");
+  ok(/!validVisitSpan\(startAt, endAt\)/.test(fnBody(read("src/app/(app)/visit-booking-actions.ts"), "updateVisitAction")),
+    "site-visits fix: updateVisitAction uses the same span rule");
+
+  // 8. Saved after each recipient, so a drive sync mid-dispatch sees new event ids.
+  const snaps: Array<{ names: string; mailSoFar: number }> = [];
+  const hs = inviteHarness();
+  hs.deps.saveInvites = async (_id, invites) => { snaps.push({ names: invites.map((e) => e.name).join(), mailSoFar: hs.mail.length }); };
+  await dispatchVisitInvite(sv("SV-S1", { attendees: ["Jeff"] }), me, hs.deps);
+  ok(snaps.length >= 2 && snaps[0].names === "Dana" && snaps[0].mailSoFar === 0 && snaps[snaps.length - 1].names === "Dana,Jeff",
+    "site-visits fix: the invites are saved after each recipient (Dana's event id is stored before Jeff's send)");
+
+  // 9. Docs.
+  const dec = read("DECISIONS.md");
+  ok(dec.includes("once per read window (twice when the visit day is outside the look-ahead)") && !dec.includes("each person's calendar read once,"),
+    "site-visits fix: D780 says how often each calendar is read");
+  ok(/## D782\. /.test(dec), "site-visits fix: the past-visit delete rule is logged (D782)");
+  ok(read("MASTER-QUESTIONS.md").includes("Anyone signed in can edit/re-lead a scheduled visit or remove attendees"), "site-visits fix: the edit-permission question is on Jeff's list");
 }

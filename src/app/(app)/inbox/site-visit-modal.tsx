@@ -77,6 +77,8 @@ function inviteMessage(status: InviteStatus, assignee: string): string {
       return "No connected mailbox to send from — connect one in Settings → Mailboxes.";
     case "no-email":
       return `${assignee} has no email on the team roster.`;
+    case "reconnect":
+      return `${assignee}'s calendar is disconnected — reconnect it to update their copy.`;
     case "failed":
       return "The invite email failed to send — the visit is saved; try again later.";
   }

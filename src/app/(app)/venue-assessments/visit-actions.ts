@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
+import { validVisitSpan } from "@/lib/visit-plan/input";
 import { cleanAttendees } from "@/lib/visit-plan/people";
 import { claimVisit, getVisit, releaseVisit, removeVisit, scheduleVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteStatus, type RecipientResult } from "@/lib/visit-invite";
@@ -73,8 +74,8 @@ export async function scheduleVisitAction(
   input: { startAt: number; endAt: number; attendees?: unknown }
 ): Promise<{ ok: true; inviteStatus: InviteStatus; invites: RecipientResult[] } | { ok: false; error: string }> {
   const me = await requireUser();
-  if (!(input.startAt > 0) || !(input.endAt > input.startAt))
-    return { ok: false, error: "Bad time range" };
+  // At most 24 h — the same rule as editing a scheduled visit.
+  if (!validVisitSpan(input.startAt, input.endAt)) return { ok: false, error: "Bad time range" };
   const v = await getVisit(id);
   if (!v) return { ok: false, error: "Visit not found" };
   if (v.stage === "done") return { ok: false, error: "Visit already completed" };

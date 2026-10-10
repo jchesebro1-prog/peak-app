@@ -55,6 +55,9 @@ export type SiteVisit = {
    *  entry for older readers. */
   invites: VisitInviteRecipient[];
   googleEventId?: string; // the lead's direct calendar copy (D77)
+  /** Gmail ids of invite mail sent to people since removed from the visit
+   *  (their entry is gone) — the Gmail import never re-fetches them. */
+  inviteGmailIds?: string[];
   /** Optional consulting-engagement link (D90) — oversight visits list
    *  under the engagement's Oversight tab. */
   engagementId?: string | null;
@@ -174,14 +177,21 @@ export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
   }));
 }
 
+/** Most removed-recipient Gmail ids kept on one visit (the latest win). */
+const MAX_RETIRED_GMAIL_IDS = 200;
+
 /** Record what each person was sent (spec 2026-10-09 site-visit scheduling).
  *  The lead's entry is mirrored into the old single fields for older readers
  *  (the agenda's googleEventId dedupe, "invite sent" on the company record) —
  *  exactly: a lead holding no copy of that kind clears the old field, so a
  *  deleted or moved-away calendar copy never lingers as a dedupe key. */
-export async function setVisitInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null): Promise<void> {
+export async function setVisitInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null, retiredGmailIds: string[] = []): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
     d.invites = invites;
+    if (retiredGmailIds.length) {
+      const kept = Array.isArray(d.inviteGmailIds) ? d.inviteGmailIds.filter((x) => typeof x === "string" && !!x) : [];
+      d.inviteGmailIds = [...new Set([...kept, ...retiredGmailIds])].slice(-MAX_RETIRED_GMAIL_IDS);
+    }
     if (lead?.channel === "calendar" && lead.eventId) d.googleEventId = lead.eventId;
     else delete d.googleEventId;
     d.invite =

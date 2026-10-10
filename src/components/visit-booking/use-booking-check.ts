@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { bookingCheckAction } from "@/app/(app)/visit-booking-actions";
 import type { BookingCheckResult } from "@/lib/visit-plan/types";
 
 /** Spec 2026-10-09 site-visit scheduling — the booking screen's live check.
- *  Debounced: a calendar read + routing per call, never per keystroke. */
+ *  Debounced: a calendar read + routing per call, never per keystroke. A GET
+ *  route (/api/visits/check), not a server action, so Save / Schedule never
+ *  queue behind it; a superseded check is aborted. */
 export const BOOKING_CHECK_DEBOUNCE_MS = 800;
 const FAILED = "Couldn't check conflicts — you can still schedule.";
 
@@ -24,19 +25,23 @@ export function useBookingCheck(args: BookingCheckArgs): { loading: boolean; res
   const sig = JSON.stringify(args);
   const [state, setState] = useState<{ forSig: string; result: BookingCheckResult | null; error: string }>({ forSig: "", result: null, error: "" });
   useEffect(() => {
-    let live = true;
+    const ctl = new AbortController();
     const t = setTimeout(() => {
-      bookingCheckAction(JSON.parse(sig) as BookingCheckArgs)
+      fetch("/api/visits/check?input=" + encodeURIComponent(sig), { signal: ctl.signal, cache: "no-store" })
+        .then(async (res) => {
+          if (!res.ok) throw new Error("check " + res.status);
+          return (await res.json()) as BookingCheckResult | { error: string };
+        })
         .then((r) => {
-          if (live) setState("error" in r ? { forSig: sig, result: null, error: r.error } : { forSig: sig, result: r, error: "" });
+          if (!ctl.signal.aborted) setState("error" in r ? { forSig: sig, result: null, error: r.error } : { forSig: sig, result: r, error: "" });
         })
         .catch(() => {
-          if (live) setState({ forSig: sig, result: null, error: FAILED });
+          if (!ctl.signal.aborted) setState({ forSig: sig, result: null, error: FAILED });
         });
     }, BOOKING_CHECK_DEBOUNCE_MS);
     return () => {
-      live = false;
       clearTimeout(t);
+      ctl.abort();
     };
   }, [sig]);
   // The last answer stays on screen (dimmed) while a newer one is on its way;
