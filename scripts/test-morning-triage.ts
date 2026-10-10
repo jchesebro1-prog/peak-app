@@ -27,6 +27,7 @@ import {
 } from "@/lib/triage/clock";
 import { normalizedTitle, tokens } from "@/lib/triage/text";
 import { parseTriageKey, triageKey } from "@/lib/triage/keys";
+import { donePlan } from "@/lib/triage/actions-plan";
 import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/triage/rank";
 import { feedErrorMessage, type SnapshotRow, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
 import { clipLine, formatTimestamp, matchTranscriptLine } from "@/lib/triage/transcript-match";
@@ -666,4 +667,26 @@ export async function triageCronChecks(ok: Ok): Promise<void> {
   const m = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
   const re = new RegExp("^" + (m ? m[1].replace(/\\\\/g, "\\") : "$^") + "$");
   ok(!!m && !re.test("/api/triage/build") && re.test("/triage") && re.test("/"), "cron: /api/triage/build skips the login gate (secret is its auth); /triage does not");
+}
+
+export async function triageActionChecks(ok: Ok): Promise<void> {
+  ok(JSON.stringify(donePlan("task:T-1")) === JSON.stringify({ kind: "task", id: "T-1" }) && donePlan("asg:as-1")?.kind === "assignment", "actions: Done on a task / assignment marks it done");
+  ok(JSON.stringify(donePlan("email:C-9")) === JSON.stringify({ kind: "thread", id: "C-9" }), "actions: Done on an email closes the thread");
+  ok(JSON.stringify(donePlan("call:REC-1:k1")) === JSON.stringify({ kind: "open", href: "/recordings/REC-1?tab=actions" }), "actions: Done on a call to-do opens the meeting's to-do decision instead of guessing");
+  ok(["lead:L-1", "quote:Q-1", "visit:SV-1", "renewal:flame:FT-1"].every((k) => donePlan(k)?.kind === "mark") && donePlan("bogus") === null, "actions: lead / quote / visit / renewal rows are 'Done for today'; junk keys are refused");
+
+  const actions = readFileSync("src/app/(app)/triage/actions.ts", "utf8");
+  const exportsN = (actions.match(/export async function /g) || []).length;
+  ok(actions.startsWith('"use server";') && exportsN === 4 && (actions.match(/await requireUser\(\)/g) || []).length === exportsN, "actions: a server-action file; every action calls requireUser() first");
+  ok(/dismissActionItem\(/.test(actions) && /assignThread\(/.test(actions) && /sameName\(u\.name, /.test(actions), "actions: dismissing a call to-do dismisses it on its recording; reassign only to an active teammate");
+  const rowsSrc = readFileSync("src/components/triage/triage-rows.tsx", "utf8");
+  const importLines = rowsSrc.split("\n").filter((l) => l.startsWith("import "));
+  ok(
+    rowsSrc.startsWith('"use client";') && !importLines.some((l) => /@\/lib\/stores|@\/db|triage\/(service|store|liveness|build|feeds)/.test(l)),
+    "rows: the client list imports no store, db or server triage module"
+  );
+  ok(rowsSrc.includes("Source line not found — open the meeting") && rowsSrc.includes("Snooze till tomorrow") && rowsSrc.includes("Not mine"), "rows: unmatched-line copy and the three actions");
+  const page = readFileSync("src/app/(app)/triage/page.tsx", "utf8");
+  ok(/requireUser\(\)/.test(page) && /can\("manage_users", user\.roles\)/.test(page) && /readOnly=\{!viewingSelf\}/.test(page), "page: admins can view a teammate's list, read-only");
+  ok(readFileSync("src/components/nav/nav-data.ts", "utf8").includes('"/triage": "dashboard"') && readFileSync("scripts/smoke-routes.ts", "utf8").includes('"/triage"'), "page: /triage lights Dashboard and is smoke-tested");
 }
