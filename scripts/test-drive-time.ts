@@ -4,19 +4,20 @@
    add the DB-backed checks here. */
 import { eq, inArray, like } from "drizzle-orm";
 import { getDb } from "@/db";
-import { placeBook, sites } from "@/db/schema";
+import { companies, placeBook, sites } from "@/db/schema";
 import { saveSite } from "@/lib/identity/sites";
 import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
 import { locateVenue } from "@/lib/venue-locate";
 import { getPlaces, placeStatesFor, writePlace, fixPlace } from "@/lib/address-verify/place-book";
 import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/targets";
-import { cleanFixInput, fixAddress } from "@/lib/address-verify/fix";
+import { cleanFixInput, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
 import { searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import { addressKey, isPhysicalLocation } from "@/lib/address-verify/keys";
 import {
   backfillStatus,
   geocodedStatus,
   hasHouseNumber,
+  isValidPoint,
   geoStampForSave,
   placeAddressState,
   placeRowFromHit,
@@ -305,6 +306,44 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
     ok(!bad.ok && bad.reason === "invalid", "drive-time place book: a key that isn't its own normalized form is refused");
     const badCoord = await fixPlace({ key: addressKey(D), label: D, mode: "pin", lat: 99, lng: -88 }, "u2", fastDeps(search));
     ok(!badCoord.ok && badCoord.reason === "invalid", "drive-time place book: an out-of-range pin is refused");
+    const zeroPin = await fixPlace({ key: addressKey(D), label: D, mode: "pin", lat: 0, lng: 0 }, "u2", fastDeps(search));
+    const zeroPick = await fixPlace({ key: addressKey(D), label: D, mode: "pick", street: "1 School Rd", lat: 0, lng: 0 }, "u2", fastDeps(search));
+    const zeroRetry = await fixPlace({ key: addressKey(D), label: D, mode: "retry", text: "1 School Rd, Hortonville WI" }, "u2", fastDeps(async () => [hit("1 School Rd", 0, 0)]));
+    const dAfterZero = (await getPlaces([addressKey(D)])).get(addressKey(D));
+    ok(!zeroPin.ok && zeroPin.reason === "invalid" && !zeroPick.ok && zeroPick.reason === "invalid" && !zeroRetry.ok && zeroRetry.reason === "no-hit" &&
+       dAfterZero?.lat === 44.3,
+      "drive-time place book: a (0,0) pin/pick/retry point is refused and never stored");
+    ok(isValidPoint(44.3, -88.6) && isValidPoint(-90, 180) && !isValidPoint(0, 0) && !isValidPoint(91, 0) && !isValidPoint(0, -181) &&
+       !isValidPoint(NaN, 1) && !isValidPoint(Infinity, 1) && !isValidPoint("44", "-88") && !isValidPoint(null, null) && !isValidPoint(undefined, 1) &&
+       isValidPoint(0, 1) && isValidPoint(1, 0),
+      "drive-time state: isValidPoint accepts finite in-range numbers, rejects (0,0), out-of-range, NaN, strings and nulls");
+
+    // A live hit with no usable coordinates is a hit with no point: nothing verified.
+    const Z1 = "TESTdrive 3 Zero Island Rd";
+    const Z2 = "TESTdrive 4 Nan Rd";
+    const zs = await placeStatesFor([Z1, Z2], "live", fastDeps(async (q) => (q.includes("Zero") ? [hit("3 Zero Island Rd", 0, 0)] : [hit("4 Nan Rd", NaN, NaN)])));
+    const zRows = await getPlaces([addressKey(Z1), addressKey(Z2)]);
+    ok(zs.get(addressKey(Z1))?.status === "unresolved" && zs.get(addressKey(Z1))?.point === null &&
+       zs.get(addressKey(Z2))?.status === "unresolved" && zs.get(addressKey(Z2))?.point === null &&
+       [Z1, Z2].every((z) => { const r = zRows.get(addressKey(z)); return !r || (r.status === "unresolved" && r.lat === null && r.lng === null && r.verifiedBy === null); }),
+      "drive-time place book: a live hit with unusable coordinates is never stored verified (unresolved, no point)");
+
+    // Live pacing + budget.
+    const P = ["TESTdrive Pace 1 Rd", "TESTdrive Pace 2 Rd", "TESTdrive Pace 3 Rd"];
+    let slept: number[] = [];
+    let searched = 0;
+    const pacingSearch = async () => { searched++; return [hit("1 Pace Rd")]; };
+    await placeStatesFor(P, "live", { ...fastDeps(pacingSearch), delayMs: 1100, sleep: async (ms: number) => { slept.push(ms); } });
+    ok(searched === 3 && slept.length === 2 && slept.every((ms) => ms === 1100),
+      "drive-time place book: a live pass sleeps the delay between geocodes (not before the first)");
+    await db.delete(placeBook).where(like(placeBook.key, "testdrive pace%"));
+    slept = [];
+    searched = 0;
+    const budgeted = await placeStatesFor(P, "live", { ...fastDeps(pacingSearch), delayMs: 1100, budgetMs: 100, sleep: async (ms: number) => { slept.push(ms); } });
+    const paceRows = await getPlaces(P.map(addressKey));
+    ok(searched === 1 && slept.length === 0 && paceRows.size === 1 && paceRows.has(addressKey(P[0])) &&
+       budgeted.get(addressKey(P[1]))?.status === "unresolved" && budgeted.get(addressKey(P[2]))?.status === "unresolved",
+      "drive-time place book: a spent budget stops the pass after the first geocode — unreached keys stay unwritten");
   } finally {
     globalThis.fetch = realFetch;
     await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
@@ -316,9 +355,19 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
   const SITE = "TESTdrive:site-fix";
   const CO = "TESTdrive:co-fix";
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    throw new Error("offline in test");
+  // Never the real Nominatim: it answers `stub` (or nothing); anything else is offline.
+  let stub: { house?: string; road: string; city: string; state: string; lat: number; lng: number } | null = null;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const u = new URL(String(input));
+    if (u.hostname !== "nominatim.openstreetmap.org") throw new Error("offline in test");
+    const body = stub
+      ? [{ lat: String(stub.lat), lon: String(stub.lng), category: "building", name: "", display_name: `${stub.city}, ${stub.state}`,
+           address: { ...(stub.house ? { house_number: stub.house } : {}), road: stub.road, city: stub.city, state: stub.state } }]
+      : [];
+    return new Response(JSON.stringify(body), { status: 200 });
   }) as typeof fetch;
+  const COMPANY = "TESTdrive:co-named";
+  const SITE_GONE = "TESTdrive:site-gone";
   try {
     await saveSite({ id: SITE, companyId: CO, legacyLocId: "loc7", name: "Gym", address: "", city: "Hortonville", state: "WI", lat: "44.33", lng: "-88.63", venueKind: "proscenium" });
     ok(matchVisitSite({ customerId: CO, locationId: "loc7" }, [{ id: SITE, companyId: CO, legacyLocId: "loc7" }])?.id === SITE &&
@@ -351,6 +400,126 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
     ok(afterFix.get("SV-T2")?.status === "verified" && afterFix.get("SV-T2")?.point?.lat === 44.4,
       "drive-time: a fixed free-text visit address reads verified from the book");
 
+    // ---- venue retry / pick through fixAddress (stubbed geocoder) ----
+    const venueRow = async () => (await db.select().from(sites).where(eq(sites.id, SITE)))[0];
+    stub = { house: "12", road: "Oak St", city: "Hortonville", state: "Wisconsin", lat: 44.35, lng: -88.64 };
+    const vr = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "retry", address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944" }, "u5");
+    let vrow = await venueRow();
+    ok(vr.ok && vr.status === "verified" && vr.pointKey === "site:" + SITE && vrow.geoStatus === "verified" && vrow.geoSource === "geocode" &&
+       vrow.geoVerifiedBy === "u5" && vrow.address === "12 Oak St" && vrow.lat === "44.35",
+      "drive-time fixAddress: a venue retry that finds a house-numbered hit stores it verified (geocode, credited to the runner)");
+    stub = { road: "Oak St", city: "Hortonville", state: "Wisconsin", lat: 44.36, lng: -88.65 };
+    const vrStreet = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "retry", address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944" }, "u5");
+    vrow = await venueRow();
+    ok(vrStreet.ok && vrStreet.status === "needs_check" && vrow.geoStatus === "needs_check" && vrow.geoSource === "geocode" && vrow.geoVerifiedBy === null,
+      "drive-time fixAddress: a venue retry whose hit has no house number is needs_check, credited to no one");
+    stub = { house: "12", road: "Oak St", city: "Hortonville", state: "Illinois", lat: 40.1, lng: -89.1 };
+    const vrWrong = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "retry", address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944" }, "u5");
+    vrow = await venueRow();
+    ok(!vrWrong.ok && vrWrong.reason === "state-mismatch" && vrWrong.got === "Hortonville, IL" && vrow.geoStatus === "needs_check" && vrow.lat === "44.36",
+      "drive-time fixAddress: a rejected venue retry passes the reason and the returned place (got) through and writes nothing");
+    stub = null;
+    const vrNone = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "retry", address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944" }, "u5");
+    ok(!vrNone.ok && vrNone.reason === "no-hit" && !("got" in vrNone), "drive-time fixAddress: a venue retry with no match reports no-hit with no got");
+
+    const vp = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pick", address: "14 Elm St", city: "Hortonville", state: "WI", zip: "54944", lat: 44.5, lng: -88.5 }, "u6");
+    vrow = await venueRow();
+    ok(vp.ok && vp.status === "verified" && vrow.geoStatus === "verified" && vrow.geoSource === "geocode" && vrow.geoVerifiedBy === "u6" &&
+       vrow.address === "14 Elm St" && vrow.lat === "44.5" && vrow.lng === "-88.5",
+      "drive-time fixAddress: a venue pick of a house-numbered suggestion verifies, credited to the picker");
+    const vpTown = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pick", address: "Elm St", city: "Hortonville", state: "WI", zip: "54944", lat: 44.6, lng: -88.6 }, "u7");
+    vrow = await venueRow();
+    ok(vpTown.ok && vpTown.status === "needs_check" && vrow.geoStatus === "needs_check" && vrow.geoVerifiedBy === null && vrow.address === "14 Elm St" && vrow.lat === "44.6",
+      "drive-time fixAddress: a venue pick without a house number is needs_check and keeps the stored street");
+    const vpZero = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 0, lng: 0 }, "u7");
+    vrow = await venueRow();
+    ok(!vpZero.ok && vpZero.reason === "invalid" && vrow.lat === "44.6", "drive-time fixAddress: a (0,0) venue pin is refused and the venue is untouched");
+
+    // ---- place retry / pick through fixAddress ----
+    const PL = "TESTdrive Lone Pine School";
+    const plKey = addressKey(PL);
+    const pr1 = await fixAddress({ target: { kind: "place", key: plKey, label: PL }, mode: "retry", text: "1 School Rd, Hortonville WI" }, "u8",
+      fastDeps(async () => [hit("1 School Rd", 44.41, -88.71)]));
+    let plRow = (await getPlaces([plKey])).get(plKey);
+    ok(pr1.ok && pr1.status === "verified" && pr1.pointKey === "place:" + plKey && plRow?.source === "geocode" && plRow.verifiedBy === "u8" && plRow.label === PL && plRow.lat === 44.41,
+      "drive-time fixAddress: a place retry stores under the original key, verified, credited");
+    const pr2 = await fixAddress({ target: { kind: "place", key: plKey, label: PL }, mode: "pick", street: "Elm St", lat: 44.42, lng: -88.72 }, "u9", fastDeps(async () => []));
+    plRow = (await getPlaces([plKey])).get(plKey);
+    ok(pr2.ok && pr2.status === "needs_check" && plRow?.status === "needs_check" && plRow.source === "geocode" && plRow.verifiedBy === null && plRow.lat === 44.42,
+      "drive-time fixAddress: a place pick without a house number is needs_check, credited to no one");
+    const pr3 = await fixAddress({ target: { kind: "place", key: plKey, label: PL }, mode: "pick", street: "9 Elm St", lat: 44.43, lng: -88.73 }, "u9", fastDeps(async () => []));
+    plRow = (await getPlaces([plKey])).get(plKey);
+    ok(pr3.ok && pr3.status === "verified" && plRow?.verifiedBy === "u9" && plRow.source === "geocode",
+      "drive-time fixAddress: a place pick with a house number verifies, credited to the picker");
+    const prMiss = await fixAddress({ target: { kind: "place", key: plKey, label: PL }, mode: "retry", text: "nowhere at all" }, "u9", fastDeps(async () => []));
+    const prDown = await fixAddress({ target: { kind: "place", key: plKey, label: PL }, mode: "retry", text: "somewhere" }, "u9", fastDeps(async () => { throw new Error("503"); }));
+    ok(!prMiss.ok && prMiss.reason === "no-hit" && !prDown.ok && prDown.reason === "unavailable" && (await getPlaces([plKey])).get(plKey)?.lat === 44.43,
+      "drive-time fixAddress: a place retry with no match / an outage reports why and leaves the row alone");
+    const prZero = await fixAddress({ target: { kind: "place", key: plKey, label: PL }, mode: "pin", lat: 0, lng: 0 }, "u9", fastDeps(async () => []));
+    ok(!prZero.ok && prZero.reason === "invalid" && (await getPlaces([plKey])).get(plKey)?.source === "geocode",
+      "drive-time fixAddress: a (0,0) place pin is refused at input, not stored verified");
+
+    // ---- loadFixTarget ----
+    await db.insert(companies).values({ id: COMPANY, name: "TESTdrive Named Co", createdAt: 1, updatedAt: 1 }).onConflictDoNothing();
+    await saveSite({ id: "TESTdrive:site-named", companyId: COMPANY, name: "Main Gym", address: "5 Gym Rd", city: "Hortonville", state: "WI", zip: "54944", lat: "44.3", lng: "-88.6", venueKind: "proscenium" });
+    const named = await loadFixTarget({ kind: "venue", siteId: "TESTdrive:site-named" });
+    ok(named?.title === "TESTdrive Named Co" && named.sub === "Main Gym" && named.href === "/companies/" + encodeURIComponent(COMPANY) &&
+       named.status === "verified" && named.placeText === null &&
+       named.venue?.address === "5 Gym Rd" && named.venue.city === "Hortonville" && named.venue.state === "WI" && named.venue.zip === "54944",
+      "drive-time loadFixTarget: a venue shows its company, name, link, status and address fields");
+    await saveSite({ id: SITE_GONE, companyId: "TESTdrive:co-nonexistent", name: "", address: "", city: "", state: "", lat: null, lng: null, venueKind: "proscenium" });
+    const bare = await loadFixTarget({ kind: "venue", siteId: SITE_GONE });
+    ok(bare?.title === "(unknown company)" && bare.sub === "Untitled venue" && bare.status === "unresolved" &&
+       bare.venue?.address === "" && bare.venue.city === "" && bare.venue.state === "" && bare.venue.zip === "",
+      "drive-time loadFixTarget: a venue with no company row or name falls back to '(unknown company)' / 'Untitled venue'");
+    await db.update(sites).set({ deleted: true }).where(eq(sites.id, SITE_GONE));
+    ok((await loadFixTarget({ kind: "venue", siteId: SITE_GONE })) === null && (await loadFixTarget({ kind: "venue", siteId: "TESTdrive:nope" })) === null,
+      "drive-time loadFixTarget: a deleted or missing venue is null");
+    const placeT = await loadFixTarget({ kind: "place", key: plKey, label: PL });
+    ok(placeT?.title === PL && placeT.sub === "Address" && placeT.href === "" && placeT.venue === null && placeT.placeText === PL && placeT.status === "verified",
+      "drive-time loadFixTarget: a place shows its pinned/stored row status and its text");
+    const placeNew = await loadFixTarget({ kind: "place", key: addressKey("TESTdrive Never Seen"), label: "TESTdrive Never Seen" });
+    ok(placeNew?.status === "unresolved", "drive-time loadFixTarget: a place with no book row reads unresolved");
+    ok((await loadFixTarget({ kind: "place", key: "wrong key", label: PL })) === null && (await loadFixTarget({ kind: "place", key: "", label: "" })) === null,
+      "drive-time loadFixTarget: a place key that isn't addressKey(label) is null");
+
+    // ---- cleanFixInput ----
+    const V = { kind: "venue", siteId: SITE };
+    const vf = { address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944" };
+    const cVr = cleanFixInput({ target: V, mode: "retry", ...vf });
+    ok(cVr?.mode === "retry" && cVr.target.kind === "venue" && "address" in cVr && cVr.address === "12 Oak St" && cVr.zip === "54944",
+      "drive-time cleanFixInput: a venue retry passes");
+    const cVp = cleanFixInput({ target: V, mode: "pick", ...vf, lat: 44.5, lng: -88.5 });
+    ok(cVp?.mode === "pick" && "lat" in cVp && cVp.lat === 44.5 && "address" in cVp && cVp.city === "Hortonville", "drive-time cleanFixInput: a venue pick passes");
+    const cPr = cleanFixInput({ target: { kind: "place", key: "k", label: "L" }, mode: "retry", text: "1 School Rd" });
+    ok(cPr?.mode === "retry" && cPr.target.kind === "place" && "text" in cPr && cPr.text === "1 School Rd", "drive-time cleanFixInput: a place retry passes");
+    const cPp = cleanFixInput({ target: { kind: "place", key: "k", label: "L" }, mode: "pick", street: "1 School Rd", lat: 44.5, lng: -88.5 });
+    ok(cPp?.mode === "pick" && "street" in cPp && cPp.street === "1 School Rd" && "lng" in cPp && cPp.lng === -88.5, "drive-time cleanFixInput: a place pick passes");
+    const cTrim = cleanFixInput({ target: { kind: "venue", siteId: "  " + SITE + "  " }, mode: "retry", address: "  " + "x".repeat(400) + "  ", city: "c".repeat(200), state: "s".repeat(100), zip: "z".repeat(50) });
+    ok(cTrim?.target.kind === "venue" && cTrim.target.siteId === SITE && cTrim.mode === "retry" && "address" in cTrim &&
+       cTrim.address.length === 300 && cTrim.city.length === 120 && cTrim.state.length === 60 && cTrim.zip.length === 20,
+      "drive-time cleanFixInput: ids are trimmed and every field is truncated to its cap");
+    const cEmpty = cleanFixInput({ target: V, mode: "retry", address: "", city: "", state: "", zip: "" });
+    ok(cEmpty !== null && "address" in cEmpty && cEmpty.address === "", "drive-time cleanFixInput: blank venue fields are allowed (the retry decides)");
+    const cPlTrim = cleanFixInput({ target: { kind: "place", key: "k".repeat(400), label: "  L  " }, mode: "retry", text: "  " + "t".repeat(400) });
+    ok(cPlTrim?.target.kind === "place" && cPlTrim.target.key.length === 300 && cPlTrim.target.label === "L" && "text" in cPlTrim && cPlTrim.text.length === 300,
+      "drive-time cleanFixInput: place key/label/text are trimmed and capped");
+    ok(cleanFixInput({ target: V, mode: "retry", address: "a", city: "c", state: "s" }) === null &&
+       cleanFixInput({ target: V, mode: "retry", address: 1, city: "c", state: "s", zip: "z" }) === null &&
+       cleanFixInput({ target: { kind: "venue", siteId: "   " }, mode: "pin", lat: 1, lng: 1 }) === null &&
+       cleanFixInput({ target: { kind: "place", key: "k", label: "L" }, mode: "retry", text: "   " }) === null &&
+       cleanFixInput({ target: { kind: "place", key: "k", label: "L" }, mode: "pick", lat: 1, lng: 1 }) === null &&
+       cleanFixInput({ target: { kind: "place", key: "", label: "L" }, mode: "pin", lat: 1, lng: 1 }) === null &&
+       cleanFixInput({ target: V, mode: "pick", ...vf, lat: "44", lng: "-88" }) === null &&
+       cleanFixInput({ target: V, mode: "bogus" }) === null &&
+       cleanFixInput({ mode: "pin", lat: 1, lng: 1 }) === null,
+      "drive-time cleanFixInput: missing/blank/mistyped fields and an unknown mode are refused");
+    ok(cleanFixInput({ target: V, mode: "pin", lat: 0, lng: 0 }) === null &&
+       cleanFixInput({ target: V, mode: "pick", ...vf, lat: 0, lng: 0 }) === null &&
+       cleanFixInput({ target: { kind: "place", key: "k", label: "L" }, mode: "pin", lat: 0, lng: 0 }) === null &&
+       cleanFixInput({ target: { kind: "place", key: "k", label: "L" }, mode: "pick", street: "s", lat: 0, lng: 0 }) === null,
+      "drive-time cleanFixInput: a (0,0) point is refused in every mode");
+
     ok(cleanFixInput({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 44, lng: -88 }) !== null, "drive-time cleanFixInput: a well-formed pin passes");
     ok(cleanFixInput({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 200, lng: -88 }) === null &&
        cleanFixInput({ target: { kind: "place", key: "x" }, mode: "retry" }) === null &&
@@ -359,7 +528,8 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
       "drive-time cleanFixInput: out-of-range coords, missing fields and unknown kinds are refused");
   } finally {
     globalThis.fetch = realFetch;
-    await db.delete(sites).where(eq(sites.id, SITE));
+    await db.delete(sites).where(inArray(sites.id, [SITE, SITE_GONE, "TESTdrive:site-named"]));
+    await db.delete(companies).where(eq(companies.id, COMPANY));
     await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
   }
 }

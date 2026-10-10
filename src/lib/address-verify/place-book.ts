@@ -16,7 +16,7 @@ import { getDb } from "@/db";
 import { placeBook, type PlaceBookRow } from "@/db/schema";
 import { FETCH_TIMEOUT_MS, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import { addressKey } from "./keys";
-import { isGeoStatus, placeAddressState, placeRowFromHit, statusOfFreeTextHit } from "./state";
+import { isGeoStatus, isValidPoint, placeAddressState, placeRowFromHit, statusOfFreeTextHit } from "./state";
 import type { AddressState, GeoStatus, PlaceRow } from "./types";
 
 /** Nominatim asks for <= 1 request/second. */
@@ -120,6 +120,7 @@ export async function placeStatesFor(
       } catch {
         continue; // outage: write nothing, the next live pass retries
       }
+      // placeRowFromHit drops a hit with unusable coordinates (stored unresolved, never verified).
       const row = placeRowFromHit(key, label, hits[0], d.now());
       await writePlace(row, { overwritePin: false });
       // Re-read: a pin dropped meanwhile wins over this geocode.
@@ -139,10 +140,6 @@ export type PlaceFixInput =
 export type FixResult =
   | { ok: true; status: GeoStatus; lat: number; lng: number }
   | { ok: false; reason: "no-hit" | "unavailable" | "invalid" };
-
-const validCoord = (lat: unknown, lng: unknown): boolean =>
-  typeof lat === "number" && typeof lng === "number" && Number.isFinite(lat) && Number.isFinite(lng) &&
-  lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 
 /** A Fix on a place-book entry. Always written under the ORIGINAL key, so
  *  the record's own text never flags again (spec "Fixing an address"). */
@@ -166,13 +163,13 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
       return { ok: false, reason: "unavailable" };
     }
     // No hit, or a hit with no usable point, is a real "no match".
-    if (!hits[0] || !validCoord(hits[0].lat, hits[0].lng)) return { ok: false, reason: "no-hit" };
+    if (!hits[0] || !isValidPoint(hits[0].lat, hits[0].lng)) return { ok: false, reason: "no-hit" };
     lat = hits[0].lat;
     lng = hits[0].lng;
     // Judged on the street the geocoder returned, not the typed text.
     status = statusOfFreeTextHit(hits[0]);
   } else if (input.mode === "pick" || input.mode === "pin") {
-    if (!validCoord(input.lat, input.lng)) return { ok: false, reason: "invalid" };
+    if (!isValidPoint(input.lat, input.lng)) return { ok: false, reason: "invalid" };
     lat = input.lat;
     lng = input.lng;
     if (input.mode === "pin") {

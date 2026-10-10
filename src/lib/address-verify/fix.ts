@@ -9,7 +9,7 @@ import { companies, sites } from "@/db/schema";
 import { locateVenue } from "@/lib/venue-locate";
 import { addressKey } from "./keys";
 import { fixPlace, getPlaces, type PlaceDeps } from "./place-book";
-import { venueGeoStatus } from "./state";
+import { isValidPoint, venueGeoStatus } from "./state";
 import type { FixTarget, GeoStatus } from "./types";
 
 type VenueT = { kind: "venue"; siteId: string };
@@ -26,9 +26,6 @@ export type FixAddressInput =
 export type FixAddressResult = { ok: true; status: GeoStatus; pointKey: string } | { ok: false; reason: string; got?: string };
 
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : null);
-const coord = (lat: unknown, lng: unknown) =>
-  typeof lat === "number" && typeof lng === "number" && Number.isFinite(lat) && Number.isFinite(lng) &&
-  lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 
 /** Untrusted server-action input → a well-formed FixAddressInput, or null. */
 export function cleanFixInput(raw: unknown): FixAddressInput | null {
@@ -41,12 +38,12 @@ export function cleanFixInput(raw: unknown): FixAddressInput | null {
     const siteId = str(t.siteId, 200);
     if (!siteId) return null;
     const target: VenueT = { kind: "venue", siteId };
-    if (mode === "pin") return coord(r.lat, r.lng) ? { target, mode, lat: r.lat as number, lng: r.lng as number } : null;
+    if (mode === "pin") return isValidPoint(r.lat, r.lng) ? { target, mode, lat: r.lat as number, lng: r.lng as number } : null;
     const f = { address: str(r.address, 300), city: str(r.city, 120), state: str(r.state, 60), zip: str(r.zip, 20) };
     if (f.address == null || f.city == null || f.state == null || f.zip == null) return null;
     const fields = f as { address: string; city: string; state: string; zip: string };
     if (mode === "retry") return { target, mode, ...fields };
-    if (mode === "pick") return coord(r.lat, r.lng) ? { target, mode, ...fields, lat: r.lat as number, lng: r.lng as number } : null;
+    if (mode === "pick") return isValidPoint(r.lat, r.lng) ? { target, mode, ...fields, lat: r.lat as number, lng: r.lng as number } : null;
     return null;
   }
   if (t.kind === "place") {
@@ -54,14 +51,14 @@ export function cleanFixInput(raw: unknown): FixAddressInput | null {
     const label = str(t.label, 300);
     if (!key || label == null) return null;
     const target: PlaceT = { kind: "place", key, label };
-    if (mode === "pin") return coord(r.lat, r.lng) ? { target, mode, lat: r.lat as number, lng: r.lng as number } : null;
+    if (mode === "pin") return isValidPoint(r.lat, r.lng) ? { target, mode, lat: r.lat as number, lng: r.lng as number } : null;
     if (mode === "retry") {
       const text = str(r.text, 300);
       return text ? { target, mode, text } : null;
     }
     if (mode === "pick") {
       const street = str(r.street, 300);
-      return street != null && coord(r.lat, r.lng) ? { target, mode, street, lat: r.lat as number, lng: r.lng as number } : null;
+      return street != null && isValidPoint(r.lat, r.lng) ? { target, mode, street, lat: r.lat as number, lng: r.lng as number } : null;
     }
   }
   return null;

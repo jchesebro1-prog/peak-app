@@ -80,6 +80,12 @@ function pointOf(lat: unknown, lng: unknown): LatLng | null {
   return { lat: a, lng: b };
 }
 
+/** THE coordinate validator for pins, picks and geocoder hits: real numbers
+ *  (never strings or null), finite, in range, and not exactly (0,0). */
+export function isValidPoint(lat: unknown, lng: unknown): boolean {
+  return typeof lat === "number" && typeof lng === "number" && pointOf(lat, lng) !== null;
+}
+
 function coordsOf(row: VenueSpot): LatLng | null {
   return pointOf(row.lat, row.lng);
 }
@@ -135,12 +141,14 @@ export function placeRowFromHit(
   hit: { street: string; lat: number; lng: number } | null | undefined,
   now: number
 ): PlaceRow {
-  const status = statusOfFreeTextHit(hit);
+  // A hit with no usable point is a hit with no point: never stored verified.
+  const usable = hit && isValidPoint(hit.lat, hit.lng) ? hit : null;
+  const status = statusOfFreeTextHit(usable);
   return {
     key,
     label,
-    lat: hit ? hit.lat : null,
-    lng: hit ? hit.lng : null,
+    lat: usable ? usable.lat : null,
+    lng: usable ? usable.lng : null,
     status,
     source: "geocode",
     verifiedBy: null,

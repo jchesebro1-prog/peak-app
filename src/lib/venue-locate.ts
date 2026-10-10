@@ -27,7 +27,7 @@ import {
   route,
   type TravelSource,
 } from "@/lib/geo";
-import { geocodedStatus, hasHouseNumber } from "@/lib/address-verify/state";
+import { geocodedStatus, hasHouseNumber, isValidPoint } from "@/lib/address-verify/state";
 import type { GeoStatus } from "@/lib/address-verify/types";
 import { geocodeVenue, newGeocodeCtx, type GeocodeFailure, type GeocodePrecision } from "@/lib/geo-backfill";
 
@@ -159,10 +159,6 @@ export type LocateResult =
 
 const clip = (v: unknown, n = 200) => String(v ?? "").trim().slice(0, n);
 const orNull = (s: string) => (s ? s : null);
-const validCoord = (lat: unknown, lng: unknown) =>
-  typeof lat === "number" && typeof lng === "number" &&
-  Number.isFinite(lat) && Number.isFinite(lng) &&
-  lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 
 export async function locateVenue(
   input: LocateInput,
@@ -204,7 +200,7 @@ export async function locateVenue(
       zip: orNull(fields.zip),
     });
   } else if (input.mode === "pick" || input.mode === "pin") {
-    if (!validCoord(input.lat, input.lng)) return { ok: false, reason: "invalid" };
+    if (!isValidPoint(input.lat, input.lng)) return { ok: false, reason: "invalid" };
     lat = input.lat;
     lng = input.lng;
     if (input.mode === "pick") {
