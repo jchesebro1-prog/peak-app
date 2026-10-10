@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { GRID_LAYERS, type GridLayer } from "@/lib/design/grid-scopes";
-import type { DeviceType, TypeReviewRow } from "@/lib/design/device-types";
+import { effectiveTypeCode, type DeviceType, type TypeReviewRow } from "@/lib/design/device-types";
 import { acceptAllSuggestionsAction, assignDeviceTypeAction, mergeDeviceTypeAction, saveDeviceTypesAction } from "./actions";
 
 /**
@@ -15,7 +15,8 @@ import { acceptAllSuggestionsAction, assignDeviceTypeAction, mergeDeviceTypeActi
  */
 
 type Result = { ok: true; message?: string } | { ok: false; error: string };
-type Draft = { key?: string; label: string; scope: GridLayer; archived?: boolean };
+/** `code` (#320): "" = use the default (effectiveTypeCode). */
+type Draft = { key?: string; label: string; scope: GridLayer; code: string; archived?: boolean };
 type Show = "unmapped" | "auto" | "all";
 
 const INPUT: React.CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12.5, border: "1px solid #e4e7ec", borderRadius: 8, padding: "6px 8px", background: "#fff", color: "#16181d", outline: "none", minWidth: 0 };
@@ -26,7 +27,7 @@ const MINI: React.CSSProperties = { ...BTN, padding: "3px 7px", fontSize: 11.5 }
 const TAG: React.CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 5, marginLeft: 6 };
 const CARD: React.CSSProperties = { overflow: "hidden", marginBottom: 18 };
 const HEAD: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", rowGap: 10, padding: "14px 18px", borderBottom: "1px solid #ececf0" };
-const TYPE_GRID = "56px minmax(0, 1fr) 150px 90px 80px";
+const TYPE_GRID = "56px minmax(0, 1fr) 76px 150px 90px 80px";
 const ROW_GRID = "26px minmax(0, 1fr) 70px 210px 210px";
 const scopeName = (s: GridLayer) => (s === "Unscoped" ? "General (Unscoped)" : s);
 /** Bulk-assign sentinel: distinct from "" (no choice yet) and from a real
@@ -50,7 +51,7 @@ export default function DeviceTypesClient({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const initial = useMemo<Draft[]>(() => types.map((t) => ({ key: t.key, label: t.label, scope: t.scope, archived: !!t.archived })), [types]);
+  const initial = useMemo<Draft[]>(() => types.map((t) => ({ key: t.key, label: t.label, scope: t.scope, code: t.code ?? "", archived: !!t.archived })), [types]);
   const [drafts, setDrafts] = useState<Draft[]>(initial);
   const [newLabel, setNewLabel] = useState("");
   const [newScope, setNewScope] = useState<GridLayer>("Lighting");
@@ -118,7 +119,7 @@ export default function DeviceTypesClient({
   const add = () => {
     const label = newLabel.trim();
     if (!label) return;
-    setDrafts((d) => [...d, { label, scope: newScope }]);
+    setDrafts((d) => [...d, { label, scope: newScope, code: "" }]);
     setNewLabel("");
   };
   const togglePick = (category: string) => setPicked((p) => (p.includes(category) ? p.filter((c) => c !== category) : [...p, category]));
@@ -134,7 +135,7 @@ export default function DeviceTypesClient({
     <>
       {msg && (
         <div
-          role="status"
+          role={msg.ok ? "status" : "alert"}
           style={{ marginBottom: 12, fontSize: 12.5, borderRadius: 8, padding: "9px 12px", color: msg.ok ? "#1f7a52" : "#b4543a", background: msg.ok ? "#eaf6ef" : "#f9ece8", border: `1px solid ${msg.ok ? "#cfe9da" : "#f0d6cd"}` }}
         >
           {msg.text}
@@ -146,7 +147,8 @@ export default function DeviceTypesClient({
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Types</div>
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4 }}>
-              Rename, reorder, add or archive. An archived type maps nothing; its categories show as unmapped.
+              Rename, reorder, add or archive. An archived type maps nothing; its categories show as unmapped. Code is the
+              designator prefix on Grid plans (MIC → MIC-1); leave it blank to use the default shown.
             </div>
           </div>
           <button type="button" disabled={!dirty || pending} onClick={() => run(() => saveDeviceTypesAction(drafts))} style={dirty && !pending ? PRIMARY : OFF}>
@@ -165,6 +167,15 @@ export default function DeviceTypesClient({
                 </button>
               </span>
               <input value={d.label} onChange={(e) => edit(i, { label: e.target.value })} aria-label="Type name" maxLength={40} style={INPUT} />
+              <input
+                value={d.code}
+                onChange={(e) => edit(i, { code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) })}
+                placeholder={effectiveTypeCode({ key: d.key ?? "", label: d.label })}
+                aria-label={`Code for ${d.label}`}
+                title="Designator prefix (1–6 letters or digits) — blank uses the default shown"
+                maxLength={6}
+                style={{ ...INPUT, fontFamily: "var(--font-mono)" }}
+              />
               <select value={d.scope} onChange={(e) => edit(i, { scope: e.target.value as GridLayer })} aria-label={`Scope for ${d.label}`} style={INPUT}>
                 {GRID_LAYERS.map((s) => (
                   <option key={s} value={s}>
@@ -193,6 +204,7 @@ export default function DeviceTypesClient({
               maxLength={40}
               style={INPUT}
             />
+            <span />
             <select value={newScope} onChange={(e) => setNewScope(e.target.value as GridLayer)} aria-label="New type scope" style={INPUT}>
               {GRID_LAYERS.map((s) => (
                 <option key={s} value={s}>

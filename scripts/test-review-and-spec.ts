@@ -11533,6 +11533,7 @@ seeded()
   .then(() => designators320EditorChecks())
   .then(() => designators320DeviceRowsChecks())
   .then(() => designators320ScheduleChecks())
+  .then(() => designators320TypeCodePins())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -60526,4 +60527,13 @@ async function designators320ScheduleChecks(): Promise<void> {
   const edge = D.planDesignatorMarks([{ id: "n", key: "P9", desc: "Plain", qty: 3, curtain: false }, { id: "u", key: "P8", desc: "Lot", qty: 5, designator: "Stage Left", curtain: false }], "R");
   ok(edge.tags.get("n") === "" && edge.rows[0].tag === "" && edge.rows[0].qty === 3, "#320 plan sheet: a non-curtain device with no designator prints no mark and an empty key cell");
   ok(edge.tags.get("u") !== undefined && edge.rows[1].tag === "Stage Left" && edge.rows[1].qty === 5, "#320 plan sheet: a lot with a custom (non-parsable) designator lists it as typed in the key");
+}
+
+/* ---------------- #320: Catalog → Device types code column ---------------- */
+async function designators320TypeCodePins(): Promise<void> {
+  const client = readFileSync(join(process.cwd(), "src/app/(app)/catalog/device-types/device-types-client.tsx"), "utf8");
+  ok(client.includes("code: t.code ?? \"\"") && client.includes("placeholder={effectiveTypeCode({ key: d.key ?? \"\", label: d.label })}") &&
+     client.includes("aria-label={`Code for ${d.label}`}") && client.includes(".toUpperCase().replace(/[^A-Z0-9]/g, \"\").slice(0, 6)"),
+    "#320 Device types: an editable Code per type, uppercased as typed, showing the effective default as its placeholder");
+  ok(client.includes("{ label, scope: newScope, code: \"\" }") && client.includes("designator prefix"), "#320 Device types: new types start on the default code; the card says what the code is for");
 }
