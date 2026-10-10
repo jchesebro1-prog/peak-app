@@ -10,6 +10,11 @@ import { visitEventIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
 import { addDays, chicagoDayKey, chicagoDayStart, DRIVE_TZ } from "@/lib/drive-plan/day";
 import { chicagoMinuteOfDay, fmtClockShort } from "./hours";
 
+/** What another person's Google event is called anywhere the viewer can see
+ *  it — conflict text, nearby days. Only the viewer's own events keep their
+ *  titles; visits (Peak's own records) always keep their labels. */
+export const OTHERS_EVENT_LABEL = "a calendar event";
+
 export type BusyBlock = { key: string; kind: "visit" | "event"; label: string; startMs: number; endMs: number };
 export type BusyVisit = { id: string; label: string; startAt: number | null; endAt: number | null; stage: string; people: string[]; eventIds: string[] };
 export type BusyEvent = {

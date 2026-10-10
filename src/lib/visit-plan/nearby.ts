@@ -10,7 +10,7 @@ import { addDays, chicagoDayStart } from "@/lib/drive-plan/day";
 import { pairKey } from "@/lib/drive-plan/plan";
 import type { DriveStop } from "@/lib/drive-plan/stops";
 import { busyInRange, fmtBusy, type BusyBlock } from "./busy";
-import { overlaps, type CalendarRead } from "./check";
+import { calendarNote, overlaps, type CalendarRead } from "./check";
 import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, workWindow } from "./hours";
 import type { WorkHours } from "./settings";
 
@@ -57,7 +57,14 @@ export type NearbyDay = {
   busyText: string;
   others: AttendeeDayStatus[];
 };
-export type NearbyResult = { status: "ok"; days: NearbyDay[]; lookaheadDays: number } | { status: "unverified" } | { status: "unavailable" };
+/** `leadCalendar`: the lead's calendar read (null when no lead was read). A
+ *  failed read also carries `note` ("Couldn't check <Lead>'s calendar") — the
+ *  days were found from the lead's visits alone, never silently. */
+type LeadRead = { leadCalendar: CalendarRead | null; note?: string };
+export type NearbyResult =
+  | ({ status: "ok"; days: NearbyDay[]; lookaheadDays: number } & LeadRead)
+  | { status: "unverified" }
+  | ({ status: "unavailable" } & LeadRead);
 
 /** A day's stops that could be in the same area as the candidate: verified,
  *  not the candidate itself, and inside the straight-line pre-filter. */
@@ -101,9 +108,15 @@ export function suggestDays(args: {
   sameAreaMin: number;
   lookaheadDays: number;
   others: OtherAttendee[];
+  /** the lead and their calendar read, when one was read */
+  lead?: { person: string; calendar: CalendarRead };
 }): NearbyResult {
   const { candidate } = args;
   if (!candidate.point) return { status: "unverified" };
+  const leadRead: LeadRead = {
+    leadCalendar: args.lead?.calendar ?? null,
+    ...(args.lead?.calendar === "failed" ? { note: calendarNote(args.lead.person, "failed") ?? undefined } : {}),
+  };
   const point = candidate.point;
   const timed = candidate.startMs != null && candidate.endMs != null && candidate.endMs > candidate.startMs;
   const found: NearbyDay[] = [];
@@ -138,9 +151,9 @@ export function suggestDays(args: {
       })),
     });
   }
-  if (!found.length && missing > 0) return { status: "unavailable" };
+  if (!found.length && missing > 0) return { status: "unavailable", ...leadRead };
   found.sort((a, b) => a.nearest.minutes - b.nearest.minutes || (a.dayKey < b.dayKey ? -1 : a.dayKey > b.dayKey ? 1 : 0));
-  return { status: "ok", days: found.slice(0, MAX_NEARBY_DAYS), lookaheadDays: args.lookaheadDays };
+  return { status: "ok", days: found.slice(0, MAX_NEARBY_DAYS), lookaheadDays: args.lookaheadDays, ...leadRead };
 }
 
 /** "Tue Oct 14 · 18 min from Lone Pine Elementary · busy 9–11:30" */

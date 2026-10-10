@@ -6,7 +6,8 @@
  * hands the pure engine everything it needs. Computed live; nothing stored.
  * Addresses are read in cache mode (the booking UI's own address check
  * geocodes); missing routes go to OSRM under one shared budget and the
- * instance-wide OSRM pacer (routeMinutesFor).
+ * instance-wide OSRM pacer (routeMinutesFor). Only the viewer's own Google
+ * events keep their titles; anyone else's read "a calendar event".
  */
 import type { AddressState, LatLng } from "@/lib/address-verify/types";
 import { addressStatesForVisits, type VisitAddressInput } from "@/lib/address-verify/targets";
@@ -20,7 +21,7 @@ import { listEventsForSync, type CalendarEvent, type SyncRead } from "@/lib/goog
 import { getSchedulingSettings, workHoursFor } from "@/lib/stores/schedule-prefs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { allUsers } from "@/lib/users";
-import { busyBlocks, busyInRange, toBusyVisit } from "./busy";
+import { busyBlocks, busyInRange, OTHERS_EVENT_LABEL, toBusyVisit } from "./busy";
 import { checkVisit, type CalendarRead, type PersonCheck } from "./check";
 import { nearbyPairs, suggestDays, type NearbyResult } from "./nearby";
 import type { SchedulingSettings, WorkHours } from "./settings";
@@ -159,7 +160,21 @@ async function readPerson(d: BookingDeps, userId: string, spans: Range[]): Promi
   return { status, events: parts.flatMap((p) => p.events).filter((e) => !seen.has(e.id) && !!seen.add(e.id)) };
 }
 
-export async function loadBookingCheck(input: BookingCheckInput, opts: { nearby?: boolean } = {}, deps?: Partial<BookingDeps>): Promise<BookingCheckResult> {
+export type BookingCheckOpts = {
+  /** The signed-in user. Only their own Google events keep their titles —
+   *  anyone else's read "a calendar event" (null: nobody's keep them). */
+  viewerId: string | null;
+  /** false for conflict badges: no nearby days */
+  nearby?: boolean;
+};
+
+/** Another person's events lose their titles before any block, stop or text is
+ *  built from them, so no conflict line or nearby day can carry one. */
+function eventsForViewer(events: CalendarEvent[], ownerId: string, viewerId: string | null): CalendarEvent[] {
+  return ownerId === viewerId ? events : events.map((e) => ({ ...e, title: OTHERS_EVENT_LABEL }));
+}
+
+export async function loadBookingCheck(input: BookingCheckInput, opts: BookingCheckOpts, deps?: Partial<BookingDeps>): Promise<BookingCheckResult> {
   const d: BookingDeps = { ...defaultDeps(), ...deps };
   const now = d.now();
   const deadline = now + BOOKING_ROUTE_BUDGET_MS;
@@ -170,10 +185,6 @@ export async function loadBookingCheck(input: BookingCheckInput, opts: { nearby?
   const others = all.filter((v) => v.id !== cand.id);
   // The candidate stays in the busy source so its calendar copies are recognised; excludeVisitId keeps it from being a block.
   const busySrc = [...others, cand].map(toBusyVisit);
-  const candState: AddressState =
-    (await d.visitStates([visitAddressInput(cand)])).get(cand.id) ?? { status: "unresolved", label: input.address, point: null, pointKey: null, fix: null };
-  const address = { status: candState.status, fix: candState.fix };
-  const candPoint = candState.status === "verified" ? candState.point : null;
 
   const people = visitPeople(cand)
     .map((name) => users.find((u) => u.name === name && u.status === "active"))
@@ -184,18 +195,48 @@ export async function loadBookingCheck(input: BookingCheckInput, opts: { nearby?
   const wantNearby = opts.nearby !== false;
   const lookaheadDays = settings.nearbyLookaheadDays;
   const today = chicagoDayKey(now);
-  // Today … today + look-ahead, never a past day.
-  const look = wantNearby && candPoint && lead ? Array.from({ length: lookaheadDays }, (_, i) => addDays(today, i)) : [];
-  const emptyNearby: NearbyResult | null = !wantNearby ? null : candPoint ? { status: "ok", days: [], lookaheadDays } : { status: "unverified" };
+  // Today … today + look-ahead, never a past day — if the address turns out verified.
+  const maybeLook = wantNearby && lead ? Array.from({ length: lookaheadDays }, (_, i) => addDays(today, i)) : [];
+
+  // Addresses: ONE cache read up front — the candidate plus every visit any
+  // plan below can reach (these people, these days) — reused by every plan.
+  const names = new Set(people.map((u) => u.name));
+  const maybeSpans = readSpans([...new Set([...maybeLook, ...(candDay ? [candDay] : [])])].sort());
+  const inSpans = (ms: number) => maybeSpans.some((r) => ms >= r.timeMinMs && ms < r.timeMaxMs);
+  const states = new Map<string, AddressState>();
+  const statesFor = async (vs: VisitAddressInput[]): Promise<Map<string, AddressState>> => {
+    const missing = vs.filter((v) => !states.has(v.id));
+    if (missing.length) for (const [id, st] of await d.visitStates(missing)) states.set(id, st);
+    return new Map(vs.flatMap((v) => (states.has(v.id) ? [[v.id, states.get(v.id)!] as const] : [])));
+  };
+  const reachable = names.size ? others.filter((v) => v.startAt != null && inSpans(v.startAt) && visitPeople(v).some((n) => names.has(n))) : [];
+  await statesFor([cand, ...reachable].map(visitAddressInput));
+  const candState: AddressState = states.get(cand.id) ?? { status: "unresolved", label: input.address, point: null, pointKey: null, fix: null };
+  states.set(cand.id, candState);
+  const address = { status: candState.status, fix: candState.fix };
+  const candPoint = candState.status === "verified" ? candState.point : null;
+
+  const look = candPoint ? maybeLook : [];
+  const emptyNearby: NearbyResult | null = !wantNearby ? null : candPoint ? { status: "ok", days: [], lookaheadDays, leadCalendar: null } : { status: "unverified" };
   const dayKeys = [...new Set([...look, ...(candDay ? [candDay] : [])])].sort();
   if (!dayKeys.length || !people.length) return { address, people: [], nearby: emptyNearby, checkedAt: now };
 
   const spans = readSpans(dayKeys);
   const [reads, hours] = await Promise.all([
-    Promise.all(people.map(async (u) => [u.id, await readPerson(d, u.id, spans)] as const)).then((e) => new Map(e)),
+    Promise.all(
+      people.map(async (u) => {
+        const r = await readPerson(d, u.id, spans);
+        return [u.id, { ...r, events: eventsForViewer(r.events, u.id, opts.viewerId) }] as const;
+      })
+    ).then((e) => new Map(e)),
     Promise.all(people.map(async (u) => [u.id, await d.workHours(u.id)] as const)).then((e) => new Map(e)),
   ]);
-  const calendarOf = (userId: string): CalendarRead => reads.get(userId)?.status ?? "failed";
+  const calendarOf = (userId: string): CalendarRead => {
+    const r = reads.get(userId);
+    // Every person in `people` was read above.
+    if (!r) throw new Error(`[visit-booking] no calendar read for ${userId}`);
+    return r.status;
+  };
   const eventsOf = (userId: string): CalendarEvent[] | null => {
     const r = reads.get(userId);
     return r && r.status === "ok" ? r.events : null;
@@ -210,31 +251,14 @@ export async function loadBookingCheck(input: BookingCheckInput, opts: { nearby?
     }
   };
   // Every plan sees the in-memory visit list (one read) with the candidate in
-  // it, so its calendar copies dedup against it; addresses come from cache.
+  // it, so its calendar copies dedup against it; addresses come from the memo.
   const planDeps: Partial<DriveLoadDeps> = {
     visits: async () => [...others, cand],
-    visitStates: async (vs) => {
-      const m = await d.visitStates(vs.filter((v) => v.id !== cand.id));
-      m.set(cand.id, candState);
-      return m;
-    },
+    visitStates: (vs) => statesFor(vs),
     routes: (pairs) => routesFor(pairs),
   };
 
-  const checks: PersonCheck[] = [];
-  if (candDay) {
-    for (const u of people) {
-      const [day] = await d.plan({ userId: u.id, dayKeys: [candDay], events: eventsOf(u.id), mode: "cache", deps: planDeps });
-      checks.push(
-        ...checkVisit(
-          { key },
-          [{ person: u.name, dayKey: candDay, stops: day?.stops ?? [], legs: day?.legs ?? [], busy: busyOf(u), hours: hours.get(u.id)!, calendar: calendarOf(u.id) }],
-          { dailyDriveLimitMin: settings.dailyDriveLimitMin }
-        )
-      );
-    }
-  }
-
+  // Nearby first: the strip the user sees gets the routing budget before the per-person plans.
   let nearby: NearbyResult | null = emptyNearby;
   if (wantNearby && candPoint && lead && look.length) {
     // The lead's stops only — no routing for these plans; just the nearby pairs below.
@@ -253,7 +277,22 @@ export async function loadBookingCheck(input: BookingCheckInput, opts: { nearby?
       sameAreaMin: settings.sameAreaMin,
       lookaheadDays,
       others: people.filter((u) => u.id !== lead.id).map((u) => ({ person: u.name, calendar: calendarOf(u.id), hours: hours.get(u.id)!, busy: busyOf(u) })),
+      lead: { person: lead.name, calendar: calendarOf(lead.id) },
     });
+  }
+
+  const checks: PersonCheck[] = [];
+  if (candDay) {
+    for (const u of people) {
+      const [day] = await d.plan({ userId: u.id, dayKeys: [candDay], events: eventsOf(u.id), mode: "cache", deps: planDeps });
+      checks.push(
+        ...checkVisit(
+          { key },
+          [{ person: u.name, dayKey: candDay, stops: day?.stops ?? [], legs: day?.legs ?? [], busy: busyOf(u), hours: hours.get(u.id)!, calendar: calendarOf(u.id) }],
+          { dailyDriveLimitMin: settings.dailyDriveLimitMin }
+        )
+      );
+    }
   }
   return { address, people: checks, nearby, checkedAt: now };
 }
