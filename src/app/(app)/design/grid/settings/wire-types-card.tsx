@@ -104,14 +104,17 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
   };
   const addRow = () => {
     setJustSaved(false);
+    setFillNote(null);
     setRows((rs) => [...rs, { id: "", label: "", connectionTypes: "", cableSku: "", dollarsPerFt: "", symbol: "", signal: "", interchangeable: false }]);
   };
   const removeRow = (i: number) => {
     setJustSaved(false);
+    setFillNote(null);
     setRows((rs) => rs.filter((_, idx) => idx !== i));
   };
   const restoreDefaults = () => {
     setJustSaved(false);
+    setFillNote(null);
     setRows(rowsOf(DEFAULT_WIRE_TYPES));
   };
 
@@ -174,7 +177,7 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-          <button type="button" onClick={fillSymbols} title="Fills only empty Symbol / Signal: DMX → D, network → N, EchoConnect → UE, contact closure → CC, panic → P" style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer" }}>
+          <button type="button" onClick={fillSymbols} disabled={pending} title="Fills only empty Symbol / Signal: DMX → D, network → N, EchoConnect → UE, contact closure → CC, panic → P" style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer" }}>
             Fill symbols from Bray&apos;s legend
           </button>
           <button type="button" onClick={restoreDefaults} style={{ fontSize: 12, fontWeight: 600, color: "#5b616e", background: "transparent", border: "none", cursor: "pointer" }}>

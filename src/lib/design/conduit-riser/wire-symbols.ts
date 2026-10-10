@@ -17,7 +17,7 @@ export const BRAY_WIRE_SYMBOLS: ReadonlyArray<{ symbol: string; signal: string; 
   { symbol: "CC", signal: "Contact closure", match: /\bcontact[\s-]*closure\b/i },
   { symbol: "UE", signal: "EchoConnect", match: /\bechoconnect\b/i },
   { symbol: "D", signal: "DMX", match: /\bdmx(512)?\b/i },
-  { symbol: "N", signal: "Network", match: /\b(network|ethernet|cat[\s-]?5e|cat[\s-]?6|sacn|art-?net)\b/i },
+  { symbol: "N", signal: "Network", match: /\b(network|ethernet|cat[\s-]?5e|cat[\s-]?6a?|sacn|art-?net)\b/i },
 ];
 
 /** The Bray symbol/signal for one wire type, or null when none of its text matches. */

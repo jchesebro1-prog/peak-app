@@ -64738,6 +64738,8 @@ async function riserPhase2A3Checks(): Promise<void> {
   const net = one({ id: "cat6", label: "Cat6 (network/Dante/sACN/HDBaseT)", connectionTypes: ["sACN/Art-Net (etherCON/Cat6)", "Dante/AES67 (Cat6)"] });
   ok(net.symbol === "N" && net.signal === "Network", "#328 A3: the default Cat6 wire type -> N / Network");
   ok(one({ id: "lan", label: "LAN", connectionTypes: ["sACN/Art-Net (etherCON/Cat6)"] }).symbol === "N", "#328 A3: a custom wire type is matched on its connection type (sACN/Art-Net)");
+  const c6a = one({ id: "cat6a", label: "HDBaseT", connectionTypes: ["HDBaseT (Cat6a)"] });
+  ok(c6a.symbol === "N" && c6a.signal === "Network", "#328 A3: a wire type with only HDBaseT (Cat6a) and id cat6a -> N / Network");
   ok(one({ id: "cat5e", label: "Cat5e", connectionTypes: ["HDMI"] }).symbol === "N", "#328 A3: a custom wire type is matched on its id keyword (cat5e)");
   const echo = one({ id: "etc-echoconnect", label: "ETC EchoConnect", connectionTypes: ["ETC EchoConnect", "ETC EchoConnect (line voltage)"] });
   ok(echo.symbol === "UE" && echo.signal === "EchoConnect", "#328 A3: EchoConnect -> UE / EchoConnect");

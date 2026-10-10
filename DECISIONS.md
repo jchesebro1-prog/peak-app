@@ -10999,8 +10999,7 @@ with the editable columns Designator code · Box · Face · Mount · Height · P
 / `—`). A blank part value is pre-filled from the suggestion rules (D813); an existing value is never replaced in the
 export. The export reads the device-type map without writing (stored types plus in-memory auto types). Upload →
 Preview (per part, field: old → new; unchanged rows hidden behind a toggle; unknown, renamed and invalid rows listed
-per row) → Apply. Cell rules: **blank = leave unchanged, `-` = clear, a literal em dash = blank (what the export
-writes for an empty cell)**, a bare number in Height gets the inch mark, anything else is cleaned by `cleanTypeCode` /
+per row) → Apply. Cell rules: **blank = leave unchanged, `-` = clear, a literal em dash = blank (the export's Source mark; accepted as blank in any editable cell)**, a bare number in Height gets the inch mark, anything else is cleaned by `cleanTypeCode` /
 `cleanTagFields`. An invalid cell refuses its **whole row** (nothing from that row is written — not even its valid
 cells) and the rest of the sheet still applies; unlike Rack data, one bad row does not block the import. A SKU that was
 renamed (#304) is followed through `renamedTo` and the change lands on the live part. Apply is one `mergeUpsert` per
@@ -11014,7 +11013,7 @@ piece B and is not built here. Punch item #328.
 specific device kind first** — EBDK, DEBC, DR, ER, TS, EP, OCC, LVJB, then the outlets CRON, CRO, CRN — so a "DMX
 emergency bypass controller" or a dimmer rack whose description says DMX is never coded as an outlet. Model,
 description and category are tested **separately**; a rule never reads across a field boundary. Brand-only tokens
-(`unison`, `sensor3`, `sensor+`) count toward DR only beside a rack/panel noun in the same field; the model-shaped
+(`unison`, `sensor3`, `sensor+`) count toward DR only with a rack/panel noun in the same field; the model-shaped
 tokens `drd\d*` and `ern\d*` count on their own (the digit is optional — "Unison ERn" has none); "touch panel" never
 supplies the noun, so a Unison touchscreen is TS. CRN matches outlet / receptacle / wall plate only (a network switch
 or jack is not an outlet); CRON needs DMX plus a network word plus outlet/port/receptacle. Box is never suggested (gang
