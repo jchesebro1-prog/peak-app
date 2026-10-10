@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CONNECTION_TYPES, DEFAULT_WIRE_TYPES, type WireType } from "@/lib/catalog-connect";
+import { brayWireSymbols } from "@/lib/design/conduit-riser/wire-symbols";
 import { saveWireTypesAction } from "./actions";
 
 /**
@@ -88,6 +89,7 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [showVocab, setShowVocab] = useState(false);
+  const [fillNote, setFillNote] = useState<string | null>(null);
 
   const dirty = JSON.stringify(rows) !== JSON.stringify(saved);
   const hasContent = rows.some((r) => r.id.trim() && r.connectionTypes.trim());
@@ -96,6 +98,7 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
 
   const patch = (i: number, p: Partial<Row>) => {
     setJustSaved(false);
+    setFillNote(null);
     setError(null);
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
   };
@@ -112,8 +115,35 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
     setRows(rowsOf(DEFAULT_WIRE_TYPES));
   };
 
+  // Fill only EMPTY Symbol / Signal from Bray's legend (pure rule in
+  // conduit-riser/wire-symbols); nothing typed is overwritten and nothing is
+  // saved until the admin presses Save.
+  const fillSymbols = () => {
+    setJustSaved(false);
+    setError(null);
+    const aligned: WireType[] = rows.map((r) => ({
+      id: r.id.trim(),
+      label: r.label.trim(),
+      connectionTypes: r.connectionTypes.split(",").map((c) => c.trim()).filter(Boolean),
+      symbol: r.symbol.trim() || undefined,
+      signal: r.signal.trim() || undefined,
+    }));
+    const filled = brayWireSymbols(aligned);
+    let n = 0;
+    const next = rows.map((r, i) => {
+      const f = filled[i];
+      const symbol = r.symbol.trim() ? r.symbol : f.symbol || "";
+      const signal = r.signal.trim() ? r.signal : f.signal || "";
+      if (symbol !== r.symbol || signal !== r.signal) n++;
+      return symbol === r.symbol && signal === r.signal ? r : { ...r, symbol, signal };
+    });
+    setRows(next);
+    setFillNote(n ? `Filled ${n} wire type${n === 1 ? "" : "s"} from Bray's legend — press Save to keep ${n === 1 ? "it" : "them"}.` : "Nothing to fill — every matching wire type already has its Symbol and Signal.");
+  };
+
   const onSave = () => {
     setError(null);
+    setFillNote(null);
     startTransition(async () => {
       try {
         const built = rowsToWireTypes(rows);
@@ -144,6 +174,9 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <button type="button" onClick={fillSymbols} title="Fills only empty Symbol / Signal: DMX → D, network → N, EchoConnect → UE, contact closure → CC, panic → P" style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer" }}>
+            Fill symbols from Bray&apos;s legend
+          </button>
           <button type="button" onClick={restoreDefaults} style={{ fontSize: 12, fontWeight: 600, color: "#5b616e", background: "transparent", border: "none", cursor: "pointer" }}>
             Restore defaults
           </button>
@@ -162,6 +195,9 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
         <div style={{ margin: "12px 18px 0", fontSize: 12, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 8, padding: "9px 12px" }}>
           Too many wire types to save ({MAX_ROWS} max) — remove some rows.
         </div>
+      )}
+      {fillNote && !justSaved && (
+        <div style={{ margin: "12px 18px 0", fontSize: 11.5, color: "#5b616e", fontWeight: 600 }}>{fillNote}</div>
       )}
       {justSaved && !dirty && (
         <div style={{ margin: "12px 18px 0", fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>✓ Saved</div>

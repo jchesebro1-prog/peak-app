@@ -11640,6 +11640,7 @@ seeded()
   .then(() => riserPolish3Checks())
   .then(() => riserPhase2A1Checks())
   .then(() => riserPhase2A2Checks())
+  .then(() => riserPhase2A3Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -64722,4 +64723,59 @@ async function riserPhase2A2Checks(): Promise<void> {
   ok(/mergeUpsert\(c\.sku, upsertPatchOf\(c\)\)/.test(srv) && !/\bupsert\(/.test(srv.replace(/mergeUpsert/g, "")), "#328 A2: parts are written only through mergeUpsert with the two-field patch");
   const cl = fs.readFileSync("src/app/(app)/catalog/riser-data/riser-data-client.tsx", "utf8");
   ok(/Show unchanged/.test(cl) && /preview\.notes/.test(cl), "#328 A2: the preview hides unchanged rows behind a toggle and shows parse notes");
+}
+
+async function riserPhase2A3Checks(): Promise<void> {
+  const J = (v: unknown) => JSON.stringify(v);
+  const W = await import("@/lib/design/conduit-riser/wire-symbols");
+  const { DEFAULT_WIRE_TYPES, cleanWireTypes } = await import("@/lib/catalog-connect");
+  type WT = import("@/lib/catalog-connect").WireType;
+  const one = (w: WT) => W.brayWireSymbols([w])[0];
+
+  // ---- 1. the mapping, per spec A
+  const dmx = one({ id: "dmx-5pin", label: "DMX 5-pin", connectionTypes: ["DMX512 (5-pin XLR)"] });
+  ok(dmx.symbol === "D" && dmx.signal === "DMX", "#328 A3: DMX wire type -> D / DMX");
+  const net = one({ id: "cat6", label: "Cat6 (network/Dante/sACN/HDBaseT)", connectionTypes: ["sACN/Art-Net (etherCON/Cat6)", "Dante/AES67 (Cat6)"] });
+  ok(net.symbol === "N" && net.signal === "Network", "#328 A3: the default Cat6 wire type -> N / Network");
+  ok(one({ id: "lan", label: "LAN", connectionTypes: ["sACN/Art-Net (etherCON/Cat6)"] }).symbol === "N", "#328 A3: a custom wire type is matched on its connection type (sACN/Art-Net)");
+  ok(one({ id: "cat5e", label: "Cat5e", connectionTypes: ["HDMI"] }).symbol === "N", "#328 A3: a custom wire type is matched on its id keyword (cat5e)");
+  const echo = one({ id: "etc-echoconnect", label: "ETC EchoConnect", connectionTypes: ["ETC EchoConnect", "ETC EchoConnect (line voltage)"] });
+  ok(echo.symbol === "UE" && echo.signal === "EchoConnect", "#328 A3: EchoConnect -> UE / EchoConnect");
+  const cc = one({ id: "contact-closure", label: "Contact closure", connectionTypes: ["contact closure"] });
+  ok(cc.symbol === "CC" && cc.signal === "Contact closure", "#328 A3: contact closure -> CC / Contact closure");
+  const panic = one({ id: "panic", label: "Panic", connectionTypes: ["contact closure"] });
+  ok(panic.symbol === "P" && panic.signal === "Panic", "#328 A3: a wire type named Panic -> P / Panic (before contact closure)");
+  ok(one({ id: "pan-2", label: "Panic loop", connectionTypes: ["bare-end"] }).symbol === "P", "#328 A3: panic matches on label alone");
+
+  // ---- 2. no match, wireless, fill-only-empty, purity
+  for (const [id, label, types] of [["hdmi", "HDMI", ["HDMI"]], ["fiber", "Fiber", ["fiber"]], ["etc-wireless", "ETC wireless (no cable)", ["ETC Echoflex (wireless)", "ETC Multiverse (wireless DMX)", "ETC MeshConnect (wireless)"]], ["etc-control", "ETC control", ["ETC CANbus", "ETC control (generic)"]], ["etc-serial", "Serial / SMPTE", ["ETC serial", "ETC SMPTE timecode"]]] as Array<[string, string, string[]]>) {
+    const w = one({ id, label, connectionTypes: types });
+    ok(w.symbol === undefined && w.signal === undefined, `#328 A3: ${id} has no Bray code and stays blank`);
+  }
+  const kept = one({ id: "dmx-5pin", label: "DMX", connectionTypes: ["DMX512 (5-pin XLR)"], symbol: "DX", signal: "Lighting data" });
+  ok(kept.symbol === "DX" && kept.signal === "Lighting data", "#328 A3: a typed Symbol and Signal are never overwritten");
+  const half = one({ id: "dmx-5pin", label: "DMX", connectionTypes: ["DMX512 (5-pin XLR)"], symbol: "DX" });
+  ok(half.symbol === "DX" && half.signal === "DMX", "#328 A3: only the empty one of Symbol / Signal is filled");
+  const half2 = one({ id: "dmx-5pin", label: "DMX", connectionTypes: ["DMX512 (5-pin XLR)"], signal: "Lights" });
+  ok(half2.symbol === "D" && half2.signal === "Lights", "#328 A3: a typed Signal stays when only Symbol is empty");
+  const blankStr = one({ id: "dmx-5pin", label: "DMX", connectionTypes: ["DMX512 (5-pin XLR)"], symbol: "  ", signal: "" });
+  ok(blankStr.symbol === "D" && blankStr.signal === "DMX", "#328 A3: whitespace / empty strings count as empty");
+
+  const input = DEFAULT_WIRE_TYPES.map((w) => ({ ...w, connectionTypes: [...w.connectionTypes] }));
+  const before = J(input);
+  const out = W.brayWireSymbols(input);
+  ok(J(input) === before && out !== input && out.length === input.length, "#328 A3: the input is never mutated and a new array comes back");
+  ok(out.every((w, i) => w.id === input[i].id && J(w.connectionTypes) === J(input[i].connectionTypes) && w.cableSku === input[i].cableSku), "#328 A3: nothing but Symbol / Signal can change");
+  const bySym = new Map(out.filter((w) => w.symbol).map((w) => [w.id, w.symbol] as const));
+  ok(J([...bySym]) === J([["dmx-5pin", "D"], ["cat6", "N"], ["contact-closure", "CC"], ["etc-echoconnect", "UE"]]), "#328 A3: on the shipped defaults exactly DMX, Cat6, contact closure and EchoConnect get a code");
+  ok(J(W.brayWireSymbols(out)) === J(out), "#328 A3: filling is idempotent");
+
+  // ---- 3. the filled list survives the server-side cleaner, and the card is wired
+  const cleaned = cleanWireTypes(out);
+  ok(!!cleaned && cleaned.find((w) => w.id === "etc-echoconnect")?.symbol === "UE" && cleaned.find((w) => w.id === "contact-closure")?.signal === "Contact closure", "#328 A3: cleanWireTypes keeps the filled Symbol / Signal");
+  const fs = await import("node:fs");
+  const card = fs.readFileSync("src/app/(app)/design/grid/settings/wire-types-card.tsx", "utf8");
+  ok(/Fill symbols from Bray&apos;s legend/.test(card) && /brayWireSymbols\(aligned\)/.test(card), "#328 A3: the Wire types card has the Fill symbols button wired to the pure helper");
+  const fillBody = card.slice(card.indexOf("const fillSymbols"), card.indexOf("const onSave"));
+  ok(!/saveWireTypesAction/.test(fillBody), "#328 A3: the fill only edits the form — Save is a separate step");
 }
