@@ -445,6 +445,16 @@ project and opportunity history (D241–D242).
   would be added as a Draft stage; you can also add it yourself in Settings →
   Pipelines)
 
+## P. Morning triage (built 2026-10-10, #324)
+
+The Start here card on Home and `/triage` rank what needs you each morning and
+midday (D707–D711).
+
+- **P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
+  quote later resubmitted for approval, or a dismissed lead that later
+  breaches its SLA, never returns to your list. ✦ keep permanent ☐ let a new
+  event (resubmit / SLA breach) bring it back: ______
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

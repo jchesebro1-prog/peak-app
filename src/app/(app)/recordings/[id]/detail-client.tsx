@@ -12,6 +12,7 @@ import { matchAssignee, routePrefill, summarySectionKey, normalizeActionTitle } 
 import { StatusChip } from "@/components/recordings/status-chip";
 import { EmptyState } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
+import { initialTranscriptShown } from "@/lib/recording-deep-link";
 import type { PrefillTarget } from "../data";
 import {
   acceptActionItemAction,
@@ -137,6 +138,8 @@ export default function DetailClient({
   krispConnected,
   prefillTarget,
   parentHref,
+  initialTab,
+  focusSeg,
 }: {
   rec: RecordingRecord;
   chip: RecordingStatusChip;
@@ -145,9 +148,11 @@ export default function DetailClient({
   krispConnected: boolean;
   prefillTarget: PrefillTarget | null;
   parentHref: string;
+  initialTab?: Tab;
+  focusSeg?: number | null;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("summary");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "summary");
   const [err, setErr] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
 
@@ -279,7 +284,7 @@ export default function DetailClient({
 
       {tab === "summary" && <SummaryTab rec={rec} chip={chip} prefillTarget={prefillTarget} busy={busy} run={run} />}
       {tab === "actions" && <ActionItemsTab rec={rec} chip={chip} users={users} viewerId={viewerId} busy={busy} run={run} />}
-      {tab === "transcript" && <TranscriptTab rec={rec} chip={chip} />}
+      {tab === "transcript" && <TranscriptTab rec={rec} chip={chip} focusSeg={focusSeg ?? null} />}
       {tab === "audio" && <AudioTab rec={rec} chip={chip} />}
     </>
   );
@@ -504,8 +509,14 @@ function ActionItemRow({
 
 const TRANSCRIPT_PAGE = 200;
 
-function TranscriptTab({ rec, chip }: { rec: RecordingRecord; chip: RecordingStatusChip }) {
-  const [shown, setShown] = useState(TRANSCRIPT_PAGE);
+function TranscriptTab({ rec, chip, focusSeg }: { rec: RecordingRecord; chip: RecordingStatusChip; focusSeg: number | null }) {
+  // seg indexes the FULL segments array — show at least through it.
+  const [shown, setShown] = useState(() => initialTranscriptShown(focusSeg, TRANSCRIPT_PAGE));
+  // Morning triage's call line links here (?tab=transcript&seg=N): bring that segment into view.
+  useEffect(() => {
+    if (focusSeg == null) return;
+    document.getElementById(`seg-${focusSeg}`)?.scrollIntoView({ block: "center" });
+  }, [focusSeg]);
   const t = rec.transcript;
   if (rec.krisp.status !== "ready" && !t) return <NotReady chip={chip} />;
   if (!t || t.segments.length === 0) return <EmptyState title="No transcript" sub="Krisp returned no transcript for this recording." />;
@@ -525,7 +536,14 @@ function TranscriptTab({ rec, chip }: { rec: RecordingRecord; chip: RecordingSta
           const prev = i > 0 ? segs[i - 1] : null;
           const newSpeaker = !prev || prev.speaker !== s.speaker;
           return (
-            <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", paddingTop: newSpeaker && i > 0 ? 8 : 0 }}>
+            <div
+              key={i}
+              id={`seg-${i}`}
+              style={{
+                display: "flex", gap: 10, alignItems: "baseline", paddingTop: newSpeaker && i > 0 ? 8 : 0,
+                background: i === focusSeg ? "color-mix(in srgb, var(--accent) 10%, #fff)" : undefined, borderRadius: 6,
+              }}
+            >
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", width: 46, flexShrink: 0, textAlign: "right" }}>
                 {mmss(s.start)}
               </span>

@@ -861,5 +861,7 @@ See `.env.example`.
     codes, then Renumber → Apply current type codes on designs already
     opened; try it on a real design in production. Punch item #320.
 
+44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning) and `/api/triage/build` (midday, 17:00 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

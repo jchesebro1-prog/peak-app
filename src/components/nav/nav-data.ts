@@ -147,6 +147,7 @@ export function activeKeyFor(pathname: string): string {
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/queue": "queue",
+    "/triage": "dashboard", // Morning triage — "See more" from Home's Start here card
     "/calendar": "calendar",
     "/inbox": "inbox",
     "/leads": "leads",

@@ -8,8 +8,7 @@ import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
 import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
-import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
-import { syncAllDrivers } from "@/lib/drive-sync/sync";
+import { buildSlotForAll } from "@/lib/triage/service";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -44,9 +43,8 @@ export const maxDuration = 60;
  *
  * #283 adds the Peak Product Photos sync the same way.
  *
- * Spec 2026-10-09 adds the venue geo-status backfill and the drive-time re-sync
- * (every rep, own try/catch + time budget), placed before the photo rider so it
- * can't be starved.
+ * Morning triage adds the morning snapshot build the same way (its midday
+ * build is /api/triage/build, the second daily cron).
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -90,26 +88,17 @@ export async function GET(req: Request): Promise<NextResponse> {
     vendors = { error: (err as Error).message };
   }
 
-  // Spec 2026-10-09 — stamp any venue still missing a verification status
-  // (idempotent; a no-op once every row is stamped).
-  let venueGeo: unknown;
+  // Morning triage (spec 2026-10-09-morning-triage-design.md) — today's
+  // morning list for every active user. 12:00 UTC is 7:00 CDT (6:00 CST);
+  // either way it builds today's Chicago "morning" slot. Before the photo
+  // sync so the photo budget below absorbs whatever this used. Own
+  // try/catch like the other riders.
+  let triage: Awaited<ReturnType<typeof buildSlotForAll>> | { error: string };
   try {
-    venueGeo = await ensureVenueGeoStatus();
+    // Stop starting users 30 s in so the photo sync below keeps its window; whoever is skipped builds lazily on first view.
+    triage = await buildSlotForAll("morning", Date.now(), { deadlineMs: started + 30_000 });
   } catch (err) {
-    venueGeo = { error: (err as Error).message };
-  }
-
-  // Spec 2026-10-09 — re-sync every rep's drive events, least recently synced
-  // first, ≤ 15 s and never past 40 s into this run. Own try/catch per rep
-  // inside syncAllDrivers, and one here around the whole rider. deadlineMs
-  // also stops a new rep starting unless a rep-sized slice (20 s) is left
-  // before 40 s, so the photo rider below keeps its window.
-  let driveTime: unknown;
-  try {
-    const budget = Math.min(15_000, 40_000 - (Date.now() - started));
-    driveTime = budget > 0 ? await syncAllDrivers({ budgetMs: budget, deadlineMs: started + 40_000 }) : { skipped: "no time left" };
-  } catch (err) {
-    driveTime = { error: (err as Error).message };
+    triage = { error: (err as Error).message };
   }
 
   // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
@@ -128,5 +117,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     drivePhotos = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, venueGeo, driveTime, drivePhotos });
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, triage, drivePhotos });
 }

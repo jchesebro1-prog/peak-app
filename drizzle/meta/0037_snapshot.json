@@ -1,6 +1,6 @@
 {
-  "id": "7a8e08cd-2c60-451d-a1fe-aacce299aa83",
-  "prevId": "3197c577-dc0f-495e-9d7f-a6d2b00fce57",
+  "id": "d3c891be-06b0-4a10-be2e-1bdca4ee5222",
+  "prevId": "7a8e08cd-2c60-451d-a1fe-aacce299aa83",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -836,6 +836,89 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.place_book": {
+      "name": "place_book",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lat": {
+          "name": "lat",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lng": {
+          "name": "lng",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verified_by": {
+          "name": "verified_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "place_book_status_idx": {
+          "name": "place_book_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.sites": {
       "name": "sites",
       "schema": "",
@@ -946,6 +1029,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "geo_status": {
+          "name": "geo_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "geo_source": {
+          "name": "geo_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "geo_verified_by": {
+          "name": "geo_verified_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "geo_verified_at": {
+          "name": "geo_verified_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "drive_folder_id": {
           "name": "drive_folder_id",
           "type": "text",
@@ -993,6 +1100,21 @@
           "columns": [
             {
               "expression": "deleted",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sites_geo_status_idx": {
+          "name": "sites_geo_status_idx",
+          "columns": [
+            {
+              "expression": "geo_status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

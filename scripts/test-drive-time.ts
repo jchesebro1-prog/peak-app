@@ -1612,10 +1612,19 @@ export async function driveTimeTriggerPins(ok: Ok): Promise<void> {
         ok(firstAwait(body, "requireUser()") || firstAwait(body, "requireCalendarGrant()"), `drive-time pin: ${file} ${m[1]} checks the session (its first await) before it triggers a sync`);
     }
   }
-  const cron = read("src/app/api/gmail/sync/route.ts");
-  ok(cron.includes("syncAllDrivers") && cron.includes("ensureVenueGeoStatus") && cron.indexOf("syncAllDrivers(") > 0 && cron.indexOf("syncAllDrivers(") < cron.indexOf("syncDrivePhotos("),
-    "drive-time: the daily cron re-syncs every rep (before the photo rider eats the budget) and stamps venue status");
-  ok(/syncAllDrivers\(\{[^}]*deadlineMs/.test(cron), "drive-time: the cron's drive rider carries a deadline so the photo rider keeps its window");
+  const cron = read("src/app/api/drive/sync/route.ts");
+  ok(/cronAuthFailure\(/.test(cron) && /maxDuration = 60/.test(cron) && cron.includes("ensureVenueGeoStatus()") && cron.indexOf("ensureVenueGeoStatus()") < cron.indexOf("syncAllDrivers("),
+    "drive-time: /api/drive/sync authenticates with CRON_SECRET, stamps venue status, then re-syncs every rep");
+  ok(/syncAllDrivers\(\{[^}]*deadlineMs: started \+ 50_000/.test(cron) && /try \{[\s\S]*syncAllDrivers[\s\S]*\} catch[\s\S]*\{ error: [\s\S]*status: 500/.test(cron),
+    "drive-time: the drive cron stops starting reps 50 s in and answers a failure with JSON { error } and status 500");
+  const gmailCron = read("src/app/api/gmail/sync/route.ts");
+  ok(!gmailCron.includes("syncAllDrivers") && !gmailCron.includes("ensureVenueGeoStatus"), "drive-time: the drive pass is off the shared Gmail/triage cron budget");
+  const vercel = JSON.parse(read("vercel.json")) as { crons: { path: string; schedule: string }[] };
+  ok(vercel.crons.some((c) => c.path === "/api/drive/sync" && c.schedule === "0 11 * * *"), "drive-time: vercel.json runs /api/drive/sync once a day at 11:00 UTC (Hobby-safe)");
+  const mw = read("src/middleware.ts");
+  const mm = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
+  const mre = new RegExp("^" + (mm ? mm[1].replace(/\\\\/g, "\\") : "$^") + "$");
+  ok(!!mm && !mre.test("/api/drive/sync") && mre.test("/calendar"), "drive-time: /api/drive/sync skips the login gate (CRON_SECRET is its auth); /calendar does not");
   const calPage = read("src/app/(app)/calendar/page.tsx");
   const home = read("src/app/(app)/page.tsx");
   ok(calPage.includes("syncDriveIfStale") && home.includes("syncDriveIfStale"),
