@@ -64,10 +64,26 @@ export default function AddressesToVerify({
     return () => clearTimeout(t);
   }, [load, q, refreshKey]);
 
-  function removeRow(id: string) {
-    setRows((prev) => prev.filter((r) => r.id !== id));
-    setList((l) => (l ? { ...l, total: Math.max(0, l.total - 1) } : l));
-    setOpen((o) => (o && o.row.id === id ? { ...o, fixed: true } : o));
+  /** Two rows are the same address when they open the same Fix target. */
+  const fixKey = (r: VerifyRow) => (r.fix.kind === "venue" ? "venue:" + r.fix.siteId : "place:" + r.fix.key);
+
+  // A verified address leaves EVERY row that shares it (one place-book key
+  // can sit under several visits and leads), so "Show more" offsets stay
+  // right and "Next address →" never opens an already-verified row.
+  function removeFixed(fixed: VerifyRow) {
+    const k = fixKey(fixed);
+    const gone = rows.filter((r) => fixKey(r) === k);
+    const goneIds = new Set(gone.map((r) => r.id));
+    // The next row's new index = the rows that survive before the opened one.
+    const at = open ? rows.slice(0, open.idx).filter((r) => !goneIds.has(r.id)).length : 0;
+    setRows(rows.filter((r) => !goneIds.has(r.id)));
+    setList((l) => {
+      if (!l) return l;
+      const counts = { ...l.counts };
+      for (const r of gone) counts[r.kind] = Math.max(0, counts[r.kind] - 1);
+      return { ...l, total: Math.max(0, l.total - gone.length), counts };
+    });
+    setOpen((o) => (o && o.row.id === fixed.id ? { ...o, idx: at, fixed: true } : o));
     onChanged();
   }
 
@@ -175,9 +191,9 @@ export default function AddressesToVerify({
           onNext={() => nextRow && setOpen({ row: nextRow, idx: rows.indexOf(nextRow), fixed: false })}
           onClose={() => setOpen(null)}
           onFixed={(s) => {
-            if (s === "verified") removeRow(open.row.id);
+            if (s === "verified") removeFixed(open.row);
           }}
-          onGone={() => removeRow(open.row.id)}
+          onGone={() => removeFixed(open.row)}
         />
       )}
     </div>

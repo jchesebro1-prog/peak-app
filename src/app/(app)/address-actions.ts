@@ -44,13 +44,15 @@ export async function loadFixTargetAction(raw: unknown): Promise<FixTargetDetail
   return target ? loadFixTarget(target) : null;
 }
 
-/** Address type-ahead for the Fix dialog (keeps zip for venue picks). */
-export async function searchAddressAction(query: string): Promise<AddressHit[]> {
+/** Address type-ahead for the Fix dialog (keeps zip for venue picks).
+ *  `limit` (1–6, default 6) lets a caller that only wants the best match —
+ *  centring the map on open — ask for one. */
+export async function searchAddressAction(query: string, limit?: number): Promise<AddressHit[]> {
   await requireUser();
   const q = text(query, 200);
   if (q.length < 3) return [];
   const { search } = await import("@/lib/geo");
-  const hits = await search(q, { limit: 6 });
+  const hits = await search(q, { limit: Math.max(1, Math.min(6, Math.floor(Number(limit)) || 6)) });
   return hits.map((h) => ({ title: h.title, sub: h.sub, street: h.street, city: h.city, state: h.state, zip: h.zip, lat: h.lat, lng: h.lng }));
 }
 
@@ -70,7 +72,14 @@ export async function townCentreForFixAction(city: string, state: string): Promi
   return hit && samePlace(c, hit.city) ? { lat: hit.lat, lng: hit.lng } : null;
 }
 
-/** The booking warning: is the address this visit will use verified? Never blocks. */
+/**
+ * The booking warning: is the address this visit will use verified? Never blocks.
+ *
+ * "live" mode geocodes an unseen free-text address and WRITES a place-book row
+ * per distinct text. Callers must therefore invoke this on blur or debounced
+ * (never per keystroke), or every half-typed address leaves a row behind.
+ * Task 11's booking form calls it that way.
+ */
 export async function addressStatusAction(input: {
   customerId?: unknown;
   locationId?: unknown;

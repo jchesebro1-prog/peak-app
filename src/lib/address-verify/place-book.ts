@@ -98,6 +98,16 @@ export async function placeStatesFor(
   mode: "cache" | "live",
   deps?: Partial<PlaceDeps>
 ): Promise<Map<string, AddressState>> {
+  return (await placeStatesWithRows(texts, mode, deps)).states;
+}
+
+/** placeStatesFor plus the place-book rows it read (keyed by addressKey), so
+ *  a caller that also needs "was this ever looked up?" reads the book once. */
+export async function placeStatesWithRows(
+  texts: string[],
+  mode: "cache" | "live",
+  deps?: Partial<PlaceDeps>
+): Promise<{ states: Map<string, AddressState>; rows: Map<string, PlaceRow> }> {
   const d = { ...defaultDeps(), ...deps };
   const byKey = new Map<string, string>();
   for (const raw of texts) {
@@ -129,7 +139,7 @@ export async function placeStatesFor(
   }
   const out = new Map<string, AddressState>();
   for (const [key, label] of byKey) out.set(key, placeAddressState(label, known.get(key)));
-  return out;
+  return { states: out, rows: known };
 }
 
 export type PlaceFixInput =
@@ -139,10 +149,12 @@ export type PlaceFixInput =
 
 export type FixResult =
   | { ok: true; status: GeoStatus; lat: number; lng: number }
-  | { ok: false; reason: "no-hit" | "unavailable" | "invalid" };
+  | { ok: false; reason: "no-hit" | "unavailable" | "invalid" | "kept-pin" };
 
 /** A Fix on a place-book entry. Always written under the ORIGINAL key, so
- *  the record's own text never flags again (spec "Fixing an address"). */
+ *  the record's own text never flags again (spec "Fixing an address").
+ *  A Retry or Pick weaker than verified never replaces a verified hand pin
+ *  ("kept-pin"); a new pin, or a Retry/Pick that verifies, does. */
 export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<PlaceDeps>): Promise<FixResult> {
   const d = { ...defaultDeps(), ...deps };
   const key = String(input.key ?? "");
@@ -182,6 +194,14 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
   } else {
     return { ok: false, reason: "invalid" };
   }
+  // Only something that verifies may replace a hand pin. Checked up front
+  // for the result, and enforced again by the write's own source guard so a
+  // pin dropped while a Retry was in flight survives too.
+  const mayReplacePin = source === "pin" || status === "verified";
+  if (!mayReplacePin) {
+    const existing = (await getPlaces([key])).get(key);
+    if (existing?.source === "pin" && existing.status === "verified") return { ok: false, reason: "kept-pin" };
+  }
   await writePlace(
     {
       key,
@@ -194,7 +214,7 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
       verifiedAt: status === "verified" ? now : null,
       updatedAt: now,
     },
-    { overwritePin: true }
+    { overwritePin: mayReplacePin }
   );
   return { ok: true, status, lat, lng };
 }

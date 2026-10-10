@@ -27,6 +27,7 @@ export function reasonLabel(reason: string, got?: string): string {
   if (reason === "gone") return "This venue was deleted";
   if (reason === "invalid") return "That didn’t look like a usable address or point";
   if (reason === "unavailable") return "The address lookup is unavailable right now";
+  if (reason === "kept-pin") return "Kept your pin — the search found only a town-level match";
   return reason;
 }
 
@@ -113,6 +114,15 @@ export default function AddressFixDrawer({
                 if (live && !pinPlacedRef.current && p) setCentre({ c: [p.lat, p.lng], z: 13 });
               })
               .catch(() => {});
+        } else if (d.placeText) {
+          // A place address has no stated town: look the text up once and open
+          // over it. Nothing found → the default view stays.
+          searchAddressAction(d.placeText, 1)
+            .then((hits) => {
+              const h = hits[0];
+              if (live && !pinPlacedRef.current && h) setCentre({ c: [h.lat, h.lng], z: 13 });
+            })
+            .catch(() => {});
         }
       })
       .catch(() => {

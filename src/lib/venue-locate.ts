@@ -155,7 +155,7 @@ export type LocateResult =
       source: TravelSource;
       officeName: string | null;
     }
-  | { ok: false; reason: GeocodeFailure["reason"] | "gone" | "invalid"; got?: string };
+  | { ok: false; reason: GeocodeFailure["reason"] | "gone" | "invalid" | "kept-pin"; got?: string };
 
 const clip = (v: unknown, n = 200) => String(v ?? "").trim().slice(0, n);
 const orNull = (s: string) => (s ? s : null);
@@ -245,14 +245,30 @@ export async function locateVenue(
   });
   set.lat = String(lat);
   set.lng = String(lng);
+  // A Retry or Pick weaker than verified never replaces a verified hand pin:
+  // nothing is written (not even the retyped address) and the person is told.
+  // The guard is in the UPDATE too, so a pin dropped while a Retry was in
+  // flight survives as well.
+  const keepsPin = input.mode !== "pin" && status !== "verified";
+  if (keepsPin && row.geoSource === "pin" && row.geoStatus === "verified") return { ok: false, reason: "kept-pin" };
   const updated = await db
     .update(sites)
     .set(set)
-    .where(and(eq(sites.id, row.id), eq(sites.deleted, false)))
+    .where(
+      and(
+        eq(sites.id, row.id),
+        eq(sites.deleted, false),
+        ...(keepsPin ? [sql`not (coalesce(${sites.geoSource}, '') = 'pin' and coalesce(${sites.geoStatus}, '') = 'verified')`] : [])
+      )
+    )
     .returning({ id: sites.id });
-  // A venue soft-deleted between the SELECT above and this UPDATE (retry mode
-  // makes paced network calls in between) must not be reported located.
-  if (updated.length === 0) return { ok: false, reason: "gone" };
+  if (updated.length === 0) {
+    // Soft-deleted between the SELECT above and this UPDATE (retry mode makes
+    // paced network calls in between) must not be reported located; else the
+    // pin guard stopped it.
+    const [still] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.id, row.id), eq(sites.deleted, false))).limit(1);
+    return { ok: false, reason: still ? "kept-pin" : "gone" };
+  }
 
   // Warm the real route now so travel reads "routed", not the haversine tier.
   // route() fails soft to null; estimate() then falls back on its own.

@@ -5,7 +5,7 @@
  * reloads and shrinks as addresses are fixed from anywhere. Visits linked to
  * a venue are represented by the venue row.
  */
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { companies, sites } from "@/db/schema";
@@ -13,7 +13,7 @@ import { chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
 import { open as openLeads } from "@/lib/stores/leads";
 import { allVisits } from "@/lib/stores/site-visits";
 import { addressKey } from "./keys";
-import { getPlaces, placeStatesFor } from "./place-book";
+import { placeStatesWithRows } from "./place-book";
 import { formatVenueAddress } from "./state";
 import { matchVisitSite } from "./targets";
 import type { VerifyKind, VerifyList, VerifyRow, VerifyStatusFilter } from "./types";
@@ -52,8 +52,8 @@ export async function listAddressesToVerify(
     })
     .from(sites)
     .leftJoin(companies, eq(companies.id, sites.companyId))
-    .where(and(eq(sites.deleted, false), inArray(sites.geoStatus, ["needs_check", "unresolved"]), or(present(sites.address), present(sites.city))))
-    .orderBy(asc(sql`lower(coalesce(${companies.name}, ''))`), asc(sites.id));
+    // No SQL ORDER BY: the combined rows are re-sorted (kind, title, id) below.
+    .where(and(eq(sites.deleted, false), inArray(sites.geoStatus, ["needs_check", "unresolved"]), or(present(sites.address), present(sites.city))));
   for (const r of venues) {
     rows.push({
       id: "venue:" + r.siteId,
@@ -88,8 +88,8 @@ export async function listAddressesToVerify(
   const leadText = (l: { address: string; city: string; state: string }) =>
     [l.address, l.city, l.state].map((s) => (s || "").trim()).filter(Boolean).join(", ");
   const texts = [...freeVisits.map((v) => v.address), ...leads.map(leadText)];
-  const states = await placeStatesFor(texts, "cache");
-  const known = await getPlaces(texts.map(addressKey));
+  // One place-book read: the states and the "ever looked up?" rows together.
+  const { states, rows: known } = await placeStatesWithRows(texts, "cache");
 
   for (const v of freeVisits) {
     const st = states.get(addressKey(v.address));
@@ -131,6 +131,6 @@ export async function listAddressesToVerify(
   const kind = opts.kind && opts.kind !== "all" ? opts.kind : null;
   const shown = filtered
     .filter((r) => !kind || r.kind === kind)
-    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.title.localeCompare(b.title));
+    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.title.localeCompare(b.title) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { rows: shown.slice(offset, offset + limit), total: shown.length, counts, noAddress: Number(noAddress) || 0 };
 }

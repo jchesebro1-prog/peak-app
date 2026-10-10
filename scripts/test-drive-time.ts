@@ -335,6 +335,30 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
     await placeStatesFor([B], "live", fastDeps(search));
     ok((await getPlaces([addressKey(B)])).get(addressKey(B))?.source === "pin", "drive-time place book: a live pass leaves a pinned key alone");
 
+    // A Retry/Pick weaker than verified never downgrades a hand pin; a new pin,
+    // or a Retry/Pick that verifies, still replaces it.
+    const K = "TESTdrive Pinned Gate, Hortonville WI";
+    const kKey = addressKey(K);
+    await fixPlace({ key: kKey, label: K, mode: "pin", lat: 44.5, lng: -88.5 }, "u1", fastDeps(search));
+    const kRetryWeak = await fixPlace({ key: kKey, label: K, mode: "retry", text: "Gate Rd Hortonville" }, "u2", fastDeps(async () => [hit("Gate Rd", 44.9, -88.9)]));
+    const kPickWeak = await fixPlace({ key: kKey, label: K, mode: "pick", street: "Gate Rd", lat: 44.9, lng: -88.9 }, "u2", fastDeps(search));
+    const kHeld = (await getPlaces([kKey])).get(kKey);
+    ok(!kRetryWeak.ok && kRetryWeak.reason === "kept-pin" && !kPickWeak.ok && kPickWeak.reason === "kept-pin" &&
+       kHeld?.source === "pin" && kHeld.status === "verified" && kHeld.lat === 44.5 && kHeld.verifiedBy === "u1",
+      "drive-time place book: a weaker Retry or Pick never replaces a verified hand pin (kept-pin, row untouched)");
+    const kRetryOk = await fixPlace({ key: kKey, label: K, mode: "retry", text: "1 Gate Rd Hortonville" }, "u2", fastDeps(async () => [hit("1 Gate Rd", 44.6, -88.6)]));
+    const kAfterRetry = (await getPlaces([kKey])).get(kKey);
+    ok(kRetryOk.ok && kRetryOk.status === "verified" && kAfterRetry?.source === "geocode" && kAfterRetry.lat === 44.6 && kAfterRetry.verifiedBy === "u2",
+      "drive-time place book: a Retry that verifies replaces a hand pin");
+    await fixPlace({ key: kKey, label: K, mode: "pin", lat: 44.5, lng: -88.5 }, "u1", fastDeps(search));
+    const kPickOk = await fixPlace({ key: kKey, label: K, mode: "pick", street: "2 Gate Rd", lat: 44.7, lng: -88.7 }, "u3", fastDeps(search));
+    const kAfterPick = (await getPlaces([kKey])).get(kKey);
+    ok(kPickOk.ok && kAfterPick?.source === "geocode" && kAfterPick.lat === 44.7, "drive-time place book: a house-numbered Pick replaces a hand pin");
+    await fixPlace({ key: kKey, label: K, mode: "pin", lat: 44.5, lng: -88.5 }, "u1", fastDeps(search));
+    const kRepin = await fixPlace({ key: kKey, label: K, mode: "pin", lat: 44.55, lng: -88.55 }, "u4", fastDeps(search));
+    const kAfterRepin = (await getPlaces([kKey])).get(kKey);
+    ok(kRepin.ok && kAfterRepin?.lat === 44.55 && kAfterRepin.verifiedBy === "u4", "drive-time place book: a new pin replaces a hand pin");
+
     // Retype under the ORIGINAL key — the same text never flags again.
     const D = "TESTdrive Lone Pine School";
     const fixed = await fixPlace({ key: addressKey(D), label: D, mode: "retry", text: "1 School Rd, Hortonville WI" }, "u2", fastDeps(search));
@@ -489,6 +513,33 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
     const vpZero = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 0, lng: 0 }, "u7");
     vrow = await venueRow();
     ok(!vpZero.ok && vpZero.reason === "invalid" && vrow.lat === "44.6", "drive-time fixAddress: a (0,0) venue pin is refused and the venue is untouched");
+
+    // A weaker Retry/Pick never downgrades a hand-pinned venue; one that verifies still replaces it.
+    const kpPin = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 44.7, lng: -88.7 }, "u7");
+    vrow = await venueRow();
+    const keptAddress = vrow.address;
+    const kpPick = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pick", address: "Elm St", city: "Hortonville", state: "WI", zip: "54944", lat: 44.8, lng: -88.8 }, "u8");
+    stub = { road: "Oak St", city: "Hortonville", state: "Wisconsin", lat: 44.81, lng: -88.81 };
+    const kpRetry = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "retry", address: "99 Oak St", city: "Hortonville", state: "WI", zip: "54944" }, "u8");
+    stub = null;
+    vrow = await venueRow();
+    ok(kpPin.ok && !kpPick.ok && kpPick.reason === "kept-pin" && !kpRetry.ok && kpRetry.reason === "kept-pin" &&
+       vrow.geoSource === "pin" && vrow.geoStatus === "verified" && vrow.lat === "44.7" && vrow.lng === "-88.7" && vrow.address === keptAddress && vrow.geoVerifiedBy === "u7",
+      "drive-time fixAddress: a weaker venue Retry or Pick never replaces a verified hand pin (kept-pin, nothing written)");
+    const kpPickOk = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pick", address: "16 Elm St", city: "Hortonville", state: "WI", zip: "54944", lat: 44.9, lng: -88.9 }, "u8");
+    vrow = await venueRow();
+    ok(kpPickOk.ok && kpPickOk.status === "verified" && vrow.geoSource === "geocode" && vrow.lat === "44.9",
+      "drive-time fixAddress: a venue Pick that verifies replaces a hand pin");
+    await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 44.7, lng: -88.7 }, "u7");
+    stub = { house: "99", road: "Oak St", city: "Hortonville", state: "Wisconsin", lat: 44.82, lng: -88.82 };
+    const kpRetryOk = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "retry", address: "99 Oak St", city: "Hortonville", state: "WI", zip: "54944" }, "u8");
+    stub = null;
+    vrow = await venueRow();
+    ok(kpRetryOk.ok && kpRetryOk.status === "verified" && vrow.geoSource === "geocode" && vrow.lat === "44.82",
+      "drive-time fixAddress: a venue Retry that verifies replaces a hand pin");
+    const kpRepin = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 44.71, lng: -88.71 }, "u9");
+    vrow = await venueRow();
+    ok(kpRepin.ok && vrow.geoSource === "pin" && vrow.lat === "44.71", "drive-time fixAddress: a new venue pin replaces a hand pin");
 
     // ---- place retry / pick through fixAddress ----
     const PL = "TESTdrive Lone Pine School";
@@ -1553,6 +1604,11 @@ export async function driveTimeWorklistChecks(ok: Ok): Promise<void> {
     const paged = await listAddressesToVerify({ q: "testdrive", offset: 1, limit: 1, now: NOW });
     ok(paged.rows.length === 1 && paged.rows[0].kind === "lead" && paged.total === 3, "drive-time worklist: offset/limit page the list, total counts every match");
 
+    // The worklist reads the place book ONCE per call (states + "checked" together).
+    const wlSrc = readFileSync("src/lib/address-verify/worklist.ts", "utf8");
+    ok(!/\bgetPlaces\b/.test(wlSrc) && (wlSrc.match(/placeStatesWithRows\(/g) || []).length === 1 && !/\.orderBy\(/.test(wlSrc),
+      "drive-time worklist: one place-book read per call (no second getPlaces) and no redundant SQL orderBy");
+
     // Verifying the visit's text drops it from the list.
     await fixPlace({ key: addressKey(visitText), label: visitText, mode: "pin", lat: 44.27, lng: -88.42 }, "u1");
     ok(!(await listAddressesToVerify({ q: "testdrive", now: NOW })).rows.some((r) => r.kind === "visit"), "drive-time worklist: a verified address leaves the worklist");
@@ -1582,8 +1638,14 @@ export async function driveTimeFixUiPins(ok: Ok): Promise<void> {
   const drawer = read("src/components/address-fix/address-fix-drawer.tsx");
   ok(drawer.includes("LeafletMap") && drawer.includes("onPick") && drawer.includes("createPortal") && /dynamic\(\(\) => import\("@\/components\/map\/LeafletMap"\), \{\s*ssr: false/.test(drawer),
     "drive-time pin: the Fix dialog drops/drags a pin on the shared Leaflet map, loaded client-only");
-  ok(read("src/components/address-fix/address-flag.tsx").includes("Address not verified — no drive time") || read("src/components/address-fix/address-flag.tsx").includes("flag.text"),
-    "drive-time pin: the flag badge shows the flag text");
+  ok(/\{compact && flag\.fix \? "Not verified" : flag\.text\}/.test(read("src/components/address-fix/address-flag.tsx")),
+    "drive-time pin: the flag badge renders the flag's own text (compact address flags say 'Not verified')");
+  const verifyList = read("src/app/(app)/settings/addresses-to-verify.tsx");
+  ok(/rows\.filter\(\(r\) => fixKey\(r\) === k\)/.test(verifyList) && !/removeRow/.test(verifyList),
+    "drive-time pin: a verified address leaves every worklist row that shares its fix target");
+  const drawerSrc = read("src/components/address-fix/address-fix-drawer.tsx");
+  ok(/searchAddressAction\(d\.placeText, 1\)/.test(drawerSrc) && drawerSrc.includes("Kept your pin — the search found only a town-level match"),
+    "drive-time pin: a place Fix opens centred on its text, and kept-pin has its own wording");
   ok(read("src/app/(app)/settings/groups/data.tsx").includes("AddressesToVerify"), "drive-time pin: Settings → Data shows Addresses to verify");
   // Client components never import a module that reaches @/db (next build breaks).
   const clientFiles = ["src/components/address-fix/address-fix-drawer.tsx", "src/components/address-fix/address-flag.tsx", "src/app/(app)/settings/addresses-to-verify.tsx"];
