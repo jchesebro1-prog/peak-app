@@ -11741,7 +11741,7 @@ Open (Jeff-gated):
   hours in Account).
 - Try a drag and an At risk fix (Push due date / Hand off) on production.
 
-## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — pieces A and B done 2026-10-10 (D812–D816)
+## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — DONE 2026-10-10 (D812–D822)
 
 Approved by Jeff 2026-10-10. Spec `docs/superpowers/specs/2026-10-10-riser-phase2-design.md`; plan
 `docs/superpowers/plans/2026-10-10-riser-phase2.md`. Build order: A riser data sheet + wire-type symbol fill →
@@ -11758,3 +11758,11 @@ line, an editor-only ⚠ on an overfilled size label, and a warnings-list entry 
 Jeff-gated: on Catalog → Riser data, export the sheet and confirm the Cables tab's pre-filled diameters (Source =
 suggested, datasheet URL in OD source); fill the blanks (Belden 1872A, the EchoConnect singles, PC224P-PLN and PC4P
 weren't verifiable); Preview, Apply; then open the lighting riser and read the Fill line on a few runs.
+
+**Piece C done 2026-10-10 (D817–D822) — #328 complete:** one A/V conduit riser (Bray's AV1.5) per design option on the
+same engine and editor (`?system=av`, Outputs → A/V conduit riser →). Audio and video devices and wires belong to it; a
+wire belongs to one riser's conduit. Bubbles and the wire legend are off by default (Defaults → Show signal bubbles). It
+prints box types, line legend and rack contents, and no power. The plan prompt names the right riser. Its drawing-set
+sheets follow the lighting ones (exclusion key `av-riser`) and download as DXF with `system=av`. The quote reads both
+risers. Jeff-gated: try the A/V riser on a real job; adjust its Always show list if a device type you need is hidden;
+compare an A/V sheet against Bray's AV1.5.

@@ -978,6 +978,28 @@ See `.env.example`.
     the task bell no longer shows teammates' overdue tasks (U1). Remaining is
     Jeff-gated: the production backfill, telling the reps, reviewing the 80 %
     cap and work hours, and U1. Punch item #327.
+50. ✅ **Conduit riser polish + phase 2** (#321 polish D806–D811, #328
+    D812–D822) — the #321 riser fits the page (up to 1.5× on 24×36), is
+    read-only on a phone, gains keyboard access, busy states and undo across
+    its own writes, and refuses estimate-owned price flags on the server.
+    #328 piece A: **Catalog → Riser data** (`/catalog/riser-data`, admin)
+    exports and imports per-part Designator code + Riser tag defaults through
+    Preview/Apply. Bray-code suggestion rules live in
+    `conduit-riser/suggest-tags.ts`, and Grid Settings → Wire types gains
+    Fill symbols from Bray's legend. Piece B: a cable **outside diameter**
+    (`CatalogPart.cableOdIn`, part editor + the sheet's Cables tab,
+    datasheet-sourced suggestions only) feeds NEC EMT **conduit fill**
+    (`conduit-riser/fill.ts`). It suggests a size and warns, and never
+    blocks. Piece C: one **A/V conduit riser** (Bray AV1.5) per option on the
+    same engine — `GridProject.avRiser` beside `conduitRiser`, walked through
+    `CONDUIT_RISER_FIELDS`, `?system=av` on the page. Audio/video devices and
+    wires belong to it, and a wire belongs to one riser's conduit. Bubbles and
+    the wire legend are off by default, with no power tables or tag fields.
+    The plan prompt picks the riser from the pair. Its sheets follow the
+    lighting E-50x pages (`av-riser` exclusion; DXF `?system=av`), and
+    `riserBom` prices from both risers. No migration. Remaining is Jeff-gated:
+    the riser data sheet and cable diameters on production, the wire-type
+    symbol fill, and trying the A/V riser on a real job. Punch item #328.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

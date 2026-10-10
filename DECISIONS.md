@@ -11061,3 +11061,57 @@ stub-only run shows nothing. Shown in the Run panel (`Fill 28 % · suggests 3/4"
 The printed sheet, the drawing set and the DXF are unchanged: the ⚠ is an editor overlay and never reaches the
 geometry. Exactly the allowed percent is not an overfill. Punch item #328.
 
+
+## D817. One A/V conduit riser per option, on the same engine (#328 piece C, 2026-10-10)
+
+Bray's AV1.5 becomes one combined **A/V conduit riser** beside the lighting control riser — not separate audio and video
+risers. It is the same engine, editor, page (`/design/grid/[id]/conduit-riser?system=av`; any other value is lighting)
+and actions, keyed by `ConduitRiserSystem = "lighting" | "av"`. It is stored in `GridProject.avRiser`
+(`Record<optionId, ConduitRiserDoc>`) beside `conduitRiser`. Every carry, prune, copy, restore and undo path walks one
+list, `CONDUIT_RISER_FIELDS` (`conduit-riser/live.ts`), so a third system later is one row. The **field is authoritative
+for the system**: a document is stamped with the system of the field it was read from, whatever it says inside.
+Revisions carry `avRiser`. Restoring a revision cut before #328 has no A/V riser, so it clears the current one. That is
+recoverable, because restore auto-saves a revision first. No migration. Punch item #328.
+
+## D818. A/V membership, and a wire belongs to one riser's conduit (#328 piece C, 2026-10-10)
+
+A device is on the A/V riser when its drawing system is `audio` or `video`, and a wire when its route system is. A
+RiserLink counts when either end is on that riser. Lighting stays `lighting`. One wire is pulled through one conduit, so
+a wire already in a run on one riser is **never suggested** on the other (`claimedElsewhere`). An undo or restore bundle
+that names a wire another riser already carries comes back without it; restore runs lighting first. Punch item #328.
+
+## D819. A/V defaults: bubbles off, its own always-show list and tables, no power (#328 piece C, 2026-10-10)
+
+The A/V riser starts with the first detail "Audio/Visual". Signal bubbles are **off by default**, and so is the wire
+legend that goes with them. `ConduitRiserDoc.showSignals` is a per-riser **Show signal bubbles** switch in Defaults on
+both risers; lighting defaults on, and a lighting doc stored before the field reads as on. A/V always-shows connector
+plates/boxes, displays/projectors, switching/distribution, networking, racks and assistive listening, editable per
+riser. The A/V sheet prints conduit box types, the line legend and equipment rack contents, plus the wire legend only
+when bubbles are on. That legend is titled **WIRE LEGEND**, as on Bray's AV1.5; lighting keeps CONTROL WIRE LEGEND. The
+A/V riser has no power types or power controls. Its Tag panel and phone view hide Power type, Power controls contents
+and the "Add power types below…" hint. Tag fields, levels, box types, conduit sizes and fill are shared and unchanged.
+Punch item #328.
+
+## D820. The plan prompt picks the riser from the pair (#328 piece C, 2026-10-10)
+
+A new plan wire between two A/V devices asks "Add … to the A/V conduit riser?". A lighting pair asks about the lighting
+control riser, worded as in #321. If one end is on no riser, the other end decides. A **mixed** lighting ↔ A/V pair,
+or a pair on no riser, asks nothing. The rule is `promptRiserSystem`, shared by the editor's pre-check and the server
+(`riserPromptForRoute`). Add accepts on the riser the prompt named. Punch item #328.
+
+## D821. A/V sheets follow the lighting ones; DXF by `system=av` (#328 piece C, 2026-10-10)
+
+The drawing set numbers the lighting control riser E-502… and then gives the A/V conduit riser the **next** numbers
+("A/V conduit riser", continuations "(cont.)"). With 2 lighting pages and 2 A/V pages, that is E-502–E-503 lighting and
+E-504–E-505 A/V; an A/V-only design starts at E-502. Each riser's sheets appear only when that riser has a run. Numbers
+are assigned before exclusion, and E-501 and E-60x never move. A design with no A/V riser gets exactly the sheet list it
+had before. A/V pages share one include/exclude switch, `av-riser`; lighting keeps `conduit-riser`, so saved exclusions
+still read. The DXF route takes `?system=av`. Only exactly `av` selects it; any other value is the lighting riser, the
+same rule as the riser page. The file is named by its real sheet number, `<project>-E-50n-av-conduit-riser.dxf`. The A/V
+riser page and the set (screen-only, under each A/V sheet) both show the Download DXF links. Punch item #328.
+
+## D822. Pricing reads both risers (#328 piece C, 2026-10-10)
+
+`riserBom` reads every riser on the option. A wire is "In conduit — by others" if **either** riser says so (the union).
+Conduit demand sums every riser's runs, and refusals are collected from both, each sentence once. An estimate-owned
+option prices nothing from either riser. Punch item #328.
