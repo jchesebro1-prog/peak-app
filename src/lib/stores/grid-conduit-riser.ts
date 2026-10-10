@@ -13,6 +13,7 @@ import {
 import { acceptSuggestion, dismissSuggestion as dismissOne, suggestions } from "@/lib/design/conduit-riser/suggest";
 import { conduitLiveIds, liveConduitRiser } from "@/lib/design/conduit-riser/live";
 import { loadRiserPartsContext, riserWires, type ConduitRiserDeps } from "@/lib/design/conduit-riser-server";
+import type { Landed } from "@/lib/design/conduit-riser/edit";
 import { getProject, type GridProject } from "./grid-projects";
 
 /**
@@ -22,10 +23,13 @@ import { getProject, type GridProject } from "./grid-projects";
  * RiserLinks, spaces, levels), the pure op applied, and the result pruned
  * and normalized again before it's written. Suggestions are always
  * re-derived here from the live wires — a client never hands one in.
- * Callers authenticate (the Grid's `requireUser()`).
+ * Callers authenticate (the Grid's `requireUser()`). A success reports the
+ * project's `updatedAt` the write was applied over and the one it left
+ * (`landed`; equal when nothing was written) — the editor's layout-undo
+ * stack is tied to that version.
  */
 
-export type ConduitRiserResult = { ok: true } | { ok: false; reason: "not-found" | "no-such-option" | "invalid" };
+export type ConduitRiserResult = { ok: true; landed: Landed } | { ok: false; reason: "not-found" | "no-such-option" | "invalid" };
 type Refusal = "no-such-option" | "invalid";
 
 const makeId: MakeId = crMakeId;
@@ -39,7 +43,9 @@ async function writeConduit(
   step: (p: GridProject, doc: ConduitRiserDoc, placementIds: ReadonlySet<string>) => ConduitRiserDoc | null | typeof SAME
 ): Promise<ConduitRiserResult> {
   let refusal: Refusal | null = null;
+  let before = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    before = p.updatedAt || 0;
     if (!hasOption(p, optionId)) {
       refusal = "no-such-option";
       return;
@@ -57,7 +63,7 @@ async function writeConduit(
   });
   if (!updated) return { ok: false, reason: "not-found" };
   const r = refusal as Refusal | null;
-  return r ? { ok: false, reason: r } : { ok: true };
+  return r ? { ok: false, reason: r } : { ok: true, landed: { before, after: updated.updatedAt || 0 } };
 }
 
 const isOp = (op: unknown): op is CROp =>
@@ -83,7 +89,7 @@ export async function acceptSuggestions(
   optionId: string,
   keys: string[] | "all",
   deps: ConduitRiserDeps = {}
-): Promise<{ ok: true; accepted: number } | Extract<ConduitRiserResult, { ok: false }>> {
+): Promise<{ ok: true; accepted: number; landed: Landed } | Extract<ConduitRiserResult, { ok: false }>> {
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
   const ctx = await loadRiserPartsContext(project, deps);
@@ -102,7 +108,7 @@ export async function acceptSuggestions(
     }
     return accepted ? next : SAME;
   });
-  return r.ok ? { ok: true, accepted } : r;
+  return r.ok ? { ok: true, accepted, landed: r.landed } : r;
 }
 
 /** Hide one suggested pair until a wire this dismissal didn't see is drawn. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { ConduitRiserFigure, CR_UNITS } from "@/components/drawing/conduit-riser-figure";
@@ -17,33 +17,46 @@ import {
   applyLayoutOps,
   historyFor,
   inverseLayoutOp,
+  landHistory,
   recordEdit,
   snapIn,
   stepRedo,
   stepUndo,
   viewWithDoc,
+  type Landed,
   type LayoutHistory,
   type LayoutOp,
 } from "@/lib/design/conduit-riser/edit";
+import { isPressKey, levelHitLabel, runHitLabel, stubHitLabel, tagHitLabel } from "@/lib/design/conduit-riser/editor-rules";
 import { addRiserLinkAction } from "../riser/actions";
 import { addRouteAction, saveLevelsAction, setTagFieldsAction } from "../actions";
 import { acceptSuggestionsAction, dismissSuggestionAction, patchConduitRiserAction } from "./actions";
 import {
   AlwaysShowPanel,
+  AlwaysShowView,
   DefaultsPanel,
+  DefaultsView,
   DetailPanel,
+  DetailView,
   LevelLinePanel,
+  LevelLineView,
   LevelsPanel,
+  LevelsView,
   NewStubPanel,
   NOTHING_NEW,
   NotesPanel,
+  NotesView,
   PairPanel,
   PowerTypesPanel,
+  PowerTypesView,
   RunPanel,
+  RunView,
   SharedLists,
   StubPanel,
+  StubView,
   SuggestionsPanel,
   TagPanel,
+  TagView,
   WarningsPanel,
   type RunSave,
   type SuggestionRow,
@@ -58,11 +71,20 @@ export type { SuggestionRow };
  * action, then router.refresh() re-derives them. A drag previews by
  * applying its layout op to a copy of the document and re-running the pure
  * layout here — the same code the server runs — then commits on release.
- * Undo / redo covers only those layout ops.
+ * Undo / redo covers only those layout ops, tied to the project's version.
+ *
+ * #321 polish: on a phone the riser is fully read-only (Jeff, 2026-10-10) —
+ * no tools, no Accept, every panel shows its values as text. The canvas
+ * hit targets are keyboard buttons (Tab, Enter / Space; Escape clears the
+ * selection and a half-picked Connect end), and every write — including
+ * the ConfirmButton ones — holds `busy` while it's in flight.
  */
 
 type Tool = "select" | "connect" | "stub";
-type Res = { ok: true } | { ok: false; error: string };
+type Res = { ok: true; landed?: Landed } | { ok: false; error: string };
+/** What one write tells `run`: a notice to show, or an error (and whether the page still changed). */
+type Outcome = { ok: true; notice?: string; landed?: Landed } | { ok: false; error: string; refresh?: boolean };
+const SOMETHING_WRONG = "Something went wrong — please try again.";
 type SheetLite = { id: string; name: string; mime: string; src: string };
 type Sel =
   | { kind: "tag"; id: string }
@@ -94,6 +116,8 @@ function subscribePhone(cb: () => void) {
 export default function ConduitRiserEditor(props: {
   projectId: string;
   optionId: string;
+  /** The project's `updatedAt` — the layout-undo stack is tied to it. */
+  version: number;
   planHref: string;
   view: ViewDetail;
   layout: DetailLayout;
@@ -124,7 +148,11 @@ export default function ConduitRiserEditor(props: {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<Drag | null>(null);
   const pids = useMemo(() => new Set(props.placementIds), [props.placementIds]);
-  const [tool, setTool] = useState<Tool>("select");
+  const phone = useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false);
+  const [toolPick, setTool] = useState<Tool>("select");
+  // A phone is read-only: always Select (view), whatever was picked before the window narrowed.
+  const tool: Tool = phone ? "select" : toolPick;
+  const version = props.version || 0;
   const [sel, setSel] = useState<Sel>(null);
   const [first, setFirst] = useState<{ end: RunEnd; label: string; key: string } | null>(null);
   const [dragOp, setDragOp] = useState<LayoutOp | null>(null);
@@ -136,7 +164,6 @@ export default function ConduitRiserEditor(props: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const phone = useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false);
 
   const awaiting = pending !== null && pending.base === doc;
   const waiting = busy || awaiting;
@@ -149,38 +176,51 @@ export default function ConduitRiserEditor(props: {
     shownLayout = layoutDetail(v, shownDoc);
     shownFigure = detailGeometry(shownLayout, v);
   }
-  const stack = historyFor(history, doc);
+  const stack = historyFor(history, doc, version);
 
   const deviceById = new Map(view.tags.map((t) => [t.device.id, t.device]));
   const stubById = new Map(doc.stubs.map((s) => [s.id, s]));
   const itemLabel = (it: LaidItem) => (it.kind === "tag" ? deviceById.get(it.id)?.label || it.id : it.label || it.id);
   const endLabel = (e: ViewEnd) => (e.kind === "tag" ? deviceById.get(e.id)?.label || e.id : e.kind === "stub" ? stubById.get(e.id)?.label || e.id : e.label);
 
-  async function run(fn: () => Promise<Res>): Promise<boolean> {
+  /** Carry the undo stack across one of this editor's own writes (none reported: the next render decides). */
+  const carryHistory = (landed: Landed | undefined) => setHistory((h) => landHistory(h, landed));
+
+  /**
+   * Every write goes through here: `busy` while it's in flight (drags and
+   * every other edit wait), the error or notice shown, the stack carried,
+   * the page refreshed. `rethrow` = for a ConfirmButton — the failure is
+   * thrown so the button shows it, instead of the alert.
+   */
+  async function run(fn: () => Promise<Outcome>, opts: { land?: (landed: Landed | undefined) => void; rethrow?: boolean } = {}): Promise<boolean> {
     setBusy(true);
     setErr(null);
     setNotice(null);
+    let failure: string | null = null;
     try {
       const r = await fn();
       if (!r.ok) {
-        setErr(r.error);
-        return false;
+        failure = r.error;
+        if (r.refresh) router.refresh();
+      } else {
+        (opts.land ?? carryHistory)(r.landed);
+        if (r.notice) setNotice(r.notice);
+        router.refresh();
+        return true;
       }
-      router.refresh();
-      return true;
     } catch {
-      setErr("Something went wrong — please try again.");
-      return false;
+      failure = SOMETHING_WRONG;
     } finally {
       setBusy(false);
     }
+    if (opts.rethrow) throw new Error(failure ?? SOMETHING_WRONG);
+    setErr(failure);
+    return false;
   }
 
-  /** For ConfirmButton: throws on { ok: false } so the button shows the error. */
+  /** For ConfirmButton (Reset layout, Remove run / stub, Delete detail, note delete): busy like any write; throws on failure so the button shows the error. */
   async function mustOk(fn: () => Promise<Res>): Promise<void> {
-    const r = await fn();
-    if (!r.ok) throw new Error(r.error);
-    router.refresh();
+    await run(fn, { rethrow: true });
   }
 
   const patch = (op: CROp) => run(() => patchConduitRiserAction(projectId, optionId, op));
@@ -188,24 +228,42 @@ export default function ConduitRiserEditor(props: {
   /** Commit one layout op: previewed until the refresh lands; an edit joins the undo stack. */
   async function commitLayout(op: LayoutOp, after?: LayoutHistory) {
     const base = doc;
+    const at = version;
     const inverse = after ? null : inverseLayoutOp(base, props.layout, op);
     setPending({ base, op });
     setDragOp(null);
-    if (!(await run(() => patchConduitRiserAction(projectId, optionId, op)))) {
-      setPending(null);
-      return;
-    }
-    if (after) setHistory(after);
-    else if (inverse) setHistory((h) => recordEdit(h, base, { forward: op, inverse }, pids));
+    const ok = await run(() => patchConduitRiserAction(projectId, optionId, op), {
+      // The stack as this edit leaves it, moved to the version the write landed on.
+      land: (landed) => {
+        if (after) setHistory(landHistory(after, landed));
+        else if (inverse) setHistory((h) => landHistory(recordEdit(h, base, { forward: op, inverse }, pids, at), landed));
+        else carryHistory(landed);
+      },
+    });
+    if (!ok) setPending(null);
   }
 
   function undo() {
-    const u = stepUndo(history, doc, pids);
+    const u = stepUndo(history, doc, pids, version);
     if (u && !waiting) void commitLayout(u.op, u.next);
   }
   function redo() {
-    const r = stepRedo(history, doc, pids);
+    const r = stepRedo(history, doc, pids, version);
     if (r && !waiting) void commitLayout(r.op, r.next);
+  }
+
+  /** Escape: nothing selected, no half-picked Connect end. */
+  function cancelAll() {
+    setFirst(null);
+    setSel(null);
+    if (toolPick === "stub") setTool("select");
+  }
+
+  function onCanvasKey(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Escape") return;
+    const t = e.target as HTMLElement;
+    if (t.closest("input, select, textarea")) return;
+    cancelAll();
   }
 
   function choose(t: Tool) {
@@ -298,43 +356,48 @@ export default function ConduitRiserEditor(props: {
     setFirst(null);
   }
 
-  function itemDown(it: LaidItem, e: ReactPointerEvent<SVGElement>) {
-    e.stopPropagation();
+  /** Click, or Enter / Space on a focused tag or stub: select it, or pick it as a Connect end. Returns false when nothing happened. */
+  function pressItem(it: LaidItem): boolean {
     if (tool === "connect") {
       pickEnd(it);
-      return;
+      return true;
     }
-    if (tool !== "select") return;
+    if (tool !== "select") return false;
     if (it.kind === "tag") setSel({ kind: "tag", id: it.id });
     else if (it.kind === "stub") setSel({ kind: "stub", id: it.id });
-    else return;
-    startDrag(e, it.kind, it.id, it.rect);
+    else return false;
+    return true;
   }
+
+  function itemDown(it: LaidItem, e: ReactPointerEvent<SVGElement>) {
+    e.stopPropagation();
+    if (pressItem(it) && tool === "select" && it.kind !== "ref") startDrag(e, it.kind, it.id, it.rect);
+  }
+
+  /** Enter / Space on a focused hit target presses it, like a button. */
+  const onPress = (fn: () => void) => (e: ReactKeyboardEvent<SVGElement>) => {
+    if (!isPressKey(e.key)) return;
+    e.preventDefault();
+    fn();
+  };
 
   /** Connect → "With wire…": add the plan wire (measured route on a scaled
    *  shared page, else a typed-length link), then accept that pair. */
   async function connectWithWire(a: string, b: string, partId: string, lengthFt: number | null) {
     const from: EndRef = { kind: "placement", placementId: a };
     const to: EndRef = { kind: "placement", placementId: b };
-    let added: Res;
-    setBusy(true);
-    setErr(null);
-    setNotice(null);
-    try {
+    await run(async (): Promise<Outcome> => {
+      let added: Res;
       if (connectKind(from, to, props.placements, props.calibrations) === "route") {
         const pa = props.placements.find((p) => p.id === a);
         const pb = props.placements.find((p) => p.id === b);
         const sheet = props.sheets.find((s) => s.id === pa?.sheetId);
-        if (!pa || !pb || !sheet) {
-          setErr("Those devices are no longer on the plan — refresh the page.");
-          return;
-        }
+        if (!pa || !pb || !sheet) return { ok: false, error: "Those devices are no longer on the plan — refresh the page." };
         let aspect: number;
         try {
           aspect = await measureSheetAspect(sheet, pa.page);
         } catch {
-          setErr("Couldn't open the plan sheet to measure this wire — try again.");
-          return;
+          return { ok: false, error: "Couldn't open the plan sheet to measure this wire — try again." };
         }
         added = await addRouteAction(projectId, {
           sheetId: pa.sheetId,
@@ -350,39 +413,25 @@ export default function ConduitRiserEditor(props: {
           toPlacementId: b,
         });
       } else {
-        if (lengthFt === null) return;
+        if (lengthFt === null) return { ok: false, error: "Type the cable length." };
         added = await addRiserLinkAction(projectId, { optionId, from, to, partId, lengthFt });
       }
-      if (!added.ok) {
-        setErr(added.error);
-        return;
-      }
+      if (!added.ok) return added;
+      // The wire is on the plan from here on — a failure below still refreshes.
       const acc = await acceptSuggestionsAction(projectId, optionId, [pairKey(a, b)]);
-      if (!acc.ok) setErr(`The wire is on the plan, but the run wasn't added: ${acc.error}`);
-      else if (acc.accepted === 0) setNotice("The wire is on the plan, but it isn't a lighting control wire, so the riser didn't add a run for it.");
-      else setSel(null);
-      router.refresh();
-    } catch {
-      setErr("Something went wrong — please try again.");
-    } finally {
-      setBusy(false);
-    }
+      if (!acc.ok) return { ok: false, error: `The wire is on the plan, but the run wasn't added: ${acc.error}`, refresh: true };
+      if (acc.accepted === 0) return { ok: true, notice: "The wire is on the plan, but it isn't a lighting control wire, so the riser didn't add a run for it.", landed: acc.landed };
+      setSel(null);
+      return { ok: true, landed: acc.landed };
+    });
   }
 
   async function acceptKeys(keys: string[] | "all") {
-    setBusy(true);
-    setErr(null);
-    setNotice(null);
-    try {
+    await run(async (): Promise<Outcome> => {
       const r = await acceptSuggestionsAction(projectId, optionId, keys);
-      if (!r.ok) setErr(r.error);
-      else if (r.accepted === 0) setNotice(`${NOTHING_NEW}.`);
-      router.refresh();
-    } catch {
-      setErr("Something went wrong — please try again.");
-    } finally {
-      setBusy(false);
-    }
+      if (!r.ok) return { ...r, refresh: true };
+      return r.accepted === 0 ? { ok: true, notice: `${NOTHING_NEW}.`, landed: r.landed } : { ok: true, landed: r.landed };
+    });
   }
 
   const saveTag = (id: string, tagPatch: TagPatch) =>
@@ -409,12 +458,20 @@ export default function ConduitRiserEditor(props: {
   const selItemKey = sel?.kind === "tag" ? `tag:${sel.id}` : sel?.kind === "stub" ? `stub:${sel.id}` : first?.key;
   const U = CR_UNITS;
   const canDrag = !phone && tool === "select";
+  const runById = new Map(view.runs.map((r) => [r.run.id, r]));
+  const runName = (runId: string) => {
+    const vr = runById.get(runId);
+    return vr ? runHitLabel(endLabel(vr.a), endLabel(vr.b), vr.run.size, vr.run.style) : "Run";
+  };
 
   return (
     <div className="cr-editor-root">
       <style>{`
         .cr-editor { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 16px; align-items: start; }
         @media (max-width: 980px) { .cr-editor { grid-template-columns: minmax(0, 1fr); } }
+        .cr-hit { outline: none; }
+        .cr-hit:focus-visible { stroke: var(--accent); stroke-width: 2px; stroke-dasharray: 4 3; }
+        polyline.cr-hit:focus-visible { stroke: color-mix(in srgb, var(--accent) 35%, transparent); stroke-dasharray: none; }
       `}</style>
       <SharedLists sizes={props.sizes} boxTypes={props.boxTypes} />
       <div className="pk-no-print" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center" }}>
@@ -469,7 +526,7 @@ export default function ConduitRiserEditor(props: {
         </span>
       </div>
       <div className="pk-no-print" style={{ fontSize: 12, color: "#8c919c", marginBottom: 8 }}>
-        {phone ? "View only on a phone — open the riser on a larger screen to drag things around." : TOOLS.find((t) => t.key === tool)?.hint}
+        {phone ? "View only on a phone — open the riser on a larger screen to edit it." : TOOLS.find((t) => t.key === tool)?.hint}
         {first ? ` — from ${first.label}; now click the other end.` : ""}
       </div>
       {err && (
@@ -484,7 +541,7 @@ export default function ConduitRiserEditor(props: {
       )}
 
       <div className="cr-editor">
-        <div className="pk-card" style={{ padding: 8, overflow: "auto", maxHeight: "78vh", minHeight: 240 }}>
+        <div className="pk-card" style={{ padding: 8, overflow: "auto", maxHeight: "78vh", minHeight: 240 }} onKeyDown={onCanvasKey}>
           {view.tags.length === 0 && view.stubs.length === 0 && (
             <div style={{ fontSize: 13, color: "#8c919c", padding: "8px 6px" }}>
               Nothing on this detail yet. Accept a run under From the plan, or place lighting control devices on the plan and wire them.
@@ -501,7 +558,9 @@ export default function ConduitRiserEditor(props: {
               onPointerUp: onUp,
               onPointerCancel: onCancel,
               onPointerDown: () => {
+                // Empty canvas: clears the selection, or cancels a half-picked Connect end.
                 if (tool === "select") setSel(null);
+                else if (tool === "connect") setFirst(null);
               },
               style: { touchAction: canDrag ? "none" : "auto", userSelect: "none", WebkitUserSelect: "none", cursor: tool === "connect" ? "crosshair" : "default" },
               "aria-label": `Detail ${view.detail.n} — ${view.detail.name}`,
@@ -517,6 +576,11 @@ export default function ConduitRiserEditor(props: {
                   width={(l.x2 - l.x1) * U}
                   height={0.12 * U}
                   fill="transparent"
+                  className="cr-hit"
+                  tabIndex={0}
+                  role="button"
+                  aria-label={levelHitLabel(l.label)}
+                  aria-pressed={sel?.kind === "level" && sel.id === l.id}
                   style={{ cursor: canDrag ? "ns-resize" : "pointer" }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
@@ -524,8 +588,11 @@ export default function ConduitRiserEditor(props: {
                     setSel({ kind: "level", id: l.id });
                     startDrag(e, "level", l.id);
                   }}
+                  onKeyDown={onPress(() => {
+                    if (tool === "select") setSel({ kind: "level", id: l.id });
+                  })}
                 >
-                  <title>{`${l.label} — drag to move`}</title>
+                  <title>{canDrag ? `${l.label} — drag to move` : l.label}</title>
                 </rect>
               </g>
             ))}
@@ -540,6 +607,11 @@ export default function ConduitRiserEditor(props: {
                     fill="none"
                     stroke="transparent"
                     strokeWidth={0.12 * U}
+                    className="cr-hit"
+                    tabIndex={0}
+                    role="button"
+                    aria-label={runName(r.runId)}
+                    aria-pressed={on}
                     style={{ pointerEvents: "stroke", cursor: canDrag ? "ew-resize" : "pointer" }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -547,8 +619,11 @@ export default function ConduitRiserEditor(props: {
                       setSel({ kind: "run", id: r.runId });
                       startDrag(e, "run", r.runId);
                     }}
+                    onKeyDown={onPress(() => {
+                      if (tool === "select") setSel({ kind: "run", id: r.runId });
+                    })}
                   >
-                    <title>Conduit run — click to edit, drag sideways to move its lane</title>
+                    <title>{phone ? "Conduit run" : "Conduit run — click to edit, drag sideways to move its lane"}</title>
                   </polyline>
                 </g>
               );
@@ -566,6 +641,17 @@ export default function ConduitRiserEditor(props: {
                   fill="transparent"
                   style={{ cursor: tool === "connect" ? "crosshair" : canDrag && it.kind !== "ref" ? "move" : "pointer" }}
                   onPointerDown={(e) => itemDown(it, e)}
+                  // Another detail's end isn't a button here — only tags and stubs take focus.
+                  {...(it.kind === "ref"
+                    ? {}
+                    : {
+                        className: "cr-hit",
+                        tabIndex: 0,
+                        role: "button",
+                        "aria-label": it.kind === "tag" ? tagHitLabel(itemLabel(it)) : stubHitLabel(itemLabel(it)),
+                        "aria-pressed": selItemKey === it.key,
+                        onKeyDown: onPress(() => void pressItem(it)),
+                      })}
                 >
                   <title>{it.kind === "ref" ? `${itemLabel(it)} (another detail)` : itemLabel(it)}</title>
                 </rect>
@@ -575,7 +661,9 @@ export default function ConduitRiserEditor(props: {
         </div>
 
         <div className="pk-no-print">
-          {sel?.kind === "tag" && selTag && (
+          {sel?.kind === "tag" && selTag && (phone ? (
+            <TagView device={selTag} powerTypes={doc.powerTypes} planHref={planHref} onClose={() => setSel(null)} />
+          ) : (
             <TagPanel
               key={`tag-${selTag.id}-${JSON.stringify(selTag.tag)}`}
               device={selTag}
@@ -588,8 +676,18 @@ export default function ConduitRiserEditor(props: {
               onUnpin={() => void commitLayout({ op: "unpinTag", placementId: selTag.id })}
               onClose={() => setSel(null)}
             />
-          )}
-          {sel?.kind === "run" && selRun && (
+          ))}
+          {sel?.kind === "run" && selRun && (phone ? (
+            <RunView
+              vr={selRun}
+              aLabel={endLabel(selRun.a)}
+              bLabel={endLabel(selRun.b)}
+              wireTypes={props.wireTypes}
+              defaults={doc.defaults}
+              estimateOwned={props.estimateOwned}
+              onClose={() => setSel(null)}
+            />
+          ) : (
             <RunPanel
               key={`run-${selRun.run.id}-${JSON.stringify(selRun.run)}`}
               vr={selRun}
@@ -603,8 +701,10 @@ export default function ConduitRiserEditor(props: {
               onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeRun", id: selRun.run.id })).then(() => setSel(null))}
               onClose={() => setSel(null)}
             />
-          )}
-          {sel?.kind === "stub" && selStub && (
+          ))}
+          {sel?.kind === "stub" && selStub && (phone ? (
+            <StubView stub={selStub} onClose={() => setSel(null)} />
+          ) : (
             <StubPanel
               key={`stub-${selStub.id}-${selStub.label}`}
               stub={selStub}
@@ -613,8 +713,10 @@ export default function ConduitRiserEditor(props: {
               onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeStub", id: selStub.id })).then(() => setSel(null))}
               onClose={() => setSel(null)}
             />
-          )}
-          {sel?.kind === "level" && selLevel && (
+          ))}
+          {sel?.kind === "level" && selLevel && (phone ? (
+            <LevelLineView label={selLevel.label} elevation={selLevel.elevation} onClose={() => setSel(null)} />
+          ) : (
             <LevelLinePanel
               label={selLevel.label}
               moved={doc.levelY[detailId]?.[selLevel.id] !== undefined}
@@ -622,8 +724,8 @@ export default function ConduitRiserEditor(props: {
               onReset={() => void commitLayout({ op: "moveLevel", detailId, levelId: selLevel.id, y: null })}
               onClose={() => setSel(null)}
             />
-          )}
-          {sel?.kind === "newStub" && (
+          ))}
+          {!phone && sel?.kind === "newStub" && (
             <NewStubPanel
               busy={waiting}
               onAdd={async (label) => {
@@ -632,7 +734,7 @@ export default function ConduitRiserEditor(props: {
               onClose={() => choose("select")}
             />
           )}
-          {sel?.kind === "pair" && (
+          {!phone && sel?.kind === "pair" && (
             <PairPanel
               key={`pair-${JSON.stringify(sel.a)}-${JSON.stringify(sel.b)}`}
               aLabel={sel.aLabel}
@@ -656,41 +758,66 @@ export default function ConduitRiserEditor(props: {
             loose={props.loose}
             planHref={planHref}
             busy={waiting}
+            readOnly={phone}
             onAccept={(keys) => void acceptKeys(keys)}
             onDismiss={(key) => void run(() => dismissSuggestionAction(projectId, optionId, key))}
           />
-          <DetailPanel
-            key={`detail-${JSON.stringify(view.detail)}`}
-            detail={view.detail}
-            spaces={props.spaces}
-            detailCount={props.detailCount}
-            busy={waiting}
-            onSave={(v) => void patch({ op: "updateDetail", id: detailId, ...v })}
-            onAdd={(name) => void patch({ op: "addDetail", name, allSpaces: false, spaceIds: [] })}
-            onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeDetail", id: detailId }))}
-          />
-          <LevelsPanel
-            key={`levels-${JSON.stringify(props.levels)}`}
-            levels={props.levels}
-            busy={waiting}
-            onSave={(rows) => void run(() => saveLevelsAction(projectId, rows))}
-          />
-          <PowerTypesPanel key={`pt-${JSON.stringify(doc.powerTypes)}`} rows={doc.powerTypes} busy={waiting} onSave={(rows) => void patch({ op: "setPowerTypes", rows })} />
-          <AlwaysShowPanel types={props.deviceTypes} selected={doc.alwaysShow} busy={waiting} onSave={(typeKeys) => void patch({ op: "setAlwaysShow", typeKeys })} />
-          <DefaultsPanel
-            key={`def-${JSON.stringify(doc.defaults)}`}
-            defaults={doc.defaults}
-            estimateOwned={props.estimateOwned}
-            busy={waiting}
-            onSave={(v) => void patch({ op: "setDefaults", ...v })}
-          />
-          <NotesPanel
-            notes={doc.notes}
-            busy={waiting}
-            onAdd={(text) => patch({ op: "addNote", text })}
-            onSave={(id, text) => void patch({ op: "updateNote", id, text })}
-            onRemove={(id) => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeNote", id }))}
-          />
+          {phone ? (
+            <DetailView detail={view.detail} spaces={props.spaces} />
+          ) : (
+            <DetailPanel
+              key={`detail-${JSON.stringify(view.detail)}`}
+              detail={view.detail}
+              spaces={props.spaces}
+              detailCount={props.detailCount}
+              busy={waiting}
+              onSave={(v) => void patch({ op: "updateDetail", id: detailId, ...v })}
+              onAdd={(name) => void patch({ op: "addDetail", name, allSpaces: false, spaceIds: [] })}
+              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeDetail", id: detailId }))}
+            />
+          )}
+          {phone ? (
+            <LevelsView levels={props.levels} />
+          ) : (
+            <LevelsPanel
+              key={`levels-${JSON.stringify(props.levels)}`}
+              levels={props.levels}
+              busy={waiting}
+              onSave={(rows) => void run(() => saveLevelsAction(projectId, rows))}
+            />
+          )}
+          {phone ? (
+            <PowerTypesView rows={doc.powerTypes} />
+          ) : (
+            <PowerTypesPanel key={`pt-${JSON.stringify(doc.powerTypes)}`} rows={doc.powerTypes} busy={waiting} onSave={(rows) => void patch({ op: "setPowerTypes", rows })} />
+          )}
+          {phone ? (
+            <AlwaysShowView types={props.deviceTypes} selected={doc.alwaysShow} />
+          ) : (
+            <AlwaysShowPanel types={props.deviceTypes} selected={doc.alwaysShow} busy={waiting} onSave={(typeKeys) => void patch({ op: "setAlwaysShow", typeKeys })} />
+          )}
+          {phone ? (
+            <DefaultsView defaults={doc.defaults} estimateOwned={props.estimateOwned} />
+          ) : (
+            <DefaultsPanel
+              key={`def-${JSON.stringify(doc.defaults)}`}
+              defaults={doc.defaults}
+              estimateOwned={props.estimateOwned}
+              busy={waiting}
+              onSave={(v) => void patch({ op: "setDefaults", ...v })}
+            />
+          )}
+          {phone ? (
+            <NotesView notes={doc.notes} />
+          ) : (
+            <NotesPanel
+              notes={doc.notes}
+              busy={waiting}
+              onAdd={(text) => patch({ op: "addNote", text })}
+              onSave={(id, text) => void patch({ op: "updateNote", id, text })}
+              onRemove={(id) => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeNote", id }))}
+            />
+          )}
           <WarningsPanel warnings={props.warnings} />
         </div>
       </div>

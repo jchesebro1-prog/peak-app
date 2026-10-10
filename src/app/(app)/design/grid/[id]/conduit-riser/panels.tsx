@@ -13,6 +13,10 @@ import type { GridLevel } from "@/lib/design/grid-levels";
  * Lighting control riser panels (#321). Plain controlled forms; the editor
  * owns every server call and passes busy + callbacks in. Each panel is
  * keyed by its data in the editor, so a refresh resets its fields.
+ *
+ * On a phone the riser is fully read-only (#321 polish, Jeff 2026-10-10):
+ * each editing panel has a `…View` twin that shows the same values as
+ * text — no inputs, no buttons beyond closing the card.
  */
 
 export const NOTHING_NEW = "Nothing new to accept";
@@ -90,6 +94,18 @@ function Text({ label, value, onChange, width = 120, max, list, placeholder }: {
     </label>
   );
 }
+
+/** One read-only value with its label — the phone views. A blank shows as "—". */
+function Val({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+      <span style={{ fontSize: 11, color: "#8c919c" }}>{label}</span>
+      <span style={{ color: "#16181d", overflowWrap: "anywhere" }}>{value === "" || value === null || value === undefined ? "—" : value}</span>
+    </div>
+  );
+}
+
+const yesNo = (v: boolean) => (v ? "Yes" : "No");
 
 /* ------------------------------- tag -------------------------------- */
 
@@ -190,6 +206,31 @@ export function TagPanel({
   );
 }
 
+/** The tag, read-only (phone). */
+export function TagView({ device, powerTypes, planHref, onClose }: { device: CRDevice; powerTypes: PowerType[]; planHref: string; onClose: () => void }) {
+  const t = device.tag;
+  const power = t.power ? `${t.power}${powerTypes.find((p) => p.letter === t.power) ? ` — ${powerTypes.find((p) => p.letter === t.power)!.type}` : ""}` : "None";
+  return (
+    <Card title={<>Tag · {device.label}</>} onClose={onClose}>
+      <div style={HINT}>
+        {device.desc}
+        {device.model ? ` · ${device.model}` : ""} —{" "}
+        <a href={planHref} style={{ color: "var(--accent)" }}>
+          Show on plan
+        </a>
+      </div>
+      <div style={{ ...ROW, alignItems: "flex-start", rowGap: 6 }}>
+        {TAG_FIELDS.map((f) => (
+          <Val key={f.key} label={f.label} value={t[f.key]} />
+        ))}
+        <Val label="P/D" value={t.pd} />
+        <Val label="Power type" value={power} />
+        <Val label="Power controls contents" value={t.contents} />
+      </div>
+    </Card>
+  );
+}
+
 /* -------------------------------- run -------------------------------- */
 
 export type RunSave = {
@@ -217,6 +258,27 @@ function TriSelect({ label, value, fallback, onChange }: { label: string; value:
     </label>
   );
 }
+
+/** The wires a run carries (or the empty-conduit note). */
+function RunMembers({ vr }: { vr: ViewRun }) {
+  return vr.members.length > 0 ? (
+    <div>
+      <div style={{ ...FIELD, marginBottom: 4 }}>Wires in this conduit</div>
+      {vr.members.map((m) => (
+        <div key={`${m.kind}:${m.id}`} style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0" }}>
+          <Bubble symbol={m.signal?.symbol || "?"} />
+          <span style={{ flex: 1 }}>{m.cable}</span>
+          <span style={{ color: "#8c919c", fontVariantNumeric: "tabular-nums" }}>{m.lengthFt !== null ? `${Math.round(m.lengthFt * 10) / 10} ft` : "unmeasured"}</span>
+        </div>
+      ))}
+    </div>
+  ) : vr.empty ? (
+    <div style={{ ...HINT, color: "#8a6a1f" }}>No wires in this conduit — it prints as an empty conduit with its size.</div>
+  ) : null;
+}
+
+const measuredFt = (vr: ViewRun) =>
+  vr.members.length && vr.members.every((m) => m.lengthFt !== null) ? vr.members.reduce((s, m) => s + (m.lengthFt || 0), 0) : null;
 
 export function RunPanel({
   vr,
@@ -249,7 +311,7 @@ export function RunPanel({
   const [pw, setPw] = useState<Tri>(triOf(run.priceWire));
   const [pc, setPc] = useState<Tri>(triOf(run.priceConduit));
   const [signals, setSignals] = useState<string[]>(run.signals || []);
-  const measured = vr.members.length && vr.members.every((m) => m.lengthFt !== null) ? vr.members.reduce((s, m) => s + (m.lengthFt || 0), 0) : null;
+  const measured = measuredFt(vr);
   const ft = length.trim() ? Number(length) : null;
   const lengthOk = ft === null || (Number.isFinite(ft) && ft > 0 && ft <= MAX_RUN_FT);
   const save = () =>
@@ -292,20 +354,7 @@ export function RunPanel({
         )}
       </div>
       <div style={HINT}>Leave the length blank to use the wires&apos; measured footage.</div>
-      {vr.members.length > 0 ? (
-        <div>
-          <div style={{ ...FIELD, marginBottom: 4 }}>Wires in this conduit</div>
-          {vr.members.map((m) => (
-            <div key={`${m.kind}:${m.id}`} style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0" }}>
-              <Bubble symbol={m.signal?.symbol || "?"} />
-              <span style={{ flex: 1 }}>{m.cable}</span>
-              <span style={{ color: "#8c919c", fontVariantNumeric: "tabular-nums" }}>{m.lengthFt !== null ? `${Math.round(m.lengthFt * 10) / 10} ft` : "unmeasured"}</span>
-            </div>
-          ))}
-        </div>
-      ) : vr.empty ? (
-        <div style={{ ...HINT, color: "#8a6a1f" }}>No wires in this conduit — it prints as an empty conduit with its size.</div>
-      ) : null}
+      <RunMembers vr={vr} />
       {stubRun && (
         <div>
           <div style={{ ...FIELD, marginBottom: 4 }}>Signals shown on this run</div>
@@ -336,6 +385,63 @@ export function RunPanel({
   );
 }
 
+/** The run, read-only (phone). */
+export function RunView({
+  vr,
+  aLabel,
+  bLabel,
+  wireTypes,
+  defaults,
+  estimateOwned,
+  onClose,
+}: {
+  vr: ViewRun;
+  aLabel: string;
+  bLabel: string;
+  wireTypes: CRWireType[];
+  defaults: ConduitRiserDefaults;
+  estimateOwned: boolean;
+  onClose: () => void;
+}) {
+  const run = vr.run;
+  const stubRun = run.a.kind === "stub" || run.b.kind === "stub";
+  const measured = measuredFt(vr);
+  const tri = (v: boolean | undefined, fallback: boolean) => (v === undefined ? `Default (${fallback ? "yes" : "no"})` : yesNo(v));
+  const shown = wireTypes.filter((t) => (run.signals || []).includes(t.id));
+  return (
+    <Card title={<>Run · {aLabel} → {bLabel}</>} onClose={onClose}>
+      <div style={{ ...ROW, alignItems: "flex-start", rowGap: 6 }}>
+        <Val label="Size" value={run.size} />
+        <Val label="Line" value={run.style === "cableMgmt" ? "Cable management" : "Conduit"} />
+        <Val label="Length" value={run.lengthFt !== undefined ? `${run.lengthFt} ft` : measured !== null ? `${Math.round(measured * 10) / 10} ft measured` : "measured"} />
+        {!estimateOwned && (
+          <>
+            <Val label="Price wire" value={tri(run.priceWire, defaults.priceWire)} />
+            <Val label="Price conduit" value={tri(run.priceConduit, defaults.priceConduit)} />
+          </>
+        )}
+      </div>
+      <RunMembers vr={vr} />
+      {stubRun && (
+        <div>
+          <div style={{ ...FIELD, marginBottom: 4 }}>Signals shown on this run</div>
+          {shown.length === 0 ? (
+            <span style={HINT}>None</span>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {shown.map((t) => (
+                <span key={t.id} style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+                  <Bubble symbol={t.symbol} /> {t.signal}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* ------------------------------ stubs -------------------------------- */
 
 export function StubPanel({ stub, busy, onRename, onRemove, onClose }: { stub: RiserStub; busy: boolean; onRename: (label: string) => void; onRemove: () => Promise<void>; onClose: () => void }) {
@@ -350,6 +456,15 @@ export function StubPanel({ stub, busy, onRename, onRemove, onClose }: { stub: R
         <ConfirmButton label="Remove stub" confirmLabel="Remove stub and its runs" disabled={busy} onConfirm={onRemove} />
       </div>
       <div style={HINT}>A stub is a line ending in a label, like &quot;TO FACP&quot;. Use Connect to run conduit to it.</div>
+    </Card>
+  );
+}
+
+/** The stub, read-only (phone). */
+export function StubView({ stub, onClose }: { stub: RiserStub; onClose: () => void }) {
+  return (
+    <Card title={<>Stub · {stub.label}</>} onClose={onClose}>
+      <div style={HINT}>A stub is a line ending in a label, like &quot;TO FACP&quot;.</div>
     </Card>
   );
 }
@@ -453,6 +568,15 @@ export function LevelLinePanel({ label, moved, busy, onReset, onClose }: { label
   );
 }
 
+/** A level line, read-only (phone). */
+export function LevelLineView({ label, elevation, onClose }: { label: string; elevation?: string; onClose: () => void }) {
+  return (
+    <Card title={<>Level line · {label}</>} onClose={onClose}>
+      <Val label="Elevation" value={elevation} />
+    </Card>
+  );
+}
+
 /* --------------------------- from the plan ---------------------------- */
 
 export type SuggestionRow = {
@@ -471,6 +595,7 @@ export function SuggestionsPanel({
   loose,
   planHref,
   busy,
+  readOnly = false,
   onAccept,
   onDismiss,
 }: {
@@ -478,6 +603,8 @@ export function SuggestionsPanel({
   loose: { id: string; cable: string }[];
   planHref: string;
   busy: boolean;
+  /** Phone: the rows show, Accept / Accept all / Dismiss don't. */
+  readOnly?: boolean;
   onAccept: (keys: string[] | "all") => void;
   onDismiss: (key: string) => void;
 }) {
@@ -487,11 +614,13 @@ export function SuggestionsPanel({
         <div style={HINT}>{NOTHING_NEW} — every lighting wire between two devices is on the riser.</div>
       ) : (
         <>
-          <div style={ROW}>
-            <button type="button" className="pk-btn-accent" style={SMALL} disabled={busy} onClick={() => onAccept("all")}>
-              Accept all
-            </button>
-          </div>
+          {readOnly ? null : (
+            <div style={ROW}>
+              <button type="button" className="pk-btn-accent" style={SMALL} disabled={busy} onClick={() => onAccept("all")}>
+                Accept all
+              </button>
+            </div>
+          )}
           {rows.map((r) => (
             <div key={r.key} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #f0f2f5", paddingTop: 6 }}>
               <span style={{ fontWeight: 600 }}>
@@ -501,16 +630,18 @@ export function SuggestionsPanel({
                 <Bubble key={s} symbol={s} />
               ))}
               {r.kind === "join" && <span style={BADGE}>joins run</span>}
-              <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                <button type="button" className="pk-btn-outline" style={SMALL} disabled={busy} onClick={() => onAccept([r.key])}>
-                  Accept
-                </button>
-                {r.kind === "new" && (
-                  <button type="button" className="pk-btn-outline" style={SMALL} disabled={busy} onClick={() => onDismiss(r.key)}>
-                    Dismiss
+              {readOnly ? null : (
+                <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                  <button type="button" className="pk-btn-outline" style={SMALL} disabled={busy} onClick={() => onAccept([r.key])}>
+                    Accept
                   </button>
-                )}
-              </span>
+                  {r.kind === "new" && (
+                    <button type="button" className="pk-btn-outline" style={SMALL} disabled={busy} onClick={() => onDismiss(r.key)}>
+                      Dismiss
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
           ))}
         </>
@@ -557,6 +688,8 @@ export function DetailPanel({
   const [all, setAll] = useState(detail.allSpaces);
   const [ids, setIds] = useState<string[]>(detail.spaceIds);
   const [newName, setNewName] = useState("");
+  // One radio group per detail — the two scope choices exclude each other.
+  const scopeName = `cr-detail-scope-${detail.id}`;
   return (
     <Section title="Detail" aside={`${detail.n} · ${detail.name}`}>
       <div style={ROW}>
@@ -565,10 +698,10 @@ export function DetailPanel({
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-          <input type="radio" checked={all} onChange={() => setAll(true)} /> All spaces
+          <input type="radio" name={scopeName} checked={all} onChange={() => setAll(true)} /> All spaces
         </label>
         <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-          <input type="radio" checked={!all} onChange={() => setAll(false)} /> Only these spaces
+          <input type="radio" name={scopeName} checked={!all} onChange={() => setAll(false)} /> Only these spaces
         </label>
         {!all && (
           <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 20, maxHeight: 180, overflowY: "auto" }}>
@@ -604,6 +737,20 @@ export function DetailPanel({
           + Detail
         </button>
       </div>
+    </Section>
+  );
+}
+
+/** The detail, read-only (phone). */
+export function DetailView({ detail, spaces }: { detail: RiserDetail; spaces: { id: string; name: string }[] }) {
+  const names = detail.spaceIds.map((id) => spaces.find((s) => s.id === id)?.name).filter((n): n is string => !!n);
+  return (
+    <Section title="Detail" aside={`${detail.n} · ${detail.name}`}>
+      <div style={{ ...ROW, alignItems: "flex-start" }}>
+        <Val label="Number" value={detail.n} />
+        <Val label="Name" value={detail.name} />
+      </div>
+      <Val label="Covers" value={detail.allSpaces ? "All spaces" : names.length ? names.join(", ") : "No spaces"} />
     </Section>
   );
 }
@@ -654,6 +801,21 @@ export function LevelsPanel({ levels, busy, onSave }: { levels: GridLevel[]; bus
   );
 }
 
+/** Levels, read-only (phone). */
+export function LevelsView({ levels }: { levels: GridLevel[] }) {
+  return (
+    <Section title="Levels" aside={`${levels.length}`}>
+      {levels.length === 0 && <div style={HINT}>No levels yet.</div>}
+      {levels.map((l) => (
+        <div key={l.id} style={{ display: "flex", gap: 8 }}>
+          <span style={{ flex: 1 }}>{l.label || "—"}</span>
+          <span style={{ color: "#8c919c" }}>{l.elevation || ""}</span>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 /* ---------------------------- power types ----------------------------- */
 
 export function PowerTypesPanel({ rows: initial, busy, onSave }: { rows: PowerType[]; busy: boolean; onSave: (rows: PowerType[]) => void }) {
@@ -692,6 +854,22 @@ export function PowerTypesPanel({ rows: initial, busy, onSave }: { rows: PowerTy
   );
 }
 
+/** Power types, read-only (phone). */
+export function PowerTypesView({ rows }: { rows: PowerType[] }) {
+  return (
+    <Section title="Power types" aside={`${rows.length}`}>
+      {rows.length === 0 && <div style={HINT}>None yet.</div>}
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 700, width: 22 }}>{r.letter}</span>
+          <span>{r.type || "—"}</span>
+          <span style={{ color: "#8c919c" }}>{[r.config, r.input].filter(Boolean).join(" · ")}</span>
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 /* ---------------------------- always show ----------------------------- */
 
 export function AlwaysShowPanel({ types, selected, busy, onSave }: { types: { key: string; label: string }[]; selected: string[]; busy: boolean; onSave: (keys: string[]) => void }) {
@@ -709,6 +887,16 @@ export function AlwaysShowPanel({ types, selected, busy, onSave }: { types: { ke
           {t.label}
         </label>
       ))}
+    </Section>
+  );
+}
+
+/** Always show, read-only (phone). */
+export function AlwaysShowView({ types, selected }: { types: { key: string; label: string }[]; selected: string[] }) {
+  const on = types.filter((t) => selected.includes(t.key));
+  return (
+    <Section title="Always show" aside={`${selected.length}`}>
+      <div>{on.length ? on.map((t) => t.label).join(", ") : "None"}</div>
     </Section>
   );
 }
@@ -758,6 +946,24 @@ export function DefaultsPanel({
           Save defaults
         </button>
       </div>
+    </Section>
+  );
+}
+
+/** Defaults, read-only (phone). */
+export function DefaultsView({ defaults, estimateOwned }: { defaults: ConduitRiserDefaults; estimateOwned: boolean }) {
+  return (
+    <Section title="Defaults" aside={defaults.size}>
+      <div style={{ ...ROW, alignItems: "flex-start" }}>
+        <Val label="Conduit size for new runs" value={defaults.size} />
+        {!estimateOwned && (
+          <>
+            <Val label="Price wire in conduit" value={yesNo(defaults.priceWire)} />
+            <Val label="Price conduit" value={yesNo(defaults.priceConduit)} />
+          </>
+        )}
+      </div>
+      {estimateOwned && <div style={HINT}>This design belongs to an estimate, so the riser never prices wire or conduit — the estimate does.</div>}
     </Section>
   );
 }
@@ -812,6 +1018,21 @@ export function NotesPanel({
         </button>
       </div>
       <div style={HINT}>Numbered notes print as General notes on the riser sheet.</div>
+    </Section>
+  );
+}
+
+/** Notes, read-only (phone). */
+export function NotesView({ notes }: { notes: RiserNote[] }) {
+  return (
+    <Section title="Notes" aside={`${notes.length}`}>
+      {notes.length === 0 && <div style={HINT}>No notes.</div>}
+      {notes.map((n) => (
+        <div key={n.id} style={{ display: "flex", gap: 8 }}>
+          <span style={{ width: 18, textAlign: "right", color: "#8c919c" }}>{n.n}.</span>
+          <span style={{ flex: 1, overflowWrap: "anywhere" }}>{n.text}</span>
+        </div>
+      ))}
     </Section>
   );
 }

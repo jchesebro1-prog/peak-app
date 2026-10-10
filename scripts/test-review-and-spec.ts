@@ -11636,6 +11636,7 @@ seeded()
   .then(() => autoCalFormChecks(ok))
   .then(() => autoCalNobodyDoneChecks(ok))
   .then(() => riserPolish1Checks())
+  .then(() => riserPolish2Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -63345,8 +63346,8 @@ async function conduitRiser321B7Checks(): Promise<void> {
     "#321 B7 prompt state: newest wire wins, hides on Escape and on the next canvas press");
   const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
   ok(rp.includes('role="status"') && rp.includes("acceptSuggestionsAction(project.id, riserPrompt.optionId, [riserPrompt.key])") && rp.includes('"Added to the riser"') &&
-     rp.includes("joins the existing run — add this wire?") && rp.includes("to the lighting control riser?") && rp.includes("Later") && /if \(!r\.ok\) \{\s*noteAction\(r\.error\);\s*return;\s*\}[\s\S]*?noteAction\(r\.accepted > 0 \? "Added to the riser" : "Already on the riser"\);\s*hideRiserPrompt\(\)/.test(rp),
-    "#321 B7 RiserPrompt: a status strip with Add / Later; Add success notes + hides, a failure notes and keeps the prompt");
+     rp.includes("joins the existing run — add this wire?") && rp.includes("to the lighting control riser?") && rp.includes("Later") && /if \(!r\.ok\) \{\s*setErr\(r\.error\);\s*return;\s*\}[\s\S]*?noteAction\(r\.accepted > 0 \? "Added to the riser" : "Already on the riser"\);\s*hideRiserPromptIf\(answered\)/.test(rp),
+    "#321 B7 RiserPrompt: a status strip with Add / Later; Add success notes + hides its own prompt, a failure reports the error and keeps the prompt (amended by #321 polish)");
   const edr = srcOf("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(edr.includes("<IntakeNotices ed={ed} />") && edr.includes("<RiserPrompt ed={ed} />") && edr.indexOf("<IntakeNotices") < edr.indexOf("<RiserPrompt"), "#321 B7 the prompt is mounted beside the intake notices");
 }
@@ -64003,4 +64004,164 @@ async function riserPolish1Checks(): Promise<void> {
   const route = srcOf("src/app/api/grid/[id]/conduit-riser/dxf/route.ts");
   ok(route.indexOf("await requireUser()") > 0 && route.includes("return conduitRiserDxfResponse(id, new URL(request.url).searchParams)") && !route.includes("getProject"),
     "#321 polish route: the route file is requireUser plus a call to the exported function");
+}
+
+/* #321 polish, Task 2 — riser editor: phone read-only, keyboard, busy everywhere, undo tied to the server version,
+   estimate-owned pricing refused server-side, DetailPanel radios, plan prompt fixes. */
+async function riserPolish2Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => fs.readFileSync(f, "utf8");
+  const M = await import("@/lib/design/conduit-riser/model");
+  const E = await import("@/lib/design/conduit-riser/edit");
+  const R = await import("@/lib/design/conduit-riser/editor-rules");
+  const dir = "src/app/(app)/design/grid/[id]/conduit-riser";
+  const ed = srcOf(`${dir}/conduit-riser-editor.tsx`);
+  const pan = srcOf(`${dir}/panels.tsx`);
+  const acts = srcOf(`${dir}/actions.ts`);
+  const page = srcOf(`${dir}/page.tsx`);
+
+  // ---- 1. undo is tied to the server version, not only the layout
+  const pids = new Set(["gp-a", "gp-b"]);
+  const doc0 = M.emptyConduitRiserDoc();
+  const fwd = { op: "moveTag" as const, placementId: "gp-a", x: 2, y: 1, detailId: "dt-main" };
+  const inv = E.inverseLayoutOp(doc0, null, fwd)!;
+  const after = E.applyLayoutOps(doc0, [fwd], pids);
+  const made = E.recordEdit(null, doc0, { forward: fwd, inverse: inv }, pids, 100);
+  ok(made.version === 100 && E.historyFor(made, after, 100).undo.length === 1, "#321 polish undo: an edit is recorded against the version it was made on");
+  const landed = E.landHistory(made, { before: 100, after: 140 });
+  ok(!!landed && landed.version === 140 && E.historyFor(landed, after, 140).undo.length === 1 && E.historyFor(landed, after, 100).undo.length === 0,
+    "#321 polish undo: this editor's own write carries the stack to the version it landed on");
+  ok(E.historyFor(landed, after, 175).undo.length === 0 && E.historyFor(landed, after, 175).redo.length === 0 && E.stepUndo(landed, after, pids, 175) === null,
+    "#321 polish undo: an identical layout at a different server version (written elsewhere) empties the stack — undo can't resurrect");
+  ok(E.landHistory(made, { before: 120, after: 140 }) === null, "#321 polish undo: a write applied over someone else's version empties the stack");
+  ok(E.landHistory(made, undefined) === made && E.landHistory(null, { before: 1, after: 2 }) === null, "#321 polish undo: a write that reports no version leaves the stack to the next render's check");
+  const u = E.stepUndo(landed, after, pids, 140)!;
+  ok(J2(u.op) === J2(inv) && u.next.version === 140 && E.landHistory(u.next, { before: 140, after: 150 })!.version === 150,
+    "#321 polish undo: undo is made against the current version and lands like any write");
+  ok(E.historyFor(E.recordEdit(null, doc0, { forward: fwd, inverse: inv }, pids), after).undo.length === 1, "#321 polish undo: an unversioned stack (null) still works as before");
+
+  // ---- 2. estimate-owned pricing is refused server-side
+  ok(E && J2(M.estimateOwnedOp({ op: "updateRun", id: "cr-1", size: '1"', priceWire: true, priceConduit: null }, true)) === J2({ op: "updateRun", id: "cr-1", size: '1"' }),
+    "#321 polish estimate-owned: updateRun keeps its other fields, loses priceWire / priceConduit");
+  ok(M.estimateOwnedOp({ op: "updateRun", id: "cr-1", priceWire: true }, true) === null && M.estimateOwnedOp({ op: "setDefaults", priceConduit: true, priceWire: false }, true) === null,
+    "#321 polish estimate-owned: an op left with nothing to do is null (ok, no write)");
+  ok(J2(M.estimateOwnedOp({ op: "setDefaults", size: '3/4"', priceWire: true }, true)) === J2({ op: "setDefaults", size: '3/4"' }), "#321 polish estimate-owned: setDefaults keeps the size");
+  const keep = { op: "updateRun" as const, id: "cr-1", priceWire: true };
+  ok(M.estimateOwnedOp(keep, false) === keep && M.estimateOwnedOp({ op: "removeRun", id: "cr-1" }, true)!.op === "removeRun",
+    "#321 polish estimate-owned: a design not owned by an estimate, and every other op, pass through untouched");
+  const pa = acts.slice(acts.indexOf("export async function patchConduitRiserAction("), acts.indexOf("export async function acceptSuggestionsAction("));
+  ok(pa.includes("await requireUser()") && pa.includes("estimateOwnedOp(op, ") && pa.includes("?.estimateOwned === true") && /if \(!kept\) return \{ ok: true \};/.test(pa) &&
+     pa.indexOf("estimateOwnedOp(") < pa.indexOf("patchConduitRiser(projectId, optionId, op)"),
+    "#321 polish estimate-owned: patchConduitRiserAction strips pricing before the store write; nothing left = ok, no write");
+
+  // ---- 3. keyboard: hit targets are buttons with names
+  ok(R.tagHitLabel("CRO-04") === "Tag CRO-04" && R.stubHitLabel("TO FACP") === "Stub TO FACP" && R.levelHitLabel("Catwalk") === "Level Catwalk" &&
+     R.runHitLabel("ER-01", "CRO-04", '3/4"') === 'Run ER-01 → CRO-04, 3/4"' && R.runHitLabel("ER-01", "CRO-04", '1"', "cableMgmt") === "Run ER-01 → CRO-04, cable management",
+    "#321 polish keyboard: hit-target names (Tag / Stub / Run with size / Level)");
+  ok(R.isPressKey("Enter") && R.isPressKey(" ") && !R.isPressKey("Escape") && !R.isPressKey("a"), "#321 polish keyboard: Enter and Space press a hit target");
+  ok((ed.match(/tabIndex=\{0\}|tabIndex: 0,/g) || []).length === 3 && (ed.match(/role="button"|role: "button",/g) || []).length === 3 &&
+     ed.includes("aria-label={levelHitLabel(") && ed.includes("aria-label={runName(") && ed.includes("runHitLabel(") && ed.includes("tagHitLabel(") && ed.includes("stubHitLabel(") &&
+     ed.includes("if (!isPressKey(e.key)) return;") && (ed.match(/onKeyDown(=\{|: )onPress\(/g) || []).length === 3,
+    "#321 polish keyboard: level, run and tag/stub hit targets take focus, are named buttons and press on Enter/Space");
+  ok(/if \(e\.key !== "Escape"\) return;/.test(ed) && ed.includes("onKeyDown={onCanvasKey}") && /function cancelAll\(\)/.test(ed) && /setFirst\(null\);\s*setSel\(null\);/.test(ed.slice(ed.indexOf("function cancelAll()"))),
+    "#321 polish keyboard: Escape clears the selection and a half-picked Connect end");
+  ok(/else if \(tool === "connect"\) setFirst\(null\)/.test(ed), "#321 polish keyboard: in Connect mode a click on empty canvas cancels the half-picked first end");
+
+  // ---- 4. busy everywhere; one run helper
+  ok((ed.match(/setBusy\(true\)/g) || []).length === 1 && !/async function acceptKeys[\s\S]{0,80}setBusy/.test(ed) && !/async function connectWithWire[\s\S]{0,400}setBusy\(true\)/.test(ed),
+    "#321 polish busy: one run helper sets busy — connectWithWire and acceptKeys go through it");
+  const must = ed.slice(ed.indexOf("async function mustOk("), ed.indexOf("async function mustOk(") + 400);
+  ok(must.includes("run(") && must.includes("rethrow: true"), "#321 polish busy: mustOk (Reset layout, Remove run/stub, Delete detail, note delete) is busy while in flight");
+  ok(/if \(phone \|\| waiting \|\| tool !== "select"\) return;/.test(ed), "#321 polish busy: a drag can't start while a write is in flight");
+  ok(page.includes("version={project.updatedAt}") && ed.includes("historyFor(history, doc, version)") && ed.includes("const version = props.version || 0;") && ed.includes("landHistory("),
+    "#321 polish undo: the page passes the project's updatedAt; the editor checks and carries the stack by it");
+
+  // ---- 5. phone = fully read-only
+  const phoneOnly = (needle: string) => {
+    const i = ed.indexOf(needle);
+    return i > 0 && /\{!phone &&\s/.test(ed.slice(Math.max(0, i - 500), i));
+  };
+  ok(ed.includes('const PHONE_QUERY = "(max-width: 640px)"') && /const tool: Tool = phone \? "select" : toolPick;/.test(ed),
+    "#321 polish phone: the drag breakpoint is the read-only breakpoint; a phone is always in Select");
+  ok(phoneOnly("TOOLS.map((t)") && phoneOnly('label="Reset layout"') && phoneOnly("onClick={undo}"), "#321 polish phone: Connect, + Stub, Reset layout, Undo / Redo hidden");
+  ok(ed.includes("readOnly={phone}") && /readOnly \? null : \(/.test(pan.slice(pan.indexOf("export function SuggestionsPanel("), pan.indexOf("/* ------------------------------ details"))) &&
+     /readOnly = false,/.test(pan) && (pan.match(/readOnly \? null : \(/g) || []).length === 2,
+    "#321 polish phone: Accept / Accept all / Dismiss hidden; the panels take readOnly");
+  for (const [name, view] of [["TagPanel", "TagView"], ["RunPanel", "RunView"], ["StubPanel", "StubView"], ["LevelLinePanel", "LevelLineView"], ["DetailPanel", "DetailView"],
+    ["LevelsPanel", "LevelsView"], ["PowerTypesPanel", "PowerTypesView"], ["AlwaysShowPanel", "AlwaysShowView"], ["DefaultsPanel", "DefaultsView"], ["NotesPanel", "NotesView"]] as const) {
+    const body = pan.slice(pan.indexOf(`export function ${view}(`));
+    const viewBody = body.slice(0, body.indexOf("\n}\n"));
+    ok(pan.includes(`export function ${view}(`) && !/<input|<select|<textarea|<button|ConfirmButton/.test(viewBody.replace(/<button type="button" className="pk-btn-outline" style=\{SMALL\} onClick=\{onClose\} aria-label="Close">/g, "")) &&
+       new RegExp(`phone \\?\\s*\\(?\\s*<${view}[\\s\\S]{0,1200}?:\\s*\\(?\\s*<${name}`).test(ed),
+      `#321 polish phone: ${name} renders as ${view} — values as text, no inputs or buttons`);
+  }
+  ok(/\{!phone && sel\?\.kind === "newStub"/.test(ed) && /\{!phone && sel\?\.kind === "pair"/.test(ed), "#321 polish phone: no New stub or Connect panel on a phone");
+  ok(page.includes('"Download DXF"') && !/phone/.test(page) && /planHref=\{planHref\}/.test(ed) && /<WarningsPanel warnings=\{props\.warnings\} \/>/.test(ed),
+    "#321 polish phone: Download DXF (the page), Show on plan and warnings stay on a phone");
+
+  // ---- 6. DetailPanel radios share one name per detail
+  const dp = pan.slice(pan.indexOf("export function DetailPanel("), pan.indexOf("export function DetailView("));
+  ok((dp.match(/type="radio" name=\{scopeName\}/g) || []).length === 2 && dp.includes("const scopeName = `cr-detail-scope-${detail.id}`"),
+    "#321 polish DetailPanel: All spaces / Only these spaces share one radio name per detail");
+
+  // ---- 7. plan prompt
+  ok(R.addAnswerHides({ key: "a|b", ticket: 3 }, { key: "a|b", ticket: 3 }) && !R.addAnswerHides({ key: "a|c", ticket: 4 }, { key: "a|b", ticket: 3 }) &&
+     !R.addAnswerHides({ key: "a|b", ticket: 4 }, { key: "a|b", ticket: 3 }) && !R.addAnswerHides(null, { key: "a|b", ticket: 3 }),
+    "#321 polish prompt: a late Add hides only the prompt it answered — never a newer wire's");
+  const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
+  const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(/if \(!r\.ok\) \{\s*setErr\(r\.error\);\s*return;\s*\}/.test(rp) && !/noteAction\(r\.error\)/.test(rp) && rp.includes("hideRiserPromptIf(answered)") && !/hideRiserPrompt\(\);\s*router\.refresh/.test(rp),
+    "#321 polish prompt: a failed Add reports through the status bar's error; a success hides only its own prompt");
+  ok(/const hideRiserPromptIf = useCallback\(\(answered: PromptTicket\) =>/.test(hook) && hook.includes("addAnswerHides(cur, answered)") && hook.includes("ticket })") && /\n    hideRiserPromptIf,/.test(hook),
+    "#321 polish prompt: the hook stamps each prompt with its ticket and offers hideRiserPromptIf");
+
+  // ---- 8. scratch DB: the store reports the version it landed on; a "joins" prompt's Add adds the new wire to that run
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const gp = await G.createProject({ name: "#321 polish riser editor", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 polish sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  const a = await place(0.1, 0.1);
+  const b = await place(0.4, 0.1);
+  const draw = async () =>
+    (await G.addRouteWithId(gp.id, { sheetId: sh.id, page: 1, partId: "T321-P2-CABLE", points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id }))!;
+  const w1 = await draw();
+  const p1 = await L.riserPromptFor(await live(), opt, w1.routeId);
+  if (!p1.show) throw new Error("#321 polish: expected a prompt for the first wire");
+  const v0 = (await live()).updatedAt;
+  const acc1 = await CR.acceptSuggestions(gp.id, opt, [p1.key]);
+  const v1 = (await live()).updatedAt;
+  ok(acc1.ok && acc1.accepted === 1 && !!acc1.landed && acc1.landed.before === v0 && acc1.landed.after === v1 && v1 >= v0,
+    "#321 polish store: an accept reports the version it was applied over and the one it left");
+  const again = await CR.acceptSuggestions(gp.id, opt, [p1.key]);
+  ok(again.ok && again.accepted === 0 && !!again.landed && again.landed.before === again.landed.after && (await live()).updatedAt === v1,
+    "#321 polish store: nothing to accept writes nothing — before and after are the same version");
+  const w2 = await draw();
+  const pj = await L.riserPromptFor(await live(), opt, w2.routeId);
+  ok(pj.show === true && pj.joins === true && pj.key === p1.key, "#321 polish prompt: a second wire on the pair asks to join the existing run");
+  if (!pj.show) throw new Error("#321 polish: expected a joins prompt");
+  const accJ = await CR.acceptSuggestions(gp.id, opt, [pj.key]);
+  const runs = (await L.loadConduitRiser(await live(), opt)).doc.runs.filter((r) => M.pairKey(
+    r.a.kind === "placement" ? r.a.placementId : "", r.b.kind === "placement" ? r.b.placementId : "") === p1.key);
+  ok(accJ.ok && accJ.accepted === 1 && runs.length === 1 && runs[0].routeIds.includes(w1.routeId) && runs[0].routeIds.includes(w2.routeId),
+    "#321 polish prompt: accepting a \"joins the existing run\" prompt adds the new wire to that run (no second run)");
+  const runId = runs[0].id;
+  const vBefore = (await live()).updatedAt;
+  const up = await CR.patchConduitRiser(gp.id, opt, { op: "updateRun", id: runId, size: '1"' });
+  ok(up.ok && !!up.landed && up.landed.before === vBefore && up.landed.after === (await live()).updatedAt, "#321 polish store: a riser edit reports the version it landed on");
+  ok(acts.includes("return { ok: true, landed: r.landed }") && acts.includes("return { ok: true, accepted: r.accepted, landed: r.landed }"),
+    "#321 polish actions: the patch and accept actions hand the landed version back to the editor");
 }

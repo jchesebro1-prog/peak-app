@@ -11,7 +11,8 @@ import type { GridEditor } from "../use-grid-editor";
  * joins this wire to it); Later hides it. When the pair's wire won't be
  * priced, the line says it will be listed as by others. It never blocks drawing: the next
  * canvas click, Escape or a newer wire's prompt replaces it. A failed Add
- * keeps the prompt and reports in the status bar.
+ * keeps the prompt and reports through the status bar's error; a late
+ * success hides only the prompt it answered, never a newer wire's.
  */
 
 const BTN: React.CSSProperties = {
@@ -27,11 +28,13 @@ const BTN: React.CSSProperties = {
 };
 
 export default function RiserPrompt({ ed }: { ed: GridEditor }) {
-  const { riserPrompt, hideRiserPrompt, project, router, noteAction, activeOptionId } = ed;
+  const { riserPrompt, hideRiserPrompt, hideRiserPromptIf, project, router, noteAction, setErr, activeOptionId } = ed;
   const [pending, start] = useTransition();
   if (!riserPrompt || riserPrompt.optionId !== activeOptionId) return null;
 
-  const add = () =>
+  const add = () => {
+    // The prompt this Add answers — a newer wire may replace it before the answer lands.
+    const answered = { key: riserPrompt.key, ticket: riserPrompt.ticket };
     start(async () => {
       let r: Awaited<ReturnType<typeof acceptSuggestionsAction>>;
       try {
@@ -40,15 +43,16 @@ export default function RiserPrompt({ ed }: { ed: GridEditor }) {
         r = { ok: false, error: "That didn't save — check your connection and try again." };
       }
       if (!r.ok) {
-        noteAction(r.error);
+        setErr(r.error);
         return;
       }
       // Nothing accepted: the pair went on the riser elsewhere (another tab,
       // the riser page) — say so instead of claiming an add.
       noteAction(r.accepted > 0 ? "Added to the riser" : "Already on the riser");
-      hideRiserPrompt();
+      hideRiserPromptIf(answered);
       router.refresh();
     });
+  };
 
   return (
     <div

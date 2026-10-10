@@ -482,6 +482,21 @@ export const CR_OP_NAMES = [
   "addNote", "updateNote", "removeNote", "setDefaults",
 ] as const;
 
+/**
+ * An estimate-owned option (#314) never prices wire or conduit on the riser —
+ * the estimate does. The op with `priceWire` / `priceConduit` taken out of
+ * `updateRun` and `setDefaults`; null when nothing is left for it to do (the
+ * action answers ok with no write). Every other op passes through untouched.
+ */
+export function estimateOwnedOp(op: CROp, estimateOwned: boolean): CROp | null {
+  if (!estimateOwned || (op.op !== "updateRun" && op.op !== "setDefaults")) return op;
+  const rest: Record<string, unknown> = { ...op };
+  delete rest.priceWire;
+  delete rest.priceConduit;
+  const left = Object.keys(rest).filter((k) => k !== "op" && k !== "id" && rest[k] !== undefined);
+  return left.length ? (rest as CROp) : null;
+}
+
 export type MakeId = (prefix: "cr-" | "dt-" | "st-" | "nt-") => string;
 
 /** The store's id minter: prefix + 12 hex characters from crypto.randomUUID(). */

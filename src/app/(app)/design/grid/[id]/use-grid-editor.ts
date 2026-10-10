@@ -50,6 +50,7 @@ import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, Rem
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import { riserPromptForRouteAction } from "./conduit-riser/actions";
+import { addAnswerHides, type PromptTicket } from "@/lib/design/conduit-riser/editor-rules";
 import { placementSystem } from "@/lib/design/grid-drawing-set";
 import {
   addRouteAction,
@@ -576,18 +577,23 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** #321: "Add to the lighting control riser?" after a device-to-device wire.
    *  One at a time — a newer wire's prompt replaces an older one; the ticket
    *  drops an answer that arrives after it was replaced or dismissed. */
-  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean; byOthers: boolean } | null>(null);
+  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean; byOthers: boolean; ticket: number } | null>(null);
   const riserTicket = useRef(0);
   const hideRiserPrompt = useCallback(() => {
     riserTicket.current++;
     setRiserPrompt(null);
+  }, []);
+  /** A late Add answer: hides the prompt only if it's still the one answered
+   *  (same key, same ticket) — never a newer wire's prompt. */
+  const hideRiserPromptIf = useCallback((answered: PromptTicket) => {
+    setRiserPrompt((cur) => (addAnswerHides(cur, answered) ? null : cur));
   }, []);
   const askRiserPrompt = useCallback((optionId: string, routeId: string) => {
     const ticket = ++riserTicket.current;
     setRiserPrompt(null);
     riserPromptForRouteAction(project.id, optionId, routeId)
       .then((r) => {
-        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins, byOthers: r.byOthers });
+        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins, byOthers: r.byOthers, ticket });
       })
       .catch(() => {});
   }, [project.id]);
@@ -2930,6 +2936,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     intakeNotices,
     riserPrompt,
     hideRiserPrompt,
+    hideRiserPromptIf,
     blobUploads,
     project,
     symbolDisplay,

@@ -5,7 +5,12 @@
  * saved result round the same way) and re-running the layout. Undo / redo
  * covers only these ops: each entry carries its inverse — the value the
  * edit replaced. The stack is tied to a fingerprint of the layout it
- * expects; data that arrives changed from anywhere else empties it.
+ * expects AND to the project's server version (`updatedAt`): data that
+ * arrives changed from anywhere else empties it, and so does a write made
+ * elsewhere that happens to leave an identical layout — undo never
+ * resurrects a position someone else's edit sat on top of. A write this
+ * editor made reports the version it landed on (`Landed`), which carries
+ * the stack across it (`landHistory`).
  */
 
 import type { DetailLayout } from "./layout";
@@ -20,7 +25,10 @@ export type LayoutOp =
   | { op: "updateRun"; id: string; laneX: number | null };
 
 export type HistoryEntry = { forward: LayoutOp; inverse: LayoutOp };
-export type LayoutHistory = { expect: string; undo: HistoryEntry[]; redo: HistoryEntry[] };
+/** `version` = the project's `updatedAt` the stack expects (null = unversioned). */
+export type LayoutHistory = { expect: string; version: number | null; undo: HistoryEntry[]; redo: HistoryEntry[] };
+/** One of this editor's own writes: the project's `updatedAt` it was applied over, and the one it left. */
+export type Landed = { before: number; after: number };
 
 export const HISTORY_CAP = 100;
 /** Drags snap to this many inches so lines and tags line up. */
@@ -99,39 +107,72 @@ export function viewWithDoc(view: ViewDetail, doc: ConduitRiserDoc): ViewDetail 
   };
 }
 
-/** The stack as it stands against `doc` — empty when the layout moved under it. */
-export function historyFor(h: LayoutHistory | null, doc: ConduitRiserDoc): { undo: HistoryEntry[]; redo: HistoryEntry[] } {
-  return h && h.expect === layoutFingerprint(doc) ? { undo: h.undo, redo: h.redo } : { undo: [], redo: [] };
+/** The stack as it stands against `doc` at server `version` — empty when the
+ *  layout moved under it, or when the project was written by anyone else. */
+export function historyFor(h: LayoutHistory | null, doc: ConduitRiserDoc, version: number | null = null): { undo: HistoryEntry[]; redo: HistoryEntry[] } {
+  return h && h.expect === layoutFingerprint(doc) && (h.version ?? null) === version ? { undo: h.undo, redo: h.redo } : { undo: [], redo: [] };
 }
 
-/** A new edit: pushed on the undo stack (capped), redo cleared. */
-export function recordEdit(h: LayoutHistory | null, doc: ConduitRiserDoc, entry: HistoryEntry, placementIds: ReadonlySet<string>): LayoutHistory {
-  const base = historyFor(h, doc);
+/** A new edit: pushed on the undo stack (capped), redo cleared. Made against
+ *  `version`; `landHistory` moves it to the version the write lands on. */
+export function recordEdit(
+  h: LayoutHistory | null,
+  doc: ConduitRiserDoc,
+  entry: HistoryEntry,
+  placementIds: ReadonlySet<string>,
+  version: number | null = null
+): LayoutHistory {
+  const base = historyFor(h, doc, version);
   return {
     expect: layoutFingerprint(applyLayoutOps(doc, [entry.forward], placementIds)),
+    version,
     undo: [...base.undo, entry].slice(-HISTORY_CAP),
     redo: [],
   };
 }
 
 /** Undo: the op to send and the stack once it lands. null = nothing to undo. */
-export function stepUndo(h: LayoutHistory | null, doc: ConduitRiserDoc, placementIds: ReadonlySet<string>): { op: LayoutOp; next: LayoutHistory } | null {
-  const base = historyFor(h, doc);
+export function stepUndo(
+  h: LayoutHistory | null,
+  doc: ConduitRiserDoc,
+  placementIds: ReadonlySet<string>,
+  version: number | null = null
+): { op: LayoutOp; next: LayoutHistory } | null {
+  const base = historyFor(h, doc, version);
   const entry = base.undo.at(-1);
   if (!entry) return null;
   return {
     op: entry.inverse,
-    next: { expect: layoutFingerprint(applyLayoutOps(doc, [entry.inverse], placementIds)), undo: base.undo.slice(0, -1), redo: [...base.redo, entry] },
+    next: { expect: layoutFingerprint(applyLayoutOps(doc, [entry.inverse], placementIds)), version, undo: base.undo.slice(0, -1), redo: [...base.redo, entry] },
   };
 }
 
 /** Redo: the op to send and the stack once it lands. null = nothing to redo. */
-export function stepRedo(h: LayoutHistory | null, doc: ConduitRiserDoc, placementIds: ReadonlySet<string>): { op: LayoutOp; next: LayoutHistory } | null {
-  const base = historyFor(h, doc);
+export function stepRedo(
+  h: LayoutHistory | null,
+  doc: ConduitRiserDoc,
+  placementIds: ReadonlySet<string>,
+  version: number | null = null
+): { op: LayoutOp; next: LayoutHistory } | null {
+  const base = historyFor(h, doc, version);
   const entry = base.redo.at(-1);
   if (!entry) return null;
   return {
     op: entry.forward,
-    next: { expect: layoutFingerprint(applyLayoutOps(doc, [entry.forward], placementIds)), undo: [...base.undo, entry], redo: base.redo.slice(0, -1) },
+    next: { expect: layoutFingerprint(applyLayoutOps(doc, [entry.forward], placementIds)), version, undo: [...base.undo, entry], redo: base.redo.slice(0, -1) },
   };
+}
+
+/**
+ * The stack after one of this editor's writes. The write reports the
+ * version it was applied over and the one it left: when that's the version
+ * the stack expects, the stack moves to the new one (no other write came
+ * between). A write applied over any other version — someone else wrote
+ * first — empties it. A write that reports nothing leaves the stack as it
+ * is; if it did move the version, the next render's `historyFor` sees the
+ * mismatch and the stack is empty.
+ */
+export function landHistory(h: LayoutHistory | null, landed: Landed | undefined): LayoutHistory | null {
+  if (!landed || !h) return h;
+  return (h.version ?? null) === landed.before ? { ...h, version: landed.after } : null;
 }

@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { CR_OP_NAMES, type CROp } from "@/lib/design/conduit-riser/model";
+import { CR_OP_NAMES, estimateOwnedOp, type CROp } from "@/lib/design/conduit-riser/model";
+import type { Landed } from "@/lib/design/conduit-riser/edit";
 import { acceptSuggestions, dismissSuggestion, patchConduitRiser } from "@/lib/stores/grid-conduit-riser";
 import { getProject } from "@/lib/stores/grid-projects";
 import { riserPromptFor, type RiserPrompt } from "@/lib/design/conduit-riser-server";
@@ -13,9 +14,12 @@ import { riserPromptFor, type RiserPrompt } from "@/lib/design/conduit-riser-ser
  * inside its own write — these actions hand it keys, never suggestion
  * objects — and loads the parts context once per call. Tags go through
  * setTagFieldsAction and levels through saveLevelsAction (../actions).
+ * A write hands back the version it landed on (`landed`) so the editor can
+ * carry its layout-undo stack across its own edits and drop it on anyone
+ * else's.
  */
 
-type Result = { ok: true } | { ok: false; error: string };
+type Result = { ok: true; landed?: Landed } | { ok: false; error: string };
 
 const MESSAGES: Record<string, string> = {
   "not-found": "Design not found.",
@@ -43,10 +47,19 @@ export async function patchConduitRiserAction(projectId: string, optionId: strin
   await requireUser();
   if (!isStr(projectId) || !isStr(optionId)) return fail("invalid");
   if (!op || typeof op !== "object" || !(CR_OP_NAMES as readonly string[]).includes(op.op)) return { ok: false, error: "Unknown riser edit." };
+  if (op.op === "updateRun" || op.op === "setDefaults") {
+    // An estimate-owned option never prices on the riser (#314) — refuse the
+    // pricing fields here, whatever the page sent; nothing left = no write.
+    const project = await getProject(projectId);
+    if (!project) return fail("not-found");
+    const kept = estimateOwnedOp(op, (project.options || []).find((o) => o.id === optionId)?.estimateOwned === true);
+    if (!kept) return { ok: true };
+    op = kept;
+  }
   const r = await patchConduitRiser(projectId, optionId, op);
   if (!r.ok) return fail(r.reason);
   revalidateConduit(projectId);
-  return { ok: true };
+  return { ok: true, landed: r.landed };
 }
 
 /** Accept suggestions from the plan by key, or "all". Nothing left to
@@ -55,7 +68,7 @@ export async function acceptSuggestionsAction(
   projectId: string,
   optionId: string,
   keys: string[] | "all"
-): Promise<{ ok: true; accepted: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; accepted: number; landed?: Landed } | { ok: false; error: string }> {
   await requireUser();
   if (!isStr(projectId) || !isStr(optionId)) return fail("invalid");
   const list = keys === "all" ? "all" : Array.isArray(keys) ? keys.filter(isKey).slice(0, 2000) : null;
@@ -63,7 +76,7 @@ export async function acceptSuggestionsAction(
   const r = await acceptSuggestions(projectId, optionId, list);
   if (!r.ok) return fail(r.reason);
   if (r.accepted) revalidateConduit(projectId);
-  return { ok: true, accepted: r.accepted };
+  return { ok: true, accepted: r.accepted, landed: r.landed };
 }
 
 /** Hide one suggested pair. A key no longer on offer (accepted or dismissed

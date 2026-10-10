@@ -176,6 +176,8 @@ export default async function ConduitRiserPage({
         key={`${optionId}:${active.detail.id}`}
         projectId={project.id}
         optionId={optionId}
+        // The layout-undo stack is tied to this version (#321 polish).
+        version={project.updatedAt}
         planHref={`${base}${optionQuery}`}
         view={active}
         layout={layout}
