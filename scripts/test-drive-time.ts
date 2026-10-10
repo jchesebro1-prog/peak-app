@@ -4,7 +4,7 @@
    add the DB-backed checks here. */
 import { eq, inArray, like } from "drizzle-orm";
 import { getDb } from "@/db";
-import { companies, placeBook, sites } from "@/db/schema";
+import { blobs, companies, placeBook, sites } from "@/db/schema";
 import { saveSite } from "@/lib/identity/sites";
 import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
 import { locateVenue } from "@/lib/venue-locate";
@@ -12,6 +12,19 @@ import { getPlaces, placeStatesFor, writePlace, fixPlace } from "@/lib/address-v
 import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/targets";
 import { cleanFixInput, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
 import { routeKey, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
+import {
+  bufferMinFor,
+  cleanBufferMin,
+  driveBufferFor,
+  getDriveSyncState,
+  getScheduleDefaults,
+  getStayOvers,
+  markDriveStale,
+  saveScheduleDefaults,
+  saveUserSchedulePrefs,
+  setDriveSyncState,
+  setStayOver,
+} from "@/lib/stores/schedule-prefs";
 import { addDays, chicagoDayKey, chicagoDayStart, dayKeysBetween, isDayKey } from "@/lib/drive-plan/day";
 import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop, type StopSourceEvent, type StopSourceVisit } from "@/lib/drive-plan/stops";
 import { dayDriveTotal, fmtDur, neededRoutes, pairKey, planDay, type PlanDayInput } from "@/lib/drive-plan/plan";
@@ -690,4 +703,36 @@ export async function driveTimePlanChecks(ok: Ok): Promise<void> {
   ok(nextNoBase.length === 1 && nextNoBase[0].flag === null && nextNoBase[0].routeMin === 40,
     "drive-time planDay: a missing base doesn't flag a leg that starts from the previous night's stop");
   ok(planDay(input({ stops: [] })).length === 0, "drive-time planDay: a day with no stops has no legs");
+}
+
+export async function driveTimePrefsChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const U = "TESTdrive:u1";
+  try {
+    ok(cleanBufferMin("20") === 20 && cleanBufferMin(-5) === 0 && cleanBufferMin(500) === 120 && cleanBufferMin("") === null && cleanBufferMin("x") === null,
+      "drive-time prefs: buffer minutes are whole, clamped 0–120, blank = unset");
+    ok(bufferMinFor({ driveBufferMin: 15 }, { driveBufferMin: null }) === 15 && bufferMinFor({ driveBufferMin: 15 }, { driveBufferMin: 0 }) === 0,
+      "drive-time prefs: the company default applies until the rep sets their own (0 is a real choice)");
+    const before = await getScheduleDefaults();
+    ok(before.driveBufferMin >= 0, "drive-time prefs: company default reads (15 when never set)");
+    await saveUserSchedulePrefs(U, { driveBufferMin: 25 });
+    ok((await driveBufferFor(U)) === 25, "drive-time prefs: a rep's own buffer wins");
+    await saveUserSchedulePrefs(U, { driveBufferMin: null });
+    ok((await driveBufferFor(U)) === before.driveBufferMin, "drive-time prefs: clearing it falls back to the company default");
+
+    ok(await setStayOver(U, "2026-10-14", true), "drive-time prefs: a stay-over saves");
+    await setStayOver(U, "2026-10-15", true);
+    await setStayOver(U, "2026-10-15", false);
+    ok(!(await setStayOver(U, "Oct 14", true)), "drive-time prefs: a malformed day key is refused");
+    const stays = await getStayOvers(U);
+    ok(stays["2026-10-14"] === true && !("2026-10-15" in stays), "drive-time prefs: stay-overs are per date; turning one off removes it");
+
+    await setDriveSyncState(U, { lastSyncAt: 123, legacyCleanedAt: 99 });
+    await markDriveStale([U]);
+    const st = await getDriveSyncState(U);
+    ok(st.lastSyncAt === 0 && st.legacyCleanedAt === 99, "drive-time prefs: markDriveStale zeroes lastSyncAt and keeps the legacy-cleanup stamp");
+    await saveScheduleDefaults({ driveBufferMin: before.driveBufferMin });
+  } finally {
+    await db.delete(blobs).where(like(blobs.id, "%TESTdrive:%"));
+  }
 }

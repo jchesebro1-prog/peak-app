@@ -112,6 +112,7 @@ export default function SettingsClient({
       case "field":
         return (
           <FieldGroup
+            driveDefaults={data.driveDefaults}
             venueTypes={data.venueTypes}
             intakeCatalog={data.intakeCatalog}
             visitReasons={data.visitReasons}

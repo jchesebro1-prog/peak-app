@@ -890,3 +890,15 @@ export async function saveEstimateOutputDefaultsAction(input: {
   revalidatePath("/", "layout");
   return { ok: true, defaults };
 }
+
+/** Spec 2026-10-09 "Buffer" — the company default drive buffer. Every rep
+ *  without their own buffer moves, so all reps re-sync on next view. */
+export async function saveDriveDefaultsAction(input: { driveBufferMin: unknown }) {
+  await requirePerm("manage_users");
+  const { saveScheduleDefaults, markDriveStale } = await import("@/lib/stores/schedule-prefs");
+  const { activeUsers } = await import("@/lib/users");
+  const saved = await saveScheduleDefaults({ driveBufferMin: input?.driveBufferMin });
+  await markDriveStale((await activeUsers()).map((u) => u.id));
+  revalidatePath("/", "layout");
+  return { ok: true as const, driveBufferMin: saved.driveBufferMin };
+}
