@@ -60513,7 +60513,7 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(view.includes('useState<Tab>("devices")') && view.includes('role="tablist"') && view.includes("<DevicesTable ed={ed} />") && view.includes("<ScheduleTable schedule={schedule}"),
     "#320 Spreadsheet: Devices (default) and Schedule tabs");
   ok(table.startsWith('"use client"') && table.includes("data-no-nudge") && table.includes("nextCell(shown, cur.id, cur.col, move)") && table.includes("focusPlacements(ids, r.id)") &&
-     table.includes("renumberDesignators(target, what)") && table.includes("Selected rows") && !/from\s+"@\/lib\/stores\//.test(table) && !table.includes("designators-server"),
+     table.includes("renumberDesignators(recode ? { ...target, recode: true } : target,") && table.includes("Selected rows") && !/from\s+"@\/lib\/stores\//.test(table) && !table.includes("designators-server"),
     "#320 Devices tab: inline edit moves cell to cell, a row click selects on the plan, Renumber menu; no store import");
   const propSrc = rd("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
   ok(table.includes("Apply current type codes") && table.includes("renumberDesignators(recode ? { ...target, recode: true } : target,") && table.includes("useState(false)") &&

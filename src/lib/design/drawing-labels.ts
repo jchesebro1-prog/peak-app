@@ -313,12 +313,14 @@ export const KEY_CUT_SUFFIX = "… see schedule";
  * A device-key row's designators as printed: as is when they fit
  * KEY_ROW_MAX_LINES; else the most leading ", "-separated designators that
  * fit with KEY_CUT_SUFFIX after them (at least the first, whole). Never cuts
- * inside a designator.
+ * inside a designator: a lone over-long one is left whole (designators cap at
+ * 24 characters, so that is at most 3 lines).
  */
 export function capKeyTag(tag: string): string {
   const fits = (t: string) => wrapLineCount(t, KEY_DESIGNATOR_CHARS_PER_LINE) <= KEY_ROW_MAX_LINES;
   if (fits(tag)) return tag;
   const tokens = tag.split(", ");
+  if (tokens.length === 1) return tag;
   const cut = (k: number) => `${tokens.slice(0, k).join(", ")} ${KEY_CUT_SUFFIX}`;
   let keep = 1;
   while (keep + 1 < tokens.length && fits(cut(keep + 1))) keep += 1;
