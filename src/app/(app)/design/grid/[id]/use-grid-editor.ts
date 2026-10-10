@@ -64,6 +64,7 @@ import {
   renumberDesignatorsAction,
   replacePlacementsPartAction,
   setDesignatorsAction,
+  setTagFieldsAction,
   restoreItemsAction,
   setPlacementsCategoryAction,
   setSymbolDisplayAction,
@@ -76,6 +77,7 @@ import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 import { duplicates, type RenumberTarget } from "@/lib/design/designators";
+import type { PlacementTag } from "@/lib/design/conduit-riser/tags";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
@@ -2315,6 +2317,36 @@ function useGridEditorImpl(props: GridEditorProps) {
     [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge, record]
   );
 
+  /* ------------------------- riser tags (#321) ------------------------- */
+
+  /** Set (or, with a null tag, clear) riser tag overrides — one write, one
+   *  undo step. Resolves true when it saved. */
+  const saveTags = useCallback(
+    async (items: { id: string; tag: PlacementTag | null }[]): Promise<boolean> => {
+      if (!items.length) return false;
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setTagFieldsAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        noteAction(items.length > 1 ? `Set riser tag on ${items.length} devices` : "Set riser tag");
+        record({ label: stepLabel("set riser tag", items.length), forward: { kind: "tag", items }, inverse: { kind: "tag", items: r.previous } });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, router, noteAction, flushNudge, record]
+  );
+
   /* ------------------------- designators (#320) ------------------------- */
 
   /** Set (or, with "", re-issue) designators — one write, one undo step.
@@ -2498,7 +2530,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const routeIds = samePage ? clip.routeIds : [];
       const dropped = clip.routeIds.length - routeIds.length;
       const items = clip.items.map((it) => {
-        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number } = {
+        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag } = {
           srcId: it.srcId,
           x: anchor.x + it.dx,
           y: anchor.y + it.dy,
@@ -2506,6 +2538,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         };
         if (it.category !== undefined) out.category = it.category;
         if (it.qty !== undefined) out.qty = it.qty;
+        if (it.tag !== undefined) out.tag = { ...it.tag };
         // The full curtain record; the server re-checks every field.
         if (it.curtain) out.curtain = { ...it.curtain };
         return out;
@@ -2646,6 +2679,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         }
         case "designator": {
           const r = await setDesignatorsAction(project.id, c.items, { keepAuto: c.keepAuto === true });
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
+        case "tag": {
+          const r = await setTagFieldsAction(project.id, c.items);
           if (!r.ok) return r;
           router.refresh();
           return { ok: true };
@@ -3033,6 +3072,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     replacePartForSelected,
     designatorDupes,
     saveDesignators,
+    saveTags,
     renumberDesignators,
     focusPlacements,
     clipboard,

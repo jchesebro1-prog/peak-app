@@ -11530,6 +11530,7 @@ seeded()
   .then(() => sheetAdjust318StaleSheetChecks())
   .then(() => conduitRiser321Checks())
   .then(() => conduitRiser321B1Checks())
+  .then(() => conduitRiser321B2Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -60851,11 +60852,14 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(R.sortDeviceRows(blankA, { key: "designator", dir: 1 }).map((r) => r.id).join(",") === "d,b,c,a" && R.sortDeviceRows(blankA, { key: "designator", dir: -1 }).map((r) => r.id).join(",") === "c,b,d,a",
     "#320 Devices: a blank designator sorts last in both directions");
   const J = (v: unknown) => JSON.stringify(v);
-  ok(J(R.nextCell(rows, "b", "designator", "right")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "b", "category", "right")) === J({ id: "d", col: "designator" }) &&
-     R.nextCell(rows, "c", "designator", "down") === null && J(R.nextCell(rows, "d", "designator", "left")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "d", "designator", "up")) === J({ id: "b", col: "designator" }),
+  // #321 widened the editable columns: Tab walks designator, category, then the eight riser tag fields.
+  ok(J(R.nextCell(rows, "b", "designator", "right")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "b", "category", "right")) === J({ id: "b", col: "box" }) &&
+     J(R.nextCell(rows, "b", "contents", "right")) === J({ id: "d", col: "designator" }) &&
+     R.nextCell(rows, "c", "designator", "down") === null && J(R.nextCell(rows, "d", "designator", "left")) === J({ id: "b", col: "contents" }) && J(R.nextCell(rows, "d", "designator", "up")) === J({ id: "b", col: "designator" }),
     "#320 Devices: Enter moves down, Tab moves right (wrapping to the next row), Shift goes back");
-  ok(R.DEVICE_COLUMNS.map((c) => c.key).join(",") === "designator,type,model,desc,space,sheet,qty,category" && R.DEVICE_COLUMNS.filter((c) => c.editable).map((c) => c.key).join(",") === "designator,category",
-    "#320 Devices: the column list (Designator and Category editable)");
+  ok(R.DEVICE_COLUMNS.map((c) => c.key).join(",") === "designator,type,model,desc,space,sheet,qty,category,box,face,mount,height,pd,location,power,contents" &&
+     R.DEVICE_COLUMNS.filter((c) => c.editable).map((c) => c.key).join(",") === "designator,category,box,face,mount,height,pd,location,power,contents",
+    "#320 Devices: the column list (Designator, Category and the riser tag fields editable)");
 
   const view = rd("src/app/(app)/design/grid/[id]/workspace/spreadsheet-view.tsx");
   const table = rd("src/app/(app)/design/grid/[id]/workspace/devices-table.tsx");
@@ -62059,4 +62063,213 @@ async function conduitRiser321B1Checks(): Promise<void> {
   ok(src("src/app/(app)/design/grid/[id]/page.tsx").includes("designatorDigits={designatorDigitsOf(settings)}"), "#321 the editor page passes the digits to the client");
   ok(src("src/app/(app)/catalog/page.tsx").includes('name="designatorCode"') && src("src/app/(app)/catalog/page.tsx").includes('placeholder="From device type"'),
     "#321 the part editor has a Designator code field");
+}
+
+/* ---------------- #321 Plan B task 2: riser tag fields on parts and devices ---------------- */
+async function conduitRiser321B2Checks(): Promise<void> {
+  const { optionalPartFields } = await import("@/app/(app)/catalog/part-form");
+  const { gridPartsFrom } = await import("@/lib/design/grid-parts");
+  const R = await import("@/lib/design/grid-device-rows");
+  const CB = await import("@/lib/design/grid-clipboard");
+  const U = await import("@/lib/design/grid-undo");
+  const fs = await import("node:fs");
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  // Key-order-insensitive: stored JSONB does not keep an object's key order.
+  const sortKeys = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(sortKeys) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, sortKeys(x)])) : v;
+  const J = (v: unknown) => JSON.stringify(sortKeys(v));
+
+  // part form: tag_* inputs -> tagDefaults
+  const none = optionalPartFields(new FormData());
+  ok(!("tagDefaults" in none), "#321 part form: a form without the tag inputs leaves the stored defaults alone");
+  const fd = new FormData();
+  fd.set("tag_box", " b1 ");
+  fd.set("tag_face", "rear");
+  fd.set("tag_mount", "");
+  fd.set("tag_height", "12 in");
+  fd.set("tag_pd", "p/d");
+  ok(J(optionalPartFields(fd).tagDefaults) === J({ box: "B1", face: "REAR", height: "12 in", pd: "P/D" }),
+    "#321 part form: tag inputs are cleaned (upper-cased, trimmed) and a blank field is simply not set");
+  const fdBlank = new FormData();
+  for (const k of ["box", "face", "mount", "height", "pd"]) fdBlank.set(`tag_${k}`, "");
+  const blank = optionalPartFields(fdBlank);
+  ok("tagDefaults" in blank && blank.tagDefaults === undefined, "#321 part form: every tag input blank clears the defaults");
+  const fdBadPd = new FormData();
+  fdBadPd.set("tag_box", "B2");
+  fdBadPd.set("tag_pd", "X");
+  ok(J(optionalPartFields(fdBadPd).tagDefaults) === J({ box: "B2" }), "#321 part form: an invalid P/D is dropped, not stored");
+
+  // gridPartsFrom carries tagDefaults on both branches
+  const sym = { id: "GS-T", name: "Relay out", manufacturer: "ETC", modelNumber: "R1", scope: "Lighting", category: "Fixtures", width: 48, height: 34, ports: [], pricingPartId: "CAT-T1", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const cat = [
+    { id: "CAT-T1", sku: "R1", desc: "Relay", category: "Fixtures", unit: "ea", list: 10, cost: 5, tagDefaults: { box: "B1", pd: "P" } },
+    { id: "CAT-T2", sku: "R2", desc: "Relay 2", category: "Fixtures", unit: "ea", list: 10, cost: 5, tagDefaults: { face: "FRONT" } },
+    { id: "CAT-T3", sku: "R3", desc: "Plain", category: "Fixtures", unit: "ea", list: 10, cost: 5 },
+  ];
+  const parts = gridPartsFrom([sym] as never, cat as never, {}, { catalogFallback: true });
+  const partOf = new Map(parts.map((p) => [p.id, p]));
+  ok(J(partOf.get("GS-T")?.tagDefaults) === J({ box: "B1", pd: "P" }), "#321 gridPartsFrom: a Grid-library symbol carries its pricing part's tag defaults");
+  ok(J(partOf.get("CAT-T2")?.tagDefaults) === J({ face: "FRONT" }) && !("tagDefaults" in partOf.get("CAT-T3")!),
+    "#321 gridPartsFrom: the catalog fallback carries them; a part without defaults has no key");
+
+  // store: setPlacementsTag
+  const G = await import("@/lib/stores/grid-projects");
+  const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { registerFixture } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const lightRow = EQUIPMENT_ROWS.find((r) => r.system === "lighting")!;
+  const LIGHT = VP.allowancePartId(lightRow.key, "better");
+  const gp = await G.createProject({ name: "#321 tag project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 tag sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const place = async (y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.1, y, partId: LIGHT, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
+  const stored = async (id: string) => (await G.getProject(gp.id))!.placements.find((p) => p.id === id)!;
+  const d1 = await place(0.1);
+  const d2 = await place(0.2);
+  const auto = (await G.addPlacements(gp.id, { sheetId: sh.id, page: 1, optionId: DEFAULT_OPTION_ID, by, items: [{ x: 0.5, y: 0.5, partId: LIGHT, auto: { scope: "lighting", rowKey: lightRow.key, tier: "better" } }] }))!.placements.at(-1)!;
+  ok(!!auto.auto, "#321 fixture: the auto-tagged device really carries an auto tag");
+  const cur = (await G.addCurtainPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.3, y: 0.3, curtain: { type: "Draw", name: "Main", widthFt: 20, heightFt: 10, fullnessPct: 50, fabricSku: "TEST-321-FAB" }, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
+
+  const set1 = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: { box: " b9 ", location: "Booth", power: "ab", pd: "P" } }, { id: d2.id, tag: { contents: "Relay 4" } }]);
+  ok(set1.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }) && J((await stored(d2.id)).tag) === J({ contents: "Relay 4" }),
+    "#321 setPlacementsTag: sets the cleaned tag on each device");
+  ok(set1.ok && J(set1.value.previous) === J([{ id: d1.id, tag: null }, { id: d2.id, tag: null }]), "#321 setPlacementsTag: previous is null where there was no tag");
+  const set2 = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: { face: "REAR" } }]);
+  ok(set2.ok && J(set2.value.previous) === J([{ id: d1.id, tag: { box: "B9", pd: "P", location: "Booth", power: "AB" } }]), "#321 setPlacementsTag: previous carries the old tag, ready for undo");
+  const back = await G.setPlacementsTag(gp.id, set2.ok ? set2.value.previous : []);
+  ok(back.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }), "#321 setPlacementsTag: replaying previous restores the tag");
+  const cleared = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: null }, { id: d2.id, tag: {} }]);
+  ok(cleared.ok && !("tag" in (await stored(d1.id))) && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: null (or an empty tag) clears the overrides");
+  const junk = await G.setPlacementsTag(gp.id, [{ id: d1.id, tag: { box: "ABCDEFGHI", pd: "Z", bogus: "x" } as never }]);
+  ok(junk.ok && J((await stored(d1.id)).tag) === J({ box: "ABCD" }), "#321 setPlacementsTag: junk is cleaned by cleanPlacementTag (long text capped, invalid P/D and unknown keys dropped)");
+  const hand = await G.setPlacementsTag(gp.id, [{ id: auto.id, tag: { box: "B1" } }]);
+  const after = await stored(auto.id);
+  ok(hand.ok && after.tag?.box === "B1" && !("auto" in after), "#321 setPlacementsTag: a hand edit clears the auto tag, like a category edit");
+  const withCurtain = await G.setPlacementsTag(gp.id, [{ id: d2.id, tag: { box: "ZZ" } }, { id: cur.id, tag: { box: "ZZ" } }]);
+  ok(!withCurtain.ok && !("tag" in (await stored(d2.id))) && !("tag" in (await stored(cur.id))), "#321 setPlacementsTag: a curtain in the batch refuses the whole batch");
+  const missing = await G.setPlacementsTag(gp.id, [{ id: d2.id, tag: { box: "ZZ" } }, { id: "gp-nope", tag: { box: "ZZ" } }]);
+  ok(!missing.ok && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: a missing id refuses the whole batch");
+
+  // paste keeps the tag, issues a new designator; a curtain item's tag is ignored
+  await G.setPlacementsTag(gp.id, [{ id: d2.id, tag: { box: "B4", location: "Lobby" } }]);
+  const src2 = await stored(d2.id);
+  const clip = CB.copySelection(gp.id, (await G.getProject(gp.id))!.placements, [], [d2.id]);
+  ok(!!clip && J(clip.items[0].tag) === J({ box: "B4", location: "Lobby" }) && !("designator" in clip.items[0]), "#321 clipboard: copy carries the tag, never the designator");
+  ok(!!clip && clip.items[0].tag !== src2.tag, "#321 clipboard: the copied tag is its own object");
+  const pasted = await G.pastePlacements(gp.id, { sheetId: sh.id, page: 1, optionId: DEFAULT_OPTION_ID, by, items: [{ srcId: d2.id, x: 0.6, y: 0.6, partId: LIGHT, tag: clip?.items[0].tag }, { srcId: "gp-x", x: 0.7, y: 0.7, partId: "TEST-321-FAB", tag: { box: "NO" }, curtain: { type: "Draw", name: "C2", widthFt: 10, heightFt: 8, fullnessPct: 50, fabricSku: "TEST-321-FAB" } }], routeIds: [] });
+  const pz = pasted.ok ? pasted.value.placements : [];
+  const pasteStored = pz[0] ? await stored(pz[0].id) : null;
+  ok(!!pasteStored && J(pasteStored.tag) === J({ box: "B4", location: "Lobby" }) && !!pasteStored.designator && pasteStored.designator !== src2.designator,
+    "#321 paste: keeps the tag fields and gets a fresh designator");
+  ok(pz.length === 2 && !("tag" in pz[1]), "#321 paste: a curtain item never takes a tag");
+
+  // option copy keeps the tag
+  const optSrc = src("src/lib/stores/grid-projects.ts");
+  ok(optSrc.includes("tag?: PlacementTag;") && optSrc.includes("export async function setPlacementsTag("), "#321 store: GridPlacement.tag and setPlacementsTag are exported");
+
+  // restore: the action's whitelist
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  const restore = acts.slice(acts.indexOf("async function cleanRestoredPlacement("), acts.indexOf("export async function restoreItemsAction("));
+  ok(restore.includes("const tag = curtain ? undefined : cleanPlacementTag(raw.tag);") && restore.includes("...(tag ? { tag } : {}),"),
+    "#321 cleanRestoredPlacement: whitelists tag through cleanPlacementTag, never on a curtain");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  ok(J(T.cleanPlacementTag({ box: "b1", pd: "p", rogue: 1 })) === J({ box: "B1", pd: "P" }) && T.cleanPlacementTag("junk") === undefined && T.cleanPlacementTag({ rogue: 1 }) === undefined,
+    "#321 the restore cleaner keeps a cleaned tag and drops junk");
+  const setAct = acts.slice(acts.indexOf("export async function setTagFieldsAction("), acts.indexOf("function cleanRenumberTarget("));
+  ok(setAct.includes("await requireUser();") && setAct.includes("setPlacementsTag(projectId,") && setAct.includes("revalidatePath(editorPath(projectId));") && setAct.includes("previous: r.value.previous"),
+    "#321 setTagFieldsAction: authed, writes through the store, revalidates, returns previous");
+  ok(acts.includes("(it.tag === undefined || isObj(it.tag)) &&") && acts.includes("...(!curtain && it.tag ? { tag: it.tag } : {}),"), "#321 pastePlacementsAction: forwards a non-curtain item's tag");
+
+  // undo
+  const entry = { label: "set riser tag (1 device)", forward: { kind: "tag" as const, items: [{ id: "a", tag: { box: "B1" } }] }, inverse: { kind: "tag" as const, items: [{ id: "a", tag: null }] } };
+  ok(U.pushUndo(U.emptyUndo(), entry).past[0].inverse.kind === "tag", "#321 undo: a tag edit is one undo step");
+  const hook = src("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes('case "tag": {') && hook.includes("setTagFieldsAction(project.id, c.items)") && hook.includes('record({ label: stepLabel("set riser tag", items.length), forward: { kind: "tag", items }, inverse: { kind: "tag", items: r.previous } });') && hook.includes("    saveTags,"),
+    "#321 hook: saveTags records an undo step with inverse = previous; the runner replays tag commands");
+
+  // Devices rows: part defaults show when there is no override
+  const pls = [
+    { id: "a", sheetId: "s1", page: 1, x: 0.2, y: 0.2, partId: "RLY", designator: "CRO-01", by: "t", at: 1 },
+    { id: "b", sheetId: "s1", page: 1, x: 0.2, y: 0.5, partId: "RLY", designator: "CRO-02", tag: { box: "B7", location: "Booth", power: "A" }, by: "t", at: 1 },
+    { id: "c", sheetId: "s1", page: 1, x: 0.8, y: 0.8, partId: "PLAIN", designator: "G-01", by: "t", at: 1 },
+  ];
+  const space = { id: "sp1", sheetId: "s1", page: 1, name: "Stage", color: "#000", points: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.6 }, { x: 0, y: 0.6 }], by: "t", at: 1 };
+  const defaultsOf = (pl: { partId: string }) => (pl.partId === "RLY" ? { box: "B1", face: "REAR", mount: "SM", height: "12 in", pd: "P" as const } : undefined);
+  const rows = R.deviceRows({
+    placements: pls as never, sheets: [{ id: "s1", name: "Plan" }], spaces: [space] as never,
+    typeKeyOf: () => "x", typeLabelOf: () => "X", modelOf: () => "m", descOf: () => "d", duplicates: new Set(), digits: 2, tagDefaultsOf: defaultsOf as never,
+  });
+  const ra = rows.find((r) => r.id === "a")!;
+  const rb = rows.find((r) => r.id === "b")!;
+  const rc = rows.find((r) => r.id === "c")!;
+  ok(ra.tag.box === "B1" && ra.tag.face === "REAR" && ra.tag.mount === "SM" && ra.tag.height === "12 in" && ra.tag.pd === "P" && ra.tag.location === "Stage" && J(ra.own) === "{}",
+    "#321 deviceRows: with no override the part defaults show, and location is the containing space");
+  ok(rb.tag.box === "B7" && rb.tag.face === "REAR" && rb.tag.location === "Booth" && rb.tag.power === "A" && J(rb.own) === J({ box: "B7", location: "Booth", power: "A" }),
+    "#321 deviceRows: an override wins per field and the others still inherit");
+  ok(rc.tag.box === "" && rc.tag.pd === "" && rc.tag.location === "", "#321 deviceRows: a part without defaults, outside any space, reads blank");
+  ok(R.cellText(ra, "box") === "B1" && R.cellText(rb, "location") === "Booth" && R.sortValue(rb, "power") === "A", "#321 deviceRows: tag columns read and sort by the value as printed");
+
+  // columns + Tab order
+  const tagCols = ["box", "face", "mount", "height", "pd", "location", "power", "contents"];
+  ok(tagCols.every((k) => R.DEVICE_COLUMNS.some((c) => c.key === k && c.editable)), "#321 Devices: the eight tag columns exist and are editable");
+  ok(J(R.EDIT_COLUMNS) === J(["designator", "category", ...tagCols]), "#321 Devices: the editable columns, in table order");
+  const walk = (start: string, move: "right" | "left") => {
+    const seen: string[] = [];
+    let cur: { id: string; col: string } | null = { id: "a", col: start };
+    for (let i = 0; i < 40 && cur; i++) {
+      seen.push(`${cur.id}:${cur.col}`);
+      cur = R.nextCell(rows, cur.id, cur.col as never, move);
+    }
+    return seen;
+  };
+  const fwd = walk("designator", "right");
+  ok(fwd.slice(0, 11).join() === ["a:designator", "a:category", ...tagCols.map((k) => `a:${k}`), "b:designator"].join() && fwd.length === rows.length * R.EDIT_COLUMNS.length,
+    "#321 nextCell: Tab walks every editable column in table order, then on to the next row");
+  const last = R.EDIT_COLUMNS[R.EDIT_COLUMNS.length - 1];
+  ok(J(R.nextCell(rows, "b", "designator", "left")) === J({ id: "a", col: last }) && J(R.nextCell(rows, "b", "box", "left")) === J({ id: "b", col: "category" }) && R.nextCell(rows, rows.at(-1)!.id, last, "right") === null,
+    "#321 nextCell: Shift+Tab walks back, across rows; the ends stop");
+  ok(J(R.nextCell(rows, "a", "box", "down")) === J({ id: rows[1].id, col: "box" }) && R.nextCell(rows, "zzz", "box", "down") === null, "#321 nextCell: Enter moves down within the column");
+
+  // edit rules
+  const e1 = R.tagAfterEdit({ box: "B7", location: "Booth" }, "face", " rear ");
+  ok(e1.ok && e1.changed && J(e1.tag) === J({ box: "B7", location: "Booth", face: "REAR" }), "#321 tagAfterEdit: sets one field, keeping the others");
+  const e2 = R.tagAfterEdit({ box: "B7" }, "box", "");
+  ok(e2.ok && e2.changed && e2.tag === null, "#321 tagAfterEdit: blank removes the override; none left = null");
+  const e3 = R.tagAfterEdit({ box: "B7", face: "REAR" }, "box", "  ");
+  ok(e3.ok && J(e3.tag) === J({ face: "REAR" }), "#321 tagAfterEdit: blank removes only that field");
+  const e4 = R.tagAfterEdit({ box: "B7" }, "box", "b7");
+  ok(e4.ok && !e4.changed, "#321 tagAfterEdit: retyping the same value changes nothing");
+  const e5 = R.tagAfterEdit(undefined, "box", "");
+  ok(e5.ok && !e5.changed && e5.tag === null, "#321 tagAfterEdit: blank on a device with no override is a no-op");
+  ok(R.parsePd("p/d") === "P/D" && R.parsePd(" P / D ") === "P/D" && R.parsePd("d") === "D" && R.parsePd("") === "" && R.parsePd("X") === null && R.parsePd("PD") === null,
+    "#321 P/D cell: accepts P, D, P/D or blank — anything else is invalid");
+  const pdBad = R.tagAfterEdit({}, "pd", "Q");
+  ok(!pdBad.ok && pdBad.error === R.PD_PROBLEM, "#321 tagAfterEdit: an invalid P/D is refused with the message");
+  const e6 = R.tagAfterEdit({}, "pd", "p / d");
+  ok(e6.ok && J(e6.tag) === J({ pd: "P/D" }), "#321 tagAfterEdit: P/D is normalised");
+  ok(R.TAG_INPUT_MAX.box === T.TAG_LIMITS.box && R.TAG_INPUT_MAX.contents === T.TAG_LIMITS.contents && R.TAG_INPUT_MAX.pd === 3, "#321 Devices: input limits come from TAG_LIMITS");
+  const bulk = R.bulkTagItems([{ id: "a" }, { id: "b", tag: { box: "B7", location: "Booth" } }, { id: "c", tag: { face: "REAR" } }], "face", "front");
+  ok(bulk.ok && J(bulk.items) === J([{ id: "a", tag: { face: "FRONT" } }, { id: "b", tag: { box: "B7", location: "Booth", face: "FRONT" } }, { id: "c", tag: { face: "FRONT" } }]),
+    "#321 bulk set: one field on every device, each keeping its other fields");
+  const bulk2 = R.bulkTagItems([{ id: "a", tag: { face: "REAR" } }, { id: "b", tag: { face: "REAR", box: "B7" } }, { id: "c" }], "face", "");
+  ok(bulk2.ok && J(bulk2.items) === J([{ id: "a", tag: null }, { id: "b", tag: { box: "B7" } }]), "#321 bulk clear: removes that field only, skips devices with nothing to clear");
+  const bulk3 = R.bulkTagItems([{ id: "a", tag: { face: "REAR" } }], "face", "REAR");
+  ok(bulk3.ok && bulk3.items.length === 0, "#321 bulk set: unchanged devices are left out");
+  ok(!R.bulkTagItems([{ id: "a" }], "pd", "nope").ok, "#321 bulk set: an invalid P/D refuses before any write");
+
+  // UI pins
+  const table = src("src/app/(app)/design/grid/[id]/workspace/devices-table.tsx");
+  ok(table.includes("const col: EditCol | null = c.editable ? (c.key as EditCol) : null;") && table.includes("saveTags([{ id: row.id, tag: edit.tag }])") &&
+     table.includes("tagDefaultsOf: (pl) => partById.get(pl.partId)?.tagDefaults,") && table.includes("TAG_INPUT_MAX[col]") && table.includes("setErr(edit.error);"),
+    "#321 Devices table: the editable flag drives the cells, tag commits go through saveTags, an invalid P/D reports and stays open");
+  const prop = src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
+  ok(prop.includes("<RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />") && prop.includes("<RiserTagRows ed={ed} pls={pls.filter((pl) => !pl.curtain)} />") &&
+     prop.includes('"(from part)"') && prop.includes("bulkTagItems(pls, field, draft)"),
+    "#321 Property Editor: a Riser tag section for one device and for several (Mixed + bulk set), never for a curtain");
+  const catPage = src("src/app/(app)/catalog/page.tsx");
+  ok(catPage.includes("<TagDefaultsField key={part?.sku ?? \"new\"}") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes("Riser tag defaults") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes('name="tag_pd"'),
+    "#321 the part editor has a Riser tag defaults section");
 }

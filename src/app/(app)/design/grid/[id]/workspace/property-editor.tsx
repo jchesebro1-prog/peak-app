@@ -12,6 +12,8 @@ import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { TIERS } from "@/app/(app)/design/quick/engine";
 import { UNMAPPED_TYPE } from "@/lib/design/device-types";
 import { cleanDesignator, DESIGNATOR_DUPLICATE_COLOR, DESIGNATOR_MAX, designatorList, formatDesignator } from "@/lib/design/designators";
+import { effectiveTag } from "@/lib/design/conduit-riser/tags";
+import { bulkTagItems, TAG_COLUMN_KEYS, TAG_INPUT_MAX, type TagColumnKey } from "@/lib/design/grid-device-rows";
 import type { GridPlacement, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import SymbolLookPanel from "../symbol-look-panel";
 import { Breakdown, SpaceEditor } from "../spaces-panel";
@@ -312,6 +314,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
           </PropRow>
         );
       })()}
+      {!selectedPlacement.curtain && <RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />}
       <PropRow label="Auto">{auto ? `Auto · ${autoTier}` : "Hand-placed"}</PropRow>
       <PropRow label="Placed by">{selectedPlacement.by}</PropRow>
       {/* Position readout + nudge hint (punch #47). Percent of the
@@ -496,6 +499,93 @@ function DesignatorRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
 }
 
 
+/* ------------------------------ riser tag (#321) ------------------------------ */
+
+const TAG_ROW_LABEL: Record<TagColumnKey, string> = {
+  box: "Box",
+  face: "Face",
+  mount: "Mount",
+  height: "Height",
+  pd: "P/D",
+  location: "Location",
+  power: "Power",
+  contents: "Contents",
+};
+const MONO_TAG: ReadonlySet<TagColumnKey> = new Set(["box", "face", "mount", "height", "pd", "power"]);
+
+/** The riser tag block's eight fields for one device or several. Each row
+ *  shows the value as printed (the device's own, else the part's default —
+ *  "(from part)"; location falls back to its space) and edits in place:
+ *  Enter saves, Esc cancels, a blank removes the device's own value. Several
+ *  devices read "Mixed" when they disagree; a save sets that one field on
+ *  all of them and leaves each device's other fields alone. */
+function RiserTagRows({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
+  const { project, partById, busy, saveTags, setErr } = ed;
+  const [editing, setEditing] = useState<TagColumnKey | null>(null);
+  const [draft, setDraft] = useState("");
+  const spaces = project.spaces || [];
+  const eff = pls.map((pl) => effectiveTag(pl.tag, partById.get(pl.partId)?.tagDefaults, spaceOf(pl, spaces)?.name ?? ""));
+  const save = async (field: TagColumnKey) => {
+    const r = bulkTagItems(pls, field, draft);
+    if (!r.ok) {
+      setErr(r.error);
+      return;
+    }
+    if (!r.items.length || (await saveTags(r.items))) setEditing(null);
+  };
+  return (
+    <>
+      <PropSection title="Riser tag" />
+      {TAG_COLUMN_KEYS.map((field) => {
+        const shown = same(eff.map((e) => e[field]));
+        const owned = pls.map((pl) => pl.tag?.[field] !== undefined);
+        const allOwn = owned.every(Boolean);
+        const ownValue = same(pls.map((pl) => (pl.tag?.[field] as string | undefined) ?? ""));
+        const inherited = shown !== null && shown !== "" && !owned.some(Boolean);
+        const hint = inherited ? (field === "location" ? "(from space)" : "(from part)") : "";
+        return (
+          <PropRow key={field} label={TAG_ROW_LABEL[field]} title="Click to edit — leave it empty to use the part's default">
+            {editing !== field ? (
+              <button
+                type="button"
+                style={{ ...BTN, width: "100%", padding: "3px 7px", fontSize: 11, fontWeight: 600, textAlign: "left", fontFamily: MONO_TAG.has(field) ? "var(--font-mono)" : "inherit", color: allOwn || shown === null ? "#16181d" : "#8c919c" }}
+                disabled={busy}
+                onClick={() => {
+                  setDraft(ownValue ?? "");
+                  setEditing(field);
+                }}
+              >
+                {shown === null ? <span style={{ color: "#8c919c", fontWeight: 400 }}>Mixed</span> : shown || <span style={{ color: "#b6bac3", fontWeight: 400 }}>—</span>}
+                {hint && <span style={{ fontWeight: 400, fontFamily: "inherit", marginLeft: 6 }}>{hint}</span>}
+              </button>
+            ) : (
+              <span style={{ display: "flex", gap: 5 }}>
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  maxLength={TAG_INPUT_MAX[field]}
+                  placeholder={shown ?? "Mixed"}
+                  aria-label={TAG_ROW_LABEL[field]}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setEditing(null);
+                    if (e.key === "Enter" && !busy) void save(field);
+                  }}
+                  style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px", minWidth: 0, fontFamily: MONO_TAG.has(field) ? "var(--font-mono)" : "inherit" }}
+                  autoFocus
+                />
+                <button type="button" style={{ ...BTN, padding: "3px 8px", fontSize: 11 }} disabled={busy} onClick={() => void save(field)}>
+                  Save
+                </button>
+              </span>
+            )}
+          </PropRow>
+        );
+      })}
+    </>
+  );
+}
+
 /* ------------------------------ several at once ------------------------------ */
 
 /** One value when every item agrees, else null (the row reads "Mixed"). */
@@ -618,6 +708,8 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
           </button>
         </span>
       </PropRow>
+
+      {curtainCount < n && <RiserTagRows ed={ed} pls={pls.filter((pl) => !pl.curtain)} />}
 
       {curtainCount < n && (
         <PropRow label="Designators" title="Renumber the selected devices in reading order — they take the lowest free numbers of their codes">

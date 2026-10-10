@@ -15,6 +15,7 @@ import type { CurtainBottomFinish, CurtainMountTypeId, CurtainTopFinish } from "
 // margin) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
 import type { GridShape } from "./grid-symbols";
+import type { TagFields } from "./conduit-riser/tags";
 // Pure (no store/db imports) — safe in this client-safe module.
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 // Pure and import-free (#304) — client-safe.
@@ -53,6 +54,8 @@ export type PartLite = {
   /** #321: the catalog part's own designator code (Bray's CRO) — wins over
    *  its device type's code when a device is numbered. */
   designatorCode?: string;
+  /** #321: the part's riser tag defaults (BOX · FACE · MOUNT · HT · P/D). */
+  tagDefaults?: TagFields;
   group?: string | null;
   /** Resolved trade (punch #48) - `tradeOf(part, map)` run server-side, the
    *  same deal as `group`. The Grid's scope taxonomy (grid-scopes.ts) needs

@@ -31,6 +31,7 @@ import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
 import RackDataField from "./rack-data-field";
+import TagDefaultsField from "./tag-defaults-field";
 import { rackFactsOf } from "@/lib/rack/part-facts";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
@@ -1018,6 +1019,9 @@ function PartFormModal({
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
                 Letters the Grid puts on this part&apos;s devices (CRO gives CRO-01). Leave blank to use the device type&apos;s code.
               </div>
+            </div>
+            <div style={{ marginTop: 13, marginBottom: 4 }}>
+              <TagDefaultsField key={part?.sku ?? "new"} initial={part?.tagDefaults ?? {}} />
             </div>
             {part && (
               <div style={{ marginTop: 13, marginBottom: 4 }}>

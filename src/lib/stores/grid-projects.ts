@@ -46,6 +46,7 @@ import {
   type RenumberTarget,
 } from "@/lib/design/designators";
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
+import { cleanPlacementTag, type PlacementTag } from "@/lib/design/conduit-riser/tags";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -136,6 +137,13 @@ export type GridPlacement = {
    * ensureDesignators numbers it). Never on a curtain.
    */
   designator?: string;
+  /**
+   * #321: the riser tag's per-device overrides (BOX · FACE · MOUNT · HT · P/D,
+   * location, power letter, power-controls contents). A field absent here
+   * falls back to the part's `tagDefaults` (location: the containing space).
+   * Never on a curtain. Written only through setPlacementsTag.
+   */
+  tag?: PlacementTag;
   /**
    * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
    * is a priced line, not a catalog unit: it is sized and specced here and
@@ -1382,7 +1390,7 @@ const RESTORE_STALE = "Couldn't undo — the design changed.";
 const RESTORE_NOTHING = "Nothing to undo.";
 const RESTORE_TOO_MANY = "Couldn't undo — too many items.";
 
-export type PasteItem = { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: GridCurtain; qty?: number };
+export type PasteItem = { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: GridCurtain; qty?: number; tag?: PlacementTag };
 
 /**
  * Paste copied devices onto one page of one option (#299), in ONE patch.
@@ -1441,6 +1449,8 @@ export async function pastePlacements(
         ...(label ? { category: label } : {}),
         ...lotAndTag(it.qty, undefined),
         ...(it.curtain ? { curtain: it.curtain } : {}),
+        // #321: a paste keeps the riser tag fields (cleaned; never on a curtain).
+        ...(!it.curtain && cleanPlacementTag(it.tag) ? { tag: cleanPlacementTag(it.tag) } : {}),
         by: input.by,
         at,
       };
@@ -1616,6 +1626,43 @@ export async function setPlacementsDesignator(
       return previous;
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_DESIGNATOR_REFUSAL : null)
+  );
+}
+
+/* ------------------------------ riser tags (#321) ------------------------------ */
+
+const CURTAIN_TAG_REFUSAL = "Curtains don't take riser tag fields.";
+
+/**
+ * Set many devices' riser tag overrides in one all-or-nothing write
+ * (batchEdit). Each `tag` goes through cleanPlacementTag; `null` (or a tag
+ * that cleans to nothing) removes the overrides so the part defaults show. A
+ * hand edit clears the #211 auto tag, like a category edit. Curtains are
+ * refused (the whole batch). Returns the previous tags (null when none).
+ */
+export async function setPlacementsTag(
+  projectId: string,
+  items: { id: string; tag: PlacementTag | null }[]
+): Promise<BatchResult<{ previous: { id: string; tag: PlacementTag | null }[] }>> {
+  const next = byId(items);
+  return batchEdit(
+    projectId,
+    items.map((it) => it.id),
+    (p) => {
+      const previous: { id: string; tag: PlacementTag | null }[] = [];
+      p.placements = (p.placements || []).map((pl) => {
+        const it = next.get(pl.id);
+        if (!it) return pl;
+        previous.push({ id: pl.id, tag: pl.tag ?? null });
+        const clean = it.tag ? cleanPlacementTag(it.tag) : undefined;
+        const edited = withoutAuto({ ...pl });
+        if (clean) edited.tag = clean;
+        else delete edited.tag;
+        return edited;
+      });
+      return { previous };
+    },
+    (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_TAG_REFUSAL : null)
   );
 }
 

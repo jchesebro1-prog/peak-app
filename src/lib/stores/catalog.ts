@@ -5,6 +5,7 @@ import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
 import type { PortalVisibility } from "@/lib/portal-visibility";
 import type { RackPartFacts } from "@/lib/rack/types";
+import type { TagFields } from "@/lib/design/conduit-riser/tags";
 import { orderNumberOf } from "@/lib/catalog-rename/sku";
 import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
 
@@ -218,6 +219,10 @@ export type CatalogPart = {
    *  is numbered. Absent = use the type's. Written ONLY through mergeUpsert
    *  (the part editor) — no importer, enricher or price-book patch carries it. */
   designatorCode?: string;
+  /** #321: the Grid riser tag's per-part defaults (BOX · FACE · MOUNT · HT · P/D);
+   *  a placement overrides per field. Absent = none. Written ONLY through
+   *  mergeUpsert (the part editor) — no importer or enricher carries it. */
+  tagDefaults?: TagFields;
 } & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
 /** All parts (port of window.MASTER_CATALOG reads). */

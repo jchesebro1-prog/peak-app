@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { cleanPlacementTag, type PlacementTag } from "@/lib/design/conduit-riser/tags";
 import { clamp01, findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
 import { clampConfigDims, venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
 import { clampHouseFieldsFor } from "@/lib/design/venue-templates/house-dims";
@@ -27,6 +28,7 @@ import {
   setPlacementsDesignator,
   renumberDesignators,
   pastePlacements,
+  setPlacementsTag,
   restoreItems,
   type GridPlacement,
   type GridRoute,
@@ -879,7 +881,7 @@ export async function pastePlacementsAction(
     sheetId: string;
     page: number;
     optionId: string;
-    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number }[];
+    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag }[];
     routeIds: string[];
   }
 ): Promise<{ ok: true; placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | { ok: false; error: string }> {
@@ -892,6 +894,7 @@ export async function pastePlacementsAction(
         isObj(it) && isStr(it.srcId) && isFiniteNum(it.x) && isFiniteNum(it.y) && isPartId(it.partId) &&
         (it.category === undefined || isStr(it.category)) &&
         (it.qty === undefined || isFiniteNum(it.qty)) &&
+        (it.tag === undefined || isObj(it.tag)) &&
         (it.curtain === undefined || isObj(it.curtain))
     )
   )
@@ -921,6 +924,7 @@ export async function pastePlacementsAction(
       ...(it.category !== undefined ? { category: it.category } : {}),
       ...(it.qty !== undefined ? { qty: it.qty } : {}),
       ...(curtain ? { curtain } : {}),
+      ...(!curtain && it.tag ? { tag: it.tag } : {}),
     });
   }
   const r = await pastePlacements(projectId, {
@@ -960,6 +964,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
   const autoOrigin = raw.autoOrigin === undefined ? null : sanitizeAutoOrigin(raw.autoOrigin);
   // #320: undo restore keeps the designator; a curtain never carries one.
   const designator = curtain ? null : cleanDesignator(raw.designator);
+  // #321: riser tag overrides come back through cleanPlacementTag; never on a curtain.
+  const tag = curtain ? undefined : cleanPlacementTag(raw.tag);
   return {
     id: raw.id,
     sheetId: raw.sheetId,
@@ -969,6 +975,7 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
     partId: curtain ? curtain.fabricSku : raw.partId,
     ...(category ? { category } : {}),
     ...(designator ? { designator } : {}),
+    ...(tag ? { tag } : {}),
     ...(curtain ? { curtain } : {}),
     ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
     ...(seededFrom ? { seededFrom } : {}),
@@ -1044,6 +1051,25 @@ export async function setDesignatorsAction(
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   return { ok: true, previous: r.value };
+}
+
+/** Set (or, with null, clear) many devices' riser tag overrides in one write
+ *  (#321). `previous` holds the old tags for undo; curtains are refused (store).
+ *  Each tag is re-cleaned by the store (cleanPlacementTag). */
+export async function setTagFieldsAction(
+  projectId: string,
+  items: { id: string; tag: PlacementTag | null }[]
+): Promise<{ ok: true; previous: { id: string; tag: PlacementTag | null }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (
+    !isStr(projectId) || !Array.isArray(items) ||
+    !items.every((it) => isObj(it) && isStr(it.id) && (it.tag === null || isObj(it.tag)))
+  )
+    return { ok: false, error: BATCH_INVALID };
+  const r = await setPlacementsTag(projectId, items.map((it) => ({ id: it.id, tag: it.tag })));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  return { ok: true, previous: r.value.previous };
 }
 
 function cleanRenumberTarget(raw: unknown): RenumberTarget | null {

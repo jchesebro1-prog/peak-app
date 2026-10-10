@@ -4,6 +4,7 @@
 import { normalizeVisibility } from "@/lib/portal-visibility";
 import { isFabricPart } from "@/lib/fabric-part";
 import { cleanTypeCode } from "@/lib/design/device-types";
+import { cleanTagFields, type TagFields } from "@/lib/design/conduit-riser/tags";
 import { cleanRackFacts, rackFactsFromForm } from "@/lib/rack/part-facts";
 import type { RackPartFacts } from "@/lib/rack/types";
 
@@ -36,6 +37,8 @@ export type OptionalPartFields = {
   flameRating?: string;
   /** #321 — the part's own Grid designator code; blank/invalid clears it. */
   designatorCode?: string;
+  /** #321 — the riser tag defaults; all blank clears them. */
+  tagDefaults?: TagFields;
 } & RackPartFacts;
 
 export const FLAME_RATING_MAX = 120;
@@ -62,6 +65,7 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   }
   if (fd.has("flameRating")) out.flameRating = String(fd.get("flameRating") || "").trim().slice(0, FLAME_RATING_MAX) || undefined;
   if (fd.has("designatorCode")) out.designatorCode = cleanTypeCode(fd.get("designatorCode")) ?? undefined;
+  if (TAG_DEFAULT_KEYS.some((k) => fd.has(`tag_${k}`))) out.tagDefaults = tagDefaultsFromForm(fd);
   if (fd.has("portalVisibility")) {
     const v = normalizeVisibility(fd.get("portalVisibility"));
     out.portalVisibility = v === "auto" ? undefined : v;
@@ -71,6 +75,19 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   const rack = cleanRackFacts(rackFactsFromForm(fd));
   if (rack.ok) Object.assign(out, rack.patch);
   return out;
+}
+
+const TAG_DEFAULT_KEYS = ["box", "face", "mount", "height", "pd"] as const;
+
+/** #321: the part's tag defaults from `tag_*` inputs. A blank field is simply
+ *  not set (a part default has no "deliberate blank"); nothing set → undefined. */
+export function tagDefaultsFromForm(fd: FormData): TagFields | undefined {
+  const raw: Record<string, string> = {};
+  for (const k of TAG_DEFAULT_KEYS) {
+    const v = String(fd.get(`tag_${k}`) ?? "").trim();
+    if (v) raw[k] = v;
+  }
+  return cleanTagFields(raw);
 }
 
 /** #296: server-side gate for the Rack data section. null = fine (or the form
