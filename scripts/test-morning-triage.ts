@@ -344,9 +344,8 @@ export async function triageFeedChecksA(ok: Ok): Promise<void> {
   const TUE_NOON = Date.UTC(2026, 9, 13, 17);
   const NEXT_WEEK = Date.UTC(2026, 9, 20, 17);
   const tk = (id: string, dueAt: number | null, extra: Partial<TaskRecord> & { priority?: string } = {}) => {
-    const { priority, ...rest } = extra;
-    const t = normalizeTask({ id, title: `Task ${id}`, assigneeName: ME.name, dueAt, status: "open", createdAt: 1, ...rest });
-    return priority ? ({ ...t, priority } as TaskRecord) : t; // spec 3's field — normalizeTask doesn't carry it yet
+    // priority is spec 3's field; normalizeTask carries a valid one and drops junk
+    return normalizeTask({ id, title: `Task ${id}`, assigneeName: ME.name, dueAt, status: "open", createdAt: 1, ...extra } as Partial<TaskRecord> & { id: string });
   };
   const asg = (id: string, dueDate: number, extra: Partial<Assignment> = {}): Assignment => ({
     id, title: `Ask ${id}`, assignee: ME.name, createdBy: "Jeff Chesebro", createdAt: 2, dueDate, link: null,

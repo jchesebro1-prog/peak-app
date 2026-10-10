@@ -1,5 +1,6 @@
 import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { tierSizeOf } from "@/lib/task-plan/fields";
+import { autoDueAt } from "@/lib/task-plan/due";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 
 /* ------------------------------------------------------------------ *
@@ -53,8 +54,14 @@ export type Assignment = {
   size?: TaskSize;
 };
 
+/** Drop a stored tier/size that isn't valid (a junk value written outside the stores). */
+function normalizeAssignment(a: Assignment): Assignment {
+  const { priority, size, ...rest } = a;
+  return { ...rest, ...tierSizeOf({ priority, size }) };
+}
+
 export async function allAssignments(): Promise<Assignment[]> {
-  const list = await listDocs<Assignment>("assignments");
+  const list = (await listDocs<Assignment>("assignments")).map(normalizeAssignment);
   return list.sort((a, b) => {
     if (a.done !== b.done) return a.done ? 1 : -1;
     const ad = a.dueDate || Number.MAX_SAFE_INTEGER;
@@ -79,13 +86,14 @@ export async function createAssignment(input: {
   priority?: unknown;
   size?: unknown;
 }): Promise<Assignment> {
+  const at = Date.now();
   const rec: Assignment = {
     id: uid("as-"),
     title: input.title.trim(),
     assignee: input.assignee.trim(),
     createdBy: input.createdBy,
-    createdAt: Date.now(),
-    dueDate: Number(input.dueDate) || 0,
+    createdAt: at,
+    dueDate: autoDueAt(Number(input.dueDate) || 0, !!input.assignee.trim(), at) ?? 0,
     link: input.link || null,
     done: false,
     doneAt: null,
@@ -113,13 +121,18 @@ export async function updateAssignment(
   id: string,
   patch: Partial<Pick<Assignment, "title" | "assignee" | "dueDate" | "link" | "priority" | "size">>
 ): Promise<void> {
+  const { priority, size, ...rest } = patch;
   await patchDoc<Assignment>("assignments", id, (d) => {
-    Object.assign(d, patch);
+    const stored = tierSizeOf(d); // a junk stored tier/size is dropped, not kept
+    delete d.priority;
+    delete d.size;
+    Object.assign(d, rest, stored, tierSizeOf({ priority, size })); // a patch writes tier/size only when valid
   });
 }
 
 export async function getAssignment(id: string): Promise<Assignment | null> {
-  return getDoc<Assignment>("assignments", id);
+  const a = await getDoc<Assignment>("assignments", id);
+  return a ? normalizeAssignment(a) : null;
 }
 
 /** Delete an assignment (soft delete — doc-store tombstone, same as every

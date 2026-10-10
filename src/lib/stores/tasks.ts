@@ -4,6 +4,7 @@ import {
 import type { ProjectTask, ProjectRecord } from "@/lib/stores/projects";
 import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
 import { tierSizeOf } from "@/lib/task-plan/fields";
+import { autoDueAt } from "@/lib/task-plan/due";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 
 /* ============================================================
@@ -402,18 +403,26 @@ export async function getTask(id: string): Promise<TaskRecord | null> {
   return doc ? normalizeTask(doc) : null;
 }
 
+/** Spec 2026-10-09 auto task calendar — a new ASSIGNED task with no due date
+ *  is due in 7 days (an unassigned checklist row isn't planned, and an
+ *  overdue unassigned row would reach every bell). */
+function withAutoDue<T extends Partial<TaskRecord>>(input: T, at: number): T {
+  const assigned = !!(input.assigneeUserId || (input.assigneeName || "").trim());
+  return { ...input, dueAt: autoDueAt(input.dueAt, assigned, at) };
+}
+
 export async function createTask(
   input: Partial<TaskRecord> & { title: string },
   me: { id: string; name: string },
 ): Promise<TaskRecord> {
   const at = now();
   if (input.id) {
-    const t = normalizeTask({ ...input, id: input.id, createdBy: me.name, createdAt: at, updatedAt: at });
+    const t = normalizeTask({ ...withAutoDue(input, at), id: input.id, createdBy: me.name, createdAt: at, updatedAt: at });
     await upsertDoc<TaskRecord>("tasks", t);
     return t;
   }
   return insertWithPrefixedId<TaskRecord>("tasks", "T", 6000, (id) =>
-    normalizeTask({ ...input, id, createdBy: me.name, createdAt: at, updatedAt: at })
+    normalizeTask({ ...withAutoDue(input, at), id, createdBy: me.name, createdAt: at, updatedAt: at })
   );
 }
 
@@ -444,7 +453,7 @@ export async function createAutoTask(
   if (existing) return null;
   const at = now();
   const id = autoTaskId(input.coverageKey);
-  const t = normalizeTask({ ...input, id, createdBy: input.createdBy || "System", createdAt: at, updatedAt: at });
+  const t = normalizeTask({ ...withAutoDue(input, at), id, createdBy: input.createdBy || "System", createdAt: at, updatedAt: at });
   const inserted = await insertDocIfAbsent<TaskRecord>("tasks", t);
   return inserted ? t : null;
 }
@@ -463,8 +472,9 @@ export async function updateTask(
   id: string,
   patch: Partial<Pick<TaskRecord, "title" | "section" | "assigneeUserId" | "assigneeName" | "dueAt" | "notes" | "priority" | "size">>,
 ): Promise<TaskRecord | null> {
+  const { priority, size, ...rest } = patch;
   return patchDoc<TaskRecord>("tasks", id, (t) => {
-    Object.assign(t, patch);
+    Object.assign(t, rest, tierSizeOf({ priority, size })); // tier/size: only a valid value is written
     t.updatedAt = now();
     return t;
   });
