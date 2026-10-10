@@ -51,7 +51,7 @@ import {
   type GeoSearchHit,
 } from "@/lib/geo";
 import type { Office } from "@/lib/settings";
-import { backfillStatus } from "@/lib/address-verify/state";
+import { geocodedStatus } from "@/lib/address-verify/state";
 
 /** Nominatim asks for <= 1 request/second. 1100ms leaves headroom. */
 export const GEOCODE_DELAY_MS = 1100;
@@ -668,11 +668,11 @@ export async function backfillVenueCoords(opts?: {
     for (const r of rows) {
       if (!dryRun) {
         // Address verification (spec 2026-10-09): a geocode verifies only
-        // when the venue's own street line leads with a house number (and
-        // the point is usable); otherwise it is town/street level →
-        // needs_check. precisionOf is NOT the rule: it calls any non-empty
-        // address "building".
-        const status = backfillStatus({ address: r.address, lat: out.lat, lng: out.lng });
+        // when the venue's street line AND the street the geocoder returned
+        // both lead with a house number (and the point is usable); otherwise
+        // it is town/street level → needs_check. precisionOf is NOT the
+        // rule: it calls any non-empty address "building".
+        const status = geocodedStatus(r.address, out.hit);
         await db
           .update(sites)
           .set({

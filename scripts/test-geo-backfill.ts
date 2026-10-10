@@ -29,7 +29,7 @@ import {
 } from "@/lib/geo-backfill";
 import { listUnlocatedVenues, locateVenue } from "@/lib/venue-locate";
 
-type Hit = { lat: number; lng: number; city: string; state: string; road?: string; zip?: string };
+type Hit = { lat: number; lng: number; city: string; state: string; road?: string; zip?: string; noHouse?: boolean };
 
 /** Nominatim answers keyed by a predicate on the decoded URL. */
 const nominatim: Array<{ when: (u: URL) => boolean; hit: Hit }> = [];
@@ -52,8 +52,9 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
             name: "",
             display_name: `${m.hit.city}, ${m.hit.state}`,
             address: {
-              house_number: "1",
-              road: m.hit.road || "Road",
+              // A structured (city-only) lookup answers at town level, as the
+              // real geocoder does: no house number, no road.
+              ...(u.searchParams.has("city") ? {} : { ...(m.hit.noHouse ? {} : { house_number: "1" }), road: m.hit.road || "Road" }),
               city: m.hit.city,
               state: m.hit.state,
               ...(m.hit.zip ? { postcode: m.hit.zip } : {}),
@@ -249,6 +250,20 @@ async function main() {
     assert.ok(typeof suite.geoVerifiedAt === "number" && suite.geoVerifiedBy === null);
     assert.equal(po.geoStatus, "needs_check", "a PO-box (no house number) geocode is needs_check, not verified");
     assert.equal(po.geoVerifiedAt, null);
+  }
+  {
+    // A house-numbered address is not proof the geocoder found the building:
+    // when the returned hit has no house number the fix is street-level.
+    await insertSite("st-ghost", { address: "50 Ghost St", city: "Ghosttown", state: "WI" });
+    nominatim.push({
+      when: (u) => q(u).startsWith("50 ghost st, ghosttown"),
+      hit: { lat: 43.9, lng: -89.9, city: "Ghosttown", state: "Wisconsin", noHouse: true },
+    });
+    await backfillVenueCoords({ limit: 50, dryRun: false, delayMs: 0, skipQueries: skip });
+    const [gh] = await db.select().from(sites).where(eq(sites.id, "st-ghost"));
+    assert.ok(gh.lat, "the street-level hit still stores coordinates");
+    assert.equal(gh.geoStatus, "needs_check", "a hit with no house number is needs_check even when the venue text has one");
+    assert.equal(gh.geoVerifiedAt, null);
   }
   console.log("PASS geo-backfill: street cleanup + PO box precision");
 
@@ -668,10 +683,15 @@ async function main() {
   const othersBefore = await others("st-w1");
   const rs = await locateVenue(
     { siteId: "st-w1", mode: "retry", address: "1302 South Broadway", city: "De Pere", state: "WI", zip: "54115" },
-    { delayMs: 0 }
+    { delayMs: 0, by: "u-fix" }
   );
   assert.ok(rs.ok && rs.source === "routed" && rs.officeName === "Reedsburg", JSON.stringify(rs));
   const [w1] = await db.select().from(sites).where(eq(sites.id, "st-w1"));
+  assert.equal(rs.ok && rs.status, "verified", "a retry whose hit has a house number reports verified");
+  assert.equal(w1.geoStatus, "verified");
+  assert.equal(w1.geoSource, "geocode");
+  assert.equal(w1.geoVerifiedBy, "u-fix", "the person who ran the fix is credited");
+  assert.equal(typeof w1.geoVerifiedAt, "number");
   assert.equal(w1.city, "De Pere");
   assert.equal(w1.zip, "54115");
   assert.equal(w1.lat, "44.4486");
@@ -726,19 +746,57 @@ async function main() {
   assert.equal(w2.state, w2Before.state, "pin leaves state unchanged");
   assert.equal(w2.zip, w2Before.zip, "pin leaves zip unchanged");
   assert.equal(w2.name, w2Before.name, "pin leaves name unchanged");
+  assert.equal(w2.geoStatus, "verified", "a dropped pin is verified");
+  assert.equal(w2.geoSource, "pin");
 
   // pick writes every field
   const w2OthersBeforePick = await others("st-w2");
   const pick = await locateVenue({
     siteId: "st-w2", mode: "pick", address: "W185 S8750 Racine Ave", city: "Muskego", state: "WI",
     zip: "53150", lat: 42.8923, lng: -88.1301,
-  });
+  }, { by: "u-pick" });
   assert.ok(pick.ok);
   assert.equal(await others("st-w2"), w2OthersBeforePick, "pick touches no other row");
   const [w2b] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
   assert.equal(w2b.address, "W185 S8750 Racine Ave");
   assert.equal(w2b.zip, "53150");
   assert.equal(w2b.lng, "-88.1301");
+  assert.equal(w2b.geoStatus, "verified", "a picked suggestion with a house number is verified");
+  assert.equal(w2b.geoSource, "geocode", "a Fix replaces a pin");
+  assert.equal(w2b.geoVerifiedBy, "u-pick");
+
+  {
+    // Pick judges the PICKED suggestion, not the stored address: a town-level
+    // pick on a venue whose stored street has a house number is not a
+    // building fix, and must not erase that street.
+    await insertSite("st-townpick", { address: "123 Main St", city: "Pickville", state: "WI" });
+    const tp = await locateVenue({
+      siteId: "st-townpick", mode: "pick", address: "", city: "Pickville", state: "WI", zip: "", lat: 43.2, lng: -89.2,
+    }, { by: "u-pick" });
+    assert.ok(tp.ok && tp.status === "needs_check" && tp.precision === "city", JSON.stringify(tp));
+    const [tpr] = await db.select().from(sites).where(eq(sites.id, "st-townpick"));
+    assert.equal(tpr.address, "123 Main St", "a town-level pick keeps the stored street");
+    assert.equal(tpr.geoStatus, "needs_check");
+    assert.equal(tpr.geoSource, "geocode");
+    assert.equal(tpr.geoVerifiedBy, null);
+    assert.equal(tpr.geoVerifiedAt, null);
+
+    // Retry judges the geocoder's hit too: typed number, hit without one.
+    await insertSite("st-retryghost", { address: "9 Retry Rd", city: "Retryville", state: "WI" });
+    nominatim.push({
+      when: (u) => q(u).startsWith("9 retry rd, retryville"),
+      hit: { lat: 43.3, lng: -89.3, city: "Retryville", state: "Wisconsin", noHouse: true },
+    });
+    const rg = await locateVenue(
+      { siteId: "st-retryghost", mode: "retry", address: "9 Retry Rd", city: "Retryville", state: "WI", zip: "" },
+      { delayMs: 0, by: "u-fix" }
+    );
+    assert.ok(rg.ok && rg.status === "needs_check", JSON.stringify(rg));
+    const [rgr] = await db.select().from(sites).where(eq(sites.id, "st-retryghost"));
+    assert.equal(rgr.geoStatus, "needs_check");
+    assert.equal(rgr.geoVerifiedBy, null);
+    assert.equal(rgr.geoVerifiedAt, null);
+  }
 
   // validation
   assert.deepEqual(await locateVenue({ siteId: "st-w2", mode: "pin", lat: 91, lng: 0 }), { ok: false, reason: "invalid" });

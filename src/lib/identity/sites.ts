@@ -1,7 +1,7 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
-import { geoStampForSave } from "@/lib/address-verify/state";
+import { geoStampForSave, sameVenueAddress } from "@/lib/address-verify/state";
 import { compareVenueOrder } from "@/lib/venue-types";
 
 /**
@@ -84,8 +84,18 @@ export async function saveSite(
   const [prev] = await db.select().from(sites).where(eq(sites.id, row.id)).limit(1);
   const given = Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined));
   const merged = prev ? { ...prev, ...given } : row;
+  // A caller that changes the address but omits lat/lng must not carry the
+  // old point to the new address: merge them as null so it re-verifies.
+  const moved = !!prev && !sameVenueAddress(prev, merged);
+  const dropCoords = moved && given.lat === undefined && given.lng === undefined;
+  if (dropCoords) Object.assign(merged, { lat: null, lng: null });
   const { stamp, keepPrevCoords } = geoStampForSave(prev ?? null, merged, t);
-  const full = { ...row, ...stamp, ...(keepPrevCoords && prev ? { lat: prev.lat, lng: prev.lng } : {}) };
+  const full = {
+    ...row,
+    ...(dropCoords ? { lat: null, lng: null } : {}),
+    ...stamp,
+    ...(keepPrevCoords && prev ? { lat: prev.lat, lng: prev.lng } : {}),
+  };
   const rest: Partial<NewSiteRow> = { ...full };
   delete rest.id;
   delete rest.createdAt;

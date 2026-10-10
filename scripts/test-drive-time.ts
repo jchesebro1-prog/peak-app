@@ -2,7 +2,7 @@
    (docs/superpowers/specs/2026-10-09-address-verification-drive-time-design.md).
    Chained from test-review-and-spec.ts. Pure rules only so far; later tasks
    add the DB-backed checks here. */
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites } from "@/db/schema";
 import { saveSite } from "@/lib/identity/sites";
@@ -11,6 +11,7 @@ import { locateVenue } from "@/lib/venue-locate";
 import { addressKey, isPhysicalLocation } from "@/lib/address-verify/keys";
 import {
   backfillStatus,
+  geocodedStatus,
   hasHouseNumber,
   geoStampForSave,
   placeAddressState,
@@ -52,6 +53,9 @@ export async function driveTimeStateChecks(ok: Ok): Promise<void> {
     "drive-time: plain, lettered and Waukesha-grid house numbers count");
   ok(!hasHouseNumber("I-94") && !hasHouseNumber("US-14 Frontage Rd") && !hasHouseNumber("CR12") && !hasHouseNumber("Hwy12") && !hasHouseNumber("WI-59") && !hasHouseNumber("Rte9"),
     "drive-time: digit-bearing road lead tokens (I-94, US-14, CR12, Hwy12) are not house numbers");
+  ok(!hasHouseNumber("STH59") && !hasHouseNumber("CTH12 W") && !hasHouseNumber("USH14") && !hasHouseNumber("SH-12") && !hasHouseNumber("IH-35") &&
+     !hasHouseNumber("CT12") && !hasHouseNumber("STH-59 Frontage Rd") && hasHouseNumber("123 Main St") && hasHouseNumber("12 St Marys Rd") && hasHouseNumber("1 Ct St"),
+    "drive-time: Wisconsin road lead tokens (STH59, CTH12, USH14, SH-12) are not house numbers; plain numbers and the word St still are");
   ok(statusOfFreeTextHit({ street: "US Highway 14" }) === "needs_check" && statusOfFreeTextHit({ street: "5th Ave" }) === "needs_check" &&
      statusOfFreeTextHit({ street: "N64W23760 Main St" }) === "verified",
     "drive-time: a road-only free-text hit is needs_check, not verified");
@@ -67,6 +71,12 @@ export async function driveTimeStateChecks(ok: Ok): Promise<void> {
   ok(backfillStatus({ address: "605 Erie Ave", lat: "999", lng: "-87.7" }) === "unresolved" && backfillStatus({ address: "605 Erie Ave", lat: "43.7", lng: "-181" }) === "unresolved" &&
      backfillStatus({ address: "605 Erie Ave", lat: "0", lng: "0" }) === "unresolved" && backfillStatus({ address: "605 Erie Ave", lat: 0, lng: -87.7 }) === "verified",
     "drive-time backfill: out-of-range or exactly (0,0) coordinates are no point; a lone 0 is fine");
+  ok(geocodedStatus("605 Erie Ave", { street: "605 Erie Ave", lat: 43.7, lng: -87.7 }) === "verified" &&
+     geocodedStatus("605 Erie Ave", { street: "Erie Ave", lat: 43.7, lng: -87.7 }) === "needs_check" &&
+     geocodedStatus("605 Erie Ave", { street: "", lat: 43.7, lng: -87.7 }) === "needs_check" &&
+     geocodedStatus("Madison HS", { street: "605 Erie Ave", lat: 43.7, lng: -87.7 }) === "needs_check" &&
+     geocodedStatus("605 Erie Ave", { street: "605 Erie Ave", lat: 0, lng: 0 }) === "unresolved",
+    "drive-time: a fresh geocode verifies only when the asked street AND the returned street have a house number and the point is usable");
   ok(venueGeoStatus({ address: "605 Erie Ave", lat: "43.7", lng: "-87.7", geoStatus: "needs_check" }) === "needs_check" &&
      venueGeoStatus({ address: "605 Erie Ave", lat: "43.7", lng: "-87.7", geoStatus: null }) === "verified",
     "drive-time: a stored status wins; an unstamped row reads through the backfill rule");
@@ -153,6 +163,18 @@ export async function driveTimeVenueStampChecks(ok: Ok): Promise<void> {
     [r] = await db.select().from(sites).where(eq(sites.id, ID));
     ok(r.geoStatus === "unresolved" && r.geoSource === null, "drive-time saveSite: editing the address resets to unresolved");
 
+    // A save that omits lat/lng while changing the address must not carry the
+    // old point to the new address: coordinates reset, verification with them.
+    await db.update(sites).set({ geoStatus: "verified", geoSource: "geocode", address: "605 Erie Ave", lat: "43.75", lng: "-87.71" }).where(eq(sites.id, ID));
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    const noCoords: Record<string, unknown> = { ...r, address: "1 New St" };
+    delete noCoords.lat;
+    delete noCoords.lng;
+    await saveSite(noCoords as Parameters<typeof saveSite>[0]);
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(r.lat === null && r.lng === null && r.geoStatus === "unresolved" && r.geoSource === null,
+      "drive-time saveSite: an address edit that omits lat/lng resets coordinates and verification (never verified at the old point)");
+
     // Backfill: only NULL rows, idempotent.
     await db.update(sites).set({ geoStatus: null, geoSource: null, address: "605 Erie Ave", lat: "43.75", lng: "-87.71" }).where(eq(sites.id, ID));
     const first = await ensureVenueGeoStatus();
@@ -160,6 +182,21 @@ export async function driveTimeVenueStampChecks(ok: Ok): Promise<void> {
     ok(first.stamped >= 1 && r.geoStatus === "verified" && r.geoSource === "geocode", "drive-time backfill: an unstamped building-level venue becomes verified");
     const second = await ensureVenueGeoStatus();
     ok(second.stamped === 0, "drive-time backfill: a second run stamps nothing");
+
+    // Chunked: three unstamped rows, chunk of 2 → one call stamps all three.
+    const extra = ["TESTdrive:site-b1", "TESTdrive:site-b2", "TESTdrive:site-b3"];
+    try {
+      for (const id of extra) {
+        await saveSite({ id, companyId: CO, name: id, address: "9 Chunk St", city: "Sheboygan", state: "WI", lat: "43.75", lng: "-87.71", venueKind: "proscenium" });
+        await db.update(sites).set({ geoStatus: null, geoSource: null }).where(eq(sites.id, id));
+      }
+      const chunked = await ensureVenueGeoStatus({ chunk: 2 });
+      const left = await db.select().from(sites).where(inArray(sites.id, extra));
+      ok(chunked.stamped >= 3 && left.length === 3 && left.every((x) => x.geoStatus === "verified"),
+        "drive-time backfill: a call loops in chunks until the NULL rows are exhausted");
+    } finally {
+      await db.delete(sites).where(inArray(sites.id, extra));
+    }
   } finally {
     globalThis.fetch = realFetch;
     await db.delete(sites).where(eq(sites.id, ID));

@@ -27,7 +27,7 @@ import {
   route,
   type TravelSource,
 } from "@/lib/geo";
-import { backfillStatus } from "@/lib/address-verify/state";
+import { geocodedStatus, hasHouseNumber } from "@/lib/address-verify/state";
 import type { GeoStatus } from "@/lib/address-verify/types";
 import { geocodeVenue, newGeocodeCtx, type GeocodeFailure, type GeocodePrecision } from "@/lib/geo-backfill";
 
@@ -178,6 +178,9 @@ export async function locateVenue(
   let lat: number;
   let lng: number;
   let precision: GeocodePrecision;
+  // The street the resulting fix is judged on (see geocodedStatus).
+  let askedStreet = "";
+  let hitStreet = "";
   const set: Partial<typeof sites.$inferInsert> = { updatedAt: Date.now() };
 
   if (input.mode === "retry") {
@@ -192,6 +195,8 @@ export async function locateVenue(
     lat = out.lat;
     lng = out.lng;
     precision = out.precision;
+    askedStreet = fields.address;
+    hitStreet = out.hit.street || "";
     Object.assign(set, {
       address: orNull(fields.address),
       city: orNull(fields.city),
@@ -209,14 +214,18 @@ export async function locateVenue(
       // human picked the PLACE, not necessarily a corrected address) must
       // not wipe a real stored value down to NULL or truncate it.
       const pickedStreet = clip(input.address);
-      const finalStreet = /\d/.test(pickedStreet) ? pickedStreet : row.address || "";
       Object.assign(set, {
         address: /\d/.test(pickedStreet) ? pickedStreet : row.address,
         city: clip(input.city, 100) || row.city,
         state: clip(input.state, 40) || row.state,
         zip: clip(input.zip, 20) || row.zip,
       });
-      precision = /\d/.test(finalStreet) ? "building" : "city";
+      // Judged on the PICKED suggestion, never the stored address: a
+      // town-level pick on a venue that already has a street is not a
+      // building fix.
+      askedStreet = pickedStreet;
+      hitStreet = pickedStreet;
+      precision = hasHouseNumber(pickedStreet) ? "building" : "city";
     } else {
       // pin: a human placed the exact point on the map.
       precision = "building";
@@ -227,10 +236,11 @@ export async function locateVenue(
 
   // Address verification (spec 2026-10-09). A Fix is deliberate, so it may
   // replace a pin; a dropped pin is always verified. retry/pick verify only
-  // when the venue's resulting street line has a house number, and are
-  // credited to the person who ran them when they verify.
-  const finalAddress = typeof set.address === "string" ? set.address : set.address === null ? "" : row.address || "";
-  const status: GeoStatus = input.mode === "pin" ? "verified" : backfillStatus({ address: finalAddress, lat, lng });
+  // when the street asked for AND the street the geocoder (or the human's
+  // pick) returned both lead with a house number, and are credited to the
+  // person who ran them when they verify.
+  const status: GeoStatus =
+    input.mode === "pin" ? "verified" : geocodedStatus(askedStreet, { street: hitStreet, lat, lng });
   Object.assign(set, {
     geoStatus: status,
     geoSource: input.mode === "pin" ? "pin" : "geocode",

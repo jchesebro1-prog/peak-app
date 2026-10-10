@@ -14,8 +14,11 @@ export function isGeoSource(v: unknown): v is GeoSource {
 }
 
 /** A numbered-road lead token with its digits attached: "I-94", "US-14",
- *  "WI59", "CR12", "Hwy12", "Rte9", "CO-12". The digits name the road. */
-const ROAD_PREFIX_RE = /^(i|us|wi|sr|cr|hwy|rte?|co)-?\d/i;
+ *  "WI59", "CR12", "Hwy12", "Rte9", "CO-12", and the Wisconsin forms "STH59",
+ *  "CTH12", "USH14", "SH-12", "IH-35", "CT12", "ST12". The digits name the
+ *  road. Only the first token is tested and only when a digit follows the
+ *  prefix, so "St" as a word and plain house numbers are untouched. */
+const ROAD_PREFIX_RE = /^(i|us|wi|sr|cr|hwy|rte?|co|sth|cth|ush|sh|ih|ct|st)-?\d/i;
 const ORDINAL_RE = /^\d+(st|nd|rd|th)$/i;
 
 /**
@@ -30,6 +33,19 @@ export function hasHouseNumber(street: string): boolean {
   const first = String(street ?? "").trim().split(/\s+/)[0] ?? "";
   if (!first || ROAD_PREFIX_RE.test(first) || ORDINAL_RE.test(first)) return false;
   return /\d/.test(first);
+}
+
+/** A geocoder fix is building-level only when BOTH the street we asked for
+ *  and the street the geocoder actually returned lead with a house number
+ *  (the address text alone is not proof it found the building) and the point
+ *  is usable. A usable point without that is town/street level → needs_check;
+ *  no usable point → unresolved. */
+export function geocodedStatus(
+  askedStreet: string | null | undefined,
+  hit: { street?: string | null; lat: unknown; lng: unknown }
+): GeoStatus {
+  if (!pointOf(hit.lat, hit.lng)) return "unresolved";
+  return hasHouseNumber(t(askedStreet)) && hasHouseNumber(t(hit.street)) ? "verified" : "needs_check";
 }
 
 /** Free text has no stated city to gate on: a hit verifies only when it
@@ -147,6 +163,12 @@ export type StampedSpot = VenueSpot & {
 };
 
 const lower = (v: unknown) => t(v).toLowerCase();
+
+/** Same street/city/state (case-insensitive, trimmed; zip edits don't move a
+ *  venue). The one comparison saveSite and geoStampForSave both use. */
+export function sameVenueAddress(a: VenueSpot, b: VenueSpot): boolean {
+  return lower(a.address) === lower(b.address) && lower(a.city) === lower(b.city) && lower(a.state) === lower(b.state);
+}
 const sameNum = (a: LatLng | null, b: LatLng | null) =>
   (!a && !b) || (!!a && !!b && Math.abs(a.lat - b.lat) < 1e-7 && Math.abs(a.lng - b.lng) < 1e-7);
 
@@ -164,8 +186,7 @@ export function geoStampForSave(
   next: VenueSpot,
   now: number
 ): { stamp: GeoStamp; keepPrevCoords: boolean } {
-  const sameAddress =
-    !!prev && lower(prev.address) === lower(next.address) && lower(prev.city) === lower(next.city) && lower(prev.state) === lower(next.state);
+  const sameAddress = !!prev && sameVenueAddress(prev, next);
   const pc = prev ? coordsOf(prev) : null;
   const nc = coordsOf(next);
   const prevStamp: GeoStamp | null =
