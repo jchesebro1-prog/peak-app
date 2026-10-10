@@ -12,7 +12,7 @@ export type OpenWork = { key: string; title: string };
  * Earliest to-do (since, then key) keeps the row. Order of survivors is kept.
  */
 export function collapseDuplicates(cands: readonly TriageCandidate[], openWork: readonly OpenWork[]): TriageCandidate[] {
-  const out = cands.map((c) => ({ ...c, also: [...(c.also ?? [])] }));
+  const out = cands.map((c) => ({ ...c, also: [...(c.also ?? [])], alsoKeys: [...(c.alsoKeys ?? [])] }));
   const byKey = new Map(out.map((c) => [c.key, c]));
   // Every open-work key per normalized title (off-list keys included), so a
   // duplicate whose first match is off the list still reaches an on-list one.
@@ -36,6 +36,8 @@ export function collapseDuplicates(cands: readonly TriageCandidate[], openWork: 
     const line = `Also mentioned in ${c.mention || "a meeting"}`;
     // A repeat from the same meeting adds nothing the kept row doesn't already say.
     const addLine = (kept: (typeof out)[number] | undefined) => {
+      // A folded CALL to-do is remembered by key even when it adds no line: dismissing the kept call row dismisses it too.
+      if (kept?.source === "call") kept.alsoKeys.push(c.key);
       if (kept && c.mention && kept.mention === c.mention) return;
       kept?.also.push(line);
     };

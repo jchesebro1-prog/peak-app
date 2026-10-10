@@ -1,4 +1,4 @@
-import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
+import type { SiteVisit } from "@/lib/stores/site-visits";
 import { sameName } from "@/lib/quote-approval-rules";
 import { dayKey } from "../clock";
 import { triageKey } from "../keys";
@@ -43,7 +43,7 @@ export function selectVisits(visits: readonly SiteVisit[], flags: ReadonlyMap<st
 export const visitsFeed: TriageFeed = {
   source: "visit",
   async load(ctx) {
-    const mine = todaysVisitsFor(await allVisits(), ctx.me.name, ctx.now);
+    const mine = todaysVisitsFor(await ctx.data.visits(), ctx.me.name, ctx.now);
     const flags = mine.length ? await ctx.hooks.visitFlags(mine.map((v) => v.id), ctx.now) : new Map<string, readonly string[]>();
     return { candidates: selectVisits(mine, flags) };
   },

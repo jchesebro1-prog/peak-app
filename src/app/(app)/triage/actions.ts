@@ -14,6 +14,7 @@ import { donePlan } from "@/lib/triage/actions-plan";
 import { slotAt, snapshotId } from "@/lib/triage/clock";
 import { snoozeUntil } from "@/lib/triage/view";
 import { setMark } from "@/lib/triage/store";
+import { dismissListedRow, listedRow } from "@/lib/triage/listed";
 
 /**
  * Morning triage row actions (spec "Row actions"). Marks are always the
@@ -24,6 +25,17 @@ import { setMark } from "@/lib/triage/store";
 type Result = { ok: true; open?: string } | { ok: false; error: string };
 
 const GONE = "That item no longer exists.";
+const NOT_LISTED = "That item isn't on your list.";
+
+/** Every action works only on a row of the signed-in user's own snapshot for today (morning or midday). */
+async function listed(userId: string, key: string, now: number) {
+  try {
+    return await listedRow(userId, key, now);
+  } catch (error) {
+    console.error("triage list check failed", error);
+    return undefined; // the snapshot couldn't be read: not "not listed"
+  }
+}
 
 function currentSlot(userId: string) {
   const now = Date.now();
@@ -40,9 +52,12 @@ export async function triageDoneAction(key: string): Promise<Result> {
   const user = await requireUser();
   const k = String(key || "");
   const plan = donePlan(k);
-  if (!plan) return { ok: false, error: "That item isn't on your list." };
-  if (plan.kind === "open") return { ok: true, open: plan.href };
+  if (!plan) return { ok: false, error: NOT_LISTED };
   const cur = currentSlot(user.id);
+  const row = await listed(user.id, k, cur.now);
+  if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
+  if (!row) return { ok: false, error: NOT_LISTED };
+  if (plan.kind === "open") return { ok: true, open: plan.href };
   try {
     // A record deleted since the snapshot was built: say so, never record a done mark for it.
     if (plan.kind === "task") {
@@ -66,8 +81,11 @@ export async function triageDoneAction(key: string): Promise<Result> {
 export async function triageSnoozeAction(key: string): Promise<Result> {
   const user = await requireUser();
   const k = String(key || "");
-  if (!parseTriageKey(k)) return { ok: false, error: "That item isn't on your list." };
+  if (!parseTriageKey(k)) return { ok: false, error: NOT_LISTED };
   const cur = currentSlot(user.id);
+  const row = await listed(user.id, k, cur.now);
+  if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
+  if (!row) return { ok: false, error: NOT_LISTED };
   try {
     await setMark({ userId: user.id, key: k, kind: "snooze", at: cur.now, snapshotId: cur.snapshotId, until: snoozeUntil(cur.day) });
   } catch (error) {
@@ -82,14 +100,20 @@ export async function triageDismissAction(key: string): Promise<Result> {
   const user = await requireUser();
   const k = String(key || "");
   const parsed = parseTriageKey(k);
-  if (!parsed) return { ok: false, error: "That item isn't on your list." };
+  if (!parsed) return { ok: false, error: NOT_LISTED };
   const cur = currentSlot(user.id);
+  const row = await listed(user.id, k, cur.now);
+  if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
+  if (!row) return { ok: false, error: NOT_LISTED };
   try {
-    if (parsed.source === "call" && parsed.part) {
-      const rec = await getRecording(parsed.id);
-      if (rec) await dismissActionItem(rec, parsed.part);
-    }
-    await setMark({ userId: user.id, key: k, kind: "dismiss", at: cur.now, snapshotId: null, until: null });
+    // A surviving call row also dismisses the call to-dos folded into it.
+    await dismissListedRow(row, {
+      dismissItem: async (meetingId, itemKey) => {
+        const rec = await getRecording(meetingId);
+        if (rec) await dismissActionItem(rec, itemKey);
+      },
+      mark: async (key) => void (await setMark({ userId: user.id, key, kind: "dismiss", at: cur.now, snapshotId: null, until: null })),
+    });
   } catch (error) {
     console.error("triageDismissAction failed", error);
     return { ok: false, error: error instanceof Error && error.message ? error.message : "Couldn’t dismiss that — please try again." };
@@ -106,6 +130,9 @@ export async function triageReassignAction(key: string, assignee: string): Promi
   const target = (await activeUsers()).find((u) => sameName(u.name, String(assignee || "")));
   if (!target) return { ok: false, error: "Pick a teammate." };
   const cur = currentSlot(user.id);
+  const row = await listed(user.id, k, cur.now);
+  if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
+  if (!row) return { ok: false, error: NOT_LISTED };
   try {
     await assignThread(parsed.id, target.name);
     await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });

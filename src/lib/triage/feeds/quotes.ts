@@ -1,4 +1,4 @@
-import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
+import type { Quote } from "@/lib/stores/quotes";
 import { quoteAwaitsApprovalBy, quoteBackFromReview } from "@/lib/quote-approval-rules";
 import { portalBellGroups } from "@/lib/portal-bell";
 import { quoteBuilderHref } from "@/lib/quote-links";
@@ -47,6 +47,6 @@ export function selectQuotes(quotes: readonly Quote[], ctx: Pick<FeedCtx, "me" |
 export const quotesFeed: TriageFeed = {
   source: "quote",
   async load(ctx) {
-    return { candidates: selectQuotes(await allQuotes(), ctx) };
+    return { candidates: selectQuotes(await ctx.data.quotes(), ctx) };
   },
 };

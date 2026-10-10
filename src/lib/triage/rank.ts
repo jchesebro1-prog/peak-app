@@ -43,6 +43,14 @@ export function pointsFor(f: TriageFact): number {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** 45 → "45 min", 180 → "3h", 90 → "1h 30m": whole hours floor, the remainder shows as minutes (never rounds up past the real time left). */
+function dueIn(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 export function factLabel(f: TriageFact): string {
   switch (f.kind) {
     case "lead_sla_breached":
@@ -56,7 +64,7 @@ export function factLabel(f: TriageFact): string {
     case "quote_awaiting_approval":
       return "Waiting on your approval";
     case "lead_sla_due_soon":
-      return `First response due in ${f.minutes < 60 ? `${f.minutes} min` : `${Math.round(f.minutes / 60)}h`}`;
+      return `First response due in ${dueIn(f.minutes)}`;
     case "task_due_today":
       return "Due today";
     case "call_todo":

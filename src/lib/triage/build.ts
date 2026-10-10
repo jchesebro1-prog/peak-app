@@ -26,16 +26,19 @@ export async function gatherCandidates(
   return { candidates, openWork, errors };
 }
 
-/** Collapse duplicate call to-dos → rank → one row per key (the highest-ranked wins). */
+/** A stored snapshot keeps this many rows at most (after ranking): the list is for a morning, not an archive. */
+export const MAX_SNAPSHOT_ROWS = 150;
+
+/** Collapse duplicate call to-dos → rank → one row per key (the highest-ranked wins) → the top MAX_SNAPSHOT_ROWS. */
 export function toSnapshotRows(candidates: readonly TriageCandidate[], openWork: readonly OpenWork[]): SnapshotRow[] {
   const seen = new Set<string>();
   const rows: SnapshotRow[] = [];
   for (const c of rankCandidates(collapseDuplicates(candidates, openWork))) {
     if (seen.has(c.key)) continue;
     seen.add(c.key);
-    rows.push({ key: c.key, source: c.source, title: c.title, sub: c.sub, href: c.href, score: c.score, reason: c.reason, callLine: c.callLine ?? null, also: c.also ?? [] });
+    rows.push({ key: c.key, source: c.source, title: c.title, sub: c.sub, href: c.href, score: c.score, reason: c.reason, callLine: c.callLine ?? null, also: c.also ?? [], alsoKeys: c.alsoKeys ?? [] });
   }
-  return rows;
+  return rows.slice(0, MAX_SNAPSHOT_ROWS);
 }
 
 export async function buildRows(ctx: FeedCtx, feeds: readonly TriageFeed[] = FEEDS): Promise<{ rows: SnapshotRow[]; errors: FeedError[] }> {

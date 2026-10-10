@@ -95,7 +95,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   // try/catch like the other riders.
   let triage: Awaited<ReturnType<typeof buildSlotForAll>> | { error: string };
   try {
-    triage = await buildSlotForAll("morning", Date.now());
+    // Stop starting users 30 s in so the photo sync below keeps its window; whoever is skipped builds lazily on first view.
+    triage = await buildSlotForAll("morning", Date.now(), { deadlineMs: started + 30_000 });
   } catch (err) {
     triage = { error: (err as Error).message };
   }

@@ -1,5 +1,5 @@
-import { allTasks, type TaskRecord } from "@/lib/stores/tasks";
-import { allAssignments, type Assignment } from "@/lib/stores/assignments";
+import type { TaskRecord } from "@/lib/stores/tasks";
+import type { Assignment } from "@/lib/stores/assignments";
 import { assignmentHref } from "@/lib/queue";
 import { sameName } from "@/lib/quote-approval-rules";
 import { dayDiff, dayKey, nextDayKey } from "../clock";
@@ -67,7 +67,7 @@ export function selectTasks(
 export const tasksFeed: TriageFeed = {
   source: "task",
   async load(ctx) {
-    const [tasks, assignments, atRisk] = await Promise.all([allTasks(), allAssignments(), ctx.hooks.atRisk(ctx.me, ctx.now)]);
+    const [tasks, assignments, atRisk] = await Promise.all([ctx.data.tasks(), ctx.data.assignments(), ctx.hooks.atRisk(ctx.me, ctx.now)]);
     return selectTasks({ tasks, assignments, atRisk }, ctx);
   },
 };

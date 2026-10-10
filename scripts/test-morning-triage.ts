@@ -49,11 +49,13 @@ import { normalizeTask, setTaskStatus, type TaskRecord } from "@/lib/stores/task
 import type { Assignment } from "@/lib/stores/assignments";
 import type { LeadRecord } from "@/lib/stores/leads";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
-import { getSnapshot, insertSnapshotIfAbsent, markId, saveSnapshot, setMark } from "@/lib/triage/store";
+import { getSnapshot, insertSnapshotIfAbsent, markId, marksFor, saveSnapshot, setMark } from "@/lib/triage/store";
 import { buildSlotForAll, computeSnapshot, LIVE_NOTE, loadTriageView, type TriageView } from "@/lib/triage/service";
 import { closedKeys } from "@/lib/triage/liveness";
 import { markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
-import { gatherCandidates, toSnapshotRows } from "@/lib/triage/build";
+import { gatherCandidates, MAX_SNAPSHOT_ROWS, toSnapshotRows } from "@/lib/triage/build";
+import { createFeedData, type FeedDataSources } from "@/lib/triage/feeds/data";
+import { dismissListedRow, foldedCallKeys, listedRow } from "@/lib/triage/listed";
 import { NO_HOOKS } from "@/lib/triage/hooks";
 import type { TriageFeed } from "@/lib/triage/feeds/context";
 
@@ -209,6 +211,9 @@ export async function triageRankChecks(ok: Ok): Promise<void> {
     factLabel({ kind: "customer_waiting", businessDays: 1 }) === "Customer waiting 1 business day" &&
       factLabel({ kind: "lead_sla_due_soon", minutes: 45 }) === "First response due in 45 min" &&
       factLabel({ kind: "lead_sla_due_soon", minutes: 180 }) === "First response due in 3h" &&
+      factLabel({ kind: "lead_sla_due_soon", minutes: 60 }) === "First response due in 1h" &&
+      factLabel({ kind: "lead_sla_due_soon", minutes: 90 }) === "First response due in 1h 30m" &&
+      factLabel({ kind: "lead_sla_due_soon", minutes: 119 }) === "First response due in 1h 59m" &&
       factLabel({ kind: "visit_today", startAt: MON_10 }) === "Site visit today 10:00 AM",
     "rank: fact labels read plainly"
   );
@@ -257,6 +262,7 @@ export async function triageMatchChecks(ok: Ok): Promise<void> {
   ok((out[0].also ?? []).join("|") === "Also mentioned in Walkthrough (Oct 7)", "dedupe: a to-do matching an open task shows on that task's row");
   ok((out[1].also ?? []).join("|") === "Also mentioned in Call B (Oct 9)", "dedupe: a later duplicate to-do folds into the earliest one");
   ok(!out.some((c) => c.key === "call:R4:k3"), "dedupe: a to-do already tracked as open work off the list is not repeated");
+  ok((out[1].alsoKeys ?? []).join("|") === "call:R3:k2" && (out[0].alsoKeys ?? []).length === 0, "dedupe: a surviving CALL row carries the keys of the call to-dos folded into it; a task row does not");
   const blank = collapseDuplicates(
     [cand("call:R5:k", "call", [], 1, { title: "the to", mention: "X" }), cand("call:R6:k", "call", [], 2, { title: "a the", mention: "Y" })],
     []
@@ -291,6 +297,7 @@ export async function triageMatchChecks(ok: Ok): Promise<void> {
     sameMeeting.length === 1 && sameMeeting[0].key === "call:R8:k1" && (sameMeeting[0].also ?? []).length === 0,
     "dedupe: a repeat from the same meeting drops with no 'Also mentioned in' line for that meeting"
   );
+  ok((sameMeeting[0].alsoKeys ?? []).join("|") === "call:R8:k2", "dedupe: a same-meeting repeat is still remembered by key (Not mine dismisses it too)");
 }
 
 export async function triageFeedChecksA(ok: Ok): Promise<void> {
@@ -523,7 +530,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   );
 
   /* ---- pure: build ---- */
-  const g = await gatherCandidates({ me: ME, now: MON_10, users: [], hooks: NO_HOOKS }, [
+  const g = await gatherCandidates({ me: ME, now: MON_10, users: [], hooks: NO_HOOKS, data: createFeedData() }, [
     { source: "lead", load: async () => ({ candidates: [cand("lead:a", "lead", [{ kind: "lead_stale", days: 6 }])] }) },
     { source: "email", load: async () => { throw new Error("boom"); } },
     { source: "visit", load: (() => { throw new Error("sync boom"); }) as TriageFeed["load"] },
@@ -538,6 +545,11 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
     []
   );
   ok(rows.map((r) => r.key).join(",") === "lead:a,task:t" && rows[0].score === 60 && rows[0].reason === "First response overdue" && Array.isArray(rows[0].also), "build: rows are ranked, one per key, with score and reason");
+  const many = Array.from({ length: 200 }, (_, i) => cand(`lead:cap${String(i).padStart(3, "0")}`, "lead", [{ kind: "lead_stale", days: 6 }], 1_000 + i));
+  many.push(cand("lead:capTop", "lead", [{ kind: "lead_sla_breached" }], 5));
+  const capped = toSnapshotRows(many, []);
+  ok(MAX_SNAPSHOT_ROWS === 150 && capped.length === 150 && capped[0].key === "lead:capTop" && new Set(capped.map((r) => r.key)).size === 150, "build: a stored snapshot keeps the top 150 rows after ranking");
+  ok(toSnapshotRows(many.slice(0, 40), []).length === 40, "build: under the cap nothing is dropped");
 
   /* ---- pure: liveness ---- */
   const lrows = ["task:T1", "task:T2", "asg:A1", "email:C1", "email:C2", "email:C3", "call:R1:k1", "call:R1:k2", "quote:Q1", "lead:L1"].map(row);
@@ -648,6 +660,104 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   const res = await buildSlotForAll("midday", MON_12, { users: [U3], feeds });
   const got = await getSnapshot(s3);
   ok(res.built === 1 && res.failed.length === 0 && got?.builtBy === "cron" && got.slot === "midday", "cron: buildSlotForAll writes each user's slot snapshot");
+
+  /* ---- DB: one shared read per collection; deadline; the cron never reorders an opened list ---- */
+  const BU = ["b1", "b2", "b3"].map((s) => ({ id: fixtureId("TRIAGE", s), name: `Triage Batch ${s}`, canApprove: false }));
+  for (const u of BU) registerFixture("triage_snapshots", snapshotId(u.id, "2026-10-12", "midday"));
+  const loads: Record<string, number> = {};
+  const counting = <T>(name: string, v: T[]) => async () => {
+    loads[name] = (loads[name] ?? 0) + 1;
+    return v;
+  };
+  const sources: FeedDataSources = {
+    threads: counting("threads", []),
+    quotes: counting("quotes", []),
+    leads: counting("leads", []),
+    tasks: counting("tasks", []),
+    assignments: counting("assignments", []),
+    recordings: counting("recordings", []),
+    visits: counting("visits", []),
+    flameRenewals: counting("flameRenewals", []),
+    inspectionRenewals: counting("inspectionRenewals", []),
+  };
+  const early = await buildSlotForAll("midday", MON_12, { users: BU, deadlineMs: Date.now() - 1, data: createFeedData(sources) });
+  ok(
+    early.built === 0 && early.skipped.join() === BU.map((u) => u.id).join() && Object.keys(loads).length === 0 && !(await getSnapshot(snapshotId(BU[0].id, "2026-10-12", "midday"))),
+    "cron: a deadline already passed → every user is skipped, nothing is built or read"
+  );
+  const batch = await buildSlotForAll("midday", MON_12, { users: BU, deadlineMs: Date.now() + 600_000, data: createFeedData(sources) });
+  const names = Object.keys(sources);
+  ok(
+    batch.built === 3 && batch.failed.length === 0 && batch.skipped.length === 0 && names.every((n) => loads[n] === 1),
+    `cron: a build for 3 users with the real feeds loads each of the 9 collections exactly once (${names.map((n) => loads[n]).join("/")})`
+  );
+  ok((await getSnapshot(snapshotId(BU[2].id, "2026-10-12", "midday")))?.builtBy === "cron", "cron: each user still gets their own snapshot from the shared read");
+  const twice = createFeedData(sources);
+  await Promise.all([twice.quotes(), twice.quotes(), twice.threads()]);
+  ok(loads.quotes === 2 && loads.threads === 2, "feed data: a loader memoizes per build (a second build reads again; concurrent asks share one read)");
+
+  const U7 = { id: fixtureId("TRIAGE", "u7"), name: "Triage Seven", canApprove: false };
+  const s7 = snapshotId(U7.id, "2026-10-12", "midday");
+  registerFixture("triage_snapshots", s7);
+  const lazy7 = await computeSnapshot(U7, { day: "2026-10-12", slot: "midday" }, MON_12 - 60_000, "lazy", { feeds, users: [] });
+  await insertSnapshotIfAbsent(lazy7);
+  const frozen = await buildSlotForAll("midday", MON_12, { users: [U7], feeds });
+  const after7 = await getSnapshot(s7);
+  ok(
+    frozen.built === 0 && frozen.kept === 1 && after7?.builtBy === "lazy" && after7.builtAt === MON_12 - 60_000 && after7.rows.length === lazy7.rows.length,
+    "cron: a slot someone's lazy view already built is kept as is — an opened list never reorders under them"
+  );
+
+  /* ---- DB: the row actions' guard + Not mine on a folded call row ---- */
+  const U8 = { id: fixtureId("TRIAGE", "u8"), name: "Triage Eight", canApprove: false };
+  const rowOf = (key: string, extra: Partial<SnapshotRow> = {}): SnapshotRow => ({ key, source: parseTriageKey(key)!.source, title: key, sub: "", href: "/", score: 1, reason: "", callLine: null, also: [], ...extra });
+  const s8m = snapshotId(U8.id, "2026-10-12", "morning");
+  const s8n = snapshotId(U8.id, "2026-10-12", "midday");
+  registerFixture("triage_snapshots", s8m);
+  registerFixture("triage_snapshots", s8n);
+  const mk = (id: string, slot: "morning" | "midday", rows: SnapshotRow[]) => ({ id, userId: U8.id, userName: U8.name, day: "2026-10-12", slot, builtAt: MON_10, builtBy: "cron" as const, rows, errors: [] });
+  await saveSnapshot(mk(s8m, "morning", [rowOf("lead:g1"), rowOf("task:g2")]));
+  await saveSnapshot(mk(s8n, "midday", [rowOf("email:g3")]));
+  ok((await listedRow(U8.id, "lead:g1", MON_10))?.key === "lead:g1" && (await listedRow(U8.id, "email:g3", MON_12))?.key === "email:g3", "guard: a key on today's morning or midday snapshot is on my list");
+  ok(
+    (await listedRow(U8.id, "lead:not-listed", MON_10)) === null &&
+      (await listedRow(U8.id, "lead:g1", TUE_8)) === null &&
+      (await listedRow(U.id, "lead:g1", MON_10)) === null,
+    "guard: a key that isn't in my snapshot (forged, yesterday's, someone else's) is refused"
+  );
+  ok((await listedRow(U8.id, "lead:g1", MON_10, async () => ({ id: "x" }) as never)) === null, "guard: a snapshot with no rows array is simply not listing the key");
+
+  const marked: string[] = [];
+  const dismissed: string[] = [];
+  const folded = rowOf("call:RF:a", { source: "call", also: ["Also mentioned in Call B (Oct 9)"], alsoKeys: ["call:RG:b", "call:RF:c", "task:T9"] });
+  ok(foldedCallKeys(folded).join() === "call:RG:b,call:RF:c" && foldedCallKeys(rowOf("task:T1", { alsoKeys: ["call:RG:b"] })).length === 0 && foldedCallKeys(rowOf("call:RF:z", { source: "call" })).length === 0, "dismiss: only a call row's folded call keys count (older rows have none)");
+  await dismissListedRow(folded, {
+    dismissItem: async (id, part) => {
+      dismissed.push(`${id}:${part}`);
+      if (id === "RG") throw new Error("already in the Home Queue");
+    },
+    mark: async (key) => void marked.push(key),
+  });
+  ok(
+    dismissed.join() === "RF:a,RG:b,RF:c" && marked.join() === "call:RF:a,call:RG:b,call:RF:c",
+    "dismiss: Not mine on a surviving call row dismisses and marks every folded call to-do too — one failing never leaves another visible"
+  );
+  const failMarks: string[] = [];
+  let threw = false;
+  try {
+    await dismissListedRow(folded, { dismissItem: async () => { throw new Error("gone"); }, mark: async (key) => void failMarks.push(key) });
+  } catch {
+    threw = true;
+  }
+  ok(threw && failMarks.length === 0, "dismiss: if the row's own recording item can't be dismissed, nothing is marked");
+  const FK = ["call:RF:a", "call:RG:b"].map((k) => `${U8.id}:${k}`);
+  for (const id of FK) registerFixture("triage_marks", id);
+  await dismissListedRow(rowOf("call:RF:a", { source: "call", alsoKeys: ["call:RG:b"] }), {
+    dismissItem: async () => {},
+    mark: async (key) => void (await setMark({ userId: U8.id, key, kind: "dismiss", at: MON_10, snapshotId: null, until: null })),
+  });
+  const vis = visibleRows([rowOf("call:RF:a", { source: "call" }), rowOf("call:RG:b", { source: "call" }), rowOf("call:RF:keep", { source: "call" })], await marksFor(U8.id), new Set(), { snapshotId: s8m, day: "2026-10-12", slot: "morning" });
+  ok(vis.map((r) => r.key).join() === "call:RF:keep", "dismiss: the folded call keys are permanently hidden alongside the surviving row");
 }
 
 export async function triageCronChecks(ok: Ok): Promise<void> {
@@ -663,6 +773,8 @@ export async function triageCronChecks(ok: Ok): Promise<void> {
     "cron: two once-a-day entries (Hobby-safe) — Gmail sync at 12:00 UTC, triage midday at 17:00 UTC"
   );
   const gmail = readFileSync("src/app/api/gmail/sync/route.ts", "utf8");
+  ok(/buildSlotForAll\("morning", Date\.now\(\), \{ deadlineMs: started \+ 30_000 \}\)/.test(gmail), "cron: the Gmail rider stops starting users 30 s in so the photo sync keeps its window");
+  ok(/deadlineMs: started \+ 50_000/.test(route) && /try \{[\s\S]*buildSlotForAll[\s\S]*\} catch[\s\S]*\{ error: [\s\S]*status: 500/.test(route), "cron: /api/triage/build stops at 50 s and answers a failed build with JSON { error } and status 500");
   ok(/buildSlotForAll\("morning", /.test(gmail) && gmail.indexOf('buildSlotForAll("morning"') < gmail.indexOf("syncDrivePhotos(budget)") && /triage = \{ error:/.test(gmail), "cron: the morning list rides the daily Gmail cron, own try/catch, before the photo budget");
   const mw = readFileSync("src/middleware.ts", "utf8");
   const m = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
@@ -679,6 +791,7 @@ export async function triageActionChecks(ok: Ok): Promise<void> {
   const actions = readFileSync("src/app/(app)/triage/actions.ts", "utf8");
   const exportsN = (actions.match(/export async function /g) || []).length;
   ok(actions.startsWith('"use server";') && exportsN === 4 && (actions.match(/await requireUser\(\)/g) || []).length === exportsN, "actions: a server-action file; every action calls requireUser() first");
+  ok((actions.match(/await listed\(user\.id, k, cur\.now\)/g) || []).length === 4 && (actions.match(/error: NOT_LISTED/g) || []).length >= 4 && /isn't on your list/.test(actions), "actions: done, snooze, dismiss and reassign each confirm the key is on the signed-in user's snapshot first");
   ok(/dismissActionItem\(/.test(actions) && /assignThread\(/.test(actions) && /sameName\(u\.name, /.test(actions), "actions: dismissing a call to-do dismisses it on its recording; reassign only to an active teammate");
   const rowsSrc = readFileSync("src/components/triage/triage-rows.tsx", "utf8");
   const importLines = rowsSrc.split("\n").filter((l) => l.startsWith("import "));
@@ -686,6 +799,9 @@ export async function triageActionChecks(ok: Ok): Promise<void> {
     rowsSrc.startsWith('"use client";') && !importLines.some((l) => /@\/lib\/stores|@\/db|triage\/(service|store|liveness|build|feeds)/.test(l)),
     "rows: the client list imports no store, db or server triage module"
   );
+  ok(/\(r\.also \?\? \[\]\)\.map/.test(rowsSrc) && /r\.callLine\?\.found/.test(rowsSrc) && !/r\.also\.map/.test(rowsSrc), "rows: an older or unexpected row shape (no also / callLine) can't crash the client list");
+  const clockSrc = readFileSync("src/lib/triage/clock.ts", "utf8");
+  ok(!/[\u00A0\u202F]/.test(clockSrc) && clockSrc.includes("[\\u00A0\\u202F]") && !/[\u00A0\u202F]/.test(chicagoTime(MON_10)) && chicagoTime(MON_10) === "10:00 AM", "clock: the narrow-space cleanup uses \\u escapes, not literal characters, and times print with a plain space");
   ok(rowsSrc.includes("Source line not found — open the meeting") && rowsSrc.includes("Snooze till tomorrow") && rowsSrc.includes("Not mine"), "rows: unmatched-line copy and the three actions");
   const page = readFileSync("src/app/(app)/triage/page.tsx", "utf8");
   ok(/requireUser\(\)/.test(page) && /can\("manage_users", user\.roles\)/.test(page) && /readOnly=\{!viewingSelf\}/.test(page), "page: admins can view a teammate's list, read-only");

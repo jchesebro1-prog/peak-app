@@ -1,5 +1,3 @@
-import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
-import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
 import { sameName } from "@/lib/quote-approval-rules";
 import { triageKey, type RenewalKind } from "../keys";
 import type { TriageCandidate, TriageFact } from "../types";
@@ -44,7 +42,7 @@ export function selectRenewals(rows: readonly RenewalRow[], ctx: Pick<FeedCtx, "
 export const renewalsFeed: TriageFeed = {
   source: "renewal",
   async load(ctx) {
-    const [flames, inspections] = await Promise.all([flameRenewals({ dueOnly: true }), inspectionRenewals({ dueOnly: true })]);
+    const [flames, inspections] = await Promise.all([ctx.data.flameRenewals(), ctx.data.inspectionRenewals()]);
     const rows: RenewalRow[] = [
       ...flames.map((j) => ({ kind: "flame" as const, id: j.id, customer: j.customer, venue: j.venue, owner: j.owner, contacted: !!j.renewalOutreach, renewal: j._renewal })),
       ...inspections.map((r) => ({ kind: "inspection" as const, id: r.id, customer: r.customer, venue: r.venue, owner: r.owner, contacted: !!r.renewalOutreach, renewal: r._renewal })),

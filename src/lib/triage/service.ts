@@ -3,10 +3,11 @@ import { can } from "@/lib/team";
 import { buildRows } from "./build";
 import { dayKey, slotAt, snapshotId } from "./clock";
 import { FEEDS } from "./feeds";
-import type { FeedCtx, TriageFeed } from "./feeds/context";
+import type { FeedCtx, FeedData, TriageFeed } from "./feeds/context";
+import { createFeedData } from "./feeds/data";
 import { TRIAGE_HOOKS } from "./hooks";
 import { loadClosedKeys } from "./liveness";
-import { getSnapshot, insertSnapshotIfAbsent, marksFor, saveSnapshot } from "./store";
+import { getSnapshot, insertSnapshotIfAbsent, marksFor } from "./store";
 import type { SnapshotRow, Slot, TriageSnapshot, TriageUser } from "./types";
 import { visibleRows } from "./view";
 
@@ -39,35 +40,57 @@ export async function computeSnapshot(
   at: { day: string; slot: Slot },
   now: number,
   builtBy: TriageSnapshot["builtBy"],
-  opts: { feeds?: readonly TriageFeed[]; users?: Roster } = {}
+  opts: { feeds?: readonly TriageFeed[]; users?: Roster; data?: FeedData } = {}
 ): Promise<TriageSnapshot> {
-  const ctx: FeedCtx = { me, now, users: opts.users ?? (await rosterNow()), hooks: TRIAGE_HOOKS };
+  // No shared loader (the lazy / live single-user path) → this snapshot gets its own.
+  const ctx: FeedCtx = { me, now, users: opts.users ?? (await rosterNow()), hooks: TRIAGE_HOOKS, data: opts.data ?? createFeedData() };
   const { rows, errors } = await buildRows(ctx, opts.feeds ?? FEEDS);
   return { id: snapshotId(me.id, at.day, at.slot), userId: me.id, userName: me.name, day: at.day, slot: at.slot, builtAt: now, builtBy, rows, errors };
 }
 
-/** Cron: (re)build `slot` for today (Chicago) for every active user — or `opts.users`. One user failing never stops the rest. */
+/**
+ * Cron: build `slot` for today (Chicago) for every active user — or `opts.users`.
+ * One user failing never stops the rest. Every user shares one memoized
+ * loader, so each collection is scanned once for the whole run. A user whose
+ * slot already has a snapshot (someone's lazy view got there first) is kept
+ * as is — the cron never reorders a list a person may already be working
+ * (D709). Once `Date.now() >= opts.deadlineMs` it stops before starting the
+ * next user: those ids come back in `skipped` and build lazily on first view.
+ */
 export async function buildSlotForAll(
   slot: Slot,
   now: number,
-  opts: { users?: TriageUser[]; feeds?: readonly TriageFeed[] } = {}
-): Promise<{ built: number; failed: string[] }> {
+  opts: { users?: TriageUser[]; feeds?: readonly TriageFeed[]; deadlineMs?: number; data?: FeedData } = {}
+): Promise<{ built: number; kept: number; failed: string[]; skipped: string[] }> {
   const day = dayKey(now);
   const rows = await activeUsers();
   const users = opts.users ?? rows.map((u) => ({ id: u.id, name: u.name, canApprove: userCan(u, "approve") }));
   const roster: Roster = rows.map((u) => ({ id: u.id, name: u.name }));
+  const data = opts.data ?? createFeedData();
   let built = 0;
+  let kept = 0;
   const failed: string[] = [];
+  const skipped: string[] = [];
   for (const u of users) {
+    if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
+      skipped.push(u.id);
+      continue;
+    }
     try {
-      await saveSnapshot(await computeSnapshot(u, { day, slot }, now, "cron", { feeds: opts.feeds, users: roster }));
-      built++;
+      if (await getSnapshot(snapshotId(u.id, day, slot))) {
+        kept++;
+        continue;
+      }
+      const snap = await computeSnapshot(u, { day, slot }, now, "cron", { feeds: opts.feeds, users: roster, data });
+      // Insert-if-absent: a lazy view that landed during the compute wins.
+      if (await insertSnapshotIfAbsent(snap)) built++;
+      else kept++;
     } catch (err) {
       console.error(`[triage] ${slot} build failed for ${u.name}`, err);
       failed.push(u.name);
     }
   }
-  return { built, failed };
+  return { built, kept, failed, skipped };
 }
 
 export type TriageView = { snapshot: TriageSnapshot; rows: SnapshotRow[]; note: string | null };

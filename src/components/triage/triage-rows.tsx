@@ -95,15 +95,14 @@ export default function TriageRows({ rows, readOnly, teammates }: { rows: Snapsh
               </div>
               {r.sub && <div style={SUB}>{r.sub}</div>}
               {r.reason && <div style={REASON}>{r.reason}</div>}
-              {r.callLine &&
-                (r.callLine.found ? (
-                  <Link href={r.callLine.href} style={LINE}>
-                    {r.callLine.speaker} — “{r.callLine.text}” ({formatTimestamp(r.callLine.start)})
-                  </Link>
-                ) : (
-                  <Link href={r.callLine.href} style={LINE_MISS}>Source line not found — open the meeting</Link>
-                ))}
-              {r.also.map((a) => (
+              {r.callLine?.found ? (
+                <Link href={r.callLine.href} style={LINE}>
+                  {r.callLine.speaker} — “{r.callLine.text}” ({formatTimestamp(r.callLine.start)})
+                </Link>
+              ) : r.callLine?.href ? (
+                <Link href={r.callLine.href} style={LINE_MISS}>Source line not found — open the meeting</Link>
+              ) : null}
+              {(r.also ?? []).map((a) => (
                 <div key={a} style={ALSO}>{a}</div>
               ))}
               {!readOnly && reassignKey === r.key && (

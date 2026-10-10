@@ -1,4 +1,4 @@
-import { allRecordings, type RecordingRecord } from "@/lib/stores/recordings";
+import type { RecordingRecord } from "@/lib/stores/recordings";
 import { matchAssignee } from "@/lib/krisp/derive";
 import { sameName } from "@/lib/quote-approval-rules";
 import { chicagoShortDate } from "../clock";
@@ -105,7 +105,7 @@ export function selectCalls(todos: readonly CallTodo[]): TriageCandidate[] {
 export const recordingsCallSource: CallTodoSource = {
   id: "recordings",
   async load(ctx) {
-    return recordingTodos(await allRecordings(), ctx);
+    return recordingTodos(await ctx.data.recordings(), ctx);
   },
 };
 

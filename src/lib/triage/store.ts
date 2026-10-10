@@ -7,12 +7,12 @@ export async function getSnapshot(id: string): Promise<TriageSnapshot | null> {
   return getDoc<TriageSnapshot>("triage_snapshots", id);
 }
 
-/** The cron's deliberate rebuild: an upsert. */
+/** An unconditional upsert — replaces whatever is stored. Nothing in the app calls it (the cron and the lazy view both insert-if-absent); kept for tests and one-off repair scripts. */
 export async function saveSnapshot(s: TriageSnapshot): Promise<void> {
   await upsertDoc<TriageSnapshot>("triage_snapshots", s);
 }
 
-/** The lazy path: insert only if the slot has no snapshot (false = one already exists). Never overwrites a cron or concurrent snapshot. */
+/** The cron and the lazy path: insert only if the slot has no snapshot (false = one already exists). Never overwrites a stored or concurrent snapshot. */
 export async function insertSnapshotIfAbsent(s: TriageSnapshot): Promise<boolean> {
   return insertDocIfAbsent<TriageSnapshot>("triage_snapshots", s);
 }

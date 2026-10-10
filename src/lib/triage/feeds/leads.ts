@@ -1,4 +1,4 @@
-import { getAll as allLeads, isOpen, slaDeadline, STALE_DAYS, type LeadRecord } from "@/lib/stores/leads";
+import { isOpen, slaDeadline, STALE_DAYS, type LeadRecord } from "@/lib/stores/leads";
 import { sameName } from "@/lib/quote-approval-rules";
 import { displayLeadNumber } from "@/lib/estimate-number";
 import { money } from "@/lib/format";
@@ -61,6 +61,6 @@ export function selectLeads(leads: readonly LeadRecord[], ctx: Pick<FeedCtx, "me
 export const leadsFeed: TriageFeed = {
   source: "lead",
   async load(ctx) {
-    return { candidates: selectLeads(await allLeads(), ctx) };
+    return { candidates: selectLeads(await ctx.data.leads(), ctx) };
   },
 };

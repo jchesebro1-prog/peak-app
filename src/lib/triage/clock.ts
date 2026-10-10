@@ -113,7 +113,7 @@ export function nextMorning(day: string): { day: string; slot: Slot } {
   return { day: nextDayKey(day), slot: "morning" };
 }
 
-const plainSpace = (s: string) => s.replace(/[  ]/g, " ");
+const plainSpace = (s: string) => s.replace(/[\u00A0\u202F]/g, " ");
 
 /** "7:02 AM" in Chicago. */
 export function chicagoTime(ms: number): string {

@@ -78,6 +78,8 @@ export type TriageCandidate = {
   mention?: string;
   /** "Also mentioned in …" lines folded in from collapsed call to-dos. */
   also?: string[];
+  /** Call to-dos only: the keys of the call to-dos folded into this row (so "Not mine" can dismiss them too). */
+  alsoKeys?: string[];
 };
 
 export type RankedCandidate = TriageCandidate & { score: number; reason: string };
@@ -93,6 +95,8 @@ export type SnapshotRow = {
   reason: string;
   callLine: CallLine | null;
   also: string[];
+  /** Keys of the call to-dos folded into this row; absent on snapshots built before this field existed. */
+  alsoKeys?: string[];
 };
 
 export type Slot = "morning" | "midday";

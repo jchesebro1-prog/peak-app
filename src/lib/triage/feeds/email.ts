@@ -1,6 +1,5 @@
-import { getAll as allThreads, waitingSince, type CommThread } from "@/lib/stores/comms";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
-import { getAll as allLeads, isOpen as leadIsOpen } from "@/lib/stores/leads";
+import { waitingSince, type CommThread } from "@/lib/stores/comms";
+import { isOpen as leadIsOpen } from "@/lib/stores/leads";
 import { sameName } from "@/lib/quote-approval-rules";
 import { money } from "@/lib/format";
 import { businessMsBetween } from "../clock";
@@ -66,7 +65,7 @@ export function selectEmail(threads: readonly CommThread[], deals: DealIndex, ct
 export const emailFeed: TriageFeed = {
   source: "email",
   async load(ctx) {
-    const [threads, quotes, leads] = await Promise.all([allThreads(), allQuotes(), allLeads()]);
+    const [threads, quotes, leads] = await Promise.all([ctx.data.threads(), ctx.data.quotes(), ctx.data.leads()]);
     const deals: DealIndex = {
       quotes: new Map(quotes.map((q) => [q.id, { status: q.status, value: Number(q.value) || 0 }])),
       leads: new Map(leads.map((l) => [l.id, { open: leadIsOpen(l), value: Number(l.value) || 0 }])),
