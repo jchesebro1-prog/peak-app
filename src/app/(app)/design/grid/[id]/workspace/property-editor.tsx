@@ -578,6 +578,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
   const [category, setCategory] = useState(sharedCategory ?? "");
   const [replacing, setReplacing] = useState(false);
   const [armDelete, setArmDelete] = useState(false);
+  const [recode, setRecode] = useState(false);
 
   const applyCategory = () => void setCategoryForSelected(category);
 
@@ -626,11 +627,21 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
               type="button"
               style={{ ...BTN, padding: "3px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" }}
               disabled={busy}
-              onClick={() => void renumberDesignators({ ids: pls.filter((pl) => !pl.curtain).map((pl) => pl.id) }, "the selection")}
+              onClick={() => {
+                const ids = pls.filter((pl) => !pl.curtain).map((pl) => pl.id);
+                void renumberDesignators(recode ? { ids, recode: true } : { ids }, recode ? "the selection (current type codes)" : "the selection");
+              }}
             >
               Renumber selection
             </button>
           </span>
+          <label
+            style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 11, color: "#5b606b", marginTop: 4 }}
+            title="Also re-issue each device in its type's current code — use it after changing a code in Catalog → Device types"
+          >
+            <input type="checkbox" checked={recode} onChange={(e) => setRecode(e.target.checked)} disabled={busy} />
+            Apply current type codes
+          </label>
         </PropRow>
       )}
 

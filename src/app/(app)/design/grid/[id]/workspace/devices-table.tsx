@@ -174,7 +174,11 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
     const ids = additive ? (selected.has(r.id) ? selectedIds.filter((x) => x !== r.id) : [...selectedIds, r.id]) : [r.id];
     focusPlacements(ids, r.id);
   };
-  const renumber = (target: RenumberTarget, what: string) => void renumberDesignators(target, what);
+  // "Apply current type codes": Renumber also re-issues each device in its
+  // type's code as it stands now (a code changed in Catalog → Device types).
+  const [recode, setRecode] = useState(false);
+  const renumber = (target: RenumberTarget, what: string) =>
+    void renumberDesignators(recode ? { ...target, recode: true } : target, recode ? `${what} (current type codes)` : what);
   const sortBy = (key: DeviceColumnKey) => setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
 
   return (
@@ -210,6 +214,13 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
           {" · click a Designator or Category to edit; Enter / Tab save"}
         </span>
         <span style={{ flex: 1 }} />
+        <label
+          style={{ display: "inline-flex", gap: 5, alignItems: "center", fontSize: 12, color: "#5b606b", whiteSpace: "nowrap" }}
+          title="Renumber also re-issues each device in its type's current code — use it after changing a code in Catalog → Device types"
+        >
+          <input type="checkbox" checked={recode} onChange={(e) => setRecode(e.target.checked)} disabled={busy} />
+          Apply current type codes
+        </label>
         <Menu
           label="Renumber…"
           align="right"

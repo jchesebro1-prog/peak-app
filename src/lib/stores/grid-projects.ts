@@ -1556,14 +1556,22 @@ export async function setPlacementsDesignator(
 /**
  * Renumber… (#320): close the gaps of one option — every code, one code, or
  * the given devices — in reading order, in ONE patch (designators.renumber).
- * Leaves the auto tag alone (bookkeeping, not a hand edit). Returns the
- * changed devices' previous and new values, for one undo step.
+ * `recode` ("Apply current type codes") re-issues them in each device's
+ * current type code (designatorContext — loaded only then). Leaves the auto
+ * tag alone (bookkeeping, not a hand edit). Returns the changed devices'
+ * previous and new values, for one undo step.
  */
 export async function renumberDesignators(
   projectId: string,
   optionId: string,
   target: RenumberTarget
 ): Promise<BatchResult<{ previous: { id: string; designator: string }[]; next: { id: string; designator: string }[] }>> {
+  let codeOf: ((pl: { partId: string; category?: string }) => string) | undefined;
+  if (target.recode === true) {
+    const before = await getProject(projectId);
+    if (!before) return { ok: false, error: "Design not found." };
+    codeOf = (await designatorContext((before.placements || []).filter((pl) => !pl.curtain).map((pl) => pl.partId))).codeOf;
+  }
   let gone = false as boolean;
   const previous: { id: string; designator: string }[] = [];
   const next: { id: string; designator: string }[] = [];
@@ -1573,7 +1581,7 @@ export async function renumberDesignators(
       return;
     }
     const own = (p.placements || []).filter((pl) => pl.optionId === optionId);
-    const changes = renumber(own, readingCtxOf(p), target);
+    const changes = renumber(own, readingCtxOf(p), target, codeOf);
     if (!changes.size) return;
     p.placements = (p.placements || []).map((pl) => {
       const d = changes.get(pl.id);

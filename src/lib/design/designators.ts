@@ -51,7 +51,10 @@ export type CodeOf<P = DesignatorPlacement> = (pl: P) => string;
 export type ReadingCtx = { sheetIds: readonly string[]; spaces: ReadonlyArray<SpaceLite> };
 /** Numbers `from`…`to` (inclusive) held under one code. */
 export type Block = { from: number; to: number };
-export type RenumberTarget = { all: true } | { code: string } | { ids: readonly string[] };
+/** Which devices Renumber re-issues. `recode` ("Apply current type codes")
+ *  re-issues them in each device's CURRENT type code instead of the code its
+ *  designator was written in. */
+export type RenumberTarget = ({ all: true } | { code: string } | { ids: readonly string[] }) & { recode?: boolean };
 
 const DESIGNATOR_RE = /^(.+?)-(\d{1,6})$/;
 const RANGE_RE = /^(.+?-\d{1,6})\s*–\s*\d{1,6}$/;
@@ -167,36 +170,47 @@ export function assignMissing<P extends DesignatorPlacement>(
 /** Re-issue the targeted placements' parseable designators, per code, from
  *  the lowest numbers not held by UNtargeted placements of that code (for
  *  `all` / `code` that is from 1), in reading order, each in its own code.
- *  Custom designators are left alone. Returns the changes only. */
-export function renumber<P extends DesignatorPlacement>(placements: readonly P[], ctx: ReadingCtx, target: RenumberTarget): Map<string, string> {
-  const parsed = new Map<string, { code: string; n: number }>();
+ *  Custom designators are left alone. Returns the changes only.
+ *
+ *  `recode` (with `codeOf`, the device's current type code): each targeted
+ *  device is re-issued in `codeOf(pl)` instead of the code it was written in
+ *  — numbered exactly as above, against the untargeted devices already
+ *  holding numbers in that code — and a `code` target picks devices by their
+ *  current code. Without `codeOf`, `recode` is ignored. */
+export function renumber<P extends DesignatorPlacement>(
+  placements: readonly P[],
+  ctx: ReadingCtx,
+  target: RenumberTarget,
+  codeOf?: CodeOf<P>
+): Map<string, string> {
+  const recode = target.recode === true && !!codeOf;
+  const ids = "ids" in target ? new Set(target.ids) : null;
+  const want = "code" in target ? target.code.trim().toUpperCase() : null;
+  const codeFor = new Map<string, string>();
+  const groups = new Map<string, { hit: P[]; held: Block[] }>();
   for (const pl of placements) {
     if (pl.curtain) continue;
     const d = parseDesignator(cleanDesignator(pl.designator));
-    if (d) parsed.set(pl.id, d);
-  }
-  const ids = "ids" in target ? new Set(target.ids) : null;
-  const want = "code" in target ? target.code.trim().toUpperCase() : null;
-  const groups = new Map<string, { hit: P[]; held: Block[] }>();
-  for (const pl of placements) {
-    const d = parsed.get(pl.id);
     if (!d) continue;
-    const key = d.code.toUpperCase();
+    const now = recode ? codeOf!(pl) : d.code;
+    const targeted = ids ? ids.has(pl.id) : want !== null ? now.toUpperCase() === want : true;
+    const code = targeted ? now : d.code;
+    const key = code.toUpperCase();
     const g = groups.get(key) ?? { hit: [], held: [] };
-    const targeted = ids ? ids.has(pl.id) : want !== null ? key === want : true;
-    if (targeted) g.hit.push(pl);
-    else g.held.push({ from: d.n, to: d.n + placementQty(pl) - 1 });
+    if (targeted) {
+      g.hit.push(pl);
+      codeFor.set(pl.id, code);
+    } else g.held.push({ from: d.n, to: d.n + placementQty(pl) - 1 });
     groups.set(key, g);
   }
   const out = new Map<string, string>();
   for (const g of groups.values()) {
     const blocks = [...g.held];
     for (const pl of readingOrder(g.hit, ctx)) {
-      const d = parsed.get(pl.id)!;
       const qty = placementQty(pl);
       const n = nextFree(blocks, qty);
       blocks.push({ from: n, to: n + qty - 1 });
-      const next = `${d.code}-${n}`;
+      const next = `${codeFor.get(pl.id)!}-${n}`;
       if (next !== pl.designator) out.set(pl.id, next);
     }
   }

@@ -148,7 +148,8 @@ export default function DeviceTypesClient({
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Types</div>
             <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4 }}>
               Rename, reorder, add or archive. An archived type maps nothing; its categories show as unmapped. Code is the
-              designator prefix on Grid plans (MIC → MIC-1); leave it blank to use the default shown.
+              designator prefix on Grid plans (MIC → MIC-1); leave it blank to use the default shown. A code applies to
+              newly placed devices; to update devices already placed, use Renumber with “Apply current type codes” on.
             </div>
           </div>
           <button type="button" disabled={!dirty || pending} onClick={() => run(() => saveDeviceTypesAction(drafts))} style={dirty && !pending ? PRIMARY : OFF}>

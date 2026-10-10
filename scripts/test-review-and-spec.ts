@@ -60163,6 +60163,22 @@ async function designators320PureChecks(): Promise<void> {
   ok(J([...D.renumber(rn, rctx, { code: "lx" }).entries()]) === J([["x5", "LX-1"]]), "#320 renumber one code (case-insensitive)");
   ok(J([...D.renumber(rn, rctx, { ids: ["x2"] }).entries()]) === J([["x2", "MIC-4"]]),
     "#320 renumber a selection: it takes the lowest numbers not held by the rest of its code");
+  // Final fix #2 — "Apply current type codes": recode re-issues in each device's CURRENT type code.
+  const curCode = (p: { partId: string }) => (p.partId === "SPKR" || p.partId === "LSX" ? "LS" : "G");
+  ok(J([...D.renumber([pl("s1", 0.1, 0.1, { partId: "SPKR", designator: "SPK-1" })], rctx, { all: true, recode: true }, curCode).entries()]) === J([["s1", "LS-1"]]),
+    "#320 recode: a device whose type code changed from SPK to LS gets LS-1");
+  const rc = [pl("l1", 0.1, 0.05, { partId: "LSX", designator: "LS-2" }), pl("s1", 0.1, 0.1, { partId: "SPKR", designator: "SPK-1" }), pl("s2", 0.1, 0.2, { partId: "SPKR", designator: "SPK-2" }),
+    pl("f", 0.1, 0.3, { partId: "SPKR", designator: "FOH-AMP" }), pl("cu", 0.1, 0.4, { partId: "SPKR", designator: "SPK-9", curtain: { name: "Main" } })];
+  ok(J([...D.renumber(rc, rctx, { ids: ["s1", "s2", "f", "cu"], recode: true }, curCode).entries()]) === J([["s1", "LS-1"], ["s2", "LS-3"]]),
+    "#320 recode a selection: untargeted LS-2 keeps its number, the recoded ones take the lowest free (LS-1, LS-3); custom FOH-AMP and the curtain untouched");
+  ok(J([...D.renumber(rc, rctx, { all: true, recode: true }, curCode).entries()]) === J([["l1", "LS-1"], ["s1", "LS-2"], ["s2", "LS-3"]]),
+    "#320 recode all: every parseable designator re-issued in its current code, in reading order; custom untouched");
+  ok(J([...D.renumber(rc, rctx, { code: "ls", recode: true }, curCode).entries()]) === J([["l1", "LS-1"], ["s1", "LS-2"], ["s2", "LS-3"]]) &&
+     J([...D.renumber(rc, rctx, { code: "ls" }, curCode).entries()]) === J([["l1", "LS-1"]]),
+    "#320 recode one code: picks devices by their current type code (plain Renumber picks by the written code)");
+  ok(J([...D.renumber(rc, rctx, { all: true, recode: true }).entries()]) === J([...D.renumber(rc, rctx, { all: true }).entries()]) &&
+     J([...D.renumber(rc, rctx, { all: true }, curCode).entries()]) === J([...D.renumber(rc, rctx, { all: true }).entries()]),
+    "#320 recode needs both the flag and a code resolver; without either it is plain Renumber");
 
   // duplicates
   const dup = D.duplicates([pl("a", 0, 0, { designator: "MIC-1", qty: 3 }), pl("b", 0, 0, { designator: "MIC-2" }), pl("c", 0, 0, { designator: "MIC-4" }),
@@ -60319,6 +60335,13 @@ async function designators320StoreChecks(): Promise<void> {
   ok(rn.ok && (await des(a1.id)) === "L-1" && (await des(lot.id)) === "L-2" && (await des(a3.id)) === "L-26" && (await des(pz!.id)) === "L-27" &&
      (await des(g1.id)) === "G-1" && (await des(aud.id)) === "A-1" && (await des(a4.id)) === "FOH-1" && rn.value.next.length === 3 && rn.value.previous.length === 3,
     "#320 renumber all: L-1, lot L-2–25, L-26, L-27; G, A and custom unchanged; previous/next hold only the changes");
+  // "Apply current type codes": a device whose designator was written in another code is re-issued in its type's code now.
+  const typed = await G.setPlacementsDesignator(gp.id, [{ id: a3.id, designator: "SPK-1" }]);
+  const plain = await G.renumberDesignators(gp.id, opt, { ids: [a3.id] });
+  const recoded = await G.renumberDesignators(gp.id, opt, { ids: [a3.id], recode: true });
+  ok(typed.ok && plain.ok && plain.value.next.length === 0 && recoded.ok && (await des(a3.id)) === "L-26" && (await des(a4.id)) === "FOH-1" &&
+     JSON.stringify(recoded.value.previous) === JSON.stringify([{ id: a3.id, designator: "SPK-1" }]) && JSON.stringify(recoded.value.next) === JSON.stringify([{ id: a3.id, designator: "L-26" }]),
+    "#320 renumber with recode: SPK-1 on a lighting device becomes L-26 (the lowest free L); plain Renumber leaves it; one undo step's previous/next");
   const rnGone = await G.renumberDesignators(gp.id, "opt-gone", { all: true });
   ok(!rnGone.ok, "#320 renumber refuses an option that no longer exists");
 
@@ -60414,6 +60437,12 @@ async function designators320EditorChecks(): Promise<void> {
   ok(["setDesignatorsAction", "renumberDesignatorsAction"].every((n) => body(n).includes("await requireUser();")) &&
      body("setDesignatorsAction").includes("setPlacementsDesignator(") && body("renumberDesignatorsAction").includes("renumberDesignators("),
     "#320 actions: both designator actions are authed like every placement edit and write through the store");
+  const crt = acts.slice(acts.indexOf("function cleanRenumberTarget("), acts.indexOf("export async function renumberDesignatorsAction("));
+  ok(crt.includes('const recode = raw.recode === true ? { recode: true } : {};') && crt.includes("return { all: true, ...recode };") && crt.includes("{ code: raw.code.trim(), ...recode }") && crt.includes("{ ids: [...raw.ids], ...recode }"),
+    "#320 cleanRenumberTarget whitelists recode (only a literal true) on every target shape");
+  const gpSrc = rd("src/lib/stores/grid-projects.ts");
+  ok(gpSrc.includes("if (target.recode === true) {") && gpSrc.includes("renumber(own, readingCtxOf(p), target, codeOf)"),
+    "#320 store: Renumber loads the code resolver only for recode and passes it to the pure rule");
   const clean = acts.slice(acts.indexOf("async function cleanRestoredPlacement("), acts.indexOf("export async function restoreItemsAction("));
   ok(clean.includes("const designator = curtain ? null : cleanDesignator(raw.designator);") && clean.includes("...(designator ? { designator } : {}),"),
     "#320 undo restore keeps a device's designator (whitelisted, cleaned; never on a curtain)");
@@ -60486,6 +60515,10 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(table.startsWith('"use client"') && table.includes("data-no-nudge") && table.includes("nextCell(shown, cur.id, cur.col, move)") && table.includes("focusPlacements(ids, r.id)") &&
      table.includes("renumberDesignators(target, what)") && table.includes("Selected rows") && !/from\s+"@\/lib\/stores\//.test(table) && !table.includes("designators-server"),
     "#320 Devices tab: inline edit moves cell to cell, a row click selects on the plan, Renumber menu; no store import");
+  const propSrc = rd("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
+  ok(table.includes("Apply current type codes") && table.includes("renumberDesignators(recode ? { ...target, recode: true } : target,") && table.includes("useState(false)") &&
+     propSrc.includes("Apply current type codes") && propSrc.includes("renumberDesignators(recode ? { ids, recode: true } : { ids },"),
+    "#320 Renumber menu and Renumber selection: an \"Apply current type codes\" checkbox (off by default) passes recode through");
   ok(!table.includes("#fdf4e3") && table.includes("color-mix(in srgb, ${DESIGNATOR_DUPLICATE_COLOR} 12%, transparent)") && table.includes("background: DESIGNATOR_DUPLICATE_TINT"),
     "#320 Devices tab: a duplicate's tint is derived from DESIGNATOR_DUPLICATE_COLOR, not hard-coded");
 }
@@ -60592,6 +60625,8 @@ async function designators320TypeCodePins(): Promise<void> {
      client.includes("aria-label={`Code for ${d.label}`}") && client.includes(".toUpperCase().replace(/[^A-Z0-9]/g, \"\").slice(0, 6)"),
     "#320 Device types: an editable Code per type, uppercased as typed, showing the effective default as its placeholder");
   ok(client.includes("{ label, scope: newScope, code: \"\" }") && client.includes("designator prefix"), "#320 Device types: new types start on the default code; the card says what the code is for");
+  ok(client.includes("A code applies to") && client.includes("newly placed devices; to update devices already placed, use Renumber with “Apply current type codes” on."),
+    "#320 Device types: the card says a code applies to newly placed devices and points at Renumber → Apply current type codes");
 }
 
 // ---------------------------------------------------------------------------

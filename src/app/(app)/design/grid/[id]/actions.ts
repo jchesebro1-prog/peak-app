@@ -1047,14 +1047,17 @@ export async function setDesignatorsAction(
 
 function cleanRenumberTarget(raw: unknown): RenumberTarget | null {
   if (!isObj(raw)) return null;
-  if (raw.all === true) return { all: true };
-  if (isStr(raw.code) && raw.code.trim() && raw.code.length <= 24) return { code: raw.code.trim() };
-  if (Array.isArray(raw.ids) && raw.ids.length > 0 && raw.ids.length <= MAX_BATCH && raw.ids.every(isStr)) return { ids: raw.ids };
+  // "Apply current type codes" — only a literal true turns it on.
+  const recode = raw.recode === true ? { recode: true } : {};
+  if (raw.all === true) return { all: true, ...recode };
+  if (isStr(raw.code) && raw.code.trim() && raw.code.length <= 24) return { code: raw.code.trim(), ...recode };
+  if (Array.isArray(raw.ids) && raw.ids.length > 0 && raw.ids.length <= MAX_BATCH && raw.ids.every(isStr)) return { ids: [...raw.ids], ...recode };
   return null;
 }
 
 /** Renumber… — close the gaps of one option (all / one code / the given
- *  devices) in reading order, in one write. `previous` / `next` are the
+ *  devices) in reading order, in one write; `recode` re-issues them in each
+ *  device's current type code. `previous` / `next` are the
  *  changed devices only, so the editor records one undo step. */
 export async function renumberDesignatorsAction(
   projectId: string,
