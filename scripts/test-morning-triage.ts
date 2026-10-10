@@ -36,6 +36,9 @@ import { selectLeads } from "@/lib/triage/feeds/leads";
 import { selectVisits, todaysVisitsFor, visitAttendees } from "@/lib/triage/feeds/visits";
 import { selectQuotes } from "@/lib/triage/feeds/quotes";
 import { selectRenewals } from "@/lib/triage/feeds/renewals";
+import { CALL_WINDOW_MS, recordingTodos, selectCalls } from "@/lib/triage/feeds/calls";
+import { FEEDS } from "@/lib/triage/feeds";
+import { normalizeRecording, type RecordingRecord } from "@/lib/stores/recordings";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import type { Quote } from "@/lib/stores/quotes";
 import type { CommThread } from "@/lib/stores/comms";
@@ -455,4 +458,37 @@ export async function triageFeedChecksB(ok: Ok): Promise<void> {
       rr[0].href === "/flame-tests?rv=contact" && rr[1].href === "/inspections?rv=contact",
     "renewals feed: past due vs in window; rows open the #37 to-contact worklist"
   );
+}
+
+export async function triageCallChecks(ok: Ok): Promise<void> {
+  const USERS = [{ id: ME.id, name: ME.name }, { id: "u-jeff", name: "Jeff Chesebro" }];
+  const item = (key: string, title: string, assigneeName: string | null, disposition = "pending") => ({ key, title, assigneeName, dueDate: null, disposition, assignmentId: null });
+  const rec = (id: string, startedAt: number, by: string, items: ReturnType<typeof item>[], segments: { speaker: number; text: string; start: number; end: number }[] = []) =>
+    normalizeRecording({
+      id, title: `Walkthrough ${id}`, startedAt, createdAt: startedAt, recordedByUserId: by,
+      recordedByName: by === ME.id ? ME.name : "Jeff Chesebro", actionItems: items,
+      transcript: { language: "en", speakers: { "1": { name: "Pat Owner" } }, segments },
+    } as unknown as Partial<RecordingRecord> & { id: string });
+  const recs = [
+    rec("REC-1", MON_10 - 2 * D, ME.id,
+      [item("k1", "Send revised rigging drawings to architect", null), item("k2", "Order motor", "Jeff"), item("k3", "Book lift", null, "accepted"), item("k4", "Call the fire marshal", null, "dismissed")],
+      [{ speaker: 1, text: "I'll send the revised rigging drawings to the architect by Friday.", start: 754, end: 760 }]),
+    rec("REC-2", MON_10 - 3 * D, "u-jeff", [item("k5", "Confirm trim heights with the venue", "Dana"), item("k6", "Quote spare cable", "Jeff")]),
+    rec("REC-3", MON_10 - 8 * D, ME.id, [item("k7", "Old thing to do", null)]),
+  ];
+  const todos = recordingTodos(recs, { me: ME, now: MON_10, users: USERS });
+  ok(todos.map((t) => `${t.meetingId}:${t.itemKey}`).join(",") === "REC-1:k1,REC-2:k5", "calls feed: pending items only, on my recordings or naming me, last 7 days — accepted / dismissed / teammates' items stay off");
+  ok(!todos[0].assigneeIsMe && todos[1].assigneeIsMe, "calls feed: knows when a to-do names me");
+  const cc = selectCalls(todos);
+  const l0 = cc[0].callLine;
+  ok(
+    cc[0].key === "call:REC-1:k1" && !!l0 && l0.found && l0.speaker === "Pat Owner" && l0.start === 754 && l0.href === "/recordings/REC-1?tab=transcript&seg=0" && cc[0].href === l0.href,
+    "calls feed: the matched transcript line links to that moment in the recording"
+  );
+  const l1 = cc[1].callLine;
+  ok(!!l1 && !l1.found && l1.href === "/recordings/REC-2?tab=actions" && cc[1].href === "/recordings/REC-2?tab=actions", "calls feed: no matching line → 'Source line not found — open the meeting'");
+  ok(cc[0].facts.map((f) => f.kind).join(",") === "call_todo" && cc[1].facts.map((f) => f.kind).join(",") === "call_todo,call_names_me", "calls feed: +10 when the to-do names me");
+  ok(cc[0].mention === `Walkthrough REC-1 (${chicagoShortDate(MON_10 - 2 * D)})`, "calls feed: the meeting + date used by 'Also mentioned in'");
+  ok(CALL_WINDOW_MS === 7 * D, "calls feed: the window is 7 days");
+  ok(FEEDS.map((f) => f.source).join(",") === "email,call,task,lead,visit,quote,renewal", "feeds: all seven sources are registered, one module each");
 }
