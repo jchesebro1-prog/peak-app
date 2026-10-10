@@ -493,6 +493,13 @@ Attendees, per-person invites, conflict checks and Edit on scheduled visits
 - **T1.** **Who can edit a scheduled visit.** Anyone signed in can edit/re-lead a scheduled visit or remove attendees, which emails/cancels teammates' calendar copies — keep open, or restrict to the lead/approvers?
   ✦ keep open to everyone signed in ☐ only the lead and approvers ☐ other: ______
 
+## U. Auto task calendar (built 2026-10-10, #327)
+
+- **U1.** **Task bell scope (behavior change, D802).** The bell's "Tasks needing attention" used to show everyone's
+  overdue tasks to everyone. Now that every assigned task gets a due date, it shows your own open tasks plus overdue
+  tasks that nobody owns; a teammate's overdue task shows only on their bell. Keep?
+  ✦ keep as built ☐ also show teammates' overdue tasks to approvers/admins ☐ other: ______
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

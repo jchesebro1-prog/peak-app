@@ -10760,17 +10760,18 @@ item source fails to load, no stale sweep runs (it would delete live pins).
 
 The spec says the plan starts at now rounded UP to the quarter-hour. That would make "a block that has already begun"
 unreachable at compute time, so the plan starts at `floorQuarter(now)`: the block on screen right now is the one that
-locks as `started` on the next compute.
+locks as `started` on the next compute — on the owner's own view only (D797; the cron and other viewers never lock).
 
 ## D787. +7 default due date: assigned items only, stamped 5:00 pm Chicago (#327, 2026-10-10)
 
 New tasks and Queue assignments with an assignee and no due date get due = today + 7 days, stamped 5:00 pm Chicago
 (`createTask`, `createAutoTask`, `createTaskOnce` — so Krisp meeting to-dos too — and `createAssignment`). An unassigned
 checklist row isn't planned and, once overdue, would reach every bell (`taskBellItems` shows anyone's overdue task), so
-it stays undated. 5 pm keeps the UTC date (what Google Tasks shows) equal to the Chicago day. Tasks the consulting
+it stays undated (and since D802 an unassigned overdue task is the only one that reaches every bell). Reassigning an
+undated item to someone stamps the same +7 (D804). 5 pm keeps the UTC date (what Google Tasks shows) equal to the Chicago day. Tasks the consulting
 schedule engine places (a `startAt` and/or a `schedule`) are skipped — the engine owns their dates, and a +7 stamp
 could land before the start or past the engagement's end. The planner's deadline is the END of the due's Chicago day.
-Undated assigned items plan as due `createdAt + 7` (virtual, never stored). One-time backfill:
+Undated assigned items plan as due a ROLLING today + 7 (virtual, never stored, never At risk — D801; was `createdAt + 7`). One-time backfill:
 `npm run tasks:backfill-due` (dry run by default; `--apply`, hosted also `--yes`; idempotent; lists what it skips).
 
 ## D788. Blocked tasks are not planned (#327, 2026-10-10)
@@ -10783,12 +10784,15 @@ calendar chip.
 When an item's pins have all passed and it's still open, its remainder = size − pinned minutes so far, at least 30
 minutes (a sub-30 remainder rounds up to 30), placed from the first work day on/after the day after its last pin. A
 passed `hand` pin triggers this the same as a `started` one. Only the chunks on the remainder's FIRST placed day are
-pinned; later days stay computed. A task still open after its whole size gets another 30 minutes each morning.
+pinned; later days stay computed. **Amended by D796:** the remainder is pinned only while size − pinned so far > 0; a
+task still open after its whole size is never pinned ahead again (it was: another locked 30 minutes every morning,
+forever). A held remainder can be Unpinned (D798).
 
 ## D790. In progress pins the item's current block (#327, 2026-10-10)
 
-Marking an item In progress pins its current (first) block at the next plan compute (any view or the morning cron) —
-the same known limit the spec states for started blocks. An in-progress pin is locked like a started one.
+Marking an item In progress pins its current (first) block at the next plan compute on the owner's own view (D797 —
+not the cron, not someone else's view) — the same known limit the spec states for started blocks. An in-progress pin
+that hasn't begun can be Unpinned by the owner or an admin (D798); one covering now stays locked.
 
 ## D791. Everyone view reads each person's Google calendar (#327, 2026-10-10)
 
@@ -10797,7 +10801,7 @@ calendar is unreadable or not connected is planned without it, with "Planned wit
 overlap meetings" (the viewer's own: "Planned without your Google calendar — may overlap meetings"); several such
 people collapse into one line. "No calendar connected" shows the same note as "can't be read". When a person's
 Google read wasn't ok, NEW `started` pins from that plan are not persisted — a block that only fit because a meeting
-was invisible must not lock.
+was invisible must not lock. The Everyone view never persists anyone's started pins but the viewer's own (D797).
 
 ## D792. Morning triage computes plans; Home "Today" card (#327, 2026-10-10)
 
@@ -10819,8 +10823,10 @@ are therefore rarely planned.
 Drag-to-pin and Unpin change a person's calendar, so they are refused ("Only the owner or an admin can change this
 plan.") unless the actor is the item's owner (derived from the stored record, never the request) or holds
 `manage_users`. Push due date, Hand off, tier/size and In progress follow the app's existing task-edit rule (any
-signed-in user). A move is atomic and refuses a stale source; a drop lands no earlier than the current quarter-hour;
-durations come from the server, never the client.
+signed-in user). A move is atomic, refuses a stale source and keeps the stored pin's own length (never the client's);
+a drop lands no earlier than the current quarter-hour. A FRESH drop's minutes come from the client (the block it
+dragged), bounded 30 min–8 h, and are capped at the item's remaining minutes (D799). Any pin that hasn't begun can be
+Unpinned — a held `started` one too (D798); only `hand` pins drag.
 
 ## D795. Pin cap (#327, 2026-10-10)
 
@@ -10828,3 +10834,80 @@ At most 500 pins per person (`PIN_MAX_PER_PERSON`). Over the cap, the persist pa
 back at the cap, PAST pins the plan no longer depends on: first past pins of items that aren't the person's open work,
 then past pins of an open item that would still have its whole size pinned without them (never its latest-ending
 pin). Never a current or future pin; anything still over the cap is kept and logged.
+
+## D796. Remainders are bounded; finished-size work stays movable (#327, 2026-10-10)
+
+The final review's simulation (25 Normal/M tasks, 6 computes a day, nothing marked Done) showed D789's "another 30
+minutes each morning" filling every day with locked 30-minute slivers: ~17 new pins a day, and a new High task due
+tomorrow landing behind them, At risk. Now an unfinished started item gets a next-work-day remainder pin ONLY while
+size − pinned minutes so far > 0 (the remainder is that difference, rounded up to the 30-minute floor). Once its whole
+size has been pinned and it is still open, it is never pinned ahead again: the planner places it like unstarted work —
+one fresh, movable 30-minute chunk (or its size if smaller), urgency-ordered — at most once a day (once that chunk has
+begun, and so locked as `started` on the owner's view, nothing more is placed for it until tomorrow; without the
+once-a-day rule an urgent finished-size item would be re-pinned at every 15-minute compute all day). Pinned by the
+`auto-cal pins:` remainder checks and the `auto-cal nobody-done:` 15-work-day simulation (max time locked ahead for any
+item: 420 min before → 30 after; pins added per day 16 → 5; the High task planned today, not At risk). Known limit: in
+the reviewer's exact scenario (most of the 25 tasks overdue), the new High task still waits behind each overdue item's
+daily 30-minute chunk, because overdue outranks everything (D784) — movable time now, not locked time.
+
+## D797. Only the owner's own views lock `started` pins (#327, 2026-10-10)
+
+`savePlanPins(plans, { persistStartedFor })` takes an explicit, required owner: /calendar and Home Today pass the
+signed-in user's id, and only that person's plan saves new `started` pins (In-progress blocks and remainders included);
+everyone else's plan on an Everyone or admin view saves none. The triage cron (morning and midday) and the lazy
+first-view triage build pass `null` — they never lock time on anyone's calendar. Stale-key removal is unchanged on
+every path (fail-closed, D785); hand pins are written only by the pin actions. So "started" means a block began while
+its owner was looking at the plan (or they marked it In progress and then viewed it).
+
+## D798. A held `started` pin can be Unpinned — the escape hatch (#327, 2026-10-10)
+
+The owner or an admin may Unpin any pin that hasn't begun, including a `started` one held ahead of time (a remainder,
+or an In-progress block); a pin covering now (or past) stays locked ("This block has started — it stays put."). Because
+the next compute would otherwise pin a remainder or In-progress block straight back, Unpin of a `started` pin drops it
+and writes a release marker in the same blob in ONE statement (`<itemKey>@released` → `{ kind: "released", atMs }`,
+`releasePin` in `src/lib/stores/task-pins.ts`; `pinsFromBlob` already ignores the key). A released item gets no
+remainder pin and no In-progress pin ahead — it is planned as movable work (a block that actually begins on the owner's
+view still locks). The marker goes when the item is done/deleted/handed off (`clearItemPins`), is swept as stale when
+the item stops being the person's open work, and is lifted by marking the task In progress again. A held started pin
+still can't be dragged ("This block holds started work — Unpin it to free the time."). The popover says "Held for work
+already started. Unpin frees this time — the task is then planned like any other."
+
+## D799. A fresh drop is capped at the item's remaining minutes (#327, 2026-10-10)
+
+A fresh drop (no `fromStartMs`) takes its length from the client — the dragged block — bounded 30 min–8 h, and the
+server caps it at the item's remaining minutes: size − minutes already pinned, on the 15-minute grid, at least 30. So a
+1 h task can't be hand-pinned for 4 h. A move still keeps the stored pin's own length.
+
+## D800. "Waiting on customer" tasks are not planned (#327, 2026-10-10)
+
+A task with `waitingOn` set (#323) is owed by the customer, so — the way `src/lib/queue.ts` skips it —
+`isPlannedTask` is false for it: it isn't planned, can't be pinned, its pins are swept as stale, and the one-time due
+backfill never dates it.
+
+## D801. Undated items plan against a rolling today + 7 (#327, 2026-10-10)
+
+An item with no stored due date (pre-backfill, or never dated) plans against an effective due of today + 7 days
+(Chicago, 5:00 pm stamp) computed from the plan's own clock each time — not `createdAt + 7`, which made every old
+undated item read as overdue and jump the queue. Urgency uses that effective date; an undated item is never flagged
+At risk or overdue until it gets a real date (`dueVirtual`). The backfill still assigns real dates.
+
+## D802. The task bell no longer shows everyone's overdue tasks (#327, 2026-10-10) — behavior change
+
+`taskBellItems` (the bell's "Tasks needing attention") used to show every open task assigned to me PLUS anyone's
+overdue task to everyone. With the auto calendar dating every assigned task (+7 on create, the backfill), that would
+flood every bell with teammates' overdue work. Now: my open tasks (as before) plus overdue tasks that nobody owns (no
+assignee id or name); someone else's overdue task shows only on their own bell. Jeff to confirm (MASTER-QUESTIONS U1).
+
+## D803. A lazy first-view triage build reads Google for at most 2.5 s (#327, 2026-10-10)
+
+A triage build with no cron deadline (someone opening their list before the cron built it) waits on the at-risk
+planner, so its Google read gets `VIEW_PLAN_CALENDAR_MS` (2.5 s, the same constant Home Today now uses) instead of
+the 6 s page limit; past it the plan is computed without the calendar. The cron path is unchanged (bounded by its
+deadline).
+
+## D804. Reassigning an undated item stamps the +7 due date (#327, 2026-10-10)
+
+`updateTask` / `updateAssignment` apply the create rule (D787) on a hand-off: when the assignee actually changes to
+someone and the item has no due date, it gets today + 7 (5:00 pm Chicago). A dated item keeps its date; a task the
+consulting schedule engine placed (a `startAt` and/or `schedule`) is never stamped; re-spelling the same assignee is
+not a hand-off.

@@ -138,18 +138,23 @@ Horizon: until everything is placed, capped at 8 weeks.
 
 ### Pins — only unstarted work moves
 
-- **Started:** when a plan is computed and one of its blocks has already
-  begun, that block is persisted as a `started` pin. Marking a task In
-  progress pins its current block too.
+- **Started:** when a plan is computed on its OWNER's own view (/calendar,
+  Home Today — never the triage cron or someone else's view, D797) and one of
+  its blocks has already begun, that block is persisted as a `started` pin.
+  Marking a task In progress pins its current block too. A started pin that
+  hasn't begun yet (a remainder, an In-progress block) can be Unpinned by the
+  owner or an admin (D798); one covering now stays locked.
 - **Hand:** dragging a block persists a `hand` pin.
 - Pinned blocks never move and are removed from free time first.
 - **Unfinished:** a started task not done by the end of its day has its
   remaining time (size − pinned minutes so far) pinned at the start of the
-  next work day.
+  next work day — only while that is > 0. Once its whole size is pinned and
+  it's still open it is never pinned ahead again; it plans as one movable
+  30-minute chunk a day (D796).
 - Done or deleted → its future pins are cleared.
 - Known limit: a block counts as started only once a plan is computed after
-  its start (any page view, or the morning cron). A block on a day nobody
-  opened the app isn't pinned and may move.
+  its start on the owner's own view. A block on a day the owner didn't open
+  /calendar or Home isn't pinned and may move.
 
 ## Part 3 — Screens, At risk, failures
 
