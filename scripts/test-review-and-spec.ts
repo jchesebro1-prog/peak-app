@@ -9433,7 +9433,7 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
  * `TEST187:`-marked (fixtureId / createFixture, D233) so the suite-level
  * teardown drops them — and the sweep catches what a quote spawns. */
 import { registerFixture } from "./test-fixtures";
-import { meetings323StoreChecks, meetings323MatchChecks, meetings323VisibilityChecks } from "./test-meetings-323";
+import { meetings323StoreChecks, meetings323MatchChecks, meetings323VisibilityChecks, meetings323RenderChecks } from "./test-meetings-323";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
 import { exportObjectsFor } from "@/app/(app)/import/registry";
@@ -11549,6 +11549,7 @@ seeded()
   .then(() => meetings323StoreChecks(ok))
   .then(() => meetings323MatchChecks(ok))
   .then(() => meetings323VisibilityChecks(ok))
+  .then(() => meetings323RenderChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

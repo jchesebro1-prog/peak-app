@@ -6,6 +6,8 @@ import * as MS from "@/lib/stores/meetings";
 import { nameCore, hitsCore, normalizeText } from "@/lib/meetings/names";
 import { canSeeMeeting, meetingScope, portalCanSee } from "@/lib/meetings/visibility";
 import { matchMeeting, type MatchIndex, type MatchInput } from "@/lib/meetings/match";
+import { mergeAttendees, relabel, renderMeeting, resolveAttendees, speakerLabel } from "@/lib/meetings/render";
+import { mergeTodos, noteParentFor, suggestTodoKind } from "@/lib/meetings/todos";
 
 type Ok = (c: boolean, m: string) => void;
 
@@ -169,4 +171,58 @@ export async function meetings323VisibilityChecks(ok: Ok): Promise<void> {
   ok(!portalCanSee(linked, "osakis"), "#323 linked but not shared → portal sees nothing");
   const shared = { ...linked, share: { sharedAt: 1, sharedBy: "Jeff", summary: "s" } };
   ok(portalCanSee(shared, "osakis") && !portalCanSee(shared, "other"), "#323 shared → only that customer's portal");
+}
+
+export async function meetings323RenderChecks(ok: Ok): Promise<void> {
+  // K9 attendee merge
+  const a1 = mergeAttendees([], [{ email: "Tom@Osakis.k12.mn.us", firstName: "Tom", lastName: "Ellis" }],
+    { eventId: "e1", title: "Osakis", attendees: [{ email: "tom@osakis.k12.mn.us", name: "Tom Ellis" }, { email: "amy@osakis.k12.mn.us", name: null }] });
+  ok(a1.length === 2 && a1[0].key === "tom@osakis.k12.mn.us" && a1[0].sources.join() === "krisp,calendar" && a1[1].name === "amy@osakis.k12.mn.us",
+    "#323 attendees: Krisp ∪ calendar, deduped by lowercased email, sources unioned, nameless calendar guest named by email");
+  const manualRemoved = a1.map((x) => (x.key === "amy@osakis.k12.mn.us" ? { ...x, removed: true } : x))
+    .concat([{ key: "name:seth", name: "Seth", email: null, sources: ["manual"], removed: false, contactId: "c-seth", userId: null }]);
+  const a2 = mergeAttendees(manualRemoved, [], { eventId: "e1", title: "Osakis", attendees: [{ email: "amy@osakis.k12.mn.us", name: "Amy" }] });
+  ok(a2.find((x) => x.key === "amy@osakis.k12.mn.us")?.removed === true && a2.some((x) => x.key === "name:seth" && x.contactId === "c-seth") &&
+     a2.find((x) => x.key === "tom@osakis.k12.mn.us")?.sources.join() === "krisp,calendar",
+    "#323 a re-merge keeps manual entries, removed flags and resolutions; drops nothing");
+  const r = resolveAttendees(a1, new Map([["tom@osakis.k12.mn.us", { contactId: "c-tom" }]]));
+  ok(r[0].contactId === "c-tom" && r[1].contactId === null, "#323 resolveAttendees fills contact ids by email, never by name");
+
+  // K10 speaker relabel
+  const m = meetingFixture323({ krispMeetingId: "r1" });
+  m.krisp.speakers = { "0": { email: "jeff@peaksystemsgroup.com", firstName: "Jeff", lastName: "Chesebro" } };
+  m.krisp.segments = [{ speaker: "0", text: "Hi", start: 0, end: 1 }, { speaker: "2", text: "Speaker 2 here, I'll send drawings", start: 1, end: 3 }];
+  m.krisp.notes = { blocks: [{ type: "action_item", text: "Send the venue drawings", assignee: "Speaker_2" }] };
+  ok(speakerLabel(m, "0") === "Jeff Chesebro" && speakerLabel(m, "2") === "Speaker 2", "#323 speaker label: Krisp's name, else 'Speaker <idx>'");
+  ok(relabel("Speaker_2 and Speaker 2 said; Speaker 22 didn't", [["Speaker 2", "Tom Ellis"]]) === "Tom Ellis and Tom Ellis said; Speaker 22 didn't",
+    "#323 relabel replaces both spellings, whole-word only");
+  m.speakerMap = { "2": { contactId: "c-tom", name: "Tom Ellis" } };
+  const view = renderMeeting(m, { contact: (id) => (id === "c-tom" ? "Tom Ellis" : null), user: () => null });
+  ok(view.segments[1].speakerName === "Tom Ellis" && view.segments[1].text.startsWith("Tom Ellis here"),
+    "#323 render: mapped speaker names the segment and replaces the label in its text");
+  ok(view.todos.length === 0 || view.todos[0].assigneeDisplay === "Tom Ellis", "#323 render: to-do owner follows the speaker map");
+  const refreshed = { ...m, krisp: { ...m.krisp, title: "Renamed in Krisp" } };
+  ok(renderMeeting(refreshed, { contact: () => "Tom Ellis", user: () => null }).segments[1].speakerName === "Tom Ellis",
+    "#323 a Krisp refresh never loses the speaker map (render starts from krisp.* every time)");
+
+  // K6 to-do defaults
+  const people = { users: [{ id: "u1", name: "Jeff Chesebro" }], contacts: [{ id: "c-tom", name: "Tom Ellis" }] };
+  ok(suggestTodoKind("Jeff Chesebro", people) === "task" && suggestTodoKind("Jeff", people) === "task", "#323 to-do for a Peak person → task (full or first name)");
+  ok(suggestTodoKind("Tom Ellis", people) === "waiting", "#323 to-do for the customer → waiting");
+  ok(suggestTodoKind(null, people) === "note" && suggestTodoKind("Someone Else", people) === "note", "#323 to-do with no known owner → note");
+  const derived = [{ key: "k1", title: "Send drawings", assigneeName: "Tom Ellis", dueDate: null }, { key: "k2", title: "Price track", assigneeName: "Jeff", dueDate: "2026-10-20" }];
+  const t1 = mergeTodos([], derived, (x) => suggestTodoKind(x, people));
+  ok(t1.length === 2 && t1[0].suggested === "waiting" && t1[1].suggested === "task" && t1.every((t) => t.decision === null), "#323 mergeTodos seeds suggestions");
+  const decided = t1.map((t) => (t.key === "k1" ? { ...t, decision: { kind: "dismiss" as const, createdId: null, decidedAt: 1, decidedBy: "Jeff" } } : t));
+  const t2 = mergeTodos(decided, [{ ...derived[0], title: "Send the drawings (edited)" }, derived[1]], () => "note");
+  ok(t2.find((t) => t.key === "k1")?.decision?.kind === "dismiss" && t2.find((t) => t.key === "k2")?.suggested === "note",
+    "#323 a decided to-do is untouched by re-sync (dismissed stays dismissed); undecided ones re-suggest");
+  ok(mergeTodos(decided, [], () => "note").length === 2, "#323 a to-do Krisp dropped is kept once it exists in the app");
+
+  // note parent priority venue > lead > project > engagement > customer
+  const L = { customerId: "osakis", siteId: "st-1", contactIds: [], work: { type: "lead" as const, id: "L-1", label: "x" }, internalUserIds: [] };
+  ok(noteParentFor(L)?.parentKind === "site" && noteParentFor({ ...L, siteId: null })?.parentKind === "lead" &&
+     noteParentFor({ ...L, siteId: null, work: { type: "survey", id: "FS-1", label: "x" } })?.parentKind === "customer" &&
+     noteParentFor({ customerId: null, siteId: null, contactIds: [], work: null, internalUserIds: [] }) === null,
+    "#323 note parent: venue > lead > project > engagement > customer; survey/site-visit work falls back to the customer");
 }
