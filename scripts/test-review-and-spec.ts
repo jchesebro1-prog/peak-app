@@ -64434,6 +64434,11 @@ async function riserPhase2A1Checks(): Promise<void> {
     ["junction box", sug("Low voltage junction box"), J({ code: "LVJB", mount: "SM", pd: "P/D" })],
     ["pull box", sug("Pull Box 12x12"), J({ code: "LVJB", mount: "SM", pd: "P/D" })],
     ["no match", sug("Fog machine", "X1", "Atmospherics"), J({})],
+    ["DEBC beats ports", sug("DMX emergency bypass controller 4 port"), J({ code: "DEBC", mount: "SM" })],
+    ["DR beats DMX/ethernet words", sug("ETC Unison DRd6 dimmer rack, DMX/ethernet"), J({ code: "DR", mount: "SM" })],
+    ["TS beats ethernet", sug("ETC Paradigm touchscreen with ethernet"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["DMX/network outlet box stays CRON", sug("DMX/network outlet box"), J({ code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" })],
+    ["ethernet switch", sug("ethernet switch"), J({})],
   ];
   for (const [name, got, want] of cases) ok(J(got) === want, `#328 A1 rules: ${name} -> ${want}`);
   ok(sug("DMX outlet plate with ethernet port").code === "CRON", "#328 A1 rules: CRON beats CRO and CRN");

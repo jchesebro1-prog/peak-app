@@ -22,14 +22,9 @@ const NETWORK = has(/\b(network|ethernet|rj-?45)\b/);
 /** "network outlet", "RJ45 2-port", "data jack" — the qualifier sits within two words of the outlet. */
 const NETWORK_OUTLET = has(/\b(network|ethernet|rj-?45|data)\b(\s+\S+){0,2}?\s+(outlets?|ports?|jacks?|receptacles?)\b/);
 
-/** The table. Order matters: CRON (DMX + network) before CRO and CRN. */
+/** The table, most-specific device kind first (a DMX emergency bypass controller with ports is a DEBC,
+ *  not an outlet). The outlets come last, CRON (DMX + network) before CRO and CRN. */
 export const SUGGEST_RULES: readonly SuggestRule[] = [
-  { id: "CRON", test: all(DMX, NETWORK, OUTLET_OR_PORT), values: { code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" } },
-  { id: "CRO", test: all(DMX, has(/\b(outlets?|ports?|receptacles?)\b|connector panel/)), values: { code: "CRO", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" } },
-  { id: "CRN", test: NETWORK_OUTLET, values: { code: "CRN", face: "NET", mount: "SM", height: '18"', pd: "P/D" } },
-  { id: "EP", test: has(/button station|\bkeypads?\b|control station|\bpresets?\b|scene station/), values: { code: "EP", mount: "FM", height: '48"' } },
-  { id: "OCC", test: has(/\b(occupancy|vacancy)\s+sensors?\b/), values: { code: "OCC", mount: "CS" } },
-  { id: "TS", test: has(/touch\s?screen|touch panel/), values: { code: "TS", mount: "FM", height: '48"' } },
   { id: "EBDK", test: has(/emergency bypass detect|\belts\b|\bbcm\s+sens/), values: { code: "EBDK", mount: "SM" } },
   { id: "DEBC", test: has(/emergency bypass controller|dmx emergency bypass/), values: { code: "DEBC", mount: "SM" } },
   {
@@ -38,7 +33,13 @@ export const SUGGEST_RULES: readonly SuggestRule[] = [
     values: { code: "DR", mount: "SM" },
   },
   { id: "ER", test: has(/equipment rack|\benclosures?\b/), values: { code: "ER", mount: "FM" } },
+  { id: "TS", test: has(/touch\s?screen|touch panel/), values: { code: "TS", mount: "FM", height: '48"' } },
+  { id: "EP", test: has(/button station|\bkeypads?\b|control station|\bpresets?\b|scene station/), values: { code: "EP", mount: "FM", height: '48"' } },
+  { id: "OCC", test: has(/\b(occupancy|vacancy)\s+sensors?\b/), values: { code: "OCC", mount: "CS" } },
   { id: "LVJB", test: has(/junction box|pull box/), values: { code: "LVJB", mount: "SM", pd: "P/D" } },
+  { id: "CRON", test: all(DMX, NETWORK, OUTLET_OR_PORT), values: { code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" } },
+  { id: "CRO", test: all(DMX, has(/\b(outlets?|ports?|receptacles?)\b|connector panel/)), values: { code: "CRO", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" } },
+  { id: "CRN", test: NETWORK_OUTLET, values: { code: "CRN", face: "NET", mount: "SM", height: '18"', pd: "P/D" } },
 ];
 
 /** The first matching rule's values (a fresh object), or {} when none match. */
