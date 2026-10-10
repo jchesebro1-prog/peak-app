@@ -80,7 +80,7 @@ export function quoteApprovalBell(quotes: Quote[], me: string, canApprove: boole
   return { needs, back };
 }
 
-export async function navData(me: string, canApprove = false): Promise<{
+export async function navData(me: string, canApprove = false, meId: string | null = null): Promise<{
   counts: NavCounts;
   bell: BellGroup[];
   bellCount: number;
@@ -304,7 +304,7 @@ export async function navData(me: string, canApprove = false): Promise<{
     })
   );
   const nowMs = Date.now();
-  const taskItems = taskBellItems(taskRows, me, nowMs);
+  const taskItems = taskBellItems(taskRows, meId, me, nowMs);
   push("tasks", "Tasks needing attention", taskItems.map((t) => ({
     id: t.id,
     title: t.title,

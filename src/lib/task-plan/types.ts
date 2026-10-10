@@ -141,7 +141,7 @@ export type PlanResult = {
   newPins: PlanPin[];
   /** pin blob keys (and release markers) whose item is no longer this person's open work */
   staleKeys: string[];
-  /** pins that haven't begun (what Unpin can offer) */
+  /** pins that haven't begun, this compute's new ones included (the view offers Unpin only on stored ones) */
   futurePins: PlanPin[];
   /** when each item's last block ends; null = doesn't fit in the horizon.
    *  An item with nothing left to place has NO key (never a bare null). */

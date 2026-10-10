@@ -70,16 +70,26 @@ function defaultDeps(): BackfillDeps {
 }
 
 export type BackfillSkipped = { kind: PlanItemKind; id: string; assignee: string; reason: string };
+/** Open (planned) In-progress tasks per roster person, dated or not: each locks its first block as a `started` pin on
+ *  its owner's first view (D790), so the rollout reviews them before deploy-day views fill calendars. */
+export type BackfillInProgress = { id: string; name: string; count: number };
 
 export async function runDueBackfill(opts: {
   apply: boolean;
   deps?: Partial<BackfillDeps>;
-}): Promise<{ apply: boolean; planned: number; updated: number; plan: BackfillPlan; skipped: BackfillSkipped[] }> {
+}): Promise<{ apply: boolean; planned: number; updated: number; plan: BackfillPlan; skipped: BackfillSkipped[]; inProgress: BackfillInProgress[] }> {
   const d: BackfillDeps = { ...defaultDeps(), ...opts.deps };
   const [roster, tasks, assignments] = await Promise.all([d.roster(), d.tasks(), d.assignments()]);
   const items: BackfillItem[] = [];
   const skipped: BackfillSkipped[] = [];
   const NOT_ROSTER = "not on the active roster";
+  const inProgress = new Map<string, BackfillInProgress>();
+  for (const t of tasks) {
+    if (isPlannedTask(t) && t.status === "in_progress") {
+      const p = personForTask(t, roster);
+      if (p) inProgress.set(p.id, { id: p.id, name: p.name, count: (inProgress.get(p.id)?.count ?? 0) + 1 });
+    }
+  }
   for (const t of tasks) {
     if (!isPlannedTask(t) || (t.dueAt ?? 0) > 0) continue;
     const p = personForTask(t, roster);
@@ -102,5 +112,6 @@ export async function runDueBackfill(opts: {
       if (wrote) updated++;
     }
   }
-  return { apply: opts.apply, planned: plan.updates.length, updated, plan, skipped };
+  const inProgressList = [...inProgress.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { apply: opts.apply, planned: plan.updates.length, updated, plan, skipped, inProgress: inProgressList };
 }

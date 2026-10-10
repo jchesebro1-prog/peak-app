@@ -153,12 +153,14 @@ export async function setTierSize(input: unknown): Promise<WriteResult> {
   return { ok: true };
 }
 
-/** Sets the task's status. Its current block is pinned by the next plan
- *  compute on the owner's own view (newPinsFrom in task-plan/pins.ts: an
- *  In-progress item's earliest unended block), which the action's
- *  revalidation triggers. Marking it In progress again lifts an earlier
- *  release (D798). */
-export async function markInProgress(input: unknown): Promise<WriteResult> {
+/** Sets the task's status — any signed-in user, like the app's other task
+ *  status edits. Its current block is pinned by the next plan compute on the
+ *  owner's own view (newPinsFrom in task-plan/pins.ts: an In-progress item's
+ *  earliest unended block), which the action's revalidation triggers. Marking
+ *  it In progress again lifts an earlier release (D798) — but only when the
+ *  actor is the owner or an admin, the same rule as pin/unpin (D794): anyone
+ *  else changes the status and leaves the release marker in place. */
+export async function markInProgress(input: unknown, actor: Actor): Promise<WriteResult> {
   const o = obj(input);
   const ref = parsePlanRef(o.kind, o.id);
   if (!ref) return { ok: false, error: "Unknown task." };
@@ -168,6 +170,6 @@ export async function markInProgress(input: unknown): Promise<WriteResult> {
   if (t.status === "done") return { ok: false, error: "That item is already done." };
   if (!(await setTaskStatus(ref.id, "in_progress"))) return GONE;
   const owner = t.assigneeUserId ?? (await userIdForName(t.assigneeName));
-  if (owner) await removePinKeys(owner, [releaseBlobKey(planItemKey("task", ref.id))]);
+  if (owner && (actor.admin || owner === actor.id)) await removePinKeys(owner, [releaseBlobKey(planItemKey("task", ref.id))]);
   return { ok: true };
 }

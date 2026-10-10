@@ -350,6 +350,24 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
     },
   });
   ok(waitRun.planned === 1 && waitRun.plan.updates[0]?.id === "T-o" && waitRun.skipped.length === 0, "auto-cal backfill: a Waiting on customer task (#323) is never given a due date");
+  // Legacy In-progress tasks lock their first block on the owner's first view (D790) — the dry run lists them per person.
+  const ipRun = await runDueBackfill({
+    apply: false,
+    deps: {
+      now: () => at(FRI, 10), roster: async () => [{ id: "u1", name: "Dana" }, { id: "u2", name: "Sam" }], assignments: async () => [], workHours: async () => DEFAULT_WORK_HOURS,
+      tasks: async () => [
+        normalizeTask({ id: "T-ip1", title: "a", assigneeUserId: "u1", assigneeName: "Dana", status: "in_progress", createdAt: 1 }),
+        normalizeTask({ id: "T-ip2", title: "b", assigneeUserId: "u1", assigneeName: "Dana", status: "in_progress", dueAt: at(FRI, 17), createdAt: 2 }),
+        normalizeTask({ id: "T-ip3", title: "c", assigneeName: "sam", status: "in_progress", createdAt: 3 }),
+        normalizeTask({ id: "T-ip4", title: "d", assigneeUserId: "u2", assigneeName: "Sam", status: "open", createdAt: 4 }),
+        normalizeTask({ id: "T-ip5", title: "e", assigneeUserId: "u1", assigneeName: "Dana", status: "in_progress", waitingOn: { contactId: null, name: "Pat" }, createdAt: 5 }),
+        normalizeTask({ id: "T-ip6", title: "f", assigneeUserId: "gone", assigneeName: "Ghost", status: "in_progress", createdAt: 6 }),
+      ],
+    },
+  });
+  ok(JSON.stringify(ipRun.inProgress) === JSON.stringify([{ id: "u1", name: "Dana", count: 2 }, { id: "u2", name: "Sam", count: 1 }]),
+    "auto-cal backfill: the dry run counts open In-progress tasks per person, dated or not (their first block locks on the owner's first view)");
+  ok(/inProgress/.test(readFileSync("scripts/backfill-task-due.ts", "utf8")), "auto-cal backfill: the CLI prints the In-progress counts");
 
   // Task 1 review add-on: update paths validate tier/size; assignments normalize on read
   const TU = fixtureId("autocal", "update-validate");
@@ -1225,8 +1243,14 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
     ok(!(await setTierSize({ kind: "task", id: T })).ok, "auto-cal write: nothing to change is refused");
     ok(!(await setTierSize({ kind: "task", id: T, priority: "high", size: "xl" })).ok && !(await setTierSize({ kind: "task", id: T, priority: "bogus" })).ok,
       "auto-cal write: an invalid field is refused outright, not silently dropped");
-    ok((await getPinState(U)).released.join() === K && (await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "in_progress" && (await getPinState(U)).released.length === 0,
+    ok((await getPinState(U)).released.join() === K && (await markInProgress({ kind: "task", id: T }, OTHER)).ok && (await getTask(T))?.status === "in_progress" && (await getPinState(U)).released.join() === K,
+      "auto-cal write: anyone may mark a task In progress (existing task permissions), but only the owner or an admin lifts its release marker");
+    ok((await markInProgress({ kind: "task", id: T }, OWN)).ok && (await getTask(T))?.status === "in_progress" && (await getPinState(U)).released.length === 0,
       "auto-cal write: In progress from the block — and it lifts an earlier release, so its current block locks again");
+    await addPins(U, [{ itemKey: K, startMs: later + 4 * 86_400_000, endMs: later + 4 * 86_400_000 + 1_800_000, kind: "started" }]);
+    await unpinBlock({ kind: "task", id: T, startMs: later + 4 * 86_400_000 }, OWN, now);
+    ok((await getPinState(U)).released.join() === K && (await markInProgress({ kind: "task", id: T }, ADMIN)).ok && (await getPinState(U)).released.length === 0,
+      "auto-cal write: an admin's In progress lifts the release marker too");
     ok(!(await handOff({ kind: "task", id: T, userId: "nobody-autocal" })).ok, "auto-cal write: hand off only to someone on the team");
     await addPins(U, [{ itemKey: K, startMs: later, endMs: later + 3_600_000, kind: "hand" }]);
     const roster = await activeUsers();
@@ -1238,7 +1262,7 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
       ok(!old.ok && old.error === "Only the owner or an admin can change this plan.", "auto-cal write: after a hand-off the old owner can't pin it");
     }
     await setTaskStatus(T, "done");
-    ok(!(await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "done", "auto-cal write: a done task isn't reopened by In progress");
+    ok(!(await markInProgress({ kind: "task", id: T }, OWN)).ok && (await getTask(T))?.status === "done", "auto-cal write: a done task isn't reopened by In progress");
     ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 60 }, OWN, now)).ok, "auto-cal write: a task handed off and done can't be pinned");
     // The owner (not a stranger) pinning a done task is refused for being done.
     const D = fixtureId("autocal", "w-done");
@@ -1287,6 +1311,20 @@ export async function autoCalCalendarViewChecks(ok: Ok): Promise<void> {
     "auto-cal view: a held started pin that hasn't begun (remainder / In progress) offers Unpin — the escape hatch — but doesn't drag (D798)");
   const heldOther = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: held }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u2", admin: false } });
   ok(!heldOther.blocks.some((b) => b.canUnpin) && !heldOther.futurePins.some((f) => f.canUnpin), "auto-cal view: …only for the owner or an admin");
+  // A started pin this compute made (In progress, its block still ahead) isn't stored yet — the owner's view saves it
+  // in the same request, anyone else's never does — so it offers no Unpin until a later compute reads it back.
+  const unsaved = planPerson(baseInput({ nowMs: at(MON, 10, 7), busy: [{ startMs: at(MON, 10), endMs: at(MON, 17) }], items: [item("IPV", { inProgress: true, size: "l", sizeMin: 240 })] }));
+  const unsavedPin = unsaved.newPins.find((x) => x.itemKey === "task:IPV" && x.startMs > at(MON, 10, 7));
+  for (const viewer of [{ id: "u1", admin: false }, { id: "u2", admin: true }]) {
+    const v = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: unsaved }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer });
+    const ub = v.blocks.find((b) => b.startMs === unsavedPin?.startMs && b.itemKey === "task:IPV");
+    ok(!!unsavedPin && ub?.pinned === "started" && !ub.canUnpin && !v.futurePins.some((f) => f.itemKey === "task:IPV" && f.canUnpin),
+      `auto-cal view: a started pin made by this compute (not stored yet) offers no Unpin — viewer ${viewer.id}${viewer.admin ? " (admin)" : ""}`);
+  }
+  const savedBack = planPerson(baseInput({ nowMs: at(MON, 10, 7), busy: [{ startMs: at(MON, 10), endMs: at(MON, 17) }], pins: unsaved.newPins, items: [item("IPV", { inProgress: true, size: "l", sizeMin: 240 })] }));
+  const sbView = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: savedBack }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u1", admin: false } });
+  ok(sbView.blocks.some((b) => b.startMs === unsavedPin?.startMs && b.canUnpin) && sbView.futurePins.some((f) => f.startMs === unsavedPin?.startMs && f.canUnpin),
+    "auto-cal view: once that pin is stored (read back as an input pin), the owner can Unpin it");
   const popSrc = readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8");
   ok(/block\.pinned === "started" && block\.canUnpin/.test(popSrc) && popSrc.includes("Unpin frees this time"), "auto-cal view: the popover explains what Unpin does to held started work");
   ok(view.blocks.filter((b) => b.itemKey === "task:R2").every((b) => b.atRiskLabel === "At risk — due Mon") && view.atRisk[0]?.itemKey === "task:R2",
@@ -1469,12 +1507,15 @@ type DoneSim = {
   addedPerDay: number[];
   /** the High task's first block and At risk state on the day it arrives (7 am compute) */
   urgent: { startMs: number | null; atRisk: boolean; dayKey: string };
+  /** items (URGENT aside) whose stored pins already cover their whole size, on the day URGENT arrives (before its first compute) */
+  finishedSizeAtUrgent: number;
   computes: number;
 };
 const SIM_VIEWS = [7 * 60, 9 * 60 + 5, 10 * 60 + 35, 12 * 60, 14 * 60 + 5, 16 * 60 + 5];
 
 /** `save` decides what a compute persists (the owner's view saves all; a cron save goes through savePlanPins). */
-async function nobodyClicksDone(opts: { items: number; dueOffsetDays: number; save: (plan: PersonPlan, store: PinStore) => Promise<void> }): Promise<DoneSim> {
+async function nobodyClicksDone(opts: { items: number; dueOffsetDays: number; workDays?: number; seedFullSizePins?: boolean; save: (plan: PersonPlan, store: PinStore) => Promise<void> }): Promise<DoneSim> {
+  const WORK_DAYS = opts.workDays ?? 15;
   const START = MON;
   const items: PlanItem[] = Array.from({ length: opts.items }, (_, i) =>
     item("N" + i, { userId: "u1", dueMs: dueStampForDay(addDays(START, opts.dueOffsetDays + i)), createdAt: i })
@@ -1488,20 +1529,33 @@ async function nobodyClicksDone(opts: { items: number; dueOffsetDays: number; sa
       for (const k of ks) pins.delete(k);
     },
   };
+  if (opts.seedFullSizePins) {
+    // each item already worked for its whole size on an earlier day (8 one-hour pins a day, the week before START)
+    items.forEach((it, i) => {
+      const day = addDays(START, -1 - Math.floor(i / 8));
+      const startMs = chicagoWallMs(day, 8 * 60 + (i % 8) * 60);
+      const p: PlanPin = { itemKey: it.key, startMs, endMs: startMs + it.sizeMin * MIN, kind: "started" };
+      pins.set(pinBlobKey(p), p);
+    });
+  }
   const lockedAhead = new Map<string, number>();
   const addedPerDay: number[] = [];
   const urgent = { startMs: null as number | null, atRisk: false, dayKey: "" };
+  let finishedSizeAtUrgent = 0;
   let computes = 0;
-  for (let day = START, wd = 0; wd < 15; day = addDays(day, 1)) {
+  for (let day = START, wd = 0; wd < WORK_DAYS; day = addDays(day, 1)) {
     if (weekdayOf(day) === 0 || weekdayOf(day) === 6) continue;
     wd++;
-    if (wd === 15) items.push(item("URGENT", { userId: "u1", tier: "high", dueMs: dueStampForDay(addDays(day, 1)), createdAt: 999 }));
+    if (wd === WORK_DAYS) {
+      finishedSizeAtUrgent = items.filter((it) => [...pins.values()].filter((p) => p.itemKey === it.key).reduce((s, p) => s + (p.endMs - p.startMs) / MIN, 0) >= it.sizeMin).length;
+      items.push(item("URGENT", { userId: "u1", tier: "high", dueMs: dueStampForDay(addDays(day, 1)), createdAt: 999 }));
+    }
     const before = pins.size;
     for (const m of SIM_VIEWS) {
       const nowMs = chicagoWallMs(day, m);
       const result = planPerson({ userId: "u1", nowMs, hours: DEFAULT_WORK_HOURS, busy: [], pins: [...pins.values()], items });
       computes++;
-      if (wd === 15 && m === SIM_VIEWS[0]) {
+      if (wd === WORK_DAYS && m === SIM_VIEWS[0]) {
         urgent.startMs = blocksOf(result, "task:URGENT")[0]?.startMs ?? null;
         urgent.atRisk = result.atRisk.some((a) => a.itemKey === "task:URGENT");
         urgent.dayKey = day;
@@ -1514,7 +1568,7 @@ async function nobodyClicksDone(opts: { items: number; dueOffsetDays: number; sa
     }
     addedPerDay.push(pins.size - before);
   }
-  return { pins, lockedAhead, addedPerDay, urgent, computes };
+  return { pins, lockedAhead, addedPerDay, urgent, finishedSizeAtUrgent, computes };
 }
 
 export async function autoCalNobodyDoneChecks(ok: Ok): Promise<void> {
@@ -1530,6 +1584,15 @@ export async function autoCalNobodyDoneChecks(ok: Ok): Promise<void> {
   const roomy = await nobodyClicksDone({ items: 16, dueOffsetDays: 25, save: owner });
   ok(roomy.urgent.startMs != null && chicagoDayKey(roomy.urgent.startMs) === roomy.urgent.dayKey && !roomy.urgent.atRisk,
     `auto-cal nobody-done: a High task due tomorrow, added on day 15, is planned TODAY and isn't At risk (${roomy.urgent.startMs ? fmtBlockTime(roomy.urgent.startMs, roomy.urgent.startMs + 3_600_000) : "not placed"})`);
+
+  // Overloaded (D805): every one of 25 tasks is overdue AND already pinned for its whole size, so each gets a daily
+  // fresh 30-min chunk (D796). Those chunks queue AFTER all work that still has size left, so the new High task due
+  // tomorrow still lands TODAY on the owner's 7 am view — not behind 25 overdue chunks for weeks.
+  const overloaded = await nobodyClicksDone({ items: 25, dueOffsetDays: -20, workDays: 5, seedFullSizePins: true, save: owner });
+  ok(overloaded.finishedSizeAtUrgent === 25,
+    `auto-cal nobody-done (overloaded): all 25 overdue tasks are pinned for their whole size before the High task arrives (${overloaded.finishedSizeAtUrgent}/25)`);
+  ok(overloaded.urgent.startMs != null && chicagoDayKey(overloaded.urgent.startMs) === overloaded.urgent.dayKey && !overloaded.urgent.atRisk,
+    `auto-cal nobody-done (overloaded): with 25 overdue finished-size tasks, a High task due tomorrow added on day 5 is planned TODAY at the 7 am view, not At risk (${overloaded.urgent.startMs ? fmtBlockTime(overloaded.urgent.startMs, overloaded.urgent.startMs + 3_600_000) : "not placed"})`);
 
   // The triage cron (and anyone else's view) computes just as often but never locks anything.
   const cron = await nobodyClicksDone({ items: 16, dueOffsetDays: 25, save: (plan, store) => savePlanPins([plan], { persistStartedFor: null, store }) });

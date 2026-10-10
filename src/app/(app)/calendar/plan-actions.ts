@@ -49,6 +49,6 @@ export async function setTierSizeAction(input: unknown): Promise<WriteResult> {
 }
 
 export async function markInProgressAction(input: unknown): Promise<WriteResult> {
-  await requireUser();
-  return finish(() => markInProgress(input));
+  const u = await requireUser();
+  return finish(() => markInProgress(input, actorOf(u)));
 }

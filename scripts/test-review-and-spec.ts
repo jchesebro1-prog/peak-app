@@ -3029,8 +3029,12 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
     mk({ id: "g", dueAt: NOW + DAY }),                                    // nobody's, not overdue
     mk({ id: "h", assigneeName: "Jeff Chesebro", dueAt: NOW - DAY }),     // mine, overdue
     mk({ id: "i", dueAt: NOW - DAY, status: "done" }),                    // nobody's, overdue, done
-  ], "Jeff Chesebro", NOW);
-  ok(bell.map(t => t.id).join(",") === "a,e,h", "tasks: bell = my open tasks + overdue tasks nobody owns; someone else's overdue task stays on their bell (D802); done excluded");
+    mk({ id: "j", assigneeUserId: "u-jeff", assigneeName: "" }),          // mine by id only (name blank)
+    mk({ id: "k", assigneeUserId: "u-jeff", assigneeName: "J. Chesebro" }), // mine by id, stale spelling
+    mk({ id: "l", assigneeName: "  jeff chesebro " }),                    // mine by name, other case/spacing
+  ], "u-jeff", "Jeff Chesebro", NOW);
+  ok(bell.map(t => t.id).join(",") === "a,e,h,j,k,l", "tasks: bell = my open tasks (matched by user id, or by name case-insensitively) + overdue tasks nobody owns; someone else's overdue task stays on their bell (D802); done excluded");
+  ok(taskBellItems([mk({ id: "m", assigneeUserId: "u-jeff" })], null, "Jeff Chesebro", NOW).length === 0, "tasks: bell with no viewer id never matches by a blank id");
 
   ok(autoTaskId("item16:sold:P-3001") === "t-auto-item16-sold-p-3001".replace("t-auto", "T-auto"), "tasks: autoTaskId is deterministic and sanitized");
   ok(autoTaskId("item16:sold:P-3001") === autoTaskId("item16:sold:P-3001"), "tasks: same coverage key, same id");

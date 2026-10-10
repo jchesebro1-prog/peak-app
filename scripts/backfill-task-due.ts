@@ -1,7 +1,7 @@
 /**
  * One-time due-date backfill — spec 2026-10-09 auto task calendar, Part 1.
  *
- *   DATABASE_URL=... npm run tasks:backfill-due                  → dry run: counts per person
+ *   DATABASE_URL=... npm run tasks:backfill-due                  → dry run: counts per person (+ open In-progress counts)
  *   DATABASE_URL=... npm run tasks:backfill-due -- --apply --yes → write (hosted needs --yes)
  *   PGLITE_PATH=<scratch dir> npm run tasks:backfill-due          → a local copy
  *
@@ -24,6 +24,10 @@ async function main(): Promise<void> {
   if (apply) requireHostedConfirmation(target.hosted, args);
   const r = await runDueBackfill({ apply });
   for (const p of r.plan.perPerson) console.log(`  ${p.name}: ${p.count} item(s), due ${p.firstDay} → ${p.lastDay}`);
+  if (r.inProgress.length) {
+    console.log(`\nOpen In-progress tasks (each locks its first block on its owner's first /calendar or Home view):`);
+    for (const p of r.inProgress) console.log(`  ${p.name}: ${p.count}`);
+  }
   if (r.skipped.length) {
     console.log(`\nSkipped ${r.skipped.length} item(s) (assignee not on the active roster):`);
     for (const k of r.skipped) console.log(`  ${k.kind} ${k.id} - ${k.assignee || "(no name)"} - ${k.reason}`);

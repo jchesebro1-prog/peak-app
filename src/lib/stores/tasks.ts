@@ -266,15 +266,17 @@ export function autoTaskId(coverageKey: string): string {
   return "T-auto-" + coverageKey.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
-/** Bell rail (#17): open tasks assigned to me, plus overdue tasks nobody owns.
- *  Someone else's overdue task is theirs — it no longer rings every bell
- *  (D802: once the auto task calendar dates every assigned task, "anyone's
- *  overdue" would flood the whole team). */
-export function taskBellItems(all: TaskRecord[], me: string, nowMs: number): TaskRecord[] {
+/** Bell rail (#17): open tasks assigned to me — by user id, or by name
+ *  (trimmed, case-insensitive) — plus overdue tasks nobody owns. Someone
+ *  else's overdue task is theirs — it no longer rings every bell (D802: once
+ *  the auto task calendar dates every assigned task, "anyone's overdue" would
+ *  flood the whole team). */
+export function taskBellItems(all: TaskRecord[], meId: string | null, me: string, nowMs: number): TaskRecord[] {
   const unassigned = (t: TaskRecord) => !t.assigneeUserId && !(t.assigneeName || "").trim();
-  return all.filter(
-    (t) => t.status !== "done" && (t.assigneeName === me || (unassigned(t) && isOverdue(t, nowMs))),
-  );
+  const myName = (me || "").trim().toLowerCase();
+  const mine = (t: TaskRecord) =>
+    (!!meId && t.assigneeUserId === meId) || (!!myName && (t.assigneeName || "").trim().toLowerCase() === myName);
+  return all.filter((t) => t.status !== "done" && (mine(t) || (unassigned(t) && isOverdue(t, nowMs))));
 }
 
 /* ---------- normalize + CRUD ---------- */

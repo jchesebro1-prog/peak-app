@@ -7,6 +7,7 @@
 import { dayKeyDiff, localDayKey, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import { chicagoDayKey } from "@/lib/drive-plan/day";
 import { collapsedGoogleNote, finishText, isGoogleNote } from "./labels";
+import { pinBlobKey } from "./pins";
 import { parsePlanItemKey, planItemKey, type PinKind, type PlanItemKind, type PlanResult, type TaskSize, type TaskTier } from "./types";
 
 export type PlanForView = { userId: string; name: string; note: string | null; result: PlanResult };
@@ -54,7 +55,8 @@ export type CalendarFuturePin = {
   startMs: number;
   endMs: number;
   pinKind: PinKind;
-  /** Any pin that hasn't begun (hand, or a held started one — D798), for the plan's owner or an admin (what the server accepts). */
+  /** Any STORED pin that hasn't begun (hand, or a held started one — D798), for the plan's owner or an admin (what the
+   *  server accepts); a pin this compute just made isn't stored yet, so it offers no Unpin. */
   canUnpin: boolean;
 };
 
@@ -90,12 +92,16 @@ export function calendarPlanView(
     const riskLabel = new Map(p.result.atRisk.map((a) => [a.itemKey, a.label] as const));
     const titleOf = new Map(p.result.blocks.map((b) => [b.itemKey, b.title] as const));
     const initials = opts.initials(p.userId, p.name);
+    // Only a pin that is actually stored (an input pin, not one this compute just made) can be Unpinned: a new pin is
+    // saved only on its owner's own view, and only after this view is built — Unpin on it would be a no-op.
+    const unsaved = new Set(p.result.newPins.map(pinBlobKey));
+    const stored = (pin: { itemKey: string; startMs: number }) => !unsaved.has(pinBlobKey(pin));
     for (const b of p.result.blocks) {
       planned.add(b.itemKey);
       if (b.endMs < opts.minMs || b.startMs > opts.maxMs) continue;
       // Any pin that hasn't begun can be Unpinned — a held "started" one (a remainder or an In-progress block) too,
       // the escape hatch (D798); a pin covering now stays locked. Only hand pins drag (the server refuses the rest).
-      const canUnpin = mayPin && !!b.pinned && b.startMs > now;
+      const canUnpin = mayPin && !!b.pinned && b.startMs > now && stored(b);
       view.blocks.push({
         key: b.key, itemKey: b.itemKey, kind: b.kind, id: b.id, title: b.title, href: b.href,
         startMs: b.startMs, endMs: b.endMs, pinned: b.pinned, canUnpin, draggable: mayPin && (!b.pinned || (canUnpin && b.pinned === "hand")),
@@ -111,7 +117,7 @@ export function calendarPlanView(
     }
     for (const f of p.result.futurePins) {
       const ref = parsePlanItemKey(f.itemKey);
-      if (ref) view.futurePins.push({ userId: p.userId, itemKey: f.itemKey, kind: ref.kind, id: ref.id, title: titleOf.get(f.itemKey) ?? ref.id, startMs: f.startMs, endMs: f.endMs, pinKind: f.kind, canUnpin: mayPin && f.startMs > now });
+      if (ref) view.futurePins.push({ userId: p.userId, itemKey: f.itemKey, kind: ref.kind, id: ref.id, title: titleOf.get(f.itemKey) ?? ref.id, startMs: f.startMs, endMs: f.endMs, pinKind: f.kind, canUnpin: mayPin && f.startMs > now && stored(f) });
     }
   }
   // One Google note stays verbatim; several (Everyone) collapse to a single line naming the people.

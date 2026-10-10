@@ -58,7 +58,8 @@ function dated(item: PlanItem, nowMs: number): PlanItem {
  *  again; it plans like unstarted work — one fresh, movable 30-minute chunk
  *  (or its size if smaller), urgency-ordered — at most once a day: once a
  *  chunk has begun today (and so locked as `started` on the owner's view),
- *  nothing more is placed until tomorrow. null = not in that state. */
+ *  nothing more is placed until tomorrow. These chunks queue after all work
+ *  that still has size left (D805). null = not in that state. */
 function freshChunkMin(item: PlanItem, pins: readonly BusyInterval[], nowMs: number): number | null {
   if (!pins.length || pins.some((p) => p.endMs > nowMs)) return null;
   if (pins.reduce((s, p) => s + (p.endMs - p.startMs) / MIN_MS, 0) < item.sizeMin) return null;
@@ -144,12 +145,17 @@ export function planPerson(input: PlanInput): PlanResult {
   const remainders = unfinishedRemainders({ items: ordered, pins, nowMs: now, hours: input.hours, released });
   const remainderKeys = new Set(remainders.map((r) => r.item.key));
   const queue: QueueEntry[] = remainders.map((r) => ({ item: r.item, minutes: r.minutes, earliestMs: Math.max(start, r.earliestMs) }));
+  // Still open after its whole size: a fresh movable chunk, once a day (D796) — queued AFTER every entry
+  // that still has size left, urgency order kept within each group (D805), so overdue finished-size
+  // items (which outrank everything under D784) can't starve new work. They still show At risk.
+  const finishedSize: QueueEntry[] = [];
   for (const item of ordered) {
     if (remainderKeys.has(item.key)) continue;
-    // Still open after its whole size: a fresh movable chunk, once a day (D796).
-    const minutes = freshChunkMin(item, pinsOf.get(item.key) ?? [], now) ?? placeable(item.sizeMin - (pinnedMin.get(item.key) ?? 0));
-    if (minutes > 0) queue.push({ item, minutes, earliestMs: Math.max(start, item.earliestMs ?? start) });
+    const fresh = freshChunkMin(item, pinsOf.get(item.key) ?? [], now);
+    const minutes = fresh ?? placeable(item.sizeMin - (pinnedMin.get(item.key) ?? 0));
+    if (minutes > 0) (fresh != null ? finishedSize : queue).push({ item, minutes, earliestMs: Math.max(start, item.earliestMs ?? start) });
   }
+  queue.push(...finishedSize);
 
   const unplaced = new Set<string>();
   for (const e of queue) {
