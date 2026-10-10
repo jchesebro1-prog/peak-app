@@ -11638,6 +11638,7 @@ seeded()
   .then(() => riserPolish1Checks())
   .then(() => riserPolish2Checks())
   .then(() => riserPolish3Checks())
+  .then(() => riserPhase2A1Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -64404,4 +64405,135 @@ async function riserPolish3Checks(): Promise<void> {
   const a = self.indexOf("await digitsSet({ designatorDigits: 1 });");
   const bIdx = self.indexOf("await digitsSet({ designatorDigits: digitsBefore });", a);
   ok(a > 0 && /\n  try \{/.test(self.slice(a, a + 200)) && /\} finally \{\s*await digitsSet\(\{ designatorDigits: digitsBefore \}\);/.test(self.slice(bIdx - 20, bIdx + 80)), "#321 polish digits: the #320 store checks restore designatorDigits in try/finally");
+}
+
+async function riserPhase2A1Checks(): Promise<void> {
+  const J = (v: unknown) => JSON.stringify(v);
+  const S = await import("@/lib/design/conduit-riser/suggest-tags");
+  const R = await import("@/lib/riser-data-sheet");
+  const { cleanTypeCode } = await import("@/lib/design/device-types");
+  const { cleanTagFields } = await import("@/lib/design/conduit-riser/tags");
+
+  // ---- 1. the suggestion rule table, row by row
+  const sug = (desc: string, model = "", category = "") => S.suggestTagDefaults({ model, desc, category });
+  const cases: Array<[string, ReturnType<typeof sug>, string]> = [
+    ["DMX and network outlet", sug("DMX / Ethernet wall outlet"), J({ code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" })],
+    ["DMX outlet", sug("5-pin DMX Outlet Panel"), J({ code: "CRO", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" })],
+    ["network outlet", sug("RJ45 data outlet, 2 port"), J({ code: "CRN", face: "NET", mount: "SM", height: '18"', pd: "P/D" })],
+    ["button station", sug("Architectural 6-button station"), J({ code: "EP", mount: "FM", height: '48"' })],
+    ["keypad", sug("Wall keypad"), J({ code: "EP", mount: "FM", height: '48"' })],
+    ["occupancy sensor", sug("Ceiling Occupancy Sensor"), J({ code: "OCC", mount: "CS" })],
+    ["touchscreen", sug("7in touchscreen"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["emergency bypass detection", sug("ELTS emergency bypass detection kit"), J({ code: "EBDK", mount: "SM" })],
+    ["emergency bypass controller", sug("DMX emergency bypass controller"), J({ code: "DEBC", mount: "SM" })],
+    ["dimmer rack", sug("ETC Sensor3 dimmer rack, 48 ch"), J({ code: "DR", mount: "SM" })],
+    ["Unison panel by model", sug("Control panel", "Unison ERn"), J({ code: "DR", mount: "SM" })],
+    ["relay panel by category", sug("24 circuit", "", "Relay Panels"), J({ code: "DR", mount: "SM" })],
+    ["equipment rack", sug("42RU equipment rack"), J({ code: "ER", mount: "FM" })],
+    ["enclosure", sug("Wall-mount enclosure"), J({ code: "ER", mount: "FM" })],
+    ["junction box", sug("Low voltage junction box"), J({ code: "LVJB", mount: "SM", pd: "P/D" })],
+    ["pull box", sug("Pull Box 12x12"), J({ code: "LVJB", mount: "SM", pd: "P/D" })],
+    ["no match", sug("Fog machine", "X1", "Atmospherics"), J({})],
+  ];
+  for (const [name, got, want] of cases) ok(J(got) === want, `#328 A1 rules: ${name} -> ${want}`);
+  ok(sug("DMX outlet plate with ethernet port").code === "CRON", "#328 A1 rules: CRON beats CRO and CRN");
+  ok(sug("DMX outlet").code === "CRO" && sug("Ethernet outlet").code === "CRN", "#328 A1 rules: CRO and CRN still match alone");
+  ok(sug("RACK-MOUNT DIMMER PANEL").code === "DR" && sug("occupancy SENSOR").code === "OCC", "#328 A1 rules: case-insensitive");
+  ok(S.SUGGEST_RULES.length === 11 && S.SUGGEST_RULES.every((r) => (r.values as Record<string, unknown>).box === undefined), "#328 A1 rules: Box is never suggested");
+  ok(S.SUGGEST_RULES.every((r) => (r.values.code === undefined || cleanTypeCode(r.values.code) === r.values.code)
+      && J(cleanTagFields({ ...r.values, code: undefined })) === J(Object.fromEntries(Object.entries(r.values).filter(([k]) => k !== "code")))),
+    "#328 A1 rules: every table value survives cleanTypeCode / cleanTagFields unchanged");
+
+  // ---- 2. export rows
+  type P = import("@/lib/riser-data-sheet").RiserPartLike;
+  const mk = (sku: string, desc: string, category: string, extra: Partial<P> = {}): P => ({ sku, manufacturer: "ETC", desc, category, ...extra });
+  const typeKeyOf = (p: P) => (p.category === "LC" ? "control-networking" : p.category === "DIM" ? "dimming-power" : p.category === "RK" ? "racks-cases" : p.category === "FX" ? "fixtures" : null);
+  const parts: P[] = [
+    mk("ETC:DMXO-1", "DMX outlet", "LC"),
+    mk("ETC:DR-1", "Dimmer rack", "DIM", { designatorCode: "DR", tagDefaults: { mount: "SM" } }),
+    mk("ETC:RK-1", "42RU equipment rack", "RK", { tagDefaults: { height: "99" } }),
+    mk("ETC:X-1", "Gateway", "LC"),
+    mk("ETC:FX-1", "Source Four", "FX"),
+    mk("ETC:UN-1", "Junction box", "LC", { designatorCode: "JB", tagDefaults: { box: "B2", face: "F", mount: "SM", height: "6", pd: "P" } }),
+  ];
+  const rows = R.riserDataRows(parts, typeKeyOf);
+  ok(rows.length === 5 && !rows.some((r) => r.sku === "ETC:FX-1"), "#328 A1 export: only control-networking / dimming-power / racks-cases parts");
+  const by = (sku: string) => rows.find((r) => r.sku === sku)!;
+  ok(by("ETC:DMXO-1").code === "CRO" && by("ETC:DMXO-1").face === "DMXO" && by("ETC:DMXO-1").source === "suggested", "#328 A1 export: a blank part is pre-filled from the rules, Source suggested");
+  ok(by("ETC:DR-1").code === "DR" && by("ETC:DR-1").mount === "SM" && by("ETC:DR-1").source === "current", "#328 A1 export: a part whose cells are all filled is current");
+  ok(by("ETC:RK-1").height === "99" && by("ETC:RK-1").code === "ER" && by("ETC:RK-1").mount === "FM" && by("ETC:RK-1").source === "suggested", "#328 A1 export: an existing value is never replaced, blanks around it are filled");
+  ok(by("ETC:X-1").code === "" && by("ETC:X-1").source === "—", "#328 A1 export: no value and no rule match is a blank row with Source —");
+  ok(by("ETC:UN-1").code === "JB" && by("ETC:UN-1").box === "B2" && by("ETC:UN-1").pd === "P" && by("ETC:UN-1").source === "current", "#328 A1 export: an existing value beats the rule (JB over LVJB, P over P/D)");
+  const cells = R.riserDataRowCells(by("ETC:DR-1"), (k) => (k === "dimming-power" ? "Dimming & Power" : k));
+  ok(J(cells) === J(["ETC", "DR-1", "ETC:DR-1", "Dimmer rack", "Dimming & Power", "DR", "", "", "SM", "", "", "current"]) && cells.length === R.RISER_DEVICE_HEADERS.length,
+    "#328 A1 export: cells follow the header order (Model is the part model, Device type the label)");
+  ok(J(R.RISER_DEVICE_HEADERS) === J(["Manufacturer", "Model", "SKU", "Description", "Device type", "Designator code", "Box", "Face", "Mount", "Height", "P/D", "Source"]), "#328 A1 export: header names");
+
+  // ---- 3. parse
+  const H = [...R.RISER_DEVICE_HEADERS] as unknown[];
+  const hdrNoSku = H.filter((h) => h !== "SKU");
+  ok(R.parseRiserDataSheet([hdrNoSku, ["x"]]).errors[0]?.message.includes("SKU") && R.parseRiserDataSheet([]).errors.length === 1, "#328 A1 parse: a sheet without the SKU header (or empty) is refused with one error");
+  ok(R.parseRiserDataSheet([["SKU", "Notes"], ["a", "b"]]).errors.length === 1, "#328 A1 parse: a sheet with no editable column is refused");
+  const row = (o: Record<string, unknown>) => H.map((h) => (o[h as string] ?? ""));
+  const pr = R.parseRiserDataSheet([
+    H,
+    row({ SKU: "A", "Designator code": " cro ", Box: "b2", Face: "dmxo", Height: 18, "P/D": "p/d" }),
+    row({ SKU: "B", "Designator code": "-", Box: "-", "P/D": "-" }),
+    row({ SKU: "C" }),
+    row({ SKU: "D", "Designator code": "TOOLONG1" }),
+    row({ SKU: "E", "P/D": "X" }),
+    row({ SKU: "F", Height: "123456789" }),
+    row({ Box: "B1" }),
+    row({}),
+    row({ SKU: "A", Box: "B9" }),
+    row({ SKU: "G", Mount: "sm", Source: "ignored" }),
+  ]);
+  const a = pr.rows.find((r) => r.sku === "A")!;
+  ok(a.row === 2 && a.code === "CRO" && a.tag.box === "B2" && a.tag.face === "DMXO" && a.tag.height === "18" && a.tag.pd === "P/D" && a.tag.mount === undefined, "#328 A1 parse: cells are cleaned, blank leaves the field undefined");
+  const b = pr.rows.find((r) => r.sku === "B")!;
+  ok(b.code === null && b.tag.box === null && b.tag.pd === null && b.tag.face === undefined, "#328 A1 parse: '-' clears (null)");
+  ok(pr.rows.find((r) => r.sku === "C") !== undefined, "#328 A1 parse: an all-blank-editable row is kept (the plan drops it as a no-op)");
+  ok(pr.rows.find((r) => r.sku === "G")!.tag.mount === "SM", "#328 A1 parse: Source column is ignored, Mount upper-cased");
+  const err = (n: number) => pr.errors.find((e) => e.row === n)?.message ?? "";
+  ok(/Designator code/.test(err(5)) && !pr.rows.some((r) => r.sku === "D"), "#328 A1 parse: an invalid code is a per-row error, row dropped");
+  ok(/P\/D/.test(err(6)) && !pr.rows.some((r) => r.sku === "E"), "#328 A1 parse: an invalid P/D is a per-row error");
+  ok(/Height/.test(err(7)) && !pr.rows.some((r) => r.sku === "F"), "#328 A1 parse: an over-long Height is an error, never truncated");
+  ok(/SKU/.test(err(8)), "#328 A1 parse: a row with values and no SKU is an error");
+  ok(/duplicate/i.test(err(10)) && pr.rows.filter((r) => r.sku === "A").length === 1, "#328 A1 parse: a repeated SKU is an error, the first row wins");
+  ok(pr.errors.length === 5 && pr.errors.every((e) => e.row >= 5), "#328 A1 parse: exactly the five bad rows error (blank row skipped)");
+  const multi = R.parseRiserDataSheet([H, row({ SKU: "M", "Designator code": "bad!", "P/D": "Q" })]);
+  ok(multi.errors.length === 1 && multi.errors[0].message.includes("P/D") && multi.errors[0].message.includes("Designator code") && multi.rows.length === 0, "#328 A1 parse: every bad cell in a row is reported");
+
+  // ---- 4. plan
+  const map = new Map<string, P>([
+    ["A", mk("ETC:A", "x", "LC", { designatorCode: "CRO", tagDefaults: { box: "B2", face: "DMXO", height: "18", pd: "P/D" } })],
+    ["B", mk("ETC:B", "x", "LC", { designatorCode: "DR", tagDefaults: { box: "B1", pd: "P" } })],
+    ["C", mk("ETC:C", "x", "LC", { designatorCode: "DR" })],
+    ["G", mk("ETC:G", "x", "LC")],
+    ["OLD", mk("ETC:NEW", "x", "LC")],
+  ]);
+  const plan = R.planRiserDataApply(R.parseRiserDataSheet([H,
+    row({ SKU: "A", "Designator code": "cro", Box: "B2", Face: "DMXO", Height: "18", "P/D": "P/D" }),
+    row({ SKU: "B", "Designator code": "-", Box: "-", "P/D": "-" }),
+    row({ SKU: "C" }),
+    row({ SKU: "G", Mount: "sm", "Designator code": "ER" }),
+    row({ SKU: "NOPE", Box: "B1" }),
+    row({ SKU: "OLD", Face: "NET" }),
+  ]).rows, map);
+  ok(plan.changes.every((c) => c.sku !== "ETC:A" && c.sku !== "ETC:C"), "#328 A1 plan: no-op rows (same value, all blank) are dropped");
+  const cb = plan.changes.find((c) => c.sku === "ETC:B")!;
+  ok(cb.patch.designatorCode === null && cb.patch.tagDefaults === null && cb.before.designatorCode === "DR" && cb.after.designatorCode === undefined && cb.after.tagDefaults === undefined,
+    "#328 A1 plan: '-' clears the code and empties the tag defaults to null");
+  const cg = plan.changes.find((c) => c.sku === "ETC:G")!;
+  ok(cg.patch.designatorCode === "ER" && J(cg.patch.tagDefaults) === J({ mount: "SM" }) && J(cg.after.tagDefaults) === J({ mount: "SM" }), "#328 A1 plan: a set writes the merged tag defaults");
+  const cn = plan.changes.find((c) => c.sku === "ETC:NEW")!;
+  ok(cn && J(cn.patch) === J({ tagDefaults: { face: "NET" } }) && !("designatorCode" in cn.patch), "#328 A1 plan: a renamed SKU lands on the resolved part, only changed pieces in the patch");
+  ok(J(plan.unknown) === J(["NOPE"]) && plan.changes.length === 3, "#328 A1 plan: an unknown SKU is listed, not changed");
+  const keep = R.planRiserDataApply(R.parseRiserDataSheet([H, row({ SKU: "A", Box: "B7" })]).rows, map);
+  ok(J(keep.changes[0].after.tagDefaults) === J({ box: "B7", face: "DMXO", height: "18", pd: "P/D" }) && keep.changes[0].after.designatorCode === "CRO", "#328 A1 plan: untouched cells carry over");
+
+  // ---- 5. purity
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("src/lib/riser-data-sheet.ts", "utf8") + fs.readFileSync("src/lib/design/conduit-riser/suggest-tags.ts", "utf8");
+  ok(!/from "@\/lib\/stores|from "@\/db|"server-only"/.test(src), "#328 A1: the rules and sheet model import no store, db or server-only code");
 }

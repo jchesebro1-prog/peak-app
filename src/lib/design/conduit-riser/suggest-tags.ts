@@ -1,0 +1,50 @@
+/**
+ * Riser tag suggestions (#328 A) — Bray's designator code plus the tag-block
+ * defaults a lighting-control part usually carries, guessed from its model,
+ * description and category. A pure table, first match wins, case-insensitive;
+ * `undefined` = leave the cell blank. Box is never suggested (gang count isn't
+ * knowable from the catalog). The riser data sheet shows these as "suggested"
+ * for Jeff to review — nothing is stored until he uploads and applies.
+ */
+
+import type { TagFields } from "./tags";
+
+export type SuggestedTagDefaults = { code?: string } & TagFields;
+export type SuggestInput = { model?: string; desc?: string; category?: string };
+export type SuggestRule = { id: string; test: (haystack: string) => boolean; values: SuggestedTagDefaults };
+
+const has = (re: RegExp) => (h: string) => re.test(h);
+const all = (...tests: Array<(h: string) => boolean>) => (h: string) => tests.every((t) => t(h));
+
+const DMX = has(/\bdmx\b/);
+const OUTLET_OR_PORT = has(/\b(outlets?|ports?|receptacles?)\b/);
+const NETWORK = has(/\b(network|ethernet|rj-?45)\b/);
+/** "network outlet", "RJ45 2-port", "data jack" — the qualifier sits within two words of the outlet. */
+const NETWORK_OUTLET = has(/\b(network|ethernet|rj-?45|data)\b(\s+\S+){0,2}?\s+(outlets?|ports?|jacks?|receptacles?)\b/);
+
+/** The table. Order matters: CRON (DMX + network) before CRO and CRN. */
+export const SUGGEST_RULES: readonly SuggestRule[] = [
+  { id: "CRON", test: all(DMX, NETWORK, OUTLET_OR_PORT), values: { code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" } },
+  { id: "CRO", test: all(DMX, has(/\b(outlets?|ports?|receptacles?)\b|connector panel/)), values: { code: "CRO", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" } },
+  { id: "CRN", test: NETWORK_OUTLET, values: { code: "CRN", face: "NET", mount: "SM", height: '18"', pd: "P/D" } },
+  { id: "EP", test: has(/button station|\bkeypads?\b|control station|\bpresets?\b|scene station/), values: { code: "EP", mount: "FM", height: '48"' } },
+  { id: "OCC", test: has(/\b(occupancy|vacancy)\s+sensors?\b/), values: { code: "OCC", mount: "CS" } },
+  { id: "TS", test: has(/touch\s?screen|touch panel/), values: { code: "TS", mount: "FM", height: '48"' } },
+  { id: "EBDK", test: has(/emergency bypass detect|\belts\b|\bbcm\s+sens/), values: { code: "EBDK", mount: "SM" } },
+  { id: "DEBC", test: has(/emergency bypass controller|dmx emergency bypass/), values: { code: "DEBC", mount: "SM" } },
+  {
+    id: "DR",
+    test: has(/\b(dimmer|relay|sensor3?\+?)s?\b(\s+\S+){0,2}?\s+(racks?|panels?)\b|\b(unison|drd|ern)\b|\bsensor3\b|\bsensor\+/),
+    values: { code: "DR", mount: "SM" },
+  },
+  { id: "ER", test: has(/equipment rack|\benclosures?\b/), values: { code: "ER", mount: "FM" } },
+  { id: "LVJB", test: has(/junction box|pull box/), values: { code: "LVJB", mount: "SM", pd: "P/D" } },
+];
+
+/** The first matching rule's values (a fresh object), or {} when none match. */
+export function suggestTagDefaults(part: SuggestInput): SuggestedTagDefaults {
+  const h = [part.model, part.desc, part.category].filter(Boolean).join(" | ").toLowerCase();
+  if (!h) return {};
+  for (const r of SUGGEST_RULES) if (r.test(h)) return { ...r.values };
+  return {};
+}
