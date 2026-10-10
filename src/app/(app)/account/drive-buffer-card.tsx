@@ -25,6 +25,11 @@ export default function DriveBufferCard({
       const r = await saveMyDriveBufferAction(n != null && Number.isFinite(n) ? n : null);
       if (r.ok) {
         if (r.driveBufferMin != null) setValue(String(r.driveBufferMin));
+        else {
+          // Cleared box = company default: make the card say so too.
+          setUseDefault(true);
+          setValue(String(companyDefault));
+        }
         setMsg("Saved");
         router.refresh();
       }

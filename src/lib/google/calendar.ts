@@ -2,6 +2,7 @@ import { accessTokenFor } from "@/lib/gmail/connections";
 import { accessTokenForConnection } from "./calendar-connections";
 import { presetFromRrule, rruleFor } from "./recurrence";
 import { findMeetingLink } from "./meeting-link";
+import { DRIVE_DAY_PROP, DRIVE_KEY_PROP, DRIVE_PROP } from "@/lib/drive-sync/diff";
 
 /**
  * Thin Google Calendar v3 client (D77) — plain fetch, bearer auth, zero deps,
@@ -77,8 +78,8 @@ async function gcalExternal<T>(
 /* ---- types (only the fields the app reads) ---- */
 
 type GoogleEventTime = { dateTime?: string; date?: string };
-type GoogleAttendee = { email: string; displayName?: string; responseStatus?: string };
-type GoogleEvent = {
+type GoogleAttendee = { email: string; displayName?: string; responseStatus?: string; self?: boolean };
+export type GoogleEvent = {
   id: string;
   iCalUID?: string;
   status?: string;
@@ -90,6 +91,7 @@ type GoogleEvent = {
   end?: GoogleEventTime;
   recurrence?: string[];
   attendees?: GoogleAttendee[];
+  extendedProperties?: { private?: Record<string, string> };
 };
 
 export type CalendarEvent = {
@@ -104,6 +106,11 @@ export type CalendarEvent = {
   location: string;
   htmlLink: string;
   meetingUrl: string;
+  /** The signed-in account declined it (spec: declined events aren't stops). */
+  selfDeclined: boolean;
+  /** Set only on the app's own drive events (private peakDrive = "1"). */
+  peakDriveKey: string;
+  peakDriveDay: string;
 };
 
 export type Attendee = { email: string; name: string; status: string };
@@ -163,21 +170,29 @@ function toMs(t: GoogleEventTime | undefined, fallback: number): number {
 
 /** Shared items→CalendarEvent[] mapping — used by both listUpcomingEvents
  *  (a mailbox's own primary calendar) and listEventsForCalendar (D148, an
- *  arbitrary calendar on a calendarConnections account). */
-function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEvent[] {
+ *  arbitrary calendar on a calendarConnections account); exported for the
+ *  spec harness. */
+export function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEvent[] {
   return (items || [])
     .filter((e) => e.status !== "cancelled")
-    .map((e) => ({
-      id: e.id,
-      iCalUID: e.iCalUID || "",
-      title: e.summary || "(no title)",
-      startMs: toMs(e.start, 0),
-      endMs: toMs(e.end, toMs(e.start, 0)),
-      allDay: !!e.start?.date,
-      location: e.location || "",
-      htmlLink: e.htmlLink || "",
-      meetingUrl: findMeetingLink(e.location, e.description),
-    }))
+    .map((e) => {
+      const priv = e.extendedProperties?.private || {};
+      const ours = priv[DRIVE_PROP] === "1";
+      return {
+        id: e.id,
+        iCalUID: e.iCalUID || "",
+        title: e.summary || "(no title)",
+        startMs: toMs(e.start, 0),
+        endMs: toMs(e.end, toMs(e.start, 0)),
+        allDay: !!e.start?.date,
+        location: e.location || "",
+        htmlLink: e.htmlLink || "",
+        meetingUrl: findMeetingLink(e.location, e.description),
+        selfDeclined: (e.attendees || []).some((a) => a.self && a.responseStatus === "declined"),
+        peakDriveKey: ours ? priv[DRIVE_KEY_PROP] || "" : "",
+        peakDriveDay: ours ? priv[DRIVE_DAY_PROP] || "" : "",
+      };
+    })
     .filter((e) => e.startMs > 0);
 }
 
@@ -202,6 +217,31 @@ export async function listUpcomingEvents(
     "/calendars/primary/events?" + eventsListParams(opts).toString()
   );
   return toCalendarEvents(r.items);
+}
+
+export type SyncCalendarEvent = CalendarEvent & { description: string };
+
+/** Every event in a window, with descriptions — the drive sync's read
+ *  (tagged-event diff, stops, D144 cleanup). Pages up to 4 x 250. */
+export async function listEventsForSync(
+  mailboxKey: string,
+  opts: { timeMinMs: number; timeMaxMs: number }
+): Promise<SyncCalendarEvent[]> {
+  const out: SyncCalendarEvent[] = [];
+  let pageToken = "";
+  for (let page = 0; page < 4; page++) {
+    const params = eventsListParams({ ...opts, maxResults: 250 });
+    if (pageToken) params.set("pageToken", pageToken);
+    const r = await gcal<{ items?: GoogleEvent[]; nextPageToken?: string }>(
+      mailboxKey,
+      "/calendars/primary/events?" + params.toString()
+    );
+    const desc = new Map((r.items || []).map((e) => [e.id, e.description || ""]));
+    for (const ev of toCalendarEvents(r.items)) out.push({ ...ev, description: desc.get(ev.id) || "" });
+    if (!r.nextPageToken) break;
+    pageToken = r.nextPageToken;
+  }
+  return out;
 }
 
 /* ---- D148: an additional connected account's own calendars ------------ */
@@ -280,9 +320,11 @@ export type EventWriteInput = {
   /** "" | "daily" | "weekly" | "monthly" | "yearly" (recurrence.ts) */
   recurrencePreset?: string;
   attendeeEmails?: string[];
+  /** Private extended properties (the drive sync's peakDrive tag). */
+  privateProps?: Record<string, string>;
 };
 
-function writeBody(ev: EventWriteInput) {
+export function eventWriteBody(ev: EventWriteInput) {
   const allDay = !!ev.allDay;
   return {
     summary: ev.title,
@@ -294,6 +336,7 @@ function writeBody(ev: EventWriteInput) {
     attendees: ev.attendeeEmails?.length
       ? ev.attendeeEmails.map((email) => ({ email }))
       : undefined,
+    extendedProperties: ev.privateProps ? { private: ev.privateProps } : undefined,
   };
 }
 
@@ -309,7 +352,7 @@ export async function insertEvent(
   const r = await gcal<GoogleEvent>(
     mailboxKey,
     "/calendars/primary/events?sendUpdates=" + sendUpdates,
-    { method: "POST", body: JSON.stringify(writeBody(ev)) }
+    { method: "POST", body: JSON.stringify(eventWriteBody(ev)) }
   );
   return { id: r.id, htmlLink: r.htmlLink || "" };
 }
@@ -339,7 +382,7 @@ export async function updateEvent(
   const r = await gcal<GoogleEvent>(
     mailboxKey,
     "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=" + sendUpdates,
-    { method: "PATCH", body: JSON.stringify(writeBody(ev)) }
+    { method: "PATCH", body: JSON.stringify(eventWriteBody(ev)) }
   );
   return { id: r.id, htmlLink: r.htmlLink || "" };
 }

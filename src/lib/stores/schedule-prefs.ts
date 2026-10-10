@@ -42,10 +42,14 @@ export async function getScheduleDefaults(): Promise<ScheduleDefaults> {
   return { driveBufferMin: cleanBufferMin(raw.driveBufferMin) ?? DEFAULT_DRIVE_BUFFER_MIN };
 }
 
-export async function saveScheduleDefaults(input: { driveBufferMin: unknown }): Promise<ScheduleDefaults> {
-  const driveBufferMin = cleanBufferMin(input?.driveBufferMin) ?? DEFAULT_DRIVE_BUFFER_MIN;
+export type SaveScheduleDefaultsResult = { ok: true; driveBufferMin: number } | { ok: false; error: string };
+
+/** Refuses blank / non-numeric input instead of silently storing the 15-minute fallback. */
+export async function saveScheduleDefaults(input: { driveBufferMin: unknown }): Promise<SaveScheduleDefaultsResult> {
+  const driveBufferMin = cleanBufferMin(input?.driveBufferMin);
+  if (driveBufferMin == null) return { ok: false, error: `Enter whole minutes between 0 and ${MAX_DRIVE_BUFFER_MIN}.` };
   await setBlob(SCHEDULE_DEFAULTS_BLOB, { driveBufferMin });
-  return { driveBufferMin };
+  return { ok: true, driveBufferMin };
 }
 
 export async function getUserSchedulePrefs(userId: string): Promise<UserSchedulePrefs> {

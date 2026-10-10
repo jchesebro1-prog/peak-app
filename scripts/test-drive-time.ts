@@ -43,6 +43,17 @@ import {
   venueGeoStatus,
 } from "@/lib/address-verify/state";
 
+import {
+  desiredFromLegs,
+  diffDriveEvents,
+  drivePrivateProps,
+  existingFromCalendar,
+  isLegacyTravelBlock,
+  type DesiredDriveEvent,
+  type ExistingDriveEvent,
+} from "@/lib/drive-sync/diff";
+import { eventWriteBody, toCalendarEvents } from "@/lib/google/calendar";
+
 export type Ok = (c: boolean, m: string) => void;
 
 export async function driveTimeKeysChecks(ok: Ok): Promise<void> {
@@ -731,8 +742,57 @@ export async function driveTimePrefsChecks(ok: Ok): Promise<void> {
     await markDriveStale([U]);
     const st = await getDriveSyncState(U);
     ok(st.lastSyncAt === 0 && st.legacyCleanedAt === 99, "drive-time prefs: markDriveStale zeroes lastSyncAt and keeps the legacy-cleanup stamp");
-    await saveScheduleDefaults({ driveBufferMin: before.driveBufferMin });
+    const bad = await saveScheduleDefaults({ driveBufferMin: "abc" });
+    const blank = await saveScheduleDefaults({ driveBufferMin: "" });
+    const good = await saveScheduleDefaults({ driveBufferMin: before.driveBufferMin });
+    ok(!bad.ok && !blank.ok && good.ok && good.driveBufferMin === before.driveBufferMin && (await getScheduleDefaults()).driveBufferMin === before.driveBufferMin,
+      "drive-time prefs: the company default refuses blank / non-numeric input with an error and keeps the stored value");
   } finally {
     await db.delete(blobs).where(like(blobs.id, "%TESTdrive:%"));
   }
+}
+
+export async function driveTimeDiffChecks(ok: Ok): Promise<void> {
+  const sA = stop("sv:A", at(9), at(10), okAddr(P1.lat, P1.lng, "A"));
+  const legs = planDay(input({ stops: [sA, stop("g:bad", at(11), at(12), badAddr("bad"))], routeMinutes: routes([BASE, P1, 60]) }));
+  const desired = desiredFromLegs(legs);
+  ok(desired.length === 1 && desired[0].title === "Drive to sv:A" && desired[0].endMs === at(9) && desired[0].description.includes("60 min drive + 15 min buffer"),
+    "drive-time diff: only unflagged legs become Google events");
+
+  const d = (key: string, day: string, s: number, e: number, title = "Drive to X"): DesiredDriveEvent => ({ key, dayKey: day, title, description: "", startMs: s, endMs: e });
+  const x = (id: string, key: string, day: string, s: number, e: number, title = "Drive to X"): ExistingDriveEvent => ({ id, key, dayKey: day, title, startMs: s, endMs: e });
+  const want = [d("k1", DAY, 1, 2), d("k2", DAY, 3, 4), d("k3", DAY, 5, 6)];
+  const have = [x("e1", "k1", DAY, 1, 2), x("e2", "k2", DAY, 3, 9), x("e3", "gone", DAY, 7, 8), x("e4", "other", "2026-10-20", 1, 2), x("e5", "k1", DAY, 1, 2)];
+  const diff = diffDriveEvents(want, have, new Set([DAY]));
+  ok(diff.insert.map((i) => i.key).join() === "k3" && diff.update.map((u) => u.id).join() === "e2" &&
+     diff.remove.map((r) => r.id).sort().join() === "e3,e5",
+    "drive-time diff: insert new, update moved, delete orphans + duplicates; unchanged left alone");
+  ok(!diff.remove.some((r) => r.id === "e4"), "drive-time diff: tagged events on days outside this sync are never touched");
+
+  const cal = existingFromCalendar([
+    { id: "a", title: "Drive to X", startMs: 1, endMs: 2, peakDriveKey: "k", peakDriveDay: DAY },
+    { id: "b", title: "Drive to X", startMs: 1, endMs: 2, peakDriveKey: "", peakDriveDay: "" },
+  ]);
+  ok(cal.length === 1 && cal[0].id === "a", "drive-time diff: only tagged (peakDrive) events count as ours");
+
+  const now = 1_000_000;
+  const legacy = { title: "Drive to Board meeting (auto)", description: "Auto-added travel time \u2014 safe to delete or edit. Estimated 40 min from Madison.", startMs: now + 1, peakDriveKey: "" };
+  ok(isLegacyTravelBlock(legacy, now), "drive-time D144: an upcoming exact-shape auto block matches");
+  ok(!isLegacyTravelBlock({ ...legacy, startMs: now - 1 }, now), "drive-time D144: past blocks are left");
+  ok(!isLegacyTravelBlock({ ...legacy, description: "My own note" }, now) && !isLegacyTravelBlock({ ...legacy, title: "Drive to Board meeting" }, now),
+    "drive-time D144: the title AND the description prefix must both match");
+  ok(!isLegacyTravelBlock({ ...legacy, peakDriveKey: "k" }, now), "drive-time D144: one of our own tagged events is never a legacy block");
+
+  const mapped = toCalendarEvents([
+    { id: "g1", summary: "Site walk", start: { dateTime: "2026-10-14T14:00:00Z" }, end: { dateTime: "2026-10-14T15:00:00Z" }, attendees: [{ email: "me@x.com", self: true, responseStatus: "declined" }] },
+    { id: "g2", summary: "Drive to X", start: { dateTime: "2026-10-14T13:00:00Z" }, end: { dateTime: "2026-10-14T14:00:00Z" }, extendedProperties: { private: { peakDrive: "1", peakDriveKey: "k9", peakDriveDay: DAY } } },
+    { id: "g3", summary: "Spoof", start: { dateTime: "2026-10-14T13:00:00Z" }, end: { dateTime: "2026-10-14T14:00:00Z" }, extendedProperties: { private: { peakDriveKey: "k9" } } },
+  ]);
+  ok(mapped[0].selfDeclined && mapped[0].peakDriveKey === "" && mapped[1].peakDriveKey === "k9" && mapped[1].peakDriveDay === DAY && mapped[2].peakDriveKey === "",
+    "drive-time calendar: declined-by-me and our private drive tag are read; a key without peakDrive=1 isn't ours");
+  const body = eventWriteBody({ title: "Drive to X", startMs: 1, endMs: 2, privateProps: drivePrivateProps(d("k1", DAY, 1, 2)) }) as { extendedProperties?: { private?: Record<string, string> } };
+  ok(body.extendedProperties?.private?.peakDrive === "1" && body.extendedProperties.private.peakDriveKey === "k1" && body.extendedProperties.private.peakDriveDay === DAY,
+    "drive-time calendar: app-written drive events carry peakDrive + leg key + day");
+  ok((eventWriteBody({ title: "Mine", startMs: 1, endMs: 2 }) as { extendedProperties?: unknown }).extendedProperties === undefined,
+    "drive-time calendar: ordinary event writes carry no extended properties");
 }

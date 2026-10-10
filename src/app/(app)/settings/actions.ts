@@ -898,6 +898,7 @@ export async function saveDriveDefaultsAction(input: { driveBufferMin: unknown }
   const { saveScheduleDefaults, markDriveStale } = await import("@/lib/stores/schedule-prefs");
   const { activeUsers } = await import("@/lib/users");
   const saved = await saveScheduleDefaults({ driveBufferMin: input?.driveBufferMin });
+  if (!saved.ok) return { ok: false as const, error: saved.error };
   await markDriveStale((await activeUsers()).map((u) => u.id));
   revalidatePath("/", "layout");
   return { ok: true as const, driveBufferMin: saved.driveBufferMin };

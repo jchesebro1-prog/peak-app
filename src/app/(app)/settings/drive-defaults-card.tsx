@@ -7,6 +7,7 @@ import { saveDriveDefaultsAction } from "./actions";
 export function DriveDefaultsCard({ initial }: { initial: number }) {
   const [value, setValue] = useState(String(initial));
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   return (
     <div className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
@@ -25,6 +26,7 @@ export function DriveDefaultsCard({ initial }: { initial: number }) {
           onChange={(e) => {
             setValue(e.target.value);
             setSaved(false);
+            setError("");
           }}
         />
         <span style={{ fontSize: 12, color: "#9aa0ab" }}>min</span>
@@ -34,10 +36,13 @@ export function DriveDefaultsCard({ initial }: { initial: number }) {
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
+              setError("");
               const r = await saveDriveDefaultsAction({ driveBufferMin: value });
               if (r.ok) {
                 setValue(String(r.driveBufferMin));
                 setSaved(true);
+              } else {
+                setError(r.error);
               }
             })
           }
@@ -45,6 +50,7 @@ export function DriveDefaultsCard({ initial }: { initial: number }) {
           {pending ? "Saving…" : "Save"}
         </button>
         {saved && <span style={{ fontSize: 11, color: "#1f7a52" }}>Saved</span>}
+        {error && <span style={{ fontSize: 11, color: "#b42318" }}>{error}</span>}
       </div>
     </div>
   );
