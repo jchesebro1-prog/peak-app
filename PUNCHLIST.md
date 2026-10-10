@@ -11671,7 +11671,7 @@ linked to the plan's devices, with wire (and sometimes conduit) priced as an opt
   at 1.5×; page size stays a manual per-design choice (D806).
 - ~~Confirm the **phone view** should be fully read-only~~ — decided and done (Jeff, 2026-10-10): the whole riser page is
   view-only on a phone (D807).
-- Polish shipped 2026-10-10 (D806–D811, commits 6a66741f..58aef63e): fit the page, read-only phone, keyboard access,
+- Polish shipped 2026-10-10 (D806–D811, commits b2214964..58aef63e): fit the page, read-only phone, keyboard access,
   busy states, undo kept across the editor's own writes, estimate-owned price flags refused server-side, strict Box
   types save, per-foot conduit search, quote labels reuse loaded parts, restore drops dangling sheet levels.
 - Next: #328 — riser data sheet, computed conduit fill, A/V conduit riser (spec
@@ -11740,3 +11740,9 @@ Open (Jeff-gated):
 - Review the 80 % fill cap (D793) and the work-hours defaults (Mon–Fri 8:00–5:00, Settings → Field; each person's own
   hours in Account).
 - Try a drag and an At risk fix (Push due date / Hand off) on production.
+
+## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — PLANNED
+
+Approved by Jeff 2026-10-10. Spec `docs/superpowers/specs/2026-10-10-riser-phase2-design.md`; plan
+`docs/superpowers/plans/2026-10-10-riser-phase2.md`. Build order: A riser data sheet + wire-type symbol fill →
+B computed conduit fill (EMT, suggest + warn) → C A/V conduit riser. Each piece reviewed and pushed on its own.

@@ -10978,7 +10978,7 @@ predates the rule still loads. `cleanWireTypes` likewise reads symbol and signal
   Connect and Accept all hold `busy`.
 - Layout undo can no longer resurrect an older layout: the stack carries the project's `updatedAt`, and the editor keeps
   it across its own writes only when the store reports `landed: { before, after }` matching that version (patch,
-  accept, dismiss, tag, tag-field and levels saves); a write by another tab or a plan edit empties it.
+  accept, dismiss, tag-field and levels saves); a write by another tab or a plan edit empties it.
 - The detail panel's scope radios share one `name` per detail. The plan prompt hides only for its own ticket, so a
   late Add success cannot swallow a newer wire's prompt, and a failed Add shows in the status-bar error.
 
@@ -10986,6 +10986,7 @@ predates the rule still loads. `cleanWireTypes` likewise reads symbol and signal
 
 The conduit-part search filters per-foot parts before scoring, the cap and the total, so a size's picker is no longer
 crowded out by other parts. Grid quotes label run ends with the editor's designators computed in memory from the rows
-already loaded (`fillDesignatorsInMemory`, `labelPartsFrom`, `GridQuoteInputs.labelCtx`, loaded once and shared), not
-by re-reading parts per quote. `restoreRevision` drops `sheetLevels` entries that name a level absent from the
+already loaded (`fillDesignatorsInMemory`, `labelPartsFrom`, `GridQuoteInputs.labelCtx`) — shared and loaded once when
+the caller passes `GridQuoteInputs` (the editor page, the Designs dashboard); a single quote built without inputs
+(Add to Quotes) reads settings and device types itself, once. `restoreRevision` drops `sheetLevels` entries that name a level absent from the
 restored levels, so a restore never leaves a dangling sheet level.
