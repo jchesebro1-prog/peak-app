@@ -27,7 +27,7 @@ import {
 import { normalizedTitle, tokens } from "@/lib/triage/text";
 import { parseTriageKey, triageKey } from "@/lib/triage/keys";
 import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/triage/rank";
-import { feedErrorMessage, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
+import { feedErrorMessage, type SnapshotRow, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
 import { clipLine, formatTimestamp, matchTranscriptLine } from "@/lib/triage/transcript-match";
 import { collapseDuplicates } from "@/lib/triage/dedupe";
 import { selectEmail, type DealIndex } from "@/lib/triage/feeds/email";
@@ -42,9 +42,17 @@ import { normalizeRecording, type RecordingRecord } from "@/lib/stores/recording
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import type { Quote } from "@/lib/stores/quotes";
 import type { CommThread } from "@/lib/stores/comms";
-import { normalizeTask, type TaskRecord } from "@/lib/stores/tasks";
+import { normalizeTask, setTaskStatus, type TaskRecord } from "@/lib/stores/tasks";
 import type { Assignment } from "@/lib/stores/assignments";
 import type { LeadRecord } from "@/lib/stores/leads";
+import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
+import { getSnapshot, markId, setMark } from "@/lib/triage/store";
+import { buildSlotForAll, LIVE_NOTE, loadTriageView, type TriageView } from "@/lib/triage/service";
+import { closedKeys } from "@/lib/triage/liveness";
+import { markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
+import { gatherCandidates, toSnapshotRows } from "@/lib/triage/build";
+import { NO_HOOKS } from "@/lib/triage/hooks";
+import type { TriageFeed } from "@/lib/triage/feeds/context";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -491,4 +499,117 @@ export async function triageCallChecks(ok: Ok): Promise<void> {
   ok(cc[0].mention === `Walkthrough REC-1 (${chicagoShortDate(MON_10 - 2 * D)})`, "calls feed: the meeting + date used by 'Also mentioned in'");
   ok(CALL_WINDOW_MS === 7 * D, "calls feed: the window is 7 days");
   ok(FEEDS.map((f) => f.source).join(",") === "email,call,task,lead,visit,quote,renewal", "feeds: all seven sources are registered, one module each");
+}
+
+export async function triageSnapshotChecks(ok: Ok): Promise<void> {
+  /* ---- pure: marks ---- */
+  const cur = { snapshotId: "u:2026-10-12:morning", day: "2026-10-12", slot: "morning" as const };
+  const noonRef = { snapshotId: "u:2026-10-12:midday", day: "2026-10-12", slot: "midday" as const };
+  ok(markHides({ kind: "dismiss", snapshotId: null, until: null }, cur), "marks: dismiss hides for good");
+  ok(markHides({ kind: "done", snapshotId: cur.snapshotId, until: null }, cur) && !markHides({ kind: "done", snapshotId: cur.snapshotId, until: null }, noonRef), "marks: done-for-today hides only in the snapshot it was marked in");
+  ok(
+    snoozeUntil("2026-10-12") === "2026-10-13:0" &&
+      markHides({ kind: "snooze", snapshotId: null, until: "2026-10-13:0" }, noonRef) &&
+      !markHides({ kind: "snooze", snapshotId: null, until: "2026-10-13:0" }, { snapshotId: "x", day: "2026-10-13", slot: "morning" }),
+    "marks: a snooze holds through midday and returns the next morning"
+  );
+  const row = (key: string): SnapshotRow => ({ key, source: parseTriageKey(key)!.source, title: key, sub: "", href: "/", score: 1, reason: "", callLine: null, also: [] });
+  ok(
+    visibleRows([row("lead:a"), row("lead:b"), row("task:c")], [{ id: "m", userId: "u", key: "lead:a", kind: "dismiss", at: 1, snapshotId: null, until: null }], new Set(["task:c"]), cur).map((r) => r.key).join() === "lead:b",
+    "view: marked and closed rows are filtered out"
+  );
+
+  /* ---- pure: build ---- */
+  const g = await gatherCandidates({ me: ME, now: MON_10, users: [], hooks: NO_HOOKS }, [
+    { source: "lead", load: async () => ({ candidates: [cand("lead:a", "lead", [{ kind: "lead_stale", days: 6 }])] }) },
+    { source: "email", load: async () => { throw new Error("boom"); } },
+    { source: "visit", load: (() => { throw new Error("sync boom"); }) as TriageFeed["load"] },
+  ]);
+  ok(
+    g.candidates.length === 1 &&
+      g.errors.map((e) => e.message).join("|") === "Email couldn't be read — list may be incomplete|Site visits couldn't be read — list may be incomplete",
+    "build: a failing feed (async or sync throw) doesn't fail the list"
+  );
+  const rows = toSnapshotRows(
+    [cand("lead:a", "lead", [{ kind: "lead_stale", days: 6 }]), cand("lead:a", "lead", [{ kind: "lead_sla_breached" }]), cand("task:t", "task", [{ kind: "task_due_today" }])],
+    []
+  );
+  ok(rows.map((r) => r.key).join(",") === "lead:a,task:t" && rows[0].score === 60 && rows[0].reason === "First response overdue" && Array.isArray(rows[0].also), "build: rows are ranked, one per key, with score and reason");
+
+  /* ---- pure: liveness ---- */
+  const lrows = ["task:T1", "task:T2", "asg:A1", "email:C1", "email:C2", "call:R1:k1", "call:R1:k2", "quote:Q1", "lead:L1"].map(row);
+  const closed = closedKeys(
+    lrows,
+    {
+      tasks: new Map([["T1", { status: "done" as const }], ["T2", { status: "open" as const }]]),
+      assignments: new Map([["A1", { done: false }]]),
+      threads: new Map([
+        ["C1", { status: "replied" as const, archived: false, assignedTo: ME.name }],
+        ["C2", { status: "waiting_us" as const, archived: false, assignedTo: ME.name }],
+      ]),
+      recordings: new Map([["R1", { actionItems: [{ key: "k1", disposition: "accepted" }, { key: "k2", disposition: "pending" }] }]]),
+      quotes: new Map([["Q1", { id: "Q1", owner: "Someone Else", status: "draft", review: { state: "approved" } } as unknown as Quote]]),
+    },
+    ME,
+    MON_10
+  );
+  ok([...closed].sort().join(",") === "call:R1:k1,email:C1,quote:Q1,task:T1", "liveness: a done task, replied thread, decided to-do and approved quote are hidden; open ones and leads stay");
+
+  /* ---- DB: lazy build, freeze, done-source, marks ---- */
+  const U = { id: fixtureId("TRIAGE", "u1"), name: "Triage Tester", canApprove: false };
+  const TASK = fixtureId("TRIAGE", "t1");
+  const L = (s: string) => `lead:${fixtureId("TRIAGE", s)}`;
+  await createFixture("tasks", normalizeTask({ id: TASK, title: "Send drawings", assigneeName: U.name, dueAt: MON_10 - 3 * D, status: "open", createdAt: 1 }));
+  const feeds: TriageFeed[] = [
+    { source: "lead", load: async () => ({ candidates: ["l1", "l2", "l3"].map((s, i) => cand(L(s), "lead", [{ kind: "lead_stale", days: 6 + i }])) }) },
+    { source: "task", load: async () => ({ candidates: [cand(`task:${TASK}`, "task", [{ kind: "task_overdue", days: 3 }])], openWork: [{ key: `task:${TASK}`, title: "Send drawings" }] }) },
+    { source: "email", load: async () => { throw new Error("boom"); } },
+  ];
+  const ids = {
+    mon: snapshotId(U.id, "2026-10-12", "morning"),
+    noon: snapshotId(U.id, "2026-10-12", "midday"),
+    tue: snapshotId(U.id, "2026-10-13", "morning"),
+    fri: snapshotId(U.id, "2026-10-16", "morning"),
+  };
+  for (const id of Object.values(ids)) registerFixture("triage_snapshots", id);
+  for (const s of ["l1", "l2", "l3"]) registerFixture("triage_marks", markId(U.id, L(s)));
+  const keysOf = (v: TriageView) => v.rows.map((r) => r.key);
+
+  const v1 = await loadTriageView(U, MON_10, { feeds });
+  const saved = await getSnapshot(ids.mon);
+  ok(!!saved && saved.builtBy === "lazy" && saved.rows.length === 4 && v1.rows.length === 4, "snapshot: the first view after a slot boundary builds and saves the slot lazily");
+  ok(v1.snapshot.errors.length === 1 && v1.snapshot.errors[0].message === "Email couldn't be read — list may be incomplete", "snapshot: a failing feed is noted and the rest still build");
+  const v2 = await loadTriageView(U, MON_10 + H, { feeds: [] });
+  ok(v2.snapshot.builtAt === MON_10 && v2.rows.length === 4, "snapshot: between runs the list is frozen");
+  await setTaskStatus(TASK, "done");
+  const v3 = await loadTriageView(U, MON_10 + H, { feeds: [] });
+  ok(!keysOf(v3).includes(`task:${TASK}`) && v3.rows.length === 3, "snapshot: a row whose source is now done is hidden on render");
+
+  await setMark({ userId: U.id, key: L("l1"), kind: "snooze", at: MON_10, snapshotId: ids.mon, until: snoozeUntil("2026-10-12") });
+  await setMark({ userId: U.id, key: L("l2"), kind: "dismiss", at: MON_10, snapshotId: ids.mon, until: null });
+  await setMark({ userId: U.id, key: L("l3"), kind: "done", at: MON_10, snapshotId: ids.mon, until: null });
+  const am = keysOf(await loadTriageView(U, MON_10 + H, { feeds: [] }));
+  ok(!am.includes(L("l1")) && !am.includes(L("l2")) && !am.includes(L("l3")), "marks: snoozed, dismissed and done-for-today rows hide in this snapshot");
+  const noon = keysOf(await loadTriageView(U, MON_12, { feeds }));
+  ok(!noon.includes(L("l1")) && !noon.includes(L("l2")) && noon.includes(L("l3")), "marks: at midday the snooze and dismiss hold; done-for-today returns in the new snapshot");
+  const tue = keysOf(await loadTriageView(U, TUE_8, { feeds }));
+  ok(tue.includes(L("l1")) && !tue.includes(L("l2")), "marks: a snooze returns the next morning; a dismiss is permanent");
+  await setMark({ userId: U.id, key: L("l2"), kind: "snooze", at: TUE_8, snapshotId: ids.tue, until: "2026-10-14:0" });
+  ok(!keysOf(await loadTriageView(U, TUE_8 + 3 * D, { feeds })).includes(L("l2")), "marks: a later mark never revives a dismissed row");
+
+  /* ---- DB: live fallback ---- */
+  const U2 = { id: fixtureId("TRIAGE", "u2"), name: "Triage Two", canApprove: false };
+  const live = await loadTriageView(U2, MON_10, { feeds, save: async () => { throw new Error("db down"); } });
+  ok(
+    live.note === LIVE_NOTE && live.snapshot.builtBy === "live" && live.rows.length > 0 && !(await getSnapshot(snapshotId(U2.id, "2026-10-12", "morning"))),
+    "snapshot: when the lazy build can't be saved the list is computed live, with a note"
+  );
+
+  /* ---- DB: cron build ---- */
+  const U3 = { id: fixtureId("TRIAGE", "u3"), name: "Triage Three", canApprove: false };
+  const s3 = snapshotId(U3.id, "2026-10-12", "midday");
+  registerFixture("triage_snapshots", s3);
+  const res = await buildSlotForAll("midday", MON_12, { users: [U3], feeds });
+  const got = await getSnapshot(s3);
+  ok(res.built === 1 && res.failed.length === 0 && got?.builtBy === "cron" && got.slot === "midday", "cron: buildSlotForAll writes each user's slot snapshot");
 }
