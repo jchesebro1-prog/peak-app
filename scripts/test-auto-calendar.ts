@@ -7,7 +7,8 @@ import type { DriveLeg } from "@/lib/drive-plan/plan";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import { TRIAGE_HOOKS } from "@/lib/triage/hooks";
 import { planItemsByPerson } from "@/lib/task-plan/items";
-import { loadTaskPlans, savePlanPins, type PinStore, type TaskPlanDeps } from "@/lib/task-plan/load";
+import { calendarBudgetMs, loadTaskPlans, savePlanPins, type PinStore, type TaskPlanDeps } from "@/lib/task-plan/load";
+import type { AtRiskShared } from "@/lib/triage/hooks";
 import { taskPlanAtRisk } from "@/lib/task-plan/triage";
 import { like } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -878,8 +879,36 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
   const [failed] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => many, readEvents: async () => ({ status: "failed", events: [] }) }) });
   ok(failed.calendar === "failed" && failed.note === "Planned without your Google calendar — may overlap meetings" && failed.result.blocks.length > 0,
     "auto-cal loader: an unreadable Google calendar still plans, with the note");
-  const [slow] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => many, readEvents: () => new Promise(() => {}) }) });
+  const warned: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...a: unknown[]) => void warned.push(a.map(String).join(" "));
+  let slow: Awaited<ReturnType<typeof loadTaskPlans>>[number];
+  try {
+    [slow] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => many, readEvents: () => new Promise(() => {}) }) });
+  } finally {
+    console.warn = realWarn;
+  }
   ok(slow.calendar === "failed" && slow.result.blocks.length > 0, "auto-cal loader: a calendar read that hangs times out and plans without it");
+  ok(warned.some((w) => w.includes("[task-plan] calendar read timed out: u1")), "auto-cal loader: a calendar timeout is logged with the user id");
+
+  // DST: the Google read covers exactly the planned days — through the 2036-11-02 fall-back (a 25-hour day).
+  const ranges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
+  for (const nowMs of [chicagoDayStart(MON), at(MON, 8)]) {
+    await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ now: () => nowMs, readEvents: async (_u, r) => (ranges.push(r), { status: "ok", events: [] }) }) });
+  }
+  const horizonEnd = chicagoDayStart(addDays(MON, 56));
+  ok(
+    ranges.length === 2 && ranges.every((r) => r.timeMaxMs === horizonEnd) && chicagoDayKey(horizonEnd - 1) === addDays(MON, 55) && horizonEnd - chicagoDayStart(MON) === 56 * 86_400_000 + 3_600_000,
+    "auto-cal loader: the calendar range ends at 00:00 Chicago after the last planned day, across the fall-back"
+  );
+
+  // The cron's calendar budget: min(timeout, deadline − now − 2 s), 0 = skip the read.
+  ok(calendarBudgetMs(6000, undefined, 0) === 6000 && calendarBudgetMs(6000, 20_000, 0) === 6000 && calendarBudgetMs(6000, 5000, 0) === 3000 && calendarBudgetMs(6000, 1500, 0) === 0 && calendarBudgetMs(6000, -5, 0) === 0,
+    "auto-cal loader: a cron calendar read is bounded by the build's deadline (2 s margin, floor 0)");
+  let lateReads = 0;
+  const [late] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deadlineMs: Date.now() + 1000, deps: deps({ tasks: async () => many, readEvents: async () => (lateReads++, { status: "ok", events: [] }) }) });
+  ok(lateReads === 0 && late.calendar === "failed" && late.note === "Planned without your Google calendar — may overlap meetings" && late.result.blocks.length > 0,
+    "auto-cal loader: with no time left before the deadline the Google read is skipped and the plan carries the calendar note");
   const everyone = await loadTaskPlans({
     userIds: "everyone",
     meId: "u2",
@@ -899,9 +928,9 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
   const noStore = { add: async () => {}, remove: async () => {} };
   const risky = Array.from({ length: 3 }, (_, i) => tk("R" + i, { size: "l", dueAt: at(MON, 17), createdAt: i }));
   const me = { id: "u1", name: "Dana", canApprove: false };
-  const set = await taskPlanAtRisk(me, at(MON, 8), { deps: deps({ tasks: async () => risky }), store: noStore });
+  const set = await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: deps({ tasks: async () => risky }), store: noStore });
   ok(set.has("task:R2") && !set.has("task:R0"), "auto-cal triage: the planner's At risk keys feed morning triage");
-  const boom = await taskPlanAtRisk(me, at(MON, 8), { deps: deps({ tasks: async () => { throw new Error("x"); } }), store: noStore });
+  const boom = await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: deps({ tasks: async () => { throw new Error("x"); } }), store: noStore });
   ok(boom.size === 0, "auto-cal triage: a planner failure never hides the tasks feed");
   ok(TRIAGE_HOOKS.atRisk === taskPlanAtRisk, "auto-cal triage: the app's triage hooks run the planner's at-risk provider");
 
@@ -925,19 +954,71 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
     ["assignments", { assignments: down }],
     ["roster", { roster: down }],
     ["pins", { pins: down }],
+    ["visits", { visits: down }],
+    ["workHours", { workHours: down }],
   ];
   for (const [label, over] of partial) {
     calls.length = 0;
     const d = deps({ tasks: async () => work, pins: async () => [stale], ...over });
     const rejected = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: d }).then(() => false, () => true);
-    const s = await taskPlanAtRisk(me, at(MON, 8), { deps: d, store: rec });
+    const s = await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: d, store: rec });
     ok(rejected && s.size === 0 && calls.length === 0, `auto-cal fail-closed: when ${label} can't be read the plan isn't computed, and no pin is written, removed or pruned`);
   }
   calls.length = 0;
-  await taskPlanAtRisk(me, at(MON, 8), { deps: deps({ tasks: async () => work, pins: async () => [stale] }), store: rec });
+  await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: deps({ tasks: async () => work, pins: async () => [stale] }), store: rec });
   const adds = calls.filter((c) => c.startsWith("add "));
   ok(calls.includes(`rm u1 ${pinBlobKey(stale)}`) && adds.length === 1 && adds[0].includes("task:IP1@") && adds[0].endsWith(` cap=task:IP1|task:Q1@${at(MON, 8)}`),
     "auto-cal fail-closed: a full load saves the in-progress pin with the cap given exactly the items it planned with, and drops the stale pin");
+  const everyoneDown = await loadTaskPlans({
+    userIds: "everyone",
+    meId: "u2",
+    deps: deps({ tasks: async () => tasks, assignments: async () => asgs, pins: async (uid) => (uid === "u3" ? down() : []) }),
+  }).then(() => false, () => true);
+  ok(everyoneDown, "auto-cal fail-closed: in Everyone mode one person's unreadable pins fail the whole load");
+
+  // One plan per build: the triage cron shares its memoized loaders and plans every user once.
+  const loadsBy: Record<string, number> = {};
+  const readsBy: Record<string, number> = {};
+  const cnt = <T,>(n: string, v: T) => async () => ((loadsBy[n] = (loadsBy[n] ?? 0) + 1), v);
+  const started = [
+    tk("S1", { status: "in_progress" }),
+    tk("S2", { status: "in_progress", assigneeUserId: "u2", assigneeName: "Sam" }),
+    tk("S3", { status: "in_progress", assigneeUserId: "u3", assigneeName: "Lee" }),
+  ];
+  const shared = (over: Partial<AtRiskShared> = {}): AtRiskShared => ({
+    build: {},
+    roster: cnt("roster", roster),
+    tasks: cnt("tasks", started),
+    assignments: cnt("assignments", [] as Assignment[]),
+    visits: cnt("visits", [] as SiteVisit[]),
+    userIds: roster.map((r) => r.id),
+    ...over,
+  });
+  const pdeps: Partial<TaskPlanDeps> = {
+    workHours: async () => DEFAULT_WORK_HOURS,
+    pins: async () => [],
+    readEvents: async (uid) => ((readsBy[uid] = (readsBy[uid] ?? 0) + 1), { status: "ok", events: [] }),
+    drive: async () => [],
+    calendarTimeoutMs: 200,
+  };
+  const people = roster.map((r) => ({ ...r, canApprove: false }));
+  calls.length = 0;
+  const build = shared();
+  for (const u of people) await taskPlanAtRisk(u, at(MON, 8), build, { deps: pdeps, store: rec });
+  ok(
+    ["u1", "u2", "u3"].every((u) => readsBy[u] === 1) && loadsBy.tasks === 1 && loadsBy.assignments === 1 && loadsBy.visits === 1 && loadsBy.roster === 1,
+    `auto-cal triage: a 3-user build plans everyone once — one Google read per user, each shared collection read once (${JSON.stringify({ ...loadsBy, ...readsBy })})`
+  );
+  ok(calls.filter((c) => c.startsWith("add ")).map((c) => c.split(" ")[1]).sort().join() === "u1,u2,u3", "auto-cal triage: a build saves each person's started pins once");
+  await taskPlanAtRisk(people[0], at(MON, 8), shared({ userIds: undefined }), { deps: pdeps, store: rec });
+  ok(readsBy.u1 === 2 && readsBy.u2 === 1 && readsBy.u3 === 1, "auto-cal triage: a single-user view (a fresh build) plans only that person");
+  calls.length = 0;
+  const failing = shared({ tasks: down });
+  const failSets = [];
+  for (const u of people) failSets.push(await taskPlanAtRisk(u, at(MON, 8), failing, { deps: pdeps, store: rec }));
+  ok(failSets.every((x) => x.size === 0) && calls.length === 0 && readsBy.u2 === 1,
+    "auto-cal fail-closed: a failed shared read stays failed for the whole build — no plan, no pin written or removed");
+
   const loadSrc = readFileSync("src/lib/task-plan/load.ts", "utf8");
   ok(/add: \(userId, pins, cap\) => addPins\(userId, pins, cap\)/.test(loadSrc), "auto-cal fail-closed: the app's pin store passes the cap context through to addPins");
 

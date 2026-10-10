@@ -3,7 +3,8 @@
  * person and runs it. Read-only — new pins come back in each result and are
  * written by savePlanPins (pages: after the response; cron: inline). Google
  * is read ONCE per person over the 8-week horizon (spec 2's
- * readCalendarForBooking, bounded by a timeout); drive blocks come from spec
+ * readCalendarForBooking, bounded by a timeout — and on the cron by its
+ * deadline); drive blocks come from spec
  * 1's planner in "cache" mode — no geocoding or OSRM on a view.
  *
  * FAILS CLOSED: if the roster, tasks, assignments, visits, work hours or a
@@ -12,7 +13,7 @@
  * "stale" or prune them against items that merely failed to load. Only the
  * Google read (→ the calendar note) and the drive layer degrade softly.
  */
-import { addDays, chicagoDayKey } from "@/lib/drive-plan/day";
+import { addDays, chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
 import { planDriveDays, type DriveDayPlan } from "@/lib/drive-plan/load";
 import type { CalendarEvent } from "@/lib/google/calendar";
 import { allAssignments, type Assignment } from "@/lib/stores/assignments";
@@ -33,7 +34,8 @@ import { planPerson } from "./plan";
 import { PLAN_HORIZON_DAYS, type BusyInterval, type PlanItem, type PlanPin, type PlanResult } from "./types";
 
 export const PLAN_CALENDAR_TIMEOUT_MS = 6_000;
-const DAY_MS = 86_400_000;
+/** Time kept back before a cron deadline when sizing the Google read. */
+export const PLAN_DEADLINE_MARGIN_MS = 2_000;
 
 export type PersonPlan = {
   userId: string;
@@ -57,6 +59,8 @@ export type TaskPlanDeps = {
   readEvents(userId: string, range: { timeMinMs: number; timeMaxMs: number }): Promise<{ status: CalendarRead; events: CalendarEvent[] }>;
   drive(args: { userId: string; dayKeys: string[]; events: CalendarEvent[] | null; visits: () => Promise<SiteVisit[]> }): Promise<DriveDayPlan[]>;
   calendarTimeoutMs: number;
+  /** Wall clock for the deadline budget (`now` is the plan's clock, which a build fixes). */
+  wallNow(): number;
 };
 
 function defaultDeps(): TaskPlanDeps {
@@ -71,13 +75,24 @@ function defaultDeps(): TaskPlanDeps {
     readEvents: readCalendarForBooking,
     drive: ({ userId, dayKeys, events, visits }) => planDriveDays({ userId, dayKeys, events, mode: "cache", deps: { visits } }),
     calendarTimeoutMs: PLAN_CALENDAR_TIMEOUT_MS,
+    wallNow: Date.now,
   };
 }
 
-/** `p`, or `fallback` once `ms` pass or if `p` rejects. */
-export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+/** The Google read's time limit: `timeoutMs`, or on a cron build
+ *  min(timeoutMs, deadline − now − margin), floored at 0 (0 = skip the read). */
+export function calendarBudgetMs(timeoutMs: number, deadlineMs: number | undefined, wallNowMs: number): number {
+  if (deadlineMs == null) return timeoutMs;
+  return Math.max(0, Math.min(timeoutMs, deadlineMs - wallNowMs - PLAN_DEADLINE_MARGIN_MS));
+}
+
+/** `p`, or `fallback` once `ms` pass (then `onTimeout` runs) or if `p` rejects. */
+export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolve) => {
-    const timer = setTimeout(() => resolve(fallback), ms);
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      resolve(fallback);
+    }, ms);
     p.then(
       (v) => {
         clearTimeout(timer);
@@ -93,10 +108,12 @@ export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<
 
 /** Plans for `userIds` ("everyone" = each roster person with planned work),
  *  the viewer first, then by name. Rejects when any item source or pin read
- *  fails (see the header). */
+ *  fails (see the header). `deadlineMs` (the cron) bounds every Google read by
+ *  calendarBudgetMs; with no time left the read is skipped (calendar note). */
 export async function loadTaskPlans(args: {
   userIds: readonly string[] | "everyone";
   meId?: string;
+  deadlineMs?: number;
   deps?: Partial<TaskPlanDeps>;
 }): Promise<PersonPlan[]> {
   const d: TaskPlanDeps = { ...defaultDeps(), ...args.deps };
@@ -107,9 +124,19 @@ export async function loadTaskPlans(args: {
   let visitsOnce: Promise<SiteVisit[]> | null = null;
   const visits = () => (visitsOnce ??= d.visits());
   const start = floorQuarter(now);
-  const range = { timeMinMs: start, timeMaxMs: start + PLAN_HORIZON_DAYS * DAY_MS };
   const dayKeys: string[] = [];
   for (let k = chicagoDayKey(start), i = 0; i < PLAN_HORIZON_DAYS; i++, k = addDays(k, 1)) dayKeys.push(k);
+  // Through 00:00 Chicago after the last planned day — a calendar-day bound, so a DST day is read whole.
+  const range = { timeMinMs: start, timeMaxMs: chicagoDayStart(addDays(dayKeys[dayKeys.length - 1], 1)) };
+  const calendarMs = calendarBudgetMs(d.calendarTimeoutMs, args.deadlineMs, d.wallNow());
+  const noCalendar = { status: "failed" as CalendarRead, events: [] as CalendarEvent[] };
+  const readCalendar = (userId: string) => {
+    if (calendarMs <= 0) {
+      console.warn("[task-plan] calendar read skipped (deadline):", userId);
+      return Promise.resolve(noCalendar);
+    }
+    return withTimeout(d.readEvents(userId, range), calendarMs, noCalendar, () => console.warn(`[task-plan] calendar read timed out: ${userId}`));
+  };
 
   const plans = await Promise.all(
     ids.map(async (userId): Promise<PersonPlan | null> => {
@@ -118,7 +145,7 @@ export async function loadTaskPlans(args: {
       const [hours, pins, cal, allV] = await Promise.all([
         d.workHours(userId),
         d.pins(userId),
-        withTimeout(d.readEvents(userId, range), d.calendarTimeoutMs, { status: "failed" as CalendarRead, events: [] as CalendarEvent[] }),
+        readCalendar(userId),
         visits(),
       ]);
       const events = cal.status === "ok" ? cal.events : null;
@@ -154,11 +181,20 @@ const defaultStore: PinStore = {
  *  removals are by key, so two tabs computing at once are safe. Never throws. */
 export async function savePlanPins(plans: readonly PersonPlan[], store: PinStore = defaultStore): Promise<void> {
   for (const p of plans) {
-    try {
-      if (p.result.newPins.length) await store.add(p.userId, p.result.newPins, p.items ? { items: p.items, nowMs: p.result.nowMs } : undefined);
-      if (p.result.staleKeys.length) await store.remove(p.userId, p.result.staleKeys);
-    } catch (err) {
-      console.error("[task-plan] pin save failed:", p.userId, err);
+    // Separate tries: a failed add never skips the stale removal, nor the reverse.
+    if (p.result.newPins.length) {
+      try {
+        await store.add(p.userId, p.result.newPins, p.items ? { items: p.items, nowMs: p.result.nowMs } : undefined);
+      } catch (err) {
+        console.error("[task-plan] pin save failed:", p.userId, err);
+      }
+    }
+    if (p.result.staleKeys.length) {
+      try {
+        await store.remove(p.userId, p.result.staleKeys);
+      } catch (err) {
+        console.error("[task-plan] stale pin removal failed:", p.userId, err);
+      }
     }
   }
 }

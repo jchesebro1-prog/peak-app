@@ -6,6 +6,7 @@ import { dayDiff, dayKey, nextDayKey } from "../clock";
 import type { OpenWork } from "../dedupe";
 import { triageKey } from "../keys";
 import type { TriageCandidate, TriageFact, TriageSource } from "../types";
+import type { AtRiskShared } from "../hooks";
 import type { FeedCtx, FeedResult, TriageFeed } from "./context";
 
 /** Spec 3 adds `priority` (high|normal|low) to tasks and assignments; read it only when present. */
@@ -64,10 +65,27 @@ export function selectTasks(
   return { candidates, openWork };
 }
 
+/** The build's memoized reads for the at-risk hook. The roster also holds
+ *  the users being planned (a build may name users outside the active roster). */
+export function atRiskShared(ctx: FeedCtx): AtRiskShared {
+  const planUsers = ctx.planUsers ?? [ctx.me];
+  const roster = ctx.users.map((u) => ({ id: u.id, name: u.name }));
+  for (const u of planUsers) if (!roster.some((r) => r.id === u.id)) roster.push({ id: u.id, name: u.name });
+  return {
+    build: ctx.data,
+    roster: async () => roster,
+    tasks: ctx.data.tasks,
+    assignments: ctx.data.assignments,
+    visits: ctx.data.visits,
+    userIds: planUsers.map((u) => u.id),
+    deadlineMs: ctx.deadlineMs,
+  };
+}
+
 export const tasksFeed: TriageFeed = {
   source: "task",
   async load(ctx) {
-    const [tasks, assignments, atRisk] = await Promise.all([ctx.data.tasks(), ctx.data.assignments(), ctx.hooks.atRisk(ctx.me, ctx.now)]);
+    const [tasks, assignments, atRisk] = await Promise.all([ctx.data.tasks(), ctx.data.assignments(), ctx.hooks.atRisk(ctx.me, ctx.now, atRiskShared(ctx))]);
     return selectTasks({ tasks, assignments, atRisk }, ctx);
   },
 };

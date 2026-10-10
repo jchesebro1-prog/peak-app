@@ -40,6 +40,10 @@ export type FeedCtx = {
   users: readonly { id: string; name: string }[];
   hooks: TriageHooks;
   data: FeedData;
+  /** Everyone this build computes (the cron's users); absent = only `me`. */
+  planUsers?: readonly { id: string; name: string }[];
+  /** The cron's stop time (bounds a hook's external reads); absent on a view. */
+  deadlineMs?: number;
 };
 
 export type FeedResult = { candidates: TriageCandidate[]; openWork?: OpenWork[] };

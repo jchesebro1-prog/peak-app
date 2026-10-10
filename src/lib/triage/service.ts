@@ -5,7 +5,7 @@ import { dayKey, slotAt, snapshotId } from "./clock";
 import { FEEDS } from "./feeds";
 import type { FeedCtx, FeedData, TriageFeed } from "./feeds/context";
 import { createFeedData } from "./feeds/data";
-import { TRIAGE_HOOKS } from "./hooks";
+import { TRIAGE_HOOKS, type TriageHooks } from "./hooks";
 import { loadClosedKeys } from "./liveness";
 import { getSnapshot, insertSnapshotIfAbsent, marksFor } from "./store";
 import type { SnapshotRow, Slot, TriageSnapshot, TriageUser } from "./types";
@@ -40,10 +40,18 @@ export async function computeSnapshot(
   at: { day: string; slot: Slot },
   now: number,
   builtBy: TriageSnapshot["builtBy"],
-  opts: { feeds?: readonly TriageFeed[]; users?: Roster; data?: FeedData } = {}
+  opts: { feeds?: readonly TriageFeed[]; users?: Roster; data?: FeedData; planUsers?: Roster; deadlineMs?: number; hooks?: TriageHooks } = {}
 ): Promise<TriageSnapshot> {
   // No shared loader (the lazy / live single-user path) → this snapshot gets its own.
-  const ctx: FeedCtx = { me, now, users: opts.users ?? (await rosterNow()), hooks: TRIAGE_HOOKS, data: opts.data ?? createFeedData() };
+  const ctx: FeedCtx = {
+    me,
+    now,
+    users: opts.users ?? (await rosterNow()),
+    hooks: opts.hooks ?? TRIAGE_HOOKS,
+    data: opts.data ?? createFeedData(),
+    planUsers: opts.planUsers,
+    deadlineMs: opts.deadlineMs,
+  };
   const { rows, errors } = await buildRows(ctx, opts.feeds ?? FEEDS);
   return { id: snapshotId(me.id, at.day, at.slot), userId: me.id, userName: me.name, day: at.day, slot: at.slot, builtAt: now, builtBy, rows, errors };
 }
@@ -51,7 +59,9 @@ export async function computeSnapshot(
 /**
  * Cron: build `slot` for today (Chicago) for every active user — or `opts.users`.
  * One user failing never stops the rest. Every user shares one memoized
- * loader, so each collection is scanned once for the whole run. A user whose
+ * loader, so each collection is scanned once for the whole run (the at-risk
+ * planner included: it plans every user once, on the first user's tasks feed,
+ * its Google reads bounded by the deadline). A user whose
  * slot already has a snapshot (someone's lazy view got there first) is kept
  * as is — the cron never reorders a list a person may already be working
  * (D709). Once `Date.now() >= opts.deadlineMs` it stops before starting the
@@ -60,7 +70,7 @@ export async function computeSnapshot(
 export async function buildSlotForAll(
   slot: Slot,
   now: number,
-  opts: { users?: TriageUser[]; feeds?: readonly TriageFeed[]; deadlineMs?: number; data?: FeedData } = {}
+  opts: { users?: TriageUser[]; feeds?: readonly TriageFeed[]; deadlineMs?: number; data?: FeedData; hooks?: TriageHooks } = {}
 ): Promise<{ built: number; kept: number; failed: string[]; skipped: string[] }> {
   const day = dayKey(now);
   const rows = await activeUsers();
@@ -81,7 +91,15 @@ export async function buildSlotForAll(
         kept++;
         continue;
       }
-      const snap = await computeSnapshot(u, { day, slot }, now, "cron", { feeds: opts.feeds, users: roster, data });
+      const snap = await computeSnapshot(u, { day, slot }, now, "cron", {
+        feeds: opts.feeds,
+        users: roster,
+        data,
+        // The at-risk planner plans every user of the build once, bounded by the deadline.
+        planUsers: users,
+        deadlineMs: opts.deadlineMs,
+        hooks: opts.hooks,
+      });
       // Insert-if-absent: a lazy view that landed during the compute wins.
       if (await insertSnapshotIfAbsent(snap)) built++;
       else kept++;

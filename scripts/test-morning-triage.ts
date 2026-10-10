@@ -56,7 +56,9 @@ import { markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
 import { gatherCandidates, MAX_SNAPSHOT_ROWS, toSnapshotRows } from "@/lib/triage/build";
 import { createFeedData, type FeedDataSources } from "@/lib/triage/feeds/data";
 import { dismissListedRow, foldedCallKeys, listedRow } from "@/lib/triage/listed";
-import { NO_HOOKS } from "@/lib/triage/hooks";
+import { NO_HOOKS, TRIAGE_HOOKS, type TriageHooks } from "@/lib/triage/hooks";
+import { taskPlanAtRisk } from "@/lib/task-plan/triage";
+import { DEFAULT_WORK_HOURS } from "@/lib/visit-plan/settings";
 import type { TriageFeed } from "@/lib/triage/feeds/context";
 
 export type Ok = (cond: boolean, msg: string) => void;
@@ -684,11 +686,31 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
     early.built === 0 && early.skipped.join() === BU.map((u) => u.id).join() && Object.keys(loads).length === 0 && !(await getSnapshot(snapshotId(BU[0].id, "2026-10-12", "midday"))),
     "cron: a deadline already passed → every user is skipped, nothing is built or read"
   );
-  const batch = await buildSlotForAll("midday", MON_12, { users: BU, deadlineMs: Date.now() + 600_000, data: createFeedData(sources) });
+  // The real at-risk planner, with only its per-user Google read, hours and pin I/O stubbed — its
+  // tasks/assignments/visits reads must come through the build's counting loaders.
+  const googleReads: Record<string, number> = {};
+  const plannerHooks: TriageHooks = {
+    ...TRIAGE_HOOKS,
+    atRisk: (me, now, shared) =>
+      taskPlanAtRisk(me, now, shared, {
+        deps: {
+          workHours: async () => DEFAULT_WORK_HOURS,
+          pins: async () => [],
+          drive: async () => [],
+          readEvents: async (uid) => ((googleReads[uid] = (googleReads[uid] ?? 0) + 1), { status: "ok", events: [] }),
+        },
+        store: { add: async () => {}, remove: async () => {} },
+      }),
+  };
+  const batch = await buildSlotForAll("midday", MON_12, { users: BU, deadlineMs: Date.now() + 600_000, data: createFeedData(sources), hooks: plannerHooks });
   const names = Object.keys(sources);
   ok(
     batch.built === 3 && batch.failed.length === 0 && batch.skipped.length === 0 && names.every((n) => loads[n] === 1),
-    `cron: a build for 3 users with the real feeds loads each of the 9 collections exactly once (${names.map((n) => loads[n]).join("/")})`
+    `cron: a build for 3 users with the real feeds and the real at-risk planner loads each of the 9 collections exactly once (${names.map((n) => loads[n]).join("/")})`
+  );
+  ok(
+    BU.every((u) => googleReads[u.id] === 1) && Object.values(googleReads).reduce((a, b) => a + b, 0) === BU.length,
+    `cron: the at-risk planner reads each user's Google calendar once per build (${JSON.stringify(googleReads)})`
   );
   ok((await getSnapshot(snapshotId(BU[2].id, "2026-10-12", "midday")))?.builtBy === "cron", "cron: each user still gets their own snapshot from the shared read");
   const twice = createFeedData(sources);
