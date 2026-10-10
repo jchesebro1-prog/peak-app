@@ -9434,7 +9434,7 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
  * teardown drops them — and the sweep catches what a quote spawns. */
 import { registerFixture } from "./test-fixtures";
 import { driveTimeKeysChecks, driveTimeStateChecks, driveTimeVenueStampChecks, driveTimePlaceBookChecks, driveTimeFixChecks, driveTimePlanChecks, driveTimePrefsChecks, driveTimeDiffChecks, driveTimeLoaderChecks, driveTimeSyncChecks, driveTimeNoStraightLinePins, driveTimeAgendaChecks, driveTimeTriggerPins, driveTimeWorklistChecks, driveTimeFixUiPins, driveTimeBookingPins, driveTimeTriageFlagChecks, driveTimeFinalFixChecks, driveTimeRound2Checks } from "./test-drive-time";
-import { siteVisitsAttendeeChecks, siteVisitsConflictChecks, siteVisitsInviteChecks, siteVisitsSettingsChecks } from "./test-site-visits";
+import { siteVisitsAttendeeChecks, siteVisitsConflictChecks, siteVisitsInviteChecks, siteVisitsNearbyChecks, siteVisitsSettingsChecks } from "./test-site-visits";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
 import { exportObjectsFor } from "@/app/(app)/import/registry";
@@ -11567,6 +11567,7 @@ seeded()
   .then(() => siteVisitsInviteChecks(ok))
   .then(() => siteVisitsSettingsChecks(ok))
   .then(() => siteVisitsConflictChecks(ok))
+  .then(() => siteVisitsNearbyChecks(ok))
   .then(() => driveTimeFinalFixChecks(ok))
   .then(() => driveTimeRound2Checks(ok))
   .then(() => triageFoundationChecks(ok))

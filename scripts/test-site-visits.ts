@@ -4,7 +4,8 @@
    Doc fixtures use fixtureId("visits", …) + createFixture and are dropped with
    dropFixtures("visits"); blob rows use TESTvisits: ids and are hard-deleted in
    each check's own finally. */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AddressState, LatLng } from "@/lib/address-verify/types";
 import { addDays, chicagoDayStart } from "@/lib/drive-plan/day";
 import { pairKey, planDay } from "@/lib/drive-plan/plan";
@@ -15,9 +16,10 @@ import { buildIcs, icsMimeType } from "@/lib/ics";
 import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
 import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
-import { busyBlocks, fmtBusy, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
+import { busyBlocks, fmtBusy, fmtBusyRange, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
 import { checkVisit, stopConflicts, type StopCheckInput } from "@/lib/visit-plan/check";
 import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, weekdayOf, workWindow } from "@/lib/visit-plan/hours";
+import { couldBeSameArea, MAX_NEARBY_DAYS, nearbyLine, nearbyPairs, straightLineMiles, suggestDays, type LeadDay } from "@/lib/visit-plan/nearby";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -361,9 +363,9 @@ export async function siteVisitsSettingsChecks(ok: Ok): Promise<void> {
     "site-visits settings: no days, an end not after the start, or junk is refused");
   ok(clockToMin("08:30") === 510 && clockToMin("24:00") === 1440 && clockToMin("24:01") === null && clockToMin("25:00") === null && clockToMin("8:5") === null && minToClock(510) === "08:30" && minToClock(1440) === "24:00",
     "site-visits settings: time inputs convert both ways; 24:00 is the end of the day, never clamped to 23:59");
-  ok(fmtClock(1440) === "12:00 AM (end of day)" && fmtWorkHours({ days: [1], startMin: 480, endMin: 1440 }) === "Mon 8:00–12:00 AM (end of day)" &&
+  ok(fmtClock(1440) === "12:00 AM (end of day)" && fmtWorkHours({ days: [1], startMin: 480, endMin: 1440 }) === "Mon 8:00–midnight" &&
      cleanWorkHours({ days: [1], startMin: 480, endMin: 1440 }, true)?.endMin === 1440,
-    "site-visits settings: an end of midnight (1440) is kept and prints as the end of the day");
+    "site-visits settings: an end of midnight (1440) is kept and prints as the end of the day (work hours say midnight)");
   ok(fmtClock(480) === "8:00" && fmtClock(1020) === "5:00" && fmtClock(750) === "12:30", "site-visits settings: clock times print 12-hour without am/pm");
   ok(fmtWorkHours(DEFAULT_WORK_HOURS) === "Mon–Fri 8:00–5:00" && fmtWorkHours({ days: [1, 3, 5], startMin: 450, endMin: 990 }) === "Mon, Wed, Fri 7:30–4:30" &&
      fmtWorkHours({ days: [0, 1, 2, 3, 4, 5, 6], startMin: 360, endMin: 1200 }) === "Every day 6:00–8:00",
@@ -476,6 +478,11 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
     "site-visits busy: my scheduled visits + my own and accepted timed events; never tentative, unanswered, declined, all-day, drive events, a visit's calendar copies, or the visit being edited");
   ok(busyBlocks({ person: "Dana", visits, events: null }).map((b) => b.key).join() === "sv:SV-1,sv:SV-9", "site-visits busy: no calendar → visits only");
   ok(fmtBusy([busyEv("a", at(9), at(10)), busyEv("b", at(9, 30), at(11, 30)), busyEv("c", at(14), at(15))]) === "9–11:30, 2–3", "site-visits busy: busy times merge and print 9–11:30, 2–3");
+  ok(fmtBusyRange({ startMs: at(22), endMs: at(24) }) === "10–midnight" && fmtBusyRange({ startMs: at(0), endMs: at(2) }) === "midnight–2" &&
+     fmtBusyRange({ startMs: at(0), endMs: at(24) }) === "all day" && fmtBusyRange({ startMs: at(9), endMs: at(10, 30) }) === "9–10:30",
+    "site-visits busy: an end at the Chicago midnight prints 'midnight' (a block spanning the whole day, 'all day')");
+  ok(fmtBusyRange({ startMs: at(22), endMs: at(26) }) === "Wed 10 – Thu 2" && fmtBusyRange({ startMs: at(22), endMs: at(24 + 24) }) === "Wed 10 – Thu midnight",
+    "site-visits busy: a block that crosses midnight names both days");
   const mapped = toCalendarEvents([
     { id: "a", summary: "A", start: { dateTime: "2036-10-15T14:00:00Z" }, end: { dateTime: "2036-10-15T15:00:00Z" }, attendees: [{ email: "me@x.com", self: true, responseStatus: "tentative" }] },
     { id: "b", summary: "B", start: { dateTime: "2036-10-15T14:00:00Z" }, end: { dateTime: "2036-10-15T15:00:00Z" } },
@@ -494,11 +501,34 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
     "site-visits conflicts: an overlap caused only by the drive block counts; back-to-back doesn't");
   const unv = conflictsFor([vStop("sv:C", at(11), at(12), badAddr("c"))], r60, [busyEv("Call", at(10), at(10, 30))]);
   ok(!unv.driveChecked && unv.conflicts.length === 0, "site-visits conflicts: an unverified address is checked without drive time (no drive-block overlap)");
+  // Without the driveChecked gate this day (two far verified stops around the unverified one) would read "Too much driving".
+  const X1 = vStop("sv:X1", at(9), at(10), okAddr(P2, "x1"));
+  const X2 = vStop("sv:X2", at(13), at(14), okAddr(P2, "x2"));
+  const unvFar = conflictsFor([X1, vStop("sv:C", at(11), at(12), badAddr("c")), X2], [[BASE, P2, 150], [P2, BASE, 150]], []);
+  ok(!unvFar.driveChecked && unvFar.conflicts.length === 0, "site-visits conflicts: an unverified candidate gets no drive-based flags even when the day's other legs are long");
+
+  // Per-leg gating: a verified candidate followed by an unresolved stop still gets its drive-to checks
+  const U = vStop("sv:U", at(14), at(15), badAddr("u"));
+  const A0 = vStop("sv:A", at(9), at(10, 30), okAddr(P2, "a"));
+  const toChecked = conflictsFor([A0, C11, U], [[BASE, P2, 30], [P2, P1, 40]], [busyEv("Call", at(10, 30), at(10, 45))]);
+  ok(toChecked.driveChecked && toChecked.conflicts.some((c) => c.kind === "tight_drive" && c.text === "Tight — needs 55m, has 30m") &&
+     toChecked.conflicts.some((c) => c.text === "Double-booked — the drive there overlaps Call (10:30–10:45)"),
+    "site-visits conflicts: a flagged drive-out leg doesn't switch off the drive-to double-booking and tight checks");
+  const earlyThenU = conflictsFor([vStop("sv:C", at(8), at(9), okAddr(P1, "c")), vStop("sv:U", at(14), at(15), badAddr("u"))], r60, []);
+  ok(earlyThenU.driveChecked && earlyThenU.conflicts.some((c) => c.kind === "outside_hours"), "site-visits conflicts: the drive-to still counts toward work hours when the next stop is unresolved");
+  const flaggedTo = conflictsFor([vStop("sv:A", at(9), at(10), badAddr("a")), C11], [[P1, BASE, 60]], [busyEv("Call", at(10), at(10, 30))]);
+  ok(!flaggedTo.driveChecked && flaggedTo.conflicts.length === 0, "site-visits conflicts: a flagged drive-to leg means the drive-based checks are skipped and the note shows");
 
   // Tight drive
   const A = vStop("sv:A", at(9), at(10, 30), okAddr(P2, "a"));
   const tight = conflictsFor([A, C11], [[BASE, P2, 30], [P2, P1, 40], [P1, BASE, 60]], []);
   ok(tight.conflicts.some((c) => c.kind === "tight_drive" && c.text === "Tight — needs 55m, has 30m"), "site-visits conflicts: spec 1's tight leg shows before booking");
+  const tightTwice = conflictsFor([A, C11], [[BASE, P2, 30], [P2, P1, 40], [P1, BASE, 60]], [{ ...busyEv("A", at(9), at(10, 30)), key: "sv:A", kind: "visit" }]);
+  ok(tightTwice.conflicts.filter((c) => c.kind === "tight_drive").length === 1 && !tightTwice.conflicts.some((c) => c.kind === "double_booked"),
+    "site-visits conflicts: a tight leg isn't also reported as the drive overlapping the stop just before it");
+  const tightOther = conflictsFor([A, C11], [[BASE, P2, 30], [P2, P1, 40], [P1, BASE, 60]], [busyEv("Call", at(10, 30), at(10, 45))]);
+  ok(tightOther.conflicts.some((c) => c.kind === "tight_drive") && tightOther.conflicts.some((c) => c.text === "Double-booked — the drive there overlaps Call (10:30–10:45)"),
+    "site-visits conflicts: a tight leg still reports the drive overlapping something other than the stop before it");
 
   // Outside work hours
   const early = conflictsFor([vStop("sv:C", at(8), at(9), okAddr(P1, "c"))], r60, []);
@@ -507,6 +537,9 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
   ok(sat.conflicts.some((c) => c.text === "Outside work hours — Saturday isn't a work day"), "site-visits conflicts: a visit on a non-work day is flagged");
   const late = conflictsFor([vStop("sv:C", at(15, 30), at(16, 45), okAddr(P1, "c"))], r60, []);
   ok(late.conflicts.some((c) => c.kind === "outside_hours"), "site-visits conflicts: the drive back counts toward work hours");
+  const midnightHours = { days: [3], startMin: 480, endMin: 1440 };
+  const beforeMidnight = conflictsFor([vStop("sv:C", at(6), at(7), okAddr(P1, "c"))], r60, [], { hours: midnightHours });
+  ok(beforeMidnight.conflicts.some((c) => c.text === "Outside work hours (8:00–midnight)"), "site-visits conflicts: hours ending at 1440 print as 8:00–midnight");
   const roomy = conflictsFor([vStop("sv:C", at(8), at(9), okAddr(P1, "c"))], r60, [], { hours: { days: [0, 1, 2, 3, 4, 5, 6], startMin: 360, endMin: 1200 } });
   ok(!roomy.conflicts.some((c) => c.kind === "outside_hours"), "site-visits conflicts: a person's own hours decide");
 
@@ -531,4 +564,68 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
     "site-visits checkVisit: an unreadable calendar says so — never reads as no conflicts");
   ok(res[2].notes.includes("Checked without drive time") && res[2].notes.includes("Sam has no connected calendar — checked visits only"),
     "site-visits checkVisit: unverified address and no calendar each leave a note");
+}
+
+export async function siteVisitsNearbyChecks(ok: Ok): Promise<void> {
+  const CAND: LatLng = { lat: 44.05, lng: -88.05 };
+  const FAR: LatLng = { lat: 46.0, lng: -88.0 };
+  const d = (n: number) => addDays(DAY, n);
+  const leadDays: LeadDay[] = [
+    { dayKey: d(1), stops: [vStop("sv:A", at(9, 0, 1), at(10, 0, 1), okAddr(P1, "a"), "Lone Pine Elementary")], busy: [busyEv("Lone Pine", at(9, 0, 1), at(11, 30, 1))] },
+    { dayKey: d(2), stops: [vStop("sv:B", at(9, 0, 2), at(10, 0, 2), okAddr(P2, "b"))], busy: [] },
+    { dayKey: d(3), stops: [vStop("sv:FAR", at(9, 0, 3), at(10, 0, 3), okAddr(FAR, "far"))], busy: [] },
+    { dayKey: d(4), stops: [vStop("sv:U", at(9, 0, 4), at(10, 0, 4), badAddr("u"))], busy: [] },
+    { dayKey: d(5), stops: [vStop("sv:SELF", at(9, 0, 5), at(10, 0, 5), okAddr(CAND, "self"))], busy: [] },
+    { dayKey: d(6), stops: [vStop("sv:B6", at(9, 0, 6), at(10, 0, 6), okAddr(P2, "b6"))], busy: [] },
+  ];
+  ok(straightLineMiles(P1, P1) === 0 && Math.round(straightLineMiles(P1, FAR)) === 138 && couldBeSameArea(P1, CAND, 45) && !couldBeSameArea(FAR, CAND, 45),
+    "site-visits nearby: the straight-line pre-filter keeps plausible stops and drops ones 100+ miles away");
+  const pairs = nearbyPairs(CAND, leadDays, 45, "sv:SELF");
+  ok(pairs.length === 2 && !pairs.some((p) => p.from.lat === FAR.lat) && pairs.every((p) => p.to === CAND),
+    "site-visits nearby: only verified, plausible stops are routed (far, unverified and the visit itself skipped), stop → candidate, deduped");
+
+  const routes = new Map([[pairKey(P1, CAND), 18], [pairKey(P2, CAND), 12]]);
+  const others = [
+    { person: "Jeff", calendar: "ok" as const, hours: DEFAULT_WORK_HOURS, busy: [busyEv("Jeff thing", at(13, 30, 1), at(14, 0, 1))] },
+    { person: "Sam", calendar: "failed" as const, hours: DEFAULT_WORK_HOURS, busy: [] },
+  ];
+  const res = suggestDays({ candidate: { key: "sv:SELF", point: CAND, startMs: at(13), endMs: at(14) }, leadDays, routeMinutes: routes, sameAreaMin: 45, lookaheadDays: 21, others });
+  ok(res.status === "ok" && res.days.map((x) => x.dayKey).join() === [d(2), d(6), d(1)].join(),
+    "site-visits nearby: ranked by nearest drive minutes, then soonest");
+  const day1 = res.status === "ok" ? res.days[2] : null;
+  ok(!!day1 && nearbyLine(day1) === "Thu Oct 16 · 18 min from Lone Pine Elementary · busy 9–11:30",
+    "site-visits nearby: a row reads date · minutes from the nearest stop · the lead's busy times");
+  ok(!!day1 && day1.others.map((o) => `${o.person}:${o.status}`).join() === "Jeff:conflict,Sam:unknown" &&
+     res.status === "ok" && res.days[0].others.map((o) => `${o.person}:${o.status}`).join() === "Jeff:free,Sam:unknown",
+    "site-visits nearby: each other attendee shows free / conflict at the chosen time that day (unknown when their calendar can't be read)");
+  ok(res.status === "ok" && res.days.every((x) => x.nearest.minutes === 12 || x.nearest.minutes === 18),
+    "site-visits nearby: every minute shown is a routed drive time, never a straight-line estimate");
+
+  const over = suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays: leadDays.slice(0, 1), routeMinutes: new Map([[pairKey(P1, CAND), 50]]), sameAreaMin: 45, lookaheadDays: 21, others: [] });
+  ok(over.status === "ok" && over.days.length === 0, "site-visits nearby: a stop more than the same-area minutes away isn't nearby");
+  ok(suggestDays({ candidate: { key: "sv:X", point: null, startMs: null, endMs: null }, leadDays, routeMinutes: routes, sameAreaMin: 45, lookaheadDays: 21, others: [] }).status === "unverified",
+    "site-visits nearby: an unverified candidate address asks for verification");
+  ok(suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays, routeMinutes: new Map(), sameAreaMin: 45, lookaheadDays: 21, others: [] }).status === "unavailable",
+    "site-visits nearby: no drive times for plausible stops (OSRM down) → unavailable, never guessed");
+  const partial = suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays: leadDays.slice(0, 2), routeMinutes: new Map([[pairKey(P1, CAND), 18]]), sameAreaMin: 45, lookaheadDays: 21, others: [] });
+  ok(partial.status === "ok" && partial.days.map((x) => x.dayKey).join() === d(1), "site-visits nearby: a stop without a routed time is left out, not estimated");
+  ok(suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays: [leadDays[2]], routeMinutes: new Map(), sameAreaMin: 45, lookaheadDays: 21, others: [] }).status === "ok",
+    "site-visits nearby: nothing plausible nearby is an empty strip, not 'unavailable'");
+  const many: LeadDay[] = Array.from({ length: 7 }, (_, i) => ({ dayKey: d(i + 1), stops: [vStop("sv:M" + i, at(9, 0, i + 1), at(10, 0, i + 1), okAddr(P1, "m" + i))], busy: [] }));
+  const capped = suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays: many, routeMinutes: new Map([[pairKey(P1, CAND), 10]]), sameAreaMin: 45, lookaheadDays: 21, others: [] });
+  ok(capped.status === "ok" && capped.days.length === MAX_NEARBY_DAYS && MAX_NEARBY_DAYS === 5 && capped.days[4].dayKey === d(5), "site-visits nearby: at most 5 days, the soonest on a tie");
+  const noTime = suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays: leadDays.slice(0, 2), routeMinutes: routes, sameAreaMin: 45, lookaheadDays: 21, others: [others[0]] });
+  ok(noTime.status === "ok" && noTime.days.find((x) => x.dayKey === d(1))?.others[0].status === "conflict" && noTime.days.find((x) => x.dayKey === d(2))?.others[0].status === "free",
+    "site-visits nearby: with no time picked yet, an attendee is free when nothing is booked inside their work hours that day");
+
+  // An event running past midnight reads as ending at midnight on the day it's shown
+  const overnight = suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: null, endMs: null }, leadDays: [{ ...leadDays[0], busy: [busyEv("Load-out", at(22, 0, 1), at(26, 0, 1))] }], routeMinutes: routes, sameAreaMin: 45, lookaheadDays: 21, others: [] });
+  ok(overnight.status === "ok" && overnight.days[0].busyText === "10–midnight", "site-visits nearby: a busy block running past midnight shows to midnight on that day");
+
+  // The straight-line distance is only a pre-filter: one definition, one use.
+  const dir = "src/lib/visit-plan";
+  const uses = readdirSync(dir).reduce((n, f) => n + (readFileSync(join(dir, f), "utf8").match(/straightLineMiles\(/g) ?? []).length, 0);
+  const banned = /\b(estimate|estimateFromParts|driveMinutes|driveMiles|haversineMiles|minutesFromMiles)\b\s*\(/;
+  ok(uses === 2 && !readdirSync(dir).some((f) => banned.test(readFileSync(join(dir, f), "utf8"))),
+    "site-visits pin: the straight-line distance feeds only the pre-filter, and nothing in visit-plan calls a straight-line drive estimate");
 }

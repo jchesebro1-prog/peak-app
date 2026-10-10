@@ -7,7 +7,7 @@ import { dayDriveTotal, fmtDur, type DriveLeg } from "@/lib/drive-plan/plan";
 import type { DriveStop } from "@/lib/drive-plan/stops";
 import { fmtBusyRange, type BusyBlock } from "./busy";
 import { WEEKDAY_NAMES, weekdayOf, workWindow } from "./hours";
-import { fmtClock, type WorkHours } from "./settings";
+import { fmtClock, fmtEndClock, type WorkHours } from "./settings";
 
 export type ConflictKind = "double_booked" | "tight_drive" | "outside_hours" | "too_much_driving";
 export type Conflict = { kind: ConflictKind; text: string };
@@ -43,25 +43,36 @@ export type StopCheckInput = {
   dailyDriveLimitMin: number;
 };
 
+/** Each drive leg is trusted on its own: a flagged leg out of this stop never
+ *  switches off the checks on the drive there, and vice versa. `driveChecked`
+ *  is true when the stop's own address and its drive-to leg resolved (the
+ *  "Checked without drive time" note is shown otherwise). */
 export function stopConflicts(i: StopCheckInput): { conflicts: Conflict[]; driveChecked: boolean } {
   const stop = i.stops.find((s) => s.key === i.stopKey);
   if (!stop) return { conflicts: [], driveChecked: false };
   const driveTo = i.legs.find((l) => l.to.key === i.stopKey && l.direction === "to_stop") ?? null;
   const driveFrom = i.legs.find((l) => l.from.key === i.stopKey) ?? null;
-  const driveChecked = stop.address.status === "verified" && !driveTo?.flag && !driveFrom?.flag;
+  const verified = stop.address.status === "verified";
+  const toOk = verified && !driveTo?.flag;
+  const fromOk = verified && !driveFrom?.flag;
   const conflicts: Conflict[] = [];
 
   // Double-booked: the visit, or its drive-to block, overlaps something.
-  const toBlock = driveChecked && driveTo && driveTo.startMs != null && driveTo.endMs != null ? { s: driveTo.startMs, e: driveTo.endMs } : null;
+  const toBlock = toOk && driveTo && driveTo.startMs != null && driveTo.endMs != null ? { s: driveTo.startMs, e: driveTo.endMs } : null;
+  const tightTo = toOk && driveTo?.tight ? driveTo.tight : null;
   for (const b of i.busy) {
     if (overlaps(stop.startMs, stop.endMs, b.startMs, b.endMs))
       conflicts.push({ kind: "double_booked", text: `Double-booked — overlaps ${b.label} (${fmtBusyRange(b)})` });
-    else if (toBlock && overlaps(toBlock.s, toBlock.e, b.startMs, b.endMs))
+    else if (toBlock && overlaps(toBlock.s, toBlock.e, b.startMs, b.endMs)) {
+      // A tight leg already says "the stop before this one runs into the drive".
+      if (tightTo && b.key === driveTo?.from.key) continue;
       conflicts.push({ kind: "double_booked", text: `Double-booked — the drive there overlaps ${b.label} (${fmtBusyRange(b)})` });
+    }
   }
 
   // Tight drive (spec 1's leg flag), into or out of this visit.
-  if (driveChecked) for (const l of [driveTo, driveFrom]) if (l?.tight) conflicts.push({ kind: "tight_drive", text: l.tight.text });
+  if (tightTo) conflicts.push({ kind: "tight_drive", text: tightTo.text });
+  if (fromOk && driveFrom?.tight) conflicts.push({ kind: "tight_drive", text: driveFrom.tight.text });
 
   // Outside work hours: the visit plus its drive there, plus the drive home
   // when this visit is the day's last stop.
@@ -70,18 +81,19 @@ export function stopConflicts(i: StopCheckInput): { conflicts: Conflict[]; drive
     conflicts.push({ kind: "outside_hours", text: `Outside work hours — ${WEEKDAY_NAMES[weekdayOf(i.dayKey)]} isn't a work day` });
   } else {
     const spanStart = toBlock ? Math.min(toBlock.s, stop.startMs) : stop.startMs;
-    const back = driveChecked && driveFrom?.direction === "back" && driveFrom.endMs != null ? driveFrom.endMs : null;
+    const back = fromOk && driveFrom?.direction === "back" && driveFrom.endMs != null ? driveFrom.endMs : null;
     const spanEnd = Math.max(stop.endMs, back ?? stop.endMs);
     if (spanStart < win.startMs || spanEnd > win.endMs)
-      conflicts.push({ kind: "outside_hours", text: `Outside work hours (${fmtClock(i.hours.startMin)}–${fmtClock(i.hours.endMin)})` });
+      conflicts.push({ kind: "outside_hours", text: `Outside work hours (${fmtClock(i.hours.startMin)}–${fmtEndClock(i.hours.endMin)})` });
   }
 
   // Too much driving: the day's total with this visit, buffer included.
-  if (driveChecked) {
+  // Flagged legs count 0, so an over-limit total is still a true floor.
+  if (verified) {
     const total = dayDriveTotal(i.legs);
     if (total > i.dailyDriveLimitMin) conflicts.push({ kind: "too_much_driving", text: `Too much driving — ${fmtDur(total)} of ${fmtLimit(i.dailyDriveLimitMin)}` });
   }
-  return { conflicts, driveChecked };
+  return { conflicts, driveChecked: toOk };
 }
 
 export type CalendarRead = "ok" | "no-calendar" | "failed";

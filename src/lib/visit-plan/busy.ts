@@ -7,6 +7,7 @@
  */
 import { isVisitIcsCopy, visitPeople } from "@/lib/drive-plan/stops";
 import { visitEventIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
+import { addDays, chicagoDayKey, chicagoDayStart, DRIVE_TZ } from "@/lib/drive-plan/day";
 import { chicagoMinuteOfDay, fmtClockShort } from "./hours";
 
 export type BusyBlock = { key: string; kind: "visit" | "event"; label: string; startMs: number; endMs: number };
@@ -59,8 +60,23 @@ export function busyInRange(blocks: readonly BusyBlock[], minMs: number, maxMs: 
   return blocks.filter((b) => b.endMs > minMs && b.startMs < maxMs);
 }
 
+const clockOf = (ms: number) => fmtClockShort(chicagoMinuteOfDay(ms));
+const weekdayOfMs = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: DRIVE_TZ, weekday: "short" });
+
+/** "9–10:30"; an end at the Chicago midnight reads "midnight" ("all day" from
+ *  midnight to midnight); a block crossing midnight names both days:
+ *  "Wed 10 – Thu 2". */
 export function fmtBusyRange(b: { startMs: number; endMs: number }): string {
-  return `${fmtClockShort(chicagoMinuteOfDay(b.startMs))}–${fmtClockShort(chicagoMinuteOfDay(b.endMs))}`;
+  const midnight = chicagoDayStart(addDays(chicagoDayKey(b.startMs), 1));
+  const startsAtMidnight = chicagoMinuteOfDay(b.startMs) === 0;
+  if (b.endMs <= midnight) {
+    if (b.endMs === midnight) return startsAtMidnight ? "all day" : `${clockOf(b.startMs)}–midnight`;
+    return `${startsAtMidnight ? "midnight" : clockOf(b.startMs)}–${clockOf(b.endMs)}`;
+  }
+  // Crosses midnight. An end exactly at a midnight is the END of the day before it.
+  const endsAtMidnight = chicagoMinuteOfDay(b.endMs) === 0;
+  const endDay = weekdayOfMs(endsAtMidnight ? b.endMs - 1 : b.endMs);
+  return `${weekdayOfMs(b.startMs)} ${startsAtMidnight ? "midnight" : clockOf(b.startMs)} – ${endDay} ${endsAtMidnight ? "midnight" : clockOf(b.endMs)}`;
 }
 
 /** Overlapping blocks merged: "9–11:30, 2–3" ("" when free). */

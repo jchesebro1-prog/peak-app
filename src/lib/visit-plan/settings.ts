@@ -125,6 +125,11 @@ function fmtDays(days: number[]): string {
   return contiguous ? `${DAY_SHORT[days[0]]}–${DAY_SHORT[days[days.length - 1]]}` : days.map((d) => DAY_SHORT[d]).join(", ");
 }
 
+/** A work-hours end: "5:00", or "midnight" for the end of the day (1440). */
+export function fmtEndClock(min: number): string {
+  return Math.round(min) >= 1440 ? "midnight" : fmtClock(min);
+}
+
 export function fmtWorkHours(h: WorkHours): string {
-  return `${fmtDays(h.days)} ${fmtClock(h.startMin)}–${fmtClock(h.endMin)}`;
+  return `${fmtDays(h.days)} ${fmtClock(h.startMin)}–${fmtEndClock(h.endMin)}`;
 }
