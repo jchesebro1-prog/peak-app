@@ -303,9 +303,32 @@ export function wrapLineCount(text: string, width: number): number {
   return lines;
 }
 
-/** Lines one device-key row prints (its designators cell wraps). */
+/** #320: the most designator lines one device-key row prints. The key is an
+ *  index — the E-60x schedule is the record — so a longer list is cut. */
+export const KEY_ROW_MAX_LINES = 4;
+/** What a cut key row ends with. */
+export const KEY_CUT_SUFFIX = "… see schedule";
+
+/**
+ * A device-key row's designators as printed: as is when they fit
+ * KEY_ROW_MAX_LINES; else the most leading ", "-separated designators that
+ * fit with KEY_CUT_SUFFIX after them (at least the first, whole). Never cuts
+ * inside a designator.
+ */
+export function capKeyTag(tag: string): string {
+  const fits = (t: string) => wrapLineCount(t, KEY_DESIGNATOR_CHARS_PER_LINE) <= KEY_ROW_MAX_LINES;
+  if (fits(tag)) return tag;
+  const tokens = tag.split(", ");
+  const cut = (k: number) => `${tokens.slice(0, k).join(", ")} ${KEY_CUT_SUFFIX}`;
+  let keep = 1;
+  while (keep + 1 < tokens.length && fits(cut(keep + 1))) keep += 1;
+  return cut(keep);
+}
+
+/** Lines one device-key row prints (its designators cell wraps; capped —
+ *  capKeyTag). */
 export function keyRowLines(tag: string): number {
-  return wrapLineCount(tag, KEY_DESIGNATOR_CHARS_PER_LINE);
+  return wrapLineCount(capKeyTag(tag), KEY_DESIGNATOR_CHARS_PER_LINE);
 }
 
 /** How many key rows fit the line budget, and the lines they take. Order is

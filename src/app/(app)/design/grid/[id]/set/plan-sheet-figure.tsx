@@ -8,7 +8,7 @@ import { ObjectSymbol } from "@/components/design/object-symbol";
 import { useImagesSettled } from "@/components/design/use-images-settled";
 import { pointInPolygon } from "@/lib/design/grid-geometry";
 import { fitBox, scaleNote } from "@/lib/design/grid-drawing-set";
-import { placeLabels, planKeyLayout, planKeyVisible, spaceNameRect, symbolRect, type Pt, type Rect } from "@/lib/design/drawing-labels";
+import { capKeyTag, placeLabels, planKeyLayout, planKeyVisible, spaceNameRect, symbolRect, type Pt, type Rect } from "@/lib/design/drawing-labels";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -181,7 +181,7 @@ export default function PlanSheetFigure({
         <tbody>
           {keyRows.slice(0, keyVisible.shown).map((r, i) => (
             <tr key={i}>
-              <td className="pk-dw-mono pk-dw-wrap">{r.tag}</td>
+              <td className="pk-dw-mono pk-dw-wrap">{capKeyTag(r.tag)}</td>
               <td>{r.qty}</td>
               <td className="pk-dw-ellip">{r.desc}</td>
             </tr>

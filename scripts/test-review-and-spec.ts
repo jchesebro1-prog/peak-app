@@ -60591,8 +60591,32 @@ async function designators320ScheduleChecks(): Promise<void> {
   ok(tallCols.every((c) => !c.length || c[c.length - 1].kind !== "section"), "#320 fix: a head never ends a column with tall rows");
   const huge = { kind: "row" as const, qty: 1, code: "H", desc: "h", designators: Array.from({ length: 60 }, (_, i) => `ZZ-${i + 1}00`).join(", ") };
   const hugePages = S.paginateSchedule([{ head: { kind: "section", name: "H", cont: false }, rows: [...lineRows(2), huge, ...lineRows(2)] }], 12, 2).flat();
-  ok(S.scheduleItemLines(huge) > 12 && hugePages.flat().filter((it) => it.kind === "row").length === 5 && hugePages.some((c) => c.length === 2 && c[1] === huge && c[0].kind === "section"),
-    "#320 fix: a row taller than a whole column goes alone under a head in a fresh column, never dropped");
+  const hugeRows = hugePages.flat().filter((it): it is Extract<typeof it, { kind: "row" }> => it.kind === "row");
+  ok(S.scheduleItemLines(huge) > 12 && hugeRows.filter((r) => !r.cont).length === 5 && hugeRows.filter((r) => r.desc === "h").map((r) => r.designators).join(", ") === huge.designators &&
+     hugePages.every((c) => c.reduce((a, it) => a + S.scheduleItemLines(it), 0) <= 12),
+    "#320 final fix: a row taller than a whole column splits into continuation rows — every column within budget, nothing dropped");
+  // ~70 fragmented designators: split across columns, every token exactly once, in order.
+  const frag = Array.from({ length: 70 }, (_, i) => `MIC-${i * 2 + 1}`);
+  const fragRow = { kind: "row" as const, qty: 70, code: "SM58", desc: "Handheld mic", designators: frag.join(", ") };
+  const fragCols = S.paginateSchedule([{ head: { kind: "section", name: "Stage", cont: false }, rows: [...lineRows(3), fragRow, ...lineRows(3)] }], 12, 2).flat();
+  const fragRows = fragCols.flat().filter((it): it is Extract<typeof it, { kind: "row" }> => it.kind === "row" && it.desc === "Handheld mic");
+  const fragTokens = fragRows.flatMap((r) => (r.designators || "").split(", "));
+  ok(S.scheduleItemLines(fragRow) > 12 && fragRows.length > 1 && fragCols.filter((c) => c.some((it) => it.kind === "row" && it.desc === "Handheld mic")).length > 1 &&
+     fragTokens.length === 70 && new Set(fragTokens).size === 70 && fragTokens.join(", ") === frag.join(", "),
+    "#320 final fix: a ~70-designator fragmented list splits across columns with every designator present exactly once, in order");
+  ok(fragRows[0].qty === 70 && fragRows[0].code === "SM58" && !fragRows[0].cont && fragRows.slice(1).every((r) => r.cont === true && r.qty === 0 && r.code === "") &&
+     fragRows.every((r) => S.scheduleItemLines(r) <= 11) && fragCols.every((c) => c.reduce((a, it) => a + S.scheduleItemLines(it), 0) <= 12),
+    "#320 final fix: the first chunk carries qty/model/desc, continuations only designators; each chunk fits under a head");
+  const shortRow = { kind: "row" as const, qty: 2, code: "A", desc: "a", designators: "MIC-1–2" };
+  const plainRow = { kind: "row" as const, qty: 1, code: "B", desc: "b" };
+  ok(S.splitScheduleRow(shortRow, 11).length === 1 && S.splitScheduleRow(shortRow, 11)[0] === shortRow && S.splitScheduleRow(plainRow, 1)[0] === plainRow,
+    "#320 final fix: a row that fits (or has no designators) is not split");
+  const giant = { kind: "row" as const, qty: 1, code: "G", desc: "g", designators: `${"Q".repeat(300)}, MIC-1` };
+  const giantSplit = S.splitScheduleRow(giant, 3);
+  ok(giantSplit.length === 2 && giantSplit[0].designators === "Q".repeat(300) && giantSplit[1].designators === "MIC-1",
+    "#320 final fix: a single designator longer than a line still goes whole");
+  ok(rd("src/components/drawing/drawing-set-sheets.tsx").includes('<td>{it.cont ? "" : it.qty}</td>') && rd("src/components/drawing/drawing-set-sheets.tsx").includes("{it.cont ? `${it.desc} (cont.)` : it.desc}"),
+    "#320 final fix: E-60x prints a continuation row as designators under \"<desc> (cont.)\", no qty or model");
   const oldStyle = S.paginateSchedule([{ head: { kind: "section", name: "B", cont: false }, rows: lineRows(70, "MIC-1") }], 24, 2);
   ok(JSON.stringify(oldStyle.map((pg) => pg.map((c) => c.length))) === "[[24,24],[24,2]]" && oldStyle[0][1][0].kind === "section" && (oldStyle[0][1][0] as { cont: boolean }).cont,
     "#320 fix: one-line rows paginate exactly as before (24 per column, head repeated cont)");
@@ -60605,11 +60629,23 @@ async function designators320ScheduleChecks(): Promise<void> {
   ok(L.keyRowLines(keyLong[0].tag) > 1 && vLong.shown < 20 && vLong.shown >= 1 && vLong.lines <= L.KEY_MAX_ROWS && vLong.lines === keyLong.slice(0, vLong.shown).reduce((a, r) => a + L.keyRowLines(r.tag), 0),
     "#320 fix: a key with long designator rows lays out within the line budget (the rest say +N more)");
   ok(L.planKeyVisible([{ tag: "Q".repeat(500) }]).shown === 1, "#320 fix: the first key row always shows");
+  // Final fix: the key is an index — a row's designators cap at KEY_ROW_MAX_LINES lines and say "… see schedule".
+  const keyTokens = Array.from({ length: 30 }, (_, i) => `MIC-${i * 2 + 1}`);
+  const capped = L.capKeyTag(keyTokens.join(", "));
+  const kept = capped.slice(0, -(" " + L.KEY_CUT_SUFFIX).length).split(", ");
+  ok(L.KEY_ROW_MAX_LINES === 4 && capped.endsWith(" … see schedule") && L.wrapLineCount(capped, L.KEY_DESIGNATOR_CHARS_PER_LINE) <= L.KEY_ROW_MAX_LINES && kept.length >= 1 &&
+     kept.join(", ") === keyTokens.slice(0, kept.length).join(", ") && L.keyRowLines(keyTokens.join(", ")) <= L.KEY_ROW_MAX_LINES,
+    "#320 final fix: a key row's designators cap at 4 lines, whole designators only, ending \"… see schedule\"");
+  ok(L.capKeyTag("MIC-1–4, MIC-7") === "MIC-1–4, MIC-7" && L.capKeyTag("") === "" && L.capKeyTag("Q".repeat(500)) === "Q".repeat(500),
+    "#320 final fix: a key row that fits is unchanged (a lone over-long designator is never cut inside)");
+  const manyLong = Array.from({ length: 20 }, () => ({ tag: keyTokens.join(", "), qty: 30, desc: "d" }));
+  const vMany = L.planKeyVisible(manyLong);
+  ok(vMany.shown >= 9 && vMany.lines <= L.KEY_MAX_ROWS, "#320 final fix: capped rows let the key show many long rows within its line budget");
   const lay = (rows: number, lines?: number) => L.planKeyLayout({ areaW: 13.3, areaH: 9.8, captionH: 0.35, aspect: 0.65, rows, ...(lines !== undefined ? { lines } : {}), k: 1 });
   ok(JSON.stringify(lay(5)) === JSON.stringify(lay(5, 5)) && JSON.stringify(lay(12)) === JSON.stringify(lay(12, 12)), "#320 fix: planKeyLayout with lines = rows is the old layout");
   ok(lay(3, 20).side && lay(3, 20).keyH > lay(3, 3).keyH && lay(3, 20).keyH <= (L.KEY_MAX_ROWS + 2.2) * 0.2 + 1e-9, "#320 fix: a short key whose rows wrap goes beside the plan and its height follows the lines");
   const figSrc = rd("src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx");
-  ok(rd("src/components/drawing/drawing-set-sheets.tsx").includes('"pk-dw-mono pk-dw-wrap">{it.designators') && figSrc.includes('"pk-dw-mono pk-dw-wrap">{r.tag}') && /\.pk-dw-wrap\s*\{[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/.test(rd("src/app/globals.css")),
+  ok(rd("src/components/drawing/drawing-set-sheets.tsx").includes('"pk-dw-mono pk-dw-wrap">{it.designators') && figSrc.includes('"pk-dw-mono pk-dw-wrap">{capKeyTag(r.tag)}') && /\.pk-dw-wrap\s*\{[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/.test(rd("src/app/globals.css")),
     "#320 fix: both Designators cells wrap instead of ellipsis");
 
   // Untested edges from the Task 5 review.

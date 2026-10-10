@@ -132,10 +132,10 @@ export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: stri
 }
 
 export type ScheduleHead = { kind: "section"; name: string; cont: boolean } | { kind: "wires"; cont: boolean };
-export type ScheduleItem =
-  | ScheduleHead
-  | { kind: "row"; qty: number; code: string; desc: string; designators?: string }
-  | { kind: "wire"; partId: string; model?: string; run: string; length: string };
+/** A part row. `cont` (#320): a continuation of the row above — further
+ *  designators only (qty 0, no code; prints "<desc> (cont.)"). */
+export type ScheduleRowItem = { kind: "row"; qty: number; code: string; desc: string; designators?: string; cont?: true };
+export type ScheduleItem = ScheduleHead | ScheduleRowItem | { kind: "wire"; partId: string; model?: string; run: string; length: string };
 export type ScheduleGroup = { head: ScheduleHead; rows: ScheduleItem[] };
 
 export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
@@ -171,11 +171,38 @@ export function scheduleItemLines(it: ScheduleItem): number {
 }
 
 /**
+ * #320: a part row whose designators need more than `maxLines` printed lines,
+ * as continuation rows that each fit: the first keeps qty/code/desc and the
+ * first chunk; the rest carry only further chunks (`cont`). Chunks split on
+ * ", " token boundaries — every designator lands whole, exactly once, in
+ * order; a single token longer than `maxLines` lines still goes whole. A row
+ * that fits (or has no designators) comes back as is.
+ */
+export function splitScheduleRow(it: ScheduleRowItem, maxLines: number): ScheduleRowItem[] {
+  const max = Math.max(1, Math.floor(maxLines));
+  if (!it.designators || scheduleItemLines(it) <= max) return [it];
+  const chunks: string[] = [];
+  let cur: string[] = [];
+  for (const token of it.designators.split(", ")) {
+    if (cur.length && wrapLineCount([...cur, token].join(", "), SCHEDULE_DESIGNATOR_CHARS_PER_LINE) > max) {
+      chunks.push(cur.join(", "));
+      cur = [];
+    }
+    cur.push(token);
+  }
+  if (cur.length) chunks.push(cur.join(", "));
+  return chunks.map((designators, i) =>
+    i === 0 ? { ...it, designators } : { kind: "row" as const, qty: 0, code: "", desc: it.desc, designators, cont: true as const }
+  );
+}
+
+/**
  * Pages → columns → items. A column holds `perColumn` lines (a row whose
  * designators wrap counts each line; every other item is one). A head never
  * ends a column (it needs at least one row under it), and a group that spills
- * into a new column repeats its head marked `cont`. A row taller than a whole
- * column still goes alone under a head in a fresh column — never dropped. An
+ * into a new column repeats its head marked `cont`. A row whose designators
+ * need more lines than a column has under its head is split into
+ * continuation rows (splitScheduleRow) — never truncated, never dropped. An
  * empty schedule is still one (empty) sheet.
  */
 export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, columns = 2): ScheduleItem[][][] {
@@ -197,11 +224,12 @@ export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, column
     }
   };
   for (const g of groups) {
-    const first = g.rows.length ? scheduleItemLines(g.rows[0]) : 1;
+    const rows = g.rows.flatMap((r): ScheduleItem[] => (r.kind === "row" ? splitScheduleRow(r, cap - 1) : [r]));
+    const first = rows.length ? scheduleItemLines(rows[0]) : 1;
     if (col.length && used + 1 + first > cap) pushCol();
     col.push(g.head);
     used += 1;
-    for (const r of g.rows) {
+    for (const r of rows) {
       const n = scheduleItemLines(r);
       if (hasRow && used + n > cap) {
         pushCol();

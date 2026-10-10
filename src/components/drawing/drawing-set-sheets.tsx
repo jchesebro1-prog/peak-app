@@ -38,13 +38,15 @@ function scheduleRow(it: ScheduleItem, key: number) {
         <td colSpan={4} className="pk-dw-sec">{`Wire runs${it.cont ? " (cont.)" : ""}`}</td>
       </tr>
     );
+  // #320: a continuation row (a designator list too tall for one column)
+  // prints only its designators, under "<desc> (cont.)".
   if (it.kind === "row")
     return (
       <tr key={key}>
-        <td>{it.qty}</td>
+        <td>{it.cont ? "" : it.qty}</td>
         <td className="pk-dw-mono pk-dw-wrap">{it.designators || ""}</td>
-        <td className="pk-dw-mono pk-dw-ellip">{it.code}</td>
-        <td className="pk-dw-ellip">{it.desc}</td>
+        <td className="pk-dw-mono pk-dw-ellip">{it.cont ? "" : it.code}</td>
+        <td className="pk-dw-ellip">{it.cont ? `${it.desc} (cont.)` : it.desc}</td>
       </tr>
     );
   return (
