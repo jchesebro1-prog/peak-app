@@ -11535,6 +11535,7 @@ seeded()
   .then(() => conduitRiser321B4Checks())
   .then(() => conduitRiser321B5Checks())
   .then(() => conduitRiser321B6Checks())
+  .then(() => conduitRiser321B7Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -63152,4 +63153,107 @@ async function conduitRiser321B6Checks(): Promise<void> {
      menu.includes('{ label: "Lighting control riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}` }') && !menu.includes('label: "Riser →"'),
     "#321 B6 Outputs menu links both risers");
   ok(srcOf("scripts/smoke-routes.ts").includes('{ route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" }'), "#321 B6 smoke lists the conduit riser page");
+}
+
+async function conduitRiser321B7Checks(): Promise<void> {
+  const M = await import("@/lib/design/conduit-riser/model");
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+
+  const gp = await G.createProject({ name: "#321 B7 riser prompt", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 B7 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+  const er = await place(LIGHT, 0.1, 0.1);
+  const cro = await place(LIGHT, 0.4, 0.1);
+  const spk1 = await place(AUDIO, 0.1, 0.8);
+  const spk2 = await place(AUDIO, 0.4, 0.8);
+  type Pl = { id: string; x: number; y: number };
+  const input = (a: Pl | null, b: Pl | null) => ({
+    sheetId: sh.id, page: 1, partId: "T321-B7-CABLE", points: [{ x: a?.x ?? 0.2, y: a?.y ?? 0.5 }, { x: b?.x ?? 0.3, y: b?.y ?? 0.5 }], aspect: 1, optionId: opt, by,
+    ...(a ? { fromPlacementId: a.id } : {}), ...(b ? { toPlacementId: b.id } : {}),
+  });
+  const draw = async (a: Pl | null, b: Pl | null) => (await G.addRouteWithId(gp.id, input(a, b)))!;
+
+  // addRouteWithId hands back the id it minted; addRoute keeps returning the project
+  const first = await draw(er, cro);
+  ok(/^wr-[0-9a-f]+$/.test(first.routeId) && first.project.routes!.at(-1)!.id === first.routeId && first.project.id === gp.id,
+    "#321 B7 addRouteWithId: returns the project and the id of the route it just saved");
+  const legacy = await G.addRoute(gp.id, input(spk1, spk2));
+  ok(!!legacy && legacy.id === gp.id && legacy.routes!.length === 2, "#321 B7 addRoute: still returns the project");
+  const refused = await G.addRouteWithId(gp.id, { ...input(er, cro), optionId: "opt-gone" });
+  ok(refused === null && (await live()).routes!.length === 2, "#321 B7 addRouteWithId: a missing option is refused, nothing written");
+  const audioRoute = (await live()).routes!.at(-1)!;
+
+  // the prompt
+  const dev = async (id: string) => (await L.loadConduitRiser(await live(), opt)).input.devices.find((d) => d.id === id)!.label;
+  const erLabel = await dev(er.id), croLabel = await dev(cro.id);
+  const p1 = await L.riserPromptFor(await live(), opt, first.routeId);
+  ok(p1.show === true && p1.key === M.pairKey(er.id, cro.id) && p1.joins === false && p1.label === `${erLabel} → ${croLabel}` && !!erLabel && !!croLabel,
+    "#321 B7 riserPromptFor: a lighting device pair shows, named by designators in the direction drawn, not a join");
+  if (!p1.show) throw new Error("#321 B7: expected a prompt for the first pair");
+  const rev = await draw(cro, er);
+  const p1r = await L.riserPromptFor(await live(), opt, rev.routeId);
+  ok(p1r.show === true && p1r.joins === false && p1r.label === `${croLabel} → ${erLabel}` && p1r.key === p1.key,
+    "#321 B7 riserPromptFor: two wires on one pair share the key; each prompt names its own direction");
+  ok((await L.riserPromptFor(await live(), opt, audioRoute.id)).show === false, "#321 B7 riserPromptFor: an audio pair doesn't show");
+  const loose = await draw(null, null);
+  ok((await L.riserPromptFor(await live(), opt, loose.routeId)).show === false, "#321 B7 riserPromptFor: a loose route (no devices) doesn't show");
+  const oneEnd = await draw(er, null);
+  ok((await L.riserPromptFor(await live(), opt, oneEnd.routeId)).show === false, "#321 B7 riserPromptFor: a route with only one end snapped doesn't show");
+  ok((await L.riserPromptFor(await live(), opt, "wr-forged")).show === false && (await L.riserPromptFor(await live(), "opt-gone", first.routeId)).show === false,
+    "#321 B7 riserPromptFor: an unknown route or option doesn't show");
+
+  // Add = acceptSuggestionsAction's store call; then a new wire on the pair joins the run
+  const acc = await CR.acceptSuggestions(gp.id, opt, [p1.key]);
+  ok(acc.ok && acc.accepted === 1, "#321 B7 Add: accepting the prompt's key puts the pair on the riser");
+  ok((await L.riserPromptFor(await live(), opt, first.routeId)).show === false, "#321 B7 riserPromptFor: a wire already inside a run doesn't show");
+  const again = await draw(er, cro);
+  const pj = await L.riserPromptFor(await live(), opt, again.routeId);
+  ok(pj.show === true && pj.joins === true && pj.key === p1.key && pj.label === `${erLabel} → ${croLabel}`,
+    "#321 B7 riserPromptFor: a wire on a pair that already has a run says joins");
+
+  // a dismissed pair stays quiet for the wires the dismissal saw
+  const er2 = await place(LIGHT, 0.7, 0.1);
+  const w2 = await draw(er, er2);
+  const k2 = M.pairKey(er.id, er2.id);
+  ok((await L.riserPromptFor(await live(), opt, w2.routeId)).show === true, "#321 B7 riserPromptFor: a fresh pair shows");
+  await CR.dismissSuggestion(gp.id, opt, k2);
+  ok((await L.riserPromptFor(await live(), opt, w2.routeId)).show === false, "#321 B7 riserPromptFor: a dismissed pair doesn't show");
+
+  // wiring pins
+  const acts = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+  const addFn = acts.slice(acts.indexOf("export async function addRouteAction("), acts.indexOf("export async function removeRouteAction("));
+  ok(/Promise<\{ ok: true; routeId: string \} \| \{ ok: false; error: string \}>/.test(addFn) && addFn.includes("addRouteWithId(") && addFn.includes("return { ok: true, routeId: added.routeId }"),
+    "#321 B7 addRouteAction returns the minted routeId");
+  const cacts = srcOf("src/app/(app)/design/grid/[id]/conduit-riser/actions.ts");
+  const pf = cacts.slice(cacts.indexOf("export async function riserPromptForRouteAction("));
+  ok(pf.includes("await requireUser()") && pf.includes("riserPromptFor(project, optionId, routeId)") && pf.includes("catch") && pf.includes("{ show: false }"),
+    "#321 B7 riserPromptForRouteAction: signed-in only, read-only, and a failure is no prompt");
+  const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const fin = hook.slice(hook.indexOf("addRouteAction(project.id, {"), hook.indexOf("addRouteAction(project.id, {") + 900);
+  ok(fin.includes("router.refresh();") && fin.indexOf("router.refresh()") < fin.indexOf("askRiserPrompt(") && fin.includes("if (fromPlacementId && toPlacementId) askRiserPrompt(activeOptionId, r.routeId)"),
+    "#321 B7 finishing a wire: the prompt check runs after the refresh is on its way, and only for a device-to-device wire");
+  ok(/if \(ticket === riserTicket\.current && r\.show\)/.test(hook) && hook.includes("riserTicket.current++") && /hideRiserPrompt\(\);\s*disarm\(\);/.test(hook) && /if \(!p\) return;\s*hideRiserPrompt\(\);/.test(hook),
+    "#321 B7 prompt state: newest wire wins, hides on Escape and on the next canvas press");
+  const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
+  ok(rp.includes('role="status"') && rp.includes("acceptSuggestionsAction(project.id, riserPrompt.optionId, [riserPrompt.key])") && rp.includes('noteAction("Added to the riser")') &&
+     rp.includes("joins the existing run — add this wire?") && rp.includes("to the lighting control riser?") && rp.includes("Later") && /if \(!r\.ok\) \{\s*noteAction\(r\.error\);\s*return;\s*\}\s*noteAction\("Added to the riser"\);\s*hideRiserPrompt\(\)/.test(rp),
+    "#321 B7 RiserPrompt: a status strip with Add / Later; Add success notes + hides, a failure notes and keeps the prompt");
+  const edr = srcOf("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(edr.includes("<IntakeNotices ed={ed} />") && edr.includes("<RiserPrompt ed={ed} />") && edr.indexOf("<IntakeNotices") < edr.indexOf("<RiserPrompt"), "#321 B7 the prompt is mounted beside the intake notices");
 }

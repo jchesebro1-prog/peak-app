@@ -2101,28 +2101,36 @@ export async function removeSpace(
 
 /* ------------------------------ routes ------------------------------ */
 
-export async function addRoute(
+export async function addRoute(projectId: string, input: AddRouteInput): Promise<GridProject | null> {
+  return (await addRouteWithId(projectId, input))?.project ?? null;
+}
+
+type AddRouteInput = {
+  sheetId: string;
+  page: number;
+  partId: string;
+  points: Point[];
+  aspect: number;
+  optionId: string;
+  by: string;
+  fromPlacementId?: string;
+  toPlacementId?: string;
+  connectionType?: string;
+};
+
+/** addRoute, plus the id it minted — what the plan's riser prompt asks about (#321). */
+export async function addRouteWithId(
   projectId: string,
-  input: {
-    sheetId: string;
-    page: number;
-    partId: string;
-    points: Point[];
-    aspect: number;
-    optionId: string;
-    by: string;
-    fromPlacementId?: string;
-    toPlacementId?: string;
-    connectionType?: string;
-  }
-): Promise<GridProject | null> {
+  input: AddRouteInput
+): Promise<{ project: GridProject; routeId: string } | null> {
   let refused = false;
+  const routeId = rid("wr-");
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
     p.routes = [
       ...(p.routes || []),
       {
-        id: rid("wr-"),
+        id: routeId,
         sheetId: input.sheetId,
         page: input.page,
         partId: input.partId,
@@ -2138,7 +2146,7 @@ export async function addRoute(
     ];
     p.updatedAt = Date.now();
   });
-  return refused ? null : updated;
+  return refused || !updated ? null : { project: updated, routeId };
 }
 
 export async function removeRoute(

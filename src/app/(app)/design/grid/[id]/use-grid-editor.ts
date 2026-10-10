@@ -50,6 +50,7 @@ import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, RemovedBundle } from "@/lib/stores/grid-projects";
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
+import { riserPromptForRouteAction } from "./conduit-riser/actions";
 import {
   addRouteAction,
   addSpaceAction,
@@ -559,6 +560,25 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  did, in words. View state only; never persisted. */
   const [lastAction, setLastAction] = useState<string | null>(null);
   const noteAction = useCallback((text: string) => setLastAction(text), []);
+
+  /** #321: "Add to the lighting control riser?" after a device-to-device wire.
+   *  One at a time — a newer wire's prompt replaces an older one; the ticket
+   *  drops an answer that arrives after it was replaced or dismissed. */
+  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean } | null>(null);
+  const riserTicket = useRef(0);
+  const hideRiserPrompt = useCallback(() => {
+    riserTicket.current++;
+    setRiserPrompt(null);
+  }, []);
+  const askRiserPrompt = useCallback((optionId: string, routeId: string) => {
+    const ticket = ++riserTicket.current;
+    setRiserPrompt(null);
+    riserPromptForRouteAction(project.id, optionId, routeId)
+      .then((r) => {
+        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins });
+      })
+      .catch(() => {});
+  }, [project.id]);
 
   /** Symbol size + Generic/Object (#300) — a display setting saved on the
    *  design, so the plan and the printed set match. Painted here first,
@@ -1567,6 +1587,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (busy || pending || curtainAt || !sheet) return;
     const p = toNorm(e);
     if (!p) return;
+    hideRiserPrompt();
 
     if (calibrating) {
       setCalDraft([p, p]);
@@ -1657,6 +1678,8 @@ function useGridEditorImpl(props: GridEditorProps) {
             noteAction(`Drew a ${partLabel(wirePartId)} run`);
             clearUndo();
             router.refresh();
+            // After the refresh is on its way — the check never holds drawing up.
+            if (fromPlacementId && toPlacementId) askRiserPrompt(activeOptionId, r.routeId);
           }
         });
         return;
@@ -2828,6 +2851,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
+        hideRiserPrompt();
         disarm();
         return;
       }
@@ -2853,13 +2877,15 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo, adjustOpen]);
+  }, [disarm, hideRiserPrompt, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo, adjustOpen]);
 
   return {
     router,
     estimateLink,
     estimateTray,
     intakeNotices,
+    riserPrompt,
+    hideRiserPrompt,
     blobUploads,
     project,
     symbolDisplay,

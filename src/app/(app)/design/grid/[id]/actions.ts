@@ -11,7 +11,7 @@ import {
   addOption,
   addPlacement,
   addRevision,
-  addRoute,
+  addRouteWithId,
   addSpace,
   clearSheetCalibration,
   generateBaseSheet,
@@ -1286,7 +1286,7 @@ export async function addRouteAction(
     fromPlacementId?: string;
     toPlacementId?: string;
   }
-): Promise<Result> {
+): Promise<{ ok: true; routeId: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if ((input.points || []).length < 2)
     return { ok: false, error: "A wire run needs at least two points." };
@@ -1333,14 +1333,15 @@ export async function addRouteAction(
     }
   }
 
-  const p = await addRoute(projectId, {
+  const added = await addRouteWithId(projectId, {
     ...input,
     connectionType,
     by: user.name,
   });
-  if (!p) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
+  if (!added) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   revalidatePath(editorPath(projectId));
-  return { ok: true };
+  // The id the plan's "Add to the riser?" prompt asks about (#321).
+  return { ok: true, routeId: added.routeId };
 }
 
 export async function removeRouteAction(

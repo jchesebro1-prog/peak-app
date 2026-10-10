@@ -6,7 +6,7 @@ import { list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import { listGridSymbols, type GridSymbol } from "@/lib/stores/grid-catalog";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { resolveWireTypes, type WireType } from "@/lib/catalog-connect";
-import { optionSlice } from "@/lib/design/grid-options";
+import { hasOption, optionSlice } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
@@ -237,4 +237,27 @@ export async function loadConduitRiser(project: GridProject, optionId: string, d
     estimateOwned: option?.estimateOwned === true,
     placementIds: new Set(devices.map((d) => d.id)),
   };
+}
+
+export type RiserPrompt = { show: false } | { show: true; key: string; label: string; joins: boolean };
+
+/**
+ * The plan's "Add to the lighting control riser?" (#321): shown only when
+ * the engine offers a suggestion that includes this route — so an audio
+ * pair, a loose wire, a wire already in a run and a dismissed pair say
+ * nothing. `label` names the ends in the direction the wire was drawn;
+ * `joins` means the pair already has a run, so Add extends it.
+ */
+export async function riserPromptFor(project: GridProject, optionId: string, routeId: string, deps: ConduitRiserDeps = {}): Promise<RiserPrompt> {
+  const none: RiserPrompt = { show: false };
+  if (!hasOption(project, optionId)) return none;
+  const data = await loadConduitRiser(project, optionId, deps);
+  const s = data.suggestions.items.find((x) => x.routeIds.includes(routeId));
+  if (!s) return none;
+  const wire = data.input.wires.find((w) => w.kind === "route" && w.id === routeId);
+  const label = (id: string | undefined) => data.input.devices.find((d) => d.id === id)?.label || "";
+  const from = label(wire?.from ?? s.a);
+  const to = label(wire?.to ?? s.b);
+  if (!from || !to) return none;
+  return { show: true, key: s.key, label: `${from} → ${to}`, joins: s.kind === "join" };
 }

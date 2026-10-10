@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { CR_OP_NAMES, type CROp } from "@/lib/design/conduit-riser/model";
 import { acceptSuggestions, dismissSuggestion, patchConduitRiser } from "@/lib/stores/grid-conduit-riser";
+import { getProject } from "@/lib/stores/grid-projects";
+import { riserPromptFor, type RiserPrompt } from "@/lib/design/conduit-riser-server";
 
 /**
  * Lighting control riser actions (#321). Same gate as every Grid edit
@@ -73,4 +75,19 @@ export async function dismissSuggestionAction(projectId: string, optionId: strin
   if (!r.ok && r.reason !== "invalid") return fail(r.reason);
   revalidateConduit(projectId);
   return { ok: true };
+}
+
+/**
+ * Should the plan ask "Add to the lighting control riser?" for a wire just
+ * drawn? Read-only; the rule is `riserPromptFor`. A failure is "no prompt".
+ */
+export async function riserPromptForRouteAction(projectId: string, optionId: string, routeId: string): Promise<RiserPrompt> {
+  await requireUser();
+  if (!isStr(projectId) || !isStr(optionId) || !isStr(routeId)) return { show: false };
+  try {
+    const project = await getProject(projectId);
+    return project ? await riserPromptFor(project, optionId, routeId) : { show: false };
+  } catch {
+    return { show: false };
+  }
 }
