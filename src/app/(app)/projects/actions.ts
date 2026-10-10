@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import { activeUsers } from "@/lib/users";
 import {
@@ -345,7 +346,7 @@ export async function addTaskAction(formData: FormData) {
   try {
     await createTask(
       { title, section, projectId, assigneeUserId, assigneeName,
-        dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
+        dueAt: due ? new Date(due + "T12:00:00").getTime() : null, ...readTierSize(formData) },
       me,
     );
   } catch (error) {
@@ -391,6 +392,7 @@ export async function updateTaskAction(formData: FormData) {
       patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
     }
     if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
+    Object.assign(patch, readTierSize(formData));
     if (!await updateTask(taskId, patch)) {
       projectErrorPath(projectId, formTab(formData, "tasks"), "That task could not be updated — please refresh and try again.");
     }

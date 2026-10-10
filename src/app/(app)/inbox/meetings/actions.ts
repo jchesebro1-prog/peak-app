@@ -115,7 +115,7 @@ export async function removeAttendeeAction(id: string, key: string): Promise<Mee
 }
 
 export async function decideTodoAction(
-  id: string, key: string, kind: TodoKind, opts: { assigneeUserId?: string; dueAt?: number | null } = {},
+  id: string, key: string, kind: TodoKind, opts: { assigneeUserId?: string; dueAt?: number | null; priority?: string; size?: string } = {},
 ): Promise<MeetingActionResult> {
   return run(id, (me) => core.decideTodo(id, key, kind, opts, me));
 }

@@ -146,10 +146,12 @@ export default function TaskBlockLayer({
               setDrag({ key: b.key, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, colPx: layerRef.current?.getBoundingClientRect().width ?? 0 });
             }}
             onPointerMove={(e) => {
+              if (!e.isPrimary) return; // a second finger never steers the drag
               if (mine) setDrag({ ...mine, dx: e.clientX - mine.x0, dy: e.clientY - mine.y0 });
             }}
             onPointerUp={(e) => {
               e.stopPropagation();
+              if (!e.isPrimary) return; // a second finger lifting never drops or opens a block
               // The drop is where the pointer is released, not the last move we happened to see.
               const d = mine ? { ...mine, dx: e.clientX - mine.x0, dy: e.clientY - mine.y0 } : null;
               const wasPressed = pressed.current === b.key;

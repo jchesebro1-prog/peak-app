@@ -23,6 +23,7 @@ import { getContact, saveContact, setEmails } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { contactsByEmails } from "@/lib/identity/lookup";
 import { createTaskOnce } from "@/lib/stores/tasks";
+import { tierSizeOf } from "@/lib/task-plan/fields";
 import { addNoteRecord } from "@/lib/stores/notes";
 import * as MS from "@/lib/stores/meetings";
 import { chicagoAt } from "./chicago-day";
@@ -438,7 +439,7 @@ function defaultAssignee<U extends { id: string; name: string }>(m: MeetingRecor
 
 /** Decide one Krisp to-do. Needs a filed meeting; idempotent on `decision.createdId` (a dismissal can be re-decided). */
 export async function decideTodo(
-  id: string, key: string, kind: TodoKind, opts: { assigneeUserId?: string; dueAt?: number | null }, me: Me,
+  id: string, key: string, kind: TodoKind, opts: { assigneeUserId?: string; dueAt?: number | null; priority?: string; size?: string }, me: Me,
 ): Promise<MeetingRecord> {
   if (!["task", "waiting", "note", "dismiss"].includes(kind)) throw new MeetingUserError("Unknown to-do kind");
   if (opts.dueAt !== undefined && opts.dueAt !== null && !(typeof opts.dueAt === "number" && Number.isFinite(opts.dueAt))) {
@@ -483,7 +484,7 @@ export async function decideTodo(
       const t = await createTaskOnce({
         id: todoRecordId("task", m.id, key),
         title, ...base, assigneeUserId: assignee?.id ?? null, assigneeName: assignee?.name ?? "",
-        dueAt: due ?? null, notes: `From meeting: ${m.krisp.title}`,
+        dueAt: due ?? null, notes: `From meeting: ${m.krisp.title}`, ...tierSizeOf(opts),
       }, me);
       createdId = t.id;
     } else if (kind === "waiting") {

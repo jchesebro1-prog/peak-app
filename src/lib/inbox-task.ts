@@ -6,6 +6,7 @@
  * so it can never link something the thread doesn't carry.
  */
 import type { TaskRecord } from "@/lib/stores/tasks";
+import { tierSizeOf } from "@/lib/task-plan/fields";
 
 export type ThreadTaskLinkKind =
   | "thread" | "contact" | "customer" | "site" | "quote" | "lead" | "project" | "survey" | "inspection";
@@ -22,6 +23,9 @@ export type ThreadTaskRequest = {
   dueDate: string;
   /** candidate keys left ticked; "thread" is always added */
   linkKeys: string[];
+  /** Spec 2026-10-09 auto task calendar — the High/Normal/Low and S/M/L chips. */
+  priority?: string;
+  size?: string;
 };
 
 export type ThreadTaskRow = {
@@ -135,6 +139,7 @@ export function buildThreadTaskInput(args: {
     assigneeUserId: assignee.id,
     assigneeName: assignee.name,
     dueAt,
+    ...tierSizeOf(req),
   };
   const contactIds: string[] = [];
   const refs: string[] = [];

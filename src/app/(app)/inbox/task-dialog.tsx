@@ -13,6 +13,8 @@ import type { ReaderVM } from "./types";
 import { createTaskFromThreadAction } from "./task-actions";
 import { defaultThreadTaskNotes, THREAD_TASK_TITLE_MAX } from "@/lib/inbox-task";
 import { BTN, CHECK_ROW, PRIMARY } from "./sidebar-styles";
+import TierSizeChips from "@/components/task-plan/tier-size-chips";
+import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 
 const inStyle: CSSProperties = {
   width: "100%",
@@ -74,6 +76,8 @@ export default function TaskDialog({
     vm.taskTeam.some((u) => u.id === vm.meId) ? vm.meId : vm.taskTeam[0]?.id || ""
   );
   const [due, setDue] = useState("");
+  const [tier, setTier] = useState<TaskTier>("normal");
+  const [size, setSize] = useState<TaskSize>("m");
   const [error, setError] = useState<string | null>(null);
 
   // Mount-focus / restore-on-close — this dialog's own copy of the pattern
@@ -169,6 +173,8 @@ export default function TaskDialog({
         assigneeUserId: assignee,
         dueDate: due,
         linkKeys: Array.from(ticked),
+        priority: tier,
+        size,
       });
       if (!r.ok) {
         setError(r.error);
@@ -281,8 +287,11 @@ export default function TaskDialog({
             <input id="task-due" type="date" value={due} onChange={(e) => setDue(e.target.value)} style={inStyle} />
           </div>
         </div>
+        <div style={{ marginTop: 10 }}>
+          <TierSizeChips tier={tier} size={size} onTier={setTier} onSize={setSize} disabled={pending} />
+        </div>
         <div style={{ fontSize: 11, color: "#8c919c", marginTop: 6, lineHeight: 1.45 }}>
-          Shows on the calendar on its due date. With no date, or once overdue, it floats on today until it’s done or deleted.
+          No date? It’s due in a week. The calendar plans time for it before its due date.
         </div>
 
         {error && (

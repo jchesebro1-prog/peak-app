@@ -18,10 +18,13 @@ import { loadQueue } from "@/lib/queue";
 import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { getSettings } from "@/lib/settings";
-import { loadTaskPlans } from "@/lib/task-plan/load";
+import { loadTaskPlans, type PersonPlan } from "@/lib/task-plan/load";
 import { once } from "./once";
 
-/** Home waits on the plan, so its Google read gets less than /calendar's 6 s. */
+/** This user's plan on Home: a plan, no plan (they aren't on the planning roster — an empty Today), or a load failure (a note). */
+export type TaskPlanState = { status: "ok"; plan: PersonPlan } | { status: "none" } | { status: "failed" };
+
+/** The Today card streams, but a slow Google read still holds its placeholder up, so it gets less than /calendar's 6 s. */
 const HOME_PLAN_CALENDAR_MS = 2_500;
 
 export function makeDashboardData(user: SessionUser) {
@@ -46,13 +49,16 @@ export function makeDashboardData(user: SessionUser) {
     waitingOnOthers: once(() => openWaitingTasksBy("assigneeUserId", [user.id])),
     agenda: once(() => loadHomeAgenda(user.id, me)),
     // Auto task calendar: this user's plan, once per Home render. Google is read with a short limit
-    // (Home waits on it); null = the plan couldn't be loaded (the card shows a note, Home still renders).
-    taskPlan: once(async () => {
+    // (Home waits on it); "failed" = the plan couldn't be loaded (the card shows a note, Home still renders),
+    // "none" = loaded fine but this user has no plan (an empty Today, no note).
+    taskPlan: once(async (): Promise<TaskPlanState> => {
       const plans = await loadTaskPlans({ userIds: [user.id], meId: user.id, deps: { calendarTimeoutMs: HOME_PLAN_CALENDAR_MS } }).catch((err) => {
         console.error("[task-plan] home plan failed:", err);
         return null;
       });
-      return plans?.[0] ?? null;
+      if (!plans) return { status: "failed" };
+      const plan = plans[0];
+      return plan ? { status: "ok", plan } : { status: "none" };
     }),
     boxCounts: once(() => Promise.all(boxes.map((b) => folderCounts(b.id, me)))),
     settings: once(getSettings),

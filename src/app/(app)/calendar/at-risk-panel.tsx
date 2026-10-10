@@ -84,7 +84,8 @@ export default function AtRiskPanel({
       {items.map((a) => {
         const others = roster.filter((u) => u.id !== a.userId);
         const pins = futurePins.filter((p) => p.userId === a.userId && p.canUnpin);
-        const target = handTo[a.itemKey] ?? "";
+        // A stored pick only counts while that person is still on the list (a roster change or a handed-off item clears it).
+        const target = others.some((u) => u.id === handTo[a.itemKey]) ? handTo[a.itemKey] : "";
         const day = a.finishDayKey;
         return (
           <div key={a.itemKey} style={{ borderTop: "1px solid #f3f4f7", padding: "8px 0", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>

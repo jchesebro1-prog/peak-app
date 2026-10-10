@@ -12,6 +12,8 @@ import {
   type QueueSource,
 } from "@/lib/queue-types";
 import { ConfirmButton } from "@/components/confirm-button";
+import TierSizeChips from "@/components/task-plan/tier-size-chips";
+import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 import { createAssignmentAction, removeAssignmentAction, setAssignmentDoneAction } from "./actions";
 
 /**
@@ -74,6 +76,8 @@ export default function QueueView({
   const [title, setTitle] = useState("");
   const [assignee, setAssignee] = useState(who);
   const [dueStr, setDueStr] = useState("");
+  const [tier, setTier] = useState<TaskTier>("normal");
+  const [size, setSize] = useState<TaskSize>("m");
   const [err, setErr] = useState<string | null>(null);
 
   const overdue = queueCardCounts(items, now).overdue;
@@ -86,6 +90,8 @@ export default function QueueView({
       title: title.trim(),
       assignee,
       dueDate: dueStr ? new Date(dueStr + "T12:00:00").getTime() : 0,
+      priority: tier,
+      size,
     });
     if (!r.ok) {
       setErr(r.error);
@@ -93,6 +99,8 @@ export default function QueueView({
     }
     setTitle("");
     setDueStr("");
+    setTier("normal");
+    setSize("m");
     router.refresh();
   }
 
@@ -139,6 +147,7 @@ export default function QueueView({
             ))}
           </select>
           <input type="date" value={dueStr} onChange={(e) => setDueStr(e.target.value)} style={INPUT} />
+          <TierSizeChips tier={tier} size={size} onTier={setTier} onSize={setSize} />
           <button style={BTN} onClick={add}>+ Assign</button>
         </div>
       </Card>

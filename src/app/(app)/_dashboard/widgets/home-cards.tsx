@@ -5,6 +5,7 @@
  * through ctx.data so a store loads once per request however many widgets
  * share it.
  */
+import { Suspense, type ComponentProps } from "react";
 import { after } from "next/server";
 import { savePlanPins } from "@/lib/task-plan/load";
 import { todayRows } from "@/lib/task-plan/today";
@@ -40,6 +41,29 @@ import HomeTeamActivity, { type TeamActivityRow } from "../../home-team-activity
 import HomeNeedsAttention from "../../home-needs-attention";
 
 const stats = async (ctx: WidgetCtx) => myQuoteStats(await ctx.data.quotes(), ctx.user.name);
+
+/** The Today card's body. An async child of a Suspense boundary so Home's other cards paint without waiting on the
+ *  Google read; because the boundary swallows nothing for us (Home has no error.tsx and WidgetHost's try/catch no
+ *  longer covers a streamed child), it catches its own failure. `ctx.data.taskPlan()` is `once()`d — one plan per render. */
+async function TodayPlanCard({ ctx }: { ctx: WidgetCtx }) {
+  let props: ComponentProps<typeof HomeToday> = { rows: [], atRiskCount: 0, note: null, failed: true };
+  try {
+    const state = await ctx.data.taskPlan();
+    if (state.status === "none") props = { rows: [], atRiskCount: 0, note: null };
+    else if (state.status === "ok") {
+      const { plan } = state;
+      after(() => savePlanPins([plan]));
+      props = { rows: todayRows(plan.result, ctx.now), atRiskCount: plan.result.atRisk.length, note: plan.note ?? null };
+    }
+  } catch (err) {
+    console.error("[task-plan] Today card failed", err);
+  }
+  return <HomeToday {...props} />;
+}
+
+const TODAY_FALLBACK = (
+  <div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Planning today…</div>
+);
 
 export const HOME_RENDERERS = {
   /* ---- stat tiles (page.tsx 213-218) ---- */
@@ -80,11 +104,11 @@ export const HOME_RENDERERS = {
 
   /* ---- Today (spec 2026-10-09 auto task calendar) — computing the plan
      saves its new started pins after the response, like /calendar ---- */
-  "today-plan": async (ctx) => {
-    const plan = await ctx.data.taskPlan();
-    if (plan) after(() => savePlanPins([plan]));
-    return <HomeToday rows={plan ? todayRows(plan.result, ctx.now) : []} atRiskCount={plan?.result.atRisk.length ?? 0} note={plan?.note ?? null} failed={!plan} />;
-  },
+  "today-plan": async (ctx) => (
+    <Suspense fallback={TODAY_FALLBACK}>
+      <TodayPlanCard ctx={ctx} />
+    </Suspense>
+  ),
 
   /* ---- inbox (page.tsx 476-501) ---- */
   inbox: async (ctx) => {

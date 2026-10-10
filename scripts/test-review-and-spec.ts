@@ -11317,7 +11317,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 
 
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
-import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks } from "./test-auto-calendar";
+import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
 seeded()
   .then(() => fixtureLeakChecks())
@@ -11624,6 +11624,7 @@ seeded()
   .then(() => autoCalCalendarViewChecks(ok))
   .then(() => autoCalDragPanelChecks(ok))
   .then(() => autoCalHomeChecks(ok))
+  .then(() => autoCalFormChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -22046,7 +22047,8 @@ import {
   );
   const it215 = readFileSync(join(process.cwd(), "src/lib/inbox-task.ts"), "utf8");
   const itImports = [...it215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
-  ok(itImports.every((m) => !!m[1]), "#215 inbox-task.ts imports types only (the dialog imports it)");
+  // Auto task calendar (Task 12): the one value import allowed is the pure task-plan/fields module (no store, no @/db).
+  ok(itImports.every((m) => !!m[1] || /from "@\/lib\/task-plan\/fields"$/.test(m[0])), "#215 inbox-task.ts imports types only, plus the pure task-plan/fields (the dialog imports it)");
 }
 
 async function inboxTask215AsyncChecks(): Promise<void> {

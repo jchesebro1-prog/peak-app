@@ -123,7 +123,9 @@ export async function acceptActionItem(
   key: string,
   assigneeUserId: string | null,
   dueAt: number | null,
-  byName: string
+  byName: string,
+  /** Spec 2026-10-09 auto task calendar — the High/Normal/Low and S/M/L chips; junk is ignored by the store. */
+  tierSize?: { priority?: unknown; size?: unknown }
 ): Promise<AcceptActionItemResult> {
   const item = rec.actionItems.find((a) => a.key === key);
   if (!item) throw new Error("That action item is no longer on the recording.");
@@ -153,6 +155,8 @@ export async function acceptActionItem(
     dueDate: dueAt ?? parseDue(item.dueDate),
     link,
     source: `Krisp ${rec.id} · ${rec.title}`,
+    priority: tierSize?.priority,
+    size: tierSize?.size,
   });
   await setActionItemDisposition(rec.id, key, "accepted", created.id);
   return { assignmentId: created.id, created: true };

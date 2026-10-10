@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
   approveDesign,
@@ -231,7 +232,7 @@ export async function addDesignTaskAction(formData: FormData): Promise<{ ok: tru
   try {
     await createTask(
       { title, section, designId, assigneeUserId, assigneeName,
-        dueAt: due ? new Date(due + "T12:00:00").getTime() : null },
+        dueAt: due ? new Date(due + "T12:00:00").getTime() : null, ...readTierSize(formData) },
       me,
     );
   } catch (error) {
@@ -265,6 +266,7 @@ export async function updateDesignTaskAction(formData: FormData) {
     patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
   }
   if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
+  Object.assign(patch, readTierSize(formData));
   await updateTaskStore(taskId, patch);
   revalidatePath("/design/designs");
 }

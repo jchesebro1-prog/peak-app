@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
   create,
@@ -1607,6 +1608,7 @@ export async function addQuoteTaskAction(formData: FormData): Promise<{ ok: true
         assigneeUserId,
         assigneeName,
         dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
+        ...readTierSize(formData),
       },
       me
     );
@@ -1641,6 +1643,7 @@ export async function updateQuoteTaskAction(formData: FormData) {
     patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
   }
   if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
+  Object.assign(patch, readTierSize(formData));
   await updateTaskStore(taskId, patch);
   revalidatePath("/", "layout");
 }

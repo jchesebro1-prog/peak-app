@@ -24,6 +24,8 @@ export async function createAssignmentAction(input: {
   dueDate?: number;
   link?: AssignmentLink;
   source?: string;
+  priority?: string;
+  size?: string;
 }): Promise<Result> {
   const user = await requireUser();
   const title = String(input?.title || "").trim();
@@ -37,6 +39,8 @@ export async function createAssignmentAction(input: {
       dueDate: Number(input?.dueDate) || 0,
       link: input?.link || null,
       source: input?.source,
+      priority: input?.priority,
+      size: input?.size,
     });
   } catch (error) {
     console.error("createAssignmentAction: assignment mint failed", error);

@@ -4,6 +4,8 @@ import { useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
+import TierSizeChips from "@/components/task-plan/tier-size-chips";
+import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 
 /**
  * Shared tasks card (#17) — renders + mutates one parent record's rows from
@@ -109,6 +111,16 @@ export function TasksCard({
 }) {
   const router = useRouter();
   const [addError, setAddError] = useState<string | null>(null);
+  const [newTier, setNewTier] = useState<TaskTier>("normal");
+  const [newSize, setNewSize] = useState<TaskSize>("m");
+  async function saveChip(taskId: string, field: "priority" | "size", value: string) {
+    const fd = new FormData();
+    fd.set("taskId", taskId);
+    fd.set("id", parentId);
+    fd.set(field, value);
+    await updateAction(fd);
+    router.refresh();
+  }
   const groupsMap: Record<string, TaskRecord[]> = {};
   const order: string[] = [];
   for (const t of tasks) {
@@ -218,6 +230,13 @@ export function TasksCard({
                   />
                 </form>
 
+                <TierSizeChips
+                  tier={t.priority ?? "normal"}
+                  size={t.size ?? "m"}
+                  onTier={(v) => saveChip(t.id, "priority", v)}
+                  onSize={(v) => saveChip(t.id, "size", v)}
+                />
+
                 {removeAction && (
                   <ConfirmButton
                     className="pk-btn-danger"
@@ -250,6 +269,8 @@ export function TasksCard({
             return;
           }
           form.reset();
+          setNewTier("normal");
+          setNewSize("m");
           router.refresh();
         }}
         style={{
@@ -291,6 +312,9 @@ export function TasksCard({
           ))}
         </select>
         <input type="date" name="dueAt" style={dateInputStyle} />
+        <TierSizeChips tier={newTier} size={newSize} onTier={setNewTier} onSize={setNewSize} />
+        <input type="hidden" name="priority" value={newTier} />
+        <input type="hidden" name="size" value={newSize} />
         <button
           type="submit"
           style={{

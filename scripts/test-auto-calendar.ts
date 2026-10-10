@@ -45,6 +45,7 @@ import { localDayKey, type CalendarTaskItem } from "@/lib/calendar-tasks";
 import { calendarPlanView, clockText, composeCalendarPlan, dragStartMs, layoutIntervals, localInputToMs, monthChips, msToLocalInput, pinArgs, PLAN_FAILED_NOTE, stripTasks } from "@/lib/task-plan/calendar-view";
 import { runDueBackfill, setAssignmentDue, setTaskDue } from "@/lib/task-plan/backfill";
 import { readTierSize } from "@/lib/task-plan/fields";
+import { buildThreadTaskInput } from "@/lib/inbox-task";
 import {
   cleanSize,
   cleanTier,
@@ -1277,7 +1278,7 @@ export async function autoCalHomeChecks(ok: Ok): Promise<void> {
     "auto-cal home: the card links to the day view and saves the plan's pins");
   const data = readFileSync("src/lib/dashboard/data.ts", "utf8");
   ok(/taskPlan: once\(/.test(data) && /\.catch\(/.test(data) && /calendarTimeoutMs/.test(data), "auto-cal home: one plan per Home render, a failed load never crashes Home, the Google read is bounded");
-  ok(/Couldn.t load today/.test(today) && /note=/.test(cards), "auto-cal home: a failed plan load shows a small note");
+  ok(/Couldn.t load today/.test(today) && /failed: true/.test(cards), "auto-cal home: a failed plan load shows a small note");
 
   // Task 10 polish
   const block = { kind: "task" as const, id: "t1", pinned: "hand" as const, startMs: at(MON, 9), endMs: at(MON, 10) };
@@ -1293,4 +1294,46 @@ export async function autoCalHomeChecks(ok: Ok): Promise<void> {
   ok(panel.includes("Hand off to…") && /disabled=\{off \|\| !target\}/.test(panel), "auto-cal polish: Hand off waits for a chosen person");
   ok(/BLOCK_MOVED_ERROR/.test(readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8")) && /BLOCK_MOVED_ERROR = "That block moved — refresh\."/.test(readFileSync("src/lib/task-plan/types.ts", "utf8")), "auto-cal polish: the popover closes when a move finds the block moved");
   ok(/pinArgs\(/.test(layer) && /pinArgs\(/.test(readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8")), "auto-cal polish: layer and popover share pinArgs");
+}
+
+/* ---- Task 12: task forms + Task 11 review add-ons ---- */
+export async function autoCalFormChecks(ok: Ok): Promise<void> {
+  const args = (priority: string, size: string) => ({
+    req: { threadId: "C-1", title: "Call back", notes: "", assigneeUserId: "u1", dueDate: "", linkKeys: [], priority, size },
+    candidates: [{ key: "thread", kind: "thread" as const, id: "C-1" }],
+    workLabel: "",
+    roster: [{ id: "u1", name: "Dana" }],
+    me: { id: "u1", name: "Dana" },
+  });
+  const built = buildThreadTaskInput(args("high", "l"));
+  ok(built.ok && built.input.priority === "high" && built.input.size === "l", "auto-cal forms: the email-task dialog's chips reach the task");
+  const junk = buildThreadTaskInput(args("urgent", ""));
+  ok(junk.ok && !("priority" in junk.input) && !("size" in junk.input), "auto-cal forms: junk chip values are ignored");
+  const rd = (f: string) => readFileSync(f, "utf8");
+  for (const f of ["src/components/tasks-card.tsx", "src/app/(app)/inbox/task-dialog.tsx", "src/app/(app)/recordings/[id]/detail-client.tsx", "src/app/(app)/queue/view.tsx", "src/app/(app)/calendar/task-block-popover.tsx"]) {
+    ok(rd(f).includes("<TierSizeChips"), `auto-cal forms: ${f} offers High/Normal/Low and S/M/L`);
+  }
+  for (const f of ["src/app/(app)/projects/actions.ts", "src/app/(app)/estimator/actions.ts", "src/app/(app)/design/designs/actions.ts"]) {
+    ok((rd(f).match(/readTierSize\(formData\)/g) ?? []).length >= 2, `auto-cal forms: ${f} reads the chips on add and on edit`);
+  }
+  ok(/priority: input\?\.priority/.test(rd("src/app/(app)/queue/actions.ts")) && /priority: tierSize\?\.priority/.test(rd("src/lib/krisp/write-back.ts")),
+    "auto-cal forms: Queue and meeting to-dos pass the chips to createAssignment");
+  ok(rd("src/app/(app)/inbox/task-dialog.tsx").includes("due in a week"), "auto-cal forms: the email-task help text says a blank date means due in a week");
+
+  // Task 11 review add-ons
+  const cards = rd("src/app/(app)/_dashboard/widgets/home-cards.tsx");
+  ok(/<Suspense[^>]*fallback=/.test(cards) && /<TodayPlanCard\b/.test(cards) && /async function TodayPlanCard/.test(cards),
+    "auto-cal addons: the Home Today card streams behind a Suspense boundary");
+  const body = cards.slice(cards.indexOf("async function TodayPlanCard"), cards.indexOf("const TODAY_FALLBACK"));
+  ok(/try \{[\s\S]*await ctx\.data\.taskPlan\(\)[\s\S]*after\(\(\) => savePlanPins[\s\S]*\} catch/.test(body) && /Planning today/.test(cards),
+    "auto-cal addons: the streamed Today card catches its own load failure and shows a planning fallback");
+  const layer = rd("src/app/(app)/calendar/task-block-layer.tsx");
+  const move = layer.slice(layer.indexOf("onPointerMove"), layer.indexOf("onPointerUp"));
+  ok(/if \(!e\.isPrimary\) return;/.test(move), "auto-cal addons: a second finger's pointer-move never steers a drag");
+  const up = layer.slice(layer.indexOf("onPointerUp"), layer.indexOf("onPointerCancel"));
+  ok(/if \(!e\.isPrimary\) return;/.test(up), "auto-cal addons: a second finger's pointer-up never drops a drag");
+  const panel = rd("src/app/(app)/calendar/at-risk-panel.tsx");
+  ok(/others\.some\(\(u\) => u\.id === handTo\[a\.itemKey\]\)/.test(panel), "auto-cal addons: a stored hand-off pick that left the list reads as empty");
+  const data = rd("src/lib/dashboard/data.ts");
+  ok(/status: "none"/.test(data) && /status: "failed"/.test(data) && /status: "ok"/.test(data), "auto-cal addons: taskPlan() tells no plan from a failed load");
 }
