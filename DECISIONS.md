@@ -10174,3 +10174,32 @@ is. While the dialog is open the editor's keys stand down and the workspace is `
 id, so sheet 1 never flashes. The tab's ⋯ menu gains Crop & rotate…, hidden on the base sheet and disabled when every
 page is known to be locked (an image, or the PDF on screen — another PDF opens and shows its locks). `PdfCanvas` gained
 `rotateBy`, added to the page's own rotation (pdf.js's viewport rotation is absolute); absent = unchanged.
+
+## D695. Product photos are squared 1600×1600, padded (#322, 2026-10-09)
+
+Jeff wants every catalog product photo the same size so tiles, portal grids and documents line up and nobody pre-resizes
+a photo before uploading. `squareProductImage` (`src/lib/part-docs/shrink.ts`) replaces `shrinkImage` for product
+photos: EXIF applied, uniform borders trimmed (`sharp.trim`, threshold 10; skipped when the trim throws — e.g. a
+perfectly uniform image — or leaves under 8 px), the product fitted inside a **1472×1472** content box and centred on
+a **1600×1600** canvas — a **64 px** even margin at the tightest side — then WebP q80. Never cropped.
+
+- **Enlargement is allowed.** A 100 px source fills the frame; uniform framing is the point, and a small source
+  enlarges softly rather than floating as a postage stamp in a big white square.
+- **Background:** opaque white, unless the trimmed image really has transparency (an alpha channel that is not fully
+  opaque) — then the padding is transparent and the cut-out keeps its alpha. An opaque PNG that merely carries an unused
+  alpha channel gets white, not a see-through margin.
+- **Squared:** direct uploads and replacements (via `shrinkStoredImage({ square: true })`), the photo sheet import, Drive
+  photo sync (new and updated), Add image from URL, and datasheet page-1 thumbnails (they show as product images in
+  the portal). Each writes `squared: true` on the `PartDocument` (JSONB, no migration); `replaceDocumentFile` sets it
+  from the new file, so a later non-squared replacement clears it.
+- **Not squared:** manufacturer images (logos; `source: "manufacturer"` — also guarded on the replace action),
+  object drawings (#300) and the curtain cut-sheet photo tiles (#292) — all keep `shrinkImage`.
+- **Existing photos:** Catalog → Datasheets → **Make photos uniform** (admin, `squarePhotosAction`,
+  `src/lib/part-docs/square-batch.ts`) — a one-time, resumable batch under the usual 45 s budget (re-click to
+  continue; failures are remembered per run). Candidates are image documents with a stored file that are not `squared`
+  and not manufacturer images; each is read, squared, stored as a NEW blob and swapped in with `replaceDocumentFile`,
+  so the original blob is **kept** on the document's `history` and nothing is ever deleted. Links, gallery order,
+  primary and hidden flags live on the link rows and are untouched; the batch also keeps `uploadedAt`/`uploadedBy`
+  (`keepStamp`), since `uploadedAt` is the gallery's tiebreak and re-squaring must not reorder photos. A squared
+  document is never a candidate again, so the batch is idempotent. An unreadable photo is counted failed and left as it
+  was.

@@ -26,7 +26,7 @@ import { buildFetchContext, catalogFetchTargets, createFetchBudget, fetchSlot, t
 import { fetchImageBytes } from "@/lib/part-docs/fetch";
 import { shrinkStoredImage } from "@/lib/part-docs/shrink-upload";
 import { storeDrawingUpload } from "@/lib/part-docs/drawing-upload";
-import { shrinkImage, webpFileName } from "@/lib/part-docs/shrink";
+import { squareProductImage, webpFileName } from "@/lib/part-docs/shrink";
 import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
@@ -41,6 +41,7 @@ import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
 import { syncDrivePhotos, type DrivePhotoSyncResult } from "@/lib/part-docs/drive-photo-sync";
+import { squareExistingPhotos } from "@/lib/part-docs/square-batch";
 import {
   FETCH_ACTION_BUDGET_MS,
   FETCH_BATCH_SIZE,
@@ -151,10 +152,10 @@ export async function attachUploadedDocumentAction(input: {
 
   const checked = await verifyUploadedBlob(input);
   if (!checked.ok) return checked;
-  // #283 — images are stored shrunk (≤1600 px WebP); the full-size upload is deleted.
+  // #283 — images are stored shrunk (≤1600 px WebP); the full-size upload is deleted. #322 — squared 1600×1600.
   let file = checked.file;
   if (input.kind === "image") {
-    const shrunk = await shrinkStoredImage(input.documentId, file);
+    const shrunk = await shrinkStoredImage(input.documentId, file, undefined, { square: true });
     if (!shrunk.ok) return shrunk;
     file = shrunk.file;
   } else if (isDrawingKind(input.kind)) {
@@ -199,7 +200,8 @@ export async function replaceDocumentFileAction(input: {
   if (!checked.ok) return checked;
   let file = checked.file;
   if (doc.kind === "image") {
-    const shrunk = await shrinkStoredImage(doc.id, file);
+    // #322 — a replaced product photo is squared too; a manufacturer image (a logo) is not.
+    const shrunk = await shrinkStoredImage(doc.id, file, undefined, { square: doc.source !== "manufacturer" });
     if (!shrunk.ok) return shrunk;
     file = shrunk.file;
   } else if (isDrawingKind(doc.kind)) {
@@ -476,7 +478,7 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
   const imageType = sniffImageType(got.file.bytes);
   if (!imageType) return { ok: false, error: "That link is not a PNG, JPEG, or WebP image." };
 
-  const shrunk = await shrinkImage(got.file.bytes);
+  const shrunk = await squareProductImage(got.file.bytes);
   if (!shrunk.ok) return { ok: false, error: shrunk.error };
   const documentId = newDocumentId();
   const fileName = webpFileName(fileNameForFetched(got.file.contentDisposition, got.file.finalUrl, "image", imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp"));
@@ -495,6 +497,7 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
     blobKey: stored.pathname,
     sourceUrl: url,
     source: "fetch",
+    squared: true,
     by: user.name,
   });
   if (!doc) {
@@ -618,6 +621,19 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
     revalidatePath("/catalog");
   }
   return { ok: true, done, failed, remaining, failedIds };
+}
+
+/** Admin "Make photos uniform" (#322): one budgeted pass squaring the photos stored before they were squared.
+ *  The button loops while `remaining > 0` and a call made progress; `skip` carries the ids that already failed. */
+export async function squarePhotosAction(input?: { skip?: string[] }): Promise<DocActionResult<{ done: number; failed: number; remaining: number; failedIds: string[] }>> {
+  const user = await requirePerm("manage_users");
+  if (!blobEnabled()) {
+    return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be squared on this deployment." };
+  }
+  const skip = Array.isArray(input?.skip) ? input.skip.filter(isDocumentId) : [];
+  const r = await squareExistingPhotos(await allDocuments(), user.name, { budgetMs: FETCH_ACTION_BUDGET_MS, skip });
+  if (r.done > 0) revalidate("image");
+  return { ok: true, ...r };
 }
 
 /** Admin "Sync now" (#283): one budgeted Peak Product Photos pass; the panel

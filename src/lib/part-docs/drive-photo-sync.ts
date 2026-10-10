@@ -25,7 +25,7 @@ import { allDocuments, attachDocument, createDocument, detachDocument, getDocume
 import { planDrivePhotoSync, type DrivePhotoFileState, type PhotoMatch, type UnmatchedPhoto } from "./drive-photo-plan";
 import { matchFileRows } from "./filename-match";
 import { sheetDriveClaims } from "./photo-sheet";
-import { shrinkImage, webpFileName } from "./shrink";
+import { squareProductImage, webpFileName } from "./shrink";
 import { MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
 
 export const DRIVE_PHOTO_SYNC_BLOB = "drive_photo_sync";
@@ -320,7 +320,7 @@ async function runSync(
         await recordError(problem);
         continue;
       }
-      const shrunk = await shrinkImage(bytes);
+      const shrunk = await squareProductImage(bytes);
       if (!shrunk.ok) {
         await recordError(shrunk.error);
         continue;
@@ -333,7 +333,7 @@ async function runSync(
       step = "store";
       const stored = await put(partDocBlobPath(documentId, fileName), shrunk.bytes, shrunk.contentType);
       step = "record";
-      const file = { blobKey: stored.pathname, fileName, contentType: shrunk.contentType, size: shrunk.bytes.byteLength };
+      const file = { blobKey: stored.pathname, fileName, contentType: shrunk.contentType, size: shrunk.bytes.byteLength, squared: true as const };
       let outcome: "imported" | "updated";
       if (existing && item.kind === "update") {
         if (!(await replaceDocumentFile(existing.id, file, SYNC_BY, now()))) throw new Error("Could not update the document.");
