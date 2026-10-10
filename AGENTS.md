@@ -718,6 +718,10 @@ See `.env.example`.
     page, only while the page is empty — which derives a new sheet from the
     original upload (`src/lib/design/sheet-adjust*.ts`); later via the tab's ⋯ →
     Crop & rotate…. Punch item #318.
+    ✅ Follow-up (#319, D696–D698): a multi-page PDF uploads as one sheet per
+    page (`<file> — p.<n>`, up to 60; `grid-sheet-split*.ts`), Adjust sheet
+    walks them ("Sheet 2 of 5", Skip the rest), and a real plan removes the
+    generated plan when nothing is drawn on it. Punch item #319.
 
 39. ✅ **Object symbols + size slider** (#300, D605–D612) — a Grid design saves
     its own symbol size (25–400 %) and Generic / Object mode (`symbolDisplay`,

@@ -53,6 +53,7 @@ import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { isBaseSheet } from "@/lib/design/sheet-adjust";
+import { parseAdjustParam } from "@/lib/design/grid-sheet-split";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
@@ -387,7 +388,9 @@ export default async function GridEditorPage({
       intakeNotices={cleanIntakeNotices(project.intake?.notices)}
       focusSheetId={project.intake?.planSheetId && (project.sheetIds || []).includes(project.intake.planSheetId) ? project.intake.planSheetId : null}
       blobUploads={blobEnabled()}
-      adjustSheetId={requestedAdjust && (project.sheetIds || []).includes(requestedAdjust) ? requestedAdjust : null}
+      adjustSheetIds={parseAdjustParam(requestedAdjust, project.sheetIds || [])}
+      // #319: the RAW ?adjust= is the adoption key — the list above shrinks as Done retires sheets.
+      adjustKey={typeof requestedAdjust === "string" && requestedAdjust ? requestedAdjust : null}
     />
     </CanMapProvider>
   );
