@@ -38,14 +38,17 @@ const LABEL: CSSProperties = {
 export async function WaitingOnCustomerCard({
   by,
   ids,
+  customerId,
   style,
 }: {
   /** company page: "customerId" + the company id; venue page: "siteId" + the venue's directory id and sites.id */
   by: "customerId" | "siteId";
   ids: readonly string[];
+  /** venue page: the venue's company — a legacy directory id repeats across companies */
+  customerId?: string;
   style?: CSSProperties;
 }) {
-  const tasks = await openWaitingTasksBy(by, ids);
+  const tasks = await openWaitingTasksBy(by, ids, customerId === undefined ? {} : { customerId });
   if (tasks.length === 0) return null;
   return (
     <div style={{ ...CARD, ...style }}>

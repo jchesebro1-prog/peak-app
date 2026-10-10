@@ -357,7 +357,7 @@ export default async function VenuePage({
       {/* #323 — Krisp meetings linked to this venue, and what the customer owes us here (a meeting-made task
           stores the venue's directory id; sites.id is matched too) */}
       <MeetingsCard kind="venue" id={site.id} viewerId={user.id} style={{ marginBottom: 24 }} />
-      <WaitingOnCustomerCard by="siteId" ids={[locationId, site.id]} style={{ marginBottom: 24 }} />
+      <WaitingOnCustomerCard by="siteId" ids={[locationId, site.id]} customerId={site.companyId} style={{ marginBottom: 24 }} />
 
       {/* contacts */}
       <div style={card}>

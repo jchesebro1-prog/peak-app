@@ -18,6 +18,7 @@ import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@
 import { summarySearchText } from "@/lib/krisp/derive";
 import { partSearchHaystack, staffPartLabel, type SearchPartLike } from "@/lib/catalog-rename/sku";
 import { searchMeetingCandidates } from "@/lib/stores/meetings";
+import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { canSeeMeeting } from "@/lib/meetings/visibility";
 import { renderMeeting, type RenderNames } from "@/lib/meetings/render";
 import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
@@ -71,6 +72,7 @@ export async function GET(req: Request) {
     .trim()
     .toLowerCase();
   if (q.length < 2) return NextResponse.json({ groups: [] });
+  const meId = session.user.id;
 
   // Pull only a small candidate set per table from SQL (matches anywhere in
   // the doc), then apply the precise per-field filter below. Avoids
@@ -88,8 +90,9 @@ export async function GET(req: Request) {
       searchDocs("catalog_parts", q, CANDIDATES),
       searchDocs<RecordingRecord>("recordings", q, CANDIDATES),
       quotesByPartialNumber(q, CANDIDATES),
-      // #323 — title / raw-notes ILIKE in SQL, no transcript; visibility + the rendered summary re-checked below
-      searchMeetingCandidates(q, CANDIDATES),
+      // #323 — title / notes-text ILIKE in SQL, visible to me (in the WHERE, before the LIMIT), no transcript;
+      // visibility + the rendered summary re-checked below
+      meetingsReadOr(searchMeetingCandidates(q, CANDIDATES, meId), [], "search"),
     ]);
 
   const groups: Group[] = [];
@@ -266,7 +269,6 @@ export async function GET(req: Request) {
   }
   // #323 Krisp meetings: title + the rendered summary, only what this user may see (canSeeMeeting).
   {
-    const meId = session.user.id;
     const DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" });
     add(
       "Meetings",

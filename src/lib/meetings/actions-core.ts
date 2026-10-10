@@ -197,10 +197,25 @@ export async function confirmSuggestions(
   });
 }
 
+/** Most ids one Confirm all reads (the To file list it comes from is far shorter). */
+export const CONFIRM_ALL_MAX = 200;
+
 /** Confirm all: every unfiled, non-noise meeting whose TOP suggestion is strong gets its strong suggestions.
- *  A row that can't be confirmed (a record gone, a share to protect) is skipped, never the whole batch. */
+ *  A row that can't be confirmed (a record gone, a share to protect, a meeting the rep can no longer see or that
+ *  is gone) is skipped, never the whole batch. Ids are loaded one by one, at most CONFIRM_ALL_MAX of them. */
 export async function confirmAllStrong(ids: string[] | "all-visible", me: Me): Promise<{ filed: number }> {
-  const list = ids === "all-visible" ? await MS.meetingsVisibleTo(me.id) : await Promise.all(ids.map((id) => load(id, me)));
+  let list: MeetingRecord[];
+  if (ids === "all-visible") list = await MS.meetingsVisibleTo(me.id);
+  else {
+    list = [];
+    for (const id of cleanIds(ids).slice(0, CONFIRM_ALL_MAX)) {
+      try {
+        list.push(await load(id, me));
+      } catch (e) {
+        if (!(e instanceof MeetingAccessError)) throw e;
+      }
+    }
+  }
   let n = 0;
   for (const m of list) {
     if (m.filedAt || m.noise || m.suggestions[0]?.strength !== "strong") continue;
@@ -208,7 +223,7 @@ export async function confirmAllStrong(ids: string[] | "all-visible", me: Me): P
       const after = await confirmSuggestions(m.id, "strong", me);
       if (after.filedAt) n++;
     } catch (e) {
-      if (!(e instanceof MeetingUserError) || e instanceof MeetingAccessError) throw e;
+      if (!(e instanceof MeetingUserError)) throw e;
     }
   }
   return { filed: n };
@@ -395,6 +410,17 @@ function waitingContactId(m: MeetingRecord, label: string): string | null {
   return byFirst.length === 1 ? byFirst[0] : null;
 }
 
+/** Krisp's fallback for a voice it couldn't name ("Speaker 3", "Speaker_3"). */
+const UNNAMED_SPEAKER = /^Speaker[ _]\d+$/i;
+
+/** Who a "waiting" to-do waits on: the (relabelled) assignee — unless it is an unmapped Speaker N, which names
+ *  nobody; then the linked company, else "Customer". */
+async function waitingName(m: MeetingRecord, label: string): Promise<string> {
+  if (label && !UNNAMED_SPEAKER.test(label)) return label;
+  const co = m.links.customerId ? await getCompany(m.links.customerId).catch(() => null) : null;
+  return co?.name?.trim() || "Customer";
+}
+
 /** The default assignee: a speaker mapped to a Peak user is that user; else the (relabelled) name, matched. */
 function defaultAssignee<U extends { id: string; name: string }>(m: MeetingRecord, todo: MeetingTodo, label: string, users: U[]): U | null {
   const raw = (todo.assigneeLabel || "").trim();
@@ -464,7 +490,7 @@ export async function decideTodo(
       const t = await createTaskOnce({
         id: todoRecordId("task", m.id, key),
         title, ...base, assigneeUserId: me.id, assigneeName: me.name, dueAt: due ?? Date.now() + WAITING_DEFAULT_MS,
-        waitingOn: { contactId: waitingContactId(m, label), name: label || "Customer" },
+        waitingOn: { contactId: waitingContactId(m, label), name: await waitingName(m, label) },
         notes: `Waiting on customer — from meeting: ${m.krisp.title}`,
       }, me);
       createdId = t.id;

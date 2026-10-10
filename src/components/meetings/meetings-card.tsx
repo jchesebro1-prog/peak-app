@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { meetingRowsLinkedTo, type MeetingLinkKind } from "@/lib/stores/meetings";
 import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
+import { meetingsReadOr } from "@/lib/meetings/safe-read";
 
 /**
  * <MeetingsCard kind id viewerId> — #323 "Elsewhere": the Krisp meetings linked
@@ -48,7 +49,7 @@ export async function MeetingsCard({
   limit?: number;
   style?: CSSProperties;
 }) {
-  const rows = await meetingRowsLinkedTo(kind, id, viewerId);
+  const rows = await meetingsReadOr(meetingRowsLinkedTo(kind, id, viewerId), [], `${kind} card`);
   if (rows.length === 0) return null;
   return (
     <div style={{ ...CARD, ...style }}>

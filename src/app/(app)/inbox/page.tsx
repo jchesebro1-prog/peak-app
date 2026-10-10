@@ -83,6 +83,7 @@ import InboxShell from "./inbox-shell";
 import MeetingsBox from "./meetings/meetings-box";
 import MeetingReader from "./meetings/meeting-reader";
 import { loadMeetingReader, loadMeetingsBox, toFileCount } from "./meetings/load";
+import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { MEETINGS_BASE_HREF, meetingsHref, meetingsTabOf } from "./meetings/format";
 import HomeTabs from "../home-tabs";
 import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
@@ -319,7 +320,7 @@ export default async function InboxPage({
     activeUsers(),
     allCustomers(),
     labelOptionsFor(box, user.id),
-    toFileCount(user.id),
+    meetingsReadOr(toFileCount(user.id), 0, "inbox count"),
   ]);
 
   // Threads worth linking to a customer but not yet linked (#96 §5) — any
@@ -1089,10 +1090,11 @@ export default async function InboxPage({
       selectedId ? loadMeetingReader(user, selectedId) : Promise.resolve(null),
     ]);
     meetingsSlot = {
-      list: <MeetingsBox vm={boxVM} selectedId={readerVM ? readerVM.id : null} tab={tab} baseHref={MEETINGS_BASE_HREF} />,
-      reader: <MeetingReader vm={readerVM} variant="pane" />,
+      // keyed: these server-made elements are rendered inside InboxShell's child lists (React key warning)
+      list: <MeetingsBox key="meetings-list" vm={boxVM} selectedId={readerVM ? readerVM.id : null} tab={tab} baseHref={MEETINGS_BASE_HREF} />,
+      reader: <MeetingReader key="meetings-reader" vm={readerVM} variant="pane" />,
       // narrow screens: the sidebar stacks under the content inside the overlay
-      overlayReader: <MeetingReader vm={readerVM} variant="overlay" />,
+      overlayReader: <MeetingReader key="meetings-overlay" vm={readerVM} variant="overlay" />,
       selected: !!readerVM,
       closeHref: meetingsHref(MEETINGS_BASE_HREF, tab),
     };

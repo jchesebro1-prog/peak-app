@@ -12,6 +12,7 @@ import { quoteBuilderHref } from "@/lib/quote-links";
 import { reviewers } from "@/lib/users";
 import { firstName } from "@/lib/team";
 import { quoteAwaitsApprovalBy, sameName } from "@/lib/quote-approval-rules";
+import { MEETINGS_BASE_HREF, meetingsHref } from "@/app/(app)/inbox/meetings/format";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.
@@ -220,6 +221,25 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       context: `${p.name}${t.section ? ` · ${t.section}` : ""}`,
       due: t.dueAt ?? due(p.targetDate),
       href: `/projects/${p.id}`,
+      writable: false,
+    });
+  }
+
+  /* --- #323 meeting to-dos assigned to me (decided "task" in the meeting reader). A meeting task that is also
+     a project's is listed above as a project task, once. "Waiting on customer" nudges stay in Home's Waiting on
+     others group. Like project tasks, read-only from outside the app (Google Tasks mirrors it, never writes it). --- */
+  for (const t of tasks) {
+    if (!t.meetingId || t.status === "done" || t.assigneeName !== me || t.waitingOn) continue;
+    if (t.projectId && projectsById.has(t.projectId)) continue;
+    const from = (t.notes || "").match(/^From meeting: (.+)$/m)?.[1]?.trim();
+    items.push({
+      key: `meeting-task:${t.id}`,
+      source: "meeting-task",
+      title: t.title,
+      context: from ? `Meeting · ${from}` : "Meeting",
+      due: due(t.dueAt),
+      // a decided to-do's meeting is filed, so its reader opens under Filed
+      href: meetingsHref(MEETINGS_BASE_HREF, "filed", t.meetingId),
       writable: false,
     });
   }

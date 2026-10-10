@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
@@ -12,6 +13,7 @@ import WidgetHost from "./_dashboard/host";
 import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
 import { syncMeetingsIfStale } from "@/lib/meetings/sync";
 import { toFileCount } from "./inbox/meetings/load";
+import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
@@ -72,11 +74,12 @@ export default async function HomePage({
   const me = user.name;
   const data = makeDashboardData(user);
   void reconcileRecordingsIfStale().catch(() => {});
-  void syncMeetingsIfStale(user.id).catch(() => {}); // #323 Krisp meetings, > 10 min stale
+  // #323 Krisp meetings, > 10 min stale — after the response (after(), like #222's PDF render), never blocking Home
+  after(() => syncMeetingsIfStale(user.id).catch(() => {}));
   const now = Date.now();
   const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
-    toFileCount(user.id), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
+    meetingsReadOr(toFileCount(user.id), 0, "home count"), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
   ]);
 
   const pipe = resolvePipe(first(sp.pipe));

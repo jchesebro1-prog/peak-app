@@ -621,7 +621,8 @@ async function actionChecks(ok: Ok, fx: Fx): Promise<void> {
   const priv = await mk({ todos: [todo("k", "x", null, null, "note")] });
   const denied = await Promise.all([
     rejects(MA.confirmSuggestions(priv.id, "strong", outsider), MA.MeetingAccessError),
-    rejects(MA.confirmAllStrong([priv.id], outsider), MA.MeetingAccessError),
+    // final review 13: Confirm all skips a row the rep can't see instead of failing the run
+    MA.confirmAllStrong([priv.id], outsider).then((r) => r.filed === 0, () => false),
     rejects(MA.setLinks(priv.id, { customerId: CO }, outsider), MA.MeetingAccessError),
     rejects(MA.setSpeaker(priv.id, "1", null, outsider), MA.MeetingAccessError),
     rejects(MA.addAttendee(priv.id, { name: "Pat", email: null }, outsider), MA.MeetingAccessError),
@@ -905,7 +906,7 @@ export async function meetings323UiPins(ok: Ok): Promise<void> {
   const format = src(`${dir}/meetings/format.ts`);
   ok(/variant\?: "pane" \| "overlay"/.test(readerOnly) && /flexDirection: pane \? "row" : "column"/.test(readerOnly) &&
      /<MeetingSidebar vm=\{vm\} variant=\{variant\} \/>/.test(readerOnly) && /width: variant === "pane" \? 300 : "auto"/.test(sidebar) &&
-     /<MeetingReader vm=\{readerVM\} variant="overlay" \/>/.test(page) && /\{meetings\.overlayReader\}/.test(shell),
+     /<MeetingReader key="meetings-overlay" vm=\{readerVM\} variant="overlay" \/>/.test(page) && /\{meetings\.overlayReader\}/.test(shell),
     "#323 UI the narrow overlay renders the overlay reader: sidebar stacked under the content, full width");
   const tickBody = actions.slice(actions.indexOf("export async function meetingsTickAction"));
   ok(!/revalidate/.test(tickBody.slice(tickBody.indexOf("{"))), "#323 UI meetingsTickAction never revalidates — the shell's latched refresh governs");
@@ -1003,7 +1004,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
 
   const search = src("src/app/api/search/route.ts");
   const sBlock = search.slice(search.indexOf("#323 Krisp meetings"), search.indexOf('"Catalog"'));
-  ok(/searchMeetingCandidates\(q, CANDIDATES\)/.test(search) && /"Meetings"/.test(sBlock) && /canSeeMeeting\(m, meId\)/.test(sBlock) &&
+  ok(/searchMeetingCandidates\(q, CANDIDATES, meId\)/.test(search) && /"Meetings"/.test(sBlock) && /canSeeMeeting\(m, meId\)/.test(sBlock) &&
      /renderMeeting\(m, NO_NAMES\)/.test(sBlock) && /letter: "M"/.test(sBlock) && /color: "#6b4fa1"/.test(sBlock) &&
      /href: meetingReaderHref\(m\)/.test(sBlock) && !/allMeetings\(|meetingsVisibleTo\(/.test(search) &&
      /const NO_NAMES: RenderNames = \{ contact: \(\) => null, user: \(\) => null \};/.test(search),
@@ -1020,7 +1021,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
   const feed = src("src/lib/customer-feed.ts");
   const company = src("src/app/(app)/companies/[id]/page.tsx");
   const rows = src("src/lib/customer-feed-rows.ts");
-  ok(/viewerId \? meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feed) && /loadCustomerFeed\(\{ id: cust\.id, name: cust\.name \}, me\.id\)/.test(company) &&
+  ok(/viewerId\s*\? meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feed) && /loadCustomerFeed\(\{ id: cust\.id, name: cust\.name \}, me\.id\)/.test(company) &&
      /`Met with \$\{names\.join\(", "\)\} — \$\{title\}`/.test(rows) && /row\(\s*"comm",\s*`meeting:\$\{m\.id\}`/.test(rows) &&
      !/summary/.test(rows.slice(rows.indexOf("export function meetingFeedRows"), rows.indexOf("export function visitFeedRows")).replace(/no summary text is copied/, "")),
     "#323 customer feed: one 'Met with … — <title>' comm row per linked, visible meeting; the viewer is passed; no summary copied");
@@ -1032,7 +1033,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
   const cards = src("src/app/(app)/_dashboard/widgets/home-cards.tsx");
   ok(/<WaitingOnCustomerCard by="customerId" ids=\{\[cust\.id\]\} \/>/.test(company) &&
      /<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\}/.test(venue) &&
-     /openWaitingTasksBy\(by, ids\)/.test(waiting) && /Waiting on customer/.test(waiting) && /owes this/.test(waiting) && /nudge /.test(waiting),
+     /openWaitingTasksBy\(by, ids, customerId === undefined \? \{\} : \{ customerId \}\)/.test(waiting) && /Waiting on customer/.test(waiting) && /owes this/.test(waiting) && /nudge /.test(waiting),
     "#323 company + venue pages list 'Waiting on customer' (venue matches the directory id a meeting task stores, and sites.id)");
   ok(/!t\.projectId \|\| t\.waitingOn\) continue;/.test(queue) && /Waiting on others/.test(hq) &&
      /waiting=\{waiting\}/.test(cards) && /ctx\.data\.waitingOnOthers\(\)/.test(cards) &&
@@ -1116,17 +1117,24 @@ export async function meetings323EverywhereChecks(ok: Ok): Promise<void> {
      r0.title === "Osakis scope review" && r0.durationSec === 1200,
     "#323 the linked-row projection carries header + live attendee names, never transcript, to-dos or share text");
 
-  // ⌘K candidates: title or notes, never the transcript; visibility is the caller's
-  const byNotes = await MS.searchMeetingCandidates("quokka", 100);
-  ok(byNotes.some((m) => m.id === fx[0].id) && byNotes.some((m) => m.id === fx[3].id) &&
-     (await MS.searchMeetingCandidates("zebracrossing", 100)).filter((m) => fx.some((f) => f.id === m.id)).length === 0 &&
-     (await MS.searchMeetingCandidates("osakis follow", 100)).some((m) => m.id === fx[1].id),
-    "#323 searchMeetingCandidates matches title and notes in SQL, never the transcript");
+  // ⌘K candidates: title or notes text, never the transcript; visibility filtered in SQL before the LIMIT (final review 11)
+  const search = MS.searchMeetingCandidates as unknown as (q: string, limit: number, viewerId: string) => Promise<MeetingRecord[]>;
+  const byNotes = await search("quokka", 100, "u-ev323");
+  ok(byNotes.some((m) => m.id === fx[0].id) && !byNotes.some((m) => m.id === fx[3].id) &&
+     (await search("quokka", 100, "u-ev323-private")).some((m) => m.id === fx[3].id) &&
+     (await search("zebracrossing", 100, "u-ev323")).filter((m) => fx.some((f) => f.id === m.id)).length === 0 &&
+     (await search("osakis follow", 100, "u-ev323")).some((m) => m.id === fx[1].id),
+    "#323 searchMeetingCandidates matches title and notes in SQL, never the transcript, only meetings the viewer may see");
+  const top1 = await search("quokka", 1, "u-ev323");
+  ok(top1.map((m) => m.id).join() === fx[2].id,
+    "#323 final 11: ⌘K applies visibility before the LIMIT — a newer private meeting never crowds out a visible one");
+  ok((await search("paragraph", 100, "u-ev323")).filter((m) => fx.some((f) => f.id === m.id)).length === 0 &&
+     (await search("rigging budget", 100, "u-ev323")).some((m) => m.id === fx[0].id),
+    "#323 final 11: ⌘K matches the notes' text values, not the raw JSON (a block type never matches)");
   const hit = byNotes.find((m) => m.id === fx[0].id)!;
   const rendered = renderMeeting(hit, { contact: () => null, user: () => null });
-  ok(hit.krisp.segments.length === 0 && rendered.summary.some((s) => /quokka/.test(s.description)) &&
-     !canSeeMeeting(byNotes.find((m) => m.id === fx[3].id)!, "u-ev323") && canSeeMeeting(hit, "u-ev323"),
-    "#323 a ⌘K candidate renders its summary without the transcript; a private meeting fails canSeeMeeting for others");
+  ok(hit.krisp.segments.length === 0 && rendered.summary.some((s) => /quokka/.test(s.description)) && canSeeMeeting(hit, "u-ev323"),
+    "#323 a ⌘K candidate renders its summary without the transcript");
 
   // customer feed
   const feedNoViewer = await loadCustomerFeed({ id: CO, name: "TEST323 portal co" });
@@ -1158,4 +1166,255 @@ export async function meetings323EverywhereChecks(ok: Ok): Promise<void> {
   ok(byCustomer.map((t) => t.id).join() === "T-TEST323-W1" && bySite.map((t) => t.id).join() === "T-TEST323-W1" &&
      mine.map((t) => t.id).join() === "T-TEST323-W1" && byCustomer[0].waitingOn?.name === "Tom Ellis",
     "#323 openWaitingTasksBy: open tasks with waitingOn only (done and ordinary tasks excluded), by company, venue ids or assignee");
+}
+
+/* ---------- final whole-branch review fixes ---------- */
+
+export async function meetings323FinalChecks(ok: Ok): Promise<void> {
+  const src = (p: string) => {
+    try { return readFileSync(join(process.cwd(), p), "utf8"); } catch { return ""; }
+  };
+  const tryImport = async <T,>(p: string): Promise<T | null> => {
+    try { return (await import(p)) as T; } catch { return null; }
+  };
+
+  // (1) /api/sync/pull serves the offline field collections only — never meetings (other reps' private notes)
+  const pullMod = await tryImport<{ pullCollections: (p: string | null) => string[] }>("@/lib/sync/pull-collections");
+  const { SYNCABLE_COLLECTIONS } = await import("@/db/doc-tables");
+  const pullAll = pullMod?.pullCollections(null) ?? [];
+  ok(!!pullMod && pullAll.join() === SYNCABLE_COLLECTIONS.join() && !pullAll.includes("meetings") &&
+     pullMod.pullCollections("meetings,tasks,quotes,nope").join() === "tasks" && pullMod.pullCollections("meetings").length === 0,
+    "#323 final 1: pullCollections serves only SYNCABLE_COLLECTIONS (the offline field set) — meetings never, quotes never");
+  const pullRoute = src("src/app/api/sync/pull/route.ts");
+  ok(/pullCollections\(url\.searchParams\.get\("collections"\)\)/.test(pullRoute) && !/Object\.keys\(DOC_TABLES\)/.test(pullRoute) &&
+     !/in DOC_TABLES/.test(pullRoute),
+    "#323 final 1: /api/sync/pull reads its collection list through pullCollections, never every DOC_TABLES key");
+
+  // (2) generic venue words: a venue core is the venue's distinctive part, shared cores are dropped, weak ties capped
+  const { prepareMatchIndex } = (await import("@/lib/meetings/match")) as unknown as { prepareMatchIndex?: (i: MatchIndex, w?: string[]) => MatchIndex };
+  const prep = (i: MatchIndex) => (prepareMatchIndex ? prepareMatchIndex(i, ["Gym Stage", "Proscenium / Auditorium"]) : i);
+  const town = (i: number) => `Tn${i}ville`;
+  const big: MatchIndex = index323({
+    companies: [
+      ...index323().companies,
+      ...Array.from({ length: 300 }, (_, i) => ({ id: `big-${i}`, name: `${town(i)} Public Schools`, keywords: [] })),
+    ],
+    sites: [
+      ...index323().sites,
+      ...Array.from({ length: 300 }, (_, i) => i % 2
+        ? { id: `big-st-${i}`, companyId: `big-${i}`, name: `${town(i)} HS — Main Stage`, locationName: `${town(i)} HS` }
+        : { id: `big-st-${i}`, companyId: `big-${i}`, name: "Main Stage", locationName: null }),
+      ...Array.from({ length: 300 }, (_, i) => ({ id: `big-gym-${i}`, companyId: `big-${i}`, name: i % 2 ? "Gym Stage" : `${town(i)} — Gym Stage`, locationName: null })),
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `lincoln-${i}`, companyId: `big-${i}`, name: "Lincoln Elementary — Auditorium", locationName: "Lincoln Elementary" })),
+      { id: "st-osakis-gym", companyId: "osakis", name: "Osakis HS — Gym Stage", locationName: "Osakis HS" },
+    ],
+  });
+  const pbig = prep(big);
+  const coIds = (r: ReturnType<typeof matchMeeting>) => r.suggestions.filter((s) => s.kind === "company").map((s) => s.id);
+  ok(coIds(matchMeeting(input323({ title: "Main Stage walkthrough" }), pbig)).length === 0,
+    "#323 final 2: 'Main Stage walkthrough' against 300 companies with Main Stage venues → no company suggestion");
+  const gym = coIds(matchMeeting(input323({ title: "Osakis gym stage walkthrough" }), pbig));
+  ok(gym.join() === "osakis", `#323 final 2: 'Osakis gym stage' with hundreds of Gym Stage venues → Osakis only (${gym.length})`);
+  ok(coIds(matchMeeting(input323({ title: "Lincoln walkthrough" }), pbig)).length === 0,
+    "#323 final 2: a venue core shared by more than 3 companies' venues is skipped");
+  const riv = index323({ companies: ["Church", "Theatre", "Schools", "Arts Center", "Community College"].map((t, i) => ({ id: `riv-${i}`, name: `Riverside ${t}`, keywords: [] })) });
+  ok(coIds(matchMeeting(input323({ title: "Riverside meeting" }), prep(riv))).length === 3,
+    "#323 final 2: weak company suggestions are capped at 3");
+  const osh = matchMeeting(input323({ title: "Oshkosh North - VE Engineering Meeting" }), prep(index323()));
+  ok(coIds(osh)[0] === "oshkosh" && osh.suggestions.some((s) => s.kind === "venue" && s.id === "st-oshkosh-1"),
+    "#323 final 2: the Oshkosh North venue hit still works on a prepared index");
+  const ib = src("src/lib/meetings/index-build.ts");
+  ok(!!prepareMatchIndex && /return prepareMatchIndex\(/.test(ib) && /venueTypesFrom\(/.test(ib) &&
+     !!prep(index323()).sites[0].cores && !!prep(index323()).companies[0].cores,
+    "#323 final 2: buildMatchIndex precomputes company + venue cores once (prepareMatchIndex, venue-type labels stripped)");
+
+  // (8) several overlapping owner visits for one company → no work / venue from visits; points count once
+  const v = (id: string, siteId: string) => ({ kind: "site_visit" as const, id, label: id, companyId: "osakis", siteId,
+    startMs: T0 - 15 * 60_000, endMs: T0 + 60 * 60_000, assigneeUserId: "u1" });
+  const two = matchMeeting(input323({ title: "Mobile recording" }), index323({ visits: [v("SV-A", "st-osakis-1"), v("SV-B", "st-osakis-2")] }));
+  ok(!two.suggestions.some((s) => s.kind === "work" || s.kind === "venue") && two.suggestions.find((s) => s.kind === "company")?.score === 40,
+    "#323 final 8: two overlapping owner visits for one company → company (40, once), no visit work or venue guessed");
+
+  // (12) to-do defaults read only this meeting's people: an unrelated company's 'Jeff' never makes Jeff's to-do a note
+  const { syncRepMeetings: sync } = await import("@/lib/meetings/sync");
+  const NOW = Date.UTC(2026, 9, 9, 18, 0);
+  const kTodo = "TEST323F" + "1".repeat(24);
+  const kFirst = ["TEST323F" + "2".repeat(24), "TEST323F" + "3".repeat(24), "TEST323F" + "4".repeat(24)];
+  [kTodo, ...kFirst].forEach((k) => registerFixture("meetings", "km-" + k));
+  const lst = (id: string, title: string) =>
+    ({ id, title, startedAt: NOW - 3600_000, durationSec: 1200, status: "completed", source: "zoom", tags: [], ownership: "owned" as const, participants: [] });
+  const st: Record<string, unknown> = {};
+  const fdeps = (userId: string, over: Partial<SyncDeps> = {}): SyncDeps => ({
+    now: () => NOW,
+    client: {
+      listMeetings: async () => ({ meetings: [lst(kTodo, "Osakis – scope")], nextCursor: null }),
+      meeting: async (id) => ({ id, title: null, startedAt: null, duration: null, status: "completed", participants: null,
+        transcript: { language: "en", speakers: {}, segments: [] },
+        notes: { blocks: [{ type: "action_items", children: [{ type: "action_item", text: "Send drawings", assignee: "Jeff" }] }] } }),
+    },
+    calendar: async () => null,
+    buildIndex: async () => index323({ contacts: [...index323().contacts,
+      { id: "c-jeff-other", companyId: "monte", firstName: "Jeff", lastName: "Nobody", emails: [] }] }),
+    lookupEmails: async () => new Map(),
+    siteIdFor: async () => null,
+    getState: async () => (st[userId] as never) ?? { syncedAt: null, backfillFrom: null, backfillCursor: null, lastError: null },
+    setState: async (patch) => { st[userId] = { ...(st[userId] as object), ...patch }; },
+    recordings: async () => [],
+    onRecordingAttached: async () => {},
+    pause: async () => {},
+    budgetMs: 40_000,
+    ...over,
+  });
+  await sync("uF1", "recent", fdeps("uF1"));
+  const tm = await MS.getMeeting("km-" + kTodo);
+  ok(tm?.todos[0]?.suggested === "task",
+    `#323 final 12: a 'Jeff' to-do on an Osakis meeting stays a task though another company has a contact Jeff (${tm?.todos[0]?.suggested})`);
+
+  // (3) the first 90-day sync is resumable: a stop mid-way keeps its cursor, the next run resumes there and completes
+  const fpages: Record<string, { meetings: ReturnType<typeof lst>[]; nextCursor: string | null }> = {
+    "": { meetings: [lst(kFirst[0], "Monte PAC"), lst(kFirst[1], "Monte PAC 2")], nextCursor: "f2" },
+    f2: { meetings: [lst(kFirst[2], "Monte PAC 3")], nextCursor: null },
+  };
+  const fcalls: string[] = [];
+  let failF2 = true;
+  const firstDeps = fdeps("uF2", { client: { meeting: fdeps("uF2").client.meeting, listMeetings: async (q) => {
+    fcalls.push(`${q.cursor || ""}@${q.from}`);
+    if (q.cursor === "f2" && failF2) throw new KrispRateLimitError();
+    return fpages[q.cursor || ""];
+  } } });
+  const f1 = await sync("uF2", "recent", firstDeps);
+  const s1 = st.uF2 as { syncedAt: number | null; backfillCursor: string | null; backfillFrom: number | null } | undefined;
+  failF2 = false;
+  fcalls.length = 0;
+  const f2 = await sync("uF2", "recent", firstDeps);
+  const s2 = st.uF2 as { syncedAt: number | null; backfillCursor: string | null; backfillFrom: number | null } | undefined;
+  ok(!f1.complete && s1?.syncedAt == null && s1?.backfillCursor === "f2" && s1?.backfillFrom === NOW - 90 * 86_400_000,
+    `#323 final 3: a first sync stopped mid-way saves its cursor (${JSON.stringify(s1)})`);
+  ok(f2.complete && fcalls[0] === `f2@${new Date(NOW - 90 * 86_400_000).toISOString()}` && s2?.syncedAt === NOW && s2.backfillCursor === null &&
+     s2.backfillFrom === NOW - 90 * 86_400_000 && (await MS.getMeeting("km-" + kFirst[2])) != null &&
+     (await MS.getMeeting("km-" + kFirst[0]))?.krisp.removedAt === null,
+    `#323 final 3: the next run resumes at the saved cursor, completes the 90 days, then sets syncedAt (${fcalls.join(" ")})`);
+  const syncSrc = src("src/lib/meetings/sync.ts");
+  ok((syncSrc.match(/step\(snap\)/g) || []).length === 1, "#323 final 3: the sync matches a changed meeting once (step(snap) computed once, reused)");
+
+  // (6) Home's stale-sync rides after(); (10) the cron's meetings rider runs last
+  const home = src("src/app/(app)/page.tsx");
+  ok(/import \{ after \} from "next\/server";/.test(home) && /after\(\(\) => syncMeetingsIfStale\(user\.id\)/.test(home) &&
+     !/void syncMeetingsIfStale/.test(home), "#323 final 6: Home schedules the stale meeting sync with after()");
+  const cron = src("src/app/api/gmail/sync/route.ts");
+  const at = (s: string) => cron.indexOf(s);
+  ok(at("await syncAllMeetings(") > at("await syncDrivePhotos(") && at("await syncAllMeetings(") > at("await ensureVendorAssignments(") &&
+     at("await syncDrivePhotos(") > 0, "#323 final 10: the cron runs the Krisp meetings rider last");
+
+  // (5) a meetings-table error degrades to empty / 0 on pages that could not fail before
+  const safe = await tryImport<{ meetingsReadOr: <T>(p: Promise<T>, fb: T, where: string) => Promise<T> }>("@/lib/meetings/safe-read");
+  const origErr = console.error;
+  console.error = () => {};
+  const degraded = safe ? await safe.meetingsReadOr(Promise.reject(new Error("relation meetings does not exist")), 0, "test") : -1;
+  console.error = origErr;
+  ok(degraded === 0, "#323 final 5: meetingsReadOr turns a failed meetings read into the fallback");
+  const inboxPage = src("src/app/(app)/inbox/page.tsx");
+  const card = src("src/components/meetings/meetings-card.tsx");
+  const feedSrc = src("src/lib/customer-feed.ts");
+  const search = src("src/app/api/search/route.ts");
+  ok(/meetingsReadOr\(toFileCount\(user\.id\), 0,/.test(home) && /meetingsReadOr\(toFileCount\(user\.id\), 0,/.test(inboxPage) &&
+     /meetingsReadOr\(meetingRowsLinkedTo\(kind, id, viewerId\), \[\]/.test(card) &&
+     /meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feedSrc) &&
+     /meetingsReadOr\(searchMeetingCandidates\(/.test(search),
+    "#323 final 5: Home, Inbox, record cards, the company feed and ⌘K read meetings through meetingsReadOr");
+
+  // (15) names.ts strips combining marks by an escaped range
+  ok(/\\u0300-\\u036f/.test(src("src/lib/meetings/names.ts")) && normalizeText("Café Ñandú") === "cafe nandu",
+    "#323 final 15: normalizeText strips accents via /[\\u0300-\\u036f]/g");
+
+  // (16) the server-made Meetings slots carry keys (no React key warning from InboxShell)
+  ok(/<MeetingsBox key="meetings-list"/.test(inboxPage) && /<MeetingReader key="meetings-reader" vm=\{readerVM\} variant="pane"/.test(inboxPage) &&
+     /<MeetingReader key="meetings-overlay" vm=\{readerVM\} variant="overlay"/.test(inboxPage),
+    "#323 final 16: the Meetings box / reader slots passed to InboxShell carry stable keys");
+
+  // DB-backed checks on their own company / venue
+  const { saveCompany } = await import("@/lib/identity/companies");
+  const { saveSite, getSite } = await import("@/lib/identity/sites");
+  const CO = "TEST323F-co", CO2 = "TEST323F-co2", SITE = "TEST323F-site";
+  await saveCompany({ id: CO, name: "TEST323F Osakis Final", type: "" });
+  await saveCompany({ id: CO2, name: "TEST323F Elsewhere", type: "" });
+  await saveSite({ id: SITE, companyId: CO, name: "TEST323F Auditorium", isPrimary: true, venueKind: "proscenium", legacyLocId: "TEST323F-loc" });
+  try {
+    const me = { id: "u1", name: "Jeff Chesebro" };
+    let n = 0;
+    const mk = async (over: Partial<MeetingRecord> = {}): Promise<MeetingRecord> => {
+      const kid = "TEST323fin" + String(++n).padStart(22, "0");
+      const base = meetingFixture323({ krispMeetingId: kid });
+      const m = meetingFixture323({ krispMeetingId: kid, ...over, krisp: { ...base.krisp, title: "Final", ...(over.krisp || {}) } });
+      registerFixture("meetings", m.id);
+      return MS.saveMeeting(m);
+    };
+    const sug = { kind: "company" as const, id: CO, label: CO, score: 90, strength: "strong" as const, reasons: ["t"] };
+
+    // (13) confirmAllStrong: an invisible id skips its row; the ids list is capped at 200
+    const hidden = await mk({ seenBy: ["u-somebody-else"], suggestions: [sug] });
+    const strong = await mk({ suggestions: [sug] });
+    const r13 = await MA.confirmAllStrong([hidden.id, "km-TEST323-missing", strong.id], me).then((r) => r, () => null);
+    ok(r13?.filed === 1 && !!(await MS.getMeeting(strong.id))?.filedAt && !(await MS.getMeeting(hidden.id))?.filedAt,
+      "#323 final 13: confirmAllStrong skips an id the rep can't see (or that's gone) and files the rest");
+    const late = await mk({ suggestions: [sug] });
+    const r13b = await MA.confirmAllStrong([...Array.from({ length: 200 }, (_, i) => `km-TEST323-none-${i}`), late.id], me).then((r) => r, () => null);
+    ok(r13b?.filed === 0 && !(await MS.getMeeting(late.id))?.filedAt, "#323 final 13: confirmAllStrong reads at most 200 ids");
+
+    // (9) a 'Speaker N' assignee nobody mapped → the waiting-on name is the linked company's
+    const todo = (key: string, assigneeLabel: string) => ({ key, title: "Send the plot " + key, assigneeLabel, dueDate: null, suggested: "waiting" as const, decision: null });
+    const wm = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), customerId: CO }, todos: [todo("w1", "Speaker 4"), todo("w2", "Speaker_2")] });
+    const wmNo = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), internalUserIds: ["u2"] }, todos: [todo("w3", "Speaker 1")] });
+    const made: string[] = [];
+    for (const [m, k] of [[wm, "w1"], [wm, "w2"], [wmNo, "w3"]] as const) {
+      const after = await MA.decideTodo(m.id, k, "waiting", {}, me);
+      const tid = after.todos.find((t) => t.key === k)?.decision?.createdId || "";
+      if (tid) registerFixture("tasks", tid);
+      made.push((await getTask(tid))?.waitingOn?.name || "?");
+    }
+    ok(made.join("|") === "TEST323F Osakis Final|TEST323F Osakis Final|Customer",
+      `#323 final 9: an unmapped 'Speaker N' / 'Speaker_N' assignee waits on the company, else 'Customer' (${made.join("|")})`);
+
+    // (4) the venue page's Waiting on customer: a legacy location id repeats across companies → also the company
+    const now = Date.now();
+    const task = (id: string, over: Record<string, unknown>) => createFixture("tasks", {
+      id, title: id, section: "Meeting", projectId: null, quoteId: null, designId: null, engagementId: null, coverageKey: null,
+      assigneeUserId: "u-fin323", assigneeName: "Fin Rep", dueAt: now + 86_400_000, startAt: null, schedule: null, handScheduled: false,
+      status: "open", notes: "", createdBy: "x", createdAt: now, updatedAt: now, doneAt: null, ...over,
+    });
+    await task("T-TEST323F-W1", { customerId: CO, siteId: "TEST323F-loc", waitingOn: { contactId: null, name: "Tom" } });
+    await task("T-TEST323F-W2", { customerId: CO2, siteId: "TEST323F-loc", waitingOn: { contactId: null, name: "Other" } });
+    const wsite = await openWaitingTasksBy("siteId", ["TEST323F-loc", SITE], { customerId: CO } as never);
+    ok(wsite.map((t) => t.id).join() === "T-TEST323F-W1", "#323 final 4: venue waiting-on tasks also match the venue's company");
+    ok(/<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\} customerId=\{site\.companyId\}/.test(src("src/app/(app)/venues/[id]/page.tsx")),
+      "#323 final 4: the venue page passes its company to the Waiting on customer card");
+
+    // (7) meeting tasks reach the queue (and so Home + Google Tasks); waiting-on nudges stay out
+    const meetingId = strong.id;
+    await task("T-TEST323F-Q1", { customerId: CO, meetingId, notes: "From meeting: Final" });
+    await task("T-TEST323F-Q2", { customerId: CO, meetingId, waitingOn: { contactId: null, name: "Tom" } });
+    await task("T-TEST323F-Q3", { customerId: CO, meetingId, status: "done" });
+    await task("T-TEST323F-Q4", { customerId: CO, notes: "plain task, no meeting" });
+    const { loadQueue } = await import("@/lib/queue");
+    const q = await loadQueue("Fin Rep");
+    const qm = q.filter((i) => i.key.startsWith("meeting-task:"));
+    ok(qm.map((i) => i.key).join() === "meeting-task:T-TEST323F-Q1" && qm[0].href === `/inbox?view=meetings&tab=filed&m=${encodeURIComponent(meetingId)}` &&
+       qm[0].due === now + 86_400_000 && !qm[0].writable && !q.some((i) => i.key.includes("T-TEST323F-Q4")),
+      `#323 final 7: an open meeting task assigned to me is a queue item linking its meeting; waiting-on, done and other tasks are not (${qm.map((i) => i.key).join()})`);
+
+    // (14) a note filed on a venue (parentKind "site") shows in that venue's History
+    const { addNoteRecord } = await import("@/lib/stores/notes");
+    const note = await addNoteRecord({ parentKind: "site", parentId: SITE, customerId: CO, text: "Ceiling height is 22 ft\n\nFrom meeting: Final" }, "Jeff Chesebro");
+    registerFixture("notes", note.id);
+    const site = await getSite(SITE);
+    const { loadVenueHistory } = await import("@/lib/venue-history-server");
+    const hist = site ? await loadVenueHistory(site) : [];
+    const hn = hist.find((r) => r.id === note.id);
+    ok(!!hn && (hn.kind as string) === "note" && hn.title === "Ceiling height is 22 ft" && !hn.open,
+      "#323 final 14: a venue note (parentKind site) appears in that venue's History");
+  } finally {
+    const db = await getDb();
+    await db.delete(sitesT).where(inArray(sitesT.id, [SITE]));
+    await db.delete(companiesT).where(inArray(companiesT.id, [CO, CO2]));
+  }
 }

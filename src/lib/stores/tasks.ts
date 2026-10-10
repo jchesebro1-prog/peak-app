@@ -377,15 +377,17 @@ export async function tasksForContact(contactId: string): Promise<TaskRecord[]> 
 
 /** #323 — open "Waiting on customer" tasks (`waitingOn` set, not done) whose `field` is one of `values`,
  *  filtered in SQL on the field (never the whole collection); soonest nudge first. A venue page passes both its
- *  directory id (what a meeting-made task stores) and its `sites.id`. */
+ *  directory id (what a meeting-made task stores) and its `sites.id` — plus `customerId`, because a legacy
+ *  directory id ('loc1') repeats across companies. */
 export async function openWaitingTasksBy(
   field: "customerId" | "siteId" | "assigneeUserId",
   values: readonly string[],
+  opts: { customerId?: string } = {},
 ): Promise<TaskRecord[]> {
   const rows = await listDocsByField<TaskRecord>("tasks", field, values);
   return rows
     .map(normalizeTask)
-    .filter((t) => t.status !== "done" && !!t.waitingOn)
+    .filter((t) => t.status !== "done" && !!t.waitingOn && (opts.customerId === undefined || t.customerId === opts.customerId))
     .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
 }
 

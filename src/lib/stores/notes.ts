@@ -1,4 +1,4 @@
-import { getDoc, insertDocIfAbsent, insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, insertDocIfAbsent, insertWithPrefixedId, listDocs, listDocsByField, softDeleteDoc } from "@/db/doc-store";
 import type { FileRef } from "@/lib/consulting-files";
 import { can } from "@/lib/team";
 
@@ -69,6 +69,14 @@ export async function getNote(id: string): Promise<NoteRecord | null> {
 /** The customer feed read — denormalized customerId, one filter. */
 export async function notesForCustomer(customerId: string): Promise<NoteRecord[]> {
   return (await allNotes()).filter((n) => n.customerId === customerId);
+}
+
+/** #323 — notes filed on one venue (parentKind "site", parentId = sites.id; a meeting to-do decided "note" on a
+ *  venue-linked meeting), filtered in SQL on parentId, newest first. */
+export async function notesForSite(siteId: string): Promise<NoteRecord[]> {
+  if (!siteId) return [];
+  const rows = await listDocsByField<NoteRecord>("notes", "parentId", [siteId]);
+  return rows.map(normalizeNote).filter((n) => n.parentKind === "site").sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 
 /** #145 — the consulting Activity tab's read, mirroring notesForCustomer. */

@@ -9,6 +9,7 @@ import { getAll as getAllRepairs } from "@/lib/stores/repair-jobs";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { meetingRowsLinkedTo, type MeetingLinkedRow } from "@/lib/stores/meetings";
+import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { contactsForCompany, displayName } from "@/lib/identity/contacts";
 import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
 import {
@@ -57,7 +58,9 @@ export async function loadCustomerFeed(cust: { id: string; name: string }, viewe
       getAllSurveys(),
       getAllProjects(),
       loadPipelines(),
-      viewerId ? meetingRowsLinkedTo("company", cust.id, viewerId) : Promise.resolve([] as MeetingLinkedRow[]),
+      viewerId
+        ? meetingsReadOr(meetingRowsLinkedTo("company", cust.id, viewerId), [] as MeetingLinkedRow[], "company feed")
+        : Promise.resolve([] as MeetingLinkedRow[]),
     ]);
 
   const rows: FeedRow[] = [];

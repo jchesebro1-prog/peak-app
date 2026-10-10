@@ -256,15 +256,26 @@ export async function meetingRowsLinkedTo(
   return out.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 }
 
-/** #323 ⌘K — meetings whose title or raw Krisp notes contain `q` (ILIKE in SQL, newest first, capped), as
- *  normalized records WITHOUT segments: enough for canSeeMeeting + renderMeeting's summary. The caller filters
- *  visibility and re-checks the rendered summary text. */
-export async function searchMeetingCandidates(q: string, limit: number): Promise<MeetingRecord[]> {
+/** #323 ⌘K — meetings `viewerId` may see whose title or Krisp notes TEXT contains `q` (ILIKE in SQL over the
+ *  title and every `text` value in the notes — never the raw JSON, never the transcript), newest first, capped.
+ *  Visibility (canSeeMeeting's rule: any external link, else seenBy ∋ viewer, else an internal link to the viewer)
+ *  is in the WHERE, so a newer private meeting never takes a visible one's place under the LIMIT. Normalized
+ *  records WITHOUT segments: enough for renderMeeting's summary; the caller re-checks visibility and the text. */
+export async function searchMeetingCandidates(q: string, limit: number, viewerId: string): Promise<MeetingRecord[]> {
   const text = q.trim();
-  if (!text) return [];
+  if (!text || !viewerId) return [];
   const db = await getDb();
   const t = meetingsTable;
   const pattern = "%" + text.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const me = JSON.stringify([viewerId]);
+  const visible = sql`(
+    coalesce(${t.doc}->'links'->>'customerId', '') <> ''
+    or coalesce(${t.doc}->'links'->>'siteId', '') <> ''
+    or (jsonb_typeof(${t.doc}->'links'->'contactIds') = 'array' and jsonb_array_length(${t.doc}->'links'->'contactIds') > 0)
+    or jsonb_typeof(${t.doc}->'links'->'work') = 'object'
+    or ${t.doc}->'seenBy' @> ${me}::jsonb
+    or ${t.doc}->'links'->'internalUserIds' @> ${me}::jsonb
+  )`;
   const rows = await db
     .select({
       id: t.id,
@@ -282,9 +293,13 @@ export async function searchMeetingCandidates(q: string, limit: number): Promise
     .from(t)
     .where(and(
       eq(t.deleted, false),
+      visible,
       or(
         sql`${t.doc}->'krisp'->>'title' ILIKE ${pattern}`,
-        sql`(${t.doc}->'krisp'->'notes')::text ILIKE ${pattern}`,
+        sql`exists (
+          select 1 from jsonb_path_query(coalesce(${t.doc}->'krisp'->'notes', 'null'::jsonb), 'lax $.**.text') as v(val)
+          where jsonb_typeof(v.val) = 'string' and (v.val #>> '{}') ILIKE ${pattern}
+        )`,
       ),
     ))
     .orderBy(sql`case when jsonb_typeof(${t.doc}->'krisp'->'startedAt') = 'number' then (${t.doc}->'krisp'->>'startedAt')::numeric end desc nulls last`)

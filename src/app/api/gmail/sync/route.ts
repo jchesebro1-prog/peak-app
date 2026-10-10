@@ -77,16 +77,6 @@ export async function GET(req: Request): Promise<NextResponse> {
     recordingsArchive = { error: (err as Error).message };
   }
 
-  // #323 — Krisp meeting sync for every connected rep (rolling 14-day window),
-  // sharing one budget capped so the riders after it keep their time. Own
-  // try/catch like the other riders.
-  let meetings: Awaited<ReturnType<typeof syncAllMeetings>> | { error: string };
-  try {
-    meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, 40_000 - (Date.now() - started))));
-  } catch (err) {
-    meetings = { error: (err as Error).message };
-  }
-
   // #122 — vendor price-list freshness (spec §4): one catalog read, one
   // profiles read, at most one new Home Queue task per (vendor, status,
   // date) key. Own try/catch like the other riders on this daily trigger.
@@ -111,6 +101,17 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
   } catch (err) {
     drivePhotos = { error: (err as Error).message };
+  }
+
+  // #323 — Krisp meeting sync for every connected rep (rolling 14-day window), LAST so a slow Krisp call can't
+  // starve the vendor and drive-photo riders: whatever is left of a 40 s cutoff (≤ 20 s) — a Krisp call's own
+  // 20 s timeout still ends under the 60 s ceiling — and every rep skipped when under 5 s is left. Home loads
+  // and the Inbox tick sync too, so a skipped cron run only delays. Own try/catch like the other riders.
+  let meetings: Awaited<ReturnType<typeof syncAllMeetings>> | { error: string };
+  try {
+    meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, 40_000 - (Date.now() - started))));
+  } catch (err) {
+    meetings = { error: (err as Error).message };
   }
 
   return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, drivePhotos });
