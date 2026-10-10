@@ -219,7 +219,8 @@ export function layoutDetail(d: ViewDetail, doc: ConduitRiserDoc): DetailLayout 
   const runs: LaidRun[] = [];
   for (const { r, A, B, straight, up } of plans) {
     const ya = runY(A);
-    const symbols = [...r.signals.map((s) => s.symbol), ...(r.unknownCables.length ? ["?"] : [])];
+    // Bubbles off (A/V default): none drawn, "?" included.
+    const symbols = doc.showSignals === false ? [] : [...r.signals.map((s) => s.symbol), ...(r.unknownCables.length ? ["?"] : [])];
     let path: Pt[];
     let sizeAt: Pt;
     let sizeAnchor: "start" | "middle" = "start";

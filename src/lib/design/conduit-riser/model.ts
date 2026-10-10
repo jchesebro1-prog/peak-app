@@ -60,10 +60,13 @@ export type Dismissal = { key: string; ids: string[] };
 export type PowerType = { letter: string; type: string; config: string; input: string };
 export type RiserNote = { id: string; n: number; text: string };
 export type ConduitRiserDefaults = { size: string; priceWire: boolean; priceConduit: boolean };
-export type ConduitRiserSystem = "lighting";
+/** One riser per system per design option (#328 piece C). */
+export type ConduitRiserSystem = "lighting" | "av";
 
 export type ConduitRiserDoc = {
   system: ConduitRiserSystem;
+  /** Draw signal bubbles and print the wire legend (lighting default on, A/V off). */
+  showSignals: boolean;
   details: RiserDetail[];
   /** Pinned tag positions, keyed by placement id. Absent = auto-layout. */
   tags: Record<string, TagPos>;
@@ -103,6 +106,25 @@ export const MAX_RUN_FT = 5000;
 export const DEFAULT_CONDUIT_SIZE = '3/4"';
 export const LIGHTING_ALWAYS_SHOW: readonly string[] = ["control-networking", "dimming-power", "racks-cases"];
 export const DEFAULT_DETAIL_NAME = "Lighting control";
+/** A/V (#328 C): Bray AV1.5's back-box devices, displays, switching, networking, racks. */
+export const AV_ALWAYS_SHOW: readonly string[] = [
+  "cable-connectors",
+  "displays-projectors",
+  "switching-distribution",
+  "networking",
+  "racks-cases",
+  "assistive-listening",
+];
+export const DEFAULT_AV_DETAIL_NAME = "Audio/Visual";
+
+/** The per-system starting point: first detail name, always-show types, bubbles. */
+export function systemDefaults(system: ConduitRiserSystem): { detailName: string; alwaysShow: readonly string[]; showSignals: boolean } {
+  return system === "av"
+    ? { detailName: DEFAULT_AV_DETAIL_NAME, alwaysShow: AV_ALWAYS_SHOW, showSignals: false }
+    : { detailName: DEFAULT_DETAIL_NAME, alwaysShow: LIGHTING_ALWAYS_SHOW, showSignals: true };
+}
+
+const asSystem = (v: unknown): ConduitRiserSystem | null => (v === "lighting" || v === "av" ? v : null);
 
 /** TL1.5's power-types table — the "Start from Bray's A–E" rows. */
 export const BRAY_POWER_TYPES: readonly PowerType[] = [
@@ -148,16 +170,18 @@ export function sameEnd(x: RunEnd, y: RunEnd): boolean {
   return x.kind === "placement" ? y.kind === "placement" && y.placementId === x.placementId : y.kind === "stub" && y.stubId === x.stubId;
 }
 
-export function emptyConduitRiserDoc(): ConduitRiserDoc {
+export function emptyConduitRiserDoc(system: ConduitRiserSystem = "lighting"): ConduitRiserDoc {
+  const sd = systemDefaults(system);
   return {
-    system: "lighting",
-    details: [{ id: "dt-main", n: "1", name: DEFAULT_DETAIL_NAME, allSpaces: true, spaceIds: [] }],
+    system,
+    showSignals: sd.showSignals,
+    details: [{ id: "dt-main", n: "1", name: sd.detailName, allSpaces: true, spaceIds: [] }],
     tags: {},
     stubs: [],
     runs: [],
     dismissed: [],
     levelY: {},
-    alwaysShow: [...LIGHTING_ALWAYS_SHOW],
+    alwaysShow: [...sd.alwaysShow],
     powerTypes: [],
     notes: [],
     defaults: { size: DEFAULT_CONDUIT_SIZE, priceWire: false, priceConduit: false },
@@ -272,8 +296,10 @@ export function compareDetailN(a: string, b: string): number {
  * rebuilt, junk dropped, caps enforced. Never throws; `null`/junk → the
  * empty document. A document always keeps at least one detail.
  */
-export function normalizeConduitRiserDoc(raw: unknown): ConduitRiserDoc {
-  const base = emptyConduitRiserDoc();
+export function normalizeConduitRiserDoc(raw: unknown, system: ConduitRiserSystem = "lighting"): ConduitRiserDoc {
+  // A stored document's own system wins when valid; else the caller's.
+  const sys = (isObj(raw) && asSystem(raw.system)) || system;
+  const base = emptyConduitRiserDoc(sys);
   if (!isObj(raw)) return base;
   const details: RiserDetail[] = [];
   for (const d of arr(raw.details).map(cleanDetail)) {
@@ -362,7 +388,8 @@ export function normalizeConduitRiserDoc(raw: unknown): ConduitRiserDoc {
 
   const d = isObj(raw.defaults) ? raw.defaults : {};
   return {
-    system: "lighting",
+    system: sys,
+    showSignals: typeof raw.showSignals === "boolean" ? raw.showSignals : base.showSignals,
     details,
     tags,
     stubs,
@@ -474,7 +501,7 @@ export type CROp =
   | { op: "addNote"; text: string }
   | { op: "updateNote"; id: string; text: string }
   | { op: "removeNote"; id: string }
-  | { op: "setDefaults"; size?: string; priceWire?: boolean; priceConduit?: boolean };
+  | { op: "setDefaults"; size?: string; priceWire?: boolean; priceConduit?: boolean; showSignals?: boolean };
 
 export const CR_OP_NAMES = [
   "moveTag", "unpinTag", "resetLayout", "addDetail", "updateDetail", "removeDetail", "addStub", "updateStub",
@@ -712,7 +739,8 @@ export function patchConduitRiser(
       if (op.size !== undefined) defaults.size = cleanSize(op.size);
       if (op.priceWire !== undefined) defaults.priceWire = op.priceWire === true;
       if (op.priceConduit !== undefined) defaults.priceConduit = op.priceConduit === true;
-      return ok({ ...doc, defaults });
+      const showSignals = op.showSignals !== undefined ? op.showSignals === true : doc.showSignals;
+      return ok({ ...doc, defaults, showSignals });
     }
   }
 }

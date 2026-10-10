@@ -203,7 +203,8 @@ export function deriveView(input: DeriveInput): CRView {
     if (!tags.length && (stubs.length || viewRuns.length)) hasUnlevelled = true;
     out.push({ detail, tags, stubs, runs: viewRuns, headEndId, levels, hasUnlevelled });
   }
-  for (const c of [...missing].sort()) warnings.push(`${c} has no signal symbol — set it in Settings → Wire types`);
+  // Symbols only matter when bubbles / the wire legend print.
+  if (doc.showSignals !== false) for (const c of [...missing].sort()) warnings.push(`${c} has no signal symbol — set it in Settings → Wire types`);
   warnings.push(...fillWarnings);
   return { details: out, warnings };
 }

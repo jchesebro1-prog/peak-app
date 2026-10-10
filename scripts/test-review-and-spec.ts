@@ -11643,6 +11643,7 @@ seeded()
   .then(() => riserPhase2A3Checks())
   .then(() => riserPhase2B1Checks())
   .then(() => riserPhase2B2Checks())
+  .then(() => riserPhase2C1Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -65087,4 +65088,149 @@ async function riserPhase2B2Checks(): Promise<void> {
   const sheet = src("src/lib/riser-data-sheet-server.ts");
   const loadCables = sheet.slice(sheet.indexOf("export async function loadCableExportRows"), sheet.indexOf("/** The \"Devices\" sheet"));
   ok(!/listCatalog\(/.test(loadCables) && /getManyBySku/.test(loadCables), "#328 B1 follow-up: the Cables export reads only the referenced parts — no second whole-catalog list");
+}
+
+async function riserPhase2C1Checks(): Promise<void> {
+  const M = await import("@/lib/design/conduit-riser/model");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  const S = await import("@/lib/design/conduit-riser/suggest");
+  const D = await import("@/lib/design/conduit-riser/derive");
+  const L = await import("@/lib/design/conduit-riser/layout");
+  const G = await import("@/lib/design/conduit-riser/drawing");
+  const SV = await import("@/lib/design/conduit-riser/svg");
+  const DX = await import("@/lib/design/conduit-riser/dxf");
+  const TB = await import("@/lib/design/conduit-riser/tables");
+  type Dev = import("@/lib/design/conduit-riser/input").CRDevice;
+  type Wire = import("@/lib/design/conduit-riser/input").CRWire;
+  const J = (v: unknown) => JSON.stringify(v);
+  let seq = 0;
+  const mk: import("@/lib/design/conduit-riser/model").MakeId = (prefix) => prefix + (++seq).toString(16).padStart(12, "0");
+
+  // ---- 1. defaults per system
+  const lt = M.emptyConduitRiserDoc();
+  const av = M.emptyConduitRiserDoc("av");
+  ok(J(lt) === J(M.emptyConduitRiserDoc("lighting")) && lt.system === "lighting" && lt.showSignals === true && lt.details[0].name === "Lighting control" && J(lt.alwaysShow) === J(["control-networking", "dimming-power", "racks-cases"]),
+    "#328 C1 model: the default (no argument) document is the lighting one — identical to an explicit \"lighting\"");
+  ok(av.system === "av" && av.showSignals === false && av.details.length === 1 && av.details[0].n === "1" && av.details[0].name === "Audio/Visual" && av.details[0].allSpaces === true &&
+     J(av.alwaysShow) === J(["cable-connectors", "displays-projectors", "switching-distribution", "networking", "racks-cases", "assistive-listening"]) && J(M.AV_ALWAYS_SHOW) === J(av.alwaysShow),
+    "#328 C1 model: an A/V document starts as detail 1 \"Audio/Visual\", the six always-show types, signal bubbles off");
+  ok(M.emptyConduitRiserDoc("av").alwaysShow !== M.AV_ALWAYS_SHOW as unknown && (M.emptyConduitRiserDoc("av").alwaysShow.push("x"), M.emptyConduitRiserDoc("av").alwaysShow.length === 6),
+    "#328 C1 model: each empty document owns its always-show list (no shared mutable default)");
+
+  // ---- 2. normalize keeps / defaults the system and showSignals
+  ok(J(M.normalizeConduitRiserDoc(null)) === J(lt) && J(M.normalizeConduitRiserDoc(null, "av")) === J(av) && J(M.normalizeConduitRiserDoc("junk", "av")) === J(av),
+    "#328 C1 normalize: nothing stored → the empty document of the asked system (lighting by default)");
+  const stored = (o: Record<string, unknown>) => ({ details: [{ id: "dt-x", n: "1", name: "X", allSpaces: true, spaceIds: [] }], ...o });
+  ok(M.normalizeConduitRiserDoc(stored({ system: "av" })).system === "av" && M.normalizeConduitRiserDoc(stored({ system: "av" }), "lighting").system === "av" &&
+     M.normalizeConduitRiserDoc(stored({ system: "lighting" }), "av").system === "lighting" && M.normalizeConduitRiserDoc(stored({ system: "audio" }), "av").system === "av" &&
+     M.normalizeConduitRiserDoc(stored({}), "av").system === "av" && M.normalizeConduitRiserDoc(stored({})).system === "lighting",
+    "#328 C1 normalize: a stored document's own valid system wins; otherwise the caller's argument");
+  ok(M.normalizeConduitRiserDoc(stored({})).showSignals === true && M.normalizeConduitRiserDoc(stored({}), "av").showSignals === false && M.normalizeConduitRiserDoc(stored({ showSignals: false })).showSignals === false &&
+     M.normalizeConduitRiserDoc(stored({ showSignals: true }), "av").showSignals === true && M.normalizeConduitRiserDoc(stored({ showSignals: "yes" }), "av").showSignals === false && M.normalizeConduitRiserDoc(stored({ showSignals: 1 })).showSignals === true,
+    "#328 C1 normalize: showSignals is the stored boolean, else the system default (lighting on, A/V off)");
+  const messy = M.normalizeConduitRiserDoc(stored({ system: "av", showSignals: true, alwaysShow: ["networking"] }));
+  ok(J(M.normalizeConduitRiserDoc(messy)) === J(messy) && J(M.normalizeConduitRiserDoc(av)) === J(av) && J(M.normalizeConduitRiserDoc(lt)) === J(lt) && messy.alwaysShow.join() === "networking",
+    "#328 C1 normalize: idempotent for both systems, and a stored always-show list is kept as stored");
+
+  // ---- 3. ops and copies
+  const ids = new Set<string>();
+  const on = M.patchConduitRiser(av, { op: "setDefaults", showSignals: true }, mk, ids);
+  const off = M.patchConduitRiser(lt, { op: "setDefaults", showSignals: false, size: '1"' }, mk, ids);
+  const keep = M.patchConduitRiser(on.doc, { op: "setDefaults", size: '1"' }, mk, ids);
+  ok(on.changed && on.doc.showSignals === true && on.doc.system === "av" && off.doc.showSignals === false && off.doc.defaults.size === '1"' && keep.doc.showSignals === true && keep.doc.defaults.size === '1"',
+    "#328 C1 ops: setDefaults switches showSignals on either riser, and an op that leaves it out keeps it");
+  const eo = M.estimateOwnedOp({ op: "setDefaults", showSignals: true, priceWire: true, priceConduit: true }, true);
+  ok(eo !== null && J(eo) === J({ op: "setDefaults", showSignals: true }) && M.estimateOwnedOp({ op: "setDefaults", priceWire: true }, true) === null,
+    "#328 C1 ops: an estimate-owned option still switches bubbles (only the pricing fields are stripped)");
+  const copied = M.copyConduitRiserDoc({ ...av, showSignals: true }, new Map(), mk);
+  ok(copied.system === "av" && copied.showSignals === true && M.copyConduitRiserDoc(lt, new Map(), mk).showSignals === true && M.copyConduitRiserDoc(M.emptyConduitRiserDoc("av"), new Map(), mk).showSignals === false,
+    "#328 C1 ops: an option copy carries the system and the signal switch");
+
+  // ---- fixtures: one lighting-shaped and one A/V-shaped plan
+  const wt = [
+    { id: "dmx", label: "Belden 1583A", symbol: "D", signal: "DMX" },
+    { id: "hdmi", label: "HDMI 2.0", symbol: "V", signal: "Video" },
+  ];
+  const levels = [{ id: "lv-stage", label: "Stage", order: 0 }];
+  const dev = (id: string, label: string, typeKey: string | null, extra: Partial<Dev> = {}): Dev => ({
+    id, label, desc: `${label} desc`, model: "", typeKey, inSystem: true, spaceId: "sp-1", spaceName: "Stage", levelId: "lv-stage",
+    tag: T.effectiveTag(undefined, { box: "E", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" }, "Stage"), ...extra,
+  });
+  const devices: Dev[] = [
+    dev("gp-er", "ER-01", "racks-cases", { rack: { items: [{ desc: "Network switch", qty: 1 }] } }),
+    dev("gp-dr", "DR-01", "dimming-power", { model: "Unison DRd6", tag: { ...T.effectiveTag({ power: "B", contents: "(6) LED10" }, undefined, "Mech") } }),
+    dev("gp-c1", "CRO-01", "control-networking"),
+    dev("gp-d1", "PRJ-01", "displays-projectors"),
+    dev("gp-d2", "TV-01", "displays-projectors"),
+    dev("gp-lx", "LX-01", "fixtures"),
+  ];
+  const wire = (id: string, from: string, to: string, sig: string | null): Wire => {
+    const t = wt.find((x) => x.id === sig);
+    return { id, kind: "route", from, to, partId: `P-${sig}`, cable: t ? t.label : "Mystery cable", signal: t ? { wireTypeId: t.id, symbol: t.symbol, signal: t.signal } : null, lengthFt: 40, inSystem: true, odIn: null };
+  };
+  const wires: Wire[] = [wire("w1", "gp-er", "gp-c1", "dmx"), wire("w2", "gp-er", "gp-dr", "dmx"), wire("w3", "gp-er", "gp-d1", "hdmi"), wire("w4", "gp-d1", "gp-d2", null)];
+  const accept = (d0: import("@/lib/design/conduit-riser/model").ConduitRiserDoc) => {
+    seq = 0; // same ids for every build, so documents compare
+    let d = d0;
+    for (const sg of S.suggestions(d, wires).items) d = S.acceptSuggestion(d, sg, mk).doc;
+    return { ...d, powerTypes: [...M.BRAY_POWER_TYPES].slice(0, 2) };
+  };
+  const render = (doc: import("@/lib/design/conduit-riser/model").ConduitRiserDoc) => {
+    const view = D.deriveView({ doc, devices, wires, levels, wireTypes: wt });
+    const tables = TB.riserTables({ view, doc, wireTypes: wt, boxTypes: TB.BRAY_BOX_TYPES });
+    const lays = view.details.map((d) => L.layoutDetail(d, doc));
+    const figs = view.details.map((d, i) => G.detailGeometry(lays[i], d));
+    const pages = G.composeSheets({ details: figs, tables, notes: [], area: { w: 33, h: 21 } });
+    return {
+      view, tables, lays,
+      geo: J(pages.map((p) => p.geo)),
+      svg: pages.map((p) => SV.geometryToSvg(p.geo, p)).join("\n"),
+      dxf: pages.map((p) => DX.geometryToDxf(p.geo, p)).join("\n"),
+    };
+  };
+
+  // ---- 4. lighting is byte-identical: default path, explicit path, and a document stored before showSignals existed
+  const ltDoc = accept(M.emptyConduitRiserDoc());
+  const ltExplicit = accept(M.emptyConduitRiserDoc("lighting"));
+  const legacy = { ...ltDoc } as Record<string, unknown>;
+  delete legacy.showSignals;
+  const legacyDoc = M.normalizeConduitRiserDoc(legacy);
+  const a = render(ltDoc);
+  const b = render(ltExplicit);
+  const c = render(legacyDoc);
+  ok(a.geo === b.geo && a.svg === b.svg && a.dxf === b.dxf && J(a.tables) === J(b.tables) && J(a.lays) === J(b.lays) && J(a.view) === J(b.view),
+    "#328 C1 lighting: tables, layout, geometry, SVG and DXF are identical through the default and the explicit \"lighting\" paths");
+  ok(c.geo === a.geo && c.svg === a.svg && c.dxf === a.dxf && J(c.tables) === J(a.tables) && J(c.lays) === J(a.lays) && J(legacyDoc) === J(ltDoc),
+    "#328 C1 lighting: a stored document with no showSignals field renders exactly as before (bubbles on)");
+  ok(J(a.tables.map((t) => t.key)) === J(["power", "wire", "line", "rack", "controls", "box"]) && a.lays.some((l) => l.runs.some((r) => r.bubbles.length)) && a.svg.includes("data-block=\"PK_SIGNAL\""),
+    "#328 C1 lighting: all six tables and the signal bubbles still print");
+
+  // ---- 5. signal bubbles and the wire legend follow showSignals
+  const quiet = render({ ...ltDoc, showSignals: false });
+  ok(quiet.lays.every((l) => l.runs.every((r) => r.bubbles.length === 0)) && !quiet.geo.includes("PK_SIGNAL") && !quiet.svg.includes("data-block=\"PK_SIGNAL\"") && !(quiet.dxf.split("ENTITIES")[1] || "").includes("PK_SIGNAL") && (a.dxf.split("ENTITIES")[1] || "").includes("PK_SIGNAL"),
+    "#328 C1 signals off: no bubble is laid out, drawn, or written to the SVG / DXF");
+  ok(quiet.lays.every((l, i) => J(l.runs.map((r) => r.path)) === J(a.lays[i].runs.map((r) => r.path)) && J(l.items) === J(a.lays[i].items)),
+    "#328 C1 signals off: every conduit path and tag rectangle is unchanged");
+  const unknownOnly = render({ ...ltDoc, showSignals: false });
+  ok(a.view.details[0].runs.some((r) => r.unknownCables.length) && unknownOnly.lays.every((l) => l.runs.every((r) => !r.bubbles.some((x) => x.symbol === "?"))) && a.lays.some((l) => l.runs.some((r) => r.bubbles.some((x) => x.symbol === "?"))),
+    "#328 C1 signals off: the \"?\" bubble of an unknown cable is suppressed too");
+  ok(J(quiet.tables.map((t) => t.key)) === J(["power", "line", "rack", "controls", "box"]) && !quiet.svg.includes("CONTROL WIRE LEGEND") && a.svg.includes("CONTROL WIRE LEGEND"),
+    "#328 C1 signals off: the wire legend is omitted (power tables still print on a lighting riser)");
+  ok(a.view.warnings.some((w) => /has no signal symbol/.test(w)) && !quiet.view.warnings.some((w) => /has no signal symbol/.test(w)),
+    "#328 C1 signals off: the missing-symbol warning is silent when no symbol prints");
+
+  // ---- 6. A/V
+  const avDoc = accept(M.emptyConduitRiserDoc("av"));
+  const avOff = render(avDoc);
+  const avOn = render({ ...avDoc, showSignals: true });
+  const withNoRun = D.deriveView({ doc: M.emptyConduitRiserDoc("av"), devices, wires, levels, wireTypes: wt }).details[0].tags.map((t) => t.device.label);
+  ok(J(withNoRun) === J(["ER-01", "PRJ-01", "TV-01"]) && D.deriveView({ doc: M.emptyConduitRiserDoc(), devices, wires, levels, wireTypes: wt }).details[0].tags.map((t) => t.device.label).join() === "CRO-01,DR-01,ER-01",
+    "#328 C1 A/V derive: an empty A/V riser tags racks and displays (no controllers, no dimmers); an empty lighting riser tags controllers, dimmers and racks");
+  ok(avOff.lays.every((l) => l.runs.every((r) => r.bubbles.length === 0)) && avOn.lays.some((l) => l.runs.some((r) => r.bubbles.length)) && !avOff.geo.includes("PK_SIGNAL") && avOn.geo.includes("PK_SIGNAL"),
+    "#328 C1 A/V: bubbles are off by default and appear when the switch is turned on");
+  ok(J(avOff.tables.map((t) => t.key)) === J(["line", "rack", "box"]) && J(avOn.tables.map((t) => t.key)) === J(["wire", "line", "rack", "box"]),
+    "#328 C1 A/V tables: box types, line legend, rack contents — and the wire legend only with signals on; never power types or power controls");
+  const avWithPower = render({ ...avDoc, powerTypes: [...M.BRAY_POWER_TYPES], showSignals: true });
+  ok(!avWithPower.tables.some((t) => t.key === "power" || t.key === "controls"), "#328 C1 A/V tables: power types and power controls never print on an A/V riser, even if the document holds rows");
+  ok(TB.riserTables({ view: { details: [], warnings: [] }, doc: M.emptyConduitRiserDoc("av"), wireTypes: wt, boxTypes: [] }).length === 0, "#328 C1 A/V tables: an empty A/V riser prints no tables");
 }

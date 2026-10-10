@@ -33,8 +33,10 @@ export function riserTables(input: {
 }): TableModel[] {
   const out: TableModel[] = [];
   const { view, doc } = input;
+  const av = doc.system === "av";
 
-  if (doc.powerTypes.length) {
+  // Power tables are lighting-only (A/V prints box types, line legend, racks, wire legend).
+  if (!av && doc.powerTypes.length) {
     out.push({
       key: "power",
       title: "POWER TYPES",
@@ -65,7 +67,7 @@ export function riserTables(input: {
       }
     }
   }
-  if (cables.size) {
+  if (cables.size && doc.showSignals !== false) {
     const rows = [...cables.values()]
       .sort((a, b) => a.symbol.localeCompare(b.symbol))
       .map((c) => [c.symbol, [...c.cables].sort().map((n) => (/^\(\d+\)/.test(n.trim()) ? U(n) : `(1) ${U(n)}`)).join(", "), U(c.signal)]);
@@ -96,7 +98,7 @@ export function riserTables(input: {
   }
 
   const controls = tagged.filter((d) => d.typeKey === "dimming-power").sort((a, b) => byNum(a.label, b.label));
-  if (controls.length) {
+  if (!av && controls.length) {
     out.push({
       key: "controls",
       title: "POWER CONTROLS",
