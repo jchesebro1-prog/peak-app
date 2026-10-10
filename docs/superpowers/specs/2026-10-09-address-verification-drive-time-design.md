@@ -221,9 +221,9 @@ Migration number set at merge (0036 is taken on the #323 branch).
 Kept here so nothing from the original list is lost. Each gets its own
 brainstorm → spec → plan.
 
-2. **Site-visit scheduling** — visits are fixed (never auto-moved); group
-   visits in the same area on the same day when possible; flag conflicts,
-   never silently resolve. Builds on this spec's stops + legs.
+2. **Site-visit scheduling** — written:
+   `2026-10-09-site-visit-scheduling-design.md`. Adds visit attendees; a
+   visit becomes a stop on the lead's **and every attendee's** day.
 3. **Auto task calendar** (Motion-style, low upkeep) — inputs only due date
    + priority tier; move only unstarted work; no hand re-weighting; flex
    around visits + drive blocks. Open: how task length is known (default vs
