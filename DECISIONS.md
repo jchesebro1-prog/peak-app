@@ -10349,3 +10349,119 @@ that, not the numbering, is why a real design can look generic at first. (2) The
 (3) Redo of Replace part re-issues the LOWEST free number for the new code rather than the exact one it first took
 (undo, by contrast, restores the old designator exactly). (4) Designators are plan-and-schedule bookkeeping only: no
 quote, BOM, customer document or cut sheet prints one.
+
+## D-TBD. #323 Krisp meeting matcher (2026-10-10)
+
+Numbers assigned at merge from origin/main (other branches also claim D707+). K1–K13 are the spec's decision table
+(`docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md`); K14 onward are defaults taken during the build.
+
+- **D-TBD (#323 K1). Pull every Krisp meeting into the app, internal ones too.** The app becomes where meeting notes
+  live, not only the customer-facing ones.
+- **D-TBD (#323 K2). Personal until linked.** An unlinked meeting is visible only to the rep(s) whose Krisp account
+  lists it. Linking to an internal person shares it with that person only; linking to anything external (company,
+  venue, external contact, a work record) makes it visible to all Peak staff.
+- **D-TBD (#323 K3). Customer portal only on an explicit "Share with customer".** Staff edit the summary first; the
+  transcript never reaches the portal.
+- **D-TBD (#323 K4). Always suggest, the rep confirms.** Nothing is linked (and so nothing shared) without a tap.
+  Confirm all confirms every To-file row with a strong suggestion, applying exactly that row's strong picks.
+- **D-TBD (#323 K5). First sync = last 90 days; Load older pulls another 90 days per tap.**
+- **D-TBD (#323 K6). Krisp to-dos: choose per item, smart default.** Assignee is a Peak person → Task for them;
+  assignee is the customer → "Waiting on customer"; no owner → Note on the linked record. The rep can switch any
+  before confirming.
+- **D-TBD (#323 K7). Lives in the Inbox** as a separate Meetings box (never mixed into mail), default tab To file,
+  built as a standalone component so it can move to its own nav page later.
+- **D-TBD (#323 K8). A new `meetings` collection** (migration 0036). Recordings keeps its audio pipeline and attaches
+  to the meeting its Krisp import produced (`recording.meetingId`, `meeting.recordingId`).
+- **D-TBD (#323 K9). Attendees are corrected in the app.** Krisp's list ∪ the overlapping Google Calendar event's
+  invite list ∪ manual adds/removes, each resolved to a contact (or offered as new). Krisp's own copy cannot be
+  edited (its API has no meeting write).
+- **D-TBD (#323 K10). Speaker mapping.** The rep maps "Speaker_2 → Tom Ellis" once; the app's copy of the transcript,
+  notes and to-do owners re-renders with real names. Find-and-replace, no AI.
+- **D-TBD (#323 K11). Matching signals in strength order:** venue/district name in the title → calendar event at that
+  time → attendee emails → speaker first names → names in the summary → the rep's scheduled site visit at that time.
+  Jeff confirmed titles are usually the venue or district name.
+- **D-TBD (#323 K12). Recordings under 3 minutes are noise** — their own tab, no suggestions, never in To file. A rep
+  can override either way (`noiseOverride`).
+- **D-TBD (#323 K13). No AI.** The matcher, the notes rebuild and the to-do defaults are deterministic; D89 holds.
+- **D-TBD (#323 K14). Sync window is a rolling 14 days, with gap widening.** Krisp's list has no last-modified cursor,
+  so a normal sync re-lists `from = max(now − 90d, min(now − 14d, syncedAt − 1d))`: normally 14 days, reaching back a
+  day before the last complete sync when that is older (a revoked key or two weeks of errors must not leave a gap),
+  never past 90 days. Unchanged meetings are fingerprint-compared (sorted-key JSON, `updatedAt`/`krisp.fetchedAt`
+  ignored) and not rewritten.
+- **D-TBD (#323 K15). The first sync is a resumable 90-day pass, then the rolling window.** A rep with no completed
+  sync runs [`backfillFrom ?? now−90d`, open end) in budgeted batches; any stop (budget, 429, timeout) saves
+  `backfillFrom` + `backfillCursor` and the next run (recent or Load older) resumes there. Only completion sets
+  `syncedAt`; the first pass never flags meetings removed (its seen-set covers only the last batch). A cursor Krisp
+  rejects (400) is dropped so Load older cannot wedge.
+- **D-TBD (#323 K16). Name cores.** A company/venue name is lowercased, de-punctuated and stripped of generic words
+  (school, district, high, elementary, isd, church, theatre, pac, inc, the, of…); a venue core also loses venue-type
+  words (main, stage, studio, hall, gym, gymnasium, black, box, room…) and the words of the editable Venue types
+  labels, and a bare direction (north/south/east/west) is refused. A core under 4 characters is unused. A venue core
+  equal to its company's core is dropped, and a venue core shared by more than 3 companies' venues is skipped (a
+  "Main Stage" must not name 150 companies). At most 3 weak company suggestions are returned.
+- **D-TBD (#323 K17). Scoring.** Per candidate company: Krisp title hits the core 50, calendar title 30, an attendee
+  email resolving to a contact at the company 60, an email domain mapped to the company 40, the rep's site
+  visit/survey overlapping 40, summary text 20, a speaker first name matching a contact's 10. Top ≥ 80 and ≥ 30 ahead
+  of the runner-up → strong; ≥ 40 → weak; below 40 → no company suggestion; title-hit ties → all suggested, weak.
+  Internal-only meetings suggest the Peak users found (strong when one resolved by email).
+- **D-TBD (#323 K18). Work-link priority.** For the top company: exactly one overlapping visit/survey of the rep >
+  the company's single open lead > single active engagement > single active project. Several overlapping visits
+  (or several of any kind) suggest no work link and no venue fallback; the reason reads "during N of your visits".
+- **D-TBD (#323 K19). Note-parent priority** when a to-do becomes a note: venue > lead > project > engagement >
+  customer. An internal-only meeting has no parent, so a note to-do there is refused (reported, not silently dropped).
+- **D-TBD (#323 K20). Sync never touches a filed meeting's links.** Krisp refresh updates the `krisp.*` header,
+  transcript, notes and speakers, never `links`, attendee corrections or to-do decisions; it only recomputes
+  suggestions. Marking noise on a filed meeting recomputes the flag only.
+- **D-TBD (#323 K21). Dead links never re-privatise.** Visibility follows the stored link ids
+  (`meetingScope`), and a link to a since-deleted record that stays put is left alone by link validation, so a
+  meeting never silently falls back to personal when a company, venue or contact it was filed under is deleted; only
+  newly added links are checked for existence.
+- **D-TBD (#323 K22). A first name matching both a Peak user and a contact → note,** not a task, because assigning
+  to the wrong person is worse than a note to review. To-do people are scoped to the meeting itself: the users plus
+  the linked/suggested company's contacts plus resolved attendee/speaker contacts, never every contact in the book.
+- **D-TBD (#323 K23). To-dos Krisp drops.** An undecided to-do that disappears from Krisp's list is removed from the
+  app; a decided one (task/note/waiting/dismissed) is kept with its created record.
+- **D-TBD (#323 K24). Speaker relabel is one pass** over the app's copy (transcript, notes, to-do owners) against the
+  current speaker map, so a swap (A→B, B→A) cannot cascade; underscore-style labels normalise.
+- **D-TBD (#323 K25). The share guard also fires when re-pointing to another company.** Moving a customer-shared
+  meeting to a different company asks to confirm and unshares unless confirmed, so a summary written for one customer
+  never silently becomes visible to another.
+- **D-TBD (#323 K26). Venue and work links depend on their company.** A venue link requires its company, and a work
+  link must belong to it; changing the company drops the old venue and work unless the same patch sets them. Every
+  link id is validated (exists, active, right company) on `setLinks` and `confirmSuggestions`. A venue from search is
+  a doc location id, so `linkVenueAction` resolves it to `sites.id` before linking.
+- **D-TBD (#323 K27). Deterministic record ids.** A to-do's task is `T-mtg-<hash>` and its note `N-mtg-<hash>`
+  (`todoRecordId(kind, meetingId, key)`, `createTaskOnce` / `addNoteRecord({id})` insert-if-absent), so a lost meeting
+  write followed by a re-decide returns the same record instead of a duplicate. The `T-####` allocator's anchored
+  regex ignores them.
+- **D-TBD (#323 K28). Refresh from Krisp uses the owner's key,** else a `seenBy` rep's key, since any staff member
+  who can open the meeting may press it. It clears `detailFetchedAt` and runs the recent sync; a meeting older than
+  the rolling window is re-fetched only when a backfill covers it.
+- **D-TBD (#323 K29). An unmapped "Speaker N" owner on a waiting item** names the linked company (else "Customer")
+  rather than the raw label.
+- **D-TBD (#323 K30). Meeting tasks join the rep's queue.** Open non-waiting tasks with a `meetingId` assigned to the
+  rep appear on Home's queue, `/queue` and the one-way Google Tasks mirror as "Meeting to-do" rows (read-only, linking
+  to the meeting reader); a task also listed as a project task is not duplicated.
+- **D-TBD (#323 K31). Waiting-on-customer tasks are excluded from the queue and Google Tasks.** They are the
+  customer's work, not the rep's; they show on Home under "Waiting on others" and on the company/venue page's
+  Waiting on customer card (scoped to that card's customer so two companies sharing a legacy venue id do not mix).
+- **D-TBD (#323 K32). `/api/sync/pull` serves only the 7 offline field collections.** It previously accepted any
+  table name from the query, which also shipped whole quote docs to any signed-in user. A pure
+  `pullCollections(param)` (`src/lib/sync/pull-collections.ts`) filters to `SYNCABLE_COLLECTIONS`; the client engine
+  only ever asked for `FIELD_COLLECTIONS`. Closes a pre-existing hole found by the final review.
+- **D-TBD (#323 K33). Hot paths read projections, never transcripts.** List rows, the To-file count, the Home badge,
+  ⌘K and the company/venue cards use store projections (`countToFile`, `meetingRowsVisibleTo`,
+  `meetingRowsLinkedTo`) so no transcript JSON is loaded; ⌘K filters visibility in SQL before LIMIT and matches note
+  text through a parameterised `jsonb_path_query`.
+- **D-TBD (#323 K34). Pages degrade if the meetings table is missing.** `meetingsReadOr(promise, fallback, where)`
+  (`src/lib/meetings/safe-read.ts`) wraps the meetings reads on Home, Inbox, company/venue/people/lead/project/
+  engagement/survey cards, the company feed and ⌘K, so a deploy ahead of its migration shows empty, not a 500.
+- **D-TBD (#323 K35). The per-rep sync guard is in-process.** A module-level `inFlight` set stops a rep's double
+  click or overlapping cron/Home trigger; it assumes a single server instance. The task and note ids (K27) are the
+  backstop if two instances ever do overlap.
+- **D-TBD (#323 K36). Cron and Home trigger.** The meetings rider runs after vendors and drive photos with
+  `min(20 s, 40 s − elapsed)` of budget (reps skipped under 5 s) so a slow Krisp call still ends under the 60 s
+  ceiling; Home kicks `syncMeetingsIfStale` through `after()` so it never delays render.
+- **D-TBD (#323 K37). User-facing errors are a closed family.** `MeetingUserError` (access, share-guard, partial,
+  busy) messages reach the user; anything else is logged and returns "Something went wrong — try again." A
+  partially applied Decide all to-dos throws `MeetingPartialError` after applying what it can.

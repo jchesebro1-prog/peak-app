@@ -445,6 +445,26 @@ project and opportunity history (D241–D242).
   would be added as a Draft stage; you can also add it yourself in Settings →
   Pipelines)
 
+## P. Krisp meeting matcher (built 2026-10-10, #323)
+
+Meetings from Krisp are pulled into Inbox → Meetings, matched by rule, and filed by
+a tap (D-TBD K1–K37). Four calls I made that you may want different.
+
+- **P1.** **Waiting-on-customer tasks** are left out of `/queue` and the Google
+  Tasks mirror (they are the customer's work, not yours); they show on Home under
+  "Waiting on others" and on the company/venue page. ✦ OK
+  ☐ also list them in my queue: ______
+- **P2.** **A to-do filed from an internal-only meeting** (no company, so a Task,
+  not a Note) becomes an ordinary task, and tasks are visible to all staff on
+  `/calendar` Everyone. ✦ OK
+  ☐ keep tasks from internal meetings private to the assignee: ______
+- **P3.** **Noise cut-off** — a recording under 3 minutes is "noise" (own tab, no
+  suggestions, never in To file; one tap overrides). ✦ 3 minutes is right
+  ☐ use ______ minutes
+- **P4.** **Sharing with a customer** shows the meeting to every portal grant at
+  that customer, not only the person who was in the meeting. ✦ OK
+  ☐ limit it to attendees' grants: ______
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

@@ -11590,3 +11590,39 @@ does not want to pre-resize photos.
   order, source pins for the squared and unsquared paths).
 - Remaining / Jeff-gated: click Make photos uniform on production after a `db:export` backup and spot-check a few
   parts in the portal and on a client PDF; the first run will take several clicks on a large catalog.
+
+## 323. Krisp meeting matcher — DONE 2026-10-10 (D-TBD K1–K37)
+
+Jeff: every Krisp meeting (customer, internal, site walk) should land in the app, be matched to the right company/
+venue/job/people, and turn its action items into tasks, waiting-on-customer items or notes — without re-typing.
+
+- **Shipped:** `/inbox?view=meetings` — a Meetings box beside mail, tabs To file · Filed · Noise (under 3 minutes) with
+  a Sync now button and Load older; each row carries a strong/weak suggestion chip with reasons, Confirm all files
+  every strong row, and a reader (summary, notes, transcript, attendees corrected from Krisp ∪ the calendar event ∪
+  manual adds, speaker mapping that re-renders names, per-to-do Task / Waiting on customer / Note / Dismiss with a
+  smart default, Share with customer, Refresh from Krisp). Filed meetings show on company, venue, people, lead,
+  project, engagement and survey pages and in the company feed, ⌘K, and the portal (shared ones only). Home shows a
+  To file count and "Waiting on others"; meeting tasks join the Home queue, `/queue` and Google Tasks; Account shows
+  sync state. Deterministic throughout — no AI, no matching on guesses (D89).
+- **Spec / plan:** `docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md`,
+  `docs/superpowers/plans/2026-10-09-krisp-meeting-matcher.md`. Core modules: `src/lib/meetings/` (`match.ts`,
+  `names.ts`, `sync.ts`, `core.ts`, `safe-read.ts`), `src/lib/stores/meetings.ts`, `src/app/(app)/inbox/meetings/`,
+  portal meeting pages, migration 0036 (`meetings`).
+- **Also closed:** `/api/sync/pull` served any collection, including quote docs, to any signed-in user; it now serves
+  only the 7 offline field collections (D-TBD K32).
+- **Gates:** `#323` spec checks 211; full `test:specs` 14,837 PASS / 0 FAIL; `tsc --noEmit` 0 errors; `next build` ok;
+  `test:smoke` 233 ok. No new env vars (reuses the Krisp connection from #119 and the Gmail/Google OAuth client).
+- **Jeff-gated:**
+  1. After merge, connect your Krisp key in Account (the Read scope is enough for meetings; recordings still need
+     Write), open `/inbox?view=meetings` on production and press **Sync now**. The first pass is 90 days and resumes
+     over several presses if it times out.
+  2. Confirm Krisp desktop auto-recorded meetings (not only in-app Recordings) list with their participants; Krisp's
+     docs don't say, and the matcher is weaker without attendees.
+  3. Review a week of suggestions; send any mis-matches (which meeting, what it picked, what it should have).
+  4. At merge the migration must be renumbered with a fresh journal `when` if `feat/drive-time` or
+     `feat/morning-triage` (both claim 0036) land first.
+- **Follow-ups:** Krisp calling; a portal request list from Waiting on customer; Meetings as its own nav page; Krisp
+  folders/tags as matching signals; sub-project 1 (the site-visit question loop); refresh stale wording about
+  `/api/sync/pull` shipping whole quote docs in `src/lib/stores/quotes.ts:317`, `src/lib/quote-share/token.ts:9` and
+  DECISIONS ~8905 (and the #293 spec check that pins it — pull no longer ships quote docs); move `meetingsHref` /
+  `MEETINGS_BASE_HREF` from `src/app/(app)/inbox/meetings/format.ts` to `src/lib/meetings/`.
