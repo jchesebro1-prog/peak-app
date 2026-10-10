@@ -53,6 +53,7 @@ export async function triageDoneAction(key: string): Promise<Result> {
     } else if (plan.kind === "thread") {
       if (!(await setThreadStatus(plan.id, "closed"))) return { ok: false, error: GONE };
     }
+    // Lead/quote/visit/renewal "Done for today" intentionally records a mark even for a deleted record (it is hidden anyway).
     await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
   } catch (error) {
     console.error("triageDoneAction failed", error);

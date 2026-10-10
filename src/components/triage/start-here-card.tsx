@@ -16,10 +16,15 @@ export default async function StartHereCard({ user }: { user: SessionUser }) {
   let teammates: string[] = [];
   try {
     view = await loadTriageView(triageUserFromSession(user), triageNow());
-    teammates = (await activeUsers()).map((u) => u.name).filter((n) => n !== user.name);
   } catch (err) {
     view = null;
     console.error("[triage] Start here card failed", err);
+  }
+  // A teammate-lookup failure only costs the Reassign list; it must not blank the card.
+  try {
+    teammates = (await activeUsers()).map((u) => u.name).filter((n) => n !== user.name);
+  } catch (err) {
+    console.error("[triage] Start here teammate lookup failed", err);
   }
   if (!view) {
     return (
@@ -28,22 +33,27 @@ export default async function StartHereCard({ user }: { user: SessionUser }) {
       </section>
     );
   }
-  const top = view.rows.slice(0, HOME_LIMIT);
+  // Render-time reads are guarded: an unexpectedly shaped snapshot must not throw (Home has no error.tsx).
+  const rows = Array.isArray(view.rows) ? view.rows : [];
+  const top = rows.slice(0, HOME_LIMIT);
+  const snap = view.snapshot;
+  const errors = Array.isArray(snap?.errors) ? snap.errors : [];
+  const header = snap && (snap.slot === "morning" || snap.slot === "midday") ? `${slotLabel(snap.slot)} · built ${chicagoTime(snap.builtAt)}` : "Today’s list";
   return (
     <section className="pk-card" style={{ marginBottom: 22, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, padding: "14px 17px 6px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14.5, fontWeight: 700, color: "#16181d" }}>Start here</span>
           <span style={{ fontSize: 12, color: "#8c919c" }}>
-            {slotLabel(view.snapshot.slot)} · built {chicagoTime(view.snapshot.builtAt)}
+            {header}
           </span>
         </div>
         <Link href="/triage" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
-          See more{view.rows.length > top.length ? ` (${view.rows.length})` : ""} →
+          See more{rows.length > top.length ? ` (${rows.length})` : ""} →
         </Link>
       </div>
       {view.note && <div style={{ fontSize: 12, color: "#8a6d1f", padding: "0 17px" }}>{view.note}</div>}
-      {view.snapshot.errors.map((e) => (
+      {errors.map((e) => (
         <div key={e.source} style={{ fontSize: 12, color: "#8a6d1f", padding: "0 17px" }}>{e.message}</div>
       ))}
       <div style={{ padding: "0 17px 8px" }}>

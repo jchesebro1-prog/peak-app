@@ -703,9 +703,15 @@ export async function triageHomeChecks(ok: Ok): Promise<void> {
   const home = readFileSync("src/app/(app)/page.tsx", "utf8");
   ok(/<StartHereCard user=\{user\} \/>/.test(home) && home.indexOf("<StartHereCard") < home.indexOf("<WidgetHost") && /<Suspense/.test(home), "home: the Start here card sits at the top of Home, above the widgets, behind Suspense");
   const card = readFileSync("src/components/triage/start-here-card.tsx", "utf8");
-  ok(/HOME_LIMIT/.test(card) && /href="\/triage"/.test(card) && /See more/.test(card) && /built \{chicagoTime\(/.test(card) && /catch/.test(card), "home: top 10, slot label with build time, See more → /triage; a load failure never breaks Home");
+  ok(/HOME_LIMIT/.test(card) && /href="\/triage"/.test(card) && /See more/.test(card) && /chicagoTime\(snap\.builtAt\)/.test(card), "home: top 10, slot label with build time, See more → /triage");
+  const failBranch = card.slice(card.indexOf("if (!view)"), card.indexOf("const rows"));
+  ok(/couldn’t load your list/.test(failBranch) && /href="\/triage"/.test(failBranch) && !/\/catch\//.test(failBranch), "home: a load failure shows the fallback copy linking to /triage, never breaking Home");
+  const tmIdx = card.indexOf("activeUsers()");
+  ok(tmIdx > card.indexOf("view = null") && /try \{\s*teammates = /.test(card), "home: a teammate-lookup failure has its own try and never blanks the card");
+  ok(/Array\.isArray\(view\.rows\)/.test(card) && /Array\.isArray\(snap\?\.errors\)/.test(card) && !/view\.snapshot\.errors\.map/.test(card), "home: render-time snapshot reads are guarded so a bad shape cannot throw");
   const recPage = readFileSync("src/app/(app)/recordings/[id]/page.tsx", "utf8");
   const detail = readFileSync("src/app/(app)/recordings/[id]/detail-client.tsx", "utf8");
+  ok(/key=\{`\$\{link\.tab\}:\$\{link\.seg \?\? ""\}`\}/.test(recPage), "deep link: DetailClient is keyed on tab:seg so a same-route navigation re-initialises it");
   ok(/parseRecordingDeepLink\(/.test(recPage) && /initialTab=\{link\.tab\}/.test(recPage) && /focusSeg=\{link\.seg\}/.test(recPage), "deep link: the recording page passes the tab + segment through");
   ok(/useState<Tab>\(initialTab \?\? "summary"\)/.test(detail) && /id=\{`seg-\$\{i\}`\}/.test(detail) && /scrollIntoView/.test(detail) && /initialTranscriptShown\(focusSeg, TRANSCRIPT_PAGE\)/.test(detail), "deep link: the transcript shows, scrolls to and highlights the segment");
 

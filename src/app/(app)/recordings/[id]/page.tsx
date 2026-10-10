@@ -158,6 +158,7 @@ export default async function RecordingDetailPage({
       </section>
 
       <DetailClient
+        key={`${link.tab}:${link.seg ?? ""}`}
         rec={rec}
         chip={chip}
         users={detail.users}
