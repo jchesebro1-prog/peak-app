@@ -1,5 +1,6 @@
 import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
+import { readAttendees } from "@/lib/visit-plan/people";
 
 /**
  * Site visits (D76, Jeff 2026-07-19 — PUNCHLIST #2 phase 1). A visit links a
@@ -38,6 +39,10 @@ export type SiteVisit = {
   notes: string;
   /** team-member NAME (app convention); "" until claimed (#34). */
   assignedTo: string;
+  /** Spec 2026-10-09 site-visit scheduling — other Peak people on the visit
+   *  (names; never the lead). The visit is a stop on each one's day
+   *  (visitPeople). Normalized to [] on read; no migration. */
+  attendees: string[];
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -83,6 +88,7 @@ function normalizeVisit(v: SiteVisit): SiteVisit {
   v.startAt = v.startAt ?? null;
   v.endAt = v.endAt ?? null;
   v.customerId = v.customerId ?? null;
+  v.attendees = readAttendees(v.attendees);
   v.stage = deriveVisitStage(v, Date.now());
   v.leadId = v.leadId ?? null;
   v.surveyId = v.surveyId ?? null;
@@ -131,13 +137,14 @@ export async function linkVisitToEngagement(
 
 export type SiteVisitInput = Omit<
   SiteVisit,
-  "id" | "createdAt" | "updatedAt" | "invite"
->;
+  "id" | "createdAt" | "updatedAt" | "invite" | "attendees"
+> & { attendees?: string[] };
 
 export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
   const now = Date.now();
   return insertWithPrefixedId<SiteVisit>("site_visits", "SV", 5000, (id) => ({
     ...input,
+    attendees: input.attendees ?? [],
     id,
     createdAt: now,
     updatedAt: now,
@@ -191,13 +198,30 @@ export async function releaseVisit(id: string): Promise<void> {
   });
 }
 
-export async function scheduleVisit(id: string, startAt: number, endAt: number): Promise<void> {
+export async function scheduleVisit(id: string, startAt: number, endAt: number, attendees?: string[]): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
     d.startAt = startAt;
     d.endAt = endAt;
+    if (attendees) d.attendees = attendees.filter((n) => n !== d.assignedTo);
     d.stage = "scheduled";
     d.updatedAt = Date.now();
   });
+}
+
+export type VisitBookingPatch = { startAt: number; endAt: number; assignedTo: string; attendees: string[] };
+
+/** Editing a scheduled visit (spec 2026-10-09 site-visit scheduling): time,
+ *  lead and attendees in one write. The caller cleans the names. */
+export async function updateVisitBooking(id: string, patch: VisitBookingPatch): Promise<SiteVisit | null> {
+  const saved = await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    d.startAt = patch.startAt;
+    d.endAt = patch.endAt;
+    d.assignedTo = patch.assignedTo;
+    d.attendees = patch.attendees.filter((n) => n !== patch.assignedTo);
+    d.stage = "scheduled";
+    d.updatedAt = Date.now();
+  });
+  return saved ? getVisit(id) : null;
 }
 
 /** Close out a still-unscheduled visit (final-review fix #34): the lead it
