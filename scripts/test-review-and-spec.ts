@@ -60121,6 +60121,7 @@ async function designators320PureChecks(): Promise<void> {
   ok(D.cleanDesignator("MIC\u0085-1") === "MIC-1" && D.cleanDesignator("\u009bMIC-2") === "MIC-2" && D.cleanDesignator("MIC\u200b-\u200c3\u200d") === "MIC-3" &&
      D.cleanDesignator("\ufeffLX-4") === "LX-4" && D.cleanDesignator("\u202eLX-5\u202c") === "LX-5" && D.cleanDesignator("\u2066A-6\u2069") === "A-6" && D.cleanDesignator("\u200b\u202e") === null,
     "#320 cleanDesignator: C1 controls, zero-width chars, the BOM and bidi overrides/isolates are stripped");
+  ok(D.cleanDesignator("\u200eMIC-1\u2060") === "MIC-1", "#320 cleanDesignator strips LRM and word joiner");
   ok(J(D.parseDesignator("MIC-12")) === J({ code: "MIC", n: 12 }) && D.parseDesignator("mic-3")?.code === "mic" && J(D.parseDesignator("A-1-2")) === J({ code: "A-1", n: 2 }),
     "#320 parseDesignator: <code>-<number>, code kept as written");
   ok(D.parseDesignator("FOH-AMP") === null && D.parseDesignator("MIC-0") === null && D.parseDesignator("MIC-1234567") === null && D.parseDesignator(undefined) === null,

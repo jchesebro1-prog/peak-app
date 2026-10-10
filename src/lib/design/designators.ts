@@ -60,9 +60,10 @@ const DESIGNATOR_RE = /^(.+?)-(\d{1,6})$/;
 const RANGE_RE = /^(.+?-\d{1,6})\s*–\s*\d{1,6}$/;
 const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-/** Invisible characters a pasted designator can carry: zero-width spaces and
- *  joiners, the BOM, and bidi embeddings/overrides/isolates — removed. */
-const INVISIBLE_RE = /[\u200b-\u200d\ufeff\u202a-\u202e\u2066-\u2069]/g;
+/** Invisible characters a pasted designator can carry: the soft hyphen,
+ *  zero-width spaces/joiners, LRM/RLM/ALM marks, the word joiner, the BOM,
+ *  and bidi embeddings/overrides/isolates — removed. */
+const INVISIBLE_RE = /[\u00ad\u061c\u200b-\u200f\u2060\ufeff\u202a-\u202e\u2066-\u2069]/g;
 /** C0 and C1 control characters and DEL — read as a space. */
 const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g;
 
