@@ -30,6 +30,13 @@ import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/t
 import { feedErrorMessage, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
 import { clipLine, formatTimestamp, matchTranscriptLine } from "@/lib/triage/transcript-match";
 import { collapseDuplicates } from "@/lib/triage/dedupe";
+import { selectEmail, type DealIndex } from "@/lib/triage/feeds/email";
+import { selectTasks, tierOf } from "@/lib/triage/feeds/tasks";
+import { selectLeads } from "@/lib/triage/feeds/leads";
+import type { CommThread } from "@/lib/stores/comms";
+import { normalizeTask, type TaskRecord } from "@/lib/stores/tasks";
+import type { Assignment } from "@/lib/stores/assignments";
+import type { LeadRecord } from "@/lib/stores/leads";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -265,4 +272,105 @@ export async function triageMatchChecks(ok: Ok): Promise<void> {
     sameMeeting.length === 1 && sameMeeting[0].key === "call:R8:k1" && (sameMeeting[0].also ?? []).length === 0,
     "dedupe: a repeat from the same meeting drops with no 'Also mentioned in' line for that meeting"
   );
+}
+
+export async function triageFeedChecksA(ok: Ok): Promise<void> {
+  /* ---- email ---- */
+  const thread = (id: string, since: number, extra: Record<string, unknown> = {}) =>
+    ({
+      id, mailbox: "personal", mailboxUser: ME.name, unread: true, customerId: null, customer: "Acme Theatre",
+      contactName: "Pat", contactEmail: "pat@acme.test", subject: "Rigging quote?", channel: "email",
+      status: "waiting_us", assignedTo: ME.name, link: null,
+      messages: [{ id: "m1", at: since, direction: "in", channel: "email", author: "Pat", body: "Hi" }],
+      createdAt: since, updatedAt: since, ...extra,
+    }) as unknown as CommThread;
+  const deals: DealIndex = {
+    quotes: new Map([["Q-1", { status: "sent", value: 18400 }], ["Q-2", { status: "won", value: 900 }]]),
+    leads: new Map([["L-1", { open: true, value: 5000 }]]),
+  };
+  const em = selectEmail(
+    [
+      thread("C-1", THU_9, { link: { type: "quote", id: "Q-1" } }),
+      thread("C-2", FRI_15),
+      thread("C-3", FRI_9, { link: { type: "quote", id: "Q-2" } }),
+      thread("C-4", THU_9, { assignedTo: "Someone Else" }),
+      thread("C-5", THU_9, { status: "waiting_them" }),
+      thread("C-6", THU_9, { archived: true }),
+      thread("C-7", THU_9, { gmailInboxed: false }),
+      thread("C-8", THU_9, { link: { type: "lead", id: "L-1" } }),
+    ],
+    deals,
+    { me: ME, now: MON_10 }
+  );
+  ok(em.map((c) => c.key).join(",") === "email:C-1,email:C-2,email:C-3,email:C-8", "email feed: only my waiting, inboxed, unarchived threads");
+  ok(
+    JSON.stringify(em[0].facts) === JSON.stringify([{ kind: "customer_waiting", businessDays: 2 }, { kind: "linked_open_deal", label: "open quote $18,400" }]),
+    "email feed: 2 business days waiting + the linked open quote"
+  );
+  ok(JSON.stringify(em[1].facts) === JSON.stringify([{ kind: "customer_message_new", hours: 19 }]), "email feed: under one business day ranks lower and shows business hours");
+  ok(em[2].facts.length === 1 && em[2].facts[0].kind === "customer_waiting", "email feed: a won quote is not an open deal");
+  ok(JSON.stringify(em[3].facts[1]) === JSON.stringify({ kind: "linked_open_deal", label: "open lead $5,000" }), "email feed: a linked open lead counts");
+  ok(em[0].href === "/inbox?thread=C-1" && em[0].since === THU_9 && em[0].title === "Acme Theatre" && em[0].sub === "Rigging quote?", "email feed: the row opens the thread; its age is 'waiting since'");
+
+  /* ---- tasks + assignments ---- */
+  const FRI_NOON = Date.UTC(2026, 9, 9, 17);
+  const MON_18 = Date.UTC(2026, 9, 12, 23);
+  const TUE_NOON = Date.UTC(2026, 9, 13, 17);
+  const NEXT_WEEK = Date.UTC(2026, 9, 20, 17);
+  const tk = (id: string, dueAt: number | null, extra: Partial<TaskRecord> & { priority?: string } = {}) => {
+    const { priority, ...rest } = extra;
+    const t = normalizeTask({ id, title: `Task ${id}`, assigneeName: ME.name, dueAt, status: "open", createdAt: 1, ...rest });
+    return priority ? ({ ...t, priority } as TaskRecord) : t; // spec 3's field — normalizeTask doesn't carry it yet
+  };
+  const asg = (id: string, dueDate: number, extra: Partial<Assignment> = {}): Assignment => ({
+    id, title: `Ask ${id}`, assignee: ME.name, createdBy: "Jeff Chesebro", createdAt: 2, dueDate, link: null,
+    done: false, doneAt: null, doneVia: null, source: "", ...extra,
+  });
+  const tr = selectTasks(
+    {
+      tasks: [
+        tk("T1", FRI_NOON), tk("T2", MON_18, { priority: "high" }), tk("T3", TUE_NOON, { priority: "low" }), tk("T4", NEXT_WEEK),
+        tk("T5", null), tk("T6", FRI_NOON, { status: "done" }), tk("T7", FRI_NOON, { assigneeName: "Someone Else" }), tk("T8", NEXT_WEEK, { projectId: "P-1" }),
+      ],
+      assignments: [asg("A1", MON_18), asg("A2", 0, { done: true }), asg("A3", MON_18, { assignee: "Someone Else" })],
+      atRisk: new Set(["task:T5"]),
+    },
+    { me: ME, now: MON_10 }
+  );
+  ok(tr.candidates.map((c) => c.key).join(",") === "task:T1,task:T2,task:T3,task:T5,asg:A1", "tasks feed: my open overdue / today / tomorrow / at-risk items only");
+  ok(JSON.stringify(tr.candidates[0].facts) === JSON.stringify([{ kind: "task_overdue", days: 3 }]), "tasks feed: days overdue are Chicago calendar days");
+  ok(tr.candidates[1].facts.map((f) => f.kind).join(",") === "task_due_today,task_tier", "tasks feed: due today + High tier (when spec 3's priority is present)");
+  ok(JSON.stringify(tr.candidates[2].facts) === JSON.stringify([{ kind: "task_due_tomorrow" }, { kind: "task_tier", tier: "low" }]), "tasks feed: due tomorrow + Low tier");
+  ok(JSON.stringify(tr.candidates[3].facts) === JSON.stringify([{ kind: "task_at_risk" }]), "tasks feed: the optional at-risk hook adds a fact");
+  ok((tr.openWork ?? []).map((w) => w.key).join(",") === "task:T1,task:T2,task:T3,task:T4,task:T5,task:T8,asg:A1", "tasks feed: every open item of mine is open work for the duplicate collapse");
+  ok(tr.candidates[4].href === "/queue" && tr.candidates[4].sub === "from Jeff Chesebro" && tr.candidates[0].href === "/calendar", "tasks feed: rows open the queue / calendar like My Queue does");
+  ok(tierOf({ priority: "high" }) === "high" && tierOf({ priority: "normal" }) === null && tierOf({}) === null && tierOf(null) === null, "tasks feed: tier is read only when present");
+  ok(selectTasks({ tasks: [tk("T9", null)], assignments: [], atRisk: new Set() }, { me: ME, now: MON_10 }).candidates.length === 0, "tasks feed: without the hook an undated task stays off (pre-spec-3 form)");
+
+  /* ---- leads ---- */
+  const lead = (id: string, extra: Record<string, unknown> = {}) =>
+    ({
+      id, org: `Org ${id}`, contact: "", stage: "new", owner: ME.name, value: 0, interest: "", slaHours: 24,
+      firstContactAt: null, nextActionAt: null, createdAt: MON_10 - 2 * H, lastActivityAt: MON_10 - 2 * H, ...extra,
+    }) as unknown as LeadRecord;
+  const lr = selectLeads(
+    [
+      lead("L1", { createdAt: MON_10 - 30 * H }),
+      lead("L2", { createdAt: MON_10 - 21 * H }),
+      lead("L3", { stage: "contacted", firstContactAt: 1, nextActionAt: MON_10 - D }),
+      lead("L4", { stage: "qualified", firstContactAt: 1, lastActivityAt: MON_10 - 6 * D }),
+      lead("L5", { stage: "contacted", firstContactAt: 1 }),
+      lead("L6", { createdAt: MON_10 - 30 * H, owner: "Someone Else" }),
+      lead("L7", { createdAt: MON_10 - 30 * H, owner: "" }),
+      lead("L8", { createdAt: MON_10 - 30 * H, stage: "lost" }),
+    ],
+    { me: ME, now: MON_10 }
+  );
+  ok(lr.map((c) => c.key).join(",") === "lead:L1,lead:L2,lead:L3,lead:L4,lead:L7", "leads feed: my open leads (and unassigned ones, like the bell) that need follow-up");
+  ok(
+    JSON.stringify(lr.map((c) => c.facts)) ===
+      JSON.stringify([[{ kind: "lead_sla_breached" }], [{ kind: "lead_sla_due_soon", minutes: 180 }], [{ kind: "lead_next_action_overdue" }], [{ kind: "lead_stale", days: 6 }], [{ kind: "lead_sla_breached" }]]),
+    "leads feed: SLA breached, SLA due within 4 h, next action overdue, stale"
+  );
+  ok(lr[4].sub.includes("unassigned") && lr[0].href === "/leads?lead=L1", "leads feed: unassigned is said; the row opens the lead");
 }
