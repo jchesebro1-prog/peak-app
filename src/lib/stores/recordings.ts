@@ -417,6 +417,13 @@ async function patch(
   });
 }
 
+/** #323 — the meetings doc this recording's Krisp meeting became (set by the meeting sync). */
+export async function setRecordingMeeting(id: string, meetingId: string): Promise<void> {
+  await patch(id, (r) => {
+    r.meetingId = meetingId;
+  });
+}
+
 /* audio lifecycle */
 
 export async function markUploaded(id: string, blobPathname: string, sizeBytes: number) {

@@ -8,6 +8,12 @@ import { canSeeMeeting, meetingScope, portalCanSee } from "@/lib/meetings/visibi
 import { matchMeeting, type MatchIndex, type MatchInput } from "@/lib/meetings/match";
 import { mergeAttendees, relabel, renderMeeting, resolveAttendees, speakerIndexes, speakerLabel } from "@/lib/meetings/render";
 import { mergeTodos, noteParentFor, suggestTodoKind } from "@/lib/meetings/todos";
+import { rematchMeeting, syncRepMeetings, type SyncDeps } from "@/lib/meetings/sync";
+import { chicagoDayRange } from "@/lib/meetings/chicago-day";
+import { createKrispClient } from "@/lib/krisp/client";
+import { KrispAuthError, KrispRateLimitError } from "@/lib/krisp/errors";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 type Ok = (c: boolean, m: string) => void;
 
@@ -265,4 +271,165 @@ export async function meetings323RenderChecks(ok: Ok): Promise<void> {
      noteParentFor({ ...L, siteId: null, work: { type: "survey", id: "FS-1", label: "x" } })?.parentKind === "customer" &&
      noteParentFor({ customerId: null, siteId: null, contactIds: [], work: null, internalUserIds: [] }) === null,
     "#323 note parent: venue > lead > project > engagement > customer; survey/site-visit work falls back to the customer");
+}
+
+export async function meetings323SyncChecks(ok: Ok): Promise<void> {
+  // --- the list endpoint: query string, bare and {data} envelopes, person normalisation
+  const seenUrls: string[] = [];
+  const body = { meetings: [{ id: "m1", title: "Osakis", started_at: "2026-10-09T15:00:00Z", duration: 1200, status: "completed",
+    source: "zoom", tags: ["x", 3], ownership: "owned", participants: [{ first_name: "Tom", last_name: "Ellis", email: "Tom@Osakis.k12.mn.us" }, { name: "Pat Lee" }] },
+    { title: "no id" }], next_cursor: "c2", total: 2 };
+  const fakeFetch = (wrap: boolean) => async (url: string) => {
+    seenUrls.push(url);
+    return new Response(JSON.stringify(wrap ? { data: body } : body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const page1 = await createKrispClient("k", fakeFetch(false)).listMeetings({ from: "2026-07-01T00:00:00.000Z", cursor: "c1" });
+  const page2 = await createKrispClient("k", fakeFetch(true)).listMeetings({});
+  const q = new URL(seenUrls[0]).searchParams;
+  ok(q.get("limit") === "100" && q.get("ownership") === "all" && q.get("fields") === "title,started_at,duration,status,source,tags,ownership,participants" &&
+     q.get("from") === "2026-07-01T00:00:00.000Z" && q.get("cursor") === "c1" && new URL(seenUrls[1]).searchParams.get("cursor") === null,
+    "#323 listMeetings sends limit/ownership/fields/from/cursor");
+  const lm = page1.meetings[0];
+  ok(page1.meetings.length === 1 && page1.nextCursor === "c2" && lm.startedAt === Date.parse("2026-10-09T15:00:00Z") && lm.durationSec === 1200 &&
+     lm.ownership === "owned" && lm.tags.join() === "x" && lm.participants[0].email === "tom@osakis.k12.mn.us" && lm.participants[0].lastName === "Ellis" &&
+     lm.participants[1].firstName === "Pat" && lm.participants[1].lastName === "Lee",
+    "#323 listMeetings parses meetings (id-less rows dropped), next_cursor and first/last-name participants");
+  ok(page2.meetings.length === 1 && page2.nextCursor === "c2", "#323 listMeetings also reads a {data: …} envelope");
+
+  // --- Chicago day for a survey's scheduledDate
+  const cdt = chicagoDayRange("2026-07-15"), cst = chicagoDayRange("2026-01-15"), fallBack = chicagoDayRange("2026-11-01");
+  ok(cdt?.[0] === Date.UTC(2026, 6, 15, 5) && cdt?.[1] === Date.UTC(2026, 6, 16, 5) && cst?.[0] === Date.UTC(2026, 0, 15, 6) &&
+     cst?.[1] === Date.UTC(2026, 0, 16, 6) && fallBack?.[1] === Date.UTC(2026, 10, 2, 6) && fallBack[1] - fallBack[0] === 25 * 3600_000 &&
+     chicagoDayRange("") === null && chicagoDayRange("2026-13-40") === null,
+    "#323 chicagoDayRange: midnight-to-midnight America/Chicago (CDT −5, CST −6, a 25 h fall-back day); junk → null");
+
+  // --- the sync engine, with a fake client
+  const NOW = Date.UTC(2026, 9, 9, 18, 0);
+  const ids = { a: "TEST323" + "1".repeat(25), b: "TEST323" + "2".repeat(25), c: "TEST323" + "3".repeat(25), d: "TEST323" + "4".repeat(25) };
+  Object.values(ids).forEach((k) => registerFixture("meetings", "km-" + k));
+  const listed = (id: string, title: string, startedAt: number, dur = 1200, ownership: "owned" | "shared" = "owned") =>
+    ({ id, title, startedAt, durationSec: dur, status: "completed", source: "zoom", tags: [], ownership, participants: [] });
+  const pages: Record<string, { meetings: ReturnType<typeof listed>[]; nextCursor: string | null }> = {
+    "": { meetings: [listed(ids.a, "Osakis – scope", NOW - 3600_000), listed(ids.b, "avconferenced", NOW - 7200_000, 45)], nextCursor: "p2" },
+    p2: { meetings: [listed(ids.c, "Jeff <> Speaker_2", NOW - 86_400_000)], nextCursor: null },
+  };
+  const calls: string[] = [];
+  const state: Record<string, unknown> = {};
+  const detail = (id: string) => ({ id, title: null, startedAt: null, duration: null, status: "completed", participants: null,
+    transcript: { language: "en", speakers: { "1": { first_name: "Tom", last_name: "Ellis", email: "TOM@osakis.k12.mn.us" } },
+      segments: [{ speaker: 1, text: "hello", start: 0, end: 1 }] },
+    // Krisp's shape: a container block holding action_item children
+    notes: { blocks: [{ type: "action_items", children: [{ type: "action_item", text: "Send drawings", assignee: "Jeff" }] }] } });
+  const deps = (userId: string): SyncDeps => ({
+    now: () => NOW,
+    client: {
+      listMeetings: async (q) => { calls.push("list:" + (q.cursor || "")); return pages[q.cursor || ""]; },
+      meeting: async (id) => { calls.push("detail:" + id); return detail(id); },
+    },
+    calendar: async () => null,
+    buildIndex: async () => index323(),
+    lookupEmails: async () => new Map(),
+    siteIdFor: async (_c, loc) => loc,
+    getState: async () => (state[userId] as never) ?? { syncedAt: null, backfillFrom: null, backfillCursor: null, lastError: null },
+    setState: async (patch) => { state[userId] = { ...(state[userId] as object), ...patch }; },
+    recordings: async () => [],
+    onRecordingAttached: async () => {},
+    pause: async () => {},
+    budgetMs: 40_000,
+  });
+  const r1 = await syncRepMeetings("u1", "recent", deps("u1"));
+  const a = await MS.getMeeting("km-" + ids.a);
+  ok(r1.complete && r1.listed === 3 && r1.created === 3 && calls.filter((c) => c.startsWith("list")).length === 2,
+    "#323 sync follows next_cursor through every page");
+  ok(!!a && a.seenBy.join() === "u1" && a.ownerUserId === "u1" && a.krisp.segments.length === 1 && a.todos.length === 1 &&
+     a.todos[0].title === "Send drawings" && a.todos[0].suggested === "task" && a.krisp.speakers["1"]?.email === "tom@osakis.k12.mn.us",
+    "#323 a new meeting is created with detail (segments, speakers, to-dos) under km-<id>");
+  ok(a?.suggestions.find((s) => s.kind === "company")?.id === "osakis", "#323 sync runs the matcher on unfiled meetings");
+  ok((await MS.getMeeting("km-" + ids.b))?.noise === true, "#323 a 45 s meeting lands as noise");
+  ok(!calls.includes("detail:" + ids.b), "#323 noise meetings skip the detail fetch");
+  ok((state.u1 as { syncedAt: number; backfillFrom: number }).syncedAt === NOW && (state.u1 as { backfillFrom: number }).backfillFrom === NOW - 90 * 86_400_000,
+    "#323 the first sync covers 90 days and seeds backfillFrom");
+  calls.length = 0;
+  await syncRepMeetings("u1", "recent", deps("u1"));
+  ok(!calls.some((c) => c.startsWith("detail:")), "#323 a re-sync does not re-fetch detail for meetings that already have notes");
+  // a second rep sees the same meeting (shared) → stored once, both in seenBy
+  await syncRepMeetings("u2", "recent", { ...deps("u2"), client: { ...deps("u2").client,
+    listMeetings: async () => ({ meetings: [listed(ids.a, "Osakis – scope", NOW - 3600_000, 1200, "shared")], nextCursor: null }) } });
+  const a2 = await MS.getMeeting("km-" + ids.a);
+  ok(a2?.seenBy.sort().join() === "u1,u2" && a2.ownerUserId === "u1", "#323 the same meeting from two reps is one doc; owner stays the owning rep");
+  // a shared copy seen first, then the owner's listing → the owner takes it
+  await syncRepMeetings("u3", "recent", { ...deps("u3"), client: { ...deps("u3").client,
+    listMeetings: async () => ({ meetings: [listed(ids.d, "Monte PAC", NOW - 3600_000, 1200, "shared")], nextCursor: null }) } });
+  await syncRepMeetings("u4", "recent", { ...deps("u4"), client: { ...deps("u4").client,
+    listMeetings: async () => ({ meetings: [listed(ids.d, "Monte PAC", NOW - 3600_000, 1200, "owned")], nextCursor: null }) } });
+  const d1 = await MS.getMeeting("km-" + ids.d);
+  ok(d1?.ownerUserId === "u4" && d1.seenBy.sort().join() === "u3,u4", "#323 ownership 'owned' wins over a rep who saw the shared copy first");
+  // filed meetings keep links; suggestions frozen
+  await MS.patchMeeting("km-" + ids.a, (x) => ({ ...x, filedAt: NOW, links: { ...x.links, customerId: "monte" } }));
+  await syncRepMeetings("u1", "recent", deps("u1"));
+  ok((await MS.getMeeting("km-" + ids.a))?.links.customerId === "monte", "#323 sync never touches a filed meeting's links");
+  // a rep's edit made WHILE the batch runs survives: the sync writes through patchMeeting on the latest doc
+  await MS.patchMeeting("km-" + ids.a, (x) => ({ ...x, filedAt: null, links: { ...x.links, customerId: null }, krisp: { ...x.krisp, notes: null } }));
+  calls.length = 0;
+  await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    meeting: async (id) => {
+      calls.push("detail:" + id);
+      if (id === ids.a) {
+        await MS.patchMeeting("km-" + ids.a, (x) => ({ ...x, filedAt: NOW - 1, filedBy: "Jeff",
+          speakerMap: { "1": { contactId: "c-tom", name: "Tom Ellis" } }, links: { ...x.links, customerId: "osakis" } }));
+      }
+      return detail(id);
+    } } });
+  const a3 = await MS.getMeeting("km-" + ids.a);
+  ok(calls.includes("detail:" + ids.a) && !!a3?.krisp.notes && a3.speakerMap["1"]?.contactId === "c-tom" && a3.filedAt === NOW - 1 &&
+     a3.links.customerId === "osakis" && a3.seenBy.sort().join() === "u1,u2",
+    "#323 a rep's speaker map, filing and links made during the detail fetch survive the sync's write (patch, not blind upsert)");
+  // removed from Krisp
+  await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    listMeetings: async () => ({ meetings: [listed(ids.a, "Osakis – scope", NOW - 3600_000)], nextCursor: null }) } });
+  ok((await MS.getMeeting("km-" + ids.c))?.krisp.removedAt === NOW && !!(await MS.getMeeting("km-" + ids.c)),
+    "#323 a meeting gone from Krisp's window is flagged removed, never deleted");
+  // 429 ends the batch early, not complete, no throw
+  const r429 = await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    listMeetings: async () => { throw new KrispRateLimitError(); } } });
+  ok(!r429.complete && r429.error === null, "#323 a 429 ends the batch quietly; next trigger resumes");
+  // a detail fetch that fails with a non-auth API error skips that meeting's detail, not the batch
+  await MS.patchMeeting("km-" + ids.c, (x) => ({ ...x, krisp: { ...x.krisp, detailFetchedAt: null } }));
+  const rBad = await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    meeting: async (id) => { if (id === ids.c) { const { KrispApiError } = await import("@/lib/krisp/errors"); throw new KrispApiError(500, "boom"); } return detail(id); } } });
+  ok(rBad.complete && rBad.error === null && (await MS.getMeeting("km-" + ids.c))?.krisp.detailFetchedAt === null,
+    "#323 a 5xx on one meeting's detail is retried next sync and never fails the batch");
+  // revoked key
+  const r401 = await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    listMeetings: async () => { throw new KrispAuthError(); } } });
+  ok(!!r401.error && (state.u1 as { lastError: string }).lastError === r401.error, "#323 a 401 records meetings_last_error");
+  // backfill resumes from the saved cursor
+  state.u1 = { syncedAt: NOW, backfillFrom: NOW - 90 * 86_400_000, backfillCursor: "p2", lastError: null };
+  calls.length = 0;
+  await syncRepMeetings("u1", "backfill", deps("u1"));
+  ok(calls[0] === "list:p2" && (state.u1 as { backfillCursor: string | null; backfillFrom: number }).backfillCursor === null &&
+     (state.u1 as { backfillFrom: number }).backfillFrom === NOW - 180 * 86_400_000,
+    "#323 Load older resumes at the saved cursor, then moves backfillFrom back another 90 days");
+  // the time budget ends a backfill mid-page and keeps the page's cursor
+  let clock = NOW;
+  state.u5 = { syncedAt: NOW, backfillFrom: NOW - 90 * 86_400_000, backfillCursor: null, lastError: null };
+  const rBudget = await syncRepMeetings("u5", "backfill", { ...deps("u5"), now: () => (clock += 12_000) });
+  ok(!rBudget.complete && (state.u5 as { backfillCursor: string | null }).backfillCursor === null && rBudget.listed >= 1 && rBudget.listed < 3,
+    "#323 an exhausted time budget stops the batch between meetings, incomplete, resumable");
+  // rematch is pure and leaves filed meetings alone
+  const filed = { ...(await MS.getMeeting("km-" + ids.a))! };
+  ok(rematchMeeting(filed, index323()).suggestions === filed.suggestions, "#323 rematchMeeting leaves a filed meeting's suggestions as they were");
+  const shortOverridden = meetingFixture323({ krispMeetingId: "ov", noiseOverride: true, krisp: { ...meetingFixture323({ krispMeetingId: "ov" }).krisp, durationSec: 30 } });
+  ok(rematchMeeting(shortOverridden, index323()).noise === false, "#323 rematchMeeting honours noiseOverride");
+
+  // --- the match index and the sync engine are server-only: no client module imports them
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
+    const p = join(dir, f);
+    return statSync(p).isDirectory() ? walk(p) : /\.(tsx?|jsx?)$/.test(f) ? [p] : [];
+  });
+  const offenders = walk(join(process.cwd(), "src")).filter((p) => {
+    const src = readFileSync(p, "utf8");
+    return /^\s*["']use client["']/.test(src) && /@\/lib\/meetings\/(index-build|sync|sync-state)["']/.test(src);
+  });
+  ok(offenders.length === 0, "#323 no client module imports the match index, the sync engine or its state");
 }

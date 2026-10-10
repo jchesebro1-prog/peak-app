@@ -10,6 +10,7 @@ import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
 import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
+import { syncMeetingsIfStale } from "@/lib/meetings/sync";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
@@ -70,6 +71,7 @@ export default async function HomePage({
   const me = user.name;
   const data = makeDashboardData(user);
   void reconcileRecordingsIfStale().catch(() => {});
+  void syncMeetingsIfStale(user.id).catch(() => {}); // #323 Krisp meetings, > 10 min stale
   const now = Date.now();
   const [userRecord, appSettings, quotesAll, designsAll] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),

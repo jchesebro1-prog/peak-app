@@ -4,6 +4,7 @@ import { checkMailIfStale } from "@/lib/stores/comms";
 import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
 import { reconcileRecordings } from "@/lib/krisp/reconcile";
 import { archiveRecordings } from "@/lib/krisp/archive";
+import { syncAllMeetings } from "@/lib/meetings/sync";
 import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
@@ -41,6 +42,8 @@ export const maxDuration = 60;
  * "daily cron" is this route.
  *
  * #283 adds the Peak Product Photos sync the same way.
+ *
+ * #323 adds the Krisp meeting sync (syncAllMeetings) the same way.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -74,6 +77,16 @@ export async function GET(req: Request): Promise<NextResponse> {
     recordingsArchive = { error: (err as Error).message };
   }
 
+  // #323 — Krisp meeting sync for every connected rep (rolling 14-day window),
+  // sharing one budget capped so the riders after it keep their time. Own
+  // try/catch like the other riders.
+  let meetings: Awaited<ReturnType<typeof syncAllMeetings>> | { error: string };
+  try {
+    meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, 40_000 - (Date.now() - started))));
+  } catch (err) {
+    meetings = { error: (err as Error).message };
+  }
+
   // #122 — vendor price-list freshness (spec §4): one catalog read, one
   // profiles read, at most one new Home Queue task per (vendor, status,
   // date) key. Own try/catch like the other riders on this daily trigger.
@@ -100,5 +113,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     drivePhotos = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, drivePhotos });
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, drivePhotos });
 }
