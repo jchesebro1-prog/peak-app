@@ -11,7 +11,8 @@ import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { sortedLevels } from "@/lib/design/grid-levels";
-import { loadConduitRiser } from "@/lib/design/conduit-riser-server";
+import { conduitRiserPagesOf, loadConduitRiser } from "@/lib/design/conduit-riser-server";
+import { conduitRiserSheetNumber, drawingArea, resolveSheetSize } from "@/lib/design/grid-drawing-set";
 import { layoutDetail } from "@/lib/design/conduit-riser/layout";
 import { detailGeometry, tableGeometry } from "@/lib/design/conduit-riser/drawing";
 import { LIGHTING_ALWAYS_SHOW } from "@/lib/design/conduit-riser/model";
@@ -92,6 +93,12 @@ export default async function ConduitRiserPage({
     .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
     .map((t) => ({ key: t.key, label: t.label }));
 
+  // #321: E-502… as the drawing set prints them at its saved size — one DXF per page.
+  const sheetSize = resolveSheetSize(null, project.drawingSet?.size);
+  const sheetPages = conduitRiserPagesOf(data, drawingArea(sheetSize));
+  const dxfHref = (page: number) =>
+    `/api/grid/${encodeURIComponent(project.id)}/conduit-riser/dxf${optionQuery}&size=${sheetSize}&page=${page}`;
+
   const slice = optionSlice(project, optionId);
   const detailHref = (detailId: string) => `${base}/conduit-riser${optionQuery}&detail=${encodeURIComponent(detailId)}`;
 
@@ -107,6 +114,17 @@ export default async function ConduitRiserPage({
         <Link href={`${base}/set${optionQuery}`} style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accent)", textDecoration: "none" }}>
           Drawing set →
         </Link>
+        {sheetPages.map((_, i) => (
+          // A file download, not a page — a plain link.
+          <a
+            key={i}
+            href={dxfHref(i + 1)}
+            title={`${conduitRiserSheetNumber(i)} as a CAD file (DXF), without the title block`}
+            style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", border: "1px solid #e4e7ec", borderRadius: 7, padding: "4px 10px" }}
+          >
+            {sheetPages.length > 1 ? `Download DXF · ${conduitRiserSheetNumber(i)}` : "Download DXF"}
+          </a>
+        ))}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Lighting control riser</h1>

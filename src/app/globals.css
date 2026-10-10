@@ -1136,6 +1136,11 @@ button.pk-searchbar-glass {
     break-after: auto;
     page-break-after: auto;
   }
+  /* #321: a screen-only DXF link may follow the last sheet. */
+  .pk-drawing-sheet:has(+ .pk-dw-dxf:last-child) {
+    break-after: auto;
+    page-break-after: auto;
+  }
 }
 
 /* Curtain cut sheets (#292). Submittal reuses .pk-drawing-sheet with its own

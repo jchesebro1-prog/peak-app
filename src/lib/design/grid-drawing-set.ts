@@ -376,10 +376,10 @@ export function planContent<
 
 /* ------------------------------ sheet list ------------------------------ */
 
-export type DrawingSheetKind = "cover" | "plan" | "riser" | "schedule";
+export type DrawingSheetKind = "cover" | "plan" | "riser" | "conduitRiser" | "schedule";
 
 export type DrawingSheetDef = {
-  /** Stable identity: "cover" | "plan:<system>:<sheetId>:<page>" | "riser" | "schedule" | "schedule:<n>". */
+  /** Stable identity: "cover" | "plan:<system>:<sheetId>:<page>" | "riser" | "conduit-riser" | "conduit-riser:<n>" | "schedule" | "schedule:<n>". */
   key: string;
   kind: DrawingSheetKind;
   number: string;
@@ -389,11 +389,20 @@ export type DrawingSheetDef = {
   page?: number;
   /** 0-based schedule page. */
   schedulePage?: number;
+  /** 0-based lighting control riser page (#321). */
+  conduitRiserPage?: number;
 };
 
-/** All schedule pages share one include/exclude switch. */
+/** All schedule pages share one include/exclude switch; so do the lighting
+ *  control riser's pages (#321). */
 export function sheetExclusionKey(d: DrawingSheetDef): string {
-  return d.kind === "schedule" ? "schedule" : d.key;
+  return d.kind === "schedule" ? "schedule" : d.kind === "conduitRiser" ? "conduit-riser" : d.key;
+}
+
+/** The lighting control riser's sheet number (#321): page 0 → E-502, then
+ *  E-503… — after E-501. The set and the DXF download both name it so. */
+export function conduitRiserSheetNumber(page: number): string {
+  return `E-${502 + page}`;
 }
 
 /**
@@ -405,6 +414,8 @@ export function buildSheetList(input: {
   planGroups: PlanGroup[];
   sourceNames: Readonly<Record<string, string>>;
   schedulePages: number;
+  /** Lighting control riser pages (#321); 0 or absent = none. */
+  conduitRiserPages?: number;
   excluded?: readonly string[];
 }): { all: DrawingSheetDef[]; included: DrawingSheetDef[] } {
   const all: DrawingSheetDef[] = [{ key: "cover", kind: "cover", number: "T-001", title: "Cover sheet" }];
@@ -424,6 +435,16 @@ export function buildSheetList(input: {
     });
   }
   all.push({ key: "riser", kind: "riser", number: "E-501", title: "System riser" });
+  const crPages = Math.max(0, Math.floor(input.conduitRiserPages || 0));
+  for (let i = 0; i < crPages; i++) {
+    all.push({
+      key: i === 0 ? "conduit-riser" : `conduit-riser:${i + 1}`,
+      kind: "conduitRiser",
+      number: conduitRiserSheetNumber(i),
+      title: i === 0 ? "Lighting control riser" : "Lighting control riser (cont.)",
+      conduitRiserPage: i,
+    });
+  }
   const n = Math.max(1, Math.floor(input.schedulePages) || 1);
   for (let i = 0; i < n; i++) {
     all.push({
@@ -443,6 +464,7 @@ export function toggleableSheets(all: DrawingSheetDef[]): Array<{ key: string; l
   const out: Array<{ key: string; label: string }> = [];
   const seen = new Set<string>();
   const scheduleCount = all.filter((d) => d.kind === "schedule").length;
+  const crCount = all.filter((d) => d.kind === "conduitRiser").length;
   for (const d of all) {
     const key = sheetExclusionKey(d);
     if (seen.has(key)) continue;
@@ -452,7 +474,9 @@ export function toggleableSheets(all: DrawingSheetDef[]): Array<{ key: string; l
       label:
         d.kind === "schedule"
           ? `${d.number}${scheduleCount > 1 ? `–E-${600 + scheduleCount}` : ""} Equipment schedules`
-          : `${d.number} ${d.title}`,
+          : d.kind === "conduitRiser"
+            ? `${d.number}${crCount > 1 ? `–${conduitRiserSheetNumber(crCount - 1)}` : ""} Lighting control riser`
+            : `${d.number} ${d.title}`,
     });
   }
   return out;

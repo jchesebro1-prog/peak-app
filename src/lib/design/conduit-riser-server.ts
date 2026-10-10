@@ -16,7 +16,7 @@ import { parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import { getRiserBoxTypes } from "@/lib/stores/riser-box-types";
 import { getConduitSizes } from "@/lib/stores/conduit-sizes";
 import { placementQty, routeLengthFt, type PartLite } from "@/lib/design/grid-bom";
-import { placementSystem, routeSystem } from "@/lib/design/grid-drawing-set";
+import { drawingArea, placementSystem, routeSystem, type SheetSizeKey } from "@/lib/design/grid-drawing-set";
 import { spaceOf } from "@/lib/design/grid-geometry";
 import { levelOfPlacement } from "@/lib/design/grid-levels";
 import { normalizeRiserDoc } from "@/lib/design/grid-riser-doc";
@@ -31,6 +31,8 @@ import { suggestions, type SuggestResult } from "@/lib/design/conduit-riser/sugg
 import { riserTables, type TableModel } from "@/lib/design/conduit-riser/tables";
 import { effectiveTag } from "@/lib/design/conduit-riser/tags";
 import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
+import { layoutDetail } from "@/lib/design/conduit-riser/layout";
+import { composeSheets, detailGeometry, type SheetPage } from "@/lib/design/conduit-riser/drawing";
 
 /**
  * The conduit riser's server loader (#321). Turns a Grid project's option
@@ -237,6 +239,27 @@ export async function loadConduitRiser(project: GridProject, optionId: string, d
     estimateOwned: option?.estimateOwned === true,
     placementIds: new Set(devices.map((d) => d.id)),
   };
+}
+
+/**
+ * The lighting control riser's printed pages (#321): every detail laid out,
+ * packed with the tables and general notes into `area` inches. Nothing until
+ * the riser has a conduit run.
+ */
+export function conduitRiserPagesOf(data: Pick<ConduitRiserData, "doc" | "view" | "tables">, area: { w: number; h: number }): SheetPage[] {
+  if (!data.doc.runs.length) return [];
+  const details = data.view.details.map((v) => detailGeometry(layoutDetail(v, data.doc), v));
+  return composeSheets({ details, tables: data.tables, notes: data.doc.notes, area });
+}
+
+/**
+ * E-502… for one option at one sheet size — the one computation the drawing
+ * set's sheets and the DXF download both read, so the printed sheet and the
+ * CAD file can't disagree. Skips the loader when there is no run.
+ */
+export async function conduitRiserSheetPages(project: GridProject, optionId: string, size: SheetSizeKey, deps: ConduitRiserDeps = {}): Promise<SheetPage[]> {
+  if (!hasOption(project, optionId) || !liveConduitRiser(project, optionId).runs.length) return [];
+  return conduitRiserPagesOf(await loadConduitRiser(project, optionId, deps), drawingArea(size));
 }
 
 export type RiserPrompt = { show: false } | { show: true; key: string; label: string; joins: boolean };

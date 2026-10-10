@@ -11537,6 +11537,7 @@ seeded()
   .then(() => conduitRiser321B6Checks())
   .then(() => conduitRiser321B7Checks())
   .then(() => conduitRiser321B8Checks())
+  .then(() => conduitRiser321B9Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -60121,6 +60122,33 @@ async function sheetAdjust318StaleSheetChecks(): Promise<void> {
 }
 
 /* ---------------- #321: Grid conduit riser — pure engine ---------------- */
+/** #321 — a tiny DXF reader shared by the riser checks: group-code pairs,
+ *  sections, blocks, inserts, attributes. */
+const readDxf321 = (dxf: string) => {
+  const lines = dxf.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  const pairs: [number, string][] = [];
+  for (let i = 0; i + 1 < lines.length; i += 2) pairs.push([Number(lines[i]), lines[i + 1]]);
+  const zeros = pairs.filter(([c]) => c === 0).map(([, v]) => v);
+  const count = (v: string) => zeros.filter((z) => z === v).length;
+  const blocks = new Set<string>();
+  const attdefs = new Map<string, string[]>();
+  let curBlock = "";
+  let ent = "";
+  const insertNames: string[] = [];
+  const attribsPer: string[][] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    const [c, v] = pairs[i];
+    if (c === 0) ent = v;
+    if (c === 0 && v === "ENDBLK") curBlock = "";
+    if (c === 2 && ent === "BLOCK") { curBlock = v; blocks.add(v); attdefs.set(v, []); }
+    if (c === 2 && ent === "ATTDEF" && curBlock) attdefs.get(curBlock)!.push(v);
+    if (c === 2 && ent === "INSERT") { insertNames.push(v); attribsPer.push([]); }
+    if (c === 2 && ent === "ATTRIB") attribsPer[attribsPer.length - 1].push(v);
+  }
+  return { lines, pairs, zeros, count, blocks, attdefs, insertNames, attribsPer };
+};
+
 async function conduitRiser321Checks(): Promise<void> {
   const M = await import("@/lib/design/conduit-riser/model");
   const T = await import("@/lib/design/conduit-riser/tags");
@@ -60329,28 +60357,7 @@ async function conduitRiser321Checks(): Promise<void> {
   ok(pages.length === 1 && inserts.filter((x) => x.t === "insert" && x.block === "PK_TAG").length === 6 &&
      (svg.match(/data-block="PK_TAG"/g) || []).length === 6 && svg.includes(">CONTROL WIRE LEGEND<") && svg.includes("EP-06"),
     "#321 one sheet: six tags, the tables and notes; SVG expands each block insert");
-  // A tiny DXF reader: group-code pairs, sections, blocks, inserts, attributes.
-  const lines = dxf.split("\n");
-  if (lines[lines.length - 1] === "") lines.pop();
-  const pairs: [number, string][] = [];
-  for (let i = 0; i + 1 < lines.length; i += 2) pairs.push([Number(lines[i]), lines[i + 1]]);
-  const zeros = pairs.filter(([c]) => c === 0).map(([, v]) => v);
-  const count = (v: string) => zeros.filter((z) => z === v).length;
-  const blocks = new Set<string>();
-  const attdefs = new Map<string, string[]>();
-  let curBlock = "";
-  let ent = "";
-  const insertNames: string[] = [];
-  const attribsPer: string[][] = [];
-  for (let i = 0; i < pairs.length; i++) {
-    const [c, v] = pairs[i];
-    if (c === 0) ent = v;
-    if (c === 0 && v === "ENDBLK") curBlock = "";
-    if (c === 2 && ent === "BLOCK") { curBlock = v; blocks.add(v); attdefs.set(v, []); }
-    if (c === 2 && ent === "ATTDEF" && curBlock) attdefs.get(curBlock)!.push(v);
-    if (c === 2 && ent === "INSERT") { insertNames.push(v); attribsPer.push([]); }
-    if (c === 2 && ent === "ATTRIB") attribsPer[attribsPer.length - 1].push(v);
-  }
+  const { lines, pairs, zeros, count, blocks, attdefs, insertNames, attribsPer } = readDxf321(dxf);
   ok(lines.length % 2 === 0 && pairs.every(([c]) => Number.isInteger(c)) && zeros[zeros.length - 1] === "EOF" &&
      count("SECTION") === 4 && count("ENDSEC") === 4 && count("BLOCK") === count("ENDBLK") && count("TABLE") === count("ENDTAB") &&
      pairs.some(([c, v]) => c === 1 && v === "AC1009"),
@@ -63465,4 +63472,113 @@ async function conduitRiser321B8Checks(): Promise<void> {
   ok(panel.includes("In conduit — by others") && panel.includes("riser.byOthers") && panel.includes("riser.refusals") && panel.includes('case "conduit":') &&
      panel.indexOf("riser.refusals") > panel.indexOf("wires.unmeasured"),
     "#321 B8 BOM panel: an In conduit — by others list, the refusal sentences beside the unmeasured-wire notice, and a Conduit row");
+}
+
+async function conduitRiser321B9Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const DSet = await import("@/lib/design/grid-drawing-set");
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+
+  // --- the sheet list (pure) ---
+  const groups = [{ system: "lighting" as const, sheetId: "s1", page: 1 }, { system: "audio" as const, sheetId: "s1", page: 1 }];
+  const base = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2 });
+  const two = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 2 });
+  const one = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 1 });
+  ok(J2(DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 0 })) === J2(base) && !base.all.some((d) => d.kind === "conduitRiser"),
+    "#321 B9 sheet list: no riser pages (0 or absent) adds no sheet");
+  ok(two.all.map((d) => d.number).join() === "T-001,L-101,A-101,E-501,E-502,E-503,E-601,E-602" && one.all.map((d) => d.number).join() === "T-001,L-101,A-101,E-501,E-502,E-601,E-602",
+    "#321 B9 sheet list: the lighting control riser pages number E-502, E-503… right after E-501; E-60x keep their numbers");
+  const cr = two.all.filter((d) => d.kind === "conduitRiser");
+  ok(J2(cr.map((d) => [d.key, d.title, d.conduitRiserPage])) === J2([["conduit-riser", "Lighting control riser", 0], ["conduit-riser:2", "Lighting control riser (cont.)", 1]]),
+    "#321 B9 sheet list: page 1 is \"Lighting control riser\", later pages \"(cont.)\", each keyed and indexed");
+  ok(cr.every((d) => DSet.sheetExclusionKey(d) === "conduit-riser") && DSet.conduitRiserSheetNumber(0) === "E-502" && DSet.conduitRiserSheetNumber(2) === "E-504",
+    "#321 B9 sheet list: every riser page shares the exclusion key conduit-riser; conduitRiserSheetNumber counts from E-502");
+  const ex = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 2, excluded: ["conduit-riser"] });
+  ok(ex.included.map((d) => d.number).join() === "T-001,L-101,A-101,E-501,E-601,E-602" && J2(ex.all) === J2(two.all),
+    "#321 B9 sheet list: excluding conduit-riser drops every riser page and renumbers nothing");
+  const tg2 = DSet.toggleableSheets(two.all).filter((t) => t.key === "conduit-riser");
+  const tg1 = DSet.toggleableSheets(one.all).filter((t) => t.key === "conduit-riser");
+  ok(J2(tg2) === J2([{ key: "conduit-riser", label: "E-502–E-503 Lighting control riser" }]) && J2(tg1) === J2([{ key: "conduit-riser", label: "E-502 Lighting control riser" }]),
+    "#321 B9 set settings: the riser pages toggle as one checkbox naming their range");
+
+  // --- the loader → pages → DXF, on a real project ---
+  const G = await import("@/lib/stores/grid-projects");
+  const CRS = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const X = await import("@/lib/design/conduit-riser/dxf");
+  const GO = await import("@/lib/design/grid-options");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getSettings } = await import("@/lib/settings");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const C1 = fid(321, "b9-dmx-cable");
+  await mergeUpsert(C1, { desc: "Test321 B9 DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5, manufacturerModelNumber: "T321-B9DMX" });
+  reg("catalog_parts", C1);
+  const settings = await getSettings();
+  const deps = { settings: { ...settings, wireTypes: [{ id: "t321-b9", label: "DMX", connectionTypes: ["T321-B9"], cableSku: C1, symbol: "D", signal: "DMX" }] } };
+  const gp = await G.createProject({ name: "#321 B9 riser / sheet", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 B9 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  const a = await place(0.1, 0.1);
+  const b = await place(0.4, 0.4);
+  await G.addRoute(gp.id, { sheetId: sh.id, page: 1, partId: C1, points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id });
+  ok((await L.conduitRiserSheetPages(await live(), opt, "b", deps)).length === 0, "#321 B9 pages: a design whose riser has no conduit run prints no E-502");
+  const acc = await CRS.acceptSuggestions(gp.id, opt, "all", deps);
+  ok(acc.ok && acc.accepted === 1, "#321 B9 fixture: one accepted run");
+  await CRS.patchConduitRiser(gp.id, opt, { op: "addNote", text: "Pull string in every empty conduit" });
+  const p = await live();
+  const pagesB = await L.conduitRiserSheetPages(p, opt, "b", deps);
+  const pagesD = await L.conduitRiserSheetPages(p, opt, "d", deps);
+  const areaB = DSet.drawingArea("b");
+  const areaD = DSet.drawingArea("d");
+  ok(pagesB.length >= 1 && pagesB.every((pg) => pg.w === areaB.w && pg.h === areaB.h) && pagesD.length >= 1 && pagesD.every((pg) => pg.w === areaD.w && pg.h === areaD.h),
+    "#321 B9 pages: one run → at least one page, each exactly the size's drawing area (11×17 and 24×36)");
+  const viaData = L.conduitRiserPagesOf(await L.loadConduitRiser(p, opt, deps), areaB);
+  ok(J2(viaData) === J2(pagesB), "#321 B9 pages: the riser page's pages and the set's pages are one computation (same geometry)");
+  const geo = pagesB[0].geo;
+  const tagInserts = geo.filter((g) => g.t === "insert" && g.block === "PK_TAG").length;
+  ok(tagInserts === 2 && geo.some((g) => g.t === "text" && g.s === "GENERAL NOTES"), "#321 B9 pages: page 1 draws both devices' tags and the general notes");
+  const dxf = X.geometryToDxf(pagesB[0].geo, pagesB[0]);
+  const R = readDxf321(dxf);
+  const extMax = R.pairs.findIndex(([c, v]) => c === 9 && v === "$EXTMAX");
+  ok(R.lines.length % 2 === 0 && R.pairs.every(([c]) => Number.isInteger(c)) && R.zeros[R.zeros.length - 1] === "EOF" && R.count("SECTION") === 4 && R.count("ENDSEC") === 4 &&
+     R.count("BLOCK") === R.count("ENDBLK") && R.pairs.some(([c, v]) => c === 1 && v === "AC1009") && !/[^\x00-\x7e]/.test(dxf),
+    "#321 B9 DXF (loader-built): R12, even pairs, balanced sections and blocks, ASCII, ends in EOF");
+  ok(R.insertNames.length === geo.filter((g) => g.t === "insert").length && R.insertNames.every((n, i) => R.blocks.has(n) && J2(R.attribsPer[i]) === J2(R.attdefs.get(n))) &&
+     R.insertNames.filter((n) => n === "PK_TAG").length === 2,
+    "#321 B9 DXF (loader-built): every insert names a defined block with exactly its attributes; both tags are there");
+  ok(extMax > 0 && Number(R.pairs[extMax + 1][1]) === areaB.w && Number(R.pairs[extMax + 2][1]) === areaB.h, "#321 B9 DXF (loader-built): the extents are the sheet's drawing area");
+
+  // --- wiring pins ---
+  const route = srcOf("src/app/api/grid/[id]/conduit-riser/dxf/route.ts");
+  const iUser = route.indexOf("await requireUser()");
+  ok(iUser > 0 && iUser < route.indexOf("try {") && iUser < route.indexOf("getProject(projectId)") && route.indexOf("decodeURIComponent(id)") < route.indexOf("getProject(projectId)") && route.includes('export const dynamic = "force-dynamic"'),
+    "#321 B9 route: requireUser is awaited outside the try, before getProject (a signed-out request redirects)");
+  ok(route.includes("conduitRiserSheetPages(") && route.includes("geometryToDxf(page.geo, page)") && route.includes('"content-type": "application/dxf"') &&
+     route.includes("attachmentDisposition(") && route.includes("-lighting-control-riser.dxf") && route.includes("conduitRiserSheetNumber(") &&
+     route.includes('"cache-control": "private, no-store"') && route.includes("status: 404"),
+    "#321 B9 route: the DXF comes from the set's own pages, downloads as an attachment named by its sheet number, never cached; a miss is a 404");
+  const dsd = srcOf("src/lib/design/drawing-set-data.ts");
+  ok(dsd.includes("conduitRiserSheetPages(project, optionId, size,") && dsd.includes("conduitRiserPages: conduitRiserPages.length"),
+    "#321 B9 set data: the set computes the riser pages once and numbers them through buildSheetList");
+  const sheets = srcOf("src/components/drawing/drawing-set-sheets.tsx");
+  ok(sheets.includes('d.kind === "conduitRiser"') && sheets.includes("<ConduitRiserFigure") && sheets.includes("pk-no-print pk-dw-dxf") && sheets.includes('d.kind === "conduitRiser" && assets.conduitRiserDxf &&'),
+    "#321 B9 set sheets: E-502 draws through the shared ConduitRiserFigure; its DXF link is screen-only");
+  ok(!/data-plan-figure/.test(srcOf("src/components/drawing/conduit-riser-figure.tsx")), "#321 B9 print: the riser figure loads no images, so Print never waits on it");
+  const DSD = await import("@/lib/design/drawing-set-data");
+  ok(DSD.TEAM_DRAWING_SET_ASSETS.conduitRiserDxf?.({ projectId: "GRD 1", optionId: "opt-base", size: "d", page: 2 }) === "/api/grid/GRD%201/conduit-riser/dxf?option=opt-base&size=d&page=2" &&
+     !srcOf("src/app/print/grid-set/[id]/page.tsx").includes("conduitRiserDxf") && srcOf("src/app/(app)/design/grid/[id]/conduit-riser/page.tsx").includes("Download DXF") &&
+     srcOf("src/app/(app)/design/grid/[id]/conduit-riser/page.tsx").includes("/conduit-riser/dxf"),
+    "#321 B9 buttons: the team set links each riser sheet's DXF (the signed print route never does); the riser page has Download DXF");
+  ok(srcOf("src/app/globals.css").includes(".pk-drawing-sheet:has(+ .pk-dw-dxf:last-child)"), "#321 B9 print CSS: a DXF link after the last sheet never adds a blank page");
+  ok(srcOf("scripts/smoke-routes.ts").includes('"/api/grid/GRD-5001/conduit-riser/dxf"'), "#321 B9 smoke: the DXF route is listed");
 }

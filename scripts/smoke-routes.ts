@@ -359,6 +359,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
+  // #321 — the lighting control riser DXF: the seeded design has no conduit run
+  // (a clean 404 after the loader path compiles); an unknown design is a 404 too.
+  { route: "/api/grid/GRD-5001/conduit-riser/dxf", expectNotFound: true },
+  { route: "/api/grid/GRD-NOPE/conduit-riser/dxf?option=opt-base&size=d&page=1", expectNotFound: true },
   // #301 slice B — the share photo route with a v2 token that fails the verify: a clean 404.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/photo/PD-1", expectNotFound: true },
   // #301 slice C — the package datasheet route with a v2 token that fails the verify: a clean 404.
