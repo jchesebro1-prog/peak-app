@@ -477,6 +477,7 @@ function DesignatorRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
             maxLength={DESIGNATOR_MAX}
             placeholder="Blank = next free number"
             aria-label="Designator"
+            onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {
               if (e.key === "Escape") setDraft(null);
               if (e.key === "Enter" && !busy) void save();

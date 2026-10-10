@@ -293,6 +293,7 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
                       {cell && col ? (
                         <input
                           autoFocus
+                          onFocus={(e) => e.currentTarget.select()}
                           value={cell.draft}
                           maxLength={col === "designator" ? DESIGNATOR_MAX : 40}
                           list={col === "category" ? "grid-devices-category-suggestions" : undefined}

@@ -60522,6 +60522,15 @@ async function designators320DeviceRowsChecks(): Promise<void> {
     "#320 Renumber menu and Renumber selection: an \"Apply current type codes\" checkbox (off by default) passes recode through");
   ok(!table.includes("#fdf4e3") && table.includes("color-mix(in srgb, ${DESIGNATOR_DUPLICATE_COLOR} 12%, transparent)") && table.includes("background: DESIGNATOR_DUPLICATE_TINT"),
     "#320 Devices tab: a duplicate's tint is derived from DESIGNATOR_DUPLICATE_COLOR, not hard-coded");
+  const inlineInput = table.slice(table.indexOf("<input\n                          autoFocus"), table.indexOf("value={cell.draft}"));
+  ok(inlineInput.includes("autoFocus") && inlineInput.includes("onFocus={(e) => e.currentTarget.select()}") && propSrc.includes('aria-label="Designator"\n            onFocus={(e) => e.currentTarget.select()}'),
+    "#320 Devices tab: the inline cell input (and the Property Editor designator input) select their text on focus, so typing replaces it");
+  const tb = rd("src/app/(app)/design/grid/[id]/workspace/toolbar.tsx");
+  const stepFn = tb.slice(tb.indexOf("const stepBlocked"), tb.indexOf("const undoBlocked"));
+  const hook = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const keyBlock = hook.slice(hook.indexOf("if (isUndo || isRedo) {"), hook.indexOf("// ⌘C/⌘X/⌘V/⌘D"));
+  ok(stepFn.includes("nothing to ${what}") && !stepFn.includes('"sheet"') && !keyBlock.includes('view !== "plan"') && tb.includes('view === "sheet" ? "switch to Plan view" : !clipboard'),
+    "#320 Undo/Redo work in Spreadsheet view (toolbar and ⌘Z are not blocked by view === \"sheet\"); paste stays plan-only");
 }
 
 /* ---------------- #320: designators on schedules and the drawing set ---------------- */

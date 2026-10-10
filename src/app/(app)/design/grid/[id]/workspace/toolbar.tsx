@@ -186,7 +186,7 @@ export default function Toolbar({ ed }: { ed: GridEditor }) {
           : null;
   /** Why Undo / Redo is off (tooltip suffix), or null when it works. */
   const stepBlocked = (has: boolean, what: string): string | null =>
-    view === "sheet" ? "switch to Plan view" : !has ? `nothing to ${what}` : busy ? "saving…" : null;
+    !has ? `nothing to ${what}` : busy ? "saving…" : null;
   const undoBlocked = stepBlocked(canUndo, "undo");
   const redoBlocked = stepBlocked(canRedo, "redo");
   const pasteBlocked: string | null =

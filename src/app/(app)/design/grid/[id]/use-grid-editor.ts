@@ -2713,7 +2713,9 @@ function useGridEditorImpl(props: GridEditorProps) {
         const isUndo = k === "z" && !e.shiftKey;
         const isRedo = (k === "z" && e.shiftKey) || (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey);
         if (isUndo || isRedo) {
-          if (view !== "plan") return;
+          // #320: Undo/Redo work in Spreadsheet view too — the Devices tab is
+          // where designators and categories are edited. (Every step is an
+          // id-keyed server action; none needs the canvas.)
           // A pending (unwritten) nudge is something to undo too.
           if (isUndo ? !undoRef.current.past.length && !pendingNudge.current?.length : !undoRef.current.future.length) return;
           e.preventDefault();
