@@ -29,6 +29,7 @@ import type { BookingCheckInput } from "@/lib/visit-plan/types";
 import { cleanBookingInput } from "@/lib/visit-plan/input";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { pickDayTimes } from "@/lib/visit-plan/pick-day";
+import { agendaConflicts } from "@/lib/visit-plan/agenda";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { blobs } from "@/db/schema";
@@ -967,4 +968,37 @@ export async function siteVisitsEditPins(ok: Ok): Promise<void> {
   ok(/calendarNote\(o\.person, "failed"\)/.test(strip), "site-visits booking: an attendee whose calendar failed reads \"Couldn't check <Name>'s calendar\"");
   ok(read("src/components/visit-booking/conflicts-panel.tsx").includes('aria-live="polite"') && strip.includes('aria-live="polite"'),
     "site-visits booking: the conflicts and nearby results are live regions");
+}
+
+export async function siteVisitsAgendaChecks(ok: Ok): Promise<void> {
+  const r60: Array<[LatLng, LatLng, number]> = [[BASE, P1, 60], [P1, BASE, 60]];
+  const C = vStop("sv:SV-C", at(10), at(11), okAddr(P1, "c"));
+  const Q = vStop("sv:SV-Q", at(14), at(15), okAddr(P1, "q"));
+  const plan = dayPlan([C, Q], [...r60, [P1, P1, 0]]);
+  const visits = [
+    sv("SV-C", { startAt: at(10), endAt: at(11), invites: [rcpt("Dana", { channel: "calendar", eventId: "g-copy" })] }),
+    sv("SV-Q", { startAt: at(14), endAt: at(15) }),
+  ];
+  const events = [
+    gEvent("board", at(10, 30), at(11, 30), { title: "Board meeting" }),
+    gEvent("g-copy", at(10), at(11)),
+    gEvent("ics", at(10), at(11), { iCalUID: "sv-SV-C@peak-app" }),
+  ];
+  const m = agendaConflicts({ me: "Dana", plans: [{ dayKey: DAY, ...plan }], visits, events, hours: DEFAULT_WORK_HOURS, dailyDriveLimitMin: 300 });
+  ok(m.get("v-SV-C")?.[0]?.text === "Double-booked — overlaps Board meeting (10:30–11:30)" && m.has("g-g-copy") && m.has("g-ics"),
+    "site-visits agenda: a conflicting visit is badged on its own row and on every calendar copy of it");
+  ok(!m.has("v-SV-Q") && !m.has("g-board"), "site-visits agenda: a visit without conflicts, and ordinary events, get no badge");
+  ok(agendaConflicts({ me: "Dana", plans: [{ dayKey: DAY, ...plan }], visits, events: null, hours: DEFAULT_WORK_HOURS, dailyDriveLimitMin: 300 }).size === 0,
+    "site-visits agenda: with no calendar, only visits can conflict");
+
+  const read = (p: string) => readFileSync(p, "utf8");
+  const agenda = read("src/lib/agenda.ts");
+  ok(/if \(!visitPeople\(v\)\.includes\(me\)\) continue;/.test(agenda) && !agenda.includes("v.assignedTo !== me"),
+    "site-visits agenda: a visit shows on its lead's and every attendee's agenda");
+  ok(/visitEventIds\(v\)\.some\(\(id\) => fetchedIds\.has\(id\)\)/.test(agenda), "site-visits agenda: a visit already on my Google calendar (any copy) isn't shown twice");
+  ok(/agendaConflicts\(/.test(agenda) && /it\.conflicts = /.test(agenda) && (agenda.match(/await allVisits\(\)/g) ?? []).length === 1,
+    "site-visits agenda: badges come from the same plans and the one site_visits read");
+  ok(/plans\b/.test(read("src/lib/drive-sync/agenda.ts").split("return {").pop() ?? ""), "site-visits agenda: the drive layer hands its plans back");
+  ok(read("src/app/(app)/calendar/calendar-client.tsx").includes("<ConflictBadge") && read("src/app/(app)/home-calendar.tsx").includes("<ConflictBadge"),
+    "site-visits agenda: /calendar and the Home agenda show the badge");
 }

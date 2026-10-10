@@ -7,7 +7,7 @@
 import type { FixTarget } from "@/lib/address-verify/types";
 import type { AgendaItem } from "@/lib/agenda";
 import { dayKeysBetween } from "@/lib/drive-plan/day";
-import { planDriveDays, type DriveLoadDeps } from "@/lib/drive-plan/load";
+import { planDriveDays, type DriveDayPlan, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import { FLAG_TEXT, type DriveLeg } from "@/lib/drive-plan/plan";
 import type { CalendarEvent } from "@/lib/google/calendar";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
@@ -47,7 +47,7 @@ export async function driveAgendaLayer(args: {
   maxMs: number;
   googleEvents: CalendarEvent[] | null;
   deps?: Partial<DriveLoadDeps>;
-}): Promise<{ items: AgendaItem[]; addressFlags: Map<string, AddressFlag> }> {
+}): Promise<{ items: AgendaItem[]; addressFlags: Map<string, AddressFlag>; plans: DriveDayPlan[] }> {
   // One site_visits read for the planner AND the event-id lookup below.
   const readVisits = args.deps?.visits ?? allVisits;
   let visitsOnce: Promise<SiteVisit[]> | null = null;
@@ -82,5 +82,5 @@ export async function driveAgendaLayer(args: {
       }
     }
   }
-  return { items, addressFlags };
+  return { items, addressFlags, plans };
 }
