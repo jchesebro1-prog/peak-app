@@ -62548,7 +62548,7 @@ async function conduitRiser321B3Checks(): Promise<void> {
 
   // actions + UI pins
   const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
-  for (const [fn, call] of [["saveLevelsAction", "setLevels(projectId, levels)"], ["setSpaceLevelAction", "setSpaceLevel(projectId, spaceId, levelId)"], ["setSheetLevelAction", "setSheetLevel(projectId, sheetId, levelId)"]]) {
+  for (const [fn, call] of [["saveLevelsAction", "setLevelsLanded(projectId, levels)"], ["setSpaceLevelAction", "setSpaceLevel(projectId, spaceId, levelId)"], ["setSheetLevelAction", "setSheetLevel(projectId, sheetId, levelId)"]]) {
     const body = acts.slice(acts.indexOf(`export async function ${fn}(`), acts.indexOf("export async function", acts.indexOf(`export async function ${fn}(`) + 10));
     ok(body.includes("await requireUser();") && body.includes(call) && body.includes("revalidatePath(editorPath(projectId));") && body.includes("revalidatePath(riserPath(projectId));"), `#321 ${fn}: authed, writes through the store, revalidates the editor and the riser page`);
   }
@@ -64054,6 +64054,9 @@ async function riserPolish2Checks(): Promise<void> {
   ok(pa.includes("await requireUser()") && pa.includes("estimateOwnedOp(op, ") && pa.includes("?.estimateOwned === true") && /if \(!kept\) return \{ ok: true \};/.test(pa) &&
      pa.indexOf("estimateOwnedOp(") < pa.indexOf("patchConduitRiser(projectId, optionId, op)"),
     "#321 polish estimate-owned: patchConduitRiserAction strips pricing before the store write; nothing left = ok, no write");
+  ok(/if \(\(op\.op === "updateRun" \|\| op\.op === "setDefaults"\) && \(op\.priceWire !== undefined \|\| op\.priceConduit !== undefined\)\) \{/.test(pa) &&
+     pa.indexOf("getProject(projectId)") > pa.indexOf("op.priceConduit !== undefined"),
+    "#321 polish fix 1: the extra project read happens only for an op that carries a pricing field");
 
   // ---- 3. keyboard: hit targets are buttons with names
   ok(R.tagHitLabel("CRO-04") === "Tag CRO-04" && R.stubHitLabel("TO FACP") === "Stub TO FACP" && R.levelHitLabel("Catwalk") === "Level Catwalk" &&
@@ -64064,8 +64067,11 @@ async function riserPolish2Checks(): Promise<void> {
      ed.includes("aria-label={levelHitLabel(") && ed.includes("aria-label={runName(") && ed.includes("runHitLabel(") && ed.includes("tagHitLabel(") && ed.includes("stubHitLabel(") &&
      ed.includes("if (!isPressKey(e.key)) return;") && (ed.match(/onKeyDown(=\{|: )onPress\(/g) || []).length === 3,
     "#321 polish keyboard: level, run and tag/stub hit targets take focus, are named buttons and press on Enter/Space");
-  ok(/if \(e\.key !== "Escape"\) return;/.test(ed) && ed.includes("onKeyDown={onCanvasKey}") && /function cancelAll\(\)/.test(ed) && /setFirst\(null\);\s*setSel\(null\);/.test(ed.slice(ed.indexOf("function cancelAll()"))),
-    "#321 polish keyboard: Escape clears the selection and a half-picked Connect end");
+  const esc = ed.slice(ed.indexOf("const onKey = (e: KeyboardEvent) => {"), ed.indexOf("const onKey = (e: KeyboardEvent) => {") + 500);
+  ok(/function cancelAll\(\)/.test(ed) && /setFirst\(null\);\s*setSel\(null\);/.test(ed.slice(ed.indexOf("function cancelAll()"))) &&
+     esc.includes('if (e.key !== "Escape" || e.defaultPrevented) return;') && esc.includes("rootRef.current?.contains(t)") && esc.includes('closest("input, select, textarea, [contenteditable=\'true\']")') &&
+     esc.includes("escapeRef.current();") && ed.includes('window.addEventListener("keydown", onKey);') && ed.includes('<div className="cr-editor-root" ref={rootRef}>') && !ed.includes("onCanvasKey"),
+    "#321 polish keyboard (fix 1): Escape from anywhere in the editor (canvas or panels) clears the selection and a half-picked Connect end — never from a form field");
   ok(/else if \(tool === "connect"\) setFirst\(null\)/.test(ed), "#321 polish keyboard: in Connect mode a click on empty canvas cancels the half-picked first end");
 
   // ---- 4. busy everywhere; one run helper
@@ -64074,17 +64080,26 @@ async function riserPolish2Checks(): Promise<void> {
   const must = ed.slice(ed.indexOf("async function mustOk("), ed.indexOf("async function mustOk(") + 400);
   ok(must.includes("run(") && must.includes("rethrow: true"), "#321 polish busy: mustOk (Reset layout, Remove run/stub, Delete detail, note delete) is busy while in flight");
   ok(/if \(phone \|\| waiting \|\| tool !== "select"\) return;/.test(ed), "#321 polish busy: a drag can't start while a write is in flight");
-  ok(page.includes("version={project.updatedAt}") && ed.includes("historyFor(history, doc, version)") && ed.includes("const version = props.version || 0;") && ed.includes("landHistory("),
+  ok(page.includes("version={project.updatedAt}") && ed.includes("historyFor(history, doc, version)") && ed.includes("const version = Math.max(props.version || 0, landedAt);") && ed.includes("landHistory("),
     "#321 polish undo: the page passes the project's updatedAt; the editor checks and carries the stack by it");
 
   // ---- 5. phone = fully read-only
-  const phoneOnly = (needle: string) => {
-    const i = ed.indexOf(needle);
-    return i > 0 && /\{!phone &&\s/.test(ed.slice(Math.max(0, i - 500), i));
-  };
+  // Every `{!phone && …}` block, brace-balanced — a needle is phone-hidden when it sits inside one.
+  const phoneBlocks: string[] = [];
+  for (let i = ed.indexOf("{!phone &&"); i >= 0; i = ed.indexOf("{!phone &&", i + 1)) {
+    let depth = 0, j = i;
+    for (; j < ed.length; j++) {
+      if (ed[j] === "{") depth++;
+      else if (ed[j] === "}" && --depth === 0) break;
+    }
+    phoneBlocks.push(ed.slice(i, j + 1));
+  }
+  const phoneOnly = (needle: string) => ed.includes(needle) && phoneBlocks.some((b) => b.includes(needle)) && ed.split(needle).length === 2;
   ok(ed.includes('const PHONE_QUERY = "(max-width: 640px)"') && /const tool: Tool = phone \? "select" : toolPick;/.test(ed),
     "#321 polish phone: the drag breakpoint is the read-only breakpoint; a phone is always in Select");
-  ok(phoneOnly("TOOLS.map((t)") && phoneOnly('label="Reset layout"') && phoneOnly("onClick={undo}"), "#321 polish phone: Connect, + Stub, Reset layout, Undo / Redo hidden");
+  ok(phoneOnly("TOOLS.map((t)") && phoneOnly('label="Reset layout"') && phoneOnly("onClick={undo}") && phoneOnly("onClick={redo}") && phoneOnly("<NewStubPanel") && phoneOnly("<PairPanel") &&
+     !phoneBlocks.some((b) => b.includes('aria-label="Zoom in"') || b.includes("Re-layout")),
+    "#321 polish phone: Connect, + Stub, Reset layout, Undo / Redo, New stub and Connect panels sit inside {!phone && …}; zoom and Re-layout don't");
   ok(ed.includes("readOnly={phone}") && /readOnly \? null : \(/.test(pan.slice(pan.indexOf("export function SuggestionsPanel("), pan.indexOf("/* ------------------------------ details"))) &&
      /readOnly = false,/.test(pan) && (pan.match(/readOnly \? null : \(/g) || []).length === 2,
     "#321 polish phone: Accept / Accept all / Dismiss hidden; the panels take readOnly");
@@ -64164,4 +64179,41 @@ async function riserPolish2Checks(): Promise<void> {
   ok(up.ok && !!up.landed && up.landed.before === vBefore && up.landed.after === (await live()).updatedAt, "#321 polish store: a riser edit reports the version it landed on");
   ok(acts.includes("return { ok: true, landed: r.landed }") && acts.includes("return { ok: true, accepted: r.accepted, landed: r.landed }"),
     "#321 polish actions: the patch and accept actions hand the landed version back to the editor");
+
+  // ---- fix round 1: the editor's own non-layout writes keep the layout-undo stack
+  const tick = () => new Promise((res) => setTimeout(res, 3));
+  const carries = (l: { before: number; after: number } | undefined) => {
+    if (!l) return false;
+    const h = { expect: "fp", version: l.before, undo: [], redo: [] };
+    const n = E.landHistory(h, l);
+    return !!n && n.version === l.after;
+  };
+  await tick();
+  const vt = (await live()).updatedAt;
+  const tagged = await G.setPlacementsTag(gp.id, [{ id: a.id, patch: { box: "4S" } }]);
+  ok(tagged.ok && !!tagged.landed && tagged.landed.before === vt && tagged.landed.after === (await live()).updatedAt && tagged.landed.before !== tagged.landed.after && carries(tagged.landed),
+    "#321 polish fix 1: a tag save reports {before, after} (after ≠ before) and landHistory carries the stack across it");
+  await tick();
+  const vl = (await live()).updatedAt;
+  const lv = await G.setLevelsLanded(gp.id, [{ label: "Stage" }, { label: "Catwalk" }]);
+  ok(!!lv && lv.landed.before === vl && lv.landed.after === lv.project.updatedAt && lv.landed.after === (await live()).updatedAt && lv.landed.before !== lv.landed.after && carries(lv.landed) &&
+     lv.project.levels!.length === 2,
+    "#321 polish fix 1: a levels save reports {before, after} (after ≠ before) and landHistory carries the stack across it");
+  const c = await place(0.7, 0.1);
+  await G.addRouteWithId(gp.id, { sheetId: sh.id, page: 1, partId: "T321-P2-CABLE", points: [{ x: a.x, y: a.y }, { x: c.x, y: c.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: c.id });
+  await tick();
+  const vd = (await live()).updatedAt;
+  const dis = await CR.dismissSuggestion(gp.id, opt, M.pairKey(a.id, c.id));
+  ok(dis.ok && dis.landed.before === vd && dis.landed.after === (await live()).updatedAt && dis.landed.before !== dis.landed.after && carries(dis.landed),
+    "#321 polish fix 1: a dismiss reports {before, after} (after ≠ before) and landHistory carries the stack across it");
+  const gacts = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+  const tagAct = gacts.slice(gacts.indexOf("export async function setTagFieldsAction("), gacts.indexOf("function cleanRenumberTarget("));
+  const lvAct = gacts.slice(gacts.indexOf("export async function saveLevelsAction("), gacts.indexOf("export async function setSpaceLevelAction("));
+  const disAct = acts.slice(acts.indexOf("export async function dismissSuggestionAction("), acts.indexOf("export async function riserPromptForRouteAction("));
+  ok(tagAct.includes("return { ok: true, previous: r.value.previous, landed: r.landed };") && lvAct.includes("const r = await setLevelsLanded(projectId, levels);") &&
+     lvAct.includes("return { ok: true, landed: r.landed };") && disAct.includes("return { ok: true, landed: r.ok ? r.landed : undefined };") &&
+     ed.includes("return r.ok ? { ok: true as const, landed: r.landed } : r;") && ed.includes("run(() => saveLevelsAction(projectId, rows))") && ed.includes("run(() => dismissSuggestionAction(projectId, optionId, key))"),
+    "#321 polish fix 1: setTagFieldsAction, saveLevelsAction and dismissSuggestionAction hand landed back; the editor's run carries it");
+  ok(/const \[landedAt, setLandedAt\] = useState\(0\);/.test(ed) && ed.includes("noteLanded(r.landed);") && ed.includes("setLandedAt((v) => Math.max(v, landed.after))"),
+    "#321 polish fix 1: the newest landed version counts before the refresh brings it, so an edit made in between isn't dropped");
 }

@@ -47,9 +47,10 @@ export async function patchConduitRiserAction(projectId: string, optionId: strin
   await requireUser();
   if (!isStr(projectId) || !isStr(optionId)) return fail("invalid");
   if (!op || typeof op !== "object" || !(CR_OP_NAMES as readonly string[]).includes(op.op)) return { ok: false, error: "Unknown riser edit." };
-  if (op.op === "updateRun" || op.op === "setDefaults") {
+  if ((op.op === "updateRun" || op.op === "setDefaults") && (op.priceWire !== undefined || op.priceConduit !== undefined)) {
     // An estimate-owned option never prices on the riser (#314) — refuse the
     // pricing fields here, whatever the page sent; nothing left = no write.
+    // Only an op that carries a pricing field costs this extra read.
     const project = await getProject(projectId);
     if (!project) return fail("not-found");
     const kept = estimateOwnedOp(op, (project.options || []).find((o) => o.id === optionId)?.estimateOwned === true);
@@ -87,7 +88,7 @@ export async function dismissSuggestionAction(projectId: string, optionId: strin
   const r = await dismissSuggestion(projectId, optionId, key);
   if (!r.ok && r.reason !== "invalid") return fail(r.reason);
   revalidateConduit(projectId);
-  return { ok: true };
+  return { ok: true, landed: r.ok ? r.landed : undefined };
 }
 
 /**

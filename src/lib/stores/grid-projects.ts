@@ -49,6 +49,7 @@ import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import type { Landed } from "@/lib/design/conduit-riser/edit";
 import { conduitRemovedBetween, pruneConduitRisersIn, restoreConduitItems, type ConduitRemoved } from "@/lib/design/conduit-riser/live";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
@@ -1228,7 +1229,8 @@ export type RemovedBundle = {
   /** #321: conduit runs, pinned tags and dismissals the delete took, per option. Absent = none. */
   conduit?: ConduitRemoved;
 };
-export type BatchResult<T> = { ok: true; project: GridProject; value: T } | { ok: false; error: string };
+/** `landed` (batchEdit's writes): the project's `updatedAt` before and after — the conduit riser editor's undo stack follows it. */
+export type BatchResult<T> = { ok: true; project: GridProject; value: T; landed?: Landed } | { ok: false; error: string };
 
 export const MAX_BATCH = 2000;
 const BATCH_NOTHING = "Nothing selected.";
@@ -1271,7 +1273,9 @@ async function batchEdit<T>(
   // `as`: assigned inside the patchDoc callback, which TS's narrowing can't see.
   let refusal = null as string | null;
   let value: T | undefined;
+  let was = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    was = p.updatedAt || 0;
     refusal = refusalFor(p.placements || []);
     if (refusal) return;
     value = apply(p, ids);
@@ -1279,7 +1283,7 @@ async function batchEdit<T>(
   });
   if (!updated) return { ok: false, error: "Design not found." };
   if (refusal) return { ok: false, error: refusal };
-  return { ok: true, project: updated, value: value as T };
+  return { ok: true, project: updated, value: value as T, landed: { before: was, after: updated.updatedAt || 0 } };
 }
 
 /** Last entry wins when an id repeats. */
@@ -2015,8 +2019,15 @@ export async function renameSpace(
 
 /** Replace the riser level list (#321). A level that's gone is cleared off every space and sheet that named it. */
 export async function setLevels(projectId: string, raw: unknown): Promise<GridProject | null> {
+  return (await setLevelsLanded(projectId, raw))?.project ?? null;
+}
+
+/** setLevels, also reporting the project's `updatedAt` before and after (the riser editor's undo stack follows it). */
+export async function setLevelsLanded(projectId: string, raw: unknown): Promise<{ project: GridProject; landed: Landed } | null> {
   const levels = cleanLevels(raw);
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+  let was = 0;
+  const project = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    was = p.updatedAt || 0;
     const keep = new Set(levels.map((l) => l.id));
     p.levels = levels;
     p.spaces = (p.spaces || []).map((s) => {
@@ -2034,6 +2045,7 @@ export async function setLevels(projectId: string, raw: unknown): Promise<GridPr
     pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
+  return project ? { project, landed: { before: was, after: project.updatedAt || 0 } } : null;
 }
 
 /** Set (or, with null, clear) the level a space sits on (#321). Null when the design is gone, the space isn't on it, or the level isn't on its list. */

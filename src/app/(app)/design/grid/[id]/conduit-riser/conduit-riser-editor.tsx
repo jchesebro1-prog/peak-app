@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { ConduitRiserFigure, CR_UNITS } from "@/components/drawing/conduit-riser-figure";
@@ -152,7 +152,11 @@ export default function ConduitRiserEditor(props: {
   const [toolPick, setTool] = useState<Tool>("select");
   // A phone is read-only: always Select (view), whatever was picked before the window narrowed.
   const tool: Tool = phone ? "select" : toolPick;
-  const version = props.version || 0;
+  // The newest version this editor's own writes landed on: until the refresh
+  // brings it in as props.version, an edit made in between is still made
+  // against the version the server actually has.
+  const [landedAt, setLandedAt] = useState(0);
+  const version = Math.max(props.version || 0, landedAt);
   const [sel, setSel] = useState<Sel>(null);
   const [first, setFirst] = useState<{ end: RunEnd; label: string; key: string } | null>(null);
   const [dragOp, setDragOp] = useState<LayoutOp | null>(null);
@@ -185,6 +189,9 @@ export default function ConduitRiserEditor(props: {
 
   /** Carry the undo stack across one of this editor's own writes (none reported: the next render decides). */
   const carryHistory = (landed: Landed | undefined) => setHistory((h) => landHistory(h, landed));
+  const noteLanded = (landed: Landed | undefined) => {
+    if (landed) setLandedAt((v) => Math.max(v, landed.after));
+  };
 
   /**
    * Every write goes through here: `busy` while it's in flight (drags and
@@ -204,6 +211,7 @@ export default function ConduitRiserEditor(props: {
         if (r.refresh) router.refresh();
       } else {
         (opts.land ?? carryHistory)(r.landed);
+        noteLanded(r.landed);
         if (r.notice) setNotice(r.notice);
         router.refresh();
         return true;
@@ -259,12 +267,25 @@ export default function ConduitRiserEditor(props: {
     if (toolPick === "stub") setTool("select");
   }
 
-  function onCanvasKey(e: ReactKeyboardEvent<HTMLDivElement>) {
-    if (e.key !== "Escape") return;
-    const t = e.target as HTMLElement;
-    if (t.closest("input, select, textarea")) return;
-    cancelAll();
-  }
+  // Escape from anywhere in the editor (canvas or panels) — never from a
+  // form field, where the typing isn't saved yet: leave the field first.
+  // The listener reads the latest render through a ref.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const escapeRef = useRef(cancelAll);
+  useEffect(() => {
+    escapeRef.current = cancelAll;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target instanceof Element ? e.target : null;
+      const inEditor = !t || t === document.body || !!rootRef.current?.contains(t);
+      if (!inEditor || t?.closest("input, select, textarea, [contenteditable='true']")) return;
+      escapeRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function choose(t: Tool) {
     setTool(t);
@@ -437,7 +458,7 @@ export default function ConduitRiserEditor(props: {
   const saveTag = (id: string, tagPatch: TagPatch) =>
     run(async () => {
       const r = await setTagFieldsAction(projectId, [{ id, patch: tagPatch }]);
-      return r.ok ? { ok: true as const } : r;
+      return r.ok ? { ok: true as const, landed: r.landed } : r;
     });
 
   function saveRun(id: string, v: RunSave) {
@@ -465,7 +486,7 @@ export default function ConduitRiserEditor(props: {
   };
 
   return (
-    <div className="cr-editor-root">
+    <div className="cr-editor-root" ref={rootRef}>
       <style>{`
         .cr-editor { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 16px; align-items: start; }
         @media (max-width: 980px) { .cr-editor { grid-template-columns: minmax(0, 1fr); } }
@@ -541,7 +562,7 @@ export default function ConduitRiserEditor(props: {
       )}
 
       <div className="cr-editor">
-        <div className="pk-card" style={{ padding: 8, overflow: "auto", maxHeight: "78vh", minHeight: 240 }} onKeyDown={onCanvasKey}>
+        <div className="pk-card" style={{ padding: 8, overflow: "auto", maxHeight: "78vh", minHeight: 240 }}>
           {view.tags.length === 0 && view.stubs.length === 0 && (
             <div style={{ fontSize: 13, color: "#8c919c", padding: "8px 6px" }}>
               Nothing on this detail yet. Accept a run under From the plan, or place lighting control devices on the plan and wire them.

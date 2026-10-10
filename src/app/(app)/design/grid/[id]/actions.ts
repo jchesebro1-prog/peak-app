@@ -42,7 +42,7 @@ import {
   renameOption,
   renameProject,
   renameSpace,
-  setLevels,
+  setLevelsLanded,
   setSpaceLevel,
   setSheetLevel,
   restoreRevision,
@@ -143,6 +143,7 @@ import { create as createQuote, get as getQuote, update as updateQuote } from "@
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import type { AState } from "@/app/(app)/design/quick/engine";
+import type { Landed } from "@/lib/design/conduit-riser/edit";
 
 /** The Grid editor server actions (D108). */
 
@@ -1066,14 +1067,14 @@ export async function setDesignatorsAction(
 export async function setTagFieldsAction(
   projectId: string,
   items: { id: string; patch: TagPatch }[]
-): Promise<{ ok: true; previous: { id: string; patch: TagPatch }[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; previous: { id: string; patch: TagPatch }[]; landed?: Landed } | { ok: false; error: string }> {
   await requireUser();
   if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && isTagPatch(it.patch)))
     return { ok: false, error: BATCH_INVALID };
   const r = await setPlacementsTag(projectId, items.map((it) => ({ id: it.id, patch: it.patch })));
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
-  return { ok: true, previous: r.value.previous };
+  return { ok: true, previous: r.value.previous, landed: r.landed };
 }
 
 function cleanRenumberTarget(raw: unknown): RenumberTarget | null {
@@ -1177,13 +1178,14 @@ export async function renameSpaceAction(
 const riserPath = (projectId: string) => `/design/grid/${projectId}/conduit-riser`;
 
 /** Replace the riser level list; a removed level is cleared off spaces and sheets. */
-export async function saveLevelsAction(projectId: string, levels: unknown): Promise<Result> {
+/** `landed` = the version the write landed on, for the riser editor's layout-undo stack. */
+export async function saveLevelsAction(projectId: string, levels: unknown): Promise<{ ok: true; landed: Landed } | { ok: false; error: string }> {
   await requireUser();
-  const p = await setLevels(projectId, levels);
-  if (!p) return { ok: false, error: "Design not found." };
+  const r = await setLevelsLanded(projectId, levels);
+  if (!r) return { ok: false, error: "Design not found." };
   revalidatePath(editorPath(projectId));
   revalidatePath(riserPath(projectId));
-  return { ok: true };
+  return { ok: true, landed: r.landed };
 }
 
 export async function setSpaceLevelAction(projectId: string, spaceId: string, levelId: string | null): Promise<Result> {
