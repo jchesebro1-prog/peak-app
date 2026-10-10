@@ -4,20 +4,22 @@ export const DRIVE_TZ = "America/Chicago";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 export function isDayKey(v: unknown): v is string {
-  return typeof v === "string" && DAY_RE.test(v);
+  return typeof v === "string" && DAY_RE.test(v) && addDays(v, 0) === v; // round-trip rejects 2026-02-31 etc.
 }
 
+const WALL_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: DRIVE_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 function wallParts(ms: number): Record<string, string> {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: DRIVE_TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(ms);
+  const parts = WALL_FMT.formatToParts(ms);
   return Object.fromEntries(parts.map((p) => [p.type, p.value]));
 }
 

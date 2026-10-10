@@ -16,7 +16,6 @@ import { addDays, chicagoDayKey, chicagoDayStart, dayKeysBetween, isDayKey } fro
 import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop, type StopSourceEvent, type StopSourceVisit } from "@/lib/drive-plan/stops";
 import { dayDriveTotal, fmtDur, neededRoutes, pairKey, planDay, type PlanDayInput } from "@/lib/drive-plan/plan";
 import type { AddressState } from "@/lib/address-verify/types";
-
 import { addressKey, isPhysicalLocation } from "@/lib/address-verify/keys";
 import {
   backfillStatus,
@@ -564,6 +563,8 @@ export async function driveTimePlanChecks(ok: Ok): Promise<void> {
   ok(addDays("2026-10-31", 1) === "2026-11-01" && addDays("2026-01-01", -1) === "2025-12-31", "drive-time day: addDays crosses months and years");
   ok(dayKeysBetween(at(9), at(9) + 2 * 86_400_000).join(",") === "2026-10-14,2026-10-15,2026-10-16", "drive-time day: dayKeysBetween is inclusive");
   ok(isDayKey("2026-10-14") && !isDayKey("2026-1-4") && !isDayKey(20261014) && !isDayKey(null), "drive-time day: isDayKey accepts only YYYY-MM-DD strings");
+  ok(!isDayKey("2026-02-31") && !isDayKey("2026-13-45") && !isDayKey("2026-02-29") && !isDayKey("2026-00-10") && isDayKey("2028-02-29") && isDayKey("2026-12-31"),
+    "drive-time day: isDayKey rejects impossible calendar dates");
   // DST days: the fall-back day is 25h, the spring-forward day 23h, and neither is skipped or doubled.
   ok(chicagoDayStart("2026-11-02") - chicagoDayStart("2026-11-01") === 25 * 3_600_000 &&
      chicagoDayStart("2026-03-09") - chicagoDayStart("2026-03-08") === 23 * 3_600_000 &&
@@ -634,17 +635,44 @@ export async function driveTimePlanChecks(ok: Ok): Promise<void> {
   ok(ub[1].flag?.text === "Address not verified — no drive time" && ub[2].flag?.kind === "unverified" && ub[1].minutes === null &&
      ub[1].fix?.kind === "place" && ub[0].flag === null && ub[3].flag === null,
     "drive-time planDay: an unverified stop flags the legs into and out of it, with its Fix target");
+  ok(ub[2].fix?.kind === "place" && ub[2].fix.key === "bad", "drive-time planDay: the leg out of an unverified stop carries that stop's Fix target");
+  const sNoFix = stop("g:nofix", at(12, 30), at(12, 45), { status: "unresolved", label: "x", point: null, pointKey: null, fix: null });
+  const ub2 = planDay(input({ stops: [sBad, sNoFix], routeMinutes: full }));
+  ok(ub2[1].flag?.kind === "unverified" && ub2[1].fix?.kind === "place" && ub2[1].fix.key === "bad",
+    "drive-time planDay: an unverified end with no Fix target falls back to the other end's");
+  ok(dayDriveTotal(ub) === 75 + 85, "drive-time dayDriveTotal: flagged legs count 0, only the legs with minutes add up");
 
   // Route unavailable
   const ru = planDay(input({ stops: [sA, sB], routeMinutes: routes([BASE, P1, 60]) }));
   ok(ru[1].flag?.text === "Drive time unavailable — retrying" && ru[1].startMs === null, "drive-time planDay: a missing OSRM route is flagged, never estimated");
   ok(neededRoutes(input({ stops: [sA, sB] })).length === 3, "drive-time neededRoutes: every verified pair is requested once");
+  const sA3 = stop("sv:A3", at(15), at(16), okAddr(P1.lat, P1.lng, "A3"));
+  const sB3 = stop("sv:B3", at(17), at(18), okAddr(P2.lat, P2.lng, "B3"));
+  ok(neededRoutes(input({ stops: [sA, sB, sA3, sB3] })).length === 4, "drive-time neededRoutes: a pair that repeats during the day is returned once (legs: 5, pairs: 4)");
+  ok(neededRoutes(input({ stops: [sA, sBad, sB] })).length === 2, "drive-time neededRoutes: a leg with an unverified end is excluded");
 
   // Tight
   const sC = stop("sv:C", at(10, 30), at(11), okAddr(P2.lat, P2.lng, "C"));
   const tight = planDay(input({ stops: [sA, sC], routeMinutes: routes([BASE, P1, 60], [P1, P2, 85], [P2, BASE, 70]) }));
   ok(tight[1].tight?.text === "Tight — needs 1h 40m, has 30m" && tight[1].endMs === at(10, 30),
     "drive-time planDay: a drive-to that would start before the previous stop ends is flagged Tight; nothing moves");
+
+  // Tight boundary: exactly enough time is not tight; one minute short is; roomy has no tight at all.
+  const gap = (startB: number) => planDay(input({ stops: [sA, stop("sv:G", startB, startB + 3_600_000, okAddr(P2.lat, P2.lng, "G"))], routeMinutes: full }))[1];
+  ok(gap(at(10, 55)).tight === null && gap(at(12)).tight === null, "drive-time planDay: a gap exactly equal to the drive (route + buffer) is not tight, and a roomy one has tight === null");
+  ok(gap(at(10, 54)).tight?.text === "Tight — needs 55m, has 54m", "drive-time planDay: one minute short of the needed time is Tight");
+
+  // Overlapping stops: the drive back starts after the LATEST end, and Tight compares against the latest earlier end.
+  const conf = stop("g:conf", at(9), at(17), okAddr(P1.lat, P1.lng, "conf"));
+  const vis = stop("sv:V", at(10), at(11), okAddr(P2.lat, P2.lng, "V"));
+  const ov = planDay(input({ stops: [vis, conf], routeMinutes: full }));
+  ok(ov.length === 3 && ov[1].to.key === "sv:V" && ov[2].direction === "back" && ov[2].startMs === at(17) && ov[2].endMs === at(17) + 85 * 60_000,
+    "drive-time planDay: with an 8h conference overlapping a visit, the drive back starts at 17:00 (the latest end)");
+  const third = stop("sv:T", at(17, 30), at(18, 30), okAddr(P1.lat, P1.lng, "T"));
+  const ov3 = planDay(input({ stops: [conf, vis, third], routeMinutes: routes([BASE, P1, 60], [P1, P2, 40], [P2, P1, 45], [P1, BASE, 60]) }));
+  ok(ov3[2].to.key === "sv:T" && ov3[2].from.key === "sv:V" && ov3[2].tight?.text === "Tight — needs 1h 00m, has 30m",
+    "drive-time planDay: a 17:30 stop needing 60 min is Tight against the 17:00 conference end, though the visit before it ended at 11:00");
+  ok(ov3[3].direction === "back" && ov3[3].startMs === at(18, 30), "drive-time planDay: …and the drive back follows the latest end (18:30)");
 
   // Same location back-to-back → no leg
   const sA2 = stop("sv:A2", at(10, 15), at(11), okAddr(P1.lat, P1.lng, "A2"));
@@ -658,5 +686,8 @@ export async function driveTimePlanChecks(ok: Ok): Promise<void> {
     "drive-time planDay: the day after a stay-over starts from that day's last stop");
   const nextBad = planDay(input({ dayKey: addDays(DAY, 1), stops: [sA], routeMinutes: full, prevDay: { stayOver: true, lastStop: sBad } }));
   ok(nextBad[0].flag?.kind === "unverified", "drive-time planDay: …and is flagged when that stop isn't verified");
+  const nextNoBase = planDay(input({ dayKey: addDays(DAY, 1), base: null, stayOver: true, stops: [stop("sv:D", at(9) + 86_400_000, at(10) + 86_400_000, okAddr(P1.lat, P1.lng, "D"))], routeMinutes: routes([P2, P1, 40]), prevDay: { stayOver: true, lastStop: sB } }));
+  ok(nextNoBase.length === 1 && nextNoBase[0].flag === null && nextNoBase[0].routeMin === 40,
+    "drive-time planDay: a missing base doesn't flag a leg that starts from the previous night's stop");
   ok(planDay(input({ stops: [] })).length === 0, "drive-time planDay: a day with no stops has no legs");
 }

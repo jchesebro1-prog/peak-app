@@ -134,13 +134,13 @@ function makeLeg(
     endMs,
     anchorMs,
     flag: flagKind ? { kind: flagKind, text: FLAG_TEXT[flagKind] } : null,
-    fix: flagKind === "unverified" ? (!to.verified ? to.fix : from.fix) : null,
+    fix: flagKind === "unverified" ? (to.fix ?? from.fix) : null,
     tight,
   };
 }
 
 export function planDay(input: PlanDayInput): DriveLeg[] {
-  const stops = [...input.stops].sort((a, b) => a.startMs - b.startMs || a.key.localeCompare(b.key));
+  const stops = [...input.stops].sort((a, b) => a.startMs - b.startMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   if (!stops.length) return [];
   const base = baseEnd(input.base);
   const legs: DriveLeg[] = [];
@@ -150,15 +150,20 @@ export function planDay(input: PlanDayInput): DriveLeg[] {
   };
   const origin = input.prevDay.stayOver && input.prevDay.lastStop ? stopEnd(input.prevDay.lastStop, "prev_stop") : base;
   push(origin, stopEnd(stops[0]), "to_stop", stops[0].startMs, null);
-  for (let i = 1; i < stops.length; i++) push(stopEnd(stops[i - 1]), stopEnd(stops[i]), "to_stop", stops[i].startMs, stops[i - 1].endMs);
-  if (!input.stayOver) {
-    const last = stops[stops.length - 1];
-    push(stopEnd(last), base, "back", last.endMs, null);
+  // Stops can overlap (an all-day conference with a visit inside it), so "when
+  // the previous stop ended" is the running MAX end of every earlier stop.
+  let maxEnd = stops[0].endMs;
+  for (let i = 1; i < stops.length; i++) {
+    push(stopEnd(stops[i - 1]), stopEnd(stops[i]), "to_stop", stops[i].startMs, maxEnd);
+    maxEnd = Math.max(maxEnd, stops[i].endMs);
   }
+  if (!input.stayOver) push(stopEnd(stops[stops.length - 1]), base, "back", maxEnd, null);
   return legs;
 }
 
-/** The OSRM pairs a day needs — verified ends, not yet in routeMinutes. */
+/** Every verified from→to pair the day's legs need, deduplicated by pairKey.
+ *  Callers filter it against their own cache (geo_cache / routeMinutes) —
+ *  this function doesn't know what is already cached. */
 export function neededRoutes(input: Omit<PlanDayInput, "routeMinutes">): Array<{ from: LatLng; to: LatLng }> {
   const out = new Map<string, { from: LatLng; to: LatLng }>();
   for (const l of planDay({ ...input, routeMinutes: new Map() })) {

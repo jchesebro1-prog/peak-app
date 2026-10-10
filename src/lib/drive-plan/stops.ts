@@ -90,5 +90,5 @@ export function stopsForDay(args: {
       address: e.address ?? { status: "unresolved", label: e.location, point: null, pointKey: null, fix: null },
     });
   }
-  return out.sort((a, b) => a.startMs - b.startMs || a.key.localeCompare(b.key));
+  return out.sort((a, b) => a.startMs - b.startMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
