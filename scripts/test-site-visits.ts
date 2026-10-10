@@ -6,12 +6,18 @@
    each check's own finally. */
 import { readFileSync } from "node:fs";
 import type { AddressState, LatLng } from "@/lib/address-verify/types";
-import { isVisitIcsCopy, stopsForDay, visitPeople } from "@/lib/drive-plan/stops";
+import { addDays, chicagoDayStart } from "@/lib/drive-plan/day";
+import { pairKey, planDay } from "@/lib/drive-plan/plan";
+import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop } from "@/lib/drive-plan/stops";
+import { toCalendarEvents } from "@/lib/google/calendar";
 import { buildRaw } from "@/lib/gmail/mime";
 import { buildIcs, icsMimeType } from "@/lib/ics";
 import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
 import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
+import { busyBlocks, fmtBusy, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
+import { checkVisit, stopConflicts, type StopCheckInput } from "@/lib/visit-plan/check";
+import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, weekdayOf, workWindow } from "@/lib/visit-plan/hours";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -54,6 +60,20 @@ const sv = (id: string, over: Partial<SiteVisit>): SiteVisit => ({
 const rcpt = (name: string, over: Partial<VisitInviteRecipient> = {}): VisitInviteRecipient => ({
   name, to: name.toLowerCase() + "@peak.test", channel: "ics", eventId: null, sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: "personal:me", gmailId: null, ...over,
 });
+
+const BASE = { name: "Madison Office", lat: 43.0731, lng: -89.4012 };
+const P2: LatLng = { lat: 44.1, lng: -88.1 };
+const badAddr = (key: string): AddressState => ({ status: "needs_check", label: key, point: null, pointKey: "place:" + key, fix: { kind: "place", key, label: key } });
+const vStop = (key: string, start: number, end: number, address: AddressState, label = key.slice(3)): DriveStop => ({ key, kind: "visit", label, startMs: start, endMs: end, address });
+const busyEv = (label: string, s: number, e: number): BusyBlock => ({ key: "g:" + label, kind: "event", label, startMs: s, endMs: e });
+function dayPlan(stops: DriveStop[], minutes: Array<[LatLng, LatLng, number]>, dayKey = DAY) {
+  const routeMinutes = new Map(minutes.map(([a, b, m]) => [pairKey(a, b), m]));
+  return { stops, legs: planDay({ userId: "u1", dayKey, stops, base: BASE, bufferMin: 15, routeMinutes, prevDay: { stayOver: false, lastStop: null }, stayOver: false }) };
+}
+function conflictsFor(stops: DriveStop[], minutes: Array<[LatLng, LatLng, number]>, busy: BusyBlock[], over: Partial<StopCheckInput> = {}) {
+  const p = dayPlan(stops, minutes, over.dayKey ?? DAY);
+  return stopConflicts({ stopKey: "sv:C", dayKey: DAY, stops: p.stops, legs: p.legs, busy, hours: DEFAULT_WORK_HOURS, dailyDriveLimitMin: 300, ...over });
+}
 
 /** One exported function's source, up to the next top-level export. */
 function fnBody(src: string, name: string): string {
@@ -412,4 +432,103 @@ export async function siteVisitsSettingsChecks(ok: Ok): Promise<void> {
   ok(readFileSync("src/app/(app)/settings/groups/field.tsx", "utf8").includes("<SchedulingDefaultsCard") &&
      readFileSync("src/app/(app)/account/page.tsx", "utf8").includes("<WorkHoursCard"),
     "site-visits settings: Settings → Field shows the company card; Account shows personal work hours");
+}
+
+export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
+  // Chicago wall clock
+  ok(chicagoWallMs("2026-03-08", 480) === Date.UTC(2026, 2, 8, 13) && chicagoWallMs("2026-11-01", 480) === Date.UTC(2026, 10, 1, 14),
+    "site-visits hours: 8:00 is 8:00 Chicago on both DST-change days");
+  ok(chicagoWallMs(DAY, 1440) === chicagoDayStart(addDays(DAY, 1)) && chicagoWallMs("2026-03-08", 1430) === Date.UTC(2026, 2, 9, 4, 50),
+    "site-visits hours: end-of-day and late-evening wall times land on the right instant");
+  ok(chicagoMinuteOfDay(at(13, 30)) === 810 && weekdayOf(DAY) === 3 && fmtDayLabel(DAY) === "Wed Oct 15", "site-visits hours: minute of day, weekday and day label");
+  const win = workWindow(DAY, DEFAULT_WORK_HOURS);
+  ok(win?.startMs === at(8) && win.endMs === at(17) && workWindow(addDays(DAY, 3), DEFAULT_WORK_HOURS) === null,
+    "site-visits hours: a work day's window is 8:00–5:00 Chicago; Saturday has none");
+  const midnightWin = workWindow(DAY, { days: [3], startMin: 480, endMin: 1440 });
+  ok(midnightWin?.endMs === at(24) && midnightWin.endMs - midnightWin.startMs === 16 * 3_600_000,
+    "site-visits hours: an end of 1440 runs to the next Chicago midnight");
+  const springWin = workWindow("2026-03-08", { days: [0], startMin: 480, endMin: 1440 });
+  const fallWin = workWindow("2026-11-01", { days: [0], startMin: 480, endMin: 1440 });
+  ok(springWin?.startMs === Date.UTC(2026, 2, 8, 13) && springWin.endMs === Date.UTC(2026, 2, 9, 5) &&
+     fallWin?.startMs === Date.UTC(2026, 10, 1, 14) && fallWin.endMs === Date.UTC(2026, 10, 2, 6),
+    "site-visits hours: a work window on a DST-change day ends at the real next midnight (23h and 25h days)");
+  const lateOk = conflictsFor([vStop("sv:C", at(18), at(19), okAddr(P1, "c"))], [[BASE, P1, 30], [P1, BASE, 30]], [], { hours: { days: [3], startMin: 480, endMin: 1440 } });
+  ok(!lateOk.conflicts.some((c) => c.kind === "outside_hours"), "site-visits conflicts: with hours ending at midnight, an evening visit and its drive home are inside");
+  ok(chicagoMinuteOfDay(Date.UTC(2026, 2, 8, 13)) === 480 && chicagoMinuteOfDay(Date.UTC(2026, 10, 1, 14)) === 480,
+    "site-visits hours: minute of day reads 8:00 on both DST-change days");
+
+  // Busy blocks: what counts as busy
+  const visits: BusyVisit[] = [
+    { id: "SV-1", label: "Lone Pine", startAt: at(9), endAt: at(10), stage: "scheduled", people: ["Dana", "Jeff"], eventIds: ["gev-1"] },
+    { id: "SV-2", label: "Other", startAt: at(11), endAt: at(12), stage: "scheduled", people: ["Sam"], eventIds: [] },
+    { id: "SV-3", label: "Unscheduled", startAt: null, endAt: null, stage: "claimed", people: ["Dana"], eventIds: [] },
+    { id: "SV-4", label: "Requested w/ time", startAt: at(13), endAt: at(14), stage: "requested", people: ["Dana"], eventIds: [] },
+    { id: "SV-9", label: "Being edited", startAt: at(15), endAt: at(16), stage: "scheduled", people: ["Dana"], eventIds: [] },
+  ];
+  const ev = (id: string, over: Partial<BusyEvent>): BusyEvent => ({ id, iCalUID: id + "@google.com", title: id, startMs: at(15), endMs: at(16), allDay: false, selfDeclined: false, selfResponse: "", peakDriveKey: "", ...over });
+  const events = [
+    ev("own", {}), ev("accepted", { selfResponse: "accepted" }), ev("tentative", { selfResponse: "tentative" }), ev("needs", { selfResponse: "needsAction" }),
+    ev("declined", { selfDeclined: true, selfResponse: "declined" }), ev("allday", { allDay: true }), ev("drive", { peakDriveKey: "u1|x|a|b" }),
+    ev("ics", { iCalUID: "sv-SV-1@peak-app" }), ev("gev-1", {}), ev("copy-of-edited", { iCalUID: "sv-SV-9@peak-app" }),
+  ];
+  const blocks = busyBlocks({ person: "Dana", visits, events, excludeVisitId: "SV-9" });
+  ok(blocks.map((b) => b.key).sort().join() === "g:accepted,g:own,sv:SV-1",
+    "site-visits busy: my scheduled visits + my own and accepted timed events; never tentative, unanswered, declined, all-day, drive events, a visit's calendar copies, or the visit being edited");
+  ok(busyBlocks({ person: "Dana", visits, events: null }).map((b) => b.key).join() === "sv:SV-1,sv:SV-9", "site-visits busy: no calendar → visits only");
+  ok(fmtBusy([busyEv("a", at(9), at(10)), busyEv("b", at(9, 30), at(11, 30)), busyEv("c", at(14), at(15))]) === "9–11:30, 2–3", "site-visits busy: busy times merge and print 9–11:30, 2–3");
+  const mapped = toCalendarEvents([
+    { id: "a", summary: "A", start: { dateTime: "2036-10-15T14:00:00Z" }, end: { dateTime: "2036-10-15T15:00:00Z" }, attendees: [{ email: "me@x.com", self: true, responseStatus: "tentative" }] },
+    { id: "b", summary: "B", start: { dateTime: "2036-10-15T14:00:00Z" }, end: { dateTime: "2036-10-15T15:00:00Z" } },
+  ]);
+  ok(mapped[0].selfResponse === "tentative" && mapped[1].selfResponse === "", "site-visits calendar: my own response is read (blank on my own events)");
+
+  // Double-booked
+  const C = vStop("sv:C", at(10), at(11), okAddr(P1, "c"));
+  const r60: Array<[LatLng, LatLng, number]> = [[BASE, P1, 60], [P1, BASE, 60]];
+  const body = conflictsFor([C], r60, [busyEv("Board meeting", at(10, 30), at(11, 30))]);
+  ok(body.driveChecked && body.conflicts.length === 1 && body.conflicts[0].kind === "double_booked" && body.conflicts[0].text === "Double-booked — overlaps Board meeting (10:30–11:30)",
+    "site-visits conflicts: a visit overlapping a busy block is double-booked");
+  const C11 = vStop("sv:C", at(11), at(12), okAddr(P1, "c"));
+  const drive = conflictsFor([C11], r60, [busyEv("Call", at(10), at(10, 30)), busyEv("Lunch", at(12), at(13))]);
+  ok(drive.conflicts.length === 1 && drive.conflicts[0].text === "Double-booked — the drive there overlaps Call (10–10:30)",
+    "site-visits conflicts: an overlap caused only by the drive block counts; back-to-back doesn't");
+  const unv = conflictsFor([vStop("sv:C", at(11), at(12), badAddr("c"))], r60, [busyEv("Call", at(10), at(10, 30))]);
+  ok(!unv.driveChecked && unv.conflicts.length === 0, "site-visits conflicts: an unverified address is checked without drive time (no drive-block overlap)");
+
+  // Tight drive
+  const A = vStop("sv:A", at(9), at(10, 30), okAddr(P2, "a"));
+  const tight = conflictsFor([A, C11], [[BASE, P2, 30], [P2, P1, 40], [P1, BASE, 60]], []);
+  ok(tight.conflicts.some((c) => c.kind === "tight_drive" && c.text === "Tight — needs 55m, has 30m"), "site-visits conflicts: spec 1's tight leg shows before booking");
+
+  // Outside work hours
+  const early = conflictsFor([vStop("sv:C", at(8), at(9), okAddr(P1, "c"))], r60, []);
+  ok(early.conflicts.some((c) => c.kind === "outside_hours" && c.text === "Outside work hours (8:00–5:00)"), "site-visits conflicts: a drive starting before 8:00 is outside work hours");
+  const sat = conflictsFor([vStop("sv:C", at(10, 0, 3), at(11, 0, 3), okAddr(P1, "c"))], r60, [], { dayKey: addDays(DAY, 3) });
+  ok(sat.conflicts.some((c) => c.text === "Outside work hours — Saturday isn't a work day"), "site-visits conflicts: a visit on a non-work day is flagged");
+  const late = conflictsFor([vStop("sv:C", at(15, 30), at(16, 45), okAddr(P1, "c"))], r60, []);
+  ok(late.conflicts.some((c) => c.kind === "outside_hours"), "site-visits conflicts: the drive back counts toward work hours");
+  const roomy = conflictsFor([vStop("sv:C", at(8), at(9), okAddr(P1, "c"))], r60, [], { hours: { days: [0, 1, 2, 3, 4, 5, 6], startMin: 360, endMin: 1200 } });
+  ok(!roomy.conflicts.some((c) => c.kind === "outside_hours"), "site-visits conflicts: a person's own hours decide");
+
+  // Too much driving (buffer included)
+  const C12 = vStop("sv:C", at(12), at(13), okAddr(P1, "c"));
+  const far = conflictsFor([C12], [[BASE, P1, 150], [P1, BASE, 150]], []);
+  ok(far.conflicts.some((c) => c.kind === "too_much_driving" && c.text === "Too much driving — 5h 30m of 5h"), "site-visits conflicts: a day over the drive limit is flagged as 5h 30m of 5h");
+  const withBuffer = conflictsFor([C12], [[BASE, P1, 140], [P1, BASE, 140]], []);
+  ok(withBuffer.conflicts.some((c) => c.text === "Too much driving — 5h 10m of 5h"), "site-visits conflicts: the limit counts the buffer (280 min of road + 30 of buffer > 5h)");
+  ok(!conflictsFor([C12], [[BASE, P1, 140], [P1, BASE, 140]], [], { dailyDriveLimitMin: 330 }).conflicts.some((c) => c.kind === "too_much_driving"),
+    "site-visits conflicts: under the limit → no flag");
+
+  // checkVisit — several attendees, calendar notes
+  const p = dayPlan([C], r60);
+  const res = checkVisit({ key: "sv:C" }, [
+    { person: "Dana", dayKey: DAY, ...p, busy: [busyEv("Board meeting", at(10, 30), at(11, 30))], hours: DEFAULT_WORK_HOURS, calendar: "ok" },
+    { person: "Jeff", dayKey: DAY, ...p, busy: [], hours: DEFAULT_WORK_HOURS, calendar: "failed" },
+    { person: "Sam", dayKey: DAY, ...dayPlan([{ ...C, address: badAddr("c") }], []), busy: [], hours: DEFAULT_WORK_HOURS, calendar: "no-calendar" },
+  ], { dailyDriveLimitMin: 300 });
+  ok(res.length === 3 && res[0].conflicts.length === 1 && res[0].notes.length === 0, "site-visits checkVisit: conflicts are per attendee");
+  ok(res[1].conflicts.length === 0 && res[1].notes.includes("Couldn't check Jeff's calendar") && res[1].calendar === "failed",
+    "site-visits checkVisit: an unreadable calendar says so — never reads as no conflicts");
+  ok(res[2].notes.includes("Checked without drive time") && res[2].notes.includes("Sam has no connected calendar — checked visits only"),
+    "site-visits checkVisit: unverified address and no calendar each leave a note");
 }
