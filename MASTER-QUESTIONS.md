@@ -472,25 +472,18 @@ Fix (D712–D724).
   already right to a file and apply with `-- --apply --yes --skip <file>`.
   ✦ run the re-check in production after deploy ☐ accept backfilled venues
   as verified
-## R. Krisp meeting matcher (built 2026-10-10, #323)
+## R. Krisp meeting matcher (built 2026-10-10, #323) — ANSWERED 2026-10-10 (Jeff)
 
-Meetings from Krisp are pulled into Inbox → Meetings, matched by rule, and filed by
-a tap (D725–D761). Four calls I made that you may want different.
+Jeff confirmed all four calls as built (logged as D762 in DECISIONS.md):
 
-- **R1.** **Waiting-on-customer tasks** are left out of `/queue` and the Google
-  Tasks mirror (they are the customer's work, not yours); they show on Home under
-  "Waiting on others" and on the company/venue page. ✦ OK
-  ☐ also list them in my queue: ______
-- **R2.** **A to-do filed from an internal-only meeting** (no company, so a Task,
-  not a Note) becomes an ordinary task, and tasks are visible to all staff on
-  `/calendar` Everyone. ✦ OK
-  ☐ keep tasks from internal meetings private to the assignee: ______
-- **R3.** **Noise cut-off** — a recording under 3 minutes is "noise" (own tab, no
-  suggestions, never in To file; one tap overrides). ✦ 3 minutes is right
-  ☐ use ______ minutes
-- **R4.** **Sharing with a customer** shows the meeting to every portal grant at
-  that customer, not only the person who was in the meeting. ✦ OK
-  ☐ limit it to attendees' grants: ______
+- ~~**R1.** Waiting-on-customer tasks stay out of `/queue` and the Google Tasks
+  mirror; they show on Home under "Waiting on others" and on the company/venue
+  page.~~ **ANSWERED: keep as built.**
+- ~~**R2.** A to-do filed from an internal-only meeting becomes an ordinary task,
+  visible to all staff on `/calendar` Everyone.~~ **ANSWERED: keep as built.**
+- ~~**R3.** Recordings under 3 minutes are "noise".~~ **ANSWERED: 3 minutes is right.**
+- ~~**R4.** Sharing with a customer shows the meeting to every portal grant at that
+  customer.~~ **ANSWERED: keep as built.**
 
 ---
 

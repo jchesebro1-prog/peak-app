@@ -10536,3 +10536,7 @@ D725–D737 are the spec's decision table K1–K13
 - **D761. User-facing errors are a closed family.** `MeetingUserError` (access, share-guard, partial,
   busy) messages reach the user; anything else is logged and returns "Something went wrong — try again." A
   partially applied Decide all to-dos throws `MeetingPartialError` after applying what it can.
+- **D762. #323 open questions confirmed (2026-10-10, Jeff).** All four MASTER-QUESTIONS §R calls stand as
+  built: waiting-on-customer tasks stay out of `/queue` and the Google Tasks mirror (Home "Waiting on others" +
+  company/venue pages); a to-do from an internal-only meeting is an ordinary task visible to all staff on
+  `/calendar`; the noise cut-off stays at 3 minutes; a customer share shows to every portal grant at that customer.
