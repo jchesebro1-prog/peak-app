@@ -10399,10 +10399,10 @@ Numbers assigned at merge from origin/main (other branches also claim D707+). K1
   labels, and a bare direction (north/south/east/west) is refused. A core under 4 characters is unused. A venue core
   equal to its company's core is dropped, and a venue core shared by more than 3 companies' venues is skipped (a
   "Main Stage" must not name 150 companies). At most 3 weak company suggestions are returned.
-- **D-TBD (#323 K17). Scoring.** Per candidate company: Krisp title hits the core 50, calendar title 30, an attendee
+- **D-TBD (#323 K17). Scoring.** Per candidate company: Krisp title hits the core 50 (+10 when the hit came through a venue core), calendar title 30, an attendee
   email resolving to a contact at the company 60, an email domain mapped to the company 40, the rep's site
   visit/survey overlapping 40, summary text 20, a speaker first name matching a contact's 10. Top ≥ 80 and ≥ 30 ahead
-  of the runner-up → strong; ≥ 40 → weak; below 40 → no company suggestion; title-hit ties → all suggested, weak.
+  of the runner-up → strong; ≥ 40 → weak; below 40 → no company suggestion; a weak top also lists runners-up within 30 points, at most 3 companies in total, all weak.
   Internal-only meetings suggest the Peak users found (strong when one resolved by email).
 - **D-TBD (#323 K18). Work-link priority.** For the top company: exactly one overlapping visit/survey of the rep >
   the company's single open lead > single active engagement > single active project. Several overlapping visits
