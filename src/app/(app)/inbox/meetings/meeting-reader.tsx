@@ -43,7 +43,14 @@ const BADGE: React.CSSProperties = {
 const ROW: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f5f6f8", flexWrap: "wrap" };
 const SMALL_INPUT: React.CSSProperties = { ...INPUT, padding: "6px 9px", fontSize: 12.5 };
 
-export default function MeetingReader({ vm }: { vm: MeetingReaderVM | null }) {
+export default function MeetingReader({
+  vm,
+  variant = "pane",
+}: {
+  vm: MeetingReaderVM | null;
+  /** pane → the sidebar is a column beside the content; overlay (narrow) → stacked under it, one scroll */
+  variant?: "pane" | "overlay";
+}) {
   if (!vm) {
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -55,15 +62,29 @@ export default function MeetingReader({ vm }: { vm: MeetingReaderVM | null }) {
       </div>
     );
   }
-  return <Reader key={vm.id} vm={vm} />;
+  return <Reader key={vm.id} vm={vm} variant={variant} />;
 }
 
-function Reader({ vm }: { vm: MeetingReaderVM }) {
+function Reader({ vm, variant }: { vm: MeetingReaderVM; variant: "pane" | "overlay" }) {
+  const pane = variant === "pane";
   const { pending, error, run } = useMeetingAction();
   const scope = SCOPE_META[vm.share ? "shared" : vm.scope];
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "row", minHeight: 0, background: "#fff" }}>
-      <div className="ib-scroll" style={{ flex: 1, minWidth: 0, overflowY: "auto", fontFamily: "var(--font-ui)", color: "#16181d" }}>
+    <div
+      className={pane ? undefined : "ib-scroll"}
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: pane ? "row" : "column",
+        minHeight: 0,
+        overflowY: pane ? undefined : "auto",
+        background: "#fff",
+      }}
+    >
+      <div
+        className={pane ? "ib-scroll" : undefined}
+        style={{ flex: pane ? 1 : "0 0 auto", minWidth: 0, overflowY: pane ? "auto" : "visible", fontFamily: "var(--font-ui)", color: "#16181d" }}
+      >
         {/* ---- header ---- */}
         <div style={{ padding: "15px 20px 13px", borderBottom: "1px solid #eef0f3" }}>
           <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-.01em" }}>{vm.title}</div>
@@ -135,7 +156,7 @@ function Reader({ vm }: { vm: MeetingReaderVM }) {
           </details>
         </div>
       </div>
-      <MeetingSidebar vm={vm} />
+      <MeetingSidebar vm={vm} variant={variant} />
     </div>
   );
 }

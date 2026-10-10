@@ -181,11 +181,10 @@ export async function loadOlderAction(): Promise<SyncActionResult> {
   return syncAction("backfill");
 }
 
-/** The Inbox's 3-minute tick: a recent sync only when the last one is stale. */
+/** The Inbox's 3-minute tick: a recent sync only when the last one is stale. No revalidatePath — like
+ *  autoSyncAction, the shell latches `changed` and refreshes itself, never while someone is typing. */
 export async function meetingsTickAction(): Promise<{ changed: boolean }> {
   const me = await session();
   const r = await syncMeetingsIfStale(me.id).catch(() => null);
-  const changed = !!r && (r.created > 0 || r.detailed > 0);
-  if (changed) revalidate();
-  return { changed };
+  return { changed: !!r && (r.created > 0 || r.detailed > 0) };
 }

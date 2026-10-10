@@ -82,7 +82,8 @@ import type {
 import InboxShell from "./inbox-shell";
 import MeetingsBox from "./meetings/meetings-box";
 import MeetingReader from "./meetings/meeting-reader";
-import { loadMeetingReader, loadMeetingsBox, meetingsTabOf, toFileCount } from "./meetings/load";
+import { loadMeetingReader, loadMeetingsBox, toFileCount } from "./meetings/load";
+import { MEETINGS_BASE_HREF, meetingsHref, meetingsTabOf } from "./meetings/format";
 import HomeTabs from "../home-tabs";
 import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
@@ -1073,7 +1074,13 @@ export default async function InboxPage({
   }
 
   /* ---- #323 Meetings box + reader (only on ?view=meetings) ---- */
-  let meetingsSlot: { list: React.ReactNode; reader: React.ReactNode; selected: boolean; closeHref: string } | null = null;
+  let meetingsSlot: {
+    list: React.ReactNode;
+    reader: React.ReactNode;
+    overlayReader: React.ReactNode;
+    selected: boolean;
+    closeHref: string;
+  } | null = null;
   if (isMeetings) {
     const tab = meetingsTabOf(str(params.tab));
     const selectedId = str(params.m) || null;
@@ -1082,10 +1089,12 @@ export default async function InboxPage({
       selectedId ? loadMeetingReader(user, selectedId) : Promise.resolve(null),
     ]);
     meetingsSlot = {
-      list: <MeetingsBox vm={boxVM} selectedId={readerVM ? readerVM.id : null} tab={tab} />,
-      reader: <MeetingReader vm={readerVM} />,
+      list: <MeetingsBox vm={boxVM} selectedId={readerVM ? readerVM.id : null} tab={tab} baseHref={MEETINGS_BASE_HREF} />,
+      reader: <MeetingReader vm={readerVM} variant="pane" />,
+      // narrow screens: the sidebar stacks under the content inside the overlay
+      overlayReader: <MeetingReader vm={readerVM} variant="overlay" />,
       selected: !!readerVM,
-      closeHref: `/inbox?view=meetings&tab=${tab}`,
+      closeHref: meetingsHref(MEETINGS_BASE_HREF, tab),
     };
   }
 

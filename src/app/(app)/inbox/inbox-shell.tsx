@@ -130,7 +130,7 @@ export default function InboxShell({
   signature: string;
   /** #323 — ?view=meetings: the Meetings box and meeting reader (server-rendered
    *  slots) replace the thread list and thread reader; null on every mail view. */
-  meetings?: { list: ReactNode; reader: ReactNode; selected: boolean; closeHref: string } | null;
+  meetings?: { list: ReactNode; reader: ReactNode; overlayReader: ReactNode; selected: boolean; closeHref: string } | null;
 }) {
   const router = useRouter();
   // #126 — both remembered per browser (localStorage), hydration-safe: the
@@ -629,8 +629,9 @@ export default function InboxShell({
   // something and never mid-typing; a change detected while typing is LATCHED
   // and flushed at the next non-typing moment (next tick or field blur).
   // #323 — while the Meetings box is open the tick syncs Krisp meetings
-  // (only when stale) instead of mail.
-  const view = isView ? box : null;
+  // (only when stale) instead of mail. A boolean dep, so moving between the
+  // other views never rebuilds the tick.
+  const meetingsView = isView && box === "meetings";
   useEffect(() => {
     let stop = false;
     let pending = false;
@@ -652,7 +653,7 @@ export default function InboxShell({
     const tick = async () => {
       if (stop || document.visibilityState !== "visible") return;
       try {
-        const r = view === "meetings" ? await meetingsTickAction() : await autoSyncAction();
+        const r = meetingsView ? await meetingsTickAction() : await autoSyncAction();
         if (r.changed) pending = true;
         flush();
       } catch {
@@ -668,7 +669,7 @@ export default function InboxShell({
       clearInterval(iv);
       document.removeEventListener("focusout", onBlur);
     };
-  }, [router, view]);
+  }, [router, meetingsView]);
 
   const [sendReceiving, setSendReceiving] = useState(false);
   const onSendReceive = useCallback(async () => {
@@ -1222,7 +1223,7 @@ export default function InboxShell({
             >
               ×
             </button>
-            <div style={{ flex: 1, minHeight: 0 }}>{meetings.reader}</div>
+            <div style={{ flex: 1, minHeight: 0 }}>{meetings.overlayReader}</div>
           </div>
         </>
       )}

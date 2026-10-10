@@ -1,6 +1,7 @@
 /**
  * #323 — server loaders for the Inbox Meetings box and the meeting reader.
- * Every read goes through `meetingsVisibleTo` / `canSeeMeeting`: a meeting the
+ * Every read goes through `meetingRowsVisibleTo` (a narrow projection, no
+ * transcripts) / `canSeeMeeting`, and the to-file count is one SQL count: a meeting the
  * viewer can't see is absent from every list and its reader is null (never
  * its title). The client components get plain view models only — no store,
  * db or sync import crosses into the client bundle.
@@ -8,7 +9,7 @@
  * Not `import "server-only"`: the package isn't installed in this repo; the
  * `next build` gate catches a client import of this module instead.
  */
-import { getDoc } from "@/db/doc-store";
+import { getDoc, listDocsByField } from "@/db/doc-store";
 import type { CollectionName } from "@/db/doc-tables";
 import * as MS from "@/lib/stores/meetings";
 import { canSeeMeeting, meetingScope, type MeetingScope } from "@/lib/meetings/visibility";
@@ -25,12 +26,12 @@ import { can } from "@/lib/team";
 import { getTask } from "@/lib/stores/tasks";
 import { getNote } from "@/lib/stores/notes";
 import { taskHref } from "@/lib/calendar-tasks";
-import { getAll as allLeads, isOpen as leadIsOpen } from "@/lib/stores/leads";
-import { allVisits } from "@/lib/stores/site-visits";
-import { getAll as allSurveys } from "@/lib/stores/surveys";
-import { getAllProjects } from "@/lib/stores/projects";
-import { allEngagements } from "@/lib/stores/engagements";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { isOpen as leadIsOpen, type LeadRecord } from "@/lib/stores/leads";
+import type { SiteVisit } from "@/lib/stores/site-visits";
+import type { SurveyRecord } from "@/lib/stores/surveys";
+import type { ProjectRecord } from "@/lib/stores/projects";
+import type { ConsultingEngagement } from "@/lib/stores/engagements";
+import type { Quote } from "@/lib/stores/quotes";
 import { displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import {
   NOISE_MAX_SEC,
@@ -42,14 +43,9 @@ import {
   type TodoKind,
   type WorkType,
 } from "@/lib/meetings/types";
+import { agoLabel, FILED_CAP, lengthLabel, WORK_TYPE_LABEL, type MeetingsTab } from "./format";
 
-export type MeetingsTab = "to-file" | "filed" | "noise";
-
-export const MEETINGS_TABS: MeetingsTab[] = ["to-file", "filed", "noise"];
-
-export function meetingsTabOf(v: string | null | undefined): MeetingsTab {
-  return v === "filed" || v === "noise" ? v : "to-file";
-}
+export type { MeetingsTab } from "./format";
 
 export type MeetingRowVM = {
   id: string;
@@ -111,7 +107,8 @@ export type MeetingReaderVM = {
     decision: null | { kind: TodoKind; label: string; href: string | null };
   }[];
   segments: { speakerName: string; text: string }[];
-  suggestions: (MeetingSuggestion & { companyId: string | null; linked: boolean })[];
+  /** companyId/companyName: a company suggestion's own, a venue suggestion's company (the core links them together) */
+  suggestions: (MeetingSuggestion & { companyId: string | null; companyName: string | null; linked: boolean })[];
   links: {
     company: LinkChipVM | null;
     venue: LinkChipVM | null;
@@ -140,24 +137,6 @@ function whenLabel(ms: number | null, now: number): string {
   return (Math.abs(now - ms) < 300 * 86_400_000 ? WHEN : WHEN_YEAR).format(ms);
 }
 
-export function lengthLabel(sec: number | null): string {
-  if (sec == null) return "—";
-  if (sec < 60) return `${Math.max(0, Math.round(sec))} s`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min} min`;
-  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
-}
-
-export function agoLabel(ms: number, now: number): string {
-  const s = Math.max(0, Math.round((now - ms) / 1000));
-  if (s < 60) return "just now";
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 48) return `${h} h ago`;
-  return `${Math.round(h / 24)} d ago`;
-}
-
 function sourceLabel(s: string | null): string {
   if (!s) return "Krisp";
   const t = s.replace(/[_-]+/g, " ").trim();
@@ -166,7 +145,7 @@ function sourceLabel(s: string | null): string {
 
 /* ---------- the box ---------- */
 
-function rowOf(m: MeetingRecord, now: number): MeetingRowVM {
+function rowOf(m: MS.MeetingListRow, now: number): MeetingRowVM {
   return {
     id: m.id,
     title: m.krisp.title || "Untitled meeting",
@@ -183,18 +162,19 @@ function rowOf(m: MeetingRecord, now: number): MeetingRowVM {
   };
 }
 
-const isToFile = (m: MeetingRecord) => !m.filedAt && !m.noise;
-const isNoise = (m: MeetingRecord) => m.noise && !m.filedAt;
+const isToFile = (m: MS.MeetingListRow) => !m.filedAt && !m.noise;
+const isNoise = (m: MS.MeetingListRow) => m.noise && !m.filedAt;
 
-/** Home + the Inbox view row: the viewer's own unfiled, non-noise meetings. */
+/** Home + the Inbox view row: the viewer's own unfiled, non-noise meetings — one SQL count, no doc scan. */
 export async function toFileCount(userId: string): Promise<number> {
-  return (await MS.meetingsVisibleTo(userId)).filter((m) => isToFile(m) && m.seenBy.includes(userId)).length;
+  return MS.countToFile(userId);
 }
 
 export async function loadMeetingsBox(me: { id: string }, tab: MeetingsTab): Promise<MeetingsBoxVM> {
   const now = Date.now();
   const [all, sync, conn] = await Promise.all([
-    MS.meetingsVisibleTo(me.id),
+    // a narrow projection (no transcripts / notes), visibility-filtered through canSeeMeeting
+    MS.meetingRowsVisibleTo(me.id),
     getSyncState(me.id).catch(() => null),
     getKrispConnectionInfo(me.id).catch(() => null),
   ]);
@@ -206,7 +186,7 @@ export async function loadMeetingsBox(me: { id: string }, tab: MeetingsTab): Pro
     tab,
     thisWeek: tab === "to-file" ? toFile.filter((m) => (m.krisp.startedAt ?? 0) >= weekAgo).map((m) => rowOf(m, now)) : [],
     older: tab === "to-file" ? toFile.filter((m) => (m.krisp.startedAt ?? 0) < weekAgo).map((m) => rowOf(m, now)) : [],
-    rows: tab === "filed" ? filed.slice(0, 200).map((m) => rowOf(m, now)) : tab === "noise" ? noise.map((m) => rowOf(m, now)) : [],
+    rows: tab === "filed" ? filed.slice(0, FILED_CAP).map((m) => rowOf(m, now)) : tab === "noise" ? noise.map((m) => rowOf(m, now)) : [],
     counts: { toFile: toFile.length, filed: filed.length, noise: noise.length },
     sync: {
       syncedAt: sync?.syncedAt ?? null,
@@ -224,10 +204,6 @@ export async function loadMeetingsBox(me: { id: string }, tab: MeetingsTab): Pro
 const WORK_COLLECTION: Record<WorkType, CollectionName> = {
   lead: "leads", site_visit: "site_visits", survey: "surveys", project: "projects",
   engagement: "consulting_engagements", quote: "quotes",
-};
-
-export const WORK_TYPE_LABEL: Record<WorkType, string> = {
-  lead: "Lead", site_visit: "Site visit", survey: "Survey", project: "Project", engagement: "Engagement", quote: "Quote",
 };
 
 function workHref(type: WorkType, id: string): string {
@@ -261,8 +237,14 @@ const CAP = 200;
 async function workOptionsFor(companyId: string | null): Promise<MeetingReaderVM["workOptions"]> {
   const out = Object.fromEntries(WORK_TYPES.map((t) => [t, [] as { id: string; label: string }[]])) as MeetingReaderVM["workOptions"];
   if (!companyId) return out;
+  // company-scoped reads only (never six full collections); each collection's own company field
   const [leads, visits, surveys, projects, engagements, quotes] = await Promise.all([
-    allLeads(), allVisits(), allSurveys(), getAllProjects(), allEngagements(), allQuotes(),
+    listDocsByField<LeadRecord>("leads", "customerId", [companyId]),
+    listDocsByField<SiteVisit>("site_visits", "customerId", [companyId]),
+    listDocsByField<SurveyRecord>("surveys", "customerId", [companyId]),
+    listDocsByField<ProjectRecord>("projects", "customerId", [companyId]),
+    listDocsByField<ConsultingEngagement>("consulting_engagements", "companyId", [companyId]),
+    listDocsByField<Quote>("quotes", "customerId", [companyId]),
   ]);
   out.lead = leads.filter((l) => l.customerId === companyId && leadIsOpen(l))
     .map((l) => ({ id: l.id, label: `${displayLeadNumber(l)} · ${l.org || l.contact || "Lead"}` })).slice(0, CAP);
@@ -318,9 +300,11 @@ export async function loadMeetingReader(
   ]);
 
   // a venue suggestion carries its company: the core refuses a venue without it
-  const venueCompany = new Map<string, string | null>();
+  const venueCompany = new Map<string, { id: string; name: string | null } | null>();
   await Promise.all(m.suggestions.filter((s) => s.kind === "venue").map(async (s) => {
-    venueCompany.set(s.id, (await getSite(s.id).catch(() => null))?.companyId ?? null);
+    const cid = (await getSite(s.id).catch(() => null))?.companyId ?? null;
+    const co = cid ? await getCompany(cid).catch(() => null) : null;
+    venueCompany.set(s.id, cid ? { id: cid, name: co?.name ?? null } : null);
   }));
   const isLinked = (s: MeetingSuggestion): boolean =>
     s.kind === "company" ? L.customerId === s.id
@@ -387,7 +371,8 @@ export async function loadMeetingReader(
     segments: r.segments.map((s) => ({ speakerName: s.speakerName, text: s.text })),
     suggestions: m.suggestions.map((s) => ({
       ...s,
-      companyId: s.kind === "venue" ? venueCompany.get(s.id) ?? null : s.kind === "company" ? s.id : null,
+      companyId: s.kind === "venue" ? venueCompany.get(s.id)?.id ?? null : s.kind === "company" ? s.id : null,
+      companyName: s.kind === "venue" ? venueCompany.get(s.id)?.name ?? null : s.kind === "company" ? s.label : null,
       linked: isLinked(s),
     })),
     links: {

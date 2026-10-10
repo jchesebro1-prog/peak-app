@@ -112,3 +112,76 @@ export async function meetingRefsSeenBy(userId: string, fromMs: number): Promise
     removedAt: r.removedAt != null && Number.isFinite(Number(r.removedAt)) ? Number(r.removedAt) : null,
   }));
 }
+
+/** #323 — the Meetings box row: everything a list needs, never the transcript, notes, attendees or to-dos. */
+export type MeetingListRow = Pick<
+  MeetingRecord,
+  "id" | "links" | "seenBy" | "ownerUserId" | "filedAt" | "noise" | "noiseOverride" | "share" | "suggestions"
+> & { krisp: Pick<MeetingRecord["krisp"], "title" | "startedAt" | "durationSec" | "source" | "removedAt"> };
+
+/** #323 — the Meetings box's list, as a narrow JSONB projection (no segments/notes), visibility-filtered in JS
+ *  through canSeeMeeting; newest first. */
+export async function meetingRowsVisibleTo(userId: string): Promise<MeetingListRow[]> {
+  const db = await getDb();
+  const t = meetingsTable;
+  const rows = await db
+    .select({
+      id: t.id,
+      links: sql<unknown>`${t.doc}->'links'`,
+      seenBy: sql<unknown>`${t.doc}->'seenBy'`,
+      ownerUserId: sql<string | null>`${t.doc}->>'ownerUserId'`,
+      filedAt: sql<unknown>`${t.doc}->'filedAt'`,
+      noise: sql<unknown>`${t.doc}->'noise'`,
+      noiseOverride: sql<unknown>`${t.doc}->'noiseOverride'`,
+      share: sql<unknown>`${t.doc}->'share'`,
+      suggestions: sql<unknown>`${t.doc}->'suggestions'`,
+      title: sql<unknown>`${t.doc}->'krisp'->'title'`,
+      startedAt: sql<unknown>`${t.doc}->'krisp'->'startedAt'`,
+      durationSec: sql<unknown>`${t.doc}->'krisp'->'durationSec'`,
+      source: sql<unknown>`${t.doc}->'krisp'->'source'`,
+      removedAt: sql<unknown>`${t.doc}->'krisp'->'removedAt'`,
+    })
+    .from(t)
+    .where(eq(t.deleted, false));
+  const out: MeetingListRow[] = [];
+  for (const r of rows) {
+    const m = normalizeMeeting({
+      id: r.id,
+      links: r.links as MeetingRecord["links"],
+      seenBy: r.seenBy as string[],
+      ownerUserId: r.ownerUserId ?? "",
+      filedAt: r.filedAt as number | null,
+      noise: r.noise as boolean,
+      noiseOverride: r.noiseOverride as boolean,
+      share: r.share as MeetingRecord["share"],
+      suggestions: r.suggestions as MeetingRecord["suggestions"],
+      krisp: {
+        title: r.title, startedAt: r.startedAt, durationSec: r.durationSec, source: r.source, removedAt: r.removedAt,
+      } as MeetingRecord["krisp"],
+    });
+    if (!canSeeMeeting(m, userId)) continue;
+    out.push({
+      id: m.id, links: m.links, seenBy: m.seenBy, ownerUserId: m.ownerUserId, filedAt: m.filedAt, noise: m.noise,
+      noiseOverride: m.noiseOverride, share: m.share, suggestions: m.suggestions,
+      krisp: { title: m.krisp.title, startedAt: m.krisp.startedAt, durationSec: m.krisp.durationSec, source: m.krisp.source, removedAt: m.krisp.removedAt },
+    });
+  }
+  return out.sort((a, b) => (b.krisp.startedAt ?? 0) - (a.krisp.startedAt ?? 0));
+}
+
+/** #323 — Home + the Inbox view row: the viewer's own unfiled, non-noise meetings, as one SQL count
+ *  (seenBy ∋ the viewer implies canSeeMeeting). Mirrors `!filedAt && !noise` on a normalized doc. */
+export async function countToFile(userId: string): Promise<number> {
+  const db = await getDb();
+  const t = meetingsTable;
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(t)
+    .where(and(
+      eq(t.deleted, false),
+      sql`${t.doc}->'seenBy' @> ${JSON.stringify([userId])}::jsonb`,
+      sql`(${t.doc}->'filedAt' is null or ${t.doc}->'filedAt' in ('null'::jsonb, '0'::jsonb))`,
+      sql`coalesce(${t.doc}->'noise', 'false'::jsonb) in ('false'::jsonb, 'null'::jsonb)`,
+    ));
+  return Number(r?.n ?? 0);
+}

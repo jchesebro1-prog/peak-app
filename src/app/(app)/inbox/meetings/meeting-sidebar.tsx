@@ -10,7 +10,6 @@
  * customer share asks first and retries with `confirmUnshare`.
  */
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Typeahead } from "@/components/search/typeahead";
 import { passAllFilter, stableRank } from "@/lib/search/typeahead-rank";
 import type { LinkTargetHit, LinkTargetKind } from "@/lib/inbox-link-targets";
@@ -19,6 +18,7 @@ import { searchLinkTargetsAction } from "../link-popup-actions";
 import { ACCENT_BTN, BODY, BTN, CARD, H, MUTED, PRIMARY, SELECT } from "../sidebar-styles";
 import { INPUT } from "@/components/entity-quick-add";
 import type { MeetingReaderVM } from "./load";
+import { WORK_TYPE_LABEL } from "./format";
 import {
   confirmSuggestionsAction,
   linkVenueAction,
@@ -32,9 +32,10 @@ import { SuggestionChip } from "./meetings-box";
 
 type Opts = { confirmUnshare?: boolean };
 
-/** One meeting mutation: inline error, the share guard's confirm-then-retry, then a refresh. */
+/** One meeting mutation: inline error and the share guard's confirm-then-retry. Every meeting action
+ *  revalidates /inbox itself (also when it fails part-way), and a Server Function's revalidatePath updates
+ *  the open page, so there is no client router.refresh() here — one refresh per write. */
 export function useMeetingAction() {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const run = (fn: (opts: Opts) => Promise<MeetingActionResult>, after?: () => void) =>
@@ -48,11 +49,9 @@ export function useMeetingAction() {
         }
         if (!r.ok) {
           setError(r.busy ? "Sync already running — try again in a moment" : r.error);
-          if (r.partial) router.refresh();
           return;
         }
         after?.();
-        router.refresh();
       } catch {
         setError("Something went wrong — try again.");
       }
@@ -135,10 +134,6 @@ export function LinkSearch({
   );
 }
 
-const WORK_LABEL: Record<WorkType, string> = {
-  lead: "Lead", site_visit: "Site visit", survey: "Survey", project: "Project", engagement: "Engagement", quote: "Quote",
-};
-
 const X_BTN: React.CSSProperties = {
   border: "none", background: "transparent", color: "#8c919c", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 2px", flexShrink: 0,
 };
@@ -161,7 +156,7 @@ function LinkedRow({ kind, label, href, removed, onRemove, disabled }: {
   );
 }
 
-export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
+export default function MeetingSidebar({ vm, variant = "pane" }: { vm: MeetingReaderVM; variant?: "pane" | "overlay" }) {
   const { pending, error, run } = useMeetingAction();
   const [workType, setWorkType] = useState<WorkType>(vm.links.work?.type ?? "lead");
   const [workFilter, setWorkFilter] = useState("");
@@ -171,8 +166,16 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
   const L = vm.links;
   const setLinks = (patch: Partial<MeetingLinks>) => run((o) => setLinksAction(vm.id, patch, o));
 
+  /** Re-pointing the meeting at a different company drops the old company's venue and work — ask first. */
+  const okToReplaceCompany = (nextId: string | null, nextName: string): boolean => {
+    const cur = L.company;
+    if (!cur || !nextId || cur.id === nextId) return true;
+    return window.confirm(`Link this to ${nextName} instead of ${cur.label}?`);
+  };
+
   /** One suggestion. A venue carries its company: linked already, its company suggestion, else a manual link. */
   const confirmOne = (s: MeetingReaderVM["suggestions"][number]) => {
+    if ((s.kind === "company" || s.kind === "venue") && !okToReplaceCompany(s.companyId, s.companyName || s.label)) return;
     if (s.kind === "venue") {
       const cid = s.companyId;
       if (!cid) return run(async () => ({ ok: false, error: "That venue no longer exists" }));
@@ -197,9 +200,11 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
   };
 
   const pickTarget = (h: LinkTargetHit) => {
-    if (h.kind === "company") setLinks({ customerId: h.id });
-    else if (h.kind === "venue") {
+    if (h.kind === "company") {
+      if (okToReplaceCompany(h.id, h.label)) setLinks({ customerId: h.id });
+    } else if (h.kind === "venue") {
       if (!h.companyId) return run(async () => ({ ok: false, error: "That venue has no company" }));
+      if (!okToReplaceCompany(h.companyId, h.companyName || "that venue's company")) return;
       run((o) => linkVenueAction(vm.id, h.id, h.companyId!, o));
     } else if (!L.contactIds.includes(h.id)) setLinks({ contactIds: [...L.contactIds, h.id] });
   };
@@ -214,13 +219,16 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
     <aside
       className="ib-scroll"
       data-link-panel
+      data-variant={variant}
       style={{
-        width: 300,
+        // pane → a 300px column beside the reader; overlay → stacked under the content, full width
+        width: variant === "pane" ? 300 : "auto",
         maxWidth: "100%",
         flexShrink: 0,
-        borderLeft: "1px solid #ececf0",
+        borderLeft: variant === "pane" ? "1px solid #ececf0" : undefined,
+        borderTop: variant === "overlay" ? "1px solid #ececf0" : undefined,
         background: "#fafbfc",
-        overflowY: "auto",
+        overflowY: variant === "pane" ? "auto" : "visible",
         padding: 14,
         display: "flex",
         flexDirection: "column",
@@ -252,7 +260,7 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
       <div style={CARD}>
         <div style={H}>Linked</div>
         {!L.company && !L.venue && !L.people.length && !L.work && !L.internal.length ? (
-          <div style={MUTED}>Not linked yet — only you can see it.</div>
+          <div style={MUTED}>Not linked yet — only people who were in it can see it.</div>
         ) : (
           <>
             {L.company && (
@@ -291,8 +299,8 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
               onChange={(e) => { setWorkType(e.target.value as WorkType); setWorkFilter(""); }}
               style={SELECT}
             >
-              {(Object.keys(WORK_LABEL) as WorkType[]).map((t) => (
-                <option key={t} value={t}>{WORK_LABEL[t]} ({vm.workOptions[t]?.length ?? 0})</option>
+              {(Object.keys(WORK_TYPE_LABEL) as WorkType[]).map((t) => (
+                <option key={t} value={t}>{WORK_TYPE_LABEL[t]} ({vm.workOptions[t]?.length ?? 0})</option>
               ))}
             </select>
             {options.length > 8 && (
@@ -314,7 +322,7 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
               }}
               style={{ ...SELECT, marginTop: 6 }}
             >
-              <option value="">{options.length ? `Pick a ${WORK_LABEL[workType].toLowerCase()}…` : `No ${WORK_LABEL[workType].toLowerCase()}s for this company`}</option>
+              <option value="">{options.length ? `Pick a ${WORK_TYPE_LABEL[workType].toLowerCase()}…` : `No ${WORK_TYPE_LABEL[workType].toLowerCase()}s for this company`}</option>
               {filteredWork.map((o) => (
                 <option key={o.id} value={o.id}>{o.label}</option>
               ))}
@@ -389,7 +397,7 @@ export default function MeetingSidebar({ vm }: { vm: MeetingReaderVM }) {
 }
 
 function SuggestionRow({ s, disabled, onConfirm }: { s: MeetingSuggestion; disabled: boolean; onConfirm: () => void }) {
-  const kind = s.kind === "work" && s.workType ? WORK_LABEL[s.workType] : s.kind === "internal" ? "Internal" : s.kind.charAt(0).toUpperCase() + s.kind.slice(1);
+  const kind = s.kind === "work" && s.workType ? WORK_TYPE_LABEL[s.workType] : s.kind === "internal" ? "Internal" : s.kind.charAt(0).toUpperCase() + s.kind.slice(1);
   return (
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #f0f1f4" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -407,17 +415,50 @@ function SuggestionRow({ s, disabled, onConfirm }: { s: MeetingSuggestion; disab
 function ShareModal({ draft, setDraft, pending, onClose, onShare, error }: {
   draft: string; setDraft: (v: string) => void; pending: boolean; onClose: () => void; onShare: () => void; error: string | null;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const closeRef = useRef(onClose);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    closeRef.current = onClose;
   }, [onClose]);
+  // focus moves into the dialog on open, Tab stays inside it, and focus returns to the opener on close
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    textRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== "Tab" || !dialogRef.current) return;
+      const els = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>("textarea, button:not([disabled]), [href], input, select")
+      );
+      if (!els.length) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (opener && opener.isConnected) opener.focus();
+    };
+  }, []);
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(16,22,30,.44)", zIndex: 120, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Share with customer"
@@ -429,6 +470,7 @@ function ShareModal({ draft, setDraft, pending, onClose, onShare, error }: {
           The customer sees this summary, the date and the title in their portal — never the transcript, attendees or to-dos.
         </div>
         <textarea
+          ref={textRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           rows={14}

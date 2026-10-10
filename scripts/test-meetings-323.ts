@@ -878,16 +878,82 @@ export async function meetings323UiPins(ok: Ok): Promise<void> {
     "#323 UI a searched venue links with its company through linkVenueAction");
   ok(/export async function setAttendeeContactAction\(/.test(src(`${dir}/meetings/actions.ts`)) && /setAttendeeContactAction\(/.test(reader),
     "#323 UI an attendee can be pointed at an existing contact");
-  ok(/(canSeeMeeting|meetingsVisibleTo)/.test(load) && !/allMeetings\(/.test(load),
-    "#323 UI every Meetings read in load.ts is visibility-filtered");
+  ok(/canSeeMeeting\(m, me\.id\)/.test(load) && /MS\.meetingRowsVisibleTo\(me\.id\)/.test(load) &&
+     !/allMeetings\(|meetingsVisibleTo\(/.test(load) && /return MS\.countToFile\(userId\)/.test(load),
+    "#323 UI load.ts lists through the visibility-filtered projection and counts in SQL — only the reader loads a full doc");
   ok(/export async function toFileCount\(/.test(load) && /export async function loadMeetingsBox\(/.test(load) &&
      /export async function loadMeetingReader\(/.test(load),
     "#323 UI load.ts exports toFileCount, loadMeetingsBox and loadMeetingReader");
-  const clientOnly = (s: string) => !/from "@\/(lib\/stores|db|lib\/meetings\/(sync|index-build|actions-core|sync-state))/.test(s);
+  const clientOnly = (s: string) => !/from "@\/(lib\/stores|db|lib\/meetings\/(sync|index-build|actions-core|sync-state))/.test(s) &&
+    !/^import (?!type )[^;]*from "\.\/load";/m.test(s) && /^import type [^;]*from "\.\/load";/m.test(s);
   ok(/^"use client";/.test(box) && /^"use client";/.test(src(`${dir}/meetings/meeting-reader.tsx`)) && clientOnly(box) && clientOnly(reader),
     "#323 UI the Meetings box and reader are client components with no server-only imports");
   const tick = shell.slice(shell.indexOf("const tick = async"), shell.indexOf("const onBlur"));
-  ok(/view === "meetings"\s*\?\s*await meetingsTickAction\(\)\s*:\s*await autoSyncAction\(\)/.test(tick),
-    "#323 UI the 3-minute tick runs meetingsTickAction only while the meetings view is open");
+  ok(/meetingsView\s*\?\s*await meetingsTickAction\(\)\s*:\s*await autoSyncAction\(\)/.test(tick) &&
+     /const meetingsView = isView && box === "meetings";/.test(shell) && /\}, \[router, meetingsView\]\);/.test(shell),
+    "#323 UI the 3-minute tick runs meetingsTickAction only while the meetings view is open (a boolean dep)");
   ok(smoke.includes(`"/inbox?view=meetings"`), "#323 UI smoke covers /inbox?view=meetings");
+
+  // fix round 1
+  const sidebar = src(`${dir}/meetings/meeting-sidebar.tsx`);
+  const readerOnly = src(`${dir}/meetings/meeting-reader.tsx`);
+  const actions = src(`${dir}/meetings/actions.ts`);
+  const format = src(`${dir}/meetings/format.ts`);
+  ok(/variant\?: "pane" \| "overlay"/.test(readerOnly) && /flexDirection: pane \? "row" : "column"/.test(readerOnly) &&
+     /<MeetingSidebar vm=\{vm\} variant=\{variant\} \/>/.test(readerOnly) && /width: variant === "pane" \? 300 : "auto"/.test(sidebar) &&
+     /<MeetingReader vm=\{readerVM\} variant="overlay" \/>/.test(page) && /\{meetings\.overlayReader\}/.test(shell),
+    "#323 UI the narrow overlay renders the overlay reader: sidebar stacked under the content, full width");
+  const tickBody = actions.slice(actions.indexOf("export async function meetingsTickAction"));
+  ok(!/revalidate/.test(tickBody.slice(tickBody.indexOf("{"))), "#323 UI meetingsTickAction never revalidates — the shell's latched refresh governs");
+  const hook = sidebar.slice(sidebar.indexOf("export function useMeetingAction"), sidebar.indexOf("const KIND_META"));
+  ok(!/router\.refresh\(\)|useRouter/.test(hook), "#323 UI meeting actions revalidate server-side; the client hook adds no second refresh");
+  ok(["lengthLabel", "agoLabel", "WORK_TYPE_LABEL", "meetingsTabOf", "meetingsHref"].every((n) => new RegExp(`export (function|const) ${n}\\b`).test(format)) &&
+     !/const WORK_LABEL/.test(sidebar) && !/export (function|const) (lengthLabel|agoLabel|WORK_TYPE_LABEL|meetingsTabOf)\b/.test(load),
+    "#323 UI pure helpers live in format.ts (no duplicate work-type labels)");
+  const wo = load.slice(load.indexOf("async function workOptionsFor"), load.indexOf("async function decisionOf"));
+  ok((wo.match(/listDocsByField</g) || []).length === 6 && !/allLeads|allVisits|allSurveys|getAllProjects|allEngagements|allQuotes/.test(load),
+    "#323 UI the work picker reads only the linked company's records");
+  ok(/Updated \$\{detailed\}/.test(box) && /Showing \{Math\.min\(FILED_CAP/.test(box) && /aria-current=\{on \? "page" : undefined\}/.test(box) &&
+     !/role="tab"/.test(box) && /baseHref = MEETINGS_BASE_HREF/.test(box),
+    "#323 UI box: Updated N, Filed cap note, aria-current tab links, a baseHref for a later nav page");
+  ok(/only people who were in it can see it/.test(sidebar) && /instead of \$\{cur\.label\}\?/.test(sidebar) &&
+     /textRef\.current\?\.focus\(\)/.test(sidebar) && /opener\.focus\(\)/.test(sidebar) && /e\.key !== "Tab"/.test(sidebar),
+    "#323 UI sidebar: scope copy, confirm before replacing a company, the share dialog traps and returns focus");
+}
+
+/** Fix round 1 — the Meetings box's projection queries against the real doc table. */
+export async function meetings323ProjectionChecks(ok: Ok): Promise<void> {
+  const u = "u-proj323";
+  const mk = (n: number, over: Partial<MeetingRecord>) => {
+    const kid = `TEST323P${n}` + "b".repeat(20);
+    const base = meetingFixture323({ krispMeetingId: kid });
+    return { ...base, ...over, krisp: { ...base.krisp, title: `Projection ${n}`,
+      segments: [{ speaker: "1", text: "a long transcript line", start: 0, end: 1 }], notes: { blocks: [] } } } as MeetingRecord;
+  };
+  const fx = [
+    mk(1, { seenBy: [u] }),                                            // to file
+    mk(2, { seenBy: [u], filedAt: 1_790_000_000_000, filedBy: "x" }),  // filed
+    mk(3, { seenBy: [u], noise: true }),                               // noise
+    mk(4, { seenBy: ["u-other323"] }),                                 // private to someone else
+    mk(5, { seenBy: ["u-other323"], links: { ...emptyLinks(), customerId: "TEST323-proj-co" } }), // peak-wide, not mine
+  ];
+  for (const m of fx) {
+    registerFixture("meetings", m.id);
+    await MS.saveMeeting(m);
+  }
+  const full = await MS.meetingsVisibleTo(u);
+  const scanCount = full.filter((m) => !m.filedAt && !m.noise && m.seenBy.includes(u)).length;
+  const count = await MS.countToFile(u);
+  ok(count === scanCount && count === 1, `#323 countToFile matches the full-scan to-file count (${count} vs ${scanCount})`);
+  const rows = await MS.meetingRowsVisibleTo(u);
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id).sort().join(",");
+  ok(ids(rows) === ids(full), "#323 meetingRowsVisibleTo returns exactly the meetings canSeeMeeting allows");
+  const r1 = rows.find((r) => r.id === fx[0].id);
+  ok(!!r1 && r1.krisp.title === "Projection 1" && !("segments" in r1.krisp) && !("notes" in r1.krisp) &&
+     !("todos" in r1) && !("attendees" in r1) && !rows.some((r) => r.id === fx[3].id) && rows.some((r) => r.id === fx[4].id),
+    "#323 the list projection carries the header fields, never segments / notes / attendees / to-dos");
+  const store = readFileSync(join(process.cwd(), "src/lib/stores/meetings.ts"), "utf8");
+  const proj = store.slice(store.indexOf("export async function meetingRowsVisibleTo"), store.indexOf("export async function countToFile"));
+  ok(!/segments|notes|transcript|'todos'|'attendees'/.test(proj.slice(proj.indexOf(".select("), proj.indexOf(".from("))),
+    "#323 the projection's SELECT never names segments or notes");
 }

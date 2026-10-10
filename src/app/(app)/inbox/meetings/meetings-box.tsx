@@ -11,7 +11,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { MeetingScope } from "@/lib/meetings/visibility";
 import type { MeetingSuggestion } from "@/lib/meetings/types";
-import type { MeetingRowVM, MeetingsBoxVM, MeetingsTab } from "./load";
+import type { MeetingRowVM, MeetingsBoxVM } from "./load";
+import { FILED_CAP, MEETINGS_BASE_HREF, meetingsHref, type MeetingsTab } from "./format";
 import { confirmAllStrongAction, loadOlderAction, syncNowAction } from "./actions";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
@@ -79,18 +80,17 @@ const BTN: React.CSSProperties = {
 };
 const PRIMARY: React.CSSProperties = { ...BTN, color: "#fff", background: "var(--accent)", border: "1px solid transparent" };
 
-function hrefFor(tab: MeetingsTab, id?: string): string {
-  return `/inbox?view=meetings&tab=${tab}${id ? `&m=${encodeURIComponent(id)}` : ""}`;
-}
-
 export default function MeetingsBox({
   vm,
   selectedId,
   tab,
+  baseHref = MEETINGS_BASE_HREF,
 }: {
   vm: MeetingsBoxVM;
   selectedId: string | null;
   tab: MeetingsTab;
+  /** where the box lives — the Inbox view today; its own nav page later (K7) */
+  baseHref?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -103,13 +103,13 @@ export default function MeetingsBox({
     start(async () => {
       setNote(null);
       try {
+        // the action revalidates /inbox itself — no client refresh on top
         const r = await confirmAllStrongAction(strongIds);
         if (!r.ok) setNote({ text: r.error, bad: true });
         else setNote({ text: `Filed ${r.filed ?? 0} meeting${r.filed === 1 ? "" : "s"}`, bad: false });
       } catch {
         setNote({ text: "Something went wrong — try again.", bad: true });
       }
-      router.refresh();
     });
 
   const sync = (mode: "recent" | "backfill") =>
@@ -120,13 +120,22 @@ export default function MeetingsBox({
         if (!r.ok) setNote({ text: r.error, bad: true });
         else if (r.busy) setNote({ text: "Sync already running", bad: false });
         else {
-          const n = r.result?.created ?? 0;
-          setNote({ text: n ? `${n} new meeting${n === 1 ? "" : "s"}` : "Up to date", bad: false });
+          const created = r.result?.created ?? 0;
+          const detailed = r.result?.detailed ?? 0;
+          setNote({
+            text: created
+              ? `${created} new meeting${created === 1 ? "" : "s"}`
+              : detailed
+                ? `Updated ${detailed}`
+                : "Up to date",
+            bad: false,
+          });
+          // the action revalidates only when something changed; refresh for the "Synced …" line otherwise
+          if (!created && !detailed) router.refresh();
         }
       } catch {
         setNote({ text: "Something went wrong — try again.", bad: true });
       }
-      router.refresh();
     });
 
   const count = tab === "to-file" ? vm.counts.toFile : tab === "filed" ? vm.counts.filed : vm.counts.noise;
@@ -177,16 +186,15 @@ export default function MeetingsBox({
             {note.text}
           </div>
         )}
-        <div role="tablist" style={{ display: "flex", gap: 4, marginTop: 10 }}>
+        <nav aria-label="Meetings" style={{ display: "flex", gap: 4, marginTop: 10 }}>
           {TABS.map((t) => {
             const on = t.key === tab;
             const n = t.key === "to-file" ? vm.counts.toFile : t.key === "filed" ? vm.counts.filed : vm.counts.noise;
             return (
               <Link
                 key={t.key}
-                role="tab"
-                aria-selected={on}
-                href={hrefFor(t.key)}
+                aria-current={on ? "page" : undefined}
+                href={meetingsHref(baseHref, t.key)}
                 style={{
                   fontSize: 12,
                   fontWeight: on ? 600 : 500,
@@ -203,7 +211,7 @@ export default function MeetingsBox({
               </Link>
             );
           })}
-        </div>
+        </nav>
       </div>
 
       <div className="ib-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
@@ -212,8 +220,8 @@ export default function MeetingsBox({
             <Empty title="Nothing to file" sub="New Krisp meetings land here until they're linked." />
           ) : (
             <>
-              <Section label="This week" rows={vm.thisWeek} tab={tab} selectedId={selectedId} />
-              <Section label="Older" rows={vm.older} tab={tab} selectedId={selectedId} />
+              <Section label="This week" rows={vm.thisWeek} tab={tab} selectedId={selectedId} baseHref={baseHref} />
+              <Section label="Older" rows={vm.older} tab={tab} selectedId={selectedId} baseHref={baseHref} />
             </>
           )
         ) : vm.rows.length === 0 ? (
@@ -222,14 +230,23 @@ export default function MeetingsBox({
             sub={tab === "filed" ? "Meetings you link show up here." : "Recordings under 3 minutes land here."}
           />
         ) : (
-          vm.rows.map((r) => <Row key={r.id} r={r} tab={tab} selected={r.id === selectedId} />)
+          <>
+            {vm.rows.map((r) => <Row key={r.id} r={r} tab={tab} selected={r.id === selectedId} baseHref={baseHref} />)}
+            {tab === "filed" && vm.counts.filed > vm.rows.length && (
+              <div style={{ padding: "10px 18px", fontSize: 11.5, color: "#9aa0ab" }}>
+                Showing {Math.min(FILED_CAP, vm.rows.length)} of {vm.counts.filed}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function Section({ label, rows, tab, selectedId }: { label: string; rows: MeetingRowVM[]; tab: MeetingsTab; selectedId: string | null }) {
+function Section({ label, rows, tab, selectedId, baseHref }: {
+  label: string; rows: MeetingRowVM[]; tab: MeetingsTab; selectedId: string | null; baseHref: string;
+}) {
   if (!rows.length) return null;
   return (
     <>
@@ -247,17 +264,17 @@ function Section({ label, rows, tab, selectedId }: { label: string; rows: Meetin
       >
         {label}
       </div>
-      {rows.map((r) => <Row key={r.id} r={r} tab={tab} selected={r.id === selectedId} />)}
+      {rows.map((r) => <Row key={r.id} r={r} tab={tab} selected={r.id === selectedId} baseHref={baseHref} />)}
     </>
   );
 }
 
-function Row({ r, tab, selected }: { r: MeetingRowVM; tab: MeetingsTab; selected: boolean }) {
+function Row({ r, tab, selected, baseHref }: { r: MeetingRowVM; tab: MeetingsTab; selected: boolean; baseHref: string }) {
   return (
     <Link
       className="ib-row"
       data-meeting-id={r.id}
-      href={hrefFor(tab, r.id)}
+      href={meetingsHref(baseHref, tab, r.id)}
       style={{
         display: "flex",
         alignItems: "flex-start",
