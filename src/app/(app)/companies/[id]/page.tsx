@@ -41,6 +41,9 @@ import { defsForType, resolveFieldDefs } from "@/lib/customer-fields";
 import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
 export const metadata = { title: "Company — Quartzite-6" };
+
+// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
+export const maxDuration = 60;
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import { RewardsCard } from "./rewards-card";

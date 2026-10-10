@@ -27,6 +27,9 @@ import { FLAG_TEXT } from "@/lib/drive-plan/plan";
 
 export const metadata = { title: "Venue assessments — Quartzite-6" };
 
+// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
+export const maxDuration = 60;
+
 /* accent-derived tints (prototype color-mix over the office accent) */
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 13%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 70%, #000)";

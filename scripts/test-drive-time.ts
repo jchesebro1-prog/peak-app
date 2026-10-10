@@ -12,6 +12,7 @@ import { getPlaces, placeStatesFor, writePlace, fixPlace } from "@/lib/address-v
 import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/targets";
 import { cleanFixInput, cleanFixTarget, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
 import { listAddressesToVerify } from "@/lib/address-verify/worklist";
+import { unverifiedVisitFlags } from "@/lib/address-verify/triage-flags";
 import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
 import { routeKey, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import {
@@ -1754,4 +1755,28 @@ export async function driveTimeBookingPins(ok: Ok): Promise<void> {
   const home = read("src/app/(app)/home-calendar.tsx");
   ok(/<AddressFlagBadge flag=\{it\.addressFlag\} \/>/.test(home) && !/<AddressFlagBadge flag=\{it\.addressFlag\} compact/.test(home), "drive-time booking: Home agenda rows show the full address flag (not compact)");
   ok(/<span role="img"[^>]*aria-label=\{text\}/.test(read("src/app/(app)/calendar/calendar-client.tsx")), "drive-time booking: the calendar's plain flag span carries a role with its aria-label");
+}
+
+export async function driveTimeTriageFlagChecks(ok: Ok): Promise<void> {
+  const visit = (id: string, address: string) => ({ id, customerId: null, locationId: null, address }) as unknown as SiteVisit;
+  const verified: AddressState = { status: "verified", label: "1 Main St", point: { lat: 43, lng: -89 }, pointKey: "place:1 main st", fix: null };
+  const needs: AddressState = { status: "needs_check", label: "Rural Rd", point: { lat: 43, lng: -89 }, pointKey: "place:rural rd", fix: null };
+  const asked: string[][] = [];
+  const flags = await unverifiedVisitFlags(["SV-a", "SV-b", "SV-c", "SV-a", "SV-gone"], 0, {
+    getVisits: async (ids) => {
+      asked.push([...ids]);
+      return ids.filter((id) => id !== "SV-gone").map((id) => visit(id, id));
+    },
+    states: async () => new Map([["SV-a", verified], ["SV-b", needs]]),
+  });
+  ok(!flags.has("SV-a") && JSON.stringify(flags.get("SV-b")) === JSON.stringify(["Address not verified — no drive time"]) && flags.has("SV-c") && !flags.has("SV-gone"),
+    "drive-time triage: today's visits whose address isn't verified (or has no state) carry the verbatim flag; verified and missing visits don't");
+  ok(asked.length === 1 && asked[0].join() === "SV-a,SV-b,SV-c,SV-gone", "drive-time triage: visit ids are de-duplicated before one lookup");
+  ok((await unverifiedVisitFlags([], 0, { getVisits: async () => { throw new Error("never"); } })).size === 0, "drive-time triage: no visits → no lookup");
+  const failed = await unverifiedVisitFlags(["SV-a"], 0, { getVisits: async () => [visit("SV-a", "x")], states: async () => { throw new Error("db down"); } });
+  ok(failed.size === 0, "drive-time triage: a lookup failure drops the flags, never throws (the visit feed keeps today's visits)");
+  const real = await unverifiedVisitFlags(["TESTdrive:SV-unchecked"], 0, { getVisits: async () => [visit("TESTdrive:SV-unchecked", "TESTdrive 999 Nowhere Rd, Nowhere WI")] });
+  ok(real.has("TESTdrive:SV-unchecked"), "drive-time triage: an address no one has checked reads as not verified in cache mode (never geocoded)");
+  const hooks = readFileSync("src/lib/triage/hooks.ts", "utf8");
+  ok(/TRIAGE_HOOKS: TriageHooks = \{ \.\.\.NO_HOOKS, visitFlags: unverifiedVisitFlags \}/.test(hooks), "drive-time triage: the app's TRIAGE_HOOKS runs the unverified-address visit flag");
 }
