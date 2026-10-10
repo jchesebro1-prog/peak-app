@@ -1797,7 +1797,7 @@ export async function driveTimeTriageFlagChecks(ok: Ok): Promise<void> {
   const real = await unverifiedVisitFlags(["TESTdrive:SV-unchecked"], 0, { getVisits: async () => [visit("TESTdrive:SV-unchecked", "TESTdrive 999 Nowhere Rd, Nowhere WI")] });
   ok(real.has("TESTdrive:SV-unchecked"), "drive-time triage: an address no one has checked reads as not verified in cache mode (never geocoded)");
   const hooks = readFileSync("src/lib/triage/hooks.ts", "utf8");
-  ok(/TRIAGE_HOOKS: TriageHooks = \{ \.\.\.NO_HOOKS, visitFlags: unverifiedVisitFlags \}/.test(hooks), "drive-time triage: the app's TRIAGE_HOOKS runs the unverified-address visit flag");
+  ok(/TRIAGE_HOOKS: TriageHooks = \{ \.\.\.NO_HOOKS, visitFlags: unverifiedVisitFlags(, atRisk: taskPlanAtRisk)? \}/.test(hooks), "drive-time triage: the app's TRIAGE_HOOKS runs the unverified-address visit flag");
 }
 
 /* ============ Final-review fix round ============ */

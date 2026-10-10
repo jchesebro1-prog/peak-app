@@ -2,6 +2,13 @@
    (docs/superpowers/specs/2026-10-09-auto-task-calendar-design.md).
    Chained from test-review-and-spec.ts. */
 import { readFileSync } from "node:fs";
+import type { CalendarEvent } from "@/lib/google/calendar";
+import type { DriveLeg } from "@/lib/drive-plan/plan";
+import type { SiteVisit } from "@/lib/stores/site-visits";
+import { TRIAGE_HOOKS } from "@/lib/triage/hooks";
+import { planItemsByPerson } from "@/lib/task-plan/items";
+import { loadTaskPlans, savePlanPins, type PinStore, type TaskPlanDeps } from "@/lib/task-plan/load";
+import { taskPlanAtRisk } from "@/lib/task-plan/triage";
 import { like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { blobs } from "@/db/schema";
@@ -821,4 +828,119 @@ export async function autoCalPinStoreChecks(ok: Ok): Promise<void> {
   } finally {
     await db.delete(blobs).where(like(blobs.id, "task_pins:TESTautocal:%"));
   }
+}
+
+/* ---- Task 7: loader + triage hook ---- */
+export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
+  const roster = [{ id: "u1", name: "Dana" }, { id: "u2", name: "Sam" }, { id: "u3", name: "Lee" }];
+  const tk = (id: string, over: Partial<TaskRecord> = {}) => normalizeTask({ id, title: id, assigneeUserId: "u1", assigneeName: "Dana", dueAt: at(FRI, 17), createdAt: 1, ...over });
+  const asg = (id: string, over: Partial<Assignment> = {}): Assignment => ({ id, title: id, assignee: "Dana", createdBy: "x", createdAt: 1, dueDate: at(FRI, 17), link: null, done: false, doneAt: null, doneVia: null, source: "", ...over });
+  const tasks = [
+    tk("T-open"), tk("T-ip", { status: "in_progress" }), tk("T-blocked", { status: "blocked" }), tk("T-done", { status: "done" }),
+    tk("T-none", { assigneeUserId: null, assigneeName: "" }), tk("T-legacy", { assigneeUserId: null, assigneeName: "sam" }),
+    tk("T-auto-p1-x", { coverageKey: "P-1:installation:x", startAt: at(WED, 0) }), tk("T-undated", { dueAt: null, createdAt: at(MON, 9) }),
+  ];
+  const asgs = [asg("as-1"), asg("as-done", { done: true }), asg("as-lee", { assignee: "LEE" }), asg("as-noone", { assignee: "" })];
+  const by = planItemsByPerson(tasks, asgs, roster);
+  const keys = (u: string) => (by.get(u) ?? []).map((i) => i.key).sort().join();
+  ok(keys("u1") === ["asg:as-1", "task:T-auto-p1-x", "task:T-ip", "task:T-open", "task:T-undated"].sort().join(),
+    "auto-cal items: every open task and Queue assignment with an assignee — checklist/template tasks too; blocked, done and unassigned wait");
+  ok(keys("u2") === "task:T-legacy" && keys("u3") === "asg:as-lee", "auto-cal items: a name-only assignee resolves through the roster (case-insensitive)");
+  const u1 = by.get("u1")!;
+  ok(u1.find((i) => i.id === "T-auto-p1-x")?.earliestMs === at(WED, 0) && u1.find((i) => i.id === "T-ip")?.inProgress === true && u1.find((i) => i.id === "T-undated")?.dueVirtual === true,
+    "auto-cal items: a template start, In progress and a virtual due date carry into the plan");
+
+  const visit = { id: "SV-1", assignedTo: "Dana", attendees: [], invites: [], venue: "Lone Pine", customer: "LP", stage: "scheduled", startAt: at(MON, 10), endAt: at(MON, 11), googleEventId: null, address: "", customerId: null, locationId: null } as unknown as SiteVisit;
+  const gev = (id: string, s: number, e: number, over: Partial<CalendarEvent> = {}): CalendarEvent => ({ id, iCalUID: id + "@google.com", title: id, startMs: s, endMs: e, allDay: false, location: "", htmlLink: "", meetingUrl: "", selfDeclined: false, selfResponse: "", peakDriveKey: "", peakDriveDay: "", ...over });
+  const events = [gev("accepted", at(MON, 13), at(MON, 14), { selfResponse: "accepted" }), gev("tentative", at(MON, 14), at(MON, 15), { selfResponse: "tentative" }), gev("allday", at(MON, 0), at(TUE, 0), { allDay: true })];
+  const leg = { startMs: at(MON, 9, 30), endMs: at(MON, 10), flag: null } as unknown as DriveLeg;
+  const deps = (over: Partial<TaskPlanDeps> = {}): Partial<TaskPlanDeps> => ({
+    now: () => at(MON, 8),
+    roster: async () => roster,
+    tasks: async () => [],
+    assignments: async () => [],
+    visits: async () => [visit],
+    workHours: async () => DEFAULT_WORK_HOURS,
+    pins: async () => [],
+    readEvents: async () => ({ status: "ok", events }),
+    drive: async () => [{ dayKey: MON, stops: [], legs: [leg], totalMin: 30 }],
+    calendarTimeoutMs: 200,
+    ...over,
+  });
+  const many = Array.from({ length: 8 }, (_, i) => tk("M" + i, { createdAt: i }));
+  const [plan] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => many }) });
+  const mon = plan.result.blocks.filter((b) => chicagoDayKey(b.startMs) === MON);
+  const hits = (s: number, e: number) => mon.some((b) => b.startMs < e && b.endMs > s);
+  ok(plan.calendar === "ok" && plan.note === null, "auto-cal loader: a readable calendar plans with no note");
+  ok(!hits(at(MON, 10), at(MON, 11)) && !hits(at(MON, 9, 30), at(MON, 10)) && !hits(at(MON, 13), at(MON, 14)),
+    "auto-cal loader: free time excludes the visit, its drive block and accepted timed events");
+  ok(hits(at(MON, 14), at(MON, 15)), "auto-cal loader: a tentative event isn't busy and an all-day event is ignored");
+  const [failed] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => many, readEvents: async () => ({ status: "failed", events: [] }) }) });
+  ok(failed.calendar === "failed" && failed.note === "Planned without your Google calendar — may overlap meetings" && failed.result.blocks.length > 0,
+    "auto-cal loader: an unreadable Google calendar still plans, with the note");
+  const [slow] = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => many, readEvents: () => new Promise(() => {}) }) });
+  ok(slow.calendar === "failed" && slow.result.blocks.length > 0, "auto-cal loader: a calendar read that hangs times out and plans without it");
+  const everyone = await loadTaskPlans({
+    userIds: "everyone",
+    meId: "u2",
+    deps: deps({ tasks: async () => tasks, assignments: async () => asgs, readEvents: async (uid) => (uid === "u3" ? { status: "no-calendar", events: [] } : { status: "ok", events: [] }) }),
+  });
+  ok(everyone.map((p) => p.userId).join() === "u2,u1,u3", "auto-cal loader: Everyone plans each person with work — viewer first, then by name");
+  ok(everyone.find((p) => p.userId === "u3")?.note === "Planned without Lee's Google calendar — may overlap meetings", "auto-cal loader: another person's note names them");
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  await savePlanPins(
+    [{ userId: "u9", name: "X", calendar: "ok", note: null, result: { ...plan.result, newPins: [{ itemKey: "task:A", startMs: 1, endMs: 2, kind: "started" }], staleKeys: ["task:B@5"] } }],
+    { add: async (u, ps) => { added.push(`${u}:${ps.length}`); }, remove: async (u, ks) => { removed.push(`${u}:${ks.join()}`); } }
+  );
+  ok(added.join() === "u9:1" && removed.join() === "u9:task:B@5", "auto-cal loader: computing a plan persists its new started pins and drops stale ones");
+
+  const noStore = { add: async () => {}, remove: async () => {} };
+  const risky = Array.from({ length: 3 }, (_, i) => tk("R" + i, { size: "l", dueAt: at(MON, 17), createdAt: i }));
+  const me = { id: "u1", name: "Dana", canApprove: false };
+  const set = await taskPlanAtRisk(me, at(MON, 8), { deps: deps({ tasks: async () => risky }), store: noStore });
+  ok(set.has("task:R2") && !set.has("task:R0"), "auto-cal triage: the planner's At risk keys feed morning triage");
+  const boom = await taskPlanAtRisk(me, at(MON, 8), { deps: deps({ tasks: async () => { throw new Error("x"); } }), store: noStore });
+  ok(boom.size === 0, "auto-cal triage: a planner failure never hides the tasks feed");
+  ok(TRIAGE_HOOKS.atRisk === taskPlanAtRisk, "auto-cal triage: the app's triage hooks run the planner's at-risk provider");
+
+  // Fail closed: a partial item list or an unread pin blob never writes, removes or prunes a pin.
+  const calls: string[] = [];
+  const rec: PinStore = {
+    add: async (u, ps, cap) => {
+      calls.push(`add ${u} ${ps.map(pinBlobKey).join("|")} cap=${cap ? `${cap.items.map((i) => i.key).sort().join("|")}@${cap.nowMs}` : "none"}`);
+    },
+    remove: async (u, ks) => {
+      calls.push(`rm ${u} ${ks.join("|")}`);
+    },
+  };
+  const stale: PlanPin = { itemKey: "task:GONE", startMs: at(MON, 16), endMs: at(MON, 17), kind: "hand" };
+  const work = [tk("IP1", { status: "in_progress" }), tk("Q1")];
+  const down = async (): Promise<never> => {
+    throw new Error("down");
+  };
+  const partial: Array<[string, Partial<TaskPlanDeps>]> = [
+    ["tasks", { tasks: down }],
+    ["assignments", { assignments: down }],
+    ["roster", { roster: down }],
+    ["pins", { pins: down }],
+  ];
+  for (const [label, over] of partial) {
+    calls.length = 0;
+    const d = deps({ tasks: async () => work, pins: async () => [stale], ...over });
+    const rejected = await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: d }).then(() => false, () => true);
+    const s = await taskPlanAtRisk(me, at(MON, 8), { deps: d, store: rec });
+    ok(rejected && s.size === 0 && calls.length === 0, `auto-cal fail-closed: when ${label} can't be read the plan isn't computed, and no pin is written, removed or pruned`);
+  }
+  calls.length = 0;
+  await taskPlanAtRisk(me, at(MON, 8), { deps: deps({ tasks: async () => work, pins: async () => [stale] }), store: rec });
+  const adds = calls.filter((c) => c.startsWith("add "));
+  ok(calls.includes(`rm u1 ${pinBlobKey(stale)}`) && adds.length === 1 && adds[0].includes("task:IP1@") && adds[0].endsWith(` cap=task:IP1|task:Q1@${at(MON, 8)}`),
+    "auto-cal fail-closed: a full load saves the in-progress pin with the cap given exactly the items it planned with, and drops the stale pin");
+  const loadSrc = readFileSync("src/lib/task-plan/load.ts", "utf8");
+  ok(/add: \(userId, pins, cap\) => addPins\(userId, pins, cap\)/.test(loadSrc), "auto-cal fail-closed: the app's pin store passes the cap context through to addPins");
+
+  const planSrc = ["items.ts", "load.ts", "plan.ts", "pins.ts", "triage.ts"].map((f) => readFileSync(`src/lib/task-plan/${f}`, "utf8")).join("\n").replace(/import type[^;]+;/g, "");
+  ok(!/from "@\/lib\/google\/calendar"/.test(planSrc), "auto-cal google: the planner never writes to (or even value-imports) Google Calendar — task blocks are app-only");
 }

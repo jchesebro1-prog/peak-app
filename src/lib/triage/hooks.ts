@@ -1,5 +1,6 @@
 import type { TriageUser } from "./types";
 import { unverifiedVisitFlags } from "@/lib/address-verify/triage-flags";
+import { taskPlanAtRisk } from "@/lib/task-plan/triage";
 
 /**
  * Optional inputs from specs 1–3 (drive time, visit scheduling, auto task
@@ -20,4 +21,4 @@ export const NO_HOOKS: TriageHooks = {
 };
 
 /** The hooks the app runs with. */
-export const TRIAGE_HOOKS: TriageHooks = { ...NO_HOOKS, visitFlags: unverifiedVisitFlags };
+export const TRIAGE_HOOKS: TriageHooks = { ...NO_HOOKS, visitFlags: unverifiedVisitFlags, atRisk: taskPlanAtRisk };
