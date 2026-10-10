@@ -936,7 +936,7 @@ See `.env.example`.
     part tag defaults, set levels on a real job, open the DXF in AutoCAD/Vectorworks,
     decide 24×36 scaling and a read-only phone view. Later: AV/video risers, computed
     conduit fill. Punch item #321.
-48. ✅ **Site-visit scheduling** (#326, D775–D781) — visits are fixed
+48. ✅ **Site-visit scheduling** (#326, D775–D783) — visits are fixed
     appointments with a lead + `attendees` (never the lead; each gets their own
     drive chain via `visitPeople`); per-recipient invites in `SiteVisit.invites`
     (`src/lib/visit-invite-plan.ts` plans add/update/cancel; `visit-invite.ts`
@@ -949,7 +949,9 @@ See `.env.example`.
     visit-requests scheduler, the Inbox dialog and the company record's Edit
     (scheduled visits only); conflict badges on the company record (GET
     `/api/visits/conflicts`, 20 s budget), /calendar and Home; settings in
-    Settings → Field + Account. Nothing moves or blocks a visit; nothing is stored
+    Settings → Field + Account; the live booking check is GET `/api/visits/check`.
+    Deleting a past visit leaves calendars alone; updates/cancels mail from the
+    original sender's box. Nothing moves or blocks a visit; nothing is stored
     for conflicts; no migration. Remaining is Jeff-gated: the settings values, a
     real booking with attendees, and a real-mailbox CANCEL check in Gmail/Outlook/
     Apple. Punch item #326.

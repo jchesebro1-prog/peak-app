@@ -10693,8 +10693,10 @@ visits only. "Nearby days unavailable" when plausible stops had no drive time an
 
 ## D780. Where the checks run, what they cost, and who can edit (#326, 2026-10-10)
 
-Booking check: addresses in cache mode (the booking UI's own address check geocodes), each person's calendar read once,
-live OSRM under one 10 s budget, debounced 800 ms. /calendar and Home badge only the viewer's own visits — as lead or
+Booking check: addresses in cache mode (the booking UI's own address check geocodes), each person's calendar read
+once per read window (twice when the visit day is outside the look-ahead), live OSRM under one 10 s budget, debounced
+800 ms, from a GET route (`/api/visits/check`, a JSON `input` param capped at 4,000 characters) that the hook aborts
+when superseded — not a server action, so Save / Schedule never queue behind it. /calendar and Home badge only the viewer's own visits — as lead or
 attendee — from the drive layer's existing plans (no other calendar read on a page view). The company record
 lazy-loads badges for up to 10 upcoming scheduled visits, for every person on each, from a GET route
 (`/api/visits/conflicts`) rather than a server action — Next runs a page's server actions one at a time, so a slow
@@ -10710,3 +10712,21 @@ converts. Leaving attendees untouched on save leaves them alone.
 from Chicago midnight; an end of 1440 ("midnight", an end-of-day checkbox) is allowed. Settings → Field (admin) and
 Account. Saves refuse bad input (strict: whole numbers in range, end after start) instead of storing a fallback; a bad
 stored value reads as its default.
+
+## D782. Deleting a past visit leaves calendars alone (#326, 2026-10-10)
+
+Deleting a visit whose end (or, with no end, its start) is already past sends no cancellations: no `METHOD:CANCEL`
+email and no calendar delete, for anyone. The visit stays in each person's calendar history, and no one is emailed
+about removing something that already happened. A future or ongoing visit cancels everyone's copy as before
+(`cancelVisitInvites`).
+
+## D783. Updates come from the original sender; a disconnected calendar (#326, 2026-10-10)
+
+An emailed update or cancellation goes out from the mailbox that sent that person's original invite while it is still
+connected — whoever saves the change — so the ORGANIZER of the series never changes (Bob moving Jeff's visit still
+mails from Jeff's box). If that mailbox is gone it falls back to the saver's personal box, else a shared box, and the
+mailbox actually used is recorded. A calendar copy whose owner's Calendar grant is gone reads "<Name>'s calendar is
+disconnected — reconnect it to update their copy" (kept, retried); a removed person's copy that can no longer be
+deleted is dropped from the record and the summary says to remove it by hand. Every Gmail id sent per person
+(invite, updates, cancellations; a removed person's on the visit) seeds the Gmail import's dedup. Invites are saved
+after each person, so a drive sync mid-dispatch sees new event ids. Scheduling refuses a span over 24 h, like editing.

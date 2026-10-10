@@ -485,6 +485,14 @@ Jeff confirmed all four calls as built (logged as D762 in DECISIONS.md):
 - ~~**R4.** Sharing with a customer shows the meeting to every portal grant at that
   customer.~~ **ANSWERED: keep as built.**
 
+## S. Site-visit scheduling (built 2026-10-10, #326)
+
+Attendees, per-person invites, conflict checks and Edit on scheduled visits
+(D775–D783).
+
+- **S1.** **Who can edit a scheduled visit.** Anyone signed in can edit/re-lead a scheduled visit or remove attendees, which emails/cancels teammates' calendar copies — keep open, or restrict to the lead/approvers?
+  ✦ keep open to everyone signed in ☐ only the lead and approvers ☐ other: ______
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form
