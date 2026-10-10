@@ -55,11 +55,12 @@ duration, status, source, tags, ownership, participants` (participants opt-in vi
 are listed. Rate limit 5 req/s sustained, 25 per 5 s burst, per Krisp account.
 
 The list response carries **no last-modified timestamp**, so sync is a rolling date
-window, not a "changed since" cursor (see Sync). `GET /meetings/{id}` (already in
-`src/lib/krisp/client.ts`) supplies transcript + notes; the implementer must confirm
-against the live reference whether detail content is requested via `fields=` (what the
-D152 client sends) or `include=` (what the current docs index mentions) and support
-whichever the API honours.
+window, not a "changed since" cursor (see Sync). `GET /meetings/{id}?fields=…`
+(already in `src/lib/krisp/client.ts`) supplies transcript + notes — the OpenAPI spec
+defines only `fields` (the prose's `include` is a docs slip). Transcript `speakers` is a
+map keyed by diarization index whose values are `{email, first_name, last_name}`;
+indexes with no identified speaker are omitted ("fall back to Speaker N"). Action items
+arrive as `action_item` blocks inside `notes`.
 
 ## Data model
 
@@ -251,7 +252,8 @@ scope review", "tom@osakis.k12.mn.us is Tom Ellis").
 - **Attendees block** from `attendees` (not removed), names from the resolved contact /
   user when present.
 - **Speaker labels.** For each speaker idx, its original label is Krisp's participant
-  name or `Speaker_<n>` / `Speaker <n>`. With a `speakerMap` entry, every whole-word
+  name, else `Speaker <idx>` (Krisp's documented fallback); both the `Speaker <idx>` and
+  `Speaker_<idx>` spellings are replaced. With a `speakerMap` entry, every whole-word
   occurrence of the original label in segments, summary, key points and to-do assignees
   is replaced with the mapped display name.
 - Summary / key points / to-dos come from `deriveSummary(m.krisp.notes)` (existing,
@@ -342,8 +344,8 @@ requires `create`. Portal reads go through `portalSession()`'s `customerId`.
 - `429` → backoff, end batch, resume next trigger.
 - Detail `409` (still processing) → retry next sync.
 - Calendar errors → `calendar` stays null; matching proceeds without it.
-- A linked record deleted later → the link renders as "(removed)"; scope recomputed
-  ignoring dead links.
+- A linked record deleted later → the link renders as "(removed)"; the scope does not
+  change until a person unlinks it (never silently re-privatised).
 
 ## Testing
 
