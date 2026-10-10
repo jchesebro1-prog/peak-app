@@ -24,14 +24,17 @@ const NETWORK = has(/\b(network|ethernet|rj-?45)\b/);
 const NETWORK_OUTLET = has(/\b(network|ethernet|rj-?45|data)\b(\s+\S+){0,2}?\s+(outlets?|receptacles?|wall plates?)\b/);
 
 /** A dimmer / relay / sensor rack or panel. Adjacent words only ("dimmer touch panel" is a touch panel);
- *  "touch panel" never counts as the panel noun. A brand token (Unison, DRd, ERn, Sensor3, Sensor+) counts only
- *  together with a rack / panel / dimmer / relay noun in the same field, so "Unison Echo Button Station" and
- *  "Sensor+ touchscreen controller" stay out. */
+ *  "touch panel" never counts as the panel noun, and an occupancy / vacancy sensor panel ("Occupancy sensor
+ *  panel-mount") or a "sensor panel-…" is a mounting phrase, not a panel. Model-shaped tokens (DRd6, ERn) count on
+ *  their own; brand-only tokens (Unison, Sensor3, Sensor+) need a rack / panel noun in the same field, so
+ *  "Unison Echo Button Station" and "Sensor+ touchscreen controller" stay out. */
 const DIMMER_RACK = (h: string) => {
   const t = h.replace(/touch\s?panels?/g, " ");
   return (
-    /\b(dimmer|relay|dimming)s?(\s*[/&]\s*(dimmer|relay)s?)?\s+(racks?|panels?)\b|\bsensor\s+(racks?|panels?)\b/.test(t) ||
-    (/\b(unison|drd\d*|ern\d*|sensor3|sensor\+)(?=\W|$)/.test(t) && /\b(racks?|panels?|dimmers?|relays?)\b/.test(t))
+    /\b(dimmer|relay|dimming)s?(\s*[/&]\s*(dimmer|relay)s?)?\s+(racks?|panels?)\b/.test(t) ||
+    /(?<!\b(?:occupancy|vacancy)\s)\bsensor\s+(racks?|panels?)\b(?!-)/.test(t) ||
+    /\b(drd|ern)\d*(?=\W|$)/.test(t) ||
+    (/\b(unison|sensor3|sensor\+)(?=\W|$)/.test(t) && /\b(racks?|panels?)\b/.test(t))
   );
 };
 
@@ -47,7 +50,7 @@ export const SUGGEST_RULES: readonly SuggestRule[] = [
   },
   { id: "ER", test: has(/equipment rack|\benclosures?\b/), values: { code: "ER", mount: "FM" } },
   { id: "TS", test: has(/touch\s?screen|touch panel/), values: { code: "TS", mount: "FM", height: '48"' } },
-  { id: "EP", test: has(/button station|\bkeypads?\b|control station|\bpresets?\b|scene station/), values: { code: "EP", mount: "FM", height: '48"' } },
+  { id: "EP", test: has(/button station|relay station|\bkeypads?\b|control station|\bpresets?\b|scene station/), values: { code: "EP", mount: "FM", height: '48"' } },
   { id: "OCC", test: has(/\b(occupancy|vacancy)\s+sensors?\b/), values: { code: "OCC", mount: "CS" } },
   { id: "LVJB", test: has(/junction box|pull box/), values: { code: "LVJB", mount: "SM", pd: "P/D" } },
   { id: "CRON", test: all(DMX, NETWORK, OUTLET_OR_PORT), values: { code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" } },

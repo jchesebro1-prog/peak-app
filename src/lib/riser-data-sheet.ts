@@ -158,7 +158,7 @@ function levenshtein(a: string, b: string): number {
   return d[a.length][b.length];
 }
 
-/** Unrecognized headers that look like a misspelled editable column — "Hieght", "Designator", "PD". */
+/** Unrecognized headers (4+ letters, same first letter) that look like a misspelled editable column — "Hieght", "Designator". */
 function misspelledHeaderNotes(header: readonly unknown[]): string[] {
   const known = new Set(RISER_DEVICE_HEADERS.map(headerKey));
   const notes: string[] = [];
@@ -167,9 +167,10 @@ function misspelledHeaderNotes(header: readonly unknown[]): string[] {
     if (!shown || known.has(headerKey(shown))) continue;
     const n = normHeader(shown);
     if (!n) continue;
+    if (n.length < 4) continue; // "ID", "PD": too short to tell a typo from another column
     const hit = EDIT_COLUMNS.find((e) => {
       const c = normHeader(e.header);
-      return levenshtein(n, c) <= Math.max(1, Math.ceil(c.length / 4)) || (n.length >= 4 && c.includes(n));
+      return n[0] === c[0] && (levenshtein(n, c) <= Math.max(1, Math.ceil(c.length / 4)) || c.includes(n));
     });
     if (hit) notes.push(`Column "${shown}" isn't recognized — did you mean "${hit.header}"? It was ignored.`);
   }

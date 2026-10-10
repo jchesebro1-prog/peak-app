@@ -64442,7 +64442,14 @@ async function riserPhase2A1Checks(): Promise<void> {
     ["Unison Echo Button Station is EP", sug("Unison Echo Button Station"), J({ code: "EP", mount: "FM", height: '48"' })],
     ["Unison Paradigm touchscreen is TS", sug("Unison Paradigm touchscreen"), J({ code: "TS", mount: "FM", height: '48"' })],
     ["Sensor+ touchscreen controller is TS", sug("Sensor+ touchscreen controller"), J({ code: "TS", mount: "FM", height: '48"' })],
-    ["brand token alone is not DR", sug("Control cabinet", "Unison ERn"), J({})],
+    ["model token ERn is DR on its own", sug("Control panel", "Unison ERn"), J({ code: "DR", mount: "SM" })],
+    ["model token DRd6 is DR on its own", sug("Cabinet", "DRd6"), J({ code: "DR", mount: "SM" })],
+    ["plain Unison + Control panel is no match", sug("Control panel", "Unison"), J({})],
+    ["Unison Paradigm touchscreen, dimmer control is TS", sug("Unison Paradigm touchscreen, dimmer control"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["Unison Echo relay station, 6 button is EP", sug("Unison Echo relay station, 6 button"), J({ code: "EP", mount: "FM", height: '48"' })],
+    ["Unison rack is DR (brand needs a rack/panel noun)", sug("Unison rack"), J({ code: "DR", mount: "SM" })],
+    ["Occupancy sensor panel-mount is OCC", sug("Occupancy sensor panel-mount"), J({ code: "OCC", mount: "CS" })],
+    ["Vacancy sensor panel mount is OCC", sug("Vacancy sensor panel mount"), J({ code: "OCC", mount: "CS" })],
     ["Unison touch panel is TS", sug("Unison touch panel"), J({ code: "TS", mount: "FM", height: '48"' })],
     ["Sensor3 dimmer rack", sug("Sensor3 dimmer rack, 48 ch"), J({ code: "DR", mount: "SM" })],
     ["sensor rack", sug("ETC sensor rack"), J({ code: "DR", mount: "SM" })],
@@ -64532,8 +64539,9 @@ async function riserPhase2A1Checks(): Promise<void> {
   ok(R.parseRiserDataSheet([H, row({ SKU: "Y", Height: '18"' })]).rows[0].tag.height === '18"' && R.parseRiserDataSheet([H, row({ SKU: "Y", Height: "6 ft" })]).rows[0].tag.height === "6 ft", "#328 A1 parse: a Height with text is stored as typed");
   ok(R.parseRiserDataSheet([H, row({ SKU: "Y", Height: 12345678 })]).errors.length === 1, "#328 A1 parse: a numeric Height that no longer fits after the inch mark is an error");
   const typo = R.parseRiserDataSheet([["SKU", "Hieght", "Designator", "PD", "Box", "Notes", "Source"], ["a", "6", "x", "P", "B1", "n", "—"]]);
-  ok(typo.notes.length === 3 && /Hieght.*Height/.test(typo.notes[0]) && /Designator.*Designator code/.test(typo.notes[1]) && /"PD".*P\/D/.test(typo.notes[2]) && typo.rows.length === 1 && typo.errors.length === 0 && typo.rows[0].tag.height === undefined,
-    "#328 A1 parse: misspelled editable headers are non-fatal notes (Notes and Source are not flagged), the column is ignored");
+  ok(typo.notes.length === 2 && /Hieght.*Height/.test(typo.notes[0]) && /Designator.*Designator code/.test(typo.notes[1]) && typo.rows.length === 1 && typo.errors.length === 0 && typo.rows[0].tag.height === undefined,
+    "#328 A1 parse: misspelled editable headers are non-fatal notes (Notes, Source and the 2-letter PD are not flagged), the column is ignored");
+  ok(R.parseRiserDataSheet([["SKU", "Box", "Count", "ID", "Weight", "Qty"], ["a", "b", "1", "2", "3", "4"]]).notes.length === 0, "#328 A1 parse: Count, ID, Weight and Qty are not mistaken for editable columns");
   ok(pr.notes.length === 0 && R.parseRiserDataSheet([["SKU", "Boxx"], ["a", "b"]]).errors.length === 1 && R.parseRiserDataSheet([["SKU", "Boxx"], ["a", "b"]]).notes.length === 1, "#328 A1 parse: a clean header has no notes; notes ride on the fatal no-editable-column result too");
 
   // ---- 4. plan
