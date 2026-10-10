@@ -57,11 +57,18 @@ const DESIGNATOR_RE = /^(.+?)-(\d{1,6})$/;
 const RANGE_RE = /^(.+?-\d{1,6})\s*–\s*\d{1,6}$/;
 const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-/** Trim, strip control chars, collapse spaces, a typed range → its first
- *  number, cap at 24; blank (or not text) → null. */
+/** Invisible characters a pasted designator can carry: zero-width spaces and
+ *  joiners, the BOM, and bidi embeddings/overrides/isolates — removed. */
+const INVISIBLE_RE = /[\u200b-\u200d\ufeff\u202a-\u202e\u2066-\u2069]/g;
+/** C0 and C1 control characters and DEL — read as a space. */
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/** Trim, strip control and invisible chars, collapse spaces (none around a
+ *  "-": `MIC - 1` → `MIC-1`), a typed range → its first number, cap at 24;
+ *  blank (or not text) → null. */
 export function cleanDesignator(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  let s = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  let s = raw.replace(INVISIBLE_RE, "").replace(CONTROL_RE, " ").replace(/\s+/g, " ").replace(/ ?- ?/g, "-").trim();
   const range = RANGE_RE.exec(s);
   if (range) s = range[1];
   s = s.slice(0, DESIGNATOR_MAX).trim();

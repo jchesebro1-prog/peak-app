@@ -60113,9 +60113,14 @@ async function designators320PureChecks(): Promise<void> {
   const pl = (id: string, x: number, y: number, extra: Record<string, unknown> = {}) => ({ id, sheetId: "s1", page: 1, x, y, partId: "P", ...extra });
 
   // clean / parse / format
-  ok(D.cleanDesignator("  MIC \u0007 -1 ") === "MIC -1" && D.cleanDesignator("x".repeat(30)) === "x".repeat(24) && D.cleanDesignator("   ") === null && D.cleanDesignator(5) === null,
+  ok(D.cleanDesignator("  MIC \u0007 -1 ") === "MIC-1" && D.cleanDesignator("x".repeat(30)) === "x".repeat(24) && D.cleanDesignator("   ") === null && D.cleanDesignator(5) === null,
     "#320 cleanDesignator: trims, collapses spaces, strips control chars, caps at 24; blank/non-text → null");
   ok(D.cleanDesignator("LX-1–24") === "LX-1" && D.cleanDesignator("LX-1 – 24") === "LX-1", "#320 cleanDesignator: a typed range keeps its first number");
+  ok(D.cleanDesignator("MIC -1") === "MIC-1" && D.cleanDesignator("MIC - 1") === "MIC-1" && D.cleanDesignator("MIC-  1") === "MIC-1" && D.cleanDesignator("FOH AMP") === "FOH AMP",
+    "#320 cleanDesignator: spaces around a \"-\" collapse (MIC - 1 → MIC-1); other inner spaces stay single");
+  ok(D.cleanDesignator("MIC\u0085-1") === "MIC-1" && D.cleanDesignator("\u009bMIC-2") === "MIC-2" && D.cleanDesignator("MIC\u200b-\u200c3\u200d") === "MIC-3" &&
+     D.cleanDesignator("\ufeffLX-4") === "LX-4" && D.cleanDesignator("\u202eLX-5\u202c") === "LX-5" && D.cleanDesignator("\u2066A-6\u2069") === "A-6" && D.cleanDesignator("\u200b\u202e") === null,
+    "#320 cleanDesignator: C1 controls, zero-width chars, the BOM and bidi overrides/isolates are stripped");
   ok(J(D.parseDesignator("MIC-12")) === J({ code: "MIC", n: 12 }) && D.parseDesignator("mic-3")?.code === "mic" && J(D.parseDesignator("A-1-2")) === J({ code: "A-1", n: 2 }),
     "#320 parseDesignator: <code>-<number>, code kept as written");
   ok(D.parseDesignator("FOH-AMP") === null && D.parseDesignator("MIC-0") === null && D.parseDesignator("MIC-1234567") === null && D.parseDesignator(undefined) === null,
