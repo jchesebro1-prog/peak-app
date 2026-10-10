@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { handOff, markInProgress, pinBlock, pushDueDate, setTierSize, unpinBlock, type WriteResult } from "@/lib/task-plan/write";
 
 /**
@@ -9,6 +10,8 @@ import { handOff, markInProgress, pinBlock, pushDueDate, setTierSize, unpinBlock
  * actions. Each is requireUser() then the write in src/lib/task-plan/write.ts
  * (which validates the untrusted input). Nothing here writes Google Calendar.
  */
+const actorOf = (u: { id: string; roles: string[] }) => ({ id: u.id, admin: can("manage_users", u.roles) });
+
 async function finish(run: () => Promise<WriteResult>): Promise<WriteResult> {
   try {
     const r = await run();
@@ -21,13 +24,13 @@ async function finish(run: () => Promise<WriteResult>): Promise<WriteResult> {
 }
 
 export async function pinBlockAction(input: unknown): Promise<WriteResult> {
-  await requireUser();
-  return finish(() => pinBlock(input));
+  const u = await requireUser();
+  return finish(() => pinBlock(input, actorOf(u)));
 }
 
 export async function unpinBlockAction(input: unknown): Promise<WriteResult> {
-  await requireUser();
-  return finish(() => unpinBlock(input));
+  const u = await requireUser();
+  return finish(() => unpinBlock(input, actorOf(u)));
 }
 
 export async function pushDueDateAction(input: unknown): Promise<WriteResult> {

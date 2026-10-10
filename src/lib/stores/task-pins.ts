@@ -13,7 +13,7 @@
  * past pins the plan no longer depends on (pinsToPrune in task-plan/pins.ts);
  * anything else stays and the overflow is logged. Never a current or future pin.
  */
-import { eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { getBlob, setBlob } from "@/db/doc-store";
 import { blobs } from "@/db/doc-tables";
@@ -73,6 +73,21 @@ export async function removePinKeys(userId: string, keys: readonly string[]): Pr
   for (const k of list) expr = sql`(${expr}) - ${k}::text`;
   const db = await getDb();
   await db.update(blobs).set({ data: expr, updatedAt: Date.now() }).where(eq(blobs.id, pinsBlobId(userId)));
+}
+
+/** Move one pin in ONE statement: drop `fromKey` and add the new pin, only if
+ *  `fromKey` is still there. False = it already moved or went (a double or
+ *  concurrent drag), and nothing was written. */
+export async function movePin(userId: string, fromKey: string, to: PlanPin): Promise<boolean> {
+  if (!userId || !fromKey) return false;
+  const patch = JSON.stringify({ [pinBlobKey(to)]: pinBlobValue(to) });
+  const db = await getDb();
+  const rows = await db
+    .update(blobs)
+    .set({ data: sql`(${blobs.data} - ${fromKey}::text) || ${patch}::jsonb`, updatedAt: Date.now() })
+    .where(and(eq(blobs.id, pinsBlobId(userId)), sql`jsonb_exists(${blobs.data}, ${fromKey})`))
+    .returning({ id: blobs.id });
+  return rows.length > 0;
 }
 
 export async function clearItemPins(userId: string | null | undefined, itemKey: string): Promise<number> {
