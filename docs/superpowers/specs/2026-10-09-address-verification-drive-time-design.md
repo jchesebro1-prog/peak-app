@@ -227,9 +227,4 @@ brainstorm → spec → plan.
 3. **Auto task calendar** — written:
    `2026-10-09-auto-task-calendar-design.md` (time blocks, blended urgency,
    pins; plans around visits + drive blocks).
-4. **Morning triage** — one ranked list (~10, "see more") from email, Krisp
-   calls (needs #323 merged) and tasks; each row shows source + why it's
-   ranked there; call items show the transcript line they came from
-   (deterministic text match, "source line not found" otherwise). Open: one
-   rep or whole team; what counts as a "waiting" email (same day / 1 / 2
-   days); midday refresh (free if computed on page load); Motion rules.
+4. **Morning triage** — written: `2026-10-09-morning-triage-design.md`.
