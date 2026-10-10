@@ -113,8 +113,8 @@ import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
 export type Ok = (c: boolean, m: string) => void;
 
 /* ---- shared helpers (later tasks add more below these) ---- */
-const DAY = "2026-10-14"; // a Wednesday, CDT (UTC-5); every test day stays in October
-const at = (hh: number, mm = 0, plusDays = 0) => Date.UTC(2026, 9, 14 + plusDays, hh + 5, mm);
+const DAY = "2036-10-15"; // a Wednesday, CDT (UTC-5), far in the future so "scheduled" never reads "done"; every test day stays in October
+const at = (hh: number, mm = 0, plusDays = 0) => Date.UTC(2036, 9, 15 + plusDays, hh + 5, mm);
 const P1: LatLng = { lat: 44.0, lng: -88.0 };
 const okAddr = (p: LatLng, key: string): AddressState => ({ status: "verified", label: key, point: p, pointKey: "place:" + key, fix: null });
 
@@ -1631,7 +1631,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `planDay`, `dayDriveTotal`, `fmtDur`, `pairKey`, `DriveLeg` (plan.ts); `DriveStop`, `isVisitIcsCopy`, `visitPeople` (stops.ts); `chicagoDayStart`, `addDays`, `DRIVE_TZ` (day.ts); `visitEventIds`, `InviteVisitShape` (Task 2); `WorkHours`, `fmtClock` (Task 3).
 - Produces:
-  - `hours.ts`: `chicagoMinuteOfDay(ms): number`; `chicagoWallMs(dayKey, minuteOfDay): number` (DST-safe; 1440 = next midnight); `weekdayOf(dayKey): number`; `WEEKDAY_NAMES`; `workWindow(dayKey, hours: WorkHours): { startMs: number; endMs: number } | null` (null = not a work day); `fmtDayLabel(dayKey): string` (`"Wed Oct 14"`); `fmtClockShort(min): string` (`540` → `"9"`, `690` → `"11:30"`).
+  - `hours.ts`: `chicagoMinuteOfDay(ms): number`; `chicagoWallMs(dayKey, minuteOfDay): number` (DST-safe; 1440 = next midnight); `weekdayOf(dayKey): number`; `WEEKDAY_NAMES`; `workWindow(dayKey, hours: WorkHours): { startMs: number; endMs: number } | null` (null = not a work day); `fmtDayLabel(dayKey): string` (`"Wed Oct 15"`); `fmtClockShort(min): string` (`540` → `"9"`, `690` → `"11:30"`).
   - `busy.ts`: `type BusyBlock = { key: string; kind: "visit" | "event"; label: string; startMs: number; endMs: number }`; `type BusyVisit = { id; label; startAt; endAt; stage; people: string[]; eventIds: string[] }`; `type BusyEvent = { id; iCalUID; title; startMs; endMs; allDay; selfDeclined; selfResponse?: string; peakDriveKey }`; `type VisitForBusy = InviteVisitShape & { venue: string; customer: string; stage: string }`; `toBusyVisit(v: VisitForBusy): BusyVisit`; `isBusyEvent(e: BusyEvent): boolean`; `busyBlocks({ person, visits, events, excludeVisitId? }): BusyBlock[]`; `busyInRange(blocks, minMs, maxMs): BusyBlock[]`; `fmtBusyRange(b): string` (`"9–10:30"`); `fmtBusy(blocks): string` (merged, `"9–11:30, 2–3"`).
   - `check.ts`: `type ConflictKind = "double_booked" | "tight_drive" | "outside_hours" | "too_much_driving"`; `type Conflict = { kind: ConflictKind; text: string }`; `CONFLICT_LABEL`; `CHECKED_WITHOUT_DRIVE = "Checked without drive time"`; `overlaps(a0, a1, b0, b1): boolean` (strict — back-to-back isn't an overlap); `fmtLimit(min): string` (`300` → `"5h"`); `type StopCheckInput = { stopKey; dayKey; stops: DriveStop[]; legs: DriveLeg[]; busy: BusyBlock[]; hours: WorkHours; dailyDriveLimitMin: number }`; `stopConflicts(i): { conflicts: Conflict[]; driveChecked: boolean }`; `type CalendarRead = "ok" | "no-calendar" | "failed"`; `calendarNote(person, calendar): string | null`; `type AttendeeDay = { person; dayKey; stops; legs; busy; hours; calendar: CalendarRead }`; `type PersonCheck = { person: string; conflicts: Conflict[]; notes: string[]; calendar: CalendarRead }`; `checkVisit(candidate: { key: string }, days: AttendeeDay[], opts: { dailyDriveLimitMin: number }): PersonCheck[]`.
   - `calendar.ts`: `CalendarEvent.selfResponse?: string` — the signed-in account's own `responseStatus` (`""` when it has no attendee row, i.e. its own event).
@@ -1677,7 +1677,7 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
     "site-visits hours: 8:00 is 8:00 Chicago on both DST-change days");
   ok(chicagoWallMs(DAY, 1440) === chicagoDayStart(addDays(DAY, 1)) && chicagoWallMs("2026-03-08", 1430) === Date.UTC(2026, 2, 9, 4, 50),
     "site-visits hours: end-of-day and late-evening wall times land on the right instant");
-  ok(chicagoMinuteOfDay(at(13, 30)) === 810 && weekdayOf(DAY) === 3 && fmtDayLabel(DAY) === "Wed Oct 14", "site-visits hours: minute of day, weekday and day label");
+  ok(chicagoMinuteOfDay(at(13, 30)) === 810 && weekdayOf(DAY) === 3 && fmtDayLabel(DAY) === "Wed Oct 15", "site-visits hours: minute of day, weekday and day label");
   const win = workWindow(DAY, DEFAULT_WORK_HOURS);
   ok(win?.startMs === at(8) && win.endMs === at(17) && workWindow(addDays(DAY, 3), DEFAULT_WORK_HOURS) === null,
     "site-visits hours: a work day's window is 8:00–5:00 Chicago; Saturday has none");
@@ -1702,8 +1702,8 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
   ok(busyBlocks({ person: "Dana", visits, events: null }).map((b) => b.key).join() === "sv:SV-1,sv:SV-9", "site-visits busy: no calendar → visits only");
   ok(fmtBusy([busyEv("a", at(9), at(10)), busyEv("b", at(9, 30), at(11, 30)), busyEv("c", at(14), at(15))]) === "9–11:30, 2–3", "site-visits busy: busy times merge and print 9–11:30, 2–3");
   const mapped = toCalendarEvents([
-    { id: "a", summary: "A", start: { dateTime: "2026-10-14T14:00:00Z" }, end: { dateTime: "2026-10-14T15:00:00Z" }, attendees: [{ email: "me@x.com", self: true, responseStatus: "tentative" }] },
-    { id: "b", summary: "B", start: { dateTime: "2026-10-14T14:00:00Z" }, end: { dateTime: "2026-10-14T15:00:00Z" } },
+    { id: "a", summary: "A", start: { dateTime: "2036-10-15T14:00:00Z" }, end: { dateTime: "2036-10-15T15:00:00Z" }, attendees: [{ email: "me@x.com", self: true, responseStatus: "tentative" }] },
+    { id: "b", summary: "B", start: { dateTime: "2036-10-15T14:00:00Z" }, end: { dateTime: "2036-10-15T15:00:00Z" } },
   ]);
   ok(mapped[0].selfResponse === "tentative" && mapped[1].selfResponse === "", "site-visits calendar: my own response is read (blank on my own events)");
 
@@ -1818,7 +1818,7 @@ export function workWindow(dayKey: string, hours: WorkHours): { startMs: number;
   return { startMs: chicagoWallMs(dayKey, hours.startMin), endMs: chicagoWallMs(dayKey, hours.endMin) };
 }
 
-/** "Wed Oct 14" */
+/** "Wed Oct 15" */
 export function fmtDayLabel(dayKey: string): string {
   const [y, m, d] = dayKey.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).replace(",", "");
@@ -2065,7 +2065,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `projectTime(startMs, endMs, dayKey): { startMs: number; endMs: number }` (same Chicago time of day on another day).
   - `attendeeStatusOn(o: OtherAttendee, dayKey, slot: { startMs: number; endMs: number } | null)`.
   - `suggestDays({ candidate: { key; point: LatLng | null; startMs: number | null; endMs: number | null }, leadDays, routeMinutes: ReadonlyMap<string, number>, sameAreaMin, lookaheadDays, others }): NearbyResult`.
-  - `nearbyLine(d: NearbyDay): string` → `"Thu Oct 15 · 18 min from Lone Pine Elementary · busy 9–11:30"`.
+  - `nearbyLine(d: NearbyDay): string` → `"Thu Oct 16 · 18 min from Lone Pine Elementary · busy 9–11:30"`.
   - `index.ts` re-exports `people`, `settings`, `hours`, `busy`, `check`, `nearby` (never `load`).
 
 - [ ] **Step 1: Write the failing tests**
@@ -2109,10 +2109,10 @@ export async function siteVisitsNearbyChecks(ok: Ok): Promise<void> {
   const res = suggestDays({ candidate: { key: "sv:SELF", point: CAND, startMs: at(13), endMs: at(14) }, leadDays, routeMinutes: routes, sameAreaMin: 45, lookaheadDays: 21, others });
   ok(res.status === "ok" && res.days.map((x) => x.dayKey).join() === [d(2), d(6), d(1)].join(),
     "site-visits nearby: ranked by nearest drive minutes, then soonest");
-  const oct15 = res.status === "ok" ? res.days[2] : null;
-  ok(!!oct15 && nearbyLine(oct15) === "Thu Oct 15 · 18 min from Lone Pine Elementary · busy 9–11:30",
+  const day1 = res.status === "ok" ? res.days[2] : null;
+  ok(!!day1 && nearbyLine(day1) === "Thu Oct 16 · 18 min from Lone Pine Elementary · busy 9–11:30",
     "site-visits nearby: a row reads date · minutes from the nearest stop · the lead's busy times");
-  ok(!!oct15 && oct15.others.map((o) => `${o.person}:${o.status}`).join() === "Jeff:conflict,Sam:unknown" &&
+  ok(!!day1 && day1.others.map((o) => `${o.person}:${o.status}`).join() === "Jeff:conflict,Sam:unknown" &&
      res.status === "ok" && res.days[0].others.map((o) => `${o.person}:${o.status}`).join() === "Jeff:free,Sam:unknown",
     "site-visits nearby: each other attendee shows free / conflict at the chosen time that day (unknown when their calendar can't be read)");
   ok(res.status === "ok" && res.days.every((x) => x.nearest.minutes === 12 || x.nearest.minutes === 18),

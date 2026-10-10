@@ -5,10 +5,9 @@ import { triageKey } from "../keys";
 import type { TriageCandidate, TriageFact } from "../types";
 import type { TriageFeed } from "./context";
 
-/** Spec 2 adds `attendees: string[]` (names); until then a visit has only its lead, `assignedTo`. */
+/** Everyone besides the lead on a visit (names). */
 export function visitAttendees(v: SiteVisit): string[] {
-  const a = (v as SiteVisit & { attendees?: unknown }).attendees;
-  return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : [];
+  return Array.isArray(v.attendees) ? v.attendees.filter((x): x is string => typeof x === "string") : [];
 }
 
 /** Today's (Chicago) visits not yet done where `me` is the lead or an attendee. */

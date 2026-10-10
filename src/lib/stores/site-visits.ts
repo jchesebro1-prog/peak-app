@@ -82,13 +82,20 @@ export function mergedVisitReasons(stored?: string[] | null): string[] {
   return list.length ? list : DEFAULT_VISIT_REASONS;
 }
 
+/** The lead is never also an attendee (trimmed, case-sensitive — the same
+ *  match cleanAttendees uses). */
+function withoutLead(names: string[], lead: string | null | undefined): string[] {
+  const leadName = (lead || "").trim();
+  return leadName ? names.filter((n) => n !== leadName) : names;
+}
+
 /** Normalize-on-read (#34): backfill the lifecycle fields on pre-#34 docs
  *  and derive stage (a stored "scheduled" past its end reads "done"). */
 function normalizeVisit(v: SiteVisit): SiteVisit {
   v.startAt = v.startAt ?? null;
   v.endAt = v.endAt ?? null;
   v.customerId = v.customerId ?? null;
-  v.attendees = readAttendees(v.attendees);
+  v.attendees = withoutLead(readAttendees(v.attendees), v.assignedTo);
   v.stage = deriveVisitStage(v, Date.now());
   v.leadId = v.leadId ?? null;
   v.surveyId = v.surveyId ?? null;
@@ -144,7 +151,7 @@ export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
   const now = Date.now();
   return insertWithPrefixedId<SiteVisit>("site_visits", "SV", 5000, (id) => ({
     ...input,
-    attendees: input.attendees ?? [],
+    attendees: withoutLead(readAttendees(input.attendees), input.assignedTo),
     id,
     createdAt: now,
     updatedAt: now,
@@ -202,7 +209,7 @@ export async function scheduleVisit(id: string, startAt: number, endAt: number, 
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
     d.startAt = startAt;
     d.endAt = endAt;
-    if (attendees) d.attendees = attendees.filter((n) => n !== d.assignedTo);
+    if (attendees) d.attendees = withoutLead(readAttendees(attendees), d.assignedTo);
     d.stage = "scheduled";
     d.updatedAt = Date.now();
   });
@@ -217,11 +224,11 @@ export async function updateVisitBooking(id: string, patch: VisitBookingPatch): 
     d.startAt = patch.startAt;
     d.endAt = patch.endAt;
     d.assignedTo = patch.assignedTo;
-    d.attendees = patch.attendees.filter((n) => n !== patch.assignedTo);
+    d.attendees = withoutLead(readAttendees(patch.attendees), patch.assignedTo);
     d.stage = "scheduled";
     d.updatedAt = Date.now();
   });
-  return saved ? getVisit(id) : null;
+  return saved ? normalizeVisit(saved) : null;
 }
 
 /** Close out a still-unscheduled visit (final-review fix #34): the lead it
