@@ -5,10 +5,14 @@
  *   schedule_defaults            { driveBufferMin }        admin, Settings → Field
  *   schedule_prefs:<userId>      { driveBufferMin | null } the rep, Account
  *   stay_over:<userId>           { "YYYY-MM-DD": true }    one key per day
- *   drive_sync:<userId>          { lastSyncAt, legacyCleanedAt, staleAt }
+ *   drive_sync:<userId>          { lastSyncAt, legacyCleanedAt, staleAt,
+ *                                  legacyRetry, legacyCursorMs, syncingUntil }
  * Blobs survive the go-live demo wipe.
  */
+import { and, eq, sql } from "drizzle-orm";
+import { getDb } from "@/db";
 import { getBlob, setBlob } from "@/db/doc-store";
+import { blobs } from "@/db/doc-tables";
 import { isDayKey } from "@/lib/drive-plan/day";
 
 export const SCHEDULE_DEFAULTS_BLOB = "schedule_defaults";
@@ -18,8 +22,19 @@ export const MAX_DRIVE_BUFFER_MIN = 120;
 export type ScheduleDefaults = { driveBufferMin: number };
 export type UserSchedulePrefs = { driveBufferMin: number | null };
 /** staleAt: when markDriveStale last ran — a sync that started before it
- *  must not stamp the rep fresh (drive-sync compares it with its start). */
-export type DriveSyncState = { lastSyncAt: number; legacyCleanedAt: number | null; staleAt?: number };
+ *  must not stamp the rep fresh (drive-sync compares it with its start).
+ *  legacyRetry: D144 blocks whose delete failed after a complete scan, retried
+ *  by later drive syncs (no re-scan). legacyCursorMs: where a scan cut off by
+ *  its read cap resumes. The sync lease (syncingUntil) is not part of this
+ *  state — only acquire/releaseDriveSyncLease touch it. */
+export type LegacyRetry = Record<string, { startMs: number; tries: number }>;
+export type DriveSyncState = {
+  lastSyncAt: number;
+  legacyCleanedAt: number | null;
+  staleAt?: number;
+  legacyRetry?: LegacyRetry;
+  legacyCursorMs?: number;
+};
 
 const prefsId = (userId: string) => `schedule_prefs:${userId}`;
 const stayId = (userId: string) => `stay_over:${userId}`;
@@ -85,12 +100,26 @@ export async function setStayOver(userId: string, dayKey: string, on: boolean): 
   return true;
 }
 
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+function cleanLegacyRetry(v: unknown): LegacyRetry {
+  const out: LegacyRetry = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [id, r] of Object.entries(v as Record<string, unknown>)) {
+    const e = r as { startMs?: unknown; tries?: unknown } | null;
+    if (id && e && finite(e.startMs) && finite(e.tries)) out[id] = { startMs: e.startMs, tries: e.tries };
+  }
+  return out;
+}
+
 export async function getDriveSyncState(userId: string): Promise<DriveSyncState> {
   const raw = await getBlob<Record<string, unknown>>(syncId(userId), {});
   return {
     lastSyncAt: typeof raw.lastSyncAt === "number" ? raw.lastSyncAt : 0,
     legacyCleanedAt: typeof raw.legacyCleanedAt === "number" ? raw.legacyCleanedAt : null,
     staleAt: typeof raw.staleAt === "number" ? raw.staleAt : 0,
+    legacyRetry: cleanLegacyRetry(raw.legacyRetry),
+    ...(finite(raw.legacyCursorMs) ? { legacyCursorMs: raw.legacyCursorMs } : {}),
   };
 }
 
@@ -98,6 +127,8 @@ export async function setDriveSyncState(userId: string, patch: Partial<DriveSync
   const clean: Record<string, unknown> = {};
   if (typeof patch?.lastSyncAt === "number" && Number.isFinite(patch.lastSyncAt)) clean.lastSyncAt = patch.lastSyncAt;
   if (typeof patch?.staleAt === "number" && Number.isFinite(patch.staleAt)) clean.staleAt = patch.staleAt;
+  if (finite(patch?.legacyCursorMs)) clean.legacyCursorMs = patch.legacyCursorMs;
+  if (patch && "legacyRetry" in patch) clean.legacyRetry = cleanLegacyRetry(patch.legacyRetry);
   if (patch && "legacyCleanedAt" in patch && (patch.legacyCleanedAt === null || (typeof patch.legacyCleanedAt === "number" && Number.isFinite(patch.legacyCleanedAt))))
     clean.legacyCleanedAt = patch.legacyCleanedAt;
   if (!Object.keys(clean).length) return;
@@ -108,4 +139,47 @@ export async function setDriveSyncState(userId: string, patch: Partial<DriveSync
  *  lets a sync already in flight see the mark and leave the rep stale. */
 export async function markDriveStale(userIds: string[], nowMs: number = Date.now()): Promise<void> {
   for (const id of userIds) await setDriveSyncState(id, { lastSyncAt: 0, staleAt: nowMs });
+}
+
+/* ---- the per-rep sync lease ---------------------------------------------
+ * Concurrent syncs for one rep (cron, page-load stale check, a visit change's
+ * after() resync) would each read Google, plan, and insert the same leg. Every
+ * sync takes this lease first. Acquire is ONE conditional statement on the
+ * drive_sync blob row (insert, or update only where syncingUntil is absent or
+ * past), so two racing acquires can't both win. The lease expires on its own
+ * (a crashed sync never wedges the rep). */
+
+export const DRIVE_SYNC_LEASE_MS = 90_000;
+
+/** The lease token (its syncingUntil) when acquired, null when another sync
+ *  holds the rep. */
+export async function acquireDriveSyncLease(userId: string, nowMs: number = Date.now(), ttlMs: number = DRIVE_SYNC_LEASE_MS): Promise<number | null> {
+  const until = Math.round(nowMs + ttlMs);
+  const patch = { syncingUntil: until };
+  const db = await getDb();
+  const rows = await db
+    .insert(blobs)
+    .values({ id: syncId(userId), data: patch, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: blobs.id,
+      set: { data: sql`${blobs.data} || ${JSON.stringify(patch)}::jsonb`, updatedAt: Date.now() },
+      setWhere: sql`coalesce(case when jsonb_typeof(${blobs.data}->'syncingUntil') = 'number' then (${blobs.data}->>'syncingUntil')::numeric end, 0) < ${Math.round(nowMs)}`,
+    })
+    .returning({ id: blobs.id });
+  return rows.length ? until : null;
+}
+
+/** Frees the rep — only if the lease is still this token (an expired lease
+ *  someone else has since taken is left alone). */
+export async function releaseDriveSyncLease(userId: string, token: number): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(blobs)
+    .set({ data: sql`${blobs.data} - 'syncingUntil'`, updatedAt: Date.now() })
+    .where(
+      and(
+        eq(blobs.id, syncId(userId)),
+        sql`case when jsonb_typeof(${blobs.data}->'syncingUntil') = 'number' then (${blobs.data}->>'syncingUntil')::numeric end = ${Math.round(token)}`
+      )
+    );
 }

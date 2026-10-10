@@ -6,11 +6,18 @@
  * calendar is app-only; a write failure is logged and retried on the next
  * sync. Callers run these inside after() (next/server) — never on the
  * request's critical path.
+ *
+ * Concurrency: every sync takes the rep's lease (acquireDriveSyncLease, one
+ * conditional statement on the drive_sync blob) before it reads Google; a
+ * sync that finds it held skips and leaves the rep stale. As a second line,
+ * the tagged events are re-listed right before diffing, so a slow plan
+ * (live geocoding + routing) never diffs against a read that is tens of
+ * seconds old.
  */
 import { addressStatesForVisits, type VisitAddressInput } from "@/lib/address-verify/targets";
 import type { AddressState } from "@/lib/address-verify/types";
 import { addDays, chicagoDayKey, chicagoDayStart, isDayKey } from "@/lib/drive-plan/day";
-import { planDriveDays, type DriveDayPlan, type DriveLoadMode } from "@/lib/drive-plan/load";
+import { planDriveDays, visitAddressInput, type DriveDayPlan, type DriveLoadMode } from "@/lib/drive-plan/load";
 import { visitPeople } from "@/lib/drive-plan/stops";
 import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
 import { getConnectionInfo } from "@/lib/gmail/connections";
@@ -20,10 +27,16 @@ import {
   listEventsForSync,
   updateEvent,
   type EventWriteInput,
-  type SyncCalendarEvent,
   type SyncRead,
 } from "@/lib/google/calendar";
-import { getDriveSyncState, setDriveSyncState, type DriveSyncState } from "@/lib/stores/schedule-prefs";
+import {
+  acquireDriveSyncLease,
+  getDriveSyncState,
+  releaseDriveSyncLease,
+  setDriveSyncState,
+  type DriveSyncState,
+  type LegacyRetry,
+} from "@/lib/stores/schedule-prefs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { allUsers } from "@/lib/users";
 import {
@@ -39,8 +52,12 @@ import {
 export const STALE_SYNC_MS = 10 * 60_000;
 export const SYNC_WINDOW_DAYS = 15;
 export const LEGACY_LOOKAHEAD_MS = 180 * 86_400_000;
-/** Paged reads the one-time D144 scan may make (each up to 1,000 events). */
+/** Paged reads the one-time D144 scan may make per sync (each up to 1,000
+ *  events); a scan cut off here resumes from its cursor on the next sync. */
 const LEGACY_MAX_READS = 10;
+/** Attempts at deleting one D144 block (the scan's + later retries) before
+ *  it is given up on and logged. */
+const LEGACY_RETRY_LIMIT = 5;
 
 export function syncWindowDays(nowMs: number): string[] {
   const today = chicagoDayKey(nowMs);
@@ -65,13 +82,18 @@ export type DriveSyncDeps = {
   users(): Promise<Array<{ id: string; name: string; status: string }>>;
   visits(): Promise<SiteVisit[]>;
   visitStates(visits: VisitAddressInput[], mode: DriveLoadMode): Promise<Map<string, AddressState>>;
+  /** The per-rep sync lease: its token when acquired, null when held. */
+  acquireLease(userId: string, nowMs: number): Promise<number | null>;
+  releaseLease(userId: string, token: number): Promise<void>;
   log(msg: string, err?: unknown): void;
 };
 
 export type DriveSyncResult = {
   userId: string;
   days: string[];
-  google: "written" | "no-calendar" | "read-failed" | "none";
+  /** busy: another sync holds the rep's lease — nothing read or written, the
+   *  rep is left stale for the next view / cron pass. */
+  google: "written" | "no-calendar" | "read-failed" | "busy" | "none";
   inserted: number;
   updated: number;
   removed: number;
@@ -99,6 +121,8 @@ function defaultDeps(): DriveSyncDeps {
     users: async () => (await allUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
     visits: allVisits,
     visitStates: (visits, mode) => addressStatesForVisits(visits, mode),
+    acquireLease: (userId, nowMs) => acquireDriveSyncLease(userId, nowMs),
+    releaseLease: releaseDriveSyncLease,
     log: (msg, err) => console.error(msg, err),
   };
 }
@@ -109,22 +133,32 @@ function toWrite(ev: DesiredDriveEvent): EventWriteInput {
   return { title: ev.title, startMs: ev.startMs, endMs: ev.endMs, description: ev.description, privateProps: drivePrivateProps(ev) };
 }
 
+type LegacyScan = { complete: boolean; cursorMs: number; failed: LegacyRetry };
+
 /** D144 retirement — upcoming exact-shape blocks, today → +180 days, read
- *  with the paged reader and continued where a capped read stopped. True
- *  only when the whole range was read and every delete went through. */
-async function cleanLegacyBlocks(key: string, now: number, d: DriveSyncDeps, res: DriveSyncResult): Promise<boolean> {
+ *  with the paged reader from `fromMs` (a cut-off scan's cursor) and
+ *  continued where a capped read stopped. complete = the whole range was
+ *  read; deletes that failed come back in `failed` for later retries. */
+async function scanLegacyBlocks(
+  key: string,
+  now: number,
+  fromMs: number | undefined,
+  skip: ReadonlySet<string>,
+  d: DriveSyncDeps,
+  res: DriveSyncResult
+): Promise<LegacyScan> {
   const today = chicagoDayKey(now);
   const endMs = chicagoDayStart(addDays(today, Math.round(LEGACY_LOOKAHEAD_MS / 86_400_000)));
-  let cursor = chicagoDayStart(today);
-  let clean = true;
-  const seen = new Set<string>(); // a continued read overlaps the last one
+  let cursor = Math.max(chicagoDayStart(today), fromMs ?? 0);
+  const failed: LegacyRetry = {};
+  const seen = new Set<string>(skip); // a continued read overlaps the last one; retried ids are handled elsewhere
   for (let i = 0; i < LEGACY_MAX_READS; i++) {
     let read: SyncRead;
     try {
       read = await d.listEvents(key, { timeMinMs: cursor, timeMaxMs: endMs });
     } catch (err) {
       res.errors.push("legacy list: " + errText(err));
-      return false;
+      return { complete: false, cursorMs: cursor, failed };
     }
     for (const ev of read.events) {
       if (seen.has(ev.id)) continue;
@@ -134,16 +168,61 @@ async function cleanLegacyBlocks(key: string, now: number, d: DriveSyncDeps, res
         await d.deleteEvent(key, ev.id);
         res.legacyRemoved++;
       } catch (err) {
-        clean = false;
+        failed[ev.id] = { startMs: ev.startMs, tries: 1 };
         res.errors.push("legacy " + ev.id + ": " + errText(err));
       }
     }
-    if (read.coveredThroughMs >= endMs) return clean;
+    if (read.coveredThroughMs >= endMs) return { complete: true, cursorMs: endMs, failed };
     if (!(read.coveredThroughMs > cursor)) break; // no progress — try again next sync
     cursor = read.coveredThroughMs;
   }
   res.errors.push("legacy list: calendar read did not finish");
-  return false;
+  return { complete: false, cursorMs: cursor, failed };
+}
+
+/** Runs after the drive writes. Retries remembered failed deletes (a block
+ *  that has since passed is dropped — past ones are left — and one that
+ *  keeps failing is given up after LEGACY_RETRY_LIMIT tries), then, until a
+ *  complete scan has been stamped, scans (or resumes the scan). legacyCleanedAt
+ *  is stamped once the whole range has been read, failed deletes or not. */
+async function retireLegacyBlocks(userId: string, key: string, now: number, d: DriveSyncDeps, res: DriveSyncResult): Promise<void> {
+  const state = await d.getState(userId);
+  const before = state.legacyRetry ?? {};
+  const retry: LegacyRetry = { ...before };
+  let changed = false;
+  for (const [id, r] of Object.entries(before)) {
+    changed = true;
+    if (r.startMs < now) {
+      delete retry[id];
+      continue;
+    }
+    try {
+      await d.deleteEvent(key, id);
+      res.legacyRemoved++;
+      delete retry[id];
+    } catch (err) {
+      const tries = r.tries + 1;
+      if (tries >= LEGACY_RETRY_LIMIT) {
+        delete retry[id];
+        res.errors.push(`legacy ${id}: giving up after ${tries} tries: ${errText(err)}`);
+      } else {
+        retry[id] = { startMs: r.startMs, tries };
+        res.errors.push("legacy " + id + ": " + errText(err));
+      }
+    }
+  }
+  const patch: Partial<DriveSyncState> = {};
+  if (!state.legacyCleanedAt) {
+    const scan = await scanLegacyBlocks(key, now, state.legacyCursorMs, new Set(Object.keys(before)), d, res);
+    for (const [id, r] of Object.entries(scan.failed)) {
+      retry[id] = r;
+      changed = true;
+    }
+    if (scan.complete) patch.legacyCleanedAt = now;
+    else patch.legacyCursorMs = scan.cursorMs;
+  }
+  if (changed) patch.legacyRetry = retry;
+  if (Object.keys(patch).length) await d.setState(userId, patch);
 }
 
 export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Partial<DriveSyncDeps>): Promise<DriveSyncResult> {
@@ -156,43 +235,70 @@ export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Pa
   if (!days.length) return res;
 
   const key = await d.calendarKeyFor(userId);
-  let events: SyncCalendarEvent[] | null = null;
-  let covered: string[] = [];
-  if (key) {
-    try {
-      // Whole Chicago days: the day before the first (its last stop is a
-      // stay-over origin) through the end of the last.
-      const read = await d.listEvents(key, {
-        timeMinMs: chicagoDayStart(addDays(days[0], -1)),
-        timeMaxMs: chicagoDayStart(addDays(days[days.length - 1], 1)),
-      });
-      events = read.events;
-      // A capped read saw only part of the window: diff just the days it saw
-      // in full, or a missing tagged event would be re-inserted (duplicate)
-      // and a missing stop's event wrongly deleted.
-      covered = daysFullyCovered(days, read.coveredThroughMs);
-    } catch (err) {
-      d.log("[drive-sync] calendar read failed " + userId, err);
-      res.google = "read-failed";
-      return res; // can't see our tagged events — writing now could duplicate
-    }
-  } else {
+  if (!key) {
     res.google = "no-calendar";
+    const plans = await d.plan({ userId, dayKeys: days, events: null, mode: "live" });
+    res.flagged = plans.flatMap((p) => p.legs).filter((l) => l.flag).length;
+    return res;
   }
 
-  const plans = await d.plan({ userId, dayKeys: days, events, mode: "live" });
+  // One sync per rep at a time. A sync that finds the lease held skips and
+  // marks the rep stale — the holder's reads may predate whatever triggered
+  // this one, so the holder must not stamp the rep fresh (syncWindow).
+  const lease = await d.acquireLease(userId, now);
+  if (lease == null) {
+    res.google = "busy";
+    await d.setState(userId, { lastSyncAt: 0, staleAt: now });
+    return res;
+  }
+  try {
+    await syncLeased(userId, key, days, now, d, res);
+  } finally {
+    try {
+      await d.releaseLease(userId, lease);
+    } catch (err) {
+      d.log("[drive-sync] lease release failed " + userId + " (it expires on its own)", err);
+    }
+  }
+  return res;
+}
+
+async function syncLeased(userId: string, key: string, days: string[], now: number, d: DriveSyncDeps, res: DriveSyncResult): Promise<void> {
+  // Whole Chicago days: the day before the first (its last stop is a
+  // stay-over origin) through the end of the last.
+  const range = { timeMinMs: chicagoDayStart(addDays(days[0], -1)), timeMaxMs: chicagoDayStart(addDays(days[days.length - 1], 1)) };
+  let first: SyncRead;
+  try {
+    first = await d.listEvents(key, range);
+  } catch (err) {
+    d.log("[drive-sync] calendar read failed " + userId, err);
+    res.google = "read-failed";
+    return; // can't see our tagged events — writing now could duplicate
+  }
+
+  const plans = await d.plan({ userId, dayKeys: days, events: first.events, mode: "live" });
   const legs = plans.flatMap((p) => p.legs);
   res.flagged = legs.filter((l) => l.flag).length;
-  if (!key || !events) return res;
 
-  const state = await d.getState(userId);
-  if (!state.legacyCleanedAt && (await cleanLegacyBlocks(key, now, d, res))) await d.setState(userId, { legacyCleanedAt: now });
-
+  // Planning geocodes and routes live (tens of seconds): re-read the tagged
+  // events right before diffing, so the diff never works from a stale copy.
+  let fresh: SyncRead;
+  try {
+    fresh = await d.listEvents(key, range);
+  } catch (err) {
+    d.log("[drive-sync] calendar re-read failed " + userId, err);
+    res.google = "read-failed";
+    return;
+  }
+  // A capped read saw only part of the window: diff just the days it saw
+  // in full, or a missing tagged event would be re-inserted (duplicate)
+  // and a missing stop's event wrongly deleted.
+  const covered = daysFullyCovered(days, fresh.coveredThroughMs);
   if (covered.length < days.length) res.errors.push(`calendar read truncated: ${days.length - covered.length} day(s) left for the next sync`);
   // "Drive time unavailable — retrying" is transient (OSRM down / out of
   // budget): its leg still exists, so its Google event stays as it is.
   const retrying = new Set(legs.filter((l) => l.flag?.kind === "route_unavailable").map((l) => l.key));
-  const existing = existingFromCalendar(events).filter((e) => !retrying.has(e.key));
+  const existing = existingFromCalendar(fresh.events).filter((e) => !retrying.has(e.key));
   const diff = diffDriveEvents(desiredFromLegs(legs), existing, new Set(covered));
   for (const ev of diff.insert) {
     try {
@@ -218,9 +324,16 @@ export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Pa
       res.errors.push("delete " + r.id + ": " + errText(err));
     }
   }
-  if (res.errors.length) d.log("[drive-sync] " + userId + " sync errors", res.errors);
   res.google = "written";
-  return res;
+
+  // The one-time D144 retirement runs AFTER the drive writes — never in the
+  // read → write gap.
+  try {
+    await retireLegacyBlocks(userId, key, now, d, res);
+  } catch (err) {
+    res.errors.push("legacy: " + errText(err));
+  }
+  if (res.errors.length) d.log("[drive-sync] " + userId + " sync errors", res.errors);
 }
 
 /** The whole window, then stamp lastSyncAt — unless markDriveStale ran after
@@ -324,10 +437,7 @@ export async function resyncForAddress(pointKey: string, deps?: Partial<DriveSyn
   const minMs = chicagoDayStart(window[0]);
   const maxMs = chicagoDayStart(addDays(window[window.length - 1], 1));
   const upcoming = (await d.visits()).filter((v) => v.startAt != null && v.startAt >= minMs && v.startAt < maxMs);
-  const states = await d.visitStates(
-    upcoming.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
-    "cache"
-  );
+  const states = await d.visitStates(upcoming.map(visitAddressInput), "cache");
   const map = new Map<string, Set<string>>();
   for (const v of upcoming) if (states.get(v.id)?.pointKey === pointKey) addPersonDays(map, v);
   await syncPeopleDays(map, d);

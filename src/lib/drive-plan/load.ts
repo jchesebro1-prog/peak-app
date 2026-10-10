@@ -44,10 +44,24 @@ export type RouteDeps = {
   budgetMs: number;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** When the next OSRM request may go out. Shared by every loader in this
+   *  instance (the module default), so concurrent syncs stay at ≤ 1 request
+   *  per delayMs combined. Tests inject their own. */
+  pacer: { nextAt: number };
 };
 
+/** The instance-wide OSRM turn queue (see RouteDeps.pacer). */
+const osrmPacer = { nextAt: 0 };
+
+/** The address input the address-state lookups take for a visit — the one
+ *  mapping the loader and the sync both use. */
+export function visitAddressInput(v: Pick<SiteVisit, "id" | "customerId" | "locationId" | "address">): VisitAddressInput {
+  return { id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address };
+}
+
 /** geo_cache first (pairKey === geo routeKey); in live mode, OSRM for the
- *  misses, paced and budgeted. A failed route stays missing → flagged. */
+ *  misses, paced (one shared turn queue per instance) and budgeted per call.
+ *  A failed route stays missing → flagged. */
 export async function routeMinutesFor(
   pairs: Array<{ from: LatLng; to: LatLng }>,
   mode: DriveLoadMode,
@@ -60,6 +74,7 @@ export async function routeMinutesFor(
     budgetMs: 20_000,
     now: Date.now,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    pacer: osrmPacer,
     ...deps,
   };
   const out = new Map<string, number>();
@@ -71,8 +86,13 @@ export async function routeMinutesFor(
     for (const p of pairs) {
       const k = pairKey(p.from, p.to);
       if (out.has(k)) continue;
-      if (n > 0 && d.now() - start + d.delayMs + FETCH_TIMEOUT_MS > d.budgetMs) break;
-      if (n > 0) await d.sleep(d.delayMs);
+      // Take the next shared turn — synchronously, so two loaders can't take
+      // the same one — unless it would land past this call's own budget.
+      const now = d.now();
+      const slot = Math.max(now, d.pacer.nextAt);
+      if ((n > 0 || slot > now) && slot - start + FETCH_TIMEOUT_MS > d.budgetMs) break;
+      d.pacer.nextAt = slot + d.delayMs;
+      if (slot > now) await d.sleep(slot - now);
       n++;
       const r = await d.live(p.from, p.to);
       if (r) out.set(k, r.minutes);
@@ -120,7 +140,7 @@ export async function planDriveDays(args: {
     (v) => v.startAt != null && v.startAt >= minMs && v.startAt < maxMs && visitPeople(v).includes(user.name)
   );
   const vStates = await d.visitStates(
-    mine.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
+    mine.map(visitAddressInput),
     args.mode
   );
   const evs = (args.events ?? []).filter((e) => e.startMs >= minMs && e.startMs < maxMs);

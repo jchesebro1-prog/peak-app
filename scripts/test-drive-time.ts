@@ -13,6 +13,8 @@ import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/tar
 import { cleanFixInput, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
 import { routeKey, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import {
+  DRIVE_SYNC_LEASE_MS,
+  acquireDriveSyncLease,
   bufferMinFor,
   cleanBufferMin,
   driveBufferFor,
@@ -20,6 +22,7 @@ import {
   getScheduleDefaults,
   getStayOvers,
   markDriveStale,
+  releaseDriveSyncLease,
   saveScheduleDefaults,
   saveUserSchedulePrefs,
   setDriveSyncState,
@@ -54,7 +57,7 @@ import {
   type ExistingDriveEvent,
 } from "@/lib/drive-sync/diff";
 import { eventWriteBody, readSyncPages, toCalendarEvents, type CalendarEvent, type EventPage, type SyncCalendarEvent } from "@/lib/google/calendar";
-import { planDriveDays, routeMinutesFor, type DriveLoadDeps } from "@/lib/drive-plan/load";
+import { planDriveDays, routeMinutesFor, visitAddressInput, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import {
   LEGACY_LOOKAHEAD_MS,
   resyncForAddress,
@@ -773,6 +776,24 @@ export async function driveTimePrefsChecks(ok: Ok): Promise<void> {
     const good = await saveScheduleDefaults({ driveBufferMin: before.driveBufferMin });
     ok(!bad.ok && !blank.ok && afterRefused === 33 && good.ok && good.driveBufferMin === before.driveBufferMin && (await getScheduleDefaults()).driveBufferMin === before.driveBufferMin,
       "drive-time prefs: the company default refuses blank / non-numeric input with an error and keeps the stored value");
+
+    // The per-rep sync lease: one conditional statement on the drive_sync blob row.
+    const L = "TESTdrive:lease";
+    const T0 = 1_000_000;
+    const first = await acquireDriveSyncLease(L, T0); // no row yet → insert path
+    const second = await acquireDriveSyncLease(L, T0 + 1_000);
+    ok(first === T0 + DRIVE_SYNC_LEASE_MS && second === null && DRIVE_SYNC_LEASE_MS === 90_000,
+      "drive-time lease: the first acquire holds the rep for 90 s; a second acquire while it's held gets nothing");
+    const race = await Promise.all([acquireDriveSyncLease("TESTdrive:race", T0), acquireDriveSyncLease("TESTdrive:race", T0)]);
+    ok(race.filter((t) => t !== null).length === 1, "drive-time lease: two concurrent acquires — exactly one wins");
+    await setDriveSyncState(L, { lastSyncAt: 777 });
+    const expired = await acquireDriveSyncLease(L, T0 + DRIVE_SYNC_LEASE_MS + 1);
+    ok(expired === T0 + 2 * DRIVE_SYNC_LEASE_MS + 1 && (await getDriveSyncState(L)).lastSyncAt === 777,
+      "drive-time lease: an expired lease is re-acquirable, and the lease never disturbs the sync state");
+    await releaseDriveSyncLease(L, first as number); // stale token: someone else's lease now
+    ok((await acquireDriveSyncLease(L, T0 + DRIVE_SYNC_LEASE_MS + 2)) === null, "drive-time lease: releasing with an old token leaves the current holder's lease alone");
+    await releaseDriveSyncLease(L, expired as number);
+    ok((await acquireDriveSyncLease(L, T0 + DRIVE_SYNC_LEASE_MS + 3)) !== null, "drive-time lease: the holder's release frees the rep at once");
   } finally {
     await db.delete(blobs).where(like(blobs.id, "%TESTdrive:%"));
   }
@@ -906,7 +927,7 @@ export async function driveTimeLoaderChecks(ok: Ok): Promise<void> {
   const rdeps = {
     cached: async (keys: string[]) => new Map(keys.filter((k) => k === pairKey(BASE, P1)).map((k) => [k, { miles: 50, minutes: 60 }])),
     live: async (a: { lat: number; lng: number }) => { liveCalls++; return a.lat === P1.lat ? { miles: 30, minutes: 40 } : null; },
-    delayMs: 0, budgetMs: 60_000, now: () => 0, sleep: async () => {},
+    delayMs: 0, budgetMs: 60_000, now: () => 0, sleep: async () => {}, pacer: { nextAt: 0 },
   };
   const pairs = [{ from: BASE, to: P1 }, { from: P1, to: P2 }, { from: P2, to: BASE }];
   const cachedOnly = await routeMinutesFor(pairs, "cache", rdeps);
@@ -914,6 +935,45 @@ export async function driveTimeLoaderChecks(ok: Ok): Promise<void> {
   const live = await routeMinutesFor(pairs, "live", rdeps);
   ok(live.get(pairKey(P1, P2)) === 40 && !live.has(pairKey(P2, BASE)) && liveCalls === 2,
     "drive-time routes: live mode routes the misses; an OSRM failure stays missing");
+
+  // Pacing is shared: two loaders running at once never exceed 1 OSRM request / second combined.
+  // Virtual time: sleeps queue timers; the driver fires the earliest once every promise has settled.
+  let t = 0;
+  const callTimes: number[] = [];
+  const pacer = { nextAt: 0 };
+  const timers: Array<{ at: number; fire: () => void }> = [];
+  const paced = {
+    cached: async () => new Map(),
+    live: async () => { callTimes.push(t); return { miles: 1, minutes: 1 }; },
+    delayMs: 1_000, budgetMs: 60_000, now: () => t,
+    sleep: (ms: number) => new Promise<void>((fire) => { timers.push({ at: t + ms, fire }); }),
+    pacer,
+  };
+  async function virtually<T>(p: Promise<T>): Promise<T> {
+    let done = false;
+    const run = p.finally(() => { done = true; });
+    for (let guard = 0; !done && guard < 1_000; guard++) {
+      await new Promise((r) => setImmediate(r));
+      if (done) break;
+      timers.sort((a, b) => a.at - b.at);
+      const next = timers.shift();
+      if (next) { t = Math.max(t, next.at); next.fire(); }
+    }
+    return run;
+  }
+  const pt = (n: number) => ({ lat: 40 + n / 100, lng: -90 });
+  const pairsA = [0, 1, 2].map((n) => ({ from: pt(n), to: pt(n + 10) }));
+  const pairsB = [3, 4, 5].map((n) => ({ from: pt(n), to: pt(n + 10) }));
+  const [ra, rb] = await virtually(Promise.all([routeMinutesFor(pairsA, "live", paced), routeMinutesFor(pairsB, "live", paced)]));
+  const sortedCalls = [...callTimes].sort((a, b) => a - b);
+  ok(ra.size === 3 && rb.size === 3 && sortedCalls.length === 6 && sortedCalls.every((c, i) => i === 0 || c - sortedCalls[i - 1] >= 1_000),
+    "drive-time routes: concurrent live loaders share one pace — never two OSRM requests within a second" + (sortedCalls.length ? " (" + sortedCalls.join(",") + ")" : ""));
+  t = 0;
+  callTimes.length = 0;
+  pacer.nextAt = 50_000; // the shared queue is already 50 s deep
+  const budgeted = await virtually(routeMinutesFor(pairsA, "live", { ...paced, budgetMs: 20_000 }));
+  ok(budgeted.size === 0 && callTimes.length === 0 && pacer.nextAt === 50_000,
+    "drive-time routes: a loader whose turn would land past its own budget skips OSRM (and doesn't take a turn)");
 }
 
 export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
@@ -932,6 +992,8 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     { ...gEv("legacy", { title: "Drive to Board (auto)", startMs: NOW + 3_600_000, location: "" }), description: "Auto-added travel time — safe to delete or edit." },
     { ...gEv("legacy-past", { title: "Drive to Old (auto)", startMs: NOW - 3_600_000, location: "" }), description: "Auto-added travel time — old" },
   ];
+  // In-memory stand-in for the drive_sync lease (the real one is a conditional SQL update, tested in the prefs checks).
+  let leaseUntil = 0;
   const fullRead = (evs: SyncCalendarEvent[]) => async (_k: string, range: { timeMinMs: number; timeMaxMs: number }) => ({ events: evs, coveredThroughMs: range.timeMaxMs });
   const deps = (over: Partial<DriveSyncDeps> = {}): Partial<DriveSyncDeps> => ({
     now: () => NOW,
@@ -946,6 +1008,8 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     users: async () => [{ id: "u1", name: "Dana", status: "active" }],
     visits: async () => [visit("SV-1", {})],
     visitStates: async (vs) => new Map(vs.map((v) => [v.id, okAddr(P1.lat, P1.lng, v.id)])),
+    acquireLease: async (_u, nowMs) => { if (leaseUntil > nowMs) return null; leaseUntil = nowMs + 90_000; return leaseUntil; },
+    releaseLease: async (_u, token) => { if (leaseUntil === token) leaseUntil = 0; },
     log: () => {},
     ...over,
   });
@@ -959,6 +1023,9 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     "drive-time sync: the missing drive-back leg is inserted with its leg key");
   ok(calls.includes("delete:legacy") && !calls.includes("delete:legacy-past") && r.legacyRemoved === 1 && typeof state.legacyCleanedAt === "number",
     "drive-time sync: first sync deletes upcoming D144 blocks only, then remembers it did");
+  ok(calls.indexOf("delete:legacy") > calls.indexOf("delete:orphan") && calls.indexOf("delete:legacy") > calls.findIndex((c) => c.startsWith("insert:")),
+    "drive-time sync: the one-time D144 scan runs after the drive writes, never between the drive read and its writes");
+  ok(leaseUntil === 0, "drive-time sync: the lease is released when the sync finishes");
   calls.length = 0;
   await syncDriveDays("u1", [DAY], deps());
   ok(!calls.includes("delete:legacy"), "drive-time sync: the D144 cleanup runs once per rep");
@@ -987,7 +1054,7 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     },
     plan: (a) => planDriveDays({ ...a, deps: loadDeps({ visits: async () => [visit("SV-1", {}), visit("SV-2", { startAt: at(9) + DAY_MS, endAt: at(10) + DAY_MS })] }) }),
   }));
-  ok(ranges.length === 1 && ranges[0].timeMinMs === chicagoDayStart(addDays(DAY, -1)) && ranges[0].timeMaxMs === chicagoDayStart(addDays(D2, 1)),
+  ok(ranges.length === 2 && ranges.every((x) => x.timeMinMs === chicagoDayStart(addDays(DAY, -1)) && x.timeMaxMs === chicagoDayStart(addDays(D2, 1))),
     "drive-time sync: the Google read window runs from a Chicago day start (the day before, for stay-over origins) to the start of the day after the last synced day");
   ok(calls.includes("delete:orphanA") && calls.some((c) => c.includes(`|${DAY}|`)) && !calls.includes("delete:orphanB") && !calls.some((c) => c.includes(`|${D2}|`)) &&
      twoDays.errors.some((e) => e.includes("truncated")),
@@ -1038,6 +1105,108 @@ export async function driveTimeSyncChecks(ok: Ok): Promise<void> {
     listEvents: async (_k, range) => { if (isLegacyRead(range)) throw new Error("500"); return { events, coveredThroughMs: range.timeMaxMs }; },
   }));
   ok(state.legacyCleanedAt === null && legacyFails.google === "written" && legacyFails.errors.length >= 1, "drive-time sync: a failed D144 read is logged, not stamped, and blocks nothing");
+
+  // A persistently failing D144 delete: stamped after the complete read, retried on later drive syncs, no re-scan.
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  const scanRanges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
+  let legacyDeleteTries = 0;
+  const failingDel = deps({
+    listEvents: async (_k, range) => { if (isLegacyRead(range)) scanRanges.push(range); return { events, coveredThroughMs: range.timeMaxMs }; },
+    deleteEvent: async (_k, id) => { if (id === "legacy") { legacyDeleteTries++; throw new Error("403"); } calls.push("delete:" + id); },
+  });
+  const f1 = await syncDriveDays("u1", [DAY], failingDel);
+  ok(typeof state.legacyCleanedAt === "number" && scanRanges.length === 1 && legacyDeleteTries === 1 && f1.errors.some((e) => e.startsWith("legacy legacy")) && !!state.legacyRetry?.legacy,
+    "drive-time sync: a D144 scan that read the whole range is stamped even when a delete failed; the failed id is remembered");
+  await syncDriveDays("u1", [DAY], failingDel);
+  await syncDriveDays("u1", [DAY], failingDel);
+  ok(scanRanges.length === 1 && legacyDeleteTries === 3 && state.legacyRetry?.legacy?.tries === 3,
+    "drive-time sync: later drive syncs retry the failed D144 delete without re-running the 180-day scan");
+  for (let i = 0; i < 4; i++) await syncDriveDays("u1", [DAY], failingDel);
+  ok(scanRanges.length === 1 && legacyDeleteTries === 5 && !state.legacyRetry?.legacy,
+    "drive-time sync: a D144 delete that keeps failing is given up after 5 tries (logged), never retried forever");
+  state = { ...state, legacyRetry: { gone: { startMs: NOW + 3_600_000, tries: 1 }, old: { startMs: NOW - 1, tries: 1 } } };
+  calls.length = 0;
+  const retried = await syncDriveDays("u1", [DAY], deps());
+  ok(calls.includes("delete:gone") && !calls.includes("delete:old") && retried.legacyRemoved === 1 && Object.keys(state.legacyRetry ?? {}).length === 0,
+    "drive-time sync: a retried D144 delete that succeeds is cleared; one that has since passed is dropped, not deleted");
+
+  // A D144 scan that hits its read cap resumes from where it stopped on the next sync.
+  state = { lastSyncAt: 0, legacyCleanedAt: null };
+  const capRanges: Array<{ timeMinMs: number; timeMaxMs: number }> = [];
+  const crawl = deps({
+    listEvents: async (_k, range) => {
+      if (!isLegacyRead(range)) return { events, coveredThroughMs: range.timeMaxMs };
+      capRanges.push(range);
+      return { events: [], coveredThroughMs: range.timeMinMs + DAY_MS };
+    },
+  });
+  await syncDriveDays("u1", [DAY], crawl);
+  const cursorAfter = state.legacyCursorMs;
+  await syncDriveDays("u1", [DAY], crawl);
+  ok(state.legacyCleanedAt === null && capRanges.length === 20 && cursorAfter === chicagoDayStart(DAY) + 10 * DAY_MS && capRanges[10].timeMinMs === cursorAfter,
+    "drive-time sync: a D144 scan cut off by its read cap is resumed from its cursor next sync, not restarted");
+
+  // Concurrent syncs for one rep (cron + page load + visit change) never double-insert a leg.
+  const cal: SyncCalendarEvent[] = [];
+  const inserted: string[] = [];
+  let nextId = 0;
+  const calDeps = (over: Partial<DriveSyncDeps> = {}) => deps({
+    listEvents: async (_k, range) => ({ events: [...cal], coveredThroughMs: range.timeMaxMs }),
+    insertEvent: async (_k, ev) => {
+      const id = "ins" + ++nextId;
+      const key = ev.privateProps?.peakDriveKey ?? "";
+      cal.push(tagged(id, key, ev.startMs, ev.endMs, ev.title, ev.privateProps?.peakDriveDay ?? DAY));
+      inserted.push(key);
+      return { id };
+    },
+    deleteEvent: async (_k, id) => { const i = cal.findIndex((e) => e.id === id); if (i >= 0) cal.splice(i, 1); },
+    ...over,
+  });
+  const perKey = () => new Set(inserted).size === inserted.length && inserted.length === 2;
+  const realPlan = (a: Parameters<DriveSyncDeps["plan"]>[0]) => planDriveDays({ ...a, deps: loadDeps({ visits: async () => [visit("SV-1", {})] }) });
+  // (1a) No lease at all: the re-list right before diffing sees the other sync's inserts.
+  state = { lastSyncAt: 0, legacyCleanedAt: 1 };
+  const noLease = { acquireLease: async (_u: string, n: number) => n + 90_000, releaseLease: async () => {} };
+  let started = false;
+  await syncDriveDays("u1", [DAY], calDeps({
+    ...noLease,
+    plan: async (a) => { if (!started) { started = true; await syncDriveDays("u1", [DAY], calDeps(noLease)); } return realPlan(a); },
+  }));
+  ok(perKey(), "drive-time sync: two interleaved syncs sharing one calendar insert each leg exactly once (re-list before diffing)" + " — " + inserted.join(" "));
+  // (1b) With the lease: the second sync skips and leaves the rep stale; the first inserts once.
+  cal.length = 0;
+  inserted.length = 0;
+  leaseUntil = 0;
+  state = { lastSyncAt: 0, legacyCleanedAt: 1 };
+  let inner: Awaited<ReturnType<typeof syncDriveDays>> | null = null;
+  let innerReads = 0;
+  started = false;
+  await syncDriveForUser("u1", calDeps({
+    plan: async (a) => {
+      if (!started) {
+        started = true;
+        inner = await syncDriveDays("u1", [DAY], calDeps({ listEvents: async (_k, range) => { innerReads++; return { events: [...cal], coveredThroughMs: range.timeMaxMs }; } }));
+      }
+      return realPlan(a);
+    },
+  }));
+  const innerRes = inner as Awaited<ReturnType<typeof syncDriveDays>> | null;
+  ok(perKey() && innerRes?.google === "busy" && innerReads === 0, "drive-time sync: a second sync while the rep's lease is held skips before reading Google");
+  ok(state.lastSyncAt === 0 && (state.staleAt ?? 0) >= NOW && leaseUntil === 0,
+    "drive-time sync: the skipped sync leaves the rep stale (the holder can't stamp it fresh), and the holder releases the lease");
+  leaseUntil = NOW + 20 * 60_000;
+  state = { lastSyncAt: NOW, legacyCleanedAt: 1 };
+  const held = await syncDriveIfStale("u1", deps({ now: () => NOW + 11 * 60_000 }));
+  ok(held?.google === "busy" && state.lastSyncAt === 0, "drive-time sync: a stale-on-load sync that finds the lease held skips and stays stale");
+  leaseUntil = NOW - 1; // expired
+  calls.length = 0;
+  const reAcq = await syncDriveDays("u1", [DAY], deps());
+  ok(reAcq.google === "written" && calls.includes("delete:orphan") && leaseUntil === 0, "drive-time sync: an expired lease is taken over");
+  leaseUntil = NOW + 10_000;
+  const visitSeen: string[][] = [];
+  await resyncForVisitChange(null, { startAt: at(9), assignedTo: "Dana" }, deps({ plan: async (a) => { visitSeen.push(a.dayKeys); return []; } }));
+  ok(visitSeen.length === 0, "drive-time sync: a visit-change resync respects a held lease too");
+  leaseUntil = 0;
 
   state = { lastSyncAt: NOW - 60_000, legacyCleanedAt: 1 };
   ok((await syncDriveIfStale("u1", deps())) === null, "drive-time sync: a sync under 10 min old is not repeated");
@@ -1099,6 +1268,13 @@ export async function driveTimeNoStraightLinePins(ok: Ok): Promise<void> {
   ok(offenders.length === 0, "drive-time pin: nothing on the drive path calls a straight-line estimate" + (offenders.length ? " — " + offenders.join(", ") : ""));
   ok(readdirSync("src/lib/drive-plan").includes("load.ts") && readdirSync("src/lib/drive-sync").includes("sync.ts"),
     "drive-time pin: the loader and the sync engine are inside the pinned directories");
+  const loadSrc = readFileSync("src/lib/drive-plan/load.ts", "utf8");
+  const syncSrc = readFileSync("src/lib/drive-sync/sync.ts", "utf8");
+  const v = visitAddressInput({ id: "SV-9", customerId: "c", locationId: "l", address: "a", venue: "x" } as unknown as SiteVisit);
+  ok(JSON.stringify(v) === JSON.stringify({ id: "SV-9", customerId: "c", locationId: "l", address: "a" }) &&
+     /\.map\(visitAddressInput\)/.test(loadSrc) && /\.map\(visitAddressInput\)/.test(syncSrc) &&
+     ((loadSrc + syncSrc).match(/locationId: v\.locationId/g) ?? []).length === 1,
+    "drive-time pin: one visitAddressInput helper builds the address input in both the loader and the sync");
 }
 
 export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
