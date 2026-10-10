@@ -2,12 +2,16 @@
    (docs/superpowers/specs/2026-10-09-address-verification-drive-time-design.md).
    Chained from test-review-and-spec.ts. Pure rules only so far; later tasks
    add the DB-backed checks here. */
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import { getDb } from "@/db";
-import { sites } from "@/db/schema";
+import { placeBook, sites } from "@/db/schema";
 import { saveSite } from "@/lib/identity/sites";
 import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
 import { locateVenue } from "@/lib/venue-locate";
+import { getPlaces, placeStatesFor, writePlace, fixPlace } from "@/lib/address-verify/place-book";
+import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/targets";
+import { cleanFixInput, fixAddress } from "@/lib/address-verify/fix";
+import { searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import { addressKey, isPhysicalLocation } from "@/lib/address-verify/keys";
 import {
   backfillStatus,
@@ -200,5 +204,162 @@ export async function driveTimeVenueStampChecks(ok: Ok): Promise<void> {
   } finally {
     globalThis.fetch = realFetch;
     await db.delete(sites).where(eq(sites.id, ID));
+  }
+}
+
+const hit = (street: string, lat = 44.3, lng = -88.6): GeoSearchHit => ({
+  title: street, sub: street, name: "", street, city: "Hortonville", state: "WI", zip: "54944", lat, lng, display: street,
+});
+const fastDeps = (search: (q: string) => Promise<GeoSearchHit[]>) => ({
+  search, delayMs: 0, budgetMs: 60_000, now: () => 1_790_000_000_000, sleep: async () => {},
+});
+
+export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const realFetch = globalThis.fetch;
+  try {
+    // searchOrThrow: an outage throws; a real empty answer is [].
+    globalThis.fetch = (async () => new Response("down", { status: 503 })) as typeof fetch;
+    let threw503 = false;
+    try { await searchOrThrow("TESTdrive 1 School Rd"); } catch { threw503 = true; }
+    globalThis.fetch = (async () => { throw new Error("offline in test"); }) as typeof fetch;
+    let threwNet = false;
+    try { await searchOrThrow("TESTdrive 1 School Rd"); } catch { threwNet = true; }
+    globalThis.fetch = (async () => new Response("[]", { status: 200 })) as typeof fetch;
+    const empty = await searchOrThrow("TESTdrive 1 School Rd");
+    globalThis.fetch = realFetch;
+    ok(threw503 && threwNet && Array.isArray(empty) && empty.length === 0,
+      "drive-time geo: searchOrThrow throws on an outage/error status and returns [] only for a real empty answer");
+
+    const A = "TESTdrive 1 School Rd, Hortonville WI";
+    const B = "TESTdrive Main St, Hortonville WI";
+    const C = "TESTdrive Down Server Rd";
+    const cache = await placeStatesFor([A], "cache");
+    ok(cache.get(addressKey(A))?.status === "unresolved" && (await getPlaces([addressKey(A)])).size === 0,
+      "drive-time place book: cache mode never geocodes and never writes");
+
+    let calls = 0;
+    const search = async (q: string) => {
+      calls++;
+      if (q.includes("Down Server")) throw new Error("Nominatim 503");
+      return q.includes("1 School") ? [hit("1 School Rd")] : [hit("Main St")];
+    };
+    const live = await placeStatesFor([A, B, C, "  " + A.toUpperCase() + "  "], "live", fastDeps(search));
+    ok(calls === 3, "drive-time place book: duplicate spellings of one key geocode once");
+    ok(live.get(addressKey(A))?.status === "verified" && live.get(addressKey(A))?.point?.lat === 44.3,
+      "drive-time place book: a building-level hit writes back verified");
+    ok(live.get(addressKey(B))?.status === "needs_check", "drive-time place book: a street-only hit is stored needs_check");
+    const rows = await getPlaces([addressKey(A), addressKey(B), addressKey(C)]);
+    ok(rows.get(addressKey(B))?.status === "needs_check" && !rows.has(addressKey(C)) && live.get(addressKey(C))?.status === "unresolved",
+      "drive-time place book: a geocoder outage writes nothing (unresolved for now, retried next sync)");
+    calls = 0;
+    await placeStatesFor([A, B], "live", fastDeps(search));
+    ok(calls === 0, "drive-time place book: known keys are read from the book, not re-geocoded");
+
+    // A typed house number is not proof: the hit's own street decides.
+    const E = "TESTdrive 55 Highway Rd, Hortonville WI";
+    const F = "TESTdrive 7 Frontage Rd, Hortonville WI";
+    const judged = await placeStatesFor([E, F], "live", fastDeps(async (q) => (q.includes("55 Highway") ? [hit("Main St")] : [hit("US Highway 14")])));
+    ok(judged.get(addressKey(E))?.status === "needs_check" && judged.get(addressKey(F))?.status === "needs_check" &&
+       judged.get(addressKey(E))?.point === null,
+      "drive-time place book: a hit with no real house number (street-only or a numbered road) is needs_check even when the typed text has a number");
+    // A real empty answer is stored unresolved (a real "no match", not an outage).
+    const G = "TESTdrive Nowhere Land";
+    await placeStatesFor([G], "live", fastDeps(async () => []));
+    ok((await getPlaces([addressKey(G)])).get(addressKey(G))?.status === "unresolved",
+      "drive-time place book: a real empty answer is stored unresolved");
+
+    // Pin, then a geocode write must not overwrite it.
+    const pin = await fixPlace({ key: addressKey(B), label: B, mode: "pin", lat: 44.31, lng: -88.61 }, "u1", fastDeps(search));
+    ok(pin.ok && pin.status === "verified", "drive-time place book: a dropped pin verifies");
+    await writePlace({ ...rows.get(addressKey(B))!, lat: 1, lng: 1, status: "needs_check", source: "geocode" }, { overwritePin: false });
+    const afterPin = (await getPlaces([addressKey(B)])).get(addressKey(B));
+    ok(afterPin?.source === "pin" && afterPin.lat === 44.31 && afterPin.verifiedBy === "u1",
+      "drive-time place book: a geocode write never overwrites a pin");
+    await placeStatesFor([B], "live", fastDeps(search));
+    ok((await getPlaces([addressKey(B)])).get(addressKey(B))?.source === "pin", "drive-time place book: a live pass leaves a pinned key alone");
+
+    // Retype under the ORIGINAL key — the same text never flags again.
+    const D = "TESTdrive Lone Pine School";
+    const fixed = await fixPlace({ key: addressKey(D), label: D, mode: "retry", text: "1 School Rd, Hortonville WI" }, "u2", fastDeps(search));
+    const dRow = (await getPlaces([addressKey(D)])).get(addressKey(D));
+    ok(fixed.ok && dRow?.status === "verified" && dRow.label === D && dRow.verifiedBy === "u2",
+      "drive-time place book: a retyped fix is stored under the original text's key");
+    const none = await fixPlace({ key: addressKey(D), label: D, mode: "retry", text: "TESTdrive Down Server Rd" }, "u2", fastDeps(search));
+    ok(!none.ok && none.reason === "unavailable" && (await getPlaces([addressKey(D)])).get(addressKey(D))?.status === "verified",
+      "drive-time place book: a failed retry leaves the stored row alone");
+    const noHit = await fixPlace({ key: addressKey(D), label: D, mode: "retry", text: "TESTdrive nothing here" }, "u2", fastDeps(async () => []));
+    ok(!noHit.ok && noHit.reason === "no-hit", "drive-time place book: a retry with no match reports no-hit and writes nothing");
+    const H = "TESTdrive Retry Street Only";
+    const streetOnly = await fixPlace({ key: addressKey(H), label: H, mode: "retry", text: "12 Elm St Hortonville" }, "u2", fastDeps(async () => [hit("Elm St")]));
+    const hRow = (await getPlaces([addressKey(H)])).get(addressKey(H));
+    ok(streetOnly.ok && streetOnly.status === "needs_check" && hRow?.status === "needs_check" && hRow.verifiedBy === null,
+      "drive-time place book: a retry judges the geocoder's returned street, not the typed text");
+    const pickTown = await fixPlace({ key: addressKey(H), label: H, mode: "pick", street: "Elm St", lat: 44.2, lng: -88.5 }, "u3", fastDeps(search));
+    ok(pickTown.ok && pickTown.status === "needs_check", "drive-time place book: a picked suggestion without a house number stays needs_check");
+    const pickNum = await fixPlace({ key: addressKey(H), label: H, mode: "pick", street: "12 Elm St", lat: 44.2, lng: -88.5 }, "u3", fastDeps(search));
+    const hRow2 = (await getPlaces([addressKey(H)])).get(addressKey(H));
+    ok(pickNum.ok && pickNum.status === "verified" && hRow2?.source === "geocode" && hRow2.verifiedBy === "u3",
+      "drive-time place book: a picked house-numbered suggestion verifies, credited to the picker");
+    const bad = await fixPlace({ key: "Not A Key!", label: D, mode: "pin", lat: 44, lng: -88 }, "u2", fastDeps(search));
+    ok(!bad.ok && bad.reason === "invalid", "drive-time place book: a key that isn't its own normalized form is refused");
+    const badCoord = await fixPlace({ key: addressKey(D), label: D, mode: "pin", lat: 99, lng: -88 }, "u2", fastDeps(search));
+    ok(!badCoord.ok && badCoord.reason === "invalid", "drive-time place book: an out-of-range pin is refused");
+  } finally {
+    globalThis.fetch = realFetch;
+    await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
+  }
+}
+
+export async function driveTimeFixChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const SITE = "TESTdrive:site-fix";
+  const CO = "TESTdrive:co-fix";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("offline in test");
+  }) as typeof fetch;
+  try {
+    await saveSite({ id: SITE, companyId: CO, legacyLocId: "loc7", name: "Gym", address: "", city: "Hortonville", state: "WI", lat: "44.33", lng: "-88.63", venueKind: "proscenium" });
+    ok(matchVisitSite({ customerId: CO, locationId: "loc7" }, [{ id: SITE, companyId: CO, legacyLocId: "loc7" }])?.id === SITE &&
+       matchVisitSite({ customerId: "other", locationId: "loc7" }, [{ id: SITE, companyId: CO, legacyLocId: "loc7" }]) === null,
+      "drive-time: a visit's venue matches by legacyLocId or id, within its own company");
+    const states = await addressStatesForVisits(
+      [
+        { id: "SV-T1", customerId: CO, locationId: "loc7", address: "ignored" },
+        { id: "SV-T2", customerId: null, locationId: null, address: "TESTdrive 9 Elm St" },
+        { id: "SV-T3", customerId: null, locationId: null, address: "" },
+      ],
+      "cache"
+    );
+    ok(states.get("SV-T1")?.status === "needs_check" && states.get("SV-T1")?.fix?.kind === "venue",
+      "drive-time: a venue-linked visit takes the venue's state (city-level → needs_check)");
+    ok(states.get("SV-T2")?.fix?.kind === "place" && states.get("SV-T2")?.status === "unresolved",
+      "drive-time: a visit without a venue goes through the place book");
+    ok(states.get("SV-T3")?.status === "unresolved" && states.get("SV-T3")?.fix === null, "drive-time: a visit with no address has nothing to fix");
+
+    const r = await fixAddress({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 44.3301, lng: -88.6302 }, "u1");
+    const [row] = await db.select().from(sites).where(eq(sites.id, SITE));
+    ok(r.ok && r.status === "verified" && r.pointKey === "site:" + SITE && row.geoSource === "pin",
+      "drive-time fixAddress: a venue pin writes the venue (verified, source pin)");
+
+    const pr = await fixAddress({ target: { kind: "place", key: addressKey("TESTdrive 9 Elm St"), label: "TESTdrive 9 Elm St" }, mode: "pin", lat: 44.4, lng: -88.7 }, "u1");
+    const placed = (await getPlaces([addressKey("TESTdrive 9 Elm St")])).get(addressKey("TESTdrive 9 Elm St"));
+    ok(pr.ok && pr.status === "verified" && pr.pointKey === "place:" + addressKey("TESTdrive 9 Elm St") && placed?.source === "pin",
+      "drive-time fixAddress: a place pin writes the place book (pointKey place:<key>)");
+    const afterFix = await addressStatesForVisits([{ id: "SV-T2", customerId: null, locationId: null, address: "TESTdrive 9 Elm St" }], "cache");
+    ok(afterFix.get("SV-T2")?.status === "verified" && afterFix.get("SV-T2")?.point?.lat === 44.4,
+      "drive-time: a fixed free-text visit address reads verified from the book");
+
+    ok(cleanFixInput({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 44, lng: -88 }) !== null, "drive-time cleanFixInput: a well-formed pin passes");
+    ok(cleanFixInput({ target: { kind: "venue", siteId: SITE }, mode: "pin", lat: 200, lng: -88 }) === null &&
+       cleanFixInput({ target: { kind: "place", key: "x" }, mode: "retry" }) === null &&
+       cleanFixInput({ target: { kind: "bogus" }, mode: "pin", lat: 1, lng: 1 }) === null &&
+       cleanFixInput("junk") === null,
+      "drive-time cleanFixInput: out-of-range coords, missing fields and unknown kinds are refused");
+  } finally {
+    globalThis.fetch = realFetch;
+    await db.delete(sites).where(eq(sites.id, SITE));
+    await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
   }
 }
