@@ -11030,3 +11030,33 @@ wire type named "Panic" or "Cat5e" fills too; anything marked wireless is skippe
 closure because Bray's panic loop rides a contact closure. It edits the form only — nothing is saved until Save — and
 the card says how many rows it filled. A wire type whose connection types include a Dante / HDBaseT "(Cat6)" entry
 reads as network, since the Cat6 wire type carries them. Punch item #328.
+
+## D815. Cable outside diameter: a catalog field, with researched suggestions only where a datasheet resolved (#328 piece B, 2026-10-10)
+
+A per-length catalog part gains an optional **Outside diameter (in)** (`CatalogPart.cableOdIn`, 0 < OD ≤ 3.0, three
+decimals; written only through `mergeUpsert`; absent = unknown, never zero). It is edited in the part editor, carried
+through the Grid library into `PartLite`, and edited in bulk on **Catalog → Riser data → Cables** (the second tab of
+the riser data sheet: referenced cables only, Source current / suggested / —, the datasheet URL in OD source). The
+Cables tab and the part editor's hint pre-fill from `CABLE_OD_SUGGESTIONS` (`conduit-riser/cable-od.ts`), built **only**
+from the rows of `docs/specs-seed/cable-od-2026-10-10.json` that resolved to a manufacturer datasheet value (30 of 34,
+each citing its datasheet URL); the four that did not (Belden 1872A, the ETC EchoConnect auxiliary-power and ESD-ground
+singles, ProPlex PC224P-PLN and PC4P) stay blank rather than guessed. A suggestion matches on model (a longer model never
+matches its shorter cousin; two fits is no match) and the manufacturer; a purely numeric model (2412, 9841, 13060) is
+too common a number to trust alone, so it matches only when the part's manufacturer is known and matches the row.
+Nothing is written until the admin uploads the sheet and Applies; a stored value is never replaced by a suggestion.
+Punch item #328.
+
+## D816. Conduit fill: NEC EMT, suggest and warn, never block (#328 piece B, 2026-10-10)
+
+The conduit riser computes fill from its cables' diameters (`conduit-riser/fill.ts`, pure): each member wire counts once
+as a circle of its OD; the allowed share is NEC Chapter 9 **Table 1** (1 cable 53 %, 2 cables 31 %, 3 or more 40 %) of
+the **Table 4 EMT** total internal area (1/2" 0.304 … 4" 14.753 in², checked against π/4 × ID² and a published
+reproduction, cited in the module). EMT only: a run whose typed size is not an EMT trade size (and any cable-management
+line) shows the **suggestion only** — the smallest trade size that holds the cables. Jeff keeps control of the size:
+this advises, it never edits a size, and **never blocks a quote, a save or a print**. A run with any cable lacking a
+diameter reads "Fill unknown" and names those cables, so no overfill is claimed from partial data; an empty or
+stub-only run shows nothing. Shown in the Run panel (`Fill 28 % · suggests 3/4"`, or amber `Overfilled — 3/4" allows
+31 % for 2 cables`), as a ⚠ beside the run's size label **in the editor only**, and in the riser page's warnings list.
+The printed sheet, the drawing set and the DXF are unchanged: the ⚠ is an editor overlay and never reaches the
+geometry. Exactly the allowed percent is not an overfill. Punch item #328.
+

@@ -11741,7 +11741,7 @@ Open (Jeff-gated):
   hours in Account).
 - Try a drag and an At risk fix (Push due date / Hand off) on production.
 
-## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — piece A done 2026-10-10 (D812–D814)
+## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — pieces A and B done 2026-10-10 (D812–D816)
 
 Approved by Jeff 2026-10-10. Spec `docs/superpowers/specs/2026-10-10-riser-phase2-design.md`; plan
 `docs/superpowers/plans/2026-10-10-riser-phase2.md`. Build order: A riser data sheet + wire-type symbol fill →
@@ -11751,3 +11751,10 @@ B computed conduit fill (EMT, suggest + warn) → C A/V conduit riser. Each piec
 and Grid Settings → Wire types → Fill symbols from Bray's legend. Jeff-gated: open Catalog → Riser data and export the
 sheet; review the rows with Source = suggested (gateways and splitters may read CRON/CRO; Box is never suggested);
 upload, check the Preview, Apply; then in Grid Settings → Wire types click Fill symbols from Bray's legend and Save.
+
+**Piece B done 2026-10-10 (D815–D816):** a cable outside-diameter field (part editor + Riser data → Cables tab,
+researched pre-fill from manufacturer datasheets only) and computed EMT conduit fill on the conduit riser: Run panel
+line, an editor-only ⚠ on an overfilled size label, and a warnings-list entry — it suggests a size and never blocks.
+Jeff-gated: on Catalog → Riser data, export the sheet and confirm the Cables tab's pre-filled diameters (Source =
+suggested, datasheet URL in OD source); fill the blanks (Belden 1872A, the EchoConnect singles, PC224P-PLN and PC4P
+weren't verifiable); Preview, Apply; then open the lighting riser and read the Fill line on a few runs.
