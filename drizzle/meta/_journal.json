@@ -253,6 +253,13 @@
       "when": 1790971856355,
       "tag": "0035_manufacturers",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791606177365,
+      "tag": "0036_triage",
+      "breakpoints": true
     }
   ]
 }

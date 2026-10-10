@@ -11313,6 +11313,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 }
 
 
+import { triageFoundationChecks } from "./test-morning-triage";
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -11543,6 +11544,7 @@ seeded()
   .then(() => square322ImageChecks())
   .then(() => square322BatchChecks())
   .then(() => square322Pins())
+  .then(() => triageFoundationChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
