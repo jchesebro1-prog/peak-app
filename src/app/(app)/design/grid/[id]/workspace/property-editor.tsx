@@ -635,8 +635,6 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
       )}
 
       {/* A curtain's part is its fabric — the server refuses the swap, so
-
-      {/* A curtain's part is its fabric — the server refuses the swap, so
           Replace is offered only on a devices-only selection. */}
       {!anyCurtain && (
         <PropBlock>
