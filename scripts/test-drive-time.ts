@@ -75,6 +75,7 @@ import {
   type DriveSyncResult,
 } from "@/lib/drive-sync/sync";
 import { withoutAppDriveEvents } from "@/lib/agenda";
+import { driveAgendaLayer, driveItemFromLeg } from "@/lib/drive-sync/agenda";
 import type { DriveSyncState } from "@/lib/stores/schedule-prefs";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import type { Office } from "@/lib/settings";
@@ -1498,6 +1499,30 @@ export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
   ok((src.match(/withoutAppDriveEvents\(\s*await listUpcomingEvents\(/g) ?? []).length === 1 &&
      (src.match(/withoutAppDriveEvents\(\s*await listEventsForExternalCalendar\(/g) ?? []).length === 1,
     "drive-time agenda: both Google sources in loadAgendaRange go through the filter");
+  const layer = await driveAgendaLayer({
+    userId: "u1",
+    minMs: at(0),
+    maxMs: at(23),
+    googleEvents: [gEv("ics1", { iCalUID: "sv-SV-1@peak-app", startMs: at(9), endMs: at(10) }), gEv("meet", {})],
+    deps: loadDeps({ visitStates: async (vs) => new Map(vs.map((v) => [v.id, badAddr(v.id)])) }),
+  });
+  const flags = layer.items.filter((i) => i.drive?.flag);
+  ok(layer.items.every((i) => i.source === "drive") && flags.length === 2 && flags.every((i) => i.drive?.flag === "Address not verified — no drive time" && i.drive?.fix?.kind === "place"),
+    "drive-time agenda: legs into/out of an unverified visit render as flags with its Fix target");
+  ok(layer.addressFlags.get("v-SV-1")?.fix?.kind === "place" && layer.addressFlags.get("g-ics1")?.text === "Address not verified — no drive time" && !layer.addressFlags.has("g-meet"),
+    "drive-time agenda: the visit and its Google .ics copy both carry the address flag; verified stops don't");
+  const okLayer = await driveAgendaLayer({ userId: "u1", minMs: at(0), maxMs: at(23), googleEvents: null, deps: loadDeps() });
+  const blocks = okLayer.items.filter((i) => !i.drive?.flag);
+  ok(blocks.length === 2 && blocks[0].title === "Drive to Venue SV-1" && blocks[0].endMs === at(9) && blocks[0].drive?.minutes === 45 && blocks[1].title === "Drive back to Madison Office",
+    "drive-time agenda: verified legs render as timed drive blocks (no calendar connected → visits only)");
+  const flagged = driveItemFromLeg(planDay(input({ stops: [stop("sv:Z", at(9), at(10), badAddr("z"))] }))[0]);
+  ok(flagged.startMs === at(9) && flagged.endMs === at(9) && flagged.drive?.minutes === null, "drive-time agenda: a flag sits at its anchor with no minutes");
+  const agendaSrc = readFileSync("src/lib/agenda.ts", "utf8");
+  ok(agendaSrc.includes("peakDriveKey") && agendaSrc.includes("driveAgendaLayer"), "drive-time agenda: Google copies of our drive events are hidden; computed legs are shown instead");
+  const client = readFileSync("src/app/(app)/calendar/calendar-client.tsx", "utf8");
+  ok(client.includes("Staying near last stop") && client.includes("fmtDur(") && client.includes("AddressFlagBadge"),
+    "drive-time calendar: stay-over toggle, day drive totals and Fix flags are on /calendar");
+  ok(readFileSync("src/app/(app)/home-calendar.tsx", "utf8").includes('source === "drive"'), "drive-time agenda: the Home card renders drive rows");
 }
 
 /** One exported function's source: from its `export async function` line up

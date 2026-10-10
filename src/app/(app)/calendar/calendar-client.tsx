@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useMemo, useState, useSyncExternalStore, useTransition, type CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AgendaItem } from "@/lib/agenda";
 import EventModal, { type EventModalTarget } from "./event-modal";
 import CalendarFilterRail from "./calendar-filter-rail";
-import type { CalendarConnectionView } from "../calendar-actions";
+import { setStayOverAction, type CalendarConnectionView } from "../calendar-actions";
+import { fmtDur } from "@/lib/drive-plan/plan";
+import AddressFlagBadge from "@/components/address-fix/address-flag";
 import { groupPlacedByDay, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import TaskChip from "./task-chip";
 
@@ -74,6 +77,19 @@ function isExternal(it: AgendaItem): boolean {
   return it.source === "external";
 }
 
+const isDrive = (it: AgendaItem) => it.source === "drive";
+const isDriveFlag = (it: AgendaItem) => it.source === "drive" && !!it.drive?.flag;
+/** Spec 2026-10-09 — the day header's total drive time (buffer included). */
+function driveTotal(list: AgendaItem[]): number {
+  return list.reduce((s, it) => s + (isDrive(it) && !it.drive?.flag ? it.drive?.minutes ?? 0 : 0), 0);
+}
+function blockColors(it: AgendaItem, tint: (hex: string, a: number) => string): { bg: string; bd: string; ink: string } {
+  if (isExternal(it)) { const c = it.external!.color; return { bg: tint(c, 0.14), bd: tint(c, 0.4), ink: c }; }
+  if (isDrive(it)) return it.drive?.tight ? { bg: "#fdf3e7", bd: "#f0d3a8", ink: "#8a5a1a" } : { bg: "#f1f2f5", bd: "#d9dce2", ink: "#5b616e" };
+  if (it.source === "visit") return { bg: "#e8f3ee", bd: "#cfe6db", ink: "#1f7a52" };
+  return { bg: "#e9eefb", bd: "#d4ddf3", ink: "#3155a8" };
+}
+
 /** Greedy interval-overlap column assignment, per connected cluster, so
  *  concurrent events in a day column sit side-by-side instead of stacking. */
 function layoutTimed(items: AgendaItem[]): Array<{ it: AgendaItem; col: number; cols: number }> {
@@ -120,6 +136,7 @@ export default function CalendarClient({
   canConnectCalendar,
   tasks,
   tasksEveryone,
+  stayOvers,
 }: {
   view: "month" | "week" | "day";
   year: number;
@@ -139,7 +156,28 @@ export default function CalendarClient({
   /** #215 — open tasks + My Queue assignments (mine, or everyone's with ?tasks=all). */
   tasks: CalendarTaskItem[];
   tasksEveryone: boolean;
+  /** Spec 2026-10-09 — this rep's "Staying near last stop" days (YYYY-MM-DD → true). */
+  stayOvers: Record<string, boolean>;
 }) {
+  const router = useRouter();
+  const [stayPending, startStay] = useTransition();
+  function toggleStay(k: string) {
+    startStay(async () => {
+      await setStayOverAction(k, !stayOvers[k]);
+      router.refresh();
+    });
+  }
+  function renderDriveFlag(it: AgendaItem) {
+    return (
+      <div key={it.key} onClick={(e) => e.stopPropagation()} style={{ fontSize: 10.5, lineHeight: 1.35, marginBottom: 3, padding: "2px 6px", borderRadius: 5, background: "#fbf0ee", border: "1px dashed #e8c9c0" }}>
+        {it.drive?.fix ? (
+          <AddressFlagBadge flag={{ text: it.drive.flag || "", fix: it.drive.fix }} compact />
+        ) : (
+          <span style={{ fontWeight: 600, color: "#8a3a2a" }} title={`Drive to ${it.drive?.toLabel}`}>⚠ {it.drive?.flag}</span>
+        )}
+      </div>
+    );
+  }
   const mounted = useSyncExternalStore(
     emptySubscribe,
     () => true,
@@ -260,18 +298,14 @@ export default function CalendarClient({
   }
 
   function chipStyle(it: AgendaItem): CSSProperties {
-    const color = isExternal(it)
-      ? it.external!.color
-      : it.source === "visit"
-        ? "#1f7a52"
-        : "#3155a8";
+    const c = blockColors(it, tint);
     return {
       fontSize: 10.5,
       lineHeight: 1.35,
       fontWeight: 600,
-      color,
-      background: isExternal(it) ? tint(color, 0.14) : it.source === "visit" ? "#e8f3ee" : "#e9eefb",
-      border: `1px solid ${isExternal(it) ? tint(color, 0.4) : it.source === "visit" ? "#cfe6db" : "#d4ddf3"}`,
+      color: c.ink,
+      background: c.bg,
+      border: `1px solid ${c.bd}`,
       borderRadius: 5,
       padding: "2px 6px",
       marginBottom: 3,
@@ -282,7 +316,22 @@ export default function CalendarClient({
     };
   }
 
+  // The Fix button sits beside the chip, never inside its link (a button
+  // can't nest in an anchor).
   function renderMonthChip(it: AgendaItem) {
+    if (isDriveFlag(it)) return renderDriveFlag(it);
+    if (!it.addressFlag) return renderMonthChipBody(it);
+    return (
+      <div key={it.key}>
+        {renderMonthChipBody(it)}
+        <div style={{ marginBottom: 3 }}>
+          <AddressFlagBadge flag={it.addressFlag} compact />
+        </div>
+      </div>
+    );
+  }
+
+  function renderMonthChipBody(it: AgendaItem) {
     const chip = (
       <div
         style={chipStyle(it)}
@@ -404,6 +453,18 @@ export default function CalendarClient({
                 >
                   {d.getDate()}
                 </div>
+                {driveTotal(byDay.get(k) || []) > 0 && (
+                  <div style={{ fontSize: 10, color: "#5b616e", fontWeight: 600, marginTop: 2 }}>Drive {fmtDur(driveTotal(byDay.get(k) || []))}</div>
+                )}
+                <button
+                  type="button"
+                  disabled={stayPending}
+                  onClick={() => toggleStay(k)}
+                  title="No drive back to base today; tomorrow starts from your last stop"
+                  style={{ marginTop: 3, fontSize: 9.5, fontWeight: 600, padding: "1px 6px", borderRadius: 10, border: "1px solid #e4e7ec", background: stayOvers[k] ? "var(--accent)" : "#fff", color: stayOvers[k] ? "#fff" : "#9aa0ab", cursor: "pointer" }}
+                >
+                  {stayOvers[k] ? "✓ Staying near last stop" : "Staying near last stop"}
+                </button>
               </div>
             );
           })}
@@ -449,6 +510,7 @@ export default function CalendarClient({
                     <div style={chipStyle(it)} title={it.title}>{it.title}</div>
                   </div>
                 ))}
+                {(byDay.get(k) || []).filter(isDriveFlag).map(renderDriveFlag)}
               </div>
             );
           })}
@@ -468,7 +530,7 @@ export default function CalendarClient({
             </div>
             {days.map((d) => {
               const k = keyFor(d.getFullYear(), d.getMonth(), d.getDate());
-              const timed = (byDay.get(k) || []).filter((it) => !it.allDay);
+              const timed = (byDay.get(k) || []).filter((it) => !it.allDay && !isDriveFlag(it));
               const positioned = layoutTimed(timed);
               return (
                 <div key={k} style={{ width: colWidth, position: "relative", borderLeft: "1px solid #f4f5f7" }}>
@@ -485,7 +547,7 @@ export default function CalendarClient({
                       const endMin = Math.max(startMin + 15, new Date(it.endMs).getHours() * 60 + new Date(it.endMs).getMinutes());
                       const top = ((startMin - HOUR_START * 60) / 60) * HOUR_PX;
                       const h = ((endMin - startMin) / 60) * HOUR_PX;
-                      const extColor = isExternal(it) ? it.external!.color : null;
+                      const c = blockColors(it, tint);
                       return (
                         <div
                           key={it.key}
@@ -497,16 +559,16 @@ export default function CalendarClient({
                               openItem(it);
                             }
                           }}
-                          title={timeLabel(it) + " · " + it.title + (it.location ? " · " + it.location : "")}
+                          title={timeLabel(it) + " · " + it.title + (it.location ? " · " + it.location : "") + (it.drive?.tight ? " · " + it.drive.tight : "")}
                           style={{
                             position: "absolute",
                             top,
                             height: Math.max(16, h),
                             left: `calc(${(col / cols) * 100}% + 2px)`,
                             width: `calc(${100 / cols}% - 4px)`,
-                            background: extColor ? tint(extColor, 0.14) : it.source === "visit" ? "#e8f3ee" : "#e9eefb",
-                            border: `1px solid ${extColor ? tint(extColor, 0.4) : it.source === "visit" ? "#cfe6db" : "#d4ddf3"}`,
-                            color: extColor || (it.source === "visit" ? "#1f7a52" : "#3155a8"),
+                            background: c.bg,
+                            border: `1px ${isDrive(it) ? "dashed" : "solid"} ${c.bd}`,
+                            color: c.ink,
                             borderRadius: 5,
                             padding: "2px 5px",
                             fontSize: 10.5,
@@ -517,6 +579,9 @@ export default function CalendarClient({
                           }}
                         >
                           {timeLabel(it)} {it.title}
+                          {isDrive(it) && it.drive?.minutes != null ? ` · ${fmtDur(it.drive.minutes)}` : ""}
+                          {it.drive?.tight && <div style={{ fontWeight: 700 }}>{it.drive.tight}</div>}
+                          {it.addressFlag && <div><AddressFlagBadge flag={it.addressFlag} compact /></div>}
                         </div>
                       );
                     })}
@@ -538,10 +603,10 @@ export default function CalendarClient({
           <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.015em" }}>Calendar</div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>
             {calendarOn
-              ? "Your Google Calendar + your Peak site visits."
+              ? "Your Google Calendar + your Peak site visits. Drive time between stops is added automatically."
               : gmailOn
-                ? "Showing your Peak site visits — Enable calendar on your mailbox (Account settings) to see Google Calendar here."
-                : "Showing your Peak site visits. Google Calendar arrives once Gmail is connected."}
+                ? "Showing your Peak site visits — Enable calendar on your mailbox (Account settings) to see Google Calendar here. Drive time between stops is added automatically."
+                : "Showing your Peak site visits. Google Calendar arrives once Gmail is connected. Drive time between stops is added automatically."}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -671,10 +736,20 @@ export default function CalendarClient({
                         {day.getDate()}
                       </div>
                       {renderTasks(k, 3)}
-                      {list.slice(0, 3).map(renderMonthChip)}
-                      {list.length > 3 && (
-                        <div style={{ fontSize: 10, color: "#9aa0ab", fontWeight: 600 }}>+{list.length - 3} more</div>
+                      {driveTotal(list) > 0 && (
+                        <div style={{ fontSize: 10, color: "#5b616e", fontWeight: 600, marginBottom: 2 }}>Drive {fmtDur(driveTotal(list))}</div>
                       )}
+                      {(() => {
+                        const shownList = list.filter((it) => !isDrive(it) || isDriveFlag(it));
+                        return (
+                          <>
+                            {shownList.slice(0, 3).map(renderMonthChip)}
+                            {shownList.length > 3 && (
+                              <div style={{ fontSize: 10, color: "#9aa0ab", fontWeight: 600 }}>+{shownList.length - 3} more</div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   );
                 })}

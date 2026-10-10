@@ -1,3 +1,4 @@
+import type { FixTarget } from "@/lib/address-verify/types";
 import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
 import { allVisits } from "@/lib/stores/site-visits";
 
@@ -37,12 +38,27 @@ export type AgendaItem = {
   href: string;
   /** Provider join URL extracted from the Google event, when present. */
   meetingUrl?: string;
-  source: "google" | "visit" | "external";
+  source: "google" | "visit" | "external" | "drive";
   /** Set only for source "external" — which connection/calendar this came
    *  from, and the color the client should render it in (the calendar's
    *  colorOverride if the user set one, else Google's own backgroundColor,
    *  else a client-side fallback). */
   external?: { connectionId: string; calendarId: string; color: string };
+  /** Spec 2026-10-09 — set only for source "drive" (computed legs, never the
+   *  Google copy). `flag` set = no minutes, render as a flag, not a block. */
+  drive?: {
+    dayKey: string;
+    minutes: number | null;
+    routeMin: number | null;
+    bufferMin: number;
+    flag: string | null;
+    tight: string | null;
+    fix: FixTarget | null;
+    fromLabel: string;
+    toLabel: string;
+  };
+  /** Spec 2026-10-09 — this visit/event's address isn't verified. */
+  addressFlag?: { text: string; fix: FixTarget | null };
 };
 
 /** The drive sync's own Google events (private peakDrive tag) are left out
@@ -70,6 +86,9 @@ export async function loadAgendaRange(
   const items: AgendaItem[] = [];
   const fetchedIds = new Set<string>();
   const fetchedIcal = new Set<string>();
+  // Spec 2026-10-09 — the rep's own Google events (app drive events already
+  // filtered out), the stop source for the computed drive layer below.
+  const googleEvents: import("@/lib/google/calendar").CalendarEvent[] = [];
   if (gmailOn) {
     try {
       const { getConnectionInfo } = await import("@/lib/gmail/connections");
@@ -85,6 +104,7 @@ export async function loadAgendaRange(
         for (const e of evs) {
           fetchedIds.add(e.id);
           if (e.iCalUID) fetchedIcal.add(e.iCalUID);
+          googleEvents.push(e);
           items.push({
             key: "g-" + e.id,
             id: e.id,
@@ -178,6 +198,18 @@ export async function loadAgendaRange(
       href: v.customerId ? "/companies/" + encodeURIComponent(v.customerId) : "",
       source: "visit",
     });
+  }
+  // Spec 2026-10-09 — drive blocks + address flags, from the same stops.
+  try {
+    const { driveAgendaLayer } = await import("@/lib/drive-sync/agenda");
+    const layer = await driveAgendaLayer({ userId, minMs, maxMs, googleEvents: calendarOn ? googleEvents : null });
+    items.push(...layer.items);
+    for (const it of items) {
+      const f = layer.addressFlags.get(it.key);
+      if (f) it.addressFlag = f;
+    }
+  } catch (err) {
+    console.error("[agenda] drive layer failed:", err);
   }
   items.sort((a, b) => a.startMs - b.startMs);
   return { gmailOn, calendarOn, items };

@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { loadAgendaRange } from "@/lib/agenda";
 import { loadCalendarTasks } from "@/lib/calendar-tasks-load";
+import { getStayOvers } from "@/lib/stores/schedule-prefs";
 import { googleConfigured } from "@/lib/gmail/config";
 import CalendarClient from "./calendar-client";
 import HomeTabs from "../home-tabs";
@@ -75,7 +76,7 @@ export default async function CalendarPage({
     maxMs = dateAnchor.getTime() + 2 * DAY;
   }
 
-  const [{ gmailOn, calendarOn, items }, calendarConnections, calendarTasks] = await Promise.all([
+  const [{ gmailOn, calendarOn, items }, calendarConnections, calendarTasks, stayOvers] = await Promise.all([
     loadAgendaRange(user.id, user.name, minMs, maxMs),
     // D148 — the filter rail's initial data; loadAgendaRange already fetched
     // the same connections internally to build `items`, but it doesn't
@@ -87,6 +88,7 @@ export default async function CalendarPage({
       return rows.map((r) => ({ id: r.id, googleEmail: r.googleEmail, calendars: r.calendars }));
     })(),
     loadCalendarTasks({ id: user.id, name: user.name }, tasksEveryone),
+    getStayOvers(user.id),
   ]);
 
   return (
@@ -108,6 +110,7 @@ export default async function CalendarPage({
         canConnectCalendar={googleConfigured()}
         tasks={calendarTasks}
         tasksEveryone={tasksEveryone}
+        stayOvers={stayOvers}
       />
     </HomeTabs>
   );
