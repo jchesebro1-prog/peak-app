@@ -224,10 +224,9 @@ brainstorm → spec → plan.
 2. **Site-visit scheduling** — written:
    `2026-10-09-site-visit-scheduling-design.md`. Adds visit attendees; a
    visit becomes a stop on the lead's **and every attendee's** day.
-3. **Auto task calendar** (Motion-style, low upkeep) — inputs only due date
-   + priority tier; move only unstarted work; no hand re-weighting; flex
-   around visits + drive blocks. Open: how task length is known (default vs
-   size tier); Jeff's Motion brainstorm rules (to paste in).
+3. **Auto task calendar** — written:
+   `2026-10-09-auto-task-calendar-design.md` (time blocks, blended urgency,
+   pins; plans around visits + drive blocks).
 4. **Morning triage** — one ranked list (~10, "see more") from email, Krisp
    calls (needs #323 merged) and tasks; each row shows source + why it's
    ranked there; call items show the transcript line they came from
