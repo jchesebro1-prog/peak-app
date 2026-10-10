@@ -6,10 +6,16 @@
  * Geocode writes never overwrite a pin; a Fix (retry/pick/pin) is deliberate
  * and may.
  *
- * Status from a geocoder hit is judged on the street the geocoder RETURNED
- * (state.ts statusOfFreeTextHit: a real house number, not a numbered road) —
- * never on the typed text alone. A hand-dropped pin is the only path that
- * verifies without a house-numbered hit.
+ * Status from a geocoder hit is judged on BOTH the typed text's street part
+ * and the street the geocoder RETURNED (state.ts statusOfFreeTextHit: each
+ * must lead with a real house number, not a numbered road). A name
+ * ("Starbucks") is needs_check whatever the hit. A hand-dropped pin is the
+ * only path that verifies without that.
+ *
+ * Every live Nominatim request here (live passes and Fix retries) takes a
+ * turn on one module-level pacer (nominatimPacer), so concurrent syncs,
+ * booking checks and Fix dialogs in one instance stay at ≤ 1 request per
+ * PLACE_DELAY_MS combined; each call keeps its own budget.
  */
 import { inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -22,12 +28,18 @@ import type { AddressState, GeoStatus, PlaceRow } from "./types";
 /** Nominatim asks for <= 1 request/second. */
 export const PLACE_DELAY_MS = 1100;
 
+/** The instance-wide Nominatim turn queue: when the next request may start.
+ *  Shared by every live place-book pass and Fix retry in this instance. */
+export const nominatimPacer = { nextAt: 0 };
+
 export type PlaceDeps = {
   search: (q: string) => Promise<GeoSearchHit[]>;
   delayMs: number;
   budgetMs: number;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** When the next request may go out (the module default is shared; tests inject their own). */
+  pacer: { nextAt: number };
 };
 
 function defaultDeps(): PlaceDeps {
@@ -37,6 +49,7 @@ function defaultDeps(): PlaceDeps {
     budgetMs: 20_000,
     now: Date.now,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    pacer: nominatimPacer,
   };
 }
 
@@ -121,8 +134,13 @@ export async function placeStatesWithRows(
     let n = 0;
     for (const [key, label] of byKey) {
       if (known.has(key)) continue;
-      if (n > 0 && d.now() - start + d.delayMs + FETCH_TIMEOUT_MS > d.budgetMs) break;
-      if (n > 0) await d.sleep(d.delayMs);
+      // Take the next shared turn — synchronously, so two passes can't take
+      // the same one — unless it would land past this call's own budget.
+      const now = d.now();
+      const slot = Math.max(now, d.pacer.nextAt);
+      if ((n > 0 || slot > now) && slot - start + FETCH_TIMEOUT_MS > d.budgetMs) break;
+      d.pacer.nextAt = slot + d.delayMs;
+      if (slot > now) await d.sleep(slot - now);
       n++;
       let hits: GeoSearchHit[];
       try {
@@ -160,6 +178,9 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
   const key = String(input.key ?? "");
   if (!key || addressKey(key) !== key) return { ok: false, reason: "invalid" };
   const label = String(input.label ?? "").trim().slice(0, 300) || key;
+  // The label must be the key's own text (like loadFixTarget), so a fix is
+  // never written under one record's key with another record's text.
+  if (addressKey(label) !== key) return { ok: false, reason: "invalid" };
   const now = d.now();
   let lat: number;
   let lng: number;
@@ -168,6 +189,13 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
   if (input.mode === "retry") {
     const text = String(input.text ?? "").trim().slice(0, 300);
     if (text.length < 3) return { ok: false, reason: "invalid" };
+    // Take a turn on the shared pacer; a queue longer than this call's
+    // budget answers "unavailable" (try again) instead of hanging the dialog.
+    const asked = d.now();
+    const slot = Math.max(asked, d.pacer.nextAt);
+    if (slot - asked + FETCH_TIMEOUT_MS > d.budgetMs) return { ok: false, reason: "unavailable" };
+    d.pacer.nextAt = slot + d.delayMs;
+    if (slot > asked) await d.sleep(slot - asked);
     let hits: GeoSearchHit[];
     try {
       hits = await d.search(text);
@@ -178,8 +206,8 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
     if (!hits[0] || !isValidPoint(hits[0].lat, hits[0].lng)) return { ok: false, reason: "no-hit" };
     lat = hits[0].lat;
     lng = hits[0].lng;
-    // Judged on the street the geocoder returned, not the typed text.
-    status = statusOfFreeTextHit(hits[0]);
+    // Judged on the retyped text's street AND the street the geocoder returned.
+    status = statusOfFreeTextHit(text, hits[0]);
   } else if (input.mode === "pick" || input.mode === "pin") {
     if (!isValidPoint(input.lat, input.lng)) return { ok: false, reason: "invalid" };
     lat = input.lat;
@@ -188,8 +216,10 @@ export async function fixPlace(input: PlaceFixInput, by: string, deps?: Partial<
       status = "verified";
       source = "pin";
     } else {
-      // The picked suggestion's own street decides.
-      status = statusOfFreeTextHit({ street: String(input.street ?? "") });
+      // The picked suggestion's own street decides: the human chose that
+      // exact suggestion, so it is both the asked and the returned street.
+      const street = String(input.street ?? "");
+      status = statusOfFreeTextHit(street, { street });
     }
   } else {
     return { ok: false, reason: "invalid" };

@@ -30,10 +30,24 @@ export type DriveLoadDeps = {
   visits(): Promise<SiteVisit[]>;
   bufferMin(userId: string): Promise<number>;
   stayOvers(userId: string): Promise<Record<string, boolean>>;
-  visitStates(visits: VisitAddressInput[], mode: DriveLoadMode): Promise<Map<string, AddressState>>;
-  placeStates(texts: string[], mode: DriveLoadMode): Promise<Map<string, AddressState>>;
-  routes(pairs: Array<{ from: LatLng; to: LatLng }>, mode: DriveLoadMode): Promise<Map<string, number>>;
+  /** budgetMs (live mode only): this lookup's time budget; omitted = the default 20 s. */
+  visitStates(visits: VisitAddressInput[], mode: DriveLoadMode, budgetMs?: number): Promise<Map<string, AddressState>>;
+  placeStates(texts: string[], mode: DriveLoadMode, budgetMs?: number): Promise<Map<string, AddressState>>;
+  routes(pairs: Array<{ from: LatLng; to: LatLng }>, mode: DriveLoadMode, budgetMs?: number): Promise<Map<string, number>>;
 };
+
+/** A live lookup's default budget, and the margin kept before a caller's deadline. */
+export const LIVE_LOOKUP_BUDGET_MS = 20_000;
+export const DEADLINE_MARGIN_MS = 5_000;
+
+/** The mode + budget for the next live lookup: min(20 s, deadline − now − 5 s).
+ *  With less than one request's timeout left it falls back to "cache" (no
+ *  network), so a rep started late can't push the caller past its deadline. */
+export function lookupBudget(mode: DriveLoadMode, deadlineMs: number | undefined, nowMs: number): { mode: DriveLoadMode; budgetMs: number | undefined } {
+  if (mode !== "live" || deadlineMs == null) return { mode, budgetMs: undefined };
+  const budgetMs = Math.min(LIVE_LOOKUP_BUDGET_MS, deadlineMs - nowMs - DEADLINE_MARGIN_MS);
+  return budgetMs < FETCH_TIMEOUT_MS ? { mode: "cache", budgetMs: undefined } : { mode: "live", budgetMs };
+}
 
 export type DriveDayPlan = { dayKey: string; stops: DriveStop[]; legs: DriveLeg[]; totalMin: number };
 
@@ -71,7 +85,7 @@ export async function routeMinutesFor(
     cached: routeCachedBulk,
     live: route,
     delayMs: ROUTE_DELAY_MS,
-    budgetMs: 20_000,
+    budgetMs: LIVE_LOOKUP_BUDGET_MS,
     now: Date.now,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     pacer: osrmPacer,
@@ -111,9 +125,9 @@ function defaultDeps(): DriveLoadDeps {
     visits: allVisits,
     bufferMin: driveBufferFor,
     stayOvers: getStayOvers,
-    visitStates: (visits, mode) => addressStatesForVisits(visits, mode),
-    placeStates: (texts, mode) => placeStatesFor(texts, mode),
-    routes: (pairs, mode) => routeMinutesFor(pairs, mode),
+    visitStates: (visits, mode, budgetMs) => addressStatesForVisits(visits, mode, budgetMs != null ? { budgetMs } : undefined),
+    placeStates: (texts, mode, budgetMs) => placeStatesFor(texts, mode, budgetMs != null ? { budgetMs } : undefined),
+    routes: (pairs, mode, budgetMs) => routeMinutesFor(pairs, mode, budgetMs != null ? { budgetMs } : undefined),
   };
 }
 
@@ -125,8 +139,14 @@ export async function planDriveDays(args: {
   events: CalendarEvent[] | null;
   mode: DriveLoadMode;
   deps?: Partial<DriveLoadDeps>;
+  /** Live mode: finish every lookup by this time (minus a 5 s margin) — the
+   *  cron's own deadline. Each lookup's budget is recomputed right before it. */
+  deadlineMs?: number;
+  now?: () => number;
 }): Promise<DriveDayPlan[]> {
   const d = { ...defaultDeps(), ...args.deps };
+  const clock = args.now ?? Date.now;
+  const next = () => lookupBudget(args.mode, args.deadlineMs, clock());
   const days = [...new Set(args.dayKeys.filter(isDayKey))].sort();
   if (!days.length) return [];
   const user = await d.getUser(args.userId);
@@ -139,13 +159,12 @@ export async function planDriveDays(args: {
   const mine = (await d.visits()).filter(
     (v) => v.startAt != null && v.startAt >= minMs && v.startAt < maxMs && visitPeople(v).includes(user.name)
   );
-  const vStates = await d.visitStates(
-    mine.map(visitAddressInput),
-    args.mode
-  );
+  const vb = next();
+  const vStates = await d.visitStates(mine.map(visitAddressInput), vb.mode, vb.budgetMs);
   const evs = (args.events ?? []).filter((e) => e.startMs >= minMs && e.startMs < maxMs);
   const physical = evs.filter((e) => !e.allDay && !e.selfDeclined && !e.peakDriveKey && isPhysicalLocation(e.location));
-  const pStates = await d.placeStates(physical.map((e) => e.location), args.mode);
+  const pb = next();
+  const pStates = await d.placeStates(physical.map((e) => e.location), pb.mode, pb.budgetMs);
 
   const visitSrc: StopSourceVisit[] = mine.map((v) => ({
     id: v.id,
@@ -193,7 +212,8 @@ export async function planDriveDays(args: {
   });
   const pairs = new Map<string, { from: LatLng; to: LatLng }>();
   for (const i of inputs) for (const p of neededRoutes(i)) pairs.set(pairKey(p.from, p.to), p);
-  const routeMinutes = pairs.size ? await d.routes([...pairs.values()], args.mode) : new Map<string, number>();
+  const rb = next();
+  const routeMinutes = pairs.size ? await d.routes([...pairs.values()], rb.mode, rb.budgetMs) : new Map<string, number>();
   return inputs.map((i) => {
     const legs = planDay({ ...i, routeMinutes });
     return { dayKey: i.dayKey, stops: i.stops, legs, totalMin: dayDriveTotal(legs) };

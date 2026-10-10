@@ -48,11 +48,22 @@ export function geocodedStatus(
   return hasHouseNumber(t(askedStreet)) && hasHouseNumber(t(hit.street)) ? "verified" : "needs_check";
 }
 
-/** Free text has no stated city to gate on: a hit verifies only when it
- *  resolved to a house number; any other hit is town/street level. */
-export function statusOfFreeTextHit(hit: { street: string } | null | undefined): GeoStatus {
+/** The street part of typed free text: its first line / comma part
+ *  ("123 Main St, Madison WI" → "123 Main St"; "Starbucks, 123 Main St" →
+ *  "Starbucks"). */
+export function typedStreet(text: string | null | undefined): string {
+  return t(text).split(/[,\n]/)[0] ?? "";
+}
+
+/** Free text has no stated city to gate on, so — like the venue path's
+ *  geocodedStatus(askedStreet, hit) — a hit verifies only when the TYPED
+ *  text's street part AND the street the geocoder returned both lead with a
+ *  house number. A name ("Starbucks", "Holiday Inn Express", "North HS") can
+ *  geocode to a house-numbered POI hundreds of miles away: that is
+ *  needs_check (flagged; a Fix/pin once and the place book remembers it). */
+export function statusOfFreeTextHit(typed: string | null | undefined, hit: { street: string } | null | undefined): GeoStatus {
   if (!hit) return "unresolved";
-  return hasHouseNumber(hit.street || "") ? "verified" : "needs_check";
+  return hasHouseNumber(typedStreet(typed)) && hasHouseNumber(hit.street || "") ? "verified" : "needs_check";
 }
 
 export type VenueSpot = {
@@ -100,6 +111,15 @@ export function backfillStatus(row: VenueSpot): GeoStatus {
   return hasHouseNumber(t(row.address)) ? "verified" : "needs_check";
 }
 
+/** A verification the one-time backfill derived (ensureVenueGeoStatus, or a
+ *  save of a never-stamped row): verified + source geocode + no verified-at.
+ *  Every live verification (a geocode fix, the coordinate backfill, a form
+ *  override, a pin) stamps geoVerifiedAt, so this is the set the paced
+ *  re-check (scripts/geo-recheck-venues.ts) re-geocodes. */
+export function isBackfillVerified(row: { geoStatus?: string | null; geoSource?: string | null; geoVerifiedAt?: number | null }): boolean {
+  return row.geoStatus === "verified" && row.geoSource === "geocode" && row.geoVerifiedAt == null;
+}
+
 /** Stored status, else the backfill rule (a row stamped before this feature
  *  shipped reads correctly before ensureVenueGeoStatus has run). */
 export function venueGeoStatus(row: VenueSpot & { geoStatus?: string | null }): GeoStatus {
@@ -143,7 +163,7 @@ export function placeRowFromHit(
 ): PlaceRow {
   // A hit with no usable point is a hit with no point: never stored verified.
   const usable = hit && isValidPoint(hit.lat, hit.lng) ? hit : null;
-  const status = statusOfFreeTextHit(usable);
+  const status = statusOfFreeTextHit(label, usable);
   return {
     key,
     label,

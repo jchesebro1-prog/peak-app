@@ -3,6 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import type { FixTarget } from "@/lib/address-verify/types";
+import { FLAG_TEXT } from "@/lib/drive-plan/plan";
 import AddressFixDrawer from "./address-fix-drawer";
 
 /** A flag as the server hands it to a view: the flag copy (e.g. "Address not
@@ -24,8 +25,8 @@ export default function AddressFlagBadge({ flag, compact = false, style, drawerZ
       aria-label={flag.text}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: compact ? 10 : 11.5, fontWeight: 600, color: "#8a3a2a", ...style }}
     >
-      {/* Compact: short wording for an address flag (verbatim text stays in title + aria-label); any other flag keeps its own copy. */}
-      <span>⚠ {compact && flag.fix ? "Not verified" : flag.text}</span>
+      {/* Compact: short wording for a flag with a Fix (verbatim text stays in title + aria-label); any other flag keeps its own copy. */}
+      <span>⚠ {compact && flag.fix ? (flag.text === FLAG_TEXT.long_route ? "Over 6 h" : "Not verified") : flag.text}</span>
       {flag.fix && (
         <button
           type="button"

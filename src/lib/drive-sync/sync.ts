@@ -55,6 +55,9 @@ export const SYNC_WINDOW_DAYS = 15;
 /** The D144 phase needs this much lease left; with less, the sync renews. */
 export const LEGACY_PHASE_MIN_LEASE_MS = 30_000;
 export const LEGACY_LOOKAHEAD_MS = 180 * 86_400_000;
+/** With a deadline, the D144 phase is skipped (it resumes next sync) when
+ *  less than this is left after the drive writes. */
+export const LEGACY_PHASE_MIN_TIME_MS = 10_000;
 /** Paged reads the one-time D144 scan may make per sync (each up to 1,000
  *  events); a scan cut off here resumes from its cursor on the next sync. */
 const LEGACY_MAX_READS = 10;
@@ -122,7 +125,8 @@ function defaultDeps(): DriveSyncDeps {
     listEvents: listEventsForSync,
     insertEvent,
     updateEvent,
-    deleteEvent,
+    // Drive and D144 deletes notify no one (they carry no attendees anyway).
+    deleteEvent: (key, id) => deleteEvent(key, id, { sendUpdates: "none" }),
     plan: planDriveDays,
     getState: getDriveSyncState,
     setState: setDriveSyncState,
@@ -138,8 +142,18 @@ function defaultDeps(): DriveSyncDeps {
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
 
-function toWrite(ev: DesiredDriveEvent): EventWriteInput {
-  return { title: ev.title, startMs: ev.startMs, endMs: ev.endMs, description: ev.description, privateProps: drivePrivateProps(ev) };
+/** A drive event as written to Google: tagged peakDrive, no reminders (a
+ *  drive block shouldn't ping the rep), and busy (opaque). */
+export function driveEventWrite(ev: DesiredDriveEvent): EventWriteInput {
+  return {
+    title: ev.title,
+    startMs: ev.startMs,
+    endMs: ev.endMs,
+    description: ev.description,
+    privateProps: drivePrivateProps(ev),
+    noReminders: true,
+    busy: true,
+  };
 }
 
 type LegacyScan = { complete: boolean; cursorMs: number; failed: LegacyRetry };
@@ -234,8 +248,15 @@ async function retireLegacyBlocks(userId: string, key: string, now: number, d: D
   if (Object.keys(patch).length) await d.setState(userId, patch);
 }
 
-export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Partial<DriveSyncDeps>): Promise<DriveSyncResult> {
+export type SyncRunOpts = {
+  /** The caller's hard stop (the cron's): the planner's live lookups finish
+   *  5 s before it and the D144 phase is skipped with < 10 s left. */
+  deadlineMs?: number;
+};
+
+export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Partial<DriveSyncDeps>, opts?: SyncRunOpts): Promise<DriveSyncResult> {
   const d = { ...defaultDeps(), ...deps };
+  const deadlineMs = opts?.deadlineMs;
   const now = d.now();
   const window = new Set(syncWindowDays(now));
   // Past days are history; days past +14 wait for the window to reach them.
@@ -246,7 +267,7 @@ export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Pa
   const key = await d.calendarKeyFor(userId);
   if (!key) {
     res.google = "no-calendar";
-    const plans = await d.plan({ userId, dayKeys: days, events: null, mode: "live" });
+    const plans = await d.plan({ userId, dayKeys: days, events: null, mode: "live", deadlineMs, now: d.now });
     res.flagged = plans.flatMap((p) => p.legs).filter((l) => l.flag).length;
     return res;
   }
@@ -262,7 +283,7 @@ export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Pa
   }
   const held = { token: lease }; // renewal swaps it; release always uses the latest
   try {
-    await syncLeased(userId, key, days, now, d, res, held);
+    await syncLeased(userId, key, days, now, d, res, held, deadlineMs);
   } finally {
     try {
       await d.releaseLease(userId, held.token);
@@ -273,7 +294,16 @@ export async function syncDriveDays(userId: string, dayKeys: string[], deps?: Pa
   return res;
 }
 
-async function syncLeased(userId: string, key: string, days: string[], now: number, d: DriveSyncDeps, res: DriveSyncResult, held: { token: number }): Promise<void> {
+async function syncLeased(
+  userId: string,
+  key: string,
+  days: string[],
+  now: number,
+  d: DriveSyncDeps,
+  res: DriveSyncResult,
+  held: { token: number },
+  deadlineMs: number | undefined
+): Promise<void> {
   // Whole Chicago days: the day before the first (its last stop is a
   // stay-over origin) through the end of the last.
   const range = { timeMinMs: chicagoDayStart(addDays(days[0], -1)), timeMaxMs: chicagoDayStart(addDays(days[days.length - 1], 1)) };
@@ -286,7 +316,7 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
     return; // can't see our tagged events — writing now could duplicate
   }
 
-  const plans = await d.plan({ userId, dayKeys: days, events: first.events, mode: "live" });
+  const plans = await d.plan({ userId, dayKeys: days, events: first.events, mode: "live", deadlineMs, now: d.now });
   const legs = plans.flatMap((p) => p.legs);
   res.flagged = legs.filter((l) => l.flag).length;
 
@@ -310,7 +340,9 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
   // "Drive time unavailable — retrying" is transient (OSRM down / out of
   // budget): its leg still exists, so its Google event stays as it is.
   const retrying = new Set(legs.filter((l) => l.flag?.kind === "route_unavailable").map((l) => l.key));
-  const existing = existingFromCalendar(fresh.events).filter((e) => !retrying.has(e.key));
+  // Only this rep's own legs (key "<userId>|…"): a shared or delegated
+  // calendar showing another rep's drive events must never lose them here.
+  const existing = existingFromCalendar(fresh.events, userId).filter((e) => !retrying.has(e.key));
   const diff = diffDriveEvents(desiredFromLegs(legs), existing, new Set(covered));
 
   // Planning + re-reading may have outlived the lease. Verify (and extend) it,
@@ -327,7 +359,7 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
   held.token = renewed;
   for (const ev of diff.insert) {
     try {
-      await d.insertEvent(key, toWrite(ev));
+      await d.insertEvent(key, driveEventWrite(ev));
       res.inserted++;
     } catch (err) {
       res.errors.push("insert " + ev.key + ": " + errText(err));
@@ -335,7 +367,7 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
   }
   for (const u of diff.update) {
     try {
-      await d.updateEvent(key, u.id, toWrite(u.ev));
+      await d.updateEvent(key, u.id, driveEventWrite(u.ev));
       res.updated++;
     } catch (err) {
       res.errors.push("update " + u.id + ": " + errText(err));
@@ -352,7 +384,11 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
   res.google = "written";
 
   // The one-time D144 retirement runs AFTER the drive writes — never in the
-  // read → write gap.
+  // read → write gap — and only with time left before the caller's deadline.
+  if (deadlineMs != null && deadlineMs - d.now() < LEGACY_PHASE_MIN_TIME_MS) {
+    if (res.errors.length) d.log("[drive-sync] " + userId + " sync errors", res.errors);
+    return;
+  }
   try {
     // Planning + writes may have eaten most of the lease: renew before the
     // scan, and if the lease is no longer ours skip it (it resumes next sync).
@@ -376,16 +412,16 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
 /** The whole window, then stamp lastSyncAt — unless markDriveStale ran after
  *  this sync started (its reads may predate the change): then the rep stays
  *  stale so the next view / cron pass picks the change up. */
-async function syncWindow(userId: string, d: DriveSyncDeps, startMs: number): Promise<DriveSyncResult> {
-  const res = await syncDriveDays(userId, syncWindowDays(startMs), d);
+async function syncWindow(userId: string, d: DriveSyncDeps, startMs: number, opts?: SyncRunOpts): Promise<DriveSyncResult> {
+  const res = await syncDriveDays(userId, syncWindowDays(startMs), d, opts);
   const after = await d.getState(userId);
   await d.setState(userId, { lastSyncAt: (after.staleAt ?? 0) >= startMs ? 0 : d.now() });
   return res;
 }
 
-export async function syncDriveForUser(userId: string, deps?: Partial<DriveSyncDeps>): Promise<DriveSyncResult> {
+export async function syncDriveForUser(userId: string, deps?: Partial<DriveSyncDeps>, opts?: SyncRunOpts): Promise<DriveSyncResult> {
   const d = { ...defaultDeps(), ...deps };
-  return syncWindow(userId, d, d.now());
+  return syncWindow(userId, d, d.now(), opts);
 }
 
 /** /calendar + Home: re-sync when the last one is > 10 min old (catches
@@ -431,7 +467,7 @@ export async function syncAllDrivers(opts: { budgetMs: number; deadlineMs?: numb
       continue;
     }
     try {
-      const result = await syncDriveForUser(r.id, d);
+      const result = await syncDriveForUser(r.id, d, { deadlineMs: opts.deadlineMs });
       if (result.google === "busy") out.busy++;
       else if (result.google === "read-failed") out.readFailed++;
       else out.synced++;
@@ -470,7 +506,8 @@ export async function markStaleIfTriggerFailed(
   const d = { ...defaultDeps(), ...deps };
   if (err !== undefined) d.log("[drive-sync] trigger re-sync failed " + userId, err);
   const failed =
-    !result || (result.google !== "busy" && (result.google === "read-failed" || result.errors.some((e) => !e.startsWith("legacy:"))));
+    // D144 errors read "legacy list: …", "legacy <id>: …" or "legacy: …".
+    !result || (result.google !== "busy" && (result.google === "read-failed" || result.errors.some((e) => !e.startsWith("legacy"))));
   if (!failed) return;
   try {
     await d.setState(userId, { lastSyncAt: 0, staleAt: d.now() });

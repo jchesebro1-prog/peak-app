@@ -374,8 +374,14 @@ async function venuesMissingCoords(): Promise<SiteRow[]> {
     );
 }
 
-/** Per-run state for geocodeVenue(): pacing + the stated-town centre cache. */
-export type GeocodeCtx = { delayMs: number; townCentres: Map<string, GeoSearchHit | null> };
+/** Per-run state for geocodeVenue(): pacing + the stated-town centre cache.
+ *  `search` replaces the fail-soft free-text search (the venue re-check passes
+ *  a paced searchOrThrow wrapper so it can tell an outage from a miss). */
+export type GeocodeCtx = {
+  delayMs: number;
+  townCentres: Map<string, GeoSearchHit | null>;
+  search?: (q: string, opts?: { limit?: number }) => Promise<GeoSearchHit[]>;
+};
 
 export function newGeocodeCtx(delayMs: number = GEOCODE_DELAY_MS): GeocodeCtx {
   return { delayMs, townCentres: new Map() };
@@ -487,7 +493,7 @@ export async function geocodeVenue(
   // beats a confident wrong answer that misprices every quote on that venue.
   const hits =
     precision === "building"
-      ? await search(q, { limit: 1 })
+      ? await (ctx.search ?? search)(q, { limit: 1 })
       : await searchCity(row.city, row.state, { limit: 1 });
   const hit = hits[0];
   const attempt1: GeocodeOutcome = hit
@@ -522,7 +528,7 @@ export async function geocodeVenue(
   const q2 = [street2, city2, [state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   if (q2 && q2 !== q) {
     await sleep(ctx.delayMs);
-    const [hit2] = await search(q2, { limit: 1 });
+    const [hit2] = await (ctx.search ?? search)(q2, { limit: 1 });
     if (hit2) {
       const gate2 = await gateHit(hit2, row, precision, ctx, { cityForCompare: city2, zip5, fallback: true });
       if (gate2.ok) return { ok: true, lat: hit2.lat, lng: hit2.lng, precision, hit: hit2 };
@@ -540,7 +546,7 @@ export async function geocodeVenue(
     // can leave q3 identical to q or q2 — skip the redundant request.
     if (q3 && q3 !== q && q3 !== q2) {
       await sleep(ctx.delayMs);
-      const [hit3] = await search(q3, { limit: 1 });
+      const [hit3] = await (ctx.search ?? search)(q3, { limit: 1 });
       if (hit3) {
         const gate3 = await gateHit(hit3, row, precision, ctx, { cityForCompare: city2, zip5, fallback: true });
         if (gate3.ok) return { ok: true, lat: hit3.lat, lng: hit3.lng, precision, hit: hit3 };
