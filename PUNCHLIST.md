@@ -11590,3 +11590,11 @@ does not want to pre-resize photos.
   order, source pins for the squared and unsquared paths).
 - Remaining / Jeff-gated: click Make photos uniform on production after a `db:export` backup and spot-check a few
   parts in the portal and on a client PDF; the first run will take several clicks on a large catalog.
+
+## 324. Morning triage — "Start here" on Home — DONE 2026-10-10 (D707–D711)
+
+Spec: docs/superpowers/specs/2026-10-09-morning-triage-design.md · Plan: docs/superpowers/plans/2026-10-09-morning-triage.md
+
+Each person's ranked list at the top of Home (top 10, See more → /triage), built from seven feeds — email waiting on a reply, Recordings call to-dos (with the transcript line), tasks + Queue assignments, lead SLA / follow-ups, today's site visits, quotes awaiting you, renewals due — scored by a visible points table with a plain-words reason. Snapshots at 7:00 (Gmail cron rider) and 12:00 (new /api/triage/build cron) Central, lazily on first view, frozen between; Done / Snooze till tomorrow / Not mine per row; admins can view a teammate's list. Deterministic, no AI.
+
+Open: wire spec 3's at-risk provider and specs 1–2's visit flags into `TRIAGE_HOOKS` when those merge (and have spec 3's `normalizeTask` carry `priority`); add a #323 meetings `CallTodoSource` when that lands; check on production that the 17:00 UTC cron fires (`CRON_SECRET` is already set for the Gmail cron).
