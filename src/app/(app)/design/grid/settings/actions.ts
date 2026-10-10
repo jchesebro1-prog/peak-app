@@ -19,6 +19,7 @@ import type { EquipRowInput } from "@/lib/design/equipment-map";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { saveRiserBoxTypes } from "@/lib/stores/riser-box-types";
 import type { CRBoxType } from "@/lib/design/conduit-riser/input";
+import type { BoxTypeRowError } from "@/lib/riser-box-types";
 
 /**
  * Grid Settings mutations (/design/grid/settings). All gated on manage_users
@@ -138,17 +139,19 @@ export async function saveDesignatorDigitsAction(digits: number) {
 }
 
 /** Riser box types (#321): the code + description table printed on the conduit
- *  riser sheet. FULL REPLACEMENT — the store sanitizes (≤ 40, codes unique and
- *  uppercased) and the card shows what was stored, so a dropped row is visible. */
-export async function saveRiserBoxTypesAction(rows: unknown): Promise<{ ok: true; types: CRBoxType[] } | { ok: false; error: string }> {
+ *  riser sheet. FULL REPLACEMENT, strict (#321 polish) — a blank / invalid /
+ *  repeated code or a blank / over-long description refuses the save with
+ *  per-row errors instead of silently dropping the row. */
+export async function saveRiserBoxTypesAction(rows: unknown): Promise<{ ok: true; types: CRBoxType[] } | { ok: false; error: string; errors: BoxTypeRowError[] }> {
   await requirePerm("manage_users");
   try {
-    const types = await saveRiserBoxTypes(rows);
+    const r = await saveRiserBoxTypes(rows);
+    if (!r.ok) return { ok: false, error: r.errors[0]?.message ?? "Could not save the box types.", errors: r.errors };
     revalidatePath("/design/grid/settings");
     revalidatePath("/design/grid", "layout");
-    return { ok: true, types };
+    return { ok: true, types: r.types };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not save the box types." };
+    return { ok: false, error: e instanceof Error ? e.message : "Could not save the box types.", errors: [] };
   }
 }
 

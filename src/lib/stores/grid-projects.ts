@@ -2603,6 +2603,9 @@ export async function restoreRevision(
       const merged: Record<string, string> = {};
       for (const [sid, lid] of Object.entries(doc.sheetLevels || {})) if (!known.has(sid) && liveSheetIds.has(sid)) merged[sid] = lid;
       for (const [sid, lid] of Object.entries(target.sheetLevels)) if (liveSheetIds.has(sid)) merged[sid] = lid;
+      // …and an entry naming a level that isn't in the (restored) levels list is dropped too.
+      const liveLevelIds = new Set((doc.levels || []).map((l) => l.id));
+      for (const [sid, lid] of Object.entries(merged)) if (!liveLevelIds.has(lid)) delete merged[sid];
       if (Object.keys(merged).length) doc.sheetLevels = merged;
       else delete doc.sheetLevels;
     }

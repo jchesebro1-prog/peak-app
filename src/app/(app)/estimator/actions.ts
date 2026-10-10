@@ -23,6 +23,7 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { travelForId } from "@/lib/stores/customers";
+import { isPerLengthUnit } from "@/lib/design/grid-bom";
 import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
 import type { QuoteLite, TravelLite } from "./types";
@@ -1449,11 +1450,14 @@ export async function draftQuoteScopeAction(input: {
  * In-memory substring match over sku/desc/mfr/MFR P/N/Model #/former SKUs (#304; optionally scoped to a category),
  * ranked so prefix hits on the SKU or description come first. Returns up to
  * `limit` hits plus the pre-cap total so the UI can say "refine to narrow".
+ * `perLengthOnly` (#321 polish) keeps only per-foot parts, applied BEFORE the cap so
+ * a broad query still finds them and `total` counts per-foot matches.
  */
 export async function searchCatalog(
   query: string,
   category = "",
-  limit = 40
+  limit = 40,
+  perLengthOnly = false
 ): Promise<CatalogSearch> {
   await requireUser();
   const q = (query || "").trim().toLowerCase();
@@ -1465,6 +1469,7 @@ export async function searchCatalog(
     // #264: "Fabric" means every fabric part (isFabricPart — Fabric, or
     // Theatrical/Soft Goods sold per sq ft); any other category is exact.
     .filter((p) => (!cat ? true : cat === "Fabric" ? isFabricPart(p) : (p.category || "") === cat))
+    .filter((p) => !perLengthOnly || isPerLengthUnit(p.unit || ""))
     .map((p) => {
       const sku = (p.sku || "").toLowerCase();
       const desc = (p.desc || "").toLowerCase();

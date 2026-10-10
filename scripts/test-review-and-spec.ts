@@ -11637,6 +11637,7 @@ seeded()
   .then(() => autoCalNobodyDoneChecks(ok))
   .then(() => riserPolish1Checks())
   .then(() => riserPolish2Checks())
+  .then(() => riserPolish3Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -60726,6 +60727,7 @@ async function designators320StoreChecks(): Promise<void> {
   const { getSettingsPatch: digitsPatch, setSettings: digitsSet } = await import("@/lib/settings");
   const digitsBefore = (await digitsPatch()).designatorDigits;
   await digitsSet({ designatorDigits: 1 });
+  try { // restored in finally — a failing check must not leave the shop on one digit
 
   const gp = await G.createProject({ name: "#320 designators project", customer: "Spec fixture", customerId: null, by });
   registerFixture("grid_projects", gp.id);
@@ -60850,7 +60852,9 @@ async function designators320StoreChecks(): Promise<void> {
   // Two adds at once never hand out the same number among what landed.
   await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
   ok(D.duplicates(optSlice(await proj(), opt)).size === 0, "#320 concurrent adds: numbers come from the doc each patch read — no duplicate among the survivors");
-  await digitsSet({ designatorDigits: digitsBefore });
+  } finally {
+    await digitsSet({ designatorDigits: digitsBefore });
+  }
 }
 
 /* ---------------- #320: Grid device designators — editor wiring ---------------- */
@@ -62583,7 +62587,7 @@ async function conduitRiser321B4Checks(): Promise<void> {
   ok(wt[0].symbol === "UE" && wt[0].signal === "Unshielded Ethernet", "#321 cleanWireTypes: symbol is uppercased and trimmed, signal trimmed and whitespace collapsed");
   ok(!("symbol" in wt[1]) && !("signal" in wt[1]) && !("symbol" in wt[3]) && !("signal" in wt[3]), "#321 cleanWireTypes: a blank or missing symbol / signal is left off, like cableSku");
   ok(wt[2].symbol === "NDX" && wt[2].signal!.length === 30, "#321 cleanWireTypes: symbol keeps letters and digits only, at most 3; signal is capped at 30");
-  ok(wt[4].symbol === "7" && !("signal" in wt[4]), "#321 cleanWireTypes: junk values are coerced or dropped, never thrown");
+  ok(!("symbol" in wt[4]) && !("signal" in wt[4]), "#321 cleanWireTypes: junk values are dropped, never thrown (a number is not coerced since the polish, #321 polish Task 3)");
   const card = src("src/app/(app)/design/grid/settings/wire-types-card.tsx");
   ok(card.includes('aria-label="Riser symbol"') && card.includes('aria-label="Riser signal"') && card.includes("symbol: wt.symbol || \"\"") && card.includes("wt.symbol = r.symbol.trim()") && card.includes("wt.signal = r.signal.trim()"),
     "#321 Wire types card: Symbol and Signal inputs, round-tripped through rowOf and rowsToWireTypes");
@@ -62615,8 +62619,8 @@ async function conduitRiser321B4Checks(): Promise<void> {
   try {
     await setBlob(BT.RISER_BOX_TYPES_BLOB, { types: null });
     ok(J2(await BTS.getRiserBoxTypes()) === J2(BRAY_BOX_TYPES), "#321 getRiserBoxTypes: nothing stored → Bray's list");
-    const savedBoxes = await BTS.saveRiserBoxTypes([{ code: "x", description: "Custom" }, { code: "x", description: "dup" }, { code: "", description: "junk" }]);
-    ok(J2(savedBoxes) === J2([{ code: "X", description: "Custom" }]) && J2(await BTS.getRiserBoxTypes()) === J2(savedBoxes), "#321 saveRiserBoxTypes: stores the sanitized list and reads it back");
+    const savedBoxes = await BTS.saveRiserBoxTypes([{ code: "x", description: "Custom" }, { code: "", description: "" }]);
+    ok(savedBoxes.ok && J2(savedBoxes.types) === J2([{ code: "X", description: "Custom" }]) && J2(await BTS.getRiserBoxTypes()) === J2([{ code: "X", description: "Custom" }]), "#321 saveRiserBoxTypes: stores the sanitized list (fully blank rows skipped) and reads it back");
     await BTS.saveRiserBoxTypes([]);
     ok((await BTS.getRiserBoxTypes()).length === 0, "#321 getRiserBoxTypes: an explicitly saved empty list stays empty");
   } finally {
@@ -62683,7 +62687,7 @@ async function conduitRiser321B4Checks(): Promise<void> {
 
   // page, actions, tile
   const act = src("src/app/(app)/estimating-rules/conduit-sizes/actions.ts");
-  ok(act.includes("export async function saveConduitSizesAction(") && act.includes("export async function searchConduitPartsAction(") && (act.match(/await requirePerm\("manage_users"\);/g) || []).length === 2 && act.includes("isPerLengthUnit(h.unit"),
+  ok(act.includes("export async function saveConduitSizesAction(") && act.includes("export async function searchConduitPartsAction(") && (act.match(/await requirePerm\("manage_users"\);/g) || []).length === 2 && act.includes('searchCatalog(String(query ?? ""), "", 20, true)'),
     "#321 conduit sizes actions: admin-gated save and a per-foot-only part search");
   const page = src("src/app/(app)/estimating-rules/conduit-sizes/page.tsx");
   ok(page.includes("Admin access required") && page.includes('can("manage_users", user.roles)') && page.includes("getConduitSizes()"), "#321 conduit sizes page: admin gate, reads the store");
@@ -63861,7 +63865,6 @@ async function riserPolish1Checks(): Promise<void> {
   const fs = await import("node:fs");
   const srcOf = (f: string) => fs.readFileSync(f, "utf8");
   const G = await import("@/lib/design/conduit-riser/drawing");
-  const TB = await import("@/lib/design/conduit-riser/tables");
   const DSet = await import("@/lib/design/grid-drawing-set");
   type Geo = import("@/lib/design/conduit-riser/drawing").SheetPage["geo"][number];
   const areaB = DSet.drawingArea("b");
@@ -63922,7 +63925,6 @@ async function riserPolish1Checks(): Promise<void> {
     const d = rects(withD.slice(bare.length))[0];
     ok(d.x + d.w <= sideLeft + 1e-3, `#321 polish fit: ${name} the grown detail stops short of the table column`);
   }
-  void TB;
 
   // Overflowing pages: every page of a pile of big details sits inside the area at both sizes.
   const pile = Array.from({ length: 7 }, () => box(9, 6));
@@ -64216,4 +64218,151 @@ async function riserPolish2Checks(): Promise<void> {
     "#321 polish fix 1: setTagFieldsAction, saveLevelsAction and dismissSuggestionAction hand landed back; the editor's run carries it");
   ok(/const \[landedAt, setLandedAt\] = useState\(0\);/.test(ed) && ed.includes("noteLanded(r.landed);") && ed.includes("setLandedAt((v) => Math.max(v, landed.after))"),
     "#321 polish fix 1: the newest landed version counts before the refresh brings it, so an edit made in between isn't dropped");
+}
+
+/* #321 polish, Task 3 — settings and data hygiene: strict box types, cleanWireTypes strings, per-foot search before the cap, quote labels = editor labels, restore drops dead levels. */
+async function riserPolish3Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => fs.readFileSync(f, "utf8");
+
+  // ---- 1. box types: strict save, per-row errors
+  const BT = await import("@/lib/riser-box-types");
+  const good = BT.validateBoxTypeRows([{ code: " ar ", description: "  As   required " }, { code: "B1", description: "Two-gang" }, { code: "", description: "" }]);
+  ok(good.ok && J2(good.types) === J2([{ code: "AR", description: "As required" }, { code: "B1", description: "Two-gang" }]), "#321 polish box types: a clean list validates (codes uppercased, text collapsed, fully blank rows skipped)");
+  const bad = BT.validateBoxTypeRows([
+    { code: "", description: "No code" },
+    { code: "TOOLONG", description: "Long code" },
+    { code: "A", description: "First A" },
+    { code: "a", description: "Second A" },
+    { code: "C", description: "" },
+    { code: "D", description: "x".repeat(BT.BOX_DESC_MAX + 1) },
+    { code: "E!", description: "Bad chars" },
+  ]);
+  const errAt = (row: number, field: string) => (!bad.ok ? bad.errors.filter((e) => e.row === row && e.field === field).length : -1);
+  ok(!bad.ok && errAt(0, "code") === 1 && errAt(1, "code") === 1 && errAt(2, "code") === 0 && errAt(3, "code") === 1 && errAt(4, "description") === 1 && errAt(5, "description") === 1 && errAt(6, "code") === 1,
+    "#321 polish box types: blank, invalid, repeated codes and blank / over-long descriptions each name their own row");
+  ok(!bad.ok && bad.errors.every((e) => e.message.startsWith(`Row ${e.row + 1}`)) && bad.errors.length === 6, "#321 polish box types: one error per bad cell, messages lead with the 1-based row");
+  const over = BT.validateBoxTypeRows(Array.from({ length: BT.BOX_TYPES_MAX + 1 }, (_, i) => ({ code: "X" + i, description: "d" })));
+  ok(!over.ok && over.errors.some((e) => e.field === "list" && e.row === -1), "#321 polish box types: more than 40 rows is a list-level error");
+  ok(BT.validateBoxTypeRows("junk").ok && J2((BT.validateBoxTypeRows("junk") as { types: unknown }).types) === "[]", "#321 polish box types: junk is an empty (valid) list");
+  ok(J2(BT.sanitizeBoxTypes([{ code: "", description: "x" }, { code: "A", description: "y" }])) === J2([{ code: "A", description: "y" }]), "#321 polish box types: sanitizeBoxTypes (the read path) still drops bad rows quietly");
+
+  const BTS = await import("@/lib/stores/riser-box-types");
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const before = await getBlob<Record<string, unknown>>(BT.RISER_BOX_TYPES_BLOB, {});
+  try {
+    await setBlob(BT.RISER_BOX_TYPES_BLOB, { types: [{ code: "Z", description: "Kept" }] });
+    const refused = await BTS.saveRiserBoxTypes([{ code: "x", description: "Fine" }, { code: "x", description: "Dup" }]);
+    ok(!refused.ok && refused.errors.length === 1 && refused.errors[0].row === 1 && J2(await BTS.getRiserBoxTypes()) === J2([{ code: "Z", description: "Kept" }]),
+      "#321 polish box types: a save with a bad row is refused with its error and writes nothing");
+    const saved = await BTS.saveRiserBoxTypes([{ code: "x", description: "Fine" }]);
+    ok(saved.ok && J2(await BTS.getRiserBoxTypes()) === J2([{ code: "X", description: "Fine" }]), "#321 polish box types: a valid save stores the list");
+  } finally {
+    await setBlob(BT.RISER_BOX_TYPES_BLOB, before);
+  }
+  const gridActions = srcOf("src/app/(app)/design/grid/settings/actions.ts");
+  const boxAct = gridActions.slice(gridActions.indexOf("export async function saveRiserBoxTypesAction("), gridActions.indexOf("/* ----------------------------- Equipment map"));
+  ok(boxAct.includes('await requirePerm("manage_users");') && boxAct.includes("errors: r.errors") && boxAct.includes("if (!r.ok)"), "#321 polish box types: the action stays admin-gated and returns the per-row errors");
+  const card = srcOf("src/app/(app)/design/grid/settings/box-types-card.tsx");
+  ok(card.includes("saveRiserBoxTypesAction(rows)") && !card.includes("rows.filter((r) => r.code.trim()") && card.includes("rowErrors.find((e) => e.row === i && e.field ===") && card.includes("aria-invalid={!!codeErr}") && card.includes("aria-invalid={!!descErr}"),
+    "#321 polish box types: the card sends every row and marks the rows the server named");
+
+  // ---- 2. cleanWireTypes reads symbol / signal only when they are strings
+  const { cleanWireTypes } = await import("@/lib/catalog-connect");
+  const wt = cleanWireTypes([
+    { id: "w1", connectionTypes: ["HDMI"], symbol: { toString: () => "EVIL" }, signal: ["a", "b"] },
+    { id: "w2", connectionTypes: ["HDMI"], symbol: 42, signal: 7 },
+    { id: "w3", connectionTypes: ["HDMI"], symbol: "d-m x", signal: "  DMX  512 " },
+  ]) || [];
+  ok(wt.length === 3 && !("symbol" in wt[0]) && !("signal" in wt[0]) && !("symbol" in wt[1]) && !("signal" in wt[1]) && wt[2].symbol === "DMX" && wt[2].signal === "DMX 512",
+    "#321 polish cleanWireTypes: a non-string symbol / signal is ignored (no String() coercion); strings clean as before");
+
+  // ---- 3. conduit-part search filters per-foot inside the catalog query, before the cap
+  const est = srcOf("src/app/(app)/estimator/actions.ts");
+  const sc = est.slice(est.indexOf("export async function searchCatalog("), est.indexOf("export type ResolvedCatalogSku"));
+  ok(/limit = 40,\s*perLengthOnly = false/.test(sc) && sc.includes(".filter((p) => !perLengthOnly || isPerLengthUnit(p.unit || \"\"))") && sc.indexOf("perLengthOnly || isPerLengthUnit") < sc.indexOf(".slice(0, Math.max(1, limit))") && sc.includes("total: scored.length"),
+    "#321 polish conduit search: searchCatalog takes perLengthOnly and applies it before scoring, the cap and the total");
+  const csa = srcOf("src/app/(app)/estimating-rules/conduit-sizes/actions.ts");
+  const csaSearch = csa.slice(csa.indexOf("export async function searchConduitPartsAction("));
+  ok(csaSearch.includes('searchCatalog(String(query ?? ""), "", 20, true)') && !csaSearch.includes("300") && !csaSearch.includes(".filter(") && csaSearch.includes("total,") && csaSearch.includes('requirePerm("manage_users")'),
+    "#321 polish conduit search: the picker asks for 20 per-foot hits, its count is the per-foot total, still admin-only");
+
+  // ---- 4. run-end labels in a quote refusal are the editor's
+  const D = await import("@/lib/design/designators");
+  const DS = await import("@/lib/design/designators-server");
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const BOM = await import("@/lib/design/conduit-riser/bom");
+  const M = await import("@/lib/design/conduit-riser/model");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { getSettingsPatch, setSettings } = await import("@/lib/settings");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const digitsBefore = (await getSettingsPatch()).designatorDigits;
+  try {
+    await setSettings({ designatorDigits: undefined });
+    const gp = await G.createProject({ name: "#321 polish labels", customer: "Spec fixture", customerId: null, by });
+    reg("grid_projects", gp.id);
+    const sh = (await G.addSheet(gp.id, { name: "#321 polish labels sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    reg("grid_sheets", sh.id);
+    const add = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+    const pa = await add(0.1, 0.1);
+    const pb = await add(0.5, 0.1);
+    const stored = await G.getProject(gp.id);
+    // A design nobody has opened since numbering shipped: no stored designators.
+    const bare = { ...stored!, placements: stored!.placements.map((pl) => ({ ...pl, designator: undefined })) };
+    const slice = bare.placements.filter((pl) => !pl.curtain);
+    const filled = await DS.fillDesignatorsInMemory(bare, slice, 2);
+    const doc = M.emptyConduitRiserDoc();
+    const labeler = BOM.riserEndLabeler(doc, filled, () => "an allowance", 2);
+    const editor = (await L.loadConduitRiser(bare, opt)).input.devices;
+    const editorLabel = (id: string) => editor.find((d) => d.id === id)?.label;
+    ok(editorLabel(pa.id) === "L-01" && editorLabel(pb.id) === "L-02", "#321 polish labels: fixture — the editor numbers an unnumbered design L-01, L-02");
+    ok(labeler({ kind: "placement", placementId: pa.id }) === editorLabel(pa.id) && labeler({ kind: "placement", placementId: pb.id }) === editorLabel(pb.id),
+      "#321 polish labels: filled in memory, a run end is named exactly as the editor names it");
+    const unfilled = BOM.riserEndLabeler(doc, slice, () => "an allowance", 2);
+    ok(unfilled({ kind: "placement", placementId: pa.id }) === "an allowance", "#321 polish labels: unfilled, the labeler falls back to the description (the old divergence)");
+    ok(J2((bare.placements).map((pl) => pl.designator)) === J2([undefined, undefined]) && D.needsDesignators(slice), "#321 polish labels: the fill is in memory — the input placements are not mutated");
+  } finally {
+    await setSettings({ designatorDigits: digitsBefore });
+  }
+  const gq = srcOf("src/lib/design/grid-quote.ts");
+  ok(gq.includes("await fillDesignatorsInMemory(project, nonCurtain, digits)") && gq.includes("riserEndLabeler(conduitDoc, labelPlacements,"), "#321 polish labels: buildGridQuote names run ends through the filled placements");
+
+  // ---- 5. restoreRevision drops a default level the restored levels don't have
+  const gp3 = await G.createProject({ name: "#321 polish restore", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp3.id);
+  const mk = async (n: string) => {
+    const s = (await G.addSheet(gp3.id, { name: `#321 polish restore ${n}`, mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    reg("grid_sheets", s.id);
+    return s;
+  };
+  const live3 = async () => (await G.getProject(gp3.id))!;
+  await G.setLevels(gp3.id, [{ label: "Stage" }]);
+  const [stage] = (await live3()).levels!;
+  const se = await mk("E");
+  await G.setSheetLevel(gp3.id, se.id, stage.id);
+  const cut = (await G.addRevision(gp3.id, { by, note: "one level" }))!;
+  await G.setLevels(gp3.id, [{ id: stage.id, label: "Stage" }, { label: "Catwalk" }]);
+  const cat = (await live3()).levels!.find((l) => l.label === "Catwalk")!;
+  const sf = await mk("F");
+  await G.setSheetLevel(gp3.id, sf.id, cat.id);
+  const back = await G.restoreRevision(gp3.id, cut.rev, by);
+  const p3 = await live3();
+  ok(back.ok && p3.levels!.length === 1 && p3.levels![0].id === stage.id && p3.sheetLevels?.[se.id] === stage.id,
+    "#321 polish restore: the snapshot's levels and its sheet default come back");
+  ok(!(sf.id in (p3.sheetLevels || {})), "#321 polish restore: a later sheet's default naming a level the restore removed is dropped");
+  const gs = srcOf("src/lib/stores/grid-projects.ts");
+  ok(gs.includes("const liveLevelIds = new Set((doc.levels || []).map((l) => l.id));") && gs.includes("if (!liveLevelIds.has(lid)) delete merged[sid];"), "#321 polish restore: the level check sits in the sheetLevels merge");
+
+  // ---- 6. the #320 store checks restore designatorDigits in a finally
+  const self = srcOf("scripts/test-review-and-spec.ts");
+  const a = self.indexOf("await digitsSet({ designatorDigits: 1 });");
+  const bIdx = self.indexOf("await digitsSet({ designatorDigits: digitsBefore });", a);
+  ok(a > 0 && /\n  try \{/.test(self.slice(a, a + 200)) && /\} finally \{\s*await digitsSet\(\{ designatorDigits: digitsBefore \}\);/.test(self.slice(bIdx - 20, bIdx + 80)), "#321 polish digits: the #320 store checks restore designatorDigits in try/finally");
 }

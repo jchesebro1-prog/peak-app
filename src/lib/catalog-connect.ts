@@ -262,9 +262,9 @@ export function cleanWireTypes(rows: unknown): WireType[] | null {
     const wt: WireType = { id, label, connectionTypes };
     const cableSku = String(r.cableSku ?? "").trim().slice(0, 60);
     if (cableSku) wt.cableSku = cableSku;
-    const symbol = String(r.symbol ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3);
+    const symbol = (typeof r.symbol === "string" ? r.symbol : "").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3);
     if (symbol) wt.symbol = symbol;
-    const signal = String(r.signal ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+    const signal = (typeof r.signal === "string" ? r.signal : "").replace(/\s+/g, " ").trim().slice(0, 30);
     if (signal) wt.signal = signal;
     const dpf = Number(r.dollarsPerFt);
     if (Number.isFinite(dpf) && dpf >= 0) wt.dollarsPerFt = dpf;

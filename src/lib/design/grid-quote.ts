@@ -32,6 +32,7 @@ import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { getConduitSizes } from "@/lib/stores/conduit-sizes";
 import { designatorDigitsOf } from "@/lib/settings";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { fillDesignatorsInMemory } from "@/lib/design/designators-server";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { getSettings } from "@/lib/settings";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
@@ -241,6 +242,13 @@ export async function buildGridQuote(
     if (!tiered) fallbackKeys.add(p.id);
   }
   const descById = new Map(tierCatalog.map((p) => [p.id, p.desc]));
+  // Run-end names in a refusal are the editor's: a device not yet numbered is
+  // named by the number the editor would give it (fillDesignators over the same
+  // reading order, the same code resolver as the riser loader), never written.
+  const nonCurtain = placements.filter((pl) => !pl.curtain);
+  const labelPlacements = riserPriced
+    ? await fillDesignatorsInMemory(project, nonCurtain, digits)
+    : nonCurtain;
   const riser = riserBom({
     doc: conduitDoc,
     estimateOwned,
@@ -251,7 +259,7 @@ export async function buildGridQuote(
     conduitParts,
     sizes: conduitSizes,
     placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
-    labelOf: riserEndLabeler(conduitDoc, placements, (id) => descById.get(id), digits),
+    labelOf: riserEndLabeler(conduitDoc, labelPlacements, (id) => descById.get(id), digits),
   });
   if (riser.refusals.length) return { ok: false, error: riser.refusals.map((s) => s + ".").join(" ") };
   const wires = riser.wires;

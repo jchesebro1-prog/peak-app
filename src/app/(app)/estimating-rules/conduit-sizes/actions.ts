@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { saveConduitSizes } from "@/lib/stores/conduit-sizes";
 import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
-import { isPerLengthUnit } from "@/lib/design/grid-bom";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import type { EquipPartHit } from "@/app/(app)/design/grid/settings/actions";
 
@@ -22,13 +21,12 @@ export async function saveConduitSizesAction(rows: unknown): Promise<{ ok: true;
   }
 }
 
-/** Part search for the size rows: only per-foot parts (the catalog's `ft` units) are offered. Searches wide, then filters, so the 20 shown are all pickable. */
+/** Part search for the size rows: only per-foot parts (the catalog's `ft` units) are offered. The unit filter runs inside the catalog query, before the 20-hit cap, so a broad query ("emt") still finds per-foot parts and `total` counts per-foot matches. */
 export async function searchConduitPartsAction(query: string): Promise<{ hits: EquipPartHit[]; total: number }> {
   await requirePerm("manage_users");
-  const { hits } = await searchCatalog(String(query ?? ""), "", 300);
-  const perFoot = hits.filter((h) => isPerLengthUnit(h.unit || ""));
+  const { hits, total } = await searchCatalog(String(query ?? ""), "", 20, true);
   return {
-    hits: perFoot.slice(0, 20).map((h) => ({ sku: h.sku, desc: h.desc, category: h.category, unit: h.unit, cost: h.cost, list: h.list })),
-    total: perFoot.length,
+    hits: hits.map((h) => ({ sku: h.sku, desc: h.desc, category: h.category, unit: h.unit, cost: h.cost, list: h.list })),
+    total,
   };
 }

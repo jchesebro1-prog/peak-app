@@ -9,7 +9,7 @@ import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { gridPartsFrom } from "./grid-parts";
 import { parseVirtualPartId } from "./grid-virtual-parts";
 import { isSeedPlaceholder } from "./grid-seed";
-import { designatorCodeOf, type CodePart } from "./designators";
+import { designatorCodeOf, fillDesignators, readingCtxOf, type CodePart, type DesignatorPlacement } from "./designators";
 import type { DeviceTypeContext } from "./device-types";
 
 // Server-only (the `server-only` package isn't installed here): fail loudly
@@ -52,4 +52,21 @@ export async function designatorContext(
     ...virtual,
   ];
   return { codeOf: designatorCodeOf(new Map(parts.map((p) => [p.id, p])), deviceTypes), digits: designatorDigitsOf(settings) };
+}
+
+/**
+ * #321 polish: the placements as the riser editor names them — a device not
+ * yet numbered gets the number the editor will give it (fillDesignators over
+ * the project's reading order, the same code resolver), in memory only.
+ * buildGridQuote names run ends in a refusal through this, so the quote and
+ * the editor call the same device by the same label.
+ */
+export async function fillDesignatorsInMemory<P extends DesignatorPlacement & { partId: string; category?: string }>(
+  project: { sheetIds?: readonly string[]; spaces?: Parameters<typeof readingCtxOf>[0]["spaces"] },
+  placements: readonly P[],
+  digits: 1 | 2
+): Promise<P[]> {
+  if (!placements.length) return [...placements];
+  const { codeOf } = await designatorContext(placements.map((pl) => pl.partId));
+  return fillDesignators(placements, codeOf, readingCtxOf(project, digits));
 }

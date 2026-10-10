@@ -260,9 +260,10 @@ export function allPagesLocked(locks: Record<number, string>, pageCount: number)
 
 /**
  * Point every stored reference to `oldId` at `newId`, in place, on a doc
- * patchDoc just read: the sheet order (same position), placements, spaces,
- * routes, calibrations (`docId`), the intake's plan view and drawing-set
- * exclusion keys `plan:<system>:<sheetId>:<page>`, the sheet's default riser level. The adjust gate has
+ * patchDoc just read. Moved: the sheet order (same position), placements,
+ * spaces and routes (`sheetId`), calibrations (`docId`), the intake's plan
+ * view, the sheet's default level (`sheetLevels` key), and the drawing-set
+ * exclusion keys `plan:<system>:<sheetId>:<page>`. The adjust gate has
  * already guaranteed nothing sits on a page whose frame changed, so every
  * reference moves. Revisions are history and are never touched; the base
  * sheet id is never remapped (the base sheet is never adjusted).
