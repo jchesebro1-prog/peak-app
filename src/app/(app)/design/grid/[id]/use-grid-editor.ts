@@ -50,7 +50,7 @@ import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, Rem
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import { riserPromptForRouteAction } from "./conduit-riser/actions";
-import { addAnswerHides, type PromptTicket } from "@/lib/design/conduit-riser/editor-rules";
+import { addAnswerHides, promptRiserSystem, type PromptTicket } from "@/lib/design/conduit-riser/editor-rules";
 import { placementSystem } from "@/lib/design/grid-drawing-set";
 import {
   addRouteAction,
@@ -84,7 +84,7 @@ import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
 import { riserBom, riserEndLabeler } from "@/lib/design/conduit-riser/bom";
-import type { ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import type { ConduitRiserDoc, ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
 import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 import type { SysKey } from "@/app/(app)/design/quick/engine";
@@ -576,10 +576,19 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [lastAction, setLastAction] = useState<string | null>(null);
   const noteAction = useCallback((text: string) => setLastAction(text), []);
 
-  /** #321: "Add to the lighting control riser?" after a device-to-device wire.
+  /** #321: "Add to the lighting control riser?" after a device-to-device wire
+   *  (#328 C3: or the A/V conduit riser — `system` is the server's pick).
    *  One at a time — a newer wire's prompt replaces an older one; the ticket
    *  drops an answer that arrives after it was replaced or dismissed. */
-  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean; byOthers: boolean; ticket: number } | null>(null);
+  const [riserPrompt, setRiserPrompt] = useState<{
+    optionId: string;
+    system: ConduitRiserSystem;
+    key: string;
+    label: string;
+    joins: boolean;
+    byOthers: boolean;
+    ticket: number;
+  } | null>(null);
   const riserTicket = useRef(0);
   const hideRiserPrompt = useCallback(() => {
     riserTicket.current++;
@@ -595,7 +604,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     setRiserPrompt(null);
     riserPromptForRouteAction(project.id, optionId, routeId)
       .then((r) => {
-        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins, byOthers: r.byOthers, ticket });
+        if (ticket === riserTicket.current && r.show)
+          setRiserPrompt({ optionId, system: r.system, key: r.key, label: r.label, joins: r.joins, byOthers: r.byOthers, ticket });
       })
       .catch(() => {});
   }, [project.id]);
@@ -1726,12 +1736,13 @@ function useGridEditorImpl(props: GridEditorProps) {
             clearUndo();
             router.refresh();
             // After the refresh is on its way — the check never holds drawing up.
-            // Only a pair with a lighting device can ever be offered — any
-            // other pair skips the server round trip (#321 final review).
+            // Only a pair the server's rule can pick a riser for (lighting, or
+            // audio / video — #328 C3) is ever offered; any other pair, a
+            // lighting ↔ A/V one included, skips the server round trip.
             if (
               fromPlacement &&
               toPlacement &&
-              (placementSystem(fromPlacement, partById) === "lighting" || placementSystem(toPlacement, partById) === "lighting")
+              promptRiserSystem(placementSystem(fromPlacement, partById), placementSystem(toPlacement, partById))
             )
               askRiserPrompt(activeOptionId, r.routeId);
           }

@@ -349,6 +349,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&detail=dt-main", reject: "no longer exists" },
+  /* #328 C3: the A/V conduit riser — the same page with ?system=av. */
+  { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&system=av", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/schedule?option=opt-does-not-exist", reject: "no longer exists" },
   /* The drawing set (#209) at both sheet sizes, and an unknown option. */
   { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },

@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
@@ -15,12 +16,22 @@ import { conduitRiserPagesOf, loadConduitRiser } from "@/lib/design/conduit-rise
 import { conduitRiserSheetNumber, drawingArea, resolveSheetSize } from "@/lib/design/grid-drawing-set";
 import { layoutDetail } from "@/lib/design/conduit-riser/layout";
 import { detailGeometry, tableGeometry } from "@/lib/design/conduit-riser/drawing";
-import { LIGHTING_ALWAYS_SHOW } from "@/lib/design/conduit-riser/model";
+import type { ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
+import { alwaysShowTypeOptions, conduitRiserHref, RISER_TITLE } from "@/lib/design/conduit-riser/editor-rules";
+import { isSystem } from "@/lib/stores/grid-conduit-riser";
 import { cleanPlacementTag } from "@/lib/design/conduit-riser/tags";
 import { ConduitRiserFigure } from "@/components/drawing/conduit-riser-figure";
 import ConduitRiserEditor, { type SuggestionRow } from "./conduit-riser-editor";
 
-export const metadata = { title: "Lighting control riser — Quartzite-6" };
+type SearchParams = Promise<{ option?: string; detail?: string; system?: string | string[] }>;
+
+/** `?system=av` is the A/V conduit riser (#328 C3); anything else, the lighting control riser. */
+const systemOf = (v: unknown): ConduitRiserSystem => (isSystem(v) ? v : "lighting");
+
+export async function generateMetadata({ searchParams }: { searchParams: SearchParams }): Promise<Metadata> {
+  return { title: `${RISER_TITLE[systemOf((await searchParams).system)]} — Quartzite-6` };
+}
+
 export const dynamic = "force-dynamic";
 // The loader reads the catalog, fixtures and virtual parts — same budget as the editor.
 export const maxDuration = 60;
@@ -28,22 +39,26 @@ export const maxDuration = 60;
 const TAB: CSSProperties = { fontSize: 12.5, padding: "5px 11px", borderRadius: 7, textDecoration: "none", border: "1px solid #e4e7ec" };
 
 /**
- * The lighting control riser (#321) — Bray's device-level conduit riser,
+ * The conduit riser page (#321) — Bray's device-level conduit riser,
  * drawn from the plan. Devices and wires are derived from the plan on every
  * load; the riser document adds details, pinned positions, stubs, conduit
  * runs, level-line positions, power types, notes and pricing defaults.
  * `?option=` picks the design option, `?detail=` the detail being edited.
+ * #328 C3: `?system=av` opens the A/V conduit riser instead — the same
+ * page, editor and engine over the option's second riser document.
  */
 export default async function ConduitRiserPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ option?: string; detail?: string }>;
+  searchParams: SearchParams;
 }) {
   await requireUser();
   const { id } = await params;
-  const { option: requestedOption, detail: requestedDetail } = await searchParams;
+  const { option: requestedOption, detail: requestedDetail, system: requestedSystem } = await searchParams;
+  const system = systemOf(requestedSystem);
+  const title = RISER_TITLE[system];
   const project = await getProject(decodeURIComponent(id));
   if (!project) {
     return (
@@ -59,11 +74,13 @@ export default async function ConduitRiserPage({
   const option = options.find((o) => o.id === optionId)!;
   const base = `/design/grid/${encodeURIComponent(project.id)}`;
   const optionQuery = `?option=${encodeURIComponent(optionId)}`;
+  // This riser's own URL for the option — lighting keeps the bare one.
+  const riserHref = conduitRiserHref(base, optionId, system);
 
   // Loaded once and handed to the loader, so nothing reads the catalog twice.
   const [sheets, catalog, gridSymbols, settings] = await Promise.all([listSheets(project.id), listCatalog(), listGridSymbols(), getSettings()]);
   const deviceTypes = await loadDeviceTypeContext(catalog);
-  const data = await loadConduitRiser(project, optionId, "lighting", { catalog, gridSymbols, settings, deviceTypes });
+  const data = await loadConduitRiser(project, optionId, system, { catalog, gridSymbols, settings, deviceTypes });
 
   const details = data.view.details;
   const active = details.find((d) => d.detail.id === requestedDetail) ?? details[0];
@@ -90,20 +107,20 @@ export default async function ConduitRiserPage({
     .filter((p) => isPerLengthUnit(p.unit))
     .map((p) => ({ id: p.id, label: partLabel(p) }))
     .sort((a, b) => a.label.localeCompare(b.label));
-  const shown = new Set([...LIGHTING_ALWAYS_SHOW, ...data.doc.alwaysShow]);
-  const typeOptions = deviceTypes.types
-    .filter((t) => !t.archived && (t.scope === "Lighting" || shown.has(t.key)))
-    .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
-    .map((t) => ({ key: t.key, label: t.label }));
+  // Lighting types for the lighting riser; audio + video types for A/V.
+  const typeOptions = alwaysShowTypeOptions(deviceTypes.types, system, data.doc.alwaysShow);
 
   // #321: E-502… as the drawing set prints them at its saved size — one DXF per page.
+  // The A/V riser's sheet numbers and DXF arrive with its drawing-set pages
+  // (#328 C4); until then its page offers no DXF rather than lighting's.
   const sheetSize = resolveSheetSize(null, project.drawingSet?.size);
-  const sheetPages = conduitRiserPagesOf(data, drawingArea(sheetSize), layouts);
+  const sheetPages = system === "lighting" ? conduitRiserPagesOf(data, drawingArea(sheetSize), layouts) : [];
   const dxfHref = (page: number) =>
     `/api/grid/${encodeURIComponent(project.id)}/conduit-riser/dxf${optionQuery}&size=${sheetSize}&page=${page}`;
 
   const slice = optionSlice(project, optionId);
-  const detailHref = (detailId: string) => `${base}/conduit-riser${optionQuery}&detail=${encodeURIComponent(detailId)}`;
+  const detailHref = (detailId: string) => `${riserHref}&detail=${encodeURIComponent(detailId)}`;
+  const other: ConduitRiserSystem = system === "av" ? "lighting" : "av";
 
   return (
     <div className="pk-content" style={{ maxWidth: 1480, padding: "26px 30px 64px" }}>
@@ -130,12 +147,20 @@ export default async function ConduitRiserPage({
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Lighting control riser</h1>
+        <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>{title}</h1>
         <span style={{ color: "#8c919c", fontSize: 13 }}>
           {project.name}
           {options.length > 1 ? ` · ${option.name}` : ""}
           {project.customer ? ` · ${project.customer}` : ""} · {project.id}
         </span>
+        {/* #328 C3: the option's other conduit riser, one click away. */}
+        <Link
+          className="pk-no-print"
+          href={conduitRiserHref(base, optionId, other)}
+          style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--accent)", textDecoration: "none", border: "1px solid #e4e7ec", borderRadius: 7, padding: "4px 10px" }}
+        >
+          {RISER_TITLE[other]} →
+        </Link>
       </div>
       <p className="pk-no-print" style={{ color: "#8c919c", fontSize: 13, marginBottom: 14 }}>
         Devices and wires come live from the plan. Accept the conduit runs the plan suggests, drag tags, stubs, lanes and level lines to
@@ -148,7 +173,7 @@ export default async function ConduitRiserPage({
           {options.map((o) => (
             <Link
               key={o.id}
-              href={`${base}/conduit-riser?option=${encodeURIComponent(o.id)}`}
+              href={conduitRiserHref(base, o.id, system)}
               aria-current={o.id === optionId ? "page" : undefined}
               style={{ ...TAB, ...(o.id === optionId ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : { color: "#3b404a" }) }}
             >
@@ -173,9 +198,10 @@ export default async function ConduitRiserPage({
 
       <ConduitRiserEditor
         // A new detail or option is a fresh editor (drag state, undo stack, selection).
-        key={`${optionId}:${active.detail.id}`}
+        key={`${system}:${optionId}:${active.detail.id}`}
         projectId={project.id}
         optionId={optionId}
+        system={system}
         // The layout-undo stack is tied to this version (#321 polish).
         version={project.updatedAt}
         planHref={`${base}${optionQuery}`}

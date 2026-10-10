@@ -31,6 +31,7 @@ import type { DeviceTypeContext } from "@/lib/design/device-types";
 import type { CRBoxType, CRDevice, CRLevel, CRSignal, CRWire, CRWireType } from "@/lib/design/conduit-riser/input";
 import type { ConduitRiserDoc, ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
 import { CONDUIT_RISER_FIELDS, liveConduitRiser, riserSystemOf } from "@/lib/design/conduit-riser/live";
+import { promptRiserSystem } from "@/lib/design/conduit-riser/editor-rules";
 import { deriveView, type CRView, type DeriveInput } from "@/lib/design/conduit-riser/derive";
 import { claimedBy, suggestions, type ClaimedWires, type SuggestResult } from "@/lib/design/conduit-riser/suggest";
 import { riserTables, type TableModel } from "@/lib/design/conduit-riser/tables";
@@ -57,6 +58,9 @@ export type ConduitRiserDeps = {
   deviceTypes?: DeviceTypeContext;
   boxTypes?: CRBoxType[];
   sizes?: ConduitSize[];
+  /** The parts context, already built for this project (the plan prompt
+   *  builds it once to pick the riser, then loads that riser with it). */
+  parts?: RiserPartsContext;
 };
 
 /** What turning plan records into riser input needs. */
@@ -300,7 +304,7 @@ export type ConduitRiserData = {
  *  system's field, devices and wires flagged in or out of that system. */
 export async function loadConduitRiser(project: GridProject, optionId: string, system: ConduitRiserSystem, deps: ConduitRiserDeps = {}): Promise<ConduitRiserData> {
   const [ctx, boxTypes, sizes] = await Promise.all([
-    loadRiserPartsContext(project, deps),
+    deps.parts ?? loadRiserPartsContext(project, deps),
     deps.boxTypes ?? getRiserBoxTypes(),
     deps.sizes ?? getConduitSizes(),
   ]);
@@ -404,6 +408,8 @@ export type RiserPrompt =
   | { show: false }
   | {
       show: true;
+      /** The riser the prompt adds to (#328 C3) — Add accepts on this one. */
+      system: ConduitRiserSystem;
       key: string;
       label: string;
       joins: boolean;
@@ -414,7 +420,7 @@ export type RiserPrompt =
     };
 
 /**
- * The plan's "Add to the lighting control riser?" (#321): shown only when
+ * The plan's "Add to the … riser?" for one riser `system` (#321; #328 C3): shown only when
  * the engine offers a suggestion that includes this route — so an audio
  * pair, a loose wire, a wire already in a run and a dismissed pair say
  * nothing. `label` names the ends in the direction the wire was drawn;
@@ -440,5 +446,28 @@ export async function riserPromptFor(
   if (!from || !to) return none;
   const run = s.kind === "join" ? data.doc.runs.find((r) => r.id === s.runId) : undefined;
   const byOthers = !data.estimateOwned && !(run ? effectivePricing(run, data.doc.defaults).wire : data.doc.defaults.priceWire);
-  return { show: true, key: s.key, label: `${from} → ${to}`, joins: s.kind === "join", byOthers };
+  return { show: true, system, key: s.key, label: `${from} → ${to}`, joins: s.kind === "join", byOthers };
+}
+
+/**
+ * The plan's prompt for a wire just drawn (#328 C3): the riser is picked
+ * from the wire's two devices by `promptRiserSystem` — a lighting pair asks
+ * about the lighting control riser, an audio / video pair the A/V conduit
+ * riser, a lighting ↔ A/V pair (or a pair on no riser) nothing — then
+ * `riserPromptFor` decides on that riser. The parts context is built once.
+ */
+export async function riserPromptForRoute(project: GridProject, optionId: string, routeId: string, deps: ConduitRiserDeps = {}): Promise<RiserPrompt> {
+  const none: RiserPrompt = { show: false };
+  if (!hasOption(project, optionId)) return none;
+  const slice = optionSlice(project, optionId);
+  const route = slice.routes.find((r) => r.id === routeId);
+  if (!route?.fromPlacementId || !route.toPlacementId) return none;
+  const parts = deps.parts ?? (await loadRiserPartsContext(project, deps));
+  const byId = new Map(slice.placements.filter((pl) => !pl.curtain).map((pl) => [pl.id, pl]));
+  const systemAt = (id: string) => {
+    const pl = byId.get(id);
+    return pl ? placementSystem(pl, parts.partById) : null;
+  };
+  const system = promptRiserSystem(systemAt(route.fromPlacementId), systemAt(route.toPlacementId));
+  return system ? riserPromptFor(project, optionId, system, routeId, { ...deps, parts }) : none;
 }

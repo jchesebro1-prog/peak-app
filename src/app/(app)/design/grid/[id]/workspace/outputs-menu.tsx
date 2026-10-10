@@ -44,6 +44,7 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
       items={[
         { label: "System riser →", href: `/design/grid/${id}/riser?option=${opt}` },
         { label: "Lighting control riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}` },
+        { label: "A/V conduit riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}&system=av` },
         { label: "Schedule →", href: `/design/grid/${id}/schedule?option=${opt}` },
         { label: "Drawing set →", href: `/design/grid/${id}/set?option=${opt}` },
         ...(project.linesetDesignId ? [{ label: "Linesets →", href: `/design/grid/${id}/lineset` }] : []),

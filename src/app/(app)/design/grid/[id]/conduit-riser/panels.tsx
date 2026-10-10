@@ -12,7 +12,7 @@ import { formatCableOd } from "@/lib/design/conduit-riser/cable-od";
 import type { GridLevel } from "@/lib/design/grid-levels";
 
 /**
- * Lighting control riser panels (#321). Plain controlled forms; the editor
+ * Conduit riser panels (#321; both risers since #328). Plain controlled forms; the editor
  * owns every server call and passes busy + callbacks in. Each panel is
  * keyed by its data in the editor, so a refresh resets its fields.
  *
@@ -614,6 +614,7 @@ export function SuggestionsPanel({
   planHref,
   busy,
   readOnly = false,
+  wireNoun = "lighting",
   onAccept,
   onDismiss,
 }: {
@@ -623,13 +624,15 @@ export function SuggestionsPanel({
   busy: boolean;
   /** Phone: the rows show, Accept / Accept all / Dismiss don't. */
   readOnly?: boolean;
+  /** The riser's wires in a sentence — "lighting" or "A/V" (#328). */
+  wireNoun?: string;
   onAccept: (keys: string[] | "all") => void;
   onDismiss: (key: string) => void;
 }) {
   return (
     <Section title="From the plan" aside={rows.length ? `${rows.length} new` : undefined} open={rows.length > 0 || loose.length > 0}>
       {rows.length === 0 ? (
-        <div style={HINT}>{NOTHING_NEW} — every lighting wire between two devices is on the riser.</div>
+        <div style={HINT}>{NOTHING_NEW} — every {wireNoun} wire between two devices is on the riser.</div>
       ) : (
         <>
           {readOnly ? null : (
@@ -923,23 +926,31 @@ export function AlwaysShowView({ types, selected }: { types: { key: string; labe
 
 export function DefaultsPanel({
   defaults,
+  showSignals,
   estimateOwned,
   busy,
   onSave,
 }: {
   defaults: ConduitRiserDefaults;
+  /** #328 C3: the riser's signal bubbles (and the sheet's wire legend). */
+  showSignals: boolean;
   estimateOwned: boolean;
   busy: boolean;
-  onSave: (v: { size: string; priceWire?: boolean; priceConduit?: boolean }) => void;
+  onSave: (v: { size: string; showSignals: boolean; priceWire?: boolean; priceConduit?: boolean }) => void;
 }) {
   const [size, setSize] = useState(defaults.size);
   const [pw, setPw] = useState(defaults.priceWire);
   const [pc, setPc] = useState(defaults.priceConduit);
+  const [sig, setSig] = useState(showSignals);
   return (
     <Section title="Defaults" aside={defaults.size}>
       <div style={ROW}>
         <Text label="Conduit size for new runs" value={size} width={90} max={12} list={SIZE_LIST_ID} onChange={setSize} />
       </div>
+      <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <input type="checkbox" checked={sig} onChange={(e) => setSig(e.target.checked)} /> Show signal bubbles
+      </label>
+      <div style={HINT}>Off: runs draw no signal bubbles and the sheet prints no wire legend.</div>
       {estimateOwned ? (
         <div style={HINT}>This design belongs to an estimate, so the riser never prices wire or conduit — the estimate does.</div>
       ) : (
@@ -959,7 +970,9 @@ export function DefaultsPanel({
           className="pk-btn-accent"
           style={SMALL}
           disabled={busy || !size.trim()}
-          onClick={() => onSave(estimateOwned ? { size: size.trim() } : { size: size.trim(), priceWire: pw, priceConduit: pc })}
+          onClick={() =>
+            onSave(estimateOwned ? { size: size.trim(), showSignals: sig } : { size: size.trim(), showSignals: sig, priceWire: pw, priceConduit: pc })
+          }
         >
           Save defaults
         </button>
@@ -969,11 +982,12 @@ export function DefaultsPanel({
 }
 
 /** Defaults, read-only (phone). */
-export function DefaultsView({ defaults, estimateOwned }: { defaults: ConduitRiserDefaults; estimateOwned: boolean }) {
+export function DefaultsView({ defaults, showSignals, estimateOwned }: { defaults: ConduitRiserDefaults; showSignals: boolean; estimateOwned: boolean }) {
   return (
     <Section title="Defaults" aside={defaults.size}>
       <div style={{ ...ROW, alignItems: "flex-start" }}>
         <Val label="Conduit size for new runs" value={defaults.size} />
+        <Val label="Show signal bubbles" value={yesNo(showSignals)} />
         {!estimateOwned && (
           <>
             <Val label="Price wire in conduit" value={yesNo(defaults.priceWire)} />

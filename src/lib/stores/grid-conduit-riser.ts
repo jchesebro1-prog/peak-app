@@ -73,9 +73,10 @@ async function writeConduit(
   return r ? { ok: false, reason: r } : { ok: true, landed: { before, after: updated.updatedAt || 0 } };
 }
 
-/** The two riser systems, whitelisted — a forged system never reaches a field name. */
+/** The two riser systems, whitelisted — a forged system never reaches a field
+ *  name. The riser page and actions check a client's `system` with this too. */
 const SYSTEMS: readonly string[] = CONDUIT_RISER_FIELDS.map((f) => f.system);
-const isSystem = (v: unknown): v is ConduitRiserSystem => typeof v === "string" && SYSTEMS.includes(v);
+export const isSystem = (v: unknown): v is ConduitRiserSystem => typeof v === "string" && SYSTEMS.includes(v);
 
 const isOp = (op: unknown): op is CROp =>
   !!op && typeof op === "object" && (CR_OP_NAMES as readonly string[]).includes((op as { op?: unknown }).op as string);

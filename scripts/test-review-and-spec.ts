@@ -11645,6 +11645,7 @@ seeded()
   .then(() => riserPhase2B2Checks())
   .then(() => riserPhase2C1Checks())
   .then(() => riserPhase2C2Checks())
+  .then(() => riserPhase2C3Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -63243,12 +63244,13 @@ async function conduitRiser321B6Checks(): Promise<void> {
   const actFns = acts.split(/export async function /).slice(1);
   ok(acts.startsWith('"use server"') && actFns.length >= 3 && actFns.every((f) => f.includes("await requireUser()")),
     "#321 B6 actions: a server file; every action calls requireUser");
-  ok(/\(CR_OP_NAMES as readonly string\[\]\)\.includes\(op\.op\)/.test(acts) && acts.includes('patchConduitRiser(projectId, optionId, "lighting", op)'),
-    "#321 B6 patchConduitRiserAction whitelists ops against CR_OP_NAMES");
-  ok(/acceptSuggestionsAction\(\s*projectId: string,\s*optionId: string,\s*keys: string\[\] \| "all"/.test(acts) && acts.includes('acceptSuggestions(projectId, optionId, "lighting", list)') && !/\bsuggestions\(/.test(acts.replace(/acceptSuggestions\(|dismissSuggestions?\(/g, "")),
+  ok(/\(CR_OP_NAMES as readonly string\[\]\)\.includes\(op\.op\)/.test(acts) && acts.includes('patchConduitRiser(projectId, optionId, system, op)'),
+    "#321 B6 patchConduitRiserAction whitelists ops against CR_OP_NAMES"); // #328 C3: system, not "lighting"
+  // #328 C3: the action takes the riser `system` before the keys.
+  ok(/acceptSuggestionsAction\(\s*projectId: string,\s*optionId: string,\s*system: ConduitRiserSystem,\s*keys: string\[\] \| "all"/.test(acts) && acts.includes('acceptSuggestions(projectId, optionId, system, list)') && !/\bsuggestions\(/.test(acts.replace(/acceptSuggestions\(|dismissSuggestions?\(/g, "")),
     "#321 B6 acceptSuggestionsAction passes keys (or \"all\") — never suggestion objects");
   ok(acts.includes("/conduit-riser`") && acts.includes("/set`") && acts.includes("revalidatePath(base)"), "#321 B6 actions revalidate the riser page, the editor and /set");
-  ok(ed.includes("acceptSuggestionsAction(projectId, optionId, [pairKey(") && ed.includes("addRouteAction(") && ed.includes("addRiserLinkAction(") &&
+  ok(ed.includes("acceptSuggestionsAction(projectId, optionId, system, [pairKey(") && ed.includes("addRouteAction(") /* #328 C3: + system */ && ed.includes("addRiserLinkAction(") &&
      ed.includes("setTagFieldsAction(") && ed.includes("saveLevelsAction(") && /op: "resetLayout", detailId, runIds: view\.runs\.map/.test(ed) && ed.includes("getScreenCTM()"),
     "#321 B6 editor: Connect-with-wire adds the wire then accepts that pair; tags, levels and Reset layout go through their actions");
   ok(pan.includes("BRAY_POWER_TYPES") && pan.includes("Start from Bray") && pan.includes("Nothing new to accept") && /estimateOwned/.test(pan),
@@ -63347,18 +63349,22 @@ async function conduitRiser321B7Checks(): Promise<void> {
     "#321 B7 addRouteAction returns the minted routeId");
   const cacts = srcOf("src/app/(app)/design/grid/[id]/conduit-riser/actions.ts");
   const pf = cacts.slice(cacts.indexOf("export async function riserPromptForRouteAction("));
-  ok(pf.includes("await requireUser()") && pf.includes('riserPromptFor(project, optionId, "lighting", routeId)') && pf.includes("catch") && pf.includes("{ show: false }"),
+  // #328 C3: the action now lets the server pick the riser (riserPromptForRoute → riserPromptFor).
+  ok(pf.includes("await requireUser()") && pf.includes("riserPromptForRoute(project, optionId, routeId)") && pf.includes("catch") && pf.includes("{ show: false }"),
     "#321 B7 riserPromptForRouteAction: signed-in only, read-only, and a failure is no prompt");
   const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
   const fin = hook.slice(hook.indexOf("addRouteAction(project.id, {"), hook.indexOf("addRouteAction(project.id, {") + 1400);
+  // #328 C3: the pre-check is the shared promptRiserSystem rule (lighting, or audio / video).
   ok(fin.includes("router.refresh();") && fin.indexOf("router.refresh()") < fin.indexOf("askRiserPrompt(") &&
-     /fromPlacement &&\s*toPlacement &&\s*\(placementSystem\(fromPlacement, partById\) === "lighting" \|\| placementSystem\(toPlacement, partById\) === "lighting"\)\s*\)\s*askRiserPrompt\(activeOptionId, r\.routeId\)/.test(fin),
-    "#321 B7 finishing a wire: the prompt check runs after the refresh is on its way, and only for a device-to-device wire with a lighting end");
+     /fromPlacement &&\s*toPlacement &&\s*promptRiserSystem\(placementSystem\(fromPlacement, partById\), placementSystem\(toPlacement, partById\)\)\s*\)\s*askRiserPrompt\(activeOptionId, r\.routeId\)/.test(fin),
+    "#321 B7 finishing a wire: the prompt check runs after the refresh is on its way, and only for a device-to-device wire a riser could take");
   ok(/if \(ticket === riserTicket\.current && r\.show\)/.test(hook) && hook.includes("riserTicket.current++") && /hideRiserPrompt\(\);\s*disarm\(\);/.test(hook) && /if \(!p\) return;\s*hideRiserPrompt\(\);/.test(hook),
     "#321 B7 prompt state: newest wire wins, hides on Escape and on the next canvas press");
   const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
-  ok(rp.includes('role="status"') && rp.includes("acceptSuggestionsAction(project.id, riserPrompt.optionId, [riserPrompt.key])") && rp.includes('"Added to the riser"') &&
-     rp.includes("joins the existing run — add this wire?") && rp.includes("to the lighting control riser?") && rp.includes("Later") && /if \(!r\.ok\) \{\s*setErr\(r\.error\);\s*return;\s*\}[\s\S]*?noteAction\(r\.accepted > 0 \? "Added to the riser" : "Already on the riser"\);\s*hideRiserPromptIf\(answered\)/.test(rp),
+  // #328 C3: the copy moved to riserPromptText (editor-rules); Add names the prompt's riser.
+  const rules = srcOf("src/lib/design/conduit-riser/editor-rules.ts");
+  ok(rp.includes('role="status"') && rp.includes("acceptSuggestionsAction(project.id, riserPrompt.optionId, riserPrompt.system, [riserPrompt.key])") && rp.includes('"Added to the riser"') &&
+     rules.includes("joins the existing run — add this wire?") && rules.includes("riserName(p.system)") && rp.includes("riserPromptText(riserPrompt)") && rp.includes("Later") && /if \(!r\.ok\) \{\s*setErr\(r\.error\);\s*return;\s*\}[\s\S]*?noteAction\(r\.accepted > 0 \? "Added to the riser" : "Already on the riser"\);\s*hideRiserPromptIf\(answered\)/.test(rp),
     "#321 B7 RiserPrompt: a status strip with Add / Later; Add success notes + hides its own prompt, a failure reports the error and keeps the prompt (amended by #321 polish)");
   const edr = srcOf("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(edr.includes("<IntakeNotices ed={ed} />") && edr.includes("<RiserPrompt ed={ed} />") && edr.indexOf("<IntakeNotices") < edr.indexOf("<RiserPrompt"), "#321 B7 the prompt is mounted beside the intake notices");
@@ -63777,9 +63783,10 @@ async function conduitRiser321FinalFixChecks(): Promise<void> {
   ok(lrc.includes("const full = deps.catalog;") && lrc.includes("scopedRiserParts(project, settings, deps.deviceTypes)") && lrc.includes("getManyBySku(memberSkus)"),
     "#321 final scoped load: loadRiserPartsContext uses the full book only when the caller passes one");
   const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  // #328 C3: lighting OR audio / video, through the shared promptRiserSystem rule.
   ok(hook.includes('import { placementSystem } from "@/lib/design/grid-drawing-set";') &&
-     /placementSystem\(fromPlacement, partById\) === "lighting" \|\| placementSystem\(toPlacement, partById\) === "lighting"\)\s*\)\s*askRiserPrompt\(/.test(hook),
-    "#321 final plan prompt: the server is asked only when one end's part is in the lighting system");
+     /promptRiserSystem\(placementSystem\(fromPlacement, partById\), placementSystem\(toPlacement, partById\)\)\s*\)\s*askRiserPrompt\(/.test(hook),
+    "#321 final plan prompt: the server is asked only when the pair's parts pick a riser");
 
   // --- 3. the prompt says the wire goes by others ---
   const p0 = await L.riserPromptFor(await live(), opt, "lighting", wRackLx1.id, deps);
@@ -63798,7 +63805,9 @@ async function conduitRiser321FinalFixChecks(): Promise<void> {
   const acc3 = await CR.acceptSuggestions(gp.id, opt, "lighting", [M.pairKey(rack.id, lx1.id)], deps);
   ok(acc2.ok && acc2.accepted === 1 && acc3.ok && acc3.accepted === 0, "#321 final prompt: accepting a pair already on the riser reports accepted 0");
   const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
-  ok(rp.includes('riserPrompt.byOthers ? " — its wire will be listed as by others" : ""') && rp.includes('noteAction(r.accepted > 0 ? "Added to the riser" : "Already on the riser")'),
+  // #328 C3: the by-others clause lives in riserPromptText now.
+  ok(srcOf("src/lib/design/conduit-riser/editor-rules.ts").includes('(p.byOthers ? " — its wire will be listed as by others" : "")') && rp.includes("riserPromptText(riserPrompt)") &&
+     rp.includes('noteAction(r.accepted > 0 ? "Added to the riser" : "Already on the riser")'),
     "#321 final prompt: the bar says when the wire will be by others; Add notes \"Already on the riser\" when nothing was accepted");
   ok(crs.includes("const byOthers = !data.estimateOwned && !(run ? effectivePricing(run, data.doc.defaults).wire : data.doc.defaults.priceWire);"),
     "#321 final prompt: byOthers = the run's override ?? the design default; never on an estimate-owned option");
@@ -64062,7 +64071,7 @@ async function riserPolish2Checks(): Promise<void> {
     "#321 polish estimate-owned: a design not owned by an estimate, and every other op, pass through untouched");
   const pa = acts.slice(acts.indexOf("export async function patchConduitRiserAction("), acts.indexOf("export async function acceptSuggestionsAction("));
   ok(pa.includes("await requireUser()") && pa.includes("estimateOwnedOp(op, ") && pa.includes("?.estimateOwned === true") && /if \(!kept\) return \{ ok: true \};/.test(pa) &&
-     pa.indexOf("estimateOwnedOp(") < pa.indexOf('patchConduitRiser(projectId, optionId, "lighting", op)'),
+     pa.indexOf("estimateOwnedOp(") < pa.indexOf('patchConduitRiser(projectId, optionId, system, op)'), // #328 C3: system
     "#321 polish estimate-owned: patchConduitRiserAction strips pricing before the store write; nothing left = ok, no write");
   ok(/if \(\(op\.op === "updateRun" \|\| op\.op === "setDefaults"\) && \(op\.priceWire !== undefined \|\| op\.priceConduit !== undefined\)\) \{/.test(pa) &&
      pa.indexOf("getProject(projectId)") > pa.indexOf("op.priceConduit !== undefined"),
@@ -64222,7 +64231,7 @@ async function riserPolish2Checks(): Promise<void> {
   const disAct = acts.slice(acts.indexOf("export async function dismissSuggestionAction("), acts.indexOf("export async function riserPromptForRouteAction("));
   ok(tagAct.includes("return { ok: true, previous: r.value.previous, landed: r.landed };") && lvAct.includes("const r = await setLevelsLanded(projectId, levels);") &&
      lvAct.includes("return { ok: true, landed: r.landed };") && disAct.includes("return { ok: true, landed: r.ok ? r.landed : undefined };") &&
-     ed.includes("return r.ok ? { ok: true as const, landed: r.landed } : r;") && ed.includes("run(() => saveLevelsAction(projectId, rows))") && ed.includes("run(() => dismissSuggestionAction(projectId, optionId, key))"),
+     ed.includes("return r.ok ? { ok: true as const, landed: r.landed } : r;") && ed.includes("run(() => saveLevelsAction(projectId, rows))") && ed.includes("run(() => dismissSuggestionAction(projectId, optionId, system, key))"), // #328 C3: system
     "#321 polish fix 1: setTagFieldsAction, saveLevelsAction and dismissSuggestionAction hand landed back; the editor's run carries it");
   ok(/const \[landedAt, setLandedAt\] = useState\(0\);/.test(ed) && ed.includes("noteLanded(r.landed);") && ed.includes("setLandedAt((v) => Math.max(v, landed.after))"),
     "#321 polish fix 1: the newest landed version counts before the refresh brings it, so an edit made in between isn't dropped");
@@ -65608,6 +65617,198 @@ async function riserPhase2C2Checks(): Promise<void> {
   ok((rsSrc.match(/claimedElsewhere\(p, optionId, system, wires\)/g) || []).length === 2 && svSrc.includes("suggestions(doc, wires, claimedElsewhere(project, optionId, system, wires))") &&
      rsSrc.includes("CONDUIT_RISER_FIELDS.map((f) => f.system)"),
     "#328 C2 fix1 pins: the loader and both store re-derivations pass the other risers' claims; isSystem derives from CONDUIT_RISER_FIELDS");
-  ok(['patchConduitRiser(projectId, optionId, "lighting", op)', 'acceptSuggestions(projectId, optionId, "lighting", list)', 'dismissSuggestion(projectId, optionId, "lighting", key)', 'riserPromptFor(project, optionId, "lighting", routeId)'].every((x) => actSrc.includes(x)),
-    "#328 C2 pins: the riser actions name the lighting system explicitly (the A/V page wiring is C3)");
+  // #328 C3 replaced the explicit "lighting" with the page's whitelisted `system` (see riserPhase2C3Checks).
+  ok(['patchConduitRiser(projectId, optionId, system, op)', 'acceptSuggestions(projectId, optionId, system, list)', 'dismissSuggestion(projectId, optionId, system, key)', 'riserPromptForRoute(project, optionId, routeId)'].every((x) => actSrc.includes(x)),
+    "#328 C2 pins: the riser actions name their riser system explicitly (C3: the page's whitelisted system)");
+}
+
+/* ======================================================================
+   #328 C3 — the A/V conduit riser's page, editor and plan prompt: the
+   pure naming / prompt / always-show rules, the prompt picking its riser
+   from the wire's devices on a scratch DB, Show signal bubbles through
+   the store, a forged undo bundle never double-claiming a wire, and the
+   page / actions / menu / prompt wiring pins.
+   ====================================================================== */
+async function riserPhase2C3Checks(): Promise<void> {
+  const ER = await import("@/lib/design/conduit-riser/editor-rules");
+  const M = await import("@/lib/design/conduit-riser/model");
+  const LV = await import("@/lib/design/conduit-riser/live");
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const J = (v: unknown) => JSON.stringify(v);
+  type Doc = import("@/lib/design/conduit-riser/model").ConduitRiserDoc;
+  const opt = GO.DEFAULT_OPTION_ID;
+
+  // ---- 1. names, URLs, prompt copy (pure)
+  ok(ER.RISER_TITLE.lighting === "Lighting control riser" && ER.RISER_TITLE.av === "A/V conduit riser" &&
+     ER.riserName("av") === "A/V conduit riser" && ER.riserName("lighting") === "lighting control riser",
+    "#328 C3 names: \"Lighting control riser\" / \"A/V conduit riser\" as headings, lower-case in a sentence");
+  ok(ER.conduitRiserHref("/design/grid/G1", "opt-a b", "lighting") === "/design/grid/G1/conduit-riser?option=opt-a%20b" &&
+     ER.conduitRiserHref("/design/grid/G1", "opt-a", "av") === "/design/grid/G1/conduit-riser?option=opt-a&system=av",
+    "#328 C3 href: lighting keeps the bare riser URL; the A/V riser adds &system=av");
+  ok(ER.riserPromptText({ label: "A-1 → B-1", joins: false, byOthers: false, system: "lighting" }) === "Add A-1 → B-1 to the lighting control riser?" &&
+     ER.riserPromptText({ label: "A-1 → B-1", joins: true, byOthers: true, system: "lighting" }) === "A-1 → B-1 joins the existing run — add this wire? — its wire will be listed as by others",
+    "#328 C3 prompt copy: lighting's wording is unchanged from #321");
+  ok(ER.riserPromptText({ label: "WP-1 → RACK-1", joins: false, byOthers: false, system: "av" }) === "Add WP-1 → RACK-1 to the A/V conduit riser?" &&
+     ER.riserPromptText({ label: "WP-1 → RACK-1", joins: true, byOthers: false, system: "av" }) === "WP-1 → RACK-1 joins an existing run on the A/V conduit riser — add this wire?",
+    "#328 C3 prompt copy: an A/V pair asks \"Add … to the A/V conduit riser?\"; a join names the A/V riser");
+  ok(ER.notThisRiserNotice("av").includes("isn't an A/V wire") && ER.notThisRiserNotice("lighting").includes("isn't a lighting control wire") &&
+     ER.riserWireNoun("av") === "A/V" && ER.riserWireNoun("lighting") === "lighting" && ER.riserDeviceNoun("av") === "audio or video",
+    "#328 C3 copy: the Connect notice, the From-the-plan hint and the empty-detail hint name the riser's own wires/devices");
+
+  // ---- 2. which riser the prompt asks about (pure)
+  const P = ER.promptRiserSystem;
+  ok(P("lighting", "lighting") === "lighting" && P("audio", "video") === "av" && P("audio", "audio") === "av" && P("video", "video") === "av",
+    "#328 C3 prompt system: a lighting pair → lighting; an audio / video pair → A/V");
+  ok(P("lighting", "audio") === null && P("video", "lighting") === null,
+    "#328 C3 prompt system: a mixed lighting ↔ A/V pair asks nothing");
+  ok(P("lighting", "general") === "lighting" && P("rigging", "video") === "av" && P("general", "general") === null && P("rigging", null) === null && P(undefined, undefined) === null,
+    "#328 C3 prompt system: an end on no riser goes with the other end; a pair on no riser asks nothing");
+
+  // ---- 3. the Always show list per riser (pure)
+  const types = [
+    { key: "dimming-power", label: "Dimming", scope: "Lighting" as const, order: 2 },
+    { key: "fixtures", label: "Fixtures", scope: "Lighting" as const, order: 1 },
+    { key: "speakers", label: "Speakers", scope: "Audio" as const, order: 5 },
+    { key: "displays-projectors", label: "Displays", scope: "Video" as const, order: 4 },
+    { key: "racks-cases", label: "Racks", scope: "Unscoped" as const, order: 9 },
+    { key: "cable-connectors", label: "Connectors", scope: "Unscoped" as const, order: 8 },
+    { key: "trusses", label: "Truss", scope: "Rigging" as const, order: 3 },
+    { key: "old-audio", label: "Old", scope: "Audio" as const, order: 0, archived: true },
+  ] as import("@/lib/design/device-types").DeviceType[];
+  const keys = (sys: "lighting" | "av", sel: string[]) => ER.alwaysShowTypeOptions(types, sys, sel).map((t) => t.key).join();
+  ok(keys("lighting", []) === "fixtures,dimming-power,racks-cases",
+    "#328 C3 always-show: the lighting riser lists Lighting types plus its default always-show types (Racks)");
+  ok(keys("av", []) === "displays-projectors,speakers,cable-connectors,racks-cases",
+    "#328 C3 always-show: the A/V riser lists Audio + Video types plus its defaults (connectors, racks); archived and rigging types stay out");
+  ok(keys("av", ["trusses"]) === "trusses,displays-projectors,speakers,cable-connectors,racks-cases",
+    "#328 C3 always-show: a type the riser already shows stays listed so it can be unticked");
+
+  // ---- 4. a forged undo bundle can't put one wire in two risers' conduit (C2 follow-up, pure)
+  const pe = (id: string) => ({ kind: "placement" as const, placementId: id });
+  const run = (id: string, a: string, b: string, routeIds: string[], linkIds: string[] = []) =>
+    ({ id, a: pe(a), b: pe(b), routeIds, linkIds, size: '3/4"', style: "conduit" });
+  const doc = (): import("@/lib/design/conduit-riser/live").ConduitLiveDoc & { conduitRiser?: Record<string, unknown>; avRiser?: Record<string, unknown> } => ({
+    placements: [{ id: "gp-a1" }, { id: "gp-a2" }, { id: "gp-a3" }],
+    routes: [
+      { id: "wr-x", fromPlacementId: "gp-a1", toPlacementId: "gp-a2" },
+      { id: "wr-y", fromPlacementId: "gp-a1", toPlacementId: "gp-a2" },
+      { id: "wr-z", fromPlacementId: "gp-a2", toPlacementId: "gp-a3" },
+    ],
+    conduitRiser: { [opt]: { runs: [run("cr-00000000c301", "gp-a1", "gp-a2", ["wr-x"])] } },
+    avRiser: { [opt]: { runs: [] } },
+  });
+  const forged = doc();
+  LV.restoreConduitBundle(forged, { av: { [opt]: { runs: [run("cr-00000000c3a1", "gp-a1", "gp-a2", ["wr-x", "wr-y"])], tags: {}, dismissed: [] } } });
+  const avRuns = (forged.avRiser![opt] as Doc).runs;
+  ok(avRuns.length === 1 && J(avRuns[0].routeIds) === J(["wr-y"]) && J((forged.conduitRiser![opt] as Doc).runs[0].routeIds) === J(["wr-x"]),
+    "#328 C3 restore: a forged A/V run naming a wire the lighting riser carries comes back without it; the lighting run keeps it");
+  const both = doc();
+  both.conduitRiser = { [opt]: { runs: [] } };
+  LV.restoreConduitBundle(both, {
+    lighting: { [opt]: { runs: [run("cr-00000000c302", "gp-a2", "gp-a3", ["wr-z"])], tags: {}, dismissed: [] } },
+    av: { [opt]: { runs: [run("cr-00000000c3a2", "gp-a2", "gp-a3", ["wr-z"])], tags: {}, dismissed: [] } },
+  });
+  ok(J((both.conduitRiser![opt] as Doc).runs.map((r) => r.routeIds)) === J([["wr-z"]]) && J((both.avRiser![opt] as Doc).runs.map((r) => r.routeIds)) === J([[]]),
+    "#328 C3 restore: one bundle claiming a wire on both risers gives it to one (lighting, restored first); the A/V run comes back empty");
+  const fair = doc();
+  fair.conduitRiser = {};
+  LV.restoreConduitBundle(fair, { av: { [opt]: { runs: [run("cr-00000000c3a3", "gp-a1", "gp-a2", ["wr-x", "wr-y"])], tags: {}, dismissed: [] } } });
+  ok(J((fair.avRiser![opt] as Doc).runs[0].routeIds) === J(["wr-x", "wr-y"]),
+    "#328 C3 restore: with no other riser claiming them, a restored run keeps every member");
+
+  // ---- 5. scratch DB: the prompt picks its riser; Add / Show signal bubbles land on that riser only
+  const by = "Test Harness";
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+  const VIDEO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "video")!.key, "better");
+  const gp = await G.createProject({ name: "#328 C3 A/V riser", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#328 C3 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+  type Pl = { id: string; x: number; y: number };
+  const draw = async (a: Pl, b: Pl) =>
+    (await G.addRouteWithId(gp.id, { sheetId: sh.id, page: 1, partId: "T328-C3-CABLE", points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id }))!;
+  const l1 = await place(LIGHT, 0.1, 0.1);
+  const l2 = await place(LIGHT, 0.4, 0.1);
+  const spk = await place(AUDIO, 0.1, 0.8);
+  const prj = await place(VIDEO, 0.4, 0.8);
+  const av = await draw(spk, prj);
+  const lt = await draw(l1, l2);
+  const mixed = await draw(l1, spk);
+  const pa = await L.riserPromptForRoute(await live(), opt, av.routeId);
+  const avLabel = async (id: string) => (await L.loadConduitRiser(await live(), opt, "av")).input.devices.find((d) => d.id === id)!.label;
+  ok(pa.show === true && pa.system === "av" && pa.key === M.pairKey(spk.id, prj.id) && pa.joins === false && pa.label === `${await avLabel(spk.id)} → ${await avLabel(prj.id)}`,
+    "#328 C3 riserPromptForRoute: an audio → video wire asks about the A/V conduit riser, named in the direction drawn");
+  const pl = await L.riserPromptForRoute(await live(), opt, lt.routeId);
+  ok(pl.show === true && pl.system === "lighting", "#328 C3 riserPromptForRoute: a lighting pair still asks about the lighting control riser");
+  ok((await L.riserPromptForRoute(await live(), opt, mixed.routeId)).show === false &&
+     (await L.riserPromptFor(await live(), opt, "lighting", mixed.routeId)).show === true,
+    "#328 C3 riserPromptForRoute: a lighting → audio wire asks nothing (mixed), though the lighting riser itself would offer it");
+  ok((await L.riserPromptForRoute(await live(), opt, "wr-forged")).show === false && (await L.riserPromptForRoute(await live(), "opt-gone", av.routeId)).show === false,
+    "#328 C3 riserPromptForRoute: an unknown route or option asks nothing");
+  if (!pa.show) throw new Error("#328 C3: expected an A/V prompt");
+  const acc = await CR.acceptSuggestions(gp.id, opt, pa.system, [pa.key]);
+  const afterAdd = await live();
+  ok(acc.ok && acc.accepted === 1 && LV.liveConduitRiser(afterAdd, opt, "av").runs.length === 1 && LV.liveConduitRiser(afterAdd, opt, "lighting").runs.length === 0,
+    "#328 C3 Add: accepting the prompt on its riser puts the pair on the A/V riser, not the lighting one");
+  const again = await draw(prj, spk);
+  const pj = await L.riserPromptForRoute(await live(), opt, again.routeId);
+  ok(pj.show === true && pj.system === "av" && pj.joins === true && (await L.riserPromptForRoute(await live(), opt, av.routeId)).show === false,
+    "#328 C3 riserPromptForRoute: a second A/V wire on the pair joins the A/V run; the accepted wire asks nothing");
+  const sig = await CR.patchConduitRiser(gp.id, opt, "av", { op: "setDefaults", size: '1"', showSignals: true });
+  const afterSig = await live();
+  ok(sig.ok && LV.liveConduitRiser(afterSig, opt, "av").showSignals === true && LV.liveConduitRiser(afterSig, opt, "av").defaults.size === '1"' &&
+     LV.liveConduitRiser(afterSig, opt, "lighting").showSignals === true && LV.liveConduitRiser(afterSig, opt, "lighting").defaults.size === M.DEFAULT_CONDUIT_SIZE,
+    "#328 C3 Show signal bubbles: setDefaults { showSignals } on the A/V riser turns its bubbles on and leaves the lighting riser alone");
+  await CR.patchConduitRiser(gp.id, opt, "lighting", { op: "setDefaults", showSignals: false });
+  const afterOff = await live();
+  ok(LV.liveConduitRiser(afterOff, opt, "lighting").showSignals === false && LV.liveConduitRiser(afterOff, opt, "av").showSignals === true,
+    "#328 C3 Show signal bubbles: the lighting riser's switch is its own");
+  const forgedSys = await CR.patchConduitRiser(gp.id, opt, "rigging" as never, { op: "setDefaults", showSignals: true });
+  ok(!forgedSys.ok && forgedSys.reason === "invalid" && CR.isSystem("av") && CR.isSystem("lighting") && !CR.isSystem("conduitRiser") && !CR.isSystem(["av"]),
+    "#328 C3 isSystem: only \"lighting\" and \"av\" pass — a forged system is refused before any write");
+  ok(J(M.estimateOwnedOp({ op: "setDefaults", size: '1"', showSignals: false, priceWire: true }, true)) === J({ op: "setDefaults", size: '1"', showSignals: false }),
+    "#328 C3 estimate-owned: Show signal bubbles still saves on an estimate-owned option; only the pricing fields drop");
+
+  // ---- 6. wiring pins
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const dir = "src/app/(app)/design/grid/[id]";
+  const acts = src(`${dir}/conduit-riser/actions.ts`);
+  ok(['patchConduitRiser(projectId, optionId, system, op)', 'acceptSuggestions(projectId, optionId, system, list)', 'dismissSuggestion(projectId, optionId, system, key)', 'riserPromptForRoute(project, optionId, routeId)'].every((x) => acts.includes(x)) &&
+     (acts.match(/!isSystem\(system\)/g) || []).length === 3 && !acts.includes('"lighting", op') && !/riserPromptForRouteAction\([^)]*system/.test(acts),
+    "#328 C3 pins: the three riser writes take `system`, each whitelisted with isSystem; the prompt action lets the server pick the riser");
+  const page = src(`${dir}/conduit-riser/page.tsx`);
+  ok(page.includes("export async function generateMetadata(") && !page.includes("export const metadata") && page.includes("RISER_TITLE[systemOf((await searchParams).system)]") &&
+     page.includes("const systemOf = (v: unknown): ConduitRiserSystem => (isSystem(v) ? v : \"lighting\")") && page.includes("loadConduitRiser(project, optionId, system, {") &&
+     page.includes("<h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: \"-.015em\" }}>{title}</h1>") && page.includes("conduitRiserHref(base, optionId, other)") &&
+     page.includes("system={system}") && page.includes("alwaysShowTypeOptions(deviceTypes.types, system, data.doc.alwaysShow)") && page.includes("conduitRiserHref(base, o.id, system)"),
+    "#328 C3 pins: the riser page reads ?system= (whitelisted, default lighting) for its title, heading, loader, editor, option tabs and the switcher link");
+  const editor = src(`${dir}/conduit-riser/conduit-riser-editor.tsx`);
+  ok(!/Action\(projectId, optionId, (?!system)/.test(editor) && editor.includes("showSignals={doc.showSignals}") && editor.includes('{system === "av" ? null : phone ? (') &&
+     editor.includes("notThisRiserNotice(system)") && editor.includes("wireNoun={riserWireNoun(system)}"),
+    "#328 C3 pins: every editor action names its riser; Defaults carries Show signal bubbles; power types are lighting-only");
+  const panels = src(`${dir}/conduit-riser/panels.tsx`);
+  ok(panels.includes("Show signal bubbles") && panels.includes("showSignals: sig") && panels.includes('<Val label="Show signal bubbles" value={yesNo(showSignals)} />'),
+    "#328 C3 pins: the Defaults panel saves Show signal bubbles; the phone view shows it read-only");
+  const menu = src(`${dir}/workspace/outputs-menu.tsx`);
+  ok(menu.includes('{ label: "A/V conduit riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}&system=av` }') && menu.includes('label: "Lighting control riser →"'),
+    "#328 C3 pins: the Outputs menu lists A/V conduit riser → beside Lighting control riser →");
+  const prompt = src(`${dir}/workspace/riser-prompt.tsx`);
+  const hook = src(`${dir}/use-grid-editor.ts`);
+  ok(prompt.includes("acceptSuggestionsAction(project.id, riserPrompt.optionId, riserPrompt.system, [riserPrompt.key])") && prompt.includes("{riserPromptText(riserPrompt)}") &&
+     hook.includes("promptRiserSystem(placementSystem(fromPlacement, partById), placementSystem(toPlacement, partById))") && hook.includes("system: r.system,") &&
+     !hook.includes('placementSystem(fromPlacement, partById) === "lighting"'),
+    "#328 C3 pins: the plan prompt's pre-check uses the shared rule, its copy names the riser, and Add accepts on the prompt's riser");
+  const smoke = src("scripts/smoke-routes.ts");
+  ok(smoke.includes('{ route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&system=av", reject: "no longer exists" }'),
+    "#328 C3 pins: the A/V riser page is in the smoke routes");
 }

@@ -215,7 +215,10 @@ const RUN_ID = /^cr-[0-9a-f]{12}$/;
  * device of THAT option (a stub end must name a stub that still exists);
  * nothing already present comes back twice (run id, a pair that already
  * has a run, tag device, dismissal pair) — two runs the bundle carries for
- * one pair both come back. Ends with pruneConduitRisersIn — normalized and capped.
+ * one pair both come back. A wire belongs to one riser's conduit (#328): a
+ * member wire already inside a run on another riser of that option is
+ * stripped from the restored run (the run itself still comes back). Ends
+ * with pruneConduitRisersIn — normalized and capped.
  */
 export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown, system: ConduitRiserSystem): void {
   if (!isObj(raw)) return;
@@ -242,12 +245,16 @@ export function restoreConduitItems(p: ConduitLiveDoc, raw: unknown, system: Con
     // that had two runs when it was deleted gets both back (#321 final
     // review). Run ids still dedupe within the bundle.
     const pairs = new Set(current.runs.map(runPairKey).filter((x): x is string => !!x));
+    // #328: the wires the option's other risers already carry, as they stand now.
+    const otherRuns = CONDUIT_RISER_FIELDS.filter((f) => f.system !== system).flatMap((f) => liveConduitRiser(p, k, f.system).runs);
+    const otherRoutes = new Set(otherRuns.flatMap((r) => r.routeIds));
+    const otherLinks = new Set(otherRuns.flatMap((r) => r.linkIds));
     const runs: ConduitRun[] = [];
     for (const r of asked.runs) {
       const pair = runPairKey(r);
       const endsOwn = [r.a, r.b].every((e) => e.kind === "stub" || own(e.placementId));
       if (!RUN_ID.test(r.id) || runIds.has(r.id) || (pair && pairs.has(pair)) || !endsOwn) continue;
-      runs.push(r);
+      runs.push({ ...r, routeIds: r.routeIds.filter((id) => !otherRoutes.has(id)), linkIds: r.linkIds.filter((id) => !otherLinks.has(id)) });
       runIds.add(r.id);
     }
     const tags = Object.fromEntries(Object.entries(asked.tags).filter(([id]) => own(id) && !Object.prototype.hasOwnProperty.call(current.tags, id)));

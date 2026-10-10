@@ -13,7 +13,7 @@ import type { CRBoxType, CRWireType } from "@/lib/design/conduit-riser/input";
 import { isOverfilled, viewRunFill } from "@/lib/design/conduit-riser/fill";
 import type { GridLevel } from "@/lib/design/grid-levels";
 import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
-import { pairKey, type ConduitRiserDoc, type CROp, type RunEnd } from "@/lib/design/conduit-riser/model";
+import { pairKey, type ConduitRiserDoc, type ConduitRiserSystem, type CROp, type RunEnd } from "@/lib/design/conduit-riser/model";
 import {
   applyLayoutOps,
   historyFor,
@@ -28,7 +28,16 @@ import {
   type LayoutHistory,
   type LayoutOp,
 } from "@/lib/design/conduit-riser/edit";
-import { isPressKey, levelHitLabel, runHitLabel, stubHitLabel, tagHitLabel } from "@/lib/design/conduit-riser/editor-rules";
+import {
+  isPressKey,
+  levelHitLabel,
+  notThisRiserNotice,
+  riserDeviceNoun,
+  riserWireNoun,
+  runHitLabel,
+  stubHitLabel,
+  tagHitLabel,
+} from "@/lib/design/conduit-riser/editor-rules";
 import { addRiserLinkAction } from "../riser/actions";
 import { addRouteAction, saveLevelsAction, setTagFieldsAction } from "../actions";
 import { acceptSuggestionsAction, dismissSuggestionAction, patchConduitRiserAction } from "./actions";
@@ -67,7 +76,8 @@ import type { RiserPartOption } from "../riser/riser-panels";
 export type { SuggestionRow };
 
 /**
- * The lighting control riser editor (#321). The view and its layout are
+ * The conduit riser editor (#321) — the lighting control riser, or the A/V
+ * conduit riser (#328 C3: `system`, handed to every riser action). The view and its layout are
  * derived server-side and arrive as props; every edit goes through a server
  * action, then router.refresh() re-derives them. A drag previews by
  * applying its layout op to a copy of the document and re-running the pure
@@ -117,6 +127,8 @@ function subscribePhone(cb: () => void) {
 export default function ConduitRiserEditor(props: {
   projectId: string;
   optionId: string;
+  /** Which of the option's risers this is (#328 C3). */
+  system: ConduitRiserSystem;
   /** The project's `updatedAt` — the layout-undo stack is tied to it. */
   version: number;
   planHref: string;
@@ -143,7 +155,7 @@ export default function ConduitRiserEditor(props: {
   /** Each device's own tag fields (placement.tag) — the Tag panel saves against these. */
   tagOverrides: Record<string, PlacementTag>;
 }) {
-  const { projectId, optionId, view, doc, planHref } = props;
+  const { projectId, optionId, system, view, doc, planHref } = props;
   const detailId = view.detail.id;
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -232,7 +244,7 @@ export default function ConduitRiserEditor(props: {
     await run(fn, { rethrow: true });
   }
 
-  const patch = (op: CROp) => run(() => patchConduitRiserAction(projectId, optionId, op));
+  const patch = (op: CROp) => run(() => patchConduitRiserAction(projectId, optionId, system, op));
 
   /** Commit one layout op: previewed until the refresh lands; an edit joins the undo stack. */
   async function commitLayout(op: LayoutOp, after?: LayoutHistory) {
@@ -241,7 +253,7 @@ export default function ConduitRiserEditor(props: {
     const inverse = after ? null : inverseLayoutOp(base, props.layout, op);
     setPending({ base, op });
     setDragOp(null);
-    const ok = await run(() => patchConduitRiserAction(projectId, optionId, op), {
+    const ok = await run(() => patchConduitRiserAction(projectId, optionId, system, op), {
       // The stack as this edit leaves it, moved to the version the write landed on.
       land: (landed) => {
         if (after) setHistory(landHistory(after, landed));
@@ -440,9 +452,9 @@ export default function ConduitRiserEditor(props: {
       }
       if (!added.ok) return added;
       // The wire is on the plan from here on — a failure below still refreshes.
-      const acc = await acceptSuggestionsAction(projectId, optionId, [pairKey(a, b)]);
+      const acc = await acceptSuggestionsAction(projectId, optionId, system, [pairKey(a, b)]);
       if (!acc.ok) return { ok: false, error: `The wire is on the plan, but the run wasn't added: ${acc.error}`, refresh: true };
-      if (acc.accepted === 0) return { ok: true, notice: "The wire is on the plan, but it isn't a lighting control wire, so the riser didn't add a run for it.", landed: acc.landed };
+      if (acc.accepted === 0) return { ok: true, notice: notThisRiserNotice(system), landed: acc.landed };
       setSel(null);
       return { ok: true, landed: acc.landed };
     });
@@ -450,7 +462,7 @@ export default function ConduitRiserEditor(props: {
 
   async function acceptKeys(keys: string[] | "all") {
     await run(async (): Promise<Outcome> => {
-      const r = await acceptSuggestionsAction(projectId, optionId, keys);
+      const r = await acceptSuggestionsAction(projectId, optionId, system, keys);
       if (!r.ok) return { ...r, refresh: true };
       return r.accepted === 0 ? { ok: true, notice: `${NOTHING_NEW}.`, landed: r.landed } : { ok: true, landed: r.landed };
     });
@@ -517,7 +529,7 @@ export default function ConduitRiserEditor(props: {
             label="Reset layout"
             confirmLabel="Reset this detail's layout"
             pendingLabel="Resetting…"
-            onConfirm={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "resetLayout", detailId, runIds: view.runs.map((r) => r.run.id) }))}
+            onConfirm={() => mustOk(() => patchConduitRiserAction(projectId, optionId, system, { op: "resetLayout", detailId, runIds: view.runs.map((r) => r.run.id) }))}
           />
         )}
         {!phone && (
@@ -566,7 +578,7 @@ export default function ConduitRiserEditor(props: {
         <div className="pk-card" style={{ padding: 8, overflow: "auto", maxHeight: "78vh", minHeight: 240 }}>
           {view.tags.length === 0 && view.stubs.length === 0 && (
             <div style={{ fontSize: 13, color: "#8c919c", padding: "8px 6px" }}>
-              Nothing on this detail yet. Accept a run under From the plan, or place lighting control devices on the plan and wire them.
+              Nothing on this detail yet. Accept a run under From the plan, or place {riserDeviceNoun(system)} devices on the plan and wire them.
             </div>
           )}
           <ConduitRiserFigure
@@ -737,7 +749,7 @@ export default function ConduitRiserEditor(props: {
               estimateOwned={props.estimateOwned}
               busy={waiting}
               onSave={(v) => saveRun(selRun.run.id, v)}
-              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeRun", id: selRun.run.id })).then(() => setSel(null))}
+              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, system, { op: "removeRun", id: selRun.run.id })).then(() => setSel(null))}
               onClose={() => setSel(null)}
             />
           ))}
@@ -749,7 +761,7 @@ export default function ConduitRiserEditor(props: {
               stub={selStub}
               busy={waiting}
               onRename={(label) => void patch({ op: "updateStub", id: selStub.id, label })}
-              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeStub", id: selStub.id })).then(() => setSel(null))}
+              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, system, { op: "removeStub", id: selStub.id })).then(() => setSel(null))}
               onClose={() => setSel(null)}
             />
           ))}
@@ -798,8 +810,9 @@ export default function ConduitRiserEditor(props: {
             planHref={planHref}
             busy={waiting}
             readOnly={phone}
+            wireNoun={riserWireNoun(system)}
             onAccept={(keys) => void acceptKeys(keys)}
-            onDismiss={(key) => void run(() => dismissSuggestionAction(projectId, optionId, key))}
+            onDismiss={(key) => void run(() => dismissSuggestionAction(projectId, optionId, system, key))}
           />
           {phone ? (
             <DetailView detail={view.detail} spaces={props.spaces} />
@@ -812,7 +825,7 @@ export default function ConduitRiserEditor(props: {
               busy={waiting}
               onSave={(v) => void patch({ op: "updateDetail", id: detailId, ...v })}
               onAdd={(name) => void patch({ op: "addDetail", name, allSpaces: false, spaceIds: [] })}
-              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeDetail", id: detailId }))}
+              onRemove={() => mustOk(() => patchConduitRiserAction(projectId, optionId, system, { op: "removeDetail", id: detailId }))}
             />
           )}
           {phone ? (
@@ -825,7 +838,8 @@ export default function ConduitRiserEditor(props: {
               onSave={(rows) => void run(() => saveLevelsAction(projectId, rows))}
             />
           )}
-          {phone ? (
+          {/* Power types are the lighting control riser's alone — the A/V sheet prints none (#328). */}
+          {system === "av" ? null : phone ? (
             <PowerTypesView rows={doc.powerTypes} />
           ) : (
             <PowerTypesPanel key={`pt-${JSON.stringify(doc.powerTypes)}`} rows={doc.powerTypes} busy={waiting} onSave={(rows) => void patch({ op: "setPowerTypes", rows })} />
@@ -836,11 +850,12 @@ export default function ConduitRiserEditor(props: {
             <AlwaysShowPanel types={props.deviceTypes} selected={doc.alwaysShow} busy={waiting} onSave={(typeKeys) => void patch({ op: "setAlwaysShow", typeKeys })} />
           )}
           {phone ? (
-            <DefaultsView defaults={doc.defaults} estimateOwned={props.estimateOwned} />
+            <DefaultsView defaults={doc.defaults} showSignals={doc.showSignals} estimateOwned={props.estimateOwned} />
           ) : (
             <DefaultsPanel
-              key={`def-${JSON.stringify(doc.defaults)}`}
+              key={`def-${JSON.stringify(doc.defaults)}-${doc.showSignals}`}
               defaults={doc.defaults}
+              showSignals={doc.showSignals}
               estimateOwned={props.estimateOwned}
               busy={waiting}
               onSave={(v) => void patch({ op: "setDefaults", ...v })}
@@ -854,7 +869,7 @@ export default function ConduitRiserEditor(props: {
               busy={waiting}
               onAdd={(text) => patch({ op: "addNote", text })}
               onSave={(id, text) => void patch({ op: "updateNote", id, text })}
-              onRemove={(id) => mustOk(() => patchConduitRiserAction(projectId, optionId, { op: "removeNote", id }))}
+              onRemove={(id) => mustOk(() => patchConduitRiserAction(projectId, optionId, system, { op: "removeNote", id }))}
             />
           )}
           <WarningsPanel warnings={props.warnings} />
