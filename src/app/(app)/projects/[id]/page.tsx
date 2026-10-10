@@ -4,6 +4,7 @@ import { can } from "@/lib/team";
 import { ProjectsView } from "../view";
 import { loadProjectsData, one, normFilter } from "../data";
 import ActionError from "@/components/action-error";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
 
 export const metadata = { title: "Project — Quartzite-6" };
 
@@ -56,6 +57,7 @@ export default async function ProjectDetailPage({
         people={data.people}
         templateSets={data.templateSets}
         pipelines={data.pipelines}
+        meetingsSlot={<MeetingsCard kind="work" id={sel.id} viewerId={user.id} style={{ marginTop: 18 }} />}
       />
     </>
   );

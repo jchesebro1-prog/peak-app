@@ -45,6 +45,11 @@ import {
   stampNewDesignators,
   type RenumberTarget,
 } from "@/lib/design/designators";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
+import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
+import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
+import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import { conduitRemovedBetween, pruneConduitRisersIn, restoreConduitItems, type ConduitRemoved } from "@/lib/design/conduit-riser/live";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -64,7 +69,7 @@ import {
   type GridAccessory,
 } from "@/lib/design/grid-accessories";
 import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "@/lib/design/wire-labor";
-import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
+import { isEditableBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { get as getCatalogPart } from "@/lib/stores/catalog";
 import { liveRenameRefs } from "@/lib/stores/catalog-renames";
@@ -136,6 +141,13 @@ export type GridPlacement = {
    */
   designator?: string;
   /**
+   * #321: the riser tag's per-device overrides (BOX · FACE · MOUNT · HT · P/D,
+   * location, power letter, power-controls contents). A field absent here
+   * falls back to the part's `tagDefaults` (location: the containing space).
+   * Never on a curtain. Written only through setPlacementsTag.
+   */
+  tag?: PlacementTag;
+  /**
    * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
    * is a priced line, not a catalog unit: it is sized and specced here and
    * priced from fullness + fabric through the shared curtain model, landing
@@ -194,6 +206,8 @@ export type GridSpace = {
   color: string;
   /** Normalized 0..1 polygon vertices, ≥3. */
   points: Point[];
+  /** #321: the riser level this room sits on (an id on `GridProject.levels`). */
+  levelId?: string;
   by: string;
   at: number;
 };
@@ -227,6 +241,13 @@ export type GridRevision = {
   /** Auto intake choices per option at snapshot time (#211, D312).
    *  Absent on older snapshots — restore then clears them. */
   autoEstimate?: AutoEstimates;
+  /** Riser levels and per-sheet default levels at snapshot time (#321).
+   *  Absent on older snapshots — restore then leaves the current values. */
+  levels?: GridLevel[];
+  sheetLevels?: Record<string, string>;
+  /** Conduit riser documents at snapshot time (#321). Absent on older
+   *  snapshots — restore then clears them. */
+  conduitRiser?: Record<string, ConduitRiserDoc>;
 };
 
 /**
@@ -333,6 +354,15 @@ export type GridProject = {
   /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
+  /** Conduit riser document per option id (#321) — what the plan can't
+   *  know: details, pinned tags, stubs, accepted conduit runs, dismissals,
+   *  power types, notes and pricing defaults. Devices and wires stay derived. */
+  conduitRiser?: Record<string, ConduitRiserDoc>;
+  /** Riser levels (#321) — the floor lines device tags sit on, in `order`. */
+  levels?: GridLevel[];
+  /** Default level per sheet id (#321); a device's space level wins. On the
+   *  project, not the sheet document, so a level edit is one write. */
+  sheetLevels?: Record<string, string>;
   /** Drawing-set settings (#209) — size, drawn/checked by, excluded sheets,
    *  general notes, revision labels. Absent = defaults. */
   drawingSet?: DrawingSetSettings;
@@ -760,8 +790,15 @@ function dropSheetInPatch(p: GridProject, sheetId: string, by: string, note: str
     pushRevision(p, by, "manual", note);
     p.spaces = (p.spaces || []).filter((sp) => !dropped.has(sp.id));
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: dropped });
+    pruneConduitRisersIn(p);
   }
   p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
+  if (p.sheetLevels && sheetId in p.sheetLevels) {
+    const rest = { ...p.sheetLevels };
+    delete rest[sheetId];
+    if (Object.keys(rest).length) p.sheetLevels = rest;
+    else delete p.sheetLevels;
+  }
   p.updatedAt = Date.now();
   return dropped.size;
 }
@@ -853,7 +890,7 @@ export async function addPlacement(
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
 ): Promise<GridProject | null> {
   // #320: resolved before the patch; the number is handed out inside it.
-  const { codeOf } = await designatorContext([input.partId]);
+  const { codeOf, digits } = await designatorContext([input.partId]);
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
@@ -872,7 +909,7 @@ export async function addPlacement(
         at: Date.now(),
       },
     ];
-    stampNewDesignators(p, new Set([id]), codeOf);
+    stampNewDesignators(p, new Set([id]), codeOf, digits);
     p.updatedAt = Date.now();
   });
   return refused ? null : updated;
@@ -897,7 +934,7 @@ export async function addPlacements(
   }
 ): Promise<GridProject | null> {
   if (!input.items.length) return getProject(projectId);
-  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  const { codeOf, digits } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
   const at = Date.now();
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -918,7 +955,7 @@ export async function addPlacements(
       at,
     }));
     p.placements = [...(p.placements || []), ...added];
-    stampNewDesignators(p, new Set(added.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(added.map((pl) => pl.id)), codeOf, digits);
     p.updatedAt = at;
   });
   return refused ? null : updated;
@@ -947,7 +984,7 @@ export async function replaceAutoPlacements(
   projectId: string,
   input: { optionId: string; scopes: SysKey[]; sheetId: string; page: number; items: AutoPlacementInput[]; by: string }
 ): Promise<{ removed: number; added: number } | null> {
-  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  const { codeOf, digits } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
   const at = Date.now();
   const scopes = new Set(input.scopes);
   let refused = false;
@@ -989,8 +1026,9 @@ export async function replaceAutoPlacements(
     });
     p.placements = [...kept, ...fresh];
     // #320: the removed Auto devices' numbers are free again, so a re-fill renumbers its scope.
-    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    if (gone.size) pruneConduitRisersIn(p);
     removed = gone.size;
     added = fresh.length;
     p.updatedAt = at;
@@ -1175,6 +1213,8 @@ export async function removePlacement(
     p.placements = (p.placements || []).filter((pl) => pl.id !== placementId);
     // A riser link or conduit that ended on this device goes with it (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
+    // Its conduit runs and pinned tag go too (#321).
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -1182,7 +1222,12 @@ export async function removePlacement(
 /* ------------------------- batch edits (#299 Task 14) ------------------------- */
 
 /** What a batch removal took out — enough for undo to put it all back. */
-export type RemovedBundle = { placements: GridPlacement[]; riser: RiserRemoved };
+export type RemovedBundle = {
+  placements: GridPlacement[];
+  riser: RiserRemoved;
+  /** #321: conduit runs, pinned tags and dismissals the delete took, per option. Absent = none. */
+  conduit?: ConduitRemoved;
+};
 export type BatchResult<T> = { ok: true; project: GridProject; value: T } | { ok: false; error: string };
 
 export const MAX_BATCH = 2000;
@@ -1285,7 +1330,10 @@ export async function removePlacements(projectId: string, ids: string[]): Promis
       p.riser = pruneRisers(p.riser, { placementIds: gone });
       riser = riserRemovedBetween(before, p.riser);
     }
-    return { placements, riser };
+    const conduitBefore = p.conduitRiser ? (JSON.parse(JSON.stringify(p.conduitRiser)) as Record<string, ConduitRiserDoc>) : undefined;
+    pruneConduitRisersIn(p);
+    const conduit = conduitRemovedBetween(conduitBefore, p.conduitRiser);
+    return { placements, riser, ...(Object.keys(conduit).length ? { conduit } : {}) };
   });
 }
 
@@ -1329,7 +1377,7 @@ export async function setPlacementsPart(
   // type's code is re-issued in the new one (keepsDesignatorOnSwap).
   const before = await getProject(projectId);
   const oldParts = (before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId);
-  const { codeOf } = await designatorContext([...oldParts, ...items.map((it) => it.partId)]);
+  const { codeOf, digits } = await designatorContext([...oldParts, ...items.map((it) => it.partId)]);
   return batchEdit(
     projectId,
     items.map((it) => it.id),
@@ -1363,7 +1411,7 @@ export async function setPlacementsPart(
         }
         return swapped;
       });
-      stampNewDesignators(p, reissue, codeOf);
+      stampNewDesignators(p, reissue, codeOf, digits);
       return previous;
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_PART_REFUSAL : null)
@@ -1381,7 +1429,7 @@ const RESTORE_STALE = "Couldn't undo — the design changed.";
 const RESTORE_NOTHING = "Nothing to undo.";
 const RESTORE_TOO_MANY = "Couldn't undo — too many items.";
 
-export type PasteItem = { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: GridCurtain; qty?: number };
+export type PasteItem = { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: GridCurtain; qty?: number; tag?: PlacementTag };
 
 /**
  * Paste copied devices onto one page of one option (#299), in ONE patch.
@@ -1409,7 +1457,7 @@ export async function pastePlacements(
   if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
   if (!sheetOnProject(before, input.sheetId)) return { ok: false, error: PASTE_SHEET_GONE };
   // #320: a paste never carries a designator — every copy gets a fresh number.
-  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  const { codeOf, digits } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
 
   let refused = false;
   let sheetGone = false;
@@ -1440,6 +1488,8 @@ export async function pastePlacements(
         ...(label ? { category: label } : {}),
         ...lotAndTag(it.qty, undefined),
         ...(it.curtain ? { curtain: it.curtain } : {}),
+        // #321: a paste keeps the riser tag fields (cleaned; never on a curtain).
+        ...(!it.curtain && cleanPlacementTag(it.tag) ? { tag: cleanPlacementTag(it.tag) } : {}),
         by: input.by,
         at,
       };
@@ -1481,7 +1531,7 @@ export async function pastePlacements(
       });
     }
     p.placements = [...(p.placements || []), ...pasted];
-    stampNewDesignators(p, new Set(pasted.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(pasted.map((pl) => pl.id)), codeOf, digits);
     const stamped = byId(p.placements);
     if (routes.length) p.routes = [...(p.routes || []), ...routes];
     p.updatedAt = at;
@@ -1528,14 +1578,14 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   // #320: a restored device keeps its designator; one restored without
   // (a bundle from before #320) is numbered like a new device.
   const unnumbered = placements.filter((pl) => !pl.curtain && !cleanDesignator(pl.designator));
-  const codeOf = unnumbered.length ? (await designatorContext(unnumbered.map((pl) => pl.partId))).codeOf : null;
+  const numbering = unnumbered.length ? await designatorContext(unnumbered.map((pl) => pl.partId)) : null;
 
   let refusal = null as string | null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     refusal = refusalFor(p);
     if (refusal) return;
     p.placements = [...(p.placements || []), ...placements];
-    if (codeOf) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), codeOf);
+    if (numbering) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), numbering.codeOf, numbering.digits);
     const first = defaultOptionId(p);
     const optionOf = new Map(p.placements.map((pl) => [pl.id, pl.optionId || first]));
     const removed = cleanRiserRemoved(bundle?.riser, new Set(ensureOptions(p).options.map((o) => o.id)));
@@ -1560,6 +1610,9 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
         p.riser = restored;
       }
     }
+    // #321: the conduit runs, pinned tags and dismissals that went with them —
+    // untrusted client input, cleaned and own-option-checked by the helper.
+    restoreConduitItems(p, bundle?.conduit);
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, error: "Design not found." };
@@ -1585,10 +1638,10 @@ export async function setPlacementsDesignator(
 ): Promise<BatchResult<{ id: string; designator: string }[]>> {
   const next = byId(items);
   const needCodes = items.some((it) => !cleanDesignator(it.designator));
-  let codeOf: ((pl: { partId: string; category?: string }) => string) | null = null;
+  let numbering: Awaited<ReturnType<typeof designatorContext>> | null = null;
   if (needCodes) {
     const before = await getProject(projectId);
-    codeOf = (await designatorContext((before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId))).codeOf;
+    numbering = await designatorContext((before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId));
   }
   return batchEdit(
     projectId,
@@ -1611,10 +1664,49 @@ export async function setPlacementsDesignator(
         }
         return edited;
       });
-      if (codeOf) stampNewDesignators(p, reissue, codeOf);
+      if (numbering) stampNewDesignators(p, reissue, numbering.codeOf, numbering.digits);
       return previous;
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_DESIGNATOR_REFUSAL : null)
+  );
+}
+
+/* ------------------------------ riser tags (#321) ------------------------------ */
+
+const CURTAIN_TAG_REFUSAL = "Curtains don't take riser tag fields.";
+
+/**
+ * Patch many devices' riser tag overrides in one all-or-nothing write
+ * (batchEdit). Each item is a per-field patch (applyTagPatch): a key absent
+ * is left alone, a string sets that field (cleaned; "" is a deliberate
+ * blank), null removes that override; an all-empty result deletes `tag`. A
+ * hand edit clears the #211 auto tag, like a category edit. Curtains are
+ * refused (the whole batch). `previous` is, per id, a patch that restores
+ * exactly the prior values of the touched fields — undo and redo are patches.
+ */
+export async function setPlacementsTag(
+  projectId: string,
+  items: { id: string; patch: TagPatch }[]
+): Promise<BatchResult<{ previous: { id: string; patch: TagPatch }[] }>> {
+  const next = byId(items);
+  return batchEdit(
+    projectId,
+    items.map((it) => it.id),
+    (p) => {
+      const previous: { id: string; patch: TagPatch }[] = [];
+      p.placements = (p.placements || []).map((pl) => {
+        const it = next.get(pl.id);
+        if (!it) return pl;
+        const r = applyTagPatch(pl.tag, it.patch);
+        previous.push({ id: pl.id, patch: r.previous });
+        const edited = withoutAuto({ ...pl });
+        if (r.tag) edited.tag = r.tag;
+        else delete edited.tag;
+        return edited;
+      });
+      return { previous };
+    },
+    (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_TAG_REFUSAL : null)
   );
 }
 
@@ -1632,11 +1724,12 @@ export async function renumberDesignators(
   target: RenumberTarget
 ): Promise<BatchResult<{ previous: { id: string; designator: string }[]; next: { id: string; designator: string }[] }>> {
   let codeOf: ((pl: { partId: string; category?: string }) => string) | undefined;
+  let digits: 1 | 2;
   if (target.recode === true) {
     const before = await getProject(projectId);
     if (!before) return { ok: false, error: "Design not found." };
-    codeOf = (await designatorContext((before.placements || []).filter((pl) => !pl.curtain).map((pl) => pl.partId))).codeOf;
-  }
+    ({ codeOf, digits } = await designatorContext((before.placements || []).filter((pl) => !pl.curtain).map((pl) => pl.partId)));
+  } else digits = designatorDigitsOf(await getSettings());
   let gone = false as boolean;
   const previous: { id: string; designator: string }[] = [];
   const next: { id: string; designator: string }[] = [];
@@ -1646,7 +1739,7 @@ export async function renumberDesignators(
       return;
     }
     const own = (p.placements || []).filter((pl) => pl.optionId === optionId);
-    const changes = renumber(own, readingCtxOf(p), target, codeOf);
+    const changes = renumber(own, readingCtxOf(p, digits), target, codeOf);
     if (!changes.size) return;
     p.placements = (p.placements || []).map((pl) => {
       const d = changes.get(pl.id);
@@ -1676,12 +1769,12 @@ function withoutCurtainDesignator(pl: GridPlacement): GridPlacement {
  * option slice, the print paths' rule) and curtains' stripped. The input is
  * never touched.
  */
-export function designatorsFilledInMemory(project: GridProject, codeOf: (pl: { partId: string; category?: string }) => string): GridProject {
+export function designatorsFilledInMemory(project: GridProject, codeOf: (pl: { partId: string; category?: string }) => string, digits?: 1 | 2): GridProject {
   const doc = ensureOptions({ ...project, placements: (project.placements || []).map((pl) => ({ ...withoutCurtainDesignator(pl) })) });
   const filled = new Map<string, GridPlacement>();
   for (const o of doc.options) {
     const own = doc.placements.filter((pl) => pl.optionId === o.id);
-    for (const pl of fillDesignators(own, codeOf, readingCtxOf(doc))) filled.set(pl.id, pl);
+    for (const pl of fillDesignators(own, codeOf, readingCtxOf(doc, digits))) filled.set(pl.id, pl);
   }
   doc.placements = doc.placements.map((pl) => filled.get(pl.id) ?? pl);
   return doc;
@@ -1704,14 +1797,14 @@ export async function ensureDesignators(
   opts: { write?: boolean } = {}
 ): Promise<GridProject> {
   if (!needsDesignators(project.placements || [])) return project;
-  const { codeOf } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
+  const { codeOf, digits } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
   const write = opts.write ?? process.env.VERCEL_ENV !== "preview";
-  if (!write) return designatorsFilledInMemory(project, codeOf);
+  if (!write) return designatorsFilledInMemory(project, codeOf, digits);
   const updated = await patchDoc<GridProject>("grid_projects", project.id, (p) => {
     if (!needsDesignators(p.placements || [])) return;
     const doc = ensureOptions(p);
     doc.placements = (doc.placements || []).map(withoutCurtainDesignator);
-    for (const o of doc.options) stampDesignators(doc, o.id, codeOf);
+    for (const o of doc.options) stampDesignators(doc, o.id, codeOf, undefined, digits);
   });
   // A concurrent numbering can land first (the patch then finds nothing to
   // do): hand back the doc the patch read, never the stale one given.
@@ -1920,6 +2013,79 @@ export async function renameSpace(
   });
 }
 
+/** Replace the riser level list (#321). A level that's gone is cleared off every space and sheet that named it. */
+export async function setLevels(projectId: string, raw: unknown): Promise<GridProject | null> {
+  const levels = cleanLevels(raw);
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const keep = new Set(levels.map((l) => l.id));
+    p.levels = levels;
+    p.spaces = (p.spaces || []).map((s) => {
+      if (!s.levelId || keep.has(s.levelId)) return s;
+      const rest = { ...s };
+      delete rest.levelId;
+      return rest;
+    });
+    if (p.sheetLevels) {
+      const next = Object.fromEntries(Object.entries(p.sheetLevels).filter(([, id]) => keep.has(id)));
+      if (Object.keys(next).length) p.sheetLevels = next;
+      else delete p.sheetLevels;
+    }
+    // A removed level's dragged line positions go with it (#321).
+    pruneConduitRisersIn(p);
+    p.updatedAt = Date.now();
+  });
+}
+
+/** Set (or, with null, clear) the level a space sits on (#321). Null when the design is gone, the space isn't on it, or the level isn't on its list. */
+export async function setSpaceLevel(
+  projectId: string,
+  spaceId: string,
+  levelId: string | null
+): Promise<GridProject | null> {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (levelId && !(p.levels || []).some((l) => l.id === levelId)) {
+      refused = true;
+      return;
+    }
+    if (!(p.spaces || []).some((s) => s.id === spaceId)) {
+      refused = true;
+      return;
+    }
+    p.spaces = (p.spaces || []).map((s) => {
+      if (s.id !== spaceId) return s;
+      if (levelId) return { ...s, levelId };
+      const rest = { ...s };
+      delete rest.levelId;
+      return rest;
+    });
+    p.updatedAt = Date.now();
+  });
+  return refused ? null : updated;
+}
+
+/** Set (or clear) a sheet's default level (#321). Null when the design is gone, the sheet isn't on it, or the level isn't on its list. */
+export async function setSheetLevel(
+  projectId: string,
+  sheetId: string,
+  levelId: string | null
+): Promise<GridProject | null> {
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if ((levelId && !(p.levels || []).some((l) => l.id === levelId)) || !(p.sheetIds || []).includes(sheetId)) {
+      refused = true;
+      return;
+    }
+    const next = { ...(p.sheetLevels || {}) };
+    if (levelId) next[sheetId] = levelId;
+    else delete next[sheetId];
+    if (Object.keys(next).length) p.sheetLevels = next;
+    else delete p.sheetLevels;
+    p.updatedAt = Date.now();
+  });
+  return refused ? null : updated;
+}
+
 export async function removeSpace(
   projectId: string,
   spaceId: string
@@ -1928,34 +2094,43 @@ export async function removeSpace(
     p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
     // Its riser box, and any link/conduit ending on it, go too (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: new Set([spaceId]) });
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
 
 /* ------------------------------ routes ------------------------------ */
 
-export async function addRoute(
+export async function addRoute(projectId: string, input: AddRouteInput): Promise<GridProject | null> {
+  return (await addRouteWithId(projectId, input))?.project ?? null;
+}
+
+type AddRouteInput = {
+  sheetId: string;
+  page: number;
+  partId: string;
+  points: Point[];
+  aspect: number;
+  optionId: string;
+  by: string;
+  fromPlacementId?: string;
+  toPlacementId?: string;
+  connectionType?: string;
+};
+
+/** addRoute, plus the id it minted — what the plan's riser prompt asks about (#321). */
+export async function addRouteWithId(
   projectId: string,
-  input: {
-    sheetId: string;
-    page: number;
-    partId: string;
-    points: Point[];
-    aspect: number;
-    optionId: string;
-    by: string;
-    fromPlacementId?: string;
-    toPlacementId?: string;
-    connectionType?: string;
-  }
-): Promise<GridProject | null> {
+  input: AddRouteInput
+): Promise<{ project: GridProject; routeId: string } | null> {
   let refused = false;
+  const routeId = rid("wr-");
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
     p.routes = [
       ...(p.routes || []),
       {
-        id: rid("wr-"),
+        id: routeId,
         sheetId: input.sheetId,
         page: input.page,
         partId: input.partId,
@@ -1971,7 +2146,7 @@ export async function addRoute(
     ];
     p.updatedAt = Date.now();
   });
-  return refused ? null : updated;
+  return refused || !updated ? null : { project: updated, routeId };
 }
 
 export async function removeRoute(
@@ -1980,6 +2155,8 @@ export async function removeRoute(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.routes = (p.routes || []).filter((r) => r.id !== routeId);
+    // A conduit keeps standing when its last wire goes — only the member drops (#321).
+    pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -2028,8 +2205,16 @@ export async function addOption(
       // The copied option gets its own riser document, device ends re-pointed
       // at the copied placements (#209).
       const srcRiser = doc.riser?.[input.copyFromOptionId];
+      const linkMap = new Map<string, string>();
       if (srcRiser) {
-        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
+        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, linkMap) };
+      }
+      // …and its own conduit riser, runs re-pointed at the copied devices,
+      // wires and links (#321).
+      const srcConduit = doc.conduitRiser?.[input.copyFromOptionId];
+      if (srcConduit) {
+        const idMap = new Map([...copied.idMap, ...linkMap]);
+        doc.conduitRiser = { ...doc.conduitRiser, [option.id]: copyConduitRiserDoc(srcConduit, idMap, crMakeId) };
       }
       // The copied placements keep their auto tags, so the copy carries the
       // source option's Auto choices with them (#211, D312).
@@ -2096,6 +2281,11 @@ export async function removeOption(
       const riser = { ...doc.riser };
       delete riser[optionId];
       doc.riser = riser;
+    }
+    if (doc.conduitRiser && optionId in doc.conduitRiser) {
+      const conduit = { ...doc.conduitRiser };
+      delete conduit[optionId];
+      doc.conduitRiser = conduit;
     }
     // A legacy single estimate belongs to the pre-removal first option (#211, D312).
     if (doc.autoEstimate) {
@@ -2179,7 +2369,7 @@ export async function setLaborOverride(
   system: string,
   amount: number | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!isBomGroupKey(system)) return { ok: false, error: "Unknown labor line." };
+  if (!isEditableBomGroupKey(system)) return { ok: false, error: "Unknown labor line." };
   if (amount !== null && !(typeof amount === "number" && Number.isFinite(amount) && amount >= 0 && amount <= LABOR_OVERRIDE_MAX))
     return { ok: false, error: "Enter a labor amount from $0 to $10,000,000." };
   const project = await getProject(projectId);
@@ -2289,6 +2479,11 @@ function snapshotOf(
     routes: [...(p.routes || [])],
     // Deep copy: the riser document is nested and patched in place later.
     riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
+    // The conduit riser is design state too (#321) — deep-copied the same way.
+    ...(p.conduitRiser ? { conduitRiser: JSON.parse(JSON.stringify(p.conduitRiser)) as Record<string, ConduitRiserDoc> } : {}),
+    // Riser levels are design state too (#321); a space's level rides in `spaces`.
+    levels: (p.levels || []).map((l) => ({ ...l })),
+    sheetLevels: { ...(p.sheetLevels || {}) },
     // Auto choices are design state like the riser (#211, D312) —
     // normalized (a legacy single value lands as the first option's) and deep-copied.
     autoEstimate: JSON.parse(JSON.stringify(autoEstimatesOf(p.autoEstimate, p.options?.[0]?.id ?? DEFAULT_OPTION_ID))) as AutoEstimates,
@@ -2369,6 +2564,9 @@ export async function restoreRevision(
     // wholesale. A pre-#209 snapshot has none → back to the auto layout.
     if (target.riser) doc.riser = JSON.parse(JSON.stringify(target.riser)) as Record<string, RiserDoc>;
     else delete doc.riser;
+    // Levels (#321): restored with the spaces that name them; a snapshot cut
+    // before levels existed leaves the current ones alone.
+    if (target.levels) doc.levels = target.levels.map((l) => ({ ...l }));
     // sheetIds themselves are still never restored wholesale from the
     // snapshot (a sheet added since, or removed for reasons unrelated to
     // this revision, should stay exactly as it is) — but a sheet that WAS
@@ -2385,6 +2583,17 @@ export async function restoreRevision(
     const liveSheetIds = new Set(doc.sheetIds || []);
     for (const sid of referencedSheetIds) liveSheetIds.add(sid);
     doc.sheetIds = Array.from(liveSheetIds);
+    // Sheet default levels (#321): restore never touches sheetIds, so merge —
+    // the snapshot's entry wins for a sheet it knew, a sheet added since keeps
+    // its current entry, and an entry for a sheet that's gone is dropped.
+    if (target.sheetLevels) {
+      const known = new Set(target.sheetIds || []);
+      const merged: Record<string, string> = {};
+      for (const [sid, lid] of Object.entries(doc.sheetLevels || {})) if (!known.has(sid) && liveSheetIds.has(sid)) merged[sid] = lid;
+      for (const [sid, lid] of Object.entries(target.sheetLevels)) if (liveSheetIds.has(sid)) merged[sid] = lid;
+      if (Object.keys(merged).length) doc.sheetLevels = merged;
+      else delete doc.sheetLevels;
+    }
     // Quote links are bookkeeping, not design state: a restore brings back
     // the option LIST and membership, but every option that still exists
     // keeps its CURRENT quote link, and the project mirror is re-derived.
@@ -2415,6 +2624,14 @@ export async function restoreRevision(
     // still holds the current ones).
     const restoredEsts = autoEstimatesOf(target.autoEstimate, doc.options![0].id);
     const liveOptionIds = new Set(doc.options!.map((o) => o.id));
+    // The conduit riser comes back with the plan it annotates (#321), kept
+    // only for options that exist after the restore; a snapshot cut before
+    // it existed clears it (the snapshot just pushed above holds the current one).
+    const restoredConduit = Object.fromEntries(
+      Object.entries(target.conduitRiser || {}).filter(([k]) => liveOptionIds.has(k)).map(([k, v]) => [k, JSON.parse(JSON.stringify(v)) as ConduitRiserDoc])
+    );
+    if (Object.keys(restoredConduit).length) doc.conduitRiser = restoredConduit;
+    else delete doc.conduitRiser;
     for (const k of Object.keys(restoredEsts)) if (!liveOptionIds.has(k)) delete restoredEsts[k];
     if (Object.keys(restoredEsts).length) doc.autoEstimate = restoredEsts;
     else delete doc.autoEstimate;

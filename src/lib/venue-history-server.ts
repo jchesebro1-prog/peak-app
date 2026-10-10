@@ -17,6 +17,7 @@ import { getAll as getAllInspections } from "@/lib/stores/inspections";
 import { getAll as getAllRepairs } from "@/lib/stores/repair-jobs";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
 import { allVisits } from "@/lib/stores/site-visits";
+import { notesForSite } from "@/lib/stores/notes";
 import {
   venueDocLocId,
   docMatchesVenue,
@@ -110,7 +111,7 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   const companyId = site.companyId;
   const locId = venueDocLocId(site);
 
-  const [quotes, projects, engagements, flame, inspections, repairs, surveys, visits] =
+  const [quotes, projects, engagements, flame, inspections, repairs, surveys, visits, notes] =
     await Promise.all([
       getAllQuotes(),
       getAllProjects(),
@@ -120,6 +121,11 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
       getAllRepairs(),
       getAllSurveys(),
       allVisits(),
+      // #323 — notes filed on this venue (sites.id), e.g. a meeting to-do decided "note"
+      notesForSite(site.id).catch((e: unknown) => {
+        console.error("[venue-history] notes read failed —", (e as Error)?.message || e);
+        return [];
+      }),
     ]);
 
   const rows: VenueHistoryRow[] = [];
@@ -182,6 +188,16 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
       status: v.startAt == null ? v.stage : v.startAt >= now ? "upcoming" : "past",
       open: v.startAt == null ? v.stage !== "done" : v.startAt >= now,
       href: v.engagementId ? "/design/engagements/" + encodeURIComponent(v.engagementId) : "/calendar",
+    });
+  }
+
+  for (const n of notes) {
+    const firstLine = n.text.split("\n").map((l) => l.trim()).find(Boolean) || "Note";
+    rows.push({
+      id: n.id, kind: "note", title: firstLine.length > 120 ? firstLine.slice(0, 119) + "…" : firstLine,
+      subtitle: n.by ? `Note · ${n.by}` : "Note",
+      ts: n.at, status: "note", open: false,
+      href: "/companies/" + encodeURIComponent(companyId),
     });
   }
 

@@ -77,6 +77,7 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
     setErr,
     partById,
     wires,
+    riser,
     runQuote,
     customItems,
     bomEmpty,
@@ -172,6 +173,20 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
           <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
         </div>
       );
+    case "conduit":
+      // #321: priced conduit from the conduit riser — feet of the size's part.
+      return (
+        <div key={`cd-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+          <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
+          <span
+            style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={`${l.partId} — ${l.desc}`}
+          >
+            {l.desc}
+          </span>
+          <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+        </div>
+      );
     case "device":
       return (
         <div key={`d-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
@@ -237,7 +252,7 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
                 <span style={{ flex: 1, fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
                   {g.label}
                 </span>
-                {pickerOpenFor !== g.key && (
+                {pickerOpenFor !== g.key && g.key !== "conduit" && (
                   <button type="button" style={ADD_LINK} onClick={() => setAddingTo({ optionId: activeOptionId, group: g.key })}>
                     + Add accessory
                   </button>
@@ -276,11 +291,34 @@ export default function BomPanel({ ed }: { ed: GridEditor }) {
           );
         })}
         {customSection}
+        {/* #321: wire inside a conduit run whose wire is by others — footage only, never priced or quoted. */}
+        {riser.byOthers.length > 0 && (
+          <div style={{ display: "grid", gap: 3, borderTop: "1px dashed #e3e5ea", paddingTop: 5 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
+              In conduit — by others
+            </span>
+            {riser.byOthers.map((w) => (
+              <div key={`bo-${w.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline", color: "#8c919c" }}>
+                <strong style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{w.feet} ft</strong>
+                <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={`${w.partId} — ${w.desc}`}>
+                  {w.desc}
+                </span>
+                <span style={{ fontSize: 10.5, whiteSpace: "nowrap" }}>not priced</span>
+              </div>
+            ))}
+          </div>
+        )}
         {wires.unmeasured > 0 && (
           <div style={{ fontSize: 10.5, color: "#a0442b" }}>
             {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
           </div>
         )}
+        {/* #321: what the conduit riser needs before the quote can price — the quote refuses with these same sentences. */}
+        {riser.refusals.map((r, i) => (
+          <div key={`${i}:${r}`} style={{ fontSize: 10.5, color: "#a0442b" }}>
+            {r}.
+          </div>
+        ))}
         {!bomEmpty && (
           <div style={{ borderTop: "1px solid #edeff3", marginTop: 3, paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
             <span style={{ color: "#8c919c" }}>Total</span>

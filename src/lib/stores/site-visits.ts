@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, listDocsByField, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
 import { normalizeInvites, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { readAttendees } from "@/lib/visit-plan/people";
@@ -122,6 +122,12 @@ export async function visitsForCustomer(customerId: string): Promise<SiteVisit[]
 
 export async function visitsForEngagement(engagementId: string): Promise<SiteVisit[]> {
   return (await allVisits()).filter((v) => v.engagementId === engagementId);
+}
+
+/** #323 — ids of the visits linked to one survey, filtered in SQL (the survey page's Meetings card). */
+export async function visitIdsForSurvey(surveyId: string): Promise<string[]> {
+  if (!surveyId) return [];
+  return (await listDocsByField<SiteVisit>("site_visits", "surveyId", [surveyId])).map((v) => v.id);
 }
 
 export async function getVisit(id: string): Promise<SiteVisit | null> {

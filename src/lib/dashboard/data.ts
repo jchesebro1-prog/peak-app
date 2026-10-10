@@ -15,6 +15,7 @@ import { open as openLeads, followUps } from "@/lib/stores/leads";
 import { threadsIn, unreadCount, folderCounts, mailboxes as commMailboxes } from "@/lib/stores/comms";
 import { list as catalogList } from "@/lib/stores/catalog";
 import { loadQueue } from "@/lib/queue";
+import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { getSettings } from "@/lib/settings";
 import { once } from "./once";
@@ -37,6 +38,8 @@ export function makeDashboardData(user: SessionUser) {
     roster: once(activeUsers),
     catalogParts: once(catalogList),
     queueItems: once(() => loadQueue(me)),
+    /** #323 — my open "Waiting on customer" nudges: Home lists them apart from my own to-dos. */
+    waitingOnOthers: once(() => openWaitingTasksBy("assigneeUserId", [user.id])),
     agenda: once(() => loadHomeAgenda(user.id, me)),
     boxCounts: once(() => Promise.all(boxes.map((b) => folderCounts(b.id, me)))),
     settings: once(getSettings),

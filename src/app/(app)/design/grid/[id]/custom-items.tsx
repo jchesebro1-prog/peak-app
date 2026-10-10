@@ -10,7 +10,7 @@ import {
   customItemPartId,
   type GridCustomItem,
 } from "@/lib/design/grid-custom-items";
-import { BOM_GROUPS, CUSTOM_SYSTEM_OF_GROUP, groupOfCustomSystem } from "@/lib/design/grid-bom-groups";
+import { CUSTOM_SYSTEM_OF_GROUP, EDITABLE_BOM_GROUPS, groupOfCustomSystem } from "@/lib/design/grid-bom-groups";
 import { removeCustomItemAction, saveCustomItemAction } from "./actions";
 
 /**
@@ -204,7 +204,7 @@ export default function CustomItemsSection({
             aria-label="BOM category"
             style={INPUT}
           >
-            {BOM_GROUPS.map((g) => (
+            {EDITABLE_BOM_GROUPS.map((g) => (
               <option key={g.key} value={CUSTOM_SYSTEM_OF_GROUP[g.key] ?? ""}>
                 {g.label}
               </option>

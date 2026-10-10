@@ -10,6 +10,7 @@ import { placementQty } from "./grid-bom";
 import { spaceOf } from "./grid-geometry";
 import { normalizeCategory } from "./grid-scopes";
 import { cleanDesignator, formatDesignator, readingOrder } from "./designators";
+import { cleanPlacementTag, effectiveTag, TAG_FIELD_KEYS, TAG_LIMITS, type EffectiveTag, type PlacementTag, type TagFields, type TagPatch } from "./conduit-riser/tags";
 
 export type DeviceRow = {
   id: string;
@@ -32,11 +33,20 @@ export type DeviceRow = {
   qty: number;
   category: string;
   duplicate: boolean;
+  /** #321: the riser tag as printed — the device's own fields over its part's defaults (location: its space). */
+  tag: EffectiveTag;
+  /** #321: just the device's own overrides; a field absent here is inherited. */
+  own: PlacementTag;
 };
 
-export type DeviceColumnKey = "designator" | "type" | "model" | "desc" | "space" | "sheet" | "qty" | "category";
+/** #321: the riser tag fields, in tag order — each is also a Devices column. */
+export const TAG_COLUMN_KEYS = TAG_FIELD_KEYS;
+export type TagColumnKey = (typeof TAG_COLUMN_KEYS)[number];
+export const isTagColumn = (key: string): key is TagColumnKey => (TAG_COLUMN_KEYS as readonly string[]).includes(key);
+
+export type DeviceColumnKey = "designator" | "type" | "model" | "desc" | "space" | "sheet" | "qty" | "category" | TagColumnKey;
 export type DeviceColumn = { key: DeviceColumnKey; label: string; width: number; editable?: boolean; mono?: boolean };
-export type EditCol = "designator" | "category";
+export type EditCol = "designator" | "category" | TagColumnKey;
 
 /** Width 0 = takes the rest of the row. */
 export const DEVICE_COLUMNS: readonly DeviceColumn[] = [
@@ -48,7 +58,19 @@ export const DEVICE_COLUMNS: readonly DeviceColumn[] = [
   { key: "sheet", label: "Sheet", width: 120 },
   { key: "qty", label: "Qty", width: 52 },
   { key: "category", label: "Category", width: 130, editable: true },
+  // #321 riser tag fields — all editable; a blank cell falls back to the part's default.
+  { key: "box", label: "Box", width: 52, editable: true, mono: true },
+  { key: "face", label: "Face", width: 64, editable: true, mono: true },
+  { key: "mount", label: "Mount", width: 56, editable: true, mono: true },
+  { key: "height", label: "Ht", width: 64, editable: true, mono: true },
+  { key: "pd", label: "P/D", width: 52, editable: true, mono: true },
+  { key: "location", label: "Location", width: 120, editable: true },
+  { key: "power", label: "Pwr", width: 48, editable: true, mono: true },
+  { key: "contents", label: "Contents", width: 150, editable: true },
 ];
+
+/** The columns a cell edit can visit, in table order — what Tab walks. */
+export const EDIT_COLUMNS: readonly EditCol[] = DEVICE_COLUMNS.filter((c) => c.editable).map((c) => c.key as EditCol);
 
 export const NO_SPACE = "__none";
 export type DeviceFilter = { type?: string; space?: string; sheet?: string };
@@ -64,6 +86,10 @@ export type DeviceRowInput = {
   modelOf: (pl: GridPlacement) => string;
   descOf: (pl: GridPlacement) => string;
   duplicates: ReadonlySet<string>;
+  /** #321: designator number padding (2 = CRO-01); absent = 1. */
+  digits?: 1 | 2;
+  /** #321: a device's part's riser tag defaults; absent = none. */
+  tagDefaultsOf?: (pl: GridPlacement) => TagFields | undefined;
 };
 
 const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
@@ -82,7 +108,7 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
       id: pl.id,
       order,
       designator,
-      display: formatDesignator(designator, qty),
+      display: formatDesignator(designator, qty, i.digits),
       typeKey,
       typeLabel: i.typeLabelOf(typeKey),
       model: i.modelOf(pl),
@@ -95,6 +121,8 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
       qty,
       category: normalizeCategory(pl.category) ?? "",
       duplicate: i.duplicates.has(pl.id),
+      tag: effectiveTag(pl.tag, i.tagDefaultsOf?.(pl), home?.name ?? ""),
+      own: pl.tag ?? {},
     };
   });
 }
@@ -126,6 +154,15 @@ export function sortValue(r: DeviceRow, key: DeviceColumnKey): string | number {
       return r.qty;
     case "category":
       return r.category;
+    case "box":
+    case "face":
+    case "mount":
+    case "height":
+    case "pd":
+    case "location":
+    case "power":
+    case "contents":
+      return r.tag[key];
   }
 }
 
@@ -151,13 +188,72 @@ export function cellText(r: DeviceRow, key: DeviceColumnKey): string {
   return String(sortValue(r, key));
 }
 
-/** Where an edit goes next: down / up stay in the column; right goes
- *  Designator → Category → the next row's Designator; left the reverse. */
+/** Where an edit goes next: down / up stay in the column; right walks the
+ *  editable columns in table order, then on to the next row's first; left the reverse. */
 export function nextCell(rows: readonly DeviceRow[], id: string, col: EditCol, move: "down" | "up" | "right" | "left"): { id: string; col: EditCol } | null {
   const i = rows.findIndex((r) => r.id === id);
   if (i < 0) return null;
   if (move === "down") return i + 1 < rows.length ? { id: rows[i + 1].id, col } : null;
   if (move === "up") return i > 0 ? { id: rows[i - 1].id, col } : null;
-  if (move === "right") return col === "designator" ? { id, col: "category" } : i + 1 < rows.length ? { id: rows[i + 1].id, col: "designator" } : null;
-  return col === "category" ? { id, col: "designator" } : i > 0 ? { id: rows[i - 1].id, col: "category" } : null;
+  const c = EDIT_COLUMNS.indexOf(col);
+  if (move === "right") {
+    if (c >= 0 && c + 1 < EDIT_COLUMNS.length) return { id, col: EDIT_COLUMNS[c + 1] };
+    return i + 1 < rows.length ? { id: rows[i + 1].id, col: EDIT_COLUMNS[0] } : null;
+  }
+  if (c > 0) return { id, col: EDIT_COLUMNS[c - 1] };
+  return i > 0 ? { id: rows[i - 1].id, col: EDIT_COLUMNS[EDIT_COLUMNS.length - 1] } : null;
+}
+
+/* ------------------------------ riser tag edits (#321) ------------------------------ */
+
+/** Longest text a tag column takes (the P/D cell is at most "P/D"). */
+export const TAG_INPUT_MAX: Record<TagColumnKey, number> = { ...TAG_LIMITS, pd: 3 };
+
+export const PD_PROBLEM = "P/D takes P, D, P/D or nothing.";
+
+/** The P/D cell's text: "p / d" → "P/D"; blank → ""; anything else → null. */
+export function parsePd(text: string): "P" | "D" | "P/D" | "" | null {
+  const t = text.trim().toUpperCase().replace(/\s+/g, "");
+  return t === "P" || t === "D" || t === "P/D" || t === "" ? t : null;
+}
+
+/**
+ * One tag field edited on a device that carries `own` overrides, as a
+ * single-field PATCH (never a whole tag, so a fast second edit can't undo the
+ * first). Typing text sets that field; typing nothing removes the device's
+ * override for it (`null`) whenever it has one — a stored "" included — so the
+ * part's default shows again. `patch: null` = nothing to write.
+ */
+export function tagPatchAfterEdit(
+  own: PlacementTag | undefined,
+  field: TagColumnKey,
+  text: string
+): { ok: true; patch: TagPatch | null } | { ok: false; error: string } {
+  let value = text;
+  if (field === "pd") {
+    const pd = parsePd(text);
+    if (pd === null) return { ok: false, error: PD_PROBLEM };
+    value = pd;
+  }
+  const current = (own as Record<string, string> | undefined)?.[field];
+  if (value.trim() === "") return { ok: true, patch: current !== undefined ? { [field]: null } : null };
+  const cleaned = (cleanPlacementTag({ [field]: value }) as Record<string, string> | undefined)?.[field];
+  if (cleaned === undefined || cleaned === current) return { ok: true, patch: null };
+  return { ok: true, patch: { [field]: cleaned } };
+}
+
+/** Set one tag field on several devices as per-field patches. Only devices
+ *  whose value would change are returned. */
+export function bulkTagItems(
+  pls: ReadonlyArray<{ id: string; tag?: PlacementTag }>,
+  field: TagColumnKey,
+  text: string
+): { ok: true; items: { id: string; patch: TagPatch }[] } | { ok: false; error: string } {
+  const items: { id: string; patch: TagPatch }[] = [];
+  for (const pl of pls) {
+    const r = tagPatchAfterEdit(pl.tag, field, text);
+    if (!r.ok) return r;
+    if (r.patch) items.push({ id: pl.id, patch: r.patch });
+  }
+  return { ok: true, items };
 }

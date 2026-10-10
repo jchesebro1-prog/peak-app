@@ -1,0 +1,1420 @@
+/* #323 Krisp meeting matcher — spec checks. Chained from test-review-and-spec.ts. */
+import { createFixture, registerFixture } from "./test-fixtures";
+import type { MeetingLinks, MeetingRecord } from "@/lib/meetings/types";
+import { emptyLinks, meetingIdFor } from "@/lib/meetings/types";
+import * as MS from "@/lib/stores/meetings";
+import { nameCore, hitsCore, normalizeText } from "@/lib/meetings/names";
+import { canSeeMeeting, meetingScope, portalCanSee } from "@/lib/meetings/visibility";
+import { matchMeeting, type MatchIndex, type MatchInput } from "@/lib/meetings/match";
+import { mergeAttendees, relabel, renderMeeting, resolveAttendees, speakerIndexes, speakerLabel } from "@/lib/meetings/render";
+import { mergeTodos, noteParentFor, suggestTodoKind } from "@/lib/meetings/todos";
+import { rematchMeeting, syncRepMeetings, type SyncDeps } from "@/lib/meetings/sync";
+import { chicagoDayRange } from "@/lib/meetings/chicago-day";
+import { createKrispClient } from "@/lib/krisp/client";
+import * as MA from "@/lib/meetings/actions-core";
+import { allTasks, getTask } from "@/lib/stores/tasks";
+import { getNote } from "@/lib/stores/notes";
+import { activeUsers } from "@/lib/users";
+import { refreshMeetingDetailWith, type RefreshDeps } from "@/lib/meetings/sync";
+import { getContact as getContactRow } from "@/lib/identity/contacts";
+import { upsertDoc } from "@/db/doc-store";
+import { getDb } from "@/db";
+import { companies as companiesT, sites as sitesT, contacts as contactsT, contactEmails as contactEmailsT } from "@/db/schema";
+import { inArray } from "drizzle-orm";
+import { KrispApiError, KrispAuthError, KrispNotReadyError, KrispRateLimitError } from "@/lib/krisp/errors";
+import type { RecordingRecord } from "@/lib/stores/recordings";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { portalMeetings } from "@/lib/meetings/portal";
+import { loadCustomerFeed } from "@/lib/customer-feed";
+import { meetingFeedRows } from "@/lib/customer-feed-rows";
+import { openWaitingTasksBy } from "@/lib/stores/tasks";
+import { join } from "node:path";
+
+type Ok = (c: boolean, m: string) => void;
+
+export function meetingFixture323(over: Partial<MeetingRecord> & { krispMeetingId: string }): MeetingRecord {
+  const now = 1_790_000_000_000;
+  return {
+    id: meetingIdFor(over.krispMeetingId),
+    seenBy: ["u1"], ownerUserId: "u1", recordingId: null,
+    krisp: { title: "", startedAt: now, durationSec: 1200, source: null, status: "completed", tags: [],
+      participants: [], speakers: {}, segments: [], notes: null, fetchedAt: now, detailFetchedAt: null, removedAt: null },
+    calendar: null, attendees: [], speakerMap: {}, links: emptyLinks(), filedAt: null, filedBy: null,
+    suggestions: [], noise: false, noiseOverride: false, todos: [], share: null, createdAt: now, updatedAt: now,
+    ...over,
+  } as MeetingRecord;
+}
+
+export async function meetings323StoreChecks(ok: Ok): Promise<void> {
+  const kid = "TEST323" + "a".repeat(25);
+  const m = meetingFixture323({ krispMeetingId: kid, krisp: { ...meetingFixture323({ krispMeetingId: kid }).krisp, title: "Osakis – scope" } });
+  registerFixture("meetings", m.id);
+  await MS.saveMeeting(m);
+  const back = await MS.getMeeting(m.id);
+  ok(!!back && back.id === "km-" + kid && back.krisp.title === "Osakis – scope", "#323 a meeting round-trips through the meetings doc table under km-<krispId>");
+  const patched = await MS.patchMeeting(m.id, (x) => ({ ...x, links: { ...x.links, customerId: "TEST323-co" } }));
+  ok(patched?.links.customerId === "TEST323-co", "#323 patchMeeting is read-modify-write");
+  const norm = MS.normalizeMeeting({ id: "km-x" } as MeetingRecord);
+  ok(Array.isArray(norm.seenBy) && norm.links.contactIds.length === 0 && norm.todos.length === 0 && norm.share === null,
+    "#323 normalizeMeeting fills every array/object default for a sparse doc");
+  ok((await MS.meetingsVisibleTo("u-nobody")).some((x) => x.id === m.id), "#323 a company-linked meeting is visible to any Peak user");
+  await MS.patchMeeting(m.id, (x) => ({ ...x, links: { ...x.links, customerId: null } }));
+  ok(!(await MS.meetingsVisibleTo("u-nobody")).some((x) => x.id === m.id) && (await MS.meetingsVisibleTo("u1")).some((x) => x.id === m.id),
+    "#323 unlinked again → only the rep in seenBy sees it");
+}
+
+const T0 = Date.UTC(2026, 9, 6, 15, 0); // 2026-10-06 10:00 Chicago
+
+function index323(over: Partial<MatchIndex> = {}): MatchIndex {
+  return {
+    companies: [
+      { id: "osakis", name: "Osakis Public Schools", keywords: [] },
+      { id: "oshkosh", name: "Oshkosh Area School District", keywords: [] },
+      { id: "oshct", name: "Oshkosh Community Theatre", keywords: [] },
+      { id: "monte", name: "Montevideo Public Schools", keywords: ["Monte PAC"] },
+    ],
+    sites: [
+      { id: "st-osakis-1", companyId: "osakis", name: "Osakis High School Auditorium", locationName: null },
+      { id: "st-oshkosh-1", companyId: "oshkosh", name: "Oshkosh North High School", locationName: null },
+      { id: "st-oshkosh-2", companyId: "oshkosh", name: "Oshkosh West High School", locationName: null },
+    ],
+    contacts: [
+      { id: "c-tom", companyId: "osakis", firstName: "Tom", lastName: "Ellis", emails: ["tom@osakis.k12.mn.us"] },
+      { id: "c-seth", companyId: "monte", firstName: "Seth", lastName: "Berg", emails: [] },
+    ],
+    users: [
+      { id: "u1", name: "Jeff Chesebro", emails: ["jeff@peaksystemsgroup.com"] },
+      { id: "u2", name: "Jason Keagy", emails: ["jason@peaksystemsgroup.com"] },
+    ],
+    internalDomains: ["peaksystemsgroup.com"],
+    domainCompanies: { "osakis.k12.mn.us": ["osakis"] },
+    visits: [],
+    openWork: [],
+    ...over,
+  };
+}
+function input323(over: Partial<MatchInput>): MatchInput {
+  return { title: "", calendarTitle: null, summaryText: "", attendees: [], speakerNames: [],
+    startMs: T0, endMs: T0 + 30 * 60_000, durationSec: 1800, ownerUserId: "u1", ...over };
+}
+
+export async function meetings323MatchChecks(ok: Ok): Promise<void> {
+  ok(normalizeText("Osakis – Theatrical Owner's Scope!") === "osakis theatrical owner s scope", "#323 normalizeText lowercases and turns punctuation into spaces");
+  ok(nameCore("Osakis Public Schools") === "osakis" && nameCore("Oshkosh North High School") === "oshkosh north" &&
+     nameCore("Oshkosh Community Theatre") === "oshkosh" && nameCore("The Center") === null,
+    "#323 nameCore strips generic words and refuses an empty / < 4-char core");
+  ok(hitsCore("Oshkosh North - VE Engineering Meeting", "oshkosh north") && !hitsCore("Oshkoshville kickoff", "oshkosh"),
+    "#323 hitsCore matches whole words only");
+
+  const idx = index323();
+  // title + calendar title → strong
+  const a = matchMeeting(input323({ title: "Osakis – theatrical owner scope requests", calendarTitle: "Osakis scope review" }), idx);
+  const aCo = a.suggestions.find((s) => s.kind === "company");
+  ok(!a.noise && aCo?.id === "osakis" && aCo.strength === "strong" && aCo.score === 80, "#323 title + calendar title → strong company suggestion (80)");
+  ok(a.suggestions.some((s) => s.kind === "venue" && s.id === "st-osakis-1") === false,
+    "#323 no venue suggested when no venue core hit and no visit (Osakis HS Auditorium core 'osakis' equals the company core — counted once, not as a venue hit)");
+  // title only → weak
+  const b = matchMeeting(input323({ title: "Montevideo - orchestra pit discussion" }), idx);
+  ok(b.suggestions.find((s) => s.kind === "company")?.strength === "weak", "#323 title only → weak");
+  // keyword hit counts as title
+  const kw = matchMeeting(input323({ title: "Monte PAC rigging walk" }), idx);
+  ok(kw.suggestions.find((s) => s.kind === "company")?.id === "monte", "#323 a company keyword is matched like its name");
+  // no signal
+  const c = matchMeeting(input323({ title: "Jeff Chesebro <> Speaker_2" }), idx);
+  ok(c.suggestions.length === 0 && !c.noise, "#323 'Jeff <> Speaker_2' alone → no suggestion");
+  // noise
+  const d = matchMeeting(input323({ title: "Osakis quick", durationSec: 45 }), idx);
+  ok(d.noise && d.suggestions.length === 0, "#323 < 3 minutes → noise, no suggestions");
+  // venue-core hit beats a same-name company, but within 30 → both weak, venue suggested for top
+  const e = matchMeeting(input323({ title: "Oshkosh North - VE Engineering Meeting" }), idx);
+  const eCos = e.suggestions.filter((s) => s.kind === "company");
+  ok(eCos[0]?.id === "oshkosh" && eCos[0].score === 60 && eCos.some((s) => s.id === "oshct") && eCos.every((s) => s.strength === "weak"),
+    "#323 district venue hit (60) vs same-word theatre (50): both suggested, weak, district first");
+  ok(e.suggestions.some((s) => s.kind === "venue" && s.id === "st-oshkosh-1") && !e.suggestions.some((s) => s.id === "st-oshkosh-2"),
+    "#323 the venue whose core hit is suggested; its sibling is not");
+  // email → contact
+  const f = matchMeeting(input323({ title: "Scope call", attendees: [{ name: "Tom Ellis", email: "tom@osakis.k12.mn.us" }] }), idx);
+  ok(f.suggestions.find((s) => s.kind === "company")?.score === 60 && f.suggestions.some((s) => s.kind === "contact" && s.id === "c-tom"),
+    "#323 attendee email → contact (60) and the contact is suggested");
+  // mobile recording during an owner's scheduled visit → that visit
+  const g = matchMeeting(input323({ title: "Mobile recording - October 6, 2026 9:48 AM" }), index323({
+    visits: [{ kind: "site_visit", id: "SV-1001", label: "Osakis walkthrough", companyId: "osakis", siteId: "st-osakis-1",
+      startMs: T0 - 15 * 60_000, endMs: T0 + 60 * 60_000, assigneeUserId: "u1" }],
+  }));
+  ok(g.suggestions.some((s) => s.kind === "work" && s.id === "SV-1001" && s.workType === "site_visit") &&
+     g.suggestions.some((s) => s.kind === "venue" && s.id === "st-osakis-1") &&
+     g.suggestions.find((s) => s.kind === "company")?.score === 40,
+    "#323 a recording during the owner's scheduled site visit suggests that visit, its venue and company (40, weak)");
+  // someone else's visit doesn't count
+  const g2 = matchMeeting(input323({ title: "Mobile recording" }), index323({
+    visits: [{ kind: "site_visit", id: "SV-1002", label: "x", companyId: "osakis", siteId: null, startMs: T0, endMs: T0 + 1, assigneeUserId: "u2" }],
+  }));
+  ok(g2.suggestions.length === 0, "#323 another rep's visit is not a signal for this owner");
+  // unique open lead becomes the work suggestion
+  const h = matchMeeting(input323({ title: "Osakis scope", calendarTitle: "Osakis" }), index323({
+    openWork: [{ type: "lead", id: "L-1", label: "Osakis rigging", companyId: "osakis" }],
+  }));
+  ok(h.suggestions.some((s) => s.kind === "work" && s.id === "L-1" && s.strength === "strong"), "#323 the company's single open lead is the work suggestion");
+  const h2 = matchMeeting(input323({ title: "Osakis scope", calendarTitle: "Osakis" }), index323({
+    openWork: [{ type: "lead", id: "L-1", label: "a", companyId: "osakis" }, { type: "lead", id: "L-2", label: "b", companyId: "osakis" }],
+  }));
+  ok(!h2.suggestions.some((s) => s.kind === "work"), "#323 two open leads → no work suggestion (never guessed)");
+  // internal
+  const i = matchMeeting(input323({ title: "Weekly Design Meeting", attendees: [
+    { name: "Jeff Chesebro", email: "jeff@peaksystemsgroup.com" }, { name: "Jason Keagy", email: "jason@peaksystemsgroup.com" }] }), idx);
+  ok(i.suggestions.length === 1 && i.suggestions[0].kind === "internal" && i.suggestions[0].id === "u2" && i.suggestions[0].strength === "strong",
+    "#323 internal-only meeting → internal link to the other Peak attendee (not the owner), strong by email");
+  // speaker first name breaks nothing alone
+  const j = matchMeeting(input323({ title: "Mobile recording", speakerNames: ["Seth"] }), idx);
+  ok(j.suggestions.length === 0, "#323 a speaker first name alone (10) is below the bar");
+  // summary text
+  const k = matchMeeting(input323({ title: "Mobile recording", summaryText: "Walked the Montevideo pit with Seth", speakerNames: ["Seth"] }), idx);
+  ok(k.suggestions.length === 0, "#323 summary hit (20) + speaker first name at that company (10) = 30 → below the bar, nothing suggested");
+  ok(a.suggestions.find((s) => s.kind === "company")!.reasons.some((r) => r.includes("title")), "#323 suggestions carry human reasons");
+}
+
+export async function meetings323VisibilityChecks(ok: Ok): Promise<void> {
+  const base = meetingFixture323({ krispMeetingId: "v1", seenBy: ["u1", "u3"] });
+  ok(meetingScope(base) === "private" && canSeeMeeting(base, "u1") && canSeeMeeting(base, "u3") && !canSeeMeeting(base, "u2"),
+    "#323 unlinked → private to every rep whose Krisp lists it");
+  const internal = { ...base, links: { ...base.links, internalUserIds: ["u2"] } };
+  ok(meetingScope(internal) === "internal" && canSeeMeeting(internal, "u2") && !canSeeMeeting(internal, "u4"),
+    "#323 internal link shares with that person only");
+  const externals: [string, Partial<MeetingLinks>][] = [
+    ["company", { customerId: "osakis" }], ["venue", { siteId: "st-1" }], ["contact", { contactIds: ["c-1"] }],
+    ["work", { work: { type: "lead", id: "L-1", label: "x" } }],
+  ];
+  for (const [label, links] of externals) {
+    const m = { ...base, links: { ...base.links, ...links } };
+    ok(meetingScope(m) === "peak" && canSeeMeeting(m, "u9"), `#323 any external link (${label}) → all of Peak`);
+  }
+  const linked = { ...base, links: { ...base.links, customerId: "osakis" } };
+  ok(!portalCanSee(linked, "osakis"), "#323 linked but not shared → portal sees nothing");
+  const shared = { ...linked, share: { sharedAt: 1, sharedBy: "Jeff", summary: "s" } };
+  ok(portalCanSee(shared, "osakis") && !portalCanSee(shared, "other"), "#323 shared → only that customer's portal");
+}
+
+export async function meetings323RenderChecks(ok: Ok): Promise<void> {
+  // K9 attendee merge
+  const a1 = mergeAttendees([], [{ email: "Tom@Osakis.k12.mn.us", firstName: "Tom", lastName: "Ellis" }],
+    { eventId: "e1", title: "Osakis", attendees: [{ email: "tom@osakis.k12.mn.us", name: "Tom Ellis" }, { email: "amy@osakis.k12.mn.us", name: null }] });
+  ok(a1.length === 2 && a1[0].key === "tom@osakis.k12.mn.us" && a1[0].sources.join() === "krisp,calendar" && a1[1].name === "amy@osakis.k12.mn.us",
+    "#323 attendees: Krisp ∪ calendar, deduped by lowercased email, sources unioned, nameless calendar guest named by email");
+  const manualRemoved = a1.map((x) => (x.key === "amy@osakis.k12.mn.us" ? { ...x, removed: true } : x))
+    .concat([{ key: "name:seth", name: "Seth", email: null, sources: ["manual"], removed: false, contactId: "c-seth", userId: null }]);
+  const a2 = mergeAttendees(manualRemoved, [], { eventId: "e1", title: "Osakis", attendees: [{ email: "amy@osakis.k12.mn.us", name: "Amy" }] });
+  ok(a2.find((x) => x.key === "amy@osakis.k12.mn.us")?.removed === true && a2.some((x) => x.key === "name:seth" && x.contactId === "c-seth") &&
+     a2.find((x) => x.key === "tom@osakis.k12.mn.us")?.sources.join() === "krisp,calendar",
+    "#323 a re-merge keeps manual entries, removed flags and resolutions; drops nothing");
+  ok(a2.find((x) => x.key === "amy@osakis.k12.mn.us")?.name === "Amy", "#323 a nameless calendar guest (name = email) is upgraded when a later source supplies a real name");
+  // 2: same person name-only from Krisp, with an email from the calendar
+  const a3 = mergeAttendees([], [{ email: null, firstName: "Tom", lastName: "Ellis" }],
+    { eventId: "e2", title: "Osakis", attendees: [{ email: " Tom@Osakis.k12.mn.us ", name: "Tom Ellis" }, { email: "   ", name: "Pat Lee" }] });
+  ok(a3.length === 2 && a3[0].key === "tom@osakis.k12.mn.us" && a3[0].email === "tom@osakis.k12.mn.us" && a3[0].sources.join() === "krisp,calendar" &&
+     a3[1].key === "name:pat lee" && a3[1].email === null,
+    "#323 a name-only Krisp attendee and the same person with an email from the calendar become one entry; blank emails are null");
+  const a3b = mergeAttendees(a3, [{ email: null, firstName: "Tom", lastName: "Ellis" }],
+    { eventId: "e2", title: "Osakis", attendees: [{ email: " Tom@Osakis.k12.mn.us ", name: "Tom Ellis" }, { email: "   ", name: "Pat Lee" }] });
+  const tomRows = a3b.filter((x) => normalizeText(x.name) === "tom ellis");
+  ok(a3b.length === a3.length && tomRows.length === 1 && tomRows[0].key === "tom@osakis.k12.mn.us" &&
+     tomRows[0].sources.includes("krisp") && tomRows[0].sources.includes("calendar"),
+    "#323 a re-merge where Krisp stays name-only folds into the emailed entry (no duplicate)");
+  const a4 = mergeAttendees([{ key: "name:tom ellis", name: "Tom Ellis", email: null, sources: ["manual"], removed: true, contactId: "c-tom", userId: null }], [],
+    { eventId: "e3", title: "x", attendees: [{ email: "tom@osakis.k12.mn.us", name: "Tom Ellis" }] });
+  ok(a4.length === 1 && a4[0].key === "tom@osakis.k12.mn.us" && a4[0].removed && a4[0].contactId === "c-tom" && a4[0].sources.join() === "manual,calendar",
+    "#323 the adopted entry keeps its removed flag, resolution and unions the source");
+  const r = resolveAttendees(a1, new Map([["tom@osakis.k12.mn.us", { contactId: "c-tom" }]]));
+  ok(r[0].contactId === "c-tom" && r[1].contactId === null, "#323 resolveAttendees fills contact ids by email, never by name");
+  const pre = a1.map((x) => (x.key === "amy@osakis.k12.mn.us" ? { ...x, contactId: "c-pre" } : x));
+  const r2 = resolveAttendees(pre.concat([{ key: "name:zed", name: "Tom Ellis", email: "zed@x.org", sources: ["manual"], removed: false, contactId: null, userId: null }]),
+    new Map([["tom@osakis.k12.mn.us", { contactId: "c-tom" }], ["amy@osakis.k12.mn.us", { contactId: "c-other" }]]));
+  ok(r2[0].contactId === "c-tom" && r2[1].contactId === "c-pre" && r2[2].contactId === null && r2[2].userId === null,
+    "#323 resolveAttendees: only mapped addresses resolve (an unmapped one with the same name stays null) and a pre-resolved attendee is never overwritten");
+
+  // K10 speaker relabel
+  const m = meetingFixture323({ krispMeetingId: "r1" });
+  m.krisp.speakers = { "0": { email: "jeff@peaksystemsgroup.com", firstName: "Jeff", lastName: "Chesebro" } };
+  m.krisp.segments = [{ speaker: "0", text: "Hi", start: 0, end: 1 }, { speaker: "2", text: "Speaker 2 here, I'll send drawings", start: 1, end: 3 }];
+  m.krisp.notes = { blocks: [{ type: "action_item", text: "Send the venue drawings", assignee: "Speaker_2" }] };
+  ok(speakerLabel(m, "0") === "Jeff Chesebro" && speakerLabel(m, "2") === "Speaker 2", "#323 speaker label: Krisp's name, else 'Speaker <idx>'");
+  ok(relabel("Speaker_2 and Speaker 2 said; Speaker 22 didn't", [["Speaker 2", "Tom Ellis"]]) === "Tom Ellis and Tom Ellis said; Speaker 22 didn't",
+    "#323 relabel replaces both spellings, whole-word only");
+  ok(relabel("A$AP said", [["A$AP", "Rocky"]]) === "Rocky said" && relabel("Speaker 1 said", [["Speaker 1", "Q$&A $1"]]) === "Q$&A $1 said",
+    "#323 relabel: $-patterns in a name are literal, not replacement tokens");
+  ok(relabel("Speaker 1 met Tom Ellis", [["Speaker 1", "Tom Ellis"], ["Tom Ellis", "Thomas Ellis"]]) === "Tom Ellis met Thomas Ellis",
+    "#323 relabel applies every pair in one pass (a mapped name is never re-replaced)");
+  m.krisp.speakers["10"] = { email: null, firstName: "Ten", lastName: "" };
+  m.krisp.speakers["abc"] = { email: null, firstName: "Abc", lastName: "" };
+  const idxs = speakerIndexes(m);
+  ok(idxs.indexOf("2") < idxs.indexOf("10") && idxs.indexOf("0") < idxs.indexOf("2") && idxs.indexOf("10") < idxs.indexOf("abc"),
+    "#323 speaker indexes sort numerically, non-numeric after, deterministically");
+  delete m.krisp.speakers["10"]; delete m.krisp.speakers["abc"];
+  m.speakerMap = { "2": { contactId: "c-tom", name: "Tom Ellis" } };
+  m.todos = [{ key: "k", title: "Send the venue drawings", assigneeLabel: "Speaker_2", dueDate: null, suggested: "waiting", decision: null }];
+  const view = renderMeeting(m, { contact: (id) => (id === "c-tom" ? "Tom Ellis" : null), user: () => null });
+  ok(view.segments[1].speakerName === "Tom Ellis" && view.segments[1].text.startsWith("Tom Ellis here"),
+    "#323 render: mapped speaker names the segment and replaces the label in its text");
+  ok(view.todos.length === 1 && view.todos[0].assigneeDisplay === "Tom Ellis", "#323 render: to-do owner follows the speaker map");
+  const refreshed = { ...m, krisp: { ...m.krisp, title: "Renamed in Krisp" } };
+  ok(renderMeeting(refreshed, { contact: () => null, user: () => null }).segments[1].speakerName === "Tom Ellis",
+    "#323 a Krisp refresh never loses the speaker map (name comes from speakerMap itself; render starts from krisp.* every time)");
+
+  // K6 to-do defaults
+  const people = { users: [{ id: "u1", name: "Jeff Chesebro" }], contacts: [{ id: "c-tom", name: "Tom Ellis" }] };
+  ok(suggestTodoKind("Jeff Chesebro", people) === "task" && suggestTodoKind("Jeff", people) === "task", "#323 to-do for a Peak person → task (full or first name)");
+  ok(suggestTodoKind("Tom Ellis", people) === "waiting", "#323 to-do for the customer → waiting");
+  const people2 = { users: [{ id: "u1", name: "Jeff Chesebro" }, { id: "u3", name: "Tom Xu" }], contacts: [{ id: "c-tom", name: "Tom Ellis" }] };
+  ok(suggestTodoKind("Tom", people2) === "note" && suggestTodoKind("Tom Ellis", people2) === "waiting" &&
+     suggestTodoKind("Tom Xu", people2) === "task" && suggestTodoKind("Jeff", people2) === "task",
+    "#323 to-do owner: exact full name first; a first name shared by a Peak user and a contact is ambiguous → note");
+  ok(suggestTodoKind("Tom Ellis", { users: [], contacts: [{ id: "c1", name: "Tom" }] }) === "waiting", "#323 a full label matches a contact stored by first name only");
+  ok(suggestTodoKind(null, people) === "note" && suggestTodoKind("Someone Else", people) === "note", "#323 to-do with no known owner → note");
+  const derived = [{ key: "k1", title: "Send drawings", assigneeName: "Tom Ellis", dueDate: null }, { key: "k2", title: "Price track", assigneeName: "Jeff", dueDate: "2026-10-20" }];
+  const t1 = mergeTodos([], derived, (x) => suggestTodoKind(x, people));
+  ok(t1.length === 2 && t1[0].suggested === "waiting" && t1[1].suggested === "task" && t1.every((t) => t.decision === null), "#323 mergeTodos seeds suggestions");
+  const decided = t1.map((t) => (t.key === "k1" ? { ...t, decision: { kind: "dismiss" as const, createdId: null, decidedAt: 1, decidedBy: "Jeff" } } : t));
+  const t2 = mergeTodos(decided, [{ ...derived[0], title: "Send the drawings (edited)" }, derived[1]], () => "note");
+  ok(t2.find((t) => t.key === "k1")?.decision?.kind === "dismiss" && t2.find((t) => t.key === "k2")?.suggested === "note",
+    "#323 a decided to-do is untouched by re-sync (dismissed stays dismissed); undecided ones re-suggest");
+  const orphaned = mergeTodos([...decided, { key: "k9", title: "Old wording", assigneeLabel: null, dueDate: null, suggested: "note", decision: null }], [], () => "note");
+  ok(orphaned.length === 1 && orphaned[0].key === "k1" && orphaned[0].decision?.kind === "dismiss",
+    "#323 a decided to-do Krisp no longer lists is kept; an undecided one it dropped or reworded is removed");
+
+  // note parent priority venue > lead > project > engagement > customer
+  const L = { customerId: "osakis", siteId: "st-1", contactIds: [], work: { type: "lead" as const, id: "L-1", label: "x" }, internalUserIds: [] };
+  ok(noteParentFor(L)?.parentKind === "site" && noteParentFor({ ...L, siteId: null })?.parentKind === "lead" &&
+     noteParentFor({ ...L, siteId: null, work: { type: "survey", id: "FS-1", label: "x" } })?.parentKind === "customer" &&
+     noteParentFor({ customerId: null, siteId: null, contactIds: [], work: null, internalUserIds: [] }) === null,
+    "#323 note parent: venue > lead > project > engagement > customer; survey/site-visit work falls back to the customer");
+}
+
+export async function meetings323SyncChecks(ok: Ok): Promise<void> {
+  // --- the list endpoint: query string, bare and {data} envelopes, person normalisation
+  const seenUrls: string[] = [];
+  const body = { meetings: [{ id: "m1", title: "Osakis", started_at: "2026-10-09T15:00:00Z", duration: 1200, status: "completed",
+    source: "zoom", tags: ["x", 3], ownership: "owned", participants: [{ first_name: "Tom", last_name: "Ellis", email: "Tom@Osakis.k12.mn.us" }, { name: "Pat Lee" }] },
+    { title: "no id" }], next_cursor: "c2", total: 2 };
+  const fakeFetch = (wrap: boolean) => async (url: string) => {
+    seenUrls.push(url);
+    return new Response(JSON.stringify(wrap ? { data: body } : body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const page1 = await createKrispClient("k", fakeFetch(false)).listMeetings({ from: "2026-07-01T00:00:00.000Z", cursor: "c1" });
+  const page2 = await createKrispClient("k", fakeFetch(true)).listMeetings({});
+  const q = new URL(seenUrls[0]).searchParams;
+  ok(q.get("limit") === "100" && q.get("ownership") === "all" && q.get("fields") === "title,started_at,duration,status,source,tags,ownership,participants" &&
+     q.get("from") === "2026-07-01T00:00:00.000Z" && q.get("cursor") === "c1" && new URL(seenUrls[1]).searchParams.get("cursor") === null,
+    "#323 listMeetings sends limit/ownership/fields/from/cursor");
+  const lm = page1.meetings[0];
+  ok(page1.meetings.length === 1 && page1.nextCursor === "c2" && lm.startedAt === Date.parse("2026-10-09T15:00:00Z") && lm.durationSec === 1200 &&
+     lm.ownership === "owned" && lm.tags.join() === "x" && lm.participants[0].email === "tom@osakis.k12.mn.us" && lm.participants[0].lastName === "Ellis" &&
+     lm.participants[1].firstName === "Pat" && lm.participants[1].lastName === "Lee",
+    "#323 listMeetings parses meetings (id-less rows dropped), next_cursor and first/last-name participants");
+  ok(page2.meetings.length === 1 && page2.nextCursor === "c2", "#323 listMeetings also reads a {data: …} envelope");
+
+  // --- Chicago day for a survey's scheduledDate
+  const cdt = chicagoDayRange("2026-07-15"), cst = chicagoDayRange("2026-01-15"), fallBack = chicagoDayRange("2026-11-01");
+  ok(cdt?.[0] === Date.UTC(2026, 6, 15, 5) && cdt?.[1] === Date.UTC(2026, 6, 16, 5) && cst?.[0] === Date.UTC(2026, 0, 15, 6) &&
+     cst?.[1] === Date.UTC(2026, 0, 16, 6) && fallBack?.[1] === Date.UTC(2026, 10, 2, 6) && fallBack[1] - fallBack[0] === 25 * 3600_000 &&
+     chicagoDayRange("") === null && chicagoDayRange("2026-13-40") === null,
+    "#323 chicagoDayRange: midnight-to-midnight America/Chicago (CDT −5, CST −6, a 25 h fall-back day); junk → null");
+
+  // --- the sync engine, with a fake client
+  const NOW = Date.UTC(2026, 9, 9, 18, 0);
+  const ids = { a: "TEST323" + "1".repeat(25), b: "TEST323" + "2".repeat(25), c: "TEST323" + "3".repeat(25), d: "TEST323" + "4".repeat(25) };
+  Object.values(ids).forEach((k) => registerFixture("meetings", "km-" + k));
+  const listed = (id: string, title: string, startedAt: number, dur = 1200, ownership: "owned" | "shared" = "owned") =>
+    ({ id, title, startedAt, durationSec: dur, status: "completed", source: "zoom", tags: [], ownership, participants: [] });
+  const pages: Record<string, { meetings: ReturnType<typeof listed>[]; nextCursor: string | null }> = {
+    "": { meetings: [listed(ids.a, "Osakis – scope", NOW - 3600_000), listed(ids.b, "avconferenced", NOW - 7200_000, 45)], nextCursor: "p2" },
+    p2: { meetings: [listed(ids.c, "Jeff <> Speaker_2", NOW - 86_400_000)], nextCursor: null },
+  };
+  const calls: string[] = [];
+  const state: Record<string, unknown> = {};
+  const detail = (id: string) => ({ id, title: null, startedAt: null, duration: null, status: "completed", participants: null,
+    transcript: { language: "en", speakers: { "1": { first_name: "Tom", last_name: "Ellis", email: "TOM@osakis.k12.mn.us" } },
+      segments: [{ speaker: 1, text: "hello", start: 0, end: 1 }] },
+    // Krisp's shape: a container block holding action_item children
+    notes: { blocks: [{ type: "action_items", children: [{ type: "action_item", text: "Send drawings", assignee: "Jeff" }] }] } });
+  const deps = (userId: string): SyncDeps => ({
+    now: () => NOW,
+    client: {
+      listMeetings: async (q) => { calls.push("list:" + (q.cursor || "")); return pages[q.cursor || ""]; },
+      meeting: async (id) => { calls.push("detail:" + id); return detail(id); },
+    },
+    calendar: async () => null,
+    buildIndex: async () => index323(),
+    lookupEmails: async () => new Map(),
+    siteIdFor: async (_c, loc) => loc,
+    getState: async () => (state[userId] as never) ?? { syncedAt: null, backfillFrom: null, backfillCursor: null, lastError: null },
+    setState: async (patch) => { state[userId] = { ...(state[userId] as object), ...patch }; },
+    recordings: async () => [],
+    onRecordingAttached: async () => {},
+    pause: async () => {},
+    budgetMs: 40_000,
+  });
+  const r1 = await syncRepMeetings("u1", "recent", deps("u1"));
+  const a = await MS.getMeeting("km-" + ids.a);
+  ok(r1.complete && r1.listed === 3 && r1.created === 3 && calls.filter((c) => c.startsWith("list")).length === 2,
+    "#323 sync follows next_cursor through every page");
+  ok(!!a && a.seenBy.join() === "u1" && a.ownerUserId === "u1" && a.krisp.segments.length === 1 && a.todos.length === 1 &&
+     a.todos[0].title === "Send drawings" && a.todos[0].suggested === "task" && a.krisp.speakers["1"]?.email === "tom@osakis.k12.mn.us",
+    "#323 a new meeting is created with detail (segments, speakers, to-dos) under km-<id>");
+  ok(a?.suggestions.find((s) => s.kind === "company")?.id === "osakis", "#323 sync runs the matcher on unfiled meetings");
+  ok((await MS.getMeeting("km-" + ids.b))?.noise === true, "#323 a 45 s meeting lands as noise");
+  ok(!calls.includes("detail:" + ids.b), "#323 noise meetings skip the detail fetch");
+  ok((state.u1 as { syncedAt: number; backfillFrom: number }).syncedAt === NOW && (state.u1 as { backfillFrom: number }).backfillFrom === NOW - 90 * 86_400_000,
+    "#323 the first sync covers 90 days and seeds backfillFrom");
+  calls.length = 0;
+  await syncRepMeetings("u1", "recent", deps("u1"));
+  ok(!calls.some((c) => c.startsWith("detail:")), "#323 a re-sync does not re-fetch detail for meetings that already have notes");
+  // a second rep sees the same meeting (shared) → stored once, both in seenBy
+  await syncRepMeetings("u2", "recent", { ...deps("u2"), client: { ...deps("u2").client,
+    listMeetings: async () => ({ meetings: [listed(ids.a, "Osakis – scope", NOW - 3600_000, 1200, "shared")], nextCursor: null }) } });
+  const a2 = await MS.getMeeting("km-" + ids.a);
+  ok(a2?.seenBy.sort().join() === "u1,u2" && a2.ownerUserId === "u1", "#323 the same meeting from two reps is one doc; owner stays the owning rep");
+  // a shared copy seen first, then the owner's listing → the owner takes it
+  await syncRepMeetings("u3", "recent", { ...deps("u3"), client: { ...deps("u3").client,
+    listMeetings: async () => ({ meetings: [listed(ids.d, "Monte PAC", NOW - 3600_000, 1200, "shared")], nextCursor: null }) } });
+  await syncRepMeetings("u4", "recent", { ...deps("u4"), client: { ...deps("u4").client,
+    listMeetings: async () => ({ meetings: [listed(ids.d, "Monte PAC", NOW - 3600_000, 1200, "owned")], nextCursor: null }) } });
+  const d1 = await MS.getMeeting("km-" + ids.d);
+  ok(d1?.ownerUserId === "u4" && d1.seenBy.sort().join() === "u3,u4", "#323 ownership 'owned' wins over a rep who saw the shared copy first");
+  // filed meetings keep links; suggestions frozen
+  await MS.patchMeeting("km-" + ids.a, (x) => ({ ...x, filedAt: NOW, links: { ...x.links, customerId: "monte" } }));
+  await syncRepMeetings("u1", "recent", deps("u1"));
+  ok((await MS.getMeeting("km-" + ids.a))?.links.customerId === "monte", "#323 sync never touches a filed meeting's links");
+  // a rep's edit made WHILE the batch runs survives: the sync writes through patchMeeting on the latest doc
+  await MS.patchMeeting("km-" + ids.a, (x) => ({ ...x, filedAt: null, links: { ...x.links, customerId: null }, krisp: { ...x.krisp, notes: null } }));
+  calls.length = 0;
+  await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    meeting: async (id) => {
+      calls.push("detail:" + id);
+      if (id === ids.a) {
+        await MS.patchMeeting("km-" + ids.a, (x) => ({ ...x, filedAt: NOW - 1, filedBy: "Jeff",
+          speakerMap: { "1": { contactId: "c-tom", name: "Tom Ellis" } }, links: { ...x.links, customerId: "osakis" } }));
+      }
+      return detail(id);
+    } } });
+  const a3 = await MS.getMeeting("km-" + ids.a);
+  ok(calls.includes("detail:" + ids.a) && !!a3?.krisp.notes && a3.speakerMap["1"]?.contactId === "c-tom" && a3.filedAt === NOW - 1 &&
+     a3.links.customerId === "osakis" && a3.seenBy.sort().join() === "u1,u2",
+    "#323 a rep's speaker map, filing and links made during the detail fetch survive the sync's write (patch, not blind upsert)");
+  // removed from Krisp
+  await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    listMeetings: async () => ({ meetings: [listed(ids.a, "Osakis – scope", NOW - 3600_000)], nextCursor: null }) } });
+  ok((await MS.getMeeting("km-" + ids.c))?.krisp.removedAt === NOW && !!(await MS.getMeeting("km-" + ids.c)),
+    "#323 a meeting gone from Krisp's window is flagged removed, never deleted");
+  // 429 ends the batch early, not complete, no throw
+  const r429 = await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    listMeetings: async () => { throw new KrispRateLimitError(); } } });
+  ok(!r429.complete && r429.error === null, "#323 a 429 ends the batch quietly; next trigger resumes");
+  // a detail fetch that fails with a non-auth API error skips that meeting's detail, not the batch
+  await MS.patchMeeting("km-" + ids.c, (x) => ({ ...x, krisp: { ...x.krisp, detailFetchedAt: null } }));
+  const rBad = await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    meeting: async (id) => { if (id === ids.c) { const { KrispApiError } = await import("@/lib/krisp/errors"); throw new KrispApiError(500, "boom"); } return detail(id); } } });
+  ok(rBad.complete && rBad.error === null && (await MS.getMeeting("km-" + ids.c))?.krisp.detailFetchedAt === null,
+    "#323 a 5xx on one meeting's detail is retried next sync and never fails the batch");
+  // revoked key
+  const r401 = await syncRepMeetings("u1", "recent", { ...deps("u1"), client: { ...deps("u1").client,
+    listMeetings: async () => { throw new KrispAuthError(); } } });
+  ok(!!r401.error && (state.u1 as { lastError: string }).lastError === r401.error, "#323 a 401 records meetings_last_error");
+  // backfill resumes from the saved cursor
+  state.u1 = { syncedAt: NOW, backfillFrom: NOW - 90 * 86_400_000, backfillCursor: "p2", lastError: null };
+  calls.length = 0;
+  await syncRepMeetings("u1", "backfill", deps("u1"));
+  ok(calls[0] === "list:p2" && (state.u1 as { backfillCursor: string | null; backfillFrom: number }).backfillCursor === null &&
+     (state.u1 as { backfillFrom: number }).backfillFrom === NOW - 180 * 86_400_000,
+    "#323 Load older resumes at the saved cursor, then moves backfillFrom back another 90 days");
+  // the time budget ends a backfill mid-page and keeps the page's cursor
+  let clock = NOW;
+  state.u5 = { syncedAt: NOW, backfillFrom: NOW - 90 * 86_400_000, backfillCursor: null, lastError: null };
+  const rBudget = await syncRepMeetings("u5", "backfill", { ...deps("u5"), now: () => (clock += 12_000) });
+  ok(!rBudget.complete && (state.u5 as { backfillCursor: string | null }).backfillCursor === null && rBudget.listed >= 1 && rBudget.listed < 3,
+    "#323 an exhausted time budget stops the batch between meetings, incomplete, resumable");
+  // rematch is pure and leaves filed meetings alone
+  const filed = { ...(await MS.getMeeting("km-" + ids.a))! };
+  ok(rematchMeeting(filed, index323()).suggestions === filed.suggestions, "#323 rematchMeeting leaves a filed meeting's suggestions as they were");
+  const shortOverridden = meetingFixture323({ krispMeetingId: "ov", noiseOverride: true, krisp: { ...meetingFixture323({ krispMeetingId: "ov" }).krisp, durationSec: 30 } });
+  ok(rematchMeeting(shortOverridden, index323()).noise === false, "#323 rematchMeeting honours noiseOverride");
+
+  // ===== fix round 1 =====
+  const fx = { e: "TEST323" + "5".repeat(25), g: "TEST323" + "6".repeat(25), h: "TEST323" + "7".repeat(25) };
+  Object.values(fx).forEach((k) => registerFixture("meetings", "km-" + k));
+  const DAY = 86_400_000;
+  const emptyList = (froms: string[]) => async (q: { from?: string }) => { froms.push(q.from || ""); return { meetings: [], nextCursor: null }; };
+  // (1) the rolling window reaches back to the last complete sync (minus a day), never past 90 days
+  const fromFor = async (u: string, syncedAt: number | null) => {
+    const froms: string[] = [];
+    state[u] = { syncedAt, backfillFrom: NOW - 90 * DAY, backfillCursor: null, lastError: null };
+    await syncRepMeetings(u, "recent", { ...deps(u), client: { ...deps(u).client, listMeetings: emptyList(froms) } });
+    return Date.parse(froms[0]);
+  };
+  ok(await fromFor("w1", NOW - 20 * DAY) === NOW - 21 * DAY && await fromFor("w2", NOW - 2 * DAY) === NOW - 14 * DAY &&
+     await fromFor("w3", NOW - 200 * DAY) === NOW - 90 * DAY && await fromFor("w4", null) === NOW - 90 * DAY,
+    "#323 recent window = max(now−90d, min(now−14d, last sync−1d)): a 20-day gap lists from 21 days back, no meeting is skipped");
+  // (2)+(3) removed-flagging reads only this rep's window refs, and only the owner (or the sole viewer) flags
+  await MS.saveMeeting(meetingFixture323({ krispMeetingId: fx.e, seenBy: ["u8", "u9"], ownerUserId: "u9",
+    krisp: { ...meetingFixture323({ krispMeetingId: fx.e }).krisp, startedAt: NOW - DAY } }));
+  const refs = await MS.meetingRefsSeenBy("u8", NOW - 14 * DAY);
+  ok(refs.some((r) => r.id === "km-" + fx.e) && !(await MS.meetingRefsSeenBy("u8", NOW - 1000)).some((r) => r.id === "km-" + fx.e) &&
+     !(await MS.meetingRefsSeenBy("u-nobody", NOW - 14 * DAY)).some((r) => r.id === "km-" + fx.e) &&
+     !readFileSync(join(process.cwd(), "src/lib/meetings/sync.ts"), "utf8").includes("allMeetings("),
+    "#323 removed-flagging reads id/owner/seenBy refs of this rep's window only (no whole-history allMeetings load)");
+  for (const u of ["u8", "u9"]) state[u] = { syncedAt: NOW - DAY, backfillFrom: NOW - 90 * DAY, backfillCursor: null, lastError: null };
+  await syncRepMeetings("u8", "recent", { ...deps("u8"), client: { ...deps("u8").client, listMeetings: emptyList([]) } });
+  const e1 = await MS.getMeeting("km-" + fx.e);
+  await syncRepMeetings("u9", "recent", { ...deps("u9"), client: { ...deps("u9").client, listMeetings: emptyList([]) } });
+  const e2 = await MS.getMeeting("km-" + fx.e);
+  ok(e1?.krisp.removedAt === null && e2?.krisp.removedAt === NOW,
+    "#323 a shared viewer whose listing lacks the meeting never flags it removed; the owner's listing does");
+  // (4) noiseOverride lets a short meeting be matched
+  const ovr = meetingFixture323({ krispMeetingId: "ov2", noiseOverride: true,
+    krisp: { ...meetingFixture323({ krispMeetingId: "ov2" }).krisp, title: "Osakis – scope", durationSec: 60 } });
+  const ovrM = rematchMeeting(ovr, index323());
+  ok(!ovrM.noise && ovrM.suggestions.some((s) => s.kind === "company" && s.id === "osakis"),
+    "#323 an overridden short meeting is matched like any other (the matcher's noise cut-off is bypassed)");
+  // (5) recording back-pointer: a failed write never fails the batch, and is re-asserted next sync
+  const recPtr: { meetingId: string | null } = { meetingId: null };
+  const pointerCalls: string[] = [];
+  const recDeps = (failPointer: boolean): SyncDeps => ({ ...deps("u12"),
+    client: { ...deps("u12").client, listMeetings: async () => ({ meetings: [listed(fx.g, "SV-1 walk", NOW - 3600_000)], nextCursor: null }) },
+    recordings: async () => [{ id: "REC-323", parentKind: "site_visit", parentId: "SV-323", customerId: "osakis", locationId: "loc1",
+      title: "SV-323 · Osakis", krisp: { meetingId: fx.g }, meetingId: recPtr.meetingId } as unknown as RecordingRecord],
+    onRecordingAttached: async (recId, mid) => { pointerCalls.push(recId + ">" + mid); if (failPointer) throw new Error("db down"); recPtr.meetingId = mid; },
+  });
+  const rp1 = await syncRepMeetings("u12", "recent", recDeps(true));
+  const g1 = await MS.getMeeting("km-" + fx.g);
+  await syncRepMeetings("u12", "recent", recDeps(false));
+  await syncRepMeetings("u12", "recent", recDeps(false));
+  ok(rp1.complete && g1?.recordingId === "REC-323" && g1.links.work?.id === "SV-323" && !!g1.filedAt &&
+     pointerCalls.join() === "REC-323>km-" + fx.g + ",REC-323>km-" + fx.g && recPtr.meetingId === "km-" + fx.g,
+    "#323 a failed recording back-pointer write never fails the batch and is re-asserted until it sticks (then left alone)");
+  // (6) a sync that changes nothing writes nothing
+  const before = (await MS.getMeeting("km-" + fx.g))!.updatedAt;
+  await new Promise((r) => setTimeout(r, 15));
+  await syncRepMeetings("u12", "recent", recDeps(false));
+  ok((await MS.getMeeting("km-" + fx.g))!.updatedAt === before, "#323 an unchanged meeting is not rewritten on every sync");
+  // (7) one sync per rep at a time; a Krisp timeout ends the batch quietly
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const slow = syncRepMeetings("u13", "recent", { ...deps("u13"), client: { ...deps("u13").client,
+    listMeetings: async () => { await gate; return { meetings: [], nextCursor: null }; } } });
+  await new Promise((r) => setTimeout(r, 5));
+  const second = await syncRepMeetings("u13", "recent", deps("u13"));
+  release();
+  const first = await slow;
+  ok(!second.complete && second.error === null && second.listed === 0 && first.complete,
+    "#323 a second concurrent sync for the same rep returns at once (complete:false), the first finishes");
+  ok(second.busy === true && !first.busy, "#323 the run the in-flight guard turned away says busy; the real run does not");
+  const third = await syncRepMeetings("u13", "recent", { ...deps("u13"), client: { ...deps("u13").client,
+    listMeetings: async () => { throw new DOMException("The operation timed out.", "TimeoutError"); } } });
+  const clientSrc = readFileSync(join(process.cwd(), "src/lib/krisp/client.ts"), "utf8");
+  ok(!third.complete && third.error === null && /AbortSignal\.timeout\(/.test(clientSrc) &&
+     /createKrispClient\(apiKey: string, transport: KrispTransport = apiTransport\)/.test(clientSrc) &&
+     /putToPresignedUrl\([\s\S]*?transport: KrispTransport = fetchTransport/.test(clientSrc),
+    "#323 Krisp API calls time out (the audio PUT does not); a timeout ends the batch quietly, the in-flight guard released");
+  // (8) a cursor Krisp rejects is cleared instead of wedging Load older
+  state.u14 = { syncedAt: NOW, backfillFrom: NOW - 90 * DAY, backfillCursor: "stale", lastError: null };
+  const bad = await syncRepMeetings("u14", "backfill", { ...deps("u14"), client: { ...deps("u14").client,
+    listMeetings: async (q) => { if (q.cursor === "stale") throw new KrispApiError(400, "Invalid cursor"); return { meetings: [], nextCursor: null }; } } });
+  const st14 = state.u14 as { backfillCursor: string | null; lastError: string | null; backfillFrom: number };
+  ok(!!bad.error && !bad.complete && st14.backfillCursor === null && st14.lastError === bad.error && st14.backfillFrom === NOW - 90 * DAY,
+    "#323 a rejected backfill cursor is cleared and recorded; the next Load older starts the window fresh");
+
+  // --- the match index and the sync engine are server-only: no client module imports them
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
+    const p = join(dir, f);
+    return statSync(p).isDirectory() ? walk(p) : /\.(tsx?|jsx?)$/.test(f) ? [p] : [];
+  });
+  const offenders = walk(join(process.cwd(), "src")).filter((p) => {
+    const src = readFileSync(p, "utf8");
+    return /^\s*["']use client["']/.test(src) && /@\/lib\/meetings\/(index-build|sync|sync-state)["']/.test(src);
+  });
+  ok(offenders.length === 0, "#323 no client module imports the match index, the sync engine or its state");
+}
+
+/* ---------- Task 5: mutations (actions-core) ---------- */
+
+export async function meetings323ActionChecks(ok: Ok): Promise<void> {
+  const { saveCompany } = await import("@/lib/identity/companies");
+  const { saveSite } = await import("@/lib/identity/sites");
+  const { saveContact } = await import("@/lib/identity/contacts");
+  const CO = "TEST323-co", CO2 = "TEST323-co2", SITE = "TEST323-site", SITE2 = "TEST323-site2", SITE_OTHER = "TEST323-site3";
+  const CT = "TEST323-ct-tom", CT2 = "TEST323-ct-pat";
+  await saveCompany({ id: CO, name: "TEST323 Osakis Fixture", type: "" });
+  await saveCompany({ id: CO2, name: "TEST323 Other Fixture", type: "" });
+  await saveSite({ id: SITE, companyId: CO, name: "TEST323 Auditorium", isPrimary: true, venueKind: "proscenium", legacyLocId: "TEST323-loc" });
+  await saveSite({ id: SITE2, companyId: CO, name: "TEST323 Gym", isPrimary: false, venueKind: "proscenium" });
+  await saveSite({ id: SITE_OTHER, companyId: CO2, name: "TEST323 Elsewhere", isPrimary: true, venueKind: "proscenium" });
+  await saveContact({ id: CT, firstName: "Tom", lastName: "Ellis", homeCompanyId: CO, title: "" });
+  await saveContact({ id: CT2, firstName: "Pat", lastName: "Lee", homeCompanyId: CO, title: "" });
+  registerFixture("leads", "TEST323:lead");
+  await upsertDoc("leads", { id: "TEST323:lead", customerId: CO, title: "TEST323 lead" });
+  try {
+    await actionChecks(ok, { CO, CO2, SITE, SITE2, SITE_OTHER, CT, CT2, LEAD: "TEST323:lead" });
+  } finally {
+    const db = await getDb();
+    const madeContacts = (await db.select({ id: contactsT.id }).from(contactsT).where(inArray(contactsT.homeCompanyId, [CO, CO2]))).map((r) => r.id);
+    if (madeContacts.length) {
+      await db.delete(contactEmailsT).where(inArray(contactEmailsT.contactId, madeContacts));
+      await db.delete(contactsT).where(inArray(contactsT.id, madeContacts));
+    }
+    await db.delete(sitesT).where(inArray(sitesT.id, [SITE, SITE2, SITE_OTHER]));
+    await db.delete(companiesT).where(inArray(companiesT.id, [CO, CO2]));
+  }
+}
+
+type Fx = { CO: string; CO2: string; SITE: string; SITE2: string; SITE_OTHER: string; CT: string; CT2: string; LEAD: string };
+
+async function actionChecks(ok: Ok, fx: Fx): Promise<void> {
+  const { CO, CO2, SITE, SITE2, SITE_OTHER, CT, CT2, LEAD } = fx;
+  const me = { id: "u1", name: "Jeff Chesebro" };
+  const outsider = { id: "u-out323", name: "Out Sider" };
+  const users = await activeUsers();
+  const jeff = users.find((u) => u.name === "Jeff Chesebro");
+  const other = users.find((u) => u.id !== "u1" && u.id !== jeff?.id);
+  let n = 0;
+  const mk = async (over: Partial<MeetingRecord> = {}): Promise<MeetingRecord> => {
+    const kid = "TEST323act" + String(++n).padStart(22, "0");
+    const base = meetingFixture323({ krispMeetingId: kid });
+    const m = meetingFixture323({ krispMeetingId: kid, ...over, krisp: { ...base.krisp, title: "Osakis scope", ...(over.krisp || {}) } });
+    registerFixture("meetings", m.id);
+    return MS.saveMeeting(m);
+  };
+  /** default: an intended, user-facing refusal (MeetingUserError) */
+  const rejects = async (p: Promise<unknown>, cls: new (...a: never[]) => Error = MA.MeetingUserError): Promise<boolean> => {
+    try { await p; return false; } catch (e) { return e instanceof cls; }
+  };
+  const sug = (kind: MeetingRecord["suggestions"][number]["kind"], id: string, strength: "strong" | "weak") =>
+    ({ kind, id, label: id, score: strength === "strong" ? 90 : 50, strength, reasons: ["t"] });
+  const todo = (key: string, title: string, assigneeLabel: string | null, dueDate: string | null, suggested: "task" | "waiting" | "note") =>
+    ({ key, title, assigneeLabel, dueDate, suggested, decision: null });
+  const created = (m: MeetingRecord, key: string) => m.todos.find((t) => t.key === key)?.decision?.createdId || "";
+
+  // (1) confirm strong only; weak-only untouched by Confirm all
+  const a = await mk({ suggestions: [sug("company", CO, "strong"), sug("venue", SITE, "strong"), sug("contact", CT, "weak")] });
+  const a2 = await MA.confirmSuggestions(a.id, "strong", me);
+  ok(a2.links.customerId === CO && a2.links.siteId === SITE && a2.links.contactIds.length === 0 && !!a2.filedAt && a2.filedBy === "Jeff Chesebro",
+    "#323 confirmSuggestions(strong) applies only the strong suggestions and files the meeting");
+  const weakOnly = await mk({ suggestions: [sug("company", CO2, "weak")] });
+  const strongTop = await mk({ suggestions: [sug("company", CO, "strong")] });
+  const all = await MA.confirmAllStrong([weakOnly.id, strongTop.id], me);
+  const w2 = await MS.getMeeting(weakOnly.id), s2 = await MS.getMeeting(strongTop.id);
+  ok(all.filed === 1 && w2?.filedAt === null && w2.links.customerId === null && s2?.links.customerId === CO && !!s2.filedAt,
+    "#323 confirmAllStrong files the strong-top row and leaves a weak-only meeting unchanged");
+  const picked = await mk({ suggestions: [sug("company", CO2, "weak")], links: { ...emptyLinks(), customerId: CO, siteId: SITE } });
+  const p2 = await MA.confirmSuggestions(picked.id, [{ kind: "company", id: CO2 }], me);
+  ok(p2.links.customerId === CO2 && p2.links.siteId === null, "#323 picking a different company replaces it and drops the old company's venue");
+  const stale = await mk({ suggestions: [sug("company", "TEST323-gone", "strong")] });
+  ok(await rejects(MA.confirmSuggestions(stale.id, "strong", me)) && (await MS.getMeeting(stale.id))?.links.customerId === null,
+    "#323 confirmSuggestions refuses a suggestion whose company no longer exists");
+  // share guard on confirm (review fix 1)
+  const shc = await mk({ links: { ...emptyLinks(), customerId: CO }, filedAt: 1, filedBy: "x",
+    share: { sharedAt: 1, sharedBy: "x", summary: "Recap" }, suggestions: [sug("company", CO2, "weak")] });
+  ok(await rejects(MA.confirmSuggestions(shc.id, [{ kind: "company", id: CO2 }], me), MA.MeetingShareGuardError) &&
+     (await MS.getMeeting(shc.id))?.links.customerId === CO,
+    "#323 confirmSuggestions re-pointing a shared meeting at another company throws MeetingShareGuardError and changes nothing");
+  const shc2 = await MA.confirmSuggestions(shc.id, [{ kind: "company", id: CO2 }], me, { confirmUnshare: true });
+  ok(shc2.share === null && shc2.links.customerId === CO2, "#323 confirmSuggestions with confirmUnshare re-points and clears the share");
+
+  // (2) outsider on a private meeting → MeetingAccessError from every action
+  const priv = await mk({ todos: [todo("k", "x", null, null, "note")] });
+  const denied = await Promise.all([
+    rejects(MA.confirmSuggestions(priv.id, "strong", outsider), MA.MeetingAccessError),
+    // final review 13: Confirm all skips a row the rep can't see instead of failing the run
+    MA.confirmAllStrong([priv.id], outsider).then((r) => r.filed === 0, () => false),
+    rejects(MA.setLinks(priv.id, { customerId: CO }, outsider), MA.MeetingAccessError),
+    rejects(MA.setSpeaker(priv.id, "1", null, outsider), MA.MeetingAccessError),
+    rejects(MA.addAttendee(priv.id, { name: "Pat", email: null }, outsider), MA.MeetingAccessError),
+    rejects(MA.removeAttendee(priv.id, "name:pat", outsider), MA.MeetingAccessError),
+    rejects(MA.decideTodo(priv.id, "k", "note", {}, outsider), MA.MeetingAccessError),
+    rejects(MA.decideAllTodos(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.shareWithCustomer(priv.id, "s", outsider), MA.MeetingAccessError),
+    rejects(MA.stopSharing(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.setNoise(priv.id, false, outsider), MA.MeetingAccessError),
+    rejects(MA.refreshFromKrisp(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.newContactFromAttendee(priv.id, "name:pat", CO, outsider), MA.MeetingAccessError),
+    rejects(MA.confirmSuggestions("km-TEST323-missing", "strong", me), MA.MeetingAccessError),
+  ]);
+  ok(denied.every(Boolean) && (await MS.getMeeting(priv.id))?.links.customerId === null,
+    `#323 an outsider gets MeetingAccessError from every action on a private meeting (${denied.map((d) => (d ? 1 : 0)).join("")})`);
+
+  // (3) contact cap; internal-only link → internal scope; ids are checked (review fix 3)
+  const lk = await mk();
+  ok(await rejects(MA.setLinks(lk.id, { contactIds: Array.from({ length: 26 }, (_, i) => `c-${i}`) }, me)),
+    "#323 setLinks refuses 26 contacts");
+  const lk2 = await MA.setLinks(lk.id, { internalUserIds: [other?.id || "?"] }, me);
+  ok(!!other && meetingScope(lk2) === "internal" && !!lk2.filedAt && canSeeMeeting(lk2, other.id), "#323 linking only an internal person → internal scope, filed");
+  const bad = await Promise.all([
+    rejects(MA.setLinks(lk.id, { customerId: "TEST323-nope" }, me)),
+    rejects(MA.setLinks(lk.id, { customerId: CO, siteId: SITE_OTHER }, me)),
+    rejects(MA.setLinks(lk.id, { siteId: SITE }, me)),
+    rejects(MA.setLinks(lk.id, { contactIds: ["TEST323-ct-nope"] }, me)),
+    rejects(MA.setLinks(lk.id, { internalUserIds: ["u-nope323"] }, me)),
+    rejects(MA.setLinks(lk.id, { work: { type: "lead", id: "TEST323:nolead", label: "x" } }, me)),
+    rejects(MA.setSpeaker(lk.id, "1", { contactId: "TEST323-ct-nope", name: "X" }, me)),
+    rejects(MA.addAttendee(lk.id, { name: "X", email: null, userId: "u-nope323" }, me)),
+  ]);
+  const lkAfter = await MS.getMeeting(lk.id);
+  ok(bad.every(Boolean) && lkAfter?.links.customerId === null && lkAfter.links.contactIds.length === 0,
+    `#323 unknown company / venue of another company / venue with no company / unknown contact, user or work → refused (${bad.map((d) => (d ? 1 : 0)).join("")})`);
+  const lk3 = await MA.setLinks(lk.id, { customerId: CO, siteId: SITE2, contactIds: [CT], work: { type: "lead", id: LEAD, label: "Lead" } }, me);
+  const lk4 = await MA.setLinks(lk.id, { customerId: CO2 }, me);
+  ok(lk3.links.siteId === SITE2 && lk3.links.work?.id === LEAD && lk4.links.customerId === CO2 && lk4.links.siteId === null && lk4.links.work === null &&
+     lk4.links.contactIds.join() === CT, "#323 real ids link; changing the company drops the old company's venue and work");
+
+  // (4) share guard
+  const sh = await mk();
+  await MA.setLinks(sh.id, { customerId: CO }, me);
+  const shared = await MA.shareWithCustomer(sh.id, "  Scope recap  ", me);
+  ok(shared.share?.summary === "Scope recap" && shared.share.sharedBy === "Jeff Chesebro", "#323 shareWithCustomer trims and stamps the summary");
+  ok(await rejects(MA.setLinks(sh.id, { customerId: null }, me), MA.MeetingShareGuardError) && !!(await MS.getMeeting(sh.id))?.share,
+    "#323 unlinking the last external link of a shared meeting throws MeetingShareGuardError and changes nothing");
+  const unshared = await MA.setLinks(sh.id, { customerId: null }, me, { confirmUnshare: true });
+  ok(unshared.share === null && unshared.links.customerId === null, "#323 confirmUnshare unlinks and clears the share");
+  const sh2 = await mk({ links: { ...emptyLinks(), customerId: CO } });
+  await MA.shareWithCustomer(sh2.id, "Recap", me);
+  ok(await rejects(MA.setLinks(sh2.id, { customerId: CO2 }, me), MA.MeetingShareGuardError),
+    "#323 re-pointing a shared meeting at another company also needs the unshare confirmation");
+  ok(await rejects(MA.shareWithCustomer(sh2.id, "   ", me)) && await rejects(MA.shareWithCustomer(sh2.id, "x".repeat(8001), me)),
+    "#323 an empty or > 8000-char summary is refused");
+  const stopped = await MA.stopSharing(sh2.id, me);
+  ok(stopped.share === null && stopped.links.customerId === CO, "#323 stopSharing clears the share, keeps the link");
+
+  // (5) no customer → no share
+  const noCo = await mk();
+  ok(await rejects(MA.shareWithCustomer(noCo.id, "Recap", me)), "#323 shareWithCustomer needs a linked company");
+
+  // (6) task: one task, linked; idempotent (also under a double click and across processes)
+  const tm = await mk({
+    filedAt: 1, filedBy: "Jeff Chesebro",
+    links: { ...emptyLinks(), customerId: CO, siteId: SITE, contactIds: [CT], work: { type: "lead", id: LEAD, label: "Lead" } },
+    krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis scope",
+      segments: [{ speaker: "2", text: "Speaker 2 will send it", start: 0, end: 1 }, { speaker: "3", text: "ok", start: 1, end: 2 }] },
+    speakerMap: { "2": { contactId: CT, name: "Tom Ellis" }, "3": { userId: other?.id || "?", name: "Zz Nomatch" } },
+    todos: [todo("k1", "Send drawings", "Jeff Chesebro", "2026-10-15", "task"), todo("k1b", "Book lift", "Jeff", null, "task"),
+      todo("k2", "Send the rigging plot", "Speaker 2", null, "waiting"), todo("k5", "Order pipe", "Speaker 3", null, "task"),
+      todo("k6", "Bad due", null, null, "task")],
+  });
+  const before = (await allTasks()).length;
+  const d1 = await MA.decideTodo(tm.id, "k1", "task", {}, me);
+  const tid = created(d1, "k1");
+  if (tid) registerFixture("tasks", tid);
+  const task = await getTask(tid);
+  ok(!!task && task.meetingId === tm.id && task.customerId === CO && task.siteId === "TEST323-loc" && task.leadId === LEAD &&
+     (task.contactIds || []).join() === CT && !!jeff && task.assigneeUserId === jeff.id && task.dueAt === Date.UTC(2026, 9, 15, 22),
+    "#323 decideTodo(task) creates a task carrying meeting/company/venue (directory id)/lead/contacts, the resolved assignee, due 17:00 Chicago");
+  const d1again = await MA.decideTodo(tm.id, "k1", "task", {}, me);
+  ok(created(d1again, "k1") === tid && (await allTasks()).length === before + 1, "#323 decideTodo is idempotent: the same createdId, no second task");
+  const [r1, r2] = await Promise.all([MA.decideTodo(tm.id, "k1b", "task", {}, me), MA.decideTodo(tm.id, "k1b", "task", {}, me)]);
+  const b1 = created(r1, "k1b");
+  if (b1) registerFixture("tasks", b1);
+  ok(!!b1 && b1 === created(r2, "k1b") && (await allTasks()).length === before + 2, "#323 two concurrent decides of one to-do create one task");
+  // another process created the task but its meeting write was lost: the record id is deterministic, so no duplicate
+  await MS.patchMeeting(tm.id, (x) => ({ ...x, todos: x.todos.map((t) => (t.key === "k1" ? { ...t, decision: null } : t)) }));
+  const d1lost = await MA.decideTodo(tm.id, "k1", "task", {}, me);
+  ok(created(d1lost, "k1") === tid && (await allTasks()).length === before + 2,
+    "#323 a decide whose earlier meeting write was lost re-finds the same task (deterministic id), never a second one");
+  const d5 = await MA.decideTodo(tm.id, "k5", "task", {}, me);
+  const t5 = await getTask(created(d5, "k5"));
+  if (t5) registerFixture("tasks", t5.id);
+  ok(!!t5 && !!other && t5.assigneeUserId === other.id, "#323 a to-do owned by a speaker mapped to a Peak user is assigned to that user");
+  ok(await rejects(MA.decideTodo(tm.id, "k6", "task", { dueAt: Number.NaN }, me)) &&
+     await rejects(MA.decideTodo(tm.id, "k6", "task", { dueAt: "soon" as unknown as number }, me)) &&
+     !(await MS.getMeeting(tm.id))?.todos.find((t) => t.key === "k6")?.decision,
+    "#323 decideTodo refuses a due date that isn't a finite number or null");
+
+  // (7) waiting on the customer
+  const t0 = Date.now();
+  const d2 = await MA.decideTodo(tm.id, "k2", "waiting", {}, me);
+  const wid = created(d2, "k2");
+  if (wid) registerFixture("tasks", wid);
+  const wt = await getTask(wid);
+  const WEEK = 7 * 86_400_000;
+  ok(!!wt && wt.waitingOn?.name === "Tom Ellis" && wt.waitingOn.contactId === CT && wt.assigneeUserId === "u1" &&
+     wt.dueAt != null && wt.dueAt >= t0 + WEEK && wt.dueAt <= Date.now() + WEEK && wt.meetingId === tm.id,
+    "#323 decideTodo(waiting) → task waiting on the mapped speaker, owned by the rep, due in 7 days");
+
+  // (8) note on the venue, deterministic id
+  const nm = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), customerId: CO, siteId: SITE2 },
+    todos: [todo("k3", "Ceiling height", null, null, "note")] });
+  const d3 = await MA.decideTodo(nm.id, "k3", "note", {}, me);
+  const nid = created(d3, "k3");
+  if (nid) registerFixture("notes", nid);
+  const note = await getNote(nid);
+  ok(!!note && note.parentKind === "site" && note.parentId === SITE2 && note.customerId === CO, "#323 decideTodo(note) on a venue-linked meeting → a site note");
+  await MS.patchMeeting(nm.id, (x) => ({ ...x, todos: x.todos.map((t) => ({ ...t, decision: null })) }));
+  ok(created(await MA.decideTodo(nm.id, "k3", "note", {}, me), "k3") === nid, "#323 a re-decided note re-finds the same note (deterministic id)");
+
+  // (9) unfiled → refused
+  const uf = await mk({ todos: [todo("k4", "x", null, null, "note")] });
+  ok(await rejects(MA.decideTodo(uf.id, "k4", "dismiss", {}, me)), "#323 decideTodo refuses an unfiled meeting");
+
+  // decideAllTodos partial failure (review fix 6): the task lands, the note can't (no parent) → MeetingPartialError
+  const part = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), internalUserIds: [other?.id || "?"] },
+    todos: [todo("p1", "Book lift", "Jeff Chesebro", null, "task"), todo("p2", "Remember this", null, null, "note")] });
+  const partErr = await MA.decideAllTodos(part.id, me).then(() => null, (e: unknown) => e);
+  const partAfter = await MS.getMeeting(part.id);
+  const p1id = partAfter ? created(partAfter, "p1") : "";
+  if (p1id) registerFixture("tasks", p1id);
+  ok(partErr instanceof MA.MeetingPartialError && !!p1id && !partAfter?.todos.find((t) => t.key === "p2")?.decision,
+    "#323 decideAllTodos applies what it can and throws MeetingPartialError for the rest");
+
+  // (10) speaker map
+  const sp = await mk({ krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis",
+    segments: [{ speaker: "2", text: "hi", start: 0, end: 1 }] } });
+  const names = { contact: () => null, user: () => null };
+  const sp1 = await MA.setSpeaker(sp.id, "2", { contactId: CT, name: "Tom Ellis" }, me);
+  const sp2 = await MA.setSpeaker(sp.id, "2", null, me);
+  ok(renderMeeting(sp1, names).segments[0].speakerName === "Tom Ellis" && renderMeeting(sp2, names).segments[0].speakerName === "Speaker 2" &&
+     !("2" in sp2.speakerMap), "#323 setSpeaker maps a speaker; null clears it");
+  ok(await rejects(MA.setSpeaker(sp.id, "9", { name: "Nobody" }, me)), "#323 setSpeaker refuses an unknown speaker index");
+
+  // (11) remove keeps the row, a later merge keeps it removed; add re-instates
+  const at = await mk({ attendees: [{ key: "tom@osakis.k12.mn.us", name: "Tom Ellis", email: "tom@osakis.k12.mn.us", sources: ["krisp"], removed: false, contactId: null, userId: null }] });
+  const rm = await MA.removeAttendee(at.id, "tom@osakis.k12.mn.us", me);
+  const merged = mergeAttendees(rm.attendees, [{ email: "tom@osakis.k12.mn.us", firstName: "Tom", lastName: "Ellis" }], null);
+  ok(rm.attendees.length === 1 && rm.attendees[0].removed && merged.length === 1 && merged[0].removed,
+    "#323 removeAttendee flags (never deletes); a later sync merge keeps it removed");
+  const ad = await MA.addAttendee(at.id, { name: "Pat Lee", email: "Pat@Example.com", contactId: CT2 }, me);
+  const back = await MA.addAttendee(at.id, { name: "Tom Ellis", email: "tom@osakis.k12.mn.us" }, me);
+  const pat = ad.attendees.find((x) => x.key === "pat@example.com");
+  ok(!!pat && pat.sources.join() === "manual" && pat.contactId === CT2 && back.attendees.find((x) => x.email === "tom@osakis.k12.mn.us")?.removed === false,
+    "#323 addAttendee adds a manual attendee, and re-adding a removed one restores it");
+  // + New contact
+  const E = "tom.test323@example.com";
+  const att = (name: string) => [{ key: E, name, email: E, sources: ["krisp" as const], removed: false, contactId: null, userId: null }];
+  const nc1m = await mk({ attendees: att("Tom Ellis") });
+  const nc = await MA.newContactFromAttendee(nc1m.id, E, CO, me);
+  const ncId = nc.attendees[0].contactId || "";
+  const ncRow = await getContactRow(ncId);
+  const nc2m = await mk({ attendees: att("T. Ellis") });
+  const nc2 = await MA.newContactFromAttendee(nc2m.id, E, CO, me);
+  ok(!!ncRow && ncRow.homeCompanyId === CO && ncRow.firstName === "Tom" && ncRow.lastName === "Ellis" &&
+     nc2.attendees[0].contactId === ncId && await rejects(MA.newContactFromAttendee(nc2m.id, E, CO, me)) &&
+     await rejects(MA.newContactFromAttendee(nc1m.id, "nobody@x.com", CO, me)),
+    "#323 + New contact makes the contact at the company with its email; the same address later links that contact, never a duplicate");
+
+  // noise override
+  const nz = await mk({ krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis quick", durationSec: 45 }, noise: true });
+  const nz2 = await MA.setNoise(nz.id, false, me);
+  const nz3 = await MA.setNoise(nz.id, true, me);
+  ok(nz2.noise === false && nz2.noiseOverride === true && nz3.noise === true && nz3.noiseOverride === false,
+    "#323 setNoise(false) overrides a short meeting out of Noise; setNoise(true) puts it back");
+
+  // Refresh from Krisp (review fix 2): one detail fetch for an OLD meeting, outside any recent window
+  const NOW = Date.UTC(2026, 9, 9, 18);
+  const old = await mk({ ownerUserId: "u1", krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis old", durationSec: 60,
+    startedAt: NOW - 200 * 86_400_000, detailFetchedAt: NOW - 199 * 86_400_000 } });
+  const fetched: string[] = [];
+  let gate: () => void = () => {};
+  const held = new Promise<void>((r) => { gate = r; });
+  const rdeps = (hold: boolean, fail?: Error): RefreshDeps => ({
+    now: () => NOW,
+    client: { meeting: async (id: string) => {
+      fetched.push(id);
+      if (hold) await held;
+      if (fail) throw fail;
+      return { id, title: null, startedAt: null, duration: null, status: "completed", participants: null,
+        transcript: { language: "en", speakers: { "1": { first_name: "Tom", last_name: "Ellis", email: null } }, segments: [{ speaker: 1, text: "Speaker 1 here", start: 0, end: 1 }] },
+        notes: { blocks: [{ type: "action_items", children: [{ type: "action_item", text: "Send drawings", assignee: "Jeff" }] }] } } as never;
+    } },
+    buildIndex: async () => index323(),
+    lookupEmails: async () => new Map(),
+  });
+  const rr = await refreshMeetingDetailWith(old.id, "u1-refresh323", rdeps(false));
+  const oldAfter = await MS.getMeeting(old.id);
+  ok(rr.error === null && !rr.busy && fetched.join() === old.krispMeetingId && oldAfter?.krisp.detailFetchedAt === NOW &&
+     oldAfter.krisp.segments.length === 1 && oldAfter.todos.length === 1 && oldAfter.todos[0].title === "Send drawings",
+    "#323 refreshMeetingDetail fetches one old (and short) meeting's detail and merges transcript + to-dos");
+  const slow = refreshMeetingDetailWith(old.id, "u2-refresh323", rdeps(true));
+  const busy = await refreshMeetingDetailWith(old.id, "u2-refresh323", rdeps(false));
+  gate();
+  const slowR = await slow;
+  const errR = await refreshMeetingDetailWith(old.id, "u3-refresh323", rdeps(false, new KrispNotReadyError()));
+  ok(busy.busy === true && slowR.error === null && !!errR.error && !errR.busy,
+    "#323 refreshMeetingDetail shares the per-rep in-flight guard (busy) and reports a Krisp error as a message");
+
+  // the "use server" layer: only intended messages reach the client (review fix 5/6)
+  const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/inbox/meetings/actions.ts"), "utf8");
+  const failBody = actSrc.slice(actSrc.indexOf("function fail("), actSrc.indexOf("}\n", actSrc.indexOf("function fail(")));
+  ok(/instanceof core\.MeetingUserError\) return \{ ok: false, error: e\.message \}/.test(failBody) &&
+     /return \{ ok: false, error: GENERIC \};\s*$/.test(failBody) && /const GENERIC = "Something went wrong — try again\.";/.test(actSrc) &&
+     /partial: true/.test(failBody) && !/\(e as Error\)\?\.message/.test(actSrc),
+    "#323 meeting actions return only MeetingUserError messages; anything else is a generic retry message");
+  ok(/catch \(e\) \{\s*revalidate\(/.test(actSrc), "#323 a failed (or partial) meeting action still revalidates");
+}
+
+/** Task 6 — the Inbox Meetings box, reader and sidebar: source pins (the house pattern for UI). */
+export async function meetings323UiPins(ok: Ok): Promise<void> {
+  const src = (p: string) => {
+    try { return readFileSync(join(process.cwd(), p), "utf8"); } catch { return ""; }
+  };
+  const dir = "src/app/(app)/inbox";
+  const shell = src(`${dir}/inbox-shell.tsx`);
+  const page = src(`${dir}/page.tsx`);
+  const box = src(`${dir}/meetings/meetings-box.tsx`);
+  const reader = src(`${dir}/meetings/meeting-reader.tsx`) + src(`${dir}/meetings/meeting-sidebar.tsx`);
+  const load = src(`${dir}/meetings/load.ts`);
+  const smoke = src("scripts/smoke-routes.ts");
+
+  ok(/const BOX_SEL_OPTIONS: Opt\[\] = \[[^\]]*\{ value: "meetings", label: "Meetings" \}/.test(shell),
+    "#323 UI the Inbox box picker lists Meetings");
+  ok(/viewParam === "meetings"/.test(page) && /<MeetingsBox\b/.test(page) && /<MeetingReader\b/.test(page),
+    "#323 UI page.tsx accepts ?view=meetings and renders the Meetings box + reader");
+  ok(/isMeetings[\s\S]{0,120}\?\s*Promise\.resolve\(\[\] as CommThread\[\]\)\s*:\s*threadsIn\(/.test(page),
+    "#323 UI the meetings view never queries threadsIn (meetings are not threads)");
+  ok(/key: "meetings",\s*label: "Meetings"[\s\S]{0,200}count: meetingsToFile/.test(page) && /toFileCount\(user\.id\)/.test(page),
+    "#323 UI the Meetings view row carries the viewer's to-file count");
+  ok(["To file", "Filed", "Noise", "This week", "Older", "Confirm all", "Sync now", "Load older"].every((s) => box.includes(s)),
+    "#323 UI the Meetings box has its tabs, sections, Confirm all, Sync now and Load older");
+  ok(["Only you", "Internal", "All of Peak", "Shared with customer"].every((s) => box.includes(s)),
+    "#323 UI the Meetings box names every scope icon");
+  ok(/confirmAllStrongAction\(/.test(box) && /Sync already running/.test(box),
+    "#323 UI Confirm all goes through confirmAllStrongAction; a busy sync says so");
+  ok(["Open in Krisp", "Refresh from Krisp", "Attendees", "Speakers", "+ New contact", "To-dos", "Transcript",
+    "Share with customer", "Stop sharing", "File the meeting first", "Confirm all to-dos"].every((s) => reader.includes(s)),
+    "#323 UI the meeting reader has its header actions, sections, to-do gate and share controls");
+  ok(/target="_blank"\s+rel="noreferrer"/.test(reader), "#323 UI Open in Krisp opens a new tab without a referrer");
+  ok(/This stops sharing it with the customer\. Continue\?/.test(reader) && /confirmUnshare: true/.test(reader),
+    "#323 UI an unshare-on-unlink asks first, then retries with confirmUnshare");
+  ok(/searchLinkTargetsAction\(/.test(reader), "#323 UI manual linking reuses the Inbox link-target search");
+  ok(/linkVenueAction\(/.test(reader) && /export async function linkVenueAction\(/.test(src(`${dir}/meetings/actions.ts`)),
+    "#323 UI a searched venue links with its company through linkVenueAction");
+  ok(/export async function setAttendeeContactAction\(/.test(src(`${dir}/meetings/actions.ts`)) && /setAttendeeContactAction\(/.test(reader),
+    "#323 UI an attendee can be pointed at an existing contact");
+  ok(/canSeeMeeting\(m, me\.id\)/.test(load) && /MS\.meetingRowsVisibleTo\(me\.id\)/.test(load) &&
+     !/allMeetings\(|meetingsVisibleTo\(/.test(load) && /return MS\.countToFile\(userId\)/.test(load),
+    "#323 UI load.ts lists through the visibility-filtered projection and counts in SQL — only the reader loads a full doc");
+  ok(/export async function toFileCount\(/.test(load) && /export async function loadMeetingsBox\(/.test(load) &&
+     /export async function loadMeetingReader\(/.test(load),
+    "#323 UI load.ts exports toFileCount, loadMeetingsBox and loadMeetingReader");
+  const clientOnly = (s: string) => !/from "@\/(lib\/stores|db|lib\/meetings\/(sync|index-build|actions-core|sync-state))/.test(s) &&
+    !/^import (?!type )[^;]*from "\.\/load";/m.test(s) && /^import type [^;]*from "\.\/load";/m.test(s);
+  ok(/^"use client";/.test(box) && /^"use client";/.test(src(`${dir}/meetings/meeting-reader.tsx`)) && clientOnly(box) && clientOnly(reader),
+    "#323 UI the Meetings box and reader are client components with no server-only imports");
+  const tick = shell.slice(shell.indexOf("const tick = async"), shell.indexOf("const onBlur"));
+  ok(/meetingsView\s*\?\s*await meetingsTickAction\(\)\s*:\s*await autoSyncAction\(\)/.test(tick) &&
+     /const meetingsView = isView && box === "meetings";/.test(shell) && /\}, \[router, meetingsView\]\);/.test(shell),
+    "#323 UI the 3-minute tick runs meetingsTickAction only while the meetings view is open (a boolean dep)");
+  ok(smoke.includes(`"/inbox?view=meetings"`), "#323 UI smoke covers /inbox?view=meetings");
+
+  // fix round 1
+  const sidebar = src(`${dir}/meetings/meeting-sidebar.tsx`);
+  const readerOnly = src(`${dir}/meetings/meeting-reader.tsx`);
+  const actions = src(`${dir}/meetings/actions.ts`);
+  const format = src(`${dir}/meetings/format.ts`);
+  ok(/variant\?: "pane" \| "overlay"/.test(readerOnly) && /flexDirection: pane \? "row" : "column"/.test(readerOnly) &&
+     /<MeetingSidebar vm=\{vm\} variant=\{variant\} \/>/.test(readerOnly) && /width: variant === "pane" \? 300 : "auto"/.test(sidebar) &&
+     /<MeetingReader key="meetings-overlay" vm=\{readerVM\} variant="overlay" \/>/.test(page) && /\{meetings\.overlayReader\}/.test(shell),
+    "#323 UI the narrow overlay renders the overlay reader: sidebar stacked under the content, full width");
+  const tickBody = actions.slice(actions.indexOf("export async function meetingsTickAction"));
+  ok(!/revalidate/.test(tickBody.slice(tickBody.indexOf("{"))), "#323 UI meetingsTickAction never revalidates — the shell's latched refresh governs");
+  const hook = sidebar.slice(sidebar.indexOf("export function useMeetingAction"), sidebar.indexOf("const KIND_META"));
+  ok(!/router\.refresh\(\)|useRouter/.test(hook), "#323 UI meeting actions revalidate server-side; the client hook adds no second refresh");
+  ok(["lengthLabel", "agoLabel", "WORK_TYPE_LABEL", "meetingsTabOf", "meetingsHref"].every((n) => new RegExp(`export (function|const) ${n}\\b`).test(format)) &&
+     !/const WORK_LABEL/.test(sidebar) && !/export (function|const) (lengthLabel|agoLabel|WORK_TYPE_LABEL|meetingsTabOf)\b/.test(load),
+    "#323 UI pure helpers live in format.ts (no duplicate work-type labels)");
+  const wo = load.slice(load.indexOf("async function workOptionsFor"), load.indexOf("async function decisionOf"));
+  ok((wo.match(/listDocsByField</g) || []).length === 6 && !/allLeads|allVisits|allSurveys|getAllProjects|allEngagements|allQuotes/.test(load),
+    "#323 UI the work picker reads only the linked company's records");
+  ok(/Updated \$\{detailed\}/.test(box) && /Showing \{Math\.min\(FILED_CAP/.test(box) && /aria-current=\{on \? "page" : undefined\}/.test(box) &&
+     !/role="tab"/.test(box) && /baseHref = MEETINGS_BASE_HREF/.test(box),
+    "#323 UI box: Updated N, Filed cap note, aria-current tab links, a baseHref for a later nav page");
+  ok(/only people who were in it can see it/.test(sidebar) && /instead of \$\{cur\.label\}\?/.test(sidebar) &&
+     /textRef\.current\?\.focus\(\)/.test(sidebar) && /opener\.focus\(\)/.test(sidebar) && /e\.key !== "Tab"/.test(sidebar),
+    "#323 UI sidebar: scope copy, confirm before replacing a company, the share dialog traps and returns focus");
+}
+
+/** Fix round 1 — the Meetings box's projection queries against the real doc table. */
+export async function meetings323ProjectionChecks(ok: Ok): Promise<void> {
+  const u = "u-proj323";
+  const mk = (n: number, over: Partial<MeetingRecord>) => {
+    const kid = `TEST323P${n}` + "b".repeat(20);
+    const base = meetingFixture323({ krispMeetingId: kid });
+    return { ...base, ...over, krisp: { ...base.krisp, title: `Projection ${n}`,
+      segments: [{ speaker: "1", text: "a long transcript line", start: 0, end: 1 }], notes: { blocks: [] } } } as MeetingRecord;
+  };
+  const fx = [
+    mk(1, { seenBy: [u] }),                                            // to file
+    mk(2, { seenBy: [u], filedAt: 1_790_000_000_000, filedBy: "x" }),  // filed
+    mk(3, { seenBy: [u], noise: true }),                               // noise
+    mk(4, { seenBy: ["u-other323"] }),                                 // private to someone else
+    mk(5, { seenBy: ["u-other323"], links: { ...emptyLinks(), customerId: "TEST323-proj-co" } }), // peak-wide, not mine
+  ];
+  for (const m of fx) {
+    registerFixture("meetings", m.id);
+    await MS.saveMeeting(m);
+  }
+  const full = await MS.meetingsVisibleTo(u);
+  const scanCount = full.filter((m) => !m.filedAt && !m.noise && m.seenBy.includes(u)).length;
+  const count = await MS.countToFile(u);
+  ok(count === scanCount && count === 1, `#323 countToFile matches the full-scan to-file count (${count} vs ${scanCount})`);
+  const rows = await MS.meetingRowsVisibleTo(u);
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id).sort().join(",");
+  ok(ids(rows) === ids(full), "#323 meetingRowsVisibleTo returns exactly the meetings canSeeMeeting allows");
+  const r1 = rows.find((r) => r.id === fx[0].id);
+  ok(!!r1 && r1.krisp.title === "Projection 1" && !("segments" in r1.krisp) && !("notes" in r1.krisp) &&
+     !("todos" in r1) && !("attendees" in r1) && !rows.some((r) => r.id === fx[3].id) && rows.some((r) => r.id === fx[4].id),
+    "#323 the list projection carries the header fields, never segments / notes / attendees / to-dos");
+  const store = readFileSync(join(process.cwd(), "src/lib/stores/meetings.ts"), "utf8");
+  const proj = store.slice(store.indexOf("export async function meetingRowsVisibleTo"), store.indexOf("export async function countToFile"));
+  ok(!/segments|notes|transcript|'todos'|'attendees'/.test(proj.slice(proj.indexOf(".select("), proj.indexOf(".from("))),
+    "#323 the projection's SELECT never names segments or notes");
+}
+
+/* ---------- Task 7: everywhere else (Home, record cards, ⌘K, Account, feed, waiting-on-customer, portal) ---------- */
+
+/** Source pins for the Task 7 mounts and their seams. */
+export async function meetings323EverywherePins(ok: Ok): Promise<void> {
+  const src = (p: string) => {
+    try { return readFileSync(join(process.cwd(), p), "utf8"); } catch { return ""; }
+  };
+  const home = src("src/app/(app)/page.tsx");
+  const greet = src("src/app/(app)/home-greeting.tsx");
+  ok(/import \{ toFileCount \} from "\.\/inbox\/meetings\/load";/.test(home) && /toFileCount\(user\.id\)/.test(home) &&
+     /meetingsToFile=\{meetingsToFile\}/.test(home) && /href="\/inbox\?view=meetings"/.test(greet) &&
+     /\{meetingsToFile\} meeting\{meetingsToFile === 1 \? "" : "s"\} to file →/.test(greet) && /meetingsToFile > 0 &&/.test(greet),
+    "#323 Home: 'N meetings to file →' from toFileCount, linking /inbox?view=meetings, only when N > 0");
+
+  const card = src("src/components/meetings/meetings-card.tsx");
+  ok(/meetingRowsLinkedTo\(kind, id, viewerId\)/.test(card) && !/allMeetings\(|meetingsVisibleTo\(|meetingsLinkedTo\(/.test(card) &&
+     /href=\{meetingReaderHref\(m\)\}/.test(card) && /if \(rows\.length === 0\) return null;/.test(card) && /limit = 8/.test(card) &&
+     /lengthLabel\(m\.durationSec\)/.test(card),
+    "#323 MeetingsCard: narrow projection (never a full doc), reader deep links, cap 8, nothing when empty");
+  const mounts: [string, RegExp][] = [
+    ["src/app/(app)/companies/[id]/page.tsx", /<MeetingsCard kind="company" id=\{cust\.id\} viewerId=\{me\.id\} \/>/],
+    ["src/app/(app)/venues/[id]/page.tsx", /<MeetingsCard kind="venue" id=\{site\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/people/[id]/page.tsx", /<MeetingsCard kind="contact" id=\{person\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/venue-assessments/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{\[rec\.id, \.\.\.visitIds\]\} viewerId=\{user\.id\} \/>\}/],
+    ["src/app/(app)/projects/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/design/engagements/[id]/page.tsx", /<RecordingsCard parentKind="engagement" parentId=\{sel\.id\} \/>\s*<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\} \/>/],
+    ["src/app/(app)/leads/page.tsx", /<MeetingsCard kind="work" id=\{leadRec\.id\} viewerId=\{me\.id\}/],
+  ];
+  const missing = mounts.filter(([p, re]) => !re.test(src(p))).map(([p]) => p);
+  ok(missing.length === 0, `#323 MeetingsCard is mounted on company, venue, person, survey (+ its site visits), project, engagement and lead pages${missing.length ? " — missing: " + missing.join(", ") : ""}`);
+  const slots = [
+    ["src/app/(app)/venue-assessments/[id]/controls.tsx", /\{meetingsSlot\}\s*\{visibleSections\.map/],
+    ["src/app/(app)/projects/view.tsx", /\{curTab === "overview" && meetingsSlot\}/],
+    ["src/app/(app)/leads/lead-drawer.tsx", /\{meetingsSlot\}\s*\{\/\* log a touch \*\/\}/],
+  ] as const;
+  ok(slots.every(([p, re]) => re.test(src(p))) &&
+     ["src/app/(app)/venue-assessments/[id]/controls.tsx", "src/app/(app)/leads/lead-drawer.tsx", "src/app/(app)/projects/view.tsx"].every((p) => !/meetings-card/.test(src(p))),
+    "#323 client editors (survey, lead drawer) render the server card through a ReactNode slot, never importing it");
+
+  const search = src("src/app/api/search/route.ts");
+  const sBlock = search.slice(search.indexOf("#323 Krisp meetings"), search.indexOf('"Catalog"'));
+  ok(/searchMeetingCandidates\(q, CANDIDATES, meId\)/.test(search) && /"Meetings"/.test(sBlock) && /canSeeMeeting\(m, meId\)/.test(sBlock) &&
+     /renderMeeting\(m, NO_NAMES\)/.test(sBlock) && /letter: "M"/.test(sBlock) && /color: "#6b4fa1"/.test(sBlock) &&
+     /href: meetingReaderHref\(m\)/.test(sBlock) && !/allMeetings\(|meetingsVisibleTo\(/.test(search) &&
+     /const NO_NAMES: RenderNames = \{ contact: \(\) => null, user: \(\) => null \};/.test(search),
+    "#323 ⌘K: a Meetings group (M, #6b4fa1) over title + rendered summary, canSeeMeeting-filtered, no full-table load");
+
+  const krisp = src("src/app/(app)/account/krisp-card.tsx");
+  const account = src("src/app/(app)/account/page.tsx");
+  ok(["Sync now", "Load older", "Pulled back to", "Meetings synced", "Last meetings sync failed"].every((s) => krisp.includes(s)) &&
+     /syncNowAction\(\)/.test(krisp) && /loadOlderAction\(\)/.test(krisp) &&
+     /meetings: \{ syncedAt: number \| null; lastError: string \| null; backfillFrom: number \| null \}/.test(krisp) &&
+     /getSyncState\(user\.id\)/.test(account) && /^"use client";/.test(krisp) && !/from "@\/(lib\/stores|db|lib\/meetings\/sync)/.test(krisp),
+    "#323 Account → My Krisp: meetings sync status, Sync now, Load older (Pulled back to <date>), from getSyncState");
+
+  const feed = src("src/lib/customer-feed.ts");
+  const company = src("src/app/(app)/companies/[id]/page.tsx");
+  const rows = src("src/lib/customer-feed-rows.ts");
+  ok(/viewerId\s*\? meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feed) && /loadCustomerFeed\(\{ id: cust\.id, name: cust\.name \}, me\.id\)/.test(company) &&
+     /`Met with \$\{names\.join\(", "\)\} — \$\{title\}`/.test(rows) && /row\(\s*"comm",\s*`meeting:\$\{m\.id\}`/.test(rows) &&
+     !/summary/.test(rows.slice(rows.indexOf("export function meetingFeedRows"), rows.indexOf("export function visitFeedRows")).replace(/no summary text is copied/, "")),
+    "#323 customer feed: one 'Met with … — <title>' comm row per linked, visible meeting; the viewer is passed; no summary copied");
+
+  const waiting = src("src/components/meetings/waiting-on-card.tsx");
+  const venue = src("src/app/(app)/venues/[id]/page.tsx");
+  const queue = src("src/lib/queue.ts");
+  const hq = src("src/app/(app)/home-queue.tsx");
+  const cards = src("src/app/(app)/_dashboard/widgets/home-cards.tsx");
+  ok(/<WaitingOnCustomerCard by="customerId" ids=\{\[cust\.id\]\} \/>/.test(company) &&
+     /<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\}/.test(venue) &&
+     /openWaitingTasksBy\(by, ids, customerId === undefined \? \{\} : \{ customerId \}\)/.test(waiting) && /Waiting on customer/.test(waiting) && /owes this/.test(waiting) && /nudge /.test(waiting),
+    "#323 company + venue pages list 'Waiting on customer' (venue matches the directory id a meeting task stores, and sites.id)");
+  ok(/!t\.projectId \|\| t\.waitingOn\) continue;/.test(queue) && /Waiting on others/.test(hq) &&
+     /waiting=\{waiting\}/.test(cards) && /ctx\.data\.waitingOnOthers\(\)/.test(cards) &&
+     /waitingOnOthers: once\(\(\) => openWaitingTasksBy\("assigneeUserId", \[user\.id\]\)\)/.test(src("src/lib/dashboard/data.ts")),
+    "#323 Home: waitingOn tasks sit under 'Waiting on others', never mixed into the rep's own queue rows");
+
+  const nav = src("src/app/portal/nav.ts");
+  const portal = src("src/app/portal/meetings/page.tsx");
+  const portalLib = src("src/lib/meetings/portal.ts");
+  ok(/\{ href: "\/portal\/meetings" \+ pv, label: "Meeting notes", active: active === "meetings" \}/.test(nav) &&
+     /resolvePortalViewer\(previewCid\)/.test(portal) && /portalMeetings\(cid\)/.test(portal) && /portalNav\("meetings"/.test(portal) &&
+     /<PortalSignedOut /.test(portal) && !/segments|attendees|todos|\.links\b/.test(portal) &&
+     /portalCanSee\(m, customerId\)/.test(portalLib) && /sharedMeetingRowsFor\(customerId\)/.test(portalLib) && !/allMeetings/.test(portalLib),
+    "#323 portal: 'Meeting notes' nav; the page reads the portal session and portalMeetings only, never transcript/attendees/to-dos/links");
+
+  const store = readFileSync(join(process.cwd(), "src/lib/stores/meetings.ts"), "utf8");
+  const sel = (fn: string) => {
+    const body = store.slice(store.indexOf(`export async function ${fn}`));
+    return body.slice(body.indexOf(".select("), body.indexOf(".from("));
+  };
+  ok(["meetingRowsLinkedTo", "searchMeetingCandidates", "sharedMeetingRowsFor"].every((f) => store.includes(`export async function ${f}(`)) &&
+     !/segments|'notes'|'todos'/.test(sel("meetingRowsLinkedTo")) && !/segments|'todos'|'attendees'/.test(sel("searchMeetingCandidates")) &&
+     !/segments|'notes'|'todos'|'attendees'/.test(sel("sharedMeetingRowsFor")),
+    "#323 Task 7 projections never select the transcript (record cards / feed / ⌘K / portal)");
+  const smoke = src("scripts/smoke-routes.ts");
+  ok(["/portal/meetings", "/portal/meetings?preview=lakefront", "/design/engagements/CE-1001?tab=oversight", "/leads?lead=L-1061"].every((r) => smoke.includes(`"${r}"`)),
+    "#323 smoke covers the portal Meeting notes page, the engagement Oversight tab and the lead drawer");
+}
+
+/** DB checks: the record-card / feed / ⌘K / portal projections against the real doc table. */
+export async function meetings323EverywhereChecks(ok: Ok): Promise<void> {
+  const CO = "TEST323-portal-co", CO_OTHER = "TEST323-portal-co2", SITE = "TEST323-ev-site", CT = "TEST323-ev-ct";
+  const mk = (n: number, title: string, startedAt: number, over: Partial<MeetingRecord>) => {
+    const kid = `TEST323E${n}` + "c".repeat(20);
+    const base = meetingFixture323({ krispMeetingId: kid });
+    return { ...base, ...over, krisp: { ...base.krisp, title, startedAt,
+      segments: [{ speaker: "1", text: "zebracrossing transcript only", start: 0, end: 1 }],
+      notes: { blocks: [{ type: "paragraph", text: "Discussed the quokka rigging budget" }] } } } as MeetingRecord;
+  };
+  const L = (o: Partial<MeetingLinks>): MeetingLinks => ({ ...emptyLinks(), ...o });
+  const fx = [
+    mk(1, "Osakis scope review", 1_790_000_000_000, {
+      seenBy: ["u-ev323"], links: L({ customerId: CO, siteId: SITE, contactIds: [CT], work: { type: "survey", id: "TEST323-FS", label: "FS" } }),
+      share: { sharedAt: 1, sharedBy: "Jeff", summary: "Shared recap\n\nSecond paragraph" },
+      attendees: [
+        { key: "jeff@peak", name: "Jeff C", email: "jeff@peak", sources: ["krisp"], removed: false, contactId: null, userId: "u1" },
+        { key: "tom@o", name: "Tom Ellis", email: "tom@o", sources: ["krisp"], removed: false, contactId: null, userId: null },
+        { key: "ann@o", name: "Ann Lee", email: "ann@o", sources: ["calendar"], removed: false, contactId: null, userId: null },
+        { key: "gone@o", name: "Gone Guy", email: "gone@o", sources: ["manual"], removed: true, contactId: null, userId: null },
+      ] }),
+    mk(2, "Osakis follow-up", 1_790_000_100_000, { seenBy: ["u-ev323"], links: L({ customerId: CO, work: { type: "site_visit", id: "TEST323-SV", label: "SV" } }) }),
+    mk(3, "Other customer shared", 1_790_000_200_000, { seenBy: ["u-ev323"], links: L({ customerId: CO_OTHER }),
+      share: { sharedAt: 1, sharedBy: "Jeff", summary: "Not yours" } }),
+    mk(4, "Private quokka chat", 1_790_000_300_000, { seenBy: ["u-ev323-private"] }),
+  ];
+  for (const m of fx) {
+    registerFixture("meetings", m.id);
+    await MS.saveMeeting(m);
+  }
+
+  // portal (K3): only the shared meeting linked to that customer, with the edited summary
+  const pm = await portalMeetings(CO);
+  ok(pm.length === 1 && pm[0].id === fx[0].id && pm[0].summary === "Shared recap\n\nSecond paragraph" && pm[0].title === "Osakis scope review" &&
+     Object.keys(pm[0]).sort().join() === "id,startedAt,summary,title",
+    "#323 portalMeetings returns exactly the shared meeting linked to the customer, its share summary, and nothing else");
+  ok((await portalMeetings("TEST323-portal-nobody")).length === 0 && (await portalMeetings("")).length === 0,
+    "#323 portalMeetings: another customer (or none) sees nothing");
+  ok((await portalMeetings(CO_OTHER)).map((m) => m.summary).join() === "Not yours", "#323 portalMeetings is scoped per customer");
+
+  // record cards
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id).join(",");
+  const byCo = await MS.meetingRowsLinkedTo("company", CO, "u-anyone");
+  ok(ids(byCo) === [fx[1].id, fx[0].id].join(","), "#323 meetingRowsLinkedTo(company): the linked meetings, newest first");
+  ok(ids(await MS.meetingRowsLinkedTo("venue", SITE, "u-anyone")) === fx[0].id &&
+     ids(await MS.meetingRowsLinkedTo("contact", CT, "u-anyone")) === fx[0].id &&
+     ids(await MS.meetingRowsLinkedTo("work", ["TEST323-FS", "TEST323-SV"], "u-anyone")) === [fx[1].id, fx[0].id].join(",") &&
+     (await MS.meetingRowsLinkedTo("work", [], "u-anyone")).length === 0,
+    "#323 meetingRowsLinkedTo filters by venue, contact and work (several ids: a survey + its site visits)");
+  const r0 = byCo.find((r) => r.id === fx[0].id)!;
+  ok(!("krisp" in r0) && !("segments" in r0) && !("todos" in r0) && !("share" in r0) && r0.attendees.length === 3 &&
+     r0.title === "Osakis scope review" && r0.durationSec === 1200,
+    "#323 the linked-row projection carries header + live attendee names, never transcript, to-dos or share text");
+
+  // ⌘K candidates: title or notes text, never the transcript; visibility filtered in SQL before the LIMIT (final review 11)
+  const search = MS.searchMeetingCandidates as unknown as (q: string, limit: number, viewerId: string) => Promise<MeetingRecord[]>;
+  const byNotes = await search("quokka", 100, "u-ev323");
+  ok(byNotes.some((m) => m.id === fx[0].id) && !byNotes.some((m) => m.id === fx[3].id) &&
+     (await search("quokka", 100, "u-ev323-private")).some((m) => m.id === fx[3].id) &&
+     (await search("zebracrossing", 100, "u-ev323")).filter((m) => fx.some((f) => f.id === m.id)).length === 0 &&
+     (await search("osakis follow", 100, "u-ev323")).some((m) => m.id === fx[1].id),
+    "#323 searchMeetingCandidates matches title and notes in SQL, never the transcript, only meetings the viewer may see");
+  const top1 = await search("quokka", 1, "u-ev323");
+  ok(top1.map((m) => m.id).join() === fx[2].id,
+    "#323 final 11: ⌘K applies visibility before the LIMIT — a newer private meeting never crowds out a visible one");
+  ok((await search("paragraph", 100, "u-ev323")).filter((m) => fx.some((f) => f.id === m.id)).length === 0 &&
+     (await search("rigging budget", 100, "u-ev323")).some((m) => m.id === fx[0].id),
+    "#323 final 11: ⌘K matches the notes' text values, not the raw JSON (a block type never matches)");
+  const hit = byNotes.find((m) => m.id === fx[0].id)!;
+  const rendered = renderMeeting(hit, { contact: () => null, user: () => null });
+  ok(hit.krisp.segments.length === 0 && rendered.summary.some((s) => /quokka/.test(s.description)) && canSeeMeeting(hit, "u-ev323"),
+    "#323 a ⌘K candidate renders its summary without the transcript");
+
+  // customer feed
+  const feedNoViewer = await loadCustomerFeed({ id: CO, name: "TEST323 portal co" });
+  const feed = await loadCustomerFeed({ id: CO, name: "TEST323 portal co" }, "u-ev323");
+  const fr = feed.find((r) => r.id === `meeting:${fx[0].id}`);
+  ok(!feedNoViewer.some((r) => r.id.startsWith("meeting:")) && feed.filter((r) => r.id.startsWith("meeting:")).length === 2 &&
+     !!fr && fr.title === "Met with Tom Ellis, Ann Lee — Osakis scope review" && fr.kind === "comm" &&
+     fr.href === `/inbox?view=meetings&tab=to-file&m=${encodeURIComponent(fx[0].id)}` && !/recap|quokka/i.test(fr.title + fr.sub),
+    "#323 the company feed gets one 'Met with <two outside attendees> — <title>' row per linked meeting, linking the reader, no summary");
+  const solo = meetingFeedRows({ id: "km-x", title: "", startedAt: 5, durationLabel: "20 min", href: "/x", attendees: [{ display: "Jeff C", internal: true }] });
+  ok(solo[0]?.title === "Met with Jeff C — Untitled meeting" &&
+     meetingFeedRows({ id: "km-y", title: "T", startedAt: 5, durationLabel: "—", href: "/x", attendees: [] })[0]?.title === "Meeting — T" &&
+     meetingFeedRows({ id: "km-z", title: "T", startedAt: null, durationLabel: "—", href: "/x", attendees: [] }).length === 0,
+    "#323 meetingFeedRows: falls back to team names, then 'Meeting — <title>'; an undated meeting has no row");
+
+  // waiting on customer
+  const now = Date.now();
+  const task = (id: string, over: Record<string, unknown>) => createFixture("tasks", {
+    id, title: id, section: "Meeting", projectId: null, quoteId: null, designId: null, engagementId: null, coverageKey: null,
+    assigneeUserId: "u-ev323", assigneeName: "Ev Rep", dueAt: now + 86_400_000, startAt: null, schedule: null, handScheduled: false,
+    status: "open", notes: "", createdBy: "x", createdAt: now, updatedAt: now, doneAt: null, ...over,
+  });
+  await task("T-TEST323-W1", { customerId: CO, siteId: "TEST323-locid", meetingId: fx[0].id, waitingOn: { contactId: null, name: "Tom Ellis" } });
+  await task("T-TEST323-W2", { customerId: CO, siteId: SITE, waitingOn: { contactId: null, name: "Ann" }, status: "done" });
+  await task("T-TEST323-W3", { customerId: CO, siteId: SITE });
+  const byCustomer = await openWaitingTasksBy("customerId", [CO]);
+  const bySite = await openWaitingTasksBy("siteId", ["TEST323-locid", SITE]);
+  const mine = await openWaitingTasksBy("assigneeUserId", ["u-ev323"]);
+  ok(byCustomer.map((t) => t.id).join() === "T-TEST323-W1" && bySite.map((t) => t.id).join() === "T-TEST323-W1" &&
+     mine.map((t) => t.id).join() === "T-TEST323-W1" && byCustomer[0].waitingOn?.name === "Tom Ellis",
+    "#323 openWaitingTasksBy: open tasks with waitingOn only (done and ordinary tasks excluded), by company, venue ids or assignee");
+}
+
+/* ---------- final whole-branch review fixes ---------- */
+
+export async function meetings323FinalChecks(ok: Ok): Promise<void> {
+  const src = (p: string) => {
+    try { return readFileSync(join(process.cwd(), p), "utf8"); } catch { return ""; }
+  };
+  const tryImport = async <T,>(p: string): Promise<T | null> => {
+    try { return (await import(p)) as T; } catch { return null; }
+  };
+
+  // (1) /api/sync/pull serves the offline field collections only — never meetings (other reps' private notes)
+  const pullMod = await tryImport<{ pullCollections: (p: string | null) => string[] }>("@/lib/sync/pull-collections");
+  const { SYNCABLE_COLLECTIONS } = await import("@/db/doc-tables");
+  const pullAll = pullMod?.pullCollections(null) ?? [];
+  ok(!!pullMod && pullAll.join() === SYNCABLE_COLLECTIONS.join() && !pullAll.includes("meetings") &&
+     pullMod.pullCollections("meetings,tasks,quotes,nope").join() === "tasks" && pullMod.pullCollections("meetings").length === 0,
+    "#323 final 1: pullCollections serves only SYNCABLE_COLLECTIONS (the offline field set) — meetings never, quotes never");
+  const pullRoute = src("src/app/api/sync/pull/route.ts");
+  ok(/pullCollections\(url\.searchParams\.get\("collections"\)\)/.test(pullRoute) && !/Object\.keys\(DOC_TABLES\)/.test(pullRoute) &&
+     !/in DOC_TABLES/.test(pullRoute),
+    "#323 final 1: /api/sync/pull reads its collection list through pullCollections, never every DOC_TABLES key");
+
+  // (2) generic venue words: a venue core is the venue's distinctive part, shared cores are dropped, weak ties capped
+  const { prepareMatchIndex } = (await import("@/lib/meetings/match")) as unknown as { prepareMatchIndex?: (i: MatchIndex, w?: string[]) => MatchIndex };
+  const prep = (i: MatchIndex) => (prepareMatchIndex ? prepareMatchIndex(i, ["Gym Stage", "Proscenium / Auditorium"]) : i);
+  const town = (i: number) => `Tn${i}ville`;
+  const big: MatchIndex = index323({
+    companies: [
+      ...index323().companies,
+      ...Array.from({ length: 300 }, (_, i) => ({ id: `big-${i}`, name: `${town(i)} Public Schools`, keywords: [] })),
+    ],
+    sites: [
+      ...index323().sites,
+      ...Array.from({ length: 300 }, (_, i) => i % 2
+        ? { id: `big-st-${i}`, companyId: `big-${i}`, name: `${town(i)} HS — Main Stage`, locationName: `${town(i)} HS` }
+        : { id: `big-st-${i}`, companyId: `big-${i}`, name: "Main Stage", locationName: null }),
+      ...Array.from({ length: 300 }, (_, i) => ({ id: `big-gym-${i}`, companyId: `big-${i}`, name: i % 2 ? "Gym Stage" : `${town(i)} — Gym Stage`, locationName: null })),
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `lincoln-${i}`, companyId: `big-${i}`, name: "Lincoln Elementary — Auditorium", locationName: "Lincoln Elementary" })),
+      { id: "st-osakis-gym", companyId: "osakis", name: "Osakis HS — Gym Stage", locationName: "Osakis HS" },
+    ],
+  });
+  const pbig = prep(big);
+  const coIds = (r: ReturnType<typeof matchMeeting>) => r.suggestions.filter((s) => s.kind === "company").map((s) => s.id);
+  ok(coIds(matchMeeting(input323({ title: "Main Stage walkthrough" }), pbig)).length === 0,
+    "#323 final 2: 'Main Stage walkthrough' against 300 companies with Main Stage venues → no company suggestion");
+  const gym = coIds(matchMeeting(input323({ title: "Osakis gym stage walkthrough" }), pbig));
+  ok(gym.join() === "osakis", `#323 final 2: 'Osakis gym stage' with hundreds of Gym Stage venues → Osakis only (${gym.length})`);
+  ok(coIds(matchMeeting(input323({ title: "Lincoln walkthrough" }), pbig)).length === 0,
+    "#323 final 2: a venue core shared by more than 3 companies' venues is skipped");
+  const riv = index323({ companies: ["Church", "Theatre", "Schools", "Arts Center", "Community College"].map((t, i) => ({ id: `riv-${i}`, name: `Riverside ${t}`, keywords: [] })) });
+  ok(coIds(matchMeeting(input323({ title: "Riverside meeting" }), prep(riv))).length === 3,
+    "#323 final 2: weak company suggestions are capped at 3");
+  const osh = matchMeeting(input323({ title: "Oshkosh North - VE Engineering Meeting" }), prep(index323()));
+  ok(coIds(osh)[0] === "oshkosh" && osh.suggestions.some((s) => s.kind === "venue" && s.id === "st-oshkosh-1"),
+    "#323 final 2: the Oshkosh North venue hit still works on a prepared index");
+  const ib = src("src/lib/meetings/index-build.ts");
+  ok(!!prepareMatchIndex && /return prepareMatchIndex\(/.test(ib) && /venueTypesFrom\(/.test(ib) &&
+     !!prep(index323()).sites[0].cores && !!prep(index323()).companies[0].cores,
+    "#323 final 2: buildMatchIndex precomputes company + venue cores once (prepareMatchIndex, venue-type labels stripped)");
+
+  // (8) several overlapping owner visits for one company → no work / venue from visits; points count once
+  const v = (id: string, siteId: string) => ({ kind: "site_visit" as const, id, label: id, companyId: "osakis", siteId,
+    startMs: T0 - 15 * 60_000, endMs: T0 + 60 * 60_000, assigneeUserId: "u1" });
+  const two = matchMeeting(input323({ title: "Mobile recording" }), index323({ visits: [v("SV-A", "st-osakis-1"), v("SV-B", "st-osakis-2")] }));
+  ok(!two.suggestions.some((s) => s.kind === "work" || s.kind === "venue") && two.suggestions.find((s) => s.kind === "company")?.score === 40,
+    "#323 final 8: two overlapping owner visits for one company → company (40, once), no visit work or venue guessed");
+
+  // (12) to-do defaults read only this meeting's people: an unrelated company's 'Jeff' never makes Jeff's to-do a note
+  const { syncRepMeetings: sync } = await import("@/lib/meetings/sync");
+  const NOW = Date.UTC(2026, 9, 9, 18, 0);
+  const kTodo = "TEST323F" + "1".repeat(24);
+  const kFirst = ["TEST323F" + "2".repeat(24), "TEST323F" + "3".repeat(24), "TEST323F" + "4".repeat(24)];
+  [kTodo, ...kFirst].forEach((k) => registerFixture("meetings", "km-" + k));
+  const lst = (id: string, title: string) =>
+    ({ id, title, startedAt: NOW - 3600_000, durationSec: 1200, status: "completed", source: "zoom", tags: [], ownership: "owned" as const, participants: [] });
+  const st: Record<string, unknown> = {};
+  const fdeps = (userId: string, over: Partial<SyncDeps> = {}): SyncDeps => ({
+    now: () => NOW,
+    client: {
+      listMeetings: async () => ({ meetings: [lst(kTodo, "Osakis – scope")], nextCursor: null }),
+      meeting: async (id) => ({ id, title: null, startedAt: null, duration: null, status: "completed", participants: null,
+        transcript: { language: "en", speakers: {}, segments: [] },
+        notes: { blocks: [{ type: "action_items", children: [{ type: "action_item", text: "Send drawings", assignee: "Jeff" }] }] } }),
+    },
+    calendar: async () => null,
+    buildIndex: async () => index323({ contacts: [...index323().contacts,
+      { id: "c-jeff-other", companyId: "monte", firstName: "Jeff", lastName: "Nobody", emails: [] }] }),
+    lookupEmails: async () => new Map(),
+    siteIdFor: async () => null,
+    getState: async () => (st[userId] as never) ?? { syncedAt: null, backfillFrom: null, backfillCursor: null, lastError: null },
+    setState: async (patch) => { st[userId] = { ...(st[userId] as object), ...patch }; },
+    recordings: async () => [],
+    onRecordingAttached: async () => {},
+    pause: async () => {},
+    budgetMs: 40_000,
+    ...over,
+  });
+  await sync("uF1", "recent", fdeps("uF1"));
+  const tm = await MS.getMeeting("km-" + kTodo);
+  ok(tm?.todos[0]?.suggested === "task",
+    `#323 final 12: a 'Jeff' to-do on an Osakis meeting stays a task though another company has a contact Jeff (${tm?.todos[0]?.suggested})`);
+
+  // (3) the first 90-day sync is resumable: a stop mid-way keeps its cursor, the next run resumes there and completes
+  const fpages: Record<string, { meetings: ReturnType<typeof lst>[]; nextCursor: string | null }> = {
+    "": { meetings: [lst(kFirst[0], "Monte PAC"), lst(kFirst[1], "Monte PAC 2")], nextCursor: "f2" },
+    f2: { meetings: [lst(kFirst[2], "Monte PAC 3")], nextCursor: null },
+  };
+  const fcalls: string[] = [];
+  let failF2 = true;
+  const firstDeps = fdeps("uF2", { client: { meeting: fdeps("uF2").client.meeting, listMeetings: async (q) => {
+    fcalls.push(`${q.cursor || ""}@${q.from}`);
+    if (q.cursor === "f2" && failF2) throw new KrispRateLimitError();
+    return fpages[q.cursor || ""];
+  } } });
+  const f1 = await sync("uF2", "recent", firstDeps);
+  const s1 = st.uF2 as { syncedAt: number | null; backfillCursor: string | null; backfillFrom: number | null } | undefined;
+  failF2 = false;
+  fcalls.length = 0;
+  const f2 = await sync("uF2", "recent", firstDeps);
+  const s2 = st.uF2 as { syncedAt: number | null; backfillCursor: string | null; backfillFrom: number | null } | undefined;
+  ok(!f1.complete && s1?.syncedAt == null && s1?.backfillCursor === "f2" && s1?.backfillFrom === NOW - 90 * 86_400_000,
+    `#323 final 3: a first sync stopped mid-way saves its cursor (${JSON.stringify(s1)})`);
+  ok(f2.complete && fcalls[0] === `f2@${new Date(NOW - 90 * 86_400_000).toISOString()}` && s2?.syncedAt === NOW && s2.backfillCursor === null &&
+     s2.backfillFrom === NOW - 90 * 86_400_000 && (await MS.getMeeting("km-" + kFirst[2])) != null &&
+     (await MS.getMeeting("km-" + kFirst[0]))?.krisp.removedAt === null,
+    `#323 final 3: the next run resumes at the saved cursor, completes the 90 days, then sets syncedAt (${fcalls.join(" ")})`);
+  const syncSrc = src("src/lib/meetings/sync.ts");
+  ok((syncSrc.match(/step\(snap\)/g) || []).length === 1, "#323 final 3: the sync matches a changed meeting once (step(snap) computed once, reused)");
+
+  // (6) Home's stale-sync rides after(); (10) the cron's meetings rider runs last
+  const home = src("src/app/(app)/page.tsx");
+  ok(/import \{ after \} from "next\/server";/.test(home) && /after\(\(\) => syncMeetingsIfStale\(user\.id\)/.test(home) &&
+     !/void syncMeetingsIfStale/.test(home), "#323 final 6: Home schedules the stale meeting sync with after()");
+  const cron = src("src/app/api/gmail/sync/route.ts");
+  const at = (s: string) => cron.indexOf(s);
+  ok(at("await syncAllMeetings(") > at("await syncDrivePhotos(") && at("await syncAllMeetings(") > at("await ensureVendorAssignments(") &&
+     at("await syncDrivePhotos(") > 0, "#323 final 10: the cron runs the Krisp meetings rider last");
+
+  // (5) a meetings-table error degrades to empty / 0 on pages that could not fail before
+  const safe = await tryImport<{ meetingsReadOr: <T>(p: Promise<T>, fb: T, where: string) => Promise<T> }>("@/lib/meetings/safe-read");
+  const origErr = console.error;
+  console.error = () => {};
+  const degraded = safe ? await safe.meetingsReadOr(Promise.reject(new Error("relation meetings does not exist")), 0, "test") : -1;
+  console.error = origErr;
+  ok(degraded === 0, "#323 final 5: meetingsReadOr turns a failed meetings read into the fallback");
+  const inboxPage = src("src/app/(app)/inbox/page.tsx");
+  const card = src("src/components/meetings/meetings-card.tsx");
+  const feedSrc = src("src/lib/customer-feed.ts");
+  const search = src("src/app/api/search/route.ts");
+  ok(/meetingsReadOr\(toFileCount\(user\.id\), 0,/.test(home) && /meetingsReadOr\(toFileCount\(user\.id\), 0,/.test(inboxPage) &&
+     /meetingsReadOr\(meetingRowsLinkedTo\(kind, id, viewerId\), \[\]/.test(card) &&
+     /meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feedSrc) &&
+     /meetingsReadOr\(searchMeetingCandidates\(/.test(search),
+    "#323 final 5: Home, Inbox, record cards, the company feed and ⌘K read meetings through meetingsReadOr");
+
+  // (15) names.ts strips combining marks by an escaped range
+  ok(/\\u0300-\\u036f/.test(src("src/lib/meetings/names.ts")) && normalizeText("Café Ñandú") === "cafe nandu",
+    "#323 final 15: normalizeText strips accents via /[\\u0300-\\u036f]/g");
+
+  // (16) the server-made Meetings slots carry keys (no React key warning from InboxShell)
+  ok(/<MeetingsBox key="meetings-list"/.test(inboxPage) && /<MeetingReader key="meetings-reader" vm=\{readerVM\} variant="pane"/.test(inboxPage) &&
+     /<MeetingReader key="meetings-overlay" vm=\{readerVM\} variant="overlay"/.test(inboxPage),
+    "#323 final 16: the Meetings box / reader slots passed to InboxShell carry stable keys");
+
+  // DB-backed checks on their own company / venue
+  const { saveCompany } = await import("@/lib/identity/companies");
+  const { saveSite, getSite } = await import("@/lib/identity/sites");
+  const CO = "TEST323F-co", CO2 = "TEST323F-co2", SITE = "TEST323F-site";
+  await saveCompany({ id: CO, name: "TEST323F Osakis Final", type: "" });
+  await saveCompany({ id: CO2, name: "TEST323F Elsewhere", type: "" });
+  await saveSite({ id: SITE, companyId: CO, name: "TEST323F Auditorium", isPrimary: true, venueKind: "proscenium", legacyLocId: "TEST323F-loc" });
+  try {
+    const me = { id: "u1", name: "Jeff Chesebro" };
+    let n = 0;
+    const mk = async (over: Partial<MeetingRecord> = {}): Promise<MeetingRecord> => {
+      const kid = "TEST323fin" + String(++n).padStart(22, "0");
+      const base = meetingFixture323({ krispMeetingId: kid });
+      const m = meetingFixture323({ krispMeetingId: kid, ...over, krisp: { ...base.krisp, title: "Final", ...(over.krisp || {}) } });
+      registerFixture("meetings", m.id);
+      return MS.saveMeeting(m);
+    };
+    const sug = { kind: "company" as const, id: CO, label: CO, score: 90, strength: "strong" as const, reasons: ["t"] };
+
+    // (13) confirmAllStrong: an invisible id skips its row; the ids list is capped at 200
+    const hidden = await mk({ seenBy: ["u-somebody-else"], suggestions: [sug] });
+    const strong = await mk({ suggestions: [sug] });
+    const r13 = await MA.confirmAllStrong([hidden.id, "km-TEST323-missing", strong.id], me).then((r) => r, () => null);
+    ok(r13?.filed === 1 && !!(await MS.getMeeting(strong.id))?.filedAt && !(await MS.getMeeting(hidden.id))?.filedAt,
+      "#323 final 13: confirmAllStrong skips an id the rep can't see (or that's gone) and files the rest");
+    const late = await mk({ suggestions: [sug] });
+    const r13b = await MA.confirmAllStrong([...Array.from({ length: 200 }, (_, i) => `km-TEST323-none-${i}`), late.id], me).then((r) => r, () => null);
+    ok(r13b?.filed === 0 && !(await MS.getMeeting(late.id))?.filedAt, "#323 final 13: confirmAllStrong reads at most 200 ids");
+
+    // (9) a 'Speaker N' assignee nobody mapped → the waiting-on name is the linked company's
+    const todo = (key: string, assigneeLabel: string) => ({ key, title: "Send the plot " + key, assigneeLabel, dueDate: null, suggested: "waiting" as const, decision: null });
+    const wm = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), customerId: CO }, todos: [todo("w1", "Speaker 4"), todo("w2", "Speaker_2")] });
+    const wmNo = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), internalUserIds: ["u2"] }, todos: [todo("w3", "Speaker 1")] });
+    const made: string[] = [];
+    for (const [m, k] of [[wm, "w1"], [wm, "w2"], [wmNo, "w3"]] as const) {
+      const after = await MA.decideTodo(m.id, k, "waiting", {}, me);
+      const tid = after.todos.find((t) => t.key === k)?.decision?.createdId || "";
+      if (tid) registerFixture("tasks", tid);
+      made.push((await getTask(tid))?.waitingOn?.name || "?");
+    }
+    ok(made.join("|") === "TEST323F Osakis Final|TEST323F Osakis Final|Customer",
+      `#323 final 9: an unmapped 'Speaker N' / 'Speaker_N' assignee waits on the company, else 'Customer' (${made.join("|")})`);
+
+    // (4) the venue page's Waiting on customer: a legacy location id repeats across companies → also the company
+    const now = Date.now();
+    const task = (id: string, over: Record<string, unknown>) => createFixture("tasks", {
+      id, title: id, section: "Meeting", projectId: null, quoteId: null, designId: null, engagementId: null, coverageKey: null,
+      assigneeUserId: "u-fin323", assigneeName: "Fin Rep", dueAt: now + 86_400_000, startAt: null, schedule: null, handScheduled: false,
+      status: "open", notes: "", createdBy: "x", createdAt: now, updatedAt: now, doneAt: null, ...over,
+    });
+    await task("T-TEST323F-W1", { customerId: CO, siteId: "TEST323F-loc", waitingOn: { contactId: null, name: "Tom" } });
+    await task("T-TEST323F-W2", { customerId: CO2, siteId: "TEST323F-loc", waitingOn: { contactId: null, name: "Other" } });
+    const wsite = await openWaitingTasksBy("siteId", ["TEST323F-loc", SITE], { customerId: CO } as never);
+    ok(wsite.map((t) => t.id).join() === "T-TEST323F-W1", "#323 final 4: venue waiting-on tasks also match the venue's company");
+    ok(/<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\} customerId=\{site\.companyId\}/.test(src("src/app/(app)/venues/[id]/page.tsx")),
+      "#323 final 4: the venue page passes its company to the Waiting on customer card");
+
+    // (7) meeting tasks reach the queue (and so Home + Google Tasks); waiting-on nudges stay out
+    const meetingId = strong.id;
+    await task("T-TEST323F-Q1", { customerId: CO, meetingId, notes: "From meeting: Final" });
+    await task("T-TEST323F-Q2", { customerId: CO, meetingId, waitingOn: { contactId: null, name: "Tom" } });
+    await task("T-TEST323F-Q3", { customerId: CO, meetingId, status: "done" });
+    await task("T-TEST323F-Q4", { customerId: CO, notes: "plain task, no meeting" });
+    const { loadQueue } = await import("@/lib/queue");
+    const q = await loadQueue("Fin Rep");
+    const qm = q.filter((i) => i.key.startsWith("meeting-task:"));
+    ok(qm.map((i) => i.key).join() === "meeting-task:T-TEST323F-Q1" && qm[0].href === `/inbox?view=meetings&tab=filed&m=${encodeURIComponent(meetingId)}` &&
+       qm[0].due === now + 86_400_000 && !qm[0].writable && !q.some((i) => i.key.includes("T-TEST323F-Q4")),
+      `#323 final 7: an open meeting task assigned to me is a queue item linking its meeting; waiting-on, done and other tasks are not (${qm.map((i) => i.key).join()})`);
+
+    // (14) a note filed on a venue (parentKind "site") shows in that venue's History
+    const { addNoteRecord } = await import("@/lib/stores/notes");
+    const note = await addNoteRecord({ parentKind: "site", parentId: SITE, customerId: CO, text: "Ceiling height is 22 ft\n\nFrom meeting: Final" }, "Jeff Chesebro");
+    registerFixture("notes", note.id);
+    const site = await getSite(SITE);
+    const { loadVenueHistory } = await import("@/lib/venue-history-server");
+    const hist = site ? await loadVenueHistory(site) : [];
+    const hn = hist.find((r) => r.id === note.id);
+    ok(!!hn && (hn.kind as string) === "note" && hn.title === "Ceiling height is 22 ft" && !hn.open,
+      "#323 final 14: a venue note (parentKind site) appears in that venue's History");
+  } finally {
+    const db = await getDb();
+    await db.delete(sitesT).where(inArray(sitesT.id, [SITE]));
+    await db.delete(companiesT).where(inArray(companiesT.id, [CO, CO2]));
+  }
+}

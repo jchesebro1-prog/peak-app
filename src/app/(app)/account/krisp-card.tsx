@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { connectKrispAction, disconnectKrispAction } from "./actions";
+import { loadOlderAction, syncNowAction } from "../inbox/meetings/actions";
+import { agoLabel } from "../inbox/meetings/format";
 
 /** Serializable view of the signed-in user's Krisp connection (no secret). */
 export type KrispCardInfo = {
@@ -11,7 +13,16 @@ export type KrispCardInfo = {
   connectedAt: number;
   lastUsedAt: number | null;
   lastError: string | null;
+  /** #323 — the meetings sync on the same connection (Inbox → Meetings). */
+  meetings: { syncedAt: number | null; lastError: string | null; backfillFrom: number | null };
 };
+
+const DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" });
+
+/** "5 min ago" against the clock at render (the line is suppressHydrationWarning — a server/client minute apart is fine) */
+function syncedAgo(ms: number): string {
+  return agoLabel(ms, Date.now());
+}
 
 /**
  * Account → "My Krisp" (Recordings spec §1.2 / §6): the per-rep Krisp API
@@ -56,6 +67,26 @@ export default function KrispCard({ info }: { info: KrispCardInfo | null }) {
       setConfirmDisconnect(false);
       if (r.ok) router.refresh();
       else setError(r.error || "Couldn't disconnect — try again.");
+    });
+  }
+
+  // #323 — Sync now / Load older, the same actions as the Inbox Meetings box
+  const [syncNote, setSyncNote] = useState<{ text: string; bad: boolean } | null>(null);
+  function syncMeetings(mode: "recent" | "backfill") {
+    setSyncNote(null);
+    startTransition(async () => {
+      try {
+        const r = mode === "recent" ? await syncNowAction() : await loadOlderAction();
+        if (!r.ok) setSyncNote({ text: r.error, bad: true });
+        else if (r.busy) setSyncNote({ text: "Sync already running", bad: false });
+        else {
+          const created = r.result?.created ?? 0;
+          setSyncNote({ text: created ? `${created} new meeting${created === 1 ? "" : "s"}` : "Up to date", bad: false });
+        }
+        router.refresh();
+      } catch {
+        setSyncNote({ text: "Something went wrong — try again.", bad: true });
+      }
     });
   }
 
@@ -153,6 +184,37 @@ export default function KrispCard({ info }: { info: KrispCardInfo | null }) {
           </>
         )}
       </div>
+      {info && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid #f0f1f4" }}>
+          <div style={{ flex: 1, minWidth: 200, fontSize: 12, lineHeight: 1.5 }}>
+            <div style={{ color: info.meetings.lastError ? "#b4543a" : "#5b616e" }} suppressHydrationWarning>
+              {info.meetings.lastError
+                ? `Last meetings sync failed: ${info.meetings.lastError}`
+                : info.meetings.syncedAt
+                  ? `Meetings synced ${syncedAgo(info.meetings.syncedAt)}`
+                  : "Meetings not synced yet"}
+            </div>
+            {info.meetings.backfillFrom != null && (
+              <div style={{ color: "#9aa0ab" }}>Pulled back to {DAY.format(info.meetings.backfillFrom)}</div>
+            )}
+            {syncNote && (
+              <div role="status" style={{ color: syncNote.bad ? "#b4543a" : "#5b616e", marginTop: 3 }}>{syncNote.text}</div>
+            )}
+          </div>
+          <button className="pk-btn-outline" disabled={pending} onClick={() => syncMeetings("recent")} style={{ flexShrink: 0 }}>
+            Sync now
+          </button>
+          <button
+            className="pk-btn-outline"
+            disabled={pending}
+            onClick={() => syncMeetings("backfill")}
+            title="Import the 90 days before the oldest meeting synced so far"
+            style={{ flexShrink: 0 }}
+          >
+            Load older
+          </button>
+        </div>
+      )}
     </div>
   );
 }

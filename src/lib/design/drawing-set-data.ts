@@ -1,5 +1,5 @@
 // SERVER ONLY — reads the catalog, settings, sheets and part documents.
-import { getSettings } from "@/lib/settings";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { listSheets, type GridProject, type GridSheet } from "@/lib/stores/grid-projects";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { list as listCatalog } from "@/lib/stores/catalog";
@@ -12,11 +12,12 @@ import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { legendRows, symbolContext, type SymbolEntry } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
 import { buildSchedule, paginateSchedule, scheduleGroups, scheduleModelOf, scheduleWiresFromView } from "@/lib/design/grid-schedule";
-import { SHEET_SIZES, buildSheetList, drawingArea, planSheetGroups, resolveGeneralNotes, resolveSheetSize, revisionRows } from "@/lib/design/grid-drawing-set";
+import { SHEET_SIZES, type SheetSizeKey, buildSheetList, drawingArea, planSheetGroups, resolveGeneralNotes, resolveSheetSize, revisionRows } from "@/lib/design/grid-drawing-set";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 import { partDocumentUrl, type ObjectSymbolUrls } from "@/lib/design/object-symbols";
 import { designatorCodeOf, fillDesignators, readingCtxOf } from "@/lib/design/designators";
+import { conduitRiserSheetPages } from "@/lib/design/conduit-riser-server";
 
 /**
  * The drawing set's data (#209, #300), shared since #301 slice C (R8a) by
@@ -29,7 +30,14 @@ import { designatorCodeOf, fillDesignators, readingCtxOf } from "@/lib/design/de
  *  type included, scales with the size, so this holds at 24×36 too). */
 export const SCHEDULE_ROWS_PER_COLUMN = 30;
 
-export type DrawingSetAssets = { sheet: (src: Pick<GridSheet, "id">) => string; doc: (docId: string) => string };
+export type DrawingSetAssets = {
+  sheet: (src: Pick<GridSheet, "id">) => string;
+  doc: (docId: string) => string;
+  /** #321: a lighting control riser sheet's DXF download (1-based page). The
+   *  team page only — it prints a screen-only link under each E-502…; the
+   *  signed print route has none. */
+  conduitRiserDxf?: (q: { projectId: string; optionId: string; size: SheetSizeKey; page: number }) => string;
+};
 
 export const TEAM_DRAWING_SET_ASSETS: DrawingSetAssets = {
   // Every sheet streams through the authenticated proxy (#209 I6) — Blob and
@@ -37,6 +45,8 @@ export const TEAM_DRAWING_SET_ASSETS: DrawingSetAssets = {
   // download, never a data-URL inlined once per page.
   sheet: (src) => `/api/grid-sheets/${encodeURIComponent(src.id)}`,
   doc: partDocumentUrl,
+  conduitRiserDxf: (q) =>
+    `/api/grid/${encodeURIComponent(q.projectId)}/conduit-riser/dxf?option=${encodeURIComponent(q.optionId)}&size=${q.size}&page=${q.page}`,
 };
 
 const DOC_URL = /^\/api\/part-documents\/([^/?#]+)$/;
@@ -74,6 +84,7 @@ export async function loadDrawingSetData(
   // #226: device types — the scope fix and type-grouped legend labels.
   const deviceTypes = await loadDeviceTypeContext(catalog);
   const accent = settings.accent || "#b08d4a";
+  const digits = designatorDigitsOf(settings);
   const symCtx = symbolContext(settings, deviceTypes.types);
   const parts = [
     ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
@@ -83,7 +94,7 @@ export async function loadDrawingSetData(
   // #320: plan marks, keys and E-60x read designators; one not yet assigned
   // prints the number the editor will give it (filled here, never written —
   // this also serves the signed print route).
-  const slice = { ...rawSlice, placements: fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project)) };
+  const slice = { ...rawSlice, placements: fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits)) };
   const set = project.drawingSet || {};
   const size = resolveSheetSize(requestedSize, set.size);
   const k = SHEET_SIZES[size].k;
@@ -119,6 +130,7 @@ export async function loadDrawingSetData(
     descOf: (pid) => partById.get(pid)?.desc,
     modelOf: (pid) => scheduleModelOf(partById.get(pid)),
     wires: scheduleWiresFromView(view),
+    digits,
   });
   const schedulePages = paginateSchedule(scheduleGroups(schedule), SCHEDULE_ROWS_PER_COLUMN, 2);
 
@@ -126,7 +138,16 @@ export async function loadDrawingSetData(
   const groups = planSheetGroups({ sheetOrder: project.sheetIds || [], placements: slice.placements, routes: slice.routes, partById });
   const sourceNames = Object.fromEntries(sheets.map((s) => [s.id, s.name]));
   const sheetById = new Map(sheets.map((s) => [s.id, s]));
-  const { all, included } = buildSheetList({ planGroups: groups, sourceNames, schedulePages: schedulePages.length, excluded: set.excluded });
+  // E-502… (#321): the lighting control riser, once the option has a conduit
+  // run — the same pages the DXF download writes.
+  const conduitRiserPages = await conduitRiserSheetPages(project, optionId, size, { catalog, gridSymbols, settings, deviceTypes });
+  const { all, included } = buildSheetList({
+    planGroups: groups,
+    sourceNames,
+    schedulePages: schedulePages.length,
+    conduitRiserPages: conduitRiserPages.length,
+    excluded: set.excluded,
+  });
   const revRows = revisionRows(project.revisions, set.revisionLabels);
   const notes = resolveGeneralNotes(set, settings.gridStandardNotes);
   const legend = legendRows(
@@ -141,7 +162,7 @@ export async function loadDrawingSetData(
 
   return {
     project, optionId, options, option, slice, spaces, cals, partById, symCtx, accent, set, size, k, area, now,
-    symbolDisplay, symbolUrls, view, schedule, schedulePages, sheetById, all, included, revRows, notes, legend, optionQuoteNo,
+    symbolDisplay, symbolUrls, view, schedule, schedulePages, conduitRiserPages, sheetById, all, included, revRows, notes, legend, optionQuoteNo, digits,
     company: { name: settings.companyName, logoDark: settings.logoDark, offices: settings.offices },
     gridStandardNotes: settings.gridStandardNotes || "",
   };

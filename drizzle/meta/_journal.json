@@ -267,6 +267,13 @@
       "when": 1791607238134,
       "tag": "0037_address_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791627387111,
+      "tag": "0038_krisp_meetings",
+      "breakpoints": true
     }
   ]
 }

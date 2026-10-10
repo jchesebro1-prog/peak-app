@@ -27,6 +27,8 @@ type Row = {
   connectionTypes: string;
   cableSku: string;
   dollarsPerFt: string;
+  symbol: string;
+  signal: string;
   interchangeable: boolean;
 };
 
@@ -50,6 +52,8 @@ const rowOf = (wt: WireType): Row => ({
   connectionTypes: wt.connectionTypes.join(", "),
   cableSku: wt.cableSku || "",
   dollarsPerFt: wt.dollarsPerFt != null ? String(wt.dollarsPerFt) : "",
+  symbol: wt.symbol || "",
+  signal: wt.signal || "",
   interchangeable: !!wt.interchangeable,
 });
 
@@ -68,6 +72,8 @@ function rowsToWireTypes(rows: Row[]): WireType[] {
     if (r.cableSku.trim()) wt.cableSku = r.cableSku.trim();
     const dpf = Number(r.dollarsPerFt);
     if (r.dollarsPerFt.trim() && Number.isFinite(dpf) && dpf >= 0) wt.dollarsPerFt = dpf;
+    if (r.symbol.trim()) wt.symbol = r.symbol.trim();
+    if (r.signal.trim()) wt.signal = r.signal.trim();
     if (r.interchangeable) wt.interchangeable = true;
     out.push(wt);
   }
@@ -95,7 +101,7 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
   };
   const addRow = () => {
     setJustSaved(false);
-    setRows((rs) => [...rs, { id: "", label: "", connectionTypes: "", cableSku: "", dollarsPerFt: "", interchangeable: false }]);
+    setRows((rs) => [...rs, { id: "", label: "", connectionTypes: "", cableSku: "", dollarsPerFt: "", symbol: "", signal: "", interchangeable: false }]);
   };
   const removeRow = (i: number) => {
     setJustSaved(false);
@@ -178,6 +184,10 @@ export function WireTypesCard({ wireTypes }: { wireTypes: WireType[] }) {
               aria-label="Connection types"
               style={{ ...inS, marginBottom: 6 }}
             />
+            <div style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: 8, marginBottom: 6 }}>
+              <input value={r.symbol} onChange={(e) => patch(i, { symbol: e.target.value.toUpperCase() })} maxLength={3} placeholder="Symbol" aria-label="Riser symbol" title="The 1–3 character bubble the conduit riser prints on a run of this wire (N, D, UE)" style={{ ...inS, fontWeight: 600, textAlign: "center" }} />
+              <input value={r.signal} onChange={(e) => patch(i, { signal: e.target.value })} maxLength={30} placeholder="Signal (e.g. Network) — shown in the riser's wire legend" aria-label="Riser signal" style={inS} />
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "center" }}>
               <input value={r.cableSku} onChange={(e) => patch(i, { cableSku: e.target.value })} placeholder="Cable SKU (optional)" aria-label="Cable SKU" style={inS} />
               <input value={r.dollarsPerFt} onChange={(e) => patch(i, { dollarsPerFt: e.target.value })} placeholder="$/ft (optional)" aria-label="Dollars per foot" inputMode="decimal" style={inS} />

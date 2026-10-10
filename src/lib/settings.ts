@@ -140,6 +140,11 @@ export type AppSettingsData = {
    *  set's cover (T-001) unless that set has its own. One note per line;
    *  null/absent = none. Edited in Design → Grid Settings. */
   gridStandardNotes?: string | null;
+  /** Device designators (#321): digits an issued number is padded to —
+   *  2 = `CRO-01` (Bray's drawings), 1 = `CRO-1`. Absent = 2. Changing it never
+   *  rewrites a stored designator; Renumber (Devices tab) does. Edited in
+   *  Design → Grid Settings → Designator numbers. */
+  designatorDigits?: 1 | 2;
   /** Pipelines (spec 2026-09-24 §3) — FULL REPLACEMENT lists (the wireTypes
    *  idiom). resolvePipelines in lib/pipelines returns the Daylite seeds when
    *  absent or invalid. Edited in Settings → Pipelines. */
@@ -177,6 +182,11 @@ export type RecordingsArchiveLastRun = {
   failed: number;
   skipped: string | null;
 };
+
+/** #321: the digits an issued designator number is padded to (default 2). */
+export function designatorDigitsOf(s: { designatorDigits?: 1 | 2 | null } | null | undefined): 1 | 2 {
+  return s?.designatorDigits === 1 ? 1 : 2;
+}
 
 /**
  * Pilot gate for the Record button (Recordings spec §1.3 / §7): an empty

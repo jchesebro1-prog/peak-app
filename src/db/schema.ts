@@ -197,6 +197,11 @@ export const krispConnections = pgTable("krisp_connections", {
   lastUsedAt: bigint("last_used_at", { mode: "number" }),
   lastError: text("last_error"),
   importClaimedAt: bigint("import_claimed_at", { mode: "number" }), // the import lock (spec §1.2)
+  /** #323 — meeting sync state (src/lib/meetings/sync-state.ts). */
+  meetingsSyncedAt: bigint("meetings_synced_at", { mode: "number" }),
+  meetingsBackfillFrom: bigint("meetings_backfill_from", { mode: "number" }),
+  meetingsBackfillCursor: text("meetings_backfill_cursor"),
+  meetingsLastError: text("meetings_last_error"),
 });
 
 export type KrispConnectionRow = typeof krispConnections.$inferSelect;

@@ -17,6 +17,8 @@ import { LEGACY_HINTS, legacyHintSkus } from "@/lib/design/equipment-legacy-hint
 import { suggestParts } from "@/lib/design/equipment-map-view";
 import type { EquipRowInput } from "@/lib/design/equipment-map";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
+import { saveRiserBoxTypes } from "@/lib/stores/riser-box-types";
+import type { CRBoxType } from "@/lib/design/conduit-riser/input";
 
 /**
  * Grid Settings mutations (/design/grid/settings). All gated on manage_users
@@ -122,6 +124,32 @@ export async function saveStandardNotesAction(text: string) {
   revalidatePath("/design/grid/settings");
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** Device designators (#321): the digits an issued number prints with. Only
+ *  1 or 2 is accepted; changing it never rewrites a stored designator. */
+export async function saveDesignatorDigitsAction(digits: number) {
+  await requirePerm("manage_users");
+  if (digits !== 1 && digits !== 2) return { ok: false as const, error: "Choose one or two digits." };
+  await setSettings({ designatorDigits: digits });
+  revalidatePath("/design/grid/settings");
+  revalidatePath("/design/grid", "layout");
+  return { ok: true as const };
+}
+
+/** Riser box types (#321): the code + description table printed on the conduit
+ *  riser sheet. FULL REPLACEMENT — the store sanitizes (≤ 40, codes unique and
+ *  uppercased) and the card shows what was stored, so a dropped row is visible. */
+export async function saveRiserBoxTypesAction(rows: unknown): Promise<{ ok: true; types: CRBoxType[] } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  try {
+    const types = await saveRiserBoxTypes(rows);
+    revalidatePath("/design/grid/settings");
+    revalidatePath("/design/grid", "layout");
+    return { ok: true, types };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not save the box types." };
+  }
 }
 
 /* ----------------------------- Equipment map (#211) ----------------------------- */

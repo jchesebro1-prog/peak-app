@@ -17,7 +17,7 @@ import { parseVirtualPartId, virtualPartsFor } from "@/lib/design/grid-virtual-p
 import type { CatalogPart } from "@/lib/stores/catalog";
 import type { GridSymbol } from "@/lib/stores/grid-catalog";
 import type { GridProject } from "@/lib/stores/grid-projects";
-import { bomLines, bomTotals, curtainLines, routeLines, type BomLine } from "@/lib/design/grid-bom";
+import { bomLines, bomTotals, curtainLines, type BomLine } from "@/lib/design/grid-bom";
 import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { defaultOptionId, ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options";
@@ -25,7 +25,12 @@ import { riserLinksOf } from "@/lib/design/grid-riser-doc";
 import { customItemBomLines, customItemsCost, customItemsOf } from "@/lib/design/grid-custom-items";
 import { accessoriesCost, accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { autoEstimateFor } from "@/lib/design/grid-auto-model";
-import { groupedBomLines, isBomGroupKey, type BomGroupKey, type GroupablePart } from "@/lib/design/grid-bom-groups";
+import { groupedBomLines, isEditableBomGroupKey, type BomGroupKey, type GroupablePart } from "@/lib/design/grid-bom-groups";
+import { liveConduitRiser } from "@/lib/design/conduit-riser/live";
+import { riserBom, riserEndLabeler, type RiserBomPart } from "@/lib/design/conduit-riser/bom";
+import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
+import { getConduitSizes } from "@/lib/stores/conduit-sizes";
+import { designatorDigitsOf } from "@/lib/settings";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { getSettings } from "@/lib/settings";
@@ -83,6 +88,10 @@ export type GridQuoteInputs = {
    *  editor groups its BOM by (gridPartsFrom with the category map and device
    *  types), so a line's labor heading is the heading it prints under. */
   groupParts: ReadonlyArray<GridGroupPart>;
+  /** #321: Estimating Rules → Conduit sizes (getConduitSizes) — read when absent. */
+  conduitSizes?: ConduitSize[];
+  /** #321: digits a designator prints with, for a refusal's run names — read when absent. */
+  designatorDigits?: 1 | 2;
 };
 
 /**
@@ -100,7 +109,14 @@ export async function loadGridQuoteInputs(
   opts: { location?: boolean } = {}
 ): Promise<GridQuoteInputs> {
   const anyVirtual = projects.some((p) => (p.placements || []).some((pl) => parseVirtualPartId(pl.partId) !== null));
-  const [catalog, symbols, wireLabor, sewingPct] = await Promise.all([listCatalog(), listGridSymbols(), loadWireLaborRules(), loadCurtainSewingPct()]);
+  const [catalog, symbols, wireLabor, sewingPct, conduitSizes, settings] = await Promise.all([
+    listCatalog(),
+    listGridSymbols(),
+    loadWireLaborRules(),
+    loadCurtainSewingPct(),
+    getConduitSizes(),
+    getSettings(),
+  ]);
   const [equip, groupParts] = await Promise.all([
     anyVirtual ? loadEquipPriceCtx({ catalog }) : Promise.resolve(null),
     loadGridGroupParts(symbols, catalog),
@@ -111,7 +127,10 @@ export async function loadGridQuoteInputs(
     if (!tiers.has(k)) tiers.set(k, resolveTier(customerId, contactName));
     return tiers.get(k)!;
   };
-  return { catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, sewingPct, groupParts };
+  return {
+    catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, sewingPct, groupParts,
+    conduitSizes, designatorDigits: designatorDigitsOf(settings),
+  };
 }
 
 export async function buildGridQuote(
@@ -201,7 +220,42 @@ export async function buildGridQuote(
 
   const devLines = bomLines(placements, tierCatalog);
   const devTotals = bomTotals(placements, tierCatalog);
-  const wires = routeLines(routes, tierCatalog, project.calibrations || [], riserLinks);
+
+  // #321: the conduit riser — wire inside a run whose wire pricing is off is
+  // by others (off the quote); a run whose conduit is priced adds its conduit
+  // part by the foot, tier-priced like every Grid line; anything that can't
+  // price refuses the quote by name. The editor's live BOM runs the same
+  // riserBom. An estimate-owned option (#314) prices nothing from the riser.
+  const estimateOwned = option.estimateOwned === true;
+  const conduitDoc = liveConduitRiser(project, optionId);
+  const riserPriced = !estimateOwned && conduitDoc.runs.length > 0;
+  const conduitSizes = !riserPriced ? [] : inputs?.conduitSizes ?? (await getConduitSizes());
+  const digits = !riserPriced ? 1 : inputs?.designatorDigits ?? designatorDigitsOf(await getSettings());
+  const catalogById = new Map(catalog.map((p) => [p.id, p]));
+  const conduitParts = new Map<string, RiserBomPart>();
+  for (const s of conduitSizes) {
+    const p = s.partId ? catalogById.get(s.partId) : undefined;
+    if (!p || conduitParts.has(p.id)) continue;
+    const tiered = isTierPriced(p.cost, tier.margin);
+    conduitParts.set(p.id, { desc: p.desc, unit: p.unit, cost: p.cost, list: tiered ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100 : p.list });
+    if (!tiered) fallbackKeys.add(p.id);
+  }
+  const descById = new Map(tierCatalog.map((p) => [p.id, p.desc]));
+  const riser = riserBom({
+    doc: conduitDoc,
+    estimateOwned,
+    routes,
+    links: riserLinks,
+    cals: project.calibrations || [],
+    parts: tierCatalog,
+    conduitParts,
+    sizes: conduitSizes,
+    placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
+    labelOf: riserEndLabeler(conduitDoc, placements, (id) => descById.get(id), digits),
+  });
+  if (riser.refusals.length) return { ok: false, error: riser.refusals.map((s) => s + ".").join(" ") };
+  const wires = riser.wires;
+  const conduit = riser.conduit;
 
   // #227 late: curtains carry the sewing adder on top of the fabric rate.
   const sewingPct = inputs ? inputs.sewingPct : await loadCurtainSewingPct();
@@ -245,15 +299,17 @@ export async function buildGridQuote(
     accessories: acc,
     parts: [...groupParts, ...virtual],
     placements,
+    conduit,
   });
-  const material: Partial<Record<BomGroupKey, number>> = {};
-  for (const l of grouped) if (l.ext > 0) material[l.group] = (material[l.group] ?? 0) + l.ext;
+  // #321: priced conduit carries no labor — the Conduit heading is skipped.
+  const material: Partial<Record<Exclude<BomGroupKey, "conduit">, number>> = {};
+  for (const l of grouped) if (l.ext > 0 && l.group !== "conduit") material[l.group] = (material[l.group] ?? 0) + l.ext;
   const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
   const laborTier = (sys: string): TierKey | null =>
     (sys !== "general" ? est?.tierByScope[sys as keyof typeof est.tierByScope] : undefined) ?? option.tier ?? null;
   // Only BOM headings take an override (setLaborOverride's rule), whatever an older doc holds.
   const overrides: LaborOverrides = {};
-  for (const [k, v] of Object.entries(sanitizeLaborOverrides(option.laborOverrides))) if (isBomGroupKey(k)) overrides[k] = v;
+  for (const [k, v] of Object.entries(sanitizeLaborOverrides(option.laborOverrides))) if (isEditableBomGroupKey(k)) overrides[k] = v;
   const laborLines = gridLaborLines(material, laborTier, wireLabor, overrides);
   const laborCostFrac = tier.margin >= 0 && tier.margin < 0.95 ? 1 - tier.margin : LABOR_COST_FRAC_FALLBACK;
   const labor = laborLines
@@ -264,12 +320,13 @@ export async function buildGridQuote(
     ...devLines,
     ...acc,
     ...wires.lines,
+    ...conduit,
     ...curtains,
     ...custom,
     ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
   ];
-  const value = devTotals.value + accValue + wires.value + curtainValue + customValue + labor.reduce((a, l) => a + l.ext, 0);
-  const cost = devTotals.cost + accCost + wires.cost + curtainCostTotal + customCost + labor.reduce((a, l) => a + l.cost, 0);
+  const value = devTotals.value + accValue + wires.value + riser.conduitValue + curtainValue + customValue + labor.reduce((a, l) => a + l.ext, 0);
+  const cost = devTotals.cost + accCost + wires.cost + riser.conduitCost + curtainCostTotal + customCost + labor.reduce((a, l) => a + l.cost, 0);
   const margin = value > 0 ? (value - cost) / value : 0;
   const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
 

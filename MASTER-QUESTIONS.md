@@ -472,6 +472,18 @@ Fix (D712–D724).
   already right to a file and apply with `-- --apply --yes --skip <file>`.
   ✦ run the re-check in production after deploy ☐ accept backfilled venues
   as verified
+## R. Krisp meeting matcher (built 2026-10-10, #323) — ANSWERED 2026-10-10 (Jeff)
+
+Jeff confirmed all four calls as built (logged as D762 in DECISIONS.md):
+
+- ~~**R1.** Waiting-on-customer tasks stay out of `/queue` and the Google Tasks
+  mirror; they show on Home under "Waiting on others" and on the company/venue
+  page.~~ **ANSWERED: keep as built.**
+- ~~**R2.** A to-do filed from an internal-only meeting becomes an ordinary task,
+  visible to all staff on `/calendar` Everyone.~~ **ANSWERED: keep as built.**
+- ~~**R3.** Recordings under 3 minutes are "noise".~~ **ANSWERED: 3 minutes is right.**
+- ~~**R4.** Sharing with a customer shows the meeting to every portal grant at that
+  customer.~~ **ANSWERED: keep as built.**
 
 ---
 

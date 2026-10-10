@@ -15,6 +15,7 @@ import type { CurtainBottomFinish, CurtainMountTypeId, CurtainTopFinish } from "
 // margin) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
 import type { GridShape } from "./grid-symbols";
+import type { TagFields } from "./conduit-riser/tags";
 // Pure (no store/db imports) — safe in this client-safe module.
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 // Pure and import-free (#304) — client-safe.
@@ -40,6 +41,11 @@ export type PartLite = {
    *  only needs to know whether to render a link to the authenticated
    *  /api/part-datasheet/<sku> proxy, which bridges to the document viewer. */
   hasDatasheet?: boolean;
+  /** #321: the catalog part's own designator code (Bray's CRO) — wins over
+   *  its device type's code when a device is numbered. */
+  designatorCode?: string;
+  /** #321: the part's riser tag defaults (BOX · FACE · MOUNT · HT · P/D). */
+  tagDefaults?: TagFields;
   /** Resolved beta group (Task 6, punch #39) — `groupOf(part, map)` run
    *  server-side against the admin-editable category map; null when the
    *  part's category has no group mapping (legacy taxonomy, surfaced in the

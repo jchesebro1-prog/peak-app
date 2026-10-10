@@ -14,7 +14,7 @@
  */
 
 import type { CatalogPart } from "@/lib/stores/catalog";
-import type { AppSettingsData } from "@/lib/settings";
+import { designatorDigitsOf, type AppSettingsData } from "@/lib/settings";
 import type { GridProject } from "@/lib/stores/grid-projects";
 import type { GridSymbol } from "@/lib/stores/grid-catalog";
 import type { DeviceTypeContext } from "@/lib/design/device-types";
@@ -59,7 +59,8 @@ export async function scheduleForOption(
   const spaces = project.spaces || [];
   // #320: a device not yet numbered (a design the editor hasn't opened since)
   // lists the number the editor will give it — computed here, never written.
-  const placements = fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project));
+  const digits = designatorDigitsOf(settings);
+  const placements = fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits));
   const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings, deviceTypes.types) });
   return buildSchedule({
     placements,
@@ -67,5 +68,6 @@ export async function scheduleForOption(
     descOf: (pid) => partById.get(pid)?.desc,
     modelOf: (pid) => scheduleModelOf(partById.get(pid)),
     wires: scheduleWiresFromView(view),
+    digits,
   });
 }

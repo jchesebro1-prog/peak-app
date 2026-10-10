@@ -9435,6 +9435,7 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
 import { registerFixture } from "./test-fixtures";
 import { driveTimeKeysChecks, driveTimeStateChecks, driveTimeVenueStampChecks, driveTimePlaceBookChecks, driveTimeFixChecks, driveTimePlanChecks, driveTimePrefsChecks, driveTimeDiffChecks, driveTimeLoaderChecks, driveTimeSyncChecks, driveTimeNoStraightLinePins, driveTimeAgendaChecks, driveTimeTriggerPins, driveTimeWorklistChecks, driveTimeFixUiPins, driveTimeBookingPins, driveTimeTriageFlagChecks, driveTimeFinalFixChecks, driveTimeRound2Checks } from "./test-drive-time";
 import { siteVisitsActionChecks, siteVisitsAgendaChecks, siteVisitsAttendeeChecks, siteVisitsBookingUiPins, siteVisitsConflictChecks, siteVisitsEditPins, siteVisitsInviteChecks, siteVisitsLoaderChecks, siteVisitsNearbyChecks, siteVisitsSettingsChecks } from "./test-site-visits";
+import { meetings323StoreChecks, meetings323MatchChecks, meetings323VisibilityChecks, meetings323RenderChecks, meetings323SyncChecks, meetings323ActionChecks, meetings323UiPins, meetings323ProjectionChecks, meetings323EverywherePins, meetings323EverywhereChecks, meetings323FinalChecks } from "./test-meetings-323";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
 import { exportObjectsFor } from "@/app/(app)/import/registry";
@@ -11531,6 +11532,17 @@ seeded()
   .then(() => sheetAdjust318UiPins())
   .then(() => sheetAdjust318DialogGuardPins())
   .then(() => sheetAdjust318StaleSheetChecks())
+  .then(() => conduitRiser321Checks())
+  .then(() => conduitRiser321B1Checks())
+  .then(() => conduitRiser321B2Checks())
+  .then(() => conduitRiser321B3Checks())
+  .then(() => conduitRiser321B4Checks())
+  .then(() => conduitRiser321B5Checks())
+  .then(() => conduitRiser321B6Checks())
+  .then(() => conduitRiser321B7Checks())
+  .then(() => conduitRiser321B8Checks())
+  .then(() => conduitRiser321B9Checks())
+  .then(() => conduitRiser321FinalFixChecks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -11587,6 +11599,17 @@ seeded()
   .then(() => triageHomeChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
+  .then(() => meetings323StoreChecks(ok))
+  .then(() => meetings323MatchChecks(ok))
+  .then(() => meetings323VisibilityChecks(ok))
+  .then(() => meetings323RenderChecks(ok))
+  .then(() => meetings323SyncChecks(ok))
+  .then(() => meetings323ActionChecks(ok))
+  .then(() => meetings323UiPins(ok))
+  .then(() => meetings323ProjectionChecks(ok))
+  .then(() => meetings323EverywherePins(ok))
+  .then(() => meetings323EverywhereChecks(ok))
+  .then(() => meetings323FinalChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -18506,9 +18529,9 @@ import {
 /* --- #209 grid drawing set — Task 4: RiserLinks reach the quote and the editor BOM --- */
 {
   const gdsQuoteSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
-  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && gdsQuoteSrc.includes("routeLines(routes, tierCatalog, project.calibrations || [], riserLinks)"), "#209 quote: RiserLinks price as wire lines on the draft quote");
+  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && /riserBom\(\{[^}]*routes,\s*links: riserLinks,\s*cals: project\.calibrations \|\| \[\],\s*parts: tierCatalog,/.test(gdsQuoteSrc) /* #321: through riserBom */, "#209 quote: RiserLinks price as wire lines on the draft quote");
   const gdsEditorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
-  ok(gdsEditorSrc.includes("routeLines(routes || [], parts, project.calibrations, riserLinks)"), "#209 editor: the live BOM sidebar counts RiserLinks too");
+  ok(/riserBom\(\{[^}]*routes: routes \|\| \[\],\s*links: riserLinks,\s*cals: project\.calibrations,\s*parts,/.test(gdsEditorSrc) /* #321: through riserBom */, "#209 editor: the live BOM sidebar counts RiserLinks too");
   const gdsStoreSrc = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
   ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#209 revisions: snapshotOf copies the riser document");
   const gdsActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/actions.ts"), "utf8");
@@ -18958,8 +18981,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th).
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 11 && (actionsSrc.match(/^export async function/gm) || []).length === 11, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th); #321 adds saveDesignatorDigitsAction (the 12th) and saveRiserBoxTypesAction (the 13th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 13 && (actionsSrc.match(/^export async function/gm) || []).length === 13, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -24410,7 +24433,7 @@ import type { PartLite as P230 } from "@/lib/design/grid-bom";
 
 {
   // --- groups + the grouping rule
-  ok(g230Groups.map((g) => g.label).join("|") === "Rigging|Curtains|Lighting|Audio|Video|Controls|General", "#230 groups: seven headings in Jeff's order");
+  ok(g230Groups.map((g) => g.label).join("|") === "Rigging|Curtains|Lighting|Audio|Video|Controls|General|Conduit", "#230 groups: seven headings in Jeff's order (then #321's Conduit)");
   ok(g230IsKey("controls") && g230IsKey("general") && !g230IsKey("Controls") && !g230IsKey("acoustical"), "#230 groups: keys are the lower-case system keys");
   ok(g230GroupOf({ gridScope: "Audio", deviceType: "speakers" }) === "audio" && g230GroupOf({ gridScope: "Unscoped", deviceType: "cable-connectors" }) === "general" && g230GroupOf(undefined) === "general",
     "#230 groups: a part files by its (device-type) scope; Unscoped → General");
@@ -29633,16 +29656,17 @@ import {
   // #248 Task 3 added a Service item between Catalog and Quote — reindexed
   // here rather than left pinned to the pre-#248 shape.
   // #288 added My quotes before the cart item and renamed "Quote" → "Cart".
+  // #323 added Meeting notes before the cart item — Cart reindexed 4 → 5.
   const nav = d245Nav("catalog", { cartCount: 3 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]) && nav[1].active === true && !nav[0].active && nav[4].badge === 3 && nav[4].href === "/portal/catalog/quote",
-    "#245 nav: Home · Catalog · Service · My quotes · Cart (N), Catalog active");
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Meeting notes", "Cart"]) && nav[1].active === true && !nav[0].active && nav[5].badge === 3 && nav[5].href === "/portal/catalog/quote",
+    "#245 nav: Home · Catalog · Service · My quotes · Meeting notes · Cart (N), Catalog active");
   const pvNav = d245Nav("home", { previewCid: "c 1" });
   ok(
     pvNav[0].href === "/portal?preview=c%201" &&
       pvNav[1].href === "/portal/catalog?preview=c%201" &&
       pvNav[2].href === "/portal/service?preview=c%201" &&
-      pvNav[4].disabled === true &&
-      pvNav[4].badge === undefined,
+      pvNav[5].disabled === true &&
+      pvNav[5].badge === undefined,
     "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Cart"
   );
 }
@@ -43194,13 +43218,14 @@ import {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   // ---- nav ----
   const nav = n288Nav("my-quotes", { cartCount: 2 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]), "#288 nav: Home · Catalog · Service · My quotes · Cart, in that order");
+  // #323 added Meeting notes between My quotes and Cart — Cart reindexed 4 → 5.
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Meeting notes", "Cart"]), "#288 nav: Home · Catalog · Service · My quotes · Meeting notes · Cart, in that order");
   ok(nav[3]?.href === "/portal/my-quotes" && nav[3]?.active === true && nav.filter((n) => n.active).length === 1, "#288 nav: My quotes links /portal/my-quotes and is the one active item on 'my-quotes'");
-  ok(nav[4]?.href === "/portal/catalog/quote" && nav[4]?.badge === 2 && !nav[4]?.disabled, "#288 nav: Cart keeps the cart href and its (N) badge");
-  ok(n288Nav("quote", { cartCount: 0 })[4]?.active === true && !n288Nav("home")[3]?.active, "#288 nav: 'quote' still marks Cart active; Home doesn't mark My quotes");
+  ok(nav[5]?.href === "/portal/catalog/quote" && nav[5]?.badge === 2 && !nav[5]?.disabled, "#288 nav: Cart keeps the cart href and its (N) badge");
+  ok(n288Nav("quote", { cartCount: 0 })[5]?.active === true && !n288Nav("home")[3]?.active, "#288 nav: 'quote' still marks Cart active; Home doesn't mark My quotes");
   const pv = n288Nav("my-quotes", { previewCid: "c 1" });
   ok(pv[3]?.href === "/portal/my-quotes?preview=c%201" && !pv[3]?.disabled && pv[3]?.active === true, "#288 nav: in a team preview My quotes stays enabled and carries ?preview=");
-  ok(pv[4]?.disabled === true && pv[4]?.badge === undefined && pv[4]?.label === "Cart", "#288 nav: in a team preview Cart is disabled with no count");
+  ok(pv[5]?.disabled === true && pv[5]?.badge === undefined && pv[5]?.label === "Cart", "#288 nav: in a team preview Cart is disabled with no count");
 
   // ---- my-quotes view model ----
   const NOW = Date.UTC(2026, 9, 1, 15);
@@ -60153,6 +60178,347 @@ async function sheetAdjust318StaleSheetChecks(): Promise<void> {
   }
 }
 
+/* ---------------- #321: Grid conduit riser — pure engine ---------------- */
+/** #321 — a tiny DXF reader shared by the riser checks: group-code pairs,
+ *  sections, blocks, inserts, attributes. */
+const readDxf321 = (dxf: string) => {
+  const lines = dxf.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  const pairs: [number, string][] = [];
+  for (let i = 0; i + 1 < lines.length; i += 2) pairs.push([Number(lines[i]), lines[i + 1]]);
+  const zeros = pairs.filter(([c]) => c === 0).map(([, v]) => v);
+  const count = (v: string) => zeros.filter((z) => z === v).length;
+  const blocks = new Set<string>();
+  const attdefs = new Map<string, string[]>();
+  let curBlock = "";
+  let ent = "";
+  const insertNames: string[] = [];
+  const attribsPer: string[][] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    const [c, v] = pairs[i];
+    if (c === 0) ent = v;
+    if (c === 0 && v === "ENDBLK") curBlock = "";
+    if (c === 2 && ent === "BLOCK") { curBlock = v; blocks.add(v); attdefs.set(v, []); }
+    if (c === 2 && ent === "ATTDEF" && curBlock) attdefs.get(curBlock)!.push(v);
+    if (c === 2 && ent === "INSERT") { insertNames.push(v); attribsPer.push([]); }
+    if (c === 2 && ent === "ATTRIB") attribsPer[attribsPer.length - 1].push(v);
+  }
+  return { lines, pairs, zeros, count, blocks, attdefs, insertNames, attribsPer };
+};
+
+async function conduitRiser321Checks(): Promise<void> {
+  const M = await import("@/lib/design/conduit-riser/model");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  const S = await import("@/lib/design/conduit-riser/suggest");
+  const D = await import("@/lib/design/conduit-riser/derive");
+  const P = await import("@/lib/design/conduit-riser/pricing");
+  const TB = await import("@/lib/design/conduit-riser/tables");
+  const L = await import("@/lib/design/conduit-riser/layout");
+  const G = await import("@/lib/design/conduit-riser/drawing");
+  const SV = await import("@/lib/design/conduit-riser/svg");
+  const X = await import("@/lib/design/conduit-riser/dxf");
+  type Dev = import("@/lib/design/conduit-riser/input").CRDevice;
+  type Wire = import("@/lib/design/conduit-riser/input").CRWire;
+  const J = (v: unknown) => JSON.stringify(v);
+  let seq = 0;
+  const makeId: import("@/lib/design/conduit-riser/model").MakeId = (p) => `${p}${(++seq).toString(16).padStart(12, "0")}`;
+
+  // ---- model
+  const empty = M.normalizeConduitRiserDoc(null);
+  ok(empty.details.length === 1 && empty.details[0].n === "1" && empty.defaults.size === '3/4"' && !empty.defaults.priceWire && !empty.defaults.priceConduit &&
+     J(empty.alwaysShow) === J(["control-networking", "dimming-power", "racks-cases"]),
+    "#321 normalize: junk → one 'Lighting control' detail, 3/4\" default, both pricing defaults off, lighting always-show types");
+  const messy = M.normalizeConduitRiserDoc({
+    details: [{ id: "dt-a", n: "1", name: "PAC" }, { id: "dt-a", n: "2", name: "dup" }, { id: "dt-b", n: "", name: "" }],
+    tags: { "gp-1": { x: 1, y: 2, detailId: "dt-a" }, "gp-2": { x: 1, y: 2, detailId: "dt-gone" }, "gp-3": { x: "1", y: 2, detailId: "dt-a" } },
+    stubs: [{ id: "st-1", label: "TO JB1", detailId: "dt-a" }, { id: "st-2", label: "", detailId: "dt-a" }],
+    runs: [
+      { id: "cr-1", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "stub", stubId: "st-1" }, routeIds: ["wr-1", "wr-1"], linkIds: [], size: "", style: "zz", lengthFt: 9e9 },
+      { id: "cr-2", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-1" } },
+      { id: "cr-3", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "stub", stubId: "st-gone" } },
+      { id: "cr-4", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-9" }, routeIds: ["wr-1", "wr-2"], priceWire: "yes" },
+    ],
+    powerTypes: [{ letter: "a", type: "Normal" }, { letter: "A", type: "dup" }, { letter: "", type: "x" }],
+    notes: [{ id: "nt-1", text: "  one  " }, { id: "nt-2", text: "" }],
+    defaults: { size: "1\"", priceWire: "true", priceConduit: true },
+  });
+  ok(messy.details.length === 1 && Object.keys(messy.tags).length === 1 && messy.stubs.length === 1 &&
+     J(messy.runs.map((r) => r.id)) === J(["cr-1", "cr-4"]) && J(messy.runs[0].routeIds) === J(["wr-1"]) && messy.runs[0].size === '3/4"' &&
+     messy.runs[0].style === "conduit" && messy.runs[0].lengthFt === M.MAX_RUN_FT && J(messy.runs[1].routeIds) === J(["wr-2"]) && messy.runs[1].priceWire === undefined &&
+     J(messy.powerTypes) === J([{ letter: "A", type: "Normal", config: "", input: "" }]) && messy.notes.length === 1 && messy.notes[0].text === "one" &&
+     J(messy.defaults) === J({ size: '1"', priceWire: false, priceConduit: true }),
+    "#321 normalize drops dup/blank details, dangling tags/stubs/runs, self-loops; a wire stays in only its first run; caps length; booleans must be booleans");
+  const live = { placementIds: new Set(["gp-1"]), routeIds: new Set<string>(), linkIds: new Set<string>(), spaceIds: new Set<string>() };
+  const pruned = M.pruneConduitRiser(messy, live);
+  ok(J(pruned.runs.map((r) => [r.id, r.routeIds])) === J([["cr-1", []]]) && M.pruneConduitRiser(pruned, live) === pruned,
+    "#321 prune: a deleted device takes its runs; a deleted wire leaves an empty conduit; nothing to prune → the same object");
+  const ids = new Set(["gp-1", "gp-2"]);
+  let doc = M.emptyConduitRiserDoc();
+  const step = (op: import("@/lib/design/conduit-riser/model").CROp) => { const r = M.patchConduitRiser(doc, op, makeId, ids); doc = r.doc; return r.changed; };
+  ok(!step({ op: "addConduitRun", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-1" } }) &&
+     !step({ op: "addConduitRun", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-x" } }) &&
+     step({ op: "addConduitRun", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-2" } }) &&
+     doc.runs.length === 1 && doc.runs[0].routeIds.length === 0,
+    "#321 addConduitRun: refuses a self-loop and an unknown device; makes an empty conduit-only run");
+  const rid = doc.runs[0].id;
+  ok(step({ op: "updateRun", id: rid, priceWire: true, lengthFt: 12.34, laneX: 3 }) && doc.runs[0].priceWire === true && doc.runs[0].lengthFt === 12.3 &&
+     step({ op: "updateRun", id: rid, priceWire: null, lengthFt: null }) && doc.runs[0].priceWire === undefined && doc.runs[0].lengthFt === undefined,
+    "#321 updateRun: per-run overrides set and clear back to the design default (null)");
+  ok(!step({ op: "removeDetail", id: "dt-main" }) && step({ op: "addDetail", name: "Lobby", allSpaces: true, spaceIds: [] }) && doc.details[1].n === "2" &&
+     step({ op: "moveTag", placementId: "gp-1", x: 2, y: 3, detailId: "dt-main" }) && step({ op: "moveLevel", detailId: "dt-main", levelId: "lv-1", y: 4 }) &&
+     step({ op: "resetLayout", detailId: "dt-main" }) && !doc.tags["gp-1"] && !doc.levelY["dt-main"] && doc.runs[0].laneX === undefined,
+    "#321 the last detail can't be removed; a new detail numbers next; Reset layout clears pins, level moves and lanes in that detail");
+  ok(M.compareDetailN("1.1", "1") > 0 && M.compareDetailN("1.2", "2") < 0 && M.compareDetailN("10", "9") > 0, "#321 detail numbers sort 1 < 1.1 < 1.2 < 2 < 10");
+
+  // ---- tags
+  ok(J(T.cleanTagFields({ box: " e ", face: "dmxo", mount: "cs", height: '18"', pd: "p / d", junk: 1 })) === J({ box: "E", face: "DMXO", mount: "CS", height: '18"', pd: "P/D" }) &&
+     T.cleanTagFields({ pd: "X" }) === undefined && J(T.cleanPlacementTag({ location: "Elec 1", power: "b", box: "" })) === J({ box: "", location: "Elec 1", power: "B" }),
+    "#321 tag fields: uppercased codes, P/D vocabulary only, a blank string is a deliberate blank");
+  const eff = T.effectiveTag({ box: "", mount: "FM" }, { box: "E", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" }, "Elec 4");
+  ok(J(eff) === J({ box: "", face: "DMXO", mount: "FM", height: '18"', pd: "P/D", location: "Elec 4", power: "", contents: "" }),
+    "#321 effectiveTag: placement overrides part defaults per field; location defaults to the space name");
+
+  // ---- the TL1.5-style fixture
+  const wt = [
+    { id: "net", label: "Belden 1583A", symbol: "N", signal: "Network" },
+    { id: "dmx", label: "Belden 1583A", symbol: "D", signal: "DMX" },
+    { id: "ue", label: "Belden 8471", symbol: "UE", signal: "EchoConnect" },
+    { id: "cc", label: "(2) #16 AWG stranded", symbol: "CC", signal: "Contact closure" },
+  ];
+  const levels = [
+    { id: "lv-cat", label: "Catwalk", elevation: "+24'", order: 0 },
+    { id: "lv-stage", label: "Stage", order: 1 },
+  ];
+  const dev = (id: string, label: string, typeKey: string | null, levelId: string | null, extra: Partial<Dev> = {}): Dev => ({
+    id, label, desc: `${label} desc`, model: "", typeKey, inSystem: true, spaceId: "sp-1", spaceName: "Stage", levelId,
+    tag: T.effectiveTag(undefined, { box: "E", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" }, "Stage"), ...extra,
+  });
+  const devices: Dev[] = [
+    dev("gp-er", "ER-01", "racks-cases", "lv-stage", { rack: { items: [{ desc: "Network switch", qty: 1 }] } }),
+    dev("gp-dr", "DR-01", "dimming-power", "lv-stage", { model: "Unison DRd6", tag: { ...T.effectiveTag({ power: "B", contents: "(6) LED10" }, undefined, "Mech") } }),
+    dev("gp-c1", "CRO-01", "control-networking", "lv-cat"),
+    dev("gp-c2", "CRO-02", "control-networking", "lv-cat"),
+    dev("gp-e6", "EP-06", "control-networking", "lv-stage"),
+    dev("gp-e8", "EP-08", "control-networking", "lv-stage"),
+    dev("gp-lx", "LX-01–24", "fixtures", "lv-cat"),
+    dev("gp-sp", "SPK-01", "speakers", "lv-cat", { inSystem: false }),
+  ];
+  const wire = (id: string, from: string | undefined, to: string | undefined, sig: string | null, kind: "route" | "link" = "route", lengthFt: number | null = 40): Wire => {
+    const t = wt.find((x) => x.id === sig);
+    return { id, kind, from, to, partId: `P-${sig}`, cable: t ? t.label : "Mystery cable", signal: t ? { wireTypeId: t.id, symbol: t.symbol, signal: t.signal } : null, lengthFt, inSystem: true };
+  };
+  const wires: Wire[] = [
+    wire("w1", "gp-er", "gp-c1", "dmx", "route", 50), wire("w2", "gp-c1", "gp-er", "net", "route", 62.5),
+    wire("w3", "gp-er", "gp-c2", "dmx"), wire("w4", "gp-er", "gp-dr", "net"),
+    wire("w5", "gp-e6", "gp-e8", "ue", "link", 30), wire("w6", "gp-dr", "gp-e6", null),
+    wire("w7", "gp-er", undefined, "dmx"), { ...wire("w8", "gp-sp", "gp-er", "net"), inSystem: false },
+  ];
+
+  // ---- suggestions
+  let cr = M.emptyConduitRiserDoc();
+  const sug = S.suggestions(cr, wires);
+  ok(J(sug.items.map((s) => [s.key, s.kind, s.routeIds, s.linkIds])) === J([
+      ["gp-c1|gp-er", "new", ["w1", "w2"], []], ["gp-c2|gp-er", "new", ["w3"], []], ["gp-dr|gp-e6", "new", ["w6"], []],
+      ["gp-dr|gp-er", "new", ["w4"], []], ["gp-e6|gp-e8", "new", [], ["w5"]],
+    ]) && J(sug.loose) === J(["w7"]),
+    "#321 suggestions: wires joining the same two devices merge (both directions); out-of-system wires ignored; a wire with one end free is 'not connected'");
+  const first = sug.items[0];
+  cr = S.acceptSuggestion(cr, first, makeId).doc;
+  ok(cr.runs.length === 1 && J(cr.runs[0].routeIds) === J(["w1", "w2"]) && cr.runs[0].size === '3/4"' && !S.acceptSuggestion(cr, first, makeId).changed,
+    "#321 accept makes one run with every wire of the pair; accepting again changes nothing");
+  const later = S.suggestions(cr, [...wires, wire("w9", "gp-er", "gp-c1", "net")]);
+  const join = later.items.find((s) => s.key === "gp-c1|gp-er")!;
+  ok(join.kind === "join" && J(join.routeIds) === J(["w9"]) && J(S.acceptSuggestion(cr, join, makeId).doc.runs[0].routeIds) === J(["w1", "w2", "w9"]),
+    "#321 a new wire between an accepted pair suggests 'joins run' and accepting adds it to that run");
+  const toDismiss = sug.items.find((s) => s.key === "gp-dr|gp-e6")!;
+  const dismissed = S.dismissSuggestion(cr, toDismiss).doc;
+  ok(!S.suggestions(dismissed, wires).items.some((s) => s.key === "gp-dr|gp-e6") &&
+     S.suggestions(dismissed, [...wires, wire("w10", "gp-e6", "gp-dr", "ue")]).items.some((s) => s.key === "gp-dr|gp-e6"),
+    "#321 Dismiss hides a pair until a wire the dismissal didn't see is drawn");
+  for (const s of S.suggestions(cr, wires).items) cr = S.acceptSuggestion(cr, s, makeId).doc;
+  cr = { ...cr, stubs: [{ id: "st-1", label: "TO JB1", detailId: "dt-main" }] };
+  cr = { ...cr, runs: [...cr.runs, { id: "cr-stub", a: { kind: "placement", placementId: "gp-c2" }, b: { kind: "stub", stubId: "st-1" }, routeIds: [], linkIds: [], size: '3/4"', style: "cableMgmt", signals: ["cc"] }] };
+  cr = { ...cr, powerTypes: [...M.BRAY_POWER_TYPES].slice(0, 2) };
+
+  // ---- derive
+  const input = { doc: cr, devices, wires, levels, wireTypes: wt };
+  const view = D.deriveView(input);
+  const det = view.details[0];
+  ok(J(det.tags.map((t) => t.device.label)) === J(["CRO-01", "CRO-02", "DR-01", "EP-06", "EP-08", "ER-01"]) && det.headEndId === "gp-er",
+    "#321 derive: a device gets a tag when it's in a run or an always-show type in the system (fixtures and speakers don't); the head end is the most-connected (ER-01)");
+  const toE6 = det.runs.find((r) => J([r.a, r.b].map((e) => (e.kind === "tag" ? e.id : ""))).includes("gp-e6") && J([r.a, r.b]).includes("gp-dr"))!;
+  ok(toE6.a.kind === "tag" && toE6.a.id === "gp-dr" && J(toE6.unknownCables) === J(["Mystery cable"]) &&
+     view.warnings.includes("Mystery cable has no signal symbol — set it in Settings → Wire types"),
+    "#321 derive orients a chain run head-end side first (DR-01 → EP-06) and names a cable with no signal symbol");
+  const c1 = det.runs.find((r) => r.run.routeIds.includes("w1"))!;
+  const stubRun = det.runs.find((r) => r.run.id === "cr-stub")!;
+  ok(J(c1.signals.map((s) => s.symbol)) === J(["D", "N"]) && J(stubRun.signals.map((s) => s.symbol)) === J(["CC"]) && !stubRun.empty,
+    "#321 a run's bubbles are its wires' signal symbols, sorted; a stub run shows its display-only signals");
+  const split = { ...cr, details: [...cr.details, { id: "dt-2", n: "2", name: "Pit", allSpaces: false, spaceIds: ["sp-pit"] }], alwaysShow: [] as string[] };
+  split.details[0] = { ...split.details[0], allSpaces: false, spaceIds: ["sp-1"] };
+  const view2 = D.deriveView({ ...input, doc: split, devices: devices.map((d) => (d.id === "gp-c2" ? { ...d, spaceId: "sp-pit" } : d)) });
+  const ref = view2.details[0].runs.find((r) => r.run.routeIds.includes("w3"))!;
+  const inPit = view2.details[1];
+  ok(ref.b.kind === "ref" && ref.b.label === "TO CRO-02" && inPit.runs.some((r) => [r.a, r.b].some((e) => e.kind === "ref" && e.label === "TO ER-01")) &&
+     inPit.stubs.some((st) => st.id === "st-1") && !view2.details[0].stubs.length && !JSON.stringify(view2).includes("TO TO "),
+    "#321 a run between two details draws in both, the far end as a 'TO <ID>' stub; a stub follows its device's detail");
+
+  // ---- pricing
+  const wbo = P.wireByOthers(cr, false);
+  ok(wbo.routeIds.has("w1") && wbo.linkIds.has("w5") && P.wireByOthers(cr, true).routeIds.size === 0 &&
+     !P.wireByOthers({ ...cr, defaults: { ...cr.defaults, priceWire: true } }, false).routeIds.has("w1"),
+    "#321 wire in conduit is by others by default; turning the design default on prices it; an estimate-owned option excludes nothing");
+  const priced = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true } : r.id === "cr-stub" ? { ...r, priceConduit: true, style: "conduit" as const } : r)) };
+  const label = (e: import("@/lib/design/conduit-riser/model").RunEnd) => (e.kind === "placement" ? devices.find((d) => d.id === e.placementId)!.label : "TO JB1");
+  const dem = P.conduitDemand({ doc: priced, estimateOwned: false, wires, sizes: [{ size: '3/4"', partId: "EMT-34" }], labelOf: label });
+  ok(J(dem.lines) === J([{ partId: "EMT-34", size: '3/4"', feet: 63 }]) && J(dem.refusals) === J(["CRO-02 → TO JB1 needs a length"]),
+    "#321 priced conduit = its longest member wire (62.5 → 63 ft, rounded once per part); a priced run with no length refuses by name");
+  const dem2 = P.conduitDemand({ doc: priced, estimateOwned: false, wires, sizes: [], labelOf: label });
+  ok(dem2.refusals[0] === 'Conduit 3/4" has no part — set it in Estimating Rules → Conduit sizes' && dem2.lines.length === 0 &&
+     P.conduitDemand({ doc: priced, estimateOwned: true, wires, sizes: [], labelOf: label }).refusals.length === 0,
+    "#321 an unmapped conduit size refuses once by size; an estimate-owned option prices nothing");
+
+  // ---- tables
+  const tables = TB.riserTables({ view, doc: cr, wireTypes: wt, boxTypes: TB.BRAY_BOX_TYPES });
+  ok(J(tables.map((t) => t.key)) === J(["power", "wire", "line", "rack", "controls", "box"]) &&
+     J(tables[1].rows) === J([["CC", "(2) #16 AWG STRANDED", "CONTACT CLOSURE"], ["D", "(1) BELDEN 1583A", "DMX"], ["N", "(1) BELDEN 1583A", "NETWORK"], ["UE", "(1) BELDEN 8471", "ECHOCONNECT"]]) &&
+     J(tables[4].rows) === J([["DR-01", "UNISON DRD6", "(6) LED10"]]) && tables[3].title === "EQUIPMENT RACK CONTENTS — ER-01" && tables[5].rows.length === 22,
+    "#321 tables in Bray's order; the wire legend lists cables per symbol (a counted cable keeps its own count); power controls list dimming/power devices");
+  ok(TB.riserTables({ view: { details: [], warnings: [] }, doc: M.emptyConduitRiserDoc(), wireTypes: wt, boxTypes: [] }).length === 0, "#321 an empty riser prints no tables");
+
+  // ---- layout
+  const lay = L.layoutDetail(det, cr);
+  ok(J(lay) === J(L.layoutDetail(D.deriveView(input).details[0], cr)), "#321 layout is deterministic — same input, same picture");
+  const rects = lay.items.map((i) => i.rect);
+  const overlap = rects.some((a, i) => rects.some((b, j) => i < j && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y));
+  const er = lay.items.find((i) => i.id === "gp-er")!;
+  const cat = lay.levels.find((l) => l.id === "lv-cat")!;
+  const stage = lay.levels.find((l) => l.id === "lv-stage")!;
+  ok(!overlap && er.rect.x === L.MARGIN && lay.items.filter((i) => i.kind === "tag" && devices.find((d) => d.id === i.id)!.levelId === "lv-cat").every((i) => i.rect.y + i.rect.h < cat.y) &&
+     cat.y < stage.y && er.rect.y > cat.y && er.rect.y + er.rect.h < stage.y,
+    "#321 layout: no tags overlap; the head end is leftmost; tags sit above their own level line, levels top to bottom by order");
+  ok(lay.runs.every((r) => r.path.every((p, i) => i === 0 || p.x === r.path[i - 1].x || p.y === r.path[i - 1].y)),
+    "#321 every run is orthogonal");
+  const pinnedDoc = { ...cr, tags: { "gp-c1": { x: 12, y: 0.5, detailId: "dt-main" } } };
+  const lay2 = L.layoutDetail(D.deriveView({ ...input, doc: pinnedDoc }).details[0], pinnedDoc);
+  const pc1 = lay2.items.find((i) => i.id === "gp-c1")!;
+  ok(pc1.pinned && pc1.rect.x === 12 && pc1.rect.y === 0.5, "#321 a pinned tag keeps its stored position");
+
+  // ---- drawing, SVG, DXF
+  const g = G.detailGeometry(lay, det);
+  const pages = G.composeSheets({ details: [g], tables, notes: [{ id: "nt-1", n: 1, text: "Wire pull by others" }], area: { w: 33, h: 21 } });
+  const geo = pages[0].geo;
+  const svg = SV.geometryToSvg(geo, pages[0]);
+  const dxf = X.geometryToDxf(geo, pages[0]);
+  const inserts = geo.filter((x) => x.t === "insert");
+  ok(pages.length === 1 && inserts.filter((x) => x.t === "insert" && x.block === "PK_TAG").length === 6 &&
+     (svg.match(/data-block="PK_TAG"/g) || []).length === 6 && svg.includes(">CONTROL WIRE LEGEND<") && svg.includes("EP-06"),
+    "#321 one sheet: six tags, the tables and notes; SVG expands each block insert");
+  const { lines, pairs, zeros, count, blocks, attdefs, insertNames, attribsPer } = readDxf321(dxf);
+  ok(lines.length % 2 === 0 && pairs.every(([c]) => Number.isInteger(c)) && zeros[zeros.length - 1] === "EOF" &&
+     count("SECTION") === 4 && count("ENDSEC") === 4 && count("BLOCK") === count("ENDBLK") && count("TABLE") === count("ENDTAB") &&
+     pairs.some(([c, v]) => c === 1 && v === "AC1009"),
+    "#321 DXF: R12 (AC1009), even group-code pairs, balanced SECTION/BLOCK/TABLE, ends in EOF");
+  ok(insertNames.length === inserts.length && insertNames.every((n) => blocks.has(n)) &&
+     insertNames.every((n, i) => J(attribsPer[i]) === J(attdefs.get(n))) &&
+     J([...attdefs.get("PK_TAG")!]) === J(["ID", "LOC", "PD", "BOX", "FACE", "MOUNT", "HT"]),
+    "#321 DXF: every INSERT names a defined block and carries exactly its ATTDEFs (the tag block: ID, LOC, PD, BOX, FACE, MOUNT, HT)");
+  ok(pairs.some(([c, v]) => c === 2 && v === "PK-RISER-CABLEMGMT") && pairs.some(([c, v]) => c === 8 && v === "PK-RISER-CABLEMGMT") &&
+     X.dxfText("3Ø, 4 wire — LX-01–24 ×2 °") === "3%%c, 4 wire - LX-01-24 x2 %%d" && !/[^\x00-\x7e]/.test(dxf),
+    "#321 DXF: named PK-RISER layers in use; text is ASCII with AutoCAD's %%c/%%d codes");
+  ok(geo.filter((x) => x.t === "poly" && x.layer === "CABLEMGMT").length === 1 && svg.includes("stroke-dasharray"),
+    "#321 the cable-management run draws dashed in both outputs");
+
+  // ---- review fixes
+  {
+    let d2 = M.emptyConduitRiserDoc();
+    d2 = M.patchConduitRiser(d2, { op: "addConduitRun", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-2" } }, makeId, ids).doc;
+    d2 = M.patchConduitRiser(d2, { op: "updateRun", id: d2.runs[0].id, laneX: 5 }, makeId, ids).doc;
+    const reset = M.patchConduitRiser(d2, { op: "resetLayout", detailId: "dt-main", runIds: [d2.runs[0].id] }, makeId, ids).doc;
+    ok(reset.runs[0].laneX === undefined, "#321 Reset layout clears a dragged lane between two unpinned tags (the view passes the detail's run ids)");
+  }
+  {
+    const scoped = M.normalizeConduitRiserDoc({ details: [{ id: "dt-a", n: "1", name: "PAC", allSpaces: false, spaceIds: ["sp-x"] }, { id: "dt-b", n: "2", name: "All", allSpaces: true }] });
+    const gone = M.pruneConduitRiser(scoped, { placementIds: new Set(), routeIds: new Set(), linkIds: new Set(), spaceIds: new Set() });
+    const v = D.deriveView({ doc: gone, devices: [dev("gp-er", "ER-01", "racks-cases", null)], wires: [], levels, wireTypes: wt });
+    ok(gone.details[0].allSpaces === false && gone.details[0].spaceIds.length === 0 && v.details[0].tags.length === 0 && v.details[1].tags.length === 1 &&
+       M.normalizeConduitRiserDoc({ details: [{ id: "dt-x", n: "1", name: "Old", spaceIds: [] }] }).details[0].allSpaces === true,
+      "#321 a scoped detail whose spaces are all deleted covers nothing — it never turns into 'every space'; an older empty list still reads as all");
+  }
+  {
+    const moved = wires.map((w) => (w.id === "w1" ? { ...w, to: "gp-c2" } : w));
+    const v = D.deriveView({ ...input, wires: moved });
+    const c1run = v.details[0].runs.find((r) => r.run.routeIds.includes("w1"))!;
+    const s2 = S.suggestions(cr, moved).items.find((x) => x.key === "gp-c2|gp-er");
+    const ends = new Map(moved.map((w) => [`${w.kind}:${w.id}`, w.from && w.to ? M.pairKey(w.from, w.to) : null] as const));
+    const live2 = { placementIds: new Set(devices.map((x) => x.id)), routeIds: new Set(moved.filter((w) => w.kind === "route").map((w) => w.id)), linkIds: new Set(moved.filter((w) => w.kind === "link").map((w) => w.id)), spaceIds: new Set(["sp-1"]), wireEnds: ends };
+    ok(!c1run.members.some((w) => w.id === "w1") && s2?.kind === "join" && s2.routeIds.includes("w1") &&
+       !M.pruneConduitRiser(cr, live2).runs.some((r) => r.routeIds.includes("w1") && M.runPairKey(r) === "gp-c1|gp-er"),
+      "#321 a plan wire re-snapped to other devices leaves its old conduit, is suggested for its new pair, and prune drops it from the old run");
+  }
+  {
+    const forged = { key: "x|y", a: "gp-er", b: "gp-er", routeIds: ["zz"], linkIds: [], kind: "new" as const };
+    const liveIds = new Set(devices.map((x) => x.id));
+    ok(!S.acceptSuggestion(cr, forged, makeId, liveIds).changed &&
+       !S.acceptSuggestion(cr, { ...forged, key: "gp-er|gp-nope", b: "gp-nope" }, makeId, liveIds).changed &&
+       !S.acceptSuggestion(cr, { ...forged, key: "gp-c1|gp-dr", b: "gp-c1" }, makeId, liveIds).changed,
+      "#321 accept refuses a self-loop, a key that doesn't match its ends, and a device that isn't live");
+  }
+  {
+    let d3 = M.emptyConduitRiserDoc();
+    for (let i = 0; i < M.CR_CAPS.levelsPerDetail + 5; i++) d3 = M.patchConduitRiser(d3, { op: "moveLevel", detailId: "dt-main", levelId: `lv-${i}`, y: i }, makeId, ids).doc;
+    const proto = M.normalizeConduitRiserDoc(JSON.parse('{"tags":{"__proto__":{"x":1,"y":2,"detailId":"dt-main"}}}'));
+    ok(Object.keys(d3.levelY["dt-main"]).length === M.CR_CAPS.levelsPerDetail && Object.keys(proto.tags).length === 0 &&
+       !M.patchConduitRiser(d3, { op: "unpinTag", placementId: "constructor" }, makeId, ids).changed &&
+       Object.getPrototypeOf(proto.tags) === Object.prototype,
+      "#321 level positions are capped per detail; reserved keys (__proto__, constructor) never become map entries");
+  }
+  {
+    const typed = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true, lengthFt: 10.5 } : r)) };
+    const cm = { ...cr, runs: cr.runs.map((r) => (r.routeIds.includes("w1") ? { ...r, priceConduit: true, style: "cableMgmt" as const } : r)) };
+    const sizes = [{ size: '3/4"', partId: "EMT-34" }];
+    ok(J(P.conduitDemand({ doc: typed, estimateOwned: false, wires, sizes, labelOf: label }).lines) === J([{ partId: "EMT-34", size: '3/4"', feet: 11 }]) &&
+       P.conduitDemand({ doc: cm, estimateOwned: false, wires, sizes, labelOf: label }).lines.length === 0,
+      "#321 a typed run length overrides the measured wire; a cable-management run never puts conduit on the quote");
+  }
+  {
+    // 30 home runs over two levels — no conduit segment may pass through a tag it doesn't end on.
+    const many: Dev[] = [dev("gp-h", "ER-01", "racks-cases", "lv-stage")];
+    const mw: Wire[] = [];
+    for (let i = 1; i <= 30; i++) {
+      const id = `gp-${i}`;
+      many.push(dev(id, `CRO-${String(i).padStart(2, "0")}`, "control-networking", i % 2 ? "lv-cat" : "lv-stage"));
+      mw.push(wire(`m${i}`, "gp-h", id, i % 3 ? "dmx" : "net"));
+    }
+    let md = M.emptyConduitRiserDoc();
+    for (const sgn of S.suggestions(md, mw).items) md = S.acceptSuggestion(md, sgn, makeId).doc;
+    const mv = D.deriveView({ doc: md, devices: many, wires: mw, levels, wireTypes: wt }).details[0];
+    const ml = L.layoutDetail(mv, md);
+    const tagsById = new Map(ml.items.map((it) => [it.key, it]));
+    let crossings = 0;
+    for (const r of ml.runs) {
+      const vr = mv.runs.find((x) => x.run.id === r.runId)!;
+      const mine = new Set([vr.a, vr.b].map((e) => L.endKey(e)));
+      for (let i = 1; i < r.path.length; i++) {
+        const [p, q] = [r.path[i - 1], r.path[i]];
+        for (const [k, it] of tagsById) {
+          if (mine.has(k)) continue;
+          const x0 = Math.min(p.x, q.x), x1 = Math.max(p.x, q.x), y0 = Math.min(p.y, q.y), y1 = Math.max(p.y, q.y);
+          if (x0 < it.rect.x + it.rect.w - 1e-6 && x1 > it.rect.x + 1e-6 && y0 < it.rect.y + it.rect.h - 1e-6 && y1 > it.rect.y + 1e-6) crossings++;
+        }
+      }
+    }
+    ok(crossings === 0 && ml.w < 25, `#321 30 home runs: no conduit runs through another tag (${crossings} crossings), rows wrap inside the sheet (${ml.w}" wide)`);
+  }
+  {
+    const long = G.composeSheets({ details: [], tables: [], notes: [{ id: "n", n: 1, text: "word ".repeat(120) }], area: { w: 33, h: 21 } })[0].geo;
+    const texts = long.filter((x) => x.t === "text").map((x) => (x.t === "text" ? x.s : ""));
+    ok(texts.length > 3 && texts.every((t) => t.length <= 90) && G.fitText("ETC RESPONSE MK2 GATEWAY 8 PORT TERMINAL WITH POE", 1, 0.06).endsWith("...") &&
+       !SV.escapeXml("A\u000bB<").includes("\u000b") && SV.escapeXml("A\u000bB<") === "AB&lt;",
+      "#321 long notes wrap, an over-long table cell is cut with '...', and XML-illegal control characters are stripped from the SVG");
+  }
+}
+
 /* ---------------- #320: Grid device designators — pure rules ---------------- */
 async function designators320PureChecks(): Promise<void> {
   const D = await import("@/lib/design/designators");
@@ -60328,6 +60694,10 @@ async function designators320StoreChecks(): Promise<void> {
   const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
   const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
   const NOPART = "TEST-320-NOPART";
+  // #321: numbers default to two digits; these #320 checks pin the one-digit rule (L-1), so they run in one-digit mode.
+  const { getSettingsPatch: digitsPatch, setSettings: digitsSet } = await import("@/lib/settings");
+  const digitsBefore = (await digitsPatch()).designatorDigits;
+  await digitsSet({ designatorDigits: 1 });
 
   const gp = await G.createProject({ name: "#320 designators project", customer: "Spec fixture", customerId: null, by });
   registerFixture("grid_projects", gp.id);
@@ -60446,12 +60816,13 @@ async function designators320StoreChecks(): Promise<void> {
      (await proj()).placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)),
     "#320 ensureDesignators: the in-memory numbers are exactly the ones a write stores");
   const gs = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
-  ok(gs.includes('const write = opts.write ?? process.env.VERCEL_ENV !== "preview";') && gs.includes("if (!write) return designatorsFilledInMemory(project, codeOf);"),
+  ok(gs.includes('const write = opts.write ?? process.env.VERCEL_ENV !== "preview";') && gs.includes("if (!write) return designatorsFilledInMemory(project, codeOf, digits);"),
     "#320 ensureDesignators: the preview guard sits before the write");
 
   // Two adds at once never hand out the same number among what landed.
   await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
   ok(D.duplicates(optSlice(await proj(), opt)).size === 0, "#320 concurrent adds: numbers come from the doc each patch read — no duplicate among the survivors");
+  await digitsSet({ designatorDigits: digitsBefore });
 }
 
 /* ---------------- #320: Grid device designators — editor wiring ---------------- */
@@ -60490,7 +60861,7 @@ async function designators320EditorChecks(): Promise<void> {
   ok(crt.includes('const recode = raw.recode === true ? { recode: true } : {};') && crt.includes("return { all: true, ...recode };") && crt.includes("{ code: raw.code.trim(), ...recode }") && crt.includes("{ ids: [...raw.ids], ...recode }"),
     "#320 cleanRenumberTarget whitelists recode (only a literal true) on every target shape");
   const gpSrc = rd("src/lib/stores/grid-projects.ts");
-  ok(gpSrc.includes("if (target.recode === true) {") && gpSrc.includes("renumber(own, readingCtxOf(p), target, codeOf)"),
+  ok(gpSrc.includes("if (target.recode === true) {") && gpSrc.includes("renumber(own, readingCtxOf(p, digits), target, codeOf)"),
     "#320 store: Renumber loads the code resolver only for recode and passes it to the pure rule");
   const clean = acts.slice(acts.indexOf("async function cleanRestoredPlacement("), acts.indexOf("export async function restoreItemsAction("));
   ok(clean.includes("const designator = curtain ? null : cleanDesignator(raw.designator);") && clean.includes("...(designator ? { designator } : {}),"),
@@ -60502,7 +60873,7 @@ async function designators320EditorChecks(): Promise<void> {
   ok(page.includes("const designatorParts = [...parts, ...fallbackPartsFor((project.placements || []).map((pl) => pl.partId), parts, catalog, categoryMap, { deviceTypes })];"),
     "#320 page: numbering on load adds the catalog-fallback rows of pre-library placements (the store writers' part list)");
   const canvas = rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
-  ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
+  ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q, designatorDigits);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
     "#320 plan: a device is labelled by its designator (a lot by its range, no ×N), with a hover title; duplicates drawn amber");
   const prop = rd("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
   ok(prop.includes('<PropRow label="Designator"') && prop.includes("<DesignatorRow key={selectedPlacement.id}") && prop.includes("Renumber selection"),
@@ -60551,11 +60922,14 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(R.sortDeviceRows(blankA, { key: "designator", dir: 1 }).map((r) => r.id).join(",") === "d,b,c,a" && R.sortDeviceRows(blankA, { key: "designator", dir: -1 }).map((r) => r.id).join(",") === "c,b,d,a",
     "#320 Devices: a blank designator sorts last in both directions");
   const J = (v: unknown) => JSON.stringify(v);
-  ok(J(R.nextCell(rows, "b", "designator", "right")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "b", "category", "right")) === J({ id: "d", col: "designator" }) &&
-     R.nextCell(rows, "c", "designator", "down") === null && J(R.nextCell(rows, "d", "designator", "left")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "d", "designator", "up")) === J({ id: "b", col: "designator" }),
+  // #321 widened the editable columns: Tab walks designator, category, then the eight riser tag fields.
+  ok(J(R.nextCell(rows, "b", "designator", "right")) === J({ id: "b", col: "category" }) && J(R.nextCell(rows, "b", "category", "right")) === J({ id: "b", col: "box" }) &&
+     J(R.nextCell(rows, "b", "contents", "right")) === J({ id: "d", col: "designator" }) &&
+     R.nextCell(rows, "c", "designator", "down") === null && J(R.nextCell(rows, "d", "designator", "left")) === J({ id: "b", col: "contents" }) && J(R.nextCell(rows, "d", "designator", "up")) === J({ id: "b", col: "designator" }),
     "#320 Devices: Enter moves down, Tab moves right (wrapping to the next row), Shift goes back");
-  ok(R.DEVICE_COLUMNS.map((c) => c.key).join(",") === "designator,type,model,desc,space,sheet,qty,category" && R.DEVICE_COLUMNS.filter((c) => c.editable).map((c) => c.key).join(",") === "designator,category",
-    "#320 Devices: the column list (Designator and Category editable)");
+  ok(R.DEVICE_COLUMNS.map((c) => c.key).join(",") === "designator,type,model,desc,space,sheet,qty,category,box,face,mount,height,pd,location,power,contents" &&
+     R.DEVICE_COLUMNS.filter((c) => c.editable).map((c) => c.key).join(",") === "designator,category,box,face,mount,height,pd,location,power,contents",
+    "#320 Devices: the column list (Designator, Category and the riser tag fields editable)");
 
   const view = rd("src/app/(app)/design/grid/[id]/workspace/spreadsheet-view.tsx");
   const table = rd("src/app/(app)/design/grid/[id]/workspace/devices-table.tsx");
@@ -60570,7 +60944,7 @@ async function designators320DeviceRowsChecks(): Promise<void> {
     "#320 Renumber menu and Renumber selection: an \"Apply current type codes\" checkbox (off by default) passes recode through");
   ok(!table.includes("#fdf4e3") && table.includes("color-mix(in srgb, ${DESIGNATOR_DUPLICATE_COLOR} 12%, transparent)") && table.includes("background: DESIGNATOR_DUPLICATE_TINT"),
     "#320 Devices tab: a duplicate's tint is derived from DESIGNATOR_DUPLICATE_COLOR, not hard-coded");
-  const inlineInput = table.slice(table.indexOf("<input\n                          autoFocus"), table.indexOf("value={cell.draft}"));
+  const inlineInput = table.slice(table.indexOf("<input\n                            autoFocus"), table.indexOf("value={cell.draft}"));
   ok(inlineInput.includes("autoFocus") && inlineInput.includes("onFocus={(e) => e.currentTarget.select()}") && propSrc.includes('aria-label="Designator"\n            onFocus={(e) => e.currentTarget.select()}'),
     "#320 Devices tab: the inline cell input (and the Property Editor designator input) select their text on focus, so typing replaces it");
   const tb = rd("src/app/(app)/design/grid/[id]/workspace/toolbar.tsx");
@@ -60621,8 +60995,8 @@ async function designators320ScheduleChecks(): Promise<void> {
   ok(rd("src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx").includes("<th>Designators</th>"), "#320 drawing set: the device key's first column is Designators");
   const table = rd("src/app/(app)/design/grid/[id]/schedule/schedule-table.tsx");
   ok(table.includes(">Designators</th>") && table.includes("r.designators"), "#320 /schedule + Spreadsheet Schedule tab: Designators column");
-  ok(rd("src/lib/design/grid-schedule-server.ts").includes("fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project))") &&
-     rd("src/lib/design/drawing-set-data.ts").includes("fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project))"),
+  ok(rd("src/lib/design/grid-schedule-server.ts").includes("fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits))") &&
+     rd("src/lib/design/drawing-set-data.ts").includes("fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits))"),
     "#320 schedule + set fill missing designators in memory (never a write on a print path)");
   const gs = rd("src/lib/design/grid-schedule.ts");
   ok(!/from\s+"@\/lib\/stores\//.test(gs.replace(/import type[^;]*;/g, "")) && !rd("src/lib/design/designators.ts").includes("@/lib/stores/") && !rd("src/lib/design/designators.ts").includes("@/db"),
@@ -61603,4 +61977,1851 @@ async function pagesAsSheets319FinalFixChecks(): Promise<void> {
   } finally {
     if (prevBlob !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
   }
+}
+
+/* --- #321 Plan B Task 1: Bray IDs — per-part designator code + two-digit numbering --- */
+async function conduitRiser321B1Checks(): Promise<void> {
+  const D = await import("@/lib/design/designators");
+  const T = await import("@/lib/design/device-types");
+  const { designatorDigitsOf } = await import("@/lib/settings");
+  const { optionalPartFields } = await import("@/app/(app)/catalog/part-form");
+  const { gridPartsFrom } = await import("@/lib/design/grid-parts");
+  const fs = await import("node:fs");
+  const J = (v: unknown) => JSON.stringify(v);
+  const pl = (id: string, x: number, y: number, extra: Record<string, unknown> = {}) => ({ id, sheetId: "s1", page: 1, x, y, partId: "P", ...extra });
+  const tctx = { types: T.SEED_DEVICE_TYPES, map: {} };
+
+  // code resolution: the part's own code first
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: "CRO" }, tctx) === "CRO",
+    "#321 codeOfPlacement: a part's own designator code beats its device type's code");
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: " cro " }, tctx) === "CRO",
+    "#321 codeOfPlacement: the part code is trimmed and upper-cased");
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: "" }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: "TOO-LONG-CODE" }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: null }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers" }, tctx) === "SPK",
+    "#321 codeOfPlacement: a blank or invalid part code falls through to the device type's");
+  ok(D.codeOfPlacement({}, { id: "asm:x", kind: "device", gridScope: "Audio", designatorCode: "BX" }, tctx) === "BX",
+    "#321 codeOfPlacement: a part code also wins where the system letter would have been used");
+
+  // number format
+  ok(D.formatDesignatorNumber(7, 2) === "07" && D.formatDesignatorNumber(123, 2) === "123" && D.formatDesignatorNumber(7, 1) === "7" &&
+     D.formatDesignatorNumber(10, 2) === "10" && D.formatDesignatorNumber(9) === "9",
+    "#321 formatDesignatorNumber: two digits pads below ten; three-digit numbers and one-digit mode print as is; absent = one digit");
+  ok(designatorDigitsOf({}) === 2 && designatorDigitsOf(null) === 2 && designatorDigitsOf({ designatorDigits: 1 }) === 1 && designatorDigitsOf({ designatorDigits: 2 }) === 2,
+    "#321 designatorDigitsOf: default 2, only an explicit 1 reads as one digit");
+
+  // issuing
+  const codeCRO = () => "CRO";
+  const ctx2 = { sheetIds: ["s1"], spaces: [], digits: 2 as const };
+  const got = D.assignMissing([pl("a", 0.1, 0.1), pl("b", 0.5, 0.1)], codeCRO, ctx2);
+  ok(got.get("a") === "CRO-01" && got.get("b") === "CRO-02", "#321 assignMissing at two digits issues CRO-01, CRO-02");
+  const got1 = D.assignMissing([pl("a", 0.1, 0.1), pl("b", 0.5, 0.1)], codeCRO, { sheetIds: ["s1"], spaces: [] });
+  ok(got1.get("a") === "CRO-1" && got1.get("b") === "CRO-2", "#321 assignMissing without digits keeps today's CRO-1, CRO-2");
+  const gotTen = D.assignMissing(Array.from({ length: 11 }, (_, i) => pl(`p${i}`, i / 20, 0.1)), codeCRO, ctx2);
+  ok(gotTen.get("p8") === "CRO-09" && gotTen.get("p9") === "CRO-10" && gotTen.get("p10") === "CRO-11", "#321 two-digit numbers roll over cleanly at ten");
+  const lot = D.assignMissing([pl("lot", 0.1, 0.1, { qty: 24 })], () => "LX", ctx2);
+  ok(lot.get("lot") === "LX-01", "#321 a lot's first number is issued padded");
+  ok(D.formatDesignator("LX-01", 24, 2) === "LX-01–24" && D.formatDesignator("LX-1", 24, 2) === "LX-01–24" && D.formatDesignator("LX-1", 24) === "LX-1–24" && D.formatDesignator("LX-01", 1, 2) === "LX-01",
+    "#321 formatDesignator: a lot of 24 reads LX-01–24 at two digits; one digit and singles unchanged");
+  ok(D.formatDesignator("LX-1", 5, 2) === "LX-01–05", "#321 formatDesignator: a short range pads both ends");
+
+  // parse / duplicates: CRO-1 and CRO-01 are the same number
+  ok(D.parseDesignator("CRO-01")?.n === 1 && D.parseDesignator("CRO-01")?.code === "CRO" && D.parseDesignator("CRO-1")?.n === 1,
+    "#321 parseDesignator: CRO-01 reads as number 1");
+  ok(J([...D.duplicates([pl("a", 0, 0, { designator: "CRO-1" }), pl("b", 0, 0, { designator: "CRO-01" })])].sort()) === J(["a", "b"]),
+    "#321 duplicates: CRO-1 and CRO-01 are the same number");
+
+  // renumber re-pads
+  const rn = D.renumber([pl("a", 0.1, 0.1, { designator: "CRO-1" }), pl("b", 0.5, 0.1, { designator: "CRO-7" })], ctx2, { all: true });
+  ok(rn.get("a") === "CRO-01" && rn.get("b") === "CRO-02", "#321 renumber at two digits re-issues CRO-01, CRO-02 (a one-digit design is re-padded)");
+  const rnSame = D.renumber([pl("a", 0.1, 0.1, { designator: "CRO-01" }), pl("b", 0.5, 0.1, { designator: "CRO-02" })], ctx2, { all: true });
+  ok(rnSame.size === 0, "#321 renumber: numbers already in order and padded change nothing");
+  const rn1 = D.renumber([pl("a", 0.1, 0.1, { designator: "CRO-01" })], { sheetIds: ["s1"], spaces: [] }, { all: true });
+  ok(rn1.get("a") === "CRO-1", "#321 renumber without digits writes one-digit numbers");
+
+  // schedule cell
+  ok(D.designatorList([{ designator: "CRO-01" }, { designator: "CRO-02" }, { designator: "CRO-04" }], 2) === "CRO-01–02, CRO-04" &&
+     D.designatorList([{ designator: "CRO-1" }, { designator: "CRO-2" }]) === "CRO-1–2",
+    "#321 designatorList pads at two digits and is unchanged by default");
+
+  // stamping carries digits
+  const doc: { placements: ReturnType<typeof pl>[] } = { placements: [pl("a", 0.1, 0.1), pl("b", 0.5, 0.1)] };
+  D.stampNewDesignators(doc as never, new Set(["a", "b"]), codeCRO as never, 2);
+  ok(J(doc.placements.map((p) => (p as { designator?: string }).designator)) === J(["CRO-01", "CRO-02"]), "#321 stampNewDesignators passes the digits through");
+  const marks = D.planDesignatorMarks([{ id: "a", key: "k", desc: "d", qty: 24, designator: "LX-1", curtain: false }], "L", 2);
+  ok(marks.tags.get("a") === "LX-01–24" && marks.rows[0].tag === "LX-01–24", "#321 planDesignatorMarks prints two-digit tags and rows");
+
+  // part form
+  const fd = new FormData();
+  ok(!("designatorCode" in optionalPartFields(fd)), "#321 part form: a form without the field leaves the stored code alone");
+  fd.set("designatorCode", " cro ");
+  ok(optionalPartFields(fd).designatorCode === "CRO", "#321 part form: ' cro ' saves as CRO");
+  fd.set("designatorCode", "");
+  const blank = optionalPartFields(fd);
+  ok("designatorCode" in blank && blank.designatorCode === undefined, "#321 part form: a blank clears the code");
+  fd.set("designatorCode", "no way too long");
+  const bad = optionalPartFields(fd);
+  ok("designatorCode" in bad && bad.designatorCode === undefined, "#321 part form: an invalid code is dropped, not stored");
+
+  // gridPartsFrom carries it, both branches
+  const sym = { id: "GS-9", name: "Relay out", manufacturer: "ETC", modelNumber: "R1", scope: "Lighting", category: "Fixtures", width: 48, height: 34, ports: [], pricingPartId: "CAT-9", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const cat = [
+    { id: "CAT-9", sku: "R1", desc: "Relay", category: "Fixtures", unit: "ea", list: 10, cost: 5, designatorCode: "CRO" },
+    { id: "CAT-8", sku: "R8", desc: "Relay 2", category: "Fixtures", unit: "ea", list: 10, cost: 5, designatorCode: "DM" },
+    { id: "CAT-7", sku: "R7", desc: "Plain", category: "Fixtures", unit: "ea", list: 10, cost: 5 },
+  ];
+  const parts = gridPartsFrom([sym] as never, cat as never, {}, { catalogFallback: true });
+  const partOf = new Map(parts.map((p) => [p.id, p]));
+  ok(partOf.get("GS-9")?.designatorCode === "CRO", "#321 gridPartsFrom: a Grid-library symbol carries its pricing part's designator code");
+  ok(partOf.get("CAT-8")?.designatorCode === "DM" && partOf.get("CAT-7")?.designatorCode === undefined && !("designatorCode" in partOf.get("CAT-7")!),
+    "#321 gridPartsFrom: the catalog fallback carries the code; a part without one has no key");
+  ok(D.codeOfPlacement({}, partOf.get("GS-9"), tctx) === "CRO", "#321 end to end: a symbol's resolved code is the part code");
+
+  // store: the setting decides what a new device is issued; Renumber re-pads
+  const G = await import("@/lib/stores/grid-projects");
+  const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { registerFixture } = await import("./test-fixtures");
+  const { getSettingsPatch, setSettings } = await import("@/lib/settings");
+  const digitsBefore = (await getSettingsPatch()).designatorDigits;
+  const by = "Test Harness";
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const gp = await G.createProject({ name: "#321 digits project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const place = async (y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.1, y, partId: LIGHT, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
+  try {
+    await setSettings({ designatorDigits: undefined });
+    const d1 = await place(0.1);
+    const d2 = await place(0.2);
+    ok(d1.designator === "L-01" && d2.designator === "L-02", "#321 store: with no setting a new device is issued a two-digit number (L-01, L-02)");
+    await setSettings({ designatorDigits: 1 });
+    const d3 = await place(0.3);
+    ok(d3.designator === "L-3" && (await G.getProject(gp.id))!.placements.find((p) => p.id === d1.id)?.designator === "L-01",
+      "#321 store: switching to one digit issues L-3 and never rewrites the stored L-01");
+    const r1 = await G.renumberDesignators(gp.id, DEFAULT_OPTION_ID, { all: true });
+    const after1 = (await G.getProject(gp.id))!.placements.map((p) => p.designator).join();
+    ok(r1.ok && after1 === "L-1,L-2,L-3", "#321 store: Renumber at one digit re-issues L-1, L-2, L-3");
+    await setSettings({ designatorDigits: 2 });
+    const r2 = await G.renumberDesignators(gp.id, DEFAULT_OPTION_ID, { all: true });
+    const after2 = (await G.getProject(gp.id))!.placements.map((p) => p.designator).join();
+    ok(r2.ok && after2 === "L-01,L-02,L-03", "#321 store: Renumber at two digits re-pads to L-01, L-02, L-03");
+  } finally {
+    await setSettings({ designatorDigits: digitsBefore });
+  }
+
+  // wiring pins
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const settingsSrc = src("src/lib/settings.ts");
+  ok(settingsSrc.includes("designatorDigits?: 1 | 2") && /s\?\.designatorDigits === 1 \? 1 : 2/.test(settingsSrc), "#321 settings: designatorDigits setting with default 2");
+  const actSrc = src("src/app/(app)/design/grid/settings/actions.ts");
+  ok(/saveDesignatorDigitsAction[\s\S]{0,200}requirePerm\("manage_users"\)[\s\S]{0,300}setSettings\(\{ designatorDigits: digits \}\)[\s\S]{0,120}revalidatePath\("\/design\/grid", "layout"\)/.test(actSrc),
+    "#321 saveDesignatorDigitsAction: admin-gated, stores 1|2, revalidates the Grid layout");
+  const cardSrc = src("src/app/(app)/design/grid/settings/designator-digits-card.tsx");
+  ok(cardSrc.includes("Two digits (CRO-01)") && cardSrc.includes("One digit (CRO-1)") && cardSrc.includes("never rewrites existing designators"),
+    "#321 Designator numbers card: both options and the never-rewrites note");
+  ok(src("src/app/(app)/design/grid/settings/page.tsx").includes("<DesignatorDigitsCard"), "#321 Grid Settings page renders the Designator numbers card");
+  const srvSrc = src("src/lib/design/designators-server.ts");
+  ok(srvSrc.includes("digits: designatorDigitsOf(settings)"), "#321 designatorContext exposes the digits from settings");
+  const projSrc = src("src/lib/stores/grid-projects.ts");
+  ok(!/stampNewDesignators\([^;]*codeOf\);/.test(projSrc) && !/stampNewDesignators\([^;]*codeOf\);/.test(src("src/lib/stores/grid-riser.ts")) &&
+     projSrc.includes("readingCtxOf(p, digits)"),
+    "#321 every store call site that numbers a device passes the digits");
+  ok(src("src/app/(app)/design/grid/[id]/page.tsx").includes("designatorDigits={designatorDigitsOf(settings)}"), "#321 the editor page passes the digits to the client");
+  ok(src("src/app/(app)/catalog/page.tsx").includes('name="designatorCode"') && src("src/app/(app)/catalog/page.tsx").includes('placeholder="From device type"'),
+    "#321 the part editor has a Designator code field");
+}
+
+/* ---------------- #321 Plan B task 2: riser tag fields on parts and devices ---------------- */
+async function conduitRiser321B2Checks(): Promise<void> {
+  const { optionalPartFields } = await import("@/app/(app)/catalog/part-form");
+  const { gridPartsFrom } = await import("@/lib/design/grid-parts");
+  const R = await import("@/lib/design/grid-device-rows");
+  const CB = await import("@/lib/design/grid-clipboard");
+  const U = await import("@/lib/design/grid-undo");
+  const fs = await import("node:fs");
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  // Key-order-insensitive: stored JSONB does not keep an object's key order.
+  const sortKeys = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(sortKeys) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, sortKeys(x)])) : v;
+  const J = (v: unknown) => JSON.stringify(sortKeys(v));
+
+  // part form: tag_* inputs -> tagDefaults
+  const none = optionalPartFields(new FormData());
+  ok(!("tagDefaults" in none), "#321 part form: a form without the tag inputs leaves the stored defaults alone");
+  const fd = new FormData();
+  fd.set("tag_box", " b1 ");
+  fd.set("tag_face", "rear");
+  fd.set("tag_mount", "");
+  fd.set("tag_height", "12 in");
+  fd.set("tag_pd", "p/d");
+  ok(J(optionalPartFields(fd).tagDefaults) === J({ box: "B1", face: "REAR", height: "12 in", pd: "P/D" }),
+    "#321 part form: tag inputs are cleaned (upper-cased, trimmed) and a blank field is simply not set");
+  const fdBlank = new FormData();
+  for (const k of ["box", "face", "mount", "height", "pd"]) fdBlank.set(`tag_${k}`, "");
+  const blank = optionalPartFields(fdBlank);
+  ok("tagDefaults" in blank && blank.tagDefaults === undefined, "#321 part form: every tag input blank clears the defaults");
+  const fdBadPd = new FormData();
+  fdBadPd.set("tag_box", "B2");
+  fdBadPd.set("tag_pd", "X");
+  ok(J(optionalPartFields(fdBadPd).tagDefaults) === J({ box: "B2" }), "#321 part form: an invalid P/D is dropped, not stored");
+
+  // gridPartsFrom carries tagDefaults on both branches
+  const sym = { id: "GS-T", name: "Relay out", manufacturer: "ETC", modelNumber: "R1", scope: "Lighting", category: "Fixtures", width: 48, height: 34, ports: [], pricingPartId: "CAT-T1", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const cat = [
+    { id: "CAT-T1", sku: "R1", desc: "Relay", category: "Fixtures", unit: "ea", list: 10, cost: 5, tagDefaults: { box: "B1", pd: "P" } },
+    { id: "CAT-T2", sku: "R2", desc: "Relay 2", category: "Fixtures", unit: "ea", list: 10, cost: 5, tagDefaults: { face: "FRONT" } },
+    { id: "CAT-T3", sku: "R3", desc: "Plain", category: "Fixtures", unit: "ea", list: 10, cost: 5 },
+  ];
+  const parts = gridPartsFrom([sym] as never, cat as never, {}, { catalogFallback: true });
+  const partOf = new Map(parts.map((p) => [p.id, p]));
+  ok(J(partOf.get("GS-T")?.tagDefaults) === J({ box: "B1", pd: "P" }), "#321 gridPartsFrom: a Grid-library symbol carries its pricing part's tag defaults");
+  ok(J(partOf.get("CAT-T2")?.tagDefaults) === J({ face: "FRONT" }) && !("tagDefaults" in partOf.get("CAT-T3")!),
+    "#321 gridPartsFrom: the catalog fallback carries them; a part without defaults has no key");
+
+  // store: setPlacementsTag
+  const G = await import("@/lib/stores/grid-projects");
+  const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { registerFixture } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const lightRow = EQUIPMENT_ROWS.find((r) => r.system === "lighting")!;
+  const LIGHT = VP.allowancePartId(lightRow.key, "better");
+  const gp = await G.createProject({ name: "#321 tag project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 tag sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const place = async (y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.1, y, partId: LIGHT, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
+  const stored = async (id: string) => (await G.getProject(gp.id))!.placements.find((p) => p.id === id)!;
+  const d1 = await place(0.1);
+  const d2 = await place(0.2);
+  const auto = (await G.addPlacements(gp.id, { sheetId: sh.id, page: 1, optionId: DEFAULT_OPTION_ID, by, items: [{ x: 0.5, y: 0.5, partId: LIGHT, auto: { scope: "lighting", rowKey: lightRow.key, tier: "better" } }] }))!.placements.at(-1)!;
+  ok(!!auto.auto, "#321 fixture: the auto-tagged device really carries an auto tag");
+  const cur = (await G.addCurtainPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.3, y: 0.3, curtain: { type: "Draw", name: "Main", widthFt: 20, heightFt: 10, fullnessPct: 50, fabricSku: "TEST-321-FAB" }, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
+
+  const set1 = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: " b9 ", location: "Booth", power: "ab", pd: "P" } }, { id: d2.id, patch: { contents: "Relay 4" } }]);
+  ok(set1.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }) && J((await stored(d2.id)).tag) === J({ contents: "Relay 4" }),
+    "#321 setPlacementsTag: a patch sets the cleaned fields on each device");
+  ok(set1.ok && J(set1.value.previous) === J([{ id: d1.id, patch: { box: null, location: null, power: null, pd: null } }, { id: d2.id, patch: { contents: null } }]),
+    "#321 setPlacementsTag: previous is null for every touched field that had no override");
+  const set2 = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { face: "REAR", box: "B1" } }]);
+  ok(set2.ok && J((await stored(d1.id)).tag) === J({ box: "B1", face: "REAR", pd: "P", location: "Booth", power: "AB" }), "#321 setPlacementsTag: untouched fields are left alone");
+  ok(set2.ok && J(set2.value.previous) === J([{ id: d1.id, patch: { face: null, box: "B9" } }]), "#321 setPlacementsTag: previous restores only the touched fields (old value, or null)");
+  const back = await G.setPlacementsTag(gp.id, set2.ok ? set2.value.previous : []);
+  ok(back.ok && J((await stored(d1.id)).tag) === J({ box: "B9", pd: "P", location: "Booth", power: "AB" }), "#321 setPlacementsTag: replaying previous restores the tag exactly (undo is a patch)");
+  ok(back.ok && J(back.value.previous) === J([{ id: d1.id, patch: { face: "REAR", box: "B1" } }]), "#321 setPlacementsTag: the undo's own previous is the redo patch");
+  // the fast Tab flow: two single-field patches built from the same stale row both land
+  const fast1 = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "B2" } }]);
+  const fast2 = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { face: "FRONT" } }]);
+  ok(fast1.ok && fast2.ok && J((await stored(d2.id)).tag) === J({ contents: "Relay 4", box: "B2", face: "FRONT" }),
+    "#321 setPlacementsTag: two sequential single-field patches on one device keep both fields");
+  ok(fast2.ok && J(fast2.value.previous) === J([{ id: d2.id, patch: { face: null } }]), "#321 setPlacementsTag: the second edit's undo does not touch the first field");
+  const rm1 = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: null } }]);
+  ok(rm1.ok && J((await stored(d2.id)).tag) === J({ contents: "Relay 4", face: "FRONT" }) && J(rm1.value.previous) === J([{ id: d2.id, patch: { box: "B2" } }]),
+    "#321 setPlacementsTag: a null patch removes one override and leaves the others");
+  const blankSet = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { face: "" } }]);
+  ok(blankSet.ok && (await stored(d2.id)).tag?.face === "", "#321 setPlacementsTag: \"\" is a deliberate blank, kept");
+  const blankGone = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { face: null } }]);
+  ok(blankGone.ok && (await stored(d2.id)).tag?.face === undefined && !("face" in ((await stored(d2.id)).tag || {})), "#321 setPlacementsTag: null removes a stored deliberate blank");
+  const cleared = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: null, pd: null, location: null, power: null } }, { id: d2.id, patch: { contents: null } }]);
+  ok(cleared.ok && !("tag" in (await stored(d1.id))) && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: removing every override deletes the tag");
+  const junk = await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: "ABCDEFGHI", pd: "Z" } }]);
+  ok(junk.ok && J((await stored(d1.id)).tag) === J({ box: "ABCD" }), "#321 setPlacementsTag: junk is cleaned by cleanPlacementTag (long text capped, invalid P/D dropped)");
+  await G.setPlacementsTag(gp.id, [{ id: d1.id, patch: { box: null } }]);
+  const hand = await G.setPlacementsTag(gp.id, [{ id: auto.id, patch: { box: "B1" } }]);
+  const after = await stored(auto.id);
+  ok(hand.ok && after.tag?.box === "B1" && !("auto" in after), "#321 setPlacementsTag: a hand edit clears the auto tag, like a category edit");
+  const withCurtain = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "ZZ" } }, { id: cur.id, patch: { box: "ZZ" } }]);
+  ok(!withCurtain.ok && !("tag" in (await stored(d2.id))) && !("tag" in (await stored(cur.id))), "#321 setPlacementsTag: a curtain in the batch refuses the whole batch");
+  const missing = await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "ZZ" } }, { id: "gp-nope", patch: { box: "ZZ" } }]);
+  ok(!missing.ok && !("tag" in (await stored(d2.id))), "#321 setPlacementsTag: a missing id refuses the whole batch");
+
+  // paste keeps the tag, issues a new designator; a curtain item's tag is ignored
+  await G.setPlacementsTag(gp.id, [{ id: d2.id, patch: { box: "B4", location: "Lobby" } }]);
+  const src2 = await stored(d2.id);
+  const clip = CB.copySelection(gp.id, (await G.getProject(gp.id))!.placements, [], [d2.id]);
+  ok(!!clip && J(clip.items[0].tag) === J({ box: "B4", location: "Lobby" }) && !("designator" in clip.items[0]), "#321 clipboard: copy carries the tag, never the designator");
+  ok(!!clip && clip.items[0].tag !== src2.tag, "#321 clipboard: the copied tag is its own object");
+  const pasted = await G.pastePlacements(gp.id, { sheetId: sh.id, page: 1, optionId: DEFAULT_OPTION_ID, by, items: [{ srcId: d2.id, x: 0.6, y: 0.6, partId: LIGHT, tag: clip?.items[0].tag }, { srcId: "gp-x", x: 0.7, y: 0.7, partId: "TEST-321-FAB", tag: { box: "NO" }, curtain: { type: "Draw", name: "C2", widthFt: 10, heightFt: 8, fullnessPct: 50, fabricSku: "TEST-321-FAB" } }], routeIds: [] });
+  const pz = pasted.ok ? pasted.value.placements : [];
+  const pasteStored = pz[0] ? await stored(pz[0].id) : null;
+  ok(!!pasteStored && J(pasteStored.tag) === J({ box: "B4", location: "Lobby" }) && !!pasteStored.designator && pasteStored.designator !== src2.designator,
+    "#321 paste: keeps the tag fields and gets a fresh designator");
+  ok(pz.length === 2 && !("tag" in pz[1]), "#321 paste: a curtain item never takes a tag");
+
+  // option copy keeps the tag
+  const optSrc = src("src/lib/stores/grid-projects.ts");
+  ok(optSrc.includes("tag?: PlacementTag;") && optSrc.includes("export async function setPlacementsTag("), "#321 store: GridPlacement.tag and setPlacementsTag are exported");
+
+  // restore: the action's whitelist
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  const restore = acts.slice(acts.indexOf("async function cleanRestoredPlacement("), acts.indexOf("export async function restoreItemsAction("));
+  ok(restore.includes("const tag = curtain ? undefined : cleanPlacementTag(raw.tag);") && restore.includes("...(tag ? { tag } : {}),"),
+    "#321 cleanRestoredPlacement: whitelists tag through cleanPlacementTag, never on a curtain");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  ok(J(T.cleanPlacementTag({ box: "b1", pd: "p", rogue: 1 })) === J({ box: "B1", pd: "P" }) && T.cleanPlacementTag("junk") === undefined && T.cleanPlacementTag({ rogue: 1 }) === undefined,
+    "#321 the restore cleaner keeps a cleaned tag and drops junk");
+  const setAct = acts.slice(acts.indexOf("export async function setTagFieldsAction("), acts.indexOf("function cleanRenumberTarget("));
+  ok(setAct.includes("await requireUser();") && setAct.includes("isTagPatch(it.patch)") && setAct.includes("setPlacementsTag(projectId,") && setAct.includes("revalidatePath(editorPath(projectId));") && setAct.includes("previous: r.value.previous"),
+    "#321 setTagFieldsAction: authed, writes through the store, revalidates, returns previous");
+  ok(acts.includes("(it.tag === undefined || isObj(it.tag)) &&") && acts.includes("...(!curtain && it.tag ? { tag: it.tag } : {}),"), "#321 pastePlacementsAction: forwards a non-curtain item's tag");
+
+  // undo
+  const entry = { label: "set riser tag (1 device)", forward: { kind: "tag" as const, items: [{ id: "a", patch: { box: "B1" } }] }, inverse: { kind: "tag" as const, items: [{ id: "a", patch: { box: null } }] } };
+  ok(U.pushUndo(U.emptyUndo(), entry).past[0].inverse.kind === "tag", "#321 undo: a tag edit is one undo step");
+  const hook = src("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes('case "tag": {') && hook.includes("setTagFieldsAction(project.id, c.items)") && hook.includes('record({ label: stepLabel("set riser tag", items.length), forward: { kind: "tag", items }, inverse: { kind: "tag", items: r.previous } });') && hook.includes("    saveTags,"),
+    "#321 hook: saveTags records an undo step with inverse = previous; the runner replays tag commands");
+
+  // Devices rows: part defaults show when there is no override
+  const pls = [
+    { id: "a", sheetId: "s1", page: 1, x: 0.2, y: 0.2, partId: "RLY", designator: "CRO-01", by: "t", at: 1 },
+    { id: "b", sheetId: "s1", page: 1, x: 0.2, y: 0.5, partId: "RLY", designator: "CRO-02", tag: { box: "B7", location: "Booth", power: "A" }, by: "t", at: 1 },
+    { id: "c", sheetId: "s1", page: 1, x: 0.8, y: 0.8, partId: "PLAIN", designator: "G-01", by: "t", at: 1 },
+  ];
+  const space = { id: "sp1", sheetId: "s1", page: 1, name: "Stage", color: "#000", points: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.6 }, { x: 0, y: 0.6 }], by: "t", at: 1 };
+  const defaultsOf = (pl: { partId: string }) => (pl.partId === "RLY" ? { box: "B1", face: "REAR", mount: "SM", height: "12 in", pd: "P" as const } : undefined);
+  const rows = R.deviceRows({
+    placements: pls as never, sheets: [{ id: "s1", name: "Plan" }], spaces: [space] as never,
+    typeKeyOf: () => "x", typeLabelOf: () => "X", modelOf: () => "m", descOf: () => "d", duplicates: new Set(), digits: 2, tagDefaultsOf: defaultsOf as never,
+  });
+  const ra = rows.find((r) => r.id === "a")!;
+  const rb = rows.find((r) => r.id === "b")!;
+  const rc = rows.find((r) => r.id === "c")!;
+  ok(ra.tag.box === "B1" && ra.tag.face === "REAR" && ra.tag.mount === "SM" && ra.tag.height === "12 in" && ra.tag.pd === "P" && ra.tag.location === "Stage" && J(ra.own) === "{}",
+    "#321 deviceRows: with no override the part defaults show, and location is the containing space");
+  ok(rb.tag.box === "B7" && rb.tag.face === "REAR" && rb.tag.location === "Booth" && rb.tag.power === "A" && J(rb.own) === J({ box: "B7", location: "Booth", power: "A" }),
+    "#321 deviceRows: an override wins per field and the others still inherit");
+  ok(rc.tag.box === "" && rc.tag.pd === "" && rc.tag.location === "", "#321 deviceRows: a part without defaults, outside any space, reads blank");
+  ok(R.cellText(ra, "box") === "B1" && R.cellText(rb, "location") === "Booth" && R.sortValue(rb, "power") === "A", "#321 deviceRows: tag columns read and sort by the value as printed");
+
+  // columns + Tab order
+  const tagCols = ["box", "face", "mount", "height", "pd", "location", "power", "contents"];
+  ok(tagCols.every((k) => R.DEVICE_COLUMNS.some((c) => c.key === k && c.editable)), "#321 Devices: the eight tag columns exist and are editable");
+  ok(J(R.EDIT_COLUMNS) === J(["designator", "category", ...tagCols]), "#321 Devices: the editable columns, in table order");
+  const walk = (start: string, move: "right" | "left") => {
+    const seen: string[] = [];
+    let cur: { id: string; col: string } | null = { id: "a", col: start };
+    for (let i = 0; i < 40 && cur; i++) {
+      seen.push(`${cur.id}:${cur.col}`);
+      cur = R.nextCell(rows, cur.id, cur.col as never, move);
+    }
+    return seen;
+  };
+  const fwd = walk("designator", "right");
+  ok(fwd.slice(0, 11).join() === ["a:designator", "a:category", ...tagCols.map((k) => `a:${k}`), "b:designator"].join() && fwd.length === rows.length * R.EDIT_COLUMNS.length,
+    "#321 nextCell: Tab walks every editable column in table order, then on to the next row");
+  const last = R.EDIT_COLUMNS[R.EDIT_COLUMNS.length - 1];
+  ok(J(R.nextCell(rows, "b", "designator", "left")) === J({ id: "a", col: last }) && J(R.nextCell(rows, "b", "box", "left")) === J({ id: "b", col: "category" }) && R.nextCell(rows, rows.at(-1)!.id, last, "right") === null,
+    "#321 nextCell: Shift+Tab walks back, across rows; the ends stop");
+  ok(J(R.nextCell(rows, "a", "box", "down")) === J({ id: rows[1].id, col: "box" }) && R.nextCell(rows, "zzz", "box", "down") === null, "#321 nextCell: Enter moves down within the column");
+
+  // edit rules
+  const e1 = R.tagPatchAfterEdit({ box: "B7", location: "Booth" }, "face", " rear ");
+  ok(e1.ok && J(e1.patch) === J({ face: "REAR" }), "#321 tagPatchAfterEdit: a typed value is a single-field patch (nothing else in it)");
+  const e2 = R.tagPatchAfterEdit({ box: "B7" }, "box", "");
+  ok(e2.ok && J(e2.patch) === J({ box: null }), "#321 tagPatchAfterEdit: blank on an overridden field removes that override");
+  const e3 = R.tagPatchAfterEdit({ box: "B7", face: "REAR" }, "box", "  ");
+  ok(e3.ok && J(e3.patch) === J({ box: null }), "#321 tagPatchAfterEdit: blank touches only that field");
+  const e4 = R.tagPatchAfterEdit({ box: "B7" }, "box", "b7");
+  ok(e4.ok && e4.patch === null, "#321 tagPatchAfterEdit: retyping the same value writes nothing");
+  const e5 = R.tagPatchAfterEdit(undefined, "box", "");
+  ok(e5.ok && e5.patch === null, "#321 tagPatchAfterEdit: blank on a device with no override is a no-op");
+  const e7 = R.tagPatchAfterEdit({ face: "" }, "face", "");
+  ok(e7.ok && J(e7.patch) === J({ face: null }), "#321 tagPatchAfterEdit: blank clears a stored deliberate blank (the UI can remove it)");
+  const e8 = R.tagPatchAfterEdit({ face: "" }, "face", "REAR");
+  ok(e8.ok && J(e8.patch) === J({ face: "REAR" }), "#321 tagPatchAfterEdit: a value replaces a deliberate blank");
+  ok(R.parsePd("p/d") === "P/D" && R.parsePd(" P / D ") === "P/D" && R.parsePd("d") === "D" && R.parsePd("") === "" && R.parsePd("X") === null && R.parsePd("PD") === null,
+    "#321 P/D cell: accepts P, D, P/D or blank — anything else is invalid");
+  const pdBad = R.tagPatchAfterEdit({}, "pd", "Q");
+  ok(!pdBad.ok && pdBad.error === R.PD_PROBLEM, "#321 tagPatchAfterEdit: an invalid P/D is refused with the message");
+  const e6 = R.tagPatchAfterEdit({}, "pd", "p / d");
+  ok(e6.ok && J(e6.patch) === J({ pd: "P/D" }), "#321 tagPatchAfterEdit: P/D is normalised");
+  // tags.ts patch helpers
+  ok(T.isTagPatch({ box: "B", face: null }) && T.isTagPatch({}) && !T.isTagPatch({ rogue: "x" }) && !T.isTagPatch({ box: 3 }) && !T.isTagPatch(null) && !T.isTagPatch([]),
+    "#321 isTagPatch: only tag fields with string | null values");
+  const ap = T.applyTagPatch({ box: "B1", face: "REAR" }, { box: null, mount: "SM" });
+  ok(J(ap.tag) === J({ face: "REAR", mount: "SM" }) && J(ap.previous) === J({ box: "B1", mount: null }), "#321 applyTagPatch: merges per field, previous covers only the touched fields");
+  ok(T.applyTagPatch({ box: "B1" }, { box: null }).tag === undefined, "#321 applyTagPatch: an all-empty result is no tag");
+  ok(R.TAG_INPUT_MAX.box === T.TAG_LIMITS.box && R.TAG_INPUT_MAX.contents === T.TAG_LIMITS.contents && R.TAG_INPUT_MAX.pd === 3, "#321 Devices: input limits come from TAG_LIMITS");
+  const bulk = R.bulkTagItems([{ id: "a" }, { id: "b", tag: { box: "B7", location: "Booth" } }, { id: "c", tag: { face: "REAR" } }], "face", "front");
+  ok(bulk.ok && J(bulk.items) === J([{ id: "a", patch: { face: "FRONT" } }, { id: "b", patch: { face: "FRONT" } }, { id: "c", patch: { face: "FRONT" } }]),
+    "#321 bulk set: a single-field patch per device (each device's other fields untouched by construction)");
+  const bulk2 = R.bulkTagItems([{ id: "a", tag: { face: "REAR" } }, { id: "b", tag: { face: "REAR", box: "B7" } }, { id: "c" }], "face", "");
+  ok(bulk2.ok && J(bulk2.items) === J([{ id: "a", patch: { face: null } }, { id: "b", patch: { face: null } }]), "#321 bulk clear: removes that field only, skips devices with nothing to clear");
+  const bulk3 = R.bulkTagItems([{ id: "a", tag: { face: "REAR" } }], "face", "REAR");
+  ok(bulk3.ok && bulk3.items.length === 0, "#321 bulk set: unchanged devices are left out");
+  ok(!R.bulkTagItems([{ id: "a" }], "pd", "nope").ok, "#321 bulk set: an invalid P/D refuses before any write");
+
+  // UI pins
+  const table = src("src/app/(app)/design/grid/[id]/workspace/devices-table.tsx");
+  ok(table.includes("const col: EditCol | null = c.editable ? (c.key as EditCol) : null;") && table.includes("saveTags([{ id: row.id, patch: edit.patch }])") &&
+     table.includes("tagDefaultsOf: (pl) => partById.get(pl.partId)?.tagDefaults,") && table.includes("TAG_INPUT_MAX[col]") && table.includes("setErr(edit.error);"),
+    "#321 Devices table: the editable flag drives the cells, tag commits go through saveTags, an invalid P/D reports and stays open");
+  const prop = src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
+  ok(prop.includes("<RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />") && prop.includes("pls={pls.filter((pl) => !pl.curtain)} />") &&
+     prop.includes('"(from part)"') && prop.includes("bulkTagItems(pls, field, draft)") &&
+     prop.includes("if (!dirty && same(eff.map((e) => e[field])) === null) {") && prop.includes('<RiserTagRows key={pls.map((pl) => pl.id).sort().join("|")}'),
+    "#321 Property Editor: a Riser tag section for one device and for several (Mixed + bulk set), never for a curtain");
+  const catPage = src("src/app/(app)/catalog/page.tsx");
+  ok(catPage.includes("<TagDefaultsField key={part?.sku ?? \"new\"}") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes("Riser tag defaults") && src("src/app/(app)/catalog/tag-defaults-field.tsx").includes('name="tag_pd"'),
+    "#321 the part editor has a Riser tag defaults section");
+}
+
+/* ---------------- #321 Plan B task 3: levels on spaces and sheets ---------------- */
+async function conduitRiser321B3Checks(): Promise<void> {
+  const L = await import("@/lib/design/grid-levels");
+  const G = await import("@/lib/stores/grid-projects");
+  const fs = await import("node:fs");
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const J2 = (v: unknown) => JSON.stringify(v);
+
+  // cleanLevels
+  const many = L.cleanLevels(Array.from({ length: 40 }, (_, i) => ({ label: `L${i}` })));
+  ok(many.length === 30 && many.every((l, i) => l.order === i && /^lvl-[0-9a-f]{12}$/.test(l.id)), "#321 cleanLevels: caps at 30 and mints lvl- ids with orders 0..n-1");
+  const mixed = L.cleanLevels([{ label: "  Stage " , elevation: " +0'-0\" " }, { label: "   " }, { label: "" }, null, 7, { label: "Catwalk" }]);
+  ok(mixed.length === 2 && mixed[0].label === "Stage" && mixed[0].elevation === "+0'-0\"" && mixed[1].label === "Catwalk" && !("elevation" in mixed[1]) && mixed[1].order === 1,
+    "#321 cleanLevels: trims, drops blank labels and non-objects, renumbers order past the dropped rows");
+  const longRow = L.cleanLevels([{ label: "x".repeat(60), elevation: "9".repeat(40) }])[0];
+  ok(longRow.label.length === 40 && longRow.elevation!.length === 20, "#321 cleanLevels: label capped at 40, elevation at 20");
+  ok(L.cleanLevels("nope").length === 0 && L.cleanLevels(undefined).length === 0, "#321 cleanLevels: a non-array is an empty list");
+  const keep = L.cleanLevels([{ id: "lvl-0123456789ab", label: "A" }, { id: "lvl-0123456789ab", label: "B" }, { id: "bad", label: "C" }, { label: "D" }]);
+  ok(keep[0].id === "lvl-0123456789ab" && new Set(keep.map((l) => l.id)).size === 4 && keep.slice(1).every((l) => /^lvl-[0-9a-f]{12}$/.test(l.id)),
+    "#321 cleanLevels: keeps a valid incoming id, mints for a repeated, malformed or missing one");
+  const reordered = L.cleanLevels([{ id: "lvl-aaaaaaaaaaaa", label: "Top", order: 9 }, { id: "lvl-bbbbbbbbbbbb", label: "Bottom", order: 0 }]);
+  ok(reordered[0].order === 0 && reordered[1].order === 1 && reordered[0].label === "Top", "#321 cleanLevels: order follows array position, not the incoming order");
+
+  // levelOfPlacement
+  const proj = { levels: [{ id: "lvl-aaaaaaaaaaaa", label: "Stage", order: 0 }, { id: "lvl-bbbbbbbbbbbb", label: "Catwalk", order: 1 }], sheetLevels: { s1: "lvl-aaaaaaaaaaaa", s3: "lvl-gone00000000" } };
+  const pl = (sheetId: string) => ({ sheetId });
+  const inSpace = (levelId?: string) => () => ({ levelId });
+  const noSpace = () => null;
+  ok(L.levelOfPlacement(pl("s1"), inSpace("lvl-bbbbbbbbbbbb"), proj) === "lvl-bbbbbbbbbbbb", "#321 levelOfPlacement: the space's level beats the sheet's");
+  ok(L.levelOfPlacement(pl("s1"), inSpace(undefined), proj) === "lvl-aaaaaaaaaaaa", "#321 levelOfPlacement: a space with no level falls to the sheet's");
+  ok(L.levelOfPlacement(pl("s1"), noSpace, proj) === "lvl-aaaaaaaaaaaa", "#321 levelOfPlacement: no space falls to the sheet's default");
+  ok(L.levelOfPlacement(pl("s2"), noSpace, proj) === null, "#321 levelOfPlacement: neither -> null");
+  ok(L.levelOfPlacement(pl("s1"), inSpace("lvl-gone00000000"), proj) === "lvl-aaaaaaaaaaaa", "#321 levelOfPlacement: an unknown space level is ignored, the sheet's applies");
+  ok(L.levelOfPlacement(pl("s3"), noSpace, proj) === null, "#321 levelOfPlacement: an unknown sheet level is ignored");
+  ok(L.levelOfPlacement(pl("s1"), noSpace, {}) === null, "#321 levelOfPlacement: a project with no levels yields null");
+
+  // store
+  const { registerFixture } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const gp = await G.createProject({ name: "#321 levels project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh1 = (await G.addSheet(gp.id, { name: "#321 lvl sheet 1", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh1.id);
+  const sh2 = (await G.addSheet(gp.id, { name: "#321 lvl sheet 2", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh2.id);
+  const live = async () => (await G.getProject(gp.id))!;
+  const pts = [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }];
+  await G.addSpace(gp.id, { sheetId: sh1.id, page: 1, name: "Stage", points: pts, by });
+  await G.addSpace(gp.id, { sheetId: sh1.id, page: 1, name: "Pit", points: pts, by });
+  const [spA, spB] = (await live()).spaces!;
+
+  const noLevelsYet = await G.setSpaceLevel(gp.id, spA.id, "lvl-nothing0000");
+  ok(noLevelsYet === null && !(await live()).spaces!.some((s) => s.levelId), "#321 setSpaceLevel: a level that isn't on the list is refused");
+  const set = await G.setLevels(gp.id, [{ label: "Stage", elevation: "0'" }, { label: "  " }, { label: "Catwalk" }, { label: "Pit" }]);
+  const lv = (await live()).levels!;
+  ok(!!set && lv.length === 3 && lv.map((l) => l.label).join() === "Stage,Catwalk,Pit" && lv.every((l, i) => l.order === i), "#321 setLevels: stores the cleaned list");
+  const [stage, cat, pit] = lv;
+  ok(!!(await G.setSpaceLevel(gp.id, spA.id, stage.id)) && !!(await G.setSpaceLevel(gp.id, spB.id, pit.id)), "#321 setSpaceLevel: sets a listed level");
+  ok((await live()).spaces!.find((s) => s.id === spA.id)!.levelId === stage.id, "#321 setSpaceLevel: the space carries its levelId");
+  ok(!!(await G.setSheetLevel(gp.id, sh1.id, cat.id)) && !!(await G.setSheetLevel(gp.id, sh2.id, pit.id)) && (await live()).sheetLevels?.[sh1.id] === cat.id, "#321 setSheetLevel: sets a sheet default");
+  ok((await G.setSheetLevel(gp.id, "gs-not-on-design", cat.id)) === null && (await G.setSheetLevel(gp.id, sh1.id, "lvl-nothing0000")) === null, "#321 setSheetLevel: an unknown sheet or level is refused");
+  ok(!!(await G.setSheetLevel(gp.id, sh2.id, null)) && (await live()).sheetLevels?.[sh2.id] === undefined, "#321 setSheetLevel: null clears the default");
+  await G.setSheetLevel(gp.id, sh2.id, pit.id);
+
+  // revision round-trip
+  const rv = (await G.addRevision(gp.id, { by, note: "levels" }))!;
+  ok(J2(rv.levels) === J2(lv) && rv.sheetLevels?.[sh1.id] === cat.id && rv.spaces.find((s) => s.id === spA.id)!.levelId === stage.id, "#321 snapshot: carries levels, sheetLevels and the spaces' levelId");
+
+  // removing a level clears it from spaces and sheetLevels
+  await G.setLevels(gp.id, lv.filter((l) => l.id !== pit.id));
+  let after = await live();
+  ok(after.levels!.length === 2 && !after.spaces!.some((s) => s.levelId === pit.id) && !("levelId" in after.spaces!.find((s) => s.id === spB.id)!) && after.sheetLevels?.[sh2.id] === undefined,
+    "#321 setLevels: removing a level clears it from spaces and sheetLevels");
+  ok(after.spaces!.find((s) => s.id === spA.id)!.levelId === stage.id && after.sheetLevels?.[sh1.id] === cat.id, "#321 setLevels: levels that stay keep their references");
+  await G.setLevels(gp.id, []);
+  after = await live();
+  ok(after.levels!.length === 0 && !after.spaces!.some((s) => s.levelId) && after.sheetLevels === undefined, "#321 setLevels: an empty list clears every reference");
+
+  // restore brings them back
+  const back = await G.restoreRevision(gp.id, rv.rev, by);
+  after = await live();
+  ok(back.ok && J2(after.levels) === J2(lv) && after.sheetLevels?.[sh2.id] === pit.id && after.spaces!.find((s) => s.id === spB.id)!.levelId === pit.id, "#321 restoreRevision: levels, sheetLevels and space levels round-trip");
+
+  // an older snapshot (no levels fields) leaves the current ones alone
+  const older = (await G.addRevision(gp.id, { by, note: "older" }))!;
+  await (await import("@/db/doc-store")).patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", gp.id, (p) => {
+    const r = p.revisions!.find((x) => x.rev === older.rev)!;
+    delete r.levels;
+    delete r.sheetLevels;
+  });
+  await G.setLevels(gp.id, [{ id: "lvl-cccccccccccc", label: "Fly floor" }]);
+  await G.setSheetLevel(gp.id, sh1.id, "lvl-cccccccccccc");
+  const old = await G.restoreRevision(gp.id, older.rev, by);
+  after = await live();
+  ok(old.ok && after.levels!.length === 1 && after.levels![0].id === "lvl-cccccccccccc" && after.sheetLevels?.[sh1.id] === "lvl-cccccccccccc", "#321 restoreRevision: a snapshot without levels leaves the current levels alone");
+
+  // fix round 1: sheet default levels follow sheet replace / delete / restore
+  const SA = await import("@/lib/design/sheet-adjust");
+  const rm = { sheetIds: ["sA", "sB"], sheetLevels: { sA: "lvl-aaaaaaaaaaaa", sB: "lvl-bbbbbbbbbbbb" } };
+  SA.remapSheetRefs(rm, "sA", "sZ");
+  ok(J2(rm.sheetLevels) === J2({ sB: "lvl-bbbbbbbbbbbb", sZ: "lvl-aaaaaaaaaaaa" }) && rm.sheetIds.join() === "sZ,sB", "#321 remapSheetRefs: a sheet's default level moves to its new id");
+  const rmNone: { sheetIds: string[]; sheetLevels?: Record<string, string> } = { sheetIds: ["sA"] };
+  SA.remapSheetRefs(rmNone, "sA", "sZ");
+  ok(!("sheetLevels" in rmNone), "#321 remapSheetRefs: a doc with no sheetLevels gains none");
+
+  const gp2 = await G.createProject({ name: "#321 levels project 2", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp2.id);
+  const mk = async (n: string) => {
+    const sh = (await G.addSheet(gp2.id, { name: `#321 lvl2 ${n}`, mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    registerFixture("grid_sheets", sh.id);
+    return sh;
+  };
+  const live2 = async () => (await G.getProject(gp2.id))!;
+  await G.setLevels(gp2.id, [{ label: "Stage" }, { label: "Catwalk" }]);
+  const [l1, l2] = (await live2()).levels!;
+  const sa = await mk("A");
+  const sb = await mk("B");
+  await G.setSheetLevel(gp2.id, sa.id, l1.id);
+  await G.setSheetLevel(gp2.id, sb.id, l2.id);
+  const rep = await G.replaceSheetWithAdjusted(gp2.id, sa.id, { name: "#321 adj", mime: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=", adjust: { fromSheetId: sa.id, pages: { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } } }, by }, [1]);
+  registerFixture("grid_sheets", rep.ok ? rep.sheet.id : "none");
+  let p2 = await live2();
+  ok(rep.ok && p2.sheetLevels?.[rep.sheet.id] === l1.id && !(sa.id in (p2.sheetLevels || {})) && p2.sheetLevels?.[sb.id] === l2.id,
+    "#321 replaceSheetWithAdjusted: the default level follows the sheet to its new id");
+  ok(!!rep.ok && (await G.removeSheet(gp2.id, rep.sheet.id, by)).ok === true, "#321 fixture: the replaced sheet deletes");
+  p2 = await live2();
+  ok(!(rep.ok && rep.sheet.id in (p2.sheetLevels || {})) && p2.sheetLevels?.[sb.id] === l2.id, "#321 removeSheet: the deleted sheet's default level is dropped, others stay");
+
+  // restore merges sheetLevels instead of replacing them
+  const sc = await mk("C");
+  await G.setSheetLevel(gp2.id, sc.id, l1.id);
+  const cut = (await G.addRevision(gp2.id, { by, note: "knows B and C" }))!;
+  const sd = await mk("D");
+  await G.setSheetLevel(gp2.id, sd.id, l2.id);
+  await G.setSheetLevel(gp2.id, sb.id, l1.id);
+  await G.removeSheet(gp2.id, sc.id, by);
+  const rest = await G.restoreRevision(gp2.id, cut.rev, by);
+  p2 = await live2();
+  ok(rest.ok && p2.sheetLevels?.[sb.id] === l2.id, "#321 restoreRevision: the snapshot's default level wins for a sheet it knew");
+  ok(p2.sheetLevels?.[sd.id] === l2.id, "#321 restoreRevision: a sheet added since keeps its current default level");
+  ok(!(sc.id in (p2.sheetLevels || {})) && !(p2.sheetIds || []).includes(sc.id), "#321 restoreRevision: no default level is kept for a sheet that isn't on the design");
+
+  // setSpaceLevel on an unknown space
+  ok((await G.setSpaceLevel(gp.id, "sp-not-here", null)) === null && (await G.setSpaceLevel(gp.id, "sp-not-here", "lvl-cccccccccccc")) === null, "#321 setSpaceLevel: an unknown space is refused");
+  ok(!src("src/lib/design/grid-levels.ts").includes("as never") && src("src/lib/design/grid-levels.ts").includes("levelOfPlacement<P extends { sheetId: string }>("), "#321 levelOfPlacement is generic over the placement, no cast");
+
+  // actions + UI pins
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  for (const [fn, call] of [["saveLevelsAction", "setLevels(projectId, levels)"], ["setSpaceLevelAction", "setSpaceLevel(projectId, spaceId, levelId)"], ["setSheetLevelAction", "setSheetLevel(projectId, sheetId, levelId)"]]) {
+    const body = acts.slice(acts.indexOf(`export async function ${fn}(`), acts.indexOf("export async function", acts.indexOf(`export async function ${fn}(`) + 10));
+    ok(body.includes("await requireUser();") && body.includes(call) && body.includes("revalidatePath(editorPath(projectId));") && body.includes("revalidatePath(riserPath(projectId));"), `#321 ${fn}: authed, writes through the store, revalidates the editor and the riser page`);
+  }
+  const panel = src("src/app/(app)/design/grid/[id]/spaces-panel.tsx");
+  ok(panel.includes("setSpaceLevelAction(projectId, selected.id, e.target.value || null)") && panel.includes("Levels are set on the conduit riser page.") && panel.includes("levels && levels.length > 0"),
+    "#321 SpaceEditor: a Level select, replaced by a hint when the design has no levels");
+  ok(src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx").includes("levels={project.levels}"), "#321 Property Editor passes the design's levels to the space editor");
+  const tabs = src("src/app/(app)/design/grid/[id]/workspace/sheet-tabs.tsx");
+  ok(tabs.includes("Default level") && tabs.includes("setSheetLevelAction(project.id, s.id, e.target.value || null)") && tabs.includes("Levels are set on the conduit riser page."),
+    "#321 sheet tab menu: a Default level select with the same hint");
+  ok(src("src/app/(app)/design/grid/[id]/page.tsx").includes("levels: project.levels || [],") && src("src/app/(app)/design/grid/[id]/page.tsx").includes("sheetLevels: project.sheetLevels || {},"), "#321 the editor page passes levels and sheetLevels to the client");
+}
+
+/* ---------------- #321 Plan B task 4: wire-type symbols, box types, conduit sizes ---------------- */
+async function conduitRiser321B4Checks(): Promise<void> {
+  const fs = await import("node:fs");
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+
+  // --- wire types: symbol + signal ---
+  const { cleanWireTypes } = await import("@/lib/catalog-connect");
+  const wt = cleanWireTypes([
+    { id: "a", connectionTypes: ["HDMI"], symbol: " ue ", signal: "  Unshielded   Ethernet " },
+    { id: "b", connectionTypes: ["HDMI"], symbol: "   ", signal: "" },
+    { id: "c", connectionTypes: ["HDMI"], symbol: "n!d-x9", signal: "S".repeat(50) },
+    { id: "d", connectionTypes: ["HDMI"] },
+    { id: "e", connectionTypes: ["HDMI"], symbol: 7, signal: null },
+  ])!;
+  ok(wt[0].symbol === "UE" && wt[0].signal === "Unshielded Ethernet", "#321 cleanWireTypes: symbol is uppercased and trimmed, signal trimmed and whitespace collapsed");
+  ok(!("symbol" in wt[1]) && !("signal" in wt[1]) && !("symbol" in wt[3]) && !("signal" in wt[3]), "#321 cleanWireTypes: a blank or missing symbol / signal is left off, like cableSku");
+  ok(wt[2].symbol === "NDX" && wt[2].signal!.length === 30, "#321 cleanWireTypes: symbol keeps letters and digits only, at most 3; signal is capped at 30");
+  ok(wt[4].symbol === "7" && !("signal" in wt[4]), "#321 cleanWireTypes: junk values are coerced or dropped, never thrown");
+  const card = src("src/app/(app)/design/grid/settings/wire-types-card.tsx");
+  ok(card.includes('aria-label="Riser symbol"') && card.includes('aria-label="Riser signal"') && card.includes("symbol: wt.symbol || \"\"") && card.includes("wt.symbol = r.symbol.trim()") && card.includes("wt.signal = r.signal.trim()"),
+    "#321 Wire types card: Symbol and Signal inputs, round-tripped through rowOf and rowsToWireTypes");
+
+  // --- box types ---
+  const BT = await import("@/lib/riser-box-types");
+  const { BRAY_BOX_TYPES } = await import("@/lib/design/conduit-riser/tables");
+  const boxes = BT.sanitizeBoxTypes([
+    { code: " ar ", description: "  As   required " },
+    { code: "AR", description: "duplicate code" },
+    { code: "ab12", description: "x".repeat(80) },
+    { code: "TOOLONG", description: "five+ chars" },
+    { code: "b-1", description: "bad char" },
+    { code: "", description: "no code" },
+    { code: "Z", description: "   " },
+    null,
+    "junk",
+    { code: "q", description: "Last" },
+  ]);
+  ok(J2(boxes.map((b) => b.code)) === J2(["AR", "AB12", "Q"]), "#321 sanitizeBoxTypes: codes uppercased and unique (first wins); bad, blank and over-long codes and blank descriptions are dropped");
+  ok(boxes[0].description === "As required" && boxes[1].description.length === BT.BOX_DESC_MAX, "#321 sanitizeBoxTypes: description whitespace collapsed and capped at 60");
+  const manyBoxes = BT.sanitizeBoxTypes(Array.from({ length: 60 }, (_, i) => ({ code: "X" + i, description: "d" + i })));
+  ok(manyBoxes.length === 40 && manyBoxes[0].code === "X0", "#321 sanitizeBoxTypes: caps at 40 rows, keeps order");
+  ok(BT.sanitizeBoxTypes({ types: [{ code: "a", description: "b" }] }).length === 1 && BT.sanitizeBoxTypes("x").length === 0 && BT.sanitizeBoxTypes(undefined).length === 0, "#321 sanitizeBoxTypes: reads { types } or a bare array; junk is an empty list");
+  ok(BRAY_BOX_TYPES.every((b) => /^[A-Z0-9]{1,4}$/.test(b.code) && b.description.length <= BT.BOX_DESC_MAX) && J2(BT.sanitizeBoxTypes(BRAY_BOX_TYPES)) === J2(BRAY_BOX_TYPES), "#321 Bray's list passes its own sanitizer unchanged");
+
+  const BTS = await import("@/lib/stores/riser-box-types");
+  const boxBefore = await getBlob<Record<string, unknown>>(BT.RISER_BOX_TYPES_BLOB, {});
+  try {
+    await setBlob(BT.RISER_BOX_TYPES_BLOB, { types: null });
+    ok(J2(await BTS.getRiserBoxTypes()) === J2(BRAY_BOX_TYPES), "#321 getRiserBoxTypes: nothing stored → Bray's list");
+    const savedBoxes = await BTS.saveRiserBoxTypes([{ code: "x", description: "Custom" }, { code: "x", description: "dup" }, { code: "", description: "junk" }]);
+    ok(J2(savedBoxes) === J2([{ code: "X", description: "Custom" }]) && J2(await BTS.getRiserBoxTypes()) === J2(savedBoxes), "#321 saveRiserBoxTypes: stores the sanitized list and reads it back");
+    await BTS.saveRiserBoxTypes([]);
+    ok((await BTS.getRiserBoxTypes()).length === 0, "#321 getRiserBoxTypes: an explicitly saved empty list stays empty");
+  } finally {
+    await setBlob(BT.RISER_BOX_TYPES_BLOB, { types: Array.isArray(boxBefore.types) ? boxBefore.types : null });
+  }
+  const gridActions = src("src/app/(app)/design/grid/settings/actions.ts");
+  const boxAction = gridActions.slice(gridActions.indexOf("export async function saveRiserBoxTypesAction("), gridActions.indexOf("/* ----------------------------- Equipment map"));
+  ok(boxAction.includes('await requirePerm("manage_users");') && boxAction.includes("saveRiserBoxTypes(rows)") && boxAction.includes('revalidatePath("/design/grid/settings");'), "#321 saveRiserBoxTypesAction: admin-gated, writes through the store, revalidates the settings page");
+  ok(src("src/app/(app)/design/grid/settings/page.tsx").includes("<BoxTypesCard key={JSON.stringify(boxTypes)} boxTypes={boxTypes} />") && src("src/app/(app)/design/grid/settings/box-types-card.tsx").includes("Reset to Bray&apos;s list") && src("src/app/(app)/design/grid/settings/box-types-card.tsx").includes("+ Add box type"),
+    "#321 Grid Settings page mounts the Riser box types card with Add and Reset");
+
+  // --- conduit sizes ---
+  const CS = await import("@/lib/conduit-sizes");
+  const sized = CS.sanitizeConduitSizes([
+    { size: ' 1" ', partId: "  P-1 " },
+    { size: '1"', partId: "dup" },
+    { size: "3/4\"" },
+    { size: "", partId: "blank" },
+    { size: "x".repeat(40), partId: "" },
+    null,
+    { size: "2\"", partId: 5 },
+  ]);
+  ok(J2(sized) === J2([{ size: '1"', partId: "P-1" }, { size: '3/4"' }, { size: "x".repeat(12) }, { size: '2"' }]), "#321 sanitizeConduitSizes: trims, keeps order, first of a repeated size wins, partId optional, size capped at 12");
+  ok(CS.sanitizeConduitSizes(Array.from({ length: 30 }, (_, i) => ({ size: "s" + i }))).length === 20, "#321 sanitizeConduitSizes: caps at 20 rows");
+  ok(J2(CS.DEFAULT_CONDUIT_SIZES.map((s) => s.size)) === J2(['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"']) && CS.DEFAULT_CONDUIT_SIZES.every((s) => !("partId" in s)), "#321 conduit size seed: the six sizes, no parts");
+  ok(!CS.validateConduitSizeRows([{ size: "1\"" }, { size: " " }]).ok && !CS.validateConduitSizeRows([{ size: "1\"" }, { size: "1\"" }]).ok && !CS.validateConduitSizeRows([{ size: "x".repeat(13) }]).ok && !CS.validateConduitSizeRows(Array.from({ length: 21 }, (_, i) => ({ size: "s" + i }))).ok && CS.validateConduitSizeRows([{ size: "1\"" }]).ok,
+    "#321 validateConduitSizeRows: a blank, repeated or over-long size and a 21st row are refused, not dropped");
+
+  const FT = fid(321, "cond-ft");
+  const EA = fid(321, "cond-ea");
+  await mergeUpsert(FT, { desc: "Test321 EMT 1 inch", category: "Test321 Conduit", unit: "ft", list: 2, cost: 1 });
+  reg("catalog_parts", FT);
+  await mergeUpsert(EA, { desc: "Test321 EMT coupling", category: "Test321 Conduit", unit: "ea", list: 2, cost: 1 });
+  reg("catalog_parts", EA);
+  const CSS = await import("@/lib/stores/conduit-sizes");
+  const sizesBefore = await getBlob<Record<string, unknown>>(CS.CONDUIT_SIZES_BLOB, {});
+  try {
+    await setBlob(CS.CONDUIT_SIZES_BLOB, { sizes: null });
+    ok(J2(await CSS.getConduitSizes()) === J2(CS.DEFAULT_CONDUIT_SIZES), "#321 getConduitSizes: nothing stored → the six seed sizes");
+    const unknown = await CSS.saveConduitSizes([{ size: '1"', partId: "NO-SUCH-321" }]);
+    ok(!unknown.ok && unknown.error.includes("NO-SUCH-321") && unknown.error.includes('1"'), "#321 saveConduitSizes: a part missing from the catalog is refused by size and part");
+    const notFt = await CSS.saveConduitSizes([{ size: '3/4"' }, { size: '1"', partId: EA }]);
+    ok(!notFt.ok && notFt.error.includes(EA) && notFt.error.includes("per foot"), "#321 saveConduitSizes: a part not sold per foot is refused by name");
+    const badRow = await CSS.saveConduitSizes([{ size: '1"' }, { size: "" }]);
+    ok(!badRow.ok && badRow.error.startsWith("Row 2"), "#321 saveConduitSizes: a blank size is refused by row");
+    ok(J2(await CSS.getConduitSizes()) === J2(CS.DEFAULT_CONDUIT_SIZES), "#321 saveConduitSizes: a refused save writes nothing");
+    const good = await CSS.saveConduitSizes([{ size: ' 1" ', partId: ` ${FT} ` }, { size: '2"' }]);
+    ok(good.ok && J2(good.sizes) === J2([{ size: '1"', partId: FT }, { size: '2"' }]) && J2(await CSS.getConduitSizes()) === J2(good.ok ? good.sizes : null), "#321 saveConduitSizes: a per-foot catalog part saves, sanitized, and reads back");
+    await CSS.saveConduitSizes([]);
+    ok((await CSS.getConduitSizes()).length === 0, "#321 getConduitSizes: an explicitly saved empty list stays empty");
+  } finally {
+    await setBlob(CS.CONDUIT_SIZES_BLOB, { sizes: Array.isArray(sizesBefore.sizes) ? sizesBefore.sizes : null });
+  }
+
+  // rename sweep
+  const RW = await import("@/lib/catalog-rename/rewrite");
+  const OLD = "T321-OLD", NEW = "Brand:T321 New", OTHER = "T321-OTHER";
+  const rm: ReadonlyMap<string, string> = new Map([[OLD, NEW]]);
+  const blob = { sizes: [{ size: '1"', partId: OLD }, { size: '2"', partId: OTHER }, { size: '3/4"' }, { size: '1/2"', partId: OLD }] };
+  ok(J2(RW.rewriteConduitSizes(blob, rm)) === J2({ sizes: [{ size: '1"', partId: NEW }, { size: '2"', partId: OTHER }, { size: '3/4"' }, { size: '1/2"', partId: NEW }] }), "#321 rewriteConduitSizes: every row's partId moves, other rows and sizes are untouched");
+  ok(RW.rewriteConduitSizes({ sizes: [{ size: '1"', partId: NEW }] }, rm) === null && RW.rewriteConduitSizes({}, rm) === null && RW.rewriteConduitSizes({ sizes: "x" }, rm) === null, "#321 rewriteConduitSizes: nothing to change, no list or a malformed list → null");
+  const apply = src("src/lib/catalog-rename/apply.ts");
+  ok(apply.includes("[CONDUIT_SIZES_BLOB, (raw) => RW.rewriteConduitSizes(raw, m)]"), "#321 the SKU-rename blobs step sweeps conduit_sizes");
+
+  // page, actions, tile
+  const act = src("src/app/(app)/estimating-rules/conduit-sizes/actions.ts");
+  ok(act.includes("export async function saveConduitSizesAction(") && act.includes("export async function searchConduitPartsAction(") && (act.match(/await requirePerm\("manage_users"\);/g) || []).length === 2 && act.includes("isPerLengthUnit(h.unit"),
+    "#321 conduit sizes actions: admin-gated save and a per-foot-only part search");
+  const page = src("src/app/(app)/estimating-rules/conduit-sizes/page.tsx");
+  ok(page.includes("Admin access required") && page.includes('can("manage_users", user.roles)') && page.includes("getConduitSizes()"), "#321 conduit sizes page: admin gate, reads the store");
+  ok(src("src/app/(app)/estimating-rules/page.tsx").includes('href="/estimating-rules/conduit-sizes"') && src("src/app/(app)/estimating-rules/conduit-sizes/conduit-sizes-client.tsx").includes("+ Add size") && src("src/app/(app)/estimating-rules/conduit-sizes/conduit-sizes-client.tsx").includes("search={searchConduitPartsAction}"),
+    "#321 Estimating Rules has a Conduit sizes tile; the page adds sizes and searches per-foot parts");
+}
+
+/* ---------------- #321 Plan B task 5: conduit riser store and server loader ---------------- */
+async function conduitRiser321B5Checks(): Promise<void> {
+  type GP = import("@/lib/stores/grid-projects").GridProject;
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const M = await import("@/lib/design/conduit-riser/model");
+  const LV = await import("@/lib/design/conduit-riser/live");
+  const GO = await import("@/lib/design/grid-options");
+  const RD = await import("@/lib/design/grid-riser-doc");
+
+  // --- copyConduitRiserDoc (pure) ---
+  let seq = 0;
+  const mk: import("@/lib/design/conduit-riser/model").MakeId = (prefix) => `${prefix}${String(++seq).padStart(12, "0")}`;
+  const src0 = M.normalizeConduitRiserDoc({
+    details: [{ id: "dt-main", n: "1", name: "Main", allSpaces: true, spaceIds: [] }, { id: "dt-two", n: "2", name: "Booth", allSpaces: false, spaceIds: ["sp-1"] }],
+    tags: { "gp-a": { x: 1, y: 2, detailId: "dt-two" }, "gp-z": { x: 3, y: 4, detailId: "dt-main" } },
+    stubs: [{ id: "st-1", label: "TO FACP", detailId: "dt-main" }],
+    runs: [
+      { id: "cr-1", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "placement", placementId: "gp-b" }, routeIds: ["wr-1", "wr-gone"], linkIds: ["lk-1"], size: '1"', style: "conduit", laneX: 5 },
+      { id: "cr-2", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "stub", stubId: "st-1" }, routeIds: [], linkIds: [], size: '3/4"', style: "conduit", signals: ["dmx"] },
+      { id: "cr-3", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "placement", placementId: "gp-z" }, routeIds: [], linkIds: [], size: '3/4"', style: "conduit" },
+    ],
+    dismissed: [{ key: M.pairKey("gp-a", "gp-b"), ids: ["wr-1"] }, { key: M.pairKey("gp-a", "gp-z"), ids: [] }],
+    levelY: { "dt-two": { "lvl-aaaaaaaaaaaa": 7 } },
+    powerTypes: [{ letter: "A", type: "Normal", config: "", input: "" }],
+    notes: [{ id: "nt-1", text: "Pull string in every empty conduit" }],
+    defaults: { size: '1"', priceWire: true, priceConduit: false },
+  });
+  const srcJson = J2(src0);
+  const idMap = new Map([["gp-a", "gp-A"], ["gp-b", "gp-B"], ["wr-1", "wr-X"], ["lk-1", "lk-Y"]]);
+  const cp = M.copyConduitRiserDoc(src0, idMap, mk);
+  const dMain = cp.details.find((d) => d.name === "Main")!;
+  const dTwo = cp.details.find((d) => d.name === "Booth")!;
+  ok(J2(src0) === srcJson, "#321 copyConduitRiserDoc: never mutates the source");
+  ok(cp.details.length === 2 && cp.details.every((d) => /^dt-\d{12}$/.test(d.id)) && J2(dTwo.spaceIds) === J2(["sp-1"]) && !dTwo.allSpaces, "#321 copyConduitRiserDoc: details get new ids and keep their spaces");
+  ok(J2(Object.keys(cp.tags)) === J2(["gp-A"]) && cp.tags["gp-A"].detailId === dTwo.id && cp.tags["gp-A"].x === 1, "#321 copyConduitRiserDoc: a pinned tag re-points to the copied device and detail; an uncopied device's tag drops");
+  ok(cp.stubs.length === 1 && /^st-\d{12}$/.test(cp.stubs[0].id) && cp.stubs[0].detailId === dMain.id, "#321 copyConduitRiserDoc: stubs get new ids, their detail follows");
+  const r1 = cp.runs.find((r) => r.a.kind === "placement" && r.b.kind === "placement")!;
+  const r2 = cp.runs.find((r) => r.b.kind === "stub")!;
+  ok(cp.runs.length === 2 && cp.runs.every((r) => /^cr-\d{12}$/.test(r.id)), "#321 copyConduitRiserDoc: runs get new ids; a run to an uncopied device drops");
+  ok(M.runPairKey(r1) === M.pairKey("gp-A", "gp-B") && J2(r1.routeIds) === J2(["wr-X"]) && J2(r1.linkIds) === J2(["lk-Y"]) && r1.size === '1"' && r1.laneX === 5,
+    "#321 copyConduitRiserDoc: ends, member routes and links re-point through idMap; an unmapped member drops; size and lane kept");
+  ok(r2.a.kind === "placement" && r2.a.placementId === "gp-A" && r2.b.kind === "stub" && r2.b.stubId === cp.stubs[0].id && J2(r2.signals) === J2(["dmx"]), "#321 copyConduitRiserDoc: a stub run's stub end follows the new stub id");
+  ok(cp.dismissed.length === 1 && cp.dismissed[0].key === M.pairKey("gp-A", "gp-B") && J2(cp.dismissed[0].ids) === J2(["wr-X"]), "#321 copyConduitRiserDoc: dismissals re-key to the copied pair; one naming an uncopied device drops");
+  ok(J2(cp.levelY) === J2({ [dTwo.id]: { "lvl-aaaaaaaaaaaa": 7 } }) && cp.notes.length === 1 && cp.notes[0].id !== "nt-1" && cp.notes[0].text === src0.notes[0].text && J2(cp.defaults) === J2(src0.defaults) && J2(cp.powerTypes) === J2(src0.powerTypes),
+    "#321 copyConduitRiserDoc: level positions follow their detail; notes get new ids; power types and defaults copy");
+  ok(M.copyConduitRiserDoc(undefined, new Map(), mk).runs.length === 0 && M.copyConduitRiserDoc(undefined, new Map(), mk).details.length === 1, "#321 copyConduitRiserDoc: nothing stored copies as an empty document");
+
+  // --- the option copy's id maps ---
+  const cm = GO.copyOptionMembers({ placements: [{ id: "gp-1", optionId: "o1" }], routes: [{ id: "wr-1", optionId: "o1", fromPlacementId: "gp-1" }], fromOptionId: "o1", toOptionId: "o2", makeId: (p) => `${p}copy`, by: "t", at: 1 });
+  ok(cm.idMap.get("gp-1") === "gp-copy" && cm.idMap.get("wr-1") === "wr-copy", "#321 copyOptionMembers: its id map covers routes as well as placements");
+  const lm = new Map<string, string>();
+  const rdoc = RD.normalizeRiserDoc({ links: [{ id: "lk-1", from: { kind: "placement", placementId: "gp-1" }, to: { kind: "placement", placementId: "gp-2" }, partId: "C", lengthFt: 5, by: "t", at: 1 }, { id: "lk-2", from: { kind: "placement", placementId: "gp-9" }, to: { kind: "space", spaceId: null }, partId: "C", lengthFt: 5, by: "t", at: 1 }] });
+  const rc = RD.copyRiserDoc(rdoc, new Map([["gp-1", "gp-1c"], ["gp-2", "gp-2c"]]), (p) => `${p}new`, "t", 2, lm);
+  ok(rc.links.length === 1 && lm.get("lk-1") === "lk-new" && !lm.has("lk-2"), "#321 copyRiserDoc: records old → new link ids for the links it copies");
+
+  // --- conduitLiveIds / pruneConduitRisersIn (pure) ---
+  const liveDoc = {
+    options: [{ id: "o1" }, { id: "o2" }],
+    placements: [{ id: "gp-1", optionId: "o1" }, { id: "gp-2" }, { id: "gp-c", optionId: "o1", curtain: { type: "Draw" } }, { id: "gp-9", optionId: "o2" }],
+    routes: [{ id: "wr-1", optionId: "o1", fromPlacementId: "gp-1", toPlacementId: "gp-2" }, { id: "wr-2", optionId: "o1", fromPlacementId: "gp-1" }, { id: "wr-9", optionId: "o2" }],
+    spaces: [{ id: "sp-1" }],
+    levels: [{ id: "lvl-aaaaaaaaaaaa" }],
+    riser: { o1: { links: [{ id: "lk-1", from: { kind: "placement", placementId: "gp-2" }, to: { kind: "placement", placementId: "gp-1" }, partId: "C", lengthFt: 5, by: "t", at: 1 }] } },
+  };
+  const li = LV.conduitLiveIds(liveDoc, "o1");
+  ok(J2([...li.placementIds].sort()) === J2(["gp-1", "gp-2"]) && J2([...li.routeIds].sort()) === J2(["wr-1", "wr-2"]) && J2([...li.linkIds]) === J2(["lk-1"]),
+    "#321 conduitLiveIds: the option's devices (untagged → first option, curtains out), wires and RiserLinks");
+  ok(li.wireEnds!.get("route:wr-1") === M.pairKey("gp-1", "gp-2") && li.wireEnds!.get("route:wr-2") === null && li.wireEnds!.get("link:lk-1") === M.pairKey("gp-1", "gp-2") && li.levelIds!.has("lvl-aaaaaaaaaaaa") && li.spaceIds.has("sp-1"),
+    "#321 conduitLiveIds: each wire's device pair (null for a free end), plus spaces and levels");
+  const pruneMe = {
+    ...liveDoc,
+    conduitRiser: {
+      o1: { runs: [{ id: "cr-1", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-2" }, routeIds: ["wr-1", "wr-2", "wr-x"], linkIds: ["lk-1"], size: '1"' }, { id: "cr-2", a: { kind: "placement", placementId: "gp-1" }, b: { kind: "placement", placementId: "gp-c" }, routeIds: [], linkIds: [], size: '1"' }] },
+      gone: { runs: [] },
+    } as Record<string, unknown>,
+  };
+  LV.pruneConduitRisersIn(pruneMe);
+  const pr = pruneMe.conduitRiser.o1 as import("@/lib/design/conduit-riser/model").ConduitRiserDoc;
+  ok(J2(Object.keys(pruneMe.conduitRiser)) === J2(["o1"]) && pr.runs.length === 1 && J2(pr.runs[0].routeIds) === J2(["wr-1"]) && J2(pr.runs[0].linkIds) === J2(["lk-1"]),
+    "#321 pruneConduitRisersIn: drops a removed option's doc, a run to a curtain, a deleted wire and a wire joining other devices");
+  const none: { conduitRiser?: Record<string, unknown> } = {};
+  LV.pruneConduitRisersIn(none);
+  ok(!("conduitRiser" in none), "#321 pruneConduitRisersIn: a design with no conduit riser gains none");
+
+  // --- store + loader on a real project ---
+  const G = await import("@/lib/stores/grid-projects");
+  const GR = await import("@/lib/stores/grid-riser");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const DS = await import("@/db/doc-store");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const Fx = await import("@/lib/stores/fixtures");
+  const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getSettings } = await import("@/lib/settings");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+
+  // cables: C1 matched by exact cableSku, C2 by a former SKU, C3 by connection type, C4 by a type with no symbol
+  const C1 = fid(321, "b5-dmx-cable");
+  const C2 = fid(321, "b5-net-cable");
+  const C2OLD = fid(321, "b5-net-old");
+  const C3 = fid(321, "b5-ct-cable");
+  const C4 = fid(321, "b5-plain-cable");
+  await mergeUpsert(C1, { desc: "Test321 DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5, manufacturerModelNumber: "T321-DMX5" });
+  await mergeUpsert(C2, { desc: "Test321 Cat6 cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5, formerSkus: [C2OLD] });
+  await mergeUpsert(C3, { desc: "Test321 sense cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5 });
+  await mergeUpsert(C4, { desc: "Test321 plain cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5 });
+  for (const c of [C1, C2, C3, C4]) reg("catalog_parts", c);
+  const settings = await getSettings();
+  const deps = {
+    settings: {
+      ...settings,
+      wireTypes: [
+        { id: "t321-dmx", label: "DMX", connectionTypes: ["T321-DMX"], cableSku: C1, symbol: "D", signal: "DMX" },
+        { id: "t321-net", label: "Network", connectionTypes: ["T321-NET"], cableSku: C2OLD, symbol: "N" },
+        { id: "t321-ct", label: "Sense", connectionTypes: ["T321-CT"], symbol: "X", signal: "Sense" },
+        { id: "t321-plain", label: "Plain", connectionTypes: ["T321-PLAIN"], cableSku: C4 },
+      ],
+    },
+  };
+
+  // a lighting rack assembly (2 dimmer modules + a node)
+  const rackClean = sanitizeFixtureInput({
+    kind: "rack", label: "Test321 Dimmer rack", description: "", scope: "Lighting", parts: [],
+    rack: { config: { ruCount: 12, widthIn: 19, numbering: "bottom-up" }, placements: [
+      { id: "RP-D1", kind: "device", sku: "T321-DIM", label: "Dimmer module", ruStart: 1, ruHeight: 1, face: "front" },
+      { id: "RP-D2", kind: "device", sku: "T321-DIM", label: "Dimmer module", ruStart: 2, ruHeight: 1, face: "front" },
+      { id: "RP-N1", kind: "device", sku: "T321-NODE", label: "DMX node", ruStart: 4, ruHeight: 1, face: "front" },
+    ] },
+  });
+  if (!rackClean.ok) throw new Error("#321 B5: expected a clean rack — " + rackClean.error);
+  const rackRec = await Fx.createFixture(rackClean.value, by, { cost: 0, price: 0, pricedAt: null }, 1_700_321_500_000);
+  reg("subassemblies", rackRec.id);
+  const RACK = VP.assemblyPartId(rackRec.id);
+
+  const gp = await G.createProject({ name: "#321 B5 conduit riser", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 B5 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+  const rack = await place(RACK, 0.1, 0.1);
+  const dim = await place(LIGHT, 0.3, 0.1);
+  const dmx1 = await place(LIGHT, 0.1, 0.4);
+  const dmx2 = await place(LIGHT, 0.4, 0.4);
+  const spk = await place(AUDIO, 0.8, 0.8);
+  const curtain = (await G.addCurtainPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.5, y: 0.9, curtain: { type: "Draw", name: "Main", widthFt: 20, heightFt: 10, fullnessPct: 50, fabricSku: "T321-FAB" }, optionId: opt, by }))!.placements.at(-1)!;
+  const route = async (a: { id: string; x: number; y: number }, b: { id: string; x: number; y: number }, partId: string, connectionType?: string) =>
+    (await G.addRoute(gp.id, { sheetId: sh.id, page: 1, partId, points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id, ...(connectionType ? { connectionType } : {}) }))!.routes!.at(-1)!;
+  const wRackDim = await route(rack, dim, C1);
+  const wRackDmx1 = await route(rack, dmx1, C2);
+  const wRackDmx1b = await route(rack, dmx1, C3, "T321-CT");
+  const wDmx2Rack = await route(dmx2, rack, C4);
+  const wSpk = await route(spk, dim, C1);
+  const link = await GR.addRiserLink(gp.id, { optionId: opt, from: { kind: "placement", placementId: dim.id }, to: { kind: "placement", placementId: dmx2.id }, partId: C1, lengthFt: 30, by });
+  if (!link.ok) throw new Error("#321 B5: expected a riser link");
+
+  // loader
+  let data = await L.loadConduitRiser(await live(), opt, deps);
+  const keys = data.suggestions.items.map((s) => s.key).sort();
+  const kRackDim = M.pairKey(rack.id, dim.id), kRackDmx1 = M.pairKey(rack.id, dmx1.id), kRackDmx2 = M.pairKey(rack.id, dmx2.id), kDimDmx2 = M.pairKey(dim.id, dmx2.id);
+  ok(J2(keys) === J2([kRackDim, kRackDmx1, kRackDmx2, kDimDmx2].sort()) && data.suggestions.items.every((s) => s.kind === "new"),
+    "#321 loadConduitRiser: one suggestion per device pair joined by a lighting wire or link; the audio device's wire suggests nothing");
+  const sRackDmx1 = data.suggestions.items.find((s) => s.key === kRackDmx1)!;
+  const sDimDmx2 = data.suggestions.items.find((s) => s.key === kDimDmx2)!;
+  ok(J2(sRackDmx1.routeIds.sort()) === J2([wRackDmx1.id, wRackDmx1b.id].sort()) && J2(sDimDmx2.linkIds) === J2([link.id]), "#321 loadConduitRiser: wires joining one pair merge; a RiserLink suggests like a route");
+  const dev = (id: string) => data.input.devices.find((d) => d.id === id)!;
+  ok(data.input.devices.length === 5 && !data.input.devices.some((d) => d.id === curtain.id) && data.placementIds.size === 5 && !data.placementIds.has(curtain.id),
+    "#321 loadConduitRiser: every non-curtain device of the option, never a curtain");
+  ok(dev(rack.id).typeKey === L.RACK_TYPE_KEY && J2(dev(rack.id).rack) === J2({ items: [{ desc: "Dimmer module", qty: 2 }, { desc: "DMX node", qty: 1 }] }) && dev(rack.id).inSystem,
+    "#321 loadConduitRiser: a rack assembly reads as a rack with its contents grouped by part");
+  ok(dev(dim.id).inSystem && !dev(spk.id).inSystem && !!dev(dim.id).label && dev(dim.id).label !== dev(dmx1.id).label && dev(dim.id).tag.location === "",
+    "#321 loadConduitRiser: lighting devices are in the system, audio is not; each has its own designator label");
+  const wire = (id: string) => data.input.wires.find((w) => w.id === id)!;
+  ok(Math.abs(wire(wRackDim.id).lengthFt! - 20) < 1e-6 && wire(wRackDim.id).inSystem && !wire(wSpk.id).inSystem && wire(link.id).kind === "link" && wire(link.id).lengthFt === 30 && wire(link.id).inSystem,
+    "#321 loadConduitRiser: a route measures off the calibration; a link keeps its typed length; system follows the wire's devices");
+  ok(wire(wRackDim.id).signal?.symbol === "D" && wire(wRackDim.id).signal?.signal === "DMX" && wire(wRackDim.id).cable === "T321-DMX5",
+    "#321 loadConduitRiser: a cable matched by its exact SKU takes that wire type's signal; the cable prints its model");
+  ok(wire(wRackDmx1.id).signal?.symbol === "N" && wire(wRackDmx1.id).signal?.signal === "Network", "#321 loadConduitRiser: a cable matched by a former SKU takes that wire type's signal (blank signal → the type's label)");
+  ok(wire(wRackDmx1b.id).signal?.symbol === "X" && wire(wDmx2Rack.id).signal === null, "#321 loadConduitRiser: no SKU match falls back to the wire's connection type; a type with no symbol prints no signal");
+  ok(J2(data.wireTypes.map((t) => t.id)) === J2(["t321-dmx", "t321-net", "t321-ct"]) && data.estimateOwned === false && data.boxTypes.length > 0 && data.sizes.length > 0,
+    "#321 loadConduitRiser: only wire types with a symbol; box types, conduit sizes; not estimate-owned");
+
+  // accept
+  const forged = await CR.acceptSuggestions(gp.id, opt, ["gp-forged|gp-nothing", `${rack.id}|${spk.id}`], deps);
+  ok(forged.ok && forged.accepted === 0 && !(await live()).conduitRiser, "#321 acceptSuggestions: a key not on offer is ignored — nothing accepted, nothing written");
+  const one = await CR.acceptSuggestions(gp.id, opt, [kRackDmx1], deps);
+  let doc = (await live()).conduitRiser![opt];
+  ok(one.ok && one.accepted === 1 && doc.runs.length === 1 && M.runPairKey(doc.runs[0]) === kRackDmx1 && J2([...doc.runs[0].routeIds].sort()) === J2([wRackDmx1.id, wRackDmx1b.id].sort()) && /^cr-[0-9a-f]{12}$/.test(doc.runs[0].id),
+    "#321 acceptSuggestions: a listed key becomes a run holding the pair's wires");
+  const all = await CR.acceptSuggestions(gp.id, opt, "all", deps);
+  doc = (await live()).conduitRiser![opt];
+  ok(all.ok && all.accepted === 3 && doc.runs.length === 4 && J2(doc.runs.map((r) => M.runPairKey(r)).sort()) === J2(keys) && doc.runs.find((r) => M.runPairKey(r) === kDimDmx2)!.linkIds[0] === link.id,
+    "#321 acceptSuggestions(\"all\"): every suggestion on offer becomes a run");
+  const again = await CR.acceptSuggestions(gp.id, opt, "all", deps);
+  ok(again.ok && again.accepted === 0 && J2((await live()).conduitRiser![opt]) === J2(doc), "#321 acceptSuggestions: accepting again changes nothing ({ ok: true, accepted: 0 })");
+  ok((await L.loadConduitRiser(await live(), opt, deps)).suggestions.items.length === 0, "#321 loadConduitRiser: accepted wires suggest nothing more");
+
+  // dismiss
+  const wDmx = await route(dmx1, dmx2, C1);
+  const kDmx = M.pairKey(dmx1.id, dmx2.id);
+  ok((await L.loadConduitRiser(await live(), opt, deps)).suggestions.items.some((s) => s.key === kDmx), "#321 a new lighting wire between two devices suggests a run");
+  const dis = await CR.dismissSuggestion(gp.id, opt, kDmx, deps);
+  ok(dis.ok && !(await L.loadConduitRiser(await live(), opt, deps)).suggestions.items.some((s) => s.key === kDmx) && (await live()).conduitRiser![opt].dismissed.some((d) => d.key === kDmx && d.ids.includes(wDmx.id)),
+    "#321 dismissSuggestion: the pair is hidden, its wires recorded");
+  const disAcc = await CR.acceptSuggestions(gp.id, opt, [kDmx], deps);
+  ok(!(await CR.dismissSuggestion(gp.id, opt, "gp-forged|gp-nothing", deps)).ok && disAcc.ok && disAcc.accepted === 0, "#321 dismissSuggestion: a key not on offer is refused; a dismissed pair can't be accepted by key");
+
+  // ops
+  const det = doc.details[0].id;
+  ok((await CR.patchConduitRiser(gp.id, opt, { op: "moveTag", placementId: dmx2.id, x: 4, y: 5, detailId: det })).ok && (await live()).conduitRiser![opt].tags[dmx2.id]?.x === 4, "#321 patchConduitRiser: pins a device's tag");
+  const curTag = await CR.patchConduitRiser(gp.id, opt, { op: "moveTag", placementId: curtain.id, x: 1, y: 1, detailId: det });
+  ok(!curTag.ok && curTag.reason === "invalid" && !(curtain.id in (await live()).conduitRiser![opt].tags), "#321 patchConduitRiser: a curtain never takes a riser tag");
+  const junk = await CR.patchConduitRiser(gp.id, opt, { op: "dropTables" } as unknown as import("@/lib/design/conduit-riser/model").CROp);
+  const noOpt = await CR.patchConduitRiser(gp.id, "opt-gone", { op: "addNote", text: "x" });
+  const noProj = await CR.patchConduitRiser("GRD-NOPE-321", opt, { op: "addNote", text: "x" });
+  ok(!junk.ok && junk.reason === "invalid" && !noOpt.ok && noOpt.reason === "no-such-option" && !noProj.ok && noProj.reason === "not-found",
+    "#321 patchConduitRiser: an unknown op is invalid; a missing option or project is refused by name");
+  const fakeRun = await CR.patchConduitRiser(gp.id, opt, { op: "addConduitRun", a: { kind: "placement", placementId: dim.id }, b: { kind: "placement", placementId: "gp-forged" } });
+  ok(!fakeRun.ok && fakeRun.reason === "invalid", "#321 patchConduitRiser: a run to a device not in the option is refused");
+
+  // option copy re-points runs to the copied devices, routes and links
+  const copy = await G.addOption(gp.id, { name: "Copy", copyFromOptionId: opt, by });
+  if (!copy.ok) throw new Error("#321 B5: expected an option copy");
+  let p = await live();
+  const copiedIds = new Set(p.placements.filter((pl) => pl.optionId === copy.option.id).map((pl) => pl.id));
+  const copiedRoutes = new Set((p.routes || []).filter((r) => r.optionId === copy.option.id).map((r) => r.id));
+  const copiedLinks = new Set(RD.normalizeRiserDoc(p.riser?.[copy.option.id]).links.map((l) => l.id));
+  const cdoc = p.conduitRiser![copy.option.id];
+  const cEnds = cdoc.runs.flatMap((r) => [r.a, r.b]).map((e) => (e.kind === "placement" ? e.placementId : ""));
+  ok(cdoc.runs.length === 4 && cEnds.every((id) => copiedIds.has(id)), "#321 addOption copy: the copy's runs end on the copied devices");
+  ok(cdoc.runs.every((r) => r.routeIds.every((id) => copiedRoutes.has(id))) && cdoc.runs.reduce((n, r) => n + r.routeIds.length, 0) === 4 && cdoc.runs.some((r) => r.linkIds.length === 1 && copiedLinks.has(r.linkIds[0])),
+    "#321 addOption copy: member routes and RiserLinks re-point to the copy's own");
+  ok(Object.keys(cdoc.tags).length === 1 && copiedIds.has(Object.keys(cdoc.tags)[0]) && cdoc.dismissed.length === 1 && cdoc.dismissed[0].key.split("|").every((id) => copiedIds.has(id)) && !cdoc.runs.some((r) => doc.runs.some((o) => o.id === r.id)),
+    "#321 addOption copy: pinned tags and dismissals re-point; runs get new ids");
+  ok((await L.loadConduitRiser(p, copy.option.id, deps)).suggestions.items.length === 0, "#321 addOption copy: the copy has nothing left to suggest");
+
+  // estimate-owned
+  await DS.patchDoc<GP>("grid_projects", gp.id, (x) => {
+    x.options = x.options!.map((o) => (o.id === copy.option.id ? { ...o, estimateOwned: true as const, quoteId: "Q-T321-B5" } : o));
+  });
+  ok((await L.loadConduitRiser(await live(), copy.option.id, deps)).estimateOwned === true && (await L.loadConduitRiser(await live(), opt, deps)).estimateOwned === false,
+    "#321 loadConduitRiser: estimateOwned reads true on an estimate-linked option only");
+
+  // revision round-trip
+  const rv = (await G.addRevision(gp.id, { by, note: "B5" }))!;
+  const before = J2((await live()).conduitRiser);
+  ok(J2(rv.conduitRiser) === before, "#321 snapshot: carries every option's conduit riser");
+  await CR.patchConduitRiser(gp.id, opt, { op: "addNote", text: "Changed after the snapshot" });
+  ok(J2((await live()).conduitRiser) !== before, "#321 fixture: the doc changed after the snapshot");
+  const back = await G.restoreRevision(gp.id, rv.rev, by);
+  ok(back.ok && J2((await live()).conduitRiser) === before, "#321 restoreRevision: brings the conduit riser back");
+
+  // removeRoute empties the run, keeps it
+  await G.removeRoute(gp.id, wRackDim.id);
+  doc = (await live()).conduitRiser![opt];
+  const kept = doc.runs.find((r) => M.runPairKey(r) === kRackDim);
+  ok(!!kept && kept.routeIds.length === 0, "#321 removeRoute: the run stays, emptied");
+  ok((await L.loadConduitRiser(await live(), opt, deps)).view.details.some((d) => d.runs.some((r) => r.run.id === kept!.id && r.empty)), "#321 loadConduitRiser: an emptied run draws as an empty conduit");
+
+  // removePlacement drops its runs and pinned tag
+  await G.removePlacement(gp.id, dmx2.id);
+  doc = (await live()).conduitRiser![opt];
+  ok(!doc.runs.some((r) => [r.a, r.b].some((e) => e.kind === "placement" && e.placementId === dmx2.id)) && doc.runs.length === 2 && !(dmx2.id in doc.tags) && !doc.dismissed.some((d) => d.key === kDmx),
+    "#321 removePlacement: the device's runs, pinned tag and dismissals go");
+  ok((await live()).conduitRiser![copy.option.id].runs.length === 4, "#321 removePlacement: another option's riser is untouched");
+
+  // removeRiserLink (old riser) leaves the conduit too — on the copy
+  const cLink = [...copiedLinks][0];
+  await GR.patchRiser(gp.id, copy.option.id, { op: "removeLink", id: cLink });
+  ok(!(await live()).conduitRiser![copy.option.id].runs.some((r) => r.linkIds.includes(cLink)), "#321 removing a RiserLink drops it from its conduit");
+
+  // removeOption drops the doc
+  await G.removeOption(gp.id, copy.option.id, by);
+  p = await live();
+  ok(!(copy.option.id in (p.conduitRiser || {})) && !!p.conduitRiser![opt], "#321 removeOption: the option's conduit riser goes with it");
+
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => fs.readFileSync(f, "utf8");
+
+  // --- fix round 1: delete → undo keeps the conduit data ---
+  // pure: conduitRemovedBetween + restoreConduitItems
+  const rid12 = (c: string) => "cr-" + c.repeat(12);
+  const runOf = (id: string, a: string, b: string, extra: Record<string, unknown> = {}) => ({ id, a: { kind: "placement", placementId: a }, b: { kind: "placement", placementId: b }, routeIds: [], linkIds: [], size: '1"', style: "conduit", ...extra });
+  const between = LV.conduitRemovedBetween(
+    { o1: { runs: [runOf(rid12("a"), "gp-1", "gp-2"), runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-2": { x: 1, y: 1, detailId: "dt-main" }, "gp-1": { x: 2, y: 2, detailId: "dt-main" } }, dismissed: [{ key: "gp-2|gp-3", ids: [] }] }, o2: { runs: [] } },
+    { o1: { runs: [runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-1": { x: 2, y: 2, detailId: "dt-main" } } }, o2: { runs: [] } }
+  );
+  ok(J2(Object.keys(between)) === J2(["o1"]) && J2(between.o1.runs.map((r) => r.id)) === J2([rid12("a")]) && J2(Object.keys(between.o1.tags)) === J2(["gp-2"]) && J2(between.o1.dismissed.map((d) => d.key)) === J2(["gp-2|gp-3"]),
+    "#321 conduitRemovedBetween: per option, the runs, pinned tags and dismissals that went; options with nothing removed are omitted");
+  const rdoc2 = {
+    options: [{ id: "o1" }, { id: "o2" }],
+    placements: [{ id: "gp-1", optionId: "o1" }, { id: "gp-2", optionId: "o1" }, { id: "gp-3", optionId: "o1" }, { id: "gp-c", optionId: "o1", curtain: {} }, { id: "gp-9", optionId: "o2" }],
+    conduitRiser: { o1: { runs: [runOf(rid12("a"), "gp-1", "gp-2")], stubs: [{ id: "st-1", label: "TO FACP", detailId: "dt-main" }], tags: { "gp-1": { x: 9, y: 9, detailId: "dt-main" } } } } as Record<string, unknown>,
+  };
+  LV.restoreConduitItems(rdoc2, {
+    o1: {
+      runs: [
+        runOf(rid12("b"), "gp-2", "gp-1"), // pair gp-1|gp-2 already has a run
+        runOf(rid12("a"), "gp-1", "gp-3"), // run id already present
+        runOf(rid12("c"), "gp-1", "gp-3"), // new → restored
+        runOf(rid12("d"), "gp-3", "gp-1"), // same pair as the one just restored → also restored (final review: a pair's second run comes back)
+        runOf(rid12("e"), "gp-2", "gp-9"), // another option's device
+        runOf(rid12("f"), "gp-2", "gp-c"), // a curtain
+        runOf("cr-handmade", "gp-2", "gp-3"), // not a store-shaped id
+        { ...runOf(rid12("1"), "gp-2", "gp-3"), b: { kind: "stub", stubId: "st-gone" } }, // a stub that's gone
+        { ...runOf(rid12("2"), "gp-2", "gp-3"), b: { kind: "stub", stubId: "st-1" } }, // a stub that exists
+      ],
+      tags: { "gp-1": { x: 0, y: 0, detailId: "dt-main" }, "gp-2": { x: 3, y: 3, detailId: "dt-main" }, "gp-9": { x: 1, y: 1, detailId: "dt-main" }, "gp-c": { x: 1, y: 1, detailId: "dt-main" } },
+      dismissed: [{ key: "gp-2|gp-3", ids: [] }, { key: "gp-2|gp-9", ids: [] }],
+    },
+    o2: { runs: [runOf(rid12("9"), "gp-1", "gp-2")] }, // o1's devices under o2's key
+    "opt-gone": { runs: [runOf(rid12("8"), "gp-1", "gp-2")] },
+  });
+  const rd2 = rdoc2.conduitRiser.o1 as import("@/lib/design/conduit-riser/model").ConduitRiserDoc;
+  ok(J2(rd2.runs.map((r) => r.id)) === J2([rid12("a"), rid12("c"), rid12("d"), rid12("2")]) && rd2.runs[0].b.kind === "placement" && (rd2.runs[0].b as { placementId: string }).placementId === "gp-2",
+    "#321 restoreConduitItems: restores new runs (two on one pair both come back) and a run to a live stub; skips a pair that already had a run, an id already present, another option's device, a curtain, a hand-made id and a gone stub");
+  ok(rd2.tags["gp-1"].x === 9 && rd2.tags["gp-2"].x === 3 && !("gp-9" in rd2.tags) && !("gp-c" in rd2.tags) && J2(rd2.dismissed.map((d) => d.key)) === J2(["gp-2|gp-3"]),
+    "#321 restoreConduitItems: a pinned tag already present wins; other options' devices and curtains take nothing back");
+  ok(!("o2" in rdoc2.conduitRiser) && !("opt-gone" in rdoc2.conduitRiser), "#321 restoreConduitItems: a key naming another option's devices, or a gone option, restores nothing");
+  const untouched = { conduitRiser: undefined as Record<string, unknown> | undefined };
+  LV.restoreConduitItems(untouched, "junk");
+  LV.restoreConduitItems(untouched, null);
+  ok(untouched.conduitRiser === undefined, "#321 restoreConduitItems: junk input writes nothing");
+
+  // store: delete two devices joined by a run with a pinned tag → undo
+  const pre = (await live()).conduitRiser![opt];
+  const runRackDmx1 = pre.runs.find((r) => M.runPairKey(r) === kRackDmx1)!;
+  await CR.patchConduitRiser(gp.id, opt, { op: "moveTag", placementId: dmx1.id, x: 6, y: 7, detailId: det });
+  const del = await G.removePlacements(gp.id, [rack.id, dmx1.id]);
+  if (!del.ok) throw new Error("#321 B5: expected the delete");
+  doc = (await live()).conduitRiser![opt];
+  const bundleConduit = del.value.conduit?.[opt];
+  ok(doc.runs.length === 0 && !(dmx1.id in doc.tags) && !!bundleConduit && bundleConduit.runs.length === 2 && bundleConduit.tags[dmx1.id]?.x === 6,
+    "#321 removePlacements: the runs and pinned tag go, and the bundle carries them for undo");
+  const undo = await G.restoreItems(gp.id, del.value);
+  doc = (await live()).conduitRiser![opt];
+  const back1 = doc.runs.find((r) => r.id === runRackDmx1.id);
+  ok(undo.ok && doc.runs.length === 2 && !!back1 && J2([...back1.routeIds].sort()) === J2([...runRackDmx1.routeIds].sort()) && doc.tags[dmx1.id]?.x === 6,
+    "#321 restoreItems: undo puts the runs (same ids, same wires) and the pinned tag back");
+  // a forged bundle: another option's devices / a run whose pair already has one
+  const other = await G.addOption(gp.id, { name: "Other", by });
+  if (!other.ok) throw new Error("#321 B5: expected a second option");
+  const oth = (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.6, y: 0.6, partId: LIGHT, optionId: other.option.id, by }))!.placements.at(-1)!;
+  const delSpk = await G.removePlacements(gp.id, [spk.id]);
+  if (!delSpk.ok) throw new Error("#321 B5: expected the delete");
+  const forgedBundle = {
+    ...delSpk.value,
+    conduit: {
+      [opt]: { runs: [runOf(rid12("f"), spk.id, oth.id), runOf(rid12("e"), dim.id, rack.id), runOf(rid12("d"), spk.id, dim.id)], tags: { [oth.id]: { x: 1, y: 1, detailId: det } }, dismissed: [] },
+      [other.option.id]: { runs: [runOf(rid12("c"), spk.id, dim.id)], tags: {}, dismissed: [] },
+    },
+  } as unknown as import("@/lib/stores/grid-projects").RemovedBundle;
+  const forgedUndo = await G.restoreItems(gp.id, forgedBundle);
+  p = await live();
+  doc = p.conduitRiser![opt];
+  ok(forgedUndo.ok && p.placements.some((pl) => pl.id === spk.id) && doc.runs.some((r) => r.id === rid12("d")) && !doc.runs.some((r) => r.id === rid12("f") || r.id === rid12("e")) && !(oth.id in doc.tags),
+    "#321 restoreItems: a forged run naming another option's device is dropped; a run whose pair already has one is skipped");
+  ok(!(other.option.id in (p.conduitRiser || {})), "#321 restoreItems: another option's key naming this option's devices restores nothing");
+  await G.removeOption(gp.id, other.option.id, by);
+  const actSrc = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+  ok(actSrc.includes("const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;") && actSrc.includes("restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}) })"),
+    "#321 restoreItemsAction carries the conduit half through to the store");
+
+  // setNodeDeviceQty / removeSpace / setLevels / removeSheet prune (behavioural)
+  const gq = await G.createProject({ name: "#321 B5 prune hooks", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gq.id);
+  const shq = (await G.addSheet(gq.id, { name: "#321 B5 q sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", shq.id);
+  const shq2 = (await G.addSheet(gq.id, { name: "#321 B5 q sheet 2", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", shq2.id);
+  const liveQ = async () => (await G.getProject(gq.id))!;
+  const qa = (await G.addPlacement(gq.id, { sheetId: shq.id, page: 1, x: 0.8, y: 0.8, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  const qb = (await G.addPlacement(gq.id, { sheetId: shq.id, page: 1, x: 0.9, y: 0.9, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  await G.addRoute(gq.id, { sheetId: shq.id, page: 1, partId: C1, points: [{ x: 0.8, y: 0.8 }, { x: 0.9, y: 0.9 }], aspect: 1, optionId: opt, by, fromPlacementId: qa.id, toPlacementId: qb.id });
+  const qAcc = await CR.acceptSuggestions(gq.id, opt, "all", deps);
+  const qdet = (await liveQ()).conduitRiser![opt].details[0].id;
+  await CR.patchConduitRiser(gq.id, opt, { op: "moveTag", placementId: qb.id, x: 2, y: 2, detailId: qdet });
+  const lower = await GR.setNodeDeviceQty(gq.id, { optionId: opt, nodeKey: RD.UNASSIGNED_KEY, partId: LIGHT, qty: 1, by });
+  let qdoc = (await liveQ()).conduitRiser![opt];
+  ok(qAcc.ok && qAcc.accepted === 1 && lower.ok && lower.removed === 1 && !(await liveQ()).placements.some((pl) => pl.id === qb.id) && qdoc.runs.length === 0 && !(qb.id in qdoc.tags),
+    "#321 setNodeDeviceQty: lowering a node's count drops the removed device's runs and pinned tag");
+  const ptsQ = [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }];
+  await G.addSpace(gq.id, { sheetId: shq.id, page: 1, name: "Stage", points: ptsQ, by });
+  await G.addSpace(gq.id, { sheetId: shq2.id, page: 1, name: "Booth", points: ptsQ, by });
+  const [spStage, spBooth] = (await liveQ()).spaces!;
+  await CR.patchConduitRiser(gq.id, opt, { op: "addDetail", name: "Rooms", allSpaces: false, spaceIds: [spStage.id, spBooth.id] });
+  const rooms = () => liveQ().then((x) => x.conduitRiser![opt].details.find((d) => d.name === "Rooms")!);
+  ok(J2((await rooms()).spaceIds) === J2([spStage.id, spBooth.id]), "#321 fixture: a detail covering two spaces");
+  await G.removeSpace(gq.id, spStage.id);
+  ok(J2((await rooms()).spaceIds) === J2([spBooth.id]), "#321 removeSpace: the space leaves every detail that listed it");
+  const rmSheet = await G.removeSheet(gq.id, shq2.id, by);
+  ok(rmSheet.ok && (await rooms()).spaceIds.length === 0, "#321 removeSheet (dropSheetInPatch): a dropped sheet's spaces leave every detail (a sheet holding devices can't be dropped, so no run is ever on one)");
+  await G.setLevels(gq.id, [{ label: "Stage" }]);
+  const qlvl = (await liveQ()).levels![0].id;
+  await CR.patchConduitRiser(gq.id, opt, { op: "moveLevel", detailId: qdet, levelId: qlvl, y: 4 });
+  ok((await liveQ()).conduitRiser![opt].levelY[qdet]?.[qlvl] === 4, "#321 fixture: a dragged level line");
+  await G.setLevels(gq.id, []);
+  qdoc = (await liveQ()).conduitRiser![opt];
+  ok(!(qdet in qdoc.levelY), "#321 setLevels: a removed level's dragged positions go");
+
+  // wiring pins
+  const projSrc = srcOf("src/lib/stores/grid-projects.ts");
+  ok((projSrc.match(/pruneConduitRisersIn\(p\)/g) || []).length >= 7, "#321 grid-projects: the plan deletes call pruneConduitRisersIn (pin; behaviour checked above)");
+  ok(/if \(gone\.size\) pruneConduitRisersIn\(p\);/.test(srcOf("src/lib/stores/grid-riser.ts")), "#321 grid-riser: setNodeDeviceQty prunes the conduit riser");
+  ok(/export const crMakeId: MakeId/.test(srcOf("src/lib/design/conduit-riser/model.ts")) && projSrc.includes("crMakeId") && srcOf("src/lib/stores/grid-conduit-riser.ts").includes("crMakeId") && !projSrc.includes("function crId("),
+    "#321 one conduit id minter (crMakeId) for the store and option copy");
+  ok(projSrc.includes("copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, linkMap)") && projSrc.includes("new Map([...copied.idMap, ...linkMap])"), "#321 option copy: link ids land in their own map, merged after");
+  ok(srcOf("src/lib/design/conduit-riser-server.ts").startsWith("// SERVER ONLY"), "#321 the loader is marked server-only");
+  ok(!/from "@\/lib\/design\/conduit-riser-server"/.test(srcOf("src/lib/design/conduit-riser/live.ts")) && !/@\/lib\/stores\//.test(srcOf("src/lib/design/conduit-riser/live.ts")), "#321 live.ts stays pure");
+}
+
+async function conduitRiser321B6Checks(): Promise<void> {
+  const M = await import("@/lib/design/conduit-riser/model");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  const S = await import("@/lib/design/conduit-riser/suggest");
+  const D = await import("@/lib/design/conduit-riser/derive");
+  const L = await import("@/lib/design/conduit-riser/layout");
+  const G = await import("@/lib/design/conduit-riser/drawing");
+  const SV = await import("@/lib/design/conduit-riser/svg");
+  const E = await import("@/lib/design/conduit-riser/edit");
+  const fs = await import("node:fs");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  type Dev = import("@/lib/design/conduit-riser/input").CRDevice;
+  type Wire = import("@/lib/design/conduit-riser/input").CRWire;
+  const J = (v: unknown) => JSON.stringify(v);
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  let seq = 0;
+  const mk: import("@/lib/design/conduit-riser/model").MakeId = (p) => `${p}${(++seq).toString(16).padStart(12, "0")}`;
+
+  // ---- fixture: a rack, two control devices, one stub
+  const dev = (id: string, label: string, typeKey: string): Dev => ({
+    id, label, desc: label, model: "", typeKey, inSystem: true, spaceId: "sp-1", spaceName: "Stage", levelId: "lv-stage",
+    tag: T.effectiveTag(undefined, { box: "E", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" }, "Stage"),
+  });
+  const devices = [dev("gp-er", "ER-01", "racks-cases"), dev("gp-c1", "CRO-01", "control-networking"), dev("gp-c2", "CRO-02", "control-networking")];
+  const wt = [{ id: "dmx", label: "Belden 1583A", symbol: "D", signal: "DMX" }];
+  const wires: Wire[] = [
+    { id: "w1", kind: "route", from: "gp-er", to: "gp-c1", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true },
+    { id: "w2", kind: "route", from: "gp-er", to: "gp-c2", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true },
+  ];
+  let doc = M.emptyConduitRiserDoc();
+  for (const s of S.suggestions(doc, wires).items) doc = S.acceptSuggestion(doc, s, mk).doc;
+  doc = M.patchConduitRiser(doc, { op: "addStub", label: "TO JB1", detailId: "dt-main" }, mk, new Set()).doc;
+  const stubId = doc.stubs[0].id;
+  doc = M.patchConduitRiser(doc, { op: "addConduitRun", a: { kind: "placement", placementId: "gp-c2" }, b: { kind: "stub", stubId } }, mk, new Set(["gp-c2"])).doc;
+  doc = M.normalizeConduitRiserDoc(doc);
+  const pids = new Set(devices.map((d) => d.id));
+  const levels = [{ id: "lv-stage", label: "Stage", order: 0 }];
+  const view = D.deriveView({ doc, devices, wires, levels, wireTypes: wt });
+  const vd = view.details[0];
+  const layout = L.layoutDetail(vd, doc);
+  const run1 = doc.runs.find((r) => r.routeIds.includes("w1"))!;
+
+  // ---- edit.ts: apply / inverse
+  const moved = E.applyLayoutOps(doc, [{ op: "moveTag", placementId: "gp-c1", x: 5.123456, y: 2, detailId: "dt-main" }], pids);
+  ok(moved.tags["gp-c1"]?.x === 5.1235 && moved.tags["gp-c1"].detailId === "dt-main" && !doc.tags["gp-c1"],
+    "#321 B6 applyLayoutOps: a tag drag pins it with the store's own rounding; never mutates the input");
+  ok(E.applyLayoutOps(doc, [{ op: "moveTag", placementId: "gp-nope", x: 1, y: 1, detailId: "dt-main" }], pids) === doc,
+    "#321 B6 applyLayoutOps: an op the store refuses changes nothing");
+  ok(J(E.inverseLayoutOp(doc, layout, { op: "moveTag", placementId: "gp-c1", x: 5, y: 2, detailId: "dt-main" })) === J({ op: "unpinTag", placementId: "gp-c1" }) &&
+     J(E.inverseLayoutOp(moved, layout, { op: "moveTag", placementId: "gp-c1", x: 9, y: 9, detailId: "dt-main" })) === J({ op: "moveTag", placementId: "gp-c1", x: 5.1235, y: 2, detailId: "dt-main" }) &&
+     J(E.inverseLayoutOp(moved, layout, { op: "unpinTag", placementId: "gp-c1" })) === J({ op: "moveTag", placementId: "gp-c1", x: 5.1235, y: 2, detailId: "dt-main" }) &&
+     E.inverseLayoutOp(doc, layout, { op: "unpinTag", placementId: "gp-c1" }) === null,
+    "#321 B6 inverseLayoutOp: an auto tag's drag undoes to un-pinned; a pinned tag's to its old spot; un-pin undoes to the pin");
+  const stubRect = layout.items.find((it) => it.kind === "stub" && it.id === stubId)!.rect;
+  ok(J(E.inverseLayoutOp(doc, layout, { op: "updateStub", id: stubId, x: 1, y: 1 })) === J({ op: "updateStub", id: stubId, x: stubRect.x, y: stubRect.y }),
+    "#321 B6 inverseLayoutOp: an auto-placed stub's drag undoes to where the layout drew it");
+  ok(J(E.inverseLayoutOp(doc, layout, { op: "moveLevel", detailId: "dt-main", levelId: "lv-stage", y: 3 })) === J({ op: "moveLevel", detailId: "dt-main", levelId: "lv-stage", y: null }) &&
+     J(E.inverseLayoutOp(doc, layout, { op: "updateRun", id: run1.id, laneX: 4 })) === J({ op: "updateRun", id: run1.id, laneX: null }) &&
+     J(E.inverseLayoutOp(E.applyLayoutOps(doc, [{ op: "updateRun", id: run1.id, laneX: 4 }], pids), layout, { op: "updateRun", id: run1.id, laneX: 6 })) === J({ op: "updateRun", id: run1.id, laneX: 4 }),
+    "#321 B6 inverseLayoutOp: a level line and a run lane undo to their previous value (null = back to auto)");
+
+  // ---- preview: the dragged lane / stub reach the layout
+  const laned = E.applyLayoutOps(doc, [{ op: "updateRun", id: run1.id, laneX: 7.5 }, { op: "updateStub", id: stubId, x: 8, y: 1 }], pids);
+  const lay2 = L.layoutDetail(E.viewWithDoc(vd, laned), laned);
+  ok(lay2.runs.find((r) => r.runId === run1.id)!.path.some((p) => p.x === 7.5) && J(lay2.items.find((it) => it.kind === "stub")!.rect) === J({ x: 8, y: 1, w: L.STUB_W, h: L.STUB_H }),
+    "#321 B6 viewWithDoc: a dragged lane and stub position show in the re-run layout");
+
+  // ---- history
+  const fp0 = E.layoutFingerprint(doc);
+  const withStub = M.patchConduitRiser(doc, { op: "addStub", label: "TO FACP", detailId: "dt-main" }, mk, pids).doc;
+  ok(E.layoutFingerprint({ ...doc, runs: doc.runs.map((r) => ({ ...r, size: '1"' })) }) === fp0 && E.layoutFingerprint(withStub) === fp0 && E.layoutFingerprint(moved) !== fp0 &&
+     E.layoutFingerprint(E.applyLayoutOps(doc, [{ op: "updateStub", id: stubId, x: 3, y: 3 }], pids)) !== fp0,
+    "#321 B6 layoutFingerprint: a size change or a new auto-placed stub leaves it alone (undo survives); a moved tag or placed stub changes it");
+  const fwd = { op: "moveTag" as const, placementId: "gp-c1", x: 5, y: 2, detailId: "dt-main" };
+  let h = E.recordEdit(null, doc, { forward: fwd, inverse: E.inverseLayoutOp(doc, layout, fwd)! }, pids);
+  const after = E.applyLayoutOps(doc, [fwd], pids);
+  ok(E.historyFor(h, doc).undo.length === 0 && E.historyFor(h, after).undo.length === 1,
+    "#321 B6 history: the stack only counts once the server data shows the edit it expects");
+  const u = E.stepUndo(h, after, pids)!;
+  ok(J(u.op) === J({ op: "unpinTag", placementId: "gp-c1" }) && u.next.undo.length === 0 && u.next.redo.length === 1 && u.next.expect === E.layoutFingerprint(doc),
+    "#321 B6 stepUndo: sends the inverse; the entry moves to redo");
+  h = u.next;
+  const r = E.stepRedo(h, doc, pids)!;
+  ok(J(r.op) === J(fwd) && r.next.undo.length === 1 && r.next.redo.length === 0, "#321 B6 stepRedo: sends the edit again");
+  ok(E.historyFor(h, moved).undo.length === 0 && E.historyFor(h, moved).redo.length === 0 && E.stepUndo(h, moved, pids) === null,
+    "#321 B6 history: layout changed from elsewhere → the stack is empty");
+  let big: import("@/lib/design/conduit-riser/edit").LayoutHistory | null = null;
+  let cur = doc;
+  for (let i = 0; i < E.HISTORY_CAP + 5; i++) {
+    const op = { op: "moveLevel" as const, detailId: "dt-main", levelId: "lv-stage", y: 2 + i * 0.05 };
+    big = E.recordEdit(big, cur, { forward: op, inverse: E.inverseLayoutOp(cur, layout, op)! }, pids);
+    cur = E.applyLayoutOps(cur, [op], pids);
+  }
+  ok(E.historyFor(big, cur).undo.length === E.HISTORY_CAP, "#321 B6 history: capped at 100 steps");
+  ok(Math.abs(E.snapIn(1.234) - 1.25) < 1e-9 && E.snapIn(-0.02) === 0, "#321 B6 drags snap to 0.05\"");
+
+  // ---- the React figure draws what svg.ts draws
+  const F = await import("@/components/drawing/conduit-riser-figure");
+  const geo = G.detailGeometry(layout, vd);
+  const html = renderToStaticMarkup(createElement(F.ConduitRiserFigure, { geo: geo.geo, w: geo.w, h: geo.h }));
+  const svg = SV.geometryToSvg(geo.geo, { w: geo.w, h: geo.h });
+  const count = (s: string, t: string) => (s.match(new RegExp(`<${t}[\\s>]`, "g")) || []).length;
+  ok(["line", "polyline", "polygon", "rect", "circle", "text", "g"].every((t) => count(html, t) === count(svg, t)) && count(html, "rect") > 0 && count(html, "text") > 0,
+    "#321 B6 ConduitRiserFigure: the same primitives as geometryToSvg (lines, polylines, polygons, rects, circles, text, block groups)");
+  ok(html.includes(`viewBox="0 0 ${Math.round(geo.w * 100 * 100) / 100} ${Math.round(geo.h * 100 * 100) / 100}"`) && html.includes(">ER-01<") && html.includes(">TO JB1<"),
+    "#321 B6 ConduitRiserFigure: one viewBox in sheet units; tag and stub text drawn");
+  const withKids = renderToStaticMarkup(createElement(F.ConduitRiserFigure, { geo: geo.geo, w: geo.w, h: geo.h }, createElement("rect", { "data-hit": "x" })));
+  ok(withKids.includes('data-hit="x"'), "#321 B6 ConduitRiserFigure: overlay children draw inside the same svg");
+
+  // ---- page / actions / editor / menu pins
+  const dir = "src/app/(app)/design/grid/[id]/conduit-riser";
+  const page = srcOf(`${dir}/page.tsx`);
+  const acts = srcOf(`${dir}/actions.ts`);
+  const ed = srcOf(`${dir}/conduit-riser-editor.tsx`);
+  const pan = srcOf(`${dir}/panels.tsx`);
+  ok(page.includes("await requireUser()") && page.includes("loadConduitRiser(") && page.includes("layoutDetail(") && page.includes("detailGeometry(") &&
+     page.includes('export const dynamic = "force-dynamic"') && page.includes("export const maxDuration = 60") && page.includes("resolveOptionId("),
+    "#321 B6 page: requireUser, resolveOptionId, loadConduitRiser, layout + geometry per detail; force-dynamic, 60 s");
+  const actFns = acts.split(/export async function /).slice(1);
+  ok(acts.startsWith('"use server"') && actFns.length >= 3 && actFns.every((f) => f.includes("await requireUser()")),
+    "#321 B6 actions: a server file; every action calls requireUser");
+  ok(/\(CR_OP_NAMES as readonly string\[\]\)\.includes\(op\.op\)/.test(acts) && acts.includes("patchConduitRiser(projectId, optionId, op)"),
+    "#321 B6 patchConduitRiserAction whitelists ops against CR_OP_NAMES");
+  ok(/acceptSuggestionsAction\(\s*projectId: string,\s*optionId: string,\s*keys: string\[\] \| "all"/.test(acts) && acts.includes("acceptSuggestions(projectId, optionId, list)") && !/\bsuggestions\(/.test(acts.replace(/acceptSuggestions\(|dismissSuggestions?\(/g, "")),
+    "#321 B6 acceptSuggestionsAction passes keys (or \"all\") — never suggestion objects");
+  ok(acts.includes("/conduit-riser`") && acts.includes("/set`") && acts.includes("revalidatePath(base)"), "#321 B6 actions revalidate the riser page, the editor and /set");
+  ok(ed.includes("acceptSuggestionsAction(projectId, optionId, [pairKey(") && ed.includes("addRouteAction(") && ed.includes("addRiserLinkAction(") &&
+     ed.includes("setTagFieldsAction(") && ed.includes("saveLevelsAction(") && /op: "resetLayout", detailId, runIds: view\.runs\.map/.test(ed) && ed.includes("getScreenCTM()"),
+    "#321 B6 editor: Connect-with-wire adds the wire then accepts that pair; tags, levels and Reset layout go through their actions");
+  ok(pan.includes("BRAY_POWER_TYPES") && pan.includes("Start from Bray") && pan.includes("Nothing new to accept") && /estimateOwned/.test(pan),
+    "#321 B6 panels: Bray's A–E starter, the nothing-to-accept notice, pricing controls gated on estimateOwned");
+  const menu = srcOf("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx");
+  ok(menu.includes('{ label: "System riser →", href: `/design/grid/${id}/riser?option=${opt}` }') &&
+     menu.includes('{ label: "Lighting control riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}` }') && !menu.includes('label: "Riser →"'),
+    "#321 B6 Outputs menu links both risers");
+  ok(srcOf("scripts/smoke-routes.ts").includes('{ route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" }'), "#321 B6 smoke lists the conduit riser page");
+}
+
+async function conduitRiser321B7Checks(): Promise<void> {
+  const M = await import("@/lib/design/conduit-riser/model");
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+
+  const gp = await G.createProject({ name: "#321 B7 riser prompt", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 B7 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+  const er = await place(LIGHT, 0.1, 0.1);
+  const cro = await place(LIGHT, 0.4, 0.1);
+  const spk1 = await place(AUDIO, 0.1, 0.8);
+  const spk2 = await place(AUDIO, 0.4, 0.8);
+  type Pl = { id: string; x: number; y: number };
+  const input = (a: Pl | null, b: Pl | null) => ({
+    sheetId: sh.id, page: 1, partId: "T321-B7-CABLE", points: [{ x: a?.x ?? 0.2, y: a?.y ?? 0.5 }, { x: b?.x ?? 0.3, y: b?.y ?? 0.5 }], aspect: 1, optionId: opt, by,
+    ...(a ? { fromPlacementId: a.id } : {}), ...(b ? { toPlacementId: b.id } : {}),
+  });
+  const draw = async (a: Pl | null, b: Pl | null) => (await G.addRouteWithId(gp.id, input(a, b)))!;
+
+  // addRouteWithId hands back the id it minted; addRoute keeps returning the project
+  const first = await draw(er, cro);
+  ok(/^wr-[0-9a-f]+$/.test(first.routeId) && first.project.routes!.at(-1)!.id === first.routeId && first.project.id === gp.id,
+    "#321 B7 addRouteWithId: returns the project and the id of the route it just saved");
+  const legacy = await G.addRoute(gp.id, input(spk1, spk2));
+  ok(!!legacy && legacy.id === gp.id && legacy.routes!.length === 2, "#321 B7 addRoute: still returns the project");
+  const refused = await G.addRouteWithId(gp.id, { ...input(er, cro), optionId: "opt-gone" });
+  ok(refused === null && (await live()).routes!.length === 2, "#321 B7 addRouteWithId: a missing option is refused, nothing written");
+  const audioRoute = (await live()).routes!.at(-1)!;
+
+  // the prompt
+  const dev = async (id: string) => (await L.loadConduitRiser(await live(), opt)).input.devices.find((d) => d.id === id)!.label;
+  const erLabel = await dev(er.id), croLabel = await dev(cro.id);
+  const p1 = await L.riserPromptFor(await live(), opt, first.routeId);
+  ok(p1.show === true && p1.key === M.pairKey(er.id, cro.id) && p1.joins === false && p1.label === `${erLabel} → ${croLabel}` && !!erLabel && !!croLabel,
+    "#321 B7 riserPromptFor: a lighting device pair shows, named by designators in the direction drawn, not a join");
+  if (!p1.show) throw new Error("#321 B7: expected a prompt for the first pair");
+  const rev = await draw(cro, er);
+  const p1r = await L.riserPromptFor(await live(), opt, rev.routeId);
+  ok(p1r.show === true && p1r.joins === false && p1r.label === `${croLabel} → ${erLabel}` && p1r.key === p1.key,
+    "#321 B7 riserPromptFor: two wires on one pair share the key; each prompt names its own direction");
+  ok((await L.riserPromptFor(await live(), opt, audioRoute.id)).show === false, "#321 B7 riserPromptFor: an audio pair doesn't show");
+  const loose = await draw(null, null);
+  ok((await L.riserPromptFor(await live(), opt, loose.routeId)).show === false, "#321 B7 riserPromptFor: a loose route (no devices) doesn't show");
+  const oneEnd = await draw(er, null);
+  ok((await L.riserPromptFor(await live(), opt, oneEnd.routeId)).show === false, "#321 B7 riserPromptFor: a route with only one end snapped doesn't show");
+  ok((await L.riserPromptFor(await live(), opt, "wr-forged")).show === false && (await L.riserPromptFor(await live(), "opt-gone", first.routeId)).show === false,
+    "#321 B7 riserPromptFor: an unknown route or option doesn't show");
+
+  // Add = acceptSuggestionsAction's store call; then a new wire on the pair joins the run
+  const acc = await CR.acceptSuggestions(gp.id, opt, [p1.key]);
+  ok(acc.ok && acc.accepted === 1, "#321 B7 Add: accepting the prompt's key puts the pair on the riser");
+  ok((await L.riserPromptFor(await live(), opt, first.routeId)).show === false, "#321 B7 riserPromptFor: a wire already inside a run doesn't show");
+  const again = await draw(er, cro);
+  const pj = await L.riserPromptFor(await live(), opt, again.routeId);
+  ok(pj.show === true && pj.joins === true && pj.key === p1.key && pj.label === `${erLabel} → ${croLabel}`,
+    "#321 B7 riserPromptFor: a wire on a pair that already has a run says joins");
+
+  // a dismissed pair stays quiet for the wires the dismissal saw
+  const er2 = await place(LIGHT, 0.7, 0.1);
+  const w2 = await draw(er, er2);
+  const k2 = M.pairKey(er.id, er2.id);
+  ok((await L.riserPromptFor(await live(), opt, w2.routeId)).show === true, "#321 B7 riserPromptFor: a fresh pair shows");
+  await CR.dismissSuggestion(gp.id, opt, k2);
+  ok((await L.riserPromptFor(await live(), opt, w2.routeId)).show === false, "#321 B7 riserPromptFor: a dismissed pair doesn't show");
+
+  // wiring pins
+  const acts = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+  const addFn = acts.slice(acts.indexOf("export async function addRouteAction("), acts.indexOf("export async function removeRouteAction("));
+  ok(/Promise<\{ ok: true; routeId: string \} \| \{ ok: false; error: string \}>/.test(addFn) && addFn.includes("addRouteWithId(") && addFn.includes("return { ok: true, routeId: added.routeId }"),
+    "#321 B7 addRouteAction returns the minted routeId");
+  const cacts = srcOf("src/app/(app)/design/grid/[id]/conduit-riser/actions.ts");
+  const pf = cacts.slice(cacts.indexOf("export async function riserPromptForRouteAction("));
+  ok(pf.includes("await requireUser()") && pf.includes("riserPromptFor(project, optionId, routeId)") && pf.includes("catch") && pf.includes("{ show: false }"),
+    "#321 B7 riserPromptForRouteAction: signed-in only, read-only, and a failure is no prompt");
+  const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  const fin = hook.slice(hook.indexOf("addRouteAction(project.id, {"), hook.indexOf("addRouteAction(project.id, {") + 1400);
+  ok(fin.includes("router.refresh();") && fin.indexOf("router.refresh()") < fin.indexOf("askRiserPrompt(") &&
+     /fromPlacement &&\s*toPlacement &&\s*\(placementSystem\(fromPlacement, partById\) === "lighting" \|\| placementSystem\(toPlacement, partById\) === "lighting"\)\s*\)\s*askRiserPrompt\(activeOptionId, r\.routeId\)/.test(fin),
+    "#321 B7 finishing a wire: the prompt check runs after the refresh is on its way, and only for a device-to-device wire with a lighting end");
+  ok(/if \(ticket === riserTicket\.current && r\.show\)/.test(hook) && hook.includes("riserTicket.current++") && /hideRiserPrompt\(\);\s*disarm\(\);/.test(hook) && /if \(!p\) return;\s*hideRiserPrompt\(\);/.test(hook),
+    "#321 B7 prompt state: newest wire wins, hides on Escape and on the next canvas press");
+  const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
+  ok(rp.includes('role="status"') && rp.includes("acceptSuggestionsAction(project.id, riserPrompt.optionId, [riserPrompt.key])") && rp.includes('"Added to the riser"') &&
+     rp.includes("joins the existing run — add this wire?") && rp.includes("to the lighting control riser?") && rp.includes("Later") && /if \(!r\.ok\) \{\s*noteAction\(r\.error\);\s*return;\s*\}[\s\S]*?noteAction\(r\.accepted > 0 \? "Added to the riser" : "Already on the riser"\);\s*hideRiserPrompt\(\)/.test(rp),
+    "#321 B7 RiserPrompt: a status strip with Add / Later; Add success notes + hides, a failure notes and keeps the prompt");
+  const edr = srcOf("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(edr.includes("<IntakeNotices ed={ed} />") && edr.includes("<RiserPrompt ed={ed} />") && edr.indexOf("<IntakeNotices") < edr.indexOf("<RiserPrompt"), "#321 B7 the prompt is mounted beside the intake notices");
+}
+
+/* #321 B8 — riser pricing: wire by others, priced conduit, refusals (pure + scratch DB). */
+async function conduitRiser321B8Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const M = await import("@/lib/design/conduit-riser/model");
+  const RB = await import("@/lib/design/conduit-riser/bom");
+  const GB = await import("@/lib/design/grid-bom");
+  const BG = await import("@/lib/design/grid-bom-groups");
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  const EMT_SENTENCE = 'Conduit 3/4" has no part — set it in Estimating Rules → Conduit sizes';
+
+  // --- riserBom (pure) ---
+  const cals = [{ docId: "sh", page: 1, scale: 100, unit: "ft", refLength: 100, by: "t", at: 1 }] as import("@/lib/annotations").Calibration[];
+  const rt = (id: string, partId: string, pts: [number, number][]) => ({ id, sheetId: "sh", page: 1, aspect: 1, partId, points: pts.map(([x, y]) => ({ x, y })) });
+  const rIn1 = rt("wr-in1", "DMX", [[0, 0], [0.3, 0]]);
+  const rIn2 = rt("wr-in2", "DMX", [[0, 0], [0, 0.2], [0.3, 0.2], [0.3, 0]]);
+  const rOut = rt("wr-out", "SPK", [[0, 0.5], [0.25, 0.5]]);
+  const lkIn = { id: "lk-in", partId: "DMX", lengthFt: 12 };
+  const parts = [
+    { id: "DMX", sku: "DMX", desc: "DMX cable", category: "Cable", unit: "ft", list: 1, cost: 0.5 },
+    { id: "SPK", sku: "SPK", desc: "Speaker cable", category: "Cable", unit: "ft", list: 2, cost: 1 },
+  ];
+  const emt = new Map([["EMT34", { desc: "3/4 in EMT", unit: "ft", list: 4, cost: 2 }]]);
+  const pids = new Set(["gp-a", "gp-b", "gp-c"]);
+  const runOf = (extra: Record<string, unknown> = {}) => ({
+    id: "cr-000000000001", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "placement", placementId: "gp-b" },
+    routeIds: ["wr-in1", "wr-in2"], linkIds: ["lk-in"], size: '3/4"', style: "conduit", ...extra,
+  });
+  const docOf = (runs: unknown[], defaults?: Record<string, unknown>) =>
+    M.normalizeConduitRiserDoc({ runs, ...(defaults ? { defaults: { size: '3/4"', priceWire: false, priceConduit: false, ...defaults } } : {}) });
+  const labelOf = RB.riserEndLabeler(
+    { stubs: [{ id: "st-1", label: "TO FACP", detailId: "dt-main" }] },
+    [{ id: "gp-a", partId: "DMX", designator: "CRO-4" }, { id: "gp-b", partId: "NODE", designator: "LX-1", qty: 24 }, { id: "gp-c", partId: "NODE" }],
+    (id) => (id === "NODE" ? "DMX node" : undefined),
+    2
+  );
+  ok(labelOf({ kind: "placement", placementId: "gp-a" }) === "CRO-4" && labelOf({ kind: "placement", placementId: "gp-b" }) === "LX-01–24" &&
+     labelOf({ kind: "placement", placementId: "gp-c" }) === "DMX node" && labelOf({ kind: "stub", stubId: "st-1" }) === "TO FACP",
+    "#321 B8 riserEndLabeler: a designator (a lot's range), else the part's description; a stub prints its label");
+  const base = { estimateOwned: false, routes: [rIn1, rIn2, rOut], links: [lkIn], cals, parts, conduitParts: emt, sizes: [{ size: '3/4"', partId: "EMT34" }], placementIds: pids, labelOf };
+  const all = GB.routeLines([rIn1, rIn2, rOut], parts, cals, [lkIn]);
+  const none = RB.riserBom({ ...base, doc: null });
+  ok(J2(none.wires) === J2(all) && none.byOthers.length === 0 && none.conduit.length === 0 && none.refusals.length === 0,
+    "#321 B8 riserBom: no conduit riser leaves every wire priced, nothing by others, no conduit");
+  const ft = (r: typeof rIn1) => GB.routeLengthFt(r, cals)!;
+  const off = RB.riserBom({ ...base, doc: docOf([runOf()]) });
+  const spkLine = all.lines.find((l) => l.partId === "SPK");
+  ok(J2(off.wires.lines) === J2([spkLine]) && J2(off.routes.map((r) => r.id)) === J2(["wr-out"]) && off.links.length === 0,
+    "#321 B8 riserBom: defaults off — the run's routes and links leave the priced wire; the other wire is unchanged");
+  ok(J2(off.byOthers) === J2([{ partId: "DMX", desc: "DMX cable", feet: Math.ceil(ft(rIn1) + ft(rIn2) + 12) }]) && off.conduit.length === 0 && off.refusals.length === 0,
+    "#321 B8 riserBom: the run's wire is listed by others, footage rounded up once per part; no conduit priced");
+  const wireOn = RB.riserBom({ ...base, doc: docOf([runOf({ priceWire: true })]) });
+  ok(J2(wireOn.wires) === J2(all) && wireOn.byOthers.length === 0, "#321 B8 riserBom: priceWire on the run brings its wire back, priced exactly as before");
+  const defOn = RB.riserBom({ ...base, doc: docOf([runOf()], { priceWire: true }) });
+  ok(J2(defOn.wires) === J2(all), "#321 B8 riserBom: the design default turned on prices every run's wire");
+  const longest = Math.max(ft(rIn1), ft(rIn2), 12);
+  const cOn = RB.riserBom({ ...base, doc: docOf([runOf({ priceConduit: true })]) });
+  const want = Math.ceil(longest);
+  ok(J2(cOn.conduit) === J2([{ partId: "EMT34", desc: "3/4 in EMT", unit: "ft", qty: want, list: 4, ext: want * 4 }]) && cOn.conduitValue === want * 4 && cOn.conduitCost === want * 2 && cOn.refusals.length === 0,
+    `#321 B8 riserBom: priceConduit adds one Conduit line = ceil(longest member) feet of the mapped part (${want} ft)`);
+  ok(J2(cOn.byOthers) === J2(off.byOthers), "#321 B8 riserBom: pricing the conduit alone leaves the wire by others");
+  const typed = RB.riserBom({ ...base, doc: docOf([runOf({ priceConduit: true, lengthFt: 80.2 })]) });
+  ok(typed.conduit[0]?.qty === 81, "#321 B8 riserBom: a typed run length wins over the members");
+  const unmapped = RB.riserBom({ ...base, sizes: [{ size: '3/4"' }], doc: docOf([runOf({ priceConduit: true })]) });
+  ok(unmapped.conduit.length === 0 && J2(unmapped.refusals) === J2([EMT_SENTENCE]), "#321 B8 riserBom: an unmapped size refuses with the exact sentence");
+  const ghostPart = RB.riserBom({ ...base, conduitParts: new Map(), doc: docOf([runOf({ priceConduit: true })]) });
+  ok(J2(ghostPart.refusals) === J2([EMT_SENTENCE]), "#321 B8 riserBom: a size mapped to a part that has left the catalog refuses like an unmapped one");
+  const noLen = RB.riserBom({ ...base, routes: [rOut], links: [], doc: docOf([runOf({ priceConduit: true, routeIds: [], linkIds: [] })]) });
+  ok(J2(noLen.refusals) === J2(["CRO-4 → LX-01–24 needs a length"]), "#321 B8 riserBom: a priced run with no measured member and no typed length refuses by its ends' names");
+  const cm = RB.riserBom({ ...base, doc: docOf([runOf({ priceConduit: true, style: "cableMgmt" })]) });
+  ok(cm.conduit.length === 0 && cm.refusals.length === 0 && J2(cm.byOthers) === J2(off.byOthers), "#321 B8 riserBom: a cable-management run never adds conduit (its wire still follows priceWire)");
+  const owned = RB.riserBom({ ...base, estimateOwned: true, sizes: [], doc: docOf([runOf({ priceConduit: true })]) });
+  ok(J2(owned.wires) === J2(all) && owned.byOthers.length === 0 && owned.conduit.length === 0 && owned.refusals.length === 0,
+    "#321 B8 riserBom: an estimate-owned option ignores the riser — every wire priced, no conduit, no refusal");
+  const ghost = RB.riserBom({ ...base, placementIds: new Set(["gp-a"]), doc: docOf([runOf({ priceConduit: true })]) });
+  ok(J2(ghost.wires) === J2(all) && ghost.conduit.length === 0 && ghost.refusals.length === 0, "#321 B8 riserBom: a run to a device that is gone prices nothing");
+
+  // --- the Conduit BOM heading ---
+  ok(BG.BOM_GROUPS.at(-1)!.key === "conduit" && BG.BOM_GROUPS.at(-1)!.label === "Conduit" && BG.isBomGroupKey("conduit") && !BG.isEditableBomGroupKey("conduit") &&
+     BG.isEditableBomGroupKey("general") && !BG.EDITABLE_BOM_GROUPS.some((g) => (g.key as string) === "conduit") && !("conduit" in BG.CUSTOM_SYSTEM_OF_GROUP),
+    "#321 B8 groups: Conduit is the last BOM heading; it takes no accessory, labor override or custom item");
+  const grp = (conduit: import("@/lib/design/grid-bom").BomLine[]) => BG.bomGroups(BG.groupedBomLines({ devices: [], wires: off.wires.lines, curtains: [], custom: [], customItems: [], accessories: [], parts, placements: [], conduit }));
+  const g0 = grp([]);
+  const g1 = grp(cOn.conduit);
+  ok(g0.length === 7 && !g0.some((g) => g.key === "conduit"), "#321 B8 groups: an empty Conduit heading is left out (it can't take an accessory)");
+  const cg = g1.find((g) => g.key === "conduit");
+  ok(g1.length === 8 && !!cg && cg.lines.length === 1 && cg.lines[0].source === "conduit" && cg.value === want * 4, "#321 B8 groups: conduit lines print under Conduit with source conduit");
+  const { sanitizeAccessory } = await import("@/lib/design/grid-accessories");
+  ok(!sanitizeAccessory({ partId: "DMX", qty: 1, scope: "conduit" }, "ba-000000000001").ok, "#321 B8 accessories: none can be added under Conduit");
+
+  // --- buildGridQuote on a scratch project ---
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const DS = await import("@/db/doc-store");
+  const { buildGridQuote } = await import("@/lib/design/grid-quote");
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const { isTierPriced } = await import("@/lib/tier-pricing");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { saveConduitSizes } = await import("@/lib/stores/conduit-sizes");
+  const { CONDUIT_SIZES_BLOB } = await import("@/lib/conduit-sizes");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const C1 = fid(321, "b8-dmx-cable");
+  const C2 = fid(321, "b8-spk-cable");
+  const EMT = fid(321, "b8-emt-34");
+  await mergeUpsert(C1, { desc: "Test321 B8 DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5 });
+  await mergeUpsert(C2, { desc: "Test321 B8 speaker cable", category: "Test321 Cable", unit: "ft", list: 2, cost: 1 });
+  await mergeUpsert(EMT, { desc: "Test321 B8 3/4 in EMT", category: "Test321 Conduit", unit: "ft", list: 4, cost: 2 });
+  for (const c of [C1, C2, EMT]) reg("catalog_parts", c);
+  const sizesBlobBefore = await DS.getBlob<Record<string, unknown>>(CONDUIT_SIZES_BLOB, {});
+  try {
+    await DS.setBlob(CONDUIT_SIZES_BLOB, {});
+    const gp = await G.createProject({ name: "#321 B8 riser pricing", customer: "Spec fixture", customerId: null, by });
+    reg("grid_projects", gp.id);
+    const sh = (await G.addSheet(gp.id, { name: "#321 B8 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    reg("grid_sheets", sh.id);
+    await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+    const live = async () => (await G.getProject(gp.id))!;
+    const place = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: "T321-B8-DEV", optionId: opt, by }))!.placements.at(-1)!;
+    const a = await place(0.1, 0.1);
+    const b = await place(0.4, 0.1);
+    const c = await place(0.1, 0.8);
+    const d = await place(0.4, 0.8);
+    type Pl = { id: string; x: number; y: number };
+    const draw = async (p: Pl, q: Pl, partId: string, via: { x: number; y: number }[] = []) =>
+      (await G.addRouteWithId(gp.id, { sheetId: sh.id, page: 1, partId, points: [{ x: p.x, y: p.y }, ...via, { x: q.x, y: q.y }], aspect: 1, optionId: opt, by, fromPlacementId: p.id, toPlacementId: q.id }))!.routeId;
+    const w1 = await draw(a, b, C1);
+    const w2 = await draw(a, b, C1, [{ x: 0.1, y: 0.3 }, { x: 0.4, y: 0.3 }]);
+    await draw(c, d, C2);
+    const quote = async () => {
+      const r = await buildGridQuote(await live(), opt);
+      if (!r.ok) return { ok: false as const, error: r.error, lines: [] as import("@/lib/design/grid-bom").BomLine[], spec: [] as { sku: string; qty: number; ext: number; unit: string }[], labor: [] as unknown[], value: 0 };
+      return { ok: true as const, error: "", lines: r.build.lines, spec: r.build.spec.lines, labor: r.build.labor, value: r.build.value };
+    };
+    const lineOf = (q: Awaited<ReturnType<typeof quote>>, sku: string) => q.spec.find((l) => l.sku === sku);
+    const b0 = await quote();
+    ok(b0.ok && !!lineOf(b0, C1) && !!lineOf(b0, C2), "#321 B8 quote: before the riser, both wires price");
+
+    const runId = "cr-0000000000b8";
+    await DS.patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", gp.id, (p) => {
+      p.conduitRiser = { [opt]: M.normalizeConduitRiserDoc({ runs: [{ id: runId, a: { kind: "placement", placementId: a.id }, b: { kind: "placement", placementId: b.id }, routeIds: [w1, w2], linkIds: [], size: '3/4"', style: "conduit" }] }) };
+    });
+    const b1 = await quote();
+    ok(b1.ok && !lineOf(b1, C1) && J2(lineOf(b1, C2)) === J2(lineOf(b0, C2)) && !b1.spec.some((l) => l.sku === EMT),
+      "#321 B8 quote: defaults off — a routed DMX wire inside a run leaves the quote; the other wire line is unchanged");
+    const upd = (extra: Record<string, unknown>) => CR.patchConduitRiser(gp.id, opt, { op: "updateRun", id: runId, ...extra } as import("@/lib/design/conduit-riser/model").CROp);
+    await upd({ priceWire: true });
+    const b2 = await quote();
+    ok(b2.ok && J2(lineOf(b2, C1)) === J2(lineOf(b0, C1)) && J2(lineOf(b2, C2)) === J2(lineOf(b0, C2)), "#321 B8 quote: priceWire on the run brings its wire back");
+
+    await upd({ priceConduit: true });
+    const b3 = await quote();
+    ok(!b3.ok && b3.error === EMT_SENTENCE + ".", `#321 B8 quote: priced conduit on an unmapped size refuses with the exact sentence (${b3.error})`);
+    const acts = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+    const draft = acts.slice(acts.indexOf("export async function createDraftQuoteAction("));
+    ok(draft.includes("const built = await buildGridQuote(project, resolvedOptionId);") && draft.includes("if (!built.ok) return built;"),
+      "#321 B8 quote: createDraftQuoteAction — the Designs dashboard and Home promote through it — returns the refusal");
+
+    const saved = await saveConduitSizes([{ size: '3/4"', partId: EMT }, { size: '1"' }]);
+    ok(saved.ok, "#321 B8 fixture: 3/4\" maps to the per-foot EMT part");
+    const b4 = await quote();
+    const pr = await live();
+    const len = Math.max(...pr.routes!.filter((r) => r.id === w1 || r.id === w2).map((r) => GB.routeLengthFt(r, pr.calibrations || [])!));
+    const tier = await resolveTier(null);
+    const emtList = isTierPriced(2, tier.margin) ? Math.round((2 / (1 - tier.margin)) * 100) / 100 : 4;
+    const emtLine = lineOf(b4, EMT);
+    ok(b4.ok && !!emtLine && emtLine.qty === Math.ceil(len) && emtLine.unit === "ft" && Math.abs(emtLine.ext - Math.ceil(len) * emtList) < 0.005,
+      `#321 B8 quote: priceConduit with a mapped 3/4" EMT part adds a Conduit line = ceil(longest member ft) at the tier price (${emtLine?.qty} ft)`);
+    ok(b4.ok && Math.abs(b4.value - b2.value - Math.ceil(len) * emtList) < 0.005, "#321 B8 quote: the conduit line is in the quote value");
+    ok(b4.ok && J2(b4.labor) === J2(b2.labor) && !b4.spec.some((l) => l.sku === "labor:conduit"),
+      "#321 B8 labor: labor rows never include the conduit group — the same labor with or without priced conduit");
+    ok(!(await G.setLaborOverride(gp.id, opt, "conduit", 5)).ok, "#321 B8 labor: a Conduit labor override is refused");
+
+    await upd({ style: "cableMgmt" });
+    const b5 = await quote();
+    ok(b5.ok && !lineOf(b5, EMT) && J2(lineOf(b5, C1)) === J2(lineOf(b0, C1)), "#321 B8 quote: a cable-management run never adds conduit");
+    await upd({ style: "conduit", priceWire: null, size: '1"' });
+    const b6 = await quote();
+    ok(!b6.ok && b6.error === 'Conduit 1" has no part — set it in Estimating Rules → Conduit sizes.', "#321 B8 quote: the refusal names the run's own size");
+
+    await DS.patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", gp.id, (p) => {
+      p.options = (p.options || []).map((o) => (o.id === opt ? { ...o, estimateOwned: true as const } : o));
+    });
+    const b7 = await quote();
+    ok(b7.ok && J2(lineOf(b7, C1)) === J2(lineOf(b0, C1)) && !lineOf(b7, EMT), "#321 B8 quote: an estimate-owned option ignores all of it — its wire priced, no conduit, no refusal");
+  } finally {
+    await DS.setBlob(CONDUIT_SIZES_BLOB, sizesBlobBefore);
+  }
+  ok(J2(await DS.getBlob(CONDUIT_SIZES_BLOB, {})) === J2(sizesBlobBefore), "#321 B8 fixture: the conduit sizes blob is restored");
+
+  // --- wiring pins ---
+  const gq = srcOf("src/lib/design/grid-quote.ts");
+  ok(gq.includes("riserBom(") && gq.includes('error: riser.refusals.map((s) => s + ".").join(" ")') && gq.includes("liveConduitRiser(project, optionId)") && gq.includes("option.estimateOwned === true"),
+    "#321 B8 grid-quote: buildGridQuote prices through riserBom over the live, pruned doc and refuses with its sentences");
+  const pg = srcOf("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(pg.includes("conduitRiser={") && pg.includes("liveConduitRiser(designed, activeOptionId)") && pg.includes("conduitSizes={conduitSizes}") && pg.includes("conduitParts={"),
+    "#321 B8 page: the editor gets the option's pruned conduit riser, the conduit sizes and the conduit parts");
+  const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes("riserBom(") && hook.includes("riserEndLabeler(") && hook.includes("riser.wires") && hook.includes("riser.conduitValue") && hook.includes("conduit: riser.conduit"),
+    "#321 B8 editor: the live BOM runs the same riserBom — wire filtering, conduit lines and the total");
+  const panel = srcOf("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx");
+  ok(panel.includes("In conduit — by others") && panel.includes("riser.byOthers") && panel.includes("riser.refusals") && panel.includes('case "conduit":') &&
+     panel.indexOf("riser.refusals") > panel.indexOf("wires.unmeasured"),
+    "#321 B8 BOM panel: an In conduit — by others list, the refusal sentences beside the unmeasured-wire notice, and a Conduit row");
+}
+
+async function conduitRiser321B9Checks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const DSet = await import("@/lib/design/grid-drawing-set");
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+
+  // --- the sheet list (pure) ---
+  const groups = [{ system: "lighting" as const, sheetId: "s1", page: 1 }, { system: "audio" as const, sheetId: "s1", page: 1 }];
+  const base = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2 });
+  const two = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 2 });
+  const one = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 1 });
+  ok(J2(DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 0 })) === J2(base) && !base.all.some((d) => d.kind === "conduitRiser"),
+    "#321 B9 sheet list: no riser pages (0 or absent) adds no sheet");
+  ok(two.all.map((d) => d.number).join() === "T-001,L-101,A-101,E-501,E-502,E-503,E-601,E-602" && one.all.map((d) => d.number).join() === "T-001,L-101,A-101,E-501,E-502,E-601,E-602",
+    "#321 B9 sheet list: the lighting control riser pages number E-502, E-503… right after E-501; E-60x keep their numbers");
+  const cr = two.all.filter((d) => d.kind === "conduitRiser");
+  ok(J2(cr.map((d) => [d.key, d.title, d.conduitRiserPage])) === J2([["conduit-riser", "Lighting control riser", 0], ["conduit-riser:2", "Lighting control riser (cont.)", 1]]),
+    "#321 B9 sheet list: page 1 is \"Lighting control riser\", later pages \"(cont.)\", each keyed and indexed");
+  ok(cr.every((d) => DSet.sheetExclusionKey(d) === "conduit-riser") && DSet.conduitRiserSheetNumber(0) === "E-502" && DSet.conduitRiserSheetNumber(2) === "E-504",
+    "#321 B9 sheet list: every riser page shares the exclusion key conduit-riser; conduitRiserSheetNumber counts from E-502");
+  const ex = DSet.buildSheetList({ planGroups: groups, sourceNames: { s1: "Main" }, schedulePages: 2, conduitRiserPages: 2, excluded: ["conduit-riser"] });
+  ok(ex.included.map((d) => d.number).join() === "T-001,L-101,A-101,E-501,E-601,E-602" && J2(ex.all) === J2(two.all),
+    "#321 B9 sheet list: excluding conduit-riser drops every riser page and renumbers nothing");
+  const tg2 = DSet.toggleableSheets(two.all).filter((t) => t.key === "conduit-riser");
+  const tg1 = DSet.toggleableSheets(one.all).filter((t) => t.key === "conduit-riser");
+  ok(J2(tg2) === J2([{ key: "conduit-riser", label: "E-502–E-503 Lighting control riser" }]) && J2(tg1) === J2([{ key: "conduit-riser", label: "E-502 Lighting control riser" }]),
+    "#321 B9 set settings: the riser pages toggle as one checkbox naming their range");
+
+  // --- the loader → pages → DXF, on a real project ---
+  const G = await import("@/lib/stores/grid-projects");
+  const CRS = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const X = await import("@/lib/design/conduit-riser/dxf");
+  const GO = await import("@/lib/design/grid-options");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { getSettings } = await import("@/lib/settings");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const C1 = fid(321, "b9-dmx-cable");
+  await mergeUpsert(C1, { desc: "Test321 B9 DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5, manufacturerModelNumber: "T321-B9DMX" });
+  reg("catalog_parts", C1);
+  const settings = await getSettings();
+  const deps = { settings: { ...settings, wireTypes: [{ id: "t321-b9", label: "DMX", connectionTypes: ["T321-B9"], cableSku: C1, symbol: "D", signal: "DMX" }] } };
+  const gp = await G.createProject({ name: "#321 B9 riser / sheet", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 B9 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  const a = await place(0.1, 0.1);
+  const b = await place(0.4, 0.4);
+  await G.addRoute(gp.id, { sheetId: sh.id, page: 1, partId: C1, points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id });
+  ok((await L.conduitRiserSheetPages(await live(), opt, "b", deps)).length === 0, "#321 B9 pages: a design whose riser has no conduit run prints no E-502");
+  const acc = await CRS.acceptSuggestions(gp.id, opt, "all", deps);
+  ok(acc.ok && acc.accepted === 1, "#321 B9 fixture: one accepted run");
+  await CRS.patchConduitRiser(gp.id, opt, { op: "addNote", text: "Pull string in every empty conduit" });
+  const p = await live();
+  const pagesB = await L.conduitRiserSheetPages(p, opt, "b", deps);
+  const pagesD = await L.conduitRiserSheetPages(p, opt, "d", deps);
+  const areaB = DSet.drawingArea("b");
+  const areaD = DSet.drawingArea("d");
+  ok(pagesB.length >= 1 && pagesB.every((pg) => pg.w === areaB.w && pg.h === areaB.h) && pagesD.length >= 1 && pagesD.every((pg) => pg.w === areaD.w && pg.h === areaD.h),
+    "#321 B9 pages: one run → at least one page, each exactly the size's drawing area (11×17 and 24×36)");
+  const viaData = L.conduitRiserPagesOf(await L.loadConduitRiser(p, opt, deps), areaB);
+  ok(J2(viaData) === J2(pagesB), "#321 B9 pages: the riser page's pages and the set's pages are one computation (same geometry)");
+  const geo = pagesB[0].geo;
+  const tagInserts = geo.filter((g) => g.t === "insert" && g.block === "PK_TAG").length;
+  ok(tagInserts === 2 && geo.some((g) => g.t === "text" && g.s === "GENERAL NOTES"), "#321 B9 pages: page 1 draws both devices' tags and the general notes");
+  const dxf = X.geometryToDxf(pagesB[0].geo, pagesB[0]);
+  const R = readDxf321(dxf);
+  const extMax = R.pairs.findIndex(([c, v]) => c === 9 && v === "$EXTMAX");
+  ok(R.lines.length % 2 === 0 && R.pairs.every(([c]) => Number.isInteger(c)) && R.zeros[R.zeros.length - 1] === "EOF" && R.count("SECTION") === 4 && R.count("ENDSEC") === 4 &&
+     R.count("BLOCK") === R.count("ENDBLK") && R.pairs.some(([c, v]) => c === 1 && v === "AC1009") && !/[^\x00-\x7e]/.test(dxf),
+    "#321 B9 DXF (loader-built): R12, even pairs, balanced sections and blocks, ASCII, ends in EOF");
+  ok(R.insertNames.length === geo.filter((g) => g.t === "insert").length && R.insertNames.every((n, i) => R.blocks.has(n) && J2(R.attribsPer[i]) === J2(R.attdefs.get(n))) &&
+     R.insertNames.filter((n) => n === "PK_TAG").length === 2,
+    "#321 B9 DXF (loader-built): every insert names a defined block with exactly its attributes; both tags are there");
+  ok(extMax > 0 && Number(R.pairs[extMax + 1][1]) === areaB.w && Number(R.pairs[extMax + 2][1]) === areaB.h, "#321 B9 DXF (loader-built): the extents are the sheet's drawing area");
+
+  // --- wiring pins ---
+  const route = srcOf("src/app/api/grid/[id]/conduit-riser/dxf/route.ts");
+  const iUser = route.indexOf("await requireUser()");
+  ok(iUser > 0 && iUser < route.indexOf("try {") && iUser < route.indexOf("getProject(projectId)") && route.indexOf("decodeURIComponent(id)") < route.indexOf("getProject(projectId)") && route.includes('export const dynamic = "force-dynamic"'),
+    "#321 B9 route: requireUser is awaited outside the try, before getProject (a signed-out request redirects)");
+  ok(route.includes("conduitRiserSheetPages(") && route.includes("geometryToDxf(page.geo, page)") && route.includes('"content-type": "application/dxf"') &&
+     route.includes("attachmentDisposition(") && route.includes("-lighting-control-riser.dxf") && route.includes("conduitRiserSheetNumber(") &&
+     route.includes('"cache-control": "private, no-store"') && route.includes("status: 404"),
+    "#321 B9 route: the DXF comes from the set's own pages, downloads as an attachment named by its sheet number, never cached; a miss is a 404");
+  const dsd = srcOf("src/lib/design/drawing-set-data.ts");
+  ok(dsd.includes("conduitRiserSheetPages(project, optionId, size,") && dsd.includes("conduitRiserPages: conduitRiserPages.length"),
+    "#321 B9 set data: the set computes the riser pages once and numbers them through buildSheetList");
+  const sheets = srcOf("src/components/drawing/drawing-set-sheets.tsx");
+  ok(sheets.includes('d.kind === "conduitRiser"') && sheets.includes("<ConduitRiserFigure") && sheets.includes("pk-no-print pk-dw-dxf") && sheets.includes('d.kind === "conduitRiser" && assets.conduitRiserDxf &&'),
+    "#321 B9 set sheets: E-502 draws through the shared ConduitRiserFigure; its DXF link is screen-only");
+  ok(!/data-plan-figure/.test(srcOf("src/components/drawing/conduit-riser-figure.tsx")), "#321 B9 print: the riser figure loads no images, so Print never waits on it");
+  const DSD = await import("@/lib/design/drawing-set-data");
+  ok(DSD.TEAM_DRAWING_SET_ASSETS.conduitRiserDxf?.({ projectId: "GRD 1", optionId: "opt-base", size: "d", page: 2 }) === "/api/grid/GRD%201/conduit-riser/dxf?option=opt-base&size=d&page=2" &&
+     !srcOf("src/app/print/grid-set/[id]/page.tsx").includes("conduitRiserDxf") && srcOf("src/app/(app)/design/grid/[id]/conduit-riser/page.tsx").includes("Download DXF") &&
+     srcOf("src/app/(app)/design/grid/[id]/conduit-riser/page.tsx").includes("/conduit-riser/dxf"),
+    "#321 B9 buttons: the team set links each riser sheet's DXF (the signed print route never does); the riser page has Download DXF");
+  ok(srcOf("src/app/globals.css").includes(".pk-drawing-sheet:has(+ .pk-dw-dxf:last-child)"), "#321 B9 print CSS: a DXF link after the last sheet never adds a blank page");
+  ok(srcOf("scripts/smoke-routes.ts").includes('"/api/grid/GRD-5001/conduit-riser/dxf"'), "#321 B9 smoke: the DXF route is listed");
+}
+
+/* #321 final review — scoped riser parts load, refusal dedupe, prompt says by others, tag revert, undo keeps pair runs. */
+async function conduitRiser321FinalFixChecks(): Promise<void> {
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const fs = await import("node:fs");
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  const M = await import("@/lib/design/conduit-riser/model");
+  const RB = await import("@/lib/design/conduit-riser/bom");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  const LV = await import("@/lib/design/conduit-riser/live");
+
+  // --- 1. scoped parts load: identical devices and wires to the full-catalog load ---
+  const G = await import("@/lib/stores/grid-projects");
+  const GR = await import("@/lib/stores/grid-riser");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const GO = await import("@/lib/design/grid-options");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const Fx = await import("@/lib/stores/fixtures");
+  const GC = await import("@/lib/stores/grid-catalog");
+  const DT = await import("@/lib/stores/device-types");
+  const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const Cat = await import("@/lib/stores/catalog");
+  const { getSettings } = await import("@/lib/settings");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+  const by = "Test Harness";
+  const opt = GO.DEFAULT_OPTION_ID;
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+  const DEV = fid(321, "ff-cro");
+  const CAB = fid(321, "ff-dmx-cable");
+  await Cat.mergeUpsert(DEV, { desc: "Test321 final control station", category: "Test321 Final Control", unit: "ea", list: 10, cost: 5, designatorCode: "CRO", tagDefaults: { box: "4S", mount: "WM" }, manufacturerModelNumber: "T321-CRO" });
+  await Cat.mergeUpsert(CAB, { desc: "Test321 final DMX cable", category: "Test321 Cable", unit: "ft", list: 1, cost: 0.5 });
+  reg("catalog_parts", DEV);
+  reg("catalog_parts", CAB);
+  const devPart = (await Cat.getMany([DEV]))[0];
+  await GC.ensureGridSymbolsFor(devPart ? [devPart] : [], by);
+  reg("grid_catalog", DEV);
+  const settings = await getSettings();
+  const deps = { settings: { ...settings, wireTypes: [{ id: "t321f-dmx", label: "DMX", connectionTypes: ["T321F-DMX"], cableSku: CAB, symbol: "D", signal: "DMX" }] } };
+  const rackClean = sanitizeFixtureInput({
+    kind: "rack", label: "Test321 final rack", description: "", scope: "Lighting", parts: [],
+    rack: { config: { ruCount: 8, widthIn: 19, numbering: "bottom-up" }, placements: [
+      { id: "RP-F1", kind: "device", sku: DEV, label: "Station label", ruStart: 1, ruHeight: 1, face: "front" },
+      { id: "RP-F2", kind: "device", sku: DEV, label: "Station label", ruStart: 2, ruHeight: 1, face: "front" },
+      { id: "RP-F3", kind: "device", sku: "T321F-NOPE", label: "Loose module", ruStart: 4, ruHeight: 1, face: "front" },
+    ] },
+  });
+  if (!rackClean.ok) throw new Error("#321 final: expected a clean rack — " + rackClean.error);
+  const rackRec = await Fx.createFixture(rackClean.value, by, { cost: 0, price: 0, pricedAt: null }, 1_700_321_900_000);
+  reg("subassemblies", rackRec.id);
+  const RACK = VP.assemblyPartId(rackRec.id);
+  const gp = await G.createProject({ name: "#321 final scoped load", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 final sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", sh.id);
+  await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+  const live = async () => (await G.getProject(gp.id))!;
+  const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+  const rack = await place(RACK, 0.1, 0.1);
+  const cro = await place(DEV, 0.3, 0.1);
+  const lx1 = await place(LIGHT, 0.1, 0.4);
+  const lx2 = await place(LIGHT, 0.4, 0.4);
+  const spk = await place(AUDIO, 0.8, 0.8);
+  const route = async (a: { id: string; x: number; y: number }, b: { id: string; x: number; y: number }, partId: string) =>
+    (await G.addRoute(gp.id, { sheetId: sh.id, page: 1, partId, points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id }))!.routes!.at(-1)!;
+  await route(rack, cro, CAB);
+  await route(cro, lx1, CAB);
+  const wRackLx1 = await route(rack, lx1, CAB);
+  await route(spk, lx2, CAB);
+  const link = await GR.addRiserLink(gp.id, { optionId: opt, from: { kind: "placement", placementId: lx1.id }, to: { kind: "placement", placementId: lx2.id }, partId: CAB, lengthFt: 25, by });
+  if (!link.ok) throw new Error("#321 final: expected a riser link");
+  const catalog = await Cat.list();
+  const fullDeps = { ...deps, catalog, gridSymbols: await GC.listGridSymbols(), deviceTypes: await DT.loadDeviceTypeContext(catalog) };
+  const full = await L.loadConduitRiser(await live(), opt, fullDeps);
+  const scoped = await L.loadConduitRiser(await live(), opt, deps);
+  ok(full.input.devices.length === 5 && J2(scoped.input.devices) === J2(full.input.devices),
+    "#321 final scoped load: every CRDevice (designator, model, type, system, tag, rack contents) matches the full-catalog load");
+  ok(full.input.wires.length === 5 && J2(scoped.input.wires) === J2(full.input.wires) && J2(scoped.suggestions) === J2(full.suggestions),
+    "#321 final scoped load: every CRWire (cable, signal, length, system) and the suggestions match the full-catalog load");
+  const sCro = scoped.input.devices.find((d) => d.id === cro.id)!;
+  const sRack = scoped.input.devices.find((d) => d.id === rack.id)!;
+  ok(/^CRO-/.test(sCro.label) && sCro.model === "T321-CRO" && sCro.tag.box === "4S" && sCro.tag.mount === "WM",
+    "#321 final scoped load: a Grid-library symbol over a catalog part keeps its designator code, model and tag defaults");
+  ok(J2(sRack.rack) === J2({ items: [{ desc: "Test321 final control station", qty: 2 }, { desc: "Loose module", qty: 1 }] }),
+    "#321 final scoped load: rack contents read their member SKUs' catalog descriptions (a SKU off the catalog keeps its label)");
+  const crs = srcOf("src/lib/design/conduit-riser-server.ts");
+  const scopedFn = crs.slice(crs.indexOf("async function scopedRiserParts("), crs.indexOf("export async function loadRiserPartsContext("));
+  ok(scopedFn.includes('getDocRows<GridSymbol>("grid_catalog", realIds)') && scopedFn.includes("getCatalogParts(pricingIds)") && scopedFn.includes("getTypeMap()") &&
+     !scopedFn.includes("loadDeviceTypeContext(") && !/listCatalog|\blist\(\)|listGridSymbols\(/.test(scopedFn) && !crs.includes("list as listCatalog"),
+    "#321 final scoped load: the scoped path reads Grid-library docs and catalog rows by id and the stored type map — never the whole book, never a type-map write");
+  const lrc = crs.slice(crs.indexOf("export async function loadRiserPartsContext("), crs.indexOf("/** Wire types the riser can print a bubble for"));
+  ok(lrc.includes("const full = deps.catalog;") && lrc.includes("scopedRiserParts(project, settings, deps.deviceTypes)") && lrc.includes("getManyBySku(memberSkus)"),
+    "#321 final scoped load: loadRiserPartsContext uses the full book only when the caller passes one");
+  const hook = srcOf("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(hook.includes('import { placementSystem } from "@/lib/design/grid-drawing-set";') &&
+     /placementSystem\(fromPlacement, partById\) === "lighting" \|\| placementSystem\(toPlacement, partById\) === "lighting"\)\s*\)\s*askRiserPrompt\(/.test(hook),
+    "#321 final plan prompt: the server is asked only when one end's part is in the lighting system");
+
+  // --- 3. the prompt says the wire goes by others ---
+  const p0 = await L.riserPromptFor(await live(), opt, wRackLx1.id, deps);
+  ok(p0.show && p0.byOthers === true && !p0.joins, "#321 final prompt: with the design's wire pricing off (the default) a new pair's prompt says by others");
+  ok((await CR.patchConduitRiser(gp.id, opt, { op: "setDefaults", priceWire: true })).ok, "#321 final prompt: setDefaults priceWire true saves");
+  const p1 = await L.riserPromptFor(await live(), opt, wRackLx1.id, deps);
+  ok(p1.show && p1.byOthers === false, "#321 final prompt: after setDefaults priceWire true the prompt no longer says by others");
+  const acc = await CR.acceptSuggestions(gp.id, opt, [M.pairKey(rack.id, lx1.id)], deps);
+  ok(acc.ok && acc.accepted === 1, "#321 final prompt: accepting the pair makes one run");
+  const runId = (await live()).conduitRiser![opt].runs.find((r) => M.runPairKey(r) === M.pairKey(rack.id, lx1.id))!.id;
+  await CR.patchConduitRiser(gp.id, opt, { op: "updateRun", id: runId, priceWire: false });
+  const again = await route(lx1, rack, CAB);
+  const pj = await L.riserPromptFor(await live(), opt, again.id, deps);
+  ok(pj.show && pj.joins && pj.byOthers === true, "#321 final prompt: a join reads the existing run's own wire override (off → by others) over the design default");
+  const acc2 = await CR.acceptSuggestions(gp.id, opt, [M.pairKey(rack.id, lx1.id)], deps);
+  const acc3 = await CR.acceptSuggestions(gp.id, opt, [M.pairKey(rack.id, lx1.id)], deps);
+  ok(acc2.ok && acc2.accepted === 1 && acc3.ok && acc3.accepted === 0, "#321 final prompt: accepting a pair already on the riser reports accepted 0");
+  const rp = srcOf("src/app/(app)/design/grid/[id]/workspace/riser-prompt.tsx");
+  ok(rp.includes('riserPrompt.byOthers ? " — its wire will be listed as by others" : ""') && rp.includes('noteAction(r.accepted > 0 ? "Added to the riser" : "Already on the riser")'),
+    "#321 final prompt: the bar says when the wire will be by others; Add notes \"Already on the riser\" when nothing was accepted");
+  ok(crs.includes("const byOthers = !data.estimateOwned && !(run ? effectivePricing(run, data.doc.defaults).wire : data.doc.defaults.priceWire);"),
+    "#321 final prompt: byOthers = the run's override ?? the design default; never on an estimate-owned option");
+
+  // --- 2. refusals are deduped and each ends in a period ---
+  const cals = [{ docId: "sh", page: 1, scale: 100, unit: "ft", refLength: 100, by: "t", at: 1 }] as import("@/lib/annotations").Calibration[];
+  const parts = [{ id: "DMX", sku: "DMX", desc: "DMX cable", category: "Cable", unit: "ft", list: 1, cost: 0.5 }];
+  const labelOf = RB.riserEndLabeler({ stubs: [] }, [{ id: "gp-a", partId: "DMX", designator: "CRO-4" }, { id: "gp-b", partId: "DMX", designator: "LX-1" }], () => undefined, 2);
+  const twoRuns = M.normalizeConduitRiserDoc({
+    runs: [
+      { id: "cr-00000000000a", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "placement", placementId: "gp-b" }, routeIds: [], linkIds: [], size: '3/4"', style: "conduit", priceConduit: true },
+      { id: "cr-00000000000b", a: { kind: "placement", placementId: "gp-a" }, b: { kind: "placement", placementId: "gp-b" }, routeIds: [], linkIds: [], size: '3/4"', style: "conduit", priceConduit: true },
+    ],
+  });
+  const emt = new Map([["EMT34", { desc: "3/4 in EMT", unit: "ft", list: 4, cost: 2 }]]);
+  const dup = RB.riserBom({ estimateOwned: false, routes: [], links: [], cals, parts, conduitParts: emt, sizes: [{ size: '3/4"', partId: "EMT34" }], placementIds: new Set(["gp-a", "gp-b"]), labelOf, doc: twoRuns });
+  ok(J2(dup.refusals) === J2(["CRO-4 → LX-1 needs a length"]),
+    `#321 final refusals: two runs on one pair that both need a length refuse with one sentence (${dup.refusals.join(" | ")})`);
+  ok(srcOf("src/lib/design/grid-quote.ts").includes('error: riser.refusals.map((s) => s + ".").join(" ")'), "#321 final refusals: the quote's error ends every sentence in a period");
+  ok(srcOf("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx").includes("riser.refusals.map((r, i) => (") && srcOf("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx").includes("key={`${i}:${r}`}"),
+    "#321 final refusals: the BOM panel keys each refusal by index and text");
+
+  // --- 4. the Tag panel reverts a cleared field and never echoes the inherited value ---
+  const eff = T.effectiveTag({ face: "C" }, { box: "4S", mount: "WM" }, "Stage");
+  const vals = { ...eff };
+  ok(J2(T.tagPanelPatch(vals, eff, { face: "C" })) === "{}", "#321 final tag panel: nothing changed → empty patch");
+  ok(J2(T.tagPanelPatch({ ...vals, box: "4s", location: "Stage" }, eff, { face: "C" })) === "{}", "#321 final tag panel: retyping the inherited box (any case) or the space name sets no override");
+  ok(J2(T.tagPanelPatch({ ...vals, face: "" }, eff, { face: "C" })) === J2({ face: null }), "#321 final tag panel: clearing a field the device overrides sends null (revert), never \"\"");
+  ok(J2(T.tagPanelPatch({ ...vals, box: "" }, eff, { face: "C" })) === "{}", "#321 final tag panel: clearing an inherited field sends nothing (no deliberate blank in v1)");
+  ok(J2(T.tagPanelPatch({ ...vals, box: "2G", height: '18"' }, eff, { face: "C" })) === J2({ box: "2G", height: '18"' }), "#321 final tag panel: a new value sets an override");
+  const effBlank = T.effectiveTag({ location: "" }, undefined, "Stage");
+  ok(J2(T.tagPanelPatch({ ...vals, face: "c" }, eff, { face: "C" })) === "{}" && J2(T.tagPanelPatch({ ...effBlank }, effBlank, { location: "" })) === "{}" &&
+     J2(T.tagPanelPatch({ ...effBlank, box: "1G" }, effBlank, { location: "" })) === J2({ box: "1G" }),
+    "#321 final tag panel: the device's own override compares case-insensitively; a stored blank left alone is never rewritten by another field's save");
+  const panels = srcOf("src/app/(app)/design/grid/[id]/conduit-riser/panels.tsx");
+  ok(panels.includes("const patch = tagPanelPatch(v, device.tag, overrides);") && !panels.includes("if (v[k] !== device.tag[k]) patch[k] = v[k]") &&
+     srcOf("src/app/(app)/design/grid/[id]/conduit-riser/conduit-riser-editor.tsx").includes("overrides={props.tagOverrides[selTag.id]}") &&
+     srcOf("src/app/(app)/design/grid/[id]/conduit-riser/page.tsx").includes("cleanPlacementTag(pl.tag)"),
+    "#321 final tag panel: TagPanel saves through tagPanelPatch against the placement's own overrides the page passes");
+  ok(srcOf("DECISIONS.md").includes("a `null` field reverts that override") && srcOf("DECISIONS.md").includes("a deliberate blank isn't offered in v1"), "#321 final D769: null reverts; no deliberate blank in v1");
+
+  // --- 5. undo keeps a second run on one pair ---
+  const rid = (c: string) => "cr-" + c.repeat(12);
+  const runOf = (id: string, a: string, b: string) => ({ id, a: { kind: "placement", placementId: a }, b: { kind: "placement", placementId: b }, routeIds: [], linkIds: [], size: '1"', style: "conduit" });
+  const udoc = { options: [{ id: "o1" }], placements: [{ id: "gp-1", optionId: "o1" }, { id: "gp-2", optionId: "o1" }, { id: "gp-3", optionId: "o1" }], conduitRiser: { o1: { runs: [runOf(rid("a"), "gp-1", "gp-3")] } } as Record<string, unknown> };
+  LV.restoreConduitItems(udoc, { o1: { runs: [runOf(rid("b"), "gp-1", "gp-2"), runOf(rid("c"), "gp-2", "gp-1"), runOf(rid("b"), "gp-1", "gp-2"), runOf(rid("d"), "gp-3", "gp-1")] } });
+  ok(J2((udoc.conduitRiser.o1 as { runs: { id: string }[] }).runs.map((r) => r.id)) === J2([rid("a"), rid("b"), rid("c")]),
+    "#321 final undo: two runs the bundle carries for one pair both come back; a repeated id and a pair that already had a run don't");
+  ok(srcOf("DECISIONS.md").includes("two runs the bundle carries for one\npair both come back") || srcOf("DECISIONS.md").includes("pair both come back."), "#321 final D774: the text says a pair's second run comes back");
+
+  // --- 6. isTagPatch validates pd ---
+  ok(T.isTagPatch({ pd: "P" }) && T.isTagPatch({ pd: " p / d " }) && T.isTagPatch({ pd: "" }) && T.isTagPatch({ pd: null }) && T.isTagPatch({ pd: "d" }),
+    "#321 final isTagPatch: pd accepts \"\", P, D, P/D (any case or spacing) and null");
+  ok(!T.isTagPatch({ pd: "X" }) && !T.isTagPatch({ pd: "PD/" }) && !T.isTagPatch({ box: "4S", pd: "Power" }) && T.isTagPatch({ box: "anything" }),
+    "#321 final isTagPatch: any other pd string rejects the whole patch; other fields stay free text");
+
+  // --- 7. pointer cancel discards the drag ---
+  const ed = srcOf("src/app/(app)/design/grid/[id]/conduit-riser/conduit-riser-editor.tsx");
+  const cancelFn = ed.slice(ed.indexOf("function onCancel() {"), ed.indexOf("function onCancel() {") + 120);
+  ok(ed.includes("onPointerCancel: onCancel,") && !ed.includes("onPointerCancel: onUp") && /drag\.current = null;\s*setDragOp\(null\);\s*\}/.test(cancelFn) && !cancelFn.includes("commitLayout"),
+    "#321 final riser editor: a cancelled pointer drops the drag and its preview, never commits it");
+
+  // --- 9. PartLite doc comments sit over their own fields ---
+  const gb = srcOf("src/lib/design/grid-bom.ts");
+  ok(/on the server\. \*\/\n\s*group\?: string \| null;/.test(gb) && /tagDefaults\?: TagFields;\n\s*\/\*\* Resolved beta group/.test(gb),
+    "#321 final grid-bom: the Resolved beta group comment sits directly over group again");
 }

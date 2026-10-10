@@ -7,6 +7,8 @@ import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
+import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../../recordings/data";
@@ -135,7 +137,7 @@ export default async function CustomerDetailPage({
     commsByCustomer(id),
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }),
+    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id),
     getSettings(),
     getRewardsProgram(),
   ]);
@@ -928,6 +930,10 @@ export default async function CustomerDetailPage({
 
             {/* ---- recordings (Krisp spec §6) — every recording under this customer ---- */}
             <CustomerRecordingsCard customerId={cust.id} />
+
+            {/* ---- #323 Krisp meetings linked here + what the customer owes us ---- */}
+            <MeetingsCard kind="company" id={cust.id} viewerId={me.id} />
+            <WaitingOnCustomerCard by="customerId" ids={[cust.id]} />
 
 
           </div>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { getSettings } from "@/lib/settings";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { symbolCategoryRows, symbolContext } from "@/lib/design/grid-icons";
@@ -16,7 +16,10 @@ import { typeOfCategory } from "@/lib/design/device-types";
 import { DeviceTypeIconsCard, type DeviceTypeDrawing } from "./device-type-icons-card";
 import { getDocuments } from "@/lib/stores/part-documents";
 import { WireTypesCard } from "./wire-types-card";
+import { BoxTypesCard } from "./box-types-card";
+import { getRiserBoxTypes } from "@/lib/stores/riser-box-types";
 import { StandardNotesCard } from "./standard-notes-card";
+import { DesignatorDigitsCard } from "./designator-digits-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
 import { GridSettingsTabs } from "./settings-tabs";
 
@@ -115,6 +118,7 @@ export default async function GridSettingsPage() {
   }
   const used = [...usedSet];
   const wireTypes = resolveWireTypes(settings.wireTypes);
+  const boxTypes = await getRiserBoxTypes();
 
   // Port rules review (#159) — one pass over the full catalog (~37,400 parts
   // in prod) via listCatalog() above, called exactly once for this request;
@@ -212,6 +216,10 @@ export default async function GridSettingsPage() {
       <WireTypesCard key={JSON.stringify(wireTypes)} wireTypes={wireTypes} />
 
       <StandardNotesCard key={settings.gridStandardNotes ?? ""} value={settings.gridStandardNotes ?? ""} />
+
+      <BoxTypesCard key={JSON.stringify(boxTypes)} boxTypes={boxTypes} />
+
+      <DesignatorDigitsCard key={designatorDigitsOf(settings)} value={designatorDigitsOf(settings)} />
 
       <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Related settings</div>

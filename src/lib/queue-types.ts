@@ -12,6 +12,7 @@ export type QueueSource =
   | "checklist"
   | "milestone"
   | "project-task"
+  | "meeting-task"
   | "flame-renewal"
   | "inspection-renewal"
   | "site-visit";
@@ -38,6 +39,7 @@ export const SOURCE_LABEL: Record<QueueSource, string> = {
   checklist: "Standards",
   milestone: "Milestone",
   "project-task": "Project task",
+  "meeting-task": "Meeting to-do",
   "flame-renewal": "Flame renewal",
   "inspection-renewal": "Inspection renewal",
   "site-visit": "Site visit",

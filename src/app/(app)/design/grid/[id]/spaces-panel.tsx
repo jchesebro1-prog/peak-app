@@ -4,7 +4,8 @@ import { useState } from "react";
 import type { GridSpace } from "@/lib/stores/grid-projects";
 import type { RollupSlice, SpaceRollup } from "@/lib/design/grid-bom";
 import { scopeColor } from "@/lib/design/grid-scopes";
-import { removeSpaceAction, renameSpaceAction } from "./actions";
+import { sortedLevels, type GridLevel } from "@/lib/design/grid-levels";
+import { removeSpaceAction, renameSpaceAction, setSpaceLevelAction } from "./actions";
 
 /**
  * Spaces sidebar panel (D109) — list the active page's rooms with their
@@ -205,6 +206,7 @@ export default function SpacesPanel({
 export function SpaceEditor({
   projectId,
   selected,
+  levels,
   busy,
   onSelect,
   onChanged,
@@ -212,6 +214,8 @@ export function SpaceEditor({
 }: {
   projectId: string;
   selected: GridSpace;
+  /** The design's riser levels (#321); empty hides the Level picker. */
+  levels?: GridLevel[];
   busy: boolean;
   onSelect: (id: string | null) => void;
   onChanged: () => void;
@@ -277,6 +281,32 @@ export function SpaceEditor({
           </button>
         </div>
       )}
+      <div style={{ marginTop: 8 }}>
+        {levels && levels.length > 0 ? (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "#3d424e" }}>
+            Level
+            <select
+              value={levels.some((l) => l.id === selected.levelId) ? selected.levelId : ""}
+              disabled={busy}
+              onChange={async (e) => {
+                const r = await setSpaceLevelAction(projectId, selected.id, e.target.value || null);
+                if (!r.ok) onError(r.error);
+                else onChanged();
+              }}
+              style={{ ...INPUT, flex: 1, minWidth: 0 }}
+            >
+              <option value="">— none —</option>
+              {sortedLevels(levels).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div style={{ fontSize: 10.5, color: "#9aa0ab" }}>Levels are set on the conduit riser page.</div>
+        )}
+      </div>
       <div style={{ fontSize: 10.5, color: "#9aa0ab", marginTop: 5 }}>
         Devices inside the outline belong to it automatically — nested
         spaces win by smallest.

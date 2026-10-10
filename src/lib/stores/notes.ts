@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, insertDocIfAbsent, insertWithPrefixedId, listDocs, listDocsByField, softDeleteDoc } from "@/db/doc-store";
 import type { FileRef } from "@/lib/consulting-files";
 import { can } from "@/lib/team";
 
@@ -20,7 +20,7 @@ import { can } from "@/lib/team";
  * on collision instead of one writer's note silently replacing another's.
  */
 
-export type NoteParentKind = "customer" | "lead" | "project" | "quote" | "engagement";
+export type NoteParentKind = "customer" | "lead" | "project" | "quote" | "engagement" | "site";
 
 export type NoteRecord = {
   id: string; // 'N-####' (base 7000)
@@ -71,6 +71,14 @@ export async function notesForCustomer(customerId: string): Promise<NoteRecord[]
   return (await allNotes()).filter((n) => n.customerId === customerId);
 }
 
+/** #323 — notes filed on one venue (parentKind "site", parentId = sites.id; a meeting to-do decided "note" on a
+ *  venue-linked meeting), filtered in SQL on parentId, newest first. */
+export async function notesForSite(siteId: string): Promise<NoteRecord[]> {
+  if (!siteId) return [];
+  const rows = await listDocsByField<NoteRecord>("notes", "parentId", [siteId]);
+  return rows.map(normalizeNote).filter((n) => n.parentKind === "site").sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
 /** #145 — the consulting Activity tab's read, mirroring notesForCustomer. */
 export async function notesForEngagement(engagementId: string): Promise<NoteRecord[]> {
   return (await allNotes()).filter(
@@ -88,10 +96,13 @@ export async function addNoteRecord(
     taskIds?: string[];
     system?: boolean;
   },
-  me: string
+  me: string,
+  /** #323 — a caller-chosen deterministic id: the note is written at most once; a
+   *  repeat call returns the note already there (never a duplicate or an overwrite). */
+  opts: { id?: string } = {}
 ): Promise<NoteRecord> {
   const t = Date.now();
-  return insertWithPrefixedId<NoteRecord>("notes", "N", 7000, (id) => ({
+  const build = (id: string): NoteRecord => ({
     id,
     parentKind: input.parentKind,
     parentId: input.parentId,
@@ -104,7 +115,13 @@ export async function addNoteRecord(
     system: input.system ?? false,
     createdAt: t,
     updatedAt: t,
-  }));
+  });
+  if (opts.id) {
+    const doc = build(opts.id);
+    if (await insertDocIfAbsent<NoteRecord>("notes", doc)) return doc;
+    return (await getNote(opts.id)) ?? doc;
+  }
+  return insertWithPrefixedId<NoteRecord>("notes", "N", 7000, build);
 }
 
 /** Soft delete (doc-store tombstone). */

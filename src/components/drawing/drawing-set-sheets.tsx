@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties } from "react";
 import type { GridPlacement } from "@/lib/stores/grid-projects";
 import { findCalibration } from "@/lib/annotations";
 import { placementQty } from "@/lib/design/grid-bom";
@@ -13,16 +13,19 @@ import { markerBox } from "@/lib/design/grid-symbol-display";
 import type { DrawingSetAssets, DrawingSetData } from "@/lib/design/drawing-set-data";
 import { DrawingSheet } from "@/components/drawing/drawing-sheet";
 import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
+import { ConduitRiserFigure } from "@/components/drawing/conduit-riser-figure";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import PlanSheetFigure, { type FigurePlacement } from "@/app/(app)/design/grid/[id]/set/plan-sheet-figure";
 import RiserSheetFigure from "@/app/(app)/design/grid/[id]/set/riser-sheet-figure";
 
 /**
  * The drawing set's sheets (#209, spec 2026-09-25 §3) — T-001 cover, one
- * plan sheet per system per source page, E-501 riser, E-60x schedules (no
- * prices) — as one server component (#301 slice C, R8a). The team set page
- * and the signed /print/grid-set/[id] route both render it; every asset URL
- * comes from `assets`.
+ * plan sheet per system per source page, E-501 riser, E-502… lighting
+ * control riser (#321), E-60x schedules (no prices) — as one server
+ * component (#301 slice C, R8a). The team set page and the signed
+ * /print/grid-set/[id] route both render it; every asset URL comes from
+ * `assets`. `assets.conduitRiserDxf` (the team page only) puts a
+ * screen-only Download DXF link under each lighting control riser sheet.
  */
 
 function scheduleRow(it: ScheduleItem, key: number) {
@@ -61,7 +64,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
 
 export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; assets: DrawingSetAssets }) {
   const { project, option, options, optionQuoteNo, slice, spaces, cals, partById, symCtx, set, size, k, area, now, symbolDisplay, symbolUrls, view,
-    schedule, schedulePages, sheetById, included, revRows, notes, legend } = data;
+    schedule, schedulePages, conduitRiserPages, sheetById, included, revRows, notes, legend } = data;
 
   const tb = (d: DrawingSheetDef, i: number) =>
     titleBlockData({
@@ -189,7 +192,8 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
       // by its range); a curtain keeps its type mark. Key = designators · qty · desc.
       const marks = planDesignatorMarks(
         figs.map((f) => ({ id: f.fig.id, key: f.fig.key, desc: f.desc, qty: f.qty, designator: f.designator, curtain: f.fig.curtain })),
-        DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || ""
+        DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || "",
+        data.digits
       );
       return (
         <PlanSheetFigure
@@ -230,6 +234,13 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
         </div>
       );
     }
+    if (d.kind === "conduitRiser") {
+      // The engine's own page (sheet inches = the drawing area), drawn by the
+      // same renderer as the riser page; no images, so Print never waits on it.
+      const page = conduitRiserPages[d.conduitRiserPage ?? 0];
+      if (!page) return <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the lighting control riser yet.</p>;
+      return <ConduitRiserFigure geo={page.geo} w={page.w} h={page.h} svgProps={{ style: { width: "100%", height: "100%" } }} />;
+    }
     const pageIdx = d.schedulePage ?? 0;
     const cols = schedulePages[pageIdx] || [[]];
     const last = pageIdx === schedulePages.length - 1;
@@ -266,9 +277,20 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
   return (
     <div className="pk-drawing-set" data-size={size} style={{ "--dw-screen-zoom": String(SHEET_SIZES[size].screenZoom) } as CSSProperties}>
       {included.map((d, i) => (
-        <DrawingSheet key={d.key} size={size} titleBlock={tb(d, i)}>
-          {body(d)}
-        </DrawingSheet>
+        <Fragment key={d.key}>
+          <DrawingSheet size={size} titleBlock={tb(d, i)}>
+            {body(d)}
+          </DrawingSheet>
+          {d.kind === "conduitRiser" && assets.conduitRiserDxf && (
+            // Under the set's screen zoom, so the type is sized back up.
+            <p className="pk-no-print pk-dw-dxf" style={{ margin: 0, fontFamily: "var(--font-ui)", fontSize: "calc(12.5px / var(--dw-screen-zoom, 1))" }}>
+              <a href={assets.conduitRiserDxf({ projectId: project.id, optionId: data.optionId, size, page: (d.conduitRiserPage ?? 0) + 1 })} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+                {`Download DXF — ${d.number}`}
+              </a>
+              <span style={{ color: "#8c919c" }}> · this sheet as a CAD file, without the title block</span>
+            </p>
+          )}
+        </Fragment>
       ))}
     </div>
   );

@@ -6,6 +6,7 @@
  * The reducer only moves entries between `past` and `future`. Type-only
  * import of the store so no server code reaches the client bundle.
  */
+import type { TagPatch } from "@/lib/design/conduit-riser/tags";
 import type { RemovedBundle } from "@/lib/stores/grid-projects";
 
 export type GridCommand =
@@ -15,7 +16,9 @@ export type GridCommand =
   | { kind: "category"; items: { id: string; category: string }[] }
   | { kind: "part"; items: { id: string; partId: string; qty?: number; designator?: string }[] }
   /** #320: set designators; `keepAuto` for Renumber's undo/redo (not a hand edit). */
-  | { kind: "designator"; items: { id: string; designator: string }[]; keepAuto?: boolean };
+  | { kind: "designator"; items: { id: string; designator: string }[]; keepAuto?: boolean }
+  /** #321: per-field riser tag patches (absent = leave, string = set, null = remove override). */
+  | { kind: "tag"; items: { id: string; patch: TagPatch }[] };
 
 export type UndoEntry = { label: string; forward: GridCommand; inverse: GridCommand };
 export type UndoState = { past: UndoEntry[]; future: UndoEntry[] };
