@@ -3,8 +3,8 @@ import { tokens } from "./text";
 /**
  * Spec "Transcript line match" — score each segment by the share of the
  * to-do's (unique, stopword-free) tokens it contains. Best segment with
- * share ≥ 0.5 AND ≥ 2 matched tokens wins; ties → more matched tokens →
- * earlier segment. Pure, client-safe.
+ * share ≥ 0.5 AND ≥ 2 matched tokens wins; ties → earlier segment. Pure,
+ * client-safe.
  */
 export type TranscriptSegment = { speaker: number; text: string; start: number; end: number };
 export type LineMatch = { index: number; speaker: number; text: string; start: number; share: number; matched: number };
@@ -18,11 +18,12 @@ export function matchTranscriptLine(title: string, segments: readonly Transcript
   let best: LineMatch | null = null;
   for (let index = 0; index < segments.length; index++) {
     const s = segments[index];
-    const have = new Set(tokens(String(s?.text ?? "")));
+    if (!s) continue;
+    const have = new Set(tokens(String(s.text ?? "")));
     let matched = 0;
     for (const w of want) if (have.has(w)) matched++;
     const share = matched / want.size;
-    if (!best || share > best.share || (share === best.share && matched > best.matched)) {
+    if (!best || share > best.share) {
       best = { index, speaker: Number(s.speaker) || 0, text: String(s.text ?? ""), start: Number(s.start) || 0, share, matched };
     }
   }

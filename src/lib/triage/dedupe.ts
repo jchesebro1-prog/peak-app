@@ -14,10 +14,15 @@ export type OpenWork = { key: string; title: string };
 export function collapseDuplicates(cands: readonly TriageCandidate[], openWork: readonly OpenWork[]): TriageCandidate[] {
   const out = cands.map((c) => ({ ...c, also: [...(c.also ?? [])] }));
   const byKey = new Map(out.map((c) => [c.key, c]));
-  const workByTitle = new Map<string, string>();
+  // Every open-work key per normalized title (off-list keys included), so a
+  // duplicate whose first match is off the list still reaches an on-list one.
+  const workByTitle = new Map<string, string[]>();
   for (const w of openWork) {
     const n = normalizedTitle(w.title);
-    if (n && !workByTitle.has(n)) workByTitle.set(n, w.key);
+    if (!n) continue;
+    const keys = workByTitle.get(n) ?? [];
+    if (!keys.includes(w.key)) keys.push(w.key);
+    workByTitle.set(n, keys);
   }
   const age = (c: TriageCandidate) => (c.since > 0 ? c.since : Number.MAX_SAFE_INTEGER);
   const calls = out
@@ -29,16 +34,21 @@ export function collapseDuplicates(cands: readonly TriageCandidate[], openWork: 
     const n = normalizedTitle(c.title);
     if (!n) continue;
     const line = `Also mentioned in ${c.mention || "a meeting"}`;
-    const workKey = workByTitle.get(n);
-    if (workKey) {
+    // A repeat from the same meeting adds nothing the kept row doesn't already say.
+    const addLine = (kept: (typeof out)[number] | undefined) => {
+      if (kept && c.mention && kept.mention === c.mention) return;
+      kept?.also.push(line);
+    };
+    const workKeys = workByTitle.get(n) ?? [];
+    if (workKeys.length) {
       drop.add(c.key);
-      byKey.get(workKey)?.also?.push(line);
+      addLine(workKeys.map((k) => byKey.get(k)).find((k) => k !== undefined));
       continue;
     }
     const prior = firstCall.get(n);
     if (prior) {
       drop.add(c.key);
-      prior.also?.push(line);
+      addLine(prior);
       continue;
     }
     firstCall.set(n, c);

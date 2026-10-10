@@ -236,4 +236,33 @@ export async function triageMatchChecks(ok: Ok): Promise<void> {
     []
   );
   ok(blank.length === 2, "dedupe: an all-stopword title never collapses");
+
+  // An off-list open item registered first must not swallow the on-list row's line.
+  const offFirst = collapseDuplicates(
+    [
+      cand("task:T2", "task", [], 5, { title: "Book lift" }),
+      cand("call:R7:k", "call", [], 10, { title: "book lift!", mention: "Call D (Oct 9)" }),
+    ],
+    [
+      { key: "asg:A1", title: "Book lift" },
+      { key: "task:T2", title: "Book lift" },
+    ]
+  );
+  ok(
+    offFirst.length === 1 && offFirst[0].key === "task:T2" && (offFirst[0].also ?? []).join("|") === "Also mentioned in Call D (Oct 9)",
+    "dedupe: a duplicate-titled off-list open item registered first still folds its line onto the on-list open work row"
+  );
+
+  // A repeat from the same meeting folds away without an "Also mentioned in" line for that same meeting.
+  const sameMeeting = collapseDuplicates(
+    [
+      cand("call:R8:k1", "call", [], 10, { title: "Send the cue list", mention: "Walkthrough (Oct 7)" }),
+      cand("call:R8:k2", "call", [], 11, { title: "send the cue list", mention: "Walkthrough (Oct 7)" }),
+    ],
+    []
+  );
+  ok(
+    sameMeeting.length === 1 && sameMeeting[0].key === "call:R8:k1" && (sameMeeting[0].also ?? []).length === 0,
+    "dedupe: a repeat from the same meeting drops with no 'Also mentioned in' line for that meeting"
+  );
 }
