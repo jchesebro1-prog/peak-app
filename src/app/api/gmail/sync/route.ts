@@ -8,6 +8,8 @@ import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
 import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
+import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
+import { syncAllDrivers } from "@/lib/drive-sync/sync";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -41,6 +43,10 @@ export const maxDuration = 60;
  * "daily cron" is this route.
  *
  * #283 adds the Peak Product Photos sync the same way.
+ *
+ * Spec 2026-10-09 adds the venue geo-status backfill and the drive-time re-sync
+ * (every rep, own try/catch + time budget), placed before the photo rider so it
+ * can't be starved.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -84,6 +90,28 @@ export async function GET(req: Request): Promise<NextResponse> {
     vendors = { error: (err as Error).message };
   }
 
+  // Spec 2026-10-09 — stamp any venue still missing a verification status
+  // (idempotent; a no-op once every row is stamped).
+  let venueGeo: unknown;
+  try {
+    venueGeo = await ensureVenueGeoStatus();
+  } catch (err) {
+    venueGeo = { error: (err as Error).message };
+  }
+
+  // Spec 2026-10-09 — re-sync every rep's drive events, least recently synced
+  // first, ≤ 15 s and never past 40 s into this run. Own try/catch per rep
+  // inside syncAllDrivers, and one here around the whole rider. deadlineMs
+  // also stops a new rep starting unless a rep-sized slice (20 s) is left
+  // before 40 s, so the photo rider below keeps its window.
+  let driveTime: unknown;
+  try {
+    const budget = Math.min(15_000, 40_000 - (Date.now() - started));
+    driveTime = budget > 0 ? await syncAllDrivers({ budgetMs: budget, deadlineMs: started + 40_000 }) : { skipped: "no time left" };
+  } catch (err) {
+    driveTime = { error: (err as Error).message };
+  }
+
   // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
   // budgeted against a 45 s cutoff (the sync's hard deadline is budget +
   // 10 s, leaving ~5 s under the 60 s ceiling for the last shrink + store),
@@ -100,5 +128,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     drivePhotos = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, drivePhotos });
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, venueGeo, driveTime, drivePhotos });
 }

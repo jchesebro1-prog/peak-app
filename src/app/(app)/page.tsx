@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
@@ -70,6 +71,10 @@ export default async function HomePage({
   const me = user.name;
   const data = makeDashboardData(user);
   void reconcileRecordingsIfStale().catch(() => {});
+  after(async () => {
+    const { syncDriveIfStale } = await import("@/lib/drive-sync/sync");
+    await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
+  });
   const now = Date.now();
   const [userRecord, appSettings, quotesAll, designsAll] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),

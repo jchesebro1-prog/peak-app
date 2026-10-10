@@ -312,6 +312,19 @@ async function syncLeased(userId: string, key: string, days: string[], now: numb
   const retrying = new Set(legs.filter((l) => l.flag?.kind === "route_unavailable").map((l) => l.key));
   const existing = existingFromCalendar(fresh.events).filter((e) => !retrying.has(e.key));
   const diff = diffDriveEvents(desiredFromLegs(legs), existing, new Set(covered));
+
+  // Planning + re-reading may have outlived the lease. Verify (and extend) it,
+  // conditional on still being ours, right before the first Google write: if
+  // another sync took the rep over, write nothing and leave the rep stale.
+  const renewed = await d.renewLease(userId, held.token, d.now());
+  if (renewed == null) {
+    res.google = "busy";
+    res.errors.push("sync lease lost before the Google writes — nothing written, left stale");
+    await d.setState(userId, { lastSyncAt: 0, staleAt: d.now() });
+    d.log("[drive-sync] " + userId + " sync errors", res.errors);
+    return;
+  }
+  held.token = renewed;
   for (const ev of diff.insert) {
     try {
       await d.insertEvent(key, toWrite(ev));
@@ -388,11 +401,18 @@ export async function syncDriveIfStale(userId: string, deps?: Partial<DriveSyncD
 
 /** The daily cron rider: every active rep with a connected calendar, least
  *  recently synced first, own try/catch each, no new rep after the budget. */
-export async function syncAllDrivers(opts: { budgetMs: number }, deps?: Partial<DriveSyncDeps>): Promise<{ synced: number; skipped: number; busy: number; errors: string[] }> {
+export type SyncAllDriversResult = { synced: number; skipped: number; busy: number; readFailed: number; errors: string[] };
+
+/** A rep's sync can run this long (a 20 s routing budget plus reads and writes):
+ *  with a deadline, no new rep starts unless that much time is left before it. */
+export const REP_SYNC_RESERVE_MS = 20_000;
+
+export async function syncAllDrivers(opts: { budgetMs: number; deadlineMs?: number }, deps?: Partial<DriveSyncDeps>): Promise<SyncAllDriversResult> {
   const d = { ...defaultDeps(), ...deps };
   const start = d.now();
   // busy: the rep's lease was held by another sync — left stale, not synced.
-  const out = { synced: 0, skipped: 0, busy: 0, errors: [] as string[] };
+  // readFailed: Google refused the calendar read — nothing written, retried next pass.
+  const out: SyncAllDriversResult = { synced: 0, skipped: 0, busy: 0, readFailed: 0, errors: [] };
   const reps: Array<{ id: string; lastSyncAt: number }> = [];
   for (const u of await d.users()) {
     if (u.status !== "active") continue;
@@ -405,13 +425,15 @@ export async function syncAllDrivers(opts: { budgetMs: number }, deps?: Partial<
   }
   reps.sort((a, b) => a.lastSyncAt - b.lastSyncAt);
   for (const r of reps) {
-    if (d.now() - start > opts.budgetMs) {
+    const t = d.now();
+    if (t - start > opts.budgetMs || (opts.deadlineMs != null && t + REP_SYNC_RESERVE_MS > opts.deadlineMs)) {
       out.skipped++;
       continue;
     }
     try {
       const result = await syncDriveForUser(r.id, d);
       if (result.google === "busy") out.busy++;
+      else if (result.google === "read-failed") out.readFailed++;
       else out.synced++;
     } catch (err) {
       out.errors.push(r.id + ": " + errText(err));

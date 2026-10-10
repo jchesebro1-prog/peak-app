@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { claimVisit, getVisit, releaseVisit, removeVisit, scheduleVisit } from "@/lib/stores/site-visits";
 import { dispatchVisitInvite, type InviteStatus } from "@/lib/visit-invite";
@@ -78,6 +79,12 @@ export async function removeVisitAction(
     }
   }
   await removeVisit(id);
+  // Spec 2026-10-09 triggers: the removed stop's day (and the next) re-syncs for everyone on it.
+  const removed = v;
+  after(async () => {
+    const { resyncForVisitChange } = await import("@/lib/drive-sync/sync");
+    await resyncForVisitChange(removed, null).catch((err) => console.error("[drive-sync] visit delete re-sync failed:", err));
+  });
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -98,6 +105,13 @@ export async function scheduleVisitAction(
   const inviteStatus: InviteStatus = fresh
     ? await dispatchVisitInvite(fresh, { id: me.id, name: me.name })
     : "failed";
+  // Spec 2026-10-09 triggers: re-sync the old and new day for everyone on it.
+  const prevVisit = v;
+  const nextVisit = fresh;
+  after(async () => {
+    const { resyncForVisitChange } = await import("@/lib/drive-sync/sync");
+    await resyncForVisitChange(prevVisit, nextVisit).catch((err) => console.error("[drive-sync] visit re-sync failed:", err));
+  });
   revalidatePath("/", "layout");
   return { ok: true, inviteStatus };
 }
