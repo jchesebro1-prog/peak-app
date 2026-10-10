@@ -8,6 +8,7 @@
  * registered for the harness teardown.
  */
 import { readFileSync, readdirSync } from "node:fs";
+import { cronAuthFailure, parseSlotParam } from "@/lib/triage/cron";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
 import { CONFIG_COLLECTIONS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import {
@@ -645,4 +646,24 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   const res = await buildSlotForAll("midday", MON_12, { users: [U3], feeds });
   const got = await getSnapshot(s3);
   ok(res.built === 1 && res.failed.length === 0 && got?.builtBy === "cron" && got.slot === "midday", "cron: buildSlotForAll writes each user's slot snapshot");
+}
+
+export async function triageCronChecks(ok: Ok): Promise<void> {
+  ok(JSON.stringify(cronAuthFailure("Bearer x", undefined)) === JSON.stringify({ status: 503, error: "cron not configured" }), "cron: disabled (503) until CRON_SECRET is set");
+  ok(cronAuthFailure(null, "s")?.status === 401 && cronAuthFailure("Bearer t", "s")?.status === 401 && cronAuthFailure("Bearer s", "s") === null, "cron: only the matching bearer secret passes");
+  ok(parseSlotParam("midday") === "midday" && parseSlotParam("morning") === "morning" && parseSlotParam("noon") === null && parseSlotParam(null) === null, "cron: slot param");
+
+  const route = readFileSync("src/app/api/triage/build/route.ts", "utf8");
+  ok(/cronAuthFailure\(/.test(route) && /buildSlotForAll\(slot, /.test(route) && /\?\? "midday"/.test(route) && /maxDuration = 60/.test(route), "cron: /api/triage/build authenticates, defaults to the midday slot, builds every user");
+  const vercel = JSON.parse(readFileSync("vercel.json", "utf8")) as { crons: { path: string; schedule: string }[] };
+  ok(
+    vercel.crons.some((c) => c.path === "/api/triage/build?slot=midday" && c.schedule === "0 17 * * *") && vercel.crons.some((c) => c.path === "/api/gmail/sync" && c.schedule === "0 12 * * *") && vercel.crons.length === 2,
+    "cron: two once-a-day entries (Hobby-safe) — Gmail sync at 12:00 UTC, triage midday at 17:00 UTC"
+  );
+  const gmail = readFileSync("src/app/api/gmail/sync/route.ts", "utf8");
+  ok(/buildSlotForAll\("morning", /.test(gmail) && gmail.indexOf('buildSlotForAll("morning"') < gmail.indexOf("syncDrivePhotos(budget)") && /triage = \{ error:/.test(gmail), "cron: the morning list rides the daily Gmail cron, own try/catch, before the photo budget");
+  const mw = readFileSync("src/middleware.ts", "utf8");
+  const m = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
+  const re = new RegExp("^" + (m ? m[1].replace(/\\\\/g, "\\") : "$^") + "$");
+  ok(!!m && !re.test("/api/triage/build") && re.test("/triage") && re.test("/"), "cron: /api/triage/build skips the login gate (secret is its auth); /triage does not");
 }
