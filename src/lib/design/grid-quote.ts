@@ -32,7 +32,9 @@ import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { getConduitSizes } from "@/lib/stores/conduit-sizes";
 import { designatorDigitsOf } from "@/lib/settings";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
-import { fillDesignatorsInMemory } from "@/lib/design/designators-server";
+import type { DeviceTypeContext } from "@/lib/design/device-types";
+import type { CategoryMap } from "@/lib/catalog-taxonomy";
+import { fillDesignatorsInMemory, labelPartsFrom } from "@/lib/design/designators-server";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { getSettings } from "@/lib/settings";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
@@ -93,6 +95,8 @@ export type GridQuoteInputs = {
   conduitSizes?: ConduitSize[];
   /** #321: digits a designator prints with, for a refusal's run names — read when absent. */
   designatorDigits?: 1 | 2;
+  /** #321 polish: what a run-end label's designator code needs (the category map and the device-type context) — read when absent. */
+  labelCtx?: { categoryMap: CategoryMap; deviceTypes: DeviceTypeContext };
 };
 
 /**
@@ -100,8 +104,12 @@ export type GridQuoteInputs = {
  * saved category map and the device-type context — exactly how the editor
  * page builds `parts`. Virtual (asm:/allow:) rows are added per build.
  */
-export async function loadGridGroupParts(symbols: GridSymbol[], catalog: CatalogPart[]): Promise<GridGroupPart[]> {
-  const [settings, deviceTypes] = await Promise.all([getSettings(), loadDeviceTypeContext(catalog)]);
+export async function loadGridGroupParts(
+  symbols: GridSymbol[],
+  catalog: CatalogPart[],
+  preloaded?: { settings: Awaited<ReturnType<typeof getSettings>>; deviceTypes: DeviceTypeContext }
+): Promise<GridGroupPart[]> {
+  const { settings, deviceTypes } = preloaded ?? { settings: await getSettings(), deviceTypes: await loadDeviceTypeContext(catalog) };
   return gridPartsFrom(symbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { deviceTypes });
 }
 
@@ -118,9 +126,10 @@ export async function loadGridQuoteInputs(
     getConduitSizes(),
     getSettings(),
   ]);
+  const deviceTypes = await loadDeviceTypeContext(catalog);
   const [equip, groupParts] = await Promise.all([
     anyVirtual ? loadEquipPriceCtx({ catalog }) : Promise.resolve(null),
-    loadGridGroupParts(symbols, catalog),
+    loadGridGroupParts(symbols, catalog, { settings, deviceTypes }),
   ]);
   const tiers = new Map<string, ReturnType<typeof resolveTier>>();
   const tierFor = (customerId: string | null | undefined, contactName?: string | null) => {
@@ -131,6 +140,7 @@ export async function loadGridQuoteInputs(
   return {
     catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, sewingPct, groupParts,
     conduitSizes, designatorDigits: designatorDigitsOf(settings),
+    labelCtx: { categoryMap: resolveCategoryMap(settings.catalogCategoryMap), deviceTypes },
   };
 }
 
@@ -246,9 +256,18 @@ export async function buildGridQuote(
   // named by the number the editor would give it (fillDesignators over the same
   // reading order, the same code resolver as the riser loader), never written.
   const nonCurtain = placements.filter((pl) => !pl.curtain);
-  const labelPlacements = riserPriced
-    ? await fillDesignatorsInMemory(project, nonCurtain, digits)
-    : nonCurtain;
+  let labelPlacements = nonCurtain;
+  if (riserPriced) {
+    // The parts the editor's resolver would build for this option's devices,
+    // from rows already in hand (library symbols, catalog fallback, the
+    // virtual parts above) — no extra reads when the caller shared inputs.
+    const labelCtx = inputs?.labelCtx ?? {
+      categoryMap: resolveCategoryMap((await getSettings()).catalogCategoryMap),
+      deviceTypes: await loadDeviceTypeContext(catalog),
+    };
+    const labelParts = labelPartsFrom({ placedIds: new Set(nonCurtain.map((pl) => pl.partId)), symbols, catalog, virtual, categoryMap: labelCtx.categoryMap, deviceTypes: labelCtx.deviceTypes });
+    labelPlacements = await fillDesignatorsInMemory(project, nonCurtain, digits, { parts: labelParts, deviceTypes: labelCtx.deviceTypes });
+  }
   const riser = riserBom({
     doc: conduitDoc,
     estimateOwned,

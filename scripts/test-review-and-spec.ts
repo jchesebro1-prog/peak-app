@@ -64243,6 +64243,9 @@ async function riserPolish3Checks(): Promise<void> {
   ok(!bad.ok && errAt(0, "code") === 1 && errAt(1, "code") === 1 && errAt(2, "code") === 0 && errAt(3, "code") === 1 && errAt(4, "description") === 1 && errAt(5, "description") === 1 && errAt(6, "code") === 1,
     "#321 polish box types: blank, invalid, repeated codes and blank / over-long descriptions each name their own row");
   ok(!bad.ok && bad.errors.every((e) => e.message.startsWith(`Row ${e.row + 1}`)) && bad.errors.length === 6, "#321 polish box types: one error per bad cell, messages lead with the 1-based row");
+  const junkCode = BT.validateBoxTypeRows([{ code: { toString: () => "OK" }, description: "Object code" }, { code: 7, description: "Number code" }]);
+  ok(!junkCode.ok && junkCode.errors.filter((e) => e.field === "code").length === 2 && junkCode.errors.every((e) => e.field === "code"),
+    "#321 polish box types: a non-string code is reported as invalid, never String()-coerced");
   const over = BT.validateBoxTypeRows(Array.from({ length: BT.BOX_TYPES_MAX + 1 }, (_, i) => ({ code: "X" + i, description: "d" })));
   ok(!over.ok && over.errors.some((e) => e.field === "list" && e.row === -1), "#321 polish box types: more than 40 rows is a list-level error");
   ok(BT.validateBoxTypeRows("junk").ok && J2((BT.validateBoxTypeRows("junk") as { types: unknown }).types) === "[]", "#321 polish box types: junk is an empty (valid) list");
@@ -64311,28 +64314,59 @@ async function riserPolish3Checks(): Promise<void> {
     const sh = (await G.addSheet(gp.id, { name: "#321 polish labels sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
     reg("grid_sheets", sh.id);
     const add = async (x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+    // A Grid-library symbol part, a raw catalog part (catalog fallback) and two allowances.
+    const Cat = await import("@/lib/stores/catalog");
+    const GC = await import("@/lib/stores/grid-catalog");
+    const { fixtureId } = await import("./test-fixtures");
+    const SYM = fixtureId(3213, "label-sym");
+    const RAW = fixtureId(3213, "label-raw");
+    await Cat.mergeUpsert(SYM, { desc: "Test3213 label symbol part", category: "Test3213 Control", unit: "ea", list: 10, cost: 5, designatorCode: "CRQ" });
+    await Cat.mergeUpsert(RAW, { desc: "Test3213 label raw part", category: "Test3213 Raw", unit: "ea", list: 10, cost: 5, designatorCode: "CRW" });
+    reg("catalog_parts", SYM);
+    reg("catalog_parts", RAW);
+    await GC.ensureGridSymbolsFor((await Cat.getMany([SYM])).filter(Boolean), by);
+    reg("grid_catalog", SYM);
+    const addPart = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
     const pa = await add(0.1, 0.1);
     const pb = await add(0.5, 0.1);
+    const pc = await addPart(SYM, 0.1, 0.4);
+    const pd = await addPart(RAW, 0.5, 0.4);
     const stored = await G.getProject(gp.id);
     // A design nobody has opened since numbering shipped: no stored designators.
     const bare = { ...stored!, placements: stored!.placements.map((pl) => ({ ...pl, designator: undefined })) };
     const slice = bare.placements.filter((pl) => !pl.curtain);
-    const filled = await DS.fillDesignatorsInMemory(bare, slice, 2);
+    const { getDeviceTypes, getTypeMap } = await import("@/lib/stores/device-types");
+    const { resolveCategoryMap } = await import("@/lib/catalog-taxonomy");
+    const deviceTypes = { types: await getDeviceTypes(), map: await getTypeMap() };
+    const settingsNow = await (await import("@/lib/settings")).getSettings();
+    const parts = DS.labelPartsFrom({
+      placedIds: new Set(slice.map((pl) => pl.partId)),
+      symbols: await GC.listGridSymbols(by),
+      catalog: await Cat.list(),
+      virtual: await (await import("@/lib/stores/equipment-map")).loadVirtualParts(slice.map((pl) => pl.partId)),
+      categoryMap: resolveCategoryMap(settingsNow.catalogCategoryMap),
+      deviceTypes,
+    });
+    const preloaded = await DS.fillDesignatorsInMemory(bare, slice, 2, { parts, deviceTypes });
+    const loaded = await DS.fillDesignatorsInMemory(bare, slice, 2);
+    ok(J2(preloaded.map((pl) => pl.designator)) === J2(loaded.map((pl) => pl.designator)), "#321 polish labels: the preloaded path (parts already in hand) numbers exactly as the by-id loader does");
     const doc = M.emptyConduitRiserDoc();
-    const labeler = BOM.riserEndLabeler(doc, filled, () => "an allowance", 2);
+    const filled = preloaded;
+    const labeler = BOM.riserEndLabeler(doc, filled, () => "a part", 2);
     const editor = (await L.loadConduitRiser(bare, opt)).input.devices;
     const editorLabel = (id: string) => editor.find((d) => d.id === id)?.label;
-    ok(editorLabel(pa.id) === "L-01" && editorLabel(pb.id) === "L-02", "#321 polish labels: fixture — the editor numbers an unnumbered design L-01, L-02");
-    ok(labeler({ kind: "placement", placementId: pa.id }) === editorLabel(pa.id) && labeler({ kind: "placement", placementId: pb.id }) === editorLabel(pb.id),
-      "#321 polish labels: filled in memory, a run end is named exactly as the editor names it");
+    ok(editorLabel(pa.id) === "L-01" && editorLabel(pb.id) === "L-02", "#321 polish labels: fixture — the editor numbers two unnumbered allowances L-01, L-02");
+    ok(/^CRQ-/.test(editorLabel(pc.id) || "") && /^CRW-/.test(editorLabel(pd.id) || ""), "#321 polish labels: fixture — a Grid-symbol part and a raw catalog part carry their own codes in the editor");
+    ok([pa, pb, pc, pd].every((pl) => labeler({ kind: "placement", placementId: pl.id }) === editorLabel(pl.id)),
+      "#321 polish labels: filled in memory, a run end is named exactly as the editor names it — allowance, Grid-symbol part and catalog part alike");
     const unfilled = BOM.riserEndLabeler(doc, slice, () => "an allowance", 2);
     ok(unfilled({ kind: "placement", placementId: pa.id }) === "an allowance", "#321 polish labels: unfilled, the labeler falls back to the description (the old divergence)");
-    ok(J2((bare.placements).map((pl) => pl.designator)) === J2([undefined, undefined]) && D.needsDesignators(slice), "#321 polish labels: the fill is in memory — the input placements are not mutated");
+    ok(bare.placements.every((pl) => pl.designator === undefined) && D.needsDesignators(slice), "#321 polish labels: the fill is in memory — the input placements are not mutated");
   } finally {
     await setSettings({ designatorDigits: digitsBefore });
   }
   const gq = srcOf("src/lib/design/grid-quote.ts");
-  ok(gq.includes("await fillDesignatorsInMemory(project, nonCurtain, digits)") && gq.includes("riserEndLabeler(conduitDoc, labelPlacements,"), "#321 polish labels: buildGridQuote names run ends through the filled placements");
+  ok(gq.includes("await fillDesignatorsInMemory(project, nonCurtain, digits, { parts: labelParts, deviceTypes: labelCtx.deviceTypes })") && gq.includes("inputs?.labelCtx ??") && gq.includes("riserEndLabeler(conduitDoc, labelPlacements,"), "#321 polish labels: buildGridQuote names run ends through the filled placements");
 
   // ---- 5. restoreRevision drops a default level the restored levels don't have
   const gp3 = await G.createProject({ name: "#321 polish restore", customer: "Spec fixture", customerId: null, by });

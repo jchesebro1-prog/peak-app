@@ -7,6 +7,9 @@ import type { GridSymbol } from "@/lib/stores/grid-catalog";
 import { getDeviceTypes, getTypeMap } from "@/lib/stores/device-types";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { gridPartsFrom } from "./grid-parts";
+import { catalogForSchedule } from "./grid-schedule";
+import type { CatalogPart } from "@/lib/stores/catalog";
+import type { CategoryMap } from "@/lib/catalog-taxonomy";
 import { parseVirtualPartId } from "./grid-virtual-parts";
 import { isSeedPlaceholder } from "./grid-seed";
 import { designatorCodeOf, fillDesignators, readingCtxOf, type CodePart, type DesignatorPlacement } from "./designators";
@@ -59,14 +62,40 @@ export async function designatorContext(
  * yet numbered gets the number the editor will give it (fillDesignators over
  * the project's reading order, the same code resolver), in memory only.
  * buildGridQuote names run ends in a refusal through this, so the quote and
- * the editor call the same device by the same label.
+ * the editor call the same device by the same label. With `preload` (parts the
+ * caller already built + the device-type context) nothing is read; without it
+ * the parts are loaded by id exactly as a store writer would (designatorContext).
  */
 export async function fillDesignatorsInMemory<P extends DesignatorPlacement & { partId: string; category?: string }>(
   project: { sheetIds?: readonly string[]; spaces?: Parameters<typeof readingCtxOf>[0]["spaces"] },
   placements: readonly P[],
-  digits: 1 | 2
+  digits: 1 | 2,
+  preload?: DesignatorPreload
 ): Promise<P[]> {
   if (!placements.length) return [...placements];
-  const { codeOf } = await designatorContext(placements.map((pl) => pl.partId));
+  const codeOf = preload
+    ? designatorCodeOf(new Map(preload.parts.map((p) => [p.id, p])), preload.deviceTypes)
+    : (await designatorContext(placements.map((pl) => pl.partId))).codeOf;
   return fillDesignators(placements, codeOf, readingCtxOf(project, digits));
+}
+
+/**
+ * The parts designatorContext would build for these placed ids, from rows the
+ * caller already holds: the placed Grid-library symbols, the catalog fallback
+ * for a raw catalog id (catalogForSchedule narrows it to what's placed), and
+ * the already-resolved virtual (asm:/allow:) parts. No reads.
+ */
+export function labelPartsFrom(input: {
+  placedIds: ReadonlySet<string>;
+  symbols: readonly GridSymbol[];
+  catalog: CatalogPart[];
+  virtual: ReadonlyArray<CodePart & { id: string }>;
+  categoryMap: CategoryMap;
+  deviceTypes: DeviceTypeContext;
+}): Array<CodePart & { id: string }> {
+  const placedSymbols = input.symbols.filter((s) => input.placedIds.has(s.id));
+  return [
+    ...gridPartsFrom([...placedSymbols], catalogForSchedule(input.catalog, placedSymbols, input.placedIds), input.categoryMap, { catalogFallback: true, deviceTypes: input.deviceTypes }),
+    ...input.virtual,
+  ];
 }
