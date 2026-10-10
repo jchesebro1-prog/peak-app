@@ -497,7 +497,9 @@ Attendees, per-person invites, conflict checks and Edit on scheduled visits
 
 - **U1.** **Task bell scope (behavior change, D802).** The bell's "Tasks needing attention" used to show everyone's
   overdue tasks to everyone. Now that every assigned task gets a due date, it shows your own open tasks plus overdue
-  tasks that nobody owns; a teammate's overdue task shows only on their bell. Keep?
+  tasks that nobody owns; a teammate's overdue task shows only on their bell ("mine" = my user id, or my name). Note:
+  an overdue task whose assignee is deactivated or off the roster (an id or name that no current user signs in as) no
+  longer rings anyone's bell — it isn't "nobody's", and its owner never views. Keep?
   ✦ keep as built ☐ also show teammates' overdue tasks to approvers/admins ☐ other: ______
 
 ---

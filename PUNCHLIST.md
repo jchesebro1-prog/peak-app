@@ -11696,7 +11696,7 @@ Open (Jeff-gated):
 - Later (out of scope here): Morning triage could surface visit conflicts through `TRIAGE_HOOKS`
   (`src/lib/triage/hooks.ts`).
 
-## 327. Auto task calendar — tasks planned into free work time — DONE 2026-10-10 (D784–D804)
+## 327. Auto task calendar — tasks planned into free work time — DONE 2026-10-10 (D784–D805)
 
 Spec: docs/superpowers/specs/2026-10-09-auto-task-calendar-design.md · Plan: docs/superpowers/plans/2026-10-10-auto-task-calendar.md
 
@@ -11710,8 +11710,9 @@ blocks (drag to pin, Unpin, a popover with Done / In progress), Month chips come
 panel (Push due date / Hand off / Unpin something), and a Home "Today" card. New assigned items get a due date a week
 out (5:00 pm Chicago). Task blocks are app-only — never written to Google Calendar. Deterministic, no AI, no migration.
 
-Final-review fixes (D796–D804): remainders are bounded — a task still open after its whole size is never pinned ahead
-again, it plans as one movable 30-minute chunk a day; only the owner's own /calendar and Home views lock `started` pins
+Final-review fixes (D796–D805): remainders are bounded — a task still open after its whole size is never pinned ahead
+again, it plans as one movable 30-minute chunk a day, queued after all work that still has size left (D805) so it can't
+starve a new urgent task; only the owner's own /calendar and Home views lock `started` pins
 (never the triage cron, the Everyone view or an admin); a held started pin (remainder / In progress) can be Unpinned;
 "Waiting on customer" tasks aren't planned or backfilled; undated items plan against a rolling today + 7 and are never
 At risk; the task bell shows someone else's overdue task only to them (unassigned overdue tasks still go to everyone —
@@ -11719,7 +11720,9 @@ a behavior change, MASTER-QUESTIONS U1); reassigning an undated item stamps +7.
 
 Open (Jeff-gated):
 - Production rollout, in this order: (1) deploy; (2) back up (`DATABASE_URL=… npm run db:export`); (3) backfill dry run
-  `DATABASE_URL=… npm run tasks:backfill-due` — review the per-person counts and the skipped list; (4) apply
+  `DATABASE_URL=… npm run tasks:backfill-due` — review the per-person counts, the skipped list and the open In-progress
+  counts per person (each legacy In-progress task locks its first block as a `started` pin on its owner's first
+  /calendar or Home view — set stale ones back to Open first); (4) apply
   `DATABASE_URL=… npm run tasks:backfill-due -- --apply --yes`.
 - Google Tasks: items already mirrored to Google Tasks don't receive later due-date changes (the backfill's dates, a
   Push due date, a +7 on reassign) — the app's date is the one the plan uses.

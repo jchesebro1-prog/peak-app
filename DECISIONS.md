@@ -10744,7 +10744,9 @@ An item that isn't overdue has weight = tier factor (High 3 · Normal 2 · Low 1
 days left = whole Chicago calendar days from today to the due day (0 = due today). Items compare by exact integer
 cross-products (`tierA × (daysLeftB + 1)` vs `tierB × (daysLeftA + 1)`), never floats. Overdue outranks everything,
 most overdue first, then tier. Ties: earlier due → older `createdAt` → item key. So a Low due tomorrow (1/2) beats a
-High next week (3/8) and a High next month (3/31). Pinned by the `auto-cal urgency:` checks.
+High next week (3/8) and a High next month (3/31). Pinned by the `auto-cal urgency:` checks. **Amended by D805:** the
+planner queues a finished-size item's daily fresh chunk (D796) after all work that still has size left, so "overdue
+outranks everything" holds within each of those two groups, not across them.
 
 ## D785. Pins live in a per-person blob; stale pins are swept (#327, 2026-10-10)
 
@@ -10844,11 +10846,15 @@ size − pinned minutes so far > 0 (the remainder is that difference, rounded up
 size has been pinned and it is still open, it is never pinned ahead again: the planner places it like unstarted work —
 one fresh, movable 30-minute chunk (or its size if smaller), urgency-ordered — at most once a day (once that chunk has
 begun, and so locked as `started` on the owner's view, nothing more is placed for it until tomorrow; without the
-once-a-day rule an urgent finished-size item would be re-pinned at every 15-minute compute all day). Pinned by the
-`auto-cal pins:` remainder checks and the `auto-cal nobody-done:` 15-work-day simulation (max time locked ahead for any
-item: 420 min before → 30 after; pins added per day 16 → 5; the High task planned today, not At risk). Known limit: in
-the reviewer's exact scenario (most of the 25 tasks overdue), the new High task still waits behind each overdue item's
-daily 30-minute chunk, because overdue outranks everything (D784) — movable time now, not locked time.
+once-a-day rule an urgent finished-size item would be re-pinned at every 15-minute compute all day). What stays locked
+is bounded: a block that began on the owner's view locks up to its own size (a 4-hour task's begun block holds up to
+4 hours), plus a remainder only while the item's pins are short of its size — nothing beyond today's begun blocks and
+those bounded remainders. Pinned by the `auto-cal pins:` remainder checks and the `auto-cal nobody-done:` 15-work-day
+simulation of 1-hour tasks (max time locked ahead for any item: 420 min before → 30 after; pins added per day 16 → 5).
+In that simulation's roomy case (16 tasks due ≥ 25 days out) a new High task due tomorrow is planned today and isn't
+At risk. In the overloaded case (most of 25 tasks overdue and already worked for their whole size) it was not: each
+overdue item's daily fresh chunk outranked it (D784), and the reviewer's re-run showed it "tomorrow, At risk" for 46
+days — fixed by D805.
 
 ## D797. Only the owner's own views lock `started` pins (#327, 2026-10-10)
 
@@ -10868,7 +10874,11 @@ and writes a release marker in the same blob in ONE statement (`<itemKey>@releas
 `releasePin` in `src/lib/stores/task-pins.ts`; `pinsFromBlob` already ignores the key). A released item gets no
 remainder pin and no In-progress pin ahead — it is planned as movable work (a block that actually begins on the owner's
 view still locks). The marker goes when the item is done/deleted/handed off (`clearItemPins`), is swept as stale when
-the item stops being the person's open work, and is lifted by marking the task In progress again. A held started pin
+the item stops being the person's open work, and is lifted by marking the task In progress again — only when the owner
+or an admin does it (D794's rule); anyone else may still set In progress (existing task permissions), which leaves the
+marker in place. Unpin is offered only on a pin that is actually stored — an input pin of the compute, not a `started`
+pin that compute just made (saved only on the owner's view, after the page is built) — so an Everyone/admin view or a
+not-yet-saved block never offers a no-op Unpin. A held started pin
 still can't be dragged ("This block holds started work — Unpin it to free the time."). The popover says "Held for work
 already started. Unpin frees this time — the task is then planned like any other."
 
@@ -10894,7 +10904,8 @@ At risk or overdue until it gets a real date (`dueVirtual`). The backfill still 
 ## D802. The task bell no longer shows everyone's overdue tasks (#327, 2026-10-10) — behavior change
 
 `taskBellItems` (the bell's "Tasks needing attention") used to show every open task assigned to me PLUS anyone's
-overdue task to everyone. With the auto calendar dating every assigned task (+7 on create, the backfill), that would
+overdue task to everyone. "Mine" now matches by the viewer's user id (`assigneeUserId`) or by name, trimmed and
+case-insensitive (it was an exact name match, so a task stored by id with a stale spelling never rang). With the auto calendar dating every assigned task (+7 on create, the backfill), that would
 flood every bell with teammates' overdue work. Now: my open tasks (as before) plus overdue tasks that nobody owns (no
 assignee id or name); someone else's overdue task shows only on their own bell. Jeff to confirm (MASTER-QUESTIONS U1).
 
@@ -10911,3 +10922,15 @@ deadline).
 someone and the item has no due date, it gets today + 7 (5:00 pm Chicago). A dated item keeps its date; a task the
 consulting schedule engine placed (a `startAt` and/or `schedule`) is never stamped; re-spelling the same assignee is
 not a hand-off.
+
+## D805. Finished-size chunks queue after work that still has size left (#327, 2026-10-10)
+
+The round-2 review re-ran its 25-task, 6-views-a-day simulation and found D796's daily fresh chunks starving new work:
+once most items were overdue and already worked for their whole size, each one's 30-minute chunk outranked everything
+(D784), so a new High task due tomorrow sat behind ~25 of them — "tomorrow, At risk" for 46 days. Now `planPerson`
+builds its queue in two groups: (1) unfinished remainders, then every item that still has size left to place, in
+urgency order; (2) after all of those, the finished-size items' daily fresh chunks, again in urgency order. A
+finished-size item still shows At risk when it is overdue (its due date is unchanged), and still gets its one movable
+chunk a day when time is left. Pinned by the `auto-cal nobody-done (overloaded)` check: 25 overdue tasks, each already
+pinned for its whole size, and a High task due tomorrow added on day 5 is planned that day at the owner's 7 am view
+(8:00–9:00), not At risk.

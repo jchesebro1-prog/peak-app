@@ -955,7 +955,7 @@ See `.env.example`.
     for conflicts; no migration. Remaining is Jeff-gated: the settings values, a
     real booking with attendees, and a real-mailbox CANCEL check in Gmail/Outlook/
     Apple. Punch item #326.
-49. ✅ **Auto task calendar** (#327, D784–D804) — a pure planner
+49. ✅ **Auto task calendar** (#327, D784–D805) — a pure planner
     (`src/lib/task-plan/`, `planPerson`) places every open assigned task and
     Queue assignment into each person's free work time (spec-2 work hours minus
     visits, spec-1 drive blocks, accepted timed Google events and pins; 80 % of
@@ -970,8 +970,9 @@ See `.env.example`.
     something) and a streamed Home "Today" card; tier/size chips on every task
     form; +7 default due date on new assigned items (5 pm Chicago; consulting-
     scheduled tasks skipped); one-time `npm run tasks:backfill-due`. Task
-    blocks are app-only; no migration. Final-review fixes (D796–D804):
-    bounded remainders (finished-size work stays movable), only the owner's
+    blocks are app-only; no migration. Final-review fixes (D796–D805):
+    bounded remainders (finished-size work stays movable, its daily chunk
+    queued after all work with size left — D805), only the owner's
     own views lock started pins, held started pins can be Unpinned, Waiting
     on customer tasks skipped, undated = rolling today + 7 (never At risk),
     the task bell no longer shows teammates' overdue tasks (U1). Remaining is
