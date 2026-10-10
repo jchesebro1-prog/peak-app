@@ -5,6 +5,7 @@ import { loadConsultingData } from "../data";
 import { ConsultingView } from "../view";
 import { TABS, type TabKey } from "../tabs";
 import { RecordingsCard } from "@/components/recordings/recordings-card";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { notesForEngagement } from "@/lib/stores/notes";
 import { tasksForEngagement } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
@@ -133,7 +134,15 @@ export default async function ConsultingDetailPage({
         recordingSource={recordingSource}
         earlierSpecCount={earlierSpecs.length}
         // Recordings spec §6 — server-rendered card slotted under Oversight.
-        oversightExtra={tab === "oversight" ? <RecordingsCard parentKind="engagement" parentId={sel.id} /> : null}
+        // #323 — the Krisp meetings linked to this engagement sit beside it.
+        oversightExtra={
+          tab === "oversight" ? (
+            <>
+              <RecordingsCard parentKind="engagement" parentId={sel.id} />
+              <MeetingsCard kind="work" id={sel.id} viewerId={user.id} />
+            </>
+          ) : null
+        }
       />
     </>
   );

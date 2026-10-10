@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { getDoc, listDocs, patchDoc, upsertDoc } from "@/db/doc-store";
 import { meetings as meetingsTable } from "@/db/doc-tables";
@@ -184,4 +184,147 @@ export async function countToFile(userId: string): Promise<number> {
       sql`coalesce(${t.doc}->'noise', 'false'::jsonb) in ('false'::jsonb, 'null'::jsonb)`,
     ));
   return Number(r?.n ?? 0);
+}
+
+/** #323 — a record-page / customer-feed row: the header fields plus the attendee names, never the transcript,
+ *  notes, to-dos or share text. */
+export type MeetingLinkedRow = {
+  id: string;
+  title: string;
+  startedAt: number | null;
+  durationSec: number | null;
+  filedAt: number | null;
+  noise: boolean;
+  links: MeetingRecord["links"];
+  attendees: { name: string; contactId: string | null; userId: string | null }[];
+};
+
+export type MeetingLinkKind = "company" | "venue" | "contact" | "work";
+
+/** #323 — visible meetings linked to one record (or a few: a survey + its site visits), newest first, filtered
+ *  in SQL on the link field and through canSeeMeeting in JS. A narrow JSONB projection — Home, record pages and
+ *  the customer feed never load a transcript. */
+export async function meetingRowsLinkedTo(
+  kind: MeetingLinkKind, ids: string | readonly string[], viewerId: string,
+): Promise<MeetingLinkedRow[]> {
+  const want = [...new Set(typeof ids === "string" ? [ids] : ids)].filter(Boolean);
+  if (!want.length) return [];
+  const db = await getDb();
+  const t = meetingsTable;
+  const link =
+    kind === "contact"
+      ? or(...want.map((id) => sql`${t.doc}->'links'->'contactIds' @> ${JSON.stringify([id])}::jsonb`))
+      : inArray(
+          kind === "company" ? sql<string>`${t.doc}->'links'->>'customerId'`
+          : kind === "venue" ? sql<string>`${t.doc}->'links'->>'siteId'`
+          : sql<string>`${t.doc}->'links'->'work'->>'id'`,
+          want,
+        );
+  const rows = await db
+    .select({
+      id: t.id,
+      links: sql<unknown>`${t.doc}->'links'`,
+      seenBy: sql<unknown>`${t.doc}->'seenBy'`,
+      filedAt: sql<unknown>`${t.doc}->'filedAt'`,
+      noise: sql<unknown>`${t.doc}->'noise'`,
+      attendees: sql<unknown>`${t.doc}->'attendees'`,
+      title: sql<unknown>`${t.doc}->'krisp'->'title'`,
+      startedAt: sql<unknown>`${t.doc}->'krisp'->'startedAt'`,
+      durationSec: sql<unknown>`${t.doc}->'krisp'->'durationSec'`,
+    })
+    .from(t)
+    .where(and(eq(t.deleted, false), link));
+  const out: MeetingLinkedRow[] = [];
+  for (const r of rows) {
+    const m = normalizeMeeting({
+      id: r.id,
+      links: r.links as MeetingRecord["links"],
+      seenBy: r.seenBy as string[],
+      filedAt: r.filedAt as number | null,
+      noise: r.noise as boolean,
+      attendees: r.attendees as MeetingRecord["attendees"],
+      krisp: { title: r.title, startedAt: r.startedAt, durationSec: r.durationSec } as MeetingRecord["krisp"],
+    });
+    if (!canSeeMeeting(m, viewerId)) continue;
+    out.push({
+      id: m.id, title: m.krisp.title, startedAt: m.krisp.startedAt, durationSec: m.krisp.durationSec,
+      filedAt: m.filedAt, noise: m.noise, links: m.links,
+      attendees: m.attendees.filter((a) => a && !a.removed)
+        .map((a) => ({ name: String(a.name || ""), contactId: a.contactId ?? null, userId: a.userId ?? null })),
+    });
+  }
+  return out.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+}
+
+/** #323 ⌘K — meetings whose title or raw Krisp notes contain `q` (ILIKE in SQL, newest first, capped), as
+ *  normalized records WITHOUT segments: enough for canSeeMeeting + renderMeeting's summary. The caller filters
+ *  visibility and re-checks the rendered summary text. */
+export async function searchMeetingCandidates(q: string, limit: number): Promise<MeetingRecord[]> {
+  const text = q.trim();
+  if (!text) return [];
+  const db = await getDb();
+  const t = meetingsTable;
+  const pattern = "%" + text.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const rows = await db
+    .select({
+      id: t.id,
+      links: sql<unknown>`${t.doc}->'links'`,
+      seenBy: sql<unknown>`${t.doc}->'seenBy'`,
+      filedAt: sql<unknown>`${t.doc}->'filedAt'`,
+      noise: sql<unknown>`${t.doc}->'noise'`,
+      speakerMap: sql<unknown>`${t.doc}->'speakerMap'`,
+      title: sql<unknown>`${t.doc}->'krisp'->'title'`,
+      startedAt: sql<unknown>`${t.doc}->'krisp'->'startedAt'`,
+      durationSec: sql<unknown>`${t.doc}->'krisp'->'durationSec'`,
+      speakers: sql<unknown>`${t.doc}->'krisp'->'speakers'`,
+      notes: sql<unknown>`${t.doc}->'krisp'->'notes'`,
+    })
+    .from(t)
+    .where(and(
+      eq(t.deleted, false),
+      or(
+        sql`${t.doc}->'krisp'->>'title' ILIKE ${pattern}`,
+        sql`(${t.doc}->'krisp'->'notes')::text ILIKE ${pattern}`,
+      ),
+    ))
+    .orderBy(sql`case when jsonb_typeof(${t.doc}->'krisp'->'startedAt') = 'number' then (${t.doc}->'krisp'->>'startedAt')::numeric end desc nulls last`)
+    .limit(limit);
+  return rows.map((r) => normalizeMeeting({
+    id: r.id,
+    links: r.links as MeetingRecord["links"],
+    seenBy: r.seenBy as string[],
+    filedAt: r.filedAt as number | null,
+    noise: r.noise as boolean,
+    speakerMap: r.speakerMap as MeetingRecord["speakerMap"],
+    krisp: {
+      title: r.title, startedAt: r.startedAt, durationSec: r.durationSec, speakers: r.speakers, notes: r.notes,
+    } as MeetingRecord["krisp"],
+  }));
+}
+
+/** #323 portal — shared meetings for one customer (K3), filtered in SQL: header + the edited share summary only. */
+export async function sharedMeetingRowsFor(customerId: string): Promise<Pick<MeetingRecord, "id" | "links" | "share" | "krisp">[]> {
+  if (!customerId) return [];
+  const db = await getDb();
+  const t = meetingsTable;
+  const rows = await db
+    .select({
+      id: t.id,
+      links: sql<unknown>`${t.doc}->'links'`,
+      share: sql<unknown>`${t.doc}->'share'`,
+      title: sql<unknown>`${t.doc}->'krisp'->'title'`,
+      startedAt: sql<unknown>`${t.doc}->'krisp'->'startedAt'`,
+    })
+    .from(t)
+    .where(and(
+      eq(t.deleted, false),
+      sql`${t.doc}->'share' is not null and ${t.doc}->'share' <> 'null'::jsonb`,
+      sql`${t.doc}->'links'->>'customerId' = ${customerId}`,
+    ));
+  return rows.map((r) => normalizeMeeting({
+    id: r.id,
+    links: r.links as MeetingRecord["links"],
+    share: r.share as MeetingRecord["share"],
+    krisp: { title: r.title, startedAt: r.startedAt } as MeetingRecord["krisp"],
+  }));
 }

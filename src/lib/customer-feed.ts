@@ -8,9 +8,13 @@ import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAll as getAllRepairs } from "@/lib/stores/repair-jobs";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
+import { meetingRowsLinkedTo, type MeetingLinkedRow } from "@/lib/stores/meetings";
+import { contactsForCompany, displayName } from "@/lib/identity/contacts";
+import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
 import {
   commFeedRows,
   jobFeedRows,
+  meetingFeedRows,
   noteFeedRows,
   projectFeedRows,
   quoteFeedRows,
@@ -35,8 +39,13 @@ import {
 /** Feed cap — "Show more" is deferred (product flag, D121). */
 export const FEED_CAP = 60;
 
-export async function loadCustomerFeed(cust: { id: string; name: string }): Promise<FeedRow[]> {
-  const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects, pipes] =
+/**
+ * `viewerId` (#323) adds one row per Krisp meeting linked to the company that the viewer can see
+ * (canSeeMeeting, inside meetingRowsLinkedTo); without it — the vendor page, the company summary — no meeting
+ * rows are read at all.
+ */
+export async function loadCustomerFeed(cust: { id: string; name: string }, viewerId?: string): Promise<FeedRow[]> {
+  const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects, pipes, meetings] =
     await Promise.all([
       notesForCustomer(cust.id),
       getAllQuotes(),
@@ -48,6 +57,7 @@ export async function loadCustomerFeed(cust: { id: string; name: string }): Prom
       getAllSurveys(),
       getAllProjects(),
       loadPipelines(),
+      viewerId ? meetingRowsLinkedTo("company", cust.id, viewerId) : Promise.resolve([] as MeetingLinkedRow[]),
     ]);
 
   const rows: FeedRow[] = [];
@@ -102,6 +112,25 @@ export async function loadCustomerFeed(cust: { id: string; name: string }): Prom
 
   for (const p of projects.filter((x) => x.customerId === cust.id))
     rows.push(...projectFeedRows(p, pipes));
+
+  if (meetings.length) {
+    // attendee display names: the linked contact's current name, else the name Krisp / the calendar gave
+    const contactName = new Map((await contactsForCompany(cust.id)).map((c) => [c.id, displayName(c)]));
+    for (const m of meetings)
+      rows.push(
+        ...meetingFeedRows({
+          id: m.id,
+          title: m.title,
+          startedAt: m.startedAt,
+          durationLabel: lengthLabel(m.durationSec),
+          href: meetingReaderHref(m),
+          attendees: m.attendees.map((a) => ({
+            display: (a.contactId && contactName.get(a.contactId)) || a.name,
+            internal: !!a.userId,
+          })),
+        })
+      );
+  }
 
   rows.sort((a, b) => b.ts - a.ts);
   return rows.slice(0, FEED_CAP);

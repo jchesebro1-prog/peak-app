@@ -17,6 +17,8 @@ import {
 import { boxMeta, waitingSince, waitLabel as commWaitLabel } from "@/lib/stores/comms";
 import { priceBooks } from "@/lib/catalog-books";
 import { queueCardCounts, queueDueLabel } from "@/lib/queue";
+import { taskHref } from "@/lib/calendar-tasks";
+import { MEETINGS_BASE_HREF, meetingsHref } from "@/app/(app)/inbox/meetings/format";
 import { recordableParentIds } from "@/app/(app)/recordings/data";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor, shortMoney } from "@/lib/dashboard/home-metrics";
@@ -56,12 +58,20 @@ export const HOME_RENDERERS = {
 
   /* ---- my queue (page.tsx 186-197) — `now` is the host's single read ---- */
   "my-queue": async (ctx) => {
-    const items = await ctx.data.queueItems();
+    const [items, waitingTasks] = await Promise.all([ctx.data.queueItems(), ctx.data.waitingOnOthers()]);
     const { open, overdue } = queueCardCounts(items, ctx.now);
     const rows: QueueRow[] = items.slice(0, 5).map((it) => ({
       key: it.key, title: it.title, context: it.context, dueLabel: queueDueLabel(it.due, ctx.now).text, href: it.href,
     }));
-    return <HomeQueue open={open} overdue={overdue} rows={rows} />;
+    // #323 — "Waiting on customer" nudges, grouped apart from my own to-dos
+    const waiting: QueueRow[] = waitingTasks.slice(0, 5).map((t) => ({
+      key: "waiting:" + t.id,
+      title: t.title,
+      context: `Waiting on ${t.waitingOn?.name || "customer"}`,
+      dueLabel: t.dueAt ? queueDueLabel(t.dueAt, ctx.now).text : "",
+      href: t.meetingId ? meetingsHref(MEETINGS_BASE_HREF, "filed", t.meetingId) : taskHref(t) || "/calendar",
+    }));
+    return <HomeQueue open={open} overdue={overdue} rows={rows} waiting={waiting} waitingTotal={waitingTasks.length} />;
   },
 
   /* ---- inbox (page.tsx 476-501) ---- */

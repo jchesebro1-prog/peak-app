@@ -1,5 +1,5 @@
 import {
-  listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
+  listDocs, listDocsByField, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectRecord } from "@/lib/stores/projects";
 import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
@@ -373,6 +373,20 @@ export async function tasksForCustomer(customerId: string): Promise<TaskRecord[]
 export async function tasksForContact(contactId: string): Promise<TaskRecord[]> {
   if (!contactId) return [];
   return (await allTasks()).filter((t) => (t.contactIds || []).includes(contactId));
+}
+
+/** #323 — open "Waiting on customer" tasks (`waitingOn` set, not done) whose `field` is one of `values`,
+ *  filtered in SQL on the field (never the whole collection); soonest nudge first. A venue page passes both its
+ *  directory id (what a meeting-made task stores) and its `sites.id`. */
+export async function openWaitingTasksBy(
+  field: "customerId" | "siteId" | "assigneeUserId",
+  values: readonly string[],
+): Promise<TaskRecord[]> {
+  const rows = await listDocsByField<TaskRecord>("tasks", field, values);
+  return rows
+    .map(normalizeTask)
+    .filter((t) => t.status !== "done" && !!t.waitingOn)
+    .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
 }
 
 export async function getTask(id: string): Promise<TaskRecord | null> {

@@ -46,3 +46,13 @@ export function agoLabel(ms: number, now: number): string {
   if (h < 48) return `${h} h ago`;
   return `${Math.round(h / 24)} d ago`;
 }
+
+/** The box tab a meeting lists under — a deep link opens its reader over the right list. */
+export function meetingTabFor(m: { filedAt: number | null; noise: boolean }): MeetingsTab {
+  return m.noise ? "noise" : m.filedAt ? "filed" : "to-file";
+}
+
+/** `/inbox?view=meetings&tab=<its tab>&m=<id>` — the reader deep link record cards, the feed and ⌘K use. */
+export function meetingReaderHref(m: { id: string; filedAt: number | null; noise: boolean }): string {
+  return meetingsHref(MEETINGS_BASE_HREF, meetingTabFor(m), m.id);
+}

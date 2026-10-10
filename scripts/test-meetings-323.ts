@@ -1,5 +1,5 @@
 /* #323 Krisp meeting matcher — spec checks. Chained from test-review-and-spec.ts. */
-import { registerFixture } from "./test-fixtures";
+import { createFixture, registerFixture } from "./test-fixtures";
 import type { MeetingLinks, MeetingRecord } from "@/lib/meetings/types";
 import { emptyLinks, meetingIdFor } from "@/lib/meetings/types";
 import * as MS from "@/lib/stores/meetings";
@@ -24,6 +24,10 @@ import { inArray } from "drizzle-orm";
 import { KrispApiError, KrispAuthError, KrispNotReadyError, KrispRateLimitError } from "@/lib/krisp/errors";
 import type { RecordingRecord } from "@/lib/stores/recordings";
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { portalMeetings } from "@/lib/meetings/portal";
+import { loadCustomerFeed } from "@/lib/customer-feed";
+import { meetingFeedRows } from "@/lib/customer-feed-rows";
+import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { join } from "node:path";
 
 type Ok = (c: boolean, m: string) => void;
@@ -956,4 +960,202 @@ export async function meetings323ProjectionChecks(ok: Ok): Promise<void> {
   const proj = store.slice(store.indexOf("export async function meetingRowsVisibleTo"), store.indexOf("export async function countToFile"));
   ok(!/segments|notes|transcript|'todos'|'attendees'/.test(proj.slice(proj.indexOf(".select("), proj.indexOf(".from("))),
     "#323 the projection's SELECT never names segments or notes");
+}
+
+/* ---------- Task 7: everywhere else (Home, record cards, ⌘K, Account, feed, waiting-on-customer, portal) ---------- */
+
+/** Source pins for the Task 7 mounts and their seams. */
+export async function meetings323EverywherePins(ok: Ok): Promise<void> {
+  const src = (p: string) => {
+    try { return readFileSync(join(process.cwd(), p), "utf8"); } catch { return ""; }
+  };
+  const home = src("src/app/(app)/page.tsx");
+  const greet = src("src/app/(app)/home-greeting.tsx");
+  ok(/import \{ toFileCount \} from "\.\/inbox\/meetings\/load";/.test(home) && /toFileCount\(user\.id\)/.test(home) &&
+     /meetingsToFile=\{meetingsToFile\}/.test(home) && /href="\/inbox\?view=meetings"/.test(greet) &&
+     /\{meetingsToFile\} meeting\{meetingsToFile === 1 \? "" : "s"\} to file →/.test(greet) && /meetingsToFile > 0 &&/.test(greet),
+    "#323 Home: 'N meetings to file →' from toFileCount, linking /inbox?view=meetings, only when N > 0");
+
+  const card = src("src/components/meetings/meetings-card.tsx");
+  ok(/meetingRowsLinkedTo\(kind, id, viewerId\)/.test(card) && !/allMeetings\(|meetingsVisibleTo\(|meetingsLinkedTo\(/.test(card) &&
+     /href=\{meetingReaderHref\(m\)\}/.test(card) && /if \(rows\.length === 0\) return null;/.test(card) && /limit = 8/.test(card) &&
+     /lengthLabel\(m\.durationSec\)/.test(card),
+    "#323 MeetingsCard: narrow projection (never a full doc), reader deep links, cap 8, nothing when empty");
+  const mounts: [string, RegExp][] = [
+    ["src/app/(app)/companies/[id]/page.tsx", /<MeetingsCard kind="company" id=\{cust\.id\} viewerId=\{me\.id\} \/>/],
+    ["src/app/(app)/venues/[id]/page.tsx", /<MeetingsCard kind="venue" id=\{site\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/people/[id]/page.tsx", /<MeetingsCard kind="contact" id=\{person\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/venue-assessments/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{\[rec\.id, \.\.\.visitIds\]\} viewerId=\{user\.id\} \/>\}/],
+    ["src/app/(app)/projects/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/design/engagements/[id]/page.tsx", /<RecordingsCard parentKind="engagement" parentId=\{sel\.id\} \/>\s*<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\} \/>/],
+    ["src/app/(app)/leads/page.tsx", /<MeetingsCard kind="work" id=\{leadRec\.id\} viewerId=\{me\.id\}/],
+  ];
+  const missing = mounts.filter(([p, re]) => !re.test(src(p))).map(([p]) => p);
+  ok(missing.length === 0, `#323 MeetingsCard is mounted on company, venue, person, survey (+ its site visits), project, engagement and lead pages${missing.length ? " — missing: " + missing.join(", ") : ""}`);
+  const slots = [
+    ["src/app/(app)/venue-assessments/[id]/controls.tsx", /\{meetingsSlot\}\s*\{visibleSections\.map/],
+    ["src/app/(app)/projects/view.tsx", /\{curTab === "overview" && meetingsSlot\}/],
+    ["src/app/(app)/leads/lead-drawer.tsx", /\{meetingsSlot\}\s*\{\/\* log a touch \*\/\}/],
+  ] as const;
+  ok(slots.every(([p, re]) => re.test(src(p))) &&
+     ["src/app/(app)/venue-assessments/[id]/controls.tsx", "src/app/(app)/leads/lead-drawer.tsx", "src/app/(app)/projects/view.tsx"].every((p) => !/meetings-card/.test(src(p))),
+    "#323 client editors (survey, lead drawer) render the server card through a ReactNode slot, never importing it");
+
+  const search = src("src/app/api/search/route.ts");
+  const sBlock = search.slice(search.indexOf("#323 Krisp meetings"), search.indexOf('"Catalog"'));
+  ok(/searchMeetingCandidates\(q, CANDIDATES\)/.test(search) && /"Meetings"/.test(sBlock) && /canSeeMeeting\(m, meId\)/.test(sBlock) &&
+     /renderMeeting\(m, NO_NAMES\)/.test(sBlock) && /letter: "M"/.test(sBlock) && /color: "#6b4fa1"/.test(sBlock) &&
+     /href: meetingReaderHref\(m\)/.test(sBlock) && !/allMeetings\(|meetingsVisibleTo\(/.test(search) &&
+     /const NO_NAMES: RenderNames = \{ contact: \(\) => null, user: \(\) => null \};/.test(search),
+    "#323 ⌘K: a Meetings group (M, #6b4fa1) over title + rendered summary, canSeeMeeting-filtered, no full-table load");
+
+  const krisp = src("src/app/(app)/account/krisp-card.tsx");
+  const account = src("src/app/(app)/account/page.tsx");
+  ok(["Sync now", "Load older", "Pulled back to", "Meetings synced", "Last meetings sync failed"].every((s) => krisp.includes(s)) &&
+     /syncNowAction\(\)/.test(krisp) && /loadOlderAction\(\)/.test(krisp) &&
+     /meetings: \{ syncedAt: number \| null; lastError: string \| null; backfillFrom: number \| null \}/.test(krisp) &&
+     /getSyncState\(user\.id\)/.test(account) && /^"use client";/.test(krisp) && !/from "@\/(lib\/stores|db|lib\/meetings\/sync)/.test(krisp),
+    "#323 Account → My Krisp: meetings sync status, Sync now, Load older (Pulled back to <date>), from getSyncState");
+
+  const feed = src("src/lib/customer-feed.ts");
+  const company = src("src/app/(app)/companies/[id]/page.tsx");
+  const rows = src("src/lib/customer-feed-rows.ts");
+  ok(/viewerId \? meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feed) && /loadCustomerFeed\(\{ id: cust\.id, name: cust\.name \}, me\.id\)/.test(company) &&
+     /`Met with \$\{names\.join\(", "\)\} — \$\{title\}`/.test(rows) && /row\(\s*"comm",\s*`meeting:\$\{m\.id\}`/.test(rows) &&
+     !/summary/.test(rows.slice(rows.indexOf("export function meetingFeedRows"), rows.indexOf("export function visitFeedRows")).replace(/no summary text is copied/, "")),
+    "#323 customer feed: one 'Met with … — <title>' comm row per linked, visible meeting; the viewer is passed; no summary copied");
+
+  const waiting = src("src/components/meetings/waiting-on-card.tsx");
+  const venue = src("src/app/(app)/venues/[id]/page.tsx");
+  const queue = src("src/lib/queue.ts");
+  const hq = src("src/app/(app)/home-queue.tsx");
+  const cards = src("src/app/(app)/_dashboard/widgets/home-cards.tsx");
+  ok(/<WaitingOnCustomerCard by="customerId" ids=\{\[cust\.id\]\} \/>/.test(company) &&
+     /<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\}/.test(venue) &&
+     /openWaitingTasksBy\(by, ids\)/.test(waiting) && /Waiting on customer/.test(waiting) && /owes this/.test(waiting) && /nudge /.test(waiting),
+    "#323 company + venue pages list 'Waiting on customer' (venue matches the directory id a meeting task stores, and sites.id)");
+  ok(/!t\.projectId \|\| t\.waitingOn\) continue;/.test(queue) && /Waiting on others/.test(hq) &&
+     /waiting=\{waiting\}/.test(cards) && /ctx\.data\.waitingOnOthers\(\)/.test(cards) &&
+     /waitingOnOthers: once\(\(\) => openWaitingTasksBy\("assigneeUserId", \[user\.id\]\)\)/.test(src("src/lib/dashboard/data.ts")),
+    "#323 Home: waitingOn tasks sit under 'Waiting on others', never mixed into the rep's own queue rows");
+
+  const nav = src("src/app/portal/nav.ts");
+  const portal = src("src/app/portal/meetings/page.tsx");
+  const portalLib = src("src/lib/meetings/portal.ts");
+  ok(/\{ href: "\/portal\/meetings" \+ pv, label: "Meeting notes", active: active === "meetings" \}/.test(nav) &&
+     /resolvePortalViewer\(previewCid\)/.test(portal) && /portalMeetings\(cid\)/.test(portal) && /portalNav\("meetings"/.test(portal) &&
+     /<PortalSignedOut /.test(portal) && !/segments|attendees|todos|\.links\b/.test(portal) &&
+     /portalCanSee\(m, customerId\)/.test(portalLib) && /sharedMeetingRowsFor\(customerId\)/.test(portalLib) && !/allMeetings/.test(portalLib),
+    "#323 portal: 'Meeting notes' nav; the page reads the portal session and portalMeetings only, never transcript/attendees/to-dos/links");
+
+  const store = readFileSync(join(process.cwd(), "src/lib/stores/meetings.ts"), "utf8");
+  const sel = (fn: string) => {
+    const body = store.slice(store.indexOf(`export async function ${fn}`));
+    return body.slice(body.indexOf(".select("), body.indexOf(".from("));
+  };
+  ok(["meetingRowsLinkedTo", "searchMeetingCandidates", "sharedMeetingRowsFor"].every((f) => store.includes(`export async function ${f}(`)) &&
+     !/segments|'notes'|'todos'/.test(sel("meetingRowsLinkedTo")) && !/segments|'todos'|'attendees'/.test(sel("searchMeetingCandidates")) &&
+     !/segments|'notes'|'todos'|'attendees'/.test(sel("sharedMeetingRowsFor")),
+    "#323 Task 7 projections never select the transcript (record cards / feed / ⌘K / portal)");
+  const smoke = src("scripts/smoke-routes.ts");
+  ok(["/portal/meetings", "/portal/meetings?preview=lakefront", "/design/engagements/CE-1001?tab=oversight", "/leads?lead=L-1061"].every((r) => smoke.includes(`"${r}"`)),
+    "#323 smoke covers the portal Meeting notes page, the engagement Oversight tab and the lead drawer");
+}
+
+/** DB checks: the record-card / feed / ⌘K / portal projections against the real doc table. */
+export async function meetings323EverywhereChecks(ok: Ok): Promise<void> {
+  const CO = "TEST323-portal-co", CO_OTHER = "TEST323-portal-co2", SITE = "TEST323-ev-site", CT = "TEST323-ev-ct";
+  const mk = (n: number, title: string, startedAt: number, over: Partial<MeetingRecord>) => {
+    const kid = `TEST323E${n}` + "c".repeat(20);
+    const base = meetingFixture323({ krispMeetingId: kid });
+    return { ...base, ...over, krisp: { ...base.krisp, title, startedAt,
+      segments: [{ speaker: "1", text: "zebracrossing transcript only", start: 0, end: 1 }],
+      notes: { blocks: [{ type: "paragraph", text: "Discussed the quokka rigging budget" }] } } } as MeetingRecord;
+  };
+  const L = (o: Partial<MeetingLinks>): MeetingLinks => ({ ...emptyLinks(), ...o });
+  const fx = [
+    mk(1, "Osakis scope review", 1_790_000_000_000, {
+      seenBy: ["u-ev323"], links: L({ customerId: CO, siteId: SITE, contactIds: [CT], work: { type: "survey", id: "TEST323-FS", label: "FS" } }),
+      share: { sharedAt: 1, sharedBy: "Jeff", summary: "Shared recap\n\nSecond paragraph" },
+      attendees: [
+        { key: "jeff@peak", name: "Jeff C", email: "jeff@peak", sources: ["krisp"], removed: false, contactId: null, userId: "u1" },
+        { key: "tom@o", name: "Tom Ellis", email: "tom@o", sources: ["krisp"], removed: false, contactId: null, userId: null },
+        { key: "ann@o", name: "Ann Lee", email: "ann@o", sources: ["calendar"], removed: false, contactId: null, userId: null },
+        { key: "gone@o", name: "Gone Guy", email: "gone@o", sources: ["manual"], removed: true, contactId: null, userId: null },
+      ] }),
+    mk(2, "Osakis follow-up", 1_790_000_100_000, { seenBy: ["u-ev323"], links: L({ customerId: CO, work: { type: "site_visit", id: "TEST323-SV", label: "SV" } }) }),
+    mk(3, "Other customer shared", 1_790_000_200_000, { seenBy: ["u-ev323"], links: L({ customerId: CO_OTHER }),
+      share: { sharedAt: 1, sharedBy: "Jeff", summary: "Not yours" } }),
+    mk(4, "Private quokka chat", 1_790_000_300_000, { seenBy: ["u-ev323-private"] }),
+  ];
+  for (const m of fx) {
+    registerFixture("meetings", m.id);
+    await MS.saveMeeting(m);
+  }
+
+  // portal (K3): only the shared meeting linked to that customer, with the edited summary
+  const pm = await portalMeetings(CO);
+  ok(pm.length === 1 && pm[0].id === fx[0].id && pm[0].summary === "Shared recap\n\nSecond paragraph" && pm[0].title === "Osakis scope review" &&
+     Object.keys(pm[0]).sort().join() === "id,startedAt,summary,title",
+    "#323 portalMeetings returns exactly the shared meeting linked to the customer, its share summary, and nothing else");
+  ok((await portalMeetings("TEST323-portal-nobody")).length === 0 && (await portalMeetings("")).length === 0,
+    "#323 portalMeetings: another customer (or none) sees nothing");
+  ok((await portalMeetings(CO_OTHER)).map((m) => m.summary).join() === "Not yours", "#323 portalMeetings is scoped per customer");
+
+  // record cards
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id).join(",");
+  const byCo = await MS.meetingRowsLinkedTo("company", CO, "u-anyone");
+  ok(ids(byCo) === [fx[1].id, fx[0].id].join(","), "#323 meetingRowsLinkedTo(company): the linked meetings, newest first");
+  ok(ids(await MS.meetingRowsLinkedTo("venue", SITE, "u-anyone")) === fx[0].id &&
+     ids(await MS.meetingRowsLinkedTo("contact", CT, "u-anyone")) === fx[0].id &&
+     ids(await MS.meetingRowsLinkedTo("work", ["TEST323-FS", "TEST323-SV"], "u-anyone")) === [fx[1].id, fx[0].id].join(",") &&
+     (await MS.meetingRowsLinkedTo("work", [], "u-anyone")).length === 0,
+    "#323 meetingRowsLinkedTo filters by venue, contact and work (several ids: a survey + its site visits)");
+  const r0 = byCo.find((r) => r.id === fx[0].id)!;
+  ok(!("krisp" in r0) && !("segments" in r0) && !("todos" in r0) && !("share" in r0) && r0.attendees.length === 3 &&
+     r0.title === "Osakis scope review" && r0.durationSec === 1200,
+    "#323 the linked-row projection carries header + live attendee names, never transcript, to-dos or share text");
+
+  // ⌘K candidates: title or notes, never the transcript; visibility is the caller's
+  const byNotes = await MS.searchMeetingCandidates("quokka", 100);
+  ok(byNotes.some((m) => m.id === fx[0].id) && byNotes.some((m) => m.id === fx[3].id) &&
+     (await MS.searchMeetingCandidates("zebracrossing", 100)).filter((m) => fx.some((f) => f.id === m.id)).length === 0 &&
+     (await MS.searchMeetingCandidates("osakis follow", 100)).some((m) => m.id === fx[1].id),
+    "#323 searchMeetingCandidates matches title and notes in SQL, never the transcript");
+  const hit = byNotes.find((m) => m.id === fx[0].id)!;
+  const rendered = renderMeeting(hit, { contact: () => null, user: () => null });
+  ok(hit.krisp.segments.length === 0 && rendered.summary.some((s) => /quokka/.test(s.description)) &&
+     !canSeeMeeting(byNotes.find((m) => m.id === fx[3].id)!, "u-ev323") && canSeeMeeting(hit, "u-ev323"),
+    "#323 a ⌘K candidate renders its summary without the transcript; a private meeting fails canSeeMeeting for others");
+
+  // customer feed
+  const feedNoViewer = await loadCustomerFeed({ id: CO, name: "TEST323 portal co" });
+  const feed = await loadCustomerFeed({ id: CO, name: "TEST323 portal co" }, "u-ev323");
+  const fr = feed.find((r) => r.id === `meeting:${fx[0].id}`);
+  ok(!feedNoViewer.some((r) => r.id.startsWith("meeting:")) && feed.filter((r) => r.id.startsWith("meeting:")).length === 2 &&
+     !!fr && fr.title === "Met with Tom Ellis, Ann Lee — Osakis scope review" && fr.kind === "comm" &&
+     fr.href === `/inbox?view=meetings&tab=to-file&m=${encodeURIComponent(fx[0].id)}` && !/recap|quokka/i.test(fr.title + fr.sub),
+    "#323 the company feed gets one 'Met with <two outside attendees> — <title>' row per linked meeting, linking the reader, no summary");
+  const solo = meetingFeedRows({ id: "km-x", title: "", startedAt: 5, durationLabel: "20 min", href: "/x", attendees: [{ display: "Jeff C", internal: true }] });
+  ok(solo[0]?.title === "Met with Jeff C — Untitled meeting" &&
+     meetingFeedRows({ id: "km-y", title: "T", startedAt: 5, durationLabel: "—", href: "/x", attendees: [] })[0]?.title === "Meeting — T" &&
+     meetingFeedRows({ id: "km-z", title: "T", startedAt: null, durationLabel: "—", href: "/x", attendees: [] }).length === 0,
+    "#323 meetingFeedRows: falls back to team names, then 'Meeting — <title>'; an undated meeting has no row");
+
+  // waiting on customer
+  const now = Date.now();
+  const task = (id: string, over: Record<string, unknown>) => createFixture("tasks", {
+    id, title: id, section: "Meeting", projectId: null, quoteId: null, designId: null, engagementId: null, coverageKey: null,
+    assigneeUserId: "u-ev323", assigneeName: "Ev Rep", dueAt: now + 86_400_000, startAt: null, schedule: null, handScheduled: false,
+    status: "open", notes: "", createdBy: "x", createdAt: now, updatedAt: now, doneAt: null, ...over,
+  });
+  await task("T-TEST323-W1", { customerId: CO, siteId: "TEST323-locid", meetingId: fx[0].id, waitingOn: { contactId: null, name: "Tom Ellis" } });
+  await task("T-TEST323-W2", { customerId: CO, siteId: SITE, waitingOn: { contactId: null, name: "Ann" }, status: "done" });
+  await task("T-TEST323-W3", { customerId: CO, siteId: SITE });
+  const byCustomer = await openWaitingTasksBy("customerId", [CO]);
+  const bySite = await openWaitingTasksBy("siteId", ["TEST323-locid", SITE]);
+  const mine = await openWaitingTasksBy("assigneeUserId", ["u-ev323"]);
+  ok(byCustomer.map((t) => t.id).join() === "T-TEST323-W1" && bySite.map((t) => t.id).join() === "T-TEST323-W1" &&
+     mine.map((t) => t.id).join() === "T-TEST323-W1" && byCustomer[0].waitingOn?.name === "Tom Ellis",
+    "#323 openWaitingTasksBy: open tasks with waitingOn only (done and ordinary tasks excluded), by company, venue ids or assignee");
 }

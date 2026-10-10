@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
 import Link from "next/link";
 import type {
   SurveyRecord,
@@ -219,6 +219,7 @@ export default function SurveyEditor({
   recordings = [],
   canShowRecord = false,
   fromRecording = [],
+  meetingsSlot = null,
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
@@ -230,6 +231,8 @@ export default function SurveyEditor({
   canShowRecord?: boolean;
   /** "From recording" prefill panels, one per ready recording (spec §4.4). */
   fromRecording?: FromRecordingPanelData[];
+  /** #323 — the server-rendered Meetings card (this survey + its site visits); null when none. */
+  meetingsSlot?: ReactNode;
 }) {
   const initial = useMemo<Draft>(() => toDraft(record), [record]);
   const [draft, setDraft] = useState<Draft>(initial);
@@ -992,6 +995,7 @@ export default function SurveyEditor({
       {/* body */}
       <div className="sv-pad" style={{ maxWidth: 900, margin: "0 auto", padding: "20px 24px 90px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {meetingsSlot}
           {visibleSections.map((sec) => {
             const locked = sec.kind === "discipline" && !tier1Done;
             const collapsible = isCollapsible(sec) || sec.kind === "discipline";

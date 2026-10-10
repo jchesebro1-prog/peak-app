@@ -209,7 +209,8 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
   /* --- project tasks assigned to me (tasks collection, #17) --- */
   const projectsById = new Map(projects.map((p) => [p.id, p]));
   for (const t of tasks) {
-    if (t.status === "done" || t.assigneeName !== me || !t.projectId) continue;
+    // #323 — a "Waiting on customer" nudge is not my to-do; Home lists it under Waiting on others
+    if (t.status === "done" || t.assigneeName !== me || !t.projectId || t.waitingOn) continue;
     const p = projectsById.get(t.projectId);
     if (!p) continue;
     items.push({

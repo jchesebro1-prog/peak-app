@@ -11,6 +11,7 @@ import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
 import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
 import { syncMeetingsIfStale } from "@/lib/meetings/sync";
+import { toFileCount } from "./inbox/meetings/load";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
@@ -73,8 +74,9 @@ export default async function HomePage({
   void reconcileRecordingsIfStale().catch(() => {});
   void syncMeetingsIfStale(user.id).catch(() => {}); // #323 Krisp meetings, > 10 min stale
   const now = Date.now();
-  const [userRecord, appSettings, quotesAll, designsAll] = await Promise.all([
+  const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
+    toFileCount(user.id), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
   ]);
 
   const pipe = resolvePipe(first(sp.pipe));
@@ -109,7 +111,7 @@ export default async function HomePage({
   return (
     <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
-      <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} />
+      <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} meetingsToFile={meetingsToFile} />
       <WidgetHost user={user} surface="home" sp={sp} data={data} />
       {sheetQuote && <HomeStageSheet quote={sheetQuote} closeHref={closeHref} />}
     </HomeTabs>

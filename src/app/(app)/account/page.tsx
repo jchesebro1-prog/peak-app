@@ -8,6 +8,7 @@ import {
   personalKey,
 } from "@/lib/gmail/config";
 import { getKrispConnectionInfo } from "@/lib/krisp/connections";
+import { getSyncState } from "@/lib/meetings/sync-state";
 import { getSettings } from "@/lib/settings";
 import { getUser } from "@/lib/users";
 import NotifControls from "./notif-controls";
@@ -64,7 +65,8 @@ export default async function AccountPage() {
   }
 
   // Recordings spec §1.2 — my own Krisp key (encrypted; the card never sees it).
-  const krispRow = await getKrispConnectionInfo(user.id);
+  // #323 — plus the meetings sync state on the same connection row (Sync now / Load older).
+  const [krispRow, meetingsSync] = await Promise.all([getKrispConnectionInfo(user.id), getSyncState(user.id)]);
   const krisp: KrispCardInfo | null = krispRow
     ? {
         krispEmail: krispRow.krispEmail,
@@ -72,6 +74,11 @@ export default async function AccountPage() {
         connectedAt: krispRow.connectedAt,
         lastUsedAt: krispRow.lastUsedAt,
         lastError: krispRow.lastError,
+        meetings: {
+          syncedAt: meetingsSync?.syncedAt ?? null,
+          lastError: meetingsSync?.lastError ?? null,
+          backfillFrom: meetingsSync?.backfillFrom ?? null,
+        },
       }
     : null;
   const rows = CATEGORIES.map((c) => ({

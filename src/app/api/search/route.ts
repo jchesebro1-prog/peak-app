@@ -17,6 +17,10 @@ import { allContacts, displayName, emailsForContacts } from "@/lib/identity/cont
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
 import { summarySearchText } from "@/lib/krisp/derive";
 import { partSearchHaystack, staffPartLabel, type SearchPartLike } from "@/lib/catalog-rename/sku";
+import { searchMeetingCandidates } from "@/lib/stores/meetings";
+import { canSeeMeeting } from "@/lib/meetings/visibility";
+import { renderMeeting, type RenderNames } from "@/lib/meetings/render";
+import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -37,6 +41,10 @@ type Result = {
 type Group = { label: string; items: Result[] };
 
 const LIMIT_PER_GROUP = 5;
+
+/** #323 — ⌘K renders a meeting's summary without resolving linked names (speed); the text still relabels
+ *  mapped speakers by their stored names. */
+const NO_NAMES: RenderNames = { contact: () => null, user: () => null };
 
 function matches(q: string, ...fields: Array<unknown>): boolean {
   return fields.some(
@@ -68,7 +76,7 @@ export async function GET(req: Request) {
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, surveys, inspections, comms, companies, people, parts, recordings, partialQuotes] =
+  const [quotes, designs, surveys, inspections, comms, companies, people, parts, recordings, partialQuotes, meetingHits] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
       searchDocs("designs", q, CANDIDATES),
@@ -80,6 +88,8 @@ export async function GET(req: Request) {
       searchDocs("catalog_parts", q, CANDIDATES),
       searchDocs<RecordingRecord>("recordings", q, CANDIDATES),
       quotesByPartialNumber(q, CANDIDATES),
+      // #323 — title / raw-notes ILIKE in SQL, no transcript; visibility + the rendered summary re-checked below
+      searchMeetingCandidates(q, CANDIDATES),
     ]);
 
   const groups: Group[] = [];
@@ -250,6 +260,28 @@ export async function GET(req: Request) {
           sub: `${recordingStatusChip(r, now)} · ${r.customer || r.venue || r.parentId}`,
           href: `/recordings/${encodeURIComponent(r.id)}`,
           letter: "R",
+          color: "#6b4fa1",
+        }))
+    );
+  }
+  // #323 Krisp meetings: title + the rendered summary, only what this user may see (canSeeMeeting).
+  {
+    const meId = session.user.id;
+    const DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" });
+    add(
+      "Meetings",
+      meetingHits
+        .filter((m) => canSeeMeeting(m, meId))
+        .filter((m) => {
+          const r = renderMeeting(m, NO_NAMES);
+          return matches(q, m.krisp.title, r.summary.flatMap((x) => [x.title, x.description]).join(" "), r.keyPoints.join(" "));
+        })
+        .map((m) => ({
+          id: m.id,
+          title: m.krisp.title || "Untitled meeting",
+          sub: `${m.krisp.startedAt != null ? DAY.format(m.krisp.startedAt) : "—"} · ${lengthLabel(m.krisp.durationSec)}`,
+          href: meetingReaderHref(m),
+          letter: "M",
           color: "#6b4fa1",
         }))
     );
