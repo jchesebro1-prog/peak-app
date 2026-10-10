@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -290,6 +290,7 @@ export default function LeadDrawer({
   visitReasons,
   customers,
   canDelete = false,
+  meetingsSlot = null,
 }: {
   mode: "new" | "detail";
   vm: DrawerDetailVM | null;
@@ -301,6 +302,8 @@ export default function LeadDrawer({
   visitReasons: string[];
   customers: LeadCustomerLiteVM[];
   canDelete?: boolean;
+  /** #323 — the server-rendered Meetings card for this lead (detail mode); null when none. */
+  meetingsSlot?: ReactNode;
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -1063,6 +1066,8 @@ export default function LeadDrawer({
                           Request site visit
                         </button>
                       ))}
+
+                    {meetingsSlot}
 
                     {/* log a touch */}
                     <div style={secLbl}>Log a touch</div>

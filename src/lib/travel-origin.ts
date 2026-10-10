@@ -1,6 +1,8 @@
 /**
- * Where a calendar appointment's auto travel block starts from (#176, D229).
- * Order: a typed address (geocoded) → a chosen saved location → the person's
+ * Travel origins (#176, D229). baseOffice is the drive chain's base (spec
+ * 2026-10-09). resolveTravelOrigin / originOptions served the retired D144
+ * auto travel block and its "Traveling from" picker. resolveTravelOrigin's
+ * order: a typed address (geocoded) → a chosen saved location → the person's
  * base ("Based out of", else the quote origin). A typed address that can't
  * be found falls back to the base WITH a note, so the block still appears
  * and says honestly what it measured from. `search` is injected so this is
@@ -32,11 +34,12 @@ export function baseOffice(offices: OriginOffice[], baseOfficeId?: string | null
 }
 
 /**
- * #176 fix 3 — the "Traveling from" choices for the New event form: the base
- * (unchanged, even if it has no coordinates — resolveTravelOrigin already
- * treats an uncoordinated base as "no fallback") plus only the offices that
- * can actually be routed from. Factored out as a pure function so it's
- * testable without the settings/session plumbing in the server action.
+ * #176 fix 3 — the base (unchanged, even if it has no coordinates —
+ * resolveTravelOrigin already treats an uncoordinated base as "no fallback")
+ * plus only the offices that can actually be routed from. Its one caller, the
+ * New event form's "Traveling from" picker, was retired with the D144 travel
+ * block (spec 2026-10-09 — drive legs now start from the rep's base via
+ * baseOffice); kept pure and pinned by test:drive-distance.
  */
 export function originOptions(
   offices: OriginOffice[],

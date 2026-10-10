@@ -522,7 +522,7 @@ export function CompanyMapClient({
 
   // Fetch (or clear) the summary for the selected company. Every setState
   // call is deferred into the setTimeout callback below (the debounced
-  // type-ahead in venue-locate-drawer.tsx uses the same shape) — a direct
+  // type-ahead in address-fix-drawer.tsx uses the same shape) — a direct
   // synchronous setState at the top of an effect body is a repo lint error
   // (react-hooks/set-state-in-effect); one inside a nested callback is the
   // supported "subscribe / respond to an external change" shape.

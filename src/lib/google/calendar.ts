@@ -2,6 +2,7 @@ import { accessTokenFor } from "@/lib/gmail/connections";
 import { accessTokenForConnection } from "./calendar-connections";
 import { presetFromRrule, rruleFor } from "./recurrence";
 import { findMeetingLink } from "./meeting-link";
+import { DRIVE_DAY_PROP, DRIVE_KEY_PROP, DRIVE_PROP } from "./drive-props";
 
 /**
  * Thin Google Calendar v3 client (D77) — plain fetch, bearer auth, zero deps,
@@ -77,8 +78,8 @@ async function gcalExternal<T>(
 /* ---- types (only the fields the app reads) ---- */
 
 type GoogleEventTime = { dateTime?: string; date?: string };
-type GoogleAttendee = { email: string; displayName?: string; responseStatus?: string };
-type GoogleEvent = {
+type GoogleAttendee = { email: string; displayName?: string; responseStatus?: string; self?: boolean };
+export type GoogleEvent = {
   id: string;
   iCalUID?: string;
   status?: string;
@@ -90,6 +91,7 @@ type GoogleEvent = {
   end?: GoogleEventTime;
   recurrence?: string[];
   attendees?: GoogleAttendee[];
+  extendedProperties?: { private?: Record<string, string> };
 };
 
 export type CalendarEvent = {
@@ -104,6 +106,11 @@ export type CalendarEvent = {
   location: string;
   htmlLink: string;
   meetingUrl: string;
+  /** The signed-in account declined it (spec: declined events aren't stops). */
+  selfDeclined: boolean;
+  /** Set only on the app's own drive events (private peakDrive = "1"). */
+  peakDriveKey: string;
+  peakDriveDay: string;
 };
 
 export type Attendee = { email: string; name: string; status: string };
@@ -163,21 +170,29 @@ function toMs(t: GoogleEventTime | undefined, fallback: number): number {
 
 /** Shared items→CalendarEvent[] mapping — used by both listUpcomingEvents
  *  (a mailbox's own primary calendar) and listEventsForCalendar (D148, an
- *  arbitrary calendar on a calendarConnections account). */
-function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEvent[] {
+ *  arbitrary calendar on a calendarConnections account); exported for the
+ *  spec harness. */
+export function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEvent[] {
   return (items || [])
     .filter((e) => e.status !== "cancelled")
-    .map((e) => ({
-      id: e.id,
-      iCalUID: e.iCalUID || "",
-      title: e.summary || "(no title)",
-      startMs: toMs(e.start, 0),
-      endMs: toMs(e.end, toMs(e.start, 0)),
-      allDay: !!e.start?.date,
-      location: e.location || "",
-      htmlLink: e.htmlLink || "",
-      meetingUrl: findMeetingLink(e.location, e.description),
-    }))
+    .map((e) => {
+      const priv = e.extendedProperties?.private || {};
+      const ours = priv[DRIVE_PROP] === "1";
+      return {
+        id: e.id,
+        iCalUID: e.iCalUID || "",
+        title: e.summary || "(no title)",
+        startMs: toMs(e.start, 0),
+        endMs: toMs(e.end, toMs(e.start, 0)),
+        allDay: !!e.start?.date,
+        location: e.location || "",
+        htmlLink: e.htmlLink || "",
+        meetingUrl: findMeetingLink(e.location, e.description),
+        selfDeclined: (e.attendees || []).some((a) => a.self && a.responseStatus === "declined"),
+        peakDriveKey: ours ? priv[DRIVE_KEY_PROP] || "" : "",
+        peakDriveDay: ours ? priv[DRIVE_DAY_PROP] || "" : "",
+      };
+    })
     .filter((e) => e.startMs > 0);
 }
 
@@ -202,6 +217,50 @@ export async function listUpcomingEvents(
     "/calendars/primary/events?" + eventsListParams(opts).toString()
   );
   return toCalendarEvents(r.items);
+}
+
+export type SyncCalendarEvent = CalendarEvent & { description: string };
+
+export type SyncRead = { events: SyncCalendarEvent[]; coveredThroughMs: number };
+export type EventPage = { items?: GoogleEvent[]; nextPageToken?: string };
+
+/** The page loop behind listEventsForSync, with the fetcher injected. When
+ *  the page cap ends the read before Google ran out, `coveredThroughMs` is
+ *  the start of the last event read (events come back ordered by start), so
+ *  the caller syncs only days that end at or before it; a complete read
+ *  covers the whole requested window. */
+export async function readSyncPages(
+  fetchPage: (pageToken?: string) => Promise<EventPage>,
+  opts: { timeMinMs: number; timeMaxMs: number; maxPages: number }
+): Promise<SyncRead> {
+  const events: SyncCalendarEvent[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < opts.maxPages; page++) {
+    const r = await fetchPage(pageToken);
+    const desc = new Map((r.items || []).map((e) => [e.id, e.description || ""]));
+    for (const ev of toCalendarEvents(r.items)) events.push({ ...ev, description: desc.get(ev.id) || "" });
+    if (!r.nextPageToken) return { events, coveredThroughMs: opts.timeMaxMs };
+    pageToken = r.nextPageToken;
+  }
+  const lastStart = events.reduce((m, e) => Math.max(m, e.startMs), opts.timeMinMs);
+  return { events, coveredThroughMs: Math.min(lastStart, opts.timeMaxMs) };
+}
+
+/** Every event in a window, with descriptions — the drive sync's read
+ *  (tagged-event diff, stops, D144 cleanup). Pages up to 4 x 250; when that
+ *  isn't the whole window, `coveredThroughMs` says how far it got. */
+export async function listEventsForSync(
+  mailboxKey: string,
+  opts: { timeMinMs: number; timeMaxMs: number }
+): Promise<SyncRead> {
+  return readSyncPages(
+    (pageToken) => {
+      const params = eventsListParams({ ...opts, maxResults: 250 });
+      if (pageToken) params.set("pageToken", pageToken);
+      return gcal<EventPage>(mailboxKey, "/calendars/primary/events?" + params.toString());
+    },
+    { ...opts, maxPages: 4 }
+  );
 }
 
 /* ---- D148: an additional connected account's own calendars ------------ */
@@ -280,9 +339,17 @@ export type EventWriteInput = {
   /** "" | "daily" | "weekly" | "monthly" | "yearly" (recurrence.ts) */
   recurrencePreset?: string;
   attendeeEmails?: string[];
+  /** Private extended properties (the drive sync's peakDrive tag). */
+  privateProps?: Record<string, string>;
+  /** No reminders at all (the drive sync's blocks); omitted = calendar default. */
+  noReminders?: boolean;
+  /** Mark the event busy (transparency opaque); omitted = not sent. */
+  busy?: boolean;
+  /** Event status to write ("confirmed" restores a cancelled/deleted event on update); omitted = not sent. */
+  status?: "confirmed";
 };
 
-function writeBody(ev: EventWriteInput) {
+export function eventWriteBody(ev: EventWriteInput) {
   const allDay = !!ev.allDay;
   return {
     summary: ev.title,
@@ -294,6 +361,10 @@ function writeBody(ev: EventWriteInput) {
     attendees: ev.attendeeEmails?.length
       ? ev.attendeeEmails.map((email) => ({ email }))
       : undefined,
+    extendedProperties: ev.privateProps ? { private: ev.privateProps } : undefined,
+    reminders: ev.noReminders ? { useDefault: false, overrides: [] } : undefined,
+    transparency: ev.busy ? "opaque" : undefined,
+    status: ev.status || undefined,
   };
 }
 
@@ -309,7 +380,7 @@ export async function insertEvent(
   const r = await gcal<GoogleEvent>(
     mailboxKey,
     "/calendars/primary/events?sendUpdates=" + sendUpdates,
-    { method: "POST", body: JSON.stringify(writeBody(ev)) }
+    { method: "POST", body: JSON.stringify(eventWriteBody(ev)) }
   );
   return { id: r.id, htmlLink: r.htmlLink || "" };
 }
@@ -334,24 +405,30 @@ export async function updateEvent(
   mailboxKey: string,
   eventId: string,
   ev: EventWriteInput
-): Promise<{ id: string; htmlLink: string }> {
+): Promise<{ id: string; htmlLink: string; status?: string }> {
   const sendUpdates = ev.attendeeEmails?.length ? "all" : "none";
   const r = await gcal<GoogleEvent>(
     mailboxKey,
     "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=" + sendUpdates,
-    { method: "PATCH", body: JSON.stringify(writeBody(ev)) }
+    { method: "PATCH", body: JSON.stringify(eventWriteBody(ev)) }
   );
-  return { id: r.id, htmlLink: r.htmlLink || "" };
+  return { id: r.id, htmlLink: r.htmlLink || "", status: r.status };
 }
 
 /** Delete an event (or, for a recurring instance id, cancel just that one
  *  occurrence). 410/404 (already gone on Google's side) is swallowed — the
  *  caller's revalidate will just stop showing it either way. */
-export async function deleteEvent(mailboxKey: string, eventId: string): Promise<void> {
+export function deleteEventPath(eventId: string, sendUpdates: "all" | "none" = "all"): string {
+  return "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=" + sendUpdates;
+}
+
+/** sendUpdates defaults to "all" (unchanged for the calendar modal etc.);
+ *  the drive sync passes "none". */
+export async function deleteEvent(mailboxKey: string, eventId: string, opts?: { sendUpdates?: "all" | "none" }): Promise<void> {
   const token = await accessTokenFor(mailboxKey);
   if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
   const res = await fetch(
-    CAL_BASE + "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=all",
+    CAL_BASE + deleteEventPath(eventId, opts?.sendUpdates ?? "all"),
     {
       method: "DELETE",
       signal: AbortSignal.timeout(5000),

@@ -8,11 +8,14 @@ import {
   personalKey,
 } from "@/lib/gmail/config";
 import { getKrispConnectionInfo } from "@/lib/krisp/connections";
+import { getSyncState } from "@/lib/meetings/sync-state";
 import { getSettings } from "@/lib/settings";
 import { getUser } from "@/lib/users";
 import NotifControls from "./notif-controls";
 import InviteToggle from "./invite-toggle";
 import OfficePicker from "./office-picker";
+import DriveBufferCard from "./drive-buffer-card";
+import { getScheduleDefaults, getUserSchedulePrefs } from "@/lib/stores/schedule-prefs";
 import KrispCard, { type KrispCardInfo } from "./krisp-card";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import { getDashboardOverride } from "@/lib/stores/notif-prefs";
@@ -28,11 +31,13 @@ export default async function AccountPage() {
 
   // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
-  const [settings, myRow, dashboardOverride, signature] = await Promise.all([
+  const [settings, myRow, dashboardOverride, signature, scheduleDefaults, schedulePrefs] = await Promise.all([
     getSettings(),
     getUser(user.id),
     getDashboardOverride(user.name),
     signatureFor(user.name),
+    getScheduleDefaults(),
+    getUserSchedulePrefs(user.id),
   ]);
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
   const myOfficeId = myRow?.officeId || "";
@@ -64,7 +69,8 @@ export default async function AccountPage() {
   }
 
   // Recordings spec §1.2 — my own Krisp key (encrypted; the card never sees it).
-  const krispRow = await getKrispConnectionInfo(user.id);
+  // #323 — plus the meetings sync state on the same connection row (Sync now / Load older).
+  const [krispRow, meetingsSync] = await Promise.all([getKrispConnectionInfo(user.id), getSyncState(user.id)]);
   const krisp: KrispCardInfo | null = krispRow
     ? {
         krispEmail: krispRow.krispEmail,
@@ -72,6 +78,11 @@ export default async function AccountPage() {
         connectedAt: krispRow.connectedAt,
         lastUsedAt: krispRow.lastUsedAt,
         lastError: krispRow.lastError,
+        meetings: {
+          syncedAt: meetingsSync?.syncedAt ?? null,
+          lastError: meetingsSync?.lastError ?? null,
+          backfillFrom: meetingsSync?.backfillFrom ?? null,
+        },
       }
     : null;
   const rows = CATEGORIES.map((c) => ({
@@ -157,6 +168,7 @@ export default async function AccountPage() {
 
       {/* ---- based out of (D144 — feeds Calendar's auto travel-time block) ---- */}
       <OfficePicker offices={officeOptions} initialOfficeId={myOfficeId} />
+      <DriveBufferCard initial={schedulePrefs.driveBufferMin} companyDefault={scheduleDefaults.driveBufferMin} />
 
       <DashboardLayoutEditor
         mode="personal"

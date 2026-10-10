@@ -17,6 +17,8 @@ import { fmtMiles, fmtTime } from "@/lib/geo";
 import { getVenueCalendar } from "@/lib/stores/venue-calendars";
 import VenueCalendarCard from "./calendar-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
+import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { ACCENT_INK, ACCENT_SOFT, cityState, mono } from "../../companies/lib";
 
 /**
@@ -149,7 +151,7 @@ export default async function VenuePage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const sp = await searchParams;
   const editing = (Array.isArray(sp.edit) ? sp.edit[0] : sp.edit) === "1";
@@ -351,6 +353,11 @@ export default async function VenuePage({
 
       {/* documents (#218) — this venue's files; uploads default to it */}
       <DocumentsCard customerId={site.companyId} siteId={locationId} />
+
+      {/* #323 — Krisp meetings linked to this venue, and what the customer owes us here (a meeting-made task
+          stores the venue's directory id; sites.id is matched too) */}
+      <MeetingsCard kind="venue" id={site.id} viewerId={user.id} style={{ marginBottom: 24 }} />
+      <WaitingOnCustomerCard by="siteId" ids={[locationId, site.id]} customerId={site.companyId} style={{ marginBottom: 24 }} />
 
       {/* contacts */}
       <div style={card}>

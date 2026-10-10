@@ -27,7 +27,10 @@ import {
   route,
   type TravelSource,
 } from "@/lib/geo";
+import { geocodedStatus, hasHouseNumber, isValidPoint } from "@/lib/address-verify/state";
+import type { GeoStatus } from "@/lib/address-verify/types";
 import { geocodeVenue, newGeocodeCtx, type GeocodeFailure, type GeocodePrecision } from "@/lib/geo-backfill";
+import { pacedSearch, pacedSearchCity } from "@/lib/address-verify/nominatim-pacer";
 
 export type UnlocatedVenue = {
   siteId: string;
@@ -146,23 +149,21 @@ export type LocateResult =
       lat: number;
       lng: number;
       precision: GeocodePrecision;
+      /** Address verification (spec 2026-10-09) status this fix stamped. */
+      status: GeoStatus;
       miles: number | null;
       minutes: number | null;
       source: TravelSource;
       officeName: string | null;
     }
-  | { ok: false; reason: GeocodeFailure["reason"] | "gone" | "invalid"; got?: string };
+  | { ok: false; reason: GeocodeFailure["reason"] | "gone" | "invalid" | "kept-pin"; got?: string };
 
 const clip = (v: unknown, n = 200) => String(v ?? "").trim().slice(0, n);
 const orNull = (s: string) => (s ? s : null);
-const validCoord = (lat: unknown, lng: unknown) =>
-  typeof lat === "number" && typeof lng === "number" &&
-  Number.isFinite(lat) && Number.isFinite(lng) &&
-  lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 
 export async function locateVenue(
   input: LocateInput,
-  opts?: { delayMs?: number }
+  opts?: { delayMs?: number; by?: string | null }
 ): Promise<LocateResult> {
   const db = await getDb();
   const siteId = clip(input?.siteId, 120);
@@ -174,6 +175,9 @@ export async function locateVenue(
   let lat: number;
   let lng: number;
   let precision: GeocodePrecision;
+  // The street the resulting fix is judged on (see geocodedStatus).
+  let askedStreet = "";
+  let hitStreet = "";
   const set: Partial<typeof sites.$inferInsert> = { updatedAt: Date.now() };
 
   if (input.mode === "retry") {
@@ -183,11 +187,20 @@ export async function locateVenue(
       state: clip(input.state, 40),
       zip: clip(input.zip, 20),
     };
-    const out = await geocodeVenue(fields, newGeocodeCtx(opts?.delayMs));
+    // Every lookup (free text + the town-centre check) takes a turn on the
+    // instance-wide Nominatim pacer, fail-soft; the pacer does the spacing.
+    const pace = opts?.delayMs != null ? { delayMs: opts.delayMs } : undefined;
+    const out = await geocodeVenue(fields, {
+      ...newGeocodeCtx(0),
+      search: (q, o) => pacedSearch(q, o, pace),
+      searchCity: (city, state, o) => pacedSearchCity(city, state, o, pace),
+    });
     if (!out.ok) return { ok: false, reason: out.reason, ...(out.got ? { got: out.got } : {}) };
     lat = out.lat;
     lng = out.lng;
     precision = out.precision;
+    askedStreet = fields.address;
+    hitStreet = out.hit.street || "";
     Object.assign(set, {
       address: orNull(fields.address),
       city: orNull(fields.city),
@@ -195,7 +208,7 @@ export async function locateVenue(
       zip: orNull(fields.zip),
     });
   } else if (input.mode === "pick" || input.mode === "pin") {
-    if (!validCoord(input.lat, input.lng)) return { ok: false, reason: "invalid" };
+    if (!isValidPoint(input.lat, input.lng)) return { ok: false, reason: "invalid" };
     lat = input.lat;
     lng = input.lng;
     if (input.mode === "pick") {
@@ -205,14 +218,18 @@ export async function locateVenue(
       // human picked the PLACE, not necessarily a corrected address) must
       // not wipe a real stored value down to NULL or truncate it.
       const pickedStreet = clip(input.address);
-      const finalStreet = /\d/.test(pickedStreet) ? pickedStreet : row.address || "";
       Object.assign(set, {
         address: /\d/.test(pickedStreet) ? pickedStreet : row.address,
         city: clip(input.city, 100) || row.city,
         state: clip(input.state, 40) || row.state,
         zip: clip(input.zip, 20) || row.zip,
       });
-      precision = /\d/.test(finalStreet) ? "building" : "city";
+      // Judged on the PICKED suggestion, never the stored address: a
+      // town-level pick on a venue that already has a street is not a
+      // building fix.
+      askedStreet = pickedStreet;
+      hitStreet = pickedStreet;
+      precision = hasHouseNumber(pickedStreet) ? "building" : "city";
     } else {
       // pin: a human placed the exact point on the map.
       precision = "building";
@@ -221,16 +238,45 @@ export async function locateVenue(
     return { ok: false, reason: "invalid" };
   }
 
+  // Address verification (spec 2026-10-09). A Fix is deliberate, so it may
+  // replace a pin; a dropped pin is always verified. retry/pick verify only
+  // when the street asked for AND the street the geocoder (or the human's
+  // pick) returned both lead with a house number, and are credited to the
+  // person who ran them when they verify.
+  const status: GeoStatus =
+    input.mode === "pin" ? "verified" : geocodedStatus(askedStreet, { street: hitStreet, lat, lng });
+  Object.assign(set, {
+    geoStatus: status,
+    geoSource: input.mode === "pin" ? "pin" : "geocode",
+    geoVerifiedBy: status === "verified" ? (opts?.by ?? null) : null,
+    geoVerifiedAt: status === "verified" ? Date.now() : null,
+  });
   set.lat = String(lat);
   set.lng = String(lng);
+  // A Retry or Pick weaker than verified never replaces a verified hand pin:
+  // nothing is written (not even the retyped address) and the person is told.
+  // The guard is in the UPDATE too, so a pin dropped while a Retry was in
+  // flight survives as well.
+  const keepsPin = input.mode !== "pin" && status !== "verified";
+  if (keepsPin && row.geoSource === "pin" && row.geoStatus === "verified") return { ok: false, reason: "kept-pin" };
   const updated = await db
     .update(sites)
     .set(set)
-    .where(and(eq(sites.id, row.id), eq(sites.deleted, false)))
+    .where(
+      and(
+        eq(sites.id, row.id),
+        eq(sites.deleted, false),
+        ...(keepsPin ? [sql`not (coalesce(${sites.geoSource}, '') = 'pin' and coalesce(${sites.geoStatus}, '') = 'verified')`] : [])
+      )
+    )
     .returning({ id: sites.id });
-  // A venue soft-deleted between the SELECT above and this UPDATE (retry mode
-  // makes paced network calls in between) must not be reported located.
-  if (updated.length === 0) return { ok: false, reason: "gone" };
+  if (updated.length === 0) {
+    // Soft-deleted between the SELECT above and this UPDATE (retry mode makes
+    // paced network calls in between) must not be reported located; else the
+    // pin guard stopped it.
+    const [still] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.id, row.id), eq(sites.deleted, false))).limit(1);
+    return { ok: false, reason: still ? "kept-pin" : "gone" };
+  }
 
   // Warm the real route now so travel reads "routed", not the haversine tier.
   // route() fails soft to null; estimate() then falls back on its own.
@@ -244,6 +290,7 @@ export async function locateVenue(
     lat,
     lng,
     precision,
+    status,
     miles: est.miles,
     minutes: est.minutes,
     source: est.source,

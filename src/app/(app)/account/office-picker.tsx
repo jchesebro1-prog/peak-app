@@ -11,8 +11,7 @@ type OfficeOption = { id: string; name: string };
  * block). Self-service picker for the signed-in user's own officeId — the
  * admin Settings -> Team form edits this same field but is gated on
  * manage_users, which most roles don't have for their own record. Feeds the
- * auto travel-time block on Calendar meetings with a physical-looking
- * location (see addTravelBlock in ../calendar-actions.ts).
+ * drive chain's base (lib/drive-plan/load.ts).
  */
 export default function OfficePicker({
   offices,
@@ -49,9 +48,7 @@ export default function OfficePicker({
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontSize: 14.5, fontWeight: 600 }}>Based out of</div>
           <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, lineHeight: 1.5 }}>
-            Where you drive from. When you schedule a meeting with a physical
-            address, Calendar adds a removable travel-time block before it,
-            estimated from this office.
+            Where you drive from. Your calendar&apos;s drive time starts and ends here.
           </div>
         </div>
         <select

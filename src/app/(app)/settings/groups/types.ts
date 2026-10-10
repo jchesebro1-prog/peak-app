@@ -117,6 +117,8 @@ export type SettingsData = {
   reviewLimits: ReviewLimits;
   /** #301 — Settings → Sales & Rewards → Estimate output. */
   estimateOutput: EstimateOutputDefaults;
+  /** Spec 2026-10-09 — Settings → Field → Drive time. */
+  driveDefaults: { driveBufferMin: number };
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id — the editor's

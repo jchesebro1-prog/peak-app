@@ -20,6 +20,8 @@ import { resolveCerts } from "@/lib/venue-assessment-certs";
 import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
 import { loadPrefillPanels, loadRecordingsStrip } from "../../recordings/data";
 import ActionError from "@/components/action-error";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
+import { visitIdsForSurvey } from "@/lib/stores/site-visits";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
@@ -32,7 +34,7 @@ export default async function SurveyEditorPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const [, rec, customers, users, settings] = await Promise.all([
+  const [user, rec, customers, users, settings] = await Promise.all([
     requireUser(),
     get(id),
     allCustomers(),
@@ -43,10 +45,11 @@ export default async function SurveyEditorPage({
   // Recordings (spec §4.4/§6): header strip + "From recording" prefill
   // panels. Both are client-rendered inside the editor, so the server half
   // (store reads + record gate) is computed here and passed down.
-  const [autoCerts, recordings, fromRecording] = await Promise.all([
+  const [autoCerts, recordings, fromRecording, visitIds] = await Promise.all([
     resolveCerts(rec.customerId, rec.locationId),
     loadRecordingsStrip("survey", rec.id),
     loadPrefillPanels("survey", rec.id),
+    visitIdsForSurvey(rec.id),
   ]);
 
   const editorCustomers: EditorCustomer[] = customers.map((cst) => {
@@ -98,6 +101,9 @@ export default async function SurveyEditorPage({
         recordings={recordings.recordings}
         canShowRecord={recordings.canRecord}
         fromRecording={fromRecording}
+        // #323 — Krisp meetings linked to this survey or one of its site visits (site visits have no page of
+        // their own; their meetings show here, like their recordings do).
+        meetingsSlot={<MeetingsCard kind="work" id={[rec.id, ...visitIds]} viewerId={user.id} />}
       />
     </>
   );

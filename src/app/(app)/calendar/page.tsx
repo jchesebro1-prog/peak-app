@@ -1,13 +1,15 @@
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { loadAgendaRange } from "@/lib/agenda";
 import { loadCalendarTasks } from "@/lib/calendar-tasks-load";
+import { getStayOvers } from "@/lib/stores/schedule-prefs";
 import { googleConfigured } from "@/lib/gmail/config";
 import CalendarClient from "./calendar-client";
 import HomeTabs from "../home-tabs";
 
 export const metadata = { title: "Calendar — Quartzite-6" };
 
-// #176 fix 1 — addCalendarEventAction's after() travel-block work (origin search, destination search, live OSRM) still runs inside this invocation, so it needs the same 60s ceiling as the other heavy routes (see import/page.tsx).
+// The after() drive re-sync (geocode + OSRM + Google writes) runs inside this invocation — keep the 60s ceiling.
 export const maxDuration = 60;
 
 /**
@@ -34,6 +36,12 @@ export default async function CalendarPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [user, sp] = await Promise.all([requireUser(), searchParams]);
+  // Spec 2026-10-09: catch edits made directly in Google — re-sync this rep's
+  // drive events when the last sync is over 10 min old (after the response).
+  after(async () => {
+    const { syncDriveIfStale } = await import("@/lib/drive-sync/sync");
+    await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
+  });
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
   const view = (["week", "day"].includes(one(sp.view) || "") ? one(sp.view) : "month") as
@@ -68,7 +76,7 @@ export default async function CalendarPage({
     maxMs = dateAnchor.getTime() + 2 * DAY;
   }
 
-  const [{ gmailOn, calendarOn, items }, calendarConnections, calendarTasks] = await Promise.all([
+  const [{ gmailOn, calendarOn, items }, calendarConnections, calendarTasks, stayOvers] = await Promise.all([
     loadAgendaRange(user.id, user.name, minMs, maxMs),
     // D148 — the filter rail's initial data; loadAgendaRange already fetched
     // the same connections internally to build `items`, but it doesn't
@@ -80,6 +88,7 @@ export default async function CalendarPage({
       return rows.map((r) => ({ id: r.id, googleEmail: r.googleEmail, calendars: r.calendars }));
     })(),
     loadCalendarTasks({ id: user.id, name: user.name }, tasksEveryone),
+    getStayOvers(user.id),
   ]);
 
   return (
@@ -101,6 +110,7 @@ export default async function CalendarPage({
         canConnectCalendar={googleConfigured()}
         tasks={calendarTasks}
         tasksEveryone={tasksEveryone}
+        stayOvers={stayOvers}
       />
     </HomeTabs>
   );

@@ -1,6 +1,7 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
+import { geoStampForSave, sameVenueAddress } from "@/lib/address-verify/state";
 import { compareVenueOrder } from "@/lib/venue-types";
 
 /**
@@ -65,6 +66,13 @@ export async function getSite(
   return rows[0] ?? null;
 }
 
+/**
+ * Upsert one venue. Address verification (spec 2026-10-09): the geo stamp is
+ * always computed here from the stored row — callers' geo fields are ignored
+ * — so every write path (venue dialog, company modal, convert) resets
+ * verification on an address edit and can never overwrite a pin. Keys the
+ * caller omits (undefined) count as unchanged.
+ */
 export async function saveSite(
   row: Omit<NewSiteRow, "createdAt" | "updatedAt"> & {
     createdAt?: number;
@@ -73,13 +81,28 @@ export async function saveSite(
 ): Promise<void> {
   const db = await getDb();
   const t = Date.now();
-  const rest: Partial<NewSiteRow> = { ...row };
+  const [prev] = await db.select().from(sites).where(eq(sites.id, row.id)).limit(1);
+  const given = Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined));
+  const merged = prev ? { ...prev, ...given } : row;
+  // A caller that changes the address but omits lat/lng must not carry the
+  // old point to the new address: merge them as null so it re-verifies.
+  const moved = !!prev && !sameVenueAddress(prev, merged);
+  const dropCoords = moved && given.lat === undefined && given.lng === undefined;
+  if (dropCoords) Object.assign(merged, { lat: null, lng: null });
+  const { stamp, keepPrevCoords } = geoStampForSave(prev ?? null, merged, t);
+  const full = {
+    ...row,
+    ...(dropCoords ? { lat: null, lng: null } : {}),
+    ...stamp,
+    ...(keepPrevCoords && prev ? { lat: prev.lat, lng: prev.lng } : {}),
+  };
+  const rest: Partial<NewSiteRow> = { ...full };
   delete rest.id;
   delete rest.createdAt;
   delete rest.updatedAt;
   await db
     .insert(sites)
-    .values({ ...row, createdAt: row.createdAt ?? t, updatedAt: t })
+    .values({ ...full, createdAt: row.createdAt ?? t, updatedAt: t })
     .onConflictDoUpdate({
       target: sites.id,
       set: { ...rest, deleted: rest.deleted ?? false, updatedAt: t },

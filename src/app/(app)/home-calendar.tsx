@@ -10,6 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { addCalendarEventAction } from "./calendar-actions";
 import type { AgendaItem } from "@/lib/agenda";
+import { fmtDur } from "@/lib/drive-plan/plan";
+import AddressFlagBadge from "@/components/address-fix/address-flag";
 import { RecordControlLink } from "@/components/recordings/record-control-link";
 
 /**
@@ -270,8 +272,30 @@ export default function HomeCalendar({
               }}
             >
               {day}
+              {(() => {
+                const total = list.reduce((s, it) => s + (it.source === "drive" && !it.drive?.flag ? it.drive?.minutes ?? 0 : 0), 0);
+                return total > 0 ? <span style={{ textTransform: "none", letterSpacing: 0 }}> · Drive {fmtDur(total)}</span> : null;
+              })()}
             </div>
             {list.map((it) => {
+              if (it.source === "drive") {
+                return (
+                  <div key={it.key} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "4px 17px" }}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#9aa0ab", flexShrink: 0, width: 62 }}>{it.drive?.flag ? "" : timeLabel(it)}</span>
+                    <span style={{ minWidth: 0, flex: 1, fontSize: 11.5, color: it.drive?.flag ? "#8a3a2a" : "#5b616e" }}>
+                      {it.drive?.flag && it.drive.fix ? (
+                        <AddressFlagBadge flag={{ text: it.drive.flag, fix: it.drive.fix }} />
+                      ) : (
+                        <>
+                          {it.drive?.flag ? "⚠ " + it.drive.flag : it.title}
+                          {it.drive?.minutes != null ? ` · ${fmtDur(it.drive.minutes)}` : ""}
+                          {it.drive?.tight ? ` · ${it.drive.tight}` : ""}
+                        </>
+                      )}
+                    </span>
+                  </div>
+                );
+              }
               const row = (
                 <div
                   style={{
@@ -364,9 +388,16 @@ export default function HomeCalendar({
                     style={{ alignSelf: "center", marginRight: 17 }}
                   />
                 ) : null;
+              // The Fix button lives outside the row's anchor (no button in a link).
+              const flag = it.addressFlag ? (
+                <span style={{ alignSelf: "center", marginRight: 17 }}>
+                  <AddressFlagBadge flag={it.addressFlag} />
+                </span>
+              ) : null;
               return (
                 <div key={it.key} style={{ display: "flex", alignItems: "stretch" }}>
                   {main}
+                  {flag}
                   {record}
                 </div>
               );

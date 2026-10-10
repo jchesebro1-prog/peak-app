@@ -9,8 +9,8 @@ import {
   setRecordingsBetaUsersAction,
   travelCoverageAction,
 } from "../actions";
-import UnlocatedVenues from "../unlocated-venues";
-import { reasonLabel } from "../venue-locate-drawer";
+import AddressesToVerify from "../addresses-to-verify";
+import { reasonLabel } from "@/components/address-fix/address-fix-drawer";
 import { DocumentCategoriesCard } from "../document-categories-card";
 import type { DocumentCategory } from "@/lib/document-categories";
 import { GROUP_LINKS } from "../settings-sections";
@@ -59,7 +59,7 @@ export function DataGroup({
   const [geoRunning, setGeoRunning] = useState(false);
   const [geoMsg, setGeoMsg] = useState("");
   // Why each venue failed in THIS page's run, keyed by site id — read by the
-  // unlocated-venues worklist. Not persisted (spec §5).
+  // Addresses to verify worklist. Not persisted (spec §5).
   const [geoReasons, setGeoReasons] = useState<Record<string, string>>({});
   const [geoListKey, setGeoListKey] = useState(0);
   const [clearConfirm, setClearConfirm] = useState("");
@@ -230,7 +230,7 @@ export function DataGroup({
             {geoMsg && (
               <div style={{ marginTop: 8, fontSize: 12.5, color: "#5d636e" }}>{geoMsg}</div>
             )}
-            <UnlocatedVenues
+            <AddressesToVerify
               reasons={geoReasons}
               refreshKey={geoListKey}
               onChanged={() => void refreshGeoCoverage()}

@@ -145,6 +145,40 @@ export function commFeedRows(thread: {
   );
 }
 
+/**
+ * #323 — one row per linked, visible Krisp meeting: "Met with Tom Ellis — Osakis PAC scope review", in the
+ * comm family (the comms "meeting" channel's verb, comms.ts CHANNEL_META.meeting), opening the meeting reader.
+ * Names are the attendees' display names, outside attendees (no team login) first; no summary text is copied.
+ * `href` is the reader deep link the loader builds (format.ts meetingReaderHref).
+ */
+export function meetingFeedRows(m: {
+  id: string;
+  title: string;
+  startedAt: number | null;
+  durationLabel: string;
+  href: string;
+  attendees: Array<{ display: string; internal: boolean }>;
+}): FeedRow[] {
+  if (m.startedAt == null) return [];
+  const names = [...m.attendees.filter((a) => !a.internal), ...m.attendees.filter((a) => a.internal)]
+    .map((a) => a.display.trim())
+    .filter(Boolean)
+    .filter((n, i, all) => all.indexOf(n) === i)
+    .slice(0, 2);
+  const title = m.title || "Untitled meeting";
+  return [
+    row(
+      "comm",
+      `meeting:${m.id}`,
+      m.startedAt,
+      names.length ? `Met with ${names.join(", ")} — ${title}` : `Meeting — ${title}`,
+      `Meeting · ${m.durationLabel}`,
+      m.href,
+      ""
+    ),
+  ];
+}
+
 export function visitFeedRows(v: {
   id: string;
   reason: string;

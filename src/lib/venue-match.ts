@@ -29,7 +29,8 @@ export type VenueHistoryKind =
   | "inspection"
   | "repair"
   | "survey"
-  | "visit";
+  | "visit"
+  | "note";
 
 export type VenueHistoryRow = {
   id: string;
@@ -73,7 +74,7 @@ export function quoteDeepLink(quoteType: string, id: string): string {
 /** Open (not-closed) stage/status values per kind. Visits are time-based, handled by the caller.
  *  Projects are NOT here — a project pipeline's stage ids are admin-editable, so "open" is
  *  decided by the record's pipeline tag (isOpenProject below), not a fixed list. */
-const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit" | "project">, readonly string[]> = {
+const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit" | "project" | "note">, readonly string[]> = {
   quote: ["draft", "sent"],
   // Six-stage consulting lifecycle (spec §1, D123) — every stage but
   // "closed" is open (D113.11). Duplicated from lib/consulting-stages ON
@@ -86,7 +87,7 @@ const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit" | "project">, readon
   survey: ["requested", "scheduled", "onsite"],
 };
 
-export function isOpenStage(kind: Exclude<VenueHistoryKind, "visit" | "project">, stage: string): boolean {
+export function isOpenStage(kind: Exclude<VenueHistoryKind, "visit" | "project" | "note">, stage: string): boolean {
   return OPEN_STAGES[kind].includes(stage);
 }
 

@@ -130,3 +130,15 @@ export async function disconnectKrispAction() {
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
+
+/** Spec 2026-10-09 "Buffer" — the signed-in rep's own drive buffer (null =
+ *  use the company default). A buffer change moves every leg, so the rep's
+ *  drive events are marked stale and re-sync on the next calendar view. */
+export async function saveMyDriveBufferAction(minutes: number | null) {
+  const me = await requireUser();
+  const { saveUserSchedulePrefs, markDriveStale } = await import("@/lib/stores/schedule-prefs");
+  const prefs = await saveUserSchedulePrefs(me.id, { driveBufferMin: minutes });
+  await markDriveStale([me.id]);
+  revalidatePath("/", "layout");
+  return { ok: true as const, driveBufferMin: prefs.driveBufferMin };
+}

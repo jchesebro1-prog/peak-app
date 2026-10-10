@@ -445,6 +445,46 @@ project and opportunity history (D241–D242).
   would be added as a Draft stage; you can also add it yourself in Settings →
   Pipelines)
 
+## P. Morning triage (built 2026-10-10, #324)
+
+The Start here card on Home and `/triage` rank what needs you each morning and
+midday (D707–D711).
+
+- **P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
+  quote later resubmitted for approval, or a dismissed lead that later
+  breaches its SLA, never returns to your list. ✦ keep permanent ☐ let a new
+  event (resubmit / SLA breach) bring it back: ______
+
+## Q. Address verification + drive time (built 2026-10-10, #325)
+
+Only verified addresses get drive time; the rest are flagged for a one-time
+Fix (D712–D724).
+
+- **Q1.** **Backfilled venues.** On first deploy every venue that already had
+  coordinates and a house number was marked verified without asking the
+  geocoder again. `npm run geo:recheck-venues` re-checks those (≈ 25–30 min,
+  1 request/second; dry run first, then `-- --apply --yes` after a backup) and
+  moves any whose address doesn't come back building-level — or comes back
+  more than half a mile from the stored point — to Needs check. Known limit:
+  venues pinned or picked by hand before #325 (Settings sidebar) are
+  indistinguishable from backfill rows and may be downgraded too — review the
+  dry run's needs_check list before `--apply`, save the ids of any that are
+  already right to a file and apply with `-- --apply --yes --skip <file>`.
+  ✦ run the re-check in production after deploy ☐ accept backfilled venues
+  as verified
+## R. Krisp meeting matcher (built 2026-10-10, #323) — ANSWERED 2026-10-10 (Jeff)
+
+Jeff confirmed all four calls as built (logged as D762 in DECISIONS.md):
+
+- ~~**R1.** Waiting-on-customer tasks stay out of `/queue` and the Google Tasks
+  mirror; they show on Home under "Waiting on others" and on the company/venue
+  page.~~ **ANSWERED: keep as built.**
+- ~~**R2.** A to-do filed from an internal-only meeting becomes an ordinary task,
+  visible to all staff on `/calendar` Everyone.~~ **ANSWERED: keep as built.**
+- ~~**R3.** Recordings under 3 minutes are "noise".~~ **ANSWERED: 3 minutes is right.**
+- ~~**R4.** Sharing with a customer shows the meeting to every portal grant at that
+  customer.~~ **ANSWERED: keep as built.**
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

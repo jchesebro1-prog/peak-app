@@ -18,6 +18,7 @@ import { shortDate } from "@/lib/format";
 import { Avatar } from "@/components/ui";
 import EditPersonModal from "../edit-modal";
 import type { SavePersonInput } from "../types";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
 
 export const metadata = { title: "Person — Quartzite-6" };
 
@@ -64,7 +65,7 @@ export default async function PersonDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, { id }, sp] = await Promise.all([requireUser(), params, searchParams]);
+  const [user, { id }, sp] = await Promise.all([requireUser(), params, searchParams]);
   const person = await getContact(id);
   if (!person) notFound();
 
@@ -189,6 +190,9 @@ export default async function PersonDetailPage({
           </div>
         )}
       </div>
+
+      {/* #323 — Krisp meetings this person is linked to */}
+      <MeetingsCard kind="contact" id={person.id} viewerId={user.id} style={{ marginBottom: 24 }} />
 
       {/* record meta */}
       <div style={card}>

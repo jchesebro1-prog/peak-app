@@ -22,8 +22,13 @@ import { RecordControl } from "@/components/recordings/record-control";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../recordings/data";
 import ActionError from "@/components/action-error";
+import { addressStatesForVisits } from "@/lib/address-verify/targets";
+import { FLAG_TEXT } from "@/lib/drive-plan/plan";
 
 export const metadata = { title: "Venue assessments — Quartzite-6" };
+
+// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
+export const maxDuration = 60;
 
 /* accent-derived tints (prototype color-mix over the office accent) */
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 13%, #fff)";
@@ -125,6 +130,10 @@ export default async function FieldSurveyPage({
         (a.stage === "claimed" ? 1 : 0) - (b.stage === "claimed" ? 1 : 0) ||
         (a.createdAt || 0) - (b.createdAt || 0)
     );
+  const visitAddr = await addressStatesForVisits(
+    queueVisits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
+    "cache"
+  );
   const visitRows: VisitRequestVM[] = queueVisits.map((v) => {
     const sm = VISIT_STAGE_META[v.stage];
     return {
@@ -140,6 +149,10 @@ export default async function FieldSurveyPage({
       surveyId: v.surveyId,
       leadId: v.leadId,
       mine: v.stage === "claimed",
+      addressFlag: (() => {
+        const st = visitAddr.get(v.id);
+        return st && st.status !== "verified" ? { text: FLAG_TEXT.unverified, fix: st.fix } : null;
+      })(),
     };
   });
   const stKey = (s: SurveyRecord): SurveyStage => (s.stage || "requested") as SurveyStage;

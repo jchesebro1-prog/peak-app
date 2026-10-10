@@ -5,7 +5,6 @@ import { requirePerm } from "@/lib/session";
 import { getSettings, getSettingsStrict, setSettings, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
-  search as geoSearch,
   type GeoSearchHit,
   type LatLng,
 } from "@/lib/geo";
@@ -449,77 +448,9 @@ export async function geocodeBatchAction(input?: {
   };
 }
 
-/* ---------------- Unlocated venues worklist (#175, D228) ---------------- */
-
-export async function listUnlocatedVenuesAction(input?: { q?: string; offset?: number; limit?: number }) {
-  await requirePerm("manage_users");
-  const { listUnlocatedVenues } = await import("@/lib/venue-locate");
-  return listUnlocatedVenues({
-    q: typeof input?.q === "string" ? input.q : "",
-    offset: Number(input?.offset) || 0,
-    limit: Number(input?.limit) || 50,
-  });
-}
-
-export type VenueAddressHit = {
-  title: string;
-  sub: string;
-  street: string;
-  city: string;
-  state: string;
-  zip: string;
-  lat: number;
-  lng: number;
-};
-
-/** Address type-ahead for the fix sidebar — like the Companies one, but keeps zip. */
-export async function searchVenueAddressAction(query: string): Promise<VenueAddressHit[]> {
-  await requirePerm("manage_users");
-  const { search } = await import("@/lib/geo");
-  const hits = await search(String(query || "").slice(0, 200), { limit: 6 });
-  return hits.map((h) => ({
-    title: h.title,
-    sub: h.sub,
-    street: h.street,
-    city: h.city,
-    state: h.state,
-    zip: h.zip,
-    lat: h.lat,
-    lng: h.lng,
-  }));
-}
-
-/** Locate ONE venue from the sidebar (retry / pick / pin), then route it. */
-export async function locateVenueAction(input: import("@/lib/venue-locate").LocateInput) {
-  await requirePerm("manage_users");
-  const { locateVenue } = await import("@/lib/venue-locate");
-  const r = await locateVenue(input);
-  if (r.ok) revalidatePath("/", "layout");
-  return r;
-}
-
-/**
- * Centre point for the sidebar's pin map (#175 D228 item 3). A free-text
- * "City, ST" search (what the drawer used to call) can resolve to the wrong
- * place entirely — "DePere, WI" landed on Menasha. This uses the same
- * structured city search + exact-place gate the batch geocoder trusts
- * (searchCity + samePlace), so the map only recentres on a town it is sure
- * is the right one; otherwise the caller keeps its Wisconsin fallback.
- */
-export async function townCentreAction(
-  city: string,
-  state: string
-): Promise<{ lat: number; lng: number } | null> {
-  await requirePerm("manage_users");
-  const { searchCity } = await import("@/lib/geo");
-  const { samePlace } = await import("@/lib/geo-backfill");
-  const c = String(city || "").trim().slice(0, 100);
-  const st = String(state || "").trim().slice(0, 40);
-  if (!c) return null;
-  const [hit] = await searchCity(c, st, { limit: 1 });
-  if (!hit || !samePlace(c, hit.city)) return null;
-  return { lat: hit.lat, lng: hit.lng };
-}
+/* Unlocated venues worklist (#175, D228) → address-actions.ts (spec
+   2026-10-09 "Addresses to verify"; the Fix dialog covers venues, visits
+   and leads). */
 
 /* ---------------- Locations (offices) ----------------
    Port of Settings.dc.html saveOffice/removeOffice — the offices array is a
@@ -639,7 +570,10 @@ export async function disconnectMailboxAction(mailboxKey: string) {
 /** Live address search (Nominatim, server-side per Geo usage policy). */
 export async function searchAddressAction(query: string): Promise<GeoSearchHit[]> {
   await requirePerm("manage_users");
-  return geoSearch(query, { limit: 6 });
+  // A turn on the instance-wide Nominatim pacer; a type-ahead never waits
+  // long — a busy queue answers [] (the next keystroke asks again).
+  const { pacedSearch } = await import("@/lib/address-verify/nominatim-pacer");
+  return pacedSearch(query, { limit: 6 }, { maxWaitMs: 3_000 });
 }
 
 /** Offline city-level geocode for the "Auto-locate" button. */
@@ -889,4 +823,17 @@ export async function saveEstimateOutputDefaultsAction(input: {
   const defaults = await saveEstimateOutputDefaults({ notIncluded: o.notIncluded, website: o.website });
   revalidatePath("/", "layout");
   return { ok: true, defaults };
+}
+
+/** Spec 2026-10-09 "Buffer" — the company default drive buffer. Every rep
+ *  without their own buffer moves, so all reps re-sync on next view. */
+export async function saveDriveDefaultsAction(input: { driveBufferMin: unknown }) {
+  await requirePerm("manage_users");
+  const { saveScheduleDefaults, markDriveStale } = await import("@/lib/stores/schedule-prefs");
+  const { activeUsers } = await import("@/lib/users");
+  const saved = await saveScheduleDefaults({ driveBufferMin: input?.driveBufferMin });
+  if (!saved.ok) return { ok: false as const, error: saved.error };
+  await markDriveStale((await activeUsers()).map((u) => u.id));
+  revalidatePath("/", "layout");
+  return { ok: true as const, driveBufferMin: saved.driveBufferMin };
 }

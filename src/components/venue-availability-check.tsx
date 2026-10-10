@@ -117,8 +117,8 @@ export function VenueAvailabilityCheck({
   const reqId = useRef(0);
 
   // No synchronous setState in the effect body (react-hooks/set-state-in-
-  // effect) — same discipline as the venue-locate-drawer's own debounced
-  // type-ahead (src/app/(app)/settings/venue-locate-drawer.tsx): every
+  // effect) — same discipline as the Fix dialog's own debounced
+  // type-ahead (src/components/address-fix/address-fix-drawer.tsx): every
   // state write happens inside the debounce timer's callback, gated by a
   // `live` flag plus the request-id ref (so a fast-changing date field
   // never lets a stale response overwrite a newer one).

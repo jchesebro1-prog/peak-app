@@ -125,7 +125,9 @@ const ROUTES = [
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
   "/inbox",
   "/inbox?view=unmatched",
+  "/inbox?view=meetings",
   "/queue",
+  "/triage", // Morning triage — the full ranked list (lazily builds the slot on the scratch db)
   "/templates",
   "/consulting",
   "/venue-assessments",
@@ -204,6 +206,9 @@ const ROUTES = [
   "/portal/my-quotes",
   "/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0",
   "/portal/my-quotes?preview=lakefront&show=accepted",
+  // #323 — Meeting notes: signed out, and a team preview (shared summaries only).
+  "/portal/meetings",
+  "/portal/meetings?preview=lakefront",
   // #282 phase 4 — the portal dashboard's team preview (the Rewards card
   // renders only while the program is on; the smoke DB leaves it off).
   "/portal?preview=lakefront",
@@ -314,6 +319,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/design/engagements/CE-1001" },
   { route: "/design/engagements/CE-1001?tab=activity" },
   { route: "/design/engagements/CE-1001?tab=schedule" },
+  // #323 — the Oversight tab mounts the Meetings card beside the Recordings card.
+  { route: "/design/engagements/CE-1001?tab=oversight" },
+  // #323 — the lead drawer's detail mode mounts the Meetings card slot.
+  { route: "/leads?lead=L-1061" },
   /* Service-line documents (#78's uncovered half). Each is the artifact a
    * customer actually receives, and each compiles a different report/letter
    * module that nothing else in this list pulls in. */

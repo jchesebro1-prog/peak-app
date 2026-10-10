@@ -7,6 +7,7 @@ import { StatusChip } from "@/components/recordings/status-chip";
 import { RecordControl } from "@/components/recordings/record-control";
 import { fmtDuration } from "@/components/recordings/recordings-card";
 import type { RecordingRecord } from "@/lib/stores/recordings";
+import { parseRecordingDeepLink } from "@/lib/recording-deep-link";
 import { loadRecordingDetail } from "../data";
 import DetailClient from "./detail-client";
 
@@ -111,8 +112,15 @@ function TimelineRow({ title, steps }: { title: string; steps: Step[] }) {
 
 const META: CSSProperties = { fontSize: 12.5, color: "#5b616e", display: "flex", gap: 14, flexWrap: "wrap" };
 
-export default async function RecordingDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const [, { id }] = await Promise.all([requireUser(), params]);
+export default async function RecordingDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [, { id }, sp] = await Promise.all([requireUser(), params, searchParams]);
+  const link = parseRecordingDeepLink(sp);
   const detail = await loadRecordingDetail(decodeURIComponent(id));
   if (!detail) notFound();
   const { rec, chip, parentLabel } = detail;
@@ -150,6 +158,7 @@ export default async function RecordingDetailPage({ params }: { params: Promise<
       </section>
 
       <DetailClient
+        key={`${link.tab}:${link.seg ?? ""}`}
         rec={rec}
         chip={chip}
         users={detail.users}
@@ -157,6 +166,8 @@ export default async function RecordingDetailPage({ params }: { params: Promise<
         krispConnected={detail.krispConnected}
         prefillTarget={detail.prefillTarget}
         parentHref={detail.parentHref}
+        initialTab={link.tab}
+        focusSeg={link.seg}
       />
     </div>
   );

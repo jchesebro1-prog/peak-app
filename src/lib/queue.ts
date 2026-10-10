@@ -12,6 +12,7 @@ import { quoteBuilderHref } from "@/lib/quote-links";
 import { reviewers } from "@/lib/users";
 import { firstName } from "@/lib/team";
 import { quoteAwaitsApprovalBy, sameName } from "@/lib/quote-approval-rules";
+import { MEETINGS_BASE_HREF, meetingsHref } from "@/app/(app)/inbox/meetings/format";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.
@@ -54,7 +55,7 @@ const VENDOR_TASK_SOURCE = "auto: vendor ";
  *  complete hooks landed). #122 added the "company" kind: the vendor
  *  price-list task lands on /vendors/<id>, where the Price lists tab is the
  *  screen that clears it. */
-function assignmentHref(link: AssignmentLink, source: string): string {
+export function assignmentHref(link: AssignmentLink, source: string): string {
   if (!link) return "/queue";
   switch (link.kind) {
     case "engagement":
@@ -209,7 +210,8 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
   /* --- project tasks assigned to me (tasks collection, #17) --- */
   const projectsById = new Map(projects.map((p) => [p.id, p]));
   for (const t of tasks) {
-    if (t.status === "done" || t.assigneeName !== me || !t.projectId) continue;
+    // #323 — a "Waiting on customer" nudge is not my to-do; Home lists it under Waiting on others
+    if (t.status === "done" || t.assigneeName !== me || !t.projectId || t.waitingOn) continue;
     const p = projectsById.get(t.projectId);
     if (!p) continue;
     items.push({
@@ -219,6 +221,25 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
       context: `${p.name}${t.section ? ` · ${t.section}` : ""}`,
       due: t.dueAt ?? due(p.targetDate),
       href: `/projects/${p.id}`,
+      writable: false,
+    });
+  }
+
+  /* --- #323 meeting to-dos assigned to me (decided "task" in the meeting reader). A meeting task that is also
+     a project's is listed above as a project task, once. "Waiting on customer" nudges stay in Home's Waiting on
+     others group. Like project tasks, read-only from outside the app (Google Tasks mirrors it, never writes it). --- */
+  for (const t of tasks) {
+    if (!t.meetingId || t.status === "done" || t.assigneeName !== me || t.waitingOn) continue;
+    if (t.projectId && projectsById.has(t.projectId)) continue;
+    const from = (t.notes || "").match(/^From meeting: (.+)$/m)?.[1]?.trim();
+    items.push({
+      key: `meeting-task:${t.id}`,
+      source: "meeting-task",
+      title: t.title,
+      context: from ? `Meeting · ${from}` : "Meeting",
+      due: due(t.dueAt),
+      // a decided to-do's meeting is filed, so its reader opens under Filed
+      href: meetingsHref(MEETINGS_BASE_HREF, "filed", t.meetingId),
       writable: false,
     });
   }

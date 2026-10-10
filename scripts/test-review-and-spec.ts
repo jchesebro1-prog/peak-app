@@ -9433,6 +9433,8 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
  * `TEST187:`-marked (fixtureId / createFixture, D233) so the suite-level
  * teardown drops them — and the sweep catches what a quote spawns. */
 import { registerFixture } from "./test-fixtures";
+import { driveTimeKeysChecks, driveTimeStateChecks, driveTimeVenueStampChecks, driveTimePlaceBookChecks, driveTimeFixChecks, driveTimePlanChecks, driveTimePrefsChecks, driveTimeDiffChecks, driveTimeLoaderChecks, driveTimeSyncChecks, driveTimeNoStraightLinePins, driveTimeAgendaChecks, driveTimeTriggerPins, driveTimeWorklistChecks, driveTimeFixUiPins, driveTimeBookingPins, driveTimeTriageFlagChecks, driveTimeFinalFixChecks, driveTimeRound2Checks } from "./test-drive-time";
+import { meetings323StoreChecks, meetings323MatchChecks, meetings323VisibilityChecks, meetings323RenderChecks, meetings323SyncChecks, meetings323ActionChecks, meetings323UiPins, meetings323ProjectionChecks, meetings323EverywherePins, meetings323EverywhereChecks, meetings323FinalChecks } from "./test-meetings-323";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
 import { exportObjectsFor } from "@/app/(app)/import/registry";
@@ -11313,6 +11315,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 }
 
 
+import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -11553,8 +11556,48 @@ seeded()
   .then(() => square322ImageChecks())
   .then(() => square322BatchChecks())
   .then(() => square322Pins())
+  .then(() => driveTimeKeysChecks(ok))
+  .then(() => driveTimeStateChecks(ok))
+  .then(() => driveTimeVenueStampChecks(ok))
+  .then(() => driveTimePlaceBookChecks(ok))
+  .then(() => driveTimeFixChecks(ok))
+  .then(() => driveTimePlanChecks(ok))
+  .then(() => driveTimePrefsChecks(ok))
+  .then(() => driveTimeDiffChecks(ok))
+  .then(() => driveTimeLoaderChecks(ok))
+  .then(() => driveTimeSyncChecks(ok))
+  .then(() => driveTimeNoStraightLinePins(ok))
+  .then(() => driveTimeAgendaChecks(ok))
+  .then(() => driveTimeTriggerPins(ok))
+  .then(() => driveTimeWorklistChecks(ok))
+  .then(() => driveTimeFixUiPins(ok))
+  .then(() => driveTimeBookingPins(ok))
+  .then(() => driveTimeTriageFlagChecks(ok))
+  .then(() => driveTimeFinalFixChecks(ok))
+  .then(() => driveTimeRound2Checks(ok))
+  .then(() => triageFoundationChecks(ok))
+  .then(() => triageRankChecks(ok))
+  .then(() => triageMatchChecks(ok))
+  .then(() => triageFeedChecksA(ok))
+  .then(() => triageFeedChecksB(ok))
+  .then(() => triageCallChecks(ok))
+  .then(() => triageSnapshotChecks(ok))
+  .then(() => triageCronChecks(ok))
+  .then(() => triageActionChecks(ok))
+  .then(() => triageHomeChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
+  .then(() => meetings323StoreChecks(ok))
+  .then(() => meetings323MatchChecks(ok))
+  .then(() => meetings323VisibilityChecks(ok))
+  .then(() => meetings323RenderChecks(ok))
+  .then(() => meetings323SyncChecks(ok))
+  .then(() => meetings323ActionChecks(ok))
+  .then(() => meetings323UiPins(ok))
+  .then(() => meetings323ProjectionChecks(ok))
+  .then(() => meetings323EverywherePins(ok))
+  .then(() => meetings323EverywhereChecks(ok))
+  .then(() => meetings323FinalChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -29601,16 +29644,17 @@ import {
   // #248 Task 3 added a Service item between Catalog and Quote — reindexed
   // here rather than left pinned to the pre-#248 shape.
   // #288 added My quotes before the cart item and renamed "Quote" → "Cart".
+  // #323 added Meeting notes before the cart item — Cart reindexed 4 → 5.
   const nav = d245Nav("catalog", { cartCount: 3 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]) && nav[1].active === true && !nav[0].active && nav[4].badge === 3 && nav[4].href === "/portal/catalog/quote",
-    "#245 nav: Home · Catalog · Service · My quotes · Cart (N), Catalog active");
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Meeting notes", "Cart"]) && nav[1].active === true && !nav[0].active && nav[5].badge === 3 && nav[5].href === "/portal/catalog/quote",
+    "#245 nav: Home · Catalog · Service · My quotes · Meeting notes · Cart (N), Catalog active");
   const pvNav = d245Nav("home", { previewCid: "c 1" });
   ok(
     pvNav[0].href === "/portal?preview=c%201" &&
       pvNav[1].href === "/portal/catalog?preview=c%201" &&
       pvNav[2].href === "/portal/service?preview=c%201" &&
-      pvNav[4].disabled === true &&
-      pvNav[4].badge === undefined,
+      pvNav[5].disabled === true &&
+      pvNav[5].badge === undefined,
     "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Cart"
   );
 }
@@ -43162,13 +43206,14 @@ import {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   // ---- nav ----
   const nav = n288Nav("my-quotes", { cartCount: 2 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]), "#288 nav: Home · Catalog · Service · My quotes · Cart, in that order");
+  // #323 added Meeting notes between My quotes and Cart — Cart reindexed 4 → 5.
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Meeting notes", "Cart"]), "#288 nav: Home · Catalog · Service · My quotes · Meeting notes · Cart, in that order");
   ok(nav[3]?.href === "/portal/my-quotes" && nav[3]?.active === true && nav.filter((n) => n.active).length === 1, "#288 nav: My quotes links /portal/my-quotes and is the one active item on 'my-quotes'");
-  ok(nav[4]?.href === "/portal/catalog/quote" && nav[4]?.badge === 2 && !nav[4]?.disabled, "#288 nav: Cart keeps the cart href and its (N) badge");
-  ok(n288Nav("quote", { cartCount: 0 })[4]?.active === true && !n288Nav("home")[3]?.active, "#288 nav: 'quote' still marks Cart active; Home doesn't mark My quotes");
+  ok(nav[5]?.href === "/portal/catalog/quote" && nav[5]?.badge === 2 && !nav[5]?.disabled, "#288 nav: Cart keeps the cart href and its (N) badge");
+  ok(n288Nav("quote", { cartCount: 0 })[5]?.active === true && !n288Nav("home")[3]?.active, "#288 nav: 'quote' still marks Cart active; Home doesn't mark My quotes");
   const pv = n288Nav("my-quotes", { previewCid: "c 1" });
   ok(pv[3]?.href === "/portal/my-quotes?preview=c%201" && !pv[3]?.disabled && pv[3]?.active === true, "#288 nav: in a team preview My quotes stays enabled and carries ?preview=");
-  ok(pv[4]?.disabled === true && pv[4]?.badge === undefined && pv[4]?.label === "Cart", "#288 nav: in a team preview Cart is disabled with no count");
+  ok(pv[5]?.disabled === true && pv[5]?.badge === undefined && pv[5]?.label === "Cart", "#288 nav: in a team preview Cart is disabled with no count");
 
   // ---- my-quotes view model ----
   const NOW = Date.UTC(2026, 9, 1, 15);
