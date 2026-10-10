@@ -7,6 +7,7 @@ import type { DriveLeg } from "@/lib/drive-plan/plan";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import { TRIAGE_HOOKS } from "@/lib/triage/hooks";
 import { planItemsByPerson } from "@/lib/task-plan/items";
+import { handOff, markInProgress, pinBlock, pushDueDate, setTierSize, unpinBlock } from "@/lib/task-plan/write";
 import { calendarBudgetMs, loadTaskPlans, savePlanPins, type PinStore, type TaskPlanDeps } from "@/lib/task-plan/load";
 import type { AtRiskShared } from "@/lib/triage/hooks";
 import { taskPlanAtRisk } from "@/lib/task-plan/triage";
@@ -1024,4 +1025,64 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
 
   const planSrc = ["items.ts", "load.ts", "plan.ts", "pins.ts", "triage.ts"].map((f) => readFileSync(`src/lib/task-plan/${f}`, "utf8")).join("\n").replace(/import type[^;]+;/g, "");
   ok(!/from "@\/lib\/google\/calendar"/.test(planSrc), "auto-cal google: the planner never writes to (or even value-imports) Google Calendar — task blocks are app-only");
+}
+
+/* ---- Task 8: write actions ---- */
+export async function autoCalWriteChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const U = "TESTautocal:w-u1";
+  const me = { id: U, name: "Auto Cal" };
+  const T = fixtureId("autocal", "w-task");
+  const K = planItemKey("task", T);
+  const now = Date.now();
+  const later = floorQuarter(now) + 26 * 3_600_000;
+  try {
+    await createTask({ id: T, title: "write", assigneeUserId: U, assigneeName: "Auto Cal" }, me);
+    registerFixture("tasks", T);
+    ok((await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 60 }, now)).ok, "auto-cal write: dropping a block pins it by hand");
+    const pins = await getPins(U);
+    ok(pins.length === 1 && pins[0].kind === "hand" && pins[0].startMs === later && pins[0].endMs === later + 3_600_000, "auto-cal write: the hand pin is stored at the dropped time");
+    ok((await pinBlock({ kind: "task", id: T, fromStartMs: later, startMs: later + 7_200_000, minutes: 60 }, now)).ok && (await getPins(U)).map((p) => p.startMs).join() === String(later + 7_200_000),
+      "auto-cal write: dragging a pinned block moves its pin");
+    ok((await pinBlock({ kind: "task", id: T, fromStartMs: later + 7_200_000, startMs: later + 7_200_000, minutes: 90 }, now)).ok && (await getPins(U)).map((p) => p.endMs - p.startMs).join() === String(90 * 60_000),
+      "auto-cal write: re-dropping a pin in place keeps exactly one pin");
+    ok((await unpinBlock({ kind: "task", id: T, startMs: later + 7_200_000 }, now)).ok && (await getPins(U)).length === 0, "auto-cal write: Unpin returns it to the scheduler");
+    await addPins(U, [{ itemKey: K, startMs: floorQuarter(now) - 900_000, endMs: floorQuarter(now) + 2_700_000, kind: "started" }]);
+    const stuck = await unpinBlock({ kind: "task", id: T, startMs: floorQuarter(now) - 900_000 }, now);
+    ok(!stuck.ok && stuck.error === "This block has started — it stays put.", "auto-cal write: a started block can't be unpinned or moved");
+    const moveStuck = await pinBlock({ kind: "task", id: T, fromStartMs: floorQuarter(now) - 900_000, startMs: later, minutes: 60 }, now);
+    ok(!moveStuck.ok && moveStuck.error === "This block has started — it stays put." && (await getPins(U)).length === 1, "auto-cal write: dragging a started block is refused and leaves its pin");
+    ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: now - 3_600_000, minutes: 60 }, now)).ok, "auto-cal write: a time in the past is refused");
+    ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 7 }, now)).ok, "auto-cal write: a block off the 15-minute grid is refused");
+    await removePinKeys(U, [pinBlobKey({ itemKey: K, startMs: floorQuarter(now) - 900_000 })]);
+    const day = chicagoDayKey(now + 10 * 86_400_000);
+    ok((await pushDueDate({ kind: "task", id: T, dayKey: day }, now)).ok && (await getTask(T))?.dueAt === dueStampForDay(day), "auto-cal write: Push due date sets the plan's finish day");
+    ok(!(await pushDueDate({ kind: "task", id: T, dayKey: "2026-02-31" }, now)).ok, "auto-cal write: a bad day is refused");
+    ok(!(await pushDueDate({ kind: "task", id: T, dayKey: addDays(chicagoDayKey(now), -1) }, now)).ok, "auto-cal write: a day in the past is refused");
+    ok((await setTierSize({ kind: "task", id: T, priority: "high", size: "s" })).ok && (await getTask(T))?.priority === "high" && (await getTask(T))?.size === "s",
+      "auto-cal write: the block's chips set tier and size");
+    ok(!(await setTierSize({ kind: "task", id: T, priority: "urgent", size: "xl" })).ok && (await getTask(T))?.priority === "high",
+      "auto-cal write: an invalid tier or size is refused, never stored");
+    ok(!(await setTierSize({ kind: "task", id: T })).ok, "auto-cal write: nothing to change is refused");
+    ok((await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "in_progress", "auto-cal write: In progress from the block");
+    ok(!(await handOff({ kind: "task", id: T, userId: "nobody-autocal" })).ok, "auto-cal write: hand off only to someone on the team");
+    await addPins(U, [{ itemKey: K, startMs: later, endMs: later + 3_600_000, kind: "hand" }]);
+    const roster = await activeUsers();
+    if (roster.length) {
+      ok((await handOff({ kind: "task", id: T, userId: roster[0].id })).ok && (await getTask(T))?.assigneeUserId === roster[0].id && !(await getPins(U)).some((p) => p.itemKey === K),
+        "auto-cal write: Hand off reassigns and clears the old calendar's pins");
+    }
+    await setTaskStatus(T, "done");
+    ok(!(await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "done", "auto-cal write: a done task isn't reopened by In progress");
+    ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 60 }, now)).ok, "auto-cal write: a done task can't be pinned");
+    ok(!(await pinBlock({ kind: "task", id: "T-missing-autocal", fromStartMs: null, startMs: later, minutes: 60 }, now)).ok, "auto-cal write: a missing item is refused");
+    ok(!(await pinBlock({ kind: "bogus", id: T, fromStartMs: null, startMs: later, minutes: 60 }, now)).ok && !(await pinBlock(null, now)).ok, "auto-cal write: junk input is refused");
+  } finally {
+    await db.delete(blobs).where(like(blobs.id, "task_pins:TESTautocal:%"));
+  }
+  const src = readFileSync("src/app/(app)/calendar/plan-actions.ts", "utf8");
+  for (const name of ["pinBlockAction", "unpinBlockAction", "pushDueDateAction", "handOffAction", "setTierSizeAction", "markInProgressAction"]) {
+    ok(firstAwait(fnBody(src, name), "requireUser()"), `auto-cal write: ${name} checks the session first`);
+  }
+  ok(!/google\/calendar/.test(readFileSync("src/lib/task-plan/write.ts", "utf8")), "auto-cal write: the plan's writes never touch Google Calendar");
 }
