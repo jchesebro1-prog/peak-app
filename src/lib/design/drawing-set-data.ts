@@ -1,5 +1,5 @@
 // SERVER ONLY — reads the catalog, settings, sheets and part documents.
-import { getSettings } from "@/lib/settings";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { listSheets, type GridProject, type GridSheet } from "@/lib/stores/grid-projects";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { list as listCatalog } from "@/lib/stores/catalog";
@@ -74,6 +74,7 @@ export async function loadDrawingSetData(
   // #226: device types — the scope fix and type-grouped legend labels.
   const deviceTypes = await loadDeviceTypeContext(catalog);
   const accent = settings.accent || "#b08d4a";
+  const digits = designatorDigitsOf(settings);
   const symCtx = symbolContext(settings, deviceTypes.types);
   const parts = [
     ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
@@ -83,7 +84,7 @@ export async function loadDrawingSetData(
   // #320: plan marks, keys and E-60x read designators; one not yet assigned
   // prints the number the editor will give it (filled here, never written —
   // this also serves the signed print route).
-  const slice = { ...rawSlice, placements: fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project)) };
+  const slice = { ...rawSlice, placements: fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits)) };
   const set = project.drawingSet || {};
   const size = resolveSheetSize(requestedSize, set.size);
   const k = SHEET_SIZES[size].k;
@@ -119,6 +120,7 @@ export async function loadDrawingSetData(
     descOf: (pid) => partById.get(pid)?.desc,
     modelOf: (pid) => scheduleModelOf(partById.get(pid)),
     wires: scheduleWiresFromView(view),
+    digits,
   });
   const schedulePages = paginateSchedule(scheduleGroups(schedule), SCHEDULE_ROWS_PER_COLUMN, 2);
 
@@ -141,7 +143,7 @@ export async function loadDrawingSetData(
 
   return {
     project, optionId, options, option, slice, spaces, cals, partById, symCtx, accent, set, size, k, area, now,
-    symbolDisplay, symbolUrls, view, schedule, schedulePages, sheetById, all, included, revRows, notes, legend, optionQuoteNo,
+    symbolDisplay, symbolUrls, view, schedule, schedulePages, sheetById, all, included, revRows, notes, legend, optionQuoteNo, digits,
     company: { name: settings.companyName, logoDark: settings.logoDark, offices: settings.offices },
     gridStandardNotes: settings.gridStandardNotes || "",
   };

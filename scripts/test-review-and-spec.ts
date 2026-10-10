@@ -11529,6 +11529,7 @@ seeded()
   .then(() => sheetAdjust318DialogGuardPins())
   .then(() => sheetAdjust318StaleSheetChecks())
   .then(() => conduitRiser321Checks())
+  .then(() => conduitRiser321B1Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -18917,8 +18918,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th).
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 11 && (actionsSrc.match(/^export async function/gm) || []).length === 11, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th); #321 adds saveDesignatorDigitsAction (the 12th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 12 && (actionsSrc.match(/^export async function/gm) || []).length === 12, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -60622,6 +60623,10 @@ async function designators320StoreChecks(): Promise<void> {
   const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
   const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
   const NOPART = "TEST-320-NOPART";
+  // #321: numbers default to two digits; these #320 checks pin the one-digit rule (L-1), so they run in one-digit mode.
+  const { getSettingsPatch: digitsPatch, setSettings: digitsSet } = await import("@/lib/settings");
+  const digitsBefore = (await digitsPatch()).designatorDigits;
+  await digitsSet({ designatorDigits: 1 });
 
   const gp = await G.createProject({ name: "#320 designators project", customer: "Spec fixture", customerId: null, by });
   registerFixture("grid_projects", gp.id);
@@ -60740,12 +60745,13 @@ async function designators320StoreChecks(): Promise<void> {
      (await proj()).placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)),
     "#320 ensureDesignators: the in-memory numbers are exactly the ones a write stores");
   const gs = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
-  ok(gs.includes('const write = opts.write ?? process.env.VERCEL_ENV !== "preview";') && gs.includes("if (!write) return designatorsFilledInMemory(project, codeOf);"),
+  ok(gs.includes('const write = opts.write ?? process.env.VERCEL_ENV !== "preview";') && gs.includes("if (!write) return designatorsFilledInMemory(project, codeOf, digits);"),
     "#320 ensureDesignators: the preview guard sits before the write");
 
   // Two adds at once never hand out the same number among what landed.
   await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
   ok(D.duplicates(optSlice(await proj(), opt)).size === 0, "#320 concurrent adds: numbers come from the doc each patch read — no duplicate among the survivors");
+  await digitsSet({ designatorDigits: digitsBefore });
 }
 
 /* ---------------- #320: Grid device designators — editor wiring ---------------- */
@@ -60784,7 +60790,7 @@ async function designators320EditorChecks(): Promise<void> {
   ok(crt.includes('const recode = raw.recode === true ? { recode: true } : {};') && crt.includes("return { all: true, ...recode };") && crt.includes("{ code: raw.code.trim(), ...recode }") && crt.includes("{ ids: [...raw.ids], ...recode }"),
     "#320 cleanRenumberTarget whitelists recode (only a literal true) on every target shape");
   const gpSrc = rd("src/lib/stores/grid-projects.ts");
-  ok(gpSrc.includes("if (target.recode === true) {") && gpSrc.includes("renumber(own, readingCtxOf(p), target, codeOf)"),
+  ok(gpSrc.includes("if (target.recode === true) {") && gpSrc.includes("renumber(own, readingCtxOf(p, digits), target, codeOf)"),
     "#320 store: Renumber loads the code resolver only for recode and passes it to the pure rule");
   const clean = acts.slice(acts.indexOf("async function cleanRestoredPlacement("), acts.indexOf("export async function restoreItemsAction("));
   ok(clean.includes("const designator = curtain ? null : cleanDesignator(raw.designator);") && clean.includes("...(designator ? { designator } : {}),"),
@@ -60796,7 +60802,7 @@ async function designators320EditorChecks(): Promise<void> {
   ok(page.includes("const designatorParts = [...parts, ...fallbackPartsFor((project.placements || []).map((pl) => pl.partId), parts, catalog, categoryMap, { deviceTypes })];"),
     "#320 page: numbering on load adds the catalog-fallback rows of pre-library placements (the store writers' part list)");
   const canvas = rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
-  ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
+  ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q, designatorDigits);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
     "#320 plan: a device is labelled by its designator (a lot by its range, no ×N), with a hover title; duplicates drawn amber");
   const prop = rd("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
   ok(prop.includes('<PropRow label="Designator"') && prop.includes("<DesignatorRow key={selectedPlacement.id}") && prop.includes("Renumber selection"),
@@ -60915,8 +60921,8 @@ async function designators320ScheduleChecks(): Promise<void> {
   ok(rd("src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx").includes("<th>Designators</th>"), "#320 drawing set: the device key's first column is Designators");
   const table = rd("src/app/(app)/design/grid/[id]/schedule/schedule-table.tsx");
   ok(table.includes(">Designators</th>") && table.includes("r.designators"), "#320 /schedule + Spreadsheet Schedule tab: Designators column");
-  ok(rd("src/lib/design/grid-schedule-server.ts").includes("fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project))") &&
-     rd("src/lib/design/drawing-set-data.ts").includes("fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project))"),
+  ok(rd("src/lib/design/grid-schedule-server.ts").includes("fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits))") &&
+     rd("src/lib/design/drawing-set-data.ts").includes("fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project, digits))"),
     "#320 schedule + set fill missing designators in memory (never a write on a print path)");
   const gs = rd("src/lib/design/grid-schedule.ts");
   ok(!/from\s+"@\/lib\/stores\//.test(gs.replace(/import type[^;]*;/g, "")) && !rd("src/lib/design/designators.ts").includes("@/lib/stores/") && !rd("src/lib/design/designators.ts").includes("@/db"),
@@ -61897,4 +61903,160 @@ async function pagesAsSheets319FinalFixChecks(): Promise<void> {
   } finally {
     if (prevBlob !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
   }
+}
+
+/* --- #321 Plan B Task 1: Bray IDs — per-part designator code + two-digit numbering --- */
+async function conduitRiser321B1Checks(): Promise<void> {
+  const D = await import("@/lib/design/designators");
+  const T = await import("@/lib/design/device-types");
+  const { designatorDigitsOf } = await import("@/lib/settings");
+  const { optionalPartFields } = await import("@/app/(app)/catalog/part-form");
+  const { gridPartsFrom } = await import("@/lib/design/grid-parts");
+  const fs = await import("node:fs");
+  const J = (v: unknown) => JSON.stringify(v);
+  const pl = (id: string, x: number, y: number, extra: Record<string, unknown> = {}) => ({ id, sheetId: "s1", page: 1, x, y, partId: "P", ...extra });
+  const tctx = { types: T.SEED_DEVICE_TYPES, map: {} };
+
+  // code resolution: the part's own code first
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: "CRO" }, tctx) === "CRO",
+    "#321 codeOfPlacement: a part's own designator code beats its device type's code");
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: " cro " }, tctx) === "CRO",
+    "#321 codeOfPlacement: the part code is trimmed and upper-cased");
+  ok(D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: "" }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: "TOO-LONG-CODE" }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers", designatorCode: null }, tctx) === "SPK" &&
+     D.codeOfPlacement({}, { id: "P1", deviceType: "speakers" }, tctx) === "SPK",
+    "#321 codeOfPlacement: a blank or invalid part code falls through to the device type's");
+  ok(D.codeOfPlacement({}, { id: "asm:x", kind: "device", gridScope: "Audio", designatorCode: "BX" }, tctx) === "BX",
+    "#321 codeOfPlacement: a part code also wins where the system letter would have been used");
+
+  // number format
+  ok(D.formatDesignatorNumber(7, 2) === "07" && D.formatDesignatorNumber(123, 2) === "123" && D.formatDesignatorNumber(7, 1) === "7" &&
+     D.formatDesignatorNumber(10, 2) === "10" && D.formatDesignatorNumber(9) === "9",
+    "#321 formatDesignatorNumber: two digits pads below ten; three-digit numbers and one-digit mode print as is; absent = one digit");
+  ok(designatorDigitsOf({}) === 2 && designatorDigitsOf(null) === 2 && designatorDigitsOf({ designatorDigits: 1 }) === 1 && designatorDigitsOf({ designatorDigits: 2 }) === 2,
+    "#321 designatorDigitsOf: default 2, only an explicit 1 reads as one digit");
+
+  // issuing
+  const codeCRO = () => "CRO";
+  const ctx2 = { sheetIds: ["s1"], spaces: [], digits: 2 as const };
+  const got = D.assignMissing([pl("a", 0.1, 0.1), pl("b", 0.5, 0.1)], codeCRO, ctx2);
+  ok(got.get("a") === "CRO-01" && got.get("b") === "CRO-02", "#321 assignMissing at two digits issues CRO-01, CRO-02");
+  const got1 = D.assignMissing([pl("a", 0.1, 0.1), pl("b", 0.5, 0.1)], codeCRO, { sheetIds: ["s1"], spaces: [] });
+  ok(got1.get("a") === "CRO-1" && got1.get("b") === "CRO-2", "#321 assignMissing without digits keeps today's CRO-1, CRO-2");
+  const gotTen = D.assignMissing(Array.from({ length: 11 }, (_, i) => pl(`p${i}`, i / 20, 0.1)), codeCRO, ctx2);
+  ok(gotTen.get("p8") === "CRO-09" && gotTen.get("p9") === "CRO-10" && gotTen.get("p10") === "CRO-11", "#321 two-digit numbers roll over cleanly at ten");
+  const lot = D.assignMissing([pl("lot", 0.1, 0.1, { qty: 24 })], () => "LX", ctx2);
+  ok(lot.get("lot") === "LX-01", "#321 a lot's first number is issued padded");
+  ok(D.formatDesignator("LX-01", 24, 2) === "LX-01–24" && D.formatDesignator("LX-1", 24, 2) === "LX-01–24" && D.formatDesignator("LX-1", 24) === "LX-1–24" && D.formatDesignator("LX-01", 1, 2) === "LX-01",
+    "#321 formatDesignator: a lot of 24 reads LX-01–24 at two digits; one digit and singles unchanged");
+  ok(D.formatDesignator("LX-1", 5, 2) === "LX-01–05", "#321 formatDesignator: a short range pads both ends");
+
+  // parse / duplicates: CRO-1 and CRO-01 are the same number
+  ok(D.parseDesignator("CRO-01")?.n === 1 && D.parseDesignator("CRO-01")?.code === "CRO" && D.parseDesignator("CRO-1")?.n === 1,
+    "#321 parseDesignator: CRO-01 reads as number 1");
+  ok(J([...D.duplicates([pl("a", 0, 0, { designator: "CRO-1" }), pl("b", 0, 0, { designator: "CRO-01" })])].sort()) === J(["a", "b"]),
+    "#321 duplicates: CRO-1 and CRO-01 are the same number");
+
+  // renumber re-pads
+  const rn = D.renumber([pl("a", 0.1, 0.1, { designator: "CRO-1" }), pl("b", 0.5, 0.1, { designator: "CRO-7" })], ctx2, { all: true });
+  ok(rn.get("a") === "CRO-01" && rn.get("b") === "CRO-02", "#321 renumber at two digits re-issues CRO-01, CRO-02 (a one-digit design is re-padded)");
+  const rnSame = D.renumber([pl("a", 0.1, 0.1, { designator: "CRO-01" }), pl("b", 0.5, 0.1, { designator: "CRO-02" })], ctx2, { all: true });
+  ok(rnSame.size === 0, "#321 renumber: numbers already in order and padded change nothing");
+  const rn1 = D.renumber([pl("a", 0.1, 0.1, { designator: "CRO-01" })], { sheetIds: ["s1"], spaces: [] }, { all: true });
+  ok(rn1.get("a") === "CRO-1", "#321 renumber without digits writes one-digit numbers");
+
+  // schedule cell
+  ok(D.designatorList([{ designator: "CRO-01" }, { designator: "CRO-02" }, { designator: "CRO-04" }], 2) === "CRO-01–02, CRO-04" &&
+     D.designatorList([{ designator: "CRO-1" }, { designator: "CRO-2" }]) === "CRO-1–2",
+    "#321 designatorList pads at two digits and is unchanged by default");
+
+  // stamping carries digits
+  const doc: { placements: ReturnType<typeof pl>[] } = { placements: [pl("a", 0.1, 0.1), pl("b", 0.5, 0.1)] };
+  D.stampNewDesignators(doc as never, new Set(["a", "b"]), codeCRO as never, 2);
+  ok(J(doc.placements.map((p) => (p as { designator?: string }).designator)) === J(["CRO-01", "CRO-02"]), "#321 stampNewDesignators passes the digits through");
+  const marks = D.planDesignatorMarks([{ id: "a", key: "k", desc: "d", qty: 24, designator: "LX-1", curtain: false }], "L", 2);
+  ok(marks.tags.get("a") === "LX-01–24" && marks.rows[0].tag === "LX-01–24", "#321 planDesignatorMarks prints two-digit tags and rows");
+
+  // part form
+  const fd = new FormData();
+  ok(!("designatorCode" in optionalPartFields(fd)), "#321 part form: a form without the field leaves the stored code alone");
+  fd.set("designatorCode", " cro ");
+  ok(optionalPartFields(fd).designatorCode === "CRO", "#321 part form: ' cro ' saves as CRO");
+  fd.set("designatorCode", "");
+  const blank = optionalPartFields(fd);
+  ok("designatorCode" in blank && blank.designatorCode === undefined, "#321 part form: a blank clears the code");
+  fd.set("designatorCode", "no way too long");
+  const bad = optionalPartFields(fd);
+  ok("designatorCode" in bad && bad.designatorCode === undefined, "#321 part form: an invalid code is dropped, not stored");
+
+  // gridPartsFrom carries it, both branches
+  const sym = { id: "GS-9", name: "Relay out", manufacturer: "ETC", modelNumber: "R1", scope: "Lighting", category: "Fixtures", width: 48, height: 34, ports: [], pricingPartId: "CAT-9", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const cat = [
+    { id: "CAT-9", sku: "R1", desc: "Relay", category: "Fixtures", unit: "ea", list: 10, cost: 5, designatorCode: "CRO" },
+    { id: "CAT-8", sku: "R8", desc: "Relay 2", category: "Fixtures", unit: "ea", list: 10, cost: 5, designatorCode: "DM" },
+    { id: "CAT-7", sku: "R7", desc: "Plain", category: "Fixtures", unit: "ea", list: 10, cost: 5 },
+  ];
+  const parts = gridPartsFrom([sym] as never, cat as never, {}, { catalogFallback: true });
+  const partOf = new Map(parts.map((p) => [p.id, p]));
+  ok(partOf.get("GS-9")?.designatorCode === "CRO", "#321 gridPartsFrom: a Grid-library symbol carries its pricing part's designator code");
+  ok(partOf.get("CAT-8")?.designatorCode === "DM" && partOf.get("CAT-7")?.designatorCode === undefined && !("designatorCode" in partOf.get("CAT-7")!),
+    "#321 gridPartsFrom: the catalog fallback carries the code; a part without one has no key");
+  ok(D.codeOfPlacement({}, partOf.get("GS-9"), tctx) === "CRO", "#321 end to end: a symbol's resolved code is the part code");
+
+  // store: the setting decides what a new device is issued; Renumber re-pads
+  const G = await import("@/lib/stores/grid-projects");
+  const { DEFAULT_OPTION_ID } = await import("@/lib/design/grid-options");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { registerFixture } = await import("./test-fixtures");
+  const { getSettingsPatch, setSettings } = await import("@/lib/settings");
+  const digitsBefore = (await getSettingsPatch()).designatorDigits;
+  const by = "Test Harness";
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const gp = await G.createProject({ name: "#321 digits project", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp.id);
+  const sh = (await G.addSheet(gp.id, { name: "#321 sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const place = async (y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.1, y, partId: LIGHT, optionId: DEFAULT_OPTION_ID, by }))!.placements.at(-1)!;
+  try {
+    await setSettings({ designatorDigits: undefined });
+    const d1 = await place(0.1);
+    const d2 = await place(0.2);
+    ok(d1.designator === "L-01" && d2.designator === "L-02", "#321 store: with no setting a new device is issued a two-digit number (L-01, L-02)");
+    await setSettings({ designatorDigits: 1 });
+    const d3 = await place(0.3);
+    ok(d3.designator === "L-3" && (await G.getProject(gp.id))!.placements.find((p) => p.id === d1.id)?.designator === "L-01",
+      "#321 store: switching to one digit issues L-3 and never rewrites the stored L-01");
+    const r1 = await G.renumberDesignators(gp.id, DEFAULT_OPTION_ID, { all: true });
+    const after1 = (await G.getProject(gp.id))!.placements.map((p) => p.designator).join();
+    ok(r1.ok && after1 === "L-1,L-2,L-3", "#321 store: Renumber at one digit re-issues L-1, L-2, L-3");
+    await setSettings({ designatorDigits: 2 });
+    const r2 = await G.renumberDesignators(gp.id, DEFAULT_OPTION_ID, { all: true });
+    const after2 = (await G.getProject(gp.id))!.placements.map((p) => p.designator).join();
+    ok(r2.ok && after2 === "L-01,L-02,L-03", "#321 store: Renumber at two digits re-pads to L-01, L-02, L-03");
+  } finally {
+    await setSettings({ designatorDigits: digitsBefore });
+  }
+
+  // wiring pins
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const settingsSrc = src("src/lib/settings.ts");
+  ok(settingsSrc.includes("designatorDigits?: 1 | 2") && /s\?\.designatorDigits === 1 \? 1 : 2/.test(settingsSrc), "#321 settings: designatorDigits setting with default 2");
+  const actSrc = src("src/app/(app)/design/grid/settings/actions.ts");
+  ok(/saveDesignatorDigitsAction[\s\S]{0,200}requirePerm\("manage_users"\)[\s\S]{0,300}setSettings\(\{ designatorDigits: digits \}\)[\s\S]{0,120}revalidatePath\("\/design\/grid", "layout"\)/.test(actSrc),
+    "#321 saveDesignatorDigitsAction: admin-gated, stores 1|2, revalidates the Grid layout");
+  const cardSrc = src("src/app/(app)/design/grid/settings/designator-digits-card.tsx");
+  ok(cardSrc.includes("Two digits (CRO-01)") && cardSrc.includes("One digit (CRO-1)") && cardSrc.includes("never rewrites existing designators"),
+    "#321 Designator numbers card: both options and the never-rewrites note");
+  ok(src("src/app/(app)/design/grid/settings/page.tsx").includes("<DesignatorDigitsCard"), "#321 Grid Settings page renders the Designator numbers card");
+  const srvSrc = src("src/lib/design/designators-server.ts");
+  ok(srvSrc.includes("digits: designatorDigitsOf(settings)"), "#321 designatorContext exposes the digits from settings");
+  const projSrc = src("src/lib/stores/grid-projects.ts");
+  ok(!/stampNewDesignators\([^;]*codeOf\);/.test(projSrc) && !/stampNewDesignators\([^;]*codeOf\);/.test(src("src/lib/stores/grid-riser.ts")) &&
+     projSrc.includes("readingCtxOf(p, digits)"),
+    "#321 every store call site that numbers a device passes the digits");
+  ok(src("src/app/(app)/design/grid/[id]/page.tsx").includes("designatorDigits={designatorDigitsOf(settings)}"), "#321 the editor page passes the digits to the client");
+  ok(src("src/app/(app)/catalog/page.tsx").includes('name="designatorCode"') && src("src/app/(app)/catalog/page.tsx").includes('placeholder="From device type"'),
+    "#321 the part editor has a Designator code field");
 }

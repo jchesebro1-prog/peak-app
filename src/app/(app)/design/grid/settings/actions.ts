@@ -124,6 +124,17 @@ export async function saveStandardNotesAction(text: string) {
   return { ok: true as const };
 }
 
+/** Device designators (#321): the digits an issued number prints with. Only
+ *  1 or 2 is accepted; changing it never rewrites a stored designator. */
+export async function saveDesignatorDigitsAction(digits: number) {
+  await requirePerm("manage_users");
+  if (digits !== 1 && digits !== 2) return { ok: false as const, error: "Choose one or two digits." };
+  await setSettings({ designatorDigits: digits });
+  revalidatePath("/design/grid/settings");
+  revalidatePath("/design/grid", "layout");
+  return { ok: true as const };
+}
+
 /* ----------------------------- Equipment map (#211) ----------------------------- */
 
 export type EquipPartHit = { sku: string; desc: string; category: string; unit: string; cost: number; list: number };

@@ -20,6 +20,7 @@ import {
   ALLOWANCE_TYPE,
   ASSEMBLY_TYPE,
   UNMAPPED_TYPE,
+  cleanTypeCode,
   effectiveTypeCode,
   typeKeyOfPart,
   typeOfCategory,
@@ -48,7 +49,9 @@ export type DesignatorPlacement = {
   category?: string;
 };
 export type CodeOf<P = DesignatorPlacement> = (pl: P) => string;
-export type ReadingCtx = { sheetIds: readonly string[]; spaces: ReadonlyArray<SpaceLite> };
+/** `digits` (#321): how many digits an issued number is padded to — 2 reads
+ *  `CRO-01`; absent = 1, so pure callers that don't pass it print `CRO-1`. */
+export type ReadingCtx = { sheetIds: readonly string[]; spaces: ReadonlyArray<SpaceLite>; digits?: 1 | 2 };
 /** Numbers `from`…`to` (inclusive) held under one code. */
 export type Block = { from: number; to: number };
 /** Which devices Renumber re-issues. `recode` ("Apply current type codes")
@@ -87,13 +90,19 @@ export function parseDesignator(s: string | null | undefined): { code: string; n
   return n >= 1 ? { code: m[1], n } : null;
 }
 
-/** What a label shows: a lot's range (`LX-1–24`), else the stored text; "" when none. */
-export function formatDesignator(stored: string | null | undefined, qty?: number | null): string {
+/** A number as printed: `7` → `07` at two digits, `123` → `123`, `7` → `7` at one. */
+export function formatDesignatorNumber(n: number, digits: 1 | 2 = 1): string {
+  return digits === 2 && n < 10 ? `0${n}` : String(n);
+}
+
+/** What a label shows: a lot's range (`LX-1–24`, `LX-01–24` at two digits),
+ *  else the stored text; "" when none. */
+export function formatDesignator(stored: string | null | undefined, qty?: number | null, digits: 1 | 2 = 1): string {
   const text = cleanDesignator(stored);
   if (!text) return "";
   const q = placementQty({ qty });
   const d = q > 1 ? parseDesignator(text) : null;
-  return d ? `${d.code}-${d.n}–${d.n + q - 1}` : text;
+  return d ? `${d.code}-${formatDesignatorNumber(d.n, digits)}–${formatDesignatorNumber(d.n + q - 1, digits)}` : text;
 }
 
 /** Per code (upper-cased key), the blocks held — a lot holds its whole block.
@@ -163,7 +172,7 @@ export function assignMissing<P extends DesignatorPlacement>(
     const n = nextFree(blocks, qty);
     blocks.push({ from: n, to: n + qty - 1 });
     occ.set(key, blocks);
-    out.set(pl.id, `${code}-${n}`);
+    out.set(pl.id, `${code}-${formatDesignatorNumber(n, ctx.digits)}`);
   }
   return out;
 }
@@ -211,7 +220,7 @@ export function renumber<P extends DesignatorPlacement>(
       const qty = placementQty(pl);
       const n = nextFree(blocks, qty);
       blocks.push({ from: n, to: n + qty - 1 });
-      const next = `${codeFor.get(pl.id)!}-${n}`;
+      const next = `${codeFor.get(pl.id)!}-${formatDesignatorNumber(n, ctx.digits)}`;
       if (next !== pl.designator) out.set(pl.id, next);
     }
   }
@@ -260,7 +269,7 @@ export function duplicates(placements: readonly DesignatorPlacement[]): Set<stri
 
 /** A schedule cell: per code (sorted), consecutive numbers as ranges
  *  (`MIC-1–4, MIC-7`), then custom ones in text order. */
-export function designatorList(items: ReadonlyArray<{ designator?: string | null; qty?: number | null }>): string {
+export function designatorList(items: ReadonlyArray<{ designator?: string | null; qty?: number | null }>, digits: 1 | 2 = 1): string {
   const codes = new Map<string, { code: string; blocks: Block[] }>();
   const custom = new Map<string, string>();
   for (const it of items) {
@@ -286,7 +295,7 @@ export function designatorList(items: ReadonlyArray<{ designator?: string | null
       if (last && b.from <= last.to + 1) last.to = Math.max(last.to, b.to);
       else merged.push({ ...b });
     }
-    for (const b of merged) parts.push(b.from === b.to ? `${g.code}-${b.from}` : `${g.code}-${b.from}–${b.to}`);
+    for (const b of merged) parts.push(b.from === b.to ? `${g.code}-${formatDesignatorNumber(b.from, digits)}` : `${g.code}-${formatDesignatorNumber(b.from, digits)}–${formatDesignatorNumber(b.to, digits)}`);
   }
   parts.push(...[...custom.values()].sort(byText));
   return parts.join(", ");
@@ -304,6 +313,8 @@ export type CodePart = {
   gridScope?: string | null;
   group?: string | null;
   trade?: string | null;
+  /** #321: a per-part code (Bray's CRO for a relay output) — wins over the device type's. */
+  designatorCode?: string | null;
 };
 export type TypeCodeCtx = { types: readonly DeviceType[]; map: TypeMap };
 
@@ -317,6 +328,8 @@ export function systemLetterOf(scope: GridLayer): string {
  *  the part's, raw category through the type map; else the system letter
  *  (assemblies, allowances, archived types, unknown parts). */
 export function codeOfPlacement(pl: { category?: string }, part: CodePart | null | undefined, ctx: TypeCodeCtx): string {
+  const own = cleanTypeCode(part?.designatorCode);
+  if (own) return own;
   const codeOfType = (key: string | null) => {
     const t = key ? ctx.types.find((x) => x.key === key && !x.archived) : undefined;
     return t ? effectiveTypeCode(t) : null;
@@ -354,8 +367,8 @@ export function keepsDesignatorOnSwap(designator: string | null | undefined, old
 
 export type DesignatorDoc<P> = { placements?: P[]; sheetIds?: readonly string[]; spaces?: ReadonlyArray<SpaceLite> };
 
-export function readingCtxOf(doc: { sheetIds?: readonly string[]; spaces?: ReadonlyArray<SpaceLite> }): ReadingCtx {
-  return { sheetIds: doc.sheetIds || [], spaces: doc.spaces || [] };
+export function readingCtxOf(doc: { sheetIds?: readonly string[]; spaces?: ReadonlyArray<SpaceLite> }, digits?: 1 | 2): ReadingCtx {
+  return { sheetIds: doc.sheetIds || [], spaces: doc.spaces || [], ...(digits ? { digits } : {}) };
 }
 
 /** Number `optionId`'s missing designators (only `only`, when given) IN
@@ -364,10 +377,11 @@ export function stampDesignators<P extends DesignatorPlacement & { optionId?: st
   doc: DesignatorDoc<P>,
   optionId: string | undefined,
   codeOf: CodeOf<P>,
-  only?: ReadonlySet<string>
+  only?: ReadonlySet<string>,
+  digits?: 1 | 2
 ): number {
   const own = (doc.placements || []).filter((pl) => pl.optionId === optionId);
-  const got = assignMissing(own, codeOf, readingCtxOf(doc), only);
+  const got = assignMissing(own, codeOf, readingCtxOf(doc, digits), only);
   if (!got.size) return 0;
   doc.placements = (doc.placements || []).map((pl) => {
     const d = got.get(pl.id);
@@ -380,12 +394,13 @@ export function stampDesignators<P extends DesignatorPlacement & { optionId?: st
 export function stampNewDesignators<P extends DesignatorPlacement & { optionId?: string }>(
   doc: DesignatorDoc<P>,
   ids: ReadonlySet<string>,
-  codeOf: CodeOf<P>
+  codeOf: CodeOf<P>,
+  digits?: 1 | 2
 ): number {
   if (!ids.size) return 0;
   const options = new Set((doc.placements || []).filter((pl) => ids.has(pl.id)).map((pl) => pl.optionId));
   let n = 0;
-  for (const o of options) n += stampDesignators(doc, o, codeOf, ids);
+  for (const o of options) n += stampDesignators(doc, o, codeOf, ids, digits);
   return n;
 }
 
@@ -415,13 +430,13 @@ export type PlanMarkItem = { id: string; key: string; desc: string; qty: number;
  * row per part (per named curtain), first-seen order: designators
  * (designatorList) · units · description. Tags are keyed by placement id.
  */
-export function planDesignatorMarks(items: ReadonlyArray<PlanMarkItem>, prefix: string): { tags: Map<string, string>; rows: Array<{ tag: string; qty: number; desc: string }> } {
+export function planDesignatorMarks(items: ReadonlyArray<PlanMarkItem>, prefix: string, digits: 1 | 2 = 1): { tags: Map<string, string>; rows: Array<{ tag: string; qty: number; desc: string }> } {
   const curtainMarks = assignTypeMarks(items.filter((it) => it.curtain).map((it) => ({ key: it.key, desc: it.desc, qty: it.qty })), prefix);
   const tags = new Map<string, string>();
   const order: string[] = [];
   const groups = new Map<string, { curtain: boolean; desc: string; qty: number; list: Array<{ designator?: string; qty: number }> }>();
   for (const it of items) {
-    tags.set(it.id, it.curtain ? curtainMarks.tags.get(it.key) || "" : formatDesignator(it.designator, it.qty));
+    tags.set(it.id, it.curtain ? curtainMarks.tags.get(it.key) || "" : formatDesignator(it.designator, it.qty, digits));
     let g = groups.get(it.key);
     if (!g) {
       g = { curtain: it.curtain, desc: it.desc, qty: 0, list: [] };
@@ -433,7 +448,7 @@ export function planDesignatorMarks(items: ReadonlyArray<PlanMarkItem>, prefix: 
   }
   const rows = order.map((key) => {
     const g = groups.get(key)!;
-    return { tag: g.curtain ? curtainMarks.tags.get(key) || "" : designatorList(g.list), qty: g.qty, desc: g.desc };
+    return { tag: g.curtain ? curtainMarks.tags.get(key) || "" : designatorList(g.list, digits), qty: g.qty, desc: g.desc };
   });
   return { tags, rows };
 }

@@ -111,6 +111,7 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
     deviceTypes,
     typeKeyOfPlacement,
     designatorDupes,
+    designatorDigits,
     selectedIds,
     busy,
     categoryCounts,
@@ -134,8 +135,9 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
         descOf: (pl) =>
           isSeedPlaceholder(pl.partId) ? pl.category || "Unassigned device" : partById.get(pl.partId)?.desc || "No longer in the catalog",
         duplicates: designatorDupes,
+        digits: designatorDigits,
       }),
-    [placements, sheets, project.spaces, typeKeyOfPlacement, deviceTypes, partById, designatorDupes]
+    [placements, sheets, project.spaces, typeKeyOfPlacement, deviceTypes, partById, designatorDupes, designatorDigits]
   );
   const [filter, setFilter] = useState<DeviceFilter>({});
   const [sort, setSort] = useState<DeviceSort>(null);

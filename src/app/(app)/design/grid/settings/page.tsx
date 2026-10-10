@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { getSettings } from "@/lib/settings";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { symbolCategoryRows, symbolContext } from "@/lib/design/grid-icons";
@@ -17,6 +17,7 @@ import { DeviceTypeIconsCard, type DeviceTypeDrawing } from "./device-type-icons
 import { getDocuments } from "@/lib/stores/part-documents";
 import { WireTypesCard } from "./wire-types-card";
 import { StandardNotesCard } from "./standard-notes-card";
+import { DesignatorDigitsCard } from "./designator-digits-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
 import { GridSettingsTabs } from "./settings-tabs";
 
@@ -212,6 +213,8 @@ export default async function GridSettingsPage() {
       <WireTypesCard key={JSON.stringify(wireTypes)} wireTypes={wireTypes} />
 
       <StandardNotesCard key={settings.gridStandardNotes ?? ""} value={settings.gridStandardNotes ?? ""} />
+
+      <DesignatorDigitsCard key={designatorDigitsOf(settings)} value={designatorDigitsOf(settings)} />
 
       <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Related settings</div>

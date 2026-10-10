@@ -50,6 +50,9 @@ export type PartLite = {
    *  palette needs it, and it treats a missing value the same as null. The
    *  editor never re-derives this — it's dumb by design; the map lives only
    *  on the server. */
+  /** #321: the catalog part's own designator code (Bray's CRO) — wins over
+   *  its device type's code when a device is numbered. */
+  designatorCode?: string;
   group?: string | null;
   /** Resolved trade (punch #48) - `tradeOf(part, map)` run server-side, the
    *  same deal as `group`. The Grid's scope taxonomy (grid-scopes.ts) needs

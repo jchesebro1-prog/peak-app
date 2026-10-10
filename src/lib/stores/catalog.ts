@@ -213,6 +213,11 @@ export type CatalogPart = {
   narrativeText?: string;
   narrativeUpdatedAt?: number;
   narrativeUpdatedBy?: string;
+  /** #321: the part's own Grid designator code (1–6 letters/digits; Bray's
+   *  CRO for a relay output) — wins over its device type's code when a device
+   *  is numbered. Absent = use the type's. Written ONLY through mergeUpsert
+   *  (the part editor) — no importer, enricher or price-book patch carries it. */
+  designatorCode?: string;
 } & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
 /** All parts (port of window.MASTER_CATALOG reads). */

@@ -350,6 +350,8 @@ export type GridEditorProps = {
   laborLines: GridLaborLine[];
   /** #226: the curated device types (palette chips, Layers). */
   deviceTypes: DeviceType[];
+  /** #321: digits a designator number prints with (Grid Settings → Designator numbers). */
+  designatorDigits: 1 | 2;
   /** #300 (D609): partId → object drawing URLs, built server-side by
    *  symbolUrlsFor; a part absent here draws the generic symbol. */
   symbolUrls: Record<string, ObjectSymbolUrls>;
@@ -399,6 +401,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     customLines,
     laborLines,
     deviceTypes,
+    designatorDigits,
     recent,
     schedule,
     symbolUrls,
@@ -2836,6 +2839,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     customLines,
     laborLines,
     deviceTypes,
+    designatorDigits,
     favorites,
     setFavorites,
     recent,

@@ -1,6 +1,6 @@
 // SERVER ONLY — reads device types, the type map, settings, Grid-library docs and catalog rows.
 import { getDocRows } from "@/db/doc-store";
-import { getSettings } from "@/lib/settings";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { getMany as getCatalogParts } from "@/lib/stores/catalog";
 import type { GridSymbol } from "@/lib/stores/grid-catalog";
@@ -30,10 +30,10 @@ export type DesignatorPreload = { parts: ReadonlyArray<CodePart & { id: string }
 export async function designatorContext(
   partIds: Iterable<string>,
   preload?: DesignatorPreload
-): Promise<{ codeOf: (pl: { partId: string; category?: string }) => string }> {
-  if (preload) return { codeOf: designatorCodeOf(new Map(preload.parts.map((p) => [p.id, p])), preload.deviceTypes) };
+): Promise<{ codeOf: (pl: { partId: string; category?: string }) => string; digits: 1 | 2 }> {
+  if (preload) return { codeOf: designatorCodeOf(new Map(preload.parts.map((p) => [p.id, p])), preload.deviceTypes), digits: designatorDigitsOf(await getSettings()) };
   const ids = [...new Set(partIds)].filter(Boolean);
-  if (!ids.length) return { codeOf: designatorCodeOf(new Map(), { types: [], map: {} }) };
+  if (!ids.length) return { codeOf: designatorCodeOf(new Map(), { types: [], map: {} }), digits: designatorDigitsOf(await getSettings()) };
   const virtualIds = ids.filter((id) => parseVirtualPartId(id));
   const realIds = ids.filter((id) => !parseVirtualPartId(id) && !isSeedPlaceholder(id));
   const [types, map, settings, symbolRows, virtual] = await Promise.all([
@@ -51,5 +51,5 @@ export async function designatorContext(
     ...gridPartsFrom(symbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
     ...virtual,
   ];
-  return { codeOf: designatorCodeOf(new Map(parts.map((p) => [p.id, p])), deviceTypes) };
+  return { codeOf: designatorCodeOf(new Map(parts.map((p) => [p.id, p])), deviceTypes), digits: designatorDigitsOf(settings) };
 }

@@ -45,6 +45,7 @@ import {
   stampNewDesignators,
   type RenumberTarget,
 } from "@/lib/design/designators";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -853,7 +854,7 @@ export async function addPlacement(
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
 ): Promise<GridProject | null> {
   // #320: resolved before the patch; the number is handed out inside it.
-  const { codeOf } = await designatorContext([input.partId]);
+  const { codeOf, digits } = await designatorContext([input.partId]);
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId) || !sheetOnProject(p, input.sheetId)) { refused = true; return; }
@@ -872,7 +873,7 @@ export async function addPlacement(
         at: Date.now(),
       },
     ];
-    stampNewDesignators(p, new Set([id]), codeOf);
+    stampNewDesignators(p, new Set([id]), codeOf, digits);
     p.updatedAt = Date.now();
   });
   return refused ? null : updated;
@@ -897,7 +898,7 @@ export async function addPlacements(
   }
 ): Promise<GridProject | null> {
   if (!input.items.length) return getProject(projectId);
-  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  const { codeOf, digits } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
   const at = Date.now();
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -918,7 +919,7 @@ export async function addPlacements(
       at,
     }));
     p.placements = [...(p.placements || []), ...added];
-    stampNewDesignators(p, new Set(added.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(added.map((pl) => pl.id)), codeOf, digits);
     p.updatedAt = at;
   });
   return refused ? null : updated;
@@ -947,7 +948,7 @@ export async function replaceAutoPlacements(
   projectId: string,
   input: { optionId: string; scopes: SysKey[]; sheetId: string; page: number; items: AutoPlacementInput[]; by: string }
 ): Promise<{ removed: number; added: number } | null> {
-  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  const { codeOf, digits } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
   const at = Date.now();
   const scopes = new Set(input.scopes);
   let refused = false;
@@ -989,7 +990,7 @@ export async function replaceAutoPlacements(
     });
     p.placements = [...kept, ...fresh];
     // #320: the removed Auto devices' numbers are free again, so a re-fill renumbers its scope.
-    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
     removed = gone.size;
     added = fresh.length;
@@ -1329,7 +1330,7 @@ export async function setPlacementsPart(
   // type's code is re-issued in the new one (keepsDesignatorOnSwap).
   const before = await getProject(projectId);
   const oldParts = (before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId);
-  const { codeOf } = await designatorContext([...oldParts, ...items.map((it) => it.partId)]);
+  const { codeOf, digits } = await designatorContext([...oldParts, ...items.map((it) => it.partId)]);
   return batchEdit(
     projectId,
     items.map((it) => it.id),
@@ -1363,7 +1364,7 @@ export async function setPlacementsPart(
         }
         return swapped;
       });
-      stampNewDesignators(p, reissue, codeOf);
+      stampNewDesignators(p, reissue, codeOf, digits);
       return previous;
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_PART_REFUSAL : null)
@@ -1409,7 +1410,7 @@ export async function pastePlacements(
   if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
   if (!sheetOnProject(before, input.sheetId)) return { ok: false, error: PASTE_SHEET_GONE };
   // #320: a paste never carries a designator — every copy gets a fresh number.
-  const { codeOf } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
+  const { codeOf, digits } = await designatorContext(input.items.filter((it) => !it.curtain).map((it) => it.partId));
 
   let refused = false;
   let sheetGone = false;
@@ -1481,7 +1482,7 @@ export async function pastePlacements(
       });
     }
     p.placements = [...(p.placements || []), ...pasted];
-    stampNewDesignators(p, new Set(pasted.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(pasted.map((pl) => pl.id)), codeOf, digits);
     const stamped = byId(p.placements);
     if (routes.length) p.routes = [...(p.routes || []), ...routes];
     p.updatedAt = at;
@@ -1528,14 +1529,14 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   // #320: a restored device keeps its designator; one restored without
   // (a bundle from before #320) is numbered like a new device.
   const unnumbered = placements.filter((pl) => !pl.curtain && !cleanDesignator(pl.designator));
-  const codeOf = unnumbered.length ? (await designatorContext(unnumbered.map((pl) => pl.partId))).codeOf : null;
+  const numbering = unnumbered.length ? await designatorContext(unnumbered.map((pl) => pl.partId)) : null;
 
   let refusal = null as string | null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     refusal = refusalFor(p);
     if (refusal) return;
     p.placements = [...(p.placements || []), ...placements];
-    if (codeOf) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), codeOf);
+    if (numbering) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), numbering.codeOf, numbering.digits);
     const first = defaultOptionId(p);
     const optionOf = new Map(p.placements.map((pl) => [pl.id, pl.optionId || first]));
     const removed = cleanRiserRemoved(bundle?.riser, new Set(ensureOptions(p).options.map((o) => o.id)));
@@ -1585,10 +1586,10 @@ export async function setPlacementsDesignator(
 ): Promise<BatchResult<{ id: string; designator: string }[]>> {
   const next = byId(items);
   const needCodes = items.some((it) => !cleanDesignator(it.designator));
-  let codeOf: ((pl: { partId: string; category?: string }) => string) | null = null;
+  let numbering: Awaited<ReturnType<typeof designatorContext>> | null = null;
   if (needCodes) {
     const before = await getProject(projectId);
-    codeOf = (await designatorContext((before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId))).codeOf;
+    numbering = await designatorContext((before?.placements || []).filter((pl) => next.has(pl.id)).map((pl) => pl.partId));
   }
   return batchEdit(
     projectId,
@@ -1611,7 +1612,7 @@ export async function setPlacementsDesignator(
         }
         return edited;
       });
-      if (codeOf) stampNewDesignators(p, reissue, codeOf);
+      if (numbering) stampNewDesignators(p, reissue, numbering.codeOf, numbering.digits);
       return previous;
     },
     (placements, ids) => (placements.some((pl) => ids.has(pl.id) && pl.curtain) ? CURTAIN_DESIGNATOR_REFUSAL : null)
@@ -1632,11 +1633,12 @@ export async function renumberDesignators(
   target: RenumberTarget
 ): Promise<BatchResult<{ previous: { id: string; designator: string }[]; next: { id: string; designator: string }[] }>> {
   let codeOf: ((pl: { partId: string; category?: string }) => string) | undefined;
+  let digits: 1 | 2;
   if (target.recode === true) {
     const before = await getProject(projectId);
     if (!before) return { ok: false, error: "Design not found." };
-    codeOf = (await designatorContext((before.placements || []).filter((pl) => !pl.curtain).map((pl) => pl.partId))).codeOf;
-  }
+    ({ codeOf, digits } = await designatorContext((before.placements || []).filter((pl) => !pl.curtain).map((pl) => pl.partId)));
+  } else digits = designatorDigitsOf(await getSettings());
   let gone = false as boolean;
   const previous: { id: string; designator: string }[] = [];
   const next: { id: string; designator: string }[] = [];
@@ -1646,7 +1648,7 @@ export async function renumberDesignators(
       return;
     }
     const own = (p.placements || []).filter((pl) => pl.optionId === optionId);
-    const changes = renumber(own, readingCtxOf(p), target, codeOf);
+    const changes = renumber(own, readingCtxOf(p, digits), target, codeOf);
     if (!changes.size) return;
     p.placements = (p.placements || []).map((pl) => {
       const d = changes.get(pl.id);
@@ -1676,12 +1678,12 @@ function withoutCurtainDesignator(pl: GridPlacement): GridPlacement {
  * option slice, the print paths' rule) and curtains' stripped. The input is
  * never touched.
  */
-export function designatorsFilledInMemory(project: GridProject, codeOf: (pl: { partId: string; category?: string }) => string): GridProject {
+export function designatorsFilledInMemory(project: GridProject, codeOf: (pl: { partId: string; category?: string }) => string, digits?: 1 | 2): GridProject {
   const doc = ensureOptions({ ...project, placements: (project.placements || []).map((pl) => ({ ...withoutCurtainDesignator(pl) })) });
   const filled = new Map<string, GridPlacement>();
   for (const o of doc.options) {
     const own = doc.placements.filter((pl) => pl.optionId === o.id);
-    for (const pl of fillDesignators(own, codeOf, readingCtxOf(doc))) filled.set(pl.id, pl);
+    for (const pl of fillDesignators(own, codeOf, readingCtxOf(doc, digits))) filled.set(pl.id, pl);
   }
   doc.placements = doc.placements.map((pl) => filled.get(pl.id) ?? pl);
   return doc;
@@ -1704,14 +1706,14 @@ export async function ensureDesignators(
   opts: { write?: boolean } = {}
 ): Promise<GridProject> {
   if (!needsDesignators(project.placements || [])) return project;
-  const { codeOf } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
+  const { codeOf, digits } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
   const write = opts.write ?? process.env.VERCEL_ENV !== "preview";
-  if (!write) return designatorsFilledInMemory(project, codeOf);
+  if (!write) return designatorsFilledInMemory(project, codeOf, digits);
   const updated = await patchDoc<GridProject>("grid_projects", project.id, (p) => {
     if (!needsDesignators(p.placements || [])) return;
     const doc = ensureOptions(p);
     doc.placements = (doc.placements || []).map(withoutCurtainDesignator);
-    for (const o of doc.options) stampDesignators(doc, o.id, codeOf);
+    for (const o of doc.options) stampDesignators(doc, o.id, codeOf, undefined, digits);
   });
   // A concurrent numbering can land first (the patch then finds nothing to
   // do): hand back the doc the patch read, never the stale one given.

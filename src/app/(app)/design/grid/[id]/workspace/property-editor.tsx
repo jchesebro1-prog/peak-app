@@ -437,10 +437,10 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
  *  an empty value re-issues the next free number. Keyed by the device, so
  *  the draft resets when the selection changes. */
 function DesignatorRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
-  const { busy, designatorDupes, saveDesignators } = ed;
+  const { busy, designatorDupes, saveDesignators, designatorDigits } = ed;
   const [draft, setDraft] = useState<string | null>(null);
   const qty = placementQty(pl);
-  const shown = formatDesignator(pl.designator, qty);
+  const shown = formatDesignator(pl.designator, qty, designatorDigits);
   const dupe = designatorDupes.has(pl.id);
   const save = async () => {
     if (draft === null) return;
@@ -552,6 +552,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
     replacePartForSelected,
     renumberDesignators,
     removeSelected,
+    designatorDigits,
   } = ed;
   const n = pls.length;
   const curtainCount = pls.filter((pl) => pl.curtain).length;
@@ -622,7 +623,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
         <PropRow label="Designators" title="Renumber the selected devices in reading order — they take the lowest free numbers of their codes">
           <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
             <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {designatorList(pls.filter((pl) => !pl.curtain)) || "—"}
+              {designatorList(pls.filter((pl) => !pl.curtain), designatorDigits) || "—"}
             </span>
             <button
               type="button"

@@ -32,6 +32,7 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
     placements,
     routes,
     partById,
+    designatorDigits,
     activeSheetId,
     page,
     selected,
@@ -74,13 +75,13 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
         // #320: leaves read "MIC-1 · SM57" (a lot by its range).
         leafLabel: (pl: GridPlacement) => {
           if (pl.curtain) return null;
-          const d = formatDesignator(pl.designator, placementQty(pl));
+          const d = formatDesignator(pl.designator, placementQty(pl), designatorDigits);
           if (!d) return null;
           const part = partById.get(pl.partId);
           return `${d} · ${part?.virtual ? part.desc : part?.modelNumber || part?.sku || pl.partId}`;
         },
       }),
-    [project.name, project.spaces, sheets, placements, routes, partById]
+    [project.name, project.spaces, sheets, placements, routes, partById, designatorDigits]
   );
 
   const byId = useMemo(() => new Map(placements.map((pl) => [pl.id, pl])), [placements]);

@@ -3,6 +3,7 @@
  */
 import { normalizeVisibility } from "@/lib/portal-visibility";
 import { isFabricPart } from "@/lib/fabric-part";
+import { cleanTypeCode } from "@/lib/design/device-types";
 import { cleanRackFacts, rackFactsFromForm } from "@/lib/rack/part-facts";
 import type { RackPartFacts } from "@/lib/rack/types";
 
@@ -33,6 +34,8 @@ export type OptionalPartFields = {
   oz?: number;
   ozBasis?: "lin-yd" | "sq-yd";
   flameRating?: string;
+  /** #321 — the part's own Grid designator code; blank/invalid clears it. */
+  designatorCode?: string;
 } & RackPartFacts;
 
 export const FLAME_RATING_MAX = 120;
@@ -58,6 +61,7 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
     out.ozBasis = out.oz !== undefined && (b === "lin-yd" || b === "sq-yd") ? b : undefined;
   }
   if (fd.has("flameRating")) out.flameRating = String(fd.get("flameRating") || "").trim().slice(0, FLAME_RATING_MAX) || undefined;
+  if (fd.has("designatorCode")) out.designatorCode = cleanTypeCode(fd.get("designatorCode")) ?? undefined;
   if (fd.has("portalVisibility")) {
     const v = normalizeVisibility(fd.get("portalVisibility"));
     out.portalVisibility = v === "auto" ? undefined : v;

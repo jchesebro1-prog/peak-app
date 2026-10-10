@@ -21,7 +21,7 @@ import { allCompanies } from "@/lib/identity/companies";
 import { intakeCustomersFrom } from "@/lib/intake-customer";
 import { venueTypesFrom } from "@/lib/venue-types";
 import { loadCurtainSewingPct, loadWireLaborRules } from "@/lib/stores/pricing";
-import { getSettings } from "@/lib/settings";
+import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { fabricSellPerSqft } from "@/lib/curtain-pricing";
@@ -379,6 +379,7 @@ export default async function GridEditorPage({
       laborLines={laborLines}
       schedule={schedule}
       deviceTypes={deviceTypes.types}
+      designatorDigits={designatorDigitsOf(settings)}
       symbolUrls={symbolUrls}
       favorites={favorites}
       recent={recent}

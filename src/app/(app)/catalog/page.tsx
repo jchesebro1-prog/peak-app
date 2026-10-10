@@ -1004,6 +1004,21 @@ function PartFormModal({
                 />
               </div>
             )}
+            <div style={{ marginTop: 13, marginBottom: 4 }}>
+              {label("Designator code")}
+              {/* key={part?.sku}: the modal is reused across parts without remounting. */}
+              <input
+                key={part?.sku ?? "new"}
+                name="designatorCode"
+                defaultValue={part?.designatorCode ?? ""}
+                placeholder="From device type"
+                maxLength={6}
+                style={{ ...inputStyle, textTransform: "uppercase" }}
+              />
+              <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
+                Letters the Grid puts on this part&apos;s devices (CRO gives CRO-01). Leave blank to use the device type&apos;s code.
+              </div>
+            </div>
             {part && (
               <div style={{ marginTop: 13, marginBottom: 4 }}>
                 {/* key={part.sku}: the modal is reused across parts (see the

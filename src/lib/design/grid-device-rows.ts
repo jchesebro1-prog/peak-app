@@ -64,6 +64,8 @@ export type DeviceRowInput = {
   modelOf: (pl: GridPlacement) => string;
   descOf: (pl: GridPlacement) => string;
   duplicates: ReadonlySet<string>;
+  /** #321: designator number padding (2 = CRO-01); absent = 1. */
+  digits?: 1 | 2;
 };
 
 const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
@@ -82,7 +84,7 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
       id: pl.id,
       order,
       designator,
-      display: formatDesignator(designator, qty),
+      display: formatDesignator(designator, qty, i.digits),
       typeKey,
       typeLabel: i.typeLabelOf(typeKey),
       model: i.modelOf(pl),

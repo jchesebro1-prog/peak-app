@@ -189,7 +189,8 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
       // by its range); a curtain keeps its type mark. Key = designators · qty · desc.
       const marks = planDesignatorMarks(
         figs.map((f) => ({ id: f.fig.id, key: f.fig.key, desc: f.desc, qty: f.qty, designator: f.designator, curtain: f.fig.curtain })),
-        DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || ""
+        DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || "",
+        data.digits
       );
       return (
         <PlanSheetFigure
