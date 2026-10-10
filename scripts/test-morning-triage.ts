@@ -26,7 +26,8 @@ import {
 } from "@/lib/triage/clock";
 import { normalizedTitle, tokens } from "@/lib/triage/text";
 import { parseTriageKey, triageKey } from "@/lib/triage/keys";
-import { feedErrorMessage } from "@/lib/triage/types";
+import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/triage/rank";
+import { feedErrorMessage, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -128,4 +129,68 @@ export async function triageFoundationChecks(ok: Ok): Promise<void> {
     feedErrorMessage("email") === "Email couldn't be read — list may be incomplete" && feedErrorMessage("assignment") === "Tasks couldn't be read — list may be incomplete",
     "types: the per-feed failure note"
   );
+}
+
+export function cand(key: string, source: TriageCandidate["source"], facts: TriageFact[], since = 1, extra: Partial<TriageCandidate> = {}): TriageCandidate {
+  return { key, source, title: key, sub: "", href: "/", since, facts, ...extra };
+}
+
+export async function triageRankChecks(ok: Ok): Promise<void> {
+  const table: Array<[TriageFact, number]> = [
+    [{ kind: "lead_sla_breached" }, 60],
+    [{ kind: "visit_today", startAt: MON_10 }, 50],
+    [{ kind: "task_overdue", days: 1 }, 45],
+    [{ kind: "customer_waiting", businessDays: 1 }, 40],
+    [{ kind: "quote_awaiting_approval" }, 35],
+    [{ kind: "lead_sla_due_soon", minutes: 90 }, 35],
+    [{ kind: "task_due_today" }, 30],
+    [{ kind: "call_todo" }, 30],
+    [{ kind: "portal_quote_review" }, 30],
+    [{ kind: "quote_sent_back" }, 30],
+    [{ kind: "renewal_past_due", days: 4 }, 30],
+    [{ kind: "lead_next_action_overdue" }, 25],
+    [{ kind: "task_at_risk" }, 15],
+    [{ kind: "linked_open_deal", label: "open quote $1" }, 10],
+    [{ kind: "call_names_me" }, 10],
+    [{ kind: "visit_flag", label: "Unverified address" }, 10],
+    [{ kind: "task_tier", tier: "high" }, 15],
+    [{ kind: "task_tier", tier: "low" }, -10],
+    [{ kind: "renewal_window", days: 20 }, 15],
+    [{ kind: "task_due_tomorrow" }, 15],
+    [{ kind: "customer_message_new", hours: 5 }, 10],
+    [{ kind: "lead_stale", days: 6 }, 10],
+  ];
+  for (const [f, p] of table) ok(pointsFor(f) === p, `rank: ${f.kind}${f.kind === "task_tier" ? `/${f.tier}` : ""} = ${p} points`);
+  ok(
+    pointsFor({ kind: "task_overdue", days: 3 }) === 55 && pointsFor({ kind: "task_overdue", days: 6 }) === 70 && pointsFor({ kind: "task_overdue", days: 40 }) === 70,
+    "rank: an overdue task gains +5/day, capped at +30"
+  );
+  ok(
+    pointsFor({ kind: "customer_waiting", businessDays: 2 }) === 50 &&
+      pointsFor({ kind: "customer_waiting", businessDays: 4 }) === 70 &&
+      pointsFor({ kind: "customer_waiting", businessDays: 12 }) === 70,
+    "rank: a waiting customer gains +10 per extra business day, capped at +30"
+  );
+  ok(scoreOf([{ kind: "task_due_today" }, { kind: "task_tier", tier: "low" }]) === 20, "rank: a row's score is the sum of its facts (Low tier subtracts)");
+  ok(
+    reasonOf([{ kind: "linked_open_deal", label: "open quote $18,400" }, { kind: "customer_waiting", businessDays: 2 }]) === "Customer waiting 2 business days · open quote $18,400",
+    "rank: the reason is the top two facts in words, biggest first"
+  );
+  ok(reasonOf([{ kind: "task_due_today" }, { kind: "task_tier", tier: "low" }]) === "Due today", "rank: a negative fact never shows as a reason");
+  ok(
+    factLabel({ kind: "customer_waiting", businessDays: 1 }) === "Customer waiting 1 business day" &&
+      factLabel({ kind: "lead_sla_due_soon", minutes: 45 }) === "First response due in 45 min" &&
+      factLabel({ kind: "lead_sla_due_soon", minutes: 180 }) === "First response due in 3h" &&
+      factLabel({ kind: "visit_today", startAt: MON_10 }) === "Site visit today 10:00 AM",
+    "rank: fact labels read plainly"
+  );
+  const ranked = rankCandidates([
+    cand("b", "task", [{ kind: "task_due_today" }], 5),
+    cand("a", "task", [{ kind: "task_due_today" }], 5),
+    cand("old", "task", [{ kind: "task_due_today" }], 1),
+    cand("undated", "task", [{ kind: "task_due_today" }], 0),
+    cand("top", "lead", [{ kind: "lead_sla_breached" }], 9),
+  ]);
+  ok(ranked.map((r) => r.key).join(",") === "top,old,a,b,undated", "rank: score desc → older first → key; an unknown age sorts after known ones");
+  ok(ranked[0].score === 60 && ranked[0].reason === "First response overdue", "rank: ranked rows carry their score and reason");
 }
