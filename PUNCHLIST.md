@@ -11692,6 +11692,6 @@ Open (Jeff-gated):
 - Review the work-hours defaults (Mon–Fri 8:00–5:00) and the three limits (45 min same area, 5 h daily drive incl.
   buffer, 21-day look-ahead) in Settings → Field; each person checks their own hours in Account.
 - Try a booking with one attendee whose calendar is connected and one whose isn't.
-- Decide who may edit / re-lead a scheduled visit or remove attendees (MASTER-QUESTIONS S1) — today anyone signed in.
+- Decide who may edit / re-lead a scheduled visit or remove attendees (MASTER-QUESTIONS T1) — today anyone signed in.
 - Later (out of scope here): Morning triage could surface visit conflicts through `TRIAGE_HOOKS`
   (`src/lib/triage/hooks.ts`).

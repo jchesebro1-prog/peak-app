@@ -5,7 +5,7 @@ import {
   nextPrefixedId,
   patchDoc,
 } from "@/db/doc-store";
-import { allUsers } from "@/lib/users";
+import { allUsers, getUser } from "@/lib/users";
 import {
   DEFAULT_DOMAIN,
   boxAddress,
@@ -51,7 +51,7 @@ import {
 } from "./api";
 import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
 import { icsMimeType } from "@/lib/ics";
-import { pickInviteMailbox, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
+import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
@@ -440,7 +440,9 @@ async function syncLabels(key: MailboxKey): Promise<void> {
  * cancellation, the mailbox that sent the person's invite while it is still
  * connected (the ORGANIZER must not change); else the scheduler's personal
  * mailbox, else the first connected shared box. The mailbox actually used is
- * returned so the visit records it. Returns the sent ids for stamping on the visit
+ * returned so the visit records it; a preferred mailbox whose owner is inactive
+ * is ignored, and an authorization failure from it retries once from the usual
+ * pick (sendWithMailboxFallback). Returns the sent ids for stamping on the visit
  * record (D76-I), or null when no mailbox can send. The X-Peak-Site-Visit
  * header keeps the import poll from re-recording the mail as an inbox thread.
  */
@@ -456,27 +458,36 @@ export async function sendSiteVisitInvite(opts: {
   ics: (organizerAddr: string) => string;
 }): Promise<{ gmailId: string; gmailThreadId: string; fromMailbox: string } | null> {
   const keys = await connectedMailboxKeys();
-  const key = pickInviteMailbox(keys, opts);
-  if (!key) return null;
-  const info = await getConnectionInfo(key);
-  if (!info) return null;
-  const icsText = opts.ics(info.address);
-  const raw = buildRaw({
-    from: info.address,
-    to: opts.toAddr,
-    subject: opts.subject,
-    body: opts.body,
-    attachments: [
-      {
-        name: "site-visit.ics",
-        mime: icsMimeType(icsText),
-        dataBase64: Buffer.from(icsText, "utf8").toString("base64"),
-      },
-    ],
-    extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },
+  // The preferred (original-sender) mailbox is ignored when its owner is no
+  // longer an active user; a token / grant failure sending from it retries once
+  // from the usual pick. The mailbox that actually sent is what gets recorded.
+  const isActive = async (k: string) => {
+    if (!k.startsWith("personal:")) return true;
+    const u = await getUser(k.slice("personal:".length));
+    return !!u && u.status === "active";
+  };
+  const out = await sendWithMailboxFallback(keys, opts, isActive, async (key) => {
+    const info = await getConnectionInfo(key);
+    if (!info) return null;
+    const icsText = opts.ics(info.address);
+    const raw = buildRaw({
+      from: info.address,
+      to: opts.toAddr,
+      subject: opts.subject,
+      body: opts.body,
+      attachments: [
+        {
+          name: "site-visit.ics",
+          mime: icsMimeType(icsText),
+          dataBase64: Buffer.from(icsText, "utf8").toString("base64"),
+        },
+      ],
+      extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },
+    });
+    const sent = await sendRaw(key, raw);
+    return { gmailId: sent.id, gmailThreadId: sent.threadId, fromMailbox: key };
   });
-  const sent = await sendRaw(key, raw);
-  return { gmailId: sent.id, gmailThreadId: sent.threadId, fromMailbox: key };
+  return out ? out.result : null;
 }
 
 /* ---- two-way archive (D74) ------------------------------------------------ */

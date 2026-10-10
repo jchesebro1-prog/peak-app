@@ -161,10 +161,16 @@ type Target = { people: string[]; startAt: number | null; endAt: number | null }
 type Change = { status: InviteStatus; ok: boolean; gmailId: string | null; eventId: string | null; fromMailbox: string | null; drop?: boolean };
 type SendIcs = InviteDeps["sendIcs"];
 
-async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; name: string }, deps?: Partial<InviteDeps>): Promise<InviteReport> {
+/** `skipPast` (a visit being deleted, D782): an entry whose copy is already in
+ *  the past — judged by the times THAT person was told — is left alone: no
+ *  CANCEL, no calendar delete, its history kept. Everyone else cancels as usual. */
+async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; name: string }, deps?: Partial<InviteDeps>, opts: { skipPast?: boolean } = {}): Promise<InviteReport> {
   const d: InviteDeps = { ...defaultDeps(), ...deps };
-  const plan = planInviteChanges(normalizeInvites(rec), target);
-  const results: RecipientResult[] = plan.keep.map((e) => ({ name: e.name, action: "keep", status: e.channel === "calendar" ? "calendar" : "sent" }));
+  const now = d.now();
+  const plan0 = planInviteChanges(normalizeInvites(rec), target);
+  const isPast = (e: VisitInviteRecipient) => !!opts.skipPast && (e.endAt || e.startAt) < now;
+  const plan = { ...plan0, cancel: plan0.cancel.filter((e) => !isPast(e)), keep: [...plan0.keep, ...plan0.cancel.filter(isPast)] };
+  const results: RecipientResult[] = plan.keep.map((e) => ({ name: e.name, action: "keep", status: e.channel === "calendar" ? "calendar" : "sent", channel: e.channel }));
   if (!plan.add.length && !plan.update.length && !plan.cancel.length) return { status: leadStatus(rec, results), recipients: results };
 
   // Every send is persisted as soon as it is made (after each person, so a
@@ -196,7 +202,10 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
     // "no grant"); null = this person has no connected calendar.
     const strictKeyOf = async (name: string): Promise<string | null> => {
       const u = userOf(name);
-      if (!u || !d.gmailEnabled()) return null;
+      // A user missing from the roster read is a retryable failure (the caller
+      // reads "failed" and keeps the entry), never "no grant" — which would drop it.
+      if (!u) throw new Error("no such team member: " + name);
+      if (!d.gmailEnabled()) return null;
       return await d.calendarKeyFor(u.id);
     };
     const keyOf = async (name: string): Promise<string | null> => {
@@ -208,7 +217,6 @@ async function syncInvites(rec: SiteVisit, target: Target, me: { id: string; nam
     };
     const cal: VisitCalendarApi = { insertEvent: d.insertEvent, updateEvent: d.updateEvent, deleteEvent: d.deleteEvent, log: d.log };
     const { title, body, location } = details(rec, me);
-    const now = d.now();
     const uid = visitUid(rec.id);
     const startAt = target?.startAt ?? 0;
     const endAt = target?.endAt ?? 0;
@@ -353,17 +361,13 @@ export async function dispatchVisitInvite(rec: SiteVisit, me: { id: string; name
   }
 }
 
-/** The visit is being deleted: everyone invited gets a cancellation — unless
- *  the visit is already over (D782): a past visit stays in people's calendar
- *  history, and no one is emailed about deleting something that happened. */
+/** The visit is being deleted: everyone invited gets a cancellation — except
+ *  anyone whose copy is already in the past (D782), judged by the times that
+ *  person was told: it stays in their calendar history, and no one is emailed
+ *  about deleting something that happened. */
 export async function cancelVisitInvites(rec: SiteVisit, me: { id: string; name: string }, deps?: Partial<InviteDeps>): Promise<InviteReport> {
   try {
-    const now = (deps?.now ?? Date.now)();
-    if ((rec.endAt ?? rec.startAt ?? 0) < now) {
-      const recipients: RecipientResult[] = normalizeInvites(rec).map((e) => ({ name: e.name, action: "keep", status: e.channel === "calendar" ? "calendar" : "sent", channel: e.channel }));
-      return { status: leadStatus(rec, recipients), recipients };
-    }
-    return await syncInvites(rec, null, me, deps);
+    return await syncInvites(rec, null, me, deps, { skipPast: true });
   } catch (err) {
     (deps?.log ?? defaultDeps().log)("[site-visit] invite cancel failed:", err);
     return { status: "failed", recipients: [] };

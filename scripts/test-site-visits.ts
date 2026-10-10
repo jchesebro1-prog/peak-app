@@ -19,7 +19,7 @@ import { buildIcs, icsMimeType } from "@/lib/ics";
 import type { Office } from "@/lib/settings";
 import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
-import { inviteSummary, normalizeInvites, pickInviteMailbox, planInviteChanges, visitEventIds, visitInviteGmailIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
+import { inviteSummary, isMailboxAuthError, normalizeInvites, pickInviteMailbox, planInviteChanges, visitEventIds, visitInviteGmailIds, visitUid, sendWithMailboxFallback, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { busyBlocks, fmtBusy, fmtBusyRange, OTHERS_EVENT_LABEL, toBusyVisit, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
 import { checkVisit, stopConflicts, type StopCheckInput } from "@/lib/visit-plan/check";
 import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, weekdayOf, workWindow } from "@/lib/visit-plan/hours";
@@ -1071,8 +1071,8 @@ export async function siteVisitsFinalFixChecks(ok: Ok): Promise<void> {
      !!m2.sent.find((x) => x.to === "sam@peak.test")?.ics.includes("ORGANIZER:mailto:bob@peak.test"),
     "site-visits fix: with the original mailbox disconnected it falls back, records the mailbox actually used, and names it as ORGANIZER");
   const svSend = fnBlock(read("src/lib/gmail/bridge.ts"), "sendSiteVisitInvite");
-  ok(/pickInviteMailbox\(keys, opts\)/.test(svSend) && /preferMailbox\?: string \| null/.test(svSend) && /fromMailbox: key/.test(svSend),
-    "site-visits fix: the Gmail bridge picks the sending mailbox through pickInviteMailbox (preferred mailbox first)");
+  ok(/sendWithMailboxFallback\(keys, opts,/.test(svSend) && /preferMailbox\?: string \| null/.test(svSend) && /fromMailbox: key/.test(svSend),
+    "site-visits fix: the Gmail bridge picks the sending mailbox through the shared helper (preferred mailbox first)");
 
   // 3. agendaConflicts: one busy build per call, Set-based copy lookups — same answers, linear-ish time.
   const mkData = (nVisits: number, nEvents: number, nStops: number) => {
@@ -1213,10 +1213,62 @@ export async function siteVisitsFinalFixChecks(ok: Ok): Promise<void> {
   ok(snaps.length >= 2 && snaps[0].names === "Dana" && snaps[0].mailSoFar === 0 && snaps[snaps.length - 1].names === "Dana,Jeff",
     "site-visits fix: the invites are saved after each recipient (Dana's event id is stored before Jeff's send)");
 
+  // 10. Round 2 — a delete judges each person by the times THEY were told.
+  const mixed = () => [
+    rcpt("Dana", { channel: "calendar", eventId: "g-1" }), // told at(9)-at(10): past
+    rcpt("Jeff", { startAt: at(13), endAt: at(14) }), // a failed update left Jeff holding future times
+  ];
+  const hm = inviteHarness({ now: () => at(12) });
+  const rm2 = await cancelVisitInvites(sv("SV-R1", { startAt: at(9), endAt: at(10), invites: mixed() }), me, hm.deps);
+  ok(hm.calls.length === 0 && hm.mail.length === 1 && hm.mail[0].to === "jeff@peak.test" && hm.mail[0].ics.includes("METHOD:CANCEL") &&
+     rm2.recipients.find((r) => r.name === "Jeff")?.action === "cancel" && rm2.recipients.find((r) => r.name === "Dana")?.action === "keep",
+    "site-visits round 2: a visit moved into the past still cancels the one person whose copy holds future times");
+  const hm2 = inviteHarness({ now: () => at(12) });
+  await cancelVisitInvites(sv("SV-R2", { startAt: at(9), endAt: at(10), invites: [rcpt("Dana", { channel: "calendar", eventId: "g-1" }), rcpt("Jeff", { endAt: 0, startAt: at(9, 30) })] }), me, hm2.deps);
+  ok(hm2.calls.length === 0 && hm2.mail.length === 0, "site-visits round 2: a genuinely past visit cancels nobody (an entry with no end is judged by its start)");
+
+  // 11. Round 2 — a missing user is a retryable failure, never a dropped copy.
+  const hu = inviteHarness({ users: async () => [{ id: "u-jeff", name: "Jeff", email: "jeff@peak.test" }] });
+  const calInv = () => [rcpt("Ghost", { channel: "calendar", eventId: "g-7", startAt: at(13), endAt: at(14) })];
+  const ru = await cancelVisitInvites(sv("SV-U1", { assignedTo: "Jeff", startAt: at(13), endAt: at(14), invites: calInv() }), me, { ...hu.deps, now: () => at(8) });
+  ok(ru.recipients.find((r) => r.name === "Ghost")?.status === "failed" && !!hu.saved()?.invites.some((e) => e.name === "Ghost"),
+    "site-visits round 2: cancelling a calendar copy whose user is missing reads failed and keeps the entry for the next save");
+  const hu2 = inviteHarness({ users: async () => [{ id: "u-jeff", name: "Jeff", email: "jeff@peak.test" }] });
+  const ru2 = await dispatchVisitInvite(sv("SV-U2", { assignedTo: "Jeff", attendees: ["Ghost"], startAt: at(15), endAt: at(16), invites: calInv() }), me, hu2.deps);
+  ok(ru2.recipients.find((r) => r.name === "Ghost")?.status === "failed" && hu2.saved()?.invites.find((e) => e.name === "Ghost")?.startAt === at(13),
+    "site-visits round 2: updating a calendar copy whose user is missing reads failed, not reconnect, and stays as last told");
+
+  // 12. Round 2 — the original sender's auth failure falls back once; an inactive owner's mailbox is ignored.
+  ok(isMailboxAuthError(new Error("Gmail API /messages/send → 401 {}")) && isMailboxAuthError(new Error("Token refresh failed: 400 {\"error\":\"invalid_grant\"}")) &&
+     isMailboxAuthError(new Error("Mailbox not connected: personal:u-jeff")) && !isMailboxAuthError(new Error("Gmail API /messages/send → 500 oops")) &&
+     !isMailboxAuthError(new Error("Gmail API /messages/send → no answer in time")),
+    "site-visits round 2: only token / grant failures count as an auth error");
+  const attempts: string[] = [];
+  const authFail = async (key: string) => {
+    attempts.push(key);
+    if (key === "personal:u-jeff") throw new Error("Token refresh failed: 400 invalid_grant");
+    return { fromMailbox: key };
+  };
+  const fb = await sendWithMailboxFallback(["personal:u-jeff", "personal:u-bob"], { preferMailbox: "personal:u-jeff", schedulerUserId: "u-bob" }, async () => true, authFail);
+  ok(fb?.key === "personal:u-bob" && attempts.join() === "personal:u-jeff,personal:u-bob",
+    "site-visits round 2: a revoked original mailbox retries once from the scheduler's box and reports the box actually used");
+  attempts.length = 0;
+  let threw = "";
+  try {
+    await sendWithMailboxFallback(["personal:u-jeff", "personal:u-bob"], { preferMailbox: "personal:u-jeff", schedulerUserId: "u-bob" }, async () => true, async (k) => { attempts.push(k); throw new Error("Gmail API /messages/send → 500 x"); });
+  } catch (e) { threw = (e as Error).message; }
+  ok(attempts.length === 1 && threw.includes("500"), "site-visits round 2: a non-auth failure is not retried from another mailbox");
+  attempts.length = 0;
+  const inactive = await sendWithMailboxFallback(["personal:u-jeff", "personal:u-bob"], { preferMailbox: "personal:u-jeff", schedulerUserId: "u-bob" }, async (k) => k !== "personal:u-jeff", authFail);
+  ok(inactive?.key === "personal:u-bob" && attempts.join() === "personal:u-bob", "site-visits round 2: a preferred mailbox whose owner is inactive is never tried");
+  const bridge = fnBlock(read("src/lib/gmail/bridge.ts"), "sendSiteVisitInvite");
+  ok(/sendWithMailboxFallback\(/.test(bridge) && /status === "active"/.test(bridge), "site-visits round 2: the Gmail bridge sends through the fallback helper and checks the owner is active");
+
   // 9. Docs.
   const dec = read("DECISIONS.md");
   ok(dec.includes("once per read window (twice when the visit day is outside the look-ahead)") && !dec.includes("each person's calendar read once,"),
     "site-visits fix: D780 says how often each calendar is read");
   ok(/## D782\. /.test(dec), "site-visits fix: the past-visit delete rule is logged (D782)");
-  ok(read("MASTER-QUESTIONS.md").includes("Anyone signed in can edit/re-lead a scheduled visit or remove attendees"), "site-visits fix: the edit-permission question is on Jeff's list");
+  ok(dec.includes("keep that past-dated copy") && dec.includes("retries once"), "site-visits round 2: D782 / D783 carry the per-person and fallback clauses");
+  ok(read("MASTER-QUESTIONS.md").includes("- **T1.** **Who can edit a scheduled visit.**") && !read("MASTER-QUESTIONS.md").includes("- **S1.** **Who can edit"), "site-visits fix: the edit-permission question is on Jeff's list (T1, no clash with the short list's S1)");
 }

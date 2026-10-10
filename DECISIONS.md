@@ -10718,7 +10718,9 @@ stored value reads as its default.
 Deleting a visit whose end (or, with no end, its start) is already past sends no cancellations: no `METHOD:CANCEL`
 email and no calendar delete, for anyone. The visit stays in each person's calendar history, and no one is emailed
 about removing something that already happened. A future or ongoing visit cancels everyone's copy as before
-(`cancelVisitInvites`).
+(`cancelVisitInvites`). It is judged per person, by the times that person was told: a copy whose end (or, with no
+end, start) is already past is left alone, while anyone still holding future times (an update that failed) is
+cancelled — so people whose copy already moved to the past keep that past-dated copy.
 
 ## D783. Updates come from the original sender; a disconnected calendar (#326, 2026-10-10)
 
@@ -10730,3 +10732,8 @@ disconnected — reconnect it to update their copy" (kept, retried); a removed p
 deleted is dropped from the record and the summary says to remove it by hand. Every Gmail id sent per person
 (invite, updates, cancellations; a removed person's on the visit) seeds the Gmail import's dedup. Invites are saved
 after each person, so a drive sync mid-dispatch sees new event ids. Scheduling refuses a span over 24 h, like editing.
+If sending from the original sender's mailbox fails on authorization (401, invalid_grant, revoked, no stored
+connection) it retries once without the preference — the saver's personal box, else a shared box — and records the
+mailbox actually used; a timeout is never retried, and an original mailbox whose owner is no longer an active user is
+ignored up front. A calendar copy whose person is missing from the roster reads "failed" and is kept to retry (not
+"reconnect", and not dropped).

@@ -169,6 +169,45 @@ export function pickInviteMailbox(keys: readonly string[], opts: { preferMailbox
   return keys.find((k) => !k.startsWith("personal:")) ?? null;
 }
 
+/** A token / grant failure on a mailbox (expired or revoked authorization, or
+ *  a mailbox with no stored connection) — as opposed to Gmail refusing or timing
+ *  out on one message. A timeout is never an auth error: that send may have gone. */
+export function isMailboxAuthError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (/no answer in time/i.test(msg)) return false;
+  return /→ 401\b|invalid_grant|invalid_token|invalid_credentials|unauthori[sz]ed|revoked|Mailbox not connected|Token refresh failed: 40[01]/i.test(msg);
+}
+
+/**
+ * Send one invite mail. The preferred mailbox (the one that sent the person's
+ * original invite) is ignored when its owner is no longer active, and when a
+ * send from it fails on authorization the send is retried ONCE without the
+ * preference (scheduler's own box, else a shared one). Any other failure
+ * propagates. Returns the mailbox actually used so the visit records it, or
+ * null when no mailbox can send. `send` builds the message for the key it is given.
+ */
+export async function sendWithMailboxFallback<T>(
+  keys: readonly string[],
+  opts: { preferMailbox?: string | null; schedulerUserId: string | null },
+  isActive: (key: string) => Promise<boolean>,
+  send: (key: string) => Promise<T | null>
+): Promise<{ key: string; result: T } | null> {
+  let prefer = opts.preferMailbox ?? null;
+  if (prefer && !(await isActive(prefer))) prefer = null;
+  const key = pickInviteMailbox(keys, { preferMailbox: prefer, schedulerUserId: opts.schedulerUserId });
+  if (!key) return null;
+  try {
+    const result = await send(key);
+    return result === null ? null : { key, result };
+  } catch (err) {
+    if (!prefer || key !== prefer || !isMailboxAuthError(err)) throw err;
+    const alt = pickInviteMailbox(keys, { preferMailbox: null, schedulerUserId: opts.schedulerUserId });
+    if (!alt || alt === key) throw err;
+    const result = await send(alt);
+    return result === null ? null : { key: alt, result };
+  }
+}
+
 export function recipientLine(r: RecipientResult): string {
   if (r.action === "keep") return "";
   const noun = r.action === "cancel" ? "cancellation" : r.action === "update" ? "update" : "invite";
