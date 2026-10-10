@@ -3,6 +3,8 @@ import {
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectRecord } from "@/lib/stores/projects";
 import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
+import { tierSizeOf } from "@/lib/task-plan/fields";
+import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
@@ -70,6 +72,10 @@ export type TaskRecord = {
   leadId?: string | null;
   /** the comms thread the task was created from */
   threadId?: string | null;
+  /** Spec 2026-10-09 auto task calendar — tier and size; written only when
+   *  set, so a pre-spec doc reads identically. Blank = Normal, 1 h. */
+  priority?: TaskTier;
+  size?: TaskSize;
   /** #323 — the Krisp meeting this task was filed from (src/lib/meetings/). */
   meetingId?: string | null;
   /** #323 — set on a "Waiting on customer" item: the customer owes this.
@@ -320,7 +326,7 @@ export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRe
     notes: raw.notes ?? "", createdBy: raw.createdBy ?? "",
     createdAt: at, updatedAt: raw.updatedAt ?? at, doneAt: raw.doneAt ?? null,
   };
-  const out: TaskRecord = { ...t, ...taskLinksOf(raw) };
+  const out: TaskRecord = { ...t, ...taskLinksOf(raw), ...tierSizeOf(raw) };
   // #323 — written only when set, so pre-#323 tasks read identically (no null keys).
   const meetingId = taskLinkId(raw.meetingId);
   if (meetingId) out.meetingId = meetingId;
@@ -455,7 +461,7 @@ export async function setTaskStatus(id: string, status: TaskStatus): Promise<Tas
 
 export async function updateTask(
   id: string,
-  patch: Partial<Pick<TaskRecord, "title" | "section" | "assigneeUserId" | "assigneeName" | "dueAt" | "notes">>,
+  patch: Partial<Pick<TaskRecord, "title" | "section" | "assigneeUserId" | "assigneeName" | "dueAt" | "notes" | "priority" | "size">>,
 ): Promise<TaskRecord | null> {
   return patchDoc<TaskRecord>("tasks", id, (t) => {
     Object.assign(t, patch);

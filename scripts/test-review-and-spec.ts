@@ -11317,6 +11317,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 
 
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
+import { autoCalFieldsChecks } from "./test-auto-calendar";
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -11611,6 +11612,7 @@ seeded()
   .then(() => meetings323EverywherePins(ok))
   .then(() => meetings323EverywhereChecks(ok))
   .then(() => meetings323FinalChecks(ok))
+  .then(() => autoCalFieldsChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

@@ -1,4 +1,6 @@
 import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { tierSizeOf } from "@/lib/task-plan/fields";
+import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 
 /* ------------------------------------------------------------------ *
  * Assignments (D93) — the ONE new record behind My Queue.
@@ -46,6 +48,9 @@ export type Assignment = {
   /** Provenance when a pipeline suggested it (iMessage/Krisp) and a human
    *  confirmed — free text, e.g. "iMessage from Jena, 2026-07-19". */
   source: string;
+  /** Spec 2026-10-09 auto task calendar — written only when set. */
+  priority?: TaskTier;
+  size?: TaskSize;
 };
 
 export async function allAssignments(): Promise<Assignment[]> {
@@ -71,6 +76,8 @@ export async function createAssignment(input: {
   dueDate?: number;
   link?: AssignmentLink;
   source?: string;
+  priority?: unknown;
+  size?: unknown;
 }): Promise<Assignment> {
   const rec: Assignment = {
     id: uid("as-"),
@@ -84,6 +91,7 @@ export async function createAssignment(input: {
     doneAt: null,
     doneVia: null,
     source: (input.source || "").trim(),
+    ...tierSizeOf(input),
   };
   await upsertDoc<Assignment>("assignments", rec);
   return rec;
@@ -103,7 +111,7 @@ export async function setAssignmentDone(
 
 export async function updateAssignment(
   id: string,
-  patch: Partial<Pick<Assignment, "title" | "assignee" | "dueDate" | "link">>
+  patch: Partial<Pick<Assignment, "title" | "assignee" | "dueDate" | "link" | "priority" | "size">>
 ): Promise<void> {
   await patchDoc<Assignment>("assignments", id, (d) => {
     Object.assign(d, patch);
