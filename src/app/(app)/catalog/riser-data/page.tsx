@@ -17,12 +17,14 @@ export default async function RiserDataPage() {
       <p style={{ color: "#8c919c", fontSize: 13, margin: "0 0 10px", maxWidth: 760 }}>
         Review the Bray designator code and riser tag defaults (Box · Face · Mount · Height · P/D) for lighting-control
         parts in one pass. <a href="/catalog/riser-data/export" style={link}>Download the sheet</a>, fix the highlighted
-        columns in Excel or Sheets, upload it, check the preview, then apply.
+        columns in Excel or Sheets, upload it, check the preview, then apply. The <strong>Cables</strong> tab lists the
+        per-length cables your wire types and Grid routes use, with their outside diameter (inches) for the conduit-fill
+        check.
       </p>
       <p style={{ color: "#8c919c", fontSize: 13, margin: "0 0 16px", maxWidth: 760 }}>
-        A blank part is pre-filled from the suggestion rules (Source: suggested) — nothing is saved until you apply it. In
-        the editable columns, a blank cell leaves the part alone and a <code>-</code> clears the saved value. Keep the SKU
-        column as it is.
+        A blank part is pre-filled from the suggestion rules, and a cable diameter from the manufacturer datasheet noted
+        in OD source (Source: suggested) — nothing is saved until you apply it. In the editable columns, a blank cell
+        leaves the part alone and a <code>-</code> clears the saved value. Keep the SKU column as it is.
       </p>
       <RiserDataClient />
     </div>

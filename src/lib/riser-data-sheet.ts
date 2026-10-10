@@ -7,11 +7,17 @@
  * Cell rules on upload: blank = leave unchanged, `-` = clear, anything else is
  * cleaned (cleanTypeCode / cleanTagFields) and an invalid cell is a per-row
  * error — never guessed, never truncated.
+ *
+ * #328 B1 adds the Cables tab: per-length cable parts a wire type or a Grid
+ * route names, with one editable column (Outside diameter (in) → `cableOdIn`)
+ * pre-filled from the researched table in conduit-riser/cable-od.ts.
  */
 import { cleanTypeCode } from "@/lib/design/device-types";
 import { cleanTagFields, TAG_LIMITS, type TagFields } from "@/lib/design/conduit-riser/tags";
 import { suggestTagDefaults } from "@/lib/design/conduit-riser/suggest-tags";
 import { partModel } from "@/lib/catalog-rename/sku";
+import { CABLE_OD_MAX_IN, cleanCableOd, formatCableOd, suggestCableOd } from "@/lib/design/conduit-riser/cable-od";
+import { isPerLengthUnit } from "@/lib/design/grid-bom";
 
 /** Export and parse agree on these names. */
 export const RISER_DEVICE_HEADERS = [
@@ -48,6 +54,8 @@ export const RISER_LIGHTING_TYPES: readonly string[] = ["control-networking", "d
 export type RiserPartLike = {
   sku: string;
   manufacturer?: string;
+  /** A catalog part's brand field (`manufacturer` is the Grid-library spelling). */
+  mfr?: string;
   manufacturerModelNumber?: string;
   manufacturerPartNumber?: string;
   desc: string;
@@ -107,7 +115,7 @@ export function riserDataRows(parts: readonly RiserPartLike[], typeKeyOf: (p: Ri
     const { cells, had, filled } = cellsOf(p);
     out.push({
       sku: p.sku,
-      manufacturer: text(p.manufacturer),
+      manufacturer: text(p.manufacturer) || text(p.mfr),
       model: partModel(p),
       desc: p.desc,
       typeKey,
@@ -159,8 +167,12 @@ function levenshtein(a: string, b: string): number {
 }
 
 /** Unrecognized headers (4+ letters, same first letter) that look like a misspelled editable column — "Hieght", "Designator". */
-function misspelledHeaderNotes(header: readonly unknown[]): string[] {
-  const known = new Set(RISER_DEVICE_HEADERS.map(headerKey));
+function misspelledHeaderNotes(
+  header: readonly unknown[],
+  knownHeaders: readonly string[] = RISER_DEVICE_HEADERS,
+  editHeaders: readonly string[] = EDIT_COLUMNS.map((e) => e.header)
+): string[] {
+  const known = new Set(knownHeaders.map(headerKey));
   const notes: string[] = [];
   for (const raw of header) {
     const shown = String(raw ?? "").trim();
@@ -168,11 +180,11 @@ function misspelledHeaderNotes(header: readonly unknown[]): string[] {
     const n = normHeader(shown);
     if (!n) continue;
     if (n.length < 4) continue; // "ID", "PD": too short to tell a typo from another column
-    const hit = EDIT_COLUMNS.find((e) => {
-      const c = normHeader(e.header);
+    const hit = editHeaders.find((h) => {
+      const c = normHeader(h);
       return n[0] === c[0] && (levenshtein(n, c) <= Math.max(1, Math.ceil(c.length / 4)) || c.includes(n));
     });
-    if (hit) notes.push(`Column "${shown}" isn't recognized — did you mean "${hit.header}"? It was ignored.`);
+    if (hit) notes.push(`Column "${shown}" isn't recognized — did you mean "${hit}"? It was ignored.`);
   }
   return notes;
 }
@@ -324,6 +336,157 @@ export function planRiserDataApply(parsed: readonly ParsedRow[], partsBySku: Rea
     if ((b.designatorCode || "") !== (a.designatorCode || "")) patch.designatorCode = a.designatorCode ?? null;
     if (!sameTag(b.tagDefaults, a.tagDefaults)) patch.tagDefaults = a.tagDefaults ?? null;
     if (Object.keys(patch).length) changes.push({ sku, patch, before: b, after: a });
+  }
+  return { changes, unknown };
+}
+
+// =====================================================================
+// #328 B1 — the Cables tab
+// =====================================================================
+
+export const RISER_CABLE_SHEET_NAME = "Cables";
+export const RISER_CABLE_OD_HEADER = "Outside diameter (in)";
+export const RISER_CABLE_HEADERS = ["Manufacturer", "Model", "SKU", "Description", RISER_CABLE_OD_HEADER, "Source", "OD source"] as const;
+
+export type CablePartLike = {
+  sku: string;
+  manufacturer?: string;
+  mfr?: string;
+  manufacturerModelNumber?: string;
+  manufacturerPartNumber?: string;
+  desc: string;
+  unit?: string;
+  cableOdIn?: number;
+};
+
+export type CableExportRow = {
+  sku: string;
+  manufacturer: string;
+  model: string;
+  desc: string;
+  /** The cell: the stored diameter, else the researched one, else blank. */
+  od: string;
+  source: RiserSource;
+  /** The datasheet URL behind a researched value (also shown when the stored value equals it); blank otherwise. */
+  odSource: string;
+};
+
+/**
+ * Cables rows: per-length parts named in `referenced` (a wire type's cableSku
+ * or a Grid route / RiserLink part — the caller resolves renames and passes the
+ * live SKUs). A stored diameter is never replaced; a blank is pre-filled from
+ * the researched table (Source = suggested), or left blank when none verified.
+ */
+export function riserCableRows(parts: readonly CablePartLike[], referenced: ReadonlySet<string>): CableExportRow[] {
+  const out: CableExportRow[] = [];
+  for (const p of parts) {
+    if (!referenced.has(p.sku) || !isPerLengthUnit(p.unit || "")) continue;
+    const sug = suggestCableOd(p);
+    const stored = cleanCableOd(p.cableOdIn);
+    const od = stored ?? sug?.odIn;
+    out.push({
+      sku: p.sku,
+      manufacturer: text(p.manufacturer) || text(p.mfr),
+      model: partModel(p),
+      desc: p.desc,
+      od: od === undefined ? "" : formatCableOd(od),
+      source: stored !== null ? "current" : sug ? "suggested" : "—",
+      odSource: sug && (stored === null || stored === sug.odIn) ? sug.source : "",
+    });
+  }
+  return out;
+}
+
+/** One Cables row as cells, in RISER_CABLE_HEADERS order. */
+export function riserCableRowCells(r: CableExportRow): string[] {
+  return [r.manufacturer, r.model, r.sku, r.desc, r.od, r.source, r.odSource];
+}
+
+/** undefined = leave, null = clear, number = set. */
+export type ParsedCableRow = { row: number; sku: string; od?: number | null };
+export type CableParseResult = { rows: ParsedCableRow[]; errors: { row: number; message: string }[]; notes: string[] };
+
+export const RISER_CABLE_NO_SKU = "The Cables tab needs a SKU column.";
+export const RISER_CABLE_NO_COLUMNS = `The Cables tab needs a "${RISER_CABLE_OD_HEADER}" column.`;
+
+export function parseRiserCablesSheet(grid: readonly (readonly unknown[])[]): CableParseResult {
+  const rows: ParsedCableRow[] = [];
+  const errors: { row: number; message: string }[] = [];
+  const header = grid[0] ?? [];
+  const notes = misspelledHeaderNotes(header, RISER_CABLE_HEADERS, [RISER_CABLE_OD_HEADER]);
+  const col = new Map<string, number>();
+  header.forEach((h, i) => {
+    const k = headerKey(h);
+    if (k && !col.has(k)) col.set(k, i);
+  });
+  const skuCol = col.get(headerKey("SKU"));
+  if (skuCol === undefined) return { rows, errors: [{ row: 1, message: RISER_CABLE_NO_SKU }], notes };
+  const odCol = col.get(headerKey(RISER_CABLE_OD_HEADER));
+  if (odCol === undefined) return { rows, errors: [{ row: 1, message: RISER_CABLE_NO_COLUMNS }], notes };
+
+  const seen = new Set<string>();
+  for (let r = 1; r < grid.length; r++) {
+    const raw = grid[r] ?? [];
+    const rowNo = r + 1;
+    const sku = cellText(raw[skuCol]);
+    const v = editText(raw[odCol]);
+    if (!sku && !v) continue;
+    if (!sku) {
+      errors.push({ row: rowNo, message: "Missing SKU." });
+      continue;
+    }
+    if (seen.has(sku)) {
+      errors.push({ row: rowNo, message: `Duplicate SKU ${sku} — only the first row is used.` });
+      continue;
+    }
+    seen.add(sku);
+    if (!v) rows.push({ row: rowNo, sku });
+    else if (v === "-") rows.push({ row: rowNo, sku, od: null });
+    else {
+      const od = cleanCableOd(v);
+      if (od === null) errors.push({ row: rowNo, message: `${RISER_CABLE_OD_HEADER} "${v}" must be a number above 0 and at most ${CABLE_OD_MAX_IN.toFixed(1)}.` });
+      else rows.push({ row: rowNo, sku, od });
+    }
+  }
+  return { rows, errors, notes };
+}
+
+export type CableChange = {
+  /** The part's own (current) SKU. */
+  sku: string;
+  /** null clears. */
+  patch: { cableOdIn: number | null };
+  before: number | undefined;
+  after: number | undefined;
+};
+export type CablePlan = { changes: CableChange[]; unknown: string[] };
+
+/** The changes a Cables Apply would make; a row that changes nothing is dropped. Last row for a part wins. */
+export function planRiserCablesApply(parsed: readonly ParsedCableRow[], partsBySku: ReadonlyMap<string, CablePartLike>): CablePlan {
+  const unknown: string[] = [];
+  const order: string[] = [];
+  const before = new Map<string, number | undefined>();
+  const after = new Map<string, number | undefined>();
+  for (const row of parsed) {
+    const part = partsBySku.get(row.sku);
+    if (!part) {
+      if (!unknown.includes(row.sku)) unknown.push(row.sku);
+      continue;
+    }
+    if (!before.has(part.sku)) {
+      const cur = cleanCableOd(part.cableOdIn) ?? undefined;
+      before.set(part.sku, cur);
+      after.set(part.sku, cur);
+      order.push(part.sku);
+    }
+    if (row.od === null) after.set(part.sku, undefined);
+    else if (row.od !== undefined) after.set(part.sku, row.od);
+  }
+  const changes: CableChange[] = [];
+  for (const sku of order) {
+    const b = before.get(sku);
+    const a = after.get(sku);
+    if (b !== a) changes.push({ sku, patch: { cableOdIn: a ?? null }, before: b, after: a });
   }
   return { changes, unknown };
 }

@@ -11641,6 +11641,7 @@ seeded()
   .then(() => riserPhase2A1Checks())
   .then(() => riserPhase2A2Checks())
   .then(() => riserPhase2A3Checks())
+  .then(() => riserPhase2B1Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -64780,4 +64781,205 @@ async function riserPhase2A3Checks(): Promise<void> {
   ok(/Fill symbols from Bray&apos;s legend/.test(card) && /brayWireSymbols\(aligned\)/.test(card), "#328 A3: the Wire types card has the Fill symbols button wired to the pure helper");
   const fillBody = card.slice(card.indexOf("const fillSymbols"), card.indexOf("const onSave"));
   ok(!/saveWireTypesAction/.test(fillBody), "#328 A3: the fill only edits the form — Save is a separate step");
+}
+
+/* ---- #328 B1: cable outside diameter + researched suggestions + Cables tab ---- */
+async function riserPhase2B1Checks(): Promise<void> {
+  const J = (v: unknown) => JSON.stringify(v);
+  const fs = await import("node:fs");
+  const OD = await import("@/lib/design/conduit-riser/cable-od");
+  const R = await import("@/lib/riser-data-sheet");
+  const V = await import("@/lib/riser-data-preview");
+  const PF = await import("@/app/(app)/catalog/part-form");
+
+  // ---- 1. the cleaner
+  ok(OD.cleanCableOd(0.274) === 0.274 && OD.cleanCableOd("0.19") === 0.19 && OD.cleanCableOd(" .5 ") === 0.5 && OD.cleanCableOd(3) === 3 && OD.cleanCableOd("1.23456") === 1.235, "#328 B1 od: a positive number up to 3.0 is kept, rounded to 3 decimals");
+  ok([0, -1, 3.0004 + 0.001, "3.01", "abc", "", "1,5", "0.19 in", null, undefined, NaN, Infinity, true].every((v) => OD.cleanCableOd(v) === null), "#328 B1 od: zero, negative, over 3.0, text, blank and non-finite are refused");
+  ok(OD.formatCableOd(0.19) === "0.19" && OD.formatCableOd(0.274) === "0.274" && OD.formatCableOd(1) === "1", "#328 B1 od: a diameter prints without trailing zeros");
+
+  // ---- 2. the researched table is exactly the resolved rows of the committed research
+  const research = JSON.parse(fs.readFileSync("docs/specs-seed/cable-od-2026-10-10.json", "utf8")) as Array<{ manufacturer: string; model: string; odIn: number | null; source: string; resolved: boolean }>;
+  const resolved = research.filter((r) => r.resolved);
+  const unresolved = research.filter((r) => !r.resolved);
+  ok(resolved.length === 30 && unresolved.length === 4 && OD.CABLE_OD_SUGGESTIONS.length === resolved.length, "#328 B1 suggestions: one table row per resolved research row (30), none for the 4 unresolved");
+  ok(resolved.every((r) => OD.CABLE_OD_SUGGESTIONS.some((e) => e.odIn === r.odIn && e.source === r.source && e.models.some((m) => OD.normCableKey(r.model.replace(/^ProPlex /, "")).startsWith(OD.normCableKey(m))))), "#328 B1 suggestions: every resolved research row is in the table with its value and its datasheet URL");
+  ok(OD.CABLE_OD_SUGGESTIONS.every((e) => /^https:\/\//.test(e.source) && e.odIn > 0 && e.odIn <= OD.CABLE_OD_MAX_IN && resolved.some((r) => r.source === e.source && r.odIn === e.odIn)), "#328 B1 suggestions: every table row cites a datasheet URL and carries a research value in range");
+  const unresolvedPart = (r: { manufacturer: string; model: string }) => ({ sku: `${r.manufacturer}:${r.model.replace(/^ProPlex /, "")}`, mfr: r.manufacturer, manufacturerModelNumber: r.model.replace(/^ProPlex /, ""), desc: "" });
+  ok(unresolved.every((r) => OD.suggestCableOd(unresolvedPart(r)) === null), "#328 B1 suggestions: the four unverified cables (1872A, EchoConnect singles, PC224P-PLN, PC4P) suggest nothing");
+
+  // ---- 3. matching
+  const sug = (p: Partial<import("@/lib/design/conduit-riser/cable-od").CableOdPartLike>) => OD.suggestCableOd({ sku: "X", desc: "", ...p })?.odIn ?? null;
+  ok(sug({ mfr: "Belden", manufacturerModelNumber: "8471" }) === 0.274 && sug({ manufacturer: "belden", manufacturerPartNumber: "8471" }) === 0.274, "#328 B1 match: Model # or MFR P/N, manufacturer without case");
+  ok(sug({ mfr: "Belden Inc.", manufacturerModelNumber: "1583A" }) === 0.19, "#328 B1 match: 'Belden Inc.' matches Belden");
+  ok(sug({ sku: "Belden:1583A", mfr: "Belden" }) === 0.19 && sug({ sku: "Belden:1583A" }) === 0.19, "#328 B1 match: the model after Brand: in the SKU");
+  ok(sug({ mfr: "Belden", desc: "Belden 1583A 1000ft Cat5e riser" }) === 0.19 && sug({ mfr: "Belden", desc: "CAT5E 1583A, 1000 ft reel" }) === 0.19, "#328 B1 match: a Belden model inside a description matches");
+  ok(sug({ desc: "Belden 1583A 1000ft" }) === 0.19, "#328 B1 match: a description that names the manufacturer matches with no manufacturer on the part");
+  ok(sug({ desc: "cable 1583A 1000ft" }) === null && sug({ desc: "Cat5e 8471" }) === null, "#328 B1 match: a bare model number in a description with no manufacturer is not trusted");
+  ok(sug({ mfr: "Southwire", manufacturerModelNumber: "8471" }) === null && sug({ mfr: "Acme", desc: "Belden 8471 compatible" }) === null, "#328 B1 match: a part with another manufacturer never matches by model or description");
+  ok(sug({ manufacturerModelNumber: "8471" }) === 0.274, "#328 B1 match: a model with no manufacturer on the part matches by model alone");
+  ok(sug({ mfr: "TMB", manufacturerModelNumber: "PC224P" }) === 0.285 && sug({ mfr: "ProPlex", manufacturerModelNumber: "PC224P" }) === 0.285 && sug({ mfr: "TMB", manufacturerModelNumber: "ProPlex PC224T" }) === 0.32, "#328 B1 match: TMB / ProPlex aliases and a ProPlex-prefixed model");
+  ok(sug({ mfr: "TMB", manufacturerModelNumber: "PC224P-PLN" }) === null && sug({ mfr: "TMB", manufacturerModelNumber: "PC224PX" }) === null, "#328 B1 match: a longer model (PC224P-PLN) never matches its shorter cousin");
+  ok(sug({ mfr: "Southwire", manufacturerModelNumber: "R50003-1B" }) === 0.174 && sug({ mfr: "Southwire", manufacturerModelNumber: "r500031b" }) === 0.174 && sug({ mfr: "Southwire", manufacturerModelNumber: "13060" }) === 0.174, "#328 B1 match: hyphen and case insensitive, and the spec number");
+  ok(sug({ mfr: "TMB", manufacturerModelNumber: "PCCAT5EUTPP" }) === 0.244 && sug({ mfr: "TMB", manufacturerModelNumber: "PCAT5EUTPP" }) === 0.244, "#328 B1 match: both spellings of the Ultra-Patch model");
+  ok(sug({ mfr: "Belden", manufacturerModelNumber: "1872A" }) === null, "#328 B1 match: Belden 1872A (unresolved) is blank");
+  ok(sug({ mfr: "Belden", desc: "Belden 1583A or 1585A, your choice" }) === null, "#328 B1 match: two models in one description is ambiguous — no guess");
+  ok(sug({ mfr: "Belden", manufacturerModelNumber: "1583A", desc: "mentions 1585A too" }) === 0.19, "#328 B1 match: the model fields win over the description");
+
+  // ---- 4. the field: form, gate, Grid carry, editor
+  const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
+  ok(PF.optionalPartFields(fd({ cableOdIn: "0.274" })).cableOdIn === 0.274 && PF.optionalPartFields(fd({ cableOdIn: "1.23456" })).cableOdIn === 1.235, "#328 B1 form: cableOdIn parses and rounds to 3 decimals");
+  const blank = PF.optionalPartFields(fd({ cableOdIn: " " }));
+  ok("cableOdIn" in blank && blank.cableOdIn === undefined && !("cableOdIn" in PF.optionalPartFields(fd({ desc: "x" }))), "#328 B1 form: a submitted blank clears; a form without the field never touches it");
+  ok(PF.cableOdProblem(fd({ cableOdIn: "" })) === null && PF.cableOdProblem(fd({ cableOdIn: "0.25" })) === null && PF.cableOdProblem(fd({})) === null, "#328 B1 gate: blank, valid and absent pass");
+  ok(/at most 3\.0/.test(PF.cableOdProblem(fd({ cableOdIn: "4" })) ?? "") && PF.cableOdProblem(fd({ cableOdIn: "0" })) !== null && PF.cableOdProblem(fd({ cableOdIn: "abc" })) !== null, "#328 B1 gate: over 3.0, zero and text are refused with a message");
+  const GP = await import("@/lib/design/grid-parts");
+  const gpSym = { id: "GS-B1", name: "Cable", manufacturer: "Belden", modelNumber: "8471", scope: "Lighting", category: "Wire", width: 10, height: 10, ports: [], pricingPartId: "CAT-B1", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const gpCat = [
+    { id: "CAT-B1", sku: "B1", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1, cableOdIn: 0.274 },
+    { id: "CAT-B2", sku: "B2", desc: "Cable 2", category: "Wire", unit: "ft", list: 2, cost: 1, cableOdIn: 0.19 },
+    { id: "CAT-B3", sku: "B3", desc: "No OD", category: "Wire", unit: "ft", list: 2, cost: 1 },
+  ];
+  const lib = GP.gridPartsFrom([gpSym] as never, gpCat as never, {}, { catalogFallback: true });
+  ok(lib.find((p) => p.id === "GS-B1")?.cableOdIn === 0.274 && lib.find((p) => p.id === "CAT-B2")?.cableOdIn === 0.19 && !("cableOdIn" in lib.find((p) => p.id === "CAT-B3")!), "#328 B1 grid: cableOdIn reaches PartLite from both the library and the catalog-fallback branch (absent stays absent)");
+  const page = fs.readFileSync("src/app/(app)/catalog/page.tsx", "utf8");
+  ok(/name="cableOdIn"/.test(page) && /isPerLengthUnit\(part\.unit/.test(page) && /Outside diameter \(in\)/.test(page), "#328 B1 editor: the part editor has an Outside diameter (in) field, shown for per-length parts");
+  const act = fs.readFileSync("src/app/(app)/catalog/actions.ts", "utf8");
+  ok(/cableOdProblem\(formData\)/.test(act), "#328 B1 editor: the save action refuses a bad diameter");
+
+  // ---- 5. Cables rows (pure)
+  const mk = (sku: string, extra: Record<string, unknown> = {}) => ({ sku, desc: "d-" + sku, unit: "ft", ...extra }) as import("@/lib/riser-data-sheet").CablePartLike;
+  const parts = [
+    mk("A", { mfr: "Belden", manufacturerModelNumber: "8471" }),
+    mk("B", { mfr: "Belden", manufacturerModelNumber: "1872A" }),
+    mk("C", { mfr: "Belden", manufacturerModelNumber: "1583A", cableOdIn: 0.5 }),
+    mk("D", { mfr: "Belden", manufacturerModelNumber: "1583A", cableOdIn: 0.19 }),
+    mk("E", { unit: "ea", mfr: "Belden", manufacturerModelNumber: "8471" }),
+    mk("F", { mfr: "Belden", manufacturerModelNumber: "8471" }),
+    mk("G", { unit: "lin ft" }),
+  ];
+  const cr = R.riserCableRows(parts, new Set(["A", "B", "C", "D", "E", "G"]));
+  ok(J(cr.map((r) => r.sku)) === J(["A", "B", "C", "D", "G"]), "#328 B1 rows: referenced per-length parts only (an each-priced and an unreferenced part are left out)");
+  const row = (s: string) => cr.find((r) => r.sku === s)!;
+  ok(row("A").od === "0.274" && row("A").source === "suggested" && row("A").odSource === OD.CABLE_OD_SUGGESTIONS.find((e) => e.odIn === 0.274 && e.models[0] === "8471")!.source && row("A").manufacturer === "Belden", "#328 B1 rows: a blank is pre-filled from the research (Source suggested) with its datasheet URL; the brand comes from mfr");
+  ok(row("B").od === "" && row("B").source === "—" && row("B").odSource === "", "#328 B1 rows: an unverified cable stays blank");
+  ok(row("C").od === "0.5" && row("C").source === "current" && row("C").odSource === "", "#328 B1 rows: a stored value is never replaced, and a differing research value is not cited");
+  ok(row("D").od === "0.19" && row("D").source === "current" && /1583A/.test(row("D").odSource), "#328 B1 rows: a stored value equal to the research cites its datasheet");
+  ok(J(R.riserCableRowCells(row("A")).length) === J(R.RISER_CABLE_HEADERS.length), "#328 B1 rows: cells line up with the headers");
+
+  // ---- 6. parse + plan (pure)
+  const H = ["Manufacturer", "Model", "SKU", "Description", "Outside diameter (in)", "Source", "OD source"];
+  const g = (...rows: string[][]) => [H, ...rows];
+  const pr = R.parseRiserCablesSheet(g(["", "", "A", "", "0.3", "suggested", "u"], ["", "", "B", "", "", "—", ""], ["", "", "C", "", "-", "", ""], ["", "", "D", "", "—", "", ""], ["", "", "E", "", "4", "", ""], ["", "", "F", "", "abc", "", ""], ["", "", "", "", "0.2", "", ""], ["", "", "A", "", "0.4", "", ""], ["", "", "G", "", "0.2504", "", ""]));
+  ok(pr.rows.length === 5 && pr.rows[0].od === 0.3 && pr.rows[1].od === undefined && pr.rows[2].od === null && pr.rows[3].od === undefined && pr.rows[4].od === 0.25, "#328 B1 parse: number sets (3 decimals), blank and em dash leave, '-' clears");
+  ok(pr.errors.length === 4 && pr.errors.some((e) => e.row === 6 && /at most 3\.0/.test(e.message)) && pr.errors.some((e) => e.row === 7) && pr.errors.some((e) => e.row === 8 && /Missing SKU/.test(e.message)) && pr.errors.some((e) => e.row === 9 && /Duplicate/.test(e.message)), "#328 B1 parse: over 3.0, text, a missing SKU and a duplicate SKU are per-row errors");
+  ok(R.parseRiserCablesSheet([["Model"], ["x"]]).errors[0]?.message === R.RISER_CABLE_NO_SKU && R.parseRiserCablesSheet([["SKU", "Notes"], ["a", "b"]]).errors[0]?.message === R.RISER_CABLE_NO_COLUMNS && R.parseRiserCablesSheet([]).errors.length === 1, "#328 B1 parse: a Cables tab without SKU or without the diameter column is refused");
+  const typo = R.parseRiserCablesSheet([["SKU", "Outside diamter (in)"], ["a", "0.2"]]);
+  ok(typo.errors.length === 1 && typo.notes.length === 1 && /Outside diameter \(in\)/.test(typo.notes[0]), "#328 B1 parse: a misspelled diameter header is named, not silently ignored");
+  ok(R.parseRiserCablesSheet(g(["", "", "A", "", "0.3", "", ""])).notes.length === 0, "#328 B1 parse: the shipped headers raise no notes");
+  const byS = new Map<string, import("@/lib/riser-data-sheet").CablePartLike>([["A", mk("A")], ["C", mk("C", { cableOdIn: 0.5 })], ["D", mk("D", { cableOdIn: 0.19 })], ["OLD-D", mk("D", { cableOdIn: 0.19 })], ["G", mk("G")]]);
+  const plan = R.planRiserCablesApply(R.parseRiserCablesSheet(g(["", "", "A", "", "0.3", "", ""], ["", "", "B", "", "0.2", "", ""], ["", "", "C", "", "-", "", ""], ["", "", "D", "", "0.19", "", ""], ["", "", "OLD-D", "", "0.25", "", ""], ["", "", "G", "", "", "", ""])).rows, byS);
+  ok(J(plan.changes.map((c) => [c.sku, c.patch.cableOdIn])) === J([["A", 0.3], ["C", null], ["D", 0.25]]) && J(plan.unknown) === J(["B"]), "#328 B1 plan: sets, clears, unknown SKUs listed; same value and blank rows drop out; a renamed SKU's later row lands on the live part");
+  const pv = V.buildRiserPreview({ rows: [], errors: [], notes: [] }, new Map(), { parse: R.parseRiserCablesSheet(g(["", "", "A", "", "0.3", "", ""], ["", "", "C", "", "-", "", ""], ["", "", "G", "", "", "", ""], ["", "", "B", "", "0.2", "", ""], ["", "", "E", "", "9", "", ""])), partsBySku: byS });
+  ok(pv.changed.length === 2 && pv.changed.every((c) => c.tab === "Cables") && J(pv.changed[0].changes) === J([{ label: "Outside diameter (in)", from: "", to: "0.3" }]) && J(pv.changed[1].changes) === J([{ label: "Outside diameter (in)", from: "0.5", to: "" }]), "#328 B1 preview: Cables changes are tagged and show diameter old → new");
+  ok(pv.unchanged.length === 1 && pv.unknown.length === 1 && pv.unknown[0].tab === "Cables" && pv.errors.length === 1 && pv.errors[0].tab === "Cables", "#328 B1 preview: unchanged, unknown and refused Cables rows are tagged too");
+  ok(J(V.cableUpsertPatchOf({ patch: { cableOdIn: 0.3 } })) === J({ cableOdIn: 0.3 }) && "cableOdIn" in V.cableUpsertPatchOf({ patch: { cableOdIn: null } }) && V.cableUpsertPatchOf({ patch: { cableOdIn: null } }).cableOdIn === undefined, "#328 B1 patch: only cableOdIn; null clears (undefined)");
+
+  // ---- 7. scratch-DB round trip
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const Settings = await import("@/lib/settings");
+  const GridStore = await import("@/lib/stores/grid-projects");
+  const SV = await import("@/lib/riser-data-sheet-server");
+  const ExcelJS = (await import("exceljs")).default;
+  const sku = (slug: string) => fixtureId(328, `b1-${slug}`);
+  const mkDoc = (slug: string, extra: Record<string, unknown>) => ({ id: sku(slug), sku: sku(slug), desc: `B1 ${slug}`, category: "FX328 B1 Wire", unit: "ft", list: 2, cost: 1, mfr: "Belden", notes: `n-${slug}`, ...extra });
+  const seeds = [
+    mkDoc("wt", { manufacturerModelNumber: "8471" }), // named by a wire type -> suggested
+    mkDoc("route", { manufacturerModelNumber: "1872A" }), // used by a Grid route -> unverified, blank
+    mkDoc("link", { manufacturerModelNumber: "1583A", cableOdIn: 0.5 }), // used by a RiserLink -> current
+    mkDoc("each", { unit: "ea", manufacturerModelNumber: "8471" }), // wire type names it but it is each-priced
+    mkDoc("idle", { manufacturerModelNumber: "8471" }), // referenced by nothing
+  ];
+  for (const d of seeds) {
+    registerFixture("catalog_parts", d.id);
+    await DS.upsertDoc("catalog_parts", d as never);
+  }
+  const wireBefore = (await Settings.getSettingsPatchStrict()).wireTypes;
+  const proj = await GridStore.createProject({ name: "FX328 B1", customer: "", customerId: null, by: "Test" });
+  registerFixture("grid_projects", proj.id);
+  try {
+    await Settings.setSettings({ wireTypes: [...(Array.isArray(wireBefore) ? wireBefore : []), { id: "fx328-b1", label: "FX328 B1", connectionTypes: ["DMX512 (5-pin XLR)"], cableSku: sku("wt") }, { id: "fx328-b1e", label: "FX328 B1 each", connectionTypes: ["DMX512 (5-pin XLR)"], cableSku: sku("each") }] });
+    await DS.patchDoc("grid_projects", proj.id, (p: Record<string, unknown>) => {
+      p.routes = [{ id: "wr-b1", sheetId: "s", page: 1, partId: sku("route"), points: [], aspect: 1, optionId: "base", by: "t", at: 1 }];
+      p.riser = { base: { nodes: {}, levels: [], conduits: [], notes: [], links: [{ id: "lk-b1", from: { kind: "node", key: "a" }, to: { kind: "node", key: "b" }, partId: sku("link"), lengthFt: 10, by: "t", at: 1 }] } };
+    });
+
+    const cable = (await SV.loadCableExportRows()).filter((r) => r.sku.startsWith(fixtureId(328, "b1-")));
+    ok(J(cable.map((r) => r.sku).sort()) === J([sku("link"), sku("route"), sku("wt")].sort()), "#328 B1 export: wire-type, Grid-route and RiserLink cables are listed; each-priced and unreferenced parts are not");
+    const byR = (s: string) => cable.find((r) => r.sku === sku(s))!;
+    ok(byR("wt").od === "0.274" && byR("wt").source === "suggested" && byR("route").od === "" && byR("route").source === "—" && byR("link").od === "0.5" && byR("link").source === "current", "#328 B1 export: suggested / unverified-blank / current as designed");
+
+    const { types } = await SV.loadRiserExportRows();
+    const buf = await SV.writeRiserDataSheet([], types, cable);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+    ok(J(wb.worksheets.map((w) => w.name)) === J(["Devices", "Cables"]), "#328 B1 export: the workbook has a Devices tab and a Cables tab");
+    const ws = wb.getWorksheet("Cables")!;
+    ok(J((ws.getRow(1).values as unknown[]).slice(1)) === J([...R.RISER_CABLE_HEADERS]), "#328 B1 export: the Cables tab has the spec headers");
+    const col = (h: string) => R.RISER_CABLE_HEADERS.indexOf(h as never) + 1;
+    const rowOf = (s: string) => { let f = 0; ws.eachRow((r, n) => { if (n > 1 && r.getCell(col("SKU")).value === s) f = n; }); return f; };
+    ok(!!rowOf(sku("wt")) && /^https:\/\//.test(String(ws.getRow(rowOf(sku("wt"))).getCell(col("OD source")).value)), "#328 B1 export: the researched row shows its datasheet URL in OD source");
+
+    // Jeff edits: accept the suggestion as-is (wt unchanged), type a value on the blank route cable, clear the link cable, add a refused and an unknown row.
+    ws.getRow(rowOf(sku("route"))).getCell(col("Outside diameter (in)")).value = "0.25";
+    ws.getRow(rowOf(sku("link"))).getCell(col("Outside diameter (in)")).value = "-";
+    ws.addRow(["", "", sku("idle"), "", "9", "", ""]);
+    ws.addRow(["", "", "TEST328:b1-nope", "", "0.2", "", ""]);
+    const edited = Buffer.from(await wb.xlsx.writeBuffer());
+    const before = new Map((await Cat.list()).filter((p) => p.sku.startsWith(fixtureId(328, "b1-"))).map((p) => [p.sku, p] as const));
+
+    const read = await SV.readRiserSheetFile(edited, "riser.xlsx");
+    if (!read.ok) { ok(false, "#328 B1 upload: the edited workbook reads: " + read.error); return; }
+    ok(read.parse.rows.length === 0 && read.parse.errors.length === 0 && !!read.cables && read.cables.rows.length === 4 && read.cables.errors.length === 1 && read.cables.errors[0].row === rowOf(sku("idle")), "#328 B1 upload: both tabs are read; the Devices tab (header only) is empty; the 9 in. diameter is refused on its row");
+    const devParts = await SV.resolveSheetParts(read.parse);
+    const cabParts = await SV.resolveSheetParts(read.cables!);
+    const preview = V.buildRiserPreview(read.parse, devParts, { parse: read.cables!, partsBySku: cabParts });
+    ok(preview.unknown.some((u) => u.sku === "TEST328:b1-nope" && u.tab === "Cables") && preview.errors.length === 1 && preview.changed.every((c) => c.tab === "Cables"), "#328 B1 preview (server): the unknown SKU and the refused row are listed; changes are Cables");
+    const cplan = await SV.planCablesSheet(read.cables);
+    const planned = cplan.changes.filter((c) => c.sku.startsWith(fixtureId(328, "b1-")));
+    ok(J(planned.map((c) => [c.sku, c.patch.cableOdIn]).sort()) === J([[sku("route"), 0.25], [sku("link"), null], [sku("wt"), 0.274]].sort()), "#328 B1 plan (server): the suggestion, the typed value and the clear (a pre-filled suggestion is a real change once applied)");
+    ok((await SV.planCablesSheet(read.cables, new Set([sku("route")]))).changes.every((c) => c.sku !== sku("route")) && (await SV.planCablesSheet(null)).changes.length === 0, "#328 B1 plan (server): SKUs that failed earlier are skipped; no Cables tab plans nothing");
+
+    const out = await SV.applyRiserChanges([], 30_000, undefined, planned);
+    ok(out.applied === 3 && out.failed.length === 0 && out.remaining === 0, "#328 B1 apply: every cable change applied");
+    const after = new Map((await Cat.list()).filter((p) => p.sku.startsWith(fixtureId(328, "b1-"))).map((p) => [p.sku, p] as const));
+    ok(after.get(sku("wt"))?.cableOdIn === 0.274 && after.get(sku("route"))?.cableOdIn === 0.25 && after.get(sku("link"))?.cableOdIn === undefined, "#328 B1 apply: suggested value saved, typed value saved, '-' cleared");
+    const strip = (p: Record<string, unknown> | undefined) => { const { cableOdIn, updatedAt, ...rest } = (p ?? {}) as Record<string, unknown>; void cableOdIn; void updatedAt; return rest; };
+    ok([...after.keys()].every((k) => J(strip(after.get(k) as never)) === J(strip(before.get(k) as never))), "#328 B1 apply: nothing but cableOdIn (and updatedAt) changed on any part");
+    ok(J(after.get(sku("idle"))) === J(before.get(sku("idle"))) && J(after.get(sku("each"))) === J(before.get(sku("each"))), "#328 B1 apply: parts not planned (refused / not on the sheet) are byte-identical");
+    ok((await SV.planCablesSheet(read.cables)).changes.filter((c) => c.sku.startsWith(fixtureId(328, "b1-"))).length === 0, "#328 B1 apply: re-planning the same sheet finds nothing left (resumable, idempotent)");
+
+    // Mixed budget: a device change and a cable change in one call; a spent budget stops after the first and reports the rest.
+    const stopped = await SV.applyRiserChanges([], -1, undefined, [{ sku: sku("route"), patch: { cableOdIn: 0.3 }, before: 0.25, after: 0.3 }, { sku: sku("wt"), patch: { cableOdIn: 0.31 }, before: 0.274, after: 0.31 }]);
+    ok(stopped.applied === 1 && stopped.remaining === 1 && (await Cat.get(sku("route")))?.cableOdIn === 0.3 && (await Cat.get(sku("wt")))?.cableOdIn === 0.274, "#328 B1 apply: a spent budget writes the first change and reports the rest remaining");
+
+    // Older workbook layouts.
+    const legacy = new ExcelJS.Workbook();
+    legacy.addWorksheet("Devices").addRows([["SKU", "Box"], ["TEST328:b1-nope", "B1"]]);
+    const lr = await SV.readRiserSheetFile(Buffer.from(await legacy.xlsx.writeBuffer()), "old.xlsx");
+    ok(lr.ok && lr.cables === null && lr.parse.rows.length === 1, "#328 B1 upload: a Devices-only workbook (the pre-Cables layout) still reads, with no Cables parse");
+    const only = new ExcelJS.Workbook();
+    only.addWorksheet("Cables").addRows([["SKU", "Outside diameter (in)"], [sku("wt"), "0.3"]]);
+    const or = await SV.readRiserSheetFile(Buffer.from(await only.xlsx.writeBuffer()), "cab.xlsx");
+    ok(or.ok && or.parse.rows.length === 0 && or.parse.errors.length === 0 && or.cables?.rows.length === 1, "#328 B1 upload: a Cables-only workbook has no Devices rows and no Devices error");
+  } finally {
+    await Settings.setSettings({ wireTypes: wireBefore });
+  }
+
+  // ---- 8. wiring pins
+  const srv = fs.readFileSync("src/lib/riser-data-sheet-server.ts", "utf8");
+  ok(/mergeUpsert\(cab!\.sku, cableUpsertPatchOf\(cab!\)\)/.test(srv) && /mergeUpsert\(c\.sku, upsertPatchOf\(c\)\)/.test(srv), "#328 B1: Devices rows write through the two-field patch and Cables rows through the cableOdIn-only patch, both via mergeUpsert");
+  const route = fs.readFileSync("src/app/(app)/catalog/riser-data/export/route.ts", "utf8");
+  ok(/requirePerm\("manage_users"\)/.test(route) && /loadCableExportRows/.test(route), "#328 B1: the export route stays admin only and adds the Cables tab");
 }

@@ -57,6 +57,8 @@ export type PartLite = {
    *  editor never re-derives this — it's dumb by design; the map lives only
    *  on the server. */
   group?: string | null;
+  /** #328 B1: a per-length part's outside diameter, inches (the conduit-fill input). */
+  cableOdIn?: number;
   /** Resolved trade (punch #48) - `tradeOf(part, map)` run server-side, the
    *  same deal as `group`. The Grid's scope taxonomy (grid-scopes.ts) needs
    *  it because Rigging has no beta group of its own: rigging hardware is

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { buildRiserPreview, MAX_RISER_SHEET_BYTES, RISER_SHEET_TOO_BIG, type RiserPreview } from "@/lib/riser-data-preview";
-import { applyRiserChanges, planRiserSheet, readRiserSheetFile, resolveSheetParts } from "@/lib/riser-data-sheet-server";
+import { applyRiserChanges, planCablesSheet, planRiserSheet, readRiserSheetFile, resolveSheetParts } from "@/lib/riser-data-sheet-server";
 import { FETCH_ACTION_BUDGET_MS } from "@/lib/part-docs/types";
 
 /** Catalog → Riser data (#328 A2): preview (no writes) and apply. Admin only. */
@@ -20,7 +20,8 @@ export async function previewRiserDataAction(form: FormData): Promise<{ ok: true
   await requirePerm("manage_users");
   const read = await readUpload(form);
   if (!read.ok) return read;
-  return { ok: true, preview: buildRiserPreview(read.parse, await resolveSheetParts(read.parse)) };
+  const cables = read.cables ? { parse: read.cables, partsBySku: await resolveSheetParts(read.cables) } : undefined;
+  return { ok: true, preview: buildRiserPreview(read.parse, await resolveSheetParts(read.parse), cables) };
 }
 
 export type ApplyBatch = { ok: true; applied: number; failed: { sku: string; error: string }[]; remaining: number } | { ok: false; error: string };
@@ -43,7 +44,8 @@ export async function applyRiserDataBatchAction(form: FormData): Promise<ApplyBa
     skip = [];
   }
   const plan = await planRiserSheet(read.parse, new Set(skip));
-  const out = await applyRiserChanges(plan.changes, FETCH_ACTION_BUDGET_MS);
+  const cablePlan = await planCablesSheet(read.cables, new Set(skip));
+  const out = await applyRiserChanges(plan.changes, FETCH_ACTION_BUDGET_MS, undefined, cablePlan.changes);
   if (out.applied) {
     revalidatePath("/catalog");
     revalidatePath("/catalog/riser-data");

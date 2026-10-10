@@ -161,7 +161,7 @@ export default function RiserDataClient() {
                 {preview.errors.map((e, i) => (
                   <tr key={`e${i}`} style={{ borderTop: "1px solid #eef0f4" }}>
                     <td style={{ ...td, ...mono }}>{e.row}</td>
-                    <td style={td}>—</td>
+                    <td style={td}>{e.tab === "Cables" ? <TabTag /> : "—"}</td>
                     <td style={td}>—</td>
                     <td style={td}>
                       <Chip bg="#fbe6e6" fg="#b3261e">Refused</Chip> <span style={{ color: "#5d6472" }}>{e.message}</span>
@@ -171,7 +171,7 @@ export default function RiserDataClient() {
                 {preview.unknown.map((u, i) => (
                   <tr key={`u${i}`} style={{ borderTop: "1px solid #eef0f4" }}>
                     <td style={{ ...td, ...mono }}>{u.row}</td>
-                    <td style={td}>—</td>
+                    <td style={td}>{u.tab === "Cables" ? <TabTag /> : "—"}</td>
                     <td style={{ ...td, ...mono }}>{u.sku}</td>
                     <td style={td}>
                       <Chip bg="#fdf3df" fg="#9a6b12">Unknown SKU</Chip> <span style={{ color: "#5d6472" }}>Not in the catalog.</span>
@@ -179,9 +179,9 @@ export default function RiserDataClient() {
                   </tr>
                 ))}
                 {preview.changed.map((c) => (
-                  <tr key={`c${c.row}`} style={{ borderTop: "1px solid #eef0f4" }}>
+                  <tr key={`c${c.tab}${c.row}`} style={{ borderTop: "1px solid #eef0f4" }}>
                     <td style={{ ...td, ...mono }}>{c.row}</td>
-                    <td style={td}>{c.label}</td>
+                    <td style={td}>{c.label}{c.tab === "Cables" && <> <TabTag /></>}</td>
                     <td style={{ ...td, ...mono }}>
                       {c.sku}
                       {c.renamedTo && <div style={{ color: "#8c919c" }}>→ {c.renamedTo}</div>}
@@ -199,7 +199,7 @@ export default function RiserDataClient() {
                   preview.unchanged.map((u, i) => (
                     <tr key={`n${i}`} style={{ borderTop: "1px solid #eef0f4", color: "#8c919c" }}>
                       <td style={{ ...td, ...mono }}>{u.row}</td>
-                      <td style={td}>{u.label}</td>
+                      <td style={td}>{u.label}{u.tab === "Cables" && <> <TabTag /></>}</td>
                       <td style={{ ...td, ...mono }}>{u.sku}{u.renamedTo && <div>→ {u.renamedTo}</div>}</td>
                       <td style={td}><Chip bg="#eef0f4" fg="#5d6472">No change</Chip></td>
                     </tr>
@@ -217,7 +217,7 @@ export default function RiserDataClient() {
             {outcome.failed.length > 0 && ` · ${outcome.failed.length} failed`}
             {preview && preview.errors.length + preview.unknown.length > 0 && ` · ${preview.errors.length + preview.unknown.length} row${preview.errors.length + preview.unknown.length === 1 ? "" : "s"} refused or unknown (nothing written)`}
           </div>
-          <div style={{ fontSize: 12, color: "#8c919c" }}>Only the designator code and riser tag defaults were saved. Upload again to see the parts as they are now.</div>
+          <div style={{ fontSize: 12, color: "#8c919c" }}>Only the designator code, riser tag defaults and cable outside diameters were saved. Upload again to see the parts as they are now.</div>
           {outcome.failed.map((f) => (
             <p key={f.sku} style={{ color: "#b3261e", fontSize: 12.5, margin: "8px 0 0" }}>
               <span style={mono}>{f.sku}</span> — {f.error}
@@ -227,6 +227,10 @@ export default function RiserDataClient() {
       )}
     </div>
   );
+}
+
+function TabTag() {
+  return <span style={{ ...mono, fontSize: 10.5, color: "#5d6472", background: "#eef0f4", borderRadius: 4, padding: "1px 5px" }}>Cables</span>;
 }
 
 function Chip({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) {

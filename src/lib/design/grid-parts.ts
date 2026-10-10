@@ -76,6 +76,7 @@ export function gridPartsFrom(
       ...(p?.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
       ...(p?.designatorCode ? { designatorCode: p.designatorCode } : {}),
       ...(p?.tagDefaults ? { tagDefaults: p.tagDefaults } : {}),
+      ...(p?.cableOdIn ? { cableOdIn: p.cableOdIn } : {}),
       symbolWidth: s.width,
       symbolHeight: s.height,
       kind: s.kind || "device",
@@ -101,6 +102,7 @@ export function gridPartsFrom(
       ...(p.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
       ...(p.designatorCode ? { designatorCode: p.designatorCode } : {}),
       ...(p.tagDefaults ? { tagDefaults: p.tagDefaults } : {}),
+      ...(p.cableOdIn ? { cableOdIn: p.cableOdIn } : {}),
       ...(dt ? { deviceType: key ?? null, deviceTypeLabel: key ? typeLabel(key, dt.types) : null } : {}),
       ...(dt && key ? { gridScope: scopeOfType(key, dt.types) } : {}),
     });

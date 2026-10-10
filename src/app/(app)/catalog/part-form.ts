@@ -5,6 +5,7 @@ import { normalizeVisibility } from "@/lib/portal-visibility";
 import { isFabricPart } from "@/lib/fabric-part";
 import { cleanTypeCode } from "@/lib/design/device-types";
 import { cleanTagFields, type TagFields } from "@/lib/design/conduit-riser/tags";
+import { CABLE_OD_MAX_IN, cleanCableOd } from "@/lib/design/conduit-riser/cable-od";
 import { cleanRackFacts, rackFactsFromForm } from "@/lib/rack/part-facts";
 import type { RackPartFacts } from "@/lib/rack/types";
 
@@ -39,6 +40,8 @@ export type OptionalPartFields = {
   designatorCode?: string;
   /** #321 — the riser tag defaults; all blank clears them. */
   tagDefaults?: TagFields;
+  /** #328 B1 — a per-length part's outside diameter (inches); blank/invalid clears it. */
+  cableOdIn?: number;
 } & RackPartFacts;
 
 export const FLAME_RATING_MAX = 120;
@@ -66,6 +69,7 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   if (fd.has("flameRating")) out.flameRating = String(fd.get("flameRating") || "").trim().slice(0, FLAME_RATING_MAX) || undefined;
   if (fd.has("designatorCode")) out.designatorCode = cleanTypeCode(fd.get("designatorCode")) ?? undefined;
   if (TAG_DEFAULT_KEYS.some((k) => fd.has(`tag_${k}`))) out.tagDefaults = tagDefaultsFromForm(fd);
+  if (fd.has("cableOdIn")) out.cableOdIn = cleanCableOd(fd.get("cableOdIn")) ?? undefined;
   if (fd.has("portalVisibility")) {
     const v = normalizeVisibility(fd.get("portalVisibility"));
     out.portalVisibility = v === "auto" ? undefined : v;
@@ -88,6 +92,15 @@ export function tagDefaultsFromForm(fd: FormData): TagFields | undefined {
     if (v) raw[k] = v;
   }
   return cleanTagFields(raw);
+}
+
+/** #328 B1: server-side gate for the cable outside diameter. null = fine (blank
+ *  clears, or the form carries no such field); else the message the part modal shows. */
+export function cableOdProblem(fd: FormData): string | null {
+  if (!fd.has("cableOdIn")) return null;
+  const raw = String(fd.get("cableOdIn") ?? "").trim();
+  if (!raw || cleanCableOd(raw) !== null) return null;
+  return `Outside diameter must be a number above 0 and at most ${CABLE_OD_MAX_IN.toFixed(1)} inches.`;
 }
 
 /** #296: server-side gate for the Rack data section. null = fine (or the form

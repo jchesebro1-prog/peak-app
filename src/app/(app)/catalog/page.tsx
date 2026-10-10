@@ -33,6 +33,8 @@ import FabricRateField from "./fabric-rate-field";
 import RackDataField from "./rack-data-field";
 import TagDefaultsField from "./tag-defaults-field";
 import { rackFactsOf } from "@/lib/rack/part-facts";
+import { isPerLengthUnit } from "@/lib/design/grid-bom";
+import { formatCableOd, suggestCableOd } from "@/lib/design/conduit-riser/cable-od";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
 import { loadPortalRules } from "@/lib/freight-rule-load";
@@ -1041,6 +1043,27 @@ function PartFormModal({
             <div style={{ marginTop: 13, marginBottom: 4 }}>
               <TagDefaultsField key={part?.sku ?? "new"} initial={part?.tagDefaults ?? {}} />
             </div>
+            {part && isPerLengthUnit(part.unit || "") && (
+              <div style={{ marginTop: 13, marginBottom: 4 }}>
+                {label("Outside diameter (in)")}
+                {/* key={part.sku}: the modal is reused across parts without remounting. */}
+                <input
+                  key={part.sku}
+                  name="cableOdIn"
+                  defaultValue={part.cableOdIn !== undefined ? formatCableOd(part.cableOdIn) : ""}
+                  placeholder="From the cable datasheet"
+                  inputMode="decimal"
+                  style={inputStyle}
+                />
+                <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
+                  The cable&apos;s overall diameter, up to 3.0 in. The Grid&apos;s conduit-fill check sums these. Leave blank if unknown.
+                  {part.cableOdIn === undefined && (() => {
+                    const s = suggestCableOd({ sku: part.sku, mfr: part.mfr, manufacturerModelNumber: part.manufacturerModelNumber, manufacturerPartNumber: part.manufacturerPartNumber, desc: part.desc });
+                    return s ? <> Researched: {formatCableOd(s.odIn)} in (<a href={s.source} target="_blank" rel="noreferrer" style={{ color: "inherit" }}>datasheet</a>).</> : null;
+                  })()}
+                </div>
+              </div>
+            )}
             {part && (
               <div style={{ marginTop: 13, marginBottom: 4 }}>
                 {/* key={part.sku}: the modal is reused across parts (see the

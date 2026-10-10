@@ -223,6 +223,12 @@ export type CatalogPart = {
    *  a placement overrides per field. Absent = none. Written ONLY through
    *  mergeUpsert (the part editor) — no importer or enricher carries it. */
   tagDefaults?: TagFields;
+  /** #328 B1: a per-length (cable) part's outside diameter in inches — what the
+   *  conduit-fill math sums. Positive, ≤ 3.0, 3 decimals (cleanCableOd). Absent =
+   *  unknown, never 0. Written ONLY through mergeUpsert (the part editor, the
+   *  Riser data sheet's Cables tab) — no importer, enricher or price-book patch
+   *  carries it. */
+  cableOdIn?: number;
 } & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
 /** All parts (port of window.MASTER_CATALOG reads). */
