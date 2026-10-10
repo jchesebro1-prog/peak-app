@@ -11532,6 +11532,7 @@ seeded()
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
   .then(() => designators320DeviceRowsChecks())
+  .then(() => designators320ScheduleChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -19237,7 +19238,7 @@ import {
   const m7 = gemMarks7([{ key: "PIPE", desc: "Pipe", qty: 240 }, { key: "PAR", desc: "Par" }, { key: "PIPE", desc: "Pipe", qty: 10 }, { key: "PAR", desc: "Par", qty: 0 }], "R");
   ok(m7.rows.map((r) => `${r.tag}:${r.qty}`).join(",") === "R1:250,R2:2", "#211 fix1 I3: the device key adds each symbol's unit count");
   const set7 = gridSetSources301();
-  ok(set7.includes("qty: f.qty") && set7.includes("`${desc} ×${qty}`") && set7.includes("`${tag} ×${qty}`"), "#211 fix1 I3: the plan sheet carries lot qty into the key and labels the symbol ×N");
+  ok(set7.includes("qty: f.qty") && set7.includes("`${desc} ×${qty}`") && set7.includes("planDesignatorMarks("), "#211 fix1 I3: the plan sheet carries lot qty into the key; #320: the symbol prints its designator range instead of ×N");
   // M2 — schedule counts units
   const sch7 = gemSchedule7({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 }, { id: "b", sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" }], spaces: [], descOf: () => "x", wires: [] });
   ok(sch7.unitCount === 241, "#211 fix1 M2: the schedule total counts units, not markers");
@@ -60430,4 +60431,52 @@ async function designators320DeviceRowsChecks(): Promise<void> {
   ok(table.startsWith('"use client"') && table.includes("data-no-nudge") && table.includes("nextCell(shown, cur.id, cur.col, move)") && table.includes("focusPlacements(ids, r.id)") &&
      table.includes("renumberDesignators(target, what)") && table.includes("Selected rows") && !/from\s+"@\/lib\/stores\//.test(table) && !table.includes("designators-server"),
     "#320 Devices tab: inline edit moves cell to cell, a row click selects on the plan, Renumber menu; no store import");
+}
+
+/* ---------------- #320: designators on schedules and the drawing set ---------------- */
+async function designators320ScheduleChecks(): Promise<void> {
+  const S = await import("@/lib/design/grid-schedule");
+  const D = await import("@/lib/design/designators");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const pl = (id: string, partId: string, x: number, extra: Record<string, unknown> = {}) => ({ id, sheetId: "s", page: 1, x, y: 0.5, partId, ...extra });
+  const sch = S.buildSchedule({
+    placements: [pl("a", "MIC", 0.1, { designator: "MIC-1" }), pl("b", "MIC", 0.2, { designator: "MIC-2" }), pl("c", "MIC", 0.3, { designator: "MIC-4" }),
+      pl("d", "PIPE", 0.4, { designator: "TR-1", qty: 24 }), pl("e", "MIC", 0.5)],
+    spaces: [],
+    descOf: () => "x",
+    wires: [],
+  });
+  const rows = sch.sections[0].rows;
+  ok(rows.find((r) => r.partId === "MIC")!.designators === "MIC-1–2, MIC-4" && rows.find((r) => r.partId === "PIPE")!.designators === "TR-1–24" && rows.find((r) => r.partId === "MIC")!.qty === 4,
+    "#320 schedule: each part row lists its designators (ranges merged); a device without one still counts");
+  ok(S.scheduleGroups(sch)[0].rows.some((r) => r.kind === "row" && r.designators === "MIC-1–2, MIC-4"), "#320 schedule: the E-60x items carry the Designators cell");
+  ok(JSON.stringify(S.buildSchedule({ placements: [pl("z", "P", 0.1)], spaces: [], descOf: () => "x", wires: [] }).sections[0].rows[0]) === JSON.stringify({ partId: "P", desc: "x", qty: 1 }),
+    "#320 schedule: a row with no designators carries no key (older readers unchanged)");
+
+  const marks = D.planDesignatorMarks(
+    [
+      { id: "a", key: "P1", desc: "Spot", qty: 1, designator: "LX-1", curtain: false },
+      { id: "b", key: "P1", desc: "Spot", qty: 1, designator: "LX-2", curtain: false },
+      { id: "c", key: "curtain:Main", desc: "Main", qty: 1, curtain: true },
+      { id: "d", key: "P2", desc: "Pipe", qty: 24, designator: "TR-1", curtain: false },
+    ],
+    "R"
+  );
+  ok(marks.tags.get("a") === "LX-1" && marks.tags.get("b") === "LX-2" && marks.tags.get("c") === "R1" && marks.tags.get("d") === "TR-1–24",
+    "#320 plan sheet: each symbol prints its designator (a lot by its range); a curtain keeps its type mark");
+  ok(JSON.stringify(marks.rows) === JSON.stringify([{ tag: "LX-1–2", qty: 2, desc: "Spot" }, { tag: "R1", qty: 1, desc: "Main" }, { tag: "TR-1–24", qty: 24, desc: "Pipe" }]),
+    "#320 plan sheet: the device key is one row per part — designators · qty · description");
+
+  const sheets = rd("src/components/drawing/drawing-set-sheets.tsx");
+  ok(sheets.includes("planDesignatorMarks(") && !sheets.includes("assignTypeMarks(") && sheets.includes("colSpan={4}") && sheets.includes("it.designators"),
+    "#320 drawing set: plan sheets print designators; E-60x gains a Designators column");
+  ok(rd("src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx").includes("<th>Designators</th>"), "#320 drawing set: the device key's first column is Designators");
+  const table = rd("src/app/(app)/design/grid/[id]/schedule/schedule-table.tsx");
+  ok(table.includes(">Designators</th>") && table.includes("r.designators"), "#320 /schedule + Spreadsheet Schedule tab: Designators column");
+  ok(rd("src/lib/design/grid-schedule-server.ts").includes("fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project))") &&
+     rd("src/lib/design/drawing-set-data.ts").includes("fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project))"),
+    "#320 schedule + set fill missing designators in memory (never a write on a print path)");
+  const gs = rd("src/lib/design/grid-schedule.ts");
+  ok(!/from\s+"@\/lib\/stores\//.test(gs.replace(/import type[^;]*;/g, "")) && !rd("src/lib/design/designators.ts").includes("@/lib/stores/") && !rd("src/lib/design/designators.ts").includes("@/db"),
+    "#320 client boundary: designators.ts and grid-schedule.ts import no store or DB");
 }

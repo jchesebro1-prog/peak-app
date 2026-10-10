@@ -3,7 +3,7 @@ import type { ScheduleData } from "@/lib/design/grid-schedule";
 
 /**
  * The equipment schedule's tables (#299, moved out of schedule/page.tsx
- * unchanged): one table per area (Qty · Part · Description), the wire runs
+ * unchanged): one table per area (Qty · Designators · Model · Description), the wire runs
  * (Wire · Run · Length), then the unit/area/footage totals. Rendered by the
  * printable /schedule page and by the editor's Spreadsheet view, so the two
  * never differ. Server-safe AND client-safe: no hooks, no "use client", and
@@ -52,6 +52,7 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
             <thead>
               <tr>
                 <th style={{ ...th, width: 54 }}>Qty</th>
+                <th style={{ ...th, width: 140 }}>Designators</th>
                 <th style={{ ...th, width: 150 }}>Model</th>
                 <th style={th}>Description</th>
               </tr>
@@ -60,6 +61,7 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
               {sec.rows.map((r) => (
                 <tr key={r.partId}>
                   <td style={td}>{r.qty}</td>
+                  <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.designators || ""}</td>
                   <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.code || r.model || r.partId}</td>
                   <td style={td}>{r.desc}</td>
                 </tr>

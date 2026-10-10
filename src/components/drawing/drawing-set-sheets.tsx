@@ -5,7 +5,7 @@ import { placementQty } from "@/lib/design/grid-bom";
 import { symbolLook } from "@/lib/design/grid-icons";
 import { markerColor } from "@/lib/design/grid-symbols";
 import { DRAWING_SYSTEMS } from "@/lib/design/grid-scopes";
-import { assignTypeMarks } from "@/lib/design/drawing-labels";
+import { planDesignatorMarks } from "@/lib/design/designators";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import type { ScheduleItem } from "@/lib/design/grid-schedule";
 import { SHEET_SIZES, planContent, titleBlockData, type DrawingSheetDef } from "@/lib/design/grid-drawing-set";
@@ -29,19 +29,20 @@ function scheduleRow(it: ScheduleItem, key: number) {
   if (it.kind === "section")
     return (
       <tr key={key}>
-        <td colSpan={3} className="pk-dw-sec">{`${it.name}${it.cont ? " (cont.)" : ""}`}</td>
+        <td colSpan={4} className="pk-dw-sec">{`${it.name}${it.cont ? " (cont.)" : ""}`}</td>
       </tr>
     );
   if (it.kind === "wires")
     return (
       <tr key={key}>
-        <td colSpan={3} className="pk-dw-sec">{`Wire runs${it.cont ? " (cont.)" : ""}`}</td>
+        <td colSpan={4} className="pk-dw-sec">{`Wire runs${it.cont ? " (cont.)" : ""}`}</td>
       </tr>
     );
   if (it.kind === "row")
     return (
       <tr key={key}>
         <td>{it.qty}</td>
+        <td className="pk-dw-mono pk-dw-ellip">{it.designators || ""}</td>
         <td className="pk-dw-mono pk-dw-ellip">{it.code}</td>
         <td className="pk-dw-ellip">{it.desc}</td>
       </tr>
@@ -49,6 +50,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
   return (
     <tr key={key}>
       <td className="pk-dw-ellip">{it.length}</td>
+      <td />
       <td className="pk-dw-mono pk-dw-ellip">{it.model || it.partId}</td>
       <td className="pk-dw-ellip">{it.run}</td>
     </tr>
@@ -76,7 +78,7 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
   // `desc` feeds the device key; `qty` is the marker's unit count (#211: a
   // lot stands for many) — summed into the key and shown as ×N on the symbol
   // label, as the editor draws it.
-  const figPlacement = (pl: GridPlacement): { fig: FigurePlacement; desc: string; qty: number } => {
+  const figPlacement = (pl: GridPlacement): { fig: FigurePlacement; desc: string; qty: number; designator?: string } => {
     const part = partById.get(pl.partId);
     const look = part ? symbolLook(part, symCtx) : symbolLook({ category: pl.category }, symCtx);
     const desc = pl.curtain ? pl.curtain.name : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category || pl.partId : pl.partId);
@@ -100,7 +102,7 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
       // The design's mode (#300): Object mode prints the part's drawing where one exists.
       ...(!pl.curtain && symbolUrls[pl.partId]?.plan ? { href: symbolUrls[pl.partId].plan } : {}),
     };
-    return { fig, desc, qty };
+    return { fig, desc, qty, designator: pl.curtain ? undefined : pl.designator };
   };
 
   const cover = (
@@ -181,8 +183,10 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
       const c = planContent({ group: { system: d.system, sheetId: d.sheetId, page: d.page }, placements: slice.placements, routes: slice.routes, spaces, partById });
       const cal = findCalibration(cals, d.sheetId, d.page);
       const figs = c.placements.map(figPlacement);
-      const marks = assignTypeMarks(
-        figs.map((f) => ({ key: f.fig.key, desc: f.desc, qty: f.qty })),
+      // #320: each device prints its designator where the type mark sat (a lot
+      // by its range); a curtain keeps its type mark. Key = designators · qty · desc.
+      const marks = planDesignatorMarks(
+        figs.map((f) => ({ id: f.fig.id, key: f.fig.key, desc: f.desc, qty: f.qty, designator: f.designator, curtain: f.fig.curtain })),
         DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || ""
       );
       return (
@@ -195,13 +199,9 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
           k={k}
           spaces={c.spaces.map((s) => ({ id: s.id, points: s.points, name: s.name, color: s.color }))}
           routes={c.routes.map((r) => ({ id: r.id, points: r.points, color: markerColor(partById.get(r.partId)?.category || "Wire") }))}
-          placements={figs.map(({ fig, qty }) => {
-            // The printed mark carries the lot count too (L3 ×240) — the
-            // collision pass sizes the mark from this text.
-            const tag = marks.tags.get(fig.key) || "";
-            return { ...fig, tag: tag && qty > 1 ? `${tag} ×${qty}` : tag };
-          })}
-          keyRows={marks.rows.map((r) => ({ tag: r.tag, qty: r.qty, desc: r.desc }))}
+          // The collision pass sizes each mark from this text.
+          placements={figs.map(({ fig }) => ({ ...fig, tag: marks.tags.get(fig.id) || "" }))}
+          keyRows={marks.rows}
           cal={cal ? { scale: cal.scale, unit: cal.unit } : null}
         />
       );
@@ -241,8 +241,9 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
             {[0, 1].map((ci) => (
               <table key={ci} className="pk-dw-table">
                 <colgroup>
-                  <col style={{ width: "13%" }} />
-                  <col style={{ width: "27%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "22%" }} />
                   <col />
                 </colgroup>
                 <tbody>{(cols[ci] || []).map((it, ri) => scheduleRow(it, ri))}</tbody>

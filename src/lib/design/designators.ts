@@ -26,6 +26,7 @@ import {
   type DeviceType,
   type TypeMap,
 } from "./device-types";
+import { assignTypeMarks } from "./drawing-labels";
 
 export const DESIGNATOR_MAX = 24;
 /** The amber a duplicate designator is drawn in (plan label, Property Editor, Devices tab). */
@@ -379,4 +380,38 @@ export function fillDesignators<P extends DesignatorPlacement>(placements: reado
     const d = got.get(pl.id);
     return d ? { ...pl, designator: d } : pl;
   });
+}
+
+/* ------------------------------ drawing set ------------------------------ */
+
+export type PlanMarkItem = { id: string; key: string; desc: string; qty: number; designator?: string; curtain: boolean };
+
+/**
+ * A plan sheet's marks (#320): each device prints its designator (a lot by
+ * its range) where the type mark sat; a curtain keeps its per-sheet type
+ * mark (assignTypeMarks, the system-letter prefix). The device key is one
+ * row per part (per named curtain), first-seen order: designators
+ * (designatorList) · units · description. Tags are keyed by placement id.
+ */
+export function planDesignatorMarks(items: ReadonlyArray<PlanMarkItem>, prefix: string): { tags: Map<string, string>; rows: Array<{ tag: string; qty: number; desc: string }> } {
+  const curtainMarks = assignTypeMarks(items.filter((it) => it.curtain).map((it) => ({ key: it.key, desc: it.desc, qty: it.qty })), prefix);
+  const tags = new Map<string, string>();
+  const order: string[] = [];
+  const groups = new Map<string, { curtain: boolean; desc: string; qty: number; list: Array<{ designator?: string; qty: number }> }>();
+  for (const it of items) {
+    tags.set(it.id, it.curtain ? curtainMarks.tags.get(it.key) || "" : formatDesignator(it.designator, it.qty));
+    let g = groups.get(it.key);
+    if (!g) {
+      g = { curtain: it.curtain, desc: it.desc, qty: 0, list: [] };
+      groups.set(it.key, g);
+      order.push(it.key);
+    }
+    g.qty += it.qty;
+    g.list.push({ designator: it.designator, qty: it.qty });
+  }
+  const rows = order.map((key) => {
+    const g = groups.get(key)!;
+    return { tag: g.curtain ? curtainMarks.tags.get(key) || "" : designatorList(g.list), qty: g.qty, desc: g.desc };
+  });
+  return { tags, rows };
 }

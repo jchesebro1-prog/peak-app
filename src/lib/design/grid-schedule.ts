@@ -9,6 +9,7 @@ import { spaceOf, type SpaceLite } from "./grid-geometry";
 import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
 import { partModel } from "@/lib/catalog-rename/sku";
+import { designatorList } from "./designators";
 
 /**
  * The catalog rows a schedule can look up by id: parts placed or routed in the
@@ -29,7 +30,8 @@ export function catalogForSchedule<C extends { id: string }>(
 }
 
 /** `code` overrides the printed Part cell for rows with no SKU (curtains). `model` (#304) is the part's Model # — what a printed schedule shows instead of the part id. */
-export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number };
+/** `designators` (#320): the row's devices' designators (designatorList); absent when none. */
+export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number; designators?: string };
 export type ScheduleSection = { key: string; name: string; rows: ScheduleRow[] };
 export type ScheduleWire = { id: string; partId: string; model?: string; fromName: string; toName: string; lengthFt: number | null; unit: string };
 export type ScheduleData = {
@@ -65,7 +67,7 @@ export function scheduleWiresFromView(view: RiserView): ScheduleWire[] {
  * group: each drop is its own made-to-size drape.
  */
 export function buildSchedule(input: {
-  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number }>;
+  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number; designator?: string }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
   /** #304: the printed Model # per part id; blank/absent = print the part id as before. */
@@ -76,6 +78,7 @@ export function buildSchedule(input: {
   const modelFor = (pid: string) => (modelOf ? modelOf(pid) || undefined : undefined);
   const wires = modelOf ? input.wires.map((w) => { const m = modelFor(w.partId); return m ? { ...w, model: m } : w; }) : input.wires;
   const bySpace = new Map<string | null, ScheduleRow[]>();
+  const held = new Map<ScheduleRow, Array<{ designator?: string; qty?: number }>>();
   for (const pl of input.placements) {
     const home = spaceOf(pl, input.spaces);
     const key = home ? home.id : null;
@@ -84,13 +87,22 @@ export function buildSchedule(input: {
       rows.push({ partId: pl.id, code: "CURTAIN", desc: curtainDesc(pl.curtain, input.descOf(pl.curtain.fabricSku)), qty: 1 });
     } else {
       const row = rows.find((r) => r.partId === pl.partId && !r.code);
-      if (row) row.qty += placementQty(pl);
-      else {
+      if (row) {
+        row.qty += placementQty(pl);
+        held.get(row)!.push(pl);
+      } else {
         const m = modelFor(pl.partId);
-        rows.push({ partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) });
+        const fresh: ScheduleRow = { partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) };
+        rows.push(fresh);
+        held.set(fresh, [pl]);
       }
     }
     bySpace.set(key, rows);
+  }
+  // #320: each part row lists its devices' designators.
+  for (const [row, list] of held) {
+    const d = designatorList(list);
+    if (d) row.designators = d;
   }
   const sections: ScheduleSection[] = [
     ...input.spaces.filter((s) => bySpace.has(s.id)).map((s) => ({ key: s.id, name: s.name, rows: bySpace.get(s.id)! })),
@@ -121,14 +133,14 @@ export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: stri
 export type ScheduleHead = { kind: "section"; name: string; cont: boolean } | { kind: "wires"; cont: boolean };
 export type ScheduleItem =
   | ScheduleHead
-  | { kind: "row"; qty: number; code: string; desc: string }
+  | { kind: "row"; qty: number; code: string; desc: string; designators?: string }
   | { kind: "wire"; partId: string; model?: string; run: string; length: string };
 export type ScheduleGroup = { head: ScheduleHead; rows: ScheduleItem[] };
 
 export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
   const groups: ScheduleGroup[] = d.sections.map((s) => ({
     head: { kind: "section", name: s.name, cont: false },
-    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.model || r.partId, desc: r.desc })),
+    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.model || r.partId, desc: r.desc, ...(r.designators ? { designators: r.designators } : {}) })),
   }));
   if (d.wires.length) {
     groups.push({
