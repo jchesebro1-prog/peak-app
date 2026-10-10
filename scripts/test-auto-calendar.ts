@@ -8,6 +8,9 @@ import { upsertDoc } from "@/db/doc-store";
 import { triageKey } from "@/lib/triage/keys";
 import { tierOf } from "@/lib/triage/feeds/tasks";
 import { chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
+import { chunkFor, freeDays } from "@/lib/task-plan/free";
+import { atRiskLabel, calendarNote, finishText, fmtBlockTime, GOOGLE_NOTE_ME, NOT_PLACED_TEXT } from "@/lib/task-plan/labels";
+import { planPerson } from "@/lib/task-plan/plan";
 import { chicagoWallMs, weekdayOf } from "@/lib/visit-plan/hours";
 import { DEFAULT_WORK_HOURS } from "@/lib/visit-plan/settings";
 import {
@@ -27,10 +30,13 @@ import {
   cleanTier,
   parsePlanItemKey,
   planItemKey,
+  QUARTER_MS,
   SIZE_MIN,
   sizeMinutes,
   tierOrDefault,
+  type PlanInput,
   type PlanItem,
+  type PlanResult,
   type TaskTier,
 } from "@/lib/task-plan/types";
 import { daysLeft, sortByUrgency, urgencyWeight, type UrgencyKey } from "@/lib/task-plan/urgency";
@@ -349,4 +355,112 @@ export async function autoCalUrgencyChecks(ok: Ok): Promise<void> {
   ok(order(...list) === order(...[...list].reverse()), "auto-cal urgency: the order never depends on input order");
   ok(urgencyWeight("normal", 0) / urgencyWeight("normal", 3) === 4 && urgencyWeight("low", 1) > urgencyWeight("high", 30) && urgencyWeight("low", 1) > urgencyWeight("high", 7),
     "auto-cal urgency: the curve is tier × 1/(days left + 1)");
+  ok(daysLeft(at("2036-11-03", 17), at("2036-11-01", 9)) === 2 && daysLeft(at("2036-11-02", 23, 30), at("2036-11-02", 0, 30)) === 0 &&
+    daysLeft(chicagoDayStart("2036-11-03"), at("2036-11-02", 23, 59)) === 1 && daysLeft(at("2036-11-01", 23, 59), at("2036-11-02", 0, 1)) === -1,
+    "auto-cal urgency: days left stays whole Chicago days across the 2036-11-02 fall-back (a 25 h day)");
+  ok(order(uk("od-low", "low", "2036-10-10"), uk("od-high", "high", "2036-10-10")) === "od-high,od-low", "auto-cal urgency: same-day overdue → the tier decides");
+  ok(order(uk("n-tomorrow", "normal", TUE), uk("n-today", "normal", MON)) === "n-today,n-tomorrow" &&
+    order(uk("high-tomorrow", "high", TUE), uk("normal-today", "normal", MON)) === "normal-today,high-tomorrow" &&
+    order(uk("low-today", "low", MON), uk("high-tomorrow", "high", TUE)) === "high-tomorrow,low-today",
+    "auto-cal urgency: due today vs due tomorrow — 2/1 beats 2/2 and 3/2, 3/2 beats 1/1");
+}
+
+/* ---- Task 4: placement ---- */
+const blocksOf = (r: PlanResult, key: string) => r.blocks.filter((b) => b.itemKey === key);
+const baseInput = (over: Partial<PlanInput> = {}): PlanInput => ({ userId: "u1", nowMs: at(MON, 7), hours: DEFAULT_WORK_HOURS, busy: [], pins: [], items: [], ...over });
+const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
+
+export async function autoCalPlacementChecks(ok: Ok): Promise<void> {
+  const one = planPerson(baseInput({ items: [item("A")] }));
+  ok(one.blocks.length === 1 && one.blocks[0].startMs === at(MON, 8) && one.blocks[0].endMs === at(MON, 9) && !one.blocks[0].pinned,
+    "auto-cal plan: a 1 h task lands in the first free hour of work");
+
+  const ten = planPerson(baseInput({ items: Array.from({ length: 10 }, (_, i) => item("T" + i, { createdAt: i })) }));
+  const monMin = ten.blocks.filter((b) => chicagoDayKey(b.startMs) === MON).reduce((s, b) => s + (b.endMs - b.startMs) / MIN, 0);
+  ok(monMin === 420 && ten.blocks.some((b) => chicagoDayKey(b.startMs) === TUE), "auto-cal plan: at most 80 % of a day's free time is filled (540 free → 420 planned, the rest Tuesday)");
+
+  const grid = planPerson(baseInput({ nowMs: at(MON, 8, 7), busy: [{ startMs: at(MON, 9, 10), endMs: at(MON, 9, 50) }], items: [item("A", { size: "l", sizeMin: 240 }), item("B", { createdAt: 2 })] }));
+  ok(grid.blocks.every((b) => b.startMs % QUARTER_MS === 0 && b.endMs % QUARTER_MS === 0), "auto-cal plan: every block sits on the 15-minute grid");
+  ok(!grid.blocks.some((b) => b.startMs < at(MON, 10) && b.endMs > at(MON, 9)), "auto-cal plan: a busy 9:10–9:50 keeps 9:00–10:00 clear on the grid");
+
+  const chunk = planPerson(baseInput({ busy: [{ startMs: at(MON, 8, 45), endMs: at(MON, 9) }, { startMs: at(MON, 10), endMs: at(MON, 10, 15) }], items: [item("L", { size: "l", sizeMin: 240 })] }));
+  const lb = blocksOf(chunk, "task:L");
+  ok(lb.length > 1 && lb.every((b) => b.endMs - b.startMs >= 30 * MIN) && lb.reduce((s, b) => s + (b.endMs - b.startMs), 0) === 240 * MIN,
+    "auto-cal plan: a long task splits into chunks of at least 30 minutes");
+  const tiny = planPerson(baseInput({ busy: [{ startMs: at(MON, 8), endMs: at(MON, 8, 30) }, { startMs: at(MON, 8, 45), endMs: at(MON, 17) }], items: [item("S", { size: "s", sizeMin: 30 })] }));
+  ok(tiny.blocks[0].startMs === at(TUE, 8), "auto-cal plan: a 15-minute gap is never used");
+
+  const tpl = planPerson(baseInput({ items: [item("A", { earliestMs: at(WED, 0) })] }));
+  ok(tpl.blocks[0].startMs === at(WED, 8), "auto-cal plan: a template's startAt is the earliest it is placed");
+  const sat = planPerson(baseInput({ nowMs: at(SAT, 10), items: [item("A", { dueMs: at("2036-10-24", 17) })] }));
+  ok(sat.blocks[0].startMs === at("2036-10-20", 8), "auto-cal plan: nothing is placed outside work hours (Saturday → Monday 8:00)");
+
+  const busy = [{ startMs: at(MON, 9), endMs: at(MON, 11) }, { startMs: at(MON, 13), endMs: at(MON, 13, 30) }];
+  const around = planPerson(baseInput({ busy, items: ["A", "B", "C", "D"].map((k, i) => item(k, { createdAt: i })) }));
+  ok(around.blocks.every((b) => busy.every((x) => b.endMs <= x.startMs || b.startMs >= x.endMs)), "auto-cal plan: blocks never overlap visits, drives or meetings");
+
+  const risk = planPerson(baseInput({ items: [
+    item("big1", { size: "l", sizeMin: 240, tier: "high", dueMs: at(MON, 17) }),
+    item("big2", { size: "l", sizeMin: 240, tier: "high", dueMs: at(MON, 17), createdAt: 2 }),
+    item("late", { dueMs: at(MON, 17), createdAt: 3 }),
+  ] }));
+  const late = risk.atRisk.find((a) => a.itemKey === "task:late");
+  ok(!!late && chicagoDayKey(late.finishMs!) === TUE && late.label === "At risk — due Mon" && blocksOf(risk, "task:late").every((b) => b.atRisk),
+    "auto-cal plan: work that can't finish by its due date is still placed, late, and flagged At risk");
+  ok(!risk.atRisk.some((a) => a.itemKey === "task:big1"), "auto-cal plan: work that fits isn't flagged");
+  const over = planPerson(baseInput({ horizonDays: 1, items: [item("A", { size: "l", sizeMin: 240 }), item("B", { size: "l", sizeMin: 240, createdAt: 2 })] }));
+  ok(over.atRisk.some((a) => a.itemKey === "task:B" && a.finishMs === null), "auto-cal plan: work that doesn't fit in the horizon is flagged with no finish date");
+
+  const pr = planPerson(baseInput({ items: [item("high-month", { tier: "high", dueMs: at("2036-11-12", 17) }), item("low-tomorrow", { tier: "low", dueMs: at(TUE, 17) })] }));
+  ok(pr.blocks[0].itemKey === "task:low-tomorrow", "auto-cal plan: the most urgent item gets the earliest time");
+
+  const pinned = planPerson(baseInput({ pins: [{ itemKey: "task:A", startMs: at(MON, 10), endMs: at(MON, 11), kind: "hand" }], items: [item("A"), item("B", { tier: "high", dueMs: at(MON, 17) })] }));
+  ok(blocksOf(pinned, "task:A").length === 1 && blocksOf(pinned, "task:A")[0].pinned === "hand" && blocksOf(pinned, "task:A")[0].startMs === at(MON, 10),
+    "auto-cal plan: a pinned block stays where it is and covers the task");
+  ok(!pinned.blocks.some((b) => b.itemKey !== "task:A" && b.startMs < at(MON, 11) && b.endMs > at(MON, 10)), "auto-cal plan: pinned time is taken out of free time first");
+
+  const inp = baseInput({ busy, items: ["A", "B", "C", "D", "E"].map((k, i) => item(k, { createdAt: 5 - i, tier: i % 2 ? "high" : "low" })) });
+  ok(JSON.stringify(planPerson(inp)) === JSON.stringify(planPerson({ ...inp, items: [...inp.items].reverse(), busy: [...inp.busy].reverse() })), "auto-cal plan: same input → same plan");
+  ok(chunkFor(60, 45) === 30 && chunkFor(240, 225) === 210 && chunkFor(30, 15) === 0 && chunkFor(15, 15) === 15 && chunkFor(45, 30) === 0 && chunkFor(60, 90) === 60,
+    "auto-cal plan: chunk sizes keep every piece ≥ 30 minutes");
+
+  /* review add-ons: undated items, midnight end, DST, copy */
+  const undated = planPerson(baseInput({ items: [item("undated", { dueMs: 0, dueVirtual: true, createdAt: at(MON, 6) }), item("dated", { dueMs: at(TUE, 17), createdAt: 5 })] }));
+  ok(undated.blocks[0].itemKey === "task:dated" && blocksOf(undated, "task:undated")[0]?.dueMs === defaultDueAt(at(MON, 6)) && !undated.atRisk.some((a) => a.itemKey === "task:undated"),
+    "auto-cal plan: an undated item plans by its effective due (created + 7), never as overdue");
+  const nothing = planPerson(baseInput({ items: [item("zero", { sizeMin: 0 })] }));
+  ok(nothing.blocks.length === 0 && nothing.atRisk.length === 0, "auto-cal plan: an item with nothing left to place isn't flagged");
+
+  const late20 = { days: EVERY_DAY, startMin: 20 * 60, endMin: 1440 };
+  const mid = planPerson(baseInput({ hours: late20, fillRatio: 1, items: [item("A", { size: "l", sizeMin: 240 })] }));
+  ok(mid.blocks.length === 1 && mid.blocks[0].startMs === at(MON, 20) && mid.blocks[0].endMs === chicagoDayStart(TUE) && fmtBlockTime(mid.blocks[0].startMs, mid.blocks[0].endMs) === "8:00–12:00",
+    "auto-cal plan: work hours ending at midnight (1440) fill up to the next day's 00:00");
+  const midCap = planPerson(baseInput({ hours: late20, items: [item("A", { size: "l", sizeMin: 240 })] }));
+  ok(blocksOf(midCap, "task:A").map((b) => `${chicagoDayKey(b.startMs)} ${(b.endMs - b.startMs) / MIN}`).join(",") === `${MON} 180,${TUE} 60`,
+    "auto-cal plan: a midnight-ending day still caps at 80 % (240 free → 180)");
+
+  const allDay = { days: EVERY_DAY, startMin: 0, endMin: 1440 };
+  const fall = freeDays({ startMs: chicagoDayStart("2036-11-02"), days: 1, hours: allDay, busy: [] });
+  const spring = freeDays({ startMs: chicagoDayStart("2037-03-08"), days: 1, hours: allDay, busy: [] });
+  ok(fall[0].free.length === 1 && fall[0].free[0].endMs - fall[0].free[0].startMs === 25 * 60 * MIN && fall[0].capMin === 1200 &&
+    spring[0].free[0].endMs - spring[0].free[0].startMs === 23 * 60 * MIN && spring[0].capMin === 1095,
+    "auto-cal plan: free time follows DST — 25 h on the fall-back day, 23 h on spring-forward");
+  const dst = planPerson(baseInput({ nowMs: at("2036-11-01", 12), hours: { days: [0], startMin: 0, endMin: 1440 }, fillRatio: 1, items: [item("A", { sizeMin: 1500, dueMs: at("2036-11-09", 17) })] }));
+  ok(dst.blocks.length === 1 && dst.blocks[0].startMs === chicagoDayStart("2036-11-02") && dst.blocks[0].endMs === chicagoDayStart("2036-11-03") &&
+    dst.blocks[0].startMs % QUARTER_MS === 0 && dst.atRisk.length === 0,
+    "auto-cal plan: a 25 h fall-back day holds 1,500 minutes on the grid");
+  const afterDst = planPerson(baseInput({ nowMs: at("2036-11-01", 10), items: [item("A", { dueMs: at("2036-11-07", 17) })] }));
+  ok(afterDst.blocks[0].startMs === at("2036-11-03", 8) && afterDst.blocks[0].endMs === at("2036-11-03", 9), "auto-cal plan: the first work day after the fall-back starts at 8:00 local (CST)");
+
+  ok(atRiskLabel(at(MON, 17), at(MON, 7)) === "At risk — due Mon" && atRiskLabel(at("2036-10-19", 17), at(MON, 7)) === "At risk — due Sun" &&
+    atRiskLabel(at("2036-10-20", 17), at(MON, 7)) === "At risk — due Oct 20" && atRiskLabel(at("2036-11-03", 17), at(MON, 7)) === "At risk — due Nov 3" &&
+    atRiskLabel(at("2036-10-10", 17), at(MON, 7)) === "At risk — due Fri",
+    "auto-cal copy: At risk — due <weekday within 6 days, else Mon D>");
+  ok(calendarNote("ok", "Dana", false) === null && calendarNote("failed", "Dana", true) === GOOGLE_NOTE_ME &&
+    GOOGLE_NOTE_ME === "Planned without your Google calendar — may overlap meetings" &&
+    calendarNote("no-calendar", "Dana", false) === "Planned without Dana's Google calendar — may overlap meetings",
+    "auto-cal copy: the Google-calendar note, mine and another person's");
+  ok(fmtBlockTime(at(MON, 8), at(MON, 9)) === "8:00–9:00" && finishText(at(TUE, 10)) === "Plan finishes Tue Oct 14" &&
+    finishText(chicagoDayStart(TUE)) === "Plan finishes Mon Oct 13" && finishText(null) === NOT_PLACED_TEXT && NOT_PLACED_TEXT === "Doesn't fit in the next 8 weeks",
+    "auto-cal copy: block time, Plan finishes, Doesn't fit in the next 8 weeks");
 }

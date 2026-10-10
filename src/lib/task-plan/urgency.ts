@@ -8,6 +8,11 @@
  * Overdue outranks everything, most overdue first; ties: earlier due → older
  * createdAt → item key. Weights are compared as integer cross-products, never
  * as floats, so the order is exact and deterministic.
+ *
+ * Callers pass DATED items only: `dueMs` must be a real due stamp. A dueMs of
+ * 0 (or any missing date) reads as decades overdue and sorts first of all.
+ * Undated work plans by its effective due (`effectiveDue` in ./due — created
+ * + 7 days); `planPerson` applies that before it sorts.
  */
 import { dayKeyDiff } from "@/lib/calendar-tasks";
 import { chicagoDayKey } from "@/lib/drive-plan/day";
