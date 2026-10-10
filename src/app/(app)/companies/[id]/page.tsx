@@ -835,6 +835,7 @@ export default async function CustomerDetailPage({
                   searchPlaceholder="Search site visits…"
                   items={visits.map((v) => {
                     const sm = VISIT_STAGE_META[v.stage];
+                    const va = visitAddr.get(v.id);
                     return (
                       <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -869,9 +870,9 @@ export default async function CustomerDetailPage({
                           {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
                           {v.invite?.sentAt ? " · invite sent" : ""}
                         </div>
-                        {v.stage !== "done" && visitAddr.get(v.id) && visitAddr.get(v.id)!.status !== "verified" && (
+                        {v.stage !== "done" && va && va.status !== "verified" && (
                           <div style={{ marginTop: 3 }}>
-                            <AddressFlagBadge flag={{ text: FLAG_TEXT.unverified, fix: visitAddr.get(v.id)!.fix }} />
+                            <AddressFlagBadge flag={{ text: FLAG_TEXT.unverified, fix: va.fix }} />
                           </div>
                         )}
                       </div>

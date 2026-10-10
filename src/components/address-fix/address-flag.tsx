@@ -11,7 +11,7 @@ export type AddressFlagVM = { text: string; fix: FixTarget | null };
 
 /** The flag + Fix (spec "Where flags show"). Fixing refreshes the page so
  *  the flag and the drive legs redraw from the server. */
-export default function AddressFlagBadge({ flag, compact = false, style }: { flag: AddressFlagVM; compact?: boolean; style?: CSSProperties }) {
+export default function AddressFlagBadge({ flag, compact = false, style, drawerZIndex }: { flag: AddressFlagVM; compact?: boolean; style?: CSSProperties; drawerZIndex?: number }) {
   const router = useRouter();
   // The target as it was when Fix was clicked — a parent re-render handing
   // in a fresh flag object must not reload the open dialog under the user.
@@ -51,6 +51,7 @@ export default function AddressFlagBadge({ flag, compact = false, style }: { fla
       {open && (
         <AddressFixDrawer
           target={open}
+          zIndex={drawerZIndex}
           onClose={() => {
             setOpen(null);
             router.refresh();

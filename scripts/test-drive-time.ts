@@ -1730,6 +1730,17 @@ export async function driveTimeBookingPins(ok: Ok): Promise<void> {
   ok(/setTimeout\([\s\S]{0,900}?,\s*(6\d\d|[7-9]\d\d|\d{4,})\)/.test(modal) && modal.includes("clearTimeout"), "drive-time booking: the Inbox scheduler's address check is debounced (>= 600 ms), not per keystroke");
   ok(!/disabled=\{[^}]*addr/.test(modal), "drive-time booking: the address warning never disables Save");
   ok(modal.includes("Address not verified — no drive time"), "drive-time booking: the Inbox warning uses the verbatim flag copy");
+  // Task 11 fix round: the Fix drawer opens above the booking dialog, and stale lookups never render.
+  const flagSrc = read("src/components/address-fix/address-flag.tsx");
+  const drawerSrc11 = read("src/components/address-fix/address-fix-drawer.tsx");
+  ok(/drawerZIndex\?: number/.test(flagSrc) && /zIndex=\{drawerZIndex\}/.test(flagSrc) && /zIndex = 60,/.test(drawerSrc11) && /inset: 0, zIndex, fontFamily/.test(drawerSrc11),
+    "drive-time booking: the Fix drawer takes a zIndex (default 60) that AddressFlagBadge threads through");
+  const modalOverlay = Number(/zIndex: (\d+),\s*display: "flex"/.exec(modal)?.[1]);
+  const modalDrawerZ = Number(/drawerZIndex=\{(\d+)\}/.exec(modal)?.[1]);
+  ok(modalOverlay > 0 && modalDrawerZ > modalOverlay && /<div onClick=\{\(e\) => e\.stopPropagation\(\)\} style=\{\{ position: "fixed", inset: 0, zIndex,/.test(drawerSrc11),
+    "drive-time booking: the Inbox Schedule modal opens the Fix drawer above its own overlay, and drawer clicks never reach the overlay's close");
+  ok(/addr && addr\.forVenue === venueId && addr\.status !== "verified"/.test(modal) && /if \(live\) setAddr\(/.test(modal),
+    "drive-time booking: a lookup for a previously selected venue is never shown (forVenue === venueId, superseded results dropped)");
   // Task 10 review add-ons.
   const home = read("src/app/(app)/home-calendar.tsx");
   ok(/<AddressFlagBadge flag=\{it\.addressFlag\} \/>/.test(home) && !/<AddressFlagBadge flag=\{it\.addressFlag\} compact/.test(home), "drive-time booking: Home agenda rows show the full address flag (not compact)");

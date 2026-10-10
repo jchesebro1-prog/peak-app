@@ -126,6 +126,7 @@ export default function SiteVisitModal({
         .then((r) => {
           if (live) setAddr({ forVenue: venueId, status: r.status, fix: r.fix });
         })
+        // The lookup is advisory: a failure is intentionally silent (no flag, never blocks Save).
         .catch(() => {});
     }, 600);
     return () => {
@@ -263,7 +264,7 @@ export default function SiteVisitModal({
             </select>
             {addr && addr.forVenue === venueId && addr.status !== "verified" && (
               <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <AddressFlagBadge flag={{ text: "Address not verified — no drive time", fix: addr.fix }} />
+                <AddressFlagBadge flag={{ text: "Address not verified — no drive time", fix: addr.fix }} drawerZIndex={120} />
                 <span style={{ fontSize: 11, color: "#9aa0ab" }}>You can still schedule it.</span>
               </div>
             )}

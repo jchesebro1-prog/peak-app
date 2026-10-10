@@ -51,6 +51,7 @@ export default function AddressFixDrawer({
   onClose,
   onFixed,
   onGone,
+  zIndex = 60,
 }: {
   target: FixTarget;
   reason?: string;
@@ -59,6 +60,8 @@ export default function AddressFixDrawer({
   onClose: () => void;
   onFixed?: (status: GeoStatus) => void;
   onGone?: () => void;
+  /** Stacking level — a caller inside a higher overlay (e.g. a modal) passes a larger one. */
+  zIndex?: number;
 }) {
   const [details, setDetails] = useState<FixTargetDetails | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -199,7 +202,7 @@ export default function AddressFixDrawer({
   if (typeof document === "undefined") return null;
   const ui = (
     // Clicks inside never reach the block / row the dialog was opened from.
-    <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 60, fontFamily: "var(--font-ui)", color: "#16181d" }}>
+    <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex, fontFamily: "var(--font-ui)", color: "#16181d" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(22,24,29,.28)" }} />
       <aside
         role="dialog"
