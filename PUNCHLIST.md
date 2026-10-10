@@ -11741,8 +11741,13 @@ Open (Jeff-gated):
   hours in Account).
 - Try a drag and an At risk fix (Push due date / Hand off) on production.
 
-## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — PLANNED
+## 328. Conduit riser phase 2 — riser data sheet, conduit fill, A/V riser — piece A done 2026-10-10 (D812–D814)
 
 Approved by Jeff 2026-10-10. Spec `docs/superpowers/specs/2026-10-10-riser-phase2-design.md`; plan
 `docs/superpowers/plans/2026-10-10-riser-phase2.md`. Build order: A riser data sheet + wire-type symbol fill →
 B computed conduit fill (EMT, suggest + warn) → C A/V conduit riser. Each piece reviewed and pushed on its own.
+
+**Piece A done 2026-10-10 (D812–D814):** Catalog → Riser data (`/catalog/riser-data`, admin), the tag suggestion rules,
+and Grid Settings → Wire types → Fill symbols from Bray's legend. Jeff-gated: open Catalog → Riser data and export the
+sheet; review the rows with Source = suggested (gateways and splitters may read CRON/CRO; Box is never suggested);
+upload, check the Preview, Apply; then in Grid Settings → Wire types click Fill symbols from Bray's legend and Save.

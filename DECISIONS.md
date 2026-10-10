@@ -10990,3 +10990,44 @@ already loaded (`fillDesignatorsInMemory`, `labelPartsFrom`, `GridQuoteInputs.la
 the caller passes `GridQuoteInputs` (the editor page, the Designs dashboard); a single quote built without inputs
 (Add to Quotes) reads settings and device types itself, once. `restoreRevision` drops `sheetLevels` entries that name a level absent from the
 restored levels, so a restore never leaves a dangling sheet level.
+
+## D812. Catalog → Riser data: an admin sheet that pre-fills the conduit riser's per-part tags (#328 piece A, 2026-10-10)
+
+`/catalog/riser-data` (admin, `manage_users`; page, export and both actions) exports an .xlsx, tab **Devices**, one row
+per catalog part whose device type is a lighting-control one (`control-networking`, `dimming-power`, `racks-cases`),
+with the editable columns Designator code · Box · Face · Mount · Height · P/D and a **Source** (`current` / `suggested`
+/ `—`). A blank part value is pre-filled from the suggestion rules (D813); an existing value is never replaced in the
+export. The export reads the device-type map without writing (stored types plus in-memory auto types). Upload →
+Preview (per part, field: old → new; unchanged rows hidden behind a toggle; unknown, renamed and invalid rows listed
+per row) → Apply. Cell rules: **blank = leave unchanged, `-` = clear, a literal em dash = blank (what the export
+writes for an empty cell)**, a bare number in Height gets the inch mark, anything else is cleaned by `cleanTypeCode` /
+`cleanTagFields`. An invalid cell refuses its **whole row** (nothing from that row is written — not even its valid
+cells) and the rest of the sheet still applies; unlike Rack data, one bad row does not block the import. A SKU that was
+renamed (#304) is followed through `renamedTo` and the change lands on the live part. Apply is one `mergeUpsert` per
+changed part touching **only `designatorCode` and `tagDefaults`**, in resumable 45 s batches that re-plan against the
+live catalog each time. The sheet is ≤ 800 KB / 10,000 rows. The spec's **Cables** tab (outside diameters) belongs to
+piece B and is not built here. Punch item #328.
+
+## D813. The tag suggestion rules: Bray's codes, most specific kind first, matched per field (#328 piece A, 2026-10-10)
+
+`SUGGEST_RULES` (`src/lib/design/conduit-riser/suggest-tags.ts`) is a data table, first match wins, tried **most
+specific device kind first** — EBDK, DEBC, DR, ER, TS, EP, OCC, LVJB, then the outlets CRON, CRO, CRN — so a "DMX
+emergency bypass controller" or a dimmer rack whose description says DMX is never coded as an outlet. Model,
+description and category are tested **separately**; a rule never reads across a field boundary. Brand-only tokens
+(`unison`, `sensor3`, `sensor+`) count toward DR only beside a rack/panel noun in the same field; the model-shaped
+tokens `drd\d*` and `ern\d*` count on their own (the digit is optional — "Unison ERn" has none); "touch panel" never
+supplies the noun, so a Unison touchscreen is TS. CRN matches outlet / receptacle / wall plate only (a network switch
+or jack is not an outlet); CRON needs DMX plus a network word plus outlet/port/receptacle. Box is never suggested (gang
+count isn't knowable from the catalog), and a code is only a starting point — the Source column marks every row a rule
+filled so Jeff reviews them. Known soft spot: gateways and splitters can read CRON/CRO.
+
+## D814. Wire types: "Fill symbols from Bray's legend" (#328 piece A, 2026-10-10)
+
+Grid Settings → Wire types gains a button that fills **only empty** Symbol / Signal by what a wire type carries:
+DMX → `D` "DMX"; network / ethernet / Cat5e / Cat6 / sACN-Art-Net → `N` "Network"; EchoConnect → `UE` "EchoConnect";
+contact closure → `CC` "Contact closure"; panic → `P` "Panic". A pure rule (`conduit-riser/wire-symbols.ts`,
+`brayWireSymbols`, never mutates, never overwrites) reads the connection types first, then the id and label, so a custom
+wire type named "Panic" or "Cat5e" fills too; anything marked wireless is skipped, and panic is tried before contact
+closure because Bray's panic loop rides a contact closure. It edits the form only — nothing is saved until Save — and
+the card says how many rows it filled. A wire type whose connection types include a Dante / HDBaseT "(Cat6)" entry
+reads as network, since the Cat6 wire type carries them. Punch item #328.
