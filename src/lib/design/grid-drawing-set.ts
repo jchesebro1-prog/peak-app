@@ -12,6 +12,7 @@
  */
 
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
+import type { ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
 import {
   DRAWING_SYSTEMS,
   drawingSystemOf,
@@ -379,7 +380,7 @@ export function planContent<
 export type DrawingSheetKind = "cover" | "plan" | "riser" | "conduitRiser" | "schedule";
 
 export type DrawingSheetDef = {
-  /** Stable identity: "cover" | "plan:<system>:<sheetId>:<page>" | "riser" | "conduit-riser" | "conduit-riser:<n>" | "schedule" | "schedule:<n>". */
+  /** Stable identity: "cover" | "plan:<system>:<sheetId>:<page>" | "riser" | "conduit-riser" | "conduit-riser:<n>" | "av-riser" | "av-riser:<n>" | "schedule" | "schedule:<n>". */
   key: string;
   kind: DrawingSheetKind;
   number: string;
@@ -389,20 +390,35 @@ export type DrawingSheetDef = {
   page?: number;
   /** 0-based schedule page. */
   schedulePage?: number;
-  /** 0-based lighting control riser page (#321). */
+  /** 0-based page within its conduit riser (#321). */
   conduitRiserPage?: number;
+  /** Which conduit riser a `conduitRiser` sheet draws (#328 C4); absent = lighting. */
+  riserSystem?: ConduitRiserSystem;
 };
 
-/** All schedule pages share one include/exclude switch; so do the lighting
- *  control riser's pages (#321). */
+/** A conduit riser sheet's system — lighting unless it says A/V. */
+export const riserSheetSystem = (d: Pick<DrawingSheetDef, "riserSystem">): ConduitRiserSystem => (d.riserSystem === "av" ? "av" : "lighting");
+
+/** Each conduit riser's pages share one include/exclude switch (#321;
+ *  #328 C4: A/V's is `av-riser`, lighting keeps `conduit-riser` so saved
+ *  exclusions still read); so do the schedule pages. */
+export const CONDUIT_RISER_EXCLUSION_KEY: Readonly<Record<ConduitRiserSystem, string>> = { lighting: "conduit-riser", av: "av-riser" };
+
+/** The sheets' titles, per conduit riser. */
+export const CONDUIT_RISER_SHEET_TITLE: Readonly<Record<ConduitRiserSystem, string>> = { lighting: "Lighting control riser", av: "A/V conduit riser" };
+
 export function sheetExclusionKey(d: DrawingSheetDef): string {
-  return d.kind === "schedule" ? "schedule" : d.kind === "conduitRiser" ? "conduit-riser" : d.key;
+  return d.kind === "schedule" ? "schedule" : d.kind === "conduitRiser" ? CONDUIT_RISER_EXCLUSION_KEY[riserSheetSystem(d)] : d.key;
 }
 
-/** The lighting control riser's sheet number (#321): page 0 → E-502, then
- *  E-503… — after E-501. The set and the DXF download both name it so. */
-export function conduitRiserSheetNumber(page: number): string {
-  return `E-${502 + page}`;
+/** A conduit riser's sheet number (#321): the lighting control riser's page 0
+ *  → E-502, then E-503… after E-501; #328 C4: the A/V conduit riser's pages
+ *  follow the lighting ones, so its numbers need `lightingPages` (the lighting
+ *  riser's page count at the same size; ignored for lighting). The set, the
+ *  riser page and the DXF download all name sheets through this. */
+export function conduitRiserSheetNumber(page: number, system: ConduitRiserSystem = "lighting", lightingPages = 0): string {
+  const offset = system === "av" ? Math.max(0, Math.floor(lightingPages || 0)) : 0;
+  return `E-${502 + offset + page}`;
 }
 
 /**
@@ -416,6 +432,8 @@ export function buildSheetList(input: {
   schedulePages: number;
   /** Lighting control riser pages (#321); 0 or absent = none. */
   conduitRiserPages?: number;
+  /** A/V conduit riser pages (#328 C4), numbered after lighting's; 0 or absent = none. */
+  avRiserPages?: number;
   excluded?: readonly string[];
 }): { all: DrawingSheetDef[]; included: DrawingSheetDef[] } {
   const all: DrawingSheetDef[] = [{ key: "cover", kind: "cover", number: "T-001", title: "Cover sheet" }];
@@ -436,14 +454,21 @@ export function buildSheetList(input: {
   }
   all.push({ key: "riser", kind: "riser", number: "E-501", title: "System riser" });
   const crPages = Math.max(0, Math.floor(input.conduitRiserPages || 0));
-  for (let i = 0; i < crPages; i++) {
-    all.push({
-      key: i === 0 ? "conduit-riser" : `conduit-riser:${i + 1}`,
-      kind: "conduitRiser",
-      number: conduitRiserSheetNumber(i),
-      title: i === 0 ? "Lighting control riser" : "Lighting control riser (cont.)",
-      conduitRiserPage: i,
-    });
+  const avPages = Math.max(0, Math.floor(input.avRiserPages || 0));
+  for (const [system, pages] of [["lighting", crPages], ["av", avPages]] as const) {
+    const base = CONDUIT_RISER_EXCLUSION_KEY[system];
+    const title = CONDUIT_RISER_SHEET_TITLE[system];
+    for (let i = 0; i < pages; i++) {
+      all.push({
+        key: i === 0 ? base : `${base}:${i + 1}`,
+        kind: "conduitRiser",
+        number: conduitRiserSheetNumber(i, system, crPages),
+        title: i === 0 ? title : `${title} (cont.)`,
+        conduitRiserPage: i,
+        // Lighting sheets keep today's exact shape (no field).
+        ...(system === "av" ? { riserSystem: "av" as const } : {}),
+      });
+    }
   }
   const n = Math.max(1, Math.floor(input.schedulePages) || 1);
   for (let i = 0; i < n; i++) {
@@ -464,7 +489,7 @@ export function toggleableSheets(all: DrawingSheetDef[]): Array<{ key: string; l
   const out: Array<{ key: string; label: string }> = [];
   const seen = new Set<string>();
   const scheduleCount = all.filter((d) => d.kind === "schedule").length;
-  const crCount = all.filter((d) => d.kind === "conduitRiser").length;
+  const riserSheets = (sys: ConduitRiserSystem) => all.filter((d) => d.kind === "conduitRiser" && riserSheetSystem(d) === sys);
   for (const d of all) {
     const key = sheetExclusionKey(d);
     if (seen.has(key)) continue;
@@ -475,7 +500,10 @@ export function toggleableSheets(all: DrawingSheetDef[]): Array<{ key: string; l
         d.kind === "schedule"
           ? `${d.number}${scheduleCount > 1 ? `–E-${600 + scheduleCount}` : ""} Equipment schedules`
           : d.kind === "conduitRiser"
-            ? `${d.number}${crCount > 1 ? `–${conduitRiserSheetNumber(crCount - 1)}` : ""} Lighting control riser`
+            ? (() => {
+                const mine = riserSheets(riserSheetSystem(d));
+                return `${d.number}${mine.length > 1 ? `–${mine[mine.length - 1].number}` : ""} ${CONDUIT_RISER_SHEET_TITLE[riserSheetSystem(d)]}`;
+              })()
             : `${d.number} ${d.title}`,
     });
   }

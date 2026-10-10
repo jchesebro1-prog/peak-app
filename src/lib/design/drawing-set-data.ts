@@ -17,7 +17,9 @@ import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 import { partDocumentUrl, type ObjectSymbolUrls } from "@/lib/design/object-symbols";
 import { designatorCodeOf, fillDesignators, readingCtxOf } from "@/lib/design/designators";
-import { conduitRiserSheetPages } from "@/lib/design/conduit-riser-server";
+import { conduitRiserSheetPages, loadRiserPartsContext } from "@/lib/design/conduit-riser-server";
+import { CONDUIT_RISER_FIELDS, liveConduitRiser } from "@/lib/design/conduit-riser/live";
+import type { ConduitRiserSystem } from "@/lib/design/conduit-riser/model";
 
 /**
  * The drawing set's data (#209, #300), shared since #301 slice C (R8a) by
@@ -33,10 +35,11 @@ export const SCHEDULE_ROWS_PER_COLUMN = 30;
 export type DrawingSetAssets = {
   sheet: (src: Pick<GridSheet, "id">) => string;
   doc: (docId: string) => string;
-  /** #321: a lighting control riser sheet's DXF download (1-based page). The
-   *  team page only — it prints a screen-only link under each E-502…; the
-   *  signed print route has none. */
-  conduitRiserDxf?: (q: { projectId: string; optionId: string; size: SheetSizeKey; page: number }) => string;
+  /** #321: a conduit riser sheet's DXF download (1-based page within that
+   *  riser; #328 C4: `system` "av" for the A/V conduit riser). The team page
+   *  only — it prints a screen-only link under each E-502…; the signed print
+   *  route has none. */
+  conduitRiserDxf?: (q: { projectId: string; optionId: string; size: SheetSizeKey; page: number; system?: ConduitRiserSystem }) => string;
 };
 
 export const TEAM_DRAWING_SET_ASSETS: DrawingSetAssets = {
@@ -46,7 +49,7 @@ export const TEAM_DRAWING_SET_ASSETS: DrawingSetAssets = {
   sheet: (src) => `/api/grid-sheets/${encodeURIComponent(src.id)}`,
   doc: partDocumentUrl,
   conduitRiserDxf: (q) =>
-    `/api/grid/${encodeURIComponent(q.projectId)}/conduit-riser/dxf?option=${encodeURIComponent(q.optionId)}&size=${q.size}&page=${q.page}`,
+    `/api/grid/${encodeURIComponent(q.projectId)}/conduit-riser/dxf?option=${encodeURIComponent(q.optionId)}&size=${q.size}&page=${q.page}${q.system === "av" ? "&system=av" : ""}`,
 };
 
 const DOC_URL = /^\/api\/part-documents\/([^/?#]+)$/;
@@ -139,13 +142,22 @@ export async function loadDrawingSetData(
   const sourceNames = Object.fromEntries(sheets.map((s) => [s.id, s.name]));
   const sheetById = new Map(sheets.map((s) => [s.id, s]));
   // E-502… (#321): the lighting control riser, once the option has a conduit
-  // run — the same pages the DXF download writes.
-  const conduitRiserPages = await conduitRiserSheetPages(project, optionId, "lighting", size, { catalog, gridSymbols, settings, deviceTypes });
+  // run — the same pages the DXF download writes. #328 C4: then the A/V
+  // conduit riser's pages, numbered after lighting's, once it has a run.
+  // Parts are built once when either riser has a run, not once per riser.
+  const anyRiser = CONDUIT_RISER_FIELDS.some((f) => liveConduitRiser(project, optionId, f.system).runs.length > 0);
+  const riserBase = { catalog, gridSymbols, settings, deviceTypes };
+  const riserDeps = anyRiser ? { ...riserBase, parts: await loadRiserPartsContext(project, riserBase) } : riserBase;
+  const [conduitRiserPages, avRiserPages] = await Promise.all([
+    conduitRiserSheetPages(project, optionId, "lighting", size, riserDeps),
+    conduitRiserSheetPages(project, optionId, "av", size, riserDeps),
+  ]);
   const { all, included } = buildSheetList({
     planGroups: groups,
     sourceNames,
     schedulePages: schedulePages.length,
     conduitRiserPages: conduitRiserPages.length,
+    avRiserPages: avRiserPages.length,
     excluded: set.excluded,
   });
   const revRows = revisionRows(project.revisions, set.revisionLabels);
@@ -162,7 +174,7 @@ export async function loadDrawingSetData(
 
   return {
     project, optionId, options, option, slice, spaces, cals, partById, symCtx, accent, set, size, k, area, now,
-    symbolDisplay, symbolUrls, view, schedule, schedulePages, conduitRiserPages, sheetById, all, included, revRows, notes, legend, optionQuoteNo, digits,
+    symbolDisplay, symbolUrls, view, schedule, schedulePages, conduitRiserPages, avRiserPages, sheetById, all, included, revRows, notes, legend, optionQuoteNo, digits,
     company: { name: settings.companyName, logoDark: settings.logoDark, offices: settings.offices },
     gridStandardNotes: settings.gridStandardNotes || "",
   };

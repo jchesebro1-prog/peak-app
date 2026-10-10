@@ -71,7 +71,8 @@ export function riserTables(input: {
     const rows = [...cables.values()]
       .sort((a, b) => a.symbol.localeCompare(b.symbol))
       .map((c) => [c.symbol, [...c.cables].sort().map((n) => (/^\(\d+\)/.test(n.trim()) ? U(n) : `(1) ${U(n)}`)).join(", "), U(c.signal)]);
-    out.push({ key: "wire", title: "CONTROL WIRE LEGEND", columns: [{ head: "SYMBOL", w: 0.6 }, { head: "WIRE TYPE(S)", w: 2.2 }, { head: "SIGNAL", w: 1.2 }], rows });
+    // #328 C4: the A/V riser's wires aren't control wire — Bray's AV1.5 says "WIRE LEGEND".
+    out.push({ key: "wire", title: av ? "WIRE LEGEND" : "CONTROL WIRE LEGEND", columns: [{ head: "SYMBOL", w: 0.6 }, { head: "WIRE TYPE(S)", w: 2.2 }, { head: "SIGNAL", w: 1.2 }], rows });
   }
 
   if (anyRun) {

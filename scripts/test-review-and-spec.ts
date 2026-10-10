@@ -11646,6 +11646,7 @@ seeded()
   .then(() => riserPhase2C1Checks())
   .then(() => riserPhase2C2Checks())
   .then(() => riserPhase2C3Checks())
+  .then(() => riserPhase2C4Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -63668,8 +63669,9 @@ async function conduitRiser321B9Checks(): Promise<void> {
   const iUser = route.indexOf("await requireUser()");
   ok(iUser > 0 && iUser < route.indexOf("conduitRiserDxfResponse(id") && route.includes('export const dynamic = "force-dynamic"') && !route.includes("try {"),
     "#321 B9 route: requireUser is awaited first, outside any try, then the DXF comes from conduitRiserDxfResponse (a signed-out request redirects)");
-  ok(crs.includes('conduitRiserSheetPages(project, optionId, "lighting", size)') && crs.includes("geometryToDxf(page.geo, page)") && crs.includes('"content-type": "application/dxf"') &&
-     crs.includes("attachmentDisposition(") && crs.includes("-lighting-control-riser.dxf") && crs.includes("conduitRiserSheetNumber(") &&
+  // #328 C4: the riser is `system` (lighting unless ?system=av), its slug from DXF_SLUG.
+  ok(crs.includes('conduitRiserSheetPages(project, optionId, system, size,') && crs.includes("geometryToDxf(page.geo, page)") && crs.includes('"content-type": "application/dxf"') &&
+     crs.includes("attachmentDisposition(") && crs.includes('lighting: "lighting-control-riser"') && crs.includes("-${DXF_SLUG[system]}.dxf") && crs.includes("conduitRiserSheetNumber(") &&
      crs.includes('"cache-control": NO_STORE') && crs.includes("status: 404") && crs.indexOf("decodeURIComponent(id)") < crs.indexOf("getProject(projectId)"),
     "#321 B9 route: the DXF comes from the set's own pages, downloads as an attachment named by its sheet number, never cached; a miss is a 404");
   const dsd = srcOf("src/lib/design/drawing-set-data.ts");
@@ -65811,4 +65813,181 @@ async function riserPhase2C3Checks(): Promise<void> {
   const smoke = src("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&system=av", reject: "no longer exists" }'),
     "#328 C3 pins: the A/V riser page is in the smoke routes");
+}
+
+/* #328 C4 — the A/V conduit riser's drawing-set sheets (numbered after lighting's), its exclusion key, the DXF
+   route's ?system=av, the A/V wire legend title, and the A/V tag panel without power fields. */
+async function riserPhase2C4Checks(): Promise<void> {
+  const DS = await import("@/lib/design/grid-drawing-set");
+  const DSD = await import("@/lib/design/drawing-set-data");
+  const M = await import("@/lib/design/conduit-riser/model");
+  const LV = await import("@/lib/design/conduit-riser/live");
+  const X = await import("@/lib/design/conduit-riser/dxf");
+  const GO = await import("@/lib/design/grid-options");
+  const G = await import("@/lib/stores/grid-projects");
+  const CR = await import("@/lib/stores/grid-conduit-riser");
+  const L = await import("@/lib/design/conduit-riser-server");
+  const VP = await import("@/lib/design/grid-virtual-parts");
+  const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+  const { getSettings } = await import("@/lib/settings");
+  const { registerFixture: reg } = await import("./test-fixtures");
+  const J = (v: unknown) => JSON.stringify(v);
+  const opt = GO.DEFAULT_OPTION_ID;
+
+  // ---- 1. numbering (pure): lighting E-502…, then A/V; every other sheet keeps its number
+  const groups = [{ system: "lighting", sheetId: "gs-1", page: 1 }, { system: "audio", sheetId: "gs-1", page: 1 }] as import("@/lib/design/grid-drawing-set").PlanGroup[];
+  const list = (cr: number, av?: number, excluded?: string[]) =>
+    DS.buildSheetList({ planGroups: groups, sourceNames: { "gs-1": "Plan" }, schedulePages: 2, conduitRiserPages: cr, ...(av === undefined ? {} : { avRiserPages: av }), excluded });
+  const nums = (r: { all: { number: string }[] } | { number: string }[]) => (Array.isArray(r) ? r : r.all).map((d) => d.number).join(",");
+  const none = list(0);
+  ok(nums(none) === "T-001,L-101,A-101,E-501,E-601,E-602" && J(list(0, 0)) === J(none),
+    "#328 C4 numbering: no riser → T-001, plans, E-501, E-601… exactly as before (avRiserPages 0 = absent)");
+  const lt = list(2);
+  ok(nums(lt) === "T-001,L-101,A-101,E-501,E-502,E-503,E-601,E-602" && J(list(2, 0)) === J(lt) && lt.all.every((d) => !("riserSystem" in d)),
+    "#328 C4 numbering: lighting only → E-502–E-503 and today's exact list (no riserSystem field on any sheet)");
+  const avOnly = list(0, 1);
+  ok(nums(avOnly) === "T-001,L-101,A-101,E-501,E-502,E-601,E-602" && avOnly.all[4].title === "A/V conduit riser" && avOnly.all[4].key === "av-riser" && avOnly.all[4].riserSystem === "av",
+    "#328 C4 numbering: A/V only → its first sheet is E-502, \"A/V conduit riser\", key av-riser");
+  const both = list(2, 2);
+  const cr = both.all.filter((d) => d.kind === "conduitRiser");
+  ok(nums(both) === "T-001,L-101,A-101,E-501,E-502,E-503,E-504,E-505,E-601,E-602" &&
+     J(cr.map((d) => [d.key, d.title, d.conduitRiserPage, DS.riserSheetSystem(d)])) === J([
+       ["conduit-riser", "Lighting control riser", 0, "lighting"], ["conduit-riser:2", "Lighting control riser (cont.)", 1, "lighting"],
+       ["av-riser", "A/V conduit riser", 0, "av"], ["av-riser:2", "A/V conduit riser (cont.)", 1, "av"]]),
+    "#328 C4 numbering: both → lighting E-502–E-503, then A/V E-504–E-505 with \"(cont.)\"; E-601… unchanged");
+  ok(DS.conduitRiserSheetNumber(0) === "E-502" && DS.conduitRiserSheetNumber(1, "lighting", 9) === "E-503" && DS.conduitRiserSheetNumber(0, "av", 2) === "E-504" &&
+     DS.conduitRiserSheetNumber(1, "av", 0) === "E-503" && DS.conduitRiserSheetNumber(0, "av", -3) === "E-502",
+    "#328 C4 conduitRiserSheetNumber: lighting ignores the offset; A/V counts lighting's pages (never negative)");
+
+  // ---- 2. exclusion keys
+  ok(cr.map((d) => DS.sheetExclusionKey(d)).join() === "conduit-riser,conduit-riser,av-riser,av-riser" &&
+     DS.CONDUIT_RISER_EXCLUSION_KEY.lighting === "conduit-riser" && DS.CONDUIT_RISER_EXCLUSION_KEY.av === "av-riser",
+    "#328 C4 exclusion: each riser's pages share one switch — lighting keeps conduit-riser (saved exclusions still read), A/V is av-riser");
+  ok(nums(list(2, 2, ["av-riser"]).included) === "T-001,L-101,A-101,E-501,E-502,E-503,E-601,E-602" &&
+     nums(list(2, 2, ["conduit-riser"]).included) === "T-001,L-101,A-101,E-501,E-504,E-505,E-601,E-602" &&
+     nums(list(2, 2, ["conduit-riser", "av-riser"]).included) === "T-001,L-101,A-101,E-501,E-601,E-602",
+    "#328 C4 exclusion: excluding one riser drops only its pages and renumbers nothing");
+  ok(J(DS.toggleableSheets(both.all).filter((t) => /riser/.test(t.key))) === J([
+       { key: "riser", label: "E-501 System riser" }, { key: "conduit-riser", label: "E-502–E-503 Lighting control riser" }, { key: "av-riser", label: "E-504–E-505 A/V conduit riser" }]) &&
+     J(DS.toggleableSheets(list(1, 1).all).filter((t) => t.key.endsWith("-riser"))) === J([
+       { key: "conduit-riser", label: "E-502 Lighting control riser" }, { key: "av-riser", label: "E-503 A/V conduit riser" }]),
+    "#328 C4 toggles: one checklist line per riser, named by its own sheet range");
+
+  // ---- 3. the team set's DXF link
+  const asset = DSD.TEAM_DRAWING_SET_ASSETS.conduitRiserDxf!;
+  ok(asset({ projectId: "GRD 1", optionId: "opt-base", size: "d", page: 2 }) === "/api/grid/GRD%201/conduit-riser/dxf?option=opt-base&size=d&page=2" &&
+     asset({ projectId: "GRD 1", optionId: "opt-base", size: "d", page: 2, system: "lighting" }) === "/api/grid/GRD%201/conduit-riser/dxf?option=opt-base&size=d&page=2" &&
+     asset({ projectId: "GRD 1", optionId: "opt-base", size: "b", page: 1, system: "av" }) === "/api/grid/GRD%201/conduit-riser/dxf?option=opt-base&size=b&page=1&system=av",
+    "#328 C4 set link: a lighting sheet's DXF URL is unchanged; an A/V sheet's adds &system=av");
+
+  // ---- 4. scratch DB: both risers with a run each
+  const by = "Test Harness";
+  const LIGHT = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "lighting")!.key, "better");
+  const AUDIO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "audio")!.key, "better");
+  const VIDEO = VP.allowancePartId(EQUIPMENT_ROWS.find((r) => r.system === "video")!.key, "better");
+  const CABLE = "T328-C4-CABLE";
+  const settings = await getSettings();
+  const deps = { settings: { ...settings, wireTypes: [{ id: "t328-c4", label: "CAT6", connectionTypes: ["T328-C4"], cableSku: CABLE, symbol: "N", signal: "Network" }] } };
+  const mk = async (name: string) => {
+    const gp = await G.createProject({ name, customer: "Spec fixture", customerId: null, by });
+    reg("grid_projects", gp.id);
+    const sh = (await G.addSheet(gp.id, { name: `${name} sheet`, mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    reg("grid_sheets", sh.id);
+    await G.setSheetCalibration(gp.id, { docId: sh.id, page: 1, scale: 100, unit: "ft", refLength: 100, by, at: Date.now() });
+    const place = async (partId: string, x: number, y: number) => (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x, y, partId, optionId: opt, by }))!.placements.at(-1)!;
+    const wire = async (a: { id: string; x: number; y: number }, b: { id: string; x: number; y: number }) =>
+      G.addRouteWithId(gp.id, { sheetId: sh.id, page: 1, partId: CABLE, points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], aspect: 1, optionId: opt, by, fromPlacementId: a.id, toPlacementId: b.id });
+    return { gp, place, wire, live: async () => (await G.getProject(gp.id))! };
+  };
+  const P = await mk("#328 C4 both risers");
+  await P.wire(await P.place(LIGHT, 0.1, 0.1), await P.place(LIGHT, 0.4, 0.1));
+  await P.wire(await P.place(AUDIO, 0.1, 0.8), await P.place(VIDEO, 0.4, 0.8));
+  const q = (o: Record<string, string>) => new URLSearchParams(o);
+  const accL = await CR.acceptSuggestions(P.gp.id, opt, "lighting", "all", deps);
+  const avMiss = await L.conduitRiserDxfResponse(P.gp.id, q({ system: "av", size: "d" }));
+  ok(accL.ok && accL.accepted === 1 && avMiss.status === 404 && (await avMiss.json()).error.includes("no A/V conduit riser") && avMiss.headers.get("cache-control") === "private, no-store" &&
+     (await L.conduitRiserDxfResponse(P.gp.id, q({ size: "d" }))).status === 200,
+    "#328 C4 DXF: with only a lighting run, system=av is a 404 naming the A/V riser while lighting downloads");
+  const accA = await CR.acceptSuggestions(P.gp.id, opt, "av", "all", deps);
+  const live = await P.live();
+  ok(accA.ok && accA.accepted === 1 && LV.liveConduitRiser(live, opt, "av").runs.length === 1 && LV.liveConduitRiser(live, opt, "lighting").runs.length === 1,
+    "#328 C4 fixture: one run on each riser");
+  const ltPagesD = await L.conduitRiserSheetPages(live, opt, "lighting", "d");
+  const avPagesD = await L.conduitRiserSheetPages(live, opt, "av", "d");
+  const avNo = `E-${502 + ltPagesD.length}`;
+  const good = await L.conduitRiserDxfResponse(encodeURIComponent(P.gp.id), q({ system: "av", page: "1", size: "d", option: opt }));
+  const body = await good.text();
+  const cd = good.headers.get("content-disposition") || "";
+  ok(ltPagesD.length >= 1 && avPagesD.length >= 1 && good.status === 200 && good.headers.get("content-type") === "application/dxf" && good.headers.get("cache-control") === "private, no-store" &&
+     /^attachment;/.test(cd) && cd.includes(`-${avNo}-av-conduit-riser.dxf`) && !cd.includes("lighting"),
+    `#328 C4 DXF: system=av is a 200 application/dxf attachment named for its real sheet number (${avNo}), after lighting's`);
+  ok(body === X.geometryToDxf(avPagesD[0].geo, avPagesD[0]) && body !== X.geometryToDxf(ltPagesD[0].geo, ltPagesD[0]),
+    "#328 C4 DXF: the A/V file is the drawing set's own A/V page, byte for byte — not the lighting one");
+  const R = readDxf321(body);
+  ok(R.lines.length % 2 === 0 && R.zeros[R.zeros.length - 1] === "EOF" && R.count("SECTION") === 4 && R.count("ENDSEC") === 4 && R.count("BLOCK") === R.count("ENDBLK") &&
+     R.pairs.some(([c, v]) => c === 1 && v === "AC1009") && R.insertNames.filter((n) => n === "PK_TAG").length === 2,
+    "#328 C4 DXF: the A/V file parses as an R12 DXF with both A/V tags");
+  const ltName = async (system: string) => (await L.conduitRiserDxfResponse(P.gp.id, q({ system, size: "d" }))).headers.get("content-disposition") || "";
+  const odd = await Promise.all(["", "lighting", "AV", "audio", "rigging", "av "].map(ltName));
+  ok(odd.every((n) => n.includes("-E-502-lighting-control-riser.dxf")),
+    "#328 C4 DXF: system is whitelisted — anything but exactly \"av\" (blank, AV, audio, rigging, \"av \") is the lighting riser, as on the riser page");
+  ok((await L.conduitRiserDxfResponse(P.gp.id, q({ system: "av", page: String(avPagesD.length + 1), size: "d" }))).status === 404 &&
+     (await L.conduitRiserDxfResponse("GRD-NOPE-9999", q({ system: "av" }))).status === 404 &&
+     (await L.conduitRiserDxfResponse(P.gp.id, q({ system: "av", option: "opt-gone", size: "d" }))).status === 200,
+    "#328 C4 DXF: an A/V page past the last and an unknown design are 404s; an unknown option resolves like the set (the base option)");
+
+  // A/V only: its first sheet is E-502.
+  const Q = await mk("#328 C4 A/V only");
+  await Q.wire(await Q.place(AUDIO, 0.1, 0.5), await Q.place(AUDIO, 0.5, 0.5));
+  await CR.acceptSuggestions(Q.gp.id, opt, "av", "all", deps);
+  ok(((await L.conduitRiserDxfResponse(Q.gp.id, q({ system: "av", size: "d" }))).headers.get("content-disposition") || "").includes("-E-502-av-conduit-riser.dxf") &&
+     (await L.conduitRiserDxfResponse(Q.gp.id, q({ size: "d" }))).status === 404,
+    "#328 C4 DXF: an A/V-only design's A/V sheet is E-502; its lighting DXF is a 404");
+
+  // ---- 5. the set end to end
+  const set = await DSD.loadDrawingSetData(live, { requestedOption: opt, requestedSize: "d", assets: DSD.TEAM_DRAWING_SET_ASSETS });
+  const crSet = set.all.filter((d) => d.kind === "conduitRiser");
+  ok(set.avRiserPages.length === avPagesD.length && set.conduitRiserPages.length === ltPagesD.length &&
+     crSet.map((d) => d.number).join() === [...ltPagesD.map((_, i) => `E-${502 + i}`), ...avPagesD.map((_, i) => `E-${502 + ltPagesD.length + i}`)].join() &&
+     crSet.filter((d) => DS.riserSheetSystem(d) === "av").every((d) => d.title.startsWith("A/V conduit riser")) && set.all.at(-1)!.number.startsWith("E-60"),
+    `#328 C4 set: a design with both risers prints lighting from E-502, then A/V (${crSet.map((d) => d.number).join(", ")}), then E-60x`);
+  const setQ = await DSD.loadDrawingSetData(await Q.live(), { requestedOption: opt, requestedSize: "d", assets: DSD.TEAM_DRAWING_SET_ASSETS });
+  ok(setQ.conduitRiserPages.length === 0 && setQ.all.filter((d) => d.kind === "conduitRiser").map((d) => `${d.number} ${d.key}`).join() === "E-502 av-riser",
+    "#328 C4 set: an A/V-only design's riser sheet is E-502, key av-riser");
+
+  // ---- 6. wire legend title per riser
+  await CR.patchConduitRiser(P.gp.id, opt, "av", { op: "setDefaults", showSignals: true });
+  const legend = async (system: "lighting" | "av") => (await L.loadConduitRiser(await P.live(), opt, system, deps)).tables.find((t) => t.key === "wire")?.title;
+  ok((await legend("lighting")) === "CONTROL WIRE LEGEND" && (await legend("av")) === "WIRE LEGEND",
+    "#328 C4 legend: the lighting riser keeps CONTROL WIRE LEGEND; the A/V riser (bubbles on) prints WIRE LEGEND");
+  const avTables = (await L.loadConduitRiser(await P.live(), opt, "av", deps)).tables.map((t) => t.key);
+  ok(!avTables.includes("power") && !avTables.includes("controls") && avTables.includes("line") && avTables.includes("box"),
+    "#328 C4 legend: the A/V riser still prints no power tables");
+  ok(M.emptyConduitRiserDoc("av").showSignals === false, "#328 C4 legend: A/V bubbles (and so its wire legend) stay off by default");
+
+  // ---- 7. pins: tag panel, sheets, riser page
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const dir = "src/app/(app)/design/grid/[id]/conduit-riser";
+  const panels = src(`${dir}/panels.tsx`);
+  const tagPanel = panels.slice(panels.indexOf("export function TagPanel("), panels.indexOf("export function TagView("));
+  const tagView = panels.slice(panels.indexOf("export function TagView("), panels.indexOf("/* -------------------------------- run"));
+  ok(tagPanel.includes("showPower = true,") && tagPanel.indexOf("{showPower && (") < tagPanel.indexOf("Power type") && tagPanel.indexOf("{showPower && (") > 0 &&
+     tagPanel.indexOf("{showPower && (") < tagPanel.indexOf('label="Power controls contents"') &&
+     tagPanel.includes("{showPower && powerTypes.length === 0 && <div style={HINT}>Add power types below") &&
+     tagView.includes('{showPower && <Val label="Power type" value={power} />}') && tagView.includes('{showPower && <Val label="Power controls contents" value={t.contents} />}'),
+    "#328 C4 tags: TagPanel and the phone TagView hide Power type, Power controls contents and the Add-power-types hint unless showPower");
+  const editor = src(`${dir}/conduit-riser-editor.tsx`);
+  ok((editor.match(/showPower=\{system !== "av"\}/g) || []).length === 2,
+    "#328 C4 tags: the editor turns power off on the A/V riser for both the panel and the phone view (lighting unchanged)");
+  const sheets = src("src/components/drawing/drawing-set-sheets.tsx");
+  ok(sheets.includes("(av ? avRiserPages : conduitRiserPages)[d.conduitRiserPage ?? 0]") && sheets.includes("system: riserSheetSystem(d)") && sheets.includes('d.kind === "conduitRiser" && assets.conduitRiserDxf &&'),
+    "#328 C4 set sheets: an A/V sheet draws the A/V pages and its screen-only DXF link names system");
+  const page = src(`${dir}/page.tsx`);
+  ok(page.includes("const sheetPages = conduitRiserPagesOf(data, drawingArea(sheetSize), layouts);") && page.includes("conduitRiserSheetNumber(i, system, lightingPages)") &&
+     page.includes('${system === "av" ? "&system=av" : ""}') && !page.includes('system === "lighting" ? conduitRiserPagesOf'),
+    "#328 C4 riser page: the A/V page shows its Download DXF links, numbered after lighting's, with &system=av");
+  const crs = src("src/lib/design/conduit-riser-server.ts");
+  ok(crs.includes('const system: ConduitRiserSystem = query.get("system") === "av" ? "av" : "lighting";') && crs.includes('av: "av-conduit-riser"'),
+    "#328 C4 pins: the DXF route whitelists system (exactly \"av\", else lighting) and names A/V files …-av-conduit-riser.dxf");
+  ok(src("scripts/smoke-routes.ts").includes("conduit-riser/dxf?option=opt-base&size=d&page=1&system=av"), "#328 C4 smoke: the A/V DXF URL is in the smoke routes");
 }

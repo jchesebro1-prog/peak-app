@@ -8,7 +8,7 @@ import { DRAWING_SYSTEMS } from "@/lib/design/grid-scopes";
 import { planDesignatorMarks } from "@/lib/design/designators";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import type { ScheduleItem } from "@/lib/design/grid-schedule";
-import { SHEET_SIZES, planContent, titleBlockData, type DrawingSheetDef } from "@/lib/design/grid-drawing-set";
+import { SHEET_SIZES, planContent, riserSheetSystem, titleBlockData, type DrawingSheetDef } from "@/lib/design/grid-drawing-set";
 import { markerBox } from "@/lib/design/grid-symbol-display";
 import type { DrawingSetAssets, DrawingSetData } from "@/lib/design/drawing-set-data";
 import { DrawingSheet } from "@/components/drawing/drawing-sheet";
@@ -64,7 +64,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
 
 export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; assets: DrawingSetAssets }) {
   const { project, option, options, optionQuoteNo, slice, spaces, cals, partById, symCtx, set, size, k, area, now, symbolDisplay, symbolUrls, view,
-    schedule, schedulePages, conduitRiserPages, sheetById, included, revRows, notes, legend } = data;
+    schedule, schedulePages, conduitRiserPages, avRiserPages, sheetById, included, revRows, notes, legend } = data;
 
   const tb = (d: DrawingSheetDef, i: number) =>
     titleBlockData({
@@ -237,8 +237,10 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
     if (d.kind === "conduitRiser") {
       // The engine's own page (sheet inches = the drawing area), drawn by the
       // same renderer as the riser page; no images, so Print never waits on it.
-      const page = conduitRiserPages[d.conduitRiserPage ?? 0];
-      if (!page) return <p style={{ margin: 0, color: "#5b616e" }}>Nothing on the lighting control riser yet.</p>;
+      // #328 C4: an A/V sheet reads the A/V conduit riser's pages.
+      const av = riserSheetSystem(d) === "av";
+      const page = (av ? avRiserPages : conduitRiserPages)[d.conduitRiserPage ?? 0];
+      if (!page) return <p style={{ margin: 0, color: "#5b616e" }}>{av ? "Nothing on the A/V conduit riser yet." : "Nothing on the lighting control riser yet."}</p>;
       return <ConduitRiserFigure geo={page.geo} w={page.w} h={page.h} svgProps={{ style: { width: "100%", height: "100%" } }} />;
     }
     const pageIdx = d.schedulePage ?? 0;
@@ -284,7 +286,7 @@ export function DrawingSetSheets({ data, assets }: { data: DrawingSetData; asset
           {d.kind === "conduitRiser" && assets.conduitRiserDxf && (
             // Under the set's screen zoom, so the type is sized back up.
             <p className="pk-no-print pk-dw-dxf" style={{ margin: 0, fontFamily: "var(--font-ui)", fontSize: "calc(12.5px / var(--dw-screen-zoom, 1))" }}>
-              <a href={assets.conduitRiserDxf({ projectId: project.id, optionId: data.optionId, size, page: (d.conduitRiserPage ?? 0) + 1 })} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+              <a href={assets.conduitRiserDxf({ projectId: project.id, optionId: data.optionId, size, page: (d.conduitRiserPage ?? 0) + 1, system: riserSheetSystem(d) })} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
                 {`Download DXF — ${d.number}`}
               </a>
               <span style={{ color: "#8c919c" }}> · this sheet as a CAD file, without the title block</span>

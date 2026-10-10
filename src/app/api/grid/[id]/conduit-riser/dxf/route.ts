@@ -6,9 +6,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * #321 — one lighting control riser sheet (E-502, E-503…) as a DXF for CAD:
+ * #321 — one conduit riser sheet (E-502, E-503…) as a DXF for CAD:
  * `?option=` resolves like the set, `?size=b|d` like the set (else the saved
- * size), `?page=` is 1-based. The logic lives in `conduitRiserDxfResponse`
+ * size), `?page=` is 1-based within the riser; #328 C4: `?system=av` is the
+ * A/V conduit riser (anything else, lighting). The logic lives in `conduitRiserDxfResponse`
  * so the harness can call it; this route only signs the request in.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {

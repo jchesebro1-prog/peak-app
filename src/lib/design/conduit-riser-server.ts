@@ -366,12 +366,18 @@ export async function conduitRiserSheetPages(
 const NO_STORE = "private, no-store";
 const dxfMiss = (error: string) => Response.json({ error }, { status: 404, headers: { "cache-control": NO_STORE } });
 
+/** The DXF file name's riser slug, per system. */
+const DXF_SLUG: Readonly<Record<ConduitRiserSystem, string>> = { lighting: "lighting-control-riser", av: "av-conduit-riser" };
+
 /**
  * The DXF download behind `/api/grid/[id]/conduit-riser/dxf` (#321) — one
- * lighting control riser sheet (E-502, E-503…) as a CAD file. `option` resolves
- * like the set, `size` (b|d) like the set (else the saved size), `page` is
- * 1-based. The geometry is the drawing set's own page, so the printed sheet and
- * the file can't disagree; no title block. The route authenticates first.
+ * conduit riser sheet (E-502, E-503…) as a CAD file. `option` resolves like
+ * the set, `size` (b|d) like the set (else the saved size), `page` is 1-based
+ * within that riser. #328 C4: `system=av` is the A/V conduit riser, named by
+ * its real sheet number (after lighting's pages at the same size); any other
+ * `system` value is the lighting control riser — the riser page's own rule.
+ * The geometry is the drawing set's own page, so the printed sheet and the
+ * file can't disagree; no title block. The route authenticates first.
  */
 export async function conduitRiserDxfResponse(id: string, query: URLSearchParams): Promise<Response> {
   try {
@@ -385,12 +391,21 @@ export async function conduitRiserDxfResponse(id: string, query: URLSearchParams
     if (!project) return dxfMiss("Design not found.");
     const optionId = resolveOptionId(project, query.get("option"));
     const size = resolveSheetSize(query.get("size"), project.drawingSet?.size);
-    const pages = await conduitRiserSheetPages(project, optionId, "lighting", size);
-    if (!pages.length) return dxfMiss("This design has no lighting control riser yet — add a conduit run first.");
+    const system: ConduitRiserSystem = query.get("system") === "av" ? "av" : "lighting";
+    if (!hasOption(project, optionId) || !liveConduitRiser(project, optionId, system).runs.length) {
+      return dxfMiss(`This design has no ${system === "av" ? "A/V conduit riser" : "lighting control riser"} yet — add a conduit run first.`);
+    }
+    // A/V's sheet numbers follow lighting's, so it counts lighting's pages
+    // too — one parts context for both.
+    const parts = system === "av" && liveConduitRiser(project, optionId, "lighting").runs.length ? await loadRiserPartsContext(project) : undefined;
+    const [pages, lightingPages] = await Promise.all([
+      conduitRiserSheetPages(project, optionId, system, size, parts ? { parts } : {}),
+      system === "av" && parts ? conduitRiserSheetPages(project, optionId, "lighting", size, { parts }).then((p) => p.length) : Promise.resolve(0),
+    ]);
     const n = Number(query.get("page") ?? "1");
     if (!Number.isInteger(n) || n < 1 || n > pages.length) return dxfMiss("That riser sheet doesn't exist.");
     const page = pages[n - 1];
-    const name = `${safeName(project.name || project.id)}-${conduitRiserSheetNumber(n - 1)}-lighting-control-riser.dxf`;
+    const name = `${safeName(project.name || project.id)}-${conduitRiserSheetNumber(n - 1, system, lightingPages)}-${DXF_SLUG[system]}.dxf`;
     return new Response(geometryToDxf(page.geo, page), {
       headers: {
         "content-type": "application/dxf",

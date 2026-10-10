@@ -126,6 +126,7 @@ export function TagPanel({
   pinned,
   planHref,
   busy,
+  showPower = true,
   onSave,
   onUnpin,
   onClose,
@@ -137,6 +138,8 @@ export function TagPanel({
   pinned: boolean;
   planHref: string;
   busy: boolean;
+  /** #328 C4: false on the A/V riser — it has no power types or power controls. */
+  showPower?: boolean;
   onSave: (patch: TagPatch) => void;
   onUnpin: () => void;
   onClose: () => void;
@@ -170,21 +173,25 @@ export function TagPanel({
             <option value="P/D">P/D</option>
           </select>
         </label>
-        <label style={FIELD}>
-          Power type
-          <select style={INPUT} value={v.power} onChange={(e) => set("power", e.target.value)}>
-            <option value="">None</option>
-            {letters.map((l) => (
-              <option key={l} value={l}>
-                {l}
-                {powerTypes.find((p) => p.letter === l) ? ` — ${powerTypes.find((p) => p.letter === l)!.type}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Text label="Power controls contents" value={v.contents} width={200} max={TAG_LIMITS.contents} placeholder="(6) LED10" onChange={(x) => set("contents", x)} />
+        {showPower && (
+          <>
+            <label style={FIELD}>
+              Power type
+              <select style={INPUT} value={v.power} onChange={(e) => set("power", e.target.value)}>
+                <option value="">None</option>
+                {letters.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                    {powerTypes.find((p) => p.letter === l) ? ` — ${powerTypes.find((p) => p.letter === l)!.type}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Text label="Power controls contents" value={v.contents} width={200} max={TAG_LIMITS.contents} placeholder="(6) LED10" onChange={(x) => set("contents", x)} />
+          </>
+        )}
       </div>
-      {powerTypes.length === 0 && <div style={HINT}>Add power types below to give this tag a power letter.</div>}
+      {showPower && powerTypes.length === 0 && <div style={HINT}>Add power types below to give this tag a power letter.</div>}
       <div style={ROW}>
         <button type="button" className="pk-btn-accent" disabled={!dirty || busy} onClick={() => onSave(patch)}>
           Save tag
@@ -209,7 +216,20 @@ export function TagPanel({
 }
 
 /** The tag, read-only (phone). */
-export function TagView({ device, powerTypes, planHref, onClose }: { device: CRDevice; powerTypes: PowerType[]; planHref: string; onClose: () => void }) {
+export function TagView({
+  device,
+  powerTypes,
+  planHref,
+  showPower = true,
+  onClose,
+}: {
+  device: CRDevice;
+  powerTypes: PowerType[];
+  planHref: string;
+  /** #328 C4: false on the A/V riser (no power fields). */
+  showPower?: boolean;
+  onClose: () => void;
+}) {
   const t = device.tag;
   const power = t.power ? `${t.power}${powerTypes.find((p) => p.letter === t.power) ? ` — ${powerTypes.find((p) => p.letter === t.power)!.type}` : ""}` : "None";
   return (
@@ -226,8 +246,8 @@ export function TagView({ device, powerTypes, planHref, onClose }: { device: CRD
           <Val key={f.key} label={f.label} value={t[f.key]} />
         ))}
         <Val label="P/D" value={t.pd} />
-        <Val label="Power type" value={power} />
-        <Val label="Power controls contents" value={t.contents} />
+        {showPower && <Val label="Power type" value={power} />}
+        {showPower && <Val label="Power controls contents" value={t.contents} />}
       </div>
     </Card>
   );

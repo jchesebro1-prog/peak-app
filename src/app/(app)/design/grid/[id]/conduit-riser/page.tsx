@@ -12,7 +12,7 @@ import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { sortedLevels } from "@/lib/design/grid-levels";
-import { conduitRiserPagesOf, loadConduitRiser } from "@/lib/design/conduit-riser-server";
+import { conduitRiserPagesOf, conduitRiserSheetPages, loadConduitRiser } from "@/lib/design/conduit-riser-server";
 import { conduitRiserSheetNumber, drawingArea, resolveSheetSize } from "@/lib/design/grid-drawing-set";
 import { layoutDetail } from "@/lib/design/conduit-riser/layout";
 import { detailGeometry, tableGeometry } from "@/lib/design/conduit-riser/drawing";
@@ -111,12 +111,17 @@ export default async function ConduitRiserPage({
   const typeOptions = alwaysShowTypeOptions(deviceTypes.types, system, data.doc.alwaysShow);
 
   // #321: E-502… as the drawing set prints them at its saved size — one DXF per page.
-  // The A/V riser's sheet numbers and DXF arrive with its drawing-set pages
-  // (#328 C4); until then its page offers no DXF rather than lighting's.
+  // #328 C4: the A/V riser's sheets follow lighting's, so its numbers count
+  // lighting's pages at the same size (nothing to count without a lighting run).
   const sheetSize = resolveSheetSize(null, project.drawingSet?.size);
-  const sheetPages = system === "lighting" ? conduitRiserPagesOf(data, drawingArea(sheetSize), layouts) : [];
+  const sheetPages = conduitRiserPagesOf(data, drawingArea(sheetSize), layouts);
+  const lightingPages =
+    system === "av" && sheetPages.length
+      ? (await conduitRiserSheetPages(project, optionId, "lighting", sheetSize, { catalog, gridSymbols, settings, deviceTypes })).length
+      : 0;
+  const sheetNo = (i: number) => conduitRiserSheetNumber(i, system, lightingPages);
   const dxfHref = (page: number) =>
-    `/api/grid/${encodeURIComponent(project.id)}/conduit-riser/dxf${optionQuery}&size=${sheetSize}&page=${page}`;
+    `/api/grid/${encodeURIComponent(project.id)}/conduit-riser/dxf${optionQuery}&size=${sheetSize}&page=${page}${system === "av" ? "&system=av" : ""}`;
 
   const slice = optionSlice(project, optionId);
   const detailHref = (detailId: string) => `${riserHref}&detail=${encodeURIComponent(detailId)}`;
@@ -139,10 +144,10 @@ export default async function ConduitRiserPage({
           <a
             key={i}
             href={dxfHref(i + 1)}
-            title={`${conduitRiserSheetNumber(i)} as a CAD file (DXF), without the title block`}
+            title={`${sheetNo(i)} as a CAD file (DXF), without the title block`}
             style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", border: "1px solid #e4e7ec", borderRadius: 7, padding: "4px 10px" }}
           >
-            {sheetPages.length > 1 ? `Download DXF · ${conduitRiserSheetNumber(i)}` : "Download DXF"}
+            {sheetPages.length > 1 ? `Download DXF · ${sheetNo(i)}` : "Download DXF"}
           </a>
         ))}
       </div>

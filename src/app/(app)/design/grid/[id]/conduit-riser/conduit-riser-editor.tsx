@@ -713,7 +713,7 @@ export default function ConduitRiserEditor(props: {
 
         <div className="pk-no-print">
           {sel?.kind === "tag" && selTag && (phone ? (
-            <TagView device={selTag} powerTypes={doc.powerTypes} planHref={planHref} onClose={() => setSel(null)} />
+            <TagView device={selTag} powerTypes={doc.powerTypes} planHref={planHref} showPower={system !== "av"} onClose={() => setSel(null)} />
           ) : (
             <TagPanel
               key={`tag-${selTag.id}-${JSON.stringify(selTag.tag)}`}
@@ -723,6 +723,7 @@ export default function ConduitRiserEditor(props: {
               pinned={Object.prototype.hasOwnProperty.call(doc.tags, selTag.id)}
               planHref={planHref}
               busy={waiting}
+              showPower={system !== "av"}
               onSave={(p) => void saveTag(selTag.id, p)}
               onUnpin={() => void commitLayout({ op: "unpinTag", placementId: selTag.id })}
               onClose={() => setSel(null)}
