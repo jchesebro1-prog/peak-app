@@ -106,17 +106,45 @@ async function commitLocked(projectId: string, blobPath: string, name: string, b
   if (head.size > GRID_SHEET_DIRECT_MAX_BYTES) return refuse(COPY.tooBig);
   const type = sniffSheetFile(head.bytes);
   if (!type) return refuse(COPY.wrongType);
+  // #319: a read that came back empty may mean the blob is gone (a concurrent
+  // commit split it and dropped the original). Head it again before recording
+  // it whole — never record a sheet whose file no longer exists.
+  let readEmpty = false;
+  let missing: string | null = null;
   const landed = await storeUploadAsSheets(
     projectId,
     {
       name,
       mime: type,
-      readBytes: () => d.read(blobPath),
+      readBytes: async () => {
+        readEmpty = true; // a throw reads as empty too
+        const bytes = await d.read(blobPath);
+        readEmpty = !bytes;
+        return bytes;
+      },
       // Not split: the uploaded blob IS the sheet's file (no `url` — provenance only, D692).
-      storeWhole: async () => ({ mime: type, dataUrl: "", blobPath }),
+      storeWhole: async () => {
+        if (readEmpty) {
+          let again: { bytes: Uint8Array; size: number } | null;
+          try {
+            again = await d.head(blobPath, GRID_SHEET_SNIFF_BYTES);
+          } catch {
+            missing = COPY.unreadable;
+            return null;
+          }
+          if (!again) {
+            missing = COPY.noArrival;
+            return null;
+          }
+        }
+        return { mime: type, dataUrl: "", blobPath };
+      },
     },
     { by, first: !!source, intakeNotices: !!source }
   );
+  // (Assigned inside the callback, which TS's flow analysis can't see.)
+  const vanished = missing as string | null;
+  if (vanished) return { ok: false, error: vanished };
   if (!landed.ok) return refuse(landed.reason === "gone" ? COPY.gone : landed.error);
   if (source) await recordIntakePlan(projectId, landed.sheetIds[0], source);
   return landed;

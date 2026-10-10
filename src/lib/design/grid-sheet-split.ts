@@ -73,13 +73,15 @@ export function landed(sheetIds: readonly string[], baseSheet?: BaseSheetOutcome
   return { sheetId: sheetIds[0] ?? "", sheetIds: [...sheetIds], ...(baseSheet ? { baseSheet } : {}), ...(note ? { note } : {}) };
 }
 
-/** The editor's "Last action" after an upload. */
-export function uploadNote(fileName: string, r: Pick<SheetsLanded, "sheetIds" | "baseSheet" | "note">): string {
+/** The editor's "Last action" after an upload. `intakeNotices`: the upload
+ *  went through an intake-position path, which already left the kept sentence
+ *  and the split note as intake notices (D698) — they are not repeated here. */
+export function uploadNote(fileName: string, r: Pick<SheetsLanded, "sheetIds" | "baseSheet" | "note">, opts?: { intakeNotices?: boolean }): string {
   const n = r.sheetIds.length;
   const parts = [n > 1 ? `Uploaded ${fileName} as ${n} sheets` : `Uploaded ${fileName}`];
   if (r.baseSheet === "removed") parts.push("removed the generated plan");
-  else if (r.baseSheet) parts.push(baseSheetKeptText(r.baseSheet));
-  if (r.note) parts.push(r.note);
+  else if (r.baseSheet && !opts?.intakeNotices) parts.push(baseSheetKeptText(r.baseSheet));
+  if (r.note && !opts?.intakeNotices) parts.push(r.note);
   return parts.join(" · ");
 }
 

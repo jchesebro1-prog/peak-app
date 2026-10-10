@@ -11533,6 +11533,7 @@ seeded()
   .then(() => pagesAsSheets319StoreChecks())
   .then(() => pagesAsSheets319UploadChecks())
   .then(() => pagesAsSheets319UiPins())
+  .then(() => pagesAsSheets319FinalFixChecks())
   .then(() => square322ImageChecks())
   .then(() => square322BatchChecks())
   .then(() => square322Pins())
@@ -60667,8 +60668,8 @@ async function pagesAsSheets319UiPins(): Promise<void> {
   ok(gi.includes("let adjustIds = saved.planSheetIds ?? [];") && gi.includes("else adjustIds = up.sheetIds;") && gi.includes('?adjust=${adjustIds.map(encodeURIComponent).join(",")}'),
     "#319 pin: the intake finishes by queueing every sheet its plan view became");
   const banner = rd("src/app/(app)/design/grid/[id]/workspace/intake-notices.tsx");
-  ok(banner.includes("openAdjust(up.sheetId, true, up.sheetIds);") && banner.includes("noteAction(uploadNote(file.name, up));"),
-    "#319 pin: the banner's re-upload queues every new sheet and notes the result");
+  ok(banner.includes("openAdjust(up.sheetId, true, up.sheetIds);") && banner.includes("noteAction(uploadNote(file.name, up, { intakeNotices: true }));"),
+    "#319 pin: the banner's re-upload queues every new sheet and notes the result (kept/split sentences only as intake notices)");
   ok(rd("src/lib/design/grid-plan-upload.ts").includes("const landedSheets = parseSheetsLanded(r);") &&
      rd("src/app/(app)/design/grid/[id]/sheet-upload.ts").includes('import type { SheetUploadResult } from "@/lib/design/grid-sheet-split";'),
     "#319 pin: both upload paths answer one result shape (sheetIds + baseSheet + note)");
@@ -60870,4 +60871,118 @@ async function square322Pins(): Promise<void> {
   const page = read("src/app/(app)/catalog/documents/page.tsx");
   ok(page.includes('can("manage_users", user.roles) && <SquarePhotosButton />') && /export async function squarePhotosAction[\s\S]*?requirePerm\("manage_users"\)/.test(actions),
     "#322 pin: Make photos uniform is admin-only on the page and in the action");
+}
+
+/* #319 final whole-branch review fixes: Auto fill refuses once the generated
+   plan is retired; the banner's re-upload states the kept/split sentence once;
+   an off-lock commit whose blob vanished refuses instead of recording it. */
+async function pagesAsSheets319FinalFixChecks(): Promise<void> {
+  const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  try {
+    const G = await import("@/lib/stores/grid-projects");
+    const F = await import("@/lib/design/grid-auto-fill");
+    const S = await import("@/lib/design/grid-sheet-split");
+    const SS = await import("@/lib/design/grid-sheet-split-server");
+    const C = await import("@/lib/design/grid-sheet-upload-server");
+    const U = await import("@/lib/design/grid-sheet-upload");
+    const { gridIntakeDefaults } = await import("@/lib/design/grid-intake");
+    const { defaultOptionId } = await import("@/lib/design/grid-options");
+    const sharp = (await import("sharp")).default;
+    const by = "Test Harness";
+    const a = gridIntakeDefaults();
+    const png = new Uint8Array(await sharp({ create: { width: 8, height: 8, channels: 3, background: "#ffffff" } }).png().toBuffer());
+    const pngSource = (name: string) => ({
+      name,
+      mime: "image/png",
+      readBytes: async () => png,
+      storeWhole: async () => ({ mime: "image/png", dataUrl: `data:image/png;base64,${Buffer.from(png).toString("base64")}` }),
+    });
+    const autoDesign = async (label: string, generated: boolean) => {
+      const gp = await G.createProject({ name: `#319 fill ${label}`, customer: "Spec fixture", customerId: null, by });
+      registerFixture("grid_projects", gp.id);
+      await G.saveGridIntake(gp.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "HS", address: "", notes: "", autoConfig: a });
+      const sheet = generated
+        ? await G.generateBaseSheet(gp.id, a, "#3a3f4a", by)
+        : await G.addSheet(gp.id, { name: "Plan.png", mime: "image/png", dataUrl: `data:image/png;base64,${Buffer.from(png).toString("base64")}`, by });
+      if (sheet) registerFixture("grid_sheets", sheet.id);
+      await G.setScopeInputs(gp.id, a as unknown as Parameters<typeof G.setScopeInputs>[1]);
+      const p = (await G.getProject(gp.id))!;
+      const optionId = defaultOptionId(p);
+      await G.setAutoEstimate(gp.id, optionId, { tierByScope: { lighting: "better", audio: "better" }, overrides: {} });
+      return { gp, sheet: sheet!, optionId };
+    };
+
+    // 1. The generated plan is retired by a real plan → Auto fill refuses with the restore sentence and places nothing.
+    const r = await autoDesign("retired", true);
+    const before = (await G.getProject(r.gp.id))!;
+    ok(before.intake?.baseSheetId === r.sheet.id && (before.spaces || []).length > 0, "#319 final fixture: a generated plan with its starter Spaces");
+    const up = await SS.storeUploadAsSheets(r.gp.id, pngSource("Real.png"), { by });
+    if (up.ok) up.sheetIds.forEach((id) => registerFixture("grid_sheets", id));
+    const mid = (await G.getProject(r.gp.id))!;
+    ok(up.ok && up.baseSheet === "removed" && !mid.sheetIds.includes(r.sheet.id) && mid.intake?.baseSheetId === r.sheet.id,
+      "#319 final fixture: the real plan retired the generated plan; baseSheetId stays");
+    const placedBefore = (mid.placements || []).length;
+    const fill = await F.fillAutoScopes(r.gp.id, r.optionId, ["lighting", "audio"], by);
+    const after = (await G.getProject(r.gp.id))!;
+    ok(!fill.ok && fill.error === F.BASE_SHEET_RETIRED && (after.placements || []).length === placedBefore && !(after.placements || []).some((pl) => up.ok && up.sheetIds.includes(pl.sheetId)),
+      "#319 Auto fill refuses once the generated plan was retired — names the restore revision and places nothing on the uploaded plan");
+    ok(F.BASE_SHEET_RETIRED.includes("\u201cAuto-saved before removing the generated plan\u201d") && F.BASE_SHEET_RETIRED.includes(G.RETIRE_BASE_REVISION_NOTE),
+      "#319 the refusal quotes the revision the retire actually cuts");
+    ok(F.baseSheetGoneMessage({ revisions: [] }, r.sheet.id) === F.BASE_SHEET_MISSING && F.baseSheetGoneMessage(after, "gs-000000000000") === F.BASE_SHEET_MISSING &&
+       F.baseSheetGoneMessage(after, r.sheet.id) === F.BASE_SHEET_RETIRED,
+      "#319 the restore sentence only when a retire revision would bring that sheet back; otherwise 'place it by hand'");
+
+    // 2. A design with no baseSheetId (pre-#314) still fills sheetIds[0].
+    const n = await autoDesign("no base", false);
+    const np = (await G.getProject(n.gp.id))!;
+    const nfill = await F.fillAutoScopes(n.gp.id, n.optionId, ["lighting", "audio"], by);
+    const nafter = (await G.getProject(n.gp.id))!;
+    ok(!np.intake?.baseSheetId && nfill.ok && (nafter.placements || []).every((pl) => pl.sheetId === np.sheetIds[0]),
+      "#319 a design with no baseSheetId still Auto-fills its first sheet");
+
+    // 3. The banner's re-upload: the kept sentence / split note live in intake notices, not again in the status bar.
+    const kept = { sheetIds: ["gs-1"], baseSheet: { kept: 2, what: "devices" as const }, note: S.splitFallbackNote("encrypted") };
+    ok(S.uploadNote("Plan.pdf", kept, { intakeNotices: true }) === "Uploaded Plan.pdf" &&
+       S.uploadNote("Set.pdf", { sheetIds: ["gs-1", "gs-2"], baseSheet: "removed" }, { intakeNotices: true }) === "Uploaded Set.pdf as 2 sheets · removed the generated plan" &&
+       S.uploadNote("Plan.pdf", kept) === `Uploaded Plan.pdf · Generated plan kept — it has 2 devices on it. · ${S.splitFallbackNote("encrypted")}`,
+      "#319 uploadNote on an intake-notices path leaves the kept sentence and split note to the notices; the + tab keeps them");
+
+    // 4. A + tab commit whose read comes back empty re-heads the blob: gone → the honest retry copy, nothing recorded.
+    const set = await pdf319Set();
+    const key = "UP-0000000000003191";
+    const d = await autoDesign("vanished blob", false);
+    const pathOf = (nm: string) => U.gridSheetBlobPath(d.gp.id, key, nm).replace(/(\.[a-z]+)$/, "-Sfx19$1");
+    const heads: number[] = [];
+    const removed: string[] = [];
+    const sheetsBefore = (await G.getProject(d.gp.id))!.sheetIds.length;
+    const gone = await C.commitSheetUpload(d.gp.id, { uploadKey: key, blobPath: pathOf("gone.pdf"), name: "Gone.pdf" }, by, {
+      head: async () => (heads.push(1), heads.length === 1 ? { bytes: set.subarray(0, U.GRID_SHEET_SNIFF_BYTES), size: set.length } : null),
+      read: async () => null,
+      held: async () => false,
+      remove: async (p: string) => { removed.push(p); },
+    });
+    ok(!gone.ok && gone.error === U.GRID_SHEET_UPLOAD_COPY.noArrival && heads.length === 2 && (await G.getProject(d.gp.id))!.sheetIds.length === sheetsBefore,
+      "#319 a commit whose blob vanished between the head and the read refuses 'didn't arrive — try again' and records no sheet");
+    const throwHead: number[] = [];
+    const flaky = await C.commitSheetUpload(d.gp.id, { uploadKey: key, blobPath: pathOf("flaky.pdf"), name: "Flaky.pdf" }, by, {
+      head: async () => { throwHead.push(1); if (throwHead.length > 1) throw new Error("head down"); return { bytes: set.subarray(0, U.GRID_SHEET_SNIFF_BYTES), size: set.length }; },
+      read: async () => { throw new Error("read down"); },
+      held: async () => false,
+      remove: async (p: string) => { removed.push(p); },
+    });
+    ok(!flaky.ok && flaky.error === U.GRID_SHEET_UPLOAD_COPY.unreadable && (await G.getProject(d.gp.id))!.sheetIds.length === sheetsBefore,
+      "#319 a failed read and a failed re-head says it couldn't read the upload and records nothing");
+    const still = await C.commitSheetUpload(d.gp.id, { uploadKey: key, blobPath: pathOf("still.pdf"), name: "Still.pdf" }, by, {
+      head: async () => ({ bytes: set.subarray(0, U.GRID_SHEET_SNIFF_BYTES), size: set.length }),
+      read: async () => null,
+      held: async () => false,
+      remove: async (p: string) => { removed.push(p); },
+    });
+    if (still.ok) still.sheetIds.forEach((id) => registerFixture("grid_sheets", id));
+    ok(still.ok && still.sheetIds.length === 1 && still.note === S.splitFallbackNote("unreadable") && removed.length === 0,
+      "#319 a read that fails while the blob is still there records it whole with the unreadable note (unchanged)");
+  } finally {
+    if (prevBlob !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+  }
 }

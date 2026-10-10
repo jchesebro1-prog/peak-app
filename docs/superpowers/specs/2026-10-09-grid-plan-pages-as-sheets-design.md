@@ -42,7 +42,13 @@ Follows #318 (`docs/superpowers/specs/2026-10-09-grid-sheet-crop-rotate-design.m
   generated plan`), riser boxes pruned. If it has devices or wires it stays,
   and the upload reports `Generated plan kept — it has N devices on it.`
   (wires counted if no devices). `intake.baseSheetId` is NOT cleared (Auto
-  fill keys off it; its refusal already names a missing base sheet).
+  fill keys off it). Once that sheet is off the design, Auto fill — the
+  intake's fill and "Change equipment…" — refuses instead of filling the
+  uploaded plan at the generated plan's coordinates: "The generated plan was
+  removed when the real plan was uploaded — restore the revision “Auto-saved
+  before removing the generated plan” to fill equipment again." (or, when no
+  such revision would bring it back, "place the equipment by hand"). Only a
+  design with no `baseSheetId` (pre-#314) falls back to its first sheet.
 - Same locking as today: the intake `position: "first"` path stays inside
   `withPlanLock` with `planUploadId` idempotency; split + retire happen inside
   the same commit.

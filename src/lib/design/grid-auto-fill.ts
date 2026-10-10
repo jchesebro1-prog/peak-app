@@ -1,5 +1,5 @@
 import { compute, defaultAState, type SysKey } from "@/app/(app)/design/quick/engine";
-import { getProject, replaceAutoPlacements, SHEET_GONE, sheetOnProject, type GridProject } from "@/lib/stores/grid-projects";
+import { getProject, replaceAutoPlacements, RETIRE_BASE_REVISION_NOTE, SHEET_GONE, sheetOnProject, type GridProject } from "@/lib/stores/grid-projects";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { ensureGridSymbolsFor } from "@/lib/stores/grid-catalog";
@@ -19,7 +19,8 @@ export type FillResult =
 /**
  * Auto fill (#211, spec §5): price the project's Auto choices from the
  * Equipment map + live catalog, lay them out by rule on the generated base
- * sheet (intake.baseSheetId, else sheetIds[0]) using the geometry it was drawn from (intake.autoConfig),
+ * sheet (intake.baseSheetId — refused once that sheet is off the design, #319 —
+ * else, for a design with no baseSheetId, sheetIds[0]) using the geometry it was drawn from (intake.autoConfig),
  * and replace the untouched auto devices of `scopes` in `optionId` — hand-
  * touched ones stay. Mapped catalog parts get a Grid library entry first so
  * the editor resolves them. Called only from user actions (the intake's first
@@ -39,8 +40,12 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
   if (!inputs || !a || !est) return { ok: false, error: "This design has no Auto choices to fill from." };
   // #314: the generated base sheet by id — an intake plan view sits in front of it.
+  // #319: a base sheet that is off the list (retired when a real plan landed,
+  // or deleted) refuses — never fill another sheet at the generated plan's
+  // template coordinates. sheetIds[0] only for a design with no baseSheetId.
   const baseId = project.intake?.baseSheetId;
-  const sheetId = baseId && project.sheetIds.includes(baseId) ? baseId : project.sheetIds[0];
+  if (baseId && !(project.sheetIds || []).includes(baseId)) return { ok: false, error: baseSheetGoneMessage(project, baseId) };
+  const sheetId = baseId || (project.sheetIds || [])[0];
   if (!sheetId) return { ok: false, error: "No plan sheet to fill yet." };
   const refs = overrideRefs(est);
   const [{ map, ctx, catalogParts }, rules] = await Promise.all([
@@ -69,7 +74,10 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   if (!res) {
     // #318: the store also refuses a sheet the design no longer lists (a racing Adjust sheet).
     const now = await getProject(projectId);
-    return { ok: false, error: now && !sheetOnProject(now, sheetId) ? SHEET_GONE : "That option was removed — refresh the page." };
+    const gone = now && !sheetOnProject(now, sheetId) ? SHEET_GONE : null;
+    // #319: a retire that raced this fill names the removed generated plan instead.
+    if (gone && now && baseId && sheetId === baseId) return { ok: false, error: baseSheetGoneMessage(now, baseId) };
+    return { ok: false, error: gone ?? "That option was removed — refresh the page." };
   }
   return {
     ok: true,
@@ -77,6 +85,23 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
     needsPart: cards.reduce((n, c) => n + c.needsPart, 0),
     kept: Object.values(kept).reduce((n, u) => n + u, 0),
   };
+}
+
+/** #319: Auto fill's refusal once the generated plan is off the design. Names
+ *  the automatic revision only when restoring it would bring the plan back
+ *  (restoreRevision re-adds a sheet its Spaces/devices/wires reference). */
+export const BASE_SHEET_RETIRED =
+  "The generated plan was removed when the real plan was uploaded — restore the revision “Auto-saved before removing the generated plan” to fill equipment again.";
+export const BASE_SHEET_MISSING =
+  "The generated plan is no longer on this design, so Auto has nowhere to fill — place the equipment by hand, or restore a revision that still has the generated plan.";
+
+export function baseSheetGoneMessage(project: Pick<GridProject, "revisions">, baseId: string): string {
+  const restorable = (project.revisions || []).some(
+    (r) =>
+      r.note === RETIRE_BASE_REVISION_NOTE &&
+      (r.spaces.some((sp) => sp.sheetId === baseId) || r.placements.some((pl) => pl.sheetId === baseId) || (r.routes || []).some((rt) => rt.sheetId === baseId))
+  );
+  return restorable ? BASE_SHEET_RETIRED : BASE_SHEET_MISSING;
 }
 
 /** The price context autoNeedsPart reads — the map plus the parts/fixtures its

@@ -746,13 +746,16 @@ function dropSheetInPatch(p: GridProject, sheetId: string, by: string, note: str
   return dropped.size;
 }
 
+/** The automatic revision cut before the generated plan is retired (#319, D697). */
+export const RETIRE_BASE_REVISION_NOTE = "Auto-saved before removing the generated plan";
+
 /**
  * #319 (D697): a real plan landed — remove the generated plan
  * (`intake.baseSheetId`) exactly like Delete sheet (#317) when no device or
  * wire on any option is on it: its Spaces go after one automatic revision,
  * riser boxes pruned. With devices (or, failing that, wires) on it, it stays
  * and the answer says how many. `intake.baseSheetId` is never cleared — Auto
- * fill keys off it, and its refusal already names a missing base sheet.
+ * fill keys off it and refuses (baseSheetGoneMessage) once it is off the list.
  * Null = nothing to retire (no generated plan, already gone, no such design).
  * Checked before and again inside the patch (removeSheet's pattern).
  */
@@ -767,7 +770,7 @@ export async function retireBaseSheet(projectId: string, by: string): Promise<Ba
     if (p.intake?.baseSheetId !== baseId || !sheetOnProject(p, baseId)) return;
     const holds = sheetHolds(p, baseId);
     if (holds) { out = holds; return; }
-    dropSheetInPatch(p, baseId, by, "Auto-saved before removing the generated plan");
+    dropSheetInPatch(p, baseId, by, RETIRE_BASE_REVISION_NOTE);
     out = "removed";
   });
   // (Assigned inside the callback, which TS's flow analysis can't see.)

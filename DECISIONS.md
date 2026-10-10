@@ -10231,8 +10231,13 @@ image) lands through the paths in D696, `retireBaseSheet` removes the sheet name
 Delete sheet (#317, D691) when no placement or route on any option is on it: its Spaces go after one automatic revision
 "Auto-saved before removing the generated plan", riser boxes pruned; checked before and again inside the patch. With
 devices on it (counted as placement records), or failing that wires (route records), it stays and the upload says
-`Generated plan kept — it has N devices on it.` `intake.baseSheetId` is never cleared — Auto fill keys off it and already
-names a missing base sheet. `removeSheet` and the retire share one private drop helper (`dropSheetInPatch`). Split and
+`Generated plan kept — it has N devices on it.` `intake.baseSheetId` is never cleared — Auto fill keys off it: once that
+sheet is off the design, Auto fill (the intake's first fill and "Change equipment…") refuses rather than fill the uploaded
+plan at the generated plan's coordinates — "The generated plan was removed when the real plan was uploaded — restore the
+revision “Auto-saved before removing the generated plan” to fill equipment again." when that revision would bring the
+sheet back, else a "place the equipment by hand" sentence (`baseSheetGoneMessage`); a retire racing a fill reads the
+same. Only a design with no `baseSheetId` (pre-#314) falls back to its first sheet. `removeSheet` and the retire share
+one private drop helper (`dropSheetInPatch`). Split and
 retire run inside the same plan-lock transaction; if the retire or the notices write hits an error that aborts the
 database transaction, it is rethrown so the new sheets roll back and the original upload stays for a retry, while an
 error that does not abort the transaction is logged and ignored (the sheets still land).
@@ -10243,7 +10248,9 @@ The commit, the 4 MB route and the plan copy answer `{ sheetId, sheetIds, baseSh
 note? }` (`sheetId` = the first, so single-sheet callers are unchanged). The `+` tab notes "Uploaded X as N sheets ·
 removed the generated plan" (or the kept sentence, or why a PDF wasn't split) in the status bar; the intake-position
 paths (the plan view, its copy, the banner's re-upload) leave the kept sentence and any split note as intake notices,
-because the intake swaps into the editor before anything it holds is seen. After a multi-sheet upload Adjust sheet
+because the intake swaps into the editor before anything it holds is seen (the banner's re-upload, which stays in the
+editor, puts only "Uploaded X as N sheets · removed the generated plan" in the status bar, so neither sentence shows
+twice). After a multi-sheet upload Adjust sheet
 walks the new sheets in order — "Sheet 2 of 5", Done or Skip (Escape, or Done with nothing changed) opens the next,
 **Skip the rest** stops — and the editor stays on the sheet the dialog was on. The intake hands the walk over as
 `?adjust=<id>,<id>,…` (listed ids only, ≤ 60); the editor adopts it once, keyed on the raw param and only when no Adjust

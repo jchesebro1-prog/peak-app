@@ -60,7 +60,8 @@ export default function IntakeNotices({ ed }: { ed: GridEditor }) {
     run(async () => {
       const up = await uploadGridSheet(project.id, file, { blobUploads, planUploadId: newPlanUploadId() });
       if (!up.ok) return up;
-      noteAction(uploadNote(file.name, up));
+      // #319: the kept sentence and split note land as intake notices (D698) — not twice.
+      noteAction(uploadNote(file.name, up, { intakeNotices: true }));
       openAdjust(up.sheetId, true, up.sheetIds);
       return dismissGridNoticeAction(project.id, noticeId);
     });
