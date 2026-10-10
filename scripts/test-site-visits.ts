@@ -6,20 +6,26 @@
    each check's own finally. */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { addressKey } from "@/lib/address-verify/keys";
 import type { AddressState, LatLng } from "@/lib/address-verify/types";
 import { addDays, chicagoDayStart } from "@/lib/drive-plan/day";
+import { planDriveDays, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import { pairKey, planDay } from "@/lib/drive-plan/plan";
 import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop } from "@/lib/drive-plan/stops";
-import { toCalendarEvents } from "@/lib/google/calendar";
+import { toCalendarEvents, type CalendarEvent } from "@/lib/google/calendar";
+import { gmailEnabled } from "@/lib/gmail/config";
 import { buildRaw } from "@/lib/gmail/mime";
 import { buildIcs, icsMimeType } from "@/lib/ics";
+import type { Office } from "@/lib/settings";
 import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
 import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { busyBlocks, fmtBusy, fmtBusyRange, type BusyBlock, type BusyEvent, type BusyVisit } from "@/lib/visit-plan/busy";
 import { checkVisit, stopConflicts, type StopCheckInput } from "@/lib/visit-plan/check";
 import { chicagoMinuteOfDay, chicagoWallMs, fmtDayLabel, weekdayOf, workWindow } from "@/lib/visit-plan/hours";
-import { couldBeSameArea, MAX_NEARBY_DAYS, nearbyLine, nearbyPairs, straightLineMiles, suggestDays, type LeadDay } from "@/lib/visit-plan/nearby";
+import { attendeeStatusOn, couldBeSameArea, MAX_NEARBY_DAYS, nearbyLine, nearbyPairs, straightLineMiles, suggestDays, VISITS_ONLY_NOTE, type LeadDay } from "@/lib/visit-plan/nearby";
+import { BOOKING_ROUTE_BUDGET_MS, bookingRouteMode, loadBookingCheck, readCalendarForBooking, type BookingDeps } from "@/lib/visit-plan/load";
+import type { BookingCheckInput } from "@/lib/visit-plan/types";
 import { cleanAttendees, MAX_ATTENDEES, readAttendees } from "@/lib/visit-plan/people";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -68,6 +74,12 @@ const P2: LatLng = { lat: 44.1, lng: -88.1 };
 const badAddr = (key: string): AddressState => ({ status: "needs_check", label: key, point: null, pointKey: "place:" + key, fix: { kind: "place", key, label: key } });
 const vStop = (key: string, start: number, end: number, address: AddressState, label = key.slice(3)): DriveStop => ({ key, kind: "visit", label, startMs: start, endMs: end, address });
 const busyEv = (label: string, s: number, e: number): BusyBlock => ({ key: "g:" + label, kind: "event", label, startMs: s, endMs: e });
+const FAR: LatLng = { lat: 46.0, lng: -88.0 };
+const office: Office = { id: "o1", name: "Madison Office", street: "", city: "Madison", state: "WI", zip: "", lat: BASE.lat, lng: BASE.lng, quoteDefault: true };
+const gEvent = (id: string, s: number, e: number, over: Partial<CalendarEvent> = {}): CalendarEvent => ({
+  id, iCalUID: id + "@google.com", title: id, startMs: s, endMs: e, allDay: false, location: "", htmlLink: "", meetingUrl: "",
+  selfDeclined: false, selfResponse: "", peakDriveKey: "", peakDriveDay: "", ...over,
+});
 function dayPlan(stops: DriveStop[], minutes: Array<[LatLng, LatLng, number]>, dayKey = DAY) {
   const routeMinutes = new Map(minutes.map(([a, b, m]) => [pairKey(a, b), m]));
   return { stops, legs: planDay({ userId: "u1", dayKey, stops, base: BASE, bufferMin: 15, routeMinutes, prevDay: { stayOver: false, lastStop: null }, stayOver: false }) };
@@ -568,7 +580,6 @@ export async function siteVisitsConflictChecks(ok: Ok): Promise<void> {
 
 export async function siteVisitsNearbyChecks(ok: Ok): Promise<void> {
   const CAND: LatLng = { lat: 44.05, lng: -88.05 };
-  const FAR: LatLng = { lat: 46.0, lng: -88.0 };
   const d = (n: number) => addDays(DAY, n);
   const leadDays: LeadDay[] = [
     { dayKey: d(1), stops: [vStop("sv:A", at(9, 0, 1), at(10, 0, 1), okAddr(P1, "a"), "Lone Pine Elementary")], busy: [busyEv("Lone Pine", at(9, 0, 1), at(11, 30, 1))] },
@@ -628,4 +639,158 @@ export async function siteVisitsNearbyChecks(ok: Ok): Promise<void> {
   const banned = /\b(estimate|estimateFromParts|driveMinutes|driveMiles|haversineMiles|minutesFromMiles)\b\s*\(/;
   ok(uses === 2 && !readdirSync(dir).some((f) => banned.test(readFileSync(join(dir, f), "utf8"))),
     "site-visits pin: the straight-line distance feeds only the pre-filter, and nothing in visit-plan calls a straight-line drive estimate");
+
+  // attendeeStatusOn's other branches
+  const att = (over: Partial<Parameters<typeof attendeeStatusOn>[0]> = {}) => ({ person: "Sam", calendar: "ok" as const, hours: DEFAULT_WORK_HOURS, busy: [], ...over });
+  ok(weekdayOf(d(3)) === 6 && attendeeStatusOn(att(), d(3), null) === "conflict" && attendeeStatusOn(att(), d(3), { startMs: at(13, 0, 3), endMs: at(14, 0, 3) }) === "conflict",
+    "site-visits nearby: a day that isn't one of the attendee's work days is a conflict");
+  ok(attendeeStatusOn(att(), d(1), { startMs: at(7, 0, 1), endMs: at(8, 30, 1) }) === "conflict" && attendeeStatusOn(att(), d(1), { startMs: at(16, 30, 1), endMs: at(17, 30, 1) }) === "conflict" &&
+     attendeeStatusOn(att(), d(1), { startMs: at(8, 0, 1), endMs: at(17, 0, 1) }) === "free",
+    "site-visits nearby: a slot outside the attendee's own hours is a conflict (exactly their hours is free)");
+  ok(attendeeStatusOn(att({ calendar: "no-calendar" }), d(1), { startMs: at(13, 0, 1), endMs: at(14, 0, 1) }) === "free" &&
+     attendeeStatusOn(att({ calendar: "no-calendar", busy: [{ key: "sv:Q", kind: "visit", label: "Q", startMs: at(13, 30, 1), endMs: at(15, 0, 1) }] }), d(1), { startMs: at(13, 0, 1), endMs: at(14, 0, 1) }) === "conflict",
+    "site-visits nearby: no calendar → judged on their visits alone");
+  const vo = suggestDays({ candidate: { key: "sv:X", point: CAND, startMs: at(13), endMs: at(14) }, leadDays: leadDays.slice(1, 2), routeMinutes: routes, sameAreaMin: 45, lookaheadDays: 21,
+    others: [att({ person: "Sam", calendar: "no-calendar" }), att({ person: "Jeff" }), att({ person: "Ann", calendar: "failed" })] });
+  ok(vo.status === "ok" && vo.days[0].others.map((o) => `${o.person}:${o.status}:${o.note ?? ""}`).join() === `Sam:free:${VISITS_ONLY_NOTE},Jeff:free:,Ann:unknown:` && VISITS_ONLY_NOTE === "checked visits only",
+    "site-visits nearby: an attendee with no calendar carries 'checked visits only', like the conflict panel's note");
+  ok((readFileSync("src/lib/visit-plan/nearby.ts", "utf8").match(/candidateStops\(/g) ?? []).length === 3,
+    "site-visits pin: nearbyPairs and suggestDays share one candidateStops filter");
+}
+
+function bookingHarness(over: Partial<BookingDeps> = {}) {
+  const reads: Array<{ userId: string; timeMaxMs: number }> = [];
+  const budgets: number[] = [];
+  const asked: Array<{ from: LatLng; to: LatLng }> = [];
+  const people = [{ id: "u1", name: "Dana", status: "active" }, { id: "u2", name: "Jeff", status: "active" }, { id: "u3", name: "Sam", status: "active" }];
+  const driveBase: Partial<DriveLoadDeps> = {
+    getUser: async (id) => { const u = people.find((p) => p.id === id); return u ? { id: u.id, name: u.name, officeId: null } : null; },
+    offices: async () => [office],
+    bufferMin: async () => 15,
+    stayOvers: async () => ({}),
+    placeStates: async (texts) => new Map(texts.map((t) => [addressKey(t), okAddr(P2, t)])),
+  };
+  const deps: Partial<BookingDeps> = {
+    now: () => at(8),
+    users: async () => people,
+    settings: async () => DEFAULT_SCHEDULING,
+    workHours: async () => DEFAULT_WORK_HOURS,
+    visits: async () => [
+      sv("SV-V1", { address: "p1", startAt: at(10, 0, 1), endAt: at(11, 0, 1) }),
+      sv("SV-E", { address: "p1", startAt: at(9, 0, 2), endAt: at(10, 0, 2) }),
+      sv("SV-V3", { assignedTo: "Jeff", address: "p1", startAt: at(13, 0, 1), endAt: at(15, 0, 1) }),
+      sv("SV-V4", { address: "far", startAt: at(9, 0, 3), endAt: at(10, 0, 3) }),
+    ],
+    visitStates: async (vs) =>
+      new Map(vs.map((v) => [v.id, v.address === "bad" ? badAddr("bad") : v.address === "far" ? okAddr(FAR, "far") : v.address === "p2" ? okAddr(P2, "p2") : okAddr(P1, v.address)])),
+    readEvents: async (userId, range) => {
+      reads.push({ userId, timeMaxMs: range.timeMaxMs });
+      if (userId === "u1")
+        return { status: "ok", events: [gEvent("zoom", at(13, 30, 1), at(14, 0, 1), { title: "Zoom call", location: "Zoom" }), gEvent("e-copy", at(9, 0, 2), at(10, 0, 2), { iCalUID: "sv-SV-E@peak-app" })] };
+      if (userId === "u2") return { status: "failed", events: [] };
+      return { status: "no-calendar", events: [] };
+    },
+    plan: (args) => planDriveDays({ ...args, deps: { ...driveBase, ...args.deps } }),
+    routes: async (pairs, budgetMs) => {
+      budgets.push(budgetMs);
+      asked.push(...pairs);
+      return new Map(pairs.map((p) => [pairKey(p.from, p.to), 20]));
+    },
+    ...over,
+  };
+  return { deps, reads, budgets, asked };
+}
+
+export async function siteVisitsLoaderChecks(ok: Ok): Promise<void> {
+  const d = (n: number) => addDays(DAY, n);
+  const NEW: BookingCheckInput = { visitId: null, customerId: null, locationId: null, address: "p2", startAt: at(13, 0, 1), endAt: at(14, 0, 1), lead: "Dana", attendees: ["Jeff", "Sam"] };
+
+  const h = bookingHarness();
+  const r = await loadBookingCheck(NEW, {}, h.deps);
+  const [dana, jeff, sam] = r.people;
+  ok(r.people.map((p) => p.person).join() === "Dana,Jeff,Sam" && r.address.status === "verified", "site-visits loader: one row per person, lead first");
+  ok(dana.conflicts.length === 1 && dana.conflicts[0].text === "Double-booked — overlaps Zoom call (1:30–2)" && dana.notes.length === 0,
+    "site-visits loader: the lead's accepted Google event (a video call, not a stop) double-books the visit");
+  ok(jeff.conflicts.some((c) => c.kind === "double_booked" && c.text.includes("Venue SV-V3")) && jeff.notes.includes("Couldn't check Jeff's calendar"),
+    "site-visits loader: an unreadable calendar still checks the person's visits and says the calendar wasn't checked");
+  ok(sam.conflicts.length === 0 && sam.notes.includes("Sam has no connected calendar — checked visits only"), "site-visits loader: no calendar → visits only, with a note");
+  ok(h.reads.filter((x) => x.userId === "u1").length === 1 && h.reads.length === 3, "site-visits loader: each person's calendar is read once");
+  ok(r.nearby?.status === "ok" && r.nearby.days.map((x) => x.dayKey).join() === [d(1), d(2)].join() && r.nearby.days[0].nearest.label === "Venue SV-V1" &&
+     r.nearby.days[0].others.map((o) => `${o.person}:${o.status}`).join() === "Jeff:unknown,Sam:free",
+    "site-visits loader: nearby days come from the lead's own stops, with each attendee's status");
+  ok(r.nearby?.status === "ok" && r.nearby.days[0].others.find((o) => o.person === "Sam")?.note === VISITS_ONLY_NOTE && !r.nearby.days[0].others.find((o) => o.person === "Jeff")?.note,
+    "site-visits loader: a nearby day says an attendee with no calendar was checked on visits only");
+  ok(!h.asked.some((p) => p.from.lat === FAR.lat || p.to.lat === FAR.lat), "site-visits loader: a stop 100+ miles away is never routed");
+  ok(h.budgets.length > 0 && h.budgets.every((b) => b >= 0 && b <= BOOKING_ROUTE_BUDGET_MS) && BOOKING_ROUTE_BUDGET_MS === 10_000,
+    "site-visits loader: live routing shares one 10 s budget");
+  let clock = at(8);
+  const spent: number[] = [];
+  await loadBookingCheck(NEW, {}, bookingHarness({ now: () => clock, routes: async (pairs, budgetMs) => { spent.push(budgetMs); clock += 4_000; return new Map(pairs.map((p) => [pairKey(p.from, p.to), 20])); } }).deps);
+  ok(spent.length >= 3 && spent[0] === BOOKING_ROUTE_BUDGET_MS && spent[1] === 6_000 && spent[2] === 2_000 && spent.slice(3).every((b) => b === 0),
+    "site-visits loader: each routing call gets what's left of the one budget, never a fresh 10 s");
+  ok(bookingRouteMode(10_000) === "live" && bookingRouteMode(4_999) === "cache" && bookingRouteMode(0) === "cache",
+    "site-visits loader: with less than one request's timeout left, routing reads the cache only");
+
+  // Editing a visit: it isn't its own conflict, its calendar copy isn't busy, and it isn't its own nearby day
+  const EDIT: BookingCheckInput = { ...NEW, visitId: "SV-E", address: "p1", startAt: at(9, 0, 2), endAt: at(10, 0, 2), attendees: [] };
+  const edit = await loadBookingCheck(EDIT, {}, bookingHarness().deps);
+  ok(edit.people.length === 1 && edit.people[0].conflicts.length === 0, "site-visits loader: an edited visit never conflicts with itself or its own calendar copy");
+  ok(edit.nearby?.status === "ok" && edit.nearby.days.map((x) => x.dayKey).join() === d(1), "site-visits loader: …and isn't suggested as its own nearby day");
+  const located = bookingHarness({
+    readEvents: async (userId) =>
+      userId === "u1" ? { status: "ok", events: [gEvent("e-copy", at(9, 0, 2), at(10, 0, 2), { iCalUID: "sv-SV-E@peak-app", location: "12 Main St, Appleton, WI" })] } : { status: "no-calendar", events: [] },
+  });
+  const editLocated = await loadBookingCheck(EDIT, {}, located.deps);
+  ok(editLocated.nearby?.status === "ok" && editLocated.nearby.days.map((x) => x.dayKey).join() === d(1) && editLocated.people[0].conflicts.length === 0,
+    "site-visits loader: the edited visit's own calendar copy (with an address) is never a nearby day or a conflict");
+  const moved = await loadBookingCheck({ ...EDIT, startAt: at(13, 0, 1), endAt: at(14, 0, 1) }, {}, located.deps);
+  ok(moved.people[0].conflicts.length === 0, "site-visits loader: moving a visit, its calendar copy at the old time is not busy");
+
+  const unv = await loadBookingCheck({ ...NEW, address: "bad" }, {}, bookingHarness().deps);
+  ok(unv.nearby?.status === "unverified" && unv.people[0].notes.includes("Checked without drive time") && unv.address.status === "needs_check" && unv.address.fix?.kind === "place",
+    "site-visits loader: an unverified address → no nearby days, checked without drive time");
+  const down = await loadBookingCheck(NEW, {}, bookingHarness({ routes: async () => new Map() }).deps);
+  ok(down.nearby?.status === "unavailable" && down.people[0].notes.includes("Checked without drive time"), "site-visits loader: OSRM down → Nearby days unavailable");
+  const thrown = await loadBookingCheck(NEW, {}, bookingHarness({ routes: async () => { throw new Error("osrm"); } }).deps);
+  ok(thrown.nearby?.status === "unavailable", "site-visits loader: a routing error reads as Nearby days unavailable, never a crash");
+  const calThrows = await loadBookingCheck(NEW, {}, bookingHarness({ readEvents: async () => { throw new Error("google"); } }).deps);
+  ok(calThrows.people.every((p) => p.calendar === "failed" && p.notes.includes(`Couldn't check ${p.person}'s calendar`)),
+    "site-visits loader: a calendar read that throws says it couldn't check — never 'no conflicts'");
+  const untimed = await loadBookingCheck({ ...NEW, startAt: null, endAt: null }, {}, bookingHarness().deps);
+  ok(untimed.people.length === 0 && untimed.nearby?.status === "ok", "site-visits loader: no time yet → no conflict rows, nearby days still shown");
+  const hb = bookingHarness();
+  const badgeOnly = await loadBookingCheck(NEW, { nearby: false }, hb.deps);
+  ok(badgeOnly.nearby === null && hb.reads.every((x) => x.timeMaxMs === chicagoDayStart(d(2))) && badgeOnly.people.length === 3,
+    "site-visits loader: badge checks read and plan only the visit's own day");
+
+  const hf = bookingHarness();
+  const farOut = { ...NEW, startAt: at(13, 0, 60), endAt: at(14, 0, 60) };
+  await loadBookingCheck(farOut, {}, hf.deps);
+  ok(hf.reads.filter((x) => x.userId === "u1").length === 2 && hf.reads.length === 6 && hf.reads.every((x) => x.timeMaxMs === chicagoDayStart(d(21)) || x.timeMaxMs === chicagoDayStart(d(61))),
+    "site-visits loader: a visit months out reads its own day separately — never one calendar read stretched over months");
+  // Nearby days are today … today + look-ahead only — never a past day
+  const later = await loadBookingCheck(NEW, {}, bookingHarness({ now: () => at(8, 0, 2) }).deps);
+  ok(later.nearby?.status === "ok" && later.nearby.days.map((x) => x.dayKey).join() === d(2), "site-visits loader: a day already past is never suggested");
+  const short = await loadBookingCheck(NEW, {}, bookingHarness({ settings: async () => ({ ...DEFAULT_SCHEDULING, nearbyLookaheadDays: 2 }) }).deps);
+  ok(short.nearby?.status === "ok" && short.nearby.days.map((x) => x.dayKey).join() === d(1) && short.nearby.lookaheadDays === 2,
+    "site-visits loader: nothing past the look-ahead is suggested");
+
+  const range = { timeMinMs: at(0), timeMaxMs: at(0, 0, 1) };
+  ok(gmailEnabled() || (await readCalendarForBooking("TESTvisits:nobody", range)).status === "no-calendar", "site-visits loader: Gmail off → no calendar, never an error");
+  const cal = (over: Parameters<typeof readCalendarForBooking>[2]) => readCalendarForBooking("TESTvisits:u", range, { enabled: () => true, connected: async () => true, ...over });
+  const full = await cal({ list: async () => ({ events: [{ ...gEvent("a", at(9), at(10)), description: "" }], coveredThroughMs: range.timeMaxMs }) });
+  const cut = await cal({ list: async () => ({ events: [{ ...gEvent("a", at(9), at(10)), description: "" }], coveredThroughMs: at(9) }) });
+  const boom = await cal({ list: async () => { throw new Error("401"); } });
+  const noScope = await cal({ connected: async () => false });
+  const connBoom = await cal({ connected: async () => { throw new Error("db"); } });
+  ok(full.status === "ok" && full.events.length === 1 && cut.status === "failed" && boom.status === "failed" && noScope.status === "no-calendar" && connBoom.status === "failed",
+    "site-visits loader: a calendar read is ok only when it covers the whole window; errors and partial reads say 'couldn't check'");
+
+  // Client-safety: only load.ts reaches the server.
+  const dir = "src/lib/visit-plan";
+  const serverOnly = /from "@\/(db|lib\/stores|lib\/google|lib\/gmail|lib\/users|lib\/address-verify\/targets|lib\/drive-plan\/load)/;
+  const leaky = readdirSync(dir).filter((f) => f !== "load.ts" && serverOnly.test(readFileSync(join(dir, f), "utf8")));
+  ok(leaky.length === 0 && serverOnly.test(readFileSync(join(dir, "load.ts"), "utf8")) && !/from "\.\/load"/.test(readFileSync(join(dir, "index.ts"), "utf8")),
+    "site-visits pin: every visit-plan module but load.ts is client-safe, and the index never re-exports load" + (leaky.length ? " — " + leaky.join(", ") : ""));
+  ok(!/^import (?!type)/m.test(readFileSync("src/lib/visit-invite-plan.ts", "utf8")), "site-visits pin: visit-invite-plan.ts has no runtime imports (client-safe)");
 }

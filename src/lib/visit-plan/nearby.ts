@@ -18,6 +18,10 @@ export const MAX_NEARBY_DAYS = 5;
 /** Faster than any real drive, so the pre-filter never drops a reachable stop. */
 export const PREFILTER_MPH = 80;
 
+/** Shown beside an attendee with no connected calendar — the conflict panel's
+ *  "checked visits only" note, on a nearby day. */
+export const VISITS_ONLY_NOTE = "checked visits only";
+
 export const NEARBY_TEXT = {
   unverified: "Verify the address to see nearby days",
   unavailable: "Nearby days unavailable",
@@ -39,7 +43,12 @@ export function couldBeSameArea(a: LatLng, b: LatLng, sameAreaMin: number): bool
 
 export type LeadDay = { dayKey: string; stops: DriveStop[]; busy: BusyBlock[] };
 export type OtherAttendee = { person: string; calendar: CalendarRead; hours: WorkHours; busy: BusyBlock[] };
-export type AttendeeDayStatus = { person: string; status: "free" | "conflict" | "unknown" };
+export type AttendeeDayStatus = {
+  person: string;
+  status: "free" | "conflict" | "unknown";
+  /** VISITS_ONLY_NOTE when they have no connected calendar (judged on their visits alone) */
+  note?: string;
+};
 export type NearbyDay = {
   dayKey: string;
   label: string;
@@ -50,18 +59,21 @@ export type NearbyDay = {
 };
 export type NearbyResult = { status: "ok"; days: NearbyDay[]; lookaheadDays: number } | { status: "unverified" } | { status: "unavailable" };
 
-const pointOf = (s: DriveStop): LatLng | null => (s.address.status === "verified" ? s.address.point : null);
+/** A day's stops that could be in the same area as the candidate: verified,
+ *  not the candidate itself, and inside the straight-line pre-filter. */
+function candidateStops(stops: readonly DriveStop[], point: LatLng, sameAreaMin: number, excludeKey: string): Array<{ stop: DriveStop; point: LatLng }> {
+  const out: Array<{ stop: DriveStop; point: LatLng }> = [];
+  for (const s of stops) {
+    if (s.key === excludeKey || s.address.status !== "verified" || !s.address.point) continue;
+    if (couldBeSameArea(s.address.point, point, sameAreaMin)) out.push({ stop: s, point: s.address.point });
+  }
+  return out;
+}
 
 /** The stop → candidate pairs worth routing. */
 export function nearbyPairs(point: LatLng, leadDays: LeadDay[], sameAreaMin: number, excludeKey: string): Array<{ from: LatLng; to: LatLng }> {
   const out = new Map<string, { from: LatLng; to: LatLng }>();
-  for (const d of leadDays)
-    for (const s of d.stops) {
-      if (s.key === excludeKey) continue;
-      const p = pointOf(s);
-      if (!p || !couldBeSameArea(p, point, sameAreaMin)) continue;
-      out.set(pairKey(p, point), { from: p, to: point });
-    }
+  for (const d of leadDays) for (const c of candidateStops(d.stops, point, sameAreaMin, excludeKey)) out.set(pairKey(c.point, point), { from: c.point, to: point });
   return [...out.values()];
 }
 
@@ -98,10 +110,7 @@ export function suggestDays(args: {
   let missing = 0;
   for (const d of args.leadDays) {
     let best: { label: string; minutes: number } | null = null;
-    for (const s of d.stops) {
-      if (s.key === candidate.key) continue;
-      const p = pointOf(s);
-      if (!p || !couldBeSameArea(p, point, args.sameAreaMin)) continue;
+    for (const { stop: s, point: p } of candidateStops(d.stops, point, args.sameAreaMin, candidate.key)) {
       const m = args.routeMinutes.get(pairKey(p, point));
       if (m == null || !Number.isFinite(m)) {
         missing++;
@@ -122,7 +131,11 @@ export function suggestDays(args: {
       label: fmtDayLabel(d.dayKey),
       nearest: best,
       busyText: fmtBusy(dayBusy),
-      others: args.others.map((o) => ({ person: o.person, status: attendeeStatusOn({ ...o, busy: busyInRange(o.busy, dayStart, dayEnd) }, d.dayKey, slot) })),
+      others: args.others.map((o) => ({
+        person: o.person,
+        status: attendeeStatusOn({ ...o, busy: busyInRange(o.busy, dayStart, dayEnd) }, d.dayKey, slot),
+        ...(o.calendar === "no-calendar" ? { note: VISITS_ONLY_NOTE } : {}),
+      })),
     });
   }
   if (!found.length && missing > 0) return { status: "unavailable" };
