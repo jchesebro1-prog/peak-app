@@ -11534,6 +11534,7 @@ seeded()
   .then(() => conduitRiser321B3Checks())
   .then(() => conduitRiser321B4Checks())
   .then(() => conduitRiser321B5Checks())
+  .then(() => conduitRiser321B6Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -63012,4 +63013,143 @@ async function conduitRiser321B5Checks(): Promise<void> {
   ok(projSrc.includes("copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, linkMap)") && projSrc.includes("new Map([...copied.idMap, ...linkMap])"), "#321 option copy: link ids land in their own map, merged after");
   ok(srcOf("src/lib/design/conduit-riser-server.ts").startsWith("// SERVER ONLY"), "#321 the loader is marked server-only");
   ok(!/from "@\/lib\/design\/conduit-riser-server"/.test(srcOf("src/lib/design/conduit-riser/live.ts")) && !/@\/lib\/stores\//.test(srcOf("src/lib/design/conduit-riser/live.ts")), "#321 live.ts stays pure");
+}
+
+async function conduitRiser321B6Checks(): Promise<void> {
+  const M = await import("@/lib/design/conduit-riser/model");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  const S = await import("@/lib/design/conduit-riser/suggest");
+  const D = await import("@/lib/design/conduit-riser/derive");
+  const L = await import("@/lib/design/conduit-riser/layout");
+  const G = await import("@/lib/design/conduit-riser/drawing");
+  const SV = await import("@/lib/design/conduit-riser/svg");
+  const E = await import("@/lib/design/conduit-riser/edit");
+  const fs = await import("node:fs");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  type Dev = import("@/lib/design/conduit-riser/input").CRDevice;
+  type Wire = import("@/lib/design/conduit-riser/input").CRWire;
+  const J = (v: unknown) => JSON.stringify(v);
+  const srcOf = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "");
+  let seq = 0;
+  const mk: import("@/lib/design/conduit-riser/model").MakeId = (p) => `${p}${(++seq).toString(16).padStart(12, "0")}`;
+
+  // ---- fixture: a rack, two control devices, one stub
+  const dev = (id: string, label: string, typeKey: string): Dev => ({
+    id, label, desc: label, model: "", typeKey, inSystem: true, spaceId: "sp-1", spaceName: "Stage", levelId: "lv-stage",
+    tag: T.effectiveTag(undefined, { box: "E", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" }, "Stage"),
+  });
+  const devices = [dev("gp-er", "ER-01", "racks-cases"), dev("gp-c1", "CRO-01", "control-networking"), dev("gp-c2", "CRO-02", "control-networking")];
+  const wt = [{ id: "dmx", label: "Belden 1583A", symbol: "D", signal: "DMX" }];
+  const wires: Wire[] = [
+    { id: "w1", kind: "route", from: "gp-er", to: "gp-c1", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true },
+    { id: "w2", kind: "route", from: "gp-er", to: "gp-c2", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true },
+  ];
+  let doc = M.emptyConduitRiserDoc();
+  for (const s of S.suggestions(doc, wires).items) doc = S.acceptSuggestion(doc, s, mk).doc;
+  doc = M.patchConduitRiser(doc, { op: "addStub", label: "TO JB1", detailId: "dt-main" }, mk, new Set()).doc;
+  const stubId = doc.stubs[0].id;
+  doc = M.patchConduitRiser(doc, { op: "addConduitRun", a: { kind: "placement", placementId: "gp-c2" }, b: { kind: "stub", stubId } }, mk, new Set(["gp-c2"])).doc;
+  doc = M.normalizeConduitRiserDoc(doc);
+  const pids = new Set(devices.map((d) => d.id));
+  const levels = [{ id: "lv-stage", label: "Stage", order: 0 }];
+  const view = D.deriveView({ doc, devices, wires, levels, wireTypes: wt });
+  const vd = view.details[0];
+  const layout = L.layoutDetail(vd, doc);
+  const run1 = doc.runs.find((r) => r.routeIds.includes("w1"))!;
+
+  // ---- edit.ts: apply / inverse
+  const moved = E.applyLayoutOps(doc, [{ op: "moveTag", placementId: "gp-c1", x: 5.123456, y: 2, detailId: "dt-main" }], pids);
+  ok(moved.tags["gp-c1"]?.x === 5.1235 && moved.tags["gp-c1"].detailId === "dt-main" && !doc.tags["gp-c1"],
+    "#321 B6 applyLayoutOps: a tag drag pins it with the store's own rounding; never mutates the input");
+  ok(E.applyLayoutOps(doc, [{ op: "moveTag", placementId: "gp-nope", x: 1, y: 1, detailId: "dt-main" }], pids) === doc,
+    "#321 B6 applyLayoutOps: an op the store refuses changes nothing");
+  ok(J(E.inverseLayoutOp(doc, layout, { op: "moveTag", placementId: "gp-c1", x: 5, y: 2, detailId: "dt-main" })) === J({ op: "unpinTag", placementId: "gp-c1" }) &&
+     J(E.inverseLayoutOp(moved, layout, { op: "moveTag", placementId: "gp-c1", x: 9, y: 9, detailId: "dt-main" })) === J({ op: "moveTag", placementId: "gp-c1", x: 5.1235, y: 2, detailId: "dt-main" }) &&
+     J(E.inverseLayoutOp(moved, layout, { op: "unpinTag", placementId: "gp-c1" })) === J({ op: "moveTag", placementId: "gp-c1", x: 5.1235, y: 2, detailId: "dt-main" }) &&
+     E.inverseLayoutOp(doc, layout, { op: "unpinTag", placementId: "gp-c1" }) === null,
+    "#321 B6 inverseLayoutOp: an auto tag's drag undoes to un-pinned; a pinned tag's to its old spot; un-pin undoes to the pin");
+  const stubRect = layout.items.find((it) => it.kind === "stub" && it.id === stubId)!.rect;
+  ok(J(E.inverseLayoutOp(doc, layout, { op: "updateStub", id: stubId, x: 1, y: 1 })) === J({ op: "updateStub", id: stubId, x: stubRect.x, y: stubRect.y }),
+    "#321 B6 inverseLayoutOp: an auto-placed stub's drag undoes to where the layout drew it");
+  ok(J(E.inverseLayoutOp(doc, layout, { op: "moveLevel", detailId: "dt-main", levelId: "lv-stage", y: 3 })) === J({ op: "moveLevel", detailId: "dt-main", levelId: "lv-stage", y: null }) &&
+     J(E.inverseLayoutOp(doc, layout, { op: "updateRun", id: run1.id, laneX: 4 })) === J({ op: "updateRun", id: run1.id, laneX: null }) &&
+     J(E.inverseLayoutOp(E.applyLayoutOps(doc, [{ op: "updateRun", id: run1.id, laneX: 4 }], pids), layout, { op: "updateRun", id: run1.id, laneX: 6 })) === J({ op: "updateRun", id: run1.id, laneX: 4 }),
+    "#321 B6 inverseLayoutOp: a level line and a run lane undo to their previous value (null = back to auto)");
+
+  // ---- preview: the dragged lane / stub reach the layout
+  const laned = E.applyLayoutOps(doc, [{ op: "updateRun", id: run1.id, laneX: 7.5 }, { op: "updateStub", id: stubId, x: 8, y: 1 }], pids);
+  const lay2 = L.layoutDetail(E.viewWithDoc(vd, laned), laned);
+  ok(lay2.runs.find((r) => r.runId === run1.id)!.path.some((p) => p.x === 7.5) && J(lay2.items.find((it) => it.kind === "stub")!.rect) === J({ x: 8, y: 1, w: L.STUB_W, h: L.STUB_H }),
+    "#321 B6 viewWithDoc: a dragged lane and stub position show in the re-run layout");
+
+  // ---- history
+  const fp0 = E.layoutFingerprint(doc);
+  const withStub = M.patchConduitRiser(doc, { op: "addStub", label: "TO FACP", detailId: "dt-main" }, mk, pids).doc;
+  ok(E.layoutFingerprint({ ...doc, runs: doc.runs.map((r) => ({ ...r, size: '1"' })) }) === fp0 && E.layoutFingerprint(withStub) === fp0 && E.layoutFingerprint(moved) !== fp0 &&
+     E.layoutFingerprint(E.applyLayoutOps(doc, [{ op: "updateStub", id: stubId, x: 3, y: 3 }], pids)) !== fp0,
+    "#321 B6 layoutFingerprint: a size change or a new auto-placed stub leaves it alone (undo survives); a moved tag or placed stub changes it");
+  const fwd = { op: "moveTag" as const, placementId: "gp-c1", x: 5, y: 2, detailId: "dt-main" };
+  let h = E.recordEdit(null, doc, { forward: fwd, inverse: E.inverseLayoutOp(doc, layout, fwd)! }, pids);
+  const after = E.applyLayoutOps(doc, [fwd], pids);
+  ok(E.historyFor(h, doc).undo.length === 0 && E.historyFor(h, after).undo.length === 1,
+    "#321 B6 history: the stack only counts once the server data shows the edit it expects");
+  const u = E.stepUndo(h, after, pids)!;
+  ok(J(u.op) === J({ op: "unpinTag", placementId: "gp-c1" }) && u.next.undo.length === 0 && u.next.redo.length === 1 && u.next.expect === E.layoutFingerprint(doc),
+    "#321 B6 stepUndo: sends the inverse; the entry moves to redo");
+  h = u.next;
+  const r = E.stepRedo(h, doc, pids)!;
+  ok(J(r.op) === J(fwd) && r.next.undo.length === 1 && r.next.redo.length === 0, "#321 B6 stepRedo: sends the edit again");
+  ok(E.historyFor(h, moved).undo.length === 0 && E.historyFor(h, moved).redo.length === 0 && E.stepUndo(h, moved, pids) === null,
+    "#321 B6 history: layout changed from elsewhere → the stack is empty");
+  let big: import("@/lib/design/conduit-riser/edit").LayoutHistory | null = null;
+  let cur = doc;
+  for (let i = 0; i < E.HISTORY_CAP + 5; i++) {
+    const op = { op: "moveLevel" as const, detailId: "dt-main", levelId: "lv-stage", y: 2 + i * 0.05 };
+    big = E.recordEdit(big, cur, { forward: op, inverse: E.inverseLayoutOp(cur, layout, op)! }, pids);
+    cur = E.applyLayoutOps(cur, [op], pids);
+  }
+  ok(E.historyFor(big, cur).undo.length === E.HISTORY_CAP, "#321 B6 history: capped at 100 steps");
+  ok(Math.abs(E.snapIn(1.234) - 1.25) < 1e-9 && E.snapIn(-0.02) === 0, "#321 B6 drags snap to 0.05\"");
+
+  // ---- the React figure draws what svg.ts draws
+  const F = await import("@/components/drawing/conduit-riser-figure");
+  const geo = G.detailGeometry(layout, vd);
+  const html = renderToStaticMarkup(createElement(F.ConduitRiserFigure, { geo: geo.geo, w: geo.w, h: geo.h }));
+  const svg = SV.geometryToSvg(geo.geo, { w: geo.w, h: geo.h });
+  const count = (s: string, t: string) => (s.match(new RegExp(`<${t}[\\s>]`, "g")) || []).length;
+  ok(["line", "polyline", "polygon", "rect", "circle", "text", "g"].every((t) => count(html, t) === count(svg, t)) && count(html, "rect") > 0 && count(html, "text") > 0,
+    "#321 B6 ConduitRiserFigure: the same primitives as geometryToSvg (lines, polylines, polygons, rects, circles, text, block groups)");
+  ok(html.includes(`viewBox="0 0 ${Math.round(geo.w * 100 * 100) / 100} ${Math.round(geo.h * 100 * 100) / 100}"`) && html.includes(">ER-01<") && html.includes(">TO JB1<"),
+    "#321 B6 ConduitRiserFigure: one viewBox in sheet units; tag and stub text drawn");
+  const withKids = renderToStaticMarkup(createElement(F.ConduitRiserFigure, { geo: geo.geo, w: geo.w, h: geo.h }, createElement("rect", { "data-hit": "x" })));
+  ok(withKids.includes('data-hit="x"'), "#321 B6 ConduitRiserFigure: overlay children draw inside the same svg");
+
+  // ---- page / actions / editor / menu pins
+  const dir = "src/app/(app)/design/grid/[id]/conduit-riser";
+  const page = srcOf(`${dir}/page.tsx`);
+  const acts = srcOf(`${dir}/actions.ts`);
+  const ed = srcOf(`${dir}/conduit-riser-editor.tsx`);
+  const pan = srcOf(`${dir}/panels.tsx`);
+  ok(page.includes("await requireUser()") && page.includes("loadConduitRiser(") && page.includes("layoutDetail(") && page.includes("detailGeometry(") &&
+     page.includes('export const dynamic = "force-dynamic"') && page.includes("export const maxDuration = 60") && page.includes("resolveOptionId("),
+    "#321 B6 page: requireUser, resolveOptionId, loadConduitRiser, layout + geometry per detail; force-dynamic, 60 s");
+  const actFns = acts.split(/export async function /).slice(1);
+  ok(acts.startsWith('"use server"') && actFns.length >= 3 && actFns.every((f) => f.includes("await requireUser()")),
+    "#321 B6 actions: a server file; every action calls requireUser");
+  ok(/\(CR_OP_NAMES as readonly string\[\]\)\.includes\(op\.op\)/.test(acts) && acts.includes("patchConduitRiser(projectId, optionId, op)"),
+    "#321 B6 patchConduitRiserAction whitelists ops against CR_OP_NAMES");
+  ok(/acceptSuggestionsAction\(\s*projectId: string,\s*optionId: string,\s*keys: string\[\] \| "all"/.test(acts) && acts.includes("acceptSuggestions(projectId, optionId, list)") && !/\bsuggestions\(/.test(acts.replace(/acceptSuggestions\(|dismissSuggestions?\(/g, "")),
+    "#321 B6 acceptSuggestionsAction passes keys (or \"all\") — never suggestion objects");
+  ok(acts.includes("/conduit-riser`") && acts.includes("/set`") && acts.includes("revalidatePath(base)"), "#321 B6 actions revalidate the riser page, the editor and /set");
+  ok(ed.includes("acceptSuggestionsAction(projectId, optionId, [pairKey(") && ed.includes("addRouteAction(") && ed.includes("addRiserLinkAction(") &&
+     ed.includes("setTagFieldsAction(") && ed.includes("saveLevelsAction(") && /op: "resetLayout", detailId, runIds: view\.runs\.map/.test(ed) && ed.includes("getScreenCTM()"),
+    "#321 B6 editor: Connect-with-wire adds the wire then accepts that pair; tags, levels and Reset layout go through their actions");
+  ok(pan.includes("BRAY_POWER_TYPES") && pan.includes("Start from Bray") && pan.includes("Nothing new to accept") && /estimateOwned/.test(pan),
+    "#321 B6 panels: Bray's A–E starter, the nothing-to-accept notice, pricing controls gated on estimateOwned");
+  const menu = srcOf("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx");
+  ok(menu.includes('{ label: "System riser →", href: `/design/grid/${id}/riser?option=${opt}` }') &&
+     menu.includes('{ label: "Lighting control riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}` }') && !menu.includes('label: "Riser →"'),
+    "#321 B6 Outputs menu links both risers");
+  ok(srcOf("scripts/smoke-routes.ts").includes('{ route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" }'), "#321 B6 smoke lists the conduit riser page");
 }
