@@ -29,7 +29,7 @@ import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { isFabricRow } from "@/lib/design/grid-curtains";
 import { symbolContext } from "@/lib/design/grid-icons";
-import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { fallbackPartsFor, gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
 import { compute, tierDefsDefault } from "@/app/(app)/design/quick/engine";
@@ -234,9 +234,12 @@ export default async function GridEditorPage({
     return {};
   });
   // #320: number every device that has no designator yet (a design drawn
-  // before #320) — one write, none at all when nothing is missing, codes from
-  // the parts this request already built. Never fatal.
-  const designed = await ensureDesignators(project, { parts, deviceTypes }).catch((e: unknown) => {
+  // before #320) — one write, none at all when nothing is missing (in memory
+  // only on a preview), codes from the parts this request already built plus
+  // the catalog-fallback rows of any pre-library placement, so a code here is
+  // the code a store write resolves (designatorContext). Never fatal.
+  const designatorParts = [...parts, ...fallbackPartsFor((project.placements || []).map((pl) => pl.partId), parts, catalog, categoryMap, { deviceTypes })];
+  const designed = await ensureDesignators(project, { parts: designatorParts, deviceTypes }).catch((e: unknown) => {
     console.error("[grid] designators failed:", e);
     return project;
   });

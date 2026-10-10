@@ -60212,6 +60212,19 @@ async function designators320PureChecks(): Promise<void> {
      D.codeOfPlacement({}, { id: "P1", deviceType: "speakers" }, { ...tctx, types: T.SEED_DEVICE_TYPES.map((t) => (t.key === "speakers" ? { ...t, archived: true } : t)) }) === "G",
     "#320 codeOfPlacement: assemblies, allowances, archived types and unknowns use the system letter (L/A/V/R/G)");
   ok(D.designatorCodeOf(new Map([["P1", { id: "P1", deviceType: "microphones" }]]), tctx)({ partId: "P1" }) === "MIC", "#320 designatorCodeOf: the part-by-id resolver");
+  // Final fix #8: the editor's parts have no catalog fallback; page-load numbering adds the fallback rows a store write would see.
+  const GP = await import("@/lib/design/grid-parts");
+  const dt8 = { types: [...tctx.types], map: tctx.map };
+  const cat8 = [{ id: "RAW-MIC", sku: "RAW-MIC", desc: "Handheld", category: "Wireless Mics", unit: "ea", list: 1, cost: 1 },
+    { id: "OTHER", sku: "OTHER", desc: "x", category: "Misc", unit: "ea", list: 1, cost: 1 }] as never[];
+  const editorParts8 = GP.gridPartsFrom([], cat8, {} as never, { deviceTypes: dt8 });
+  const fb8 = GP.fallbackPartsFor(["RAW-MIC", "RAW-MIC", ""], editorParts8, cat8, {} as never, { deviceTypes: dt8 });
+  const full8 = GP.gridPartsFrom([], cat8, {} as never, { catalogFallback: true, deviceTypes: dt8 });
+  const code8 = (rows: ReadonlyArray<{ id: string }>) => D.designatorCodeOf(new Map(rows.map((p) => [p.id, p])), tctx)({ partId: "RAW-MIC" });
+  ok(editorParts8.length === 0 && J(fb8) === J(full8.filter((p) => p.id === "RAW-MIC")) && GP.fallbackPartsFor(["RAW-MIC"], full8, cat8, {} as never, { deviceTypes: dt8 }).length === 0,
+    "#320 fallbackPartsFor: exactly gridPartsFrom's catalog-fallback rows for the ids the parts lack, nothing for ids already there");
+  ok(code8(editorParts8) === "G" && code8([...editorParts8, ...fb8]) === "MIC" && code8(full8) === "MIC",
+    "#320 page-load numbering resolves a pre-library placement's type code (MIC) as a store write does, not the system letter");
 
   // doc helpers
   const doc = { sheetIds: ["s1"], spaces: [] as never[], placements: [
@@ -60406,8 +60419,10 @@ async function designators320EditorChecks(): Promise<void> {
     "#320 undo restore keeps a device's designator (whitelisted, cleaned; never on a curtain)");
   ok(body("replacePlacementsPartAction").includes("...(it.designator !== undefined ? { designator: it.designator } : {})"), "#320 Replace part's undo carries the designator back");
   const page = rd("src/app/(app)/design/grid/[id]/page.tsx");
-  ok(page.includes("await ensureDesignators(project, { parts, deviceTypes })") && page.includes("placements: designed.placements || [],") && page.includes("scheduleForOption(designed, activeOptionId,"),
+  ok(page.includes("await ensureDesignators(project, { parts: designatorParts, deviceTypes })") && page.includes("placements: designed.placements || [],") && page.includes("scheduleForOption(designed, activeOptionId,"),
     "#320 page: the editor numbers any device missing a designator before it renders");
+  ok(page.includes("const designatorParts = [...parts, ...fallbackPartsFor((project.placements || []).map((pl) => pl.partId), parts, catalog, categoryMap, { deviceTypes })];"),
+    "#320 page: numbering on load adds the catalog-fallback rows of pre-library placements (the store writers' part list)");
   const canvas = rd("src/app/(app)/design/grid/[id]/plan-canvas.tsx");
   ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
     "#320 plan: a device is labelled by its designator (a lot by its range, no ×N), with a hover title; duplicates drawn amber");
