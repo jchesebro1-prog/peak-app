@@ -16,6 +16,7 @@ import { SHEET_SIZES, buildSheetList, drawingArea, planSheetGroups, resolveGener
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 import { partDocumentUrl, type ObjectSymbolUrls } from "@/lib/design/object-symbols";
+import { designatorCodeOf, fillDesignators, readingCtxOf } from "@/lib/design/designators";
 
 /**
  * The drawing set's data (#209, #300), shared since #301 slice C (R8a) by
@@ -65,7 +66,7 @@ export async function loadDrawingSetData(
   const optionId = resolveOptionId(project, requestedOption);
   const options = project.options!;
   const option = options.find((o) => o.id === optionId)!;
-  const slice = optionSlice(project, optionId);
+  const rawSlice = optionSlice(project, optionId);
   const spaces = project.spaces || [];
   const cals = project.calibrations || [];
 
@@ -79,6 +80,10 @@ export async function loadDrawingSetData(
     ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
   ];
   const partById = new Map(parts.map((p) => [p.id, p]));
+  // #320: plan marks, keys and E-60x read designators; one not yet assigned
+  // prints the number the editor will give it (filled here, never written —
+  // this also serves the signed print route).
+  const slice = { ...rawSlice, placements: fillDesignators(rawSlice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project)) };
   const set = project.drawingSet || {};
   const size = resolveSheetSize(requestedSize, set.size);
   const k = SHEET_SIZES[size].k;

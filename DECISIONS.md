@@ -10174,3 +10174,178 @@ is. While the dialog is open the editor's keys stand down and the workspace is `
 id, so sheet 1 never flashes. The tab's ⋯ menu gains Crop & rotate…, hidden on the base sheet and disabled when every
 page is known to be locked (an image, or the PDF on screen — another PDF opens and shows its locks). `PdfCanvas` gained
 `rotateBy`, added to the page's own rotation (pdf.js's viewport rotation is absolute); absent = unchanged.
+
+## D695. Product photos are squared 1600×1600, padded (#322, 2026-10-09)
+
+Jeff wants every catalog product photo the same size so tiles, portal grids and documents line up and nobody pre-resizes
+a photo before uploading. `squareProductImage` (`src/lib/part-docs/shrink.ts`) replaces `shrinkImage` for product
+photos: EXIF applied, uniform borders trimmed (`sharp.trim`, threshold 10; skipped when the trim throws — e.g. a
+perfectly uniform image — or leaves under 8 px), the product fitted inside a **1472×1472** content box and centred on
+a **1600×1600** canvas — a **64 px** even margin at the tightest side — then WebP q80. Never cropped.
+
+- **Enlargement is allowed.** A 100 px source fills the frame; uniform framing is the point, and a small source
+  enlarges softly rather than floating as a postage stamp in a big white square.
+- **Background:** opaque white, unless the trimmed image really has transparency (an alpha channel that is not fully
+  opaque) — then the padding is transparent and the cut-out keeps its alpha. An opaque PNG that merely carries an unused
+  alpha channel gets white, not a see-through margin.
+- **Squared:** direct uploads and replacements (via `shrinkStoredImage({ square: true })`), the photo sheet import, Drive
+  photo sync (new and updated), Add image from URL, and datasheet page-1 thumbnails (they show as product images in
+  the portal). Each writes `squared: true` on the `PartDocument` (JSONB, no migration); `replaceDocumentFile` sets it
+  from the new file, so a later non-squared replacement clears it.
+- **Not squared:** manufacturer images (logos; `source: "manufacturer"` — also guarded on the replace action),
+  object drawings (#300) and the curtain cut-sheet photo tiles (#292) — all keep `shrinkImage`.
+- **Existing photos:** Catalog → Datasheets → **Make photos uniform** (admin, `squarePhotosAction`,
+  `src/lib/part-docs/square-batch.ts`) — a one-time, resumable batch under the usual 45 s budget (re-click to
+  continue; failures are remembered per run). Candidates are image documents with a stored file that are not `squared`
+  and not manufacturer images; each is read, squared, stored as a NEW blob and swapped in with `replaceDocumentFile`,
+  so the original blob is **kept** on the document's `history` and nothing is ever deleted. Links, gallery order,
+  primary and hidden flags live on the link rows and are untouched; the batch also keeps `uploadedAt`/`uploadedBy`
+  (`keepStamp`), since `uploadedAt` is the gallery's tiebreak and re-squaring must not reorder photos. A squared
+  document is never a candidate again, so the batch is idempotent. An unreadable photo is counted failed and left as it
+  was.
+
+## D696. A multi-page PDF becomes one Grid sheet per page (#319, 2026-10-09)
+
+Jeff: "When uploads have multiple pages they should be treated as different sheets in the grid." Every path that makes a
+sheet from an uploaded or copied file — the `+` tab (Blob broker commit and the 4 MB route), the intake's plan view
+(dropped, or copied from file), the notices banner's re-upload — calls one server step, `storeUploadAsSheets`
+(`src/lib/design/grid-sheet-split-server.ts`). A PDF of 2–60 pages is split with pdf-lib `copyPages` (which carries each
+page's own and inherited MediaBox / CropBox / Rotate, checked against pdf.js) into one-page sheets named
+`<file> — p.<n>`, consecutive in page order at the upload's position (appended, or first for the plan view), each
+stamped `split: { from, page, pages }` and its own root for Adjust sheet. Pages are stored four at a time (order kept).
+An image, a 1-page PDF, or a PDF that can't be split lands as ONE sheet exactly as before, with a note: encrypted,
+unreadable, more than 60 pages, split output over 100 MB (24 MB without Blob — pdf-lib copies shared resources into
+every page), or a page that failed to store (the pages already written are deleted). A throw after the split drops the
+page blobs this call wrote. An upload is never refused for a split reason. Existing multi-page sheets are untouched.
+
+The broker's original upload blob is deleted only AFTER the plan-lock transaction commits, and only when no sheet
+references it (a failed lookup counts as referenced, so nothing is deleted on doubt); a replayed commit then fails its
+head read instead of splitting twice. A customer's on-file document is never deleted — the copy path reads it (≤ 30 MB)
+and stores new files. A failed lookup at the commit's "already saved" pre-check says "Couldn't read the uploaded file —
+try again." and never claims it was already saved.
+
+## D697. A real plan retires the generated plan (#319, 2026-10-09)
+
+Jeff picked option A: "When a PDF is uploaded it should remove the autogenerated plan set." After any real plan (PDF or
+image) lands through the paths in D696, `retireBaseSheet` removes the sheet named by `intake.baseSheetId` exactly like
+Delete sheet (#317, D691) when no placement or route on any option is on it: its Spaces go after one automatic revision
+"Auto-saved before removing the generated plan", riser boxes pruned; checked before and again inside the patch. With
+devices on it (counted as placement records), or failing that wires (route records), it stays and the upload says
+`Generated plan kept — it has N devices on it.` `intake.baseSheetId` is never cleared — Auto fill keys off it: once that
+sheet is off the design, Auto fill (the intake's first fill and "Change equipment…") refuses rather than fill the uploaded
+plan at the generated plan's coordinates — "The generated plan was removed when the real plan was uploaded — restore the
+revision “Auto-saved before removing the generated plan” to fill equipment again." when that revision would bring the
+sheet back, else a "place the equipment by hand" sentence (`baseSheetGoneMessage`); a retire racing a fill reads the
+same. Only a design with no `baseSheetId` (pre-#314) falls back to its first sheet. `removeSheet` and the retire share
+one private drop helper (`dropSheetInPatch`). Split and
+retire run inside the same plan-lock transaction; if the retire or the notices write hits an error that aborts the
+database transaction, it is rethrown so the new sheets roll back and the original upload stays for a retry, while an
+error that does not abort the transaction is logged and ignored (the sheets still land).
+
+## D698. Upload results name every sheet; Adjust sheet walks them (#319, 2026-10-09)
+
+The commit, the 4 MB route and the plan copy answer `{ sheetId, sheetIds, baseSheet?: "removed" | { kept, what },
+note? }` (`sheetId` = the first, so single-sheet callers are unchanged). The `+` tab notes "Uploaded X as N sheets ·
+removed the generated plan" (or the kept sentence, or why a PDF wasn't split) in the status bar; the intake-position
+paths (the plan view, its copy, the banner's re-upload) leave the kept sentence and any split note as intake notices,
+because the intake swaps into the editor before anything it holds is seen (the banner's re-upload, which stays in the
+editor, puts only "Uploaded X as N sheets · removed the generated plan" in the status bar, so neither sentence shows
+twice). After a multi-sheet upload Adjust sheet
+walks the new sheets in order — "Sheet 2 of 5", Done or Skip (Escape, or Done with nothing changed) opens the next,
+**Skip the rest** stops — and the editor stays on the sheet the dialog was on. The intake hands the walk over as
+`?adjust=<id>,<id>,…` (listed ids only, ≤ 60); the editor adopts it once, keyed on the raw param and only when no Adjust
+dialog or walk is open, and drops the param when the walk ends so a reload doesn't restart it.
+
+## D699. Grid device designators: the model (#320, 2026-10-09)
+
+Jeff wanted short device labels on Grid plans that carry through to schedules and the riser. Every non-curtain
+placement gets `GridPlacement.designator` — the device type's code + a number (`MIC-1`), numbered per code within one
+design option (options number on their own; a copied option keeps the same designators). A lot of qty N reserves N
+consecutive numbers and stores only its FIRST (`LX-1`, shown `LX-1–24`, en dash, no ×N). A device keeps its designator
+for life; delete leaves a gap and a new device takes the LOWEST free number for its code; Renumber… (all, one code, or
+a selection) closes gaps in reading order — sheet order, page, space in project order (`spaceOf`, the smallest
+containing polygon, no space last), 0.02 row bands, left to right. Hand-typed duplicates are allowed and drawn amber.
+Anything not `<code>-<number>` is custom: shown as typed, never renumbered by plain Renumber, never counted. Curtains
+never take one. A part with no device type (unmapped, assembly, allowance, unknown seed) uses its drawing-set system
+letter (L/A/V/R/G); the resolver tries the placement's own `category` before the part's raw category (a seeded
+placeholder carries its system-function label on the placement). Occupancy is kept as number blocks (`{ from, to }`),
+not sets — a lot can hold 100,000. Pure rules in `src/lib/design/designators.ts`. No migration; revisions and option
+copies carry the field as is.
+
+## D700. Designators are handed out inside every store write (#320, 2026-10-09)
+
+`designatorContext(partIds, preload?)` (`designators-server.ts`) resolves codes BEFORE a patch (Grid-library docs read
+by id, never the 37k-row symbol list; catalog rows behind them; virtual Auto parts, through `gridPartsFrom`) and
+returns only `{ codeOf }`; the pure numbering runs INSIDE the patch on the doc it read, with the reading-order context
+read from that same doc: addPlacement(s), Auto (re-)fill (its removed devices' numbers come free, so a re-fill
+renumbers its scope), paste/duplicate (always fresh), the riser's + Device and qty edits, undo restore (keeps its
+designator; `cleanRestoredPlacement` whitelists it). Replace part (plan and riser, one helper `keepsDesignatorOnSwap`)
+re-issues a number only when it was issued in the OLD type's code and the code changes; custom and hand-renamed
+designators are kept; its undo carries the old designator back exactly. `patchDoc` is still last-writer-wins: two truly
+simultaneous adds can lose a placement (pre-existing), but numbers come from the doc each patch read, so the survivors
+never share one. A hand designator edit clears the #211 auto tag; Renumber does not (it is bookkeeping across many
+devices) and its undo/redo goes through `setDesignatorsAction(…, { keepAuto: true })`.
+`ensureDesignators(project, preload?)` numbers pre-#320 designs once on the editor page's load: no write when nothing is
+missing, `updatedAt` untouched, and it resolves codes from the same part list as the store writes (`catalogFallback`),
+so the page and the first click agree. It never writes on a Vercel preview (`VERCEL_ENV === "preview"`; preview shares
+the production DB) — it fills in memory there, as /schedule and the drawing set always do (`fillDesignators`: a print
+or GET path never writes, only the editor page persists).
+
+## D701. Where designators show, and how the Spreadsheet edits them (#320, 2026-10-09)
+
+Plan label = the designator (curtains keep their names), an SVG title `designator · model · description`, amber when
+duplicated. Property Editor: an editable Designator row (blank = next free number) and, for several, Renumber
+selection. Browser tree leaves read `MIC-1 · SM57`. Spreadsheet view: a Devices tab (default) — one row per device in
+reading order, Designator and Category edited in place, type / space / sheet filters, header sort, row → plan
+selection, Renumber… (all, the filtered type's code — the only code visible there — or selected rows) — built from a
+column list (`grid-device-rows.ts`, `workspace/devices-table.tsx`) so later device fields are columns; and a Schedule
+tab with a Designators column, as on /schedule and the E-60x sheets. An inline cell opens with its text selected and
+commits on Enter or Tab (save and move); Esc or clicking away discards — a blur-commit would double-save as focus moves
+before `router.refresh()` lands. Undo / Redo work in the Spreadsheet view as well as the plan, and every edit and
+Renumber is one undo step. Typing a displayed range (`LX-1–24`) back stores the first designator. Quotes, BOM and
+customer documents are unchanged; the riser does not show designators yet (next slice).
+
+## D702. Printed designators are never truncated (#320, 2026-10-09)
+
+On the drawing set a designator list is complete or visibly continued, never cut. E-60x schedule cells and the
+plan-sheet key's designator cells wrap; `paginateSchedule` budgets a column by estimated lines
+(`SCHEDULE_DESIGNATOR_CHARS_PER_LINE = 18`) and a list too tall for one column splits into continuation rows
+("<description> (cont.)", qty 0 so nothing is counted twice). A plan-sheet key row is an index, not the record: it caps
+at 4 lines (`KEY_DESIGNATOR_CHARS_PER_LINE = 10`) ending "… see schedule", and the E-60x schedule carries the full list.
+Plan sheets print each device's designator where its type mark sat; the key is one row per part — designators · qty ·
+description; curtains keep their type marks.
+
+## D703. Device-type designator codes (#320, 2026-10-09)
+
+`DeviceType.code` (1–6 of A–Z/0–9, uppercased) is edited in Catalog → Device types; blank uses the effective default:
+the shipped `DEFAULT_TYPE_CODES` for the 25 seeded types (LX, DIM, LCN, LA, HST, TR, RH, RC, DR, TRK, SPK, MIC, MIX,
+AMP, ALS, COM, DSP, SCR, CAM, SW, CBL, RACK, PD, NET, PRT), else derived from the label (first letters of up to three
+words, or the first three letters of one word). Codes must be unique among active types by effective code (archived
+types don't count): a save where two would share one is refused, naming both — two types numbering into one series
+would read as one. A changed code applies to newly placed devices; existing designators keep theirs until Renumber →
+Apply current type codes, and Catalog → Device types says so and points there.
+
+## D704. Renumber closes gaps; "Apply current type codes" re-codes (#320, 2026-10-09)
+
+Plain Renumber (all, one code, or a selection) re-numbers within each designator's OWN written code, in reading order,
+so it needs no catalog read and a hand-typed `FOH-3` stays `FOH-…`. The Renumber menu also has **Apply current type
+codes** (recode): it re-issues each targeted parseable designator — hand-typed ones like `FOH-1` included — in the
+device's CURRENT type code, numbering each code from 1 in reading order; custom unparseable text (`FOH-AMP`) is left
+alone. This supersedes the plan's first design (Renumber taking no `codeOf`): the recode path is the one place the
+catalog is read, and only for the targeted devices.
+
+## D705. What a stored designator may contain (#320, 2026-10-09)
+
+`cleanDesignator` trims, collapses runs of spaces (and spaces around `-`, so `MIC - 1` is `MIC-1`), collapses a typed
+range to its first designator, caps at 24 characters, and strips control characters: C0 and C1 controls, bidi marks,
+overrides and isolates (LRM/RLM/ALM, LRE…RLO, LRI…PDI), zero-width characters, the word joiner and the soft hyphen —
+none of which can be seen on a plan but would make two designators look equal and not be. Empty means absent.
+
+## D706. Known limits of the first slice (#320, 2026-10-09)
+
+Said plainly so nobody is surprised on a real design. (1) Many catalog parts have no device type, so they number with
+their system letter (`A-1`, `L-1`) rather than a type code until their category is mapped in Catalog → Device types;
+that, not the numbering, is why a real design can look generic at first. (2) The riser does not show designators yet.
+(3) Redo of Replace part re-issues the LOWEST free number for the new code rather than the exact one it first took
+(undo, by contrast, restores the old designator exactly). (4) Designators are plan-and-schedule bookkeeping only: no
+quote, BOM, customer document or cut sheet prints one.

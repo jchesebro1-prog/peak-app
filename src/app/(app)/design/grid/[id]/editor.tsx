@@ -69,8 +69,10 @@ export default function GridEditor(props: GridEditorProps) {
           sheet={ed.adjustTarget}
           locks={ed.adjustLocks}
           afterUpload={ed.adjustAfterUpload}
+          queue={ed.adjustQueue}
           onCancel={ed.closeAdjust}
           onDone={ed.finishAdjust}
+          onSkipRest={ed.skipRestAdjust}
         />
       )}
     </>

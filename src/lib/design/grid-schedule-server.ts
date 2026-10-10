@@ -26,6 +26,7 @@ import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import type { EquipmentMap, EquipPriceCtx } from "@/lib/design/equipment-map";
 import { symbolContext } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
+import { designatorCodeOf, fillDesignators, readingCtxOf } from "@/lib/design/designators";
 import { buildSchedule, catalogForSchedule, scheduleModelOf, scheduleWiresFromView, type ScheduleData } from "@/lib/design/grid-schedule";
 
 export async function scheduleForOption(
@@ -56,9 +57,12 @@ export async function scheduleForOption(
   ];
   const partById = new Map(parts.map((p) => [p.id, p]));
   const spaces = project.spaces || [];
+  // #320: a device not yet numbered (a design the editor hasn't opened since)
+  // lists the number the editor will give it — computed here, never written.
+  const placements = fillDesignators(slice.placements, designatorCodeOf(partById, deviceTypes), readingCtxOf(project));
   const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings, deviceTypes.types) });
   return buildSchedule({
-    placements: slice.placements,
+    placements,
     spaces,
     descOf: (pid) => partById.get(pid)?.desc,
     modelOf: (pid) => scheduleModelOf(partById.get(pid)),

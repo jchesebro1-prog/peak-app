@@ -9,7 +9,7 @@ import { fileNameForFetched, sniffImageType } from "./files";
 import { placeNewImage, type ImportRow } from "./photo-sheet";
 import { loadPhotoSheetContext, type ListDrive } from "./photo-sheet-io";
 import { planPhotoSheet, type DroppedFile, type PlannedDoc, type SheetDocOutcome } from "./photo-sheet-plan";
-import { shrinkImage, webpFileName } from "./shrink";
+import { squareProductImage, webpFileName } from "./shrink";
 import { MAX_FETCH_TIMEOUT_MS, MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
 import { buildImageIndex } from "./views";
 
@@ -134,7 +134,7 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
       sourceUrl = d.file.webViewLink || null;
       sourceRef = `drive:${d.file.id}`;
     }
-    const shrunk = await shrinkImage(bytes);
+    const shrunk = await squareProductImage(bytes);
     if (!shrunk.ok) return fail(shrunk.error);
     const documentId = newDocumentId();
     const fileName = webpFileName(baseName);
@@ -152,6 +152,7 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
         blobKey: stored.pathname,
         sourceUrl,
         source: "sheet",
+        squared: true,
         ...(sourceRef ? { sourceRef } : {}),
         by,
         at: now(),

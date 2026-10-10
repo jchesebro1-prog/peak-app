@@ -3,6 +3,7 @@ import { newUploadKey } from "@/lib/document-files";
 import { gridSheetBlobPath } from "@/lib/design/grid-sheet-upload";
 import { planFileProblem, postSheetMultipart } from "@/lib/design/grid-plan-upload";
 import { commitSheetUploadAction } from "./actions";
+import type { SheetUploadResult } from "@/lib/design/grid-sheet-split";
 
 /**
  * #318 (D692) — the browser half of a plan-sheet upload, for the `+` tab, the
@@ -13,7 +14,8 @@ import { commitSheetUploadAction } from "./actions";
  * the 4 MB multipart route. `planUploadId` = the intake's plan view (FIRST
  * position, idempotent per id). Never throws. Client-only.
  */
-export type SheetUploadResult = { ok: true; sheetId: string } | { ok: false; error: string };
+/** #319: `sheetIds` = every sheet the upload became (a multi-page PDF splits), `sheetId` = the first. */
+export type { SheetUploadResult };
 
 export async function uploadGridSheet(projectId: string, file: File, opts: { blobUploads: boolean; planUploadId?: string }): Promise<SheetUploadResult> {
   const problem = planFileProblem(file, opts.blobUploads);

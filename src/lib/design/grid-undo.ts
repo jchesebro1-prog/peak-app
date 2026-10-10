@@ -13,7 +13,9 @@ export type GridCommand =
   | { kind: "remove"; ids: string[] }
   | { kind: "restore"; bundle: RemovedBundle }
   | { kind: "category"; items: { id: string; category: string }[] }
-  | { kind: "part"; items: { id: string; partId: string; qty?: number }[] };
+  | { kind: "part"; items: { id: string; partId: string; qty?: number; designator?: string }[] }
+  /** #320: set designators; `keepAuto` for Renumber's undo/redo (not a hand edit). */
+  | { kind: "designator"; items: { id: string; designator: string }[]; keepAuto?: boolean };
 
 export type UndoEntry = { label: string; forward: GridCommand; inverse: GridCommand };
 export type UndoState = { past: UndoEntry[]; future: UndoEntry[] };

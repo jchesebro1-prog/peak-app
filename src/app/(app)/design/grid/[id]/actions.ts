@@ -24,6 +24,8 @@ import {
   movePlacements,
   setPlacementsCategory,
   setPlacementsPart,
+  setPlacementsDesignator,
+  renumberDesignators,
   pastePlacements,
   restoreItems,
   type GridPlacement,
@@ -61,6 +63,7 @@ import { defaultOptionId, estimateLinkOf, estimateOwnedRefusal, hasOption, resol
 import { attachPlanCandidate, planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
 import { adjustSheet } from "@/lib/design/sheet-adjust-server";
 import { commitSheetUpload } from "@/lib/design/grid-sheet-upload-server";
+import { landed, type SheetsLanded } from "@/lib/design/grid-sheet-split";
 import { adjustRefusalText } from "@/lib/design/sheet-adjust";
 import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
 import { cleanNoticeText, newNoticeId, publicPlanCandidates, type GridIntakeNotice, type PlanCandidate } from "@/lib/design/grid-plan-intake";
@@ -123,6 +126,7 @@ import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import { isGridLayer } from "@/lib/design/grid-scopes";
 import { isPerLengthUnit, type GridCurtain } from "@/lib/design/grid-bom";
+import { cleanDesignator, type RenumberTarget } from "@/lib/design/designators";
 import { checkCurtainInput, type CurtainInput } from "@/lib/design/grid-curtain-input";
 import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
@@ -309,7 +313,7 @@ export async function saveGridIntakeAction(input: {
   estimate?: AutoEstimate;
   /** #314: an on-file plan to copy in as the FIRST sheet ("Use plan from …") — a candidate id, never a path. */
   planCandidateId?: string | null;
-}): Promise<{ ok: true; warning?: string; planRetry?: string; planSheetId?: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; warning?: string; planRetry?: string; planSheetIds?: string[] } | { ok: false; error: string }> {
   const user = await requireUser();
   if (input.mode !== "manual" && input.mode !== "auto") return { ok: false, error: "Choose Auto or Blank." };
   // #314: a design drawn from an estimate takes its parts from the estimate —
@@ -453,7 +457,7 @@ export async function saveGridIntakeAction(input: {
   // the intake — the plan opens with a warning and a retry (the #211 rule).
   let planRetry: string | undefined;
   let planWarning: string | undefined;
-  let planSheetId: string | undefined;
+  let planSheetIds: string[] | undefined;
   if (isFirstSave && typeof input.planCandidateId === "string" && input.planCandidateId) {
     let attached: Awaited<ReturnType<typeof attachPlanCandidate>>;
     try {
@@ -465,7 +469,7 @@ export async function saveGridIntakeAction(input: {
     if (!attached.ok) {
       planRetry = input.planCandidateId;
       planWarning = `The plan is ready, but the plan view wasn't added: ${attached.error}`;
-    } else planSheetId = attached.sheetId;
+    } else planSheetIds = attached.sheetIds;
   }
   // #314 review: the warnings are PERSISTED before the revalidate below — that
   // re-render swaps the intake for the editor, so a warning held only in the
@@ -479,7 +483,7 @@ export async function saveGridIntakeAction(input: {
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
   const allWarnings = [warning, planWarning].filter(Boolean).join(" ");
-  return { ok: true, ...(allWarnings ? { warning: allWarnings } : {}), ...(planRetry ? { planRetry } : {}), ...(planSheetId ? { planSheetId } : {}) };
+  return { ok: true, ...(allWarnings ? { warning: allWarnings } : {}), ...(planRetry ? { planRetry } : {}), ...(planSheetIds ? { planSheetIds } : {}) };
 }
 
 /** #314: the refusal sentence for an estimate-linked design, naming the estimate. */
@@ -824,12 +828,16 @@ const TOO_MANY_PARTS = "That's too many different parts in one edit — try a sm
  *  curtains are refused by the store. */
 export async function replacePlacementsPartAction(
   projectId: string,
-  items: { id: string; partId: string; qty?: number }[]
-): Promise<{ ok: true; previous: { id: string; partId: string; qty?: number }[] } | { ok: false; error: string }> {
+  items: { id: string; partId: string; qty?: number; designator?: string }[]
+): Promise<{ ok: true; previous: { id: string; partId: string; qty?: number; designator?: string }[] } | { ok: false; error: string }> {
   await requireUser();
   if (
     !isStr(projectId) || !Array.isArray(items) ||
-    !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.partId) && it.partId !== "" && (it.qty === undefined || isFiniteNum(it.qty)))
+    !items.every(
+      (it) =>
+        isObj(it) && isStr(it.id) && isStr(it.partId) && it.partId !== "" && (it.qty === undefined || isFiniteNum(it.qty)) &&
+        (it.designator === undefined || isStr(it.designator))
+    )
   )
     return { ok: false, error: BATCH_INVALID };
   if (items.length > MAX_BATCH) return { ok: false, error: "Select 2,000 items or fewer." };
@@ -839,7 +847,13 @@ export async function replacePlacementsPartAction(
   if (placeable.size !== partIds.size) return { ok: false, error: "That part is not in the Grid library." };
   const r = await setPlacementsPart(
     projectId,
-    items.map((it) => ({ id: it.id, partId: it.partId, ...(it.qty !== undefined ? { qty: it.qty } : {}) }))
+    items.map((it) => ({
+      id: it.id,
+      partId: it.partId,
+      ...(it.qty !== undefined ? { qty: it.qty } : {}),
+      // #320: undo of a swap carries the old designator back.
+      ...(it.designator !== undefined ? { designator: it.designator } : {}),
+    }))
   );
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
@@ -944,6 +958,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
   const qty = cleanLotQty(raw.qty);
   const auto = raw.auto === undefined ? null : sanitizeAutoTag(raw.auto);
   const autoOrigin = raw.autoOrigin === undefined ? null : sanitizeAutoOrigin(raw.autoOrigin);
+  // #320: undo restore keeps the designator; a curtain never carries one.
+  const designator = curtain ? null : cleanDesignator(raw.designator);
   return {
     id: raw.id,
     sheetId: raw.sheetId,
@@ -952,6 +968,7 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
     y: clamp01(raw.y),
     partId: curtain ? curtain.fabricSku : raw.partId,
     ...(category ? { category } : {}),
+    ...(designator ? { designator } : {}),
     ...(curtain ? { curtain } : {}),
     ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
     ...(seededFrom ? { seededFrom } : {}),
@@ -999,6 +1016,66 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
   revalidatePath(`${editorPath(projectId)}/riser`);
   return { ok: true };
 }
+
+/* ------------------------------ designators (#320) ------------------------------ */
+
+/** Raw length a client may send for one designator (the store caps at 24). */
+const DESIGNATOR_INPUT_MAX = 200;
+
+/** Set (or, with "", re-issue) many devices' designators in one write.
+ *  `previous` holds the old values for undo; curtains are refused (store).
+ *  `keepAuto` is only for undo/redo of a Renumber — a hand edit clears the tag. */
+export async function setDesignatorsAction(
+  projectId: string,
+  items: { id: string; designator: string }[],
+  opts?: { keepAuto?: boolean }
+): Promise<{ ok: true; previous: { id: string; designator: string }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (
+    !isStr(projectId) || !Array.isArray(items) ||
+    !items.every((it) => isObj(it) && isStr(it.id) && isStr(it.designator) && it.designator.length <= DESIGNATOR_INPUT_MAX)
+  )
+    return { ok: false, error: BATCH_INVALID };
+  const r = await setPlacementsDesignator(
+    projectId,
+    items.map((it) => ({ id: it.id, designator: it.designator })),
+    { keepAuto: opts?.keepAuto === true }
+  );
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  return { ok: true, previous: r.value };
+}
+
+function cleanRenumberTarget(raw: unknown): RenumberTarget | null {
+  if (!isObj(raw)) return null;
+  // "Apply current type codes" — only a literal true turns it on.
+  const recode = raw.recode === true ? { recode: true } : {};
+  if (raw.all === true) return { all: true, ...recode };
+  if (isStr(raw.code) && raw.code.trim() && raw.code.length <= 24) return { code: raw.code.trim(), ...recode };
+  if (Array.isArray(raw.ids) && raw.ids.length > 0 && raw.ids.length <= MAX_BATCH && raw.ids.every(isStr)) return { ids: [...raw.ids], ...recode };
+  return null;
+}
+
+/** Renumber… — close the gaps of one option (all / one code / the given
+ *  devices) in reading order, in one write; `recode` re-issues them in each
+ *  device's current type code. `previous` / `next` are the
+ *  changed devices only, so the editor records one undo step. */
+export async function renumberDesignatorsAction(
+  projectId: string,
+  optionId: string,
+  target: RenumberTarget
+): Promise<
+  { ok: true; previous: { id: string; designator: string }[]; next: { id: string; designator: string }[] } | { ok: false; error: string }
+> {
+  await requireUser();
+  const t = cleanRenumberTarget(target);
+  if (!isStr(projectId) || !isStr(optionId) || !t) return { ok: false, error: BATCH_INVALID };
+  const r = await renumberDesignators(projectId, optionId, t);
+  if (!r.ok) return r;
+  if (r.value.next.length) revalidatePath(editorPath(projectId));
+  return { ok: true, previous: r.value.previous, next: r.value.next };
+}
+
 
 export async function calibrateAction(
   projectId: string,
@@ -1117,16 +1194,18 @@ export async function adjustSheetAction(
 
 /** #318 (D692): record a sheet the browser uploaded straight to Blob (≤ 25 MB).
  *  Everything in `input` is untrusted — commitSheetUpload re-checks the path,
- *  the stored size and the bytes, and deletes a refused upload's blob. */
+ *  the stored size and the bytes, and deletes a refused upload's blob.
+ *  #319: answers every sheet the upload became, and what happened to the
+ *  generated plan. */
 export async function commitSheetUploadAction(
   projectId: string,
   input: { blobPath: string; uploadKey: string; name: string; position?: "first"; planUploadId?: string }
-): Promise<{ ok: true; sheetId: string } | { ok: false; error: string }> {
+): Promise<({ ok: true } & SheetsLanded) | { ok: false; error: string }> {
   const user = await requireUser();
   const r = await commitSheetUpload(String(projectId || ""), input, user.name);
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
-  return { ok: true, sheetId: r.sheetId };
+  return { ok: true, ...landed(r.sheetIds, r.baseSheet, r.note) };
 }
 
 /* ------------------------------ routes (D110) ------------------------------ */

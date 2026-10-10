@@ -8,7 +8,7 @@ import { ObjectSymbol } from "@/components/design/object-symbol";
 import { useImagesSettled } from "@/components/design/use-images-settled";
 import { pointInPolygon } from "@/lib/design/grid-geometry";
 import { fitBox, scaleNote } from "@/lib/design/grid-drawing-set";
-import { KEY_MAX_ROWS, placeLabels, planKeyLayout, spaceNameRect, symbolRect, type Pt, type Rect } from "@/lib/design/drawing-labels";
+import { capKeyTag, placeLabels, planKeyLayout, planKeyVisible, spaceNameRect, symbolRect, type Pt, type Rect } from "@/lib/design/drawing-labels";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -22,7 +22,7 @@ export type FigurePlacement = {
   label: string;
   /** Type-mark grouping key (part id, or the curtain's name). */
   key: string;
-  /** Per-sheet type mark printed beside the symbol (L1, A2 …). */
+  /** Printed beside the symbol — the device's designator (#320), or a curtain's type mark. */
   tag: string;
   /** Marker box at the design's symbol size (#300) — curtains included. */
   w: number;
@@ -101,7 +101,8 @@ export default function PlanSheetFigure({
   // never captures a blank page (#209 review I2).
   const drawingsSettled = useImagesSettled(placements.flatMap((pl) => (pl.href ? [pl.href] : [])));
   const ready = (isPdf ? aspect !== null && rendered : aspect !== null) && drawingsSettled;
-  const layout = planKeyLayout({ areaW, areaH, captionH, aspect, rows: keyRows.length, k });
+  const keyVisible = planKeyVisible(keyRows);
+  const layout = planKeyLayout({ areaW, areaH, captionH, aspect, rows: keyRows.length, lines: keyVisible.lines, k });
   const fit = aspect ? fitBox(layout.planW, layout.planH, aspect) : null;
   const H = aspect ? U * aspect : 0;
   // The functional update returns the same value when nothing changed — the
@@ -166,28 +167,28 @@ export default function PlanSheetFigure({
       <h2 className="pk-dw-h">Device key</h2>
       <table className="pk-dw-table">
         <colgroup>
-          <col style={{ width: "20%" }} />
-          <col style={{ width: "16%" }} />
+          <col style={{ width: "38%" }} />
+          <col style={{ width: "12%" }} />
           <col />
         </colgroup>
         <thead>
           <tr>
-            <th>Tag</th>
+            <th>Designators</th>
             <th>Qty</th>
             <th>Description</th>
           </tr>
         </thead>
         <tbody>
-          {keyRows.slice(0, KEY_MAX_ROWS).map((r) => (
-            <tr key={r.tag}>
-              <td className="pk-dw-mono">{r.tag}</td>
+          {keyRows.slice(0, keyVisible.shown).map((r, i) => (
+            <tr key={i}>
+              <td className="pk-dw-mono pk-dw-wrap">{capKeyTag(r.tag)}</td>
               <td>{r.qty}</td>
               <td className="pk-dw-ellip">{r.desc}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {keyRows.length > KEY_MAX_ROWS && <div style={{ marginTop: 4 }}>{`+${keyRows.length - KEY_MAX_ROWS} more — see the equipment schedule`}</div>}
+      {keyRows.length > keyVisible.shown && <div style={{ marginTop: 4 }}>{`+${keyRows.length - keyVisible.shown} more — see the equipment schedule`}</div>}
     </div>
   );
 

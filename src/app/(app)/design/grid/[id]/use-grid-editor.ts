@@ -37,6 +37,7 @@ import { distToPolyline, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import type { GridLaborLine } from "@/lib/design/wire-labor";
 import { uploadGridSheet } from "./sheet-upload";
+import { adjustQueueStep, uploadNote } from "@/lib/design/grid-sheet-split";
 import { allPagesLocked, pageLocks, type SheetAdjust } from "@/lib/design/sheet-adjust";
 import { optionSlice } from "@/lib/design/grid-options";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
@@ -60,7 +61,9 @@ import {
   placeCurtainAction,
   placeDeviceAction,
   removePlacementsAction,
+  renumberDesignatorsAction,
   replacePlacementsPartAction,
+  setDesignatorsAction,
   restoreItemsAction,
   setPlacementsCategoryAction,
   setSymbolDisplayAction,
@@ -72,6 +75,7 @@ import {
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
+import { duplicates, type RenumberTarget } from "@/lib/design/designators";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
@@ -368,8 +372,11 @@ export type GridEditorProps = {
   focusSheetId?: string | null;
   /** #318: file storage is on — sheets upload straight to Blob (≤ 25 MB); off = the 4 MB route. */
   blobUploads?: boolean;
-  /** #318: `?adjust=<sheetId>` — the intake's plan view, opened in Adjust sheet once it is listed. */
-  adjustSheetId?: string | null;
+  /** #318/#319: `?adjust=<id>,<id>,…` — the sheets the intake's plan view became, walked in Adjust sheet once the first is listed. */
+  adjustSheetIds?: string[] | null;
+  /** #319: the raw `?adjust=` string — what adoption keys on. The filtered list above shrinks
+   *  as Done retires sheets (revalidate re-renders the same URL); this does not. */
+  adjustKey?: string | null;
 };
 
 function useGridEditorImpl(props: GridEditorProps) {
@@ -431,6 +438,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   const active = useMemo(() => optionSlice(project, activeOptionId), [project, activeOptionId]);
   const placements = active.placements;
   const routes = active.routes;
+  /** #320: devices whose designator another device of this option also holds — drawn amber. */
+  const designatorDupes = useMemo(() => duplicates(placements), [placements]);
   const optionCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const pl of project.placements) m.set(pl.optionId || project.options[0].id, (m.get(pl.optionId || project.options[0].id) || 0) + 1);
@@ -480,34 +489,50 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
   // #318: Adjust sheet (crop + rotate). Opened from the tab's ⋯ menu, right
   // after an upload (the + tab, the notice banner's re-upload), or by the
-  // intake's swap into the editor through `?adjust=<sheetId>` — adopted during
-  // render once that sheet is in `sheets`, like the focus sheet above.
-  const [adjusting, setAdjusting] = useState<{ sheetId: string; afterUpload: boolean } | null>(null);
-  const requestedAdjust = props.adjustSheetId ?? null;
+  // intake's swap into the editor through `?adjust=<id>,<id>,…` — adopted during
+  // render once the first sheet is in `sheets`, like the focus sheet above.
+  /** #319: `queue` = every sheet one upload made (≥ 2, in order) — Adjust sheet walks them one at a time. */
+  const [adjusting, setAdjusting] = useState<{ sheetId: string; afterUpload: boolean; queue?: string[] } | null>(null);
+  const requestedIds = props.adjustSheetIds?.length ? props.adjustSheetIds : null;
+  /** The request's adoption key: the raw param (stable while Done retires its sheets), never the filtered list. */
+  const requestedAdjust = requestedIds ? (props.adjustKey || requestedIds.join(",")) : null;
   const [adjustApplied, setAdjustApplied] = useState<string | null>(null);
-  if (requestedAdjust && requestedAdjust !== adjustApplied && sheets.some((s) => s.id === requestedAdjust)) {
+  // Adopted once per param, and never while the dialog / a walk is open — a
+  // re-render mid-walk must not re-key the open (or Saving…) dialog.
+  if (requestedIds && requestedAdjust && requestedAdjust !== adjustApplied && !adjusting && sheets.some((s) => s.id === requestedIds[0])) {
     setAdjustApplied(requestedAdjust);
-    setAdjusting({ sheetId: requestedAdjust, afterUpload: true });
+    setAdjusting({ sheetId: requestedIds[0], afterUpload: true, ...(requestedIds.length > 1 ? { queue: requestedIds } : {}) });
     setSelectedIds([]);
-    setActiveSheetId(requestedAdjust);
+    setActiveSheetId(requestedIds[0]);
     setPage(1);
   }
   // The swap has landed (the new sheet is listed — or the old one is gone,
-  // whatever the refresh brought): close the dialog on the new sheet.
+  // whatever the refresh brought): close the dialog on the new sheet — or,
+  // #319, in a multi-sheet upload, open the next one.
   if (adjustSwap && (sheets.some((s) => s.id === adjustSwap.to) || !sheets.some((s) => s.id === adjustSwap.from))) {
     setAdjustSwap(null);
-    setAdjusting(null);
+    const nextId = adjustQueueStep(adjusting?.queue, adjustSwap.from, sheets.map((s) => s.id)).next;
+    if (adjusting?.queue && nextId) {
+      // No resetSheetState() here (not callable during render, and not needed):
+      // finishAdjust already reset the sheet state on Done, and the workspace has
+      // been inert under the Saving… dialog ever since, so nothing new accrued.
+      setAdjusting({ sheetId: nextId, afterUpload: true, queue: adjusting.queue });
+      setActiveSheetId(nextId);
+      setPage(1);
+    } else setAdjusting(null);
   }
-  const openAdjust = useCallback((sheetId: string, afterUpload = false) => {
+  const openAdjust = useCallback((sheetId: string, afterUpload = false, queue?: readonly string[]) => {
     // Defence in depth: nothing stays selected behind the dialog.
     setSelectedIds([]);
-    setAdjusting({ sheetId, afterUpload });
+    setAdjusting({ sheetId, afterUpload, ...(queue && queue.length > 1 ? { queue: [...queue] } : {}) });
   }, []);
   /** The sheet open in Adjust sheet — null until a just-uploaded sheet arrives in `sheets`. */
   const adjustTarget = adjusting ? (sheets.find((s) => s.id === adjusting.sheetId) ?? null) : null;
   /** The dialog is on screen (Saving… included): the editor's key handlers stand down. */
   const adjustOpen = !!adjustTarget;
   const adjustAfterUpload = adjusting?.afterUpload ?? false;
+  /** #319: this sheet's place in a multi-sheet upload's walk ("Sheet 2 of 5"); null = a single sheet. */
+  const adjustQueue = adjusting?.queue ? adjustQueueStep(adjusting.queue, adjusting.sheetId, []).position : null;
   /** Page locks per listed sheet — one scan per project/sheets change, not per tab per render. */
   const locksBySheet = useMemo(() => new Map(sheets.map((s) => [s.id, pageLocks(project, s.id)] as const)), [project, sheets]);
   const adjustLocks = useMemo(() => (adjustTarget ? (locksBySheet.get(adjustTarget.id) ?? {}) : {}), [locksBySheet, adjustTarget]);
@@ -1474,8 +1499,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
     setActiveSheetId(r.sheetId);
     setPage(1);
-    noteAction(`Uploaded ${file.name}`);
-    openAdjust(r.sheetId, true);
+    noteAction(uploadNote(file.name, r));
+    openAdjust(r.sheetId, true, r.sheetIds);
     clearUndo();
     router.refresh();
   }
@@ -1806,10 +1831,10 @@ function useGridEditorImpl(props: GridEditorProps) {
   }
 
   /** Persist a placement's user-defined category (punch #48). "" clears it. */
-  async function saveCategory(placementId: string, label: string) {
+  async function saveCategory(placementId: string, label: string): Promise<boolean> {
     // The batch setter with one item (same category rule as the single one)
     // hands back the previous label, so the edit is one undo step (#299).
-    if (!(await flushNudge())) return;
+    if (!(await flushNudge())) return false;
     setBusy(true);
     const items = [{ id: placementId, category: label }];
     let r: Awaited<ReturnType<typeof setPlacementsCategoryAction>>;
@@ -1818,17 +1843,19 @@ function useGridEditorImpl(props: GridEditorProps) {
     } catch {
       setBusy(false);
       setErr(SAVE_FAILED);
-      return;
+      return false;
     }
     setBusy(false);
     setCategoryDraft(null);
-    if (!r.ok) setErr(r.error);
-    else {
-      noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
-      if (r.previous.some((pv) => pv.category !== label.trim().slice(0, 40)))
-        record({ label: stepLabel("set category", 1), forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
-      router.refresh();
+    if (!r.ok) {
+      setErr(r.error);
+      return false;
     }
+    noteAction(label.trim() ? `Set category ${label.trim()}` : "Cleared a category");
+    if (r.previous.some((pv) => pv.category !== label.trim().slice(0, 40)))
+      record({ label: stepLabel("set category", 1), forward: { kind: "category", items }, inverse: { kind: "category", items: r.previous } });
+    router.refresh();
+    return true;
   }
 
   /** Persist a catalog ENTRY's icon/colour override (#131 → stock symbols).
@@ -2062,12 +2089,25 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (requestedAdjust) router.replace(`${pathname}?option=${encodeURIComponent(activeOptionId)}`, { scroll: false });
   }, [requestedAdjust, router, pathname, activeOptionId]);
 
-  /** #318: Cancel / Skip — the sheet stays as it is. Skip after an upload opens that sheet's plan. */
-  const closeAdjust = useCallback(() => {
-    if (adjusting?.afterUpload && adjusting.sheetId !== sheet?.id && sheets.some((s) => s.id === adjusting.sheetId)) switchSheet(adjusting.sheetId);
-    setAdjusting(null);
-    dropAdjustParam();
-  }, [adjusting, sheet?.id, sheets, switchSheet, dropAdjustParam]);
+  /** #318: Cancel / Skip — the sheet stays as it is. Skip after an upload opens that sheet's plan.
+   *  #319: in a multi-sheet upload, Skip (Escape, or Done with nothing changed) opens the next
+   *  sheet still listed; Skip the rest (`rest`) ends the walk on this one. */
+  const closeAdjustWith = useCallback(
+    (rest: boolean) => {
+      const nextId = rest ? null : adjustQueueStep(adjusting?.queue, adjusting?.sheetId ?? "", sheets.map((s) => s.id)).next;
+      if (adjusting?.queue && nextId) {
+        setAdjusting({ sheetId: nextId, afterUpload: true, queue: adjusting.queue });
+        switchSheet(nextId);
+        return;
+      }
+      if (adjusting?.afterUpload && adjusting.sheetId !== sheet?.id && sheets.some((s) => s.id === adjusting.sheetId)) switchSheet(adjusting.sheetId);
+      setAdjusting(null);
+      dropAdjustParam();
+    },
+    [adjusting, sheet?.id, sheets, switchSheet, dropAdjustParam]
+  );
+  const closeAdjust = useCallback(() => closeAdjustWith(false), [closeAdjustWith]);
+  const skipRestAdjust = useCallback(() => closeAdjustWith(true), [closeAdjustWith]);
 
   /** #318: Done in Adjust sheet — the new sheet took the old one's place; open it.
    *  The active id moves now; the dialog stays up ("Saving…") until the
@@ -2270,6 +2310,89 @@ function useGridEditorImpl(props: GridEditorProps) {
       }
     },
     [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge, record]
+  );
+
+  /* ------------------------- designators (#320) ------------------------- */
+
+  /** Set (or, with "", re-issue) designators — one write, one undo step.
+   *  Resolves true when it saved. */
+  const saveDesignators = useCallback(
+    async (items: { id: string; designator: string }[]): Promise<boolean> => {
+      if (!items.length) return false;
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setDesignatorsAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        const one = items.length === 1 ? items[0].designator.trim() : "";
+        noteAction(items.length > 1 ? `Set ${items.length} designators` : one ? `Designator ${one}` : "Re-issued a designator");
+        record({ label: stepLabel("set designator", items.length), forward: { kind: "designator", items }, inverse: { kind: "designator", items: r.previous } });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, router, noteAction, flushNudge, record]
+  );
+
+  /** Renumber… on the active option: `what` names the target in the status bar. */
+  const renumberDesignators = useCallback(
+    async (target: RenumberTarget, what: string): Promise<boolean> => {
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await renumberDesignatorsAction(project.id, activeOptionId, target);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        if (!r.next.length) {
+          noteAction(`Renumber ${what}: already in order`);
+          return true;
+        }
+        noteAction(`Renumbered ${what} — ${r.next.length} changed`);
+        record({
+          label: stepLabel("renumber", r.next.length),
+          forward: { kind: "designator", items: r.next, keepAuto: true },
+          inverse: { kind: "designator", items: r.previous, keepAuto: true },
+        });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, activeOptionId, router, noteAction, flushNudge, record]
+  );
+
+  /** Select devices from a list (the Devices tab) and show the focused one's
+   *  sheet and page on the plan. */
+  const focusPlacements = useCallback(
+    (ids: string[], focusId?: string) => {
+      const target = placements.find((pl) => pl.id === (focusId ?? ids[0]));
+      if (target && (target.sheetId !== activeSheetId || target.page !== page)) {
+        setActiveSheetId(target.sheetId);
+        setPage(target.page);
+        resetSheetState();
+      }
+      setSelectedIds(ids);
+      setSelectedSpaceId(null);
+      setSelectedRouteId(null);
+      setCategoryDraft(null);
+    },
+    [placements, activeSheetId, page, resetSheetState]
   );
 
   /* ------------------------- clipboard (#299) ------------------------- */
@@ -2518,6 +2641,12 @@ function useGridEditorImpl(props: GridEditorProps) {
           router.refresh();
           return { ok: true };
         }
+        case "designator": {
+          const r = await setDesignatorsAction(project.id, c.items, { keepAuto: c.keepAuto === true });
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
       }
     },
     [placements, project.id, router]
@@ -2617,7 +2746,9 @@ function useGridEditorImpl(props: GridEditorProps) {
         const isUndo = k === "z" && !e.shiftKey;
         const isRedo = (k === "z" && e.shiftKey) || (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey);
         if (isUndo || isRedo) {
-          if (view !== "plan") return;
+          // #320: Undo/Redo work in Spreadsheet view too — the Devices tab is
+          // where designators and categories are edited. (Every step is an
+          // id-keyed server action; none needs the canvas.)
           // A pending (unwritten) nudge is something to undo too.
           if (isUndo ? !undoRef.current.past.length && !pendingNudge.current?.length : !undoRef.current.future.length) return;
           e.preventDefault();
@@ -2896,6 +3027,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     distributeSelected,
     setCategoryForSelected,
     replacePartForSelected,
+    designatorDupes,
+    saveDesignators,
+    renumberDesignators,
+    focusPlacements,
     clipboard,
     copySelected,
     cutSelected,
@@ -2912,9 +3047,11 @@ function useGridEditorImpl(props: GridEditorProps) {
     adjustTarget,
     adjustOpen,
     adjustAfterUpload,
+    adjustQueue,
     adjustLocks,
     openAdjust,
     closeAdjust,
+    skipRestAdjust,
     finishAdjust,
     adjustAvailability,
   };

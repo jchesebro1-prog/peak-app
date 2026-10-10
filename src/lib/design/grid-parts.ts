@@ -103,3 +103,23 @@ export function gridPartsFrom(
   }
   return parts;
 }
+
+/**
+ * #320: the catalog-fallback rows gridPartsFrom(…, { catalogFallback: true })
+ * would add for `ids` that `parts` lacks — the same rows, without walking the
+ * whole catalog. The editor builds its parts without the fallback; numbering
+ * on page load adds these so a pre-library placement (a raw catalog id)
+ * resolves its type code exactly as a store write (designatorContext) does.
+ */
+export function fallbackPartsFor(
+  ids: Iterable<string>,
+  parts: ReadonlyArray<{ id: string }>,
+  catalog: CatalogPart[],
+  categoryMap: CategoryMap,
+  opts: { deviceTypes?: DeviceTypeContext } = {}
+): PartLite[] {
+  const have = new Set(parts.map((p) => p.id));
+  const need = new Set([...ids].filter((id) => id && !have.has(id)));
+  if (!need.size) return [];
+  return gridPartsFrom([], catalog.filter((p) => need.has(p.id)), categoryMap, { catalogFallback: true, deviceTypes: opts.deviceTypes });
+}

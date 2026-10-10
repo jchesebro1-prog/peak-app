@@ -9,6 +9,8 @@ import { spaceOf, type SpaceLite } from "./grid-geometry";
 import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
 import { partModel } from "@/lib/catalog-rename/sku";
+import { designatorList } from "./designators";
+import { wrapLineCount } from "./drawing-labels";
 
 /**
  * The catalog rows a schedule can look up by id: parts placed or routed in the
@@ -29,7 +31,8 @@ export function catalogForSchedule<C extends { id: string }>(
 }
 
 /** `code` overrides the printed Part cell for rows with no SKU (curtains). `model` (#304) is the part's Model # — what a printed schedule shows instead of the part id. */
-export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number };
+/** `designators` (#320): the row's devices' designators (designatorList); absent when none. */
+export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number; designators?: string };
 export type ScheduleSection = { key: string; name: string; rows: ScheduleRow[] };
 export type ScheduleWire = { id: string; partId: string; model?: string; fromName: string; toName: string; lengthFt: number | null; unit: string };
 export type ScheduleData = {
@@ -65,7 +68,7 @@ export function scheduleWiresFromView(view: RiserView): ScheduleWire[] {
  * group: each drop is its own made-to-size drape.
  */
 export function buildSchedule(input: {
-  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number }>;
+  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number; designator?: string }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
   /** #304: the printed Model # per part id; blank/absent = print the part id as before. */
@@ -76,6 +79,7 @@ export function buildSchedule(input: {
   const modelFor = (pid: string) => (modelOf ? modelOf(pid) || undefined : undefined);
   const wires = modelOf ? input.wires.map((w) => { const m = modelFor(w.partId); return m ? { ...w, model: m } : w; }) : input.wires;
   const bySpace = new Map<string | null, ScheduleRow[]>();
+  const held = new Map<ScheduleRow, Array<{ designator?: string; qty?: number }>>();
   for (const pl of input.placements) {
     const home = spaceOf(pl, input.spaces);
     const key = home ? home.id : null;
@@ -84,13 +88,22 @@ export function buildSchedule(input: {
       rows.push({ partId: pl.id, code: "CURTAIN", desc: curtainDesc(pl.curtain, input.descOf(pl.curtain.fabricSku)), qty: 1 });
     } else {
       const row = rows.find((r) => r.partId === pl.partId && !r.code);
-      if (row) row.qty += placementQty(pl);
-      else {
+      if (row) {
+        row.qty += placementQty(pl);
+        held.get(row)!.push(pl);
+      } else {
         const m = modelFor(pl.partId);
-        rows.push({ partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) });
+        const fresh: ScheduleRow = { partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) };
+        rows.push(fresh);
+        held.set(fresh, [pl]);
       }
     }
     bySpace.set(key, rows);
+  }
+  // #320: each part row lists its devices' designators.
+  for (const [row, list] of held) {
+    const d = designatorList(list);
+    if (d) row.designators = d;
   }
   const sections: ScheduleSection[] = [
     ...input.spaces.filter((s) => bySpace.has(s.id)).map((s) => ({ key: s.id, name: s.name, rows: bySpace.get(s.id)! })),
@@ -119,16 +132,16 @@ export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: stri
 }
 
 export type ScheduleHead = { kind: "section"; name: string; cont: boolean } | { kind: "wires"; cont: boolean };
-export type ScheduleItem =
-  | ScheduleHead
-  | { kind: "row"; qty: number; code: string; desc: string }
-  | { kind: "wire"; partId: string; model?: string; run: string; length: string };
+/** A part row. `cont` (#320): a continuation of the row above — further
+ *  designators only (qty 0, no code; prints "<desc> (cont.)"). */
+export type ScheduleRowItem = { kind: "row"; qty: number; code: string; desc: string; designators?: string; cont?: true };
+export type ScheduleItem = ScheduleHead | ScheduleRowItem | { kind: "wire"; partId: string; model?: string; run: string; length: string };
 export type ScheduleGroup = { head: ScheduleHead; rows: ScheduleItem[] };
 
 export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
   const groups: ScheduleGroup[] = d.sections.map((s) => ({
     head: { kind: "section", name: s.name, cont: false },
-    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.model || r.partId, desc: r.desc })),
+    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.model || r.partId, desc: r.desc, ...(r.designators ? { designators: r.designators } : {}) })),
   }));
   if (d.wires.length) {
     groups.push({
@@ -145,10 +158,52 @@ export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
   return groups;
 }
 
+/** #320: characters of the E-60x Designators cell per printed line. The cell
+ *  is 24 % of a schedule column (≈ 6.5 in at 11×17, scaling with the sheet) →
+ *  ≈ 106 pt after padding in 8 pt mono (4.8 pt a character) = 22 on paper;
+ *  18 is the conservative budget. */
+export const SCHEDULE_DESIGNATOR_CHARS_PER_LINE = 18;
+
+/** Printed lines one schedule item takes: a part row's designators cell wraps;
+ *  heads and wire rows are one line. */
+export function scheduleItemLines(it: ScheduleItem): number {
+  return it.kind === "row" && it.designators ? Math.max(1, wrapLineCount(it.designators, SCHEDULE_DESIGNATOR_CHARS_PER_LINE)) : 1;
+}
+
 /**
- * Pages → columns → items. A head never ends a column (it needs at least one
- * row under it), and a group that spills into a new column repeats its head
- * marked `cont`. An empty schedule is still one (empty) sheet.
+ * #320: a part row whose designators need more than `maxLines` printed lines,
+ * as continuation rows that each fit: the first keeps qty/code/desc and the
+ * first chunk; the rest carry only further chunks (`cont`). Chunks split on
+ * ", " token boundaries — every designator lands whole, exactly once, in
+ * order; a single token longer than `maxLines` lines still goes whole. A row
+ * that fits (or has no designators) comes back as is.
+ */
+export function splitScheduleRow(it: ScheduleRowItem, maxLines: number): ScheduleRowItem[] {
+  const max = Math.max(1, Math.floor(maxLines));
+  if (!it.designators || scheduleItemLines(it) <= max) return [it];
+  const chunks: string[] = [];
+  let cur: string[] = [];
+  for (const token of it.designators.split(", ")) {
+    if (cur.length && wrapLineCount([...cur, token].join(", "), SCHEDULE_DESIGNATOR_CHARS_PER_LINE) > max) {
+      chunks.push(cur.join(", "));
+      cur = [];
+    }
+    cur.push(token);
+  }
+  if (cur.length) chunks.push(cur.join(", "));
+  return chunks.map((designators, i) =>
+    i === 0 ? { ...it, designators } : { kind: "row" as const, qty: 0, code: "", desc: it.desc, designators, cont: true as const }
+  );
+}
+
+/**
+ * Pages → columns → items. A column holds `perColumn` lines (a row whose
+ * designators wrap counts each line; every other item is one). A head never
+ * ends a column (it needs at least one row under it), and a group that spills
+ * into a new column repeats its head marked `cont`. A row whose designators
+ * need more lines than a column has under its head is split into
+ * continuation rows (splitScheduleRow) — never truncated, never dropped. An
+ * empty schedule is still one (empty) sheet.
  */
 export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, columns = 2): ScheduleItem[][][] {
   const cap = Math.max(2, Math.floor(perColumn));
@@ -156,23 +211,34 @@ export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, column
   const pages: ScheduleItem[][][] = [];
   let page: ScheduleItem[][] = [];
   let col: ScheduleItem[] = [];
+  let used = 0;
+  let hasRow = false;
   const pushCol = () => {
     page.push(col);
     col = [];
+    used = 0;
+    hasRow = false;
     if (page.length === cols) {
       pages.push(page);
       page = [];
     }
   };
   for (const g of groups) {
-    if (col.length && col.length + 2 > cap) pushCol();
+    const rows = g.rows.flatMap((r): ScheduleItem[] => (r.kind === "row" ? splitScheduleRow(r, cap - 1) : [r]));
+    const first = rows.length ? scheduleItemLines(rows[0]) : 1;
+    if (col.length && used + 1 + first > cap) pushCol();
     col.push(g.head);
-    for (const r of g.rows) {
-      if (col.length >= cap) {
+    used += 1;
+    for (const r of rows) {
+      const n = scheduleItemLines(r);
+      if (hasRow && used + n > cap) {
         pushCol();
         col.push({ ...g.head, cont: true });
+        used = 1;
       }
       col.push(r);
+      used += n;
+      hasRow = true;
     }
   }
   if (col.length) pushCol();

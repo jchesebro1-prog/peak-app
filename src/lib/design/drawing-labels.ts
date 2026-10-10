@@ -252,21 +252,101 @@ export function planKeyLayout(input: {
   captionH: number;
   aspect: number | null;
   rows: number;
+  /** Printed lines the key's rows take (a wrapped designators cell is more
+   *  than one); defaults to `rows`. */
+  lines?: number;
   k: number;
 }): { side: boolean; keyW: number; keyH: number; planW: number; planH: number } {
   const { areaW, areaH, captionH, aspect, rows, k } = input;
+  const lines = Math.max(rows, input.lines ?? rows);
   const gap = 0.2 * k;
   const keyW = rows > 0 ? 2.3 * k : 0;
-  const keyH = rows > 0 ? (Math.min(rows, KEY_MAX_ROWS) + 2.2) * 0.2 * k : 0;
+  const keyH = rows > 0 ? (Math.min(lines, KEY_MAX_ROWS) + 2.2) * 0.2 * k : 0;
   const side = { side: true, keyW, keyH, planW: Math.max(0, areaW - (keyW ? keyW + gap : 0)), planH: areaH - captionH };
-  if (!rows || !(aspect && aspect > 0) || rows > 6) return side;
+  if (!rows || !(aspect && aspect > 0) || rows > 6 || lines > 6) return side;
   const bottom = { side: false, keyW, keyH, planW: areaW, planH: Math.max(0, areaH - captionH - keyH - gap) };
   const fitW = (w: number, h: number) => Math.min(w, h / aspect);
   return fitW(bottom.planW, bottom.planH) > fitW(side.planW, side.planH) ? bottom : side;
 }
 
-/** Device-key rows a plan sheet prints before it says "+N more". */
+/** Device-key lines a plan sheet prints before it says "+N more" (one line
+ *  per row unless a designators cell wraps — #320). */
 export const KEY_MAX_ROWS = 36;
+
+/** #320: characters of the key's Designators cell per printed line. The cell
+ *  is 38 % of a 2.3 in key (≈ 57 pt after padding) in 7.5 pt mono (4.5 pt a
+ *  character) → about 12 on paper; 10 is the conservative budget. */
+export const KEY_DESIGNATOR_CHARS_PER_LINE = 10;
+
+/**
+ * Printed lines a comma list takes in a cell `width` characters wide when it
+ * wraps only after ", " (a token longer than a line breaks anywhere). A greedy
+ * pack that never counts fewer lines than the browser would draw. >= 1.
+ */
+export function wrapLineCount(text: string, width: number): number {
+  const w = Math.max(1, Math.floor(width));
+  if (!text) return 1;
+  const parts = text.split(", ");
+  let lines = 1;
+  let used = 0;
+  parts.forEach((part, i) => {
+    const t = i < parts.length - 1 ? `${part},` : part;
+    const len = t.length;
+    if (used === 0 ? len <= w : used + 1 + len <= w) {
+      used = used === 0 ? len : used + 1 + len;
+      return;
+    }
+    if (used > 0) lines += 1;
+    lines += Math.ceil(len / w) - 1;
+    used = ((len - 1) % w) + 1;
+  });
+  return lines;
+}
+
+/** #320: the most designator lines one device-key row prints. The key is an
+ *  index — the E-60x schedule is the record — so a longer list is cut. */
+export const KEY_ROW_MAX_LINES = 4;
+/** What a cut key row ends with. */
+export const KEY_CUT_SUFFIX = "… see schedule";
+
+/**
+ * A device-key row's designators as printed: as is when they fit
+ * KEY_ROW_MAX_LINES; else the most leading ", "-separated designators that
+ * fit with KEY_CUT_SUFFIX after them (at least the first, whole). Never cuts
+ * inside a designator: a lone over-long one is left whole (designators cap at
+ * 24 characters, so that is at most 3 lines).
+ */
+export function capKeyTag(tag: string): string {
+  const fits = (t: string) => wrapLineCount(t, KEY_DESIGNATOR_CHARS_PER_LINE) <= KEY_ROW_MAX_LINES;
+  if (fits(tag)) return tag;
+  const tokens = tag.split(", ");
+  if (tokens.length === 1) return tag;
+  const cut = (k: number) => `${tokens.slice(0, k).join(", ")} ${KEY_CUT_SUFFIX}`;
+  let keep = 1;
+  while (keep + 1 < tokens.length && fits(cut(keep + 1))) keep += 1;
+  return cut(keep);
+}
+
+/** Lines one device-key row prints (its designators cell wraps; capped —
+ *  capKeyTag). */
+export function keyRowLines(tag: string): number {
+  return wrapLineCount(capKeyTag(tag), KEY_DESIGNATOR_CHARS_PER_LINE);
+}
+
+/** How many key rows fit the line budget, and the lines they take. Order is
+ *  kept (no skipping); the first row always shows, even if taller than the
+ *  budget. One-line rows: min(rows, KEY_MAX_ROWS), exactly as before. */
+export function planKeyVisible(rows: ReadonlyArray<{ tag: string }>): { shown: number; lines: number } {
+  let lines = 0;
+  let shown = 0;
+  for (const r of rows) {
+    const n = keyRowLines(r.tag);
+    if (shown > 0 && lines + n > KEY_MAX_ROWS) break;
+    lines += n;
+    shown += 1;
+  }
+  return { shown, lines };
+}
 
 /** Raster zoom for a PDF plan sheet (#209 I6): about `dpi` across the width
  *  the page will print at inside a `boxW` × `boxH` inch box, capped at

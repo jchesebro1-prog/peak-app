@@ -27,6 +27,7 @@ import DocumentsClient from "./documents-client";
 import DavinciPrefillButton from "./davinci-prefill-button";
 import ThumbnailButton from "./thumbnail-button";
 import CatalogImagesButton from "./catalog-images-button";
+import SquarePhotosButton from "./square-photos-button";
 import DrivePhotosPanel from "./drive-photos-panel";
 
 export const metadata = { title: "Datasheets — Quartzite-6" };
@@ -119,6 +120,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           {can("manage_users", user.roles) && <DavinciPrefillButton />}
           {can("manage_users", user.roles) && <ThumbnailButton />}
           {can("manage_users", user.roles) && <CatalogImagesButton />}
+          {can("manage_users", user.roles) && <SquarePhotosButton />}
           <Link href="/catalog/documents/photos" className="pk-btn-outline" style={{ textDecoration: "none" }}>Photo sheet</Link>
           <Link href="/catalog/rack-data" className="pk-btn-outline" style={{ textDecoration: "none" }}>Rack data sheet</Link>
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { blobEnabled } from "@/lib/blob";
 import { can } from "@/lib/team";
-import { getProject, listSheets } from "@/lib/stores/grid-projects";
+import { ensureDesignators, getProject, listSheets } from "@/lib/stores/grid-projects";
 import { defaultOptionId, estimateLinkOf, resolveOptionId } from "@/lib/design/grid-options";
 import { coverFromVenue } from "@/lib/design/grid-intake";
 import { loadEstimateTray } from "@/lib/design/estimate-tray-server";
@@ -29,7 +29,7 @@ import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { isFabricRow } from "@/lib/design/grid-curtains";
 import { symbolContext } from "@/lib/design/grid-icons";
-import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { fallbackPartsFor, gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
 import { compute, tierDefsDefault } from "@/app/(app)/design/quick/engine";
@@ -53,6 +53,7 @@ import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 import { cleanSymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { isBaseSheet } from "@/lib/design/sheet-adjust";
+import { parseAdjustParam } from "@/lib/design/grid-sheet-split";
 import { symbolUrlsFor } from "@/lib/design/object-symbols-server";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
@@ -233,6 +234,16 @@ export default async function GridEditorPage({
     console.error("[grid] object symbol lookup failed:", e);
     return {};
   });
+  // #320: number every device that has no designator yet (a design drawn
+  // before #320) — one write, none at all when nothing is missing (in memory
+  // only on a preview), codes from the parts this request already built plus
+  // the catalog-fallback rows of any pre-library placement, so a code here is
+  // the code a store write resolves (designatorContext). Never fatal.
+  const designatorParts = [...parts, ...fallbackPartsFor((project.placements || []).map((pl) => pl.partId), parts, catalog, categoryMap, { deviceTypes })];
+  const designed = await ensureDesignators(project, { parts: designatorParts, deviceTypes }).catch((e: unknown) => {
+    console.error("[grid] designators failed:", e);
+    return project;
+  });
 
 
   /**
@@ -289,7 +300,7 @@ export default async function GridEditorPage({
   // (catalog fallback + virtual parts + riser view), so the two never differ.
   // A schedule fault must not take the editor down with it either — the view
   // says it couldn't be built and points at the printable page's own error.
-  const schedule = await scheduleForOption(project, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded }).catch(
+  const schedule = await scheduleForOption(designed, activeOptionId, { catalog, gridSymbols, settings, deviceTypes, equip: equipLoaded }).catch(
     (e: unknown) => {
       console.error("[grid] schedule build failed:", e);
       return null;
@@ -333,7 +344,7 @@ export default async function GridEditorPage({
         quoteId: project.quoteId,
         options: project.options || [],
         scopeInputs: project.scopeInputs || null,
-        placements: project.placements || [],
+        placements: designed.placements || [],
         calibrations: project.calibrations || [],
         spaces: project.spaces || [],
         routes: project.routes || [],
@@ -377,7 +388,9 @@ export default async function GridEditorPage({
       intakeNotices={cleanIntakeNotices(project.intake?.notices)}
       focusSheetId={project.intake?.planSheetId && (project.sheetIds || []).includes(project.intake.planSheetId) ? project.intake.planSheetId : null}
       blobUploads={blobEnabled()}
-      adjustSheetId={requestedAdjust && (project.sheetIds || []).includes(requestedAdjust) ? requestedAdjust : null}
+      adjustSheetIds={parseAdjustParam(requestedAdjust, project.sheetIds || [])}
+      // #319: the RAW ?adjust= is the adoption key — the list above shrinks as Done retires sheets.
+      adjustKey={typeof requestedAdjust === "string" && requestedAdjust ? requestedAdjust : null}
     />
     </CanMapProvider>
   );

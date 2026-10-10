@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GridPlacement, GridRoute } from "@/lib/stores/grid-projects";
 import { browserTree, nodeForPlacement, type TreeNode } from "@/lib/design/grid-browser-tree";
 import { toggleId } from "@/lib/design/grid-selection";
+import { placementQty } from "@/lib/design/grid-bom";
+import { formatDesignator } from "@/lib/design/designators";
 import type { GridEditor } from "../use-grid-editor";
 
 /**
@@ -69,6 +71,14 @@ export default function BrowserTree({ ed }: { ed: GridEditor }) {
           });
         },
         wireName: (r: GridRoute) => partById.get(r.partId)?.desc || r.partId,
+        // #320: leaves read "MIC-1 · SM57" (a lot by its range).
+        leafLabel: (pl: GridPlacement) => {
+          if (pl.curtain) return null;
+          const d = formatDesignator(pl.designator, placementQty(pl));
+          if (!d) return null;
+          const part = partById.get(pl.partId);
+          return `${d} · ${part?.virtual ? part.desc : part?.modelNumber || part?.sku || pl.partId}`;
+        },
       }),
     [project.name, project.spaces, sheets, placements, routes, partById]
   );

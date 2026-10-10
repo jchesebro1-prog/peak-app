@@ -103,6 +103,8 @@ export type PartDocument = {
    *  SVG only) — e.g. "script elements", "event handlers" — so an admin can
    *  see what a drawing lost on the way in. Absent = nothing stripped. */
   svgRemoved?: string[];
+  /** The current file was made a 1600×1600 padded square (#322). Absent = not squared (older photos, manufacturer images, drawings). */
+  squared?: true;
 };
 
 export type PartDocumentLink = {
