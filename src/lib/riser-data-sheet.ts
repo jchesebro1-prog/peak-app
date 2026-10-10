@@ -133,10 +133,48 @@ export type ParsedRow = {
   code?: string | null;
   tag: Partial<Record<TagKey, string | null>>;
 };
-export type ParseResult = { rows: ParsedRow[]; errors: { row: number; message: string }[] };
+export type ParseResult = {
+  rows: ParsedRow[];
+  errors: { row: number; message: string }[];
+  /** Non-fatal: e.g. a column header that looks like a misspelled editable column (it was ignored). */
+  notes: string[];
+};
 
 const headerKey = (h: unknown) => String(h ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 const cellText = (v: unknown) => (v === undefined || v === null ? "" : String(v).trim());
+/** An editable cell: a literal em dash (the export's "nothing here" mark) reads as blank. */
+const editText = (v: unknown) => {
+  const t = cellText(v);
+  return t === "—" ? "" : t;
+};
+
+const normHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function levenshtein(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+/** Unrecognized headers that look like a misspelled editable column — "Hieght", "Designator", "PD". */
+function misspelledHeaderNotes(header: readonly unknown[]): string[] {
+  const known = new Set(RISER_DEVICE_HEADERS.map(headerKey));
+  const notes: string[] = [];
+  for (const raw of header) {
+    const shown = String(raw ?? "").trim();
+    if (!shown || known.has(headerKey(shown))) continue;
+    const n = normHeader(shown);
+    if (!n) continue;
+    const hit = EDIT_COLUMNS.find((e) => {
+      const c = normHeader(e.header);
+      return levenshtein(n, c) <= Math.max(1, Math.ceil(c.length / 4)) || (n.length >= 4 && c.includes(n));
+    });
+    if (hit) notes.push(`Column "${shown}" isn't recognized — did you mean "${hit.header}"? It was ignored.`);
+  }
+  return notes;
+}
 
 export const RISER_SHEET_NO_SKU = "The sheet needs a SKU column.";
 export const RISER_SHEET_NO_COLUMNS = "The sheet needs at least one of: Designator code, Box, Face, Mount, Height, P/D.";
@@ -145,22 +183,23 @@ export function parseRiserDataSheet(grid: readonly (readonly unknown[])[]): Pars
   const rows: ParsedRow[] = [];
   const errors: { row: number; message: string }[] = [];
   const header = grid[0] ?? [];
+  const notes = misspelledHeaderNotes(header);
   const col = new Map<string, number>();
   header.forEach((h, i) => {
     const k = headerKey(h);
     if (k && !col.has(k)) col.set(k, i);
   });
   const skuCol = col.get(headerKey("SKU"));
-  if (skuCol === undefined) return { rows, errors: [{ row: 1, message: RISER_SHEET_NO_SKU }] };
+  if (skuCol === undefined) return { rows, errors: [{ row: 1, message: RISER_SHEET_NO_SKU }], notes };
   const edits = EDIT_COLUMNS.filter((e) => col.has(headerKey(e.header)));
-  if (!edits.length) return { rows, errors: [{ row: 1, message: RISER_SHEET_NO_COLUMNS }] };
+  if (!edits.length) return { rows, errors: [{ row: 1, message: RISER_SHEET_NO_COLUMNS }], notes };
 
   const seen = new Set<string>();
   for (let r = 1; r < grid.length; r++) {
     const raw = grid[r] ?? [];
     const rowNo = r + 1;
     const sku = cellText(raw[skuCol]);
-    const values = edits.map((e) => ({ e, v: cellText(raw[col.get(headerKey(e.header))!]) }));
+    const values = edits.map((e) => ({ e, v: editText(raw[col.get(headerKey(e.header))!]) }));
     if (!sku && values.every((x) => !x.v)) continue;
     if (!sku) {
       errors.push({ row: rowNo, message: "Missing SKU." });
@@ -193,15 +232,17 @@ export function parseRiserDataSheet(grid: readonly (readonly unknown[])[]): Pars
         continue;
       }
       const max = TAG_LIMITS[e.key];
-      const clean = cleanTagFields({ [e.key]: v })?.[e.key];
+      // A bare number in Height (a spreadsheet turns 18" into 18) is inches: store it as 18".
+      const cell = e.key === "height" && /^\d+(\.\d+)?$/.test(v) ? `${v}"` : v;
+      const clean = cleanTagFields({ [e.key]: cell })?.[e.key];
       if (!clean) bad.push(`${e.header} "${v}" is not valid`);
-      else if (v.replace(/\s+/g, " ").length > max) bad.push(`${e.header} "${v}" is longer than ${max} characters`);
+      else if (cell.replace(/\s+/g, " ").length > max) bad.push(`${e.header} "${v}" is longer than ${max} characters`);
       else parsed.tag[e.key] = clean;
     }
     if (bad.length) errors.push({ row: rowNo, message: bad.join("; ") + "." });
     else rows.push(parsed);
   }
-  return { rows, errors };
+  return { rows, errors, notes };
 }
 
 // ---- apply plan ----

@@ -19,8 +19,21 @@ const all = (...tests: Array<(h: string) => boolean>) => (h: string) => tests.ev
 const DMX = has(/\bdmx\b/);
 const OUTLET_OR_PORT = has(/\b(outlets?|ports?|receptacles?)\b/);
 const NETWORK = has(/\b(network|ethernet|rj-?45)\b/);
-/** "network outlet", "RJ45 2-port", "data jack" — the qualifier sits within two words of the outlet. */
-const NETWORK_OUTLET = has(/\b(network|ethernet|rj-?45|data)\b(\s+\S+){0,2}?\s+(outlets?|ports?|jacks?|receptacles?)\b/);
+/** "network outlet", "RJ45 data outlet", "ethernet wall plate" — the qualifier sits within two words of the outlet.
+ *  Ports and jacks do not count: a "network switch, 24 ports" is not a wall outlet. */
+const NETWORK_OUTLET = has(/\b(network|ethernet|rj-?45|data)\b(\s+\S+){0,2}?\s+(outlets?|receptacles?|wall plates?)\b/);
+
+/** A dimmer / relay / sensor rack or panel. Adjacent words only ("dimmer touch panel" is a touch panel);
+ *  "touch panel" never counts as the panel noun. A brand token (Unison, DRd, ERn, Sensor3, Sensor+) counts only
+ *  together with a rack / panel / dimmer / relay noun in the same field, so "Unison Echo Button Station" and
+ *  "Sensor+ touchscreen controller" stay out. */
+const DIMMER_RACK = (h: string) => {
+  const t = h.replace(/touch\s?panels?/g, " ");
+  return (
+    /\b(dimmer|relay|dimming)s?(\s*[/&]\s*(dimmer|relay)s?)?\s+(racks?|panels?)\b|\bsensor\s+(racks?|panels?)\b/.test(t) ||
+    (/\b(unison|drd\d*|ern\d*|sensor3|sensor\+)(?=\W|$)/.test(t) && /\b(racks?|panels?|dimmers?|relays?)\b/.test(t))
+  );
+};
 
 /** The table, most-specific device kind first (a DMX emergency bypass controller with ports is a DEBC,
  *  not an outlet). The outlets come last, CRON (DMX + network) before CRO and CRN. */
@@ -29,7 +42,7 @@ export const SUGGEST_RULES: readonly SuggestRule[] = [
   { id: "DEBC", test: has(/emergency bypass controller|dmx emergency bypass/), values: { code: "DEBC", mount: "SM" } },
   {
     id: "DR",
-    test: has(/\b(dimmer|relay|sensor3?\+?)s?\b(\s+\S+){0,2}?\s+(racks?|panels?)\b|\b(unison|drd|ern)\b|\bsensor3\b|\bsensor\+/),
+    test: DIMMER_RACK,
     values: { code: "DR", mount: "SM" },
   },
   { id: "ER", test: has(/equipment rack|\benclosures?\b/), values: { code: "ER", mount: "FM" } },
@@ -42,10 +55,11 @@ export const SUGGEST_RULES: readonly SuggestRule[] = [
   { id: "CRN", test: NETWORK_OUTLET, values: { code: "CRN", face: "NET", mount: "SM", height: '18"', pd: "P/D" } },
 ];
 
-/** The first matching rule's values (a fresh object), or {} when none match. */
+/** The first matching rule's values (a fresh object), or {} when none match. Each field (model, description,
+ *  category) is matched on its own — a rule never reads across a field boundary. */
 export function suggestTagDefaults(part: SuggestInput): SuggestedTagDefaults {
-  const h = [part.model, part.desc, part.category].filter(Boolean).join(" | ").toLowerCase();
-  if (!h) return {};
-  for (const r of SUGGEST_RULES) if (r.test(h)) return { ...r.values };
+  const fields = [part.model, part.desc, part.category].map((f) => (f || "").toLowerCase()).filter(Boolean);
+  if (!fields.length) return {};
+  for (const r of SUGGEST_RULES) if (fields.some((f) => r.test(f))) return { ...r.values };
   return {};
 }

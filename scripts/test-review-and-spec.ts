@@ -64427,7 +64427,7 @@ async function riserPhase2A1Checks(): Promise<void> {
     ["emergency bypass detection", sug("ELTS emergency bypass detection kit"), J({ code: "EBDK", mount: "SM" })],
     ["emergency bypass controller", sug("DMX emergency bypass controller"), J({ code: "DEBC", mount: "SM" })],
     ["dimmer rack", sug("ETC Sensor3 dimmer rack, 48 ch"), J({ code: "DR", mount: "SM" })],
-    ["Unison panel by model", sug("Control panel", "Unison ERn"), J({ code: "DR", mount: "SM" })],
+    ["Unison DRd dimmer rack by model", sug("Control cabinet", "Unison DRd6 dimmer rack"), J({ code: "DR", mount: "SM" })],
     ["relay panel by category", sug("24 circuit", "", "Relay Panels"), J({ code: "DR", mount: "SM" })],
     ["equipment rack", sug("42RU equipment rack"), J({ code: "ER", mount: "FM" })],
     ["enclosure", sug("Wall-mount enclosure"), J({ code: "ER", mount: "FM" })],
@@ -64439,6 +64439,21 @@ async function riserPhase2A1Checks(): Promise<void> {
     ["TS beats ethernet", sug("ETC Paradigm touchscreen with ethernet"), J({ code: "TS", mount: "FM", height: '48"' })],
     ["DMX/network outlet box stays CRON", sug("DMX/network outlet box"), J({ code: "CRON", face: "O/N", mount: "SM", height: '18"', pd: "P/D" })],
     ["ethernet switch", sug("ethernet switch"), J({})],
+    ["Unison Echo Button Station is EP", sug("Unison Echo Button Station"), J({ code: "EP", mount: "FM", height: '48"' })],
+    ["Unison Paradigm touchscreen is TS", sug("Unison Paradigm touchscreen"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["Sensor+ touchscreen controller is TS", sug("Sensor+ touchscreen controller"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["brand token alone is not DR", sug("Control cabinet", "Unison ERn"), J({})],
+    ["Unison touch panel is TS", sug("Unison touch panel"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["Sensor3 dimmer rack", sug("Sensor3 dimmer rack, 48 ch"), J({ code: "DR", mount: "SM" })],
+    ["sensor rack", sug("ETC sensor rack"), J({ code: "DR", mount: "SM" })],
+    ["occupancy sensor never crosses into category", sug("Ceiling Occupancy Sensor", "", "Control Panels"), J({ code: "OCC", mount: "CS" })],
+    ["occupancy sensor power pack, panel mount", sug("Occupancy sensor power pack, panel mount"), J({ code: "OCC", mount: "CS" })],
+    ["Dimmer touch panel is TS", sug("Dimmer touch panel"), J({ code: "TS", mount: "FM", height: '48"' })],
+    ["Ethernet switch, 8 port PoE", sug("Ethernet switch, 8 port PoE"), J({})],
+    ["Network switch 24 ports", sug("Network switch 24 ports"), J({})],
+    ["ethernet jack is not an outlet", sug("Ethernet jack"), J({})],
+    ["ethernet wall plate", sug("Ethernet wall plate"), J({ code: "CRN", face: "NET", mount: "SM", height: '18"', pd: "P/D" })],
+    ["a field boundary is never crossed", sug("DMX splitter", "Data", "Outlet Strips"), J({})],
   ];
   for (const [name, got, want] of cases) ok(J(got) === want, `#328 A1 rules: ${name} -> ${want}`);
   ok(sug("DMX outlet plate with ethernet port").code === "CRON", "#328 A1 rules: CRON beats CRO and CRN");
@@ -64494,7 +64509,7 @@ async function riserPhase2A1Checks(): Promise<void> {
     row({ SKU: "G", Mount: "sm", Source: "ignored" }),
   ]);
   const a = pr.rows.find((r) => r.sku === "A")!;
-  ok(a.row === 2 && a.code === "CRO" && a.tag.box === "B2" && a.tag.face === "DMXO" && a.tag.height === "18" && a.tag.pd === "P/D" && a.tag.mount === undefined, "#328 A1 parse: cells are cleaned, blank leaves the field undefined");
+  ok(a.row === 2 && a.code === "CRO" && a.tag.box === "B2" && a.tag.face === "DMXO" && a.tag.height === '18"' && a.tag.pd === "P/D" && a.tag.mount === undefined, "#328 A1 parse: cells are cleaned, blank leaves the field undefined");
   const b = pr.rows.find((r) => r.sku === "B")!;
   ok(b.code === null && b.tag.box === null && b.tag.pd === null && b.tag.face === undefined, "#328 A1 parse: '-' clears (null)");
   ok(pr.rows.find((r) => r.sku === "C") !== undefined, "#328 A1 parse: an all-blank-editable row is kept (the plan drops it as a no-op)");
@@ -64509,9 +64524,21 @@ async function riserPhase2A1Checks(): Promise<void> {
   const multi = R.parseRiserDataSheet([H, row({ SKU: "M", "Designator code": "bad!", "P/D": "Q" })]);
   ok(multi.errors.length === 1 && multi.errors[0].message.includes("P/D") && multi.errors[0].message.includes("Designator code") && multi.rows.length === 0, "#328 A1 parse: every bad cell in a row is reported");
 
+  // ---- 3b. em dash, Height numerals, misspelled-column notes
+  const dash = R.parseRiserDataSheet([H, row({ SKU: "Z", Box: "—", Mount: " — ", "Designator code": "—", Height: "6", Face: "—" })]);
+  const z = dash.rows[0];
+  ok(dash.errors.length === 0 && z.code === undefined && z.tag.box === undefined && z.tag.mount === undefined && z.tag.face === undefined, "#328 A1 parse: a literal em dash in an editable cell is blank (leave), not an error");
+  ok(z.tag.height === '6"' && R.parseRiserDataSheet([H, row({ SKU: "Y", Height: 18.5 })]).rows[0].tag.height === '18.5"', "#328 A1 parse: a bare numeric Height gets the inch mark");
+  ok(R.parseRiserDataSheet([H, row({ SKU: "Y", Height: '18"' })]).rows[0].tag.height === '18"' && R.parseRiserDataSheet([H, row({ SKU: "Y", Height: "6 ft" })]).rows[0].tag.height === "6 ft", "#328 A1 parse: a Height with text is stored as typed");
+  ok(R.parseRiserDataSheet([H, row({ SKU: "Y", Height: 12345678 })]).errors.length === 1, "#328 A1 parse: a numeric Height that no longer fits after the inch mark is an error");
+  const typo = R.parseRiserDataSheet([["SKU", "Hieght", "Designator", "PD", "Box", "Notes", "Source"], ["a", "6", "x", "P", "B1", "n", "—"]]);
+  ok(typo.notes.length === 3 && /Hieght.*Height/.test(typo.notes[0]) && /Designator.*Designator code/.test(typo.notes[1]) && /"PD".*P\/D/.test(typo.notes[2]) && typo.rows.length === 1 && typo.errors.length === 0 && typo.rows[0].tag.height === undefined,
+    "#328 A1 parse: misspelled editable headers are non-fatal notes (Notes and Source are not flagged), the column is ignored");
+  ok(pr.notes.length === 0 && R.parseRiserDataSheet([["SKU", "Boxx"], ["a", "b"]]).errors.length === 1 && R.parseRiserDataSheet([["SKU", "Boxx"], ["a", "b"]]).notes.length === 1, "#328 A1 parse: a clean header has no notes; notes ride on the fatal no-editable-column result too");
+
   // ---- 4. plan
   const map = new Map<string, P>([
-    ["A", mk("ETC:A", "x", "LC", { designatorCode: "CRO", tagDefaults: { box: "B2", face: "DMXO", height: "18", pd: "P/D" } })],
+    ["A", mk("ETC:A", "x", "LC", { designatorCode: "CRO", tagDefaults: { box: "B2", face: "DMXO", height: '18"', pd: "P/D" } })],
     ["B", mk("ETC:B", "x", "LC", { designatorCode: "DR", tagDefaults: { box: "B1", pd: "P" } })],
     ["C", mk("ETC:C", "x", "LC", { designatorCode: "DR" })],
     ["G", mk("ETC:G", "x", "LC")],
@@ -64535,7 +64562,7 @@ async function riserPhase2A1Checks(): Promise<void> {
   ok(cn && J(cn.patch) === J({ tagDefaults: { face: "NET" } }) && !("designatorCode" in cn.patch), "#328 A1 plan: a renamed SKU lands on the resolved part, only changed pieces in the patch");
   ok(J(plan.unknown) === J(["NOPE"]) && plan.changes.length === 3, "#328 A1 plan: an unknown SKU is listed, not changed");
   const keep = R.planRiserDataApply(R.parseRiserDataSheet([H, row({ SKU: "A", Box: "B7" })]).rows, map);
-  ok(J(keep.changes[0].after.tagDefaults) === J({ box: "B7", face: "DMXO", height: "18", pd: "P/D" }) && keep.changes[0].after.designatorCode === "CRO", "#328 A1 plan: untouched cells carry over");
+  ok(J(keep.changes[0].after.tagDefaults) === J({ box: "B7", face: "DMXO", height: '18"', pd: "P/D" }) && keep.changes[0].after.designatorCode === "CRO", "#328 A1 plan: untouched cells carry over");
 
   // ---- 5. purity
   const fs = await import("node:fs");
