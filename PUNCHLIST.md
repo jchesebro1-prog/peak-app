@@ -11667,9 +11667,15 @@ linked to the plan's devices, with wire (and sometimes conduit) priced as an opt
   network outlets, button stations, dimmers, racks).
 - Add **Levels** and each space's level on a real job; check E-502 against Bray's.
 - Open a downloaded **DXF** in AutoCAD / Vectorworks (verified only with ezdxf's auditor, 0 errors).
-- Decide whether **24×36 should scale the riser up** (today it draws at true size in the top-left of the sheet).
-- Confirm the **phone view** should be fully read-only (today the Tag panel still edits on a phone).
-- Later: AV/video conduit risers on the same engine; computed conduit fill (size is typed today).
+- ~~Decide whether **24×36 should scale the riser up**~~ — decided and done (Jeff, 2026-10-10): it fits the page, capped
+  at 1.5×; page size stays a manual per-design choice (D806).
+- ~~Confirm the **phone view** should be fully read-only~~ — decided and done (Jeff, 2026-10-10): the whole riser page is
+  view-only on a phone (D807).
+- Polish shipped 2026-10-10 (D806–D811, commits 6a66741f..58aef63e): fit the page, read-only phone, keyboard access,
+  busy states, undo kept across the editor's own writes, estimate-owned price flags refused server-side, strict Box
+  types save, per-foot conduit search, quote labels reuse loaded parts, restore drops dangling sheet levels.
+- Next: #328 — riser data sheet, computed conduit fill, A/V conduit riser (spec
+  docs/superpowers/specs/2026-10-10-riser-phase2-design.md).
 
 ## 326. Site-visit scheduling — attendees, invites, conflicts, nearby days — DONE 2026-10-10 (D775–D783)
 

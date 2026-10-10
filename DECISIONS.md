@@ -10934,3 +10934,58 @@ finished-size item still shows At risk when it is overdue (its due date is uncha
 chunk a day when time is left. Pinned by the `auto-cal nobody-done (overloaded)` check: 25 overdue tasks, each already
 pinned for its whole size, and a High task due tomorrow added on day 5 is planned that day at the owner's 7 am view
 (8:00–9:00), not At risk.
+
+## D806. The riser fits the page: grows on 24×36, shrinks on 11×17, capped at 1.5× (#321 polish, 2026-10-10)
+
+Jeff, 2026-10-10: the riser should use the sheet it is printed on. `composeSheets` still packs details at scale <= 1
+(a detail too big for a page alone shrinks, so 11×17 behaves as before), then grows each page's packed group by one
+factor, `max(1, min(MAX_SHEET_SCALE, room / usedWidth, area height / usedHeight))`, `MAX_SHEET_SCALE = 1.5`. The room is
+the width beside the first page's table column, else the whole drawing area. Positions, gaps and shelves scale
+together, so details on one page keep their relative layout; tables and notes stay 1:1 and are untouched. The PDF
+sheet and the DXF share the pages helper, so both change. Page size remains a manual per-design choice (internal
+11×17, external 24×36) — nothing picks it automatically.
+
+## D807. The riser page is fully read-only on a phone (#321 polish, 2026-10-10)
+
+Jeff, 2026-10-10: on a phone (the same `(max-width: 640px)` query that already disables dragging) the riser is for
+looking, not editing. Hidden: the Connect / + Stub / Select tools, Reset layout, Undo / Redo, the New stub and Connect
+panels, and Accept all / Accept / Dismiss on suggestions. Every editing panel (tag, run, stub, level line, detail,
+levels, power types, always-show, defaults, notes) has a read-only twin that shows values as text with no inputs or
+buttons beyond the card's close. The tool is forced back to Select so a narrowed window cannot stay in Connect. Kept:
+viewing, zoom, Re-layout (a refresh, no write), detail tabs, the option picker, Download DXF, Show on plan and warnings.
+
+## D808. Estimate-owned options refuse price flags on the server (#321 polish, 2026-10-10)
+
+On an `estimateOwned` option the estimate owns parts and prices (D685), so the riser's wire and conduit pricing flags
+must not change. They were only hidden in the UI; `patchConduitRiserAction` now strips `priceWire` / `priceConduit`
+from `updateRun` and `setDefaults` ops (pure `estimateOwnedOp` in `model.ts`) and writes nothing when no other field
+is left. The project is read only for an op that actually carries one of those flags, and `requireUser()` stays first.
+
+## D809. Box types save strictly, with per-row errors (#321 polish, 2026-10-10)
+
+Like conduit sizes (D770), the Box types card now refuses a bad list instead of quietly repairing it:
+`validateBoxTypeRows` reports `{row, field, message}` for a blank, invalid or repeated code, a blank or over-long
+description, a non-string code, or more than 40 rows (fully blank rows are skipped); `saveRiserBoxTypes` writes
+nothing on any error and the card marks the cells named. `sanitizeBoxTypes` stays the read path, so a blob that
+predates the rule still loads. `cleanWireTypes` likewise reads symbol and signal only when they are strings.
+
+## D810. Riser editor polish: keyboard, busy, undo kept across its own writes, prompt fixes (#321 polish, 2026-10-10)
+
+- Level, run, tag and stub hit targets are keyboard-reachable (`tabIndex`, `role="button"`, `aria-label`,
+  `aria-pressed`, Enter/Space, a `:focus-visible` outline); Escape clears the selection and a half-picked Connect end,
+  except from inside a form field. Labels and keys are pure helpers in `conduit-riser/editor-rules.ts`.
+- One `run()` helper owns busy / error / notice / refresh, so Reset layout, Remove run/stub, Delete detail, note delete,
+  Connect and Accept all hold `busy`.
+- Layout undo can no longer resurrect an older layout: the stack carries the project's `updatedAt`, and the editor keeps
+  it across its own writes only when the store reports `landed: { before, after }` matching that version (patch,
+  accept, dismiss, tag, tag-field and levels saves); a write by another tab or a plan edit empties it.
+- The detail panel's scope radios share one `name` per detail. The plan prompt hides only for its own ticket, so a
+  late Add success cannot swallow a newer wire's prompt, and a failed Add shows in the status-bar error.
+
+## D811. Data hygiene: per-foot search before the cap, quote labels reuse loaded parts, restore drops dangling levels (#321 polish, 2026-10-10)
+
+The conduit-part search filters per-foot parts before scoring, the cap and the total, so a size's picker is no longer
+crowded out by other parts. Grid quotes label run ends with the editor's designators computed in memory from the rows
+already loaded (`fillDesignatorsInMemory`, `labelPartsFrom`, `GridQuoteInputs.labelCtx`, loaded once and shared), not
+by re-reading parts per quote. `restoreRevision` drops `sheetLevels` entries that name a level absent from the
+restored levels, so a restore never leaves a dangling sheet level.
