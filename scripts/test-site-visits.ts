@@ -7,7 +7,8 @@
 import { readFileSync } from "node:fs";
 import type { AddressState, LatLng } from "@/lib/address-verify/types";
 import { isVisitIcsCopy, stopsForDay, visitPeople } from "@/lib/drive-plan/stops";
-import { buildIcs } from "@/lib/ics";
+import { buildRaw } from "@/lib/gmail/mime";
+import { buildIcs, icsMimeType } from "@/lib/ics";
 import { createVisit, getVisit, scheduleVisit, setVisitInvites, updateVisitBooking, type SiteVisit } from "@/lib/stores/site-visits";
 import { cancelVisitInvites, dispatchVisitInvite, type InviteDeps } from "@/lib/visit-invite";
 import { inviteSummary, normalizeInvites, planInviteChanges, visitEventIds, visitUid, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
@@ -116,7 +117,7 @@ function inviteHarness(over: Partial<InviteDeps> = {}) {
     // Google answers an update with the event; "confirmed" = the copy is live (main's writeVisitCalendarEvent rule).
     updateEvent: async (key, id) => { calls.push(`update ${key} ${id}`); return { id, status: "confirmed" }; },
     deleteEvent: async (key, id) => { calls.push(`delete ${key} ${id}`); },
-    sendIcs: async (o) => { mail.push({ to: o.toAddr, subject: o.subject, ics: o.icsText }); return { gmailId: "m" + mail.length, gmailThreadId: "t", fromMailbox: "personal:me" }; },
+    sendIcs: async (o) => { mail.push({ to: o.toAddr, subject: o.subject, ics: o.ics("me@peak.test") }); return { gmailId: "m" + mail.length, gmailThreadId: "t", fromMailbox: "personal:me" }; },
     saveInvites: async (_id, invites, lead) => { saved = { invites, lead }; },
     log: () => {},
     ...over,
@@ -153,6 +154,23 @@ export async function siteVisitsInviteChecks(ok: Ok): Promise<void> {
   const cancel = buildIcs({ ...base, method: "CANCEL", sequence: 2 });
   ok(cancel.includes("METHOD:CANCEL") && cancel.includes("STATUS:CANCELLED") && cancel.includes("SEQUENCE:2") && cancel.includes("UID:sv-SV-1@peak-app"),
     "site-visits ics: a cancellation keeps the UID and carries METHOD:CANCEL, STATUS:CANCELLED and a higher SEQUENCE");
+  const who = { organizer: "me@peak.test", attendee: "jeff@peak.test" };
+  const cancelTo = buildIcs({ ...base, method: "CANCEL", sequence: 2, ...who });
+  ok(cancelTo.includes("\r\nORGANIZER:mailto:me@peak.test\r\n") && cancelTo.includes("\r\nATTENDEE:mailto:jeff@peak.test\r\n") &&
+     cancelTo.indexOf("ORGANIZER:") > cancelTo.indexOf("BEGIN:VEVENT") && cancelTo.indexOf("ATTENDEE:") < cancelTo.indexOf("END:VEVENT"),
+    "site-visits ics: a cancellation names the sending mailbox as ORGANIZER and the recipient as ATTENDEE inside the VEVENT (RFC 5546)");
+  ok(buildIcs({ ...base, ...who }) === plain && buildIcs({ ...base, method: "PUBLISH", sequence: 1, ...who }) === buildIcs({ ...base, method: "PUBLISH", sequence: 1 }),
+    "site-visits ics: a PUBLISH invite / update stays byte-identical (no ORGANIZER / ATTENDEE)");
+  ok(icsMimeType(cancelTo) === "text/calendar; method=CANCEL" && icsMimeType(plain) === "text/calendar",
+    "site-visits ics: the attachment type carries the .ics METHOD for a cancellation; PUBLISH stays text/calendar");
+  const rawCancel = Buffer.from(buildRaw({ from: "me@peak.test", to: "jeff@peak.test", subject: "Cancelled: T", body: "b",
+    attachments: [{ name: "site-visit.ics", mime: icsMimeType(cancelTo), dataBase64: Buffer.from(cancelTo).toString("base64") }] }), "base64url").toString("utf8");
+  ok(rawCancel.includes('\r\nContent-Type: text/calendar; method=CANCEL; name="site-visit.ics"\r\n'),
+    "site-visits ics: the cancellation email's MIME part is Content-Type: text/calendar; method=CANCEL");
+  const bridgeSrc = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+  const svSend = bridgeSrc.slice(bridgeSrc.indexOf("export async function sendSiteVisitInvite("));
+  ok(/const icsText = opts\.ics\(info\.address\)/.test(svSend) && /mime: icsMimeType\(icsText\)/.test(svSend),
+    "site-visits: the Gmail bridge builds the .ics with the sending mailbox as ORGANIZER and sends it with the METHOD-matched type");
 
   // dispatch: new visit, lead with calendar grant + attendee without
   const me = { id: "u-me", name: "Me" };
@@ -190,13 +208,40 @@ export async function siteVisitsInviteChecks(ok: Ok): Promise<void> {
   const v3 = sv("SV-T1", { attendees: [], startAt: at(13), endAt: at(14), invites: s2.invites });
   await dispatchVisitInvite(v3, me, h3.deps);
   ok(h3.calls.length === 0 && h3.mail.length === 1 && h3.mail[0].to === "jeff@peak.test" && h3.mail[0].ics.includes("METHOD:CANCEL") && h3.mail[0].ics.includes("SEQUENCE:2") &&
-     h3.mail[0].ics.includes("UID:sv-SV-T1@peak-app") && h3.saved()!.invites.map((e) => e.name).join() === "Dana",
+     h3.mail[0].ics.includes("UID:sv-SV-T1@peak-app") && h3.saved()!.invites.map((e) => e.name).join() === "Dana" &&
+     h3.mail[0].ics.includes("ORGANIZER:mailto:me@peak.test") && h3.mail[0].ics.includes("ATTENDEE:mailto:jeff@peak.test"),
     "site-visits invites: removing a person sends them a cancellation with the same UID; the lead is left alone");
 
   // delete: everyone cancelled
   const h4 = inviteHarness();
-  await cancelVisitInvites(sv("SV-T1", { invites: h3.saved()!.invites }), me, h4.deps);
+  const r4 = await cancelVisitInvites(sv("SV-T1", { invites: h3.saved()!.invites }), me, h4.deps);
   ok(h4.calls.join() === "delete personal:u-dana g-1" && h4.saved()!.invites.length === 0, "site-visits invites: deleting a visit removes it from every calendar");
+  ok(r4.status === "calendar", "site-visits invites: a fully successful cancellation reports the lead's cancel status, not failed");
+
+  // One person's throw never loses another's send: the rest go out and every send made is recorded.
+  const h8 = inviteHarness({ invitesOn: async (n) => { if (n === "Dana") throw new Error("prefs down"); return true; } });
+  const r8 = await dispatchVisitInvite(sv("SV-T5", { attendees: ["Jeff"] }), me, h8.deps);
+  const s8 = h8.saved();
+  ok(r8.recipients.find((x) => x.name === "Dana")?.status === "failed" && r8.recipients.find((x) => x.name === "Jeff")?.status === "sent" &&
+     h8.mail.length === 1 && h8.mail[0].to === "jeff@peak.test" && s8?.invites.map((e) => e.name).join() === "Jeff",
+    "site-visits invites: a throw for the first person still invites and records the second");
+  const h9 = inviteHarness();
+  await dispatchVisitInvite(sv("SV-T5", { attendees: ["Jeff"], invites: s8?.invites ?? [] }), me, h9.deps);
+  ok(h9.mail.length === 0 && h9.calls.join() === "insert personal:u-dana" && h9.saved()?.invites.map((e) => e.name).sort().join() === "Dana,Jeff",
+    "site-visits invites: the next save invites only the person who failed — the recorded send is never repeated");
+  let gmailReads = 0;
+  const h10 = inviteHarness({ gmailEnabled: () => { if (gmailReads++ === 0) throw new Error("config read failed"); return true; } });
+  const r10 = await cancelVisitInvites(sv("SV-T6", { invites: [rcpt("Dana", { channel: "calendar", eventId: "g-9" }), rcpt("Jeff")] }), me, h10.deps);
+  ok(r10.recipients.find((x) => x.name === "Dana")?.status === "failed" && h10.mail.length === 1 && h10.mail[0].to === "jeff@peak.test" &&
+     h10.saved()?.invites.map((e) => e.name).join() === "Dana" && r10.status === "failed",
+    "site-visits invites: a cancellation that throws keeps that entry (the next save retries it); the others still go out");
+
+  // The summary: identical lines once; a calendar copy is never called an email.
+  const h11 = inviteHarness({ gmailEnabled: () => false });
+  const r11 = await dispatchVisitInvite(sv("SV-T7", { attendees: ["Jeff", "Sam"], startAt: at(13), endAt: at(14),
+    invites: [rcpt("Dana", { channel: "calendar", eventId: "g-5" }), rcpt("Jeff"), rcpt("Sam")] }), me, h11.deps);
+  ok(inviteSummary(r11.recipients) === "Calendar updates need Gmail connected. Email updates need Gmail connected.",
+    "site-visits invites: the summary drops repeated lines and names a calendar update as a calendar update");
 
   // invites-off on add is not recorded (retried later); a failed update keeps the old entry
   const h5 = inviteHarness({ invitesOn: async (n) => n !== "Sam" });

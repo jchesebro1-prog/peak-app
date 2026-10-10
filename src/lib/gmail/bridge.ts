@@ -50,6 +50,7 @@ import {
   type GmailLabelEvent,
 } from "./api";
 import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
+import { icsMimeType } from "@/lib/ics";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
@@ -445,7 +446,8 @@ export async function sendSiteVisitInvite(opts: {
   toAddr: string;
   subject: string;
   body: string;
-  icsText: string;
+  /** builds the .ics with the sending mailbox as its ORGANIZER */
+  ics: (organizerAddr: string) => string;
 }): Promise<{ gmailId: string; gmailThreadId: string; fromMailbox: string } | null> {
   const keys = await connectedMailboxKeys();
   const personal = opts.schedulerUserId ? "personal:" + opts.schedulerUserId : null;
@@ -456,6 +458,7 @@ export async function sendSiteVisitInvite(opts: {
   if (!key) return null;
   const info = await getConnectionInfo(key);
   if (!info) return null;
+  const icsText = opts.ics(info.address);
   const raw = buildRaw({
     from: info.address,
     to: opts.toAddr,
@@ -464,8 +467,8 @@ export async function sendSiteVisitInvite(opts: {
     attachments: [
       {
         name: "site-visit.ics",
-        mime: "text/calendar",
-        dataBase64: Buffer.from(opts.icsText, "utf8").toString("base64"),
+        mime: icsMimeType(icsText),
+        dataBase64: Buffer.from(icsText, "utf8").toString("base64"),
       },
     ],
     extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },

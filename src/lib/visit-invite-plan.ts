@@ -28,7 +28,13 @@ export type VisitInviteRecipient = {
   gmailId: string | null;
 };
 
-export type RecipientResult = { name: string; action: "invite" | "update" | "cancel" | "keep"; status: InviteStatus };
+export type RecipientResult = {
+  name: string;
+  action: "invite" | "update" | "cancel" | "keep";
+  status: InviteStatus;
+  /** how the person holds (or was to get) the visit, when known */
+  channel?: InviteChannel;
+};
 
 export type InviteVisitShape = {
   id: string;
@@ -130,7 +136,7 @@ export function recipientLine(r: RecipientResult): string {
     case "invites-off":
       return `${r.name} has calendar-invite emails turned off`;
     case "gmail-off":
-      return `Email ${noun}s need Gmail connected`;
+      return `${r.channel === "calendar" ? "Calendar" : "Email"} ${noun}s need Gmail connected`;
     case "no-mailbox":
       return `No connected mailbox to send ${r.name}'s ${noun}`;
     case "no-email":
@@ -141,6 +147,6 @@ export function recipientLine(r: RecipientResult): string {
 }
 
 export function inviteSummary(rs: readonly RecipientResult[]): string {
-  const lines = rs.map(recipientLine).filter(Boolean);
+  const lines = [...new Set(rs.map(recipientLine).filter(Boolean))];
   return lines.length ? lines.join(". ") + "." : "";
 }

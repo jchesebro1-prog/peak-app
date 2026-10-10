@@ -5,7 +5,8 @@
  * goes only to the assignee's own mailbox (decision B — customers are never
  * auto-invited), so there is no RSVP round-trip. An update re-sends PUBLISH
  * with a higher SEQUENCE; a removal sends METHOD:CANCEL with the same UID
- * (spec 2026-10-09 site-visit scheduling).
+ * (spec 2026-10-09 site-visit scheduling), which also names the ORGANIZER
+ * (sending mailbox) and ATTENDEE (recipient) as RFC 5546 requires.
  */
 
 export type IcsEvent = {
@@ -22,7 +23,25 @@ export type IcsEvent = {
   /** RFC-5545 SEQUENCE — an update or cancel carries a higher number than
    *  the last copy sent. Omitted = no SEQUENCE line. */
   sequence?: number;
+  /** ORGANIZER (the sending mailbox) and ATTENDEE (the recipient) addresses.
+   *  Printed only with a METHOD other than PUBLISH — RFC 5546 requires both
+   *  on a CANCEL; a PUBLISH stays byte-identical to the original invite. */
+  organizer?: string;
+  attendee?: string;
 };
+
+/** The attachment's MIME type: a non-PUBLISH .ics carries its METHOD
+ *  (`text/calendar; method=CANCEL`) so mail clients act on it; PUBLISH stays
+ *  plain `text/calendar` as before. */
+export function icsMimeType(icsText: string): string {
+  const method = /^METHOD:([A-Z-]+)\r?$/m.exec(icsText)?.[1];
+  return method && method !== "PUBLISH" ? `text/calendar; method=${method}` : "text/calendar";
+}
+
+/** mailto: value for ORGANIZER / ATTENDEE — no line breaks, no stray colons/semicolons. */
+function mailto(addr: string): string {
+  return "mailto:" + addr.replace(/[\r\n;:,"<>\s]/g, "");
+}
 
 /** RFC-5545 TEXT escaping: backslash, semicolon, comma, newline. */
 function esc(s: string): string {
@@ -63,6 +82,8 @@ export function buildIcs(ev: IcsEvent): string {
     "DTSTART:" + utc(ev.start),
     "DTEND:" + utc(ev.end),
     ...(ev.method === "CANCEL" ? ["STATUS:CANCELLED"] : []),
+    ...(ev.method && ev.method !== "PUBLISH" && ev.organizer ? ["ORGANIZER:" + mailto(ev.organizer)] : []),
+    ...(ev.method && ev.method !== "PUBLISH" && ev.attendee ? ["ATTENDEE:" + mailto(ev.attendee)] : []),
     "SUMMARY:" + esc(ev.title),
     ...(ev.location ? ["LOCATION:" + esc(ev.location)] : []),
     ...(ev.description ? ["DESCRIPTION:" + esc(ev.description)] : []),
