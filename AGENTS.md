@@ -863,7 +863,7 @@ See `.env.example`.
 
 44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning) and `/api/triage/build` (midday, 17:00 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
 
-45. ✅ **Address verification + drive time** (#325, D712–D723) — every address
+45. ✅ **Address verification + drive time** (#325, D712–D724) — every address
     is `verified` / `needs_check` / `unresolved` (only verified gets drive
     time): venues carry the stamp on four `sites` columns, every other address
     lives in the new `place_book` (exact normalized key, house-number rule;
@@ -883,8 +883,12 @@ See `.env.example`.
     15 min, Settings → Field) and Morning triage's unverified-visit flag
     (`TRIAGE_HOOKS.visitFlags`). Specs 2–3 consume `planDay`,
     `visitPeople`, `addressStatesForVisits` and the `schedule_*` blobs.
-    Remaining is Jeff-gated: confirm the drive cron fires, review the
-    worklist, connect rep calendars. Punch item #325.
+    Free text verifies only with a typed house number; legs over 6 h are
+    flagged (`long_route`), under 3 min skipped; `npm run geo:recheck-venues`
+    re-checks backfilled venue verifications (D724). Remaining is
+    Jeff-gated: confirm the drive cron fires (a third daily cron), run or
+    waive the re-check, review the worklist, connect rep calendars. Punch
+    item #325.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
