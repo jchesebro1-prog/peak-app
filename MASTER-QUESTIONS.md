@@ -455,6 +455,24 @@ midday (D707–D711).
   breaches its SLA, never returns to your list. ✦ keep permanent ☐ let a new
   event (resubmit / SLA breach) bring it back: ______
 
+## Q. Address verification + drive time (built 2026-10-10, #325)
+
+Only verified addresses get drive time; the rest are flagged for a one-time
+Fix (D712–D724).
+
+- **Q1.** **Backfilled venues.** On first deploy every venue that already had
+  coordinates and a house number was marked verified without asking the
+  geocoder again. `npm run geo:recheck-venues` re-checks those (≈ 25–30 min,
+  1 request/second; dry run first, then `-- --apply --yes` after a backup) and
+  moves any whose address doesn't come back building-level — or comes back
+  more than half a mile from the stored point — to Needs check. Known limit:
+  venues pinned or picked by hand before #325 (Settings sidebar) are
+  indistinguishable from backfill rows and may be downgraded too — review the
+  dry run's needs_check list before `--apply`, save the ids of any that are
+  already right to a file and apply with `-- --apply --yes --skip <file>`.
+  ✦ run the re-check in production after deploy ☐ accept backfilled venues
+  as verified
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

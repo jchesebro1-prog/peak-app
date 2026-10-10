@@ -41,11 +41,16 @@ export function drivePrivateProps(ev: DesiredDriveEvent): Record<string, string>
   return { [DRIVE_PROP]: "1", [DRIVE_KEY_PROP]: ev.key, [DRIVE_DAY_PROP]: ev.dayKey };
 }
 
+/** The tagged drive events that are THIS rep's legs (key "<userId>|…"). A
+ *  shared or delegated calendar can show another rep's drive events; those
+ *  are never diffed, so one rep's sync can't delete another's. */
 export function existingFromCalendar(
-  events: ReadonlyArray<{ id: string; title: string; startMs: number; endMs: number; peakDriveKey: string; peakDriveDay: string }>
+  events: ReadonlyArray<{ id: string; title: string; startMs: number; endMs: number; peakDriveKey: string; peakDriveDay: string }>,
+  userId: string
 ): ExistingDriveEvent[] {
+  const prefix = userId + "|";
   return events
-    .filter((e) => !!e.peakDriveKey)
+    .filter((e) => !!e.peakDriveKey && e.peakDriveKey.startsWith(prefix))
     .map((e) => ({ id: e.id, key: e.peakDriveKey, dayKey: e.peakDriveDay, title: e.title, startMs: e.startMs, endMs: e.endMs }));
 }
 

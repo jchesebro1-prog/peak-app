@@ -8,7 +8,7 @@ import { getDb } from "@/db";
 import { companies, sites } from "@/db/schema";
 import { locateVenue } from "@/lib/venue-locate";
 import { addressKey } from "./keys";
-import { fixPlace, getPlaces, type PlaceDeps } from "./place-book";
+import { fixPlace, getPlaces, MAX_PLACE_KEY, type PlaceDeps } from "./place-book";
 import { isValidPoint, venueGeoStatus } from "./state";
 import type { FixTarget, FixTargetDetails, GeoStatus } from "./types";
 
@@ -68,9 +68,13 @@ export function cleanFixTarget(raw: unknown): FixTarget | null {
     return siteId ? { kind: "venue", siteId } : null;
   }
   if (t.kind === "place") {
-    const key = str(t.key, 300);
-    const label = str(t.label, 300);
-    return key && label != null ? { kind: "place", key, label } : null;
+    // Not truncated to the stored 300: a long location keys on its full
+    // text, and fixPlace checks the label against the key before storing.
+    // Over MAX_PLACE_KEY is invalid (the live pass never geocodes it), not capped.
+    const key = str(t.key, MAX_PLACE_KEY + 1);
+    const label = str(t.label, MAX_PLACE_KEY + 1);
+    if (!key || label == null || key.length > MAX_PLACE_KEY || label.length > MAX_PLACE_KEY) return null;
+    return { kind: "place", key, label };
   }
   return null;
 }

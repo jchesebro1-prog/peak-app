@@ -51,8 +51,10 @@ export async function searchAddressAction(query: string, limit?: number): Promis
   await requireUser();
   const q = text(query, 200);
   if (q.length < 3) return [];
-  const { search } = await import("@/lib/geo");
-  const hits = await search(q, { limit: Math.max(1, Math.min(6, Math.floor(Number(limit)) || 6)) });
+  // A turn on the instance-wide Nominatim pacer; a type-ahead never waits
+  // long — a busy queue answers [] (the next keystroke asks again).
+  const { pacedSearch } = await import("@/lib/address-verify/nominatim-pacer");
+  const hits = await pacedSearch(q, { limit: Math.max(1, Math.min(6, Math.floor(Number(limit)) || 6)) }, { maxWaitMs: 3_000 });
   return hits.map((h) => ({ title: h.title, sub: h.sub, street: h.street, city: h.city, state: h.state, zip: h.zip, lat: h.lat, lng: h.lng }));
 }
 
@@ -66,9 +68,9 @@ export async function townCentreForFixAction(city: string, state: string): Promi
   const c = text(city, 100);
   const st = text(state, 40);
   if (!c) return null;
-  const { searchCity } = await import("@/lib/geo");
-  const { samePlace } = await import("@/lib/geo-backfill");
-  const [hit] = await searchCity(c, st, { limit: 1 });
+  const { pacedSearchCity } = await import("@/lib/address-verify/nominatim-pacer");
+  const { samePlace } = await import("@/lib/address-verify/same-place");
+  const [hit] = await pacedSearchCity(c, st, { limit: 1 }, { maxWaitMs: 3_000 });
   return hit && samePlace(c, hit.city) ? { lat: hit.lat, lng: hit.lng } : null;
 }
 
@@ -89,7 +91,7 @@ export async function addressStatusAction(input: {
   const r = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const { addressStatesForVisits } = await import("@/lib/address-verify/targets");
   const states = await addressStatesForVisits(
-    [{ id: "check", customerId: text(r.customerId, 200) || null, locationId: text(r.locationId, 200) || null, address: text(r.address, 300) }],
+    [{ id: "check", customerId: text(r.customerId, 200) || null, locationId: text(r.locationId, 200) || null, address: text(r.address, 1000) }],
     "live"
   );
   const st = states.get("check");

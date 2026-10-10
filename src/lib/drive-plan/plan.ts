@@ -8,13 +8,20 @@ import type { FixTarget, LatLng } from "@/lib/address-verify/types";
 import type { DriveStop } from "./stops";
 
 export type DriveBase = { name: string; lat: number; lng: number };
-export type DriveFlagKind = "no_base" | "unverified" | "route_unavailable";
+export type DriveFlagKind = "no_base" | "unverified" | "route_unavailable" | "long_route";
 
 export const FLAG_TEXT: Record<DriveFlagKind, string> = {
   no_base: "No base set",
   unverified: "Address not verified — no drive time",
   route_unavailable: "Drive time unavailable — retrying",
+  long_route: "Over 6 h — check the address",
 };
+
+/** A route longer than this is almost certainly a wrong address (a name that
+ *  geocoded to the far side of the country): flagged, never placed. */
+export const LONG_ROUTE_MIN = 360;
+/** Below this many route minutes (before buffer) there is no drive to place. */
+export const MIN_ROUTE_MIN = 3;
 
 export type LegEnd = {
   kind: "base" | "stop" | "prev_stop";
@@ -22,7 +29,11 @@ export type LegEnd = {
   label: string;
   point: LatLng | null;
   verified: boolean;
+  /** Set only when this end is unverified (what its address flag fixes). */
   fix: FixTarget | null;
+  /** The stop's own Fix target whatever its state (null for the base) — what a
+   *  long-route flag offers, since a verified end can still be the wrong place. */
+  addressFix?: FixTarget | null;
 };
 
 export type DriveLeg = {
@@ -74,7 +85,7 @@ export function fmtDur(min: number): string {
 
 function stopEnd(s: DriveStop, kind: "stop" | "prev_stop" = "stop"): LegEnd {
   const verified = s.address.status === "verified" && !!s.address.point;
-  return { kind, key: s.key, label: s.label, point: verified ? s.address.point : null, verified, fix: verified ? null : s.address.fix };
+  return { kind, key: s.key, label: s.label, point: verified ? s.address.point : null, verified, fix: verified ? null : s.address.fix, addressFix: s.address.fix };
 }
 
 function baseEnd(b: DriveBase | null): LegEnd {
@@ -92,7 +103,7 @@ function makeLeg(
   direction: "to_stop" | "back",
   anchorMs: number,
   prevStopEndMs: number | null
-): DriveLeg {
+): DriveLeg | null {
   let flagKind: DriveFlagKind | null = null;
   if ((from.kind === "base" && !from.verified) || (to.kind === "base" && !to.verified)) flagKind = "no_base";
   else if (!from.verified || !to.verified) flagKind = "unverified";
@@ -100,6 +111,8 @@ function makeLeg(
   if (!flagKind) {
     const r = input.routeMinutes.get(pairKey(from.point!, to.point!));
     if (r == null || !Number.isFinite(r)) flagKind = "route_unavailable";
+    else if (r < MIN_ROUTE_MIN) return null; // near-zero: no leg, no block
+    else if (r > LONG_ROUTE_MIN) flagKind = "long_route"; // flagged like an unverified address, never placed
     else routeMin = Math.max(0, Math.round(r));
   }
   const bufferMin = Math.max(0, Math.round(input.bufferMin));
@@ -134,7 +147,12 @@ function makeLeg(
     endMs,
     anchorMs,
     flag: flagKind ? { kind: flagKind, text: FLAG_TEXT[flagKind] } : null,
-    fix: flagKind === "unverified" ? (to.fix ?? from.fix) : null,
+    fix:
+      flagKind === "unverified"
+        ? (to.fix ?? from.fix)
+        : flagKind === "long_route"
+          ? (to.addressFix ?? from.addressFix ?? null)
+          : null,
     tight,
   };
 }
@@ -146,7 +164,8 @@ export function planDay(input: PlanDayInput): DriveLeg[] {
   const legs: DriveLeg[] = [];
   const push = (from: LegEnd, to: LegEnd, direction: "to_stop" | "back", anchorMs: number, prevEnd: number | null) => {
     if (samePoint(from, to)) return; // same place back-to-back: no drive
-    legs.push(makeLeg(input, from, to, direction, anchorMs, prevEnd));
+    const leg = makeLeg(input, from, to, direction, anchorMs, prevEnd);
+    if (leg) legs.push(leg);
   };
   const origin = input.prevDay.stayOver && input.prevDay.lastStop ? stopEnd(input.prevDay.lastStop, "prev_stop") : base;
   push(origin, stopEnd(stops[0]), "to_stop", stops[0].startMs, null);

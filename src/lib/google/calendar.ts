@@ -341,6 +341,12 @@ export type EventWriteInput = {
   attendeeEmails?: string[];
   /** Private extended properties (the drive sync's peakDrive tag). */
   privateProps?: Record<string, string>;
+  /** No reminders at all (the drive sync's blocks); omitted = calendar default. */
+  noReminders?: boolean;
+  /** Mark the event busy (transparency opaque); omitted = not sent. */
+  busy?: boolean;
+  /** Event status to write ("confirmed" restores a cancelled/deleted event on update); omitted = not sent. */
+  status?: "confirmed";
 };
 
 export function eventWriteBody(ev: EventWriteInput) {
@@ -356,6 +362,9 @@ export function eventWriteBody(ev: EventWriteInput) {
       ? ev.attendeeEmails.map((email) => ({ email }))
       : undefined,
     extendedProperties: ev.privateProps ? { private: ev.privateProps } : undefined,
+    reminders: ev.noReminders ? { useDefault: false, overrides: [] } : undefined,
+    transparency: ev.busy ? "opaque" : undefined,
+    status: ev.status || undefined,
   };
 }
 
@@ -396,24 +405,30 @@ export async function updateEvent(
   mailboxKey: string,
   eventId: string,
   ev: EventWriteInput
-): Promise<{ id: string; htmlLink: string }> {
+): Promise<{ id: string; htmlLink: string; status?: string }> {
   const sendUpdates = ev.attendeeEmails?.length ? "all" : "none";
   const r = await gcal<GoogleEvent>(
     mailboxKey,
     "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=" + sendUpdates,
     { method: "PATCH", body: JSON.stringify(eventWriteBody(ev)) }
   );
-  return { id: r.id, htmlLink: r.htmlLink || "" };
+  return { id: r.id, htmlLink: r.htmlLink || "", status: r.status };
 }
 
 /** Delete an event (or, for a recurring instance id, cancel just that one
  *  occurrence). 410/404 (already gone on Google's side) is swallowed — the
  *  caller's revalidate will just stop showing it either way. */
-export async function deleteEvent(mailboxKey: string, eventId: string): Promise<void> {
+export function deleteEventPath(eventId: string, sendUpdates: "all" | "none" = "all"): string {
+  return "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=" + sendUpdates;
+}
+
+/** sendUpdates defaults to "all" (unchanged for the calendar modal etc.);
+ *  the drive sync passes "none". */
+export async function deleteEvent(mailboxKey: string, eventId: string, opts?: { sendUpdates?: "all" | "none" }): Promise<void> {
   const token = await accessTokenFor(mailboxKey);
   if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
   const res = await fetch(
-    CAL_BASE + "/calendars/primary/events/" + encodeURIComponent(eventId) + "?sendUpdates=all",
+    CAL_BASE + deleteEventPath(eventId, opts?.sendUpdates ?? "all"),
     {
       method: "DELETE",
       signal: AbortSignal.timeout(5000),

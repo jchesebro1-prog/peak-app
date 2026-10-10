@@ -13,6 +13,8 @@ import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/tar
 import { cleanFixInput, cleanFixTarget, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
 import { listAddressesToVerify } from "@/lib/address-verify/worklist";
 import { unverifiedVisitFlags } from "@/lib/address-verify/triage-flags";
+import { recheckBackfilledVenues } from "@/lib/address-verify/venue-recheck";
+import { writeVisitCalendarEvent } from "@/lib/visit-invite";
 import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
 import { routeKey, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
 import {
@@ -41,6 +43,7 @@ import {
   backfillStatus,
   geocodedStatus,
   hasHouseNumber,
+  isBackfillVerified,
   isValidPoint,
   geoStampForSave,
   placeAddressState,
@@ -60,10 +63,11 @@ import {
   type DesiredDriveEvent,
   type ExistingDriveEvent,
 } from "@/lib/drive-sync/diff";
-import { eventWriteBody, readSyncPages, toCalendarEvents, type CalendarEvent, type EventPage, type SyncCalendarEvent } from "@/lib/google/calendar";
+import { deleteEventPath, eventWriteBody, readSyncPages, toCalendarEvents, type CalendarEvent, type EventPage, type SyncCalendarEvent } from "@/lib/google/calendar";
 import { planDriveDays, routeMinutesFor, visitAddressInput, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import {
   LEGACY_LOOKAHEAD_MS,
+  driveEventWrite,
   markStaleIfTriggerFailed,
   resyncForAddress,
   resyncForVisitChange,
@@ -104,8 +108,8 @@ export async function driveTimeKeysChecks(ok: Ok): Promise<void> {
 }
 
 export async function driveTimeStateChecks(ok: Ok): Promise<void> {
-  ok(statusOfFreeTextHit({ street: "123 Main St" }) === "verified" && statusOfFreeTextHit({ street: "Main St" }) === "needs_check" &&
-     statusOfFreeTextHit({ street: "" }) === "needs_check" && statusOfFreeTextHit(null) === "unresolved",
+  ok(statusOfFreeTextHit("123 Main St, Madison", { street: "123 Main St", city: "Madison" }) === "verified" && statusOfFreeTextHit("123 Main St, Madison", { street: "Main St", city: "Madison" }) === "needs_check" &&
+     statusOfFreeTextHit("123 Main St, Madison", { street: "", city: "Madison" }) === "needs_check" && statusOfFreeTextHit("123 Main St, Madison", null) === "unresolved",
     "drive-time: a free-text hit verifies only with a house number; no hit → unresolved");
 
   ok(!hasHouseNumber("Highway 12") && !hasHouseNumber("US Highway 14") && !hasHouseNumber("5th Ave") && !hasHouseNumber("County Road 12") &&
@@ -118,8 +122,8 @@ export async function driveTimeStateChecks(ok: Ok): Promise<void> {
   ok(!hasHouseNumber("STH59") && !hasHouseNumber("CTH12 W") && !hasHouseNumber("USH14") && !hasHouseNumber("SH-12") && !hasHouseNumber("IH-35") &&
      !hasHouseNumber("CT12") && !hasHouseNumber("STH-59 Frontage Rd") && hasHouseNumber("123 Main St") && hasHouseNumber("12 St Marys Rd") && hasHouseNumber("1 Ct St"),
     "drive-time: Wisconsin road lead tokens (STH59, CTH12, USH14, SH-12) are not house numbers; plain numbers and the word St still are");
-  ok(statusOfFreeTextHit({ street: "US Highway 14" }) === "needs_check" && statusOfFreeTextHit({ street: "5th Ave" }) === "needs_check" &&
-     statusOfFreeTextHit({ street: "N64W23760 Main St" }) === "verified",
+  ok(statusOfFreeTextHit("14 Main St", { street: "US Highway 14" }) === "needs_check" && statusOfFreeTextHit("45 5th Ave", { street: "5th Ave" }) === "needs_check" &&
+     statusOfFreeTextHit("N64W23760 Main St, Sussex", { street: "N64W23760 Main St", city: "Sussex" }) === "verified",
     "drive-time: a road-only free-text hit is needs_check, not verified");
 
   // One-time venue backfill mapping.
@@ -160,13 +164,13 @@ export async function driveTimeStateChecks(ok: Ok): Promise<void> {
   const stampBad = geoStampForSave(null, { address: "605 Erie Ave", lat: "999", lng: "10" }, 99);
   ok(stampBad.stamp.geoStatus === "unresolved" && stampBad.stamp.geoSource === null, "drive-time: a save carrying out-of-range coordinates stamps unresolved");
 
-  const row = placeRowFromHit("1 main st x", "1 Main St X", { street: "1 Main St", lat: 43, lng: -89 }, 1000);
+  const row = placeRowFromHit("1 main st madison", "1 Main St, Madison", { street: "1 Main St", city: "Madison", lat: 43, lng: -89 }, 1000);
   ok(row.status === "verified" && row.source === "geocode" && row.lat === 43 && row.verifiedAt === 1000 && row.verifiedBy === null,
     "drive-time: a building-level free-text hit writes back as verified (source geocode)");
   const miss = placeRowFromHit("nowhere", "Nowhere", null, 1000);
   ok(miss.status === "unresolved" && miss.lat === null && miss.verifiedAt === null, "drive-time: no hit is stored as unresolved, no coordinates");
-  const ps = placeAddressState("1 Main St X", row);
-  ok(ps.status === "verified" && ps.pointKey === "place:1 main st x" && ps.fix?.kind === "place" && ps.point?.lng === -89,
+  const ps = placeAddressState("1 Main St, Madison", row);
+  ok(ps.status === "verified" && ps.pointKey === "place:1 main st madison" && ps.fix?.kind === "place" && ps.point?.lng === -89,
     "drive-time: a place state keys on the normalized text");
   ok(placeAddressState("1 Main St X", undefined).status === "unresolved" && placeAddressState("", undefined).fix === null,
     "drive-time: an unknown place is unresolved; no text → nothing to fix");
@@ -269,7 +273,7 @@ const hit = (street: string, lat = 44.3, lng = -88.6): GeoSearchHit => ({
   title: street, sub: street, name: "", street, city: "Hortonville", state: "WI", zip: "54944", lat, lng, display: street,
 });
 const fastDeps = (search: (q: string) => Promise<GeoSearchHit[]>) => ({
-  search, delayMs: 0, budgetMs: 60_000, now: () => 1_790_000_000_000, sleep: async () => {},
+  search, delayMs: 0, budgetMs: 60_000, now: () => 1_790_000_000_000, sleep: async () => {}, pacer: { nextAt: 0 },
 });
 
 export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
@@ -289,7 +293,8 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
     ok(threw503 && threwNet && Array.isArray(empty) && empty.length === 0,
       "drive-time geo: searchOrThrow throws on an outage/error status and returns [] only for a real empty answer");
 
-    const A = "TESTdrive 1 School Rd, Hortonville WI";
+    // The typed text must lead with a house number too (D714 as amended): the number comes first.
+    const A = "1 TESTdrive School Rd, Hortonville WI";
     const B = "TESTdrive Main St, Hortonville WI";
     const C = "TESTdrive Down Server Rd";
     const cache = await placeStatesFor([A], "cache");
@@ -300,7 +305,7 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
     const search = async (q: string) => {
       calls++;
       if (q.includes("Down Server")) throw new Error("Nominatim 503");
-      return q.includes("1 School") ? [hit("1 School Rd")] : [hit("Main St")];
+      return q.includes("School") ? [hit("1 School Rd")] : [hit("Main St")];
     };
     const live = await placeStatesFor([A, B, C, "  " + A.toUpperCase() + "  "], "live", fastDeps(search));
     ok(calls === 3, "drive-time place book: duplicate spellings of one key geocode once");
@@ -348,7 +353,7 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
     ok(!kRetryWeak.ok && kRetryWeak.reason === "kept-pin" && !kPickWeak.ok && kPickWeak.reason === "kept-pin" &&
        kHeld?.source === "pin" && kHeld.status === "verified" && kHeld.lat === 44.5 && kHeld.verifiedBy === "u1",
       "drive-time place book: a weaker Retry or Pick never replaces a verified hand pin (kept-pin, row untouched)");
-    const kRetryOk = await fixPlace({ key: kKey, label: K, mode: "retry", text: "1 Gate Rd Hortonville" }, "u2", fastDeps(async () => [hit("1 Gate Rd", 44.6, -88.6)]));
+    const kRetryOk = await fixPlace({ key: kKey, label: K, mode: "retry", text: "1 Gate Rd, Hortonville" }, "u2", fastDeps(async () => [hit("1 Gate Rd", 44.6, -88.6)]));
     const kAfterRetry = (await getPlaces([kKey])).get(kKey);
     ok(kRetryOk.ok && kRetryOk.status === "verified" && kAfterRetry?.source === "geocode" && kAfterRetry.lat === 44.6 && kAfterRetry.verifiedBy === "u2",
       "drive-time place book: a Retry that verifies replaces a hand pin");
@@ -414,7 +419,8 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
     let slept: number[] = [];
     let searched = 0;
     const pacingSearch = async () => { searched++; return [hit("1 Pace Rd")]; };
-    await placeStatesFor(P, "live", { ...fastDeps(pacingSearch), delayMs: 1100, sleep: async (ms: number) => { slept.push(ms); } });
+    let paceClock = 1_790_000_000_000;
+    await placeStatesFor(P, "live", { ...fastDeps(pacingSearch), delayMs: 1100, now: () => paceClock, sleep: async (ms: number) => { slept.push(ms); paceClock += ms; } });
     ok(searched === 3 && slept.length === 2 && slept.every((ms) => ms === 1100),
       "drive-time place book: a live pass sleeps the delay between geocodes (not before the first)");
     await db.delete(placeBook).where(like(placeBook.key, "testdrive pace%"));
@@ -427,7 +433,7 @@ export async function driveTimePlaceBookChecks(ok: Ok): Promise<void> {
       "drive-time place book: a spent budget stops the pass after the first geocode — unreached keys stay unwritten");
   } finally {
     globalThis.fetch = realFetch;
-    await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
+    await db.delete(placeBook).where(like(placeBook.key, "%testdrive%"));
   }
 }
 
@@ -609,9 +615,11 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
       "drive-time cleanFixInput: ids are trimmed and every field is truncated to its cap");
     const cEmpty = cleanFixInput({ target: V, mode: "retry", address: "", city: "", state: "", zip: "" });
     ok(cEmpty !== null && "address" in cEmpty && cEmpty.address === "", "drive-time cleanFixInput: blank venue fields are allowed (the retry decides)");
-    const cPlTrim = cleanFixInput({ target: { kind: "place", key: "k".repeat(400), label: "  L  " }, mode: "retry", text: "  " + "t".repeat(400) });
-    ok(cPlTrim?.target.kind === "place" && cPlTrim.target.key.length === 300 && cPlTrim.target.label === "L" && "text" in cPlTrim && cPlTrim.text.length === 300,
+    const cPlTrim = cleanFixInput({ target: { kind: "place", key: "k".repeat(900), label: "  L  " }, mode: "retry", text: "  " + "t".repeat(400) });
+    ok(cPlTrim?.target.kind === "place" && cPlTrim.target.key.length === 900 && cPlTrim.target.label === "L" && "text" in cPlTrim && cPlTrim.text.length === 300,
       "drive-time cleanFixInput: place key/label/text are trimmed and capped");
+    ok(cleanFixInput({ target: { kind: "place", key: "k".repeat(2500), label: "L" }, mode: "retry", text: "x" }) === null,
+      "drive-time cleanFixInput: a place key over 1000 chars is invalid, not silently capped");
     ok(cleanFixInput({ target: V, mode: "retry", address: "a", city: "c", state: "s" }) === null &&
        cleanFixInput({ target: V, mode: "retry", address: 1, city: "c", state: "s", zip: "z" }) === null &&
        cleanFixInput({ target: { kind: "venue", siteId: "   " }, mode: "pin", lat: 1, lng: 1 }) === null &&
@@ -883,9 +891,9 @@ export async function driveTimeDiffChecks(ok: Ok): Promise<void> {
   ok(!diff.remove.some((r) => r.id === "e4"), "drive-time diff: tagged events on days outside this sync are never touched");
 
   const cal = existingFromCalendar([
-    { id: "a", title: "Drive to X", startMs: 1, endMs: 2, peakDriveKey: "k", peakDriveDay: DAY },
+    { id: "a", title: "Drive to X", startMs: 1, endMs: 2, peakDriveKey: "u1|k", peakDriveDay: DAY },
     { id: "b", title: "Drive to X", startMs: 1, endMs: 2, peakDriveKey: "", peakDriveDay: "" },
-  ]);
+  ], "u1");
   ok(cal.length === 1 && cal[0].id === "a", "drive-time diff: only tagged (peakDrive) events count as ours");
 
   const now = 1_000_000;
@@ -1589,9 +1597,9 @@ export async function driveTimeTriggerPins(ok: Ok): Promise<void> {
   ok(isStayOverDay("2026-10-13", T) && isStayOverDay("2026-10-14", T) && isStayOverDay("2026-10-28", T) &&
      !isStayOverDay("2026-10-12", T) && !isStayOverDay("2026-10-29", T) && !isStayOverDay("2026-02-31", T) && !isStayOverDay(20261014, T),
     "drive-time: stay-over days run from yesterday to today + 14 (Chicago), real dates only");
-  ok((cal.match(/syncDriveForUser\(syncUser\)/g) ?? []).length === 2,
+  ok((cal.match(/syncDriveForUser\(syncUser, undefined, \{ deadlineMs: triggerDeadline\(\) \}\)/g) ?? []).length === 2,
     "drive-time: editing or deleting a calendar event re-syncs the rep's chain after the response");
-  ok((cal.match(/after\(async \(\) => \{\s*const \{ (syncDriveDays|syncDriveForUser), markStaleIfTriggerFailed \} = await import\("@\/lib\/drive-sync\/sync"\);\s*await \1\([^;]*?\)\s*\.then\(\(r\) => markStaleIfTriggerFailed\([^;]*?\)\)\s*\.catch\(\(err\) => markStaleIfTriggerFailed\(/g) ?? []).length === 4,
+  ok((cal.match(/after\(async \(\) => \{\s*const \{ (syncDriveDays|syncDriveForUser), markStaleIfTriggerFailed, triggerDeadline \} = await import\("@\/lib\/drive-sync\/sync"\);\s*await \1\([^;]*?\)\s*\.then\(\(r\) => markStaleIfTriggerFailed\([^;]*?\)\)\s*\.catch\(\(err\) => markStaleIfTriggerFailed\(/g) ?? []).length === 4,
     "drive-time: all four calendar triggers (add, edit, delete, stay-over) run in after() and mark the rep stale when the sync fails");
   ok(!read("src/app/(app)/calendar/event-modal.tsx").includes("Traveling from") && !read("src/app/(app)/calendar/event-modal.tsx").includes("travelOriginOptionsAction"),
     "drive-time D144: the 'Traveling from' picker is gone");
@@ -1704,8 +1712,8 @@ export async function driveTimeFixUiPins(ok: Ok): Promise<void> {
   const drawer = read("src/components/address-fix/address-fix-drawer.tsx");
   ok(drawer.includes("LeafletMap") && drawer.includes("onPick") && drawer.includes("createPortal") && /dynamic\(\(\) => import\("@\/components\/map\/LeafletMap"\), \{\s*ssr: false/.test(drawer),
     "drive-time pin: the Fix dialog drops/drags a pin on the shared Leaflet map, loaded client-only");
-  ok(/\{compact && flag\.fix \? "Not verified" : flag\.text\}/.test(read("src/components/address-fix/address-flag.tsx")),
-    "drive-time pin: the flag badge renders the flag's own text (compact address flags say 'Not verified')");
+  ok(/\{compact && flag\.fix \? \(flag\.text === FLAG_TEXT\.long_route \? "Over 6 h" : "Not verified"\) : flag\.text\}/.test(read("src/components/address-fix/address-flag.tsx")),
+    "drive-time pin: the flag badge renders the flag's own text (compact address flags say 'Not verified', a long route 'Over 6 h')");
   const verifyList = read("src/app/(app)/settings/addresses-to-verify.tsx");
   ok(/rows\.filter\(\(r\) => fixKey\(r\) === k\)/.test(verifyList) && !/removeRow/.test(verifyList),
     "drive-time pin: a verified address leaves every worklist row that shares its fix target");
@@ -1715,7 +1723,7 @@ export async function driveTimeFixUiPins(ok: Ok): Promise<void> {
   ok(read("src/app/(app)/settings/groups/data.tsx").includes("AddressesToVerify"), "drive-time pin: Settings → Data shows Addresses to verify");
   // Client components never import a module that reaches @/db (next build breaks).
   const clientFiles = ["src/components/address-fix/address-fix-drawer.tsx", "src/components/address-fix/address-flag.tsx", "src/app/(app)/settings/addresses-to-verify.tsx"];
-  const allowed = /^(react|react-dom|next\/(dynamic|navigation)|@\/lib\/address-verify\/types|@\/app\/\(app\)\/address-actions|\.\.\/address-actions|\.\/address-fix-drawer|@\/components\/address-fix\/address-fix-drawer|@\/components\/map\/LeafletMap)$/;
+  const allowed = /^(react|react-dom|next\/(dynamic|navigation)|@\/lib\/address-verify\/types|@\/lib\/drive-plan\/plan|@\/app\/\(app\)\/address-actions|\.\.\/address-actions|\.\/address-fix-drawer|@\/components\/address-fix\/address-fix-drawer|@\/components\/map\/LeafletMap)$/;
   const bad: string[] = [];
   for (const f of clientFiles) {
     const src = read(f);
@@ -1779,4 +1787,556 @@ export async function driveTimeTriageFlagChecks(ok: Ok): Promise<void> {
   ok(real.has("TESTdrive:SV-unchecked"), "drive-time triage: an address no one has checked reads as not verified in cache mode (never geocoded)");
   const hooks = readFileSync("src/lib/triage/hooks.ts", "utf8");
   ok(/TRIAGE_HOOKS: TriageHooks = \{ \.\.\.NO_HOOKS, visitFlags: unverifiedVisitFlags \}/.test(hooks), "drive-time triage: the app's TRIAGE_HOOKS runs the unverified-address visit flag");
+}
+
+/* ============ Final-review fix round ============ */
+export async function driveTimeFinalFixChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const read = (p: string) => readFileSync(p, "utf8");
+  // One group's throw must not hide the others' results.
+  const group = async (name: string, fn: () => Promise<void> | void) => {
+    try { await fn(); } catch (err) { ok(false, `drive-time final: ${name} threw: ${(err as Error).message}`); }
+  };
+
+  // ---- 1a. Free text verifies only when the TYPED text leads with a house number too ----
+  await group("typed house number", async () => {
+    ok(statusOfFreeTextHit("Starbucks", { street: "123 Main St" }) === "needs_check" &&
+       statusOfFreeTextHit("Holiday Inn Express", { street: "4800 Hotel Dr" }) === "needs_check" &&
+       statusOfFreeTextHit("North HS", { street: "1 School Rd" }) === "needs_check",
+      "drive-time final: a names-only free text ('Starbucks') with a house-numbered POI hit is needs_check, never verified");
+    ok(statusOfFreeTextHit("123 Main St, Town", { street: "123 Main St", city: "Town" }) === "verified" &&
+       statusOfFreeTextHit("123 Main St, Town", { street: "Main St" }) === "needs_check" &&
+       statusOfFreeTextHit("123 Main St, Town", null) === "unresolved" &&
+       statusOfFreeTextHit("Starbucks, 123 Main St", { street: "123 Main St" }) === "needs_check",
+      "drive-time final: '123 Main St, Town' with a house-numbered hit verifies; the typed first line decides");
+    const poi = placeRowFromHit("starbucks testdrive", "Starbucks TESTdrive", { street: "123 Main St", lat: 30.2, lng: -97.7 }, 1000);
+    ok(poi.status === "needs_check" && poi.verifiedAt === null && poi.lat === 30.2, "drive-time final: a names-only place-book write-back is needs_check (point kept for the Fix map)");
+    const S = "Starbucks TESTdrive";
+    const T = "12 TESTdrive Main St, Hortonville WI";
+    const live = await placeStatesFor([S, T], "live", fastDeps(async (q) => (q.startsWith("12 ") ? [hit("12 TESTdrive Main St")] : [hit("123 Main St", 30.2, -97.7)])));
+    ok(live.get(addressKey(S))?.status === "needs_check" && live.get(addressKey(S))?.point === null && live.get(addressKey(T))?.status === "verified",
+      "drive-time final: the live place-book path flags 'Starbucks' (no drive time) and verifies a typed street address");
+    const retry = await fixPlace({ key: addressKey("Holiday TESTdrive"), label: "Holiday TESTdrive", mode: "retry", text: "Holiday Inn Express" }, "u1", fastDeps(async () => [hit("4800 Hotel Dr")]));
+    ok(retry.ok && retry.status === "needs_check", "drive-time final: a Fix retry typed without a house number stays needs_check");
+    const pin = await fixPlace({ key: addressKey(S), label: S, mode: "pin", lat: 44.2, lng: -88.4 }, "u1", fastDeps(async () => []));
+    ok(pin.ok && pin.status === "verified", "drive-time final: a hand pin on a names-only place still verifies");
+  });
+
+  // ---- 1b. Over 6 h of driving is flagged, never placed ----
+  await group("long route", () => {
+    const farFix = { kind: "place" as const, key: "far", label: "far" };
+    const far: AddressState = { ...okAddr(P2.lat, P2.lng, "far"), fix: farFix };
+    const legs = planDay(input({ stops: [stop("sv:far", at(10), at(11), far)], routeMinutes: routes([BASE, P2, 400], [P2, BASE, 400]) }));
+    ok(legs.length === 2 && legs.every((l) => l.flag?.kind === "long_route" && l.flag.text === "Over 6 h — check the address" && l.minutes === null && l.startMs === null && l.endMs === null),
+      "drive-time final: a 400-minute route is flagged 'Over 6 h — check the address' with no minutes and no block");
+    ok(legs[0].fix?.kind === "place" && legs[0].fix.key === "far" && legs[1].fix?.kind === "place", "drive-time final: the long-route flag offers the stop's Fix");
+    ok(desiredFromLegs(legs).length === 0 && dayDriveTotal(legs) === 0, "drive-time final: a long-route leg gets no Google event and counts 0 toward the day");
+    const at360 = planDay(input({ stops: [stop("sv:ok", at(10), at(11), okAddr(P2.lat, P2.lng, "ok"))], routeMinutes: routes([BASE, P2, 360], [P2, BASE, 360]) }));
+    ok(at360.every((l) => !l.flag && l.minutes === 375), "drive-time final: exactly 360 route minutes is still a normal leg");
+    ok(neededRoutes(input({ stops: [stop("sv:far", at(10), at(11), far)] })).length === 2, "drive-time final: neededRoutes still asks for the pairs (long_route is decided once minutes exist)");
+    ok(read("src/app/(app)/calendar/calendar-client.tsx").includes("FLAG_TEXT.long_route"), "drive-time final: the month grid has a short form for the long-route flag");
+    ok(read("src/components/address-fix/address-flag.tsx").includes("FLAG_TEXT.long_route"), "drive-time final: the compact Fix badge doesn't call a long route 'Not verified'");
+  });
+
+  // ---- 5d. Near-zero legs are skipped ----
+  await group("near-zero legs", () => {
+    const near = planDay(input({ stops: [stop("sv:n", at(10), at(11), okAddr(P1.lat, P1.lng, "n"))], routeMinutes: routes([BASE, P1, 2], [P1, BASE, 2.9]) }));
+    ok(near.length === 0, "drive-time final: a leg under 3 route minutes (before buffer) is skipped — no leg, no block");
+    const three = planDay(input({ stops: [stop("sv:n", at(10), at(11), okAddr(P1.lat, P1.lng, "n"))], routeMinutes: routes([BASE, P1, 3], [P1, BASE, 3]) }));
+    ok(three.length === 2 && three.every((l) => l.minutes === 18), "drive-time final: a 3-minute route is a leg (3 + 15 buffer)");
+  });
+
+  // ---- 2. One Nominatim pacer across concurrent callers ----
+  await group("nominatim pacer", async () => {
+    let clock = 5_000_000;
+    const starts: number[] = [];
+    const pacer = { nextAt: 0 };
+    const deps = {
+      search: async () => { starts.push(clock); return [hit("1 Pace Rd")]; },
+      delayMs: 1100, budgetMs: 60_000, now: () => clock, pacer,
+      sleep: async (ms: number) => { const target = clock + ms; await Promise.resolve(); clock = Math.max(clock, target); },
+    };
+    await Promise.all([
+      placeStatesFor(["1 TESTdrive Pacer A1", "1 TESTdrive Pacer A2"], "live", deps),
+      placeStatesFor(["1 TESTdrive Pacer B1", "1 TESTdrive Pacer B2"], "live", deps),
+    ]);
+    const sorted = [...starts].sort((a, b) => a - b);
+    ok(starts.length === 4 && sorted.every((s, i) => i === 0 || s - sorted[i - 1] >= 1100),
+      "drive-time final: two concurrent place-book passes share one pacer — request starts are ≥ 1.1 s apart");
+    const before = pacer.nextAt;
+    const fx = await fixPlace({ key: addressKey("1 TESTdrive Pacer Fix"), label: "1 TESTdrive Pacer Fix", mode: "retry", text: "1 Pace Rd, Hortonville" }, "u1", deps);
+    ok(fx.ok && starts[starts.length - 1] >= before && pacer.nextAt >= before + 1100, "drive-time final: a Fix retry takes its turn on the same pacer");
+    ok(/nominatimPacer/.test(read("src/lib/address-verify/place-book.ts")), "drive-time final: the place book's default deps use the module-level Nominatim pacer");
+  });
+
+  // ---- 5e. fixPlace refuses a label that isn't the key's own text ----
+  await group("fixPlace label", async () => {
+    const r = await fixPlace({ key: addressKey("1 TESTdrive Label A"), label: "1 TESTdrive Label B", mode: "pin", lat: 44.1, lng: -88.1 }, "u1", fastDeps(async () => []));
+    ok(!r.ok && r.reason === "invalid" && !(await getPlaces([addressKey("1 TESTdrive Label A")])).size,
+      "drive-time final: fixPlace refuses when addressKey(label) !== key (like loadFixTarget) and writes nothing");
+  });
+
+  // ---- 3. Backfill verifications are identifiable and re-checkable ----
+  await group("backfill recheck", async () => {
+    ok(isBackfillVerified({ geoStatus: "verified", geoSource: "geocode", geoVerifiedAt: null }) &&
+       !isBackfillVerified({ geoStatus: "verified", geoSource: "geocode", geoVerifiedAt: 5 }) &&
+       !isBackfillVerified({ geoStatus: "verified", geoSource: "pin", geoVerifiedAt: null }) &&
+       !isBackfillVerified({ geoStatus: "needs_check", geoSource: "geocode", geoVerifiedAt: null }),
+      "drive-time final: a backfill-derived verification is verified + geocode + no verified-at");
+    const CO = "TESTdrive:co-recheck";
+    const ids = { good: "TESTdrive:rc-good", poi: "TESTdrive:rc-poi", drift: "TESTdrive:rc-drift", out: "TESTdrive:rc-out", pin: "TESTdrive:rc-pin", human: "TESTdrive:rc-human" };
+    const base = { companyId: CO, name: "Gym", city: "Hortonville", state: "WI", zip: "54944", venueKind: "proscenium" as const, lat: "44.3300", lng: "-88.6300" };
+    try {
+      for (const id of Object.values(ids)) await saveSite({ id, ...base, address: "12 Oak St" });
+      await db.update(sites).set({ geoStatus: "verified", geoSource: "geocode", geoVerifiedAt: null, geoVerifiedBy: null }).where(inArray(sites.id, Object.values(ids)));
+      await db.update(sites).set({ geoSource: "pin", geoVerifiedBy: "u1", geoVerifiedAt: 7 }).where(eq(sites.id, ids.pin));
+      await db.update(sites).set({ geoVerifiedBy: "u2", geoVerifiedAt: 9 }).where(eq(sites.id, ids.human));
+      const asked: string[] = [];
+      const geocode = async (row: { id: string }) => {
+        asked.push(row.id);
+        if (row.id === ids.out) return "outage" as const;
+        if (row.id === ids.poi) return { ok: true as const, lat: 44.33, lng: -88.63, precision: "building" as const, hit: hit("Oak St", 44.33, -88.63) };
+        if (row.id === ids.drift) return { ok: true as const, lat: 45.5, lng: -88.63, precision: "building" as const, hit: hit("12 Oak St", 45.5, -88.63) };
+        return { ok: true as const, lat: 44.3301, lng: -88.6301, precision: "building" as const, hit: hit("12 Oak St", 44.3301, -88.6301) };
+      };
+      const dry = await recheckBackfilledVenues({ apply: false, ids: Object.values(ids) }, { geocode, now: () => 1234 });
+      const stillVerified = await db.select().from(sites).where(inArray(sites.id, Object.values(ids)));
+      ok(dry.candidates === 4 && dry.downgraded === 2 && dry.confirmed === 1 && dry.outage === 1 && !asked.includes(ids.pin) && !asked.includes(ids.human) &&
+         stillVerified.every((s) => s.geoStatus === "verified"),
+        "drive-time final: the re-check dry run judges only backfill-derived venues (never pins or human verifications) and writes nothing");
+      asked.length = 0;
+      const applied = await recheckBackfilledVenues({ apply: true, ids: Object.values(ids) }, { geocode, now: () => 1234 });
+      const rows = new Map((await db.select().from(sites).where(inArray(sites.id, Object.values(ids)))).map((s) => [s.id, s]));
+      ok(applied.downgraded === 2 && rows.get(ids.poi)?.geoStatus === "needs_check" && rows.get(ids.drift)?.geoStatus === "needs_check" &&
+         rows.get(ids.poi)?.lat === "44.3300",
+        "drive-time final: --apply downgrades a hit that fails geocodedStatus (and one far from the stored point) to needs_check, coordinates untouched");
+      ok(rows.get(ids.good)?.geoStatus === "verified" && rows.get(ids.good)?.geoVerifiedAt === 1234 && rows.get(ids.out)?.geoStatus === "verified" && rows.get(ids.out)?.geoVerifiedAt === null,
+        "drive-time final: a confirmed venue is stamped verified-at (no longer backfill-derived); an outage leaves the row for the next run");
+      ok(rows.get(ids.pin)?.geoSource === "pin" && rows.get(ids.pin)?.geoVerifiedAt === 7 && rows.get(ids.human)?.geoVerifiedAt === 9,
+        "drive-time final: the re-check never touches a pin or a human verification");
+      asked.length = 0;
+      await recheckBackfilledVenues({ apply: true, ids: Object.values(ids) }, { geocode, now: () => 5678 });
+      ok(asked.length === 1 && asked[0] === ids.out, "drive-time final: a second run only re-tries what is still backfill-derived");
+      const script = read("scripts/geo-recheck-venues.ts");
+      ok(/DATABASE_URL/.test(script) && /PGLITE_PATH/.test(script) && /--apply/.test(script) && /requireHostedConfirmation/.test(script) &&
+         JSON.parse(read("package.json")).scripts["geo:recheck-venues"] === "tsx scripts/geo-recheck-venues.ts",
+        "drive-time final: npm run geo:recheck-venues is a dry run by default, needs an explicit DB target, --apply to write and --yes for hosted");
+    } finally {
+      await db.delete(sites).where(inArray(sites.id, Object.values(ids)));
+    }
+  });
+
+  // ---- 4. The live planner and the sync respect the cron deadline ----
+  await group("deadline", async () => {
+    const budgets: Array<{ what: string; mode: string; budget: number | undefined }> = [];
+    let clock = at(6);
+    const deadlineDeps = loadDeps({
+      visitStates: async (vs, mode, budget) => { budgets.push({ what: "visits", mode, budget }); return new Map(vs.map((v) => [v.id, okAddr(P1.lat, P1.lng, v.id)])); },
+      placeStates: async (texts, mode, budget) => { budgets.push({ what: "places", mode, budget }); return new Map(); },
+      routes: async (pairs, mode, budget) => { budgets.push({ what: "routes", mode, budget }); return new Map(pairs.map((p) => [pairKey(p.from, p.to), 30])); },
+    });
+    await planDriveDays({ userId: "u1", dayKeys: [DAY], events: [], mode: "live", deps: deadlineDeps, deadlineMs: clock + 60_000, now: () => clock });
+    ok(budgets.filter((b) => b.what !== "places").every((b) => b.mode === "live" && b.budget === 20_000), "drive-time final: with time to spare, each live lookup keeps its 20 s budget");
+    budgets.length = 0;
+    await planDriveDays({ userId: "u1", dayKeys: [DAY], events: [], mode: "live", deps: deadlineDeps, deadlineMs: clock + 18_000, now: () => clock });
+    ok(budgets.filter((b) => b.what !== "places").every((b) => b.mode === "live" && b.budget === 13_000), "drive-time final: near the deadline a live lookup's budget is deadline − now − 5 s");
+    budgets.length = 0;
+    await planDriveDays({ userId: "u1", dayKeys: [DAY], events: [], mode: "live", deps: deadlineDeps, deadlineMs: clock + 8_000, now: () => clock });
+    ok(budgets.length > 0 && budgets.every((b) => b.mode === "cache"), "drive-time final: with too little time left for one request, lookups fall back to cache mode (no network)");
+
+    // The sync passes the deadline to the planner and skips the D144 phase late.
+    const seen: Array<number | undefined> = [];
+    let legacyReads = 0;
+    let st: DriveSyncState = { lastSyncAt: 0, legacyCleanedAt: null };
+    let leaseUntil = 0;
+    const sdeps = (over: Partial<DriveSyncDeps> = {}): Partial<DriveSyncDeps> => ({
+      now: () => clock,
+      calendarKeyFor: async () => "personal:u1",
+      listEvents: async (_k, range, purpose) => { if (purpose === "legacy") legacyReads++; return { events: [], coveredThroughMs: range.timeMaxMs }; },
+      insertEvent: async () => ({ id: "n" }), updateEvent: async () => ({}), deleteEvent: async () => {},
+      plan: async (a) => { seen.push(a.deadlineMs); clock += 1_000; return []; },
+      getState: async () => st, setState: async (_u, p) => { st = { ...st, ...p }; },
+      users: async () => [{ id: "u1", name: "Dana", status: "active" }],
+      visits: async () => [], visitStates: async () => new Map(),
+      acquireLease: async (_u, n) => { if (leaseUntil > n) return null; leaseUntil = n + 90_000; return leaseUntil; },
+      renewLease: async (_u, t, n) => (leaseUntil === t ? (leaseUntil = Math.max(n + 90_000, t + 1)) : null),
+      releaseLease: async (_u, t) => { if (leaseUntil === t) leaseUntil = 0; },
+      log: () => {},
+      ...over,
+    });
+    clock = at(6);
+    await syncDriveDays("u1", [DAY], sdeps(), { deadlineMs: clock + 8_000 });
+    ok(seen[0] === at(6) + 8_000 && legacyReads === 0 && !st.legacyCleanedAt, "drive-time final: the sync hands its deadline to the planner and skips the D144 phase with under 10 s left");
+    clock = at(6);
+    await syncDriveDays("u1", [DAY], sdeps(), { deadlineMs: clock + 40_000 });
+    ok(legacyReads > 0, "drive-time final: with time left the D144 phase still runs");
+    seen.length = 0;
+    clock = at(6);
+    await syncAllDrivers({ budgetMs: 50_000, deadlineMs: clock + 50_000 }, sdeps());
+    ok(seen.length === 1 && seen[0] === at(6) + 50_000, "drive-time final: the cron's deadline reaches each rep's planner");
+  });
+
+  // ---- 5a. A D144-only error doesn't mark the rep stale ----
+  await group("legacy errors", async () => {
+    const marks: number[] = [];
+    const sd = { now: () => 42, setState: async () => { marks.push(1); }, log: () => {} } as Partial<DriveSyncDeps>;
+    const res = (errors: string[]): DriveSyncResult => ({ userId: "u1", days: [DAY], google: "written", inserted: 0, updated: 0, removed: 0, legacyRemoved: 0, flagged: 0, errors });
+    await markStaleIfTriggerFailed("u1", res(["legacy list: 503"]), undefined, sd);
+    await markStaleIfTriggerFailed("u1", res(["legacy evt123: 500", "legacy evt9: giving up after 5 tries: x", "legacy: sync lease lost — D144 cleanup skipped this run"]), undefined, sd);
+    ok(marks.length === 0, "drive-time final: D144 cleanup errors ('legacy list: …', 'legacy <id>: …') never mark the rep stale");
+    await markStaleIfTriggerFailed("u1", res(["legacy list: 503", "insert k: quota"]), undefined, sd);
+    ok(marks.length === 1, "drive-time final: a drive write error still marks the rep stale");
+  });
+
+  // ---- 5b. Only the rep's own legs are diffed ----
+  await group("own legs", async () => {
+    const mk = (id: string, key: string) => ({ id, title: "Drive to X", startMs: at(8), endMs: at(9), peakDriveKey: key, peakDriveDay: DAY });
+    const own = existingFromCalendar([mk("a", `u1|${DAY}|base|sv:A`), mk("b", `u2|${DAY}|base|sv:B`), mk("c", `u10|${DAY}|base|sv:C`)], "u1");
+    ok(own.length === 1 && own[0].id === "a", "drive-time final: existingFromCalendar keeps only keys starting with '<userId>|'");
+    const deleted: string[] = [];
+    let st: DriveSyncState = { lastSyncAt: 0, legacyCleanedAt: 1 };
+    let leaseUntil = 0;
+    const r = await syncDriveDays("u1", [DAY], {
+      now: () => at(6),
+      calendarKeyFor: async () => "personal:u1",
+      listEvents: async (_k, range) => ({ events: [{ ...gEv("other", { title: "Drive to B", startMs: at(8), endMs: at(9), location: "", peakDriveKey: `u2|${DAY}|base|sv:B`, peakDriveDay: DAY }), description: "" }], coveredThroughMs: range.timeMaxMs }),
+      insertEvent: async () => ({ id: "n" }), updateEvent: async () => ({}), deleteEvent: async (_k, id) => { deleted.push(id); },
+      plan: async () => [],
+      getState: async () => st, setState: async (_u, p) => { st = { ...st, ...p }; },
+      acquireLease: async (_u, n) => { leaseUntil = n + 90_000; return leaseUntil; },
+      renewLease: async (_u, t, n) => (leaseUntil === t ? (leaseUntil = n + 90_000) : null),
+      releaseLease: async () => {}, log: () => {},
+    });
+    ok(r.google === "written" && deleted.length === 0, "drive-time final: a delegated/shared calendar's other-rep drive event is never deleted by this rep's sync");
+  });
+
+  // ---- 1b (sync). A long-route leg loses its existing event (not kept like a transient retry) ----
+  await group("long route sync", async () => {
+    const deleted: string[] = [];
+    let st: DriveSyncState = { lastSyncAt: 0, legacyCleanedAt: 1 };
+    let leaseUntil = 0;
+    const key = `u1|${DAY}|base|sv:far`;
+    const legs = planDay(input({ stops: [stop("sv:far", at(10), at(11), okAddr(P2.lat, P2.lng, "far"))], routeMinutes: routes([BASE, P2, 400], [P2, BASE, 400]) }));
+    await syncDriveDays("u1", [DAY], {
+      now: () => at(6),
+      calendarKeyFor: async () => "personal:u1",
+      listEvents: async (_k, range) => ({ events: [{ ...gEv("was", { title: "Drive to far", startMs: at(9), endMs: at(10), location: "", peakDriveKey: key, peakDriveDay: DAY }), description: "" }], coveredThroughMs: range.timeMaxMs }),
+      insertEvent: async () => ({ id: "n" }), updateEvent: async () => ({}), deleteEvent: async (_k, id) => { deleted.push(id); },
+      plan: async () => [{ dayKey: DAY, stops: [], legs, totalMin: 0 }],
+      getState: async () => st, setState: async (_u, p) => { st = { ...st, ...p }; },
+      acquireLease: async (_u, n) => { leaseUntil = n + 90_000; return leaseUntil; },
+      renewLease: async (_u, t, n) => (leaseUntil === t ? (leaseUntil = n + 90_000) : null),
+      releaseLease: async () => {}, log: () => {},
+    });
+    ok(legs[0].key === key && deleted.includes("was"), "drive-time final: a long-route leg's existing Google event is removed (non-transient, unlike 'retrying')");
+  });
+
+  // ---- 5c. Drive events: no reminders, busy; drive + legacy deletes send no updates ----
+  await group("event write body", () => {
+    const ev: DesiredDriveEvent = { key: `u1|${DAY}|base|sv:A`, dayKey: DAY, title: "Drive to A", description: "d", startMs: at(8), endMs: at(9) };
+    const body = eventWriteBody(driveEventWrite(ev)) as Record<string, unknown>;
+    ok(JSON.stringify(body.reminders) === JSON.stringify({ useDefault: false, overrides: [] }) && body.transparency === "opaque" &&
+       (body.extendedProperties as { private: Record<string, string> }).private.peakDrive === "1",
+      "drive-time final: a drive event is written with no reminders and as busy (opaque)");
+    const plain = eventWriteBody({ title: "Lunch", startMs: at(12), endMs: at(13) }) as Record<string, unknown>;
+    ok(plain.reminders === undefined && plain.transparency === undefined, "drive-time final: other event writes are unchanged (no reminders/transparency sent)");
+    ok(deleteEventPath("ev 1", "none") === "/calendars/primary/events/ev%201?sendUpdates=none" && deleteEventPath("ev1") === "/calendars/primary/events/ev1?sendUpdates=all",
+      "drive-time final: deleteEvent takes a sendUpdates parameter (default all, unchanged for other callers)");
+    ok(/deleteEvent:\s*\(key, id\) => deleteEvent\(key, id, \{ sendUpdates: "none" \}\)/.test(read("src/lib/drive-sync/sync.ts")),
+      "drive-time final: the drive sync's deletes (drive + D144) send no updates");
+  });
+
+  // ---- 5f. The company page ----
+  await group("company page", () => {
+    const src = read("src/app/(app)/companies/[id]/page.tsx");
+    const lastImport = src.lastIndexOf("\nimport ");
+    const md = src.indexOf("export const maxDuration");
+    ok(md > lastImport && md > 0, "drive-time final: the company page's maxDuration sits below every import");
+    ok(/try \{\s*visitAddr = await addressStatesForVisits\(/.test(src), "drive-time final: the company page's address lookup is guarded (a failure → no flags, page still renders)");
+  });
+
+  // ---- 5g. Rescheduling a visit moves its Google copy instead of adding another ----
+  await group("visit reschedule", async () => {
+    const calls: string[] = [];
+    const cal = {
+      insertEvent: async (_k: string, ev: { title: string }) => { calls.push("insert:" + ev.title); return { id: "g-new", htmlLink: "" }; },
+      updateEvent: async (_k: string, id: string) => { calls.push("update:" + id); return { id, htmlLink: "", status: "confirmed" }; },
+      deleteEvent: async (_k: string, id: string) => { calls.push("delete:" + id); },
+    };
+    const ev = { title: "Gym — Survey", startMs: at(9), endMs: at(10) };
+    const moved = await writeVisitCalendarEvent("personal:u1", "g-old", ev, cal);
+    ok(moved.id === "g-old" && calls.join() === "update:g-old", "drive-time final: a reschedule updates the visit's existing Google event (no second copy)");
+    calls.length = 0;
+    const first = await writeVisitCalendarEvent("personal:u1", null, ev, cal);
+    ok(first.id === "g-new" && calls.join() === "insert:Gym — Survey", "drive-time final: a first schedule inserts as before");
+    calls.length = 0;
+    const gone = await writeVisitCalendarEvent("personal:u1", "g-old", ev, { ...cal, updateEvent: async (_k: string, id: string) => { calls.push("update:" + id); throw new Error("404"); } });
+    ok(gone.id === "g-new" && calls.join() === "update:g-old,delete:g-old,insert:Gym — Survey", "drive-time final: an update that fails removes the old copy, then inserts");
+    ok(/writeVisitCalendarEvent\(akey, rec\.googleEventId/.test(read("src/lib/visit-invite.ts")), "drive-time final: dispatchVisitInvite writes through writeVisitCalendarEvent with the visit's googleEventId");
+  });
+
+  await db.delete(placeBook).where(like(placeBook.key, "%testdrive%"));
+}
+
+/* ---------------- Round 2 (final fix round 2) ---------------- */
+export async function driveTimeRound2Checks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const read = (p: string) => readFileSync(p, "utf8");
+  const group = async (name: string, fn: () => Promise<void> | void) => {
+    try { await fn(); } catch (err) { ok(false, `drive-time round2: ${name} threw: ${(err as Error).message}`); }
+  };
+  const madison = (street: string, over: Partial<GeoSearchHit> = {}): GeoSearchHit => ({
+    title: street, sub: street, name: "", street, city: "Madison", state: "WI", zip: "53703", lat: 43.07, lng: -89.4, display: street, ...over,
+  });
+
+  // ---- 1. Free text verifies only with a house number that matches AND a town that matches ----
+  await group("free-text locality", () => {
+    const noTown: Array<[string, GeoSearchHit]> = [
+      ["100 Main St", madison("100 Main St")],
+      ["123", madison("123 Main St")],
+      ["53703", madison("53703 Main St")],
+      ["4B Conference Room", madison("4B Main St")],
+      ["1-800-FLOWERS", madison("1 Main St")],
+    ];
+    for (const [typed, h] of noTown) {
+      ok(statusOfFreeTextHit(typed, h) === "needs_check", `drive-time round2: '${typed}' (no town or ZIP typed) is needs_check even against a house-numbered hit`);
+    }
+    ok(statusOfFreeTextHit("123 Main St, Madison, WI", madison("123 Main St")) === "verified",
+      "drive-time round2: '123 Main St, Madison, WI' verifies against a Madison hit with house number 123");
+    ok(statusOfFreeTextHit("123 Main St, Madison, WI", madison("123 Main St", { city: "Milwaukee", zip: "53202" })) === "needs_check",
+      "drive-time round2: the same text against a Milwaukee hit is needs_check");
+    ok(statusOfFreeTextHit("123 Main St, Madison, WI", madison("125 Main St")) === "needs_check",
+      "drive-time round2: a hit with house number 125 for a typed 123 is needs_check");
+    ok(statusOfFreeTextHit("123 Main St, WI 53703", madison("123 Main St", { city: "Fitchburg" })) === "verified" &&
+       statusOfFreeTextHit("123 Main St, WI 53703", madison("123 Main St", { city: "Fitchburg", zip: "53711" })) === "needs_check",
+      "drive-time round2: a typed 5-digit ZIP is a locality signal — verified only when it matches the hit's postcode");
+    ok(statusOfFreeTextHit("123a Main St, Madison WI 53703", madison("123A Main St")) === "verified" &&
+       statusOfFreeTextHit("123A Main St, Madison", madison("123 Main St")) === "verified" &&
+       statusOfFreeTextHit("123A Main St, Madison", madison("123B Main St")) === "needs_check",
+      "drive-time round2: house numbers compare case-insensitively and allow a trailing letter (123A ≠ 123B)");
+    ok(statusOfFreeTextHit("123 Main St, Madison", madison("123 Main St", { houseNumber: "125" })) === "needs_check",
+      "drive-time round2: the hit's own house_number (when the geocoder gives one) is what's compared");
+    ok(placeRowFromHit("100 main st", "100 Main St", madison("100 Main St"), 1000).status === "needs_check",
+      "drive-time round2: the place-book write-back uses the same rule (no town typed → needs_check)");
+  });
+  await group("free-text fix paths", async () => {
+    const K = "1 TESTdrive Round2 Rd";
+    const retry = await fixPlace({ key: addressKey(K), label: K, mode: "retry", text: "1 Round2 Rd" }, "u1", fastDeps(async () => [hit("1 Round2 Rd")]));
+    ok(retry.ok && retry.status === "needs_check", "drive-time round2: a Fix retry typed without a town stays needs_check");
+    const retry2 = await fixPlace({ key: addressKey(K), label: K, mode: "retry", text: "1 Round2 Rd, Hortonville" }, "u1", fastDeps(async () => [hit("1 Round2 Rd")]));
+    ok(retry2.ok && retry2.status === "verified", "drive-time round2: a Fix retry with the town typed verifies against a matching hit");
+    const pin = await fixPlace({ key: addressKey("TESTdrive r2 pin"), label: "TESTdrive r2 pin", mode: "pin", lat: 44.2, lng: -88.4 }, "u1", fastDeps(async () => []));
+    ok(pin.ok && pin.status === "verified", "drive-time round2: a hand pin still verifies");
+  });
+
+  // ---- 2. Re-check docs + --skip ----
+  await group("recheck skip + docs", async () => {
+    const { parseRecheckArgs } = await import("./geo-recheck-args");
+    const files: Record<string, string> = {
+      "skip.txt": "# reviewed 2026-10-10\nst-1\n\n  st-2  \n  needs_check  st-3  12 Oak St, Hortonville, WI  — not building-level\nst-4, st-5\n",
+    };
+    const reader = (p: string) => { if (!(p in files)) throw new Error("ENOENT " + p); return files[p]; };
+    const a = parseRecheckArgs(["--apply", "--skip", "skip.txt", "--limit", "5"], reader);
+    ok(a.ok && a.apply && a.limit === 5 && [...a.skipIds].sort().join() === "st-1,st-2,st-3,st-4,st-5",
+      "drive-time round2: --skip <file> reads one site id per line (comments, blanks, commas, and pasted dry-run needs_check lines)");
+    const none = parseRecheckArgs([], reader);
+    ok(none.ok && !none.apply && none.limit === undefined && none.skipIds.size === 0, "drive-time round2: no flags → dry run, no limit, nothing skipped");
+    const missing = parseRecheckArgs(["--skip"], reader);
+    const unreadable = parseRecheckArgs(["--skip", "nope.txt"], reader);
+    const badLimit = parseRecheckArgs(["--limit", "x"], reader);
+    ok(!missing.ok && !unreadable.ok && !badLimit.ok, "drive-time round2: --skip without a readable file (or a bad --limit) is an error, never a silent full run");
+
+    const CO = "TESTdrive:co-r2skip";
+    const ids = ["TESTdrive:r2-a", "TESTdrive:r2-b"];
+    try {
+      for (const id of ids) await saveSite({ id, companyId: CO, name: "Gym", address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944", venueKind: "proscenium", lat: "44.3300", lng: "-88.6300" });
+      await db.update(sites).set({ geoStatus: "verified", geoSource: "geocode", geoVerifiedAt: null, geoVerifiedBy: null }).where(inArray(sites.id, ids));
+      const asked: string[] = [];
+      const rep = await recheckBackfilledVenues({ apply: false, ids, skipIds: new Set([ids[1]]) }, {
+        geocode: async (row) => { asked.push(row.id); return "outage"; }, now: () => 1,
+      });
+      ok(rep.candidates === 1 && asked.join() === ids[0] && rep.skipped === 1, "drive-time round2: skipped site ids are never re-geocoded or written");
+    } finally {
+      await db.delete(sites).where(inArray(sites.id, ids));
+    }
+
+    const d724 = read("DECISIONS.md").split("## D724.")[1]?.split("\n## ")[0] ?? "";
+    const q1 = read("MASTER-QUESTIONS.md").split("**Q1.**")[1]?.split("\n- **Q")[0]?.split("\n---")[0] ?? "";
+    const header = read("scripts/geo-recheck-venues.ts").split("*/")[0];
+    for (const [name, txt] of [["D724", d724], ["MASTER-QUESTIONS Q1", q1], ["the script header", header]] as const) {
+      const flat = txt.replace(/\s+/g, " ");
+      ok(/indistinguishable/i.test(flat) && /before #325/.test(flat) && /needs_check list/i.test(flat) && /--skip/.test(flat),
+        `drive-time round2: ${name} warns that pre-#325 Settings-sidebar pins/picks look like backfill rows, says to review the dry run's needs_check list before --apply, and names --skip`);
+    }
+  });
+
+  // ---- 3. A town-centre lookup outage during the re-check is an outage, never a downgrade ----
+  await group("recheck outage", async () => {
+    const { recheckGeocoder } = await import("@/lib/address-verify/venue-recheck");
+    const realFetch = globalThis.fetch;
+    const ID = "TESTdrive:r2-outage";
+    const urls: string[] = [];
+    try {
+      await saveSite({ id: ID, companyId: "TESTdrive:co-r2out", name: "Gym", address: "12 Oak St", city: "Hortonville", state: "WI", zip: "54944", venueKind: "proscenium", lat: "44.3300", lng: "-88.6300" });
+      await db.update(sites).set({ geoStatus: "verified", geoSource: "geocode", geoVerifiedAt: null, geoVerifiedBy: null }).where(eq(sites.id, ID));
+      // Free text answers with a building in a different-named town (so the city gate consults the
+      // stated town's centre); the structured town-centre lookup is down.
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        const u = String(input);
+        urls.push(u);
+        if (u.includes("city=")) throw new Error("ECONNRESET in test");
+        return new Response(JSON.stringify([{ lat: "44.3301", lon: "-88.6301", address: { house_number: "12", road: "Oak St", village: "Greenville", state: "Wisconsin", postcode: "54944" } }]), { status: 200 });
+      }) as typeof fetch;
+      const rep = await recheckBackfilledVenues({ apply: true, ids: [ID] }, { geocode: recheckGeocoder({ delayMs: 0, pacer: { nextAt: 0 } }), now: () => 99 });
+      globalThis.fetch = realFetch;
+      const [row] = await db.select().from(sites).where(eq(sites.id, ID));
+      ok(urls.some((u) => u.includes("city=")) && rep.outage === 1 && rep.downgraded === 0 && row.geoStatus === "verified" && row.geoVerifiedAt === null,
+        "drive-time round2: a failed town-centre lookup (fetch rejects) skips the venue as an outage — not downgraded, still backfill-shaped for the next run");
+      globalThis.fetch = (async () => { throw new Error("offline in test"); }) as typeof fetch;
+      const rep2 = await recheckBackfilledVenues({ apply: true, ids: [ID] }, { geocode: recheckGeocoder({ delayMs: 0, pacer: { nextAt: 0 } }), now: () => 99 });
+      globalThis.fetch = realFetch;
+      ok(rep2.outage === 1 && rep2.downgraded === 0, "drive-time round2: a free-text search outage is skipped too");
+    } finally {
+      globalThis.fetch = realFetch;
+      await db.delete(sites).where(eq(sites.id, ID));
+    }
+  });
+
+  // ---- 4. PGLITE_PATH alone can't be overridden by .env.local's DATABASE_URL ----
+  await group("explicit db target", async () => {
+    const { resolveExplicitDbTarget } = await import("./db-target");
+    const env1: Record<string, string | undefined> = { PGLITE_PATH: "/tmp/scratch-pg" };
+    const t1 = resolveExplicitDbTarget("t", env1, () => { if (!env1.DATABASE_URL) env1.DATABASE_URL = "postgres://from-env-local"; }, () => {});
+    ok(!!t1 && !t1.hosted && env1.DATABASE_URL === undefined && t1.label.includes("/tmp/scratch-pg"),
+      "drive-time round2: with only PGLITE_PATH set, a DATABASE_URL loaded from .env.local is removed — the run stays local");
+    const env2: Record<string, string | undefined> = { DATABASE_URL: "postgres://explicit" };
+    const t2 = resolveExplicitDbTarget("t", env2, () => {}, () => {});
+    ok(!!t2 && t2.hosted && env2.DATABASE_URL === "postgres://explicit", "drive-time round2: an explicit DATABASE_URL is hosted");
+    ok(resolveExplicitDbTarget("t", {}, () => { throw new Error("must not load"); }, () => {}) === null, "drive-time round2: no explicit target → null, .env.local never read");
+    ok(/resolveExplicitDbTarget\(/.test(read("scripts/geo-recheck-venues.ts")), "drive-time round2: the re-check script resolves its target through resolveExplicitDbTarget");
+  });
+
+  // ---- 5. Re-confirming a visit's Google copy ----
+  await group("visit event status", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const calls: string[] = [];
+    const cal = (status: string | undefined) => ({
+      insertEvent: async () => { calls.push("insert"); return { id: "g-new" }; },
+      updateEvent: async (_k: string, id: string, ev: Record<string, unknown>) => { sent.push(ev); calls.push("update:" + id); return { id, status }; },
+      deleteEvent: async (_k: string, id: string) => { calls.push("delete:" + id); },
+    });
+    const ev = { title: "Gym — Survey", startMs: at(9), endMs: at(10) };
+    const kept = await writeVisitCalendarEvent("personal:u1", "g-old", ev, cal("confirmed"));
+    ok(kept.id === "g-old" && calls.join() === "update:g-old" && sent[0]?.status === "confirmed",
+      "drive-time round2: updating a visit's Google copy sends status 'confirmed' (a rep-deleted event comes back)");
+    calls.length = 0;
+    const re = await writeVisitCalendarEvent("personal:u1", "g-old", ev, cal("cancelled"));
+    ok(re.id === "g-new" && calls.join() === "update:g-old,delete:g-old,insert", "drive-time round2: an update answered with a non-confirmed status falls through to a fresh insert");
+    const body = eventWriteBody({ ...ev, status: "confirmed" }) as Record<string, unknown>;
+    const plain = eventWriteBody(ev) as Record<string, unknown>;
+    ok(body.status === "confirmed" && plain.status === undefined, "drive-time round2: the event body carries status only when asked (other writes unchanged)");
+  });
+
+  // ---- 6. Live triggers carry a deadline (route maxDuration 60 s) ----
+  await group("trigger deadlines", async () => {
+    const NOW = at(6);
+    const seen: Array<number | undefined> = [];
+    let st: DriveSyncState = { lastSyncAt: 0, legacyCleanedAt: 1 };
+    let leaseUntil = 0;
+    const sdeps = (): Partial<DriveSyncDeps> => ({
+      now: () => NOW,
+      calendarKeyFor: async () => "personal:u1",
+      listEvents: async (_k, range) => ({ events: [], coveredThroughMs: range.timeMaxMs }),
+      insertEvent: async () => ({ id: "n" }), updateEvent: async () => ({}), deleteEvent: async () => {},
+      plan: async (a) => { seen.push(a.deadlineMs); return []; },
+      getState: async () => st, setState: async (_u, p) => { st = { ...st, ...p }; },
+      users: async () => [{ id: "u1", name: "Dana", status: "active" }],
+      visits: async () => [visit("SV-1", {})],
+      visitStates: async (vs) => new Map(vs.map((v) => [v.id, okAddr(P1.lat, P1.lng, v.id)])),
+      acquireLease: async (_u, n) => { leaseUntil = n + 90_000; return leaseUntil; },
+      renewLease: async (_u, t, n) => (leaseUntil === t ? (leaseUntil = n + 90_000) : null),
+      releaseLease: async () => { leaseUntil = 0; }, log: () => {},
+    });
+    await resyncForVisitChange(null, { startAt: at(9), assignedTo: "Dana" }, sdeps());
+    ok(seen.length === 1 && seen[0] === NOW + 50_000, "drive-time round2: a visit trigger hands the planner a deadline of start + 50 s");
+    seen.length = 0;
+    await resyncForAddress("place:SV-1", sdeps());
+    ok(seen.length === 1 && seen[0] === NOW + 50_000, "drive-time round2: an address trigger hands the planner a deadline of start + 50 s");
+    seen.length = 0;
+    st = { lastSyncAt: 0, legacyCleanedAt: 1 };
+    await syncDriveIfStale("u1", sdeps());
+    ok(seen.length === 1 && seen[0] === NOW + 50_000, "drive-time round2: the stale-on-load trigger hands the planner a deadline of start + 50 s");
+    const ca = read("src/app/(app)/calendar-actions.ts");
+    ok((ca.match(/triggerDeadline\(\)/g) || []).length >= 2, "drive-time round2: the calendar-event and stay-over triggers pass a deadline too");
+  });
+
+  // ---- 7. Venue Fix retry + Settings type-ahead share the Nominatim pacer ----
+  await group("shared pacer", async () => {
+    const { pacedSearch } = await import("@/lib/address-verify/nominatim-pacer");
+    const realFetch = globalThis.fetch;
+    let fetched = 0;
+    try {
+      globalThis.fetch = (async () => { fetched++; throw new Error("down in test"); }) as typeof fetch;
+      const pacer = { nextAt: 0 };
+      const r1 = await pacedSearch("1 Main St, Madison", { limit: 1 }, { pacer, delayMs: 1100, now: () => 1_000, sleep: async () => {} });
+      ok(Array.isArray(r1) && r1.length === 0 && fetched === 1 && pacer.nextAt === 2_100, "drive-time round2: pacedSearch takes a turn on the pacer and is fail-soft ([] on an outage)");
+      const r2 = await pacedSearch("1 Main St, Madison", { limit: 1 }, { pacer: { nextAt: 60_000 }, delayMs: 1100, maxWaitMs: 3_000, now: () => 1_000, sleep: async () => {} });
+      ok(r2.length === 0 && fetched === 1, "drive-time round2: a queue longer than maxWaitMs answers [] without a request");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    const vl = read("src/lib/venue-locate.ts");
+    ok(/pacedSearch\b/.test(vl) && /pacedSearchCity\b/.test(vl), "drive-time round2: the venue Fix retry searches through the shared paced search");
+    for (const f of ["src/app/(app)/address-actions.ts", "src/app/(app)/settings/actions.ts", "src/app/(app)/companies/actions.ts"]) {
+      ok(/pacedSearch\(/.test(fnBody(read(f), "searchAddressAction")), `drive-time round2: ${f}'s address type-ahead searches through the shared pacer`);
+    }
+    ok(/pacedSearchCity\(/.test(fnBody(read("src/app/(app)/address-actions.ts"), "townCentreForFixAction")), "drive-time round2: the Fix dialog's town-centre lookup takes a turn too");
+    ok(/from "\.\/nominatim-pacer"/.test(read("src/lib/address-verify/place-book.ts")), "drive-time round2: the place book's pacer is the shared one");
+  });
+
+  // ---- 8. A >300-character location can still be fixed ----
+  await group("long label", async () => {
+    const long = "1 TESTdrive Long Rd, Hortonville WI — " + "gate code and directions ".repeat(16);
+    const key = addressKey(long);
+    ok(long.length > 300 && key !== addressKey(long.slice(0, 300)), "drive-time round2: fixture is a >300-char location whose key depends on its tail");
+    const target = cleanFixTarget({ kind: "place", key, label: long });
+    ok(target?.kind === "place" && target.key === key && target.label === long.trim(), "drive-time round2: the Fix target keeps an untruncated long label");
+    const r = await fixPlace({ key, label: long, mode: "pin", lat: 44.3, lng: -88.6 }, "u1", fastDeps(async () => []));
+    const row = (await getPlaces([key])).get(key);
+    ok(r.ok && row?.status === "verified" && row.label.length === 300, "drive-time round2: fixPlace checks the untruncated label against the key and stores it truncated to 300");
+    const live = await placeStatesFor([long], "cache");
+    ok(live.get(key)?.status === "verified" && live.get(key)?.fix?.kind === "place" && (live.get(key)?.fix as { key: string }).key === key,
+      "drive-time round2: the place book keys a long location on its full text, so the fixed row is found again");
+  });
+
+  // ---- 8b. Hardening: over-long keys and write failures ----
+  await group("long key hardening", async () => {
+    const huge = "1 TESTdrive Huge Rd, Hortonville WI — " + "x".repeat(1200);
+    const hugeKey = addressKey(huge);
+    const mid = "2 TESTdrive Mid Rd, Hortonville WI — " + "y".repeat(400);
+    const midKey = addressKey(mid);
+    const normal = "3 TESTdrive Normal Rd, Hortonville WI";
+    const queries: string[] = [];
+    const st = await placeStatesFor([huge, mid, normal], "live", fastDeps(async (q) => { queries.push(q); return [hit("Rd")]; }));
+    ok(hugeKey.length > 1000 && st.get(hugeKey)?.status === "unresolved" && !queries.some((q) => q.includes("Huge")) && !(await getPlaces([hugeKey])).has(hugeKey),
+      "drive-time hardening: a >1000-char key is unresolved, never searched, and no row is written");
+    ok(st.get(hugeKey)?.fix === null, "drive-time hardening: an over-long key offers no Fix target");
+    const midQ = queries.find((q) => q.includes("Mid Rd"));
+    ok(!!midQ && midQ.length <= 300 && (await getPlaces([midKey])).has(midKey) && midKey.length > 300,
+      "drive-time hardening: a 400-char location searches ≤300 chars but is keyed on its full text");
+    ok(queries.some((q) => q.includes("Normal Rd")), "drive-time hardening: the sync continues past an over-long key");
+    ok(cleanFixTarget({ kind: "place", key: hugeKey, label: huge }) === null && cleanFixTarget({ kind: "place", key: midKey, label: mid })?.kind === "place",
+      "drive-time hardening: cleanFixTarget rejects a >1000-char key and accepts a 400-char one");
+    ok(/try \{\s*await writePlace\(row, \{ overwritePin: false \}\);[\s\S]*?\} catch \(e\) \{/.test(read("src/lib/address-verify/place-book.ts")),
+      "drive-time hardening: a failing place-book write is caught per key, so one bad row can't fail the sync");
+    ok(cleanFixTarget({ kind: "place", key: "k", label: "y".repeat(1001) }) === null, "drive-time hardening: cleanFixTarget rejects a >1000-char label");
+  });
+
+  // ---- 9. D720 names the known long-route limit ----
+  await group("D720 limit", () => {
+    const d720 = (read("DECISIONS.md").split("## D720.")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
+    ok(/genuine/i.test(d720) && /acknowledg/i.test(d720), "drive-time round2: D720 notes that a genuine > 6 h trip stays flagged (no acknowledgement path yet)");
+  });
+
+  await db.delete(placeBook).where(like(placeBook.key, "%testdrive%"));
 }

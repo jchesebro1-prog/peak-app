@@ -42,8 +42,6 @@ import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
 export const metadata = { title: "Company — Quartzite-6" };
 
-// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
-export const maxDuration = 60;
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import { RewardsCard } from "./rewards-card";
@@ -70,8 +68,12 @@ import {
 import type { SaveCustomerInput } from "../types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { addressStatesForVisits } from "@/lib/address-verify/targets";
+import type { AddressState } from "@/lib/address-verify/types";
 import { FLAG_TEXT } from "@/lib/drive-plan/plan";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
+
+// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
+export const maxDuration = 60;
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -233,10 +235,16 @@ export default async function CustomerDetailPage({
 
   /* ---- site visits (D76) ---- */
   const visits = await visitsForCustomer(cust.id);
-  const visitAddr = await addressStatesForVisits(
-    visits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
-    "cache"
-  );
+  // Address flags are advisory: a failed lookup shows none, never breaks the page.
+  let visitAddr: Map<string, AddressState> = new Map();
+  try {
+    visitAddr = await addressStatesForVisits(
+      visits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
+      "cache"
+    );
+  } catch (err) {
+    console.error("[address-verify] company visit address states failed", err);
+  }
   // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
   const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
 

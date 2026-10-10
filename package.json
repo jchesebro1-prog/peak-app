@@ -26,6 +26,7 @@
     "part-docs:davinci": "tsx scripts/part-docs-davinci.ts",
     "symbols:davinci": "tsx scripts/symbols-davinci.ts",
     "fixtures:convert": "tsx scripts/fixtures-convert.ts",
+    "geo:recheck-venues": "tsx scripts/geo-recheck-venues.ts",
     "specs:seed": "tsx scripts/seed-specs-once.ts --local",
     "specs:import-library": "tsx scripts/import-spec-library.ts",
     "db:inventory": "tsx scripts/inventory.ts",

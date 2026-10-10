@@ -93,7 +93,7 @@ function driveTotalsByChicagoDay(items: AgendaItem[]): Map<string, number> {
 }
 /** A leg flag's short form for the month grid (verbatim stays in title + aria-label). */
 function compactLegFlag(text: string): string {
-  return text === FLAG_TEXT.route_unavailable ? "Drive unavailable" : text;
+  return text === FLAG_TEXT.route_unavailable ? "Drive unavailable" : text === FLAG_TEXT.long_route ? "Over 6 h" : text;
 }
 function blockColors(it: AgendaItem, tint: (hex: string, a: number) => string): { bg: string; bd: string; ink: string } {
   if (isExternal(it)) { const c = it.external!.color; return { bg: tint(c, 0.14), bd: tint(c, 0.4), ink: c }; }

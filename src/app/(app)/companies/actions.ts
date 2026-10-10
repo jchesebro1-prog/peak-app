@@ -152,8 +152,8 @@ export async function deleteCustomerAction(
 /** Live address search for the edit modal (geo.search / Nominatim). */
 export async function searchAddressAction(query: string): Promise<AddressHitVM[]> {
   await requireUser();
-  const { search } = await import("@/lib/geo");
-  const hits = await search(query, { limit: 6 });
+  const { pacedSearch } = await import("@/lib/address-verify/nominatim-pacer");
+  const hits = await pacedSearch(query, { limit: 6 }, { maxWaitMs: 3_000 });
   return hits.map((h) => ({
     title: h.title,
     sub: h.sub,
