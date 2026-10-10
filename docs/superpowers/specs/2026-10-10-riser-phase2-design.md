@@ -33,7 +33,10 @@ lighting-control parts only, **Bray's codes**, and a one-click wire-type fill.
   Cell rules: **blank = leave unchanged**, **`-` = clear**, anything else is cleaned (`cleanTypeCode`,
   `cleanTagFields`, OD a positive number ≤ 3.0 in, 3 decimals). Invalid cells are refused per row, never guessed.
 - **Suggestion rules** — a pure table (`src/lib/design/conduit-riser/suggest-tags.ts`) over model + description +
-  category, first match wins, case-insensitive:
+  category, first match wins, case-insensitive. **Evaluation order is most-specific device kind first:** EBDK, DEBC,
+  DR, ER, TS, EP, OCC, LVJB, then the outlets CRON, CRO, CRN — so a "DMX emergency bypass controller" or a dimmer
+  rack whose description mentions DMX is never coded as an outlet (corrected 2026-10-10 during A1; the table below
+  lists the rules, not the order):
 
   | match | code | face | mount | height | P/D |
   |---|---|---|---|---|---|
