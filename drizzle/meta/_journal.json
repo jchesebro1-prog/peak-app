@@ -253,6 +253,13 @@
       "when": 1790971856355,
       "tag": "0035_manufacturers",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791598786721,
+      "tag": "0036_krisp_meetings",
+      "breakpoints": true
     }
   ]
 }

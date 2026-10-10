@@ -70,6 +70,11 @@ export type TaskRecord = {
   leadId?: string | null;
   /** the comms thread the task was created from */
   threadId?: string | null;
+  /** #323 — the Krisp meeting this task was filed from (src/lib/meetings/). */
+  meetingId?: string | null;
+  /** #323 — set on a "Waiting on customer" item: the customer owes this.
+   *  assigneeUserId is the Peak rep who owns the nudge; dueAt is the nudge date. */
+  waitingOn?: { contactId: string | null; name: string } | null;
 };
 
 export type TaskTemplateItem = { key: string; title: string; section?: string };
@@ -315,7 +320,15 @@ export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRe
     notes: raw.notes ?? "", createdBy: raw.createdBy ?? "",
     createdAt: at, updatedAt: raw.updatedAt ?? at, doneAt: raw.doneAt ?? null,
   };
-  return { ...t, ...taskLinksOf(raw) };
+  const out: TaskRecord = { ...t, ...taskLinksOf(raw) };
+  // #323 — written only when set, so pre-#323 tasks read identically (no null keys).
+  const meetingId = taskLinkId(raw.meetingId);
+  if (meetingId) out.meetingId = meetingId;
+  const w = raw.waitingOn;
+  if (w && typeof w === "object" && typeof w.name === "string") {
+    out.waitingOn = { contactId: taskLinkId(w.contactId), name: w.name };
+  }
+  return out;
 }
 
 export async function allTasks(): Promise<TaskRecord[]> {

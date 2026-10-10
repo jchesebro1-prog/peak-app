@@ -133,6 +133,7 @@ export type RecordingRecord = {
   actionItems: RecordingActionItem[];
   feedNoteId: string | null;
   prefill: { insertedKeys: string[] }; // summary section keys already inserted
+  meetingId?: string | null; // #323 — the meetings doc its Krisp import became
 
   createdAt: number;
   updatedAt: number;
@@ -255,6 +256,7 @@ export function normalizeRecording(
         ? prefillRaw.insertedKeys.filter((k) => typeof k === "string")
         : [],
     },
+    ...(typeof raw.meetingId === "string" && raw.meetingId ? { meetingId: raw.meetingId } : {}),
     createdAt: at,
     updatedAt: raw.updatedAt ?? at,
   };

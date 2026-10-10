@@ -20,7 +20,7 @@ import { can } from "@/lib/team";
  * on collision instead of one writer's note silently replacing another's.
  */
 
-export type NoteParentKind = "customer" | "lead" | "project" | "quote" | "engagement";
+export type NoteParentKind = "customer" | "lead" | "project" | "quote" | "engagement" | "site";
 
 export type NoteRecord = {
   id: string; // 'N-####' (base 7000)
