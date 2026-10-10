@@ -36,6 +36,7 @@ import { cleanIntakeNotices, MAX_INTAKE_NOTICES, type GridIntakeNotice } from "@
 import { blockedPages, remapSheetRefs, type SheetAdjust } from "@/lib/design/sheet-adjust";
 import {
   cleanDesignator,
+  fillDesignators,
   keepsDesignatorOnSwap,
   needsDesignators,
   readingCtxOf,
@@ -1588,25 +1589,55 @@ export async function renumberDesignators(
   return { ok: true, project: updated, value: { previous, next } };
 }
 
+/** A curtain never carries a designator — a copy without one. */
+function withoutCurtainDesignator(pl: GridPlacement): GridPlacement {
+  if (!pl.curtain || pl.designator === undefined) return pl;
+  const stripped = { ...pl };
+  delete stripped.designator;
+  return stripped;
+}
+
+/**
+ * #320: what ensureDesignators would write, built IN MEMORY — a copy of the
+ * project with each option's missing designators filled (fillDesignators per
+ * option slice, the print paths' rule) and curtains' stripped. The input is
+ * never touched.
+ */
+export function designatorsFilledInMemory(project: GridProject, codeOf: (pl: { partId: string; category?: string }) => string): GridProject {
+  const doc = ensureOptions({ ...project, placements: (project.placements || []).map((pl) => ({ ...withoutCurtainDesignator(pl) })) });
+  const filled = new Map<string, GridPlacement>();
+  for (const o of doc.options) {
+    const own = doc.placements.filter((pl) => pl.optionId === o.id);
+    for (const pl of fillDesignators(own, codeOf, readingCtxOf(doc))) filled.set(pl.id, pl);
+  }
+  doc.placements = doc.placements.map((pl) => filled.get(pl.id) ?? pl);
+  return doc;
+}
+
 /**
  * Existing designs (#320): number every device that has no designator yet,
  * every option on its own, and strip any a curtain carries — in ONE patch.
  * A no-op (no read, no write) when nothing is missing, so the editor page
  * calls it on every load. Doesn't bump `updatedAt`: numbering is
  * bookkeeping, not an edit. Returns the numbered project (or the one given).
+ *
+ * `write` defaults to off on a Vercel preview — previews share production's
+ * database (the device-types precedent) — where the numbers are filled in
+ * memory only (designatorsFilledInMemory) and nothing is stored.
  */
-export async function ensureDesignators(project: GridProject, preload?: DesignatorPreload): Promise<GridProject> {
+export async function ensureDesignators(
+  project: GridProject,
+  preload?: DesignatorPreload,
+  opts: { write?: boolean } = {}
+): Promise<GridProject> {
   if (!needsDesignators(project.placements || [])) return project;
   const { codeOf } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
+  const write = opts.write ?? process.env.VERCEL_ENV !== "preview";
+  if (!write) return designatorsFilledInMemory(project, codeOf);
   const updated = await patchDoc<GridProject>("grid_projects", project.id, (p) => {
     if (!needsDesignators(p.placements || [])) return;
     const doc = ensureOptions(p);
-    doc.placements = (doc.placements || []).map((pl) => {
-      if (!pl.curtain || pl.designator === undefined) return pl;
-      const stripped = { ...pl };
-      delete stripped.designator;
-      return stripped;
-    });
+    doc.placements = (doc.placements || []).map(withoutCurtainDesignator);
     for (const o of doc.options) stampDesignators(doc, o.id, codeOf);
   });
   // A concurrent numbering can land first (the patch then finds nothing to

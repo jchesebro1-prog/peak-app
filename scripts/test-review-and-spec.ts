@@ -60338,6 +60338,31 @@ async function designators320StoreChecks(): Promise<void> {
   ok(raced !== stripped && raced.placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)) &&
      J320(raced.placements.map((pl) => pl.designator ?? "")) === J320(reread.placements.map((pl) => pl.designator ?? "")),
     "#320 ensureDesignators: a concurrent numbering that landed first is returned, never the stale project");
+  // Previews share production's database: on VERCEL_ENV=preview the numbers are filled in memory only.
+  await DS.patchDoc<G320Project>("grid_projects", gp.id, (p) => {
+    for (const pl of p.placements) delete pl.designator;
+  });
+  const bare = await proj();
+  const prevVercelEnv = process.env.VERCEL_ENV;
+  process.env.VERCEL_ENV = "preview";
+  let mem: G320Project;
+  try {
+    mem = await G.ensureDesignators(bare);
+  } finally {
+    if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = prevVercelEnv;
+  }
+  const afterPreview = await proj();
+  ok(mem !== bare && mem.placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)) && D.duplicates(optSlice(mem, opt)).size === 0 &&
+     afterPreview.placements.every((pl) => pl.designator === undefined) && bare.placements.every((pl) => pl.designator === undefined) && afterPreview.updatedAt === bare.updatedAt,
+    "#320 ensureDesignators on a Vercel preview: numbers filled in memory, nothing written, the input untouched");
+  const writtenNow = await G.ensureDesignators(bare, undefined, { write: true });
+  ok(J320(writtenNow.placements.map((pl) => [pl.id, pl.designator ?? ""])) === J320(mem.placements.map((pl) => [pl.id, pl.designator ?? ""])) &&
+     (await proj()).placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)),
+    "#320 ensureDesignators: the in-memory numbers are exactly the ones a write stores");
+  const gs = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
+  ok(gs.includes('const write = opts.write ?? process.env.VERCEL_ENV !== "preview";') && gs.includes("if (!write) return designatorsFilledInMemory(project, codeOf);"),
+    "#320 ensureDesignators: the preview guard sits before the write");
 
   // Two adds at once never hand out the same number among what landed.
   await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
