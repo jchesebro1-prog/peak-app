@@ -11597,7 +11597,7 @@ Spec: docs/superpowers/specs/2026-10-09-morning-triage-design.md · Plan: docs/s
 
 Each person's ranked list at the top of Home (top 10, See more → /triage), built from seven feeds — email waiting on a reply, Recordings call to-dos (with the transcript line), tasks + Queue assignments, lead SLA / follow-ups, today's site visits, quotes awaiting you, renewals due — scored by a visible points table with a plain-words reason. Snapshots at 7:00 (Gmail cron rider) and 12:00 (new /api/triage/build cron) Central, lazily on first view, frozen between; Done / Snooze till tomorrow / Not mine per row; admins can view a teammate's list. Deterministic, no AI.
 
-Open: wire spec 3's at-risk provider and specs 1–2's visit flags into `TRIAGE_HOOKS` when those merge (and have spec 3's `normalizeTask` carry `priority`); add a #323 meetings `CallTodoSource` when that lands; check on production that the 17:00 UTC cron fires (`CRON_SECRET` is already set for the Gmail cron).
+Open: ~~wire spec 3's at-risk provider and specs 1–2's visit flags into `TRIAGE_HOOKS` when those merge (and have spec 3's `normalizeTask` carry `priority`)~~ — done: spec 1's visit flags (D711) and spec 3's at-risk provider + `priority` (#327, D792); add a #323 meetings `CallTodoSource` when that lands; check on production that the 17:00 UTC cron fires (`CRON_SECRET` is already set for the Gmail cron).
 
 ## 325. Address verification + automatic drive time — DONE 2026-10-10 (D712–D724)
 
@@ -11695,3 +11695,26 @@ Open (Jeff-gated):
 - Decide who may edit / re-lead a scheduled visit or remove attendees (MASTER-QUESTIONS T1) — today anyone signed in.
 - Later (out of scope here): Morning triage could surface visit conflicts through `TRIAGE_HOOKS`
   (`src/lib/triage/hooks.ts`).
+
+## 327. Auto task calendar — tasks planned into free work time — DONE 2026-10-10 (D784–D795)
+
+Spec: docs/superpowers/specs/2026-10-09-auto-task-calendar-design.md · Plan: docs/superpowers/plans/2026-10-10-auto-task-calendar.md
+
+Every open assigned task and Queue assignment is planned into its owner's free work time (spec-2 work hours minus
+visits, spec-1 drive blocks, accepted timed Google events and pins; 80 % of each day's free minutes, 15-min grid,
+chunks ≥ 30 min, 8-week horizon) by a blended urgency (tier × 1/(days left + 1), overdue first). Tier High/Normal/Low
+and size S/M/L chips on every task form (tasks card, email-task dialog, meeting to-do accept, Queue). Only pins are
+stored (`started` / `hand`, blob `task_pins:<userId>`); the plan is computed on every view and by morning triage's
+at-risk hook (now live — `TRIAGE_HOOKS.atRisk`, superseding #324's "empty" note). /calendar Week/Day draws task
+blocks (drag to pin, Unpin, a popover with Done / In progress), Month chips come from the plan, an At risk badge +
+panel (Push due date / Hand off / Unpin something), and a Home "Today" card. New assigned items get a due date a week
+out (5:00 pm Chicago). Task blocks are app-only — never written to Google Calendar. Deterministic, no AI, no migration.
+
+Open (Jeff-gated):
+- Production backfill: back up (`DATABASE_URL=… npm run db:export`), dry run `DATABASE_URL=… npm run tasks:backfill-due`,
+  review the per-person counts and the skipped list, then `DATABASE_URL=… npm run tasks:backfill-due -- --apply --yes`.
+- Tell the reps: new tasks now get a due date a week out, and their tasks show as time blocks on /calendar (drag one to
+  pin it; At risk shows what won't make its due date).
+- Review the 80 % fill cap (D793) and the work-hours defaults (Mon–Fri 8:00–5:00, Settings → Field; each person's own
+  hours in Account).
+- Try a drag and an At risk fix (Push due date / Hand off) on production.

@@ -955,6 +955,24 @@ See `.env.example`.
     for conflicts; no migration. Remaining is Jeff-gated: the settings values, a
     real booking with attendees, and a real-mailbox CANCEL check in Gmail/Outlook/
     Apple. Punch item #326.
+49. ✅ **Auto task calendar** (#327, D784–D795) — a pure planner
+    (`src/lib/task-plan/`, `planPerson`) places every open assigned task and
+    Queue assignment into each person's free work time (spec-2 work hours minus
+    visits, spec-1 drive blocks, accepted timed Google events and pins; 80 % of
+    the free time left, 15-min grid, ≥ 30-min chunks, 8 weeks) by blended
+    urgency (tier × 1/(days left + 1), overdue first). Only `started`/`hand`
+    pins are stored (blob `task_pins:<userId>`, `src/lib/stores/task-pins.ts`,
+    500-pin cap); plans are computed on every view (`savePlanPins` in
+    `after()`) and by morning triage's now-live `TRIAGE_HOOKS.atRisk`
+    (`task-plan/triage.ts`, once per build). /calendar Week/Day draws blocks
+    (drag pins and Unpin — owner or admin only — popover), Month chips come
+    from the plan, an At risk panel (Push due date / Hand off / Unpin
+    something) and a streamed Home "Today" card; tier/size chips on every task
+    form; +7 default due date on new assigned items (5 pm Chicago; consulting-
+    scheduled tasks skipped); one-time `npm run tasks:backfill-due`. Task
+    blocks are app-only; no migration. Remaining is Jeff-gated: the production
+    backfill, telling the reps, and reviewing the 80 % cap and work hours.
+    Punch item #327.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

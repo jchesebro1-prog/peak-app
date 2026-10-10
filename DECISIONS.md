@@ -10737,3 +10737,94 @@ connection) it retries once without the preference — the saver's personal box,
 mailbox actually used; a timeout is never retried, and an original mailbox whose owner is no longer an active user is
 ignored up front. A calendar copy whose person is missing from the roster reads "failed" and is kept to retry (not
 "reconnect", and not dropped).
+
+## D784. Blended urgency curve (#327, 2026-10-10)
+
+An item that isn't overdue has weight = tier factor (High 3 · Normal 2 · Low 1; blank = Normal) × 1/(days left + 1),
+days left = whole Chicago calendar days from today to the due day (0 = due today). Items compare by exact integer
+cross-products (`tierA × (daysLeftB + 1)` vs `tierB × (daysLeftA + 1)`), never floats. Overdue outranks everything,
+most overdue first, then tier. Ties: earlier due → older `createdAt` → item key. So a Low due tomorrow (1/2) beats a
+High next week (3/8) and a High next month (3/31). Pinned by the `auto-cal urgency:` checks.
+
+## D785. Pins live in a per-person blob; stale pins are swept (#327, 2026-10-10)
+
+Pins are stored in `task_pins:<userId>` (the schedule-prefs blob idiom), one top-level key per pin
+`<itemKey>@<startMs>` → `{ endMs, kind }` (`src/lib/stores/task-pins.ts`) — not a `planPins` field on the record as
+the spec's table sketches. Pins belong to a calendar, so a hand-off leaves them behind and they are cleared;
+concurrent adds can't lose each other (setBlob's atomic merge); no record write (and so no `updatedAt` bump or Google
+Tasks sync) on every page view. The planner's `staleKeys` deletes pins of items that are no longer this person's open
+work — including PAST pins of done/deleted/handed-off items, not only future ones. The loader fails closed: if any
+item source fails to load, no stale sweep runs (it would delete live pins).
+
+## D786. The plan starts at the current quarter-hour, rounded down (#327, 2026-10-10)
+
+The spec says the plan starts at now rounded UP to the quarter-hour. That would make "a block that has already begun"
+unreachable at compute time, so the plan starts at `floorQuarter(now)`: the block on screen right now is the one that
+locks as `started` on the next compute.
+
+## D787. +7 default due date: assigned items only, stamped 5:00 pm Chicago (#327, 2026-10-10)
+
+New tasks and Queue assignments with an assignee and no due date get due = today + 7 days, stamped 5:00 pm Chicago
+(`createTask`, `createAutoTask`, `createTaskOnce` — so Krisp meeting to-dos too — and `createAssignment`). An unassigned
+checklist row isn't planned and, once overdue, would reach every bell (`taskBellItems` shows anyone's overdue task), so
+it stays undated. 5 pm keeps the UTC date (what Google Tasks shows) equal to the Chicago day. Tasks the consulting
+schedule engine places (a `startAt` and/or a `schedule`) are skipped — the engine owns their dates, and a +7 stamp
+could land before the start or past the engagement's end. The planner's deadline is the END of the due's Chicago day.
+Undated assigned items plan as due `createdAt + 7` (virtual, never stored). One-time backfill:
+`npm run tasks:backfill-due` (dry run by default; `--apply`, hosted also `--yes`; idempotent; lists what it skips).
+
+## D788. Blocked tasks are not planned (#327, 2026-10-10)
+
+"Open" for the planner = Open or In progress. A Blocked task can't be worked, so it isn't placed; it keeps its #215
+calendar chip.
+
+## D789. Unfinished remainder (#327, 2026-10-10)
+
+When an item's pins have all passed and it's still open, its remainder = size − pinned minutes so far, at least 30
+minutes (a sub-30 remainder rounds up to 30), placed from the first work day on/after the day after its last pin. A
+passed `hand` pin triggers this the same as a `started` one. Only the chunks on the remainder's FIRST placed day are
+pinned; later days stay computed. A task still open after its whole size gets another 30 minutes each morning.
+
+## D790. In progress pins the item's current block (#327, 2026-10-10)
+
+Marking an item In progress pins its current (first) block at the next plan compute (any view or the morning cron) —
+the same known limit the spec states for started blocks. An in-progress pin is locked like a started one.
+
+## D791. Everyone view reads each person's Google calendar (#327, 2026-10-10)
+
+The Everyone view reads each person's Google calendar (8-week window, 6 s timeout each, in parallel). A person whose
+calendar is unreadable or not connected is planned without it, with "Planned without <name>'s Google calendar — may
+overlap meetings" (the viewer's own: "Planned without your Google calendar — may overlap meetings"); several such
+people collapse into one line. "No calendar connected" shows the same note as "can't be read". When a person's
+Google read wasn't ok, NEW `started` pins from that plan are not persisted — a block that only fit because a meeting
+was invisible must not lock.
+
+## D792. Morning triage computes plans; Home "Today" card (#327, 2026-10-10)
+
+The morning cron computes plans through `TRIAGE_HOOKS.atRisk` (`taskPlanAtRisk`, `src/lib/task-plan/triage.ts`) —
+no new rider on the full 60 s daily trigger. Plans are computed once per triage build for every user it builds,
+with the build's shared roster/tasks/assignments/visits loads and parallel Google reads bounded by the cron's
+deadline; `normalizeTask` carries `priority` into the tasks feed. This fills the at-risk seam D707–D711 left empty.
+The Home "Today" card joins the Home preset after My Queue (customized layouts add it from the gallery) and streams
+in its own `<Suspense>` with an internal try/catch — Home never waits on the plan, and a failure shows a small note.
+
+## D793. Today's 80 % is of the free time remaining from now (#327, 2026-10-10)
+
+Each day's cap is 80 % of its free minutes; for today it's 80 % of the free time remaining from the plan start, not
+of the whole day — so a plan computed at 3 pm doesn't stuff the rest of the day. The last ~30 minutes of a work day
+are therefore rarely planned.
+
+## D794. Only the owner or an admin moves a plan (#327, 2026-10-10)
+
+Drag-to-pin and Unpin change a person's calendar, so they are refused ("Only the owner or an admin can change this
+plan.") unless the actor is the item's owner (derived from the stored record, never the request) or holds
+`manage_users`. Push due date, Hand off, tier/size and In progress follow the app's existing task-edit rule (any
+signed-in user). A move is atomic and refuses a stale source; a drop lands no earlier than the current quarter-hour;
+durations come from the server, never the client.
+
+## D795. Pin cap (#327, 2026-10-10)
+
+At most 500 pins per person (`PIN_MAX_PER_PERSON`). Over the cap, the persist path prunes oldest-first, only until
+back at the cap, PAST pins the plan no longer depends on: first past pins of items that aren't the person's open work,
+then past pins of an open item that would still have its whole size pinned without them (never its latest-ending
+pin). Never a current or future pin; anything still over the cap is kept and logged.
