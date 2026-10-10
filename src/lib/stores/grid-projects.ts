@@ -747,7 +747,7 @@ function dropSheetInPatch(p: GridProject, sheetId: string, by: string, note: str
 }
 
 /**
- * #319 (D696): a real plan landed — remove the generated plan
+ * #319 (D697): a real plan landed — remove the generated plan
  * (`intake.baseSheetId`) exactly like Delete sheet (#317) when no device or
  * wire on any option is on it: its Spaces go after one automatic revision,
  * riser boxes pruned. With devices (or, failing that, wires) on it, it stays
