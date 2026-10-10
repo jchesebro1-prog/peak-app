@@ -15,7 +15,13 @@ import * as MA from "@/lib/meetings/actions-core";
 import { allTasks, getTask } from "@/lib/stores/tasks";
 import { getNote } from "@/lib/stores/notes";
 import { activeUsers } from "@/lib/users";
-import { KrispApiError, KrispAuthError, KrispRateLimitError } from "@/lib/krisp/errors";
+import { refreshMeetingDetailWith, type RefreshDeps } from "@/lib/meetings/sync";
+import { getContact as getContactRow } from "@/lib/identity/contacts";
+import { upsertDoc } from "@/db/doc-store";
+import { getDb } from "@/db";
+import { companies as companiesT, sites as sitesT, contacts as contactsT, contactEmails as contactEmailsT } from "@/db/schema";
+import { inArray } from "drizzle-orm";
+import { KrispApiError, KrispAuthError, KrispNotReadyError, KrispRateLimitError } from "@/lib/krisp/errors";
 import type { RecordingRecord } from "@/lib/stores/recordings";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -526,8 +532,43 @@ export async function meetings323SyncChecks(ok: Ok): Promise<void> {
 /* ---------- Task 5: mutations (actions-core) ---------- */
 
 export async function meetings323ActionChecks(ok: Ok): Promise<void> {
+  const { saveCompany } = await import("@/lib/identity/companies");
+  const { saveSite } = await import("@/lib/identity/sites");
+  const { saveContact } = await import("@/lib/identity/contacts");
+  const CO = "TEST323-co", CO2 = "TEST323-co2", SITE = "TEST323-site", SITE2 = "TEST323-site2", SITE_OTHER = "TEST323-site3";
+  const CT = "TEST323-ct-tom", CT2 = "TEST323-ct-pat";
+  await saveCompany({ id: CO, name: "TEST323 Osakis Fixture", type: "" });
+  await saveCompany({ id: CO2, name: "TEST323 Other Fixture", type: "" });
+  await saveSite({ id: SITE, companyId: CO, name: "TEST323 Auditorium", isPrimary: true, venueKind: "proscenium", legacyLocId: "TEST323-loc" });
+  await saveSite({ id: SITE2, companyId: CO, name: "TEST323 Gym", isPrimary: false, venueKind: "proscenium" });
+  await saveSite({ id: SITE_OTHER, companyId: CO2, name: "TEST323 Elsewhere", isPrimary: true, venueKind: "proscenium" });
+  await saveContact({ id: CT, firstName: "Tom", lastName: "Ellis", homeCompanyId: CO, title: "" });
+  await saveContact({ id: CT2, firstName: "Pat", lastName: "Lee", homeCompanyId: CO, title: "" });
+  registerFixture("leads", "TEST323:lead");
+  await upsertDoc("leads", { id: "TEST323:lead", customerId: CO, title: "TEST323 lead" });
+  try {
+    await actionChecks(ok, { CO, CO2, SITE, SITE2, SITE_OTHER, CT, CT2, LEAD: "TEST323:lead" });
+  } finally {
+    const db = await getDb();
+    const madeContacts = (await db.select({ id: contactsT.id }).from(contactsT).where(inArray(contactsT.homeCompanyId, [CO, CO2]))).map((r) => r.id);
+    if (madeContacts.length) {
+      await db.delete(contactEmailsT).where(inArray(contactEmailsT.contactId, madeContacts));
+      await db.delete(contactsT).where(inArray(contactsT.id, madeContacts));
+    }
+    await db.delete(sitesT).where(inArray(sitesT.id, [SITE, SITE2, SITE_OTHER]));
+    await db.delete(companiesT).where(inArray(companiesT.id, [CO, CO2]));
+  }
+}
+
+type Fx = { CO: string; CO2: string; SITE: string; SITE2: string; SITE_OTHER: string; CT: string; CT2: string; LEAD: string };
+
+async function actionChecks(ok: Ok, fx: Fx): Promise<void> {
+  const { CO, CO2, SITE, SITE2, SITE_OTHER, CT, CT2, LEAD } = fx;
   const me = { id: "u1", name: "Jeff Chesebro" };
   const outsider = { id: "u-out323", name: "Out Sider" };
+  const users = await activeUsers();
+  const jeff = users.find((u) => u.name === "Jeff Chesebro");
+  const other = users.find((u) => u.id !== "u1" && u.id !== jeff?.id);
   let n = 0;
   const mk = async (over: Partial<MeetingRecord> = {}): Promise<MeetingRecord> => {
     const kid = "TEST323act" + String(++n).padStart(22, "0");
@@ -536,30 +577,44 @@ export async function meetings323ActionChecks(ok: Ok): Promise<void> {
     registerFixture("meetings", m.id);
     return MS.saveMeeting(m);
   };
-  const rejects = async (p: Promise<unknown>, cls?: new (...a: never[]) => Error): Promise<boolean> => {
-    try { await p; return false; } catch (e) { return cls ? e instanceof cls : e instanceof Error && !(e instanceof MA.MeetingAccessError); }
+  /** default: an intended, user-facing refusal (MeetingUserError) */
+  const rejects = async (p: Promise<unknown>, cls: new (...a: never[]) => Error = MA.MeetingUserError): Promise<boolean> => {
+    try { await p; return false; } catch (e) { return e instanceof cls; }
   };
   const sug = (kind: MeetingRecord["suggestions"][number]["kind"], id: string, strength: "strong" | "weak") =>
     ({ kind, id, label: id, score: strength === "strong" ? 90 : 50, strength, reasons: ["t"] });
-  const CO = "TEST323-co", SITE = "TEST323-site";
+  const todo = (key: string, title: string, assigneeLabel: string | null, dueDate: string | null, suggested: "task" | "waiting" | "note") =>
+    ({ key, title, assigneeLabel, dueDate, suggested, decision: null });
+  const created = (m: MeetingRecord, key: string) => m.todos.find((t) => t.key === key)?.decision?.createdId || "";
 
   // (1) confirm strong only; weak-only untouched by Confirm all
-  const a = await mk({ suggestions: [sug("company", CO, "strong"), sug("venue", SITE, "strong"), sug("contact", "c-tom", "weak")] });
+  const a = await mk({ suggestions: [sug("company", CO, "strong"), sug("venue", SITE, "strong"), sug("contact", CT, "weak")] });
   const a2 = await MA.confirmSuggestions(a.id, "strong", me);
   ok(a2.links.customerId === CO && a2.links.siteId === SITE && a2.links.contactIds.length === 0 && !!a2.filedAt && a2.filedBy === "Jeff Chesebro",
     "#323 confirmSuggestions(strong) applies only the strong suggestions and files the meeting");
-  const weakOnly = await mk({ suggestions: [sug("company", "monte", "weak")] });
+  const weakOnly = await mk({ suggestions: [sug("company", CO2, "weak")] });
   const strongTop = await mk({ suggestions: [sug("company", CO, "strong")] });
   const all = await MA.confirmAllStrong([weakOnly.id, strongTop.id], me);
   const w2 = await MS.getMeeting(weakOnly.id), s2 = await MS.getMeeting(strongTop.id);
   ok(all.filed === 1 && w2?.filedAt === null && w2.links.customerId === null && s2?.links.customerId === CO && !!s2.filedAt,
     "#323 confirmAllStrong files the strong-top row and leaves a weak-only meeting unchanged");
-  const picked = await mk({ suggestions: [sug("company", "oshkosh", "weak"), sug("company", "oshct", "weak")], links: { ...emptyLinks(), customerId: CO, siteId: SITE } });
-  const p2 = await MA.confirmSuggestions(picked.id, [{ kind: "company", id: "oshct" }], me);
-  ok(p2.links.customerId === "oshct" && p2.links.siteId === null, "#323 picking a different company replaces it and drops the old company's venue");
+  const picked = await mk({ suggestions: [sug("company", CO2, "weak")], links: { ...emptyLinks(), customerId: CO, siteId: SITE } });
+  const p2 = await MA.confirmSuggestions(picked.id, [{ kind: "company", id: CO2 }], me);
+  ok(p2.links.customerId === CO2 && p2.links.siteId === null, "#323 picking a different company replaces it and drops the old company's venue");
+  const stale = await mk({ suggestions: [sug("company", "TEST323-gone", "strong")] });
+  ok(await rejects(MA.confirmSuggestions(stale.id, "strong", me)) && (await MS.getMeeting(stale.id))?.links.customerId === null,
+    "#323 confirmSuggestions refuses a suggestion whose company no longer exists");
+  // share guard on confirm (review fix 1)
+  const shc = await mk({ links: { ...emptyLinks(), customerId: CO }, filedAt: 1, filedBy: "x",
+    share: { sharedAt: 1, sharedBy: "x", summary: "Recap" }, suggestions: [sug("company", CO2, "weak")] });
+  ok(await rejects(MA.confirmSuggestions(shc.id, [{ kind: "company", id: CO2 }], me), MA.MeetingShareGuardError) &&
+     (await MS.getMeeting(shc.id))?.links.customerId === CO,
+    "#323 confirmSuggestions re-pointing a shared meeting at another company throws MeetingShareGuardError and changes nothing");
+  const shc2 = await MA.confirmSuggestions(shc.id, [{ kind: "company", id: CO2 }], me, { confirmUnshare: true });
+  ok(shc2.share === null && shc2.links.customerId === CO2, "#323 confirmSuggestions with confirmUnshare re-points and clears the share");
 
   // (2) outsider on a private meeting → MeetingAccessError from every action
-  const priv = await mk({ todos: [{ key: "k", title: "x", assigneeLabel: null, dueDate: null, suggested: "note", decision: null }] });
+  const priv = await mk({ todos: [todo("k", "x", null, null, "note")] });
   const denied = await Promise.all([
     rejects(MA.confirmSuggestions(priv.id, "strong", outsider), MA.MeetingAccessError),
     rejects(MA.confirmAllStrong([priv.id], outsider), MA.MeetingAccessError),
@@ -573,17 +628,35 @@ export async function meetings323ActionChecks(ok: Ok): Promise<void> {
     rejects(MA.stopSharing(priv.id, outsider), MA.MeetingAccessError),
     rejects(MA.setNoise(priv.id, false, outsider), MA.MeetingAccessError),
     rejects(MA.refreshFromKrisp(priv.id, outsider), MA.MeetingAccessError),
+    rejects(MA.newContactFromAttendee(priv.id, "name:pat", CO, outsider), MA.MeetingAccessError),
     rejects(MA.confirmSuggestions("km-TEST323-missing", "strong", me), MA.MeetingAccessError),
   ]);
   ok(denied.every(Boolean) && (await MS.getMeeting(priv.id))?.links.customerId === null,
     `#323 an outsider gets MeetingAccessError from every action on a private meeting (${denied.map((d) => (d ? 1 : 0)).join("")})`);
 
-  // (3) contact cap; internal-only link → internal scope
+  // (3) contact cap; internal-only link → internal scope; ids are checked (review fix 3)
   const lk = await mk();
   ok(await rejects(MA.setLinks(lk.id, { contactIds: Array.from({ length: 26 }, (_, i) => `c-${i}`) }, me)),
     "#323 setLinks refuses 26 contacts");
-  const lk2 = await MA.setLinks(lk.id, { internalUserIds: ["u2"] }, me);
-  ok(meetingScope(lk2) === "internal" && !!lk2.filedAt && canSeeMeeting(lk2, "u2"), "#323 linking only an internal person → internal scope, filed");
+  const lk2 = await MA.setLinks(lk.id, { internalUserIds: [other?.id || "?"] }, me);
+  ok(!!other && meetingScope(lk2) === "internal" && !!lk2.filedAt && canSeeMeeting(lk2, other.id), "#323 linking only an internal person → internal scope, filed");
+  const bad = await Promise.all([
+    rejects(MA.setLinks(lk.id, { customerId: "TEST323-nope" }, me)),
+    rejects(MA.setLinks(lk.id, { customerId: CO, siteId: SITE_OTHER }, me)),
+    rejects(MA.setLinks(lk.id, { siteId: SITE }, me)),
+    rejects(MA.setLinks(lk.id, { contactIds: ["TEST323-ct-nope"] }, me)),
+    rejects(MA.setLinks(lk.id, { internalUserIds: ["u-nope323"] }, me)),
+    rejects(MA.setLinks(lk.id, { work: { type: "lead", id: "TEST323:nolead", label: "x" } }, me)),
+    rejects(MA.setSpeaker(lk.id, "1", { contactId: "TEST323-ct-nope", name: "X" }, me)),
+    rejects(MA.addAttendee(lk.id, { name: "X", email: null, userId: "u-nope323" }, me)),
+  ]);
+  const lkAfter = await MS.getMeeting(lk.id);
+  ok(bad.every(Boolean) && lkAfter?.links.customerId === null && lkAfter.links.contactIds.length === 0,
+    `#323 unknown company / venue of another company / venue with no company / unknown contact, user or work → refused (${bad.map((d) => (d ? 1 : 0)).join("")})`);
+  const lk3 = await MA.setLinks(lk.id, { customerId: CO, siteId: SITE2, contactIds: [CT], work: { type: "lead", id: LEAD, label: "Lead" } }, me);
+  const lk4 = await MA.setLinks(lk.id, { customerId: CO2 }, me);
+  ok(lk3.links.siteId === SITE2 && lk3.links.work?.id === LEAD && lk4.links.customerId === CO2 && lk4.links.siteId === null && lk4.links.work === null &&
+     lk4.links.contactIds.join() === CT, "#323 real ids link; changing the company drops the old company's venue and work");
 
   // (4) share guard
   const sh = await mk();
@@ -596,7 +669,7 @@ export async function meetings323ActionChecks(ok: Ok): Promise<void> {
   ok(unshared.share === null && unshared.links.customerId === null, "#323 confirmUnshare unlinks and clears the share");
   const sh2 = await mk({ links: { ...emptyLinks(), customerId: CO } });
   await MA.shareWithCustomer(sh2.id, "Recap", me);
-  ok(await rejects(MA.setLinks(sh2.id, { customerId: "oshkosh" }, me), MA.MeetingShareGuardError),
+  ok(await rejects(MA.setLinks(sh2.id, { customerId: CO2 }, me), MA.MeetingShareGuardError),
     "#323 re-pointing a shared meeting at another company also needs the unshare confirmation");
   ok(await rejects(MA.shareWithCustomer(sh2.id, "   ", me)) && await rejects(MA.shareWithCustomer(sh2.id, "x".repeat(8001), me)),
     "#323 an empty or > 8000-char summary is refused");
@@ -604,66 +677,89 @@ export async function meetings323ActionChecks(ok: Ok): Promise<void> {
   ok(stopped.share === null && stopped.links.customerId === CO, "#323 stopSharing clears the share, keeps the link");
 
   // (5) no customer → no share
-  ok(await rejects(MA.shareWithCustomer(lk.id, "Recap", me)), "#323 shareWithCustomer needs a linked company");
+  const noCo = await mk();
+  ok(await rejects(MA.shareWithCustomer(noCo.id, "Recap", me)), "#323 shareWithCustomer needs a linked company");
 
-  // (6) task: one task, linked; idempotent (also under a double click)
-  const jeff = (await activeUsers()).find((u) => u.name === "Jeff Chesebro");
-  const todo = (key: string, title: string, assigneeLabel: string | null, dueDate: string | null, suggested: "task" | "waiting" | "note") =>
-    ({ key, title, assigneeLabel, dueDate, suggested, decision: null });
+  // (6) task: one task, linked; idempotent (also under a double click and across processes)
   const tm = await mk({
     filedAt: 1, filedBy: "Jeff Chesebro",
-    links: { ...emptyLinks(), customerId: CO, siteId: SITE, contactIds: ["c-tom"], work: { type: "lead", id: "TEST323-lead", label: "Lead" } },
+    links: { ...emptyLinks(), customerId: CO, siteId: SITE, contactIds: [CT], work: { type: "lead", id: LEAD, label: "Lead" } },
     krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis scope",
-      segments: [{ speaker: "2", text: "Speaker 2 will send it", start: 0, end: 1 }] },
-    speakerMap: { "2": { contactId: "c-tom", name: "Tom Ellis" } },
+      segments: [{ speaker: "2", text: "Speaker 2 will send it", start: 0, end: 1 }, { speaker: "3", text: "ok", start: 1, end: 2 }] },
+    speakerMap: { "2": { contactId: CT, name: "Tom Ellis" }, "3": { userId: other?.id || "?", name: "Zz Nomatch" } },
     todos: [todo("k1", "Send drawings", "Jeff Chesebro", "2026-10-15", "task"), todo("k1b", "Book lift", "Jeff", null, "task"),
-      todo("k2", "Send the rigging plot", "Speaker 2", null, "waiting")],
+      todo("k2", "Send the rigging plot", "Speaker 2", null, "waiting"), todo("k5", "Order pipe", "Speaker 3", null, "task"),
+      todo("k6", "Bad due", null, null, "task")],
   });
   const before = (await allTasks()).length;
   const d1 = await MA.decideTodo(tm.id, "k1", "task", {}, me);
-  const tid = d1.todos.find((t) => t.key === "k1")?.decision?.createdId || "";
+  const tid = created(d1, "k1");
   if (tid) registerFixture("tasks", tid);
   const task = await getTask(tid);
-  ok(!!task && task.meetingId === tm.id && task.customerId === CO && task.siteId === SITE && task.leadId === "TEST323-lead" &&
-     (task.contactIds || []).join() === "c-tom" && !!jeff && task.assigneeUserId === jeff.id && task.dueAt === Date.UTC(2026, 9, 15, 22),
-    "#323 decideTodo(task) creates a task carrying meeting/company/venue/lead/contacts, the resolved assignee, due 17:00 Chicago");
+  ok(!!task && task.meetingId === tm.id && task.customerId === CO && task.siteId === "TEST323-loc" && task.leadId === LEAD &&
+     (task.contactIds || []).join() === CT && !!jeff && task.assigneeUserId === jeff.id && task.dueAt === Date.UTC(2026, 9, 15, 22),
+    "#323 decideTodo(task) creates a task carrying meeting/company/venue (directory id)/lead/contacts, the resolved assignee, due 17:00 Chicago");
   const d1again = await MA.decideTodo(tm.id, "k1", "task", {}, me);
-  ok(d1again.todos.find((t) => t.key === "k1")?.decision?.createdId === tid && (await allTasks()).length === before + 1,
-    "#323 decideTodo is idempotent: the same createdId, no second task");
+  ok(created(d1again, "k1") === tid && (await allTasks()).length === before + 1, "#323 decideTodo is idempotent: the same createdId, no second task");
   const [r1, r2] = await Promise.all([MA.decideTodo(tm.id, "k1b", "task", {}, me), MA.decideTodo(tm.id, "k1b", "task", {}, me)]);
-  const b1 = r1.todos.find((t) => t.key === "k1b")?.decision?.createdId, b2 = r2.todos.find((t) => t.key === "k1b")?.decision?.createdId;
+  const b1 = created(r1, "k1b");
   if (b1) registerFixture("tasks", b1);
-  ok(!!b1 && b1 === b2 && (await allTasks()).length === before + 2, "#323 two concurrent decides of one to-do create one task");
+  ok(!!b1 && b1 === created(r2, "k1b") && (await allTasks()).length === before + 2, "#323 two concurrent decides of one to-do create one task");
+  // another process created the task but its meeting write was lost: the record id is deterministic, so no duplicate
+  await MS.patchMeeting(tm.id, (x) => ({ ...x, todos: x.todos.map((t) => (t.key === "k1" ? { ...t, decision: null } : t)) }));
+  const d1lost = await MA.decideTodo(tm.id, "k1", "task", {}, me);
+  ok(created(d1lost, "k1") === tid && (await allTasks()).length === before + 2,
+    "#323 a decide whose earlier meeting write was lost re-finds the same task (deterministic id), never a second one");
+  const d5 = await MA.decideTodo(tm.id, "k5", "task", {}, me);
+  const t5 = await getTask(created(d5, "k5"));
+  if (t5) registerFixture("tasks", t5.id);
+  ok(!!t5 && !!other && t5.assigneeUserId === other.id, "#323 a to-do owned by a speaker mapped to a Peak user is assigned to that user");
+  ok(await rejects(MA.decideTodo(tm.id, "k6", "task", { dueAt: Number.NaN }, me)) &&
+     await rejects(MA.decideTodo(tm.id, "k6", "task", { dueAt: "soon" as unknown as number }, me)) &&
+     !(await MS.getMeeting(tm.id))?.todos.find((t) => t.key === "k6")?.decision,
+    "#323 decideTodo refuses a due date that isn't a finite number or null");
 
   // (7) waiting on the customer
   const t0 = Date.now();
   const d2 = await MA.decideTodo(tm.id, "k2", "waiting", {}, me);
-  const wid = d2.todos.find((t) => t.key === "k2")?.decision?.createdId || "";
+  const wid = created(d2, "k2");
   if (wid) registerFixture("tasks", wid);
   const wt = await getTask(wid);
   const WEEK = 7 * 86_400_000;
-  ok(!!wt && wt.waitingOn?.name === "Tom Ellis" && wt.waitingOn.contactId === "c-tom" && wt.assigneeUserId === "u1" &&
+  ok(!!wt && wt.waitingOn?.name === "Tom Ellis" && wt.waitingOn.contactId === CT && wt.assigneeUserId === "u1" &&
      wt.dueAt != null && wt.dueAt >= t0 + WEEK && wt.dueAt <= Date.now() + WEEK && wt.meetingId === tm.id,
     "#323 decideTodo(waiting) → task waiting on the mapped speaker, owned by the rep, due in 7 days");
 
-  // (8) note on the venue
-  const nm = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), customerId: CO, siteId: "TEST323-site2" },
+  // (8) note on the venue, deterministic id
+  const nm = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), customerId: CO, siteId: SITE2 },
     todos: [todo("k3", "Ceiling height", null, null, "note")] });
   const d3 = await MA.decideTodo(nm.id, "k3", "note", {}, me);
-  const nid = d3.todos.find((t) => t.key === "k3")?.decision?.createdId || "";
+  const nid = created(d3, "k3");
   if (nid) registerFixture("notes", nid);
   const note = await getNote(nid);
-  ok(!!note && note.parentKind === "site" && note.parentId === "TEST323-site2" && note.customerId === CO, "#323 decideTodo(note) on a venue-linked meeting → a site note");
+  ok(!!note && note.parentKind === "site" && note.parentId === SITE2 && note.customerId === CO, "#323 decideTodo(note) on a venue-linked meeting → a site note");
+  await MS.patchMeeting(nm.id, (x) => ({ ...x, todos: x.todos.map((t) => ({ ...t, decision: null })) }));
+  ok(created(await MA.decideTodo(nm.id, "k3", "note", {}, me), "k3") === nid, "#323 a re-decided note re-finds the same note (deterministic id)");
 
   // (9) unfiled → refused
   const uf = await mk({ todos: [todo("k4", "x", null, null, "note")] });
   ok(await rejects(MA.decideTodo(uf.id, "k4", "dismiss", {}, me)), "#323 decideTodo refuses an unfiled meeting");
 
+  // decideAllTodos partial failure (review fix 6): the task lands, the note can't (no parent) → MeetingPartialError
+  const part = await mk({ filedAt: 1, filedBy: "x", links: { ...emptyLinks(), internalUserIds: [other?.id || "?"] },
+    todos: [todo("p1", "Book lift", "Jeff Chesebro", null, "task"), todo("p2", "Remember this", null, null, "note")] });
+  const partErr = await MA.decideAllTodos(part.id, me).then(() => null, (e: unknown) => e);
+  const partAfter = await MS.getMeeting(part.id);
+  const p1id = partAfter ? created(partAfter, "p1") : "";
+  if (p1id) registerFixture("tasks", p1id);
+  ok(partErr instanceof MA.MeetingPartialError && !!p1id && !partAfter?.todos.find((t) => t.key === "p2")?.decision,
+    "#323 decideAllTodos applies what it can and throws MeetingPartialError for the rest");
+
   // (10) speaker map
   const sp = await mk({ krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis",
     segments: [{ speaker: "2", text: "hi", start: 0, end: 1 }] } });
   const names = { contact: () => null, user: () => null };
-  const sp1 = await MA.setSpeaker(sp.id, "2", { contactId: "c-tom", name: "Tom Ellis" }, me);
+  const sp1 = await MA.setSpeaker(sp.id, "2", { contactId: CT, name: "Tom Ellis" }, me);
   const sp2 = await MA.setSpeaker(sp.id, "2", null, me);
   ok(renderMeeting(sp1, names).segments[0].speakerName === "Tom Ellis" && renderMeeting(sp2, names).segments[0].speakerName === "Speaker 2" &&
      !("2" in sp2.speakerMap), "#323 setSpeaker maps a speaker; null clears it");
@@ -675,11 +771,24 @@ export async function meetings323ActionChecks(ok: Ok): Promise<void> {
   const merged = mergeAttendees(rm.attendees, [{ email: "tom@osakis.k12.mn.us", firstName: "Tom", lastName: "Ellis" }], null);
   ok(rm.attendees.length === 1 && rm.attendees[0].removed && merged.length === 1 && merged[0].removed,
     "#323 removeAttendee flags (never deletes); a later sync merge keeps it removed");
-  const ad = await MA.addAttendee(at.id, { name: "Pat Lee", email: "Pat@Example.com", contactId: "c-pat" }, me);
+  const ad = await MA.addAttendee(at.id, { name: "Pat Lee", email: "Pat@Example.com", contactId: CT2 }, me);
   const back = await MA.addAttendee(at.id, { name: "Tom Ellis", email: "tom@osakis.k12.mn.us" }, me);
   const pat = ad.attendees.find((x) => x.key === "pat@example.com");
-  ok(!!pat && pat.sources.join() === "manual" && pat.contactId === "c-pat" && back.attendees.find((x) => x.email === "tom@osakis.k12.mn.us")?.removed === false,
+  ok(!!pat && pat.sources.join() === "manual" && pat.contactId === CT2 && back.attendees.find((x) => x.email === "tom@osakis.k12.mn.us")?.removed === false,
     "#323 addAttendee adds a manual attendee, and re-adding a removed one restores it");
+  // + New contact
+  const E = "tom.test323@example.com";
+  const att = (name: string) => [{ key: E, name, email: E, sources: ["krisp" as const], removed: false, contactId: null, userId: null }];
+  const nc1m = await mk({ attendees: att("Tom Ellis") });
+  const nc = await MA.newContactFromAttendee(nc1m.id, E, CO, me);
+  const ncId = nc.attendees[0].contactId || "";
+  const ncRow = await getContactRow(ncId);
+  const nc2m = await mk({ attendees: att("T. Ellis") });
+  const nc2 = await MA.newContactFromAttendee(nc2m.id, E, CO, me);
+  ok(!!ncRow && ncRow.homeCompanyId === CO && ncRow.firstName === "Tom" && ncRow.lastName === "Ellis" &&
+     nc2.attendees[0].contactId === ncId && await rejects(MA.newContactFromAttendee(nc2m.id, E, CO, me)) &&
+     await rejects(MA.newContactFromAttendee(nc1m.id, "nobody@x.com", CO, me)),
+    "#323 + New contact makes the contact at the company with its email; the same address later links that contact, never a duplicate");
 
   // noise override
   const nz = await mk({ krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis quick", durationSec: 45 }, noise: true });
@@ -687,4 +796,46 @@ export async function meetings323ActionChecks(ok: Ok): Promise<void> {
   const nz3 = await MA.setNoise(nz.id, true, me);
   ok(nz2.noise === false && nz2.noiseOverride === true && nz3.noise === true && nz3.noiseOverride === false,
     "#323 setNoise(false) overrides a short meeting out of Noise; setNoise(true) puts it back");
+
+  // Refresh from Krisp (review fix 2): one detail fetch for an OLD meeting, outside any recent window
+  const NOW = Date.UTC(2026, 9, 9, 18);
+  const old = await mk({ ownerUserId: "u1", krisp: { ...meetingFixture323({ krispMeetingId: "x" }).krisp, title: "Osakis old", durationSec: 60,
+    startedAt: NOW - 200 * 86_400_000, detailFetchedAt: NOW - 199 * 86_400_000 } });
+  const fetched: string[] = [];
+  let gate: () => void = () => {};
+  const held = new Promise<void>((r) => { gate = r; });
+  const rdeps = (hold: boolean, fail?: Error): RefreshDeps => ({
+    now: () => NOW,
+    client: { meeting: async (id: string) => {
+      fetched.push(id);
+      if (hold) await held;
+      if (fail) throw fail;
+      return { id, title: null, startedAt: null, duration: null, status: "completed", participants: null,
+        transcript: { language: "en", speakers: { "1": { first_name: "Tom", last_name: "Ellis", email: null } }, segments: [{ speaker: 1, text: "Speaker 1 here", start: 0, end: 1 }] },
+        notes: { blocks: [{ type: "action_items", children: [{ type: "action_item", text: "Send drawings", assignee: "Jeff" }] }] } } as never;
+    } },
+    buildIndex: async () => index323(),
+    lookupEmails: async () => new Map(),
+  });
+  const rr = await refreshMeetingDetailWith(old.id, "u1-refresh323", rdeps(false));
+  const oldAfter = await MS.getMeeting(old.id);
+  ok(rr.error === null && !rr.busy && fetched.join() === old.krispMeetingId && oldAfter?.krisp.detailFetchedAt === NOW &&
+     oldAfter.krisp.segments.length === 1 && oldAfter.todos.length === 1 && oldAfter.todos[0].title === "Send drawings",
+    "#323 refreshMeetingDetail fetches one old (and short) meeting's detail and merges transcript + to-dos");
+  const slow = refreshMeetingDetailWith(old.id, "u2-refresh323", rdeps(true));
+  const busy = await refreshMeetingDetailWith(old.id, "u2-refresh323", rdeps(false));
+  gate();
+  const slowR = await slow;
+  const errR = await refreshMeetingDetailWith(old.id, "u3-refresh323", rdeps(false, new KrispNotReadyError()));
+  ok(busy.busy === true && slowR.error === null && !!errR.error && !errR.busy,
+    "#323 refreshMeetingDetail shares the per-rep in-flight guard (busy) and reports a Krisp error as a message");
+
+  // the "use server" layer: only intended messages reach the client (review fix 5/6)
+  const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/inbox/meetings/actions.ts"), "utf8");
+  const failBody = actSrc.slice(actSrc.indexOf("function fail("), actSrc.indexOf("}\n", actSrc.indexOf("function fail(")));
+  ok(/instanceof core\.MeetingUserError\) return \{ ok: false, error: e\.message \}/.test(failBody) &&
+     /return \{ ok: false, error: GENERIC \};\s*$/.test(failBody) && /const GENERIC = "Something went wrong — try again\.";/.test(actSrc) &&
+     /partial: true/.test(failBody) && !/\(e as Error\)\?\.message/.test(actSrc),
+    "#323 meeting actions return only MeetingUserError messages; anything else is a generic retry message");
+  ok(/catch \(e\) \{\s*revalidate\(/.test(actSrc), "#323 a failed (or partial) meeting action still revalidates");
 }

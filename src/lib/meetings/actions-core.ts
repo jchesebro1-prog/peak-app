@@ -7,24 +7,29 @@
  * Concurrency: the sync writes meetings while a rep edits them, so every
  * write goes through `MS.patchMeeting` with a pure callback over the LATEST
  * doc — never a get-then-save. Anything slow or record-creating (the match
- * index, users, createTask, addNoteRecord) happens before the patch, and the
- * access check runs again inside it on the doc being written.
+ * index, id checks, users, createTaskOnce, addNoteRecord) happens before the
+ * patch, and the access check runs again inside it on the doc being written.
+ *
+ * Errors: `MeetingUserError` (and its subclasses) carry a message meant for
+ * the rep; anything else is a bug and the action layer hides its message.
  */
-import { matchAssignee } from "@/lib/krisp/derive";
+import { getDoc } from "@/db/doc-store";
+import type { CollectionName } from "@/db/doc-tables";
+import { matchAssignee, shortHash } from "@/lib/krisp/derive";
 import { activeUsers } from "@/lib/users";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { getCompany } from "@/lib/identity/companies";
-import { saveContact, setEmails } from "@/lib/identity/contacts";
+import { getContact, saveContact, setEmails } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { contactsByEmails } from "@/lib/identity/lookup";
-import { createTask } from "@/lib/stores/tasks";
+import { createTaskOnce } from "@/lib/stores/tasks";
 import { addNoteRecord } from "@/lib/stores/notes";
 import * as MS from "@/lib/stores/meetings";
 import { chicagoAt } from "./chicago-day";
 import { buildMatchIndex } from "./index-build";
 import { normalizeText } from "./names";
 import { attendeeKey, relabel, speakerIndexes, speakerLabel } from "./render";
-import { rematchMeeting, runMeetingsSync } from "./sync";
+import { refreshMeetingDetail, rematchMeeting } from "./sync";
 import { noteParentFor } from "./todos";
 import {
   MAX_CONTACT_LINKS,
@@ -37,18 +42,30 @@ import {
   type MeetingTodo,
   type SuggestionKind,
   type TodoKind,
+  type WorkType,
 } from "./types";
 import { canSeeMeeting, hasExternalLink } from "./visibility";
 
 export type Me = { id: string; name: string };
 
-export class MeetingAccessError extends Error {}
-export class MeetingShareGuardError extends Error {}
+/** A refusal whose message is meant for the rep. */
+export class MeetingUserError extends Error {}
+export class MeetingAccessError extends MeetingUserError {}
+export class MeetingShareGuardError extends MeetingUserError {}
+/** decideAllTodos: some to-dos were filed, these weren't. */
+export class MeetingPartialError extends MeetingUserError {}
+/** Refresh from Krisp: a sync for that Krisp account is already running. */
+export class MeetingBusyError extends MeetingUserError {}
 
 export const SHARE_SUMMARY_MAX = 8000;
 const WAITING_DEFAULT_MS = 7 * 86_400_000;
 const DUE_HOUR = 17; // a Krisp due date is a day; the task is due 17:00 Chicago that day
 const ID_MAX = 120;
+
+const WORK_COLLECTION: Record<WorkType, CollectionName> = {
+  lead: "leads", site_visit: "site_visits", survey: "surveys", project: "projects",
+  engagement: "consulting_engagements", quote: "quotes",
+};
 
 /* ---------- plumbing ---------- */
 
@@ -87,6 +104,57 @@ function speakerPairs(m: MeetingRecord): [string, string][] {
   return Object.entries(m.speakerMap).filter(([, ref]) => ref?.name).map(([idx, ref]) => [speakerLabel(m, idx), ref.name]);
 }
 
+/* ---------- id checks (client ids are never trusted) ---------- */
+
+async function activeUserIds(): Promise<Set<string>> {
+  return new Set((await activeUsers()).map((u) => u.id));
+}
+
+async function checkContact(id: string): Promise<void> {
+  if (!(await getContact(id))) throw new MeetingUserError("That person isn't in Contacts any more");
+}
+
+async function checkUser(id: string, active?: Set<string>): Promise<void> {
+  if (!(active ?? (await activeUserIds())).has(id)) throw new MeetingUserError("That person isn't on the team");
+}
+
+/** Validates what changed between `prev` and `next` (a link to a since-deleted record that stays put is left alone). */
+async function checkLinks(next: MeetingLinks, prev: MeetingLinks): Promise<void> {
+  if (next.customerId && next.customerId !== prev.customerId && !(await getCompany(next.customerId))) {
+    throw new MeetingUserError("That company no longer exists");
+  }
+  if (next.siteId && (next.siteId !== prev.siteId || next.customerId !== prev.customerId)) {
+    const site = await getSite(next.siteId);
+    if (!site) throw new MeetingUserError("That venue no longer exists");
+    if (!next.customerId) throw new MeetingUserError("Link the venue's company first");
+    if (site.companyId !== next.customerId) throw new MeetingUserError("That venue belongs to a different company");
+  }
+  const newContacts = next.contactIds.filter((c) => !prev.contactIds.includes(c));
+  await Promise.all(newContacts.map(checkContact));
+  const newUsers = next.internalUserIds.filter((u) => !prev.internalUserIds.includes(u));
+  if (newUsers.length) {
+    const active = await activeUserIds();
+    for (const u of newUsers) await checkUser(u, active);
+  }
+  const w = next.work;
+  if (w && (w.id !== prev.work?.id || w.type !== prev.work?.type) && !(await getDoc(WORK_COLLECTION[w.type], w.id))) {
+    throw new MeetingUserError("That record no longer exists");
+  }
+}
+
+async function checkPersonRef(ref: { contactId?: string | null; userId?: string | null }): Promise<void> {
+  if (ref.contactId) await checkContact(ref.contactId);
+  if (ref.userId) await checkUser(ref.userId);
+}
+
+/** The share guard (spec §Visibility): a shared meeting that loses its last external link, or is re-pointed at
+ *  another company (the portal keys on customerId), stops being shared — only with `confirmUnshare`. */
+function guardShare(cur: MeetingRecord, links: MeetingLinks, confirmUnshare: boolean | undefined): MeetingRecord["share"] {
+  if (!cur.share || (hasExternalLink(links) && links.customerId === cur.links.customerId)) return cur.share;
+  if (!confirmUnshare) throw new MeetingShareGuardError("This meeting is shared with the customer — this change stops sharing it");
+  return null;
+}
+
 /* ---------- linking ---------- */
 
 function applySuggestions(links: MeetingLinks, picks: MeetingSuggestion[]): MeetingLinks {
@@ -106,35 +174,57 @@ function applySuggestions(links: MeetingLinks, picks: MeetingSuggestion[]): Meet
   return next;
 }
 
-/** Apply the picked suggestions (or every strong one) and file the meeting. Picks no longer suggested are ignored. */
+function chooseSuggestions(m: MeetingRecord, picks: { kind: SuggestionKind; id: string }[] | "strong"): MeetingSuggestion[] {
+  return picks === "strong"
+    ? m.suggestions.filter((s) => s.strength === "strong")
+    : picks.map((p) => m.suggestions.find((s) => s.kind === p.kind && s.id === p.id)).filter((s): s is MeetingSuggestion => !!s);
+}
+
+/** Apply the picked suggestions (or every strong one) and file the meeting. Picks no longer suggested are ignored;
+ *  a suggestion whose record has since gone is refused. Same share guard as setLinks. */
 export async function confirmSuggestions(
-  id: string, picks: { kind: SuggestionKind; id: string }[] | "strong", me: Me,
+  id: string, picks: { kind: SuggestionKind; id: string }[] | "strong", me: Me, opts: { confirmUnshare?: boolean } = {},
 ): Promise<MeetingRecord> {
-  await load(id, me);
+  const snap = await load(id, me);
+  const chosen = chooseSuggestions(snap, picks);
+  if (chosen.length) await checkLinks(applySuggestions(snap.links, chosen), snap.links);
   const now = Date.now();
   return mutate(id, me, (cur) => {
-    const chosen = picks === "strong"
-      ? cur.suggestions.filter((s) => s.strength === "strong")
-      : picks.map((p) => cur.suggestions.find((s) => s.kind === p.kind && s.id === p.id)).filter((s): s is MeetingSuggestion => !!s);
-    if (!chosen.length) return cur;
-    return filed({ ...cur, links: applySuggestions(cur.links, chosen) }, me, now);
+    const sel = chooseSuggestions(cur, picks);
+    if (!sel.length) return cur;
+    const links = applySuggestions(cur.links, sel);
+    return filed({ ...cur, links, share: guardShare(cur, links, opts.confirmUnshare) }, me, now);
   });
 }
 
-/** Confirm all: every unfiled, non-noise meeting whose TOP suggestion is strong gets its strong suggestions. */
+/** Confirm all: every unfiled, non-noise meeting whose TOP suggestion is strong gets its strong suggestions.
+ *  A row that can't be confirmed (a record gone, a share to protect) is skipped, never the whole batch. */
 export async function confirmAllStrong(ids: string[] | "all-visible", me: Me): Promise<{ filed: number }> {
   const list = ids === "all-visible" ? await MS.meetingsVisibleTo(me.id) : await Promise.all(ids.map((id) => load(id, me)));
   let n = 0;
   for (const m of list) {
     if (m.filedAt || m.noise || m.suggestions[0]?.strength !== "strong") continue;
-    const after = await confirmSuggestions(m.id, "strong", me);
-    if (after.filedAt) n++;
+    try {
+      const after = await confirmSuggestions(m.id, "strong", me);
+      if (after.filedAt) n++;
+    } catch (e) {
+      if (!(e instanceof MeetingUserError) || e instanceof MeetingAccessError) throw e;
+    }
   }
   return { filed: n };
 }
 
-/** Manual linking. Refuses > 25 contacts; dropping the last external link of a shared meeting (or re-pointing it
- *  at another company — the portal keys on customerId) needs `confirmUnshare` and clears the share. */
+/** `patch` over `links`: a different company drops the old company's venue and work unless the patch sets them. */
+function mergeLinks(links: MeetingLinks, patch: Partial<MeetingLinks>): MeetingLinks {
+  const next: MeetingLinks = { ...links, ...patch };
+  if ("customerId" in patch && links.customerId && patch.customerId !== links.customerId) {
+    if (!("siteId" in patch)) next.siteId = null;
+    if (!("work" in patch)) next.work = null;
+  }
+  return next;
+}
+
+/** Manual linking. Refuses > 25 contacts and ids that don't resolve; the share guard as above. */
 export async function setLinks(
   id: string, patch: Partial<MeetingLinks>, me: Me, opts: { confirmUnshare?: boolean } = {},
 ): Promise<MeetingRecord> {
@@ -143,7 +233,7 @@ export async function setLinks(
   if ("siteId" in patch) clean.siteId = cleanId(patch.siteId);
   if ("contactIds" in patch) {
     clean.contactIds = cleanIds(patch.contactIds);
-    if (clean.contactIds.length > MAX_CONTACT_LINKS) throw new Error(`A meeting can link at most ${MAX_CONTACT_LINKS} people`);
+    if (clean.contactIds.length > MAX_CONTACT_LINKS) throw new MeetingUserError(`A meeting can link at most ${MAX_CONTACT_LINKS} people`);
   }
   if ("internalUserIds" in patch) clean.internalUserIds = cleanIds(patch.internalUserIds);
   if ("work" in patch) {
@@ -151,20 +241,16 @@ export async function setLinks(
     if (w == null) clean.work = null;
     else {
       const wid = cleanId(w.id);
-      if (!wid || !WORK_TYPES.includes(w.type)) throw new Error("Pick a lead, visit, survey, project, engagement or quote");
+      if (!wid || !WORK_TYPES.includes(w.type)) throw new MeetingUserError("Pick a lead, visit, survey, project, engagement or quote");
       clean.work = { type: w.type, id: wid, label: String(w.label || wid).slice(0, 200) };
     }
   }
-  await load(id, me);
+  const snap = await load(id, me);
+  await checkLinks(mergeLinks(snap.links, clean), snap.links);
   const now = Date.now();
   return mutate(id, me, (cur) => {
-    const links: MeetingLinks = { ...cur.links, ...clean };
-    let share = cur.share;
-    if (share && (!hasExternalLink(links) || links.customerId !== cur.links.customerId)) {
-      if (!opts.confirmUnshare) throw new MeetingShareGuardError("This meeting is shared with the customer — unlinking stops sharing it");
-      share = null;
-    }
-    const next = { ...cur, links, share };
+    const links = mergeLinks(cur.links, clean);
+    const next = { ...cur, links, share: guardShare(cur, links, opts.confirmUnshare) };
     const anyLink = hasExternalLink(links) || links.internalUserIds.length > 0;
     return anyLink ? filed(next, me, now) : next;
   });
@@ -179,10 +265,11 @@ export async function setSpeaker(id: string, idx: string, ref: MeetingPersonRef 
     ...(cleanId(ref.contactId) ? { contactId: cleanId(ref.contactId)! } : {}),
     ...(cleanId(ref.userId) ? { userId: cleanId(ref.userId)! } : {}),
   } : null;
-  if (clean && !clean.name) throw new Error("Pick who this speaker is");
+  if (clean && !clean.name) throw new MeetingUserError("Pick who this speaker is");
   await load(id, me);
+  if (clean) await checkPersonRef(clean);
   return mutate(id, me, (cur) => {
-    if (!speakerIndexes(cur).includes(key)) throw new Error("No such speaker in this meeting");
+    if (!speakerIndexes(cur).includes(key)) throw new MeetingUserError("No such speaker in this meeting");
     const speakerMap = { ...cur.speakerMap };
     if (clean) speakerMap[key] = clean;
     else delete speakerMap[key];
@@ -196,11 +283,12 @@ export async function addAttendee(
 ): Promise<MeetingRecord> {
   const name = String(a.name || "").trim().slice(0, 200);
   const email = String(a.email || "").trim().toLowerCase() || null;
-  if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) throw new Error("That email doesn't look right");
+  if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) throw new MeetingUserError("That email doesn't look right");
   const key = attendeeKey(name || email || "", email);
-  if (key === "name:") throw new Error("An attendee needs a name or an email");
+  if (key === "name:") throw new MeetingUserError("An attendee needs a name or an email");
   const contactId = cleanId(a.contactId), userId = cleanId(a.userId);
   await load(id, me);
+  await checkPersonRef({ contactId, userId });
   return mutate(id, me, (cur) => {
     const hit = cur.attendees.find((x) => x.key === key);
     if (hit) {
@@ -217,7 +305,7 @@ export async function addAttendee(
 export async function removeAttendee(id: string, key: string, me: Me): Promise<MeetingRecord> {
   await load(id, me);
   return mutate(id, me, (cur) => {
-    if (!cur.attendees.some((x) => x.key === key)) throw new Error("Attendee not found");
+    if (!cur.attendees.some((x) => x.key === key)) throw new MeetingUserError("Attendee not found");
     return { ...cur, attendees: cur.attendees.map((x) => (x.key === key ? { ...x, removed: true } : x)) };
   });
 }
@@ -225,10 +313,11 @@ export async function removeAttendee(id: string, key: string, me: Me): Promise<M
 /** Points an attendee at a contact (the "+ New contact" flow). */
 export async function setAttendeeContact(id: string, key: string, contactId: string, me: Me): Promise<MeetingRecord> {
   const cid = cleanId(contactId);
-  if (!cid) throw new Error("Pick a contact");
+  if (!cid) throw new MeetingUserError("Pick a contact");
   await load(id, me);
+  await checkContact(cid);
   return mutate(id, me, (cur) => {
-    if (!cur.attendees.some((x) => x.key === key)) throw new Error("Attendee not found");
+    if (!cur.attendees.some((x) => x.key === key)) throw new MeetingUserError("Attendee not found");
     return { ...cur, attendees: cur.attendees.map((x) => (x.key === key ? { ...x, contactId: cid } : x)) };
   });
 }
@@ -238,10 +327,10 @@ export async function setAttendeeContact(id: string, key: string, contactId: str
 export async function newContactFromAttendee(id: string, key: string, companyId: string, me: Me): Promise<MeetingRecord> {
   const m = await load(id, me);
   const att = m.attendees.find((x) => x.key === key);
-  if (!att) throw new Error("Attendee not found");
-  if (att.contactId) throw new Error("That attendee is already a contact");
+  if (!att) throw new MeetingUserError("Attendee not found");
+  if (att.contactId) throw new MeetingUserError("That attendee is already a contact");
   const company = await getCompany(cleanId(companyId));
-  if (!company) throw new Error("Pick the company this person works for");
+  if (!company) throw new MeetingUserError("Pick the company this person works for");
   const known = att.email ? (await contactsByEmails([att.email])).get(att.email) : undefined;
   let cid = known && "contactId" in known ? known.contactId : null;
   if (!cid) {
@@ -263,7 +352,8 @@ export async function newContactFromAttendee(id: string, key: string, companyId:
 
 /* ---------- to-dos ---------- */
 
-/** One decide at a time per (meeting, to-do) in this process: a double click waits, re-reads, and finds the decision. */
+/** One decide at a time per (meeting, to-do) in this process: a double click waits, re-reads, and finds the decision.
+ *  Across processes the deterministic record ids below make a second create a no-op. */
 const todoChains = new Map<string, Promise<unknown>>();
 
 async function withTodoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -275,6 +365,11 @@ async function withTodoLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   } finally {
     if (todoChains.get(key) === run) todoChains.delete(key);
   }
+}
+
+/** The record a (meeting, to-do) decision creates always has the same id. */
+export function todoRecordId(kind: "task" | "note", meetingId: string, key: string): string {
+  return `${kind === "task" ? "T" : "N"}-mtg-${shortHash(`${meetingId}|${key}`)}`;
 }
 
 function dueFrom(todo: MeetingTodo): number | null {
@@ -300,17 +395,35 @@ function waitingContactId(m: MeetingRecord, label: string): string | null {
   return byFirst.length === 1 ? byFirst[0] : null;
 }
 
+/** The default assignee: a speaker mapped to a Peak user is that user; else the (relabelled) name, matched. */
+function defaultAssignee<U extends { id: string; name: string }>(m: MeetingRecord, todo: MeetingTodo, label: string, users: U[]): U | null {
+  const raw = (todo.assigneeLabel || "").trim();
+  if (raw) {
+    for (const [idx, ref] of Object.entries(m.speakerMap)) {
+      if (!ref.userId) continue;
+      if (normalizeText(speakerLabel(m, idx)) === normalizeText(raw) || normalizeText(ref.name) === normalizeText(label)) {
+        const u = users.find((x) => x.id === ref.userId);
+        if (u) return u;
+      }
+    }
+  }
+  return matchAssignee(label, users);
+}
+
 /** Decide one Krisp to-do. Needs a filed meeting; idempotent on `decision.createdId` (a dismissal can be re-decided). */
 export async function decideTodo(
   id: string, key: string, kind: TodoKind, opts: { assigneeUserId?: string; dueAt?: number | null }, me: Me,
 ): Promise<MeetingRecord> {
-  if (!["task", "waiting", "note", "dismiss"].includes(kind)) throw new Error("Unknown to-do kind");
+  if (!["task", "waiting", "note", "dismiss"].includes(kind)) throw new MeetingUserError("Unknown to-do kind");
+  if (opts.dueAt !== undefined && opts.dueAt !== null && !(typeof opts.dueAt === "number" && Number.isFinite(opts.dueAt))) {
+    throw new MeetingUserError("That due date isn't a date");
+  }
   return withTodoLock(`${id}|${key}`, async () => {
     const m = await load(id, me);
     const todo = m.todos.find((t) => t.key === key);
-    if (!todo) throw new Error("To-do not found");
+    if (!todo) throw new MeetingUserError("To-do not found");
     if (todo.decision?.createdId) return m;
-    if (!m.filedAt) throw new Error("File the meeting before its to-dos");
+    if (!m.filedAt) throw new MeetingUserError("File the meeting before its to-dos");
 
     const pairs = speakerPairs(m);
     const title = relabel(todo.title, pairs).trim() || "Meeting follow-up";
@@ -337,17 +450,19 @@ export async function decideTodo(
       let assignee: { id: string; name: string } | null = null;
       if (opts.assigneeUserId) {
         assignee = users.find((u) => u.id === opts.assigneeUserId) ?? null;
-        if (!assignee) throw new Error("Pick someone on the team");
+        if (!assignee) throw new MeetingUserError("Pick someone on the team");
       } else {
-        assignee = matchAssignee(label, users);
+        assignee = defaultAssignee(m, todo, label, users);
       }
-      const t = await createTask({
+      const t = await createTaskOnce({
+        id: todoRecordId("task", m.id, key),
         title, ...base, assigneeUserId: assignee?.id ?? null, assigneeName: assignee?.name ?? "",
         dueAt: due ?? null, notes: `From meeting: ${m.krisp.title}`,
       }, me);
       createdId = t.id;
     } else if (kind === "waiting") {
-      const t = await createTask({
+      const t = await createTaskOnce({
+        id: todoRecordId("task", m.id, key),
         title, ...base, assigneeUserId: me.id, assigneeName: me.name, dueAt: due ?? Date.now() + WAITING_DEFAULT_MS,
         waitingOn: { contactId: waitingContactId(m, label), name: label || "Customer" },
         notes: `Waiting on customer — from meeting: ${m.krisp.title}`,
@@ -355,8 +470,9 @@ export async function decideTodo(
       createdId = t.id;
     } else if (kind === "note") {
       const parent = noteParentFor(m.links);
-      if (!parent) throw new Error("Link the meeting to a company or venue first");
-      const n = await addNoteRecord({ ...parent, customerId: m.links.customerId, text: `${title}\n\nFrom meeting: ${m.krisp.title}` }, me.name);
+      if (!parent) throw new MeetingUserError("Link the meeting to a company or venue first");
+      const n = await addNoteRecord({ ...parent, customerId: m.links.customerId, text: `${title}\n\nFrom meeting: ${m.krisp.title}` },
+        me.name, { id: todoRecordId("note", m.id, key) });
       createdId = n.id;
     }
 
@@ -371,10 +487,11 @@ export async function decideTodo(
   });
 }
 
-/** Confirm all to-dos: each undecided one takes its suggested kind. The rest still apply when one fails. */
+/** Confirm all to-dos: each undecided one takes its suggested kind. The rest still apply when one fails;
+ *  then a MeetingPartialError names the ones that didn't. */
 export async function decideAllTodos(id: string, me: Me): Promise<MeetingRecord> {
   const m = await load(id, me);
-  if (!m.filedAt) throw new Error("File the meeting before its to-dos");
+  if (!m.filedAt) throw new MeetingUserError("File the meeting before its to-dos");
   const failed: string[] = [];
   let last = m;
   for (const t of m.todos) {
@@ -382,11 +499,11 @@ export async function decideAllTodos(id: string, me: Me): Promise<MeetingRecord>
     try {
       last = await decideTodo(id, t.key, t.suggested, {}, me);
     } catch (e) {
-      if (e instanceof MeetingAccessError) throw e;
-      failed.push(`${t.title}: ${(e as Error).message}`);
+      if (e instanceof MeetingAccessError || !(e instanceof MeetingUserError)) throw e;
+      failed.push(`${t.title}: ${e.message}`);
     }
   }
-  if (failed.length) throw new Error(`${failed.length} to-do${failed.length === 1 ? "" : "s"} not filed — ${failed.join("; ")}`);
+  if (failed.length) throw new MeetingPartialError(`${failed.length} to-do${failed.length === 1 ? "" : "s"} not filed — ${failed.join("; ")}`);
   return last;
 }
 
@@ -394,11 +511,11 @@ export async function decideAllTodos(id: string, me: Me): Promise<MeetingRecord>
 
 export async function shareWithCustomer(id: string, summary: string, me: Me): Promise<MeetingRecord> {
   const text = String(summary ?? "").trim();
-  if (!text) throw new Error("Write the summary the customer will see");
-  if (text.length > SHARE_SUMMARY_MAX) throw new Error(`Keep the summary under ${SHARE_SUMMARY_MAX} characters`);
+  if (!text) throw new MeetingUserError("Write the summary the customer will see");
+  if (text.length > SHARE_SUMMARY_MAX) throw new MeetingUserError(`Keep the summary under ${SHARE_SUMMARY_MAX} characters`);
   await load(id, me);
   return mutate(id, me, (cur) => {
-    if (!cur.links.customerId) throw new Error("Link the meeting to a company before sharing it");
+    if (!cur.links.customerId) throw new MeetingUserError("Link the meeting to a company before sharing it");
     return { ...cur, share: { sharedAt: Date.now(), sharedBy: me.name, summary: text } };
   });
 }
@@ -424,10 +541,11 @@ export async function setNoise(id: string, noise: boolean, me: Me): Promise<Meet
   });
 }
 
-/** Re-fetch this meeting's detail on the next pass, then run the rep's recent sync. */
+/** Refresh from Krisp: one detail re-fetch of THIS meeting (any age) through its owner's Krisp account. */
 export async function refreshFromKrisp(id: string, me: Me): Promise<MeetingRecord> {
   await load(id, me);
-  await mutate(id, me, (cur) => ({ ...cur, krisp: { ...cur.krisp, detailFetchedAt: null } }));
-  await runMeetingsSync(me.id, "recent");
+  const r = await refreshMeetingDetail(id);
+  if (r.busy) throw new MeetingBusyError("Sync already running — try again in a moment");
+  if (r.error) throw new MeetingUserError(r.error);
   return load(id, me);
 }

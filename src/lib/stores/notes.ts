@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, insertDocIfAbsent, insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
 import type { FileRef } from "@/lib/consulting-files";
 import { can } from "@/lib/team";
 
@@ -88,10 +88,13 @@ export async function addNoteRecord(
     taskIds?: string[];
     system?: boolean;
   },
-  me: string
+  me: string,
+  /** #323 — a caller-chosen deterministic id: the note is written at most once; a
+   *  repeat call returns the note already there (never a duplicate or an overwrite). */
+  opts: { id?: string } = {}
 ): Promise<NoteRecord> {
   const t = Date.now();
-  return insertWithPrefixedId<NoteRecord>("notes", "N", 7000, (id) => ({
+  const build = (id: string): NoteRecord => ({
     id,
     parentKind: input.parentKind,
     parentId: input.parentId,
@@ -104,7 +107,13 @@ export async function addNoteRecord(
     system: input.system ?? false,
     createdAt: t,
     updatedAt: t,
-  }));
+  });
+  if (opts.id) {
+    const doc = build(opts.id);
+    if (await insertDocIfAbsent<NoteRecord>("notes", doc)) return doc;
+    return (await getNote(opts.id)) ?? doc;
+  }
+  return insertWithPrefixedId<NoteRecord>("notes", "N", 7000, build);
 }
 
 /** Soft delete (doc-store tombstone). */

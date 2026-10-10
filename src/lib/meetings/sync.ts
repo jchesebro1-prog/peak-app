@@ -14,6 +14,7 @@ import {
   KrispApiError,
   KrispAuthError,
   KrispForbiddenError,
+  KrispNotReadyError,
   KrispRateLimitError,
 } from "@/lib/krisp/errors";
 import {
@@ -129,26 +130,30 @@ function attachRecording(m: MeetingRecord, rec: RecordingRecord, siteId: string 
   return { ...m, recordingId: rec.id, links, filedAt: now, filedBy: "Recording" };
 }
 
-/** The pure sync step over the LATEST doc: header refresh, detail, seenBy/owner,
- *  calendar (once), recording (once), attendees, to-dos, then rematch. */
+/** The pure sync step over the LATEST doc: header refresh, seenBy/owner, calendar (once), then `applyFetched`. */
 function applySync(
   cur: MeetingRecord, l: KrispListedMeeting, userId: string, now: number, pre: Prefetched, index: MatchIndex,
 ): MeetingRecord {
-  let m: MeetingRecord = {
+  const m: MeetingRecord = {
     ...cur,
     krisp: {
       ...cur.krisp,
       title: l.title, startedAt: l.startedAt, durationSec: l.durationSec, source: l.source, status: l.status, tags: l.tags,
       participants: l.participants, fetchedAt: now, removedAt: null,
-      ...(pre.detail ? { ...pre.detail, detailFetchedAt: now } : {}),
     },
     seenBy: cur.seenBy.includes(userId) ? cur.seenBy : [...cur.seenBy, userId],
     // the Krisp account that owns the meeting wins; a shared copy never takes it over
     ownerUserId: l.ownership === "owned" ? userId : cur.ownerUserId || userId,
     calendar: cur.calendar ?? pre.calendar,
   };
+  return applyFetched(m, now, pre, index);
+}
+
+/** Detail, recording (once), attendees, to-dos, then rematch — shared by the batch and a single-meeting refresh. */
+function applyFetched(cur: MeetingRecord, now: number, pre: Prefetched, index: MatchIndex): MeetingRecord {
+  let m: MeetingRecord = pre.detail ? { ...cur, krisp: { ...cur.krisp, ...pre.detail, detailFetchedAt: now } } : cur;
   if (pre.recording && !m.recordingId) m = attachRecording(m, pre.recording.rec, pre.recording.siteId, now);
-  m.attendees = resolveAttendees(mergeAttendees(m.attendees, m.krisp.participants, m.calendar), pre.emails);
+  m = { ...m, attendees: resolveAttendees(mergeAttendees(m.attendees, m.krisp.participants, m.calendar), pre.emails) };
   const pairs: [string, string][] = Object.entries(m.speakerMap).map(([idx, ref]) => [speakerLabel(m, idx), ref.name]);
   const people = {
     users: index.users.map((u) => ({ id: u.id, name: u.name })),
@@ -157,6 +162,19 @@ function applySync(
   m.todos = mergeTodos(m.todos, deriveSummary(m.krisp.notes as { blocks: KrispNoteBlock[] } | null).actionItems,
     (a) => suggestTodoKind(a ? relabel(a, pairs) : null, people));
   return rematchMeeting(m, index);
+}
+
+/** A Krisp meeting's detail payload → the stored shape. */
+function detailFrom(d: Awaited<ReturnType<KrispClient["meeting"]>>): NonNullable<Prefetched["detail"]> {
+  const speakers: Record<string, KrispPerson> = {};
+  for (const [k, v] of Object.entries(d.transcript?.speakers || {})) {
+    if (v && typeof v === "object") speakers[k] = krispPersonFrom(v as Record<string, unknown>);
+  }
+  return {
+    speakers,
+    segments: (d.transcript?.segments || []).map((s) => ({ speaker: String(s.speaker), text: s.text, start: s.start, end: s.end })),
+    notes: d.notes ?? null,
+  };
 }
 
 /** JSON with sorted keys at every level — jsonb does not keep key order, so a
@@ -243,15 +261,7 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
           try {
             const d = await deps.client.meeting(l.id);
             await deps.pause(PACE_MS);
-            const speakers: Record<string, KrispPerson> = {};
-            for (const [k, v] of Object.entries(d.transcript?.speakers || {})) {
-              if (v && typeof v === "object") speakers[k] = krispPersonFrom(v as Record<string, unknown>);
-            }
-            pre.detail = {
-              speakers,
-              segments: (d.transcript?.segments || []).map((s) => ({ speaker: String(s.speaker), text: s.text, start: s.start, end: s.end })),
-              notes: d.notes ?? null,
-            };
+            pre.detail = detailFrom(d);
             res.detailed++;
           } catch (e) {
             // 409 still processing, or a one-off API failure on this meeting → retry next sync.
@@ -329,6 +339,48 @@ async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", 
   return res;
 }
 
+/* ---------- Refresh from Krisp: one meeting, any age ---------- */
+
+export type RefreshDeps = Pick<SyncDeps, "now" | "buildIndex" | "lookupEmails"> & { client: Pick<KrispClient, "meeting"> };
+export type RefreshResult = { busy?: boolean; error: string | null };
+
+function krispErrorMessage(e: unknown): string | null {
+  if (e instanceof KrispNotReadyError) return "Krisp is still processing this meeting — try again in a few minutes.";
+  if (e instanceof KrispAuthError || e instanceof KrispForbiddenError) return "Krisp rejected the key — reconnect Krisp on your Account page.";
+  if (e instanceof KrispRateLimitError) return "Krisp is busy — try again in a minute.";
+  if (isTimeout(e)) return "Krisp didn't answer — try again.";
+  if (e instanceof KrispApiError) return `Krisp couldn't return this meeting (${e.status}).`;
+  return null;
+}
+
+/** Re-fetch one meeting's detail through `repUserId`'s Krisp account — no window, no short-meeting gate (an explicit
+ *  refresh always fetches) — and merge it through the batch's own pure step. Shares the per-rep in-flight guard. */
+export async function refreshMeetingDetailWith(meetingId: string, repUserId: string, deps: RefreshDeps): Promise<RefreshResult> {
+  if (inFlight.has(repUserId)) return { busy: true, error: null };
+  inFlight.add(repUserId);
+  try {
+    const snap = await MS.getMeeting(meetingId);
+    if (!snap) return { error: "Meeting not found" };
+    let detail: Prefetched["detail"];
+    try {
+      detail = detailFrom(await deps.client.meeting(snap.krispMeetingId));
+    } catch (e) {
+      const msg = krispErrorMessage(e);
+      if (msg == null) throw e;
+      return { error: msg };
+    }
+    const emails = [...snap.krisp.participants.map((p) => p.email), ...(snap.calendar?.attendees || []).map((a) => a.email),
+      ...snap.attendees.map((a) => a.email)].filter((e): e is string => !!e).map((e) => e.toLowerCase());
+    const pre: Prefetched = { detail, calendar: null, recording: null, emails: emails.length ? await deps.lookupEmails([...new Set(emails)]) : new Map() };
+    const index = await deps.buildIndex();
+    const now = deps.now();
+    const out = await MS.patchMeeting(meetingId, (cur) => applyFetched(cur, now, pre, index));
+    return out ? { error: null } : { error: "Meeting not found" };
+  } finally {
+    inFlight.delete(repUserId);
+  }
+}
+
 /* ---------- real dependencies ---------- */
 
 async function calendarFor(userId: string, startMs: number, endMs: number): Promise<MeetingCalendar | null> {
@@ -392,6 +444,23 @@ export async function runMeetingsSync(
     pause: (ms) => new Promise((r) => setTimeout(r, ms)),
     budgetMs: Math.min(SYNC_BUDGET_MS, budgetMs),
   });
+}
+
+/** Refresh from Krisp through the meeting owner's connection, else any rep who has seen it and is connected. */
+export async function refreshMeetingDetail(meetingId: string): Promise<RefreshResult> {
+  const m = await MS.getMeeting(meetingId);
+  if (!m) return { error: "Meeting not found" };
+  for (const rep of [...new Set([m.ownerUserId, ...m.seenBy].filter(Boolean))]) {
+    const conn = await getKrispConnection(rep);
+    if (!conn) continue;
+    return refreshMeetingDetailWith(meetingId, rep, {
+      now: Date.now,
+      client: createKrispClient(conn.apiKey),
+      buildIndex: buildMatchIndex,
+      lookupEmails: emailLookup(),
+    });
+  }
+  return { error: "No connected Krisp account can read this meeting." };
 }
 
 const lastRun = new Map<string, number>();

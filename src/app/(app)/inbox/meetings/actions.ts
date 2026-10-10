@@ -15,7 +15,9 @@ import type { MeetingLinks, MeetingPersonRef, MeetingRecord, SuggestionKind, Tod
 
 export type MeetingActionResult =
   | { ok: true }
-  | { ok: false; error: string; needsConfirm?: boolean };
+  | { ok: false; error: string; needsConfirm?: boolean; partial?: boolean; busy?: boolean };
+
+const GENERIC = "Something went wrong — try again.";
 
 type Me = core.Me;
 
@@ -39,27 +41,31 @@ function revalidate(...links: (Pick<MeetingLinks, "customerId" | "siteId"> | nul
 function fail(e: unknown): MeetingActionResult {
   if (e instanceof core.MeetingShareGuardError) return { ok: false, needsConfirm: true, error: e.message };
   if (e instanceof core.MeetingAccessError) return { ok: false, error: "Meeting not found" };
+  if (e instanceof core.MeetingPartialError) return { ok: false, partial: true, error: e.message };
+  if (e instanceof core.MeetingBusyError) return { ok: false, busy: true, error: e.message };
+  if (e instanceof core.MeetingUserError) return { ok: false, error: e.message };
   console.error("meetings action failed", e);
-  return { ok: false, error: (e as Error)?.message || "Something went wrong — please try again." };
+  return { ok: false, error: GENERIC };
 }
 
-/** Run one core mutation; revalidate the links it had before and has after. */
+/** Run one core mutation; revalidate the links it had before and has after — also when it failed part-way. */
 async function run(id: string, fn: (me: Me) => Promise<MeetingRecord>, me?: Me): Promise<MeetingActionResult> {
   const who = me ?? (await session());
+  const before = await MS.getMeeting(id).catch(() => null);
   try {
-    const before = await MS.getMeeting(id);
     const after = await fn({ id: who.id, name: who.name });
     revalidate(before?.links, after.links);
     return { ok: true };
   } catch (e) {
+    revalidate(before?.links, (await MS.getMeeting(id).catch(() => null))?.links);
     return fail(e);
   }
 }
 
 export async function confirmSuggestionsAction(
-  id: string, picks: { kind: SuggestionKind; id: string }[] | "strong",
+  id: string, picks: { kind: SuggestionKind; id: string }[] | "strong", opts: { confirmUnshare?: boolean } = {},
 ): Promise<MeetingActionResult> {
-  return run(id, (me) => core.confirmSuggestions(id, picks, me));
+  return run(id, (me) => core.confirmSuggestions(id, picks, me, opts));
 }
 
 export async function confirmAllStrongAction(ids: string[] | "all-visible"): Promise<MeetingActionResult & { filed?: number }> {
@@ -144,7 +150,7 @@ async function syncAction(mode: "recent" | "backfill"): Promise<SyncActionResult
     return { ok: true, result: r };
   } catch (e) {
     console.error("meetings sync failed", e);
-    return { ok: false, error: (e as Error)?.message || "Sync failed — please try again." };
+    return { ok: false, error: GENERIC };
   }
 }
 

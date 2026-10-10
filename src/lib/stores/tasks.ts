@@ -395,6 +395,19 @@ export async function createTask(
   );
 }
 
+/** #323 — create under a caller-chosen deterministic id, at most once: a
+ *  second call (another process, a lost follow-up write) gets the row that is
+ *  already there, never a duplicate or an overwrite. */
+export async function createTaskOnce(
+  input: Partial<TaskRecord> & { id: string; title: string },
+  me: { id: string; name: string },
+): Promise<TaskRecord> {
+  const at = now();
+  const t = normalizeTask({ ...input, createdBy: me.name, createdAt: at, updatedAt: at });
+  if (await insertDocIfAbsent<TaskRecord>("tasks", t)) return t;
+  return (await getTask(input.id)) ?? t;
+}
+
 /** Idempotent system-created task (templates, item 16): coverageKey is the
     dedup guard — both trigger paths are re-runnable by design (PUNCHLIST §16).
     The id is deterministic (autoTaskId), so concurrent callers for the same
