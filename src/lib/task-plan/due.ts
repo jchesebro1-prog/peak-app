@@ -32,10 +32,12 @@ export function deadlineOf(dueMs: number): number {
   return chicagoDayStart(addDays(chicagoDayKey(dueMs), 1));
 }
 
-/** An undated item (assigned after creation, or pre-backfill) plans as due 7 days after it was created. */
-export function effectiveDue(dueAt: number | null | undefined, createdAt: number): { dueMs: number; virtual: boolean } {
+/** An undated item (pre-backfill, or never assigned a date) plans as due
+ *  today + 7 days — a ROLLING date that moves with `nowMs`, never stored — so
+ *  it is never overdue or At risk until it gets a real date (D801). */
+export function effectiveDue(dueAt: number | null | undefined, nowMs: number): { dueMs: number; virtual: boolean } {
   if (typeof dueAt === "number" && Number.isFinite(dueAt) && dueAt > 0) return { dueMs: dueAt, virtual: false };
-  return { dueMs: defaultDueAt(createdAt || 0), virtual: true };
+  return { dueMs: defaultDueAt(nowMs), virtual: true };
 }
 
 /* ---- the one-time backfill (pure half) ---- */

@@ -18,14 +18,14 @@ import { loadQueue } from "@/lib/queue";
 import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { getSettings } from "@/lib/settings";
-import { loadTaskPlans, type PersonPlan } from "@/lib/task-plan/load";
+import { loadTaskPlans, VIEW_PLAN_CALENDAR_MS, type PersonPlan } from "@/lib/task-plan/load";
 import { once } from "./once";
 
 /** This user's plan on Home: a plan, no plan (they aren't on the planning roster — an empty Today), or a load failure (a note). */
 export type TaskPlanState = { status: "ok"; plan: PersonPlan } | { status: "none" } | { status: "failed" };
 
 /** The Today card streams, but a slow Google read still holds its placeholder up, so it gets less than /calendar's 6 s. */
-const HOME_PLAN_CALENDAR_MS = 2_500;
+const HOME_PLAN_CALENDAR_MS = VIEW_PLAN_CALENDAR_MS;
 
 export function makeDashboardData(user: SessionUser) {
   const me = user.name;

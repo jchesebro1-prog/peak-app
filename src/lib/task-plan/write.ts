@@ -12,15 +12,15 @@
  */
 import { addDays, chicagoDayKey, isDayKey } from "@/lib/drive-plan/day";
 import { getAssignment, updateAssignment } from "@/lib/stores/assignments";
-import { addPins, getPins, movePin, removePinKeys, userIdForName } from "@/lib/stores/task-pins";
+import { addPins, getPins, movePin, releasePin, removePinKeys, userIdForName } from "@/lib/stores/task-pins";
 import { getTask, setTaskStatus, updateTask } from "@/lib/stores/tasks";
 import { activeUsers } from "@/lib/users";
 import { dueStampForDay } from "./due";
 import { tierSizeOf } from "./fields";
 import { isPlannedTask } from "./people";
-import { cleanPinMove, pinBlobKey, PIN_MAX_PER_PERSON } from "./pins";
+import { cleanPinMove, pinBlobKey, PIN_MAX_PER_PERSON, releaseBlobKey } from "./pins";
 import { floorQuarter } from "./free";
-import { BLOCK_MOVED_ERROR, MIN_CHUNK_MIN, parsePlanRef, planItemKey, QUARTER_MS, type PlanRef } from "./types";
+import { BLOCK_MOVED_ERROR, GRID_MIN, MIN_CHUNK_MIN, parsePlanRef, planItemKey, QUARTER_MS, sizeMinutes, type PlanRef } from "./types";
 
 export type WriteResult = { ok: true } | { ok: false; error: string };
 export const STARTED_ERROR = "This block has started — it stays put.";
@@ -29,34 +29,37 @@ const DUE_MAX_DAYS = 400;
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
 
-type Target = { key: string; ownerId: string | null; open: boolean };
+type Target = { key: string; ownerId: string | null; open: boolean; sizeMin: number };
 
-/** The stored item, its pin key and whose calendar it sits on. */
+/** The stored item, its pin key, size and whose calendar it sits on. */
 async function target(ref: PlanRef): Promise<Target | null> {
   const key = planItemKey(ref.kind, ref.id);
   if (ref.kind === "task") {
     const t = await getTask(ref.id);
     if (!t) return null;
-    return { key, ownerId: t.assigneeUserId ?? (await userIdForName(t.assigneeName)), open: isPlannedTask(t) };
+    return { key, ownerId: t.assigneeUserId ?? (await userIdForName(t.assigneeName)), open: isPlannedTask(t), sizeMin: sizeMinutes(t.size) };
   }
   const a = await getAssignment(ref.id);
   if (!a) return null;
-  return { key, ownerId: await userIdForName(a.assignee), open: !a.done };
+  return { key, ownerId: await userIdForName(a.assignee), open: !a.done, sizeMin: sizeMinutes(a.size) };
 }
 
 /** Who is asking (from the session, never the request). */
 export type Actor = { id: string; admin: boolean };
 export const OWNER_ERROR = "Only the owner or an admin can change this plan.";
-export const IN_PROGRESS_PIN_ERROR = "This block is in progress — it stays put.";
+/** Dragging a held `started` pin (a remainder or an In-progress block that hasn't begun). It can be Unpinned (D798). */
+export const IN_PROGRESS_PIN_ERROR = "This block holds started work — Unpin it to free the time.";
 const STALE_ERROR = BLOCK_MOVED_ERROR;
 const NOT_OPEN: WriteResult = { ok: false, error: "That item isn't open." };
 
 const mayChange = (t: Target, actor: Actor) => actor.admin || (!!t.ownerId && t.ownerId === actor.id);
 
-/** Drag / drop a block. Only the plan's owner or an admin; a fresh drop is
- *  30 minutes to 8 hours, a move keeps the stored pin's own length (never the
- *  client's), and a drop at or before now lands at the next quarter so the
- *  pin is never born "started". */
+/** Drag / drop a block. Only the plan's owner or an admin. A fresh drop's
+ *  length comes from the client (the block it dragged), bounded 30 minutes to
+ *  8 hours and capped at the item's remaining minutes — its size less what is
+ *  already pinned, on the grid, at least 30 (D799); a move keeps the stored
+ *  pin's own length (never the client's); a drop at or before now lands at the
+ *  next quarter so the pin is never born "started". */
 export async function pinBlock(input: unknown, actor: Actor, nowMs: number = Date.now()): Promise<WriteResult> {
   const c = cleanPinMove(input, nowMs);
   if (!c.ok) return c;
@@ -78,7 +81,10 @@ export async function pinBlock(input: unknown, actor: Actor, nowMs: number = Dat
   }
   if (c.value.minutes < MIN_CHUNK_MIN) return { ok: false, error: "A block is 30 minutes to 8 hours." };
   if (pins.length >= PIN_MAX_PER_PERSON) return { ok: false, error: "Too many pinned blocks — unpin some first." };
-  await addPins(t.ownerId, [{ itemKey: t.key, startMs, endMs: startMs + c.value.minutes * 60_000, kind: "hand" }]);
+  const pinnedMin = pins.filter((p) => p.itemKey === t.key).reduce((s, p) => s + (p.endMs - p.startMs) / 60_000, 0);
+  const remaining = Math.max(MIN_CHUNK_MIN, Math.ceil(Math.max(0, t.sizeMin - pinnedMin) / GRID_MIN) * GRID_MIN);
+  const minutes = Math.min(c.value.minutes, remaining);
+  await addPins(t.ownerId, [{ itemKey: t.key, startMs, endMs: startMs + minutes * 60_000, kind: "hand" }]);
   return { ok: true };
 }
 
@@ -93,8 +99,14 @@ export async function unpinBlock(input: unknown, actor: Actor, nowMs: number = D
   if (!t.ownerId) return { ok: true };
   const pin = (await getPins(t.ownerId)).find((p) => p.itemKey === t.key && p.startMs === startMs);
   if (!pin) return { ok: true };
+  // A pin covering now (or past) stays locked; anything that hasn't begun can go.
   if (pin.startMs <= nowMs) return { ok: false, error: STARTED_ERROR };
-  if (pin.kind === "started") return { ok: false, error: IN_PROGRESS_PIN_ERROR };
+  // A held `started` pin (a remainder, or an In-progress block) is the escape hatch (D798): drop it AND mark the item
+  // released in one statement, so the next compute plans it as movable work instead of pinning it straight back.
+  if (pin.kind === "started") {
+    await releasePin(t.ownerId, pin, nowMs);
+    return { ok: true };
+  }
   await removePinKeys(t.ownerId, [pinBlobKey(pin)]);
   return { ok: true };
 }
@@ -142,8 +154,10 @@ export async function setTierSize(input: unknown): Promise<WriteResult> {
 }
 
 /** Sets the task's status. Its current block is pinned by the next plan
- *  compute (newPinsFrom in task-plan/pins.ts: an In-progress item's earliest
- *  unended block), which the action's revalidation triggers. */
+ *  compute on the owner's own view (newPinsFrom in task-plan/pins.ts: an
+ *  In-progress item's earliest unended block), which the action's
+ *  revalidation triggers. Marking it In progress again lifts an earlier
+ *  release (D798). */
 export async function markInProgress(input: unknown): Promise<WriteResult> {
   const o = obj(input);
   const ref = parsePlanRef(o.kind, o.id);
@@ -152,5 +166,8 @@ export async function markInProgress(input: unknown): Promise<WriteResult> {
   const t = await getTask(ref.id);
   if (!t) return GONE;
   if (t.status === "done") return { ok: false, error: "That item is already done." };
-  return (await setTaskStatus(ref.id, "in_progress")) ? { ok: true } : GONE;
+  if (!(await setTaskStatus(ref.id, "in_progress"))) return GONE;
+  const owner = t.assigneeUserId ?? (await userIdForName(t.assigneeName));
+  if (owner) await removePinKeys(owner, [releaseBlobKey(planItemKey("task", ref.id))]);
+  return { ok: true };
 }

@@ -266,10 +266,14 @@ export function autoTaskId(coverageKey: string): string {
   return "T-auto-" + coverageKey.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
-/** Bell rail (#17): open tasks assigned to me, plus anything overdue. */
+/** Bell rail (#17): open tasks assigned to me, plus overdue tasks nobody owns.
+ *  Someone else's overdue task is theirs — it no longer rings every bell
+ *  (D802: once the auto task calendar dates every assigned task, "anyone's
+ *  overdue" would flood the whole team). */
 export function taskBellItems(all: TaskRecord[], me: string, nowMs: number): TaskRecord[] {
+  const unassigned = (t: TaskRecord) => !t.assigneeUserId && !(t.assigneeName || "").trim();
   return all.filter(
-    (t) => t.status !== "done" && (t.assigneeName === me || isOverdue(t, nowMs)),
+    (t) => t.status !== "done" && (t.assigneeName === me || (unassigned(t) && isOverdue(t, nowMs))),
   );
 }
 
@@ -483,7 +487,12 @@ export async function updateTask(
   const prev = { assignee: null as string | null };
   const t = await patchDoc<TaskRecord>("tasks", id, (t) => {
     prev.assignee = t.assigneeUserId ?? null;
+    const prevName = t.assigneeName || "";
     Object.assign(t, rest, tierSizeOf({ priority, size })); // tier/size: only a valid value is written
+    // Handed to someone new and still undated → the +7 default, the same rule as create (D787, withAutoDue).
+    const handed = ("assigneeUserId" in rest || "assigneeName" in rest) &&
+      ((t.assigneeUserId ?? null) !== prev.assignee || (t.assigneeName || "").trim().toLowerCase() !== prevName.trim().toLowerCase());
+    if (handed) t.dueAt = withAutoDue({ assigneeUserId: t.assigneeUserId, assigneeName: t.assigneeName, dueAt: t.dueAt, startAt: t.startAt, schedule: t.schedule }, now()).dueAt ?? null;
     t.updatedAt = now();
     return t;
   });

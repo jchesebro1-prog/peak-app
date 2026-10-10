@@ -108,14 +108,15 @@ export default async function CalendarPage({
   ]);
 
   // New "started" pins are saved after the response, never on the render path
-  // (and not at all when the plan failed to load).
+  // (and not at all when the plan failed to load) — and only on the viewer's
+  // OWN plan: an Everyone view or an admin never locks someone else's time (D797).
   const { view: plan, toSave } = composeCalendarPlan(plans, {
     minMs,
     maxMs,
     initials: (id, name) => roster.find((u) => u.id === id)?.initials || deriveInitials(name),
     viewer: { id: user.id, admin: can("manage_users", user.roles) },
   });
-  if (toSave.length) after(() => savePlanPins(toSave).catch((err) => console.error("[task-plan] pin save failed:", err)));
+  if (toSave.length) after(() => savePlanPins(toSave, { persistStartedFor: user.id }).catch((err) => console.error("[task-plan] pin save failed:", err)));
 
   return (
     <HomeTabs active="calendar" maxWidth={1120} style={{ padding: "24px 30px 64px" }}>

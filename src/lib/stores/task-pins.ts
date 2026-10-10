@@ -18,15 +18,21 @@ import { getDb } from "@/db";
 import { getBlob, setBlob } from "@/db/doc-store";
 import { blobs } from "@/db/doc-tables";
 import { sameName } from "@/lib/quote-approval-rules";
-import { PIN_MAX_PER_PERSON, pinBlobKey, pinBlobValue, pinsFromBlob, pinsToPrune } from "@/lib/task-plan/pins";
+import { PIN_MAX_PER_PERSON, pinBlobKey, pinBlobValue, pinsFromBlob, pinsToPrune, releaseBlobKey, releasedFromBlob, RELEASED_SUFFIX } from "@/lib/task-plan/pins";
 import { planItemKey, type PlanItem, type PlanItemKind, type PlanPin } from "@/lib/task-plan/types";
 import { activeUsers } from "@/lib/users";
 
 export const pinsBlobId = (userId: string) => `task_pins:${userId}`;
 
 export async function getPins(userId: string): Promise<PlanPin[]> {
-  if (!userId) return [];
-  return pinsFromBlob(await getBlob<Record<string, unknown>>(pinsBlobId(userId), {}));
+  return (await getPinState(userId)).pins;
+}
+
+/** One read of the blob: the pins and the item keys whose held time was released (D798). */
+export async function getPinState(userId: string): Promise<{ pins: PlanPin[]; released: string[] }> {
+  if (!userId) return { pins: [], released: [] };
+  const raw = await getBlob<Record<string, unknown>>(pinsBlobId(userId), {});
+  return { pins: pinsFromBlob(raw), released: releasedFromBlob(raw) };
 }
 
 /** What the cap needs to know which past pins the plan still depends on:
@@ -66,13 +72,29 @@ async function enforcePinCap(userId: string, cap: PinCapContext, log: PinLog): P
   }
 }
 
+/** Drop keys in one `data - ARRAY[...]::text[]` statement. */
 export async function removePinKeys(userId: string, keys: readonly string[]): Promise<void> {
   const list = [...new Set(keys.filter((k) => typeof k === "string" && k))];
   if (!userId || !list.length) return;
-  let expr: SQL = sql`${blobs.data}`;
-  for (const k of list) expr = sql`(${expr}) - ${k}::text`;
+  const arr: SQL = sql`ARRAY[${sql.join(list.map((k) => sql`${k}`), sql`, `)}]::text[]`;
   const db = await getDb();
-  await db.update(blobs).set({ data: expr, updatedAt: Date.now() }).where(eq(blobs.id, pinsBlobId(userId)));
+  await db.update(blobs).set({ data: sql`${blobs.data} - ${arr}`, updatedAt: Date.now() }).where(eq(blobs.id, pinsBlobId(userId)));
+}
+
+/** Unpin a held `started` pin (D798) in ONE statement: drop it and mark the
+ *  item released, so the next compute doesn't pin it straight back. False =
+ *  the pin had already gone (nothing written). */
+export async function releasePin(userId: string, pin: PlanPin, atMs: number = Date.now()): Promise<boolean> {
+  const fromKey = pinBlobKey(pin);
+  if (!userId) return false;
+  const patch = JSON.stringify({ [releaseBlobKey(pin.itemKey)]: { kind: RELEASED_SUFFIX, atMs } });
+  const db = await getDb();
+  const rows = await db
+    .update(blobs)
+    .set({ data: sql`(${blobs.data} - ${fromKey}::text) || ${patch}::jsonb`, updatedAt: Date.now() })
+    .where(and(eq(blobs.id, pinsBlobId(userId)), sql`jsonb_exists(${blobs.data}, ${fromKey})`))
+    .returning({ id: blobs.id });
+  return rows.length > 0;
 }
 
 /** Move one pin in ONE statement: drop `fromKey` and add the new pin, only if
@@ -90,10 +112,11 @@ export async function movePin(userId: string, fromKey: string, to: PlanPin): Pro
   return rows.length > 0;
 }
 
+/** All of an item's pins, and its release marker. Returns the pin count. */
 export async function clearItemPins(userId: string | null | undefined, itemKey: string): Promise<number> {
   if (!userId) return 0;
   const keys = (await getPins(userId)).filter((p) => p.itemKey === itemKey).map(pinBlobKey);
-  await removePinKeys(userId, keys);
+  await removePinKeys(userId, [...keys, releaseBlobKey(itemKey)]);
   return keys.length;
 }
 

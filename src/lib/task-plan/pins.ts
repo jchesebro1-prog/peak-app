@@ -49,24 +49,31 @@ export function pinsFromBlob(raw: Record<string, unknown>): PlanPin[] {
   return out.sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0));
 }
 
-/** Spec "Unfinished": an open item whose pins all ended on a day before
- *  today gets its remaining time (size − pinned so far, at least 30 min)
- *  pinned first thing on the next work day. */
+/** Spec "Unfinished" (bounded, D796): an open item whose pins all ended on a
+ *  day before today, and whose pins so far are still SHORT of its size, gets
+ *  the rest (size − pinned so far, on the grid, at least 30 min) pinned first
+ *  thing on the next work day. Once its whole size has been pinned it is never
+ *  pinned ahead again — the planner places it like any unstarted work, a
+ *  movable 30-minute chunk (`exhaustedItem`). An item whose remainder the
+ *  owner released (Unpin, D798) gets none either. */
 export function unfinishedRemainders(args: {
   items: readonly PlanItem[];
   pins: readonly PlanPin[];
   nowMs: number;
   hours: WorkHours;
+  released?: ReadonlySet<string>;
 }): Array<{ item: PlanItem; minutes: number; earliestMs: number }> {
   const today = chicagoDayKey(args.nowMs);
   const out: Array<{ item: PlanItem; minutes: number; earliestMs: number }> = [];
   for (const item of args.items) {
+    if (args.released?.has(item.key)) continue;
     const ps = args.pins.filter((p) => p.itemKey === item.key);
     if (!ps.length || ps.some((p) => p.endMs > args.nowMs)) continue;
     const lastDay = chicagoDayKey(Math.max(...ps.map((p) => p.endMs)) - 1);
     if (lastDay >= today) continue;
-    const pinned = ps.reduce((s, p) => s + (p.endMs - p.startMs) / 60_000, 0);
-    const minutes = Math.max(MIN_CHUNK_MIN, Math.ceil(Math.max(0, item.sizeMin - pinned) / GRID_MIN) * GRID_MIN);
+    const left = item.sizeMin - ps.reduce((s, p) => s + (p.endMs - p.startMs) / 60_000, 0);
+    if (left <= 0) continue; // its whole size is pinned: never locked ahead again
+    const minutes = Math.max(MIN_CHUNK_MIN, Math.ceil(left / GRID_MIN) * GRID_MIN);
     let k = addDays(lastDay, 1);
     if (k < today) k = today;
     let win = workWindow(k, args.hours);
@@ -88,13 +95,17 @@ export function unfinishedRemainders(args: {
  *    ended, when that block isn't already a pin. A pin covering now is that
  *    block, so it suppresses; a far-future hand pin isn't, so it doesn't;
  *    and once the current block is pinned the rest stay movable (no ratchet
- *    pinning one more chunk per compute). */
+ *    pinning one more chunk per compute). Not once the owner released the
+ *    item (Unpin of its held block, D798) — then only a block that has begun
+ *    is pinned.
+ *  Only the owner's own views SAVE these (savePlanPins, D797). */
 export function newPinsFrom(args: {
   blocks: readonly PlanBlock[];
   items: readonly PlanItem[];
   pins: readonly PlanPin[];
   nowMs: number;
   remainderKeys: ReadonlySet<string>;
+  released?: ReadonlySet<string>;
 }): PlanPin[] {
   const persisted = new Set(args.pins.map(pinBlobKey));
   const out = new Map<string, PlanPin>();
@@ -112,16 +123,37 @@ export function newPinsFrom(args: {
     if (b.startMs <= args.nowMs || remainderDay.get(b.itemKey) === chicagoDayKey(b.startMs)) add(b);
   }
   for (const item of args.items) {
-    if (!item.inProgress) continue;
+    if (!item.inProgress || args.released?.has(item.key)) continue;
     const current = args.blocks.filter((b) => b.itemKey === item.key && b.endMs > args.nowMs).sort(byStart)[0];
     if (current && !persisted.has(current.key)) add(current);
   }
   return [...out.values()].sort((a, b) => a.startMs - b.startMs || (a.itemKey < b.itemKey ? -1 : 1));
 }
 
-/** Blob keys of pins whose item is no longer this person's open work. */
-export function stalePinKeys(pins: readonly PlanPin[], openKeys: ReadonlySet<string>): string[] {
-  return pins.filter((p) => !openKeys.has(p.itemKey)).map(pinBlobKey);
+/** Blob keys of pins (and release markers) whose item is no longer this person's open work. */
+export function stalePinKeys(pins: readonly PlanPin[], openKeys: ReadonlySet<string>, released: readonly string[] = []): string[] {
+  return [...pins.filter((p) => !openKeys.has(p.itemKey)).map(pinBlobKey), ...released.filter((k) => !openKeys.has(k)).map(releaseBlobKey)];
+}
+
+/* ---- Release markers (D798) ----
+ * Unpin of a held `started` pin (a remainder, or an In-progress block that
+ * hasn't begun) stores `<itemKey>@released` → { kind: "released", atMs } in
+ * the same blob, so the next compute doesn't pin it straight back. pinsFromBlob
+ * already skips the key (its start isn't a number); the item is then planned
+ * like unstarted work until it's done, handed off or marked In progress again. */
+export const RELEASED_SUFFIX = "released";
+export function releaseBlobKey(itemKey: string): string {
+  return `${itemKey}@${RELEASED_SUFFIX}`;
+}
+export function releasedFromBlob(raw: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(raw || {})) {
+    if (!k.endsWith("@" + RELEASED_SUFFIX)) continue;
+    const itemKey = k.slice(0, -(RELEASED_SUFFIX.length + 1));
+    const o = v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+    if (parsePlanItemKey(itemKey) && o?.kind === RELEASED_SUFFIX) out.push(itemKey);
+  }
+  return out.sort();
 }
 
 export type PinMove = { kind: PlanItemKind; id: string; fromStartMs: number | null; startMs: number; minutes: number };
@@ -153,8 +185,8 @@ export function cleanPinMove(input: unknown, nowMs: number): { ok: true; value: 
  *      planner already ignores them and sweeps them as staleKeys);
  *   2. past pins of an open item that would still have at least its size
  *      pinned (by its past pins alone) without them, never that item's latest-ending pin. Its
- *      remainder is then "nothing left" (or the daily +30 for still-open
- *      work) and its last pinned day stays put, so planPerson returns the
+ *      remainder is then "nothing left" (still-open work plans as a movable
+ *      30-minute chunk, D796) and its last pinned day stays put, so planPerson returns the
  *      same blocks, new pins, At risk and finish times from now on; only
  *      that old day's block stops showing.
  *  Never a current or future pin, never a pin an item's remaining time still

@@ -76,7 +76,7 @@ export type PlanItem = {
   tier: TaskTier;
   size: TaskSize;
   sizeMin: number;
-  /** effective due (an undated item plans as due 7 days after it was created) */
+  /** stored due; an undated item (`dueVirtual`) plans by a rolling today + 7 days (D801) */
   dueMs: number;
   dueVirtual: boolean;
   /** a template's startAt: the earliest the item may be placed */
@@ -93,6 +93,8 @@ export type PlanInput = {
   busy: BusyInterval[];
   /** this person's pins (any item; pins of items not in `items` are stale) */
   pins: PlanPin[];
+  /** item keys whose held time the owner released (Unpin of a `started` pin, D798) */
+  released?: readonly string[];
   items: PlanItem[];
   horizonDays?: number;
   fillRatio?: number;
@@ -137,7 +139,7 @@ export type PlanResult = {
   atRisk: AtRiskItem[];
   /** pins this compute must persist (blocks that began, in-progress, remainders) */
   newPins: PlanPin[];
-  /** pin blob keys whose item is no longer this person's open work */
+  /** pin blob keys (and release markers) whose item is no longer this person's open work */
   staleKeys: string[];
   /** pins that haven't begun (what Unpin can offer) */
   futurePins: PlanPin[];

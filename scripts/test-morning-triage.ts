@@ -696,6 +696,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
         deps: {
           workHours: async () => DEFAULT_WORK_HOURS,
           pins: async () => [],
+          released: async () => [],
           drive: async () => [],
           readEvents: async (uid) => ((googleReads[uid] = (googleReads[uid] ?? 0) + 1), { status: "ok", events: [] }),
         },

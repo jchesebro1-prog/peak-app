@@ -2,8 +2,11 @@
  * Morning triage's at-risk provider (TRIAGE_HOOKS.atRisk, spec
  * 2026-10-09-morning-triage "spec 3 seam"). The triage cron builds every
  * user's morning list through this, so it is also where the plan is
- * computed "on the morning cron" — and its started/remainder pins saved —
- * without a new rider on the daily trigger.
+ * computed "on the morning cron" without a new rider on the daily trigger.
+ * It never LOCKS anything (D797): no `started` pin is saved from a triage
+ * build — cron or lazy first view — for anyone; only stale pins are swept
+ * (fail-closed, as before). A view build (no deadline) reads Google with the
+ * short VIEW_PLAN_CALENDAR_MS limit, like Home.
  *
  * One plan per build: with `shared` (the build's memoized loaders) the first
  * call plans EVERY user the build names in one loadTaskPlans — Google reads
@@ -16,7 +19,7 @@
  */
 import type { AtRiskShared } from "@/lib/triage/hooks";
 import type { TriageUser } from "@/lib/triage/types";
-import { loadTaskPlans, savePlanPins, type PersonPlan, type PinStore, type TaskPlanDeps } from "./load";
+import { loadTaskPlans, savePlanPins, VIEW_PLAN_CALENDAR_MS, type PersonPlan, type PinStore, type TaskPlanDeps } from "./load";
 
 type Opts = { deps?: Partial<TaskPlanDeps>; store?: PinStore };
 type BuildPlans = { ids: ReadonlySet<string>; plans: Promise<Map<string, PersonPlan>> };
@@ -28,8 +31,10 @@ async function planAndSave(userIds: readonly string[], meId: string, now: number
   const fromBuild: Partial<TaskPlanDeps> = shared
     ? { roster: shared.roster, tasks: shared.tasks, assignments: shared.assignments, visits: shared.visits }
     : {};
-  const plans = await loadTaskPlans({ userIds, meId, deadlineMs: shared?.deadlineMs, deps: { ...opts.deps, ...fromBuild, now: () => now } });
-  await savePlanPins(plans, opts.store);
+  // A view build (no cron deadline) waits on the Google read — keep it short.
+  const viewLimit: Partial<TaskPlanDeps> = shared?.deadlineMs == null ? { calendarTimeoutMs: VIEW_PLAN_CALENDAR_MS } : {};
+  const plans = await loadTaskPlans({ userIds, meId, deadlineMs: shared?.deadlineMs, deps: { ...viewLimit, ...opts.deps, ...fromBuild, now: () => now } });
+  await savePlanPins(plans, { persistStartedFor: null, store: opts.store });
   return new Map(plans.map((p) => [p.userId, p]));
 }
 

@@ -132,6 +132,9 @@ export async function updateAssignment(
     delete d.priority;
     delete d.size;
     Object.assign(d, rest, stored, tierSizeOf({ priority, size })); // a patch writes tier/size only when valid
+    // Reassigned to someone new with no date → the +7 default, the same rule as create (D787).
+    const handed = "assignee" in rest && !!(d.assignee || "").trim() && !sameName(prev.assignee, d.assignee || "");
+    if (handed && !(Number(d.dueDate) > 0)) d.dueDate = autoDueAt(Number(d.dueDate) || 0, true, Date.now()) ?? 0;
   });
   // A hand-off leaves the old assignee's pins behind on their calendar — clear them.
   if (rec && "assignee" in patch && prev.assignee && !sameName(prev.assignee, rec.assignee)) {

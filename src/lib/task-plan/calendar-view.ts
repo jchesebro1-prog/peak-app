@@ -54,7 +54,7 @@ export type CalendarFuturePin = {
   startMs: number;
   endMs: number;
   pinKind: PinKind;
-  /** A hand pin that hasn't begun, for the plan's owner or an admin (what the server accepts). */
+  /** Any pin that hasn't begun (hand, or a held started one — D798), for the plan's owner or an admin (what the server accepts). */
   canUnpin: boolean;
 };
 
@@ -93,11 +93,12 @@ export function calendarPlanView(
     for (const b of p.result.blocks) {
       planned.add(b.itemKey);
       if (b.endMs < opts.minMs || b.startMs > opts.maxMs) continue;
-      // A pin that has begun, or is an in-progress remainder ("started"), stays put (the server refuses both).
-      const canUnpin = mayPin && b.pinned === "hand" && b.startMs > now;
+      // Any pin that hasn't begun can be Unpinned — a held "started" one (a remainder or an In-progress block) too,
+      // the escape hatch (D798); a pin covering now stays locked. Only hand pins drag (the server refuses the rest).
+      const canUnpin = mayPin && !!b.pinned && b.startMs > now;
       view.blocks.push({
         key: b.key, itemKey: b.itemKey, kind: b.kind, id: b.id, title: b.title, href: b.href,
-        startMs: b.startMs, endMs: b.endMs, pinned: b.pinned, canUnpin, draggable: mayPin && (!b.pinned || canUnpin),
+        startMs: b.startMs, endMs: b.endMs, pinned: b.pinned, canUnpin, draggable: mayPin && (!b.pinned || (canUnpin && b.pinned === "hand")),
         atRiskLabel: b.atRisk ? (riskLabel.get(b.itemKey) ?? null) : null,
         userId: p.userId, ownerName: p.name, initials, tier: b.tier, size: b.size, inProgress: b.inProgress,
       });
@@ -110,7 +111,7 @@ export function calendarPlanView(
     }
     for (const f of p.result.futurePins) {
       const ref = parsePlanItemKey(f.itemKey);
-      if (ref) view.futurePins.push({ userId: p.userId, itemKey: f.itemKey, kind: ref.kind, id: ref.id, title: titleOf.get(f.itemKey) ?? ref.id, startMs: f.startMs, endMs: f.endMs, pinKind: f.kind, canUnpin: mayPin && f.kind === "hand" && f.startMs > now });
+      if (ref) view.futurePins.push({ userId: p.userId, itemKey: f.itemKey, kind: ref.kind, id: ref.id, title: titleOf.get(f.itemKey) ?? ref.id, startMs: f.startMs, endMs: f.endMs, pinKind: f.kind, canUnpin: mayPin && f.startMs > now });
     }
   }
   // One Google note stays verbatim; several (Everyone) collapse to a single line naming the people.

@@ -1,7 +1,8 @@
 /**
  * Task-plan loader (spec Part 2 "Free time"): builds planPerson input per
  * person and runs it. Read-only — new pins come back in each result and are
- * written by savePlanPins (pages: after the response; cron: inline). Google
+ * written by savePlanPins (the owner's own page views only lock `started`
+ * pins, D797; the cron saves stale removals only). Google
  * is read ONCE per person over the 8-week horizon (spec 2's
  * readCalendarForBooking, bounded by a timeout — and on the cron by its
  * deadline); drive blocks come from spec
@@ -19,7 +20,7 @@ import type { CalendarEvent } from "@/lib/google/calendar";
 import { allAssignments, type Assignment } from "@/lib/stores/assignments";
 import { workHoursFor } from "@/lib/stores/schedule-prefs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
-import { addPins, getPins, removePinKeys, type PinCapContext } from "@/lib/stores/task-pins";
+import { addPins, getPinState, removePinKeys, type PinCapContext } from "@/lib/stores/task-pins";
 import { allTasks, type TaskRecord } from "@/lib/stores/tasks";
 import { activeUsers } from "@/lib/users";
 import { busyBlocks, toBusyVisit } from "@/lib/visit-plan/busy";
@@ -34,6 +35,8 @@ import { planPerson } from "./plan";
 import { PLAN_HORIZON_DAYS, type BusyInterval, type PlanItem, type PlanPin, type PlanResult } from "./types";
 
 export const PLAN_CALENDAR_TIMEOUT_MS = 6_000;
+/** A view that waits on the plan (Home Today, a lazy first-view triage build) reads Google with this short limit. */
+export const VIEW_PLAN_CALENDAR_MS = 2_500;
 /** Time kept back before a cron deadline when sizing the Google read. */
 export const PLAN_DEADLINE_MARGIN_MS = 2_000;
 
@@ -56,6 +59,8 @@ export type TaskPlanDeps = {
   visits(): Promise<SiteVisit[]>;
   workHours(userId: string): Promise<WorkHours>;
   pins(userId: string): Promise<PlanPin[]>;
+  /** item keys whose held time the owner released (D798); read with the pins (one blob) */
+  released(userId: string): Promise<string[]>;
   readEvents(userId: string, range: { timeMinMs: number; timeMaxMs: number }): Promise<{ status: CalendarRead; events: CalendarEvent[] }>;
   drive(args: { userId: string; dayKeys: string[]; events: CalendarEvent[] | null; visits: () => Promise<SiteVisit[]> }): Promise<DriveDayPlan[]>;
   calendarTimeoutMs: number;
@@ -64,6 +69,13 @@ export type TaskPlanDeps = {
 };
 
 function defaultDeps(): TaskPlanDeps {
+  // pins + released come from ONE blob read per person per load.
+  const states = new Map<string, ReturnType<typeof getPinState>>();
+  const state = (userId: string) => {
+    let s = states.get(userId);
+    if (!s) states.set(userId, (s = getPinState(userId)));
+    return s;
+  };
   return {
     now: Date.now,
     roster: async () => (await activeUsers()).map((u) => ({ id: u.id, name: u.name })),
@@ -71,7 +83,8 @@ function defaultDeps(): TaskPlanDeps {
     assignments: allAssignments,
     visits: allVisits,
     workHours: workHoursFor,
-    pins: getPins,
+    pins: async (userId) => (await state(userId)).pins,
+    released: async (userId) => (await state(userId)).released,
     readEvents: readCalendarForBooking,
     drive: ({ userId, dayKeys, events, visits }) => planDriveDays({ userId, dayKeys, events, mode: "cache", deps: { visits } }),
     calendarTimeoutMs: PLAN_CALENDAR_TIMEOUT_MS,
@@ -142,9 +155,10 @@ export async function loadTaskPlans(args: {
     ids.map(async (userId): Promise<PersonPlan | null> => {
       const person = roster.find((u) => u.id === userId);
       if (!person) return null;
-      const [hours, pins, cal, allV] = await Promise.all([
+      const [hours, pins, released, cal, allV] = await Promise.all([
         d.workHours(userId),
         d.pins(userId),
+        d.released(userId),
         readCalendar(userId),
         visits(),
       ]);
@@ -158,7 +172,7 @@ export async function loadTaskPlans(args: {
         console.error("[task-plan] drive layer failed:", userId, err);
       }
       const items = byPerson.get(userId) ?? [];
-      const result = planPerson({ userId, nowMs: now, hours, busy, pins, items });
+      const result = planPerson({ userId, nowMs: now, hours, busy, pins, released, items });
       return { userId, name: person.name, calendar: cal.status, note: calendarNote(cal.status, person.name, userId === args.meId), result, items };
     })
   );
@@ -176,15 +190,26 @@ const defaultStore: PinStore = {
   remove: removePinKeys,
 };
 
-/** Persist what a compute decided: new started pins (with the cap given the
- *  plan's own items; none when that person's calendar wasn't read), and stale keys dropped. Adds merge atomically and
- *  removals are by key, so two tabs computing at once are safe. Never throws. */
-export async function savePlanPins(plans: readonly PersonPlan[], store: PinStore = defaultStore): Promise<void> {
+/** Who a save may lock `started` pins for (D797): the signed-in OWNER on their
+ *  own page view (/calendar, Home Today) — `persistStartedFor: user.id` — and
+ *  nobody else. The triage cron/lazy build and anyone viewing someone else's
+ *  plan (Everyone view, an admin) pass null or a different id, so they never
+ *  lock time on another person's calendar. Explicit, never defaulted. */
+export type SavePlanOpts = { persistStartedFor: string | null; store?: PinStore };
+
+/** Persist what a compute decided: new started pins — only on the owner's own
+ *  view and only when that person's calendar was read (with the cap given the
+ *  plan's own items) — and stale keys dropped (always; the loader fails closed).
+ *  Adds merge atomically and removals are by key, so two tabs computing at once
+ *  are safe. Never throws. */
+export async function savePlanPins(plans: readonly PersonPlan[], opts: SavePlanOpts): Promise<void> {
+  const store = opts.store ?? defaultStore;
   for (const p of plans) {
     // Separate tries: a failed add never skips the stale removal, nor the reverse.
     // A plan that never saw the person's meetings (Google failed, timed out or isn't connected)
     // would freeze its guesses as "started" pins, so those aren't saved — the next view re-plans them.
-    const fresh = p.calendar === "ok" ? p.result.newPins : p.result.newPins.filter((x) => x.kind !== "started");
+    const lockStarted = p.calendar === "ok" && opts.persistStartedFor != null && p.userId === opts.persistStartedFor;
+    const fresh = lockStarted ? p.result.newPins : p.result.newPins.filter((x) => x.kind !== "started");
     if (fresh.length) {
       try {
         await store.add(p.userId, fresh, p.items ? { items: p.items, nowMs: p.result.nowMs } : undefined);

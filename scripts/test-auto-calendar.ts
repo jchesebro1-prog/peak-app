@@ -9,7 +9,7 @@ import type { SiteVisit } from "@/lib/stores/site-visits";
 import { TRIAGE_HOOKS } from "@/lib/triage/hooks";
 import { planItemsByPerson } from "@/lib/task-plan/items";
 import { handOff, markInProgress, pinBlock, pushDueDate, setTierSize, unpinBlock } from "@/lib/task-plan/write";
-import { calendarBudgetMs, loadTaskPlans, savePlanPins, type PinStore, type TaskPlanDeps } from "@/lib/task-plan/load";
+import { calendarBudgetMs, loadTaskPlans, savePlanPins, VIEW_PLAN_CALENDAR_MS, type PersonPlan, type PinStore, type TaskPlanDeps } from "@/lib/task-plan/load";
 import type { AtRiskShared } from "@/lib/triage/hooks";
 import { taskPlanAtRisk } from "@/lib/task-plan/triage";
 import { like } from "drizzle-orm";
@@ -17,7 +17,7 @@ import { getDb } from "@/db";
 import { blobs } from "@/db/schema";
 import { activeUsers } from "@/lib/users";
 import { autoTaskId, createAutoTask, createTask, createTaskOnce, getTask, normalizeTask, removeTask, setTaskStatus, updateTask, type TaskRecord } from "@/lib/stores/tasks";
-import { addPins, clearItemPins, getPins, removePinKeys } from "@/lib/stores/task-pins";
+import { addPins, clearItemPins, getPins, getPinState, removePinKeys } from "@/lib/stores/task-pins";
 import { allAssignments, createAssignment, getAssignment, removeAssignment, setAssignmentDone, updateAssignment, type Assignment } from "@/lib/stores/assignments";
 import { upsertDoc } from "@/db/doc-store";
 import { triageKey } from "@/lib/triage/keys";
@@ -26,7 +26,7 @@ import { addDays, chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
 import { chunkFor, floorQuarter, freeDays } from "@/lib/task-plan/free";
 import { atRiskLabel, calendarNote, finishText, fmtBlockTime, GOOGLE_NOTE_ME, NOT_PLACED_TEXT } from "@/lib/task-plan/labels";
 import { planPerson } from "@/lib/task-plan/plan";
-import { cleanPinMove, PIN_MAX_PER_PERSON, pinBlobKey, pinBlobValue, pinsFromBlob, pinsToPrune, type PinMove } from "@/lib/task-plan/pins";
+import { cleanPinMove, PIN_MAX_PER_PERSON, pinBlobKey, pinBlobValue, pinsFromBlob, pinsToPrune, releaseBlobKey, releasedFromBlob, type PinMove } from "@/lib/task-plan/pins";
 import { chicagoWallMs, weekdayOf } from "@/lib/visit-plan/hours";
 import { DEFAULT_WORK_HOURS } from "@/lib/visit-plan/settings";
 import {
@@ -160,7 +160,8 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
   ok(autoDueAt(null, true, now) === defaultDueAt(now) && autoDueAt(null, false, now) === null && autoDueAt(at(FRI, 12), true, now) === at(FRI, 12) && autoDueAt(0, true, now) === defaultDueAt(now),
     "auto-cal due: only an assigned item with no date gets the +7 default");
   const v = effectiveDue(null, at(MON, 9));
-  ok(v.virtual && v.dueMs === defaultDueAt(at(MON, 9)) && !effectiveDue(at(FRI, 12), 1).virtual, "auto-cal due: an undated item plans as if due 7 days after it was created");
+  ok(v.virtual && v.dueMs === defaultDueAt(at(MON, 9)) && effectiveDue(null, at(FRI, 9)).dueMs === defaultDueAt(at(FRI, 9)) && !effectiveDue(at(FRI, 12), 1).virtual,
+    "auto-cal due: an undated item plans as if due 7 days from NOW — a rolling date, never stored (D801)");
 
   // Backfill plan (pure)
   const items: BackfillItem[] = [
@@ -235,6 +236,17 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
   registerFixture("assignments", b.id);
   ok(expect(a.dueDate) && b.dueDate === at(FRI, 12), "auto-cal due: createAssignment gives an undated assignment a due date 7 days out");
 
+  // Reassigning an undated item to someone stamps the same +7 (the create rule), never over a real date or an engine's.
+  await updateTask(T2, { assigneeUserId: me.id, assigneeName: me.name });
+  ok(expect((await getTask(T2))?.dueAt), "auto-cal due: assigning an undated task to someone stamps +7 (same rule as create)");
+  await updateTask(T3, { assigneeUserId: "TESTautocal:u2", assigneeName: "Other Person" });
+  ok((await getTask(T3))?.dueAt === at(FRI, 12), "auto-cal due: reassigning a dated task keeps its date");
+  const unasg = await createAssignment({ title: "due asg unassigned", assignee: "", createdBy: me.name });
+  registerFixture("assignments", unasg.id);
+  ok(!unasg.dueDate, "auto-cal due: an unassigned assignment stays undated");
+  await updateAssignment(unasg.id, { assignee: me.name });
+  ok(expect((await getAssignment(unasg.id))?.dueDate), "auto-cal due: assigning an undated assignment to someone stamps +7");
+
   // Fix round 1: createTaskOnce (Krisp #323 meeting to-dos) stamps the same default
   const O1 = fixtureId("autocal", "once-assigned");
   const O2 = fixtureId("autocal", "once-unassigned");
@@ -264,6 +276,12 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
   ok(expect(e1?.dueAt) && e1?.startAt === null, "auto-cal due: a manual engagement task gets +7 but has no startAt, so it never reaches the Gantt (which needs both dates) or its overrun flag");
   ok(e2?.startAt === at(MON, 12) && e2?.dueAt === at(TUE, 12) && !overrunsEnd(e2, at(TUE, 12)), "auto-cal due: an engine-placed task keeps its own dates exactly");
   ok(e3?.startAt === at(MON, 12) && e3?.dueAt === null, "auto-cal due: a task with a startAt but no dueAt is left to the engine, never stamped");
+
+  const E4 = fixtureId("autocal", "eng-reassign");
+  registerFixture("tasks", E4);
+  await createTask({ id: E4, title: "eng reassign", engagementId: ENG, startAt: at(MON, 12) }, me);
+  await updateTask(E4, { assigneeUserId: me.id, assigneeName: me.name });
+  ok((await getTask(E4))?.dueAt === null, "auto-cal due: reassigning an engine-placed task (it has a startAt) never stamps +7");
 
   // Fix round 1: createTask's insertWithPrefixedId path (no caller-chosen id)
   const p1 = await createTask({ title: "prefixed assigned", assigneeUserId: me.id, assigneeName: me.name }, me);
@@ -324,6 +342,14 @@ export async function autoCalDueChecks(ok: Ok): Promise<void> {
     skipRun.skipped.some((k) => k.kind === "task" && k.id === "T-g1" && k.assignee === "Ghost Person" && k.reason === "not on the active roster") &&
     skipRun.skipped.some((k) => k.kind === "assignment" && k.id === "as-g1" && k.assignee === "Nobody Here"),
     "auto-cal backfill: items whose assignee is off the roster are reported as skipped (an unassigned task is not)");
+  const waitRun = await runDueBackfill({
+    apply: false,
+    deps: {
+      now: () => at(FRI, 10), roster: async () => [{ id: "u1", name: "Dana" }], assignments: async () => [], workHours: async () => DEFAULT_WORK_HOURS,
+      tasks: async () => [normalizeTask({ id: "T-w", title: "w", assigneeUserId: "u1", assigneeName: "Dana", waitingOn: { contactId: null, name: "Pat" }, createdAt: 1 }), normalizeTask({ id: "T-o", title: "o", assigneeUserId: "u1", assigneeName: "Dana", createdAt: 2 })],
+    },
+  });
+  ok(waitRun.planned === 1 && waitRun.plan.updates[0]?.id === "T-o" && waitRun.skipped.length === 0, "auto-cal backfill: a Waiting on customer task (#323) is never given a due date");
 
   // Task 1 review add-on: update paths validate tier/size; assignments normalize on read
   const TU = fixtureId("autocal", "update-validate");
@@ -452,9 +478,18 @@ export async function autoCalPlacementChecks(ok: Ok): Promise<void> {
     "auto-cal plan: chunk sizes keep every piece ≥ 30 minutes");
 
   /* review add-ons: undated items, midnight end, DST, copy */
-  const undated = planPerson(baseInput({ items: [item("undated", { dueMs: 0, dueVirtual: true, createdAt: at(MON, 6) }), item("dated", { dueMs: at(TUE, 17), createdAt: 5 })] }));
-  ok(undated.blocks[0].itemKey === "task:dated" && blocksOf(undated, "task:undated")[0]?.dueMs === defaultDueAt(at(MON, 6)) && !undated.atRisk.some((a) => a.itemKey === "task:undated"),
-    "auto-cal plan: an undated item plans by its effective due (created + 7), never as overdue");
+  const undated = planPerson(baseInput({ items: [item("undated", { dueMs: 0, dueVirtual: true, createdAt: at("2036-08-01", 6) }), item("dated", { dueMs: at(TUE, 17), createdAt: 5 })] }));
+  ok(undated.blocks[0].itemKey === "task:dated" && blocksOf(undated, "task:undated")[0]?.dueMs === defaultDueAt(at(MON, 7)) && !undated.atRisk.some((a) => a.itemKey === "task:undated"),
+    "auto-cal plan: an undated item — even one created months ago — plans by a rolling today + 7, never as overdue (D801)");
+  // Undated work that can't fit is still never flagged; the same item with a real date that can't fit is.
+  const flood = (dueVirtual: boolean) => planPerson(baseInput({ horizonDays: 1, items: [
+    item("big", { size: "l", sizeMin: 600, tier: "high", dueMs: at(MON, 17) }),
+    item("u", { dueMs: dueVirtual ? 0 : at(MON, 17), dueVirtual, createdAt: 2 }),
+  ] }));
+  ok(!flood(true).atRisk.some((a) => a.itemKey === "task:u") && flood(true).finishMs["task:u"] === null && flood(false).atRisk.some((a) => a.itemKey === "task:u"),
+    "auto-cal plan: an undated item that doesn't fit is never At risk until it gets a real date (a dated one is)");
+  const vdue = planPerson(baseInput({ nowMs: at(FRI, 7), items: [item("u", { dueMs: at(MON, 17), dueVirtual: true })] }));
+  ok(blocksOf(vdue, "task:u")[0]?.dueMs === defaultDueAt(at(FRI, 7)) && vdue.atRisk.length === 0, "auto-cal plan: a virtual due is re-dated from the plan's clock, never read as stored");
   const nothing = nothing0();
   ok(nothing.blocks.length === 0 && nothing.atRisk.length === 0, "auto-cal plan: an item with nothing left to place isn't flagged");
 
@@ -532,10 +567,30 @@ export async function autoCalPinRuleChecks(ok: Ok): Promise<void> {
     "auto-cal pins: an unfinished started task's remaining time (4 h − 2 h) is pinned first thing the next work day (over the weekend)");
   const whole: PlanPin[] = [...fri, { itemKey: "task:L", startMs: at(FRI, 10), endMs: at(FRI, 14), kind: "started" }];
   const again = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: whole, items: [item("L", { size: "l", sizeMin: 240 })] }));
-  ok(blocksOf(again, "task:L").filter((b) => b.startMs > at(FRI, 23)).reduce((s, b) => s + b.endMs - b.startMs, 0) === 30 * MIN,
-    "auto-cal pins: still open after its whole size → 30 more minutes pinned the next morning");
+  const againL = blocksOf(again, "task:L").filter((b) => b.startMs > at(FRI, 23));
+  ok(againL.reduce((s, b) => s + b.endMs - b.startMs, 0) === 30 * MIN && againL.every((b) => !b.pinned) && again.newPins.length === 0,
+    "auto-cal pins: still open after its whole size → never pinned ahead again; one fresh 30-minute chunk, movable (D796)");
+  const againHigh = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: whole, items: [item("L", { size: "l", sizeMin: 240, dueMs: at("2036-10-30", 17) }), item("NEW", { tier: "high", dueMs: at(NEXT_MON, 17), createdAt: 9 })] }));
+  ok(blocksOf(againHigh, "task:NEW")[0]?.startMs === at(NEXT_MON, 8) && blocksOf(againHigh, "task:L").filter((b) => !b.pinned)[0]?.startMs === at(NEXT_MON, 9),
+    "auto-cal pins: that fresh chunk is urgency-ordered — more urgent new work goes ahead of it");
+  const begunToday = planPerson(baseInput({ nowMs: at(NEXT_MON, 11), pins: [...whole, { itemKey: "task:L", startMs: at(NEXT_MON, 8), endMs: at(NEXT_MON, 8, 30), kind: "started" }], items: [item("L", { size: "l", sizeMin: 240 })] }));
+  ok(blocksOf(begunToday, "task:L").filter((b) => b.startMs >= at(NEXT_MON, 11)).length === 0 && begunToday.newPins.length === 0,
+    "auto-cal pins: once today's fresh chunk has begun (and locked), nothing more is placed until tomorrow");
+  const shortRem = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: fri, items: [item("L", { size: "l", sizeMin: 240 })] }));
+  ok(shortRem.newPins.reduce((s, x) => s + x.endMs - x.startMs, 0) === 120 * MIN, "auto-cal pins: a remainder is pinned only while size − pinned so far > 0, and only for that difference");
   const sameDay = planPerson(baseInput({ nowMs: at(NEXT_MON, 9), pins: [...fri, { itemKey: "task:L", startMs: at(NEXT_MON, 8), endMs: at(NEXT_MON, 10), kind: "started" }], items: [item("L", { size: "l", sizeMin: 240 })] }));
   ok(sameDay.newPins.length === 0, "auto-cal pins: the remainder is pinned once, not again the same day");
+  // Released (Unpin of a held started pin, D798): no remainder, no In-progress pin ahead; still planned, movable.
+  const rel = planPerson(baseInput({ nowMs: at(NEXT_MON, 7, 30), pins: fri, released: ["task:L", "task:IPR", "task:GONE"], items: [item("L", { size: "l", sizeMin: 240 }), item("IPR", { inProgress: true })] }));
+  ok(rel.newPins.length === 0 && blocksOf(rel, "task:L").filter((b) => b.startMs > at(FRI, 23)).reduce((s, b) => s + b.endMs - b.startMs, 0) === 120 * MIN &&
+    blocksOf(rel, "task:L").every((b) => b.startMs < at(FRI, 23) || !b.pinned) && blocksOf(rel, "task:IPR").every((b) => !b.pinned),
+    "auto-cal pins: a released item gets no remainder pin and no In-progress pin ahead — its time is planned, movable");
+  ok(rel.staleKeys.join() === "task:GONE@released", "auto-cal pins: a release marker of an item that's no longer open work is swept as stale");
+  const relBegun = planPerson(baseInput({ nowMs: at(NEXT_MON, 8, 5), released: ["task:IPR"], items: [item("IPR", { inProgress: true })] }));
+  ok(relBegun.newPins.length === 1 && relBegun.newPins[0].startMs === at(NEXT_MON, 8), "auto-cal pins: a released item's block that has begun still locks (a pin covering now)");
+  ok(JSON.stringify(releasedFromBlob({ [releaseBlobKey("task:L")]: { kind: "released", atMs: 1 }, "asg:a@released": { kind: "hand" }, "lead:x@released": { kind: "released" } })) === JSON.stringify(["task:L"]) &&
+    pinsFromBlob({ [releaseBlobKey("task:L")]: { kind: "released", atMs: 1 } }).length === 0,
+    "auto-cal pins: release markers parse from the pin blob and are never read as pins");
 
   const stale = planPerson(baseInput({ pins: [{ itemKey: "task:GONE", startMs: at(MON, 8), endMs: at(MON, 12), kind: "hand" }], items: [item("A")] }));
   ok(stale.staleKeys.join() === `task:GONE@${at(MON, 8)}` && stale.blocks[0].startMs === at(MON, 8) && !stale.blocks.some((b) => b.itemKey === "task:GONE"),
@@ -696,7 +751,7 @@ export async function autoCalPinRuleChecks(ok: Ok): Promise<void> {
     }
     ok(computes === 5 * 96 && dupFree && store.size > 10, `auto-cal pins (save loop, ${computes} computes Sat → Wed): no compute re-adds a stored pin key or repeats one`);
     ok(overlapFree, "auto-cal pins (save loop): stored pins never overlap");
-    ok(bounded, "auto-cal pins (save loop): an item's pinned minutes never pass its size (+ under one grid piece), except the one +30 per day for still-open work");
+    ok(bounded, "auto-cal pins (save loop): an item's pinned minutes never pass its size (+ under one grid piece), except at most one 30-minute chunk a day for still-open work that actually began");
     ok(staleDropped, "auto-cal pins (save loop): a done item's pins are dropped by the next compute");
     ok(total("task:L1") >= 240 && total("task:N4") >= 45 && total("task:IP") >= 120, "auto-cal pins (save loop): by Wednesday night the week's work has all been pinned as it began");
   }
@@ -847,12 +902,13 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
     tk("T-open"), tk("T-ip", { status: "in_progress" }), tk("T-blocked", { status: "blocked" }), tk("T-done", { status: "done" }),
     tk("T-none", { assigneeUserId: null, assigneeName: "" }), tk("T-legacy", { assigneeUserId: null, assigneeName: "sam" }),
     tk("T-auto-p1-x", { coverageKey: "P-1:installation:x", startAt: at(WED, 0) }), tk("T-undated", { dueAt: null, createdAt: at(MON, 9) }),
+    tk("T-waiting", { waitingOn: { contactId: null, name: "Pat Customer" } }), tk("T-waiting-ip", { status: "in_progress", waitingOn: { contactId: "C-1", name: "Pat" } }),
   ];
   const asgs = [asg("as-1"), asg("as-done", { done: true }), asg("as-lee", { assignee: "LEE" }), asg("as-noone", { assignee: "" })];
   const by = planItemsByPerson(tasks, asgs, roster);
   const keys = (u: string) => (by.get(u) ?? []).map((i) => i.key).sort().join();
   ok(keys("u1") === ["asg:as-1", "task:T-auto-p1-x", "task:T-ip", "task:T-open", "task:T-undated"].sort().join(),
-    "auto-cal items: every open task and Queue assignment with an assignee — checklist/template tasks too; blocked, done and unassigned wait");
+    "auto-cal items: every open task and Queue assignment with an assignee — checklist/template tasks too; blocked, done, unassigned and Waiting on customer (#323) wait");
   ok(keys("u2") === "task:T-legacy" && keys("u3") === "asg:as-lee", "auto-cal items: a name-only assignee resolves through the roster (case-insensitive)");
   const u1 = by.get("u1")!;
   ok(u1.find((i) => i.id === "T-auto-p1-x")?.earliestMs === at(WED, 0) && u1.find((i) => i.id === "T-ip")?.inProgress === true && u1.find((i) => i.id === "T-undated")?.dueVirtual === true,
@@ -870,6 +926,7 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
     visits: async () => [visit],
     workHours: async () => DEFAULT_WORK_HOURS,
     pins: async () => [],
+    released: async () => [],
     readEvents: async () => ({ status: "ok", events }),
     drive: async () => [{ dayKey: MON, stops: [], legs: [leg], totalMin: 30 }],
     calendarTimeoutMs: 200,
@@ -926,22 +983,33 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
 
   const added: string[] = [];
   const removed: string[] = [];
-  await savePlanPins(
-    [{ userId: "u9", name: "X", calendar: "ok", note: null, result: { ...plan.result, newPins: [{ itemKey: "task:A", startMs: 1, endMs: 2, kind: "started" }], staleKeys: ["task:B@5"] } }],
-    { add: async (u, ps) => { added.push(`${u}:${ps.length}`); }, remove: async (u, ks) => { removed.push(`${u}:${ks.join()}`); } }
-  );
-  ok(added.join() === "u9:1" && removed.join() === "u9:task:B@5", "auto-cal loader: computing a plan persists its new started pins and drops stale ones");
+  const memStore: PinStore = { add: async (u, ps) => { added.push(`${u}:${ps.length}`); }, remove: async (u, ks) => { removed.push(`${u}:${ks.join()}`); } };
+  const okPlan = (userId: string) => ({ userId, name: "X", calendar: "ok" as CalendarRead, note: null, result: { ...plan.result, newPins: [{ itemKey: "task:A", startMs: 1, endMs: 2, kind: "started" as PinKind }], staleKeys: ["task:B@5"] } });
+  await savePlanPins([okPlan("u9")], { persistStartedFor: "u9", store: memStore });
+  ok(added.join() === "u9:1" && removed.join() === "u9:task:B@5", "auto-cal loader: the owner's own view persists its new started pins and drops stale ones");
+  added.length = 0;
+  removed.length = 0;
+  await savePlanPins([okPlan("u9"), okPlan("u8")], { persistStartedFor: null, store: memStore });
+  await savePlanPins([okPlan("u9"), okPlan("u8")], { persistStartedFor: "u7", store: memStore });
+  ok(added.length === 0 && removed.join("|") === "u9:task:B@5|u8:task:B@5|u9:task:B@5|u8:task:B@5",
+    "auto-cal loader: a cron/triage save (persistStartedFor null) or someone else's view (Everyone, an admin) never persists a started pin — stale removal still runs (D797)");
+  added.length = 0;
+  await savePlanPins([okPlan("u9"), okPlan("u8")], { persistStartedFor: "u8", store: memStore });
+  ok(added.join() === "u8:1", "auto-cal loader: on an Everyone view only the viewer's own plan locks started pins");
+  const loadSrc0 = readFileSync("src/lib/task-plan/load.ts", "utf8");
+  ok(/export async function savePlanPins\(plans: readonly PersonPlan\[\], opts: SavePlanOpts\)/.test(loadSrc0) && /persistStartedFor: string \| null;/.test(loadSrc0),
+    "auto-cal loader: persistStartedFor is a required, explicit choice on every save");
   // A plan built without the person's meetings must not freeze its guesses as "started" pins.
   const addedBlind: string[] = [];
   const removedBlind: string[] = [];
   const blindPlan = (calendar: CalendarRead, newPins: PlanPin[]) => ({ userId: "u9", name: "X", calendar, note: null, result: { ...plan.result, newPins, staleKeys: ["task:B@5"] } });
   const startedPin: PlanPin = { itemKey: "task:A", startMs: 1, endMs: 2, kind: "started" };
   for (const c of ["failed", "no-calendar"] as const) {
-    await savePlanPins([blindPlan(c, [startedPin])], { add: async (u, ps) => { addedBlind.push(`${c}:${u}:${ps.length}`); }, remove: async (u, ks) => { removedBlind.push(`${c}:${ks.join()}`); } });
+    await savePlanPins([blindPlan(c, [startedPin])], { persistStartedFor: "u9", store: { add: async (u, ps) => { addedBlind.push(`${c}:${u}:${ps.length}`); }, remove: async (u, ks) => { removedBlind.push(`${c}:${ks.join()}`); } } });
   }
   ok(addedBlind.length === 0 && removedBlind.length === 2, "auto-cal loader: when the person's Google calendar wasn't read, new started pins are not saved (stale removal still runs)");
   const handPin: PlanPin = { itemKey: "task:H", startMs: 3, endMs: 4, kind: "hand" };
-  await savePlanPins([blindPlan("failed", [startedPin, handPin])], { add: async (u, ps) => { addedBlind.push(ps.map((x) => x.kind).join()); }, remove: async () => {} });
+  await savePlanPins([blindPlan("failed", [startedPin, handPin])], { persistStartedFor: "u9", store: { add: async (u, ps) => { addedBlind.push(ps.map((x) => x.kind).join()); }, remove: async () => {} } });
   ok(addedBlind.join() === "hand", "auto-cal loader: a hand pin is unaffected by a failed calendar read");
 
   const noStore = { add: async () => {}, remove: async () => {} };
@@ -952,6 +1020,23 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
   const boom = await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: deps({ tasks: async () => { throw new Error("x"); } }), store: noStore });
   ok(boom.size === 0, "auto-cal triage: a planner failure never hides the tasks feed");
   ok(TRIAGE_HOOKS.atRisk === taskPlanAtRisk, "auto-cal triage: the app's triage hooks run the planner's at-risk provider");
+  {
+    // A view build (no cron deadline — the lazy first view) waits on Google for at most VIEW_PLAN_CALENDAR_MS, like Home.
+    const { calendarTimeoutMs: _unused, ...noLimit } = deps({ tasks: async () => risky, readEvents: () => new Promise(() => {}) });
+    void _unused;
+    const realWarn = console.warn;
+    console.warn = () => {};
+    const t0 = Date.now();
+    let viewSet: ReadonlySet<string>;
+    try {
+      viewSet = await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: noLimit, store: noStore });
+    } finally {
+      console.warn = realWarn;
+    }
+    const took = Date.now() - t0;
+    ok(VIEW_PLAN_CALENDAR_MS <= 2_500 && took >= VIEW_PLAN_CALENDAR_MS - 50 && took < VIEW_PLAN_CALENDAR_MS + 1_500 && viewSet.has("task:R2"),
+      `auto-cal triage: a lazy first-view build gives Google at most ${VIEW_PLAN_CALENDAR_MS} ms, then plans without it (${took} ms)`);
+  }
 
   // Fail closed: a partial item list or an unread pin blob never writes, removes or prunes a pin.
   const calls: string[] = [];
@@ -973,6 +1058,7 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
     ["assignments", { assignments: down }],
     ["roster", { roster: down }],
     ["pins", { pins: down }],
+    ["released", { released: down }],
     ["visits", { visits: down }],
     ["workHours", { workHours: down }],
   ];
@@ -985,9 +1071,12 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
   }
   calls.length = 0;
   await taskPlanAtRisk(me, at(MON, 8), undefined, { deps: deps({ tasks: async () => work, pins: async () => [stale] }), store: rec });
+  ok(calls.join() === `rm u1 ${pinBlobKey(stale)}`, "auto-cal triage: a triage build drops the stale pin but locks nothing — not even the In-progress block (D797)");
+  calls.length = 0;
+  await savePlanPins(await loadTaskPlans({ userIds: ["u1"], meId: "u1", deps: deps({ tasks: async () => work, pins: async () => [stale] }) }), { persistStartedFor: "u1", store: rec });
   const adds = calls.filter((c) => c.startsWith("add "));
   ok(calls.includes(`rm u1 ${pinBlobKey(stale)}`) && adds.length === 1 && adds[0].includes("task:IP1@") && adds[0].endsWith(` cap=task:IP1|task:Q1@${at(MON, 8)}`),
-    "auto-cal fail-closed: a full load saves the in-progress pin with the cap given exactly the items it planned with, and drops the stale pin");
+    "auto-cal fail-closed: the owner's full load saves the in-progress pin with the cap given exactly the items it planned with, and drops the stale pin");
   const everyoneDown = await loadTaskPlans({
     userIds: "everyone",
     meId: "u2",
@@ -1016,6 +1105,7 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
   const pdeps: Partial<TaskPlanDeps> = {
     workHours: async () => DEFAULT_WORK_HOURS,
     pins: async () => [],
+    released: async () => [],
     readEvents: async (uid) => ((readsBy[uid] = (readsBy[uid] ?? 0) + 1), { status: "ok", events: [] }),
     drive: async () => [],
     calendarTimeoutMs: 200,
@@ -1028,7 +1118,7 @@ export async function autoCalLoaderChecks(ok: Ok): Promise<void> {
     ["u1", "u2", "u3"].every((u) => readsBy[u] === 1) && loadsBy.tasks === 1 && loadsBy.assignments === 1 && loadsBy.visits === 1 && loadsBy.roster === 1,
     `auto-cal triage: a 3-user build plans everyone once — one Google read per user, each shared collection read once (${JSON.stringify({ ...loadsBy, ...readsBy })})`
   );
-  ok(calls.filter((c) => c.startsWith("add ")).map((c) => c.split(" ")[1]).sort().join() === "u1,u2,u3", "auto-cal triage: a build saves each person's started pins once");
+  ok(calls.filter((c) => c.startsWith("add ")).length === 0, "auto-cal triage: the cron build plans everyone (each has an In-progress block) but persists no started pin for anyone (D797)");
   await taskPlanAtRisk(people[0], at(MON, 8), shared({ userIds: undefined }), { deps: pdeps, store: rec });
   ok(readsBy.u1 === 2 && readsBy.u2 === 1 && readsBy.u3 === 1, "auto-cal triage: a single-user view (a fresh build) plans only that person");
   calls.length = 0;
@@ -1078,6 +1168,11 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
     ok([m1.ok, m2.ok].filter(Boolean).length === 1 && after.length === 1, "auto-cal write: two concurrent drags of one block leave exactly one pin");
     const pinAt = after[0].startMs;
     ok((await pinBlock({ kind: "task", id: T, fromStartMs: pinAt, startMs: later + 7_200_000, minutes: 60 }, OWN, now)).ok, "auto-cal write: (reset) the pin goes back to its spot");
+    const bigDrop = await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later + 28_800_000, minutes: 240 }, OWN, now);
+    const dropped = (await getPins(U)).find((p) => p.startMs === later + 28_800_000);
+    ok(bigDrop.ok && dropped?.endMs === later + 28_800_000 + 30 * 60_000,
+      "auto-cal write: a fresh drop is capped at the item's remaining minutes (a 1 h task with 1 h already pinned → 30 min, the floor)");
+    await removePinKeys(U, [pinBlobKey({ itemKey: K, startMs: later + 28_800_000 })]);
     const forged = await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later + 21_600_000, minutes: 15 }, OWN, now);
     ok(!forged.ok && (await getPins(U)).length === 1, "auto-cal write: a fresh drop under 30 minutes is refused");
     const stranger = await pinBlock({ kind: "task", id: T, fromStartMs: later + 7_200_000, startMs: later + 3_600_000, minutes: 60 }, OTHER, now);
@@ -1104,10 +1199,21 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
     ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: now - 3_600_000, minutes: 60 }, OWN, now)).ok, "auto-cal write: a time in the past is refused");
     ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: null, startMs: later, minutes: 7 }, OWN, now)).ok, "auto-cal write: a block off the 15-minute grid is refused");
     await addPins(U, [{ itemKey: K, startMs: later + 86_400_000, endMs: later + 86_400_000 + 1_800_000, kind: "started" }]);
-    const inProg = await unpinBlock({ kind: "task", id: T, startMs: later + 86_400_000 }, OWN, now);
-    ok(!inProg.ok && inProg.error === "This block is in progress — it stays put." && (await getPins(U)).some((p) => p.startMs === later + 86_400_000), "auto-cal write: a future in-progress/remainder pin can't be unpinned");
-    ok(!(await pinBlock({ kind: "task", id: T, fromStartMs: later + 86_400_000, startMs: later, minutes: 60 }, OWN, now)).ok, "auto-cal write: …or dragged");
-    await removePinKeys(U, [pinBlobKey({ itemKey: K, startMs: floorQuarter(now) - 900_000 }), pinBlobKey({ itemKey: K, startMs: later + 86_400_000 })]);
+    const dragHeld = await pinBlock({ kind: "task", id: T, fromStartMs: later + 86_400_000, startMs: later, minutes: 60 }, OWN, now);
+    ok(!dragHeld.ok && dragHeld.error === "This block holds started work — Unpin it to free the time." && (await getPins(U)).some((p) => p.startMs === later + 86_400_000),
+      "auto-cal write: a held started pin (remainder / In progress) that hasn't begun can't be dragged — the error points to Unpin");
+    ok(!(await unpinBlock({ kind: "task", id: T, startMs: later + 86_400_000 }, OTHER, now)).ok, "auto-cal write: another user can't release it");
+    const heldOut = await unpinBlock({ kind: "task", id: T, startMs: later + 86_400_000 }, OWN, now);
+    ok(heldOut.ok && !(await getPins(U)).some((p) => p.startMs === later + 86_400_000) && (await getPinState(U)).released.join() === K,
+      "auto-cal write: the owner can Unpin a held started pin that hasn't begun — the escape hatch — and the item is marked released (D798)");
+    ok((await getPins(U)).some((p) => p.startMs === floorQuarter(now) - 900_000), "auto-cal write: …while the started pin covering now stays");
+    await addPins(U, [{ itemKey: K, startMs: later + 2 * 86_400_000, endMs: later + 2 * 86_400_000 + 1_800_000, kind: "started" }]);
+    ok((await unpinBlock({ kind: "task", id: T, startMs: later + 2 * 86_400_000 }, ADMIN, now)).ok && !(await getPins(U)).some((p) => p.startMs === later + 2 * 86_400_000),
+      "auto-cal write: an admin can release one too");
+    await removePinKeys(U, [pinBlobKey({ itemKey: K, startMs: floorQuarter(now) - 900_000 })]);
+    ok((await clearItemPins(U, K)) === 0 && (await getPinState(U)).released.length === 0, "auto-cal pin store: clearing an item also drops its release marker");
+    await addPins(U, [{ itemKey: K, startMs: later + 3 * 86_400_000, endMs: later + 3 * 86_400_000 + 1_800_000, kind: "started" }]);
+    await unpinBlock({ kind: "task", id: T, startMs: later + 3 * 86_400_000 }, OWN, now); // released again; In progress below lifts it
     const day = chicagoDayKey(now + 10 * 86_400_000);
     ok((await pushDueDate({ kind: "task", id: T, dayKey: day }, now)).ok && (await getTask(T))?.dueAt === dueStampForDay(day), "auto-cal write: Push due date sets the plan's finish day");
     ok(!(await pushDueDate({ kind: "task", id: T, dayKey: "2026-02-31" }, now)).ok, "auto-cal write: a bad day is refused");
@@ -1119,7 +1225,8 @@ export async function autoCalWriteChecks(ok: Ok): Promise<void> {
     ok(!(await setTierSize({ kind: "task", id: T })).ok, "auto-cal write: nothing to change is refused");
     ok(!(await setTierSize({ kind: "task", id: T, priority: "high", size: "xl" })).ok && !(await setTierSize({ kind: "task", id: T, priority: "bogus" })).ok,
       "auto-cal write: an invalid field is refused outright, not silently dropped");
-    ok((await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "in_progress", "auto-cal write: In progress from the block");
+    ok((await getPinState(U)).released.join() === K && (await markInProgress({ kind: "task", id: T })).ok && (await getTask(T))?.status === "in_progress" && (await getPinState(U)).released.length === 0,
+      "auto-cal write: In progress from the block — and it lifts an earlier release, so its current block locks again");
     ok(!(await handOff({ kind: "task", id: T, userId: "nobody-autocal" })).ok, "auto-cal write: hand off only to someone on the team");
     await addPins(U, [{ itemKey: K, startMs: later, endMs: later + 3_600_000, kind: "hand" }]);
     const roster = await activeUsers();
@@ -1173,6 +1280,15 @@ export async function autoCalCalendarViewChecks(ok: Ok): Promise<void> {
   ok(p.pinned === "hand" && p.canUnpin && p.draggable, "auto-cal view: a pin that hasn't begun can be unpinned and dragged");
   const begun = view.blocks.find((b) => b.pinned === "started");
   ok(!!begun && !begun.canUnpin && !begun.draggable, "auto-cal view: a block that has begun can't be unpinned or dragged");
+  const held = planPerson(baseInput({ nowMs: at(MON, 10, 7), pins: [{ itemKey: "task:H", startMs: at(TUE, 8), endMs: at(TUE, 9), kind: "started" }], items: [item("H", { size: "l", sizeMin: 240 })] }));
+  const heldView = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: held }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u1", admin: false } });
+  const hb = heldView.blocks.find((b) => b.startMs === at(TUE, 8));
+  ok(hb?.pinned === "started" && hb.canUnpin && !hb.draggable && heldView.futurePins.some((f) => f.startMs === at(TUE, 8) && f.pinKind === "started" && f.canUnpin),
+    "auto-cal view: a held started pin that hasn't begun (remainder / In progress) offers Unpin — the escape hatch — but doesn't drag (D798)");
+  const heldOther = calendarPlanView([{ userId: "u1", name: "Dana", note: null, result: held }], { minMs: at(MON, 0), maxMs: at(TUE, 23), initials: () => "DA", viewer: { id: "u2", admin: false } });
+  ok(!heldOther.blocks.some((b) => b.canUnpin) && !heldOther.futurePins.some((f) => f.canUnpin), "auto-cal view: …only for the owner or an admin");
+  const popSrc = readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8");
+  ok(/block\.pinned === "started" && block\.canUnpin/.test(popSrc) && popSrc.includes("Unpin frees this time"), "auto-cal view: the popover explains what Unpin does to held started work");
   ok(view.blocks.filter((b) => b.itemKey === "task:R2").every((b) => b.atRiskLabel === "At risk — due Mon") && view.atRisk[0]?.itemKey === "task:R2",
     "auto-cal view: an at-risk block carries the badge text");
   ok(view.atRisk[0]?.finishDayKey === TUE && view.atRisk[0]?.finishText === "Plan finishes Tue Oct 14",
@@ -1336,4 +1452,88 @@ export async function autoCalFormChecks(ok: Ok): Promise<void> {
   ok(/others\.some\(\(u\) => u\.id === handTo\[a\.itemKey\]\)/.test(panel), "auto-cal addons: a stored hand-off pick that left the list reads as empty");
   const data = rd("src/lib/dashboard/data.ts");
   ok(/status: "none"/.test(data) && /status: "failed"/.test(data) && /status: "ok"/.test(data), "auto-cal addons: taskPlan() tells no plan from a failed load");
+}
+
+/* ---- Final review: "nobody clicks Done" (D796–D797) ----
+   Adapted from the final reviewer's simulation: 15 work days, the plan
+   computed 6 times a day, nothing ever marked Done. Before the fix every
+   still-open item got a locked 30-minute remainder each morning forever, the
+   day filled with locked slivers, pins grew ~17 a day, and a new High task
+   due tomorrow landed behind them, At risk. */
+type DoneSim = {
+  /** stored pins after the run */
+  pins: Map<string, PlanPin>;
+  /** minutes pinned AHEAD of the compute (startMs > now) per item, over the whole run */
+  lockedAhead: Map<string, number>;
+  /** pins added per work day */
+  addedPerDay: number[];
+  /** the High task's first block and At risk state on the day it arrives (7 am compute) */
+  urgent: { startMs: number | null; atRisk: boolean; dayKey: string };
+  computes: number;
+};
+const SIM_VIEWS = [7 * 60, 9 * 60 + 5, 10 * 60 + 35, 12 * 60, 14 * 60 + 5, 16 * 60 + 5];
+
+/** `save` decides what a compute persists (the owner's view saves all; a cron save goes through savePlanPins). */
+async function nobodyClicksDone(opts: { items: number; dueOffsetDays: number; save: (plan: PersonPlan, store: PinStore) => Promise<void> }): Promise<DoneSim> {
+  const START = MON;
+  const items: PlanItem[] = Array.from({ length: opts.items }, (_, i) =>
+    item("N" + i, { userId: "u1", dueMs: dueStampForDay(addDays(START, opts.dueOffsetDays + i)), createdAt: i })
+  );
+  const pins = new Map<string, PlanPin>();
+  const store: PinStore = {
+    add: async (_u, ps) => {
+      for (const p of ps) pins.set(pinBlobKey(p), p);
+    },
+    remove: async (_u, ks) => {
+      for (const k of ks) pins.delete(k);
+    },
+  };
+  const lockedAhead = new Map<string, number>();
+  const addedPerDay: number[] = [];
+  const urgent = { startMs: null as number | null, atRisk: false, dayKey: "" };
+  let computes = 0;
+  for (let day = START, wd = 0; wd < 15; day = addDays(day, 1)) {
+    if (weekdayOf(day) === 0 || weekdayOf(day) === 6) continue;
+    wd++;
+    if (wd === 15) items.push(item("URGENT", { userId: "u1", tier: "high", dueMs: dueStampForDay(addDays(day, 1)), createdAt: 999 }));
+    const before = pins.size;
+    for (const m of SIM_VIEWS) {
+      const nowMs = chicagoWallMs(day, m);
+      const result = planPerson({ userId: "u1", nowMs, hours: DEFAULT_WORK_HOURS, busy: [], pins: [...pins.values()], items });
+      computes++;
+      if (wd === 15 && m === SIM_VIEWS[0]) {
+        urgent.startMs = blocksOf(result, "task:URGENT")[0]?.startMs ?? null;
+        urgent.atRisk = result.atRisk.some((a) => a.itemKey === "task:URGENT");
+        urgent.dayKey = day;
+      }
+      const keys = new Set(pins.keys());
+      await opts.save({ userId: "u1", name: "Dana", calendar: "ok", note: null, result, items }, store);
+      for (const p of pins.values()) {
+        if (!keys.has(pinBlobKey(p)) && p.startMs > nowMs) lockedAhead.set(p.itemKey, (lockedAhead.get(p.itemKey) ?? 0) + (p.endMs - p.startMs) / MIN);
+      }
+    }
+    addedPerDay.push(pins.size - before);
+  }
+  return { pins, lockedAhead, addedPerDay, urgent, computes };
+}
+
+export async function autoCalNobodyDoneChecks(ok: Ok): Promise<void> {
+  const owner = (plan: PersonPlan, store: PinStore) => savePlanPins([plan], { persistStartedFor: "u1", store });
+  for (const [n, off] of [[16, 25], [25, 3]] as const) {
+    const r = await nobodyClicksDone({ items: n, dueOffsetDays: off, save: owner });
+    const maxAhead = Math.max(0, ...r.lockedAhead.values());
+    ok(r.computes === 90 && maxAhead <= 60,
+      `auto-cal nobody-done (${n} tasks, owner views 6×/day × 15 days): no item is ever locked ahead beyond its size (max ${maxAhead} min, size 60)`);
+    ok(r.addedPerDay.every((x) => x <= SIM_VIEWS.length) && r.addedPerDay.slice(5).every((x) => x <= Math.max(...r.addedPerDay.slice(0, 5))),
+      `auto-cal nobody-done (${n} tasks): pins per day stay bounded — about one per compute a block began at, no growth after week 1 (${r.addedPerDay.join(" ")})`);
+  }
+  const roomy = await nobodyClicksDone({ items: 16, dueOffsetDays: 25, save: owner });
+  ok(roomy.urgent.startMs != null && chicagoDayKey(roomy.urgent.startMs) === roomy.urgent.dayKey && !roomy.urgent.atRisk,
+    `auto-cal nobody-done: a High task due tomorrow, added on day 15, is planned TODAY and isn't At risk (${roomy.urgent.startMs ? fmtBlockTime(roomy.urgent.startMs, roomy.urgent.startMs + 3_600_000) : "not placed"})`);
+
+  // The triage cron (and anyone else's view) computes just as often but never locks anything.
+  const cron = await nobodyClicksDone({ items: 16, dueOffsetDays: 25, save: (plan, store) => savePlanPins([plan], { persistStartedFor: null, store }) });
+  const other = await nobodyClicksDone({ items: 16, dueOffsetDays: 25, save: (plan, store) => savePlanPins([plan], { persistStartedFor: "u2", store }) });
+  ok(cron.pins.size === 0 && other.pins.size === 0, "auto-cal nobody-done: 90 cron computes, or 90 computes on someone else's view, persist zero started pins (D797)");
+  ok(!cron.urgent.atRisk && cron.urgent.startMs != null, "auto-cal nobody-done: with nothing locked, the new High task is planned and not At risk");
 }

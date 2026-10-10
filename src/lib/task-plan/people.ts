@@ -5,9 +5,12 @@ import type { TaskRecord } from "@/lib/stores/tasks";
 
 export type RosterPerson = { id: string; name: string };
 
-/** Open or In progress. A Blocked task waits — it can't be worked. */
-export function isPlannedTask(t: Pick<TaskRecord, "status">): boolean {
-  return t.status === "open" || t.status === "in_progress";
+/** Open or In progress. A Blocked task waits — it can't be worked; nor can a
+ *  "Waiting on customer" task (#323 `waitingOn`, skipped the way queue.ts
+ *  skips it — D800): the customer owes it, so it is never planned, pinned or
+ *  backfilled. */
+export function isPlannedTask(t: Pick<TaskRecord, "status"> & Partial<Pick<TaskRecord, "waitingOn">>): boolean {
+  return (t.status === "open" || t.status === "in_progress") && !t.waitingOn;
 }
 
 /** The assignee's user id when it's on the roster, else the assignee name (legacy name-only tasks). */

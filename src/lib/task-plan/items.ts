@@ -1,11 +1,17 @@
 /** What is scheduled (spec Part 1): every open task and Queue assignment with
- *  an assignee, checklist and template tasks included. Pure, client-safe. */
+ *  an assignee, checklist and template tasks included — not a "Waiting on
+ *  customer" task (#323, D800). Pure, client-safe. An undated item carries
+ *  `dueVirtual` (dueMs 0); planPerson gives it the rolling today + 7 (D801). */
 import { taskHref } from "@/lib/calendar-tasks";
 import type { Assignment } from "@/lib/stores/assignments";
 import type { TaskRecord } from "@/lib/stores/tasks";
-import { effectiveDue } from "./due";
 import { isPlannedTask, personForAssignment, personForTask, type RosterPerson } from "./people";
 import { cleanSize, cleanTier, DEFAULT_SIZE, DEFAULT_TIER, planItemKey, SIZE_MIN, type PlanItem } from "./types";
+
+/** The stored due, or 0 + virtual (the planner dates it from its own clock). */
+function storedDue(v: number | null | undefined): { dueMs: number; virtual: boolean } {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? { dueMs: v, virtual: false } : { dueMs: 0, virtual: true };
+}
 
 export function planItemsByPerson(
   tasks: readonly TaskRecord[],
@@ -22,7 +28,7 @@ export function planItemsByPerson(
     if (!isPlannedTask(t)) continue;
     const p = personForTask(t, roster);
     if (!p) continue;
-    const due = effectiveDue(t.dueAt, t.createdAt);
+    const due = storedDue(t.dueAt);
     const size = cleanSize(t.size) ?? DEFAULT_SIZE;
     push(p.id, {
       key: planItemKey("task", t.id),
@@ -45,7 +51,7 @@ export function planItemsByPerson(
     if (a.done) continue;
     const p = personForAssignment(a, roster);
     if (!p) continue;
-    const due = effectiveDue(a.dueDate, a.createdAt);
+    const due = storedDue(a.dueDate);
     const size = cleanSize(a.size) ?? DEFAULT_SIZE;
     push(p.id, {
       key: planItemKey("assignment", a.id),

@@ -10,6 +10,7 @@
  * next one: that is what lets "a block that has already begun" exist at
  * compute time and be pinned as started (Task 5).
  */
+import { chicagoDayKey } from "@/lib/drive-plan/day";
 import { deadlineOf, effectiveDue } from "./due";
 import { ceilQuarter, chunkFor, floorQuarter, freeDays, type FreeDay } from "./free";
 import { atRiskLabel } from "./labels";
@@ -44,11 +45,25 @@ const horizonOf = (days: number | undefined): number => {
 };
 
 /** The urgency comparator takes dated items only (a dueMs of 0 would sort as
- *  maximally overdue), so an item without a usable due plans by its effective
- *  due — 7 days after it was created — exactly as `effectiveDue` defines it. */
-function dated(item: PlanItem): PlanItem {
-  if (Number.isFinite(item.dueMs) && item.dueMs > 0) return item;
-  return { ...item, dueMs: effectiveDue(null, item.createdAt).dueMs, dueVirtual: true };
+ *  maximally overdue), so an undated item (no stored due, or `dueVirtual`)
+ *  plans by its ROLLING effective due — today + 7 days (D801), exactly as
+ *  `effectiveDue` defines it — and is never At risk until it gets a real date. */
+function dated(item: PlanItem, nowMs: number): PlanItem {
+  if (!item.dueVirtual && Number.isFinite(item.dueMs) && item.dueMs > 0) return item;
+  return { ...item, dueMs: effectiveDue(null, nowMs).dueMs, dueVirtual: true };
+}
+
+/** D796: an item whose PAST pins already cover its size, with nothing current
+ *  or ahead, is still open after its whole size. It is never pinned ahead
+ *  again; it plans like unstarted work — one fresh, movable 30-minute chunk
+ *  (or its size if smaller), urgency-ordered — at most once a day: once a
+ *  chunk has begun today (and so locked as `started` on the owner's view),
+ *  nothing more is placed until tomorrow. null = not in that state. */
+function freshChunkMin(item: PlanItem, pins: readonly BusyInterval[], nowMs: number): number | null {
+  if (!pins.length || pins.some((p) => p.endMs > nowMs)) return null;
+  if (pins.reduce((s, p) => s + (p.endMs - p.startMs) / MIN_MS, 0) < item.sizeMin) return null;
+  const today = chicagoDayKey(nowMs);
+  return pins.some((p) => chicagoDayKey(p.startMs) === today) ? 0 : Math.min(MIN_CHUNK_MIN, placeable(item.sizeMin));
 }
 
 export function blockOf(item: PlanItem, s: BusyInterval, pinned: PinKind | null): PlanBlock {
@@ -102,7 +117,8 @@ export function placeEntry(e: QueueEntry, days: FreeDay[]): { slots: BusyInterva
 export function planPerson(input: PlanInput): PlanResult {
   const now = input.nowMs;
   const start = floorQuarter(now);
-  const ordered = sortByUrgency(input.items.map(dated), now);
+  const ordered = sortByUrgency(input.items.map((i) => dated(i, now)), now);
+  const released = new Set(input.released ?? []);
   const byKey = new Map(ordered.map((i) => [i.key, i] as const));
   const pins = input.pins
     .filter((p) => byKey.has(p.itemKey) && p.endMs > p.startMs)
@@ -117,15 +133,21 @@ export function planPerson(input: PlanInput): PlanResult {
 
   const blocks: PlanBlock[] = pins.map((p) => blockOf(byKey.get(p.itemKey)!, p, p.kind));
   const pinnedMin = new Map<string, number>();
-  for (const p of pins) pinnedMin.set(p.itemKey, (pinnedMin.get(p.itemKey) ?? 0) + (p.endMs - p.startMs) / MIN_MS);
+  const pinsOf = new Map<string, BusyInterval[]>();
+  for (const p of pins) {
+    pinnedMin.set(p.itemKey, (pinnedMin.get(p.itemKey) ?? 0) + (p.endMs - p.startMs) / MIN_MS);
+    pinsOf.set(p.itemKey, [...(pinsOf.get(p.itemKey) ?? []), p]);
+  }
 
   // Unfinished started work goes first and is pinned where it lands (spec "Unfinished").
-  const remainders = unfinishedRemainders({ items: ordered, pins, nowMs: now, hours: input.hours });
+  // Only while its pins so far are short of its size (D796); a released item never (D798).
+  const remainders = unfinishedRemainders({ items: ordered, pins, nowMs: now, hours: input.hours, released });
   const remainderKeys = new Set(remainders.map((r) => r.item.key));
   const queue: QueueEntry[] = remainders.map((r) => ({ item: r.item, minutes: r.minutes, earliestMs: Math.max(start, r.earliestMs) }));
   for (const item of ordered) {
     if (remainderKeys.has(item.key)) continue;
-    const minutes = placeable(item.sizeMin - (pinnedMin.get(item.key) ?? 0));
+    // Still open after its whole size: a fresh movable chunk, once a day (D796).
+    const minutes = freshChunkMin(item, pinsOf.get(item.key) ?? [], now) ?? placeable(item.sizeMin - (pinnedMin.get(item.key) ?? 0));
     if (minutes > 0) queue.push({ item, minutes, earliestMs: Math.max(start, item.earliestMs ?? start) });
   }
 
@@ -144,6 +166,7 @@ export function planPerson(input: PlanInput): PlanResult {
   for (const k of unplaced) finishMs[k] = null;
   const atRisk: AtRiskItem[] = [];
   for (const item of ordered) {
+    if (item.dueVirtual) continue; // undated: never At risk until it gets a real date (D801)
     const f = finishMs[item.key];
     if (!unplaced.has(item.key) && (f == null || f <= deadlineOf(item.dueMs))) continue; // no key here = nothing to place
     atRisk.push({ itemKey: item.key, kind: item.kind, id: item.id, userId: item.userId, title: item.title, href: item.href, dueMs: item.dueMs, finishMs: f ?? null, label: atRiskLabel(item.dueMs, now) });
@@ -151,7 +174,7 @@ export function planPerson(input: PlanInput): PlanResult {
   const risky = new Set(atRisk.map((a) => a.itemKey));
   for (const b of blocks) b.atRisk = risky.has(b.itemKey);
 
-  const newPins = newPinsFrom({ blocks, items: ordered, pins, nowMs: now, remainderKeys });
+  const newPins = newPinsFrom({ blocks, items: ordered, pins, nowMs: now, remainderKeys, released });
   const fresh = new Set(newPins.map(pinBlobKey));
   for (const b of blocks) if (!b.pinned && fresh.has(b.key)) b.pinned = "started";
 
@@ -161,7 +184,7 @@ export function planPerson(input: PlanInput): PlanResult {
     blocks,
     atRisk,
     newPins,
-    staleKeys: stalePinKeys(input.pins, new Set(byKey.keys())),
+    staleKeys: stalePinKeys(input.pins, new Set(byKey.keys()), input.released),
     // pins that haven't begun, this compute's new ones included (what Unpin can offer)
     futurePins: [...pins, ...newPins]
       .filter((p) => p.startMs > now)

@@ -103,6 +103,9 @@ export default function TaskBlockPopover({ block, onClose }: { block: CalendarPl
           {block.inProgress ? " · In progress" : ""}
         </div>
         {block.atRiskLabel && <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: "#b4543a" }}>{block.atRiskLabel}</div>}
+        {block.pinned === "started" && block.canUnpin && (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#5b616e" }}>Held for work already started. Unpin frees this time — the task is then planned like any other.</div>
+        )}
         <div style={{ marginTop: 12 }}>
           <TierSizeChips
             tier={tier}

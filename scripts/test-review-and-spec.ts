@@ -3021,11 +3021,16 @@ import { CATEGORIES } from "@/lib/stores/notif-prefs";
   });
   const bell = taskBellItems([
     mk({ id: "a", assigneeName: "Jeff Chesebro" }),                       // mine, open
-    mk({ id: "b", assigneeName: "Someone Else", dueAt: NOW - DAY }),      // overdue, not mine
+    mk({ id: "b", assigneeName: "Someone Else", dueAt: NOW - DAY }),      // overdue, someone else's
     mk({ id: "c", assigneeName: "Someone Else" }),                        // not mine, not overdue
     mk({ id: "d", assigneeName: "Jeff Chesebro", status: "done" }),       // mine but done
+    mk({ id: "e", dueAt: NOW - DAY }),                                    // overdue, nobody's
+    mk({ id: "f", assigneeUserId: "u-x", dueAt: NOW - DAY }),             // overdue, owned by id only
+    mk({ id: "g", dueAt: NOW + DAY }),                                    // nobody's, not overdue
+    mk({ id: "h", assigneeName: "Jeff Chesebro", dueAt: NOW - DAY }),     // mine, overdue
+    mk({ id: "i", dueAt: NOW - DAY, status: "done" }),                    // nobody's, overdue, done
   ], "Jeff Chesebro", NOW);
-  ok(bell.map(t => t.id).join(",") === "a,b", "tasks: bell = open assigned-to-me + overdue, done excluded");
+  ok(bell.map(t => t.id).join(",") === "a,e,h", "tasks: bell = my open tasks + overdue tasks nobody owns; someone else's overdue task stays on their bell (D802); done excluded");
 
   ok(autoTaskId("item16:sold:P-3001") === "t-auto-item16-sold-p-3001".replace("t-auto", "T-auto"), "tasks: autoTaskId is deterministic and sanitized");
   ok(autoTaskId("item16:sold:P-3001") === autoTaskId("item16:sold:P-3001"), "tasks: same coverage key, same id");
@@ -11317,7 +11322,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 
 
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
-import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks } from "./test-auto-calendar";
+import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
 seeded()
   .then(() => fixtureLeakChecks())
@@ -11625,6 +11630,7 @@ seeded()
   .then(() => autoCalDragPanelChecks(ok))
   .then(() => autoCalHomeChecks(ok))
   .then(() => autoCalFormChecks(ok))
+  .then(() => autoCalNobodyDoneChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

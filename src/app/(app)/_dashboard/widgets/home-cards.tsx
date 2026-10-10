@@ -52,7 +52,8 @@ async function TodayPlanCard({ ctx }: { ctx: WidgetCtx }) {
     if (state.status === "none") props = { rows: [], atRiskCount: 0, note: null };
     else if (state.status === "ok") {
       const { plan } = state;
-      after(() => savePlanPins([plan]));
+      // The owner's own view: the only kind that locks this person's started pins (D797).
+      after(() => savePlanPins([plan], { persistStartedFor: ctx.user.id }));
       props = { rows: todayRows(plan.result, ctx.now), atRiskCount: plan.result.atRisk.length, note: plan.note ?? null };
     }
   } catch (err) {
