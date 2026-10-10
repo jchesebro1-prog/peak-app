@@ -77,6 +77,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     symbolDisplay,
     symbolUrls,
     designatorDupes,
+    designatorDigits,
     selectedIds,
     marquee,
     cancelGesture,
@@ -517,7 +518,7 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
               // #320: a device reads by its designator — a lot by its range, so
               // no ×N; a device not yet numbered falls back to its description.
               // Curtains keep their name.
-              const tag = pl.curtain ? "" : formatDesignator(pl.designator, q);
+              const tag = pl.curtain ? "" : formatDesignator(pl.designator, q, designatorDigits);
               const label = pl.curtain ? pl.curtain.name + (q > 1 ? ` ×${q}` : "") : tag || name + (q > 1 ? ` ×${q}` : "");
               const ink = !pl.curtain && designatorDupes.has(pl.id) ? DESIGNATOR_DUPLICATE_COLOR : c;
               const model = part?.virtual ? "" : part?.modelNumber || part?.sku || "";

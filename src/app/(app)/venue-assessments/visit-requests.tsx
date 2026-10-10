@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { claimVisitAction, releaseVisitAction, removeVisitAction, scheduleVisitAction } from "./visit-actions";
 import { ConfirmButton } from "@/components/confirm-button";
 import AddressFlagBadge, { type AddressFlagVM } from "@/components/address-fix/address-flag";
+import BookingPanel from "@/components/visit-booking/booking-panel";
+import { pickDayTimes } from "@/lib/visit-plan/pick-day";
 
 /**
  * #34 — the open-visit queue rows above the survey cards. Unclaimed rows
@@ -33,6 +35,12 @@ export type VisitRequestVM = {
   mine: boolean;
   /** Spec 2026-10-09 — set when the visit's address isn't verified (no drive time). */
   addressFlag: AddressFlagVM | null;
+  /** Spec 2026-10-09 site-visit scheduling — the booking check's inputs. */
+  customerId: string | null;
+  locationId: string | null;
+  address: string;
+  /** Spec 2026-10-09 — other Peak people already on the visit (never the lead). */
+  attendees: string[];
 };
 
 const chipBtn: CSSProperties = {
@@ -71,12 +79,30 @@ const linkStyle: CSSProperties = {
   textDecoration: "none",
 };
 
-function VisitRequestRow({ row }: { row: VisitRequestVM }) {
+function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[]; me: string }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [err, setErr] = useState("");
+  // Seeded from the visit, so Schedule never silently clears who is already
+  // going; only an edit in the picker sends a list.
+  const [attendees, setAttendees] = useState<string[]>(row.attendees);
+  const [touched, setTouched] = useState(false);
+  const parsed = (v: string) => {
+    const t = v ? new Date(v).getTime() : NaN;
+    return Number.isFinite(t) ? t : null;
+  };
+  const startMs = parsed(start);
+  const endMs = parsed(end);
+  // A nearby day fills the date; the rep's times stay (or 9–10 when blank,
+  // an hour after the start when only the end is blank). The end is always
+  // after the start on the same day: clamped to start + 1 h (max 23:59).
+  const pickDay = (dayKey: string) => {
+    const t = pickDayTimes(start.slice(11, 16), end.slice(11, 16));
+    setStart(`${dayKey}T${t.start}`);
+    setEnd(`${dayKey}T${t.end}`);
+  };
 
   // Plan-review minor: check the action result instead of refreshing
   // silently — an { ok: false } (visit already scheduled/done out from under
@@ -102,7 +128,7 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
     }
     setErr("");
     startTransition(async () => {
-      const res = await scheduleVisitAction(row.id, { startAt: s, endAt: e });
+      const res = await scheduleVisitAction(row.id, { startAt: s, endAt: e, attendees: touched ? attendees : undefined });
       if (!res.ok) {
         setErr(res.error);
         return;
@@ -192,12 +218,30 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
           onConfirm={() => run(() => removeVisitAction(row.id))}
         />
       </div>
+      {row.mine && (
+        <BookingPanel
+          visitId={row.id}
+          customerId={row.customerId}
+          locationId={row.locationId}
+          address={row.address}
+          startAt={startMs}
+          endAt={endMs}
+          lead={me}
+          team={team}
+          attendees={attendees}
+          onAttendeesChange={(next) => {
+            setTouched(true);
+            setAttendees(next);
+          }}
+          onPickDay={pickDay}
+        />
+      )}
       {err && <div style={{ fontSize: 11.5, color: "#b4543a", fontWeight: 600, marginTop: 6 }}>{err}</div>}
     </div>
   );
 }
 
-export default function VisitRequests({ rows }: { rows: VisitRequestVM[] }) {
+export default function VisitRequests({ rows, team, me }: { rows: VisitRequestVM[]; team: string[]; me: string }) {
   if (!rows.length) return null;
   return (
     <div style={{ marginBottom: 16 }}>
@@ -223,7 +267,7 @@ export default function VisitRequests({ rows }: { rows: VisitRequestVM[] }) {
         }}
       >
         {rows.map((r) => (
-          <VisitRequestRow key={r.id} row={r} />
+          <VisitRequestRow key={r.id} row={r} team={team} me={me} />
         ))}
       </div>
     </div>

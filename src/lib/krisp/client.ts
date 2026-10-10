@@ -3,6 +3,7 @@ import type {
   KrispParticipant,
   RecordingTranscript,
 } from "@/lib/stores/recordings";
+import type { KrispPerson } from "@/lib/meetings/types";
 import {
   KrispApiError,
   KrispAuthError,
@@ -36,6 +37,14 @@ export const KRISP_API_BASE = "https://meeting-api.krisp.ai/v1";
 export type KrispTransport = (url: string, init: RequestInit) => Promise<Response>;
 
 const fetchTransport: KrispTransport = (url, init) => fetch(url, init);
+
+/** #323 — Krisp REST calls time out so one hung request can't stall a sync
+ *  batch (or the cron) — the default for `createKrispClient` only. The audio
+ *  PUT (`putToPresignedUrl`) keeps the plain transport: a large upload may
+ *  legitimately run longer. */
+export const KRISP_API_TIMEOUT_MS = 20_000;
+const apiTransport: KrispTransport = (url, init) =>
+  fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(KRISP_API_TIMEOUT_MS) });
 
 export type KrispMe = {
   id: number | null;
@@ -148,7 +157,64 @@ function num(v: unknown): number | null {
   return null;
 }
 
-export function createKrispClient(apiKey: string, transport: KrispTransport = fetchTransport) {
+/* ---------- #323 meeting list ---------- */
+
+export type KrispListQuery = {
+  from?: string;
+  to?: string;
+  cursor?: string | null;
+  limit?: number;
+  ownership?: "all" | "mine" | "shared";
+};
+export type KrispListedMeeting = {
+  id: string;
+  title: string;
+  startedAt: number | null;
+  durationSec: number | null;
+  status: string;
+  source: string | null;
+  tags: string[];
+  ownership: "owned" | "shared" | null;
+  participants: KrispPerson[];
+};
+export type KrispMeetingPage = { meetings: KrispListedMeeting[]; nextCursor: string | null };
+
+export const KRISP_LIST_FIELDS = "title,started_at,duration,status,source,tags,ownership,participants";
+
+/** A Krisp participant / transcript speaker → KrispPerson. The live API sends
+ *  `first_name`/`last_name`; a bare `name` is split on its first space. */
+function toPerson(p: Record<string, unknown>): KrispPerson {
+  const s = (k: string) => (typeof p[k] === "string" && (p[k] as string).trim() ? (p[k] as string).trim() : null);
+  const first = s("first_name"), last = s("last_name"), name = s("name");
+  return {
+    email: s("email")?.toLowerCase() ?? null,
+    firstName: first ?? (name ? name.split(/\s+/)[0] : null),
+    lastName: last ?? (name && /\s/.test(name) ? name.slice(name.search(/\s/) + 1).trim() : null),
+  };
+}
+
+function toListed(r: Record<string, unknown>): KrispListedMeeting | null {
+  const id = str(r.id);
+  if (!id) return null;
+  const started = typeof r.started_at === "string" ? Date.parse(r.started_at) : NaN;
+  const parts = Array.isArray(r.participants) ? r.participants : [];
+  return {
+    id,
+    title: typeof r.title === "string" ? r.title : "",
+    startedAt: Number.isFinite(started) ? started : null,
+    durationSec: num(r.duration),
+    status: typeof r.status === "string" ? r.status : "",
+    source: typeof r.source === "string" ? r.source : null,
+    tags: Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === "string") : [],
+    ownership: r.ownership === "owned" || r.ownership === "shared" ? r.ownership : null,
+    participants: parts
+      .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
+      .map(toPerson),
+  };
+}
+export { toPerson as krispPersonFrom };
+
+export function createKrispClient(apiKey: string, transport: KrispTransport = apiTransport) {
   async function call(method: "GET" | "POST", path: string, body?: Json): Promise<Json | null> {
     const init: RequestInit = {
       method,
@@ -244,6 +310,30 @@ export function createKrispClient(apiKey: string, transport: KrispTransport = fe
           notes && typeof notes === "object" && Array.isArray((notes as Json).blocks)
             ? (notes as { blocks: KrispNoteBlock[] })
             : null,
+      };
+    },
+
+    /** `GET /meetings` (#323) — one page of the meetings visible to the key
+     *  holder (owned + shared), newest first. The list carries no
+     *  last-modified field, so callers sync by date window. */
+    async listMeetings(q: KrispListQuery = {}): Promise<KrispMeetingPage> {
+      const p = new URLSearchParams();
+      p.set("limit", String(Math.min(100, Math.max(1, q.limit ?? 100))));
+      p.set("ownership", q.ownership ?? "all");
+      p.set("sort_by", "date");
+      p.set("order", "newest");
+      p.set("fields", KRISP_LIST_FIELDS);
+      if (q.from) p.set("from", q.from);
+      if (q.to) p.set("to", q.to);
+      if (q.cursor) p.set("cursor", q.cursor);
+      const d = unwrap(await call("GET", `/meetings?${p.toString()}`), "meetings");
+      const rows = Array.isArray(d.meetings) ? d.meetings : [];
+      return {
+        meetings: rows
+          .filter((raw): raw is Json => !!raw && typeof raw === "object")
+          .map(toListed)
+          .filter((m): m is KrispListedMeeting => !!m),
+        nextCursor: str(d.next_cursor) || null,
       };
     },
   };

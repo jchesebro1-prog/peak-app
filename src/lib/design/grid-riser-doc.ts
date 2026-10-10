@@ -603,7 +603,10 @@ export function copyRiserDoc(
   idMap: ReadonlyMap<string, string>,
   makeId: (prefix: RiserIdPrefix) => string,
   by: string,
-  at: number
+  at: number,
+  /** #321: receives old link id → new link id, so the conduit riser's
+   *  member links re-point. */
+  linkIds?: Map<string, string>
 ): RiserDoc {
   const d = normalizeRiserDoc(src);
   const map = (e: EndRef): EndRef | null => {
@@ -615,7 +618,10 @@ export function copyRiserDoc(
   for (const l of d.links) {
     const from = map(l.from);
     const to = map(l.to);
-    if (from && to) links.push({ ...l, id: makeId("lk-"), from, to, by, at });
+    if (!from || !to) continue;
+    const id = makeId("lk-");
+    linkIds?.set(l.id, id);
+    links.push({ ...l, id, from, to, by, at });
   }
   const conduits: RiserConduit[] = [];
   for (const c of d.conduits) {

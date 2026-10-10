@@ -13,6 +13,9 @@ import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
 import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
+import { syncMeetingsIfStale } from "@/lib/meetings/sync";
+import { toFileCount } from "./inbox/meetings/load";
+import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
@@ -73,13 +76,16 @@ export default async function HomePage({
   const me = user.name;
   const data = makeDashboardData(user);
   void reconcileRecordingsIfStale().catch(() => {});
+  // #323 Krisp meetings, > 10 min stale — after the response (after(), like #222's PDF render), never blocking Home
+  after(() => syncMeetingsIfStale(user.id).catch(() => {}));
   after(async () => {
     const { syncDriveIfStale } = await import("@/lib/drive-sync/sync");
     await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
   });
   const now = Date.now();
-  const [userRecord, appSettings, quotesAll, designsAll] = await Promise.all([
+  const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
+    meetingsReadOr(toFileCount(user.id), 0, "home count"), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
   ]);
 
   const pipe = resolvePipe(first(sp.pipe));
@@ -114,7 +120,7 @@ export default async function HomePage({
   return (
     <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
-      <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} />
+      <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} meetingsToFile={meetingsToFile} />
       <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Building your Start here list…</div>}>
         <StartHereCard user={user} />
       </Suspense>

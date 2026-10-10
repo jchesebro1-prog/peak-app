@@ -1547,6 +1547,17 @@ export async function driveTimeAgendaChecks(ok: Ok): Promise<void> {
   });
   ok(pushed.addressFlags.get("g-gx1")?.fix?.kind === "place" && pushed.addressFlags.get("v-SV-1") !== undefined && !pushed.addressFlags.has("g-meet"),
     "drive-time agenda: a visit mirrored by googleEventId hands its address flag to that Google event");
+  const asAttendee = await driveAgendaLayer({
+    userId: "u1",
+    minMs: at(0),
+    maxMs: at(23),
+    googleEvents: [gEv("gA", { startMs: at(9), endMs: at(10) }), gEv("meet", {})],
+    deps: badDeps({ visits: async () => [visit("SV-1", { assignedTo: "Jeff", attendees: ["Dana"], googleEventId: "gL",
+      invites: [{ name: "Jeff", to: "", channel: "calendar", eventId: "gL", sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: null, gmailId: null, gmailIds: [] },
+                { name: "Dana", to: "", channel: "calendar", eventId: "gA", sentAt: 1, startAt: at(9), endAt: at(10), sequence: 0, fromMailbox: null, gmailId: null, gmailIds: [] }] })] }),
+  });
+  ok(asAttendee.addressFlags.get("g-gA")?.fix?.kind === "place" && !asAttendee.addressFlags.has("g-meet"),
+    "drive-time agenda: an attendee's own Google copy of the visit carries its address flag too");
   ok(visitReads === 1, "drive-time agenda: the drive layer reads site_visits once (the googleEventId lookup reuses the planner's read)");
   const agendaSrc = readFileSync("src/lib/agenda.ts", "utf8");
   ok((agendaSrc.match(/await allVisits\(\)/g) ?? []).length === 1 && /deps:\s*\{\s*visits:\s*async \(\) => allV/.test(agendaSrc),
@@ -2062,6 +2073,7 @@ export async function driveTimeFinalFixChecks(ok: Ok): Promise<void> {
       insertEvent: async (_k: string, ev: { title: string }) => { calls.push("insert:" + ev.title); return { id: "g-new", htmlLink: "" }; },
       updateEvent: async (_k: string, id: string) => { calls.push("update:" + id); return { id, htmlLink: "", status: "confirmed" }; },
       deleteEvent: async (_k: string, id: string) => { calls.push("delete:" + id); },
+      log: () => {}, // the replaced-copy warning stays out of a passing run
     };
     const ev = { title: "Gym — Survey", startMs: at(9), endMs: at(10) };
     const moved = await writeVisitCalendarEvent("personal:u1", "g-old", ev, cal);
@@ -2072,7 +2084,7 @@ export async function driveTimeFinalFixChecks(ok: Ok): Promise<void> {
     calls.length = 0;
     const gone = await writeVisitCalendarEvent("personal:u1", "g-old", ev, { ...cal, updateEvent: async (_k: string, id: string) => { calls.push("update:" + id); throw new Error("404"); } });
     ok(gone.id === "g-new" && calls.join() === "update:g-old,delete:g-old,insert:Gym — Survey", "drive-time final: an update that fails removes the old copy, then inserts");
-    ok(/writeVisitCalendarEvent\(akey, rec\.googleEventId/.test(read("src/lib/visit-invite.ts")), "drive-time final: dispatchVisitInvite writes through writeVisitCalendarEvent with the visit's googleEventId");
+    ok(/writeVisitCalendarEvent\(key, e\.eventId, write, cal\)/.test(read("src/lib/visit-invite.ts")), "drive-time final: dispatchVisitInvite updates each recipient's Google copy in place through writeVisitCalendarEvent");
   });
 
   await db.delete(placeBook).where(like(placeBook.key, "%testdrive%"));
@@ -2224,6 +2236,7 @@ export async function driveTimeRound2Checks(ok: Ok): Promise<void> {
       insertEvent: async () => { calls.push("insert"); return { id: "g-new" }; },
       updateEvent: async (_k: string, id: string, ev: Record<string, unknown>) => { sent.push(ev); calls.push("update:" + id); return { id, status }; },
       deleteEvent: async (_k: string, id: string) => { calls.push("delete:" + id); },
+      log: () => {},
     });
     const ev = { title: "Gym — Survey", startMs: at(9), endMs: at(10) };
     const kept = await writeVisitCalendarEvent("personal:u1", "g-old", ev, cal("confirmed"));

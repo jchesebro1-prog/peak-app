@@ -74,6 +74,8 @@ export function gridPartsFrom(
       ...(p?.manufacturerModelNumber ? { manufacturerModelNumber: p.manufacturerModelNumber } : {}),
       ...(p?.manufacturerPartNumber ? { manufacturerPartNumber: p.manufacturerPartNumber } : {}),
       ...(p?.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
+      ...(p?.designatorCode ? { designatorCode: p.designatorCode } : {}),
+      ...(p?.tagDefaults ? { tagDefaults: p.tagDefaults } : {}),
       symbolWidth: s.width,
       symbolHeight: s.height,
       kind: s.kind || "device",
@@ -97,6 +99,8 @@ export function gridPartsFrom(
       ...(p.manufacturerModelNumber ? { manufacturerModelNumber: p.manufacturerModelNumber } : {}),
       ...(p.manufacturerPartNumber ? { manufacturerPartNumber: p.manufacturerPartNumber } : {}),
       ...(p.formerSkus?.length ? { formerSkus: p.formerSkus } : {}),
+      ...(p.designatorCode ? { designatorCode: p.designatorCode } : {}),
+      ...(p.tagDefaults ? { tagDefaults: p.tagDefaults } : {}),
       ...(dt ? { deviceType: key ?? null, deviceTypeLabel: key ? typeLabel(key, dt.types) : null } : {}),
       ...(dt && key ? { gridScope: scopeOfType(key, dt.types) } : {}),
     });

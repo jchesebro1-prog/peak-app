@@ -24,6 +24,7 @@ import { planRowQty } from "@/lib/design/grid-riser";
 import { AUTO_QTY_MAX, sanitizeAutoOrigin, withoutAuto } from "@/lib/design/grid-auto-model";
 import { keepsDesignatorOnSwap, stampNewDesignators } from "@/lib/design/designators";
 import { designatorContext } from "@/lib/design/designators-server";
+import { pruneConduitRisersIn } from "@/lib/design/conduit-riser/live";
 import type { GridPlacement, GridProject } from "./grid-projects";
 
 /**
@@ -150,6 +151,8 @@ export async function patchRiser(
       return;
     }
     p.riser = { ...(p.riser || {}), [optionId]: res.doc };
+    // A removed RiserLink leaves any conduit it was a member of (#321).
+    if (op.op === "removeLink") pruneConduitRisersIn(p);
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
@@ -204,7 +207,7 @@ export async function addDevicesToNode(
 ): Promise<{ ok: true; added: number } | { ok: false; reason: Missing | DropRefusal | "bad-qty" }> {
   const qty = Math.floor(input.qty);
   if (!(qty >= 1 && qty <= MAX_NODE_QTY)) return { ok: false, reason: "bad-qty" };
-  const { codeOf } = await designatorContext([input.partId]);
+  const { codeOf, digits } = await designatorContext([input.partId]);
   let refusal: Missing | DropRefusal | null = null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId)) {
@@ -219,7 +222,7 @@ export async function addDevicesToNode(
     const at = Date.now();
     const fresh = newPlacements(drop, input.partId, input.optionId, input.by, at);
     p.placements = [...(p.placements || []), ...fresh];
-    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf);
+    stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     p.updatedAt = at;
   });
   if (!updated) return { ok: false, reason: "not-found" };
@@ -243,7 +246,7 @@ export async function setNodeDeviceQty(
 ): Promise<{ ok: true; added: number; removed: number } | { ok: false; reason: Missing | DropRefusal | "bad-qty" | "no-devices" }> {
   const qty = Math.floor(Number(input.qty));
   if (!(Number.isFinite(qty) && qty >= 1 && qty <= AUTO_QTY_MAX)) return { ok: false, reason: "bad-qty" };
-  const { codeOf } = await designatorContext([input.partId]);
+  const { codeOf, digits } = await designatorContext([input.partId]);
   let refusal: Missing | DropRefusal | "bad-qty" | "no-devices" | null = null;
   let added = 0;
   let removed = 0;
@@ -299,8 +302,10 @@ export async function setNodeDeviceQty(
     ];
     // #320: a lot whose qty changed keeps its first number (a grown block that
     // now overlaps another device is flagged, never silently renumbered).
-    if (fresh.length) stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf);
+    if (fresh.length) stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    // #321: a removed device's conduit runs and pinned tag go too.
+    if (gone.size) pruneConduitRisersIn(p);
     added = fresh.length;
     removed = gone.size;
     p.updatedAt = Date.now();
@@ -317,7 +322,7 @@ export async function replaceNodeDevicePart(
   projectId: string,
   input: { optionId: string; nodeKey: string; fromPartId: string; toPartId: string }
 ): Promise<{ ok: true; changed: number } | { ok: false; reason: Missing | "no-devices" }> {
-  const { codeOf } = await designatorContext([input.fromPartId, input.toPartId]);
+  const { codeOf, digits } = await designatorContext([input.fromPartId, input.toPartId]);
   let refusal: Missing | "no-devices" | null = null;
   let changed = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -341,7 +346,7 @@ export async function replaceNodeDevicePart(
       }
       return swapped;
     });
-    stampNewDesignators(p, reissue, codeOf);
+    stampNewDesignators(p, reissue, codeOf, digits);
     changed = ids.size;
     p.updatedAt = Date.now();
   });
@@ -369,6 +374,7 @@ export async function removeNodeDevices(
     }
     p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    pruneConduitRisersIn(p);
     removed = gone.size;
     p.updatedAt = Date.now();
   });

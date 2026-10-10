@@ -10421,3 +10421,319 @@ Spec 1 fills its `TRIAGE_HOOKS` seam (D711): `visitFlags` runs `unverifiedVisitF
 ## D724. Backfilled venue verifications are re-checked once (#325, 2026-10-10)
 
 The one-time backfill (`ensureVenueGeoStatus`) still marks a venue verified from what it holds — stored coordinates plus a house number in the street line — but those verifications stay identifiable: `geo_status = verified`, `geo_source = geocode`, `geo_verified_at` NULL (`isBackfillVerified`; every live verification, override and pin stamps `geo_verified_at`). No migration. `npm run geo:recheck-venues` (`scripts/geo-recheck-venues.ts` → `src/lib/address-verify/venue-recheck.ts`) re-geocodes exactly those venues through the venue path's own gates (`geocodeVenue`) at ≤ 1 request/second on the shared Nominatim pacer: a hit that passes `geocodedStatus` and lands within 0.5 mi of the stored point is confirmed (`geo_verified_at` stamped, so a re-run skips it); anything else — no hit, a gate failure, a town/street-level hit, or a building hit elsewhere — is downgraded to `needs_check` with its coordinates untouched; a geocoder outage leaves the row for the next run. Every write is conditioned on the backfill shape, so pins and human verifications are never touched. Dry run by default; `--apply` writes, `--yes` for a hosted database, and the target must be named explicitly (`DATABASE_URL` or `PGLITE_PATH` in the command's own environment — `.env.local` is not consulted for it). **Known limit — review before `--apply`:** venue pins and suggestion picks made before #325 (the Settings sidebar's Unlocated venues list, #175) stamped no verification fields, so they are **indistinguishable** from backfill rows and may be downgraded to `needs_check` like any other. Review the dry run's needs_check list first, save the ids of any venue a human already placed correctly to a file (one per line; the dry run's own `needs_check <id> …` lines paste as-is) and apply with `--skip <file>` so they are left alone. Every lookup in the re-check — the free-text search **and** the town-centre lookup the city gate consults (new optional `GeocodeCtx.searchCity`) — is paced and throwing, so any lookup failure counts as an outage (skipped), never as a mismatch that downgrades the venue. With only `PGLITE_PATH` set, a `DATABASE_URL` from `.env.local` is dropped (`resolveExplicitDbTarget`). Running it in production (≈ 25–30 min) or accepting the backfill as is is Jeff's call (MASTER-QUESTIONS Q1).
+## D725–D761. #323 Krisp meeting matcher (2026-10-10)
+
+D725–D737 are the spec's decision table K1–K13
+(`docs/superpowers/specs/2026-10-09-krisp-meeting-matcher-design.md`); D738 onward (K14+) are defaults taken during the build.
+
+- **D725. Pull every Krisp meeting into the app, internal ones too.** The app becomes where meeting notes
+  live, not only the customer-facing ones.
+- **D726. Personal until linked.** An unlinked meeting is visible only to the rep(s) whose Krisp account
+  lists it. Linking to an internal person shares it with that person only; linking to anything external (company,
+  venue, external contact, a work record) makes it visible to all Peak staff.
+- **D727. Customer portal only on an explicit "Share with customer".** Staff edit the summary first; the
+  transcript never reaches the portal.
+- **D728. Always suggest, the rep confirms.** Nothing is linked (and so nothing shared) without a tap.
+  Confirm all confirms every To-file row with a strong suggestion, applying exactly that row's strong picks.
+- **D729. First sync = last 90 days; Load older pulls another 90 days per tap.**
+- **D730. Krisp to-dos: choose per item, smart default.** Assignee is a Peak person → Task for them;
+  assignee is the customer → "Waiting on customer"; no owner → Note on the linked record. The rep can switch any
+  before confirming.
+- **D731. Lives in the Inbox** as a separate Meetings box (never mixed into mail), default tab To file,
+  built as a standalone component so it can move to its own nav page later.
+- **D732. A new `meetings` collection** (migration 0038). Recordings keeps its audio pipeline and attaches
+  to the meeting its Krisp import produced (`recording.meetingId`, `meeting.recordingId`).
+- **D733. Attendees are corrected in the app.** Krisp's list ∪ the overlapping Google Calendar event's
+  invite list ∪ manual adds/removes, each resolved to a contact (or offered as new). Krisp's own copy cannot be
+  edited (its API has no meeting write).
+- **D734. Speaker mapping.** The rep maps "Speaker_2 → Tom Ellis" once; the app's copy of the transcript,
+  notes and to-do owners re-renders with real names. Find-and-replace, no AI.
+- **D735. Matching signals in strength order:** venue/district name in the title → calendar event at that
+  time → attendee emails → speaker first names → names in the summary → the rep's scheduled site visit at that time.
+  Jeff confirmed titles are usually the venue or district name.
+- **D736. Recordings under 3 minutes are noise** — their own tab, no suggestions, never in To file. A rep
+  can override either way (`noiseOverride`).
+- **D737. No AI.** The matcher, the notes rebuild and the to-do defaults are deterministic; D89 holds.
+- **D738. Sync window is a rolling 14 days, with gap widening.** Krisp's list has no last-modified cursor,
+  so a normal sync re-lists `from = max(now − 90d, min(now − 14d, syncedAt − 1d))`: normally 14 days, reaching back a
+  day before the last complete sync when that is older (a revoked key or two weeks of errors must not leave a gap),
+  never past 90 days. Unchanged meetings are fingerprint-compared (sorted-key JSON, `updatedAt`/`krisp.fetchedAt`
+  ignored) and not rewritten.
+- **D739. The first sync is a resumable 90-day pass, then the rolling window.** A rep with no completed
+  sync runs [`backfillFrom ?? now−90d`, open end) in budgeted batches; any stop (budget, 429, timeout) saves
+  `backfillFrom` + `backfillCursor` and the next run (recent or Load older) resumes there. Only completion sets
+  `syncedAt`; the first pass never flags meetings removed (its seen-set covers only the last batch). A cursor Krisp
+  rejects (400) is dropped so Load older cannot wedge.
+- **D740. Name cores.** A company/venue name is lowercased, de-punctuated and stripped of generic words
+  (school, district, high, elementary, isd, church, theatre, pac, inc, the, of…); a venue core also loses venue-type
+  words (main, stage, studio, hall, gym, gymnasium, black, box, room…) and the words of the editable Venue types
+  labels, and a bare direction (north/south/east/west) is refused. A core under 4 characters is unused. A venue core
+  equal to its company's core is dropped, and a venue core shared by more than 3 companies' venues is skipped (a
+  "Main Stage" must not name 150 companies). At most 3 weak company suggestions are returned.
+- **D741. Scoring.** Per candidate company: Krisp title hits the core 50 (+10 when the hit came through a venue core), calendar title 30, an attendee
+  email resolving to a contact at the company 60, an email domain mapped to the company 40, the rep's site
+  visit/survey overlapping 40, summary text 20, a speaker first name matching a contact's 10. Top ≥ 80 and ≥ 30 ahead
+  of the runner-up → strong; ≥ 40 → weak; below 40 → no company suggestion; a weak top also lists runners-up within 30 points, at most 3 companies in total, all weak.
+  Internal-only meetings suggest the Peak users found (strong when one resolved by email).
+- **D742. Work-link priority.** For the top company: exactly one overlapping visit/survey of the rep >
+  the company's single open lead > single active engagement > single active project. Several overlapping visits
+  (or several of any kind) suggest no work link and no venue fallback; the reason reads "during N of your visits".
+- **D743. Note-parent priority** when a to-do becomes a note: venue > lead > project > engagement >
+  customer. An internal-only meeting has no parent, so a note to-do there is refused (reported, not silently dropped).
+- **D744. Sync never touches a filed meeting's links.** Krisp refresh updates the `krisp.*` header,
+  transcript, notes and speakers, never `links`, attendee corrections or to-do decisions; it only recomputes
+  suggestions. Marking noise on a filed meeting recomputes the flag only.
+- **D745. Dead links never re-privatise.** Visibility follows the stored link ids
+  (`meetingScope`), and a link to a since-deleted record that stays put is left alone by link validation, so a
+  meeting never silently falls back to personal when a company, venue or contact it was filed under is deleted; only
+  newly added links are checked for existence.
+- **D746. A first name matching both a Peak user and a contact → note,** not a task, because assigning
+  to the wrong person is worse than a note to review. To-do people are scoped to the meeting itself: the users plus
+  the linked/suggested company's contacts plus resolved attendee/speaker contacts, never every contact in the book.
+- **D747. To-dos Krisp drops.** An undecided to-do that disappears from Krisp's list is removed from the
+  app; a decided one (task/note/waiting/dismissed) is kept with its created record.
+- **D748. Speaker relabel is one pass** over the app's copy (transcript, notes, to-do owners) against the
+  current speaker map, so a swap (A→B, B→A) cannot cascade; underscore-style labels normalise.
+- **D749. The share guard also fires when re-pointing to another company.** Moving a customer-shared
+  meeting to a different company asks to confirm and unshares unless confirmed, so a summary written for one customer
+  never silently becomes visible to another.
+- **D750. Venue and work links depend on their company.** A venue link requires its company, and a work
+  link must belong to it; changing the company drops the old venue and work unless the same patch sets them. Every
+  link id is validated (exists, active, right company) on `setLinks` and `confirmSuggestions`. A venue from search is
+  a doc location id, so `linkVenueAction` resolves it to `sites.id` before linking.
+- **D751. Deterministic record ids.** A to-do's task is `T-mtg-<hash>` and its note `N-mtg-<hash>`
+  (`todoRecordId(kind, meetingId, key)`, `createTaskOnce` / `addNoteRecord({id})` insert-if-absent), so a lost meeting
+  write followed by a re-decide returns the same record instead of a duplicate. The `T-####` allocator's anchored
+  regex ignores them.
+- **D752. Refresh from Krisp uses the owner's key,** else a `seenBy` rep's key, since any staff member
+  who can open the meeting may press it. It clears `detailFetchedAt` and runs the recent sync; a meeting older than
+  the rolling window is re-fetched only when a backfill covers it.
+- **D753. An unmapped "Speaker N" owner on a waiting item** names the linked company (else "Customer")
+  rather than the raw label.
+- **D754. Meeting tasks join the rep's queue.** Open non-waiting tasks with a `meetingId` assigned to the
+  rep appear on Home's queue, `/queue` and the one-way Google Tasks mirror as "Meeting to-do" rows (read-only, linking
+  to the meeting reader); a task also listed as a project task is not duplicated.
+- **D755. Waiting-on-customer tasks are excluded from the queue and Google Tasks.** They are the
+  customer's work, not the rep's; they show on Home under "Waiting on others" and on the company/venue page's
+  Waiting on customer card (scoped to that card's customer so two companies sharing a legacy venue id do not mix).
+- **D756. `/api/sync/pull` serves only the 7 offline field collections.** It previously accepted any
+  table name from the query, which also shipped whole quote docs to any signed-in user. A pure
+  `pullCollections(param)` (`src/lib/sync/pull-collections.ts`) filters to `SYNCABLE_COLLECTIONS`; the client engine
+  only ever asked for `FIELD_COLLECTIONS`. Closes a pre-existing hole found by the final review.
+- **D757. Hot paths read projections, never transcripts.** List rows, the To-file count, the Home badge,
+  ⌘K and the company/venue cards use store projections (`countToFile`, `meetingRowsVisibleTo`,
+  `meetingRowsLinkedTo`) so no transcript JSON is loaded; ⌘K filters visibility in SQL before LIMIT and matches note
+  text through a parameterised `jsonb_path_query`.
+- **D758. Pages degrade if the meetings table is missing.** `meetingsReadOr(promise, fallback, where)`
+  (`src/lib/meetings/safe-read.ts`) wraps the meetings reads on Home, Inbox, company/venue/people/lead/project/
+  engagement/survey cards, the company feed and ⌘K, so a deploy ahead of its migration shows empty, not a 500.
+- **D759. The per-rep sync guard is in-process.** A module-level `inFlight` set stops a rep's double
+  click or overlapping cron/Home trigger; it assumes a single server instance. The task and note ids (K27) are the
+  backstop if two instances ever do overlap.
+- **D760. Cron and Home trigger.** The meetings rider runs after vendors and drive photos with
+  `min(20 s, 40 s − elapsed)` of budget (reps skipped under 5 s) so a slow Krisp call still ends under the 60 s
+  ceiling; Home kicks `syncMeetingsIfStale` through `after()` so it never delays render.
+- **D761. User-facing errors are a closed family.** `MeetingUserError` (access, share-guard, partial,
+  busy) messages reach the user; anything else is logged and returns "Something went wrong — try again." A
+  partially applied Decide all to-dos throws `MeetingPartialError` after applying what it can.
+- **D762. #323 open questions confirmed (2026-10-10, Jeff).** All four MASTER-QUESTIONS §R calls stand as
+  built: waiting-on-customer tasks stay out of `/queue` and the Google Tasks mirror (Home "Waiting on others" +
+  company/venue pages); a to-do from an internal-only meeting is an ordinary task visible to all staff on
+  `/calendar`; the noise cut-off stays at 3 minutes; a customer share shows to every portal grant at that customer.
+
+## D763. The lighting control riser downloads as DXF R12 (#321, 2026-10-10)
+
+Jeff asked for a conduit riser "similar to" Bray's TL1.5 sheet, reachable from the Grid. The riser's DXF is **R12
+(AC1009)**, not R2000: R12 has no handles or object dictionaries to get wrong and every CAD package reads it, while
+blocks with attributes (`PK_TAG`, `PK_SIGNAL`, `PK_POWER`, `PK_STUB`), named layers (`PK-RISER-TAG` …
+`PK-RISER-TABLE`) and the DASHED linetype are all R12 features. ezdxf's auditor reads the sample with 0 errors. DWG is
+one Save As away in the CAD package. Inches, 1:1 sheet size, no title block (the PDF set carries it). `GET
+/api/grid/[id]/conduit-riser/dxf?option=&size=b|d&page=` (signed-in, attachment) and a "Download DXF" link on the riser
+page and under E-502 in the on-screen drawing set (never in the signed print route).
+
+## D764. Runs are orthogonal; the only drag is the lane x; bubbles sit at the device end (#321, 2026-10-10)
+
+A conduit run is drawn orthogonally, so its only free coordinate is the vertical lane's x (`laneX`), not a free bend
+point; a drag edits `laneX` and Reset layout clears it. Signal bubbles (bubbles left, size label right) sit beside the
+drop into each device tag — Bray's look, and it keeps the head-end bundle uncluttered; chain hops print the size below
+the line. A stub follows its device: a stub whose run ends on a device in another detail is drawn in that device's
+detail. The engine takes a plain input (`input.ts`; designators already formatted) and never imports a store, so it
+builds and tests without the rest of the Grid.
+
+## D765. Conduit length, cable management and scoped details (#321, 2026-10-10)
+
+The priced conduit length is the run's typed length, else its **longest member wire** (a measured route and a typed
+link count alike). A cable-management run never prices conduit — its legend says it is provided by others. A detail
+carries `allSpaces`: `spaceIds: []` alone was ambiguous (a scoped detail whose spaces were all deleted would have become
+"every space"), so now an emptied scoped detail covers nothing and the default detail is `allSpaces: true`.
+
+## D766. A plan wire re-snapped to other devices leaves its old run (#321, 2026-10-10)
+
+Derive and the suggestions ignore a member wire whose device pair no longer matches the run, and `pruneConduitRiser`
+drops it when the store passes each wire's device pair (`wireEnds`). The re-snapped wire is suggested again for its new
+pair. Deleting a wire empties its conduit; deleting a device prunes its runs and pinned tag.
+
+## D767. Levels live on the project; `sheetLevels` replaces `GridSheet.defaultLevelId` (#321, 2026-10-10)
+
+The spec put a default level on each sheet. Sheets are replaced, deleted and restored by several paths (Adjust sheet,
+page split, revision restore), so a field on `GridSheet` was lost by each. `sheetLevels` (sheet id → level id) lives on
+the project, beside the project's `levels`, and follows sheet replace, delete and revision restore (a restored entry
+naming a level the restore removed is ignored on read). A device sits on its containing space's level, else its sheet's,
+else none (an id not on the project's list is ignored).
+
+## D768. Designator numbers: two digits by default, a part's code wins (#321, 2026-10-10)
+
+Bray prints `L-01`, so numbers pad to **two digits** by default (Grid Settings → Designator numbers). The setting only
+changes how numbers print and how new ones are issued — it **never rewrites a stored designator**; a single `CRO-1`
+shows unpadded until Renumber. A per-part **Designator code** (catalog part editor) wins over the device type's code
+(D699–D706), so ETC's DMX outlets and button stations can number as `DMX-01` while sharing a device type.
+
+## D769. Riser tag fields are part defaults plus per-device overrides (#321, 2026-10-10)
+
+A tag's ID/LOC/P-D/box/face/mount/height come from the **part's Riser tag defaults**, overridden per device
+(`GridPlacement.tag`). Edits go in as per-field patches (`setTagFieldsAction`, merged under the row lock) so fast Tab
+entry in the Devices spreadsheet cannot drop a field; a `null` field reverts that override to the part default (or,
+for location, the space name). The riser Tag panel sends `null` for a cleared field and compares against the device's
+own overrides, so retyping the inherited value creates no override; a deliberate blank isn't offered in v1.
+Curtain placements never take tag fields (refused on write, ignored on read). The Devices tab gains the tag columns.
+
+## D770. Box types and conduit sizes are admin-edited blobs (#321, 2026-10-10)
+
+`riser_box_types` is seeded from Bray's AV1.5 box legend and edited in Grid Settings → Box types; `conduit_sizes`
+(Estimating Rules → Conduit sizes) is seeded with six sizes (½" to 2") and no parts, and each size maps to a catalog
+part that **must be priced per foot** (a per-each part is refused; an unmapped size refuses a priced run by name).
+Wire types gain a Symbol (the bubble letter — N, D, UE, P, CC) and a Signal label, edited in Grid Settings → Wire
+types; a blank signal falls back to the wire type's label so the legend never prints an empty entry.
+
+## D771. E-502 follows E-501, once, from one computation (#321, 2026-10-10)
+
+E-502, E-503… appear right after E-501 **only when the option has a conduit run**. They share one exclusion key
+(`conduit-riser`, one checkbox in the set's sheet list) and one page computation (`conduitRiserSheetPages`) that feeds
+the PDF sheet, the riser page and the DXF, so the three can never differ. The set's link to the DXF comes from the
+team assets, not a new `DrawingSetSheets` prop, so the signed print route structurally cannot print it. At 24×36 the
+riser draws at true sheet-inch size (the other sheets scale); a cover for 99+ pages is not handled (E-599 would collide
+with the schedules).
+
+## D772. The plan asks "Add to the lighting control riser?" (#321, 2026-10-10)
+
+After a wire is drawn between two devices, a one-line bar over the plan offers Add — or, when the pair already has a
+run, "joins the existing run — add this wire?" — and Later (hides it; nothing is stored). It shows only when the
+engine's suggestions include that route, so an audio pair, a loose wire, a wire already in a run and a pair dismissed
+on the riser page say nothing, and it never blocks drawing. When the pair's wire won't be priced (wire pricing off for
+the run, or by default for a new one) the bar adds "— its wire will be listed as by others"; the plan only asks the
+server when one end is a lighting device. The riser page lists the same suggestions with
+Accept / Dismiss (dismissals are stored with the riser and can be un-dismissed).
+
+## D773. Riser pricing: both defaults off; by others is listed, never priced (#321, 2026-10-10)
+
+`ConduitRiserDefaults.priceWire` and `priceConduit` both default **off**, and a run can override each. A run's wire is
+priced through the ordinary wire BOM only when wire pricing is on; with it off the wire is "by others" — listed in the
+BOM panel and the E-502 tables, never priced. Priced conduit is its own BOM lines (ceiling-rounded per size to the
+catalog part's foot) under a **Conduit** group excluded from the wire-pull/labor percentage. A run that needs a length
+or a mapped size is refused by name, and a refusal blocks every promote path (D319 pattern). **Estimate-owned options
+(#314) ignore riser pricing** and hide the controls. The live BOM prices at catalog list like wire and devices today;
+the quote prices at tier.
+
+## D774. Delete → Undo restores conduit runs, pinned tags and dismissals (#321, 2026-10-10)
+
+`removePlacements` prunes the riser, so its undo bundle also carries the removed runs, pinned tags and suggestion
+dismissals (`RemovedBundle.conduit`); `restoreItems` puts them back with the devices, and the untrusted bundle is
+cleaned server-side (known ids, runs re-validated, qty prune applied) like the plan items. A run is skipped when its
+id is already present or its device pair already had a run before the restore; two runs the bundle carries for one
+pair both come back.
+
+## D775. Site-visit attendees and per-recipient invites (#326, 2026-10-10)
+
+Spec `docs/superpowers/specs/2026-10-09-site-visit-scheduling-design.md`. A visit keeps one lead (`assignedTo`) and
+gains `attendees: string[]` (roster names, at most 8, never the lead — the lead is filtered out on read and on every
+write through `cleanAttendees`), normalized on read — no migration. `visitPeople()` stays the one place that decides
+who a visit is a stop for, so every attendee gets their own drive chain and re-sync. Invites are recorded per
+recipient in `SiteVisit.invites` (channel, Google event id, the times that person was told, .ics SEQUENCE); a
+pre-spec-2 `invite`/`googleEventId` reads as one entry for the lead and survives the first reschedule (it is updated,
+not re-sent), and the lead's entry keeps mirroring into those fields for older readers. Each person gets a direct
+Google Calendar event when their mailbox has the Calendar grant (D77 kept), else the emailed .ics — the spec said .ics
+for everyone; D77 means people with the grant see it instantly, and the UID stays `sv-<id>@peak-app`. Add → invite,
+remove → calendar delete / `METHOD:CANCEL` (same UID), move → PATCH / .ics with SEQUENCE + 1. A CANCEL names the
+ORGANIZER (sending mailbox) and ATTENDEE (recipient) and goes out as `text/calendar; method=CANCEL` so mail clients
+act on it; PUBLISH invites are unchanged. Only a NEW recipient is subject to the Account invite toggle; updates and
+cancels always go to someone already holding a copy. A failed send is not recorded (retried on the next save); a failed
+update/cancel keeps the old entry (retried).
+
+## D776. What counts as busy, and the calendar-read notes (#326, 2026-10-10)
+
+Double-booked counts the person's scheduled visits and their accepted or own timed Google events (an event with no
+response status is the person's own). Tentative, unanswered, declined and all-day events, the app's drive events and
+any calendar copy of a visit are not busy (the spec said "accepted"; tentative is not accepted). An unreadable
+calendar says "Couldn't check Dana's calendar" and never shows "No conflicts"; a person with no connected calendar is
+checked against visits only and says "Dana has no connected calendar — checked visits only" (the spec named only the
+failure case) — the lead included, on the Nearby days strip too.
+
+## D777. Other people's Google events show as "a calendar event" (#326, 2026-10-10)
+
+The booking check reads every person's calendar, but only the signed-in viewer's own events keep their titles in
+conflict text and Nearby days; anyone else's read "a calendar event" (`OTHERS_EVENT_LABEL`, applied at one choke point
+in `loadBookingCheck` from the session `viewerId`). Visits — Peak's own records — always keep their labels. The check
+reveals only that a teammate is busy and when, never what the event is.
+
+## D778. Conflict rules in detail (#326, 2026-10-10)
+
+The drive-to block counts for Double-booked; the drive home counts for work hours only when the visit is the day's
+last stop. Each leg is gated on its own flags (an unverified leg skips its drive checks only). Back-to-back is not an
+overlap, and a tight gap against the preceding stop is not also reported as double-booked. Too much driving = the
+day's leg minutes with this visit, buffer included; flagged legs count 0. Work hours are Chicago wall-clock (DST-safe);
+a non-work day reads "Outside work hours — Saturday isn't a work day".
+
+## D779. Nearby days in detail (#326, 2026-10-10)
+
+Days run today → today + look-ahead − 1 (Chicago). Only the lead's verified stops count; minutes are stop → candidate,
+routed only (geo_cache / OSRM). A straight-line distance at an 80 mph bound skips stops too far to route and is never
+shown. Each other attendee's free/conflict is the chosen time of day moved to that date; with no time picked yet, free
+= a work day with nothing booked inside their work hours; an attendee with no connected calendar is checked against
+visits only. "Nearby days unavailable" when plausible stops had no drive time and nothing could be suggested.
+
+## D780. Where the checks run, what they cost, and who can edit (#326, 2026-10-10)
+
+Booking check: addresses in cache mode (the booking UI's own address check geocodes), each person's calendar read
+once per read window (twice when the visit day is outside the look-ahead), live OSRM under one 10 s budget, debounced
+800 ms, from a GET route (`/api/visits/check`, a JSON `input` param capped at 4,000 characters) that the hook aborts
+when superseded — not a server action, so Save / Schedule never queue behind it. /calendar and Home badge only the viewer's own visits — as lead or
+attendee — from the drive layer's existing plans (no other calendar read on a page view). The company record
+lazy-loads badges for up to 10 upcoming scheduled visits, for every person on each, from a GET route
+(`/api/visits/conflicts`) rather than a server action — Next runs a page's server actions one at a time, so a slow
+badge load would queue the Edit dialog's check, Save and Delete — under one shared 20 s deadline (visits left unchecked
+when it runs out simply show no badge). Editing lives on the company record (visits have no detail page) and only on
+**scheduled** visits (the server refuses anything else); a visit with no customer yet gains Edit once its lead
+converts. Leaving attendees untouched on save leaves them alone.
+
+## D781. Scheduling settings (#326, 2026-10-10)
+
+`schedule_defaults` gains `workHours` (Mon–Fri 8:00–5:00), `sameAreaMin` (45, 5–180), `dailyDriveLimitMin` (300,
+30–960), `nearbyLookaheadDays` (21, 1–60); `schedule_prefs:<userId>` gains `workHours | null`. Work hours are minutes
+from Chicago midnight; an end of 1440 ("midnight", an end-of-day checkbox) is allowed. Settings → Field (admin) and
+Account. Saves refuse bad input (strict: whole numbers in range, end after start) instead of storing a fallback; a bad
+stored value reads as its default.
+
+## D782. Deleting a past visit leaves calendars alone (#326, 2026-10-10)
+
+Deleting a visit whose end (or, with no end, its start) is already past sends no cancellations: no `METHOD:CANCEL`
+email and no calendar delete, for anyone. The visit stays in each person's calendar history, and no one is emailed
+about removing something that already happened. A future or ongoing visit cancels everyone's copy as before
+(`cancelVisitInvites`). It is judged per person, by the times that person was told: a copy whose end (or, with no
+end, start) is already past is left alone, while anyone still holding future times (an update that failed) is
+cancelled — so people whose copy already moved to the past keep that past-dated copy.
+
+## D783. Updates come from the original sender; a disconnected calendar (#326, 2026-10-10)
+
+An emailed update or cancellation goes out from the mailbox that sent that person's original invite while it is still
+connected — whoever saves the change — so the ORGANIZER of the series never changes (Bob moving Jeff's visit still
+mails from Jeff's box). If that mailbox is gone it falls back to the saver's personal box, else a shared box, and the
+mailbox actually used is recorded. A calendar copy whose owner's Calendar grant is gone reads "<Name>'s calendar is
+disconnected — reconnect it to update their copy" (kept, retried); a removed person's copy that can no longer be
+deleted is dropped from the record and the summary says to remove it by hand. Every Gmail id sent per person
+(invite, updates, cancellations; a removed person's on the visit) seeds the Gmail import's dedup. Invites are saved
+after each person, so a drive sync mid-dispatch sees new event ids. Scheduling refuses a span over 24 h, like editing.
+If sending from the original sender's mailbox fails on authorization (401, invalid_grant, revoked, no stored
+connection) it retries once without the preference — the saver's personal box, else a shared box — and records the
+mailbox actually used; a timeout is never retried, and an original mailbox whose owner is no longer an active user is
+ignored up front. A calendar copy whose person is missing from the roster reads "failed" and is kept to retry (not
+"reconnect", and not dropped).

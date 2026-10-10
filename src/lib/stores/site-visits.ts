@@ -1,5 +1,7 @@
-import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, listDocsByField, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
+import { normalizeInvites, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
+import { readAttendees } from "@/lib/visit-plan/people";
 
 /**
  * Site visits (D76, Jeff 2026-07-19 — PUNCHLIST #2 phase 1). A visit links a
@@ -7,8 +9,8 @@ import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-t
  * .ics calendar-invite email sent for it. No prototype ancestor — this is the
  * first post-rebuild collection (drizzle migration 0004).
  *
- * Phase 2 (deferred): direct Google Calendar write (googleEventId is already
- * reserved here) and the in-app calendar.
+ * Invites are per person since spec 2026-10-09 site-visit scheduling
+ * (`invites`, written by src/lib/visit-invite.ts through setVisitInvites).
  */
 
 export type SiteVisitInvite = {
@@ -38,11 +40,24 @@ export type SiteVisit = {
   notes: string;
   /** team-member NAME (app convention); "" until claimed (#34). */
   assignedTo: string;
+  /** Spec 2026-10-09 site-visit scheduling — other Peak people on the visit
+   *  (names; never the lead). The visit is a stop on each one's day
+   *  (visitPeople). Normalized to [] on read; no migration. */
+  attendees: string[];
   createdBy: string;
   createdAt: number;
   updatedAt: number;
   invite?: SiteVisitInvite | null;
-  googleEventId?: string; // phase 2
+  /** Spec 2026-10-09 site-visit scheduling — what each person on the visit
+   *  was sent (calendar event or .ics, and the times they were told).
+   *  Normalized on read: a pre-spec-2 `invite` / `googleEventId` reads as one
+   *  entry for the lead. `invite` / `googleEventId` keep mirroring the lead's
+   *  entry for older readers. */
+  invites: VisitInviteRecipient[];
+  googleEventId?: string; // the lead's direct calendar copy (D77)
+  /** Gmail ids of invite mail sent to people since removed from the visit
+   *  (their entry is gone) — the Gmail import never re-fetches them. */
+  inviteGmailIds?: string[];
   /** Optional consulting-engagement link (D90) — oversight visits list
    *  under the engagement's Oversight tab. */
   engagementId?: string | null;
@@ -77,12 +92,21 @@ export function mergedVisitReasons(stored?: string[] | null): string[] {
   return list.length ? list : DEFAULT_VISIT_REASONS;
 }
 
+/** The lead is never also an attendee (trimmed, case-sensitive — the same
+ *  match cleanAttendees uses). */
+function withoutLead(names: string[], lead: string | null | undefined): string[] {
+  const leadName = (lead || "").trim();
+  return leadName ? names.filter((n) => n !== leadName) : names;
+}
+
 /** Normalize-on-read (#34): backfill the lifecycle fields on pre-#34 docs
  *  and derive stage (a stored "scheduled" past its end reads "done"). */
 function normalizeVisit(v: SiteVisit): SiteVisit {
   v.startAt = v.startAt ?? null;
   v.endAt = v.endAt ?? null;
   v.customerId = v.customerId ?? null;
+  v.attendees = withoutLead(readAttendees(v.attendees), v.assignedTo);
+  v.invites = normalizeInvites(v);
   v.stage = deriveVisitStage(v, Date.now());
   v.leadId = v.leadId ?? null;
   v.surveyId = v.surveyId ?? null;
@@ -101,6 +125,12 @@ export async function visitsForCustomer(customerId: string): Promise<SiteVisit[]
 
 export async function visitsForEngagement(engagementId: string): Promise<SiteVisit[]> {
   return (await allVisits()).filter((v) => v.engagementId === engagementId);
+}
+
+/** #323 — ids of the visits linked to one survey, filtered in SQL (the survey page's Meetings card). */
+export async function visitIdsForSurvey(surveyId: string): Promise<string[]> {
+  if (!surveyId) return [];
+  return (await listDocsByField<SiteVisit>("site_visits", "surveyId", [surveyId])).map((v) => v.id);
 }
 
 export async function getVisit(id: string): Promise<SiteVisit | null> {
@@ -131,42 +161,52 @@ export async function linkVisitToEngagement(
 
 export type SiteVisitInput = Omit<
   SiteVisit,
-  "id" | "createdAt" | "updatedAt" | "invite"
->;
+  "id" | "createdAt" | "updatedAt" | "invite" | "invites" | "attendees"
+> & { attendees?: string[] };
 
 export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
   const now = Date.now();
   return insertWithPrefixedId<SiteVisit>("site_visits", "SV", 5000, (id) => ({
     ...input,
+    attendees: withoutLead(readAttendees(input.attendees), input.assignedTo),
     id,
     createdAt: now,
     updatedAt: now,
     invite: null,
+    invites: [],
   }));
 }
 
-/** Record the sent .ics invite on the visit (D76-I). */
-export async function stampInvite(
-  id: string,
-  invite: SiteVisitInvite
-): Promise<void> {
+/** Most removed-recipient Gmail ids kept on one visit (the latest win). */
+const MAX_RETIRED_GMAIL_IDS = 200;
+
+/** Record what each person was sent (spec 2026-10-09 site-visit scheduling).
+ *  The lead's entry is mirrored into the old single fields for older readers
+ *  (the agenda's googleEventId dedupe, "invite sent" on the company record) —
+ *  exactly: a lead holding no copy of that kind clears the old field, so a
+ *  deleted or moved-away calendar copy never lingers as a dedupe key. */
+export async function setVisitInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null, retiredGmailIds: string[] = []): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    d.invite = invite;
+    d.invites = invites;
+    if (retiredGmailIds.length) {
+      const kept = Array.isArray(d.inviteGmailIds) ? d.inviteGmailIds.filter((x) => typeof x === "string" && !!x) : [];
+      d.inviteGmailIds = [...new Set([...kept, ...retiredGmailIds])].slice(-MAX_RETIRED_GMAIL_IDS);
+    }
+    if (lead?.channel === "calendar" && lead.eventId) d.googleEventId = lead.eventId;
+    else delete d.googleEventId;
+    d.invite =
+      lead?.channel === "ics"
+        ? { sentAt: lead.sentAt, to: lead.to, fromMailbox: lead.fromMailbox ?? "", ...(lead.gmailId ? { gmailId: lead.gmailId } : {}) }
+        : null;
     d.updatedAt = Date.now();
   });
 }
 
-/** Record the directly-created Google Calendar event (D77). The dashboard
- *  agenda uses this to dedup: a visit with a googleEventId shows via Google,
- *  not as a second local row. */
-export async function stampGoogleEvent(
-  id: string,
-  googleEventId: string
-): Promise<void> {
-  await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    d.googleEventId = googleEventId;
-    d.updatedAt = Date.now();
-  });
+/** A pre-spec-2 doc has only the old single stamp, read as "told the visit's
+ *  current times". Pin it to those times BEFORE a write changes them, so the
+ *  dispatch that follows sees a move and updates the lead's copy. */
+function pinLegacyInvites(d: SiteVisit): void {
+  if (!Array.isArray(d.invites)) d.invites = normalizeInvites(d);
 }
 
 /* ---- #34 lifecycle mutations (the LEAD claim model — no approver gate) ---- */
@@ -191,13 +231,32 @@ export async function releaseVisit(id: string): Promise<void> {
   });
 }
 
-export async function scheduleVisit(id: string, startAt: number, endAt: number): Promise<void> {
+export async function scheduleVisit(id: string, startAt: number, endAt: number, attendees?: string[]): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    pinLegacyInvites(d);
     d.startAt = startAt;
     d.endAt = endAt;
+    if (attendees) d.attendees = withoutLead(readAttendees(attendees), d.assignedTo);
     d.stage = "scheduled";
     d.updatedAt = Date.now();
   });
+}
+
+export type VisitBookingPatch = { startAt: number; endAt: number; assignedTo: string; attendees: string[] };
+
+/** Editing a scheduled visit (spec 2026-10-09 site-visit scheduling): time,
+ *  lead and attendees in one write. The caller cleans the names. */
+export async function updateVisitBooking(id: string, patch: VisitBookingPatch): Promise<SiteVisit | null> {
+  const saved = await patchDoc<SiteVisit>("site_visits", id, (d) => {
+    pinLegacyInvites(d);
+    d.startAt = patch.startAt;
+    d.endAt = patch.endAt;
+    d.assignedTo = patch.assignedTo;
+    d.attendees = withoutLead(readAttendees(patch.attendees), patch.assignedTo);
+    d.stage = "scheduled";
+    d.updatedAt = Date.now();
+  });
+  return saved ? normalizeVisit(saved) : null;
 }
 
 /** Close out a still-unscheduled visit (final-review fix #34): the lead it
@@ -215,8 +274,8 @@ export async function closeVisit(id: string): Promise<void> {
  * Delete a site visit (soft delete). Visits are never quote-spawned or
  * swept by a reconciliation job (unlike flame/repair/inspection jobs), so
  * there is no tombstone-coverage concern here — nothing recreates a
- * deleted visit. Any Google Calendar event the visit mirrored
- * (googleEventId, phase 2) is the caller's job to clear first, same
+ * deleted visit. Cancelling everyone's invite (calendar copies + .ics,
+ * cancelVisitInvites) is the caller's job first, same
  * separation the crew-booking removeBooking action keeps from
  * projects.removeCrew (src/app/(app)/schedule/actions.ts).
  */

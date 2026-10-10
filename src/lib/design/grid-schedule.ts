@@ -74,6 +74,8 @@ export function buildSchedule(input: {
   /** #304: the printed Model # per part id; blank/absent = print the part id as before. */
   modelOf?: (partId: string) => string | undefined;
   wires: ScheduleWire[];
+  /** #321: designator number padding (2 = CRO-01); absent = 1. */
+  digits?: 1 | 2;
 }): ScheduleData {
   const modelOf = input.modelOf;
   const modelFor = (pid: string) => (modelOf ? modelOf(pid) || undefined : undefined);
@@ -102,7 +104,7 @@ export function buildSchedule(input: {
   }
   // #320: each part row lists its devices' designators.
   for (const [row, list] of held) {
-    const d = designatorList(list);
+    const d = designatorList(list, input.digits);
     if (d) row.designators = d;
   }
   const sections: ScheduleSection[] = [

@@ -7,6 +7,7 @@
  * a pasted device is an ordinary hand placement. Type-only store import.
  */
 import type { Point } from "@/lib/annotations";
+import type { PlacementTag } from "@/lib/design/conduit-riser/tags";
 import type { GridPlacement, GridRoute } from "@/lib/stores/grid-projects";
 
 export type ClipItem = {
@@ -17,6 +18,8 @@ export type ClipItem = {
   category?: string;
   curtain?: GridPlacement["curtain"];
   qty?: number;
+  /** #321: riser tag overrides ride along; the designator does not (a paste is renumbered). */
+  tag?: PlacementTag;
 };
 export type Clipboard = {
   items: ClipItem[];
@@ -52,6 +55,7 @@ export function copySelection(
     if (p.category !== undefined) item.category = p.category;
     if (p.curtain !== undefined) item.curtain = p.curtain;
     if (p.qty !== undefined) item.qty = p.qty;
+    if (p.tag !== undefined && !p.curtain) item.tag = { ...p.tag };
     return item;
   });
   const routeIds = routes

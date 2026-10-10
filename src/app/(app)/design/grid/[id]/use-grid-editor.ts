@@ -17,7 +17,6 @@ import {
   curtainLines,
   curtainSpecOf,
   isPerLengthUnit,
-  routeLines,
   type GridCurtain,
   type GridCurtainType,
   type PartLite,
@@ -40,6 +39,7 @@ import { uploadGridSheet } from "./sheet-upload";
 import { adjustQueueStep, uploadNote } from "@/lib/design/grid-sheet-split";
 import { allPagesLocked, pageLocks, type SheetAdjust } from "@/lib/design/sheet-adjust";
 import { optionSlice } from "@/lib/design/grid-options";
+import type { GridLevel } from "@/lib/design/grid-levels";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
 import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
@@ -49,6 +49,8 @@ import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, RemovedBundle } from "@/lib/stores/grid-projects";
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
+import { riserPromptForRouteAction } from "./conduit-riser/actions";
+import { placementSystem } from "@/lib/design/grid-drawing-set";
 import {
   addRouteAction,
   addSpaceAction,
@@ -64,6 +66,7 @@ import {
   renumberDesignatorsAction,
   replacePlacementsPartAction,
   setDesignatorsAction,
+  setTagFieldsAction,
   restoreItemsAction,
   setPlacementsCategoryAction,
   setSymbolDisplayAction,
@@ -76,8 +79,12 @@ import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 import { duplicates, type RenumberTarget } from "@/lib/design/designators";
+import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
+import { riserBom, riserEndLabeler } from "@/lib/design/conduit-riser/bom";
+import type { ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 import type { SysKey } from "@/app/(app)/design/quick/engine";
 import { paletteView } from "@/lib/design/grid-palette";
@@ -304,6 +311,9 @@ export type ProjectLite = {
   riser: Record<string, RiserDoc>;
   /** Symbol scale + mode (#300) — always cleaned by the page. */
   symbolDisplay: SymbolDisplay;
+  /** Riser levels and per-sheet default levels (#321). */
+  levels: GridLevel[];
+  sheetLevels: Record<string, string>;
 };
 
 type Pending =
@@ -350,6 +360,13 @@ export type GridEditorProps = {
   laborLines: GridLaborLine[];
   /** #226: the curated device types (palette chips, Layers). */
   deviceTypes: DeviceType[];
+  /** #321: digits a designator number prints with (Grid Settings → Designator numbers). */
+  designatorDigits: 1 | 2;
+  /** #321: the active option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
+  conduitRiser?: ConduitRiserDoc | null;
+  /** #321: Estimating Rules → Conduit sizes, and each mapped size's catalog part. */
+  conduitSizes?: ConduitSize[];
+  conduitParts?: PartLite[];
   /** #300 (D609): partId → object drawing URLs, built server-side by
    *  symbolUrlsFor; a part absent here draws the generic symbol. */
   symbolUrls: Record<string, ObjectSymbolUrls>;
@@ -379,6 +396,10 @@ export type GridEditorProps = {
   adjustKey?: string | null;
 };
 
+/** Stable empties for the optional #321 props (memo dependencies). */
+const NO_CONDUIT_SIZES: ConduitSize[] = [];
+const NO_PARTS: PartLite[] = [];
+
 function useGridEditorImpl(props: GridEditorProps) {
   const {
     project,
@@ -399,6 +420,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     customLines,
     laborLines,
     deviceTypes,
+    designatorDigits,
     recent,
     schedule,
     symbolUrls,
@@ -550,6 +572,25 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  did, in words. View state only; never persisted. */
   const [lastAction, setLastAction] = useState<string | null>(null);
   const noteAction = useCallback((text: string) => setLastAction(text), []);
+
+  /** #321: "Add to the lighting control riser?" after a device-to-device wire.
+   *  One at a time — a newer wire's prompt replaces an older one; the ticket
+   *  drops an answer that arrives after it was replaced or dismissed. */
+  const [riserPrompt, setRiserPrompt] = useState<{ optionId: string; key: string; label: string; joins: boolean; byOthers: boolean } | null>(null);
+  const riserTicket = useRef(0);
+  const hideRiserPrompt = useCallback(() => {
+    riserTicket.current++;
+    setRiserPrompt(null);
+  }, []);
+  const askRiserPrompt = useCallback((optionId: string, routeId: string) => {
+    const ticket = ++riserTicket.current;
+    setRiserPrompt(null);
+    riserPromptForRouteAction(project.id, optionId, routeId)
+      .then((r) => {
+        if (ticket === riserTicket.current && r.show) setRiserPrompt({ optionId, key: r.key, label: r.label, joins: r.joins, byOthers: r.byOthers });
+      })
+      .catch(() => {});
+  }, [project.id]);
 
   /** Symbol size + Generic/Object (#300) — a display setting saved on the
    *  design, so the plan and the printed set match. Painted here first,
@@ -1061,10 +1102,34 @@ function useGridEditorImpl(props: GridEditorProps) {
   );
   const totals = useMemo(() => bomTotals(placements, parts), [placements, parts]);
   const riserLinks = useMemo(() => riserLinksOf(project.riser, activeOptionId), [project.riser, activeOptionId]);
-  const wires = useMemo(
-    () => routeLines(routes || [], parts, project.calibrations, riserLinks),
-    [routes, parts, project.calibrations, riserLinks]
+  /** #321: the conduit riser's effect on the BOM — buildGridQuote's own
+   *  riserBom: wire by others leaves the priced wire, priced conduit adds
+   *  Conduit lines, and its refusals are the quote's. An estimate-owned
+   *  option (#314) prices nothing from the riser. */
+  const conduitRiser = props.conduitRiser ?? null;
+  const conduitSizes = props.conduitSizes ?? NO_CONDUIT_SIZES;
+  const conduitPartList = props.conduitParts ?? NO_PARTS;
+  const conduitParts = useMemo(() => new Map(conduitPartList.map((p) => [p.id, p])), [conduitPartList]);
+  const estimateOwned = activeOption.estimateOwned === true;
+  const riser = useMemo(
+    () =>
+      riserBom({
+        doc: conduitRiser,
+        estimateOwned,
+        routes: routes || [],
+        links: riserLinks,
+        cals: project.calibrations,
+        parts,
+        conduitParts,
+        sizes: conduitSizes,
+        placementIds: new Set(placements.filter((pl) => !pl.curtain).map((pl) => pl.id)),
+        labelOf: conduitRiser
+          ? riserEndLabeler(conduitRiser, placements, (id) => partById.get(id)?.desc, designatorDigits)
+          : () => "",
+      }),
+    [conduitRiser, estimateOwned, routes, riserLinks, project.calibrations, parts, conduitParts, conduitSizes, placements, partById, designatorDigits]
   );
+  const wires = riser.wires;
 
   /* ------------------------------ curtains (#49) ------------------------------ */
 
@@ -1127,8 +1192,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   const accessoryLines = useMemo(() => accessoryBomLines(accessories, parts), [accessories, parts]);
   const accessoryValue = accessoryLines.reduce((a, l) => a + l.ext, 0);
   const bomEmpty =
-    lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0 && accessoryLines.length === 0;
-  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue + accessoryValue;
+    lines.length === 0 && wires.lines.length === 0 && riser.conduit.length === 0 && curtains.length === 0 && customLines.length === 0 && accessoryLines.length === 0;
+  const grandValue = totals.value + wires.value + riser.conduitValue + laborValue + curtainValue + customValue + accessoryValue;
   /** #230: the BOM under its seven headings. */
   const bomGroupList = useMemo(
     () =>
@@ -1143,9 +1208,10 @@ function useGridEditorImpl(props: GridEditorProps) {
           parts,
           placements,
           labor: laborLines,
+          conduit: riser.conduit,
         })
       ),
-    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements, laborLines]
+    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements, laborLines, riser.conduit]
   );
   /** The heading whose accessory picker is open — per option, so switching options closes it. */
   const [addingTo, setAddingTo] = useState<{ optionId: string; group: BomGroupKey } | null>(null);
@@ -1558,6 +1624,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (busy || pending || curtainAt || !sheet) return;
     const p = toNorm(e);
     if (!p) return;
+    hideRiserPrompt();
 
     if (calibrating) {
       setCalDraft([p, p]);
@@ -1648,6 +1715,15 @@ function useGridEditorImpl(props: GridEditorProps) {
             noteAction(`Drew a ${partLabel(wirePartId)} run`);
             clearUndo();
             router.refresh();
+            // After the refresh is on its way — the check never holds drawing up.
+            // Only a pair with a lighting device can ever be offered — any
+            // other pair skips the server round trip (#321 final review).
+            if (
+              fromPlacement &&
+              toPlacement &&
+              (placementSystem(fromPlacement, partById) === "lighting" || placementSystem(toPlacement, partById) === "lighting")
+            )
+              askRiserPrompt(activeOptionId, r.routeId);
           }
         });
         return;
@@ -2312,6 +2388,37 @@ function useGridEditorImpl(props: GridEditorProps) {
     [selectedPlacements, project.id, router, noteAction, partLabel, flushNudge, record]
   );
 
+  /* ------------------------- riser tags (#321) ------------------------- */
+
+  /** Patch riser tag overrides per field — one write, one undo step (the
+   *  inverse is the previous values of only the touched fields). Resolves true
+   *  when it saved. */
+  const saveTags = useCallback(
+    async (items: { id: string; patch: TagPatch }[]): Promise<boolean> => {
+      if (!items.length) return false;
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setTagFieldsAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        noteAction(items.length > 1 ? `Set riser tag on ${items.length} devices` : "Set riser tag");
+        record({ label: stepLabel("set riser tag", items.length), forward: { kind: "tag", items }, inverse: { kind: "tag", items: r.previous } });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, router, noteAction, flushNudge, record]
+  );
+
   /* ------------------------- designators (#320) ------------------------- */
 
   /** Set (or, with "", re-issue) designators — one write, one undo step.
@@ -2495,7 +2602,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const routeIds = samePage ? clip.routeIds : [];
       const dropped = clip.routeIds.length - routeIds.length;
       const items = clip.items.map((it) => {
-        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number } = {
+        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag } = {
           srcId: it.srcId,
           x: anchor.x + it.dx,
           y: anchor.y + it.dy,
@@ -2503,6 +2610,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         };
         if (it.category !== undefined) out.category = it.category;
         if (it.qty !== undefined) out.qty = it.qty;
+        if (it.tag !== undefined) out.tag = { ...it.tag };
         // The full curtain record; the server re-checks every field.
         if (it.curtain) out.curtain = { ...it.curtain };
         return out;
@@ -2647,6 +2755,12 @@ function useGridEditorImpl(props: GridEditorProps) {
           router.refresh();
           return { ok: true };
         }
+        case "tag": {
+          const r = await setTagFieldsAction(project.id, c.items);
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
       }
     },
     [placements, project.id, router]
@@ -2781,6 +2895,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
+        hideRiserPrompt();
         disarm();
         return;
       }
@@ -2806,13 +2921,15 @@ function useGridEditorImpl(props: GridEditorProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [disarm, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo, adjustOpen]);
+  }, [disarm, hideRiserPrompt, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo, adjustOpen]);
 
   return {
     router,
     estimateLink,
     estimateTray,
     intakeNotices,
+    riserPrompt,
+    hideRiserPrompt,
     blobUploads,
     project,
     symbolDisplay,
@@ -2836,6 +2953,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     customLines,
     laborLines,
     deviceTypes,
+    designatorDigits,
     favorites,
     setFavorites,
     recent,
@@ -2946,6 +3064,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     totals,
     riserLinks,
     wires,
+    riser,
     fabricBySku,
     fabricNames,
     curtainPrices,
@@ -3029,6 +3148,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     replacePartForSelected,
     designatorDupes,
     saveDesignators,
+    saveTags,
     renumberDesignators,
     focusPlacements,
     clipboard,

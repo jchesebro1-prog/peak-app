@@ -1,5 +1,5 @@
 import {
-  listDocs, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
+  listDocs, listDocsByField, getDoc, upsertDoc, patchDoc, softDeleteDoc, insertDocIfAbsent, insertWithPrefixedId,
 } from "@/db/doc-store";
 import type { ProjectTask, ProjectRecord } from "@/lib/stores/projects";
 import { shiftForMilestone, shiftTasksByIds } from "@/lib/consulting-schedule";
@@ -70,6 +70,11 @@ export type TaskRecord = {
   leadId?: string | null;
   /** the comms thread the task was created from */
   threadId?: string | null;
+  /** #323 — the Krisp meeting this task was filed from (src/lib/meetings/). */
+  meetingId?: string | null;
+  /** #323 — set on a "Waiting on customer" item: the customer owes this.
+   *  assigneeUserId is the Peak rep who owns the nudge; dueAt is the nudge date. */
+  waitingOn?: { contactId: string | null; name: string } | null;
 };
 
 export type TaskTemplateItem = { key: string; title: string; section?: string };
@@ -315,7 +320,15 @@ export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRe
     notes: raw.notes ?? "", createdBy: raw.createdBy ?? "",
     createdAt: at, updatedAt: raw.updatedAt ?? at, doneAt: raw.doneAt ?? null,
   };
-  return { ...t, ...taskLinksOf(raw) };
+  const out: TaskRecord = { ...t, ...taskLinksOf(raw) };
+  // #323 — written only when set, so pre-#323 tasks read identically (no null keys).
+  const meetingId = taskLinkId(raw.meetingId);
+  if (meetingId) out.meetingId = meetingId;
+  const w = raw.waitingOn;
+  if (w && typeof w === "object" && typeof w.name === "string") {
+    out.waitingOn = { contactId: taskLinkId(w.contactId), name: w.name };
+  }
+  return out;
 }
 
 export async function allTasks(): Promise<TaskRecord[]> {
@@ -362,6 +375,22 @@ export async function tasksForContact(contactId: string): Promise<TaskRecord[]> 
   return (await allTasks()).filter((t) => (t.contactIds || []).includes(contactId));
 }
 
+/** #323 — open "Waiting on customer" tasks (`waitingOn` set, not done) whose `field` is one of `values`,
+ *  filtered in SQL on the field (never the whole collection); soonest nudge first. A venue page passes both its
+ *  directory id (what a meeting-made task stores) and its `sites.id` — plus `customerId`, because a legacy
+ *  directory id ('loc1') repeats across companies. */
+export async function openWaitingTasksBy(
+  field: "customerId" | "siteId" | "assigneeUserId",
+  values: readonly string[],
+  opts: { customerId?: string } = {},
+): Promise<TaskRecord[]> {
+  const rows = await listDocsByField<TaskRecord>("tasks", field, values);
+  return rows
+    .map(normalizeTask)
+    .filter((t) => t.status !== "done" && !!t.waitingOn && (opts.customerId === undefined || t.customerId === opts.customerId))
+    .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
+}
+
 export async function getTask(id: string): Promise<TaskRecord | null> {
   const doc = await getDoc<TaskRecord>("tasks", id);
   return doc ? normalizeTask(doc) : null;
@@ -380,6 +409,19 @@ export async function createTask(
   return insertWithPrefixedId<TaskRecord>("tasks", "T", 6000, (id) =>
     normalizeTask({ ...input, id, createdBy: me.name, createdAt: at, updatedAt: at })
   );
+}
+
+/** #323 — create under a caller-chosen deterministic id, at most once: a
+ *  second call (another process, a lost follow-up write) gets the row that is
+ *  already there, never a duplicate or an overwrite. */
+export async function createTaskOnce(
+  input: Partial<TaskRecord> & { id: string; title: string },
+  me: { id: string; name: string },
+): Promise<TaskRecord> {
+  const at = now();
+  const t = normalizeTask({ ...input, createdBy: me.name, createdAt: at, updatedAt: at });
+  if (await insertDocIfAbsent<TaskRecord>("tasks", t)) return t;
+  return (await getTask(input.id)) ?? t;
 }
 
 /** Idempotent system-created task (templates, item 16): coverageKey is the

@@ -12,6 +12,7 @@ import { addCalendarEventAction } from "./calendar-actions";
 import type { AgendaItem } from "@/lib/agenda";
 import { fmtDur } from "@/lib/drive-plan/plan";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
+import ConflictBadge from "@/components/visit-booking/conflict-badge";
 import { RecordControlLink } from "@/components/recordings/record-control-link";
 
 /**
@@ -394,10 +395,16 @@ export default function HomeCalendar({
                   <AddressFlagBadge flag={it.addressFlag} />
                 </span>
               ) : null;
+              const conflict = it.conflicts?.length ? (
+                <span style={{ alignSelf: "center", marginRight: 17 }}>
+                  <ConflictBadge conflicts={it.conflicts} />
+                </span>
+              ) : null;
               return (
                 <div key={it.key} style={{ display: "flex", alignItems: "stretch" }}>
                   {main}
                   {flag}
+                  {conflict}
                   {record}
                 </div>
               );

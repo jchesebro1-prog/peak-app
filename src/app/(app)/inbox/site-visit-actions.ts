@@ -5,13 +5,16 @@ import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { createVisit } from "@/lib/stores/site-visits";
 import { update as updateThread } from "@/lib/stores/comms";
+import { activeUsers } from "@/lib/users";
 import { dispatchVisitInvite } from "@/lib/visit-invite";
+import { cleanAttendees } from "@/lib/visit-plan/people";
 
 /**
  * Schedule a site visit from an inbox thread (D76 / PUNCHLIST #2 phase 1).
- * Creates the visit record, then emails the assignee an .ics invite from the
- * scheduler's connected mailbox (decisions B/E — the customer is never
- * emailed; recipient is the assignee only, honoring their Account toggle).
+ * Creates the visit record, then invites everyone on it (lead + attendees,
+ * per person since spec 2026-10-09 site-visit scheduling) — a calendar event
+ * or an .ics from the scheduler's connected mailbox (decisions B/E — the
+ * customer is never emailed; each person's Account toggle is honored).
  * The visit is always created even when the invite can't be sent — the
  * returned inviteStatus says what happened.
  */
@@ -32,17 +35,19 @@ export type CreateSiteVisitInput = {
   endAt: number;
   notes: string;
   assignedTo: string; // team-member name
+  /** Spec 2026-10-09 site-visit scheduling — other Peak people on the visit. */
+  attendees?: string[];
   /** Optional consulting-engagement link (D90). */
   engagementId?: string | null;
 };
 
-export type { InviteStatus } from "@/lib/visit-invite";
-import type { InviteStatus } from "@/lib/visit-invite";
+export type { InviteStatus, RecipientResult } from "@/lib/visit-invite";
+import type { InviteStatus, RecipientResult } from "@/lib/visit-invite";
 
 export async function createSiteVisitAction(
   input: CreateSiteVisitInput
 ): Promise<
-  | { ok: true; id: string; inviteStatus: InviteStatus }
+  | { ok: true; id: string; inviteStatus: InviteStatus; invites: RecipientResult[] }
   | { ok: false; error: string }
 > {
   const me = await requireUser();
@@ -64,6 +69,7 @@ export async function createSiteVisitAction(
   // budget (doc-store.ts). Rare, but this is a Schedule button — report it
   // through the failure shape this action already has instead of letting a
   // raw exception escape as a 500.
+  const roster = (await activeUsers()).map((u) => u.name);
   let rec: Awaited<ReturnType<typeof createVisit>>;
   try {
     rec = await createVisit({
@@ -80,6 +86,7 @@ export async function createSiteVisitAction(
       endAt: input.endAt,
       notes: input.notes,
       assignedTo: input.assignedTo,
+      attendees: cleanAttendees(input.attendees, input.assignedTo, roster),
       createdBy: me.name,
       engagementId: input.engagementId || null,
       stage: "scheduled",
@@ -99,11 +106,11 @@ export async function createSiteVisitAction(
     await resyncForVisitChange(null, rec).catch((err) => console.error("[drive-sync] visit re-sync failed:", err));
   });
 
-  const inviteStatus: InviteStatus = await dispatchVisitInvite(rec, {
+  const report = await dispatchVisitInvite(rec, {
     id: me.id,
     name: me.name,
   });
 
   revalidatePath("/", "layout");
-  return { ok: true, id: rec.id, inviteStatus };
+  return { ok: true, id: rec.id, inviteStatus: report.status, invites: report.recipients };
 }

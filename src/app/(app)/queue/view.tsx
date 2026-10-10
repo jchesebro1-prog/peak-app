@@ -49,6 +49,7 @@ const SOURCE_COLOR: Record<QueueSource, string> = {
   checklist: "#3155a8",
   milestone: "#2e9e6b",
   "project-task": "#3155a8",
+  "meeting-task": "#6b4fa1",
   "flame-renewal": "#c4553a",
   "inspection-renewal": "#c4553a",
   "site-visit": "#7b3f8a",

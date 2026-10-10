@@ -1,0 +1,97 @@
+/**
+ * Busy blocks for one person (spec 2026-10-09 site-visit scheduling,
+ * "Double-booked"). Pure and client-safe. Busy = their scheduled visits and
+ * their accepted (or own) timed Google events. Never busy: all-day,
+ * declined, unanswered or tentative events, the app's drive events, and any
+ * calendar copy of a visit (the visit itself is counted once, from its record).
+ */
+import { visitCopyIndex, visitPeople } from "@/lib/drive-plan/stops";
+import { visitEventIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
+import { addDays, chicagoDayKey, chicagoDayStart, DRIVE_TZ } from "@/lib/drive-plan/day";
+import { chicagoMinuteOfDay, fmtClockShort } from "./hours";
+
+/** What another person's Google event is called anywhere the viewer can see
+ *  it — conflict text, nearby days. Only the viewer's own events keep their
+ *  titles; visits (Peak's own records) always keep their labels. */
+export const OTHERS_EVENT_LABEL = "a calendar event";
+
+export type BusyBlock = { key: string; kind: "visit" | "event"; label: string; startMs: number; endMs: number };
+export type BusyVisit = { id: string; label: string; startAt: number | null; endAt: number | null; stage: string; people: string[]; eventIds: string[] };
+export type BusyEvent = {
+  id: string;
+  iCalUID: string;
+  title: string;
+  startMs: number;
+  endMs: number;
+  allDay: boolean;
+  selfDeclined: boolean;
+  selfResponse?: string;
+  peakDriveKey: string;
+};
+export type VisitForBusy = InviteVisitShape & { venue: string; customer: string; stage: string };
+
+export function toBusyVisit(v: VisitForBusy): BusyVisit {
+  return { id: v.id, label: v.venue || v.customer || v.id, startAt: v.startAt, endAt: v.endAt, stage: v.stage, people: visitPeople(v), eventIds: visitEventIds(v) };
+}
+
+export function isBusyEvent(e: BusyEvent): boolean {
+  if (e.allDay || e.selfDeclined || e.peakDriveKey || !(e.endMs > e.startMs)) return false;
+  return !e.selfResponse || e.selfResponse === "accepted";
+}
+
+/** `visits` must include the visit being edited (its calendar copies are
+ *  recognised); `excludeVisitId` keeps it from being its own conflict. */
+export function busyBlocks(args: {
+  person: string;
+  visits: readonly BusyVisit[];
+  events: readonly BusyEvent[] | null;
+  excludeVisitId?: string | null;
+}): BusyBlock[] {
+  const out: BusyBlock[] = [];
+  for (const v of args.visits) {
+    if (v.id === args.excludeVisitId || v.startAt == null || !v.people.includes(args.person)) continue;
+    if (v.stage !== "scheduled" && v.stage !== "done") continue;
+    out.push({ key: "sv:" + v.id, kind: "visit", label: v.label, startMs: v.startAt, endMs: Math.max(v.endAt ?? v.startAt, v.startAt) });
+  }
+  const copies = visitCopyIndex(args.visits);
+  for (const e of args.events ?? []) {
+    if (!isBusyEvent(e) || copies.has(e)) continue;
+    out.push({ key: "g:" + e.id, kind: "event", label: e.title, startMs: e.startMs, endMs: e.endMs });
+  }
+  return out.sort((a, b) => a.startMs - b.startMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+export function busyInRange(blocks: readonly BusyBlock[], minMs: number, maxMs: number): BusyBlock[] {
+  return blocks.filter((b) => b.endMs > minMs && b.startMs < maxMs);
+}
+
+const clockOf = (ms: number) => fmtClockShort(chicagoMinuteOfDay(ms));
+const weekdayOfMs = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: DRIVE_TZ, weekday: "short" });
+
+/** "9–10:30"; an end at the Chicago midnight reads "midnight" ("all day" from
+ *  midnight to midnight); a block crossing midnight names both days:
+ *  "Wed 10 – Thu 2". */
+export function fmtBusyRange(b: { startMs: number; endMs: number }): string {
+  const midnight = chicagoDayStart(addDays(chicagoDayKey(b.startMs), 1));
+  const startsAtMidnight = chicagoMinuteOfDay(b.startMs) === 0;
+  if (b.endMs <= midnight) {
+    if (b.endMs === midnight) return startsAtMidnight ? "all day" : `${clockOf(b.startMs)}–midnight`;
+    return `${startsAtMidnight ? "midnight" : clockOf(b.startMs)}–${clockOf(b.endMs)}`;
+  }
+  // Crosses midnight. An end exactly at a midnight is the END of the day before it.
+  const endsAtMidnight = chicagoMinuteOfDay(b.endMs) === 0;
+  const endDay = weekdayOfMs(endsAtMidnight ? b.endMs - 1 : b.endMs);
+  return `${weekdayOfMs(b.startMs)} ${startsAtMidnight ? "midnight" : clockOf(b.startMs)} – ${endDay} ${endsAtMidnight ? "midnight" : clockOf(b.endMs)}`;
+}
+
+/** Overlapping blocks merged: "9–11:30, 2–3" ("" when free). */
+export function fmtBusy(blocks: readonly BusyBlock[]): string {
+  const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
+  const merged: Array<{ startMs: number; endMs: number }> = [];
+  for (const b of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && b.startMs <= last.endMs) last.endMs = Math.max(last.endMs, b.endMs);
+    else merged.push({ startMs: b.startMs, endMs: b.endMs });
+  }
+  return merged.map(fmtBusyRange).join(", ");
+}

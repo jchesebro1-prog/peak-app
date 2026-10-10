@@ -125,6 +125,7 @@ const ROUTES = [
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
   "/inbox",
   "/inbox?view=unmatched",
+  "/inbox?view=meetings",
   "/queue",
   "/triage", // Morning triage — the full ranked list (lazily builds the slot on the scratch db)
   "/templates",
@@ -205,6 +206,9 @@ const ROUTES = [
   "/portal/my-quotes",
   "/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0",
   "/portal/my-quotes?preview=lakefront&show=accepted",
+  // #323 — Meeting notes: signed out, and a team preview (shared summaries only).
+  "/portal/meetings",
+  "/portal/meetings?preview=lakefront",
   // #282 phase 4 — the portal dashboard's team preview (the Rewards card
   // renders only while the program is on; the smoke DB leaves it off).
   "/portal?preview=lakefront",
@@ -315,6 +319,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/design/engagements/CE-1001" },
   { route: "/design/engagements/CE-1001?tab=activity" },
   { route: "/design/engagements/CE-1001?tab=schedule" },
+  // #323 — the Oversight tab mounts the Meetings card beside the Recordings card.
+  { route: "/design/engagements/CE-1001?tab=oversight" },
+  // #323 — the lead drawer's detail mode mounts the Meetings card slot.
+  { route: "/leads?lead=L-1061" },
   /* Service-line documents (#78's uncovered half). Each is the artifact a
    * customer actually receives, and each compiles a different report/letter
    * module that nothing else in this list pulls in. */
@@ -328,6 +336,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/inspections/RI-2042/report" },
   /* The Grid's derived drawings (D112 riser, device schedule). */
   { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
+  { route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/schedule", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/lineset", reject: "no longer exists" },
   { route: "/api/grid/GRD-5001/package-manifest" },
@@ -337,6 +346,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/design/grid/GRD-5001?option=opt-base", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },
+  { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&detail=dt-main", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/schedule?option=opt-does-not-exist", reject: "no longer exists" },
   /* The drawing set (#209) at both sheet sizes, and an unknown option. */
   { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
@@ -358,6 +368,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
+  // #321 — the lighting control riser DXF: the seeded design has no conduit run
+  // (a clean 404 after the loader path compiles); an unknown design is a 404 too.
+  { route: "/api/grid/GRD-5001/conduit-riser/dxf", expectNotFound: true },
+  { route: "/api/grid/GRD-NOPE/conduit-riser/dxf?option=opt-base&size=d&page=1", expectNotFound: true },
   // #301 slice B — the share photo route with a v2 token that fails the verify: a clean 404.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/photo/PD-1", expectNotFound: true },
   // #301 slice C — the package datasheet route with a v2 token that fails the verify: a clean 404.

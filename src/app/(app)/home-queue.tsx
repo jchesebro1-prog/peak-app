@@ -23,10 +23,15 @@ export default function HomeQueue({
   open,
   overdue,
   rows,
+  waiting = [],
+  waitingTotal = 0,
 }: {
   open: number;
   overdue: number;
   rows: QueueRow[];
+  /** #323 — "Waiting on customer" nudges, listed under their own heading, never mixed into `rows`. */
+  waiting?: QueueRow[];
+  waitingTotal?: number;
 }) {
   return (
     <div className="pk-card" style={{ overflow: "hidden", marginBottom: 22 }}>
@@ -76,63 +81,7 @@ export default function HomeQueue({
         </Link>
       </div>
       {rows.map((r) => (
-        <Link
-          key={r.key}
-          href={r.href}
-          className="pkh-hover"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "12px 17px",
-            borderBottom: "1px solid #f5f6f8",
-            textDecoration: "none",
-            color: "inherit",
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "#16181d",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {r.title}
-            </div>
-            {r.context && (
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "#9aa0ab",
-                  marginTop: 2,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {r.context}
-              </div>
-            )}
-          </div>
-          {r.dueLabel && (
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#5b616e",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {r.dueLabel}
-            </span>
-          )}
-        </Link>
+        <QueueRowLink key={r.key} r={r} />
       ))}
       {rows.length === 0 && (
         <div
@@ -146,6 +95,91 @@ export default function HomeQueue({
           You’re clear — nothing in your queue.
         </div>
       )}
+      {waiting.length > 0 && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "11px 17px 7px",
+              borderTop: rows.length ? "1px solid #f0f1f4" : undefined,
+              fontSize: 11,
+              fontWeight: 600,
+              color: "#9aa0ab",
+              letterSpacing: ".05em",
+              textTransform: "uppercase",
+            }}
+          >
+            Waiting on others
+            <span style={{ fontFamily: "var(--font-mono)", color: "#aab0bb", letterSpacing: 0 }}>{waitingTotal}</span>
+          </div>
+          {waiting.map((r) => (
+            <QueueRowLink key={r.key} r={r} />
+          ))}
+        </>
+      )}
     </div>
+  );
+}
+
+function QueueRowLink({ r }: { r: QueueRow }) {
+  return (
+    <Link
+      href={r.href}
+      className="pkh-hover"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 11,
+        padding: "12px 17px",
+        borderBottom: "1px solid #f5f6f8",
+        textDecoration: "none",
+        color: "inherit",
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: "#16181d",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {r.title}
+        </div>
+        {r.context && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "#9aa0ab",
+              marginTop: 2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {r.context}
+          </div>
+        )}
+      </div>
+      {r.dueLabel && (
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#5b616e",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {r.dueLabel}
+        </span>
+      )}
+    </Link>
   );
 }

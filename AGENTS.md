@@ -889,6 +889,72 @@ See `.env.example`.
     Jeff-gated: confirm the drive cron fires (a third daily cron), run or
     waive the re-check, review the worklist, connect rep calendars. Punch
     item #325.
+46. ✅ **Krisp meeting matcher** (#323, D725–D761) — every Krisp meeting,
+    internal ones included, lands in the Inbox as a separate **Meetings** box
+    (`/inbox?view=meetings`: To file · Filed · Noise, Sync now, Load older) backed
+    by a new `meetings` collection (migration 0038; `src/lib/stores/meetings.ts`,
+    `src/lib/meetings/`). A resumable 90-day first sync, then a rolling 14-day
+    window (`sync.ts`; per-rep in-process guard, daily cron rider, Home
+    `after()` trigger), and a deterministic matcher (`match.ts`, `names.ts`: name
+    cores, calendar, attendee emails, speakers, the rep's site visits; strong ≥ 80
+    and 30 ahead, weak ≥ 40) that only suggests — nothing is linked or shared
+    without a tap, Confirm all files the strong rows. A reader corrects attendees
+    (Krisp ∪ the calendar event ∪ manual), maps "Speaker N" to people (one-pass
+    relabel), and decides each Krisp to-do: Task (deterministic `T-mtg-` id),
+    Waiting on customer, or Note (`N-mtg-`). Visibility is personal until linked,
+    all staff once linked externally, the portal only on an explicit Share with
+    customer (never the transcript). Filed meetings show on company/venue/people/
+    lead/project/engagement/survey pages, the feed, ⌘K and the portal; meeting
+    tasks join the Home queue, `/queue` and Google Tasks (waiting-on-customer
+    ones show on Home under Waiting on others instead). Also closes a hole:
+    `/api/sync/pull` now serves only the 7 offline field collections. No AI
+    (D89), no new env vars. Remaining is Jeff-gated: connect the Krisp key and
+    press Sync now on production, confirm desktop auto-recorded meetings list
+    with participants, review a week of suggestions, and renumber migration 0036
+    at merge if another branch lands first. Punch item #323.
+
+47. ✅ **Grid conduit riser** (#321, D763–D774) — a Bray-format lighting control
+    riser derived from the Grid's devices and wires: `/design/grid/[id]/conduit-riser`
+    draws device tags (ID, location, P/D, box, face, mount, height), conduit runs
+    with size labels and signal bubbles, chained hops, stubs, power types, notes and
+    per-level / per-space details, with a draggable lane (`laneX`), Reset layout,
+    undo/redo and a Tag panel; suggestions come from plan wires between
+    lighting-control devices (the plan's "Add to the lighting control riser?" bar).
+    Pure engine in `src/lib/design/conduit-riser/` (model, suggest, derive, layout,
+    drawing, svg, dxf, tables, pricing), server in
+    `src/lib/design/conduit-riser-server.ts`, store in
+    `src/lib/stores/grid-conduit-riser.ts` (the document rides the design option;
+    no migration). The drawing set gains E-502… (six tables) and a DXF R12 download
+    at `GET /api/grid/[id]/conduit-riser/dxf`. Designators pad to two digits by
+    default, parts carry a Designator code and Riser tag defaults, devices override
+    per field, levels live on spaces and `sheetLevels` on the project; wire types
+    gain Symbol/Signal, and `riser_box_types` / `conduit_sizes` are settings blobs.
+    Pricing: wire and conduit are both off by default per design, with a per-run
+    override (unpriced wire is "by others"; refusals block promote; estimate-owned
+    options ignore it). Remaining
+    is Jeff-gated: fill Estimating Rules → Conduit sizes, set wire-type symbols and
+    part tag defaults, set levels on a real job, open the DXF in AutoCAD/Vectorworks,
+    decide 24×36 scaling and a read-only phone view. Later: AV/video risers, computed
+    conduit fill. Punch item #321.
+48. ✅ **Site-visit scheduling** (#326, D775–D783) — visits are fixed
+    appointments with a lead + `attendees` (never the lead; each gets their own
+    drive chain via `visitPeople`); per-recipient invites in `SiteVisit.invites`
+    (`src/lib/visit-invite-plan.ts` plans add/update/cancel; `visit-invite.ts`
+    delivers — a Google Calendar event when the mailbox has the grant, else .ics
+    with a real `method=CANCEL`, UID `sv-<id>@peak-app`; a legacy single invite
+    reads as the lead's entry); a pure engine `src/lib/visit-plan/` (work hours,
+    busy blocks, `checkVisit`, `suggestDays`, `agendaConflicts`) behind
+    `visit-plan/load.ts`, where other people's Google events read "a calendar
+    event"; the booking panel (`src/components/visit-booking/`) on the
+    visit-requests scheduler, the Inbox dialog and the company record's Edit
+    (scheduled visits only); conflict badges on the company record (GET
+    `/api/visits/conflicts`, 20 s budget), /calendar and Home; settings in
+    Settings → Field + Account; the live booking check is GET `/api/visits/check`.
+    Deleting a past visit leaves calendars alone; updates/cancels mail from the
+    original sender's box. Nothing moves or blocks a visit; nothing is stored
+    for conflicts; no migration. Remaining is Jeff-gated: the settings values, a
+    real booking with attendees, and a real-mailbox CANCEL check in Gmail/Outlook/
+    Apple. Punch item #326.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -42,7 +42,8 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
       align="right"
       width={300}
       items={[
-        { label: "Riser →", href: `/design/grid/${id}/riser?option=${opt}` },
+        { label: "System riser →", href: `/design/grid/${id}/riser?option=${opt}` },
+        { label: "Lighting control riser →", href: `/design/grid/${id}/conduit-riser?option=${opt}` },
         { label: "Schedule →", href: `/design/grid/${id}/schedule?option=${opt}` },
         { label: "Drawing set →", href: `/design/grid/${id}/set?option=${opt}` },
         ...(project.linesetDesignId ? [{ label: "Linesets →", href: `/design/grid/${id}/lineset` }] : []),

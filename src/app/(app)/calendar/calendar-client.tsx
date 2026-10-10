@@ -10,6 +10,7 @@ import { setStayOverAction, type CalendarConnectionView } from "../calendar-acti
 import { fmtDur, FLAG_TEXT } from "@/lib/drive-plan/plan";
 import { isStayOverDay } from "@/lib/drive-plan/day";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
+import ConflictBadge from "@/components/visit-booking/conflict-badge";
 import { groupPlacedByDay, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
 import TaskChip from "./task-chip";
 
@@ -358,13 +359,20 @@ export default function CalendarClient({
   // can't nest in an anchor).
   function renderMonthChip(it: AgendaItem) {
     if (isDriveFlag(it)) return renderDriveFlag(it, true);
-    if (!it.addressFlag) return renderMonthChipBody(it);
+    if (!it.addressFlag && !it.conflicts?.length) return renderMonthChipBody(it);
     return (
       <div key={it.key}>
         {renderMonthChipBody(it)}
-        <div style={{ marginBottom: 3 }}>
-          <AddressFlagBadge flag={it.addressFlag} compact />
-        </div>
+        {it.addressFlag && (
+          <div style={{ marginBottom: 3 }}>
+            <AddressFlagBadge flag={it.addressFlag} compact />
+          </div>
+        )}
+        {it.conflicts?.length ? (
+          <div style={{ marginBottom: 3 }}>
+            <ConflictBadge conflicts={it.conflicts} compact />
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -627,6 +635,7 @@ export default function CalendarClient({
                           {isDrive(it) && it.drive?.minutes != null ? ` · ${fmtDur(it.drive.minutes)}` : ""}
                           {it.drive?.tight && <div style={{ fontWeight: 700 }}>{it.drive.tight}</div>}
                           {it.addressFlag && <div><AddressFlagBadge flag={it.addressFlag} compact /></div>}
+                          {it.conflicts?.length ? <div><ConflictBadge conflicts={it.conflicts} compact /></div> : null}
                         </div>
                       );
                     })}

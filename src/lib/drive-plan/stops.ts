@@ -21,11 +21,24 @@ export function visitPeople(v: { assignedTo: string; attendees?: readonly string
   return out;
 }
 
-export function isVisitIcsCopy(
-  ev: { id: string; iCalUID: string },
-  visits: ReadonlyArray<{ id: string; googleEventId?: string | null }>
-): boolean {
-  return visits.some((v) => ev.iCalUID === `sv-${v.id}@peak-app` || (!!v.googleEventId && v.googleEventId === ev.id));
+type CopySourceVisit = { id: string; googleEventId?: string | null; eventIds?: readonly string[] | null };
+export type VisitCopyIndex = { has(ev: { id: string; iCalUID: string }): boolean };
+
+/** Every visit's .ics UID and calendar-copy event ids in two Sets: build once,
+ *  then each event is one lookup instead of a scan over every visit. */
+export function visitCopyIndex(visits: ReadonlyArray<CopySourceVisit>): VisitCopyIndex {
+  const uids = new Set<string>();
+  const ids = new Set<string>();
+  for (const v of visits) {
+    uids.add(`sv-${v.id}@peak-app`);
+    if (v.googleEventId) ids.add(v.googleEventId);
+    for (const id of v.eventIds ?? []) if (id) ids.add(id);
+  }
+  return { has: (ev) => uids.has(ev.iCalUID) || ids.has(ev.id) };
+}
+
+export function isVisitIcsCopy(ev: { id: string; iCalUID: string }, visits: ReadonlyArray<CopySourceVisit>): boolean {
+  return visitCopyIndex(visits).has(ev);
 }
 
 export type StopSourceVisit = {
@@ -36,6 +49,8 @@ export type StopSourceVisit = {
   stage: string;
   people: string[];
   googleEventId?: string | null;
+  /** Spec 2026-10-09 site-visit scheduling — every person's direct calendar copy of the visit. */
+  eventIds?: string[] | null;
   address: AddressState;
 };
 
@@ -68,6 +83,7 @@ export function stopsForDay(args: {
   events: StopSourceEvent[];
 }): DriveStop[] {
   const out: DriveStop[] = [];
+  const copies = visitCopyIndex(args.visits);
   for (const v of args.visits) {
     if (!v.people.includes(args.person) || v.startAt == null) continue;
     // A stored "scheduled" visit reads "done" once it has ended
@@ -79,7 +95,7 @@ export function stopsForDay(args: {
   for (const e of args.events) {
     if (e.allDay || e.selfDeclined || e.peakDriveKey) continue;
     if (!isPhysicalLocation(e.location)) continue;
-    if (isVisitIcsCopy(e, args.visits)) continue;
+    if (copies.has(e)) continue;
     if (chicagoDayKey(e.startMs) !== args.dayKey) continue;
     out.push({
       key: `g:${e.id}`,

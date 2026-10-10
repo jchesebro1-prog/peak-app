@@ -7,6 +7,8 @@ import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
+import { MeetingsCard } from "@/components/meetings/meetings-card";
+import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../../recordings/data";
@@ -51,6 +53,8 @@ import { companyPerkPanel } from "@/lib/stores/reward-perks";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
 import { DeleteVisitButton } from "../delete-visit-button";
+import { EditVisitButton } from "@/components/visit-booking/visit-edit-button";
+import { VisitConflictChip, VisitConflictProvider } from "@/components/visit-booking/visit-conflict-chips";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -133,7 +137,7 @@ export default async function CustomerDetailPage({
     commsByCustomer(id),
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }),
+    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id),
     getSettings(),
     getRewardsProgram(),
   ]);
@@ -247,6 +251,16 @@ export default async function CustomerDetailPage({
   }
   // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
   const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
+  // Spec 2026-10-09 site-visit scheduling — Edit + conflict badges. A stored
+  // "scheduled" visit past its end already reads "done" (deriveVisitStage).
+  const teamNames = users.map((u) => u.name);
+  const conflictVisits = visits
+    .filter((v) => v.stage === "scheduled" && v.startAt != null)
+    .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
+    .slice(0, 10);
+  const conflictIds = conflictVisits.map((v) => v.id);
+  // Changes when an edit lands, so the badges are asked for again.
+  const conflictVersion = conflictVisits.map((v) => `${v.id}:${v.updatedAt}`).join("|");
 
   /* ---- portal access grants (IDEAS #47) ---- */
   const portalGrants = (await grantsFor(cust.id)).map((g) => ({
@@ -842,6 +856,7 @@ export default async function CustomerDetailPage({
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
                   Site visits
                 </div>
+                <VisitConflictProvider ids={conflictIds} version={conflictVersion}>
                 <ShortList
                   searchPlaceholder="Search site visits…"
                   items={visits.map((v) => {
@@ -870,7 +885,24 @@ export default async function CustomerDetailPage({
                             {sm.label}
                           </span>
                           <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
-                          <span style={{ marginLeft: "auto" }}>
+                          <VisitConflictChip id={v.id} />
+                          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+                            {v.stage === "scheduled" && v.startAt != null && v.endAt != null ? (
+                              <EditVisitButton
+                                visit={{
+                                  id: v.id,
+                                  customerId: v.customerId,
+                                  locationId: v.locationId,
+                                  address: v.address,
+                                  title: [v.reason, v.venue].filter(Boolean).join(" · "),
+                                  startAt: v.startAt,
+                                  endAt: v.endAt,
+                                  assignedTo: v.assignedTo,
+                                  attendees: v.attendees,
+                                }}
+                                team={teamNames}
+                              />
+                            ) : null}
                             <DeleteVisitButton id={v.id} />
                           </span>
                         </div>
@@ -879,6 +911,7 @@ export default async function CustomerDetailPage({
                             ? new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
                             : v.preferredTiming || "Not scheduled yet"}
                           {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
+                          {v.attendees.length ? " + " + v.attendees.join(", ") : ""}
                           {v.invite?.sentAt ? " · invite sent" : ""}
                         </div>
                         {v.stage !== "done" && va && va.status !== "verified" && (
@@ -891,11 +924,16 @@ export default async function CustomerDetailPage({
                   })}
                   searchText={visits.map((v) => [v.reason, v.venue, VISIT_STAGE_META[v.stage]?.label, v.assignedTo].filter(Boolean).join(" "))}
                 />
+                </VisitConflictProvider>
               </div>
             )}
 
             {/* ---- recordings (Krisp spec §6) — every recording under this customer ---- */}
             <CustomerRecordingsCard customerId={cust.id} />
+
+            {/* ---- #323 Krisp meetings linked here + what the customer owes us ---- */}
+            <MeetingsCard kind="company" id={cust.id} viewerId={me.id} />
+            <WaitingOnCustomerCard by="customerId" ids={[cust.id]} />
 
 
           </div>

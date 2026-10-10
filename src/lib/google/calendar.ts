@@ -108,6 +108,11 @@ export type CalendarEvent = {
   meetingUrl: string;
   /** The signed-in account declined it (spec: declined events aren't stops). */
   selfDeclined: boolean;
+  /** Spec 2026-10-09 site-visit scheduling — the signed-in account's own
+   *  responseStatus ("accepted" | "tentative" | "needsAction" | "declined"),
+   *  "" when it has no attendee row (its own event). Only accepted or own
+   *  events count as busy. */
+  selfResponse?: string;
   /** Set only on the app's own drive events (private peakDrive = "1"). */
   peakDriveKey: string;
   peakDriveDay: string;
@@ -178,6 +183,7 @@ export function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEven
     .map((e) => {
       const priv = e.extendedProperties?.private || {};
       const ours = priv[DRIVE_PROP] === "1";
+      const self = (e.attendees || []).find((a) => a.self);
       return {
         id: e.id,
         iCalUID: e.iCalUID || "",
@@ -189,6 +195,7 @@ export function toCalendarEvents(items: GoogleEvent[] | undefined): CalendarEven
         htmlLink: e.htmlLink || "",
         meetingUrl: findMeetingLink(e.location, e.description),
         selfDeclined: (e.attendees || []).some((a) => a.self && a.responseStatus === "declined"),
+        selfResponse: self?.responseStatus || "",
         peakDriveKey: ours ? priv[DRIVE_KEY_PROP] || "" : "",
         peakDriveDay: ours ? priv[DRIVE_DAY_PROP] || "" : "",
       };

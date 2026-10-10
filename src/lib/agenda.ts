@@ -1,6 +1,9 @@
 import type { FixTarget } from "@/lib/address-verify/types";
 import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
+import { visitPeople } from "@/lib/drive-plan/stops";
 import { allVisits } from "@/lib/stores/site-visits";
+import { visitEventIds } from "@/lib/visit-invite-plan";
+import type { Conflict } from "@/lib/visit-plan/check";
 
 /**
  * Shared agenda assembly (D77/D81): the signed-in user's Google Calendar
@@ -59,6 +62,9 @@ export type AgendaItem = {
   };
   /** Spec 2026-10-09 — this visit/event's address isn't verified. */
   addressFlag?: { text: string; fix: FixTarget | null };
+  /** Spec 2026-10-09 site-visit scheduling — conflicts on one of MY visits
+   *  (set on its "v-" row and on its Google copies). Flags only. */
+  conflicts?: Conflict[];
 };
 
 /** The drive sync's own Google events (private peakDrive tag) are left out
@@ -181,12 +187,13 @@ export async function loadAgendaRange(
 
   const allVisitsList = await allVisits();
   for (const v of allVisitsList) {
-    if (v.assignedTo !== me) continue;
+    // Spec 2026-10-09 site-visit scheduling — the lead's AND every attendee's agenda.
+    if (!visitPeople(v).includes(me)) continue;
     // #34: unscheduled requests (null startAt) have no agenda slot yet.
     if (v.startAt == null) continue;
     const endMs = v.endAt ?? v.startAt;
     if (endMs < minMs || v.startAt > maxMs) continue;
-    if (v.googleEventId && fetchedIds.has(v.googleEventId)) continue;
+    if (visitEventIds(v).some((id) => fetchedIds.has(id))) continue;
     if (fetchedIcal.has("sv-" + v.id + "@peak-app")) continue;
     items.push({
       key: "v-" + v.id,
@@ -215,6 +222,26 @@ export async function loadAgendaRange(
     for (const it of items) {
       const f = layer.addressFlags.get(it.key);
       if (f) it.addressFlag = f;
+    }
+    // Spec 2026-10-09 site-visit scheduling — conflict badges on my visits,
+    // from the same plans (my own day only; no one else's calendar is read).
+    try {
+      const [{ agendaConflicts }, prefs] = await Promise.all([import("@/lib/visit-plan/agenda"), import("@/lib/stores/schedule-prefs")]);
+      const [settings, hours] = await Promise.all([prefs.getSchedulingSettings(), prefs.workHoursFor(userId)]);
+      const conflicts = agendaConflicts({
+        me,
+        plans: layer.plans,
+        visits: allVisitsList,
+        events: calendarOn ? googleEvents : null,
+        hours,
+        dailyDriveLimitMin: settings.dailyDriveLimitMin,
+      });
+      for (const it of items) {
+        const c = conflicts.get(it.key);
+        if (c?.length) it.conflicts = c;
+      }
+    } catch (err) {
+      console.error("[agenda] conflict badges failed:", err);
     }
   } catch (err) {
     console.error("[agenda] drive layer failed:", err);

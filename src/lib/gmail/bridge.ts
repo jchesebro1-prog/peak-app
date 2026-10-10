@@ -5,7 +5,7 @@ import {
   nextPrefixedId,
   patchDoc,
 } from "@/db/doc-store";
-import { allUsers } from "@/lib/users";
+import { allUsers, getUser } from "@/lib/users";
 import {
   DEFAULT_DOMAIN,
   boxAddress,
@@ -50,6 +50,8 @@ import {
   type GmailLabelEvent,
 } from "./api";
 import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
+import { icsMimeType } from "@/lib/ics";
+import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
@@ -434,8 +436,13 @@ async function syncLabels(key: MailboxKey): Promise<void> {
 /**
  * Email a site-visit .ics invite to the assignee (D76 decisions B/E: the
  * scheduler's own connected mailbox sends it; no customer is ever an
- * attendee). Sender preference: the scheduler's personal mailbox, else the
- * first connected shared box. Returns the sent ids for stamping on the visit
+ * attendee). Sender preference (pickInviteMailbox): for an update or
+ * cancellation, the mailbox that sent the person's invite while it is still
+ * connected (the ORGANIZER must not change); else the scheduler's personal
+ * mailbox, else the first connected shared box. The mailbox actually used is
+ * returned so the visit records it; a preferred mailbox whose owner is inactive
+ * is ignored, and an authorization failure from it retries once from the usual
+ * pick (sendWithMailboxFallback). Returns the sent ids for stamping on the visit
  * record (D76-I), or null when no mailbox can send. The X-Peak-Site-Visit
  * header keeps the import poll from re-recording the mail as an inbox thread.
  */
@@ -445,33 +452,42 @@ export async function sendSiteVisitInvite(opts: {
   toAddr: string;
   subject: string;
   body: string;
-  icsText: string;
+  /** the mailbox that sent this person's original invite (updates / cancels) */
+  preferMailbox?: string | null;
+  /** builds the .ics with the sending mailbox as its ORGANIZER */
+  ics: (organizerAddr: string) => string;
 }): Promise<{ gmailId: string; gmailThreadId: string; fromMailbox: string } | null> {
   const keys = await connectedMailboxKeys();
-  const personal = opts.schedulerUserId ? "personal:" + opts.schedulerUserId : null;
-  const key =
-    personal && keys.includes(personal)
-      ? personal
-      : keys.find((k) => !isPersonalKey(k)) ?? null;
-  if (!key) return null;
-  const info = await getConnectionInfo(key);
-  if (!info) return null;
-  const raw = buildRaw({
-    from: info.address,
-    to: opts.toAddr,
-    subject: opts.subject,
-    body: opts.body,
-    attachments: [
-      {
-        name: "site-visit.ics",
-        mime: "text/calendar",
-        dataBase64: Buffer.from(opts.icsText, "utf8").toString("base64"),
-      },
-    ],
-    extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },
+  // The preferred (original-sender) mailbox is ignored when its owner is no
+  // longer an active user; a token / grant failure sending from it retries once
+  // from the usual pick. The mailbox that actually sent is what gets recorded.
+  const isActive = async (k: string) => {
+    if (!k.startsWith("personal:")) return true;
+    const u = await getUser(k.slice("personal:".length));
+    return !!u && u.status === "active";
+  };
+  const out = await sendWithMailboxFallback(keys, opts, isActive, async (key) => {
+    const info = await getConnectionInfo(key);
+    if (!info) return null;
+    const icsText = opts.ics(info.address);
+    const raw = buildRaw({
+      from: info.address,
+      to: opts.toAddr,
+      subject: opts.subject,
+      body: opts.body,
+      attachments: [
+        {
+          name: "site-visit.ics",
+          mime: icsMimeType(icsText),
+          dataBase64: Buffer.from(icsText, "utf8").toString("base64"),
+        },
+      ],
+      extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },
+    });
+    const sent = await sendRaw(key, raw);
+    return { gmailId: sent.id, gmailThreadId: sent.threadId, fromMailbox: key };
   });
-  const sent = await sendRaw(key, raw);
-  return { gmailId: sent.id, gmailThreadId: sent.threadId, fromMailbox: key };
+  return out ? out.result : null;
 }
 
 /* ---- two-way archive (D74) ------------------------------------------------ */
@@ -543,10 +559,10 @@ async function buildImportDedup(): Promise<Set<string>> {
       if (m.gmailId) known.add(m.gmailId);
     }
   }
-  for (const d of await listDocs<{ id: string; invite?: { gmailId?: string } }>(
-    "site_visits"
-  )) {
-    if (d.invite?.gmailId) known.add(d.invite.gmailId);
+  for (const d of await listDocs<InviteVisitShape>("site_visits")) {
+    // Spec 2026-10-09 site-visit scheduling — every invite, update and
+    // cancellation sent per recipient, plus the old single stamp.
+    for (const id of visitInviteGmailIds(d)) known.add(id);
   }
   return known;
 }

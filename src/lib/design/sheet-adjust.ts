@@ -203,6 +203,8 @@ export type SheetRefsDoc = {
   calibrations?: Array<{ docId: string; page: number }>;
   intake?: { planSheetId?: string; baseSheetId?: string } | null;
   drawingSet?: { excluded?: string[] } | null;
+  /** #321: default riser level per sheet id. */
+  sheetLevels?: Record<string, string>;
 };
 
 export type PageContent = { devices: number; spaces: number; wires: number; scale: boolean };
@@ -260,7 +262,7 @@ export function allPagesLocked(locks: Record<number, string>, pageCount: number)
  * Point every stored reference to `oldId` at `newId`, in place, on a doc
  * patchDoc just read: the sheet order (same position), placements, spaces,
  * routes, calibrations (`docId`), the intake's plan view and drawing-set
- * exclusion keys `plan:<system>:<sheetId>:<page>`. The adjust gate has
+ * exclusion keys `plan:<system>:<sheetId>:<page>`, the sheet's default riser level. The adjust gate has
  * already guaranteed nothing sits on a page whose frame changed, so every
  * reference moves. Revisions are history and are never touched; the base
  * sheet id is never remapped (the base sheet is never adjusted).
@@ -274,6 +276,11 @@ export function remapSheetRefs(p: SheetRefsDoc, oldId: string, newId: string): v
   if (p.routes) p.routes = move(p.routes);
   if (p.calibrations) p.calibrations = p.calibrations.map((c) => (c.docId === oldId ? { ...c, docId: newId } : c));
   if (p.intake?.planSheetId === oldId) p.intake.planSheetId = newId;
+  if (p.sheetLevels && oldId in p.sheetLevels) {
+    const next = { ...p.sheetLevels, [newId]: p.sheetLevels[oldId] };
+    delete next[oldId];
+    p.sheetLevels = next;
+  }
   if (p.drawingSet?.excluded) {
     p.drawingSet.excluded = p.drawingSet.excluded.map((k) => {
       const parts = k.split(":");

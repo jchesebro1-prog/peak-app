@@ -10,6 +10,7 @@ import type { Pipelines } from "@/lib/pipelines";
 import type { DocumentCategory } from "@/lib/document-categories";
 import type { ReviewLimits } from "@/lib/review-limits";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
+import type { SchedulingSettings } from "@/lib/visit-plan/settings";
 
 export type UserVM = {
   id: string;
@@ -119,6 +120,8 @@ export type SettingsData = {
   estimateOutput: EstimateOutputDefaults;
   /** Spec 2026-10-09 — Settings → Field → Drive time. */
   driveDefaults: { driveBufferMin: number };
+  /** Spec 2026-10-09 site-visit scheduling — Settings → Field. */
+  scheduling: SchedulingSettings;
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id — the editor's

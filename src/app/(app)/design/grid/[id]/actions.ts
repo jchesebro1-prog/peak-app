@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { cleanPlacementTag, isTagPatch, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { clamp01, findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
 import { clampConfigDims, venueOf, type QuickScopeInputs, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
 import { clampHouseFieldsFor } from "@/lib/design/venue-templates/house-dims";
@@ -10,7 +11,7 @@ import {
   addOption,
   addPlacement,
   addRevision,
-  addRoute,
+  addRouteWithId,
   addSpace,
   clearSheetCalibration,
   generateBaseSheet,
@@ -27,6 +28,7 @@ import {
   setPlacementsDesignator,
   renumberDesignators,
   pastePlacements,
+  setPlacementsTag,
   restoreItems,
   type GridPlacement,
   type GridRoute,
@@ -40,6 +42,9 @@ import {
   renameOption,
   renameProject,
   renameSpace,
+  setLevels,
+  setSpaceLevel,
+  setSheetLevel,
   restoreRevision,
   setOptionQuote,
   setPlacementCategory,
@@ -879,7 +884,7 @@ export async function pastePlacementsAction(
     sheetId: string;
     page: number;
     optionId: string;
-    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number }[];
+    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag }[];
     routeIds: string[];
   }
 ): Promise<{ ok: true; placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | { ok: false; error: string }> {
@@ -892,6 +897,7 @@ export async function pastePlacementsAction(
         isObj(it) && isStr(it.srcId) && isFiniteNum(it.x) && isFiniteNum(it.y) && isPartId(it.partId) &&
         (it.category === undefined || isStr(it.category)) &&
         (it.qty === undefined || isFiniteNum(it.qty)) &&
+        (it.tag === undefined || isObj(it.tag)) &&
         (it.curtain === undefined || isObj(it.curtain))
     )
   )
@@ -921,6 +927,7 @@ export async function pastePlacementsAction(
       ...(it.category !== undefined ? { category: it.category } : {}),
       ...(it.qty !== undefined ? { qty: it.qty } : {}),
       ...(curtain ? { curtain } : {}),
+      ...(!curtain && it.tag ? { tag: it.tag } : {}),
     });
   }
   const r = await pastePlacements(projectId, {
@@ -960,6 +967,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
   const autoOrigin = raw.autoOrigin === undefined ? null : sanitizeAutoOrigin(raw.autoOrigin);
   // #320: undo restore keeps the designator; a curtain never carries one.
   const designator = curtain ? null : cleanDesignator(raw.designator);
+  // #321: riser tag overrides come back through cleanPlacementTag; never on a curtain.
+  const tag = curtain ? undefined : cleanPlacementTag(raw.tag);
   return {
     id: raw.id,
     sheetId: raw.sheetId,
@@ -969,6 +978,7 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
     partId: curtain ? curtain.fabricSku : raw.partId,
     ...(category ? { category } : {}),
     ...(designator ? { designator } : {}),
+    ...(tag ? { tag } : {}),
     ...(curtain ? { curtain } : {}),
     ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
     ...(seededFrom ? { seededFrom } : {}),
@@ -981,7 +991,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
 }
 
 /** Undo of a batch removal ONLY: puts the removed devices back with their
- *  original ids, plus the riser links/conduits that went with them. The
+ *  original ids, plus the riser links/conduits and conduit-riser runs/tags
+ *  (#321) that went with them. The
  *  bundle round-trips through the client, so every record is rebuilt and
  *  re-validated here, and the riser half is cleaned by the store. Refused,
  *  whole, when any record fails or the design changed since. */
@@ -1010,7 +1021,9 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
   const cables = await Promise.all([...cableIds].map((id) => (isPartId(id) ? partForGrid(id) : Promise.resolve(null))));
   if (cables.some((part) => !part || !isPerLengthUnit(part.unit)))
     return { ok: false, error: "Couldn't undo — a cable in it is no longer in the Grid library." };
-  const r = await restoreItems(projectId, { placements, riser });
+  // #321: the conduit half is cleaned (live options, own devices, cr- ids) by the store.
+  const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;
+  const r = await restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}) });
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);
@@ -1044,6 +1057,23 @@ export async function setDesignatorsAction(
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   return { ok: true, previous: r.value };
+}
+
+/** Patch many devices' riser tag overrides in one write (#321). Each item is
+ *  a per-field patch (absent = leave alone, string = set, null = remove), so a
+ *  fast second edit never overwrites the first. `previous` holds the patches
+ *  that undo it; curtains are refused (store). */
+export async function setTagFieldsAction(
+  projectId: string,
+  items: { id: string; patch: TagPatch }[]
+): Promise<{ ok: true; previous: { id: string; patch: TagPatch }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && isTagPatch(it.patch)))
+    return { ok: false, error: BATCH_INVALID };
+  const r = await setPlacementsTag(projectId, items.map((it) => ({ id: it.id, patch: it.patch })));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  return { ok: true, previous: r.value.previous };
 }
 
 function cleanRenumberTarget(raw: unknown): RenumberTarget | null {
@@ -1142,6 +1172,38 @@ export async function renameSpaceAction(
   return { ok: true };
 }
 
+/* ------------------------------ levels (#321) ------------------------------ */
+
+const riserPath = (projectId: string) => `/design/grid/${projectId}/conduit-riser`;
+
+/** Replace the riser level list; a removed level is cleared off spaces and sheets. */
+export async function saveLevelsAction(projectId: string, levels: unknown): Promise<Result> {
+  await requireUser();
+  const p = await setLevels(projectId, levels);
+  if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(riserPath(projectId));
+  return { ok: true };
+}
+
+export async function setSpaceLevelAction(projectId: string, spaceId: string, levelId: string | null): Promise<Result> {
+  await requireUser();
+  const p = await setSpaceLevel(projectId, spaceId, levelId);
+  if (!p) return { ok: false, error: "That space or level isn't on this design any more — refresh and pick again." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(riserPath(projectId));
+  return { ok: true };
+}
+
+export async function setSheetLevelAction(projectId: string, sheetId: string, levelId: string | null): Promise<Result> {
+  await requireUser();
+  const p = await setSheetLevel(projectId, sheetId, levelId);
+  if (!p) return { ok: false, error: "That sheet or level isn't on this design any more — refresh and try again." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(riserPath(projectId));
+  return { ok: true };
+}
+
 export async function removeSpaceAction(
   projectId: string,
   spaceId: string
@@ -1224,7 +1286,7 @@ export async function addRouteAction(
     fromPlacementId?: string;
     toPlacementId?: string;
   }
-): Promise<Result> {
+): Promise<{ ok: true; routeId: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if ((input.points || []).length < 2)
     return { ok: false, error: "A wire run needs at least two points." };
@@ -1271,14 +1333,15 @@ export async function addRouteAction(
     }
   }
 
-  const p = await addRoute(projectId, {
+  const added = await addRouteWithId(projectId, {
     ...input,
     connectionType,
     by: user.name,
   });
-  if (!p) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
+  if (!added) return { ok: false, error: await sheetGoneOr(projectId, input.sheetId, "Design not found.") };
   revalidatePath(editorPath(projectId));
-  return { ok: true };
+  // The id the plan's "Add to the riser?" prompt asks about (#321).
+  return { ok: true, routeId: added.routeId };
 }
 
 export async function removeRouteAction(

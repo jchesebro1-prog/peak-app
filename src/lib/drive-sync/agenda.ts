@@ -7,10 +7,11 @@
 import type { FixTarget } from "@/lib/address-verify/types";
 import type { AgendaItem } from "@/lib/agenda";
 import { dayKeysBetween } from "@/lib/drive-plan/day";
-import { planDriveDays, type DriveLoadDeps } from "@/lib/drive-plan/load";
+import { planDriveDays, type DriveDayPlan, type DriveLoadDeps } from "@/lib/drive-plan/load";
 import { FLAG_TEXT, type DriveLeg } from "@/lib/drive-plan/plan";
 import type { CalendarEvent } from "@/lib/google/calendar";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
+import { visitEventIds } from "@/lib/visit-invite-plan";
 import { driveEventTitle } from "./diff";
 
 export type AddressFlag = { text: string; fix: FixTarget | null };
@@ -46,8 +47,8 @@ export async function driveAgendaLayer(args: {
   maxMs: number;
   googleEvents: CalendarEvent[] | null;
   deps?: Partial<DriveLoadDeps>;
-}): Promise<{ items: AgendaItem[]; addressFlags: Map<string, AddressFlag> }> {
-  // One site_visits read for the planner AND the googleEventId lookup below.
+}): Promise<{ items: AgendaItem[]; addressFlags: Map<string, AddressFlag>; plans: DriveDayPlan[] }> {
+  // One site_visits read for the planner AND the event-id lookup below.
   const readVisits = args.deps?.visits ?? allVisits;
   let visitsOnce: Promise<SiteVisit[]> | null = null;
   const visits = () => (visitsOnce ??= readVisits());
@@ -63,10 +64,11 @@ export async function driveAgendaLayer(args: {
   const inWindow = (startMs: number, endMs: number) => endMs >= args.minMs && startMs <= args.maxMs;
   const items = plans.flatMap((p) => p.legs.map(driveItemFromLeg)).filter((i) => inWindow(i.startMs, i.endMs));
   const addressFlags = new Map<string, AddressFlag>();
-  // A visit pushed straight to Google (googleEventId) shows as that event.
+  // A visit pushed straight to Google shows as that event — the lead's copy
+  // (googleEventId) or any attendee's own copy (their recorded event id).
   const needVisits = (args.googleEvents ?? []).length > 0 && plans.some((p) => p.stops.some((s) => s.kind === "visit" && s.address.status !== "verified"));
-  const eventIdOf = new Map<string, string>();
-  if (needVisits) for (const v of await visits()) if (v.googleEventId) eventIdOf.set(v.id, v.googleEventId);
+  const eventIdsOf = new Map<string, Set<string>>();
+  if (needVisits) for (const v of await visits()) eventIdsOf.set(v.id, new Set(visitEventIds(v)));
   for (const p of plans) {
     for (const s of p.stops) {
       if (s.address.status === "verified" || !inWindow(s.startMs, s.endMs)) continue;
@@ -74,11 +76,11 @@ export async function driveAgendaLayer(args: {
       if (s.kind === "visit") {
         const id = s.key.slice("sv:".length);
         addressFlags.set("v-" + id, flag);
-        for (const e of args.googleEvents ?? []) if (e.iCalUID === `sv-${id}@peak-app` || e.id === eventIdOf.get(id)) addressFlags.set("g-" + e.id, flag);
+        for (const e of args.googleEvents ?? []) if (e.iCalUID === `sv-${id}@peak-app` || eventIdsOf.get(id)?.has(e.id)) addressFlags.set("g-" + e.id, flag);
       } else {
         addressFlags.set("g-" + s.key.slice("g:".length), flag);
       }
     }
   }
-  return { items, addressFlags };
+  return { items, addressFlags, plans };
 }

@@ -4,6 +4,7 @@ import { checkMailIfStale } from "@/lib/stores/comms";
 import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
 import { reconcileRecordings } from "@/lib/krisp/reconcile";
 import { archiveRecordings } from "@/lib/krisp/archive";
+import { syncAllMeetings } from "@/lib/meetings/sync";
 import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
@@ -45,6 +46,7 @@ export const maxDuration = 60;
  *
  * Morning triage adds the morning snapshot build the same way (its midday
  * build is /api/triage/build, the second daily cron).
+ * #323 adds the Krisp meeting sync (syncAllMeetings) the same way.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -117,5 +119,16 @@ export async function GET(req: Request): Promise<NextResponse> {
     drivePhotos = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, vendors, triage, drivePhotos });
+  // #323 — Krisp meeting sync for every connected rep (rolling 14-day window), LAST so a slow Krisp call can't
+  // starve the vendor and drive-photo riders: whatever is left of a 40 s cutoff (≤ 20 s) — a Krisp call's own
+  // 20 s timeout still ends under the 60 s ceiling — and every rep skipped when under 5 s is left. Home loads
+  // and the Inbox tick sync too, so a skipped cron run only delays. Own try/catch like the other riders.
+  let meetings: Awaited<ReturnType<typeof syncAllMeetings>> | { error: string };
+  try {
+    meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, 40_000 - (Date.now() - started))));
+  } catch (err) {
+    meetings = { error: (err as Error).message };
+  }
+
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, triage, drivePhotos });
 }

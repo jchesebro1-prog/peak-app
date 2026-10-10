@@ -16,6 +16,7 @@ import type { Office } from "@/lib/settings";
 import { driveBufferFor, getStayOvers } from "@/lib/stores/schedule-prefs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { baseOffice } from "@/lib/travel-origin";
+import { visitEventIds } from "@/lib/visit-invite-plan";
 import { getUser } from "@/lib/users";
 import { addDays, chicagoDayStart, isDayKey } from "./day";
 import { dayDriveTotal, neededRoutes, pairKey, planDay, type DriveBase, type DriveLeg, type PlanDayInput } from "./plan";
@@ -174,6 +175,7 @@ export async function planDriveDays(args: {
     stage: v.stage,
     people: visitPeople(v),
     googleEventId: v.googleEventId ?? null,
+    eventIds: visitEventIds(v),
     address: vStates.get(v.id) ?? unresolved(v.address || ""),
   }));
   const eventSrc: StopSourceEvent[] = evs.map((e) => ({

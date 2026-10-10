@@ -225,6 +225,7 @@ export function ProjectsView({
   templateSets,
   pipelines,
   canDelete = false,
+  meetingsSlot = null,
 }: {
   projects: ProjectRecord[];
   pending: QuoteLike[];
@@ -245,6 +246,8 @@ export function ProjectsView({
   pipelines: Pipelines;
   /** #277 — Delete (list cards + detail header) only for users with `create`. */
   canDelete?: boolean;
+  /** #323 — the server-rendered Meetings card for the selected project (Overview tab). */
+  meetingsSlot?: ReactNode;
 }) {
   const custName = (p: { customerId: string | null; customer: string }) =>
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
@@ -841,6 +844,7 @@ export function ProjectsView({
               templateSets={templateSets}
               pipelines={pipelines}
               canDelete={canDelete}
+              meetingsSlot={meetingsSlot}
             />
           ) : (
             <div
@@ -901,6 +905,7 @@ function ProjectDetail({
   templateSets,
   pipelines,
   canDelete,
+  meetingsSlot,
 }: {
   p: ProjectRecord;
   tab: string;
@@ -915,6 +920,7 @@ function ProjectDetail({
   templateSets: TaskTemplateSetRecord[];
   pipelines: Pipelines;
   canDelete: boolean;
+  meetingsSlot: ReactNode;
 }) {
   const { colorOf, initialsOf } = makeIdentityLookup(identity);
   // The record's own pipeline — an order walks the order pipeline, a job on a
@@ -1220,6 +1226,7 @@ function ProjectDetail({
             templateSets={templateSets}
           />
         )}
+        {curTab === "overview" && meetingsSlot}
         {curTab === "procurement" && <ProcurementTab p={p} />}
         {curTab === "deliveries" && <DeliveriesTab p={p} />}
         {curTab === "crew" && !isOrder && (
