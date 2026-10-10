@@ -1598,7 +1598,6 @@ export async function renumberDesignators(
 export async function ensureDesignators(project: GridProject, preload?: DesignatorPreload): Promise<GridProject> {
   if (!needsDesignators(project.placements || [])) return project;
   const { codeOf } = await designatorContext((project.placements || []).map((pl) => pl.partId), preload);
-  let wrote = false as boolean;
   const updated = await patchDoc<GridProject>("grid_projects", project.id, (p) => {
     if (!needsDesignators(p.placements || [])) return;
     const doc = ensureOptions(p);
@@ -1609,9 +1608,10 @@ export async function ensureDesignators(project: GridProject, preload?: Designat
       return stripped;
     });
     for (const o of doc.options) stampDesignators(doc, o.id, codeOf);
-    wrote = true;
   });
-  return updated && wrote ? ensureOptions(updated) : project;
+  // A concurrent numbering can land first (the patch then finds nothing to
+  // do): hand back the doc the patch read, never the stale one given.
+  return updated ? ensureOptions(updated) : project;
 }
 
 /** Set (or replace) the scale for one page of one sheet. null = the project

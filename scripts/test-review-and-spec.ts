@@ -60327,11 +60327,17 @@ async function designators320StoreChecks(): Promise<void> {
   const stripped = await proj();
   const ensured = await G.ensureDesignators(stripped);
   const optSlice = (p: G320Project, o: string) => p.placements.filter((pl) => pl.optionId === o);
+  const J320 = (v: unknown) => JSON.stringify(v);
   ok(ensured !== stripped && ensured.placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)) &&
      D.duplicates(optSlice(ensured, opt)).size === 0 && alt.ok && D.duplicates(optSlice(ensured, alt.option.id)).size === 0 && ensured.updatedAt === stripped.updatedAt,
     "#320 ensureDesignators numbers every device of every option, no duplicates, without bumping updatedAt");
   const reread = await proj();
   ok((await G.ensureDesignators(reread)) === reread, "#320 ensureDesignators is a no-op (same object, no write) when nothing is missing");
+  // A stale copy (read before a concurrent numbering landed) gets the stored, numbered doc back — not itself.
+  const raced = await G.ensureDesignators(stripped);
+  ok(raced !== stripped && raced.placements.every((pl) => (pl.curtain ? pl.designator === undefined : !!pl.designator)) &&
+     J320(raced.placements.map((pl) => pl.designator ?? "")) === J320(reread.placements.map((pl) => pl.designator ?? "")),
+    "#320 ensureDesignators: a concurrent numbering that landed first is returned, never the stale project");
 
   // Two adds at once never hand out the same number among what landed.
   await Promise.all([place(LIGHT, 0.9, 0.1), place(LIGHT, 0.9, 0.2)]);
