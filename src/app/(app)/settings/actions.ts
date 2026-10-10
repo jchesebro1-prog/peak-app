@@ -491,9 +491,9 @@ export async function searchVenueAddressAction(query: string): Promise<VenueAddr
 
 /** Locate ONE venue from the sidebar (retry / pick / pin), then route it. */
 export async function locateVenueAction(input: import("@/lib/venue-locate").LocateInput) {
-  await requirePerm("manage_users");
+  const user = await requirePerm("manage_users");
   const { locateVenue } = await import("@/lib/venue-locate");
-  const r = await locateVenue(input);
+  const r = await locateVenue(input, { by: user.id });
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }

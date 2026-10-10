@@ -239,6 +239,17 @@ async function main() {
   assert.ok(await coordsOf("st-suite"), "suite address geocodes once the suite is dropped");
   assert.ok(await coordsOf("st-pobox"), "PO-box-only venue geocodes to its town");
   assert.equal(r2.geocodedCity, 1, "the PO-box venue is counted as city precision, not building");
+  {
+    // Address verification (spec 2026-10-09): a geocode verifies only with a
+    // house number in the venue's own street line.
+    const [suite] = await db.select().from(sites).where(eq(sites.id, "st-suite"));
+    const [po] = await db.select().from(sites).where(eq(sites.id, "st-pobox"));
+    assert.equal(suite.geoStatus, "verified", "a geocoded house-numbered venue is stamped verified");
+    assert.equal(suite.geoSource, "geocode");
+    assert.ok(typeof suite.geoVerifiedAt === "number" && suite.geoVerifiedBy === null);
+    assert.equal(po.geoStatus, "needs_check", "a PO-box (no house number) geocode is needs_check, not verified");
+    assert.equal(po.geoVerifiedAt, null);
+  }
   console.log("PASS geo-backfill: street cleanup + PO box precision");
 
   /* ---- 3. postal city ≠ municipality: accept a nearby building, reject a far one ---- */

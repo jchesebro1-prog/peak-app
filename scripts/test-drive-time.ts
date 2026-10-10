@@ -2,6 +2,12 @@
    (docs/superpowers/specs/2026-10-09-address-verification-drive-time-design.md).
    Chained from test-review-and-spec.ts. Pure rules only so far; later tasks
    add the DB-backed checks here. */
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db";
+import { sites } from "@/db/schema";
+import { saveSite } from "@/lib/identity/sites";
+import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
+import { locateVenue } from "@/lib/venue-locate";
 import { addressKey, isPhysicalLocation } from "@/lib/address-verify/keys";
 import {
   backfillStatus,
@@ -9,7 +15,6 @@ import {
   geoStampForSave,
   placeAddressState,
   placeRowFromHit,
-  statusFromPrecision,
   statusOfFreeTextHit,
   venueAddressState,
   venueGeoStatus,
@@ -36,8 +41,6 @@ export async function driveTimeKeysChecks(ok: Ok): Promise<void> {
 }
 
 export async function driveTimeStateChecks(ok: Ok): Promise<void> {
-  ok(statusFromPrecision("building") === "verified" && statusFromPrecision("city") === "needs_check",
-    "drive-time: building-level geocode verifies; city/zip → needs_check");
   ok(statusOfFreeTextHit({ street: "123 Main St" }) === "verified" && statusOfFreeTextHit({ street: "Main St" }) === "needs_check" &&
      statusOfFreeTextHit({ street: "" }) === "needs_check" && statusOfFreeTextHit(null) === "unresolved",
     "drive-time: a free-text hit verifies only with a house number; no hit → unresolved");
@@ -47,6 +50,8 @@ export async function driveTimeStateChecks(ok: Ok): Promise<void> {
     "drive-time: road-only streets (numbered highways, ordinals, county/state roads) have no house number");
   ok(hasHouseNumber("123 Main St") && hasHouseNumber("N64W23760 Main St") && hasHouseNumber("123A Oak Rd") && hasHouseNumber("  45 5th Ave"),
     "drive-time: plain, lettered and Waukesha-grid house numbers count");
+  ok(!hasHouseNumber("I-94") && !hasHouseNumber("US-14 Frontage Rd") && !hasHouseNumber("CR12") && !hasHouseNumber("Hwy12") && !hasHouseNumber("WI-59") && !hasHouseNumber("Rte9"),
+    "drive-time: digit-bearing road lead tokens (I-94, US-14, CR12, Hwy12) are not house numbers");
   ok(statusOfFreeTextHit({ street: "US Highway 14" }) === "needs_check" && statusOfFreeTextHit({ street: "5th Ave" }) === "needs_check" &&
      statusOfFreeTextHit({ street: "N64W23760 Main St" }) === "verified",
     "drive-time: a road-only free-text hit is needs_check, not verified");
@@ -113,4 +118,50 @@ export async function driveTimeStateChecks(ok: Ok): Promise<void> {
     "drive-time: an unstamped row saved unchanged gets its backfill stamp (numeric vs text coords compare equal)");
   const fresh = geoStampForSave(null, { address: "", city: "Madison", lat: "43.07", lng: "-89.4" }, 99);
   ok(fresh.stamp.geoStatus === "needs_check" && fresh.stamp.geoVerifiedAt === null, "drive-time: a new city-level venue starts needs_check");
+}
+
+export async function driveTimeVenueStampChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const ID = "TESTdrive:site-1";
+  const CO = "TESTdrive:co";
+  // locateVenue warms an OSRM route after a fix — keep the suite offline.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("offline in test");
+  }) as typeof fetch;
+  try {
+    await saveSite({ id: ID, companyId: CO, name: "Stage", address: "605 Erie Ave", city: "Sheboygan", state: "WI", zip: "53081", lat: "43.75", lng: "-87.71", venueKind: "proscenium" });
+    let [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(r.geoStatus === "verified" && r.geoSource === "override", "drive-time saveSite: a new building-level venue with form coords stamps verified");
+
+    // Pin it through the Fix path, then re-save the same address with other coords.
+    const pin = await locateVenue({ siteId: ID, mode: "pin", lat: 43.7512, lng: -87.7133 }, { by: "u1" });
+    ok(pin.ok && pin.status === "verified", "drive-time locateVenue: a dropped pin reports verified");
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(r.geoSource === "pin" && r.geoVerifiedBy === "u1" && typeof r.geoVerifiedAt === "number", "drive-time locateVenue: pin stamps source/who/when");
+    await saveSite({ ...r, lat: "43.1", lng: "-87.1" });
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(r.lat === "43.7512" && r.geoSource === "pin", "drive-time saveSite: the same address never overwrites a pin");
+
+    // A save that omits lat/lng keys treats them as unchanged.
+    await saveSite({ id: ID, companyId: CO, name: "Stage renamed", venueKind: "proscenium" });
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(r.geoSource === "pin" && r.lat === "43.7512", "drive-time saveSite: a partial save keeps the stamp and coords");
+
+    // Editing the address resets verification.
+    await saveSite({ ...r, address: "1 New St", lat: null, lng: null });
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(r.geoStatus === "unresolved" && r.geoSource === null, "drive-time saveSite: editing the address resets to unresolved");
+
+    // Backfill: only NULL rows, idempotent.
+    await db.update(sites).set({ geoStatus: null, geoSource: null, address: "605 Erie Ave", lat: "43.75", lng: "-87.71" }).where(eq(sites.id, ID));
+    const first = await ensureVenueGeoStatus();
+    [r] = await db.select().from(sites).where(eq(sites.id, ID));
+    ok(first.stamped >= 1 && r.geoStatus === "verified" && r.geoSource === "geocode", "drive-time backfill: an unstamped building-level venue becomes verified");
+    const second = await ensureVenueGeoStatus();
+    ok(second.stamped === 0, "drive-time backfill: a second run stamps nothing");
+  } finally {
+    globalThis.fetch = realFetch;
+    await db.delete(sites).where(eq(sites.id, ID));
+  }
 }

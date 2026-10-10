@@ -51,6 +51,7 @@ import {
   type GeoSearchHit,
 } from "@/lib/geo";
 import type { Office } from "@/lib/settings";
+import { backfillStatus } from "@/lib/address-verify/state";
 
 /** Nominatim asks for <= 1 request/second. 1100ms leaves headroom. */
 export const GEOCODE_DELAY_MS = 1100;
@@ -666,10 +667,26 @@ export async function backfillVenueCoords(opts?: {
 
     for (const r of rows) {
       if (!dryRun) {
+        // Address verification (spec 2026-10-09): a geocode verifies only
+        // when the venue's own street line leads with a house number (and
+        // the point is usable); otherwise it is town/street level →
+        // needs_check. precisionOf is NOT the rule: it calls any non-empty
+        // address "building".
+        const status = backfillStatus({ address: r.address, lat: out.lat, lng: out.lng });
         await db
           .update(sites)
-          .set({ lat: String(out.lat), lng: String(out.lng), updatedAt: Date.now() })
-          .where(eq(sites.id, r.id));
+          .set({
+            lat: String(out.lat),
+            lng: String(out.lng),
+            geoStatus: status,
+            geoSource: "geocode",
+            geoVerifiedBy: null,
+            geoVerifiedAt: status === "verified" ? Date.now() : null,
+            updatedAt: Date.now(),
+          })
+          // A pin always has coordinates, so it is never a candidate here —
+          // this guard keeps it that way if candidate selection changes.
+          .where(and(eq(sites.id, r.id), or(isNull(sites.geoSource), ne(sites.geoSource, "pin"))));
       }
       report.geocoded++;
       if (precisionOf(r) === "building") report.geocodedBuilding++;

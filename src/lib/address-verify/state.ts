@@ -13,11 +13,9 @@ export function isGeoSource(v: unknown): v is GeoSource {
   return v === "geocode" || v === "pin" || v === "override";
 }
 
-export function statusFromPrecision(p: "building" | "city"): GeoStatus {
-  return p === "building" ? "verified" : "needs_check";
-}
-
-const ROAD_WORD_RE = /^(us|highway|hwy|county|state|route|cr|sr)$/i;
+/** A numbered-road lead token with its digits attached: "I-94", "US-14",
+ *  "WI59", "CR12", "Hwy12", "Rte9", "CO-12". The digits name the road. */
+const ROAD_PREFIX_RE = /^(i|us|wi|sr|cr|hwy|rte?|co)-?\d/i;
 const ORDINAL_RE = /^\d+(st|nd|rd|th)$/i;
 
 /**
@@ -30,7 +28,7 @@ const ORDINAL_RE = /^\d+(st|nd|rd|th)$/i;
  */
 export function hasHouseNumber(street: string): boolean {
   const first = String(street ?? "").trim().split(/\s+/)[0] ?? "";
-  if (!first || ROAD_WORD_RE.test(first) || ORDINAL_RE.test(first)) return false;
+  if (!first || ROAD_PREFIX_RE.test(first) || ORDINAL_RE.test(first)) return false;
   return /\d/.test(first);
 }
 

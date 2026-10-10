@@ -27,6 +27,8 @@ import {
   route,
   type TravelSource,
 } from "@/lib/geo";
+import { backfillStatus } from "@/lib/address-verify/state";
+import type { GeoStatus } from "@/lib/address-verify/types";
 import { geocodeVenue, newGeocodeCtx, type GeocodeFailure, type GeocodePrecision } from "@/lib/geo-backfill";
 
 export type UnlocatedVenue = {
@@ -146,6 +148,8 @@ export type LocateResult =
       lat: number;
       lng: number;
       precision: GeocodePrecision;
+      /** Address verification (spec 2026-10-09) status this fix stamped. */
+      status: GeoStatus;
       miles: number | null;
       minutes: number | null;
       source: TravelSource;
@@ -162,7 +166,7 @@ const validCoord = (lat: unknown, lng: unknown) =>
 
 export async function locateVenue(
   input: LocateInput,
-  opts?: { delayMs?: number }
+  opts?: { delayMs?: number; by?: string | null }
 ): Promise<LocateResult> {
   const db = await getDb();
   const siteId = clip(input?.siteId, 120);
@@ -221,6 +225,18 @@ export async function locateVenue(
     return { ok: false, reason: "invalid" };
   }
 
+  // Address verification (spec 2026-10-09). A Fix is deliberate, so it may
+  // replace a pin; a dropped pin is always verified. retry/pick verify only
+  // when the venue's resulting street line has a house number, and are
+  // credited to the person who ran them when they verify.
+  const finalAddress = typeof set.address === "string" ? set.address : set.address === null ? "" : row.address || "";
+  const status: GeoStatus = input.mode === "pin" ? "verified" : backfillStatus({ address: finalAddress, lat, lng });
+  Object.assign(set, {
+    geoStatus: status,
+    geoSource: input.mode === "pin" ? "pin" : "geocode",
+    geoVerifiedBy: status === "verified" ? (opts?.by ?? null) : null,
+    geoVerifiedAt: status === "verified" ? Date.now() : null,
+  });
   set.lat = String(lat);
   set.lng = String(lng);
   const updated = await db
@@ -244,6 +260,7 @@ export async function locateVenue(
     lat,
     lng,
     precision,
+    status,
     miles: est.miles,
     minutes: est.minutes,
     source: est.source,
