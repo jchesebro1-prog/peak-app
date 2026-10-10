@@ -495,9 +495,15 @@ export async function updateTask(
 }
 
 export async function removeTask(id: string): Promise<void> {
-  const t = await getDoc<TaskRecord>("tasks", id);
+  // The assignee is only needed to clear pins (fail-soft) — a read error must not block the delete.
+  let assignee: string | null = null;
+  try {
+    assignee = (await getDoc<TaskRecord>("tasks", id))?.assigneeUserId ?? null;
+  } catch (err) {
+    console.error("[task-plan] pre-delete read failed:", "task", id, err);
+  }
   await softDeleteDoc("tasks", id);
-  if (t) await clearPlanPinsFor("task", id, t.assigneeUserId);
+  if (assignee) await clearPlanPinsFor("task", id, assignee);
 }
 
 /**

@@ -8,7 +8,7 @@ import { blobs } from "@/db/schema";
 import { activeUsers } from "@/lib/users";
 import { autoTaskId, createAutoTask, createTask, createTaskOnce, getTask, normalizeTask, removeTask, setTaskStatus, updateTask, type TaskRecord } from "@/lib/stores/tasks";
 import { addPins, clearItemPins, getPins, removePinKeys } from "@/lib/stores/task-pins";
-import { allAssignments, createAssignment, getAssignment, setAssignmentDone, updateAssignment, type Assignment } from "@/lib/stores/assignments";
+import { allAssignments, createAssignment, getAssignment, removeAssignment, setAssignmentDone, updateAssignment, type Assignment } from "@/lib/stores/assignments";
 import { upsertDoc } from "@/db/doc-store";
 import { triageKey } from "@/lib/triage/keys";
 import { tierOf } from "@/lib/triage/feeds/tasks";
@@ -731,15 +731,33 @@ export async function autoCalPinStoreChecks(ok: Ok): Promise<void> {
     ok((await has(U, T2)) && (await getTask(T2))?.priority === "high", "auto-cal pin store: an edit that keeps the assignee keeps its pins (and still writes the tier)");
 
     const roster = await activeUsers();
-    if (roster.length) {
+    ok(roster.length > 0, "auto-cal pin store: the dev roster has someone to own the assignment checks (no silent skip)");
+    {
       const who = roster[0];
-      const a = await createAssignment({ title: "pins asg", assignee: who.name, createdBy: "Auto Cal" });
-      registerFixture("assignments", a.id);
-      const k = planItemKey("assignment", a.id);
-      await addPins(who.id, [pin(k, 4)]);
-      await setAssignmentDone(a.id, true, "app");
-      ok(!(await getPins(who.id)).some((x) => x.itemKey === k), "auto-cal pin store: a completed assignment's pins are cleared (also when Google Tasks completes it)");
-      await removePinKeys(who.id, [pinBlobKey(pin(k, 4))]);
+      const pinsOf = async (k: string) => (await getPins(who.id)).filter((x) => x.itemKey === k).length;
+      const mk = async (title: string, assignee: string) => {
+        const a = await createAssignment({ title, assignee, createdBy: "Auto Cal" });
+        registerFixture("assignments", a.id);
+        const k = planItemKey("assignment", a.id);
+        await addPins(who.id, [pin(k, 4)]);
+        return { id: a.id, k };
+      };
+      const done = await mk("pins asg done", who.name);
+      await setAssignmentDone(done.id, true, "app");
+      ok((await pinsOf(done.k)) === 0, "auto-cal pin store: a completed assignment's pins are cleared (also when Google Tasks completes it)");
+
+      const hand = await mk("pins asg handoff", who.name.toLowerCase());
+      await updateAssignment(hand.id, { assignee: who.name });
+      ok((await pinsOf(hand.k)) === 1, "auto-cal pin store: re-spelling the assignee's name (case) is not a hand-off — pins stay");
+      await updateAssignment(hand.id, { title: "pins asg handoff 2" });
+      ok((await pinsOf(hand.k)) === 1, "auto-cal pin store: an assignment edit that leaves the assignee alone keeps its pins");
+      await updateAssignment(hand.id, { assignee: "Nobody Else" });
+      ok((await pinsOf(hand.k)) === 0, "auto-cal pin store: handing an assignment to someone else clears its pins from the old calendar");
+
+      const gone = await mk("pins asg delete", who.name);
+      await removeAssignment(gone.id);
+      ok((await pinsOf(gone.k)) === 0, "auto-cal pin store: deleting an assignment clears its pins");
+      await removePinKeys(who.id, [pinBlobKey(pin(done.k, 4)), pinBlobKey(pin(hand.k, 4)), pinBlobKey(pin(gone.k, 4))]);
     }
 
     /* (g) PIN_MAX_PER_PERSON: prune only past pins the plan no longer depends on */
@@ -758,13 +776,25 @@ export async function autoCalPinStoreChecks(ok: Ok): Promise<void> {
     ok(p5.join() === keysOf([cp("GONE", MON, 8), cp("GONE", MON, 9), cp("KEEP", MON, 10), cp("KEEP", MON, 11)]),
       "auto-cal pin cap: over the cap, past pins of finished items go first, then the oldest past pins of an item already pinned past its size");
     const p3 = pinsToPrune({ pins: capPins, items: capItems, nowMs: nowCap, max: 3 });
-    ok(p3.join() === keysOf([cp("GONE", MON, 8), cp("GONE", MON, 9), cp("KEEP", MON, 10), cp("KEEP", MON, 11), cp("KEEP", MON, 13, 0, "hand")]),
-      "auto-cal pin cap: never a future pin, never one an item's remaining time still depends on — still over the cap, the rest is kept");
+    ok(p3.join() === keysOf([cp("GONE", MON, 8), cp("GONE", MON, 9), cp("KEEP", MON, 10), cp("KEEP", MON, 11)]),
+      "auto-cal pin cap: never a future pin, never one an item's remaining time still depends on (its past pins alone must cover its size) — still over the cap, the rest is kept");
     const strip = (r: PlanResult) => JSON.stringify({ ...r, staleKeys: [], blocks: r.blocks.filter((b) => b.endMs > r.nowMs), finishMs: Object.entries(r.finishMs).sort() });
     const pruned = new Set(p3);
     const kept = capPins.filter((x) => !pruned.has(pinBlobKey(x)));
     ok([nowCap, at(FRI, 7), at("2036-10-20", 7)].every((n) => strip(planPerson(baseInput({ nowMs: n, pins: capPins, items: capItems }))) === strip(planPerson(baseInput({ nowMs: n, pins: kept, items: capItems })))),
       "auto-cal pin cap: pruning leaves the plan from now on exactly as it was");
+
+    /* a later Unpin/drag of a FUTURE pin must not change what pruning already did */
+    {
+      const fk = [item("FUT", { sizeMin: 90 })];
+      const fa = cp("FUT", MON, 8), fb = cp("FUT", MON, 9), ff: PlanPin = { itemKey: "task:FUT", startMs: at(FRI, 9), endMs: at(FRI, 10), kind: "hand" };
+      const fpins = [fa, fb, ff];
+      const fprune = pinsToPrune({ pins: fpins, items: fk, nowMs: nowCap, max: 2 });
+      const fkept = fpins.filter((x) => !fprune.includes(pinBlobKey(x)));
+      const noFuture = (ps: PlanPin[]) => ps.filter((x) => x !== ff);
+      ok([nowCap, at(FRI, 7)].every((n) => strip(planPerson(baseInput({ nowMs: n, pins: noFuture(fpins), items: fk }))) === strip(planPerson(baseInput({ nowMs: n, pins: noFuture(fkept), items: fk })))),
+        "auto-cal pin cap: pruning counts only past pins — removing a future pin afterwards leaves the plan as it would have been unpruned");
+    }
 
     const U3 = "TESTautocal:pins-cap";
     const U4 = "TESTautocal:pins-cap-keep";
@@ -773,15 +803,21 @@ export async function autoCalPinStoreChecks(ok: Ok): Promise<void> {
     const past = (k: string, i: number): PlanPin => ({ itemKey: k, startMs: hourAgo - i * 3_600_000, endMs: hourAgo - i * 3_600_000 + 1_800_000, kind: "started" });
     const futureX: PlanPin = { itemKey: "task:X", startMs: t0, endMs: t0 + 1_800_000, kind: "hand" };
     const many = [...Array.from({ length: PIN_MAX_PER_PERSON + 3 }, (_, i) => past("task:X", i)), past("task:GONE", 600), past("task:GONE", 601), futureX];
-    await addPins(U3, many, { items: [item("X", { sizeMin: 60 })], nowMs });
+    const logs: string[] = [];
+    const quiet = { info: (m: string) => void logs.push(`info ${m}`), warn: (m: string) => void logs.push(`warn ${m}`), error: (m: string) => void logs.push(`error ${m}`) };
+    await addPins(U3, many, { items: [item("X", { sizeMin: 60 })], nowMs }, quiet);
     const after = await getPins(U3);
     ok(after.length === PIN_MAX_PER_PERSON && !after.some((x) => x.itemKey === "task:GONE") && after.some((x) => pinBlobKey(x) === pinBlobKey(futureX)) &&
       !after.some((x) => pinBlobKey(x) === pinBlobKey(past("task:X", PIN_MAX_PER_PERSON + 2))) && after.some((x) => pinBlobKey(x) === pinBlobKey(past("task:X", 0))),
       `auto-cal pin store: over ${PIN_MAX_PER_PERSON} pins, the store prunes the oldest past pins the plan no longer needs and keeps future ones`);
     const needy = Array.from({ length: PIN_MAX_PER_PERSON + 1 }, (_, i) => past("task:Y", i));
-    await addPins(U4, needy, { items: [item("Y", { sizeMin: 100_000 })], nowMs });
-    await addPins(U4, [{ itemKey: "task:Y", startMs: t0, endMs: t0 + 1_800_000, kind: "hand" }]);
-    ok((await getPins(U4)).length === PIN_MAX_PER_PERSON + 2, "auto-cal pin store: pins the plan still depends on are never pruned, even over the cap");
+    ok(logs.length === 1 && logs[0].startsWith("info ") && /pruned \d+ past pin/.test(logs[0]), "auto-cal pin store: the cap prune reports once, through the injected logger");
+    logs.length = 0;
+    await addPins(U4, needy, { items: [item("Y", { sizeMin: 100_000 })], nowMs }, quiet);
+    ok(logs.length === 1 && logs[0].startsWith("warn "), "auto-cal pin store: nothing prunable over the cap → one warning, through the injected logger");
+    logs.length = 0;
+    await addPins(U4, [{ itemKey: "task:Y", startMs: t0, endMs: t0 + 1_800_000, kind: "hand" }], undefined, quiet);
+    ok((await getPins(U4)).length === PIN_MAX_PER_PERSON + 2 && logs.length === 0, "auto-cal pin store: pins the plan still depends on are never pruned, and a plain add (no cap context) neither prunes nor logs");
   } finally {
     await db.delete(blobs).where(like(blobs.id, "task_pins:TESTautocal:%"));
   }

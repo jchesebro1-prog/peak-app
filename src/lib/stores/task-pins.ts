@@ -8,7 +8,8 @@
  * behind (and they are cleared). No table, no migration; blobs survive the
  * go-live demo wipe.
  *
- * Cap: PIN_MAX_PER_PERSON. addPins given the person's open items prunes only
+ * Cap: PIN_MAX_PER_PERSON. addPins given the person's open items (the explicit
+ * persist path; a plain add checks nothing) prunes only
  * past pins the plan no longer depends on (pinsToPrune in task-plan/pins.ts);
  * anything else stays and the overflow is logged. Never a current or future pin.
  */
@@ -32,29 +33,36 @@ export async function getPins(userId: string): Promise<PlanPin[]> {
  *  the person's open items (key + size) as of `nowMs`. */
 export type PinCapContext = { items: ReadonlyArray<Pick<PlanItem, "key" | "sizeMin">>; nowMs: number };
 
-export async function addPins(userId: string, pins: readonly PlanPin[], cap?: PinCapContext): Promise<void> {
+/** Where the store reports (console by default; the spec checks pass a silent one). */
+export type PinLog = Pick<Console, "info" | "warn" | "error">;
+
+/** Add pins. The cap is enforced only when `cap` (the person's open items) is
+ *  given — i.e. from the explicit persist path — so a plain add never reads
+ *  the whole blob back. */
+export async function addPins(userId: string, pins: readonly PlanPin[], cap?: PinCapContext, log: PinLog = console): Promise<void> {
   if (!userId || !pins.length) return;
   const patch: Record<string, unknown> = {};
   for (const p of pins) patch[pinBlobKey(p)] = pinBlobValue(p);
   await setBlob(pinsBlobId(userId), patch);
+  if (!cap) return;
   try {
-    await enforcePinCap(userId, cap);
+    await enforcePinCap(userId, cap, log);
   } catch (err) {
-    console.error("[task-plan] pin cap check failed:", userId, err);
+    log.error("[task-plan] pin cap check failed:", userId, err);
   }
 }
 
-async function enforcePinCap(userId: string, cap: PinCapContext | undefined): Promise<void> {
+async function enforcePinCap(userId: string, cap: PinCapContext, log: PinLog): Promise<void> {
   const all = await getPins(userId);
   if (all.length <= PIN_MAX_PER_PERSON) return;
-  const prune = cap ? pinsToPrune({ pins: all, items: cap.items, nowMs: cap.nowMs }) : [];
+  const prune = pinsToPrune({ pins: all, items: cap.items, nowMs: cap.nowMs });
   if (prune.length) {
     await removePinKeys(userId, prune);
-    console.info(`[task-plan] pin cap: pruned ${prune.length} past pin(s) the plan no longer needs for ${userId}`);
+    log.info(`[task-plan] pin cap: pruned ${prune.length} past pin(s) the plan no longer needs for ${userId}`);
   }
   const left = all.length - prune.length;
   if (left > PIN_MAX_PER_PERSON) {
-    console.warn(`[task-plan] pin cap: ${userId} keeps ${left} pins (cap ${PIN_MAX_PER_PERSON}) — the rest are current, future or still needed by the plan`);
+    log.warn(`[task-plan] pin cap: ${userId} keeps ${left} pins (cap ${PIN_MAX_PER_PERSON}) — the rest are current, future or still needed by the plan`);
   }
 }
 

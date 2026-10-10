@@ -152,7 +152,7 @@ export function cleanPinMove(input: unknown, nowMs: number): { ok: true; value: 
  *   1. past pins of items that aren't this person's open work any more (the
  *      planner already ignores them and sweeps them as staleKeys);
  *   2. past pins of an open item that would still have at least its size
- *      pinned without them, never that item's latest-ending pin. Its
+ *      pinned (by its past pins alone) without them, never that item's latest-ending pin. Its
  *      remainder is then "nothing left" (or the daily +30 for still-open
  *      work) and its last pinned day stays put, so planPerson returns the
  *      same blocks, new pins, At risk and finish times from now on; only
@@ -180,8 +180,10 @@ export function pinsToPrune(args: {
   }
   const pinned = new Map<string, number>();
   const latest = new Map<string, PlanPin>();
+  // Past pins only: a future pin can still be unpinned or dragged, so it can't
+  // be what makes an old pin redundant.
   for (const p of args.pins) {
-    if (!size.has(p.itemKey)) continue;
+    if (p.startMs > args.nowMs || !size.has(p.itemKey)) continue;
     pinned.set(p.itemKey, (pinned.get(p.itemKey) ?? 0) + (p.endMs - p.startMs) / 60_000);
     const l = latest.get(p.itemKey);
     if (!l || p.endMs > l.endMs) latest.set(p.itemKey, p);

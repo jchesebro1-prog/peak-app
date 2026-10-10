@@ -2,6 +2,7 @@ import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-s
 import { tierSizeOf } from "@/lib/task-plan/fields";
 import { autoDueAt } from "@/lib/task-plan/due";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
+import { sameName } from "@/lib/quote-approval-rules";
 import { clearPlanPinsForName } from "@/lib/stores/task-pins";
 
 /* ------------------------------------------------------------------ *
@@ -133,7 +134,7 @@ export async function updateAssignment(
     Object.assign(d, rest, stored, tierSizeOf({ priority, size })); // a patch writes tier/size only when valid
   });
   // A hand-off leaves the old assignee's pins behind on their calendar — clear them.
-  if (rec && "assignee" in patch && prev.assignee && prev.assignee !== rec.assignee) {
+  if (rec && "assignee" in patch && prev.assignee && !sameName(prev.assignee, rec.assignee)) {
     await clearPlanPinsForName("assignment", id, prev.assignee);
   }
 }
@@ -146,7 +147,13 @@ export async function getAssignment(id: string): Promise<Assignment | null> {
 /** Delete an assignment (soft delete — doc-store tombstone, same as every
  *  other collection removal in this app). */
 export async function removeAssignment(id: string): Promise<void> {
-  const rec = await getDoc<Assignment>("assignments", id);
+  // The assignee is only needed to clear pins (fail-soft) — a read error must not block the delete.
+  let assignee: string | null = null;
+  try {
+    assignee = (await getDoc<Assignment>("assignments", id))?.assignee ?? null;
+  } catch (err) {
+    console.error("[task-plan] pre-delete read failed:", "assignment", id, err);
+  }
   await softDeleteDoc("assignments", id);
-  if (rec) await clearPlanPinsForName("assignment", id, rec.assignee);
+  if (assignee) await clearPlanPinsForName("assignment", id, assignee);
 }
