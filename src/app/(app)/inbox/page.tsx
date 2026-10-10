@@ -80,6 +80,9 @@ import type {
   ThreadRowVM,
 } from "./types";
 import InboxShell from "./inbox-shell";
+import MeetingsBox from "./meetings/meetings-box";
+import MeetingReader from "./meetings/meeting-reader";
+import { loadMeetingReader, loadMeetingsBox, meetingsTabOf, toFileCount } from "./meetings/load";
 import HomeTabs from "../home-tabs";
 import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
@@ -234,6 +237,8 @@ export default async function InboxPage({
     viewParam === "unmatched"
       ? viewParam
       : null;
+  // #323 — the Krisp Meetings box: its own list + reader, never threads.
+  const isMeetings = viewParam === "meetings";
 
   const filter: FilterKey | null = FILTER_KEYS.includes(str(params.filter))
     ? (str(params.filter) as FilterKey)
@@ -258,7 +263,7 @@ export default async function InboxPage({
   const threadParam = str(params.thread);
   const explicitThread = threadParam ? await getThread(threadParam) : null;
   // deep links carry only ?thread= (global search does) — land in its mailbox
-  if (explicitThread && !params.box && !view) {
+  if (explicitThread && !params.box && !view && !isMeetings) {
     box = explicitThread.mailbox === "personal" ? "personal" : explicitThread.mailbox;
     folder = "inbox";
   }
@@ -270,7 +275,7 @@ export default async function InboxPage({
   const openDraftThread =
     draftThread && draftThread.status === "draft" ? draftThread : null;
 
-  const isView = !!view;
+  const isView = !!view || isMeetings;
   const isDrafts = !isView && folder === "drafts";
 
   // Read up front (punch #42): threadsIn's opts.crmMode needs the resolved
@@ -291,6 +296,7 @@ export default async function InboxPage({
     roster,
     customers,
     labelOptions,
+    meetingsToFile,
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
     folderCounts("personal", me),
@@ -299,8 +305,9 @@ export default async function InboxPage({
     flaggedCount(me),
     view === "unmatched" ? allThreads() : Promise.resolve([] as CommThread[]),
     followUpCount({ unownedOrMine: true, me }),
-    // Unmatched builds its own list from allComms — skip the query it would discard.
-    view === "unmatched"
+    // Unmatched builds its own list from allComms — skip the query it would
+    // discard; the Meetings box (#323) lists meetings, never threads.
+    view === "unmatched" || isMeetings
       ? Promise.resolve([] as CommThread[])
       : threadsIn(view ?? box, view ? "inbox" : folder, me, {
           filter,
@@ -311,6 +318,7 @@ export default async function InboxPage({
     activeUsers(),
     allCustomers(),
     labelOptionsFor(box, user.id),
+    toFileCount(user.id),
   ]);
 
   // Threads worth linking to a customer but not yet linked (#96 §5) — any
@@ -457,6 +465,15 @@ export default async function InboxPage({
         icon: "calls",
       },
       {
+        key: "meetings",
+        label: "Meetings",
+        active: isMeetings,
+        count: meetingsToFile,
+        badge: "accent",
+        href: viewHref("meetings"),
+        icon: "calls",
+      },
+      {
         key: "unmatched",
         label: "Unmatched",
         active: view === "unmatched",
@@ -570,6 +587,9 @@ export default async function InboxPage({
   } else if (view === "calls") {
     listTitle = "Calls & meetings";
     listSub = "Logged phone calls and meetings";
+  } else if (isMeetings) {
+    listTitle = "Meetings";
+    listSub = "Krisp meetings — file each one to a customer";
   } else if (view === "unmatched") {
     listTitle = "Unmatched";
     listSub = "Email not yet linked to a customer — link it once and the rest follows";
@@ -598,7 +618,7 @@ export default async function InboxPage({
               : view === "unmatched"
                 ? "unmatched"
                 : "",
-    boxSelValue: view ? view : `${box}:${folder}`,
+    boxSelValue: view ? view : isMeetings ? "meetings" : `${box}:${folder}`,
     filter: filter || "",
     label: labelId || "",
     labelOptions,
@@ -607,10 +627,10 @@ export default async function InboxPage({
   };
 
   /* ---- reader (explicit ?thread= or desktop auto-select) ---- */
-  const autoThread = !isDrafts
+  const autoThread = !isDrafts && !isMeetings
     ? threads.find((t) => t.status !== "draft") || null
     : null;
-  const sel = explicitThread ?? autoThread;
+  const sel = isMeetings ? null : explicitThread ?? autoThread;
 
   let reader: ReaderVM | null = null;
   if (sel) {
@@ -1052,6 +1072,23 @@ export default async function InboxPage({
     };
   }
 
+  /* ---- #323 Meetings box + reader (only on ?view=meetings) ---- */
+  let meetingsSlot: { list: React.ReactNode; reader: React.ReactNode; selected: boolean; closeHref: string } | null = null;
+  if (isMeetings) {
+    const tab = meetingsTabOf(str(params.tab));
+    const selectedId = str(params.m) || null;
+    const [boxVM, readerVM] = await Promise.all([
+      loadMeetingsBox(user, tab),
+      selectedId ? loadMeetingReader(user, selectedId) : Promise.resolve(null),
+    ]);
+    meetingsSlot = {
+      list: <MeetingsBox vm={boxVM} selectedId={readerVM ? readerVM.id : null} tab={tab} />,
+      reader: <MeetingReader vm={readerVM} />,
+      selected: !!readerVM,
+      closeHref: `/inbox?view=meetings&tab=${tab}`,
+    };
+  }
+
   return (
     <>
       <style>{`
@@ -1095,7 +1132,7 @@ export default async function InboxPage({
         />
         <div style={{ flex: "1 1 auto", minHeight: 0 }}>
           <InboxShell
-            box={view ? view : box}
+            box={view ? view : isMeetings ? "meetings" : box}
             folder={folder}
             isView={isView}
             isDrafts={isDrafts}
@@ -1112,6 +1149,7 @@ export default async function InboxPage({
             categoryOptions={CATEGORIES}
             crmMode={crmMode}
             signature={signature}
+            meetings={meetingsSlot}
           />
         </div>
       </div>

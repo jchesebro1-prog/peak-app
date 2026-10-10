@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -49,6 +49,7 @@ import {
 } from "@/lib/inbox-layout";
 import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
+import { meetingsTickAction } from "./meetings/actions";
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
 
@@ -63,6 +64,7 @@ const BOX_SEL_OPTIONS: Opt[] = [
   { value: "personal:drafts", label: "Drafts" },
   { value: "needs", label: "Needs reply" },
   { value: "calls", label: "Calls & meetings" },
+  { value: "meetings", label: "Meetings" },
   { value: "unmatched", label: "Unmatched" },
 ];
 
@@ -102,6 +104,7 @@ export default function InboxShell({
   // server action + revalidate.
   crmMode: initialCrmMode,
   signature,
+  meetings = null,
 }: {
   box: string;
   folder: string;
@@ -125,6 +128,9 @@ export default function InboxShell({
   crmMode: boolean;
   /** #127 — the signed-in user's email signature ("" when none) */
   signature: string;
+  /** #323 — ?view=meetings: the Meetings box and meeting reader (server-rendered
+   *  slots) replace the thread list and thread reader; null on every mail view. */
+  meetings?: { list: ReactNode; reader: ReactNode; selected: boolean; closeHref: string } | null;
 }) {
   const router = useRouter();
   // #126 — both remembered per browser (localStorage), hydration-safe: the
@@ -622,6 +628,9 @@ export default function InboxShell({
   // roundtrip) — we refresh here instead, only when a sync actually changed
   // something and never mid-typing; a change detected while typing is LATCHED
   // and flushed at the next non-typing moment (next tick or field blur).
+  // #323 — while the Meetings box is open the tick syncs Krisp meetings
+  // (only when stale) instead of mail.
+  const view = isView ? box : null;
   useEffect(() => {
     let stop = false;
     let pending = false;
@@ -643,7 +652,7 @@ export default function InboxShell({
     const tick = async () => {
       if (stop || document.visibilityState !== "visible") return;
       try {
-        const r = await autoSyncAction();
+        const r = view === "meetings" ? await meetingsTickAction() : await autoSyncAction();
         if (r.changed) pending = true;
         flush();
       } catch {
@@ -659,7 +668,7 @@ export default function InboxShell({
       clearInterval(iv);
       document.removeEventListener("focusout", onBlur);
     };
-  }, [router]);
+  }, [router, view]);
 
   const [sendReceiving, setSendReceiving] = useState(false);
   const onSendReceive = useCallback(async () => {
@@ -675,7 +684,7 @@ export default function InboxShell({
 
   const onBoxSel = useCallback(
     (v: string) => {
-      if (v === "needs" || v === "calls" || v === "unmatched")
+      if (v === "needs" || v === "calls" || v === "unmatched" || v === "meetings")
         router.push(`/inbox?view=${v}`);
       else {
         const [b, f] = v.split(":");
@@ -1004,7 +1013,48 @@ export default function InboxShell({
         </div>
       </div>
 
-      {/* ===== message list ===== */}
+      {/* ===== message list (or the #323 Meetings box) ===== */}
+      {meetings ? (
+        <div
+          className="ib-list"
+          style={{
+            width: listWidth,
+            flexShrink: 0,
+            background: "#fff",
+            borderRight: "1px solid #ececf0",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+          }}
+        >
+          <div style={{ padding: "11px 15px 0", flexShrink: 0 }} className="ib-boxsel">
+            <select
+              value="meetings"
+              onChange={(e) => onBoxSel(e.target.value)}
+              aria-label="Mailbox"
+              style={{
+                width: "100%",
+                fontFamily: "var(--font-ui)",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#16181d",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "9px 11px",
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              {BOX_SEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {meetings.list}
+        </div>
+      ) : (
       <ThreadList
         list={list}
         selectedId={reader && !narrow ? reader.id : explicitSelected && reader ? reader.id : null}
@@ -1095,6 +1145,7 @@ export default function InboxShell({
         rowActions={rowActions}
         width={listWidth}
       />
+      )}
 
       <div
         role="separator"
@@ -1124,15 +1175,57 @@ export default function InboxShell({
           at the 961px desktop breakpoint, so the pane holds a floor and the
           shell scrolls sideways rather than squeezing the reader unreadable. */}
       <div className="ib-pane" style={{ flex: 1, minWidth: 640, background: "#fff" }}>
-        <ThreadReader
-          key={reader ? reader.id : "empty"}
-          vm={reader}
-          variant="pane"
-          rosterOptions={rosterOptions}
-          onAfterSend={selectThread}
-          signature={signature}
-        />
+        {meetings ? (
+          !narrow && meetings.reader
+        ) : (
+          <ThreadReader
+            key={reader ? reader.id : "empty"}
+            vm={reader}
+            variant="pane"
+            rosterOptions={rosterOptions}
+            onAfterSend={selectThread}
+            signature={signature}
+          />
+        )}
       </div>
+
+      {/* ===== #323 meeting reader overlay (narrow) ===== */}
+      {meetings && narrow && meetings.selected && (
+        <>
+          <div
+            onClick={() => router.push(meetings.closeHref)}
+            style={{ position: "fixed", inset: 0, background: "rgba(16,22,30,.44)", zIndex: 80, animation: "ib-scrim .16s ease both" }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: 760,
+              maxWidth: "100vw",
+              zIndex: 90,
+              background: "#fff",
+              boxShadow: "-18px 0 50px rgba(0,0,0,.26)",
+              display: "flex",
+              flexDirection: "column",
+              overflowX: "auto",
+              animation: "ib-slide .2s cubic-bezier(.22,.61,.36,1) both",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => router.push(meetings.closeHref)}
+              title="Close"
+              aria-label="Close meeting"
+              style={{ alignSelf: "flex-start", margin: "10px 12px 0", width: 32, height: 32, borderRadius: 8, border: "1px solid #c7cbd3", background: "#f1f2f5", fontSize: 17, lineHeight: 1, cursor: "pointer", flexShrink: 0 }}
+            >
+              ×
+            </button>
+            <div style={{ flex: 1, minHeight: 0 }}>{meetings.reader}</div>
+          </div>
+        </>
+      )}
 
       {/* ===== reading overlay (narrow) ===== */}
       {showOverlay && (

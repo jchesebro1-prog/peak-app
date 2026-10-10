@@ -11,6 +11,7 @@ import { can } from "@/lib/team";
 import * as MS from "@/lib/stores/meetings";
 import * as core from "@/lib/meetings/actions-core";
 import { runMeetingsSync, syncMeetingsIfStale, type SyncResult } from "@/lib/meetings/sync";
+import { siteIdForDocLoc } from "@/lib/meetings/index-build";
 import type { MeetingLinks, MeetingPersonRef, MeetingRecord, SuggestionKind, TodoKind } from "@/lib/meetings/types";
 
 export type MeetingActionResult =
@@ -86,6 +87,19 @@ export async function setLinksAction(
   return run(id, (me) => core.setLinks(id, patch, me, opts));
 }
 
+/** A venue picked from the Inbox link search: the search returns the venue's doc location id (a migrated venue's
+ *  legacyLocId) and its company; meetings store `sites.id`, and a venue only links together with its company. */
+export async function linkVenueAction(
+  id: string, venueLocId: string, companyId: string, opts: { confirmUnshare?: boolean } = {},
+): Promise<MeetingActionResult> {
+  const me = await session();
+  const siteId = typeof venueLocId === "string" && typeof companyId === "string" && companyId
+    ? await siteIdForDocLoc(companyId, venueLocId).catch(() => null)
+    : null;
+  if (!siteId) return { ok: false, error: "That venue no longer exists" };
+  return run(id, (m) => core.setLinks(id, { customerId: companyId, siteId }, m, opts), me);
+}
+
 export async function setSpeakerAction(id: string, idx: string, ref: MeetingPersonRef | null): Promise<MeetingActionResult> {
   return run(id, (me) => core.setSpeaker(id, idx, ref, me));
 }
@@ -126,6 +140,11 @@ export async function setNoiseAction(id: string, noise: boolean): Promise<Meetin
 
 export async function refreshFromKrispAction(id: string): Promise<MeetingActionResult> {
   return run(id, (me) => core.refreshFromKrisp(id, me));
+}
+
+/** Points an attendee at an existing contact (the reader's "Link existing…"). */
+export async function setAttendeeContactAction(id: string, key: string, contactId: string): Promise<MeetingActionResult> {
+  return run(id, (me) => core.setAttendeeContact(id, key, contactId, me));
 }
 
 export async function newContactFromAttendeeAction(meetingId: string, key: string, companyId: string): Promise<MeetingActionResult> {

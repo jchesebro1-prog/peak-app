@@ -125,6 +125,7 @@ const ROUTES = [
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
   "/inbox",
   "/inbox?view=unmatched",
+  "/inbox?view=meetings",
   "/queue",
   "/templates",
   "/consulting",

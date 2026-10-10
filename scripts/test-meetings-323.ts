@@ -839,3 +839,55 @@ async function actionChecks(ok: Ok, fx: Fx): Promise<void> {
     "#323 meeting actions return only MeetingUserError messages; anything else is a generic retry message");
   ok(/catch \(e\) \{\s*revalidate\(/.test(actSrc), "#323 a failed (or partial) meeting action still revalidates");
 }
+
+/** Task 6 — the Inbox Meetings box, reader and sidebar: source pins (the house pattern for UI). */
+export async function meetings323UiPins(ok: Ok): Promise<void> {
+  const src = (p: string) => {
+    try { return readFileSync(join(process.cwd(), p), "utf8"); } catch { return ""; }
+  };
+  const dir = "src/app/(app)/inbox";
+  const shell = src(`${dir}/inbox-shell.tsx`);
+  const page = src(`${dir}/page.tsx`);
+  const box = src(`${dir}/meetings/meetings-box.tsx`);
+  const reader = src(`${dir}/meetings/meeting-reader.tsx`) + src(`${dir}/meetings/meeting-sidebar.tsx`);
+  const load = src(`${dir}/meetings/load.ts`);
+  const smoke = src("scripts/smoke-routes.ts");
+
+  ok(/const BOX_SEL_OPTIONS: Opt\[\] = \[[^\]]*\{ value: "meetings", label: "Meetings" \}/.test(shell),
+    "#323 UI the Inbox box picker lists Meetings");
+  ok(/viewParam === "meetings"/.test(page) && /<MeetingsBox\b/.test(page) && /<MeetingReader\b/.test(page),
+    "#323 UI page.tsx accepts ?view=meetings and renders the Meetings box + reader");
+  ok(/isMeetings[\s\S]{0,120}\?\s*Promise\.resolve\(\[\] as CommThread\[\]\)\s*:\s*threadsIn\(/.test(page),
+    "#323 UI the meetings view never queries threadsIn (meetings are not threads)");
+  ok(/key: "meetings",\s*label: "Meetings"[\s\S]{0,200}count: meetingsToFile/.test(page) && /toFileCount\(user\.id\)/.test(page),
+    "#323 UI the Meetings view row carries the viewer's to-file count");
+  ok(["To file", "Filed", "Noise", "This week", "Older", "Confirm all", "Sync now", "Load older"].every((s) => box.includes(s)),
+    "#323 UI the Meetings box has its tabs, sections, Confirm all, Sync now and Load older");
+  ok(["Only you", "Internal", "All of Peak", "Shared with customer"].every((s) => box.includes(s)),
+    "#323 UI the Meetings box names every scope icon");
+  ok(/confirmAllStrongAction\(/.test(box) && /Sync already running/.test(box),
+    "#323 UI Confirm all goes through confirmAllStrongAction; a busy sync says so");
+  ok(["Open in Krisp", "Refresh from Krisp", "Attendees", "Speakers", "+ New contact", "To-dos", "Transcript",
+    "Share with customer", "Stop sharing", "File the meeting first", "Confirm all to-dos"].every((s) => reader.includes(s)),
+    "#323 UI the meeting reader has its header actions, sections, to-do gate and share controls");
+  ok(/target="_blank"\s+rel="noreferrer"/.test(reader), "#323 UI Open in Krisp opens a new tab without a referrer");
+  ok(/This stops sharing it with the customer\. Continue\?/.test(reader) && /confirmUnshare: true/.test(reader),
+    "#323 UI an unshare-on-unlink asks first, then retries with confirmUnshare");
+  ok(/searchLinkTargetsAction\(/.test(reader), "#323 UI manual linking reuses the Inbox link-target search");
+  ok(/linkVenueAction\(/.test(reader) && /export async function linkVenueAction\(/.test(src(`${dir}/meetings/actions.ts`)),
+    "#323 UI a searched venue links with its company through linkVenueAction");
+  ok(/export async function setAttendeeContactAction\(/.test(src(`${dir}/meetings/actions.ts`)) && /setAttendeeContactAction\(/.test(reader),
+    "#323 UI an attendee can be pointed at an existing contact");
+  ok(/(canSeeMeeting|meetingsVisibleTo)/.test(load) && !/allMeetings\(/.test(load),
+    "#323 UI every Meetings read in load.ts is visibility-filtered");
+  ok(/export async function toFileCount\(/.test(load) && /export async function loadMeetingsBox\(/.test(load) &&
+     /export async function loadMeetingReader\(/.test(load),
+    "#323 UI load.ts exports toFileCount, loadMeetingsBox and loadMeetingReader");
+  const clientOnly = (s: string) => !/from "@\/(lib\/stores|db|lib\/meetings\/(sync|index-build|actions-core|sync-state))/.test(s);
+  ok(/^"use client";/.test(box) && /^"use client";/.test(src(`${dir}/meetings/meeting-reader.tsx`)) && clientOnly(box) && clientOnly(reader),
+    "#323 UI the Meetings box and reader are client components with no server-only imports");
+  const tick = shell.slice(shell.indexOf("const tick = async"), shell.indexOf("const onBlur"));
+  ok(/view === "meetings"\s*\?\s*await meetingsTickAction\(\)\s*:\s*await autoSyncAction\(\)/.test(tick),
+    "#323 UI the 3-minute tick runs meetingsTickAction only while the meetings view is open");
+  ok(smoke.includes(`"/inbox?view=meetings"`), "#323 UI smoke covers /inbox?view=meetings");
+}
