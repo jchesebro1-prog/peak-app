@@ -55,13 +55,13 @@ export function sortedLevels(levels: GridLevel[] | undefined): GridLevel[] {
  * sheet's default, else null. An id that isn't on the project's list is
  * ignored (a space's stale level never beats the sheet's good one).
  */
-export function levelOfPlacement(
-  pl: { sheetId: string },
-  spaceOf: (pl: never) => { levelId?: string } | null,
+export function levelOfPlacement<P extends { sheetId: string }>(
+  pl: P,
+  spaceOf: (pl: P) => { levelId?: string } | null,
   project: { levels?: GridLevel[]; sheetLevels?: Record<string, string> }
 ): string | null {
   const known = new Set((project.levels || []).map((l) => l.id));
-  const fromSpace = spaceOf(pl as never)?.levelId;
+  const fromSpace = spaceOf(pl)?.levelId;
   if (fromSpace && known.has(fromSpace)) return fromSpace;
   const fromSheet = project.sheetLevels?.[pl.sheetId];
   if (fromSheet && known.has(fromSheet)) return fromSheet;

@@ -783,6 +783,12 @@ function dropSheetInPatch(p: GridProject, sheetId: string, by: string, note: str
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: dropped });
   }
   p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
+  if (p.sheetLevels && sheetId in p.sheetLevels) {
+    const rest = { ...p.sheetLevels };
+    delete rest[sheetId];
+    if (Object.keys(rest).length) p.sheetLevels = rest;
+    else delete p.sheetLevels;
+  }
   p.updatedAt = Date.now();
   return dropped.size;
 }
@@ -2004,7 +2010,7 @@ export async function setLevels(projectId: string, raw: unknown): Promise<GridPr
   });
 }
 
-/** Set (or, with null, clear) the level a space sits on (#321). Null when the design is gone or the level isn't on its list. */
+/** Set (or, with null, clear) the level a space sits on (#321). Null when the design is gone, the space isn't on it, or the level isn't on its list. */
 export async function setSpaceLevel(
   projectId: string,
   spaceId: string,
@@ -2013,6 +2019,10 @@ export async function setSpaceLevel(
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (levelId && !(p.levels || []).some((l) => l.id === levelId)) {
+      refused = true;
+      return;
+    }
+    if (!(p.spaces || []).some((s) => s.id === spaceId)) {
       refused = true;
       return;
     }
@@ -2505,10 +2515,6 @@ export async function restoreRevision(
     // Levels (#321): restored with the spaces that name them; a snapshot cut
     // before levels existed leaves the current ones alone.
     if (target.levels) doc.levels = target.levels.map((l) => ({ ...l }));
-    if (target.sheetLevels) {
-      if (Object.keys(target.sheetLevels).length) doc.sheetLevels = { ...target.sheetLevels };
-      else delete doc.sheetLevels;
-    }
     // sheetIds themselves are still never restored wholesale from the
     // snapshot (a sheet added since, or removed for reasons unrelated to
     // this revision, should stay exactly as it is) — but a sheet that WAS
@@ -2525,6 +2531,17 @@ export async function restoreRevision(
     const liveSheetIds = new Set(doc.sheetIds || []);
     for (const sid of referencedSheetIds) liveSheetIds.add(sid);
     doc.sheetIds = Array.from(liveSheetIds);
+    // Sheet default levels (#321): restore never touches sheetIds, so merge —
+    // the snapshot's entry wins for a sheet it knew, a sheet added since keeps
+    // its current entry, and an entry for a sheet that's gone is dropped.
+    if (target.sheetLevels) {
+      const known = new Set(target.sheetIds || []);
+      const merged: Record<string, string> = {};
+      for (const [sid, lid] of Object.entries(doc.sheetLevels || {})) if (!known.has(sid) && liveSheetIds.has(sid)) merged[sid] = lid;
+      for (const [sid, lid] of Object.entries(target.sheetLevels)) if (liveSheetIds.has(sid)) merged[sid] = lid;
+      if (Object.keys(merged).length) doc.sheetLevels = merged;
+      else delete doc.sheetLevels;
+    }
     // Quote links are bookkeeping, not design state: a restore brings back
     // the option LIST and membership, but every option that still exists
     // keeps its CURRENT quote link, and the project mirror is re-derived.

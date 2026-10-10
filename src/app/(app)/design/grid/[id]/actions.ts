@@ -1186,7 +1186,7 @@ export async function saveLevelsAction(projectId: string, levels: unknown): Prom
 export async function setSpaceLevelAction(projectId: string, spaceId: string, levelId: string | null): Promise<Result> {
   await requireUser();
   const p = await setSpaceLevel(projectId, spaceId, levelId);
-  if (!p) return { ok: false, error: "That level isn't on this design any more — refresh and pick again." };
+  if (!p) return { ok: false, error: "That space or level isn't on this design any more — refresh and pick again." };
   revalidatePath(editorPath(projectId));
   revalidatePath(riserPath(projectId));
   return { ok: true };

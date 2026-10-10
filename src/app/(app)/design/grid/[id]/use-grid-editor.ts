@@ -1,6 +1,5 @@
 "use client";
 
-import type { GridLevel } from "@/lib/design/grid-levels";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -41,6 +40,7 @@ import { uploadGridSheet } from "./sheet-upload";
 import { adjustQueueStep, uploadNote } from "@/lib/design/grid-sheet-split";
 import { allPagesLocked, pageLocks, type SheetAdjust } from "@/lib/design/sheet-adjust";
 import { optionSlice } from "@/lib/design/grid-options";
+import type { GridLevel } from "@/lib/design/grid-levels";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
 import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";

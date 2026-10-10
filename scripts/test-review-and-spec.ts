@@ -62399,6 +62399,56 @@ async function conduitRiser321B3Checks(): Promise<void> {
   after = await live();
   ok(old.ok && after.levels!.length === 1 && after.levels![0].id === "lvl-cccccccccccc" && after.sheetLevels?.[sh1.id] === "lvl-cccccccccccc", "#321 restoreRevision: a snapshot without levels leaves the current levels alone");
 
+  // fix round 1: sheet default levels follow sheet replace / delete / restore
+  const SA = await import("@/lib/design/sheet-adjust");
+  const rm = { sheetIds: ["sA", "sB"], sheetLevels: { sA: "lvl-aaaaaaaaaaaa", sB: "lvl-bbbbbbbbbbbb" } };
+  SA.remapSheetRefs(rm, "sA", "sZ");
+  ok(J2(rm.sheetLevels) === J2({ sB: "lvl-bbbbbbbbbbbb", sZ: "lvl-aaaaaaaaaaaa" }) && rm.sheetIds.join() === "sZ,sB", "#321 remapSheetRefs: a sheet's default level moves to its new id");
+  const rmNone: { sheetIds: string[]; sheetLevels?: Record<string, string> } = { sheetIds: ["sA"] };
+  SA.remapSheetRefs(rmNone, "sA", "sZ");
+  ok(!("sheetLevels" in rmNone), "#321 remapSheetRefs: a doc with no sheetLevels gains none");
+
+  const gp2 = await G.createProject({ name: "#321 levels project 2", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", gp2.id);
+  const mk = async (n: string) => {
+    const sh = (await G.addSheet(gp2.id, { name: `#321 lvl2 ${n}`, mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+    registerFixture("grid_sheets", sh.id);
+    return sh;
+  };
+  const live2 = async () => (await G.getProject(gp2.id))!;
+  await G.setLevels(gp2.id, [{ label: "Stage" }, { label: "Catwalk" }]);
+  const [l1, l2] = (await live2()).levels!;
+  const sa = await mk("A");
+  const sb = await mk("B");
+  await G.setSheetLevel(gp2.id, sa.id, l1.id);
+  await G.setSheetLevel(gp2.id, sb.id, l2.id);
+  const rep = await G.replaceSheetWithAdjusted(gp2.id, sa.id, { name: "#321 adj", mime: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=", adjust: { fromSheetId: sa.id, pages: { "1": { rotate: 90, crop: { x: 0, y: 0, w: 1, h: 1 } } } }, by }, [1]);
+  registerFixture("grid_sheets", rep.ok ? rep.sheet.id : "none");
+  let p2 = await live2();
+  ok(rep.ok && p2.sheetLevels?.[rep.sheet.id] === l1.id && !(sa.id in (p2.sheetLevels || {})) && p2.sheetLevels?.[sb.id] === l2.id,
+    "#321 replaceSheetWithAdjusted: the default level follows the sheet to its new id");
+  ok(!!rep.ok && (await G.removeSheet(gp2.id, rep.sheet.id, by)).ok === true, "#321 fixture: the replaced sheet deletes");
+  p2 = await live2();
+  ok(!(rep.ok && rep.sheet.id in (p2.sheetLevels || {})) && p2.sheetLevels?.[sb.id] === l2.id, "#321 removeSheet: the deleted sheet's default level is dropped, others stay");
+
+  // restore merges sheetLevels instead of replacing them
+  const sc = await mk("C");
+  await G.setSheetLevel(gp2.id, sc.id, l1.id);
+  const cut = (await G.addRevision(gp2.id, { by, note: "knows B and C" }))!;
+  const sd = await mk("D");
+  await G.setSheetLevel(gp2.id, sd.id, l2.id);
+  await G.setSheetLevel(gp2.id, sb.id, l1.id);
+  await G.removeSheet(gp2.id, sc.id, by);
+  const rest = await G.restoreRevision(gp2.id, cut.rev, by);
+  p2 = await live2();
+  ok(rest.ok && p2.sheetLevels?.[sb.id] === l2.id, "#321 restoreRevision: the snapshot's default level wins for a sheet it knew");
+  ok(p2.sheetLevels?.[sd.id] === l2.id, "#321 restoreRevision: a sheet added since keeps its current default level");
+  ok(!(sc.id in (p2.sheetLevels || {})) && !(p2.sheetIds || []).includes(sc.id), "#321 restoreRevision: no default level is kept for a sheet that isn't on the design");
+
+  // setSpaceLevel on an unknown space
+  ok((await G.setSpaceLevel(gp.id, "sp-not-here", null)) === null && (await G.setSpaceLevel(gp.id, "sp-not-here", "lvl-cccccccccccc")) === null, "#321 setSpaceLevel: an unknown space is refused");
+  ok(!src("src/lib/design/grid-levels.ts").includes("as never") && src("src/lib/design/grid-levels.ts").includes("levelOfPlacement<P extends { sheetId: string }>("), "#321 levelOfPlacement is generic over the placement, no cast");
+
   // actions + UI pins
   const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
   for (const [fn, call] of [["saveLevelsAction", "setLevels(projectId, levels)"], ["setSpaceLevelAction", "setSpaceLevel(projectId, spaceId, levelId)"], ["setSheetLevelAction", "setSheetLevel(projectId, sheetId, levelId)"]]) {
