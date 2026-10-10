@@ -1,0 +1,342 @@
+[
+  {
+    "manufacturer": "Belden",
+    "model": "1583A",
+    "description": "Cat5e U/UTP 4-pair 24 AWG solid, riser CMR, PVC jacket",
+    "odIn": 0.19,
+    "odMm": 4.83,
+    "source": "https://catalog.belden.com/techdata/EN/1583A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 07-06-2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "1585A",
+    "description": "Cat5e U/UTP 4-pair 24 AWG solid, plenum CMP, Flamarrest PVC-LS jacket",
+    "odIn": 0.19,
+    "odMm": 4.83,
+    "source": "https://catalog.belden.com/techdata/EN/1585A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 07-06-2026. Plenum variant of 1583A; same OD.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "1700A",
+    "description": "Cat5e+ 4 bonded-pair 24 AWG, riser CMR",
+    "odIn": 0.202,
+    "odMm": 5.13,
+    "source": "https://catalog.belden.com/techdata/EN/1700A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. Extra, bonded-pair Cat5e+.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "1701A",
+    "description": "Cat5e+ 4 bonded-pair 24 AWG, plenum CMP",
+    "odIn": 0.195,
+    "odMm": 4.95,
+    "source": "https://catalog.belden.com/techdata/EN/1701A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. Plenum variant of 1700A.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "2412",
+    "description": "Cat6+ Enhanced 4-pair 23 AWG solid U/UTP, riser CMR (round, non-bonded) - used as the Cat6 representative",
+    "odIn": 0.224,
+    "odMm": 5.69,
+    "source": "https://catalog.belden.com/techdata/EN/2412_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. 7881A does not exist on Belden catalog; 7929A is DataTuff Cat5e shielded (see separate row), not Cat6.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "2413",
+    "description": "Cat6+ Enhanced 4-pair 23 AWG solid U/UTP, plenum CMP",
+    "odIn": 0.224,
+    "odMm": 5.69,
+    "source": "https://catalog.belden.com/techdata/EN/2413_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 08-17-2026. Plenum variant of 2412; same OD.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "1872A",
+    "description": "Cat6+ 4 bonded-pair 23 AWG U/UTP, riser CMR - FLAT/OVAL profile",
+    "odIn": null,
+    "odMm": null,
+    "source": "https://catalog.belden.com/techdata/EN/1872A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. Sheet gives 0.365 x 0.165 in (major x minor), not a single round OD. A round-equivalent for fill must be decided by the caller. User asked for 1872A as Cat6 plenum; Belden's 1872A is riser (CMR). Plenum counterpart not read.",
+    "resolved": false
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "7814A",
+    "description": "CAT 6 4PR 24AWG solid U/UTP, PVC, indoor CM",
+    "odIn": 0.23,
+    "odMm": 5.8,
+    "source": "https://catalog.belden.com/techdata/EN/7814A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. Sheet gives only '5.8 mm (0.23 in)' under Outer Jacket Nom. Diameter (2-digit inch value).",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "7929A",
+    "description": "DataTuff Industrial Ethernet Cat5e 4 bonded-pair 24 AWG, overall Beldfoil shield, PVC, CMR/CMG",
+    "odIn": 0.275,
+    "odMm": 6.99,
+    "source": "https://catalog.belden.com/techdata/EN/7929A_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. Shielded industrial Cat5e, not Cat6.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "9841",
+    "description": "RS-485 1 pair 24 AWG (7x32) TC, PE ins, Beldfoil + TC braid, PVC jacket, CM",
+    "odIn": 0.232,
+    "odMm": 5.89,
+    "source": "https://catalog.belden.com/techdata/EN/9841_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-25-2026. Jacket OD tolerance +/-0.020 in per table note.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "9842",
+    "description": "RS-485 2 pair 24 AWG (7x32) TC, PE ins, Beldfoil + TC braid, PVC jacket, CM",
+    "odIn": 0.34,
+    "odMm": 8.64,
+    "source": "https://catalog.belden.com/techdata/EN/9842_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-25-2026. Jacket OD tolerance +/-0.020 in per table note (stated on 9841 sheet; assumed similar on 9842).",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "9729",
+    "description": "RS-232/422 low-cap 2 pair 24 AWG, individually foil-shielded, PVC jacket, CM",
+    "odIn": 0.266,
+    "odMm": 6.76,
+    "source": "https://catalog.belden.com/techdata/EN/9729_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "9829",
+    "description": "RS-232/422 low-cap 2 pair 24 AWG, overall foil + braid, PVC jacket, CM",
+    "odIn": 0.291,
+    "odMm": 7.39,
+    "source": "https://catalog.belden.com/techdata/EN/9829_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 09-07-2025.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "82842",
+    "description": "RS-485 2 pair 24 AWG (7x32) TC, FEP ins, Beldfoil + TC braid, PVC jacket, CMP (plenum)",
+    "odIn": 0.273,
+    "odMm": 6.93,
+    "source": "https://catalog.belden.com/techdata/EN/82842_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026. Plenum counterpart of 9842 - note 9842 is 0.340 in, 82842 is 0.273 in.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "8471",
+    "description": "2 conductor 16 AWG (19x29) TC, PVC ins, PVC jacket, unshielded, CMG",
+    "odIn": 0.274,
+    "odMm": 6.96,
+    "source": "https://catalog.belden.com/techdata/EN/8471_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 03-04-2026. This is ETC's specified EchoConnect data cable.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "8461",
+    "description": "2 conductor 18 AWG (7x26) TC, PVC ins, PVC jacket, unshielded, CMG",
+    "odIn": 0.234,
+    "odMm": 5.94,
+    "source": "https://catalog.belden.com/techdata/EN/8461_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "8473",
+    "description": "2 conductor 14 AWG (42x30) TC, PVC ins, PVC jacket, unshielded, CL3",
+    "odIn": 0.356,
+    "odMm": 9.04,
+    "source": "https://catalog.belden.com/techdata/EN/8473_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 09-07-2025. Generic '#14 AWG 2-conductor stranded' example.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "8760",
+    "description": "2 conductor 18 AWG (16x30) TC, PE ins, overall Beldfoil, 20 AWG drain, PVC, CM",
+    "odIn": 0.222,
+    "odMm": 5.64,
+    "source": "https://catalog.belden.com/techdata/EN/8760_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Belden",
+    "model": "8761",
+    "description": "2 conductor 22 AWG (7x30) TC, PE ins, overall Beldfoil, 22 AWG drain, PVC, CM",
+    "odIn": 0.175,
+    "odMm": 4.45,
+    "source": "https://catalog.belden.com/techdata/EN/8761_techdata.pdf",
+    "notes": "Belden tech data sheet, 'Overall Cable Diameter (Nominal)', rev date 02-20-2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "Southwire",
+    "model": "R50003-1B (spec 13060)",
+    "description": "16 AWG 19-strand 2/C unshielded, CMR/CMG/CL3R/FPLR, gray PVC - generic #16 2-conductor stranded example",
+    "odIn": 0.174,
+    "odMm": null,
+    "source": "https://www.southwire.com/wire-cable/low-voltage-cable/multi-conductor-security-riser-unshielded/p/R50003-1B",
+    "notes": "Product page lists 'Approximate OD' 0.174 in (0.44 cm); no mm value. Plenum sibling P50032 reported 0.174 in by search snippet only (not read directly).",
+    "resolved": true
+  },
+  {
+    "manufacturer": "ETC",
+    "model": "EchoConnect standard cable (data)",
+    "description": "ETC cable cross-reference: Belden 8471 for data; 2 x 16 AWG stranded for auxiliary power; 1 x 14 AWG stranded for ESD ground",
+    "odIn": 0.274,
+    "odMm": 6.96,
+    "source": "https://support.etcconnect.com/ETC/FAQ/Cable_Cross_Database_Filter_Search",
+    "notes": "Data cable = Belden 8471 (OD 0.274 in, see Belden 8471 row). The 16 AWG power and 14 AWG ground are separate single conductors; ETC names no part, so those ODs are unresolved. ETC's Echo FAQ (support.etcconnect.com/ETC/Architectural/Echo/ECHO_FAQ/Using_Cat5_cable_in_Echo_systems) allows Cat5/Cat5e as an alternate (max 1000 ft, needs termination kits); ETC says changes possible. Page read via WebFetch summary, not raw HTML.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "ETC",
+    "model": "EchoConnect aux power 16 AWG and ESD ground 14 AWG singles",
+    "description": "Individual stranded conductors ETC says to run beside the 8471; no part number specified",
+    "odIn": null,
+    "odMm": null,
+    "source": "https://support.etcconnect.com/ETC/FAQ/Cable_Cross_Database_Filter_Search",
+    "notes": "No manufacturer part given by ETC, so no manufacturer OD. Unresolved.",
+    "resolved": false
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC224P",
+    "description": "Extra-rugged portable 2-pair DMX512, 22 AWG, double shielded, PUR jacket - PORTABLE cable, not an installation cable",
+    "odIn": 0.285,
+    "odMm": 7.24,
+    "source": "https://tmb.com/docs/proplex/dmx/pdf/ProPlexP-LTR-web.pdf",
+    "notes": "TMB literature LITPROPLEXP effective 7 Dec 2022; also on https://tmb.com/proplex-dmx-portable-cables/ (no date). TMB is internally inconsistent on conductor gauge (23 vs 22 AWG), OD consistent. PC222P (1 pair) is 0.215 in [5.46 mm].",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC224P-PLN",
+    "description": "Requested plenum variant of PC224P",
+    "odIn": null,
+    "odMm": null,
+    "source": "https://tmb.com/proplex-cables-for-etc-systems/",
+    "notes": "No such model on tmb.com. TMB's plenum DMX is PC244TPB (row below). Unresolved as named.",
+    "resolved": false
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC224T",
+    "description": "Installation/portable 2-pair 22 AWG DMX, overall foil+braid, CL2 FT1, UV resistant",
+    "odIn": 0.32,
+    "odMm": 8.13,
+    "source": "https://tmb.com/docs/proplex/dmx/pdf/ProPlex-PC224T-LTR-web.pdf",
+    "notes": "Effective 2 September 2026 (LITPC224T). Closest installation counterpart to PC224P.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC244T",
+    "description": "Installation DMX for conduit, 2 pair 24 AWG, individually shielded pairs, CM/CMH",
+    "odIn": 0.315,
+    "odMm": 8.0,
+    "source": "https://tmb.com/docs/proplex/dmx/pdf/ProPlex-PC244T-LTR-web.pdf",
+    "notes": "Effective 2 September 2026 (LITPC244T). TMB's conduit DMX cable.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC244TPB",
+    "description": "Plenum installation DMX, 2 pair 24 AWG, individually shielded pairs, CMP",
+    "odIn": 0.245,
+    "odMm": null,
+    "source": "https://tmb.com/docs/proplex/dmx/pdf/ProPlex-PC244TPB-LTR-web.pdf",
+    "notes": "Effective 2 September 2026 (LITPC244TPB). Sheet gives 'Overall Diameter 0.245 in nom.' with no mm.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC226T",
+    "description": "Installation/portable 3 pair 22 AWG RFU/ETClink cable, CL2 FT1",
+    "odIn": 0.33,
+    "odMm": 8.38,
+    "source": "https://tmb.com/docs/proplex/dmx/pdf/ProPlex-PC226T-LTR-web.pdf",
+    "notes": "Effective 7 December 2022 (LITPC226T).",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PCLP1PT",
+    "description": "Architectural node LV cable, 1 pair 16 AWG + 22 AWG ground, CL3 FT1 (ETC UnisonLink power)",
+    "odIn": 0.2,
+    "odMm": 5.08,
+    "source": "https://tmb.com/docs/proplex/arch-node/ProPlex-Arch-Node-LTR-web.pdf",
+    "notes": "Effective 2 September 2026 (LITPPXARCHNODE).",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PCLP1PTPB",
+    "description": "Plenum PCLP1PT, CL3P",
+    "odIn": 0.198,
+    "odMm": 5.0,
+    "source": "https://tmb.com/docs/proplex/arch-node/ProPlex-Arch-Node-LTR-web.pdf",
+    "notes": "Effective 2 September 2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PCLP2PT",
+    "description": "Architectural node LV cable, 2 pair 16 AWG + 14 AWG ground, CL3 FT1 (UnisonLink + display power)",
+    "odIn": 0.315,
+    "odMm": 8.0,
+    "source": "https://tmb.com/docs/proplex/arch-node/ProPlex-Arch-Node-LTR-web.pdf",
+    "notes": "Effective 2 September 2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PCLP2PTPB",
+    "description": "Plenum PCLP2PT, CL3P",
+    "odIn": 0.315,
+    "odMm": 8.0,
+    "source": "https://tmb.com/docs/proplex/arch-node/ProPlex-Arch-Node-LTR-web.pdf",
+    "notes": "Effective 2 September 2026.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PCCAT5EUTPP (PCAT5EUTPP)",
+    "description": "Cat5e Ultra-Patch U/UTP 24 AWG patch cable",
+    "odIn": 0.244,
+    "odMm": 6.2,
+    "source": "https://tmb.com/docs/proplex/cat5e/pdf/ProPlex-PCCAT5EUTPP-LTR-web.pdf",
+    "notes": "Effective 21 December 2022; +/-0.012 in. Patch cable, not an installation Cat5e.",
+    "resolved": true
+  },
+  {
+    "manufacturer": "TMB",
+    "model": "ProPlex PC4P",
+    "description": "Requested Cat5e model",
+    "odIn": null,
+    "odMm": null,
+    "source": "https://tmb.com/proplex-cables-for-etc-systems/",
+    "notes": "No 'PC4P' model found on tmb.com; TMB Cat5e codes are PCCAT5E*. Unresolved. PCCAT5EPU2X individual cable listed 8.1 mm +/-0.3 on https://tmb.com/proplex-ethernet-snake/ (not confirmed for a standalone PCCAT5EPU sheet).",
+    "resolved": false
+  }
+]
