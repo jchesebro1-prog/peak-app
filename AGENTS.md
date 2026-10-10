@@ -839,5 +839,27 @@ See `.env.example`.
     needed per part, arm-to-place, alternates & options collapsed). Every Grid intake gains an optional Plan view (upload, or
     a plan already on file copied Blob to Blob) that opens as the first sheet; failures open the plan with a retry (PUNCHLIST #314).
 
+43. ✅ **Grid device designators** (#320, D699–D706) — every placed Grid device
+    gets a stable, editable designator: its device type's code + a number
+    (`MIC-1`; a lot of N reserves N and shows `LX-1–24`), numbered per code
+    within each design option, gaps kept until Renumber…, hand duplicates
+    drawn amber, curtains excluded. Rules are pure in
+    `src/lib/design/designators.ts`; numbers are handed out inside every
+    store write via `designatorContext` (`designators-server.ts`), and
+    pre-#320 designs are numbered once on editor load (never on a Vercel
+    preview). They show on the plan, the Property Editor, the Browser, a
+    Spreadsheet **Devices** tab (`workspace/devices-table.tsx`, columns from
+    `grid-device-rows.ts`; inline edit, filters, sort, Undo/Redo), the
+    schedules and the drawing set (plan sheets replace type marks; E-60x and
+    the key never truncate: wrap, "(cont.)" rows, "… see schedule"). Codes
+    live on device types (Catalog → Device types, unique among active types);
+    Renumber closes gaps and **Apply current type codes** re-issues in the
+    current code. No migration. Not in scope: the riser, quotes, BOM and
+    customer documents. Remaining is Jeff-gated: many parts are unmapped to a
+    device type and number with their system letter (A-1, L-1) until their
+    category is mapped in Catalog → Device types; review the default type
+    codes, then Renumber → Apply current type codes on designs already
+    opened; try it on a real design in production. Punch item #320.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
