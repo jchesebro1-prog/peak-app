@@ -11,7 +11,12 @@ import { locateVenue } from "@/lib/venue-locate";
 import { getPlaces, placeStatesFor, writePlace, fixPlace } from "@/lib/address-verify/place-book";
 import { addressStatesForVisits, matchVisitSite } from "@/lib/address-verify/targets";
 import { cleanFixInput, fixAddress, loadFixTarget } from "@/lib/address-verify/fix";
-import { searchOrThrow, type GeoSearchHit } from "@/lib/geo";
+import { routeKey, searchOrThrow, type GeoSearchHit } from "@/lib/geo";
+import { addDays, chicagoDayKey, chicagoDayStart, dayKeysBetween, isDayKey } from "@/lib/drive-plan/day";
+import { isVisitIcsCopy, stopsForDay, visitPeople, type DriveStop, type StopSourceEvent, type StopSourceVisit } from "@/lib/drive-plan/stops";
+import { dayDriveTotal, fmtDur, neededRoutes, pairKey, planDay, type PlanDayInput } from "@/lib/drive-plan/plan";
+import type { AddressState } from "@/lib/address-verify/types";
+
 import { addressKey, isPhysicalLocation } from "@/lib/address-verify/keys";
 import {
   backfillStatus,
@@ -532,4 +537,126 @@ export async function driveTimeFixChecks(ok: Ok): Promise<void> {
     await db.delete(companies).where(eq(companies.id, COMPANY));
     await db.delete(placeBook).where(like(placeBook.key, "testdrive%"));
   }
+}
+
+/* ============ Task 4: the pure drive engine ============ */
+const DAY = "2026-10-14"; // a Wednesday, CDT (UTC-5)
+const at = (hh: number, mm = 0) => Date.UTC(2026, 9, 14, hh + 5, mm);
+const okAddr = (lat: number, lng: number, key: string): AddressState => ({ status: "verified", label: key, point: { lat, lng }, pointKey: "place:" + key, fix: null });
+const badAddr = (key: string): AddressState => ({ status: "needs_check", label: key, point: null, pointKey: "place:" + key, fix: { kind: "place", key, label: key } });
+const stop = (key: string, start: number, end: number, address: AddressState): DriveStop => ({ key, kind: "visit", label: key, startMs: start, endMs: end, address });
+const BASE = { name: "Madison Office", lat: 43.0731, lng: -89.4012 };
+const P1 = { lat: 44.0, lng: -88.0 };
+const P2 = { lat: 44.5, lng: -88.5 };
+function routes(...pairs: Array<[{ lat: number; lng: number }, { lat: number; lng: number }, number]>) {
+  return new Map(pairs.map(([a, b, m]) => [pairKey(a, b), m]));
+}
+function input(over: Partial<PlanDayInput>): PlanDayInput {
+  return { userId: "u1", dayKey: DAY, stops: [], base: BASE, bufferMin: 15, routeMinutes: new Map(), prevDay: { stayOver: false, lastStop: null }, stayOver: false, ...over };
+}
+
+export async function driveTimePlanChecks(ok: Ok): Promise<void> {
+  // Chicago days
+  ok(chicagoDayKey(Date.UTC(2026, 9, 15, 4, 30)) === "2026-10-14", "drive-time day: 23:30 CDT is still that Chicago day");
+  ok(chicagoDayStart("2026-10-14") === Date.UTC(2026, 9, 14, 5) && chicagoDayStart("2026-12-01") === Date.UTC(2026, 11, 1, 6) &&
+     chicagoDayStart("2026-11-01") === Date.UTC(2026, 10, 1, 5),
+    "drive-time day: midnight Chicago in CDT, CST and on the fall-back day");
+  ok(addDays("2026-10-31", 1) === "2026-11-01" && addDays("2026-01-01", -1) === "2025-12-31", "drive-time day: addDays crosses months and years");
+  ok(dayKeysBetween(at(9), at(9) + 2 * 86_400_000).join(",") === "2026-10-14,2026-10-15,2026-10-16", "drive-time day: dayKeysBetween is inclusive");
+  ok(isDayKey("2026-10-14") && !isDayKey("2026-1-4") && !isDayKey(20261014) && !isDayKey(null), "drive-time day: isDayKey accepts only YYYY-MM-DD strings");
+  // DST days: the fall-back day is 25h, the spring-forward day 23h, and neither is skipped or doubled.
+  ok(chicagoDayStart("2026-11-02") - chicagoDayStart("2026-11-01") === 25 * 3_600_000 &&
+     chicagoDayStart("2026-03-09") - chicagoDayStart("2026-03-08") === 23 * 3_600_000 &&
+     chicagoDayStart("2026-03-08") === Date.UTC(2026, 2, 8, 6) && chicagoDayStart("2026-03-09") === Date.UTC(2026, 2, 9, 5),
+    "drive-time day: the fall-back day is 25h and the spring-forward day 23h");
+  ok(chicagoDayKey(chicagoDayStart("2026-11-01")) === "2026-11-01" && chicagoDayKey(chicagoDayStart("2026-11-02") - 1) === "2026-11-01" &&
+     chicagoDayKey(chicagoDayStart("2026-03-08")) === "2026-03-08" && chicagoDayKey(chicagoDayStart("2026-03-09") - 1) === "2026-03-08",
+    "drive-time day: day start and the ms before the next start land on the right Chicago day across DST");
+  ok(dayKeysBetween(Date.UTC(2026, 10, 1, 5), Date.UTC(2026, 10, 3, 18)).join(",") === "2026-11-01,2026-11-02,2026-11-03" &&
+     dayKeysBetween(Date.UTC(2026, 2, 7, 20), Date.UTC(2026, 2, 9, 20)).join(",") === "2026-03-07,2026-03-08,2026-03-09" &&
+     dayKeysBetween(10, 5).length === 0,
+    "drive-time day: dayKeysBetween lists every day exactly once across both DST changes");
+  ok(pairKey(P1, BASE) === routeKey(P1, BASE), "drive-time: pairKey is byte-identical to the geo_cache routeKey");
+  ok(fmtDur(100) === "1h 40m" && fmtDur(65) === "1h 05m" && fmtDur(42) === "42m" && fmtDur(60) === "1h 00m", "drive-time: durations print as the spec's examples");
+
+  // Stops
+  ok(visitPeople({ assignedTo: "Dana", attendees: ["Jeff", "Dana", " "] }).join("|") === "Dana|Jeff" && visitPeople({ assignedTo: "" }).length === 0,
+    "drive-time: visitPeople = lead + attendees, deduped (the spec-2 seam)");
+  const visits: StopSourceVisit[] = [
+    { id: "SV-1", label: "Lone Pine", startAt: at(9), endAt: at(10), stage: "scheduled", people: ["Dana"], address: okAddr(P1.lat, P1.lng, "a") },
+    { id: "SV-2", label: "Past one", startAt: at(7), endAt: at(8), stage: "done", people: ["Dana"], address: okAddr(P2.lat, P2.lng, "b") },
+    { id: "SV-3", label: "Unscheduled", startAt: null, endAt: null, stage: "claimed", people: ["Dana"], address: okAddr(1, 1, "c") },
+    { id: "SV-4", label: "Someone else", startAt: at(11), endAt: at(12), stage: "scheduled", people: ["Jeff"], address: okAddr(1, 1, "d") },
+    { id: "SV-5", label: "Requested w/ time", startAt: at(13), endAt: at(14), stage: "requested", people: ["Dana"], address: okAddr(1, 1, "e") },
+  ];
+  const ev = (id: string, over: Partial<StopSourceEvent>): StopSourceEvent => ({
+    id, iCalUID: id + "@google.com", title: id, startMs: at(15), endMs: at(16), allDay: false, location: "123 Main St, Madison WI", selfDeclined: false, peakDriveKey: "", address: okAddr(43.1, -89.3, id), ...over,
+  });
+  const events = [
+    ev("meet", {}),
+    ev("allday", { allDay: true }),
+    ev("noloc", { location: "" }),
+    ev("zoom", { location: "https://zoom.us/j/1" }),
+    ev("declined", { selfDeclined: true }),
+    ev("drive", { peakDriveKey: "u1|x|a|b" }),
+    ev("ics", { iCalUID: "sv-SV-1@peak-app", startMs: at(9), endMs: at(10) }),
+  ];
+  ok(isVisitIcsCopy({ id: "x", iCalUID: "sv-SV-1@peak-app" }, visits) && isVisitIcsCopy({ id: "g9", iCalUID: "" }, [{ id: "SV-9", googleEventId: "g9" }]) &&
+     !isVisitIcsCopy({ id: "x", iCalUID: "other" }, visits), "drive-time: a visit's .ics copy (or mirrored event) is recognised");
+  const stops = stopsForDay({ person: "Dana", dayKey: DAY, visits, events });
+  ok(stops.map((s) => s.key).join(",") === "sv:SV-2,sv:SV-1,g:meet",
+    "drive-time stops: own scheduled/done visits + timed physical events; all-day, no-location, video, declined, drive and .ics copies skipped");
+  // A late-evening stop belongs to its Chicago day, not the UTC day; and a stop on another day is left out.
+  const late = stopsForDay({ person: "Dana", dayKey: DAY, visits: [{ ...visits[0], id: "SV-L", startAt: at(23, 30), endAt: at(23, 59) }, { ...visits[0], id: "SV-N", startAt: at(25), endAt: at(26) }], events: [] });
+  ok(late.map((s) => s.key).join(",") === "sv:SV-L", "drive-time stops: a stop is placed by its Chicago day");
+
+  // planDay — chaining, buffer, placement
+  const sA = stop("sv:A", at(9), at(10), okAddr(P1.lat, P1.lng, "A"));
+  const sB = stop("sv:B", at(13), at(14), okAddr(P2.lat, P2.lng, "B"));
+  const full = routes([BASE, P1, 60], [P1, P2, 40], [P2, BASE, 70]);
+  const legs = planDay(input({ stops: [sB, sA], routeMinutes: full }));
+  ok(legs.length === 3 && legs[0].from.kind === "base" && legs[0].to.key === "sv:A" && legs[1].to.key === "sv:B" && legs[2].to.kind === "base",
+    "drive-time planDay: base → first stop → next stop → base, sorted by start");
+  ok(legs[0].minutes === 75 && legs[0].endMs === at(9) && legs[0].startMs === at(9) - 75 * 60_000,
+    "drive-time planDay: minutes = route + buffer; a drive-to block ends at the stop's start");
+  ok(legs[2].startMs === at(14) && legs[2].endMs === at(14) + 85 * 60_000 && legs[2].direction === "back",
+    "drive-time planDay: the drive-back block starts at the last stop's end");
+  ok(legs[0].key === `u1|${DAY}|base|sv:A` && dayDriveTotal(legs) === 75 + 55 + 85, "drive-time planDay: leg keys + day total (buffer included)");
+
+  // No base
+  const nb = planDay(input({ stops: [sA, sB], base: null, routeMinutes: full }));
+  ok(nb[0].flag?.text === "No base set" && nb[2].flag?.text === "No base set" && nb[0].minutes === null && nb[1].flag === null,
+    "drive-time planDay: no base → first and last legs flagged 'No base set'");
+
+  // Unverified end breaks the chain into and out of it
+  const sBad = stop("g:bad", at(11), at(12), badAddr("bad"));
+  const ub = planDay(input({ stops: [sA, sBad, sB], routeMinutes: full }));
+  ok(ub[1].flag?.text === "Address not verified — no drive time" && ub[2].flag?.kind === "unverified" && ub[1].minutes === null &&
+     ub[1].fix?.kind === "place" && ub[0].flag === null && ub[3].flag === null,
+    "drive-time planDay: an unverified stop flags the legs into and out of it, with its Fix target");
+
+  // Route unavailable
+  const ru = planDay(input({ stops: [sA, sB], routeMinutes: routes([BASE, P1, 60]) }));
+  ok(ru[1].flag?.text === "Drive time unavailable — retrying" && ru[1].startMs === null, "drive-time planDay: a missing OSRM route is flagged, never estimated");
+  ok(neededRoutes(input({ stops: [sA, sB] })).length === 3, "drive-time neededRoutes: every verified pair is requested once");
+
+  // Tight
+  const sC = stop("sv:C", at(10, 30), at(11), okAddr(P2.lat, P2.lng, "C"));
+  const tight = planDay(input({ stops: [sA, sC], routeMinutes: routes([BASE, P1, 60], [P1, P2, 85], [P2, BASE, 70]) }));
+  ok(tight[1].tight?.text === "Tight — needs 1h 40m, has 30m" && tight[1].endMs === at(10, 30),
+    "drive-time planDay: a drive-to that would start before the previous stop ends is flagged Tight; nothing moves");
+
+  // Same location back-to-back → no leg
+  const sA2 = stop("sv:A2", at(10, 15), at(11), okAddr(P1.lat, P1.lng, "A2"));
+  ok(planDay(input({ stops: [sA, sA2], routeMinutes: full })).length === 2, "drive-time planDay: consecutive stops at the same point have no leg between them");
+
+  // Stay-over, both days
+  const stay = planDay(input({ stops: [sA, sB], routeMinutes: full, stayOver: true }));
+  ok(stay.length === 2 && stay.every((l) => l.direction === "to_stop"), "drive-time planDay: a stay-over day has no drive-back leg");
+  const next = planDay(input({ dayKey: addDays(DAY, 1), stops: [stop("sv:D", at(9) + 86_400_000, at(10) + 86_400_000, okAddr(P1.lat, P1.lng, "D"))], routeMinutes: routes([P2, P1, 40], [P1, BASE, 65]), prevDay: { stayOver: true, lastStop: sB } }));
+  ok(next[0].from.kind === "prev_stop" && next[0].from.key === "sv:B" && next[0].routeMin === 40,
+    "drive-time planDay: the day after a stay-over starts from that day's last stop");
+  const nextBad = planDay(input({ dayKey: addDays(DAY, 1), stops: [sA], routeMinutes: full, prevDay: { stayOver: true, lastStop: sBad } }));
+  ok(nextBad[0].flag?.kind === "unverified", "drive-time planDay: …and is flagged when that stop isn't verified");
+  ok(planDay(input({ stops: [] })).length === 0, "drive-time planDay: a day with no stops has no legs");
 }
