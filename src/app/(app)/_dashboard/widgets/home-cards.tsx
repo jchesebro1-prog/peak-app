@@ -5,6 +5,9 @@
  * through ctx.data so a store loads once per request however many widgets
  * share it.
  */
+import { after } from "next/server";
+import { savePlanPins } from "@/lib/task-plan/load";
+import { todayRows } from "@/lib/task-plan/today";
 import { designBudgetLabel, designNeedsPart, designRefreshHint } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
@@ -23,6 +26,7 @@ import { recordableParentIds } from "@/app/(app)/recordings/data";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor, shortMoney } from "@/lib/dashboard/home-metrics";
 import { tile } from "./tile";
+import HomeToday from "../../home-today";
 import HomeQueue, { type QueueRow } from "../../home-queue";
 import HomeInbox from "../../home-inbox";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "../../home-my-leads";
@@ -72,6 +76,14 @@ export const HOME_RENDERERS = {
       href: t.meetingId ? meetingsHref(MEETINGS_BASE_HREF, "filed", t.meetingId) : taskHref(t) || "/calendar",
     }));
     return <HomeQueue open={open} overdue={overdue} rows={rows} waiting={waiting} waitingTotal={waitingTasks.length} />;
+  },
+
+  /* ---- Today (spec 2026-10-09 auto task calendar) — computing the plan
+     saves its new started pins after the response, like /calendar ---- */
+  "today-plan": async (ctx) => {
+    const plan = await ctx.data.taskPlan();
+    if (plan) after(() => savePlanPins([plan]));
+    return <HomeToday rows={plan ? todayRows(plan.result, ctx.now) : []} atRiskCount={plan?.result.atRisk.length ?? 0} note={plan?.note ?? null} failed={!plan} />;
   },
 
   /* ---- inbox (page.tsx 476-501) ---- */

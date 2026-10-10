@@ -6,7 +6,7 @@
  * the existing path) and Unpin something (frees pinned time for the
  * scheduler). Nothing runs while another plan action is pending.
  */
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CalendarAtRisk, CalendarFuturePin } from "@/lib/task-plan/calendar-view";
@@ -41,7 +41,16 @@ export default function AtRiskPanel({
 
   useEffect(() => {
     onBusy?.(pending);
+    return () => onBusy?.(false);
   }, [pending, onBusy]);
+
+  // A message about the last fix goes away when the refreshed plan arrives (the refresh our own failed fix asked for doesn't count).
+  const planSig = items.map((a) => `${a.itemKey}|${a.label}|${a.finishDayKey}`).join(",") + "#" + futurePins.length;
+  const keepError = useRef(false);
+  useEffect(() => {
+    if (keepError.current) keepError.current = false;
+    else setError(null);
+  }, [planSig]);
 
   if (!items.length) return null;
 
@@ -54,7 +63,10 @@ export default function AtRiskPanel({
       } catch {
         r = { ok: false, error: "Couldn't save — try again." };
       }
-      if (!r.ok) setError(r.error);
+      if (!r.ok) {
+        keepError.current = true;
+        setError(r.error);
+      }
       router.refresh();
     });
 
@@ -63,13 +75,16 @@ export default function AtRiskPanel({
       <div style={{ fontSize: 13, fontWeight: 700, color: "#8a3a2a", marginBottom: 6 }}>At risk ({items.length})</div>
       {error && (
         <div role="alert" style={{ fontSize: 12, color: "#a03b2e", marginBottom: 6 }}>
-          {error}
+          {error}{" "}
+          <button type="button" aria-label="Dismiss" onClick={() => setError(null)} style={{ border: 0, background: "transparent", color: "inherit", cursor: "pointer", fontSize: 11, padding: 0, marginLeft: 2 }}>
+            ✕
+          </button>
         </div>
       )}
       {items.map((a) => {
         const others = roster.filter((u) => u.id !== a.userId);
         const pins = futurePins.filter((p) => p.userId === a.userId && p.canUnpin);
-        const target = handTo[a.itemKey] ?? others[0]?.id ?? "";
+        const target = handTo[a.itemKey] ?? "";
         const day = a.finishDayKey;
         return (
           <div key={a.itemKey} style={{ borderTop: "1px solid #f3f4f7", padding: "8px 0", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
@@ -96,6 +111,7 @@ export default function AtRiskPanel({
                   onChange={(e) => setHandTo((m) => ({ ...m, [a.itemKey]: e.target.value }))}
                   style={{ fontSize: 11.5, border: "1px solid #e4e7ec", borderRadius: 7, padding: "3px 6px" }}
                 >
+                  <option value="">Hand off to…</option>
                   {others.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}

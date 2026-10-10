@@ -39,8 +39,10 @@ import {
   type BackfillItem,
 } from "@/lib/task-plan/due";
 import { overrunsEnd } from "@/lib/consulting-schedule";
+import { presetFor, widgetDef } from "@/lib/dashboard/registry";
+import { todayRows } from "@/lib/task-plan/today";
 import { localDayKey, type CalendarTaskItem } from "@/lib/calendar-tasks";
-import { calendarPlanView, composeCalendarPlan, dragStartMs, layoutIntervals, localInputToMs, monthChips, msToLocalInput, PLAN_FAILED_NOTE, stripTasks } from "@/lib/task-plan/calendar-view";
+import { calendarPlanView, clockText, composeCalendarPlan, dragStartMs, layoutIntervals, localInputToMs, monthChips, msToLocalInput, pinArgs, PLAN_FAILED_NOTE, stripTasks } from "@/lib/task-plan/calendar-view";
 import { runDueBackfill, setAssignmentDue, setTaskDue } from "@/lib/task-plan/backfill";
 import { readTierSize } from "@/lib/task-plan/fields";
 import {
@@ -1245,9 +1247,9 @@ export async function autoCalDragPanelChecks(ok: Ok): Promise<void> {
      dragStartMs({ startMs: s, dyPx: 0, dxPx: 160, hourPx: 48, colPx: 100, dayCount: 1 }) === s,
     "auto-cal drag: sideways moves whole days in Week view, never in Day view");
   const layer = readFileSync("src/app/(app)/calendar/task-block-layer.tsx", "utf8");
-  ok(/onPointerDown/.test(layer) && /pinBlockAction\(/.test(layer) && /fromStartMs: b\.pinned \? b\.startMs : null/.test(layer), "auto-cal drag: dropping a block pins it (moving a pin replaces it)");
+  ok(/onPointerDown/.test(layer) && /pinBlockAction\(/.test(layer) && /pinArgs\(/.test(layer) && /fromStartMs: block\.pinned \? block\.startMs : null/.test(readFileSync("src/lib/task-plan/calendar-view.ts", "utf8")), "auto-cal drag: dropping a block pins it (moving a pin replaces it)");
   ok(/if \(!b\.draggable\)/.test(layer) && /disabled=\{busy\}/.test(layer) && /aria-label=/.test(layer), "auto-cal drag: only draggable blocks drag, drags are off while any action is pending, blocks are labelled");
-  ok(/if \(!r\.ok\) setError\(r\.error\);\s*\/\/[^\n]*\n\s*router\.refresh\(\)/.test(layer), "auto-cal drag: a refused or stale move (\"That block moved — refresh.\") shows the message and refreshes the view");
+  ok(/if \(!r\.ok\) \{[^}]*setError\(r\.error\);\s*\}\s*\/\/[^\n]*\n\s*router\.refresh\(\)/.test(layer), "auto-cal drag: a refused or stale move (\"That block moved — refresh.\") shows the message and refreshes the view");
   const panel = readFileSync("src/app/(app)/calendar/at-risk-panel.tsx", "utf8");
   ok(["Push due date", "Hand off", "Unpin something"].every((t) => panel.includes(t)) && /pushDueDateAction\(/.test(panel) && /handOffAction\(/.test(panel) && /unpinBlockAction\(/.test(panel),
     "auto-cal at risk: the panel's three one-click fixes");
@@ -1257,4 +1259,38 @@ export async function autoCalDragPanelChecks(ok: Ok): Promise<void> {
   ok(/\.focus\(/.test(pop) && /previouslyFocused|returnFocus/.test(pop) && /Move to/.test(pop), "auto-cal drag: the popover takes focus, gives it back on close, and offers a keyboard Move to…");
   const noDb = (f: string) => !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/task-plan\/load"|lib\/task-plan\/write"|lib\/task-plan\/backfill")/m.test(readFileSync(f, "utf8"));
   ok(["src/app/(app)/calendar/at-risk-panel.tsx", "src/app/(app)/calendar/task-block-layer.tsx", "src/app/(app)/calendar/task-block-popover.tsx"].every(noDb), "auto-cal drag: the new client files import pure modules only");
+}
+
+/* ---- Task 11: Home Today card + Task 10 polish ---- */
+export async function autoCalHomeChecks(ok: Ok): Promise<void> {
+  ok(widgetDef("today-plan")?.title === "Today" && !!widgetDef("today-plan")?.surfaces.includes("home") && presetFor("home", ["Admin"]).includes("today-plan"),
+    "auto-cal home: a Today card on Home");
+  const home = presetFor("home", ["Admin"]);
+  ok(home.indexOf("today-plan") === home.indexOf("my-queue") + 1, "auto-cal home: the Today card sits right after My Queue");
+  const r = planPerson(baseInput({ items: [item("A"), item("B", { createdAt: 2 })] }));
+  const rows = todayRows(r, at(MON, 7));
+  ok(rows.length === 2 && rows[0].time === "8:00–9:00" && rows[1].time === "9:00–10:00" && rows.every((x) => !x.pinned && !x.atRisk), "auto-cal home: today's blocks in order with their times");
+  ok(todayRows(r, at(TUE, 7)).length === 0, "auto-cal home: only today's blocks");
+  const cards = readFileSync("src/app/(app)/_dashboard/widgets/home-cards.tsx", "utf8");
+  const today = readFileSync("src/app/(app)/home-today.tsx", "utf8");
+  ok(cards.includes('"today-plan"') && /savePlanPins\(/.test(cards) && today.includes("/calendar?view=day"),
+    "auto-cal home: the card links to the day view and saves the plan's pins");
+  const data = readFileSync("src/lib/dashboard/data.ts", "utf8");
+  ok(/taskPlan: once\(/.test(data) && /\.catch\(/.test(data) && /calendarTimeoutMs/.test(data), "auto-cal home: one plan per Home render, a failed load never crashes Home, the Google read is bounded");
+  ok(/Couldn.t load today/.test(today) && /note=/.test(cards), "auto-cal home: a failed plan load shows a small note");
+
+  // Task 10 polish
+  const block = { kind: "task" as const, id: "t1", pinned: "hand" as const, startMs: at(MON, 9), endMs: at(MON, 10) };
+  const a = pinArgs(block, at(MON, 11));
+  ok(a.kind === "task" && a.id === "t1" && a.fromStartMs === at(MON, 9) && a.startMs === at(MON, 11) && a.minutes === 60, "auto-cal polish: pinArgs carries the block's own start when pinned and its length");
+  ok(pinArgs({ ...block, pinned: null }, at(MON, 11)).fromStartMs === null, "auto-cal polish: pinArgs from an unpinned block moves nothing");
+  ok(typeof clockText(at(MON, 9)) === "string" && /9:00/.test(clockText(new Date(2036, 9, 13, 9, 0).getTime())), "auto-cal polish: one shared clock formatter");
+  const layer = readFileSync("src/app/(app)/calendar/task-block-layer.tsx", "utf8");
+  ok(/e\.button === 0 && e\.isPrimary/.test(layer) || (/e\.button !== 0/.test(layer) && /isPrimary/.test(layer)), "auto-cal polish: only the primary button starts a drag");
+  ok(/onPointerUp[\s\S]*clientX/.test(layer) && /addEventListener\("keydown"/.test(layer), "auto-cal polish: the drop uses the pointer-up position; a window Escape cancels a drag");
+  ok(/onBusy\?\.\(false\)/.test(layer) && /onBusy\?\.\(false\)/.test(readFileSync("src/app/(app)/calendar/at-risk-panel.tsx", "utf8")), "auto-cal polish: shared busy state resets on unmount");
+  const panel = readFileSync("src/app/(app)/calendar/at-risk-panel.tsx", "utf8");
+  ok(panel.includes("Hand off to…") && /disabled=\{off \|\| !target\}/.test(panel), "auto-cal polish: Hand off waits for a chosen person");
+  ok(/BLOCK_MOVED_ERROR/.test(readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8")) && /BLOCK_MOVED_ERROR = "That block moved — refresh\."/.test(readFileSync("src/lib/task-plan/types.ts", "utf8")), "auto-cal polish: the popover closes when a move finds the block moved");
+  ok(/pinArgs\(/.test(layer) && /pinArgs\(/.test(readFileSync("src/app/(app)/calendar/task-block-popover.tsx", "utf8")), "auto-cal polish: layer and popover share pinArgs");
 }

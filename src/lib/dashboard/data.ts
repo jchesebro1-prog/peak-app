@@ -18,7 +18,11 @@ import { loadQueue } from "@/lib/queue";
 import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { getSettings } from "@/lib/settings";
+import { loadTaskPlans } from "@/lib/task-plan/load";
 import { once } from "./once";
+
+/** Home waits on the plan, so its Google read gets less than /calendar's 6 s. */
+const HOME_PLAN_CALENDAR_MS = 2_500;
 
 export function makeDashboardData(user: SessionUser) {
   const me = user.name;
@@ -41,6 +45,15 @@ export function makeDashboardData(user: SessionUser) {
     /** #323 — my open "Waiting on customer" nudges: Home lists them apart from my own to-dos. */
     waitingOnOthers: once(() => openWaitingTasksBy("assigneeUserId", [user.id])),
     agenda: once(() => loadHomeAgenda(user.id, me)),
+    // Auto task calendar: this user's plan, once per Home render. Google is read with a short limit
+    // (Home waits on it); null = the plan couldn't be loaded (the card shows a note, Home still renders).
+    taskPlan: once(async () => {
+      const plans = await loadTaskPlans({ userIds: [user.id], meId: user.id, deps: { calendarTimeoutMs: HOME_PLAN_CALENDAR_MS } }).catch((err) => {
+        console.error("[task-plan] home plan failed:", err);
+        return null;
+      });
+      return plans?.[0] ?? null;
+    }),
     boxCounts: once(() => Promise.all(boxes.map((b) => folderCounts(b.id, me)))),
     settings: once(getSettings),
   };

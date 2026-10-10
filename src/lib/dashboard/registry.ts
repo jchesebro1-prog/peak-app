@@ -38,6 +38,7 @@ export const WIDGETS = [
   { id: "my-out-for-signature", title: "Out for signature", desc: "Your quotes currently sent.", size: "tile", timeframe: "none", surfaces: HOME },
   { id: "my-avg-quote", title: "Avg quote", desc: "Average value of your quotes.", size: "tile", timeframe: "none", surfaces: HOME },
   { id: "my-queue", title: "My Queue", desc: "Open and overdue items from your queue.", size: "full", timeframe: "none", surfaces: HOME },
+  { id: "today-plan", title: "Today", desc: "Today's planned task blocks and anything at risk.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "inbox", title: "Inbox", desc: "Threads waiting on a reply, per mailbox.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "my-leads", title: "My leads", desc: "Follow-up worklist for leads you own.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "my-designs", title: "My designs", desc: "Your budgetary designs in the sandbox.", size: "full", timeframe: "none", surfaces: HOME },
@@ -103,7 +104,7 @@ export function galleryFor(surface: Surface, roles: string[]): WidgetDef[] {
 export const PRESETS: Record<Surface, readonly WidgetId[]> = {
   home: [
     "my-open-pipeline", "my-win-rate", "my-out-for-signature", "my-avg-quote",
-    "my-queue", "inbox", "my-leads", "my-designs", "my-pipeline",
+    "my-queue", "today-plan", "inbox", "my-leads", "my-designs", "my-pipeline",
     "catalog", "calendar", "venue-assessments", "team-activity", "needs-attention",
   ],
   reports: [

@@ -20,7 +20,7 @@ import { tierSizeOf } from "./fields";
 import { isPlannedTask } from "./people";
 import { cleanPinMove, pinBlobKey, PIN_MAX_PER_PERSON } from "./pins";
 import { floorQuarter } from "./free";
-import { MIN_CHUNK_MIN, parsePlanRef, planItemKey, QUARTER_MS, type PlanRef } from "./types";
+import { BLOCK_MOVED_ERROR, MIN_CHUNK_MIN, parsePlanRef, planItemKey, QUARTER_MS, type PlanRef } from "./types";
 
 export type WriteResult = { ok: true } | { ok: false; error: string };
 export const STARTED_ERROR = "This block has started — it stays put.";
@@ -48,7 +48,7 @@ async function target(ref: PlanRef): Promise<Target | null> {
 export type Actor = { id: string; admin: boolean };
 export const OWNER_ERROR = "Only the owner or an admin can change this plan.";
 export const IN_PROGRESS_PIN_ERROR = "This block is in progress — it stays put.";
-const STALE_ERROR = "That block moved — refresh.";
+const STALE_ERROR = BLOCK_MOVED_ERROR;
 const NOT_OPEN: WriteResult = { ok: false, error: "That item isn't open." };
 
 const mayChange = (t: Target, actor: Actor) => actor.admin || (!!t.ownerId && t.ownerId === actor.id);

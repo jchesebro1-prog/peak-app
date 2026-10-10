@@ -39,6 +39,9 @@ export function sizeMinutes(v: unknown): number {
   return SIZE_MIN[cleanSize(v) ?? DEFAULT_SIZE];
 }
 
+/** What a pin write answers when the block it was asked to move is no longer where the caller saw it. */
+export const BLOCK_MOVED_ERROR = "That block moved — refresh.";
+
 export type PlanItemKind = "task" | "assignment";
 export type PlanRef = { kind: PlanItemKind; id: string };
 

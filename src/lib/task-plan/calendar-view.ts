@@ -204,6 +204,19 @@ export function dragStartMs(args: { startMs: number; dyPx: number; dxPx: number;
   return d.getTime() + minutes * 60_000;
 }
 
+/** "9:00 AM" in the browser's local time, as the grid draws blocks. */
+export function clockText(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+/** The pinBlockAction input for moving `block` to start at `startMs` (a pinned block replaces its pin). */
+export function pinArgs(
+  block: Pick<CalendarPlanBlock, "kind" | "id" | "pinned" | "startMs" | "endMs">,
+  startMs: number
+): { kind: PlanItemKind; id: string; fromStartMs: number | null; startMs: number; minutes: number } {
+  return { kind: block.kind, id: block.id, fromStartMs: block.pinned ? block.startMs : null, startMs, minutes: Math.round((block.endMs - block.startMs) / 60_000) };
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 /** `datetime-local` value for a moment, in the browser's local time. */
 export function msToLocalInput(ms: number): string {

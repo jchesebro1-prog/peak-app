@@ -8,12 +8,14 @@
  * it by hand at the drop (15-minute steps; whole days sideways in Week view);
  * a press without movement opens the block, and Enter/Space on the focused
  * block does too (the popover has a keyboard "Move to…"). Only blocks marked
- * draggable drag; nothing drags while any plan action is pending. Positions
- * use the browser's local hours, like the agenda blocks beside them.
+ * draggable drag, with the primary button only; nothing drags while any plan
+ * action is pending; Escape (anywhere) cancels a drag in flight. The drop is
+ * read from the pointer-up position. Positions use the browser's local hours,
+ * like the agenda blocks beside them.
  */
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { dragStartMs, layoutIntervals, type CalendarPlanBlock } from "@/lib/task-plan/calendar-view";
+import { clockText, dragStartMs, layoutIntervals, pinArgs, type CalendarPlanBlock } from "@/lib/task-plan/calendar-view";
 import { pinBlockAction } from "./plan-actions";
 
 const RISK: CSSProperties = { display: "block", marginTop: 1, fontSize: 9.5, fontWeight: 700, color: "#b4543a" };
@@ -24,7 +26,6 @@ function minuteOf(ms: number): number {
   const d = new Date(ms);
   return d.getHours() * 60 + d.getMinutes();
 }
-const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
 export default function TaskBlockLayer({
   blocks,
@@ -56,7 +57,30 @@ export default function TaskBlockLayer({
 
   useEffect(() => {
     onBusy?.(pending);
+    return () => onBusy?.(false);
   }, [pending, onBusy]);
+
+  // A message about the last drop goes away when the refreshed plan arrives (the refresh our own failed drop asked for doesn't count).
+  // Keyed on what is drawn, not the array's identity (an empty day gets a fresh [] every render).
+  const planSig = blocks.map((b) => `${b.key}@${b.startMs}`).join("|");
+  const keepError = useRef(false);
+  useEffect(() => {
+    if (keepError.current) keepError.current = false;
+    else setError(null);
+  }, [planSig]);
+
+  // Escape, wherever focus is, cancels a drag in flight.
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      pressed.current = null;
+      setDrag(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dragging]);
 
   function drop(b: CalendarPlanBlock, d: Drag) {
     const startMs = dragStartMs({ startMs: b.startMs, dyPx: d.dy, dxPx: d.dx, hourPx, colPx: d.colPx, dayCount });
@@ -65,11 +89,14 @@ export default function TaskBlockLayer({
       setError(null);
       let r: { ok: true } | { ok: false; error: string };
       try {
-        r = await pinBlockAction({ kind: b.kind, id: b.id, fromStartMs: b.pinned ? b.startMs : null, startMs, minutes: Math.round((b.endMs - b.startMs) / 60_000) });
+        r = await pinBlockAction(pinArgs(b, startMs));
       } catch {
         r = { ok: false, error: "Couldn't save — try again." };
       }
-      if (!r.ok) setError(r.error);
+      if (!r.ok) {
+        keepError.current = true;
+        setError(r.error);
+      }
       // Success or refusal alike (e.g. "That block moved — refresh."), redraw from the stored plan so a stale block doesn't linger.
       router.refresh();
     });
@@ -85,7 +112,10 @@ export default function TaskBlockLayer({
     <div ref={layerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
       {error && (
         <div role="alert" style={{ position: "absolute", top: 2, left: 2, right: 2, zIndex: 6, pointerEvents: "auto", fontSize: 10.5, color: "#a03b2e", background: "#fbefe9", border: "1px solid #f1d6ca", borderRadius: 5, padding: "2px 5px" }}>
-          {error}
+          {error}{" "}
+          <button type="button" aria-label="Dismiss" onClick={() => setError(null)} style={{ border: 0, background: "transparent", color: "inherit", cursor: "pointer", fontSize: 11, padding: 0, marginLeft: 2 }}>
+            ✕
+          </button>
         </div>
       )}
       {layoutIntervals(blocks).map(({ it: b, col, cols }) => {
@@ -101,13 +131,14 @@ export default function TaskBlockLayer({
             key={b.key}
             type="button"
             disabled={busy}
-            aria-label={`${b.title}, ${clock(b.startMs)} to ${clock(b.endMs)}${b.pinned ? ", pinned" : ""}${b.atRiskLabel ? ", " + b.atRiskLabel : ""}${b.draggable ? ". Drag to move it, or press Enter to open it" : ". Press Enter to open it"}`}
+            aria-label={`${b.title}, ${clockText(b.startMs)} to ${clockText(b.endMs)}${b.pinned ? ", pinned" : ""}${b.atRiskLabel ? ", " + b.atRiskLabel : ""}${b.draggable ? ". Drag to move it, or press Enter to open it" : ". Press Enter to open it"}`}
             onClick={(e) => {
               e.stopPropagation();
               if (e.detail === 0) onOpen(b); // keyboard activation; a pointer press opens on pointer-up
             }}
             onPointerDown={(e) => {
               e.stopPropagation();
+              if (e.button !== 0 || !e.isPrimary) return; // a right/middle click or a second finger never starts a press
               pressed.current = b.key;
               if (!b.draggable) return;
               setError(null);
@@ -119,7 +150,8 @@ export default function TaskBlockLayer({
             }}
             onPointerUp={(e) => {
               e.stopPropagation();
-              const d = mine;
+              // The drop is where the pointer is released, not the last move we happened to see.
+              const d = mine ? { ...mine, dx: e.clientX - mine.x0, dy: e.clientY - mine.y0 } : null;
               const wasPressed = pressed.current === b.key;
               pressed.current = null;
               setDrag(null);
@@ -133,12 +165,6 @@ export default function TaskBlockLayer({
             onPointerCancel={() => {
               pressed.current = null;
               setDrag(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && mine) {
-                pressed.current = null;
-                setDrag(null);
-              }
             }}
             title={label + (b.atRiskLabel ? " · " + b.atRiskLabel : "") + (b.draggable ? " · drag to pin" : "")}
             style={{

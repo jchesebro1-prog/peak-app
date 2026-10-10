@@ -12,13 +12,12 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TierSizeChips from "@/components/task-plan/tier-size-chips";
-import { localInputToMs, msToLocalInput, type CalendarPlanBlock } from "@/lib/task-plan/calendar-view";
-import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
+import { clockText, localInputToMs, msToLocalInput, pinArgs, type CalendarPlanBlock } from "@/lib/task-plan/calendar-view";
+import { BLOCK_MOVED_ERROR, type TaskSize, type TaskTier } from "@/lib/task-plan/types";
 import { completeCalendarTaskAction } from "./task-actions";
 import { markInProgressAction, pinBlockAction, setTierSizeAction, unpinBlockAction } from "./plan-actions";
 
 type Result = { ok: true } | { ok: false; error: string };
-const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
 export default function TaskBlockPopover({ block, onClose }: { block: CalendarPlanBlock; onClose: () => void }) {
   const router = useRouter();
@@ -76,6 +75,12 @@ export default function TaskBlockPopover({ block, onClose }: { block: CalendarPl
         r = { ok: false, error: "Couldn't save — try again." };
       }
       if (!r.ok) {
+        // The block isn't where this popover thinks it is: nothing here can act on it any more, so close and redraw.
+        if (r.error === BLOCK_MOVED_ERROR) {
+          onClose();
+          router.refresh();
+          return;
+        }
         setError(r.error);
         onFail?.();
         return;
@@ -93,7 +98,7 @@ export default function TaskBlockPopover({ block, onClose }: { block: CalendarPl
           {block.href ? <Link href={block.href}>{block.title}</Link> : block.title}
         </div>
         <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4 }}>
-          {clock(block.startMs)}–{clock(block.endMs)} · {block.ownerName}
+          {clockText(block.startMs)}–{clockText(block.endMs)} · {block.ownerName}
           {block.kind === "assignment" ? " · Queue" : ""}
           {block.inProgress ? " · In progress" : ""}
         </div>
@@ -128,7 +133,7 @@ export default function TaskBlockPopover({ block, onClose }: { block: CalendarPl
               disabled={pending || moveMs == null || moveMs === block.startMs}
               onClick={() =>
                 moveMs != null &&
-                run(() => pinBlockAction({ kind: block.kind, id: block.id, fromStartMs: block.pinned ? block.startMs : null, startMs: moveMs, minutes: Math.round((block.endMs - block.startMs) / 60_000) }), true, () => router.refresh())
+                run(() => pinBlockAction(pinArgs(block, moveMs)), true, () => router.refresh())
               }
             >
               Move
