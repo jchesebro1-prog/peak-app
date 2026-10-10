@@ -10,6 +10,7 @@ import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
 import { partModel } from "@/lib/catalog-rename/sku";
 import { designatorList } from "./designators";
+import { wrapLineCount } from "./drawing-labels";
 
 /**
  * The catalog rows a schedule can look up by id: parts placed or routed in the
@@ -157,10 +158,25 @@ export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
   return groups;
 }
 
+/** #320: characters of the E-60x Designators cell per printed line. The cell
+ *  is 24 % of a schedule column (≈ 6.5 in at 11×17, scaling with the sheet) →
+ *  ≈ 106 pt after padding in 8 pt mono (4.8 pt a character) = 22 on paper;
+ *  18 is the conservative budget. */
+export const SCHEDULE_DESIGNATOR_CHARS_PER_LINE = 18;
+
+/** Printed lines one schedule item takes: a part row's designators cell wraps;
+ *  heads and wire rows are one line. */
+export function scheduleItemLines(it: ScheduleItem): number {
+  return it.kind === "row" && it.designators ? Math.max(1, wrapLineCount(it.designators, SCHEDULE_DESIGNATOR_CHARS_PER_LINE)) : 1;
+}
+
 /**
- * Pages → columns → items. A head never ends a column (it needs at least one
- * row under it), and a group that spills into a new column repeats its head
- * marked `cont`. An empty schedule is still one (empty) sheet.
+ * Pages → columns → items. A column holds `perColumn` lines (a row whose
+ * designators wrap counts each line; every other item is one). A head never
+ * ends a column (it needs at least one row under it), and a group that spills
+ * into a new column repeats its head marked `cont`. A row taller than a whole
+ * column still goes alone under a head in a fresh column — never dropped. An
+ * empty schedule is still one (empty) sheet.
  */
 export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, columns = 2): ScheduleItem[][][] {
   const cap = Math.max(2, Math.floor(perColumn));
@@ -168,23 +184,33 @@ export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, column
   const pages: ScheduleItem[][][] = [];
   let page: ScheduleItem[][] = [];
   let col: ScheduleItem[] = [];
+  let used = 0;
+  let hasRow = false;
   const pushCol = () => {
     page.push(col);
     col = [];
+    used = 0;
+    hasRow = false;
     if (page.length === cols) {
       pages.push(page);
       page = [];
     }
   };
   for (const g of groups) {
-    if (col.length && col.length + 2 > cap) pushCol();
+    const first = g.rows.length ? scheduleItemLines(g.rows[0]) : 1;
+    if (col.length && used + 1 + first > cap) pushCol();
     col.push(g.head);
+    used += 1;
     for (const r of g.rows) {
-      if (col.length >= cap) {
+      const n = scheduleItemLines(r);
+      if (hasRow && used + n > cap) {
         pushCol();
         col.push({ ...g.head, cont: true });
+        used = 1;
       }
       col.push(r);
+      used += n;
+      hasRow = true;
     }
   }
   if (col.length) pushCol();

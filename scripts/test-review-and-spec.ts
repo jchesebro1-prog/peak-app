@@ -60479,4 +60479,51 @@ async function designators320ScheduleChecks(): Promise<void> {
   const gs = rd("src/lib/design/grid-schedule.ts");
   ok(!/from\s+"@\/lib\/stores\//.test(gs.replace(/import type[^;]*;/g, "")) && !rd("src/lib/design/designators.ts").includes("@/lib/stores/") && !rd("src/lib/design/designators.ts").includes("@/db"),
     "#320 client boundary: designators.ts and grid-schedule.ts import no store or DB");
+
+  // Fix round 1 — printed designators are never truncated: the cells wrap and pagination budgets the lines.
+  const L = await import("@/lib/design/drawing-labels");
+  const longList = Array.from({ length: 12 }, (_, i) => `MIC-${i * 2 + 1}`).join(", ");
+  const longRow = { kind: "row" as const, qty: 12, code: "SM58", desc: "Mic", designators: longList };
+  const lineRows = (n: number, designators?: string) => Array.from({ length: n }, (_, i) => ({ kind: "row" as const, qty: 1, code: `P${i}`, desc: "d", ...(designators ? { designators } : {}) }));
+  ok(S.scheduleItemLines(longRow) > 1 && S.scheduleItemLines(longRow) >= Math.ceil(longList.length / (S.SCHEDULE_DESIGNATOR_CHARS_PER_LINE + 1)), "#320 fix: a long designator list is a multi-line schedule item");
+  ok(S.scheduleItemLines({ kind: "row", qty: 1, code: "a", desc: "a" }) === 1 && S.scheduleItemLines({ kind: "row", qty: 1, code: "a", desc: "a", designators: "MIC-1" }) === 1 &&
+     S.scheduleItemLines({ kind: "section", name: "S", cont: false }) === 1 && S.scheduleItemLines({ kind: "wire", partId: "w", run: "a → b", length: "1 ft" }) === 1,
+    "#320 fix: short designators, heads and wire rows are one line");
+  ok(L.wrapLineCount("A".repeat(50), 18) === 3 && L.wrapLineCount("", 18) === 1 && L.wrapLineCount("X-1, X-2", 18) === 1, "#320 fix: a token longer than a line breaks anywhere; short lists stay one line");
+  const tallGroups = [
+    { head: { kind: "section" as const, name: "A", cont: false }, rows: [...lineRows(6), longRow, ...lineRows(3, longList), ...lineRows(6)] },
+    { head: { kind: "wires" as const, cont: false }, rows: [{ kind: "wire" as const, partId: "w", run: "a → b", length: "1 ft" }] },
+  ];
+  const tallPages = S.paginateSchedule(tallGroups, 12, 2);
+  const tallCols = tallPages.flat();
+  ok(tallCols.every((c) => c.reduce((a, it) => a + S.scheduleItemLines(it), 0) <= 12 || c.filter((it) => it.kind === "row").length === 1), "#320 fix: no E-60x column exceeds its line budget (a lone tall row aside)");
+  ok(tallCols.flat().filter((it) => it.kind === "row").length === 16 && tallCols.flat().filter((it) => it.kind === "wire").length === 1, "#320 fix: pagination keeps every row and wire");
+  ok(tallCols.every((c) => !c.length || c[c.length - 1].kind !== "section"), "#320 fix: a head never ends a column with tall rows");
+  const huge = { kind: "row" as const, qty: 1, code: "H", desc: "h", designators: Array.from({ length: 60 }, (_, i) => `ZZ-${i + 1}00`).join(", ") };
+  const hugePages = S.paginateSchedule([{ head: { kind: "section", name: "H", cont: false }, rows: [...lineRows(2), huge, ...lineRows(2)] }], 12, 2).flat();
+  ok(S.scheduleItemLines(huge) > 12 && hugePages.flat().filter((it) => it.kind === "row").length === 5 && hugePages.some((c) => c.length === 2 && c[1] === huge && c[0].kind === "section"),
+    "#320 fix: a row taller than a whole column goes alone under a head in a fresh column, never dropped");
+  const oldStyle = S.paginateSchedule([{ head: { kind: "section", name: "B", cont: false }, rows: lineRows(70, "MIC-1") }], 24, 2);
+  ok(JSON.stringify(oldStyle.map((pg) => pg.map((c) => c.length))) === "[[24,24],[24,2]]" && oldStyle[0][1][0].kind === "section" && (oldStyle[0][1][0] as { cont: boolean }).cont,
+    "#320 fix: one-line rows paginate exactly as before (24 per column, head repeated cont)");
+
+  const keyShort = Array.from({ length: 40 }, (_, i) => ({ tag: `A-${i}`, qty: 1, desc: "d" }));
+  const vShort = L.planKeyVisible(keyShort);
+  ok(vShort.shown === L.KEY_MAX_ROWS && vShort.lines === L.KEY_MAX_ROWS && L.planKeyVisible(keyShort.slice(0, 5)).shown === 5, "#320 fix: one-line key rows show min(rows, 36), as before");
+  const keyLong = Array.from({ length: 20 }, (_, i) => ({ tag: `MIC-${i * 3 + 1}, MIC-${i * 3 + 3}, LX-${i + 1}0, LX-${i + 1}2`, qty: 4, desc: "d" }));
+  const vLong = L.planKeyVisible(keyLong);
+  ok(L.keyRowLines(keyLong[0].tag) > 1 && vLong.shown < 20 && vLong.shown >= 1 && vLong.lines <= L.KEY_MAX_ROWS && vLong.lines === keyLong.slice(0, vLong.shown).reduce((a, r) => a + L.keyRowLines(r.tag), 0),
+    "#320 fix: a key with long designator rows lays out within the line budget (the rest say +N more)");
+  ok(L.planKeyVisible([{ tag: "Q".repeat(500) }]).shown === 1, "#320 fix: the first key row always shows");
+  const lay = (rows: number, lines?: number) => L.planKeyLayout({ areaW: 13.3, areaH: 9.8, captionH: 0.35, aspect: 0.65, rows, ...(lines !== undefined ? { lines } : {}), k: 1 });
+  ok(JSON.stringify(lay(5)) === JSON.stringify(lay(5, 5)) && JSON.stringify(lay(12)) === JSON.stringify(lay(12, 12)), "#320 fix: planKeyLayout with lines = rows is the old layout");
+  ok(lay(3, 20).side && lay(3, 20).keyH > lay(3, 3).keyH && lay(3, 20).keyH <= (L.KEY_MAX_ROWS + 2.2) * 0.2 + 1e-9, "#320 fix: a short key whose rows wrap goes beside the plan and its height follows the lines");
+  const figSrc = rd("src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx");
+  ok(rd("src/components/drawing/drawing-set-sheets.tsx").includes('"pk-dw-mono pk-dw-wrap">{it.designators') && figSrc.includes('"pk-dw-mono pk-dw-wrap">{r.tag}') && /\.pk-dw-wrap\s*\{[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/.test(rd("src/app/globals.css")),
+    "#320 fix: both Designators cells wrap instead of ellipsis");
+
+  // Untested edges from the Task 5 review.
+  const edge = D.planDesignatorMarks([{ id: "n", key: "P9", desc: "Plain", qty: 3, curtain: false }, { id: "u", key: "P8", desc: "Lot", qty: 5, designator: "Stage Left", curtain: false }], "R");
+  ok(edge.tags.get("n") === "" && edge.rows[0].tag === "" && edge.rows[0].qty === 3, "#320 plan sheet: a non-curtain device with no designator prints no mark and an empty key cell");
+  ok(edge.tags.get("u") !== undefined && edge.rows[1].tag === "Stage Left" && edge.rows[1].qty === 5, "#320 plan sheet: a lot with a custom (non-parsable) designator lists it as typed in the key");
 }

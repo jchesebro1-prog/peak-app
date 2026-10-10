@@ -42,7 +42,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
     return (
       <tr key={key}>
         <td>{it.qty}</td>
-        <td className="pk-dw-mono pk-dw-ellip">{it.designators || ""}</td>
+        <td className="pk-dw-mono pk-dw-wrap">{it.designators || ""}</td>
         <td className="pk-dw-mono pk-dw-ellip">{it.code}</td>
         <td className="pk-dw-ellip">{it.desc}</td>
       </tr>
