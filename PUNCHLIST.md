@@ -11641,3 +11641,32 @@ venue/job/people, and turn its action items into tasks, waiting-on-customer item
   `/api/sync/pull` shipping whole quote docs in `src/lib/stores/quotes.ts:317`, `src/lib/quote-share/token.ts:9` and
   DECISIONS ~8905 (and the #293 spec check that pins it — pull no longer ships quote docs); move `meetingsHref` /
   `MEETINGS_BASE_HREF` from `src/app/(app)/inbox/meetings/format.ts` to `src/lib/meetings/`.
+
+## 321. Grid conduit riser — Bray format, lighting control first — DONE 2026-10-10 (D763–D774)
+
+Jeff shared Bray's TL1.5 Lighting Control Riser and AV1.5 A/V Conduit Riser and asked for the same on the Grid,
+linked to the plan's devices, with wire (and sometimes conduit) priced as an option.
+
+- **Engine:** `src/lib/design/conduit-riser/` (model, suggest, derive, layout, drawing, svg, dxf, tables, pricing, tags,
+  edit) — pure, deterministic, no store imports. Server: `src/lib/design/conduit-riser-server.ts`; store:
+  `src/lib/stores/grid-conduit-riser.ts` (document on the design option; no migration).
+- **Pages:** `/design/grid/[id]/conduit-riser` (Bray-style SVG: tags, signal bubbles, size labels, stubs, notes, details,
+  power types, levels, drag lane, Reset layout, Tag panel, suggestions, Undo/Redo), the plan's "Add to the lighting
+  control riser?" prompt, E-502… in the drawing set (six tables), and `GET /api/grid/[id]/conduit-riser/dxf` (R12).
+- **Data:** per-part Designator code + Riser tag defaults, per-device tag overrides, levels on spaces and
+  `sheetLevels` on the project, wire-type Symbol/Signal, `riser_box_types` (Grid Settings → Box types) and `conduit_sizes` (Estimating Rules) blobs, two-digit
+  designators by default (Grid Settings → Designator numbers).
+- **Pricing:** wire and conduit pricing both off by default; wire in an unpriced run is "by others"; priced conduit under
+  its own BOM group; refusals block promote; estimate-owned options ignore it.
+
+**Jeff-gated follow-ups:**
+- Estimating Rules → **Conduit sizes**: map each size to a per-foot catalog part (the list starts unmapped, so no
+  conduit prices until you do).
+- Grid Settings → **Wire types**: set each type's Symbol and Signal (N, D, UE, P, CC) for the bubbles and legend.
+- Catalog → part editor: set **Designator code** and **Riser tag defaults** on the lighting-control parts (ETC DMX/
+  network outlets, button stations, dimmers, racks).
+- Add **Levels** and each space's level on a real job; check E-502 against Bray's.
+- Open a downloaded **DXF** in AutoCAD / Vectorworks (verified only with ezdxf's auditor, 0 errors).
+- Decide whether **24×36 should scale the riser up** (today it draws at true size in the top-left of the sheet).
+- Confirm the **phone view** should be fully read-only (today the Tag panel still edits on a phone).
+- Later: AV/video conduit risers on the same engine; computed conduit fill (size is typed today).

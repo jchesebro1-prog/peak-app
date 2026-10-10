@@ -1,5 +1,7 @@
 # Grid: conduit riser — Bray format, lighting control first (#321)
 
+**Status:** Plan A (engine) and Plan B (wiring, editor, pricing, E-502 + DXF) built 2026-10-10 on `feat/321-conduit-riser`; decisions D763–D774, punch #321.
+
 Date: 2026-10-09 · Requested by Jeff · Designed in session (brainstorm, every
 section approved: "Yes, write the spec and be ready to implement").
 
@@ -392,6 +394,9 @@ Grid view permission, `Content-Disposition: attachment`.
 10. **The engine takes a plain input** (`input.ts`: devices with their
    display designator already formatted, wires with signal + length) — it
    never imports #320 or a store, so it builds and tests ahead of #320.
+11. **`sheetLevels` lives on the project, not `GridSheet.defaultLevelId`** (Plan B,
+   D767): sheet replace, delete and revision restore carry the map, which a field
+   on the sheet record lost.
 
 ## Out of scope (v1)
 

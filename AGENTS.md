@@ -913,5 +913,28 @@ See `.env.example`.
     with participants, review a week of suggestions, and renumber migration 0036
     at merge if another branch lands first. Punch item #323.
 
+47. ✅ **Grid conduit riser** (#321, D763–D774) — a Bray-format lighting control
+    riser derived from the Grid's devices and wires: `/design/grid/[id]/conduit-riser`
+    draws device tags (ID, location, P/D, box, face, mount, height), conduit runs
+    with size labels and signal bubbles, chained hops, stubs, power types, notes and
+    per-level / per-space details, with a draggable lane (`laneX`), Reset layout,
+    undo/redo and a Tag panel; suggestions come from plan wires between
+    lighting-control devices (the plan's "Add to the lighting control riser?" bar).
+    Pure engine in `src/lib/design/conduit-riser/` (model, suggest, derive, layout,
+    drawing, svg, dxf, tables, pricing), server in
+    `src/lib/design/conduit-riser-server.ts`, store in
+    `src/lib/stores/grid-conduit-riser.ts` (the document rides the design option;
+    no migration). The drawing set gains E-502… (six tables) and a DXF R12 download
+    at `GET /api/grid/[id]/conduit-riser/dxf`. Designators pad to two digits by
+    default, parts carry a Designator code and Riser tag defaults, devices override
+    per field, levels live on spaces and `sheetLevels` on the project; wire types
+    gain Symbol/Signal, and `riser_box_types` / `conduit_sizes` are settings blobs.
+    Pricing is opt-in per run (wire and conduit both default off; unpriced wire is
+    "by others"; refusals block promote; estimate-owned options ignore it). Remaining
+    is Jeff-gated: fill Estimating Rules → Conduit sizes, set wire-type symbols and
+    part tag defaults, set levels on a real job, open the DXF in AutoCAD/Vectorworks,
+    decide 24×36 scaling and a read-only phone view. Later: AV/video risers, computed
+    conduit fill. Punch item #321.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

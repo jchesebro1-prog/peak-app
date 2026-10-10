@@ -10540,3 +10540,99 @@ D725–D737 are the spec's decision table K1–K13
   built: waiting-on-customer tasks stay out of `/queue` and the Google Tasks mirror (Home "Waiting on others" +
   company/venue pages); a to-do from an internal-only meeting is an ordinary task visible to all staff on
   `/calendar`; the noise cut-off stays at 3 minutes; a customer share shows to every portal grant at that customer.
+
+## D763. The lighting control riser downloads as DXF R12 (#321, 2026-10-10)
+
+Jeff asked for a conduit riser "similar to" Bray's TL1.5 sheet, reachable from the Grid. The riser's DXF is **R12
+(AC1009)**, not R2000: R12 has no handles or object dictionaries to get wrong and every CAD package reads it, while
+blocks with attributes (`PK_TAG`, `PK_SIGNAL`, `PK_POWER`, `PK_STUB`), named layers (`PK-RISER-TAG` …
+`PK-RISER-TABLE`) and the DASHED linetype are all R12 features. ezdxf's auditor reads the sample with 0 errors. DWG is
+one Save As away in the CAD package. Inches, 1:1 sheet size, no title block (the PDF set carries it). `GET
+/api/grid/[id]/conduit-riser/dxf?option=&size=b|d&page=` (signed-in, attachment) and a "Download DXF" link on the riser
+page and under E-502 in the on-screen drawing set (never in the signed print route).
+
+## D764. Runs are orthogonal; the only drag is the lane x; bubbles sit at the device end (#321, 2026-10-10)
+
+A conduit run is drawn orthogonally, so its only free coordinate is the vertical lane's x (`laneX`), not a free bend
+point; a drag edits `laneX` and Reset layout clears it. Signal bubbles (bubbles left, size label right) sit beside the
+drop into each device tag — Bray's look, and it keeps the head-end bundle uncluttered; chain hops print the size below
+the line. A stub follows its device: a stub whose run ends on a device in another detail is drawn in that device's
+detail. The engine takes a plain input (`input.ts`; designators already formatted) and never imports a store, so it
+builds and tests without the rest of the Grid.
+
+## D765. Conduit length, cable management and scoped details (#321, 2026-10-10)
+
+The priced conduit length is the run's typed length, else its **longest member wire** (a measured route and a typed
+link count alike). A cable-management run never prices conduit — its legend says it is provided by others. A detail
+carries `allSpaces`: `spaceIds: []` alone was ambiguous (a scoped detail whose spaces were all deleted would have become
+"every space"), so now an emptied scoped detail covers nothing and the default detail is `allSpaces: true`.
+
+## D766. A plan wire re-snapped to other devices leaves its old run (#321, 2026-10-10)
+
+Derive and the suggestions ignore a member wire whose device pair no longer matches the run, and `pruneConduitRiser`
+drops it when the store passes each wire's device pair (`wireEnds`). The re-snapped wire is suggested again for its new
+pair. Deleting a wire empties its conduit; deleting a device prunes its runs and pinned tag.
+
+## D767. Levels live on the project; `sheetLevels` replaces `GridSheet.defaultLevelId` (#321, 2026-10-10)
+
+The spec put a default level on each sheet. Sheets are replaced, deleted and restored by several paths (Adjust sheet,
+page split, revision restore), so a field on `GridSheet` was lost by each. `sheetLevels` (sheet id → level id) lives on
+the project, beside the project's `levels`, and follows sheet replace, delete and revision restore (a restored entry
+naming a level the restore removed is ignored on read). A device sits on its containing space's level, else its sheet's,
+else none (an id not on the project's list is ignored).
+
+## D768. Designator numbers: two digits by default, a part's code wins (#321, 2026-10-10)
+
+Bray prints `L-01`, so numbers pad to **two digits** by default (Grid Settings → Designator numbers). The setting only
+changes how numbers print and how new ones are issued — it **never rewrites a stored designator**; a single `CRO-1`
+shows unpadded until Renumber. A per-part **Designator code** (catalog part editor) wins over the device type's code
+(D699–D706), so ETC's DMX outlets and button stations can number as `DMX-01` while sharing a device type.
+
+## D769. Riser tag fields are part defaults plus per-device overrides (#321, 2026-10-10)
+
+A tag's ID/LOC/P-D/box/face/mount/height come from the **part's Riser tag defaults**, overridden per device
+(`GridPlacement.tag`). Edits go in as per-field patches (`setTagFieldsAction`, merged under the row lock) so fast Tab
+entry in the Devices spreadsheet cannot drop a field; an empty string clears an override back to the part default.
+Curtain placements never take tag fields (refused on write, ignored on read). The Devices tab gains the tag columns.
+
+## D770. Box types and conduit sizes are admin-edited blobs (#321, 2026-10-10)
+
+`riser_box_types` is seeded from Bray's AV1.5 box legend and edited in Grid Settings → Box types; `conduit_sizes`
+(Estimating Rules → Conduit sizes) is seeded with six sizes (½" to 2") and no parts, and each size maps to a catalog
+part that **must be priced per foot** (a per-each part is refused; an unmapped size refuses a priced run by name).
+Wire types gain a Symbol (the bubble letter — N, D, UE, P, CC) and a Signal label, edited in Grid Settings → Wire
+types; a blank signal falls back to the wire type's label so the legend never prints an empty entry.
+
+## D771. E-502 follows E-501, once, from one computation (#321, 2026-10-10)
+
+E-502, E-503… appear right after E-501 **only when the option has a conduit run**. They share one exclusion key
+(`conduit-riser`, one checkbox in the set's sheet list) and one page computation (`conduitRiserSheetPages`) that feeds
+the PDF sheet, the riser page and the DXF, so the three can never differ. The set's link to the DXF comes from the
+team assets, not a new `DrawingSetSheets` prop, so the signed print route structurally cannot print it. At 24×36 the
+riser draws at true sheet-inch size (the other sheets scale); a cover for 99+ pages is not handled (E-599 would collide
+with the schedules).
+
+## D772. The plan asks "Add to the lighting control riser?" (#321, 2026-10-10)
+
+After a wire is drawn between two devices, a one-line bar over the plan offers Add — or, when the pair already has a
+run, "joins the existing run — add this wire?" — and Later (hides it; nothing is stored). It shows only when the
+engine's suggestions include that route, so an audio pair, a loose wire, a wire already in a run and a pair dismissed
+on the riser page say nothing, and it never blocks drawing. The riser page lists the same suggestions with
+Accept / Dismiss (dismissals are stored with the riser and can be un-dismissed).
+
+## D773. Riser pricing: both defaults off; by others is listed, never priced (#321, 2026-10-10)
+
+`ConduitRiserDefaults.priceWire` and `priceConduit` both default **off**, and a run can override each. A run's wire is
+priced through the ordinary wire BOM only when wire pricing is on; with it off the wire is "by others" — listed in the
+BOM panel and the E-502 tables, never priced. Priced conduit is its own BOM lines (ceiling-rounded per size to the
+catalog part's foot) under a **Conduit** group excluded from the wire-pull/labor percentage. A run that needs a length
+or a mapped size is refused by name, and a refusal blocks every promote path (D319 pattern). **Estimate-owned options
+(#314) ignore riser pricing** and hide the controls. The live BOM prices at catalog list like wire and devices today;
+the quote prices at tier.
+
+## D774. Delete → Undo restores conduit runs, pinned tags and dismissals (#321, 2026-10-10)
+
+`removePlacements` prunes the riser, so its undo bundle also carries the removed runs, pinned tags and suggestion
+dismissals (`RemovedBundle.conduit`); `restoreItems` puts them back with the devices, and the untrusted bundle is
+cleaned server-side (known ids, runs re-validated, qty prune applied) like the plan items. Two runs between the same
+device pair in one bundle restore only the first — a known limit.
