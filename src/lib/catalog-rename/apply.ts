@@ -42,6 +42,7 @@ import {
 import type { CollectionName } from "@/db/doc-tables";
 import { mfrKey } from "@/lib/catalog-books";
 import { CURTAIN_MOUNTS_BLOB } from "@/lib/curtain-mounts";
+import { CONDUIT_SIZES_BLOB } from "@/lib/conduit-sizes";
 import { favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { EQUIPMENT_MAP_BLOB } from "@/lib/design/equipment-map";
 import { DRIVE_PHOTO_SYNC_BLOB } from "@/lib/part-docs/drive-photo-sync";
@@ -274,6 +275,7 @@ async function blobsStep(ctx: Ctx): Promise<StepOut> {
       },
     ],
     [SYSTEM_CATEGORIES_BLOB, (raw) => RW.rewriteSystemCategories(raw, m)],
+    [CONDUIT_SIZES_BLOB, (raw) => RW.rewriteConduitSizes(raw, m)],
     [DRIVE_PHOTO_SYNC_BLOB, (raw) => RW.rewriteDrivePhotoSync(raw, m)],
   ];
   const [favs, recents] = await Promise.all([listBlobIds(favoritesBlobId("")), listBlobIds(recentBlobId(""))]);

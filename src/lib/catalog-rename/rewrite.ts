@@ -348,6 +348,13 @@ export function rewriteCurtainMounts(blob: Record<string, unknown>, m: RenameMap
   return rows ? { ...blob, rows } : null;
 }
 
+/** The `conduit_sizes` blob (`{ sizes: [{ size, partId }] }`): each row's `partId` (a catalog SKU) moves. Two sizes may share a part, so no row is dropped. */
+export function rewriteConduitSizes(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
+  if (!isRec(blob)) return null;
+  const sizes = mapObjs(blob.sizes, (r) => swapFields(r, ["partId"], m));
+  return sizes ? { ...blob, sizes } : null;
+}
+
 /** The `system_categories` blob (`{ categories: [{ items: [{ sku }] }] }`): each item's `sku` moves. A category holding both the old and the new SKU keeps one item (the earlier position), so a category never lists a SKU twice. */
 export function rewriteSystemCategories(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
   if (!isRec(blob)) return null;

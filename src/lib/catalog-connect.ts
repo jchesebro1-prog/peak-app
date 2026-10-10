@@ -28,6 +28,10 @@ export type WireType = {
   connectionTypes: string[];
   cableSku?: string;
   dollarsPerFt?: number;
+  /** Conduit riser (#321): the 1–3 character bubble the riser prints on a run of this wire ("N", "D", "UE"), uppercased letters/digits. */
+  symbol?: string;
+  /** Conduit riser (#321): the signal the bubble stands for, in the wire legend ("Network"). */
+  signal?: string;
   /**
    * Opt-in: any connector in this family physically mates with any other in
    * it, so `canConnect` accepts a cross-type pair inside the family instead of
@@ -258,6 +262,10 @@ export function cleanWireTypes(rows: unknown): WireType[] | null {
     const wt: WireType = { id, label, connectionTypes };
     const cableSku = String(r.cableSku ?? "").trim().slice(0, 60);
     if (cableSku) wt.cableSku = cableSku;
+    const symbol = String(r.symbol ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3);
+    if (symbol) wt.symbol = symbol;
+    const signal = String(r.signal ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+    if (signal) wt.signal = signal;
     const dpf = Number(r.dollarsPerFt);
     if (Number.isFinite(dpf) && dpf >= 0) wt.dollarsPerFt = dpf;
     if (r.interchangeable === true) wt.interchangeable = true;

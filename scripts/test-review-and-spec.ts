@@ -11532,6 +11532,7 @@ seeded()
   .then(() => conduitRiser321B1Checks())
   .then(() => conduitRiser321B2Checks())
   .then(() => conduitRiser321B3Checks())
+  .then(() => conduitRiser321B4Checks())
   .then(() => designators320PureChecks())
   .then(() => designators320StoreChecks())
   .then(() => designators320EditorChecks())
@@ -18920,8 +18921,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th); #321 adds saveDesignatorDigitsAction (the 12th).
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 12 && (actionsSrc.match(/^export async function/gm) || []).length === 12, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th); #321 adds saveDesignatorDigitsAction (the 12th) and saveRiserBoxTypesAction (the 13th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 13 && (actionsSrc.match(/^export async function/gm) || []).length === 13, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -62463,4 +62464,133 @@ async function conduitRiser321B3Checks(): Promise<void> {
   ok(tabs.includes("Default level") && tabs.includes("setSheetLevelAction(project.id, s.id, e.target.value || null)") && tabs.includes("Levels are set on the conduit riser page."),
     "#321 sheet tab menu: a Default level select with the same hint");
   ok(src("src/app/(app)/design/grid/[id]/page.tsx").includes("levels: project.levels || [],") && src("src/app/(app)/design/grid/[id]/page.tsx").includes("sheetLevels: project.sheetLevels || {},"), "#321 the editor page passes levels and sheetLevels to the client");
+}
+
+/* ---------------- #321 Plan B task 4: wire-type symbols, box types, conduit sizes ---------------- */
+async function conduitRiser321B4Checks(): Promise<void> {
+  const fs = await import("node:fs");
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const J2 = (v: unknown) => JSON.stringify(v);
+  const { getBlob, setBlob } = await import("@/db/doc-store");
+  const { mergeUpsert } = await import("@/lib/stores/catalog");
+  const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
+
+  // --- wire types: symbol + signal ---
+  const { cleanWireTypes } = await import("@/lib/catalog-connect");
+  const wt = cleanWireTypes([
+    { id: "a", connectionTypes: ["HDMI"], symbol: " ue ", signal: "  Unshielded   Ethernet " },
+    { id: "b", connectionTypes: ["HDMI"], symbol: "   ", signal: "" },
+    { id: "c", connectionTypes: ["HDMI"], symbol: "n!d-x9", signal: "S".repeat(50) },
+    { id: "d", connectionTypes: ["HDMI"] },
+    { id: "e", connectionTypes: ["HDMI"], symbol: 7, signal: null },
+  ])!;
+  ok(wt[0].symbol === "UE" && wt[0].signal === "Unshielded Ethernet", "#321 cleanWireTypes: symbol is uppercased and trimmed, signal trimmed and whitespace collapsed");
+  ok(!("symbol" in wt[1]) && !("signal" in wt[1]) && !("symbol" in wt[3]) && !("signal" in wt[3]), "#321 cleanWireTypes: a blank or missing symbol / signal is left off, like cableSku");
+  ok(wt[2].symbol === "NDX" && wt[2].signal!.length === 30, "#321 cleanWireTypes: symbol keeps letters and digits only, at most 3; signal is capped at 30");
+  ok(wt[4].symbol === "7" && !("signal" in wt[4]), "#321 cleanWireTypes: junk values are coerced or dropped, never thrown");
+  const card = src("src/app/(app)/design/grid/settings/wire-types-card.tsx");
+  ok(card.includes('aria-label="Riser symbol"') && card.includes('aria-label="Riser signal"') && card.includes("symbol: wt.symbol || \"\"") && card.includes("wt.symbol = r.symbol.trim()") && card.includes("wt.signal = r.signal.trim()"),
+    "#321 Wire types card: Symbol and Signal inputs, round-tripped through rowOf and rowsToWireTypes");
+
+  // --- box types ---
+  const BT = await import("@/lib/riser-box-types");
+  const { BRAY_BOX_TYPES } = await import("@/lib/design/conduit-riser/tables");
+  const boxes = BT.sanitizeBoxTypes([
+    { code: " ar ", description: "  As   required " },
+    { code: "AR", description: "duplicate code" },
+    { code: "ab12", description: "x".repeat(80) },
+    { code: "TOOLONG", description: "five+ chars" },
+    { code: "b-1", description: "bad char" },
+    { code: "", description: "no code" },
+    { code: "Z", description: "   " },
+    null,
+    "junk",
+    { code: "q", description: "Last" },
+  ]);
+  ok(J2(boxes.map((b) => b.code)) === J2(["AR", "AB12", "Q"]), "#321 sanitizeBoxTypes: codes uppercased and unique (first wins); bad, blank and over-long codes and blank descriptions are dropped");
+  ok(boxes[0].description === "As required" && boxes[1].description.length === BT.BOX_DESC_MAX, "#321 sanitizeBoxTypes: description whitespace collapsed and capped at 60");
+  const manyBoxes = BT.sanitizeBoxTypes(Array.from({ length: 60 }, (_, i) => ({ code: "X" + i, description: "d" + i })));
+  ok(manyBoxes.length === 40 && manyBoxes[0].code === "X0", "#321 sanitizeBoxTypes: caps at 40 rows, keeps order");
+  ok(BT.sanitizeBoxTypes({ types: [{ code: "a", description: "b" }] }).length === 1 && BT.sanitizeBoxTypes("x").length === 0 && BT.sanitizeBoxTypes(undefined).length === 0, "#321 sanitizeBoxTypes: reads { types } or a bare array; junk is an empty list");
+  ok(BRAY_BOX_TYPES.every((b) => /^[A-Z0-9]{1,4}$/.test(b.code) && b.description.length <= BT.BOX_DESC_MAX) && J2(BT.sanitizeBoxTypes(BRAY_BOX_TYPES)) === J2(BRAY_BOX_TYPES), "#321 Bray's list passes its own sanitizer unchanged");
+
+  const BTS = await import("@/lib/stores/riser-box-types");
+  const boxBefore = await getBlob<Record<string, unknown>>(BT.RISER_BOX_TYPES_BLOB, {});
+  try {
+    await setBlob(BT.RISER_BOX_TYPES_BLOB, { types: null });
+    ok(J2(await BTS.getRiserBoxTypes()) === J2(BRAY_BOX_TYPES), "#321 getRiserBoxTypes: nothing stored → Bray's list");
+    const savedBoxes = await BTS.saveRiserBoxTypes([{ code: "x", description: "Custom" }, { code: "x", description: "dup" }, { code: "", description: "junk" }]);
+    ok(J2(savedBoxes) === J2([{ code: "X", description: "Custom" }]) && J2(await BTS.getRiserBoxTypes()) === J2(savedBoxes), "#321 saveRiserBoxTypes: stores the sanitized list and reads it back");
+    await BTS.saveRiserBoxTypes([]);
+    ok((await BTS.getRiserBoxTypes()).length === 0, "#321 getRiserBoxTypes: an explicitly saved empty list stays empty");
+  } finally {
+    await setBlob(BT.RISER_BOX_TYPES_BLOB, { types: Array.isArray(boxBefore.types) ? boxBefore.types : null });
+  }
+  const gridActions = src("src/app/(app)/design/grid/settings/actions.ts");
+  const boxAction = gridActions.slice(gridActions.indexOf("export async function saveRiserBoxTypesAction("), gridActions.indexOf("/* ----------------------------- Equipment map"));
+  ok(boxAction.includes('await requirePerm("manage_users");') && boxAction.includes("saveRiserBoxTypes(rows)") && boxAction.includes('revalidatePath("/design/grid/settings");'), "#321 saveRiserBoxTypesAction: admin-gated, writes through the store, revalidates the settings page");
+  ok(src("src/app/(app)/design/grid/settings/page.tsx").includes("<BoxTypesCard key={JSON.stringify(boxTypes)} boxTypes={boxTypes} />") && src("src/app/(app)/design/grid/settings/box-types-card.tsx").includes("Reset to Bray&apos;s list") && src("src/app/(app)/design/grid/settings/box-types-card.tsx").includes("+ Add box type"),
+    "#321 Grid Settings page mounts the Riser box types card with Add and Reset");
+
+  // --- conduit sizes ---
+  const CS = await import("@/lib/conduit-sizes");
+  const sized = CS.sanitizeConduitSizes([
+    { size: ' 1" ', partId: "  P-1 " },
+    { size: '1"', partId: "dup" },
+    { size: "3/4\"" },
+    { size: "", partId: "blank" },
+    { size: "x".repeat(40), partId: "" },
+    null,
+    { size: "2\"", partId: 5 },
+  ]);
+  ok(J2(sized) === J2([{ size: '1"', partId: "P-1" }, { size: '3/4"' }, { size: "x".repeat(12) }, { size: '2"' }]), "#321 sanitizeConduitSizes: trims, keeps order, first of a repeated size wins, partId optional, size capped at 12");
+  ok(CS.sanitizeConduitSizes(Array.from({ length: 30 }, (_, i) => ({ size: "s" + i }))).length === 20, "#321 sanitizeConduitSizes: caps at 20 rows");
+  ok(J2(CS.DEFAULT_CONDUIT_SIZES.map((s) => s.size)) === J2(['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"']) && CS.DEFAULT_CONDUIT_SIZES.every((s) => !("partId" in s)), "#321 conduit size seed: the six sizes, no parts");
+  ok(!CS.validateConduitSizeRows([{ size: "1\"" }, { size: " " }]).ok && !CS.validateConduitSizeRows([{ size: "1\"" }, { size: "1\"" }]).ok && !CS.validateConduitSizeRows([{ size: "x".repeat(13) }]).ok && !CS.validateConduitSizeRows(Array.from({ length: 21 }, (_, i) => ({ size: "s" + i }))).ok && CS.validateConduitSizeRows([{ size: "1\"" }]).ok,
+    "#321 validateConduitSizeRows: a blank, repeated or over-long size and a 21st row are refused, not dropped");
+
+  const FT = fid(321, "cond-ft");
+  const EA = fid(321, "cond-ea");
+  await mergeUpsert(FT, { desc: "Test321 EMT 1 inch", category: "Test321 Conduit", unit: "ft", list: 2, cost: 1 });
+  reg("catalog_parts", FT);
+  await mergeUpsert(EA, { desc: "Test321 EMT coupling", category: "Test321 Conduit", unit: "ea", list: 2, cost: 1 });
+  reg("catalog_parts", EA);
+  const CSS = await import("@/lib/stores/conduit-sizes");
+  const sizesBefore = await getBlob<Record<string, unknown>>(CS.CONDUIT_SIZES_BLOB, {});
+  try {
+    await setBlob(CS.CONDUIT_SIZES_BLOB, { sizes: null });
+    ok(J2(await CSS.getConduitSizes()) === J2(CS.DEFAULT_CONDUIT_SIZES), "#321 getConduitSizes: nothing stored → the six seed sizes");
+    const unknown = await CSS.saveConduitSizes([{ size: '1"', partId: "NO-SUCH-321" }]);
+    ok(!unknown.ok && unknown.error.includes("NO-SUCH-321") && unknown.error.includes('1"'), "#321 saveConduitSizes: a part missing from the catalog is refused by size and part");
+    const notFt = await CSS.saveConduitSizes([{ size: '3/4"' }, { size: '1"', partId: EA }]);
+    ok(!notFt.ok && notFt.error.includes(EA) && notFt.error.includes("per foot"), "#321 saveConduitSizes: a part not sold per foot is refused by name");
+    const badRow = await CSS.saveConduitSizes([{ size: '1"' }, { size: "" }]);
+    ok(!badRow.ok && badRow.error.startsWith("Row 2"), "#321 saveConduitSizes: a blank size is refused by row");
+    ok(J2(await CSS.getConduitSizes()) === J2(CS.DEFAULT_CONDUIT_SIZES), "#321 saveConduitSizes: a refused save writes nothing");
+    const good = await CSS.saveConduitSizes([{ size: ' 1" ', partId: ` ${FT} ` }, { size: '2"' }]);
+    ok(good.ok && J2(good.sizes) === J2([{ size: '1"', partId: FT }, { size: '2"' }]) && J2(await CSS.getConduitSizes()) === J2(good.ok ? good.sizes : null), "#321 saveConduitSizes: a per-foot catalog part saves, sanitized, and reads back");
+    await CSS.saveConduitSizes([]);
+    ok((await CSS.getConduitSizes()).length === 0, "#321 getConduitSizes: an explicitly saved empty list stays empty");
+  } finally {
+    await setBlob(CS.CONDUIT_SIZES_BLOB, { sizes: Array.isArray(sizesBefore.sizes) ? sizesBefore.sizes : null });
+  }
+
+  // rename sweep
+  const RW = await import("@/lib/catalog-rename/rewrite");
+  const OLD = "T321-OLD", NEW = "Brand:T321 New", OTHER = "T321-OTHER";
+  const rm: ReadonlyMap<string, string> = new Map([[OLD, NEW]]);
+  const blob = { sizes: [{ size: '1"', partId: OLD }, { size: '2"', partId: OTHER }, { size: '3/4"' }, { size: '1/2"', partId: OLD }] };
+  ok(J2(RW.rewriteConduitSizes(blob, rm)) === J2({ sizes: [{ size: '1"', partId: NEW }, { size: '2"', partId: OTHER }, { size: '3/4"' }, { size: '1/2"', partId: NEW }] }), "#321 rewriteConduitSizes: every row's partId moves, other rows and sizes are untouched");
+  ok(RW.rewriteConduitSizes({ sizes: [{ size: '1"', partId: NEW }] }, rm) === null && RW.rewriteConduitSizes({}, rm) === null && RW.rewriteConduitSizes({ sizes: "x" }, rm) === null, "#321 rewriteConduitSizes: nothing to change, no list or a malformed list → null");
+  const apply = src("src/lib/catalog-rename/apply.ts");
+  ok(apply.includes("[CONDUIT_SIZES_BLOB, (raw) => RW.rewriteConduitSizes(raw, m)]"), "#321 the SKU-rename blobs step sweeps conduit_sizes");
+
+  // page, actions, tile
+  const act = src("src/app/(app)/estimating-rules/conduit-sizes/actions.ts");
+  ok(act.includes("export async function saveConduitSizesAction(") && act.includes("export async function searchConduitPartsAction(") && (act.match(/await requirePerm\("manage_users"\);/g) || []).length === 2 && act.includes("isPerLengthUnit(h.unit"),
+    "#321 conduit sizes actions: admin-gated save and a per-foot-only part search");
+  const page = src("src/app/(app)/estimating-rules/conduit-sizes/page.tsx");
+  ok(page.includes("Admin access required") && page.includes('can("manage_users", user.roles)') && page.includes("getConduitSizes()"), "#321 conduit sizes page: admin gate, reads the store");
+  ok(src("src/app/(app)/estimating-rules/page.tsx").includes('href="/estimating-rules/conduit-sizes"') && src("src/app/(app)/estimating-rules/conduit-sizes/conduit-sizes-client.tsx").includes("+ Add size") && src("src/app/(app)/estimating-rules/conduit-sizes/conduit-sizes-client.tsx").includes("search={searchConduitPartsAction}"),
+    "#321 Estimating Rules has a Conduit sizes tile; the page adds sizes and searches per-foot parts");
 }
