@@ -68,16 +68,17 @@ const WIDTHS: Record<(typeof RISER_DEVICE_HEADERS)[number], number> = {
  * SKUs are followed (getManyBySku) so a stale reference lands on the live part.
  */
 export async function loadCableExportRows(): Promise<CableExportRow[]> {
-  const [parts, settings, projects] = await Promise.all([listCatalog(), getSettings(), listProjects()]);
+  const [settings, projects] = await Promise.all([getSettings(), listProjects()]);
   const wanted = new Set<string>();
   for (const w of resolveWireTypes(settings.wireTypes)) if (w.cableSku) wanted.add(w.cableSku);
   for (const p of projects) {
     for (const r of p.routes || []) if (r.partId) wanted.add(r.partId);
     for (const doc of Object.values(p.riser || {})) for (const l of doc.links || []) if (l.partId) wanted.add(l.partId);
   }
+  // Only the referenced parts are read (no second whole-catalog list); a renamed SKU resolves to its live part, deduped by SKU.
   const resolved = await getManyBySku([...wanted]);
-  const referenced = new Set<string>([...wanted, ...[...resolved.values()].map((p) => p.sku)]);
-  const rows = riserCableRows(parts, referenced);
+  const parts = [...new Map([...resolved.values()].map((p) => [p.sku, p] as const)).values()];
+  const rows = riserCableRows(parts, new Set(parts.map((p) => p.sku)));
   rows.sort((a, b) => a.manufacturer.localeCompare(b.manufacturer) || a.model.localeCompare(b.model) || a.sku.localeCompare(b.sku));
   return rows;
 }

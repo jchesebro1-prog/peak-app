@@ -236,6 +236,7 @@ export function riserWires(project: GridProject, optionId: string, ctx: RiserPar
     signal: signalOf(r.partId, ctx.partById.get(r.partId), r.connectionType, ctx.wireTypes),
     lengthFt: routeLengthFt(r, cals),
     inSystem: routeSystem(r, placementById, ctx.partById) === "lighting",
+    odIn: ctx.partById.get(r.partId)?.cableOdIn ?? null,
   }));
   const lit = (id: string) => {
     const pl = placementById.get(id);
@@ -255,6 +256,7 @@ export function riserWires(project: GridProject, optionId: string, ctx: RiserPar
       signal: signalOf(l.partId, ctx.partById.get(l.partId), undefined, ctx.wireTypes),
       lengthFt: l.lengthFt,
       inSystem: lit(from) || lit(to),
+      odIn: ctx.partById.get(l.partId)?.cableOdIn ?? null,
     });
   }
   return wires;

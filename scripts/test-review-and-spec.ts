@@ -11642,6 +11642,7 @@ seeded()
   .then(() => riserPhase2A2Checks())
   .then(() => riserPhase2A3Checks())
   .then(() => riserPhase2B1Checks())
+  .then(() => riserPhase2B2Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -60338,7 +60339,7 @@ async function conduitRiser321Checks(): Promise<void> {
   ];
   const wire = (id: string, from: string | undefined, to: string | undefined, sig: string | null, kind: "route" | "link" = "route", lengthFt: number | null = 40): Wire => {
     const t = wt.find((x) => x.id === sig);
-    return { id, kind, from, to, partId: `P-${sig}`, cable: t ? t.label : "Mystery cable", signal: t ? { wireTypeId: t.id, symbol: t.symbol, signal: t.signal } : null, lengthFt, inSystem: true };
+    return { id, kind, from, to, partId: `P-${sig}`, cable: t ? t.label : "Mystery cable", signal: t ? { wireTypeId: t.id, symbol: t.symbol, signal: t.signal } : null, lengthFt, inSystem: true, odIn: null };
   };
   const wires: Wire[] = [
     wire("w1", "gp-er", "gp-c1", "dmx", "route", 50), wire("w2", "gp-c1", "gp-er", "net", "route", 62.5),
@@ -63144,8 +63145,8 @@ async function conduitRiser321B6Checks(): Promise<void> {
   const devices = [dev("gp-er", "ER-01", "racks-cases"), dev("gp-c1", "CRO-01", "control-networking"), dev("gp-c2", "CRO-02", "control-networking")];
   const wt = [{ id: "dmx", label: "Belden 1583A", symbol: "D", signal: "DMX" }];
   const wires: Wire[] = [
-    { id: "w1", kind: "route", from: "gp-er", to: "gp-c1", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true },
-    { id: "w2", kind: "route", from: "gp-er", to: "gp-c2", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true },
+    { id: "w1", kind: "route", from: "gp-er", to: "gp-c1", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true, odIn: null },
+    { id: "w2", kind: "route", from: "gp-er", to: "gp-c2", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true, odIn: null },
   ];
   let doc = M.emptyConduitRiserDoc();
   for (const s of S.suggestions(doc, wires).items) doc = S.acceptSuggestion(doc, s, mk).doc;
@@ -64816,7 +64817,8 @@ async function riserPhase2B1Checks(): Promise<void> {
   ok(sug({ desc: "Belden 1583A 1000ft" }) === 0.19, "#328 B1 match: a description that names the manufacturer matches with no manufacturer on the part");
   ok(sug({ desc: "cable 1583A 1000ft" }) === null && sug({ desc: "Cat5e 8471" }) === null, "#328 B1 match: a bare model number in a description with no manufacturer is not trusted");
   ok(sug({ mfr: "Southwire", manufacturerModelNumber: "8471" }) === null && sug({ mfr: "Acme", desc: "Belden 8471 compatible" }) === null, "#328 B1 match: a part with another manufacturer never matches by model or description");
-  ok(sug({ manufacturerModelNumber: "8471" }) === 0.274, "#328 B1 match: a model with no manufacturer on the part matches by model alone");
+  ok(sug({ manufacturerModelNumber: "1583A" }) === 0.19 && sug({ manufacturerModelNumber: "8471" }) === null && sug({ manufacturerModelNumber: "2412" }) === null && sug({ sku: "Belden:9841" }) === null, "#328 B1 match: a model with no manufacturer on the part matches by model alone — unless it is purely numeric (B2: 8471, 2412, 9841 need the manufacturer)");
+  ok(sug({ mfr: "Belden", manufacturerModelNumber: "2412" }) === 0.224 && sug({ mfr: "Southwire", manufacturerModelNumber: "2412" }) === null, "#328 B1 match: a numeric model matches when the part's manufacturer matches the row, never another maker's");
   ok(sug({ mfr: "TMB", manufacturerModelNumber: "PC224P" }) === 0.285 && sug({ mfr: "ProPlex", manufacturerModelNumber: "PC224P" }) === 0.285 && sug({ mfr: "TMB", manufacturerModelNumber: "ProPlex PC224T" }) === 0.32, "#328 B1 match: TMB / ProPlex aliases and a ProPlex-prefixed model");
   ok(sug({ mfr: "TMB", manufacturerModelNumber: "PC224P-PLN" }) === null && sug({ mfr: "TMB", manufacturerModelNumber: "PC224PX" }) === null, "#328 B1 match: a longer model (PC224P-PLN) never matches its shorter cousin");
   ok(sug({ mfr: "Southwire", manufacturerModelNumber: "R50003-1B" }) === 0.174 && sug({ mfr: "Southwire", manufacturerModelNumber: "r500031b" }) === 0.174 && sug({ mfr: "Southwire", manufacturerModelNumber: "13060" }) === 0.174, "#328 B1 match: hyphen and case insensitive, and the spec number");
@@ -64982,4 +64984,106 @@ async function riserPhase2B1Checks(): Promise<void> {
   ok(/mergeUpsert\(cab!\.sku, cableUpsertPatchOf\(cab!\)\)/.test(srv) && /mergeUpsert\(c\.sku, upsertPatchOf\(c\)\)/.test(srv), "#328 B1: Devices rows write through the two-field patch and Cables rows through the cableOdIn-only patch, both via mergeUpsert");
   const route = fs.readFileSync("src/app/(app)/catalog/riser-data/export/route.ts", "utf8");
   ok(/requirePerm\("manage_users"\)/.test(route) && /loadCableExportRows/.test(route), "#328 B1: the export route stays admin only and adds the Cables tab");
+}
+
+async function riserPhase2B2Checks(): Promise<void> {
+  const fs = await import("node:fs");
+  const F = await import("@/lib/design/conduit-riser/fill");
+  const M = await import("@/lib/design/conduit-riser/model");
+  const T = await import("@/lib/design/conduit-riser/tags");
+  const S = await import("@/lib/design/conduit-riser/suggest");
+  const D = await import("@/lib/design/conduit-riser/derive");
+  const L = await import("@/lib/design/conduit-riser/layout");
+  const G = await import("@/lib/design/conduit-riser/drawing");
+  const SV = await import("@/lib/design/conduit-riser/svg");
+  const DX = await import("@/lib/design/conduit-riser/dxf");
+  type Dev = import("@/lib/design/conduit-riser/input").CRDevice;
+  type Wire = import("@/lib/design/conduit-riser/input").CRWire;
+  const J = (v: unknown) => JSON.stringify(v);
+  const src = (f: string) => fs.readFileSync(f, "utf8");
+  const near = (a: number, b: number, eps = 1e-9) => Math.abs(a - b) < eps;
+  const od = (cable: string, odIn: number | null | undefined) => ({ cable, odIn });
+  const areaOf = (...ods: number[]) => ods.reduce((sum, d) => sum + Math.PI * (d / 2) ** 2, 0);
+
+  // ---- 1. the tables
+  const ID: Record<string, number> = { '1/2"': 0.622, '3/4"': 0.824, '1"': 1.049, '1-1/4"': 1.38, '1-1/2"': 1.61, '2"': 2.067, '2-1/2"': 2.731, '3"': 3.356, '3-1/2"': 3.834, '4"': 4.334 };
+  ok(J(F.EMT_AREAS.map((e) => e.area)) === J([0.304, 0.533, 0.864, 1.496, 2.036, 3.356, 5.858, 8.846, 11.545, 14.753]) && F.EMT_AREAS.length === 10, "#328 B2 fill: the ten EMT total areas are NEC Chapter 9 Table 4 (1/2\" … 4\")");
+  ok(F.EMT_AREAS.every((e) => near(e.area, (Math.PI / 4) * ID[e.size] ** 2, 0.0015)), "#328 B2 fill: each Table 4 area agrees with pi/4 x the EMT internal diameter squared");
+  ok(F.allowedFillPct(1) === 53 && F.allowedFillPct(2) === 31 && F.allowedFillPct(3) === 40 && F.allowedFillPct(12) === 40, "#328 B2 fill: Table 1 allows 53 % for one cable, 31 % for two, 40 % for three or more");
+  ok(F.normalizeEmtSize('3/4"') === '3/4"' && F.normalizeEmtSize("3/4") === '3/4"' && F.normalizeEmtSize("1 1/4 in") === '1-1/4"' && F.normalizeEmtSize('1-1/2" EMT') === '1-1/2"' && F.normalizeEmtSize("2 inch") === '2"' && F.normalizeEmtSize("4in") === '4"' && F.normalizeEmtSize(" 1/2\u2033 ") === '1/2"', "#328 B2 fill: a typed size normalizes to its EMT trade size");
+  ok(["", "5", '5"', "12", "1.25", "PVC", "ladder", "3/8", "0"].every((x) => F.normalizeEmtSize(x) === null), "#328 B2 fill: anything that is not an EMT trade size normalizes to nothing");
+
+  // ---- 2. the math
+  const two = F.runFill([od("A", 0.274), od("B", 0.19)], '3/4"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
+  ok("count" in two && two.count === 2 && near(two.areaIn2, areaOf(0.274, 0.19)) && near(two.pct!, (areaOf(0.274, 0.19) / 0.533) * 100) && F.fmtPct(two.pct!) === "16.4" && two.allowed === 31 && !two.over && two.suggested === '1/2"', "#328 B2 fill: two cables sum their circle areas; 0.274\" + 0.19\" in 3/4\" is 16.4 % of 31 %, suggests 1/2\"");
+  const fat = F.runFill([od("A", 0.5), od("B", 0.5)], '3/4"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
+  ok(fat.over && F.fmtPct(fat.pct!) === "73.7" && fat.suggested === '1-1/4"', "#328 B2 fill: two 0.5\" cables overfill 3/4\" (73.7 % > 31 %) and the suggestion steps up to 1-1/4\"");
+  const one = F.runFill([od("A", 0.274)], '1/2"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
+  ok(one.allowed === 53 && !one.over && one.suggested === '1/2"', "#328 B2 fill: one cable uses the 53 % rule");
+  const three = F.runFill([od("A", 0.3), od("B", 0.3), od("C", 0.3)], '1/2"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
+  ok(three.allowed === 40 && three.over && three.suggested === '3/4"', "#328 B2 fill: three cables use the 40 % rule (0.212 in2 > 0.122 in2 in 1/2\", fits 3/4\")");
+  // The limit itself is not an overfill: a single cable whose area is exactly 53 % of 1/2".
+  const edgeOd = 2 * Math.sqrt((0.304 * 0.53) / Math.PI);
+  const edge = F.runFill([od("A", edgeOd)], '1/2"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
+  const past = F.runFill([od("A", edgeOd * 1.001)], '1/2"') as Extract<import("@/lib/design/conduit-riser/fill").RunFill, { count: number }>;
+  ok(near(edge.pct!, 53, 1e-6) && !edge.over && past.over, "#328 B2 fill: exactly the allowed percent is not overfilled; a hair over is");
+  ok(F.runFill([od("A", 1.1), od("B", 1.1), od("C", 1.1), od("D", 1.1), od("E", 1.1)], '2"') !== null && (F.runFill([od("A", 1.1), od("B", 1.1), od("C", 1.1), od("D", 1.1), od("E", 1.1)], '2"') as { suggested: string | null }).suggested === '4"', "#328 B2 fill: the suggestion is the smallest size whose allowed area holds the cables");
+  const huge = F.runFill(Array.from({ length: 9 }, (_, i) => od(`C${i}`, 1.5)), '4"') as { suggested: string | null; over: boolean };
+  ok(huge.suggested === null && huge.over && /larger than 4/.test(F.fillLine(huge as never, '4"').text), "#328 B2 fill: cables too big for 4\" EMT have no suggestion and say so");
+  const odd = F.runFill([od("A", 0.274), od("B", 0.19)], '12"') as { pct: number | null; over: boolean; suggested: string | null };
+  ok(odd.pct === null && !odd.over && odd.suggested === '1/2"' && /^Fill — suggests 1\/2"/.test(F.fillLine(odd as never, '12"').text), "#328 B2 fill: a size that is not an EMT trade size shows the suggestion only — no percent, never overfilled");
+  ok(F.runFill([], '3/4"') === null, "#328 B2 fill: a run with no cables shows nothing");
+  const unk = F.runFill([od("Belden 1583A", 0.19), od("Mystery", null), od("Mystery", null), od("Alpha", undefined)], '3/4"') as { unknown: string[] };
+  ok(J(unk) === J({ unknown: ["Alpha", "Mystery"] }) && F.fillLine(unk as never, '3/4"').text === "Fill unknown — no diameter for Alpha, Mystery", "#328 B2 fill: any cable missing a diameter makes the fill unknown and lists those cables (once each)");
+  ok(F.runFill([od("A", 0)], '3/4"') !== null && "unknown" in (F.runFill([od("A", 0)], '3/4"') as object) && "unknown" in (F.runFill([od("A", NaN)], '3/4"') as object), "#328 B2 fill: a zero or non-finite diameter counts as missing");
+  ok(F.fillLine(fat, '3/4"').text === 'Overfilled — 3/4" allows 31 % for 2 cables · suggests 1-1/4"' && F.fillLine(fat, '3/4"').tone === "warn" && F.fillLine(two, '3/4"').text === 'Fill 16.4 % · suggests 1/2"' && F.fillLine(two, '3/4"').tone === "ok", "#328 B2 fill: the Run panel line reads 'Fill 16.4 % · suggests 1/2\"' or the amber overfilled text");
+  ok(F.overfillWarning("ER-01", "CRO-04", '3/4"', fat) === 'ER-01 → CRO-04: 3/4" is overfilled (73.7 %, 31 % allowed) — suggests 1-1/4"', "#328 B2 fill: the warning names both ends, the typed size, the percent and the suggestion");
+
+  // ---- 3. through derive: members' diameters, warnings, cable management
+  let seq = 0;
+  const mk: import("@/lib/design/conduit-riser/model").MakeId = (p) => `${p}${(++seq).toString(16).padStart(12, "0")}`;
+  const dev = (id: string, label: string, typeKey: string): Dev => ({
+    id, label, desc: label, model: "", typeKey, inSystem: true, spaceId: "sp-1", spaceName: "Stage", levelId: "lv-stage",
+    tag: T.effectiveTag(undefined, { box: "E", face: "DMXO", mount: "SM", height: '18"', pd: "P/D" }, "Stage"),
+  });
+  const devices = [dev("fb-er", "ER-01", "racks-cases"), dev("fb-c1", "CRO-04", "control-networking")];
+  const wt = [{ id: "dmx", label: "Belden 1583A", symbol: "D", signal: "DMX" }];
+  const wire = (id: string, odIn: number | null): Wire => ({ id, kind: "route", from: "fb-er", to: "fb-c1", partId: "C", cable: "Belden 1583A", signal: { wireTypeId: "dmx", symbol: "D", signal: "DMX" }, lengthFt: 40, inSystem: true, odIn });
+  const levels = [{ id: "lv-stage", label: "Stage", order: 0 }];
+  const build = (ods: (number | null)[], size: string, style?: "cableMgmt") => {
+    const wires = ods.map((o, i) => wire(`fw${i + 1}`, o));
+    let doc = M.emptyConduitRiserDoc();
+    for (const sg of S.suggestions(doc, wires).items) doc = S.acceptSuggestion(doc, sg, mk).doc;
+    doc = { ...doc, runs: doc.runs.map((r) => ({ ...r, size, ...(style ? { style } : {}) })) };
+    const view = D.deriveView({ doc, devices, wires, levels, wireTypes: wt });
+    return { doc, view, vd: view.details[0] };
+  };
+  const over = build([0.5, 0.5], '3/4"');
+  ok(over.vd.runs.length === 1 && over.vd.runs[0].members.map((m) => m.odIn).join() === "0.5,0.5", "#328 B2 derive: a run's members carry their cable diameters");
+  ok(over.view.warnings.includes('ER-01 → CRO-04: 3/4" is overfilled (73.7 %, 31 % allowed) — suggests 1-1/4"'), "#328 B2 derive: an overfilled run lands in the warnings list");
+  ok(!build([0.2, 0.2], '3/4"').view.warnings.some((w) => /overfilled/.test(w)) && !build([0.5, null], '3/4"').view.warnings.some((w) => /overfilled/.test(w)) && !build([0.5, 0.5], '12"').view.warnings.some((w) => /overfilled/.test(w)), "#328 B2 derive: a roomy run, an unknown-fill run and a non-EMT size warn about nothing");
+  ok(F.viewRunFill(build([0.5, 0.5], '3/4"', "cableMgmt").vd.runs[0]) === null && !build([0.5, 0.5], '3/4"', "cableMgmt").view.warnings.some((w) => /overfilled/.test(w)), "#328 B2 derive: cable management is not conduit — no fill");
+  ok(F.isOverfilled(F.viewRunFill(over.vd.runs[0])) && !F.isOverfilled(null) && !F.isOverfilled({ unknown: ["x"] }), "#328 B2 derive: isOverfilled picks only a computed overfill");
+
+  // ---- 4. the sheet and the DXF never change, whatever the fill
+  const render = (b: ReturnType<typeof build>) => {
+    const fig = G.detailGeometry(L.layoutDetail(b.vd, b.doc), b.vd);
+    return { geo: J(fig.geo), svg: SV.geometryToSvg(fig.geo, { w: fig.w, h: fig.h }), dxf: DX.geometryToDxf(fig.geo, { w: fig.w, h: fig.h }) };
+  };
+  const roomy = render(build([0.1, 0.1], '3/4"'));
+  const crowded = render(over);
+  const unknownOd = render(build([null, null], '3/4"'));
+  ok(roomy.geo === crowded.geo && roomy.svg === crowded.svg && roomy.dxf === crowded.dxf && roomy.svg === unknownOd.svg && roomy.dxf === unknownOd.dxf, "#328 B2 sheet: the printed drawing and the DXF are byte-identical whether a conduit is roomy, overfilled or unknown");
+  ok(!crowded.svg.includes("\u26a0") && !crowded.dxf.includes("\u26a0") && !/\\U\+26A0|26a0/i.test(crowded.dxf), "#328 B2 sheet: no warning sign on the sheet or in the DXF");
+
+  // ---- 5. wiring pins
+  const loader = src("src/lib/design/conduit-riser-server.ts");
+  ok((loader.match(/odIn: ctx\.partById\.get\((r|l)\.partId\)\?\.cableOdIn \?\? null/g) || []).length === 2, "#328 B2: the loader reads each route's and RiserLink's cable diameter from the cable part's cableOdIn");
+  const editor = src("src/app/(app)/design/grid/[id]/conduit-riser/conduit-riser-editor.tsx");
+  const panels = src("src/app/(app)/design/grid/[id]/conduit-riser/panels.tsx");
+  ok(editor.includes("viewRunFill") && editor.includes("\u26a0") && panels.includes("RunFillLine") && (panels.match(/<RunFillLine /g) || []).length === 2, "#328 B2: the editor flags an overfilled size label and both Run panels (edit and phone view) show the fill line");
+  ok(["src/lib/design/conduit-riser/drawing.ts", "src/lib/design/conduit-riser/svg.ts", "src/lib/design/conduit-riser/dxf.ts", "src/lib/design/conduit-riser/layout.ts", "src/components/drawing/conduit-riser-figure.tsx"].every((f) => !src(f).includes("\u26a0") && !/from "\.\/fill"/.test(src(f))), "#328 B2: the drawing, layout, SVG, DXF and figure never import the fill module or carry the warning sign");
+  const sheet = src("src/lib/riser-data-sheet-server.ts");
+  const loadCables = sheet.slice(sheet.indexOf("export async function loadCableExportRows"), sheet.indexOf("/** The \"Devices\" sheet"));
+  ok(!/listCatalog\(/.test(loadCables) && /getManyBySku/.test(loadCables), "#328 B1 follow-up: the Cables export reads only the referenced parts — no second whole-catalog list");
 }

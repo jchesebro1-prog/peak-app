@@ -45,6 +45,8 @@ export type CRWire = {
   lengthFt: number | null;
   /** In this riser's system (routeSystem for routes; either end for links). */
   inSystem: boolean;
+  /** The cable part's outside diameter, inches (catalog `cableOdIn`); null = not recorded (#328 B2 fill). */
+  odIn: number | null;
 };
 
 export type CRLevel = { id: string; label: string; elevation?: string; order: number };

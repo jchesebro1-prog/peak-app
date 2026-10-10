@@ -10,6 +10,7 @@ import { layoutDetail, type DetailLayout, type LaidItem } from "@/lib/design/con
 import { detailGeometry, type Geo } from "@/lib/design/conduit-riser/drawing";
 import type { ViewDetail, ViewEnd } from "@/lib/design/conduit-riser/derive";
 import type { CRBoxType, CRWireType } from "@/lib/design/conduit-riser/input";
+import { isOverfilled, viewRunFill } from "@/lib/design/conduit-riser/fill";
 import type { GridLevel } from "@/lib/design/grid-levels";
 import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { pairKey, type ConduitRiserDoc, type CROp, type RunEnd } from "@/lib/design/conduit-riser/model";
@@ -646,6 +647,19 @@ export default function ConduitRiserEditor(props: {
                   >
                     <title>{phone ? "Conduit run" : "Conduit run — click to edit, drag sideways to move its lane"}</title>
                   </polyline>
+                  {/* #328 B2: editor-only overfill flag beside the size label — the printed sheet and the DXF never draw it. */}
+                  {(() => {
+                    const vr = runById.get(r.runId);
+                    const f = vr ? viewRunFill(vr) : null;
+                    if (!vr || !isOverfilled(f)) return null;
+                    const w = r.size.length * 0.112 * 0.56;
+                    const x = r.sizeAnchor === "middle" ? r.sizeAt.x + w / 2 + 0.05 : r.sizeAt.x + w + 0.05;
+                    return (
+                      <text x={x * U} y={r.sizeAt.y * U} fontSize={0.13 * U} dominantBaseline="central" fill="#c47a00" fontWeight={700} pointerEvents="none" aria-hidden="true">
+⚠
+                      </text>
+                    );
+                  })()}
                 </g>
               );
             })}

@@ -7,6 +7,8 @@ import { BRAY_POWER_TYPES, MAX_RUN_FT, type ConduitRiserDefaults, type PowerType
 import { TAG_LIMITS, tagPanelPatch, type EffectiveTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import type { CRBoxType, CRDevice, CRWireType } from "@/lib/design/conduit-riser/input";
 import type { ViewRun } from "@/lib/design/conduit-riser/derive";
+import { fillLine, viewRunFill } from "@/lib/design/conduit-riser/fill";
+import { formatCableOd } from "@/lib/design/conduit-riser/cable-od";
 import type { GridLevel } from "@/lib/design/grid-levels";
 
 /**
@@ -268,6 +270,7 @@ function RunMembers({ vr }: { vr: ViewRun }) {
         <div key={`${m.kind}:${m.id}`} style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0" }}>
           <Bubble symbol={m.signal?.symbol || "?"} />
           <span style={{ flex: 1 }}>{m.cable}</span>
+          <span style={{ color: m.odIn ? "#8c919c" : "#8a6a1f", fontVariantNumeric: "tabular-nums" }} title="Outside diameter (Catalog → Riser data sheet → Cables)">{m.odIn ? `${formatCableOd(m.odIn)}" OD` : "no OD"}</span>
           <span style={{ color: "#8c919c", fontVariantNumeric: "tabular-nums" }}>{m.lengthFt !== null ? `${Math.round(m.lengthFt * 10) / 10} ft` : "unmeasured"}</span>
         </div>
       ))}
@@ -275,6 +278,19 @@ function RunMembers({ vr }: { vr: ViewRun }) {
   ) : vr.empty ? (
     <div style={{ ...HINT, color: "#8a6a1f" }}>No wires in this conduit — it prints as an empty conduit with its size.</div>
   ) : null;
+}
+
+/** #328 B2: `Fill 28 % · suggests 3/4"` / amber overfilled / fill unknown — advice only, never a block. */
+function RunFillLine({ vr, size, style }: { vr: ViewRun; size: string; style: "conduit" | "cableMgmt" }) {
+  const f = viewRunFill({ run: { ...vr.run, size, style }, members: vr.members });
+  if (!f) return null;
+  const line = fillLine(f, size);
+  return (
+    <div role={line.tone === "warn" ? "status" : undefined} style={{ ...HINT, ...(line.tone === "ok" ? { color: "#3b404a" } : { color: "#8a4b2a", fontWeight: line.tone === "warn" ? 650 : 400 }) }}>
+      {line.tone === "warn" ? "⚠ " : ""}
+      {line.text}
+    </div>
+  );
 }
 
 const measuredFt = (vr: ViewRun) =>
@@ -355,6 +371,7 @@ export function RunPanel({
       </div>
       <div style={HINT}>Leave the length blank to use the wires&apos; measured footage.</div>
       <RunMembers vr={vr} />
+      <RunFillLine vr={vr} size={size} style={style} />
       {stubRun && (
         <div>
           <div style={{ ...FIELD, marginBottom: 4 }}>Signals shown on this run</div>
@@ -422,6 +439,7 @@ export function RunView({
         )}
       </div>
       <RunMembers vr={vr} />
+      <RunFillLine vr={vr} size={run.size} style={run.style} />
       {stubRun && (
         <div>
           <div style={{ ...FIELD, marginBottom: 4 }}>Signals shown on this run</div>

@@ -6,6 +6,7 @@
 
 import { compareDetailN, pairKey, runPairKey, type ConduitRiserDoc, type ConduitRun, type RiserDetail, type RiserStub, type RunEnd } from "./model";
 import type { CRDevice, CRLevel, CRSignal, CRWire, CRWireType } from "./input";
+import { isOverfilled, overfillWarning, viewRunFill } from "./fill";
 
 export type ViewEnd =
   | { kind: "tag"; id: string }
@@ -103,6 +104,8 @@ export function deriveView(input: DeriveInput): CRView {
 
   const out: ViewDetail[] = [];
   const missing = new Set<string>();
+  const fillWarned = new Set<string>();
+  const fillWarnings: string[] = [];
   for (const detail of details) {
     const tagIds = [...tagged].filter((id) => detailOf.get(id) === detail.id);
     const stubs = doc.stubs.filter((s) => stubDetail.get(s.id) === detail.id);
@@ -171,6 +174,12 @@ export function deriveView(input: DeriveInput): CRView {
         if (t && t.symbol) sig.set(t.id, { wireTypeId: t.id, symbol: t.symbol, signal: t.signal });
       }
       unknown.forEach((c) => missing.add(c));
+      // #328 B2: an overfilled conduit is a warning (editor list only) — never a block. A run in two details warns once.
+      const fill = viewRunFill({ run, members });
+      if (isOverfilled(fill) && !fillWarned.has(run.id)) {
+        fillWarned.add(run.id);
+        fillWarnings.push(overfillWarning(endLabel(run.a), endLabel(run.b), run.size, fill));
+      }
       const stubRun = run.a.kind === "stub" || run.b.kind === "stub";
       return {
         run,
@@ -195,5 +204,6 @@ export function deriveView(input: DeriveInput): CRView {
     out.push({ detail, tags, stubs, runs: viewRuns, headEndId, levels, hasUnlevelled });
   }
   for (const c of [...missing].sort()) warnings.push(`${c} has no signal symbol — set it in Settings → Wire types`);
+  warnings.push(...fillWarnings);
   return { details: out, warnings };
 }

@@ -104,7 +104,8 @@ function keysOf(text: string): Set<string> {
 /**
  * The researched diameter for a part, or null. A model match is by the part's
  * Model #, MFR P/N or the text after the SKU's `Brand:`; it also requires the
- * manufacturer to match when the part has one. A match from the description
+ * manufacturer to match when the part has one — and a purely numeric model
+ * (2412, 9841) only matches when the part's manufacturer is known and matches. A match from the description
  * ("Belden 1583A 1000ft") additionally needs the manufacturer to be positively
  * known — on the part, or named in the description. A model that is only a
  * prefix of the part's (PC224P vs PC224P-PLN) never matches. If more than one
@@ -118,7 +119,9 @@ export function suggestCableOd(part: CableOdPartLike): CableOdSuggestion | null 
   }
   const hits = (keys: Set<string>, entryOk: (e: CableOdSuggestion) => boolean) =>
     CABLE_OD_SUGGESTIONS.filter((e) => entryOk(e) && e.models.some((m) => keys.has(normCableKey(m))));
-  const byModel = hits(modelKeys, (e) => !mfr || mfrMatches(mfr, e));
+  // A purely numeric model (2412, 9841, 13060) is too common a number to trust alone: it needs the part's manufacturer to match the row.
+  const numeric = (m: string) => /^\d+$/.test(normCableKey(m));
+  const byModel = CABLE_OD_SUGGESTIONS.filter((e) => e.models.some((m) => modelKeys.has(normCableKey(m)) && (mfr ? mfrMatches(mfr, e) : !numeric(m))));
   if (byModel.length) return byModel.length === 1 ? byModel[0] : null;
   const desc = String(part.desc ?? "");
   const descKeys = keysOf(desc);
