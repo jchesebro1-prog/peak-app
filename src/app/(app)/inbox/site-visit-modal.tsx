@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import type { ReaderVM } from "./types";
 import {
@@ -8,6 +8,9 @@ import {
   type InviteStatus,
 } from "./site-visit-actions";
 import { VenueAvailabilityCheck } from "@/components/venue-availability-check";
+import { addressStatusAction } from "../address-actions";
+import AddressFlagBadge from "@/components/address-fix/address-flag";
+import type { FixTarget, GeoStatus } from "@/lib/address-verify/types";
 
 /**
  * Schedule-site-visit modal (D76 / PUNCHLIST #2 phase 1). Opened from the
@@ -111,6 +114,25 @@ export default function SiteVisitModal({
   }, [visit.contacts, contactEmail]);
 
   const [venueId, setVenueId] = useState(defaultVenue?.id || "");
+  // Spec 2026-10-09 — warn while booking at an unverified address. Never blocks.
+  // addressStatusAction can write a place-book row per distinct text, so the
+  // check is debounced (>= 600 ms) and a superseded request is dropped.
+  const [addr, setAddr] = useState<{ forVenue: string; status: GeoStatus; fix: FixTarget | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const venue = visit.venues.find((v) => v.id === venueId);
+    const t = setTimeout(() => {
+      addressStatusAction({ customerId, locationId: venueId || null, address: venue?.address || "" })
+        .then((r) => {
+          if (live) setAddr({ forVenue: venueId, status: r.status, fix: r.fix });
+        })
+        .catch(() => {});
+    }, 600);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [venueId, customerId, visit.venues]);
   const [contactIdx, setContactIdx] = useState(defaultContactIdx);
   const [reason, setReason] = useState(visit.reasons[0] || "");
   const [date, setDate] = useState(tomorrowISO());
@@ -239,6 +261,12 @@ export default function SiteVisitModal({
               ))}
               {visit.venues.length === 0 && <option value="">No venues on record</option>}
             </select>
+            {addr && addr.forVenue === venueId && addr.status !== "verified" && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <AddressFlagBadge flag={{ text: "Address not verified — no drive time", fix: addr.fix }} />
+                <span style={{ fontSize: 11, color: "#9aa0ab" }}>You can still schedule it.</span>
+              </div>
+            )}
 
             <label style={lbl}>Contact (goes in the event details — not emailed)</label>
             <select

@@ -1717,3 +1717,21 @@ export async function driveTimeFixUiPins(ok: Ok): Promise<void> {
      !/locateVenueAction|searchVenueAddressAction|townCentreAction|listUnlocatedVenuesAction/.test(read("src/app/(app)/settings/actions.ts")),
     "drive-time: the old venue-only locate drawer, worklist and actions are gone");
 }
+
+export async function driveTimeBookingPins(ok: Ok): Promise<void> {
+  const read = (p: string) => readFileSync(p, "utf8");
+  const vr = read("src/app/(app)/venue-assessments/visit-requests.tsx");
+  ok(vr.includes("addressFlag: AddressFlagVM | null") && vr.includes("<AddressFlagBadge"), "drive-time booking: the visit-requests scheduler shows the address flag with Fix");
+  ok(read("src/app/(app)/venue-assessments/page.tsx").includes("addressStatesForVisits"), "drive-time booking: visit rows get their address state server-side");
+  const modal = read("src/app/(app)/inbox/site-visit-modal.tsx");
+  ok(modal.includes("addressStatusAction") && modal.includes("You can still schedule it"), "drive-time booking: the Inbox scheduler warns about an unverified address but never blocks");
+  ok(read("src/app/(app)/companies/[id]/page.tsx").includes("addressStatesForVisits"), "drive-time booking: the company record's visit list flags unverified addresses");
+  // The live check writes a place-book row per distinct text: debounced, never per keystroke, never gating Save.
+  ok(/setTimeout\([\s\S]{0,900}?,\s*(6\d\d|[7-9]\d\d|\d{4,})\)/.test(modal) && modal.includes("clearTimeout"), "drive-time booking: the Inbox scheduler's address check is debounced (>= 600 ms), not per keystroke");
+  ok(!/disabled=\{[^}]*addr/.test(modal), "drive-time booking: the address warning never disables Save");
+  ok(modal.includes("Address not verified — no drive time"), "drive-time booking: the Inbox warning uses the verbatim flag copy");
+  // Task 10 review add-ons.
+  const home = read("src/app/(app)/home-calendar.tsx");
+  ok(/<AddressFlagBadge flag=\{it\.addressFlag\} \/>/.test(home) && !/<AddressFlagBadge flag=\{it\.addressFlag\} compact/.test(home), "drive-time booking: Home agenda rows show the full address flag (not compact)");
+  ok(/<span role="img"[^>]*aria-label=\{text\}/.test(read("src/app/(app)/calendar/calendar-client.tsx")), "drive-time booking: the calendar's plain flag span carries a role with its aria-label");
+}

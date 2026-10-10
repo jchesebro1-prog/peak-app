@@ -66,6 +66,9 @@ import {
 } from "../lib";
 import type { SaveCustomerInput } from "../types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { addressStatesForVisits } from "@/lib/address-verify/targets";
+import { FLAG_TEXT } from "@/lib/drive-plan/plan";
+import AddressFlagBadge from "@/components/address-fix/address-flag";
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -227,6 +230,10 @@ export default async function CustomerDetailPage({
 
   /* ---- site visits (D76) ---- */
   const visits = await visitsForCustomer(cust.id);
+  const visitAddr = await addressStatesForVisits(
+    visits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
+    "cache"
+  );
   // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
   const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
 
@@ -862,6 +869,11 @@ export default async function CustomerDetailPage({
                           {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
                           {v.invite?.sentAt ? " · invite sent" : ""}
                         </div>
+                        {v.stage !== "done" && visitAddr.get(v.id) && visitAddr.get(v.id)!.status !== "verified" && (
+                          <div style={{ marginTop: 3 }}>
+                            <AddressFlagBadge flag={{ text: FLAG_TEXT.unverified, fix: visitAddr.get(v.id)!.fix }} />
+                          </div>
+                        )}
                       </div>
                     );
                   })}

@@ -210,7 +210,7 @@ export default function CalendarClient({
         {it.drive?.fix ? (
           <AddressFlagBadge flag={{ text, fix: it.drive.fix }} compact={compact} />
         ) : (
-          <span style={{ fontWeight: 600, color: "#8a3a2a" }} title={text} aria-label={text}>⚠ {compact ? compactLegFlag(text) : text}</span>
+          <span role="img" style={{ fontWeight: 600, color: "#8a3a2a" }} title={text} aria-label={text}>⚠ {compact ? compactLegFlag(text) : text}</span>
         )}
       </div>
     );

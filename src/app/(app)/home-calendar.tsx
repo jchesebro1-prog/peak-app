@@ -391,7 +391,7 @@ export default function HomeCalendar({
               // The Fix button lives outside the row's anchor (no button in a link).
               const flag = it.addressFlag ? (
                 <span style={{ alignSelf: "center", marginRight: 17 }}>
-                  <AddressFlagBadge flag={it.addressFlag} compact />
+                  <AddressFlagBadge flag={it.addressFlag} />
                 </span>
               ) : null;
               return (
