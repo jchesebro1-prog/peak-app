@@ -9433,6 +9433,7 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
  * `TEST187:`-marked (fixtureId / createFixture, D233) so the suite-level
  * teardown drops them — and the sweep catches what a quote spawns. */
 import { registerFixture } from "./test-fixtures";
+import { driveTimeKeysChecks, driveTimeStateChecks } from "./test-drive-time";
 import { templateForStage } from "../src/lib/stores/tasks";
 import { yearAwareDate } from "../src/lib/format";
 import { exportObjectsFor } from "@/app/(app)/import/registry";
@@ -11543,6 +11544,8 @@ seeded()
   .then(() => square322ImageChecks())
   .then(() => square322BatchChecks())
   .then(() => square322Pins())
+  .then(() => driveTimeKeysChecks(ok))
+  .then(() => driveTimeStateChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
