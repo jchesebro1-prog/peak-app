@@ -11,7 +11,8 @@ import { mergeTodos, noteParentFor, suggestTodoKind } from "@/lib/meetings/todos
 import { rematchMeeting, syncRepMeetings, type SyncDeps } from "@/lib/meetings/sync";
 import { chicagoDayRange } from "@/lib/meetings/chicago-day";
 import { createKrispClient } from "@/lib/krisp/client";
-import { KrispAuthError, KrispRateLimitError } from "@/lib/krisp/errors";
+import { KrispApiError, KrispAuthError, KrispRateLimitError } from "@/lib/krisp/errors";
+import type { RecordingRecord } from "@/lib/stores/recordings";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -421,6 +422,89 @@ export async function meetings323SyncChecks(ok: Ok): Promise<void> {
   ok(rematchMeeting(filed, index323()).suggestions === filed.suggestions, "#323 rematchMeeting leaves a filed meeting's suggestions as they were");
   const shortOverridden = meetingFixture323({ krispMeetingId: "ov", noiseOverride: true, krisp: { ...meetingFixture323({ krispMeetingId: "ov" }).krisp, durationSec: 30 } });
   ok(rematchMeeting(shortOverridden, index323()).noise === false, "#323 rematchMeeting honours noiseOverride");
+
+  // ===== fix round 1 =====
+  const fx = { e: "TEST323" + "5".repeat(25), g: "TEST323" + "6".repeat(25), h: "TEST323" + "7".repeat(25) };
+  Object.values(fx).forEach((k) => registerFixture("meetings", "km-" + k));
+  const DAY = 86_400_000;
+  const emptyList = (froms: string[]) => async (q: { from?: string }) => { froms.push(q.from || ""); return { meetings: [], nextCursor: null }; };
+  // (1) the rolling window reaches back to the last complete sync (minus a day), never past 90 days
+  const fromFor = async (u: string, syncedAt: number | null) => {
+    const froms: string[] = [];
+    state[u] = { syncedAt, backfillFrom: NOW - 90 * DAY, backfillCursor: null, lastError: null };
+    await syncRepMeetings(u, "recent", { ...deps(u), client: { ...deps(u).client, listMeetings: emptyList(froms) } });
+    return Date.parse(froms[0]);
+  };
+  ok(await fromFor("w1", NOW - 20 * DAY) === NOW - 21 * DAY && await fromFor("w2", NOW - 2 * DAY) === NOW - 14 * DAY &&
+     await fromFor("w3", NOW - 200 * DAY) === NOW - 90 * DAY && await fromFor("w4", null) === NOW - 90 * DAY,
+    "#323 recent window = max(now−90d, min(now−14d, last sync−1d)): a 20-day gap lists from 21 days back, no meeting is skipped");
+  // (2)+(3) removed-flagging reads only this rep's window refs, and only the owner (or the sole viewer) flags
+  await MS.saveMeeting(meetingFixture323({ krispMeetingId: fx.e, seenBy: ["u8", "u9"], ownerUserId: "u9",
+    krisp: { ...meetingFixture323({ krispMeetingId: fx.e }).krisp, startedAt: NOW - DAY } }));
+  const refs = await MS.meetingRefsSeenBy("u8", NOW - 14 * DAY);
+  ok(refs.some((r) => r.id === "km-" + fx.e) && !(await MS.meetingRefsSeenBy("u8", NOW - 1000)).some((r) => r.id === "km-" + fx.e) &&
+     !(await MS.meetingRefsSeenBy("u-nobody", NOW - 14 * DAY)).some((r) => r.id === "km-" + fx.e) &&
+     !readFileSync(join(process.cwd(), "src/lib/meetings/sync.ts"), "utf8").includes("allMeetings("),
+    "#323 removed-flagging reads id/owner/seenBy refs of this rep's window only (no whole-history allMeetings load)");
+  for (const u of ["u8", "u9"]) state[u] = { syncedAt: NOW - DAY, backfillFrom: NOW - 90 * DAY, backfillCursor: null, lastError: null };
+  await syncRepMeetings("u8", "recent", { ...deps("u8"), client: { ...deps("u8").client, listMeetings: emptyList([]) } });
+  const e1 = await MS.getMeeting("km-" + fx.e);
+  await syncRepMeetings("u9", "recent", { ...deps("u9"), client: { ...deps("u9").client, listMeetings: emptyList([]) } });
+  const e2 = await MS.getMeeting("km-" + fx.e);
+  ok(e1?.krisp.removedAt === null && e2?.krisp.removedAt === NOW,
+    "#323 a shared viewer whose listing lacks the meeting never flags it removed; the owner's listing does");
+  // (4) noiseOverride lets a short meeting be matched
+  const ovr = meetingFixture323({ krispMeetingId: "ov2", noiseOverride: true,
+    krisp: { ...meetingFixture323({ krispMeetingId: "ov2" }).krisp, title: "Osakis – scope", durationSec: 60 } });
+  const ovrM = rematchMeeting(ovr, index323());
+  ok(!ovrM.noise && ovrM.suggestions.some((s) => s.kind === "company" && s.id === "osakis"),
+    "#323 an overridden short meeting is matched like any other (the matcher's noise cut-off is bypassed)");
+  // (5) recording back-pointer: a failed write never fails the batch, and is re-asserted next sync
+  const recPtr: { meetingId: string | null } = { meetingId: null };
+  const pointerCalls: string[] = [];
+  const recDeps = (failPointer: boolean): SyncDeps => ({ ...deps("u12"),
+    client: { ...deps("u12").client, listMeetings: async () => ({ meetings: [listed(fx.g, "SV-1 walk", NOW - 3600_000)], nextCursor: null }) },
+    recordings: async () => [{ id: "REC-323", parentKind: "site_visit", parentId: "SV-323", customerId: "osakis", locationId: "loc1",
+      title: "SV-323 · Osakis", krisp: { meetingId: fx.g }, meetingId: recPtr.meetingId } as unknown as RecordingRecord],
+    onRecordingAttached: async (recId, mid) => { pointerCalls.push(recId + ">" + mid); if (failPointer) throw new Error("db down"); recPtr.meetingId = mid; },
+  });
+  const rp1 = await syncRepMeetings("u12", "recent", recDeps(true));
+  const g1 = await MS.getMeeting("km-" + fx.g);
+  await syncRepMeetings("u12", "recent", recDeps(false));
+  await syncRepMeetings("u12", "recent", recDeps(false));
+  ok(rp1.complete && g1?.recordingId === "REC-323" && g1.links.work?.id === "SV-323" && !!g1.filedAt &&
+     pointerCalls.join() === "REC-323>km-" + fx.g + ",REC-323>km-" + fx.g && recPtr.meetingId === "km-" + fx.g,
+    "#323 a failed recording back-pointer write never fails the batch and is re-asserted until it sticks (then left alone)");
+  // (6) a sync that changes nothing writes nothing
+  const before = (await MS.getMeeting("km-" + fx.g))!.updatedAt;
+  await new Promise((r) => setTimeout(r, 15));
+  await syncRepMeetings("u12", "recent", recDeps(false));
+  ok((await MS.getMeeting("km-" + fx.g))!.updatedAt === before, "#323 an unchanged meeting is not rewritten on every sync");
+  // (7) one sync per rep at a time; a Krisp timeout ends the batch quietly
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const slow = syncRepMeetings("u13", "recent", { ...deps("u13"), client: { ...deps("u13").client,
+    listMeetings: async () => { await gate; return { meetings: [], nextCursor: null }; } } });
+  await new Promise((r) => setTimeout(r, 5));
+  const second = await syncRepMeetings("u13", "recent", deps("u13"));
+  release();
+  const first = await slow;
+  ok(!second.complete && second.error === null && second.listed === 0 && first.complete,
+    "#323 a second concurrent sync for the same rep returns at once (complete:false), the first finishes");
+  const third = await syncRepMeetings("u13", "recent", { ...deps("u13"), client: { ...deps("u13").client,
+    listMeetings: async () => { throw new DOMException("The operation timed out.", "TimeoutError"); } } });
+  const clientSrc = readFileSync(join(process.cwd(), "src/lib/krisp/client.ts"), "utf8");
+  ok(!third.complete && third.error === null && /AbortSignal\.timeout\(/.test(clientSrc) &&
+     /createKrispClient\(apiKey: string, transport: KrispTransport = apiTransport\)/.test(clientSrc) &&
+     /putToPresignedUrl\([\s\S]*?transport: KrispTransport = fetchTransport/.test(clientSrc),
+    "#323 Krisp API calls time out (the audio PUT does not); a timeout ends the batch quietly, the in-flight guard released");
+  // (8) a cursor Krisp rejects is cleared instead of wedging Load older
+  state.u14 = { syncedAt: NOW, backfillFrom: NOW - 90 * DAY, backfillCursor: "stale", lastError: null };
+  const bad = await syncRepMeetings("u14", "backfill", { ...deps("u14"), client: { ...deps("u14").client,
+    listMeetings: async (q) => { if (q.cursor === "stale") throw new KrispApiError(400, "Invalid cursor"); return { meetings: [], nextCursor: null }; } } });
+  const st14 = state.u14 as { backfillCursor: string | null; lastError: string | null; backfillFrom: number };
+  ok(!!bad.error && !bad.complete && st14.backfillCursor === null && st14.lastError === bad.error && st14.backfillFrom === NOW - 90 * DAY,
+    "#323 a rejected backfill cursor is cleared and recorded; the next Load older starts the window fresh");
 
   // --- the match index and the sync engine are server-only: no client module imports them
   const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => {

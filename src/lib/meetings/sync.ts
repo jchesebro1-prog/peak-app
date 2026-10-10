@@ -70,6 +70,7 @@ export type SyncDeps = {
 export type SyncResult = { listed: number; created: number; detailed: number; complete: boolean; error: string | null };
 
 const PACE_MS = 220; // ≤ 5 req/s per Krisp account
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Recompute suggestions + noise for an unfiled meeting; a filed one comes back as-is. */
 export function rematchMeeting(m: MeetingRecord, index: MatchIndex): MeetingRecord {
@@ -84,7 +85,8 @@ export function rematchMeeting(m: MeetingRecord, index: MatchIndex): MeetingReco
     speakerNames: Object.keys(m.krisp.speakers).map((i) => speakerLabel(m, i)),
     startMs: m.krisp.startedAt,
     endMs: m.krisp.startedAt != null && m.krisp.durationSec != null ? m.krisp.startedAt + m.krisp.durationSec * 1000 : null,
-    durationSec: m.krisp.durationSec,
+    // an overridden short meeting is matched like any other (the matcher cuts < 3 min as noise)
+    durationSec: m.noiseOverride ? null : m.krisp.durationSec,
     ownerUserId: m.ownerUserId,
   }, index);
   return { ...m, suggestions: r.suggestions, noise: m.noiseOverride ? false : r.noise };
@@ -127,7 +129,7 @@ function attachRecording(m: MeetingRecord, rec: RecordingRecord, siteId: string 
  *  calendar (once), recording (once), attendees, to-dos, then rematch. */
 function applySync(
   cur: MeetingRecord, l: KrispListedMeeting, userId: string, now: number, pre: Prefetched, index: MatchIndex,
-): { next: MeetingRecord; attached: string | null } {
+): MeetingRecord {
   let m: MeetingRecord = {
     ...cur,
     krisp: {
@@ -141,11 +143,7 @@ function applySync(
     ownerUserId: l.ownership === "owned" ? userId : cur.ownerUserId || userId,
     calendar: cur.calendar ?? pre.calendar,
   };
-  let attached: string | null = null;
-  if (pre.recording && !m.recordingId) {
-    m = attachRecording(m, pre.recording.rec, pre.recording.siteId, now);
-    attached = pre.recording.rec.id;
-  }
+  if (pre.recording && !m.recordingId) m = attachRecording(m, pre.recording.rec, pre.recording.siteId, now);
   m.attendees = resolveAttendees(mergeAttendees(m.attendees, m.krisp.participants, m.calendar), pre.emails);
   const pairs: [string, string][] = Object.entries(m.speakerMap).map(([idx, ref]) => [speakerLabel(m, idx), ref.name]);
   const people = {
@@ -154,17 +152,57 @@ function applySync(
   };
   m.todos = mergeTodos(m.todos, deriveSummary(m.krisp.notes as { blocks: KrispNoteBlock[] } | null).actionItems,
     (a) => suggestTodoKind(a ? relabel(a, pairs) : null, people));
-  return { next: rematchMeeting(m, index), attached };
+  return rematchMeeting(m, index);
 }
 
+/** JSON with sorted keys at every level — jsonb does not keep key order, so a
+ *  doc read back from the DB and the same doc rebuilt in code must compare equal. */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/** What a sync write would change — `updatedAt` and the listing's `fetchedAt` stamp don't count. */
+function syncFingerprint(m: MeetingRecord): string {
+  const n = MS.normalizeMeeting(m);
+  return stableJson({ ...n, updatedAt: 0, krisp: { ...n.krisp, fetchedAt: 0 } });
+}
+
+function isTimeout(e: unknown): boolean {
+  const name = (e as { name?: unknown } | null)?.name;
+  return name === "TimeoutError" || name === "AbortError";
+}
+
+/** Reps with a sync in flight in this process — cron, Sync now, the Home check and the tick share it. */
+const inFlight = new Set<string>();
+
 export async function syncRepMeetings(userId: string, mode: "recent" | "backfill", deps: SyncDeps): Promise<SyncResult> {
+  if (inFlight.has(userId)) return { listed: 0, created: 0, detailed: 0, complete: false, error: null };
+  inFlight.add(userId);
+  try {
+    return await syncRepMeetingsOnce(userId, mode, deps);
+  } finally {
+    inFlight.delete(userId);
+  }
+}
+
+async function syncRepMeetingsOnce(userId: string, mode: "recent" | "backfill", deps: SyncDeps): Promise<SyncResult> {
   const started = deps.now();
   const res: SyncResult = { listed: 0, created: 0, detailed: 0, complete: false, error: null };
   const st = await deps.getState();
   const now = deps.now();
   const backfillFrom = st.backfillFrom ?? now - BACKFILL_STEP_MS;
+  // recent: the rolling 14 days, reaching back to a day before the last complete sync when that is
+  // older (a revoked key or two weeks of errors must not leave a gap), never past 90 days
+  const recentFrom = st.syncedAt == null
+    ? now - BACKFILL_STEP_MS
+    : Math.max(now - BACKFILL_STEP_MS, Math.min(now - ROLLING_WINDOW_MS, st.syncedAt - DAY_MS));
   const window = mode === "recent"
-    ? { from: now - (st.syncedAt == null ? BACKFILL_STEP_MS : ROLLING_WINDOW_MS), to: null as number | null, cursor: null as string | null }
+    ? { from: recentFrom, to: null as number | null, cursor: null as string | null }
     : { from: backfillFrom - BACKFILL_STEP_MS, to: backfillFrom as number | null, cursor: st.backfillCursor };
   const overBudget = () => deps.now() - started > deps.budgetMs;
   const stopEarly = async (cursor: string | null) => {
@@ -214,7 +252,7 @@ export async function syncRepMeetings(userId: string, mode: "recent" | "backfill
           } catch (e) {
             // 409 still processing, or a one-off API failure on this meeting → retry next sync.
             // Auth / forbidden / rate limit end the batch below.
-            if (e instanceof KrispAuthError || e instanceof KrispForbiddenError || e instanceof KrispRateLimitError) throw e;
+            if (e instanceof KrispAuthError || e instanceof KrispForbiddenError || e instanceof KrispRateLimitError || isTimeout(e)) throw e;
             if (!(e instanceof KrispApiError)) throw e; // KrispNotReadyError (409) is a KrispApiError
           }
         }
@@ -230,22 +268,39 @@ export async function syncRepMeetings(userId: string, mode: "recent" | "backfill
         ].filter((e): e is string => !!e).map((e) => e.toLowerCase());
         pre.emails = emails.length ? await deps.lookupEmails([...new Set(emails)]) : new Map();
 
-        const out: { attached: string | null } = { attached: null };
+        const out: { recordingId: string | null } = { recordingId: null };
         const step = (cur: MeetingRecord) => {
-          const r = applySync(cur, l, userId, now, pre, index);
-          out.attached = r.attached;
-          return r.next;
+          const next = applySync(cur, l, userId, now, pre, index);
+          out.recordingId = next.recordingId;
+          return next;
         };
-        // existing doc (or one another rep's sync created meanwhile) → patch the latest; else create
-        const patched = await MS.patchMeeting(id, step);
-        if (!patched) await MS.saveMeeting(step(blankMeeting(l, userId, now)));
-        if (out.attached) await deps.onRecordingAttached(out.attached, id);
+        // nothing changed since the snapshot → no write at all (a concurrent edit is the latest doc already)
+        const unchanged = !!snap && syncFingerprint(step(snap)) === syncFingerprint(snap);
+        if (!unchanged) {
+          // existing doc (or one another rep's sync created meanwhile) → patch the latest; else create
+          const patched = await MS.patchMeeting(id, step);
+          if (!patched) await MS.saveMeeting(step(blankMeeting(l, userId, now)));
+        }
+        // the recording → meeting back-pointer: (re-)asserted until it sticks; never fails the batch
+        if (rec && out.recordingId === rec.id && rec.meetingId !== id) {
+          try {
+            await deps.onRecordingAttached(rec.id, id);
+          } catch {
+            /* retried next sync */
+          }
+        }
       }
       cursor = page.nextCursor;
       if (!cursor) break;
     }
   } catch (e) {
-    if (e instanceof KrispRateLimitError) return stopEarly(cursor);
+    if (e instanceof KrispRateLimitError || isTimeout(e)) return stopEarly(cursor);
+    if (e instanceof KrispApiError && e.status === 400 && cursor) {
+      // a cursor Krisp rejects (stale, expired) would wedge Load older forever: drop it, start the window fresh
+      res.error = `Krisp rejected the saved position (${e.message}) — starting this window over.`;
+      await deps.setState({ lastError: res.error, ...(mode === "backfill" ? { backfillCursor: null } : {}) });
+      return res;
+    }
     if (e instanceof KrispAuthError || e instanceof KrispForbiddenError) {
       res.error = e.message || "Krisp key rejected";
       await deps.setState({ lastError: res.error });
@@ -254,11 +309,13 @@ export async function syncRepMeetings(userId: string, mode: "recent" | "backfill
     throw e;
   }
   if (mode === "recent") {
-    // a meeting in this rep's window that Krisp no longer lists is flagged, never deleted
-    for (const m of await MS.allMeetings()) {
-      if (m.seenBy.includes(userId) && !seen.has(m.krispMeetingId) && (m.krisp.startedAt ?? 0) >= window.from && !m.krisp.removedAt) {
-        await MS.patchMeeting(m.id, (x) => (x.krisp.removedAt ? x : { ...x, krisp: { ...x.krisp, removedAt: now } }));
-      }
+    // a meeting in this rep's window that Krisp no longer lists is flagged, never deleted — only by its
+    // owner or its only viewer, so an un-share on one rep's side can't flip-flop it against another's
+    const flagsIt = (r: { ownerUserId: string; seenBy: string[] }) =>
+      r.ownerUserId === userId || (r.seenBy.length === 1 && r.seenBy[0] === userId);
+    for (const r of await MS.meetingRefsSeenBy(userId, window.from)) {
+      if (seen.has(r.krispMeetingId) || r.removedAt || !flagsIt(r)) continue;
+      await MS.patchMeeting(r.id, (x) => (x.krisp.removedAt || !flagsIt(x) ? x : { ...x, krisp: { ...x.krisp, removedAt: now } }));
     }
     await deps.setState({ syncedAt: now, lastError: null, ...(st.backfillFrom == null ? { backfillFrom: window.from } : {}) });
   } else {

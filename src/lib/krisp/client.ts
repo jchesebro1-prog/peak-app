@@ -38,6 +38,14 @@ export type KrispTransport = (url: string, init: RequestInit) => Promise<Respons
 
 const fetchTransport: KrispTransport = (url, init) => fetch(url, init);
 
+/** #323 — Krisp REST calls time out so one hung request can't stall a sync
+ *  batch (or the cron) — the default for `createKrispClient` only. The audio
+ *  PUT (`putToPresignedUrl`) keeps the plain transport: a large upload may
+ *  legitimately run longer. */
+export const KRISP_API_TIMEOUT_MS = 20_000;
+const apiTransport: KrispTransport = (url, init) =>
+  fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(KRISP_API_TIMEOUT_MS) });
+
 export type KrispMe = {
   id: number | null;
   email: string;
@@ -206,7 +214,7 @@ function toListed(r: Record<string, unknown>): KrispListedMeeting | null {
 }
 export { toPerson as krispPersonFrom };
 
-export function createKrispClient(apiKey: string, transport: KrispTransport = fetchTransport) {
+export function createKrispClient(apiKey: string, transport: KrispTransport = apiTransport) {
   async function call(method: "GET" | "POST", path: string, body?: Json): Promise<Json | null> {
     const init: RequestInit = {
       method,

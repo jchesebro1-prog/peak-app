@@ -1,4 +1,7 @@
+import { and, eq, sql } from "drizzle-orm";
+import { getDb } from "@/db";
 import { getDoc, listDocs, patchDoc, upsertDoc } from "@/db/doc-store";
+import { meetings as meetingsTable } from "@/db/doc-tables";
 import type { MeetingRecord } from "@/lib/meetings/types";
 import { emptyLinks } from "@/lib/meetings/types";
 import { canSeeMeeting } from "@/lib/meetings/visibility";
@@ -77,4 +80,35 @@ export async function meetingsLinkedTo(
     : kind === "venue" ? m.links.siteId === id
     : kind === "contact" ? m.links.contactIds.includes(id)
     : m.links.work?.id === id);
+}
+
+export type MeetingWindowRef = { id: string; krispMeetingId: string; ownerUserId: string; seenBy: string[]; removedAt: number | null };
+
+/** #323 — the sync's removed-flag candidates: live meetings `userId` has seen that started at/after `fromMs`.
+ *  Projects only the ids/owner/seenBy/removedAt (never transcripts), filtered in SQL. */
+export async function meetingRefsSeenBy(userId: string, fromMs: number): Promise<MeetingWindowRef[]> {
+  const db = await getDb();
+  const t = meetingsTable;
+  const rows = await db
+    .select({
+      id: t.id,
+      krispMeetingId: sql<string | null>`${t.doc}->>'krispMeetingId'`,
+      ownerUserId: sql<string | null>`${t.doc}->>'ownerUserId'`,
+      seenBy: sql<unknown>`${t.doc}->'seenBy'`,
+      removedAt: sql<string | null>`${t.doc}->'krisp'->>'removedAt'`,
+    })
+    .from(t)
+    .where(and(
+      eq(t.deleted, false),
+      sql`${t.doc}->'seenBy' @> ${JSON.stringify([userId])}::jsonb`,
+      sql`jsonb_typeof(${t.doc}->'krisp'->'startedAt') = 'number'`,
+      sql`(${t.doc}->'krisp'->>'startedAt')::numeric >= ${fromMs}`,
+    ));
+  return rows.map((r) => ({
+    id: r.id,
+    krispMeetingId: r.krispMeetingId || r.id.replace(/^km-/, ""),
+    ownerUserId: r.ownerUserId || "",
+    seenBy: Array.isArray(r.seenBy) ? r.seenBy.filter((x): x is string => typeof x === "string") : [],
+    removedAt: r.removedAt != null && Number.isFinite(Number(r.removedAt)) ? Number(r.removedAt) : null,
+  }));
 }
