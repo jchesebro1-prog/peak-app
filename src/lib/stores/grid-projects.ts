@@ -48,8 +48,8 @@ import {
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
-import { copyConduitRiserDoc, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
-import { pruneConduitRisersIn } from "@/lib/design/conduit-riser/live";
+import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
+import { conduitRemovedBetween, pruneConduitRisersIn, restoreConduitItems, type ConduitRemoved } from "@/lib/design/conduit-riser/live";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
@@ -401,11 +401,6 @@ function rid(prefix: string): string {
   const bytes = new Uint8Array(6);
   crypto.getRandomValues(bytes);
   return prefix + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Conduit riser ids (#321): prefix + 12 hex characters. */
-function crId(prefix: string): string {
-  return prefix + crypto.randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
 /** #318: the one sentence for a write aimed at a sheet the design no longer
@@ -1227,7 +1222,12 @@ export async function removePlacement(
 /* ------------------------- batch edits (#299 Task 14) ------------------------- */
 
 /** What a batch removal took out — enough for undo to put it all back. */
-export type RemovedBundle = { placements: GridPlacement[]; riser: RiserRemoved };
+export type RemovedBundle = {
+  placements: GridPlacement[];
+  riser: RiserRemoved;
+  /** #321: conduit runs, pinned tags and dismissals the delete took, per option. Absent = none. */
+  conduit?: ConduitRemoved;
+};
 export type BatchResult<T> = { ok: true; project: GridProject; value: T } | { ok: false; error: string };
 
 export const MAX_BATCH = 2000;
@@ -1330,8 +1330,10 @@ export async function removePlacements(projectId: string, ids: string[]): Promis
       p.riser = pruneRisers(p.riser, { placementIds: gone });
       riser = riserRemovedBetween(before, p.riser);
     }
+    const conduitBefore = p.conduitRiser ? (JSON.parse(JSON.stringify(p.conduitRiser)) as Record<string, ConduitRiserDoc>) : undefined;
     pruneConduitRisersIn(p);
-    return { placements, riser };
+    const conduit = conduitRemovedBetween(conduitBefore, p.conduitRiser);
+    return { placements, riser, ...(Object.keys(conduit).length ? { conduit } : {}) };
   });
 }
 
@@ -1608,6 +1610,9 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
         p.riser = restored;
       }
     }
+    // #321: the conduit runs, pinned tags and dismissals that went with them —
+    // untrusted client input, cleaned and own-option-checked by the helper.
+    restoreConduitItems(p, bundle?.conduit);
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, error: "Design not found." };
@@ -2192,15 +2197,16 @@ export async function addOption(
       // The copied option gets its own riser document, device ends re-pointed
       // at the copied placements (#209).
       const srcRiser = doc.riser?.[input.copyFromOptionId];
+      const linkMap = new Map<string, string>();
       if (srcRiser) {
-        // copied.idMap also learns old → new link ids, for the conduit riser below.
-        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, copied.idMap) };
+        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, linkMap) };
       }
       // …and its own conduit riser, runs re-pointed at the copied devices,
       // wires and links (#321).
       const srcConduit = doc.conduitRiser?.[input.copyFromOptionId];
       if (srcConduit) {
-        doc.conduitRiser = { ...doc.conduitRiser, [option.id]: copyConduitRiserDoc(srcConduit, copied.idMap, (prefix) => crId(prefix)) };
+        const idMap = new Map([...copied.idMap, ...linkMap]);
+        doc.conduitRiser = { ...doc.conduitRiser, [option.id]: copyConduitRiserDoc(srcConduit, idMap, crMakeId) };
       }
       // The copied placements keep their auto tags, so the copy carries the
       // source option's Auto choices with them (#211, D312).

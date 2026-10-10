@@ -304,6 +304,8 @@ export async function setNodeDeviceQty(
     // now overlaps another device is flagged, never silently renumbered).
     if (fresh.length) stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    // #321: a removed device's conduit runs and pinned tag go too.
+    if (gone.size) pruneConduitRisersIn(p);
     added = fresh.length;
     removed = gone.size;
     p.updatedAt = Date.now();

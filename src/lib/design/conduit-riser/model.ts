@@ -484,6 +484,9 @@ export const CR_OP_NAMES = [
 
 export type MakeId = (prefix: "cr-" | "dt-" | "st-" | "nt-") => string;
 
+/** The store's id minter: prefix + 12 hex characters from crypto.randomUUID(). */
+export const crMakeId: MakeId = (prefix) => prefix + crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+
 /** Next detail number: one more than the highest whole number in use. */
 function nextDetailN(details: readonly RiserDetail[]): string {
   const top = details.reduce((m, d) => Math.max(m, parseInt(d.n, 10) || 0), 0);

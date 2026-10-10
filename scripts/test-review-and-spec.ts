@@ -62787,17 +62787,17 @@ async function conduitRiser321B5Checks(): Promise<void> {
 
   // accept
   const forged = await CR.acceptSuggestions(gp.id, opt, ["gp-forged|gp-nothing", `${rack.id}|${spk.id}`], deps);
-  ok(!forged.ok && forged.reason === "invalid" && !(await live()).conduitRiser, "#321 acceptSuggestions: a key not on offer is ignored — nothing accepted, nothing written");
+  ok(forged.ok && forged.accepted === 0 && !(await live()).conduitRiser, "#321 acceptSuggestions: a key not on offer is ignored — nothing accepted, nothing written");
   const one = await CR.acceptSuggestions(gp.id, opt, [kRackDmx1], deps);
   let doc = (await live()).conduitRiser![opt];
-  ok(one.ok && doc.runs.length === 1 && M.runPairKey(doc.runs[0]) === kRackDmx1 && J2([...doc.runs[0].routeIds].sort()) === J2([wRackDmx1.id, wRackDmx1b.id].sort()) && /^cr-[0-9a-f]{12}$/.test(doc.runs[0].id),
+  ok(one.ok && one.accepted === 1 && doc.runs.length === 1 && M.runPairKey(doc.runs[0]) === kRackDmx1 && J2([...doc.runs[0].routeIds].sort()) === J2([wRackDmx1.id, wRackDmx1b.id].sort()) && /^cr-[0-9a-f]{12}$/.test(doc.runs[0].id),
     "#321 acceptSuggestions: a listed key becomes a run holding the pair's wires");
   const all = await CR.acceptSuggestions(gp.id, opt, "all", deps);
   doc = (await live()).conduitRiser![opt];
-  ok(all.ok && doc.runs.length === 4 && J2(doc.runs.map((r) => M.runPairKey(r)).sort()) === J2(keys) && doc.runs.find((r) => M.runPairKey(r) === kDimDmx2)!.linkIds[0] === link.id,
+  ok(all.ok && all.accepted === 3 && doc.runs.length === 4 && J2(doc.runs.map((r) => M.runPairKey(r)).sort()) === J2(keys) && doc.runs.find((r) => M.runPairKey(r) === kDimDmx2)!.linkIds[0] === link.id,
     "#321 acceptSuggestions(\"all\"): every suggestion on offer becomes a run");
   const again = await CR.acceptSuggestions(gp.id, opt, "all", deps);
-  ok(!again.ok && again.reason === "invalid" && J2((await live()).conduitRiser![opt]) === J2(doc), "#321 acceptSuggestions: accepting again changes nothing");
+  ok(again.ok && again.accepted === 0 && J2((await live()).conduitRiser![opt]) === J2(doc), "#321 acceptSuggestions: accepting again changes nothing ({ ok: true, accepted: 0 })");
   ok((await L.loadConduitRiser(await live(), opt, deps)).suggestions.items.length === 0, "#321 loadConduitRiser: accepted wires suggest nothing more");
 
   // dismiss
@@ -62807,7 +62807,8 @@ async function conduitRiser321B5Checks(): Promise<void> {
   const dis = await CR.dismissSuggestion(gp.id, opt, kDmx, deps);
   ok(dis.ok && !(await L.loadConduitRiser(await live(), opt, deps)).suggestions.items.some((s) => s.key === kDmx) && (await live()).conduitRiser![opt].dismissed.some((d) => d.key === kDmx && d.ids.includes(wDmx.id)),
     "#321 dismissSuggestion: the pair is hidden, its wires recorded");
-  ok(!(await CR.dismissSuggestion(gp.id, opt, "gp-forged|gp-nothing", deps)).ok && !(await CR.acceptSuggestions(gp.id, opt, [kDmx], deps)).ok, "#321 dismissSuggestion: a key not on offer is refused; a dismissed pair can't be accepted by key");
+  const disAcc = await CR.acceptSuggestions(gp.id, opt, [kDmx], deps);
+  ok(!(await CR.dismissSuggestion(gp.id, opt, "gp-forged|gp-nothing", deps)).ok && disAcc.ok && disAcc.accepted === 0, "#321 dismissSuggestion: a key not on offer is refused; a dismissed pair can't be accepted by key");
 
   // ops
   const det = doc.details[0].id;
@@ -62873,16 +62874,142 @@ async function conduitRiser321B5Checks(): Promise<void> {
   await GR.patchRiser(gp.id, copy.option.id, { op: "removeLink", id: cLink });
   ok(!(await live()).conduitRiser![copy.option.id].runs.some((r) => r.linkIds.includes(cLink)), "#321 removing a RiserLink drops it from its conduit");
 
-  // removeSpace / setLevels prune; removeOption drops the doc
+  // removeOption drops the doc
   await G.removeOption(gp.id, copy.option.id, by);
   p = await live();
   ok(!(copy.option.id in (p.conduitRiser || {})) && !!p.conduitRiser![opt], "#321 removeOption: the option's conduit riser goes with it");
 
-  // wiring pins
   const fs = await import("node:fs");
   const srcOf = (f: string) => fs.readFileSync(f, "utf8");
+
+  // --- fix round 1: delete → undo keeps the conduit data ---
+  // pure: conduitRemovedBetween + restoreConduitItems
+  const rid12 = (c: string) => "cr-" + c.repeat(12);
+  const runOf = (id: string, a: string, b: string, extra: Record<string, unknown> = {}) => ({ id, a: { kind: "placement", placementId: a }, b: { kind: "placement", placementId: b }, routeIds: [], linkIds: [], size: '1"', style: "conduit", ...extra });
+  const between = LV.conduitRemovedBetween(
+    { o1: { runs: [runOf(rid12("a"), "gp-1", "gp-2"), runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-2": { x: 1, y: 1, detailId: "dt-main" }, "gp-1": { x: 2, y: 2, detailId: "dt-main" } }, dismissed: [{ key: "gp-2|gp-3", ids: [] }] }, o2: { runs: [] } },
+    { o1: { runs: [runOf(rid12("b"), "gp-1", "gp-3")], tags: { "gp-1": { x: 2, y: 2, detailId: "dt-main" } } }, o2: { runs: [] } }
+  );
+  ok(J2(Object.keys(between)) === J2(["o1"]) && J2(between.o1.runs.map((r) => r.id)) === J2([rid12("a")]) && J2(Object.keys(between.o1.tags)) === J2(["gp-2"]) && J2(between.o1.dismissed.map((d) => d.key)) === J2(["gp-2|gp-3"]),
+    "#321 conduitRemovedBetween: per option, the runs, pinned tags and dismissals that went; options with nothing removed are omitted");
+  const rdoc2 = {
+    options: [{ id: "o1" }, { id: "o2" }],
+    placements: [{ id: "gp-1", optionId: "o1" }, { id: "gp-2", optionId: "o1" }, { id: "gp-3", optionId: "o1" }, { id: "gp-c", optionId: "o1", curtain: {} }, { id: "gp-9", optionId: "o2" }],
+    conduitRiser: { o1: { runs: [runOf(rid12("a"), "gp-1", "gp-2")], stubs: [{ id: "st-1", label: "TO FACP", detailId: "dt-main" }], tags: { "gp-1": { x: 9, y: 9, detailId: "dt-main" } } } } as Record<string, unknown>,
+  };
+  LV.restoreConduitItems(rdoc2, {
+    o1: {
+      runs: [
+        runOf(rid12("b"), "gp-2", "gp-1"), // pair gp-1|gp-2 already has a run
+        runOf(rid12("a"), "gp-1", "gp-3"), // run id already present
+        runOf(rid12("c"), "gp-1", "gp-3"), // new → restored
+        runOf(rid12("d"), "gp-3", "gp-1"), // same pair as the one just restored
+        runOf(rid12("e"), "gp-2", "gp-9"), // another option's device
+        runOf(rid12("f"), "gp-2", "gp-c"), // a curtain
+        runOf("cr-handmade", "gp-2", "gp-3"), // not a store-shaped id
+        { ...runOf(rid12("1"), "gp-2", "gp-3"), b: { kind: "stub", stubId: "st-gone" } }, // a stub that's gone
+        { ...runOf(rid12("2"), "gp-2", "gp-3"), b: { kind: "stub", stubId: "st-1" } }, // a stub that exists
+      ],
+      tags: { "gp-1": { x: 0, y: 0, detailId: "dt-main" }, "gp-2": { x: 3, y: 3, detailId: "dt-main" }, "gp-9": { x: 1, y: 1, detailId: "dt-main" }, "gp-c": { x: 1, y: 1, detailId: "dt-main" } },
+      dismissed: [{ key: "gp-2|gp-3", ids: [] }, { key: "gp-2|gp-9", ids: [] }],
+    },
+    o2: { runs: [runOf(rid12("9"), "gp-1", "gp-2")] }, // o1's devices under o2's key
+    "opt-gone": { runs: [runOf(rid12("8"), "gp-1", "gp-2")] },
+  });
+  const rd2 = rdoc2.conduitRiser.o1 as import("@/lib/design/conduit-riser/model").ConduitRiserDoc;
+  ok(J2(rd2.runs.map((r) => r.id)) === J2([rid12("a"), rid12("c"), rid12("2")]) && rd2.runs[0].b.kind === "placement" && (rd2.runs[0].b as { placementId: string }).placementId === "gp-2",
+    "#321 restoreConduitItems: restores a new run and a run to a live stub; skips a pair or id already present, another option's device, a curtain, a hand-made id and a gone stub");
+  ok(rd2.tags["gp-1"].x === 9 && rd2.tags["gp-2"].x === 3 && !("gp-9" in rd2.tags) && !("gp-c" in rd2.tags) && J2(rd2.dismissed.map((d) => d.key)) === J2(["gp-2|gp-3"]),
+    "#321 restoreConduitItems: a pinned tag already present wins; other options' devices and curtains take nothing back");
+  ok(!("o2" in rdoc2.conduitRiser) && !("opt-gone" in rdoc2.conduitRiser), "#321 restoreConduitItems: a key naming another option's devices, or a gone option, restores nothing");
+  const untouched = { conduitRiser: undefined as Record<string, unknown> | undefined };
+  LV.restoreConduitItems(untouched, "junk");
+  LV.restoreConduitItems(untouched, null);
+  ok(untouched.conduitRiser === undefined, "#321 restoreConduitItems: junk input writes nothing");
+
+  // store: delete two devices joined by a run with a pinned tag → undo
+  const pre = (await live()).conduitRiser![opt];
+  const runRackDmx1 = pre.runs.find((r) => M.runPairKey(r) === kRackDmx1)!;
+  await CR.patchConduitRiser(gp.id, opt, { op: "moveTag", placementId: dmx1.id, x: 6, y: 7, detailId: det });
+  const del = await G.removePlacements(gp.id, [rack.id, dmx1.id]);
+  if (!del.ok) throw new Error("#321 B5: expected the delete");
+  doc = (await live()).conduitRiser![opt];
+  const bundleConduit = del.value.conduit?.[opt];
+  ok(doc.runs.length === 0 && !(dmx1.id in doc.tags) && !!bundleConduit && bundleConduit.runs.length === 2 && bundleConduit.tags[dmx1.id]?.x === 6,
+    "#321 removePlacements: the runs and pinned tag go, and the bundle carries them for undo");
+  const undo = await G.restoreItems(gp.id, del.value);
+  doc = (await live()).conduitRiser![opt];
+  const back1 = doc.runs.find((r) => r.id === runRackDmx1.id);
+  ok(undo.ok && doc.runs.length === 2 && !!back1 && J2([...back1.routeIds].sort()) === J2([...runRackDmx1.routeIds].sort()) && doc.tags[dmx1.id]?.x === 6,
+    "#321 restoreItems: undo puts the runs (same ids, same wires) and the pinned tag back");
+  // a forged bundle: another option's devices / a run whose pair already has one
+  const other = await G.addOption(gp.id, { name: "Other", by });
+  if (!other.ok) throw new Error("#321 B5: expected a second option");
+  const oth = (await G.addPlacement(gp.id, { sheetId: sh.id, page: 1, x: 0.6, y: 0.6, partId: LIGHT, optionId: other.option.id, by }))!.placements.at(-1)!;
+  const delSpk = await G.removePlacements(gp.id, [spk.id]);
+  if (!delSpk.ok) throw new Error("#321 B5: expected the delete");
+  const forgedBundle = {
+    ...delSpk.value,
+    conduit: {
+      [opt]: { runs: [runOf(rid12("f"), spk.id, oth.id), runOf(rid12("e"), dim.id, rack.id), runOf(rid12("d"), spk.id, dim.id)], tags: { [oth.id]: { x: 1, y: 1, detailId: det } }, dismissed: [] },
+      [other.option.id]: { runs: [runOf(rid12("c"), spk.id, dim.id)], tags: {}, dismissed: [] },
+    },
+  } as unknown as import("@/lib/stores/grid-projects").RemovedBundle;
+  const forgedUndo = await G.restoreItems(gp.id, forgedBundle);
+  p = await live();
+  doc = p.conduitRiser![opt];
+  ok(forgedUndo.ok && p.placements.some((pl) => pl.id === spk.id) && doc.runs.some((r) => r.id === rid12("d")) && !doc.runs.some((r) => r.id === rid12("f") || r.id === rid12("e")) && !(oth.id in doc.tags),
+    "#321 restoreItems: a forged run naming another option's device is dropped; a run whose pair already has one is skipped");
+  ok(!(other.option.id in (p.conduitRiser || {})), "#321 restoreItems: another option's key naming this option's devices restores nothing");
+  await G.removeOption(gp.id, other.option.id, by);
+  const actSrc = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
+  ok(actSrc.includes("const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;") && actSrc.includes("restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}) })"),
+    "#321 restoreItemsAction carries the conduit half through to the store");
+
+  // setNodeDeviceQty / removeSpace / setLevels / removeSheet prune (behavioural)
+  const gq = await G.createProject({ name: "#321 B5 prune hooks", customer: "Spec fixture", customerId: null, by });
+  reg("grid_projects", gq.id);
+  const shq = (await G.addSheet(gq.id, { name: "#321 B5 q sheet", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", shq.id);
+  const shq2 = (await G.addSheet(gq.id, { name: "#321 B5 q sheet 2", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  reg("grid_sheets", shq2.id);
+  const liveQ = async () => (await G.getProject(gq.id))!;
+  const qa = (await G.addPlacement(gq.id, { sheetId: shq.id, page: 1, x: 0.8, y: 0.8, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  const qb = (await G.addPlacement(gq.id, { sheetId: shq.id, page: 1, x: 0.9, y: 0.9, partId: LIGHT, optionId: opt, by }))!.placements.at(-1)!;
+  await G.addRoute(gq.id, { sheetId: shq.id, page: 1, partId: C1, points: [{ x: 0.8, y: 0.8 }, { x: 0.9, y: 0.9 }], aspect: 1, optionId: opt, by, fromPlacementId: qa.id, toPlacementId: qb.id });
+  const qAcc = await CR.acceptSuggestions(gq.id, opt, "all", deps);
+  const qdet = (await liveQ()).conduitRiser![opt].details[0].id;
+  await CR.patchConduitRiser(gq.id, opt, { op: "moveTag", placementId: qb.id, x: 2, y: 2, detailId: qdet });
+  const lower = await GR.setNodeDeviceQty(gq.id, { optionId: opt, nodeKey: RD.UNASSIGNED_KEY, partId: LIGHT, qty: 1, by });
+  let qdoc = (await liveQ()).conduitRiser![opt];
+  ok(qAcc.ok && qAcc.accepted === 1 && lower.ok && lower.removed === 1 && !(await liveQ()).placements.some((pl) => pl.id === qb.id) && qdoc.runs.length === 0 && !(qb.id in qdoc.tags),
+    "#321 setNodeDeviceQty: lowering a node's count drops the removed device's runs and pinned tag");
+  const ptsQ = [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }];
+  await G.addSpace(gq.id, { sheetId: shq.id, page: 1, name: "Stage", points: ptsQ, by });
+  await G.addSpace(gq.id, { sheetId: shq2.id, page: 1, name: "Booth", points: ptsQ, by });
+  const [spStage, spBooth] = (await liveQ()).spaces!;
+  await CR.patchConduitRiser(gq.id, opt, { op: "addDetail", name: "Rooms", allSpaces: false, spaceIds: [spStage.id, spBooth.id] });
+  const rooms = () => liveQ().then((x) => x.conduitRiser![opt].details.find((d) => d.name === "Rooms")!);
+  ok(J2((await rooms()).spaceIds) === J2([spStage.id, spBooth.id]), "#321 fixture: a detail covering two spaces");
+  await G.removeSpace(gq.id, spStage.id);
+  ok(J2((await rooms()).spaceIds) === J2([spBooth.id]), "#321 removeSpace: the space leaves every detail that listed it");
+  const rmSheet = await G.removeSheet(gq.id, shq2.id, by);
+  ok(rmSheet.ok && (await rooms()).spaceIds.length === 0, "#321 removeSheet (dropSheetInPatch): a dropped sheet's spaces leave every detail (a sheet holding devices can't be dropped, so no run is ever on one)");
+  await G.setLevels(gq.id, [{ label: "Stage" }]);
+  const qlvl = (await liveQ()).levels![0].id;
+  await CR.patchConduitRiser(gq.id, opt, { op: "moveLevel", detailId: qdet, levelId: qlvl, y: 4 });
+  ok((await liveQ()).conduitRiser![opt].levelY[qdet]?.[qlvl] === 4, "#321 fixture: a dragged level line");
+  await G.setLevels(gq.id, []);
+  qdoc = (await liveQ()).conduitRiser![opt];
+  ok(!(qdet in qdoc.levelY), "#321 setLevels: a removed level's dragged positions go");
+
+  // wiring pins
   const projSrc = srcOf("src/lib/stores/grid-projects.ts");
-  ok((projSrc.match(/pruneConduitRisersIn\(p\)/g) || []).length >= 7, "#321 grid-projects: every plan delete prunes the conduit riser");
+  ok((projSrc.match(/pruneConduitRisersIn\(p\)/g) || []).length >= 7, "#321 grid-projects: the plan deletes call pruneConduitRisersIn (pin; behaviour checked above)");
+  ok(/if \(gone\.size\) pruneConduitRisersIn\(p\);/.test(srcOf("src/lib/stores/grid-riser.ts")), "#321 grid-riser: setNodeDeviceQty prunes the conduit riser");
+  ok(/export const crMakeId: MakeId/.test(srcOf("src/lib/design/conduit-riser/model.ts")) && projSrc.includes("crMakeId") && srcOf("src/lib/stores/grid-conduit-riser.ts").includes("crMakeId") && !projSrc.includes("function crId("),
+    "#321 one conduit id minter (crMakeId) for the store and option copy");
+  ok(projSrc.includes("copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at, linkMap)") && projSrc.includes("new Map([...copied.idMap, ...linkMap])"), "#321 option copy: link ids land in their own map, merged after");
   ok(srcOf("src/lib/design/conduit-riser-server.ts").startsWith("// SERVER ONLY"), "#321 the loader is marked server-only");
   ok(!/from "@\/lib\/design\/conduit-riser-server"/.test(srcOf("src/lib/design/conduit-riser/live.ts")) && !/@\/lib\/stores\//.test(srcOf("src/lib/design/conduit-riser/live.ts")), "#321 live.ts stays pure");
 }

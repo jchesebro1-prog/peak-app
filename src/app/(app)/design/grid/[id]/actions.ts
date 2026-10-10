@@ -991,7 +991,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
 }
 
 /** Undo of a batch removal ONLY: puts the removed devices back with their
- *  original ids, plus the riser links/conduits that went with them. The
+ *  original ids, plus the riser links/conduits and conduit-riser runs/tags
+ *  (#321) that went with them. The
  *  bundle round-trips through the client, so every record is rebuilt and
  *  re-validated here, and the riser half is cleaned by the store. Refused,
  *  whole, when any record fails or the design changed since. */
@@ -1020,7 +1021,9 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
   const cables = await Promise.all([...cableIds].map((id) => (isPartId(id) ? partForGrid(id) : Promise.resolve(null))));
   if (cables.some((part) => !part || !isPerLengthUnit(part.unit)))
     return { ok: false, error: "Couldn't undo — a cable in it is no longer in the Grid library." };
-  const r = await restoreItems(projectId, { placements, riser });
+  // #321: the conduit half is cleaned (live options, own devices, cr- ids) by the store.
+  const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;
+  const r = await restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}) });
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);

@@ -2,6 +2,7 @@ import { patchDoc } from "@/db/doc-store";
 import { ensureOptions, hasOption } from "@/lib/design/grid-options";
 import {
   CR_OP_NAMES,
+  crMakeId,
   normalizeConduitRiserDoc,
   patchConduitRiser as applyConduitOp,
   pruneConduitRiser,
@@ -27,13 +28,15 @@ import { getProject, type GridProject } from "./grid-projects";
 export type ConduitRiserResult = { ok: true } | { ok: false; reason: "not-found" | "no-such-option" | "invalid" };
 type Refusal = "no-such-option" | "invalid";
 
-const makeId: MakeId = (prefix) => prefix + crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+const makeId: MakeId = crMakeId;
+/** A step's answer: the next doc, null to refuse, or SAME to change nothing (no write, no refusal). */
+const SAME = Symbol("same");
 
 /** One patch: `step` gets the live, pruned doc and returns the next doc, or null to refuse. */
 async function writeConduit(
   projectId: string,
   optionId: string,
-  step: (p: GridProject, doc: ConduitRiserDoc, placementIds: ReadonlySet<string>) => ConduitRiserDoc | null
+  step: (p: GridProject, doc: ConduitRiserDoc, placementIds: ReadonlySet<string>) => ConduitRiserDoc | null | typeof SAME
 ): Promise<ConduitRiserResult> {
   let refusal: Refusal | null = null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -44,6 +47,7 @@ async function writeConduit(
     ensureOptions(p);
     const live = conduitLiveIds(p, optionId);
     const next = step(p, liveConduitRiser(p, optionId), live.placementIds);
+    if (next === SAME) return;
     if (!next) {
       refusal = "invalid";
       return;
@@ -71,32 +75,34 @@ export async function patchConduitRiser(projectId: string, optionId: string, op:
 /**
  * Accept suggestions by key ("all" = every one on offer). The suggestions
  * are re-derived from the live wires inside the patch; a listed key that
- * isn't on offer (forged, already accepted, gone) is ignored. Refused as
- * "invalid" when nothing was accepted.
+ * isn't on offer (forged, already accepted, gone) is ignored. Nothing
+ * left to accept is not an error: `{ ok: true, accepted: 0 }`, no write.
  */
 export async function acceptSuggestions(
   projectId: string,
   optionId: string,
   keys: string[] | "all",
   deps: ConduitRiserDeps = {}
-): Promise<ConduitRiserResult> {
+): Promise<{ ok: true; accepted: number } | Extract<ConduitRiserResult, { ok: false }>> {
   const project = await getProject(projectId);
   if (!project) return { ok: false, reason: "not-found" };
   const ctx = await loadRiserPartsContext(project, deps);
+  let accepted = 0;
   const want = keys === "all" ? null : new Set(Array.isArray(keys) ? keys.filter((k) => typeof k === "string") : []);
-  return writeConduit(projectId, optionId, (p, doc, placementIds) => {
+  const r = await writeConduit(projectId, optionId, (p, doc, placementIds) => {
     let next = doc;
-    let changed = false;
+    accepted = 0;
     for (const s of suggestions(doc, riserWires(p, optionId, ctx)).items) {
       if (want && !want.has(s.key)) continue;
       const res = acceptSuggestion(next, s, makeId, placementIds);
       if (res.changed) {
         next = res.doc;
-        changed = true;
+        accepted++;
       }
     }
-    return changed ? next : null;
+    return accepted ? next : SAME;
   });
+  return r.ok ? { ok: true, accepted } : r;
 }
 
 /** Hide one suggested pair until a wire this dismissal didn't see is drawn. */
