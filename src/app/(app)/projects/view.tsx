@@ -1016,6 +1016,7 @@ function ProjectDetail({
             <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-.01em", marginTop: 8 }}>{p.name}</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
               {custName} · PM {firstName(p.owner)} · {formatJobValue(p, money)}
+              {typeof p.performanceBonusPool === "number" && p.performanceBonusPool > 0 ? ` · Performance bonus pool ${money(p.performanceBonusPool)}` : ""}
             </div>
           </div>
           <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>

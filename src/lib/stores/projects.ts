@@ -212,6 +212,9 @@ export type ProjectRecord = {
   customerId: string | null;
   locationId: string | null;
   owner: string;
+  /** Estimator bonuses — the 5% package-bonus cost carried from the won quote's
+   *  record; the Performance bonus pool the PM's crew bonus draws on. */
+  performanceBonusPool?: number;
   value: number;
   margin: number;
   createdAt: number;
@@ -669,6 +672,12 @@ function deriveProcurement(q: QuoteLike): ProcurementLine[] {
   return out;
 }
 
+/** Estimator bonuses: the won quote's 5% package-bonus cost, 0 when it has none. */
+function poolOf(q: QuoteLike): number {
+  const n = (q.bonusRecord as { packageBonusCost?: unknown } | null | undefined)?.packageBonusCost;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /** Port of fromQuote(q) — the id is assigned by the caller. Lands on the first stage of the kind's pipeline. */
 function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
   const labor = quoteHasLabor(q);
@@ -697,6 +706,7 @@ function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
     customerId: q.customerId || null,
     locationId: q.locationId || null,
     owner: q.owner || DEFAULT_ACTOR,
+    ...(poolOf(q) > 0 ? { performanceBonusPool: poolOf(q) } : {}),
     value: q.value || 0,
     margin: q.margin || 0,
     createdAt: t,

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/session";
+import { requirePerm, requireUser } from "@/lib/session";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
@@ -12,6 +12,8 @@ import {
   isApprovalGateRefusal,
   retireReplacedDraftSafely,
   setStatus,
+  setEstimatorBonusSplit,
+  setBonusAlternatesTaken,
   setQuoteStage,
   setQuotePipeline,
   statusFailureMessage,
@@ -1173,7 +1175,8 @@ export async function resolveTierAction(
 
 export async function setStatusAction(
   id: string,
-  status: QuoteStatus
+  status: QuoteStatus,
+  opts?: { alternatesTaken?: string[] }
 ): Promise<ReviewSync> {
   const user = await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
@@ -1202,7 +1205,7 @@ export async function setStatusAction(
     }
   }
   try {
-    await setStatus(id, status, user.name);
+    await setStatus(id, status, user.name, opts?.alternatesTaken ? { alternatesTaken: opts.alternatesTaken.filter((x) => typeof x === "string") } : {});
   } catch (e) {
     const cur = await get(id);
     return {
@@ -1218,6 +1221,34 @@ export async function setStatusAction(
   }
   refresh();
   return syncOf(id, user);
+}
+
+/** Estimator bonuses — save the Lead / Prepared-by split of the 2% (approvers only). */
+export async function saveBonusSplitAction(id: string, leadPct: number): Promise<{ ok: boolean; error?: string }> {
+  await requirePerm("approve");
+  try {
+    if (!id) return { ok: false, error: "Missing quote." };
+    await setEstimatorBonusSplit(id, { leadPct });
+    revalidatePath("/estimator");
+    return { ok: true };
+  } catch (e) {
+    console.error("[estimator] saveBonusSplitAction failed:", e);
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** Estimator bonuses — save which alternates the customer took on a won quote (approvers only). */
+export async function saveBonusAlternatesAction(id: string, ids: string[]): Promise<{ ok: boolean; error?: string }> {
+  await requirePerm("approve");
+  try {
+    if (!id) return { ok: false, error: "Missing quote." };
+    await setBonusAlternatesTaken(id, Array.isArray(ids) ? ids.filter((x) => typeof x === "string") : []);
+    revalidatePath("/estimator");
+    return { ok: true };
+  } catch (e) {
+    console.error("[estimator] saveBonusAlternatesAction failed:", e);
+    return { ok: false, error: String(e) };
+  }
 }
 
 /**

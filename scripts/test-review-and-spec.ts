@@ -11668,6 +11668,7 @@ seeded()
   .then(() => gridNotes9Checks())
   .then(() => datasheetBook329Checks())
   .then(() => bonusLeakChecks())
+  .then(() => bonusStoreChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -67462,4 +67463,54 @@ import {
   ok(zero.credits.length === 1 && zero.credits[0].role === "lead", "#bonus record: a 0% share is omitted");
   const resp = [{ id: "r1", kind: "accept", rev: 1, at: 5, name: "", email: "", message: "", sectionIds: ["a", "alt1"], sectionNames: [], total: 0 }];
   ok(bnAltDefault(secs, resp as never).join() === "alt1" && bnAltDefault(secs, []).length === 0, "#bonus defaultAlternatesTaken from the latest accept response");
+}
+
+async function bonusStoreChecks(): Promise<void> {
+  const bnsQ = await import("@/lib/stores/quotes");
+  const { withBonusLines: bnsW, idCounterFrom: bnsIds } = await import("@/lib/estimate-bonus/rules");
+  const bnsBase = [{ id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [
+    { id: 1, sku: "P-1", desc: "Part", qty: 1, unit: "ea", cost: 1000, price: 1500 },
+    { id: 2, sku: "L-2", desc: "Labor", qty: 1, unit: "lot", cost: 400, price: 600, labor: true },
+  ] }];
+  const bnsSections = bnsW(bnsBase as never, bnsIds(bnsBase as never));
+  const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
+  const q = await bnsQ.create({ name: "Bonus test", source: "estimator", quoteType: "system", owner: "Bonus Lead", preparedBy: "Bonus Prep", spec: { sections: bnsSections, mobs: [] } } as never);
+  await bnsQ.update(q.id, { bonusRecord: { wonAt: 1 }, estimatorBonusSplit: { leadPct: 1 } } as never);
+  const afterUpdate = (await bnsQ.get(q.id))!;
+  ok(!afterUpdate.bonusRecord && !afterUpdate.estimatorBonusSplit, "#bonus store: update() can't write bonusRecord or the split");
+  const before = afterUpdate.updatedAt;
+  await bnsQ.setEstimatorBonusSplit(q.id, { leadPct: 60 });
+  const afterSplit = (await bnsQ.get(q.id))!;
+  ok(afterSplit.estimatorBonusSplit?.leadPct === 60 && afterSplit.updatedAt === before, "#bonus store: the split saves without bumping updatedAt");
+  await bnsQ.setStatus(q.id, "sent", "test", bypass);
+  ok(!(await bnsQ.get(q.id))!.bonusRecord, "#bonus store: Sent writes no record");
+  await bnsQ.setStatus(q.id, "won", "test", bypass);
+  const won = (await bnsQ.get(q.id))!;
+  ok(!!won.bonusRecord && won.bonusRecord.credits.length === 2 && won.bonusRecord.credits[0].pct === 60, "#bonus store: Won writes the record with the saved split");
+  ok(won.bonusRecord!.estimatorBonus > 0 && won.bonusRecord!.packageBonusCost === 70, "#bonus store: record amounts");
+  const { getProjectByQuote, removeProject: bnsRemoveProject } = await import("@/lib/stores/projects");
+  const proj = await getProjectByQuote(q.id);
+  ok(proj?.performanceBonusPool === 70, "#bonus store: the install project carries the 5% pool");
+  const wonAt = won.bonusRecord!.wonAt;
+  await bnsQ.setEstimatorBonusSplit(q.id, { leadPct: 50 });
+  const rebuilt = (await bnsQ.get(q.id))!.bonusRecord!;
+  ok(rebuilt.credits[0].pct === 50 && rebuilt.wonAt === wonAt, "#bonus store: editing the split on a won quote rebuilds the record, keeping wonAt");
+  await bnsQ.setBonusAlternatesTaken(q.id, ["nope"]);
+  ok((await bnsQ.get(q.id))!.bonusRecord!.alternatesTaken.length === 0, "#bonus store: unknown alternate ids are dropped");
+  await bnsQ.setStatus(q.id, "lost", "test", bypass);
+  ok(!(await bnsQ.get(q.id))!.bonusRecord, "#bonus store: leaving Won withdraws the record");
+  ok((await getProjectByQuote(q.id))?.performanceBonusPool === 70, "#bonus store: the project keeps its pool after the quote leaves Won");
+  const legacy = await bnsQ.create({ name: "Legacy", source: "estimator", quoteType: "system", owner: "Bonus Lead", spec: { sections: bnsBase, mobs: [] } } as never);
+  await bnsQ.setStatus(legacy.id, "sent", "test", bypass);
+  await bnsQ.setStatus(legacy.id, "won", "test", bypass);
+  ok(!(await bnsQ.get(legacy.id))!.bonusRecord, "#bonus store: a quote without bonus lines records nothing");
+  const grid = await bnsQ.create({ name: "Grid", source: "grid", quoteType: "system", owner: "Bonus Lead", spec: { sections: bnsSections, mobs: [] } } as never);
+  await bnsQ.setStatus(grid.id, "sent", "test", bypass);
+  await bnsQ.setStatus(grid.id, "won", "test", bypass);
+  ok(!(await bnsQ.get(grid.id))!.bonusRecord, "#bonus store: an ineligible (grid) quote records nothing");
+  for (const id of [q.id, legacy.id, grid.id]) {
+    const p = await getProjectByQuote(id);
+    if (p) await bnsRemoveProject(p.id);
+    await bnsQ.remove(id);
+  }
 }

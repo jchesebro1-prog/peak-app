@@ -51,6 +51,12 @@ import { REVIEW_COMMENTS_MAX, sanitizeComment, type ReviewComment } from "@/lib/
 import { approvalFingerprint, approvalSnapshotMatches, type ApprovalSnapshot } from "@/lib/approval-snapshot";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import { liveRenameRefs } from "@/lib/stores/catalog-renames";
+import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
+import {
+  buildBonusRecord, defaultAlternatesTaken, normalizeSplit, quoteHasBonusLines,
+  type BonusRecord, type BonusSplit,
+} from "@/lib/estimate-bonus/record";
+import { allUsers } from "@/lib/users";
 
 export { normalizeQuotePipeline };
 
@@ -342,6 +348,13 @@ export type Quote = {
    *  package page, append-only, ≤ 200. Written only by appendClientResponse;
    *  update() drops it; never content, never snapshotted. Staff-only. */
   clientResponses?: ClientResponse[] | null;
+  /** Estimator bonuses — the payout record written when the quote goes Won
+   *  (null/absent otherwise). Store-owned (setStatus, setEstimatorBonusSplit,
+   *  setBonusAlternatesTaken); update() drops it; never content. Staff-only. */
+  bonusRecord?: BonusRecord | null;
+  /** Estimator bonuses — how the 2% splits between Lead estimator and Prepared
+   *  by. Store-owned; update() drops it; never content. */
+  estimatorBonusSplit?: BonusSplit | null;
   /** Grid notes #9 — "Include Peak header" on this estimate's package
    *  documents (specification + equipment summary): true/false = the
    *  estimate's own choice, absent = the company default (Settings →
@@ -828,6 +841,9 @@ export async function update(
     // #301 slice C: the drawings list and the client responses have their own writers.
     delete clean.packageFiles;
     delete clean.clientResponses;
+    // Estimator bonuses: the record and the split have their own writers.
+    delete clean.bonusRecord;
+    delete clean.estimatorBonusSplit;
     // Grid notes #9: the package header choice is setPackagePeakHeader's alone.
     delete clean.packagePeakHeader;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
@@ -1568,6 +1584,9 @@ export type SetStatusOpts = {
    *  version the sender was shown — Approve & send →). Checked under the row
    *  lock before anything is written; a mismatch throws QuoteVersionChanged. */
   expectUpdatedAt?: number;
+  /** Estimator bonuses: the alternate system ids the customer took, recorded
+   *  when moving to Won. Absent = the latest client accept response decides. */
+  alternatesTaken?: string[];
 };
 
 /**
@@ -1861,6 +1880,8 @@ export async function setStatus(
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
   const sentCut = { value: false };
+  // Estimator bonuses: read before the transaction — the patch mutator is synchronous.
+  const bonusUsers = status === "won" ? (await allUsers()).map((u) => ({ id: u.id, name: u.name })) : [];
   // #282 phase 2: set only when this call really transitioned the quote.
   const moved = { value: false };
   const out = await withTransaction(async () => {
@@ -1918,6 +1939,22 @@ export async function setStatus(
     doc.history.push({ at: t, from: doc.status, to: status });
     doc.status = status;
     moved.value = true;
+    // Estimator bonuses: Won records the payout; leaving Won withdraws it.
+    if (status === "won") {
+      const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
+      if (isBonusEligibleQuote(doc) && Array.isArray(secs) && quoteHasBonusLines(secs)) {
+        try {
+          const alts = new Set(secs.filter((x) => x.alternate === true).map((x) => x.id));
+          const taken = opts.alternatesTaken ? opts.alternatesTaken.filter((aid) => alts.has(aid)) : defaultAlternatesTaken(secs, doc.clientResponses);
+          doc.bonusRecord = buildBonusRecord({ sections: secs, owner: doc.owner, preparedBy: doc.preparedBy, split: doc.estimatorBonusSplit, alternatesTaken: taken, users: bonusUsers, wonAt: t });
+        } catch (e) {
+          console.error("[bonus] record failed for", doc.id, e);
+          doc.bonusRecord = null;
+        }
+      }
+    } else if (doc.bonusRecord) {
+      doc.bonusRecord = null;
+    }
     // #282 follow-up: a lost quote is out of the Rewards program — drop any
     // credit it carried and put `value` back to the pre-credit price, so
     // nothing stays parked on it. The ledger reconcile below keys on the
@@ -2002,6 +2039,45 @@ export async function setStatus(
   // re-reads the quote and re-picks its snapshot as of now.
   if (out && moved.value) await invalidateSystemLibrarySafely();
   return out;
+}
+
+/** Estimator bonuses: rebuild a won quote's record from its current spec, keeping `wonAt`. */
+function rebuildBonusRecord(doc: Quote, alternatesTaken: string[], users: { id: string; name: string }[]): void {
+  const prev = doc.bonusRecord;
+  const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
+  if (!prev || !Array.isArray(secs)) return;
+  try {
+    doc.bonusRecord = buildBonusRecord({ sections: secs, owner: doc.owner, preparedBy: doc.preparedBy, split: doc.estimatorBonusSplit, alternatesTaken, users, wonAt: prev.wonAt });
+  } catch (e) {
+    console.error("[bonus] record rebuild failed for", doc.id, e);
+  }
+}
+
+/**
+ * Estimator bonuses — the ONLY writer of `Quote.estimatorBonusSplit`. Never
+ * content, so `updatedAt` is not bumped; a won quote's record is rebuilt.
+ */
+export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Promise<Quote | null> {
+  const users = (await allUsers()).map((u) => ({ id: u.id, name: u.name }));
+  return patchQuote(id, (doc) => {
+    doc.estimatorBonusSplit = normalizeSplit(split);
+    if (doc.status === "won" && doc.bonusRecord) rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
+  });
+}
+
+/**
+ * Estimator bonuses — the alternates the customer took, on a won quote only.
+ * Ids are filtered to the quote's own alternate systems; no `updatedAt` bump.
+ */
+export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null> {
+  const users = (await allUsers()).map((u) => ({ id: u.id, name: u.name }));
+  return patchQuote(id, (doc) => {
+    if (doc.status !== "won" || !doc.bonusRecord) return;
+    const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
+    if (!Array.isArray(secs)) return;
+    const alts = new Set(secs.filter((x) => x.alternate === true).map((x) => x.id));
+    rebuildBonusRecord(doc, (Array.isArray(ids) ? ids : []).filter((aid) => alts.has(aid)), users);
+  });
 }
 
 /** #282 phase 2: post the quote's Rewards ledger entries; log, never throw. */
