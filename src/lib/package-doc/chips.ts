@@ -1,6 +1,7 @@
 import { fmt, systemSellTotal } from "@/app/(app)/estimator/pricing";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import type { ChipKind, PDChip } from "./types";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 /**
  * Estimator Phase 5 — chips: numbers live, words yours. A chip stores only
@@ -46,7 +47,8 @@ export function findSection(sections: readonly SpecSection[] | null | undefined,
   return (Array.isArray(sections) ? sections : []).find((s) => s && s.id === id);
 }
 export function findLine(sec: SpecSection | undefined, lineKey: string): SpecItem | undefined {
-  return sec && Array.isArray(sec.items) ? sec.items.find((it) => it && String(it.id) === lineKey) : undefined;
+  const it = sec && Array.isArray(sec.items) ? sec.items.find((x) => x && String(x.id) === lineKey) : undefined;
+  return isBonusItem(it) ? undefined : it;
 }
 
 /** "4 ea", "12.5 ft", "3" (no unit). */

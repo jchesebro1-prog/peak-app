@@ -4,6 +4,7 @@ import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { applyAutoFreight } from "@/app/(app)/estimator/freight-default";
 import {
   keyProductHeading,
@@ -119,7 +120,7 @@ function sectionsOf(spec: unknown): SpecSection[] {
 
 /** A system's lines without the Rewards credit (and without junk rows). */
 function linesOf(sec: SpecSection): SpecItem[] {
-  return sec.items.filter((it): it is SpecItem => !!it && typeof it === "object" && !isRewardCreditItem(it));
+  return sec.items.filter((it): it is SpecItem => !!it && typeof it === "object" && !isRewardCreditItem(it) && !isBonusItem(it));
 }
 
 const distinct = (xs: string[]): string[] => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];

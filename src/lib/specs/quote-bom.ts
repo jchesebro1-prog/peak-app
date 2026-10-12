@@ -6,6 +6,7 @@ import { getMany } from "@/lib/stores/catalog";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 /**
  * Shared quote → BOM extraction (#205 spec builder T4), split out of the
@@ -31,6 +32,7 @@ type QuoteSpecDoc = {
         qty?: number;
         option?: boolean;
         labor?: boolean;
+        bonus?: string;
         manufacturer?: string;
         manufacturerPartNumber?: string;
         specKey?: string;
@@ -76,7 +78,7 @@ export async function bomFromQuote(
       // Optional-scope lines are not part of the base bid; labor lines
       // (mobilizations, shop & engineering, allowance, performance bonus)
       // aren't equipment and don't belong in the bid-spec BOM either.
-      if (it.option || it.labor || isRewardCreditItem(it)) continue;
+      if (it.option || it.labor || isBonusItem(it) || isRewardCreditItem(it)) continue;
       // A vendor-quote roll-up line is replaced by that vendor quote's own
       // material lines — that's where the actual part numbers live.
       if (it.vendorQuoteId) {

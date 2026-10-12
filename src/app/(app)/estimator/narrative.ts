@@ -1,6 +1,7 @@
 import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 /**
  * #281 — a system narrative's plain-text formatting, turned into printable
  * blocks. Pure (no React) so the test:specs harness can import it.
@@ -116,7 +117,7 @@ const anchorsOn = (item: SpecItem, sku: string): boolean => {
  *  additions — featuring one would describe an item not in the total). */
 export function isKeyProductEligible(it: SpecItem): boolean {
   if (!it || !skuOf(it)) return false;
-  return !it.labor && !it.laborOverhead && !it.laborTravel && !it.rewardCredit && !it.option;
+  return !isBonusItem(it) && !it.labor && !it.laborOverhead && !it.laborTravel && !it.rewardCredit && !it.option;
 }
 
 export type KeyProductResolution =

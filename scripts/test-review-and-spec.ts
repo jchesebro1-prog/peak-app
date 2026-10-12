@@ -11667,6 +11667,7 @@ seeded()
   .then(() => gridNotes5WireStarterChecks())
   .then(() => gridNotes9Checks())
   .then(() => datasheetBook329Checks())
+  .then(() => bonusLeakChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -67363,4 +67364,62 @@ import { customerLines as bnCustomerLines, totals as bnTotals, computeLabor as b
 
   const lr = bnComputeLabor({ discipline: "RIG", margin: "30", mobs: [], pmHrs: "0", pmAuto: true, shopHrs: "0", drfHrs: "0", drfAuto: true, misc: "100" }, () => 0);
   ok(lr.totalCost === lr.baseCost && !("performanceBonus" in lr), "#bonus computeLabor: the modal no longer adds its own 5%");
+}
+
+/* ---- #bonus Task 3: every other reader skips the two bonus lines ---- */
+import { isKeyProductEligible as bnKeyEligible } from "@/app/(app)/estimator/narrative";
+import { cartLinesFromSpec as bnCartLines } from "@/lib/portal-pricing";
+import { copySectionForTarget as bnCopySection } from "@/app/(app)/estimator/copy-system";
+import { partsListRows as bnPartsRows } from "@/app/(app)/estimator/parts-csv";
+import { findLine as bnFindLine } from "@/lib/package-doc/chips";
+import { fmt as bnFmt } from "@/app/(app)/estimator/pricing";
+import { qd293Props as bnQdProps, renderQuoteDocument293 as bnRender } from "./qd293-cases";
+function bnLeakFixture(): EstimatorSpecSection[] {
+  const it = (id: number, cost: number, price: number, extra: Partial<SpecItem> = {}): SpecItem => ({
+    id, sku: "P-" + id, desc: "Part " + id, qty: 1, unit: "ea", cost, price, ...extra,
+  });
+  const base: EstimatorSpecSection = { id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, 1000, 1500), it(2, 400, 600, { labor: true })] };
+  return bnWith([base], bnIds([base]));
+}
+{
+  const sections = bnLeakFixture();
+  const bonusLines = sections[0].items.filter(bnIsBonus);
+  ok(bonusLines.length === 2, "#bonus leak fixture has both lines");
+  const noBon = (s: string) => !/BON-|bonus/i.test(s);
+  ok(bonusLines.every((x) => !bnKeyEligible(x)), "#bonus leak: bonus lines can't be key products");
+  ok(bonusLines.every((x) => bnFindLine(sections[0], String(x.id)) === undefined), "#bonus leak: a package-doc chip can't find a bonus line");
+  ok(noBon(JSON.stringify(bnCartLines(sections))), "#bonus leak: portal copy-to-cart");
+  const cp = bnCopySection(sections[0], { newSectionId: "s9", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  ok(!cp.section.items.some(bnIsBonus), "#bonus copy system drops bonus lines");
+  ok(cp.section.items.length === 2, "#bonus copy system keeps the real lines");
+  const pl = bnPartsRows(sections, [], {});
+  ok(pl.every((r) => !/BON-|bonus/i.test(r.sku + r.desc)) && pl.length === 1, "#bonus leak: Parts list has no bonus rows (labor line is already left out)");
+  ok(Math.abs(pl[0].unitSell * pl[0].qty - 1500 * bnSellTotal(sections[0]) / 2100) < 0.01, "#bonus leak: parts list still scales the real part to the system price (bonus sell rides on it)");
+
+  // The customer document: no bonus word, and the printed grand total is the staff total.
+  const grand = bnTotals(sections, 0).grand;
+  const html = bnRender(bnQdProps({ sections }));
+  ok(noBon(html), "#bonus QuoteDocument: no BON- sku and no bonus wording in the rendered document");
+  ok(html.includes(bnFmt(grand)), "#bonus QuoteDocument: the printed grand total equals the staff total (" + bnFmt(grand) + ")");
+  const html2 = bnRender(bnQdProps({ sections, pdfOptions: { detail: "sectioned", pdfItemizedAppendix: true } }));
+  ok(noBon(html2) && html2.includes(bnFmt(grand)), "#bonus QuoteDocument: sectioned + appendix also clean and on the staff total");
+  const web = bnRender({ ...bnQdProps({ sections }), layout: "web" });
+  ok(noBon(web) && web.includes(bnFmt(grand)), "#bonus QuoteDocument: web layout also clean and on the staff total");
+}
+{
+  const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  for (const p of [
+    "src/lib/client-package-server.ts", "src/lib/specs/quote-bom.ts", "src/app/(app)/estimator/narrative.ts",
+    "src/app/(app)/estimator/parts-csv.ts", "src/lib/manufacturer-analytics.ts", "src/lib/dashboard/metrics.ts",
+    "src/lib/part-docs/quoted-parts.ts", "src/lib/design/estimate-tray.ts", "src/lib/package-doc/chips.ts",
+    "src/lib/portal-pricing.ts", "src/app/(app)/estimator/copy-system.ts", "src/lib/narrative/system-library.ts",
+  ]) ok(src(p).includes("isBonusItem"), "#bonus leak pin: " + p + " skips bonus lines");
+}
+async function bonusLeakChecks(): Promise<void> {
+  const { upsertDoc } = await import("@/db/doc-store");
+  const { bomFromQuote } = await import("@/lib/specs/quote-bom");
+  const sections = bnLeakFixture();
+  await upsertDoc("quotes", { id: "Q-BONUS-LEAK-1", name: "Bonus leak", spec: { sections } } as never);
+  const r = await bomFromQuote("Q-BONUS-LEAK-1");
+  ok(r.ok && r.rows.length === 1 && r.rows[0].sku === "P-1" && !/BON-|bonus/i.test(JSON.stringify(r.rows)), "#bonus leak: Word spec BOM lists only the real part");
 }

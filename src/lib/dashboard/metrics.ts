@@ -11,6 +11,7 @@ import { isActive, isBacklog, isDone, projectTag, type ProjectTag } from "@/lib/
 import { knownValue, unknownCount } from "@/lib/job-value";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 export const DAY = 86_400_000;
 
@@ -124,6 +125,7 @@ type SpecLike = {
       price?: number;
       extSellOverride?: number;
       labor?: boolean;
+      bonus?: string;
       option?: boolean;
     }>;
   }>;
@@ -148,7 +150,7 @@ export function equipmentSold(
       // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
       if (s.alternate) continue;
       for (const it of s.items || []) {
-        if (it.labor || it.option || isRewardCreditItem(it)) continue;
+        if (it.labor || it.option || isBonusItem(it) || isRewardCreditItem(it)) continue;
         const sku = it.sku || "";
         const category = (sku && partCategory(sku)) || "Uncategorized";
         const qty = it.qty || 0;

@@ -16,6 +16,7 @@ import { quoteMode } from "@/lib/portal-quote-mode";
 import { partModel } from "@/lib/catalog-rename/sku";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { travelForId } from "@/lib/stores/customers";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 /**
  * Server-canonical portal pricing (#245, spec §2 + §8). The browser never
@@ -482,6 +483,7 @@ export function cartLinesFromSpec(sections: readonly SpecSection[]): Array<Omit<
   const out: Array<Omit<CartLine, "lineId">> = [];
   for (const s of sections) {
     for (const it of s.items) {
+      if (isBonusItem(it)) continue;
       if (it.fixture) {
         if (it.fixtureId) out.push({ kind: "fixture", fixtureId: it.fixtureId, fixtureOptions: it.fixtureOptions, qty: it.qty });
       } else if (it.curtain) {

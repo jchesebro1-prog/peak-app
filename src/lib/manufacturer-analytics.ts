@@ -22,6 +22,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";
 import { CUSTOM_ITEM_PREFIX } from "@/lib/design/grid-custom-items";
 import { isLaborSku } from "@/lib/design/wire-labor";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 export type AnalyticsQuote = Pick<Quote, "id" | "status" | "createdAt" | "updatedAt" | "history" | "spec">;
 /** `cost` is today's catalog cost — read only for Grid lines, which carry none. */
@@ -85,7 +86,7 @@ export function attributedLines(
     // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
     if (sec.alternate) continue;
     for (const it of sec.items as SpecItem[]) {
-      if (!it || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por || isRewardCreditItem(it)) continue;
+      if (!it || isBonusItem(it) || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por || isRewardCreditItem(it)) continue;
       const lineQty = num(it.qty);
       if (Array.isArray(it.components) && it.components.length) {
         for (const c of it.components) {

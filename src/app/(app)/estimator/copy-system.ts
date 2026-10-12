@@ -14,6 +14,7 @@ import {
   tierSeedPrice,
 } from "./tier-reprice";
 import type { SpecItem, SpecSection } from "./types";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 /**
  * #266 — Copy a system (SpecSection) to a new estimate, an existing one, or
@@ -115,7 +116,7 @@ export function copySectionForTarget(
   let handPriced = 0;
 
   // #282 phase 2: the Rewards credit is the source quote's — a copy never carries it.
-  const items = (section.items || []).filter((it) => !isRewardCreditItem(it)).map((it): SpecItem => {
+  const items = (section.items || []).filter((it) => !isRewardCreditItem(it) && !isBonusItem(it)).map((it): SpecItem => {
     const comps = Array.isArray(it.components) ? it.components : [];
 
     /* #274: a track line is a tier-seeded line whose "catalog cost" is its

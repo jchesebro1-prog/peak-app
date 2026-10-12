@@ -25,6 +25,7 @@
 
 import { isPerLengthUnit, placementQty } from "./grid-bom";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 export type TrayExclusion = "labor" | "allowance" | "curtain" | "per-length" | "no-part";
 
@@ -123,7 +124,7 @@ export function estimateTrayLines(
       const it = rawItem as Record<string, unknown>;
       const qty = Math.round(Number(it.qty));
       if (!Number.isFinite(qty) || qty <= 0) continue;
-      if (it.labor === true || it.laborOverhead || it.laborTravel) { skip("labor"); continue; }
+      if (it.labor === true || it.laborOverhead || it.laborTravel || isBonusItem(it)) { skip("labor"); continue; }
       if (it.allowance === true || (typeof it.vendorQuoteId === "string" && it.vendorQuoteId)) { skip("allowance"); continue; }
       if (it.curtain === true) { skip("curtain"); continue; }
       const rawSku = str(it.sku);

@@ -35,6 +35,7 @@ import { racksInGrid, racksInQuote, scheduleCsv } from "@/lib/rack/submittal";
 import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-server";
 import type { Letterhead } from "@/lib/letterhead";
 import { loadDocumentLetterhead } from "@/lib/letterhead-server";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -344,7 +345,7 @@ export function quoteBom(
   /** #296: rack members this flags (internal catalog rows — labor) stay out of the BOM. */
   isInternal?: (sku: string) => boolean,
 ): Array<{ sku: string; desc: string; qty: number }> {
-  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean; rackId?: unknown }> }> } | null | undefined;
+  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean; bonus?: string; rackId?: unknown }> }> } | null | undefined;
   const rows = new Map<string, { sku: string; desc: string; qty: number }>();
   for (const section of spec?.sections || []) {
     for (const item of section.items || []) {
@@ -352,7 +353,7 @@ export function quoteBom(
       // still carry individual labor lines (mobilizations, shop &
       // engineering, allowance, performance bonus) — they're not equipment
       // and don't belong in the BOM/client package either.
-      if (section.kind === "labor" || item.labor || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
+      if (section.kind === "labor" || item.labor || isBonusItem(item) || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
       const rack = rackOf && typeof item.rackId === "string" ? rackOf(item.rackId) : null;
       if (rack?.kind === "rack") {
         const members = gridSpecBomRows([{ sku: `asm:${item.rackId}`, desc: String(item.desc || ""), qty: item.qty }], rackOf!, isInternal);

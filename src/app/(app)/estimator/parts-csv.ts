@@ -1,7 +1,8 @@
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { lineModel, partModel } from "@/lib/catalog-rename/sku";
-import { systemItemsRev, systemSellTotal } from "./pricing";
+import { lineExtSellOf, systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
  *  every orderable part in the estimate's material systems, assemblies
@@ -82,12 +83,13 @@ function expand(
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
     // #279: every part's sell scales by the system's price (freight included) ÷ its lines' sell.
-    const rev = systemItemsRev(section);
+    // The bonus lines are internal; their sell rides on the real parts through k (the file still totals to the system price).
+    const rev = systemItemsRev(section) - section.items.filter((x) => isBonusItem(x)).reduce((a, x) => a + lineExtSellOf(x), 0);
     const k0 = rev > 0 ? Math.max(0, systemSellTotal(section)) / rev : 1;
     const k = Number.isFinite(k0) ? k0 : 1;
     const start = out.length;
     for (const item of section.items) {
-      if (item.labor || item.laborOverhead || item.laborTravel || item.option || isRewardCreditItem(item)) continue;
+      if (item.labor || item.laborOverhead || item.laborTravel || item.option || isBonusItem(item) || isRewardCreditItem(item)) continue;
       if (!Number.isFinite(item.qty) || item.qty <= 0) continue;
       const lineSell = lineSellOf(item);
       const note = item.internalNote?.trim() || "";

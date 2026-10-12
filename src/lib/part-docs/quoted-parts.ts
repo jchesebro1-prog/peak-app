@@ -5,6 +5,8 @@
  * one Map keyed by SKU.
  */
 
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
+
 export type QuotedPartStat = {
   sku: string;
   /** Distinct quotes carrying the SKU — the ranking key (§2.1). */
@@ -37,7 +39,7 @@ export function quoteLineSkus(spec: unknown): string[] {
       if (!sec || sec.kind === "labor" || !Array.isArray(sec.items)) continue;
       for (const rawItem of sec.items) {
         const item = bag(rawItem);
-        if (!item || item.labor === true) continue;
+        if (!item || item.labor === true || isBonusItem(item)) continue;
         const sku = skuOf(item.sku);
         if (sku) out.add(sku);
       }
