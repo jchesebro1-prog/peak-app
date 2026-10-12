@@ -30,8 +30,10 @@ export function BonusCard(props: {
   hasBonusLines: boolean;
   status: string;
   error?: string | null;
+  /** An alternates save is in flight. */
+  saving?: boolean;
 }) {
-  const { quoteId, canApprove, owner, preparedBy, split, onSplit, alternates, taken, onTaken, estimatorBonus, record, hasBonusLines, status, error } = props;
+  const { quoteId, canApprove, owner, preparedBy, split, onSplit, alternates, taken, onTaken, estimatorBonus, record, hasBonusLines, status, error, saving } = props;
   // null = not being edited: the input shows the saved split.
   const [typed, setTyped] = useState<string | null>(null);
   const draft = typed ?? String(split.leadPct);
@@ -112,7 +114,7 @@ export function BonusCard(props: {
           <span>Bonus not recorded {"\u2014"} use Record now</span>
           <button
             type="button"
-            disabled={!quoteId}
+            disabled={!quoteId || !!saving}
             onClick={() => onTaken(taken)}
             style={{ fontSize: 11.5, padding: "3px 8px", border: "1px solid #dfe2e8", borderRadius: 6, background: "#fff", cursor: "pointer" }}
           >

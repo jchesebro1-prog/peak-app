@@ -973,7 +973,6 @@ export function useEstimatorState(props: EstimatorProps) {
   const router = useRouter();
   const [bonusSplit, setBonusSplit] = useState<BonusSplit>(() => normalizeSplit(initial.estimatorBonusSplit));
   const [bonusRecord, setBonusRecord] = useState<BonusRecord | null>(initial.bonusRecord);
-  useEffect(() => setBonusRecord(initial.bonusRecord), [initial.bonusRecord]);
   const [alternatesTaken, setAlternatesTaken] = useState<string[]>(() =>
     initial.bonusRecord ? initial.bonusRecord.alternatesTaken : defaultAlternatesTaken(initial.sections ?? [], initial.clientResponses)
   );
@@ -981,7 +980,19 @@ export function useEstimatorState(props: EstimatorProps) {
    *  move sends no list, so the server picks the default from the customer's
    *  latest accept (the list above was seeded once, at load). */
   const [alternatesTouched, setAlternatesTouched] = useState(false);
+  /** After a refresh the server-written record is the truth: re-read it, and
+   *  adopt its alternates (a Won recorded with the server's default list would
+   *  otherwise keep the load-time list) and clear "touched". */
+  useEffect(() => {
+    setBonusRecord(initial.bonusRecord);
+    if (initial.bonusRecord) {
+      setAlternatesTaken(initial.bonusRecord.alternatesTaken);
+      setAlternatesTouched(false);
+    }
+  }, [initial.bonusRecord]);
   const [bonusError, setBonusError] = useState<string | null>(null);
+  /** An alternates save is in flight — the card's Record now button waits on it. */
+  const [bonusSaving, setBonusSaving] = useState(false);
   const bonusEligible = isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType });
   /** A status change that lands on or leaves Won changes the server-written
    *  record: drop a stale "Recorded at Won" block at once when leaving Won and
@@ -1013,14 +1024,19 @@ export function useEstimatorState(props: EstimatorProps) {
     setAlternatesTouched(true);
     setBonusError(null);
     if (status !== "won" || !loadedId || !bonusEligible) return;
+    setBonusSaving(true);
     startTransition(async () => {
-      const r = await saveBonusAlternatesAction(loadedId, ids);
-      if (!r.ok) {
-        setAlternatesTaken(before);
-        setBonusError(r.error || "Could not save the alternates.");
-        return;
+      try {
+        const r = await saveBonusAlternatesAction(loadedId, ids);
+        if (!r.ok) {
+          setAlternatesTaken(before);
+          setBonusError(r.error || "Could not save the alternates.");
+          return;
+        }
+        router.refresh();
+      } finally {
+        setBonusSaving(false);
       }
-      router.refresh();
     });
   };
   const [peopleBusy, setPeopleBusy] = useState(false);
@@ -3125,6 +3141,7 @@ export function useEstimatorState(props: EstimatorProps) {
     bonusRecord,
     alternatesTaken,
     bonusError,
+    bonusSaving,
     saveBonusSplit,
     pickAlternatesTaken,
     owner,

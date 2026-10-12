@@ -35,6 +35,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     alternatesTaken,
     bonusError,
     bonusRecord,
+    bonusSaving,
     bonusSplit,
     initial,
     owner,
@@ -160,6 +161,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
             hasBonusLines={quoteHasBonusLines(sections)}
             status={status}
             error={bonusError}
+            saving={bonusSaving}
           />
         )}
       </Fragment>

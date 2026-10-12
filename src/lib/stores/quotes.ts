@@ -2011,11 +2011,6 @@ export async function setStatus(
   if (result) {
     const { spawnFromQuote } = await import("./quote-spawn");
     await spawnFromQuote(result, q.status);
-    // Estimator bonuses: a re-win keeps the project the first win spawned —
-    // bring its 5% pool to this record's package cost (no-op write skipped).
-    if (moved.value && status === "won" && isBonusEligibleQuote(result)) {
-      await syncProjectBonusPool(id, result.bonusRecord?.packageBonusCost ?? 0);
-    }
   }
   return result;
   });
@@ -2038,6 +2033,13 @@ export async function setStatus(
   // row (historical-import records history, it is not a sale made here), and
   // never able to block the status change: a failure is logged, not thrown.
   if (out && moved.value && opts.bypassApprovalGate !== "historical-import") await reconcileRewardsSafely(out, by);
+  // Estimator bonuses: a re-win keeps the project the first win spawned —
+  // bring its 5% pool to this record's package cost (no-op write skipped).
+  // After the transaction: a swallowed DB error here must not abort the
+  // status change's own Postgres transaction and roll the Won back.
+  if (out && moved.value && status === "won" && isBonusEligibleQuote(out)) {
+    await syncProjectBonusPool(id, out.bonusRecord?.packageBonusCost ?? 0);
+  }
   // #293 slice 2: same outer-transaction caveat as the copy above — inside
   // setQuoteStage's transaction this invalidation fires BEFORE commit, so a
   // rebuild that runs concurrently can cache the pre-transition state for up

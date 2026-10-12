@@ -67767,3 +67767,20 @@ async function bonusFinalFixChecks(): Promise<void> {
     }
   }
 }
+
+// Estimator bonuses — fix round 2 source pins.
+{
+  const fr2Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const fr2Hook = fr2Read("src/app/(app)/estimator/use-estimator-state.ts");
+  const fr2Eff = fr2Hook.slice(fr2Hook.indexOf("setBonusRecord(initial.bonusRecord);") - 40, fr2Hook.indexOf("}, [initial.bonusRecord]);") + 30);
+  ok(/setBonusRecord\(initial\.bonusRecord\);\s*if \(initial\.bonusRecord\) \{\s*setAlternatesTaken\(initial\.bonusRecord\.alternatesTaken\);\s*setAlternatesTouched\(false\);\s*\}\s*\}, \[initial\.bonusRecord\]\)/.test(fr2Eff), "#bonus fr2 source pin: a refreshed bonusRecord re-syncs the alternates list and clears the touched flag");
+  const fr2Pick = fr2Hook.slice(fr2Hook.indexOf("const pickAlternatesTaken ="), fr2Hook.indexOf("const [peopleBusy"));
+  ok(/setBonusSaving\(true\)/.test(fr2Pick) && /finally \{\s*setBonusSaving\(false\);/.test(fr2Pick), "#bonus fr2 source pin: the alternates save raises a saving flag and always clears it");
+  const fr2Card = fr2Read("src/app/(app)/estimator/steps/bonus-card.tsx");
+  ok(/disabled=\{!quoteId \|\| !!saving\}\s*onClick=\{\(\) => onTaken\(taken\)\}/.test(fr2Card), "#bonus fr2 source pin: Record now is disabled while the alternates save is pending");
+  ok(fr2Read("src/app/(app)/estimator/steps/send-step.tsx").includes("saving={bonusSaving}"), "#bonus fr2 source pin: the Send step passes the saving flag to the card");
+  const fr2Store = fr2Read("src/lib/stores/quotes.ts");
+  const fr2Set = fr2Store.slice(fr2Store.indexOf("export async function setStatus("), fr2Store.indexOf("/** Estimator bonuses: rebuild a won quote's record"));
+  const fr2Pool = fr2Set.indexOf("await syncProjectBonusPool(id, out.bonusRecord?.packageBonusCost ?? 0);");
+  ok(fr2Pool > fr2Set.indexOf("await reconcileRewardsSafely(out, by);") && !/syncProjectBonusPool\(id, result/.test(fr2Set) && /if \(out && moved\.value && status === "won" && isBonusEligibleQuote\(out\)\) \{\s*await syncProjectBonusPool/.test(fr2Set), "#bonus fr2 source pin: the re-win pool sync runs after the status transaction, on the committed quote, same gate");
+}
