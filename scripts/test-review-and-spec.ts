@@ -52801,7 +52801,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('buildSpecDocx(sp.spec, { letterhead: await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader) })') && srv.includes("zipCacheable(built.leftOut)") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('const letterhead = await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);') && srv.includes("buildSpecDocx(sp.spec, { letterhead })") && srv.includes("zipCacheable(built.leftOut)") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -66811,7 +66811,7 @@ async function gridNotes9Checks(): Promise<void> {
   // The estimate zip cache is keyed by the RESOLVED header; the build prints that same value.
   const Z9 = await import("@/lib/estimate-output/package-zip-server");
   const ZP9 = await import("@/lib/estimate-output/package-zip");
-  ok(ZP9.packageZipCachePath("Q-1", 2, true) !== ZP9.packageZipCachePath("Q-1", 2, false) && ZP9.packageZipCachePath("Q-1", 2, false).endsWith("rev-2-h0.zip"),
+  ok(ZP9.packageZipCachePath("Q-1", 2, true) !== ZP9.packageZipCachePath("Q-1", 2, false) && ZP9.packageZipCachePath("Q-1", 2, false).endsWith("rev-2-h0-v2.zip"), // #329: + the contents version
     "Grid notes #9 review: the zip cache path carries the header (-h1 / -h0)");
   const got9: string[] = [];
   const built9: boolean[] = [];
@@ -66826,7 +66826,7 @@ async function gridNotes9Checks(): Promise<void> {
   });
   await serve9(false);
   await serve9(true);
-  ok(got9[0].endsWith("-h0.zip") && got9[1].endsWith("-h1.zip") && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
+  ok(got9[0].endsWith("-h0-v2.zip") && got9[1].endsWith("-h1-v2.zip") && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
   const zsrc9 = src9("src/lib/estimate-output/package-zip-server.ts");
   ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader)") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader)"),
     "Grid notes #9 review: servePackageZip resolves the header once (estimate's choice ?? company default) for both the cache key and the build");
@@ -66935,7 +66935,7 @@ import { PACKAGE_BOOK_MS as b329BookMs, PACKAGE_ZIP_DEADLINE_MS as b329ZipMs } f
   const cps = rd("src/lib/client-package-server.ts");
   const grid = cps.slice(cps.indexOf("export async function createClientPackage("), cps.indexOf("/** Build the same package from a quote"));
   const quote = cps.slice(cps.indexOf("export async function createQuoteClientPackage("));
-  ok(cps.includes("datasheetEntryName(doc, plan.docMfr.get(doc.documentId)") && [grid, quote].every((b) => b.includes("planDatasheetBook(bookParts)") && b.includes("addBook(await bookP, files, gaps)") && b.indexOf("packageBook(") < b.indexOf("addCutSheets(") && b.indexOf("addBook(") > b.indexOf("addRacks(")),
+  ok(cps.includes("datasheetEntryName(doc, plan.docMfr.get(doc.documentId)") && [grid, quote].every((b) => b.includes("planDatasheetBook(bookParts)") && b.includes("addBook(await bookP, files, gaps, bookDocs,") && b.indexOf("packageBook(") < b.indexOf("addCutSheets(") && b.indexOf("addBook(") > b.indexOf("addRacks(")),
     "#329 packages: both client packages name loose datasheets by manufacturer, start the book before the renders and add it after the racks (one read of the bytes)");
   const zs = rd("src/lib/estimate-output/package-zip-server.ts");
   ok(zs.includes("datasheetEntryName(doc, bookPlan.docMfr.get(doc.documentId)") && zs.includes("{ name: BOOK_FILE_NAME, data: built.bytes }") && zs.includes("Math.max(deadline, d.now()) + PACKAGE_BOOK_MS") && b329File === "Datasheets.pdf",
@@ -67135,4 +67135,125 @@ async function datasheetBook329Checks(): Promise<void> {
   const noBook = await Z.buildRevisionPackageZip(q2, rev, { read: async (key) => (key.includes("zulu") ? read(key) : null), sections: async () => [], letterhead: async () => null, now: (() => { let t = 0; return () => (t += 1_000); })() });
   ok(!!noBook && noBook.book === true && noBook.leftOut.some((l) => l.name === "datasheets/Alpha Lighting - AS.pdf"),
     "#329 estimate zip: a datasheet missing from storage is LEFT OUT under its manufacturer name and indexed as not included; the book still builds");
+
+  // #329 review (5): a corrupt datasheet ships loose, is a gap in the client package and a cacheable LEFT OUT line in the estimate zip.
+  const BR = fixtureId(329, "bravo");
+  await C.upsert({ sku: BR, desc: "Bravo dimmer", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "Bravo Pro", manufacturerModelNumber: "BD-1" });
+  registerFixture("catalog_parts", BR);
+  const badDoc = await D.createDocument({ kind: "datasheet", fileName: "bravo.pdf", contentType: "application/pdf", size: 9, blobKey: "part-docs/PD-fixture-329/bravo.pdf", sourceUrl: null, source: "upload", by: "Test" });
+  if (!badDoc) throw new Error("#329 review: fixture document failed");
+  registerFixture("part_documents", badDoc.id);
+  await D.attachDocument(badDoc.id, [BR], "Test");
+  registerFixture("part_document_links", D.documentLinkId(BR, badDoc.id));
+  blobs.set("part-docs/PD-fixture-329/bravo.pdf", Buffer.from("not a pdf") as never);
+  const QID2 = fixtureId(329, "quote-bad");
+  await Q.create({ id: QID2, name: "#329 bad sheet", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [line(1, ZA), line(2, BR)] }], mobs: [] } });
+  registerFixture("quotes", QID2);
+  const warn329 = console.warn;
+  console.warn = () => {};
+  try {
+    const pkg2 = await CPS.createQuoteClientPackage((await Q.get(QID2))!, "Tester", { deps: {
+      blobOn: () => true,
+      put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; },
+      save: async (input) => ({ ...input, id: "PKG-329b", createdAt: 0 }),
+      secret: () => "s329",
+      findGrid: async () => null,
+      readDoc: read,
+    } });
+    const names2 = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name);
+    const g2 = pkg2.gaps.filter((g) => g.kind === "missing-datasheet-book");
+    ok(names2.includes("datasheets/Bravo Pro - bravo.pdf") && names2.includes("Datasheets.pdf") && g2.length === 1 && g2[0].sku === BR &&
+       g2[0].description === "datasheets/Bravo Pro - bravo.pdf couldn’t be read, so it isn’t in Datasheets.pdf; the file itself is in the package." && !pkg2.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === BR),
+      "#329 review: a corrupt datasheet ships loose and is one gap naming the file (not a missing datasheet) in the client package");
+    await Q.update(QID2, { status: "sent" });
+    const rev2 = (await Q.addQuoteRevision(QID2, { by: "Test", reason: "sent" }))!;
+    const built2 = await Z.buildRevisionPackageZip((await Q.get(QID2))!, rev2, { read: async (key) => read(key), sections: async () => [], letterhead: async () => null });
+    const zNames2 = built2 ? zipNamesGn7(built2.zip).map((f) => f.name) : [];
+    const { zipCacheable: cacheable329, LEFT_OUT_REASON: lo329 } = await import("@/lib/estimate-output/package-zip");
+    ok(!!built2 && built2.book === true && zNames2.includes("datasheets/Bravo Pro - bravo.pdf") && zNames2.includes("LEFT OUT.txt") &&
+       built2.leftOut.length === 1 && built2.leftOut[0].name === "datasheets/Bravo Pro - bravo.pdf" && built2.leftOut[0].reason === lo329.notInBook && cacheable329(built2.leftOut),
+      "#329 review: in the estimate zip the corrupt datasheet is a LEFT OUT line (not in Datasheets.pdf, file included) and the zip stays cacheable");
+  } finally {
+    console.warn = warn329;
+  }
+
+  // #329 review (2): a document whose page box is missing or broken is "Could not be read", never the whole book.
+  {
+    const { PDFDocument: P2, PDFName, PDFString } = await import("pdf-lib");
+    const broken = async (mutate: (pg: import("pdf-lib").PDFPage) => void) => {
+      const d = await P2.create();
+      mutate(d.addPage(L));
+      return Buffer.from(await d.save());
+    };
+    const garbage = await broken((pg) => pg.node.set(PDFName.of("MediaBox"), PDFString.of("x")));
+    const zero = await broken((pg) => pg.setMediaBox(0, 0, 0, 0));
+    const badCrop = await broken((pg) => pg.node.set(PDFName.of("CropBox"), PDFString.of("y")));
+    const { buildDatasheetBook: bb } = await import("@/lib/part-docs/datasheet-book-server");
+    const warn2 = console.warn;
+    console.warn = () => {};
+    try {
+      const r = await bb({ subtitleLines: ["Boxes"], parts: [
+        { sku: "G", mfr: "A", model: "G", desc: "Garbage box", docId: "D-g" },
+        { sku: "Z", mfr: "B", model: "Z", desc: "Zero box", docId: "D-z" },
+        { sku: "C", mfr: "C", model: "C", desc: "Bad crop", docId: "D-c" },
+        { sku: "OK", mfr: "D", model: "OK", desc: "Good", docId: "D-ok" },
+      ], docs: new Map([["D-g", { bytes: garbage }], ["D-z", { bytes: zero }], ["D-c", { bytes: badCrop }], ["D-ok", { bytes: await b329Sheet([{ size: L }]) }]]) });
+      const t = r.ok ? await b329PageTexts(r.bytes) : [];
+      ok(r.ok && r.unmergeable.sort().join() === "D-c,D-g,D-z" && r.pageCount === 2 && t.every((x, i) => x.includes(`Page ${i + 1} of 2`)) && r.index.notIncluded.every((x) => x.reason === "Could not be read"),
+        "#329 review: a missing/garbage MediaBox, a zero-size box or a bad CropBox makes THAT datasheet 'Could not be read'; the rest of the book builds and is stamped: " + (r.ok ? r.unmergeable.join() : r.detail));
+    } finally {
+      console.warn = warn2;
+    }
+  }
+}
+
+/* ===== #329 review — owner manufacturer, case-insensitive names, size ceiling, rack deadline, cacheable notes ===== */
+import { BOOK_ZIP_CEILING_BYTES as r329Ceiling, BOOK_MAX_BYTES as r329Max, bookByteBudget as r329Budget, planDatasheetBook as r329Plan } from "@/lib/part-docs/datasheet-book";
+import { datasheetEntryName as r329Entry, packageEntryName as r329PkgEntry } from "@/lib/part-docs/package";
+import { zipCacheable as r329Cacheable, LEFT_OUT_REASON as r329Lo } from "@/lib/estimate-output/package-zip";
+import { RACK_BOOK_MERGE_MS as r329RackMerge, RACK_DATASHEET_ALLOWANCE_MS as r329RackAllow, RACK_SUBMITTAL_FINISH_ALLOWANCE_MS as r329RackFinish,
+  RACK_SUBMITTAL_DEADLINE_MS as r329RackDeadline, RACK_SUBMITTAL_MAX_DURATION_MS as r329RackMax } from "@/lib/rack/submittal-server";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  // (3) A fixture sheet that covers another maker's accessory keeps the FIXTURE maker's name and place.
+  const plan = r329Plan([
+    { sku: "ACC", mfr: "Altman", model: "A-1", desc: "Accessory on the ETC sheet", docId: "D-fix", coveredBy: ["FIX"] },
+    { sku: "ALT", mfr: "Altman", model: "Z-9", desc: "Altman's own", docId: "D-alt" },
+    { sku: "FIX", mfr: "ETC", model: "S4", desc: "Fixture", docId: "D-fix" },
+    { sku: "ONLY", mfr: "Chauvet", model: "C", desc: "Covered only", docId: "D-cov", coveredBy: ["GONE"] },
+  ]);
+  ok(plan.docMfr.get("D-fix") === "ETC" && plan.docOrder.join() === "D-alt,D-cov,D-fix" && plan.docMfr.get("D-cov") === "Chauvet",
+    "#329 review: a document's manufacturer (name and place) comes from the part it's linked to directly, not a covered accessory of another maker; covered-only falls back to the first part: " + plan.docOrder.join());
+  const u = new Set<string>();
+  ok(r329Entry({ documentId: "PD-f", kind: "datasheet", name: "s4.pdf" }, plan.docMfr.get("D-fix")!, u) === "datasheets/ETC - s4.pdf",
+    "#329 review: the loose file follows its maker (ETC), not the covered accessory's (Altman)");
+  // (4) Case-insensitive clash set.
+  const used = new Set<string>();
+  const a = r329Entry({ documentId: "PD-1", kind: "datasheet", name: "S4.pdf" }, "ETC", used);
+  const b = r329Entry({ documentId: "PD-2", kind: "datasheet", name: "s4.pdf" }, "ETC", used);
+  const c = r329PkgEntry({ documentId: "PD-3", kind: "specsheet", name: "G.docx" }, used, (x) => x);
+  const d = r329PkgEntry({ documentId: "PD-4", kind: "specsheet", name: "g.docx" }, used, (x) => x);
+  ok(a === "datasheets/ETC - S4.pdf" && b === "datasheets/PD-2-ETC - s4.pdf" && c === "specsheets/G.docx" && d === "specsheets/PD-4-g.docx",
+    "#329 review: names that differ only in case never collide on extraction (the second gets its id prefix): " + [a, b, c, d].join("|"));
+  // (6) The combined ceiling.
+  const MB = 1024 * 1024;
+  ok(r329Ceiling === 120 * MB && r329Budget(0) === r329Max && r329Budget(30 * MB) === 90 * MB && r329Budget(70 * MB) === 50 * MB && r329Budget(130 * MB) < 0,
+    "#329 review: loose datasheets + the book stay under 120 MB (the book's own 100 MB cap still applies)");
+  const cps = rd("src/lib/client-package-server.ts");
+  const zs = rd("src/lib/estimate-output/package-zip-server.ts");
+  ok(cps.includes("maxBytes: bookByteBudget(loose)") && zs.includes("maxBytes: bookByteBudget(") && (cps.match(/addBook\(await bookP, files, gaps, bookDocs,/g) || []).length === 2,
+    "#329 review: both client packages and the estimate zip size the book against the ceiling; both packages record unmergeable datasheets");
+  // (5) A datasheet the book can't read is deterministic: the zip stays cacheable.
+  ok(r329Cacheable([{ name: "datasheets/X.pdf", reason: r329Lo.notInBook }]) && r329Cacheable([{ name: "a", reason: r329Lo.tooBig }, { name: "b", reason: r329Lo.notInBook }]) &&
+     !r329Cacheable([{ name: "b", reason: r329Lo.notInBook }, { name: "c", reason: r329Lo.late }]) && zs.includes("reason: LEFT_OUT_REASON.notInBook"),
+    "#329 review: a 'not in Datasheets.pdf' line keeps the estimate zip cacheable; a timeout still doesn't");
+  // (1) The rack book has a deadline inside the finish allowance.
+  const rs = rd("src/lib/rack/submittal-server.ts");
+  ok(rs.includes("deadline: readsBy + RACK_BOOK_MERGE_MS") && r329RackMerge > 0 && r329RackMerge < r329RackFinish &&
+     r329RackDeadline + r329RackAllow + r329RackMerge + 4_000 <= r329RackMax,
+    "#329 review: the rack's book merge stops RACK_BOOK_MERGE_MS after the reads, leaving ≥ 4 s of the 120 s route for the zip and response");
+  const bs = rd("src/lib/part-docs/datasheet-book-server.ts");
+  ok(bs.includes("copied.forEach((p, i) => checkPageBox(p, i + 1));") && /try \{\s*stampPage\(p, `Page/.test(bs),
+    "#329 review: page boxes are checked per document inside the merge try, and each stamp is its own try");
 }

@@ -11219,18 +11219,25 @@ crop box and rotation. Punch item #329.
 
 ## D832. Loose datasheets are "<Manufacturer> - <file>" (#329, 2026-10-12)
 
-`datasheets/ETC - ColorSource Spot.pdf`. The manufacturer is the book's printed name for the datasheet's first part
-(D829). A file name that already starts with it isn't doubled ("ETC_S4.pdf" → "ETC - S4.pdf"); a blank manufacturer keeps
+`datasheets/ETC - ColorSource Spot.pdf`. The manufacturer is the book's printed name for the datasheet's OWNER (#329
+review): the first part, in book order, the document is linked to directly (no `coveredBy`), so an ETC fixture sheet that
+also covers an Altman accessory stays "ETC - …" and sits in the ETC part of the book; a document that only covers parts
+falls back to the first one (D829). A file name that already starts with it isn't doubled ("ETC_S4.pdf" → "ETC - S4.pdf"); a blank manufacturer keeps
 the file's own name. Datasheet names keep spaces (a new `zipEntrySafe`: path and reserved characters → "_", ≤ 140
 chars, extension kept) instead of `safeName`'s underscores — spec sheets and manuals keep `safeName`. A clash keeps
-`packageEntryName`'s `<documentId>-` prefix. Datasheets go into the zip first, in book order. Punch item #329.
+`packageEntryName`'s `<documentId>-` prefix, and (#329 review) clashes are matched case-insensitively — "ETC - S4.pdf"
+and "ETC - s4.pdf" would overwrite each other when the zip is extracted on macOS or Windows — for every package entry. Datasheets go into the zip first, in book order. Punch item #329.
 
 ## D833. When the book is skipped, and its time budget (#329, 2026-10-12)
 
 The book never fails a package. It is skipped — the loose files still ship — when the datasheets read are over 100 MB
 or the finished PDF is (`BOOK_MAX_BYTES`), when it runs past its deadline, when no datasheet could be merged, or on any
-error. A datasheet that is corrupt, encrypted or empty becomes a "Could not be read" index row; its loose file still
-ships. Client packages (Grid and quote): the book merges from the bytes `addDocuments` already read (no second read;
+error. A datasheet that is corrupt, encrypted or empty — or (#329 review) has a missing or broken page box or rotation,
+checked per document inside the merge — becomes a "Could not be read" index row; its loose file still ships, and it
+is recorded: a `missing-datasheet-book` gap naming the file in the client packages, a LEFT OUT.txt line ("Not in
+Datasheets.pdf — the PDF couldn't be read (the file itself is included)") in the estimate zip, which keeps the zip
+cacheable (a corrupt file stays corrupt; `zipCacheable` accepts it like the size cap). Each page stamp is its own try,
+so one odd page never costs the book. The loose datasheets + the book also stay under D836's ceiling. Client packages (Grid and quote): the book merges from the bytes `addDocuments` already read (no second read;
 the reader is now an injectable `readDoc` dep), started before the drawing-set render and awaited after the racks,
 yielding between documents, on the package's 75 s render deadline — so the 25 s finish allowance is untouched; a skip
 is a `missing-datasheet-book` gap ("Datasheets.pdf — … ; the individual datasheets are in datasheets/."). Estimate zip:
@@ -11244,10 +11251,24 @@ Punch item #329.
 order (manufacturer A→Z) instead of schedule order, with the same cover, index and page stamps, and the same caps
 (25 MB / 60 MB) and read deadline. Its staff gaps are unchanged; a part marked "not needed" is now listed under Not
 included ("Datasheet not required") instead of left out. It still builds a cover-only book when no datasheet is on
-file. If the book itself can't be built, datasheets.pdf is left out with a missing-data gap. Punch item #329.
+file. If the book itself can't be built, datasheets.pdf is left out with a missing-data gap. (#329 review) The merge
+has a deadline: `RACK_BOOK_MERGE_MS` = 6 s after the datasheet reads stop (90 + 15 + 6 s, inside the 10 s finish
+allowance), so a slow merge is `late` — datasheets.pdf left out with that gap — instead of running the route past 120 s. Punch item #329.
 
 ## D835. Estimate package zip cache key bumped to v2 (#329, 2026-10-12)
 
 `packageZipCachePath` is now `estimate-package/<quote>/rev-<n>-h<0|1>-v2.zip` (D827's header key plus
 `PACKAGE_ZIP_CACHE_VERSION = 2`), so a zip cached before #329 (no Datasheets.pdf, old loose names) is never served; the
 first download after deploy rebuilds. Old `rev-<n>.zip` / `rev-<n>-h<0|1>.zip` blobs stay in the quote's folder until Rebuild package clears the folder (same prefix). Punch item #329.
+
+## D836. Loose datasheets + Datasheets.pdf stay under 120 MB per zip (#329 review, 2026-10-12)
+
+Every datasheet now ships twice (the loose file and its pages in the book) and a package zip is built as one in-memory
+buffer. `BOOK_ZIP_CEILING_BYTES` = **120 MB**: the book may use `bookByteBudget(loose) = min(100 MB, 120 MB − loose
+datasheet bytes)`; past it the book is skipped as "package size limit" (the existing note — a `missing-datasheet-book`
+gap in the client packages, a cacheable LEFT OUT line in the estimate zip) and the loose files ship. 120 MB is twice
+the 60 MB datasheet total the estimate zip and the rack submittal already cap their reads at
+(`PACKAGE_ZIP_TOTAL_MAX_BYTES`, `RACK_DATASHEETS_TOTAL_BYTES`), so a package at that cap still gets its book. The
+client packages read every datasheet with no cap of their own (unchanged); only the book is held back. Known limit, not
+fixed: in the Grid and quote client packages the book shares the 75 s render budget with the drawing set, cut sheets
+and racks, so on a slow build it can be skipped as "ran out of time" (with the note). Punch item #329.

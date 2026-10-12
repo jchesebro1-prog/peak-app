@@ -16,7 +16,7 @@ import { createStoredZip, type ZipFile } from "@/lib/zip";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { datasheetEntryName, packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
-import { BOOK_FILE_NAME, BOOK_REASON, bookDate, bookPartOf, planDatasheetBook, type BookPart, type BookPlan } from "@/lib/part-docs/datasheet-book";
+import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook, type BookPart, type BookPlan } from "@/lib/part-docs/datasheet-book";
 import { BOOK_SKIPPED_REASON, buildDatasheetBook, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, CUT_SHEET_DEADLINE_MS, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
@@ -476,8 +476,9 @@ async function addDocuments(
     }
     const data = await bytesFromStream(stream);
     if (doc.kind === "datasheet") {
-      files.push({ name: datasheetEntryName(doc, plan.docMfr.get(doc.documentId) ?? "", used), data });
-      book.set(doc.documentId, { bytes: data });
+      const name = datasheetEntryName(doc, plan.docMfr.get(doc.documentId) ?? "", used);
+      files.push({ name, data });
+      book.set(doc.documentId, { bytes: data, name });
     } else {
       files.push({ name: packageEntryName(doc, used, safeName), data });
     }
@@ -490,6 +491,11 @@ export function datasheetBookGap(cause: "too-big" | "late" | "failed"): ClientPa
   return { kind: "missing-datasheet-book", sku: "DS", description: `${BOOK_FILE_NAME} — ${BOOK_SKIPPED_REASON[cause]}; the individual datasheets are in datasheets/.`, qty: 0, catalogId: null };
 }
 
+/** #329 review — one datasheet the book couldn't read (corrupt, encrypted, a bad page box): it ships loose but isn't in the book. */
+export function unmergeableDatasheetGap(file: string, sku: string, catalogId: string | null): ClientPackageGap {
+  return { kind: "missing-datasheet-book", sku, description: `${file} couldn’t be read, so it isn’t in ${BOOK_FILE_NAME}; the file itself is in the package.`, qty: 0, catalogId };
+}
+
 type PackageBookResult = Awaited<ReturnType<typeof buildDatasheetBook>> | null;
 
 /**
@@ -500,14 +506,20 @@ type PackageBookResult = Awaited<ReturnType<typeof buildDatasheetBook>> | null;
 async function packageBook(parts: BookPart[], docs: Map<string, BookDoc>, subtitleLines: string[], deadline: number, tag: string, letterhead: Letterhead | null): Promise<PackageBookResult> {
   // Nothing read (no datasheets, or Blob lost every one — each already a missing-datasheet gap): no book.
   if (![...docs.values()].some((d) => d.bytes)) return null;
-  return buildDatasheetBook({ subtitleLines, parts, docs, letterhead, deadline, logTag: tag });
+  // #329 review: the loose datasheets + the book stay under BOOK_ZIP_CEILING_BYTES (skip = "package size limit").
+  const loose = [...docs.values()].reduce((n, d) => n + (d.bytes?.byteLength ?? 0), 0);
+  return buildDatasheetBook({ subtitleLines, parts, docs, letterhead, deadline, logTag: tag, maxBytes: bookByteBudget(loose) });
 }
 
-/** Put the book at the zip root, or the gap that says it was skipped. */
-function addBook(book: PackageBookResult, files: ZipFile[], gaps: ClientPackageGap[]): boolean {
+/** Put the book at the zip root (plus a gap per datasheet it couldn't read), or the gap that says it was skipped. */
+function addBook(book: PackageBookResult, files: ZipFile[], gaps: ClientPackageGap[], docs: Map<string, BookDoc>, catalogIdOf: (sku: string) => string | null): boolean {
   if (!book) return false;
   if (book.ok) {
     files.push({ name: BOOK_FILE_NAME, data: book.bytes });
+    for (const id of book.unmergeable) {
+      const sku = book.plan.parts.find((p) => p.docId === id && !p.coveredBy?.length)?.sku ?? book.plan.parts.find((p) => p.docId === id)?.sku ?? "";
+      gaps.push(unmergeableDatasheetGap(docs.get(id)?.name ?? "A datasheet", sku, catalogIdOf(sku)));
+    }
     return true;
   }
   console.warn(`[package] ${BOOK_FILE_NAME} skipped (${book.cause}): ${book.detail}`);
@@ -632,7 +644,7 @@ export async function createClientPackage(
   // #296 — racks placed on this option (`asm:<id>` of kind rack), after the cut sheets on the same deadline.
   const gridRacks = racksInGrid(optionSlice(project, optId).placements.map((p) => p.partId), (id) => fixtures?.get(id));
   const rackRun = await addRacks(gridRacks, [], (id) => fixtures?.get(id)?.label || "Rack", where, files, gaps, cutSheetsBy);
-  const datasheetBook = addBook(await bookP, files, gaps);
+  const datasheetBook = addBook(await bookP, files, gaps, bookDocs, (sku) => itemBySku.get(sku)?.catalogId ?? null);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
   specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec }, { letterhead });
   const publicManifest = { ...manifest, gaps };
@@ -706,7 +718,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   for (const it of qItems) if (typeof it.rackId === "string" && !rackLineName.has(it.rackId)) rackLineName.set(it.rackId, String(it.desc || "") || "Rack");
   const goneRacks = racksInQuote(qItems.map((it) => ({ rackId: it.rackId })), () => ({ kind: "rack" })).filter((id) => rackFixtures.get(id)?.kind !== "rack");
   const rackRun = await addRacks(quoteRacks, goneRacks, (id) => rackFixtures.get(id)?.label || rackLineName.get(id) || "Rack", where, files, gaps, cutSheetsBy);
-  const datasheetBook = addBook(await bookP, files, gaps);
+  const datasheetBook = addBook(await bookP, files, gaps, bookDocs, (sku) => itemBySku.get(sku)?.catalogId ?? null);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
   specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec }, { letterhead });
   files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, ...(drawingSet ? { drawingSet } : {}), cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, ...(datasheetBook ? { datasheetBook: BOOK_FILE_NAME } : {}), generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });

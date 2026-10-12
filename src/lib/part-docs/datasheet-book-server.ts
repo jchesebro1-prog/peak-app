@@ -21,7 +21,8 @@ import {
   type BookIndex, type BookIndexRow, type BookPart, type BookPlan,
 } from "./datasheet-book";
 
-export type BookDoc = { bytes: Uint8Array | null; reason?: string };
+/** `name`: the document's loose zip entry, when the caller ships one (for its notes). */
+export type BookDoc = { bytes: Uint8Array | null; reason?: string; name?: string };
 
 export type BuildBookInput = {
   title?: string;
@@ -103,6 +104,15 @@ function clamp(font: PDFFont, text: string, size: number, width: number, max: nu
 }
 
 /* ---------- page stamp ---------- */
+
+/** Throws unless the page's media box, crop box and rotation read as finite numbers with a real size (#329 review). */
+export function checkPageBox(page: PDFPage, n = 1): void {
+  const ok = (b: { x: number; y: number; width: number; height: number }) =>
+    [b.x, b.y, b.width, b.height].every(Number.isFinite) && Math.abs(b.width) >= 1 && Math.abs(b.height) >= 1;
+  if (!ok(page.getMediaBox())) throw new Error(`page ${n}: unusable MediaBox`);
+  if (!ok(page.getCropBox())) throw new Error(`page ${n}: unusable CropBox`);
+  if (!Number.isFinite(page.getRotation().angle)) throw new Error(`page ${n}: unusable Rotate`);
+}
 
 export const STAMP_SIZE = 8;
 export const STAMP_INSET = 18;
@@ -323,6 +333,8 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
         if (src.isEncrypted) throw new Error("encrypted PDF");
         const copied = await out.copyPages(src, src.getPageIndices());
         if (!copied.length) throw new Error("PDF has no pages");
+        // #329 review: a missing or bad /MediaBox, /CropBox or /Rotate fails THIS document here, never the stamp loop.
+        copied.forEach((p, i) => checkPageBox(p, i + 1));
         for (const p of copied) out.addPage(p);
         pages.set(id, copied.length);
       } catch (err) {
@@ -365,7 +377,14 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
     }
     laid.forEach((ops, i) => drawFront(out.insertPage(i, [PAGE_W, PAGE_H]), ops, f, logo));
     const all = out.getPages();
-    all.forEach((p, i) => stampPage(p, `Page ${i + 1} of ${all.length}`, f.regular));
+    all.forEach((p, i) => {
+      try {
+        stampPage(p, `Page ${i + 1} of ${all.length}`, f.regular);
+      } catch (err) {
+        // One odd page never costs the book its other pages.
+        console.warn(`${tag} page ${i + 1} not stamped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
     out.setTitle(subtitleLines[0] ? `${title} — ${subtitleLines[0]}` : title);
     out.setCreator("Peak Systems Group");
     out.setProducer("Quartzite");

@@ -40,6 +40,8 @@ export const RACK_MIN_RENDER_MS = 5_000;
 export const RACK_DATASHEET_ALLOWANCE_MS = 15_000;
 /** After the datasheet reads: the merge, the zip and the first response bytes. */
 export const RACK_SUBMITTAL_FINISH_ALLOWANCE_MS = 10_000;
+/** #329 review: the datasheet book's merge may run this long past the reads — inside the finish allowance, leaving the rest for the zip and the response. */
+export const RACK_BOOK_MERGE_MS = 6_000;
 /** The route's maxDuration (120 s); the harness checks the budgets above fit inside it. */
 export const RACK_SUBMITTAL_MAX_DURATION_MS = 120_000;
 /** One datasheet file over this is left out. */
@@ -258,6 +260,10 @@ async function datasheetsPdf(
     letterhead: cover.letterhead,
     logTag: "[rack]",
     emptyOk: true,
+    // #329 review: the merge stops RACK_BOOK_MERGE_MS after the reads (inside the finish allowance), so a slow
+    // merge skips the book with a gap instead of blowing the route's 120 s.
+    deadline: readsBy + RACK_BOOK_MERGE_MS,
+    now,
   });
   if (!book.ok) {
     console.warn(`[rack] datasheets.pdf not built (${book.cause}): ${book.detail}`);

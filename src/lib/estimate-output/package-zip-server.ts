@@ -7,7 +7,7 @@ import { CutSheetDeadlineError } from "@/lib/curtain-cut-sheets/deadline";
 import { attachmentDisposition } from "@/lib/document-files";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { datasheetEntryName, packageEntryName } from "@/lib/part-docs/package";
-import { BOOK_FILE_NAME, BOOK_REASON, bookDate, bookPartOf, planDatasheetBook } from "@/lib/part-docs/datasheet-book";
+import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook } from "@/lib/part-docs/datasheet-book";
 import { BOOK_SKIPPED_REASON, buildDatasheetBook, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import { readCapped } from "@/lib/rack/submittal-server";
 import type { SharedPackage } from "@/lib/quote-share/links";
@@ -137,7 +137,7 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
         files.push({ name, data: bytes });
         if (isDs) {
           datasheets++;
-          bookDocs.set(doc.documentId, { bytes });
+          bookDocs.set(doc.documentId, { bytes, name });
         } else specsheets++;
       } catch (e) {
         console.warn(`[package] ${doc.documentId}: ${e instanceof Error ? e.message : String(e)}`);
@@ -161,10 +161,14 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
       deadline: Math.max(deadline, d.now()) + PACKAGE_BOOK_MS,
       now: d.now,
       logTag: `[package] ${q.id} rev ${rev.rev}`,
+      // #329 review: the loose datasheets + the book stay under BOOK_ZIP_CEILING_BYTES.
+      maxBytes: bookByteBudget([...bookDocs.values()].reduce((n, x) => n + (x.bytes?.byteLength ?? 0), 0)),
     });
     if (built.ok) {
       files.splice(specifications ? 1 : 0, 0, { name: BOOK_FILE_NAME, data: built.bytes });
       book = true;
+      // A datasheet the book couldn't read ships loose but isn't in the book: say so (deterministic — still cacheable).
+      for (const id of built.unmergeable) leftOut.push({ name: bookDocs.get(id)?.name ?? "A datasheet", reason: LEFT_OUT_REASON.notInBook });
     } else {
       console.warn(`[package] ${q.id} rev ${rev.rev}: ${BOOK_FILE_NAME} skipped (${built.cause}): ${built.detail}`);
       leftOut.push({ name: BOOK_FILE_NAME, reason: built.cause === "too-big" ? LEFT_OUT_REASON.tooBig : built.cause === "late" ? LEFT_OUT_REASON.late : BOOK_SKIPPED_REASON.failed });

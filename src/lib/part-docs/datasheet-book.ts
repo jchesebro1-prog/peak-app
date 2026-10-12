@@ -14,6 +14,19 @@ export const BOOK_FILE_NAME = "Datasheets.pdf";
 export const BOOK_TITLE = "Product Datasheets";
 /** A finished book over this is not shipped (the loose files still are). */
 export const BOOK_MAX_BYTES = 100 * 1024 * 1024;
+/**
+ * #329 review — every datasheet ships twice (loose + in the book) and a zip is
+ * one in-memory buffer: the loose datasheets plus the book stay under this.
+ * Twice the 60 MB datasheet total the estimate zip and the rack submittal
+ * already cap their reads at (PACKAGE_ZIP_TOTAL_MAX_BYTES,
+ * RACK_DATASHEETS_TOTAL_BYTES).
+ */
+export const BOOK_ZIP_CEILING_BYTES = 120 * 1024 * 1024;
+
+/** The bytes a book may take next to `looseBytes` of loose datasheets (≤ 0 = skip the book, "package size limit"). */
+export function bookByteBudget(looseBytes: number): number {
+  return Math.min(BOOK_MAX_BYTES, BOOK_ZIP_CEILING_BYTES - Math.max(0, looseBytes));
+}
 export const UNKNOWN_MANUFACTURER = "Unknown manufacturer";
 
 /** Customer-facing "Not included" reasons. */
@@ -117,22 +130,29 @@ export function sortPartsForBook(parts: readonly BookPart[]): SortedBookPart[] {
 
 export type BookPlan = {
   parts: SortedBookPart[];
-  /** Each datasheet ONCE, at the first part (in book order) it serves. */
+  /** Each datasheet ONCE, at its owner's place in book order (the owner: see docMfr). */
   docOrder: string[];
-  /** A document's manufacturer — its first part's printed manufacturer ("" when unknown). */
+  /**
+   * A document's manufacturer — its OWNER's printed manufacturer ("" when
+   * unknown): the first part (book order) the document is linked to directly
+   * (no `coveredBy`), so a fixture sheet that also covers another maker's
+   * accessory keeps the fixture maker's name; else the first part it serves.
+   */
   docMfr: Map<string, string>;
 };
 
 export function planDatasheetBook(parts: readonly BookPart[]): BookPlan {
   const sorted = sortPartsForBook(parts);
-  const docOrder: string[] = [];
-  const docMfr = new Map<string, string>();
-  for (const p of sorted) {
-    if (!p.docId || docMfr.has(p.docId)) continue;
-    docOrder.push(p.docId);
-    docMfr.set(p.docId, p.group ? p.mfrLabel : "");
-  }
-  return { parts: sorted, docOrder, docMfr };
+  const owner = new Map<string, { at: number; part: SortedBookPart; direct: boolean }>();
+  sorted.forEach((p, at) => {
+    if (!p.docId) return;
+    const direct = !p.coveredBy?.length;
+    const cur = owner.get(p.docId);
+    if (!cur || (direct && !cur.direct)) owner.set(p.docId, { at, part: p, direct });
+  });
+  const ranked = [...owner.entries()].sort((a, b) => a[1].at - b[1].at);
+  const docMfr = new Map(ranked.map(([id, o]) => [id, o.part.group ? o.part.mfrLabel : ""] as const));
+  return { parts: sorted, docOrder: ranked.map(([id]) => id), docMfr };
 }
 
 export type BookIndexRow = {

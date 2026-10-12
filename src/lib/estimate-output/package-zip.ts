@@ -22,6 +22,8 @@ export const LEFT_OUT_REASON = {
   late: "Left out — ran out of time",
   unreadable: "Left out — the file couldn't be read",
   missing: "Left out — the file is missing",
+  /** #329 review: the file IS in the zip; only the combined Datasheets.pdf lacks it (a corrupt / unreadable PDF). */
+  notInBook: "Not in Datasheets.pdf — the PDF couldn't be read (the file itself is included)",
 } as const;
 
 export type LeftOut = { name: string; reason: string };
@@ -48,9 +50,10 @@ export function leftOutText(rows: readonly LeftOut[]): string {
 }
 
 /** Freeze a build in the cache only when nothing transient went wrong: the
- *  size cap is deterministic; a timeout, an unreadable or a missing file is not. */
+ *  size cap and a datasheet the book can't read (#329 review — a corrupt file
+ *  stays corrupt) are deterministic; a timeout, an unreadable or a missing file is not. */
 export function zipCacheable(rows: readonly LeftOut[]): boolean {
-  return rows.every((r) => r.reason === LEFT_OUT_REASON.tooBig);
+  return rows.every((r) => r.reason === LEFT_OUT_REASON.tooBig || r.reason === LEFT_OUT_REASON.notInBook);
 }
 
 /** Slice C adaptation 3: Blob must be on, and only the PRODUCTION Vercel
