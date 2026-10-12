@@ -11766,3 +11766,43 @@ prints box types, line legend and rack contents, and no power. The plan prompt n
 sheets follow the lighting ones (exclusion key `av-riser`) and download as DXF with `system=av`. The quote reads both
 risers. Jeff-gated: try the A/V riser on a real job; adjust its Always show list if a device type you need is hidden;
 compare an A/V sheet against Bray's AV1.5.
+
+## 329. Datasheet packages — A→Z by manufacturer, a cover sheet and an index — DONE 2026-10-12 (D828–D836)
+
+**Asked (Jeff, 2026-10-12):** "When generating a datasheet package, it needs to be alphabetical by manufacturer; all
+datasheet packages should have a cover sheet and an index of all of the pages and where each part starts." His answers:
+one merged `Datasheets.pdf` per package AND the loose files (renamed so they sort by manufacturer); datasheets only (spec
+sheets and manuals stay loose, unchanged); one index row per BOM part with the page its datasheet starts on (a shared or
+covering datasheet prints once, every part on it points at the same page; no datasheet → a "Not included" section);
+"Page N of M" small in the bottom margin of every page.
+
+**Built:** a pure planner `src/lib/part-docs/datasheet-book.ts` (sort, plan, index, loose names) and one pdf-lib
+builder `src/lib/part-docs/datasheet-book-server.ts` (`buildDatasheetBook`: Letter cover with the branding logo, title,
+job lines and "N parts · M datasheets · P pages"; the index table Manufacturer | Model / Part # | Description | Page,
+then Not included with reasons; each datasheet once, manufacturer A→Z; every page stamped through its own crop box and
+rotation). All four bundles use it:
+- Grid client package and quote client package (`client-package-server.ts`): `Datasheets.pdf` at the zip root, loose
+  files `datasheets/<Manufacturer> - <file>`; the book merges from the bytes already read, alongside the renders.
+- Customer estimate package zip (`estimate-output/package-zip-server.ts`): `Datasheets.pdf` next to
+  Specifications.docx; the Blob cache key is now `rev-<n>-v2.zip` so no zip cached before this is served.
+- Rack submittal: `datasheets.pdf` (name unchanged) is now the same book — manufacturer order, not rack schedule order.
+`scripts/datasheet-book-sample.ts <out.pdf> [logo]` writes a sample book from generated fixture PDFs.
+
+**Review fixes (same day, D832–D836):** the rack's book merge has a 6 s deadline after its reads; a datasheet with a
+bad page box is "Could not be read" (never the whole book) and each page stamp is its own try; a fixture sheet covering
+another maker's accessory keeps the fixture maker's name and place; zip entry clashes are case-insensitive; a datasheet
+the book can't read is a gap in the client packages and a cacheable LEFT OUT line in the estimate zip; loose datasheets
++ the book stay under 120 MB per zip (D836). The cover uses the Grid notes #9 letterhead (on/off per document).
+
+**Known limit:** in the Grid and quote client packages the book shares the 75 s render budget with the drawing set, cut
+sheets and racks; on a slow build it is skipped with the "ran out of time" note (the loose files still ship).
+
+**Remaining (Jeff-gated):** open a real package on production and look at the cover/index; check a few manufacturer
+PDFs that are landscape or rotated for the page stamp.
+
+**#329b (Jeff-approved follow-up, D837):** the #298 manufacturer merges now apply to the book: each part's
+manufacturer resolves to its canonical manufacturer record (merge chains followed) before sorting, grouping and
+printing, and the loose `datasheets/<Manufacturer> - <file>` names use the same name — in the Grid and quote client
+packages, the estimate package zip and the rack submittal. One manufacturers read per build
+(`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`); a failed read falls back to each part's own
+manufacturer with a warning.

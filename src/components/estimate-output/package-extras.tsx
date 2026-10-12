@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
 import { downloadsSummary, type DatasheetLinkView, type PackageDownloadsView, type PackagePlanView } from "@/lib/estimate-output/package-extras-model";
 
 /**
@@ -27,6 +28,14 @@ export function PackageDownloads({ view }: { view: PackageDownloadsView }) {
         <a href={view.zipHref} download style={{ ...PKG_LINK, display: "inline-block", border: "1px solid var(--accent)", borderRadius: 8, padding: "8px 14px" }}>
           Download all (.zip)
         </a>
+        {view.datasheetsPdfHref && (
+          <>
+            {" "}
+            <a href={view.datasheetsPdfHref} download style={{ ...PKG_LINK, display: "inline-block", border: "1px solid var(--accent)", borderRadius: 8, padding: "8px 14px", marginTop: 6 }}>
+              {BOOK_COVER_COPY.button}
+            </a>
+          </>
+        )}
       </p>
       <p className="pkg-muted" style={{ margin: "0 0 8px" }}>
         {downloadsSummary(view)}

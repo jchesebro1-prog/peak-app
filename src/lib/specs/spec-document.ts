@@ -54,6 +54,10 @@ export type SpecDocument = {
   usedRecords: Record<string, number>;
   /** When the last Word download happened (epoch ms). */
   downloadedAt?: number;
+  /** Grid notes #9 — "Include Peak header" on page 1 of the Word file:
+   *  true/false = this spec's own choice, absent = the company default
+   *  (Settings → Branding). */
+  peakHeader?: boolean;
   createdAt: number;
   createdBy: string;
   updatedAt: number;
@@ -205,6 +209,7 @@ export function normalizeSpecDocument(raw: unknown): SpecDocument {
     overrides: overridesMap(o.overrides),
     usedRecords: revisionMap(o.usedRecords),
     ...(Number(o.downloadedAt) > 0 ? { downloadedAt: Number(o.downloadedAt) } : {}),
+    ...(typeof o.peakHeader === "boolean" ? { peakHeader: o.peakHeader } : {}),
     createdAt: Number(o.createdAt) || 0,
     createdBy: str(o.createdBy),
     updatedAt: Number(o.updatedAt) || 0,

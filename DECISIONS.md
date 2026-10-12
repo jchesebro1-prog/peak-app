@@ -11117,6 +11117,181 @@ riser page and the set (screen-only, under each A/V sheet) both show the Downloa
 Conduit demand sums every riser's runs, and refusals are collected from both, each sentence once. An estimate-owned
 option prices nothing from either riser. Punch item #328.
 
+## D823. Specs carry the Peak letterhead on page 1 only (Grid notes #9, 2026-10-12)
+
+"The Peak standard header" is the existing letterhead, with the same D59 ladder the letters use: the uploaded dark logo
+when it is a JPEG, else the baked `peak-letterhead.jpg`, else the company name set bold in type. `letterheadJpeg` moved to
+`src/lib/letterhead-server.ts` (renewal-outreach re-exports it unchanged); the pure rules live in `src/lib/letterhead.ts`.
+The Spec builder's Word file sets `titlePage` and gives page 1 its own header: the letterhead image **above** the same
+MasterSpec HDR lines. Page 1 also gets the same running footer, since a title page otherwise prints no footer. Later pages
+keep `headers.default`/`footers.default` byte-for-byte, and the D474/D475 styles are untouched. The D94 bid spec .docx has
+no running header, so it gets only a first-page header. Its print view and .doc download (`renderSpecHtml`) put the
+letterhead at the top as a data-URI image. `specification.docx` in both client packages, and the estimate package zip's
+`Specifications.docx`, use the same builder. With the header off, every one of these is the file it was before #9.
+Checked as XML only: there is no Word on this Mac.
+
+## D824. Company default + per-document choice; matching the default stores nothing (Grid notes #9, 2026-10-12)
+
+Settings → Branding → "Put the Peak header on documents" (`settings.peakHeader`, admin-only) is the company default.
+**Absent = on**; only an explicit `false` turns it off. Each document's own choice wins: `resolvePeakHeader(perDoc, default)`.
+The choice is saved on the Spec builder record (`spec_documents.peakHeader`, the checkbox under the Header card) and on the
+D94 spec (`generated_specs.peakHeader`, beside Print / Download on its page; presentation only, the frozen `spec` never
+changes). An estimate saves it as `Quote.packagePeakHeader`, from the staff package panel beside Rebuild package. That
+field has one writer, `setPackagePeakHeader`, and `update()` drops it. It is not content and is not snapshotted. The
+cached package zip is keyed by the resolved header (D827), so the next download carries a change. The Grid Outputs menu's checkbox applies to
+one build only: it starts at the company default and is passed into `createClientPackage`. The Quotes hub's
+"Build client package" follows the estimate's saved choice, then the default. A checkbox ticked to match the company
+default stores **nothing** (null), so the document keeps following a later change of the default.
+
+## D825. The plain-name documents get the letterhead too (Grid notes #9, 2026-10-12)
+
+The client package's rough-drawings fallback and the quote equipment summary used to print "Peak Systems Group" in type.
+They now print the letterhead through `renderLetterPdf`'s `headerJpeg`, as renewal letters do. The rack datasheet index
+(`mergeDatasheets`) draws it at the top of its first index page; the index layout leaves room for it, so the page
+numbers it lists stay right. The rack submittal download follows the company default (no per-rack toggle). With the
+header off these PDFs are unchanged. Letters, quotes, reports, cut sheets, the drawing set and the cover already carried
+the letterhead and are untouched.
+
+## D826. The baked letterhead ships with every function (Grid notes #9, 2026-10-12)
+
+`letterheadJpeg` reads `src/app/(app)/flame-tests/letter/peak-letterhead.jpg` with `fs` at run time, which file tracing
+can't see (the `path` import is dynamic), so a deployed function may have been falling back to the company name in
+type. `next.config.ts` now includes it for `"/**"` (120 KB per function), so specs, packages, rentals and renewal PDFs
+find it in production. This was a choice over a per-route list, which would drift as callers are added.
+
+## D827. Peak header review fixes: every logo format, a header-keyed zip cache, strict toggles (Grid notes #9, 2026-10-12)
+
+A dark logo uploaded as PNG, WebP or SVG used to be replaced by the baked sheet on every PDF and Word output, because
+only JPEG could be embedded. The logo's format is now sniffed from its bytes. A JPEG is used as-is. Anything else is
+rasterised with sharp: SVG at 288 dpi, everything capped at 2400×800. The result is kept as PNG for Word, pdf-lib and
+the HTML view, and as a JPEG flattened on white for `lib/pdf.ts`. That reaches renewal and rental letters too, which now
+print a PNG/SVG logo instead of the baked sheet, as the on-screen letters already did (D59). An unreadable logo falls
+back to the baked sheet. A missing baked file is logged once. Its path lives in one module, `src/lib/letterhead-path.ts`,
+shared with `next.config.ts`. The estimate package zip's cache path now carries the **resolved** header
+(`rev-<n>-h1.zip` / `-h0.zip`). `servePackageZip` resolves the header once per download (the estimate's choice, else the
+company default) and uses that one value for both the cache key and the build. A company-default change or a toggle
+racing a build can therefore never serve the other header's zip. The header is **live**, not frozen with the revision: a
+toggle after send applies to the next download. Older un-suffixed cache files are simply never read again. Every header
+toggle accepts only `true`, `false` or `null` (follow the default), with no coercion. The D94 spec's toggle needs `create`,
+like the Spec builder's. If the Grid Outputs menu can't read the default, it sends nothing and the server applies it.
+
+## D828. One Datasheets.pdf per package, at the zip root, datasheets only (#329, 2026-10-12)
+
+Jeff's call: a merged book AND the loose files. Defaults taken: the book is `Datasheets.pdf` at the zip root of the Grid
+client package, the quote client package and the estimate package zip (next to Specifications.docx); the rack submittal
+keeps its `datasheets.pdf` name. Spec sheets and manuals are never in the book and keep their loose names. A package
+with no datasheet read gets no book and no note. The Grid/quote `00-package-index.json` gains `datasheetBook:
+"Datasheets.pdf"` when it ships. Punch item #329.
+
+## D829. Book order: manufacturer, then model, then SKU; blank manufacturer last (#329, 2026-10-12)
+
+Manufacturers group by `mfrKey` (case and punctuation ignored), so "Etc" and "ETC" are one group printed by its most
+common spelling (a tie goes to the code-point-smallest, so "ETC" beats "Etc"). Groups sort A→Z (numeric-aware, case
+ignored). A part with no manufacturer sorts LAST under "Unknown manufacturer". Within a group: the printed model
+(`partModel`, #304 — Model #, then MFR P/N, then the SKU's model tail), numeric-aware ("Lens Tube 2" before "Lens Tube
+10"), then SKU. The #298 manufacturer merges were NOT applied at first (they need a manufacturers-table read);
+#329b applies them (D837). Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
+
+## D830. The book's cover and index (#329, 2026-10-12)
+
+pdf-lib, Letter 612×792, Helvetica (no Chrome route), like the rack's old cover. Top to bottom: the Peak letterhead
+(Grid notes #9, D823–D827: the same `Letterhead` and size as the rack index — the logo in any format, else the baked
+sheet, else the company name in type; none when the header is off for that document), "Product Datasheets", the job lines
+(Grid: design, customer, venue, today; quote package: quote name, customer, Estimate #, today; estimate zip: the
+revision's name, customer, "Estimate # · Rev N", the revision's issued date; rack: "<rack> — rack submittal", scope,
+today — all America/Chicago), "N parts · M datasheets · P pages", then the index on the same page, continuing on
+following pages with "Product Datasheets — index (continued)" and the column header repeated. Columns: Manufacturer |
+Model / Part # | Description | Page ("Reason" instead of Page under Not included). The manufacturer prints bold on a
+group's first row (with a thin rule above it) and again at the top of each continued page, instead of a separate
+header line. Descriptions wrap to 3 lines, other cells to 2, then "…". One row per BOM part: a part covered by a
+fixture's datasheet and parts sharing one document all show the same page. Not included reasons: "No datasheet on
+file", "Datasheet not required" (marked not needed — listed, per one row per part), "Not a catalog part" (model "—";
+e.g. a Grid curtain), "Could not be read", "File missing", "Left out — package size limit", "Left out — ran out of
+time". No PDF bookmarks (left out to keep risk down). Punch item #329.
+
+## D831. "Page N of M" on every page, through each page's own box and rotation (#329, 2026-10-12)
+
+8 pt Helvetica, gray, centered, 18 pt above the page's VISUAL bottom edge: the crop box (falls back to the media box),
+and `/Rotate` respected (0 → y-min, 90 → x-max, 180 → y-max, 270 / -90 → x-min, the text turned to read upright).
+Cover and index pages are numbered too. pdf-lib wraps a page's existing content in q/Q before drawing, so a
+manufacturer PDF that leaves its graphics state transformed can't move the stamp. Manufacturer pages keep their size,
+crop box and rotation. Punch item #329.
+
+## D832. Loose datasheets are "<Manufacturer> - <file>" (#329, 2026-10-12)
+
+`datasheets/ETC - ColorSource Spot.pdf`. The manufacturer is the book's printed name for the datasheet's OWNER (#329
+review): the first part, in book order, the document is linked to directly (no `coveredBy`), so an ETC fixture sheet that
+also covers an Altman accessory stays "ETC - …" and sits in the ETC part of the book; a document that only covers parts
+falls back to the first one (D829). A file name that already starts with it isn't doubled ("ETC_S4.pdf" → "ETC - S4.pdf"); a blank manufacturer keeps
+the file's own name. Datasheet names keep spaces (a new `zipEntrySafe`: path and reserved characters → "_", ≤ 140
+chars, extension kept) instead of `safeName`'s underscores — spec sheets and manuals keep `safeName`. A clash keeps
+`packageEntryName`'s `<documentId>-` prefix, and (#329 review) clashes are matched case-insensitively — "ETC - S4.pdf"
+and "ETC - s4.pdf" would overwrite each other when the zip is extracted on macOS or Windows — for every package entry. Datasheets go into the zip first, in book order. Punch item #329.
+
+## D833. When the book is skipped, and its time budget (#329, 2026-10-12)
+
+The book never fails a package. It is skipped — the loose files still ship — when the datasheets read are over 100 MB
+or the finished PDF is (`BOOK_MAX_BYTES`), when it runs past its deadline, when no datasheet could be merged, or on any
+error. A datasheet that is corrupt, encrypted or empty — or (#329 review) has a missing or broken page box or rotation,
+checked per document inside the merge — becomes a "Could not be read" index row; its loose file still ships, and it
+is recorded: a `missing-datasheet-book` gap naming the file in the client packages, a LEFT OUT.txt line ("Not in
+Datasheets.pdf — the PDF couldn't be read (the file itself is included)") in the estimate zip, which keeps the zip
+cacheable (a corrupt file stays corrupt; `zipCacheable` accepts it like the size cap). Each page stamp is its own try,
+so one odd page never costs the book. The loose datasheets + the book also stay under D836's ceiling. Client packages (Grid and quote): the book merges from the bytes `addDocuments` already read (no second read;
+the reader is now an injectable `readDoc` dep), started before the drawing-set render and awaited after the racks,
+yielding between documents, on the package's 75 s render deadline — so the 25 s finish allowance is untouched; a skip
+is a `missing-datasheet-book` gap ("Datasheets.pdf — … ; the individual datasheets are in datasheets/."). Estimate zip:
+merged after the 45 s reads with its own 30 s (`PACKAGE_BOOK_MS`; 45 + 30 + the zip fit the route's 120 s); a skip is
+a LEFT OUT.txt line ("package size limit" — still cacheable — or "ran out of time" / "couldn't be built" — not cached).
+Punch item #329.
+
+## D834. The rack submittal's datasheets.pdf is the shared book, manufacturer order (#329, 2026-10-12)
+
+`mergeDatasheets` / `datasheetCoverLines` moved into `buildDatasheetBook`; the rack reads its datasheets in the book's
+order (manufacturer A→Z) instead of schedule order, with the same cover, index and page stamps, and the same caps
+(25 MB / 60 MB) and read deadline. Its staff gaps are unchanged; a part marked "not needed" is now listed under Not
+included ("Datasheet not required") instead of left out. It still builds a cover-only book when no datasheet is on
+file. If the book itself can't be built, datasheets.pdf is left out with a missing-data gap. (#329 review) The merge
+has a deadline: `RACK_BOOK_MERGE_MS` = 6 s after the datasheet reads stop (90 + 15 + 6 s, inside the 10 s finish
+allowance), so a slow merge is `late` — datasheets.pdf left out with that gap — instead of running the route past 120 s. Punch item #329.
+
+## D835. Estimate package zip cache key bumped to v2 (#329, 2026-10-12)
+
+`packageZipCachePath` is now `estimate-package/<quote>/rev-<n>-h<0|1>-v2.zip` (D827's header key plus
+`PACKAGE_ZIP_CACHE_VERSION = 2`), so a zip cached before #329 (no Datasheets.pdf, old loose names) is never served; the
+first download after deploy rebuilds. Old `rev-<n>.zip` / `rev-<n>-h<0|1>.zip` blobs stay in the quote's folder until Rebuild package clears the folder (same prefix). Punch item #329.
+
+## D836. Loose datasheets + Datasheets.pdf stay under 120 MB per zip (#329 review, 2026-10-12)
+
+Every datasheet now ships twice (the loose file and its pages in the book) and a package zip is built as one in-memory
+buffer. `BOOK_ZIP_CEILING_BYTES` = **120 MB**: the book may use `bookByteBudget(loose) = min(100 MB, 120 MB − loose
+datasheet bytes)`; past it the book is skipped as "package size limit" (the existing note — a `missing-datasheet-book`
+gap in the client packages, a cacheable LEFT OUT line in the estimate zip) and the loose files ship. 120 MB is twice
+the 60 MB datasheet total the estimate zip and the rack submittal already cap their reads at
+(`PACKAGE_ZIP_TOTAL_MAX_BYTES`, `RACK_DATASHEETS_TOTAL_BYTES`), so a package at that cap still gets its book. The
+client packages read every datasheet with no cap of their own (unchanged); only the book is held back. Known limit, not
+fixed: in the Grid and quote client packages the book shares the 75 s render budget with the drawing set, cut sheets
+and racks, so on a slow build it can be skipped as "ran out of time" (with the note). Punch item #329.
+
+## D837. The datasheet book follows the #298 manufacturer merges (#329b, 2026-10-12)
+
+Jeff approved reversing D829's skip. Each package build (Grid and quote client packages, estimate package zip, rack
+submittal) reads the manufacturer records ONCE (`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`,
+over `listManufacturers()`), and `canonicalMfrResolver` (pure, `datasheet-book.ts`) turns a part's `mfr` → `mfrKey` →
+canonical key (`canonicalKeyMap`, #298's own helper: follows merge chains A → B → C and stops a cycle after 8 hops) →
+that canonical record's display `name`. A spelling with no record, or whose canonical record has no name or is itself
+merged away (a cycle), keeps the part's own text; a blank stays blank (Unknown manufacturer, last). The resolved name
+drives the sort, the groups, the printed Manufacturer column and the loose `<Manufacturer> - <file>` names, so a merged
+spelling's files sort together. An unmerged manufacturer that has a record prints its record's name (the same name the
+Manufacturers page shows). The pure planner stays pure: `sortPartsForBook` / `planDatasheetBook` and
+`buildDatasheetBook` take an optional `canonicalMfr` resolver; callers that resolved their parts with
+`withCanonicalMfrs` may omit it (applying it twice is a no-op). A failed read logs a warning and returns null — the book
+then groups by each part's own manufacturer, as before — and never fails the package; a resolver that throws keeps the
+part's text. Estimate package zip Blob cache: NOT bumped. A zip is pinned to a sent revision and cached on its first
+download; one cached before a later merge keeps its old grouping until staff Rebuild package (or the next sent
+revision). That is acceptable: the grouping is presentation, every datasheet and page is still there, and a merge is
+an occasional admin action. Punch item #329.
+
 ## D838. A part can carry its own Grid device type, set by an admin (Grid notes #2, 2026-10-12)
 
 Jeff: a Shure SM58-LC read as Dimming & Power because its raw catalog category was mapped there, and the only fix was
@@ -11157,3 +11332,63 @@ undoable (a `space` undo command). The undo of a pin to a space that has since d
 stuck. An undo of a delete puts a device's pin back only while that space still exists on its sheet and page. Paste does not carry pins (the copy
 may land elsewhere). Spaces are project-level, so option copies and revisions carry `spaceId` unchanged. The Property
 Editor (one device or several on one page) and the Spreadsheet's Space cell edit it. No migration.
+
+## D840. Grid notes #8 rides on the datasheet book: its cover gains the job (2026-10-12)
+
+Jeff asked for the datasheets as one package with a job cover. #329's datasheet book (`Datasheets.pdf`) already is that
+one PDF, with A→Z order, an index and page stamps, so #8 builds onto it and adds **no second merge engine and no second
+combined file**. `buildDatasheetBook` gains one optional input, `cover`, and nothing else in the book changes. The baked
+letterhead still prints as a full-width band (the book's own `letterheadBoxPx` sizing). Below it, the title sits left and
+the customer's logo right (≤ 200 × 72 pt), or the company name set large (≤ 3 lines). Then:
+- the job name (≤ 2 lines, "…") and number ("Estimate EST-n", "· Rev N" for a sent revision, "Design GRD-n");
+- Venue (name + address) · Prepared for · Prepared by columns, each line ≤ 2 lines;
+- the date;
+- the book's own counts line, then the index.
+
+Every run is clamped, so the index still starts on page 1. Without `cover` the book is byte-for-byte #329's (rack
+submittals pass none). **Prepared for** follows the estimate's own Attn ladder: a contact never set, or no longer on the
+company, falls back to the primary contact (Jeff confirmed), and `""` means none, leaving the company line only. A Grid
+design reads its contact exactly. **Prepared by** is the lead estimator (quote `owner`, then Prepared by) off the roster.
+A Grid design uses its option's quote, else whoever drew it, else the builder. A sent revision prints its frozen name,
+customer, venue, contact and estimator with its issued date, while the logo and contact details are read live. The Grid
+and quote client packages and the estimate package zip pass the cover. A cover that can't be read leaves the book's plain
+cover and never fails a package. The letterhead follows each document's Peak-header choice (D824), as the book's does.
+Files: `src/lib/part-docs/datasheet-book-cover.ts` (pure), `datasheet-book-cover-server.ts`, and the additive
+`cover` branch in `datasheet-book-server.ts`.
+
+## D841. "Download all datasheets" serves the book on its own (Grid notes #8, 2026-10-12)
+
+Three buttons serve the book through one module, `src/lib/part-docs/datasheet-book-download.ts`:
+- **Grid Outputs menu** (`/api/grid/<id>/datasheets-pdf?option=&header=1|0`): that option's client-package documents.
+  It honours the menu's "Include Peak header" checkbox, as the package build does; absent means the company default, and
+  any value but `1`/`0` is refused (400).
+- **Estimate Build package step** (`/api/quotes/<id>/datasheets-pdf`): the saved estimate, with its own header choice.
+- **Customer's package page** (`/share/quote/<id>/<token>/datasheets.pdf`): the pinned sent revision, under
+  `package.zip`'s rules — the same `share-zip:` per-IP bucket (one download budget), a v2 token only, the uniform 404.
+
+Every download plans through `loadBookInputs`, which applies #329b's manufacturer merges (`loadCanonicalMfr()`, null on
+a failed read) and hands the same resolver to the book. Reads follow the zip's caps (25 MB a file, 60 MB together,
+"package size limit"). The time budget starts at **route entry**: the prelude (a 37k-part catalog read, coverage, the
+cover) and the reads must finish by +45 s, and the merge by +90 s, leaving 30 s of `maxDuration` 120 to stream the body.
+A prelude that has already spent the read budget answers 503 ("took too long to build — try again") and reads nothing.
+Nothing to combine → 404; too large → 413 with a message; late → 503.
+The share download rebuilds the book rather than unpacking the cached zip; that is simpler, and the zip may not exist yet.
+It is cached per revision at `estimate-package/<quote>/rev-<n>-<cover>-Datasheets.pdf`, beside the zip and under its gate.
+`<cover>` is 8 hex characters of a hash of the front matter as it would print now: the cover facts, plus digests of the
+customer logo and the letterhead. The cover reads live data, so an edit names a fresh file. Only a build with nothing left
+out but for the size cap is cached (the zip's rule), and **Rebuild package** clears it with the zip. Staff downloads are
+always built live. The estimate package zip carries the same job cover in its `Datasheets.pdf`. Its cache key therefore
+gains the same fingerprint (`rev-<n>-h<0|1>-c<cover>-v3.zip`; `PACKAGE_ZIP_CACHE_VERSION` 2 → 3 because the contents
+changed), and the build prints exactly the cover it was keyed by. A cover that failed to load prints the book's plain
+cover and is never cached.
+
+## D842. Customer logos on the company record (Grid notes #8, 2026-10-12)
+
+The company page gains a **Logo** card (preview, Upload/Replace, Remove). It is stored as the blob `company_logo:<id>`, so
+there is **no migration**. PNG, JPEG or WebP, up to 1 MB, checked from the file's own bytes. **SVG is refused**, including
+one behind an XML declaration, comments or a `<!DOCTYPE>` ("SVG isn't supported — use PNG, JPEG or WebP"). sharp decodes
+it with a 25-megapixel input limit, makes it upright, drops metadata, caps it at 800 px, and saves a palette PNG
+(transparency kept). Anyone signed in may change it, the same as editing a company (Jeff confirmed). No logo prints the
+company name in its place. Separately, `letterhead-server.ts` now reads the baked letterhead through a **literal** path
+with static `fs`/`path` imports. `next build` no longer traces the whole project into every function, and the harness
+checks the literal equals `BAKED_LETTERHEAD`.

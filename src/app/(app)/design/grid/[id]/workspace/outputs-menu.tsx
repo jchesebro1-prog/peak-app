@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { peakHeaderDefaultAction } from "@/app/(app)/peak-header-actions";
 import { cutSheetsUnreadableNote } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import type { GridEditor } from "../use-grid-editor";
 import { GRID_LINK_COPY, specFromDesignHref } from "@/lib/design/estimate-grid-link";
+import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
 import Menu from "./menu";
 import { BTN, FIELD_LABEL } from "./toolbar-style";
 
@@ -30,6 +33,24 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
     deleteDesign,
     busy,
   } = ed;
+  // Grid notes #9 — "Include Peak header" for this build; starts at the company default. Until that is known
+  // (or if reading it fails) it stays null and the build sends nothing, so the server applies the default.
+  const [peakHeader, setPeakHeader] = useState<boolean | null>(null);
+  const [headerUnknown, setHeaderUnknown] = useState(false);
+  useEffect(() => {
+    let live = true;
+    peakHeaderDefaultAction().then(
+      (on) => {
+        if (live) setPeakHeader((cur) => (cur === null ? on : cur));
+      },
+      () => {
+        if (live) setHeaderUnknown(true);
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
   const id = encodeURIComponent(project.id);
   const opt = encodeURIComponent(activeOptionId);
   return (
@@ -76,7 +97,7 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
 
       <div style={{ ...FIELD_LABEL, marginTop: 12 }}>Client package</div>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" style={BTN} disabled={packageBusy || busy} onClick={buildClientPackage} title="Build a ZIP with the specification, datasheets, the title-blocked drawing set (plans with devices, riser, schedules), cut sheets and racks">
+        <button type="button" style={BTN} disabled={packageBusy || busy} onClick={() => buildClientPackage(peakHeader ?? undefined)} title="Build a ZIP with the specification, datasheets, the title-blocked drawing set (plans with devices, riser, schedules), cut sheets and racks">
           {packageBusy ? "Building…" : packageUrl ? "Rebuild" : "Build client package"}
         </button>
         {packageUrl && (
@@ -85,6 +106,25 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
           </a>
         )}
       </div>
+      {peakHeader === null ? (
+        <div style={{ fontSize: 12, color: "#8c919c", marginTop: 6 }}>
+          {headerUnknown ? "Peak header: the company default (Settings → Branding)" : "Peak header: loading…"}
+        </div>
+      ) : (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3d424e", marginTop: 6, cursor: "pointer" }} title="The Peak letterhead on the package's specification and summary (default: Settings → Branding)">
+          <input type="checkbox" checked={peakHeader} disabled={packageBusy} onChange={(e) => setPeakHeader(e.target.checked)} />
+          Include Peak header
+        </label>
+      )}
+      {/* Grid notes #8 — this option's datasheet book (#329) with the job cover, on its own; it follows the header checkbox above (unknown = the server's default). */}
+      <a
+        href={`/api/grid/${id}/datasheets-pdf?option=${opt}${peakHeader === null ? "" : `&header=${peakHeader ? 1 : 0}`}`}
+        download
+        style={{ ...BTN, display: "inline-block", marginTop: 6, textDecoration: "none" }}
+        title="The datasheet book: a job cover (logos, job, venue, contacts), the index, then every datasheet A→Z by manufacturer"
+      >
+        {BOOK_COVER_COPY.button}
+      </a>
       {packageUrl && packageUnreadable.length > 0 && (
         <div
           style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 6, lineHeight: 1.4 }}

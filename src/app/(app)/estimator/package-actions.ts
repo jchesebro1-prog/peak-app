@@ -9,7 +9,8 @@ import { loadPackagePanel, type PackagePanel } from "@/lib/estimate-output/packa
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser } from "@/lib/session";
-import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getQuote, setPackagePeakHeader } from "@/lib/stores/quotes";
+import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import { can } from "@/lib/team";
 
 /**
@@ -68,6 +69,28 @@ export async function rebuildPackageZipAction(quoteId: string): Promise<{ ok: tr
     return { ok: true, removed: await clearPackageZipCache(q.id) };
   } catch (e) {
     console.error("[package] rebuild failed", e);
+    return { ok: false, error: PACKAGE_FILES_COPY.failed };
+  }
+}
+
+/** Grid notes #9 — the estimate's "Include Peak header" for its package
+ *  documents: true/false, or null to follow the company default. A boolean
+ *  matching the default stores nothing (the estimate keeps following it);
+ *  anything else is refused. The zip cache is keyed by the resolved header,
+ *  so correctness never depends on the clear below — it only frees storage. */
+export async function setPackagePeakHeaderAction(quoteId: string, on: boolean | null): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("send", user.roles)) return { ok: false, error: ONLINE_COPY.needsSend };
+  if (typeof on !== "boolean" && on !== null) return { ok: false, error: "Choose on or off." };
+  try {
+    const q = await getQuote(String(quoteId || ""));
+    if (!q) return { ok: false, error: ONLINE_COPY.gone };
+    const saved = await setPackagePeakHeader(q.id, on === null || on === (await loadPeakHeaderDefault()) ? null : on);
+    if (!saved) return { ok: false, error: ONLINE_COPY.gone };
+    await clearPackageZipCache(q.id);
+    return { ok: true };
+  } catch (e) {
+    console.error("[package] header choice failed", e);
     return { ok: false, error: PACKAGE_FILES_COPY.failed };
   }
 }

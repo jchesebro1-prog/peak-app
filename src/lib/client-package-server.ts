@@ -15,7 +15,11 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 import { createStoredZip, type ZipFile } from "@/lib/zip";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
+import { datasheetEntryName, packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
+import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook, withCanonicalMfrs, type BookPart, type BookPlan, type CanonicalMfr } from "@/lib/part-docs/datasheet-book";
+import { BOOK_SKIPPED_REASON, buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
+import type { BookCover } from "@/lib/part-docs/datasheet-book-cover";
+import { gridBookCover, quoteBookCover } from "@/lib/part-docs/datasheet-book-cover-server";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, CUT_SHEET_DEADLINE_MS, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { GRID_SET_STEP_MS } from "@/lib/design/grid-set-print";
@@ -31,6 +35,8 @@ import { rackPackageEntries, type RackIndexEntry, type RackRun } from "@/lib/rac
 import { rackElevationPng } from "@/lib/rack/raster";
 import { racksInGrid, racksInQuote, scheduleCsv } from "@/lib/rack/submittal";
 import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-server";
+import type { Letterhead } from "@/lib/letterhead";
+import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -59,7 +65,26 @@ export type ClientPackageDeps = {
   secret: () => string;
   /** The Grid design a quote came from (quote packages only). */
   findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
+  /** #329 — a package document's bytes (Blob in production). */
+  readDoc: (blobKey: string) => Promise<ReadableStream | null>;
+  /** #329b — the #298 manufacturer merges for the datasheet book (null = each part's own manufacturer). */
+  canonicalMfr: () => Promise<CanonicalMfr | null>;
+  /** Grid notes #8 — the datasheet book's job cover (customer logo, job, venue, Prepared for / by). */
+  bookCover: (src: BookCoverSource) => Promise<BookCover>;
 };
+
+/** Grid notes #8 — whose job cover the package's datasheet book prints. */
+export type BookCoverSource = { kind: "grid"; project: GridProject; quoteId: string | null; by: string } | { kind: "quote"; quote: Quote };
+
+/** The job cover, or null (logged) when it can't be read — the book then keeps its plain cover; never fails the package. */
+async function safeBookCover(d: ClientPackageDeps, src: BookCoverSource): Promise<BookCover | null> {
+  try {
+    return await d.bookCover(src);
+  } catch (e) {
+    console.warn("[package] datasheet book job cover not loaded", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
 
 const livePackageDeps: ClientPackageDeps = {
   blobOn: blobEnabled,
@@ -68,6 +93,9 @@ const livePackageDeps: ClientPackageDeps = {
   renderGridSet: renderPrintRouteToPdf,
   secret: () => process.env.AUTH_SECRET || "",
   findGrid: gridProjectForQuote,
+  readDoc: (blobKey) => getBlobStream(blobKey),
+  canonicalMfr: () => loadCanonicalMfr(undefined, "[package]"),
+  bookCover: (src) => (src.kind === "quote" ? quoteBookCover(src.quote) : gridBookCover(src.project, { quoteId: src.quoteId, by: src.by })),
 };
 
 /** Production deps with the caller's overrides — an override left `undefined` never blanks a live dep. */
@@ -215,7 +243,14 @@ async function planBackgroundFiles(projectId: string): Promise<ZipFile[]> {
   return out;
 }
 
-function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], packageName: string): Buffer {
+/** Grid notes #9 — a plain-name PDF's letterhead: the Peak letterhead when
+ *  given, else the company name in type (as before #9). */
+function letterheadFields(letterhead: Letterhead | null | undefined): Pick<LetterDoc, "companyName" | "headerJpeg" | "headerFull"> {
+  if (!letterhead) return { companyName: "Peak Systems Group" };
+  return { companyName: letterhead.companyName, headerJpeg: letterhead.image?.jpeg ?? null, headerFull: letterhead.image?.full ?? false };
+}
+
+export function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], packageName: string, letterhead: Letterhead | null = null): Buffer {
   const parts = catalog.map((part) => ({
     id: part.id,
     sku: part.sku,
@@ -273,7 +308,7 @@ function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], package
     },
   ];
   const doc: LetterDoc = {
-    companyName: "Peak Systems Group",
+    ...letterheadFields(letterhead),
     accent: "#b08d4a",
     tag: "Rough design drawings",
     meta: [{ label: "Package", value: packageName }, { label: "Project", value: project.id }],
@@ -289,9 +324,9 @@ function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], package
   return renderLetterPdf(doc);
 }
 
-function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
+export function roughQuoteDrawing(quote: Quote, packageName: string, letterhead: Letterhead | null = null): Buffer {
   const doc: LetterDoc = {
-    companyName: "Peak Systems Group",
+    ...letterheadFields(letterhead),
     accent: "#b08d4a",
     tag: "Quote package",
     meta: [{ label: "Package", value: packageName }, { label: "Quote", value: displayQuoteNumber(quote) }],
@@ -430,6 +465,9 @@ function quoteItems(quote: Quote): Array<{ rackId?: unknown; fixtureId?: unknown
  * Put every package document in the zip ONCE (#207): a fixture datasheet
  * that also covers its lens and clamps is one file. A document whose blob is
  * missing from storage turns into a gap for each SKU it was meant to serve.
+ * #329: datasheets go first, in the book's manufacturer A→Z order, named
+ * `datasheets/<Manufacturer> - <file>`; their bytes come back for the book
+ * (read once, never twice).
  */
 async function addDocuments(
   documents: PackageDocument[],
@@ -437,17 +475,77 @@ async function addDocuments(
   describe: (sku: string) => { description: string; qty: number; catalogId: string | null },
   files: ZipFile[],
   gaps: ClientPackageGap[],
-): Promise<void> {
+  plan: BookPlan,
+  read: ClientPackageDeps["readDoc"],
+): Promise<Map<string, BookDoc>> {
   const used = new Set<string>();
-  for (const doc of documents) {
+  const book = new Map<string, BookDoc>();
+  const rank = new Map(plan.docOrder.map((id, i) => [id, i] as const));
+  const ordered = [
+    ...documents.filter((d) => d.kind === "datasheet").sort((a, b) => (rank.get(a.documentId) ?? 1e9) - (rank.get(b.documentId) ?? 1e9)),
+    ...documents.filter((d) => d.kind !== "datasheet"),
+  ];
+  for (const doc of ordered) {
     const blobKey = index.docsById.get(doc.documentId)?.blobKey;
-    const stream = blobKey ? await getBlobStream(blobKey) : null;
+    const stream = blobKey ? await read(blobKey) : null;
     if (!stream) {
-      if (doc.kind === "datasheet") for (const sku of doc.skus) gaps.push({ kind: "missing-datasheet", sku, ...describe(sku) });
+      if (doc.kind === "datasheet") {
+        for (const sku of doc.skus) gaps.push({ kind: "missing-datasheet", sku, ...describe(sku) });
+        book.set(doc.documentId, { bytes: null, reason: BOOK_REASON.missing });
+      }
       continue;
     }
-    files.push({ name: packageEntryName(doc, used, safeName), data: await bytesFromStream(stream) });
+    const data = await bytesFromStream(stream);
+    if (doc.kind === "datasheet") {
+      const name = datasheetEntryName(doc, plan.docMfr.get(doc.documentId) ?? "", used);
+      files.push({ name, data });
+      book.set(doc.documentId, { bytes: data, name });
+    } else {
+      files.push({ name: packageEntryName(doc, used, safeName), data });
+    }
   }
+  return book;
+}
+
+/** The gap a package records when its combined datasheet book was skipped (#329). */
+export function datasheetBookGap(cause: "too-big" | "late" | "failed"): ClientPackageGap {
+  return { kind: "missing-datasheet-book", sku: "DS", description: `${BOOK_FILE_NAME} — ${BOOK_SKIPPED_REASON[cause]}; the individual datasheets are in datasheets/.`, qty: 0, catalogId: null };
+}
+
+/** #329 review — one datasheet the book couldn't read (corrupt, encrypted, a bad page box): it ships loose but isn't in the book. */
+export function unmergeableDatasheetGap(file: string, sku: string, catalogId: string | null): ClientPackageGap {
+  return { kind: "missing-datasheet-book", sku, description: `${file} couldn’t be read, so it isn’t in ${BOOK_FILE_NAME}; the file itself is in the package.`, qty: 0, catalogId };
+}
+
+type PackageBookResult = Awaited<ReturnType<typeof buildDatasheetBook>> | null;
+
+/**
+ * #329 — a client package's datasheet book. It merges ALONGSIDE the renders
+ * (pdf-lib yields between documents) on the package's render deadline, so it
+ * never eats the finish allowance. Null = no datasheet was read (no book, no gap).
+ */
+async function packageBook(parts: BookPart[], docs: Map<string, BookDoc>, subtitleLines: string[], deadline: number, tag: string, letterhead: Letterhead | null, cover: BookCover | null = null): Promise<PackageBookResult> {
+  // Nothing read (no datasheets, or Blob lost every one — each already a missing-datasheet gap): no book.
+  if (![...docs.values()].some((d) => d.bytes)) return null;
+  // #329 review: the loose datasheets + the book stay under BOOK_ZIP_CEILING_BYTES (skip = "package size limit").
+  const loose = [...docs.values()].reduce((n, d) => n + (d.bytes?.byteLength ?? 0), 0);
+  return buildDatasheetBook({ subtitleLines, parts, docs, letterhead, deadline, logTag: tag, maxBytes: bookByteBudget(loose), cover });
+}
+
+/** Put the book at the zip root (plus a gap per datasheet it couldn't read), or the gap that says it was skipped. */
+function addBook(book: PackageBookResult, files: ZipFile[], gaps: ClientPackageGap[], docs: Map<string, BookDoc>, catalogIdOf: (sku: string) => string | null): boolean {
+  if (!book) return false;
+  if (book.ok) {
+    files.push({ name: BOOK_FILE_NAME, data: book.bytes });
+    for (const id of book.unmergeable) {
+      const sku = book.plan.parts.find((p) => p.docId === id && !p.coveredBy?.length)?.sku ?? book.plan.parts.find((p) => p.docId === id)?.sku ?? "";
+      gaps.push(unmergeableDatasheetGap(docs.get(id)?.name ?? "A datasheet", sku, catalogIdOf(sku)));
+    }
+    return true;
+  }
+  console.warn(`[package] ${BOOK_FILE_NAME} skipped (${book.cause}): ${book.detail}`);
+  gaps.push(datasheetBookGap(book.cause));
+  return false;
 }
 
 /**
@@ -504,11 +602,13 @@ export async function createClientPackage(
   project: GridProject,
   by: string,
   requestedOptionId?: string | null,
-  opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {},
+  opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps>; peakHeader?: boolean | null } = {},
 ): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
   const d = packageDeps(opts.deps);
   if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
+  // Grid notes #9 — this build's "Include Peak header" ?? the company default.
+  const letterhead = await loadDocumentLetterhead(opts.peakHeader);
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   const fixtures = packageNeedsFixtures(project.placements || []) ? new Map((await listFixtures()).map((f) => [f.id, f])) : null;
@@ -528,10 +628,20 @@ export async function createClientPackage(
   const files: ZipFile[] = [specFile];
   const gaps = [...manifest.gaps];
   const itemBySku = new Map(manifest.items.map((item) => [item.sku, item]));
-  await addDocuments(manifest.documents, docIndex, (sku) => {
+  // #329 — the datasheet book: one row per BOM part, manufacturer A→Z.
+  const partBySku = new Map(catalog.map((part) => [part.sku, part] as const));
+  const noDatasheet = new Set(manifest.gaps.filter((g) => g.kind === "missing-datasheet").map((g) => g.sku));
+  // #329b — the #298 manufacturer merges, read once for this build: every part prints under its canonical manufacturer.
+  const bookParts = withCanonicalMfrs(manifest.items.map((item) => bookPartOf({ sku: item.sku, desc: item.description }, item.catalogId ? partBySku.get(item.sku) : null, { ...item, datasheetOk: !noDatasheet.has(item.sku) })), await d.canonicalMfr());
+  const bookPlan = planDatasheetBook(bookParts);
+  const bookDocs = await addDocuments(manifest.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
-  }, files, gaps);
+  }, files, gaps, bookPlan, d.readDoc);
+  // Grid notes #8 — the book's job cover (the option's quote names the lead estimator).
+  const coverQuoteId = ensureOptions(project).options.find((o) => o.id === resolveOptionId(project, requestedOptionId))?.quoteId ?? null;
+  const bookCover = await safeBookCover(d, { kind: "grid", project, quoteId: coverQuoteId, by });
+  const bookP = packageBook(bookParts, bookDocs, [project.name, project.customer, project.siteName ?? "", bookDate(Date.now())], cutSheetsBy, `[package] grid ${project.id}`, letterhead, bookCover);
   const optId = resolveOptionId(project, requestedOptionId);
   // Grid notes #7 — the title-blocked drawing set (plans WITH devices, riser, schedules) is the first render on the
   // package's deadline. Rendered: it replaces the rough drawings and the raw plans. Not: they stay, plus one gap.
@@ -544,7 +654,7 @@ export async function createClientPackage(
     files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
     drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE, source: "live design" };
   } else {
-    files.splice(1, 0, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) });
+    files.splice(1, 0, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName, letterhead) });
     // Read only now (after the set failed): a slow read never eats the set's budget, a rendered set never pays for them.
     files.push(...(await planBackgroundFiles(project.id)));
     gaps.push(drawingSetGap(set.reason, "the rough drawings and plan backgrounds are"));
@@ -559,10 +669,11 @@ export async function createClientPackage(
   // #296 — racks placed on this option (`asm:<id>` of kind rack), after the cut sheets on the same deadline.
   const gridRacks = racksInGrid(optionSlice(project, optId).placements.map((p) => p.partId), (id) => fixtures?.get(id));
   const rackRun = await addRacks(gridRacks, [], (id) => fixtures?.get(id)?.label || "Rack", where, files, gaps, cutSheetsBy);
+  const datasheetBook = addBook(await bookP, files, gaps, bookDocs, (sku) => itemBySku.get(sku)?.catalogId ?? null);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
-  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
+  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec }, { letterhead });
   const publicManifest = { ...manifest, gaps };
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, drawingSet, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, drawingSet, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, ...(datasheetBook ? { datasheetBook: BOOK_FILE_NAME } : {}), generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const zip = createStoredZip(files);
   const fileName = `${packageName}.zip`;
   const stored = await d.put(`client-packages/${safeName(project.id)}/${fileName}`, zip, "application/zip");
@@ -579,10 +690,12 @@ export async function createClientPackage(
 }
 
 /** Build the same package from a quote when it has not yet become a Grid project. */
-export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {}): Promise<BuiltClientPackage> {
+export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps>; peakHeader?: boolean | null } = {}): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
   const d = packageDeps(opts.deps);
   if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
+  // Grid notes #9 — this build's choice ?? the estimate's own (staff package panel) ?? the company default.
+  const letterhead = await loadDocumentLetterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : quote.packagePeakHeader);
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
@@ -595,10 +708,18 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };
   const files: ZipFile[] = [specFile];
   const itemBySku = new Map(items.map((item) => [item.sku, item]));
-  await addDocuments(packageDocs.documents, docIndex, (sku) => {
+  // #329 — the datasheet book: one row per BOM part, manufacturer A→Z.
+  const partBySku = new Map(catalog.map((part) => [part.sku, part] as const));
+  // #329b — the #298 manufacturer merges, read once for this build.
+  const bookParts = withCanonicalMfrs(bom.map((row) => bookPartOf(row, partBySku.get(row.sku), packageDocs.bySku.get(row.sku))), await d.canonicalMfr());
+  const bookPlan = planDatasheetBook(bookParts);
+  const bookDocs = await addDocuments(packageDocs.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
-  }, files, gaps);
+  }, files, gaps, bookPlan, d.readDoc);
+  // Grid notes #8 — the book's job cover.
+  const bookCover = await safeBookCover(d, { kind: "quote", quote });
+  const bookP = packageBook(bookParts, bookDocs, [quote.name, quote.customer, `Estimate ${displayQuoteNumber(quote)}`, bookDate(Date.now())], cutSheetsBy, `[package] quote ${quote.id}`, letterhead, bookCover);
   // Grid notes #7 — a quote minted by a Grid design ships that option's drawing set (the first render on the
   // package's deadline) in place of the equipment summary; a failed render keeps the summary plus one gap.
   // A quote with no Grid design keeps the summary, no gap.
@@ -611,7 +732,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
     files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
     drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE, source: "live design" };
   } else {
-    files.splice(1, 0, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) });
+    files.splice(1, 0, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName, letterhead) });
     if (set) {
       gaps.push(drawingSetGap(set.reason, "the equipment summary is"));
       drawingSet = { included: false, reason: set.reason, source: "live design" };
@@ -625,9 +746,10 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   for (const it of qItems) if (typeof it.rackId === "string" && !rackLineName.has(it.rackId)) rackLineName.set(it.rackId, String(it.desc || "") || "Rack");
   const goneRacks = racksInQuote(qItems.map((it) => ({ rackId: it.rackId })), () => ({ kind: "rack" })).filter((id) => rackFixtures.get(id)?.kind !== "rack");
   const rackRun = await addRacks(quoteRacks, goneRacks, (id) => rackFixtures.get(id)?.label || rackLineName.get(id) || "Rack", where, files, gaps, cutSheetsBy);
+  const datasheetBook = addBook(await bookP, files, gaps, bookDocs, (sku) => itemBySku.get(sku)?.catalogId ?? null);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
-  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, ...(drawingSet ? { drawingSet } : {}), cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec }, { letterhead });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, ...(drawingSet ? { drawingSet } : {}), cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, ...(datasheetBook ? { datasheetBook: BOOK_FILE_NAME } : {}), generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const fileName = `${packageName}.zip`;
   const stored = await d.put(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");
   const record = await d.save({ projectId: `quote:${quote.id}`, fileName, blobPath: stored.pathname, createdBy: by, itemCount: items.length, datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length, gapCount: gaps.length });

@@ -23,6 +23,8 @@ import {
 import type { AssembledSection, EquipmentRow } from "@/lib/specs/assemble-section";
 import type { OutlineLine } from "@/lib/specs/outline";
 import { longDate } from "@/lib/specs/spec-file-name";
+import type { Letterhead } from "@/lib/letterhead";
+import { letterheadParagraph } from "@/lib/letterhead-docx";
 
 /* ------------------------------------------------------------------ *
  * The spec builder's Word writer (#205 Phase B, design §4).
@@ -230,7 +232,7 @@ const HDR_TABS = [
  * the project name. A blank piece drops its text but keeps its tab, so the
  * others hold their positions.
  */
-function runningHeader(a: AssembledSection): Header {
+function runningHeaderParagraphs(a: AssembledSection): Paragraph[] {
   const h = a.header;
   const pieces = [longDate(h.issueDate), h.projectName, h.projectNumber ? `Project No. ${h.projectNumber}` : ""];
   const line: Array<string | Tab> = [];
@@ -238,14 +240,22 @@ function runningHeader(a: AssembledSection): Header {
     if (i > 0) line.push(new Tab());
     if (text) line.push(xmlSafe(text));
   });
-  return new Header({
-    children: [
-      new Paragraph({ style: "HDR", tabStops: HDR_TABS, children: [new TextRun({ children: line, font: FONTS, size: HF_SIZE })] }),
-      ...(h.phase
-        ? [new Paragraph({ style: "HDR", tabStops: HDR_TABS, children: [new TextRun({ children: [new Tab(), xmlSafe(h.phase)], font: FONTS, size: HF_SIZE })] })]
-        : []),
-    ],
-  });
+  return [
+    new Paragraph({ style: "HDR", tabStops: HDR_TABS, children: [new TextRun({ children: line, font: FONTS, size: HF_SIZE })] }),
+    ...(h.phase
+      ? [new Paragraph({ style: "HDR", tabStops: HDR_TABS, children: [new TextRun({ children: [new Tab(), xmlSafe(h.phase)], font: FONTS, size: HF_SIZE })] })]
+      : []),
+  ];
+}
+
+function runningHeader(a: AssembledSection): Header {
+  return new Header({ children: runningHeaderParagraphs(a) });
+}
+
+/** Grid notes #9 — page 1's header: the Peak letterhead ABOVE the same
+ *  MasterSpec HDR lines every later page carries. */
+function firstPageHeader(a: AssembledSection, lh: Letterhead): Header {
+  return new Header({ children: [letterheadParagraph(lh, FONTS), ...runningHeaderParagraphs(a)] });
 }
 
 function runningFooter(a: AssembledSection): Footer {
@@ -263,7 +273,14 @@ function runningFooter(a: AssembledSection): Footer {
   });
 }
 
-export async function buildSectionDocx(a: AssembledSection): Promise<Buffer> {
+/**
+ * `letterhead` (Grid notes #9): when given, page 1 gets its own header
+ * (`titlePage`) — the letterhead above the MasterSpec header text — and the
+ * same footer as every other page; later pages are unchanged. Absent/null =
+ * exactly the file this wrote before #9.
+ */
+export async function buildSectionDocx(a: AssembledSection, opts: { letterhead?: Letterhead | null } = {}): Promise<Buffer> {
+  const lh = opts.letterhead ?? null;
   const doc = new Document({
     creator: "Quartzite",
     title: xmlSafe(`Section ${a.number} – ${a.title}`),
@@ -279,9 +296,11 @@ export async function buildSectionDocx(a: AssembledSection): Promise<Buffer> {
             size: { width: 12240, height: 15840 },
             margin: { top: 1440, right: 1440, bottom: 1440, left: 1440, header: 720, footer: 720 },
           },
+          ...(lh ? { titlePage: true } : {}),
         },
-        headers: { default: runningHeader(a) },
-        footers: { default: runningFooter(a) },
+        headers: lh ? { default: runningHeader(a), first: firstPageHeader(a, lh) } : { default: runningHeader(a) },
+        // A title page uses the FIRST footer — give it the same running footer.
+        footers: lh ? { default: runningFooter(a), first: runningFooter(a) } : { default: runningFooter(a) },
         children: body(a),
       },
     ],

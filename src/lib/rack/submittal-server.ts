@@ -1,8 +1,9 @@
 /**
  * #296 — the rack submittal files (Task 12): the three printed sheets as
  * PDFs through the signed print route and headless Chrome, the schedule CSV,
- * and every placed part's datasheet merged into one datasheets.pdf behind a
- * cover index that lists what is missing. SERVER ONLY (stores, Blob, Chrome).
+ * and every placed part's datasheet merged into one datasheets.pdf — #329:
+ * the shared datasheet book (cover + index, manufacturer A→Z, page stamps).
+ * SERVER ONLY (stores, Blob, Chrome).
  *
  * Time: the caller passes a deadline (route: start + RACK_SUBMITTAL_DEADLINE_MS).
  * The sheets render sequentially, each signed right before its own render;
@@ -15,15 +16,17 @@
  *
  * This zip is staff-facing, so a gap's detail can be specific.
  */
-import { PDFDocument, StandardFonts, type PDFFont } from "pdf-lib";
 import { getBlobStream, safeName } from "@/lib/blob";
 import { CutSheetDeadlineError, rejectAfter } from "@/lib/curtain-cut-sheets/deadline";
 import { renderTimeoutMs, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { loadPartDocsState } from "@/lib/part-docs/load";
+import { BOOK_REASON, bookDate, bookPartOf, planDatasheetBook, withCanonicalMfrs } from "@/lib/part-docs/datasheet-book";
+import { buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import { resolvePackageDocs } from "@/lib/part-docs/package";
 import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { signPrintToken } from "@/lib/quote-pdf/token";
 import { getMany } from "@/lib/stores/catalog";
+import type { Letterhead } from "@/lib/letterhead";
 import type { ZipFile } from "@/lib/zip";
 import { loadRackForSheets } from "./load";
 import type { RackSheetKind } from "./sheet-format";
@@ -37,6 +40,8 @@ export const RACK_MIN_RENDER_MS = 5_000;
 export const RACK_DATASHEET_ALLOWANCE_MS = 15_000;
 /** After the datasheet reads: the merge, the zip and the first response bytes. */
 export const RACK_SUBMITTAL_FINISH_ALLOWANCE_MS = 10_000;
+/** #329 review: the datasheet book's merge may run this long past the reads — inside the finish allowance, leaving the rest for the zip and the response. */
+export const RACK_BOOK_MERGE_MS = 6_000;
 /** The route's maxDuration (120 s); the harness checks the budgets above fit inside it. */
 export const RACK_SUBMITTAL_MAX_DURATION_MS = 120_000;
 /** One datasheet file over this is left out. */
@@ -50,6 +55,7 @@ export const DATASHEET_UNREADABLE = "Datasheet file could not be read.";
 export const DATASHEET_UNMERGEABLE = "Datasheet PDF could not be merged.";
 export const DATASHEET_TOO_BIG = "Left out — package size limit";
 export const DATASHEET_LATE = "Left out — ran out of time";
+export const DATASHEET_BOOK_FAILED = "The merged datasheets PDF could not be built — the datasheets are on each part.";
 
 const SHEETS: ReadonlyArray<{ kind: RackSheetKind; file: string; name: string }> = [
   { kind: "elevation", file: "elevation.pdf", name: "Elevation" },
@@ -74,6 +80,8 @@ export async function rackSubmittalFiles(
     now?: () => number;
     /** Default true; the client package (Task 13) passes false. */
     datasheets?: boolean;
+    /** Grid notes #9 — the Peak letterhead atop the datasheet index (null/absent = none, as before). */
+    letterhead?: Letterhead | null;
   },
 ): Promise<RackSubmittalFiles> {
   const now = opts.now ?? Date.now;
@@ -85,7 +93,8 @@ export async function rackSubmittalFiles(
   await addSheetPdfs(id, where, files, gaps, { deadline: opts.deadline, render: opts.render ?? renderPrintRouteToPdf, now });
   files.push({ name: "schedule.csv", data: Buffer.from(scheduleCsv(submittal), "utf8") });
   if (opts.datasheets !== false) {
-    files.push({ name: "datasheets.pdf", data: await datasheetsPdf(submittal, gaps, opts.deadline + RACK_DATASHEET_ALLOWANCE_MS, now) });
+    const book = await datasheetsPdf(submittal, gaps, opts.deadline + RACK_DATASHEET_ALLOWANCE_MS, now, { letterhead: opts.letterhead ?? null, at: loaded.now });
+    if (book) files.push({ name: "datasheets.pdf", data: book });
   }
   return { ok: true, folder: safeName(rec.label || rec.id), files, gaps };
 }
@@ -139,9 +148,6 @@ async function addSheetPdfs(
 
 /* ---------- datasheets ---------- */
 
-export type DatasheetEntry = { sku: string; label: string; bytes: Buffer | null; reason?: string };
-export type CoverEntry = { sku: string; label: string; pageCount: number | null; reason?: string };
-
 /** Shared with the estimate package zip (#301 slice C). */
 export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<Buffer | "too-big"> {
   const reader = stream.getReader();
@@ -160,51 +166,60 @@ export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number
   return Buffer.concat(chunks);
 }
 
-async function datasheetsPdf(submittal: RackSubmittal, gaps: RackSubmittalGap[], readsBy: number, now: () => number): Promise<Buffer> {
+/** The book's customer-facing reason for a staff gap detail. */
+const BOOK_REASON_OF: Record<string, string> = {
+  [DATASHEET_MISSING]: BOOK_REASON.noDatasheet,
+  [DATASHEET_UNREADABLE]: BOOK_REASON.unreadable,
+  [DATASHEET_TOO_BIG]: BOOK_REASON.tooBig,
+  [DATASHEET_LATE]: BOOK_REASON.late,
+};
+
+/**
+ * #329 — the rack's datasheets.pdf is the shared datasheet book
+ * (datasheet-book-server.ts): cover + index, manufacturer A→Z, each
+ * datasheet once, "Page N of M" on every page. Null (and a gap) only when
+ * the book itself couldn't be built.
+ */
+async function datasheetsPdf(
+  submittal: RackSubmittal,
+  gaps: RackSubmittalGap[],
+  readsBy: number,
+  now: () => number,
+  cover: { letterhead: Letterhead | null; at: number },
+): Promise<Buffer | null> {
   const missingCatalog = new Map(submittal.gaps.filter((g) => g.kind === "missing-catalog").map((g) => [g.sku, g] as const));
   const skus = submittal.datasheetSkus.filter((s) => !missingCatalog.has(s));
   const parts = skus.length ? await getMany(skus) : [];
   const { index } = await loadPartDocsState(parts);
-  const { bySku, documents } = resolvePackageDocs(index, skus);
+  const { bySku } = resolvePackageDocs(index, skus);
+  const partBySku = new Map(parts.map((p) => [p.sku, p] as const));
   const nameOf = new Map<string, string>();
   for (const r of [...submittal.schedule, ...submittal.rackLevel]) if (r.sku && !nameOf.has(r.sku)) nameOf.set(r.sku, r.desc || r.sku);
   for (const p of parts) if (p.desc) nameOf.set(p.sku, p.desc);
   const name = (sku: string) => nameOf.get(sku) || sku;
-  const listed: Array<DatasheetEntry & { skus: string[] }> = [];
   const gapFor = (skuList: string[], detail: string) => {
     for (const sku of skuList) gaps.push({ sku, label: name(sku), kind: "missing-datasheet", detail });
   };
-  const docById = new Map(documents.filter((d) => d.kind === "datasheet").map((d) => [d.documentId, d] as const));
-  const done = new Set<string>();
+  // #329b — the #298 manufacturer merges, read once for this submittal (a failed read groups by each part's own text).
+  const bookParts = withCanonicalMfrs(submittal.datasheetSkus.map((sku) => bookPartOf({ sku, desc: missingCatalog.get(sku)?.label ?? name(sku) }, partBySku.get(sku), bySku.get(sku))), await loadCanonicalMfr(undefined, "[rack]"));
+  for (const p of bookParts) if (!p.docId && p.reason === BOOK_REASON.noDatasheet) gapFor([p.sku], DATASHEET_MISSING);
+  const plan = planDatasheetBook(bookParts);
+  const skusOf = new Map<string, string[]>();
+  for (const p of plan.parts) if (p.docId) skusOf.set(p.docId, [...(skusOf.get(p.docId) ?? []), p.sku]);
 
-  // In schedule order: each distinct document once, at the first SKU it serves.
+  // Manufacturer A→Z: each distinct document read once, at the first part it serves.
+  const docs = new Map<string, BookDoc>();
   const abort = new AbortController();
   const abortTimer = setTimeout(() => abort.abort(new CutSheetDeadlineError()), Math.max(0, readsBy - Date.now()));
   let total = 0;
   try {
-    for (const sku of submittal.datasheetSkus) {
-      const cat = missingCatalog.get(sku);
-      if (cat) {
-        listed.push({ sku, label: cat.label, bytes: null, reason: cat.detail, skus: [sku] });
-        continue;
-      }
-      const ref = bySku.get(sku);
-      const doc = ref?.datasheet ? docById.get(ref.datasheet.documentId) : undefined;
-      if (!doc) {
-        // Marked not needed: no gap, not listed.
-        if (ref?.datasheetOk) continue;
-        gapFor([sku], DATASHEET_MISSING);
-        listed.push({ sku, label: name(sku), bytes: null, reason: DATASHEET_MISSING, skus: [sku] });
-        continue;
-      }
-      if (done.has(doc.documentId)) continue;
-      done.add(doc.documentId);
-      const entry = { sku: doc.skus.join(", "), label: doc.skus.map(name).join("; "), skus: doc.skus };
-      const leaveOut = (reason: string) => {
-        gapFor(doc.skus, reason);
-        listed.push({ ...entry, bytes: null, reason });
+    for (const id of plan.docOrder) {
+      const served = skusOf.get(id) ?? [];
+      const leaveOut = (detail: string) => {
+        gapFor(served, detail);
+        docs.set(id, { bytes: null, reason: BOOK_REASON_OF[detail] ?? BOOK_REASON.unreadable });
       };
-      const meta = index.docsById.get(doc.documentId);
+      const meta = index.docsById.get(id);
       if (!meta?.blobKey) {
         leaveOut(DATASHEET_MISSING);
         continue;
@@ -229,9 +244,9 @@ async function datasheetsPdf(submittal: RackSubmittal, gaps: RackSubmittalGap[],
           continue;
         }
         total += bytes.length;
-        listed.push({ ...entry, bytes });
+        docs.set(id, { bytes });
       } catch (e) {
-        console.warn(`[rack] datasheet ${doc.documentId} (${entry.sku}): ${e instanceof Error ? e.message : String(e)}`);
+        console.warn(`[rack] datasheet ${id} (${served.join(", ")}): ${e instanceof Error ? e.message : String(e)}`);
         leaveOut(abort.signal.aborted ? DATASHEET_LATE : DATASHEET_UNREADABLE);
       }
     }
@@ -239,144 +254,23 @@ async function datasheetsPdf(submittal: RackSubmittal, gaps: RackSubmittalGap[],
     clearTimeout(abortTimer);
   }
 
-  return mergeDatasheets(listed, `${submittal.title} — datasheets`, (e) => gapFor((e as (typeof listed)[number]).skus ?? [e.sku], DATASHEET_UNMERGEABLE));
-}
-
-/**
- * The cover's lines, pure: the title, then "Included" (`SKU — part — page N`,
- * page N counted from the first page of the merged file, cover included),
- * then "Not included" (`SKU — part — reason`). `None.` under an empty heading.
- */
-export function datasheetCoverLines(entries: readonly CoverEntry[], title: string, coverPages = 1): string[] {
-  const included: string[] = [];
-  const missing: string[] = [];
-  let page = coverPages + 1;
-  for (const e of entries) {
-    if (e.pageCount && e.pageCount > 0) {
-      included.push(`${e.sku} — ${e.label} — page ${page}`);
-      page += e.pageCount;
-    } else {
-      missing.push(`${e.sku} — ${e.label} — ${e.reason || DATASHEET_MISSING}`);
-    }
-  }
-  return [title, "", "Included", ...(included.length ? included : ["None."]), "", "Not included", ...(missing.length ? missing : ["None."])];
-}
-
-const PAGE_W = 612;
-const PAGE_H = 792;
-const MARGIN = 54;
-const TITLE_SIZE = 16;
-const HEAD_SIZE = 12;
-const BODY_SIZE = 10;
-const LEAD = 1.45;
-
-/** Text Helvetica (WinAnsi) can't encode becomes "?", so drawing never throws. */
-const charSets = new WeakMap<PDFFont, Set<number>>();
-function encodable(font: PDFFont, text: string): string {
-  let set = charSets.get(font);
-  if (!set) charSets.set(font, (set = new Set(font.getCharacterSet())));
-  let out = "";
-  for (const ch of text) out += set.has(ch.codePointAt(0)!) ? ch : "?";
-  return out;
-}
-
-function wrap(font: PDFFont, text: string, size: number, width: number): string[] {
-  if (!text) return [""];
-  const out: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/)) {
-    const next = line ? `${line} ${word}` : word;
-    if (font.widthOfTextAtSize(next, size) <= width) {
-      line = next;
-      continue;
-    }
-    if (line) out.push(line);
-    // A single word wider than the line breaks by character.
-    let w = word;
-    while (font.widthOfTextAtSize(w, size) > width && w.length > 1) {
-      let cut = w.length - 1;
-      while (cut > 1 && font.widthOfTextAtSize(w.slice(0, cut), size) > width) cut--;
-      out.push(w.slice(0, cut));
-      w = w.slice(cut);
-    }
-    line = w;
-  }
-  if (line) out.push(line);
-  return out;
-}
-
-type Laid = { text: string; size: number; font: PDFFont };
-
-/** Lines → pages of positioned rows (title, headings bold, body wrapped). */
-function layoutCover(lines: string[], regular: PDFFont, bold: PDFFont): Laid[][] {
-  const width = PAGE_W - 2 * MARGIN;
-  const pages: Laid[][] = [[]];
-  let y = PAGE_H - MARGIN;
-  const put = (row: Laid) => {
-    const h = row.size * LEAD;
-    if (y - h < MARGIN) {
-      pages.push([]);
-      y = PAGE_H - MARGIN;
-    }
-    pages[pages.length - 1].push(row);
-    y -= h;
-  };
-  lines.forEach((raw, i) => {
-    const isTitle = i === 0;
-    const isHead = raw === "Included" || raw === "Not included";
-    const font = isTitle || isHead ? bold : regular;
-    const size = isTitle ? TITLE_SIZE : isHead ? HEAD_SIZE : BODY_SIZE;
-    for (const t of wrap(font, encodable(font, raw), size, width)) put({ text: t, size, font });
+  const book = await buildDatasheetBook({
+    subtitleLines: [`${submittal.title} — rack submittal`, submittal.scope ?? "", bookDate(cover.at)],
+    parts: bookParts,
+    docs,
+    letterhead: cover.letterhead,
+    logTag: "[rack]",
+    emptyOk: true,
+    // #329 review: the merge stops RACK_BOOK_MERGE_MS after the reads (inside the finish allowance), so a slow
+    // merge skips the book with a gap instead of blowing the route's 120 s.
+    deadline: readsBy + RACK_BOOK_MERGE_MS,
+    now,
   });
-  return pages;
-}
-
-/**
- * One PDF: cover page(s) indexing every entry, then each datasheet's pages
- * in entry order. A PDF that can't be loaded or copied (corrupt, encrypted,
- * empty) is listed under Not included and reported through `onUnmergeable`.
- */
-export async function mergeDatasheets(
-  entries: readonly DatasheetEntry[],
-  title: string,
-  onUnmergeable?: (entry: DatasheetEntry) => void,
-): Promise<Buffer> {
-  const out = await PDFDocument.create();
-  const cover: CoverEntry[] = [];
-  for (const e of entries) {
-    if (!e.bytes) {
-      cover.push({ sku: e.sku, label: e.label, pageCount: null, reason: e.reason });
-      continue;
-    }
-    try {
-      const src = await PDFDocument.load(e.bytes, { ignoreEncryption: true });
-      if (src.isEncrypted) throw new Error("encrypted PDF");
-      const pages = await out.copyPages(src, src.getPageIndices());
-      if (!pages.length) throw new Error("PDF has no pages");
-      for (const p of pages) out.addPage(p);
-      cover.push({ sku: e.sku, label: e.label, pageCount: pages.length });
-    } catch (err) {
-      console.warn(`[rack] datasheet ${e.sku} not merged: ${err instanceof Error ? err.message : String(err)}`);
-      cover.push({ sku: e.sku, label: e.label, pageCount: null, reason: DATASHEET_UNMERGEABLE });
-      onUnmergeable?.(e);
-    }
+  if (!book.ok) {
+    console.warn(`[rack] datasheets.pdf not built (${book.cause}): ${book.detail}`);
+    gaps.push({ sku: "", label: "Datasheets", kind: "missing-data", detail: `${DATASHEET_BOOK_FAILED} (${book.cause})` });
+    return null;
   }
-  const regular = await out.embedFont(StandardFonts.Helvetica);
-  const bold = await out.embedFont(StandardFonts.HelveticaBold);
-  // The index's page numbers depend on how many cover pages there are: settle it.
-  let coverPages = 1;
-  let laid = layoutCover(datasheetCoverLines(cover, title, coverPages), regular, bold);
-  for (let i = 0; i < 4 && laid.length !== coverPages; i++) {
-    coverPages = laid.length;
-    laid = layoutCover(datasheetCoverLines(cover, title, coverPages), regular, bold);
-  }
-  laid.forEach((rows, i) => {
-    const page = out.insertPage(i, [PAGE_W, PAGE_H]);
-    let y = PAGE_H - MARGIN;
-    for (const r of rows) {
-      y -= r.size * LEAD;
-      page.drawText(r.text, { x: MARGIN, y, size: r.size, font: r.font });
-    }
-  });
-  return Buffer.from(await out.save());
+  for (const id of book.unmergeable) gapFor(skusOf.get(id) ?? [], DATASHEET_UNMERGEABLE);
+  return book.bytes;
 }

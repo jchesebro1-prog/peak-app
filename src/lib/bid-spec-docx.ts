@@ -2,6 +2,7 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  Header,
   HeadingLevel,
   ImageRun,
   Packer,
@@ -17,6 +18,8 @@ import {
 import type { AssembledSpec, RackSpecSection } from "@/lib/bid-spec";
 import { pngSize } from "@/lib/rack/png-size";
 import { xmlSafe } from "@/lib/specs/spec-docx";
+import type { Letterhead } from "@/lib/letterhead";
+import { letterheadParagraph } from "@/lib/letterhead-docx";
 
 /* ------------------------------------------------------------------ *
  * Real .docx generation (D94 upgrade, 2026-07-20).
@@ -157,7 +160,14 @@ function rackSection(racks: RackSpecSection[]): Array<Paragraph | Table> {
   return out;
 }
 
-export async function buildSpecDocx(spec: AssembledSpec): Promise<Buffer> {
+/**
+ * `letterhead` (Grid notes #9): when given, page 1 carries the Peak
+ * letterhead in its own header (`titlePage` + `headers.first`); the document
+ * has no running header, so later pages stay as before. Absent/null = exactly
+ * the file this wrote before #9.
+ */
+export async function buildSpecDocx(spec: AssembledSpec, opts: { letterhead?: Letterhead | null } = {}): Promise<Buffer> {
+  const lh = opts.letterhead ?? null;
   const dateStr = new Date(spec.date).toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
@@ -279,7 +289,9 @@ export async function buildSpecDocx(spec: AssembledSpec): Promise<Buffer> {
       {
         properties: {
           page: { margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } },
+          ...(lh ? { titlePage: true } : {}),
         },
+        ...(lh ? { headers: { first: new Header({ children: [letterheadParagraph(lh)] }) } } : {}),
         children,
       },
     ],

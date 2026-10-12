@@ -273,6 +273,22 @@ export function CompanyGroup({
             onSaved={() => router.refresh()}
           />
         </div>
+
+        {/* Grid notes #9 — the company default for the letterhead on specs and plain documents */}
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 16, paddingTop: 14, borderTop: "1px solid #f0f1f4", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            defaultChecked={settings.peakHeader}
+            onChange={(e) => saveSetting({ peakHeader: e.target.checked })}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Put the Peak header on documents</span>
+            <span style={{ display: "block", fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>
+              The letterhead on the first page of specifications and on client-package summaries. Each spec and package can still turn it off.
+            </span>
+          </span>
+        </label>
       </section>
 
       {/* ---- Locations ---- */}

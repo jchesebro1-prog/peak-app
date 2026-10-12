@@ -6,7 +6,7 @@ import { CustomerCombobox, type CustomerComboboxOption } from "@/components/cust
 import { ConfirmButton } from "@/components/confirm-button";
 import { SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, type SpecDocHeader, type SpecDocSource, type SpecDocument } from "@/lib/specs/spec-document";
 import type { SpecChecklist } from "@/lib/specs/assemble-section";
-import { applySpecHeaderToProjectAction, setSpecCustomerAction, setSpecFillInAction, updateSpecHeaderAction } from "../builder-actions";
+import { applySpecHeaderToProjectAction, setSpecCustomerAction, setSpecFillInAction, setSpecPeakHeaderAction, updateSpecHeaderAction } from "../builder-actions";
 
 /**
  * #205 Phase B (T5) — the builder's first two cards: the Word file's header
@@ -124,6 +124,7 @@ export function HeaderCard({
   canEdit,
   sourceQuoteNumber,
   projectSpecCount = 0,
+  peakHeaderDefault = true,
 }: {
   doc: SpecDocument;
   customerOptions: CustomerComboboxOption[];
@@ -131,6 +132,8 @@ export function HeaderCard({
   sourceQuoteNumber?: string | null;
   /** Other saved specs with this spec's project number. */
   projectSpecCount?: number;
+  /** Grid notes #9 — the company "Put the Peak header on documents" default. */
+  peakHeaderDefault?: boolean;
 }) {
   const router = useRouter();
   const { err, pending, run, track } = useSave();
@@ -266,6 +269,21 @@ export function HeaderCard({
           )}
         </div>
       )}
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 14, fontSize: 12.5, color: "#3a3f4a", cursor: canEdit ? "pointer" : "default" }}>
+        <input
+          type="checkbox"
+          checked={typeof doc.peakHeader === "boolean" ? doc.peakHeader : peakHeaderDefault}
+          disabled={!canEdit || pending}
+          onChange={(e) => {
+            const on = e.target.checked;
+            // Matching the company default stores nothing — the spec keeps following it.
+            run(() => setSpecPeakHeaderAction(doc.id, on === peakHeaderDefault ? null : on));
+          }}
+        />
+        Include Peak header
+        <span style={MUTED}>— the Peak letterhead above this header on page 1 of the Word file</span>
+      </label>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
         <span style={MUTED}>Source: {sourceText(doc.source, sourceQuoteNumber)}</span>

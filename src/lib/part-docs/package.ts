@@ -1,4 +1,5 @@
 import { slotCoverage, type CoverageIndex } from "./coverage";
+import { datasheetLooseName, zipEntrySafe } from "./datasheet-book";
 import { isDocSlotKind, type DocSlotKind, type PartDocKind } from "./types";
 
 /**
@@ -66,7 +67,18 @@ export function packageEntryName(doc: Pick<PackageDocument, "documentId" | "kind
   // #300: resolvePackageDocs only ever takes slot kinds, so a symbol/riser drawing never reaches a package; "drawings" only keeps this total.
   const folder = doc.kind === "image" ? "images" : isDocSlotKind(doc.kind) ? PACKAGE_FOLDER[doc.kind] : "drawings";
   let name = `${folder}/${safe(doc.name)}`;
-  if (used.has(name)) name = `${folder}/${doc.documentId}-${safe(doc.name)}`;
-  used.add(name);
+  // #329 review: keyed case-insensitively — "ETC - S4.pdf" and "ETC - s4.pdf" are one file on macOS/Windows extraction.
+  if (used.has(name.toLowerCase())) name = `${folder}/${doc.documentId}-${safe(doc.name)}`;
+  used.add(name.toLowerCase());
   return name;
+}
+
+/**
+ * #329 — a datasheet's loose zip entry, manufacturer first
+ * (`datasheets/ETC - ColorSource Spot.pdf`) so the folder sorts by
+ * manufacturer; spaces kept; the same clash rule as packageEntryName.
+ * `mfr` is the book plan's docMfr ("" keeps the file's own name).
+ */
+export function datasheetEntryName(doc: Pick<PackageDocument, "documentId" | "kind" | "name">, mfr: string, used: Set<string>): string {
+  return packageEntryName({ ...doc, name: datasheetLooseName(mfr, doc.name) }, used, zipEntrySafe);
 }

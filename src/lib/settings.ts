@@ -64,6 +64,11 @@ export type AppSettingsData = {
    *  documents (letters + reports) in place of the baked-in letterhead. */
   logoLight?: string | null;
   logoDark?: string | null;
+  /** Grid notes #9 — "Put the Peak header on documents" (Settings →
+   *  Branding): the company default for the letterhead on specs (first page)
+   *  and the plain-name PDFs. Absent = ON; only an explicit false turns it
+   *  off. Each document can override it (src/lib/letterhead.ts). */
+  peakHeader?: boolean;
   /** Document-template wording overrides (IDEAS — centralized templates),
    *  a sparse map { [templateId]: { [fieldId]: string } } over the built-in
    *  defaults in lib/templates.ts. Edited in the Templates screen. */

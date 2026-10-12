@@ -90,6 +90,8 @@ export type CompanySettingsVM = {
   feedbackEmail: string;
   logoLight: string | null;
   logoDark: string | null;
+  /** Grid notes #9 — "Put the Peak header on documents" (absent in settings = on). */
+  peakHeader: boolean;
   dashboardDefaults: DashboardLayout;
 };
 

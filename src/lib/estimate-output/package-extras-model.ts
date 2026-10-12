@@ -10,7 +10,13 @@ import { formatBytes } from "@/lib/document-files";
  */
 
 export type DatasheetLinkView = { href: string; name: string };
-export type PackageDownloadsView = { zipHref: string; files: Array<{ href: string; name: string; kindLabel: string }>; specifications: boolean };
+export type PackageDownloadsView = {
+  zipHref: string;
+  /** Grid notes #8 — the datasheet book (#329) with the job cover, on its own; null with no datasheet to combine. */
+  datasheetsPdfHref: string | null;
+  files: Array<{ href: string; name: string; kindLabel: string }>;
+  specifications: boolean;
+};
 export type PackagePlanView = { href: string; name: string; kindLabel: string; sizeLabel: string; isImage: boolean };
 export type PackageActionsView = { scopes: ResponseScope[] };
 export type PackageExtras = {
@@ -40,7 +46,7 @@ export function downloadsView(documents: readonly Pick<PackageDocument, "documen
     .filter((d) => d.kind === "datasheet" || d.kind === "specsheet")
     .map((d) => ({ href: packageDocHref(base, d.documentId), name: d.name, kindLabel: d.kind === "datasheet" ? "Datasheet" : "Spec sheet" }));
   if (!files.length && !specifications) return null;
-  return { zipHref: `${base}/package.zip`, files, specifications };
+  return { zipHref: `${base}/package.zip`, datasheetsPdfHref: files.some((f) => f.kindLabel === "Datasheet") ? `${base}/datasheets.pdf` : null, files, specifications };
 }
 
 export function downloadsSummary(v: PackageDownloadsView): string {

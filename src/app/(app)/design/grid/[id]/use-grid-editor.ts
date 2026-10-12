@@ -781,11 +781,12 @@ function useGridEditorImpl(props: GridEditorProps) {
     }
   }
 
-  async function buildClientPackage() {
+  /** Grid notes #9: `peakHeader` = the Outputs menu's "Include Peak header" (absent = the company default). */
+  async function buildClientPackage(peakHeader?: boolean) {
     setPackageBusy(true);
     setPackageUrl(null);
     setPackageUnreadable([]);
-    const result = await createClientPackageAction(project.id, activeOptionId);
+    const result = await createClientPackageAction(project.id, activeOptionId, peakHeader);
     setPackageBusy(false);
     if (!result.ok) setErr(result.error);
     else {

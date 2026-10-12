@@ -182,6 +182,8 @@ export async function saveSettingsAction(patch: {
   seedDemo?: boolean;
   feedbackEmail?: string;
   dashboardDefaults?: DashboardLayout;
+  /** Grid notes #9 — "Put the Peak header on documents". */
+  peakHeader?: boolean;
 }) {
   await requirePerm("manage_users");
   const clean: Record<string, unknown> = {};
@@ -194,6 +196,7 @@ export async function saveSettingsAction(patch: {
   if (typeof patch.seedDemo === "boolean") clean.seedDemo = patch.seedDemo;
   if (typeof patch.feedbackEmail === "string")
     clean.feedbackEmail = patch.feedbackEmail;
+  if (typeof patch.peakHeader === "boolean") clean.peakHeader = patch.peakHeader;
   if (patch.dashboardDefaults?.version === 1 && Array.isArray(patch.dashboardDefaults.widgets))
     clean.dashboardDefaults = patch.dashboardDefaults;
   await setSettings(clean);
