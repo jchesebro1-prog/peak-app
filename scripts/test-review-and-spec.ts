@@ -67592,3 +67592,24 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
   const bnSum = readFileSync(join(process.cwd(), "src/app/(app)/estimator/review-cost-summary.tsx"), "utf8");
   ok(/isPackageBonusItem/.test(bnSum) && /isEstimatorBonusItem/.test(bnSum) && /inTotal\.reduce/.test(bnSum), "#bonus client pin: cost summary sums bonus lines over In-total systems");
 }
+
+import { alternateChoices as bn8Alts, liveEstimatorBonus as bn8Live, showSplitRow as bn8Split, parseLeadPct as bn8Parse } from "@/lib/estimate-bonus/card";
+{
+  const it = (id: number, price: number, extra: Partial<SpecItem> = {}): SpecItem => ({ id, sku: "P-" + id, desc: "Part " + id, qty: 1, unit: "ea", cost: price / 2, price, ...extra });
+  const mk = (id: string, items: SpecItem[], extra: Partial<EstimatorSpecSection> = {}): EstimatorSpecSection =>
+    ({ id, name: id.toUpperCase(), kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const raw = [mk("a", [it(1, 1000)]), mk("alt1", [it(2, 500)], { alternate: true })];
+  const secs = bnWith(raw, bnIds(raw));
+  const estOf = (id: string) => secs.find((s) => s.id === id)!.items.find((x) => x.bonus === "estimator")!.price;
+  ok(bn8Alts(secs).length === 1 && bn8Alts(secs)[0].id === "alt1" && bn8Alts(secs)[0].name === "ALT1", "#bonus card: alternate choices list only alternate systems");
+  ok(bn8Live(secs, []) === estOf("a"), "#bonus card: 2% excludes an untaken alternate");
+  ok(bn8Live(secs, ["alt1"]) === Math.round((estOf("a") + estOf("alt1")) * 100) / 100, "#bonus card: 2% includes a taken alternate");
+  ok(bn8Live(raw, []) === 0, "#bonus card: no bonus lines → 0");
+  ok(bn8Split("Jeff", "Sam") && !bn8Split("Jeff", "jeff") && !bn8Split("Jeff", " ") && !bn8Split("", "Sam"), "#bonus card: split row only for two different non-blank people");
+  ok(bn8Parse("70.4") === 70 && bn8Parse("140") === 100 && bn8Parse("-5") === 0 && bn8Parse("") === null && bn8Parse("abc") === null, "#bonus card: parseLeadPct clamps and rejects");
+  const hook8 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+  const cs8 = hook8.slice(hook8.indexOf("const changeStatus = (v: QuoteStatus) => {"), hook8.indexOf("const changeStage ="));
+  ok(/setStatusAction\(id, v, v === "won" \? \{ alternatesTaken \} : undefined\)/.test(cs8), "#bonus source pin: changeStatus passes alternatesTaken to setStatusAction when moving to won");
+  const step8 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/send-step.tsx"), "utf8");
+  ok(/isBonusEligibleQuote\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType \}\)/.test(step8) && step8.includes("<BonusCard"), "#bonus source pin: Send & track renders the bonus card only for eligible quotes");
+}

@@ -12,9 +12,11 @@ import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
-import { draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
+import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
+import { useRouter } from "next/navigation";
 import { bonusRulesApply, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
@@ -963,6 +965,47 @@ export function useEstimatorState(props: EstimatorProps) {
      on the customer document, so a change re-renders the PDF. */
   const [owner, setOwner] = useState(initial.owner);
   const [preparedBy, setPreparedBy] = useState(initial.preparedBy);
+
+  /* Estimator bonuses — Send & track card state. `bonusRecord` is the
+   * server-written record at Won; a router refresh re-reads it from `initial`. */
+  const router = useRouter();
+  const [bonusSplit, setBonusSplit] = useState<BonusSplit>(() => normalizeSplit(initial.estimatorBonusSplit));
+  const [bonusRecord, setBonusRecord] = useState<BonusRecord | null>(initial.bonusRecord);
+  useEffect(() => setBonusRecord(initial.bonusRecord), [initial.bonusRecord]);
+  const [alternatesTaken, setAlternatesTaken] = useState<string[]>(() =>
+    initial.bonusRecord ? initial.bonusRecord.alternatesTaken : defaultAlternatesTaken(initial.sections ?? [], initial.clientResponses)
+  );
+  const [bonusError, setBonusError] = useState<string | null>(null);
+  const saveBonusSplit = (leadPct: number) => {
+    if (!loadedId) return;
+    const before = bonusSplit;
+    setBonusSplit({ leadPct });
+    setBonusError(null);
+    startTransition(async () => {
+      const r = await saveBonusSplitAction(loadedId, leadPct);
+      if (!r.ok) {
+        setBonusSplit(before);
+        setBonusError(r.error || "Could not save the split.");
+        return;
+      }
+      if (status === "won") router.refresh();
+    });
+  };
+  const pickAlternatesTaken = (ids: string[]) => {
+    const before = alternatesTaken;
+    setAlternatesTaken(ids);
+    setBonusError(null);
+    if (status !== "won" || !loadedId) return;
+    startTransition(async () => {
+      const r = await saveBonusAlternatesAction(loadedId, ids);
+      if (!r.ok) {
+        setAlternatesTaken(before);
+        setBonusError(r.error || "Could not save the alternates.");
+        return;
+      }
+      router.refresh();
+    });
+  };
   const [peopleBusy, setPeopleBusy] = useState(false);
   const changePeople = (patch: { owner?: string; preparedBy?: string }) => {
     if (!loadedId) return;
@@ -1252,7 +1295,7 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
-          const r = await setStatusAction(id, v);
+          const r = await setStatusAction(id, v, v === "won" ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
             // approval on record) — roll back the optimistic UI change and
@@ -1268,6 +1311,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
+          // Estimator bonuses: Won writes the record server-side — re-read it.
+          if (v === "won") router.refresh();
         } finally {
           setStatusChanging(false);
         }
@@ -3051,6 +3096,14 @@ export function useEstimatorState(props: EstimatorProps) {
     venueRoomName,
     viewerCanApprove,
     viewerName,
+    bonusSplit,
+    bonusRecord,
+    alternatesTaken,
+    bonusError,
+    saveBonusSplit,
+    pickAlternatesTaken,
+    owner,
+    preparedBy,
     wonMetaGuard,
     packageDocOver,
     setPackageDocOver,

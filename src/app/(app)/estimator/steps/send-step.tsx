@@ -14,6 +14,9 @@ import { CHEVRON_CLIP, DARK_SELECT, STATUS_DOT } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
 import { SendActivity } from "./send-activity";
 import { SendComposer } from "./send-composer";
+import { BonusCard } from "./bonus-card";
+import { alternateChoices, liveEstimatorBonus } from "@/lib/estimate-bonus/card";
+import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
 
 const CARD = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: 16 } as const;
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
@@ -28,6 +31,17 @@ const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpac
  */
 export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {
   const {
+    alternatesTaken,
+    bonusError,
+    bonusRecord,
+    bonusSplit,
+    initial,
+    owner,
+    pickAlternatesTaken,
+    preparedBy,
+    saveBonusSplit,
+    sections,
+    viewerCanApprove,
     applySync,
     changePipeline,
     changeStage,
@@ -275,6 +289,23 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     <div className="est-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 26px 60px" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
         {sendStepLayout(status, showStageBar).map((k) => cards[k])}
+        {isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType }) && (
+          <BonusCard
+            quoteId={loadedId}
+            canApprove={viewerCanApprove}
+            owner={owner}
+            preparedBy={preparedBy}
+            split={bonusSplit}
+            onSplit={saveBonusSplit}
+            alternates={alternateChoices(sections)}
+            taken={alternatesTaken}
+            onTaken={pickAlternatesTaken}
+            estimatorBonus={liveEstimatorBonus(sections, alternatesTaken)}
+            record={bonusRecord}
+            status={status}
+            error={bonusError}
+          />
+        )}
       </div>
     </div>
   );

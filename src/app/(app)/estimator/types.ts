@@ -1,3 +1,5 @@
+import type { ClientResponse } from "@/lib/estimate-output/responses";
+import type { BonusRecord, BonusSplit } from "@/lib/estimate-bonus/record";
 import type { RackPartFacts } from "@/lib/rack/types";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
@@ -598,6 +600,10 @@ export type InitialQuote = {
    *  estimate reads "estimator" / "system"); feeds `bonusRulesApply`. */
   bonusSource: string;
   bonusQuoteType: string;
+  /** Estimator bonuses — store-owned, display-only (never in the save payload). */
+  clientResponses: ClientResponse[] | null;
+  bonusRecord: BonusRecord | null;
+  estimatorBonusSplit: BonusSplit | null;
 };
 
 /**

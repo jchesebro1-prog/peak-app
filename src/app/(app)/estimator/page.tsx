@@ -155,6 +155,9 @@ async function initialFrom(
       portal: null,
       bonusSource: "estimator",
       bonusQuoteType: "system",
+      clientResponses: null,
+      bonusRecord: null,
+      estimatorBonusSplit: null,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -234,6 +237,9 @@ async function initialFrom(
     // `por` lines; the next Save recomputes what remains (clearPricedPor).
     bonusSource: q.source ?? "estimator",
     bonusQuoteType: q.quoteType ?? "system",
+    clientResponses: q.clientResponses ?? null,
+    bonusRecord: q.bonusRecord ?? null,
+    estimatorBonusSplit: q.estimatorBonusSplit ?? null,
     portal:
       q.source === "portal-catalog"
         ? {
