@@ -16,8 +16,9 @@
  */
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { letterheadBoxPx, type Letterhead } from "@/lib/letterhead";
+import { listManufacturers } from "@/lib/stores/manufacturers";
 import {
-  BOOK_MAX_BYTES, BOOK_REASON, BOOK_TITLE, bookIndex, bookSummary, planDatasheetBook,
+  BOOK_MAX_BYTES, BOOK_REASON, BOOK_TITLE, bookIndex, bookSummary, canonicalMfrResolver, planDatasheetBook, type CanonicalMfr,
   type BookIndex, type BookIndexRow, type BookPart, type BookPlan,
 } from "./datasheet-book";
 
@@ -41,6 +42,11 @@ export type BuildBookInput = {
   logTag?: string;
   /** Build even when no datasheet merged (the rack's cover-only index, #296). Default false: no merged page → `failed`. */
   emptyOk?: boolean;
+  /**
+   * #329b — the #298 manufacturer merges (from `loadCanonicalMfr()`), applied before sorting, grouping and printing.
+   * Optional: callers that already resolved their parts (`withCanonicalMfrs`) may omit it; applying it twice is a no-op.
+   */
+  canonicalMfr?: CanonicalMfr | null;
 };
 
 export type BuiltBook =
@@ -53,6 +59,23 @@ export const BOOK_SKIPPED_REASON: Record<"too-big" | "late" | "failed", string> 
   late: BOOK_REASON.late,
   failed: "Left out — the combined datasheet book couldn't be built",
 };
+
+/**
+ * #329b — the #298 merges for ONE package build: one read of the manufacturer
+ * records. A failed read logs and returns null — the book then groups by each
+ * part's own manufacturer text, as before; it never fails the package.
+ */
+export async function loadCanonicalMfr(
+  list: () => Promise<ReadonlyArray<{ key: string; name?: string; aliasKeys?: string[]; mergedInto?: string | null }>> = listManufacturers,
+  tag = "[datasheet-book]",
+): Promise<CanonicalMfr | null> {
+  try {
+    return canonicalMfrResolver(await list());
+  } catch (err) {
+    console.warn(`${tag} manufacturer merges not loaded — grouping by each part's own manufacturer: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
 
 /* ---------- text helpers (moved from the rack submittal) ---------- */
 
@@ -312,7 +335,7 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
   const now = input.now ?? Date.now;
   const maxBytes = input.maxBytes ?? BOOK_MAX_BYTES;
   try {
-    const plan = planDatasheetBook(input.parts);
+    const plan = planDatasheetBook(input.parts, input.canonicalMfr);
     let inBytes = 0;
     for (const id of plan.docOrder) inBytes += input.docs.get(id)?.bytes?.byteLength ?? 0;
     if (inBytes > maxBytes) return { ok: false, cause: "too-big", detail: `${inBytes} bytes of datasheets` };

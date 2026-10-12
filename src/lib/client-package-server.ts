@@ -16,8 +16,8 @@ import { createStoredZip, type ZipFile } from "@/lib/zip";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { datasheetEntryName, packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
-import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook, type BookPart, type BookPlan } from "@/lib/part-docs/datasheet-book";
-import { BOOK_SKIPPED_REASON, buildDatasheetBook, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
+import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook, withCanonicalMfrs, type BookPart, type BookPlan, type CanonicalMfr } from "@/lib/part-docs/datasheet-book";
+import { BOOK_SKIPPED_REASON, buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, CUT_SHEET_DEADLINE_MS, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { GRID_SET_STEP_MS } from "@/lib/design/grid-set-print";
@@ -65,6 +65,8 @@ export type ClientPackageDeps = {
   findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
   /** #329 — a package document's bytes (Blob in production). */
   readDoc: (blobKey: string) => Promise<ReadableStream | null>;
+  /** #329b — the #298 manufacturer merges for the datasheet book (null = each part's own manufacturer). */
+  canonicalMfr: () => Promise<CanonicalMfr | null>;
 };
 
 const livePackageDeps: ClientPackageDeps = {
@@ -75,6 +77,7 @@ const livePackageDeps: ClientPackageDeps = {
   secret: () => process.env.AUTH_SECRET || "",
   findGrid: gridProjectForQuote,
   readDoc: (blobKey) => getBlobStream(blobKey),
+  canonicalMfr: () => loadCanonicalMfr(undefined, "[package]"),
 };
 
 /** Production deps with the caller's overrides — an override left `undefined` never blanks a live dep. */
@@ -610,7 +613,8 @@ export async function createClientPackage(
   // #329 — the datasheet book: one row per BOM part, manufacturer A→Z.
   const partBySku = new Map(catalog.map((part) => [part.sku, part] as const));
   const noDatasheet = new Set(manifest.gaps.filter((g) => g.kind === "missing-datasheet").map((g) => g.sku));
-  const bookParts = manifest.items.map((item) => bookPartOf({ sku: item.sku, desc: item.description }, item.catalogId ? partBySku.get(item.sku) : null, { ...item, datasheetOk: !noDatasheet.has(item.sku) }));
+  // #329b — the #298 manufacturer merges, read once for this build: every part prints under its canonical manufacturer.
+  const bookParts = withCanonicalMfrs(manifest.items.map((item) => bookPartOf({ sku: item.sku, desc: item.description }, item.catalogId ? partBySku.get(item.sku) : null, { ...item, datasheetOk: !noDatasheet.has(item.sku) })), await d.canonicalMfr());
   const bookPlan = planDatasheetBook(bookParts);
   const bookDocs = await addDocuments(manifest.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);
@@ -685,7 +689,8 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   const itemBySku = new Map(items.map((item) => [item.sku, item]));
   // #329 — the datasheet book: one row per BOM part, manufacturer A→Z.
   const partBySku = new Map(catalog.map((part) => [part.sku, part] as const));
-  const bookParts = bom.map((row) => bookPartOf(row, partBySku.get(row.sku), packageDocs.bySku.get(row.sku)));
+  // #329b — the #298 manufacturer merges, read once for this build.
+  const bookParts = withCanonicalMfrs(bom.map((row) => bookPartOf(row, partBySku.get(row.sku), packageDocs.bySku.get(row.sku))), await d.canonicalMfr());
   const bookPlan = planDatasheetBook(bookParts);
   const bookDocs = await addDocuments(packageDocs.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);

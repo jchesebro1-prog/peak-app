@@ -11189,8 +11189,8 @@ Manufacturers group by `mfrKey` (case and punctuation ignored), so "Etc" and "ET
 common spelling (a tie goes to the code-point-smallest, so "ETC" beats "Etc"). Groups sort A→Z (numeric-aware, case
 ignored). A part with no manufacturer sorts LAST under "Unknown manufacturer". Within a group: the printed model
 (`partModel`, #304 — Model #, then MFR P/N, then the SKU's model tail), numeric-aware ("Lens Tube 2" before "Lens Tube
-10"), then SKU. The #298 manufacturer merges (`canonicalKeyMap`) are NOT applied: they need a manufacturers-table read
-the packages don't otherwise make. Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
+10"), then SKU. The #298 manufacturer merges were NOT applied at first (they need a manufacturers-table read);
+#329b applies them (D8XX). Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
 
 ## D830. The book's cover and index (#329, 2026-10-12)
 
@@ -11272,3 +11272,22 @@ the 60 MB datasheet total the estimate zip and the rack submittal already cap th
 client packages read every datasheet with no cap of their own (unchanged); only the book is held back. Known limit, not
 fixed: in the Grid and quote client packages the book shares the 75 s render budget with the drawing set, cut sheets
 and racks, so on a slow build it can be skipped as "ran out of time" (with the note). Punch item #329.
+
+## D8XX. The datasheet book follows the #298 manufacturer merges (#329b, 2026-10-12) — placeholder number, renumber at push
+
+Jeff approved reversing D829's skip. Each package build (Grid and quote client packages, estimate package zip, rack
+submittal) reads the manufacturer records ONCE (`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`,
+over `listManufacturers()`), and `canonicalMfrResolver` (pure, `datasheet-book.ts`) turns a part's `mfr` → `mfrKey` →
+canonical key (`canonicalKeyMap`, #298's own helper: follows merge chains A → B → C and stops a cycle after 8 hops) →
+that canonical record's display `name`. A spelling with no record, or whose canonical record has no name or is itself
+merged away (a cycle), keeps the part's own text; a blank stays blank (Unknown manufacturer, last). The resolved name
+drives the sort, the groups, the printed Manufacturer column and the loose `<Manufacturer> - <file>` names, so a merged
+spelling's files sort together. An unmerged manufacturer that has a record prints its record's name (the same name the
+Manufacturers page shows). The pure planner stays pure: `sortPartsForBook` / `planDatasheetBook` and
+`buildDatasheetBook` take an optional `canonicalMfr` resolver; callers that resolved their parts with
+`withCanonicalMfrs` may omit it (applying it twice is a no-op). A failed read logs a warning and returns null — the book
+then groups by each part's own manufacturer, as before — and never fails the package; a resolver that throws keeps the
+part's text. Estimate package zip Blob cache: NOT bumped. A zip is pinned to a sent revision and cached on its first
+download; one cached before a later merge keeps its old grouping until staff Rebuild package (or the next sent
+revision). That is acceptable: the grouping is presentation, every datasheet and page is still there, and a merge is
+an occasional admin action. Punch item #329.

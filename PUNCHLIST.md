@@ -11798,5 +11798,11 @@ the book can't read is a gap in the client packages and a cacheable LEFT OUT lin
 sheets and racks; on a slow build it is skipped with the "ran out of time" note (the loose files still ship).
 
 **Remaining (Jeff-gated):** open a real package on production and look at the cover/index; check a few manufacturer
-PDFs that are landscape or rotated for the page stamp; say if the merge-spellings (#298 manufacturer merges) should
-also fold aliases in the book (it groups case/punctuation variants only today, D829).
+PDFs that are landscape or rotated for the page stamp.
+
+**#329b (Jeff-approved follow-up, D8XX):** the #298 manufacturer merges now apply to the book: each part's
+manufacturer resolves to its canonical manufacturer record (merge chains followed) before sorting, grouping and
+printing, and the loose `datasheets/<Manufacturer> - <file>` names use the same name — in the Grid and quote client
+packages, the estimate package zip and the rack submittal. One manufacturers read per build
+(`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`); a failed read falls back to each part's own
+manufacturer with a warning.

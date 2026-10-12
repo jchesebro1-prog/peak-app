@@ -11668,6 +11668,7 @@ seeded()
   .then(() => gridNotes5WireStarterChecks())
   .then(() => gridNotes9Checks())
   .then(() => datasheetBook329Checks())
+  .then(() => mfrMerges329bChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -67206,6 +67207,36 @@ async function datasheetBook329Checks(): Promise<void> {
       console.warn = warn2;
     }
   }
+
+  // #329b — the #298 merges reach the client package and the estimate zip (names, groups, loose files).
+  {
+    const { canonicalMfrResolver: res329b } = await import("@/lib/part-docs/datasheet-book");
+    const merged = res329b([{ key: "alphalighting", name: "Alpha Lighting Co" }, { key: "zuluaudio", name: "Zulu Audio", mergedInto: "alphalighting" }]);
+    const qDeps = (canonicalMfr: () => Promise<((m: string) => string) | null>): NonNullable<Parameters<typeof CPS.createQuoteClientPackage>[2]>["deps"] => ({
+      blobOn: () => true,
+      put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; },
+      save: async (input) => ({ ...input, id: "PKG-329m", createdAt: 0 }),
+      secret: () => "s329",
+      findGrid: async () => null,
+      readDoc: read,
+      canonicalMfr,
+    });
+    const quoteNow = (await Q.get(QID))!;
+    await CPS.createQuoteClientPackage(quoteNow, "Tester", { deps: qDeps(async () => merged) });
+    const mFiles = zipNamesGn7(stored[stored.length - 1]);
+    const mDs = mFiles.map((f) => f.name).filter((x) => x.startsWith("datasheets/"));
+    const mText = (await b329PageTexts(mFiles.find((f) => f.name === "Datasheets.pdf")!.data))[0];
+    ok(mDs.join("|") === "datasheets/Alpha Lighting Co - Alpha_Lighting_AS.pdf|datasheets/Alpha Lighting Co - zulu-za10.pdf" && mText.includes("Alpha Lighting Co") && !mText.includes("Zulu Audio") && !mText.includes("alpha lighting"),
+      "#329b quote package: merged spellings print and sort under the canonical name, loose files too: " + mDs.join("|"));
+    await CPS.createQuoteClientPackage(quoteNow, "Tester", { deps: qDeps(async () => null) });
+    const fDs = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name).filter((x) => x.startsWith("datasheets/"));
+    ok(fDs.join("|") === "datasheets/Alpha Lighting - AS.pdf|datasheets/Zulu Audio - zulu-za10.pdf",
+      "#329b quote package: with no merges (a failed read) the book groups by each part's own manufacturer, as before");
+    const zm = await Z.buildRevisionPackageZip(q2, rev, { read: async (key) => read(key), sections: async () => [], letterhead: async () => null, canonicalMfr: async () => merged });
+    const zmNames = zm ? zipNamesGn7(zm.zip).map((f) => f.name) : [];
+    ok(zmNames.includes("datasheets/Alpha Lighting Co - Alpha_Lighting_AS.pdf") && zmNames.includes("datasheets/Alpha Lighting Co - zulu-za10.pdf"),
+      "#329b estimate zip: the merges apply to the loose names (and the book) there too");
+  }
 }
 
 /* ===== #329 review — owner manufacturer, case-insensitive names, size ceiling, rack deadline, cacheable notes ===== */
@@ -67256,4 +67287,70 @@ import { RACK_BOOK_MERGE_MS as r329RackMerge, RACK_DATASHEET_ALLOWANCE_MS as r32
   const bs = rd("src/lib/part-docs/datasheet-book-server.ts");
   ok(bs.includes("copied.forEach((p, i) => checkPageBox(p, i + 1));") && /try \{\s*stampPage\(p, `Page/.test(bs),
     "#329 review: page boxes are checked per document inside the merge try, and each stamp is its own try");
+}
+
+/* ===== #329b — the #298 manufacturer merges in the datasheet book ===== */
+import { canonicalMfrResolver as m329Res, planDatasheetBook as m329Plan, sortPartsForBook as m329Sort, withCanonicalMfrs as m329With } from "@/lib/part-docs/datasheet-book";
+import { datasheetEntryName as m329Entry } from "@/lib/part-docs/package";
+{
+  const etc = m329Res([
+    { key: "etc", name: "ETC", aliasKeys: ["electronictheatrecontrols"] },
+    { key: "electronictheatrecontrols", name: "Electronic Theatre Controls", mergedInto: "etc" },
+    { key: "rosebrand", name: "Rose Brand" },
+  ]);
+  const plan = m329Plan([
+    { sku: "S4", mfr: "Electronic Theatre Controls", model: "S4", desc: "Source Four", docId: "D-s4" },
+    { sku: "CS", mfr: "ETC", model: "ColorSource", desc: "ColorSource", docId: "D-cs" },
+    { sku: "P", mfr: "rose brand", model: "Pipe", desc: "Pipe", docId: null },
+    { sku: "Z", mfr: "Zeta Audio", model: "Z", desc: "Zeta", docId: "D-z" },
+  ], etc);
+  ok(plan.parts.map((p) => `${p.sku}:${p.mfrLabel}`).join() === "CS:ETC,S4:ETC,P:Rose Brand,Z:Zeta Audio" && plan.parts[0].group === plan.parts[1].group,
+    "#329b: two merged spellings are one group printed by the canonical record's name; an unmerged record prints its own record name; a manufacturer with no record is unchanged: " + plan.parts.map((p) => `${p.sku}:${p.mfrLabel}`).join());
+  ok(m329Entry({ documentId: "PD-s4", kind: "datasheet", name: "s4.pdf" }, plan.docMfr.get("D-s4")!, new Set()) === "datasheets/ETC - s4.pdf",
+    "#329b: the loose file of a merged spelling uses the canonical name, so it sorts with the rest of that manufacturer");
+  const chain = m329Res([{ key: "a", name: "A Co", mergedInto: "b" }, { key: "b", name: "B Co", mergedInto: "c" }, { key: "c", name: "C Co" }]);
+  ok(chain("a") === "C Co" && chain("B") === "C Co" && chain("c") === "C Co", "#329b: a merge chain A → B → C resolves to C's name");
+  const t0 = Date.now();
+  const cyc = m329Res([{ key: "x", name: "X", mergedInto: "y" }, { key: "y", name: "Y", mergedInto: "x" }]);
+  const cx = cyc("x"), cy = cyc("y");
+  ok(Date.now() - t0 < 1000 && cx === "x" && cy === "y" && m329Sort([{ sku: "1", mfr: "x", model: "", desc: "", docId: null }], cyc).length === 1,
+    "#329b: a merge cycle stops (no record outside the cycle is canonical, so each part keeps its own text)");
+  const boom = () => { throw new Error("resolver down"); };
+  const kept = m329With([{ sku: "S4", mfr: "Electronic Theatre Controls", model: "S4", desc: "", docId: null }], boom);
+  ok(kept[0].mfr === "Electronic Theatre Controls" && m329Plan([{ sku: "S4", mfr: "ETC", model: "", desc: "", docId: "D" }], boom).docMfr.get("D") === "ETC" && m329With([{ sku: "B", mfr: "", model: "", desc: "", docId: null }], etc)[0].mfr === "",
+    "#329b: a resolver that throws keeps each part's own manufacturer; a blank manufacturer stays blank");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const cps = rd("src/lib/client-package-server.ts"), zs = rd("src/lib/estimate-output/package-zip-server.ts"), rs = rd("src/lib/rack/submittal-server.ts");
+  ok((cps.match(/withCanonicalMfrs\(/g) || []).length === 2 && (cps.match(/await d\.canonicalMfr\(\)/g) || []).length === 2 && zs.includes("await d.canonicalMfr()") && rs.includes('await loadCanonicalMfr(undefined, "[rack]")'),
+    "#329b: the Grid and quote packages, the estimate zip and the rack submittal each read the merges once per build");
+}
+
+async function mfrMerges329bChecks(): Promise<void> {
+  const { loadCanonicalMfr } = await import("@/lib/part-docs/datasheet-book-server");
+  const warn = console.warn;
+  const warned: string[] = [];
+  console.warn = (...a: unknown[]) => { warned.push(a.map(String).join(" ")); };
+  try {
+    const down = await loadCanonicalMfr(async () => { throw new Error("db down"); }, "[t329b]");
+    const up = await loadCanonicalMfr(async () => [{ key: "etc", name: "ETC", aliasKeys: ["electronictheatrecontrols"] }]);
+    ok(down === null && warned.some((w) => w.includes("[t329b] manufacturer merges not loaded")) && !!up && up("Electronic Theatre Controls") === "ETC",
+      "#329b: a failed manufacturer read logs and returns null (each part's own manufacturer); a good read resolves aliases");
+    const live = await loadCanonicalMfr();
+    ok(typeof live === "function", "#329b: the live loader reads the manufacturers collection");
+    // The optional `canonicalMfr` input field (for callers that build the book directly); applying it twice is a no-op.
+    const { buildDatasheetBook } = await import("@/lib/part-docs/datasheet-book-server");
+    const { canonicalMfrResolver, withCanonicalMfrs } = await import("@/lib/part-docs/datasheet-book");
+    const res = canonicalMfrResolver([{ key: "etc", name: "ETC", aliasKeys: ["electronictheatrecontrols"] }]);
+    const parts = [
+      { sku: "S4", mfr: "Electronic Theatre Controls", model: "S4", desc: "Source Four", docId: null, reason: "No datasheet on file" },
+      { sku: "CS", mfr: "ETC", model: "CS", desc: "ColorSource", docId: null, reason: "No datasheet on file" },
+    ];
+    const direct = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs: new Map(), emptyOk: true, canonicalMfr: res });
+    const twice = await buildDatasheetBook({ subtitleLines: ["x"], parts: withCanonicalMfrs(parts, res), docs: new Map(), emptyOk: true, canonicalMfr: res });
+    const groups = (b: typeof direct) => (b.ok ? b.index.notIncluded.map((r) => `${r.mfr}:${r.groupStart}`).join() : "");
+    ok(direct.ok && groups(direct) === "ETC:true,ETC:false" && groups(twice) === groups(direct),
+      "#329b: buildDatasheetBook's optional canonicalMfr field groups merged spellings under one name; pre-resolved parts give the same book");
+  } finally {
+    console.warn = warn;
+  }
 }

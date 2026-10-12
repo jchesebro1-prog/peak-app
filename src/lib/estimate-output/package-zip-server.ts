@@ -7,8 +7,8 @@ import { CutSheetDeadlineError } from "@/lib/curtain-cut-sheets/deadline";
 import { attachmentDisposition } from "@/lib/document-files";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { datasheetEntryName, packageEntryName } from "@/lib/part-docs/package";
-import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook } from "@/lib/part-docs/datasheet-book";
-import { BOOK_SKIPPED_REASON, buildDatasheetBook, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
+import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook, withCanonicalMfrs, type CanonicalMfr } from "@/lib/part-docs/datasheet-book";
+import { BOOK_SKIPPED_REASON, buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import { readCapped } from "@/lib/rack/submittal-server";
 import type { SharedPackage } from "@/lib/quote-share/links";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
@@ -44,6 +44,8 @@ type ZipDeps = {
   now: () => number;
   /** Grid notes #9 — the specification's first-page letterhead (null = none); #329: also the datasheet book's cover. */
   letterhead: (perDoc: boolean | null | undefined) => Promise<Letterhead | null>;
+  /** #329b — the #298 manufacturer merges for the datasheet book (null = each part's own manufacturer). */
+  canonicalMfr: () => Promise<CanonicalMfr | null>;
 };
 
 const liveZipDeps: ZipDeps = {
@@ -51,6 +53,7 @@ const liveZipDeps: ZipDeps = {
   sections: allSections,
   now: Date.now,
   letterhead: loadDocumentLetterhead,
+  canonicalMfr: () => loadCanonicalMfr(undefined, "[package]"),
 };
 
 /** `peakHeader` (Grid notes #9 review): the header value resolved by the caller (servePackageZip keys the
@@ -80,7 +83,8 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
 
   // #329 — the book's rows: one per BOM part, manufacturer A→Z; datasheets are read in that order.
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
-  const bookParts = docs.bom.map((row) => bookPartOf(row, partBySku.get(row.sku), docs.bySku.get(row.sku)));
+  // #329b — the #298 manufacturer merges, read once for this build (a failed read groups by each part's own text).
+  const bookParts = withCanonicalMfrs(docs.bom.map((row) => bookPartOf(row, partBySku.get(row.sku), docs.bySku.get(row.sku))), await d.canonicalMfr());
   const bookPlan = planDatasheetBook(bookParts);
   const rank = new Map(bookPlan.docOrder.map((id, i) => [id, i] as const));
   const ordered = [
