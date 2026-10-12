@@ -1,4 +1,3 @@
-import type { CustomerDoc } from "@/lib/stores/customers";
 import type { AppSettingsData } from "@/lib/settings";
 import type { Quote } from "@/lib/stores/quotes";
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
@@ -59,7 +58,13 @@ export function portalDocumentExtras(
 }
 
 type DocQuote = Quote & { paymentTerms?: string };
-type DocCustomer = Pick<CustomerDoc, "name" | "locations" | "contacts">;
+/** #333 — structural, so both a stored CustomerDoc and the Estimator's
+ *  CustomerLite (the live BOM quote, estimate-output/live-bom.ts) fit. */
+type DocCustomer = {
+  name: string;
+  locations?: readonly { id?: string; label?: string; city?: string; primary?: boolean }[];
+  contacts?: readonly { name: string; role?: string; primary?: boolean }[];
+};
 
 export function quoteDocumentDataFor(
   q: DocQuote,

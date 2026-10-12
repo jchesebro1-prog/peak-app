@@ -69556,3 +69556,87 @@ async function pkg333DrawingChecks(): Promise<void> {
   const pOff = await PP.loadPackagePanel({ id: "Q-333d", spec, packageSelection: { drawings: false } } as never, false, deps as never);
   ok(pOn.gaps.includes("No drawings") && !pOff.gaps.includes("No drawings"), "#333 panel: drawings off suppresses the \"No drawings\" chip");
 }
+
+// ---- Task 7: the live BOM quote (browser-built) equals the saved BOM view ----
+import { liveBomDocumentProps as p3LiveBom, type LiveBomInput as P3LiveBomInput } from "@/lib/estimate-output/live-bom";
+import { quoteDocumentDataFor as p3DocData } from "@/lib/quote-pdf/quote-document-data";
+import { bomViewProps as p3BomView } from "@/app/(app)/estimator/quote-document-view";
+import { normalizePdfOptions as p3NormPdf } from "@/lib/quote-pdf/pdf-options";
+import { sanitizeGroups as p3SanGroups, normalizeSystemOrder as p3NormOrder } from "@/lib/estimate-groups/groups";
+import { qd293Sections as p3QdSections, renderQuoteDocument293 as p3RenderQd } from "./qd293-cases";
+{
+  const settings = { companyName: "Peak Systems Group", logoDark: null };
+  const custDoc = {
+    id: "C-333", name: "North High School", type: "customer",
+    locations: [{ id: "L1", label: "Auditorium", city: "Fargo", primary: false }, { id: "L2", label: "Gym", city: "Moorhead", primary: true }],
+    contacts: [{ name: "Ann Lee", role: "Director", primary: false }, { name: "Bo Kim", role: "Principal", primary: true }],
+  };
+  const custLite = { id: custDoc.id, name: custDoc.name, locations: custDoc.locations.map((l) => ({ id: l.id, label: l.label, city: l.city, primary: l.primary })), contacts: custDoc.contacts.map((c) => ({ name: c.name, role: c.role, primary: c.primary })) };
+  const others = [{ id: "C-x", name: "Other", locations: [], contacts: [] }];
+  // initialFrom's mapping (estimator/page.tsx), as the hook holds it after load.
+  const asHook = (q: Record<string, unknown>, rewardsLine: string): P3LiveBomInput => {
+    const cid = (q.customerId as string) || null;
+    const crec = cid ? custLite : undefined;
+    let locId = (q.locationId as string) || null;
+    if (cid && !locId && crec) locId = (crec.locations.find((l) => l.primary) || crec.locations[0])?.id || null;
+    let contactName = q.contactName as string | null | undefined;
+    const conts = crec?.contacts || [];
+    if (contactName == null) contactName = (conts.find((c) => c.primary) || conts[0])?.name || "";
+    else if (contactName && conts.length && !conts.some((c) => c.name === contactName)) contactName = (conts.find((c) => c.primary) || conts[0])?.name || "";
+    const spec = q.spec as { sections: unknown[]; groups?: unknown };
+    const groups = p3SanGroups(spec.groups);
+    return {
+      quoteNumber: q.id as string, projectName: q.name as string, customerId: cid, custName: cid ? crec?.name || (q.customer as string) : (q.customer as string),
+      locationId: locId, contactName: contactName || "", quoteNote: (q.quoteNote as string) ?? "", assumptions: (q.assumptions as string) ?? "",
+      owner: (q.owner as string) || "", preparedBy: (q.preparedBy as string) || "", paymentTerms: (q.paymentTerms as string) || "Unknown",
+      sections: p3NormOrder(spec.sections as never, groups), groups, vendorQuotes: (q.vendorQuotes as never) || [], pdfOptions: p3NormPdf(q.pdfOptions),
+      revNum: Math.max(1, (q.revisions as unknown[])?.length || 1), revDateMs: (q.updatedAt as number) || 0,
+      source: q.source === "portal-catalog" ? "portal-catalog" : null, portalFirm: q.source === "portal-catalog" ? ((q.portalFirm as never) ?? null) : null,
+      customers: [...others, custLite], companyName: settings.companyName, logoDark: settings.logoDark, rewardsLine,
+    };
+  };
+  const saved = (q: Record<string, unknown>, rewardsLine: string) => p3BomView({ ...p3DocData(q as never, q.customerId ? (custDoc as never) : null, settings), rewardsLine });
+  const AT = Date.UTC(2026, 9, 1, 15);
+  const G = [{ id: "g-a", name: "Stage", alternate: false }, { id: "g-x", name: "Upgrades", alternate: true }];
+  const secs = p3QdSections().map((s) => (s.id === "s2" ? { ...s, groupId: "g-a" } : s.id === "s4" ? { ...s, groupId: "g-x", alternate: true } : s));
+  const narr = {
+    id: "Q-333L", estNo: 1201, estPrefix: "EST", name: "Auditorium refresh", customer: "North High School", customerId: "C-333", locationId: null, contactName: null,
+    owner: "Pat Estimator", preparedBy: "Sam Helper", createdAt: AT - 5, updatedAt: AT, revisions: [{}, {}], quoteNote: "Cover note.", assumptions: "Assume access.", paymentTerms: "Net 30",
+    spec: { sections: secs, groups: G }, pdfOptions: { detail: "itemized", pdfItemizedAppendix: true, pdfPrices: true },
+    vendorQuotes: [{ id: "VQ-1", vendor: "Acme", quoteNumber: "Q9", description: "Motors", display: "itemized", lines: [{ id: 1, description: "Motor", qty: 2, unit: "ea", amount: 100 }], terms: "", notes: "", total: 100, includesFreight: false }],
+  };
+  const narrIn = asHook(narr, "Your Gold rewards: Free freight");
+  // the hook's label is the display number (EST-1201), not the id
+  const liveNarr = p3LiveBom({ ...narrIn, quoteNumber: saved(narr, "").quoteId });
+  ok(JSON.stringify(liveNarr) === JSON.stringify(saved(narr, "Your Gold rewards: Free freight")), "#333 live BOM: a narrative + itemized quote with groups and an alternate deep-equals the saved BOM view");
+  ok(liveNarr.document === null && liveNarr.detail === "itemized" && liveNarr.sections.every((s) => s.presentation === "itemized") && liveNarr.attnLine === "Bo Kim · Principal" && liveNarr.venueLabel === "Gym — Moorhead",
+    "#333 live BOM: itemized everywhere, no document; the contact ladder and the primary venue come out as the saved document's");
+  ok(liveNarr.rewardsLine === "Your Gold rewards: Free freight" && p3LiveBom({ ...narrIn, rewardsLine: "" }).rewardsLine === "", "#333 live BOM: rewardsLine passes through");
+  const portal = {
+    id: "Q-333P", name: "Cart", customer: "North High School", customerId: "C-333", locationId: "L1", contactName: "Ann Lee", owner: "", preparedBy: "",
+    createdAt: AT, updatedAt: AT + 10, revisions: [], quoteNote: "", assumptions: "", paymentTerms: "Bogus", source: "portal-catalog", portalFirm: { generatedAt: AT, validUntil: AT + 30 * 86400000 },
+    spec: { sections: [{ ...p3QdSections()[0], freightMiles: 412.4 }, p3QdSections()[2]] }, pdfOptions: { pdfPrices: false },
+  };
+  const portalIn = asHook(portal, "");
+  const livePortal = p3LiveBom(portalIn);
+  ok(JSON.stringify(livePortal) === JSON.stringify(saved(portal, "")), "#333 live BOM: a portal-catalog quote with freight miles deep-equals the saved BOM view");
+  ok(livePortal.isPortalCatalog === true && livePortal.freightLabel === "Freight & delivery — 412 mi" && livePortal.standingLines?.length === 3 && livePortal.pdfPrices === false && livePortal.paymentTerms === "Unknown",
+    "#333 live BOM: portal extras (freight miles, standing lines, valid until) and the quote's own Prices choice");
+  // The #330 leak rule: no bonus line, sku or wording in the live BOM.
+  const bonusSecs = bnLeakFixture();
+  const withBonus = p3LiveBom({ ...asHook({ ...narr, spec: { sections: bonusSecs } }, ""), customerId: null, custName: "Walk-in" });
+  const html = p3RenderQd({ ...withBonus, layout: "web" });
+  ok(bonusSecs[0].items.some((x) => x.bonus) && !/bonus/i.test(html) && !html.includes("BON-") && !/Package bonus|Estimator bonus/.test(html), "#333 live BOM: never shows the internal bonus lines (#330 leak rule)");
+  let threw = false;
+  let empty = "";
+  try {
+    empty = p3RenderQd({ ...p3LiveBom({ ...narrIn, sections: [], groups: [] }), layout: "web" });
+  } catch {
+    threw = true;
+  }
+  ok(!threw && empty.length > 0, "#333 live BOM: an empty estimate renders without throwing");
+  const src = readFileSync(join(process.cwd(), "src/lib/estimate-output/live-bom.ts"), "utf8");
+  ok(!/^import (?!type)[^\n]*from "@\/lib\/stores\//m.test(src) && !/^["']use (server|client)["']/m.test(src), "#333 live BOM: pure module — no store values, no directive");
+  const ra = readFileSync(join(process.cwd(), "src/app/(app)/rewards/actions.ts"), "utf8");
+  ok(ra.includes("purchasePerksDocLine: purchasePerksDocLine(pp), customerId: id"), "#333 rewards: the credit read carries the customer-document perks line");
+}

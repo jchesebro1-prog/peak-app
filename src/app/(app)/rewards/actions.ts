@@ -24,7 +24,7 @@ import {
   undoPerkUse,
 } from "@/lib/stores/reward-perks";
 import { formatPoints } from "@/lib/rewards/points";
-import { purchasePerksBannerText } from "@/lib/rewards/purchase-perks";
+import { purchasePerksBannerText, purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 
 /**
  * Customer Rewards suggestion actions (#282 Phase 1, spec §3). Both need the
@@ -70,6 +70,9 @@ export type RewardCreditInfo = {
   available: number;
   /** #282 perks+points: the staff banner text ("Gold purchase perks: …"), "" when none. */
   purchasePerks?: string;
+  /** #333: the customer-document line ("Your Gold rewards: …"), "" when none —
+   *  the live BOM quote prints it as the saved document does. */
+  purchasePerksDocLine?: string;
   /** #282 perks+points: the customer this answer is for (a stale answer shows nothing). */
   customerId?: string;
 };
@@ -82,9 +85,9 @@ export async function rewardCreditInfoAction(customerId: string | null, quoteId:
   await requireUser();
   const program = await getRewardsProgram();
   const id = String(customerId || "").trim();
-  if (!program.enabled || !id) return { enabled: program.enabled, balance: 0, available: 0, purchasePerks: "" };
+  if (!program.enabled || !id) return { enabled: program.enabled, balance: 0, available: 0, purchasePerks: "", purchasePerksDocLine: "" };
   const [c, pp] = await Promise.all([companyCredit(id, quoteId || null), purchasePerksForCompany(id)]);
-  return { enabled: true, balance: c.balance, available: c.available, purchasePerks: purchasePerksBannerText(pp), customerId: id };
+  return { enabled: true, balance: c.balance, available: c.available, purchasePerks: purchasePerksBannerText(pp), purchasePerksDocLine: purchasePerksDocLine(pp), customerId: id };
 }
 
 export type CreditActionResult = { ok: true; message: string } | { ok: false; error: string };
