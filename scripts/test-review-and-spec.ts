@@ -69640,3 +69640,82 @@ import { qd293Sections as p3QdSections, renderQuoteDocument293 as p3RenderQd } f
   const ra = readFileSync(join(process.cwd(), "src/app/(app)/rewards/actions.ts"), "utf8");
   ok(ra.includes("purchasePerksDocLine: purchasePerksDocLine(pp), customerId: id"), "#333 rewards: the credit read carries the customer-document perks line");
 }
+
+// ---- Task 8: the trimmed BOM projection + the Client package tab's datasheet rows ----
+import * as p3Proj from "@/lib/estimate-output/bom-projection";
+import { quoteBom as p3QuoteBom } from "@/lib/client-package-server";
+import { clientDatasheetRows as p3ClientRows, bomMemberParents as p3MemberParents } from "@/lib/estimate-output/package-preview";
+import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
+{
+  const P = p3Proj;
+  const comp = (sku: string, role: string, qty: number) => ({ sku, label: sku + " label", role, qty, unit: "ea", cost: 1, price: 2, notes: "big blob" });
+  const rack = { id: "SA-P3R", kind: "rack" as const, label: "Rack", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "P3-FRM", qty: 1 }],
+    rack: { config: { ruCount: 12, widthIn: 19 as const, numbering: "bottom-up" as const }, placements: [{ id: "RP-1", kind: "device" as const, sku: "P3-AMP", ruStart: 1, ruHeight: 2, face: "front" as const }] } };
+  const fx = { id: "SA-P3F", kind: "fixture" as const, label: "Wash", lightEngineSku: "P3-ENG", lensSku: null, lines: { data: [], power: [], mounting: [{ sku: "P3-CLAMP", qty: 1, label: "Clamp" }], accessories: [] } };
+  const all = new Map<string, unknown>([[rack.id, rack], [fx.id, fx]]);
+  const fixtureOf = (id: string) => all.get(id) as never;
+  const line = (id: number, extra: Record<string, unknown> = {}) => ({ id, sku: "P3-" + id, desc: "Line " + id, qty: 2, unit: "ea", cost: 10, price: 25, comment: "c", internalNote: "n", ...extra });
+  const full = [
+    { id: "a", name: "Rigging", kind: "materials", mfr: "", freightPct: 5, narrative: "x".repeat(4000), items: [
+      line(1), line(2, { qty: 0 }), line(3, { labor: true }), line(4, { sku: "P3-ENG" }),
+      line(5, { sku: "SA-P3E", desc: "Wash fixture", fixture: true, qty: 3, components: [comp("P3-ENG", "fixture", 1), comp("P3-CLAMP", "mount", 2), comp("P3-OPT", "accessory", 0)] }),
+      line(6, { sku: "SA-P3R", desc: "Amp rack", fixture: true, rackId: "SA-P3R", qty: 1, components: [comp("P3-STALE", "fixture", 1)] }),
+      line(7, { sku: "asm:SA-P3F", desc: "Grid wash", qty: 2 }),
+      line(8, { sku: "SA-P3F", desc: "Bare fixture", fixture: true, qty: 1 }),
+      line(9, { rewardCredit: true, qty: 1, price: -100 }),
+    ] },
+    { id: "b", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [line(10)] },
+  ];
+  const bonus = bnLeakFixture();
+  for (const [name, secs] of [["fixture + rack", full], ["bonus", bonus]] as const) {
+    const proj = P.projectBom(secs as never);
+    ok(JSON.stringify(p3QuoteBom({ spec: { sections: proj } } as never, fixtureOf)) === JSON.stringify(p3QuoteBom({ spec: { sections: secs } } as never, fixtureOf)) &&
+       JSON.stringify(p3QuoteBom({ spec: { sections: P.sanitizeBomProjection(JSON.parse(JSON.stringify(proj))) } } as never, fixtureOf)) === JSON.stringify(p3QuoteBom({ spec: { sections: secs } } as never, fixtureOf)),
+      `#333 projection: quoteBom on the projection (and on its sanitised JSON) equals quoteBom on the full sections (${name})`);
+  }
+  const projJson = JSON.stringify(P.projectBom(full as never));
+  ok(!projJson.includes("internalNote") && !projJson.includes("narrative") && !projJson.includes("big blob") && !projJson.includes('"price"') && projJson.length < JSON.stringify(full).length / 3,
+    "#333 projection: only the BOM's keys ride (no notes, narrative, prices) — a fraction of the Save payload");
+  // Caps.
+  const many = Array.from({ length: 201 }, () => ({ kind: "materials", items: [] }));
+  ok(P.sanitizeBomProjection(many).length === 200, "#333 projection: 201 sections → 200");
+  const big = [{ items: Array.from({ length: 3000 }, (_, i) => ({ sku: "S" + i, qty: 1 })) }, { items: Array.from({ length: 3000 }, (_, i) => ({ sku: "T" + i, qty: 1 })) }];
+  ok(P.sanitizeBomProjection(big).reduce((n, s) => n + s.items.length, 0) === 5000, "#333 projection: 6,000 items → 5,000 in all");
+  const one = P.sanitizeBomProjection([{ kind: "x".repeat(400), items: [{ sku: "y".repeat(400), desc: "d".repeat(400), qty: NaN, components: [{ sku: "z", qty: Infinity }] }, { sku: "Q", qty: "3" }, null, 7] }]);
+  ok(one[0].kind!.length === 300 && one[0].items[0].sku!.length === 300 && one[0].items[0].desc!.length === 300 && one[0].items[0].qty === 0 && one[0].items[0].components![0].qty === 0 && one[0].items[1].qty === 0 && one[0].items.length === 2,
+    "#333 projection: strings ≤ 300 chars, non-finite / non-number qty → 0 (quoteBom skips it), junk items dropped");
+  ok(p3QuoteBom({ spec: { sections: one } } as never).length === 0, "#333 projection: a NaN qty line never reaches the BOM");
+  ok(JSON.stringify(P.sanitizeBomProjection("junk")) === "[]" && JSON.stringify(P.sanitizeBomProjection([{ items: "x" }])) === JSON.stringify([{ items: [] }]), "#333 projection: junk never throws");
+
+  // Rows: own / covered / not-needed / missing.
+  const bom = [{ sku: "OWN", desc: "Fixture" }, { sku: "COV", desc: "Lens" }, { sku: "NN", desc: "Cable" }, { sku: "MISS", desc: "Clamp" }, { sku: "OFFCAT", desc: "Custom" }, { sku: "OWN", desc: "dup" }];
+  const by = new Map([
+    ["OWN", { datasheet: { documentId: "PD-own", name: "own.pdf" }, datasheetCoveredBy: [], datasheetOk: true }],
+    ["COV", { datasheet: { documentId: "PD-own", name: "own.pdf" }, datasheetCoveredBy: ["OWN"], datasheetOk: true }],
+    ["NN", { datasheet: null, datasheetCoveredBy: [], datasheetOk: true }],
+    ["MISS", { datasheet: null, datasheetCoveredBy: [], datasheetOk: false }],
+  ]);
+  const parts = [{ sku: "OWN", mfr: "ETC", manufacturerModelNumber: "S4-26" }, { sku: "COV", mfr: " ETC ", manufacturerPartNumber: "7060A1013" }, { sku: "NN" }, { sku: "Acme:Clamp-9" }];
+  const rows = p3ClientRows({ bom, bySku: by as never, parts }, new Map([["MISS", ["Wash fixture"]]]));
+  ok(rows.map((r) => `${r.sku}:${r.state}`).join() === "OWN:own,COV:covered,NN:not-needed,MISS:missing", "#333 client rows: own / covered / not-needed / missing, the BOM's order, one row per SKU, catalog parts only");
+  ok(rows[0].model === "S4-26" && rows[0].mfr === "ETC" && rows[1].model === "7060A1013" && rows[1].mfr === "ETC" && rows[0].datasheet?.href === "/api/part-documents/PD-own" && rows[1].coveredBy.join() === "OWN" && rows[3].datasheet === null,
+    "#333 client rows: Manufacturer · Model (partModel) · staff document link · covering fixtures");
+  ok(rows[3].partOf.join() === "Wash fixture" && rows[0].partOf.length === 0, "#333 client rows: partOf from the member map");
+  ok(p3Exclusion({ sku: rows[1].sku, state: rows[1].state, coveredBy: rows[1].coveredBy }, new Set(["OWN"])) === "parent", "#333 client rows: the browser's exclusion rule reads the row as-is (an accessory follows its fixture)");
+
+  // partOf: an assembly line (components), a rack line and a bare fixture line give their members the line's description;
+  // a SKU both standalone and a member is one row listing the assembly.
+  const mp = p3MemberParents(P.projectBom(full as never), fixtureOf, new Map([["P3-AMP", "Brand:AMP"]]));
+  ok((mp.get("P3-ENG") || []).join("|") === "Wash fixture|Grid wash|Bare fixture" && (mp.get("P3-CLAMP") || []).join("|") === "Wash fixture|Grid wash|Bare fixture",
+    "#333 partOf: assembly members list each assembly line's description once: " + JSON.stringify([...mp]));
+  ok((mp.get("Brand:AMP") || []).join() === "Amp rack" && (mp.get("P3-FRM") || []).join() === "Amp rack" && !mp.has("P3-STALE") && !mp.has("P3-OPT") && !mp.has("P3-1"),
+    "#333 partOf: a rack line's live members (renames mapped), never its stale snapshot; an add-on at 0 and plain lines aren't members");
+  const engRows = p3ClientRows({ bom: [{ sku: "P3-ENG", desc: "Engine" }], bySku: new Map([["P3-ENG", { datasheet: null, datasheetCoveredBy: [], datasheetOk: false }]]) as never, parts: [{ sku: "P3-ENG" }] }, mp);
+  ok(engRows.length === 1 && engRows[0].partOf.length === 3, "#333 partOf: a SKU both standalone and a member is one row with the assemblies listed");
+
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-package-actions.ts"), "utf8");
+  ok(act.startsWith('"use server";') && act.includes("await requireUser();") && act.includes("specPackageDocs({ sections }, null)") && act.includes("sanitizeBomProjection(") && act.includes("return { ok: false, error:"),
+    "#333 datasheet-rows action (source): use server, requireUser, sanitised projection, no exclusions, never throws");
+  const projSrc = readFileSync(join(process.cwd(), "src/lib/estimate-output/bom-projection.ts"), "utf8");
+  ok(!/^import /m.test(projSrc), "#333 projection: pure, no imports (client-safe)");
+}

@@ -5,6 +5,10 @@ import { documentRevStamp } from "@/lib/quote-pdf/state";
 import { formatBytes } from "@/lib/document-files";
 import { cleanPackageFiles, isPackageFileId, PACKAGE_FILE_KIND_LABEL, visiblePackageFiles, type PackageFile, type PackageFileRow } from "./package-files";
 import { withDatasheetAliases, type DatasheetLinkView, type PackagePlanView } from "./package-extras-model";
+import { partModel } from "@/lib/catalog-rename/sku";
+import { expandLine, type FixtureLookup, type MemberLine } from "@/lib/quote-line-members";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 
 /**
  * Estimator Phase 4 (spec §11.1) — the staff preview of what the client gets:
@@ -151,4 +155,87 @@ export function reviewDatasheetRows(bom: ReadonlyArray<{ sku: string; desc: stri
 /** The drawings the client sees (an upload hides a Grid file of its kind), linked to the staff file route. */
 export function reviewDrawingRows(quoteId: string, rows: readonly PackageFileRow[]): ReviewDrawingRow[] {
   return rows.filter((r) => !r.hidden).map((r) => ({ id: r.id, name: r.name, kindLabel: r.kindLabel, sizeLabel: r.sizeLabel, href: staffPackageFileHref(quoteId, r.id) }));
+}
+
+// ---- #333: the Build package step's Client package tab — datasheet rows ----
+
+/** One package BOM product on the Client package tab (spec §7.3). Built with NO
+ *  exclusions applied, so the tab can show both what a row is and what
+ *  leaving it out does (the browser applies part-docs/exclusions.ts). */
+export type ClientDatasheetRow = {
+  sku: string;
+  mfr: string;
+  model: string;
+  label: string;
+  /** The datasheet slot on this package: link-only reads as missing (nothing to send). */
+  state: "own" | "covered" | "not-needed" | "missing";
+  /** Fixture SKUs whose datasheet covers this part on this package (covered rows). */
+  coveredBy: string[];
+  /** The staff part-document route only. */
+  datasheet: DocLinkView | null;
+  /** #332: the assembly lines this product is a member of (their descriptions); [] = standalone only. */
+  partOf: string[];
+};
+
+type ClientRowsDocs = {
+  bom: ReadonlyArray<{ sku: string; desc: string }>;
+  bySku: ReadonlyMap<string, Pick<PackageSkuDocs, "datasheet" | "datasheetCoveredBy" | "datasheetOk">>;
+  parts: ReadonlyArray<{ sku: string; mfr?: string; manufacturerPartNumber?: string; manufacturerModelNumber?: string }>;
+};
+
+/** The package BOM's catalog products (its order, one row per SKU), with their datasheet state. */
+export function clientDatasheetRows(docs: ClientRowsDocs, members: ReadonlyMap<string, readonly string[]>): ClientDatasheetRow[] {
+  const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
+  const out: ClientDatasheetRow[] = [];
+  const seen = new Set<string>();
+  for (const r of docs.bom) {
+    const d = docs.bySku.get(r.sku);
+    if (!d || seen.has(r.sku)) continue;
+    seen.add(r.sku);
+    const p = partBySku.get(r.sku);
+    const coveredBy = [...d.datasheetCoveredBy];
+    const state: ClientDatasheetRow["state"] = coveredBy.length ? "covered" : d.datasheet ? "own" : d.datasheetOk ? "not-needed" : "missing";
+    out.push({
+      sku: r.sku,
+      mfr: (p?.mfr || "").trim(),
+      model: p ? partModel(p) : r.sku,
+      label: (r.desc || "").trim() || r.sku,
+      state,
+      coveredBy,
+      datasheet: docLink(d.datasheet),
+      partOf: [...(members.get(r.sku) ?? [])],
+    });
+  }
+  return out;
+}
+
+/**
+ * #332 member SKU (live, through `moved`) → the descriptions of the assembly
+ * lines it is a member of, walking the lines with the package BOM's own skip
+ * rule (quoteBom: labor sections / lines, bonus and credit lines, qty ≤ 0) and
+ * expandLine. A SKU on several assembly lines lists each description once.
+ */
+export function bomMemberParents(
+  sections: ReadonlyArray<{ kind?: string; items: ReadonlyArray<MemberLine & { labor?: unknown; bonus?: unknown; rewardCredit?: unknown; desc?: unknown; qty?: unknown }> }>,
+  fixtureOf?: FixtureLookup,
+  moved?: ReadonlyMap<string, string>,
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const s of sections || []) {
+    if (s.kind === "labor") continue;
+    for (const it of s.items || []) {
+      const qty = typeof it.qty === "number" ? it.qty : NaN;
+      if (it.labor || isBonusItem(it) || isRewardCreditItem(it) || !(qty > 0)) continue;
+      const rows = expandLine(it, fixtureOf);
+      if (!rows) continue;
+      const desc = (typeof it.desc === "string" && it.desc.trim()) || (typeof it.sku === "string" ? it.sku : "") || "Assembly";
+      for (const m of rows) {
+        const sku = moved?.get(m.sku) ?? m.sku;
+        const list = out.get(sku) ?? [];
+        if (!list.includes(desc)) list.push(desc);
+        out.set(sku, list);
+      }
+    }
+  }
+  return out;
 }
