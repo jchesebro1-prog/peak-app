@@ -1287,7 +1287,7 @@ function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRec
       })}</div>)}
       {section("Field progress", <>{row("Tasks", `${doneTasks} of ${projectTasks.length} complete`)}{row("Notes", `${liveNotes.length} recorded`)}{p.signoff ? row("Customer acceptance", `Signed by ${p.signoff.name || "customer"} · ${fmtDateY(p.signoff.signedAt)}`) : row("Customer acceptance", "Pending")}</>)}
       {liveNotes.length > 0 && section("Recent notes", <div style={{ display: "grid", gap: 7 }}>{liveNotes.slice(0, 8).map((note) => <div key={note.id} style={{ fontSize: 12.5, lineHeight: 1.45, color: "#3d424e" }}><span style={{ color: "#8c919c" }}>{firstName(note.by)} · {fmtDateY(note.at)} </span>{note.text}</div>)}</div>)}
-      {section("Drawings & datasheets", <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.5 }}>Grid plan sheets, catalog datasheets, and the rough riser belong to the linked design package. Use the Grid client package action when a design is linked; missing assets are reported explicitly in that package index.</div>)}
+      {section("Drawings & datasheets", <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.5 }}>The title-blocked drawing set (plans with devices, riser, schedules) and catalog datasheets belong to the linked design package. Use the Grid client package action when a design is linked; missing assets are reported explicitly in that package index.</div>)}
     </div>
   );
 }

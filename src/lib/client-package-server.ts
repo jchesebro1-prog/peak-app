@@ -7,7 +7,7 @@ import { listFixtures } from "@/lib/stores/fixtures";
 import { renderLetterPdf, type FieldSheetDoc, type LetterDoc } from "@/lib/pdf";
 import { riserGraph } from "@/lib/design/grid-riser";
 import { list as listCatalog } from "@/lib/stores/catalog";
-import { listSheets, type GridProject } from "@/lib/stores/grid-projects";
+import { gridProjectForQuote, listSheets, type GridProject } from "@/lib/stores/grid-projects";
 import { allSections } from "@/lib/stores/spec-sections";
 import { saveClientPackage, type ClientPackageRecord } from "@/lib/stores/client-packages";
 import type { Quote } from "@/lib/stores/quotes";
@@ -18,6 +18,11 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
+import { rejectAfter } from "@/lib/curtain-cut-sheets/deadline";
+import { GRID_SET_STEP_MS } from "@/lib/design/grid-set-print";
+import { renderGridSetPdf, type GridSetRenderCause, type GridSetRenderFn } from "@/lib/design/grid-set-render";
+import { MAX_PACKAGE_FILE_BYTES } from "@/lib/estimate-output/package-files";
+import { renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { ensureOptions, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import type { FixtureRecord, FixtureResolvable } from "@/lib/fixture-assemblies";
 import { gridSpecBomRows, internalSkuCheck } from "@/lib/design/grid-virtual-parts";
@@ -34,10 +39,108 @@ export type BuiltClientPackage = {
   spec: AssembledSpec;
   /** #292 — staff-only: includes the unreadable curtains the zip's index leaves out. */
   cutSheets: CutSheetsAdded;
+  /** Grid notes #7 — whether the title-blocked drawing set is in the zip; null = a quote with no Grid design. */
+  drawingSet: PackageDrawingSet | null;
 };
 
 async function bytesFromStream(stream: ReadableStream): Promise<Buffer> {
   return Buffer.from(await new Response(stream).arrayBuffer());
+}
+
+/**
+ * The package builders' outside world, injectable for the spec harness
+ * (production uses the real Blob store, record store, Chrome and secret).
+ */
+export type ClientPackageDeps = {
+  blobOn: () => boolean;
+  put: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ pathname: string }>;
+  save: (input: Omit<ClientPackageRecord, "id" | "createdAt">) => Promise<ClientPackageRecord>;
+  /** Grid notes #7 — the drawing set's renderer (renderPrintRouteToPdf). */
+  renderGridSet: GridSetRenderFn;
+  secret: () => string;
+  /** The Grid design a quote came from (quote packages only). */
+  findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
+};
+
+const livePackageDeps: ClientPackageDeps = {
+  blobOn: blobEnabled,
+  put: putBlob,
+  save: saveClientPackage,
+  renderGridSet: renderPrintRouteToPdf,
+  secret: () => process.env.AUTH_SECRET || "",
+  findGrid: gridProjectForQuote,
+};
+
+/** Grid notes #7 — where the title-blocked drawing set lands in the zip. */
+export const PACKAGE_DRAWING_SET_FILE = "drawings/drawing-set.pdf";
+/** The drawing set needs at least this much of the package's render budget left to be started. */
+export const PACKAGE_DRAWING_SET_MIN_RENDER_MS = 10_000;
+
+/** What the zip's index says about the drawing set. */
+export type PackageDrawingSet = { included: true; file: string } | { included: false; reason: string };
+
+/** Customer-safe words for why the set is missing (the zip's index is customer-facing; the raw cause goes to the server log). */
+const DRAWING_SET_REASON: Record<GridSetRenderCause | "no-origin" | "too-big", string> = {
+  "no-origin": "printing isn’t available on this server",
+  "no-secret": "printing isn’t available on this server",
+  unavailable: "printing isn’t available on this server",
+  figure: "one of the plan sheets couldn’t be drawn",
+  late: "it didn’t finish in time",
+  failed: "the drawing renderer failed",
+  "too-big": "it is over 25 MB",
+};
+
+/** The gap a package records when its drawing set isn't in the zip. */
+export function drawingSetGap(reason: string, instead: string): ClientPackageGap {
+  return { kind: "missing-drawing-set", sku: "DWG", description: `Drawing set couldn’t be rendered — ${reason}; ${instead} included instead.`, qty: 0, catalogId: null };
+}
+
+/**
+ * Grid notes #7 — render the design option's drawing set (cover, plans with
+ * devices, riser, schedules — the same PDF as Generate from Grid, through
+ * renderGridSetPdf) for a client package. It is the FIRST render on the
+ * package's one render deadline (cutSheetDeadline): it is not started with
+ * less than PACKAGE_DRAWING_SET_MIN_RENDER_MS left, Chrome's step cap is the
+ * time left (at most GRID_SET_STEP_MS), an AbortSignal fires at the deadline
+ * (queue wait included) and our wait on it is cut there too. The cut sheets
+ * and racks that follow get whatever is left. Never throws.
+ */
+export async function renderPackageDrawingSet(
+  project: Pick<GridProject, "id">,
+  optionId: string,
+  where: PrintWhere,
+  deadline: number,
+  deps: Pick<ClientPackageDeps, "renderGridSet" | "secret">,
+  now: () => number = Date.now,
+): Promise<{ ok: true; pdf: Buffer } | { ok: false; reason: string }> {
+  const fail = (cause: keyof typeof DRAWING_SET_REASON, detail: string) => {
+    console.warn(`[package] drawing set ${project.id}~${optionId} not included (${cause}): ${detail}`);
+    return { ok: false as const, reason: DRAWING_SET_REASON[cause] };
+  };
+  if ("error" in where) return fail("no-origin", where.error);
+  const left = deadline - now();
+  if (left < PACKAGE_DRAWING_SET_MIN_RENDER_MS) return fail("late", `${Math.max(0, left)} ms of render budget left`);
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(new Error("The client package's render deadline passed.")), Math.max(0, deadline - Date.now()));
+  try {
+    const r = await renderGridSetPdf({
+      projectId: project.id,
+      optionId,
+      origin: where.origin,
+      secret: deps.secret(),
+      now,
+      render: (url, o) => rejectAfter(deps.renderGridSet(url, o), deadline - now()),
+      timeoutMs: Math.max(1, Math.min(GRID_SET_STEP_MS, deadline - now())),
+      signal: abort.signal,
+    });
+    if (!r.ok) return fail(r.cause === "failed" && abort.signal.aborted ? "late" : r.cause, r.error);
+    if (r.pdf.length > MAX_PACKAGE_FILE_BYTES) return fail("too-big", `${r.pdf.length} bytes`);
+    return { ok: true, pdf: r.pdf };
+  } finally {
+    clearTimeout(timer);
+    // Anything still queued or running for this set is abandoned now, never left holding the Chrome queue.
+    abort.abort(new Error("The client package moved on."));
+  }
 }
 
 function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], packageName: string): Buffer {
@@ -329,10 +432,11 @@ export async function createClientPackage(
   project: GridProject,
   by: string,
   requestedOptionId?: string | null,
-  opts: { printWhere?: PrintWhere } = {},
+  opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {},
 ): Promise<BuiltClientPackage> {
-  const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build
-  if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
+  const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
+  const d: ClientPackageDeps = { ...livePackageDeps, ...opts.deps };
+  if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   const fixtures = packageNeedsFixtures(project.placements || []) ? new Map((await listFixtures()).map((f) => [f.id, f])) : null;
@@ -349,13 +453,16 @@ export async function createClientPackage(
   const packageName = `${safeName(project.name || project.id)}-${project.id}`;
   // The docx is written once the racks are known (#296); it keeps its place in the zip.
   const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };
-  const files: ZipFile[] = [specFile, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) }];
+  const files: ZipFile[] = [specFile];
   const gaps = [...manifest.gaps];
   const itemBySku = new Map(manifest.items.map((item) => [item.sku, item]));
   await addDocuments(manifest.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps);
+  // The raw plan backgrounds are read before any render (as before #7), so the deadline-bounded work stays last;
+  // they ship only as the fallback when the drawing set can't be rendered.
+  const planFiles: ZipFile[] = [];
   for (const [index, sheet] of (await listSheets(project.id)).entries()) {
     let bytes: Buffer | null = null;
     if (sheet.dataUrl) {
@@ -364,26 +471,40 @@ export async function createClientPackage(
       const stream = await getBlobStream(sheet.blobPath);
       if (stream) bytes = await bytesFromStream(stream);
     }
-    if (bytes) files.push({ name: `drawings/plan-${String(index + 1).padStart(2, "0")}-${safeName(sheet.name)}`, data: bytes });
+    if (bytes) planFiles.push({ name: `drawings/plan-${String(index + 1).padStart(2, "0")}-${safeName(sheet.name)}`, data: bytes });
+  }
+  const optId = resolveOptionId(project, requestedOptionId);
+  // Grid notes #7 — the title-blocked drawing set (plans WITH devices, riser, schedules) is the first render on the
+  // package's deadline. Rendered: it replaces the rough drawings and the raw plans. Not: they stay, plus one gap.
+  const where = opts.printWhere ?? NO_PRINT_ORIGIN;
+  const set = await renderPackageDrawingSet(project, optId, where, cutSheetsBy, d);
+  let drawingSet: PackageDrawingSet;
+  if (set.ok) {
+    files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
+    drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE };
+  } else {
+    files.splice(1, 0, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) });
+    files.push(...planFiles);
+    gaps.push(drawingSetGap(set.reason, "the rough drawings and plan backgrounds are"));
+    drawingSet = { included: false, reason: set.reason };
   }
   // #292 — cut sheets for the option's quote; a design with curtains but no quote gets one gap.
-  const optId = resolveOptionId(project, requestedOptionId);
   const optQuoteId = ensureOptions(project).options.find((o) => o.id === optId)?.quoteId ?? null;
   let cutSheets: CutSheetsAdded = { sheets: [], unreadable: [] };
-  if (optQuoteId) cutSheets = await addCutSheets(optQuoteId, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, { deadline: cutSheetsBy });
+  if (optQuoteId) cutSheets = await addCutSheets(optQuoteId, where, files, gaps, { deadline: cutSheetsBy });
   else if (optionSlice(project, optId).placements.some((p) => !!p.curtain))
     gaps.push({ kind: "missing-cutsheet", sku: "CS", description: "Add this design to Quotes to include cut sheets", qty: 0, catalogId: null });
   // #296 — racks placed on this option (`asm:<id>` of kind rack), after the cut sheets on the same deadline.
   const gridRacks = racksInGrid(optionSlice(project, optId).placements.map((p) => p.partId), (id) => fixtures?.get(id));
-  const rackRun = await addRacks(gridRacks, [], (id) => fixtures?.get(id)?.label || "Rack", opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, cutSheetsBy);
+  const rackRun = await addRacks(gridRacks, [], (id) => fixtures?.get(id)?.label || "Rack", where, files, gaps, cutSheetsBy);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
   specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
   const publicManifest = { ...manifest, gaps };
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, drawingSet, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const zip = createStoredZip(files);
   const fileName = `${packageName}.zip`;
-  const stored = await putBlob(`client-packages/${safeName(project.id)}/${fileName}`, zip, "application/zip");
-  const record = await saveClientPackage({
+  const stored = await d.put(`client-packages/${safeName(project.id)}/${fileName}`, zip, "application/zip");
+  const record = await d.save({
     projectId: project.id,
     fileName,
     blobPath: stored.pathname,
@@ -392,13 +513,14 @@ export async function createClientPackage(
     datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length,
     gapCount: gaps.length,
   });
-  return { record, gaps, spec: specWithRacks, cutSheets };
+  return { record, gaps, spec: specWithRacks, cutSheets, drawingSet };
 }
 
 /** Build the same package from a quote when it has not yet become a Grid project. */
-export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere } = {}): Promise<BuiltClientPackage> {
-  const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build
-  if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
+export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {}): Promise<BuiltClientPackage> {
+  const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
+  const d: ClientPackageDeps = { ...livePackageDeps, ...opts.deps };
+  if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
@@ -409,25 +531,42 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   const packageName = `${safeName(quote.name || quote.id)}-${safeName(displayQuoteNumber(quote))}`;
   // The docx is written once the racks are known (#296); it keeps its place in the zip.
   const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };
-  const files: ZipFile[] = [specFile, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) }];
+  const files: ZipFile[] = [specFile];
   const itemBySku = new Map(items.map((item) => [item.sku, item]));
   await addDocuments(packageDocs.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps);
-  const cutSheets = await addCutSheets(quote.id, opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, { deadline: cutSheetsBy });
+  // Grid notes #7 — a quote minted by a Grid design ships that option's drawing set (the first render on the
+  // package's deadline) in place of the equipment summary; a failed render keeps the summary plus one gap.
+  // A quote with no Grid design keeps the summary, no gap.
+  const where = opts.printWhere ?? NO_PRINT_ORIGIN;
+  const grid = await d.findGrid(quote.id);
+  const set = grid ? await renderPackageDrawingSet(grid.project, grid.optionId, where, cutSheetsBy, d) : null;
+  let drawingSet: PackageDrawingSet | null = null;
+  if (set?.ok) {
+    files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
+    drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE };
+  } else {
+    files.splice(1, 0, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) });
+    if (set) {
+      gaps.push(drawingSetGap(set.reason, "the equipment summary is"));
+      drawingSet = { included: false, reason: set.reason };
+    }
+  }
+  const cutSheets = await addCutSheets(quote.id, where, files, gaps, { deadline: cutSheetsBy });
   // #296 — rack lines (`rackId`, D578; or a rack `fixtureId`), read live, after the cut sheets on the same deadline.
   const quoteRacks = racksInQuote(qItems, (id) => rackFixtures.get(id));
   // A well-formed rackId that no longer resolves to a rack (deleted) is an on-request gap, named by its line.
   const rackLineName = new Map<string, string>();
   for (const it of qItems) if (typeof it.rackId === "string" && !rackLineName.has(it.rackId)) rackLineName.set(it.rackId, String(it.desc || "") || "Rack");
   const goneRacks = racksInQuote(qItems.map((it) => ({ rackId: it.rackId })), () => ({ kind: "rack" })).filter((id) => rackFixtures.get(id)?.kind !== "rack");
-  const rackRun = await addRacks(quoteRacks, goneRacks, (id) => rackFixtures.get(id)?.label || rackLineName.get(id) || "Rack", opts.printWhere ?? NO_PRINT_ORIGIN, files, gaps, cutSheetsBy);
+  const rackRun = await addRacks(quoteRacks, goneRacks, (id) => rackFixtures.get(id)?.label || rackLineName.get(id) || "Rack", where, files, gaps, cutSheetsBy);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
   specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, ...(drawingSet ? { drawingSet } : {}), cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const fileName = `${packageName}.zip`;
-  const stored = await putBlob(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");
-  const record = await saveClientPackage({ projectId: `quote:${quote.id}`, fileName, blobPath: stored.pathname, createdBy: by, itemCount: items.length, datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length, gapCount: gaps.length });
-  return { record, gaps, spec: specWithRacks, cutSheets };
+  const stored = await d.put(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");
+  const record = await d.save({ projectId: `quote:${quote.id}`, fileName, blobPath: stored.pathname, createdBy: by, itemCount: items.length, datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length, gapCount: gaps.length });
+  return { record, gaps, spec: specWithRacks, cutSheets, drawingSet };
 }

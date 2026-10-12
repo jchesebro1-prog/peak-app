@@ -11664,6 +11664,7 @@ seeded()
   .then(() => riserPhase2C3Checks())
   .then(() => riserPhase2C4Checks())
   .then(() => gridNotes6Checks())
+  .then(() => gridNotes7Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -46619,7 +46620,7 @@ import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
     "#292 package: a render error becomes a fixed customer-safe reason (timeout → late, anything else → couldn't be rendered)");
   const srv = rd("src/lib/client-package-server.ts");
   const builders = ["export async function createClientPackage(", "export async function createQuoteClientPackage("].map((h) => srv.slice(srv.indexOf(h), srv.indexOf("\n}\n", srv.indexOf(h))));
-  ok(builders.every((b) => b.indexOf("cutSheetDeadline(Date.now())") > 0 && b.indexOf("cutSheetDeadline(Date.now())") < b.indexOf("blobEnabled()") && /addCutSheets\([^;]*\{ deadline: cutSheetsBy \}\)/.test(b)),
+  ok(builders.every((b) => b.indexOf("cutSheetDeadline(Date.now())") > 0 && b.indexOf("cutSheetDeadline(Date.now())") < b.indexOf("d.blobOn()") /* Grid notes #7: the Blob check goes through the injectable deps */ && /addCutSheets\([^;]*\{ deadline: cutSheetsBy \}\)/.test(b)),
     "#292 source: each package builder takes its cut-sheet deadline at the start of the build and threads it into addCutSheets");
   const ps = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
   ok(/rejectAfter\(render\(url, \{ timeoutMs: renderTimeoutMs\(opts\.deadline, now\(\)\), signal: abort\.signal \}\), opts\.deadline - now\(\)\)/.test(ps) && ps.indexOf("signPrintToken(") > ps.indexOf("CUT_SHEET_MIN_RENDER_MS || abort.signal.aborted) {"),
@@ -53247,9 +53248,13 @@ import { RENDER_LAUNCH_TIMEOUT_MS as e301cgLaunch, RENDER_FONTS_TIMEOUT_MS as e3
     "#301 grid: the shared sheets component takes every asset URL from its resolver");
   const gen = rd("src/lib/estimate-output/package-files-server.ts");
   const g = gen.slice(gen.indexOf("export async function generateGridDrawingSet("));
-  ok(g.indexOf("d.find(q.id)") < g.indexOf('signPrintToken(d.secret, "grid-set", setId, d.now())') && g.indexOf('signPrintToken(d.secret, "grid-set", setId, d.now())') < g.indexOf("d.render(") &&
-     g.includes("waitFor: GRID_SET_WAIT_FOR") && g.includes('kind: "drawing"') && g.includes('source: "grid"'),
-    "#301 grid: Generate signs the token right before the one render and stores a Grid drawing set");
+  // Grid notes #7: the sign + render moved into the shared renderGridSetPdf (src/lib/design/grid-set-render.ts).
+  const gsr = rd("src/lib/design/grid-set-render.ts");
+  const gsrBody = gsr.slice(gsr.indexOf("export async function renderGridSetPdf("));
+  ok(g.indexOf("d.find(q.id)") > 0 && g.indexOf("d.find(q.id)") < g.indexOf("renderGridSetPdf({") && !g.includes("signPrintToken(") &&
+     gsrBody.indexOf('signPrintToken(input.secret, "grid-set", setId, input.now())') > 0 && gsrBody.indexOf('signPrintToken(input.secret, "grid-set", setId, input.now())') < gsrBody.indexOf("await render(") &&
+     gsrBody.includes("waitFor: GRID_SET_WAIT_FOR") && g.includes('kind: "drawing"') && g.includes('source: "grid"'),
+    "#301 grid: Generate signs the token right before the one render (in the shared renderGridSetPdf) and stores a Grid drawing set");
   const acts = rd("src/app/(app)/estimator/package-actions.ts");
   ok(acts.slice(acts.indexOf("export async function generateGridDrawingsAction(")).includes("printOriginFor(process.env,"), "#301 grid: the action prints from the request's own origin (printOriginFor)");
   // #301 slice C review fixes: a failed plan figure fails the render; add-then-remove ordering; a bounded queue wait.
@@ -53260,10 +53265,10 @@ import { RENDER_LAUNCH_TIMEOUT_MS as e301cgLaunch, RENDER_FONTS_TIMEOUT_MS as e3
     "#301 grid fix: after waitFor, a still-present failIf figure fails the render (opt-in; the comment no longer overclaims)");
   ok(rs.includes("  if (!opts.signal) return enqueueRender(() => renderOnce(url, timeout));\n  return enqueueRender((signal) => renderOnce(url, timeout, signal), opts.signal);"),
     "#301 grid fix: the two pre-existing dispatch lines stay byte-identical (#292 pin)");
-  ok(g.includes("failIf: GRID_SET_FAIL_IF") && g.includes("signal: d.signal(") && g.includes("GRID_SET_DEADLINE_MS") && g.includes('process.env.NODE_ENV === "development"') &&
+  ok(gsrBody.includes("failIf: GRID_SET_FAIL_IF") && gsrBody.includes("signal: input.signal,") && g.includes("signal: d.signal(") && g.includes("GRID_SET_DEADLINE_MS") && g.includes('process.env.NODE_ENV === "development"') &&
      g.indexOf("d.put(") < g.indexOf("addPackageFile(q.id, file)") && g.indexOf("addPackageFile(q.id, file)") < g.indexOf("removePackageFileAndBlob(q.id, f.id") &&
      g.includes("cleanPackageFiles(res.quote.packageFiles).filter((f) => f.source === \"grid\" && f.id !== file.id)") && !g.includes("const old = current.filter(") &&
-     g.includes("GRID_SET_COPY.figureFailed") && g.includes("GRID_SET_COPY.storeFailed"),
+     gsrBody.includes("GRID_SET_COPY.figureFailed") && g.includes("if (!rendered.ok) return { ok: false, error: rendered.error };") && g.includes("GRID_SET_COPY.storeFailed"),
     "#301 grid fix: Generate bounds the queue wait, passes failIf, adds the new record BEFORE removing the old, and names the failing step");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base", expectNotFound: true }') && smoke.includes('{ route: "/print/grid-set/GRD-5001~opt-base/asset/sheet/gs-1", expectNotFound: true }') &&
@@ -66240,4 +66245,175 @@ async function gridNotes6Checks(): Promise<void> {
     "Grid notes #6: the client side never imports a store (the pure module's store imports are type-only)");
   ok(src("src/app/(app)/design/grid/[id]/use-grid-editor.ts").includes("withCatalogLookups(parts, catalogParts)"),
     "Grid notes #6: the editor's part lookup knows shown catalog results (armed ghost, labels)");
+}
+
+/* ======================================================================
+   Grid notes #7 — the client package ships the title-blocked drawing set
+   (renderGridSetPdf, shared with Generate from Grid) instead of the rough
+   drawings + raw plan backgrounds; a failed render keeps those as the
+   fallback and records a missing-drawing-set gap. Render, Blob and record
+   store are injected; the design, sheet and quote are DB fixtures.
+   ====================================================================== */
+type GridSetRenderFnGn7 = import("@/lib/design/grid-set-render").GridSetRenderFn;
+type ClientPackageRecordGn7 = import("@/lib/stores/client-packages").ClientPackageRecord;
+
+/** File names (in order) of a stored (uncompressed) zip — createStoredZip's own layout. */
+function zipNamesGn7(zip: Buffer): Array<{ name: string; data: Buffer }> {
+  const out: Array<{ name: string; data: Buffer }> = [];
+  let at = 0;
+  while (at + 30 <= zip.length && zip.readUInt32LE(at) === 0x04034b50) {
+    const size = zip.readUInt32LE(at + 18);
+    const nameLen = zip.readUInt16LE(at + 26);
+    const extra = zip.readUInt16LE(at + 28);
+    const name = zip.subarray(at + 30, at + 30 + nameLen).toString("utf8");
+    const start = at + 30 + nameLen + extra;
+    out.push({ name, data: zip.subarray(start, start + size) });
+    at = start + size;
+  }
+  return out;
+}
+
+async function gridNotes7Checks(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const R = await import("@/lib/design/grid-set-render");
+  const GSP = await import("@/lib/design/grid-set-print");
+  const { PdfRenderUnavailable, PrintFigureFailed } = await import("@/lib/quote-pdf/render");
+  const { verifyPrintToken } = await import("@/lib/quote-pdf/token");
+  const CPS = await import("@/lib/client-package-server");
+  const { MAX_PACKAGE_FILE_BYTES } = await import("@/lib/estimate-output/package-files");
+  const G = await import("@/lib/stores/grid-projects");
+  const Q = await import("@/lib/stores/quotes");
+  const { ensureOptions } = await import("@/lib/design/grid-options");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const PDF = Buffer.from("%PDF-1.7 grid notes 7 drawing set");
+  const err = console.error;
+  const warn = console.warn;
+  console.error = () => undefined;
+  console.warn = () => undefined;
+  try {
+    // ---- 1. the shared render
+    const calls: Array<{ url: string; o: { timeoutMs?: number; waitFor?: string; failIf?: string; signal?: AbortSignal } }> = [];
+    const NOW = 1_800_000_000_000;
+    const sig = new AbortController().signal;
+    const r1 = await R.renderGridSetPdf({ projectId: "GRD-7", optionId: "opt-base", origin: "https://app.test/", secret: "s7", now: () => NOW, timeoutMs: 1234, signal: sig,
+      render: async (url, o) => { calls.push({ url, o }); return PDF; } });
+    const tok = calls[0] ? new URL(calls[0].url).searchParams.get("t") || "" : "";
+    ok(r1.ok && r1.pdf === PDF && calls.length === 1 && calls[0].url.startsWith("https://app.test/print/grid-set/GRD-7~opt-base?t=") &&
+       verifyPrintToken("s7", tok, "grid-set", "GRD-7~opt-base", NOW) && calls[0].o.waitFor === GSP.GRID_SET_WAIT_FOR && calls[0].o.failIf === GSP.GRID_SET_FAIL_IF &&
+       calls[0].o.timeoutMs === 1234 && calls[0].o.signal === sig,
+      "Grid notes #7: renderGridSetPdf signs a grid-set token for <project>~<option> and renders the print route with waitFor, failIf, the step cap and the signal");
+    let rendered = 0;
+    const noSecret = await R.renderGridSetPdf({ projectId: "GRD-7", optionId: "opt-base", origin: "https://app.test", secret: "", now: () => NOW, signal: sig, render: async () => { rendered++; return PDF; } });
+    const fig = await R.renderGridSetPdf({ projectId: "GRD-7", optionId: "opt-base", origin: "https://app.test", secret: "s7", now: () => NOW, signal: sig, render: async () => { throw new PrintFigureFailed(); } });
+    const noChrome = await R.renderGridSetPdf({ projectId: "GRD-7", optionId: "opt-base", origin: "https://app.test", secret: "s7", now: () => NOW, signal: sig, render: async () => { throw new PdfRenderUnavailable("No Chrome here"); } });
+    const late = await R.renderGridSetPdf({ projectId: "GRD-7", optionId: "opt-base", origin: "https://app.test", secret: "s7", now: () => NOW, signal: AbortSignal.abort(), render: async () => { throw new Error("aborted"); } });
+    const boom = await R.renderGridSetPdf({ projectId: "GRD-7", optionId: "opt-base", origin: "https://app.test", secret: "s7", now: () => NOW, signal: sig, render: async () => { throw new Error("boom"); } });
+    ok(rendered === 0 && !noSecret.ok && noSecret.cause === "no-secret" && noSecret.error === GSP.GRID_SET_COPY.noSecret &&
+       !fig.ok && fig.cause === "figure" && fig.error === GSP.GRID_SET_COPY.figureFailed &&
+       !noChrome.ok && noChrome.cause === "unavailable" && noChrome.error === "No Chrome here" &&
+       !late.ok && late.cause === "late" && late.error === GSP.GRID_SET_COPY.renderFailed && !boom.ok && boom.cause === "failed" && boom.error === GSP.GRID_SET_COPY.renderFailed,
+      "Grid notes #7: renderGridSetPdf names the failure (no secret → never renders; figure; no Chrome keeps its message; aborted → late; anything else → failed) with Generate's own copy");
+
+    // ---- 2. Generate from Grid still renders through it
+    const gen = rd("src/lib/estimate-output/package-files-server.ts");
+    const g = gen.slice(gen.indexOf("export async function generateGridDrawingSet("), gen.indexOf("\n}\n", gen.indexOf("export async function generateGridDrawingSet(")));
+    const cps = rd("src/lib/client-package-server.ts");
+    ok(g.includes("renderGridSetPdf({") && g.includes("render: d.render,") && !g.includes("signPrintToken(") && !g.includes("gridSetPrintUrl(") &&
+       (cps.match(/renderGridSetPdf\(\{/g) || []).length === 1 && !cps.includes("signPrintToken(") && !cps.includes("gridSetPrintUrl("),
+      "Grid notes #7: Generate from Grid and the client packages both render through the one renderGridSetPdf (neither signs or builds the URL itself)");
+
+    // ---- 3. the package's drawing-set step on the shared deadline
+    const deps = (render: GridSetRenderFnGn7) => ({ renderGridSet: render, secret: () => "s7" });
+    let called = 0;
+    const noOrigin = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { error: "Set QUOTE_PDF_ORIGIN" }, Date.now() + 60_000, deps(async () => { called++; return PDF; }));
+    const noTime = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS - 1_000, deps(async () => { called++; return PDF; }));
+    ok(called === 0 && !noOrigin.ok && noOrigin.reason === "printing isn’t available on this server" && !noOrigin.reason.includes("QUOTE_PDF_ORIGIN") &&
+       !noTime.ok && noTime.reason === "it didn’t finish in time",
+      "Grid notes #7: no print origin, or too little of the package's render budget left, never starts the render (customer-safe reasons)");
+    let seenTimeout = 0;
+    let seenSignal: AbortSignal | undefined;
+    let first = true;
+    const t0 = Date.now();
+    const hung = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + 300,
+      deps((_u, o) => { seenTimeout = o.timeoutMs ?? -1; seenSignal = o.signal; return new Promise<Buffer>(() => undefined); }),
+      () => (first ? ((first = false), Date.now() - 20_000) : Date.now()));
+    ok(!hung.ok && hung.reason === "it didn’t finish in time" && Date.now() - t0 < 3_000 && seenTimeout > 0 && seenTimeout <= 300 && seenSignal?.aborted === true,
+      "Grid notes #7: a render that outlives the package deadline is cut there (step cap = time left, the signal fires) and reads as late");
+    const big = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + 60_000, deps(async () => Buffer.alloc(MAX_PACKAGE_FILE_BYTES + 1)));
+    let earlyTimeout = 0;
+    const fine = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + 60_000, deps(async (_u, o) => { earlyTimeout = o.timeoutMs ?? -1; return PDF; }));
+    ok(!big.ok && big.reason === "it is over 25 MB" && fine.ok && fine.pdf === PDF && earlyTimeout === GSP.GRID_SET_STEP_MS,
+      "Grid notes #7: an oversized set is refused; an early render gets Generate's normal 25 s step cap");
+
+    // ---- 4. the Grid client package, end to end (DB fixtures, injected render / Blob / record store)
+    const project = await G.createProject({ name: "Grid notes 7 design", customer: "Spec fixture", customerId: null, by: "Test" });
+    registerFixture("grid_projects", project.id);
+    const sheet = await G.addSheet(project.id, { name: "Ground floor", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test" });
+    if (sheet) registerFixture("grid_sheets", sheet.id);
+    const live = (await G.getProject(project.id))!;
+    const optionId = ensureOptions(live).options[0].id;
+    const stored: Buffer[] = [];
+    const renderUrls: string[] = [];
+    const pkgDeps = (render: GridSetRenderFnGn7) => ({
+      blobOn: () => true,
+      put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; },
+      save: async (input: Omit<ClientPackageRecordGn7, "id" | "createdAt">) => ({ ...input, id: "PKG-GN7", createdAt: 0 }),
+      renderGridSet: render,
+      secret: () => "s7",
+    });
+    const okPkg = await CPS.createClientPackage(live, "Tester", optionId, { printWhere: { origin: "https://app.test" }, deps: pkgDeps(async (url) => { renderUrls.push(url); return PDF; }) });
+    const okZip = zipNamesGn7(stored[stored.length - 1]);
+    const okNames = okZip.map((f) => f.name);
+    const okIndex = JSON.parse(okZip.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { drawingSet?: { included: boolean; file?: string }; gaps: Array<{ kind: string }> };
+    ok(okNames.includes("drawings/drawing-set.pdf") && okZip.find((f) => f.name === "drawings/drawing-set.pdf")!.data.equals(PDF) &&
+       !okNames.includes("drawings/rough-drawings.pdf") && !okNames.some((n) => n.startsWith("drawings/plan-")) && okNames[1] === "specification.docx" && okNames[2] === "drawings/drawing-set.pdf" &&
+       renderUrls.length === 1 && renderUrls[0].includes(`/print/grid-set/${encodeURIComponent(project.id + "~" + optionId)}?t=`) &&
+       okIndex.drawingSet?.included === true && okIndex.drawingSet.file === "drawings/drawing-set.pdf" && !okIndex.gaps.some((x) => x.kind === "missing-drawing-set") &&
+       okPkg.drawingSet?.included === true && !okPkg.gaps.some((x) => x.kind === "missing-drawing-set"),
+      "Grid notes #7: a rendered drawing set ships as drawings/drawing-set.pdf for the package's option; no rough drawings, no raw plan backgrounds; the index says it is included");
+    const badPkg = await CPS.createClientPackage(live, "Tester", optionId, { printWhere: { origin: "https://app.test" }, deps: pkgDeps(async () => { throw new Error("spawn /opt/secret-chrome ENOENT"); }) });
+    const badZip = zipNamesGn7(stored[stored.length - 1]);
+    const badNames = badZip.map((f) => f.name);
+    const badIndex = JSON.parse(badZip.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { drawingSet?: { included: boolean; reason?: string }; gaps: Array<{ kind: string; description: string; sku: string }> };
+    const gap = badIndex.gaps.filter((x) => x.kind === "missing-drawing-set");
+    ok(!badNames.includes("drawings/drawing-set.pdf") && badNames.includes("drawings/rough-drawings.pdf") && badNames.includes("drawings/plan-01-Ground_floor") &&
+       gap.length === 1 && gap[0].sku === "DWG" && gap[0].description === "Drawing set couldn’t be rendered — the drawing renderer failed; the rough drawings and plan backgrounds are included instead." &&
+       !gap[0].description.includes("secret-chrome") && badIndex.drawingSet?.included === false && badPkg.gaps.some((x) => x.kind === "missing-drawing-set") && badPkg.record.gapCount === badPkg.gaps.length,
+      "Grid notes #7: a failed render keeps the rough drawings + raw plan backgrounds and adds one customer-safe missing-drawing-set gap (index: not included)");
+    const noPrint = await CPS.createClientPackage(live, "Tester", optionId, { deps: pkgDeps(async () => PDF) });
+    ok(noPrint.drawingSet?.included === false && noPrint.gaps.some((x) => x.kind === "missing-drawing-set" && x.description.includes("printing isn’t available on this server")),
+      "Grid notes #7: with no print address the package still builds — fallback drawings plus the gap");
+
+    // ---- 5. the quote package: a Grid-minted quote gets the same set; any other keeps its equipment summary
+    const QID = fixtureId("gn7", "quote");
+    const quote = await Q.create({ id: QID, name: "Grid notes 7 quote", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "grid",
+      spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "GN7-A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] }], mobs: [] } });
+    registerFixture("quotes", QID);
+    const qDeps = (render: GridSetRenderFnGn7, grid: boolean) => ({ ...pkgDeps(render), findGrid: async () => (grid ? { project: live, optionId } : null) });
+    const qOk = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" }, deps: qDeps(async () => PDF, true) });
+    const qOkNames = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name);
+    const qBad = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" }, deps: qDeps(async () => { throw new PrintFigureFailed(); }, true) });
+    const qBadNames = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name);
+    let qRendered = 0;
+    const qNone = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" }, deps: qDeps(async () => { qRendered++; return PDF; }, false) });
+    const qNoneNames = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name);
+    ok(qOkNames.includes("drawings/drawing-set.pdf") && !qOkNames.includes("drawings/quote-equipment-summary.pdf") && qOk.drawingSet?.included === true &&
+       !qBadNames.includes("drawings/drawing-set.pdf") && qBadNames.includes("drawings/quote-equipment-summary.pdf") &&
+       qBad.gaps.some((x) => x.kind === "missing-drawing-set" && x.description === "Drawing set couldn’t be rendered — one of the plan sheets couldn’t be drawn; the equipment summary is included instead.") &&
+       qRendered === 0 && qNoneNames.includes("drawings/quote-equipment-summary.pdf") && qNone.drawingSet === null && !qNone.gaps.some((x) => x.kind === "missing-drawing-set"),
+      "Grid notes #7: a quote from a Grid design ships that design's drawing set (fallback: the equipment summary + gap); a quote with no design is unchanged");
+
+    // ---- 6. copy + budget pins
+    ok(rd("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx").includes('title="Build a ZIP with the specification, datasheets, the title-blocked drawing set (plans with devices, riser, schedules), cut sheets and racks"') &&
+       !rd("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx").includes("rough riser") && !rd("src/app/(app)/projects/view.tsx").includes("rough riser") &&
+       rd("src/lib/client-package.ts").includes('"missing-drawing-set"'),
+      "Grid notes #7: the Outputs button and the project page describe the drawing set, not rough riser drawings; missing-drawing-set is a package gap kind");
+    const build = cps.slice(cps.indexOf("export async function createClientPackage("), cps.indexOf("/** Build the same package from a quote"));
+    ok(build.indexOf("renderPackageDrawingSet(project, optId, where, cutSheetsBy, d)") > 0 && build.indexOf("renderPackageDrawingSet(") < build.indexOf("addCutSheets(") &&
+       build.indexOf("addCutSheets(") < build.indexOf("addRacks(") && CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS < c292Pkg.CUT_SHEET_DEADLINE_MS,
+      "Grid notes #7: the drawing set is the first render on the package's one deadline (cutSheetDeadline), before the cut sheets and racks, inside the 120 s budget");
+  } finally {
+    console.error = err;
+    console.warn = warn;
+  }
 }

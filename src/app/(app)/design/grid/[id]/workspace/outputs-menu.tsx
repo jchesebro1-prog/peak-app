@@ -76,7 +76,7 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
 
       <div style={{ ...FIELD_LABEL, marginTop: 12 }}>Client package</div>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" style={BTN} disabled={packageBusy || busy} onClick={buildClientPackage} title="Build a ZIP with the specification, datasheets, plan sheets, and rough riser drawings">
+        <button type="button" style={BTN} disabled={packageBusy || busy} onClick={buildClientPackage} title="Build a ZIP with the specification, datasheets, the title-blocked drawing set (plans with devices, riser, schedules), cut sheets and racks">
           {packageBusy ? "Building…" : packageUrl ? "Rebuild" : "Build client package"}
         </button>
         {packageUrl && (

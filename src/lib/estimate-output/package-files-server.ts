@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { blobEnabled, deleteBlob, getBlobHead, getBlobStream, putBlob } from "@/lib/blob";
-import { GRID_SET_COPY, GRID_SET_DEADLINE_MS, GRID_SET_FAIL_IF, GRID_SET_STEP_MS, GRID_SET_WAIT_FOR, gridSetFileName, gridSetId, gridSetPrintUrl } from "@/lib/design/grid-set-print";
+import { GRID_SET_COPY, GRID_SET_DEADLINE_MS, GRID_SET_STEP_MS, gridSetFileName } from "@/lib/design/grid-set-print";
+import { renderGridSetPdf, type GridSetRenderFn } from "@/lib/design/grid-set-render";
 import { cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
-import { PdfRenderUnavailable, PrintFigureFailed, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
+import { renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
-import { signPrintToken } from "@/lib/quote-pdf/token";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-projects";
 import { addPackageFile, get as getQuote, removePackageFile, type QuoteRevision } from "@/lib/stores/quotes";
@@ -152,7 +152,7 @@ type GridDeps = {
   now: () => number;
   newId: () => string;
   find: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
-  render: (url: string, opts: { timeoutMs?: number; waitFor?: string; failIf?: string; signal?: AbortSignal }) => Promise<Buffer>;
+  render: GridSetRenderFn;
   signal: (ms: number) => AbortSignal;
   put: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ url: string; pathname: string }>;
   remove: (pathname: string) => Promise<void>;
@@ -163,7 +163,8 @@ type GridDeps = {
  * drawing set (cover, plans, riser, schedules at 11×17) through the signed
  * print route to ONE PDF (adaptation 5) and store it as a `drawing`, source
  * `grid`. An earlier Grid set is replaced. The token is signed right before
- * the render (120 s life). `origin` is the request's own (printOriginFor).
+ * the render (120 s life) inside renderGridSetPdf — the one render the client
+ * packages share (Grid notes #7). `origin` is the request's own (printOriginFor).
  */
 export async function generateGridDrawingSet(quoteId: string, by: string, origin: string, deps: Partial<GridDeps> = {}): Promise<Result<{ file: PackageFile }>> {
   const d: GridDeps = {
@@ -187,24 +188,21 @@ export async function generateGridDrawingSet(quoteId: string, by: string, origin
   const current = cleanPackageFiles(q.packageFiles);
   // The new record is added BEFORE the old Grid set goes, so a full list refuses up front (nothing rendered, the old set kept).
   if (current.length >= MAX_PACKAGE_FILES) return { ok: false, error: PACKAGE_FILES_COPY.full };
-  const setId = gridSetId(hit.project.id, hit.optionId);
-  let pdf: Buffer;
-  try {
-    const t = signPrintToken(d.secret, "grid-set", setId, d.now());
-    // Dev compiles /print on first hit (renderPrintRouteToPdf's own 90 s default); production keeps the 25 s steps.
-    const dev = process.env.NODE_ENV === "development";
-    pdf = await d.render(gridSetPrintUrl(origin, setId, t), {
-      timeoutMs: dev ? undefined : GRID_SET_STEP_MS,
-      waitFor: GRID_SET_WAIT_FOR,
-      failIf: GRID_SET_FAIL_IF,
-      // Bounds the queue wait too (a render queued behind others can't outrun the step budget).
-      signal: d.signal(dev ? 360_000 : GRID_SET_DEADLINE_MS),
-    });
-  } catch (e) {
-    if (e instanceof PdfRenderUnavailable) return { ok: false, error: e.message };
-    console.error("[package] grid drawing set render failed", e);
-    return { ok: false, error: e instanceof PrintFigureFailed ? GRID_SET_COPY.figureFailed : GRID_SET_COPY.renderFailed };
-  }
+  // Dev compiles /print on first hit (renderPrintRouteToPdf's own 90 s default); production keeps the 25 s steps.
+  const dev = process.env.NODE_ENV === "development";
+  const rendered = await renderGridSetPdf({
+    projectId: hit.project.id,
+    optionId: hit.optionId,
+    origin,
+    secret: d.secret,
+    now: d.now,
+    render: d.render,
+    timeoutMs: dev ? undefined : GRID_SET_STEP_MS,
+    // Bounds the queue wait too (a render queued behind others can't outrun the step budget).
+    signal: d.signal(dev ? 360_000 : GRID_SET_DEADLINE_MS),
+  });
+  if (!rendered.ok) return { ok: false, error: rendered.error };
+  const pdf = rendered.pdf;
   if (pdf.length > MAX_PACKAGE_FILE_BYTES) return { ok: false, error: GRID_SET_COPY.tooBig };
   let stored: { url: string; pathname: string };
   try {

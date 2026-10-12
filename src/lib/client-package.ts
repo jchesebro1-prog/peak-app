@@ -8,7 +8,8 @@ import { placementQty } from "@/lib/design/grid-bom";
 import { gridSpecBomRows, internalSkuCheck, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import type { FixtureResolvable } from "@/lib/fixture-assemblies";
 
-export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec" | "missing-cutsheet" | "missing-rack";
+/** Grid notes #7: "missing-drawing-set" — the title-blocked drawing set couldn't be rendered (the fallback drawings ship instead). */
+export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec" | "missing-cutsheet" | "missing-rack" | "missing-drawing-set";
 
 export type ClientPackageGap = {
   kind: PackageGapKind;
