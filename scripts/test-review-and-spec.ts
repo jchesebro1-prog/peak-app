@@ -69154,3 +69154,43 @@ import { stepSearch as p3StepSearch } from "@/lib/estimate-steps/steps";
   ok(T.packageTabId("bom") === "pkg-tab-bom" && T.packageTabPanelId("bom") === "pkg-panel-bom", "#333 tabs: tab / panel ids");
 }
 
+// ---- Task 2: the PackageSelection model ----
+import * as p3Sel from "@/lib/estimate-output/package-selection";
+{
+  const S = p3Sel;
+  ok(JSON.stringify(S.DEFAULT_PACKAGE_SELECTION) === JSON.stringify({ estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [] }), "#333 selection: defaults are all on, nothing excluded");
+  ok(JSON.stringify(S.normalizePackageSelection(undefined)) === JSON.stringify(S.DEFAULT_PACKAGE_SELECTION) && JSON.stringify(S.normalizePackageSelection(null)) === JSON.stringify(S.DEFAULT_PACKAGE_SELECTION) &&
+     JSON.stringify(S.normalizePackageSelection("junk")) === JSON.stringify(S.DEFAULT_PACKAGE_SELECTION) && JSON.stringify(S.normalizePackageSelection([1, 2])) === JSON.stringify(S.DEFAULT_PACKAGE_SELECTION),
+    "#333 selection: absent / junk → defaults");
+  const junk = S.normalizePackageSelection({ estimatePdf: "no", coverPdf: false, drawings: 0, excludedDatasheets: [" B ", "A", "A", "", 7, "x".repeat(201)], extra: 1 });
+  ok(junk.estimatePdf === true && junk.coverPdf === false && junk.drawings === true && JSON.stringify(junk.excludedDatasheets) === JSON.stringify(["A", "B"]) && !("extra" in junk),
+    "#333 selection: non-boolean → default; SKUs trimmed, non-empty, ≤ 200 chars, deduped, sorted; unknown keys dropped: " + JSON.stringify(junk));
+  ok(S.normalizePackageSelection({ excludedDatasheets: ["x".repeat(200)] }).excludedDatasheets.length === 1 && S.PACKAGE_SELECTION_SKU_MAX === 200, "#333 selection: a 200-char SKU is kept");
+  const many = S.normalizePackageSelection({ excludedDatasheets: Array.from({ length: 600 }, (_, i) => `S-${String(i).padStart(4, "0")}`) });
+  ok(many.excludedDatasheets.length === 500 && S.PACKAGE_SELECTION_MAX_EXCLUDED === 500 && many.excludedDatasheets[0] === "S-0000", "#333 selection: 600 SKUs are capped at 500");
+  ok(S.normalizePackageSelection({ excludedDatasheets: "A" }).excludedDatasheets.length === 0, "#333 selection: a non-array exclusion list → []");
+  ok(S.isDefaultPackageSelection(S.DEFAULT_PACKAGE_SELECTION) && S.isDefaultPackageSelection(S.normalizePackageSelection(undefined)) &&
+     !S.isDefaultPackageSelection({ ...S.DEFAULT_PACKAGE_SELECTION, drawings: false }) && !S.isDefaultPackageSelection({ ...S.DEFAULT_PACKAGE_SELECTION, excludedDatasheets: ["A"] }),
+    "#333 selection: isDefaultPackageSelection");
+  ok(JSON.stringify(S.attachDefaults(S.DEFAULT_PACKAGE_SELECTION)) === JSON.stringify({ attachEstimate: true, attachCover: true }) &&
+     JSON.stringify(S.attachDefaults({ ...S.DEFAULT_PACKAGE_SELECTION, coverPdf: false })) === JSON.stringify({ attachEstimate: true, attachCover: false }) &&
+     JSON.stringify(S.attachDefaults(null)) === JSON.stringify({ attachEstimate: true, attachCover: true }),
+    "#333 selection: attachDefaults follows the Estimate / Cover PDF switches (absent → both ticked)");
+  ok(S.selectionKey({ excludedDatasheets: ["B", "A"], drawings: true, coverPdf: true, estimatePdf: true } as never) === S.selectionKey(S.normalizePackageSelection({ estimatePdf: true, excludedDatasheets: ["A", "B"] })) &&
+     S.selectionKey(S.DEFAULT_PACKAGE_SELECTION) !== S.selectionKey({ ...S.DEFAULT_PACKAGE_SELECTION, coverPdf: false }),
+    "#333 selection: selectionKey is stable across key order and SKU order, and moves on any change");
+  const base = { sel: S.DEFAULT_PACKAGE_SELECTION, pdfItemizedAppendix: false, pdfCutSheets: false, cutSheetCount: 0, drawingCount: 0, datasheets: null };
+  ok(S.PACKAGE_SUMMARY_LABEL === "The client gets:", "#333 summary: label");
+  ok(S.packageSummaryLine(base) === "Estimate PDF · Cover PDF · Package page", "#333 summary: an all-default selection on a bare estimate: " + S.packageSummaryLine(base));
+  const full = { sel: S.DEFAULT_PACKAGE_SELECTION, pdfItemizedAppendix: true, pdfCutSheets: true, cutSheetCount: 3, drawingCount: 2, datasheets: { included: 41, total: 45, missing: 2 } };
+  ok(S.packageSummaryLine(full) === "Estimate PDF · Cover PDF · Package page with 2 drawings · 41 of 45 datasheets · 3 cut sheets · Itemized appendix",
+    "#333 summary: the §4.4 example line: " + S.packageSummaryLine(full));
+  const off = { ...full, sel: { ...S.DEFAULT_PACKAGE_SELECTION, drawings: false, excludedDatasheets: ["A", "B"] }, datasheets: { included: 43, total: 45, missing: 0 } };
+  ok(S.packageSummaryLine(off) === "Estimate PDF · Cover PDF · Package page · 43 of 45 datasheets · 3 cut sheets · Itemized appendix",
+    "#333 summary: drawings off and two exclusions: " + S.packageSummaryLine(off));
+  ok(S.packageSummaryLine({ ...base, sel: { ...S.DEFAULT_PACKAGE_SELECTION, estimatePdf: false, coverPdf: false }, drawingCount: 1, pdfCutSheets: true, cutSheetCount: 1, datasheets: { included: 5, total: 5, missing: 0 } }) ===
+     "Package page with 1 drawing · 5 datasheets · 1 cut sheet", "#333 summary: singulars; all datasheets in reads as a plain count; PDFs off drop out");
+  ok(S.packageSummaryLine({ ...base, pdfCutSheets: true, cutSheetCount: 0, datasheets: { included: 0, total: 0, missing: 0 } }) === "Estimate PDF · Cover PDF · Package page",
+    "#333 summary: cut sheets on with none to print, and no datasheet rows, add nothing");
+  ok(!/^import (?!type )/m.test(readFileSync(join(process.cwd(), "src/lib/estimate-output/package-selection.ts"), "utf8")), "#333 selection: package-selection.ts is pure (type imports only)");
+}
