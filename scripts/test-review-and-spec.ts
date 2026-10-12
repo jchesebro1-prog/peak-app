@@ -426,7 +426,7 @@ ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew 
 ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
 const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [installMob], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
-ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
+ok(laborCalc.totalCost === laborCalc.baseCost && !("performanceBonus" in laborCalc), "labor no longer adds its own 5% (the package bonus line does, estimator-wide)");
 
 /* --- #160: quote intake → builder hand-off (pure) --- */
 import { builderPath, SERVICE_TYPES, BUILDER_BASE } from "@/app/(app)/quotes/new/types";
@@ -567,8 +567,7 @@ function expectedLaborLineCount(r: ReturnType<typeof computeLabor>): number {
   return (
     r.mobs.filter((m) => m.cost > 0).length +
     (r.shopCost > 0 ? 1 : 0) +
-    (r.misc > 0 ? 1 : 0) +
-    (r.performanceBonus > 0 ? 1 : 0)
+    (r.misc > 0 ? 1 : 0)
   );
 }
 function idGenFrom(start: number) {
@@ -593,8 +592,8 @@ ok(
   "buildLaborItems: the allowance is its own LAB-MISC- line tagged laborOverhead:'misc', the older separate-line desc restored"
 );
 ok(
-  oneMobItems.some((it) => it.laborOverhead === "bonus" && it.sku.startsWith("LAB-BONUS-") && it.desc === "Performance bonus — 5% of labor cost"),
-  "buildLaborItems: the performance bonus is its own LAB-BONUS- line tagged laborOverhead:'bonus', the older separate-line desc restored"
+  oneMobItems.every((it) => it.laborOverhead !== "bonus" && !it.sku.startsWith("LAB-BONUS-")),
+  "buildLaborItems: no LAB-BONUS- line is emitted any more (the package bonus is added by the system rules)"
 );
 ok(
   round2(oneMobItems.reduce((a, it) => a + it.price, 0)) === round2(oneMobR.totalPrice),
@@ -37879,8 +37878,8 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
     const mobLine = lines.find((x) => x.mob)!;
     ok(Math.abs(mobLine.cost - mc.labor) <= 0.02, `#270 build: mobilization ${i + 1}'s own line is crew labor only (${mobLine.cost} ≈ ${l270R2(mc.labor)})`);
   });
-  ok(l270R2(items.reduce((a, x) => a + x.cost, 0)) === l270R2(r.mobs.reduce((a, x) => a + l270R2(x.cost), 0) + l270R2(r.shopCost) + l270R2(r.misc) + l270R2(r.performanceBonus)),
-    "#270 build: the labor total's cost is unchanged to the cent (Σ mobilizations + shop + misc + bonus)");
+  ok(l270R2(items.reduce((a, x) => a + x.cost, 0)) === l270R2(r.mobs.reduce((a, x) => a + l270R2(x.cost), 0) + l270R2(r.shopCost) + l270R2(r.misc)),
+    "#270 build: the labor total's cost is unchanged to the cent (Σ mobilizations + shop + misc)");
   ok(l270R2(items.reduce((a, x) => a + x.price, 0)) === l270R2(r.totalPrice), "#270 build: the lines still sum to the modal's rounded Price · ext");
   ok(items.slice(0, -1).every((x) => x.price === priceOf(x.cost)), "#270 build: every line but the drift-nudged last sells at exactly its own cost's seed (so #254 tier re-pricing recognises each)");
 
@@ -37907,7 +37906,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   ok(items.every((x) => x.labor && x.laborGroup === "lgTEST"), "#269 build: every line of one Add labor is a labor line carrying the group id");
   ok(travel0.every((x) => !x.mob && !x.comment), "#270 build: travel lines carry no `mob` (spec.mobs unchanged) and no customer comment");
   ok(l270TravelParts(r.mobs[0]).reduce((a, t) => a + t.cost, 0) === r.mobs[0].trav, "#270 mobTravelParts: the parts sum to computeMob's trav exactly");
-  ok(l270IsTravel(byKind("hotel")) && !l270IsOverhead(byKind("hotel")) && l270IsInternal(byKind("hotel")) && l270IsInternal(items.find((x) => x.laborOverhead === "bonus")!) && !l270IsInternal(mobLines[0]),
+  ok(l270IsTravel(byKind("hotel")) && !l270IsOverhead(byKind("hotel")) && l270IsInternal(byKind("hotel")) && l270IsInternal(items.find((x) => x.laborOverhead === "shop")!) && !l270IsInternal(mobLines[0]),
     "#270 predicates: travel is travel (not overhead); both are internal; a mobilization line is neither");
   const noGroup = l270Build(r, "Rigging", nid);
   ok(noGroup.every((x) => !x.laborGroup) && noGroup.filter((x) => x.laborTravel).every((x) => noGroup.some((y) => y.mob && y.laborMobKey === x.laborMobKey)),
@@ -67333,4 +67332,35 @@ import { systemSellTotal as bnSellTotal, systemFreight as bnFreight } from "@/ap
   ok(bnApplies({ source: "estimator" }, [noLabor]), "#bonus applies: unsaved");
   ok(!bnApplies({ source: "estimator", status: "sent" }, [noLabor]) && bnApplies({ source: "estimator", status: "sent" }, [w]), "#bonus applies: sent only when already on the new rules");
   ok(!bnApplies({ source: "estimator", status: "won" }, [w]) && !bnApplies({ source: "estimator", status: "lost" }, [w]), "#bonus applies: won/lost frozen");
+}
+
+import { customerLines as bnCustomerLines, totals as bnTotals, computeLabor as bnComputeLabor } from "@/app/(app)/estimator/pricing";
+{
+  const it = (id: number, cost: number, price: number, extra: Partial<SpecItem> = {}): SpecItem => ({
+    id, sku: "P-" + id, desc: "Part " + id, qty: 1, unit: "ea", cost, price, ...extra,
+  });
+  const base: EstimatorSpecSection = {
+    id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+    items: [it(1, 1000, 1500), it(2, 400, 600, { labor: true, mob: { type: "Install", days: 1, crew: 2, discipline: "RIG" } })],
+  };
+  const [w] = bnWith([base], bnIds([base]));
+  const rows = bnCustomerLines(w);
+  const rowsTotal = Math.round(rows.reduce((a, r) => a + r.ext, 0) * 100) / 100;
+  ok(rows.every((r) => !r.item || !bnIsBonus(r.item)), "#bonus customerLines: neither bonus line is a customer row");
+  ok(rows.every((r) => (r.item ? r.item.desc : r.desc).toLowerCase().indexOf("bonus") < 0), "#bonus customerLines: no row says bonus");
+  ok(rowsTotal === bnSellTotal(w), "#bonus customerLines: rows still add up to the system total");
+  const mobRow = rows.find((r) => r.item && r.item.id === 2)!;
+  ok(mobRow.ext > 600 + 105 - 0.01, "#bonus customerLines: 5% sell folds into the labor line");
+
+  const [nl] = bnWith([{ ...base, items: [it(1, 1000, 1500)] }], () => 50);
+  const nlRows = bnCustomerLines(nl);
+  ok(nlRows.length === 1 && !!nlRows[0].item && nlRows[0].ext === bnSellTotal(nl), "#bonus customerLines: no-labor system gets no extra row; the 2% spreads onto its lines");
+
+  const t = bnTotals([w], 0);
+  ok(Math.abs(t.rev - bnSellTotal(w)) < 0.005, "#bonus totals: rev includes both bonus lines");
+  ok(Math.abs(t.lab - (600 + 105 + 44.1 * (705 / 2205))) < 0.02, "#bonus totals: the 2% splits by the system's labor share; the 5% is labor");
+  ok(Math.abs(t.mat + t.lab - t.rev) < 0.005, "#bonus totals: mat + lab = rev");
+
+  const lr = bnComputeLabor({ discipline: "RIG", margin: "30", mobs: [], pmHrs: "0", pmAuto: true, shopHrs: "0", drfHrs: "0", drfAuto: true, misc: "100" }, () => 0);
+  ok(lr.totalCost === lr.baseCost && !("performanceBonus" in lr), "#bonus computeLabor: the modal no longer adds its own 5%");
 }

@@ -13,7 +13,7 @@ import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, S
  * mileage/lodging/per-diem, supervisor, lift), shop & engineering hours with
  * auto PM/drafting defaults, misc allowance and margin. addLabor
  * (estimator-client.tsx) adds each mobilization's mileage / hotel / per diem
- * / lift (#270) and shop & engineering / the allowance / performance bonus
+ * / lift (#270) and shop & engineering / the allowance
  * as their own separate lines too — internal-estimate only; the customer
  * document folds their sell into the mobilization line(s) (see
  * `customerLines`, pricing.ts).
@@ -208,7 +208,7 @@ export default function LaborModal({
         ) : (
           <>
             Adds to {secName} · one line per mobilization plus its mileage, hotel, per diem and lift lines, and
-            shop &amp; engineering and bonus lines (internal — the customer sees them folded into labor)
+            shop &amp; engineering lines (internal — the customer sees them folded into labor)
           </>
         )
       }
@@ -825,7 +825,7 @@ export default function LaborModal({
         </div>
       </div>
       <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#f7f8fa", color: "#5b616e", fontSize: 11.5 }}>
-        Performance bonus · 5% of {fmt(lr.baseCost)} cost = <strong style={{ color: "#16181d" }}>{fmt(lr.performanceBonus)}</strong>
+        Package bonus (5% of system cost) is added to the system automatically.
       </div>
       </div>
     </ConfigModal>

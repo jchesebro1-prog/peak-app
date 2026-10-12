@@ -1,6 +1,7 @@
 import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from "@/lib/design/curtain-pricing";
 import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/service-pricing";
 import { creditLineAmount, isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -325,7 +326,8 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
       continue;
     }
     let secMat = 0,
-      secLab = 0;
+      secLab = 0,
+      secEst = 0;
     for (const it of sec.items) {
       if (isRewardCreditItem(it)) {
         creditSum += creditLineAmount(it);
@@ -338,6 +340,10 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
       }
       rev += ext;
       cost += it.qty * it.cost;
+      if (isEstimatorBonusItem(it)) {
+        secEst += ext;
+        continue;
+      }
       if (sec.kind === "labor" || it.labor) {
         lab += ext;
         secLab += ext;
@@ -347,6 +353,13 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
       }
     }
     fr += systemFreight(sec);
+    if (secEst !== 0) {
+      // Estimator bonuses: the 2% rides in revenue split like the #267 adjustment.
+      const b = secMat + secLab;
+      const labShare = b > 0 ? round2((secEst * secLab) / b) : sec.kind === "labor" ? secEst : 0;
+      lab += labShare;
+      mat += round2(secEst - labShare);
+    }
     // #267: the system's price adjustment rides in revenue, split between
     // materials and labor the way the section's own lines are (a labor
     // section → all labor; a mixed section by its lines' sell, to the cent).
@@ -692,7 +705,6 @@ export type LaborCalc = {
   shopCost: number;
   misc: number;
   baseCost: number;
-  performanceBonus: number;
   totalCost: number;
   margin: number;
   totalPrice: number;
@@ -714,8 +726,7 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   const shopCost = pmHrs * rate("SHP-PM") + shopHrs * rate("SHP-IN") + drfHrs * rate("DRF-SUB");
   const misc = Math.max(0, parseFloat(draft.misc) || 0);
   const baseCost = mobCost + shopCost + misc;
-  const performanceBonus = baseCost * 0.05;
-  const totalCost = baseCost + performanceBonus;
+  const totalCost = baseCost;
   const margin = Math.min(0.95, Math.max(0, (parseFloat(draft.margin) || 0) / 100));
   const totalPrice = margin < 1 ? totalCost / (1 - margin) : totalCost;
   return {
@@ -735,7 +746,6 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
     shopCost,
     misc,
     baseCost,
-    performanceBonus,
     totalCost,
     margin,
     totalPrice,
@@ -911,22 +921,6 @@ export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => n
       ...tag,
     });
   }
-  if (r.performanceBonus > 0) {
-    const idN = nextId();
-    const skuN = nextId();
-    items.push({
-      id: idN,
-      sku: "LAB-BONUS-" + skuN,
-      desc: "Performance bonus — 5% of labor cost",
-      qty: 1,
-      unit: "lot",
-      cost: round2(r.performanceBonus),
-      price: price(r.performanceBonus),
-      labor: true,
-      laborOverhead: "bonus",
-      ...tag,
-    });
-  }
   if (items.length) {
     const target = round2(r.totalPrice);
     const drift = round2(target - items.reduce((a, it) => a + it.price, 0));
@@ -1092,7 +1086,14 @@ export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc:
 function customerLinesRaw(sec: SpecSection): CustomerLine[] {
   // #282 phase 2: the Rewards credit prints on its own under the totals.
   const visible = sec.items.filter(isSystemLine);
+  // Estimator bonuses: the 2% line is spread over every row at the end;
+  // the 5% line folds into labor exactly like shop & engineering (D251).
+  const estimatorBonusSell = round2(visible.filter(isEstimatorBonusItem).reduce((a, it) => a + lineExtSellOf(it), 0));
+  const rows = customerLinesBase(visible.filter((it) => !isEstimatorBonusItem(it)));
+  return estimatorBonusSell > 0 ? absorbSellAdjustment(rows, estimatorBonusSell) : rows;
+}
 
+function customerLinesBase(visible: SpecItem[]): CustomerLine[] {
   // #270: each travel line (mileage / hotel / per diem / lift) folds into the
   // mobilization line sharing its laborMobKey — sell AND cost, so that line
   // reads, and weighs in the overhead fold below, exactly as the one
@@ -1117,8 +1118,8 @@ function customerLinesRaw(sec: SpecSection): CustomerLine[] {
   }
   const extOf = (it: SpecItem) => round2(lineExtSellOf(it) + (travelAdd.get(it)?.sell || 0));
 
-  const overhead = [...visible.filter(isLaborOverheadItem), ...orphanTravel];
-  const rest = visible.filter((it) => !isLaborOverheadItem(it) && !isLaborTravelItem(it));
+  const overhead = [...visible.filter((it) => isLaborOverheadItem(it) || isPackageBonusItem(it)), ...orphanTravel];
+  const rest = visible.filter((it) => !isLaborOverheadItem(it) && !isPackageBonusItem(it) && !isLaborTravelItem(it));
   if (!overhead.length) return rest.map((item) => ({ item, ext: travelAdd.has(item) ? extOf(item) : lineExtSellOf(item) }));
 
   const overheadTotal = round2(overhead.reduce((a, it) => a + lineExtSellOf(it), 0));
