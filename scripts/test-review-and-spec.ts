@@ -11666,6 +11666,7 @@ seeded()
   .then(() => gridNotes6Checks())
   .then(() => gridNotes7Checks())
   .then(() => gridNotes5WireStarterChecks())
+  .then(() => gridNotes9Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -46233,7 +46234,7 @@ import type { AssembledSpec as C296qSpec } from "@/lib/bid-spec";
   ok(/outcome: "late", folder: safeName\(loaded\.rec\.label \|\| loaded\.rec\.id\), files: \[csv\]/.test(src) && src.includes("scheduleCsv(loaded.submittal)"), "#296 rack package (fix 4 source): a rack out of render time still gets its schedule.csv");
   ok(src.includes("racksInGrid(") && src.includes("racksInQuote(") && src.includes("rackSubmittalFiles("), "#296 rack package (source): the client-package builder discovers racks in Grid and quotes and calls rackSubmittalFiles");
   ok(/rackSubmittalFiles\([^)]*datasheets: false/.test(src), "#296 rack package (source): the client package asks for no datasheets.pdf (the package's own datasheets/ covers members)");
-  ok((src.match(/racks: rackRun\.index/g) ?? []).length === 2 && (src.match(/buildSpecDocx\(\{ \.\.\.spec, racks: rackRun\.spec \}\)/g) ?? []).length === 2,
+  ok((src.match(/racks: rackRun\.index/g) ?? []).length === 2 && (src.match(/buildSpecDocx\(\{ \.\.\.spec, racks: rackRun\.spec \}, \{ letterhead \}\)/g) ?? []).length === 2,
     "#296 rack package (source): both builders put racks in the index and the D94 docx");
   ok(rd296q("src/lib/client-package.ts").includes('"missing-rack"'), "#296 rack package (source): missing-rack is a package gap kind");
   ok(rd296q("src/lib/rack/raster.ts").includes('strokeMode: "absolute"'), "#296 rack package (source): the docx raster uses absolute strokes (librsvg ignores vector-effect)");
@@ -52793,7 +52794,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("buildSpecDocx(sp.spec)") && srv.includes("zipCacheable(built.leftOut)") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("buildSpecDocx(sp.spec, { letterhead: await d.letterhead(q.packagePeakHeader) })") && srv.includes("zipCacheable(built.leftOut)") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -66601,4 +66602,165 @@ async function gridNotes5WireStarterChecks(): Promise<void> {
   ok(wp5.includes('href="/design/grid/settings#wire-types"') && wp5.includes("No per-foot cable in the Grid library yet") && !wp5.includes("and it appears here"), "Grid notes #5: the Wires pane's empty hint points admins to Grid Settings → Wire types");
   ok(wp5.includes("export const needsWirePrice = (p: Pick<PartLite, \"list\" | \"cost\">) => !(p.list > 0) && !(p.cost > 0);") && (wp5.match(/<span style=\{NEEDS_PRICE\}>Needs price<\/span>/g) || []).length >= 3 && wp5.includes('needsWirePrice(p) ? "needs price"'),
     "Grid notes #5: an unpriced cable shows Needs price in the pick list, under the picker and on its runs");
+}
+
+/* ======================================================================
+   Grid notes #9 — the Peak standard header on specs (first page only) and
+   the plain-name PDFs; company default (Settings → Branding, absent = on) +
+   per-document choice. No Word on this Mac — the .docx is checked as XML.
+   ====================================================================== */
+async function gridNotes9Checks(): Promise<void> {
+  const LH = await import("@/lib/letterhead");
+  const LHS = await import("@/lib/letterhead-server");
+  const { buildSectionDocx } = await import("@/lib/specs/spec-docx");
+  const { buildSpecDocx } = await import("@/lib/bid-spec-docx");
+  const { renderSpecHtml } = await import("@/lib/bid-spec");
+  const { normalizeSpecDocument } = await import("@/lib/specs/spec-document");
+  const CPS = await import("@/lib/client-package-server");
+  const { mergeDatasheets } = await import("@/lib/rack/submittal-server");
+  const { PDFDocument, PDFName } = await import("pdf-lib");
+  const Settings = await import("@/lib/settings");
+  const src9 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  // ---- 1. the default and the per-document rule
+  ok(LH.peakHeaderDefault({}) && LH.peakHeaderDefault(null) && LH.peakHeaderDefault({ peakHeader: true }) && !LH.peakHeaderDefault({ peakHeader: false }) && LH.peakHeaderDefault({ peakHeader: "no" }),
+    "Grid notes #9: the company default is ON when absent; only an explicit false turns it off");
+  ok(LH.resolvePeakHeader(null, true) && !LH.resolvePeakHeader(null, false) && LH.resolvePeakHeader(undefined, true) && !LH.resolvePeakHeader(false, true) && LH.resolvePeakHeader(true, false) && LH.resolvePeakHeader("x", true),
+    "Grid notes #9: a per-document null/absent follows the default; an explicit true/false wins");
+  const before9 = await Settings.getSettingsPatchStrict();
+  try {
+    await Settings.setSettings({ peakHeader: undefined as unknown as boolean });
+    const absent = await Settings.getSettings();
+    ok(absent.peakHeader === undefined && (await LHS.loadPeakHeaderDefault()) === true, "Grid notes #9 (DB): with nothing stored the setting reads as on");
+    await Settings.setSettings({ peakHeader: false });
+    ok((await LHS.loadPeakHeaderDefault()) === false && (await LHS.loadDocumentLetterhead(null)) === null && !!(await LHS.loadDocumentLetterhead(true)),
+      "Grid notes #9 (DB): company default off — a null document carries none, an explicit true still does");
+  } finally {
+    await Settings.setSettings({ peakHeader: (before9 as { peakHeader?: boolean }).peakHeader as boolean });
+  }
+  ok((await LHS.documentLetterhead({} as never, false)) === null && (await LHS.documentLetterhead({ peakHeader: false } as never, null)) === null,
+    "Grid notes #9: an explicit false — or a null under a false default — prints no letterhead");
+  const lh = (await LHS.documentLetterhead({ companyName: "Peak Systems Group" } as never, null))!;
+  ok(!!lh && !!lh.image && lh.image.full && lh.image.w > 0 && lh.image.h > 0 && lh.companyName === "Peak Systems Group",
+    "Grid notes #9: with no uploaded JPEG logo the letterhead is the baked Peak sheet (D59 ladder), full width");
+  const box9 = LH.letterheadBoxPx(lh.image!);
+  ok(box9.width === LH.LETTERHEAD_CONTENT_PX && box9.height > 0 && box9.height < 213 && LH.letterheadBoxPx({ full: false, w: 400, h: 200 }).height === 76,
+    "Grid notes #9: the baked sheet spans the 6.5\" content width; an uploaded logo is capped at 76 px tall");
+  const nd = normalizeSpecDocument({ id: "SP-1", peakHeader: false });
+  ok(nd.peakHeader === false && normalizeSpecDocument({ id: "SP-1" }).peakHeader === undefined && !("peakHeader" in normalizeSpecDocument({ id: "SP-1", peakHeader: "yes" })),
+    "Grid notes #9: a spec document keeps a boolean peakHeader, drops junk, and stays absent when unset");
+
+  // ---- 2. the Spec builder Word file: first page only
+  const sec9 = {
+    number: "11 61 23", title: "Stage Curtains",
+    header: { projectName: "GN9 Project", projectNumber: "9009", phase: "", issueDate: "2026-10-12", preparedBy: "T" },
+    part1: [], part3: [], part2: { style: "paragraphs", articles: [] },
+    checklist: { leftOut: [] }, warnings: [], usedRecords: {}, rowMatches: {},
+  } as unknown as Parameters<typeof buildSectionDocx>[0];
+  const unzip9 = async (buf: Buffer) => {
+    const z = await JSZip.loadAsync(buf);
+    const read = async (f: string) => (await z.file(f)?.async("string")) ?? "";
+    const doc = await read("word/document.xml");
+    const rels = await read("word/_rels/document.xml.rels");
+    const sectPr = (doc.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/g) || []).pop() || "";
+    const refOf = (type: string, kind: "header" | "footer") => {
+      const rid = (sectPr.match(new RegExp(`<w:${kind}Reference w:type="${type}" r:id="([^"]+)"`)) || [])[1];
+      if (!rid) return null;
+      const target = (rels.match(new RegExp(`Id="${rid}"[^>]*Target="([^"]+)"`)) || rels.match(new RegExp(`Target="([^"]+)"[^>]*Id="${rid}"`)) || [])[1];
+      return target ? `word/${target}` : null;
+    };
+    const firstH = refOf("first", "header");
+    const defH = refOf("default", "header");
+    return {
+      doc, sectPr,
+      titlePg: /<w:titlePg\/>|<w:titlePg w:val="(1|true)"\/>/.test(sectPr),
+      firstHeader: firstH ? await read(firstH) : null,
+      defaultHeader: defH ? await read(defH) : null,
+      firstFooter: refOf("first", "footer") ? await read(refOf("first", "footer")!) : null,
+      defaultFooter: refOf("default", "footer") ? await read(refOf("default", "footer")!) : null,
+      media: Object.keys(z.files).filter((f) => f.startsWith("word/media/") && !f.endsWith("/")),
+    };
+  };
+  const text9 = (xml: string) => (xml.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((t) => t.replace(/<[^>]+>/g, "")).join("");
+  const off = await unzip9(await buildSectionDocx(sec9));
+  const offNull = await unzip9(await buildSectionDocx(sec9, { letterhead: null }));
+  const on = await unzip9(await buildSectionDocx(sec9, { letterhead: lh }));
+  ok(!off.titlePg && off.firstHeader === null && off.media.length === 0 && off.doc === offNull.doc && off.defaultHeader === offNull.defaultHeader && text9(off.defaultHeader || "").includes("GN9 Project"),
+    "Grid notes #9 spec docx: header off — no title page, no first-page header, no image; identical to the pre-#9 call");
+  ok(on.titlePg && !!on.firstHeader && /<w:drawing>/.test(on.firstHeader) && /<a:blip r:embed="/.test(on.firstHeader) && text9(on.firstHeader).includes("GN9 Project") && text9(on.firstHeader).includes("Project No. 9009") && on.firstHeader.includes('w:val="HDR"') && on.media.length === 1,
+    "Grid notes #9 spec docx: header on — sectPr has titlePg and a first header holding the letterhead image above the MasterSpec HDR text");
+  ok(on.firstHeader!.indexOf("<w:drawing>") < on.firstHeader!.indexOf("GN9 Project"), "Grid notes #9 spec docx: the letterhead sits ABOVE the MasterSpec header line");
+  ok(on.defaultHeader === off.defaultHeader && !/<w:drawing>/.test(on.defaultHeader || "") && on.defaultFooter === off.defaultFooter && !!on.firstFooter && on.firstFooter === on.defaultFooter,
+    "Grid notes #9 spec docx: the default (later-page) header and footer are unchanged; page 1 keeps the same footer");
+  ok(on.doc.replace(/<w:sectPr[\s\S]*<\/w:sectPr>/, "") === off.doc.replace(/<w:sectPr[\s\S]*<\/w:sectPr>/, ""), "Grid notes #9 spec docx: the body is untouched — only the section properties change");
+  const onType = await unzip9(await buildSectionDocx(sec9, { letterhead: { companyName: "Peak Systems Group", image: null } }));
+  ok(onType.titlePg && !!onType.firstHeader && !onType.firstHeader.includes("<w:drawing>") && text9(onType.firstHeader).startsWith("Peak Systems Group") && onType.media.length === 0,
+    "Grid notes #9 spec docx: no letterhead image on the server → the company name set in type (the D59 fallback)");
+
+  // ---- 3. the D94 bid spec .docx + HTML/.doc
+  const spec9 = { projectName: "GN9 Bid", customer: "Cust", engagementId: "E-9", preparedBy: "T", date: Date.UTC(2026, 9, 12), sections: [], waived: [] } as unknown as Parameters<typeof buildSpecDocx>[0];
+  const bOff = await unzip9(await buildSpecDocx(spec9));
+  const bOffNull = await unzip9(await buildSpecDocx(spec9, { letterhead: null }));
+  const bOn = await unzip9(await buildSpecDocx(spec9, { letterhead: lh }));
+  ok(!bOff.titlePg && bOff.firstHeader === null && bOff.defaultHeader === null && bOff.media.length === 0 && bOff.doc === bOffNull.doc,
+    "Grid notes #9 bid spec docx: header off — no headers at all, as before #9");
+  ok(bOn.titlePg && !!bOn.firstHeader && /<a:blip r:embed="/.test(bOn.firstHeader) && bOn.defaultHeader === null && bOn.media.length === 1 &&
+     bOn.doc.replace(/<w:sectPr[\s\S]*<\/w:sectPr>/, "") === bOff.doc.replace(/<w:sectPr[\s\S]*<\/w:sectPr>/, ""),
+    "Grid notes #9 bid spec docx: header on — a first-page header with the letterhead image, no running header on later pages, body unchanged");
+  const hOff = renderSpecHtml(spec9);
+  const hOn = renderSpecHtml(spec9, { letterhead: lh });
+  const hWord = renderSpecHtml(spec9, { forWord: true, letterhead: lh });
+  ok(hOff === renderSpecHtml(spec9, { letterhead: null }) && !hOff.includes("peak-letterhead") && hOn.includes('<body>\n<div class="peak-letterhead"') && hOn.includes('src="data:image/jpeg;base64,') && hOn.indexOf("peak-letterhead") < hOn.indexOf("<h1>") && hWord.includes("data:image/jpeg;base64,"),
+    "Grid notes #9 bid spec HTML/.doc: off = unchanged; on = a data-URI letterhead image at the top, ahead of the title (print + Word)");
+
+  // ---- 4. the plain-name PDFs
+  const hasImage = (pdf: Buffer) => pdf.toString("latin1").includes("/Subtype /Image");
+  const q9 = { id: "Q-GN9", name: "GN9 quote", customer: "Cust", value: 1000, spec: null } as never;
+  const sumOff = CPS.roughQuoteDrawing(q9, "pkg");
+  const sumOn = CPS.roughQuoteDrawing(q9, "pkg", lh);
+  ok(!hasImage(sumOff) && hasImage(sumOn) && sumOff.equals(CPS.roughQuoteDrawing(q9, "pkg", null)), "Grid notes #9: the quote equipment summary embeds the letterhead image when on; off is the pre-#9 PDF (the plain name)");
+  const proj9 = { id: "GP-GN9", name: "GN9 design", placements: [], routes: [], spaces: [], calibrations: [], sheetIds: [] } as never;
+  ok(!hasImage(CPS.roughDrawings(proj9, [], "pkg")) && hasImage(CPS.roughDrawings(proj9, [], "pkg", lh)), "Grid notes #9: the rough drawings PDF embeds the letterhead image when on, none when off");
+  const xobj = async (pdf: Buffer) => {
+    const d = (await PDFDocument.load(pdf)).getPage(0).node.Resources()?.get(PDFName.of("XObject"));
+    return !!d && /\/Image-/.test(d.toString());
+  };
+  const idxOff = await mergeDatasheets([], "GN9 rack — datasheets");
+  const idxOn = await mergeDatasheets([], "GN9 rack — datasheets", undefined, { letterhead: lh });
+  ok(!(await xobj(idxOff)) && (await xobj(idxOn)) && (await PDFDocument.load(idxOn)).getPageCount() === 1, "Grid notes #9: the rack datasheet index draws the letterhead image on its first page when on, none when off");
+
+  // ---- 5. the estimate's own choice (Quote.packagePeakHeader) + the staff panel
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const P = await import("@/lib/estimate-output/package-panel-server");
+  const QID = fixtureId(9, "peak-header");
+  await Q.create({ id: QID, name: "GN9 header", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator" } as never);
+  registerFixture("quotes", QID);
+  await Q.setPackagePeakHeader(QID, false);
+  await Q.update(QID, { packagePeakHeader: true, name: "GN9 header 2" } as never);
+  const q9b = (await Q.get(QID))!;
+  ok(q9b.packagePeakHeader === false && q9b.name === "GN9 header 2", "Grid notes #9 (DB): only setPackagePeakHeader writes the estimate's choice — update() drops it");
+  const deps9 = { datasheetGaps: async () => 0, uploads: () => false, findGrid: async () => null };
+  const pOff = await P.loadPackagePanel(q9b, true, { ...deps9, peakHeaderDefault: async () => true });
+  await Q.setPackagePeakHeader(QID, null);
+  const q9c = (await Q.get(QID))!;
+  const pDef = await P.loadPackagePanel(q9c, true, { ...deps9, peakHeaderDefault: async () => false });
+  ok(!("packagePeakHeader" in q9c) && pOff.peakHeader === false && pOff.peakHeaderDefault === true && pDef.peakHeader === false && (await P.loadPackagePanel(q9c, true, { ...deps9, peakHeaderDefault: async () => true })).peakHeader === true,
+    "Grid notes #9 (DB): the package panel shows the estimate's explicit choice, else the company default; null clears the choice");
+
+  // ---- 6. source pins: every path resolves per-document ?? default
+  const cps9 = src9("src/lib/client-package-server.ts");
+  ok((cps9.match(/buildSpecDocx\(\{ \.\.\.spec, racks: rackRun\.spec \}, \{ letterhead \}\)/g) || []).length === 2 &&
+     cps9.includes("roughDrawings(project, catalog, packageName, letterhead)") && cps9.includes("roughQuoteDrawing(quote, packageName, letterhead)") &&
+     cps9.includes("loadDocumentLetterhead(opts.peakHeader)") && cps9.includes('loadDocumentLetterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : quote.packagePeakHeader)'),
+    "Grid notes #9: both client packages pass the letterhead into specification.docx and the rough/summary PDFs (build choice ?? estimate ?? default)");
+  ok(src9("src/app/api/spec/[id]/docx/route.ts").includes("loadDocumentLetterhead(rec.peakHeader)") && src9("src/app/api/spec-documents/[id]/docx/route.ts").includes("loadDocumentLetterhead(doc.peakHeader)") &&
+     src9("src/app/(app)/design/engagements/spec/[id]/page.tsx").includes("documentLetterhead(settings, rec.peakHeader)") && src9("src/app/api/racks/[id]/submittal/route.ts").includes("letterhead: await loadDocumentLetterhead()"),
+    "Grid notes #9: the spec builder, the D94 docx/print view and the rack submittal resolve the letterhead server-side");
+  const sa9 = src9("src/app/(app)/settings/actions.ts");
+  ok(sa9.includes('if (typeof patch.peakHeader === "boolean") clean.peakHeader = patch.peakHeader;') && sa9.indexOf('await requirePerm("manage_users")', sa9.indexOf("export async function saveSettingsAction")) < sa9.indexOf("clean.peakHeader"),
+    "Grid notes #9: Settings → Branding saves only a boolean, admin-gated (manage_users)");
+  ok(src9("src/lib/renewal-outreach.ts").includes('import { letterheadJpeg } from "@/lib/letterhead-server";') && src9("src/lib/renewal-outreach.ts").includes("export { letterheadJpeg };") && src9("next.config.ts").includes('"./src/app/*/flame-tests/letter/peak-letterhead.jpg"'),
+    "Grid notes #9: letterheadJpeg moved to letterhead-server (renewal-outreach re-exports it); the baked sheet ships with every function");
+  ok(!/from "@\/(lib\/stores|lib\/settings|db)\//.test(src9("src/lib/letterhead.ts")) && !/^import /m.test(src9("src/lib/letterhead.ts")), "Grid notes #9: letterhead.ts stays pure (the client-safe bid-spec module imports it)");
 }

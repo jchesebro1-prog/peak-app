@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { peakHeaderDefaultAction } from "@/app/(app)/peak-header-actions";
 import { cutSheetsUnreadableNote } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import type { GridEditor } from "../use-grid-editor";
 import { GRID_LINK_COPY, specFromDesignHref } from "@/lib/design/estimate-grid-link";
@@ -30,6 +32,22 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
     deleteDesign,
     busy,
   } = ed;
+  // Grid notes #9 — "Include Peak header" for this build; starts at the company default.
+  const [peakHeader, setPeakHeader] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    peakHeaderDefaultAction().then(
+      (on) => {
+        if (live) setPeakHeader((cur) => (cur === null ? on : cur));
+      },
+      () => {
+        if (live) setPeakHeader((cur) => (cur === null ? true : cur));
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
   const id = encodeURIComponent(project.id);
   const opt = encodeURIComponent(activeOptionId);
   return (
@@ -76,7 +94,7 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
 
       <div style={{ ...FIELD_LABEL, marginTop: 12 }}>Client package</div>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" style={BTN} disabled={packageBusy || busy} onClick={buildClientPackage} title="Build a ZIP with the specification, datasheets, the title-blocked drawing set (plans with devices, riser, schedules), cut sheets and racks">
+        <button type="button" style={BTN} disabled={packageBusy || busy} onClick={() => buildClientPackage(peakHeader ?? undefined)} title="Build a ZIP with the specification, datasheets, the title-blocked drawing set (plans with devices, riser, schedules), cut sheets and racks">
           {packageBusy ? "Building…" : packageUrl ? "Rebuild" : "Build client package"}
         </button>
         {packageUrl && (
@@ -85,6 +103,10 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
           </a>
         )}
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3d424e", marginTop: 6, cursor: "pointer" }} title="The Peak letterhead on the package's specification and summary (default: Settings → Branding)">
+        <input type="checkbox" checked={peakHeader ?? true} disabled={peakHeader === null || packageBusy} onChange={(e) => setPeakHeader(e.target.checked)} />
+        Include Peak header
+      </label>
       {packageUrl && packageUnreadable.length > 0 && (
         <div
           style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 6, lineHeight: 1.4 }}

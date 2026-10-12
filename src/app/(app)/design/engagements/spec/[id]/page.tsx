@@ -2,6 +2,9 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getGeneratedSpec } from "@/lib/stores/generated-specs";
 import { renderSpecHtml } from "@/lib/bid-spec";
+import { getSettings } from "@/lib/settings";
+import { documentLetterhead } from "@/lib/letterhead-server";
+import { peakHeaderDefault } from "@/lib/letterhead";
 import SpecDocView from "./doc-view";
 
 export const metadata = { title: "Specification — Quartzite-6" };
@@ -28,6 +31,10 @@ export default async function GeneratedSpecPage({
     );
   }
 
+  // Grid notes #9 — this spec's own "Include Peak header" ?? the company default.
+  const settings = await getSettings();
+  const letterhead = await documentLetterhead(settings, rec.peakHeader);
+
   return (
     <SpecDocView
       specId={rec.id}
@@ -37,7 +44,9 @@ export default async function GeneratedSpecPage({
       createdAt={rec.createdAt}
       sectionCount={rec.spec.sections.length}
       waived={rec.spec.waived}
-      html={renderSpecHtml(rec.spec)}
+      html={renderSpecHtml(rec.spec, { letterhead })}
+      peakHeader={!!letterhead}
+      peakHeaderDefault={peakHeaderDefault(settings)}
       filename={`${rec.spec.projectName.replace(/[^a-z0-9]+/gi, "-")}-specification`}
     />
   );

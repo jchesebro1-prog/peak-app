@@ -8,6 +8,8 @@ import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./p
 import { cleanPackageFiles, packageFileRows, visiblePackageFiles, type PackageFileRow } from "./package-files";
 import { responseRows, type ResponseRow } from "./responses";
 import { quoteQualifiesForGrid } from "@/lib/design/estimate-grid-link";
+import { resolvePeakHeader } from "@/lib/letterhead";
+import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
 
 /**
  * #301 slice C (spec §6, §7) — the staff side of the Client link panel:
@@ -29,14 +31,19 @@ export type PackagePanel = {
   grid: { label: string; projectId: string; estimateOwned: boolean } | null;
   gridEligible: boolean;
   canCreate: boolean;
+  /** Grid notes #9 — whether the package documents carry the Peak header
+   *  (the estimate's own choice ?? the company default), and that default. */
+  peakHeader: boolean;
+  peakHeaderDefault: boolean;
 };
 
 type PanelDeps = {
   datasheetGaps: (spec: unknown) => Promise<number>;
   uploads: () => boolean;
   findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
+  peakHeaderDefault: () => Promise<boolean>;
 };
-const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, findGrid: gridProjectForQuote };
+const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, findGrid: gridProjectForQuote, peakHeaderDefault: loadPeakHeaderDefault };
 
 function liveSections(q: Quote): SpecSection[] {
   const s = q.spec as { sections?: unknown } | null | undefined;
@@ -67,6 +74,12 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
   } catch (e) {
     console.warn("[package] grid lookup failed", e instanceof Error ? e.message : e);
   }
+  let peakHeaderDefault = true;
+  try {
+    peakHeaderDefault = await d.peakHeaderDefault();
+  } catch (e) {
+    console.warn("[package] settings read failed", e instanceof Error ? e.message : e);
+  }
   const revNoOf = (rev: number) => {
     const r = (q.revisions || []).find((x) => x.rev === rev);
     return r ? sentDocumentStamp(q, r).revNo : rev;
@@ -85,5 +98,7 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
     grid,
     gridEligible: quoteQualifiesForGrid(q),
     canCreate: false,
+    peakHeader: resolvePeakHeader(q.packagePeakHeader, peakHeaderDefault),
+    peakHeaderDefault,
   };
 }

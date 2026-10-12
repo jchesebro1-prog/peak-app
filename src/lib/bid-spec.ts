@@ -2,6 +2,7 @@ import type { CatalogPart } from "@/lib/stores/catalog";
 import { partText, type SpecSection } from "@/lib/specs/sections";
 import { hasPrintableSpec } from "@/lib/specs/articles";
 import type { ScheduleRow } from "@/lib/rack/submittal";
+import { letterheadHtml, type Letterhead } from "@/lib/letterhead";
 
 /* ------------------------------------------------------------------ *
  * Bid-spec matching + assembly (D94).
@@ -273,8 +274,12 @@ function two(n: number): string {
  * paste sections into a project manual), and the same markup is the in-app
  * print/PDF view. See DECISIONS.md D94 for why this rather than a binary
  * .docx on day one.
+ *
+ * `letterhead` (Grid notes #9): the Peak letterhead at the top of the
+ * document (a data-URI image, so the .doc download and the print window
+ * carry it). Absent/null = the HTML this wrote before #9.
  */
-export function renderSpecHtml(spec: AssembledSpec, opts: { forWord?: boolean } = {}): string {
+export function renderSpecHtml(spec: AssembledSpec, opts: { forWord?: boolean; letterhead?: Letterhead | null } = {}): string {
   const dateStr = new Date(spec.date).toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
@@ -334,7 +339,7 @@ ${spec.waived
   @media print { body { padding: 0; } h2 { page-break-after: avoid; } }
 </style></head>
 <body>
-<h1>${esc(spec.projectName)}</h1>
+${letterheadHtml(opts.letterhead, esc)}<h1>${esc(spec.projectName)}</h1>
 <div class="meta">
   ${esc(spec.customer)}${spec.customer ? " · " : ""}${esc(spec.engagementId)}<br>
   Specification prepared by ${esc(spec.preparedBy)} · ${esc(dateStr)}

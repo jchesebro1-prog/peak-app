@@ -342,6 +342,12 @@ export type Quote = {
    *  package page, append-only, ≤ 200. Written only by appendClientResponse;
    *  update() drops it; never content, never snapshotted. Staff-only. */
   clientResponses?: ClientResponse[] | null;
+  /** Grid notes #9 — "Include Peak header" on this estimate's package
+   *  documents (specification + equipment summary): true/false = the
+   *  estimate's own choice, absent = the company default (Settings →
+   *  Branding). Written only by setPackagePeakHeader (update() drops it);
+   *  never content, never snapshotted — read when a package is built. */
+  packagePeakHeader?: boolean | null;
   /** Estimator Phase 3 — the comms threads this estimate was emailed on
    *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
    *  by recordEstimateEmail under the row lock; update() drops it so an
@@ -822,6 +828,8 @@ export async function update(
     // #301 slice C: the drawings list and the client responses have their own writers.
     delete clean.packageFiles;
     delete clean.clientResponses;
+    // Grid notes #9: the package header choice is setPackagePeakHeader's alone.
+    delete clean.packagePeakHeader;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
     // Phase 4: the review comments are the add/resolve/delete writers' alone.
@@ -2081,6 +2089,16 @@ export async function setPoReceived(id: string, on: boolean): Promise<Quote | nu
   return patchQuote(id, (doc) => {
     doc.poReceivedAt = on ? Date.now() : null;
     doc.updatedAt = Date.now();
+  });
+}
+
+/** Grid notes #9 — the ONLY writer of `Quote.packagePeakHeader`: true/false
+ *  = this estimate's own choice, null = follow the company default. Touches
+ *  nothing else (not updatedAt — it never prints on the estimate itself). */
+export async function setPackagePeakHeader(id: string, on: boolean | null): Promise<Quote | null> {
+  return patchQuote(id, (doc) => {
+    if (typeof on === "boolean") doc.packagePeakHeader = on;
+    else delete doc.packagePeakHeader;
   });
 }
 

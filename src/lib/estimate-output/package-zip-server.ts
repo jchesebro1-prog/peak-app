@@ -11,6 +11,8 @@ import { readCapped } from "@/lib/rack/submittal-server";
 import type { SharedPackage } from "@/lib/quote-share/links";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
 import { allSections } from "@/lib/stores/spec-sections";
+import type { Letterhead } from "@/lib/letterhead";
+import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { createStoredZip, zipStream, type ZipFile } from "@/lib/zip";
 import { revisionPackageDocs } from "./package-docs-server";
@@ -35,12 +37,15 @@ type ZipDeps = {
   read: (blobKey: string, signal: AbortSignal) => Promise<ReadableStream | null>;
   sections: () => Promise<Awaited<ReturnType<typeof allSections>>>;
   now: () => number;
+  /** Grid notes #9 — the specification's first-page letterhead (null = none). */
+  letterhead: (perDoc: boolean | null | undefined) => Promise<Letterhead | null>;
 };
 
 const liveZipDeps: ZipDeps = {
   read: (blobKey, signal) => getBlobStream(blobKey, { signal }),
   sections: allSections,
   now: Date.now,
+  letterhead: loadDocumentLetterhead,
 };
 
 export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps: Partial<ZipDeps> = {}): Promise<BuiltPackageZip> {
@@ -61,7 +66,8 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
     date: rev.at,
   });
   const specifications = sp.spec.sections.length > 0;
-  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec) });
+  // Grid notes #9 — the estimate's own "Include Peak header" (staff package panel) ?? the company default.
+  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead: await d.letterhead(q.packagePeakHeader) }) });
 
   const used = new Set<string>();
   let total = 0;

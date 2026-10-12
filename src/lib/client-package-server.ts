@@ -31,6 +31,8 @@ import { rackPackageEntries, type RackIndexEntry, type RackRun } from "@/lib/rac
 import { rackElevationPng } from "@/lib/rack/raster";
 import { racksInGrid, racksInQuote, scheduleCsv } from "@/lib/rack/submittal";
 import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-server";
+import type { Letterhead } from "@/lib/letterhead";
+import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -215,7 +217,14 @@ async function planBackgroundFiles(projectId: string): Promise<ZipFile[]> {
   return out;
 }
 
-function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], packageName: string): Buffer {
+/** Grid notes #9 — a plain-name PDF's letterhead: the Peak letterhead when
+ *  given, else the company name in type (as before #9). */
+function letterheadFields(letterhead: Letterhead | null | undefined): Pick<LetterDoc, "companyName" | "headerJpeg" | "headerFull"> {
+  if (!letterhead) return { companyName: "Peak Systems Group" };
+  return { companyName: letterhead.companyName, headerJpeg: letterhead.image?.jpeg ?? null, headerFull: letterhead.image?.full ?? false };
+}
+
+export function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], packageName: string, letterhead: Letterhead | null = null): Buffer {
   const parts = catalog.map((part) => ({
     id: part.id,
     sku: part.sku,
@@ -273,7 +282,7 @@ function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], package
     },
   ];
   const doc: LetterDoc = {
-    companyName: "Peak Systems Group",
+    ...letterheadFields(letterhead),
     accent: "#b08d4a",
     tag: "Rough design drawings",
     meta: [{ label: "Package", value: packageName }, { label: "Project", value: project.id }],
@@ -289,9 +298,9 @@ function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], package
   return renderLetterPdf(doc);
 }
 
-function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
+export function roughQuoteDrawing(quote: Quote, packageName: string, letterhead: Letterhead | null = null): Buffer {
   const doc: LetterDoc = {
-    companyName: "Peak Systems Group",
+    ...letterheadFields(letterhead),
     accent: "#b08d4a",
     tag: "Quote package",
     meta: [{ label: "Package", value: packageName }, { label: "Quote", value: displayQuoteNumber(quote) }],
@@ -504,11 +513,13 @@ export async function createClientPackage(
   project: GridProject,
   by: string,
   requestedOptionId?: string | null,
-  opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {},
+  opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps>; peakHeader?: boolean | null } = {},
 ): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
   const d = packageDeps(opts.deps);
   if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
+  // Grid notes #9 — this build's "Include Peak header" ?? the company default.
+  const letterhead = await loadDocumentLetterhead(opts.peakHeader);
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   const fixtures = packageNeedsFixtures(project.placements || []) ? new Map((await listFixtures()).map((f) => [f.id, f])) : null;
@@ -544,7 +555,7 @@ export async function createClientPackage(
     files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
     drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE, source: "live design" };
   } else {
-    files.splice(1, 0, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) });
+    files.splice(1, 0, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName, letterhead) });
     // Read only now (after the set failed): a slow read never eats the set's budget, a rendered set never pays for them.
     files.push(...(await planBackgroundFiles(project.id)));
     gaps.push(drawingSetGap(set.reason, "the rough drawings and plan backgrounds are"));
@@ -560,7 +571,7 @@ export async function createClientPackage(
   const gridRacks = racksInGrid(optionSlice(project, optId).placements.map((p) => p.partId), (id) => fixtures?.get(id));
   const rackRun = await addRacks(gridRacks, [], (id) => fixtures?.get(id)?.label || "Rack", where, files, gaps, cutSheetsBy);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
-  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
+  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec }, { letterhead });
   const publicManifest = { ...manifest, gaps };
   files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, drawingSet, cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const zip = createStoredZip(files);
@@ -579,10 +590,12 @@ export async function createClientPackage(
 }
 
 /** Build the same package from a quote when it has not yet become a Grid project. */
-export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {}): Promise<BuiltClientPackage> {
+export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps>; peakHeader?: boolean | null } = {}): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
   const d = packageDeps(opts.deps);
   if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
+  // Grid notes #9 — this build's choice ?? the estimate's own (staff package panel) ?? the company default.
+  const letterhead = await loadDocumentLetterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : quote.packagePeakHeader);
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
   // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
@@ -611,7 +624,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
     files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
     drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE, source: "live design" };
   } else {
-    files.splice(1, 0, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) });
+    files.splice(1, 0, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName, letterhead) });
     if (set) {
       gaps.push(drawingSetGap(set.reason, "the equipment summary is"));
       drawingSet = { included: false, reason: set.reason, source: "live design" };
@@ -626,7 +639,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   const goneRacks = racksInQuote(qItems.map((it) => ({ rackId: it.rackId })), () => ({ kind: "rack" })).filter((id) => rackFixtures.get(id)?.kind !== "rack");
   const rackRun = await addRacks(quoteRacks, goneRacks, (id) => rackFixtures.get(id)?.label || rackLineName.get(id) || "Rack", where, files, gaps, cutSheetsBy);
   const specWithRacks: AssembledSpec = rackRun.spec.length ? { ...spec, racks: rackRun.spec } : spec;
-  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec });
+  specFile.data = await buildSpecDocx({ ...spec, racks: rackRun.spec }, { letterhead });
   files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, ...(drawingSet ? { drawingSet } : {}), cutSheets: { sheets: cutSheets.sheets }, racks: rackRun.index, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const fileName = `${packageName}.zip`;
   const stored = await d.put(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");

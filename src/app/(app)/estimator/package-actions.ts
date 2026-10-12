@@ -9,7 +9,8 @@ import { loadPackagePanel, type PackagePanel } from "@/lib/estimate-output/packa
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser } from "@/lib/session";
-import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getQuote, setPackagePeakHeader } from "@/lib/stores/quotes";
+import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import { can } from "@/lib/team";
 
 /**
@@ -68,6 +69,26 @@ export async function rebuildPackageZipAction(quoteId: string): Promise<{ ok: tr
     return { ok: true, removed: await clearPackageZipCache(q.id) };
   } catch (e) {
     console.error("[package] rebuild failed", e);
+    return { ok: false, error: PACKAGE_FILES_COPY.failed };
+  }
+}
+
+/** Grid notes #9 — the estimate's "Include Peak header" for its package
+ *  documents. Matching the company default stores nothing (the estimate keeps
+ *  following it). Drops the cached zips so the next download carries it. */
+export async function setPackagePeakHeaderAction(quoteId: string, on: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can("send", user.roles)) return { ok: false, error: ONLINE_COPY.needsSend };
+  try {
+    const q = await getQuote(String(quoteId || ""));
+    if (!q) return { ok: false, error: ONLINE_COPY.gone };
+    const value = !!on;
+    const saved = await setPackagePeakHeader(q.id, value === (await loadPeakHeaderDefault()) ? null : value);
+    if (!saved) return { ok: false, error: ONLINE_COPY.gone };
+    await clearPackageZipCache(q.id);
+    return { ok: true };
+  } catch (e) {
+    console.error("[package] header choice failed", e);
     return { ok: false, error: PACKAGE_FILES_COPY.failed };
   }
 }

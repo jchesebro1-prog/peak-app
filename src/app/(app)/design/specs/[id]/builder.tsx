@@ -684,6 +684,7 @@ export default function Builder({
   canEdit,
   sourceQuoteNumber,
   projectSpecCount,
+  peakHeaderDefault = true,
   recordsById,
   recordTexts,
   systemMatchKeys,
@@ -699,6 +700,8 @@ export default function Builder({
   sourceQuoteNumber: string | null;
   /** Other saved specs sharing this spec's project number (0 for viewers). */
   projectSpecCount: number;
+  /** Grid notes #9 — the company "Put the Peak header on documents" default. */
+  peakHeaderDefault?: boolean;
   /** Spec records (Task 9): the records this spec refers to, slim. */
   recordsById: Record<string, SlimSpecRecord>;
   /** Library title/text of each matched record — the Edit panel's start. */
@@ -774,6 +777,7 @@ export default function Builder({
           canEdit={canEdit}
           sourceQuoteNumber={sourceQuoteNumber}
           projectSpecCount={projectSpecCount}
+          peakHeaderDefault={peakHeaderDefault}
         />
 
         {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} labels={doc.fillInLabels} checklist={assembled.checklist} canEdit={canEdit} />}

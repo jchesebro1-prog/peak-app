@@ -596,6 +596,8 @@ export async function linkLinesetDesignAction(
 export async function createClientPackageAction(
   projectId: string,
   optionId: string | null,
+  /** Grid notes #9 — this build's "Include Peak header"; absent = the company default. */
+  peakHeader?: boolean | null,
 ): Promise<{ ok: true; packageId: string; url: string; gapCount: number; cutSheetsUnreadable: CutSheetsAdded["unreadable"] } | { ok: false; error: string }> {
   const user = await requireUser();
   const project = await getProject(projectId);
@@ -603,7 +605,7 @@ export async function createClientPackageAction(
   const h = await headers();
   const printWhere = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   try {
-    const built = await createClientPackage(project, user.name, optionId, { printWhere });
+    const built = await createClientPackage(project, user.name, optionId, { printWhere, peakHeader: typeof peakHeader === "boolean" ? peakHeader : null });
     revalidatePath(editorPath(projectId));
     return {
       ok: true,

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { openGridDesignForQuoteAction } from "./grid-design-actions";
 import { GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
-import { addPackageFileAction, generateGridDrawingsAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction } from "./package-actions";
+import { addPackageFileAction, generateGridDrawingsAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction, setPackagePeakHeaderAction } from "./package-actions";
 import { putPackageFile } from "./package-file-upload";
 import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKAGE_FILES_COPY, type PackageFileKind } from "@/lib/estimate-output/package-files";
 import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
@@ -110,6 +110,22 @@ export function PackageStaffPanel({
         return;
       }
       setConfirmId(null);
+      if (!r.ok) setErr(r.error);
+      await reload();
+    });
+
+  /** Grid notes #9 — the package documents' Peak header (saved on the estimate; drops the cached zips). */
+  const setPeakHeader = (on: boolean) =>
+    start(async () => {
+      setErr(null);
+      setNote(null);
+      let r: Awaited<ReturnType<typeof setPackagePeakHeaderAction>>;
+      try {
+        r = await setPackagePeakHeaderAction(quoteId, on);
+      } catch {
+        setErr(FAILED);
+        return;
+      }
       if (!r.ok) setErr(r.error);
       await reload();
     });
@@ -346,9 +362,15 @@ export function PackageStaffPanel({
 
       {section !== "responses" && (
         <>
-          <button type="button" onClick={rebuild} disabled={!panel.canSend || pending} style={{ ...linkBtn, color: "var(--accent)", alignSelf: "flex-start", marginTop: 4, ...(panel.canSend ? {} : off) }}>
-            Rebuild package
-          </button>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+            <button type="button" onClick={rebuild} disabled={!panel.canSend || pending} style={{ ...linkBtn, color: "var(--accent)", ...(panel.canSend ? {} : off) }}>
+              Rebuild package
+            </button>
+            <label style={{ ...small, display: "flex", alignItems: "center", gap: 5, cursor: panel.canSend ? "pointer" : "default" }} title="The Peak letterhead on the package's specification and equipment summary (default: Settings → Branding)">
+              <input type="checkbox" checked={panel.peakHeader} disabled={!panel.canSend || pending} onChange={(e) => setPeakHeader(e.target.checked)} />
+              Include Peak header
+            </label>
+          </div>
           <span style={small}>The download zip is saved after its first download. Rebuild after adding datasheets.</span>
         </>
       )}

@@ -1,4 +1,4 @@
-import { getDoc, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import type { AssembledSpec, BomRow } from "@/lib/bid-spec";
 
 /* ------------------------------------------------------------------ *
@@ -27,6 +27,11 @@ export type GeneratedSpec = {
   waivedCount: number;
   createdAt: number;
   createdBy: string;
+  /** Grid notes #9 — "Include Peak header" for this spec's .docx / .doc /
+   *  print: true/false = this spec's own choice, absent = the company
+   *  default (Settings → Branding). Presentation only; the frozen `spec`
+   *  never changes. Written only by setGeneratedSpecPeakHeader. */
+  peakHeader?: boolean;
 };
 
 export async function specsForEngagement(engagementId: string): Promise<GeneratedSpec[]> {
@@ -73,4 +78,13 @@ export async function saveGeneratedSpec(input: {
  *  touches the catalog/spec-section language it was assembled from. */
 export async function removeGeneratedSpec(id: string): Promise<void> {
   await softDeleteDoc("generated_specs", id);
+}
+
+/** Grid notes #9 — set (true/false) or clear (null = follow the company
+ *  default) one saved spec's "Include Peak header". Touches only that field. */
+export async function setGeneratedSpecPeakHeader(id: string, on: boolean | null): Promise<GeneratedSpec | null> {
+  return patchDoc<GeneratedSpec>("generated_specs", id, (doc) => {
+    if (typeof on === "boolean") doc.peakHeader = on;
+    else delete doc.peakHeader;
+  });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { buildSpecDocx } from "@/lib/bid-spec-docx";
 import { getGeneratedSpec } from "@/lib/stores/generated-specs";
+import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 
 /**
  * .docx download for a saved bid spec (D94 upgrade).
@@ -17,7 +18,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const rec = await getGeneratedSpec(id);
   if (!rec) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const buf = await buildSpecDocx(rec.spec);
+  // Grid notes #9 — first-page Peak letterhead: the spec's own choice ?? the company default.
+  const buf = await buildSpecDocx(rec.spec, { letterhead: await loadDocumentLetterhead(rec.peakHeader) });
   const name = `${rec.spec.projectName.replace(/[^a-z0-9]+/gi, "-")}-specification.docx`;
 
   return new NextResponse(new Uint8Array(buf), {

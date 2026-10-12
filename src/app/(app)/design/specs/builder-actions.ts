@@ -303,6 +303,19 @@ export async function setSpecPrintQuantitiesAction(id: string, on: boolean): Pro
   return applyPatch(id, user, (d) => ({ ...d, printQuantities: !!on }));
 }
 
+/** Grid notes #9 — the Word file's "Include Peak header" (true/false; null =
+ *  follow the company default, Settings → Branding). */
+export async function setSpecPeakHeaderAction(id: string, on: boolean | null): Promise<Result> {
+  const user = await requirePerm("create");
+  const value = typeof on === "boolean" ? on : null;
+  return applyPatch(id, user, (d) => {
+    const next: SpecDocument = { ...d };
+    if (value === null) delete next.peakHeader;
+    else next.peakHeader = value;
+    return next;
+  });
+}
+
 export async function deleteSpecDocumentAction(id: string): Promise<Result> {
   await requirePerm("create");
   const doc = await getSpecDocument(id);

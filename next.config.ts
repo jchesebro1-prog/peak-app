@@ -44,6 +44,11 @@ const nextConfig: NextConfig = {
     "/flame-tests": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/inspections": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/api/racks/[id]/submittal": ["./node_modules/@sparticuz/chromium/bin/**"],
+    // Grid notes #9: the baked Peak letterhead (src/lib/letterhead-server.ts)
+    // is read with fs at run time by every document that prints it — specs,
+    // client packages, renewal/rental letters — which file tracing can't see.
+    // 120 KB; shipped with every function rather than a list that drifts.
+    "/**": ["./src/app/*/flame-tests/letter/peak-letterhead.jpg"],
   },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy

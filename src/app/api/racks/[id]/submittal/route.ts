@@ -6,6 +6,7 @@ import { RACK_NOT_FOUND, RACK_SUBMITTAL_DEADLINE_MS, rackSubmittalFiles } from "
 import { safeName } from "@/lib/blob";
 import { requireUser } from "@/lib/session";
 import { createStoredZip } from "@/lib/zip";
+import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -61,7 +62,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const h = request.headers;
     const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
     if ("error" in where) return text(where.error, 503);
-    const built = await rackSubmittalFiles(id, where, { deadline: started + RACK_SUBMITTAL_DEADLINE_MS });
+    // Grid notes #9 — the datasheet index carries the Peak letterhead per the company default.
+    const built = await rackSubmittalFiles(id, where, { deadline: started + RACK_SUBMITTAL_DEADLINE_MS, letterhead: await loadDocumentLetterhead() });
     if (!built.ok) return text(built.error, built.error === RACK_NOT_FOUND ? 404 : 500);
     const gapLines = built.gaps.map((g) => [g.kind, g.sku, g.label, g.detail].map((v) => v.replace(/[\t\r\n]+/g, " ")).join("\t"));
     const zip = createStoredZip([

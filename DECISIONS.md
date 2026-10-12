@@ -11116,3 +11116,45 @@ riser page and the set (screen-only, under each A/V sheet) both show the Downloa
 `riserBom` reads every riser on the option. A wire is "In conduit — by others" if **either** riser says so (the union).
 Conduit demand sums every riser's runs, and refusals are collected from both, each sentence once. An estimate-owned
 option prices nothing from either riser. Punch item #328.
+
+## D823. Specs carry the Peak letterhead on page 1 only (Grid notes #9, 2026-10-12)
+
+"The Peak standard header" is the existing letterhead, with the same D59 ladder the letters use: the uploaded dark logo
+when it is a JPEG, else the baked `peak-letterhead.jpg`, else the company name set bold in type. `letterheadJpeg` moved to
+`src/lib/letterhead-server.ts` (renewal-outreach re-exports it unchanged); the pure rules live in `src/lib/letterhead.ts`.
+The Spec builder's Word file sets `titlePage` and gives page 1 its own header: the letterhead image **above** the same
+MasterSpec HDR lines. Page 1 also gets the same running footer, since a title page otherwise prints no footer. Later pages
+keep `headers.default`/`footers.default` byte-for-byte, and the D474/D475 styles are untouched. The D94 bid spec .docx has
+no running header, so it gets only a first-page header. Its print view and .doc download (`renderSpecHtml`) put the
+letterhead at the top as a data-URI image. `specification.docx` in both client packages, and the estimate package zip's
+`Specifications.docx`, use the same builder. With the header off, every one of these is the file it was before #9.
+Checked as XML only: there is no Word on this Mac.
+
+## D824. Company default + per-document choice; matching the default stores nothing (Grid notes #9, 2026-10-12)
+
+Settings → Branding → "Put the Peak header on documents" (`settings.peakHeader`, admin-only) is the company default.
+**Absent = on**; only an explicit `false` turns it off. Each document's own choice wins: `resolvePeakHeader(perDoc, default)`.
+The choice is saved on the Spec builder record (`spec_documents.peakHeader`, the checkbox under the Header card) and on the
+D94 spec (`generated_specs.peakHeader`, beside Print / Download on its page; presentation only, the frozen `spec` never
+changes). An estimate saves it as `Quote.packagePeakHeader`, from the staff package panel beside Rebuild package. That
+field has one writer, `setPackagePeakHeader`, and `update()` drops it. It is not content and is not snapshotted. Changing
+it drops the cached package zips, so the next download carries the change. The Grid Outputs menu's checkbox applies to
+one build only: it starts at the company default and is passed into `createClientPackage`. The Quotes hub's
+"Build client package" follows the estimate's saved choice, then the default. A checkbox ticked to match the company
+default stores **nothing** (null), so the document keeps following a later change of the default.
+
+## D825. The plain-name documents get the letterhead too (Grid notes #9, 2026-10-12)
+
+The client package's rough-drawings fallback and the quote equipment summary used to print "Peak Systems Group" in type.
+They now print the letterhead through `renderLetterPdf`'s `headerJpeg`, as renewal letters do. The rack datasheet index
+(`mergeDatasheets`) draws it at the top of its first index page; the index layout leaves room for it, so the page
+numbers it lists stay right. The rack submittal download follows the company default (no per-rack toggle). With the
+header off these PDFs are unchanged. Letters, quotes, reports, cut sheets, the drawing set and the cover already carried
+the letterhead and are untouched.
+
+## D826. The baked letterhead ships with every function (Grid notes #9, 2026-10-12)
+
+`letterheadJpeg` reads `src/app/(app)/flame-tests/letter/peak-letterhead.jpg` with `fs` at run time, which file tracing
+can't see (the `path` import is dynamic), so a deployed function may have been falling back to the company name in
+type. `next.config.ts` now includes it for `"/**"` (120 KB per function), so specs, packages, rentals and renewal PDFs
+find it in production. This was a choice over a per-route list, which would drift as callers are added.

@@ -24,6 +24,7 @@ import { resolvePackageDocs } from "@/lib/part-docs/package";
 import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { signPrintToken } from "@/lib/quote-pdf/token";
 import { getMany } from "@/lib/stores/catalog";
+import { letterheadBoxPx, type Letterhead } from "@/lib/letterhead";
 import type { ZipFile } from "@/lib/zip";
 import { loadRackForSheets } from "./load";
 import type { RackSheetKind } from "./sheet-format";
@@ -74,6 +75,8 @@ export async function rackSubmittalFiles(
     now?: () => number;
     /** Default true; the client package (Task 13) passes false. */
     datasheets?: boolean;
+    /** Grid notes #9 — the Peak letterhead atop the datasheet index (null/absent = none, as before). */
+    letterhead?: Letterhead | null;
   },
 ): Promise<RackSubmittalFiles> {
   const now = opts.now ?? Date.now;
@@ -85,7 +88,7 @@ export async function rackSubmittalFiles(
   await addSheetPdfs(id, where, files, gaps, { deadline: opts.deadline, render: opts.render ?? renderPrintRouteToPdf, now });
   files.push({ name: "schedule.csv", data: Buffer.from(scheduleCsv(submittal), "utf8") });
   if (opts.datasheets !== false) {
-    files.push({ name: "datasheets.pdf", data: await datasheetsPdf(submittal, gaps, opts.deadline + RACK_DATASHEET_ALLOWANCE_MS, now) });
+    files.push({ name: "datasheets.pdf", data: await datasheetsPdf(submittal, gaps, opts.deadline + RACK_DATASHEET_ALLOWANCE_MS, now, opts.letterhead ?? null) });
   }
   return { ok: true, folder: safeName(rec.label || rec.id), files, gaps };
 }
@@ -160,7 +163,7 @@ export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number
   return Buffer.concat(chunks);
 }
 
-async function datasheetsPdf(submittal: RackSubmittal, gaps: RackSubmittalGap[], readsBy: number, now: () => number): Promise<Buffer> {
+async function datasheetsPdf(submittal: RackSubmittal, gaps: RackSubmittalGap[], readsBy: number, now: () => number, letterhead: Letterhead | null): Promise<Buffer> {
   const missingCatalog = new Map(submittal.gaps.filter((g) => g.kind === "missing-catalog").map((g) => [g.sku, g] as const));
   const skus = submittal.datasheetSkus.filter((s) => !missingCatalog.has(s));
   const parts = skus.length ? await getMany(skus) : [];
@@ -239,7 +242,7 @@ async function datasheetsPdf(submittal: RackSubmittal, gaps: RackSubmittalGap[],
     clearTimeout(abortTimer);
   }
 
-  return mergeDatasheets(listed, `${submittal.title} — datasheets`, (e) => gapFor((e as (typeof listed)[number]).skus ?? [e.sku], DATASHEET_UNMERGEABLE));
+  return mergeDatasheets(listed, `${submittal.title} — datasheets`, (e) => gapFor((e as (typeof listed)[number]).skus ?? [e.sku], DATASHEET_UNMERGEABLE), { letterhead });
 }
 
 /**
@@ -307,11 +310,12 @@ function wrap(font: PDFFont, text: string, size: number, width: number): string[
 
 type Laid = { text: string; size: number; font: PDFFont };
 
-/** Lines → pages of positioned rows (title, headings bold, body wrapped). */
-function layoutCover(lines: string[], regular: PDFFont, bold: PDFFont): Laid[][] {
+/** Lines → pages of positioned rows (title, headings bold, body wrapped).
+ *  `topInset` (Grid notes #9) is the letterhead's room on the first page. */
+function layoutCover(lines: string[], regular: PDFFont, bold: PDFFont, topInset = 0): Laid[][] {
   const width = PAGE_W - 2 * MARGIN;
   const pages: Laid[][] = [[]];
-  let y = PAGE_H - MARGIN;
+  let y = PAGE_H - MARGIN - topInset;
   const put = (row: Laid) => {
     const h = row.size * LEAD;
     if (y - h < MARGIN) {
@@ -340,6 +344,8 @@ export async function mergeDatasheets(
   entries: readonly DatasheetEntry[],
   title: string,
   onUnmergeable?: (entry: DatasheetEntry) => void,
+  /** Grid notes #9 — the Peak letterhead atop the first index page (absent/null = the index as before). */
+  opts: { letterhead?: Letterhead | null } = {},
 ): Promise<Buffer> {
   const out = await PDFDocument.create();
   const cover: CoverEntry[] = [];
@@ -363,16 +369,40 @@ export async function mergeDatasheets(
   }
   const regular = await out.embedFont(StandardFonts.Helvetica);
   const bold = await out.embedFont(StandardFonts.HelveticaBold);
+  // Grid notes #9 — the letterhead (image, or the company name in type) takes the top of the first page.
+  const lh = opts.letterhead ?? null;
+  let headImage: Awaited<ReturnType<typeof out.embedJpg>> | null = null;
+  let headBox: { width: number; height: number } | null = null;
+  if (lh?.image) {
+    try {
+      headImage = await out.embedJpg(lh.image.jpeg);
+      // letterheadBoxPx is in 96-dpi pixels; PDF points are 72 per inch.
+      const px = letterheadBoxPx(lh.image, ((PAGE_W - 2 * MARGIN) * 96) / 72);
+      headBox = { width: (px.width * 72) / 96, height: (px.height * 72) / 96 };
+    } catch (err) {
+      console.warn(`[rack] letterhead not embedded: ${err instanceof Error ? err.message : String(err)}`);
+      headImage = null;
+    }
+  }
+  const HEAD_GAP = 18;
+  const topInset = !lh ? 0 : headImage && headBox ? headBox.height + HEAD_GAP : TITLE_SIZE * LEAD + HEAD_GAP;
   // The index's page numbers depend on how many cover pages there are: settle it.
   let coverPages = 1;
-  let laid = layoutCover(datasheetCoverLines(cover, title, coverPages), regular, bold);
+  let laid = layoutCover(datasheetCoverLines(cover, title, coverPages), regular, bold, topInset);
   for (let i = 0; i < 4 && laid.length !== coverPages; i++) {
     coverPages = laid.length;
-    laid = layoutCover(datasheetCoverLines(cover, title, coverPages), regular, bold);
+    laid = layoutCover(datasheetCoverLines(cover, title, coverPages), regular, bold, topInset);
   }
   laid.forEach((rows, i) => {
     const page = out.insertPage(i, [PAGE_W, PAGE_H]);
-    let y = PAGE_H - MARGIN;
+    if (i === 0 && lh) {
+      if (headImage && headBox) {
+        page.drawImage(headImage, { x: MARGIN, y: PAGE_H - MARGIN - headBox.height, width: headBox.width, height: headBox.height });
+      } else {
+        page.drawText(encodable(bold, lh.companyName), { x: MARGIN, y: PAGE_H - MARGIN - TITLE_SIZE, size: TITLE_SIZE, font: bold });
+      }
+    }
+    let y = PAGE_H - MARGIN - (i === 0 ? topInset : 0);
     for (const r of rows) {
       y -= r.size * LEAD;
       page.drawText(r.text, { x: MARGIN, y, size: r.size, font: r.font });

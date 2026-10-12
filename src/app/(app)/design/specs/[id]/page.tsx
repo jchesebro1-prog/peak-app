@@ -10,6 +10,7 @@ import { specCustomerOptions } from "../customer-options";
 import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { allSpecDocuments } from "@/lib/stores/spec-documents";
 import { projectSiblings } from "@/lib/specs/spec-document";
+import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import Builder, { type SpecProductRow } from "./builder";
 import type { SlimSpecRecord } from "./record-row";
 
@@ -159,6 +160,7 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       canEdit={canEdit}
       sourceQuoteNumber={sourceQuoteNumber}
       projectSpecCount={projectSpecCount}
+      peakHeaderDefault={await loadPeakHeaderDefault()}
       recordsById={recordsById}
       recordTexts={recordTexts}
       systemMatchKeys={systemMatchKeys}

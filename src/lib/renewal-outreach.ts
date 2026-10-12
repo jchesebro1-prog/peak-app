@@ -37,9 +37,8 @@ import {
   type InspectionRates,
   type InspectionVenueInput,
 } from "@/lib/inspection-engine";
+import { letterheadJpeg } from "@/lib/letterhead-server";
 import {
-  dataUrlBytes,
-  jpegInfo,
   renderLetterPdf,
   type LetterBlock,
   type LetterDoc,
@@ -193,31 +192,9 @@ export function priorHandSetPrice(doc: unknown): number | null {
 
 /* ---------------- letterhead ---------------- */
 
-/** JPEG letterhead for the PDF: the uploaded dark logo when it's a JPEG,
- *  else the baked-in Peak letterhead, else null (typographic fallback —
- *  same ladder the on-screen letters use, D59). PNG logos can't be embedded
- *  without a decoder (see lib/pdf.ts), so they fall to the baked sheet.
- *  Exported so other renderLetterPdf() callers (e.g. the rentals letter
- *  route) get the same fallback ladder instead of reimplementing it. */
-export async function letterheadJpeg(
-  settings: AppSettingsData
-): Promise<{ jpeg: Buffer | null; full: boolean }> {
-  const logo = dataUrlBytes(settings.logoDark, "image/jpeg");
-  if (logo && jpegInfo(logo)) return { jpeg: logo, full: false };
-  try {
-    const { readFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-    const file = path.join(
-      process.cwd(),
-      "src/app/(app)/flame-tests/letter/peak-letterhead.jpg"
-    );
-    const buf = await readFile(file);
-    if (jpegInfo(buf)) return { jpeg: buf, full: true };
-  } catch {
-    // bundled deploys may not carry source assets — typographic fallback
-  }
-  return { jpeg: null, full: false };
-}
+/** Moved to lib/letterhead-server.ts (Grid notes #9) — re-exported so the
+ *  rentals letter route and venue assessments keep importing it from here. */
+export { letterheadJpeg };
 
 /* ---------------- signature block ---------------- */
 

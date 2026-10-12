@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { buildSectionDocx } from "@/lib/specs/spec-docx";
+import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 import { specFileName } from "@/lib/specs/spec-file-name";
 import { stampSpecDocumentDownload } from "@/lib/stores/spec-documents";
 
@@ -16,7 +17,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { doc, section, assembled } = await loadAssembledSpec(id);
   if (!doc.id) return new Response("Spec not found.", { status: 404 });
   if (!section || !assembled) return new Response("This section is no longer in the library.", { status: 409 });
-  const buf = await buildSectionDocx(assembled);
+  // Grid notes #9 — first-page Peak letterhead: the spec's own choice ?? the company default.
+  const buf = await buildSectionDocx(assembled, { letterhead: await loadDocumentLetterhead(doc.peakHeader) });
   // Record which library revisions this download printed (spec records
   // design §5.3) after the response is sent — best-effort: the download
   // never waits on it, and a failed stamp never fails it.
