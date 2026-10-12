@@ -266,7 +266,8 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   return (
     <>
       <PropSection title={selectedPlacement.curtain ? "Selected curtain" : "Selected device"} />
-      {!selectedPlacement.curtain && <DesignatorRow key={selectedPlacement.id} ed={ed} pl={selectedPlacement} />}
+      {/* Distinct keys: a shared key between siblings orphans the old row's DOM on every device switch (stale Designator rows piled up). */}
+      {!selectedPlacement.curtain && <DesignatorRow key={`desig:${selectedPlacement.id}`} ed={ed} pl={selectedPlacement} />}
       <PropRow label={selectedPlacement.curtain ? "Curtain" : "Part"}>
         <strong style={{ fontWeight: 600 }}>
           {selectedPlacement.curtain
@@ -314,7 +315,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
           </PropRow>
         );
       })()}
-      {!selectedPlacement.curtain && <RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />}
+      {!selectedPlacement.curtain && <RiserTagRows key={`tags:${selectedPlacement.id}`} ed={ed} pls={[selectedPlacement]} />}
       <PropRow label="Auto">{auto ? `Auto · ${autoTier}` : "Hand-placed"}</PropRow>
       <PropRow label="Placed by">{selectedPlacement.by}</PropRow>
       {/* Position readout + nudge hint (punch #47). Percent of the

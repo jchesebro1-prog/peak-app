@@ -1875,7 +1875,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       marqueeStart.current = null;
       setMarquee(null);
       if (!ms.rect) {
-        clickEmpty(ms.p);
+        // A Shift-click that just misses a marker is a near-miss while
+        // building a selection, not "click away" — keep what's selected.
+        if (!(ms.shift || e?.shiftKey)) clickEmpty(ms.p);
         return;
       }
       // Shown positions (visiblePlacements carries every live offset).
@@ -1896,17 +1898,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         else if (d.toggleOff) setSelectedIds([]);
         return;
       }
-      // Released where it started (snapped back, or dragged out and back):
-      // that was a click — writing nothing, not even an Auto-tag clear.
+      // Dragged out and back (or snapped back to where it started): write nothing — not even an Auto-tag clear — and keep the selection as it was.
       const targets = changedMoves(
         d.ids.filter((id) => d.from[id]).map((id) => ({ id, ...d.from[id] })),
         dragTargets(d, snap)
       );
-      if (!targets.length) {
-        if (d.collapse) setSelectedIds([d.id]);
-        else if (d.toggleOff) setSelectedIds([]);
-        return;
-      }
+      if (!targets.length) return; // dragged and put back: selection stays as it was
       void commitMoves(targets);
       return;
     }

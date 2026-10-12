@@ -5524,8 +5524,24 @@ import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
   const gridNavBlock = gridNavStart >= 0 && gridNavEnd > gridNavStart ? iconPickerSrc.slice(gridNavStart, gridNavEnd) : "";
   ok(gridNavBlock.includes("e.preventDefault();") && gridNavBlock.includes("e.stopPropagation();"),
     "#206 final fix wave: the IconPicker grid's arrow-key handler stops propagation after preventDefault");
-  ok(iconPickerSrc.includes("triggerRef.current?.focus();") && iconPickerSrc.includes('wrap.addEventListener("focusout"'),
+  // Grid notes Oct 12: the panel is portaled to <body>, so "a Tab that
+  // leaves the panel" is the panel's own onBlur (it bubbles through the
+  // portal), checked against both the panel and the trigger's wrapper.
+  ok(iconPickerSrc.includes("triggerRef.current?.focus();") && iconPickerSrc.includes("onBlur={(e) =>") &&
+      iconPickerSrc.includes("panelRef.current?.contains(next) || wrapRef.current?.contains(next)"),
     "#206 final fix wave: the IconPicker returns focus to its trigger on close and closes on a Tab that leaves the panel");
+  ok(iconPickerSrc.includes("createPortal(") && iconPickerSrc.includes('position: "fixed"') && iconPickerSrc.includes("vw - PANEL_W - EDGE"),
+    "Grid notes Oct 12: the IconPicker panel portals to <body>, fixed and clamped inside the viewport (never off-screen in a narrow pane)");
+  {
+    const edSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8");
+    const propSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/workspace/property-editor.tsx"), "utf8");
+    ok(edSrc.includes("if (!(ms.shift || e?.shiftKey)) clickEmpty(ms.p);"),
+      "Grid notes Oct 12: a Shift-click that misses a marker keeps the selection (no clickEmpty)");
+    ok(edSrc.includes("if (!targets.length) return; // dragged and put back"),
+      "Grid notes Oct 12: dragging a group out and back keeps the whole selection");
+    ok(!propSrc.includes("key={selectedPlacement.id}"),
+      "Grid notes Oct 12: no two DeviceProps siblings share the bare placement-id key (orphaned Designator rows)");
+  }
   ok(iconPickerSrc.includes("tabIndex={i === effectiveActiveCell ? 0 : -1}"),
     "#206 final fix wave: the IconPicker's icon grid is a roving-tabindex single tab stop");
   const gridEditorFixWaveSrc = readFileSync(
@@ -60917,7 +60933,7 @@ async function designators320EditorChecks(): Promise<void> {
   ok(canvas.includes("const tag = pl.curtain ? \"\" : formatDesignator(pl.designator, q, designatorDigits);") && canvas.includes("<title>{hover}</title>") && canvas.includes("designatorDupes.has(pl.id)"),
     "#320 plan: a device is labelled by its designator (a lot by its range, no ×N), with a hover title; duplicates drawn amber");
   const prop = rd("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
-  ok(prop.includes('<PropRow label="Designator"') && prop.includes("<DesignatorRow key={selectedPlacement.id}") && prop.includes("Renumber selection"),
+  ok(prop.includes('<PropRow label="Designator"') && prop.includes("<DesignatorRow key={`desig:${selectedPlacement.id}`}") && prop.includes("Renumber selection"),
     "#320 Property Editor: an editable Designator row; several selected → Renumber selection");
   const btree = rd("src/app/(app)/design/grid/[id]/workspace/browser-tree.tsx");
   ok(btree.includes("leafLabel: (pl: GridPlacement) =>"), "#320 the Browser tab passes the designator leaf label");
@@ -62404,7 +62420,7 @@ async function conduitRiser321B2Checks(): Promise<void> {
      table.includes("tagDefaultsOf: (pl) => partById.get(pl.partId)?.tagDefaults,") && table.includes("TAG_INPUT_MAX[col]") && table.includes("setErr(edit.error);"),
     "#321 Devices table: the editable flag drives the cells, tag commits go through saveTags, an invalid P/D reports and stays open");
   const prop = src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
-  ok(prop.includes("<RiserTagRows key={selectedPlacement.id} ed={ed} pls={[selectedPlacement]} />") && prop.includes("pls={pls.filter((pl) => !pl.curtain)} />") &&
+  ok(prop.includes("<RiserTagRows key={`tags:${selectedPlacement.id}`} ed={ed} pls={[selectedPlacement]} />") && prop.includes("pls={pls.filter((pl) => !pl.curtain)} />") &&
      prop.includes('"(from part)"') && prop.includes("bulkTagItems(pls, field, draft)") &&
      prop.includes("if (!dirty && same(eff.map((e) => e[field])) === null) {") && prop.includes('<RiserTagRows key={pls.map((pl) => pl.id).sort().join("|")}'),
     "#321 Property Editor: a Riser tag section for one device and for several (Mixed + bulk set), never for a curtain");
