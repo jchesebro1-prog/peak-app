@@ -67423,3 +67423,43 @@ async function bonusLeakChecks(): Promise<void> {
   const r = await bomFromQuote("Q-BONUS-LEAK-1");
   ok(r.ok && r.rows.length === 1 && r.rows[0].sku === "P-1" && !/BON-|bonus/i.test(JSON.stringify(r.rows)), "#bonus leak: Word spec BOM lists only the real part");
 }
+
+import {
+  normalizeSplit as bnSplit, buildBonusRecord as bnRecord, defaultAlternatesTaken as bnAltDefault,
+  resolveUserId as bnResolve, quoteHasBonusLines as bnHasLines,
+} from "@/lib/estimate-bonus/record";
+{
+  const it = (id: number, cost: number, price: number, extra: Partial<SpecItem> = {}): SpecItem => ({
+    id, sku: "P-" + id, desc: "Part " + id, qty: 1, unit: "ea", cost, price, ...extra,
+  });
+  const mk = (id: string, items: SpecItem[], extra: Partial<EstimatorSpecSection> = {}): EstimatorSpecSection =>
+    ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+  const raw = [
+    mk("a", [it(1, 1000, 1500), it(2, 400, 600, { labor: true })]),
+    mk("b", [it(3, 2000, 2500)]),
+    mk("alt1", [it(4, 500, 1000)], { alternate: true }),
+  ];
+  const secs = bnWith(raw, bnIds(raw));
+  const users = [{ id: "u1", name: "Jeff Chesebro" }, { id: "u2", name: "Sam Smith" }];
+  ok(bnSplit(undefined).leadPct === 50 && bnSplit({ leadPct: 140 }).leadPct === 100 && bnSplit({ leadPct: 70.4 }).leadPct === 70, "#bonus split: default 50, clamped, whole");
+  ok(bnResolve("jeff chesebro", users) === "u1" && bnResolve("Nobody", users) === null, "#bonus resolveUserId");
+  ok(bnHasLines(secs) && !bnHasLines(raw), "#bonus quoteHasBonusLines");
+
+  const est = (id: string) => secs.find((s) => s.id === id)!.items.find((x) => x.bonus === "estimator")!.price;
+  const pkgCost = secs[0].items.find((x) => x.bonus === "package")!.cost;
+  const r = bnRecord({ sections: secs, owner: "Jeff Chesebro", preparedBy: "Sam Smith", split: { leadPct: 70 }, alternatesTaken: [], users, wonAt: 1000 });
+  ok(r.estimatorBonus === Math.round((est("a") + est("b")) * 100) / 100, "#bonus record: Σ 2% of in-total systems; untaken alternate excluded");
+  ok(r.packageBonusCost === pkgCost, "#bonus record: package pool = Σ 5% COST");
+  ok(r.credits.length === 2 && r.credits[0].role === "lead" && r.credits[0].pct === 70 && r.credits[0].userId === "u1" && r.credits[1].pct === 30, "#bonus record: 70/30 credits");
+  ok(Math.round((r.credits[0].amount + r.credits[1].amount) * 100) === Math.round(r.estimatorBonus * 100), "#bonus record: credits sum to the bonus to the cent");
+  const rAlt = bnRecord({ sections: secs, owner: "Jeff Chesebro", preparedBy: "Sam Smith", alternatesTaken: ["alt1"], users, wonAt: 1000 });
+  ok(rAlt.estimatorBonus === Math.round((est("a") + est("b") + est("alt1")) * 100) / 100 && rAlt.alternatesTaken.join() === "alt1", "#bonus record: a taken alternate counts");
+  const same = bnRecord({ sections: secs, owner: "Jeff Chesebro", preparedBy: "jeff chesebro", alternatesTaken: [], users, wonAt: 1 });
+  ok(same.credits.length === 1 && same.credits[0].pct === 100, "#bonus record: same person both roles → 100%");
+  const blank = bnRecord({ sections: secs, owner: "Jeff Chesebro", preparedBy: "", alternatesTaken: [], users, wonAt: 1 });
+  ok(blank.credits.length === 1 && blank.credits[0].role === "lead" && blank.credits[0].pct === 100, "#bonus record: blank Prepared by → lead 100%");
+  const zero = bnRecord({ sections: secs, owner: "Jeff Chesebro", preparedBy: "Sam Smith", split: { leadPct: 100 }, alternatesTaken: [], users, wonAt: 1 });
+  ok(zero.credits.length === 1 && zero.credits[0].role === "lead", "#bonus record: a 0% share is omitted");
+  const resp = [{ id: "r1", kind: "accept", rev: 1, at: 5, name: "", email: "", message: "", sectionIds: ["a", "alt1"], sectionNames: [], total: 0 }];
+  ok(bnAltDefault(secs, resp as never).join() === "alt1" && bnAltDefault(secs, []).length === 0, "#bonus defaultAlternatesTaken from the latest accept response");
+}
