@@ -9,6 +9,7 @@
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import { FOLLOW_UP_CHOICES, type EmailDeliveryState, type EstimateEmailDefaults } from "./compose";
+import { attachDefaults, type PackageSelection } from "@/lib/estimate-output/package-selection";
 
 export const SEND_UI_COPY = {
   composerTitle: "Email the estimate",
@@ -68,16 +69,20 @@ export type ComposerFields = {
   followUpDays: number;
 };
 
-/** The composer's fields from the server defaults (§10.2): both PDFs ticked, follow-up 5 days. */
-export function composerInitial(d: Partial<EstimateEmailDefaults> | null | undefined): ComposerFields {
+/** The composer's fields from the server defaults (§10.2): both PDFs ticked, follow-up 5 days.
+ *  #333 (Q5, D-TBD-e): the project's Client package choices set where the two
+ *  PDF ticks START — the sender can still change them per send. No selection
+ *  (or an absent one) = both ticked, exactly as before. */
+export function composerInitial(d: Partial<EstimateEmailDefaults> | null | undefined, sel?: PackageSelection | null): ComposerFields {
   const s = (v: unknown) => (typeof v === "string" ? v : "");
+  const attach = attachDefaults(sel);
   return {
     to: s(d?.to),
     cc: s(d?.cc),
     subject: s(d?.subject),
     body: s(d?.body),
-    attachEstimate: true,
-    attachCover: true,
+    attachEstimate: attach.attachEstimate,
+    attachCover: attach.attachCover,
     followUpDays: FOLLOW_UP_DEFAULT,
   };
 }

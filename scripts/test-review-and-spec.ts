@@ -56415,7 +56415,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   const ui = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-ui.ts"), "utf8");
   ok(comp.startsWith('"use client";') && act.startsWith('"use client";'), "#P3 send UI: composer and Activity are client components");
   ok(!/^import\s+(?!type\b)[^;]*?from\s+"@\/(lib\/stores|db)/m.test(ui) && !/from "react"|from "next/.test(ui), "#P3 send UI: send-ui.ts is pure (no store/db value, React or next import)");
-  ok(comp.includes("estimateEmailDefaultsAction(loadedId)") && comp.includes("setFields(composerInitial(r))"), "#P3 send UI: the composer loads its defaults on mount");
+  ok(comp.includes("estimateEmailDefaultsAction(loadedId)") && comp.includes("...composerInitial(r)"), "#P3 send UI: the composer loads its defaults on mount (#333: keeping the selection's PDF ticks)");
   ok(/if \(pdfDirty\) return await saveNow\(\);\s+return next\?\.asOf;/.test(comp) && comp.includes("if (asOf === false) return;") && comp.includes("const input = { ...fields, asOf };"),
     "#P3 send UI: send saves unsaved edits first and passes the saved version (else next.asOf) as asOf");
   ok(comp.includes("if (busy.current) return;") && comp.includes("const disabled = pending ||") && (comp.match(/disabled=\{disabled\}/g) || []).length >= 8,
@@ -69871,4 +69871,22 @@ import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
   const cli = readFileSync(join(root, "estimator-client.tsx"), "utf8");
   ok(cli.includes('packageTabSearch(stepSearch(window.location.search, "package"), "client") + "#systems"'), "#333 Q4: the chip lands on Build package → Client package → #systems");
   ok(readFileSync(join(root, "narrative.ts"), "utf8").includes('presentation: "narrative"'), "#333 Q4: Draft narrative still switches its system to Narrative (same field)");
+}
+
+// ---- Task 14: Send & track's attachment ticks start from the Client package choices (Q5) ----
+import { composerInitial as p3ComposerInitial } from "@/lib/estimate-email/send-ui";
+import { DEFAULT_PACKAGE_SELECTION as p3DefaultSel } from "@/lib/estimate-output/package-selection";
+{
+  const d = { to: "a@b.co", cc: "", subject: "S", body: "B" };
+  const base = p3ComposerInitial(d);
+  ok(base.attachEstimate === true && base.attachCover === true && JSON.stringify(p3ComposerInitial(d, null)) === JSON.stringify(base) && JSON.stringify(p3ComposerInitial(d, p3DefaultSel)) === JSON.stringify(base),
+    "#333 composer: with no selection (or the defaults) both PDFs start ticked, exactly as before");
+  ok(p3ComposerInitial(d, { ...p3DefaultSel, coverPdf: false }).attachCover === false && p3ComposerInitial(d, { ...p3DefaultSel, coverPdf: false }).attachEstimate === true &&
+     p3ComposerInitial(d, { ...p3DefaultSel, estimatePdf: false }).attachEstimate === false,
+    "#333 composer: Cover PDF / Estimate PDF switched off → that tick starts off");
+  const comp = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/send-composer.tsx"), "utf8");
+  const run = comp.slice(comp.indexOf("const run = async"), comp.indexOf("const noticeView"));
+  ok(/await selectionSettled\(\);\s*\n\s*const asOf = await versionToSend\(\);/.test(run) && run.indexOf("await selectionSettled()") < run.indexOf("sendEstimateEmailAction("),
+    "#333 composer: Send waits for any in-flight Client package write before it saves / sends (R4)");
+  ok(comp.includes("composerInitial(null, packageSelection)") && comp.includes("attachEstimate: f.attachEstimate, attachCover: f.attachCover"), "#333 composer: the ticks start from the selection; the server defaults fill the text fields");
 }

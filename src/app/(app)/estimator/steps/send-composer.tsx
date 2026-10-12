@@ -64,8 +64,9 @@ function goTo(cardId: string, focusId?: string) {
  * card), Copy link only (the Client link card).
  */
 export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; collapsible: boolean; onSent: () => void }) {
-  const { applySync, loadedId, next, pdfDirty, saveNow, setActionError, setGateRefused, status, statusChanging, tierResolving } = s;
-  const [fields, setFields] = useState<ComposerFields>(() => composerInitial(null));
+  const { applySync, loadedId, next, packageSelection, pdfDirty, saveNow, selectionSettled, setActionError, setGateRefused, status, statusChanging, tierResolving } = s;
+  // #333 (Q5): the PDF ticks start from Build package → Client package; the server defaults fill the rest.
+  const [fields, setFields] = useState<ComposerFields>(() => composerInitial(null, packageSelection));
   const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [gmail, setGmail] = useState<{ connected: boolean; from: string } | null>(null);
@@ -81,7 +82,7 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
       (r) => {
         if (!live) return;
         if (r.ok) {
-          setFields(composerInitial(r));
+          setFields((f) => ({ ...composerInitial(r), attachEstimate: f.attachEstimate, attachCover: f.attachCover }));
           setGmail({ connected: r.gmailConnected, from: r.fromAddress });
           setLoadErr(null);
         } else setLoadErr(r.error);
@@ -122,6 +123,8 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
     setPending(true);
     setNotice(null);
     try {
+      // #333 (R4): a Client package choice still in flight lands before the send freezes the revision.
+      await selectionSettled();
       const asOf = await versionToSend();
       if (asOf === false) return;
       const input = { ...fields, asOf };
