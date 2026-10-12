@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { iconById, searchIcons } from "@/lib/design/grid-icons";
 import { SymbolIcon } from "./symbol-shape";
 
@@ -18,9 +19,16 @@ import { SymbolIcon } from "./symbol-shape";
  * not just an outside click; and the icon grid is one tab stop (roving
  * tabindex — the active cell is the current icon, or the first result),
  * arrows move it, matching a standard listbox/grid pattern.
+ *
+ * The panel is portaled to <body> with fixed, viewport-clamped positioning
+ * so a narrow or overflow-clipped pane (the Grid workspace's Property
+ * Editor) can't push it off-screen; it flips above the trigger when there's
+ * more room there.
  */
 
 const COLS = 8;
+const PANEL_W = 300;
+const EDGE = 8;
 
 export function IconPicker({
   value,
@@ -53,6 +61,8 @@ export function IconPicker({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
   const results = useMemo(() => searchIcons(q), [q]);
   const current = iconById(value);
   const effectiveActiveCell = results.length
@@ -65,24 +75,44 @@ export function IconPicker({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Close on a Tab that leaves the panel (forward past the grid, or
-  // backward before the search box) — not just an outside click.
-  useEffect(() => {
+  // Place the portaled panel from the trigger's rect: right-aligned to it
+  // when it fits, clamped inside the viewport, below unless there's too
+  // little room there and more above. Capture-phase scroll so a pane
+  // scrolling under the trigger moves the panel with it.
+  useLayoutEffect(() => {
     if (!open) return;
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const onFocusOut = (e: FocusEvent) => {
-      const next = e.relatedTarget as Node | null;
-      if (!next || !wrap.contains(next)) setOpen(false);
+    const place = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const left = Math.max(EDGE, Math.min(rect.right - PANEL_W, vw - PANEL_W - EDGE));
+      const below = rect.bottom + 4;
+      const spaceBelow = vh - below - EDGE;
+      const spaceAbove = rect.top - 4 - EDGE;
+      if (spaceBelow < 260 && spaceAbove > spaceBelow) {
+        const h = panelRef.current?.offsetHeight || 320;
+        setPos({ top: Math.max(EDGE, rect.top - 4 - Math.min(h, spaceAbove)), left, maxHeight: spaceAbove });
+      } else {
+        setPos({ top: below, left, maxHeight: spaceBelow });
+      }
     };
-    wrap.addEventListener("focusout", onFocusOut);
-    return () => wrap.removeEventListener("focusout", onFocusOut);
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [open]);
 
   const focusCell = (i: number) => {
@@ -95,6 +125,7 @@ export function IconPicker({
 
   const setPanelOpen = (next: boolean) => {
     setOpen(next);
+    setPos(null); // re-measured (hidden until then) on the next open
     setActiveCell(null); // fresh default next time the panel's contents show
   };
 
@@ -130,8 +161,9 @@ export function IconPicker({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{current.label}</span>
         <span aria-hidden style={{ color: "#9aa0ab" }}>▾</span>
       </button>
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <div
+          ref={panelRef}
           role="dialog"
           aria-label={label}
           onKeyDown={(e) => {
@@ -140,8 +172,19 @@ export function IconPicker({
               close();
             }
           }}
+          // Close on a Tab that leaves the panel (forward past the grid, or
+          // backward before the search box) — not just an outside click.
+          onBlur={(e) => {
+            const next = e.relatedTarget as Node | null;
+            if (next && (panelRef.current?.contains(next) || wrapRef.current?.contains(next))) return;
+            setOpen(false);
+          }}
           style={{
-            position: "absolute", zIndex: 40, top: "calc(100% + 4px)", right: 0, width: 300, padding: 10,
+            position: "fixed", zIndex: 1000, top: pos?.top, left: pos?.left, width: PANEL_W,
+            maxWidth: "calc(100vw - 16px)", maxHeight: pos?.maxHeight, overflow: "auto",
+            // Hidden until placed. Opacity, not visibility: a visibility:hidden
+            // search box can't take the autoFocus that fires on mount.
+            opacity: pos ? 1 : 0, pointerEvents: pos ? undefined : "none", padding: 10,
             background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, boxShadow: "0 8px 24px rgba(22,24,29,.12)",
           }}
         >
@@ -222,7 +265,8 @@ export function IconPicker({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
