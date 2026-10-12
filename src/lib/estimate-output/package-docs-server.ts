@@ -10,6 +10,7 @@ import { movedSkus } from "@/lib/catalog-rename/live-reads";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { memberAliases, needsFixtureLookup, specItems } from "@/lib/quote-line-members";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
+import { normalizePackageSelection, type PackageSelection } from "./package-selection";
 
 /**
  * #301 slice C (D-l) — the documents an estimate package offers, for one
@@ -18,6 +19,13 @@ import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
  * lines expand into their members, labor / credit / zero-qty lines drop
  * out) and its coverage rule (resolvePackageDocs in the quote's own
  * context), over scoped reads only (Slice C adaptation 1). Server-only.
+ *
+ * #333: `sel` — the project's package selection (a sent revision's frozen
+ * `docFields.packageSelection`, or the live quote's). Its left-out SKUs join
+ * the catalog read so a #304 rename maps them onto the live SKU, then
+ * resolvePackageDocs leaves those datasheets out (exclusions.ts). `bom`
+ * keeps every row; bookRows() is the datasheet book's rows. With no
+ * selection (or nothing left out) the output is exactly the pre-#333 one.
  */
 
 export type RevisionPackageDocs = {
@@ -47,7 +55,10 @@ function hasAssemblyLines(spec: unknown): boolean {
   return specItems(spec).some((it) => !!it.rackId || !!it.fixtureId || needsFixtureLookup(it));
 }
 
-export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDocs> {
+export type DatasheetSelection = Pick<PackageSelection, "excludedDatasheets">;
+
+export async function specPackageDocs(spec: unknown, sel?: DatasheetSelection | null): Promise<RevisionPackageDocs> {
+  const excludedIn = sel ? normalizePackageSelection(sel).excludedDatasheets : [];
   const src = { spec } as Pick<Quote, "spec">;
   const fixtures = hasAssemblyLines(spec) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
   const rackOf = (id: string) => fixtures.get(id);
@@ -55,7 +66,9 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   // internal-row check pass 2 needs (labor members drop out, #296).
   // #304: a sent revision keeps a renamed part's old SKU — its row is read,
   // covered and listed under the live SKU.
-  const found = await getManyBySku(quoteBom(src, rackOf).map((r) => r.sku));
+  // #333: a left-out SKU joins the read so `moved` covers a renamed one.
+  const bomSkus = quoteBom(src, rackOf).map((r) => r.sku);
+  const found = await getManyBySku(excludedIn.length ? [...bomSkus, ...excludedIn] : bomSkus);
   const parts0 = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
   const moved = movedSkus(found);
   // The internal-row check is asked about the SKU each line names (old or live).
@@ -65,7 +78,8 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   const parts = parts0.filter((p) => inBom.has(p.sku));
   const index = await loadScopedCoverage(parts);
   const known = new Set(parts.map((p) => p.sku));
-  const { bySku, documents } = resolvePackageDocs(index, bom.filter((r) => known.has(r.sku)).map((r) => r.sku));
+  const excluded = excludedIn.length ? new Set(excludedIn.map((s) => moved.get(s) ?? s)) : null;
+  const { bySku, documents } = resolvePackageDocs(index, bom.filter((r) => known.has(r.sku)).map((r) => r.sku), excluded ? { excludedDatasheets: excluded } : undefined);
   const aliases = memberAliases(specItems(spec));
   return { bom, parts, index, bySku, documents, moved, aliases };
 }
@@ -83,14 +97,20 @@ function liveBom(rows: Array<{ sku: string; desc: string; qty: number }>, moved:
   return [...out.values()];
 }
 
-export function revisionPackageDocs(rev: Pick<QuoteRevision, "spec">): Promise<RevisionPackageDocs> {
-  return specPackageDocs(rev.spec);
+/** #333: the BOM rows whose datasheet goes to the client — the datasheet book's rows (Q2: a left-out product is not in its index). */
+export function bookRows(docs: Pick<RevisionPackageDocs, "bom" | "bySku">): RevisionPackageDocs["bom"] {
+  return docs.bom.filter((r) => !docs.bySku.get(r.sku)?.datasheetExcluded);
+}
+
+/** A sent revision's package documents, with the selection it was sent with (#333; absent = everything). */
+export function revisionPackageDocs(rev: Pick<QuoteRevision, "spec" | "docFields">): Promise<RevisionPackageDocs> {
+  return specPackageDocs(rev.spec, rev.docFields?.packageSelection ?? null);
 }
 
 const SERVED_KINDS: ReadonlySet<string> = new Set(["datasheet", "specsheet"]);
 
 /** The blob-backed datasheet / spec sheet `docId` IF this revision's package lists it; else null. */
-export async function packageDocForRevision(rev: Pick<QuoteRevision, "spec">, docId: string): Promise<PartDocument | null> {
+export async function packageDocForRevision(rev: Pick<QuoteRevision, "spec" | "docFields">, docId: string): Promise<PartDocument | null> {
   if (!isDocumentId(docId)) return null;
   const d = await revisionPackageDocs(rev);
   if (!d.documents.some((x) => x.documentId === docId && SERVED_KINDS.has(x.kind))) return null;
@@ -98,8 +118,8 @@ export async function packageDocForRevision(rev: Pick<QuoteRevision, "spec">, do
   return doc && doc.blobKey && SERVED_KINDS.has(doc.kind) ? doc : null;
 }
 
-/** Staff gap chip: catalog parts on this spec whose datasheet slot is not satisfied. */
-export async function datasheetGapCount(spec: unknown): Promise<number> {
-  const d = await specPackageDocs(spec);
+/** Staff gap chip: catalog parts on this spec whose datasheet slot is not satisfied (#333: a left-out one is never a gap). */
+export async function datasheetGapCount(spec: unknown, sel?: DatasheetSelection | null): Promise<number> {
+  const d = await specPackageDocs(spec, sel ?? null);
   return [...d.bySku.values()].filter((x) => !x.datasheetOk).length;
 }

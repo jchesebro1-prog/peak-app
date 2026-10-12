@@ -3,7 +3,7 @@ import { blobEnabled } from "@/lib/blob";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
 import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-projects";
 import type { Quote } from "@/lib/stores/quotes";
-import { datasheetGapCount } from "./package-docs-server";
+import { datasheetGapCount, type DatasheetSelection } from "./package-docs-server";
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./package-gaps";
 import { cleanPackageFiles, packageFileRows, visiblePackageFiles, type PackageFileRow } from "./package-files";
 import { responseRows, type ResponseRow } from "./responses";
@@ -38,7 +38,8 @@ export type PackagePanel = {
 };
 
 type PanelDeps = {
-  datasheetGaps: (spec: unknown) => Promise<number>;
+  /** #333: with the live quote's selection — a left-out datasheet is never a gap. */
+  datasheetGaps: (spec: unknown, sel: DatasheetSelection | null) => Promise<number>;
   uploads: () => boolean;
   findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
   peakHeaderDefault: () => Promise<boolean>;
@@ -56,7 +57,7 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
   const files = cleanPackageFiles(q.packageFiles);
   let noDatasheet = 0;
   try {
-    noDatasheet = await d.datasheetGaps(q.spec);
+    noDatasheet = await d.datasheetGaps(q.spec, q.packageSelection ?? null);
   } catch (e) {
     console.warn("[package] datasheet gap count failed", e instanceof Error ? e.message : e);
   }

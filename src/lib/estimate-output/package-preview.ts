@@ -1,4 +1,5 @@
 import type { PackageDocument, PackageSkuDocs } from "@/lib/part-docs/package";
+import type { DatasheetExclusion } from "@/lib/part-docs/exclusions";
 import { displayQuoteNumber, type QuoteNumberFields } from "@/lib/estimate-number";
 import { documentRevStamp } from "@/lib/quote-pdf/state";
 import { formatBytes } from "@/lib/document-files";
@@ -116,6 +117,8 @@ export type ReviewDatasheetRow = {
   datasheetOk: boolean;
   specsheet: DocLinkView | null;
   manual: DocLinkView | null;
+  /** #333: this project leaves the datasheet out ("parent": with every fixture covering it). Absent = included. */
+  excluded?: DatasheetExclusion;
 };
 export type ReviewDrawingRow = { id: string; name: string; kindLabel: string; sizeLabel: string; href: string };
 export type ReviewDocsView = { datasheets: ReviewDatasheetRow[]; drawings: ReviewDrawingRow[]; gaps: string[] };
@@ -138,6 +141,7 @@ export function reviewDatasheetRows(bom: ReadonlyArray<{ sku: string; desc: stri
       datasheetOk: d.datasheetOk,
       specsheet: docLink(d.specsheet),
       manual: docLink(d.manual),
+      ...(d.datasheetExcluded ? { excluded: d.datasheetExcluded } : {}),
     });
   }
   return out;

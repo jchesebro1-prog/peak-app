@@ -11677,6 +11677,7 @@ seeded()
   .then(() => letterhead331Checks())
   .then(() => assemblyMembers332Checks())
   .then(() => pkg333StoreChecks())
+  .then(() => pkg333DatasheetChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -52788,7 +52789,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   }
   const cps = rd("src/lib/client-package-server.ts");
   const qcp = cps.slice(cps.indexOf("export async function createQuoteClientPackage("));
-  ok(qcp.includes("quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now() })") &&
+  ok(qcp.includes("quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now(), excludedDatasheets })") &&
      qcp.indexOf("const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));") < qcp.indexOf("quoteSpecParts("),
     "#301 zip: the staff quote package builds its spec through quoteSpecParts (the #296 BOM line unchanged)");
   ok(/addRandomSuffix: false,\s*allowOverwrite: true/.test(rd("src/lib/blob.ts")) && rd("src/lib/rack/submittal-server.ts").includes("export async function readCapped("),
@@ -57188,7 +57189,7 @@ function p4PreviewChecks(): void {
   const act = rd("src/app/(app)/estimator/review-actions.ts");
   const docsAct = act.slice(act.indexOf("export async function reviewDocsAction("));
   ok(docsAct.length > 40 && docsAct.indexOf("await requireUser();") > 0 && docsAct.indexOf("await requireUser();") < docsAct.indexOf("getQuote(") &&
-     docsAct.includes("specPackageDocs(q.spec)") && docsAct.includes("loadPackagePanel(q, false,") && docsAct.includes("reviewDatasheetRows(docs.bom, docs.bySku)") &&
+     docsAct.includes("specPackageDocs(q.spec, q.packageSelection ?? null)") && docsAct.includes("loadPackagePanel(q, false,") && docsAct.includes("reviewDatasheetRows(docs.bom, docs.bySku)") &&
      docsAct.includes("reviewDrawingRows(q.id, panel.files)") && docsAct.includes("gaps: panel.gaps"),
     "#P4 preview: reviewDocsAction is signed-in only and maps the saved quote's documents, drawings and gaps");
   const smoke = rd("scripts/smoke-routes.ts");
@@ -69323,5 +69324,185 @@ async function pkg333StoreChecks(): Promise<void> {
   } finally {
     await db.delete(blobsT).where(inArray(blobsT.id, [Ren.SKU_RENAMES_BLOB]));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
+  }
+}
+
+// ---- Task 5: every datasheet consumer honours the project's choices ----
+import { reviewDatasheetRows as p3ReviewRows } from "@/lib/estimate-output/package-preview";
+import { datasheetCell as p3Cell, REVIEW_UI_COPY as p3ReviewCopy } from "@/lib/estimate-review/review-ui";
+{
+  const bom = [{ sku: "FIX", desc: "Fixture" }, { sku: "LENS", desc: "Lens" }, { sku: "OWN", desc: "Own" }];
+  const by = new Map([
+    ["FIX", { datasheet: null, datasheetCoveredBy: [], datasheetOk: true, specsheet: null, manual: null, datasheetExcluded: "self" as const }],
+    ["LENS", { datasheet: null, datasheetCoveredBy: ["S4-26"], datasheetOk: true, specsheet: null, manual: null, datasheetExcluded: "parent" as const }],
+    ["OWN", { datasheet: { documentId: "PD-own", name: "own.pdf" }, datasheetCoveredBy: [], datasheetOk: true, specsheet: null, manual: null }],
+  ]);
+  const rows = p3ReviewRows(bom, by);
+  ok(rows[0].excluded === "self" && rows[1].excluded === "parent" && !("excluded" in rows[2]), "#333 review rows: a left-out product's row carries excluded (absent otherwise — unchanged rows)");
+  ok(JSON.stringify(p3Cell(rows[0])) === JSON.stringify({ kind: "note", text: "Left out of this package" }) && p3ReviewCopy.leftOut === "Left out of this package",
+    "#333 review cell: a left-out datasheet reads \"Left out of this package\"");
+  ok(JSON.stringify(p3Cell(rows[1])) === JSON.stringify({ kind: "note", text: "Left out with S4-26" }), "#333 review cell: an accessory left out with its fixture reads \"Left out with S4-26\"");
+  ok(p3Cell(rows[2]).kind === "link", "#333 review cell: an included product keeps its link");
+
+  // 8. Source pin: every specPackageDocs( call site passes a selection argument (the datasheet-rows action excepted).
+  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
+  const calls: string[] = [];
+  for (const f of walk(join(process.cwd(), "src"))) {
+    const src = readFileSync(f, "utf8");
+    const re = /(?<!function )specPackageDocs\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      let depth = 1, i = m.index + m[0].length, top = false;
+      for (; i < src.length && depth > 0; i++) {
+        const c = src[i];
+        if (c === "(" || c === "{" || c === "[") depth++;
+        else if (c === ")" || c === "}" || c === "]") depth--;
+        else if (c === "," && depth === 1) top = true;
+      }
+      const rel = f.slice(process.cwd().length + 1);
+      if (!top && !rel.endsWith("estimator/client-package-actions.ts")) calls.push(`${rel}: ${src.slice(m.index, i)}`);
+    }
+  }
+  ok(calls.length === 0, "#333 (source): every specPackageDocs( caller passes the project's selection: " + calls.join(" | "));
+  const rdp = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rdp("src/lib/estimate-output/package-zip-server.ts").includes("bom: docs.bom,") && rdp("src/lib/estimate-output/package-zip-server.ts").includes("bookRows(docs)"),
+    "#333 zip (source): Specifications.docx keeps the full BOM; the book takes the included rows only");
+  ok(rdp("src/lib/estimate-output/package-panel-server.ts").includes("d.datasheetGaps(q.spec, q.packageSelection ?? null)"), "#333 panel (source): the staff gap chip counts with the live quote's selection");
+}
+
+async function pkg333DatasheetChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const C = await import("@/lib/stores/catalog");
+  const D = await import("@/lib/stores/part-documents");
+  const Q = await import("@/lib/stores/quotes");
+  const SS = await import("@/lib/stores/spec-sections");
+  const PD = await import("@/lib/estimate-output/package-docs-server");
+  const Z = await import("@/lib/estimate-output/package-zip-server");
+  const CPS = await import("@/lib/client-package-server");
+  const PE = await import("@/lib/estimate-output/package-extras");
+  const PP = await import("@/lib/estimate-output/package-panel-server");
+  const L: [number, number] = [612, 792];
+  const section = await SS.createSection({ number: "11 61 33", title: "#333 zip section", sort: 1, by: "Test" });
+  registerFixture("spec_sections", section.id);
+  const X = fixtureId(333, "x"), Y = fixtureId(333, "y"), M = fixtureId(333, "m");
+  await C.upsert({ sku: X, desc: "Xeno amp", category: "Audio", unit: "ea", list: 10, cost: 5, mfr: "Xeno Audio", manufacturerModelNumber: "XM-333" });
+  await C.upsert({ sku: Y, desc: "Yankee spot", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "Yankee Lighting", manufacturerModelNumber: "YS-333" });
+  await C.upsert({ sku: M, desc: "Mystery box", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "Mike Co", manufacturerModelNumber: "MB-333" });
+  for (const s of [X, Y, M]) registerFixture("catalog_parts", s);
+  await C.mergeUpsert(X, { specSectionId: section.id, specBody: "Provide the #333 fixture." } as never);
+  const blobs = new Map<string, Buffer>();
+  const mk = async (sku: string, fileName: string) => {
+    const bytes = await b329Sheet([{ size: L }]);
+    const d = await D.createDocument({ kind: "datasheet", fileName, contentType: "application/pdf", size: bytes.length, blobKey: `part-docs/PD-fixture-333/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#333: fixture document failed");
+    registerFixture("part_documents", d.id);
+    await D.attachDocument(d.id, [sku], "Test");
+    registerFixture("part_document_links", D.documentLinkId(sku, d.id));
+    blobs.set(`part-docs/PD-fixture-333/${fileName}`, bytes);
+    return d;
+  };
+  const xDoc = await mk(X, "xeno-333.pdf");
+  const yDoc = await mk(Y, "yankee-333.pdf");
+  const line = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 });
+  const spec = { sections: [{ id: "s1", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [line(1, X), line(2, Y), line(3, M)] }], mobs: [] };
+  const ser = (d: Awaited<ReturnType<typeof PD.specPackageDocs>>) => JSON.stringify({ bom: d.bom, bySku: [...d.bySku], documents: d.documents, moved: [...d.moved], aliases: [...d.aliases] });
+
+  // 2. No selection → exactly today's output.
+  const plain = await PD.specPackageDocs(spec);
+  ok(ser(await PD.specPackageDocs(spec, null)) === ser(plain) && ser(await PD.specPackageDocs(spec, { excludedDatasheets: [] })) === ser(plain) &&
+     ser(await PD.revisionPackageDocs({ spec } as never)) === ser(plain) && ser(await PD.revisionPackageDocs({ spec, docFields: {} } as never)) === ser(plain),
+    "#333 package docs: a quote / revision with no packageSelection resolves exactly as before");
+  // 1. A revision excluding X: X's document is gone from documents and the doc route.
+  const revX = { spec, docFields: { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X] } } } as never;
+  const dx = await PD.revisionPackageDocs(revX);
+  ok(!dx.documents.some((d) => d.documentId === xDoc.id) && dx.documents.some((d) => d.documentId === yDoc.id) && dx.bySku.get(X)?.datasheetExcluded === "self" && dx.bom.some((r) => r.sku === X),
+    "#333 package docs: a left-out datasheet leaves documents (the BOM keeps the row)");
+  ok((await PD.packageDocForRevision(revX, xDoc.id)) === null && (await PD.packageDocForRevision(revX, yDoc.id))?.id === yDoc.id && (await PD.packageDocForRevision({ spec } as never, xDoc.id))?.id === xDoc.id,
+    "#333 doc route: the left-out datasheet 404s for that revision only");
+  ok(PD.bookRows(dx).map((r) => r.sku).join() === [Y, M].join() && PD.bookRows(plain).length === 3, "#333 bookRows: the BOM rows whose datasheet is not left out");
+  // 4. The gap count drops by the excluded-missing count.
+  ok((await PD.datasheetGapCount(spec)) === 1 && (await PD.datasheetGapCount(spec, { excludedDatasheets: [M] })) === 0, "#333 gap chip: a left-out product with no datasheet is never a gap");
+  // The staff panel passes the live quote's selection.
+  let seen: unknown = "unset";
+  await PP.loadPackagePanel({ id: "Q-333", spec, packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [M] } } as never, false, {
+    datasheetGaps: async (_s: unknown, sel: unknown) => { seen = sel; return 0; }, findGrid: async () => null, uploads: () => false, peakHeaderDefault: async () => true } as never);
+  ok(JSON.stringify((seen as { excludedDatasheets?: string[] })?.excludedDatasheets) === JSON.stringify([M]), "#333 panel: datasheetGaps receives the live quote's selection");
+  // Package page extras (no code change): the key-product link and the Downloads card follow.
+  const ex = await PE.loadPackageExtras({ rev: revX } as never, "/share/quote/Q/t");
+  ok(!(X in ex.datasheets) && (Y in ex.datasheets) && !!ex.downloads && !ex.downloads.files.some((f) => f.name === "xeno-333.pdf") && ex.downloads.files.some((f) => f.name === "yankee-333.pdf"),
+    "#333 package page: a left-out datasheet has no key-product link and no Downloads entry");
+
+  // 3. Renames: a revision excluding OLD, whose part is now NEW, still excludes it.
+  const OLD = fixtureId(333, "old"), NEW = fixtureId(333, "new");
+  await C.upsert({ sku: OLD, desc: "Renamed DSP", category: "Audio", unit: "ea", list: 10, cost: 5, mfr: "Rename Co", manufacturerModelNumber: "RD-333" });
+  registerFixture("catalog_parts", OLD);
+  ok((await C.renamePartDocs(OLD, NEW, "RD 333"))?.sku === NEW, "#333 renames: fixture part renamed");
+  registerFixture("catalog_parts", NEW);
+  const nDoc = await mk(NEW, "renamed-333.pdf");
+  const rspec = { sections: [{ id: "s1", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [line(1, NEW), line(2, Y)] }], mobs: [] };
+  const dr = await PD.revisionPackageDocs({ spec: rspec, docFields: { packageSelection: { excludedDatasheets: [OLD] } } } as never);
+  ok(dr.bySku.get(NEW)?.datasheetExcluded === "self" && !dr.documents.some((d) => d.documentId === nDoc.id), "#333 renames: an exclusion stored under the old SKU still leaves the live part's datasheet out (spec names the new SKU)");
+  const ospec = { sections: [{ id: "s1", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [line(1, OLD)] }], mobs: [] };
+  const dro = await PD.revisionPackageDocs({ spec: ospec, docFields: { packageSelection: { excludedDatasheets: [OLD] } } } as never);
+  ok(dro.bySku.get(NEW)?.datasheetExcluded === "self" && !dro.documents.some((d) => d.documentId === nDoc.id), "#333 renames: a frozen revision naming the old SKU and excluding it stays excluded");
+
+  // 5. The estimate package zip.
+  const QID = fixtureId(333, "zip");
+  await Q.create({ id: QID, name: "#333 zip", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec } as never);
+  registerFixture("quotes", QID);
+  await Q.update(QID, { status: "sent" });
+  const revPlain = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  await Q.update(QID, { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X] } });
+  const revEx = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  const q = (await Q.get(QID))!;
+  const readNoX = async (key: string) => (key.includes("xeno") ? null : blobs.has(key) ? new Response(new Uint8Array(blobs.get(key)!)).body : null);
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const zPlain = await Z.buildRevisionPackageZip(q, revPlain, { read: readNoX, sections: async () => [section], letterhead: async () => null, canonicalMfr: async () => null });
+    const zEx = await Z.buildRevisionPackageZip(q, revEx, { read: readNoX, sections: async () => [section], letterhead: async () => null, canonicalMfr: async () => null });
+    const names = (b: typeof zEx) => (b ? zipNamesGn7(b.zip) : []);
+    const leftOutText = (b: typeof zEx) => names(b).find((f) => f.name === "LEFT OUT.txt")?.data.toString("utf8") ?? "";
+    const bookText = async (b: typeof zEx) => { const f = names(b).find((x) => x.name === "Datasheets.pdf"); return f ? (await b329PageTexts(f.data)).join("\n") : ""; };
+    ok(leftOutText(zPlain).includes("xeno-333.pdf") && (await bookText(zPlain)).includes("XM-333"), "#333 zip (control): without a selection the unreadable X is LEFT OUT and indexed");
+    ok(!!zEx && !names(zEx).some((f) => f.name.startsWith("datasheets/") && f.name.includes("xeno")) && names(zEx).some((f) => f.name.includes("yankee-333.pdf")),
+      "#333 zip: no datasheets/ entry for a left-out product: " + names(zEx).map((f) => f.name).join("|"));
+    ok(!leftOutText(zEx).includes("xeno") && !names(zEx).some((f) => f.name === "LEFT OUT.txt"), "#333 zip: LEFT OUT.txt never names a left-out product");
+    const bt = await bookText(zEx);
+    ok(bt.includes("YS-333") && !bt.includes("XM-333") && !bt.includes("Xeno"), "#333 zip (Q2): the book's index drops a left-out product entirely");
+    ok(!!zEx && zEx.specifications === true && names(zEx).some((f) => f.name === "Specifications.docx"), "#333 zip: Specifications.docx still covers the left-out product (its section is the only one)");
+
+    // 6. The Quotes-hub client package (Q3): follows the live quote's choices.
+    await Q.update(QID, { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X, M] } });
+    const stored: Buffer[] = [];
+    const pkg = await CPS.createQuoteClientPackage((await Q.get(QID))!, "Tester", { deps: {
+      blobOn: () => true,
+      put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; },
+      save: async (input: Record<string, unknown>) => ({ ...input, id: "PKG-333", createdAt: 0 }),
+      secret: () => "s333",
+      findGrid: async () => null,
+      readDoc: async (key: string) => (blobs.has(key) ? new Response(new Uint8Array(blobs.get(key)!)).body : null),
+      canonicalMfr: async () => null,
+    } as never });
+    const files = zipNamesGn7(stored[stored.length - 1]);
+    const idx = JSON.parse(files.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { items: Array<{ sku: string; datasheet: unknown; datasheetExcluded?: string }> };
+    const cpBook = files.find((f) => f.name === "Datasheets.pdf");
+    const cpText = cpBook ? (await b329PageTexts(cpBook.data)).join("\n") : "";
+    ok(!files.some((f) => f.name.startsWith("datasheets/") && f.name.includes("xeno")) && files.some((f) => f.name.includes("yankee-333.pdf")) && pkg.record.datasheetCount === 1,
+      "#333 client package (Q3): no datasheet for a left-out product: " + files.map((f) => f.name).join("|"));
+    ok(!pkg.gaps.some((g) => g.kind === "missing-datasheet" && (g.sku === M || g.sku === X)), "#333 client package (Q3): a left-out product is never a missing-datasheet gap");
+    ok(idx.items.find((i) => i.sku === X)?.datasheetExcluded === "self" && idx.items.find((i) => i.sku === X)?.datasheet === null && !("datasheetExcluded" in idx.items.find((i) => i.sku === Y)!),
+      "#333 client package (Q3): the index's items carry datasheetExcluded");
+    ok(cpText.includes("YS-333") && !cpText.includes("XM-333") && !cpText.includes("MB-333"), "#333 client package (Q3): the book lists the included rows only");
+    // Control: no selection → the missing gap is back.
+    await Q.update(QID, { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [] } });
+    const pkg0 = await CPS.createQuoteClientPackage((await Q.get(QID))!, "Tester", { deps: {
+      blobOn: () => true, put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; }, save: async (input: Record<string, unknown>) => ({ ...input, id: "PKG-333b", createdAt: 0 }),
+      secret: () => "s333", findGrid: async () => null, readDoc: async (key: string) => (blobs.has(key) ? new Response(new Uint8Array(blobs.get(key)!)).body : null), canonicalMfr: async () => null,
+    } as never });
+    ok(pkg0.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === M) && pkg0.record.datasheetCount === 2, "#333 client package (control): with nothing left out, M is a gap and both datasheets ship");
+  } finally {
+    console.warn = warn;
   }
 }

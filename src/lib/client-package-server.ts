@@ -39,6 +39,8 @@ import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-ser
 import type { Letterhead } from "@/lib/letterhead";
 import { loadDocumentLetterhead } from "@/lib/letterhead-server";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { normalizePackageSelection } from "@/lib/estimate-output/package-selection";
+import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -556,6 +558,9 @@ function addBook(book: PackageBookResult, files: ZipFile[], gaps: ClientPackageG
  * Specifications.docx (estimate-output/package-zip-server.ts) both use it.
  * #207: the quote's own SKUs are the coverage context — an accessory rides
  * on a fixture only when that fixture is on this quote.
+ * #333: `excludedDatasheets` (the project's left-out datasheets, live SKUs)
+ * leaves those datasheets out: no document, no missing-datasheet gap, no
+ * "covered by" note; items carry `datasheetExcluded`. Absent = as before.
  */
 export function quoteSpecParts(input: {
   quote: Pick<Quote, "id" | "name" | "customer">;
@@ -565,6 +570,7 @@ export function quoteSpecParts(input: {
   sections: Awaited<ReturnType<typeof allSections>>;
   by: string;
   date: number;
+  excludedDatasheets?: ReadonlySet<string>;
 }) {
   const { quote, bom, catalog, docIndex } = input;
   const bySku = new Map(catalog.map((part) => [part.sku, part]));
@@ -576,7 +582,8 @@ export function quoteSpecParts(input: {
     preparedBy: input.by,
     date: input.date,
   });
-  const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku));
+  const ex = input.excludedDatasheets?.size ? { excludedDatasheets: input.excludedDatasheets } : undefined;
+  const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku), ex);
   const items = bom.map((row) => {
     const part = bySku.get(row.sku);
     const docs = packageDocs.bySku.get(row.sku);
@@ -589,13 +596,14 @@ export function quoteSpecParts(input: {
       datasheetCoveredBy: docs?.datasheetCoveredBy ?? [],
       specsheet: docs?.specsheet ?? null,
       manual: docs?.manual ?? null,
+      ...(docs?.datasheetExcluded ? { datasheetExcluded: docs.datasheetExcluded } : {}),
     };
   });
   const gaps: ClientPackageGap[] = matched.rows.filter((row) => row.bucket !== "ready").map((row) => ({ kind: row.bucket === "no-match" ? "missing-catalog" : "missing-spec", sku: row.row.sku, description: row.row.desc, qty: row.row.qty, catalogId: row.part?.id || null }));
   for (const item of items) {
     if (item.catalogId && !packageDocs.bySku.get(item.sku)?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
   }
-  const covered = items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
+  const covered = items.filter((item) => item.datasheetCoveredBy.length && !item.datasheetExcluded).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
   return { matched, spec, packageDocs, items, gaps, covered };
 }
 
@@ -690,6 +698,14 @@ export async function createClientPackage(
   return { record, gaps, spec: specWithRacks, cutSheets, drawingSet };
 }
 
+/** #333 — the live quote's left-out datasheet SKUs, followed through the #304 rename log (null = none). */
+async function liveExcludedDatasheets(quote: Quote): Promise<ReadonlySet<string> | undefined> {
+  const list = normalizePackageSelection(quote.packageSelection).excludedDatasheets;
+  if (!list.length) return undefined;
+  const { m } = await liveRenameRefs();
+  return new Set(list.map((s) => m.get(s) ?? s));
+}
+
 /** Build the same package from a quote when it has not yet become a Grid project. */
 export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps>; peakHeader?: boolean | null } = {}): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
@@ -704,7 +720,9 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   // #332: an assembly line with no components of its own (`asm:`, a bare fixture line) reads its members live too.
   const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId || needsFixtureLookup(it)) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
   const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));
-  const { spec, packageDocs, items, gaps, covered } = quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now() });
+  // #333 (Q3): the estimate's own datasheet choices, moved onto renamed parts (the live spec follows renames too).
+  const excludedDatasheets = await liveExcludedDatasheets(quote);
+  const { spec, packageDocs, items, gaps, covered } = quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now(), excludedDatasheets });
   const packageName = `${safeName(quote.name || quote.id)}-${safeName(displayQuoteNumber(quote))}`;
   // The docx is written once the racks are known (#296); it keeps its place in the zip.
   const specFile: ZipFile = { name: "specification.docx", data: Buffer.alloc(0) };
@@ -713,7 +731,8 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   // #329 — the datasheet book: one row per BOM part, manufacturer A→Z.
   const partBySku = new Map(catalog.map((part) => [part.sku, part] as const));
   // #329b — the #298 manufacturer merges, read once for this build.
-  const bookParts = withCanonicalMfrs(bom.map((row) => bookPartOf(row, partBySku.get(row.sku), packageDocs.bySku.get(row.sku))), await d.canonicalMfr());
+  // #333 (Q2/Q3): a left-out product is not in the book.
+  const bookParts = withCanonicalMfrs(bom.filter((row) => !packageDocs.bySku.get(row.sku)?.datasheetExcluded).map((row) => bookPartOf(row, partBySku.get(row.sku), packageDocs.bySku.get(row.sku))), await d.canonicalMfr());
   const bookPlan = planDatasheetBook(bookParts);
   const bookDocs = await addDocuments(packageDocs.documents, docIndex, (sku) => {
     const item = itemBySku.get(sku);

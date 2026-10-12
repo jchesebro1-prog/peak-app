@@ -43,7 +43,7 @@ function previewState(q: Pick<Quote, "revisions">): VisiblePackageState {
 async function liveExtras(q: Quote): Promise<StaffPackageExtras> {
   const files = cleanPackageFiles(q.packageFiles);
   try {
-    const docs = await specPackageDocs(q.spec);
+    const docs = await specPackageDocs(q.spec, q.packageSelection ?? null);
     return staffPackageExtras(docs, specReadyFor(docs.parts, await allSections()), files, q.id);
   } catch (e) {
     console.warn("[package-preview] documents unavailable", e instanceof Error ? e.message : e);

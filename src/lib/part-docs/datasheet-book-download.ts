@@ -5,7 +5,7 @@ import { CutSheetDeadlineError } from "@/lib/curtain-cut-sheets/deadline";
 import { ensureOptions, resolveOptionId } from "@/lib/design/grid-options";
 import { attachmentDisposition } from "@/lib/document-files";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { specPackageDocs } from "@/lib/estimate-output/package-docs-server";
+import { bookRows, revisionPackageDocs, specPackageDocs } from "@/lib/estimate-output/package-docs-server";
 import { PACKAGE_ZIP_DOC_MAX_BYTES, PACKAGE_ZIP_TOTAL_MAX_BYTES, packageZipCacheDir, packageZipCacheOn } from "@/lib/estimate-output/package-zip";
 import type { Letterhead } from "@/lib/letterhead";
 import { resolvePeakHeader } from "@/lib/letterhead";
@@ -180,12 +180,13 @@ export async function quoteBookPdf(quoteId: string, opts: { startedAt: number; d
   const { deps, startedAt } = opts;
   const q = await getQuote(quoteId);
   if (!q) return { ok: false, status: 404, error: "Estimate not found." };
-  const docs = await specPackageDocs(q.spec);
+  // #333: the estimate's own datasheet choices — a left-out product is not in the book (Q2).
+  const docs = await specPackageDocs(q.spec, q.packageSelection ?? null);
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
   const [cover, letterhead, canonicalMfr] = await Promise.all([quoteBookCover(q), loadDocumentLetterhead(q.packagePeakHeader), loadCanonicalMfr(undefined, "[datasheets]")]);
   return buildBookDownload({
     startedAt,
-    inputs: loadBookInputs({ rows: docs.bom, partOf: (sku) => partBySku.get(sku), docsOf: (sku) => docs.bySku.get(sku), canonicalMfr }),
+    inputs: loadBookInputs({ rows: bookRows(docs), partOf: (sku) => partBySku.get(sku), docsOf: (sku) => docs.bySku.get(sku), canonicalMfr }),
     index: docs.index,
     cover,
     letterhead,
@@ -234,13 +235,14 @@ export async function gridBookPdf(projectId: string, optionId: string | null, by
 /** The customer's package page: a SENT revision's book, with its cover + letterhead already resolved (the cache key). */
 export async function revisionBookPdf(q: Quote, rev: QuoteRevision, cover: BookCover, letterhead: Letterhead | null, opts: { startedAt: number; deps?: ReadDeps }): Promise<BookDownload> {
   const { deps, startedAt } = opts;
-  const docs = await specPackageDocs(rev.spec);
+  // #333: the selection the revision was sent with (frozen, so the cache key holds).
+  const docs = await revisionPackageDocs(rev);
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
   const { revNo } = sentDocumentStamp(q, rev);
   const canonicalMfr = await loadCanonicalMfr(undefined, "[datasheets]");
   return buildBookDownload({
     startedAt,
-    inputs: loadBookInputs({ rows: docs.bom, partOf: (sku) => partBySku.get(sku), docsOf: (sku) => docs.bySku.get(sku), canonicalMfr }),
+    inputs: loadBookInputs({ rows: bookRows(docs), partOf: (sku) => partBySku.get(sku), docsOf: (sku) => docs.bySku.get(sku), canonicalMfr }),
     index: docs.index,
     cover,
     letterhead,

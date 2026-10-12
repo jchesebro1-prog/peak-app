@@ -20,7 +20,7 @@ import { loadDocumentLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-
 import { resolvePeakHeader } from "@/lib/letterhead";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { createStoredZip, zipStream, type ZipFile } from "@/lib/zip";
-import { revisionPackageDocs } from "./package-docs-server";
+import { bookRows, revisionPackageDocs } from "./package-docs-server";
 import {
   LEFT_OUT_NAME, LEFT_OUT_REASON, leftOutText, NOTHING_TO_DOWNLOAD, PACKAGE_BOOK_MS, PACKAGE_ZIP_DEADLINE_MS, PACKAGE_ZIP_DOC_MAX_BYTES,
   PACKAGE_ZIP_TOTAL_MAX_BYTES, packageZipCacheDir, packageZipCacheOn, packageZipCachePath, packageZipFileName, SPEC_DOCX_NAME, zipCacheable,
@@ -95,7 +95,8 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
   // #329 — the book's rows: one per BOM part, manufacturer A→Z; datasheets are read in that order.
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
   // #329b — the #298 manufacturer merges, read once for this build (a failed read groups by each part's own text).
-  const bookParts = withCanonicalMfrs(docs.bom.map((row) => bookPartOf(row, partBySku.get(row.sku), docs.bySku.get(row.sku))), await d.canonicalMfr());
+  // #333: a product whose datasheet this revision leaves out is not in the book (Q2); its file was never listed.
+  const bookParts = withCanonicalMfrs(bookRows(docs).map((row) => bookPartOf(row, partBySku.get(row.sku), docs.bySku.get(row.sku))), await d.canonicalMfr());
   const bookPlan = planDatasheetBook(bookParts);
   const rank = new Map(bookPlan.docOrder.map((id, i) => [id, i] as const));
   const ordered = [

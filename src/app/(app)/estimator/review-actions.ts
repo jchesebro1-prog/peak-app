@@ -96,7 +96,7 @@ export async function reviewDocsAction(quoteId: string): Promise<ReviewDocsResul
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: COPY.gone };
   let docs: RevisionPackageDocs | null = null;
   try {
-    docs = await specPackageDocs(q.spec);
+    docs = await specPackageDocs(q.spec, q.packageSelection ?? null);
   } catch (e) {
     console.warn("[review] package documents unavailable", e instanceof Error ? e.message : e);
   }

@@ -48,6 +48,9 @@ export const REVIEW_UI_COPY = {
   docsError: "Couldn't load the package documents.",
   datasheetMissing: "Missing",
   notNeeded: "not needed",
+  // #333: a datasheet this project leaves out (Client package).
+  leftOut: "Left out of this package",
+  leftOutWith: "Left out with",
 } as const;
 
 export const REVIEW_TABS = ["document", "package", "bom", "cutsheets", "datasheets", "drawings"] as const;
@@ -132,7 +135,10 @@ export function checklistRows(gaps: readonly string[] | null, pkg: Pick<StepBadg
 export type DatasheetCell = { kind: "link"; href: string; name: string } | { kind: "note"; text: string } | { kind: "missing"; text: string };
 
 /** A Datasheets row's datasheet cell: its own document, "covered by …", "not needed", or Missing. */
-export function datasheetCell(row: Pick<ReviewDatasheetRow, "datasheet" | "datasheetCoveredBy" | "datasheetOk">): DatasheetCell {
+export function datasheetCell(row: Pick<ReviewDatasheetRow, "datasheet" | "datasheetCoveredBy" | "datasheetOk" | "excluded">): DatasheetCell {
+  // #333: left out on this project — itself, or with every fixture covering it.
+  if (row.excluded === "parent" && row.datasheetCoveredBy.length) return { kind: "note", text: `${REVIEW_UI_COPY.leftOutWith} ${row.datasheetCoveredBy.join(", ")}` };
+  if (row.excluded) return { kind: "note", text: REVIEW_UI_COPY.leftOut };
   if (row.datasheet) return { kind: "link", href: row.datasheet.href, name: row.datasheet.name };
   if (row.datasheetOk && row.datasheetCoveredBy.length) return { kind: "note", text: `covered by ${row.datasheetCoveredBy.join(", ")}` };
   if (row.datasheetOk) return { kind: "note", text: REVIEW_UI_COPY.notNeeded };
