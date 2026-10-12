@@ -11175,3 +11175,79 @@ toggle after send applies to the next download. Older un-suffixed cache files ar
 toggle accepts only `true`, `false` or `null` (follow the default), with no coercion. The D94 spec's toggle needs `create`,
 like the Spec builder's. If the Grid Outputs menu can't read the default, it sends nothing and the server applies it.
 
+## D828. One Datasheets.pdf per package, at the zip root, datasheets only (#329, 2026-10-12)
+
+Jeff's call: a merged book AND the loose files. Defaults taken: the book is `Datasheets.pdf` at the zip root of the Grid
+client package, the quote client package and the estimate package zip (next to Specifications.docx); the rack submittal
+keeps its `datasheets.pdf` name. Spec sheets and manuals are never in the book and keep their loose names. A package
+with no datasheet read gets no book and no note. The Grid/quote `00-package-index.json` gains `datasheetBook:
+"Datasheets.pdf"` when it ships. Punch item #329.
+
+## D829. Book order: manufacturer, then model, then SKU; blank manufacturer last (#329, 2026-10-12)
+
+Manufacturers group by `mfrKey` (case and punctuation ignored), so "Etc" and "ETC" are one group printed by its most
+common spelling (a tie goes to the code-point-smallest, so "ETC" beats "Etc"). Groups sort A→Z (numeric-aware, case
+ignored). A part with no manufacturer sorts LAST under "Unknown manufacturer". Within a group: the printed model
+(`partModel`, #304 — Model #, then MFR P/N, then the SKU's model tail), numeric-aware ("Lens Tube 2" before "Lens Tube
+10"), then SKU. The #298 manufacturer merges (`canonicalKeyMap`) are NOT applied: they need a manufacturers-table read
+the packages don't otherwise make. Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
+
+## D830. The book's cover and index (#329, 2026-10-12)
+
+pdf-lib, Letter 612×792, Helvetica (no Chrome route), like the rack's old cover. Top to bottom: the Peak letterhead
+(Grid notes #9, D823–D827: the same `Letterhead` and size as the rack index — the logo in any format, else the baked
+sheet, else the company name in type; none when the header is off for that document), "Product Datasheets", the job lines
+(Grid: design, customer, venue, today; quote package: quote name, customer, Estimate #, today; estimate zip: the
+revision's name, customer, "Estimate # · Rev N", the revision's issued date; rack: "<rack> — rack submittal", scope,
+today — all America/Chicago), "N parts · M datasheets · P pages", then the index on the same page, continuing on
+following pages with "Product Datasheets — index (continued)" and the column header repeated. Columns: Manufacturer |
+Model / Part # | Description | Page ("Reason" instead of Page under Not included). The manufacturer prints bold on a
+group's first row (with a thin rule above it) and again at the top of each continued page, instead of a separate
+header line. Descriptions wrap to 3 lines, other cells to 2, then "…". One row per BOM part: a part covered by a
+fixture's datasheet and parts sharing one document all show the same page. Not included reasons: "No datasheet on
+file", "Datasheet not required" (marked not needed — listed, per one row per part), "Not a catalog part" (model "—";
+e.g. a Grid curtain), "Could not be read", "File missing", "Left out — package size limit", "Left out — ran out of
+time". No PDF bookmarks (left out to keep risk down). Punch item #329.
+
+## D831. "Page N of M" on every page, through each page's own box and rotation (#329, 2026-10-12)
+
+8 pt Helvetica, gray, centered, 18 pt above the page's VISUAL bottom edge: the crop box (falls back to the media box),
+and `/Rotate` respected (0 → y-min, 90 → x-max, 180 → y-max, 270 / -90 → x-min, the text turned to read upright).
+Cover and index pages are numbered too. pdf-lib wraps a page's existing content in q/Q before drawing, so a
+manufacturer PDF that leaves its graphics state transformed can't move the stamp. Manufacturer pages keep their size,
+crop box and rotation. Punch item #329.
+
+## D832. Loose datasheets are "<Manufacturer> - <file>" (#329, 2026-10-12)
+
+`datasheets/ETC - ColorSource Spot.pdf`. The manufacturer is the book's printed name for the datasheet's first part
+(D829). A file name that already starts with it isn't doubled ("ETC_S4.pdf" → "ETC - S4.pdf"); a blank manufacturer keeps
+the file's own name. Datasheet names keep spaces (a new `zipEntrySafe`: path and reserved characters → "_", ≤ 140
+chars, extension kept) instead of `safeName`'s underscores — spec sheets and manuals keep `safeName`. A clash keeps
+`packageEntryName`'s `<documentId>-` prefix. Datasheets go into the zip first, in book order. Punch item #329.
+
+## D833. When the book is skipped, and its time budget (#329, 2026-10-12)
+
+The book never fails a package. It is skipped — the loose files still ship — when the datasheets read are over 100 MB
+or the finished PDF is (`BOOK_MAX_BYTES`), when it runs past its deadline, when no datasheet could be merged, or on any
+error. A datasheet that is corrupt, encrypted or empty becomes a "Could not be read" index row; its loose file still
+ships. Client packages (Grid and quote): the book merges from the bytes `addDocuments` already read (no second read;
+the reader is now an injectable `readDoc` dep), started before the drawing-set render and awaited after the racks,
+yielding between documents, on the package's 75 s render deadline — so the 25 s finish allowance is untouched; a skip
+is a `missing-datasheet-book` gap ("Datasheets.pdf — … ; the individual datasheets are in datasheets/."). Estimate zip:
+merged after the 45 s reads with its own 30 s (`PACKAGE_BOOK_MS`; 45 + 30 + the zip fit the route's 120 s); a skip is
+a LEFT OUT.txt line ("package size limit" — still cacheable — or "ran out of time" / "couldn't be built" — not cached).
+Punch item #329.
+
+## D834. The rack submittal's datasheets.pdf is the shared book, manufacturer order (#329, 2026-10-12)
+
+`mergeDatasheets` / `datasheetCoverLines` moved into `buildDatasheetBook`; the rack reads its datasheets in the book's
+order (manufacturer A→Z) instead of schedule order, with the same cover, index and page stamps, and the same caps
+(25 MB / 60 MB) and read deadline. Its staff gaps are unchanged; a part marked "not needed" is now listed under Not
+included ("Datasheet not required") instead of left out. It still builds a cover-only book when no datasheet is on
+file. If the book itself can't be built, datasheets.pdf is left out with a missing-data gap. Punch item #329.
+
+## D835. Estimate package zip cache key bumped to v2 (#329, 2026-10-12)
+
+`packageZipCachePath` is now `estimate-package/<quote>/rev-<n>-h<0|1>-v2.zip` (D827's header key plus
+`PACKAGE_ZIP_CACHE_VERSION = 2`), so a zip cached before #329 (no Datasheets.pdf, old loose names) is never served; the
+first download after deploy rebuilds. Old `rev-<n>.zip` / `rev-<n>-h<0|1>.zip` blobs stay in the quote's folder until Rebuild package clears the folder (same prefix). Punch item #329.

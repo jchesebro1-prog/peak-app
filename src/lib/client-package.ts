@@ -9,7 +9,8 @@ import { gridSpecBomRows, internalSkuCheck, parseVirtualPartId } from "@/lib/des
 import type { FixtureResolvable } from "@/lib/fixture-assemblies";
 
 /** Grid notes #7: "missing-drawing-set" — the title-blocked drawing set couldn't be rendered (the fallback drawings ship instead). */
-export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec" | "missing-cutsheet" | "missing-rack" | "missing-drawing-set";
+/** #329: "missing-datasheet-book" — the combined Datasheets.pdf was skipped (too big, late or failed); the loose datasheets still ship. */
+export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec" | "missing-cutsheet" | "missing-rack" | "missing-drawing-set" | "missing-datasheet-book";
 
 export type ClientPackageGap = {
   kind: PackageGapKind;

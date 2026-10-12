@@ -11667,6 +11667,7 @@ seeded()
   .then(() => gridNotes7Checks())
   .then(() => gridNotes5WireStarterChecks())
   .then(() => gridNotes9Checks())
+  .then(() => datasheetBook329Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -46061,25 +46062,33 @@ import type { RackPartInfo as C296pInfo, RackLayout as C296pLayout, RackIssue as
 }
 
 /* ===== #296 — rack submittal zip ===== */
-import { datasheetCoverLines as c296zCover, mergeDatasheets as c296zMerge, rackSubmittalFiles as c296zFiles, RACK_SUBMITTAL_DEADLINE_MS as c296zDeadline,
+import { rackSubmittalFiles as c296zFiles, RACK_SUBMITTAL_DEADLINE_MS as c296zDeadline,
   RACK_DATASHEET_ALLOWANCE_MS as c296zDsAllow, RACK_SUBMITTAL_FINISH_ALLOWANCE_MS as c296zFinish, RACK_SUBMITTAL_MAX_DURATION_MS as c296zMaxDur } from "@/lib/rack/submittal-server";
 import { PDFDocument as C296zPdf } from "pdf-lib";
+import { bookIndex as c296zBookIndex, bookIndexLines as c296zBookLines, planDatasheetBook as c296zPlan } from "@/lib/part-docs/datasheet-book";
+import { buildDatasheetBook as c296zBook } from "@/lib/part-docs/datasheet-book-server";
 {
-  const lines = c296zCover([
-    { sku: "AMP-A", label: "Power amp", pageCount: 3 },
-    { sku: "GONE", label: "Mystery", pageCount: null, reason: "Not in the catalog." },
-    { sku: "DSP-B, SW-C", label: "DSP; Switch", pageCount: 2 },
-    { sku: "BAD", label: "Broken PDF", pageCount: null, reason: "Datasheet PDF could not be merged." },
-  ], "MDF rack — datasheets", 1);
-  ok(lines[0] === "MDF rack — datasheets", "#296 rack zip: the cover title comes first");
+  // #329: the rack's cover is the shared datasheet book's index (manufacturer A→Z, not schedule order).
+  const plan = c296zPlan([
+    { sku: "AMP-A", mfr: "Zeta", model: "Z-2", desc: "Power amp", docId: "PD-amp" },
+    { sku: "GONE", mfr: "", model: "", desc: "Mystery", docId: null, reason: "Not a catalog part" },
+    { sku: "DSP-B", mfr: "Alpha", model: "D-1", desc: "DSP", docId: "PD-dsp" },
+    { sku: "SW-C", mfr: "Alpha", model: "S-9", desc: "Switch", docId: "PD-dsp" },
+    { sku: "BAD", mfr: "Beta", model: "B", desc: "Broken PDF", docId: "PD-bad" },
+  ]);
+  ok(plan.docOrder.join() === "PD-dsp,PD-bad,PD-amp", "#296 rack zip (#329): datasheets merge manufacturer A→Z, each once: " + plan.docOrder.join());
+  const lines = c296zBookLines(c296zBookIndex(plan, new Map([["PD-amp", 3], ["PD-dsp", 2]]), new Map([["PD-bad", "Could not be read"]]), 1));
   const inc = lines.indexOf("Included"), not = lines.indexOf("Not included");
-  ok(inc > 0 && not > inc, "#296 rack zip: the cover lists Included before Not included");
-  ok(lines[inc + 1] === "AMP-A — Power amp — page 2" && lines[inc + 2] === "DSP-B, SW-C — DSP; Switch — page 5", "#296 rack zip: index lines in order, page numbers start after one cover page: " + lines.join(" | "));
-  ok(lines.slice(not + 1).join("|") === "GONE — Mystery — Not in the catalog.|BAD — Broken PDF — Datasheet PDF could not be merged.", "#296 rack zip: gaps are listed with their reason, in order");
-  const two = c296zCover([{ sku: "AMP-A", label: "Power amp", pageCount: 3 }, { sku: "X", label: "X", pageCount: 1 }], "R — datasheets", 2);
-  ok(two.includes("AMP-A — Power amp — page 3") && two.includes("X — X — page 6"), "#296 rack zip: page numbers are offset by the cover page count");
-  const none = c296zCover([{ sku: "Q", label: "Q", pageCount: null, reason: "No datasheet on file." }], "R — datasheets", 1);
-  ok(none[none.indexOf("Included") + 1] === "None." && none.includes("Q — Q — No datasheet on file."), "#296 rack zip: no datasheets reads None. and still lists the gap");
+  ok(inc === 0 && not > inc, "#296 rack zip: the cover lists Included before Not included");
+  ok(lines.slice(inc + 1, not - 1).join("|") === "Alpha — D-1 — DSP — page 2|Alpha — S-9 — Switch — page 2|Zeta — Z-2 — Power amp — page 4", "#296 rack zip: index lines in book order, a shared sheet is one page for both parts, numbers start after one cover page: " + lines.join(" | "));
+  ok(lines.slice(not + 1).join("|") === "Beta — B — Broken PDF — Could not be read|Unknown manufacturer — — — Mystery — Not a catalog part", "#296 rack zip: gaps are listed with their reason, unknown manufacturer last");
+  const two = c296zBookLines(c296zBookIndex(plan, new Map([["PD-amp", 3], ["PD-dsp", 1], ["PD-bad", 1]]), new Map(), 2));
+  ok(two.includes("Alpha — D-1 — DSP — page 3") && two.includes("Beta — B — Broken PDF — page 4") && two.includes("Zeta — Z-2 — Power amp — page 5"), "#296 rack zip: page numbers are offset by the cover page count");
+  const none = c296zBookLines(c296zBookIndex(c296zPlan([{ sku: "Q", mfr: "", model: "", desc: "Q", docId: null, reason: "No datasheet on file" }]), new Map(), new Map(), 1));
+  ok(none[none.indexOf("Included") + 1] === "None." && none.includes("Unknown manufacturer — — — Q — No datasheet on file"), "#296 rack zip: no datasheets reads None. and still lists the gap");
+  const rs = readFileSync(join(process.cwd(), "src/lib/rack/submittal-server.ts"), "utf8");
+  ok(rs.includes("planDatasheetBook(bookParts)") && rs.includes("for (const id of plan.docOrder)") && rs.includes("buildDatasheetBook(") && !rs.includes("function mergeDatasheets(") && !rs.includes("submittal.datasheetSkus) {"),
+    "#296 rack zip (#329): the rack reads its datasheets in the book's manufacturer order and merges through the shared builder");
 
   ok(c296zDeadline === 90_000, "#296 rack zip: the render deadline is 90 s");
   const rdz = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -46108,23 +46117,21 @@ async function c296zTinyPdf(pages: number): Promise<Buffer> {
 }
 
 async function rack296ZipAsyncChecks(): Promise<void> {
-  // mergeDatasheets: two real PDFs, a missing one and a corrupt one.
+  // The shared book (#329; was mergeDatasheets): two real PDFs, a missing one and a corrupt one.
   const one = await c296zTinyPdf(1), two = await c296zTinyPdf(2);
-  const failed: string[] = [];
-  const merged = await c296zMerge([
-    { sku: "A", label: "Amp", bytes: one },
-    { sku: "N", label: "Nothing", bytes: null, reason: "No datasheet on file." },
-    { sku: "C", label: "Corrupt", bytes: Buffer.from("not a pdf at all") },
-    { sku: "B", label: "Box", bytes: two },
-  ], "Test rack — datasheets", (e) => failed.push(e.sku));
-  const back = await C296zPdf.load(merged);
-  ok(back.getPageCount() === 1 + 1 + 2, "#296 rack zip: merged = one cover page + 1 + 2 datasheet pages, got " + back.getPageCount());
-  ok(failed.join() === "C", "#296 rack zip: a corrupt PDF is reported as a gap, not thrown");
-  const many = Array.from({ length: 70 }, (_, i) => ({ sku: `S-${i}`, label: "A long part name ".repeat(i % 3 ? 1 : 12), bytes: null, reason: "No datasheet on file." }));
-  const big = await C296zPdf.load(await c296zMerge([{ sku: "A", label: "Amp", bytes: one }, ...many], "Long — datasheets"));
-  ok(big.getPageCount() >= 3, "#296 rack zip: a long gap list spills onto more cover pages, got " + big.getPageCount());
-  const odd = await c296zMerge([{ sku: "Ω-1 → ≤", label: "Ünïcode ✓ 中文", bytes: null, reason: "No datasheet on file." }], "Rack ☃ — datasheets");
-  ok((await C296zPdf.load(odd)).getPageCount() === 1, "#296 rack zip: characters Helvetica can't draw are replaced, never thrown");
+  const merged = await c296zBook({ subtitleLines: ["Test rack — rack submittal"], parts: [
+    { sku: "A", mfr: "M", model: "A", desc: "Amp", docId: "PD-a" },
+    { sku: "N", mfr: "M", model: "N", desc: "Nothing", docId: null, reason: "No datasheet on file" },
+    { sku: "C", mfr: "M", model: "C", desc: "Corrupt", docId: "PD-c" },
+    { sku: "B", mfr: "M", model: "B", desc: "Box", docId: "PD-b" },
+  ], docs: new Map([["PD-a", { bytes: one }], ["PD-c", { bytes: Buffer.from("not a pdf at all") }], ["PD-b", { bytes: two }]]) });
+  ok(merged.ok && (await C296zPdf.load(merged.bytes)).getPageCount() === 1 + 1 + 2, "#296 rack zip: merged = one cover page + 1 + 2 datasheet pages, got " + (merged.ok ? merged.pageCount : merged.detail));
+  ok(merged.ok && merged.unmergeable.join() === "PD-c", "#296 rack zip: a corrupt PDF is reported as a gap, not thrown");
+  const many = Array.from({ length: 70 }, (_, i) => ({ sku: `S-${i}`, mfr: "M", model: `S-${i}`, desc: "A long part name ".repeat(i % 3 ? 1 : 12), docId: null, reason: "No datasheet on file" }));
+  const big = await c296zBook({ subtitleLines: ["Long"], parts: [{ sku: "A", mfr: "M", model: "A", desc: "Amp", docId: "PD-a" }, ...many], docs: new Map([["PD-a", { bytes: one }]]) });
+  ok(big.ok && big.frontPages >= 2 && (await C296zPdf.load(big.bytes)).getPageCount() === big.frontPages + 1, "#296 rack zip: a long gap list spills onto more cover pages, got " + (big.ok ? big.frontPages : big.detail));
+  const odd = await c296zBook({ subtitleLines: ["Rack ☃"], parts: [{ sku: "Ω-1 → ≤", mfr: "Ünïcode ✓", model: "中文", desc: "Ünïcode ✓ 中文", docId: null, reason: "No datasheet on file" }], docs: new Map(), emptyOk: true });
+  ok(odd.ok && (await C296zPdf.load(odd.bytes)).getPageCount() === 1, "#296 rack zip: characters Helvetica can't draw are replaced, never thrown");
 
   // rackSubmittalFiles against a real rack record.
   const { fixtureId: fid, registerFixture: reg } = await import("./test-fixtures");
@@ -52732,7 +52739,7 @@ import { createElement as createElement301cz } from "react";
 import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/server";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(e301czPath("Q-2041", 3, true) === "estimate-package/Q-2041/rev-3-h1.zip" && e301czPath("Q 1/x", 1, false) === "estimate-package/Q_1_x/rev-1-h0.zip" &&
+  ok(e301czPath("Q-2041", 3, true) === "estimate-package/Q-2041/rev-3-h1-v2.zip" && e301czPath("Q 1/x", 1, false) === "estimate-package/Q_1_x/rev-1-h0-v2.zip" &&
      e301czName("EST-1042", 2) === "EST-1042 Rev 2 package.zip" && e301czDocMax === 25 * 1024 * 1024 && e301czTotalMax === 60 * 1024 * 1024 && e301czDeadline === 45_000,
     "#301 zip: the cache path per (quote, rev), the download name, the rack caps");
   const lo = e301czLeftOut([{ name: "datasheets/Big.pdf", reason: e301czReason.tooBig }]);
@@ -52884,7 +52891,7 @@ async function e301cZipAsyncChecks(): Promise<void> {
   ok(puts.length === 0 && cached === null && deferred.length === 1, "#301 zip (serve): the cache write is deferred, not awaited before the response");
   await deferred.shift()!();
   const r2 = await Z.servePackageZip(pkg, { ...deps, defer });
-  ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}-h1.zip` && (await r2.text()) === "ZIP" &&
+  ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}-h1-v2.zip` && (await r2.text()) === "ZIP" &&
      /attachment; filename="EST-\d+ Rev 1 package\.zip"/.test(r1.headers.get("content-disposition") || "") && r1.headers.get("content-type") === "application/zip",
     "#301 zip (serve): the first download builds and caches; the second streams the cache");
   const failDefer: Array<() => Promise<void>> = [];
@@ -66618,7 +66625,13 @@ async function gridNotes9Checks(): Promise<void> {
   const { renderSpecHtml } = await import("@/lib/bid-spec");
   const { normalizeSpecDocument } = await import("@/lib/specs/spec-document");
   const CPS = await import("@/lib/client-package-server");
-  const { mergeDatasheets } = await import("@/lib/rack/submittal-server");
+  // #329: the rack index is the shared datasheet book now (mergeDatasheets moved into buildDatasheetBook).
+  const { buildDatasheetBook: book9 } = await import("@/lib/part-docs/datasheet-book-server");
+  const mergeDatasheets = async (_entries: unknown[], title: string, _onBad?: unknown, o: { letterhead?: Parameters<typeof book9>[0]["letterhead"] } = {}): Promise<Buffer> => {
+    const r = await book9({ subtitleLines: [title], parts: [], docs: new Map(), emptyOk: true, letterhead: o.letterhead ?? null });
+    if (!r.ok) throw new Error(`rack index not built: ${r.detail}`);
+    return r.bytes;
+  };
   const { PDFDocument, PDFName } = await import("pdf-lib");
   const Settings = await import("@/lib/settings");
   const src9 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -66834,4 +66847,292 @@ async function gridNotes9Checks(): Promise<void> {
   const om9 = src9("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx");
   ok(!om9.includes("cur === null ? true : cur") && !om9.includes("peakHeader ?? true") && om9.includes("buildClientPackage(peakHeader ?? undefined)") && om9.includes("if (live) setHeaderUnknown(true);"),
     "Grid notes #9 review: if the default can't be read the Grid menu sends nothing (the server applies the default), never a guessed ON");
+}
+
+/* ======================================================================
+   #329 — the datasheet book: one merged Datasheets.pdf per package (cover
+   + index + every datasheet, manufacturer A→Z, "Page N of M" on every
+   page), loose datasheets named "<Manufacturer> - <file>", on the Grid and
+   quote client packages, the estimate package zip and the rack submittal.
+   ====================================================================== */
+import {
+  BOOK_FILE_NAME as b329File, BOOK_REASON as b329Reason, bookDate as b329Date, bookIndex as b329Index, bookIndexLines as b329Lines,
+  bookPartOf as b329PartOf, bookSummary as b329Summary, datasheetLooseName as b329Loose, planDatasheetBook as b329Plan,
+  sortPartsForBook as b329Sort, zipEntrySafe as b329Safe, type BookPart as B329Part,
+} from "@/lib/part-docs/datasheet-book";
+import { datasheetEntryName as b329Entry } from "@/lib/part-docs/package";
+import { PACKAGE_BOOK_MS as b329BookMs, PACKAGE_ZIP_DEADLINE_MS as b329ZipMs } from "@/lib/estimate-output/package-zip";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const P = (sku: string, mfr: string, model: string, docId: string | null, extra: Partial<B329Part> = {}): B329Part => ({ sku, mfr, model, desc: `${sku} desc`, docId, ...extra });
+  const sorted = b329Sort([
+    P("Z1", "Zeta", "Z", "D-z"),
+    P("N1", "", "", null, { reason: b329Reason.noDatasheet }),
+    P("E10", "etc", "S4 Lens Tube 10", "D-s4"),
+    P("E2", "ETC", "S4 Lens Tube 2", "D-s4"),
+    P("E0", "ETC", "ColorSource Spot", "D-cs"),
+    P("A1", "Alpha", "", "D-a"),
+    P("N0", "  ", "", null, { reason: b329Reason.noDatasheet }),
+  ]);
+  ok(sorted.map((p) => p.sku).join() === "A1,E0,E2,E10,Z1,N0,N1",
+    "#329 book sort: manufacturer A→Z case-insensitive, then model numeric-aware (Lens 2 < Lens 10), blank manufacturer LAST: " + sorted.map((p) => p.sku).join());
+  ok(sorted.find((p) => p.sku === "E10")?.mfrLabel === "ETC" && sorted.find((p) => p.sku === "N1")?.mfrLabel === "Unknown manufacturer" && sorted.find((p) => p.sku === "A1")?.model === "",
+    "#329 book sort: 'etc' and 'ETC' are one group printed by its most common spelling; blank prints Unknown manufacturer");
+
+  // A shared sheet prints once; every part on it (and an accessory covered by it) points at its one page.
+  const parts: B329Part[] = [
+    P("FIX", "ETC", "S4 26", "D-s4"),
+    P("LENS", "ETC", "S4 Lens Tube 10", "D-s4", { coveredBy: ["FIX"] }),
+    P("CON", "Behringer", "X32", "D-x32"),
+    P("RACK", "Behringer", "X32 Rack", "D-x32"),
+    P("BAD", "Clear-Com", "FS II", "D-bad"),
+    P("GONE", "Meyer Sound", "UPA", "D-gone"),
+    P("CBL", "", "", null, { reason: b329Reason.noDatasheet }),
+    P("PIPE", "Rose Brand", "Pipe", null, { reason: b329Reason.notNeeded }),
+  ];
+  const plan = b329Plan(parts);
+  ok(plan.docOrder.join() === "D-x32,D-bad,D-s4,D-gone" && plan.docMfr.get("D-s4") === "ETC" && plan.docMfr.get("D-x32") === "Behringer",
+    "#329 plan: each datasheet once, in manufacturer order, at its first part: " + plan.docOrder.join());
+  const idx = b329Index(plan, new Map([["D-x32", 3], ["D-s4", 2], ["D-bad", 0]]), new Map([["D-bad", b329Reason.unreadable], ["D-gone", b329Reason.missing]]), 2);
+  const pg = (sku: string) => idx.included.find((r) => r.sku === sku)?.page;
+  ok(pg("CON") === 3 && pg("RACK") === 3 && pg("FIX") === 6 && pg("LENS") === 6 && idx.startPage.size === 2 && idx.datasheets === 2 && idx.totalPages === 7,
+    "#329 index: front pages count, a doc shared by two SKUs and a covered accessory all start on the same page, totals right");
+  ok(idx.notIncluded.map((r) => `${r.sku}:${r.reason}`).join() === "BAD:Could not be read,GONE:File missing,PIPE:Datasheet not required,CBL:No datasheet on file",
+    "#329 index: Not included rows carry the doc's reason, then the part's own (blank manufacturer last)");
+  ok(idx.included.map((r) => r.groupStart).join() === "true,false,true,false" && idx.notIncluded[0].groupStart,
+    "#329 index: a manufacturer group header starts each group in each section");
+  const lines = b329Lines(idx);
+  ok(lines[1] === "Behringer — X32 — CON desc — page 3" && lines.includes("Not included") && lines.includes("Unknown manufacturer — — — CBL desc — No datasheet on file"),
+    "#329 index lines: Manufacturer — Model — Description — page N");
+  ok(b329Summary(1, 1, 1) === "1 part · 1 datasheet · 1 page" && b329Summary(12, 8, 64) === "12 parts · 8 datasheets · 64 pages", "#329 cover: the summary line");
+  ok(b329Date(Date.UTC(2026, 9, 13, 3, 0)) === "October 12, 2026", "#329 cover: the date is America/Chicago");
+
+  // bookPartOf: a catalog row → its book row.
+  const own = b329PartOf({ sku: "Symetrix:Jupiter 4", desc: "row" }, { sku: "Symetrix:Jupiter 4", desc: "DSP", mfr: " Symetrix " }, { datasheet: { documentId: "PD-1" }, datasheetOk: true });
+  const cov = b329PartOf({ sku: "LENS", desc: "Lens" }, { sku: "LENS", mfr: "ETC", manufacturerModelNumber: "S4 Lens 10" }, { datasheet: { documentId: "PD-FIX" }, datasheetCoveredBy: ["FIX"], datasheetOk: true });
+  const notNeeded = b329PartOf({ sku: "PIPE", desc: "Pipe" }, { sku: "PIPE", mfr: "Rose" }, { datasheet: null, datasheetOk: true });
+  const none = b329PartOf({ sku: "X", desc: "X" }, { sku: "X" }, { datasheet: null, datasheetOk: false });
+  const curtain = b329PartOf({ sku: "pl-123", desc: "Main curtain" }, null, null);
+  ok(own.mfr === "Symetrix" && own.model === "Jupiter 4" && own.docId === "PD-1" && cov.docId === "PD-FIX" && cov.coveredBy?.join() === "FIX" && cov.model === "S4 Lens 10" &&
+     notNeeded.reason === b329Reason.notNeeded && none.reason === b329Reason.noDatasheet && curtain.reason === b329Reason.notCatalog && curtain.model === "" && curtain.desc === "Main curtain",
+    "#329 bookPartOf: #304 model, a covered accessory points at its fixture's doc, not-needed vs no-datasheet, a non-catalog row");
+
+  // Loose datasheet names sort by manufacturer.
+  ok(b329Loose("ETC", "ColorSource Spot.pdf") === "ETC - ColorSource Spot.pdf" && b329Loose("ETC", "ETC_S4_Datasheet.pdf") === "ETC - S4_Datasheet.pdf" &&
+     b329Loose("Meyer Sound", "meyer-sound-ultra.pdf") === "Meyer Sound - ultra.pdf" && b329Loose("", "S4 Datasheet.pdf") === "S4 Datasheet.pdf" &&
+     b329Loose("ETC", "ETC.pdf") === "ETC - ETC.pdf" && b329Loose("A/B", "x:y.pdf") === "A_B - x_y.pdf" && b329Safe("") === "file" && b329Safe("a".repeat(200) + ".pdf").length === 140 && b329Safe("a".repeat(200) + ".pdf").endsWith(".pdf"),
+    "#329 loose names: '<Manufacturer> - <file>', the manufacturer never doubled, blank keeps the file name, path characters sanitized, length capped with the extension kept");
+  const used = new Set<string>();
+  const names = [
+    b329Entry({ documentId: "PD-z", kind: "datasheet", name: "amp.pdf" }, "Zeta", used),
+    b329Entry({ documentId: "PD-a", kind: "datasheet", name: "zz-console.pdf" }, "Allen & Heath", used),
+    b329Entry({ documentId: "PD-b", kind: "datasheet", name: "zz-console.pdf" }, "Allen & Heath", used),
+  ];
+  ok(names.join("|") === "datasheets/Zeta - amp.pdf|datasheets/Allen & Heath - zz-console.pdf|datasheets/PD-b-Allen & Heath - zz-console.pdf" && [...names].sort()[0].includes("Allen & Heath - zz"),
+    "#329 loose names: under datasheets/, sorting by manufacturer; a clash keeps packageEntryName's id prefix: " + names.join("|"));
+
+  // Wiring pins.
+  const cps = rd("src/lib/client-package-server.ts");
+  const grid = cps.slice(cps.indexOf("export async function createClientPackage("), cps.indexOf("/** Build the same package from a quote"));
+  const quote = cps.slice(cps.indexOf("export async function createQuoteClientPackage("));
+  ok(cps.includes("datasheetEntryName(doc, plan.docMfr.get(doc.documentId)") && [grid, quote].every((b) => b.includes("planDatasheetBook(bookParts)") && b.includes("addBook(await bookP, files, gaps)") && b.indexOf("packageBook(") < b.indexOf("addCutSheets(") && b.indexOf("addBook(") > b.indexOf("addRacks(")),
+    "#329 packages: both client packages name loose datasheets by manufacturer, start the book before the renders and add it after the racks (one read of the bytes)");
+  const zs = rd("src/lib/estimate-output/package-zip-server.ts");
+  ok(zs.includes("datasheetEntryName(doc, bookPlan.docMfr.get(doc.documentId)") && zs.includes("{ name: BOOK_FILE_NAME, data: built.bytes }") && zs.includes("Math.max(deadline, d.now()) + PACKAGE_BOOK_MS") && b329File === "Datasheets.pdf",
+    "#329 estimate zip: Datasheets.pdf at the root from the bytes already read, on its own budget after the reads");
+  const zipRoute = rd("src/app/share/quote/[id]/[token]/package.zip/route.ts");
+  ok(Number(/export const maxDuration = (\d+)/.exec(zipRoute)?.[1]) * 1000 >= b329ZipMs + b329BookMs + 15_000,
+    "#329 estimate zip: reads (45 s) + the book (30 s) + 15 s for the zip still fit the route's maxDuration");
+  const cs = rd("src/lib/curtain-cut-sheets/package-sheets.ts");
+  ok(cs.includes("export const PACKAGE_MAX_DURATION_MS = 120_000") && cs.includes("export const CUT_SHEET_DEADLINE_MS = 75_000") && grid.includes("cutSheetsBy, `[package] grid"),
+    "#329 packages: the client-package book merges on the 75 s render deadline, so the 25 s finish allowance inside the 120 s pages is untouched");
+}
+
+/** Every page's drawn Helvetica text (pdf-lib writes hex strings), decoded. */
+async function b329PageTexts(pdf: Uint8Array): Promise<string[]> {
+  const { PDFDocument, PDFArray, PDFRawStream, decodePDFRawStream } = await import("pdf-lib");
+  const doc = await PDFDocument.load(pdf);
+  return doc.getPages().map((page) => {
+    const c = page.node.Contents();
+    const refs = c instanceof PDFArray ? c.asArray() : c ? [c] : [];
+    let raw = "";
+    for (const ref of refs) {
+      const st = doc.context.lookup(ref);
+      if (st instanceof PDFRawStream) raw += Buffer.from(decodePDFRawStream(st).decode()).toString("latin1");
+    }
+    // WinAnsi: 0x97 is the em dash, 0x85 the ellipsis; the rest of what we draw is Latin-1.
+    return [...raw.matchAll(/<([0-9A-Fa-f]*)>\s*Tj/g)].map((m) => Buffer.from(m[1], "hex").toString("latin1").replace(/\u0097/g, "—").replace(/\u0085/g, "…")).join("\n");
+  });
+}
+
+async function b329Sheet(pages: Array<{ size: [number, number]; rotate?: number; crop?: [number, number, number, number] }>): Promise<Buffer> {
+  const { PDFDocument, degrees } = await import("pdf-lib");
+  const d = await PDFDocument.create();
+  for (const p of pages) {
+    const page = d.addPage(p.size);
+    if (p.crop) page.setCropBox(...p.crop);
+    if (p.rotate) page.setRotation(degrees(p.rotate));
+  }
+  return Buffer.from(await d.save());
+}
+
+async function datasheetBook329Checks(): Promise<void> {
+  const { PDFDocument } = await import("pdf-lib");
+  const { buildDatasheetBook, stampPage } = await import("@/lib/part-docs/datasheet-book-server");
+  const L: [number, number] = [612, 792];
+  const docs = new Map([
+    ["D-s4", { bytes: await b329Sheet([{ size: L }, { size: L }]) }],
+    ["D-cs", { bytes: await b329Sheet([{ size: [792, 612] }]) }],
+    ["D-x32", { bytes: await b329Sheet([{ size: L, rotate: 90 }, { size: L, rotate: 270, crop: [36, 36, 540, 720] }]) }],
+    ["D-m", { bytes: await b329Sheet([{ size: [1224, 792], rotate: -90 }]) }],
+    ["D-bad", { bytes: Buffer.from("not a pdf") }],
+  ]);
+  const parts: B329Part[] = [
+    { sku: "FIX", mfr: "ETC", model: "S4 26", desc: "Source Four", docId: "D-s4" },
+    { sku: "LENS", mfr: "Etc", model: "S4 Lens 10", desc: "Lens", docId: "D-s4", coveredBy: ["FIX"] },
+    { sku: "CS", mfr: "ETC", model: "ColorSource Spot", desc: "CS Spot", docId: "D-cs" },
+    { sku: "X32", mfr: "Behringer", model: "X32", desc: "Console", docId: "D-x32" },
+    { sku: "X32R", mfr: "Behringer", model: "X32 Rack", desc: "Rack console", docId: "D-x32" },
+    { sku: "M", mfr: "Meyer Sound", model: "ULTRA", desc: "Speaker", docId: "D-m" },
+    { sku: "BAD", mfr: "Clear-Com", model: "FS", desc: "Beltpack", docId: "D-bad" },
+    { sku: "CBL", mfr: "", model: "", desc: "Cable", docId: null, reason: b329Reason.noDatasheet },
+  ];
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const book = await buildDatasheetBook({ subtitleLines: ["Lincoln HS — Auditorium", "", "Lincoln Public Schools", "Estimate EST-1042 · Rev 2", "October 12, 2026"], parts, docs });
+    ok(book.ok, "#329 build: the book builds from real fixture PDFs");
+    if (!book.ok) return;
+    const back = await PDFDocument.load(book.bytes);
+    const n = back.getPageCount();
+    ok(n === book.pageCount && n === book.frontPages + 2 + 2 + 1 + 1 && book.frontPages === 1 && book.unmergeable.join() === "D-bad",
+      "#329 build: cover + every datasheet once (x32 2 + cs 1 + s4 2 + meyer 1), the corrupt file is unmergeable, never thrown: " + n);
+    const texts = await b329PageTexts(book.bytes);
+    ok(texts.every((t, i) => t.includes(`Page ${i + 1} of ${n}`)), "#329 stamps: 'Page N of M' is drawn on EVERY page (cover and each datasheet page)");
+    const cover = texts[0];
+    ok(cover.includes("Product Datasheets") && cover.includes("Lincoln HS — Auditorium") && cover.includes("Estimate EST-1042 · Rev 2") &&
+       cover.includes("8 parts · 4 datasheets · 7 pages") && cover.indexOf("Behringer") < cover.indexOf("ETC") && cover.indexOf("ETC") < cover.indexOf("Meyer Sound") &&
+       cover.includes("Not included") && cover.includes("Could not be read") && cover.includes("Unknown manufacturer") && cover.includes("No datasheet on file"),
+      "#329 cover: title, job lines, the summary, the index A→Z by manufacturer and the Not included section with reasons");
+    // Page order: Behringer (x32: rotated 90, rotated 270 + crop), ETC CS (landscape), ETC S4 (2), Meyer (-90).
+    const pages = back.getPages();
+    const rot = (i: number) => pages[i].getRotation().angle;
+    const box = (i: number) => { const b = pages[i].getMediaBox(); return `${b.width}x${b.height}`; };
+    ok(rot(1) === 90 && rot(2) === 270 && box(3) === "792x612" && rot(3) === 0 && rot(6) === -90 && box(6) === "1224x792" && pages[2].getCropBox().width === 540,
+      "#329 stamps: rotated, cropped and landscape pages keep their rotation and size, in manufacturer order");
+    ok(texts[1].includes("Page 2 of 7") && !texts[1].includes("Product Datasheets"), "#329 build: datasheet pages carry only the stamp of ours");
+    // The stamp sits on the VISUAL bottom: x-max on a 90° page, x-min on a 270° page (inside its crop box).
+    const at = async (rotate: number, crop?: [number, number, number, number]) => {
+      const d = await PDFDocument.create();
+      const p = d.addPage(L);
+      if (crop) p.setCropBox(...crop);
+      const { degrees, StandardFonts } = await import("pdf-lib");
+      if (rotate) p.setRotation(degrees(rotate));
+      const calls: Array<{ x: number; y: number; r: number }> = [];
+      const orig = p.drawText.bind(p);
+      p.drawText = ((t: string, o: { x: number; y: number; rotate?: { angle: number } }) => { calls.push({ x: o.x, y: o.y, r: o.rotate?.angle ?? 0 }); orig(t, o as never); }) as never;
+      stampPage(p, "Page 1 of 1", await d.embedFont(StandardFonts.Helvetica));
+      return calls[0];
+    };
+    const s0 = await at(0), s90 = await at(90), s180 = await at(180), s270 = await at(270, [36, 36, 540, 720]), sNeg = await at(-90);
+    ok(s0.y === 18 && s0.r === 0 && s90.x === 612 - 18 && s90.r === 90 && s180.y === 792 - 18 && s180.r === 180 && s270.x === 36 + 18 && s270.r === 270 && sNeg.r === 270 && sNeg.x === 18,
+      "#329 stamps: 18 pt above the visual bottom edge for 0/90/180/270 (and -90) rotations, inside the crop box");
+
+    // Guards: too big, late, nothing merged.
+    const big = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs, maxBytes: 100 });
+    const late = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs, deadline: 5, now: () => 10 });
+    const empty = await buildDatasheetBook({ subtitleLines: ["x"], parts: [parts[6]], docs });
+    ok(!big.ok && big.cause === "too-big" && !late.ok && late.cause === "late" && !empty.ok && empty.cause === "failed",
+      "#329 guards: over the size cap, past the deadline, or nothing merged → { ok: false } (the caller ships the loose files + a note), never a throw");
+    const jpg = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/letter/peak-letterhead.jpg"));
+    const bad = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs, letterhead: { companyName: "Peak", image: { jpeg: Buffer.from("nope"), png: Buffer.from("nope"), full: false, w: 10, h: 10 } } });
+    const badText = bad.ok ? (await b329PageTexts(bad.bytes))[0] : "";
+    ok(bad.ok && badText.includes("Peak"), "#329 build: an unreadable letterhead image falls back to the company name in type; the book still builds");
+    // Grid notes #9: the committed baked letterhead stands in for the document letterhead.
+    const withLogo = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs, letterhead: { companyName: "Peak Systems Group", image: { jpeg: jpg, png: null, full: true, w: 2179, h: 275 } } });
+    const typed = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs, letterhead: { companyName: "Peak Systems Group", image: null } });
+    const typedText = typed.ok ? (await b329PageTexts(typed.bytes))[0] : "";
+    ok(withLogo.ok && withLogo.bytes.length > book.bytes.length + 1000 && typed.ok && typedText.includes("Peak Systems Group") && !cover.includes("Peak Systems Group"),
+      "#329 letterhead: the document letterhead heads the cover (image, or the company name in type); none when the header is off");
+  } finally {
+    console.warn = warn;
+  }
+
+  // A long index spills onto more front pages; page numbers count them.
+  {
+    const many: B329Part[] = Array.from({ length: 90 }, (_, i) => ({ sku: `S${i}`, mfr: `Maker ${i % 7}`, model: `M-${i}`, desc: "A long part description ".repeat(i % 4 ? 1 : 6), docId: i % 3 ? "D-cs" : null, reason: b329Reason.noDatasheet }));
+    const r = await buildDatasheetBook({ subtitleLines: ["Long"], parts: many, docs: new Map([["D-cs", docs.get("D-cs")!]]) });
+    ok(r.ok && r.frontPages >= 2 && r.pageCount === r.frontPages + 1 && r.index.included.every((x) => x.page === r.frontPages + 1),
+      "#329 build: a long index spills onto more front pages and every page number counts them: " + (r.ok ? `${r.frontPages} front` : r.detail));
+    if (r.ok) {
+      const t = await b329PageTexts(r.bytes);
+      ok(t.every((x, i) => x.includes(`Page ${i + 1} of ${r.pageCount}`)) && t[1].includes("index (continued)") && t[1].includes("MANUFACTURER"),
+        "#329 build: continuation pages repeat the table header, and every page is stamped");
+    }
+  }
+
+  // The quote client package: Datasheets.pdf + manufacturer-named loose files + the index flag.
+  const { fixtureId } = await import("./test-fixtures");
+  const C = await import("@/lib/stores/catalog");
+  const D = await import("@/lib/stores/part-documents");
+  const Q = await import("@/lib/stores/quotes");
+  const CPS = await import("@/lib/client-package-server");
+  const Z = await import("@/lib/estimate-output/package-zip-server");
+  const ZA = fixtureId(329, "zulu"), AL = fixtureId(329, "alpha"), AL2 = fixtureId(329, "alpha2"), NO = fixtureId(329, "none");
+  await C.upsert({ sku: ZA, desc: "Zulu amp", category: "Audio", unit: "ea", list: 10, cost: 5, mfr: "Zulu Audio", manufacturerModelNumber: "ZA-10" });
+  await C.upsert({ sku: AL, desc: "Alpha spot", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "alpha lighting", manufacturerModelNumber: "AS-2" });
+  await C.upsert({ sku: AL2, desc: "Alpha spot XL", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "Alpha Lighting", manufacturerModelNumber: "AS-10" });
+  await C.upsert({ sku: NO, desc: "Mystery cable", category: "Cable", unit: "ea", list: 1, cost: 1 });
+  for (const s of [ZA, AL, AL2, NO]) registerFixture("catalog_parts", s);
+  const mkDoc = async (skus: string[], fileName: string, pages: number) => {
+    const bytes = await b329Sheet(Array.from({ length: pages }, () => ({ size: L })));
+    const d = await D.createDocument({ kind: "datasheet", fileName, contentType: "application/pdf", size: bytes.length, blobKey: `part-docs/PD-fixture-329/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#329: fixture document failed");
+    registerFixture("part_documents", d.id);
+    await D.attachDocument(d.id, skus, "Test");
+    for (const s of skus) registerFixture("part_document_links", D.documentLinkId(s, d.id));
+    return { id: d.id, bytes };
+  };
+  const zDoc = await mkDoc([ZA], "zulu-za10.pdf", 2);
+  const aDoc = await mkDoc([AL, AL2], "Alpha_Lighting_AS.pdf", 1);
+  const blobs = new Map([[`part-docs/PD-fixture-329/zulu-za10.pdf`, zDoc.bytes], [`part-docs/PD-fixture-329/Alpha_Lighting_AS.pdf`, aDoc.bytes]]);
+  const read = async (key: string) => (blobs.has(key) ? new Response(new Uint8Array(blobs.get(key)!)).body : null);
+  const QID = fixtureId(329, "quote");
+  const line = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 });
+  await Q.create({ id: QID, name: "#329 book", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+    spec: { sections: [{ id: "s1", name: "Gear", kind: "materials", mfr: "", freightPct: 0, items: [line(1, ZA), line(2, AL), line(3, NO), line(4, AL2)] }], mobs: [] } });
+  registerFixture("quotes", QID);
+  const stored: Buffer[] = [];
+  const quote = (await Q.get(QID))!;
+  const pkg = await CPS.createQuoteClientPackage(quote, "Tester", { deps: {
+    blobOn: () => true,
+    put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; },
+    save: async (input) => ({ ...input, id: "PKG-329", createdAt: 0 }),
+    secret: () => "s329",
+    findGrid: async () => null,
+    readDoc: read,
+  } });
+  const files = zipNamesGn7(stored[stored.length - 1]);
+  const names = files.map((f) => f.name);
+  const ds = names.filter((x) => x.startsWith("datasheets/"));
+  ok(ds.join("|") === "datasheets/Alpha Lighting - AS.pdf|datasheets/Zulu Audio - zulu-za10.pdf" && names.includes("Datasheets.pdf") && pkg.record.datasheetCount === 2,
+    "#329 quote package: loose datasheets are '<Manufacturer> - <file>' in manufacturer order (one shared sheet once), plus Datasheets.pdf: " + names.join("|"));
+  const idxJson = JSON.parse(files.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { datasheetBook?: string };
+  const qBook = files.find((f) => f.name === "Datasheets.pdf")!.data;
+  const qTexts = await b329PageTexts(qBook);
+  ok(idxJson.datasheetBook === "Datasheets.pdf" && qTexts.length === 4 && qTexts[0].includes("Estimate ") && qTexts[0].indexOf("Alpha Lighting") < qTexts[0].indexOf("Zulu Audio") &&
+     qTexts[0].includes("AS-2") && qTexts[0].includes("AS-10") && qTexts[0].includes("Unknown manufacturer") && qTexts.every((t, i) => t.includes(`Page ${i + 1} of 4`)),
+    "#329 quote package: the book = cover + Alpha (1) + Zulu (2), both Alpha parts on one page, the gap row last, every page stamped");
+
+  // The estimate package zip (C): Datasheets.pdf next to the loose files; cache key bumped.
+  await Q.update(QID, { status: "sent" });
+  const rev = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
+  const q2 = (await Q.get(QID))!;
+  const built = await Z.buildRevisionPackageZip(q2, rev, { read: async (key) => read(key), sections: async () => [], letterhead: async () => null });
+  const zNames = built ? zipNamesGn7(built.zip).map((f) => f.name) : [];
+  ok(!!built && built.book === true && zNames[0] === "Datasheets.pdf" && zNames.includes("datasheets/Alpha Lighting - AS.pdf") && zNames.includes("datasheets/Zulu Audio - zulu-za10.pdf") && !zNames.includes("LEFT OUT.txt"),
+    "#329 estimate zip: Datasheets.pdf at the root, loose datasheets named by manufacturer, nothing left out: " + zNames.join("|"));
+  const noBook = await Z.buildRevisionPackageZip(q2, rev, { read: async (key) => (key.includes("zulu") ? read(key) : null), sections: async () => [], letterhead: async () => null, now: (() => { let t = 0; return () => (t += 1_000); })() });
+  ok(!!noBook && noBook.book === true && noBook.leftOut.some((l) => l.name === "datasheets/Alpha Lighting - AS.pdf"),
+    "#329 estimate zip: a datasheet missing from storage is LEFT OUT under its manufacturer name and indexed as not included; the book still builds");
 }

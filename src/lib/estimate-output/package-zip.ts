@@ -9,6 +9,10 @@ import { quotePathSegment } from "./package-files";
 export const PACKAGE_ZIP_DOC_MAX_BYTES = 25 * 1024 * 1024;
 export const PACKAGE_ZIP_TOTAL_MAX_BYTES = 60 * 1024 * 1024;
 export const PACKAGE_ZIP_DEADLINE_MS = 45_000;
+/** #329 — Datasheets.pdf may merge this long past the read deadline (45 + 30 s, then the zip, inside the route's 120 s). */
+export const PACKAGE_BOOK_MS = 30_000;
+/** #329 — bumped when the zip's contents change, so a cached zip from before (no Datasheets.pdf) is never served. */
+export const PACKAGE_ZIP_CACHE_VERSION = 2;
 export const PACKAGE_ZIP_CACHE_PREFIX = "estimate-package/";
 export const SPEC_DOCX_NAME = "Specifications.docx";
 export const LEFT_OUT_NAME = "LEFT OUT.txt";
@@ -29,9 +33,10 @@ export function packageZipCacheDir(quoteId: string): string {
 /** Grid notes #9 review: keyed by the RESOLVED Peak-header value too (`-h1` /
  *  `-h0`), so a company-default change or a toggle racing a build can never
  *  serve a zip with the wrong header. The header is LIVE, not frozen with the
- *  revision: a toggle after send applies to the next download. */
+ *  revision: a toggle after send applies to the next download. #329: plus the
+ *  contents version (`-v2`, Datasheets.pdf), so a zip cached before is never served. */
 export function packageZipCachePath(quoteId: string, rev: number, peakHeader: boolean): string {
-  return `${packageZipCacheDir(quoteId)}rev-${rev}-h${peakHeader ? 1 : 0}.zip`;
+  return `${packageZipCacheDir(quoteId)}rev-${rev}-h${peakHeader ? 1 : 0}-v${PACKAGE_ZIP_CACHE_VERSION}.zip`;
 }
 
 export function packageZipFileName(number: string, revNo: number): string {
