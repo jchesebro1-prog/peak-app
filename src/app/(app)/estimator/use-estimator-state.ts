@@ -30,6 +30,7 @@ import { fixtureBomLine } from "./fixture-bom";
 import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, applyTravelTripTo, defaultLaborMobs, disciplineForSystemTitle, laborMob, roundTripMiles, typeMobMiles, setRouteMiles } from "./labor-defaults";
 import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, snapshotLaborDraft, withLaborGroup } from "./labor-group";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { normalizePackageSelection, selectionKey, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
@@ -475,7 +476,8 @@ export function useEstimatorState(props: EstimatorProps) {
   const [category, setCategory] = useState(initial.category);
   const categorySaved = useRef(initial.category);
   const [revNum, setRevNum] = useState(initial.revNum);
-  const [, setRevDateMs] = useState(initial.revDateMs);
+  // #333: read by the live BOM quote (Build package → BOM quote), which prints the saved Rev date.
+  const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(initial.pdfOptions.pdfQty);
   const [pdfNotes, setPdfNotes] = useState(initial.pdfOptions.pdfNotes);
   const [pdfCover, setPdfCover] = useState(initial.pdfOptions.pdfCover);
@@ -710,6 +712,60 @@ export function useEstimatorState(props: EstimatorProps) {
   const assumptionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coverSummaryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notIncludedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* #333 (spec §4.4, D-TBD-d) — what the client gets on this project
+     (Quote.packageSelection). Not content: each change writes IMMEDIATELY
+     through the header-meta action (no timer), serialised so the latest value
+     always lands last; it also rides every Save. A new estimate holds it until
+     the first Save. Send & track awaits selectionSettled() so a revision never
+     freezes a choice still in flight (R4). */
+  const [packageSelection, setPackageSelectionState] = useState<PackageSelection>(() => normalizePackageSelection(initial.packageSelection));
+  const selectionLatest = useRef<PackageSelection>(packageSelection);
+  const selectionSentKey = useRef(selectionKey(packageSelection));
+  const selectionChain = useRef<Promise<void>>(Promise.resolve());
+  const selectionInFlight = useRef(0);
+  const [selectionSaving, setSelectionSaving] = useState(false);
+  const [selectionError, setSelectionError] = useState(false);
+  const writeSelection = (next: PackageSelection) => {
+    const value = normalizePackageSelection(next);
+    selectionLatest.current = value;
+    setPackageSelectionState(value);
+    if (!loadedId) return;
+    const id = loadedId;
+    selectionInFlight.current += 1;
+    setSelectionSaving(true);
+    selectionChain.current = selectionChain.current
+      .then(async () => {
+        // Latest wins: a write queued behind another sends the newest value; one already sent is skipped.
+        const latest = selectionLatest.current;
+        const key = selectionKey(latest);
+        if (key === selectionSentKey.current) return;
+        const r = await updateQuoteMetaAction(id, { packageSelection: latest });
+        if (!r || !r.ok) throw new Error("not saved");
+        selectionSentKey.current = key;
+        setSelectionError(false);
+      })
+      .catch(() => setSelectionError(true))
+      .finally(() => {
+        selectionInFlight.current -= 1;
+        if (selectionInFlight.current === 0) setSelectionSaving(false);
+      });
+  };
+  /** Client package → Documents: Estimate PDF / Cover PDF (Send & track defaults) and Drawings. */
+  const setPackageSwitch = (flag: "estimatePdf" | "coverPdf" | "drawings", on: boolean) =>
+    writeSelection({ ...selectionLatest.current, [flag]: on });
+  /** Client package → Datasheets: tick (included) or untick these SKUs. */
+  const setDatasheetsIncluded = (skus: string[], included: boolean) => {
+    const set = new Set(selectionLatest.current.excludedDatasheets);
+    for (const sku of skus) {
+      if (included) set.delete(sku);
+      else set.add(sku);
+    }
+    writeSelection({ ...selectionLatest.current, excludedDatasheets: [...set] });
+  };
+  /** Resolves once every queued selection write has landed (or failed). */
+  const selectionSettled = (): Promise<void> => selectionChain.current;
+
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -745,6 +801,8 @@ export function useEstimatorState(props: EstimatorProps) {
       live = false;
     };
   }, [customerId, loadedId, status, creditSeq]);
+  /** #333: the customer-document perks line for the live BOM quote — only an answer for THIS customer. */
+  const purchasePerksDocLine = creditInfo && customerId && creditInfo.customerId === customerId ? creditInfo.purchasePerksDocLine || "" : "";
   const appliedCredit = rewardCreditOf(sections);
   const applyCredit = (amount: number) =>
     setSections((ss) => withRewardCredit(ss, amount, nextId()));
@@ -1239,6 +1297,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // #301 (R14): the cover fields ride every Save.
           coverSummary,
           notIncluded,
+          // #333: the Client package selection rides every Save (it also autosaves per change).
+          packageSelection,
           // Estimator Phase 5: the package document rides every Save (null = remove it).
           document: docNow,
         });
@@ -3154,6 +3214,15 @@ export function useEstimatorState(props: EstimatorProps) {
     setPackageDocOver,
     packageDocOverDraft,
     packageDocFlushRef,
+    // #333 — Build package tabs.
+    revDateMs,
+    packageSelection,
+    setPackageSwitch,
+    setDatasheetsIncluded,
+    selectionSaving,
+    selectionError,
+    selectionSettled,
+    purchasePerksDocLine,
     trackSummary,
     setTrackSummary,
     packageDoc,

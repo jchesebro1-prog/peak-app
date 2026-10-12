@@ -69719,3 +69719,19 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   const projSrc = readFileSync(join(process.cwd(), "src/lib/estimate-output/bom-projection.ts"), "utf8");
   ok(!/^import /m.test(projSrc), "#333 projection: pure, no imports (client-safe)");
 }
+
+// ---- Task 9: the state hook owns the selection (source pins) ----
+{
+  const hook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+  const saveCall = hook.slice(hook.indexOf("await saveQuoteAction(loadedId, {"), hook.indexOf("document: docNow,", hook.indexOf("await saveQuoteAction(loadedId, {")));
+  ok(/\n\s+packageSelection,\n/.test(saveCall), "#333 hook: the Save payload carries packageSelection");
+  const w0 = hook.indexOf("const writeSelection = ");
+  const writer = hook.slice(w0, hook.indexOf("const selectionSettled", w0));
+  ok(w0 > 0 && !writer.includes("setTimeout") && writer.includes("updateQuoteMetaAction(id, { packageSelection: latest })") && writer.includes("selectionChain.current = selectionChain.current"),
+    "#333 hook: the selection writer is immediate (no timer) and serialised latest-wins through the header-meta action");
+  ok(writer.includes("if (!loadedId) return;"), "#333 hook: a new estimate holds the selection until the first Save");
+  const ret = hook.slice(hook.lastIndexOf("return {"));
+  ok(["packageSelection,", "setPackageSwitch,", "setDatasheetsIncluded,", "selectionSaving,", "selectionError,", "selectionSettled,", "purchasePerksDocLine,", "revDateMs,"].every((k) => ret.includes(k)),
+    "#333 hook: EstimatorState exposes the selection, its setters, selectionSettled and the live BOM's perks line / Rev date");
+  ok(hook.includes("creditInfo && customerId && creditInfo.customerId === customerId ? creditInfo.purchasePerksDocLine"), "#333 hook: the perks line is used only when the credit read is for this customer");
+}
