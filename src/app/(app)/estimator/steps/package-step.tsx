@@ -141,9 +141,12 @@ export function PackageStep({ s }: { s: EstimatorState }) {
    *  paragraph that made it stale). */
   const saveToProduct = useCallback(
     async (sku: string, text: string, expectUpdatedAt: number | null) => {
-      const out = await saveProductParagraphAction(sku, text, expectUpdatedAt);
+      // #332: an assembly line's library row reads its primary member — the paragraph saves to that part.
+      const own = Object.hasOwn(libraryRows, sku) ? libraryRows[sku] : undefined;
+      const target = own?.viaSku || sku;
+      const out = await saveProductParagraphAction(target, text, expectUpdatedAt);
       if (out.ok) {
-        if (out.row) setLibraryRow(sku, out.row);
+        if (out.row) setLibraryRow(sku, target !== sku ? { ...out.row, viaSku: target } : out.row);
       } else if (out.stale) {
         const row = Object.hasOwn(libraryRows, sku) ? libraryRows[sku] : undefined;
         if (row) setLibraryRow(sku, { ...row, paragraph: out.stale.paragraph, paragraphUpdatedAt: out.stale.updatedAt });

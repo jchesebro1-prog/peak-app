@@ -5,7 +5,7 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { cleanPackageFiles } from "./package-files";
 import { responseScopes } from "./responses";
 import { revisionGroupedSections } from "@/lib/quote-share/photo-response";
-import { datasheetLinks, downloadsView, EMPTY_EXTRAS, plansView, type PackageExtras } from "./package-extras-model";
+import { datasheetLinks, downloadsView, EMPTY_EXTRAS, plansView, withDatasheetAliases, type PackageExtras } from "./package-extras-model";
 
 /**
  * #301 slice C — the package page's extras for a resolved v2 link: the
@@ -18,8 +18,9 @@ export async function loadPackageExtras(hit: SharedPackage, base: string): Promi
   try {
     const docs = await revisionPackageDocs(hit.rev);
     extras.datasheets = datasheetLinks(docs.bySku, base);
-    // #304: the page looks a key product up by its line SKU — a renamed part's old one too.
-    for (const [old, live] of docs.moved) if (extras.datasheets[live]) extras.datasheets[old] = extras.datasheets[live];
+    // #304: the page looks a key product up by its line SKU — a renamed part's old one too;
+    // #332: a starred assembly line takes its primary member's datasheet.
+    withDatasheetAliases(extras.datasheets, docs.moved, docs.aliases);
     const specReady = specReadyFor(docs.parts, await allSections());
     extras.downloads = downloadsView(docs.documents, specReady, base);
   } catch (e) {

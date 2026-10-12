@@ -10,6 +10,7 @@ import { listProjects } from "@/lib/stores/grid-projects";
 import { allDocumentLinks, allDocuments, detachedDocumentLinks } from "@/lib/stores/part-documents";
 import { getDepartments } from "@/lib/stores/portal-departments";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { listFixtures } from "@/lib/stores/fixtures";
 import { listDrivePhotosForSheet } from "./drive-photo-sync";
 import { buildPartMatcher, driveIdOf, exportRows, PHOTO_SHEET_HEADERS, PHOTO_SHEET_NAME, rowsToGrid, type PartMatcher, type PhotoSheetRow, type SheetImage } from "./photo-sheet";
 import { quotedPartStats } from "./quoted-parts";
@@ -134,9 +135,11 @@ export async function loadPhotoSheetContext(listDrive: ListDrive = listDrivePhot
 
 /** Export rows: every part quoted anywhere or in a portal department. */
 export async function buildPhotoSheetExport(listDrive: ListDrive = listDrivePhotosForSheet): Promise<PhotoSheetRow[]> {
-  const [ctx, quotes, gridProjects, generated, departments] = await Promise.all([loadPhotoSheetContext(listDrive), allQuotes(), listProjects(), allGeneratedSpecs(), getDepartments()]);
+  const [ctx, quotes, gridProjects, generated, departments, fixtures] = await Promise.all([loadPhotoSheetContext(listDrive), allQuotes(), listProjects(), allGeneratedSpecs(), getDepartments(), listFixtures()]);
   const bySku = new Map(ctx.parts.map((p) => [p.sku, p] as const));
-  const stats = quotedPartStats({ quotes, gridProjects, generated }, (sku) => {
+  // #332: Grid `asm:` assemblies count their members as quoted.
+  const fixtureById = new Map(fixtures.map((f) => [f.id, f] as const));
+  const stats = quotedPartStats({ quotes, gridProjects, generated, fixtureOf: (id) => fixtureById.get(id) }, (sku) => {
     const p = bySku.get(sku);
     return !!p && p.category !== "Labor";
   });

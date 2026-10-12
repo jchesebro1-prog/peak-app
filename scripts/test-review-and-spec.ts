@@ -11675,6 +11675,7 @@ seeded()
   .then(() => gridNotes2Checks())
   .then(() => gridNotes4Checks())
   .then(() => letterhead331Checks())
+  .then(() => assemblyMembers332Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -47823,7 +47824,7 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
      draftSrc.indexOf("setNotice(NO_LIBRARY)") > -1 && draftSrc.indexOf("setNotice(NO_LIBRARY)") < draftSrc.indexOf("draftNarrative("),
     "#293 fix Draft: force-refreshes the library and aborts (no write) with “Could not load the library” when any sku has no row");
   const refreshSrc = hook.slice(hook.indexOf("const refresh = useCallback("), hook.indexOf("const setRow = useCallback("));
-  ok(refreshSrc.includes("keyProductLibraryAction(want)") && !/catch/.test(refreshSrc) && !refreshSrc.includes("in rowsRef.current"),
+  ok(refreshSrc.includes("keyProductLibraryAction(want, aliasesFor(aliasesRef.current, want))") && !/catch/.test(refreshSrc) && !refreshSrc.includes("in rowsRef.current"),
     "#293 fix Draft: refresh bypasses the cache and rejects on failure (no swallowed error)");
   ok(/onChange=\{\(e\) => \{\s*setIntroId\(e\.target\.value\);\s*setDraftAsk\(false\);/.test(col), "#293 fix Draft: changing the intro closes the Replace / Fill blanks strip");
   const star = cli.slice(cli.indexOf("const toggleKeyProductLine = "), cli.indexOf("const curtainSec = "));
@@ -58201,11 +58202,11 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
      pkgStep.includes('display: narrOpen ? "none" : "flex"'),
     "#P5 editor: Build package — Start the document seeds from the narrative fields; Remove document confirms inline then clears it; the narrative fields sit behind 'Narrative fields'; the right aside stays");
   ok(pkgStep.includes("value={packageDoc}") && pkgStep.includes("onChange={setPackageDoc}") && pkgStep.includes("library={kpLib}") &&
-     pkgStep.includes("canWriteLibrary={canWriteNarrativeLibrary}") && pkgStep.includes("const out = await saveProductParagraphAction(sku, text, expectUpdatedAt);") &&
-     pkgStep.includes("if (out.row) setLibraryRow(sku, out.row);"),
+     pkgStep.includes("canWriteLibrary={canWriteNarrativeLibrary}") && pkgStep.includes("const out = await saveProductParagraphAction(target, text, expectUpdatedAt);") &&
+     pkgStep.includes("if (out.row) setLibraryRow(sku, target !== sku ? { ...out.row, viaSku: target } : out.row);"),
     "#P5 editor: the editor is wired to the hook's packageDoc / setPackageDoc and Save to product refreshes the library row");
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
-  ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus);") &&
+  ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus, kpAliases);") &&
      /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
     "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 6 (5 + the #bonus effect)");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
@@ -68898,6 +68899,11 @@ async function gridNotes4Checks(): Promise<void> {
    ====================================================================== */
 import { renderQuoteDocument293 as k331Render, qd293Props as k331Props } from "./qd293-cases";
 import { packageViewModel as k331Model } from "@/lib/estimate-output/package-model";
+import * as k332M from "@/lib/quote-line-members";
+import { quoteBom as k332QuoteBom } from "@/lib/client-package-server";
+import { withDatasheetAliases as k332Alias } from "@/lib/estimate-output/package-extras-model";
+import { staffPackageExtras as k332Staff, reviewDatasheetRows as k332Review } from "@/lib/estimate-output/package-preview";
+import { quoteLineSkus as k332Qls, quotedPartStats as k332Stats } from "@/lib/part-docs/quoted-parts";
 
 async function letterhead331Checks(): Promise<void> {
   const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -68918,4 +68924,141 @@ async function letterhead331Checks(): Promise<void> {
   // Letters/reports keep the D59 uploaded-logo ladder.
   ok(rd("src/components/letter/SinglePageLetter.tsx").includes("src={logoDark || letterhead.src}") && rd("src/app/(app)/flame-tests/letter/letter-view.tsx").includes("src={settings.logoDark || letterhead.src}"),
     "#331: letters keep the uploaded-logo rule");
+}
+
+async function assemblyMembers332Checks(): Promise<void> {
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const M = k332M;
+  const comp = (sku: string, role: string, qty: number, label = sku + " label") => ({ sku, label, role, qty, unit: "ea", cost: 1, price: 2 });
+  const est = { id: 1, sku: "SA-K332", desc: "Wash — engine; clamp", qty: 3, unit: "ea", cost: 10, price: 20, fixture: true,
+    components: [comp("K332-CLAMP", "mount", 2), comp("K332-ENG", "fixture", 1), comp("K332-OPT", "accessory", 0), comp("labor:k332", "other", 1)] };
+
+  // ---- the helper: Estimator components ----
+  const rows = M.lineMemberRows(est);
+  ok(JSON.stringify(rows) === JSON.stringify([{ sku: "K332-CLAMP", desc: "K332-CLAMP label", qty: 6 }, { sku: "K332-ENG", desc: "K332-ENG label", qty: 3, primary: true }]),
+    "#332 members: an Estimator assembly line → its components × line qty; an optional add-on at 0 and a labor member are left out; the light engine is primary: " + JSON.stringify(rows));
+  ok(M.primaryMemberSku(est) === "K332-ENG", "#332 members: the primary member is the light engine (role fixture)");
+  const noEngine = { ...est, components: [comp("K332-OPT", "accessory", 0), comp("K332-B", "other", 1), comp("K332-C", "mount", 1)] };
+  ok(M.primaryMemberSku(noEngine) === "K332-B", "#332 members: no light engine → the first INCLUDED member is primary");
+  ok(M.lineMemberRows(est, undefined, (s) => s === "K332-CLAMP").map((r) => r.sku).join() === "K332-ENG", "#332 members: isInternal drops a member (labor catalog rows)");
+  // A portal fixture line names its light engine already — no alias.
+  const portal = { id: 2, sku: "K332-ENG", desc: "Wash", qty: 1, fixture: true, fixtureId: "SA-K332", components: [comp("K332-ENG", "fixture", 1), comp("K332-LENS", "lens", 1)] };
+  ok(M.primaryMemberSku(portal) === "K332-ENG" && M.memberAliases([portal]).size === 0 && M.lineMemberRows(portal).map((r) => r.sku).join() === "K332-ENG,K332-LENS",
+    "#332 members: a portal fixture line expands to its parts; its primary is its own sku (no alias)");
+  // Track lines (real parts in components) expand; blank-sku components never list.
+  const track = { id: 3, sku: "TRK-K332", desc: "Track", qty: 1, unit: "lot", components: [comp("K332-TRACK", "other", 4), comp("", "other", 2)], track: {} };
+  ok(M.lineMemberRows(track).map((r) => `${r.sku}:${r.qty}`).join() === "K332-TRACK:4" && M.primaryMemberSku(track) === "K332-TRACK", "#332 members: a track line lists its real parts (blank-sku rows never)");
+  ok(M.expandLine({ sku: "TRK-X", qty: 1, components: [comp("", "other", 1)] }) === null, "#332 members: components with no SKU → not an assembly (the line stands for itself)");
+  // A plain line stands for itself.
+  ok(M.expandLine({ sku: "K332-PLAIN", desc: "Plain", qty: 2 }) === null && JSON.stringify(M.lineMemberRows({ sku: " K332-PLAIN ", desc: "Plain", qty: 2 })) === JSON.stringify([{ sku: "K332-PLAIN", desc: "Plain", qty: 2, primary: true }]) &&
+     M.primaryMemberSku({ sku: "K332-PLAIN", qty: 1 }) === null, "#332 members: a plain line is not an assembly; lineMemberRows gives its own row");
+  ok(M.expandLine(null) === null && M.lineMemberRows({} as never).length === 1 && M.expandLine({ sku: "X", components: "junk" } as never) === null, "#332 members: junk input never throws");
+
+  // ---- live lookups: asm:, fixtureId, bare fixture line, racks ----
+  const lines = { data: [], power: [], mounting: [{ sku: "K332-CLAMP", qty: 1, label: "Clamp" }], accessories: [{ sku: "K332-OPT", qty: 0, label: "Opt" }] };
+  const fx = { id: "SA-K332", kind: "fixture" as const, label: "Wash", lightEngineSku: "K332-ENG", lensSku: null, lines };
+  const sys = { id: "SA-K332S", kind: "system" as const, label: "Sys", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "K332-A", qty: 2 }, { sku: "K332-B", qty: 1 }] };
+  const rack = { id: "SA-K332R", kind: "rack" as const, label: "Rack", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "K332-FRM", qty: 1 }],
+    rack: { config: { ruCount: 12, widthIn: 19 as const, numbering: "bottom-up" as const }, placements: [{ id: "RP-1", kind: "device" as const, sku: "K332-AMP", ruStart: 1, ruHeight: 2, face: "front" as const }] } };
+  const all = new Map<string, unknown>([[fx.id, fx], [sys.id, sys], [rack.id, rack]]);
+  const fixtureOf = (id: string) => all.get(id) as never;
+  const asm = M.lineMemberRows({ sku: "asm:SA-K332", desc: "Wash", qty: 2 }, fixtureOf);
+  ok(asm.map((r) => `${r.sku}:${r.qty}${r.primary ? "*" : ""}`).join() === "K332-ENG:2*,K332-CLAMP:2", "#332 members: a Grid asm: line → its live included members, light engine primary: " + JSON.stringify(asm));
+  ok(M.primaryMemberSku({ sku: "asm:SA-K332S", qty: 1 }, fixtureOf) === "K332-A", "#332 members: a System assembly's primary is its first part");
+  ok(M.primaryMemberSku({ sku: "SA-K332", qty: 1, fixture: true }, fixtureOf) === "K332-ENG", "#332 members: a bare Estimator fixture line (no components) resolves live by its assembly id");
+  ok(M.expandLine({ sku: "asm:SA-GONE", qty: 1 }, fixtureOf) === null && M.expandLine({ sku: "asm:SA-K332", qty: 1 }) === null, "#332 members: an assembly that no longer resolves (or no lookup) stands for itself");
+  const rackLine = { sku: "SA-K332R", qty: 1, fixture: true, rackId: "SA-K332R", components: [comp("K332-STALE", "other", 1)] };
+  ok(M.lineMemberRows(rackLine, fixtureOf).map((r) => r.sku).join() === "K332-FRM,K332-AMP" && M.lineMemberRows(rackLine).map((r) => r.sku).join() === "K332-STALE",
+    "#332 members: a rack line reads its LIVE members first (D578); with no lookup its stored components");
+  ok(M.needsFixtureLookup(rackLine) && M.needsFixtureLookup({ sku: "asm:SA-K332" }) && M.needsFixtureLookup({ sku: "SA-K332", fixture: true }) && M.needsFixtureLookup({ sku: "K332-ENG", fixtureId: "SA-K332" }) &&
+     !M.needsFixtureLookup(est) && !M.needsFixtureLookup(portal) && !M.needsFixtureLookup({ sku: "K332-PLAIN" }),
+    "#332 members: only a rack, an asm:, or an assembly line with no components of its own needs the fixtures read");
+  ok(JSON.stringify([...M.memberAliases([est, portal, { sku: "K332-PLAIN" }, { ...est, components: [comp("K332-OTHER", "fixture", 1)] }])]) === JSON.stringify([["SA-K332", "K332-ENG"]]),
+    "#332 members: memberAliases maps an assembly line's sku to its primary member (first line wins, identity skipped)");
+  ok(JSON.stringify(M.specItems({ sections: [{ items: [est, null, 5] }, null, { items: "x" }] })) === JSON.stringify([est]) && M.specItems(null).length === 0, "#332 members: specItems reads raw spec JSON safely");
+  ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(rd("src/lib/quote-line-members.ts")), "#332: quote-line-members.ts is client-safe (no store/db at runtime)");
+
+  // ---- quoteBom (client package + package documents) ----
+  const qSpec = (items: unknown[]) => ({ spec: { sections: [{ kind: "materials", items }] } }) as never;
+  const bom = k332QuoteBom(qSpec([est, { sku: "K332-ENG", desc: "Spare engine", qty: 1 }, { sku: "LAB", desc: "Labor", qty: 1, labor: true }]));
+  ok(JSON.stringify(bom) === JSON.stringify([{ sku: "K332-CLAMP", desc: "K332-CLAMP label", qty: 6 }, { sku: "K332-ENG", desc: "K332-ENG label", qty: 4 }]) && !bom.some((r) => r.sku.startsWith("SA-")),
+    "#332 quoteBom: an Estimator assembly line lists its members (summed with a loose line of the same part), never its SA- row: " + JSON.stringify(bom));
+  ok(k332QuoteBom(qSpec([{ sku: "asm:SA-K332", desc: "Wash", qty: 1 }]), fixtureOf).map((r) => r.sku).join() === "K332-ENG,K332-CLAMP", "#332 quoteBom: an asm: line expands through the lookup");
+  ok(rd("src/lib/client-package-server.ts").includes("it.rackId || it.fixtureId || needsFixtureLookup(it)") && rd("src/lib/estimate-output/package-docs-server.ts").includes("needsFixtureLookup(it)"),
+    "#332 (source): the client package and the package documents load fixtures for any line that needs a live read");
+
+  // ---- key-product datasheet aliases ----
+  const links: Record<string, { href: string }> = { "K332-ENG": { href: "/d/eng" }, "SA-OWN": { href: "/d/own" }, "LIVE-1": { href: "/d/live" } };
+  k332Alias(links, new Map([["OLD-1", "LIVE-1"]]), new Map([["SA-K332", "K332-ENG"], ["SA-OWN", "K332-ENG"], ["SA-NONE", "K332-NONE"], ["SA-OLD", "OLD-1"]]));
+  ok(links["SA-K332"]?.href === "/d/eng" && links["SA-OWN"].href === "/d/own" && !("SA-NONE" in links) && links["OLD-1"]?.href === "/d/live" && links["SA-OLD"]?.href === "/d/live",
+    "#332 datasheets: an assembly line's sku takes its primary member's link (through a rename too), never overwriting its own; #304 old SKUs as before");
+  const staff = k332Staff({ bySku: new Map([["K332-ENG", { datasheet: { documentId: "PD-1", name: "eng.pdf" } }]]) as never, aliases: new Map([["SA-K332", "K332-ENG"]]), documents: [] }, false, [], "Q-1");
+  ok(staff.datasheets["SA-K332"]?.href === staff.datasheets["K332-ENG"]?.href && !!staff.datasheets["SA-K332"], "#332 datasheets: the staff preview's key-product datasheet resolves for a starred assembly line");
+  ok(rd("src/lib/estimate-output/package-extras.ts").includes("withDatasheetAliases(extras.datasheets, docs.moved, docs.aliases)"), "#332 (source): the client package page applies the assembly aliases");
+
+  // ---- Catalog → Datasheets / photo sheet scope ----
+  ok(k332Qls({ sections: [{ items: [est] }] }).sort().join() === ["K332-CLAMP", "K332-ENG", "SA-K332"].sort().join(), "#332 quoted parts: an Estimator assembly line counts its members (optional add-on and labor left out)");
+  ok(k332Qls({ lines: [{ sku: "asm:SA-K332", qty: 1 }] }, fixtureOf).sort().join() === ["K332-CLAMP", "K332-ENG", "asm:SA-K332"].sort().join() && k332Qls({ lines: [{ sku: "asm:SA-K332", qty: 1 }] }).join() === "asm:SA-K332",
+    "#332 quoted parts: a Grid asm: quote line counts its members through the lookup");
+  const isPart = (s: string) => s.startsWith("K332-");
+  const stats = k332Stats({ quotes: [{ spec: { sections: [{ items: [est] }] }, updatedAt: 5 }], gridProjects: [{ placements: [{ partId: "asm:SA-K332" }] }], generated: [], fixtureOf }, isPart);
+  ok(stats.get("K332-ENG")?.quotes === 1 && stats.get("K332-ENG")?.grid === 1 && stats.get("K332-CLAMP")?.grid === 1 && !stats.has("SA-K332") && !stats.has("K332-OPT"),
+    "#332 quoted parts: Estimator members count as quoted and a Grid asm: placement counts its members as placed");
+  ok(k332Stats({ quotes: [], gridProjects: [{ placements: [{ partId: "asm:SA-K332" }] }], generated: [] }, isPart).size === 0, "#332 quoted parts: no lookup → a Grid assembly placement adds nothing (as before)");
+
+  // ---- DB-backed: photos, library, package documents, bid-spec BOM ----
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const D = await import("@/lib/stores/part-documents");
+  const Q = await import("@/lib/stores/quotes");
+  const { keyProductPhotoDocs } = await import("@/lib/narrative/photos");
+  const { keyProductLibrary } = await import("@/lib/narrative/library");
+  const PD = await import("@/lib/estimate-output/package-docs-server");
+  const { bomFromQuote } = await import("@/lib/specs/quote-bom");
+  const ENG = fixtureId(332, "eng");
+  const CLAMP = fixtureId(332, "clamp");
+  const NOPHOTO = fixtureId(332, "nophoto");
+  for (const [sku, extra] of [[ENG, { narrativeText: "The engine paragraph." }], [CLAMP, {}], [NOPHOTO, {}]] as const) {
+    await DS.upsertDoc("catalog_parts", { id: sku, sku, desc: "K332 " + sku, category: "Other", unit: "ea", list: 40, cost: 20, ...extra } as never);
+    registerFixture("catalog_parts", sku);
+  }
+  const mk = async (kind: "image" | "datasheet", fileName: string, contentType: string) => {
+    const d = await D.createDocument({ kind, fileName, contentType, size: 1000, blobKey: `part-docs/PD-fixture-332/${fileName}`, sourceUrl: null, source: "upload", by: "Test" });
+    if (!d) throw new Error("#332: fixture document failed");
+    registerFixture("part_documents", d.id);
+    return d;
+  };
+  const img = await mk("image", "eng-332.webp", "image/webp");
+  const ds = await mk("datasheet", "eng-332.pdf", "application/pdf");
+  for (const doc of [img, ds]) {
+    await D.attachDocument(doc.id, [ENG], "Test");
+    registerFixture("part_document_links", D.documentLinkId(ENG, doc.id));
+  }
+  const ASM = "SA-K332DB";
+  const asmLine = { id: 1, sku: ASM, desc: "Wash assembly", qty: 2, unit: "ea", cost: 50, price: 90, fixture: true,
+    components: [comp(CLAMP, "mount", 2), comp(ENG, "fixture", 1)] };
+  const noEngLine = { id: 2, sku: "SA-K332NE", desc: "No-photo assembly", qty: 1, unit: "ea", cost: 5, price: 9, fixture: true, components: [comp(NOPHOTO, "other", 1)] };
+  const sec = { id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Intro.",
+    items: [asmLine, noEngLine], keyProducts: [{ lineKey: "1", sku: ASM, text: "The wash.", photo: true }, { lineKey: "2", sku: "SA-K332NE", text: "x", photo: true }] };
+  const photos = await keyProductPhotoDocs([sec] as never);
+  ok(photos.get(ASM)?.id === img.id && !photos.has(ENG) && !photos.has("SA-K332NE"), "#332 photos: a starred assembly line prints its light engine's photo, stored under the line's sku");
+  const lib = await keyProductLibrary([ASM], { [ASM]: ENG });
+  ok(lib[ASM]?.inCatalog === true && lib[ASM].photoDocId === img.id && lib[ASM].paragraph === "The engine paragraph." && lib[ASM].viaSku === ENG,
+    "#332 library: the Estimator narrative column reads an assembly line's primary member (paragraph, photo) and names it in viaSku");
+  const libPlain = await keyProductLibrary([ASM, ENG], { [ENG]: ENG, junk: CLAMP });
+  ok(libPlain[ASM]?.inCatalog === false && libPlain[ASM].viaSku === undefined && libPlain[ENG]?.viaSku === undefined, "#332 library: no alias → the line's own sku as before; an identity / stray alias is ignored");
+  const spec = { sections: [sec], mobs: [] };
+  const docs = await PD.specPackageDocs(spec);
+  ok(docs.bom.map((r) => `${r.sku}:${r.qty}`).sort().join() === [`${CLAMP}:4`, `${ENG}:2`, `${NOPHOTO}:1`].sort().join() && !docs.bom.some((r) => r.sku.startsWith("SA-")),
+    "#332 package documents: the BOM lists the assembly's members, never its SA- row: " + JSON.stringify(docs.bom));
+  ok(docs.aliases.get(ASM) === ENG && docs.bySku.get(ENG)?.datasheet?.documentId === ds.id, "#332 package documents: the alias map + the member's datasheet");
+  const review = k332Review(docs.bom, docs.bySku);
+  ok(review.some((r) => r.sku === ENG && r.datasheet) && review.some((r) => r.sku === CLAMP && !r.datasheetOk), "#332 Customer review: the Datasheets tab lists an assembly's members (no longer dropped)");
+  ok(k332Staff(docs, false, [], "Q-1").datasheets[ASM]?.name === "eng-332.pdf", "#332 package page: a starred assembly line's datasheet link is its light engine's");
+  const QID = fixtureId(332, "quote");
+  await Q.create({ id: QID, name: "#332 assembly", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec } as never);
+  registerFixture("quotes", QID);
+  const bq = await bomFromQuote(QID);
+  ok(bq.ok && bq.rows.map((r) => `${r.sku}:${r.qty}`).sort().join() === [`${CLAMP}:4`, `${ENG}:2`, `${NOPHOTO}:1`].sort().join(),
+    "#332 bid-spec BOM: an Estimator assembly line expands into its members like a Grid asm: line: " + JSON.stringify(bq.ok ? bq.rows : bq));
 }

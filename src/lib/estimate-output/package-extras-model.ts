@@ -40,6 +40,29 @@ export function datasheetLinks(bySku: ReadonlyMap<string, Pick<PackageSkuDocs, "
   return out;
 }
 
+/**
+ * The page looks a key product's datasheet up by its LINE sku, so a link is
+ * copied onto every other sku that names the same part: #304 a renamed
+ * part's old SKU (`moved`: old → live), and #332 an assembly line (`aliases`:
+ * the line's sku → its primary member's — the light engine, else the first
+ * included part). Never overwrites a link the line's own sku already has.
+ * Mutates and returns `links`. Pure.
+ */
+export function withDatasheetAliases<T>(
+  links: Record<string, T>,
+  moved?: ReadonlyMap<string, string> | null,
+  aliases?: ReadonlyMap<string, string> | null,
+): Record<string, T> {
+  const own = (k: string) => Object.hasOwn(links, k);
+  for (const [old, live] of moved || []) if (own(live) && !own(old)) links[old] = links[live];
+  for (const [line, member] of aliases || []) {
+    if (own(line)) continue;
+    const via = own(member) ? member : moved?.get(member);
+    if (via && own(via)) links[line] = links[via];
+  }
+  return links;
+}
+
 /** Datasheets and spec sheets only (never manuals — D-l). Nothing to offer → no card. */
 export function downloadsView(documents: readonly Pick<PackageDocument, "documentId" | "name" | "kind">[], specifications: boolean, base: string): PackageDownloadsView | null {
   const files = documents

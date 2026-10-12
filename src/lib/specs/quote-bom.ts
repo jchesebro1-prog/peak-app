@@ -7,6 +7,7 @@ import { listFixtures } from "@/lib/stores/fixtures";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { expandLine, needsFixtureLookup } from "@/lib/quote-line-members";
 
 /**
  * Shared quote → BOM extraction (#205 spec builder T4), split out of the
@@ -40,6 +41,10 @@ type QuoteSpecDoc = {
         vendorQuoteId?: string;
         allowance?: boolean;
         custom?: boolean;
+        fixture?: boolean;
+        components?: unknown;
+        rackId?: string;
+        fixtureId?: string;
       }>;
     }>;
     lines?: Array<{ sku?: string; desc?: string; qty?: number; allowance?: boolean; specKey?: string }>;
@@ -71,6 +76,26 @@ export async function bomFromQuote(
     });
   };
   const vendorQuotes = new Map((q.vendorQuotes || []).map((vq) => [vq.id, vq]));
+  // #332: an estimator assembly line expands into its members like a Grid `asm:` line below.
+  // Fixtures load once, only when a line can expand no other way (a rack — read live, D578 —
+  // or an assembly line with no components of its own); one catalog read over every member
+  // SKU keeps labor members (internal rows) out.
+  const gridLines = q.spec?.lines || [];
+  const estItems = (q.spec?.sections || []).filter((sec) => !sec.alternate).flatMap((sec) => sec.items || []);
+  const fixtures = gridLines.some((l) => parseVirtualPartId(String(l.sku || "").trim())?.kind === "assembly") || estItems.some((it) => needsFixtureLookup(it))
+    ? new Map((await listFixtures()).map((f) => [f.id, f]))
+    : new Map();
+  const fixtureOf = (id: string) => fixtures.get(id);
+  // #296: one catalog read over the assemblies' member SKUs, so labor members (internal rows) stay out.
+  const memberSkus = [...new Set([
+    ...gridLines.flatMap((l) => {
+      const ref = parseVirtualPartId(String(l.sku || "").trim());
+      const f = ref?.kind === "assembly" ? fixtures.get(ref.id) : undefined;
+      return f ? fixtureSkus(f) : [];
+    }),
+    ...estItems.flatMap((it) => (expandLine(it, fixtureOf) || []).map((m) => m.sku)),
+  ])];
+  const isInternal = internalSkuCheck(memberSkus.length ? await getMany(memberSkus) : []);
   for (const sec of q.spec?.sections || []) {
     // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
     if (sec.alternate) continue;
@@ -88,6 +113,14 @@ export async function bomFromQuote(
           continue;
         }
       }
+      // #332: an assembly line (Estimator / portal fixture, track, rack) → its members, each
+      // matched like any part; the line's own part number / manufacturer belong to the whole
+      // line, so they don't ride onto the members.
+      const members = expandLine(it, fixtureOf, isInternal);
+      if (members) {
+        for (const m of members) push({ sku: m.sku, desc: m.desc, qty: m.qty });
+        continue;
+      }
       push({
         sku: it.sku,
         desc: it.desc,
@@ -100,18 +133,7 @@ export async function bomFromQuote(
   }
   // The Grid's flat lines (#211, D316): allowances are left out like the
   // estimator's allowance/labor lines; an Auto assembly (asm:) expands into
-  // its members. Fixtures load once, and only when an assembly line exists.
-  const gridLines = q.spec?.lines || [];
-  const fixtures = gridLines.some((l) => parseVirtualPartId(String(l.sku || "").trim())?.kind === "assembly")
-    ? new Map((await listFixtures()).map((f) => [f.id, f]))
-    : new Map();
-  // #296: one catalog read over the assemblies' member SKUs, so labor members (internal rows) stay out.
-  const memberSkus = [...new Set(gridLines.flatMap((l) => {
-    const ref = parseVirtualPartId(String(l.sku || "").trim());
-    const f = ref?.kind === "assembly" ? fixtures.get(ref.id) : undefined;
-    return f ? fixtureSkus(f) : [];
-  }))];
-  const isInternal = internalSkuCheck(memberSkus.length ? await getMany(memberSkus) : []);
+  // its members (fixtures + the internal check loaded above).
   for (const it of gridSpecBomRows(gridLines, (id) => fixtures.get(id), isInternal)) push(it);
   if (!rows.length) {
     return { ok: false, error: `Quote ${quoteId} has no equipment lines to specify.` };

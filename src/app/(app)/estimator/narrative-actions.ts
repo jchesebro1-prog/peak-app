@@ -22,9 +22,14 @@ export type IntroWriteResponse = { ok: true; intros: SystemIntro[]; id: string |
 const NEEDS_CREATE = "Needs the Create permission.";
 
 /** Per-sku library rows for the active system (≤ 200 skus). */
-export async function keyProductLibraryAction(skus: string[]): Promise<Record<string, KeyProductLibraryRow>> {
+export async function keyProductLibraryAction(skus: string[], aliases?: Record<string, string> | null): Promise<Record<string, KeyProductLibraryRow>> {
   await requireUser();
-  return keyProductLibrary(Array.isArray(skus) ? skus.slice(0, MAX_LIBRARY_SKUS) : []);
+  // #332: aliases are untrusted client input — only string → string entries reach the read (it caps them again).
+  const clean: Record<string, string> = {};
+  if (aliases && typeof aliases === "object" && !Array.isArray(aliases)) {
+    for (const [k, v] of Object.entries(aliases).slice(0, MAX_LIBRARY_SKUS)) if (typeof k === "string" && typeof v === "string") clean[k] = v;
+  }
+  return keyProductLibrary(Array.isArray(skus) ? skus.slice(0, MAX_LIBRARY_SKUS) : [], clean);
 }
 
 /** "Save to library" / the part editor's Narrative paragraph. */

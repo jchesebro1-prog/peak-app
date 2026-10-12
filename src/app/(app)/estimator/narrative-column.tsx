@@ -386,9 +386,11 @@ function KeyProductCard(props: KeyProductCardProps) {
     start(async () => {
       setMsg("");
       try {
-        const out = await saveProductParagraphAction(kp.sku, kp.text, expect);
+        // #332: an assembly line's row reads its primary member — the paragraph saves to that part.
+        const target = row?.viaSku || kp.sku;
+        const out = await saveProductParagraphAction(target, kp.text, expect);
         if (out.ok) {
-          library.setRow(kp.sku, out.row);
+          library.setRow(kp.sku, target !== kp.sku ? { ...out.row, viaSku: target } : out.row);
           setAsk(null);
           setMsg("Saved to the library.");
         } else if (out.stale) {
@@ -423,7 +425,7 @@ function KeyProductCard(props: KeyProductCardProps) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>{title}</div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{isLine ? lineLabel(item) : kp.sku}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#8c919c" }}>{isLine ? lineLabel(item) : kp.sku}{row?.viaSku ? ` · from ${row.viaSku}` : ""}</div>
         </div>
         {chip && (
           <span style={{ ...CHIP_TONE[chip], fontSize: 10.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>{KEY_PRODUCT_CHIP_LABEL[chip]}</span>
@@ -481,7 +483,7 @@ function KeyProductCard(props: KeyProductCardProps) {
 
       {ask === "replace" && (
         <div style={ASK}>
-          <span>Replace the library paragraph for {kp.sku}?</span>
+          <span>Replace the library paragraph for {row?.viaSku || kp.sku}?</span>
           <button type="button" style={BTN} disabled={pending} onClick={() => doSave(row?.paragraphUpdatedAt ?? null)}>Replace</button>
           <button type="button" style={BTN} onClick={() => setAsk(null)}>Cancel</button>
         </div>

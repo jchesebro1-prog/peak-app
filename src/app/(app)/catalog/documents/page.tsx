@@ -12,6 +12,7 @@ import { getDrivePhotoSyncState } from "@/lib/part-docs/drive-photo-sync";
 import { getConnectionInfo } from "@/lib/gmail/connections";
 import { drivePhotosLoadErrorView, drivePhotosPanelView, type DrivePhotosPanelView } from "@/lib/part-docs/drive-photo-view";
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
+import { listFixtures } from "@/lib/stores/fixtures";
 import { quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
 import {
   buildImageIndex,
@@ -78,7 +79,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
 
   const bySku = new Map(parts.map((p) => [p.sku, p]));
   // Labor rows are rates, not products — they never take a datasheet.
-  const stats = quotedPartStats({ quotes, gridProjects, generated }, (sku) => {
+  // #332: Grid `asm:` assemblies count their members as quoted (read after the #210 conversion above).
+  const fixtureById = new Map((await listFixtures()).map((f) => [f.id, f] as const));
+  const stats = quotedPartStats({ quotes, gridProjects, generated, fixtureOf: (id) => fixtureById.get(id) }, (sku) => {
     const p = bySku.get(sku);
     return !!p && p.category !== "Labor";
   });

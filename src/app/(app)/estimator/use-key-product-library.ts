@@ -19,9 +19,25 @@ export type KeyProductLibrary = {
   setRow: (sku: string, row: KeyProductLibraryRow) => void;
 };
 
-export function useKeyProductLibrary(activeSkus: string[]): KeyProductLibrary {
+/** #332: only the aliases for the skus being read ride to the server. */
+function aliasesFor(all: Readonly<Record<string, string>>, skus: readonly string[]): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  let n = 0;
+  for (const s of skus) if (Object.hasOwn(all, s)) { out[s] = all[s]; n++; }
+  return n ? out : undefined;
+}
+
+const NO_ALIASES: Readonly<Record<string, string>> = {};
+
+/** `aliases` (#332): an assembly line's sku → its primary member's
+ *  (quote-line-members.ts `memberAliases`) — that sku's row reads the member. */
+export function useKeyProductLibrary(activeSkus: string[], aliases: Readonly<Record<string, string>> = NO_ALIASES): KeyProductLibrary {
   const [rows, setRows] = useState<Record<string, KeyProductLibraryRow>>({});
   const rowsRef = useRef(rows);
+  const aliasesRef = useRef(aliases);
+  useEffect(() => {
+    aliasesRef.current = aliases;
+  }, [aliases]);
 
   const ensure = useCallback(async (skus: string[]) => {
     const missing = [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))]
@@ -29,7 +45,7 @@ export function useKeyProductLibrary(activeSkus: string[]): KeyProductLibrary {
       .slice(0, MAX_LIBRARY_SKUS);
     if (!missing.length) return rowsRef.current;
     try {
-      const got = await keyProductLibraryAction(missing);
+      const got = await keyProductLibraryAction(missing, aliasesFor(aliasesRef.current, missing));
       const next = { ...rowsRef.current, ...got };
       rowsRef.current = next;
       setRows(next);
@@ -42,7 +58,7 @@ export function useKeyProductLibrary(activeSkus: string[]): KeyProductLibrary {
   const refresh = useCallback(async (skus: string[]) => {
     const want = [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))].slice(0, MAX_LIBRARY_SKUS);
     if (!want.length) return rowsRef.current;
-    const got = await keyProductLibraryAction(want);
+    const got = await keyProductLibraryAction(want, aliasesFor(aliasesRef.current, want));
     const next = { ...rowsRef.current, ...got };
     rowsRef.current = next;
     setRows(next);

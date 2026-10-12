@@ -40,6 +40,7 @@ import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
 import type { InputKind } from "./section-card";
 import { useKeyProductLibrary } from "./use-key-product-library";
+import { memberAliases } from "@/lib/quote-line-members";
 import { fillEmptyKeyProductText, isKeyProductEligible, isLineToken, keyProductSkuOf, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
 import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
@@ -2804,7 +2805,9 @@ export function useEstimatorState(props: EstimatorProps) {
       ].filter((k) => !!k && !isLineToken(k)),
     [narrSec, packageDoc]
   );
-  const kpLib = useKeyProductLibrary(narrSkus);
+  /** #332: a starred assembly line shows its primary member's paragraph and photo. */
+  const kpAliases = useMemo(() => Object.fromEntries(memberAliases(sections.flatMap((s) => s.items))), [sections]);
+  const kpLib = useKeyProductLibrary(narrSkus, kpAliases);
   const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? fn(s) : s)));
   /** #293 ★: marking copies the saved paragraph when the library row is

@@ -6,6 +6,7 @@
  */
 
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { expandLine, type FixtureLookup } from "@/lib/quote-line-members";
 
 export type QuotedPartStat = {
   sku: string;
@@ -29,7 +30,7 @@ const skuOf = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
  * takes a datasheet — a `kind: "labor"` section and a `labor: true` line are
  * skipped, the same rule the quote client package's BOM applies.
  */
-export function quoteLineSkus(spec: unknown): string[] {
+export function quoteLineSkus(spec: unknown, fixtureOf?: FixtureLookup): string[] {
   const out = new Set<string>();
   const s = bag(spec);
   if (!s) return [];
@@ -42,6 +43,8 @@ export function quoteLineSkus(spec: unknown): string[] {
         if (!item || item.labor === true || isBonusItem(item)) continue;
         const sku = skuOf(item.sku);
         if (sku) out.add(sku);
+        // #332: an assembly line's members are quoted parts too (their datasheets and photos are what print).
+        for (const m of expandLine(item, fixtureOf) || []) out.add(m.sku);
       }
     }
   }
@@ -50,15 +53,24 @@ export function quoteLineSkus(spec: unknown): string[] {
       const line = bag(rawLine);
       const sku = line ? skuOf(line.sku) : "";
       if (sku) out.add(sku);
+      // #332: a Grid `asm:` line → its live members (through `fixtureOf`).
+      if (line) for (const m of expandLine(line, fixtureOf) || []) out.add(m.sku);
     }
   }
   return [...out];
 }
 
 export function quotedPartStats(
-  sources: { quotes: unknown[]; gridProjects: unknown[]; generated: unknown[] },
+  sources: {
+    quotes: unknown[];
+    gridProjects: unknown[];
+    generated: unknown[];
+    /** #332: resolves Grid `asm:` assemblies (quote lines and placements) into their members. Absent = they don't expand. */
+    fixtureOf?: FixtureLookup;
+  },
   isPart: (sku: string) => boolean
 ): Map<string, QuotedPartStat> {
+  const fixtureOf = sources.fixtureOf;
   const stats = new Map<string, QuotedPartStat>();
   const statFor = (sku: string): QuotedPartStat | null => {
     if (!isPart(sku)) return null;
@@ -71,7 +83,7 @@ export function quotedPartStats(
     const q = bag(raw);
     if (!q) continue;
     const at = Number(q.updatedAt ?? q.createdAt ?? 0);
-    for (const sku of quoteLineSkus(q.spec)) {
+    for (const sku of quoteLineSkus(q.spec, fixtureOf)) {
       const s = statFor(sku);
       if (!s) continue;
       s.quotes++;
@@ -88,6 +100,7 @@ export function quotedPartStats(
       if (!pl || pl.curtain) continue; // a made-to-size curtain is not a catalog product
       const sku = skuOf(pl.partId);
       if (sku) seen.add(sku);
+      if (sku) for (const m of expandLine({ sku, qty: 1 }, fixtureOf) || []) seen.add(m.sku);
     }
     for (const sku of seen) {
       const s = statFor(sku);

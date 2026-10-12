@@ -70,6 +70,10 @@ export type KeyProductLibraryRow = LibraryInfo & {
   fallbackDocId: string | null;
   /** The manufacturer name that image belongs to (the column's hint). */
   fallbackLabel: string | null;
+  /** #332: set when this row reads ANOTHER part — an assembly line's primary
+   *  member (the light engine, else the first included part). Its paragraph
+   *  and photo are that part's; Save to library writes to it. */
+  viaSku?: string;
 };
 /** saveProductParagraphAction's answer — declared here because a "use server"
  *  file may export only async functions. */

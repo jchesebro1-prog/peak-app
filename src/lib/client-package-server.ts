@@ -27,8 +27,9 @@ import { renderGridSetPdf, type GridSetRenderCause, type GridSetRenderFn } from 
 import { MAX_PACKAGE_FILE_BYTES } from "@/lib/estimate-output/package-files";
 import { renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { ensureOptions, optionSlice, resolveOptionId } from "@/lib/design/grid-options";
-import type { FixtureRecord, FixtureResolvable } from "@/lib/fixture-assemblies";
-import { gridSpecBomRows, internalSkuCheck } from "@/lib/design/grid-virtual-parts";
+import type { FixtureRecord } from "@/lib/fixture-assemblies";
+import { internalSkuCheck } from "@/lib/design/grid-virtual-parts";
+import { expandLine, needsFixtureLookup, specItems, type FixtureLookup, type MemberLine } from "@/lib/quote-line-members";
 import { emptyRackLayout } from "@/lib/rack/layout";
 import { loadRackForSheets } from "@/lib/rack/load";
 import { rackPackageEntries, type RackIndexEntry, type RackRun } from "@/lib/rack/package";
@@ -359,14 +360,18 @@ export function roughQuoteDrawing(quote: Quote, packageName: string, letterhead:
  * rack (`rackId`) expands into the rack's members, read live through `rackOf`,
  * so the package's datasheets/ and spec cover them like a Grid rack; a rack
  * that no longer resolves (or has no members) keeps its one quoted row.
+ * #332: every assembly line expands the same way (quote-line-members.ts) —
+ * an Estimator assembly / portal fixture / track line into its `components`,
+ * an `asm:` / `fixtureId` line into its live members — so its parts' datasheets
+ * reach the package instead of one SA- row nobody can cover.
  */
 export function quoteBom(
   quote: Pick<Quote, "spec">,
-  rackOf?: (id: string) => FixtureResolvable | null | undefined,
+  rackOf?: FixtureLookup,
   /** #296: rack members this flags (internal catalog rows — labor) stay out of the BOM. */
   isInternal?: (sku: string) => boolean,
 ): Array<{ sku: string; desc: string; qty: number }> {
-  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean; bonus?: string; rackId?: unknown }> }> } | null | undefined;
+  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<MemberLine & { sku?: string; desc?: string; qty?: number; labor?: boolean; bonus?: string }> }> } | null | undefined;
   const rows = new Map<string, { sku: string; desc: string; qty: number }>();
   for (const section of spec?.sections || []) {
     for (const item of section.items || []) {
@@ -375,18 +380,14 @@ export function quoteBom(
       // engineering, allowance, performance bonus) — they're not equipment
       // and don't belong in the BOM/client package either.
       if (section.kind === "labor" || item.labor || isBonusItem(item) || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
-      const rack = rackOf && typeof item.rackId === "string" ? rackOf(item.rackId) : null;
-      if (rack?.kind === "rack") {
-        const members = gridSpecBomRows([{ sku: `asm:${item.rackId}`, desc: String(item.desc || ""), qty: item.qty }], rackOf!, isInternal);
-        // A rack with no members comes back as one SKU-less row; [] means every member was labor (nothing to list).
-        if (members.every((m) => m.sku)) {
-          for (const m of members) {
-            const current = rows.get(m.sku);
-            if (current) current.qty += m.qty;
-            else rows.set(m.sku, { sku: m.sku, desc: m.desc, qty: m.qty });
-          }
-          continue;
+      const members = expandLine(item, rackOf, isInternal);
+      if (members) {
+        for (const m of members) {
+          const current = rows.get(m.sku);
+          if (current) current.qty += m.qty;
+          else rows.set(m.sku, { sku: m.sku, desc: m.desc, qty: m.qty });
         }
+        continue;
       }
       const sku = String(item.sku || item.desc || "Unspecified line");
       const current = rows.get(sku);
@@ -457,9 +458,8 @@ async function addRacks(
 }
 
 /** A quote's line items, every section. */
-function quoteItems(quote: Quote): Array<{ rackId?: unknown; fixtureId?: unknown; desc?: unknown }> {
-  const spec = quote.spec as { sections?: Array<{ items?: Array<{ rackId?: unknown; fixtureId?: unknown; desc?: unknown }> }> } | null | undefined;
-  return (spec?.sections || []).flatMap((s) => s.items || []);
+function quoteItems(quote: Quote): MemberLine[] {
+  return specItems(quote.spec);
 }
 
 /**
@@ -701,7 +701,8 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   const { index: docIndex } = await loadPartDocsState(catalog);
   // #296 — fixtures once, before the BOM: rack lines expand into their members (live, D578).
   const qItems = quoteItems(quote);
-  const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
+  // #332: an assembly line with no components of its own (`asm:`, a bare fixture line) reads its members live too.
+  const rackFixtures = qItems.some((it) => it.rackId || it.fixtureId || needsFixtureLookup(it)) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : new Map<string, FixtureRecord>();
   const bom = quoteBom(quote, (id) => rackFixtures.get(id), internalSkuCheck(catalog));
   const { spec, packageDocs, items, gaps, covered } = quoteSpecParts({ quote, bom, catalog, docIndex, sections: await allSections(), by, date: Date.now() });
   const packageName = `${safeName(quote.name || quote.id)}-${safeName(displayQuoteNumber(quote))}`;

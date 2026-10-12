@@ -3,7 +3,7 @@ import { displayQuoteNumber, type QuoteNumberFields } from "@/lib/estimate-numbe
 import { documentRevStamp } from "@/lib/quote-pdf/state";
 import { formatBytes } from "@/lib/document-files";
 import { cleanPackageFiles, isPackageFileId, PACKAGE_FILE_KIND_LABEL, visiblePackageFiles, type PackageFile, type PackageFileRow } from "./package-files";
-import type { DatasheetLinkView, PackagePlanView } from "./package-extras-model";
+import { withDatasheetAliases, type DatasheetLinkView, type PackagePlanView } from "./package-extras-model";
 
 /**
  * Estimator Phase 4 (spec §11.1) — the staff preview of what the client gets:
@@ -72,7 +72,7 @@ export type StaffPackageExtras = {
   plans: PackagePlanView[];
 };
 
-type DocsIn = { bySku: ReadonlyMap<string, Pick<PackageSkuDocs, "datasheet">>; moved?: ReadonlyMap<string, string>; documents: readonly Pick<PackageDocument, "documentId" | "name" | "kind">[] };
+type DocsIn = { bySku: ReadonlyMap<string, Pick<PackageSkuDocs, "datasheet">>; moved?: ReadonlyMap<string, string>; aliases?: ReadonlyMap<string, string>; documents: readonly Pick<PackageDocument, "documentId" | "name" | "kind">[] };
 
 /**
  * The package page's extras (the share page's loadPackageExtras rules) with
@@ -85,8 +85,9 @@ export function staffPackageExtras(docs: DocsIn | null, specifications: boolean,
   let downloads: StaffDownloadsView | null = null;
   if (docs) {
     for (const [sku, d] of docs.bySku) if (d.datasheet) datasheets[sku] = { href: staffPartDocHref(d.datasheet.documentId), name: d.datasheet.name };
-    // #304: the page looks a key product up by its line SKU — a renamed part's old one too.
-    for (const [old, live] of docs.moved || []) if (datasheets[live]) datasheets[old] = datasheets[live];
+    // #304: the page looks a key product up by its line SKU — a renamed part's old one too;
+    // #332: a starred assembly line takes its primary member's datasheet.
+    withDatasheetAliases(datasheets, docs.moved, docs.aliases);
     const shown = docs.documents
       .filter((d) => d.kind === "datasheet" || d.kind === "specsheet")
       .map((d) => ({ href: staffPartDocHref(d.documentId), name: d.name, kindLabel: d.kind === "datasheet" ? "Datasheet" : "Spec sheet" }));

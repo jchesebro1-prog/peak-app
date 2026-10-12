@@ -8,6 +8,7 @@ import { isDocumentId, type PartDocument } from "@/lib/part-docs/types";
 import { getManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { movedSkus } from "@/lib/catalog-rename/live-reads";
 import { listFixtures } from "@/lib/stores/fixtures";
+import { memberAliases, needsFixtureLookup, specItems } from "@/lib/quote-line-members";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 
 /**
@@ -29,11 +30,18 @@ export type RevisionPackageDocs = {
    *  `parts` and `bySku` speak live SKUs; a caller keyed by the spec's own
    *  line SKU (the package page's per-key-product datasheet) maps through this. */
   moved: Map<string, string>;
+  /** #332: an assembly line's SKU → its primary member's SKU (the light
+   *  engine, else the first included part) — a starred assembly's
+   *  key-product datasheet is that member's. Keyed by the spec's own line SKU;
+   *  the member SKU is the spec's too (map it through `moved` for live). */
+  aliases: Map<string, string>;
 };
 
+/** #332: any line that expands only through a live fixture read — a rack, an
+ *  `asm:` line, a portal `fixtureId`, a bare `fixture: true` line with no
+ *  components of its own (quote-line-members.ts `needsFixtureLookup`). */
 function hasAssemblyLines(spec: unknown): boolean {
-  const s = spec as { sections?: Array<{ items?: Array<{ rackId?: unknown; fixtureId?: unknown }> }> } | null | undefined;
-  return (s?.sections || []).some((sec) => (sec?.items || []).some((it) => !!it?.rackId || !!it?.fixtureId));
+  return specItems(spec).some((it) => !!it.rackId || !!it.fixtureId || needsFixtureLookup(it));
 }
 
 export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDocs> {
@@ -55,7 +63,8 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   const index = await loadScopedCoverage(parts);
   const known = new Set(parts.map((p) => p.sku));
   const { bySku, documents } = resolvePackageDocs(index, bom.filter((r) => known.has(r.sku)).map((r) => r.sku));
-  return { bom, parts, index, bySku, documents, moved };
+  const aliases = memberAliases(specItems(spec), rackOf);
+  return { bom, parts, index, bySku, documents, moved, aliases };
 }
 
 /** BOM rows under their live SKUs; an old and a new SKU on one spec merge into one row. */

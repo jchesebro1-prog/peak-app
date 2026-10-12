@@ -8,6 +8,8 @@ import type { PartDocument } from "@/lib/part-docs/types";
 import { docManufacturerFallbackSkus, documentApplies, keyProductPrintSections } from "@/lib/package-doc/print";
 import { docPhotoSkus } from "@/lib/package-doc/text";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { listFixtures } from "@/lib/stores/fixtures";
+import { memberAliases, needsFixtureLookup } from "@/lib/quote-line-members";
 
 /**
  * #293 — key-product photos for the customer document. The photo is the
@@ -58,22 +60,27 @@ export async function keyProductPhotoDocs(sections: SpecSection[], document?: Pa
   for (const s of docSkus) if (!skus.includes(s)) skus.push(s);
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
+  // #332: an assembly line's photo is its primary member's (the light engine,
+  // else the first included part), else that part's manufacturer image —
+  // read under the member's sku, stored under the line's.
+  const readSkuOf = await photoAliases(sections, skus);
+  const read = (sku: string) => readSkuOf.get(sku) ?? sku;
   // #304: keyed by the sku the section names — a sent revision keeps a
   // renamed part's old SKU, and its photo is found under the new one.
-  const { parts, images } = await partsAndImagesBySku(skus);
+  const { parts, images } = await partsAndImagesBySku([...new Set(skus.map(read))]);
   for (const sku of skus) {
-    const doc = parts.has(sku) ? images.get(sku)?.[0] : undefined;
+    const doc = parts.has(read(sku)) ? images.get(read(sku))?.[0] : undefined;
     if (doc) out.set(sku, doc);
   }
   // No photo of its own: the part's manufacturer image (never for a legacy
   // allowance/custom block — its placeholder comes first).
   const fallbackOk = new Set([...manufacturerFallbackSkusOf(kpSections), ...(docSkus.length ? docManufacturerFallbackSkus(document, sections) : [])]);
-  const missing = skus.filter((s) => parts.has(s) && !out.has(s) && fallbackOk.has(s));
+  const missing = skus.filter((s) => parts.has(read(s)) && !out.has(s) && fallbackOk.has(s));
   if (missing.length) {
     const look = manufacturerImageLookup(await listManufacturers());
     const want = new Map<string, string>();
     for (const sku of missing) {
-      const p = parts.get(sku)!;
+      const p = parts.get(read(sku))!;
       const id = p.mfr ? look(p.mfr) : null;
       if (id) want.set(sku, id);
     }
@@ -86,6 +93,18 @@ export async function keyProductPhotoDocs(sections: SpecSection[], document?: Pa
     }
   }
   return out;
+}
+
+/** #332 — each wanted sku that names an assembly line → its primary member's
+ *  sku. Estimator / portal lines carry their members (`components`); only a
+ *  line with none of its own (a rack, an `asm:` or bare fixture line) costs
+ *  one fixtures read. */
+async function photoAliases(sections: SpecSection[], skus: readonly string[]): Promise<Map<string, string>> {
+  const wanted = new Set(skus);
+  const items = (Array.isArray(sections) ? sections : []).flatMap((s) => (s && Array.isArray(s.items) ? s.items : [])).filter((it) => it && wanted.has(String(it.sku || "").trim()));
+  if (!items.length) return new Map();
+  const fixtures = items.some((it) => needsFixtureLookup(it)) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : null;
+  return memberAliases(items, fixtures ? (id) => fixtures.get(id) : undefined);
 }
 
 /** Read a private blob, giving up (null) past `maxBytes`. */
