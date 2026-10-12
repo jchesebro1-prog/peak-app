@@ -4,6 +4,7 @@ import { useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { parseStep, stepAfterAction, stepSearch, type EstimateStep } from "@/lib/estimate-steps/steps";
+import { packageTabSearch } from "@/lib/estimate-steps/package-tabs";
 import { estimateReadiness } from "@/lib/estimate-steps/readiness";
 import { CSS } from "./estimator-styles";
 import { useEstimatorState } from "./use-estimator-state";
@@ -29,6 +30,10 @@ export default function EstimatorClient(props: EstimatorProps) {
     if (to === step) return;
     window.history.pushState(null, "", window.location.pathname + stepSearch(window.location.search, to));
   };
+  /** #333 (Q4): Build's presentation chip → Build package → Client package → Systems (the one presentation editor). */
+  const presentationHref = packageTabSearch(stepSearch("?" + params.toString(), "package"), "client") + "#systems";
+  const openPresentation = () =>
+    window.history.pushState(null, "", window.location.pathname + packageTabSearch(stepSearch(window.location.search, "package"), "client") + "#systems");
   const onActed = (action: NextStepAction) => {
     const to = stepAfterAction(action);
     if (to) goStep(to);
@@ -63,7 +68,7 @@ export default function EstimatorClient(props: EstimatorProps) {
         </>
       )}
 
-      {step === "build" && <BuildStep s={s} onOpenNarrative={() => goStep("package")} />}
+      {step === "build" && <BuildStep s={s} onOpenNarrative={() => goStep("package")} presentationHref={presentationHref} onOpenPresentation={openPresentation} />}
       {step === "package" && <PackageStep s={s} />}
       {step === "review" && <ReviewStep s={s} onActed={onActed} />}
       {step === "send" && <SendStep s={s} onActed={onActed} />}

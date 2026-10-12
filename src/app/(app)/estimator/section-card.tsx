@@ -137,7 +137,10 @@ export type SectionCardProps = {
   onSetRoom: (value: string) => void;
   /** #262: the quote's venue name, shown as the Room input's placeholder when blank. */
   defaultRoom?: string;
-  onSetPresentation: (value: "itemized" | "narrative") => void;
+  /** #333 (Q4, D-TBD-b): presentation is set only on Build package → Client package → Systems;
+   *  the card shows it read-only as a chip linking there. */
+  presentationHref: string;
+  onOpenPresentation: () => void;
   /** #301: the survey discipline this system answers ("" = auto, inferred from the name). */
   onSetDiscipline: (value: ScopeDiscipline | "") => void;
   onDelete: () => void;
@@ -502,10 +505,19 @@ export default function SectionCard(p: SectionCardProps) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, padding: "0 5px" }} onClick={(e) => e.stopPropagation()}>
-              <select value={sec.presentation || "itemized"} onChange={(e) => p.onSetPresentation(e.target.value as "itemized" | "narrative")} style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff" }}>
-                <option value="itemized">Customer: itemized</option>
-                <option value="narrative">Customer: narrative</option>
-              </select>
+              <a
+                href={p.presentationHref}
+                data-testid="card-presentation"
+                title="How this system prints for the customer — change it in Build package → Client package"
+                onClick={(e) => {
+                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  p.onOpenPresentation();
+                }}
+                style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "3px 9px", fontSize: 11, fontWeight: 600, color: "#5b616e", background: "#fff", textDecoration: "none", whiteSpace: "nowrap" }}
+              >
+                Customer: {(sec.presentation || "itemized") === "narrative" ? "Narrative" : "Itemized"} ↗
+              </a>
               {/* #301: which site-visit discipline this system answers — matches the
                   survey's Client goals. Blank = inferred from the name (never stored). */}
               {sec.kind !== "labor" && (

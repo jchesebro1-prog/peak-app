@@ -69848,3 +69848,27 @@ import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
     "#333 client tab: the R10 sent note; the Show-on-PDF block is the Line detail group (PdfOptionsPanel retired, no Systems list)");
   ok(readFileSync(join(process.cwd(), "src/app/(app)/estimator/preview-doc.tsx"), "utf8").includes('"Cover note (estimate PDF)"'), "#333 line detail: the cover note is relabelled \"Cover note (estimate PDF)\"");
 }
+
+// ---- Task 13: one presentation editor (Q4 — the Build card shows a read-only chip) ----
+{
+  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+  const root = join(process.cwd(), "src/app/(app)/estimator");
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
+  const callers: string[] = [];
+  const writers: string[] = [];
+  for (const f of walk(root)) {
+    const rel = f.slice(root.length + 1);
+    const src = readFileSync(f, "utf8");
+    if (/(?<!const )setSystemPresentation\(/.test(src) && rel !== "steps/client-package-tab.tsx") callers.push(rel);
+    // Any other write of a system's presentation: only Draft narrative's switch (narrative.ts) and the BOM view's itemized copy may.
+    if (/presentation: (?!"itemized" as const)("narrative"|"itemized"|v\b|value\b)/.test(src) && rel !== "narrative.ts" && rel !== "use-estimator-state.ts") writers.push(rel);
+  }
+  ok(callers.length === 0, "#333 Q4: setSystemPresentation( is called only from the Client package tab: " + callers.join(", "));
+  ok(writers.length === 0, "#333 Q4: no other estimator file writes a system's presentation (Draft narrative's switch in narrative.ts excepted): " + writers.join(", "));
+  const card = readFileSync(join(root, "section-card.tsx"), "utf8");
+  ok(!card.includes("onSetPresentation") && !card.includes("Customer: itemized</option>") && card.includes('data-testid="card-presentation"') && card.includes("p.onOpenPresentation();"),
+    "#333 Q4: the Build card's presentation select is a read-only \"Customer: … ↗\" chip linking to Client package");
+  const cli = readFileSync(join(root, "estimator-client.tsx"), "utf8");
+  ok(cli.includes('packageTabSearch(stepSearch(window.location.search, "package"), "client") + "#systems"'), "#333 Q4: the chip lands on Build package → Client package → #systems");
+  ok(readFileSync(join(root, "narrative.ts"), "utf8").includes('presentation: "narrative"'), "#333 Q4: Draft narrative still switches its system to Narrative (same field)");
+}

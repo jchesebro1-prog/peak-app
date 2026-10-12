@@ -31,7 +31,13 @@ import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
  */
 const NO_COMMENTS: NumberedComment[] = [];
 
-export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNarrative: () => void }) {
+export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresentation }: {
+  s: EstimatorState;
+  onOpenNarrative: () => void;
+  /** #333 (Q4): the card's read-only presentation chip opens Build package → Client package → Systems. */
+  presentationHref: string;
+  onOpenPresentation: () => void;
+}) {
   /** Phase 2a: the rail group whose name is being edited (a new group opens in rename). */
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const {
@@ -153,7 +159,6 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     setNarrFocusReq,
     setQty,
     setSystemMargin,
-    setSystemPresentation,
     setSystemRoom,
     setSystemSell,
     setTrackDraft,
@@ -487,7 +492,8 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                     onActivate={() => setActiveId(sec.id)}
                     onSetRoom={(value) => setSystemRoom(sec.id, value)}
                     defaultRoom={venueRoomName}
-                    onSetPresentation={(value) => setSystemPresentation(sec.id, value)}
+                    presentationHref={presentationHref}
+                    onOpenPresentation={onOpenPresentation}
                     onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}
                     onDelete={() => deleteSystem(sec.id)}
                     onSetMargin={(v) => setSystemMargin(sec.id, v)}
