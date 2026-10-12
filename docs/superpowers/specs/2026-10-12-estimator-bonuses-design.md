@@ -188,7 +188,7 @@ Route `/reports/estimator-bonuses`, linked from the Reports page.
 - `withBonusLines` never throws: a system with non-finite cost or sell gets no bonus lines and the Build footer shows
   "Bonus not figured — check line costs".
 - A Won transition whose bonus figuring fails still marks Won, logs the error, and leaves `bonusRecord` absent; the
-  report then omits it. The Send & track tab shows "Bonus not recorded — re-save Won" to approvers.
+  report then omits it. The Send & track tab shows "Bonus not recorded — use Record now" to approvers, with a Record now button that rebuilds the record.
 - A credit with no `userId` (no team member matched the name when it was recorded) keeps its amount and shows "(no matching team member)".
 
 ## Testing

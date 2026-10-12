@@ -67693,7 +67693,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   const page = bnfRead("src/app/(app)/estimator/page.tsx");
   ok(page.includes('bonusSource: sourceForSave(q.source, "estimator")') && !page.includes("bonusSource: q.source"), "#bonus I1 source pin: the page judges eligibility on the source the save will write (sourceForSave)");
   const card = bnfRead("src/app/(app)/estimator/steps/bonus-card.tsx");
-  ok(card.includes('Bonus not recorded {"\\u2014"} re-save Won') && /won && !record && hasBonusLines && canApprove/.test(card) && /onClick=\{\(\) => onTaken\(taken\)\}/.test(card), "#bonus I2 source pin: a Won with bonus lines and no record tells approvers, with a Record now that re-saves the alternates");
+  ok(card.includes('Bonus not recorded {"\\u2014"} use Record now') && /won && !record && hasBonusLines && canApprove/.test(card) && /onClick=\{\(\) => onTaken\(taken\)\}/.test(card), "#bonus I2 source pin: a Won with bonus lines and no record tells approvers, with a Record now that re-saves the alternates");
   ok(card.includes("(no matching team member)") && !card.includes("(removed user)"), "#bonus M7: an unresolved credit says (no matching team member)");
   const step = bnfRead("src/app/(app)/estimator/steps/send-step.tsx");
   ok(step.includes("hasBonusLines={quoteHasBonusLines(sections)}") && /\n {6}<Fragment key="status">\n {8}<section id=\{SEND_STEP_IDS\.status\}/.test(step), "#bonus I2/M5 source pin: Send & track passes hasBonusLines; the status Fragment's children are indented");

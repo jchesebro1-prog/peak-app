@@ -109,7 +109,7 @@ export function BonusCard(props: {
       )}
       {notRecorded && (
         <div role="status" style={{ ...ROW, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", color: "#b06a00" }}>
-          <span>Bonus not recorded {"\u2014"} re-save Won</span>
+          <span>Bonus not recorded {"\u2014"} use Record now</span>
           <button
             type="button"
             disabled={!quoteId}
