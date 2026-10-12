@@ -49,7 +49,8 @@ function scheduleRow(it: ScheduleItem, key: number) {
         <td>{it.cont ? "" : it.qty}</td>
         <td className="pk-dw-mono pk-dw-wrap">{it.designators || ""}</td>
         <td className="pk-dw-mono pk-dw-ellip">{it.cont ? "" : it.code}</td>
-        <td className="pk-dw-ellip">{it.cont ? `${it.desc} (cont.)` : it.desc}</td>
+        {/* Grid notes #4: devices inside the holder row above print indented under it. */}
+        <td className="pk-dw-ellip" style={it.indent ? { paddingLeft: "1.2em" } : undefined}>{`${it.indent ? "↳ " : ""}${it.cont ? `${it.desc} (cont.)` : it.desc}`}</td>
       </tr>
     );
   return (

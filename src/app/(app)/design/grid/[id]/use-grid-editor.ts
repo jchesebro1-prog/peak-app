@@ -17,6 +17,7 @@ import {
   curtainLines,
   curtainSpecOf,
   isPerLengthUnit,
+  placementQty,
   type GridCurtain,
   type GridCurtainType,
   type PartLite,
@@ -73,6 +74,8 @@ import {
   restoreItemsAction,
   setPlacementsCategoryAction,
   setPlacementsSpaceAction,
+  setPlacementsGroupAction,
+  placeInsideAction,
   setSymbolDisplayAction,
   setSymbolLookAction,
   setVenueAction,
@@ -82,7 +85,7 @@ import {
 import type { CustomerComboboxOption } from "@/components/customer-combobox";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
-import { duplicates, type RenumberTarget } from "@/lib/design/designators";
+import { duplicates, formatDesignator, type RenumberTarget } from "@/lib/design/designators";
 import type { PlacementTag, TagPatch } from "@/lib/design/conduit-riser/tags";
 import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 import { bomGroups, groupedBomLines, type BomGroupKey } from "@/lib/design/grid-bom-groups";
@@ -97,6 +100,7 @@ import type { ScheduleData } from "@/lib/design/grid-schedule";
 import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/lib/design/grid-selection";
 import { alignPositions, changedMoves, distributePositions, type AlignMode } from "@/lib/design/grid-align";
 import { copySelection, PASTE_OFFSET, pasteLayout, type Clipboard } from "@/lib/design/grid-clipboard";
+import { dropHolderAt, holderOf, memberCounts, membersLeftBehind, membersOf, type DeleteMembers } from "@/lib/design/grid-groups";
 // Type-only: the module itself imports the server-side catalog lookup.
 import type { CurtainInput } from "@/lib/design/grid-curtain-input";
 import { cleanSymbolDisplay, hitRadius, type SymbolDisplay, type SymbolMode } from "@/lib/design/grid-symbol-display";
@@ -479,6 +483,11 @@ function useGridEditorImpl(props: GridEditorProps) {
   const active = useMemo(() => optionSlice(project, activeOptionId), [project, activeOptionId]);
   const placements = active.placements;
   const routes = active.routes;
+  /** Grid notes #4: the option's devices by id, and how many sit inside each holder. */
+  const placementsById = useMemo(() => new Map(placements.map((pl) => [pl.id, pl])), [placements]);
+  const holderCounts = useMemo(() => memberCounts(placements), [placements]);
+  /** Grid notes #4: a device inside another — no plan spot (not drawn, hit-tested or moved). */
+  const isInside = useCallback((pl: GridPlacement) => !!holderOf(pl, placementsById), [placementsById]);
   /** #320: devices whose designator another device of this option also holds — drawn amber. */
   const designatorDupes = useMemo(() => duplicates(placements), [placements]);
   const optionCounts = useMemo(() => {
@@ -720,6 +729,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   //    window where the action has committed and the props still say old.
   //    Each entry expires by itself (see MoveOverride).
   const [drag, setDrag] = useState<MarkerDrag | null>(null);
+  /** Grid notes #4: the holder a marker drag would drop into right now (null = a plain move). */
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [movedLocal, setMovedLocal] = useState<Record<string, MoveOverride>>({});
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The nudge positions painted but not yet written (the 400 ms debounce). */
@@ -1071,10 +1082,9 @@ function useGridEditorImpl(props: GridEditorProps) {
    * marker that could still be grabbed by a stray click would be worse than
    * no layers at all, and drag-to-move (punch #47) makes that a real risk.
    */
-  const visiblePlacements = useMemo(
-    () => sheetPlacements.filter(placementVisible),
-    [sheetPlacements, placementVisible]
-  );
+  const layerPlacements = useMemo(() => sheetPlacements.filter(placementVisible), [sheetPlacements, placementVisible]);
+  /** Grid notes #4: devices inside a holder have no marker — every plan gesture skips them. */
+  const visiblePlacements = useMemo(() => layerPlacements.filter((pl) => !isInside(pl)), [layerPlacements, isInside]);
   /** Plan legend rows (stock symbols): one per icon+colour on this sheet.
    *  Curtains draw their own drape glyph, not a badge, so they're left out.
    *  Deduped by part id (or, for a seeded-but-unassigned placement with no
@@ -1083,14 +1093,15 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  see each distinct entry once (final fix wave). */
   const planLegendRows = useMemo(() => {
     const distinct = new Map<string, SymbolEntry & { desc?: string | null }>();
-    for (const pl of visiblePlacements) {
+    // Grid notes #4: devices inside a holder are still on this sheet's legend.
+    for (const pl of layerPlacements) {
       if (pl.curtain) continue;
       const part = partById.get(pl.partId);
       const key = part ? `id:${part.id}` : `cat:${pl.category ?? ""}`;
       if (!distinct.has(key)) distinct.set(key, part ?? { category: pl.category, deviceType: null });
     }
     return legendRows([...distinct.values()], symbolCtx);
-  }, [visiblePlacements, partById, symbolCtx]);
+  }, [layerPlacements, partById, symbolCtx]);
   const pageSpaces = useMemo(
     () => (project.spaces || []).filter((s) => s.sheetId === sheet?.id && s.page === page),
     [project.spaces, sheet?.id, page]
@@ -1297,6 +1308,8 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  selected with one hidden reads as one device everywhere (Property
    *  Editor, status bar, Delete, nudge). */
   const selectedPlacement = selectedPlacements.length === 1 ? selectedPlacements[0] : null;
+  /** Grid notes #4: the selection minus devices inside a holder — what a nudge, align or distribute moves. */
+  const movablePlacements = useMemo(() => selectedPlacements.filter((pl) => !isInside(pl)), [selectedPlacements, isInside]);
   const selected = selectedPlacement ? selectedPlacement.id : null;
   /** The catalog entry behind the selected device (curtains and seed
    *  placeholders have none) — what the Symbol select edits (#131). */
@@ -1438,7 +1451,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   useEffect(() => {
     // #318: never under the Adjust sheet dialog, wherever focus fell.
     if (adjustOpen) return;
-    if (!selectedPlacements.length) return;
+    if (!movablePlacements.length) return;
     // #299: the plan is hidden in Spreadsheet view — nothing to nudge there.
     if (view !== "plan") return;
     if (pending || curtainAt || calDraft || drag || spaceDrawing || wireDrawing) return;
@@ -1468,7 +1481,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         // line in the arrow's direction (its other axis rounds onto the grid
         // too, so it lands on a dot); the rest move by the same delta.
         const k = e.shiftKey ? SNAP_NUDGE_FAST_STEPS : 1;
-        const a = shownAt(selectedPlacements[0]);
+        const a = shownAt(movablePlacements[0]);
         const to = snapPoint(a, snap);
         if (dirX) to.x = clamp01(nextGridLine(a.x, snap.stepX, dirX as -1 | 1, k));
         if (dirY) to.y = clamp01(nextGridLine(a.y, snap.stepY, dirY as -1 | 1, k));
@@ -1480,17 +1493,17 @@ function useGridEditorImpl(props: GridEditorProps) {
         dy = (dirY * step) / (aspect || 1);
       }
       // #299: every selected device moves together.
-      const moves = selectedPlacements.map((pl) => {
+      const moves = movablePlacements.map((pl) => {
         const from = shownAt(pl);
         return { id: pl.id, x: clamp01(from.x + dx), y: clamp01(from.y + dy) };
       });
       // Pinned at the page edge (or already on the grid line): nothing moves,
       // so nothing is painted, queued or written.
-      if (!changedMoves(selectedPlacements.map((pl) => ({ id: pl.id, ...shownAt(pl) })), moves).length) return;
+      if (!changedMoves(movablePlacements.map((pl) => ({ id: pl.id, ...shownAt(pl) })), moves).length) return;
       // Paint every keystroke; write once the key-repeat settles.
       setMovedLocal((prev) => {
         const next = { ...prev };
-        for (const [i, pl] of selectedPlacements.entries()) {
+        for (const [i, pl] of movablePlacements.entries()) {
           next[pl.id] = { at: { x: moves[i].x, y: moves[i].y }, base: { x: pl.x, y: pl.y } };
         }
         return next;
@@ -1515,7 +1528,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    selectedPlacements,
+    movablePlacements,
     shownAt,
     takeNudge,
     snap,
@@ -1889,6 +1902,9 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (!p) return;
       const at = { x: clamp01(p.x + drag.off.x), y: clamp01(p.y + drag.off.y) };
       setDrag((prev) => (prev ? { ...prev, at, moved: true } : prev));
+      // Grid notes #4: over a device that can take every dragged one → drop into it.
+      const into = dropHolderAt(at, visiblePlacements, drag.ids, placements, deviceHitRadius, aspect || 1, project.options[0].id);
+      setDropTargetId(into ? into.id : null);
       return;
     }
     if (!calDraft) return;
@@ -1919,6 +1935,13 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (drag) {
       const d = drag;
       setDrag(null);
+      const into = dropTargetId;
+      setDropTargetId(null);
+      // Grid notes #4: released over a holder — the dragged devices go inside it.
+      if (d.moved && into && placementsById.has(into)) {
+        void groupInto(into, d.ids);
+        return;
+      }
       // Never travelled: this was a click, so keep the old toggle-select —
       // or, on one member of a larger selection, narrow it to that device.
       if (!d.moved) {
@@ -1948,6 +1971,7 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  or marquee rather than committing wherever it stopped. */
   function cancelGesture() {
     setDrag(null);
+    setDropTargetId(null);
     marqueeStart.current = null;
     setMarquee(null);
   }
@@ -2095,7 +2119,111 @@ function useGridEditorImpl(props: GridEditorProps) {
   /* ------------------------------ tool model (#299) ------------------------------ */
 
   /** One tool at a time (#299): every entry point clears every other mode. */
+  /* ------------------------- equipment groups (Grid notes #4) ------------------------- */
+
+  /** A holder (or any device) as a person reads it: its designator, else its name. */
+  const holderLabel = useCallback(
+    (pl: GridPlacement) => formatDesignator(pl.designator, placementQty(pl), designatorDigits) || placementLabel(pl),
+    [designatorDigits, placementLabel]
+  );
+
+  /** One group write (in or out) — one undo step. Resolves true when it landed. */
+  const writeGroup = useCallback(
+    async (items: { id: string; groupId: string | null }[], label: string, verb: string, select?: string[]): Promise<boolean> => {
+      if (!items.length) return false;
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setPlacementsGroupAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        noteAction(label);
+        record({ label: stepLabel(verb, items.length), forward: { kind: "group", items }, inverse: { kind: "group", items: r.previous } });
+        if (select) setSelectedIds(select);
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [flushNudge, project.id, noteAction, record, router]
+  );
+
+  /** Move devices into a holder (the Move into button, a drag onto its marker). */
+  const groupInto = useCallback(
+    async (holderId: string, ids: readonly string[]): Promise<boolean> => {
+      const holder = placementsById.get(holderId);
+      if (!holder) return false;
+      const items = [...new Set(ids)].filter((id) => id !== holderId && placementsById.get(id)?.groupId !== holderId).map((id) => ({ id, groupId: holderId }));
+      if (!items.length) return false;
+      const n = items.length;
+      return writeGroup(items, `Moved ${n} device${n === 1 ? "" : "s"} into ${holderLabel(holder)}`, "move into", [holderId]);
+    },
+    [placementsById, holderLabel, writeGroup]
+  );
+
+  /** Take devices out of their holders, onto the plan beside them. A holder
+   *  among `ids` gives up all its devices ("Take all out"). */
+  const takeOutOfGroup = useCallback(
+    async (ids: readonly string[]): Promise<boolean> => {
+      const out = new Set<string>();
+      for (const id of ids) {
+        const pl = placementsById.get(id);
+        if (!pl) continue;
+        if (pl.groupId) out.add(pl.id);
+        else for (const m of membersOf(placements, pl.id)) out.add(m.id);
+      }
+      const items = [...out].map((id) => ({ id, groupId: null }));
+      if (!items.length) return false;
+      const first = placementsById.get(items[0].id);
+      const holder = first?.groupId ? placementsById.get(first.groupId) : undefined;
+      const n = items.length;
+      return writeGroup(items, `Took ${n} device${n === 1 ? "" : "s"} out${holder ? ` of ${holderLabel(holder)}` : ""}`, "take out", [...out]);
+    },
+    [placementsById, placements, holderLabel, writeGroup]
+  );
+
+  /** "Place inside": the holder every Product Library pick now goes into (null = off). */
+  const [placeInsideId, setPlaceInsideId] = useState<string | null>(null);
+  const placeInsideHolder = placeInsideId ? placementsById.get(placeInsideId) ?? null : null;
+
+  /** One library pick into the "Place inside" holder — one undo step (undo removes it). */
+  const placeInside = useCallback(
+    async (partId: string) => {
+      const holder = placeInsideId ? placementsById.get(placeInsideId) : undefined;
+      if (!holder || busy) return;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await placeInsideAction(project.id, { holderId: holder.id, partId });
+        if (!r.ok) {
+          setErr(r.error);
+          return;
+        }
+        noteAction(`Placed ${partLabel(partId)} inside ${holderLabel(holder)}`);
+        recordPlace(`place ${partLabel(partId)} inside`, [r.placement]);
+        router.refresh();
+      } catch {
+        setErr(SAVE_FAILED);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [placeInsideId, placementsById, busy, project.id, noteAction, partLabel, holderLabel, recordPlace, router]
+  );
+
+  /** What a Delete of the selection must ask first: a holder whose devices weren't selected with it. */
+  const [deleteAsk, setDeleteAsk] = useState<{ ids: string[]; inside: number; holders: number } | null>(null);
+
   const clearModes = useCallback(() => {
+    setPlaceInsideId(null);
+    setDeleteAsk(null);
     setArmedPartId(null);
     setArmedCurtainType(null);
     setCurtainAt(null);
@@ -2109,8 +2237,27 @@ function useGridEditorImpl(props: GridEditorProps) {
     setPanning(false);
   }, []);
 
+  /** Grid notes #4: start "Place inside" on a holder (any device that can hold). */
+  const startPlaceInside = useCallback(
+    (holderId: string) => {
+      clearModes();
+      setPlaceInsideId(holderId);
+      setSelectedIds([holderId]);
+      setSelectedSpaceId(null);
+      setSelectedRouteId(null);
+    },
+    [clearModes]
+  );
+  const stopPlaceInside = useCallback(() => setPlaceInsideId(null), []);
+
   const enterTool = useCallback(
     (t: GridTool, opts?: { partId?: string; curtainType?: string }) => {
+      // Grid notes #4: while placing inside a holder, every library pick
+      // (tiles, catalog results, the estimate tray) goes into it instead of arming.
+      if (placeInsideId && t === "place" && opts?.partId) {
+        void placeInside(opts.partId);
+        return;
+      }
       // Every tool acts on the plan — arming one from anywhere (Product
       // Library, the right pane, a Calibrate button) leaves Spreadsheet view.
       setView("plan");
@@ -2139,7 +2286,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (t === "calibrate") setCalibrating(true);
       if (t === "pan") setPanning(true);
     },
-    [clearModes, wirePartId, cal]
+    [clearModes, wirePartId, cal, placeInsideId, placeInside]
   );
 
   /** Back to select with nothing selected — what un-arming a palette part or
@@ -2306,11 +2453,9 @@ function useGridEditorImpl(props: GridEditorProps) {
 
   /* ------------------------- bulk edits on the selection (#299) ------------------------- */
 
-  /** Remove every visible selected device in one write — the Property
-   *  Editor's Remove / Delete n, the toolbar Delete and the Delete/Backspace
-   *  key all land here. Resolves to what undo needs to put back, or null. */
-  const removeSelectedAs = useCallback(async (verb: "Delete" | "Cut"): Promise<RemovedBundle | null> => {
-    const targets = selectedPlacements;
+  /** Remove `targets` in one write. Grid notes #4: `members` says what a
+   *  removed holder's devices do — "delete" them too, or "keep" them beside it. */
+  const removeTargets = useCallback(async (targets: GridPlacement[], verb: "Delete" | "Cut", members?: DeleteMembers): Promise<RemovedBundle | null> => {
     if (!targets.length) return null;
     // A pending nudge writes first (minus the devices going away), so its
     // debounce can't fire after the delete and report them missing.
@@ -2318,16 +2463,24 @@ function useGridEditorImpl(props: GridEditorProps) {
     setErr(null);
     setBusy(true);
     try {
-      const r = await removePlacementsAction(project.id, targets.map((pl) => pl.id));
+      const ids = targets.map((pl) => pl.id);
+      const r = await removePlacementsAction(project.id, ids, members);
       if (!r.ok) {
         setErr(r.error);
         return null;
       }
       setSelectedIds([]);
       setCategoryDraft(null);
-      noteAction(targets.length === 1 ? `Removed ${placementLabel(targets[0])}` : `Removed ${countNoun(targets)}`);
-      const ids = targets.map((pl) => pl.id);
-      record({ label: stepLabel(verb.toLowerCase(), ids.length), forward: { kind: "remove", ids }, inverse: { kind: "restore", bundle: r.removed } });
+      const inside = r.removed.placements.length - targets.length;
+      noteAction(
+        (targets.length === 1 ? `Removed ${placementLabel(targets[0])}` : `Removed ${countNoun(targets)}`) +
+          (inside > 0 ? ` and ${inside} device${inside === 1 ? "" : "s"} inside` : r.removed.regroup?.length ? ` — ${r.removed.regroup.length} device${r.removed.regroup.length === 1 ? "" : "s"} left on the plan` : "")
+      );
+      record({
+        label: stepLabel(verb.toLowerCase(), ids.length),
+        forward: { kind: "remove", ids, ...(members ? { members } : {}) },
+        inverse: { kind: "restore", bundle: r.removed },
+      });
       router.refresh();
       return r.removed;
     } catch {
@@ -2336,38 +2489,67 @@ function useGridEditorImpl(props: GridEditorProps) {
     } finally {
       setBusy(false);
     }
-  }, [selectedPlacements, project.id, router, noteAction, placementLabel, flushNudge, record]);
+  }, [project.id, router, noteAction, placementLabel, flushNudge, record]);
+  /** Remove every visible selected device in one write — the Property
+   *  Editor's Remove / Delete n, the toolbar Delete and the Delete/Backspace
+   *  key all land here. Resolves to what undo needs to put back, or null
+   *  (also when a holder's Delete stopped to ask — Grid notes #4). */
+  const removeSelectedAs = useCallback(async (verb: "Delete" | "Cut"): Promise<RemovedBundle | null> => {
+    const targets = selectedPlacements;
+    if (!targets.length) return null;
+    const ids = targets.map((pl) => pl.id);
+    // Grid notes #4: a Cut takes a holder's devices with it (they're on the
+    // clipboard too); a Delete of a holder whose devices weren't picked asks.
+    if (verb === "Cut") return removeTargets(targets, verb, "delete");
+    const behind = membersLeftBehind(placements, ids);
+    if (behind.length) {
+      setDeleteAsk({ ids, inside: behind.length, holders: new Set(behind.map((pl) => pl.groupId)).size });
+      return null;
+    }
+    return removeTargets(targets, verb);
+  }, [selectedPlacements, placements, removeTargets]);
   const removeSelected = useCallback(() => removeSelectedAs("Delete"), [removeSelectedAs]);
+  /** Grid notes #4: the answer to "delete the devices inside too?" (null = Cancel). */
+  const answerDeleteAsk = useCallback(
+    async (choice: DeleteMembers | null) => {
+      const ask = deleteAsk;
+      setDeleteAsk(null);
+      if (!ask || !choice) return;
+      const targets = ask.ids.flatMap((id) => placementsById.get(id) ?? []);
+      await removeTargets(targets, "Delete", choice);
+    },
+    [deleteAsk, placementsById, removeTargets]
+  );
 
   /** Where each visible selected device is shown right now. */
   const selectionPositions = useCallback(
-    () => selectedPlacements.map((pl) => ({ id: pl.id, ...shownAt(pl) })),
-    [selectedPlacements, shownAt]
+    () => movablePlacements.map((pl) => ({ id: pl.id, ...shownAt(pl) })),
+    [movablePlacements, shownAt]
   );
 
   /** Line the selection up (2+). Only devices that actually move are sent;
    *  resolves to the positions they replaced (undo), or null. */
   const alignSelected = useCallback(
     async (mode: AlignMode) => {
-      if (selectedPlacements.length < 2) return null;
+      if (movablePlacements.length < 2) return null;
       const before = selectionPositions();
       const moves = changedMoves(before, alignPositions(before, mode));
       if (!moves.length) return null;
-      return commitMoves(moves, `Aligned ${countNoun(selectedPlacements)} ${ALIGN_WORDS[mode]}`, "align");
+      return commitMoves(moves, `Aligned ${countNoun(movablePlacements)} ${ALIGN_WORDS[mode]}`, "align");
     },
-    [selectedPlacements, selectionPositions, commitMoves]
+    [movablePlacements, selectionPositions, commitMoves]
   );
 
   /** Space the selection evenly along one axis (3+); the end devices stay. */
   const distributeSelected = useCallback(
     async (axis: "x" | "y") => {
-      if (selectedPlacements.length < 3) return null;
+      if (movablePlacements.length < 3) return null;
       const before = selectionPositions();
       const moves = changedMoves(before, distributePositions(before, axis));
       if (!moves.length) return null;
-      return commitMoves(moves, `Distributed ${countNoun(selectedPlacements)} ${axis === "x" ? "horizontally" : "vertically"}`, "distribute");
+      return commitMoves(moves, `Distributed ${countNoun(movablePlacements)} ${axis === "x" ? "horizontally" : "vertically"}`, "distribute");
     },
-    [selectedPlacements, selectionPositions, commitMoves]
+    [movablePlacements, selectionPositions, commitMoves]
   );
 
   /** Label (or clear, with "") every visible selected device. Devices that
@@ -2719,7 +2901,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       const routeIds = samePage ? clip.routeIds : [];
       const dropped = clip.routeIds.length - routeIds.length;
       const items = clip.items.map((it) => {
-        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag } = {
+        const out: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag; groupSrcId?: string } = {
           srcId: it.srcId,
           x: anchor.x + it.dx,
           y: anchor.y + it.dy,
@@ -2728,6 +2910,7 @@ function useGridEditorImpl(props: GridEditorProps) {
         if (it.category !== undefined) out.category = it.category;
         if (it.qty !== undefined) out.qty = it.qty;
         if (it.tag !== undefined) out.tag = { ...it.tag };
+        if (it.groupSrcId) out.groupSrcId = it.groupSrcId; // Grid notes #4
         // The full curtain record; the server re-checks every field.
         if (it.curtain) out.curtain = { ...it.curtain };
         return out;
@@ -2837,7 +3020,7 @@ function useGridEditorImpl(props: GridEditorProps) {
           return { ok: true };
         }
         case "remove": {
-          const r = await removePlacementsAction(project.id, c.ids);
+          const r = await removePlacementsAction(project.id, c.ids, c.members);
           if (!r.ok) return r;
           const gone = new Set(c.ids);
           setSelectedIds((prev) => prev.filter((id) => !gone.has(id)));
@@ -2880,6 +3063,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         }
         case "space": {
           const r = await setPlacementsSpaceAction(project.id, c.items);
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
+        case "group": {
+          const r = await setPlacementsGroupAction(project.id, c.items);
           if (!r.ok) return r;
           router.refresh();
           return { ok: true };
@@ -3047,6 +3236,22 @@ function useGridEditorImpl(props: GridEditorProps) {
   }, [disarm, hideRiserPrompt, enterTool, removeSelected, selectedPlacements, busy, drag, armedPartId, sheet, view, tool, visiblePlacements, copySelected, cutSelected, paste, duplicate, undo, redo, adjustOpen]);
 
   return {
+    // Grid notes #4: equipment groups.
+    placementsById,
+    holderCounts,
+    isInside,
+    holderLabel,
+    movablePlacements,
+    dropTargetId,
+    groupInto,
+    takeOutOfGroup,
+    placeInsideId,
+    placeInsideHolder,
+    startPlaceInside,
+    stopPlaceInside,
+    // The question stands only while the selection it asked about does.
+    deleteAsk: deleteAsk && deleteAsk.ids.join("|") === selectedPlacements.map((pl) => pl.id).join("|") ? deleteAsk : null,
+    answerDeleteAsk,
     router,
     estimateLink,
     estimateTray,

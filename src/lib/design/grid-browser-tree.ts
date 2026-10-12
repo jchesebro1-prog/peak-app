@@ -51,7 +51,10 @@ export type BrowserTreeInput = {
 
 const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-function deviceNode(pl: GridPlacement, name: string, members: string[], leaf?: string | null): TreeNode {
+/** Grid notes #4: the devices sitting inside each holder, per page slice. */
+type Inside = ReadonlyMap<string, GridPlacement[]>;
+
+function deviceNode(pl: GridPlacement, name: string, members: string[], leaf?: string | null, inside?: Inside, i?: BrowserTreeInput): TreeNode {
   const qty = placementQty(pl);
   const node: TreeNode = {
     key: `pl:${pl.id}`,
@@ -62,20 +65,29 @@ function deviceNode(pl: GridPlacement, name: string, members: string[], leaf?: s
     placementIds: [pl.id],
   };
   if (members.length > 0) {
-    node.children = members.map((m, i) => ({
-      key: `member:${pl.id}:${i}`,
+    node.children = members.map((m, n) => ({
+      key: `member:${pl.id}:${n}`,
       kind: "device" as const,
       label: m,
       sheetId: pl.sheetId,
       page: pl.page,
     }));
   }
+  // Grid notes #4: the devices inside a holder are its child devices (selectable).
+  const held = inside?.get(pl.id) || [];
+  if (held.length > 0 && i) {
+    node.label = `${node.label} · ${held.length}`;
+    node.children = [
+      ...(node.children || []),
+      ...held.map((m) => deviceNode(m, i.nameOf(m) || m.partId, [], i.leafLabel?.(m))),
+    ];
+  }
   return node;
 }
 
 /** Group a container's placements by name: one placement → a device node;
  *  several → a group "name ×sumQty" over device nodes. Sorted by name. */
-function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeInput): TreeNode[] {
+function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeInput, inside?: Inside): TreeNode[] {
   const byName = new Map<string, GridPlacement[]>();
   for (const pl of pls) {
     const name = i.nameOf(pl) || pl.partId;
@@ -86,7 +98,7 @@ function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeIn
   return [...byName.entries()]
     .sort(([a], [b]) => byText(a, b))
     .map(([name, list]) => {
-      if (list.length === 1) return deviceNode(list[0], name, i.membersOf(list[0]), i.leafLabel?.(list[0]));
+      if (list.length === 1) return deviceNode(list[0], name, i.membersOf(list[0]), i.leafLabel?.(list[0]), inside, i);
       const sum = list.reduce((n, pl) => n + placementQty(pl), 0);
       return {
         key: `group:${containerKey}:${name}`,
@@ -96,7 +108,7 @@ function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeIn
         sheetId: list[0].sheetId,
         page: list[0].page,
         placementIds: list.map((pl) => pl.id),
-        children: list.map((pl) => deviceNode(pl, name, i.membersOf(pl), i.leafLabel?.(pl))),
+        children: list.map((pl) => deviceNode(pl, name, i.membersOf(pl), i.leafLabel?.(pl), inside, i)),
       };
     });
 }
@@ -104,8 +116,21 @@ function groupNodes(containerKey: string, pls: GridPlacement[], i: BrowserTreeIn
 /** Spaces (by name), then "No space" when it has devices, then "Wires (n)". */
 function pageChildren(sheetId: string, page: number, i: BrowserTreeInput): TreeNode[] {
   const spaces = i.spaces.filter((s) => s.sheetId === sheetId && s.page === page);
-  const pls = i.placements.filter((pl) => pl.sheetId === sheetId && pl.page === page);
+  const all = i.placements.filter((pl) => pl.sheetId === sheetId && pl.page === page);
   const routes = i.routes.filter((r) => r.sheetId === sheetId && r.page === page);
+  // Grid notes #4: a device inside a holder on this page nests under it, not in the space lists.
+  const here = new Map(all.map((pl) => [pl.id, pl]));
+  const inside = new Map<string, GridPlacement[]>();
+  for (const pl of all) {
+    const h = pl.groupId && pl.groupId !== pl.id ? here.get(pl.groupId) : undefined;
+    if (!h || h.curtain || pl.curtain) continue;
+    const list = inside.get(h.id) || [];
+    list.push(pl);
+    inside.set(h.id, list);
+  }
+  const nested = new Set([...inside.values()].flat().map((pl) => pl.id));
+  const pls = all.filter((pl) => !nested.has(pl.id) || inside.has(pl.id));
+  const unitsOf = (pl: GridPlacement) => placementQty(pl) + (inside.get(pl.id) || []).reduce((n, m) => n + placementQty(m), 0);
 
   const inSpace = new Map<string, GridPlacement[]>();
   const loose: GridPlacement[] = [];
@@ -119,7 +144,7 @@ function pageChildren(sheetId: string, page: number, i: BrowserTreeInput): TreeN
     if (list) list.push(pl);
     else inSpace.set(s.id, [pl]);
   }
-  const sumQty = (list: GridPlacement[]) => list.reduce((n, pl) => n + placementQty(pl), 0);
+  const sumQty = (list: GridPlacement[]) => list.reduce((n, pl) => n + unitsOf(pl), 0);
 
   const out: TreeNode[] = [...spaces]
     .sort((a, b) => byText(a.name, b.name))
@@ -127,12 +152,12 @@ function pageChildren(sheetId: string, page: number, i: BrowserTreeInput): TreeN
       const list = inSpace.get(s.id) || [];
       const key = `space:${s.id}`;
       const node: TreeNode = { key, kind: "space", label: s.name, count: sumQty(list), sheetId, page, spaceId: s.id };
-      if (list.length > 0) node.children = groupNodes(key, list, i);
+      if (list.length > 0) node.children = groupNodes(key, list, i, inside);
       return node;
     });
   if (loose.length > 0) {
     const key = `none:${sheetId}:${page}`;
-    out.push({ key, kind: "space", label: "No space", count: sumQty(loose), sheetId, page, children: groupNodes(key, loose, i) });
+    out.push({ key, kind: "space", label: "No space", count: sumQty(loose), sheetId, page, children: groupNodes(key, loose, i, inside) });
   }
   if (routes.length > 0) {
     out.push({

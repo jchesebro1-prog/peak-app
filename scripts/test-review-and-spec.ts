@@ -11671,6 +11671,7 @@ seeded()
   .then(() => mfrMerges329bChecks())
   .then(() => gridNotes8Checks())
   .then(() => gridNotes2Checks())
+  .then(() => gridNotes4Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -63109,8 +63110,8 @@ async function conduitRiser321B5Checks(): Promise<void> {
   ok(!(other.option.id in (p.conduitRiser || {})), "#321 restoreItems: another option's key naming this option's devices restores nothing");
   await G.removeOption(gp.id, other.option.id, by);
   const actSrc = srcOf("src/app/(app)/design/grid/[id]/actions.ts");
-  ok(actSrc.includes("const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;") && actSrc.includes("restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}) })"),
-    "#321 restoreItemsAction carries the conduit half through to the store");
+  ok(actSrc.includes("const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;") && actSrc.includes("restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {})"),
+    "#321 restoreItemsAction carries the conduit half through to the store"); // Grid notes #4 appends `regroup` after it
 
   // setNodeDeviceQty / removeSpace / setLevels / removeSheet prune (behavioural)
   const gq = await G.createProject({ name: "#321 B5 prune hooks", customer: "Spec fixture", customerId: null, by });
@@ -67999,4 +68000,291 @@ async function gridNotes8Checks(): Promise<void> {
   } finally {
     console.warn = warn;
   }
+}
+
+/* ======================================================================
+   Grid notes #4 — equipment groups: any device holds others (groupId on the
+   member = the holder's placement id), one level, no curtains, ≤ 200, members
+   hidden on the plan and mirrored onto the holder; Spreadsheet/schedule nest
+   them under it; pricing unchanged.
+   ====================================================================== */
+async function gridNotes4Checks(): Promise<void> {
+  const GG = await import("@/lib/design/grid-groups");
+  const G = await import("@/lib/stores/grid-projects");
+  const CLIP = await import("@/lib/design/grid-clipboard");
+  const OPT = await import("@/lib/design/grid-options");
+  const SCH = await import("@/lib/design/grid-schedule");
+  const ROWS = await import("@/lib/design/grid-device-rows");
+  const TREE = await import("@/lib/design/grid-browser-tree");
+  const DSET = await import("@/lib/design/grid-drawing-set");
+  const BOM = await import("@/lib/design/grid-bom");
+  const DS = await import("@/db/doc-store");
+  const { ensureOptions } = await import("@/lib/design/grid-options");
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  type GP = import("@/lib/stores/grid-projects").GridPlacement;
+  const P = (id: string, extra: Partial<GP> = {}): GP => ({ id, sheetId: "S1", page: 1, x: 0.5, y: 0.5, partId: "PART", optionId: "o1", by: "t", at: 0, ...extra });
+
+  // ---- 1. counts / membership
+  const H = P("gp-h", { x: 0.4, y: 0.4, partId: "RACK" });
+  const A = P("gp-a", { x: 0.1, y: 0.1, groupId: "gp-h" });
+  const B = P("gp-b", { x: 0.2, y: 0.2, groupId: "gp-h" });
+  const L = P("gp-l", { x: 0.3, y: 0.3 });
+  const base = [H, A, B, L];
+  const byId = new Map(base.map((pl) => [pl.id, pl]));
+  ok(GG.memberCounts(base).get("gp-h") === 2 && GG.membersOf(base, "gp-h").map((p) => p.id).join() === "gp-a,gp-b" && GG.holderOf(A, byId)?.id === "gp-h" && GG.holderOf(L, byId) === null,
+    "Grid notes #4: memberCounts / membersOf / holderOf read the one groupId link");
+
+  // ---- 2. groupRefusal — every rule
+  const cur = P("gp-c", { curtain: { name: "Main" } as never });
+  const other = P("gp-o", { optionId: "o2" });
+  const p2 = P("gp-p", { page: 2 });
+  const all = [...base, cur, other, p2];
+  ok(GG.groupRefusal(all, "gp-h", ["gp-l"], "o1") === null && GG.groupRefusal(all, "gp-h", ["gp-a"], "o1") === null,
+    "Grid notes #4 rule: a loose device on the same option/page goes into any device; one already inside it is a no-op");
+  ok(GG.groupRefusal(all, "gp-c", ["gp-l"], "o1") === GG.GROUP_CURTAIN_HOLD && GG.groupRefusal(all, "gp-h", ["gp-c"], "o1") === GG.GROUP_CURTAIN_MEMBER,
+    "Grid notes #4 rule: a curtain can't hold and can't be held");
+  ok(GG.groupRefusal(all, "gp-a", ["gp-l"], "o1") === GG.GROUP_HOLDER_IS_MEMBER && GG.groupRefusal(all, "gp-l", ["gp-h"], "o1") === GG.GROUP_MEMBER_HOLDS,
+    "Grid notes #4 rule: one level — a member can't hold, and a holder can't go inside another");
+  ok(GG.groupRefusal(all, "gp-h", ["gp-h"], "o1") === GG.GROUP_SELF && GG.groupRefusal(all, "gp-h", ["gp-o"], "o1") === GG.GROUP_OTHER_OPTION &&
+     GG.groupRefusal(all, "gp-h", ["gp-p"], "o1") === GG.GROUP_OTHER_PAGE && GG.groupRefusal(all, "gp-zz", ["gp-l"], "o1") === GG.GROUP_HOLDER_GONE && GG.groupRefusal(all, "gp-h", ["gp-zz"], "o1") === GG.GROUP_HOLDER_GONE,
+    "Grid notes #4 rule: refuses itself, another option, another sheet/page and a missing device");
+  const full = [P("gp-big"), ...Array.from({ length: 199 }, (_, i) => P(`gp-m${i}`, { groupId: "gp-big" })), P("gp-n1"), P("gp-n2")];
+  ok(GG.groupRefusal(full, "gp-big", ["gp-n1"], "o1", "RK-1") === null && GG.groupRefusal(full, "gp-big", ["gp-n1", "gp-n2"], "o1", "RK-1") === "RK-1 already holds 200 devices." && GG.MAX_GROUP_MEMBERS === 200,
+    "Grid notes #4 rule: a holder takes at most 200 devices (the 201st is refused by name)");
+
+  // ---- 3. take-out spots, delete plan, withMembers
+  const spots = GG.takeOutPositions({ x: 0.5, y: 0.5 }, 10);
+  ok(spots.length === 10 && spots[0].x > 0.5 && spots[0].y === 0.5 && spots[7].y === 0.5 && spots[8].y > 0.5 && spots[8].x === spots[0].x,
+    "Grid notes #4: devices taken out land in a row to the right of the holder, wrapping every 8");
+  const edge = GG.takeOutPositions({ x: 0.97, y: 0.99 }, 3);
+  ok(edge.every((p) => p.x < 0.97 && p.x >= 0 && p.y <= 1), "Grid notes #4: near the right edge they land to the left, always on the page");
+  const kp = GG.deletePlan(base, ["gp-h"], "keep");
+  const dp = GG.deletePlan(base, ["gp-h"], "delete");
+  ok([...kp.removeIds].join() === "gp-h" && kp.takeOut.map((t) => `${t.id}>${t.groupId}`).join() === "gp-a>gp-h,gp-b>gp-h" && kp.takeOut.every((t) => t.x > H.x),
+    "Grid notes #4 delete: \"keep\" removes only the holder and takes its devices out beside it");
+  ok([...dp.removeIds].sort().join() === "gp-a,gp-b,gp-h" && dp.takeOut.length === 0 && GG.membersLeftBehind(base, ["gp-h"]).length === 2 && GG.membersLeftBehind(base, ["gp-h", "gp-a", "gp-b"]).length === 0,
+    "Grid notes #4 delete: \"delete\" removes the devices inside too; nothing to ask when they're all picked");
+  ok(GG.withMembers(base, ["gp-l", "gp-h"]).join() === "gp-l,gp-h,gp-a,gp-b", "Grid notes #4: a copy of a holder carries its devices");
+
+  // ---- 4. settleGroups — the one repair rule
+  const settled = GG.settleGroups([{ ...H, spaceId: "sp-1" }, A, B, L], "o1");
+  ok(settled.filter((p) => p.groupId).every((p) => p.x === 0.4 && p.y === 0.4 && p.spaceId === "sp-1") && settled.find((p) => p.id === "gp-l")!.x === 0.3,
+    "Grid notes #4 settle: members mirror the holder's spot and room pin; loose devices don't move");
+  const same = [H, { ...A, x: 0.4, y: 0.4 }];
+  ok(GG.settleGroups(same, "o1") === same && GG.settleGroups([L], "o1").length === 1, "Grid notes #4 settle: nothing to change → the same array (no rewrite)");
+  const orphan = GG.settleGroups([A, L], "o1");
+  ok(orphan[0].groupId === undefined && orphan[0].x === 0.1, "Grid notes #4 settle: a device whose holder is gone is released where it stands");
+  const nested = GG.settleGroups([P("gp-x"), P("gp-y", { groupId: "gp-x" }), P("gp-z", { groupId: "gp-y" })], "o1");
+  ok(nested.find((p) => p.id === "gp-y")!.groupId === undefined && nested.find((p) => p.id === "gp-z")!.groupId === "gp-y",
+    "Grid notes #4 settle: one level — a holder named by others keeps them and loses its own link");
+  const bad = GG.settleGroups([cur, P("gp-k", { groupId: "gp-c" }), P("gp-q", { groupId: "gp-h", optionId: "o2" }), H, P("gp-cc", { curtain: {} as never, groupId: "gp-h" })], "o1");
+  ok(bad.every((p) => p.groupId === undefined), "Grid notes #4 settle: links to a curtain, from a curtain, or across options are dropped");
+  const capped = GG.settleGroups([P("gp-big"), ...Array.from({ length: 201 }, (_, i) => P(`gp-m${i}`, { groupId: "gp-big" }))], "o1");
+  ok(capped.filter((p) => p.groupId).length === 200 && capped.at(-1)!.groupId === undefined, "Grid notes #4 settle: past 200, the later devices drop out");
+
+  // ---- 5. drag onto a holder; Spreadsheet nesting
+  const cand = [H, L];
+  ok(GG.dropHolderAt({ x: 0.401, y: 0.4 }, cand, ["gp-l"], base, 0.02, 1, "o1")?.id === "gp-h" && GG.dropHolderAt({ x: 0.6, y: 0.6 }, cand, ["gp-l"], base, 0.02, 1, "o1") === null &&
+     GG.dropHolderAt({ x: 0.3, y: 0.3 }, cand, ["gp-h"], base, 0.02, 1, "o1") === null,
+    "Grid notes #4 drag: over an eligible holder → drop into it; elsewhere, or a holder dragged onto a device (nesting), is a plain move");
+  const nr = GG.nestRows([
+    { id: "gp-a", holderId: "gp-h" },
+    { id: "gp-l", holderId: null },
+    { id: "gp-h", holderId: null },
+    { id: "gp-b", holderId: "gp-h" },
+    { id: "gp-q", holderId: "gp-gone" },
+  ]);
+  ok(nr.map((r) => `${r.id}${r.nested ? "^" : ""}`).join() === "gp-l,gp-h,gp-a^,gp-b^,gp-q", "Grid notes #4 sheet: members follow their holder (in their own sorted order); one whose holder is filtered out keeps its place");
+
+  // ---- 6. clipboard + option copy carry the group
+  const clip = CLIP.copySelection("prj", base, [], ["gp-h"])!;
+  ok(clip.items.map((i) => `${i.srcId}:${i.groupSrcId ?? ""}`).join() === "gp-h:,gp-a:gp-h,gp-b:gp-h", "Grid notes #4: copying a holder copies its devices, each pointing at the copied holder");
+  const lone = CLIP.copySelection("prj", base, [], ["gp-a"])!;
+  ok(lone.items.length === 1 && lone.items[0].groupSrcId === undefined, "Grid notes #4: a device copied without its holder pastes as a plain device");
+  let n = 0;
+  const copied = OPT.copyOptionMembers({ placements: [A, B, H], routes: [], fromOptionId: "o1", toOptionId: "o9", makeId: (p) => `${p}${++n}`, by: "t", at: 1 });
+  const newH = copied.idMap.get("gp-h")!;
+  ok(copied.placements.filter((p) => p.groupId).length === 2 && copied.placements.every((p) => p.id === newH || p.groupId === newH),
+    "Grid notes #4: an option copy re-points every member at the copied holder (even one listed before it)");
+
+  // ---- 7. schedule, device rows, browser tree, drawing set — members under the holder
+  const sp = [{ id: "sp-1", sheetId: "S1", page: 1, name: "Booth", points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] }];
+  const pls = GG.settleGroups([
+    { ...H, designator: "RK-1" },
+    { ...A, partId: "AMP", designator: "AMP-1" },
+    { ...B, partId: "AMP", designator: "AMP-2" },
+    P("gp-l2", { partId: "AMP", x: 0.7, y: 0.7, designator: "AMP-3" }),
+    P("gp-d", { partId: "DSP", groupId: "gp-h", designator: "DSP-1", qty: 2 }),
+  ], "o1");
+  const sch = SCH.buildSchedule({ placements: pls, spaces: sp, descOf: (id) => id, wires: [] });
+  const rows = sch.sections[0].rows;
+  ok(rows.map((r) => `${r.partId}:${r.qty}:${r.group ?? ""}`).join() === "RACK:1:holder,AMP:2:member,DSP:2:member,AMP:1:" && rows[1].designators === "AMP-1–2" && sch.unitCount === 6,
+    "Grid notes #4 schedule: the holder gets its own row and its devices follow (merged by part), never merged with loose ones; units unchanged");
+  const items = SCH.scheduleGroups(sch)[0].rows;
+  ok(items.map((r) => (r.kind === "row" && r.indent ? "i" : "-")).join("") === "-ii-", "Grid notes #4 schedule: printed member rows are indented (E-60x and /schedule)");
+  const drows = ROWS.deviceRows({
+    placements: pls, sheets: [{ id: "S1", name: "Plan" }], spaces: sp.map((x) => ({ ...x, color: "#000", by: "t", at: 0 })),
+    typeKeyOf: () => "t", typeLabelOf: () => "T", modelOf: () => "", descOf: (pl) => pl.partId, duplicates: new Set(),
+  });
+  const shown = ROWS.shownDeviceRows(drows, {}, { key: "desc", dir: -1 });
+  ok(shown.map((r) => `${r.designator}${r.nested ? "^" : ""}`).join() === "RK-1,DSP-1^,AMP-1^,AMP-2^,AMP-3" &&
+     drows.find((r) => r.id === "gp-h")!.memberCount === 3 && drows.find((r) => r.id === "gp-a")!.holderLabel === "RK-1" && drows.find((r) => r.id === "gp-a")!.space === "Booth",
+    "Grid notes #4 sheet: each member keeps its own designator, indented under its holder (sorted among themselves), and sits in the holder's room");
+  const typeOnly = ROWS.shownDeviceRows(drows, { type: "t" }, null).filter((r) => r.id !== "gp-h");
+  ok(typeOnly.length === 4, "Grid notes #4 sheet: filtering keeps every member");
+  const tree = TREE.browserTree({ designName: "D", sheets: [{ id: "S1", name: "Plan" }], placements: pls, spaces: sp.map((x) => ({ ...x, color: "#000", by: "t", at: 0 })), routes: [], nameOf: (pl) => pl.partId, membersOf: () => [], wireName: () => "" });
+  const boothNode = tree.children![0].children![0];
+  const rackNode = boothNode.children!.find((c) => c.label.startsWith("RACK"))!;
+  ok(boothNode.count === 6 && rackNode.label === "RACK · 3" && rackNode.children!.length === 3 && !boothNode.children!.some((c) => c.label.startsWith("DSP")),
+    "Grid notes #4 tree: the devices inside a holder are its children in the Browser, counted in its room");
+  ok(DSET.drawnOnPlan(pls).map((p) => p.id).join() === "gp-h,gp-l2" && DSET.planSheetGroups({ sheetOrder: ["S1"], placements: pls, routes: [], partById: new Map() }).length === 1,
+    "Grid notes #4 drawing set: plan sheets don't draw devices inside a holder (they print on the schedule)");
+
+  // ---- 8. pricing unchanged
+  const parts = [
+    { id: "RACK", sku: "RACK", desc: "Rack", list: 500, cost: 300, unit: "ea" },
+    { id: "AMP", sku: "AMP", desc: "Amp", list: 100, cost: 60, unit: "ea" },
+    { id: "DSP", sku: "DSP", desc: "DSP", list: 50, cost: 20, unit: "ea" },
+  ] as unknown as import("@/lib/design/grid-bom").PartLite[];
+  const flat = pls.map((p) => { const q = { ...p }; delete q.groupId; return q; });
+  ok(JSON.stringify(BOM.bomLines(pls, parts)) === JSON.stringify(BOM.bomLines(flat, parts)) && BOM.bomTotals(pls, parts).value === BOM.bomTotals(flat, parts).value && BOM.bomTotals(pls, parts).value === 500 + 300 + 100,
+    "Grid notes #4: the BOM and its totals are the same grouped or not (members price as normal placements)");
+
+  // ---- 9. scratch DB: every store write
+  const by = "Test";
+  const project = await G.createProject({ name: "Grid notes 4 design", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", project.id);
+  const sh = (await G.addSheet(project.id, { name: "Plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const opt = ensureOptions((await G.getProject(project.id))!).options[0].id;
+  const live = async () => (await G.getProject(project.id))!;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  const get = async (id: string) => (await live()).placements!.find((x) => x.id === id);
+  const put = async (x: number, y: number, partId = fixtureId("gn4", "part"), page = 1) =>
+    (await G.addPlacement(project.id, { sheetId: sh.id, page, x, y, partId, optionId: opt, by }))!.placements!.at(-1)!;
+  const rack = await put(0.5, 0.5, fixtureId("gn4", "rack"));
+  const amp = await put(0.1, 0.1);
+  const dsp = await put(0.2, 0.2);
+  const loose = await put(0.8, 0.8);
+  const farPage = await put(0.3, 0.3, fixtureId("gn4", "part"), 2);
+  const curt = (await G.addCurtainPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.6, y: 0.6, curtain: { type: "Main", name: "Main", widthFt: 10, heightFt: 10, fullness: 0.5, fabricSku: fixtureId("gn4", "fab") } as never, optionId: opt, by }))!.placements!.at(-1)!;
+  await G.addRoute(project.id, { sheetId: sh.id, page: 1, partId: fixtureId("gn4", "wire"), points: [{ x: 0.1, y: 0.1 }, { x: 0.8, y: 0.8 }], aspect: 1, optionId: opt, by, fromPlacementId: amp.id, toPlacementId: loose.id });
+
+  const g1 = await G.setPlacementsGroup(project.id, [{ id: amp.id, groupId: rack.id }, { id: dsp.id, groupId: rack.id }]);
+  const q1 = await live();
+  const amp1 = q1.placements!.find((x) => x.id === amp.id)!;
+  const route1 = q1.routes!.find((r) => r.fromPlacementId === amp.id)!;
+  ok(g1.ok && g1.value.map((v) => `${v.groupId}@${v.x}`).join() === "null@0.1,null@0.2" && amp1.groupId === rack.id && amp1.x === 0.5 && amp1.y === 0.5 &&
+     near(route1.points[0].x, 0.5) && near(route1.points[0].y, 0.5) && route1.points[1].x === 0.8,
+    "Grid notes #4 store: Move into puts devices inside (they take the holder's spot, their wire ends follow) and returns the old spots for undo");
+  const refusals = [
+    await G.setPlacementsGroup(project.id, [{ id: curt.id, groupId: rack.id }]),
+    await G.setPlacementsGroup(project.id, [{ id: loose.id, groupId: curt.id }]),
+    await G.setPlacementsGroup(project.id, [{ id: loose.id, groupId: amp.id }]),
+    await G.setPlacementsGroup(project.id, [{ id: rack.id, groupId: loose.id }]),
+    await G.setPlacementsGroup(project.id, [{ id: farPage.id, groupId: rack.id }]),
+  ];
+  ok(refusals.every((r) => !r.ok) && (await live()).updatedAt === q1.updatedAt, "Grid notes #4 store: curtains, nesting and another page are refused, whole, writing nothing");
+  const o2 = await G.addOption(project.id, { name: "Alt", by });
+  const o2id = o2.ok ? o2.option.id : "";
+  const otherOpt = (await G.addPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.5, y: 0.5, partId: fixtureId("gn4", "part"), optionId: o2id, by }))!.placements!.at(-1)!;
+  ok(!(await G.setPlacementsGroup(project.id, [{ id: otherOpt.id, groupId: rack.id }])).ok, "Grid notes #4 store: a device on another option can't go inside");
+
+  const mv = await G.movePlacements(project.id, [{ id: rack.id, x: 0.55, y: 0.45 }]);
+  const q2 = await live();
+  ok(mv.ok && [amp.id, dsp.id].every((id) => { const m = q2.placements!.find((x) => x.id === id)!; return m.x === 0.55 && m.y === 0.45; }) && near(q2.routes!.find((r) => r.fromPlacementId === amp.id)!.points[0].x, 0.55),
+    "Grid notes #4 store: moving the holder moves its devices (and their wire ends)");
+  await G.addSpace(project.id, { sheetId: sh.id, page: 1, name: "Booth", points: [{ x: 0.9, y: 0.9 }, { x: 1, y: 0.9 }, { x: 1, y: 1 }], by });
+  const booth = (await live()).spaces!.find((x) => x.name === "Booth")!.id;
+  await G.setPlacementsSpace(project.id, [{ id: rack.id, spaceId: booth }]);
+  ok((await get(amp.id))!.spaceId === booth && (await get(dsp.id))!.spaceId === booth, "Grid notes #4 store: pinning the holder to a room puts its devices there too");
+
+  const ins = await G.addPlacementInside(project.id, { holderId: rack.id, partId: fixtureId("gn4", "part"), by });
+  ok(ins.ok && ins.placement.groupId === rack.id && ins.placement.x === 0.55 && ins.placement.spaceId === booth && !!ins.placement.designator && ins.placement.optionId === opt,
+    "Grid notes #4 store: Place inside adds a numbered device at the holder, on its option, in its room");
+  ok(!(await G.addPlacementInside(project.id, { holderId: curt.id, partId: fixtureId("gn4", "part"), by })).ok && !(await G.addPlacementInside(project.id, { holderId: amp.id, partId: fixtureId("gn4", "part"), by })).ok &&
+     !(await G.addPlacementInside(project.id, { holderId: "gp-000000000000", partId: fixtureId("gn4", "part"), by })).ok,
+    "Grid notes #4 store: Place inside refuses a curtain, a device that is itself inside, and a missing holder");
+  const insId = ins.ok ? ins.placement.id : "";
+
+  const out = await G.setPlacementsGroup(project.id, [{ id: amp.id, groupId: null }]);
+  const ampOut = (await get(amp.id))!;
+  ok(out.ok && out.value[0].groupId === rack.id && ampOut.groupId === undefined && ampOut.x > 0.55 && near((await live()).routes!.find((r) => r.fromPlacementId === amp.id)!.points[0].x, ampOut.x),
+    "Grid notes #4 store: Take out puts the device beside its holder (its wire end follows) and hands back the holder for undo");
+  const back = out.ok ? await G.setPlacementsGroup(project.id, out.value) : null;
+  ok(!!back?.ok && (await get(amp.id))!.groupId === rack.id && (await get(amp.id))!.x === 0.55, "Grid notes #4 store: the undo of Take out puts it back inside");
+  const undoIn = g1.ok ? await G.setPlacementsGroup(project.id, g1.value.filter((v) => v.id === dsp.id)) : null;
+  ok(!!undoIn?.ok && (await get(dsp.id))!.groupId === undefined && (await get(dsp.id))!.x === 0.2, "Grid notes #4 store: the undo of Move into returns the device to its old spot");
+  await G.setPlacementsGroup(project.id, [{ id: dsp.id, groupId: rack.id }]);
+
+  // delete — keep (also the default) and delete, each undone
+  const kept = await G.removePlacements(project.id, [rack.id], { members: "keep" });
+  const q3 = await live();
+  ok(kept.ok && kept.value.placements.length === 1 && (kept.value.regroup || []).length === 3 && [amp.id, dsp.id, insId].every((id) => { const m = q3.placements!.find((x) => x.id === id); return !!m && !m.groupId && m.x !== 0.55; }),
+    "Grid notes #4 store: deleting a holder and keeping its devices leaves them on the plan beside it");
+  const r1 = kept.ok ? await G.restoreItems(project.id, kept.value) : null;
+  const q4 = await live();
+  ok(!!r1?.ok && [amp.id, dsp.id, insId].every((id) => { const m = q4.placements!.find((x) => x.id === id)!; return m.groupId === rack.id && m.x === 0.55; }),
+    "Grid notes #4 store: undo puts the holder back and its devices back inside it");
+  const gone = await G.removePlacements(project.id, [rack.id], { members: "delete" });
+  const q5 = await live();
+  ok(gone.ok && gone.value.placements.length === 4 && !q5.placements!.some((x) => [rack.id, amp.id, dsp.id, insId].includes(x.id)) && gone.value.placements.filter((x) => x.groupId === rack.id).length === 3,
+    "Grid notes #4 store: deleting a holder with its devices removes them all (the bundle keeps their link)");
+  const r2 = gone.ok ? await G.restoreItems(project.id, gone.value) : null;
+  ok(!!r2?.ok && (await live()).placements!.filter((x) => x.groupId === rack.id).length === 3, "Grid notes #4 store: undo brings the holder and its devices back, grouped");
+  const dflt = await G.removePlacements(project.id, [rack.id]);
+  ok(dflt.ok && (await live()).placements!.filter((x) => [amp.id, dsp.id, insId].includes(x.id)).length === 3, "Grid notes #4 store: a delete that doesn't say keeps the devices (nothing unnamed is deleted)");
+  if (dflt.ok) await G.restoreItems(project.id, dflt.value);
+
+  // option copy, revisions, paste
+  const o3 = await G.addOption(project.id, { name: "Copy", copyFromOptionId: opt, by });
+  const q6 = await live();
+  const copyId = o3.ok ? o3.option.id : "";
+  const copyHolder = q6.placements!.find((x) => x.optionId === copyId && x.partId === fixtureId("gn4", "rack"))!;
+  ok(q6.placements!.filter((x) => x.optionId === copyId && x.groupId === copyHolder.id).length === 3 && !q6.placements!.some((x) => x.optionId === copyId && x.groupId === rack.id),
+    "Grid notes #4 store: a copied option's devices sit inside the copied holder");
+  await G.addRevision(project.id, { by, note: "grouped" });
+  const revNo = (await live()).revisions!.at(-1)!.rev;
+  await G.setPlacementsGroup(project.id, [amp.id, dsp.id, insId].map((id) => ({ id, groupId: null })));
+  ok((await live()).placements!.filter((x) => x.groupId === rack.id).length === 0, "Grid notes #4 store: Take all out empties the holder");
+  await G.restoreRevision(project.id, revNo, by);
+  ok((await live()).placements!.filter((x) => x.groupId === rack.id && x.x === 0.55).length === 3, "Grid notes #4 store: recalling a revision brings the group back");
+  const pasted = await G.pastePlacements(project.id, {
+    sheetId: sh.id, page: 1, optionId: opt, by, routeIds: [],
+    items: [
+      { srcId: rack.id, x: 0.2, y: 0.7, partId: fixtureId("gn4", "rack") },
+      { srcId: amp.id, x: 0.2, y: 0.7, partId: fixtureId("gn4", "part"), groupSrcId: rack.id },
+      { srcId: loose.id, x: 0.3, y: 0.7, partId: fixtureId("gn4", "part"), groupSrcId: "gp-elsewhere" },
+    ],
+  });
+  ok(pasted.ok && pasted.value.placements[1].groupId === pasted.value.placements[0].id && pasted.value.placements[2].groupId === undefined,
+    "Grid notes #4 store: pasting a holder with its device makes a new group; a device whose holder wasn't pasted lands loose");
+  // repairs: a holder removed through the single path releases its devices
+  const solo = await put(0.05, 0.9);
+  const kid = await put(0.06, 0.9);
+  await G.setPlacementsGroup(project.id, [{ id: kid.id, groupId: solo.id }]);
+  await G.removePlacement(project.id, solo.id);
+  ok((await get(kid.id))?.groupId === undefined, "Grid notes #4 store: any other removal of a holder releases its devices where they stand");
+  // the schedule of the stored design nests them
+  const q7 = await live();
+  const sched = SCH.buildSchedule({ placements: OPT.optionSlice(q7, opt).placements, spaces: q7.spaces!, descOf: (id) => id, wires: [] });
+  ok(sched.sections.some((sec) => sec.rows.some((r) => r.group === "holder") && sec.rows.filter((r) => r.group === "member").length >= 1),
+    "Grid notes #4 store: the stored design's schedule lists the devices under their holder");
+  void DS;
+
+  // ---- 10. wiring pins
+  const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  const grpAct = acts.slice(acts.indexOf("export async function setPlacementsGroupAction"), acts.indexOf("export async function placeInsideAction"));
+  const insAct = acts.slice(acts.indexOf("export async function placeInsideAction"), acts.indexOf("/** #299: one batch edit resolves"));
+  ok(/\{\n  await requireUser\(\);\n  if \(!Array\.isArray\(items\) \|\| items\.length > MAX_BATCH\)/.test(grpAct) && insAct.includes("await requireUser();") && insAct.includes("placeDevicePartRefusal(input.partId)"),
+    "Grid notes #4: the group actions require a signed-in user; Place inside has Place's part gate");
+  const restoreSrc = acts.slice(acts.indexOf("async function cleanRestoredPlacement"), acts.indexOf("/* ------------------------------ designators (#320)"));
+  ok(restoreSrc.includes("...(groupId ? { groupId } : {})") && restoreSrc.includes("PLACEMENT_ID.test(g.groupId)"), "Grid notes #4: undo of a delete carries the groupId and re-groups the members a holder's removal took out");
+  const ed = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(ed.includes("layerPlacements.filter((pl) => !isInside(pl))") && ed.includes('case "group":') && ed.includes("if (placeInsideId && t === \"place\" && opts?.partId)") && ed.includes("membersLeftBehind(placements, ids)"),
+    "Grid notes #4 editor: members aren't on the plan; group is an undo step; library picks go inside while placing inside; a holder's delete asks");
+  ok(rd("src/app/(app)/design/grid/[id]/workspace/group-bar.tsx").includes("Keep them on the plan beside it") && rd("src/app/(app)/design/grid/[id]/editor.tsx").includes("<GroupBar ed={ed} />"),
+    "Grid notes #4 editor: the delete question offers both answers, over the plan");
+  ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(rd("src/lib/design/grid-groups.ts")), "Grid notes #4: grid-groups.ts is client-safe (no store at runtime)");
 }

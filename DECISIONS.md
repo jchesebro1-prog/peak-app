@@ -11394,3 +11394,50 @@ it with a 25-megapixel input limit, makes it upright, drops metadata, caps it at
 company name in its place. Separately, `letterhead-server.ts` now reads the baked letterhead through a **literal** path
 with static `fs`/`path` imports. `next build` no longer traces the whole project into every function, and the harness
 checks the literal equals `BAKED_LETTERHEAD`.
+
+## D843. Equipment groups are one `groupId` link on the member (Grid notes #4, 2026-10-12)
+
+Jeff's rule: any device can hold others (a plain rack part, a rack assembly, a booth, a panel), one level only, and
+curtains neither hold nor are held. The model is one optional field, `GridPlacement.groupId`, which is the holder
+placement's id. There is no groups list: a holder is any placement another one names, and it stops being one when its
+last device leaves. There is **no migration**. Every write checks the link through `grid-groups.groupRefusal`: the holder
+exists, is on the same option and on the same sheet and page, is not itself inside another device, and is not a
+curtain. The device going in is not a curtain and holds nothing. A holder takes **at most 200** devices (a default).
+Every placement write ends with the one repair rule, `settleGroups`. A broken link (holder gone, nested, curtain, another
+option, past 200) is dropped and the device stays where it stands. A device that holds others keeps them and loses its
+own link. Moving a holder, a revision recall, an option copy (`copyOptionMembers` remaps the link), a paste
+(`groupSrcId`), an Auto re-fill and every removal path all go through it. Pricing, the BOM, designators and Auto fill
+are unchanged. A rack assembly's own RU layout is not coupled to groups yet (an open question for Jeff).
+
+## D844. A device inside another has no plan spot — it mirrors its holder (Grid notes #4, 2026-10-12)
+
+Jeff decided devices inside a holder are hidden on the plan. The holder's label reads `RK-1 · 6`, counting device
+placements rather than units (a default). So a member's `sheetId`, `page`, `x`, `y` and space pin are kept **equal to
+its holder's** by `settleGroups`. Nothing that reads a position has to change: spaces, the schedule's sections, the
+risers' rooms, reading order, per-space BOM and wires all place it where its holder is. Its wire ends follow every move
+the mirror makes, by the move rule. The editor doesn't draw, hit-test, marquee, wire-snap or nudge it. Drawing-set plan
+sheets don't draw it (`drawnOnPlan`), and the legend still lists it. The Spreadsheet nests members under their holder
+(`shownDeviceRows`): a holder row, then its devices marked "↳", each with its own designator, sorted among themselves by
+the active column. A member whose holder is filtered out keeps its own row and reads "in RK-1" (a default). Its Space
+cell reads the holder's room ("with RK-1") rather than a pin control. The schedule (`/schedule`, the Spreadsheet's
+Schedule and E-60x) gives a holder with devices its own row, and its devices follow indented, merged by part among
+themselves and never with loose devices. The Browser lists them as the holder's child devices.
+
+## D845. Three ways in, Take out, and a delete that always asks (Grid notes #4, 2026-10-12)
+
+- **Place inside** (Property Editor, one device): every Product Library pick, including tiles, "From the catalog"
+  results and the estimate tray, adds one device inside the holder (`placeInsideAction`, with Place's part gate) until
+  Done or Esc.
+- **Move into <holder>** (several selected): offered as a button when exactly one selected device already holds
+  devices, otherwise as a menu of the selected devices that can take the rest.
+- **Drag onto a holder**: an eligible holder under the dragged marker gets an accent ring and "Drop into RK-1", and
+  releasing there puts the dragged devices inside. Anything else is a normal move.
+- **Take out** / **Take all out** puts devices on the plan beside the holder: a row to its right, wrapping every 8,
+  flipping left near the edge.
+
+A **Delete** of a holder whose devices weren't selected with it asks every time, in a line over the plan: "Delete the N
+devices inside too" or "Keep them on the plan beside it" (`removePlacements(…, { members })`). A store call that doesn't
+say which keeps them, so nothing that wasn't named is ever deleted. **Cut** takes the devices with it with no question,
+because they go on the clipboard too, and Copy and Duplicate of a holder copy its devices. Every step is one undo step.
+The new `group` command's inverse is the previous links and spots. The delete bundle's `regroup` puts kept devices back
+inside on undo.

@@ -14,6 +14,7 @@ import RightPane from "./workspace/right-pane";
 import CalibratePrompt from "./workspace/calibrate-prompt";
 import IntakeNotices from "./workspace/intake-notices";
 import RiserPrompt from "./workspace/riser-prompt";
+import GroupBar from "./workspace/group-bar";
 import SheetAdjustDialog from "./workspace/sheet-adjust-dialog";
 
 /**
@@ -51,6 +52,7 @@ export default function GridEditor(props: GridEditorProps) {
             <SheetTabs ed={ed} />
             <IntakeNotices ed={ed} />
             <RiserPrompt ed={ed} />
+            <GroupBar ed={ed} />
             <CalibratePrompt ed={ed} />
             {/* The plan stays mounted while the Spreadsheet view shows, so the
                 PDF render, zoom and scroll survive the round trip. */}

@@ -58,12 +58,16 @@ export default function ScheduleTable({ schedule, accent }: { schedule: Schedule
               </tr>
             </thead>
             <tbody>
-              {sec.rows.map((r) => (
-                <tr key={r.partId}>
+              {sec.rows.map((r, i) => (
+                // Grid notes #4: a part can repeat in a section (a holder row, the devices inside it), so keys carry the index.
+                <tr key={`${r.partId}:${i}`}>
                   <td style={td}>{r.qty}</td>
                   <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.designators || ""}</td>
                   <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{r.code || r.model || r.partId}</td>
-                  <td style={td}>{r.desc}</td>
+                  <td style={r.group === "member" ? { ...td, paddingLeft: 18 } : td}>
+                    {r.group === "member" ? "↳ " : ""}
+                    {r.desc}
+                  </td>
                 </tr>
               ))}
             </tbody>

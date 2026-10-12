@@ -20,6 +20,8 @@ import { Breakdown, SpaceEditor } from "../spaces-panel";
 import { RouteEditor } from "../wires-panel";
 import { SpacePinControl, TypeEditControl } from "./type-space-controls";
 import { TYPE_NOT_UNDOABLE } from "@/lib/design/grid-type-edit";
+import { groupRefusal, holdRefusal } from "@/lib/design/grid-groups";
+import Menu from "./menu";
 import type { GridEditor } from "../use-grid-editor";
 
 /**
@@ -261,6 +263,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   const typeLabel =
     typeKey === UNMAPPED_TYPE ? "Unmapped" : deviceTypes.find((t) => t.key === typeKey)?.label ?? part?.deviceTypeLabel ?? typeKey;
   const room = spaceOfPlacement(selectedPlacement, project.spaces || []);
+  const holder = selectedPlacement.groupId ? ed.placementsById.get(selectedPlacement.groupId) ?? null : null;
   const auto = selectedPlacement.auto;
   const autoTier = auto ? TIERS.find((t) => t.key === auto.tier)?.label ?? auto.tier : null;
   const ports = !selectedPlacement.curtain ? part?.ports || [] : [];
@@ -309,8 +312,14 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         )}
       </PropRow>
       <PropRow label="Space" title={room ? `In ${room.name}` : "In no space"}>
-        <SpacePinControl key={`space:${selectedPlacement.id}`} ed={ed} pls={[selectedPlacement]} />
+        {/* Grid notes #4: a device inside another is in its holder's room. */}
+        {holder ? (
+          <span style={{ color: "#5b616e" }}>{`${room ? room.name : "No space"} · with ${ed.holderLabel(holder)}`}</span>
+        ) : (
+          <SpacePinControl key={`space:${selectedPlacement.id}`} ed={ed} pls={[selectedPlacement]} />
+        )}
       </PropRow>
+      {!selectedPlacement.curtain && <GroupRow key={`group:${selectedPlacement.id}`} ed={ed} pl={selectedPlacement} />}
       <PropRow label="Qty">{qty}</PropRow>
       <PropRow label="Sell">
         <span style={{ fontWeight: 600 }}>
@@ -433,8 +442,9 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
 
       <PropBlock>
         <div style={{ fontSize: 10.5, color: "#8c919c", lineHeight: 1.45 }}>
-          Drag the marker to move it · arrow keys nudge (hold Shift for
-          bigger steps) · attached wires follow.
+          {holder
+            ? `Inside ${ed.holderLabel(holder)} — it has no spot of its own and moves with it. Take it out to place it on the plan.`
+            : "Drag the marker to move it · arrow keys nudge (hold Shift for bigger steps) · attached wires follow · drop it on another device to put it inside."}
         </div>
         <button
           style={{ ...BTN, marginTop: 8, width: "100%", color: "#a0442b" }}
@@ -445,6 +455,88 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         </button>
       </PropBlock>
     </>
+  );
+}
+
+/** Grid notes #4: the device's group — "Inside RK-1 · Take out" for a device
+ *  inside another; "Holds N · Place inside / Take all out" for one that can hold. */
+function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
+  const { placementsById, holderCounts, holderLabel, startPlaceInside, stopPlaceInside, takeOutOfGroup, placeInsideId, busy } = ed;
+  const holder = pl.groupId ? placementsById.get(pl.groupId) : undefined;
+  const small: React.CSSProperties = { ...BTN, padding: "2px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" };
+  if (holder) {
+    return (
+      <PropRow label="Inside" title="This device sits inside another — it moves with it and lists under it">
+        <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <strong style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{holderLabel(holder)}</strong>
+          <button type="button" style={small} disabled={busy} onClick={() => void takeOutOfGroup([pl.id])} title="Put it back on the plan beside its holder">
+            Take out
+          </button>
+        </span>
+      </PropRow>
+    );
+  }
+  if (holdRefusal(pl)) return null;
+  const n = holderCounts.get(pl.id) || 0;
+  const placing = placeInsideId === pl.id;
+  return (
+    <PropRow label="Holds" title="Any device can hold others — a rack, a booth, a panel. They list under it on the Spreadsheet.">
+      <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ flex: 1, minWidth: 0, color: n ? undefined : "#8c919c" }}>{n ? `${n} device${n === 1 ? "" : "s"}` : "Nothing yet"}</span>
+        <button
+          type="button"
+          style={placing ? { ...small, background: "#16181d", color: "#fff", borderColor: "#16181d" } : small}
+          disabled={busy && !placing}
+          aria-pressed={placing}
+          onClick={() => (placing ? stopPlaceInside() : startPlaceInside(pl.id))}
+          title="Then click parts in the Product Library — each click adds one inside this device"
+        >
+          {placing ? "Done" : "Place inside"}
+        </button>
+        {n > 0 && (
+          <button type="button" style={small} disabled={busy} onClick={() => void takeOutOfGroup([pl.id])} title="Put every device inside back on the plan beside it">
+            Take all out
+          </button>
+        )}
+      </span>
+    </PropRow>
+  );
+}
+
+/** Grid notes #4: several selected — Move into <holder> (the one selected
+ *  device that already holds, else a menu of every selected device that can
+ *  take the rest) and Take out of group for the ones inside a holder. */
+function GroupSeveral({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
+  const { placements, project, holderCounts, holderLabel, groupInto, takeOutOfGroup, busy } = ed;
+  const inside = pls.filter((pl) => pl.groupId);
+  const first = project.options[0]?.id ?? "";
+  const candidates = pls.filter((h) => !groupRefusal(placements, h.id, pls.filter((o) => o.id !== h.id).map((o) => o.id), first));
+  const holding = candidates.filter((h) => (holderCounts.get(h.id) || 0) > 0);
+  const others = (h: GridPlacement) => pls.filter((o) => o.id !== h.id).map((o) => o.id);
+  if (!candidates.length && !inside.length) return null;
+  const small: React.CSSProperties = { ...BTN, padding: "3px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" };
+  return (
+    <PropRow label="Group" title="Put the selected devices inside one of them, or take them out">
+      <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        {holding.length === 1 ? (
+          <button type="button" style={small} disabled={busy} onClick={() => void groupInto(holding[0].id, others(holding[0]))}>
+            {`Move into ${holderLabel(holding[0])}`}
+          </button>
+        ) : candidates.length > 0 ? (
+          <Menu
+            label="Move into…"
+            disabled={busy}
+            title="Pick the device the others go inside"
+            items={candidates.map((h) => ({ label: holderLabel(h), onSelect: () => void groupInto(h.id, others(h)) }))}
+          />
+        ) : null}
+        {inside.length > 0 && (
+          <button type="button" style={small} disabled={busy} onClick={() => void takeOutOfGroup(inside.map((pl) => pl.id))}>
+            {`Take out of group (${inside.length})`}
+          </button>
+        )}
+      </span>
+    </PropRow>
   );
 }
 
@@ -715,6 +807,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
       <PropRow label="Sell total">
         <span style={{ fontWeight: 600 }}>{moneyFmt(sell)}</span>
       </PropRow>
+      <GroupSeveral ed={ed} pls={pls} />
       <PropRow label="Category" title="Label every selected item at once — leave it empty and Apply to clear">
         <span style={{ display: "flex", gap: 5 }}>
           <input

@@ -288,7 +288,15 @@ export function titleBlockData(input: TitleBlockInput): TitleBlockData {
 
 /* ---------------------------- plan sheets ---------------------------- */
 
-export type PlanPlacementLite = { id: string; sheetId: string; page: number; partId: string; curtain?: unknown };
+/** `groupId` (Grid notes #4): a device inside another has no plan spot — plan sheets don't draw it. */
+export type PlanPlacementLite = { id: string; sheetId: string; page: number; partId: string; curtain?: unknown; groupId?: string };
+
+/** Grid notes #4: the placements a plan sheet draws — a device inside a holder
+ *  that is in the same list isn't drawn (it prints on the schedule under it). */
+export function drawnOnPlan<P extends PlanPlacementLite>(placements: readonly P[]): P[] {
+  const ids = new Set(placements.map((p) => p.id));
+  return placements.filter((p) => !(p.groupId && p.groupId !== p.id && ids.has(p.groupId)));
+}
 export type PlanRouteLite = {
   id: string;
   sheetId: string;
@@ -344,7 +352,7 @@ export function planSheetGroups(input: {
     const k = `${system}|${sheetId}|${page}`;
     if (!seen.has(k)) seen.set(k, { system, sheetId, page });
   };
-  for (const pl of input.placements) add(placementSystem(pl, input.partById), pl.sheetId, pl.page);
+  for (const pl of drawnOnPlan(input.placements)) add(placementSystem(pl, input.partById), pl.sheetId, pl.page);
   for (const r of input.routes) add(routeSystem(r, placementById, input.partById), r.sheetId, r.page);
   const sysIdx = (k: DrawingSystemKey) => DRAWING_SYSTEMS.findIndex((s) => s.key === k);
   const sheetIdx = (id: string) => input.sheetOrder.indexOf(id);
@@ -369,7 +377,7 @@ export function planContent<
   const placementById = new Map<string, PlanPlacementLite>(input.placements.map((p) => [p.id, p]));
   const here = (x: { sheetId: string; page: number }) => x.sheetId === group.sheetId && x.page === group.page;
   return {
-    placements: input.placements.filter((p) => here(p) && placementSystem(p, input.partById) === group.system),
+    placements: drawnOnPlan(input.placements).filter((p) => here(p) && placementSystem(p, input.partById) === group.system),
     routes: input.routes.filter((r) => here(r) && routeSystem(r, placementById, input.partById) === group.system),
     spaces: input.spaces.filter(here),
   };

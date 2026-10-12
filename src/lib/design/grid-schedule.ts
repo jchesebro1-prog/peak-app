@@ -32,7 +32,9 @@ export function catalogForSchedule<C extends { id: string }>(
 
 /** `code` overrides the printed Part cell for rows with no SKU (curtains). `model` (#304) is the part's Model # — what a printed schedule shows instead of the part id. */
 /** `designators` (#320): the row's devices' designators (designatorList); absent when none. */
-export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number; designators?: string };
+/** `group` (Grid notes #4): "holder" = a device that holds others, on its own row; "member" = a row of the
+ *  devices inside the holder row above it (merged by part among themselves), printed indented. */
+export type ScheduleRow = { partId: string; code?: string; model?: string; desc: string; qty: number; designators?: string; group?: "holder" | "member" };
 export type ScheduleSection = { key: string; name: string; rows: ScheduleRow[] };
 export type ScheduleWire = { id: string; partId: string; model?: string; fromName: string; toName: string; lengthFt: number | null; unit: string };
 export type ScheduleData = {
@@ -68,7 +70,7 @@ export function scheduleWiresFromView(view: RiserView): ScheduleWire[] {
  * group: each drop is its own made-to-size drape.
  */
 export function buildSchedule(input: {
-  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number; designator?: string; spaceId?: string }>;
+  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number; designator?: string; spaceId?: string; groupId?: string }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
   /** #304: the printed Model # per part id; blank/absent = print the part id as before. */
@@ -82,23 +84,49 @@ export function buildSchedule(input: {
   const wires = modelOf ? input.wires.map((w) => { const m = modelFor(w.partId); return m ? { ...w, model: m } : w; }) : input.wires;
   const bySpace = new Map<string | null, ScheduleRow[]>();
   const held = new Map<ScheduleRow, Array<{ designator?: string; qty?: number }>>();
+  // Grid notes #4: a device inside another is listed under its holder (which
+  // gets a row of its own), never merged with the loose devices of its part.
+  type Pl = (typeof input.placements)[number];
+  const byId = new Map(input.placements.map((pl) => [pl.id, pl]));
+  const members = new Map<string, Pl[]>();
   for (const pl of input.placements) {
+    const h = !pl.curtain && pl.groupId && pl.groupId !== pl.id ? byId.get(pl.groupId) : undefined;
+    if (!h || h.curtain) continue;
+    const list = members.get(h.id) || [];
+    list.push(pl);
+    members.set(h.id, list);
+  }
+  const inGroup = new Set([...members.values()].flat().map((pl) => pl.id));
+  const partRow = (pl: Pl, group?: "holder" | "member"): ScheduleRow => {
+    const m = modelFor(pl.partId);
+    const fresh: ScheduleRow = { partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl), ...(group ? { group } : {}) };
+    held.set(fresh, [pl]);
+    return fresh;
+  };
+  for (const pl of input.placements) {
+    if (inGroup.has(pl.id) && !members.has(pl.id)) continue;
     const home = spaceOfPlacement(pl, input.spaces);
     const key = home ? home.id : null;
     const rows = bySpace.get(key) || [];
     if (pl.curtain) {
       rows.push({ partId: pl.id, code: "CURTAIN", desc: curtainDesc(pl.curtain, input.descOf(pl.curtain.fabricSku)), qty: 1 });
+    } else if (members.has(pl.id)) {
+      rows.push(partRow(pl, "holder"));
+      const inside: ScheduleRow[] = [];
+      for (const m of members.get(pl.id)!) {
+        const row = inside.find((r) => r.partId === m.partId);
+        if (row) {
+          row.qty += placementQty(m);
+          held.get(row)!.push(m);
+        } else inside.push(partRow(m, "member"));
+      }
+      rows.push(...inside);
     } else {
-      const row = rows.find((r) => r.partId === pl.partId && !r.code);
+      const row = rows.find((r) => r.partId === pl.partId && !r.code && !r.group);
       if (row) {
         row.qty += placementQty(pl);
         held.get(row)!.push(pl);
-      } else {
-        const m = modelFor(pl.partId);
-        const fresh: ScheduleRow = { partId: pl.partId, ...(m ? { model: m } : {}), desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) };
-        rows.push(fresh);
-        held.set(fresh, [pl]);
-      }
+      } else rows.push(partRow(pl));
     }
     bySpace.set(key, rows);
   }
@@ -136,14 +164,21 @@ export function scheduleModelOf(p: { sku: string; manufacturerModelNumber?: stri
 export type ScheduleHead = { kind: "section"; name: string; cont: boolean } | { kind: "wires"; cont: boolean };
 /** A part row. `cont` (#320): a continuation of the row above — further
  *  designators only (qty 0, no code; prints "<desc> (cont.)"). */
-export type ScheduleRowItem = { kind: "row"; qty: number; code: string; desc: string; designators?: string; cont?: true };
+export type ScheduleRowItem = { kind: "row"; qty: number; code: string; desc: string; designators?: string; cont?: true; /** Grid notes #4: a row of devices inside the holder above. */ indent?: true };
 export type ScheduleItem = ScheduleHead | ScheduleRowItem | { kind: "wire"; partId: string; model?: string; run: string; length: string };
 export type ScheduleGroup = { head: ScheduleHead; rows: ScheduleItem[] };
 
 export function scheduleGroups(d: ScheduleData): ScheduleGroup[] {
   const groups: ScheduleGroup[] = d.sections.map((s) => ({
     head: { kind: "section", name: s.name, cont: false },
-    rows: s.rows.map((r) => ({ kind: "row" as const, qty: r.qty, code: r.code || r.model || r.partId, desc: r.desc, ...(r.designators ? { designators: r.designators } : {}) })),
+    rows: s.rows.map((r) => ({
+      kind: "row" as const,
+      qty: r.qty,
+      code: r.code || r.model || r.partId,
+      desc: r.desc,
+      ...(r.designators ? { designators: r.designators } : {}),
+      ...(r.group === "member" ? { indent: true as const } : {}),
+    })),
   }));
   if (d.wires.length) {
     groups.push({
@@ -194,7 +229,7 @@ export function splitScheduleRow(it: ScheduleRowItem, maxLines: number): Schedul
   }
   if (cur.length) chunks.push(cur.join(", "));
   return chunks.map((designators, i) =>
-    i === 0 ? { ...it, designators } : { kind: "row" as const, qty: 0, code: "", desc: it.desc, designators, cont: true as const }
+    i === 0 ? { ...it, designators } : { kind: "row" as const, qty: 0, code: "", desc: it.desc, designators, cont: true as const, ...(it.indent ? { indent: true as const } : {}) }
   );
 }
 
