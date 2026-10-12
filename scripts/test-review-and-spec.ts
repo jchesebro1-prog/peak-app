@@ -34991,7 +34991,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
   ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,120}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
-    && (t254Client.match(/setSectionsState\(/g) || []).length === 5,
+    && (t254Client.match(/setSectionsState\(/g) || []).length === 6,
     "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo and the site-visit goals pre-fill write the raw state");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
     "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
@@ -54583,7 +54583,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   };
   ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
   ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
-  ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 5,
+  ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 6,
     "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (still 5 raw writes)");
   const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
   ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
@@ -57394,7 +57394,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
     "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
-  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 5, "#P4 pins: setSectionsState( count unchanged");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 6, "#P4 pins: setSectionsState( count unchanged");
 }
 
 // ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
@@ -58200,7 +58200,7 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
     "#P5 editor: the editor is wired to the hook's packageDoc / setPackageDoc and Save to product refreshes the library row");
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
   ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus);") &&
-     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 5,
+     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
     "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count unchanged");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
@@ -58240,7 +58240,7 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
     "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content (an unmount keeps it — #P5 final)");
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
-     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 5,
+     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
     "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count unchanged");
 
   // (2) Remove document: the unmount flush never brings the removed document back.
@@ -58754,7 +58754,7 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(page.includes("loadSystemCategoryOptions()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") && page.includes("sku: p.sku") && page.includes("part: p ? {") && page.includes(": null,"),
     "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
-     (hook.match(/setSectionsState\(/g) || []).length === 5 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
+     (hook.match(/setSectionsState\(/g) || []).length === 6 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
     "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count unchanged; `next` stays last");
   // Fix round 1
   ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
@@ -59004,8 +59004,8 @@ import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui
     "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
   ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
     "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
-  ok((hook.match(/setSectionsState\(/g) || []).length === 5 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
-    "#312 estimator: setSectionsState( count stays 5; `next` stays last in the hook's return");
+  ok((hook.match(/setSectionsState\(/g) || []).length === 6 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
+    "#312 estimator: setSectionsState( count stays 6 (5 + the #bonus effect); `next` stays last in the hook's return");
 
   type R312 = { id: number; custom?: boolean; curtain?: boolean };
   const rows = specLineRows312<R312>([
@@ -67569,4 +67569,26 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
   const bnPlaceStart = bnActs.indexOf("async function placeSystemInEstimate(");
   const bnPlaceBody = bnActs.slice(bnPlaceStart, bnActs.indexOf("\n}\n", bnPlaceStart));
   ok(bnPlaceStart >= 0 && (bnPlaceBody.match(/stripBonusLines\(withoutGroupMeta\(placed\)\)/g) || []).length === 2, "#bonus source pin: placeSystemInEstimate strips bonus lines from the placed system in both the existing and the new target branch");
+}
+
+{
+  const bnHook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+  const bnFx = bnHook.indexOf("withBonusLines(sections, nextId)");
+  const bnFxStart = bnHook.lastIndexOf("useEffect(", bnFx);
+  const bnFxBody = bnHook.slice(bnFxStart, bnHook.indexOf("}, [sections, status]);", bnFx) + 30);
+  ok(bnFx > 0 && /bonusRulesApply\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType, status \}, sections\)/.test(bnFxBody), "#bonus client pin: the effect gates on bonusRulesApply with the hook's own status");
+  ok(/setSectionsState\(next\)/.test(bnFxBody) && !/\bsetSections\(/.test(bnFxBody), "#bonus client pin: the effect writes setSectionsState directly (never un-marks a built system)");
+  ok(bnHook.indexOf("const [status, setStatus]") > 0 && bnHook.indexOf("const [status, setStatus]") < bnFxStart && bnHook.indexOf("const nextId =") < bnFxStart, "#bonus client pin: status and nextId are declared before the effect");
+  const bnRemove = bnHook.slice(bnHook.indexOf("const removeItem = (id: number) => {"), bnHook.indexOf("const setMarginAll"));
+  ok(/if \(isBonusId\(id\)\) return;/.test(bnRemove), "#bonus client pin: removeItem refuses a bonus line");
+  const bnPatch = bnHook.slice(bnHook.indexOf("const patchItem ="), bnHook.indexOf("const setItemPrice"));
+  ok(/if \(isBonusId\(id\)\) return;/.test(bnPatch) && /isBonusItem\(x\)/.test(bnHook.slice(bnHook.indexOf("const isBonusId"), bnHook.indexOf("const patchItem ="))), "#bonus client pin: patchItem (price, ext, qty, inc/dec) refuses a bonus line");
+  const bnMove = bnHook.slice(bnHook.indexOf("const moveItem ="), bnHook.indexOf("const inc ="));
+  ok(/isBonusId\(id\)/.test(bnMove), "#bonus client pin: moveItem refuses a bonus line");
+  const bnMargins = bnHook.slice(bnHook.indexOf("const setMarginAll"), bnHook.indexOf("const setSystemSell"));
+  ok((bnMargins.match(/isBonusItem\(it\)/g) || []).length === 2, "#bonus client pin: both margin sliders skip bonus lines");
+  const bnCard = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
+  ok(/if \(isBonusItem\(it\)\) \{/.test(bnCard) && /never shown to the customer/.test(bnCard), "#bonus client pin: section-card renders a locked row for a bonus line");
+  const bnSum = readFileSync(join(process.cwd(), "src/app/(app)/estimator/review-cost-summary.tsx"), "utf8");
+  ok(/isPackageBonusItem/.test(bnSum) && /isEstimatorBonusItem/.test(bnSum) && /inTotal\.reduce/.test(bnSum), "#bonus client pin: cost summary sums bonus lines over In-total systems");
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import type { SpecSection } from "./types";
-import { fmt, systemFreight, systemItemsCost, systemMargin, systemSellTotal, type QuoteTotals } from "./pricing";
+import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
+import { fmt, lineExtSellOf, systemFreight, systemItemsCost, systemMargin, systemSellTotal, type QuoteTotals } from "./pricing";
 
 /**
  * #305 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system.
@@ -13,6 +14,11 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
   const num = { ...cell, textAlign: "right" as const, fontFamily: "var(--font-mono)" };
   const inTotal = sections.filter((sec) => sec.alternate !== true);
   const alternates = sections.filter((sec) => sec.alternate === true);
+  // Estimator bonuses: the two automatic lines, summed over In-total systems only.
+  const bonusSell = (pick: (it: SpecSection["items"][number]) => boolean) =>
+    inTotal.reduce((a, sec) => a + sec.items.filter(pick).reduce((b, it) => b + lineExtSellOf(it), 0), 0);
+  const pkgBonus = bonusSell(isPackageBonusItem);
+  const estBonus = bonusSell(isEstimatorBonusItem);
   const row = (sec: SpecSection) => (
     <tr key={sec.id}>
       <td style={cell}>{sec.name || "Untitled"}</td>
@@ -72,6 +78,11 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
       <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 6 }}>
         Material {fmt(totals.mat)} · Labor {fmt(totals.lab)} · Freight {fmt(totals.fr)}
       </div>
+      {(pkgBonus > 0 || estBonus > 0) && (
+        <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 2 }}>
+          5% package bonus {fmt(pkgBonus)} · 2% estimator bonus {fmt(estBonus)}
+        </div>
+      )}
     </div>
   );
 }

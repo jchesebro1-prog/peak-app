@@ -14,6 +14,8 @@ import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import { draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { bonusRulesApply, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
@@ -314,6 +316,18 @@ export function useEstimatorState(props: EstimatorProps) {
    *  in-flight change apart from a stale tab that never heard about a
    *  change made elsewhere. */
   const [baseStatus, setBaseStatus] = useState<QuoteStatus>(initial.status);
+  // Estimator bonuses: keep each system's 5% / 2% lines current. Runs after
+  // every sections change (all writers, including setSectionsState callers);
+  // withBonusLines returns the same array when nothing changes, so this
+  // settles in one pass. Writes setSectionsState directly so it never
+  // un-marks a built system. `status` is the hook's own state (declared just
+  // above); `nextId` is the nidRef counter declared before the sections.
+  useEffect(() => {
+    if (!bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, sections)) return;
+    const next = withBonusLines(sections, nextId);
+    if (next !== sections) setSectionsState(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, status]);
   /** #284 — the server-evaluated next-step control (pill, primary action, ⋯);
    *  every sync/save refreshes it. It carries the #242 limit chip as its strip. */
   const [next, setNext] = useState<QuoteNextStepView | null>(initialNext);
@@ -1415,7 +1429,11 @@ export function useEstimatorState(props: EstimatorProps) {
   const isExpanded = (id: string) => expanded[id] !== false;
   const toggleExpand = (id: string) => setExpandedRemembered({ ...expanded, [id]: !isExpanded(id) });
 
-  const patchItem = (id: number, f: (it: SpecItem) => SpecItem) =>
+  /** Estimator bonuses: an automatic bonus line is read-only — every
+   *  line-level writer below refuses it (the effect re-derives it). */
+  const isBonusId = (id: number) => sections.some((s) => s.items.some((x) => x.id === id && isBonusItem(x)));
+  const patchItem = (id: number, f: (it: SpecItem) => SpecItem) => {
+    if (isBonusId(id)) return;
     setSections((ss) =>
       ss.map((s) =>
         s.items.some((x) => x.id === id)
@@ -1423,6 +1441,7 @@ export function useEstimatorState(props: EstimatorProps) {
           : s
       )
     );
+  };
   const setItemPrice = (id: number, value: string) => {
     const price = Number(value.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(price) || price < 0) return;
@@ -1435,7 +1454,8 @@ export function useEstimatorState(props: EstimatorProps) {
     if (!Number.isFinite(ext) || ext < 0) return;
     patchItem(id, (it) => ({ ...it, ...backSolveExtSell(ext, it.qty) }));
   };
-  const moveItem = (secId: string, id: number, direction: -1 | 1) =>
+  const moveItem = (secId: string, id: number, direction: -1 | 1) => {
+    if (isBonusId(id)) return;
     setSections((ss) => ss.map((s) => {
       if (s.id !== secId) return s;
       const index = s.items.findIndex((item) => item.id === id);
@@ -1445,6 +1465,7 @@ export function useEstimatorState(props: EstimatorProps) {
       [items[index], items[next]] = [items[next], items[index]];
       return { ...s, items: items.map((item, i) => ({ ...item, lineOrder: i })) };
     }));
+  };
   const inc = (id: number) => patchItem(id, (it) => ({ ...it, qty: it.qty + 1 }));
   const dec = (id: number) => patchItem(id, (it) => ({ ...it, qty: Math.max(0, it.qty - 1) }));
   const setQty = (id: number, v: string) => {
@@ -1453,6 +1474,7 @@ export function useEstimatorState(props: EstimatorProps) {
     patchItem(id, (it) => ({ ...it, qty: n }));
   };
   const removeItem = (id: number) => {
+    if (isBonusId(id)) return;
     // #143: the × on a vendor line takes its VendorQuote record with it —
     // otherwise the attachment and the internal terms outlive the money.
     const gone = sections.flatMap((s) => s.items).find((x) => x.id === id);
@@ -1469,7 +1491,7 @@ export function useEstimatorState(props: EstimatorProps) {
       ss.map((s) => ({
         ...clearSellOverride(s),
         // #282 phase 2: the Rewards credit is not a priced line.
-        items: s.items.map((it) => (isRewardCreditItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })),
+        items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })),
       }))
     );
   };
@@ -1478,7 +1500,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
-          ? { ...clearSellOverride(s), items: s.items.map((it) => (isRewardCreditItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })) }
+          ? { ...clearSellOverride(s), items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })) }
           : s
       )
     );

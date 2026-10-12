@@ -153,6 +153,8 @@ async function initialFrom(
       coverSummary: "",
       notIncluded: null,
       portal: null,
+      bonusSource: "estimator",
+      bonusQuoteType: "system",
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -230,6 +232,8 @@ async function initialFrom(
     // #245 Task 13: the staff Portal panel — present only for a portal-
     // catalog quote. porItems is a point-in-time read of the loaded spec's
     // `por` lines; the next Save recomputes what remains (clearPricedPor).
+    bonusSource: q.source ?? "estimator",
+    bonusQuoteType: q.quoteType ?? "system",
     portal:
       q.source === "portal-catalog"
         ? {

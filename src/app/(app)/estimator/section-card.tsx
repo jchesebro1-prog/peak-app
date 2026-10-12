@@ -17,6 +17,7 @@ import {
   systemSellTotal,
   systemSellWarning,
 } from "./pricing";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { CUSTOM_PART_MARGIN } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
@@ -972,6 +973,44 @@ export default function SectionCard(p: SectionCardProps) {
 
             {/* line items */}
             {visible.map((it) => {
+              /* Estimator bonuses: an automatic 5% / 2% line is a locked,
+                 read-only row — no inputs, no actions, and it never reaches
+                 the customer (the document filters it out server-side). */
+              if (isBonusItem(it)) {
+                const bonusExt = lineExtSellOf(it);
+                const mono: CSSProperties = { fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", textAlign: "right", fontSize: 12 };
+                return (
+                  <div
+                    key={it.id}
+                    className="est-row est-row-bonus"
+                    data-bonus={it.bonus}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: cols,
+                      gap: 10,
+                      padding: "12px 20px",
+                      fontSize: 13,
+                      alignItems: "center",
+                      borderTop: "1px solid #f5f6f8",
+                      color: "#8c919c",
+                      background: "#f7f8fa",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ lineHeight: 1.3 }}>
+                        <span aria-hidden="true" style={{ marginRight: 6 }}>{"\u{1F512}"}</span>
+                        {it.desc}
+                      </div>
+                      <div style={{ fontSize: 10.5, marginTop: 2, letterSpacing: ".02em" }}>Internal {"\u2014"} never shown to the customer</div>
+                    </div>
+                    <span style={{ textAlign: "center", fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{it.qty}</span>
+                    {isInternal && <span style={mono}>{fmt(it.cost)}</span>}
+                    <span style={mono}>{fmt(it.price)}</span>
+                    <span style={{ ...mono, fontWeight: 600 }}>{fmt(bonusExt)}</span>
+                    <span></span>
+                  </div>
+                );
+              }
               const hasComment = !!(it.comment && it.comment.trim());
               const showInternal = isInternal && !!(it.internalNote && it.internalNote.trim());
               /* #143: a vendor line renders from its RECORD, not from the

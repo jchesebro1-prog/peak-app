@@ -594,6 +594,10 @@ export type InitialQuote = {
   pdf: QuotePdfView | null;
   /** #245 Task 13 — set only for a loaded `source === "portal-catalog"` quote. */
   portal: PortalPanelData | null;
+  /** Estimator bonuses — the loaded quote's source / quoteType (a new
+   *  estimate reads "estimator" / "system"); feeds `bonusRulesApply`. */
+  bonusSource: string;
+  bonusQuoteType: string;
 };
 
 /**
