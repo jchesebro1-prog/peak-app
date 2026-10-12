@@ -3216,6 +3216,9 @@ export function useEstimatorState(props: EstimatorProps) {
     packageDocFlushRef,
     // #333 — Build package tabs.
     revDateMs,
+    contactName,
+    docCustName,
+    pdfOpts,
     packageSelection,
     setPackageSwitch,
     setDatasheetsIncluded,

@@ -2,6 +2,7 @@
 
 import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   nextPackageTab,
   PACKAGE_TAB_LABEL,
@@ -31,6 +32,11 @@ const TAB_BTN = (active: boolean): CSSProperties => ({
   cursor: "pointer",
   whiteSpace: "nowrap",
 });
+
+const TAB_LOADING = <div style={{ padding: 24, fontSize: 12.5, color: "#8c919c" }}>Loading…</div>;
+
+/** #333 — the BOM quote tab is code-split: QuoteDocument and the letterhead reach only its chunk (R3). */
+const PackageBomTab = dynamic(() => import("./package-bom-tab"), { ssr: false, loading: () => TAB_LOADING });
 
 const PANEL: CSSProperties = { flex: 1, minHeight: 0, minWidth: 0, flexDirection: "column" };
 
@@ -93,7 +99,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
       </div>
       {visited.bom && (
         <div id={packageTabPanelId("bom")} role="tabpanel" aria-labelledby={packageTabId("bom")} style={{ ...PANEL, display: tab === "bom" ? "flex" : "none" }}>
-          <div style={{ padding: 24, fontSize: 12.5, color: "#8c919c" }}>BOM quote</div>
+          <PackageBomTab s={s} />
         </div>
       )}
       {visited.client && (

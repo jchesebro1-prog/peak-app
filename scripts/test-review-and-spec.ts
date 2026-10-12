@@ -377,6 +377,7 @@ const ESTIMATOR_FILES = [
   "steps/package-step.tsx",
   // #333: Build package's tabs — the step body moved into these.
   "steps/package-narrative-tab.tsx",
+  "steps/package-bom-tab.tsx",
   "steps/review-step.tsx",
   "steps/send-step.tsx",
   "steps/send-composer.tsx",
@@ -385,7 +386,7 @@ const ESTIMATOR_FILES = [
   "steps/review-sidebar.tsx",
 ];
 const PREVIEW_FILES = [
-  "preview-doc.tsx", "steps/package-step.tsx", "steps/package-narrative-tab.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
+  "preview-doc.tsx", "steps/package-step.tsx", "steps/package-narrative-tab.tsx", "steps/package-bom-tab.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
   "steps/review-tabs.tsx", "steps/review-sidebar.tsx",
 ];
 const readJoined = (files: string[]) =>
@@ -69759,4 +69760,19 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
     "#333 Narrative tab: the aside keeps people, cover and Design in the Grid; Show on PDF and the documents block left");
   ok(narr.includes("if (active) focusNarrIfPending();"), "#333 Narrative tab: a pending narrative focus runs when the tab comes into view");
   ok(!/\bsection="package"/.test(readJoined(ESTIMATOR_FILES) + rdq("client-link-panel.tsx")), "#333: PackageStaffPanel's \"package\" section is retired");
+}
+
+// ---- Task 11: the BOM quote tab (source pins) ----
+{
+  const rdq = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator", f), "utf8");
+  const bom = rdq("steps/package-bom-tab.tsx");
+  const shell = rdq("steps/package-step.tsx");
+  ok(bom.startsWith('"use client";') && bom.includes('import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";') && !/^import[^\n]*\b(bomViewProps|quoteDocumentDataFor)\b/m.test(bom) && !/\b(bomViewProps|quoteDocumentDataFor)\(/.test(bom) && !/from "@\/lib\/stores\//.test(bom),
+    "#333 BOM tab: builds its props only through live-bom.ts (the saved preview's path) and imports nothing from a store");
+  ok(bom.includes('href={previewPath(loadedId, "bom")}') && /\{loadedId && \(/.test(bom), "#333 BOM tab: \"Open saved preview ↗\" = previewPath(id, \"bom\"), only once saved");
+  ok(bom.includes("<QuoteDocument {...props} layout=\"web\" />") && bom.includes("<style>{QUOTE_WEB_CSS}</style>") && /useMemo\(\s*\(\) =>\s*liveBomDocumentProps\(/.test(bom),
+    "#333 BOM tab: renders the customer QuoteDocument (web layout) from memoised live props");
+  ok(bom.includes("rewardsLine: purchasePerksDocLine") && bom.includes("revDateMs,") && bom.includes("pdfOptions: pdfOpts,"), "#333 BOM tab: the perks line, Rev date and Show-on-PDF choices come from the hook");
+  ok(/const PackageBomTab = dynamic\(\(\) => import\("\.\/package-bom-tab"\), \{ ssr: false/.test(shell) && !/^import [^\n]*package-bom-tab/m.test(shell),
+    "#333 shell: the BOM quote tab is code-split with next/dynamic (never a static import)");
 }
