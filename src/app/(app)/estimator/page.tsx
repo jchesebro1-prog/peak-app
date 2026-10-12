@@ -1,3 +1,4 @@
+import { DEFAULT_PACKAGE_SELECTION, normalizePackageSelection } from "@/lib/estimate-output/package-selection";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
@@ -153,6 +154,7 @@ async function initialFrom(
       pdf: null,
       coverSummary: "",
       notIncluded: null,
+      packageSelection: { ...DEFAULT_PACKAGE_SELECTION, excludedDatasheets: [] },
       portal: null,
       bonusSource: "estimator",
       bonusQuoteType: "system",
@@ -233,6 +235,8 @@ async function initialFrom(
     // #301: the cover fields as stored; null = never stored (the editor starts from the default list).
     coverSummary: q.coverSummary || "",
     notIncluded: typeof q.notIncluded === "string" ? q.notIncluded : null,
+    // #333: the Client package selection, normalised on read (absent = defaults).
+    packageSelection: normalizePackageSelection(q.packageSelection),
     // #245 Task 13: the staff Portal panel — present only for a portal-
     // catalog quote. porItems is a point-in-time read of the loaded spec's
     // `por` lines; the next Save recomputes what remains (clearPricedPor).

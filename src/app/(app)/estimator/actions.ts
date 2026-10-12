@@ -72,7 +72,8 @@ import { isFabricPart } from "@/lib/fabric-part";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { partSearchHaystack } from "@/lib/catalog-rename/sku";
-import { quoteSpecFollowingRenames } from "@/lib/stores/catalog-renames";
+import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
+import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -188,6 +189,9 @@ export type SavePayload = {
   /** #301 — the cover fields (R14). Optional so an older caller saves as before. */
   coverSummary?: string;
   notIncluded?: string;
+  /** #333 — the Client package selection (not content). Optional: an older
+   *  caller that omits it keeps the stored one. Normalised + rename-mapped. */
+  packageSelection?: PackageSelection;
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
 };
@@ -515,6 +519,8 @@ export async function saveQuoteAction(
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
+    // #333: the Client package selection — not content, so it never re-renders the PDF.
+    ...(payload.packageSelection ? { packageSelection: await selectionFollowingRenames(normalizePackageSelection(payload.packageSelection)) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
   // #304: an Estimator tab opened before a model-number rename still holds the
@@ -1092,6 +1098,8 @@ export async function updateQuoteMetaAction(
     name?: string;
     coverSummary?: string;
     notIncluded?: string;
+    /** #333 — the Client package selection; normalised + rename-mapped server-side. */
+    packageSelection?: unknown;
   }
 ): Promise<{ ok: boolean; pdf?: QuotePdfView | null }> {
   await requireUser();
@@ -1113,6 +1121,8 @@ export async function updateQuoteMetaAction(
   // #301: the cover fields autosave like the cover note; neither is content, so no re-render.
   if (typeof meta.coverSummary === "string") patch.coverSummary = cleanPlainText(meta.coverSummary, COVER_SUMMARY_MAX);
   if (typeof meta.notIncluded === "string") patch.notIncluded = cleanPlainText(meta.notIncluded, NOT_INCLUDED_MAX);
+  // #333: the Client package selection autosaves (latest wins); not content, so no re-render.
+  if (meta.packageSelection !== undefined) patch.packageSelection = await selectionFollowingRenames(normalizePackageSelection(meta.packageSelection));
   // #160: the click-to-edit Estimator title. Blank never clears a name.
   if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
 

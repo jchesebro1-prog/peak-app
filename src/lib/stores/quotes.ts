@@ -1,3 +1,4 @@
+import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -332,6 +333,16 @@ export type Quote = {
    *  Settings → Estimate output default list (effectiveNotIncluded); "" = none.
    *  Not a content field. Frozen in a revision's docFields. */
   notIncluded?: string;
+  /** #333 — what the client gets on this project (Build package → Client
+   *  package): Send & track's Estimate / Cover PDF attachment defaults,
+   *  drawings on the package page, and the products whose datasheet is left
+   *  out. Not a QUOTE_CONTENT_FIELDS member (nothing here prints on the
+   *  estimate PDF); written by saveQuoteAction and updateQuoteMetaAction
+   *  through normalizePackageSelection; update() keeps it. Frozen into a new
+   *  revision's docFields only when set — never annexed after send. Absent =
+   *  DEFAULT_PACKAGE_SELECTION (today's behaviour). Read through
+   *  normalizePackageSelection. */
+  packageSelection?: PackageSelection;
   /** #301 slice B (D-o, R18) — client opens of the rev-pinned package link,
    *  per sent revision (rev → first / last / count). Written only by
    *  recordShareOpen under the row lock; update() drops it; never content,
@@ -472,6 +483,9 @@ export type QuoteRevisionDocFields = {
   /** #301 slice C — the drawings as sent (and as annexed while this was the
    *  latest sent revision, R13). Absent on older revisions = none. */
   packageFiles?: PackageFile[];
+  /** #333 — the package selection as sent. Present only when the live quote
+   *  had one; absent = defaults (everything on, nothing left out). */
+  packageSelection?: PackageSelection;
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -796,6 +810,8 @@ export function buildQuote(
     // creator (Daylite import, service builders) writes the doc it wrote before.
     ...(typeof partial.coverSummary === "string" ? { coverSummary: partial.coverSummary } : {}),
     ...(typeof partial.notIncluded === "string" ? { notIncluded: partial.notIncluded } : {}),
+    // #333: only when the caller set it, like the cover fields.
+    ...(partial.packageSelection ? { packageSelection: normalizePackageSelection(partial.packageSelection) } : {}),
   };
 }
 
@@ -878,6 +894,8 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     coverSummary: d.coverSummary || "",
     notIncluded: typeof d.notIncluded === "string" ? d.notIncluded : null,
     packageFiles: cleanPackageFiles(d.packageFiles),
+    // #333: only when the live quote has one — an untouched quote's revision is byte-identical.
+    ...(d.packageSelection ? { packageSelection: normalizePackageSelection(d.packageSelection) } : {}),
   };
 }
 

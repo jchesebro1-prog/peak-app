@@ -11676,6 +11676,7 @@ seeded()
   .then(() => gridNotes4Checks())
   .then(() => letterhead331Checks())
   .then(() => assemblyMembers332Checks())
+  .then(() => pkg333StoreChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -69252,4 +69253,75 @@ import { buildCoverageIndex as p3BuildIdx } from "@/lib/part-docs/coverage";
   const sh = p3Resolve(idx, fx.skus, { excludedDatasheets: new Set(["P3-SH1"]) });
   ok(sh.bySku.get("P3-SH1")!.datasheet === null && sh.documents.find((d) => d.documentId === "PD-p3shared-ds")?.skus.join() === "P3-SH2", "#333 exclusions: a document shared with an included SKU still ships, serving only that SKU");
   ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(readFileSync(join(process.cwd(), "src/lib/part-docs/exclusions.ts"), "utf8")), "#333 exclusions: exclusions.ts is client-safe");
+}
+
+// ---- Task 4: Quote.packageSelection — store, revisions, save + meta paths ----
+import { revisionDocFields as p3DocFields, buildQuote as p3Build, QUOTE_CONTENT_FIELDS as p3Content, quoteContentKey as p3ContentKey, type Quote as P3Quote } from "@/lib/stores/quotes";
+{
+  ok(!(p3Content as readonly string[]).includes("packageSelection"), "#333 store: packageSelection is not a content field (never stales the PDF or an approval)");
+  const bare = p3DocFields({ id: "Q", customer: "C", status: "sent" } as unknown as P3Quote);
+  ok(!("packageSelection" in bare), "#333 store: a revision cut for a quote with no packageSelection has no packageSelection key (byte-identical docFields)");
+  const set = p3DocFields({ id: "Q", customer: "C", status: "sent", packageSelection: { drawings: false, excludedDatasheets: ["B", "A", "A"], junk: 1 } } as unknown as P3Quote);
+  ok(JSON.stringify(set.packageSelection) === JSON.stringify({ estimatePdf: true, coverPdf: true, drawings: false, excludedDatasheets: ["A", "B"] }),
+    "#333 store: a revision freezes the normalised selection: " + JSON.stringify(set.packageSelection));
+  const keys = Object.keys(set);
+  ok(keys.indexOf("packageSelection") > keys.indexOf("packageFiles"), "#333 store: packageSelection sits after the existing docFields keys (older keys keep their order)");
+  const built = p3Build("Q-x", { packageSelection: { estimatePdf: false, coverPdf: true, drawings: true, excludedDatasheets: [] } }, "system", null, 1);
+  const builtBare = p3Build("Q-x", {}, "system", null, 1);
+  ok(built.packageSelection?.estimatePdf === false && !("packageSelection" in builtBare), "#333 store: buildQuote copies packageSelection only when the caller sets it");
+  const q0 = { id: "Q", name: "N", spec: null } as unknown as P3Quote;
+  ok(p3ContentKey(q0) === p3ContentKey({ ...q0, packageSelection: { estimatePdf: false, coverPdf: false, drawings: false, excludedDatasheets: ["X"] } }), "#333 store: quoteContentKey ignores packageSelection");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok(act.includes("...(payload.packageSelection ? { packageSelection: await selectionFollowingRenames(normalizePackageSelection(payload.packageSelection)) } : {}),"),
+    "#333 save (source): saveQuoteAction normalises + rename-maps a posted packageSelection; an older caller that omits it keeps the stored one");
+  ok(act.includes("if (meta.packageSelection !== undefined) patch.packageSelection = await selectionFollowingRenames(normalizePackageSelection(meta.packageSelection));") &&
+     /packageSelection\?: unknown;/.test(act.slice(act.indexOf("export async function updateQuoteMetaAction"), act.indexOf("export async function updateQuoteMetaAction") + 800)),
+    "#333 meta (source): updateQuoteMetaAction allowlists packageSelection through the same normaliser");
+  const pg = rd("src/app/(app)/estimator/page.tsx");
+  ok(pg.includes("packageSelection: normalizePackageSelection(q.packageSelection),") && pg.includes("packageSelection: { ...DEFAULT_PACKAGE_SELECTION, excludedDatasheets: [] },"),
+    "#333 page (source): initialFrom hands the Estimator a normalised selection (defaults for a new estimate)");
+}
+
+async function pkg333StoreChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const Ren = await import("@/lib/stores/catalog-renames");
+  const { getDb } = await import("@/db");
+  const { blobs: blobsT } = await import("@/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  const QID = fixtureId(333, "store");
+  await Q.create({ id: QID, name: "#333 store", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } } as never);
+  registerFixture("quotes", QID);
+  const before = (await Q.get(QID))!;
+  ok(!("packageSelection" in before), "#333 store: a new quote has no packageSelection");
+  const sel = { estimatePdf: true, coverPdf: false, drawings: false, excludedDatasheets: ["P3-A"] };
+  const upd = await Q.update(QID, { packageSelection: sel });
+  const got = await Q.get(QID);
+  const S333 = await import("@/lib/estimate-output/package-selection");
+  ok(!!got?.packageSelection && S333.selectionKey(got.packageSelection) === S333.selectionKey(sel), "#333 store: update() keeps packageSelection (it is not one of the store-owned fields it drops)");
+  ok((upd?.contentChangedAt ?? null) === (before.contentChangedAt ?? null), "#333 store: a packageSelection change never stamps contentChangedAt");
+  await Q.update(QID, { status: "sent" });
+  const rev = await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
+  ok(rev?.docFields?.packageSelection?.coverPdf === false && rev?.docFields?.packageSelection?.excludedDatasheets.join() === "P3-A", "#333 store: a new revision freezes the selection");
+  await Q.update(QID, { packageSelection: { ...sel, excludedDatasheets: [] } });
+  const after = await Q.get(QID);
+  ok(after?.revisions?.[after.revisions.length - 1]?.docFields?.packageSelection?.excludedDatasheets.join() === "P3-A", "#333 store: a change after send is never annexed onto the sent revision");
+
+  // Renames: a saved exclusion under an old SKU persists under the live one.
+  const db = await getDb();
+  const snapshot = await db.select().from(blobsT).where(inArray(blobsT.id, [Ren.SKU_RENAMES_BLOB]));
+  try {
+    const OLD = fixtureId(333, "OLD");
+    const NEW = fixtureId(333, "NEW");
+    const none = await Ren.selectionFollowingRenames({ estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [OLD] });
+    ok(none.excludedDatasheets.join() === OLD, "#333 renames: no rename logged → the exclusion is kept as is");
+    await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "M333", at: Date.now(), by: "Test" }]);
+    const moved = await Ren.selectionFollowingRenames({ estimatePdf: false, coverPdf: true, drawings: true, excludedDatasheets: [OLD, "P3-KEEP"] });
+    ok(JSON.stringify(moved) === JSON.stringify({ estimatePdf: false, coverPdf: true, drawings: true, excludedDatasheets: [NEW, "P3-KEEP"].sort() }),
+      "#333 renames: a saved excludedDatasheets [OLD] persists as [NEW] (re-normalised): " + JSON.stringify(moved));
+  } finally {
+    await db.delete(blobsT).where(inArray(blobsT.id, [Ren.SKU_RENAMES_BLOB]));
+    if (snapshot.length) await db.insert(blobsT).values(snapshot);
+  }
 }

@@ -1,3 +1,4 @@
+import type { PackageSelection } from "@/lib/estimate-output/package-selection";
 import type { ClientResponse } from "@/lib/estimate-output/responses";
 import type { BonusRecord, BonusSplit } from "@/lib/estimate-bonus/record";
 import type { RackPartFacts } from "@/lib/rack/types";
@@ -591,6 +592,8 @@ export type InitialQuote = {
   /** #301 — Not included as stored; null = never stored (the editor starts
    *  from the Settings → Estimate output default list). */
   notIncluded: string | null;
+  /** #333 — the Client package selection, normalised (defaults for a new estimate). */
+  packageSelection: PackageSelection;
   pdfOptions: QuotePdfOptions;
   /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
   pdf: QuotePdfView | null;

@@ -1,6 +1,7 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { buildImportResolver, type ImportResolver, type ResolvablePart } from "@/lib/catalog-rename/import-resolve";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
+import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 
 /**
  * #304 — the append-only log of SKU renames (order number → `Brand:Model`).
@@ -77,6 +78,16 @@ export async function quoteSpecFollowingRenames<T>(spec: T): Promise<T> {
   if (!m.size) return spec;
   const next = rewriteQuoteSpec(spec, m, models);
   return next === null ? spec : (next as T);
+}
+
+/** #333 — a project's package selection about to be saved, its left-out
+ *  datasheet SKUs moved onto the renamed parts (the same log
+ *  quoteSpecFollowingRenames reads), then re-normalised (sorted, deduped). */
+export async function selectionFollowingRenames(sel: PackageSelection): Promise<PackageSelection> {
+  if (!sel.excludedDatasheets.length) return sel;
+  const { m } = await liveRenameRefs();
+  if (!m.size || !sel.excludedDatasheets.some((s) => m.has(s))) return sel;
+  return normalizePackageSelection({ ...sel, excludedDatasheets: sel.excludedDatasheets.map((s) => m.get(s) ?? s) });
 }
 
 /** #304 — the importers' row resolver over `live` (the book the import has
