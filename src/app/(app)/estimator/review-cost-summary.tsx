@@ -14,11 +14,13 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
   const num = { ...cell, textAlign: "right" as const, fontFamily: "var(--font-mono)" };
   const inTotal = sections.filter((sec) => sec.alternate !== true);
   const alternates = sections.filter((sec) => sec.alternate === true);
-  // Estimator bonuses: the two automatic lines, summed over In-total systems only.
-  const bonusSell = (pick: (it: SpecSection["items"][number]) => boolean) =>
-    inTotal.reduce((a, sec) => a + sec.items.filter(pick).reduce((b, it) => b + lineExtSellOf(it), 0), 0);
-  const pkgBonus = bonusSell(isPackageBonusItem);
-  const estBonus = bonusSell(isEstimatorBonusItem);
+  // Estimator bonuses: the two automatic lines, summed over In-total systems
+  // only. The 5% shows as its payout (the package line's COST — its sell
+  // carries the system's markup); the 2% line's cost equals its sell.
+  const bonusSum = (pick: (it: SpecSection["items"][number]) => boolean, amount: (it: SpecSection["items"][number]) => number) =>
+    inTotal.reduce((a, sec) => a + sec.items.filter(pick).reduce((b, it) => b + amount(it), 0), 0);
+  const pkgBonus = bonusSum(isPackageBonusItem, (it) => it.qty * it.cost);
+  const estBonus = bonusSum(isEstimatorBonusItem, lineExtSellOf);
   const row = (sec: SpecSection) => (
     <tr key={sec.id}>
       <td style={cell}>{sec.name || "Untitled"}</td>
@@ -80,7 +82,7 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
       </div>
       {(pkgBonus > 0 || estBonus > 0) && (
         <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 2 }}>
-          5% package bonus {fmt(pkgBonus)} · 2% estimator bonus {fmt(estBonus)}
+          5% package bonus (payout) {fmt(pkgBonus)} · 2% estimator bonus {fmt(estBonus)}
         </div>
       )}
     </div>

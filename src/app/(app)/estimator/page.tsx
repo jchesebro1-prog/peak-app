@@ -38,6 +38,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { sourceForSave } from "@/lib/portal-quote-mode";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
@@ -235,7 +236,9 @@ async function initialFrom(
     // #245 Task 13: the staff Portal panel — present only for a portal-
     // catalog quote. porItems is a point-in-time read of the loaded spec's
     // `por` lines; the next Save recomputes what remains (clearPricedPor).
-    bonusSource: q.source ?? "estimator",
+    // Estimator bonuses: judge the source the next save will write (a grid
+    // quote saves as "estimator"), the same as saveQuoteAction's canonicalizer.
+    bonusSource: sourceForSave(q.source, "estimator"),
     bonusQuoteType: q.quoteType ?? "system",
     clientResponses: q.clientResponses ?? null,
     bonusRecord: q.bonusRecord ?? null,

@@ -1082,6 +1082,12 @@ export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc:
  *
  * Non-labor lines and option lines are untouched (options are excluded, as
  * they already are everywhere else on this document).
+ *
+ * Estimator bonuses: the 5% package line (`bonus: "package"`) is overhead —
+ * it folds into the home line above like shop & engineering. The 2% estimator
+ * line (`bonus: "estimator"`) is never a row: its sell is spread over every
+ * row at the end (`absorbSellAdjustment`), so the rows still sum to the
+ * system's total and neither bonus is ever named.
  */
 function customerLinesRaw(sec: SpecSection): CustomerLine[] {
   // #282 phase 2: the Rewards credit prints on its own under the totals.

@@ -83,7 +83,10 @@ function expand(
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
     // #279: every part's sell scales by the system's price (freight included) ÷ its lines' sell.
-    // The bonus lines are internal; their sell rides on the real parts through k (the file still totals to the system price).
+    // The bonus lines are internal and never listed; leaving their sell out of
+    // `rev` makes k spread it pro rata over the other lines, the same way k
+    // carries freight and a typed sell — so per system the listed parts still
+    // total the system's price less the labor lines' share (header above).
     const rev = systemItemsRev(section) - section.items.filter((x) => isBonusItem(x)).reduce((a, x) => a + lineExtSellOf(x), 0);
     const k0 = rev > 0 ? Math.max(0, systemSellTotal(section)) / rev : 1;
     const k = Number.isFinite(k0) ? k0 : 1;

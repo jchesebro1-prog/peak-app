@@ -16,6 +16,7 @@ import { SendActivity } from "./send-activity";
 import { SendComposer } from "./send-composer";
 import { BonusCard } from "./bonus-card";
 import { alternateChoices, liveEstimatorBonus } from "@/lib/estimate-bonus/card";
+import { quoteHasBonusLines } from "@/lib/estimate-bonus/record";
 import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
 
 const CARD = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: 16 } as const;
@@ -85,65 +86,65 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     ),
     status: (
       <Fragment key="status">
-      <section id={SEND_STEP_IDS.status} aria-label="Status" style={CARD}>
-        <div style={CARD_LABEL}>Status</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: loadedId && next ? 12 : 0 }}>
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: STATUS_DOT[status] || "#c98a2b",
-              flexShrink: 0,
-            }}
-          />
-          <select
-            value={status}
-            id={SEND_STEP_IDS.statusSelect}
-            onChange={(e) => changeStatus(e.target.value as QuoteStatus)}
-            aria-label="Quote status"
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: "#16181d",
-              background: "#fff",
-              border: "1px solid #dfe2e8",
-              borderRadius: 8,
-              padding: "9px 10px",
-              cursor: "pointer",
-            }}
-          >
-            <option value="draft">Draft</option>
-            <option value="sent">Sent</option>
-            <option value="won">Won</option>
-            <option value="lost">Lost</option>
-          </select>
-        </div>
-        {loadedId && next && (
-          <QuoteNextStep
-            quoteId={loadedId}
-            view={next}
-            variant="panel"
-            savedOnly={pdfDirty}
-            disabled={statusChanging || tierResolving}
-            beforeAction={pdfDirty ? saveNow : undefined}
-            onSync={(r, action) => {
-              applySync(r);
-              if (r.ok) {
-                setActionError(null);
+        <section id={SEND_STEP_IDS.status} aria-label="Status" style={CARD}>
+          <div style={CARD_LABEL}>Status</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: loadedId && next ? 12 : 0 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: STATUS_DOT[status] || "#c98a2b",
+                flexShrink: 0,
+              }}
+            />
+            <select
+              value={status}
+              id={SEND_STEP_IDS.statusSelect}
+              onChange={(e) => changeStatus(e.target.value as QuoteStatus)}
+              aria-label="Quote status"
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#16181d",
+                background: "#fff",
+                border: "1px solid #dfe2e8",
+                borderRadius: 8,
+                padding: "9px 10px",
+                cursor: "pointer",
+              }}
+            >
+              <option value="draft">Draft</option>
+              <option value="sent">Sent</option>
+              <option value="won">Won</option>
+              <option value="lost">Lost</option>
+            </select>
+          </div>
+          {loadedId && next && (
+            <QuoteNextStep
+              quoteId={loadedId}
+              view={next}
+              variant="panel"
+              savedOnly={pdfDirty}
+              disabled={statusChanging || tierResolving}
+              beforeAction={pdfDirty ? saveNow : undefined}
+              onSync={(r, action) => {
+                applySync(r);
+                if (r.ok) {
+                  setActionError(null);
+                  setGateRefused(false);
+                  onActed(action);
+                }
+              }}
+              onError={(m) => {
+                setActionError(m);
                 setGateRefused(false);
-                onActed(action);
-              }
-            }}
-            onError={(m) => {
-              setActionError(m);
-              setGateRefused(false);
-            }}
-          />
-        )}
-      </section>
-      {isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType }) && (
+              }}
+            />
+          )}
+        </section>
+        {isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType }) && (
           <BonusCard
             quoteId={loadedId}
             canApprove={viewerCanApprove}
@@ -156,6 +157,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
             onTaken={pickAlternatesTaken}
             estimatorBonus={liveEstimatorBonus(sections, alternatesTaken)}
             record={bonusRecord}
+            hasBonusLines={quoteHasBonusLines(sections)}
             status={status}
             error={bonusError}
           />

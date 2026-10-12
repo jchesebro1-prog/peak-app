@@ -189,7 +189,7 @@ Route `/reports/estimator-bonuses`, linked from the Reports page.
   "Bonus not figured — check line costs".
 - A Won transition whose bonus figuring fails still marks Won, logs the error, and leaves `bonusRecord` absent; the
   report then omits it. The Send & track tab shows "Bonus not recorded — re-save Won" to approvers.
-- A credit whose `userId` no longer exists keeps its amount and shows "(removed user)".
+- A credit with no `userId` (no team member matched the name when it was recorded) keeps its amount and shows "(no matching team member)".
 
 ## Testing
 

@@ -154,6 +154,9 @@ export type SectionCardProps = {
    *  section still on the auto default (`sec.freightAuto`); a hand-set % is
    *  never annotated. */
   freightUnknown?: boolean;
+  /** Estimator bonuses: the rules apply but a line's qty/cost/price isn't a
+   *  number, so this system's bonus lines can't be figured. */
+  bonusNotFigured?: boolean;
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
@@ -1483,6 +1486,16 @@ export default function SectionCard(p: SectionCardProps) {
                 </div>
               );
             })}
+
+            {p.bonusNotFigured && (
+              <div
+                role="status"
+                data-bonus-not-figured=""
+                style={{ padding: "8px 20px", fontSize: 11.5, color: "#b06a00", background: "#fff8ec", borderTop: "1px solid #f5f6f8" }}
+              >
+                Bonus not figured {"\u2014"} check line costs
+              </div>
+            )}
 
             {/* freight line */}
             {secFreight > 0 && (

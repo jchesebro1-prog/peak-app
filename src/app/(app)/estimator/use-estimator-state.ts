@@ -325,9 +325,11 @@ export function useEstimatorState(props: EstimatorProps) {
   // un-marks a built system. `status` is the hook's own state (declared just
   // above); `nextId` is the nidRef counter declared before the sections.
   useEffect(() => {
-    if (!bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, sections)) return;
-    const next = withBonusLines(sections, nextId);
-    if (next !== sections) setSectionsState(next);
+    // Functional update: judged against the CURRENT sections, so an edit that
+    // lands between this render and the update is never overwritten.
+    setSectionsState((cur) =>
+      bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, cur) ? withBonusLines(cur, nextId) : cur
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, status]);
   /** #284 — the server-evaluated next-step control (pill, primary action, ⋯);
@@ -975,6 +977,10 @@ export function useEstimatorState(props: EstimatorProps) {
   const [alternatesTaken, setAlternatesTaken] = useState<string[]>(() =>
     initial.bonusRecord ? initial.bonusRecord.alternatesTaken : defaultAlternatesTaken(initial.sections ?? [], initial.clientResponses)
   );
+  /** True once the user ticks/unticks an alternate here — until then a Won
+   *  move sends no list, so the server picks the default from the customer's
+   *  latest accept (the list above was seeded once, at load). */
+  const [alternatesTouched, setAlternatesTouched] = useState(false);
   const [bonusError, setBonusError] = useState<string | null>(null);
   const bonusEligible = isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType });
   /** A status change that lands on or leaves Won changes the server-written
@@ -1004,6 +1010,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const pickAlternatesTaken = (ids: string[]) => {
     const before = alternatesTaken;
     setAlternatesTaken(ids);
+    setAlternatesTouched(true);
     setBonusError(null);
     if (status !== "won" || !loadedId || !bonusEligible) return;
     startTransition(async () => {
@@ -1176,6 +1183,8 @@ export function useEstimatorState(props: EstimatorProps) {
       return false;
     }
     const docAtSave = { ...docInput, document: docNow };
+    // What the server had before this save (estimator bonuses: syncBonusAfterStatus).
+    const statusBeforeSave = baseStatus;
     const repriceSeqAtSave = tierRepriceSeqRef.current;
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
@@ -1251,6 +1260,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // was left alone because this tab was stale, res.status is always
           // what the server actually has now (#180 review 2).
           if (res.status) {
+            // Estimator bonuses: a save that moves to/from Won refreshes the card.
+            syncBonusAfterStatus(statusBeforeSave, res.status);
             setStatus(res.status);
             setBaseStatus(res.status);
           }
@@ -1307,7 +1318,7 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
-          const r = await setStatusAction(id, v, v === "won" ? { alternatesTaken } : undefined);
+          const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
             // approval on record) — roll back the optimistic UI change and
@@ -1349,7 +1360,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
-        const r = await setQuoteStageAction(id, stageId, alternatesTaken);
+        const r = await setQuoteStageAction(id, stageId, alternatesTouched ? alternatesTaken : undefined);
         if (!r.ok) {
           setStage(prevStage);
           setStatus(prevStatus);

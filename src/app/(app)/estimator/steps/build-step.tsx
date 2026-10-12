@@ -22,6 +22,7 @@ import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
 import { PortalPanel } from "../portal-panel";
+import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
 
 /**
  * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
@@ -188,6 +189,8 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
     vendors,
     venueRoomName,
   } = s;
+  // Estimator bonuses: "Bonus not figured — check line costs" only where the rules apply.
+  const bonusOn = bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, sections);
   /* Phase 4 — open review comments pinned to the systems (the shared list is loaded by the hook). */
   const pinned = useMemo(
     () => commentsBySection(numberComments(s.reviewComments, sections), sections.map((x) => x.id)),
@@ -493,6 +496,7 @@ export function BuildStep({ s, onOpenNarrative }: { s: EstimatorState; onOpenNar
                     onRoundPrice={() => roundSystemPrice(sec.id)}
                     onSetFreight={(v) => setFreightPct(sec.id, v)}
                     freightUnknown={freightDefault.unknown}
+                    bonusNotFigured={bonusOn && bonusNotFigured(sec)}
                     onInc={inc}
                     onDec={dec}
                     onSetQty={setQty}

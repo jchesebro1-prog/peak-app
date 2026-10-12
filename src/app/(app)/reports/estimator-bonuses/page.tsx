@@ -155,6 +155,7 @@ export default async function EstimatorBonusesPage({
                     {mrows.map((r, i) => (
                       <Link
                         key={`${r.quoteId}-${r.role}-${i}`}
+                        // Only system quotes carry a bonus record (isBonusEligibleQuote), so every row opens the Estimator.
                         href={quoteBuilderHref({ id: r.quoteId, quoteType: "system" })}
                         className="eb-grid eb-row"
                         style={{ padding: "10px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}

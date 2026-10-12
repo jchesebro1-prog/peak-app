@@ -26,10 +26,12 @@ export function BonusCard(props: {
   onTaken: (ids: string[]) => void;
   estimatorBonus: number;
   record: BonusRecord | null;
+  /** The estimate carries bonus lines — with Won and no record, the Won write failed. */
+  hasBonusLines: boolean;
   status: string;
   error?: string | null;
 }) {
-  const { quoteId, canApprove, owner, preparedBy, split, onSplit, alternates, taken, onTaken, estimatorBonus, record, status, error } = props;
+  const { quoteId, canApprove, owner, preparedBy, split, onSplit, alternates, taken, onTaken, estimatorBonus, record, hasBonusLines, status, error } = props;
   // null = not being edited: the input shows the saved split.
   const [typed, setTyped] = useState<string | null>(null);
   const draft = typed ?? String(split.leadPct);
@@ -42,6 +44,9 @@ export function BonusCard(props: {
   const lead = parseLeadPct(draft) ?? split.leadPct;
   const won = status === "won";
   const altDisabled = won ? !canApprove : false;
+  // Spec: a Won whose record write failed says so to approvers; saving the
+  // alternates (Record now, or ticking one) rebuilds the missing record.
+  const notRecorded = won && !record && hasBonusLines && canApprove;
   return (
     <section aria-label="Estimator bonus" style={CARD}>
       <div style={CARD_LABEL}>Estimator bonus</div>
@@ -97,9 +102,22 @@ export function BonusCard(props: {
           {record.credits.map((c, i) => (
             <div key={`${c.role}-${i}`} style={{ marginTop: 2 }}>
               {c.name}
-              {c.userId == null ? " (removed user)" : ""} ({c.role}) {c.pct}% — {fmt(c.amount)}
+              {c.userId == null ? " (no matching team member)" : ""} ({c.role}) {c.pct}% — {fmt(c.amount)}
             </div>
           ))}
+        </div>
+      )}
+      {notRecorded && (
+        <div role="status" style={{ ...ROW, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", color: "#b06a00" }}>
+          <span>Bonus not recorded {"\u2014"} re-save Won</span>
+          <button
+            type="button"
+            disabled={!quoteId}
+            onClick={() => onTaken(taken)}
+            style={{ fontSize: 11.5, padding: "3px 8px", border: "1px solid #dfe2e8", borderRadius: 6, background: "#fff", cursor: "pointer" }}
+          >
+            Record now
+          </button>
         </div>
       )}
       {error && (
