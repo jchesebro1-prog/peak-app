@@ -18,6 +18,8 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { datasheetEntryName, packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
 import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, planDatasheetBook, withCanonicalMfrs, type BookPart, type BookPlan, type CanonicalMfr } from "@/lib/part-docs/datasheet-book";
 import { BOOK_SKIPPED_REASON, buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
+import type { BookCover } from "@/lib/part-docs/datasheet-book-cover";
+import { gridBookCover, quoteBookCover } from "@/lib/part-docs/datasheet-book-cover-server";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { addCutSheets, CUT_SHEET_DEADLINE_MS, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { GRID_SET_STEP_MS } from "@/lib/design/grid-set-print";
@@ -67,7 +69,22 @@ export type ClientPackageDeps = {
   readDoc: (blobKey: string) => Promise<ReadableStream | null>;
   /** #329b — the #298 manufacturer merges for the datasheet book (null = each part's own manufacturer). */
   canonicalMfr: () => Promise<CanonicalMfr | null>;
+  /** Grid notes #8 — the datasheet book's job cover (customer logo, job, venue, Prepared for / by). */
+  bookCover: (src: BookCoverSource) => Promise<BookCover>;
 };
+
+/** Grid notes #8 — whose job cover the package's datasheet book prints. */
+export type BookCoverSource = { kind: "grid"; project: GridProject; quoteId: string | null; by: string } | { kind: "quote"; quote: Quote };
+
+/** The job cover, or null (logged) when it can't be read — the book then keeps its plain cover; never fails the package. */
+async function safeBookCover(d: ClientPackageDeps, src: BookCoverSource): Promise<BookCover | null> {
+  try {
+    return await d.bookCover(src);
+  } catch (e) {
+    console.warn("[package] datasheet book job cover not loaded", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
 
 const livePackageDeps: ClientPackageDeps = {
   blobOn: blobEnabled,
@@ -78,6 +95,7 @@ const livePackageDeps: ClientPackageDeps = {
   findGrid: gridProjectForQuote,
   readDoc: (blobKey) => getBlobStream(blobKey),
   canonicalMfr: () => loadCanonicalMfr(undefined, "[package]"),
+  bookCover: (src) => (src.kind === "quote" ? quoteBookCover(src.quote) : gridBookCover(src.project, { quoteId: src.quoteId, by: src.by })),
 };
 
 /** Production deps with the caller's overrides — an override left `undefined` never blanks a live dep. */
@@ -506,12 +524,12 @@ type PackageBookResult = Awaited<ReturnType<typeof buildDatasheetBook>> | null;
  * (pdf-lib yields between documents) on the package's render deadline, so it
  * never eats the finish allowance. Null = no datasheet was read (no book, no gap).
  */
-async function packageBook(parts: BookPart[], docs: Map<string, BookDoc>, subtitleLines: string[], deadline: number, tag: string, letterhead: Letterhead | null): Promise<PackageBookResult> {
+async function packageBook(parts: BookPart[], docs: Map<string, BookDoc>, subtitleLines: string[], deadline: number, tag: string, letterhead: Letterhead | null, cover: BookCover | null = null): Promise<PackageBookResult> {
   // Nothing read (no datasheets, or Blob lost every one — each already a missing-datasheet gap): no book.
   if (![...docs.values()].some((d) => d.bytes)) return null;
   // #329 review: the loose datasheets + the book stay under BOOK_ZIP_CEILING_BYTES (skip = "package size limit").
   const loose = [...docs.values()].reduce((n, d) => n + (d.bytes?.byteLength ?? 0), 0);
-  return buildDatasheetBook({ subtitleLines, parts, docs, letterhead, deadline, logTag: tag, maxBytes: bookByteBudget(loose) });
+  return buildDatasheetBook({ subtitleLines, parts, docs, letterhead, deadline, logTag: tag, maxBytes: bookByteBudget(loose), cover });
 }
 
 /** Put the book at the zip root (plus a gap per datasheet it couldn't read), or the gap that says it was skipped. */
@@ -620,7 +638,10 @@ export async function createClientPackage(
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps, bookPlan, d.readDoc);
-  const bookP = packageBook(bookParts, bookDocs, [project.name, project.customer, project.siteName ?? "", bookDate(Date.now())], cutSheetsBy, `[package] grid ${project.id}`, letterhead);
+  // Grid notes #8 — the book's job cover (the option's quote names the lead estimator).
+  const coverQuoteId = ensureOptions(project).options.find((o) => o.id === resolveOptionId(project, requestedOptionId))?.quoteId ?? null;
+  const bookCover = await safeBookCover(d, { kind: "grid", project, quoteId: coverQuoteId, by });
+  const bookP = packageBook(bookParts, bookDocs, [project.name, project.customer, project.siteName ?? "", bookDate(Date.now())], cutSheetsBy, `[package] grid ${project.id}`, letterhead, bookCover);
   const optId = resolveOptionId(project, requestedOptionId);
   // Grid notes #7 — the title-blocked drawing set (plans WITH devices, riser, schedules) is the first render on the
   // package's deadline. Rendered: it replaces the rough drawings and the raw plans. Not: they stay, plus one gap.
@@ -696,7 +717,9 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps, bookPlan, d.readDoc);
-  const bookP = packageBook(bookParts, bookDocs, [quote.name, quote.customer, `Estimate ${displayQuoteNumber(quote)}`, bookDate(Date.now())], cutSheetsBy, `[package] quote ${quote.id}`, letterhead);
+  // Grid notes #8 — the book's job cover.
+  const bookCover = await safeBookCover(d, { kind: "quote", quote });
+  const bookP = packageBook(bookParts, bookDocs, [quote.name, quote.customer, `Estimate ${displayQuoteNumber(quote)}`, bookDate(Date.now())], cutSheetsBy, `[package] quote ${quote.id}`, letterhead, bookCover);
   // Grid notes #7 — a quote minted by a Grid design ships that option's drawing set (the first render on the
   // package's deadline) in place of the equipment summary; a failed render keeps the summary plus one gap.
   // A quote with no Grid design keeps the summary, no gap.

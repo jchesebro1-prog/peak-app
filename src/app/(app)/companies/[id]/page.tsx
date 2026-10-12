@@ -46,6 +46,8 @@ export const metadata = { title: "Company — Quartzite-6" };
 
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
+import { CompanyLogoCard } from "./logo-card";
+import { getCompanyLogo } from "@/lib/stores/company-logos";
 import { RewardsCard } from "./rewards-card";
 import { companyRewards, getRewardsProgram } from "@/lib/stores/rewards";
 import { companyCredit } from "@/lib/stores/reward-ledger";
@@ -130,7 +132,7 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram] = await Promise.all([
+  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram, companyLogo] = await Promise.all([
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
@@ -140,6 +142,8 @@ export default async function CustomerDetailPage({
     loadCustomerFeed({ id: cust.id, name: cust.name }, me.id),
     getSettings(),
     getRewardsProgram(),
+    // Grid notes #8 — the customer logo on the datasheet book's cover.
+    getCompanyLogo(cust.id),
   ]);
   // #282 — the Rewards card shows only while the program is on.
   const [rewards, rewardCredit] = rewardsProgram.enabled
@@ -827,6 +831,8 @@ export default async function CustomerDetailPage({
                 <div style={{ fontSize: 12, color: "#9aa0ab", paddingTop: 4 }}>No contacts yet.</div>
               )}
             </div>
+
+            <CompanyLogoCard companyId={cust.id} companyName={cust.name} logoSrc={companyLogo?.dataUrl ?? null} />
 
             <PortalAccessCard
               customerId={cust.id}

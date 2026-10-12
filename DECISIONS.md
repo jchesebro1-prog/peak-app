@@ -11291,3 +11291,63 @@ part's text. Estimate package zip Blob cache: NOT bumped. A zip is pinned to a s
 download; one cached before a later merge keeps its old grouping until staff Rebuild package (or the next sent
 revision). That is acceptable: the grouping is presentation, every datasheet and page is still there, and a merge is
 an occasional admin action. Punch item #329.
+
+## D840. Grid notes #8 rides on the datasheet book: its cover gains the job (2026-10-12)
+
+Jeff asked for the datasheets as one package with a job cover. #329's datasheet book (`Datasheets.pdf`) already is that
+one PDF, with A→Z order, an index and page stamps, so #8 builds onto it and adds **no second merge engine and no second
+combined file**. `buildDatasheetBook` gains one optional input, `cover`, and nothing else in the book changes. The baked
+letterhead still prints as a full-width band (the book's own `letterheadBoxPx` sizing). Below it, the title sits left and
+the customer's logo right (≤ 200 × 72 pt), or the company name set large (≤ 3 lines). Then:
+- the job name (≤ 2 lines, "…") and number ("Estimate EST-n", "· Rev N" for a sent revision, "Design GRD-n");
+- Venue (name + address) · Prepared for · Prepared by columns, each line ≤ 2 lines;
+- the date;
+- the book's own counts line, then the index.
+
+Every run is clamped, so the index still starts on page 1. Without `cover` the book is byte-for-byte #329's (rack
+submittals pass none). **Prepared for** follows the estimate's own Attn ladder: a contact never set, or no longer on the
+company, falls back to the primary contact (Jeff confirmed), and `""` means none, leaving the company line only. A Grid
+design reads its contact exactly. **Prepared by** is the lead estimator (quote `owner`, then Prepared by) off the roster.
+A Grid design uses its option's quote, else whoever drew it, else the builder. A sent revision prints its frozen name,
+customer, venue, contact and estimator with its issued date, while the logo and contact details are read live. The Grid
+and quote client packages and the estimate package zip pass the cover. A cover that can't be read leaves the book's plain
+cover and never fails a package. The letterhead follows each document's Peak-header choice (D824), as the book's does.
+Files: `src/lib/part-docs/datasheet-book-cover.ts` (pure), `datasheet-book-cover-server.ts`, and the additive
+`cover` branch in `datasheet-book-server.ts`.
+
+## D841. "Download all datasheets" serves the book on its own (Grid notes #8, 2026-10-12)
+
+Three buttons serve the book through one module, `src/lib/part-docs/datasheet-book-download.ts`:
+- **Grid Outputs menu** (`/api/grid/<id>/datasheets-pdf?option=&header=1|0`): that option's client-package documents.
+  It honours the menu's "Include Peak header" checkbox, as the package build does; absent means the company default, and
+  any value but `1`/`0` is refused (400).
+- **Estimate Build package step** (`/api/quotes/<id>/datasheets-pdf`): the saved estimate, with its own header choice.
+- **Customer's package page** (`/share/quote/<id>/<token>/datasheets.pdf`): the pinned sent revision, under
+  `package.zip`'s rules — the same `share-zip:` per-IP bucket (one download budget), a v2 token only, the uniform 404.
+
+Every download plans through `loadBookInputs`, which applies #329b's manufacturer merges (`loadCanonicalMfr()`, null on
+a failed read) and hands the same resolver to the book. Reads follow the zip's caps (25 MB a file, 60 MB together,
+"package size limit"). The time budget starts at **route entry**: the prelude (a 37k-part catalog read, coverage, the
+cover) and the reads must finish by +45 s, and the merge by +90 s, leaving 30 s of `maxDuration` 120 to stream the body.
+A prelude that has already spent the read budget answers 503 ("took too long to build — try again") and reads nothing.
+Nothing to combine → 404; too large → 413 with a message; late → 503.
+The share download rebuilds the book rather than unpacking the cached zip; that is simpler, and the zip may not exist yet.
+It is cached per revision at `estimate-package/<quote>/rev-<n>-<cover>-Datasheets.pdf`, beside the zip and under its gate.
+`<cover>` is 8 hex characters of a hash of the front matter as it would print now: the cover facts, plus digests of the
+customer logo and the letterhead. The cover reads live data, so an edit names a fresh file. Only a build with nothing left
+out but for the size cap is cached (the zip's rule), and **Rebuild package** clears it with the zip. Staff downloads are
+always built live. The estimate package zip carries the same job cover in its `Datasheets.pdf`. Its cache key therefore
+gains the same fingerprint (`rev-<n>-h<0|1>-c<cover>-v3.zip`; `PACKAGE_ZIP_CACHE_VERSION` 2 → 3 because the contents
+changed), and the build prints exactly the cover it was keyed by. A cover that failed to load prints the book's plain
+cover and is never cached.
+
+## D842. Customer logos on the company record (Grid notes #8, 2026-10-12)
+
+The company page gains a **Logo** card (preview, Upload/Replace, Remove). It is stored as the blob `company_logo:<id>`, so
+there is **no migration**. PNG, JPEG or WebP, up to 1 MB, checked from the file's own bytes. **SVG is refused**, including
+one behind an XML declaration, comments or a `<!DOCTYPE>` ("SVG isn't supported — use PNG, JPEG or WebP"). sharp decodes
+it with a 25-megapixel input limit, makes it upright, drops metadata, caps it at 800 px, and saves a palette PNG
+(transparency kept). Anyone signed in may change it, the same as editing a company (Jeff confirmed). No logo prints the
+company name in its place. Separately, `letterhead-server.ts` now reads the baked letterhead through a **literal** path
+with static `fs`/`path` imports. `next build` no longer traces the whole project into every function, and the harness
+checks the literal equals `BAKED_LETTERHEAD`.
