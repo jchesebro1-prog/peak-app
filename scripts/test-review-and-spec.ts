@@ -11665,6 +11665,7 @@ seeded()
   .then(() => riserPhase2C4Checks())
   .then(() => gridNotes6Checks())
   .then(() => gridNotes7Checks())
+  .then(() => gridNotes5WireStarterChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -19036,8 +19037,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th); #321 adds saveDesignatorDigitsAction (the 12th) and saveRiserBoxTypesAction (the 13th).
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 13 && (actionsSrc.match(/^export async function/gm) || []).length === 13, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th); #300 adds setDeviceTypeSymbolAction (the 11th); #321 adds saveDesignatorDigitsAction (the 12th) and saveRiserBoxTypesAction (the 13th); Grid notes #5 adds loadWireStarterAction and syncWireLibraryAction (14th, 15th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 15 && (actionsSrc.match(/^export async function/gm) || []).length === 15, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -66451,4 +66452,130 @@ async function gridNotes7Checks(): Promise<void> {
     console.error = err;
     console.warn = warn;
   }
+}
+
+/* Grid notes #5 — starter wire cables + per-foot cables reach the Grid library. */
+async function gridNotes5WireStarterChecks(): Promise<void> {
+  const J5 = (v: unknown) => JSON.stringify(v);
+  const WS = await import("@/lib/design/wire-starter");
+  const CC = await import("@/lib/catalog-connect");
+  const { brayCodeFor } = await import("@/lib/design/conduit-riser/wire-symbols");
+  const { cleanCableOd } = await import("@/lib/design/conduit-riser/cable-od");
+  const defaultIds = new Set(CC.DEFAULT_WIRE_TYPES.map((w) => w.id));
+
+  // ---- 1. the starter list's shape
+  const L5 = WS.WIRE_STARTER;
+  ok(L5.length >= 18 && L5.length <= 24, `Grid notes #5: the starter list holds ~20 cables (${L5.length})`);
+  ok(L5.every((c) => c.unit === "ft" && c.cost === 0 && c.list === 0 && c.category === "Wire"), "Grid notes #5: every starter cable is unit ft, cost 0, list 0, category Wire");
+  ok(L5.every((c) => /^[A-Za-z][^:]*:[^:\s][^:]*$/.test(c.sku) && c.sku === `${c.manufacturer}:${c.modelNumber}` && !!c.mfrPartNumber), "Grid notes #5: every SKU is Brand:Model (#304) and carries its MFR P/N");
+  ok(new Set(L5.map((c) => c.sku.toLowerCase())).size === L5.length, "Grid notes #5: starter SKUs are unique (case-insensitive)");
+  ok(L5.every((c) => defaultIds.has(c.wireTypeId)), "Grid notes #5: every starter cable's wireTypeId exists in DEFAULT_WIRE_TYPES");
+  ok(L5.every((c) => /^https:\/\//.test(c.source) && (c.cableOdIn === undefined || cleanCableOd(c.cableOdIn) === c.cableOdIn)), "Grid notes #5: every row cites an https datasheet; every OD present is a clean cable OD");
+  const links5 = WS.WIRE_STARTER_LINKS;
+  ok(new Set(links5.map((l) => l.wireTypeId)).size === links5.length && links5.every((l) => defaultIds.has(l.wireTypeId)), "Grid notes #5: one link per wire type, each a DEFAULT_WIRE_TYPES id");
+  ok(links5.every((l) => L5.some((c) => c.sku === l.cableSku && c.wireTypeId === l.wireTypeId)), "Grid notes #5: each link's cable is a starter cable of that same wire type");
+  ok(links5.every((l) => /^[A-Z0-9]{1,3}$/.test(l.symbol) && !!l.signal.trim() && l.signal.length <= 30), "Grid notes #5: link symbols are 1–3 uppercase letters/digits, signals non-empty and ≤ 30 chars");
+  ok(new Set(links5.map((l) => l.symbol)).size === links5.length, "Grid notes #5: no two wire types share a riser symbol");
+  ok(links5.every((l) => { const wt = CC.DEFAULT_WIRE_TYPES.find((w) => w.id === l.wireTypeId)!; const b = brayCodeFor(wt); return !b || (b.symbol === l.symbol && b.signal === l.signal); }), "Grid notes #5: where Bray's legend has a code (D/N/UE/CC), the starter link uses the same symbol and signal");
+
+  // ---- 2. the wire-type merge fills blanks only and passes cleanWireTypes
+  const m1 = WS.linkStarterWireTypes(undefined);
+  ok(m1.linked === links5.length && J5(CC.cleanWireTypes(m1.wireTypes)) === J5(m1.wireTypes), "Grid notes #5: linking the defaults fills every linked type, and the result is already clean");
+  ok(m1.wireTypes.length === CC.DEFAULT_WIRE_TYPES.length && CC.DEFAULT_WIRE_TYPES.every((d) => links5.some((l) => l.wireTypeId === d.id) || J5(m1.wireTypes.find((w) => w.id === d.id)) === J5(CC.cleanWireTypes([d])![0])), "Grid notes #5: wire types without a link come through unchanged");
+  ok(links5.every((l) => { const w = m1.wireTypes.find((x) => x.id === l.wireTypeId)!; return w.cableSku === l.cableSku && w.symbol === l.symbol && w.signal === l.signal; }), "Grid notes #5: each linked type gets its cable, symbol and signal");
+  ok(WS.linkStarterWireTypes(m1.wireTypes).linked === 0, "Grid notes #5: linking twice changes nothing (idempotent)");
+  const custom5 = CC.DEFAULT_WIRE_TYPES.filter((w) => w.id !== "fiber").map((w) => (w.id === "dmx-5pin" ? { ...w, cableSku: "MY-DMX", symbol: "Q" } : { ...w }));
+  const m2 = WS.linkStarterWireTypes(custom5, (s) => (s === "Belden:2412" ? "BEL-2412" : s));
+  const dmx5 = m2.wireTypes.find((w) => w.id === "dmx-5pin")!;
+  ok(dmx5.cableSku === "MY-DMX" && dmx5.symbol === "Q" && dmx5.signal === "DMX", "Grid notes #5: a typed cable SKU and symbol are kept; only the blank signal fills");
+  ok(!m2.wireTypes.some((w) => w.id === "fiber"), "Grid notes #5: a wire type the admin deleted is never re-added");
+  ok(m2.wireTypes.find((w) => w.id === "cat6")!.cableSku === "BEL-2412", "Grid notes #5: a cable already in the Catalog under another SKU is the one linked");
+
+  // ---- 3. finding a cable already in the Catalog
+  const find5 = WS.findExistingCable;
+  const bel = { sku: "Belden:1583A", manufacturer: "Belden", modelNumber: "1583A", mfrPartNumber: "1583A" };
+  ok(find5(bel, [{ sku: "belden:1583a" }])?.sku === "belden:1583a" && find5(bel, [{ sku: "X", formerSkus: ["Belden:1583A"] }])?.sku === "X", "Grid notes #5: the same SKU (any case) or a former SKU is the existing cable");
+  ok(find5(bel, [{ sku: "BEL-1583A", mfr: "Belden Inc.", manufacturerPartNumber: "1583A" }])?.sku === "BEL-1583A", "Grid notes #5: the same manufacturer + model under another SKU is the existing cable");
+  ok(find5(bel, [{ sku: "Z", mfr: "Generic", manufacturerModelNumber: "1583A" }, { sku: "Y", mfr: "Be", manufacturerModelNumber: "1583A" }, { sku: "W", manufacturerPartNumber: "1583A" }]) === null, "Grid notes #5: a model match under another (or a too-short, or no) manufacturer is not that cable");
+
+  // ---- 4. the loader on the scratch DB: idempotent, never overwrites a price
+  const { fixtureId } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const GC = await import("@/lib/stores/grid-catalog");
+  const Settings = await import("@/lib/settings");
+  const SRV = await import("@/lib/design/wire-starter-server");
+  const sk = (s: string) => fixtureId("gn5", s);
+  const cab = (slug: string, wireTypeId: string, od?: number) => {
+    const s = sk(slug);
+    return { sku: s, manufacturer: s.slice(0, s.indexOf(":")), modelNumber: s.slice(s.indexOf(":") + 1), mfrPartNumber: slug.toUpperCase(), desc: `GN5 ${slug}`, category: "Wire" as const, unit: "ft" as const, cost: 0 as const, list: 0 as const, ...(od ? { cableOdIn: od } : {}), wireTypeId, source: "https://example.com/" + slug };
+  };
+  const starter5 = [cab("new-a", "gn5-wt", 0.25), cab("new-b", "gn5-wt2"), cab("priced", "gn5-wt"), cab("model", "gn5-wt3"), cab("gone", "gn5-wt4")];
+  const links5db = [
+    { wireTypeId: "gn5-wt", cableSku: sk("new-a"), symbol: "G5", signal: "Gee five" },
+    { wireTypeId: "gn5-wt2", cableSku: sk("new-b"), symbol: "G6", signal: "Gee six" },
+    { wireTypeId: "gn5-wt3", cableSku: sk("model"), symbol: "G7", signal: "Gee seven" },
+    { wireTypeId: "gn5-wt4", cableSku: sk("gone"), symbol: "G8", signal: "Gee eight" },
+  ];
+  for (const s of ["new-a", "new-b", "priced", "other", "gone", "loose"]) { registerFixture("catalog_parts", sk(s)); registerFixture("grid_catalog", sk(s)); }
+  await DS.upsertDoc("catalog_parts", { id: sk("priced"), sku: sk("priced"), desc: "GN5 priced", category: "Wire", unit: "ft", list: 2.5, cost: 1.1, note: "mine" } as never);
+  await DS.upsertDoc("catalog_parts", { id: sk("other"), sku: sk("other"), desc: "GN5 same cable, other sku", category: "Wire", unit: "ft", list: 3, cost: 2, mfr: "TESTgn5", manufacturerModelNumber: "model" } as never);
+  await DS.upsertDoc("catalog_parts", { id: sk("gone"), sku: sk("gone"), desc: "GN5 deleted", category: "Wire", unit: "ft", list: 1, cost: 1 } as never);
+  await DS.softDeleteDoc("catalog_parts", sk("gone"));
+  await DS.upsertDoc("catalog_parts", { id: sk("loose"), sku: sk("loose"), desc: "GN5 loose per-foot cable", category: "Wire", unit: "lin ft", list: 4, cost: 3 } as never);
+  const wireBefore5 = (await Settings.getSettingsPatchStrict()).wireTypes;
+  try {
+    const base5 = Array.isArray(wireBefore5) ? (wireBefore5 as import("@/lib/catalog-connect").WireType[]) : CC.DEFAULT_WIRE_TYPES;
+    await Settings.setSettings({
+      wireTypes: [
+        ...base5,
+        { id: "gn5-wt", label: "GN5", connectionTypes: ["DMX512 (5-pin XLR)"] },
+        { id: "gn5-wt2", label: "GN5 two", connectionTypes: ["DMX512 (5-pin XLR)"], cableSku: "KEEP-ME", symbol: "K" },
+        { id: "gn5-wt3", label: "GN5 three", connectionTypes: ["DMX512 (5-pin XLR)"] },
+        { id: "gn5-wt4", label: "GN5 four", connectionTypes: ["DMX512 (5-pin XLR)"] },
+      ],
+    });
+    const r1 = await SRV.loadWireStarter("Test Harness", { starter: starter5, links: links5db });
+    ok(r1.partsAdded === 2 && r1.partsExisting === 3, `Grid notes #5 load: two new cables added; the priced, the same-model and the deleted one count as existing (${J5(r1)})`);
+    const a5 = await Cat.get(sk("new-a"));
+    ok(!!a5 && a5.unit === "ft" && a5.cost === 0 && a5.list === 0 && a5.cableOdIn === 0.25 && a5.mfr === "TESTgn5" && a5.manufacturerModelNumber === "new-a" && a5.manufacturerPartNumber === "NEW-A" && !!a5.note && a5.docs?.[0]?.url === "https://example.com/new-a", "Grid notes #5 load: a new cable is a $0 per-ft draft with its OD, model, P/N, note and datasheet link");
+    const pr5 = await Cat.get(sk("priced"));
+    ok(pr5?.list === 2.5 && pr5?.cost === 1.1 && pr5?.note === "mine" && pr5?.updatedAt === undefined, "Grid notes #5 load: an existing part's price and note are never touched");
+    ok((await Cat.get(sk("gone"))) === null, "Grid notes #5 load: a part deleted at a starter SKU stays deleted");
+    for (const s of ["new-a", "new-b", "priced", "other", "loose"]) ok(!!(await GC.getGridSymbol(sk(s))), `Grid notes #5 library: per-foot ${s} is in the Grid library`);
+    ok(r1.libraryAdded >= 5 && !(await GC.getGridSymbol(sk("gone"))), "Grid notes #5 library: the deleted part gets no library entry");
+    const wt5 = ((await Settings.getSettingsStrict()).wireTypes || []) as import("@/lib/catalog-connect").WireType[];
+    const w = (id: string) => wt5.find((x) => x.id === id);
+    ok(w("gn5-wt")?.cableSku === sk("new-a") && w("gn5-wt")?.symbol === "G5" && w("gn5-wt")?.signal === "Gee five", "Grid notes #5 link: a blank wire type gets its cable, symbol and signal");
+    ok(w("gn5-wt2")?.cableSku === "KEEP-ME" && w("gn5-wt2")?.symbol === "K" && w("gn5-wt2")?.signal === "Gee six", "Grid notes #5 link: a set cable and symbol are kept, the blank signal fills");
+    ok(w("gn5-wt3")?.cableSku === sk("other"), "Grid notes #5 link: the same cable under another SKU is the one linked");
+    ok(!w("gn5-wt4")?.cableSku && !w("gn5-wt4")?.symbol, "Grid notes #5 link: a wire type whose cable is deleted is not linked");
+    // jsonb reorders object keys, so compare key-sorted.
+    const K5 = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
+    ok(r1.wireTypesLinked === 3 && K5(CC.cleanWireTypes(wt5)) === K5(wt5), "Grid notes #5 link: three wire types linked; the stored list is clean");
+    const settingsMid = J5((await Settings.getSettingsPatchStrict()).wireTypes);
+    const r2 = await SRV.loadWireStarter("Test Harness", { starter: starter5, links: links5db });
+    ok(r2.partsAdded === 0 && r2.partsExisting === 5 && r2.libraryAdded === 0 && r2.wireTypesLinked === 0, `Grid notes #5 load: a second run adds nothing (${J5(r2)})`);
+    ok(J5((await Settings.getSettingsPatchStrict()).wireTypes) === settingsMid && (await Cat.get(sk("priced")))?.list === 2.5, "Grid notes #5 load: a second run leaves the wire types and prices as they were");
+  } finally {
+    await Settings.setSettings({ wireTypes: wireBefore5 });
+  }
+
+  // ---- 5. pins: the action gate, the card, the Wires pane hint and Needs price
+  const src5 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acts5 = src5("src/app/(app)/design/grid/settings/actions.ts");
+  const body5 = (n: string) => acts5.slice(acts5.indexOf(`export async function ${n}`), acts5.indexOf("\n}\n", acts5.indexOf(`export async function ${n}`)));
+  ok(body5("loadWireStarterAction").includes('await requirePerm("manage_users")') && body5("loadWireStarterAction").includes("loadWireStarter(") && body5("loadWireStarterAction").includes('revalidatePath("/catalog")') &&
+     body5("syncWireLibraryAction").includes('await requirePerm("manage_users")') && body5("syncWireLibraryAction").includes("ensureWireLibrary("),
+    "Grid notes #5: both starter actions re-check manage_users on the server and revalidate");
+  const card5 = src5("src/app/(app)/design/grid/settings/wire-starter-card.tsx");
+  ok(card5.startsWith('"use client"') && !/from "@\/(lib\/stores|db)\//.test(card5) && !card5.includes("wire-starter-server") && card5.includes("Never changes a part or wire type you've already set."),
+    "Grid notes #5: the starter card is a client component that imports no store, and confirms before loading");
+  ok(!/from "@\/(lib\/stores|db)\//.test(src5("src/lib/design/wire-starter.ts")), "Grid notes #5: wire-starter.ts stays pure (no store or db import)");
+  const page5 = src5("src/app/(app)/design/grid/settings/page.tsx");
+  ok(page5.includes('<div id="wire-types"') && page5.indexOf("<WireStarterCard") < page5.indexOf("<WireTypesCard"), "Grid notes #5: the starter card sits above Wire types under the #wire-types anchor");
+  const wp5 = src5("src/app/(app)/design/grid/[id]/wires-panel.tsx");
+  ok(wp5.includes('href="/design/grid/settings#wire-types"') && wp5.includes("No per-foot cable in the Grid library yet") && !wp5.includes("and it appears here"), "Grid notes #5: the Wires pane's empty hint points admins to Grid Settings → Wire types");
+  ok(wp5.includes("export const needsWirePrice = (p: Pick<PartLite, \"list\" | \"cost\">) => !(p.list > 0) && !(p.cost > 0);") && (wp5.match(/<span style=\{NEEDS_PRICE\}>Needs price<\/span>/g) || []).length >= 3 && wp5.includes('needsWirePrice(p) ? "needs price"'),
+    "Grid notes #5: an unpriced cable shows Needs price in the pick list, under the picker and on its runs");
 }

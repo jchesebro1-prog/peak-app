@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { Calibration } from "@/lib/annotations";
 import { formatMeasure } from "@/lib/annotations";
 import type { GridRoute } from "@/lib/stores/grid-projects";
@@ -23,6 +24,23 @@ const BTN: React.CSSProperties = {
   color: "#3d424e",
   cursor: "pointer",
   fontFamily: "inherit",
+};
+
+/** Grid notes #5: a cable with neither a cost nor a list price would land on
+ *  the quote at $0 (the tier fallback only warns after Add to Quotes), so the
+ *  pane flags it before it is routed. UI only — quote rules are unchanged. */
+export const needsWirePrice = (p: Pick<PartLite, "list" | "cost">) => !(p.list > 0) && !(p.cost > 0);
+
+const NEEDS_PRICE: React.CSSProperties = {
+  display: "inline-block",
+  fontSize: 10,
+  fontWeight: 700,
+  color: "#9a5b13",
+  background: "#fdf3e3",
+  border: "1px solid #f2dcb6",
+  borderRadius: 999,
+  padding: "1px 7px",
+  whiteSpace: "nowrap",
 };
 
 const INPUT: React.CSSProperties = {
@@ -75,9 +93,12 @@ export default function WiresPanel({
         Wires
       </div>
       {wireParts.length === 0 ? (
-        <div style={{ fontSize: 11, color: "#8c919c" }}>
-          No per-length parts in the catalog yet — add cable with unit
-          &ldquo;ft&rdquo; under Catalog, and it appears here.
+        <div style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.45 }}>
+          No per-foot cable in the Grid library yet — an admin can load starter cables in{" "}
+          <Link href="/design/grid/settings#wire-types" style={{ color: "var(--accent)", fontWeight: 600 }}>
+            Grid Settings → Wire types
+          </Link>{" "}
+          (then set their prices in the Catalog).
         </div>
       ) : (
         <>
@@ -89,10 +110,27 @@ export default function WiresPanel({
             <option value="">Pick a wire type…</option>
             {wireParts.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.sku} — {p.desc} (${p.list}/{p.unit})
+                {p.sku} — {p.desc} ({needsWirePrice(p) ? "needs price" : `$${p.list}/${p.unit}`})
               </option>
             ))}
           </select>
+          {(() => {
+            const picked = wirePartId ? wireParts.find((p) => p.id === wirePartId) : undefined;
+            const unpriced = wireParts.filter(needsWirePrice).length;
+            if (picked && needsWirePrice(picked)) {
+              return (
+                <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={NEEDS_PRICE}>Needs price</span>
+                  <span>No cost or list in the Catalog yet — this run would quote at $0.</span>
+                </div>
+              );
+            }
+            return unpriced > 0 ? (
+              <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 5 }}>
+                <span style={NEEDS_PRICE}>Needs price</span> {unpriced} cable{unpriced === 1 ? " has" : "s have"} no price in the Catalog yet.
+              </div>
+            ) : null;
+          })()}
           <button
             style={{
               ...BTN,
@@ -140,6 +178,10 @@ export default function WiresPanel({
                 <span style={{ flex: 1, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {r.partId}
                 </span>
+                {(() => {
+                  const wp = wireParts.find((p) => p.id === r.partId);
+                  return wp && needsWirePrice(wp) ? <span style={NEEDS_PRICE}>Needs price</span> : null;
+                })()}
                 <span style={{ fontSize: 11, color: "#5b616e" }}>
                   {ft !== null && cal ? formatMeasure(ft, cal.unit) : "unmeasured"}
                 </span>

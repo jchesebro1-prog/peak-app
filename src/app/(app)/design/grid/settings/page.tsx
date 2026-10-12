@@ -16,6 +16,10 @@ import { typeOfCategory } from "@/lib/design/device-types";
 import { DeviceTypeIconsCard, type DeviceTypeDrawing } from "./device-type-icons-card";
 import { getDocuments } from "@/lib/stores/part-documents";
 import { WireTypesCard } from "./wire-types-card";
+import { WireStarterCard } from "./wire-starter-card";
+import { findExistingCable, WIRE_STARTER } from "@/lib/design/wire-starter";
+import { isPerLengthUnit } from "@/lib/design/grid-bom";
+import { isFabricPart } from "@/lib/fabric-part";
 import { BoxTypesCard } from "./box-types-card";
 import { getRiserBoxTypes } from "@/lib/stores/riser-box-types";
 import { StandardNotesCard } from "./standard-notes-card";
@@ -118,6 +122,10 @@ export default async function GridSettingsPage() {
   }
   const used = [...usedSet];
   const wireTypes = resolveWireTypes(settings.wireTypes);
+  // Grid notes #5: starter cables already in the Catalog, and per-foot cables
+  // the Grid library is missing (the ones the Wires pane can't offer yet).
+  const starterInCatalog = WIRE_STARTER.filter((c) => findExistingCable(c, catalog)).length;
+  const perFootMissing = catalog.filter((p) => isPerLengthUnit(p.unit || "") && !isFabricPart(p) && p.category !== "Labor" && !symById.has(p.id)).length;
   const boxTypes = await getRiserBoxTypes();
 
   // Port rules review (#159) — one pass over the full catalog (~37,400 parts
@@ -213,7 +221,10 @@ export default async function GridSettingsPage() {
         }}
       />
 
-      <WireTypesCard key={JSON.stringify(wireTypes)} wireTypes={wireTypes} />
+      <div id="wire-types" style={{ scrollMarginTop: 16 }}>
+        <WireStarterCard starterTotal={WIRE_STARTER.length} starterInCatalog={starterInCatalog} perFootMissing={perFootMissing} />
+        <WireTypesCard key={JSON.stringify(wireTypes)} wireTypes={wireTypes} />
+      </div>
 
       <StandardNotesCard key={settings.gridStandardNotes ?? ""} value={settings.gridStandardNotes ?? ""} />
 

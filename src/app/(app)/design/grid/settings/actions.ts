@@ -20,6 +20,7 @@ import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { saveRiserBoxTypes } from "@/lib/stores/riser-box-types";
 import type { CRBoxType } from "@/lib/design/conduit-riser/input";
 import type { BoxTypeRowError } from "@/lib/riser-box-types";
+import { ensureWireLibrary, loadWireStarter, type WireStarterResult } from "@/lib/design/wire-starter-server";
 
 /**
  * Grid Settings mutations (/design/grid/settings). All gated on manage_users
@@ -95,6 +96,34 @@ export async function saveWireTypesAction(rows: WireType[]) {
   revalidatePath("/design/grid/settings");
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** Grid notes #5: add the starter cables to the Catalog at $0 (never touching
+ *  a part that already exists), link each to its wire type where that wire
+ *  type's cable / symbol / signal is blank, and put every per-foot cable in
+ *  the Grid library. Idempotent — a second run adds nothing. */
+export async function loadWireStarterAction(): Promise<({ ok: true } & WireStarterResult) | { ok: false; error: string }> {
+  const me = await requirePerm("manage_users");
+  try {
+    const r = await loadWireStarter(me.name || me.email || "admin");
+    revalidatePath("/design/grid", "layout");
+    revalidatePath("/catalog");
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't load the starter cables — please try again." };
+  }
+}
+
+/** Grid notes #5: put every per-foot catalog cable in the Grid library (insert-if-absent), so it shows in the Wires pane. */
+export async function syncWireLibraryAction(): Promise<{ ok: true; libraryAdded: number } | { ok: false; error: string }> {
+  const me = await requirePerm("manage_users");
+  try {
+    const libraryAdded = await ensureWireLibrary(me.name || me.email || "admin");
+    revalidatePath("/design/grid", "layout");
+    return { ok: true, libraryAdded };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't sync the Grid library — please try again." };
+  }
 }
 
 /**
