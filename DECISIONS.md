@@ -11190,7 +11190,7 @@ common spelling (a tie goes to the code-point-smallest, so "ETC" beats "Etc"). G
 ignored). A part with no manufacturer sorts LAST under "Unknown manufacturer". Within a group: the printed model
 (`partModel`, #304 — Model #, then MFR P/N, then the SKU's model tail), numeric-aware ("Lens Tube 2" before "Lens Tube
 10"), then SKU. The #298 manufacturer merges were NOT applied at first (they need a manufacturers-table read);
-#329b applies them (D8XX). Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
+#329b applies them (D837). Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
 
 ## D830. The book's cover and index (#329, 2026-10-12)
 
@@ -11273,7 +11273,7 @@ client packages read every datasheet with no cap of their own (unchanged); only 
 fixed: in the Grid and quote client packages the book shares the 75 s render budget with the drawing set, cut sheets
 and racks, so on a slow build it can be skipped as "ran out of time" (with the note). Punch item #329.
 
-## D8XX. The datasheet book follows the #298 manufacturer merges (#329b, 2026-10-12) — placeholder number, renumber at push
+## D837. The datasheet book follows the #298 manufacturer merges (#329b, 2026-10-12)
 
 Jeff approved reversing D829's skip. Each package build (Grid and quote client packages, estimate package zip, rack
 submittal) reads the manufacturer records ONCE (`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`,
