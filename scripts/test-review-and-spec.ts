@@ -66322,28 +66322,47 @@ async function gridNotes7Checks(): Promise<void> {
        (cps.match(/renderGridSetPdf\(\{/g) || []).length === 1 && !cps.includes("signPrintToken(") && !cps.includes("gridSetPrintUrl("),
       "Grid notes #7: Generate from Grid and the client packages both render through the one renderGridSetPdf (neither signs or builds the URL itself)");
 
-    // ---- 3. the package's drawing-set step on the shared deadline
+    // ---- 3. the package's drawing-set step: its own share of the package budget, one deadline owner
+    const T0 = 1_900_000_000_000;
+    const pkgDeadline = T0 + c292Pkg.CUT_SHEET_DEADLINE_MS;
+    const prodBudget = CPS.packageDrawingSetBudget(pkgDeadline, false);
+    const devBudget = CPS.packageDrawingSetBudget(pkgDeadline, true);
+    ok(prodBudget.deadline === T0 + CPS.PACKAGE_DRAWING_SET_SHARE_MS && prodBudget.stepMs === GSP.GRID_SET_STEP_MS &&
+       pkgDeadline - prodBudget.deadline >= 25_000 && CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS < CPS.PACKAGE_DRAWING_SET_SHARE_MS &&
+       devBudget.deadline === T0 + 360_000 && devBudget.stepMs === undefined,
+      "Grid notes #7: production — the drawing set may use the first 50 s of the 75 s package budget (cut sheets + racks keep ≥ 25 s), 25 s steps; dev mirrors Generate (renderer default steps, 360 s)");
+    const at = (t: number) => () => t;
+    const budgetIn = (ms: number, step: number | undefined = GSP.GRID_SET_STEP_MS) => ({ deadline: T0 + ms, stepMs: step });
     const deps = (render: GridSetRenderFnGn7) => ({ renderGridSet: render, secret: () => "s7" });
     let called = 0;
-    const noOrigin = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { error: "Set QUOTE_PDF_ORIGIN" }, Date.now() + 60_000, deps(async () => { called++; return PDF; }));
-    const noTime = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS - 1_000, deps(async () => { called++; return PDF; }));
-    ok(called === 0 && !noOrigin.ok && noOrigin.reason === "printing isn’t available on this server" && !noOrigin.reason.includes("QUOTE_PDF_ORIGIN") &&
+    const noOrigin = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { error: "Set QUOTE_PDF_ORIGIN" }, budgetIn(60_000), deps(async () => { called++; return PDF; }), at(T0));
+    const noTime = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, budgetIn(CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS - 1), deps(async () => { called++; return PDF; }), at(T0));
+    ok(called === 0 && !noOrigin.ok && noOrigin.reason === "the drawing set couldn’t be printed just now" && !noOrigin.reason.includes("QUOTE_PDF_ORIGIN") &&
        !noTime.ok && noTime.reason === "it didn’t finish in time",
-      "Grid notes #7: no print origin, or too little of the package's render budget left, never starts the render (customer-safe reasons)");
+      "Grid notes #7: no print origin, or too little of the set's budget left, never starts the render (customer-safe reasons)");
+    // The injected clock alone decides the deadline: 10 s + 200 ms left at the check, then 200 ms left when the timer is set.
+    const clock = (() => { let n = 0; return () => (n++ === 0 ? T0 : T0 + CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS); })();
     let seenTimeout = 0;
     let seenSignal: AbortSignal | undefined;
-    let first = true;
     const t0 = Date.now();
-    const hung = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + 300,
-      deps((_u, o) => { seenTimeout = o.timeoutMs ?? -1; seenSignal = o.signal; return new Promise<Buffer>(() => undefined); }),
-      () => (first ? ((first = false), Date.now() - 20_000) : Date.now()));
-    ok(!hung.ok && hung.reason === "it didn’t finish in time" && Date.now() - t0 < 3_000 && seenTimeout > 0 && seenTimeout <= 300 && seenSignal?.aborted === true,
-      "Grid notes #7: a render that outlives the package deadline is cut there (step cap = time left, the signal fires) and reads as late");
-    const big = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + 60_000, deps(async () => Buffer.alloc(MAX_PACKAGE_FILE_BYTES + 1)));
+    const hung = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, budgetIn(CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS + 200),
+      deps((_u, o) => { seenTimeout = o.timeoutMs ?? -1; seenSignal = o.signal; return new Promise<Buffer>(() => undefined); }), clock);
+    ok(!hung.ok && hung.reason === "it didn’t finish in time" && Date.now() - t0 < 3_000 && seenTimeout === 200 && seenSignal?.aborted === true && seenSignal.reason instanceof CPS.DrawingSetDeadlineError,
+      "Grid notes #7: one timer from the injected clock owns the deadline — it aborts the render's signal, then ends the wait; Chrome's step cap is the time left; the result reads late");
+    // A renderer that rejects BECAUSE of the abort is still late (the signal is aborted first); one that fails on its own is failed.
+    const clock2 = (() => { let n = 0; return () => (n++ === 0 ? T0 : T0 + CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS); })();
+    const onAbort = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, budgetIn(CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS + 100),
+      deps((_u, o) => new Promise<Buffer>((_, rej) => o.signal?.addEventListener("abort", () => rej(new Error("browser closed")), { once: true }))), clock2);
+    const ownFail = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, budgetIn(60_000), deps(async () => { throw new Error("spawn ENOENT"); }), at(T0));
+    ok(!onAbort.ok && onAbort.reason === "it didn’t finish in time" && !ownFail.ok && ownFail.reason === "the drawing renderer failed",
+      "Grid notes #7: late vs failed is deterministic — a render ended by the deadline is late, one that fails before it is failed");
+    const big = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, budgetIn(60_000), deps(async () => Buffer.alloc(MAX_PACKAGE_FILE_BYTES + 1)), at(T0));
     let earlyTimeout = 0;
-    const fine = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, Date.now() + 60_000, deps(async (_u, o) => { earlyTimeout = o.timeoutMs ?? -1; return PDF; }));
-    ok(!big.ok && big.reason === "it is over 25 MB" && fine.ok && fine.pdf === PDF && earlyTimeout === GSP.GRID_SET_STEP_MS,
-      "Grid notes #7: an oversized set is refused; an early render gets Generate's normal 25 s step cap");
+    const fine = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, budgetIn(60_000), deps(async (_u, o) => { earlyTimeout = o.timeoutMs ?? -1; return PDF; }), at(T0));
+    let devTimeout: number | undefined = -1;
+    const devRun = await CPS.renderPackageDrawingSet({ id: "GRD-7" }, "opt-base", { origin: "https://app.test" }, { deadline: T0 + 60_000, stepMs: undefined }, deps(async (_u, o) => { devTimeout = o.timeoutMs; return PDF; }), at(T0));
+    ok(!big.ok && big.reason === "it is over 25 MB" && fine.ok && fine.pdf === PDF && earlyTimeout === GSP.GRID_SET_STEP_MS && devRun.ok && devTimeout === undefined,
+      "Grid notes #7: an oversized set is refused; an early render gets Generate's 25 s step cap; the dev budget leaves the step to the renderer's own default");
 
     // ---- 4. the Grid client package, end to end (DB fixtures, injected render / Blob / record store)
     const project = await G.createProject({ name: "Grid notes 7 design", customer: "Spec fixture", customerId: null, by: "Test" });
@@ -66364,24 +66383,24 @@ async function gridNotes7Checks(): Promise<void> {
     const okPkg = await CPS.createClientPackage(live, "Tester", optionId, { printWhere: { origin: "https://app.test" }, deps: pkgDeps(async (url) => { renderUrls.push(url); return PDF; }) });
     const okZip = zipNamesGn7(stored[stored.length - 1]);
     const okNames = okZip.map((f) => f.name);
-    const okIndex = JSON.parse(okZip.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { drawingSet?: { included: boolean; file?: string }; gaps: Array<{ kind: string }> };
+    const okIndex = JSON.parse(okZip.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { drawingSet?: { included: boolean; file?: string; source?: string }; gaps: Array<{ kind: string }> };
     ok(okNames.includes("drawings/drawing-set.pdf") && okZip.find((f) => f.name === "drawings/drawing-set.pdf")!.data.equals(PDF) &&
        !okNames.includes("drawings/rough-drawings.pdf") && !okNames.some((n) => n.startsWith("drawings/plan-")) && okNames[1] === "specification.docx" && okNames[2] === "drawings/drawing-set.pdf" &&
        renderUrls.length === 1 && renderUrls[0].includes(`/print/grid-set/${encodeURIComponent(project.id + "~" + optionId)}?t=`) &&
-       okIndex.drawingSet?.included === true && okIndex.drawingSet.file === "drawings/drawing-set.pdf" && !okIndex.gaps.some((x) => x.kind === "missing-drawing-set") &&
+       okIndex.drawingSet?.included === true && okIndex.drawingSet.file === "drawings/drawing-set.pdf" && okIndex.drawingSet.source === "live design" && !okIndex.gaps.some((x) => x.kind === "missing-drawing-set") &&
        okPkg.drawingSet?.included === true && !okPkg.gaps.some((x) => x.kind === "missing-drawing-set"),
       "Grid notes #7: a rendered drawing set ships as drawings/drawing-set.pdf for the package's option; no rough drawings, no raw plan backgrounds; the index says it is included");
     const badPkg = await CPS.createClientPackage(live, "Tester", optionId, { printWhere: { origin: "https://app.test" }, deps: pkgDeps(async () => { throw new Error("spawn /opt/secret-chrome ENOENT"); }) });
     const badZip = zipNamesGn7(stored[stored.length - 1]);
     const badNames = badZip.map((f) => f.name);
-    const badIndex = JSON.parse(badZip.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { drawingSet?: { included: boolean; reason?: string }; gaps: Array<{ kind: string; description: string; sku: string }> };
+    const badIndex = JSON.parse(badZip.find((f) => f.name === "00-package-index.json")!.data.toString("utf8")) as { drawingSet?: { included: boolean; reason?: string; source?: string }; gaps: Array<{ kind: string; description: string; sku: string }> };
     const gap = badIndex.gaps.filter((x) => x.kind === "missing-drawing-set");
     ok(!badNames.includes("drawings/drawing-set.pdf") && badNames.includes("drawings/rough-drawings.pdf") && badNames.includes("drawings/plan-01-Ground_floor") &&
        gap.length === 1 && gap[0].sku === "DWG" && gap[0].description === "Drawing set couldn’t be rendered — the drawing renderer failed; the rough drawings and plan backgrounds are included instead." &&
-       !gap[0].description.includes("secret-chrome") && badIndex.drawingSet?.included === false && badPkg.gaps.some((x) => x.kind === "missing-drawing-set") && badPkg.record.gapCount === badPkg.gaps.length,
+       !gap[0].description.includes("secret-chrome") && badIndex.drawingSet?.included === false && badIndex.drawingSet.source === "live design" && badPkg.gaps.some((x) => x.kind === "missing-drawing-set") && badPkg.record.gapCount === badPkg.gaps.length,
       "Grid notes #7: a failed render keeps the rough drawings + raw plan backgrounds and adds one customer-safe missing-drawing-set gap (index: not included)");
     const noPrint = await CPS.createClientPackage(live, "Tester", optionId, { deps: pkgDeps(async () => PDF) });
-    ok(noPrint.drawingSet?.included === false && noPrint.gaps.some((x) => x.kind === "missing-drawing-set" && x.description.includes("printing isn’t available on this server")),
+    ok(noPrint.drawingSet?.included === false && noPrint.gaps.some((x) => x.kind === "missing-drawing-set" && x.description === "Drawing set couldn’t be rendered — the drawing set couldn’t be printed just now; the rough drawings and plan backgrounds are included instead."),
       "Grid notes #7: with no print address the package still builds — fallback drawings plus the gap");
 
     // ---- 5. the quote package: a Grid-minted quote gets the same set; any other keeps its equipment summary
@@ -66390,6 +66409,16 @@ async function gridNotes7Checks(): Promise<void> {
       spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "GN7-A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] }], mobs: [] } });
     registerFixture("quotes", QID);
     const qDeps = (render: GridSetRenderFnGn7, grid: boolean) => ({ ...pkgDeps(render), findGrid: async () => (grid ? { project: live, optionId } : null) });
+    // A Grid lookup that throws is "no Grid design" (logged): the summary path, no gap, no render.
+    let thrownRendered = 0;
+    const qThrow = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" },
+      deps: { ...pkgDeps(async () => { thrownRendered++; return PDF; }), findGrid: async () => { throw new Error("store down"); } } });
+    const qThrowNames = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name);
+    ok(thrownRendered === 0 && qThrow.drawingSet === null && qThrowNames.includes("drawings/quote-equipment-summary.pdf") && !qThrow.gaps.some((x) => x.kind === "missing-drawing-set"),
+      "Grid notes #7: a quote package whose Grid lookup throws builds as a quote with no design (equipment summary, no gap)");
+    // undefined overrides never blank a live dep (the spread drops them).
+    const qUndef = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" }, deps: { ...qDeps(async () => PDF, false), renderGridSet: undefined, secret: undefined } });
+    ok(qUndef.drawingSet === null && typeof qUndef.record.id === "string", "Grid notes #7: deps given as undefined fall back to the live ones");
     const qOk = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" }, deps: qDeps(async () => PDF, true) });
     const qOkNames = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name);
     const qBad = await CPS.createQuoteClientPackage(quote, "Tester", { printWhere: { origin: "https://app.test" }, deps: qDeps(async () => { throw new PrintFigureFailed(); }, true) });
@@ -66409,9 +66438,15 @@ async function gridNotes7Checks(): Promise<void> {
        rd("src/lib/client-package.ts").includes('"missing-drawing-set"'),
       "Grid notes #7: the Outputs button and the project page describe the drawing set, not rough riser drawings; missing-drawing-set is a package gap kind");
     const build = cps.slice(cps.indexOf("export async function createClientPackage("), cps.indexOf("/** Build the same package from a quote"));
-    ok(build.indexOf("renderPackageDrawingSet(project, optId, where, cutSheetsBy, d)") > 0 && build.indexOf("renderPackageDrawingSet(") < build.indexOf("addCutSheets(") &&
-       build.indexOf("addCutSheets(") < build.indexOf("addRacks(") && CPS.PACKAGE_DRAWING_SET_MIN_RENDER_MS < c292Pkg.CUT_SHEET_DEADLINE_MS,
-      "Grid notes #7: the drawing set is the first render on the package's one deadline (cutSheetDeadline), before the cut sheets and racks, inside the 120 s budget");
+    ok(build.indexOf("packageDrawingSetBudget(cutSheetsBy, process.env.NODE_ENV === \"development\")") > 0 && build.indexOf("renderPackageDrawingSet(project, optId, where, setBudget, d)") > 0 &&
+       build.indexOf("renderPackageDrawingSet(") < build.indexOf("addCutSheets(") && build.indexOf("addCutSheets(") < build.indexOf("addRacks(") &&
+       !build.includes("listSheets(") && build.indexOf("planBackgroundFiles(project.id)") > build.indexOf("} else {", build.indexOf("renderPackageDrawingSet(")) &&
+       build.includes("const d = packageDeps(opts.deps);"),
+      "Grid notes #7: the drawing set renders first on its share of the package budget (dev mirrors Generate), before the cut sheets and racks; the raw plans are read only in the fallback branch");
+    const gpq = rd("src/lib/stores/grid-projects.ts");
+    const lookup = gpq.slice(gpq.indexOf("export async function gridProjectForQuote("), gpq.indexOf("\n}\n", gpq.indexOf("export async function gridProjectForQuote(")));
+    ok(!lookup.includes("doc.quoteId === quoteId") && !lookup.includes("options[0]"),
+      "Grid notes #7: gridProjectForQuote matches an option's quote only — a stale top-level quoteId mirror never prints options[0]'s set");
   } finally {
     console.error = err;
     console.warn = warn;

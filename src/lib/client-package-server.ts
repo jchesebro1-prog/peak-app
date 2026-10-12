@@ -17,8 +17,7 @@ import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
-import { addCutSheets, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
-import { rejectAfter } from "@/lib/curtain-cut-sheets/deadline";
+import { addCutSheets, CUT_SHEET_DEADLINE_MS, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { GRID_SET_STEP_MS } from "@/lib/design/grid-set-print";
 import { renderGridSetPdf, type GridSetRenderCause, type GridSetRenderFn } from "@/lib/design/grid-set-render";
 import { MAX_PACKAGE_FILE_BYTES } from "@/lib/estimate-output/package-files";
@@ -71,19 +70,48 @@ const livePackageDeps: ClientPackageDeps = {
   findGrid: gridProjectForQuote,
 };
 
+/** Production deps with the caller's overrides — an override left `undefined` never blanks a live dep. */
+function packageDeps(overrides: Partial<ClientPackageDeps> | undefined): ClientPackageDeps {
+  const defined = Object.fromEntries(Object.entries(overrides ?? {}).filter(([, v]) => v !== undefined)) as Partial<ClientPackageDeps>;
+  return { ...livePackageDeps, ...defined };
+}
+
 /** Grid notes #7 — where the title-blocked drawing set lands in the zip. */
 export const PACKAGE_DRAWING_SET_FILE = "drawings/drawing-set.pdf";
-/** The drawing set needs at least this much of the package's render budget left to be started. */
+/** The drawing set needs at least this much of its render budget left to be started. */
 export const PACKAGE_DRAWING_SET_MIN_RENDER_MS = 10_000;
+/**
+ * The drawing set's share of the package's 75 s render budget (CUT_SHEET_DEADLINE_MS).
+ * It renders FIRST and may use up to 50 s from the start of the build; the
+ * cut sheets and racks that follow always keep the last 25 s (the drawing set
+ * can never spend them). Production only — see packageDrawingSetBudget.
+ */
+export const PACKAGE_DRAWING_SET_SHARE_MS = 50_000;
+/** `next dev` compiles /print on first hit: Generate from Grid's dev budget (renderPrintRouteToPdf's 90 s steps, 360 s overall). */
+export const PACKAGE_DRAWING_SET_DEV_MS = 360_000;
 
-/** What the zip's index says about the drawing set. */
-export type PackageDrawingSet = { included: true; file: string } | { included: false; reason: string };
+/**
+ * The drawing set's deadline and Chrome step cap for a package whose overall
+ * render deadline is `packageDeadline` (cutSheetDeadline). Production: at most
+ * PACKAGE_DRAWING_SET_SHARE_MS from the build start, never past the package
+ * deadline, 25 s steps (clamped to the time left at render). Dev mirrors
+ * generateGridDrawingSet: the renderer's own step default and a 360 s
+ * deadline (no maxDuration under `next dev`; the cut sheets then run late).
+ */
+export function packageDrawingSetBudget(packageDeadline: number, dev: boolean): { deadline: number; stepMs: number | undefined } {
+  const startedAt = packageDeadline - CUT_SHEET_DEADLINE_MS;
+  if (dev) return { deadline: startedAt + PACKAGE_DRAWING_SET_DEV_MS, stepMs: undefined };
+  return { deadline: Math.min(packageDeadline, startedAt + PACKAGE_DRAWING_SET_SHARE_MS), stepMs: GRID_SET_STEP_MS };
+}
 
-/** Customer-safe words for why the set is missing (the zip's index is customer-facing; the raw cause goes to the server log). */
+/** What the zip's index says about the drawing set. `source`: it renders the LIVE Grid option, not a frozen revision. */
+export type PackageDrawingSet = { included: true; file: string; source: "live design" } | { included: false; reason: string; source: "live design" };
+
+/** Customer-safe words for why the set is missing (the zip's index is customer-facing; the raw cause goes to the server log only). */
 const DRAWING_SET_REASON: Record<GridSetRenderCause | "no-origin" | "too-big", string> = {
-  "no-origin": "printing isn’t available on this server",
-  "no-secret": "printing isn’t available on this server",
-  unavailable: "printing isn’t available on this server",
+  "no-origin": "the drawing set couldn’t be printed just now",
+  "no-secret": "the drawing set couldn’t be printed just now",
+  unavailable: "the drawing set couldn’t be printed just now",
   figure: "one of the plan sheets couldn’t be drawn",
   late: "it didn’t finish in time",
   failed: "the drawing renderer failed",
@@ -95,21 +123,31 @@ export function drawingSetGap(reason: string, instead: string): ClientPackageGap
   return { kind: "missing-drawing-set", sku: "DWG", description: `Drawing set couldn’t be rendered — ${reason}; ${instead} included instead.`, qty: 0, catalogId: null };
 }
 
+/** The drawing set's deadline passed: aborts the render and ends our wait on it (one owner, so late vs failed is deterministic). */
+export class DrawingSetDeadlineError extends Error {
+  constructor() {
+    super("The drawing set's render deadline passed.");
+    this.name = "DrawingSetDeadlineError";
+  }
+}
+
 /**
  * Grid notes #7 — render the design option's drawing set (cover, plans with
  * devices, riser, schedules — the same PDF as Generate from Grid, through
- * renderGridSetPdf) for a client package. It is the FIRST render on the
- * package's one render deadline (cutSheetDeadline): it is not started with
- * less than PACKAGE_DRAWING_SET_MIN_RENDER_MS left, Chrome's step cap is the
- * time left (at most GRID_SET_STEP_MS), an AbortSignal fires at the deadline
- * (queue wait included) and our wait on it is cut there too. The cut sheets
- * and racks that follow get whatever is left. Never throws.
+ * renderGridSetPdf) for a client package, by `budget.deadline`
+ * (packageDrawingSetBudget). Not started with less than
+ * PACKAGE_DRAWING_SET_MIN_RENDER_MS left. ONE timer, set from the injected
+ * clock, owns the deadline: when it fires it aborts the render's signal
+ * (a queued render never launches Chrome, a running one closes its browser)
+ * and then ends our wait — so a render cut there is always "late", and one
+ * that fails on its own before it is "failed". Chrome's step cap is the
+ * budget's step, clamped to the time left. Never throws.
  */
 export async function renderPackageDrawingSet(
   project: Pick<GridProject, "id">,
   optionId: string,
   where: PrintWhere,
-  deadline: number,
+  budget: { deadline: number; stepMs: number | undefined },
   deps: Pick<ClientPackageDeps, "renderGridSet" | "secret">,
   now: () => number = Date.now,
 ): Promise<{ ok: true; pdf: Buffer } | { ok: false; reason: string }> {
@@ -118,10 +156,18 @@ export async function renderPackageDrawingSet(
     return { ok: false as const, reason: DRAWING_SET_REASON[cause] };
   };
   if ("error" in where) return fail("no-origin", where.error);
-  const left = deadline - now();
+  const left = budget.deadline - now();
   if (left < PACKAGE_DRAWING_SET_MIN_RENDER_MS) return fail("late", `${Math.max(0, left)} ms of render budget left`);
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(new Error("The client package's render deadline passed.")), Math.max(0, deadline - Date.now()));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new DrawingSetDeadlineError();
+      abort.abort(e); // first: the signal is aborted before anyone sees the rejection
+      reject(e);
+    }, Math.max(0, budget.deadline - now()));
+  });
+  cut.catch(() => undefined);
   try {
     const r = await renderGridSetPdf({
       projectId: project.id,
@@ -129,18 +175,44 @@ export async function renderPackageDrawingSet(
       origin: where.origin,
       secret: deps.secret(),
       now,
-      render: (url, o) => rejectAfter(deps.renderGridSet(url, o), deadline - now()),
-      timeoutMs: Math.max(1, Math.min(GRID_SET_STEP_MS, deadline - now())),
+      render: (url, o) => Promise.race([deps.renderGridSet(url, o), cut]),
+      timeoutMs: budget.stepMs === undefined ? undefined : Math.max(1, Math.min(budget.stepMs, budget.deadline - now())),
       signal: abort.signal,
     });
-    if (!r.ok) return fail(r.cause === "failed" && abort.signal.aborted ? "late" : r.cause, r.error);
+    if (!r.ok) return fail(r.cause, r.error);
     if (r.pdf.length > MAX_PACKAGE_FILE_BYTES) return fail("too-big", `${r.pdf.length} bytes`);
     return { ok: true, pdf: r.pdf };
   } finally {
     clearTimeout(timer);
     // Anything still queued or running for this set is abandoned now, never left holding the Chrome queue.
-    abort.abort(new Error("The client package moved on."));
+    if (!abort.signal.aborted) abort.abort(new Error("The client package moved on."));
   }
+}
+
+/** The Grid design a quote was minted from, or null — a lookup that throws is logged and treated as "no Grid design". */
+async function safeFindGrid(find: ClientPackageDeps["findGrid"], quoteId: string): Promise<{ project: GridProject; optionId: string } | null> {
+  try {
+    return await find(quoteId);
+  } catch (e) {
+    console.warn(`[package] quote ${quoteId}: Grid design lookup failed — packaging without a drawing set`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+/** A design's raw plan backgrounds — read only for the fallback, when the drawing set wasn't rendered. */
+async function planBackgroundFiles(projectId: string): Promise<ZipFile[]> {
+  const out: ZipFile[] = [];
+  for (const [index, sheet] of (await listSheets(projectId)).entries()) {
+    let bytes: Buffer | null = null;
+    if (sheet.dataUrl) {
+      try { bytes = dataUrlToBytes(sheet.dataUrl).bytes; } catch { bytes = null; }
+    } else if (sheet.blobPath) {
+      const stream = await getBlobStream(sheet.blobPath);
+      if (stream) bytes = await bytesFromStream(stream);
+    }
+    if (bytes) out.push({ name: `drawings/plan-${String(index + 1).padStart(2, "0")}-${safeName(sheet.name)}`, data: bytes });
+  }
+  return out;
 }
 
 function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], packageName: string): Buffer {
@@ -435,7 +507,7 @@ export async function createClientPackage(
   opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {},
 ): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
-  const d: ClientPackageDeps = { ...livePackageDeps, ...opts.deps };
+  const d = packageDeps(opts.deps);
   if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
@@ -460,33 +532,23 @@ export async function createClientPackage(
     const item = itemBySku.get(sku);
     return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
   }, files, gaps);
-  // The raw plan backgrounds are read before any render (as before #7), so the deadline-bounded work stays last;
-  // they ship only as the fallback when the drawing set can't be rendered.
-  const planFiles: ZipFile[] = [];
-  for (const [index, sheet] of (await listSheets(project.id)).entries()) {
-    let bytes: Buffer | null = null;
-    if (sheet.dataUrl) {
-      try { bytes = dataUrlToBytes(sheet.dataUrl).bytes; } catch { bytes = null; }
-    } else if (sheet.blobPath) {
-      const stream = await getBlobStream(sheet.blobPath);
-      if (stream) bytes = await bytesFromStream(stream);
-    }
-    if (bytes) planFiles.push({ name: `drawings/plan-${String(index + 1).padStart(2, "0")}-${safeName(sheet.name)}`, data: bytes });
-  }
   const optId = resolveOptionId(project, requestedOptionId);
   // Grid notes #7 — the title-blocked drawing set (plans WITH devices, riser, schedules) is the first render on the
   // package's deadline. Rendered: it replaces the rough drawings and the raw plans. Not: they stay, plus one gap.
   const where = opts.printWhere ?? NO_PRINT_ORIGIN;
-  const set = await renderPackageDrawingSet(project, optId, where, cutSheetsBy, d);
+  // Budget split: the set may use the first 50 s of the 75 s render budget; cut sheets + racks keep the last 25 s.
+  const setBudget = packageDrawingSetBudget(cutSheetsBy, process.env.NODE_ENV === "development");
+  const set = await renderPackageDrawingSet(project, optId, where, setBudget, d);
   let drawingSet: PackageDrawingSet;
   if (set.ok) {
     files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
-    drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE };
+    drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE, source: "live design" };
   } else {
     files.splice(1, 0, { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) });
-    files.push(...planFiles);
+    // Read only now (after the set failed): a slow read never eats the set's budget, a rendered set never pays for them.
+    files.push(...(await planBackgroundFiles(project.id)));
     gaps.push(drawingSetGap(set.reason, "the rough drawings and plan backgrounds are"));
-    drawingSet = { included: false, reason: set.reason };
+    drawingSet = { included: false, reason: set.reason, source: "live design" };
   }
   // #292 — cut sheets for the option's quote; a design with curtains but no quote gets one gap.
   const optQuoteId = ensureOptions(project).options.find((o) => o.id === optId)?.quoteId ?? null;
@@ -519,7 +581,7 @@ export async function createClientPackage(
 /** Build the same package from a quote when it has not yet become a Grid project. */
 export async function createQuoteClientPackage(quote: Quote, by: string, opts: { printWhere?: PrintWhere; deps?: Partial<ClientPackageDeps> } = {}): Promise<BuiltClientPackage> {
   const cutSheetsBy = cutSheetDeadline(Date.now()); // #292 — measured from the start of the build; Grid notes #7: the drawing set shares it
-  const d: ClientPackageDeps = { ...livePackageDeps, ...opts.deps };
+  const d = packageDeps(opts.deps);
   if (!d.blobOn()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
@@ -541,17 +603,18 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   // package's deadline) in place of the equipment summary; a failed render keeps the summary plus one gap.
   // A quote with no Grid design keeps the summary, no gap.
   const where = opts.printWhere ?? NO_PRINT_ORIGIN;
-  const grid = await d.findGrid(quote.id);
-  const set = grid ? await renderPackageDrawingSet(grid.project, grid.optionId, where, cutSheetsBy, d) : null;
+  const grid = await safeFindGrid(d.findGrid, quote.id);
+  // Same split as the Grid package: the set's first 50 s, cut sheets + racks keep the last 25 s.
+  const set = grid ? await renderPackageDrawingSet(grid.project, grid.optionId, where, packageDrawingSetBudget(cutSheetsBy, process.env.NODE_ENV === "development"), d) : null;
   let drawingSet: PackageDrawingSet | null = null;
   if (set?.ok) {
     files.splice(1, 0, { name: PACKAGE_DRAWING_SET_FILE, data: set.pdf });
-    drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE };
+    drawingSet = { included: true, file: PACKAGE_DRAWING_SET_FILE, source: "live design" };
   } else {
     files.splice(1, 0, { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) });
     if (set) {
       gaps.push(drawingSetGap(set.reason, "the equipment summary is"));
-      drawingSet = { included: false, reason: set.reason };
+      drawingSet = { included: false, reason: set.reason, source: "live design" };
     }
   }
   const cutSheets = await addCutSheets(quote.id, where, files, gaps, { deadline: cutSheetsBy });

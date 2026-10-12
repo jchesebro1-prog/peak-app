@@ -2690,9 +2690,12 @@ export async function restoreRevision(
 
 /**
  * #301 slice C (D-k, R9) — the Grid design a quote was minted from: the
- * option whose `quoteId` is this quote, else a legacy doc whose own
- * `quoteId` is (its first option). A scan — there is no stored back-link.
+ * option whose `quoteId` is this quote. A scan — there is no stored back-link.
  * Newest activity first, so a re-minted quote finds the latest design.
+ * (A legacy doc with no options gets its own `quoteId` on its first option
+ * from ensureOptions.) Grid notes #7 review: a top-level `quoteId` mirror that
+ * no option carries is stale and is NOT a match — falling back to options[0]
+ * would print another option's drawing set against this quote.
  */
 export async function gridProjectForQuote(quoteId: string): Promise<{ project: GridProject; optionId: string } | null> {
   if (!quoteId) return null;
@@ -2700,7 +2703,6 @@ export async function gridProjectForQuote(quoteId: string): Promise<{ project: G
     const doc = ensureOptions(p);
     const opt = doc.options.find((o) => o.quoteId === quoteId);
     if (opt) return { project: doc, optionId: opt.id };
-    if (doc.quoteId === quoteId) return { project: doc, optionId: doc.options[0].id };
   }
   return null;
 }
