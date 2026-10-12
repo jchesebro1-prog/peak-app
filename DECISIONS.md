@@ -11301,8 +11301,10 @@ surface goes through `typeOfPart` (`gridPartsFrom` for the palette, layers, lege
 set and risers; the riser data sheet; Catalog → Device types counts; the Product Library's catalog search). An
 archived or unknown key reads as absent, so the category decides again. Only `setPartDeviceTypeAction`
 (`manage_users`, re-checked on the server) writes it, through the catalog store's one writer,
-`setPartDeviceTypeKeys` (batched, one statement per chunk). `mergeUpsert` strips the key from every patch, so the part
-form, importers and enrichers can never set or clear it. The Grid's Property Editor (one device or several) and Spreadsheet Type cell show a type select to
+`setPartDeviceTypeKeys`: an in-place SQL update of that one key (doc-store `patchDocKey`, live rows only, ≤ 500 ids per
+statement), so a price or spec written meanwhile is kept and a part deleted meanwhile stays deleted. Every other catalog
+write keeps the stored value: `writePart` (`upsert`, `mergeUpsert`) restores it and ignores any carried in,
+`insertIfAbsent` never sets it, and a #304 rename copies it to the new SKU. The Grid's Property Editor (one device or several) and Spreadsheet Type cell show a type select to
 admins ("Auto (from category: X → Y)" clears the override); everyone else sees the type as text. The Property Editor
 also offers **Apply to the whole '<category>' category (N parts — M with their own type will follow it too)**. That
 means every part in the category follows the category's type: the override is cleared on EVERY part in that raw

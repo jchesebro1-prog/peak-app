@@ -1,4 +1,4 @@
-import { clearCollection, DOC_BATCH_CHUNK, getDoc, getDocRows, getDocsByIdAnyCase, insertDocIfAbsent, listDeletedDocs, listDocs, listDocsByField, listDocsFiltered, patchDoc, softDeleteDoc, upsertDoc, upsertDocs } from "@/db/doc-store";
+import { clearCollection, DOC_BATCH_CHUNK, getDoc, getDocRows, getDocsByIdAnyCase, insertDocIfAbsent, listDeletedDocs, listDocs, listDocsByField, listDocsFiltered, patchDoc, patchDocKey, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
@@ -232,10 +232,13 @@ export type CatalogPart = {
   /** Grid notes #2: an admin's per-part Grid device type (a DeviceType key) —
    *  wins over the raw category's type-map entry wherever the part is typed
    *  (device-types typeOfPart). Absent = from the category. An archived or
-   *  unknown key reads as absent. Written ONLY by setPartDeviceTypeKeys (below,
-   *  called by the admin-only setPartsDeviceType) — mergeUpsert strips it from
-   *  every patch, so no importer, enricher, price-book or part-form write can
-   *  set or clear it. */
+   *  unknown key reads as absent. Written ONLY by setPartDeviceTypeKeys (an
+   *  in-place SQL key update, called by the admin-only setPartsDeviceType).
+   *  Every other catalog write keeps the stored value: writePart (upsert,
+   *  mergeUpsert — the part form, importers, enrichers, price books, the spec
+   *  builder's create-on-the-fly, datasheet/doc flags) restores it and ignores
+   *  any carried in; insertIfAbsent (starter cables) never sets it; a #304
+   *  rename copies the whole doc, so the new SKU keeps it. */
   deviceTypeKey?: string;
 } & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
@@ -344,6 +347,11 @@ async function writePart(
   const now = Date.now();
   const pricedAt = nextPricedAt(existing, part, opts.pricedAt ?? now);
   const doc: CatalogPart = { ...part, id: part.id || part.sku, updatedAt: now };
+  // Grid notes #2: the device-type override has ONE writer
+  // (setPartDeviceTypeKeys). A full replace (upsert) or a merge keeps the
+  // STORED override and ignores any carried in — set or cleared.
+  if (existing?.deviceTypeKey) doc.deviceTypeKey = existing.deviceTypeKey;
+  else delete doc.deviceTypeKey;
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
   return upsertDoc<CatalogPart>("catalog_parts", doc);
@@ -356,6 +364,7 @@ async function writePart(
 export async function insertIfAbsent(part: Omit<CatalogPart, "id"> & { id?: string }, opts: UpsertOpts = {}): Promise<boolean> {
   const now = Date.now();
   const doc: CatalogPart = { ...part, id: part.id || part.sku, updatedAt: now };
+  delete doc.deviceTypeKey; // Grid notes #2: only setPartDeviceTypeKeys sets it.
   const pricedAt = nextPricedAt(null, part, opts.pricedAt ?? now);
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
@@ -423,13 +432,11 @@ export async function mergeUpsert(
   // field itself) — the runtime contract is enforced by callers, same as
   // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
   // design/engagements/spec/actions.ts.
-  // Grid notes #2: the device-type override has ONE writer
-  // (setPartDeviceTypeKeys); a patch can never set or clear it.
-  const { deviceTypeKey: _ignored, ...owned } = patch;
-  void _ignored;
+  // Grid notes #2: a patch's deviceTypeKey is ignored — writePart keeps the
+  // stored one (setPartDeviceTypeKeys is its only writer).
   const merged = {
     ...(existing ?? {}),
-    ...owned,
+    ...patch,
     ...(patch.productMetadata || existing?.productMetadata
       ? { productMetadata: mergeProductMetadata(existing?.productMetadata, patch.productMetadata) }
       : {}),
@@ -442,12 +449,14 @@ export async function mergeUpsert(
 export type DeviceTypeKeyChange = { sku: string; deviceTypeKey: string | undefined };
 
 /**
- * Grid notes #2 — THE writer of `CatalogPart.deviceTypeKey` (mergeUpsert
- * strips the key). Each change sets (a type key) or clears (undefined) one
- * live part's override; nothing else on the part changes but `updatedAt`.
- * The parts are read in one batch and written back in chunks of
- * DOC_BATCH_CHUNK (one statement each). A part deleted meanwhile is skipped,
- * never revived. A failure mid-way stops there: `saved` is how many landed.
+ * Grid notes #2 — THE writer of `CatalogPart.deviceTypeKey` (writePart and
+ * insertIfAbsent never let another write set or clear it). Each change sets
+ * (a type key) or clears (undefined) one live part's override IN PLACE
+ * (doc-store patchDocKey: a scoped SQL UPDATE of that one key plus the
+ * part's own `updatedAt`), so a price, spec or datasheet write landing
+ * meanwhile is kept, and a part deleted or renamed meanwhile stays deleted.
+ * Grouped by value, ≤ DOC_BATCH_CHUNK ids per statement. A failure mid-way
+ * stops there: `saved` is how many parts actually changed.
  */
 export async function setPartDeviceTypeKeys(
   changes: readonly DeviceTypeKeyChange[],
@@ -455,28 +464,23 @@ export async function setPartDeviceTypeKeys(
 ): Promise<{ saved: number; total: number; failed: boolean }> {
   const want = new Map(changes.map((c) => [c.sku, c.deviceTypeKey]));
   const total = want.size;
-  if (!total) return { saved: 0, total, failed: false };
-  const now = Date.now();
-  const docs: CatalogPart[] = [];
-  for (const r of await getDocRows<CatalogPart>("catalog_parts", [...want.keys()])) {
-    if (r.deleted) continue;
-    const doc: CatalogPart = { ...r.doc, id: r.id, updatedAt: now };
-    const key = want.get(r.id);
-    if (key) doc.deviceTypeKey = key;
-    else delete doc.deviceTypeKey;
-    docs.push(doc);
+  const byValue = new Map<string, string[]>();
+  for (const [sku, key] of want) {
+    const k = key ?? "";
+    byValue.set(k, [...(byValue.get(k) ?? []), sku]);
   }
   let saved = 0;
-  const size = Math.max(1, opts.chunkSize ?? DOC_BATCH_CHUNK);
-  for (let i = 0; i < docs.length; i += size) {
-    const chunk = docs.slice(i, i + size);
-    try {
-      await upsertDocs<CatalogPart>("catalog_parts", chunk);
-    } catch (e) {
-      console.error("[catalog] device type write failed:", e);
-      return { saved, total, failed: true };
+  for (const [key, skus] of byValue) {
+    const size = Math.max(1, Math.min(opts.chunkSize ?? DOC_BATCH_CHUNK, DOC_BATCH_CHUNK));
+    for (let i = 0; i < skus.length; i += size) {
+      try {
+        const r = await patchDocKey("catalog_parts", skus.slice(i, i + size), "deviceTypeKey", key || undefined, { stamp: { updatedAt: Date.now() } });
+        saved += r.ids.length;
+      } catch (e) {
+        console.error("[catalog] device type write failed:", e);
+        return { saved, total, failed: true };
+      }
     }
-    saved += chunk.length;
   }
   return { saved, total, failed: false };
 }

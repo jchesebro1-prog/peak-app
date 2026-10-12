@@ -476,6 +476,44 @@ export async function softDeleteDocs(
   return { ids: done, complete: true };
 }
 
+/**
+ * Set (`value`) or remove (`undefined`) ONE top-level key on many LIVE docs,
+ * in place, in SQL — never a read-modify-write of the whole document, so a
+ * write to any other field landing meanwhile is kept, and a soft-deleted row
+ * is never touched (let alone revived). `stamp` adds more top-level keys in
+ * the same statement (e.g. a doc's own `updatedAt`). One UPDATE per
+ * DOC_BATCH_CHUNK ids, bumping rev / updated_at / received_at like every
+ * other write here (the table's seq trigger re-draws seq). `ids` are the rows
+ * actually changed (missing and deleted ids are absent). Grid notes #2.
+ */
+export async function patchDocKey(
+  coll: CollectionName,
+  ids: readonly string[],
+  key: string,
+  value: unknown,
+  opts: DocBatchOpts & { stamp?: Record<string, unknown> } = {}
+): Promise<DocBatchResult> {
+  const db = await getDb();
+  const t = table(coll);
+  const done: string[] = [];
+  const stamp = opts.stamp && Object.keys(opts.stamp).length ? sql` || ${JSON.stringify(opts.stamp)}::jsonb` : sql``;
+  const next =
+    value === undefined
+      ? sql`(${t.doc} - ${key}::text)${stamp}`
+      : sql`(${t.doc} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb))${stamp}`;
+  for (const chunk of chunksOf([...new Set(ids)], Math.min(opts.chunkSize ?? DOC_BATCH_CHUNK, DOC_BATCH_CHUNK))) {
+    if (opts.shouldStop?.()) return { ids: done, complete: false };
+    const now = Date.now();
+    const rows = await db
+      .update(t)
+      .set({ doc: next, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
+      .where(and(inArray(t.id, chunk), eq(t.deleted, false)))
+      .returning({ id: t.id });
+    for (const r of rows) done.push(r.id);
+  }
+  return { ids: done, complete: true };
+}
+
 /** Read-modify-write with rev bump; returns null if the doc doesn't exist. */
 export async function patchDoc<T extends Doc = Doc>(
   coll: CollectionName,

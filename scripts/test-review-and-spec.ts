@@ -66810,6 +66810,37 @@ async function gridNotes2Checks(): Promise<void> {
     await DT.setPartsDeviceType([A], "microphones");
     await Cat.mergeUpsert(A, { deviceTypeKey: undefined, note: "keep" });
     ok((await Cat.get(A))?.deviceTypeKey === "microphones", "Grid notes #2 store: a patch can't clear the override either");
+    // Full replace and insert paths never set or clear it either (writePart / insertIfAbsent).
+    const aNow = (await Cat.get(A))!;
+    await Cat.upsert({ ...aNow, deviceTypeKey: undefined, desc: "Replaced" });
+    const aRep = await Cat.get(A);
+    await Cat.upsert({ ...aRep!, deviceTypeKey: "cameras" });
+    ok(aRep?.deviceTypeKey === "microphones" && aRep.desc === "Replaced" && (await Cat.get(A))?.deviceTypeKey === "microphones",
+      "Grid notes #2 store: a full-replace upsert keeps the stored override and ignores one carried in");
+    const INS = fixtureId("gn2", "ins");
+    registerFixture("catalog_parts", INS);
+    ok((await Cat.insertIfAbsent({ sku: INS, desc: "x", category: CAT, unit: "ea", list: 1, cost: 1, deviceTypeKey: "speakers" })) && (await Cat.get(INS))?.deviceTypeKey === undefined,
+      "Grid notes #2 store: insertIfAbsent never sets an override");
+    // Lost update / revive: the writer is an in-place key update, not a read-modify-write.
+    const planned = (await Cat.get(A))!; // "planning" read
+    await Cat.mergeUpsert(A, { list: 777, specBody: "concurrent spec" }); // a write lands after the plan
+    const cw = await Cat.setPartDeviceTypeKeys([{ sku: planned.sku, deviceTypeKey: undefined }]);
+    const aCw = await Cat.get(A);
+    ok(cw.saved === 1 && !!aCw && aCw.deviceTypeKey === undefined && aCw.list === 777 && aCw.specBody === "concurrent spec" && (aCw.updatedAt ?? 0) >= (planned.updatedAt ?? 0),
+      "Grid notes #2 store: clearing an override keeps a price/spec written after the plan (no lost update) and stamps updatedAt");
+    const DEL = fixtureId("gn2", "deleted");
+    registerFixture("catalog_parts", DEL);
+    await DS.upsertDoc("catalog_parts", { id: DEL, sku: DEL, desc: "gone", category: CAT, unit: "ea", list: 1, cost: 1, deviceTypeKey: "speakers" } as never);
+    await DS.softDeleteDoc("catalog_parts", DEL);
+    const dw = await Cat.setPartDeviceTypeKeys([{ sku: DEL, deviceTypeKey: undefined }, { sku: A, deviceTypeKey: "microphones" }]);
+    const [delRow] = await DS.getDocRows<CP>("catalog_parts", [DEL]);
+    ok(dw.saved === 1 && delRow?.deleted === true && delRow.doc.deviceTypeKey === "speakers" && (await Cat.get(A))?.deviceTypeKey === "microphones",
+      "Grid notes #2 store: a part deleted meanwhile stays deleted and untouched — only live rows are written");
+    const pk = await DS.patchDocKey("catalog_parts", [A, B, DEL, fixtureId("gn2", "none")], "gn2Probe", { n: 1 }, { chunkSize: 1 });
+    const aPk = await Cat.get(A);
+    ok(pk.ids.sort().join() === [A, B].sort().join() && (aPk as unknown as { gn2Probe?: { n: number } }).gn2Probe?.n === 1 && aPk?.list === 777 &&
+       (await DS.patchDocKey("catalog_parts", [A, B], "gn2Probe", undefined)).ids.length === 2 && !("gn2Probe" in (await Cat.get(A))!),
+      "Grid notes #2 doc-store: patchDocKey sets / removes one key on live rows only, chunked, leaving the rest of each doc alone");
     const kw = await Cat.setPartDeviceTypeKeys([{ sku: A, deviceTypeKey: "speakers" }, { sku: B, deviceTypeKey: "cameras" }, { sku: fixtureId("gn2", "nope"), deviceTypeKey: "speakers" }], { chunkSize: 1 });
     ok(kw.saved === 2 && kw.total === 3 && !kw.failed && (await Cat.get(B))?.deviceTypeKey === "cameras" && (await Cat.get(B))?.note === "keep",
       "Grid notes #2 store: setPartDeviceTypeKeys writes in chunks, skips a missing part and leaves the rest of each part alone");
@@ -66817,6 +66848,10 @@ async function gridNotes2Checks(): Promise<void> {
     const fnSrc = acts2.slice(acts2.indexOf("export async function setPartsDeviceType"), acts2.indexOf('/** "Accept all suggestions"'));
     ok(fnSrc.indexOf("setPartDeviceTypeKeys(res.plan.overrides)") < fnSrc.indexOf("assignDeviceType(res.plan.categories") && fnSrc.includes("saved — reload to see the current types.") && fnSrc.includes("partial: true"),
       "Grid notes #2 store: overrides are cleared before the category is re-typed; a failure mid-way reports N of M saved (partial)");
+    const catSrc = rd("src/lib/stores/catalog.ts");
+    const writerSrc = catSrc.slice(catSrc.indexOf("export async function setPartDeviceTypeKeys"), catSrc.indexOf("export async function partsWithOwnDeviceType"));
+    ok(writerSrc.includes('patchDocKey("catalog_parts"') && !/upsertDocs?\(/.test(writerSrc) && !writerSrc.includes("getDocRows"),
+      "Grid notes #2 store: the override writer is an in-place key update — no read-then-full-doc write");
     const r3 = await DT.setPartsDeviceType([A], "microphones", { wholeCategory: true });
     const m3 = await DT.getTypeMap();
     const a3 = await Cat.get(A);
