@@ -7,7 +7,15 @@ import { GRID_CURTAIN_TYPES } from "@/lib/design/grid-bom";
 import type { GridLayer } from "@/lib/design/grid-scopes";
 import { PALETTE_ROW_CAP, isMapped, paletteView } from "@/lib/design/grid-palette";
 import { assemblyParts, libraryQuery, libraryTree, selKey, type LibraryNode, type LibrarySel } from "@/lib/design/grid-library";
-import { CATALOG_SEARCH_DEBOUNCE_MS, catalogResultsToShow, catalogSearchQuery, makeRequestSeq, offersCatalogSearch } from "@/lib/design/grid-catalog-search";
+import {
+  CATALOG_SEARCH_DEBOUNCE_MS,
+  CATALOG_TRUNCATED_NOTE,
+  catalogNodeOf,
+  catalogResultsToShow,
+  catalogSearchQuery,
+  makeRequestSeq,
+  offersCatalogSearch,
+} from "@/lib/design/grid-catalog-search";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { ObjectSymbolImg } from "@/components/design/object-symbol";
 import { useCanMap } from "@/components/design/equipment-map-link";
@@ -396,34 +404,42 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
 
   // Grid notes #6: "From the catalog" — the full catalog, searched on the
   // server (debounced; a sequence number drops stale responses), shown under
-  // the library's own tiles for All / a scope / a type.
+  // the library's own tiles for All / a scope / a type — under a scope or a
+  // type node, only parts under it (filtered on the server before the cap).
   const { rememberCatalogParts } = ed;
   const catalogQ = offersCatalogSearch(current.kind, showTray) ? catalogSearchQuery(search) : "";
-  const [catalog, setCatalog] = useState<{ q: string; parts: PartLite[]; error: string | null } | null>(null);
+  const { scope: nodeScope, typeKey: nodeType } = catalogNodeOf(current);
+  // The request's identity: query + node. Only this key's response shows.
+  const catalogKey = catalogQ ? `${catalogQ}\u0000${nodeScope}\u0000${nodeType}` : "";
+  const [catalog, setCatalog] = useState<{ key: string; parts: PartLite[]; truncated: boolean; error: string | null } | null>(null);
   const catalogSeq = useRef(makeRequestSeq());
   useEffect(() => {
     const seq = catalogSeq.current;
-    if (!catalogQ) {
+    if (!catalogKey) {
       seq.next(); // whatever is still in flight is stale now
       return;
     }
     const timer = setTimeout(() => {
       const n = seq.next();
-      searchGridCatalogAction(catalogQ).then(
+      searchGridCatalogAction(catalogQ, { scope: nodeScope, typeKey: nodeType }).then(
         (r) => {
           if (!seq.isLatest(n)) return;
           if (r.ok) rememberCatalogParts(r.parts);
-          setCatalog(r.ok ? { q: catalogQ, parts: r.parts, error: null } : { q: catalogQ, parts: [], error: r.error });
+          setCatalog(
+            r.ok
+              ? { key: catalogKey, parts: r.parts, truncated: r.truncated, error: null }
+              : { key: catalogKey, parts: [], truncated: false, error: r.error }
+          );
         },
         () => {
-          if (seq.isLatest(n)) setCatalog({ q: catalogQ, parts: [], error: "The catalog search didn't finish — try again." });
+          if (seq.isLatest(n)) setCatalog({ key: catalogKey, parts: [], truncated: false, error: "The catalog search didn't finish — try again." });
         }
       );
     }, CATALOG_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [catalogQ, rememberCatalogParts]);
+  }, [catalogKey, catalogQ, nodeScope, nodeType, rememberCatalogParts]);
   const libraryIds = useMemo(() => new Set(parts.map((p) => p.id)), [parts]);
-  const catalogDone = catalog && catalog.q === catalogQ ? catalog : null;
+  const catalogDone = catalog && catalog.key === catalogKey ? catalog : null;
   const catalogRows = useMemo(
     () => (catalogDone ? catalogResultsToShow(catalogDone.parts, libraryIds, mfr) : []),
     [catalogDone, libraryIds, mfr]
@@ -607,7 +623,10 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
               ) : catalogDone.error ? (
                 <div role="alert" style={{ fontSize: 11.5, color: "#a0442b", padding: "3px 2px" }}>{catalogDone.error}</div>
               ) : (
-                <DevicePalette ed={ed} rows={catalogRows} favSet={favSet} emptyText="No other catalog parts match." />
+                <>
+                  <DevicePalette ed={ed} rows={catalogRows} favSet={favSet} emptyText="No other catalog parts match." />
+                  {catalogDone.truncated && <div style={{ fontSize: 10.5, color: "#9aa0ab", padding: "6px 2px 0" }}>{CATALOG_TRUNCATED_NOTE}</div>}
+                </>
               )}
             </section>
           )}

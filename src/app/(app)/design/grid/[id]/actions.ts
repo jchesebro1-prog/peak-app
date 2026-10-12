@@ -122,7 +122,8 @@ import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid, placeablePartIds } from "@/lib/design/grid-part-lookup";
-import { adoptCatalogParts, searchGridCatalog } from "@/lib/design/grid-catalog-search-server";
+import { adoptCatalogParts, placeDevicePartRefusal, searchGridCatalog } from "@/lib/design/grid-catalog-search-server";
+import { cleanCatalogNode } from "@/lib/design/grid-catalog-search";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { headers } from "next/headers";
@@ -619,11 +620,18 @@ export async function createClientPackageAction(
 /** Grid notes #6: the Product Library's "From the catalog" search — the
  *  full catalog, server-side (never shipped to the client): under 2
  *  characters returns nothing, at most 40 hits, never a fabric, Labor or a
- *  renamed-away part, each built like the library entry it becomes. */
-export async function searchGridCatalogAction(query: string): Promise<{ ok: true; parts: PartLite[] } | { ok: false; error: string }> {
+ *  renamed-away part, each built like the library entry it becomes. `node`
+ *  is the selected library node (a scope, a device type under it; absent =
+ *  All) — only parts under it come back. `truncated` = the candidate read hit
+ *  its cap. */
+export async function searchGridCatalogAction(
+  query: string,
+  node?: { scope?: string; typeKey?: string }
+): Promise<{ ok: true; parts: PartLite[]; truncated: boolean } | { ok: false; error: string }> {
   await requireUser();
   try {
-    return { ok: true, parts: await searchGridCatalog(String(query ?? "")) };
+    const r = await searchGridCatalog(String(query ?? ""), cleanCatalogNode(node));
+    return { ok: true, parts: r.parts, truncated: r.truncated };
   } catch (e) {
     console.error("[grid] catalog search failed:", e);
     return { ok: false, error: "The catalog search didn't finish — try again." };
@@ -647,6 +655,11 @@ export async function placeDeviceAction(
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string }
 ): Promise<PlacedResult> {
   const user = await requireUser();
+  // Grid notes #6: the part gate Replace part has (placeable, ≤ PART_ID_MAX),
+  // plus no fabric / Labor / renamed / deleted catalog row — before any write.
+  if (!isObj(input) || !isPartId(input.partId)) return { ok: false, error: BATCH_INVALID };
+  const refusal = await placeDevicePartRefusal(input.partId);
+  if (refusal) return { ok: false, error: refusal };
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };

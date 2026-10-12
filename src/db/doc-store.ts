@@ -114,28 +114,37 @@ export async function searchDocs<T extends Doc = Doc>(
  * `limit` caps the rows, in id order by default; `orderByNumericDesc` (a doc
  * field holding a number, e.g. `estNo`) orders newest-first instead, so a
  * capped result keeps the most recent matches rather than the oldest ids.
+ *
+ * Grid notes #6: `allText` is `text` for several tokens at once — the haystack
+ * must contain EVERY one (ANDed). `fields` projects each row to just those
+ * top-level doc fields (absent/null ones left out), so a wide candidate read
+ * never ships whole documents; `id` always comes from the row.
  */
 export async function listDocsFiltered<T extends Doc = Doc>(
   coll: CollectionName,
   opts: {
     textFields?: readonly string[];
     text?: string;
+    allText?: readonly string[];
     nonEmpty?: readonly string[];
     limit?: number;
     orderByNumericDesc?: string;
+    fields?: readonly string[];
   }
 ): Promise<T[]> {
   const db = await getDb();
   const t = table(coll);
   const where = [eq(t.deleted, false)];
-  const text = (opts.text || "").trim().toLowerCase();
-  if (text && opts.textFields?.length) {
-    const pattern = "%" + text.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const texts = [opts.text || "", ...(opts.allText ?? [])].map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (texts.length && opts.textFields?.length) {
     const hay = sql.join(
       opts.textFields.map((f) => sql`coalesce(${t.doc}->>${f}, '')`),
       sql` || ' ' || `
     );
-    where.push(sql`lower(${hay}) LIKE ${pattern}`);
+    for (const text of texts) {
+      const pattern = "%" + text.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+      where.push(sql`lower(${hay}) LIKE ${pattern}`);
+    }
   }
   if (opts.nonEmpty?.length) {
     const anyNonEmpty = sql.join(
@@ -147,7 +156,13 @@ export async function listDocsFiltered<T extends Doc = Doc>(
   const order = opts.orderByNumericDesc
     ? desc(sql`(${t.doc}->>${opts.orderByNumericDesc})::numeric`)
     : asc(t.id);
-  const q = db.select().from(t).where(and(...where)).orderBy(order);
+  const doc = opts.fields?.length
+    ? sql`jsonb_strip_nulls(jsonb_build_object(${sql.join(
+        opts.fields.map((f) => sql`${f}::text, ${t.doc}->${f}`),
+        sql`, `
+      )}))`
+    : t.doc;
+  const q = db.select({ id: t.id, doc }).from(t).where(and(...where)).orderBy(order);
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }

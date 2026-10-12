@@ -2,8 +2,9 @@ import type { CatalogPart } from "@/lib/stores/catalog";
 import type { GridSymbol } from "@/lib/stores/grid-catalog";
 import type { PartLite } from "./grid-bom";
 import { isFabricPart } from "@/lib/fabric-part";
-import { partMatchesQuery } from "@/lib/catalog-rename/sku";
-import { keywordScopeOf } from "./device-types";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
+import { keywordScopeOf, typeKeyOfPart } from "./device-types";
+import { isGridLayer, scopeOfPart } from "./grid-scopes";
 
 /**
  * Grid notes #6 — the Product Library's "From the catalog" search. Pure and
@@ -14,9 +15,11 @@ import { keywordScopeOf } from "./device-types";
  * Auto fill / the From-estimate tray pulled in, and production's ~37k-part
  * catalog is far too big to ship to the client. So the library searches the
  * full catalog on the server, the specs picker's way (#205): a SQL LIKE
- * pre-filter over the #304 search fields, then the exact JS match
- * (`partMatchesQuery` — the #304 haystack: sku, description, maker, MFR P/N,
- * Model #, former SKUs), ranked the Estimator picker's way, capped.
+ * pre-filter over the #304 search fields + category (every token ANDed,
+ * projected to the light fields below), then the exact JS match (the #304
+ * haystack — sku, description, maker, MFR P/N, Model #, former SKUs — plus the
+ * category, as the Estimator's search matches it), the selected library node's
+ * scope / device type, ranked the Estimator picker's way, capped.
  */
 
 export const CATALOG_SEARCH_MIN = 2;
@@ -25,8 +28,16 @@ export const CATALOG_SEARCH_CAP = 40;
 export const CATALOG_SEARCH_CANDIDATES = 2000;
 export const CATALOG_SEARCH_DEBOUNCE_MS = 250;
 const QUERY_MAX = 120;
-/** The #304 search fields (same list as the specs picker's prefilter). */
-export const CATALOG_SEARCH_FIELDS = ["sku", "desc", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus"] as const;
+/** The #304 search fields (the specs picker's prefilter list) plus the category. */
+export const CATALOG_SEARCH_FIELDS = ["sku", "desc", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus", "category"] as const;
+/** What a candidate row is read as before the cap: enough to match, exclude,
+ *  rank and resolve its device type + scope (gridPartsFrom: category, desc,
+ *  discipline, trade). The ≤ 40 hits are then re-read in full. */
+export const CATALOG_LIGHT_FIELDS = [
+  "sku", "desc", "mfr", "category", "unit", "trade", "discipline",
+  "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus", "renamedTo",
+] as const;
+const MAX_TOKENS = 8;
 
 /** The query a search runs: trimmed, length-capped; "" when shorter than CATALOG_SEARCH_MIN. */
 export function catalogSearchQuery(raw: unknown): string {
@@ -34,14 +45,18 @@ export function catalogSearchQuery(raw: unknown): string {
   return q.length >= CATALOG_SEARCH_MIN ? q : "";
 }
 
-/** The one token the SQL pre-filter narrows on: the longest, lowercased (every
- *  token must match, so any one of them is a safe superset). */
-export function catalogPrefilterText(q: string): string {
-  return q
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .reduce((best, t) => (t.length > best.length ? t : best), "");
+/** The query's distinct lowercased tokens (at most 8) — every one must match,
+ *  in the SQL pre-filter (ANDed) and in the exact JS match. */
+export function catalogSearchTokens(q: string): string[] {
+  return [...new Set(q.toLowerCase().split(/\s+/).filter(Boolean))].slice(0, MAX_TOKENS);
+}
+
+/** The exact match: every token in the #304 haystack or the category. */
+export function catalogPartMatches(p: CatalogPart, q: string): boolean {
+  const tokens = catalogSearchTokens(q);
+  if (!tokens.length) return false;
+  const hay = `${partSearchHaystack(p)} ${(p.category || "").toLowerCase()}`;
+  return tokens.every((t) => hay.includes(t));
 }
 
 /** A catalog row the Grid library may hold — what ensureGridSymbolsFor admits
@@ -56,30 +71,68 @@ export function isLibraryCandidate(p: Pick<CatalogPart, "id" | "category" | "uni
 export function catalogHitRank(p: CatalogPart, q: string): number {
   const s = q.trim().toLowerCase();
   const desc = (p.desc || "").toLowerCase();
-  const names = [p.sku, p.manufacturerModelNumber || "", ...(p.formerSkus ?? [])].map((n) => n.toLowerCase()).filter(Boolean);
+  const names = [p.sku || "", p.manufacturerModelNumber || "", ...(p.formerSkus ?? [])].map((n) => n.toLowerCase()).filter(Boolean);
   if (names.includes(s) || desc === s) return 5;
   if (names.some((n) => n.startsWith(s)) || desc.startsWith(s)) return 4;
   if (desc.includes(s) || names.some((n) => n.includes(s))) return 2;
   return 1;
 }
 
-/** Candidates → the hits a search returns: placeable library candidates whose
- *  #304 haystack has every token, best rank first (then description, SKU), capped. */
-export function filterCatalogHits(parts: readonly CatalogPart[], rawQuery: string, cap = CATALOG_SEARCH_CAP): CatalogPart[] {
+/** Candidates → the placeable library candidates that match, deduped by id (uncapped, unranked). */
+export function matchCatalogCandidates(parts: readonly CatalogPart[], rawQuery: string): CatalogPart[] {
   const q = catalogSearchQuery(rawQuery);
   if (!q) return [];
   const seen = new Set<string>();
+  return parts.filter((p) => {
+    if (!isLibraryCandidate(p) || seen.has(p.id) || !catalogPartMatches(p, q)) return false;
+    seen.add(p.id);
+    return true;
+  });
+}
+
+/** Best rank first (then description, SKU), capped at CATALOG_SEARCH_CAP at most. */
+export function rankCatalogHits(parts: readonly CatalogPart[], rawQuery: string, cap = CATALOG_SEARCH_CAP): CatalogPart[] {
+  const q = catalogSearchQuery(rawQuery);
   return parts
-    .filter((p) => {
-      if (!isLibraryCandidate(p) || seen.has(p.id) || !partMatchesQuery(p, q)) return false;
-      seen.add(p.id);
-      return true;
-    })
     .map((p) => ({ p, r: catalogHitRank(p, q) }))
-    .sort((a, b) => b.r - a.r || (a.p.desc || "").localeCompare(b.p.desc || "") || a.p.sku.localeCompare(b.p.sku))
+    .sort((a, b) => b.r - a.r || (a.p.desc || "").localeCompare(b.p.desc || "") || (a.p.sku || "").localeCompare(b.p.sku || ""))
     .slice(0, Math.max(0, Math.min(cap, CATALOG_SEARCH_CAP)))
     .map(({ p }) => p);
 }
+
+/** Candidates → the hits a search returns (match, then rank + cap). */
+export function filterCatalogHits(parts: readonly CatalogPart[], rawQuery: string, cap = CATALOG_SEARCH_CAP): CatalogPart[] {
+  return rankCatalogHits(matchCatalogCandidates(parts, rawQuery), rawQuery, cap);
+}
+
+/** The selected library node a catalog search honours: a scope (a valid
+ *  GridLayer) and, under it, a device type; "" = no filter (All). */
+export type CatalogNode = { scope: string; typeKey: string };
+
+export function cleanCatalogNode(raw: unknown): CatalogNode {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const scope = typeof o.scope === "string" && isGridLayer(o.scope) ? o.scope : "";
+  const typeKey = scope && typeof o.typeKey === "string" ? o.typeKey.trim().slice(0, 80) : "";
+  return { scope, typeKey };
+}
+
+/** Does a built result sit under the node — the palette's own rules (scopeOfPart, typeKeyOfPart)? */
+export function inCatalogNode(p: PartLite, node: CatalogNode): boolean {
+  if (node.scope && scopeOfPart(p) !== node.scope) return false;
+  if (node.typeKey && typeKeyOfPart(p) !== node.typeKey) return false;
+  return true;
+}
+
+/** The node a library selection searches the catalog under. */
+export function catalogNodeOf(sel: { kind: string; scope?: string; typeKey?: string }): CatalogNode {
+  return {
+    scope: sel.kind === "scope" || sel.kind === "type" ? sel.scope || "" : "",
+    typeKey: sel.kind === "type" ? sel.typeKey || "" : "",
+  };
+}
+
+/** The truncation note the library shows when the candidate read hit its cap. */
+export const CATALOG_TRUNCATED_NOTE = "Showing the first matches — add a word to narrow your search.";
 
 function dimensionsFor(p: CatalogPart): { width: number; height: number } {
   const text = `${p.category} ${p.desc}`.toLowerCase();

@@ -66055,7 +66055,9 @@ async function gridNotes6Checks(): Promise<void> {
   // ---- pure: query, prefilter, filter, rank, cap
   ok(S.catalogSearchQuery("a") === "" && S.catalogSearchQuery(" a ") === "" && S.catalogSearchQuery("  ab ") === "ab" && S.catalogSearchQuery(null) === "",
     "Grid notes #6: a query shorter than 2 characters (trimmed) searches nothing");
-  ok(S.catalogPrefilterText("Shure  SM58 x") === "shure", "Grid notes #6: the SQL pre-filter narrows on the longest token, lowercased");
+  ok(S.catalogSearchTokens("ETC  750 etc") .join() === "etc,750", "Grid notes #6: the query's distinct lowercased tokens — every one is ANDed in the SQL pre-filter");
+  ok(S.CATALOG_SEARCH_FIELDS.includes("category") && S.filterCatalogHits([cp({ id: "ML1", desc: "Wash", category: "Moving Lights" })], "moving wash").length === 1,
+    "Grid notes #6: category text matches too (the Estimator search's rule)");
   ok(S.filterCatalogHits([cp({ id: "A1", desc: "a widget" })], "a").length === 0, "Grid notes #6: filterCatalogHits refuses a 1-character query");
   const many = Array.from({ length: 50 }, (_, i) => cp({ id: `W${String(i).padStart(2, "0")}`, desc: `Spot widget ${i}` }));
   const excluded = [
@@ -66118,14 +66120,64 @@ async function gridNotes6Checks(): Promise<void> {
   await DS.upsertDoc("catalog_parts", { id: fab, sku: fab, desc: `Test ${TOKEN} velour`, category: "Fabric", unit: "yd", list: 1, cost: 1 } as never);
   await DS.upsertDoc("catalog_parts", { id: lab, sku: lab, desc: `Test ${TOKEN} labor`, category: "Labor", unit: "hr", list: 1, cost: 1 } as never);
 
-  ok((await Srv.searchGridCatalog("z")).length === 0 && (await Srv.searchGridCatalog(" ")).length === 0, "Grid notes #6: searchGridCatalog refuses fewer than 2 characters");
-  const found = await Srv.searchGridCatalog(TOKEN);
+  ok((await Srv.searchGridCatalog("z")).parts.length === 0 && (await Srv.searchGridCatalog(" ")).parts.length === 0, "Grid notes #6: searchGridCatalog refuses fewer than 2 characters");
+  const res = await Srv.searchGridCatalog(TOKEN);
+  const found = res.parts;
+  ok(res.truncated === false, "Grid notes #6: a search under the candidate cap isn't marked truncated");
   ok(found.length === 40, `Grid notes #6: searchGridCatalog caps at 40 (got ${found.length})`);
   ok(found.every((p) => ids.includes(p.id) && p.fromCatalog === true) && !found.some((p) => p.id === fab || p.id === lab),
     "Grid notes #6: searchGridCatalog returns flagged parts, never the fabric or Labor rows");
   ok(found.every((p) => p.list === 120 && p.cost === 60 && p.manufacturer === "TestMfr" && p.pricingPartId === p.id && "deviceType" in p && !!p.gridScope),
     "Grid notes #6: a result is a gridPartsFrom PartLite (price, maker, pricing link, device type + scope resolved)");
-  ok((await Srv.searchGridCatalog(`speaker ${TOKEN.toUpperCase()}`)).length === 40, "Grid notes #6: the server search is case-insensitive and token-based");
+  ok((await Srv.searchGridCatalog(`speaker ${TOKEN.toUpperCase()}`)).parts.length === 40, "Grid notes #6: the server search is case-insensitive and token-based");
+  const exact = fixtureId("gn6", "exact-750");
+  registerFixture("catalog_parts", exact);
+  await DS.upsertDoc("catalog_parts", { id: exact, sku: exact, desc: `Test ${TOKEN} zqgn6lens`, category: "Speakers", unit: "ea", list: 1, cost: 1, mfr: "TestMfr" } as never);
+  const narrowed = (await Srv.searchGridCatalog(`${TOKEN} zqgn6lens`)).parts;
+  ok(narrowed.length === 1 && narrowed[0].id === exact, "Grid notes #6: every token narrows the SQL read (AND), so a specific part isn't lost among its maker's rows");
+  ok(found.every((p) => (p.ports ?? []).length === 0 && typeof p.list === "number") && narrowed[0].list === 1,
+    "Grid notes #6: hits are re-read in full after the light candidate read (prices present)");
+
+  // scope / type node filter, applied before the cap
+  const T2 = "zqgn6node";
+  const lx = Array.from({ length: 45 }, (_, i) => fixtureId("gn6", `rig${String(i).padStart(2, "0")}`));
+  const au = Array.from({ length: 3 }, (_, i) => fixtureId("gn6", `aud${i}`));
+  for (const id of lx) {
+    registerFixture("catalog_parts", id);
+    await DS.upsertDoc("catalog_parts", { id, sku: id, desc: `Aa ${T2} truss clamp`, category: "Rigging Hardware", unit: "ea", list: 5, cost: 2 } as never);
+  }
+  for (const id of au) {
+    registerFixture("catalog_parts", id);
+    await DS.upsertDoc("catalog_parts", { id, sku: id, desc: `Zz ${T2} speaker`, category: "Speakers", unit: "ea", list: 5, cost: 2, mfr: "NodeMfr" } as never);
+  }
+  const { scopeOfPart } = await import("@/lib/design/grid-scopes");
+  const { typeKeyOfPart } = await import("@/lib/design/device-types");
+  const allNode = (await Srv.searchGridCatalog(T2)).parts;
+  const auScope = scopeOfPart((await Srv.searchGridCatalog(`zz ${T2}`)).parts[0]);
+  const lxScope = scopeOfPart(allNode[0]);
+  ok(allNode.length === 40 && !allNode.some((p) => au.includes(p.id)) && auScope !== lxScope,
+    "Grid notes #6 setup: under All the 40-cap fills with the rigging rows; the speakers sit in another scope");
+  const auOnly = (await Srv.searchGridCatalog(T2, { scope: auScope, typeKey: "" })).parts;
+  ok(auOnly.length === 3 && auOnly.every((p) => au.includes(p.id) && scopeOfPart(p) === auScope),
+    "Grid notes #6: under a scope node only that scope's parts come back — filtered before the 40 cap");
+  const auType = typeKeyOfPart(auOnly[0]);
+  const typed = (await Srv.searchGridCatalog(T2, { scope: auScope, typeKey: auType })).parts;
+  ok(typed.length === 3 && typed.every((p) => typeKeyOfPart(p) === auType) && (await Srv.searchGridCatalog(T2, { scope: auScope, typeKey: "zz-no-such-type" })).parts.length === 0,
+    "Grid notes #6: under a type node only that device type");
+  const cn = S.cleanCatalogNode({ scope: "constructor", typeKey: "x" });
+  ok(cn.scope === "" && cn.typeKey === "" && S.cleanCatalogNode(null).scope === "" && S.cleanCatalogNode({ scope: lxScope, typeKey: " t " }).typeKey === "t",
+    "Grid notes #6: the node from the client is validated (a scope must be a Grid layer; a type needs a scope)");
+  ok(S.catalogNodeOf({ kind: "all" }).scope === "" && S.catalogNodeOf({ kind: "scope", scope: "Audio" }).scope === "Audio" &&
+     S.catalogNodeOf({ kind: "type", scope: "Audio", typeKey: "speakers" }).typeKey === "speakers" && S.catalogNodeOf({ kind: "scope", scope: "Audio", typeKey: "x" }).typeKey === "",
+    "Grid notes #6: the library selection maps onto the catalog node (All = no filter)");
+
+  // the candidate cap → truncated
+  const T3 = "zqgn6bulk";
+  const bulk = Array.from({ length: S.CATALOG_SEARCH_CANDIDATES + 1 }, (_, i) => fixtureId("gn6", `bulk${String(i).padStart(4, "0")}`));
+  for (const id of bulk) registerFixture("catalog_parts", id);
+  await DS.upsertDocs("catalog_parts", bulk.map((id) => ({ id, sku: id, desc: `Bulk ${T3}`, category: "Speakers", unit: "ea", list: 1, cost: 1 })) as never);
+  const big = await Srv.searchGridCatalog(T3);
+  ok(big.truncated === true && big.parts.length === 40, "Grid notes #6: hitting the 2,000-row candidate cap returns truncated: true");
 
   const target = ids[0];
   registerFixture("grid_catalog", target);
@@ -66133,10 +66185,27 @@ async function gridNotes6Checks(): Promise<void> {
   ok(!(await GC.getGridSymbol(target)), "Grid notes #6 setup: the catalog part isn't in the Grid library yet");
   const added = await Srv.adoptCatalogParts([target, "asm:FA-nope", "grid-seed:x", fab, fixtureId("gn6", "missing")], "Test Harness");
   const entry = await GC.getGridSymbol(target);
-  ok(added === 1 && !!entry && entry.pricingPartId === target && entry.kind === "device" && entry.name === `Test ${TOKEN} speaker`,
+  ok(added === 1 && !!entry && entry.pricingPartId === target && entry.kind === "device" && entry.name === `Test ${TOKEN} speaker` && entry.createdBy === "Test Harness",
     "Grid notes #6: adoptCatalogParts adds a placed catalog part to the Grid library (virtual, seed, fabric and unknown ids skipped)");
   ok(!(await GC.getGridSymbol(fab)), "Grid notes #6: a fabric is never adopted into the library");
   ok((await Srv.adoptCatalogParts([target], "Test Harness")) === 0, "Grid notes #6: adopting an id already in the library is a no-op");
+
+  // placeDeviceAction's part gate
+  const lab2 = fixtureId("gn6", "labor-place");
+  const old = fixtureId("gn6", "renamed-old");
+  for (const id of [lab2, old]) registerFixture("catalog_parts", id);
+  await DS.upsertDoc("catalog_parts", { id: lab2, sku: lab2, desc: "Install labor", category: "Labor", unit: "hr", list: 1, cost: 1 } as never);
+  await DS.upsertDoc("catalog_parts", { id: old, sku: old, desc: "Old order #", category: "Speakers", unit: "ea", list: 1, cost: 1, renamedTo: ids[1] } as never);
+  await DS.softDeleteDoc("catalog_parts", old);
+  const refuse = Srv.placeDevicePartRefusal;
+  ok((await refuse(fixtureId("gn6", "bogus"))) === "That part is not in the Grid library." && (await refuse("x".repeat(121))) === Srv.PLACE_PART_INVALID &&
+     (await refuse("")) === Srv.PLACE_PART_INVALID && (await refuse(42)) === Srv.PLACE_PART_INVALID,
+    "Grid notes #6: placing refuses a bogus, empty, non-string or over-long part id");
+  ok((await refuse(fab)) === Srv.PLACE_PART_NOT_PLACEABLE && (await refuse(lab2)) === Srv.PLACE_PART_NOT_PLACEABLE && (await refuse(old)) === Srv.PLACE_PART_NOT_PLACEABLE,
+    "Grid notes #6: placing refuses a fabric, a Labor row and a renamed-away (tombstoned) catalog id");
+  ok((await refuse(ids[2])) === null && (await refuse(target)) === null && (await refuse("grid-seed:x")) === null && (await refuse("asm:FA-anything")) === null,
+    "Grid notes #6: a live catalog part, a library entry, a seed placeholder and an Auto virtual id still place");
+  ok(!(await GC.getGridSymbol(lab2)) && !(await GC.getGridSymbol(fab)), "Grid notes #6: a refused part never reaches the library");
 
   // ---- source pins: thin actions, the client's guard, no store in the client
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -66145,16 +66214,28 @@ async function gridNotes6Checks(): Promise<void> {
   const place = body("placeDeviceAction");
   ok(place.includes("await adoptForPlacement([input.partId], user.name);") && place.indexOf("adoptForPlacement(") < place.indexOf("addPlacement("),
     "Grid notes #6: placeDeviceAction adds a catalog part to the library before placing it");
+  ok(place.includes("!isPartId(input.partId)") && place.includes("const refusal = await placeDevicePartRefusal(input.partId);") &&
+     place.indexOf("placeDevicePartRefusal(") < place.indexOf("getProject(") && place.indexOf("if (refusal) return { ok: false, error: refusal };") < place.indexOf("adoptForPlacement("),
+    "Grid notes #6: placeDeviceAction gates the part id (Replace part's rule + no fabric/Labor/renamed) before any read or write");
+  const srvSrc = src("src/lib/design/grid-catalog-search-server.ts");
+  const adoptBody = srvSrc.slice(srvSrc.indexOf("export async function adoptCatalogParts("), srvSrc.indexOf("\n}\n", srvSrc.indexOf("export async function adoptCatalogParts(")));
+  ok(adoptBody.includes("insertDocIfAbsent<GridSymbol>(\"grid_catalog\", gridSymbolFromPart(p, by, now))") && !adoptBody.includes("ensureGridSymbolsFor") && !adoptBody.includes("listGridSymbols"),
+    "Grid notes #6: adoption inserts the missing entries directly — it never lists (or seeds) the whole library");
+  ok(srvSrc.includes("allText: catalogSearchTokens(q)") && srvSrc.includes("fields: CATALOG_LIGHT_FIELDS") && srvSrc.includes("rows.length >= CATALOG_SEARCH_CANDIDATES"),
+    "Grid notes #6: the server search ANDs every token in SQL, projects light fields and reports truncation");
   const swap = body("replacePlacementsPartAction");
   ok(swap.includes("await adoptForPlacement(partIds, user.name);") && swap.indexOf("placeablePartIds(") < swap.indexOf("adoptForPlacement("),
     "Grid notes #6: Replace part adopts a catalog part too, after the placeable check");
   const search = body("searchGridCatalogAction");
-  ok(search.includes("await requireUser();") && search.includes("searchGridCatalog(String(query ?? \"\"))"), "Grid notes #6: the search action is a signed-in wrapper over searchGridCatalog");
+  ok(search.includes("await requireUser();") && search.includes("searchGridCatalog(String(query ?? \"\"), cleanCatalogNode(node))"), "Grid notes #6: the search action is a signed-in wrapper over searchGridCatalog (node validated)");
   const libSrc = src("src/app/(app)/design/grid/[id]/workspace/product-library.tsx");
-  ok(libSrc.includes("CATALOG_SEARCH_DEBOUNCE_MS") && libSrc.includes("clearTimeout(timer)") && libSrc.includes("if (!seq.isLatest(n)) return;") && libSrc.includes("searchGridCatalogAction(catalogQ)"),
+  ok(libSrc.includes("CATALOG_SEARCH_DEBOUNCE_MS") && libSrc.includes("clearTimeout(timer)") && libSrc.includes("if (!seq.isLatest(n)) return;") && libSrc.includes("searchGridCatalogAction(catalogQ,"),
     "Grid notes #6: the library debounces the catalog search and drops stale responses");
-  ok(libSrc.includes("catalog.q === catalogQ") && libSrc.includes("Searching…") && libSrc.includes("From the catalog"),
-    "Grid notes #6: only the current query's results show; a quiet Searching… meanwhile");
+  ok(libSrc.includes("catalog.key === catalogKey") && libSrc.includes("Searching…") && libSrc.includes("From the catalog"),
+    "Grid notes #6: only the current query + node's results show; a quiet Searching… meanwhile");
+  ok(libSrc.includes("searchGridCatalogAction(catalogQ, { scope: nodeScope, typeKey: nodeType })") && libSrc.includes("catalogDone.truncated && ") && libSrc.includes("{CATALOG_TRUNCATED_NOTE}") &&
+     S.CATALOG_TRUNCATED_NOTE === "Showing the first matches — add a word to narrow your search.",
+    "Grid notes #6: the library sends the selected node and shows the truncation note");
   ok(!/from "@\/lib\/stores\//.test(libSrc) && !/^import (?!type)[^\n]*@\/lib\/stores\//m.test(src("src/lib/design/grid-catalog-search.ts")),
     "Grid notes #6: the client side never imports a store (the pure module's store imports are type-only)");
   ok(src("src/app/(app)/design/grid/[id]/use-grid-editor.ts").includes("withCatalogLookups(parts, catalogParts)"),
