@@ -6,14 +6,14 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 | # | Note | Kind | Status |
 |---|------|------|--------|
 | 1 | Icon picker (symbol selector) opens off-screen in the Property Editor | Bug | ✅ Fixed `a3073d3d` — panel portals to `<body>`, clamped to the viewport |
-| 2 | Edit **Type** next to Space (Property Editor + Spreadsheet); an admin change should fix the part everywhere, or a "save as rule" (e.g. SM58 mic shows as Dimming & Power) | Feature | Decided (below) — ready to plan |
+| 2 | Edit **Type** next to Space (Property Editor + Spreadsheet); an admin change should fix the part everywhere, or a "save as rule" (e.g. SM58 mic shows as Dimming & Power) | Feature | Building |
 | 3 | Quick multi-select / marquee: selected parts appear then drop out; Properties shows a stale single device (PRT-02) above the multi-selection | Bug | ✅ Fixed `18bae19c` — duplicate React key orphaned Designator rows; Shift near-miss no longer clears; drag-and-put-back keeps the group |
 | 4 | Equipment groups: select a rack, place gear inside it, grouped for this design and shown grouped on the Spreadsheet | Feature | Decided (below) — ready to plan |
-| 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | Mapped (below) — needs Jeff's cable list |
-| 6 | Product Library shows only a small slice of the catalog (All: Lighting 21 · Audio 5 · Unscoped 4) | Gap | Built — awaiting review (below) |
-| 7 | Client package "rough drawings" have no devices and no title block | Bug | Building (worktree `peak-grid-pkg`) — ZIP ships the real title-blocked drawing set via the signed print route; rough drawings + raw plans only as a fallback with a gap |
-| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | Decided — queued after #7 (same file) |
-| 9 | The specification and all documents carry the Peak standard header at the top unless otherwise selected | Feature | Mapping every document generator + what header each has today |
+| 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | ✅ Shipped `ccd4ed28`+`5e237f04` — admin **Load starter cables** (20 cables, $0 drafts, OD from datasheets) + **Sync per-foot cables to the Grid** in Grid Settings → Wire types; Needs price chip. Jeff: confirm riser symbols SP/A/V/F/LV/PW/M, then price the cables |
+| 6 | Product Library shows only a small slice of the catalog | Gap | ✅ Shipped `bcf3e8c8`+`614465e3` — "From the catalog" server search (every word, honours the node, 40 results); placing adds it to the library |
+| 7 | Client package "rough drawings" have no devices and no title block | Bug | ✅ Shipped `d90cbf89`+`83cc466c` — ZIP ships the title-blocked drawing set (live design); rough drawings + raw plans only as a fallback with a gap |
+| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | Building |
+| 9 | The specification and all documents carry the Peak standard header at the top unless otherwise selected | Feature | Building |
 
 ## #2 Type editing — findings
 
@@ -55,6 +55,14 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 - No customer logo stored today → add a logo upload on the company record. No logo → company name set large in that spot.
 - One PDF: cover + every datasheet in BOM order. Appears in **all three** places: the client package ZIP (Grid + estimate, `datasheets/combined-datasheets.pdf`), its own download button (Grid Outputs menu + estimate Build package), and the client link page ("Download all datasheets").
 - Reuse: #296 rack submittal already pdf-lib-merges datasheets with a gap cover.
+
+## #9 Peak header — decisions (Jeff, Oct 12)
+
+- The Peak standard header = the existing letterhead (`peak-letterhead.jpg`, or the uploaded dark logo per D59) already on quotes, letters, reports and the cover.
+- Specs (spec builder Word file, D94 bid-spec .docx/.doc/HTML, the spec inside client packages): letterhead on the **first page only**; later pages keep the MasterSpec running header + footer.
+- Also the plain-text-name documents: the quote equipment summary / rough-drawings fallback PDF and the rack datasheet index.
+- Toggle in **both** places: a company default in Settings → Branding ("Put the Peak header on documents", on) and a per-document "Include Peak header" checkbox.
+- Letters/quotes/reports/cut sheets/drawing set unchanged (already carry it).
 
 ## Side observations
 
