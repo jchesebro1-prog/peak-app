@@ -1021,5 +1021,37 @@ See `.env.example`.
     production, whether the rates become Settings, and a CSV formula-injection
     guard codebase-wide. Punch item #330.
 
+52. ✅ **Build package tabs, assembly members, estimate letterhead** (#331–#333,
+    D853–D868) — estimates (PDF, preview, online page), the client package page
+    and the Cover PDF always print the full baked Peak letterhead, even with a
+    Branding dark logo; letters/reports keep the D59 ladder (#331, D853). An
+    assembly line carries its members (`src/lib/quote-line-members.ts`:
+    `expandLine` — racks read live members and keep their quoted row when
+    unresolved, add-ons/labor left out; `isAssemblyLine`/`primaryMemberSku`/
+    `memberAliases` alias photos, paragraphs and key-product datasheets for
+    fixture/System/Hardware assemblies only, never racks/tracks) into the
+    package BOM, datasheets, book, zip, review rows, Catalog → Datasheets and
+    the photo sheet; Save to library on a starred assembly writes to the member
+    (`viaSku`); the zip cache version was not bumped (#332, D854–D856). Build
+    package becomes Narrative · BOM quote · Client package (`?ptab=`, Narrative
+    kept mounted): a live, code-split BOM view built in the browser
+    (`liveBomDocumentProps`); one Client package checklist — Documents
+    (Estimate/Cover PDF Send & track defaults, BOM appendix, cut sheets,
+    drawings switch + tools), Systems (the one presentation editor; the Build
+    card shows a read-only chip), line detail, per-product Datasheets from the
+    unsaved BOM (`BomProjection` → `clientPackageDocsAction`, byte-budgeted).
+    `Quote.packageSelection` has one writer (`setPackageSelection` via the
+    header-meta action; Save never carries it; merged partials, over-cap
+    refused, never bumps `updatedAt`), is frozen per revision only when set,
+    and every datasheet consumer honours its exclusions (`datasheetExclusion`;
+    covered accessories follow their fixture; datasheets only; left out of the
+    book and Quotes-hub package, kept in the spec); drawings off hides Plans &
+    risers; Send waits for the choices (10 s) (#333, D857–D868). No migration.
+    Remaining: the #333 browser pass, then Jeff-gated — a real assembly estimate
+    and a left-out datasheet on production, the letterhead on a real PDF, whether
+    Specifications.docx / the Datasheets.pdf cover / client cut sheets switch to
+    the full sheet too, and whether to bump the Blob zip cache. Punch items
+    #331–#333.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -11507,3 +11507,154 @@ transaction commits, on a win, a re-win and every rebuild, and kept as it is if 
 - The Reports → Estimator bonuses report reads only records, so a quote won before this shipped is absent until Record now.
 - The report's CSV export has no formula-injection guard. None of the app's CSVs have one; that is a codebase-wide gap,
   flagged in PUNCHLIST #330 rather than fixed in one export.
+
+## D853. Estimates always print the full Peak letterhead (#331, 2026-10-12)
+
+The estimate document (the PDF, the staff preview and the online page), the client package page and the Cover PDF always
+head with the full baked Peak letterhead sheet (`peak-letterhead.jpg`), even when Settings → Branding has a dark logo
+uploaded. Letters, reports and the other D59 / D823 outputs keep the uploaded-logo ladder. `logoDark` stays on
+`QuoteDocumentProps` (it is Branding data other callers read) but the estimate never prints it. The Grid notes #9
+Peak-header toggle (D824) still does not apply to the estimate document. Left open for Jeff: whether the
+estimate package zip's `Specifications.docx` and `Datasheets.pdf` cover, and the client-style curtain cut sheets, should
+switch to the full sheet too (they still follow the ladder). Punch item #331.
+
+## D854. An assembly line expands to its members for datasheets and the package BOM (#332, 2026-10-12)
+
+One shared, client-safe pure helper, `src/lib/quote-line-members.ts` (`expandLine`, `specItems`, `needsFixtureLookup`),
+decides what an Estimator line stands for:
+- a **rack** line (`rackId`) reads its **live** members (D578) or returns null — rack gone, not a rack, member-less, or no
+  lookup — so the quoted rack row stays. It never falls back to `components`, which for a rack holds only the rack-level
+  parts;
+- any other line with a stored `components` snapshot expands to those parts × the line's qty; optional add-ons (qty 0)
+  and labor are left out;
+- else an `asm:` / portal `fixtureId` / bare fixture line resolves live through `gridSpecBomRows`.
+
+`quoteBom` (client package and package documents), `specPackageDocs`, `bomFromQuote` (now like its Grid branch), Customer
+review's Datasheets tab, Catalog → Datasheets and the photo sheet (Estimator components; Grid `asm:` lines and placements
+through the fixtures) list the members instead of the `SA-` row. Racks and tracks expand for datasheets like any other
+assembly. Punch item #332.
+
+## D855. Photos and narrative paragraphs alias a fixture assembly to its primary member (#332, 2026-10-12)
+
+`isAssemblyLine` is the one predicate for the photo / paragraph / key-product datasheet alias: `fixture: true` or a portal
+`fixtureId` — fixture, System and Hardware assemblies — never a rack (`rackId`) and never a track (a `track` config or a
+`TRK-` sku). `primaryMemberSku` is the light engine, else the first included part, read only from the line's own
+`components` snapshot (no fixture lookup), so the browser (`kpAliases` in the Estimator state) and the server
+(`narrative/photos.ts`, `specPackageDocs`' `aliases`) run the same pure function on the same line. A starred assembly
+prints its member's photo (else the manufacturer image, D583), stored under the line's sku; the package page and staff
+preview copy the member's datasheet onto the line (`withDatasheetAliases`, beside #304's moved aliases). The narrative
+column shows the member's paragraph and photo (`viaSku`), and **Save to library / Save to product write to that member
+part**, not to the assembly. The key-product library caches by (sku, alias) (`libraryFetchKey` / `libraryStaleSkus`), so a
+changed alias under the same sku refetches. Punch item #332.
+
+## D856. No zip cache bump for #332 (#332, 2026-10-12)
+
+`PACKAGE_ZIP_CACHE_VERSION` is unchanged (still 3). An estimate package zip already cached in Blob for a sent revision
+keeps the contents it was built with (the `SA-` row, no member datasheets) until its cache file goes; a zip not yet
+cached, or a revision sent after this ships, gets the members. The online package page and the doc route read live and
+show the members at once. Whether to bump the version (which rebuilds every cached zip on its next download) is left to
+Jeff, flagged in PUNCHLIST #332.
+
+## D857. Build package has three tabs (#333, 2026-10-12)
+
+Narrative · BOM quote · Client package, at `?ptab=narrative|bom|client`. Narrative is the default and writes no param; an
+unknown or wrong-case value reads as Narrative, and `ptab` is ignored off the package step. `stepSearch` drops `ptab`
+whenever it writes another step. Tabs switch with `pushState` (arrow keys `replaceState`), roving tabindex like the review
+tabs. The Narrative tab stays mounted while hidden (`display:none`), so the TipTap editor keeps its undo history and the
+Phase 5 unmount flush isn't exercised by a tab switch; BOM quote and Client package mount on first visit. The staff panel
+splits into a documents part (Client package) and a grid part (Design in the Grid stays on Narrative). Punch item #333.
+
+## D858. Client package → Systems is the one presentation editor (#333, 2026-10-12)
+
+Jeff confirmed Q4. A system's Narrative | Itemized choice is set only in Client package → Systems (every system with
+items; an unpriced one is marked "No price yet — not on the PDF"). The narrative column shows it read-only with a link,
+and the Build system card's select becomes a read-only "Customer: Narrative ↗" chip linking to
+`?step=package&ptab=client#systems`. Draft narrative's automatic switch to Narrative stays (it writes the same field).
+Punch item #333.
+
+## D859. The BOM quote tab is built in the browser (#333, 2026-10-12)
+
+`liveBomDocumentProps` = `bomViewProps(quoteDocumentDataFor(…))` over the unsaved editor state, the same pure builder the
+print route and preview use; no server action, no debounce. `rewardsLine` comes from the credit read
+(`purchasePerksDocLine`) when it is for the same customer. The tab is code-split (`next/dynamic`), renders with the scoped
+`QUOTE_WEB_EMBED_CSS`, freezes behind a memoised document while hidden, and labels itself "Live" with Open saved preview ↗
+for a saved estimate. A harness check pins equivalence with the saved render and the #330 no-bonus rule. Punch item
+#333.
+
+## D860. `Quote.packageSelection` has one writer and is frozen per revision (#333, 2026-10-12)
+
+`packageSelection` (`estimatePdf`, `coverPdf`, `drawings`, `excludedDatasheets`) is not a content field: a change never
+stales the PDF or an approval. As shipped it differs from the spec (which had it also riding Save):
+- after create its **only** writer is `setPackageSelection` (store), reached through `updateQuoteMetaAction`. Save never
+  carries it and `update()` drops it, so a Save built before a newer tick can't revert it;
+- the patch is checked (`checkSelectionPatch`): null / non-object is ignored; only the fields present are merged over the
+  stored value under the row lock; a SKU over 200 characters or more than 500 exclusions is **refused** with a reason,
+  never truncated. Read-side `normalizePackageSelection` still defaults junk;
+- a write never bumps `updatedAt` (the `setPackagePeakHeader` precedent), so it can't fail an in-flight Send's version
+  check;
+- left-out SKUs follow #304 renames at write (`selectionFollowingRenames`) and at read (`moved`);
+- a new estimate holds the choice in state; its first Save flushes it only when it was edited, so an untouched estimate
+  never gains the key; a later Save retries a failed write.
+
+It is frozen into a new revision's `docFields.packageSelection` only when the live quote has one, so untouched quotes'
+revisions are byte-identical, and it is never annexed after send (unlike `packageFiles`). Absent means today's behaviour.
+Punch item #333.
+
+## D861. Estimate / Cover PDF switches are Send & track defaults; Send waits for the choices (#333, 2026-10-12)
+
+Jeff confirmed Q5: the switches only set whether Send & track's "Estimate PDF" and "Cover PDF" start ticked
+(`composerInitial(d, sel)`); the sender can still change them per send, and nothing is added to the client's package page.
+Send awaits `selectionSettled()`, which races a 10 s timeout and reports whether the server holds the latest choice; if
+not, Send is blocked with "Couldn't save the package choices … nothing was sent", so a revision never freezes a choice the
+server doesn't hold. Punch item #333.
+
+## D862. The appendix and cut-sheet rows reuse the existing switches (#333, 2026-10-12)
+
+Client package → Documents' "BOM (itemized) appendix" and "Cut sheets" rows are `pdfOptions.pdfItemizedAppendix` /
+`pdfCutSheets` — no new field, still content that rides Save. The staff Quotes-hub package's `cutsheets/` and `drawings/`
+folders are unchanged. Punch item #333.
+
+## D863. Drawings off hides Plans & risers (#333, 2026-10-12)
+
+For a revision sent with drawings off, the package page shows no Plans & risers and the file route returns its uniform 404
+(`revisionShownPackageFiles`); the staff preview follows the live choice, the "No drawings" gap chip is suppressed, and
+Customer review's Drawings tab still lists the files with one "off" note. Uploading while off is allowed. Punch item #333.
+
+## D864. The per-project datasheet exclusion (#333, 2026-10-12)
+
+Jeff confirmed Q1: datasheets only — spec sheets and manuals still ship. An exclusion is keyed by live SKU. One pure rule,
+`datasheetExclusion` (`src/lib/part-docs/exclusions.ts`), used by the browser and by `resolvePackageDocs(index, skus,
+opts)`: "self" when the SKU is left out, "parent" when its datasheet is covered and **every** covering parent is left out
+(an accessory follows its fixture). Excluded counts as satisfied (no gap, so unticking a Missing row means "not needed on
+this project"); its document reaches `documents` only through an included SKU. The list is never auto-pruned. With no
+`opts` the output is deep-equal to before (pinned on committed fixtures). Every datasheet consumer honours it: package docs,
+the doc route, the gap chip, the book, the zip, the Quotes-hub package and Customer review's rows ("Left out of this
+package" / "Left out with S4-26"). Punch item #333.
+
+## D865. Left-out products leave the book; the spec keeps them (#333, 2026-10-12)
+
+Jeff confirmed Q2: a left-out product is absent from `Datasheets.pdf` and its index and is never named in `LEFT OUT.txt`.
+`Specifications.docx` still covers the full BOM (a spec is not a datasheet). The zip's per-revision cache stays valid
+because the choice is frozen with the revision. Punch item #333.
+
+## D866. The Quotes-hub client package follows the choices (#333, 2026-10-12)
+
+Jeff confirmed Q3: the staff "Client package" zip on the Quotes hub honours the live quote's datasheet exclusions
+(`quoteSpecParts` / `createQuoteClientPackage`); the Grid path (`createClientPackage`) and the rack submittal are
+unchanged. Punch item #333.
+
+## D867. No new permission (#333, 2026-10-12)
+
+`packageSelection` uses the header-meta gate (`requireUser`), like the cover fields beside it; `clientPackageDocsAction`
+is `requireUser`, read-only, like `reviewDocsAction`, and returns staff routes only. Drawings management keeps the staff
+panel's `canSend` / upload checks. The client sees only a frozen revision's effect, never the selection. Punch item #333.
+
+## D868. Live datasheet rows from a trimmed BOM projection (#333, 2026-10-12)
+
+The Client package tab's Datasheets column is built from the **unsaved** BOM: a `BomProjection` of only the keys `quoteBom`
+and the member expansion read, sent to `clientPackageDocsAction` with no exclusions applied (the browser applies
+`datasheetExclusion`, so a tick is instant). It runs only while the tab is shown, debounced 800 ms after the projection key
+changes, sequence-guarded (latest wins). The server re-sanitises (≤ 200 sections, ≤ 5,000 items, strings ≤ 300). As
+shipped, the projection is also byte-budgeted (900 kB) under the server-action ceiling; anything cut shows "List truncated
+— N items not checked" (client and server counts). Assembly members indent under "Part of: …" (D854); `partOf` comes from
+the member expansion, not the removed `lineMemberRows`. Punch item #333.

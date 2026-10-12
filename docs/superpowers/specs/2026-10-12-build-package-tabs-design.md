@@ -9,7 +9,7 @@
 > selection of what is actually getting presented to the client on this project."
 
 This file holds the design (§1–§11) and the task-by-task implementation plan (§12). Decision-log entries are
-proposed as **D-TBD-a…l** for numbering at merge time.
+**D857–D868** (numbered 2026-10-12; deviations as shipped in §11's "As shipped" note).
 
 ---
 
@@ -110,7 +110,7 @@ Today's step, minus what moves to Client package:
 - The narrative column's presentation `<select>` becomes a read-only line, "Prints as **Itemized** · Change in Client
   package →", which links to `?step=package&ptab=client#systems`. The existing hint "Prints on the quote only in
   Narrative mode." stays. Draft narrative's automatic switch to Narrative stays, because it writes the same field
-  (D-TBD-b).
+  (D858).
 
 ### 4.3 BOM quote tab
 
@@ -149,7 +149,7 @@ pure `packageSummaryLine()`:
    - *Drawings (N)*: "Plans & risers on the client's package page". Writes `packageSelection.drawings`. Under it sits
      the existing drawings management, moved here from the Narrative aside: list, Upload…, Generate from Grid and
      Remove.
-2. **Systems** (`#systems`). The **only** presentation editor (D-TBD-b). One row per printed system (today's
+2. **Systems** (`#systems`). The **only** presentation editor (D858). One row per printed system (today's
    `PdfOptionsPanel` filter: systems with revenue, freight or sell), showing:
    - the system name;
    - a segmented **Narrative | Itemized** control;
@@ -194,7 +194,7 @@ pure `packageSummaryLine()`:
 
 **Saving.** Presentation and line detail are content: they ride Save and re-render the PDF, as today.
 `packageSelection` is not content: each change writes immediately through the header-meta action (latest wins), the
-same way `coverSummary` autosaves, and it also rides every Save (D-TBD-d). A small "Saved" / "Saving…" tick sits beside
+same way `coverSummary` autosaves, and it also rides every Save (D860). A small "Saved" / "Saving…" tick sits beside
 the Datasheets toolbar.
 
 ### 4.5 Other screens
@@ -247,7 +247,7 @@ type (`stores/quotes.ts` ~:323).
 (`quotes.ts` :862) adds the key **only when the live quote has one** (`...(d.packageSelection ? { packageSelection:
 normalizePackageSelection(d.packageSelection) } : {})`), so revisions cut for untouched quotes are byte-identical to
 today. It is never annexed onto a sent revision: a change after send applies at the next send. This differs from
-`packageFiles`; see D-TBD-d.
+`packageFiles`; see D860.
 
 **Reading.** Readers always go through `normalizePackageSelection`:
 - live quote: `normalizePackageSelection(q.packageSelection)`;
@@ -434,7 +434,7 @@ behaviour. No backfill.
 ## 9. Permissions
 
 - **`packageSelection`:** same gate as the fields beside it. `saveQuoteAction` and `updateQuoteMetaAction` use
-  `requireUser()`, so a signed-in team user can change it. No new permission (D-TBD-k).
+  `requireUser()`, so a signed-in team user can change it. No new permission (D867).
 - **`clientPackageDocsAction`:** `requireUser()`, read-only, the same rule as `reviewDocsAction`. Links are staff
   routes only.
 - **Drawings management:** keeps `PackageStaffPanel`'s existing `canSend` / `uploads` checks.
@@ -486,38 +486,59 @@ Customer-visible behaviour in this design that is **not** a question (it follows
   choice;
 - drawings switched off hide Plans & risers for that revision.
 
-### Proposed decision-log entries
+### Decision-log entries (D857–D868)
 
-- **D-TBD-a** — Build package has three tabs (`?ptab=narrative|bom|client`, Narrative default and paramless). The
+- **D857** — Build package has three tabs (`?ptab=narrative|bom|client`, Narrative default and paramless). The
   Narrative tab stays mounted while hidden. `stepSearch` drops `ptab` off the package step.
-- **D-TBD-b** — The Client package tab's Systems group is the one presentation editor. The narrative column shows it
+- **D858** — The Client package tab's Systems group is the one presentation editor. The narrative column shows it
   read-only with a link. Draft narrative's automatic switch to Narrative stays. The Build card select becomes a
   read-only chip (pending Q4).
-- **D-TBD-c** — The BOM quote tab is built in the browser: `liveBomDocumentProps` = `bomViewProps(quoteDocumentDataFor(…))`
+- **D859** — The BOM quote tab is built in the browser: `liveBomDocumentProps` = `bomViewProps(quoteDocumentDataFor(…))`
   over editor state. No server action. `rewardsLine` comes from `creditInfo`.
-- **D-TBD-d** — `Quote.packageSelection` (`estimatePdf`, `coverPdf`, `drawings`, `excludedDatasheets`):
+- **D860** — `Quote.packageSelection` (`estimatePdf`, `coverPdf`, `drawings`, `excludedDatasheets`):
   - not content; it autosaves and rides Save;
   - frozen into `docFields.packageSelection` only when set;
   - never annexed after send (unlike `packageFiles`);
   - absent means today's behaviour.
-- **D-TBD-e** — The Estimate PDF and Cover PDF switches set Send & track's attachment defaults only (pending Q5).
-- **D-TBD-f** — The BOM appendix and Cut sheets rows are the existing `pdfItemizedAppendix` / `pdfCutSheets`. No new
+- **D861** — The Estimate PDF and Cover PDF switches set Send & track's attachment defaults only (pending Q5).
+- **D862** — The BOM appendix and Cut sheets rows are the existing `pdfItemizedAppendix` / `pdfCutSheets`. No new
   field. The staff Quotes-hub package's `cutsheets/` and `drawings/` folders are unchanged.
-- **D-TBD-g** — Drawings off hides Plans & risers and 404s the file route for revisions sent with it off, and
+- **D863** — Drawings off hides Plans & risers and 404s the file route for revisions sent with it off, and
   suppresses the "No drawings" chip.
-- **D-TBD-h** — The datasheet exclusion:
+- **D864** — The datasheet exclusion:
   - is keyed by live SKU and covers the datasheet slot only (pending Q1);
   - a covered accessory inherits it when every covering parent is excluded;
   - excluded counts as satisfied (no gap);
   - the list is never auto-pruned;
   - it is rename-mapped at read and at save.
-- **D-TBD-i** — Left-out products are absent from the datasheet book's index and never named in `LEFT OUT.txt`. The
+- **D865** — Left-out products are absent from the datasheet book's index and never named in `LEFT OUT.txt`. The
   specification (.docx) still covers them (pending Q2).
-- **D-TBD-j** — The staff Quotes-hub client package honours the datasheet exclusions (pending Q3).
-- **D-TBD-k** — No new permission. `packageSelection` uses the Save / header-meta gate (`requireUser`), and the
+- **D866** — The staff Quotes-hub client package honours the datasheet exclusions (pending Q3).
+- **D867** — No new permission. `packageSelection` uses the Save / header-meta gate (`requireUser`), and the
   datasheet-rows action is `requireUser`, read-only.
-- **D-TBD-l** — Live datasheet rows come from a trimmed `BomProjection` through `clientPackageDocsAction` (debounced
+- **D868** — Live datasheet rows come from a trimmed `BomProjection` through `clientPackageDocsAction` (debounced
   800 ms, only while the tab is visible). The browser applies the exclusions with the same pure rule the server uses.
+
+### As shipped — deviations from this spec (from the #333 commits, review fixes in 7c8d4a05)
+
+- **Save does not carry `packageSelection`.** §4.4, §5.1 and D860 above say it "rides every Save" and that
+  `saveQuoteAction` writes it and `update()` keeps it. As shipped its only writer after create is `setPackageSelection`
+  through `updateQuoteMetaAction`; Save never carries it and `update()` drops it, so a Save built before a newer tick
+  can't revert it. A new estimate's first Save flushes the selection (through the same action) only when it was edited.
+- **Writes merge partials and refuse over-cap.** Only the fields present are merged over the stored value under the row
+  lock; a SKU over 200 characters or more than 500 exclusions is refused with a reason, not truncated (read-side
+  `normalizePackageSelection` still defaults junk). Renames are followed at write inside `setPackageSelection`.
+- **A selection write never bumps `updatedAt`**, so it can't fail an in-flight Send's version check.
+- **Send is blocked, not just delayed.** `selectionSettled()` races a 10 s timeout; if the server doesn't hold the latest
+  choice, Send stops with "Couldn't save the package choices … nothing was sent" (D861).
+- **The datasheet projection is byte-budgeted** (900 kB) on top of the section/item caps, with a "List truncated — N items
+  not checked" note (D868).
+- **`lineMemberRows` was removed** in #332's review (no callers); `partOf` comes from the member expansion
+  (`expandLine`), and the assembly-alias predicate is `isAssemblyLine` (fixture/System/Hardware only).
+- **BOM tab:** freezes behind a memoised document while hidden and uses the scoped `QUOTE_WEB_EMBED_CSS` rather than
+  `QUOTE_WEB_CSS`.
+- Systems lists every system with items, marking unpriced ones "No price yet — not on the PDF", rather than only priced
+  systems.
 
 ---
 
@@ -908,7 +929,7 @@ document consumer. A live BOM view renders from unsaved state.
 
 - [ ] **Numbers.** `git fetch origin`. Then read the last punch number and D-number from
   `origin/main:PUNCHLIST.md` / `DECISIONS.md` **right before writing** (memory: two-session collisions). Replace
-  D-TBD-a…l, add punch #333 with Jeff's answers, and add an AGENTS.md phase-status line.
+  the proposed decision placeholders (done: D857–D868), add punch #333 with Jeff's answers, and add an AGENTS.md phase-status line.
 - [ ] **Smoke** (`scripts/smoke-routes.ts` ~:286): add `/estimator?id=Q-2041&step=package&ptab=bom`, `…&ptab=client`
   and `…&ptab=bogus`.
 - [ ] **Gates** with real numbers:

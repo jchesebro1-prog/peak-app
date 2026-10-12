@@ -284,6 +284,10 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/inbox?customer=rose-brand&log=1" },
   { route: "/estimator?id=Q-2041" },
   { route: "/estimator?id=Q-2041&step=package" },
+  // #333 Build package tabs: BOM quote, Client package, and an unknown ptab (reads as Narrative).
+  { route: "/estimator?id=Q-2041&step=package&ptab=bom" },
+  { route: "/estimator?id=Q-2041&step=package&ptab=client" },
+  { route: "/estimator?id=Q-2041&step=package&ptab=bogus" },
   { route: "/estimator?id=Q-2041&step=review" },
   { route: "/estimator?id=Q-2041&step=send" },
   { route: "/estimator?id=Q-2041&step=bogus" },

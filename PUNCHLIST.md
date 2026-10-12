@@ -11834,3 +11834,79 @@ Won … Jeff Chesebro (lead) 100% — $52.88", Reports listed it, and the projec
 - (c) Decide whether the 5% and 2% rates should become Settings (they are constants today).
 - (d) The 5% pool payout itself happens outside the app.
 - (e) Codebase-wide CSV formula-injection guard (none of the app's exports have one).
+
+## 331. Estimates print the full Peak letterhead, not the Branding logo — BUILT 2026-10-12 on `feat/331-333-package` (D853)
+
+**Asked (Jeff, 2026-10-12):** estimates head with the full Peak letterhead, not the uploaded Branding logo.
+
+**Done:** the estimate document (PDF, preview, online page), the client package page and the Cover PDF always print the
+full baked Peak letterhead sheet, even with Settings → Branding's dark logo set (`quote-document.tsx`,
+`package-model.ts`, `cover-loader.ts`). Letters and reports keep the D59 uploaded-logo ladder. Harness: the #301
+cover-loader check pins the baked sheet unconditionally; new #331 checks render `QuoteDocument` and the package model with
+a Branding logo set. 3e8316f1.
+
+**Remaining (Jeff-gated):**
+- (a) Check the letterhead on a real estimate PDF and Cover PDF on production with the Branding logo uploaded.
+- (b) **Open question:** should the estimate package zip's `Specifications.docx` and `Datasheets.pdf` cover, and the
+  client-style curtain cut sheets, switch to the full sheet too? They still follow the uploaded-logo ladder.
+
+## 332. Assembly lines carry their members' datasheets and photos — BUILT 2026-10-12 on `feat/331-333-package` (D854–D856)
+
+**Asked (Jeff, 2026-10-12):** an assembly line on an estimate should carry its member parts' datasheets and photos into
+the client package, instead of printing as one `SA-` row.
+
+**Done:** one pure helper, `src/lib/quote-line-members.ts` (`expandLine`, `isAssemblyLine`, `primaryMemberSku`,
+`memberAliases`, `needsFixtureLookup`, `specItems`). The client package BOM, package documents, `bomFromQuote`, Customer
+review's Datasheets tab, Catalog → Datasheets and the photo sheet list an assembly's members instead of its row (rack lines
+read their live members and keep the quoted row when unresolved; optional add-ons and labor left out) (D854). A starred
+fixture / System / Hardware assembly prints its light engine's (else first part's) photo and paragraph and its datasheet
+link; racks and tracks don't alias but still expand for datasheets. Save to library / Save to product on a starred
+assembly writes to that member part (`viaSku`), and the key-product library caches by (sku, alias) (D855). a33c5217,
+review fixes f10327d4.
+
+**Remaining (Jeff-gated):**
+- (a) Try a real estimate with a fixture assembly, a rack and a track on production: package page photos, datasheet links,
+  Datasheets.pdf and the zip.
+- (b) **Blob-cached zips:** a package zip already cached for a sent revision keeps its old contents (the `SA-` row) — the
+  cache version was not bumped (D856). Decide whether to bump it so every cached zip rebuilds on its next download.
+
+## 333. Build package tabs — Narrative · BOM quote · Client package — BUILT 2026-10-12 on `feat/331-333-package` (D857–D868)
+
+**Asked (Jeff, 2026-10-12):** "The Build package screen should see both the narrative and have a tab for seeing the BOM
+quote, then a selection of what is actually getting presented to the client on this project." Spec + plan
+`docs/superpowers/specs/2026-10-12-build-package-tabs-design.md`. Jeff's §11 answers, all five recommendations confirmed:
+**Q1** datasheets only (spec sheets and manuals still ship); **Q2** left-out products dropped from the book and its index;
+**Q3** the Quotes-hub client package follows the choices; **Q4** the Build card select becomes a read-only chip; **Q5** the
+Estimate/Cover PDF switches are Send & track attachment defaults only.
+
+**Done:**
+- **Tabs** at `?ptab=narrative|bom|client` (Narrative default, paramless, kept mounted while hidden) (D857).
+- **BOM quote** — the customer's BOM view rendered live in the browser from unsaved editor state
+  (`liveBomDocumentProps`, code-split), "Live" strip, Open saved preview ↗, prices-hidden note (D859).
+- **Client package** — one checklist: Documents (Estimate PDF / Cover PDF attachment defaults, BOM appendix, Cut sheets,
+  Drawings switch with the drawings tools moved here), Systems (the one Narrative | Itemized editor; the narrative column
+  and the Build card show it read-only with a link) (D858), Estimate PDF — line detail, package tools, and per-product
+  Datasheets from the unsaved BOM with All / Missing / Left out filters, Include all / Leave all out, assembly members under
+  "Part of" (D868).
+- **`Quote.packageSelection`** — one writer (`setPackageSelection` via the header-meta action; Save never carries it),
+  merged partials, over-cap refused, never bumps `updatedAt`, frozen per revision only when set (D860).
+- **Every datasheet consumer** honours the exclusions — package page, Downloads card, doc route, gap chip, Datasheets.pdf
+  and its index, zip, Quotes-hub package, Customer review rows (D864–D866); **drawings off** hides Plans & risers and
+  404s the file route for revisions sent with it off (D863).
+- **Send & track** — Estimate/Cover PDF ticks start from the choices; Send waits for an in-flight write and is blocked if
+  the server doesn't hold the latest choice within 10 s (D861).
+
+No migration; no new permission (D867). Commits bf609c38 … 7c8d4a05 (review fixes in 7c8d4a05).
+
+**New copy for Jeff to approve:** "Narrative · BOM quote · Client package", "Live — shows unsaved changes…", "The client
+gets: …", "Attached when you send (Send & track)", "Plans & risers on the client's package page", "Narrative with no
+intro", "No price yet — not on the PDF", "Left out", "Left out with …", "Left out of this package", "Not needed (catalog)",
+"Checking datasheets…", "List truncated — N items not checked", "Saved with the estimate", "Customer: Narrative ↗",
+"Couldn't save the package choices (Build package → Client package) — nothing was sent. Retry there, then send."
+
+**Remaining:**
+- (a) The Task 15 browser pass on a scratch DB (type on Build → BOM quote updates; Narrative undo after a tab switch; untick
+  a datasheet → Saved → reload; drawings off; Send & track ticks; Customer review "Left out") — not yet run.
+- (b) Jeff-gated: try a real estimate on production — leave a datasheet out, send, and check the client's package page,
+  Datasheets.pdf and zip; switch drawings off on a sent-next revision.
+- (c) Blob-cached zips for revisions sent before this keep their contents (see #332 (b)).
