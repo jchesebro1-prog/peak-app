@@ -52,6 +52,9 @@ export type NarrativeColumnProps = {
   /** #301: the saved quote id and its customer — From site visit finds the visits. */
   quoteId: string | null;
   customerId: string | null;
+  /** #333 (D-TBD-b): presentation is set on Build package → Client package → Systems; this column shows it read-only with a link there. */
+  presentationHref?: string;
+  onOpenPresentation?: () => void;
 };
 
 const LABEL: CSSProperties = { fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".06em", textTransform: "uppercase" };
@@ -256,18 +259,26 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
       {mergeOpen && (
         <SystemLibraryModal mode="merge" target={sec} onMerge={applyMerge} onClose={() => setMergeOpen(false)} />
       )}
-      <select
-        value={sec.presentation || "itemized"}
-        onChange={(e) => {
-          const v = e.target.value as "itemized" | "narrative";
-          p.onChange((s) => ({ ...s, presentation: v }));
-        }}
-        aria-label="Customer presentation"
-        style={{ alignSelf: "flex-start", border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}
-      >
-        <option value="itemized">Customer: itemized</option>
-        <option value="narrative">Customer: narrative</option>
-      </select>
+      {/* #333 (D-TBD-b): read-only — the Client package tab's Systems group is the one presentation editor. */}
+      <div data-testid="narrative-presentation" style={{ ...HINT, color: "#3a3f4a" }}>
+        Prints as <strong>{(sec.presentation || "itemized") === "narrative" ? "Narrative" : "Itemized"}</strong>
+        {p.presentationHref && (
+          <>
+            {" · "}
+            <a
+              href={p.presentationHref}
+              onClick={(e) => {
+                if (!p.onOpenPresentation || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                p.onOpenPresentation();
+              }}
+              style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}
+            >
+              Change in Client package →
+            </a>
+          </>
+        )}
+      </div>
       {(sec.presentation || "itemized") === "itemized" && <div style={HINT}>Prints on the quote only in Narrative mode.</div>}
       <ScopeOutputFields sec={sec} onChange={p.onChange} quoteId={p.quoteId} customerId={p.customerId} />
       <div style={LABEL}>Intro</div>

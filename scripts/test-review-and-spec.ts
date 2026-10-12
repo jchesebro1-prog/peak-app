@@ -375,6 +375,8 @@ const ESTIMATOR_FILES = [
   "steps/build-step.tsx",
   "add-system-modal.tsx",
   "steps/package-step.tsx",
+  // #333: Build package's tabs — the step body moved into these.
+  "steps/package-narrative-tab.tsx",
   "steps/review-step.tsx",
   "steps/send-step.tsx",
   "steps/send-composer.tsx",
@@ -383,7 +385,7 @@ const ESTIMATOR_FILES = [
   "steps/review-sidebar.tsx",
 ];
 const PREVIEW_FILES = [
-  "preview-doc.tsx", "steps/package-step.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
+  "preview-doc.tsx", "steps/package-step.tsx", "steps/package-narrative-tab.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
   "steps/review-tabs.tsx", "steps/review-sidebar.tsx",
 ];
 const readJoined = (files: string[]) =>
@@ -42676,7 +42678,7 @@ import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-docum
     const peopleFields = rd("quote-people-fields.tsx");
     ok(estimatorSource().includes("<QuotePeopleFields s={s} tone=\"dark\" />") && peopleFields.includes('aria-label="Lead estimator"') && peopleFields.includes('aria-label="Prepared by"'),
       "Lead estimator + Prepared by are one shared QuotePeopleFields, used by the header's Quote details");
-    ok(rd("steps/package-step.tsx").includes('<QuotePeopleFields s={s} tone="light" />') && peopleFields.includes("Save the quote to change these"),
+    ok(rd("steps/package-narrative-tab.tsx").includes('<QuotePeopleFields s={s} tone="light" />') && peopleFields.includes("Save the quote to change these"),
       "Build package renders QuotePeopleFields (the Lead estimator signs the cover PDF) with the same locked-save hint");
   }
   const page = src("src/app/(app)/estimator/page.tsx");
@@ -51661,7 +51663,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
      panel.includes("Reset to default") && panel.includes("p.onNotIncluded(p.notIncludedDefault)") && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf)/m.test(panel),
     "#301 preview: the Cover & package block (summary, Not included, Reset to default)");
   const prev = previewDocSource();
-  const pkgStep304 = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  const pkgStep304 = rd("src/app/(app)/estimator/steps/package-narrative-tab.tsx");
   const sendStep304 = rd("src/app/(app)/estimator/steps/send-step.tsx");
   ok(pkgStep304.includes("<CoverPackagePanel") && sendStep304.includes("<ClientLinkPanel") && !prev.includes('className="est-doc"') && !prev.includes("customerLines("),
     "#301 preview: CoverPackagePanel and ClientLinkPanel stay mounted; the #222 preview pins still hold (#305: Cover & package on Build package, Client link on Send & track)");
@@ -54362,10 +54364,11 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
 /* #305 — every existing control has a home step. */
 {
   const st = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps", f), "utf8");
-  const build = st("build-step.tsx"), pkg = st("package-step.tsx"), review = st("review-step.tsx"), send = st("send-step.tsx");
+  const build = st("build-step.tsx"), pkg = st("package-step.tsx") + st("package-narrative-tab.tsx") + (existsSync(join(process.cwd(), EST_DIR, "steps/client-package-tab.tsx")) ? st("client-package-tab.tsx") : ""), review = st("review-step.tsx"), send = st("send-step.tsx");
   ok(build.includes("<SectionCard") && build.includes("<CurtainModal") && build.includes("<RewardCreditPanel") && build.includes("+ From library…") && !build.includes("<TasksCard"),
     "#305 steps: Build holds the systems sidebar, cards, modals and Rewards credit — not Tasks");
-  ok(pkg.includes("<NarrativeColumn") && pkg.includes("<PdfOptionsPanel") && pkg.includes("<CoverPackagePanel") && pkg.includes('section="package"'),
+  // #333: the Show-on-PDF block and drawings/gaps moved to the Client package tab (section="documents"); Design in the Grid stays on Narrative (section="grid").
+  ok(pkg.includes("<NarrativeColumn") && /<(PdfOptionsPanel|PdfLineDetailGroup)\b/.test(pkg) && pkg.includes("<CoverPackagePanel") && pkg.includes('section="documents"') && pkg.includes('section="grid"'),
     "#305 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
   // Phase 4: the desktop tabs and sidebar moved into review-tabs.tsx / review-sidebar.tsx.
   const reviewAll = review + st("review-tabs.tsx") + st("review-sidebar.tsx");
@@ -54374,7 +54377,8 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(send.includes("<ClientLinkPanel") && send.includes("withPackage={false}") && send.includes('section="responses"') && send.includes("<TasksCard") && send.includes("changeStatus(") && send.includes("stageBarPipeline"),
     "#305 steps: Send & track holds status, the client link + revisions, responses, tasks and the pipeline");
   const staff = readFileSync(join(process.cwd(), "src/app/(app)/estimator/package-staff-panel.tsx"), "utf8");
-  ok(/section = "all"/.test(staff) && /section !== "responses"/.test(staff) && /section !== "package"/.test(staff), "#305 steps: PackageStaffPanel can show only its package half or only responses");
+  ok(/section = "all"/.test(staff) && staff.includes('const showDocuments = section === "all" || section === "documents";') && staff.includes('const showGrid = section === "all" || section === "grid";') && staff.includes('(section === "all" || section === "responses") &&'),
+    "#305 steps (#333 split): PackageStaffPanel shows all, only its documents half, only Design in the Grid, or only responses");
   const link = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-link-panel.tsx"), "utf8");
   ok(/withPackage = true/.test(link) && /\{withPackage && <PackageStaffPanel quoteId=\{quoteId\} \/>\}/.test(link), "#305 steps: ClientLinkPanel can leave the package panel out");
 }
@@ -57393,7 +57397,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   const pinSrc = rf(`${EST_DIR}/comment-pins.tsx`);
   const cardSrc = rf(`${EST_DIR}/section-card.tsx`);
   const buildSrc = rf(`${EST_DIR}/steps/build-step.tsx`);
-  const pkgSrc = rf(`${EST_DIR}/steps/package-step.tsx`);
+  const pkgSrc = rf(`${EST_DIR}/steps/package-narrative-tab.tsx`);
   ok(pinSrc.includes("aria-expanded={open}") && pinSrc.includes("review comment${n === 1 ? \"\" : \"s\"} on ${system}`") && pinSrc.includes('e.key === "Escape"') &&
      pinSrc.includes('document.addEventListener("pointerdown", onDoc, true)') && pinSrc.includes("ACCENT_SOFT") && pinSrc.includes("ACCENT_INK"),
     "#P4 pins: the badge is a button with aria-expanded and an 'N review comments on <system>' label; Escape / outside click close the popover; accent from the shared tokens");
@@ -57413,7 +57417,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
 {
   const rf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const pinSrc = rf(`${EST_DIR}/comment-pins.tsx`);
-  const pkgSrc = rf(`${EST_DIR}/steps/package-step.tsx`);
+  const pkgSrc = rf(`${EST_DIR}/steps/package-narrative-tab.tsx`);
   ok(/if \(count === 0 && open\) setOpen\(false\)/.test(pinSrc), "#P4 polish: the popover closes (open reset) when its comment list becomes empty");
   ok(pinSrc.includes("window.innerHeight") && pinSrc.includes("r.top - 6 - h") && pinSrc.includes("useLayoutEffect"), "#P4 polish: the popover flips above the badge when it would overflow the viewport bottom");
   ok(/e\.key === "Escape"\) \{\s+e\.stopPropagation\(\);/.test(pinSrc), "#P4 polish: Escape in the popover stops propagation");
@@ -58113,7 +58117,7 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
      J(tiptap.sort()) === J(["@tiptap/pm", "@tiptap/react", "@tiptap/starter-kit"]) &&
      tiptap.every((d) => (JSON.parse(rd(`node_modules/${d}/package.json`)) as { license?: string }).license === "MIT"),
     "#P5 editor: TipTap is the MIT core only (@tiptap/pm, react, starter-kit) — no @tiptap-pro package");
-  const pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
+  const pkgStep = rd(`${EST_DIR}/steps/package-narrative-tab.tsx`);
   ok(/const PackageDocEditor = dynamic\(\(\) => import\("@\/components\/package-doc\/editor\/package-doc-editor"\), \{\s*ssr: false,/.test(pkgStep) &&
      pkgStep.includes('import dynamic from "next/dynamic";') && !/^import [^\n]*@\/components\/package-doc\/editor/m.test(pkgStep),
     "#P5 editor: package-step loads the editor with next/dynamic, ssr: false — never a static import");
@@ -58203,8 +58207,8 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
   ok(/onClick=\{startDocument\}>\s*Start the document\s*<\/button>/.test(pkgStep) && pkgStep.includes("setPackageDoc(seedPackageDoc({ sections, groups }));") &&
      pkgStep.includes("Remove document") && pkgStep.includes("Remove the document? The estimate goes back to the narrative fields.") &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDoc\(null\);/.test(pkgStep) && pkgStep.includes("aria-pressed={narrOpen}") && pkgStep.includes("Narrative fields") &&
-     pkgStep.includes("const showNarrative = !hasDoc || narrOpen;") && pkgStep.includes("<NarrativeColumn") && pkgStep.includes("<PdfOptionsPanel") && pkgStep.includes("<CoverPackagePanel") &&
-     pkgStep.includes('display: narrOpen ? "none" : "flex"'),
+     pkgStep.includes("const showNarrative = !hasDoc || narrOpen;") && pkgStep.includes("<NarrativeColumn") && pkgStep.includes("<QuotePeopleFields") && pkgStep.includes("<CoverPackagePanel") &&
+     pkgStep.includes('display: narrOpen ? "none" : "flex"'), // #333: Show on PDF moved to the Client package tab; the aside keeps people + cover
     "#P5 editor: Build package — Start the document seeds from the narrative fields; Remove document confirms inline then clears it; the narrative fields sit behind 'Narrative fields'; the right aside stays");
   ok(pkgStep.includes("value={packageDoc}") && pkgStep.includes("onChange={setPackageDoc}") && pkgStep.includes("library={kpLib}") &&
      pkgStep.includes("canWriteLibrary={canWriteNarrativeLibrary}") && pkgStep.includes("const out = await saveProductParagraphAction(target, text, expectUpdatedAt);") &&
@@ -58238,7 +58242,7 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
   const passes = (json: unknown) => { try { schema.nodeFromJSON(json as Record<string, unknown>).check(); return true; } catch { return false; } };
 
   // (1) An over-limit document: the editor reports it; the estimator's Save refuses with the server's words, nothing written.
-  const hook = rd(`${EST_DIR}/use-estimator-state.ts`), edSrc = rd(`${ED}/package-doc-editor.tsx`), pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
+  const hook = rd(`${EST_DIR}/use-estimator-state.ts`), edSrc = rd(`${ED}/package-doc-editor.tsx`), pkgStep = rd(`${EST_DIR}/steps/package-narrative-tab.tsx`);
   const saveNowBody = hook.slice(hook.indexOf("const saveNow = async (): Promise<number | false> => {"), hook.indexOf("const doSave = () => {"));
   const refuse = saveNowBody.indexOf("if (docNow && packageDocOverRef.current) {");
   ok(hook.includes("const [packageDocOver, setPackageDocOverState] = useState(false);") && refuse > 0 && refuse < saveNowBody.indexOf("saveQuoteAction(") &&
@@ -58454,7 +58458,7 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
     "#P5 left pane: a drop inside a paragraph, a list item or a product block lands on the nearest block boundary (dropPoint); invalid nodes insert nothing");
 
   // (7) Wiring pins.
-  const dropSrc = rd(`${ED}/doc-drop.ts`), paneSrc = rd(`${ED}/left-pane.tsx`), edSrc = rd(`${ED}/package-doc-editor.tsx`), cmdSrc = rd(`${ED}/editor-commands.ts`), pkgStep = rd(`${EST_DIR}/steps/package-step.tsx`);
+  const dropSrc = rd(`${ED}/doc-drop.ts`), paneSrc = rd(`${ED}/left-pane.tsx`), edSrc = rd(`${ED}/package-doc-editor.tsx`), cmdSrc = rd(`${ED}/editor-commands.ts`), pkgStep = rd(`${EST_DIR}/steps/package-narrative-tab.tsx`);
   ok(/if \(!dt \|\| !Array\.from\(dt\.types \|\| \[\]\)\.includes\(DOC_NODE_MIME\)\) return false;/.test(dropSrc) && dropSrc.includes("parseDocNodePayload(dt.getData(DOC_NODE_MIME))") &&
      /event\.preventDefault\(\);\s*const at = view\.posAtCoords\(\{ left: event\.clientX, top: event\.clientY \}\);/.test(dropSrc) && dropSrc.includes("handleDrop(view, event)"),
     "#P5 left pane: the editor's drop handler reads only application/x-peak-docnode (other drops fall through to ProseMirror), maps the drop with posAtCoords and prevents the default");
@@ -58579,7 +58583,7 @@ import { renderToStaticMarkup as p5zMarkup } from "react-dom/server";
     "#P5 final: PackageDocView renders <ol start> for a list that doesn't begin at 1, and a plain <ol> otherwise");
 
   // (4) The over-the-caps flag survives an unmount; flush is on the editor API and runs before saveNow reads the document.
-  const ed = rd("src/components/package-doc/editor/package-doc-editor.tsx"), pstep = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  const ed = rd("src/components/package-doc/editor/package-doc-editor.tsx"), pstep = rd("src/app/(app)/estimator/steps/package-narrative-tab.tsx");
   const cleanup = ed.slice(ed.indexOf("// Unmount (step change…)"), ed.indexOf("// Back on the step"));
   ok(cleanup.length > 100 && !cleanup.includes("onOverRef.current?.(false)") && ed.includes("flush,\n    };") && rd("src/lib/package-doc/insert.ts").includes("flush: () => void;") &&
      ed.includes("overDraft") && ed.includes("onOverRef.current?.(st.level === \"over\", st.level === \"over\" ? raw : null)"),
@@ -59507,7 +59511,7 @@ import {
     "#314 review (2): restoring a revision that brings back a removed estimate-owned option brings it back unlinked (the copy rule)");
   const panel = rd("src/app/(app)/estimator/package-staff-panel.tsx");
   ok(panel.includes("GRID_LINK_COPY.generateNeedsDesign") && !panel.includes("Link a Grid design to this quote first.") && panel.includes("openGridDesignForQuoteAction(quoteId)") &&
-     panel.includes("disabled={gridPending || !panel.canCreate}") && rd("src/app/(app)/estimator/steps/package-step.tsx").includes("title={GRID_LINK_COPY.saveFirst}"),
+     panel.includes("disabled={gridPending || !panel.canCreate}") && rd("src/app/(app)/estimator/steps/package-narrative-tab.tsx").includes("title={GRID_LINK_COPY.saveFirst}"),
     "#314 pin: Build package — Design in the Grid (pending state, needs create, disabled until saved); Generate from Grid's tooltip reads 'Design in the Grid first.'");
   const qb = rd("src/app/(app)/design/grid/[id]/workspace/quote-button.tsx");
   ok(qb.indexOf("if (estimateLink) {") < qb.indexOf("runQuote(false)") && rd("src/app/(app)/design/grid/[id]/workspace/bom-panel.tsx").includes("{estimateLink ? ("),
@@ -59529,7 +59533,7 @@ import {
     "#316 pin: Home → My designs renders Open estimate → instead of Add to Quotes for an estimate-linked design, loaded in one batch by the widget");
   ok(acts.includes("estimateRefusal(estimateLink.quoteId)") && rd("src/app/(app)/design/designs/actions.ts").includes("createDraftQuoteAction(d.gridProjectId, null)") && rd("src/app/(app)/home-actions.ts").includes("promoteDesignAction"),
     "#316 pin: the server refusals stay — both dashboards' promote still goes through createDraftQuoteAction, which refuses an estimate-linked design");
-  const pstep = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  const pstep = rd("src/app/(app)/estimator/steps/package-narrative-tab.tsx");
   ok(pstep.includes("beforeGrid={pdfDirty ? saveNow : undefined}") && pstep.includes("    saveNow,\n") && !rd("src/app/(app)/estimator/steps/send-step.tsx").includes("beforeGrid") && !rd("src/app/(app)/estimator/client-link-panel.tsx").includes("beforeGrid"),
     "#316 pin: Build package passes the Estimator's awaitable saveNow behind pdfDirty (the PrintButton pattern); the other PackageStaffPanel mounts do not");
   const sbg = panel.slice(panel.indexOf("const saveBeforeGrid = async"), panel.indexOf("const openLinkedGrid = "));
@@ -69734,4 +69738,25 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   ok(["packageSelection,", "setPackageSwitch,", "setDatasheetsIncluded,", "selectionSaving,", "selectionError,", "selectionSettled,", "purchasePerksDocLine,", "revDateMs,"].every((k) => ret.includes(k)),
     "#333 hook: EstimatorState exposes the selection, its setters, selectionSettled and the live BOM's perks line / Rev date");
   ok(hook.includes("creditInfo && customerId && creditInfo.customerId === customerId ? creditInfo.purchasePerksDocLine"), "#333 hook: the perks line is used only when the credit read is for this customer");
+}
+
+// ---- Task 10: the Build package shell + Narrative tab (source pins) ----
+{
+  const rdq = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator", f), "utf8");
+  const shell = rdq("steps/package-step.tsx");
+  const narr = rdq("steps/package-narrative-tab.tsx");
+  const col = rdq("narrative-column.tsx");
+  ok(shell.includes('role="tablist"') && shell.includes('role="tab"') && shell.includes("parsePackageTab(params.get(\"ptab\"))") && shell.includes("packageTabSearch(window.location.search, to)") && shell.includes("nextPackageTab(tab, e.key)"),
+    "#333 shell: a tablist reads ?ptab= (parsePackageTab) and writes it with pushState(packageTabSearch), ←/→/Home/End");
+  ok(shell.includes('<div id={packageTabPanelId("narrative")} role="tabpanel" aria-labelledby={packageTabId("narrative")} style={{ ...PANEL, display: tab === "narrative" ? "flex" : "none" }}>') &&
+     !/\{tab === "narrative" && /.test(shell),
+    "#333 shell: the Narrative panel is always mounted and hidden with display: \"none\" — never conditionally rendered (TipTap keeps its undo)");
+  ok(/\{visited\.bom && \(/.test(shell) && /\{visited\.client && \(/.test(shell) && shell.includes('display: tab === "bom" ? "flex" : "none"') && shell.includes('display: tab === "client" ? "flex" : "none"'),
+    "#333 shell: BOM quote and Client package mount on first visit, then stay mounted while hidden");
+  ok(!/<select[\s\S]{0,200}presentation/.test(col) && !col.includes('aria-label="Customer presentation"') && col.includes("Change in Client package →") && col.includes("Prints on the quote only in Narrative mode."),
+    "#333 narrative column: no presentation select — a read-only \"Prints as …\" line links to Client package (the hint stays)");
+  ok(narr.includes('<PackageStaffPanel quoteId={loadedId} section="grid"') && !narr.includes("<PdfOptionsPanel") && narr.includes("<QuotePeopleFields") && narr.includes("<CoverPackagePanel"),
+    "#333 Narrative tab: the aside keeps people, cover and Design in the Grid; Show on PDF and the documents block left");
+  ok(narr.includes("if (active) focusNarrIfPending();"), "#333 Narrative tab: a pending narrative focus runs when the tab comes into view");
+  ok(!/\bsection="package"/.test(readJoined(ESTIMATOR_FILES) + rdq("client-link-panel.tsx")), "#333: PackageStaffPanel's \"package\" section is retired");
 }

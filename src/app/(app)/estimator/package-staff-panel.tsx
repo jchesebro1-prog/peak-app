@@ -19,6 +19,11 @@ import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
  * Rebuild package. Reads its own state (packagePanelAction) on mount and
  * after each action — no quote data comes from the Estimator.
  * #305: `section` lets the Package step show the package half and Send & track the responses.
+ * #333: Build package splits it — "documents" (gap chips, the datasheet book,
+ * drawings, Rebuild package, Include Peak header) on the Client package tab,
+ * "grid" (Design in the Grid, authoring) on the Narrative tab; "all" (the
+ * default) is the Client link panel's whole block. `refreshKey` re-reads the
+ * panel when it changes (the project's package selection after a write lands).
  */
 
 const FAILED = "Could not reach the server. Try again.";
@@ -33,9 +38,12 @@ export function PackageStaffPanel({
   quoteId,
   section = "all",
   beforeGrid,
+  refreshKey,
 }: {
   quoteId: string;
-  section?: "all" | "package" | "responses";
+  section?: "all" | "documents" | "grid" | "responses";
+  /** #333: a change re-reads the panel (gap chips follow the saved selection). */
+  refreshKey?: string;
   /** #316: saves the estimate's unsaved edits first (the Estimator's awaitable `saveNow`) — the Grid's From-estimate tray reads the SAVED quote. Resolves to false when nothing was written. Omitted = nothing to save. */
   beforeGrid?: () => Promise<number | false>;
 }) {
@@ -67,7 +75,7 @@ export function PackageStaffPanel({
     return () => {
       live = false;
     };
-  }, [quoteId]);
+  }, [quoteId, refreshKey]);
 
   const reload = async () => {
     try {
@@ -220,10 +228,12 @@ export function PackageStaffPanel({
 
   if (!panel) return <span style={small}>{err || "Loading the client package…"}</span>;
   const canUpload = panel.canSend && panel.uploads && !pending;
+  const showDocuments = section === "all" || section === "documents";
+  const showGrid = section === "all" || section === "grid";
 
   return (
     <div data-testid="package-staff" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-      {section !== "responses" && (
+      {showDocuments && (
         <>
           {panel.gaps.length > 0 && (
             <div data-testid="package-gaps" style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
@@ -306,6 +316,10 @@ export function PackageStaffPanel({
             </button>
           </div>
           {!panel.uploads && <span style={small}>{PACKAGE_FILES_COPY.noStorage}</span>}
+        </>
+      )}
+      {showGrid && (
+        <>
           {/* #314 — draw this estimate's plans in the Grid; the estimate keeps its parts and prices. */}
           {panel.gridEligible && (
             <div data-testid="package-grid-design" style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
@@ -341,7 +355,7 @@ export function PackageStaffPanel({
         </>
       )}
 
-      {section !== "package" && (
+      {(section === "all" || section === "responses") && (
         <>
           <span style={label}>Client responses</span>
           {panel.responses.length === 0 ? (
@@ -373,7 +387,7 @@ export function PackageStaffPanel({
         </>
       )}
 
-      {section !== "responses" && (
+      {showDocuments && (
         <>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
             <button type="button" onClick={rebuild} disabled={!panel.canSend || pending} style={{ ...linkBtn, color: "var(--accent)", ...(panel.canSend ? {} : off) }}>
