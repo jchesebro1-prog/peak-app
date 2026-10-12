@@ -50,6 +50,8 @@ import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace, Rem
 import type { EstimateTrayData } from "@/lib/design/estimate-tray";
 import type { GridIntakeNotice } from "@/lib/design/grid-plan-intake";
 import { riserPromptForRouteAction } from "./conduit-riser/actions";
+import { setPartDeviceTypeAction } from "@/app/(app)/catalog/device-types/actions";
+import { prefixWouldChange, PREFIX_HINT, typeEditTargets } from "@/lib/design/grid-type-edit";
 import { addAnswerHides, promptRiserSystem, type PromptTicket } from "@/lib/design/conduit-riser/editor-rules";
 import { placementSystem } from "@/lib/design/grid-drawing-set";
 import {
@@ -70,6 +72,7 @@ import {
   setTagFieldsAction,
   restoreItemsAction,
   setPlacementsCategoryAction,
+  setPlacementsSpaceAction,
   setSymbolDisplayAction,
   setSymbolLookAction,
   setVenueAction,
@@ -362,6 +365,12 @@ export type GridEditorProps = {
   laborLines: GridLaborLine[];
   /** #226: the curated device types (palette chips, Layers). */
   deviceTypes: DeviceType[];
+  /** Grid notes #2: an admin (manage_users) may change a part's device type
+   *  from the Property Editor / Spreadsheet (the action re-checks). */
+  canEditTypes?: boolean;
+  /** Grid notes #2: normalized raw category → live catalog parts in it, for
+   *  the "Apply to the whole category (N parts)" checkbox (library categories only). */
+  typeCategoryCounts?: Record<string, number>;
   /** #321: digits a designator number prints with (Grid Settings → Designator numbers). */
   designatorDigits: 1 | 2;
   /** #321: the active option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
@@ -403,6 +412,7 @@ export type GridEditorProps = {
 /** Stable empties for the optional #321 props (memo dependencies). */
 const NO_CONDUIT_SIZES: ConduitSize[] = [];
 const NO_PARTS: PartLite[] = [];
+const NO_COUNTS: Record<string, number> = {};
 
 function useGridEditorImpl(props: GridEditorProps) {
   const {
@@ -429,6 +439,8 @@ function useGridEditorImpl(props: GridEditorProps) {
     schedule,
     symbolUrls,
   } = props;
+  const canEditTypes = props.canEditTypes ?? false;
+  const typeCategoryCounts = props.typeCategoryCounts ?? NO_COUNTS;
   const estimateLink = props.estimateLink ?? null;
   const estimateTray = props.estimateTray ?? null;
   const intakeNotices = props.intakeNotices ?? [];
@@ -2449,6 +2461,75 @@ function useGridEditorImpl(props: GridEditorProps) {
     [project.id, router, noteAction, flushNudge, record]
   );
 
+  /* --------------------- space pin + type (Grid notes #2) --------------------- */
+
+  /** Pin devices to a space (null = back to "from position") — one write,
+   *  one undo step. Devices already where asked are left alone. Resolves true
+   *  when it saved (or there was nothing to change). */
+  const saveSpace = useCallback(
+    async (ids: string[], spaceId: string | null): Promise<boolean> => {
+      const byId = new Map(placements.map((pl) => [pl.id, pl]));
+      const items = ids.filter((id) => byId.has(id) && (byId.get(id)!.spaceId ?? null) !== spaceId).map((id) => ({ id, spaceId }));
+      if (!items.length) return true;
+      if (!(await flushNudge())) return false;
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setPlacementsSpaceAction(project.id, items);
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        const name = spaceId ? (project.spaces || []).find((sp) => sp.id === spaceId)?.name ?? "a space" : null;
+        const what = items.length > 1 ? `${items.length} devices` : "a device";
+        noteAction(name ? `Pinned ${what} to ${name}` : `Set ${what} back to its space by position`);
+        record({ label: stepLabel(spaceId ? "pin space" : "unpin space", items.length), forward: { kind: "space", items }, inverse: { kind: "space", items: r.previous } });
+        router.refresh();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [placements, project.id, project.spaces, router, noteAction, flushNudge, record]
+  );
+
+  /** Admin: set the device type of the catalog parts behind `pls` — per part
+   *  (null = back to the category's type) or, `wholeCategory`, for their whole
+   *  raw categories. A catalog change, so NOT on the undo stack (and it leaves
+   *  the stack alone: it touches no placement). Resolves the prefix hint
+   *  ("" when designators' prefixes don't change), or null when refused. */
+  const saveDeviceType = useCallback(
+    async (pls: readonly GridPlacement[], typeKey: string | null, wholeCategory: boolean): Promise<string | null> => {
+      const targets = typeEditTargets(pls, partById);
+      if (!targets.length) {
+        setErr("None of these devices has a catalog part whose type can change.");
+        return null;
+      }
+      const hint = prefixWouldChange(pls, partById, typeKey, wholeCategory, deviceTypes) ? PREFIX_HINT : "";
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await setPartDeviceTypeAction(targets.map((t) => t.sku), typeKey, { wholeCategory });
+        if (!r.ok) {
+          setErr(r.error);
+          return null;
+        }
+        noteAction(`${r.message ?? "Device type saved."}${hint ? ` ${hint}` : ""}`);
+        router.refresh();
+        return hint;
+      } catch {
+        setErr(SAVE_FAILED);
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [partById, deviceTypes, router, noteAction]
+  );
+
   /* ------------------------- designators (#320) ------------------------- */
 
   /** Set (or, with "", re-issue) designators — one write, one undo step.
@@ -2787,6 +2868,12 @@ function useGridEditorImpl(props: GridEditorProps) {
         }
         case "tag": {
           const r = await setTagFieldsAction(project.id, c.items);
+          if (!r.ok) return r;
+          router.refresh();
+          return { ok: true };
+        }
+        case "space": {
+          const r = await setPlacementsSpaceAction(project.id, c.items);
           if (!r.ok) return r;
           router.refresh();
           return { ok: true };
@@ -3181,6 +3268,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     designatorDupes,
     saveDesignators,
     saveTags,
+    saveSpace,
+    saveDeviceType,
+    canEditTypes,
+    typeCategoryCounts,
     renumberDesignators,
     focusPlacements,
     clipboard,

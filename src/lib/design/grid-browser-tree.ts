@@ -11,7 +11,7 @@
  */
 import type { GridPlacement, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import { placementQty } from "./grid-bom";
-import { spaceOf } from "./grid-geometry";
+import { spaceOfPlacement } from "./grid-geometry";
 
 export type TreeKind = "design" | "sheet" | "page" | "space" | "group" | "device" | "wires" | "wire";
 
@@ -110,7 +110,7 @@ function pageChildren(sheetId: string, page: number, i: BrowserTreeInput): TreeN
   const inSpace = new Map<string, GridPlacement[]>();
   const loose: GridPlacement[] = [];
   for (const pl of pls) {
-    const s = spaceOf(pl, spaces);
+    const s = spaceOfPlacement(pl, spaces);
     if (!s) {
       loose.push(pl);
       continue;

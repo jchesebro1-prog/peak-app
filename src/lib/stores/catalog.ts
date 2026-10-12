@@ -229,6 +229,13 @@ export type CatalogPart = {
    *  Riser data sheet's Cables tab) — no importer, enricher or price-book patch
    *  carries it. */
   cableOdIn?: number;
+  /** Grid notes #2: an admin's per-part Grid device type (a DeviceType key) —
+   *  wins over the raw category's type-map entry wherever the part is typed
+   *  (device-types typeOfPart). Absent = from the category. An archived or
+   *  unknown key reads as absent. Written ONLY by setPartsDeviceType (admin,
+   *  manage_users) through mergeUpsert — no importer, enricher, price-book or
+   *  part-form patch carries it. */
+  deviceTypeKey?: string;
 } & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
 /** All parts (port of window.MASTER_CATALOG reads). */

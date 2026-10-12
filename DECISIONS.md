@@ -11116,3 +11116,39 @@ riser page and the set (screen-only, under each A/V sheet) both show the Downloa
 `riserBom` reads every riser on the option. A wire is "In conduit — by others" if **either** riser says so (the union).
 Conduit demand sums every riser's runs, and refusals are collected from both, each sentence once. An estimate-owned
 option prices nothing from either riser. Punch item #328.
+
+## D832. A part can carry its own Grid device type, set by an admin (Grid notes #2, 2026-10-12)
+
+Jeff: a Shure SM58-LC read as Dimming & Power because its raw catalog category was mapped there, and the only fix was
+re-typing the whole category. A catalog part now has an optional `deviceTypeKey`: the admin's own type for that part.
+It wins over the category's map entry everywhere the part is typed, because `typeOfPart` reads it first and every
+surface goes through `typeOfPart` (`gridPartsFrom` for the palette, layers, legends, designators, schedule, drawing
+set and risers; the riser data sheet; Catalog → Device types counts; the Product Library's catalog search). An
+archived or unknown key reads as absent, so the category decides again. Only `setPartDeviceTypeAction`
+(`manage_users`, re-checked on the server) writes it, through `mergeUpsert`; the part form, importers and enrichers
+never carry it. The Grid's Property Editor (one device or several) and Spreadsheet Type cell show a type select to
+admins ("Auto (from category: X → Y)" clears the override); everyone else sees the type as text. The Property Editor
+also offers **Apply to the whole '<category>' category (N parts)**: that re-types the raw category through the existing
+map (an admin entry) and clears the override on the selected parts, so the category rule is what shows. Fabric and
+Labor never take a type. A type change is a catalog change, so it is not on the Grid's undo stack, and it does not
+renumber designators: when a numbered device's prefix would change, the editor says "Designators keep their numbers —
+Renumber to apply the new prefix." The part editor shows the same select (admin only, saves on its own), and Catalog →
+Device types notes how many parts in each category have their own type. The SM58's legend row read
+"Dimming & Power — Cardioid Dynamic" because its Grid entry carries its own mic icon, which differed from the Dimming &
+Power icon; typed Microphones, the icons match and the row reads "Microphones". No migration.
+
+## D833. A device can be pinned to a space (Grid notes #2, 2026-10-12)
+
+D109 kept a device's space computed from where it sits, never stored. Jeff wants to pick the room from the Property
+Editor, so a placement now has an optional `spaceId` pin that wins over position. "Auto (from position): <room>"
+removes the pin. One resolver, `spaceOfPlacement`, returns the pinned space when it still exists on the device's own
+sheet and page, and otherwise falls back to `spaceOf` (position, smallest wins). Every placement → space read uses
+it: per-space BOM rollups and the Spaces panel, schedule sections, the riser sketch (wire ends snapped to a device
+follow that device), riser documents, the conduit riser, designator reading order, the Browser tree, Spreadsheet rows
+and the Property Editor. A click on the plan and a free wire end still use position. A dead pin (space deleted, or on
+another page) is ignored, and `removeSpace` also clears pins to the space it deletes. `setPlacementsSpace` writes pins
+through `batchEdit`. The whole batch is refused unless each pin names a space on that device's own sheet and page;
+the check runs before the write and again inside it. A pin is a hand edit, so it clears the #211 auto tag. Pins are
+undoable (a `space` undo command). An undo of a delete puts a device's pin back. Paste does not carry pins (the copy
+may land elsewhere). Spaces are project-level, so option copies and revisions carry `spaceId` unchanged. The Property
+Editor (one device or several on one page) and the Spreadsheet's Space cell edit it. No migration.

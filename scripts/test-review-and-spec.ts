@@ -11666,6 +11666,7 @@ seeded()
   .then(() => gridNotes6Checks())
   .then(() => gridNotes7Checks())
   .then(() => gridNotes5WireStarterChecks())
+  .then(() => gridNotes2Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -66601,4 +66602,240 @@ async function gridNotes5WireStarterChecks(): Promise<void> {
   ok(wp5.includes('href="/design/grid/settings#wire-types"') && wp5.includes("No per-foot cable in the Grid library yet") && !wp5.includes("and it appears here"), "Grid notes #5: the Wires pane's empty hint points admins to Grid Settings → Wire types");
   ok(wp5.includes("export const needsWirePrice = (p: Pick<PartLite, \"list\" | \"cost\">) => !(p.list > 0) && !(p.cost > 0);") && (wp5.match(/<span style=\{NEEDS_PRICE\}>Needs price<\/span>/g) || []).length >= 3 && wp5.includes('needsWirePrice(p) ? "needs price"'),
     "Grid notes #5: an unpriced cable shows Needs price in the pick list, under the picker and on its runs");
+}
+
+/* ---------------- Grid notes #2: Type (per-part / per-category) + Space pin ---------------- */
+async function gridNotes2Checks(): Promise<void> {
+  const DTP = await import("@/lib/design/device-types");
+  const DT = await import("@/lib/stores/device-types");
+  const Cat = await import("@/lib/stores/catalog");
+  const GP = await import("@/lib/design/grid-parts");
+  const TE = await import("@/lib/design/grid-type-edit");
+  const GI = await import("@/lib/design/grid-icons");
+  const GEO = await import("@/lib/design/grid-geometry");
+  const BOM = await import("@/lib/design/grid-bom");
+  const SCH = await import("@/lib/design/grid-schedule");
+  const RIS = await import("@/lib/design/grid-riser");
+  const DES = await import("@/lib/design/designators");
+  const ROWS = await import("@/lib/design/grid-device-rows");
+  const G = await import("@/lib/stores/grid-projects");
+  const DS = await import("@/db/doc-store");
+  const { ensureOptions } = await import("@/lib/design/grid-options");
+  const { can } = await import("@/lib/team");
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const { getDb: getDbGn2 } = await import("../src/db");
+  const { blobs: blobsGn2 } = await import("../src/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  type CP = import("@/lib/stores/catalog").CatalogPart;
+  const types = DTP.deviceTypesFrom(undefined);
+  const map: import("@/lib/design/device-types").TypeMap = { audio: { typeKey: "dimming-power", by: "auto", at: 1 } };
+
+  // ---- 1. the type rule: an override wins wherever the part is typed
+  ok(DTP.typeOfPart({ category: "Audio" }, map, types) === "dimming-power" && DTP.typeOfPart({ category: "Audio", deviceTypeKey: "microphones" }, map, types) === "microphones",
+    "Grid notes #2: a part's own device type wins over its category's map entry");
+  ok(DTP.typeOfPart({ category: "Audio", deviceTypeKey: null }, map, types) === "dimming-power" && DTP.typeOfPart({ category: "Audio", deviceTypeKey: "" }, map, types) === "dimming-power",
+    "Grid notes #2: a null / blank override reads the category again");
+  const archived = types.map((t) => (t.key === "microphones" ? { ...t, archived: true } : t));
+  ok(DTP.typeOfPart({ category: "Audio", deviceTypeKey: "microphones" }, map, archived) === "dimming-power" && DTP.typeOfPart({ category: "Audio", deviceTypeKey: "no-such" }, map, types) === "dimming-power",
+    "Grid notes #2: an archived or unknown override reads as absent (the category decides)");
+
+  // ---- 2. planPartTypeEdit: per part, null clears, whole category clears the part override
+  const sm58 = { sku: "SM58-LC", category: "Audio" };
+  const p1 = DTP.planPartTypeEdit([sm58, { sku: "B", category: "Audio", deviceTypeKey: "microphones" }], "microphones", false, types);
+  ok(p1.ok && p1.plan.categories.length === 0 && p1.plan.overrides.length === 1 && p1.plan.overrides[0].sku === "SM58-LC" && p1.plan.overrides[0].deviceTypeKey === "microphones",
+    "Grid notes #2 plan: per part, each part whose override changes gets the type (an unchanged one is skipped)");
+  const p2 = DTP.planPartTypeEdit([{ ...sm58, deviceTypeKey: "microphones" }], null, false, types);
+  ok(p2.ok && p2.plan.overrides.length === 1 && p2.plan.overrides[0].deviceTypeKey === undefined, "Grid notes #2 plan: Auto (null) clears the part's override");
+  const p3 = DTP.planPartTypeEdit([{ ...sm58, deviceTypeKey: "speakers" }, { sku: "X", category: " audio " }], "microphones", true, types);
+  ok(p3.ok && p3.plan.categories.join() === "Audio" && p3.plan.overrides.length === 1 && p3.plan.overrides[0].sku === "SM58-LC" && p3.plan.overrides[0].deviceTypeKey === undefined,
+    "Grid notes #2 plan: the whole-category box re-types the raw category once and clears THESE parts' own overrides");
+  const refusals = [
+    DTP.planPartTypeEdit([sm58], null, true, types),
+    DTP.planPartTypeEdit([sm58], "no-such", false, types),
+    DTP.planPartTypeEdit([sm58], "microphones", false, archived),
+    DTP.planPartTypeEdit([{ sku: "F", category: "Fabric" }], "drapery", false, types),
+    DTP.planPartTypeEdit([{ sku: "L", category: "Labor" }], "fixtures", true, types),
+    DTP.planPartTypeEdit([{ sku: "N", category: "" }], "fixtures", true, types),
+    DTP.planPartTypeEdit([], "fixtures", false, types),
+  ];
+  ok(refusals.every((r) => !r.ok), "Grid notes #2 plan: refuses Auto for a whole category, unknown/archived types, Fabric/Labor, a blank category (category mode) and an empty pick");
+  ok(DTP.planPartTypeEdit([{ sku: "N", category: "" }], "fixtures", false, types).ok, "Grid notes #2 plan: a part with no category can still take its own type");
+
+  // ---- 3. every surface reads it through gridPartsFrom; the review rows count overrides
+  const sym = (id: string, extra: Partial<import("@/lib/stores/grid-catalog").GridSymbol> = {}) =>
+    ({ id, name: "Cardioid Dynamic", manufacturer: "Shure", modelNumber: id, scope: "Audio", category: "Audio", width: 40, height: 40, ports: [], pricingPartId: id, createdBy: "t", createdAt: 0, updatedAt: 0, ...extra }) as import("@/lib/stores/grid-catalog").GridSymbol;
+  const cpart = (o: Partial<CP> & { id: string }): CP => ({ sku: o.id, desc: "Cardioid Dynamic", category: "Audio", unit: "ea", list: 100, cost: 50, ...o }) as CP;
+  const ctx = { types, map };
+  const [before] = GP.gridPartsFrom([sym("SM58-LC", { icon: "microphone" })], [cpart({ id: "SM58-LC" })], {}, { deviceTypes: ctx });
+  const [after] = GP.gridPartsFrom([sym("SM58-LC", { icon: "microphone" })], [cpart({ id: "SM58-LC", deviceTypeKey: "microphones" })], {}, { deviceTypes: ctx });
+  ok(before.deviceType === "dimming-power" && before.gridScope === "Lighting" && after.deviceType === "microphones" && after.deviceTypeLabel === "Microphones" && after.gridScope === "Audio",
+    "Grid notes #2: gridPartsFrom types (and scopes) the part by its override — palette, layers, legends, schedule all follow");
+  ok(after.catalogCategory === "Audio" && after.deviceTypeOverride === "microphones" && after.categoryDeviceType === "dimming-power" && before.deviceTypeOverride === undefined,
+    "Grid notes #2: gridPartsFrom stamps the raw category, the stored override and the category's own type for the Type control");
+  const fb = GP.gridPartsFrom([], [cpart({ id: "FB1", deviceTypeKey: "speakers" })], {}, { catalogFallback: true, deviceTypes: ctx });
+  ok(fb[0].deviceType === "speakers" && fb[0].gridScope === "Audio" && fb[0].deviceTypeOverride === "speakers", "Grid notes #2: catalog-fallback rows honour the override too");
+  const rows = DTP.typeReviewRows([{ category: "Audio" }, { category: "Audio", deviceTypeKey: "microphones" }, { category: "audio ", deviceTypeKey: "speakers" }], map, types);
+  ok(rows.length === 1 && rows[0].count === 3 && rows[0].overrides === 2, "Grid notes #2: Catalog → Device types counts the parts with their own type per category");
+  ok(rd("src/lib/design/grid-catalog-search.ts").includes('"deviceTypeKey",'), "Grid notes #2: the Product Library's catalog search reads the override with its light fields (node filters follow it)");
+
+  // ---- 4. the SM58 legend: a per-entry icon split the row as "type — desc"; the override fixes the head
+  const symCtx = GI.symbolContext({}, types);
+  const legBefore = GI.legendRows([before], symCtx);
+  const legAfter = GI.legendRows([after], symCtx);
+  ok(legBefore.length === 1 && legBefore[0].label === "Dimming & Power — Cardioid Dynamic",
+    "Grid notes #2 legend: the SM58 read 'Dimming & Power — Cardioid Dynamic' because its entry's own mic icon differs from the Dimming & Power icon");
+  ok(legAfter.length === 1 && legAfter[0].label === "Microphones", "Grid notes #2 legend: with the part typed Microphones the entry's icon matches the type's, so the row reads just 'Microphones'");
+
+  // ---- 5. the Grid Type control's helpers
+  const lite = new Map<string, import("@/lib/design/grid-type-edit").TypeEditPart>([
+    ["SM58-LC", { ...after, deviceTypeOverride: undefined, deviceType: "dimming-power" }],
+    ["sym-b", { id: "sym-b", pricingPartId: "CAT-B", catalogCategory: "Audio", categoryDeviceType: "dimming-power", deviceType: "dimming-power" }],
+    ["asm:1", { id: "asm:1", virtual: true, kind: "assembly" }],
+    ["CRO", { id: "CRO", catalogCategory: "Relays", deviceType: "dimming-power", designatorCode: "CRO" }],
+  ]);
+  const tg = TE.typeEditTargets([{ partId: "SM58-LC" }, { partId: "SM58-LC" }, { partId: "sym-b" }, { partId: "asm:1" }, { partId: "SM58-LC", curtain: {} }], lite);
+  ok(tg.map((t) => t.sku).join() === "SM58-LC,CAT-B", "Grid notes #2 control: a selection edits its distinct catalog parts (pricing id), never assemblies/virtual parts or curtains");
+  ok(TE.sharedOverride(tg) === "" && TE.autoTypeOptionLabel(tg, types) === "Auto (from category: Audio → Dimming & Power)",
+    "Grid notes #2 control: Auto names the category and what it maps to");
+  ok(TE.prefixWouldChange([{ partId: "SM58-LC", designator: "DIM-3" }], lite, "microphones", false, types) &&
+     !TE.prefixWouldChange([{ partId: "SM58-LC" }], lite, "microphones", false, types) &&
+     !TE.prefixWouldChange([{ partId: "CRO", designator: "CRO-01" }], lite, "microphones", false, types) &&
+     !TE.prefixWouldChange([{ partId: "SM58-LC", designator: "DIM-3" }], lite, null, false, types),
+    "Grid notes #2 control: the Renumber hint shows only when a numbered device's prefix would change (not for an own designator code, nor when Auto keeps the type)");
+  ok(TE.PREFIX_HINT === "Designators keep their numbers — Renumber to apply the new prefix.", "Grid notes #2 control: the hint text");
+
+  // ---- 6. admin only: the action re-checks manage_users; clients see a flag
+  const acts = rd("src/app/(app)/catalog/device-types/actions.ts");
+  const body = acts.slice(acts.indexOf("export async function setPartDeviceTypeAction"));
+  ok(/\): Promise<Result> \{\n  await requirePerm\("manage_users"\);/.test(body) && body.includes("setPartsDeviceType(") && can("manage_users", ["Admin"]) && !can("manage_users", ["Estimator"]) && !can("manage_users", ["Manager"]),
+    "Grid notes #2: setPartDeviceTypeAction calls requirePerm(\"manage_users\") first — a non-admin is refused on the server");
+  const page = rd("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(page.includes('canEditTypes={can("manage_users", user.roles)}'), "Grid notes #2: the Grid page passes the admin flag the Type control reads");
+  ok(!rd("src/app/(app)/catalog/part-form.ts").includes("deviceTypeKey"), "Grid notes #2: the part form's save never carries deviceTypeKey (only the admin action writes it)");
+  for (const f of ["src/app/(app)/design/grid/[id]/workspace/type-space-controls.tsx", "src/app/(app)/catalog/part-device-type-field.tsx", "src/lib/design/grid-type-edit.ts"])
+    ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(rd(f)), `Grid notes #2: ${f} imports no store at runtime (type-only imports are erased — client-safe)`);
+
+  // ---- 7. the space pin resolver (pure)
+  const sq = (x0: number, y0: number, x1: number, y1: number) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+  const spaces = [
+    { id: "sp-house", sheetId: "S1", page: 1, name: "House", points: sq(0, 0, 1, 1) },
+    { id: "sp-booth", sheetId: "S1", page: 1, name: "Booth", points: sq(0.6, 0.6, 0.9, 0.9) },
+    { id: "sp-other", sheetId: "S1", page: 2, name: "Lobby", points: sq(0, 0, 1, 1) },
+  ];
+  const at = { sheetId: "S1", page: 1, x: 0.2, y: 0.2 };
+  ok(GEO.spaceOfPlacement(at, spaces)?.id === "sp-house" && GEO.spaceOfPlacement({ ...at, spaceId: "sp-booth" }, spaces)?.id === "sp-booth",
+    "Grid notes #2 pin: an unpinned device is in the room it sits in; a pinned one is in its pinned room whatever its position");
+  ok(GEO.spaceOfPlacement({ ...at, spaceId: "sp-gone" }, spaces)?.id === "sp-house" && GEO.pinnedSpaceOf({ ...at, spaceId: "sp-gone" }, spaces) === null,
+    "Grid notes #2 pin: a pin to a deleted space is dead — the position decides");
+  ok(GEO.spaceOfPlacement({ ...at, spaceId: "sp-other" }, spaces)?.id === "sp-house" && GEO.pinnedSpaceOf({ ...at, spaceId: "sp-other" }, spaces) === null,
+    "Grid notes #2 pin: a pin to a space on another page is ignored");
+  ok(GEO.spacePinRefusal([at], spaces, "sp-booth") === null && GEO.spacePinRefusal([at], spaces, "sp-other") !== null && GEO.spacePinRefusal([at], spaces, "sp-gone") !== null,
+    "Grid notes #2 pin: spacePinRefusal accepts a room on the device's page, refuses another page's or a missing one");
+
+  // ---- 8. rollups follow the pin: BOM by space, schedule, riser, reading order, Spreadsheet rows
+  const pls = [
+    { id: "gp-a", sheetId: "S1", page: 1, x: 0.2, y: 0.2, partId: "SM58-LC", spaceId: "sp-booth" },
+    { id: "gp-b", sheetId: "S1", page: 1, x: 0.25, y: 0.2, partId: "SM58-LC" },
+  ];
+  const parts = [after];
+  const roll = BOM.bomBySpace(pls, parts, spaces);
+  ok(roll.find((r) => r.spaceId === "sp-booth")?.count === 1 && roll.find((r) => r.spaceId === "sp-house")?.count === 1, "Grid notes #2 pin: per-space BOM rollups follow the pin");
+  const sched = SCH.buildSchedule({ placements: pls, spaces, descOf: () => "Mic", wires: [] });
+  ok(sched.sections.map((x) => `${x.key}:${x.rows[0]?.qty}`).join() === "sp-house:1,sp-booth:1", "Grid notes #2 pin: schedule sections follow the pin");
+  const graph = RIS.riserGraph(pls, [], spaces, parts, []);
+  ok(graph.nodes.some((n) => n.spaceId === "sp-booth" && n.groups[0]?.qty === 1), "Grid notes #2 pin: the riser sketch puts a pinned device in its pinned room");
+  const order = DES.readingOrder(pls.map((p) => ({ ...p, designator: "" })), { sheetIds: ["S1"], spaces });
+  ok(order.map((p) => p.id).join() === "gp-b,gp-a", "Grid notes #2 pin: designator reading order groups by the pinned room (House before Booth)");
+  const drows = ROWS.deviceRows({
+    placements: pls.map((p) => ({ ...p, by: "t", at: 0 })) as import("@/lib/stores/grid-projects").GridPlacement[],
+    sheets: [{ id: "S1", name: "Plan" }],
+    spaces: spaces.map((x) => ({ ...x, color: "#000", by: "t", at: 0 })),
+    typeKeyOf: () => "microphones",
+    typeLabelOf: () => "Microphones",
+    modelOf: () => "",
+    descOf: () => "Mic",
+    duplicates: new Set(),
+  });
+  const ra = drows.find((r) => r.id === "gp-a")!;
+  ok(ra.space === "Booth" && ra.spacePinned && ra.autoSpace === "House" && !drows.find((r) => r.id === "gp-b")!.spacePinned,
+    "Grid notes #2 pin: a Spreadsheet row shows the pinned room, marks it pinned, and knows what Auto would give");
+  ok(ROWS.DEVICE_COLUMNS.find((c) => c.key === "space")?.pick === true && ROWS.DEVICE_COLUMNS.find((c) => c.key === "type")?.pick === true && !ROWS.EDIT_COLUMNS.includes("space" as never),
+    "Grid notes #2: Type and Space are select cells in the Spreadsheet, outside the typed-cell Tab walk");
+  const leftovers = ["src/app/(app)/design/grid/[id]/workspace/property-editor.tsx", "src/lib/design/grid-bom.ts", "src/lib/design/grid-schedule.ts", "src/lib/design/designators.ts", "src/lib/design/grid-browser-tree.ts", "src/lib/stores/grid-riser.ts", "src/lib/design/conduit-riser-server.ts", "src/lib/design/grid-riser-doc.ts"]
+    .filter((f) => /\bspaceOf\(/.test(rd(f)));
+  ok(leftovers.length === 0, `Grid notes #2 pin: placement → space reads go through spaceOfPlacement (${leftovers.join(", ") || "none left"})`);
+
+  // ---- 9. scratch DB: setPartsDeviceType + setPlacementsSpace
+  const ids = ["gridTypeMap"];
+  const db = await getDbGn2();
+  const snapshot = await db.select().from(blobsGn2).where(inArray(blobsGn2.id, ids));
+  const CAT = "TESTgn2 Audio Gear";
+  const A = fixtureId("gn2", "sm58");
+  const B = fixtureId("gn2", "beta58");
+  try {
+    for (const id of [A, B]) {
+      registerFixture("catalog_parts", id);
+      await DS.upsertDoc("catalog_parts", { id, sku: id, desc: "Cardioid Dynamic", category: CAT, unit: "ea", list: 100, cost: 50, note: "keep" } as never);
+    }
+    await DT.assignDeviceType([CAT], "dimming-power");
+    const r1 = await DT.setPartsDeviceType([A], "microphones");
+    const a1 = await Cat.get(A);
+    const tctx = { types: await DT.getDeviceTypes(), map: await DT.getTypeMap() };
+    ok(r1.ok && r1.parts === 1 && a1?.deviceTypeKey === "microphones" && a1.note === "keep" && a1.list === 100 && DTP.typeOfPart(a1, tctx.map, tctx.types) === "microphones" &&
+       DTP.typeOfPart((await Cat.get(B))!, tctx.map, tctx.types) === "dimming-power",
+      "Grid notes #2 store: a per-part type lands on that part only (merged — nothing else on the part changes); its category-mate keeps the category's type");
+    const r2 = await DT.setPartsDeviceType([A], null);
+    ok(r2.ok && (await Cat.get(A))?.deviceTypeKey === undefined, "Grid notes #2 store: Auto (null) clears the override");
+    await DT.setPartsDeviceType([A], "speakers");
+    const r3 = await DT.setPartsDeviceType([A], "microphones", { wholeCategory: true });
+    const m3 = await DT.getTypeMap();
+    const a3 = await Cat.get(A);
+    ok(r3.ok && r3.categories === 1 && r3.parts === 1 && a3?.deviceTypeKey === undefined && m3[DTP.normalizeRawCategory(CAT)]?.typeKey === "microphones" && m3[DTP.normalizeRawCategory(CAT)]?.by === "admin" &&
+       DTP.typeOfPart((await Cat.get(B))!, m3, tctx.types) === "microphones",
+      "Grid notes #2 store: the whole-category box re-types the category (admin entry), clears this part's override, and its category-mates follow");
+    ok(!(await DT.setPartsDeviceType([fixtureId("gn2", "missing")], "microphones")).ok && !(await DT.setPartsDeviceType([A], "no-such")).ok && !(await DT.setPartsDeviceType([], "microphones")).ok,
+      "Grid notes #2 store: refuses a missing part, an unknown type and an empty pick");
+  } finally {
+    await db.delete(blobsGn2).where(inArray(blobsGn2.id, ids));
+    for (const row of snapshot) await db.insert(blobsGn2).values(row);
+  }
+
+  const by = "Test";
+  const project = await G.createProject({ name: "Grid notes 2 design", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", project.id);
+  const sh = (await G.addSheet(project.id, { name: "Plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const opt = ensureOptions((await G.getProject(project.id))!).options[0].id;
+  await G.addSpace(project.id, { sheetId: sh.id, page: 1, name: "House", points: sq(0, 0, 1, 1), by });
+  await G.addSpace(project.id, { sheetId: sh.id, page: 1, name: "Booth", points: sq(0.6, 0.6, 0.9, 0.9), by });
+  await G.addSpace(project.id, { sheetId: sh.id, page: 2, name: "Lobby", points: sq(0, 0, 1, 1), by });
+  const live = async () => (await G.getProject(project.id))!;
+  const spIds = Object.fromEntries((await live()).spaces!.map((x) => [x.name, x.id]));
+  const pl1 = (await G.addPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.2, y: 0.2, partId: A, optionId: opt, by }))!.placements!.at(-1)!;
+  const pl2 = (await G.addPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.3, y: 0.2, partId: A, optionId: opt, by }))!.placements!.at(-1)!;
+  const pin = await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.Booth }]);
+  const q1 = await live();
+  const got1 = q1.placements!.find((x) => x.id === pl1.id)!;
+  ok(pin.ok && pin.value[0].spaceId === null && got1.spaceId === spIds.Booth && GEO.spaceOfPlacement(got1, q1.spaces!)?.name === "Booth",
+    "Grid notes #2 store: setPlacementsSpace pins a device and hands back the previous pin (none) for undo");
+  const refused = await G.setPlacementsSpace(project.id, [{ id: pl2.id, spaceId: spIds.Booth }, { id: pl1.id, spaceId: spIds.Lobby }]);
+  const q2 = await live();
+  ok(!refused.ok && /own sheet and page/.test(refused.error) && !q2.placements!.find((x) => x.id === pl2.id)!.spaceId && q2.placements!.find((x) => x.id === pl1.id)!.spaceId === spIds.Booth && q2.updatedAt === q1.updatedAt,
+    "Grid notes #2 store: a pin to a space on another page refuses the whole batch and writes nothing");
+  ok(!(await G.setPlacementsSpace(project.id, [{ id: pl2.id, spaceId: "sp-nope" }])).ok, "Grid notes #2 store: a pin to a space not on the design is refused");
+  const sched2 = SCH.buildSchedule({ placements: q2.placements!, spaces: q2.spaces!, descOf: () => "Mic", wires: [] });
+  ok(sched2.sections.find((x) => x.name === "Booth")?.rows[0]?.qty === 1 && sched2.sections.find((x) => x.name === "House")?.rows[0]?.qty === 1,
+    "Grid notes #2 store: the stored pin drives the schedule's sections");
+  const undo = await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: null }]);
+  ok(undo.ok && undo.value[0].spaceId === spIds.Booth && (await live()).placements!.find((x) => x.id === pl1.id)!.spaceId === undefined,
+    "Grid notes #2 store: null unpins (back to position) and returns the old pin");
+  await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.Booth }, { id: pl2.id, spaceId: spIds.Booth }]);
+  await G.removeSpace(project.id, spIds.Booth);
+  const q3 = await live();
+  ok(q3.placements!.every((x) => x.spaceId === undefined), "Grid notes #2 store: deleting a space clears the pins to it");
+  const actSrc = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  const restoreSrc = actSrc.slice(actSrc.indexOf("async function cleanRestoredPlacement"), actSrc.indexOf("export async function restoreItemsAction"));
+  ok(restoreSrc.includes("...(spaceId ? { spaceId } : {})") && actSrc.includes("export async function setPlacementsSpaceAction") && /setPlacementsSpaceAction\([\s\S]*?\{\n  await requireUser\(\);/.test(actSrc),
+    "Grid notes #2: undo of a delete restores a device's pin; the pin action requires a signed-in user");
 }

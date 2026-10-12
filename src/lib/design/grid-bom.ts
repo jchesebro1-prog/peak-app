@@ -73,6 +73,13 @@ export type PartLite = {
   deviceType?: string | null;
   /** #226 the type's display label, null when unmapped. */
   deviceTypeLabel?: string | null;
+  /** Grid notes #2 (set by gridPartsFrom with device types, catalog-linked
+   *  devices only): the pricing part's raw catalog category, its own stored
+   *  type override (absent = none), and the type its category alone maps to
+   *  — what the Type control's "Auto (from category …)" option names. */
+  catalogCategory?: string;
+  deviceTypeOverride?: string;
+  categoryDeviceType?: string | null;
   /** Grid-owned symbol metadata; pricing remains optional and separate. */
   manufacturer?: string;
   modelNumber?: string;
@@ -311,7 +318,7 @@ export function bomLines(
 
 /* --------------------------- per-space rollups --------------------------- */
 
-import { spaceOf, type SpaceLite } from "./grid-geometry";
+import { spaceOfPlacement, type SpaceLite } from "./grid-geometry";
 import { GRID_LAYERS, normalizeCategory, scopeOfPart, type GridLayer } from "./grid-scopes";
 
 /** One slice of a space's total - by scope, or by user category. */
@@ -354,6 +361,8 @@ export type RollupPlacementLite = {
   curtain?: GridCurtain | null;
   category?: string;
   qty?: number;
+  /** Grid notes #2: a space pin (spaceOfPlacement honours it). */
+  spaceId?: string;
 };
 
 function addSlice(slices: RollupSlice[], key: string, value: number, units = 1): void {
@@ -396,7 +405,7 @@ export function bomBySpace(
   for (const s of spaces) buckets.set(s.id, blank(s.id, s.name));
   const unassigned = blank(null, "Unassigned");
   for (const pl of placements) {
-    const home = spaceOf(pl, spaces);
+    const home = spaceOfPlacement(pl, spaces);
     const bucket = home ? buckets.get(home.id)! : unassigned;
     const value = pl.curtain
       ? (pl.id ? curtainPrices?.get(pl.id) : 0) || 0

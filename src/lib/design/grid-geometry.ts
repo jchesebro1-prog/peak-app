@@ -117,9 +117,11 @@ export function distToPolyline(p: Point, points: Point[], aspect: number): numbe
 }
 
 /**
- * The space a placement belongs to: smallest containing polygon on the
- * same sheet+page, or null. Smallest-wins is what makes nesting work —
- * a control booth drawn inside the house claims its own devices.
+ * The space a POINT falls in: smallest containing polygon on the same
+ * sheet+page, or null. Smallest-wins is what makes nesting work — a control
+ * booth drawn inside the house claims its own devices. A placement's space
+ * is spaceOfPlacement (which honours a pin); this is the position rule it
+ * falls back to, and what a click or a wire end uses.
  */
 export function spaceOf<T extends SpaceLite>(
   pl: { sheetId: string; page: number; x: number; y: number },
@@ -137,4 +139,40 @@ export function spaceOf<T extends SpaceLite>(
     }
   }
   return best;
+}
+
+/** A placement as the space resolver reads it: position + an optional pin. */
+export type SpacePinned = { sheetId: string; page: number; x: number; y: number; spaceId?: string | null };
+
+/**
+ * Grid notes #2: the space a device is PINNED to (`GridPlacement.spaceId`),
+ * when that space still exists on the device's own sheet + page; else null.
+ * A pin to a deleted space, or to a space on another sheet/page, is dead
+ * and ignored (removeSpace also clears pins to the space it deletes).
+ */
+export function pinnedSpaceOf<T extends SpaceLite>(pl: SpacePinned, spaces: readonly T[]): T | null {
+  if (!pl.spaceId) return null;
+  return spaces.find((s) => s.id === pl.spaceId && s.sheetId === pl.sheetId && s.page === pl.page) ?? null;
+}
+
+/**
+ * THE placement → space resolver (Grid notes #2): the pinned space when the
+ * pin is live, else the position rule (spaceOf, smallest wins). Every
+ * per-space rollup, schedule section, riser node, designator reading order,
+ * Spreadsheet row and Property Editor reads this.
+ */
+export function spaceOfPlacement<T extends SpaceLite>(pl: SpacePinned, spaces: T[]): T | null {
+  return pinnedSpaceOf(pl, spaces) ?? spaceOf(pl, spaces);
+}
+
+/** Why `spaceId` can't be pinned on these devices (null = fine): it must be
+ *  a space of the design on EACH device's own sheet + page. */
+export function spacePinRefusal(
+  pls: ReadonlyArray<{ sheetId: string; page: number }>,
+  spaces: ReadonlyArray<{ id: string; sheetId: string; page: number }>,
+  spaceId: string
+): string | null {
+  const s = spaces.find((x) => x.id === spaceId);
+  if (!s) return "That space is no longer on this design — reload and try again.";
+  return pls.some((pl) => pl.sheetId !== s.sheetId || pl.page !== s.page) ? "A device can only be pinned to a space on its own sheet and page." : null;
 }

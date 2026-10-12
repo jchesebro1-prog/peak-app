@@ -6,7 +6,7 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 | # | Note | Kind | Status |
 |---|------|------|--------|
 | 1 | Icon picker (symbol selector) opens off-screen in the Property Editor | Bug | ✅ Fixed `a3073d3d` — panel portals to `<body>`, clamped to the viewport |
-| 2 | Edit **Type** next to Space (Property Editor + Spreadsheet); an admin change should fix the part everywhere, or a "save as rule" (e.g. SM58 mic shows as Dimming & Power) | Feature | Building |
+| 2 | Edit **Type** next to Space (Property Editor + Spreadsheet); an admin change should fix the part everywhere, or a "save as rule" (e.g. SM58 mic shows as Dimming & Power) | Feature | Built — awaiting review (D832 per-part type + whole-category box; D833 space pin) |
 | 3 | Quick multi-select / marquee: selected parts appear then drop out; Properties shows a stale single device (PRT-02) above the multi-selection | Bug | ✅ Fixed `18bae19c` — duplicate React key orphaned Designator rows; Shift near-miss no longer clears; drag-and-put-back keeps the group |
 | 4 | Equipment groups: select a rack, place gear inside it, grouped for this design and shown grouped on the Spreadsheet | Feature | Decided (below) — ready to plan |
 | 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | ✅ Shipped `ccd4ed28`+`5e237f04` — admin **Load starter cables** (20 cables, $0 drafts, OD from datasheets) + **Sync per-foot cables to the Grid** in Grid Settings → Wire types; Needs price chip. Jeff: confirm riser symbols SP/A/V/F/LV/PW/M, then price the cables |
@@ -23,6 +23,8 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 - Changing type doesn't renumber existing designators until Renumber → "Apply current type codes".
 - **Jeff (Oct 12):** per-part override by an admin, applied wherever the part is used, plus an "Apply to the whole <category> category" checkbox. **Space:** per-device override dropdown (pins a device to a room), with "Auto" to go back to position-based.
 - Options considered: per-part `deviceTypeOverride` on the catalog part (admin, from the Grid; checked first in `gridPartsFrom`) and/or "apply to the whole category" (existing map).
+- **Built (Oct 12, D832/D833):** `CatalogPart.deviceTypeKey` (admin-only `setPartDeviceTypeAction`, `manage_users`) is read first by `typeOfPart`, so the palette, layers, legends, designators, schedule, drawing set, risers and catalog search all follow it. The Property Editor's Type row (one device or several) is a select for admins with **Apply to the whole '<category>' category (N parts)** (re-types the category, clears this part's override); the Spreadsheet's Type cell sets the per-part type; the part editor has the same select; Catalog → Device types shows "N own type" per category. Not undoable (catalog change); a changed prefix says "Designators keep their numbers — Renumber to apply the new prefix." **Space:** `GridPlacement.spaceId` pin, read through `spaceOfPlacement` (dead pins ignored; `removeSpace` clears them), set by `setPlacementsSpaceAction` (undoable) from the Property Editor and the Spreadsheet's Space cell. Pure rules: `device-types.ts` (`planPartTypeEdit`), `grid-type-edit.ts`, `grid-geometry.ts`; harness "Grid notes #2:".
+- **SM58 legend:** "Dimming & Power — Cardioid Dynamic" was the per-entry mic icon differing from the Dimming & Power type icon (`legendRows` appends the description when an entry's look differs from its type's). Typed Microphones, the icons agree and the row reads "Microphones" (harness-pinned).
 
 ## #4 Equipment groups — groundwork
 
@@ -66,4 +68,4 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 
 ## Side observations
 
-- Legend shows "Dimming & Power — Cardioid Dynamic" for the SM58: the per-entry symbol override splits a legend row as type + description. Check when #2 lands.
+- Legend shows "Dimming & Power — Cardioid Dynamic" for the SM58: the per-entry symbol override splits a legend row as type + description. Checked with #2: setting the SM58's type to Microphones makes the row read "Microphones".

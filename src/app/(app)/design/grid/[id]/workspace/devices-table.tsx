@@ -23,11 +23,16 @@ import {
   type EditCol,
 } from "@/lib/design/grid-device-rows";
 import Menu from "./menu";
+import { SpacePinControl } from "./type-space-controls";
+import { autoTypeOptionLabel, TYPE_NOT_UNDOABLE, typeEditTargets } from "@/lib/design/grid-type-edit";
 import type { GridEditor } from "../use-grid-editor";
 
 /**
  * Spreadsheet → Devices (#320): one row per device on the active option
  * (curtains keep their names and stay off it), in reading order.
+ * Type (admins — the part's own device type, everywhere it's used; not
+ * undoable) and Space (a pin to a room on the device's page; undoable) edit
+ * with a select (Grid notes #2).
  * Designator and Category edit in place: click the cell, then Enter / Tab
  * save and move down / right (Shift goes back); Esc discards. There is no
  * blur handler: clicking elsewhere leaves the cell open with what was typed,
@@ -124,6 +129,8 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
     setErr,
     renumberDesignators,
     focusPlacements,
+    canEditTypes,
+    saveDeviceType,
   } = ed;
   const rows = useMemo(
     () =>
@@ -148,6 +155,9 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
   const [filter, setFilter] = useState<DeviceFilter>({});
   const [sort, setSort] = useState<DeviceSort>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
+  /** Grid notes #2: the Type / Space cell showing its select. */
+  const [picking, setPicking] = useState<{ id: string; col: "type" | "space" } | null>(null);
+  const plById = useMemo(() => new Map(placements.map((pl) => [pl.id, pl])), [placements]);
   const shown = useMemo(() => sortDeviceRows(filterDeviceRows(rows, filter), sort), [rows, filter, sort]);
   const selected = new Set(selectedIds);
   const pickedIds = shown.filter((r) => selected.has(r.id)).map((r) => r.id);
@@ -196,6 +206,68 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
   const [recode, setRecode] = useState(false);
   const renumber = (target: RenumberTarget, what: string) =>
     void renumberDesignators(recode ? { ...target, recode: true } : target, recode ? `${what} (current type codes)` : what);
+  /** Grid notes #2: Type (admins) and Space cells — text until clicked, then a select. */
+  const pickTitle = (r: DeviceRow, key: DeviceColumnKey) =>
+    key === "space"
+      ? r.spacePinned
+        ? `Pinned to ${r.space} — by position it would be ${r.autoSpace}`
+        : `${r.space} (from position) — click to pin to a room`
+      : canEditTypes
+        ? `${r.typeLabel} — click to change this part's type. ${TYPE_NOT_UNDOABLE}`
+        : r.typeLabel;
+  const pickCell = (r: DeviceRow, key: "type" | "space") => {
+    const pl = plById.get(r.id);
+    const open = picking && picking.id === r.id && picking.col === key;
+    if (!pl) return cellText(r, key);
+    if (key === "space") {
+      if (open) return <SpacePinControl ed={ed} pls={[pl]} autoFocus onDone={() => setPicking(null)} />;
+      return (
+        <button type="button" style={CELL_BTN} onClick={(e) => { e.stopPropagation(); setPicking({ id: r.id, col: "space" }); }}>
+          {r.space}
+          {r.spacePinned && <span style={{ color: "#8c919c", fontSize: 10.5 }}> · pinned</span>}
+        </button>
+      );
+    }
+    const targets = typeEditTargets([pl], partById);
+    if (!canEditTypes || !targets.length) return cellText(r, key);
+    if (open) {
+      const own = targets[0].part.deviceTypeOverride ?? "";
+      return (
+        <select
+          autoFocus
+          aria-label={`Device type for ${r.desc}`}
+          defaultValue={own}
+          disabled={busy}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={() => setPicking(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setPicking(null);
+          }}
+          onChange={async (e) => {
+            const v = e.target.value;
+            setPicking(null);
+            if (v === own) return;
+            // The hook puts the prefix hint (Renumber) on the status line.
+            await saveDeviceType([pl], v || null, false);
+          }}
+          style={{ ...CTRL, width: "100%", padding: "2px 4px" }}
+        >
+          <option value="">{autoTypeOptionLabel(targets, deviceTypes)}</option>
+          {deviceTypes.filter((t) => !t.archived).map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <button type="button" style={CELL_BTN} onClick={(e) => { e.stopPropagation(); setPicking({ id: r.id, col: "type" }); }}>
+        {r.typeLabel}
+        {targets[0].part.deviceTypeOverride && <span style={{ color: "#8c919c", fontSize: 10.5 }}> · own</span>}
+      </button>
+    );
+  };
   const sortBy = (key: DeviceColumnKey) => setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
 
   return (
@@ -298,6 +370,7 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
                     const col: EditCol | null = c.editable ? (c.key as EditCol) : null;
                     const cell = col && editing && editing.id === r.id && editing.col === col ? editing : null;
                     const dupe = c.key === "designator" && r.duplicate;
+                    if (c.pick) return <td key={c.key} style={TD} title={pickTitle(r, c.key)}>{pickCell(r, c.key as "type" | "space")}</td>;
                     return (
                       <td
                         key={c.key}

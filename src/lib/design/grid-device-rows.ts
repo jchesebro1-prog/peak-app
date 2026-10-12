@@ -7,7 +7,7 @@
  */
 import type { GridPlacement, GridSpace } from "@/lib/stores/grid-projects";
 import { placementQty } from "./grid-bom";
-import { spaceOf } from "./grid-geometry";
+import { pinnedSpaceOf, spaceOf, spaceOfPlacement } from "./grid-geometry";
 import { normalizeCategory } from "./grid-scopes";
 import { cleanDesignator, formatDesignator, readingOrder } from "./designators";
 import { cleanPlacementTag, effectiveTag, TAG_FIELD_KEYS, TAG_LIMITS, type EffectiveTag, type PlacementTag, type TagFields, type TagPatch } from "./conduit-riser/tags";
@@ -26,6 +26,10 @@ export type DeviceRow = {
   desc: string;
   spaceId: string | null;
   space: string;
+  /** Grid notes #2: true when the device is pinned to its space (a live pin). */
+  spacePinned: boolean;
+  /** Grid notes #2: the space its POSITION gives ("—" when none) — what "Auto" means. */
+  autoSpace: string;
   sheetId: string;
   /** Sheet name, with "· p<n>" past page 1. */
   sheet: string;
@@ -45,16 +49,17 @@ export type TagColumnKey = (typeof TAG_COLUMN_KEYS)[number];
 export const isTagColumn = (key: string): key is TagColumnKey => (TAG_COLUMN_KEYS as readonly string[]).includes(key);
 
 export type DeviceColumnKey = "designator" | "type" | "model" | "desc" | "space" | "sheet" | "qty" | "category" | TagColumnKey;
-export type DeviceColumn = { key: DeviceColumnKey; label: string; width: number; editable?: boolean; mono?: boolean };
+/** `pick`: edited with a select (Grid notes #2 — Type for admins, Space for anyone), not a typed cell; never on the Tab walk. */
+export type DeviceColumn = { key: DeviceColumnKey; label: string; width: number; editable?: boolean; pick?: boolean; mono?: boolean };
 export type EditCol = "designator" | "category" | TagColumnKey;
 
 /** Width 0 = takes the rest of the row. */
 export const DEVICE_COLUMNS: readonly DeviceColumn[] = [
   { key: "designator", label: "Designator", width: 120, editable: true, mono: true },
-  { key: "type", label: "Type", width: 140 },
+  { key: "type", label: "Type", width: 140, pick: true },
   { key: "model", label: "Model", width: 130, mono: true },
   { key: "desc", label: "Description", width: 0 },
-  { key: "space", label: "Space", width: 120 },
+  { key: "space", label: "Space", width: 120, pick: true },
   { key: "sheet", label: "Sheet", width: 120 },
   { key: "qty", label: "Qty", width: 52 },
   { key: "category", label: "Category", width: 130, editable: true },
@@ -99,7 +104,7 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
   const spaces = [...i.spaces];
   const devices = i.placements.filter((pl) => !pl.curtain);
   return readingOrder(devices, { sheetIds: i.sheets.map((s) => s.id), spaces }).map((pl, order) => {
-    const home = spaceOf(pl, spaces);
+    const home = spaceOfPlacement(pl, spaces);
     const typeKey = i.typeKeyOf(pl);
     const qty = placementQty(pl);
     const designator = cleanDesignator(pl.designator) ?? "";
@@ -115,6 +120,8 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
       desc: i.descOf(pl),
       spaceId: home?.id ?? null,
       space: home?.name ?? "—",
+      spacePinned: !!pinnedSpaceOf(pl, spaces),
+      autoSpace: spaceOf(pl, spaces)?.name ?? "—",
       sheetId: pl.sheetId,
       sheet: pl.page > 1 ? `${name} · p${pl.page}` : name,
       page: pl.page,

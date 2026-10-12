@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
-import { typeReviewRows } from "@/lib/design/device-types";
+import { typeOfPart, typeReviewRows } from "@/lib/design/device-types";
 import DeviceTypesClient from "./device-types-client";
 
 export const metadata = { title: "Device types — Quartzite-6" };
@@ -35,8 +35,12 @@ export default async function DeviceTypesPage() {
   const catalog = await listCatalog();
   const { types, map } = await loadDeviceTypeContext(catalog);
   const rows = typeReviewRows(catalog, map, types);
+  // Per part, so a part's own type override (Grid notes #2) counts under its type.
   const partCounts: Record<string, number> = {};
-  for (const r of rows) if (r.typeKey) partCounts[r.typeKey] = (partCounts[r.typeKey] || 0) + r.count;
+  for (const p of catalog) {
+    const k = typeOfPart(p, map, types);
+    if (k) partCounts[k] = (partCounts[k] || 0) + 1;
+  }
   const unmapped = rows.filter((r) => r.status === "unmapped").length;
 
   return (

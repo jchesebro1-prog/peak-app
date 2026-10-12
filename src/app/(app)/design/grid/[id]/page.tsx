@@ -42,6 +42,7 @@ import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import { customItemBomLines, customItemsOf } from "@/lib/design/grid-custom-items";
 import { getGridFavorites, getGridRecent, loadDeviceTypeContext } from "@/lib/stores/device-types";
+import { normalizeRawCategory } from "@/lib/design/device-types";
 import type { PartLite } from "@/lib/design/grid-bom";
 import { buildGridQuote, type GridQuoteInputs } from "@/lib/design/grid-quote";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
@@ -229,6 +230,14 @@ export default async function GridEditorPage({
     ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile, deviceTypes }),
     ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),
   ];
+  // Grid notes #2: catalog parts per raw category, for the Type control's
+  // "Apply to the whole category (N parts)" — only the library's categories.
+  const typeCategoryCounts: Record<string, number> = {};
+  const libraryCategories = new Set(parts.flatMap((p) => (p.catalogCategory !== undefined ? [normalizeRawCategory(p.catalogCategory)] : [])));
+  for (const p of catalog) {
+    const k = normalizeRawCategory(p.category);
+    if (k && libraryCategories.has(k)) typeCategoryCounts[k] = (typeCategoryCounts[k] || 0) + 1;
+  }
   // #300 (D609): each part's object drawing URLs, resolved here so the client
   // never reads documents. A lookup failure must never break the editor — it
   // just draws the generic symbols. The documents and links loaded above are
@@ -396,6 +405,8 @@ export default async function GridEditorPage({
       laborLines={laborLines}
       schedule={schedule}
       deviceTypes={deviceTypes.types}
+      canEditTypes={can("manage_users", user.roles)}
+      typeCategoryCounts={typeCategoryCounts}
       designatorDigits={designatorDigitsOf(settings)}
       conduitRiser={liveConduitRiser(designed, activeOptionId, "lighting")}
       avRiser={liveConduitRiser(designed, activeOptionId, "av")}
