@@ -161,6 +161,17 @@ export function copyOptionMembers<
       const id = input.makeId("gp-");
       idMap.set(p.id, id);
       return { ...p, id, optionId: input.toOptionId, by: input.by, at: input.at } as P;
+    })
+    // Grid notes #4: a member joins the copy of its holder (a second pass —
+    // the holder may come later in the list); no copied holder → no group.
+    .map((p) => {
+      const g = (p as { groupId?: string }).groupId;
+      if (g === undefined) return p;
+      const next = { ...p } as P & { groupId?: string };
+      const m = idMap.get(g);
+      if (m) next.groupId = m;
+      else delete next.groupId;
+      return next as P;
     });
   const routes = input.routes
     .filter((r) => r.optionId === input.fromOptionId)

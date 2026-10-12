@@ -20,7 +20,6 @@ import {
   removeAccessory,
   removeCustomItem,
   removeOption,
-  removePlacement,
   removePlacements,
   movePlacements,
   setPlacementsCategory,
@@ -31,6 +30,9 @@ import {
   pastePlacements,
   setPlacementsTag,
   restoreItems,
+  setPlacementsGroup,
+  addPlacementInside,
+  type GroupItem,
   type GridPlacement,
   type GridRoute,
   type PasteItem,
@@ -805,17 +807,6 @@ export async function setSymbolLookAction(
   return { ok: true };
 }
 
-export async function removePlacementAction(
-  projectId: string,
-  placementId: string
-): Promise<Result> {
-  await requireUser();
-  const p = await removePlacement(projectId, placementId);
-  if (!p) return { ok: false, error: "Design not found." };
-  revalidatePath(editorPath(projectId));
-  return { ok: true };
-}
-
 /* ------------------------- batch edits (#299 Task 14) ------------------------- */
 
 const BATCH_INVALID = "That edit isn't valid — reload and try again.";
@@ -843,11 +834,15 @@ export async function movePlacementsAction(
  *  `removed` carries everything undo needs to put back. */
 export async function removePlacementsAction(
   projectId: string,
-  ids: string[]
+  ids: string[],
+  /** Grid notes #4: what happens to the devices inside a removed holder —
+   *  "delete" them too, or "keep" them on the plan beside it (the default). */
+  members?: "delete" | "keep"
 ): Promise<{ ok: true; removed: RemovedBundle } | { ok: false; error: string }> {
   await requireUser();
   if (!isStr(projectId) || !Array.isArray(ids) || !ids.every(isStr)) return { ok: false, error: BATCH_INVALID };
-  const r = await removePlacements(projectId, ids);
+  if (members !== undefined && members !== "delete" && members !== "keep") return { ok: false, error: BATCH_INVALID };
+  const r = await removePlacements(projectId, ids, { members });
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);
@@ -886,6 +881,58 @@ export async function setPlacementsSpaceAction(
   revalidatePath(`${editorPath(projectId)}/riser`);
   revalidatePath(`${editorPath(projectId)}/schedule`);
   return { ok: true, previous: r.value };
+}
+
+/** Grid notes #4: put devices into a holder (`groupId` = its placement id) or
+ *  take them out (`null` — to `x,y` when given, else beside the holder) in
+ *  one all-or-nothing write; the store checks every group rule. `previous`
+ *  is what undo sends back. */
+export async function setPlacementsGroupAction(
+  projectId: string,
+  items: GroupItem[]
+): Promise<{ ok: true; previous: GroupItem[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!Array.isArray(items) || items.length > MAX_BATCH) return { ok: false, error: "Select 2,000 items or fewer." };
+  if (
+    !isStr(projectId) ||
+    !items.every(
+      (it) =>
+        isObj(it) && isStr(it.id) && (it.groupId === null || (isStr(it.groupId) && PLACEMENT_ID.test(it.groupId))) &&
+        (it.x === undefined || isFiniteNum(it.x)) && (it.y === undefined || isFiniteNum(it.y))
+    )
+  )
+    return { ok: false, error: BATCH_INVALID };
+  const r = await setPlacementsGroup(
+    projectId,
+    items.map((it) => ({ id: it.id, groupId: it.groupId, ...(it.x !== undefined && it.y !== undefined ? { x: it.x, y: it.y } : {}) }))
+  );
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true, previous: r.value };
+}
+
+/** Grid notes #4 "Place inside": one new device of `partId` straight into a
+ *  holder (no plan click) — the part gate placeDeviceAction has, then the
+ *  store's holder checks. The new record comes back for undo. */
+export async function placeInsideAction(projectId: string, input: { holderId: string; partId: string }): Promise<PlacedResult> {
+  const user = await requireUser();
+  if (!isStr(projectId) || !isObj(input) || !isStr(input.holderId) || !PLACEMENT_ID.test(input.holderId) || !isPartId(input.partId))
+    return { ok: false, error: BATCH_INVALID };
+  const refusal = await placeDevicePartRefusal(input.partId);
+  if (refusal) return { ok: false, error: refusal };
+  await adoptForPlacement([input.partId], user.name);
+  const r = await addPlacementInside(projectId, { holderId: input.holderId, partId: input.partId, by: user.name });
+  if (!r.ok) return r;
+  try {
+    await pushGridRecent(user.id, input.partId);
+  } catch {
+    /* best-effort */
+  }
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true, placement: r.placement };
 }
 
 /** #299: one batch edit resolves at most this many DISTINCT part ids — the
@@ -954,7 +1001,7 @@ export async function pastePlacementsAction(
     sheetId: string;
     page: number;
     optionId: string;
-    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag }[];
+    items: { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: CurtainInput; qty?: number; tag?: PlacementTag; groupSrcId?: string }[];
     routeIds: string[];
   }
 ): Promise<{ ok: true; placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number } | { ok: false; error: string }> {
@@ -968,6 +1015,7 @@ export async function pastePlacementsAction(
         (it.category === undefined || isStr(it.category)) &&
         (it.qty === undefined || isFiniteNum(it.qty)) &&
         (it.tag === undefined || isObj(it.tag)) &&
+        (it.groupSrcId === undefined || isStr(it.groupSrcId)) &&
         (it.curtain === undefined || isObj(it.curtain))
     )
   )
@@ -998,6 +1046,8 @@ export async function pastePlacementsAction(
       ...(it.qty !== undefined ? { qty: it.qty } : {}),
       ...(curtain ? { curtain } : {}),
       ...(!curtain && it.tag ? { tag: it.tag } : {}),
+      // Grid notes #4: joins the pasted copy of its holder (the store checks it).
+      ...(!curtain && it.groupSrcId ? { groupSrcId: it.groupSrcId } : {}),
     });
   }
   const r = await pastePlacements(projectId, {
@@ -1041,6 +1091,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
   const tag = curtain ? undefined : cleanPlacementTag(raw.tag);
   // Grid notes #2: the space pin comes back too (a dead one is ignored on read).
   const spaceId = isSpaceId(raw.spaceId) ? raw.spaceId : null;
+  // Grid notes #4: a member comes back into its holder (the store re-checks the link).
+  const groupId = !curtain && isStr(raw.groupId) && PLACEMENT_ID.test(raw.groupId) ? raw.groupId : null;
   return {
     id: raw.id,
     sheetId: raw.sheetId,
@@ -1052,6 +1104,7 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
     ...(designator ? { designator } : {}),
     ...(tag ? { tag } : {}),
     ...(spaceId ? { spaceId } : {}),
+    ...(groupId ? { groupId } : {}),
     ...(curtain ? { curtain } : {}),
     ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
     ...(seededFrom ? { seededFrom } : {}),
@@ -1096,7 +1149,13 @@ export async function restoreItemsAction(projectId: string, bundle: RemovedBundl
     return { ok: false, error: "Couldn't undo — a cable in it is no longer in the Grid library." };
   // #321: the conduit half is cleaned (live options, own devices, cr- ids) by the store.
   const conduit = isObj(bundle.conduit) ? bundle.conduit : undefined;
-  const r = await restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}) });
+  // Grid notes #4: the members a holder's removal took out, back into it.
+  const rawRegroup: unknown = bundle.regroup;
+  if (rawRegroup !== undefined && (!Array.isArray(rawRegroup) || rawRegroup.length > MAX_BATCH)) return { ok: false, error: UNDO_INVALID };
+  const regroup = (Array.isArray(rawRegroup) ? rawRegroup : []).flatMap((g: unknown) =>
+    isObj(g) && isStr(g.id) && PLACEMENT_ID.test(g.id) && isStr(g.groupId) && PLACEMENT_ID.test(g.groupId) ? [{ id: g.id, groupId: g.groupId }] : []
+  );
+  const r = await restoreItems(projectId, { placements, riser, ...(conduit ? { conduit } : {}), ...(regroup.length ? { regroup } : {}) });
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);

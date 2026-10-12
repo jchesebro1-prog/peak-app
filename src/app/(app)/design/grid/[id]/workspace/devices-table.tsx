@@ -10,10 +10,9 @@ import {
   NO_SPACE,
   cellText,
   deviceRows,
-  filterDeviceRows,
   isTagColumn,
   nextCell,
-  sortDeviceRows,
+  shownDeviceRows,
   tagPatchAfterEdit,
   TAG_INPUT_MAX,
   type DeviceColumnKey,
@@ -158,7 +157,8 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
   /** Grid notes #2: the Type / Space cell showing its select. */
   const [picking, setPicking] = useState<{ id: string; col: "type" | "space" } | null>(null);
   const plById = useMemo(() => new Map(placements.map((pl) => [pl.id, pl])), [placements]);
-  const shown = useMemo(() => sortDeviceRows(filterDeviceRows(rows, filter), sort), [rows, filter, sort]);
+  // Grid notes #4: each holder's devices sit directly under it, indented, whatever the sort.
+  const shown = useMemo(() => shownDeviceRows(rows, filter, sort), [rows, filter, sort]);
   const selected = new Set(selectedIds);
   const pickedIds = shown.filter((r) => selected.has(r.id)).map((r) => r.id);
 
@@ -208,7 +208,9 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
     void renumberDesignators(recode ? { ...target, recode: true } : target, recode ? `${what} (current type codes)` : what);
   /** Grid notes #2: Type (admins) and Space cells — text until clicked, then a select. */
   const pickTitle = (r: DeviceRow, key: DeviceColumnKey) =>
-    key === "space"
+    key === "space" && r.holderId
+      ? `In ${r.space} with ${r.holderLabel} — it sits inside it`
+      : key === "space"
       ? r.spacePinned
         ? `Pinned to ${r.space} — by position it would be ${r.autoSpace}`
         : `${r.space} (from position) — click to pin to a room`
@@ -220,6 +222,8 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
     const open = picking && picking.id === r.id && picking.col === key;
     if (!pl) return cellText(r, key);
     if (key === "space") {
+      // Grid notes #4: a device inside another is in its holder's room — no pin of its own.
+      if (r.holderId) return <span style={{ color: "#5b616e" }}>{`${r.space} · with ${r.holderLabel}`}</span>;
       if (open) return <SpacePinControl ed={ed} pls={[pl]} autoFocus onDone={() => setPicking(null)} />;
       return (
         <button type="button" style={CELL_BTN} onClick={(e) => { e.stopPropagation(); setPicking({ id: r.id, col: "space" }); }}>
@@ -371,6 +375,18 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
                     const cell = col && editing && editing.id === r.id && editing.col === col ? editing : null;
                     const dupe = c.key === "designator" && r.duplicate;
                     if (c.pick) return <td key={c.key} style={TD} title={pickTitle(r, c.key)}>{pickCell(r, c.key as "type" | "space")}</td>;
+                    // Grid notes #4: the group marks ride on the Designator cell — "↳" for a device under its holder,
+                    // "in RK-1" when its holder isn't shown, "· 6" on a holder.
+                    const groupMark =
+                      c.key !== "designator" ? null : r.nested ? (
+                        <span aria-hidden style={{ position: "absolute", left: 2, color: "#9aa0ab" }}>↳</span>
+                      ) : null;
+                    const groupNote =
+                      c.key !== "designator" ? null : r.holderId && !r.nested ? (
+                        <span style={{ color: "#8c919c", fontSize: 10.5, fontFamily: "inherit" }}>{` in ${r.holderLabel}`}</span>
+                      ) : r.memberCount > 0 ? (
+                        <span style={{ color: "#8c919c", fontSize: 10.5, fontFamily: "inherit" }} title={`${r.memberCount} device${r.memberCount === 1 ? "" : "s"} inside`}>{` · ${r.memberCount}`}</span>
+                      ) : null;
                     return (
                       <td
                         key={c.key}
@@ -379,8 +395,10 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
                           ...TD,
                           ...(c.mono ? { fontFamily: "var(--font-mono)", fontSize: 11.5 } : {}),
                           ...(dupe ? { color: DESIGNATOR_DUPLICATE_COLOR, fontWeight: 700, background: DESIGNATOR_DUPLICATE_TINT } : {}),
+                          ...(groupMark ? { paddingLeft: 14, position: "relative" } : {}),
                         }}
                       >
+                        {groupMark}
                         {cell && col ? (
                           <input
                             autoFocus
@@ -421,6 +439,7 @@ export default function DevicesTable({ ed }: { ed: GridEditor }) {
                             ) : (
                               <span style={{ color: "#b6bac3" }}>—</span>
                             )}
+                            {groupNote}
                           </button>
                         ) : (
                           cellText(r, c.key)

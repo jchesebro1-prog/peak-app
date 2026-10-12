@@ -10,6 +10,7 @@ import { placementQty } from "./grid-bom";
 import { pinnedSpaceOf, spaceOf, spaceOfPlacement } from "./grid-geometry";
 import { normalizeCategory } from "./grid-scopes";
 import { cleanDesignator, formatDesignator, readingOrder } from "./designators";
+import { holderOf, memberCounts, nestRows } from "./grid-groups";
 import { cleanPlacementTag, effectiveTag, TAG_FIELD_KEYS, TAG_LIMITS, type EffectiveTag, type PlacementTag, type TagFields, type TagPatch } from "./conduit-riser/tags";
 
 export type DeviceRow = {
@@ -41,6 +42,12 @@ export type DeviceRow = {
   tag: EffectiveTag;
   /** #321: just the device's own overrides; a field absent here is inherited. */
   own: PlacementTag;
+  /** Grid notes #4: the holder this device sits inside (null = on the plan on its own). */
+  holderId: string | null;
+  /** Grid notes #4: the holder's designator (else its description) — "in RK-1". */
+  holderLabel: string;
+  /** Grid notes #4: how many devices sit inside this one (0 = not a holder). */
+  memberCount: number;
 };
 
 /** #321: the riser tag fields, in tag order — each is also a Devices column. */
@@ -103,7 +110,11 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
   const sheetName = new Map(i.sheets.map((s) => [s.id, s.name]));
   const spaces = [...i.spaces];
   const devices = i.placements.filter((pl) => !pl.curtain);
+  // Grid notes #4: who sits inside whom (a holder is never a curtain).
+  const byId = new Map(devices.map((pl) => [pl.id, pl]));
+  const counts = memberCounts(devices);
   return readingOrder(devices, { sheetIds: i.sheets.map((s) => s.id), spaces }).map((pl, order) => {
+    const holder = holderOf(pl, byId);
     const home = spaceOfPlacement(pl, spaces);
     const typeKey = i.typeKeyOf(pl);
     const qty = placementQty(pl);
@@ -130,8 +141,21 @@ export function deviceRows(i: DeviceRowInput): DeviceRow[] {
       duplicate: i.duplicates.has(pl.id),
       tag: effectiveTag(pl.tag, i.tagDefaultsOf?.(pl), home?.name ?? ""),
       own: pl.tag ?? {},
+      holderId: holder?.id ?? null,
+      holderLabel: holder ? formatDesignator(cleanDesignator(holder.designator) ?? "", placementQty(holder), i.digits) || i.descOf(holder) : "",
+      memberCount: holder ? 0 : counts.get(pl.id) ?? 0,
     };
   });
+}
+
+/**
+ * Grid notes #4: the rows the Devices table shows — filtered, sorted, then
+ * each holder's members directly under it (sorted among themselves by the
+ * same column), `nested` for the indent. A member whose holder is filtered
+ * out keeps its own place (the table says "in <holder>").
+ */
+export function shownDeviceRows(rows: readonly DeviceRow[], f: DeviceFilter, sort: DeviceSort): Array<DeviceRow & { nested: boolean }> {
+  return nestRows(sortDeviceRows(filterDeviceRows(rows, f), sort));
 }
 
 export function filterDeviceRows(rows: readonly DeviceRow[], f: DeviceFilter): DeviceRow[] {

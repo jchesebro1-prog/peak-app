@@ -9,6 +9,7 @@
 import type { Point } from "@/lib/annotations";
 import type { PlacementTag } from "@/lib/design/conduit-riser/tags";
 import type { GridPlacement, GridRoute } from "@/lib/stores/grid-projects";
+import { withMembers } from "./grid-groups";
 
 export type ClipItem = {
   srcId: string;
@@ -20,6 +21,8 @@ export type ClipItem = {
   qty?: number;
   /** #321: riser tag overrides ride along; the designator does not (a paste is renumbered). */
   tag?: PlacementTag;
+  /** Grid notes #4: the srcId of this item's holder when the holder was copied too. */
+  groupSrcId?: string;
 };
 export type Clipboard = {
   items: ClipItem[];
@@ -40,7 +43,8 @@ export function copySelection(
   const byId = new Map(placements.map((p) => [p.id, p]));
   const picked: GridPlacement[] = [];
   const seen = new Set<string>();
-  for (const id of ids) {
+  // Grid notes #4: a copied holder carries the devices inside it.
+  for (const id of withMembers(placements, ids)) {
     const p = byId.get(id);
     if (p && !seen.has(id)) {
       seen.add(id);
@@ -56,6 +60,7 @@ export function copySelection(
     if (p.curtain !== undefined) item.curtain = p.curtain;
     if (p.qty !== undefined) item.qty = p.qty;
     if (p.tag !== undefined && !p.curtain) item.tag = { ...p.tag };
+    if (p.groupId && seen.has(p.groupId)) item.groupSrcId = p.groupId;
     return item;
   });
   const routeIds = routes

@@ -11395,7 +11395,58 @@ company name in its place. Separately, `letterhead-server.ts` now reads the bake
 with static `fs`/`path` imports. `next build` no longer traces the whole project into every function, and the harness
 checks the literal equals `BAKED_LETTERHEAD`.
 
-## D843. Estimator bonuses replace the 5%-of-labor performance bonus (#330, 2026-10-12)
+## D843. Equipment groups are one `groupId` link on the member (Grid notes #4, 2026-10-12)
+
+Jeff's rule: any device can hold others (a plain rack part, a rack assembly, a booth, a panel), one level only, and
+curtains neither hold nor are held. The model is one optional field, `GridPlacement.groupId`, which is the holder
+placement's id. There is no groups list: a holder is any placement another one names, and it stops being one when its
+last device leaves. There is **no migration**. Every write checks the link through `grid-groups.groupRefusal`: the holder
+exists, is on the same option and on the same sheet and page, is not itself inside another device, and is not a
+curtain. The device going in is not a curtain and holds nothing. A holder takes **at most 200** devices (a default).
+Every placement write ends with the one repair rule, `settleGroups`. A broken link (holder gone, nested, curtain, another
+option, another sheet or page, past 200) is dropped and the device stays where it stands — a member is never carried to
+another page. Writes that add links (paste, an undo putting devices back) check the 200 cap first (`groupCapRefusal`) and
+refuse with the reason rather than letting the repair trim the group. A device that holds others keeps them and loses its
+own link. Moving a holder, a revision recall, an option copy (`copyOptionMembers` remaps the link), a paste
+(`groupSrcId`), an Auto re-fill and every removal path all go through it. Pricing, the BOM, designators and Auto fill
+are unchanged. A rack assembly's own RU layout is not coupled to groups yet (an open question for Jeff).
+
+## D844. A device inside another has no plan spot — it mirrors its holder (Grid notes #4, 2026-10-12)
+
+Jeff decided devices inside a holder are hidden on the plan. The holder's label reads `RK-1 · 6`, counting device
+placements rather than units (a default). So a member's `sheetId`, `page`, `x`, `y` and space pin are kept **equal to
+its holder's** by `settleGroups`. Nothing that reads a position has to change: spaces, the schedule's sections, the
+risers' rooms, reading order, per-space BOM and wires all place it where its holder is. Its wire ends follow every move
+the mirror makes, by the move rule. The editor doesn't draw, hit-test, marquee, wire-snap or nudge it. Drawing-set plan
+sheets don't draw it (`drawnOnPlan`), and the legend still lists it. The Spreadsheet nests members under their holder
+(`shownDeviceRows`): a holder row, then its devices marked "↳", each with its own designator, sorted among themselves by
+the active column. A member whose holder is filtered out keeps its own row and reads "in RK-1" (a default). Its Space
+cell reads the holder's room ("with RK-1") rather than a pin control. The schedule (`/schedule`, the Spreadsheet's
+Schedule and E-60x) gives a holder with devices its own row, and its devices follow indented, merged by part among
+themselves and never with loose devices. The Browser lists them as the holder's child devices.
+
+## D845. Three ways in, Take out, and a delete that always asks (Grid notes #4, 2026-10-12)
+
+- **Place inside** (Property Editor, one device): every Product Library pick, including tiles, "From the catalog"
+  results and the estimate tray, adds one device inside the holder (`placeInsideAction`, with Place's part gate) until
+  Done or Esc.
+- **Move into <holder>** (several selected): offered as a button when exactly one selected device already holds
+  devices, otherwise as a menu of the selected devices that can take the rest.
+- **Drag onto a holder**: an eligible holder under the dragged marker gets an accent ring and "Drop into RK-1", and
+  releasing there puts the dragged devices inside. Anything else is a normal move.
+- **Take out** / **Take all out** puts devices on the plan beside the holder: a row to its right, wrapping every 8,
+  flipping left near the edge.
+
+A **Delete** of a holder whose devices weren't selected with it asks every time, in a line over the plan: "Delete the N
+devices inside too" or "Keep them on the plan beside it" (`removePlacements(…, { members })`). A store call that doesn't
+say which keeps them, so nothing that wasn't named is ever deleted; so do the removals that can't ask — the single
+`removePlacement` and the riser editor's row delete and qty cut (`keepMembersBeside`). Any selection change drops the
+question. "Place inside" ends, with "That holder is no longer on the plan.", the moment its holder leaves the option. **Cut** takes the devices with it with no question,
+because they go on the clipboard too, and Copy and Duplicate of a holder copy its devices. Every step is one undo step.
+The new `group` command's inverse is the previous links and spots. The delete bundle's `regroup` puts kept devices back
+inside on undo.
+
+## D846. Estimator bonuses replace the 5%-of-labor performance bonus (#330, 2026-10-12)
 
 Supersedes the 5% of D136 and D251. Two bonuses, both hidden from every customer surface, both recomputed by pure rules in
 `src/lib/estimate-bonus/`:
@@ -11411,7 +11462,7 @@ Each system carries at most two auto lines flagged `SpecItem.bonus` (`"package"`
 `BON-EST-<id>`. Code reads the flag, never the SKU. Legacy `laborOverhead: "bonus"` / `LAB-BONUS-` lines are still
 recognised so frozen quotes print as before; `computeLabor` no longer produces one.
 
-## D844. When the bonus rules apply (#330, 2026-10-12)
+## D847. When the bonus rules apply (#330, 2026-10-12)
 
 A quote is **eligible** when its type is system/blank and its source is not `portal*` or `grid`, as judged by
 `sourceForSave`. A Quick Design or Grid quote therefore becomes eligible once it is saved in the Estimator. Rules apply
@@ -11420,7 +11471,7 @@ quotes are never rewritten. The spec said only "sent quotes keep their numbers",
 bonus frozen under the new rules would go stale the moment a line changed, so a sent quote that already has bonus lines
 keeps recomputing.
 
-## D845. How the bonuses stay off the customer's page (#330, 2026-10-12)
+## D848. How the bonuses stay off the customer's page (#330, 2026-10-12)
 
 `customerLines()` folds the 5% into labor exactly as D251 folds shop & engineering (mobilization first, then other labor).
 The 2% spreads across **all** of the system's visible rows in proportion to price (`absorbSellAdjustment`), so a system
@@ -11429,13 +11480,13 @@ material/labor like #267's adjustment, and the 2% line is **not** `labor`, so it
 other readers of `spec.sections` (package BOM, document chips, client package, Word BOM, cut sheets, system library and the
 rest) skip bonus lines by an explicit `isBonusItem` check, pinned by the harness's leak checks.
 
-## D846. The server re-derives the bonus lines (#330, 2026-10-12)
+## D849. The server re-derives the bonus lines (#330, 2026-10-12)
 
 `saveQuoteAction` and `placeSystemInEstimate` run `withBonusLines` before persisting, so a stale or hand-built client cannot
 save a wrong bonus. A system moved to another estimate is stripped of bonus lines first, so the target quote's own rules
 (eligible or not, draft or frozen) decide what it carries.
 
-## D847. The won record (#330, 2026-10-12)
+## D850. The won record (#330, 2026-10-12)
 
 Setting a bonus-carrying quote to Won writes a store-owned `Quote.bonusRecord` inside `setStatus`'s own patch (a quote with
 no bonus lines gets none). The 2% is split 50/50 between Lead estimator and Prepared by by default; a user with `approve`
@@ -11444,12 +11495,12 @@ edits the split. Credits resolve a name to a user id by a unique case-insensitiv
 set after Won. **Record now** rebuilds a missing record (a quote won before this shipped, or a failed write). Leaving Won
 withdraws the record.
 
-## D848. The project's performance-bonus pool (#330, 2026-10-12)
+## D851. The project's performance-bonus pool (#330, 2026-10-12)
 
 The install project's `performanceBonusPool` is set to the record's 5% payout (at cost). It is synced after the status
 transaction commits, on a win, a re-win and every rebuild, and kept as it is if the quote later leaves Won.
 
-## D849. Small deviations (#330, 2026-10-12)
+## D852. Small deviations (#330, 2026-10-12)
 
 - The two locked bonus rows sit at the end of each system's line table; they stand in for the spec's footer line.
 - The internal cost summary shows the 5% payout (cost), not its marked-up sell.

@@ -131,6 +131,10 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
     setSpaceHeld,
     clearCursorAt,
     snap,
+    holderCounts,
+    placementsById,
+    dropTargetId,
+    placeInsideId,
   } = ed;
 
   // The sheet's rendered pixel size (#299 snap dots) — observed rather than
@@ -159,6 +163,15 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
   const overRef = useRef(false);
   /** Every selected device gets the dashed ring (#299 multi-select). */
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  /** Grid notes #4: holders with a selected device inside (it has no marker of its own). */
+  const holdsSelected = useMemo(() => {
+    const out = new Set<string>();
+    for (const id of selectedIds) {
+      const g = placementsById.get(id)?.groupId;
+      if (g) out.add(g);
+    }
+    return out;
+  }, [selectedIds, placementsById]);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.code !== "Space" || isEditable(e.target)) return;
@@ -519,10 +532,16 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
               // no ×N; a device not yet numbered falls back to its description.
               // Curtains keep their name.
               const tag = pl.curtain ? "" : formatDesignator(pl.designator, q, designatorDigits);
-              const label = pl.curtain ? pl.curtain.name + (q > 1 ? ` ×${q}` : "") : tag || name + (q > 1 ? ` ×${q}` : "");
+              // Grid notes #4: a holder reads "RK-1 · 6" — the devices inside it.
+              const inside = pl.curtain ? 0 : holderCounts.get(pl.id) || 0;
+              const label = (pl.curtain ? pl.curtain.name + (q > 1 ? ` ×${q}` : "") : tag || name + (q > 1 ? ` ×${q}` : "")) + (inside ? ` · ${inside}` : "");
               const ink = !pl.curtain && designatorDupes.has(pl.id) ? DESIGNATOR_DUPLICATE_COLOR : c;
               const model = part?.virtual ? "" : part?.modelNumber || part?.sku || "";
-              const hover = pl.curtain ? pl.curtain.name : [tag, model !== name ? model : "", name].filter(Boolean).join(" · ");
+              const hover =
+                (pl.curtain ? pl.curtain.name : [tag, model !== name ? model : "", name].filter(Boolean).join(" · ")) +
+                (inside ? ` — ${inside} device${inside === 1 ? "" : "s"} inside` : "");
+              // Grid notes #4: the drop-into target of a drag, the "Place inside" holder, or the holder of a selected device inside it.
+              const groupRing = pl.id === dropTargetId || pl.id === placeInsideId ? "solid" : holdsSelected.has(pl.id) ? "dashed" : null;
               return (
                 <g key={pl.id}>
                   <title>{hover}</title>
@@ -584,6 +603,24 @@ export default function PlanCanvas(props: { ed: GridEditor; onDropPart?: (partId
                   </text>
                   {on && (
                     <circle cx={x} cy={y} r={Math.max(6, 15 * s)} fill="none" stroke="#16181d" strokeDasharray="4 3" strokeWidth={1.5} />
+                  )}
+                  {groupRing && (
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={Math.max(9, 20 * s)}
+                      fill={pl.id === dropTargetId ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "none"}
+                      strokeDasharray={groupRing === "dashed" ? "2 3" : undefined}
+                      strokeWidth={2.5}
+                      style={{ stroke: "var(--accent)", pointerEvents: "none" }}
+                    >
+                      {pl.id === dropTargetId && <title>{`Drop into ${tag || name}`}</title>}
+                    </circle>
+                  )}
+                  {pl.id === dropTargetId && (
+                    <text x={x} y={y - Math.max(12, 24 * s)} textAnchor="middle" fontSize={11} fontWeight={700} style={{ fill: "var(--accent)", fontFamily: "inherit", pointerEvents: "none" }}>
+                      {`Drop into ${tag || name}`}
+                    </text>
                   )}
                 </g>
               );

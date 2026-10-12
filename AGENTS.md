@@ -1001,7 +1001,7 @@ See `.env.example`.
     the riser data sheet and cable diameters on production, the wire-type
     symbol fill, and trying the A/V riser on a real job. Punch item #328.
 
-51. ✅ **Estimator bonuses** (#330, D843–D849) — the 5%-of-labor performance
+51. ✅ **Estimator bonuses** (#330, D846–D852) — the 5%-of-labor performance
     bonus is replaced by two hidden, locked auto lines per system
     (`SpecItem.bonus`, pure rules in `src/lib/estimate-bonus/`): a **5% package
     bonus** on the system's cost when it has labor, marked up at the system's

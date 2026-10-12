@@ -11,7 +11,8 @@ import type { RemovedBundle } from "@/lib/stores/grid-projects";
 
 export type GridCommand =
   | { kind: "move"; moves: { id: string; x: number; y: number }[] }
-  | { kind: "remove"; ids: string[] }
+  /** Grid notes #4: `members` = what a removed holder's members do ("keep" when absent). */
+  | { kind: "remove"; ids: string[]; members?: "delete" | "keep" }
   | { kind: "restore"; bundle: RemovedBundle }
   | { kind: "category"; items: { id: string; category: string }[] }
   | { kind: "part"; items: { id: string; partId: string; qty?: number; designator?: string }[] }
@@ -20,7 +21,9 @@ export type GridCommand =
   /** #321: per-field riser tag patches (absent = leave, string = set, null = remove override). */
   | { kind: "tag"; items: { id: string; patch: TagPatch }[] }
   /** Grid notes #2: pin devices to a space (null = back to "from position"). */
-  | { kind: "space"; items: { id: string; spaceId: string | null }[] };
+  | { kind: "space"; items: { id: string; spaceId: string | null }[] }
+  /** Grid notes #4: put devices into a holder (its id) or take them out (null; to x,y when given). */
+  | { kind: "group"; items: { id: string; groupId: string | null; x?: number; y?: number }[] };
 
 export type UndoEntry = { label: string; forward: GridCommand; inverse: GridCommand };
 export type UndoState = { past: UndoEntry[]; future: UndoEntry[] };

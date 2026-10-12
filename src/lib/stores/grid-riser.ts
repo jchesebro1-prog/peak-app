@@ -25,7 +25,7 @@ import { AUTO_QTY_MAX, sanitizeAutoOrigin, withoutAuto } from "@/lib/design/grid
 import { keepsDesignatorOnSwap, stampNewDesignators } from "@/lib/design/designators";
 import { designatorContext } from "@/lib/design/designators-server";
 import { pruneConduitRisersIn } from "@/lib/design/conduit-riser/live";
-import type { GridPlacement, GridProject } from "./grid-projects";
+import { keepMembersBeside, settleGroupsIn, type GridPlacement, type GridProject } from "./grid-projects";
 
 /**
  * The riser editor's writes (#209, drawing set spec §4). Each function is ONE
@@ -285,6 +285,9 @@ export async function setNodeDeviceQty(
     }
     const gone = new Set(plan.remove);
     const row = new Set(cur.map((pl) => pl.id));
+    // Grid notes #4: the riser has no delete question — a removed holder's
+    // devices stay on the plan beside it (the plan's "keep" answer).
+    if (gone.size) keepMembersBeside(p, gone);
     p.placements = [
       ...(p.placements || [])
         .filter((pl) => !gone.has(pl.id))
@@ -306,6 +309,7 @@ export async function setNodeDeviceQty(
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
     // #321: a removed device's conduit runs and pinned tag go too.
     if (gone.size) pruneConduitRisersIn(p);
+    settleGroupsIn(p);
     added = fresh.length;
     removed = gone.size;
     p.updatedAt = Date.now();
@@ -372,9 +376,12 @@ export async function removeNodeDevices(
       refusal = "no-devices";
       return;
     }
+    // Grid notes #4: no delete question here — a removed holder's devices stay beside it.
+    keepMembersBeside(p, gone);
     p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
     pruneConduitRisersIn(p);
+    settleGroupsIn(p);
     removed = gone.size;
     p.updatedAt = Date.now();
   });

@@ -11807,7 +11807,7 @@ packages, the estimate package zip and the rack submittal. One manufacturers rea
 (`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`); a failed read falls back to each part's own
 manufacturer with a warning.
 
-## 330. Estimator bonuses — 5% package + 2% estimator — DONE 2026-10-12 (D843–D849)
+## 330. Estimator bonuses — 5% package + 2% estimator — DONE 2026-10-12 (D846–D852)
 
 **Reported (Jeff, 2026-10-12):** "confirm 5% of each package if there is a labor line … overall 2% bonus on the total of the
 estimate that moves forward, tracked for each estimator … never on the estimate or anything client facing."

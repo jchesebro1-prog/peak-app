@@ -48,6 +48,19 @@ import {
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
 import { pinnedSpaceOf, spacePinRefusal } from "@/lib/design/grid-geometry";
+import {
+  deletePlan,
+  GROUP_HOLDER_GONE,
+  groupRefusal,
+  holdRefusal,
+  MAX_GROUP_MEMBERS,
+  groupFull,
+  groupCapRefusal,
+  memberCounts,
+  settleGroups,
+  takeOutPositions,
+  type DeleteMembers,
+} from "@/lib/design/grid-groups";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
 import type { Landed } from "@/lib/design/conduit-riser/edit";
@@ -167,6 +180,16 @@ export type GridPlacement = {
    * project-level, so option copies and revisions carry it unchanged.
    */
   spaceId?: string;
+  /**
+   * Grid notes #4: the HOLDER placement's id when this device sits inside
+   * another (a rack, a booth, a panel…). Absent = on the plan on its own.
+   * One level only, never on or naming a curtain, same option, ≤ 200 per
+   * holder. A member has no plan spot of its own: its sheet/page/x/y/spaceId
+   * mirror the holder's (grid-groups.settleGroups, run by every placement
+   * write), so position readers put it where the holder is. Written only
+   * through setPlacementsGroup / addPlacementInside / paste / restore.
+   */
+  groupId?: string;
   /**
    * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
    * is a priced line, not a catalog unit: it is sized and specced here and
@@ -1057,6 +1080,7 @@ export async function replaceAutoPlacements(
     stampNewDesignators(p, new Set(fresh.map((pl) => pl.id)), codeOf, digits);
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
     if (gone.size) pruneConduitRisersIn(p);
+    settleGroupsIn(p); // Grid notes #4: a re-fill releases the members of a holder it removed
     removed = gone.size;
     added = fresh.length;
     p.updatedAt = at;
@@ -1201,11 +1225,58 @@ export async function movePlacement(
     // Guarded so a pre-D110 doc with no `routes` key doesn't grow an empty one.
     if (p.routes?.length)
       p.routes = translateRouteEnds(p.routes, new Map([[placementId, { sheetId: current.sheetId, page: current.page, dx, dy }]]));
+    settleGroupsIn(p); // Grid notes #4: a holder's members follow it
     p.updatedAt = Date.now();
   });
 }
 
 type MoveDelta = { sheetId: string; page: number; dx: number; dy: number };
+
+/**
+ * Grid notes #4: the one group repair + mirror (grid-groups.settleGroups),
+ * run at the end of every placement write inside its patch. A member a write
+ * just moved (onto its holder, or after the holder) drags its attached wire
+ * ends by its own delta — the move rule — so wires stay on the device.
+ */
+export function settleGroupsIn(p: GridProject): void {
+  const before = p.placements || [];
+  if (!before.some((pl) => pl.groupId)) return;
+  const settled = settleGroups(before, defaultOptionId(p));
+  if (settled === before) return;
+  const was = new Map(before.map((pl) => [pl.id, pl]));
+  const deltas = new Map<string, MoveDelta>();
+  for (const pl of settled) {
+    const b = was.get(pl.id);
+    if (b && b !== pl && b.sheetId === pl.sheetId && b.page === pl.page && (b.x !== pl.x || b.y !== pl.y))
+      deltas.set(pl.id, { sheetId: b.sheetId, page: b.page, dx: pl.x - b.x, dy: pl.y - b.y });
+  }
+  p.placements = settled;
+  if (deltas.size && p.routes?.length) p.routes = translateRouteEnds(p.routes, deltas);
+}
+
+/**
+ * Grid notes #4: before `gone` is removed inside a patch, take every device
+ * sitting in a removed holder (and not itself going) out beside it — the
+ * "keep" answer, and the only answer for removals with no question (the riser
+ * editor's row delete / qty cut). Their wire ends follow. Returns the links
+ * it cut (`RemovedBundle.regroup`), so an undo can put them back.
+ */
+export function keepMembersBeside(p: GridProject, gone: ReadonlySet<string>): { id: string; groupId: string }[] {
+  const { takeOut } = deletePlan(p.placements || [], [...gone], "keep");
+  if (!takeOut.length) return [];
+  const out = new Map(takeOut.map((t) => [t.id, t]));
+  const deltas = new Map<string, MoveDelta>();
+  p.placements = (p.placements || []).map((pl) => {
+    const t = out.get(pl.id);
+    if (!t) return pl;
+    deltas.set(pl.id, { sheetId: pl.sheetId, page: pl.page, dx: t.x - pl.x, dy: t.y - pl.y });
+    const next: GridPlacement = { ...pl, x: t.x, y: t.y };
+    delete next.groupId;
+    return next;
+  });
+  if (p.routes?.length) p.routes = translateRouteEnds(p.routes, deltas);
+  return takeOut.map((t) => ({ id: t.id, groupId: t.groupId }));
+}
 
 /** Attached wires follow a moved device (movePlacement's rule): each
  *  endpoint drawn onto a moved placement translates by THAT placement's
@@ -1238,11 +1309,14 @@ export async function removePlacement(
   placementId: string
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    // Grid notes #4: a removed holder's devices stay on the plan beside it.
+    keepMembersBeside(p, new Set([placementId]));
     p.placements = (p.placements || []).filter((pl) => pl.id !== placementId);
     // A riser link or conduit that ended on this device goes with it (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
     // Its conduit runs and pinned tag go too (#321).
     pruneConduitRisersIn(p);
+    settleGroupsIn(p);
     p.updatedAt = Date.now();
   });
 }
@@ -1258,6 +1332,9 @@ export type RemovedBundle = {
    *  #328 carries the bare lighting shape (per option) — restoreConduitBundle
    *  reads both. */
   conduit?: ConduitRemovedBySystem;
+  /** Grid notes #4: members a holder's removal took out beside it ("keep") —
+   *  undo puts each back into its holder. Absent = none. */
+  regroup?: { id: string; groupId: string }[];
 };
 /** `landed` (batchEdit's writes): the project's `updatedAt` before and after — the conduit riser editor's undo stack follows it. */
 export type BatchResult<T> = { ok: true; project: GridProject; value: T; landed?: Landed } | { ok: false; error: string };
@@ -1346,6 +1423,9 @@ export async function movePlacements(
       return withoutAuto({ ...pl, x, y });
     });
     if (p.routes?.length) p.routes = translateRouteEnds(p.routes, deltas);
+    // Grid notes #4: members follow their holder (a member asked to move
+    // stays on its holder — it has no spot of its own).
+    settleGroupsIn(p);
     return previous;
   });
 }
@@ -1355,9 +1435,17 @@ export async function movePlacements(
  * ending on any of them go too (removePlacement's rule). Returns the removed
  * records as stored, in stored order, plus the riser items the prune took.
  */
-export async function removePlacements(projectId: string, ids: string[]): Promise<BatchResult<RemovedBundle>> {
-  return batchEdit(projectId, ids, (p, gone) => {
+export async function removePlacements(
+  projectId: string,
+  ids: string[],
+  opts: { members?: DeleteMembers } = {}
+): Promise<BatchResult<RemovedBundle>> {
+  return batchEdit(projectId, ids, (p, asked) => {
+    // Grid notes #4: a removed holder's members go too ("delete") or are
+    // taken out beside it ("keep", the default — nothing unnamed is deleted).
+    const gone = deletePlan(p.placements || [], [...asked], opts.members === "delete" ? "delete" : "keep").removeIds;
     const placements = (p.placements || []).filter((pl) => gone.has(pl.id));
+    const regroup = keepMembersBeside(p, gone);
     p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
     let riser: RiserRemoved = {};
     if (p.riser) {
@@ -1368,7 +1456,8 @@ export async function removePlacements(projectId: string, ids: string[]): Promis
     const conduitBefore = conduitRisersSnapshot(p);
     pruneConduitRisersIn(p);
     const conduit = conduitRemovedAll(conduitBefore, p);
-    return { placements, riser, ...(Object.keys(conduit).length ? { conduit } : {}) };
+    settleGroupsIn(p);
+    return { placements, riser, ...(Object.keys(conduit).length ? { conduit } : {}), ...(regroup.length ? { regroup } : {}) };
   });
 }
 
@@ -1422,6 +1511,9 @@ export async function setPlacementsSpace(
         else delete edited.spaceId;
         return edited;
       });
+      // Grid notes #4: members take their holder's pin (a member's own pin is
+      // put back to its holder's — it has no room of its own).
+      settleGroupsIn(p);
       return previous;
     },
     (placements, ids, project) => {
@@ -1436,6 +1528,149 @@ export async function setPlacementsSpace(
       return null;
     }
   );
+}
+
+/* ------------------------------ equipment groups (Grid notes #4) ------------------------------ */
+
+export type GroupItem = { id: string; groupId: string | null; x?: number; y?: number };
+
+/** A holder's name in a refusal: its designator, else "That device". */
+const holderName = (pl: GridPlacement | undefined) => cleanDesignator(pl?.designator) ?? "That device";
+
+/**
+ * Put devices into a holder (`groupId` = the holder's placement id) or take
+ * them out (`null`) in one all-or-nothing write (batchEdit). Putting in is
+ * checked by grid-groups.groupRefusal per holder (same option, sheet and
+ * page; one level; no curtains; ≤ 200) and clears the #211 auto tag on the
+ * member and the holder (a hand edit — a re-fill keeps both). Taking out
+ * lands at `x,y` when given (undo) else beside the holder (takeOutPositions);
+ * attached wire ends follow every device that moves. Returns the previous
+ * `{id, groupId | null, x, y}` per item, for undo.
+ */
+export async function setPlacementsGroup(projectId: string, items: GroupItem[]): Promise<BatchResult<GroupItem[]>> {
+  const next = byId(items);
+  return batchEdit(
+    projectId,
+    items.map((it) => it.id),
+    (p) => {
+      const placements = p.placements || [];
+      const live = byId(placements);
+      const previous: GroupItem[] = [];
+      // Spots beside each holder for the devices taken out without an x,y.
+      const spots = new Map<string, { x: number; y: number }>();
+      const leaving = new Map<string, GridPlacement[]>();
+      for (const pl of placements) {
+        const it = next.get(pl.id);
+        if (it && it.groupId === null && pl.groupId && (typeof it.x !== "number" || typeof it.y !== "number")) {
+          const list = leaving.get(pl.groupId) || [];
+          list.push(pl);
+          leaving.set(pl.groupId, list);
+        }
+      }
+      for (const [holderId, list] of leaving) {
+        const h = live.get(holderId) ?? list[0];
+        takeOutPositions(h, list.length).forEach((at, i) => spots.set(list[i].id, at));
+      }
+      const holdersTouched = new Set<string>();
+      const deltas = new Map<string, MoveDelta>();
+      p.placements = placements.map((pl) => {
+        const it = next.get(pl.id);
+        if (!it) return pl;
+        previous.push({ id: pl.id, groupId: pl.groupId ?? null, x: pl.x, y: pl.y });
+        if (it.groupId) {
+          if (pl.groupId === it.groupId) return pl;
+          holdersTouched.add(it.groupId);
+          return { ...withoutAuto({ ...pl }), groupId: it.groupId };
+        }
+        if (!pl.groupId) return pl;
+        const at =
+          typeof it.x === "number" && typeof it.y === "number" ? { x: clamp01(it.x), y: clamp01(it.y) } : spots.get(pl.id) ?? { x: pl.x, y: pl.y };
+        const out: GridPlacement = withoutAuto({ ...pl, x: at.x, y: at.y });
+        delete out.groupId;
+        deltas.set(pl.id, { sheetId: pl.sheetId, page: pl.page, dx: at.x - pl.x, dy: at.y - pl.y });
+        return out;
+      });
+      if (holdersTouched.size) p.placements = p.placements.map((pl) => (holdersTouched.has(pl.id) && pl.auto ? withoutAuto({ ...pl }) : pl));
+      if (deltas.size && p.routes?.length) p.routes = translateRouteEnds(p.routes, deltas);
+      settleGroupsIn(p);
+      return previous;
+    },
+    (placements, _ids, project) => {
+      const into = new Map<string, string[]>();
+      for (const it of items) {
+        if (!it.groupId) continue;
+        const list = into.get(it.groupId) || [];
+        list.push(it.id);
+        into.set(it.groupId, list);
+      }
+      const first = defaultOptionId(project);
+      const live = byId(placements);
+      for (const [holderId, ids] of into) {
+        const refusal = groupRefusal(placements, holderId, ids, first, holderName(live.get(holderId)));
+        if (refusal) return refusal;
+      }
+      return null;
+    }
+  );
+}
+
+/**
+ * "Place inside" (Grid notes #4): a new device of `partId` straight into a
+ * holder — at the holder's sheet, page, spot and option, numbered like any
+ * new device. Refused (nothing written) when the holder is gone, a curtain, a
+ * member itself, or already holds MAX_GROUP_MEMBERS. The caller checks the part.
+ */
+export async function addPlacementInside(
+  projectId: string,
+  input: { holderId: string; partId: string; by: string }
+): Promise<{ ok: true; project: GridProject; placement: GridPlacement } | { ok: false; error: string }> {
+  const { codeOf, digits } = await designatorContext([input.partId]);
+  const refusalFor = (p: GridProject): string | null => {
+    const holder = (p.placements || []).find((pl) => pl.id === input.holderId);
+    if (!holder) return GROUP_HOLDER_GONE;
+    const own = holdRefusal(holder);
+    if (own) return own;
+    if ((memberCounts(p.placements || []).get(holder.id) || 0) >= MAX_GROUP_MEMBERS) return groupFull(holderName(holder));
+    return null;
+  };
+  const before = await getProject(projectId);
+  if (!before) return { ok: false, error: "Design not found." };
+  const early = refusalFor(before);
+  if (early) return { ok: false, error: early };
+  let refusal = null as string | null;
+  let made = null as GridPlacement | null;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    ensureOptions(p);
+    refusal = refusalFor(p);
+    if (refusal) return;
+    const holder = (p.placements || []).find((pl) => pl.id === input.holderId)!;
+    const id = rid("gp-");
+    const at = Date.now();
+    p.placements = [
+      ...(p.placements || []).map((pl) => (pl.id === holder.id && pl.auto ? withoutAuto({ ...pl }) : pl)),
+      {
+        id,
+        sheetId: holder.sheetId,
+        page: holder.page,
+        x: holder.x,
+        y: holder.y,
+        partId: input.partId,
+        optionId: holder.optionId,
+        ...(holder.spaceId ? { spaceId: holder.spaceId } : {}),
+        groupId: holder.id,
+        by: input.by,
+        at,
+      },
+    ];
+    stampNewDesignators(p, new Set([id]), codeOf, digits);
+    settleGroupsIn(p);
+    made = p.placements.find((pl) => pl.id === id) ?? null;
+    p.updatedAt = at;
+  });
+  if (!updated) return { ok: false, error: "Design not found." };
+  if (refusal) return { ok: false, error: refusal };
+  if (!made) return { ok: false, error: GROUP_HOLDER_GONE };
+  return { ok: true, project: updated, placement: made };
 }
 
 const CURTAIN_PART_REFUSAL = "Curtains can't change part — edit the curtain instead.";
@@ -1511,7 +1746,18 @@ const RESTORE_STALE = "Couldn't undo — the design changed.";
 const RESTORE_NOTHING = "Nothing to undo.";
 const RESTORE_TOO_MANY = "Couldn't undo — too many items.";
 
-export type PasteItem = { srcId: string; x: number; y: number; partId: string; category?: string; curtain?: GridCurtain; qty?: number; tag?: PlacementTag };
+export type PasteItem = {
+  srcId: string;
+  x: number;
+  y: number;
+  partId: string;
+  category?: string;
+  curtain?: GridCurtain;
+  qty?: number;
+  tag?: PlacementTag;
+  /** Grid notes #4: the srcId of this item's holder in the same paste — the copy joins the pasted holder. */
+  groupSrcId?: string;
+};
 
 /**
  * Paste copied devices onto one page of one option (#299), in ONE patch.
@@ -1534,6 +1780,14 @@ export async function pastePlacements(
 ): Promise<BatchResult<{ placements: GridPlacement[]; routes: GridRoute[]; skippedWires: number }>> {
   if (!input.items.length) return { ok: false, error: PASTE_NOTHING };
   if (input.items.length > MAX_BATCH || input.routeIds.length > MAX_BATCH) return { ok: false, error: PASTE_TOO_MANY };
+  // Grid notes #4 review: a pasted holder takes at most MAX_GROUP_MEMBERS of
+  // the pasted devices — refused before anything is written, never trimmed.
+  const pastedSrc = new Set(input.items.filter((it) => !it.curtain).map((it) => it.srcId));
+  const capped = groupCapRefusal(
+    [],
+    input.items.flatMap((it) => (!it.curtain && it.groupSrcId && it.groupSrcId !== it.srcId && pastedSrc.has(it.groupSrcId) ? [{ id: it.srcId, groupId: it.groupSrcId }] : []))
+  );
+  if (capped) return { ok: false, error: capped };
   const before = await getProject(projectId);
   if (!before) return { ok: false, error: "Design not found." };
   if (!hasOption(before, input.optionId)) return { ok: false, error: PASTE_OPTION_GONE };
@@ -1612,8 +1866,15 @@ export async function pastePlacements(
         ...(r.connectionType ? { connectionType: r.connectionType } : {}),
       });
     }
+    // Grid notes #4: a member pasted with its holder joins the copy of it;
+    // without it, it lands as a plain device (settleGroupsIn checks the rest).
+    for (const [i, it] of input.items.entries()) {
+      const holder = it.groupSrcId ? newId.get(it.groupSrcId) : undefined;
+      if (holder && holder !== pasted[i].id) pasted[i].groupId = holder;
+    }
     p.placements = [...(p.placements || []), ...pasted];
     stampNewDesignators(p, new Set(pasted.map((pl) => pl.id)), codeOf, digits);
+    settleGroupsIn(p);
     const stamped = byId(p.placements);
     if (routes.length) p.routes = [...(p.routes || []), ...routes];
     p.updatedAt = at;
@@ -1644,6 +1905,7 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   if (placements.length > MAX_BATCH) return { ok: false, error: RESTORE_TOO_MANY };
   const ids = placements.map((pl) => pl.id);
   if (new Set(ids).size !== ids.length) return { ok: false, error: RESTORE_STALE };
+  const regroupIn = Array.isArray(bundle?.regroup) ? bundle.regroup.slice(0, MAX_BATCH) : [];
   const refusalFor = (p: GridProject): string | null => {
     const have = new Set((p.placements || []).map((pl) => pl.id));
     if (ids.some((id) => have.has(id))) return RESTORE_STALE;
@@ -1651,6 +1913,17 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
     // A record whose sheet was deleted since would come back invisible but priced.
     const sheets = new Set(p.sheetIds || []);
     if (placements.some((pl) => !sheets.has(pl.sheetId))) return RESTORE_STALE;
+    // Grid notes #4 review: the devices this undo puts back into a holder must
+    // fit its MAX_GROUP_MEMBERS — refused whole, never trimmed by the repair rule.
+    const adds = [
+      ...placements.flatMap((pl) => (pl.groupId ? [{ id: pl.id, groupId: pl.groupId }] : [])),
+      ...regroupIn.flatMap((r) => (r && typeof r.id === "string" && typeof r.groupId === "string" ? [{ id: r.id, groupId: r.groupId }] : [])),
+    ];
+    if (adds.length) {
+      const names = new Map((p.placements || []).map((pl) => [pl.id, pl.designator]));
+      const capped = groupCapRefusal(p.placements || [], adds, (id) => cleanDesignator(names.get(id)) ?? "That device");
+      if (capped) return `Couldn't undo — ${capped}`;
+    }
     return null;
   };
   const before = await getProject(projectId);
@@ -1704,6 +1977,22 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
     // #321: the conduit runs, pinned tags and dismissals that went with them —
     // untrusted client input, cleaned and own-option-checked by the helper.
     restoreConduitBundle(p, bundle?.conduit);
+    // Grid notes #4: members a holder's removal took out go back into it (a
+    // member that has since joined another group, or holds, stays as it is);
+    // then the one repair rule validates every link and mirrors members.
+    const regroup = regroupIn;
+    if (regroup.length) {
+      const live = new Map(p.placements.map((pl) => [pl.id, pl]));
+      const holds = memberCounts(p.placements);
+      const back = new Map<string, string>();
+      for (const r of regroup) {
+        const m = r && typeof r.id === "string" ? live.get(r.id) : undefined;
+        if (!m || m.groupId || holds.has(m.id) || typeof r.groupId !== "string" || !live.has(r.groupId)) continue;
+        back.set(m.id, r.groupId);
+      }
+      if (back.size) p.placements = p.placements.map((pl) => (back.has(pl.id) ? { ...pl, groupId: back.get(pl.id)! } : pl));
+    }
+    settleGroupsIn(p);
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, error: "Design not found." };
@@ -2308,6 +2597,7 @@ export async function addOption(
       });
       doc.placements = [...(doc.placements || []), ...copied.placements];
       doc.routes = [...(doc.routes || []), ...copied.routes];
+      settleGroupsIn(doc); // Grid notes #4: the copy's groups (groupId remapped by copyOptionMembers)
       // The copied option gets its own riser document, device ends re-pointed
       // at the copied placements (#209).
       const srcRiser = doc.riser?.[input.copyFromOptionId];
@@ -2758,6 +3048,8 @@ export async function restoreRevision(
     // `revisions` is never touched.
     const live = renamed.size ? rewriteGridProjectLive(doc as unknown as Record<string, unknown>, renamed) : null;
     if (live) Object.assign(doc, live);
+    // Grid notes #4: groups ride in the snapshot's placements; re-checked and re-mirrored.
+    settleGroupsIn(doc);
     syncQuoteMirror(doc);
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();

@@ -480,7 +480,11 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
         ? search ? "No recent part matches." : "Parts you place show up here."
         : "Nothing matches.";
 
-  const hint = armedCurtainType
+  // Grid notes #4: "Place inside" turns every pick into one device inside the holder.
+  const inside = ed.placeInsideHolder;
+  const hint = inside
+    ? `Placing inside ${ed.holderLabel(inside)}: click a part to add one inside it. Esc or Done stops.`
+    : armedCurtainType
     ? `Dropping a ${armedCurtainType.toLowerCase()}: click the plan, then give it a name and size.`
     : armedPart
       ? `Painting: ${armedPart.sku} — click the plan to place. Esc stops.`
@@ -561,8 +565,8 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
               minWidth: 160,
               fontSize: 11,
               lineHeight: 1.4,
-              color: armedPart || armedCurtainType ? "#2e7d55" : "#8c919c",
-              fontWeight: armedPart || armedCurtainType ? 600 : 400,
+              color: armedPart || armedCurtainType || inside ? "#2e7d55" : "#8c919c",
+              fontWeight: armedPart || armedCurtainType || inside ? 600 : 400,
             }}
           >
             {hint}
