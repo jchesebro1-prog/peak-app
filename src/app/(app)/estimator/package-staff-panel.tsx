@@ -39,11 +39,14 @@ export function PackageStaffPanel({
   section = "all",
   beforeGrid,
   refreshKey,
+  onFiles,
 }: {
   quoteId: string;
   section?: "all" | "documents" | "grid" | "responses";
   /** #333: a change re-reads the panel (gap chips follow the saved selection). */
   refreshKey?: string;
+  /** #333: how many drawings the client would see (an upload hides a Grid file of its kind) — the Client package tab's count. */
+  onFiles?: (visible: number) => void;
   /** #316: saves the estimate's unsaved edits first (the Estimator's awaitable `saveNow`) — the Grid's From-estimate tray reads the SAVED quote. Resolves to false when nothing was written. Omitted = nothing to save. */
   beforeGrid?: () => Promise<number | false>;
 }) {
@@ -76,6 +79,10 @@ export function PackageStaffPanel({
       live = false;
     };
   }, [quoteId, refreshKey]);
+
+  useEffect(() => {
+    if (panel && onFiles) onFiles(panel.files.filter((f) => !f.hidden).length);
+  }, [panel, onFiles]);
 
   const reload = async () => {
     try {

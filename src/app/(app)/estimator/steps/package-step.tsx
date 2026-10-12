@@ -14,9 +14,7 @@ import {
   type PackageTab,
 } from "@/lib/estimate-steps/package-tabs";
 import { PackageNarrativeTab } from "./package-narrative-tab";
-import { PdfOptionsPanel } from "../preview-doc";
-import { PackageStaffPanel } from "../package-staff-panel";
-import { PAYMENT_TERMS } from "../types";
+import ClientPackageTab from "./client-package-tab";
 import type { EstimatorState } from "../use-estimator-state";
 
 /** The Customer review step's tab look (review-tabs.tsx), so the two tab rows read as one family. */
@@ -104,29 +102,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
       )}
       {visited.client && (
         <div id={packageTabPanelId("client")} role="tabpanel" aria-labelledby={packageTabId("client")} style={{ ...PANEL, display: tab === "client" ? "flex" : "none" }}>
-          <div className="est-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 18, background: "#fff", display: "flex", flexDirection: "column", gap: 18, maxWidth: 420 }}>
-            <PdfOptionsPanel
-              savedQuoteId={s.loadedId}
-              sections={s.sections}
-              setSectionPresentation={(id, value) => s.setSystemPresentation(id, value)}
-              detail={s.detail}
-              setDetail={s.setDetail}
-              pdfQty={s.pdfQty}
-              pdfNotes={s.pdfNotes}
-              pdfPrices={s.pdfPrices}
-              pdfCover={s.pdfCover}
-              pdfTerms={s.pdfTerms}
-              pdfOptions={s.pdfOptions}
-              pdfItemizedAppendix={s.pdfItemizedAppendix}
-              pdfCutSheets={s.pdfCutSheets}
-              cutSheetCount={s.cutSheetCount}
-              paymentTerms={s.paymentTerms}
-              paymentTermsOptions={PAYMENT_TERMS}
-              setPaymentTerms={s.setPaymentTerms}
-              togglePdf={s.togglePdf}
-            />
-            {s.loadedId ? <PackageStaffPanel quoteId={s.loadedId} section="documents" /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate to add drawings.</div>}
-          </div>
+          <ClientPackageTab s={s} active={tab === "client"} />
         </div>
       )}
     </div>

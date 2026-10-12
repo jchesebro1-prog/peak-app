@@ -487,7 +487,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
-  /** #305 — one Show-on-PDF toggle (Build package's PdfOptionsPanel). */
+  /** #305 — one Show-on-PDF toggle (#333: Build package → Client package). */
   const togglePdf = (flag: PdfToggle) => {
     if (flag === "pdfQty") setPdfQty((v) => !v);
     else if (flag === "pdfNotes") setPdfNotes((v) => !v);

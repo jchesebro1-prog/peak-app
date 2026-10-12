@@ -378,6 +378,7 @@ const ESTIMATOR_FILES = [
   // #333: Build package's tabs — the step body moved into these.
   "steps/package-narrative-tab.tsx",
   "steps/package-bom-tab.tsx",
+  "steps/client-package-tab.tsx",
   "steps/review-step.tsx",
   "steps/send-step.tsx",
   "steps/send-composer.tsx",
@@ -386,7 +387,7 @@ const ESTIMATOR_FILES = [
   "steps/review-sidebar.tsx",
 ];
 const PREVIEW_FILES = [
-  "preview-doc.tsx", "steps/package-step.tsx", "steps/package-narrative-tab.tsx", "steps/package-bom-tab.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
+  "preview-doc.tsx", "steps/package-step.tsx", "steps/package-narrative-tab.tsx", "steps/package-bom-tab.tsx", "steps/client-package-tab.tsx", "steps/review-step.tsx", "steps/send-step.tsx", "steps/send-composer.tsx", "steps/send-activity.tsx",
   "steps/review-tabs.tsx", "steps/review-sidebar.tsx",
 ];
 const readJoined = (files: string[]) =>
@@ -46657,7 +46658,9 @@ import { RENDER_STEP_TIMEOUT_MS as c292StepMs } from "@/lib/quote-pdf/render";
   ok(/settleWithin\(loadCutSheets\(id, \{ images: "data" \}\), CUT_SHEET_APPEND_LOAD_MS, `\[cutsheets\] estimate PDF \$\{id\}`\)/.test(qpr) && c292Dl.CUT_SHEET_APPEND_LOAD_MS <= 10_000,
     "#292 source: the estimate print route waits at most a few seconds for appended cut sheets, then prints without them");
   const pv = previewDocSource();
-  ok(/cut sheet\$\{p\.cutSheetCount === 1 \? "" : "s"\} \(Client style\)/.test(pv) && !/cut sheet page/.test(pv), "#292 preview: the chip counts cut sheets (types), not pages");
+  // #333: the toggle is the Client package tab's "Cut sheets (N)" Documents row — N is still countCutSheetTypes (types, not pages).
+  const cpu292 = rd("src/lib/estimate-output/client-package-ui.ts");
+  ok(cpu292.includes("cutSheets: (n: number) => `Cut sheets (${n})`,") && pv.includes("title={COPY.cutSheets(cutSheetCount)}") && !/cut sheet page/.test(pv + cpu292), "#292 preview: the chip counts cut sheets (types), not pages");
 }
 
 async function cutSheetPackage292Checks(): Promise<void> {
@@ -47638,7 +47641,8 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
   const pr = rd("src/app/print/quote/[id]/page.tsx");
   ok(pr.includes("keyProductPhotoDataUris(") && pr.includes("keyProductPhotos={keyProductPhotos}"), "#293 print route: passes the inlined key-product photos");
   const pd = previewDocSource();
-  ok(pd.includes('p.togglePdf("pdfItemizedAppendix")') && pd.includes('"Itemized appendix"') && pd.includes("Print every narrative system's full line list after the signature"),
+  // #333: the toggle is the Client package tab's "BOM (itemized) appendix" Documents row (same field, pdfItemizedAppendix).
+  ok(pd.includes('togglePdf("pdfItemizedAppendix")') && readFileSync(join(process.cwd(), "src/lib/estimate-output/client-package-ui.ts"), "utf8").includes('appendixHint: "Every narrative system\'s full line list after the signature",'),
     "#293 preview: Show on PDF offers the Itemized appendix toggle");
   ok(/detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix/.test(estimatorSource()),
     "#293 estimator: the appendix choice is saved with pdfOptions");
@@ -69775,4 +69779,72 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   ok(bom.includes("rewardsLine: purchasePerksDocLine") && bom.includes("revDateMs,") && bom.includes("pdfOptions: pdfOpts,"), "#333 BOM tab: the perks line, Rev date and Show-on-PDF choices come from the hook");
   ok(/const PackageBomTab = dynamic\(\(\) => import\("\.\/package-bom-tab"\), \{ ssr: false/.test(shell) && !/^import [^\n]*package-bom-tab/m.test(shell),
     "#333 shell: the BOM quote tab is code-split with next/dynamic (never a static import)");
+}
+
+// ---- Task 12: the Client package tab (pure UI rules + source pins) ----
+import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
+{
+  const U = p3Cpu;
+  type Row = Parameters<typeof U.clientRowViews>[0][number];
+  const row = (sku: string, state: Row["state"], extra: Partial<Row> = {}): Row => ({
+    sku, mfr: "ETC", model: sku.replace(/^ETC:/, ""), label: sku + " desc", state, coveredBy: [], datasheet: state === "own" ? { href: "/api/part-documents/PD-" + sku, name: sku + ".pdf" } : null, partOf: [], ...extra,
+  });
+  // 45 products: 41 go (2 of them missing), 4 left out (three themselves, one with its fixture), plus a not-needed row that never counts.
+  const rows: Row[] = [
+    row("ETC:S4-26", "own"),
+    row("ETC:LENS", "covered", { coveredBy: ["ETC:S4-26"], datasheet: { href: "/api/part-documents/PD-ETC:S4-26", name: "S4-26.pdf" } }),
+    row("CLAMP", "missing"), row("PIPE", "missing"), row("GONE", "missing"),
+    row("CABLE", "not-needed"),
+    ...Array.from({ length: 40 }, (_, i) => row("P" + i, "own")),
+  ];
+  const views = U.clientRowViews(rows, ["ETC:S4-26", "GONE", "P0"]);
+  const v = (sku: string) => views.find((x) => x.row.sku === sku)!;
+  ok(U.datasheetCountsLine(U.datasheetCounts(views)) === "41 of 45 go to the client · 2 missing" && JSON.stringify(U.datasheetCounts(views)) === JSON.stringify({ included: 41, total: 45, missing: 2 }),
+    "#333 client tab: \"41 of 45 go to the client · 2 missing\" (not-needed rows never count; an unticked Missing row is not a gap)");
+  ok(v("ETC:LENS").exclusion === "parent" && v("ETC:LENS").effect === "Left out with S4-26" && !v("ETC:LENS").selectable && v("ETC:LENS").lockReason === "Follows S4-26 — tick S4-26 to send it.",
+    "#333 client tab: a covered accessory left out with its fixture reads \"Left out with S4-26\" and follows it (no own tick)");
+  ok(v("ETC:S4-26").effect === "Left out" && !v("ETC:S4-26").checked && v("ETC:S4-26").selectable && v("ETC:S4-26").status.kind === "link", "#333 client tab: a left-out row keeps its datasheet state and reads \"Left out\"");
+  ok(!v("CABLE").selectable && !v("CABLE").checked && v("CABLE").status.kind === "note" && (v("CABLE").status as { text: string }).text === "Not needed (catalog)" && v("CABLE").effect === null,
+    "#333 client tab: a \"not-needed\" row is not selectable");
+  ok((v("ETC:LENS").status as { text: string }).text === "covered by S4-26" && (v("CLAMP").status as { text: string }).text === "Missing", "#333 client tab: covered by <fixture model> / Missing");
+  ok(U.filterRowViews(views, "all").length === 46 && U.filterRowViews(views, "missing").map((x) => x.row.sku).join() === "CLAMP,PIPE" &&
+     U.filterRowViews(views, "leftOut").map((x) => x.row.sku).join() === "ETC:S4-26,ETC:LENS,GONE,P0",
+    "#333 client tab: filters — All · Missing (the gaps still going) · Left out");
+  const missing = U.filterRowViews(views, "missing");
+  ok(U.bulkTargets(missing, "leaveOut").join() === "CLAMP,PIPE" && U.bulkTargets(missing, "include").length === 0, "#333 client tab: Leave all out acts on the filtered rows only");
+  const left = U.filterRowViews(views, "leftOut");
+  ok(U.bulkTargets(left, "include").join() === "ETC:S4-26,GONE,P0", "#333 client tab: Include all ticks back the filtered self-left-out rows (an accessory follows its fixture; never a not-needed row)");
+  ok(U.bulkTargets(U.filterRowViews(views, "all"), "leaveOut").length === 41 && !U.bulkTargets(U.filterRowViews(views, "all"), "leaveOut").includes("CABLE"), "#333 client tab: bulk never touches a not-needed row");
+  ok(U.datasheetCountsLine({ included: 3, total: 3, missing: 0 }) === "3 of 3 go to the client", "#333 client tab: no missing suffix when none");
+  // "Part of" headers for assembly members (#332).
+  const asm = U.clientRowViews([row("A", "own"), row("M1", "own", { partOf: ["Wash fixture"] }), row("M2", "missing", { partOf: ["Wash fixture"] }), row("R1", "own", { partOf: ["Amp rack", "Wash fixture"] })], []);
+  const listed = U.datasheetListItems(asm).map((x) => (x.kind === "header" ? "H:" + x.text : (x.indent ? "  " : "") + x.view.row.sku));
+  ok(listed.join("|") === "A|H:Part of: Wash fixture|  M1|  M2|H:Part of: Amp rack · Wash fixture|  R1", "#333 client tab: assembly members indent under a \"Part of\" header: " + listed.join("|"));
+  // Systems: printed systems only, group headings in order, alternates and the no-intro warning.
+  const it = (id: number) => ({ id, sku: "S" + id, desc: "d", qty: 1, unit: "ea", cost: 10, price: 20 });
+  const secs = [
+    { id: "a", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1)], groupId: "g1" },
+    { id: "b", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [it(2)], groupId: "g1", presentation: "narrative", narrative: "  " },
+    { id: "c", name: "Empty", kind: "materials", mfr: "", freightPct: 0, items: [] },
+    { id: "d", name: "LED upgrade", kind: "materials", mfr: "", freightPct: 0, items: [it(3)], groupId: "g2", alternate: true, presentation: "narrative", narrative: "Intro." },
+  ] as never;
+  const sys = U.systemListItems(secs, [{ id: "g1", name: "Stage", alternate: false }, { id: "g2", name: "Upgrades", alternate: true }] as never);
+  ok(sys.map((x) => (x.kind === "group" ? "G:" + x.name : `${x.name}:${x.presentation}${x.alternate ? ":alt" : ""}${x.noIntro ? ":nointro" : ""}`)).join("|") === "G:Stage|Rigging:itemized|Lighting:narrative:nointro|G:Upgrades|LED upgrade:narrative:alt",
+    "#333 client tab: Systems lists printed systems under their group headings, with Alternate and \"Narrative with no intro\"");
+  ok(U.CLIENT_PACKAGE_ANCHOR_IDS.join() === "documents,systems,line-detail,datasheets", "#333 client tab: the anchors");
+
+  const tab = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/client-package-tab.tsx"), "utf8");
+  ok(tab.startsWith('"use client";') && !/^import (?!type)[^\n]*from "@\/lib\/stores\//m.test(tab) && !/^import (?!type)[^\n]*from "@\/lib\/estimate-output\/package-docs-server"/m.test(tab),
+    "#333 client tab: a client component that imports no store or server module");
+  ok(tab.includes("clientPackageDocsAction({ sections: projection })") && tab.includes("firstLoad ? 0 : 800") && tab.includes("if (my !== seq.current) return;") && tab.includes("if (!active || rs.key === projKey) return;"),
+    "#333 client tab: datasheet rows read the unsaved BOM projection, 800 ms debounce, latest wins, only while the tab shows");
+  ok(tab.includes("{COPY.retry}") && tab.includes("{COPY.checking}"), "#333 client tab: Checking datasheets… and Retry");
+  ok(tab.includes('onClick={() => setSystemPresentation(it.id, "narrative")}') && tab.includes('onClick={() => setSystemPresentation(it.id, "itemized")}'), "#333 client tab: Systems rows write setSystemPresentation");
+  ok(tab.includes('onChange={(v) => setPackageSwitch("estimatePdf", v)}') && tab.includes('onChange={(v) => setPackageSwitch("coverPdf", v)}') && tab.includes('onChange={(v) => setPackageSwitch("drawings", v)}') &&
+     tab.includes('onChange={() => togglePdf("pdfItemizedAppendix")}') && tab.includes('onChange={() => togglePdf("pdfCutSheets")}'),
+    "#333 client tab: Documents — Estimate / Cover PDF / Drawings write the selection; the appendix and Cut sheets are the existing pdfOptions toggles");
+  ok(tab.includes('<PackageStaffPanel quoteId={loadedId} section="documents"') && tab.includes("{COPY.saveForDrawings}"), "#333 client tab: drawings management + package tools (the staff panel's documents half), or Save first");
+  ok(tab.includes("COPY.sentNote(revNum)") && tab.includes("<PdfLineDetailGroup") && !readFileSync(join(process.cwd(), "src/app/(app)/estimator/preview-doc.tsx"), "utf8").includes("PdfOptionsPanel"),
+    "#333 client tab: the R10 sent note; the Show-on-PDF block is the Line detail group (PdfOptionsPanel retired, no Systems list)");
+  ok(readFileSync(join(process.cwd(), "src/app/(app)/estimator/preview-doc.tsx"), "utf8").includes('"Cover note (estimate PDF)"'), "#333 line detail: the cover note is relabelled \"Cover note (estimate PDF)\"");
 }
