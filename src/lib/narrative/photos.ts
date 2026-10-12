@@ -8,8 +8,7 @@ import type { PartDocument } from "@/lib/part-docs/types";
 import { docManufacturerFallbackSkus, documentApplies, keyProductPrintSections } from "@/lib/package-doc/print";
 import { docPhotoSkus } from "@/lib/package-doc/text";
 import type { PackageDoc } from "@/lib/package-doc/types";
-import { listFixtures } from "@/lib/stores/fixtures";
-import { memberAliases, needsFixtureLookup } from "@/lib/quote-line-members";
+import { memberAliases } from "@/lib/quote-line-members";
 
 /**
  * #293 — key-product photos for the customer document. The photo is the
@@ -62,8 +61,9 @@ export async function keyProductPhotoDocs(sections: SpecSection[], document?: Pa
   if (!skus.length) return out;
   // #332: an assembly line's photo is its primary member's (the light engine,
   // else the first included part), else that part's manufacturer image —
-  // read under the member's sku, stored under the line's.
-  const readSkuOf = await photoAliases(sections, skus);
+  // read under the member's sku, stored under the line's. Racks and tracks
+  // keep their own (quote-line-members.ts isAssemblyLine).
+  const readSkuOf = photoAliases(sections, skus);
   const read = (sku: string) => readSkuOf.get(sku) ?? sku;
   // #304: keyed by the sku the section names — a sent revision keeps a
   // renamed part's old SKU, and its photo is found under the new one.
@@ -96,15 +96,12 @@ export async function keyProductPhotoDocs(sections: SpecSection[], document?: Pa
 }
 
 /** #332 — each wanted sku that names an assembly line → its primary member's
- *  sku. Estimator / portal lines carry their members (`components`); only a
- *  line with none of its own (a rack, an `asm:` or bare fixture line) costs
- *  one fixtures read. */
-async function photoAliases(sections: SpecSection[], skus: readonly string[]): Promise<Map<string, string>> {
+ *  sku, from the line's own components (no fixtures read) — the same
+ *  memberAliases the Estimator's library runs in the browser. */
+function photoAliases(sections: SpecSection[], skus: readonly string[]): Map<string, string> {
   const wanted = new Set(skus);
   const items = (Array.isArray(sections) ? sections : []).flatMap((s) => (s && Array.isArray(s.items) ? s.items : [])).filter((it) => it && wanted.has(String(it.sku || "").trim()));
-  if (!items.length) return new Map();
-  const fixtures = items.some((it) => needsFixtureLookup(it)) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : null;
-  return memberAliases(items, fixtures ? (id) => fixtures.get(id) : undefined);
+  return items.length ? memberAliases(items) : new Map();
 }
 
 /** Read a private blob, giving up (null) past `maxBytes`. */

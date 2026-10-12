@@ -9,9 +9,12 @@
  * A track line's priced parts ride in `components` too (real catalog parts),
  * so it expands the same way.
  *
- * The rule, in order:
- *  1. a rack line whose rack still resolves (through `fixtureOf`) → the rack's
- *     LIVE members (gridSpecBomRows — the #296 quote BOM rule, unchanged);
+ * `expandLine` — the DATASHEET / BOM rule, in order:
+ *  1. a rack line (`rackId`) → the rack's LIVE members (gridSpecBomRows — the
+ *     #296 quote BOM rule, unchanged), or null when the rack no longer
+ *     resolves, isn't a rack, or has no member: the line keeps its one quoted
+ *     row. A rack line NEVER falls back to its `components` — for a rack that
+ *     snapshot holds only the rack-level parts, not the placed gear;
  *  2. `components` with a SKU and qty > 0 → those members × the line qty
  *     (an optional add-on left at 0 is not on the line);
  *  3. an `asm:` sku, a `fixtureId`, or a `fixture: true` line naming an
@@ -21,9 +24,15 @@
  * Labor members (a Grid labor id, or a SKU `isInternal` flags) are left out,
  * as gridSpecBomRows leaves them out of a rack.
  *
- * The PRIMARY member is what the assembly's photo / key-product datasheet
- * borrows (Jeff, #332): the light engine (role "fixture" / the record's
- * `lightEngineSku`), else the first included member.
+ * `primaryMemberSku` / `memberAliases` — the PHOTO / PARAGRAPH / key-product
+ * DATASHEET alias (Jeff, #332: assemblies borrow their light engine's). Only
+ * an assembly line (`isAssemblyLine`: a fixture / system / hardware assembly
+ * line or a portal fixture line — never a rack, never a track) aliases, and
+ * only through its OWN `components` snapshot, never a live read: the browser
+ * (which holds no fixture records) and the server then compute the same alias
+ * from the same line, so Save to library writes to the part that prints. The
+ * primary member is the light engine (component role "fixture"), else the
+ * first included member.
  */
 import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import { isLaborSku } from "@/lib/design/wire-labor";
@@ -38,6 +47,7 @@ export type MemberLine = {
   components?: unknown;
   rackId?: unknown;
   fixtureId?: unknown;
+  track?: unknown;
 };
 export type MemberRow = { sku: string; desc: string; qty: number; primary?: true };
 export type FixtureLookup = (id: string) => FixtureResolvable | null | undefined;
@@ -101,10 +111,8 @@ export function expandLine(item: MemberLine | null | undefined, fixtureOf?: Fixt
   if (!item || typeof item !== "object") return null;
   const qty = num(item.qty);
   const rackId = str(item.rackId);
-  if (rackId && fixtureOf && fixtureOf(rackId)?.kind === "rack") {
-    const live = liveMembers(rackId, item, qty, fixtureOf, isInternal);
-    if (live) return live;
-  }
+  // A rack reads live or stands for itself — its components are rack-level parts only (D578).
+  if (rackId) return fixtureOf && fixtureOf(rackId)?.kind === "rack" ? liveMembers(rackId, item, qty, fixtureOf, isInternal) : null;
   const comps = onComponents(item);
   if (comps.length) {
     const kept = comps.filter((c) => !isLaborSku(c.sku) && !isInternal?.(c.sku));
@@ -119,17 +127,28 @@ export function expandLine(item: MemberLine | null | undefined, fixtureOf?: Fixt
   return null;
 }
 
-/** Every row a line stands for: its members, else itself (one primary row). Optional members are never listed. */
-export function lineMemberRows(item: MemberLine, fixtureOf?: FixtureLookup, isInternal?: (sku: string) => boolean): MemberRow[] {
-  const members = expandLine(item, fixtureOf, isInternal);
-  if (members) return members;
-  return [{ sku: str(item?.sku), desc: str(item?.desc), qty: num(item?.qty), primary: true }];
+/**
+ * An assembly line, for the photo / paragraph / key-product datasheet alias:
+ * an Estimator fixture / system / hardware assembly line (`fixture: true`) or
+ * a portal fixture line (`fixtureId`) — but never a rack line (`rackId`) and
+ * never a track line (`track` config, or a `TRK-` sku, track-bom.ts). Racks
+ * and tracks still expand for datasheets (`expandLine`); they don't borrow a
+ * member's photo or paragraph.
+ */
+export function isAssemblyLine(item: MemberLine | null | undefined): boolean {
+  if (!item || typeof item !== "object") return false;
+  if (str(item.rackId)) return false;
+  if (item.track != null || str(item.sku).toUpperCase().startsWith("TRK-")) return false;
+  return item.fixture === true || !!str(item.fixtureId);
 }
 
-/** The member an assembly line's photo / key-product datasheet borrows, or
- *  null when the line is not an assembly (or has no member). */
-export function primaryMemberSku(item: MemberLine, fixtureOf?: FixtureLookup): string | null {
-  return expandLine(item, fixtureOf)?.find((r) => r.primary)?.sku ?? null;
+/** The member an assembly line's photo / paragraph / key-product datasheet
+ *  borrows, or null (not an assembly line, or no included member in its own
+ *  components). Never a live read — the same answer in the browser and on
+ *  the server. */
+export function primaryMemberSku(item: MemberLine | null | undefined): string | null {
+  if (!isAssemblyLine(item)) return null;
+  return expandLine(item)?.find((r) => r.primary)?.sku ?? null;
 }
 
 /** True when a line can only expand through a live fixture read (racks are
@@ -145,15 +164,17 @@ export function needsFixtureLookup(item: MemberLine | null | undefined): boolean
 /**
  * Assembly line SKU → its primary member's SKU, over every line given
  * (first line wins for a SKU; a line whose primary is itself is skipped).
- * What the key-product photo / datasheet / library reads alias through.
+ * What the key-product photo / datasheet / library reads alias through —
+ * client (use-estimator-state) and server (narrative/photos.ts,
+ * package-docs-server.ts) call it on the same lines with no lookup.
  */
-export function memberAliases(items: Iterable<MemberLine | null | undefined>, fixtureOf?: FixtureLookup): Map<string, string> {
+export function memberAliases(items: Iterable<MemberLine | null | undefined>): Map<string, string> {
   const out = new Map<string, string>();
   for (const it of items) {
     if (!it || typeof it !== "object") continue;
     const sku = str(it.sku);
     if (!sku || out.has(sku)) continue;
-    const p = primaryMemberSku(it, fixtureOf);
+    const p = primaryMemberSku(it);
     if (p && p !== sku) out.set(sku, p);
   }
   return out;

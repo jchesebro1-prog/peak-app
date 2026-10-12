@@ -57,6 +57,30 @@ export const MAX_INTRO = 8000;
 /** keyProductLibraryAction reads at most this many skus per call. */
 export const MAX_LIBRARY_SKUS = 200;
 
+/** #332 review — the library prefetch key: the active skus (trimmed, deduped,
+ *  sorted), each with the alias it reads through, so an alias that changes
+ *  under the same sku (an assembly's components edited) refetches its row. */
+export function libraryFetchKey(skus: readonly string[], aliases: Readonly<Record<string, string>>): string {
+  return [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))]
+    .sort()
+    .map((s) => `${s}\t${Object.hasOwn(aliases, s) ? aliases[s] : ""}`)
+    .join("\n");
+}
+
+/** #332 review — which of `skus` the library cache must (re)fetch: not cached
+ *  yet, or cached under a different alias than the current one (`readVia`:
+ *  the alias each cached row was read through, "" = its own sku). */
+export function libraryStaleSkus(
+  skus: readonly string[],
+  rows: Readonly<Record<string, unknown>>,
+  readVia: ReadonlyMap<string, string>,
+  aliases: Readonly<Record<string, string>>,
+): string[] {
+  return [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))].filter(
+    (s) => !Object.hasOwn(rows, s) || (readVia.get(s) ?? "") !== (Object.hasOwn(aliases, s) ? aliases[s] : ""),
+  );
+}
+
 /** What Draft narrative and the chip need about one sku's library entry. */
 export type LibraryInfo = { inCatalog: boolean; desc: string; paragraph: string | null };
 /** keyProductLibraryAction's row (one per requested sku). */

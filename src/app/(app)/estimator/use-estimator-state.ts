@@ -2805,7 +2805,7 @@ export function useEstimatorState(props: EstimatorProps) {
       ].filter((k) => !!k && !isLineToken(k)),
     [narrSec, packageDoc]
   );
-  /** #332: a starred assembly line shows its primary member's paragraph and photo. */
+  /** #332: a starred assembly line (never a rack or track) shows its primary member's paragraph and photo — the same memberAliases the server prints with. */
   const kpAliases = useMemo(() => Object.fromEntries(memberAliases(sections.flatMap((s) => s.items))), [sections]);
   const kpLib = useKeyProductLibrary(narrSkus, kpAliases);
   const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>

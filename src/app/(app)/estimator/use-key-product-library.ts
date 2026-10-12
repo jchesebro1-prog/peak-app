@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MAX_LIBRARY_SKUS, type KeyProductLibraryRow } from "./narrative";
+import { MAX_LIBRARY_SKUS, libraryFetchKey, libraryStaleSkus, type KeyProductLibraryRow } from "./narrative";
 import { keyProductLibraryAction } from "./narrative-actions";
 
 /** #293 — the narrative column's per-sku library cache (paragraph, stamp,
@@ -30,50 +30,59 @@ function aliasesFor(all: Readonly<Record<string, string>>, skus: readonly string
 const NO_ALIASES: Readonly<Record<string, string>> = {};
 
 /** `aliases` (#332): an assembly line's sku → its primary member's
- *  (quote-line-members.ts `memberAliases`) — that sku's row reads the member. */
+ *  (quote-line-members.ts `memberAliases`) — that sku's row reads the member.
+ *  The cache is keyed by (sku, alias): a row read through one alias is
+ *  refetched when the alias changes (an assembly's components edited under
+ *  the same sku), so `viaSku` — where Save to library writes — never goes
+ *  stale. */
 export function useKeyProductLibrary(activeSkus: string[], aliases: Readonly<Record<string, string>> = NO_ALIASES): KeyProductLibrary {
   const [rows, setRows] = useState<Record<string, KeyProductLibraryRow>>({});
   const rowsRef = useRef(rows);
+  /** The alias each cached row was read through ("" = its own sku). */
+  const readViaRef = useRef(new Map<string, string>());
   const aliasesRef = useRef(aliases);
   useEffect(() => {
     aliasesRef.current = aliases;
   }, [aliases]);
 
-  const ensure = useCallback(async (skus: string[]) => {
-    const missing = [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))]
-      .filter((s) => !(s in rowsRef.current))
-      .slice(0, MAX_LIBRARY_SKUS);
-    if (!missing.length) return rowsRef.current;
-    try {
-      const got = await keyProductLibraryAction(missing, aliasesFor(aliasesRef.current, missing));
-      const next = { ...rowsRef.current, ...got };
-      rowsRef.current = next;
-      setRows(next);
-      return next;
-    } catch {
-      return rowsRef.current; // offline / transient — the chips just stay blank
-    }
-  }, []);
-
-  const refresh = useCallback(async (skus: string[]) => {
-    const want = [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))].slice(0, MAX_LIBRARY_SKUS);
-    if (!want.length) return rowsRef.current;
-    const got = await keyProductLibraryAction(want, aliasesFor(aliasesRef.current, want));
+  const fetchRows = useCallback(async (skus: string[]) => {
+    const sent = aliasesFor(aliasesRef.current, skus);
+    const got = await keyProductLibraryAction(skus, sent);
+    for (const s of skus) readViaRef.current.set(s, sent && Object.hasOwn(sent, s) ? sent[s] : "");
     const next = { ...rowsRef.current, ...got };
     rowsRef.current = next;
     setRows(next);
     return next;
   }, []);
 
+  const ensure = useCallback(async (skus: string[]) => {
+    const missing = libraryStaleSkus(skus, rowsRef.current, readViaRef.current, aliasesRef.current).slice(0, MAX_LIBRARY_SKUS);
+    if (!missing.length) return rowsRef.current;
+    try {
+      return await fetchRows(missing);
+    } catch {
+      return rowsRef.current; // offline / transient — the chips just stay blank
+    }
+  }, [fetchRows]);
+
+  const refresh = useCallback(async (skus: string[]) => {
+    const want = [...new Set(skus.map((s) => (s || "").trim()).filter(Boolean))].slice(0, MAX_LIBRARY_SKUS);
+    if (!want.length) return rowsRef.current;
+    return fetchRows(want);
+  }, [fetchRows]);
+
   const setRow = useCallback((sku: string, row: KeyProductLibraryRow) => {
+    // The row now reads what it names (Save to library wrote to `viaSku`).
+    readViaRef.current.set(sku, row.viaSku ?? "");
     const next = { ...rowsRef.current, [sku]: row };
     rowsRef.current = next;
     setRows(next);
   }, []);
 
-  const key = [...new Set(activeSkus.map((s) => (s || "").trim()).filter(Boolean))].sort().join("\n");
+  // (sku, alias) pairs — a changed alias re-runs the prefetch for that sku.
+  const key = libraryFetchKey(activeSkus, aliases);
   useEffect(() => {
-    if (key) void ensure(key.split("\n"));
+    if (key) void ensure(key.split("\n").map((line) => line.split("\t")[0]));
   }, [key, ensure]);
 
   return { rows, ensure, refresh, setRow };

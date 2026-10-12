@@ -47824,7 +47824,9 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
      draftSrc.indexOf("setNotice(NO_LIBRARY)") > -1 && draftSrc.indexOf("setNotice(NO_LIBRARY)") < draftSrc.indexOf("draftNarrative("),
     "#293 fix Draft: force-refreshes the library and aborts (no write) with “Could not load the library” when any sku has no row");
   const refreshSrc = hook.slice(hook.indexOf("const refresh = useCallback("), hook.indexOf("const setRow = useCallback("));
-  ok(refreshSrc.includes("keyProductLibraryAction(want, aliasesFor(aliasesRef.current, want))") && !/catch/.test(refreshSrc) && !refreshSrc.includes("in rowsRef.current"),
+  const fetchSrc = hook.slice(hook.indexOf("const fetchRows = useCallback("), hook.indexOf("const ensure = useCallback("));
+  ok(refreshSrc.includes("return fetchRows(want)") && !/catch/.test(refreshSrc) && !refreshSrc.includes("in rowsRef.current") && !refreshSrc.includes("libraryStaleSkus") &&
+     fetchSrc.includes("await keyProductLibraryAction(skus, sent)") && !/catch/.test(fetchSrc),
     "#293 fix Draft: refresh bypasses the cache and rejects on failure (no swallowed error)");
   ok(/onChange=\{\(e\) => \{\s*setIntroId\(e\.target\.value\);\s*setDraftAsk\(false\);/.test(col), "#293 fix Draft: changing the intro closes the Replace / Fill blanks strip");
   const star = cli.slice(cli.indexOf("const toggleKeyProductLine = "), cli.indexOf("const curtainSec = "));
@@ -68934,25 +68936,25 @@ async function assemblyMembers332Checks(): Promise<void> {
     components: [comp("K332-CLAMP", "mount", 2), comp("K332-ENG", "fixture", 1), comp("K332-OPT", "accessory", 0), comp("labor:k332", "other", 1)] };
 
   // ---- the helper: Estimator components ----
-  const rows = M.lineMemberRows(est);
+  const rows = M.expandLine(est) || [];
   ok(JSON.stringify(rows) === JSON.stringify([{ sku: "K332-CLAMP", desc: "K332-CLAMP label", qty: 6 }, { sku: "K332-ENG", desc: "K332-ENG label", qty: 3, primary: true }]),
     "#332 members: an Estimator assembly line → its components × line qty; an optional add-on at 0 and a labor member are left out; the light engine is primary: " + JSON.stringify(rows));
   ok(M.primaryMemberSku(est) === "K332-ENG", "#332 members: the primary member is the light engine (role fixture)");
   const noEngine = { ...est, components: [comp("K332-OPT", "accessory", 0), comp("K332-B", "other", 1), comp("K332-C", "mount", 1)] };
   ok(M.primaryMemberSku(noEngine) === "K332-B", "#332 members: no light engine → the first INCLUDED member is primary");
-  ok(M.lineMemberRows(est, undefined, (s) => s === "K332-CLAMP").map((r) => r.sku).join() === "K332-ENG", "#332 members: isInternal drops a member (labor catalog rows)");
+  ok((M.expandLine(est, undefined, (s) => s === "K332-CLAMP") || []).map((r) => r.sku).join() === "K332-ENG", "#332 members: isInternal drops a member (labor catalog rows)");
   // A portal fixture line names its light engine already — no alias.
   const portal = { id: 2, sku: "K332-ENG", desc: "Wash", qty: 1, fixture: true, fixtureId: "SA-K332", components: [comp("K332-ENG", "fixture", 1), comp("K332-LENS", "lens", 1)] };
-  ok(M.primaryMemberSku(portal) === "K332-ENG" && M.memberAliases([portal]).size === 0 && M.lineMemberRows(portal).map((r) => r.sku).join() === "K332-ENG,K332-LENS",
+  ok(M.primaryMemberSku(portal) === "K332-ENG" && M.memberAliases([portal]).size === 0 && (M.expandLine(portal) || []).map((r) => r.sku).join() === "K332-ENG,K332-LENS",
     "#332 members: a portal fixture line expands to its parts; its primary is its own sku (no alias)");
-  // Track lines (real parts in components) expand; blank-sku components never list.
+  // Track lines (real parts in components) expand for datasheets; blank-sku components never list.
   const track = { id: 3, sku: "TRK-K332", desc: "Track", qty: 1, unit: "lot", components: [comp("K332-TRACK", "other", 4), comp("", "other", 2)], track: {} };
-  ok(M.lineMemberRows(track).map((r) => `${r.sku}:${r.qty}`).join() === "K332-TRACK:4" && M.primaryMemberSku(track) === "K332-TRACK", "#332 members: a track line lists its real parts (blank-sku rows never)");
+  ok((M.expandLine(track) || []).map((r) => `${r.sku}:${r.qty}`).join() === "K332-TRACK:4", "#332 members: a track line lists its real parts for datasheets (blank-sku rows never)");
   ok(M.expandLine({ sku: "TRK-X", qty: 1, components: [comp("", "other", 1)] }) === null, "#332 members: components with no SKU → not an assembly (the line stands for itself)");
   // A plain line stands for itself.
-  ok(M.expandLine({ sku: "K332-PLAIN", desc: "Plain", qty: 2 }) === null && JSON.stringify(M.lineMemberRows({ sku: " K332-PLAIN ", desc: "Plain", qty: 2 })) === JSON.stringify([{ sku: "K332-PLAIN", desc: "Plain", qty: 2, primary: true }]) &&
-     M.primaryMemberSku({ sku: "K332-PLAIN", qty: 1 }) === null, "#332 members: a plain line is not an assembly; lineMemberRows gives its own row");
-  ok(M.expandLine(null) === null && M.lineMemberRows({} as never).length === 1 && M.expandLine({ sku: "X", components: "junk" } as never) === null, "#332 members: junk input never throws");
+  ok(M.expandLine({ sku: "K332-PLAIN", desc: "Plain", qty: 2 }) === null && M.primaryMemberSku({ sku: "K332-PLAIN", qty: 1 }) === null, "#332 members: a plain line is not an assembly");
+  ok(M.expandLine(null) === null && M.expandLine({} as never) === null && M.expandLine({ sku: "X", components: "junk" } as never) === null, "#332 members: junk input never throws");
+  ok(!("lineMemberRows" in M), "#332 review: lineMemberRows (no callers) is gone");
 
   // ---- live lookups: asm:, fixtureId, bare fixture line, racks ----
   const lines = { data: [], power: [], mounting: [{ sku: "K332-CLAMP", qty: 1, label: "Clamp" }], accessories: [{ sku: "K332-OPT", qty: 0, label: "Opt" }] };
@@ -68960,23 +68962,56 @@ async function assemblyMembers332Checks(): Promise<void> {
   const sys = { id: "SA-K332S", kind: "system" as const, label: "Sys", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "K332-A", qty: 2 }, { sku: "K332-B", qty: 1 }] };
   const rack = { id: "SA-K332R", kind: "rack" as const, label: "Rack", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "K332-FRM", qty: 1 }],
     rack: { config: { ruCount: 12, widthIn: 19 as const, numbering: "bottom-up" as const }, placements: [{ id: "RP-1", kind: "device" as const, sku: "K332-AMP", ruStart: 1, ruHeight: 2, face: "front" as const }] } };
-  const all = new Map<string, unknown>([[fx.id, fx], [sys.id, sys], [rack.id, rack]]);
+  const emptyRack = { ...rack, id: "SA-K332RE", parts: [], rack: { ...rack.rack, placements: [] } };
+  const all = new Map<string, unknown>([[fx.id, fx], [sys.id, sys], [rack.id, rack], [emptyRack.id, emptyRack]]);
   const fixtureOf = (id: string) => all.get(id) as never;
-  const asm = M.lineMemberRows({ sku: "asm:SA-K332", desc: "Wash", qty: 2 }, fixtureOf);
+  const primaryOf = (r: ReturnType<typeof M.expandLine>) => r?.find((m) => m.primary)?.sku ?? null;
+  const asm = M.expandLine({ sku: "asm:SA-K332", desc: "Wash", qty: 2 }, fixtureOf) || [];
   ok(asm.map((r) => `${r.sku}:${r.qty}${r.primary ? "*" : ""}`).join() === "K332-ENG:2*,K332-CLAMP:2", "#332 members: a Grid asm: line → its live included members, light engine primary: " + JSON.stringify(asm));
-  ok(M.primaryMemberSku({ sku: "asm:SA-K332S", qty: 1 }, fixtureOf) === "K332-A", "#332 members: a System assembly's primary is its first part");
-  ok(M.primaryMemberSku({ sku: "SA-K332", qty: 1, fixture: true }, fixtureOf) === "K332-ENG", "#332 members: a bare Estimator fixture line (no components) resolves live by its assembly id");
+  ok(primaryOf(M.expandLine({ sku: "asm:SA-K332S", qty: 1 }, fixtureOf)) === "K332-A", "#332 members: a System assembly's first part is marked primary");
+  ok(primaryOf(M.expandLine({ sku: "SA-K332", qty: 1, fixture: true }, fixtureOf)) === "K332-ENG", "#332 members: a bare Estimator fixture line (no components) expands live by its assembly id");
   ok(M.expandLine({ sku: "asm:SA-GONE", qty: 1 }, fixtureOf) === null && M.expandLine({ sku: "asm:SA-K332", qty: 1 }) === null, "#332 members: an assembly that no longer resolves (or no lookup) stands for itself");
-  const rackLine = { sku: "SA-K332R", qty: 1, fixture: true, rackId: "SA-K332R", components: [comp("K332-STALE", "other", 1)] };
-  ok(M.lineMemberRows(rackLine, fixtureOf).map((r) => r.sku).join() === "K332-FRM,K332-AMP" && M.lineMemberRows(rackLine).map((r) => r.sku).join() === "K332-STALE",
-    "#332 members: a rack line reads its LIVE members first (D578); with no lookup its stored components");
+  const rackLine = { sku: "SA-K332R", qty: 1, fixture: true, rackId: "SA-K332R", components: [comp("K332-STALE", "fixture", 1)] };
+  ok((M.expandLine(rackLine, fixtureOf) || []).map((r) => r.sku).join() === "K332-FRM,K332-AMP", "#332 members: a rack line reads its LIVE members (D578)");
+  ok(M.expandLine(rackLine) === null && M.expandLine({ ...rackLine, rackId: "SA-GONE" }, fixtureOf) === null && M.expandLine({ ...rackLine, rackId: "SA-K332RE" }, fixtureOf) === null &&
+     M.expandLine({ ...rackLine, rackId: "SA-K332" }, fixtureOf) === null,
+    "#332 review: a rack line that doesn't resolve live with members (no lookup, gone, member-less, not a rack) stands for itself — never its rack-level components snapshot");
   ok(M.needsFixtureLookup(rackLine) && M.needsFixtureLookup({ sku: "asm:SA-K332" }) && M.needsFixtureLookup({ sku: "SA-K332", fixture: true }) && M.needsFixtureLookup({ sku: "K332-ENG", fixtureId: "SA-K332" }) &&
      !M.needsFixtureLookup(est) && !M.needsFixtureLookup(portal) && !M.needsFixtureLookup({ sku: "K332-PLAIN" }),
     "#332 members: only a rack, an asm:, or an assembly line with no components of its own needs the fixtures read");
-  ok(JSON.stringify([...M.memberAliases([est, portal, { sku: "K332-PLAIN" }, { ...est, components: [comp("K332-OTHER", "fixture", 1)] }])]) === JSON.stringify([["SA-K332", "K332-ENG"]]),
-    "#332 members: memberAliases maps an assembly line's sku to its primary member (first line wins, identity skipped)");
+
+  // ---- photo / paragraph / key-product datasheet aliases: assembly lines only ----
+  ok(M.isAssemblyLine(est) && M.isAssemblyLine(portal) && M.isAssemblyLine({ sku: "K332-ENG", fixtureId: "SA-K332" }) &&
+     !M.isAssemblyLine(rackLine) && !M.isAssemblyLine(track) && !M.isAssemblyLine({ ...est, sku: "TRK-K332" }) && !M.isAssemblyLine({ ...est, track: {} }) &&
+     !M.isAssemblyLine({ sku: "K332-PLAIN", components: est.components }) && !M.isAssemblyLine(null),
+    "#332 review: isAssemblyLine = a fixture / portal-fixture line that is neither a rack (rackId) nor a track (track config / TRK- sku)");
+  ok(M.primaryMemberSku(rackLine) === null && M.primaryMemberSku(track) === null && M.primaryMemberSku({ ...est, rackId: "SA-K332R" }) === null,
+    "#332 review: a rack or track line never borrows a member's photo / paragraph");
+  ok(M.primaryMemberSku({ sku: "SA-K332", qty: 1, fixture: true }) === null && M.primaryMemberSku({ sku: "asm:SA-K332", qty: 1 }) === null,
+    "#332 review: the alias reads only the line's own components snapshot (no live read) — browser and server compute the same answer");
+  ok(M.primaryMemberSku.length === 1 && M.memberAliases.length === 1, "#332 review: primaryMemberSku / memberAliases take no fixture lookup (one pure rule on both sides)");
+  ok(JSON.stringify([...M.memberAliases([rackLine, track, est, portal, { sku: "K332-PLAIN" }, { ...est, components: [comp("K332-OTHER", "fixture", 1)] }])]) === JSON.stringify([["SA-K332", "K332-ENG"]]),
+    "#332 members: memberAliases maps an assembly line's sku to its primary member (racks / tracks never, first line wins, identity skipped)");
   ok(JSON.stringify(M.specItems({ sections: [{ items: [est, null, 5] }, null, { items: "x" }] })) === JSON.stringify([est]) && M.specItems(null).length === 0, "#332 members: specItems reads raw spec JSON safely");
   ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(rd("src/lib/quote-line-members.ts")), "#332: quote-line-members.ts is client-safe (no store/db at runtime)");
+  const photosSrc = rd("src/lib/narrative/photos.ts");
+  ok(photosSrc.includes("memberAliases(items)") && !photosSrc.includes("listFixtures") && rd("src/lib/estimate-output/package-docs-server.ts").includes("memberAliases(specItems(spec))") &&
+     rd("src/app/(app)/estimator/use-estimator-state.ts").includes("memberAliases(sections.flatMap((s) => s.items))"),
+    "#332 review (source): photos, the package's key-product datasheets and the Estimator's library all alias through the same memberAliases(lines)");
+
+  // ---- the Estimator's library cache is keyed by (sku, alias) ----
+  {
+    const N = await import("@/app/(app)/estimator/narrative");
+    const row = { inCatalog: true } as never;
+    ok(N.libraryFetchKey(["A", "B"], { A: "ENG1" }) !== N.libraryFetchKey(["A", "B"], { A: "ENG2" }) && N.libraryFetchKey(["B", "A", " A "], {}) === N.libraryFetchKey(["A", "B"], {}),
+      "#332 review: the library prefetch key changes when an alias changes under the same sku (order / blanks / dupes don't)");
+    const via = new Map([["A", "ENG1"], ["B", ""]]);
+    ok(N.libraryStaleSkus(["A", "B", "C"], { A: row, B: row }, via, { A: "ENG1" }).join() === "C", "#332 review: a cached row read under the current alias is not refetched");
+    ok(N.libraryStaleSkus(["A", "B"], { A: row, B: row }, via, { A: "ENG2", B: "ENG3" }).join() === "A,B", "#332 review: a changed (or new) alias refetches that sku's row");
+    ok(N.libraryStaleSkus(["A"], { A: row }, via, {}).join() === "A", "#332 review: an alias that went away refetches the sku's own row");
+    const hook = rd("src/app/(app)/estimator/use-key-product-library.ts");
+    ok(hook.includes("libraryStaleSkus(") && hook.includes("libraryFetchKey(activeSkus, aliases)"), "#332 review (source): the hook's cache and prefetch effect follow the alias");
+  }
 
   // ---- quoteBom (client package + package documents) ----
   const qSpec = (items: unknown[]) => ({ spec: { sections: [{ kind: "materials", items }] } }) as never;
@@ -68984,6 +69019,13 @@ async function assemblyMembers332Checks(): Promise<void> {
   ok(JSON.stringify(bom) === JSON.stringify([{ sku: "K332-CLAMP", desc: "K332-CLAMP label", qty: 6 }, { sku: "K332-ENG", desc: "K332-ENG label", qty: 4 }]) && !bom.some((r) => r.sku.startsWith("SA-")),
     "#332 quoteBom: an Estimator assembly line lists its members (summed with a loose line of the same part), never its SA- row: " + JSON.stringify(bom));
   ok(k332QuoteBom(qSpec([{ sku: "asm:SA-K332", desc: "Wash", qty: 1 }]), fixtureOf).map((r) => r.sku).join() === "K332-ENG,K332-CLAMP", "#332 quoteBom: an asm: line expands through the lookup");
+  {
+    const rl = { ...rackLine, desc: "Amp rack", components: [comp("K332-FRAME", "other", 1)] };
+    const gone = JSON.stringify(k332QuoteBom(qSpec([{ ...rl, rackId: "SA-GONE" }]), fixtureOf));
+    ok(gone === JSON.stringify([{ sku: "SA-K332R", desc: "Amp rack", qty: 1 }]) && JSON.stringify(k332QuoteBom(qSpec([rl]))) === gone,
+      "#332 review quoteBom: a rack that no longer resolves (or no lookup) keeps its one quoted row, never its rack-level parts: " + gone);
+    ok(k332QuoteBom(qSpec([rl]), fixtureOf).map((r) => r.sku).join() === "K332-FRM,K332-AMP", "#332 quoteBom: a live rack still lists its members (D578)");
+  }
   ok(rd("src/lib/client-package-server.ts").includes("it.rackId || it.fixtureId || needsFixtureLookup(it)") && rd("src/lib/estimate-output/package-docs-server.ts").includes("needsFixtureLookup(it)"),
     "#332 (source): the client package and the package documents load fixtures for any line that needs a live read");
 
@@ -69061,4 +69103,23 @@ async function assemblyMembers332Checks(): Promise<void> {
   const bq = await bomFromQuote(QID);
   ok(bq.ok && bq.rows.map((r) => `${r.sku}:${r.qty}`).sort().join() === [`${CLAMP}:4`, `${ENG}:2`, `${NOPHOTO}:1`].sort().join(),
     "#332 bid-spec BOM: an Estimator assembly line expands into its members like a Grid asm: line: " + JSON.stringify(bq.ok ? bq.rows : bq));
+
+  // ---- #332 review: racks and tracks keep datasheets but never borrow a photo / paragraph / key-product datasheet ----
+  const RACK = "SA-K332RDB"; // no such rack record — it no longer resolves
+  const rackDb = { id: 11, sku: RACK, desc: "Gone rack", qty: 1, unit: "ea", cost: 5, price: 9, fixture: true, rackId: RACK, components: [comp(ENG, "fixture", 1)] };
+  const trackDb = { id: 12, sku: "TRK-K332DB", desc: "Track", qty: 1, unit: "lot", cost: 5, price: 9, components: [comp(ENG, "other", 2)], track: {} };
+  const sec2 = { ...sec, id: "s2", items: [rackDb, trackDb], keyProducts: [{ lineKey: "11", sku: RACK, text: "r", photo: true }, { lineKey: "12", sku: "TRK-K332DB", text: "t", photo: true }] };
+  const photos2 = await keyProductPhotoDocs([sec2] as never);
+  ok(photos2.size === 0, "#332 review photos: a starred rack / track line never prints a member's photo: " + JSON.stringify([...photos2.keys()]));
+  const spec2 = { sections: [sec2], mobs: [] };
+  const docs2 = await PD.specPackageDocs(spec2);
+  ok(docs2.aliases.size === 0, "#332 review package documents: no key-product datasheet alias for a rack / track line: " + JSON.stringify([...docs2.aliases]));
+  ok(docs2.bom.map((r) => `${r.sku}:${r.qty}`).sort().join() === [`${ENG}:2`, `${RACK}:1`].sort().join(),
+    "#332 review package documents: an unresolved rack keeps its quoted row; a track still lists its parts for datasheets: " + JSON.stringify(docs2.bom));
+  const QID2 = fixtureId(332, "quote2");
+  await Q.create({ id: QID2, name: "#332 rack + track", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: spec2 } as never);
+  registerFixture("quotes", QID2);
+  const bq2 = await bomFromQuote(QID2);
+  ok(bq2.ok && bq2.rows.map((r) => `${r.sku}:${r.qty}`).sort().join() === [`${ENG}:2`, `${RACK}:1`].sort().join(),
+    "#332 review bid-spec BOM: an unresolved rack keeps its quoted row (not its rack-level parts); a track lists its parts: " + JSON.stringify(bq2.ok ? bq2.rows : bq2));
 }

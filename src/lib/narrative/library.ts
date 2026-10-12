@@ -20,9 +20,11 @@ const MAX_ALIAS_SKU = 200;
 export async function keyProductLibrary(
   skus: readonly string[],
   /** #332: an assembly line's sku → its primary member's (client-computed,
-   *  quote-line-members.ts `memberAliases`): that sku's row reads the member
-   *  part — its paragraph, photo and manufacturer fallback — and says so in
-   *  `viaSku`. Only entries for requested skus count. */
+   *  quote-line-members.ts `memberAliases` — assembly lines only, from the
+   *  line's own components, the same rule the printed photo and key-product
+   *  datasheet use): that sku's row reads the member part — its paragraph,
+   *  photo and manufacturer fallback — and says so in `viaSku`. Only entries
+   *  for requested skus count. */
   aliases?: Readonly<Record<string, string>> | null,
 ): Promise<Record<string, KeyProductLibraryRow>> {
   const wanted = [

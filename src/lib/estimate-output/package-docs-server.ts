@@ -32,8 +32,11 @@ export type RevisionPackageDocs = {
   moved: Map<string, string>;
   /** #332: an assembly line's SKU → its primary member's SKU (the light
    *  engine, else the first included part) — a starred assembly's
-   *  key-product datasheet is that member's. Keyed by the spec's own line SKU;
-   *  the member SKU is the spec's too (map it through `moved` for live). */
+   *  key-product datasheet is that member's. Assembly lines only (never a
+   *  rack or a track — quote-line-members.ts `isAssemblyLine`), read from the
+   *  line's own components exactly as the Estimator's library and the
+   *  customer photos read them. Keyed by the spec's own line SKU; the member
+   *  SKU is the spec's too (map it through `moved` for live). */
   aliases: Map<string, string>;
 };
 
@@ -63,7 +66,7 @@ export async function specPackageDocs(spec: unknown): Promise<RevisionPackageDoc
   const index = await loadScopedCoverage(parts);
   const known = new Set(parts.map((p) => p.sku));
   const { bySku, documents } = resolvePackageDocs(index, bom.filter((r) => known.has(r.sku)).map((r) => r.sku));
-  const aliases = memberAliases(specItems(spec), rackOf);
+  const aliases = memberAliases(specItems(spec));
   return { bom, parts, index, bySku, documents, moved, aliases };
 }
 
