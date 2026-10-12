@@ -122,6 +122,7 @@ import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid, placeablePartIds } from "@/lib/design/grid-part-lookup";
+import { adoptCatalogParts, searchGridCatalog } from "@/lib/design/grid-catalog-search-server";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { headers } from "next/headers";
@@ -130,7 +131,7 @@ import type { CutSheetsAdded } from "@/lib/curtain-cut-sheets/package-sheets";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import { isGridLayer } from "@/lib/design/grid-scopes";
-import { isPerLengthUnit, type GridCurtain } from "@/lib/design/grid-bom";
+import { isPerLengthUnit, type GridCurtain, type PartLite } from "@/lib/design/grid-bom";
 import { cleanDesignator, type RenumberTarget } from "@/lib/design/designators";
 import { checkCurtainInput, type CurtainInput } from "@/lib/design/grid-curtain-input";
 import { polygonArea } from "@/lib/design/grid-geometry";
@@ -615,6 +616,32 @@ export async function createClientPackageAction(
   }
 }
 
+/** Grid notes #6: the Product Library's "From the catalog" search — the
+ *  full catalog, server-side (never shipped to the client): under 2
+ *  characters returns nothing, at most 40 hits, never a fabric, Labor or a
+ *  renamed-away part, each built like the library entry it becomes. */
+export async function searchGridCatalogAction(query: string): Promise<{ ok: true; parts: PartLite[] } | { ok: false; error: string }> {
+  await requireUser();
+  try {
+    return { ok: true, parts: await searchGridCatalog(String(query ?? "")) };
+  } catch (e) {
+    console.error("[grid] catalog search failed:", e);
+    return { ok: false, error: "The catalog search didn't finish — try again." };
+  }
+}
+
+/** Grid notes #6: a placed / swapped-in catalog part joins the Grid library
+ *  first (insert-if-absent), so after the refresh it's an ordinary entry —
+ *  never "No longer in the catalog". A convenience: the placement itself
+ *  never fails on it (partForGrid resolves a catalog id either way). */
+async function adoptForPlacement(ids: Iterable<string>, by: string): Promise<void> {
+  try {
+    await adoptCatalogParts(ids, by);
+  } catch (e) {
+    console.error("[grid] adding catalog parts to the library failed:", e);
+  }
+}
+
 export async function placeDeviceAction(
   projectId: string,
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string }
@@ -624,6 +651,7 @@ export async function placeDeviceAction(
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   if (!sheetOnProject(project, input.sheetId)) return { ok: false, error: SHEET_GONE };
+  await adoptForPlacement([input.partId], user.name);
   const p = await addPlacement(projectId, { ...input, by: user.name });
   // The new record is the last placement of the doc this patch wrote (#299).
   const placement = p?.placements.at(-1);
@@ -836,7 +864,7 @@ export async function replacePlacementsPartAction(
   projectId: string,
   items: { id: string; partId: string; qty?: number; designator?: string }[]
 ): Promise<{ ok: true; previous: { id: string; partId: string; qty?: number; designator?: string }[] } | { ok: false; error: string }> {
-  await requireUser();
+  const user = await requireUser();
   if (
     !isStr(projectId) || !Array.isArray(items) ||
     !items.every(
@@ -851,6 +879,7 @@ export async function replacePlacementsPartAction(
   if (partIds.size > MAX_DISTINCT_PARTS) return { ok: false, error: TOO_MANY_PARTS };
   const placeable = await placeablePartIds(partIds);
   if (placeable.size !== partIds.size) return { ok: false, error: "That part is not in the Grid library." };
+  await adoptForPlacement(partIds, user.name); // Grid notes #6
   const r = await setPlacementsPart(
     projectId,
     items.map((it) => ({

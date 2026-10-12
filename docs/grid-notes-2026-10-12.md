@@ -7,10 +7,12 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 |---|------|------|--------|
 | 1 | Icon picker (symbol selector) opens off-screen in the Property Editor | Bug | ✅ Fixed `a3073d3d` — panel portals to `<body>`, clamped to the viewport |
 | 2 | Edit **Type** next to Space (Property Editor + Spreadsheet); an admin change should fix the part everywhere, or a "save as rule" (e.g. SM58 mic shows as Dimming & Power) | Feature | Decided (below) — ready to plan |
-| 3 | Quick multi-select / marquee: selected parts appear then drop out; Properties shows a stale single device (PRT-02) above the multi-selection | Bug | ✅ Fixed — duplicate React key orphaned Designator rows; Shift near-miss no longer clears; drag-and-put-back keeps the group |
+| 3 | Quick multi-select / marquee: selected parts appear then drop out; Properties shows a stale single device (PRT-02) above the multi-selection | Bug | ✅ Fixed `18bae19c` — duplicate React key orphaned Designator rows; Shift near-miss no longer clears; drag-and-put-back keeps the group |
 | 4 | Equipment groups: select a rack, place gear inside it, grouped for this design and shown grouped on the Spreadsheet | Feature | Decided (below) — ready to plan |
-| 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | Investigating |
-| 6 | Product Library shows only a small slice of the catalog (All: Lighting 21 · Audio 5 · Unscoped 4) | Gap | Root cause found (below) — plan: search the full catalog server-side |
+| 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | Mapped (below) — needs Jeff's cable list |
+| 6 | Product Library shows only a small slice of the catalog (All: Lighting 21 · Audio 5 · Unscoped 4) | Gap | Built — awaiting review (below) |
+| 7 | Client package "rough drawings" have no devices and no title block | Bug | Building (worktree `peak-grid-pkg`) — ZIP ships the real title-blocked drawing set via the signed print route; rough drawings + raw plans only as a fallback with a gap |
+| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | Decided — queued after #7 (same file) |
 
 ## #2 Type editing — findings
 
@@ -30,11 +32,28 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 - Still open: does a group feed a rack assembly's RU elevation/submittal? (later)
 - Original questions: is the rack a placed `asm:` rack (priced as the assembly) or just a plain rack part + a group? Do grouped devices sit on the plan at their own spot, or collapse into the rack marker? Does a group feed the rack's RU elevation / submittal?
 
+## #5 Wire types — findings
+
+- Two layers that don't connect today:
+  1. **Routable wire = any Grid library part with unit `ft`/`lf`/`lin ft`/`linear ft`** (`grid-bom.ts:429`); the Wires pane lists them (`use-grid-editor.ts:1103`). The catalog has **none**: the 10,702-row import is all `ea` (4 Belden/Cat5 "Wire" rows are per-foot prices stored as `ea`). And even a new `ft` part never reaches the Grid library (#6), so the pane's empty hint ("add cable with unit 'ft' under Catalog") is wrong.
+  2. **Wire-type registry** (`settings.wireTypes`, `catalog-connect.ts:25-48`, ~25 `DEFAULT_WIRE_TYPES`: DMX 5-pin, Cat6, speaker pair, XLR, SDI, HDMI, fiber, powerCON, motor power, ETC families) — used for port checks and the conduit riser. None has `cableSku`, `dollarsPerFt` or `symbol` set, so the riser legend shows nothing; `dollarsPerFt` is read nowhere.
+- Plan: seed a starter set of `category: "Wire"`, `unit: "ft"` catalog parts (cost/list per ft, `cableOdIn`), put them in the Grid library, and link each to its wire type (`cableSku`, riser `symbol`, `signal`). #6's catalog search makes later cable additions show up automatically.
+- **Jeff (Oct 12):** starter set — ~20 common cables with real part numbers + OD, seeded as $0 drafts linked to each wire type; Jeff fills cost/sell per ft in the Catalog.
+- Originally needed from Jeff: the cables Peak actually pulls — part # (e.g. Belden 1583A), cost + sell per ft, OD, riser letter.
+
 ## #6 Product Library is a small slice — root cause
 
 - The library is the separate `grid_catalog` collection, not the catalog (`stores/grid-catalog.ts:9-12`). `listGridSymbols` seeds it from the catalog **once, on first use, only when it's empty** (`:82-99`). Prod's was seeded long before the 37k-part catalog landed.
 - After that, a catalog part only joins the library when Auto fill or the From-estimate tray needs it (`ensureGridSymbolsFor`, `:184`; callers `grid-auto-fill.ts:61`, `actions.ts:569`, `estimator/grid-design-actions.ts:72`). So the library = the first seed + whatever Auto fill/estimates pulled in.
 - Shipping 37k parts to the client isn't viable. Plan: a **Catalog** search in the Product Library (server action, debounced, ~50 results, same palette tile), and placing a catalog result calls `ensureGridSymbolsFor([part])` first so it becomes an ordinary library entry. Fabric/Labor stay out (as today).
+- **Built (Oct 12):** typing 2+ characters under All / a scope / a type adds a **From the catalog** section below the library tiles — `searchGridCatalogAction` (`grid/[id]/actions.ts`) → `searchGridCatalog` (`lib/design/grid-catalog-search-server.ts`): the specs picker's SQL pre-filter (`listDocsFiltered` over the #304 fields, longest token), then the exact #304 match, fabric/Labor/renamed excluded, the Estimator picker's ranking, cap 40, each hit built through `gridPartsFrom` like the library entry it becomes (`fromCatalog: true`). Debounced 250 ms with a sequence guard; parts already in the library and other manufacturers (when the filter is set) are hidden. Placing (click-to-arm or drag) or Replace part calls `adoptCatalogParts` → `ensureGridSymbolsFor` first. Pure rules in `lib/design/grid-catalog-search.ts`; harness "Grid notes #6:".
+
+## #8 Datasheet package — decisions (Jeff, Oct 12)
+
+- Cover: Peak logo · job name · **both** contacts ("Prepared for" = the customer's contact on the job; "Prepared by" = Peak's lead estimator) · venue · location · customer logo.
+- No customer logo stored today → add a logo upload on the company record. No logo → company name set large in that spot.
+- One PDF: cover + every datasheet in BOM order. Appears in **all three** places: the client package ZIP (Grid + estimate, `datasheets/combined-datasheets.pdf`), its own download button (Grid Outputs menu + estimate Build package), and the client link page ("Download all datasheets").
+- Reuse: #296 rack submittal already pdf-lib-merges datasheets with a gap cover.
 
 ## Side observations
 

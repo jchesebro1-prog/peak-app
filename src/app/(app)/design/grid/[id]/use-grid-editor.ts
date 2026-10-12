@@ -89,6 +89,7 @@ import type { ConduitSize } from "@/lib/design/conduit-riser/pricing";
 import { activeTool, fitZoom, TOOL_KEYS, ZOOM_MAX, ZOOM_MIN, type GridTool } from "@/lib/design/grid-tools";
 import type { SysKey } from "@/app/(app)/design/quick/engine";
 import { paletteView } from "@/lib/design/grid-palette";
+import { mergeCatalogLookups, withCatalogLookups } from "@/lib/design/grid-catalog-search";
 import type { ScheduleData } from "@/lib/design/grid-schedule";
 import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/lib/design/grid-selection";
 import { alignPositions, changedMoves, distributePositions, type AlignMode } from "@/lib/design/grid-align";
@@ -895,10 +896,21 @@ function useGridEditorImpl(props: GridEditorProps) {
         ? "Snap: too coarse at this scale"
         : "Snap: too fine at this scale";
 
-  const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+  /** Grid notes #6: catalog search results the Product Library has shown —
+   *  not Grid library entries yet, but the lookups below (the armed ghost and
+   *  hint, labels, badges) must know them until placing one makes it a
+   *  library entry and the refresh brings it in through `parts`. Lookup
+   *  only: never the palette, the BOM or the schedule. */
+  const [catalogParts, setCatalogParts] = useState<PartLite[]>([]);
+  const rememberCatalogParts = useCallback((found: PartLite[]) => {
+    if (!found.length) return;
+    setCatalogParts((prev) => mergeCatalogLookups(prev, found));
+  }, []);
+  const lookupParts = useMemo(() => withCatalogLookups(parts, catalogParts), [parts, catalogParts]);
+  const partById = useMemo(() => new Map(lookupParts.map((p) => [p.id, p])), [lookupParts]);
   /** Every part's resolved badge (icon + colour), computed once per prop
    *  change — the plan re-renders on every drag step. */
-  const lookById = useMemo(() => new Map(parts.map((p) => [p.id, symbolLook(p, symbolCtx)])), [parts, symbolCtx]);
+  const lookById = useMemo(() => new Map(lookupParts.map((p) => [p.id, symbolLook(p, symbolCtx)])), [lookupParts, symbolCtx]);
   const lookOf = useCallback(
     (part: PartLite | null | undefined): SymbolLook => (part && lookById.get(part.id)) || symbolLook(part, symbolCtx),
     [lookById, symbolCtx]
@@ -3065,6 +3077,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     partById,
     lookById,
     lookOf,
+    rememberCatalogParts,
     scopeOfPlacement,
     typeKeyOfPlacement,
     placementVisible,

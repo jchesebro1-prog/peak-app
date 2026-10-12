@@ -108,6 +108,9 @@ export type PartLite = {
    *  longer confirmed. Prices $0; the quote refuses it by name and the editor
    *  flags it "Needs a part" (never "priced at list"). */
   virtualDead?: true;
+  /** Grid notes #6: a catalog search result not yet in the Grid library —
+   *  placing one adds it (grid-catalog-search-server). Never stored. */
+  fromCatalog?: true;
 };
 
 /** What the editor tells a person to do with a `virtualDead` part (#211). */

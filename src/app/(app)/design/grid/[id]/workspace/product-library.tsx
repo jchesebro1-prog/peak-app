@@ -7,10 +7,11 @@ import { GRID_CURTAIN_TYPES } from "@/lib/design/grid-bom";
 import type { GridLayer } from "@/lib/design/grid-scopes";
 import { PALETTE_ROW_CAP, isMapped, paletteView } from "@/lib/design/grid-palette";
 import { assemblyParts, libraryQuery, libraryTree, selKey, type LibraryNode, type LibrarySel } from "@/lib/design/grid-library";
+import { CATALOG_SEARCH_DEBOUNCE_MS, catalogResultsToShow, catalogSearchQuery, makeRequestSeq, offersCatalogSearch } from "@/lib/design/grid-catalog-search";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { ObjectSymbolImg } from "@/components/design/object-symbol";
 import { useCanMap } from "@/components/design/equipment-map-link";
-import { toggleGridFavoriteAction } from "../actions";
+import { searchGridCatalogAction, toggleGridFavoriteAction } from "../actions";
 import AssembliesPanel from "../assemblies-panel";
 import EstimateTray from "./estimate-tray";
 import { GRID_PART_MIME } from "../plan-canvas";
@@ -200,7 +201,8 @@ function DevicePalette({
   ed: GridEditor;
   rows: PartLite[];
   favSet: Set<string>;
-  onStar: (id: string) => void;
+  /** Absent = no star (catalog results: Favorites lists library parts only). */
+  onStar?: (id: string) => void;
   emptyText: string;
 }) {
   const { armedPartId, lookOf, enterTool, disarm, symbolUrls } = ed;
@@ -238,8 +240,10 @@ function DevicePalette({
                   {!isMapped(p) && <span style={{ fontWeight: 700, color: "#a0442b" }}>Unmapped · </span>}
                   {moneyFmt(p.list)}
                   {p.kind === "assembly" ? " · assembly" : ""}
+                  {p.fromCatalog ? " · catalog" : ""}
                 </span>
               </button>
+              {onStar && (
               <button
                 type="button"
                 onClick={() => onStar(p.id)}
@@ -250,6 +254,7 @@ function DevicePalette({
               >
                 {starred ? "★" : "☆"}
               </button>
+              )}
               {/* Datasheet link (Task 5, punch #39) — a sibling of the arm
                   button, never nested: an <a> inside a <button> is invalid. */}
               {p.hasDatasheet && (
@@ -386,7 +391,43 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
       }),
     [counts, favorites.length, recent.length, assemblyCount, expanded]
   );
-  const armedPart = armedPartId ? parts.find((p) => p.id === armedPartId) ?? null : null;
+  // Grid notes #6: an armed catalog result isn't in `parts` yet — the editor's lookup knows it.
+  const armedPart = armedPartId ? ed.partById.get(armedPartId) ?? null : null;
+
+  // Grid notes #6: "From the catalog" — the full catalog, searched on the
+  // server (debounced; a sequence number drops stale responses), shown under
+  // the library's own tiles for All / a scope / a type.
+  const { rememberCatalogParts } = ed;
+  const catalogQ = offersCatalogSearch(current.kind, showTray) ? catalogSearchQuery(search) : "";
+  const [catalog, setCatalog] = useState<{ q: string; parts: PartLite[]; error: string | null } | null>(null);
+  const catalogSeq = useRef(makeRequestSeq());
+  useEffect(() => {
+    const seq = catalogSeq.current;
+    if (!catalogQ) {
+      seq.next(); // whatever is still in flight is stale now
+      return;
+    }
+    const timer = setTimeout(() => {
+      const n = seq.next();
+      searchGridCatalogAction(catalogQ).then(
+        (r) => {
+          if (!seq.isLatest(n)) return;
+          if (r.ok) rememberCatalogParts(r.parts);
+          setCatalog(r.ok ? { q: catalogQ, parts: r.parts, error: null } : { q: catalogQ, parts: [], error: r.error });
+        },
+        () => {
+          if (seq.isLatest(n)) setCatalog({ q: catalogQ, parts: [], error: "The catalog search didn't finish — try again." });
+        }
+      );
+    }, CATALOG_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [catalogQ, rememberCatalogParts]);
+  const libraryIds = useMemo(() => new Set(parts.map((p) => p.id)), [parts]);
+  const catalogDone = catalog && catalog.q === catalogQ ? catalog : null;
+  const catalogRows = useMemo(
+    () => (catalogDone ? catalogResultsToShow(catalogDone.parts, libraryIds, mfr) : []),
+    [catalogDone, libraryIds, mfr]
+  );
 
   const pick = (s: LibrarySel) => {
     setTrayOn(false);
@@ -553,6 +594,22 @@ export default function ProductLibrary({ ed }: { ed: GridEditor }) {
             <DevicePalette ed={ed} rows={assemblies} favSet={favSet} onStar={star} emptyText="No assembly matches." />
           ) : (
             <DevicePalette ed={ed} rows={view?.rows ?? []} favSet={favSet} onStar={star} emptyText={emptyText} />
+          )}
+
+          {catalogQ && (
+            <section aria-label="From the catalog" style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #edeff3" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "2px 8px", marginBottom: 7 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#3d424e" }}>From the catalog</span>
+                <span style={{ fontSize: 10.5, color: "#8c919c" }}>Not in your Grid library yet — placing one adds it.</span>
+              </div>
+              {!catalogDone ? (
+                <div style={{ fontSize: 11.5, color: "#9aa0ab", padding: "3px 2px" }}>Searching…</div>
+              ) : catalogDone.error ? (
+                <div role="alert" style={{ fontSize: 11.5, color: "#a0442b", padding: "3px 2px" }}>{catalogDone.error}</div>
+              ) : (
+                <DevicePalette ed={ed} rows={catalogRows} favSet={favSet} emptyText="No other catalog parts match." />
+              )}
+            </section>
           )}
 
         </div>

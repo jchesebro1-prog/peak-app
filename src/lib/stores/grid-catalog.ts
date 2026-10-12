@@ -3,7 +3,7 @@ import { insertDocIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, insert
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart } from "@/lib/fabric-part";
 import type { GridShape } from "@/lib/design/grid-symbols";
-import { keywordScopeOf } from "@/lib/design/device-types";
+import { gridSymbolFromPart } from "@/lib/design/grid-catalog-search";
 
 /**
  * Grid's symbol library is intentionally separate from the pricing catalog.
@@ -43,40 +43,12 @@ export type GridSymbol = {
   updatedAt: number;
 };
 
-/** #226: the text heuristic lives in lib/design/device-types (pure) and now
- *  ends in Unscoped, not Lighting — an unknown part must never flood the
- *  Lighting chip (#48). Device types override this at read time
- *  (gridPartsFrom), so this is only the seed-time fallback. */
-function scopeFor(p: CatalogPart): string {
-  return keywordScopeOf(p);
-}
-
-function dimensionsFor(p: CatalogPart): { width: number; height: number } {
-  const text = `${p.category} ${p.desc}`.toLowerCase();
-  if (text.includes("speaker") || text.includes("fixture")) return { width: 48, height: 34 };
-  if (text.includes("rack") || text.includes("control")) return { width: 54, height: 38 };
-  return { width: 44, height: 30 };
-}
-
-function fromPricing(p: CatalogPart, by: string): GridSymbol {
-  const d = dimensionsFor(p);
-  return {
-    id: p.id,
-    name: p.desc,
-    manufacturer: p.mfr || "",
-    modelNumber: p.sku,
-    scope: scopeFor(p),
-    category: p.category || "Other",
-    width: d.width,
-    height: d.height,
-    ports: p.ports || [],
-    pricingPartId: p.id,
-    kind: "device",
-    createdBy: by,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
-}
+/** #226: the scope is the keyword heuristic (lib/design/device-types, pure;
+ *  ends in Unscoped, not Lighting — #48). Device types override it at read time
+ *  (gridPartsFrom), so this is only the seed-time fallback. The shape itself
+ *  lives in lib/design/grid-catalog-search (Grid notes #6) so a catalog search
+ *  result is built exactly like an entry this store writes. */
+const fromPricing = (p: CatalogPart, by: string): GridSymbol => gridSymbolFromPart(p, by);
 
 /** Load the independent Grid library, seeding only placeable pricing rows on first use. */
 export async function listGridSymbols(seedBy = "system"): Promise<GridSymbol[]> {

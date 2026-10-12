@@ -11663,6 +11663,7 @@ seeded()
   .then(() => riserPhase2C2Checks())
   .then(() => riserPhase2C3Checks())
   .then(() => riserPhase2C4Checks())
+  .then(() => gridNotes6Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -23069,7 +23070,9 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     "#226 fix wave: keywordScopeOf matches 'rig' as a word/prefix of rigging, not a bare substring — 'Rigid Mount' isn't Rigging"
   );
   const gc226 = readFileSync(join(process.cwd(), "src/lib/stores/grid-catalog.ts"), "utf8");
-  ok(gc226.includes("keywordScopeOf(") && !/return "Lighting";/.test(gc226), "#226 scope fix: grid-catalog's scopeFor delegates to keywordScopeOf (no Lighting fallback)");
+  // Grid notes #6: the seed shape moved to lib/design/grid-catalog-search (gridSymbolFromPart).
+  const gcs226 = readFileSync(join(process.cwd(), "src/lib/design/grid-catalog-search.ts"), "utf8");
+  ok(gc226.includes("gridSymbolFromPart(p, by)") && gcs226.includes("scope: keywordScopeOf(p),") && !/return "Lighting";/.test(gc226 + gcs226), "#226 scope fix: grid-catalog's seed scope delegates to keywordScopeOf (no Lighting fallback)");
 
   // the map
   ok(j(dt226Sanitize({ "  Motorized HOIST ": { typeKey: "hoists-motors", by: "auto", at: 5 }, a: { typeKey: "Bad Key", by: "admin", at: 1 }, b: { typeKey: "speakers", by: "robot", at: 1 }, c: null, d: { typeKey: null, by: "admin" } }))
@@ -66028,4 +66031,132 @@ async function riserPhase2C4Checks(): Promise<void> {
   ok(crs.includes('const system: ConduitRiserSystem = query.get("system") === "av" ? "av" : "lighting";') && crs.includes('av: "av-conduit-riser"'),
     "#328 C4 pins: the DXF route whitelists system (exactly \"av\", else lighting) and names A/V files …-av-conduit-riser.dxf");
   ok(src("scripts/smoke-routes.ts").includes("conduit-riser/dxf?option=opt-base&size=d&page=1&system=av"), "#328 C4 smoke: the A/V DXF URL is in the smoke routes");
+}
+
+/* ======================================================================
+   Grid notes #6 — the Product Library searches the full catalog on the
+   server ("From the catalog"); placing a result adds it to the Grid library.
+   Pure rules (lib/design/grid-catalog-search), the server search + adoption on
+   the scratch DB (grid-catalog-search-server), and source pins for the thin
+   actions and the library's debounce / stale-response guard.
+   ====================================================================== */
+async function gridNotes6Checks(): Promise<void> {
+  const S = await import("@/lib/design/grid-catalog-search");
+  const Srv = await import("@/lib/design/grid-catalog-search-server");
+  const GC = await import("@/lib/stores/grid-catalog");
+  const DS = await import("@/db/doc-store");
+  const { keywordScopeOf } = await import("@/lib/design/device-types");
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  type CP = import("@/lib/stores/catalog").CatalogPart;
+  type PL = import("@/lib/design/grid-bom").PartLite;
+  const cp = (o: Partial<CP> & { id: string }): CP => ({ sku: o.id, desc: "", category: "Speakers", unit: "ea", list: 10, cost: 5, ...o }) as CP;
+  const pl = (id: string, extra: Partial<PL> = {}): PL => ({ id, sku: id, desc: id, category: "Speakers", unit: "ea", list: 1, cost: 1, ...extra });
+
+  // ---- pure: query, prefilter, filter, rank, cap
+  ok(S.catalogSearchQuery("a") === "" && S.catalogSearchQuery(" a ") === "" && S.catalogSearchQuery("  ab ") === "ab" && S.catalogSearchQuery(null) === "",
+    "Grid notes #6: a query shorter than 2 characters (trimmed) searches nothing");
+  ok(S.catalogPrefilterText("Shure  SM58 x") === "shure", "Grid notes #6: the SQL pre-filter narrows on the longest token, lowercased");
+  ok(S.filterCatalogHits([cp({ id: "A1", desc: "a widget" })], "a").length === 0, "Grid notes #6: filterCatalogHits refuses a 1-character query");
+  const many = Array.from({ length: 50 }, (_, i) => cp({ id: `W${String(i).padStart(2, "0")}`, desc: `Spot widget ${i}` }));
+  const excluded = [
+    cp({ id: "FAB1", desc: "Spot widget velour", category: "Fabric", unit: "yd" }),
+    cp({ id: "SG1", desc: "Spot widget scrim", category: "Theatrical/Soft Goods", unit: "sq ft" }),
+    cp({ id: "LAB1", desc: "Spot widget install", category: "Labor" }),
+    cp({ id: "LAB2", desc: "Spot widget focus", category: " Labor " }),
+    cp({ id: "OLD1", desc: "Spot widget old", renamedTo: "W00" }),
+  ];
+  const capped = S.filterCatalogHits([...excluded, ...many], "spot widget");
+  ok(capped.length === 40 && S.CATALOG_SEARCH_CAP === 40, "Grid notes #6: results cap at 40");
+  ok(!capped.some((p) => excluded.some((x) => x.id === p.id)), "Grid notes #6: fabric (incl. Soft Goods per sq ft), Labor and renamed-away parts never come back");
+  ok(S.filterCatalogHits(many, "spot widget", 500).length === 40, "Grid notes #6: a caller can't raise the cap past 40");
+  const soft = cp({ id: "SG2", desc: "Spot widget pipe pocket", category: "Theatrical/Soft Goods", unit: "ea" });
+  ok(S.filterCatalogHits([soft], "pipe pocket").length === 1, "Grid notes #6: Soft Goods sold by the each are ordinary parts (isFabricPart's rule)");
+  const model = cp({ id: "Symetrix:Jupiter 4", desc: "DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", formerSkus: ["80-0043"] });
+  ok(S.filterCatalogHits([model], "jupiter").length === 1 && S.filterCatalogHits([model], "80-0043").length === 1,
+    "Grid notes #6: matches Model # and former SKUs (#304 haystack)");
+  ok(S.filterCatalogHits([cp({ id: "SM58", desc: "Cardioid dynamic mic", mfr: "Shure" })], "shure sm58").length === 1,
+    "Grid notes #6: every token must match somewhere (maker + SKU)");
+  const ranked = S.filterCatalogHits([cp({ id: "XSM58-KIT", desc: "Mic kit with SM58" }), cp({ id: "SM58", desc: "Zed mic" }), cp({ id: "SM58-LC", desc: "Alpha mic" })], "sm58");
+  ok(ranked.map((p) => p.id).join() === "SM58,SM58-LC,XSM58-KIT", "Grid notes #6: an exact SKU ranks first, then a prefix, then a substring (the Estimator picker's tiers)");
+
+  // ---- pure: the library entry shape
+  const sym = S.gridSymbolFromPart(cp({ id: "SPK1", desc: "Point source speaker", mfr: "EAW", ports: [] }), "Jeff", 7);
+  ok(sym.id === "SPK1" && sym.pricingPartId === "SPK1" && sym.modelNumber === "SPK1" && sym.kind === "device" && sym.manufacturer === "EAW" &&
+     sym.scope === keywordScopeOf({ category: "Speakers", desc: "Point source speaker" }) && sym.width === 48 && sym.height === 34 && sym.createdAt === 7 && sym.createdBy === "Jeff",
+    "Grid notes #6: gridSymbolFromPart builds the seed/ensureGridSymbolsFor entry (id = pricing id, keyword scope, symbol size)");
+
+  // ---- pure: what the library shows, where, and the stale guard
+  const shown = S.catalogResultsToShow([pl("A", { manufacturer: "ETC" }), pl("B", { manufacturer: "Shure" }), pl("C", { manufacturer: "ETC " })], new Set(["A"]), "");
+  ok(shown.map((p) => p.id).join() === "B,C", "Grid notes #6: catalog results already in the library are hidden");
+  ok(S.catalogResultsToShow([pl("B", { manufacturer: "Shure" }), pl("C", { manufacturer: "ETC " })], new Set(), "ETC").map((p) => p.id).join() === "C",
+    "Grid notes #6: catalog results respect the manufacturer filter");
+  ok(["all", "scope", "type"].every((k) => S.offersCatalogSearch(k, false)) && ["favorites", "recent", "assemblies", "curtains"].every((k) => !S.offersCatalogSearch(k, false)) && !S.offersCatalogSearch("all", true),
+    "Grid notes #6: the catalog section shows for All / a scope / a type — never Favorites, Recent, Assemblies, Curtains or From estimate");
+  const seq = S.makeRequestSeq();
+  const first = seq.next();
+  const second = seq.next();
+  ok(!seq.isLatest(first) && seq.isLatest(second), "Grid notes #6: an older request's response is stale once a newer one starts");
+  const merged = S.mergeCatalogLookups([pl("A", { desc: "old" }), pl("B")], [pl("A", { desc: "new" }), pl("C")]);
+  ok(merged.map((p) => `${p.id}:${p.desc}`).join() === "B:B,A:new,C:C", "Grid notes #6: remembered catalog parts merge newest-wins by id");
+  ok(S.mergeCatalogLookups([], Array.from({ length: 450 }, (_, i) => pl(`P${i}`))).length === S.CATALOG_LOOKUP_MAX, "Grid notes #6: remembered catalog parts are capped");
+  const lib = [pl("A", { desc: "library" })];
+  const look = S.withCatalogLookups(lib, [pl("A", { desc: "catalog" }), pl("Z")]);
+  ok(look.length === 2 && look[0].desc === "library" && look[1].id === "Z" && S.withCatalogLookups(lib, []) === lib,
+    "Grid notes #6: the editor's lookup keeps library entries and adds catalog results it lacks");
+
+  // ---- server: search + adoption on the scratch DB
+  const TOKEN = "zqgn6widget";
+  const ids = Array.from({ length: 45 }, (_, i) => fixtureId("gn6", `w${String(i).padStart(2, "0")}`));
+  const fab = fixtureId("gn6", "fabric");
+  const lab = fixtureId("gn6", "labor");
+  for (const id of ids) {
+    registerFixture("catalog_parts", id);
+    await DS.upsertDoc("catalog_parts", { id, sku: id, desc: `Test ${TOKEN} speaker`, category: "Speakers", unit: "ea", list: 120, cost: 60, mfr: "TestMfr" } as never);
+  }
+  registerFixture("catalog_parts", fab);
+  registerFixture("catalog_parts", lab);
+  await DS.upsertDoc("catalog_parts", { id: fab, sku: fab, desc: `Test ${TOKEN} velour`, category: "Fabric", unit: "yd", list: 1, cost: 1 } as never);
+  await DS.upsertDoc("catalog_parts", { id: lab, sku: lab, desc: `Test ${TOKEN} labor`, category: "Labor", unit: "hr", list: 1, cost: 1 } as never);
+
+  ok((await Srv.searchGridCatalog("z")).length === 0 && (await Srv.searchGridCatalog(" ")).length === 0, "Grid notes #6: searchGridCatalog refuses fewer than 2 characters");
+  const found = await Srv.searchGridCatalog(TOKEN);
+  ok(found.length === 40, `Grid notes #6: searchGridCatalog caps at 40 (got ${found.length})`);
+  ok(found.every((p) => ids.includes(p.id) && p.fromCatalog === true) && !found.some((p) => p.id === fab || p.id === lab),
+    "Grid notes #6: searchGridCatalog returns flagged parts, never the fabric or Labor rows");
+  ok(found.every((p) => p.list === 120 && p.cost === 60 && p.manufacturer === "TestMfr" && p.pricingPartId === p.id && "deviceType" in p && !!p.gridScope),
+    "Grid notes #6: a result is a gridPartsFrom PartLite (price, maker, pricing link, device type + scope resolved)");
+  ok((await Srv.searchGridCatalog(`speaker ${TOKEN.toUpperCase()}`)).length === 40, "Grid notes #6: the server search is case-insensitive and token-based");
+
+  const target = ids[0];
+  registerFixture("grid_catalog", target);
+  registerFixture("grid_catalog", fab);
+  ok(!(await GC.getGridSymbol(target)), "Grid notes #6 setup: the catalog part isn't in the Grid library yet");
+  const added = await Srv.adoptCatalogParts([target, "asm:FA-nope", "grid-seed:x", fab, fixtureId("gn6", "missing")], "Test Harness");
+  const entry = await GC.getGridSymbol(target);
+  ok(added === 1 && !!entry && entry.pricingPartId === target && entry.kind === "device" && entry.name === `Test ${TOKEN} speaker`,
+    "Grid notes #6: adoptCatalogParts adds a placed catalog part to the Grid library (virtual, seed, fabric and unknown ids skipped)");
+  ok(!(await GC.getGridSymbol(fab)), "Grid notes #6: a fabric is never adopted into the library");
+  ok((await Srv.adoptCatalogParts([target], "Test Harness")) === 0, "Grid notes #6: adopting an id already in the library is a no-op");
+
+  // ---- source pins: thin actions, the client's guard, no store in the client
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}(`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}(`)));
+  const place = body("placeDeviceAction");
+  ok(place.includes("await adoptForPlacement([input.partId], user.name);") && place.indexOf("adoptForPlacement(") < place.indexOf("addPlacement("),
+    "Grid notes #6: placeDeviceAction adds a catalog part to the library before placing it");
+  const swap = body("replacePlacementsPartAction");
+  ok(swap.includes("await adoptForPlacement(partIds, user.name);") && swap.indexOf("placeablePartIds(") < swap.indexOf("adoptForPlacement("),
+    "Grid notes #6: Replace part adopts a catalog part too, after the placeable check");
+  const search = body("searchGridCatalogAction");
+  ok(search.includes("await requireUser();") && search.includes("searchGridCatalog(String(query ?? \"\"))"), "Grid notes #6: the search action is a signed-in wrapper over searchGridCatalog");
+  const libSrc = src("src/app/(app)/design/grid/[id]/workspace/product-library.tsx");
+  ok(libSrc.includes("CATALOG_SEARCH_DEBOUNCE_MS") && libSrc.includes("clearTimeout(timer)") && libSrc.includes("if (!seq.isLatest(n)) return;") && libSrc.includes("searchGridCatalogAction(catalogQ)"),
+    "Grid notes #6: the library debounces the catalog search and drops stale responses");
+  ok(libSrc.includes("catalog.q === catalogQ") && libSrc.includes("Searching…") && libSrc.includes("From the catalog"),
+    "Grid notes #6: only the current query's results show; a quiet Searching… meanwhile");
+  ok(!/from "@\/lib\/stores\//.test(libSrc) && !/^import (?!type)[^\n]*@\/lib\/stores\//m.test(src("src/lib/design/grid-catalog-search.ts")),
+    "Grid notes #6: the client side never imports a store (the pure module's store imports are type-only)");
+  ok(src("src/app/(app)/design/grid/[id]/use-grid-editor.ts").includes("withCatalogLookups(parts, catalogParts)"),
+    "Grid notes #6: the editor's part lookup knows shown catalog results (armed ghost, labels)");
 }
