@@ -40,12 +40,14 @@ export function stepAfterAction(action: NextStepAction): EstimateStep | null {
 }
 
 /** The `?…` string for `step`, keeping every other param. Build writes no
- *  `step` param. `id` (a just-saved quote) is set when given. */
+ *  `step` param. `id` (a just-saved quote) is set when given. The Build
+ *  package tab (`ptab`, #333 package-tabs.ts) is dropped off the package step. */
 export function stepSearch(search: string, step: EstimateStep, id?: string | null): string {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   if (id) params.set("id", id);
   if (step === "build") params.delete("step");
   else params.set("step", step);
+  if (step !== "package") params.delete("ptab");
   const s = params.toString();
   return s ? "?" + s : "";
 }

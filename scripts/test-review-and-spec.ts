@@ -69123,3 +69123,34 @@ async function assemblyMembers332Checks(): Promise<void> {
   ok(bq2.ok && bq2.rows.map((r) => `${r.sku}:${r.qty}`).sort().join() === [`${ENG}:2`, `${RACK}:1`].sort().join(),
     "#332 review bid-spec BOM: an unresolved rack keeps its quoted row (not its rack-level parts); a track lists its parts: " + JSON.stringify(bq2.ok ? bq2.rows : bq2));
 }
+
+/* ======================================================================
+   #333 — Build package tabs (Narrative · BOM quote · Client package) and the
+   per-project package selection (docs/superpowers/specs/2026-10-12-build-
+   package-tabs-design.md). Pure blocks at EOF; async blocks chained before
+   teardown.
+   ====================================================================== */
+import * as p3Tabs from "@/lib/estimate-steps/package-tabs";
+import { stepSearch as p3StepSearch } from "@/lib/estimate-steps/steps";
+
+// ---- Task 1: package tab URL helpers ----
+{
+  const T = p3Tabs;
+  ok(JSON.stringify(T.PACKAGE_TABS) === JSON.stringify(["narrative", "bom", "client"]), "#333 tabs: Narrative · BOM quote · Client package, in that order");
+  ok(T.PACKAGE_TAB_LABEL.narrative === "Narrative" && T.PACKAGE_TAB_LABEL.bom === "BOM quote" && T.PACKAGE_TAB_LABEL.client === "Client package", "#333 tabs: labels");
+  ok(T.parsePackageTab("client") === "client" && T.parsePackageTab("bom") === "bom" && T.parsePackageTab("narrative") === "narrative", "#333 tabs: parsePackageTab reads a known tab");
+  ok(T.parsePackageTab("Client") === "narrative" && T.parsePackageTab(null) === "narrative" && T.parsePackageTab(undefined) === "narrative" && T.parsePackageTab("bogus") === "narrative" && T.parsePackageTab("") === "narrative",
+    "#333 tabs: unknown, missing or wrong-case ptab reads as Narrative");
+  ok(T.packageTabSearch("?id=Q-1&step=package", "bom") === "?id=Q-1&step=package&ptab=bom", "#333 tabs: packageTabSearch writes ptab, keeping every other param");
+  ok(T.packageTabSearch("?id=Q-1&step=package&ptab=bom", "narrative") === "?id=Q-1&step=package", "#333 tabs: Narrative writes no ptab");
+  ok(T.packageTabSearch("id=Q-1&step=package&ptab=bom", "client") === "?id=Q-1&step=package&ptab=client" && T.packageTabSearch("", "narrative") === "", "#333 tabs: packageTabSearch tolerates a missing ? and an empty search");
+  ok(p3StepSearch("?id=Q-1&step=package&ptab=client", "review") === "?id=Q-1&step=review", "#333 tabs: stepSearch drops ptab off the package step");
+  ok(p3StepSearch("?id=Q-1&step=package&ptab=client", "build") === "?id=Q-1", "#333 tabs: stepSearch to Build drops ptab too");
+  ok(p3StepSearch("?step=package&ptab=client", "package") === "?step=package&ptab=client", "#333 tabs: stepSearch to the package step keeps ptab");
+  ok(p3StepSearch("?id=Q-1&step=review", "send") === "?id=Q-1&step=send", "#333 tabs: stepSearch unchanged when there is no ptab");
+  ok(T.nextPackageTab("client", "ArrowRight") === "narrative" && T.nextPackageTab("narrative", "ArrowLeft") === "client" && T.nextPackageTab("narrative", "ArrowRight") === "bom",
+    "#333 tabs: ←/→ wrap");
+  ok(T.nextPackageTab("bom", "Home") === "narrative" && T.nextPackageTab("bom", "End") === "client" && T.nextPackageTab("bom", "Enter") === null, "#333 tabs: Home/End jump; any other key → null");
+  ok(T.packageTabId("bom") === "pkg-tab-bom" && T.packageTabPanelId("bom") === "pkg-panel-bom", "#333 tabs: tab / panel ids");
+}
+
