@@ -286,6 +286,7 @@ export type QuoteLike = Record<string, unknown> & {
   status?: string;
   quoteType?: string;
   updatedAt?: number;
+  bonusRecord?: { packageBonusCost?: number } | null;
   spec?:
     | (Record<string, unknown> & {
         sections?: Array<Record<string, unknown> & { kind?: string; items?: unknown[] }>;
@@ -674,7 +675,7 @@ function deriveProcurement(q: QuoteLike): ProcurementLine[] {
 
 /** Estimator bonuses: the won quote's 5% package-bonus cost, 0 when it has none. */
 function poolOf(q: QuoteLike): number {
-  const n = (q.bonusRecord as { packageBonusCost?: unknown } | null | undefined)?.packageBonusCost;
+  const n = q.bonusRecord?.packageBonusCost;
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
 }
 

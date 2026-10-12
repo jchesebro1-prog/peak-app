@@ -67479,9 +67479,11 @@ async function bonusStoreChecks(): Promise<void> {
   const afterUpdate = (await bnsQ.get(q.id))!;
   ok(!afterUpdate.bonusRecord && !afterUpdate.estimatorBonusSplit, "#bonus store: update() can't write bonusRecord or the split");
   const before = afterUpdate.updatedAt;
+  const beforeContent = afterUpdate.contentChangedAt;
   await bnsQ.setEstimatorBonusSplit(q.id, { leadPct: 60 });
   const afterSplit = (await bnsQ.get(q.id))!;
   ok(afterSplit.estimatorBonusSplit?.leadPct === 60 && afterSplit.updatedAt === before, "#bonus store: the split saves without bumping updatedAt");
+  ok(afterSplit.contentChangedAt === beforeContent, "#bonus store: the split save leaves contentChangedAt unchanged");
   await bnsQ.setStatus(q.id, "sent", "test", bypass);
   ok(!(await bnsQ.get(q.id))!.bonusRecord, "#bonus store: Sent writes no record");
   await bnsQ.setStatus(q.id, "won", "test", bypass);
@@ -67508,7 +67510,30 @@ async function bonusStoreChecks(): Promise<void> {
   await bnsQ.setStatus(grid.id, "sent", "test", bypass);
   await bnsQ.setStatus(grid.id, "won", "test", bypass);
   ok(!(await bnsQ.get(grid.id))!.bonusRecord, "#bonus store: an ineligible (grid) quote records nothing");
-  for (const id of [q.id, legacy.id, grid.id]) {
+  // Alternates taken after Won move the record AND the project's pool.
+  const bnsAltBase = [
+    ...(bnsBase as unknown as Record<string, unknown>[]),
+    { id: "sAlt", name: "Alt rigging", kind: "materials", mfr: "", freightPct: 0, alternate: true, items: [
+      { id: 3, sku: "P-3", desc: "Alt part", qty: 1, unit: "ea", cost: 800, price: 1200 },
+      { id: 4, sku: "L-4", desc: "Alt labor", qty: 1, unit: "lot", cost: 200, price: 300, labor: true },
+    ] },
+  ];
+  const bnsAltSections = bnsW(bnsAltBase as never, bnsIds(bnsAltBase as never));
+  const altQ = await bnsQ.create({ name: "Bonus alt", source: "estimator", quoteType: "system", owner: "Bonus Lead", preparedBy: "Bonus Prep", spec: { sections: bnsAltSections, mobs: [] } } as never);
+  await bnsQ.setStatus(altQ.id, "sent", "test", bypass);
+  await bnsQ.setStatus(altQ.id, "won", "test", { ...bypass, alternatesTaken: [] });
+  const altWon = (await bnsQ.get(altQ.id))!.bonusRecord!;
+  const altProj0 = await getProjectByQuote(altQ.id);
+  ok(altWon.alternatesTaken.length === 0 && altProj0?.performanceBonusPool === altWon.packageBonusCost && altWon.packageBonusCost > 0, "#bonus store: setStatus(won, { alternatesTaken: [] }) records no alternates; the pool matches the record");
+  const altRes = await bnsQ.setBonusAlternatesTaken(altQ.id, ["sAlt"]);
+  const altAfter = (await bnsQ.get(altQ.id))!.bonusRecord!;
+  const altProj1 = await getProjectByQuote(altQ.id);
+  ok(altRes !== null && altRes !== "not-won" && altAfter.alternatesTaken.join() === "sAlt" && altAfter.packageBonusCost > altWon.packageBonusCost && altAfter.estimatorBonus > altWon.estimatorBonus, "#bonus store: taking an alternate after Won raises the package cost and the estimator bonus");
+  ok(altProj1?.performanceBonusPool === altAfter.packageBonusCost, "#bonus store: taking an alternate after Won moves the install project's pool to match");
+  ok((await bnsQ.setBonusAlternatesTaken("no-such-quote", [])) === null, "#bonus store: alternates on a missing quote returns null");
+  const draftQ = await bnsQ.create({ name: "Bonus draft", source: "estimator", quoteType: "system", owner: "Bonus Lead", spec: { sections: bnsAltSections, mobs: [] } } as never);
+  ok((await bnsQ.setBonusAlternatesTaken(draftQ.id, ["sAlt"])) === "not-won", "#bonus store: alternates on a non-won quote report not-won");
+  for (const id of [q.id, legacy.id, grid.id, altQ.id, draftQ.id]) {
     const p = await getProjectByQuote(id);
     if (p) await bnsRemoveProject(p.id);
     await bnsQ.remove(id);

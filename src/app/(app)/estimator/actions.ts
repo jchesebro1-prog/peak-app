@@ -1205,7 +1205,7 @@ export async function setStatusAction(
     }
   }
   try {
-    await setStatus(id, status, user.name, opts?.alternatesTaken ? { alternatesTaken: opts.alternatesTaken.filter((x) => typeof x === "string") } : {});
+    await setStatus(id, status, user.name, Array.isArray(opts?.alternatesTaken) ? { alternatesTaken: opts.alternatesTaken.filter((x): x is string => typeof x === "string") } : {});
   } catch (e) {
     const cur = await get(id);
     return {
@@ -1228,7 +1228,9 @@ export async function saveBonusSplitAction(id: string, leadPct: number): Promise
   await requirePerm("approve");
   try {
     if (!id) return { ok: false, error: "Missing quote." };
-    await setEstimatorBonusSplit(id, { leadPct });
+    if (typeof leadPct !== "number" || !Number.isFinite(leadPct)) return { ok: false, error: "Enter a percentage" };
+    const saved = await setEstimatorBonusSplit(id, { leadPct });
+    if (!saved) return { ok: false, error: "Quote not found" };
     revalidatePath("/estimator");
     return { ok: true };
   } catch (e) {
@@ -1242,7 +1244,9 @@ export async function saveBonusAlternatesAction(id: string, ids: string[]): Prom
   await requirePerm("approve");
   try {
     if (!id) return { ok: false, error: "Missing quote." };
-    await setBonusAlternatesTaken(id, Array.isArray(ids) ? ids.filter((x) => typeof x === "string") : []);
+    const saved = await setBonusAlternatesTaken(id, Array.isArray(ids) ? ids.filter((x) => typeof x === "string") : []);
+    if (!saved) return { ok: false, error: "Quote not found" };
+    if (saved === "not-won") return { ok: false, error: "Only a won estimate records alternates here" };
     revalidatePath("/estimator");
     return { ok: true };
   } catch (e) {

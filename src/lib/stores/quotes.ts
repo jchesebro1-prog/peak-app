@@ -1881,7 +1881,8 @@ export async function setStatus(
 ): Promise<Quote | null> {
   const sentCut = { value: false };
   // Estimator bonuses: read before the transaction — the patch mutator is synchronous.
-  const bonusUsers = status === "won" ? (await allUsers()).map((u) => ({ id: u.id, name: u.name })) : [];
+  // A failed users read must never block marking Won — credits then fall back to no userId.
+  const bonusUsers = status === "won" ? await bonusUserList() : [];
   // #282 phase 2: set only when this call really transitioned the quote.
   const moved = { value: false };
   const out = await withTransaction(async () => {
@@ -2053,31 +2054,76 @@ function rebuildBonusRecord(doc: Quote, alternatesTaken: string[], users: { id: 
   }
 }
 
+/** Estimator bonuses: the roster for crediting; a failed read yields [] (logged) rather than throwing. */
+async function bonusUserList(): Promise<{ id: string; name: string }[]> {
+  try {
+    return (await allUsers()).map((u) => ({ id: u.id, name: u.name }));
+  } catch (e) {
+    console.error("[bonus] users read failed — crediting without user ids:", e);
+    return [];
+  }
+}
+
+/** Estimator bonuses: keep the linked install project's 5% pool equal to the record's package cost. */
+async function syncProjectBonusPool(quoteId: string, cost: number): Promise<void> {
+  try {
+    const { getProjectByQuote, updateProject } = await import("@/lib/stores/projects");
+    const proj = await getProjectByQuote(quoteId);
+    if (!proj) return;
+    const next = cost > 0 ? cost : undefined;
+    if (proj.performanceBonusPool === next) return;
+    await updateProject(proj.id, { performanceBonusPool: next });
+  } catch (e) {
+    console.error("[bonus] project pool sync failed for", quoteId, e);
+  }
+}
+
 /**
  * Estimator bonuses — the ONLY writer of `Quote.estimatorBonusSplit`. Never
- * content, so `updatedAt` is not bumped; a won quote's record is rebuilt.
+ * content, so `updatedAt` is not bumped; a won quote's record is rebuilt (and
+ * the install project's pool follows if the package cost moved). Null = not found.
  */
 export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Promise<Quote | null> {
-  const users = (await allUsers()).map((u) => ({ id: u.id, name: u.name }));
-  return patchQuote(id, (doc) => {
+  const users = await bonusUserList();
+  const cost = { before: 0, after: 0, rebuilt: false };
+  const out = await patchQuote(id, (doc) => {
     doc.estimatorBonusSplit = normalizeSplit(split);
-    if (doc.status === "won" && doc.bonusRecord) rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
+    if (doc.status === "won" && doc.bonusRecord) {
+      cost.before = doc.bonusRecord.packageBonusCost;
+      rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
+      cost.after = doc.bonusRecord?.packageBonusCost ?? cost.before;
+      cost.rebuilt = true;
+    }
   });
+  if (out && cost.rebuilt && cost.after !== cost.before) await syncProjectBonusPool(id, cost.after);
+  return out;
 }
 
 /**
  * Estimator bonuses — the alternates the customer took, on a won quote only.
  * Ids are filtered to the quote's own alternate systems; no `updatedAt` bump.
+ * Returns null when the quote doesn't exist and "not-won" when it isn't won
+ * (nothing written). The install project's pool follows the rebuilt record.
  */
-export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null> {
-  const users = (await allUsers()).map((u) => ({ id: u.id, name: u.name }));
-  return patchQuote(id, (doc) => {
-    if (doc.status !== "won" || !doc.bonusRecord) return;
+export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null | "not-won"> {
+  const users = await bonusUserList();
+  const st = { notWon: false, before: 0, after: 0, rebuilt: false };
+  const out = await patchQuote(id, (doc) => {
+    if (doc.status !== "won" || !doc.bonusRecord) {
+      st.notWon = true;
+      return;
+    }
     const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
     if (!Array.isArray(secs)) return;
     const alts = new Set(secs.filter((x) => x.alternate === true).map((x) => x.id));
+    st.before = doc.bonusRecord.packageBonusCost;
     rebuildBonusRecord(doc, (Array.isArray(ids) ? ids : []).filter((aid) => alts.has(aid)), users);
+    st.after = doc.bonusRecord?.packageBonusCost ?? st.before;
+    st.rebuilt = true;
   });
+  if (out && st.notWon) return "not-won";
+  if (out && st.rebuilt && st.after !== st.before) await syncProjectBonusPool(id, st.after);
+  return out;
 }
 
 /** #282 phase 2: post the quote's Rewards ledger entries; log, never throw. */
