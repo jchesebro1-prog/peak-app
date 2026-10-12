@@ -67257,3 +67257,80 @@ import { RACK_BOOK_MERGE_MS as r329RackMerge, RACK_DATASHEET_ALLOWANCE_MS as r32
   ok(bs.includes("copied.forEach((p, i) => checkPageBox(p, i + 1));") && /try \{\s*stampPage\(p, `Page/.test(bs),
     "#329 review: page boxes are checked per document inside the merge try, and each stamp is its own try");
 }
+
+import {
+  hasLaborLine as bnHasLabor,
+  packageBonus as bnPackage,
+  estimatorBonus as bnEstimator,
+  withBonusLines as bnWith,
+  stripBonusLines as bnStrip,
+  idCounterFrom as bnIds,
+  isBonusEligibleQuote as bnEligible,
+  bonusRulesApply as bnApplies,
+} from "@/lib/estimate-bonus/rules";
+import { isBonusItem as bnIsBonus } from "@/lib/estimate-bonus/flags";
+import { systemSellTotal as bnSellTotal, systemFreight as bnFreight } from "@/app/(app)/estimator/pricing";
+{
+  const it = (id: number, cost: number, price: number, extra: Partial<SpecItem> = {}): SpecItem => ({
+    id, sku: "P-" + id, desc: "Part " + id, qty: 1, unit: "ea", cost, price, ...extra,
+  });
+  const sec = (items: SpecItem[], extra: Partial<EstimatorSpecSection> = {}): EstimatorSpecSection => ({
+    id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items, ...extra,
+  });
+
+  // Labor detection
+  const noLabor = sec([it(1, 1000, 1500)]);
+  const withLabor = sec([it(1, 1000, 1500), it(2, 400, 600, { labor: true })]);
+  ok(!bnHasLabor(noLabor), "#bonus hasLaborLine: materials-only system has no labor");
+  ok(bnHasLabor(withLabor), "#bonus hasLaborLine: a labor:true line counts");
+  ok(!bnHasLabor(sec([it(1, 1000, 1500), it(2, 400, 600, { labor: true, option: true })])), "#bonus hasLaborLine: an option labor line does not count");
+  ok(bnHasLabor(sec([it(1, 100, 150)], { kind: "labor" })), "#bonus hasLaborLine: a labor-kind section counts");
+
+  // 5%: of cost, at blended markup
+  ok(bnPackage(noLabor) === null, "#bonus packageBonus: null without labor");
+  const pkg = bnPackage(withLabor)!;
+  ok(pkg.cost === 70, "#bonus packageBonus: 5% of 1400 cost = 70");
+  ok(pkg.sell === 105, "#bonus packageBonus: marked up at blended 2100/1400 = 105");
+  ok(bnPackage(sec([it(1, 0, 0, { labor: true })])) === null, "#bonus packageBonus: zero-cost system gets none");
+
+  // 2%: of price before the 2% (5% sell + freight in)
+  const est = bnEstimator(withLabor, pkg)!;
+  ok(est.sell === 44.1 && est.cost === 44.1, "#bonus estimatorBonus: 2% of (2100 + 105) = 44.10, at cost");
+  const freighted = sec([it(1, 1000, 1500), it(2, 400, 600, { labor: true })], { freightPct: 10 });
+  const fPkg = bnPackage(freighted)!;
+  ok(bnEstimator(freighted, fPkg)!.sell === Math.round(0.02 * (2100 + fPkg.sell + bnFreight(freighted)) * 100) / 100, "#bonus estimatorBonus: freight is inside the 2% base");
+  const typed = sec([it(1, 1000, 1500)], { sellOverride: 5100 });
+  ok(bnEstimator(typed, null)!.sell === 100, "#bonus estimatorBonus: typed sell 5100 → 5100 × 0.02 ÷ 1.02 = 100");
+  ok(bnEstimator(sec([it(1, 0, 0)]), null) === null, "#bonus estimatorBonus: a $0 system gets none");
+
+  // withBonusLines
+  const ids = bnIds([withLabor]);
+  const [w] = bnWith([withLabor], ids);
+  const pLine = w.items.find((x) => x.bonus === "package")!;
+  const eLine = w.items.find((x) => x.bonus === "estimator")!;
+  ok(!!pLine && pLine.cost === 70 && pLine.price === 105 && pLine.labor === true && pLine.noFreight === true && pLine.sku === "BON-PKG-s1", "#bonus withBonusLines: package line shape");
+  ok(!!eLine && eLine.cost === 44.1 && eLine.price === 44.1 && !eLine.labor && eLine.noFreight === true && eLine.sku === "BON-EST-s1", "#bonus withBonusLines: estimator line shape");
+  ok(pLine.id === 3 && eLine.id === 4, "#bonus withBonusLines: new ids come from max id + 1");
+  const again = bnWith([w], bnIds([w]));
+  ok(again[0] === w, "#bonus withBonusLines: idempotent — second run returns the same section object");
+  const arr = [w];
+  ok(bnWith(arr, bnIds(arr)) === arr, "#bonus withBonusLines: unchanged input returns the same array");
+  ok(bnSellTotal(w) === 2100 + 105 + 44.1, "#bonus withBonusLines: system total now includes both lines");
+  const [nl] = bnWith([noLabor], bnIds([noLabor]));
+  ok(!nl.items.some((x) => x.bonus === "package") && nl.items.some((x) => x.bonus === "estimator"), "#bonus withBonusLines: no-labor system gets only the 2%");
+  const dropped = { ...w, items: w.items.filter((x) => !x.labor || x.bonus) };
+  const [dr] = bnWith([dropped], bnIds([dropped]));
+  ok(!dr.items.some((x) => x.bonus === "package"), "#bonus withBonusLines: removing the labor removes the 5% line");
+  const legacy = sec([it(1, 1000, 1500), it(2, 400, 600, { labor: true }), it(3, 20, 30, { labor: true, sku: "LAB-BONUS-9", laborOverhead: "bonus" })]);
+  const [lg] = bnWith([legacy], bnIds([legacy]));
+  ok(!lg.items.some((x) => x.laborOverhead === "bonus") && lg.items.find((x) => x.bonus === "package")!.cost === 70, "#bonus withBonusLines: legacy 5%-of-labor line is replaced, not counted");
+  ok(bnStrip(w).items.every((x) => !bnIsBonus(x)), "#bonus stripBonusLines: removes both lines");
+
+  // Eligibility + when rules apply
+  ok(bnEligible({ source: "estimator", quoteType: "system" }) && bnEligible({ source: "quick" }), "#bonus eligible: estimator + quick-turned-estimator");
+  ok(!bnEligible({ source: "portal-catalog", quoteType: "system" }) && !bnEligible({ source: "grid" }) && !bnEligible({ source: "estimator", quoteType: "flame_test" }), "#bonus eligible: portal, grid, service excluded");
+  ok(bnApplies({ source: "estimator", status: "draft" }, [noLabor]), "#bonus applies: draft");
+  ok(bnApplies({ source: "estimator" }, [noLabor]), "#bonus applies: unsaved");
+  ok(!bnApplies({ source: "estimator", status: "sent" }, [noLabor]) && bnApplies({ source: "estimator", status: "sent" }, [w]), "#bonus applies: sent only when already on the new rules");
+  ok(!bnApplies({ source: "estimator", status: "won" }, [w]) && !bnApplies({ source: "estimator", status: "lost" }, [w]), "#bonus applies: won/lost frozen");
+}

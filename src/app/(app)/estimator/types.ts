@@ -90,6 +90,14 @@ export type SpecItem = {
    *  folded into the mobilization line predate this flag; `isLaborOverheadItem`
    *  also recognizes their LAB-SHOP-/LAB-BONUS-/LAB-MISC- SKU prefixes. */
   laborOverhead?: "shop" | "bonus" | "misc";
+  /**
+   * Estimator bonuses (2026-10-12 spec): an automatic, internal-only line.
+   * "package" = 5% of the system's cost (only when it has labor), marked up at
+   * the system's blended margin; "estimator" = 2% of the system's price, at
+   * cost. Written only by `withBonusLines` (src/lib/estimate-bonus/rules.ts);
+   * folded into other rows on every customer surface by `customerLines`.
+   */
+  bonus?: "package" | "estimator";
   /** #270: a mobilization's travel cost as its own internal line (mileage,
    *  hotel, per diem, lift rental). Like `laborOverhead` the CUSTOMER
    *  document never shows it — `customerLines` folds its sell into the
