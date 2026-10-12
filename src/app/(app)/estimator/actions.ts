@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
+import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
@@ -440,7 +441,17 @@ export async function saveQuoteAction(
   // settled, so the credit always lands on the true last system. built/groupId
   // are hardened (built only when exactly true, groupId only when a string).
   const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
-  const sellSanitized = Array.isArray(sellSanitizedRaw) ? normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups) : sellSanitizedRaw;
+  const sellNormalized = Array.isArray(sellSanitizedRaw) ? normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups) : sellSanitizedRaw;
+  // Estimator bonuses: the server re-derives the 5% package / 2% estimator
+  // lines from the sanitized sections, so a stale or hand-crafted client can
+  // never save a wrong bonus. Runs BEFORE the Rewards credit is settled and
+  // the value is reconciled (the credit line is outside the bonus base, and
+  // the stored value must include the bonus). source = the source this save
+  // persists; status = the prior status (status changes only travel through
+  // setStatus, never this write), "draft" for a brand-new quote.
+  const sellSanitized = Array.isArray(sellNormalized)
+    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalized)
+    : sellNormalized;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
@@ -863,7 +874,11 @@ async function placeSystemInEstimate(
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
     // re-pinned after the order is normalised, so it really is the last one.
-    const appended = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([withoutGroupMeta(placed)])], existingGroups);
+    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([withoutGroupMeta(placed)])], existingGroups);
+    // Estimator bonuses: re-derive on the merged list with the TARGET's own
+    // source / quoteType / status (a won or portal target is left untouched).
+    // Before the credit re-pin below, so value/margin include the bonus.
+    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw);
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
@@ -892,7 +907,9 @@ async function placeSystemInEstimate(
     return { ok: true, targetId: updated.id, targetName: updated.name, targetNumber: displayQuoteNumber(updated) };
   }
 
-  const t = totals(withoutRewardCredit([placed]), 0);
+  // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
+  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([withoutGroupMeta(placed)]));
+  const t = totals(newSections, 0);
   let created: Quote;
   try {
     created = await create({
@@ -902,7 +919,7 @@ async function placeSystemInEstimate(
       locationId: opts.sourceContext.locationId,
       source: "estimator",
       status: "draft",
-      spec: { sections: withoutRewardCredit([withoutGroupMeta(placed)]), mobs: [] },
+      spec: { sections: newSections, mobs: [] },
       value: t.grand,
       margin: t.margin,
       owner: opts.owner,
