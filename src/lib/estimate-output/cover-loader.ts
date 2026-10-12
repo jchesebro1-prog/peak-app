@@ -40,6 +40,7 @@ export async function loadCoverDocumentProps(
     signer: resolveCoverSigner(q.owner, q.preparedBy, users),
     footerLine: coverFooterLine({ companyName: doc.companyName, offices: settings.offices, website: defaults.website }),
     shareUrl: coverShareUrl(opts.origin, link, onlineEstimateState(q).kind),
-    letterhead: settings.logoDark ? { src: settings.logoDark, full: false } : { src: opts.letterheadSrc, full: true },
+    // #331: the cover PDF always prints the full baked Peak letterhead, never the Branding logo.
+    letterhead: { src: opts.letterheadSrc, full: true },
   });
 }

@@ -11674,6 +11674,7 @@ seeded()
   .then(() => gridNotes8Checks())
   .then(() => gridNotes2Checks())
   .then(() => gridNotes4Checks())
+  .then(() => letterhead331Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -51791,7 +51792,7 @@ async function e301CoverAsyncChecks(): Promise<void> {
     ok(props?.notIncluded === "Not included: Permits; Painting." && !!props?.footerLine.endsWith("peak.test"), "#301 loader: a quote that never stored Not included prints the Settings default; the footer carries the website");
     ok(props?.shareUrl === null, "#301 loader: no share link → no link line");
     ok(uniq ? props?.signer?.name === uniq.name : props?.signer === null, "#301 loader: the Lead estimator from the roster (R16)");
-    ok(props?.letterhead.src === "/_test/lh.jpg" || props?.letterhead.full === false, "#301 loader: the baked letterhead unless Branding has a logo");
+    ok(props?.letterhead.src === "/_test/lh.jpg" && props?.letterhead.full === true, "#301 loader: the baked letterhead — #331: always, even when Branding has a logo");
     await Q.update(QID, { notIncluded: "" });
     const q2 = await Q.get(QID);
     ok(q2 ? (await loadCoverDocumentProps(q2, { origin: null, letterheadSrc: "x" })).notIncluded === "" : false, "#301 loader: an emptied Not included prints nothing");
@@ -68888,4 +68889,33 @@ async function gridNotes4Checks(): Promise<void> {
   ok(rd("src/app/(app)/design/grid/[id]/workspace/group-bar.tsx").includes("Keep them on the plan beside it") && rd("src/app/(app)/design/grid/[id]/editor.tsx").includes("<GroupBar ed={ed} />"),
     "Grid notes #4 editor: the delete question offers both answers, over the plan");
   ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(rd("src/lib/design/grid-groups.ts")), "Grid notes #4: grid-groups.ts is client-safe (no store at runtime)");
+}
+
+/* ======================================================================
+   #331 — estimates always print the full baked Peak letterhead (even with a
+   Branding dark logo); #332 — assembly lines carry their members' datasheets
+   and photos (src/lib/quote-line-members.ts).
+   ====================================================================== */
+import { renderQuoteDocument293 as k331Render, qd293Props as k331Props } from "./qd293-cases";
+import { packageViewModel as k331Model } from "@/lib/estimate-output/package-model";
+
+async function letterhead331Checks(): Promise<void> {
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const LOGO = "data:image/png;base64,TE9HTzMzMQ==";
+  const html = k331Render({ ...k331Props(), logoDark: LOGO });
+  ok(html.includes('src="/_test/peak-letterhead.jpg"') && !html.includes(LOGO) && /<img src="\/_test\/peak-letterhead.jpg"[^>]*style="display:block;width:100%;height:auto"/.test(html),
+    "#331: the estimate document prints the full baked Peak letterhead even when Branding has a dark logo");
+  ok(k331Render(k331Props()) === k331Render({ ...k331Props(), logoDark: LOGO }), "#331: the Branding logo changes nothing on the estimate document");
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(!qd.includes("p.logoDark ||") && !qd.includes("p.logoDark\n") && qd.includes("src={letterhead.src}"), "#331 (source): QuoteDocument never chooses the Branding logo");
+  const doc = { ...k331Props(), logoDark: LOGO, rewardsLine: "" };
+  const m = k331Model({ doc, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
+    headerLine: "EST-1 · Rev 1", currentHref: null, view: "narrative", base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" } as never);
+  ok(m.logo.src === "/_test/lh.jpg" && m.logo.full === true, "#331: the package page prints the full letterhead even when Branding has a dark logo");
+  const cl = rd("src/lib/estimate-output/cover-loader.ts");
+  ok(cl.includes("letterhead: { src: opts.letterheadSrc, full: true },") && !cl.includes("settings.logoDark"), "#331 (source): the cover PDF always takes the baked letterhead");
+  ok(!rd("src/lib/estimate-output/package-model.ts").includes("d.logoDark"), "#331 (source): the package model never reads the Branding logo");
+  // Letters/reports keep the D59 uploaded-logo ladder.
+  ok(rd("src/components/letter/SinglePageLetter.tsx").includes("src={logoDark || letterhead.src}") && rd("src/app/(app)/flame-tests/letter/letter-view.tsx").includes("src={settings.logoDark || letterhead.src}"),
+    "#331: letters keep the uploaded-logo rule");
 }

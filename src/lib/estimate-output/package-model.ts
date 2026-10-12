@@ -102,7 +102,8 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const t = coverTotals(d);
   const alternates = alternatesListView(d);
   return {
-    logo: d.logoDark ? { src: d.logoDark, full: false } : { src: i.letterheadSrc, full: true },
+    // #331: the package page always prints the full baked Peak letterhead, never the Branding logo.
+    logo: { src: i.letterheadSrc, full: true },
     companyName: d.companyName,
     title: (d.projectName || "").trim() || PACKAGE_COPY.titleFallback,
     customer: d.custName,

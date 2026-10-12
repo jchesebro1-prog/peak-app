@@ -41,7 +41,7 @@ export type QuoteDocumentProps = {
   /** #287 task B — "Prepared by": `preparedBy`, else the owner, else the company. */
   preparedByName: string;
   companyName: string;
-  /** Uploaded document logo (Settings → Branding), falls back to the baked letterhead. */
+  /** Uploaded document logo (Settings → Branding). #331: the estimate document never prints it — it always heads with the full baked Peak letterhead; kept on the data for callers that read Branding. */
   logoDark: string | null;
   quoteNote: string;
   assumptions: string;
@@ -642,17 +642,15 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
             height: "fit-content",
           }}
         >
-          {/* letterhead — uploaded logo when set, baked sheet otherwise (D59 ladder) */}
+          {/* letterhead — #331: an estimate always prints the full baked Peak
+              letterhead sheet, even when Settings → Branding has a dark logo
+              (letters/reports keep the D59 uploaded-logo ladder). */}
           <div style={{ borderBottom: `3px solid var(--accent)`, paddingBottom: 16, marginBottom: 22 }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={p.logoDark || letterhead.src}
+              src={letterhead.src}
               alt={p.companyName}
-              style={
-                p.logoDark
-                  ? { display: "block", maxHeight: 76, maxWidth: "100%", objectFit: "contain" }
-                  : { display: "block", width: "100%", height: "auto" }
-              }
+              style={{ display: "block", width: "100%", height: "auto" }}
             />
           </div>
 
