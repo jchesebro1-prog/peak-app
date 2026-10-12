@@ -1299,12 +1299,12 @@ export async function declinePortalAcceptanceAction(
  * exactly like setStatusAction above and THROWS on refusal, caught here the
  * same way — never a second source of truth for the gate.
  */
-export async function setQuoteStageAction(id: string, stageId: string): Promise<StageSync> {
+export async function setQuoteStageAction(id: string, stageId: string, alternatesTaken?: string[]): Promise<StageSync> {
   const user = await requireUser();
   if (!id || !stageId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
   let q: Awaited<ReturnType<typeof setQuoteStage>>;
   try {
-    q = await setQuoteStage(id, stageId, user.name);
+    q = await setQuoteStage(id, stageId, user.name, Array.isArray(alternatesTaken) ? alternatesTaken.filter((x): x is string => typeof x === "string") : undefined);
   } catch (e) {
     const cur = await get(id);
     return {

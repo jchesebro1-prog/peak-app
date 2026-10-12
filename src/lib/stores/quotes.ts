@@ -2159,7 +2159,9 @@ async function invalidateSystemLibrarySafely(): Promise<void> {
 export async function setQuoteStage(
   id: string,
   stageId: string,
-  by?: string | null
+  by?: string | null,
+  /** Estimator bonuses: alternates the customer took, passed on to setStatus when the stage move lands on Won. */
+  alternatesTaken?: string[]
 ): Promise<Quote | null> {
   // One transaction: the status transition (and its spawn) and the chosen stage commit together.
   return withTransaction(async () => {
@@ -2169,7 +2171,7 @@ export async function setQuoteStage(
     const tag = statusForQuoteStage(pl, stageId);
     if (!tag) return null;
     if (tag !== q.status) {
-      const moved = await setStatus(id, tag, by);
+      const moved = await setStatus(id, tag, by, alternatesTaken ? { alternatesTaken } : {});
       if (!moved || moved.status !== tag) return moved ? get(id) : null;
     }
     const res = await patchQuote(id, (doc) => {

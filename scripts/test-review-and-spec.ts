@@ -67613,3 +67613,19 @@ import { alternateChoices as bn8Alts, liveEstimatorBonus as bn8Live, showSplitRo
   const step8 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/send-step.tsx"), "utf8");
   ok(/isBonusEligibleQuote\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType \}\)/.test(step8) && step8.includes("<BonusCard"), "#bonus source pin: Send & track renders the bonus card only for eligible quotes");
 }
+
+{
+  const hookF1 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+  const actF1 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  const storeF1 = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const stageF1 = hookF1.slice(hookF1.indexOf("const changeStage = (stageId: string) => {"), hookF1.indexOf("const changePipeline ="));
+  ok(/setQuoteStageAction\(id, stageId, alternatesTaken\)/.test(stageF1), "#bonus fix1 source pin: the stage bar passes the ticked alternates to setQuoteStageAction");
+  const stageActF1 = actF1.slice(actF1.indexOf("export async function setQuoteStageAction("), actF1.indexOf("export async function setQuotePipelineAction("));
+  ok(/alternatesTaken\?: string\[\]/.test(stageActF1) && /Array\.isArray\(alternatesTaken\)/.test(stageActF1) && /setQuoteStage\(id, stageId, user\.name, /.test(stageActF1), "#bonus fix1 source pin: setQuoteStageAction sanitizes alternatesTaken and hands it to setQuoteStage");
+  const stageStoreF1 = storeF1.slice(storeF1.indexOf("export async function setQuoteStage("), storeF1.indexOf("export async function setQuotePipeline("));
+  ok(/alternatesTaken \? \{ alternatesTaken \} : \{\}/.test(stageStoreF1), "#bonus fix1 source pin: setQuoteStage threads alternatesTaken into setStatus");
+  const syncF1 = hookF1.slice(hookF1.indexOf("const syncBonusAfterStatus ="), hookF1.indexOf("const saveBonusSplit ="));
+  ok(/if \(from === "won"\) setBonusRecord\(null\)/.test(syncF1) && /router\.refresh\(\)/.test(syncF1) && /bonusEligible/.test(syncF1), "#bonus fix2 source pin: leaving Won clears the record at once, and any Won transition refreshes (eligible quotes only)");
+  const applyF1 = hookF1.slice(hookF1.indexOf("const applySync ="), hookF1.indexOf("const saveNow ="));
+  ok((applyF1.match(/syncBonusAfterStatus\(status, r\.status\)/g) || []).length === 2, "#bonus fix1 source pin: applySync and applyStageSync both resync the bonus record");
+}

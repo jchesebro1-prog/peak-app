@@ -17,7 +17,7 @@ import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewar
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter } from "next/navigation";
-import { bonusRulesApply, withBonusLines } from "@/lib/estimate-bonus/rules";
+import { bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
@@ -976,6 +976,16 @@ export function useEstimatorState(props: EstimatorProps) {
     initial.bonusRecord ? initial.bonusRecord.alternatesTaken : defaultAlternatesTaken(initial.sections ?? [], initial.clientResponses)
   );
   const [bonusError, setBonusError] = useState<string | null>(null);
+  const bonusEligible = isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType });
+  /** A status change that lands on or leaves Won changes the server-written
+   *  record: drop a stale "Recorded at Won" block at once when leaving Won and
+   *  re-read it from the server either way (bonus-eligible quotes only). */
+  const syncBonusAfterStatus = (from: QuoteStatus, to: QuoteStatus | null | undefined) => {
+    if (!bonusEligible || !to || from === to) return;
+    if (from !== "won" && to !== "won") return;
+    if (from === "won") setBonusRecord(null);
+    router.refresh();
+  };
   const saveBonusSplit = (leadPct: number) => {
     if (!loadedId) return;
     const before = bonusSplit;
@@ -988,14 +998,14 @@ export function useEstimatorState(props: EstimatorProps) {
         setBonusError(r.error || "Could not save the split.");
         return;
       }
-      if (status === "won") router.refresh();
+      if (status === "won" && bonusEligible) router.refresh();
     });
   };
   const pickAlternatesTaken = (ids: string[]) => {
     const before = alternatesTaken;
     setAlternatesTaken(ids);
     setBonusError(null);
-    if (status !== "won" || !loadedId) return;
+    if (status !== "won" || !loadedId || !bonusEligible) return;
     startTransition(async () => {
       const r = await saveBonusAlternatesAction(loadedId, ids);
       if (!r.ok) {
@@ -1127,6 +1137,7 @@ export function useEstimatorState(props: EstimatorProps) {
     // Server-confirmed — this is what makes baseStatus trustworthy for the
     // next save's stale-tab check (#180 review 2).
     if (r.status) {
+      syncBonusAfterStatus(status, r.status);
       setStatus(r.status);
       setBaseStatus(r.status);
     }
@@ -1138,6 +1149,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const applyStageSync = (r: StageSync) => {
     if (r.next !== undefined) setNext(r.next ?? null);
     if (r.status) {
+      syncBonusAfterStatus(status, r.status);
       setStatus(r.status);
       setBaseStatus(r.status);
     }
@@ -1311,8 +1323,10 @@ export function useEstimatorState(props: EstimatorProps) {
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
-          // Estimator bonuses: Won writes the record server-side — re-read it.
-          if (v === "won") router.refresh();
+          // Estimator bonuses: Won writes the record server-side — re-read it;
+          // leaving Won clears it (applySync above already handled both when the
+          // server echoed a status; this covers a reply without one).
+          if (!r.status) syncBonusAfterStatus(prevStatus, v);
         } finally {
           setStatusChanging(false);
         }
@@ -1335,7 +1349,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
-        const r = await setQuoteStageAction(id, stageId);
+        const r = await setQuoteStageAction(id, stageId, alternatesTaken);
         if (!r.ok) {
           setStage(prevStage);
           setStatus(prevStatus);

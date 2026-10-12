@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { SEND_STEP_IDS, sendStepLayout, type SendCard } from "@/lib/estimate-email/send-ui";
 import type { QuoteStatus } from "@/lib/stores/quotes";
@@ -84,7 +84,8 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
       </section>
     ),
     status: (
-      <section key="status" id={SEND_STEP_IDS.status} aria-label="Status" style={CARD}>
+      <Fragment key="status">
+      <section id={SEND_STEP_IDS.status} aria-label="Status" style={CARD}>
         <div style={CARD_LABEL}>Status</div>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: loadedId && next ? 12 : 0 }}>
           <span
@@ -142,6 +143,24 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
           />
         )}
       </section>
+      {isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType }) && (
+          <BonusCard
+            quoteId={loadedId}
+            canApprove={viewerCanApprove}
+            owner={owner}
+            preparedBy={preparedBy}
+            split={bonusSplit}
+            onSplit={saveBonusSplit}
+            alternates={alternateChoices(sections)}
+            taken={alternatesTaken}
+            onTaken={pickAlternatesTaken}
+            estimatorBonus={liveEstimatorBonus(sections, alternatesTaken)}
+            record={bonusRecord}
+            status={status}
+            error={bonusError}
+          />
+        )}
+      </Fragment>
     ),
     // Daylite stage bar (Task 6) — system quotes only, none for an unsaved
     // estimate (sendStepLayout drops it when the bar does not apply).
@@ -289,23 +308,6 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     <div className="est-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 26px 60px" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
         {sendStepLayout(status, showStageBar).map((k) => cards[k])}
-        {isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType }) && (
-          <BonusCard
-            quoteId={loadedId}
-            canApprove={viewerCanApprove}
-            owner={owner}
-            preparedBy={preparedBy}
-            split={bonusSplit}
-            onSplit={saveBonusSplit}
-            alternates={alternateChoices(sections)}
-            taken={alternatesTaken}
-            onTaken={pickAlternatesTaken}
-            estimatorBonus={liveEstimatorBonus(sections, alternatesTaken)}
-            record={bonusRecord}
-            status={status}
-            error={bonusError}
-          />
-        )}
       </div>
     </div>
   );
