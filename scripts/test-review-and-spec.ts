@@ -67629,3 +67629,37 @@ import { alternateChoices as bn8Alts, liveEstimatorBonus as bn8Live, showSplitRo
   const applyF1 = hookF1.slice(hookF1.indexOf("const applySync ="), hookF1.indexOf("const saveNow ="));
   ok((applyF1.match(/syncBonusAfterStatus\(status, r\.status\)/g) || []).length === 2, "#bonus fix1 source pin: applySync and applyStageSync both resync the bonus record");
 }
+
+import { bonusReportRows as bn9Rows, chicagoMonth as bn9Month, bonusReportCsv as bn9Csv } from "@/lib/estimate-bonus/report";
+{
+  const rec = (credits: { name: string; userId: string | null; role: "lead" | "prepared"; pct: number; amount: number }[], wonAt: number) =>
+    ({ wonAt, sellTotal: 10000, estimatorBonus: 200, packageBonusCost: 70, alternatesTaken: [], credits });
+  const qs = [
+    { id: "q1", estNo: 1001, name: "A", customer: "C, Inc", status: "won", bonusRecord: rec([{ name: "Jeff", userId: "u1", role: "lead", pct: 50, amount: 100 }, { name: "Sam", userId: "u2", role: "prepared", pct: 50, amount: 100 }], Date.UTC(2026, 9, 5)) },
+    { id: "q2", name: "B", customer: "C", status: "won", bonusRecord: rec([{ name: "Sam", userId: null, role: "lead", pct: 100, amount: 200 }], Date.UTC(2026, 9, 6)) },
+    { id: "q3", name: "C", status: "lost", bonusRecord: null },
+    { id: "q4", name: "D", customer: "C", status: "sent", bonusRecord: rec([{ name: "Sam", userId: "u2", role: "lead", pct: 100, amount: 5 }], Date.UTC(2026, 9, 6)) },
+  ];
+  const all = { from: 0, to: Date.UTC(2027, 0, 1) };
+  const admin = bn9Rows(qs, { id: "u1", name: "Jeff", isAdmin: true }, all);
+  ok(admin.length === 3, "#bonus report: admin sees every credit (won quotes only)");
+  ok(admin[0].number === "EST-1001" && admin.find((r) => r.quoteId === "q2")!.number === "q2", "#bonus report: number is the estimate number, else the quote id");
+  ok(bn9Rows(qs, { id: "u1", name: "Jeff", isAdmin: true }, { ...all, person: "sam" }).length === 2, "#bonus report: admin person filter is case-insensitive");
+  ok(bn9Rows(qs, { id: "u1", name: "Jeff", isAdmin: true }, { from: 0, to: Date.UTC(2026, 9, 6) }).length === 2, "#bonus report: range is [from, to)");
+  const sam = bn9Rows(qs, { id: "u2", name: "Sam", isAdmin: false }, all);
+  ok(sam.length === 2 && sam.every((r) => r.person === "Sam"), "#bonus report: non-admin sees own rows (by id, or by name when unresolved)");
+  ok(bn9Rows(qs, { id: "u1", name: "Jeff", isAdmin: false }, { ...all, person: "Sam" }).every((r) => r.person === "Jeff"), "#bonus report: non-admin can't filter to someone else");
+  ok(bn9Month(Date.UTC(2026, 9, 1, 3)) === "2026-09", "#bonus report: month is Chicago time");
+  const csv = bn9Csv(sam);
+  ok(csv.split("\n")[0].includes("Amount"), "#bonus report: CSV header");
+  ok(bn9Csv(admin).includes('"C, Inc"'), "#bonus report: CSV quotes fields containing a comma");
+}
+
+import { bonusReportRange as bn9Range, chicagoDayStart as bn9DayStart } from "@/lib/estimate-bonus/report";
+{
+  ok(bn9DayStart("2026-10-05") === Date.UTC(2026, 9, 5, 5) && bn9DayStart("2026-01-01") === Date.UTC(2026, 0, 1, 6), "#bonus report: day start is Chicago midnight across DST");
+  ok(bn9DayStart("nope") === null, "#bonus report: a malformed day is rejected");
+  const r = bn9Range("2026-10-01", "2026-10-31", Date.UTC(2026, 9, 12));
+  ok(r.from === Date.UTC(2026, 9, 1, 5) && r.to === Date.UTC(2026, 10, 1, 5), "#bonus report: range end is inclusive of the last day");
+  ok(bn9Range(null, null, Date.UTC(2026, 9, 12)).fromDay === "2026-01-01", "#bonus report: default range starts Jan 1 this year");
+}
