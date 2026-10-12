@@ -54,15 +54,18 @@ export function PackageStep({ s }: { s: EstimatorState }) {
   if (!visited[tab]) setVisited({ ...visited, [tab]: true });
   const tabRefs = useRef<Partial<Record<PackageTab, HTMLButtonElement | null>>>({});
 
-  const goTab = (to: PackageTab, anchor?: string) => {
+  /** #333 review (M): a click is a history entry (pushState); an arrow-key move replaces it. */
+  const goTab = (to: PackageTab, anchor?: string, replace = false) => {
     if (to === tab && !anchor) return;
-    window.history.pushState(null, "", window.location.pathname + packageTabSearch(window.location.search, to) + (anchor ? "#" + anchor : ""));
+    window.history[replace ? "replaceState" : "pushState"](null, "", window.location.pathname + packageTabSearch(window.location.search, to) + (anchor ? "#" + anchor : ""));
   };
+  /** Only a mounted panel is named by aria-controls (#333 review M). */
+  const mounted = (t: PackageTab) => t === "narrative" || visited[t];
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
     const to = nextPackageTab(tab, e.key);
     if (!to) return;
     e.preventDefault();
-    goTab(to);
+    goTab(to, undefined, true);
     tabRefs.current[to]?.focus();
   };
   const presentationHref = packageTabSearch(params.toString(), "client") + "#systems";
@@ -81,7 +84,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
               type="button"
               role="tab"
               aria-selected={tab === t}
-              aria-controls={packageTabPanelId(t)}
+              aria-controls={mounted(t) ? packageTabPanelId(t) : undefined}
               tabIndex={tab === t ? 0 : -1}
               onClick={() => goTab(t)}
               onKeyDown={onTabKey}
@@ -97,7 +100,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
       </div>
       {visited.bom && (
         <div id={packageTabPanelId("bom")} role="tabpanel" aria-labelledby={packageTabId("bom")} style={{ ...PANEL, display: tab === "bom" ? "flex" : "none" }}>
-          <PackageBomTab s={s} />
+          <PackageBomTab s={s} active={tab === "bom"} />
         </div>
       )}
       {visited.client && (

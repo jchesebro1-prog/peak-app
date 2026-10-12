@@ -31,6 +31,7 @@ export const SEND_UI_COPY = {
   saveFirst: "Save the estimate first.",
   loading: "Loading…",
   failed: "That didn't go through — check your connection and try again.",
+  selectionNotSaved: "Couldn't save the package choices (Build package → Client package) — nothing was sent. Retry there, then send.",
   activity: "Activity",
   empty: "No emails sent from here yet.",
   reply: "Reply",

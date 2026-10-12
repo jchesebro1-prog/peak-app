@@ -1,4 +1,4 @@
-import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
+import { checkSelectionPatch, DEFAULT_PACKAGE_SELECTION, mergePackageSelection, normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -337,8 +337,10 @@ export type Quote = {
    *  package): Send & track's Estimate / Cover PDF attachment defaults,
    *  drawings on the package page, and the products whose datasheet is left
    *  out. Not a QUOTE_CONTENT_FIELDS member (nothing here prints on the
-   *  estimate PDF); written by saveQuoteAction and updateQuoteMetaAction
-   *  through normalizePackageSelection; update() keeps it. Frozen into a new
+   *  estimate PDF); written ONLY by setPackageSelection (through
+   *  updateQuoteMetaAction) — a checked partial merged under the row lock,
+   *  never bumping updatedAt — and by create() when a caller sets it;
+   *  update() drops it (#333 review). Frozen into a new
    *  revision's docFields only when set — never annexed after send. Absent =
    *  DEFAULT_PACKAGE_SELECTION (today's behaviour). Read through
    *  normalizePackageSelection. */
@@ -864,6 +866,9 @@ export async function update(
     delete clean.packagePeakHeader;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
+    // #333 review (B): the package selection is setPackageSelection's alone — a
+    // Save built before a newer tick can never revert it.
+    delete clean.packageSelection;
     // Phase 4: the review comments are the add/resolve/delete writers' alone.
     delete clean.reviewComments;
     delete clean.emailSending;
@@ -2264,6 +2269,42 @@ export async function setPackagePeakHeader(id: string, on: boolean | null): Prom
     if (typeof on === "boolean") doc.packagePeakHeader = on;
     else delete doc.packagePeakHeader;
   });
+}
+
+/**
+ * #333 review (B, C, D, G) — the ONLY writer of `Quote.packageSelection` after
+ * create. `raw` is untrusted: checkSelectionPatch ignores null / non-object
+ * input (nothing written), refuses an over-cap or malformed exclusion list
+ * (never truncates), and keeps only the fields present, which are MERGED over
+ * the stored value under the row lock — a partial `{ drawings: false }` keeps
+ * the exclusions. `followRenames` moves left-out SKUs onto renamed parts
+ * (catalog-renames.ts; passed in, so this store imports no other store).
+ * Never touches the revision clock: the selection is not content, so a write
+ * never stales the PDF, an approval, or an in-flight Send's version check —
+ * the setPackagePeakHeader precedent.
+ */
+export async function setPackageSelection(
+  id: string,
+  raw: unknown,
+  followRenames?: (sel: PackageSelection) => Promise<PackageSelection>
+): Promise<{ ok: true; selection: PackageSelection | null } | { ok: false; error: string }> {
+  const notFound = { ok: false as const, error: "That estimate wasn't found." };
+  const check = checkSelectionPatch(raw);
+  if (check.kind === "refuse") return { ok: false, error: check.error };
+  if (check.kind === "ignore") {
+    const q = await get(id);
+    return q ? { ok: true, selection: q.packageSelection ?? null } : notFound;
+  }
+  const patch = { ...check.patch };
+  if (patch.excludedDatasheets && followRenames) {
+    patch.excludedDatasheets = (await followRenames({ ...DEFAULT_PACKAGE_SELECTION, excludedDatasheets: patch.excludedDatasheets })).excludedDatasheets;
+  }
+  let selection: PackageSelection | null = null;
+  const q = await patchQuote(id, (doc) => {
+    selection = mergePackageSelection(doc.packageSelection, patch);
+    doc.packageSelection = selection;
+  });
+  return q && selection ? { ok: true, selection } : notFound;
 }
 
 /**

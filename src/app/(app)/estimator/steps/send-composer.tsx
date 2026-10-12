@@ -124,7 +124,12 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
     setNotice(null);
     try {
       // #333 (R4): a Client package choice still in flight lands before the send freezes the revision.
-      await selectionSettled();
+      // #333 review (F): one that failed or hasn't landed in 10 s blocks the send — the
+      // revision would otherwise freeze choices the server doesn't hold.
+      if (!(await selectionSettled())) {
+        setNotice({ tone: "error", text: SEND_UI_COPY.selectionNotSaved });
+        return;
+      }
       const asOf = await versionToSend();
       if (asOf === false) return;
       const input = { ...fields, asOf };

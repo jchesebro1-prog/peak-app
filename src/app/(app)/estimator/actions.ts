@@ -18,6 +18,7 @@ import {
   setBonusAlternatesTaken,
   setQuoteStage,
   setQuotePipeline,
+  setPackageSelection,
   statusFailureMessage,
   resolveSaveStatusChange,
   STAGES,
@@ -73,7 +74,6 @@ import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
-import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -189,9 +189,9 @@ export type SavePayload = {
   /** #301 — the cover fields (R14). Optional so an older caller saves as before. */
   coverSummary?: string;
   notIncluded?: string;
-  /** #333 — the Client package selection (not content). Optional: an older
-   *  caller that omits it keeps the stored one. Normalised + rename-mapped. */
-  packageSelection?: PackageSelection;
+  /* #333 review (B): no packageSelection here — Save never writes it. The
+     header-meta action (setPackageSelection) is its one writer, so a Save
+     built before a newer tick but processed after it can't revert the tick. */
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
 };
@@ -519,8 +519,6 @@ export async function saveQuoteAction(
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
-    // #333: the Client package selection — not content, so it never re-renders the PDF.
-    ...(payload.packageSelection ? { packageSelection: await selectionFollowingRenames(normalizePackageSelection(payload.packageSelection)) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
   // #304: an Estimator tab opened before a model-number rename still holds the
@@ -1098,10 +1096,10 @@ export async function updateQuoteMetaAction(
     name?: string;
     coverSummary?: string;
     notIncluded?: string;
-    /** #333 — the Client package selection; normalised + rename-mapped server-side. */
+    /** #333 — the Client package selection, any subset of its fields; merged over the stored value, rename-mapped server-side. */
     packageSelection?: unknown;
   }
-): Promise<{ ok: boolean; pdf?: QuotePdfView | null }> {
+): Promise<{ ok: boolean; error?: string; pdf?: QuotePdfView | null }> {
   await requireUser();
   if (!id) return { ok: false };
   // Allowlist the header fields only — never forward the raw client object.
@@ -1121,10 +1119,23 @@ export async function updateQuoteMetaAction(
   // #301: the cover fields autosave like the cover note; neither is content, so no re-render.
   if (typeof meta.coverSummary === "string") patch.coverSummary = cleanPlainText(meta.coverSummary, COVER_SUMMARY_MAX);
   if (typeof meta.notIncluded === "string") patch.notIncluded = cleanPlainText(meta.notIncluded, NOT_INCLUDED_MAX);
-  // #333: the Client package selection autosaves (latest wins); not content, so no re-render.
-  if (meta.packageSelection !== undefined) patch.packageSelection = await selectionFollowingRenames(normalizePackageSelection(meta.packageSelection));
   // #160: the click-to-edit Estimator title. Blank never clears a name.
   if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
+  // #333 review (B, C, D, G): the Client package selection autosaves (latest
+  // wins) through the store's one writer — a checked partial merged under the
+  // row lock; null / non-object input is ignored; an over-cap list is refused
+  // with its reason. It never bumps updatedAt, so it can't fail an in-flight
+  // Send ("changed since") and never re-renders the PDF.
+  let selectionError: string | undefined;
+  if (meta.packageSelection !== undefined) {
+    const r = await setPackageSelection(id, meta.packageSelection, selectionFollowingRenames);
+    if (!r.ok) selectionError = r.error;
+  }
+  if (!Object.keys(patch).length) {
+    // Selection-only (or empty): no update(), so no updatedAt bump.
+    if (!selectionError) refresh();
+    return selectionError ? { ok: false, error: selectionError } : { ok: true };
+  }
 
   // #254 review: the tier stamp is NOT written here any more. It is saved
   // only with the lines (saveQuoteAction), so a header autosave can never
@@ -1138,7 +1149,7 @@ export async function updateQuoteMetaAction(
   // The preview takes the scheduled state back so it shows "Updating PDF…".
   const pdf = q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : undefined;
   refresh();
-  return { ok: !!q, ...(pdf ? { pdf } : {}) };
+  return { ok: !!q && !selectionError, ...(selectionError ? { error: selectionError } : {}), ...(pdf ? { pdf } : {}) };
 }
 
 /** #287 task B — what setQuotePeopleAction hands back to the Estimator. */

@@ -229,6 +229,8 @@ function DatasheetsTable({ rows }: { rows: ReviewDatasheetRow[] }) {
 
 function DrawingsList({ rows, off }: { rows: ReviewDrawingRow[]; off: boolean }) {
   // #333: drawings switched off in Client package — say so, and still list the files.
+  // #333 review (N): off with no files → only the "off" note, never two messages.
+  if (off && !rows.length) return <p style={NOTE}>{COPY.drawingsOff}</p>;
   return (
     <>
       {off ? <p style={NOTE}>{COPY.drawingsOff}</p> : null}

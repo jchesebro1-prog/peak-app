@@ -34,7 +34,10 @@ export const CLIENT_PACKAGE_COPY = {
   itemized: "Itemized",
   alternate: "Alternate",
   noIntro: "Narrative with no intro",
-  noSystems: "No system prints yet — add prices on Build.",
+  noSystems: "No systems with items yet — add them on Build.",
+  unpriced: "No price yet — not on the PDF",
+  truncated: (n: number) => `List truncated — ${n} ${n === 1 ? "item" : "items"} not checked`,
+  selectionFailed: "Couldn't save package choices —",
   lineDetail: "Estimate PDF — line detail",
   datasheets: "Datasheets",
   checking: "Checking datasheets…",
@@ -53,7 +56,7 @@ export const CLIENT_PACKAGE_COPY = {
   followsFixture: (who: string) => `Follows ${who} — tick ${who} to send it.`,
   saving: "Saving…",
   saved: "Saved",
-  saveFailed: "Couldn't save — change it again to retry",
+  saveFailed: "Not saved",
   ridesSave: "Saved with the estimate",
   sentNote: (rev: number) => `The client's link shows Rev ${rev} as sent. Changes here go out with the next send.`,
 } as const;
@@ -160,16 +163,20 @@ export function narrativeNeedsIntro(sec: SpecSection): boolean {
 
 export type SystemListItem =
   | { kind: "group"; key: string; name: string }
-  | { kind: "system"; key: string; id: string; name: string; presentation: "itemized" | "narrative"; alternate: boolean; noIntro: boolean };
+  | { kind: "system"; key: string; id: string; name: string; presentation: "itemized" | "narrative"; alternate: boolean; noIntro: boolean; unpriced: boolean };
 
-/** The Systems group: every PRINTED system (the old Show-on-PDF filter), in the
- *  editor's normalised order, under its group's heading when it has one. */
+/** The Systems group — the ONE presentation editor, so it lists every system
+ *  with items (#333 review O: a zero-revenue system used to have no control
+ *  anywhere), `unpriced` marking one that doesn't print yet; plus any system
+ *  that prints without items. In the editor's normalised order, under its
+ *  group's heading when it has one. */
 export function systemListItems(sections: readonly SpecSection[], groups: readonly SystemGroup[] | undefined): SystemListItem[] {
   const names = new Map((groups || []).map((g) => [g.id, g.name] as const));
   const out: SystemListItem[] = [];
   let open: string | null = null;
   for (const sec of sections) {
-    if (!systemPrintsInBody(sec)) continue;
+    const prints = systemPrintsInBody(sec);
+    if (!prints && !(sec.items || []).length) continue;
     const gid = sec.groupId && names.has(sec.groupId) ? sec.groupId : null;
     if (gid && gid !== open) out.push({ kind: "group", key: `g:${gid}:${sec.id}`, name: names.get(gid) || "" });
     open = gid;
@@ -181,6 +188,7 @@ export function systemListItems(sections: readonly SpecSection[], groups: readon
       presentation: (sec.presentation || "itemized") === "narrative" ? "narrative" : "itemized",
       alternate: sec.alternate === true,
       noIntro: narrativeNeedsIntro(sec),
+      unpriced: !prints,
     });
   }
   return out;

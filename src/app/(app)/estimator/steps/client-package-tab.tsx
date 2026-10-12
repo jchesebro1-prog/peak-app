@@ -7,7 +7,7 @@ import { PackageStaffPanel } from "../package-staff-panel";
 import { PAYMENT_TERMS } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import type { EstimatorState } from "../use-estimator-state";
-import { bomProjectionKey, projectBom } from "@/lib/estimate-output/bom-projection";
+import { bomProjectionKey, fitBomProjection, projectBom } from "@/lib/estimate-output/bom-projection";
 import {
   bulkTargets,
   CLIENT_PACKAGE_ANCHOR_IDS,
@@ -24,7 +24,7 @@ import {
   type DatasheetFilter,
 } from "@/lib/estimate-output/client-package-ui";
 import type { ClientDatasheetRow } from "@/lib/estimate-output/package-preview";
-import { PACKAGE_SUMMARY_LABEL, packageSummaryLine, selectionKey } from "@/lib/estimate-output/package-selection";
+import { excludeRefusal, PACKAGE_SUMMARY_LABEL, packageSummaryLine, selectionKey } from "@/lib/estimate-output/package-selection";
 
 const H2: CSSProperties = { margin: 0, fontSize: 11, fontWeight: 700, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".06em" };
 const CARD: CSSProperties = { display: "flex", flexDirection: "column", gap: 10, padding: 16, background: "#fff", border: "1px solid #e4e7ec", borderRadius: 12 };
@@ -112,7 +112,7 @@ function DocRow({ title, hint, on, onChange, disabled, disabledTitle, link, chil
   );
 }
 
-type RowsState = { key: string | null; rows: ClientDatasheetRow[] | null; error: boolean };
+type RowsState = { key: string | null; rows: ClientDatasheetRow[] | null; error: boolean; truncated: number };
 
 /**
  * #333 (spec 2026-10-12 §4.4) — Build package → Client package: one checklist
@@ -134,6 +134,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
     setDatasheetsIncluded,
     selectionSaving,
     selectionError,
+    retrySelection,
     setSystemPresentation,
     pdfItemizedAppendix,
     pdfCutSheets,
@@ -143,22 +144,35 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
     revNum,
   } = s;
 
-  /* ---- datasheet rows: the unsaved BOM, debounced 800 ms, latest wins, only while shown ---- */
-  const projection = useMemo(() => projectBom(sections), [sections]);
-  const projKey = useMemo(() => bomProjectionKey(projection), [projection]);
-  const [rs, setRs] = useState<RowsState>({ key: null, rows: null, error: false });
+  /* ---- datasheet rows: the unsaved BOM, debounced 800 ms, latest wins, only while shown ----
+     #333 review: the projection and its key are built only while the tab shows
+     (H); it is fitted to a byte budget, and what it or the server's caps drop
+     is counted and shown (J); every run bumps seq first, so a read still in
+     flight for an older BOM is dropped (I). */
+  const fitted = useMemo(() => (active ? fitBomProjection(projectBom(sections)) : null), [active, sections]);
+  const projKey = useMemo(() => (fitted ? bomProjectionKey(fitted.projection) : null), [fitted]);
+  const [rs, setRs] = useState<RowsState>({ key: null, rows: null, error: false, truncated: 0 });
   const [retryTick, setRetryTick] = useState(0);
   const seq = useRef(0);
   const firstLoad = rs.rows === null;
+  // The read keys on projKey, not the projection's identity — a price edit
+  // rebuilds the projection but must not restart (and drop) a read in flight.
+  const fittedRef = useRef(fitted);
   useEffect(() => {
-    if (!active || rs.key === projKey) return;
+    fittedRef.current = fitted;
+  }, [fitted]);
+  useEffect(() => {
+    // Every run bumps seq FIRST, the early return included: a read still in
+    // flight for an older BOM (e.g. edited away and back) is then dropped.
     const my = ++seq.current;
+    const req = fittedRef.current;
+    if (!active || !req || rs.key === projKey) return;
     const timer = setTimeout(
       () => {
-        clientPackageDocsAction({ sections: projection })
+        clientPackageDocsAction({ sections: req.projection })
           .then((r) => {
             if (my !== seq.current) return;
-            setRs((prev) => (r.ok ? { key: projKey, rows: r.rows, error: false } : { ...prev, error: true }));
+            setRs((prev) => (r.ok ? { key: projKey, rows: r.rows, error: false, truncated: req.dropped + r.truncated } : { ...prev, error: true }));
           })
           .catch(() => {
             if (my === seq.current) setRs((prev) => ({ ...prev, error: true }));
@@ -168,7 +182,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
     );
     return () => clearTimeout(timer);
     // retryTick re-runs a failed read; rs.key / firstLoad are read, not reacted to beyond the key check.
-  }, [active, projKey, projection, retryTick, rs.key, firstLoad]);
+  }, [active, projKey, retryTick, rs.key, firstLoad]);
   const checking = active && rs.key !== projKey && !rs.error;
   const retry = () => {
     setRs((prev) => ({ ...prev, error: false }));
@@ -204,6 +218,22 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
     if (CLIENT_PACKAGE_ANCHOR_IDS.includes(id)) document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, [active]);
 
+  /* #333 review (D): a toggle that would pass a cap is blocked with its reason. */
+  const [limitMsg, setLimitMsg] = useState<string | null>(null);
+  const setIncluded = (skus: string[], included: boolean) => setLimitMsg(setDatasheetsIncluded(skus, included));
+  const leaveOutTargets = bulkTargets(filtered, "leaveOut");
+  const leaveOutRefusal = leaveOutTargets.length ? excludeRefusal(sel.excludedDatasheets, leaveOutTargets) : null;
+
+  /* #333 review (E): a failed write shows by the Documents switches and the Datasheets header, with Retry. */
+  const selectionAlert = (
+    <span role="alert" style={{ ...HINT, color: "#a33a2b" }}>
+      {COPY.selectionFailed} {selectionError}{" "}
+      <button type="button" onClick={retrySelection} style={{ ...SMALL_BTN, padding: "2px 8px" }}>
+        {COPY.retry}
+      </button>
+    </span>
+  );
+
   const sent = status === "sent" || status === "won" || status === "lost";
   const saveTick = !loadedId ? COPY.ridesSave : selectionSaving ? COPY.saving : selectionError ? COPY.saveFailed : COPY.saved;
 
@@ -226,6 +256,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
               <h2 id="cpk-documents" style={H2}>
                 {COPY.documents}
               </h2>
+              {selectionError && selectionAlert}
               <DocRow title={COPY.estimatePdf} hint={COPY.estimatePdfHint} on={sel.estimatePdf} onChange={(v) => setPackageSwitch("estimatePdf", v)} />
               <DocRow
                 title={COPY.coverPdf}
@@ -282,6 +313,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
                     <span style={{ flex: "1 1 140px", minWidth: 0, fontSize: 13, color: "#16181d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
                     {it.alternate && <span style={{ ...CHIP, color: "#5b616e", background: "#f1f2f5", borderColor: "#e4e7ec" }}>{COPY.alternate}</span>}
                     {it.noIntro && <span style={CHIP}>{COPY.noIntro}</span>}
+                    {it.unpriced && <span style={{ ...CHIP, color: "#5b616e", background: "#f1f2f5", borderColor: "#e4e7ec" }}>{COPY.unpriced}</span>}
                     <div role="group" aria-label={`${it.name} prints as`} style={{ display: "flex", background: "#f1f2f5", borderRadius: 8, padding: 2 }}>
                       <button type="button" aria-pressed={it.presentation === "narrative"} onClick={() => setSystemPresentation(it.id, "narrative")} style={seg(it.presentation === "narrative")}>
                         {COPY.narrative}
@@ -335,13 +367,30 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
                   </button>
                 ))}
               </div>
-              <button type="button" style={SMALL_BTN} disabled={!bulkTargets(filtered, "include").length} onClick={() => setDatasheetsIncluded(bulkTargets(filtered, "include"), true)}>
+              <button type="button" style={SMALL_BTN} disabled={!bulkTargets(filtered, "include").length} onClick={() => setIncluded(bulkTargets(filtered, "include"), true)}>
                 {COPY.includeAll}
               </button>
-              <button type="button" style={SMALL_BTN} disabled={!bulkTargets(filtered, "leaveOut").length} onClick={() => setDatasheetsIncluded(bulkTargets(filtered, "leaveOut"), false)}>
+              <button
+                type="button"
+                style={SMALL_BTN}
+                disabled={!leaveOutTargets.length || !!leaveOutRefusal}
+                title={leaveOutRefusal ?? undefined}
+                onClick={() => setIncluded(leaveOutTargets, false)}
+              >
                 {COPY.leaveAllOut}
               </button>
             </div>
+            {selectionError && selectionAlert}
+            {(limitMsg || leaveOutRefusal) && (
+              <span role="alert" style={{ ...HINT, color: "#a33a2b" }}>
+                {limitMsg || leaveOutRefusal}
+              </span>
+            )}
+            {rs.rows && rs.truncated > 0 && (
+              <span role="note" style={{ ...HINT, color: "#8a6d1f", fontWeight: 600 }}>
+                {COPY.truncated(rs.truncated)}
+              </span>
+            )}
             {checking && <span style={HINT}>{COPY.checking}</span>}
             {rs.error && (
               <span role="alert" style={{ ...HINT, color: "#a33a2b" }}>
@@ -374,7 +423,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
                           disabled={!it.view.selectable}
                           title={it.view.lockReason ?? undefined}
                           aria-label={`Send the ${it.view.row.model || it.view.row.sku} datasheet`}
-                          onChange={(e) => setDatasheetsIncluded([it.view.row.sku], e.target.checked)}
+                          onChange={(e) => setIncluded([it.view.row.sku], e.target.checked)}
                           style={{ marginTop: 2, accentColor: "var(--accent)", flexShrink: 0 }}
                         />
                       )}

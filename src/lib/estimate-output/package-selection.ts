@@ -49,6 +49,56 @@ export function normalizePackageSelection(raw: unknown): PackageSelection {
   };
 }
 
+/** #333 review (C, D) — why a selection write was refused. */
+export const PACKAGE_SELECTION_COPY = {
+  tooMany: `At most ${PACKAGE_SELECTION_MAX_EXCLUDED} datasheets can be left out of one package.`,
+  skuTooLong: `That product's code is over ${PACKAGE_SELECTION_SKU_MAX} characters — its datasheet can't be left out.`,
+  badList: "That list of left-out datasheets couldn't be read.",
+} as const;
+
+export type SelectionPatch = Partial<PackageSelection>;
+export type SelectionPatchCheck = { kind: "ignore" } | { kind: "refuse"; error: string } | { kind: "patch"; patch: SelectionPatch };
+
+/** #333 review (C, D) — a WRITE's input, checked before it touches the stored
+ *  value. null / non-object / nothing usable → "ignore" (no write). Only the
+ *  fields present are patched (mergePackageSelection keeps the rest); a
+ *  non-boolean flag is dropped from the patch. An exclusion list replaces the
+ *  stored one: trimmed, blanks dropped, deduped, sorted — and REFUSED (never
+ *  truncated) when it is not an array of strings, names a SKU over 200 chars,
+ *  or holds more than 500. Reads keep using normalizePackageSelection. */
+export function checkSelectionPatch(raw: unknown): SelectionPatchCheck {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { kind: "ignore" };
+  const r = raw as Record<string, unknown>;
+  const patch: SelectionPatch = {};
+  for (const k of ["estimatePdf", "coverPdf", "drawings"] as const) if (typeof r[k] === "boolean") patch[k] = r[k] as boolean;
+  if ("excludedDatasheets" in r && r.excludedDatasheets !== undefined) {
+    const list = r.excludedDatasheets;
+    if (!Array.isArray(list) || list.some((v) => typeof v !== "string")) return { kind: "refuse", error: PACKAGE_SELECTION_COPY.badList };
+    const skus = new Set<string>();
+    for (const v of list as string[]) {
+      const s = v.trim();
+      if (!s) continue;
+      if (s.length > PACKAGE_SELECTION_SKU_MAX) return { kind: "refuse", error: PACKAGE_SELECTION_COPY.skuTooLong };
+      skus.add(s);
+    }
+    if (skus.size > PACKAGE_SELECTION_MAX_EXCLUDED) return { kind: "refuse", error: PACKAGE_SELECTION_COPY.tooMany };
+    patch.excludedDatasheets = [...skus].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+  return Object.keys(patch).length ? { kind: "patch", patch } : { kind: "ignore" };
+}
+
+/** A checked patch over the stored value (absent → the defaults). Pure. */
+export function mergePackageSelection(stored: unknown, patch: SelectionPatch): PackageSelection {
+  return normalizePackageSelection({ ...normalizePackageSelection(stored), ...patch });
+}
+
+/** #333 review (D) — the Client package tab's guard: leaving `add` out on top
+ *  of `current` would pass a cap → the message; else null. */
+export function excludeRefusal(current: readonly string[], add: readonly string[]): string | null {
+  const r = checkSelectionPatch({ excludedDatasheets: [...current, ...add] });
+  return r.kind === "refuse" ? r.error : null;
+}
+
 /** Stable JSON of the normalised selection — for dirty / settled tracking. */
 export function selectionKey(sel: unknown): string {
   const s = normalizePackageSelection(sel);

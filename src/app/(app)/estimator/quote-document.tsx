@@ -136,6 +136,25 @@ export const QUOTE_WEB_CSS = `
 }
 `;
 
+/** #333 review (L) — QUOTE_WEB_CSS for a document EMBEDDED in an app page
+ *  (the Estimator's BOM quote tab): the same `.est-web` rules with no
+ *  page-level print rules (html / body / .pk-no-print), which would otherwise
+ *  go global on the host page once the tab mounts. */
+export const QUOTE_WEB_EMBED_CSS = `
+.est-web { margin: 0 auto; }
+@media (max-width: 760px) { .est-web { box-shadow: none !important; border-radius: 0 !important; } }
+@media (max-width: 600px) {
+  .est-web { padding: 20px 16px !important; }
+  .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
+}
+@media (max-width: 480px) {
+  .est-web .est-kp img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+}
+@media print {
+  .est-web { box-shadow: none !important; padding: 0 !important; max-width: none !important; }
+}
+`;
+
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 72%, #000)";
 const ACCENT_BD = "color-mix(in srgb, var(--accent) 28%, #fff)";
 

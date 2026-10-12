@@ -30,7 +30,7 @@ import { fixtureBomLine } from "./fixture-bom";
 import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, applyTravelTripTo, defaultLaborMobs, disciplineForSystemTitle, laborMob, roundTripMiles, typeMobMiles, setRouteMiles } from "./labor-defaults";
 import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, snapshotLaborDraft, withLaborGroup } from "./labor-group";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { normalizePackageSelection, selectionKey, type PackageSelection } from "@/lib/estimate-output/package-selection";
+import { excludeRefusal, normalizePackageSelection, selectionKey, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
@@ -58,6 +58,10 @@ import { vendorDraftTotal, vendorDraftTotalSource, vendorKeptLines, vendorLinesT
 import { systemFromCategory } from "@/lib/system-categories";
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
+
+/** #333 review (F): how long Send waits for an in-flight Client package write. */
+const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
+const SELECTION_NOT_SAVED = "Couldn't save package choices.";
 
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 export const TAX_RATE_PCT = 0;
@@ -716,55 +720,103 @@ export function useEstimatorState(props: EstimatorProps) {
   /* #333 (spec §4.4, D-TBD-d) — what the client gets on this project
      (Quote.packageSelection). Not content: each change writes IMMEDIATELY
      through the header-meta action (no timer), serialised so the latest value
-     always lands last; it also rides every Save. A new estimate holds it until
-     the first Save. Send & track awaits selectionSettled() so a revision never
-     freezes a choice still in flight (R4). */
+     always lands last. #333 review — the write model:
+       - the meta action (store: setPackageSelection) is the ONE writer; Save
+         never carries the selection (B), so a Save built before a newer tick
+         can't revert it, and a selection write never bumps updatedAt (G), so
+         it can't fail an in-flight Send's version check;
+       - `selectionAckedKey` is the key the SERVER last confirmed (the loaded
+         value, or the defaults an absent key reads as); a write is skipped
+         only when the latest value already equals it (A), and a skip clears
+         the error, since UI = server again (E);
+       - a new estimate holds the selection until its first Save, which then
+         flushes it ONLY when it was edited — an untouched estimate never
+         gains the key; any later Save also retries a failed write (E);
+       - Send awaits selectionSettled(), which races a 10 s timeout and says
+         whether the server holds the latest value (F). */
   const [packageSelection, setPackageSelectionState] = useState<PackageSelection>(() => normalizePackageSelection(initial.packageSelection));
   const selectionLatest = useRef<PackageSelection>(packageSelection);
-  const selectionSentKey = useRef(selectionKey(packageSelection));
+  const selectionAckedKey = useRef(selectionKey(packageSelection));
   const selectionChain = useRef<Promise<void>>(Promise.resolve());
   const selectionInFlight = useRef(0);
   const [selectionSaving, setSelectionSaving] = useState(false);
-  const [selectionError, setSelectionError] = useState(false);
-  const writeSelection = (next: PackageSelection) => {
-    const value = normalizePackageSelection(next);
-    selectionLatest.current = value;
-    setPackageSelectionState(value);
-    if (!loadedId) return;
-    const id = loadedId;
+  /** Why the last selection write failed (null = none pending). */
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  /** Queue a write of the latest selection to quote `id` (latest wins). */
+  const enqueueSelectionWrite = (id: string) => {
     selectionInFlight.current += 1;
     setSelectionSaving(true);
     selectionChain.current = selectionChain.current
       .then(async () => {
-        // Latest wins: a write queued behind another sends the newest value; one already sent is skipped.
+        // Latest wins: a write queued behind another sends the newest value.
         const latest = selectionLatest.current;
         const key = selectionKey(latest);
-        if (key === selectionSentKey.current) return;
+        if (key === selectionAckedKey.current) {
+          setSelectionError(null);
+          return;
+        }
         const r = await updateQuoteMetaAction(id, { packageSelection: latest });
-        if (!r || !r.ok) throw new Error("not saved");
-        selectionSentKey.current = key;
-        setSelectionError(false);
+        if (!r || !r.ok) throw new Error((r && r.error) || SELECTION_NOT_SAVED);
+        selectionAckedKey.current = key;
+        if (selectionKey(selectionLatest.current) === key) setSelectionError(null);
       })
-      .catch(() => setSelectionError(true))
+      .catch((e: unknown) => setSelectionError(e instanceof Error && e.message ? e.message : SELECTION_NOT_SAVED))
       .finally(() => {
         selectionInFlight.current -= 1;
         if (selectionInFlight.current === 0) setSelectionSaving(false);
       });
   };
+  const writeSelection = (next: PackageSelection) => {
+    const value = normalizePackageSelection(next);
+    selectionLatest.current = value;
+    setPackageSelectionState(value);
+    // A new estimate holds it until the first Save (flushSelection).
+    if (!loadedId) return;
+    enqueueSelectionWrite(loadedId);
+  };
+  /** After a Save: write the selection when the server doesn't hold it yet. */
+  const flushSelection = (id: string) => {
+    if (selectionKey(selectionLatest.current) === selectionAckedKey.current) {
+      setSelectionError(null);
+      return;
+    }
+    enqueueSelectionWrite(id);
+  };
+  /** The Client package tab's Retry. */
+  const retrySelection = () => {
+    if (loadedId) enqueueSelectionWrite(loadedId);
+  };
   /** Client package → Documents: Estimate PDF / Cover PDF (Send & track defaults) and Drawings. */
   const setPackageSwitch = (flag: "estimatePdf" | "coverPdf" | "drawings", on: boolean) =>
     writeSelection({ ...selectionLatest.current, [flag]: on });
-  /** Client package → Datasheets: tick (included) or untick these SKUs. */
-  const setDatasheetsIncluded = (skus: string[], included: boolean) => {
+  /** Client package → Datasheets: tick (included) or untick these SKUs. Returns
+   *  why it was refused (a cap — excludeRefusal), or null once applied. */
+  const setDatasheetsIncluded = (skus: string[], included: boolean): string | null => {
+    if (!included) {
+      const refusal = excludeRefusal(selectionLatest.current.excludedDatasheets, skus);
+      if (refusal) return refusal;
+    }
     const set = new Set(selectionLatest.current.excludedDatasheets);
     for (const sku of skus) {
       if (included) set.delete(sku);
       else set.add(sku);
     }
     writeSelection({ ...selectionLatest.current, excludedDatasheets: [...set] });
+    return null;
   };
-  /** Resolves once every queued selection write has landed (or failed). */
-  const selectionSettled = (): Promise<void> => selectionChain.current;
+  /** Resolves once every queued selection write has landed (or after
+   *  SELECTION_SETTLE_TIMEOUT_MS): true only when the server holds the latest value. */
+  const selectionSettled = async (): Promise<boolean> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = await Promise.race([
+      selectionChain.current.then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), SELECTION_SETTLE_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    return !timedOut && selectionKey(selectionLatest.current) === selectionAckedKey.current;
+  };
 
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1297,8 +1349,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // #301 (R14): the cover fields ride every Save.
           coverSummary,
           notIncluded,
-          // #333: the Client package selection rides every Save (it also autosaves per change).
-          packageSelection,
+          // #333 review (B): the Client package selection does NOT ride Save — it
+          // autosaves through the meta action (flushSelection after the first save).
           // Estimator Phase 5: the package document rides every Save (null = remove it).
           document: docNow,
         });
@@ -1314,6 +1366,9 @@ export function useEstimatorState(props: EstimatorProps) {
           // the gate's message), so the banner stops asking to Save.
           setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
           setLoadedId(res.id);
+          // #333 review (A, E): the first save writes an edited selection; any
+          // later Save retries one that failed. Untouched → nothing written.
+          if (res.id && (!loadedId || selectionError)) flushSelection(res.id);
           // #223: this save's render prints the number the server hands back.
           setSavedDoc({ ...docAtSave, quoteNumber: res.number ?? res.id });
           if (res.pdf) setPdf(res.pdf);
@@ -3225,6 +3280,7 @@ export function useEstimatorState(props: EstimatorProps) {
     selectionSaving,
     selectionError,
     selectionSettled,
+    retrySelection,
     purchasePerksDocLine,
     trackSummary,
     setTrackSummary,

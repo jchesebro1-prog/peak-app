@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
-import QuoteDocument, { QUOTE_WEB_CSS } from "../quote-document";
+import { memo, useMemo, useState, type CSSProperties } from "react";
+import QuoteDocument, { QUOTE_WEB_EMBED_CSS } from "../quote-document";
 import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";
 import { previewPath } from "@/lib/estimate-output/package-preview";
 import type { EstimatorState } from "../use-estimator-state";
@@ -27,7 +27,20 @@ const LINK: CSSProperties = { color: "var(--accent)", fontWeight: 600, textDecor
  * by the shell (next/dynamic), so QuoteDocument and the letterhead reach only
  * this chunk.
  */
-export default function PackageBomTab({ s }: { s: EstimatorState }) {
+type LiveBomInput = Parameters<typeof liveBomDocumentProps>[0];
+
+/** The customer document, memoised: a hidden tab's re-renders never reach it (#333 review K). */
+const BomDocument = memo(function BomDocument({ props }: { props: ReturnType<typeof liveBomDocumentProps> }) {
+  return (
+    <>
+      {/* #333 review (L): the scoped web CSS — no page-level print rules on the Estimator page. */}
+      <style>{QUOTE_WEB_EMBED_CSS}</style>
+      <QuoteDocument {...props} layout="web" />
+    </>
+  );
+});
+
+export default function PackageBomTab({ s, active }: { s: EstimatorState; active: boolean }) {
   const {
     quoteId,
     projectName,
@@ -54,37 +67,42 @@ export default function PackageBomTab({ s }: { s: EstimatorState }) {
     loadedId,
   } = s;
   const portal = initial.portal;
-  const props = useMemo(
-    () =>
-      liveBomDocumentProps({
-        quoteNumber: quoteId,
-        projectName,
-        customerId,
-        custName: docCustName,
-        locationId,
-        contactName,
-        quoteNote,
-        assumptions,
-        owner,
-        preparedBy,
-        paymentTerms,
-        sections,
-        groups,
-        vendorQuotes,
-        pdfOptions: pdfOpts,
-        revNum,
-        revDateMs,
-        // Only a portal-catalog quote prints differently (initial.portal is set for exactly those).
-        source: portal ? "portal-catalog" : null,
-        portalFirm: portal?.portalFirm ?? null,
-        customers,
-        companyName,
-        logoDark,
-        rewardsLine: purchasePerksDocLine,
-      }),
+  // #333 review (K): the input is a cheap memo; the props (and the document)
+  // follow it only while the tab shows — hidden, the last render stays as is
+  // and a TipTap keystroke on Narrative never rebuilds the BOM view.
+  const input = useMemo(
+    (): LiveBomInput => ({
+      quoteNumber: quoteId,
+      projectName,
+      customerId,
+      custName: docCustName,
+      locationId,
+      contactName,
+      quoteNote,
+      assumptions,
+      owner,
+      preparedBy,
+      paymentTerms,
+      sections,
+      groups,
+      vendorQuotes,
+      pdfOptions: pdfOpts,
+      revNum,
+      revDateMs,
+      // Only a portal-catalog quote prints differently (initial.portal is set for exactly those).
+      source: portal ? "portal-catalog" : null,
+      portalFirm: portal?.portalFirm ?? null,
+      customers,
+      companyName,
+      logoDark,
+      rewardsLine: purchasePerksDocLine,
+    }),
     [quoteId, projectName, customerId, docCustName, locationId, contactName, quoteNote, assumptions, owner, preparedBy, paymentTerms, sections, groups, vendorQuotes, pdfOpts, revNum, revDateMs, portal, customers, companyName, logoDark, purchasePerksDocLine]
   );
-  const empty = sections.every((sec) => !sec.items.length);
+  const [shown, setShown] = useState<LiveBomInput | null>(null);
+  if (active && shown !== input) setShown(input);
+  const props = useMemo(() => (shown ? liveBomDocumentProps(shown) : null), [shown]);
+  const empty = (shown?.sections ?? sections).every((sec) => !sec.items.length);
 
   return (
     <div className="est-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#f7f8fa" }}>
@@ -104,12 +122,9 @@ export default function PackageBomTab({ s }: { s: EstimatorState }) {
           <div style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 12, padding: "40px 24px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#5b616e" }}>
             {BOM_TAB_COPY.empty}
           </div>
-        ) : (
-          <>
-            <style>{QUOTE_WEB_CSS}</style>
-            <QuoteDocument {...props} layout="web" />
-          </>
-        )}
+        ) : props ? (
+          <BomDocument props={props} />
+        ) : null}
       </div>
     </div>
   );

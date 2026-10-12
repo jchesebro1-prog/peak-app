@@ -11683,6 +11683,7 @@ seeded()
   .then(() => pkg333StoreChecks())
   .then(() => pkg333DatasheetChecks())
   .then(() => pkg333DrawingChecks())
+  .then(() => pkg333ReviewStoreChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -69284,11 +69285,10 @@ import { revisionDocFields as p3DocFields, buildQuote as p3Build, QUOTE_CONTENT_
   ok(p3ContentKey(q0) === p3ContentKey({ ...q0, packageSelection: { estimatePdf: false, coverPdf: false, drawings: false, excludedDatasheets: ["X"] } }), "#333 store: quoteContentKey ignores packageSelection");
   const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const act = rd("src/app/(app)/estimator/actions.ts");
-  ok(act.includes("...(payload.packageSelection ? { packageSelection: await selectionFollowingRenames(normalizePackageSelection(payload.packageSelection)) } : {}),"),
-    "#333 save (source): saveQuoteAction normalises + rename-maps a posted packageSelection; an older caller that omits it keeps the stored one");
-  ok(act.includes("if (meta.packageSelection !== undefined) patch.packageSelection = await selectionFollowingRenames(normalizePackageSelection(meta.packageSelection));") &&
+  // #333 review (B): Save no longer writes the selection — see the review block at EOF.
+  ok(act.includes("if (meta.packageSelection !== undefined) {") && act.includes("await setPackageSelection(id, meta.packageSelection, selectionFollowingRenames)") &&
      /packageSelection\?: unknown;/.test(act.slice(act.indexOf("export async function updateQuoteMetaAction"), act.indexOf("export async function updateQuoteMetaAction") + 800)),
-    "#333 meta (source): updateQuoteMetaAction allowlists packageSelection through the same normaliser");
+    "#333 meta (source): updateQuoteMetaAction allowlists packageSelection through the store's one checked, rename-mapped writer");
   const pg = rd("src/app/(app)/estimator/page.tsx");
   ok(pg.includes("packageSelection: normalizePackageSelection(q.packageSelection),") && pg.includes("packageSelection: { ...DEFAULT_PACKAGE_SELECTION, excludedDatasheets: [] },"),
     "#333 page (source): initialFrom hands the Estimator a normalised selection (defaults for a new estimate)");
@@ -69307,15 +69307,15 @@ async function pkg333StoreChecks(): Promise<void> {
   const before = (await Q.get(QID))!;
   ok(!("packageSelection" in before), "#333 store: a new quote has no packageSelection");
   const sel = { estimatePdf: true, coverPdf: false, drawings: false, excludedDatasheets: ["P3-A"] };
-  const upd = await Q.update(QID, { packageSelection: sel });
+  await Q.setPackageSelection(QID, sel);
   const got = await Q.get(QID);
   const S333 = await import("@/lib/estimate-output/package-selection");
-  ok(!!got?.packageSelection && S333.selectionKey(got.packageSelection) === S333.selectionKey(sel), "#333 store: update() keeps packageSelection (it is not one of the store-owned fields it drops)");
-  ok((upd?.contentChangedAt ?? null) === (before.contentChangedAt ?? null), "#333 store: a packageSelection change never stamps contentChangedAt");
+  ok(!!got?.packageSelection && S333.selectionKey(got.packageSelection) === S333.selectionKey(sel), "#333 store: setPackageSelection stores the selection (#333 review: its one writer; update() drops it)");
+  ok((got?.contentChangedAt ?? null) === (before.contentChangedAt ?? null), "#333 store: a packageSelection change never stamps contentChangedAt");
   await Q.update(QID, { status: "sent" });
   const rev = await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" });
   ok(rev?.docFields?.packageSelection?.coverPdf === false && rev?.docFields?.packageSelection?.excludedDatasheets.join() === "P3-A", "#333 store: a new revision freezes the selection");
-  await Q.update(QID, { packageSelection: { ...sel, excludedDatasheets: [] } });
+  await Q.setPackageSelection(QID, { ...sel, excludedDatasheets: [] });
   const after = await Q.get(QID);
   ok(after?.revisions?.[after.revisions.length - 1]?.docFields?.packageSelection?.excludedDatasheets.join() === "P3-A", "#333 store: a change after send is never annexed onto the sent revision");
 
@@ -69463,7 +69463,7 @@ async function pkg333DatasheetChecks(): Promise<void> {
   registerFixture("quotes", QID);
   await Q.update(QID, { status: "sent" });
   const revPlain = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
-  await Q.update(QID, { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X] } });
+  await Q.setPackageSelection(QID, { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X] });
   const revEx = (await Q.addQuoteRevision(QID, { by: "Test", reason: "sent" }))!;
   const q = (await Q.get(QID))!;
   const readNoX = async (key: string) => (key.includes("xeno") ? null : blobs.has(key) ? new Response(new Uint8Array(blobs.get(key)!)).body : null);
@@ -69484,7 +69484,7 @@ async function pkg333DatasheetChecks(): Promise<void> {
     ok(!!zEx && zEx.specifications === true && names(zEx).some((f) => f.name === "Specifications.docx"), "#333 zip: Specifications.docx still covers the left-out product (its section is the only one)");
 
     // 6. The Quotes-hub client package (Q3): follows the live quote's choices.
-    await Q.update(QID, { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X, M] } });
+    await Q.setPackageSelection(QID, { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [X, M] });
     const stored: Buffer[] = [];
     const pkg = await CPS.createQuoteClientPackage((await Q.get(QID))!, "Tester", { deps: {
       blobOn: () => true,
@@ -69506,7 +69506,7 @@ async function pkg333DatasheetChecks(): Promise<void> {
       "#333 client package (Q3): the index's items carry datasheetExcluded");
     ok(cpText.includes("YS-333") && !cpText.includes("XM-333") && !cpText.includes("MB-333"), "#333 client package (Q3): the book lists the included rows only");
     // Control: no selection → the missing gap is back.
-    await Q.update(QID, { packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [] } });
+    await Q.setPackageSelection(QID, { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [] });
     const pkg0 = await CPS.createQuoteClientPackage((await Q.get(QID))!, "Tester", { deps: {
       blobOn: () => true, put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; }, save: async (input: Record<string, unknown>) => ({ ...input, id: "PKG-333b", createdAt: 0 }),
       secret: () => "s333", findGrid: async () => null, readDoc: async (key: string) => (blobs.has(key) ? new Response(new Uint8Array(blobs.get(key)!)).body : null), canonicalMfr: async () => null,
@@ -69723,7 +69723,7 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   ok(engRows.length === 1 && engRows[0].partOf.length === 3, "#333 partOf: a SKU both standalone and a member is one row with the assemblies listed");
 
   const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/client-package-actions.ts"), "utf8");
-  ok(act.startsWith('"use server";') && act.includes("await requireUser();") && act.includes("specPackageDocs({ sections }, null)") && act.includes("sanitizeBomProjection(") && act.includes("return { ok: false, error:"),
+  ok(act.startsWith('"use server";') && act.includes("await requireUser();") && act.includes("specPackageDocs({ sections }, null)") && act.includes("sanitizeBomProjectionCounted(") && act.includes("return { ok: false, error:"),
     "#333 datasheet-rows action (source): use server, requireUser, sanitised projection, no exclusions, never throws");
   const projSrc = readFileSync(join(process.cwd(), "src/lib/estimate-output/bom-projection.ts"), "utf8");
   ok(!/^import /m.test(projSrc), "#333 projection: pure, no imports (client-safe)");
@@ -69733,8 +69733,8 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
 {
   const hook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
   const saveCall = hook.slice(hook.indexOf("await saveQuoteAction(loadedId, {"), hook.indexOf("document: docNow,", hook.indexOf("await saveQuoteAction(loadedId, {")));
-  ok(/\n\s+packageSelection,\n/.test(saveCall), "#333 hook: the Save payload carries packageSelection");
-  const w0 = hook.indexOf("const writeSelection = ");
+  ok(!/\n\s+packageSelection,\n/.test(saveCall), "#333 hook: the Save payload does not carry packageSelection (#333 review B)");
+  const w0 = hook.indexOf("const enqueueSelectionWrite = ");
   const writer = hook.slice(w0, hook.indexOf("const selectionSettled", w0));
   ok(w0 > 0 && !writer.includes("setTimeout") && writer.includes("updateQuoteMetaAction(id, { packageSelection: latest })") && writer.includes("selectionChain.current = selectionChain.current"),
     "#333 hook: the selection writer is immediate (no timer) and serialised latest-wins through the header-meta action");
@@ -69774,7 +69774,7 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   ok(bom.startsWith('"use client";') && bom.includes('import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";') && !/^import[^\n]*\b(bomViewProps|quoteDocumentDataFor)\b/m.test(bom) && !/\b(bomViewProps|quoteDocumentDataFor)\(/.test(bom) && !/from "@\/lib\/stores\//.test(bom),
     "#333 BOM tab: builds its props only through live-bom.ts (the saved preview's path) and imports nothing from a store");
   ok(bom.includes('href={previewPath(loadedId, "bom")}') && /\{loadedId && \(/.test(bom), "#333 BOM tab: \"Open saved preview ↗\" = previewPath(id, \"bom\"), only once saved");
-  ok(bom.includes("<QuoteDocument {...props} layout=\"web\" />") && bom.includes("<style>{QUOTE_WEB_CSS}</style>") && /useMemo\(\s*\(\) =>\s*liveBomDocumentProps\(/.test(bom),
+  ok(bom.includes("<QuoteDocument {...props} layout=\"web\" />") && bom.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\)/.test(bom),
     "#333 BOM tab: renders the customer QuoteDocument (web layout) from memoised live props");
   ok(bom.includes("rewardsLine: purchasePerksDocLine") && bom.includes("revDateMs,") && bom.includes("pdfOptions: pdfOpts,"), "#333 BOM tab: the perks line, Rev date and Show-on-PDF choices come from the hook");
   ok(/const PackageBomTab = dynamic\(\(\) => import\("\.\/package-bom-tab"\), \{ ssr: false/.test(shell) && !/^import [^\n]*package-bom-tab/m.test(shell),
@@ -69836,7 +69836,7 @@ import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
   const tab = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/client-package-tab.tsx"), "utf8");
   ok(tab.startsWith('"use client";') && !/^import (?!type)[^\n]*from "@\/lib\/stores\//m.test(tab) && !/^import (?!type)[^\n]*from "@\/lib\/estimate-output\/package-docs-server"/m.test(tab),
     "#333 client tab: a client component that imports no store or server module");
-  ok(tab.includes("clientPackageDocsAction({ sections: projection })") && tab.includes("firstLoad ? 0 : 800") && tab.includes("if (my !== seq.current) return;") && tab.includes("if (!active || rs.key === projKey) return;"),
+  ok(tab.includes("clientPackageDocsAction({ sections: req.projection })") && tab.includes("firstLoad ? 0 : 800") && tab.includes("if (my !== seq.current) return;") && tab.includes("if (!active || !req || rs.key === projKey) return;"),
     "#333 client tab: datasheet rows read the unsaved BOM projection, 800 ms debounce, latest wins, only while the tab shows");
   ok(tab.includes("{COPY.retry}") && tab.includes("{COPY.checking}"), "#333 client tab: Checking datasheets… and Retry");
   ok(tab.includes('onClick={() => setSystemPresentation(it.id, "narrative")}') && tab.includes('onClick={() => setSystemPresentation(it.id, "itemized")}'), "#333 client tab: Systems rows write setSystemPresentation");
@@ -69886,7 +69886,170 @@ import { DEFAULT_PACKAGE_SELECTION as p3DefaultSel } from "@/lib/estimate-output
     "#333 composer: Cover PDF / Estimate PDF switched off → that tick starts off");
   const comp = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/send-composer.tsx"), "utf8");
   const run = comp.slice(comp.indexOf("const run = async"), comp.indexOf("const noticeView"));
-  ok(/await selectionSettled\(\);\s*\n\s*const asOf = await versionToSend\(\);/.test(run) && run.indexOf("await selectionSettled()") < run.indexOf("sendEstimateEmailAction("),
+  ok(/if \(!\(await selectionSettled\(\)\)\) \{[\s\S]{0,160}\}\s*\n\s*const asOf = await versionToSend\(\);/.test(run) && run.indexOf("await selectionSettled()") < run.indexOf("sendEstimateEmailAction("),
     "#333 composer: Send waits for any in-flight Client package write before it saves / sends (R4)");
   ok(comp.includes("composerInitial(null, packageSelection)") && comp.includes("attachEstimate: f.attachEstimate, attachCover: f.attachCover"), "#333 composer: the ticks start from the selection; the server defaults fill the text fields");
+}
+
+/* ======================================================================
+   #333 review — the selection write model (A–G) and the Client package /
+   BOM tab follow-ups (H–O).
+   ====================================================================== */
+import * as p3rSel from "@/lib/estimate-output/package-selection";
+import * as p3rProj from "@/lib/estimate-output/bom-projection";
+import * as p3rCpu from "@/lib/estimate-output/client-package-ui";
+import { SEND_UI_COPY as p3rSendCopy } from "@/lib/estimate-email/send-ui";
+{
+  const S = p3rSel;
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  // C: a partial merges over the stored value; null / non-object input is ignored.
+  ok(JSON.stringify(S.checkSelectionPatch(null)) === JSON.stringify({ kind: "ignore" }) && S.checkSelectionPatch("x").kind === "ignore" && S.checkSelectionPatch([1]).kind === "ignore" && S.checkSelectionPatch(7).kind === "ignore" && S.checkSelectionPatch({}).kind === "ignore",
+    "#333 review C: null / non-object / empty selection input is ignored (no write)");
+  const part = S.checkSelectionPatch({ drawings: false });
+  ok(part.kind === "patch" && JSON.stringify(part.patch) === JSON.stringify({ drawings: false }), "#333 review C: a partial patch carries only the fields it names: " + JSON.stringify(part));
+  const stored = { estimatePdf: false, coverPdf: true, drawings: true, excludedDatasheets: ["B", "A"] };
+  ok(part.kind === "patch" && JSON.stringify(S.mergePackageSelection(stored, part.patch)) === JSON.stringify({ estimatePdf: false, coverPdf: true, drawings: false, excludedDatasheets: ["A", "B"] }),
+    "#333 review C: {drawings:false} keeps the stored exclusions and flags");
+  ok(JSON.stringify(S.mergePackageSelection(undefined, { coverPdf: false })) === JSON.stringify({ ...S.DEFAULT_PACKAGE_SELECTION, coverPdf: false }), "#333 review C: merging over an absent value starts from the defaults");
+  const junkFlag = S.checkSelectionPatch({ drawings: "no", coverPdf: false });
+  ok(junkFlag.kind === "patch" && JSON.stringify(junkFlag.patch) === JSON.stringify({ coverPdf: false }), "#333 review C: a non-boolean flag is dropped from the patch (the stored one stays)");
+  const ex = S.checkSelectionPatch({ excludedDatasheets: [" B ", "A", "A", ""] });
+  ok(ex.kind === "patch" && JSON.stringify(ex.patch) === JSON.stringify({ excludedDatasheets: ["A", "B"] }), "#333 review C: an exclusion list is trimmed, deduped, sorted and replaces the stored one");
+  ok(S.checkSelectionPatch({ excludedDatasheets: "A" }).kind === "refuse" && S.checkSelectionPatch({ excludedDatasheets: ["A", 3] }).kind === "refuse", "#333 review C: a malformed exclusion list is refused, never read as []");
+  // D: over a cap is refused, never silently truncated.
+  const long = S.checkSelectionPatch({ excludedDatasheets: ["x".repeat(201)] });
+  ok(long.kind === "refuse" && long.error === S.PACKAGE_SELECTION_COPY.skuTooLong, "#333 review D: a SKU over 200 chars is refused: " + JSON.stringify(long));
+  const many = S.checkSelectionPatch({ excludedDatasheets: Array.from({ length: 501 }, (_, i) => "S-" + i) });
+  ok(many.kind === "refuse" && many.error === S.PACKAGE_SELECTION_COPY.tooMany, "#333 review D: 501 exclusions are refused");
+  ok(S.checkSelectionPatch({ excludedDatasheets: Array.from({ length: 500 }, (_, i) => "S-" + i) }).kind === "patch" && S.checkSelectionPatch({ excludedDatasheets: ["x".repeat(200)] }).kind === "patch",
+    "#333 review D: exactly 500, and a 200-char SKU, are accepted");
+  ok(S.excludeRefusal(Array.from({ length: 499 }, (_, i) => "S-" + i), ["S-1", "NEW"]) === null && S.excludeRefusal(Array.from({ length: 500 }, (_, i) => "S-" + i), ["NEW"]) === S.PACKAGE_SELECTION_COPY.tooMany &&
+     S.excludeRefusal([], ["x".repeat(201)]) === S.PACKAGE_SELECTION_COPY.skuTooLong && S.excludeRefusal(Array.from({ length: 500 }, (_, i) => "S-" + i), ["S-3"]) === null,
+    "#333 review D: excludeRefusal blocks the toggle that would pass a cap (re-leaving an excluded one is fine)");
+
+  // B + G (source): Save no longer carries the selection; the meta action routes it to the store's own writer.
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const save = act.slice(act.indexOf("export async function saveQuoteAction"), act.indexOf("export async function updateQuoteMetaAction"));
+  ok(!save.includes("packageSelection"), "#333 review B: saveQuoteAction never writes packageSelection (the meta action owns it — no Save can revert a newer tick)");
+  const meta = act.slice(act.indexOf("export async function updateQuoteMetaAction"), act.indexOf("export type QuotePeopleSync"));
+  ok(meta.includes("await setPackageSelection(id, meta.packageSelection, selectionFollowingRenames)") && !meta.includes("patch.packageSelection") && /if \(!Object\.keys\(patch\)\.length\)/.test(meta),
+    "#333 review G: a selection-only meta call writes through setPackageSelection and never calls update() (no updatedAt bump → no \"changed since\")");
+  const store = rd("src/lib/stores/quotes.ts");
+  const upd = store.slice(store.indexOf("export async function update("), store.indexOf("/* ---- revisions"));
+  ok(upd.includes("delete clean.packageSelection;"), "#333 review B: update() drops packageSelection — setPackageSelection is its one writer after create");
+  const setter = store.slice(store.indexOf("export async function setPackageSelection("), store.indexOf("\n}\n", store.indexOf("export async function setPackageSelection(")));
+  ok(setter.includes("checkSelectionPatch(") && setter.includes("mergePackageSelection(") && !setter.includes("updatedAt"), "#333 review C/G: setPackageSelection checks, merges under the row lock, never bumps updatedAt");
+
+  // A + E + F (source): the hook tracks the server-acked key; Save never writes it; first save flushes an edited selection.
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const saveCall = hook.slice(hook.indexOf("await saveQuoteAction(loadedId, {"), hook.indexOf("document: docNow,", hook.indexOf("await saveQuoteAction(loadedId, {")));
+  ok(!/\n\s+packageSelection,\n/.test(saveCall), "#333 review B: the Save payload no longer carries packageSelection");
+  const w0 = hook.indexOf("const enqueueSelectionWrite = ");
+  const writer = hook.slice(w0, hook.indexOf("const selectionSettled", w0));
+  ok(w0 > 0 && writer.includes("selectionAckedKey.current = key;") && writer.includes("if (key === selectionAckedKey.current) {") && !writer.includes("selectionSentKey"),
+    "#333 review A: the writer compares against the last SERVER-ACKED key, set only when the server confirms");
+  ok(/if \(key === selectionAckedKey\.current\) \{\s*setSelectionError\(null\);\s*return;/.test(writer), "#333 review E: a skipped write (UI already equals the server) clears the error");
+  ok(hook.includes("if (res.id && (!loadedId || selectionError)) flushSelection(res.id);"), "#333 review A/E: the first Save flushes an edited selection (and any Save retries a failed one)");
+  const flush = hook.slice(hook.indexOf("const flushSelection = "), hook.indexOf("const flushSelection = ") + 400);
+  ok(flush.includes("selectionKey(selectionLatest.current) === selectionAckedKey.current"), "#333 review B: a new estimate gains no packageSelection unless it was edited");
+  const settled = hook.slice(hook.indexOf("const selectionSettled = "), hook.indexOf("const selectionSettled = ") + 900);
+  ok(settled.includes("SELECTION_SETTLE_TIMEOUT_MS") && settled.includes("Promise.race(") && settled.includes("selectionKey(selectionLatest.current) === selectionAckedKey.current"),
+    "#333 review F: selectionSettled races a timeout and resolves true only when the server holds the latest value");
+  ok(/SELECTION_SETTLE_TIMEOUT_MS = 10_000/.test(hook), "#333 review F: the settle timeout is 10 s");
+  ok(hook.includes("const retrySelection = ") && hook.slice(hook.lastIndexOf("return {")).includes("retrySelection,"), "#333 review E: the hook exposes retrySelection");
+  const comp = rd("src/app/(app)/estimator/steps/send-composer.tsx");
+  const run = comp.slice(comp.indexOf("const run = async"), comp.indexOf("const noticeView"));
+  ok(/if \(!\(await selectionSettled\(\)\)\) \{\s*setNotice\(\{ tone: "error", text: SEND_UI_COPY\.selectionNotSaved \}\);\s*return;/.test(run) && run.indexOf("selectionSettled()") < run.indexOf("sendEstimateEmailAction("),
+    "#333 review F: Send is blocked with a clear message while the package choices haven't saved");
+  ok(typeof (p3rSendCopy as Record<string, unknown>).selectionNotSaved === "string", "#333 review F: the blocking copy exists");
+
+  // D/E (UI source).
+  const tab = rd("src/app/(app)/estimator/steps/client-package-tab.tsx");
+  ok(tab.includes("excludeRefusal(") && tab.includes("setLimitMsg("), "#333 review D: the Client package tab blocks a toggle that would pass a cap, with a message");
+  const docs = tab.slice(tab.indexOf("<section id={ANCHOR.documents}"), tab.indexOf("<section id={ANCHOR.systems}"));
+  const alertSrc = tab.slice(tab.indexOf("const selectionAlert = ("), tab.indexOf("const selectionAlert = (") + 500);
+  ok(docs.includes("{selectionError && selectionAlert}") && alertSrc.includes("onClick={retrySelection}"), "#333 review E: the selection error shows by the Documents switches too, with Retry");
+
+  // H/I/J (UI source + pure).
+  ok(/useMemo\(\(\) => \(active \? fitBomProjection\(projectBom\(sections\)\) : null\), \[active, sections\]\)/.test(tab), "#333 review H: the projection (and its key) are computed only while the tab shows");
+  ok(/const my = \+\+seq\.current;\s*\n\s*const req = fittedRef\.current;\s*\n\s*if \(!active \|\| !req \|\| rs\.key === projKey\) return;/.test(tab) && /\}, \[active, projKey, retryTick, rs\.key, firstLoad\]\);/.test(tab),
+    "#333 review I: every run bumps seq first (an in-flight read for an older BOM is dropped); the read keys on projKey, not the projection's identity");
+  ok(tab.includes("COPY.truncated(") , "#333 review J: a truncated list says so");
+  const P = p3rProj;
+  const sec = (n: number, descLen: number) => [{ kind: "materials", items: Array.from({ length: n }, (_, i) => ({ sku: "S" + i, desc: "d".repeat(descLen), qty: 1, components: [{ sku: "C" + i, label: "l".repeat(descLen), role: "fixture", qty: 1 }] })) }];
+  const small = P.fitBomProjection(sec(3, 10) as never);
+  ok(small.dropped === 0 && JSON.stringify(small.projection) === JSON.stringify(P.sanitizeBomProjection(sec(3, 10))), "#333 review J: a small projection fits unchanged");
+  const huge = P.fitBomProjection(sec(5000, 300) as never);
+  const bytes = new TextEncoder().encode(JSON.stringify(huge.projection)).length;
+  ok(bytes <= P.BOM_PROJECTION_MAX_BYTES && huge.dropped === 0 && huge.projection[0].items.length === 5000, "#333 review J: long descriptions are trimmed before any line is dropped (" + bytes + " bytes)");
+  const wide = [{ kind: "m", items: Array.from({ length: 5000 }, (_, i) => ({ sku: "S".repeat(290) + i, desc: "d", qty: 1, components: Array.from({ length: 2 }, (_, j) => ({ sku: "C".repeat(290) + i + "-" + j, qty: 1 })) })) }];
+  const fw = P.fitBomProjection(wide as never);
+  ok(new TextEncoder().encode(JSON.stringify(fw.projection)).length <= P.BOM_PROJECTION_MAX_BYTES && fw.dropped > 0 && fw.projection[0].items.length + fw.dropped / 3 === 5000,
+    "#333 review J: past the byte budget lines drop from the end and are counted (each with its components): dropped " + fw.dropped);
+  const capped = P.sanitizeBomProjectionCounted([{ items: Array.from({ length: 5003 }, (_, i) => ({ sku: "S" + i, qty: 1, components: i === 0 ? Array.from({ length: 201 }, () => ({ sku: "c", qty: 1 })) : undefined })) }]);
+  ok(capped.dropped === 4 && capped.sections[0].items.length === 5000 && JSON.stringify(capped.sections) === JSON.stringify(P.sanitizeBomProjection([{ items: Array.from({ length: 5003 }, (_, i) => ({ sku: "S" + i, qty: 1, components: i === 0 ? Array.from({ length: 201 }, () => ({ sku: "c", qty: 1 })) : undefined })) }])),
+    "#333 review J: the server counts what its caps drop (3 lines + 1 component): " + capped.dropped);
+  const cpa = rd("src/app/(app)/estimator/client-package-actions.ts");
+  ok(cpa.includes("sanitizeBomProjectionCounted(") && cpa.includes("truncated: dropped"), "#333 review J: the datasheet-rows action reports what it dropped");
+  ok(p3rCpu.CLIENT_PACKAGE_COPY.truncated(3) === "List truncated — 3 items not checked" && p3rCpu.CLIENT_PACKAGE_COPY.truncated(1) === "List truncated — 1 item not checked", "#333 review J: the truncation note");
+
+  // K/L (BOM tab).
+  const bom = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  const shell = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  ok(shell.includes('<PackageBomTab s={s} active={tab === "bom"} />') && bom.includes("if (active && shown !== input) setShown(input);") && /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\) : null\), \[shown\]\)/.test(bom) && bom.includes("const BomDocument = memo("),
+    "#333 review K: hidden, the BOM tab keeps its last render — props rebuild only while it shows, the document is memoised");
+  ok(bom.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && !bom.includes("{QUOTE_WEB_CSS}"), "#333 review L: the embedded BOM view uses the scoped web CSS");
+  // quote-document.tsx imports a .jpg, so the harness reads its CSS constants from source.
+  const qdSrc = rd("src/app/(app)/estimator/quote-document.tsx");
+  const cssOf = (name: string) => (qdSrc.match(new RegExp("export const " + name + " = `([\\s\\S]*?)`;")) || [])[1] || "";
+  const p3rEmbedCss = cssOf("QUOTE_WEB_EMBED_CSS"), p3rWebCss = cssOf("QUOTE_WEB_CSS");
+  ok(!/html|body|pk-no-print/.test(p3rEmbedCss) && p3rEmbedCss.includes(".est-web") && p3rWebCss.includes("html, body { background: #fff !important; }"),
+    "#333 review L: QUOTE_WEB_EMBED_CSS has no page-level print rules (QUOTE_WEB_CSS keeps them for its own pages)");
+
+  // M (tabs).
+  ok(shell.includes("aria-controls={mounted(t) ? packageTabPanelId(t) : undefined}") && shell.includes("goTab(to, undefined, true)") && shell.includes('window.history[replace ? "replaceState" : "pushState"]'),
+    "#333 review M: aria-controls only names mounted panels; arrow-key moves replaceState, clicks pushState");
+
+  // N (review drawings).
+  const rv = rd("src/app/(app)/estimator/steps/review-tabs.tsx");
+  ok(/\{off \? \(\s*<p style=\{NOTE\}>\{COPY\.drawingsOff\}<\/p>\s*\) : !rows\.length \? \(/.test(rv) || rv.includes("if (off && !rows.length) return <p style={NOTE}>{COPY.drawingsOff}</p>;"),
+    "#333 review N: drawings off with no files shows only \"Drawings are off…\"");
+
+  // O (Systems lists every system with items).
+  const it = (id: number, price: number) => ({ id, sku: "S" + id, desc: "d", qty: 1, unit: "ea", cost: 0, price });
+  const secs = [
+    { id: "a", name: "Priced", kind: "materials", mfr: "", freightPct: 0, items: [it(1, 20)] },
+    { id: "b", name: "Zero", kind: "materials", mfr: "", freightPct: 0, items: [it(2, 0)], presentation: "narrative" },
+    { id: "c", name: "Empty", kind: "materials", mfr: "", freightPct: 0, items: [] },
+  ] as never;
+  const sys = p3rCpu.systemListItems(secs, []);
+  ok(sys.map((x) => (x.kind === "system" ? `${x.name}:${x.presentation}${x.unpriced ? ":unpriced" : ""}${x.noIntro ? ":nointro" : ""}` : "G")).join("|") === "Priced:itemized|Zero:narrative:unpriced",
+    "#333 review O: Systems lists every system with items (an unpriced one marked, no no-intro warning); empty systems stay out: " + JSON.stringify(sys));
+  ok(tab.includes("{it.unpriced && <span") && typeof p3rCpu.CLIENT_PACKAGE_COPY.unpriced === "string", "#333 review O: the tab marks an unpriced system");
+}
+
+async function pkg333ReviewStoreChecks(): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const QID = fixtureId(333, "review");
+  await Q.create({ id: QID, name: "#333 review", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", spec: { sections: [], mobs: [] } } as never);
+  registerFixture("quotes", QID);
+  const before = (await Q.get(QID))!;
+  const r1 = await Q.setPackageSelection(QID, { excludedDatasheets: ["B", "A"], coverPdf: false });
+  const a = (await Q.get(QID))!;
+  const SK = (await import("@/lib/estimate-output/package-selection")).selectionKey;
+  ok(r1.ok && !!a.packageSelection && SK(a.packageSelection) === SK({ estimatePdf: true, coverPdf: false, drawings: true, excludedDatasheets: ["A", "B"] }) && a.packageSelection.excludedDatasheets.join() === "A,B", "#333 review store: setPackageSelection merges over the defaults: " + JSON.stringify(a.packageSelection));
+  ok(a.updatedAt === before.updatedAt && (a.contentChangedAt ?? null) === (before.contentChangedAt ?? null), "#333 review G: a selection write never bumps updatedAt (a Send's version check is untouched)");
+  await Q.setPackageSelection(QID, { drawings: false });
+  const b = (await Q.get(QID))!;
+  ok(!!b.packageSelection && SK(b.packageSelection) === SK({ estimatePdf: true, coverPdf: false, drawings: false, excludedDatasheets: ["A", "B"] }), "#333 review C: a partial {drawings:false} keeps the stored exclusions");
+  const n = await Q.setPackageSelection(QID, null);
+  const tooMany = await Q.setPackageSelection(QID, { excludedDatasheets: Array.from({ length: 501 }, (_, i) => "S-" + i) });
+  const c = (await Q.get(QID))!;
+  ok(n.ok && !tooMany.ok && SK(c.packageSelection) === SK(b.packageSelection), "#333 review C/D: null is ignored and an over-cap list is refused — the stored value is unchanged");
+  await Q.update(QID, { name: "renamed", packageSelection: { estimatePdf: false, coverPdf: false, drawings: false, excludedDatasheets: [] } } as never);
+  const d = (await Q.get(QID))!;
+  ok(d.name === "renamed" && SK(d.packageSelection) === SK(b.packageSelection), "#333 review B: update() can't write packageSelection (a stale Save never reverts a tick)");
+  const miss = await Q.setPackageSelection(fixtureId(333, "nope"), { drawings: false });
+  ok(!miss.ok, "#333 review store: an unknown quote → not ok");
 }

@@ -85,16 +85,38 @@ const finite = (v: unknown): number => (typeof v === "number" && Number.isFinite
 
 /** Untrusted JSON → a capped projection (the server side). Never throws. */
 export function sanitizeBomProjection(raw: unknown): BomProjection {
+  return sanitizeBomProjectionCounted(raw).sections;
+}
+
+const countLine = (it: Rec): number => 1 + (Array.isArray(it.components) ? it.components.filter(isRec).length : 0);
+
+/** #333 review (J) — sanitizeBomProjection plus how many BOM entries its caps
+ *  dropped (a line counts 1 plus its components; components past 200 on a
+ *  kept line count 1 each), so the tab can say the list was truncated
+ *  instead of rows silently vanishing. Junk (non-object) entries never count. */
+export function sanitizeBomProjectionCounted(raw: unknown): { sections: BomProjection; dropped: number } {
   const out: BomProjection = [];
-  if (!Array.isArray(raw)) return out;
+  let dropped = 0;
+  if (!Array.isArray(raw)) return { sections: out, dropped };
+  for (const s of raw.slice(BOM_PROJECTION_MAX_SECTIONS)) {
+    if (isRec(s) && Array.isArray(s.items)) for (const it of s.items) if (isRec(it)) dropped += countLine(it);
+  }
   let budget = BOM_PROJECTION_MAX_ITEMS;
   for (const s of raw.slice(0, BOM_PROJECTION_MAX_SECTIONS)) {
     if (!isRec(s)) continue;
-    const items: BomProjectionItem[] = [];
     const rawItems = Array.isArray(s.items) ? s.items : [];
+    if (budget <= 0) {
+      // Past the item budget: the section isn't sent at all (as before), its lines counted.
+      for (const it of rawItems) if (isRec(it)) dropped += countLine(it);
+      continue;
+    }
+    const items: BomProjectionItem[] = [];
     for (const it of rawItems) {
-      if (budget <= 0) break;
       if (!isRec(it)) continue;
+      if (budget <= 0) {
+        dropped += countLine(it);
+        continue;
+      }
       budget--;
       const o: BomProjectionItem = {};
       const sku = str(it.sku);
@@ -112,6 +134,7 @@ export function sanitizeBomProjection(raw: unknown): BomProjection {
       if (fixtureId !== undefined) o.fixtureId = fixtureId;
       if (it.fixture === true) o.fixture = true;
       if (Array.isArray(it.components)) {
+        dropped += it.components.slice(BOM_PROJECTION_MAX_COMPONENTS).filter(isRec).length;
         o.components = it.components
           .slice(0, BOM_PROJECTION_MAX_COMPONENTS)
           .filter(isRec)
@@ -131,9 +154,63 @@ export function sanitizeBomProjection(raw: unknown): BomProjection {
     }
     const kind = str(s.kind);
     out.push(kind !== undefined ? { kind, items } : { items });
-    if (budget <= 0) break;
   }
-  return out;
+  return { sections: out, dropped };
+}
+
+/** #333 review (J) — the browser's byte budget for one datasheet-rows call,
+ *  well under the ~1.2 MB server-action body ceiling. */
+export const BOM_PROJECTION_MAX_BYTES = 900_000;
+/** Description / component-label lengths tried, longest first, before any line is dropped. */
+const TEXT_STEPS = [120, 60, 24, 0];
+
+const bytesOf = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length;
+
+function withTextCap(p: BomProjection, max: number): BomProjection {
+  const cut = (v: string | undefined) => (v === undefined ? undefined : v.slice(0, max));
+  return p.map((sec) => ({
+    ...sec,
+    items: sec.items.map((it) => {
+      const o: BomProjectionItem = { ...it };
+      if (o.desc !== undefined) o.desc = cut(o.desc);
+      if (o.components) o.components = o.components.map((c) => (c.label === undefined ? c : { ...c, label: cut(c.label) }));
+      return o;
+    }),
+  }));
+}
+
+/** #333 review (J) — the browser side: the server's caps (sanitize, counted),
+ *  then a BYTE budget — descriptions / component labels are shortened first
+ *  (the datasheet rule never reads them; only a row's label does), and only
+ *  then are lines dropped from the end, each counted with its components.
+ *  `dropped` > 0 → the tab shows "List truncated — N items not checked". */
+export function fitBomProjection(p: ReadonlyArray<unknown>, maxBytes: number = BOM_PROJECTION_MAX_BYTES): { projection: BomProjection; dropped: number } {
+  const { sections, dropped } = sanitizeBomProjectionCounted(p);
+  if (bytesOf(sections) <= maxBytes) return { projection: sections, dropped };
+  let cur = sections;
+  for (const max of TEXT_STEPS) {
+    cur = withTextCap(sections, max);
+    if (bytesOf(cur) <= maxBytes) return { projection: cur, dropped };
+  }
+  // Still over: keep lines in order while they fit (a line's cost ≈ its JSON + a comma).
+  let used = bytesOf(cur.map((sec) => ({ ...sec, items: [] })));
+  let extra = 0;
+  let full = false;
+  const kept: BomProjection = cur.map((sec) => {
+    const items: BomProjectionItem[] = [];
+    for (const it of sec.items) {
+      const cost = bytesOf(it) + 1;
+      if (!full && used + cost <= maxBytes) {
+        used += cost;
+        items.push(it);
+      } else {
+        full = true;
+        extra += 1 + (it.components ? it.components.length : 0);
+      }
+    }
+    return { ...sec, items };
+  });
+  return { projection: kept, dropped: dropped + extra };
 }
 
 /** The JSON key the tab debounces on (projection order is the editor's). */
