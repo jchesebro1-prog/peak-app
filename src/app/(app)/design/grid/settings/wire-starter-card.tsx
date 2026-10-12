@@ -9,7 +9,9 @@ import { loadWireStarterAction, syncWireLibraryAction } from "./actions";
  * "Load starter cables" adds ~20 common cables to the Catalog at $0, links
  * each to its wire type where that type's cable / symbol / signal is blank,
  * and puts every per-foot cable in the Grid library. "Sync per-foot cables"
- * does only the last step. Both are additive and idempotent; the server
+ * does only the last step. A starter cable someone deleted in the Catalog is
+ * "held deleted": not re-added and its wire type left unlinked. Both are
+ * additive and idempotent; the server
  * re-checks manage_users. Kept apart from the Wire types card because that
  * card remounts (keyed on the saved list) when a load links wire types,
  * which would wipe this card's result line.
@@ -34,6 +36,9 @@ export function WireStarterCard({ starterTotal, starterInCatalog, perFootMissing
         text:
           `Added ${s(r.partsAdded, "cable")} to the Catalog (${r.partsExisting} already there), ` +
           `${s(r.libraryAdded, "per-foot cable")} to the Grid library, linked ${s(r.wireTypesLinked, "wire type")}.` +
+          (r.heldDeleted
+            ? ` ${r.heldDeleted} held deleted (restore in Catalog to use): ${r.heldDeletedNames.slice(0, 6).join(", ")}${r.heldDeletedNames.length > 6 ? ` +${r.heldDeletedNames.length - 6} more` : ""} — ${r.heldDeleted === 1 ? "its wire type stays" : "their wire types stay"} unlinked.`
+            : "") +
           (r.partsAdded ? " Set their cost and sell per ft in the Catalog." : ""),
       });
       router.refresh();

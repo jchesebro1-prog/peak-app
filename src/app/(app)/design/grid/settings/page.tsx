@@ -28,6 +28,10 @@ import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
 import { GridSettingsTabs } from "./settings-tabs";
 
 export const metadata = { title: "Grid settings — Quartzite-6" };
+// Server actions posted from this page (Load starter cables reads the whole
+// book and writes in batches) take the page's maxDuration — same as the
+// Equipment map and the catalog sheet pages.
+export const maxDuration = 60;
 
 /**
  * Grid Settings (/design/grid/settings, D-grid-settings) — the admin

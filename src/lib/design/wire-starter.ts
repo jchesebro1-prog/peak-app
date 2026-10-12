@@ -1,4 +1,5 @@
 import { cleanWireTypes, resolveWireTypes, type WireType } from "@/lib/catalog-connect";
+import { isPerLengthUnit } from "@/lib/design/grid-bom";
 
 /**
  * Starter cables (Grid notes #5). ~20 cables Peak pulls on a typical
@@ -169,12 +170,17 @@ export function linkStarterWireTypes(
 const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /**
- * The catalog part that already IS this starter cable, or null: the same SKU
- * (live, or one a rename retired into it via formerSkus), else a part whose
- * manufacturer matches and whose Model # or MFR P/N equals the cable's model
- * — so a Belden 1583A someone imported as "BEL-1583A" is not duplicated.
+ * The catalog part that already IS this starter cable, or null: the part
+ * holding the same SKU (or a SKU a rename retired into it, via formerSkus) —
+ * whatever its unit, since an insert would collide on that SKU anyway — else
+ * a PER-FOOT part whose manufacturer matches and whose Model # or MFR P/N
+ * equals the cable's model, so a Belden 1583A someone imported as
+ * "BEL-1583A" is not duplicated. An `ea` part with the same model (a 1000 ft
+ * spool priced each, a patch cord) is never "the cable": the starter is
+ * inserted beside it under its own SKU. Callers pass live rows and, separately,
+ * soft-deleted rows (a deleted match holds the cable deleted).
  */
-export function findExistingCable<P extends { sku: string; mfr?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string; formerSkus?: string[] }>(
+export function findExistingCable<P extends { sku: string; unit?: string; mfr?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string; formerSkus?: string[] }>(
   cable: Pick<WireStarterCable, "sku" | "manufacturer" | "modelNumber" | "mfrPartNumber">,
   parts: readonly P[]
 ): P | null {
@@ -185,6 +191,7 @@ export function findExistingCable<P extends { sku: string; mfr?: string; manufac
   const models = new Set([norm(cable.modelNumber), norm(cable.mfrPartNumber)]);
   return (
     parts.find((p) => {
+      if (!isPerLengthUnit(p.unit || "")) return false;
       const pm = norm(p.mfr);
       if (pm.length < 3 || !(pm === mfr || pm.startsWith(mfr) || mfr.startsWith(pm))) return false;
       return models.has(norm(p.manufacturerModelNumber)) || models.has(norm(p.manufacturerPartNumber));

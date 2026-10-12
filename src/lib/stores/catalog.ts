@@ -1,4 +1,4 @@
-import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, listDocsByField, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, insertDocIfAbsent, listDeletedDocs, listDocs, listDocsByField, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
@@ -339,6 +339,24 @@ async function writePart(
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
   return upsertDoc<CatalogPart>("catalog_parts", doc);
+}
+
+/** Insert a brand-new part ONLY when no row — live OR soft-deleted — holds
+ *  its SKU: never replaces a part and never revives a delete (Grid notes #5
+ *  starter cables). Stamps `updatedAt` and `pricedAt` exactly as writePart
+ *  does for a new part (nextPricedAt with no existing row). True = inserted. */
+export async function insertIfAbsent(part: Omit<CatalogPart, "id"> & { id?: string }, opts: UpsertOpts = {}): Promise<boolean> {
+  const now = Date.now();
+  const doc: CatalogPart = { ...part, id: part.id || part.sku, updatedAt: now };
+  const pricedAt = nextPricedAt(null, part, opts.pricedAt ?? now);
+  if (pricedAt != null) doc.pricedAt = pricedAt;
+  else delete doc.pricedAt;
+  return insertDocIfAbsent<CatalogPart>("catalog_parts", doc);
+}
+
+/** Soft-deleted parts (a human's delete or a rename's tombstone — the latter carries `renamedTo`). */
+export async function listDeleted(): Promise<CatalogPart[]> {
+  return listDeletedDocs<CatalogPart>("catalog_parts");
 }
 
 /** Insert or fully replace a part; the SKU is the document id. Stamps

@@ -1,5 +1,5 @@
 import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catalog";
-import { insertDocIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
+import { insertDocIfAbsent, insertDocsIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart } from "@/lib/fabric-part";
 import type { GridShape } from "@/lib/design/grid-symbols";
@@ -162,4 +162,22 @@ export async function ensureGridSymbolsFor(parts: CatalogPart[], by: string): Pr
     if (await insertDocIfAbsent<GridSymbol>("grid_catalog", fromPricing(p, by))) added += 1;
   }
   return added;
+}
+
+/**
+ * ensureGridSymbolsFor in batches (Grid notes #5): the same rows, the same
+ * skips (already in the library, fabric, Labor) and the same insert-if-absent
+ * rule, written DOC_BATCH_CHUNK per statement via insertDocsIfAbsent — for the
+ * "every per-foot cable" sync, which can touch hundreds of parts at once.
+ * Returns how many entries were added.
+ */
+export async function ensureGridSymbolsForMany(parts: CatalogPart[], by: string): Promise<number> {
+  if (!parts.length) return 0;
+  const have = new Set((await listGridSymbols(by)).map((s) => s.id));
+  const seen = new Set<string>();
+  const rows = parts
+    .filter((p) => !have.has(p.id) && !isFabricPart(p) && p.category !== "Labor" && !seen.has(p.id) && (seen.add(p.id), true))
+    .map((p) => fromPricing(p, by));
+  if (!rows.length) return 0;
+  return (await insertDocsIfAbsent<GridSymbol>("grid_catalog", rows)).ids.length;
 }

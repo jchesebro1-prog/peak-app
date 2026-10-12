@@ -106,8 +106,8 @@ export async function loadWireStarterAction(): Promise<({ ok: true } & WireStart
   const me = await requirePerm("manage_users");
   try {
     const r = await loadWireStarter(me.name || me.email || "admin");
-    revalidatePath("/design/grid", "layout");
-    revalidatePath("/catalog");
+    // Like the catalog's own price writers: the Catalog, the Grid editor and its settings all read these parts.
+    revalidatePath("/", "layout");
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't load the starter cables — please try again." };
@@ -119,7 +119,7 @@ export async function syncWireLibraryAction(): Promise<{ ok: true; libraryAdded:
   const me = await requirePerm("manage_users");
   try {
     const libraryAdded = await ensureWireLibrary(me.name || me.email || "admin");
-    revalidatePath("/design/grid", "layout");
+    revalidatePath("/", "layout");
     return { ok: true, libraryAdded };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't sync the Grid library — please try again." };
