@@ -422,8 +422,82 @@ export function typeOfCategory(category: string, map: TypeMap, types: readonly D
   return t && !t.archived ? t.key : null;
 }
 
-export function typeOfPart(part: { category: string }, map: TypeMap, types: readonly DeviceType[]): string | null {
-  return typeOfCategory(part.category, map, types);
+/** Grid notes #2 (D-type override): a part's ACTIVE device type — its own
+ *  admin override (`CatalogPart.deviceTypeKey`) first, when that type still
+ *  exists and isn't archived; else its raw category through the map. Every
+ *  surface that types a part reads this (gridPartsFrom, the riser data sheet,
+ *  Catalog → Device types), so an override applies wherever the part is used. */
+export function typeOfPart(
+  part: { category: string; deviceTypeKey?: string | null },
+  map: TypeMap,
+  types: readonly DeviceType[]
+): string | null {
+  const own = activeTypeKey(part.deviceTypeKey, types);
+  return own ?? typeOfCategory(part.category, map, types);
+}
+
+/** `key` when it names an active (not archived) type, else null. */
+export function activeTypeKey(key: string | null | undefined, types: readonly DeviceType[]): string | null {
+  if (!key) return null;
+  const t = types.find((x) => x.key === key);
+  return t && !t.archived ? t.key : null;
+}
+
+/** Fabric and Labor name no device — neither a category rule nor a per-part
+ *  override ever types them. */
+export function isExcludedCategory(category: string | null | undefined): boolean {
+  return EXCLUDED.has(normalizeRawCategory(category));
+}
+
+export type PartTypeEditPart = { sku: string; category: string; deviceTypeKey?: string | null };
+export type PartTypeEditPlan = {
+  /** sku → the override to store (undefined clears it). Only parts that change. */
+  overrides: Array<{ sku: string; deviceTypeKey: string | undefined }>;
+  /** Category mode: the raw categories to re-type through the map (assignEntries). */
+  categories: string[];
+};
+
+/**
+ * Grid notes #2 — what one admin Type edit writes. Per part (`wholeCategory`
+ * false): each part's override becomes `typeKey`; null clears it so the part
+ * reads its category again. Whole category: the parts' raw categories are
+ * re-typed through the map and the per-part override of EVERY part in those
+ * categories is cleared — the picked parts and `categoryMates` (the
+ * catalog's other parts that carry their own type) alike — so the whole
+ * category follows the category rule. Refuses an unknown/archived type,
+ * Fabric/Labor parts, and (category mode) "Auto" or a part with no mappable
+ * category. Pure: the store applies the plan (clears first, then the map).
+ */
+export function planPartTypeEdit(
+  parts: readonly PartTypeEditPart[],
+  typeKey: string | null,
+  wholeCategory: boolean,
+  types: readonly DeviceType[],
+  categoryMates: readonly PartTypeEditPart[] = []
+): { ok: true; plan: PartTypeEditPlan } | { ok: false; error: string } {
+  if (!parts.length) return { ok: false, error: "Pick at least one catalog part." };
+  if (typeKey !== null && !activeTypeKey(typeKey, types)) return { ok: false, error: "Pick an active device type." };
+  if (parts.some((p) => isExcludedCategory(p.category))) return { ok: false, error: "Fabric and labor aren't Grid devices — they take no device type." };
+  if (!wholeCategory) {
+    const overrides = parts
+      .filter((p) => (p.deviceTypeKey || null) !== typeKey)
+      .map((p) => ({ sku: p.sku, deviceTypeKey: typeKey ?? undefined }));
+    return { ok: true, plan: { overrides, categories: [] } };
+  }
+  if (typeKey === null) return { ok: false, error: "Pick a device type for the whole category." };
+  const categories: string[] = [];
+  const seen = new Set<string>();
+  for (const p of parts) {
+    const key = mapKeyOf(p.category);
+    if (!key) return { ok: false, error: `${p.sku} has no catalog category to re-type — set its type per part instead.` };
+    if (seen.has(key)) continue;
+    seen.add(key);
+    categories.push((p.category || "").trim());
+  }
+  const clear = new Map<string, { sku: string; deviceTypeKey: undefined }>();
+  for (const p of [...parts, ...categoryMates])
+    if (p.deviceTypeKey && seen.has(normalizeRawCategory(p.category)) && !clear.has(p.sku)) clear.set(p.sku, { sku: p.sku, deviceTypeKey: undefined });
+  return { ok: true, plan: { overrides: [...clear.values()], categories } };
 }
 
 export function scopeOfType(typeKey: string | null | undefined, types: readonly DeviceType[]): GridLayer {
@@ -478,6 +552,8 @@ export type TypeReviewRow = {
   key: string;
   category: string;
   count: number;
+  /** Grid notes #2: parts in this category carrying their own type override. */
+  overrides: number;
   suggestion: Suggestion | null;
   entry: TypeMapEntry | null;
   typeKey: string | null;
@@ -493,29 +569,34 @@ const STATUS_RANK: Record<TypeReviewRow["status"], number> = { unmapped: 0, auto
  *  written (mapKeyOf), so it gets its own "toolong" status instead of
  *  showing as perpetually "unmapped" — a status that would invite an
  *  assign/accept that silently does nothing (#226 fix wave 3). */
-export function typeReviewRows(parts: ReadonlyArray<{ category: string; desc?: string }>, map: TypeMap, types: readonly DeviceType[]): TypeReviewRow[] {
-  const groups = new Map<string, { category: string; count: number; descs: string[] }>();
+export function typeReviewRows(
+  parts: ReadonlyArray<{ category: string; desc?: string; deviceTypeKey?: string | null }>,
+  map: TypeMap,
+  types: readonly DeviceType[]
+): TypeReviewRow[] {
+  const groups = new Map<string, { category: string; count: number; overrides: number; descs: string[] }>();
   for (const p of parts) {
     const key = normalizeRawCategory(p.category);
     if (!key || EXCLUDED.has(key)) continue;
     let g = groups.get(key);
     if (!g) {
-      g = { category: (p.category || "").trim().replace(/\s+/g, " "), count: 0, descs: [] };
+      g = { category: (p.category || "").trim().replace(/\s+/g, " "), count: 0, overrides: 0, descs: [] };
       groups.set(key, g);
     }
     g.count += 1;
+    if (p.deviceTypeKey) g.overrides += 1;
     if (p.desc && g.descs.length < 5) g.descs.push(p.desc);
   }
   const rows: TypeReviewRow[] = [];
   for (const [key, g] of groups) {
     if (!mapKeyOf(key)) {
-      rows.push({ key, category: g.category, count: g.count, suggestion: null, entry: null, typeKey: null, status: "toolong" });
+      rows.push({ key, category: g.category, count: g.count, overrides: g.overrides, suggestion: null, entry: null, typeKey: null, status: "toolong" });
       continue;
     }
     const entry = Object.hasOwn(map, key) ? map[key] : null;
     const typeKey = typeOfCategory(key, map, types);
     const status: TypeReviewRow["status"] = !typeKey || !entry ? "unmapped" : entry.by;
-    rows.push({ key, category: g.category, count: g.count, suggestion: suggestDeviceType(key, g.descs), entry, typeKey, status });
+    rows.push({ key, category: g.category, count: g.count, overrides: g.overrides, suggestion: suggestDeviceType(key, g.descs), entry, typeKey, status });
   }
   return rows.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.count - a.count || a.category.localeCompare(b.category));
 }

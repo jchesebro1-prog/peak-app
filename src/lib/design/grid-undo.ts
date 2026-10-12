@@ -18,7 +18,9 @@ export type GridCommand =
   /** #320: set designators; `keepAuto` for Renumber's undo/redo (not a hand edit). */
   | { kind: "designator"; items: { id: string; designator: string }[]; keepAuto?: boolean }
   /** #321: per-field riser tag patches (absent = leave, string = set, null = remove override). */
-  | { kind: "tag"; items: { id: string; patch: TagPatch }[] };
+  | { kind: "tag"; items: { id: string; patch: TagPatch }[] }
+  /** Grid notes #2: pin devices to a space (null = back to "from position"). */
+  | { kind: "space"; items: { id: string; spaceId: string | null }[] };
 
 export type UndoEntry = { label: string; forward: GridCommand; inverse: GridCommand };
 export type UndoState = { past: UndoEntry[]; future: UndoEntry[] };

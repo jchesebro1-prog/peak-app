@@ -47,6 +47,7 @@ import {
 } from "@/lib/design/designators";
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
+import { pinnedSpaceOf, spacePinRefusal } from "@/lib/design/grid-geometry";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
 import type { Landed } from "@/lib/design/conduit-riser/edit";
@@ -157,6 +158,16 @@ export type GridPlacement = {
    */
   tag?: PlacementTag;
   /**
+   * Grid notes #2: the room this device is PINNED to, whatever its position
+   * (a `GridSpace.id` on the SAME sheet + page). Absent = computed from
+   * position (spaceOf, smallest wins). Read only through
+   * grid-geometry.spaceOfPlacement, which ignores a dead pin (space deleted,
+   * or on another page); removeSpace also clears pins to the space it
+   * deletes. Written only through setPlacementsSpace. Spaces are
+   * project-level, so option copies and revisions carry it unchanged.
+   */
+  spaceId?: string;
+  /**
    * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
    * is a priced line, not a catalog unit: it is sized and specced here and
    * priced from fullness + fabric through the shared curtain model, landing
@@ -203,9 +214,11 @@ export type GridPlacement = {
 
 /**
  * A room polygon on one page of one sheet (Phase 2, D109). Which devices
- * belong to it is COMPUTED (grid-geometry.spaceOf, smallest-wins), never
- * stored — redrawing a space reassigns instantly and deletion can't strand
- * stale ids on placements.
+ * belong to it is COMPUTED (grid-geometry.spaceOf, smallest-wins) —
+ * redrawing a space reassigns instantly. Grid notes #2 adds ONE exception: a
+ * device may carry an optional pin (`GridPlacement.spaceId`) that wins over
+ * position; a dead pin is ignored by the resolver (spaceOfPlacement) and
+ * removeSpace clears the pins to the space it deletes.
  */
 export type GridSpace = {
   id: string; // 'sp-' + random
@@ -1271,20 +1284,21 @@ async function batchEdit<T>(
   projectId: string,
   rawIds: readonly string[],
   apply: (p: GridProject, ids: ReadonlySet<string>) => T,
-  check?: (placements: GridPlacement[], ids: ReadonlySet<string>) => string | null
+  check?: (placements: GridPlacement[], ids: ReadonlySet<string>, project: GridProject) => string | null
 ): Promise<BatchResult<T>> {
   if (rawIds.length > MAX_BATCH) return { ok: false, error: BATCH_TOO_MANY };
   const ids = new Set(rawIds);
   if (!ids.size) return { ok: false, error: BATCH_NOTHING };
-  const refusalFor = (placements: GridPlacement[]): string | null => {
+  const refusalFor = (p: GridProject): string | null => {
+    const placements = p.placements || [];
     const have = new Set(placements.map((pl) => pl.id));
     let missing = 0;
     for (const id of ids) if (!have.has(id)) missing++;
-    return missing ? batchStale(missing) : check ? check(placements, ids) : null;
+    return missing ? batchStale(missing) : check ? check(placements, ids, p) : null;
   };
   const before = await getProject(projectId);
   if (!before) return { ok: false, error: "Design not found." };
-  const early = refusalFor(before.placements || []);
+  const early = refusalFor(before);
   if (early) return { ok: false, error: early };
 
   // `as`: assigned inside the patchDoc callback, which TS's narrowing can't see.
@@ -1293,7 +1307,7 @@ async function batchEdit<T>(
   let was = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     was = p.updatedAt || 0;
-    refusal = refusalFor(p.placements || []);
+    refusal = refusalFor(p);
     if (refusal) return;
     value = apply(p, ids);
     p.updatedAt = Date.now();
@@ -1375,6 +1389,53 @@ export async function setPlacementsCategory(
     });
     return previous;
   });
+}
+
+/**
+ * Grid notes #2: pin (a space id) or unpin (null — back to "from position")
+ * many devices in one all-or-nothing write (batchEdit). Every pin must name
+ * a space of the design on that device's own sheet + page, checked against
+ * the doc read and again inside the write. A pin is a hand edit, so it clears
+ * the #211 auto tag (a re-fill then keeps the device and its room). Returns
+ * the previous pins (null = none) for undo.
+ */
+export async function setPlacementsSpace(
+  projectId: string,
+  items: { id: string; spaceId: string | null }[]
+): Promise<BatchResult<{ id: string; spaceId: string | null }[]>> {
+  const next = byId(items);
+  return batchEdit(
+    projectId,
+    items.map((it) => it.id),
+    (p) => {
+      const previous: { id: string; spaceId: string | null }[] = [];
+      const spaces = p.spaces || [];
+      p.placements = (p.placements || []).map((pl) => {
+        const it = next.get(pl.id);
+        if (!it) return pl;
+        // A dead pin (space gone / another page) undoes to null, never to a
+        // space the write would refuse — undo can't get stuck on it.
+        previous.push({ id: pl.id, spaceId: pinnedSpaceOf(pl, spaces)?.id ?? null });
+        if ((pl.spaceId ?? null) === it.spaceId) return pl;
+        const edited = withoutAuto({ ...pl });
+        if (it.spaceId) edited.spaceId = it.spaceId;
+        else delete edited.spaceId;
+        return edited;
+      });
+      return previous;
+    },
+    (placements, ids, project) => {
+      const spaces = project.spaces || [];
+      for (const pl of placements) {
+        if (!ids.has(pl.id)) continue;
+        const want = next.get(pl.id)?.spaceId;
+        if (!want) continue;
+        const refusal = spacePinRefusal([pl], spaces, want);
+        if (refusal) return refusal;
+      }
+      return null;
+    }
+  );
 }
 
 const CURTAIN_PART_REFUSAL = "Curtains can't change part — edit the curtain instead.";
@@ -1605,7 +1666,16 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     refusal = refusalFor(p);
     if (refusal) return;
-    p.placements = [...(p.placements || []), ...placements];
+    // Grid notes #2: a restored device keeps its space pin only while that
+    // space still exists on its sheet + page; a dead pin is dropped.
+    const spaces = p.spaces || [];
+    const back = placements.map((pl) => {
+      if (!pl.spaceId || pinnedSpaceOf(pl, spaces)) return pl;
+      const next = { ...pl };
+      delete next.spaceId;
+      return next;
+    });
+    p.placements = [...(p.placements || []), ...back];
     if (numbering) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), numbering.codeOf, numbering.digits);
     const first = defaultOptionId(p);
     const optionOf = new Map(p.placements.map((pl) => [pl.id, pl.optionId || first]));
@@ -2121,6 +2191,13 @@ export async function removeSpace(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
+    // Grid notes #2: devices pinned to it go back to "from position".
+    p.placements = (p.placements || []).map((pl) => {
+      if (pl.spaceId !== spaceId) return pl;
+      const next = { ...pl };
+      delete next.spaceId;
+      return next;
+    });
     // Its riser box, and any link/conduit ending on it, go too (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: new Set([spaceId]) });
     pruneConduitRisersIn(p);

@@ -32,10 +32,12 @@ const QUERY_MAX = 120;
 export const CATALOG_SEARCH_FIELDS = ["sku", "desc", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus", "category"] as const;
 /** What a candidate row is read as before the cap: enough to match, exclude,
  *  rank and resolve its device type + scope (gridPartsFrom: category, desc,
- *  discipline, trade). The ≤ 40 hits are then re-read in full. */
+ *  discipline, trade, and the part's own type override). The ≤ 40 hits are then re-read in full. */
 export const CATALOG_LIGHT_FIELDS = [
   "sku", "desc", "mfr", "category", "unit", "trade", "discipline",
   "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus", "renamedTo",
+  // Grid notes #2: a part's own device type decides its node like its category does.
+  "deviceTypeKey",
 ] as const;
 const MAX_TOKENS = 8;
 

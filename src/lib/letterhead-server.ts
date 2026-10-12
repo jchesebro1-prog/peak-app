@@ -1,4 +1,6 @@
 // SERVER ONLY — imports sharp (native) for non-JPEG logos.
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { jpegInfo } from "@/lib/pdf";
 import { getSettings, type AppSettingsData } from "@/lib/settings";
 import { peakHeaderDefault, resolvePeakHeader, type Letterhead } from "@/lib/letterhead";
@@ -70,9 +72,9 @@ let bakedLogged = false;
 /** The baked Peak letterhead sheet, or null (logged once) when the file isn't there. */
 async function bakedLetterhead(): Promise<Buffer | null> {
   try {
-    const { readFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-    const buf = await readFile(path.join(process.cwd(), BAKED_LETTERHEAD));
+    // A LITERAL path (static fs/path imports): file tracing resolves it to the one file. A variable here
+    // makes Turbopack trace the whole project. The harness checks it equals BAKED_LETTERHEAD (letterhead-path.ts).
+    const buf = await readFile(path.join(process.cwd(), "src/app/(app)/flame-tests/letter/peak-letterhead.jpg"));
     if (jpegInfo(buf)) return buf;
     throw new Error("not a readable JPEG");
   } catch (err) {

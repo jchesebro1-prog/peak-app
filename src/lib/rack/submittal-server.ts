@@ -20,8 +20,8 @@ import { getBlobStream, safeName } from "@/lib/blob";
 import { CutSheetDeadlineError, rejectAfter } from "@/lib/curtain-cut-sheets/deadline";
 import { renderTimeoutMs, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { BOOK_REASON, bookDate, bookPartOf, planDatasheetBook } from "@/lib/part-docs/datasheet-book";
-import { buildDatasheetBook, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
+import { BOOK_REASON, bookDate, bookPartOf, planDatasheetBook, withCanonicalMfrs } from "@/lib/part-docs/datasheet-book";
+import { buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import { resolvePackageDocs } from "@/lib/part-docs/package";
 import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { signPrintToken } from "@/lib/quote-pdf/token";
@@ -200,7 +200,8 @@ async function datasheetsPdf(
   const gapFor = (skuList: string[], detail: string) => {
     for (const sku of skuList) gaps.push({ sku, label: name(sku), kind: "missing-datasheet", detail });
   };
-  const bookParts = submittal.datasheetSkus.map((sku) => bookPartOf({ sku, desc: missingCatalog.get(sku)?.label ?? name(sku) }, partBySku.get(sku), bySku.get(sku)));
+  // #329b — the #298 manufacturer merges, read once for this submittal (a failed read groups by each part's own text).
+  const bookParts = withCanonicalMfrs(submittal.datasheetSkus.map((sku) => bookPartOf({ sku, desc: missingCatalog.get(sku)?.label ?? name(sku) }, partBySku.get(sku), bySku.get(sku))), await loadCanonicalMfr(undefined, "[rack]"));
   for (const p of bookParts) if (!p.docId && p.reason === BOOK_REASON.noDatasheet) gapFor([p.sku], DATASHEET_MISSING);
   const plan = planDatasheetBook(bookParts);
   const skusOf = new Map<string, string[]>();

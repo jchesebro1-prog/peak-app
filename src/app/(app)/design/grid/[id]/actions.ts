@@ -24,6 +24,7 @@ import {
   removePlacements,
   movePlacements,
   setPlacementsCategory,
+  setPlacementsSpace,
   setPlacementsPart,
   setPlacementsDesignator,
   renumberDesignators,
@@ -867,6 +868,26 @@ export async function setPlacementsCategoryAction(
   return { ok: true, previous: r.value };
 }
 
+/** Grid notes #2: pin (a space id) or unpin (null — back to "from position")
+ *  many devices in one write. Each pin must be a space on that device's own
+ *  sheet + page (the store refuses otherwise, whole). `previous` is the old
+ *  pins, for undo. */
+export async function setPlacementsSpaceAction(
+  projectId: string,
+  items: { id: string; spaceId: string | null }[]
+): Promise<{ ok: true; previous: { id: string; spaceId: string | null }[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!Array.isArray(items) || items.length > MAX_BATCH) return { ok: false, error: "Select 2,000 items or fewer." };
+  if (!isStr(projectId) || !items.every((it) => isObj(it) && isStr(it.id) && (it.spaceId === null || isSpaceId(it.spaceId))))
+    return { ok: false, error: BATCH_INVALID };
+  const r = await setPlacementsSpace(projectId, items.map((it) => ({ id: it.id, spaceId: it.spaceId })));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true, previous: r.value };
+}
+
 /** #299: one batch edit resolves at most this many DISTINCT part ids — the
  *  per-id lookups run in parallel, so the payload can't fan them out. */
 const MAX_DISTINCT_PARTS = 200;
@@ -916,6 +937,9 @@ export async function replacePlacementsPartAction(
 
 const PART_ID_MAX = 120;
 const PLACEMENT_ID = /^gp-[0-9a-f]{12}$/;
+/** Grid notes #2: a space id as the store mints it (`sp-` + hex); seeds may differ, so loosely. */
+const SPACE_ID = /^sp-[A-Za-z0-9_-]{1,40}$/;
+const isSpaceId = (v: unknown): v is string => typeof v === "string" && SPACE_ID.test(v);
 const UNDO_INVALID = "Couldn't undo — reload and try again.";
 const isPage = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1;
 const isPartId = (v: unknown): v is string => isStr(v) && v !== "" && v.length <= PART_ID_MAX;
@@ -1015,6 +1039,8 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
   const designator = curtain ? null : cleanDesignator(raw.designator);
   // #321: riser tag overrides come back through cleanPlacementTag; never on a curtain.
   const tag = curtain ? undefined : cleanPlacementTag(raw.tag);
+  // Grid notes #2: the space pin comes back too (a dead one is ignored on read).
+  const spaceId = isSpaceId(raw.spaceId) ? raw.spaceId : null;
   return {
     id: raw.id,
     sheetId: raw.sheetId,
@@ -1025,6 +1051,7 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
     ...(category ? { category } : {}),
     ...(designator ? { designator } : {}),
     ...(tag ? { tag } : {}),
+    ...(spaceId ? { spaceId } : {}),
     ...(curtain ? { curtain } : {}),
     ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
     ...(seededFrom ? { seededFrom } : {}),

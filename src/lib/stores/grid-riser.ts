@@ -1,6 +1,6 @@
 import { patchDoc } from "@/db/doc-store";
 import { clamp01, type Point } from "@/lib/annotations";
-import { spaceOf } from "@/lib/design/grid-geometry";
+import { spaceOfPlacement } from "@/lib/design/grid-geometry";
 import { hasOption } from "@/lib/design/grid-options";
 import {
   UNASSIGNED_KEY,
@@ -58,7 +58,7 @@ function nodeDevices(p: GridProject, optionId: string, nodeKey: string, partId: 
         pl.optionId === optionId &&
         !pl.curtain &&
         pl.partId === partId &&
-        nodeKeyOf(spaceOf(pl, spaces)?.id ?? null) === nodeKey
+        nodeKeyOf(spaceOfPlacement(pl, spaces)?.id ?? null) === nodeKey
     )
     .sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
 }

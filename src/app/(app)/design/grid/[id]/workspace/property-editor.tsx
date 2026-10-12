@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { formatMeasure } from "@/lib/annotations";
 import { curtainDesc, placementQty, routeLengthFt } from "@/lib/design/grid-bom";
-import { spaceOf } from "@/lib/design/grid-geometry";
+import { spaceOfPlacement } from "@/lib/design/grid-geometry";
 import { normalizeCategory, scopeColor, type GridLayer } from "@/lib/design/grid-scopes";
 import { PALETTE_ROW_CAP, paletteView } from "@/lib/design/grid-palette";
 import { symbolLook } from "@/lib/design/grid-icons";
@@ -18,6 +18,8 @@ import type { GridPlacement, GridRoute, GridSpace } from "@/lib/stores/grid-proj
 import SymbolLookPanel from "../symbol-look-panel";
 import { Breakdown, SpaceEditor } from "../spaces-panel";
 import { RouteEditor } from "../wires-panel";
+import { SpacePinControl, TypeEditControl } from "./type-space-controls";
+import { TYPE_NOT_UNDOABLE } from "@/lib/design/grid-type-edit";
 import type { GridEditor } from "../use-grid-editor";
 
 /**
@@ -258,7 +260,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   const typeKey = typeKeyOfPlacement(selectedPlacement);
   const typeLabel =
     typeKey === UNMAPPED_TYPE ? "Unmapped" : deviceTypes.find((t) => t.key === typeKey)?.label ?? part?.deviceTypeLabel ?? typeKey;
-  const room = spaceOf(selectedPlacement, project.spaces || []);
+  const room = spaceOfPlacement(selectedPlacement, project.spaces || []);
   const auto = selectedPlacement.auto;
   const autoTier = auto ? TIERS.find((t) => t.key === auto.tier)?.label ?? auto.tier : null;
   const ports = !selectedPlacement.curtain ? part?.ports || [] : [];
@@ -298,8 +300,17 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         </>
       )}
       <PropRow label="Scope">{scopeOfPlacement(selectedPlacement)}</PropRow>
-      <PropRow label="Type">{typeLabel}</PropRow>
-      <PropRow label="Space">{room?.name ?? "—"}</PropRow>
+      {/* Grid notes #2: admins edit the part's type here; anyone pins the device to a room. */}
+      <PropRow label="Type" title={ed.canEditTypes ? TYPE_NOT_UNDOABLE : undefined}>
+        {selectedPlacement.curtain ? (
+          typeLabel
+        ) : (
+          <TypeEditControl key={`type:${selectedPlacement.id}`} ed={ed} pls={[selectedPlacement]} />
+        )}
+      </PropRow>
+      <PropRow label="Space" title={room ? `In ${room.name}` : "In no space"}>
+        <SpacePinControl key={`space:${selectedPlacement.id}`} ed={ed} pls={[selectedPlacement]} />
+      </PropRow>
       <PropRow label="Qty">{qty}</PropRow>
       <PropRow label="Sell">
         <span style={{ fontWeight: 600 }}>
@@ -527,7 +538,7 @@ function RiserTagRows({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
   /** True once the text was actually changed — an untouched Mixed row never writes. */
   const [dirty, setDirty] = useState(false);
   const spaces = project.spaces || [];
-  const eff = pls.map((pl) => effectiveTag(pl.tag, partById.get(pl.partId)?.tagDefaults, spaceOf(pl, spaces)?.name ?? ""));
+  const eff = pls.map((pl) => effectiveTag(pl.tag, partById.get(pl.partId)?.tagDefaults, spaceOfPlacement(pl, spaces)?.name ?? ""));
   const save = async (field: TagColumnKey) => {
     // Opening a Mixed row and pressing Enter must not blank the field on every device.
     if (!dirty && same(eff.map((e) => e[field])) === null) {
@@ -671,7 +682,7 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
         : partById.get(pl.partId)?.desc || pl.partId;
   const kinds = new Set(pls.map(identity)).size;
   const scope = same(pls.map(scopeOfPlacement));
-  const rooms = pls.map((pl) => spaceOf(pl, project.spaces || [])?.name ?? "—");
+  const rooms = pls.map((pl) => spaceOfPlacement(pl, project.spaces || [])?.name ?? "—");
   const room = same(rooms);
   const sell = pls.reduce(
     (a, pl) => a + (pl.curtain ? curtainPrices.get(pl.id) || 0 : (partById.get(pl.partId)?.list || 0) * placementQty(pl)),
@@ -693,7 +704,14 @@ function SeveralProps({ ed, pls }: { ed: GridEditor; pls: GridPlacement[] }) {
         {kinds === 1 ? <strong style={{ fontWeight: 600 }}>{describe(pls[0])}</strong> : `${kinds} different`}
       </PropRow>
       <PropRow label="Scope">{scope ?? <span style={{ color: "#8c919c" }}>Mixed</span>}</PropRow>
-      <PropRow label="Space">{room ?? <span style={{ color: "#8c919c" }}>Mixed</span>}</PropRow>
+      {curtainCount < n && (
+        <PropRow label="Type" title={ed.canEditTypes ? TYPE_NOT_UNDOABLE : undefined}>
+          <TypeEditControl ed={ed} pls={pls.filter((pl) => !pl.curtain)} />
+        </PropRow>
+      )}
+      <PropRow label="Space" title={room ? `All in ${room}` : "Mixed spaces"}>
+        <SpacePinControl ed={ed} pls={pls} />
+      </PropRow>
       <PropRow label="Sell total">
         <span style={{ fontWeight: 600 }}>{moneyFmt(sell)}</span>
       </PropRow>

@@ -3,7 +3,7 @@ import type { CatalogPart } from "@/lib/stores/catalog";
 import type { GridSymbol } from "@/lib/stores/grid-catalog";
 import type { PartLite } from "./grid-bom";
 import { gridSymbolEntry } from "./grid-icons";
-import { keywordScopeOf, scopeOfType, typeLabel, typeOfPart, type DeviceTypeContext } from "./device-types";
+import { keywordScopeOf, scopeOfType, typeLabel, typeOfCategory, typeOfPart, type DeviceTypeContext } from "./device-types";
 
 /**
  * The ONE Grid-library → PartLite builder (#209): the plan editor, the riser,
@@ -39,11 +39,13 @@ export function gridPartsFrom(
   const typed = (s: GridSymbol, p: CatalogPart | undefined) => {
     if (!dt) return {};
     const device = !!p && s.kind !== "assembly";
+    // Grid notes #2: typeOfPart reads the part's own override first.
     const key = device ? typeOfPart(p, dt.map, dt.types) : null;
     return {
       deviceType: key,
       deviceTypeLabel: key ? typeLabel(key, dt.types) : null,
       gridScope: key ? scopeOfType(key, dt.types) : device ? keywordScopeOf(p) : s.scope,
+      ...(device ? typeFacts(p, dt) : {}),
     };
   };
   const parts: PartLite[] = symbols.map((s) => {
@@ -103,11 +105,21 @@ export function gridPartsFrom(
       ...(p.designatorCode ? { designatorCode: p.designatorCode } : {}),
       ...(p.tagDefaults ? { tagDefaults: p.tagDefaults } : {}),
       ...(p.cableOdIn ? { cableOdIn: p.cableOdIn } : {}),
-      ...(dt ? { deviceType: key ?? null, deviceTypeLabel: key ? typeLabel(key, dt.types) : null } : {}),
+      ...(dt ? { deviceType: key ?? null, deviceTypeLabel: key ? typeLabel(key, dt.types) : null, ...typeFacts(p, dt) } : {}),
       ...(dt && key ? { gridScope: scopeOfType(key, dt.types) } : {}),
     });
   }
   return parts;
+}
+
+/** Grid notes #2: what the Type control needs to describe a catalog part's
+ *  type — raw category, own override, and the category's own type. */
+function typeFacts(p: CatalogPart, dt: DeviceTypeContext): Pick<PartLite, "catalogCategory" | "deviceTypeOverride" | "categoryDeviceType"> {
+  return {
+    catalogCategory: p.category || "",
+    ...(p.deviceTypeKey ? { deviceTypeOverride: p.deviceTypeKey } : {}),
+    categoryDeviceType: typeOfCategory(p.category || "", dt.map, dt.types),
+  };
 }
 
 /**

@@ -11189,8 +11189,8 @@ Manufacturers group by `mfrKey` (case and punctuation ignored), so "Etc" and "ET
 common spelling (a tie goes to the code-point-smallest, so "ETC" beats "Etc"). Groups sort A→Z (numeric-aware, case
 ignored). A part with no manufacturer sorts LAST under "Unknown manufacturer". Within a group: the printed model
 (`partModel`, #304 — Model #, then MFR P/N, then the SKU's model tail), numeric-aware ("Lens Tube 2" before "Lens Tube
-10"), then SKU. The #298 manufacturer merges (`canonicalKeyMap`) are NOT applied: they need a manufacturers-table read
-the packages don't otherwise make. Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
+10"), then SKU. The #298 manufacturer merges were NOT applied at first (they need a manufacturers-table read);
+#329b applies them (D837). Each datasheet prints once, at the first part (in this order) it serves. Punch item #329.
 
 ## D830. The book's cover and index (#329, 2026-10-12)
 
@@ -11272,3 +11272,125 @@ the 60 MB datasheet total the estimate zip and the rack submittal already cap th
 client packages read every datasheet with no cap of their own (unchanged); only the book is held back. Known limit, not
 fixed: in the Grid and quote client packages the book shares the 75 s render budget with the drawing set, cut sheets
 and racks, so on a slow build it can be skipped as "ran out of time" (with the note). Punch item #329.
+
+## D837. The datasheet book follows the #298 manufacturer merges (#329b, 2026-10-12)
+
+Jeff approved reversing D829's skip. Each package build (Grid and quote client packages, estimate package zip, rack
+submittal) reads the manufacturer records ONCE (`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`,
+over `listManufacturers()`), and `canonicalMfrResolver` (pure, `datasheet-book.ts`) turns a part's `mfr` → `mfrKey` →
+canonical key (`canonicalKeyMap`, #298's own helper: follows merge chains A → B → C and stops a cycle after 8 hops) →
+that canonical record's display `name`. A spelling with no record, or whose canonical record has no name or is itself
+merged away (a cycle), keeps the part's own text; a blank stays blank (Unknown manufacturer, last). The resolved name
+drives the sort, the groups, the printed Manufacturer column and the loose `<Manufacturer> - <file>` names, so a merged
+spelling's files sort together. An unmerged manufacturer that has a record prints its record's name (the same name the
+Manufacturers page shows). The pure planner stays pure: `sortPartsForBook` / `planDatasheetBook` and
+`buildDatasheetBook` take an optional `canonicalMfr` resolver; callers that resolved their parts with
+`withCanonicalMfrs` may omit it (applying it twice is a no-op). A failed read logs a warning and returns null — the book
+then groups by each part's own manufacturer, as before — and never fails the package; a resolver that throws keeps the
+part's text. Estimate package zip Blob cache: NOT bumped. A zip is pinned to a sent revision and cached on its first
+download; one cached before a later merge keeps its old grouping until staff Rebuild package (or the next sent
+revision). That is acceptable: the grouping is presentation, every datasheet and page is still there, and a merge is
+an occasional admin action. Punch item #329.
+
+## D838. A part can carry its own Grid device type, set by an admin (Grid notes #2, 2026-10-12)
+
+Jeff: a Shure SM58-LC read as Dimming & Power because its raw catalog category was mapped there, and the only fix was
+re-typing the whole category. A catalog part now has an optional `deviceTypeKey`: the admin's own type for that part.
+It wins over the category's map entry everywhere the part is typed, because `typeOfPart` reads it first and every
+surface goes through `typeOfPart` (`gridPartsFrom` for the palette, layers, legends, designators, schedule, drawing
+set and risers; the riser data sheet; Catalog → Device types counts; the Product Library's catalog search). An
+archived or unknown key reads as absent, so the category decides again. Only `setPartDeviceTypeAction`
+(`manage_users`, re-checked on the server) writes it, through the catalog store's one writer,
+`setPartDeviceTypeKeys`: an in-place SQL update of that one key (doc-store `patchDocKey`, live rows only, ≤ 500 ids per
+statement), so a price or spec written meanwhile is kept and a part deleted meanwhile stays deleted. Every other catalog
+write keeps the stored value: `writePart` (`upsert`, `mergeUpsert`) restores it and ignores any carried in,
+`insertIfAbsent` never sets it, and a #304 rename copies it to the new SKU. The Grid's Property Editor (one device or several) and Spreadsheet Type cell show a type select to
+admins ("Auto (from category: X → Y)" clears the override); everyone else sees the type as text. The Property Editor
+also offers **Apply to the whole '<category>' category (N parts — M with their own type will follow it too)**. That
+means every part in the category follows the category's type: the override is cleared on EVERY part in that raw
+category, catalog-wide, then the category is re-typed through the existing map (an admin entry). Clears go first, so
+a failure never leaves a re-typed category whose parts still ignore it. A failure part-way says "N of M saved — reload
+to see the current types" and the Grid refreshes. Fabric and
+Labor never take a type. A type change is a catalog change, so it is not on the Grid's undo stack, and it does not
+renumber designators: when a numbered device's prefix would change, the editor says "Designators keep their numbers —
+Renumber to apply the new prefix." The part editor shows the same select (admin only, saves on its own), and Catalog →
+Device types notes how many parts in each category have their own type. The SM58's legend row read
+"Dimming & Power — Cardioid Dynamic" because its Grid entry carries its own mic icon, which differed from the Dimming &
+Power icon; typed Microphones, the icons match and the row reads "Microphones". No migration.
+
+## D839. A device can be pinned to a space (Grid notes #2, 2026-10-12)
+
+D109 kept a device's space computed from where it sits, never stored. Jeff wants to pick the room from the Property
+Editor, so a placement now has an optional `spaceId` pin that wins over position. "Auto (from position): <room>"
+removes the pin. One resolver, `spaceOfPlacement`, returns the pinned space when it still exists on the device's own
+sheet and page, and otherwise falls back to `spaceOf` (position, smallest wins). Every placement → space read uses
+it: per-space BOM rollups and the Spaces panel, schedule sections, the riser sketch (wire ends snapped to a device
+follow that device), riser documents, the conduit riser, designator reading order, the Browser tree, Spreadsheet rows
+and the Property Editor. A click on the plan and a free wire end still use position. A dead pin (space deleted, or on
+another page) is ignored, and `removeSpace` also clears pins to the space it deletes. `setPlacementsSpace` writes pins
+through `batchEdit`. The whole batch is refused unless each pin names a space on that device's own sheet and page;
+the check runs before the write and again inside it. A pin is a hand edit, so it clears the #211 auto tag. Pins are
+undoable (a `space` undo command). The undo of a pin to a space that has since died sends "Auto", so an undo can't get
+stuck. An undo of a delete puts a device's pin back only while that space still exists on its sheet and page. Paste does not carry pins (the copy
+may land elsewhere). Spaces are project-level, so option copies and revisions carry `spaceId` unchanged. The Property
+Editor (one device or several on one page) and the Spreadsheet's Space cell edit it. No migration.
+
+## D840. Grid notes #8 rides on the datasheet book: its cover gains the job (2026-10-12)
+
+Jeff asked for the datasheets as one package with a job cover. #329's datasheet book (`Datasheets.pdf`) already is that
+one PDF, with A→Z order, an index and page stamps, so #8 builds onto it and adds **no second merge engine and no second
+combined file**. `buildDatasheetBook` gains one optional input, `cover`, and nothing else in the book changes. The baked
+letterhead still prints as a full-width band (the book's own `letterheadBoxPx` sizing). Below it, the title sits left and
+the customer's logo right (≤ 200 × 72 pt), or the company name set large (≤ 3 lines). Then:
+- the job name (≤ 2 lines, "…") and number ("Estimate EST-n", "· Rev N" for a sent revision, "Design GRD-n");
+- Venue (name + address) · Prepared for · Prepared by columns, each line ≤ 2 lines;
+- the date;
+- the book's own counts line, then the index.
+
+Every run is clamped, so the index still starts on page 1. Without `cover` the book is byte-for-byte #329's (rack
+submittals pass none). **Prepared for** follows the estimate's own Attn ladder: a contact never set, or no longer on the
+company, falls back to the primary contact (Jeff confirmed), and `""` means none, leaving the company line only. A Grid
+design reads its contact exactly. **Prepared by** is the lead estimator (quote `owner`, then Prepared by) off the roster.
+A Grid design uses its option's quote, else whoever drew it, else the builder. A sent revision prints its frozen name,
+customer, venue, contact and estimator with its issued date, while the logo and contact details are read live. The Grid
+and quote client packages and the estimate package zip pass the cover. A cover that can't be read leaves the book's plain
+cover and never fails a package. The letterhead follows each document's Peak-header choice (D824), as the book's does.
+Files: `src/lib/part-docs/datasheet-book-cover.ts` (pure), `datasheet-book-cover-server.ts`, and the additive
+`cover` branch in `datasheet-book-server.ts`.
+
+## D841. "Download all datasheets" serves the book on its own (Grid notes #8, 2026-10-12)
+
+Three buttons serve the book through one module, `src/lib/part-docs/datasheet-book-download.ts`:
+- **Grid Outputs menu** (`/api/grid/<id>/datasheets-pdf?option=&header=1|0`): that option's client-package documents.
+  It honours the menu's "Include Peak header" checkbox, as the package build does; absent means the company default, and
+  any value but `1`/`0` is refused (400).
+- **Estimate Build package step** (`/api/quotes/<id>/datasheets-pdf`): the saved estimate, with its own header choice.
+- **Customer's package page** (`/share/quote/<id>/<token>/datasheets.pdf`): the pinned sent revision, under
+  `package.zip`'s rules — the same `share-zip:` per-IP bucket (one download budget), a v2 token only, the uniform 404.
+
+Every download plans through `loadBookInputs`, which applies #329b's manufacturer merges (`loadCanonicalMfr()`, null on
+a failed read) and hands the same resolver to the book. Reads follow the zip's caps (25 MB a file, 60 MB together,
+"package size limit"). The time budget starts at **route entry**: the prelude (a 37k-part catalog read, coverage, the
+cover) and the reads must finish by +45 s, and the merge by +90 s, leaving 30 s of `maxDuration` 120 to stream the body.
+A prelude that has already spent the read budget answers 503 ("took too long to build — try again") and reads nothing.
+Nothing to combine → 404; too large → 413 with a message; late → 503.
+The share download rebuilds the book rather than unpacking the cached zip; that is simpler, and the zip may not exist yet.
+It is cached per revision at `estimate-package/<quote>/rev-<n>-<cover>-Datasheets.pdf`, beside the zip and under its gate.
+`<cover>` is 8 hex characters of a hash of the front matter as it would print now: the cover facts, plus digests of the
+customer logo and the letterhead. The cover reads live data, so an edit names a fresh file. Only a build with nothing left
+out but for the size cap is cached (the zip's rule), and **Rebuild package** clears it with the zip. Staff downloads are
+always built live. The estimate package zip carries the same job cover in its `Datasheets.pdf`. Its cache key therefore
+gains the same fingerprint (`rev-<n>-h<0|1>-c<cover>-v3.zip`; `PACKAGE_ZIP_CACHE_VERSION` 2 → 3 because the contents
+changed), and the build prints exactly the cover it was keyed by. A cover that failed to load prints the book's plain
+cover and is never cached.
+
+## D842. Customer logos on the company record (Grid notes #8, 2026-10-12)
+
+The company page gains a **Logo** card (preview, Upload/Replace, Remove). It is stored as the blob `company_logo:<id>`, so
+there is **no migration**. PNG, JPEG or WebP, up to 1 MB, checked from the file's own bytes. **SVG is refused**, including
+one behind an XML declaration, comments or a `<!DOCTYPE>` ("SVG isn't supported — use PNG, JPEG or WebP"). sharp decodes
+it with a 25-megapixel input limit, makes it upright, drops metadata, caps it at 800 px, and saves a palette PNG
+(transparency kept). Anyone signed in may change it, the same as editing a company (Jeff confirmed). No logo prints the
+company name in its place. Separately, `letterhead-server.ts` now reads the baked letterhead through a **literal** path
+with static `fs`/`path` imports. `next build` no longer traces the whole project into every function, and the harness
+checks the literal equals `BAKED_LETTERHEAD`.

@@ -1,5 +1,6 @@
 import { mfrKey } from "@/lib/catalog-books";
 import { partModel } from "@/lib/catalog-rename/sku";
+import { canonicalKeyMap, type AliasRecord } from "@/lib/manufacturer-aliases";
 
 /**
  * #329 — the datasheet book's pure rules: one merged `Datasheets.pdf` per
@@ -86,6 +87,48 @@ export function bookPartOf(row: { sku: string; desc: string }, part: PartLike | 
   };
 }
 
+/* ---------- #298 manufacturer merges (#329b) ---------- */
+
+/** A part's manufacturer text → the name the book sorts, groups and prints it under. */
+export type CanonicalMfr = (mfr: string) => string;
+
+/**
+ * #329b — the #298 spelling merges as a book resolver, built ONCE per package
+ * from the manufacturer records: a part's `mfr` → its key (`mfrKey`) → the
+ * canonical key (`canonicalKeyMap`: follows merge chains A→B→C, a cycle stops
+ * after a fixed number of hops) → that record's display `name`. A spelling with
+ * no record, or whose canonical record has no name, keeps the part's own text.
+ */
+export function canonicalMfrResolver(records: readonly (AliasRecord & { name?: string })[]): CanonicalMfr {
+  const canon = canonicalKeyMap(records);
+  const nameOf = new Map<string, string>();
+  for (const r of records) {
+    const n = String(r.name ?? "").trim();
+    if (r.key && n && !r.mergedInto) nameOf.set(r.key, n);
+  }
+  return (mfr) => {
+    const own = String(mfr ?? "").trim();
+    const key = mfrKey(own);
+    if (!key) return own;
+    return nameOf.get(canon(key)) ?? own;
+  };
+}
+
+/** The parts with their manufacturer resolved (a blank stays blank; a resolver that throws keeps the part's own text). */
+export function withCanonicalMfrs<T extends BookPart>(parts: readonly T[], canonicalMfr?: CanonicalMfr | null): T[] {
+  if (!canonicalMfr) return [...parts];
+  return parts.map((p) => {
+    if (!mfrKey(p.mfr)) return p;
+    let mfr = p.mfr;
+    try {
+      mfr = String(canonicalMfr(p.mfr) ?? "").trim() || p.mfr;
+    } catch {
+      mfr = p.mfr;
+    }
+    return mfr === p.mfr ? p : { ...p, mfr };
+  });
+}
+
 const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const cmp = (a: string, b: string) => collator.compare(a, b);
 const raw = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -113,7 +156,8 @@ function groupLabels(parts: readonly BookPart[]): Map<string, string> {
  * sorts LAST as "Unknown manufacturer"), then model (numeric-aware: "S4 2" <
  * "S4 10"), then SKU. Pure, stable, total.
  */
-export function sortPartsForBook(parts: readonly BookPart[]): SortedBookPart[] {
+export function sortPartsForBook(input: readonly BookPart[], canonicalMfr?: CanonicalMfr | null): SortedBookPart[] {
+  const parts = withCanonicalMfrs(input, canonicalMfr);
   const labels = groupLabels(parts);
   const rows: SortedBookPart[] = parts.map((p) => {
     const group = mfrKey(p.mfr);
@@ -141,8 +185,8 @@ export type BookPlan = {
   docMfr: Map<string, string>;
 };
 
-export function planDatasheetBook(parts: readonly BookPart[]): BookPlan {
-  const sorted = sortPartsForBook(parts);
+export function planDatasheetBook(parts: readonly BookPart[], canonicalMfr?: CanonicalMfr | null): BookPlan {
+  const sorted = sortPartsForBook(parts, canonicalMfr);
   const owner = new Map<string, { at: number; part: SortedBookPart; direct: boolean }>();
   sorted.forEach((p, at) => {
     if (!p.docId) return;

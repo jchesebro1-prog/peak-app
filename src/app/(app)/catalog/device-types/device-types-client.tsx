@@ -364,7 +364,17 @@ export default function DeviceTypesClient({
                 {r.status === "auto" && <span style={{ ...TAG, color: "#1f5fa8", background: "#e8f0fb" }}>auto</span>}
                 {r.status === "toolong" && <span style={{ ...TAG, color: "#8a6d1f", background: "#fbf3dd" }}>too long to map</span>}
               </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", textAlign: "right" }}>{r.count.toLocaleString("en-US")}</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", textAlign: "right" }}>
+                {r.count.toLocaleString("en-US")}
+                {r.overrides > 0 && (
+                  <span
+                    title={`${r.overrides} ${r.overrides === 1 ? "part in this category has" : "parts in this category have"} their own device type (set from the Grid or the part editor) — they ignore this row's type`}
+                    style={{ display: "block", fontSize: 10, color: "#8a6d1f" }}
+                  >
+                    {r.overrides.toLocaleString("en-US")} own type
+                  </span>
+                )}
+              </span>
               <span style={{ fontSize: 12, color: "#5b616e", minWidth: 0 }}>
                 {r.suggestion ? (
                   <>

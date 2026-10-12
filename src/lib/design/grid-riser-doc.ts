@@ -15,7 +15,7 @@
  */
 
 import type { Point } from "@/lib/annotations";
-import { pointInPolygon, polygonCentroid, spaceOf, type SpaceLite } from "./grid-geometry";
+import { pointInPolygon, polygonCentroid, spaceOfPlacement, type SpaceLite } from "./grid-geometry";
 import type { RiserGraph, RiserGroup } from "./grid-riser";
 import type { SymbolMode } from "./grid-symbol-display";
 
@@ -718,7 +718,7 @@ export function buildRiserView(input: {
   const desc = input.partDesc || ((id: string) => id);
   const code = input.partCode || ((id: string) => id);
   const byId = new Map(input.placements.map((p) => [p.id, p]));
-  const homeKey = (pl: { sheetId: string; page: number; x: number; y: number }) => nodeKeyOf(spaceOf(pl, input.spaces)?.id ?? null);
+  const homeKey = (pl: { sheetId: string; page: number; x: number; y: number; spaceId?: string }) => nodeKeyOf(spaceOfPlacement(pl, input.spaces)?.id ?? null);
 
   const ids = new Map<string, string[]>();
   for (const pl of [...input.placements].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))) {

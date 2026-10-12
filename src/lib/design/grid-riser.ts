@@ -1,5 +1,5 @@
 import type { Calibration } from "@/lib/annotations";
-import { spaceOf, type SpaceLite } from "./grid-geometry";
+import { spaceOf, spaceOfPlacement, type SpaceLite } from "./grid-geometry";
 import { PLACEMENT_QTY_MAX, placementQty, routeLengthFt, type PartLite, type RouteLite } from "./grid-bom";
 
 /* ------------------------------------------------------------------ *
@@ -93,6 +93,9 @@ const UNASSIGNED = "Unassigned";
  */
 export function riserGraph(
   placements: Array<{
+    /** With `spaceId` (Grid notes #2): a device's pin, which its wire ends follow. */
+    id?: string;
+    spaceId?: string;
     sheetId: string;
     page: number;
     x: number;
@@ -107,7 +110,7 @@ export function riserGraph(
     curtain?: unknown;
     qty?: number;
   }>,
-  routes: RouteLite[],
+  routes: Array<RouteLite & { fromPlacementId?: string; toPlacementId?: string }>,
   spaces: Array<SpaceLite & { name: string; color?: string }>,
   parts: PartLite[],
   cals: Calibration[]
@@ -123,7 +126,7 @@ export function riserGraph(
   // Devices → grouped part counts per node.
   for (const pl of placements) {
     if (pl.curtain) continue; // goods, not a signal device
-    const home = spaceOf(pl, spaces);
+    const home = spaceOfPlacement(pl, spaces);
     const node = nodeById.get(home ? home.id : null)!;
     const part = partById.get(pl.partId);
     const g = node.groups.find((x) => x.partId === pl.partId);
@@ -147,14 +150,23 @@ export function riserGraph(
   }
 
   // Wires → edges between the spaces their endpoints land in.
+  const byPlacementId = new Map(placements.flatMap((pl) => (pl.id ? [[pl.id, pl] as const] : [])));
   const touched = new Set<string | null>();
   const edges: RiserEdge[] = [];
   for (const r of routes) {
     if (r.points.length < 2) continue;
     const a = r.points[0];
     const b = r.points[r.points.length - 1];
-    const from = spaceOf({ sheetId: r.sheetId, page: r.page, x: a.x, y: a.y }, spaces);
-    const to = spaceOf({ sheetId: r.sheetId, page: r.page, x: b.x, y: b.y }, spaces);
+    // An end snapped onto a device lands in that device's room (its pin
+    // included, Grid notes #2); a free end in the room its point sits in.
+    const endSpace = (pt: { x: number; y: number }, plId: string | undefined) => {
+      const dev = plId ? byPlacementId.get(plId) : undefined;
+      return dev && dev.sheetId === r.sheetId && dev.page === r.page
+        ? spaceOfPlacement(dev, spaces)
+        : spaceOf({ sheetId: r.sheetId, page: r.page, x: pt.x, y: pt.y }, spaces);
+    };
+    const from = endSpace(a, r.fromPlacementId);
+    const to = endSpace(b, r.toPlacementId);
     const cal = cals.find((c) => c.docId === r.sheetId && c.page === r.page) || null;
     edges.push({
       routeId: r.id,

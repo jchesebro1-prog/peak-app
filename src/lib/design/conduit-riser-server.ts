@@ -22,7 +22,7 @@ import { conduitRiserSheetNumber, drawingArea, placementSystem, resolveSheetSize
 import { getProject } from "@/lib/stores/grid-projects";
 import { attachmentDisposition } from "@/lib/document-files";
 import { safeName } from "@/lib/blob";
-import { spaceOf } from "@/lib/design/grid-geometry";
+import { spaceOfPlacement } from "@/lib/design/grid-geometry";
 import { levelOfPlacement } from "@/lib/design/grid-levels";
 import { normalizeRiserDoc } from "@/lib/design/grid-riser-doc";
 import { designatorCodeOf, fillDesignators, formatDesignator, readingCtxOf } from "@/lib/design/designators";
@@ -204,7 +204,7 @@ export function riserDevices(project: GridProject, optionId: string, ctx: RiserP
   const filled = fillDesignators(raw, designatorCodeOf(ctx.partById, ctx.deviceTypes), readingCtxOf(project, ctx.digits));
   return filled.map((pl) => {
     const part = ctx.partById.get(pl.partId);
-    const space = spaceOf(pl, spaces);
+    const space = spaceOfPlacement(pl, spaces);
     const rack = ctx.racks.get(pl.partId);
     const desc = part?.desc || pl.partId;
     return {
@@ -216,7 +216,7 @@ export function riserDevices(project: GridProject, optionId: string, ctx: RiserP
       inSystem: riserSystemOf(placementSystem(pl, ctx.partById)) === system,
       spaceId: space?.id ?? null,
       spaceName: space?.name ?? "",
-      levelId: levelOfPlacement(pl, (x) => spaceOf(x, spaces), project),
+      levelId: levelOfPlacement(pl, (x) => spaceOfPlacement(x, spaces), project),
       // #328: the A/V riser has no power types or power controls, so it
       // ignores a device's own power letter and contents (no PK_POWER marker
       // pointing at a table it never prints); lighting unchanged.

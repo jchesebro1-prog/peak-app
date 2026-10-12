@@ -11670,6 +11670,9 @@ seeded()
   .then(() => bonusLeakChecks())
   .then(() => bonusStoreChecks())
   .then(() => bonusFinalFixChecks())
+  .then(() => mfrMerges329bChecks())
+  .then(() => gridNotes8Checks())
+  .then(() => gridNotes2Checks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -52741,7 +52744,7 @@ import { createElement as createElement301cz } from "react";
 import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/server";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(e301czPath("Q-2041", 3, true) === "estimate-package/Q-2041/rev-3-h1-v2.zip" && e301czPath("Q 1/x", 1, false) === "estimate-package/Q_1_x/rev-1-h0-v2.zip" &&
+  ok(e301czPath("Q-2041", 3, true, "ab12cd34") === "estimate-package/Q-2041/rev-3-h1-cab12cd34-v3.zip" && e301czPath("Q 1/x", 1, false, "00ff00ff") === "estimate-package/Q_1_x/rev-1-h0-c00ff00ff-v3.zip" &&
      e301czName("EST-1042", 2) === "EST-1042 Rev 2 package.zip" && e301czDocMax === 25 * 1024 * 1024 && e301czTotalMax === 60 * 1024 * 1024 && e301czDeadline === 45_000,
     "#301 zip: the cache path per (quote, rev), the download name, the rack caps");
   const lo = e301czLeftOut([{ name: "datasheets/Big.pdf", reason: e301czReason.tooBig }]);
@@ -52803,7 +52806,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('const letterhead = await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);') && srv.includes("buildSpecDocx(sp.spec, { letterhead })") && srv.includes("zipCacheable(built.leftOut)") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('const letterhead = opts.front ? opts.front.letterhead : await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);') && srv.includes("buildSpecDocx(sp.spec, { letterhead })") && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -52893,7 +52896,7 @@ async function e301cZipAsyncChecks(): Promise<void> {
   ok(puts.length === 0 && cached === null && deferred.length === 1, "#301 zip (serve): the cache write is deferred, not awaited before the response");
   await deferred.shift()!();
   const r2 = await Z.servePackageZip(pkg, { ...deps, defer });
-  ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}-h1-v2.zip` && (await r2.text()) === "ZIP" &&
+  ok(r1.status === 200 && r2.status === 200 && builds === 1 && new RegExp(`^estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}-h1-c[0-9a-f]{8}-v3\\.zip$`).test(puts.join()) && (await r2.text()) === "ZIP" &&
      /attachment; filename="EST-\d+ Rev 1 package\.zip"/.test(r1.headers.get("content-disposition") || "") && r1.headers.get("content-type") === "application/zip",
     "#301 zip (serve): the first download builds and caches; the second streams the cache");
   const failDefer: Array<() => Promise<void>> = [];
@@ -66614,6 +66617,312 @@ async function gridNotes5WireStarterChecks(): Promise<void> {
     "Grid notes #5: an unpriced cable shows Needs price in the pick list, under the picker and on its runs");
 }
 
+/* ---------------- Grid notes #2: Type (per-part / per-category) + Space pin ---------------- */
+async function gridNotes2Checks(): Promise<void> {
+  const DTP = await import("@/lib/design/device-types");
+  const DT = await import("@/lib/stores/device-types");
+  const Cat = await import("@/lib/stores/catalog");
+  const GP = await import("@/lib/design/grid-parts");
+  const TE = await import("@/lib/design/grid-type-edit");
+  const GI = await import("@/lib/design/grid-icons");
+  const GEO = await import("@/lib/design/grid-geometry");
+  const BOM = await import("@/lib/design/grid-bom");
+  const SCH = await import("@/lib/design/grid-schedule");
+  const RIS = await import("@/lib/design/grid-riser");
+  const DES = await import("@/lib/design/designators");
+  const ROWS = await import("@/lib/design/grid-device-rows");
+  const G = await import("@/lib/stores/grid-projects");
+  const DS = await import("@/db/doc-store");
+  const { ensureOptions } = await import("@/lib/design/grid-options");
+  const { can } = await import("@/lib/team");
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const { getDb: getDbGn2 } = await import("../src/db");
+  const { blobs: blobsGn2 } = await import("../src/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  type CP = import("@/lib/stores/catalog").CatalogPart;
+  const types = DTP.deviceTypesFrom(undefined);
+  const map: import("@/lib/design/device-types").TypeMap = { audio: { typeKey: "dimming-power", by: "auto", at: 1 } };
+
+  // ---- 1. the type rule: an override wins wherever the part is typed
+  ok(DTP.typeOfPart({ category: "Audio" }, map, types) === "dimming-power" && DTP.typeOfPart({ category: "Audio", deviceTypeKey: "microphones" }, map, types) === "microphones",
+    "Grid notes #2: a part's own device type wins over its category's map entry");
+  ok(DTP.typeOfPart({ category: "Audio", deviceTypeKey: null }, map, types) === "dimming-power" && DTP.typeOfPart({ category: "Audio", deviceTypeKey: "" }, map, types) === "dimming-power",
+    "Grid notes #2: a null / blank override reads the category again");
+  const archived = types.map((t) => (t.key === "microphones" ? { ...t, archived: true } : t));
+  ok(DTP.typeOfPart({ category: "Audio", deviceTypeKey: "microphones" }, map, archived) === "dimming-power" && DTP.typeOfPart({ category: "Audio", deviceTypeKey: "no-such" }, map, types) === "dimming-power",
+    "Grid notes #2: an archived or unknown override reads as absent (the category decides)");
+
+  // ---- 2. planPartTypeEdit: per part, null clears, whole category clears the part override
+  const sm58 = { sku: "SM58-LC", category: "Audio" };
+  const p1 = DTP.planPartTypeEdit([sm58, { sku: "B", category: "Audio", deviceTypeKey: "microphones" }], "microphones", false, types);
+  ok(p1.ok && p1.plan.categories.length === 0 && p1.plan.overrides.length === 1 && p1.plan.overrides[0].sku === "SM58-LC" && p1.plan.overrides[0].deviceTypeKey === "microphones",
+    "Grid notes #2 plan: per part, each part whose override changes gets the type (an unchanged one is skipped)");
+  const p2 = DTP.planPartTypeEdit([{ ...sm58, deviceTypeKey: "microphones" }], null, false, types);
+  ok(p2.ok && p2.plan.overrides.length === 1 && p2.plan.overrides[0].deviceTypeKey === undefined, "Grid notes #2 plan: Auto (null) clears the part's override");
+  const p3 = DTP.planPartTypeEdit([{ ...sm58, deviceTypeKey: "speakers" }, { sku: "X", category: " audio " }], "microphones", true, types);
+  ok(p3.ok && p3.plan.categories.join() === "Audio" && p3.plan.overrides.length === 1 && p3.plan.overrides[0].sku === "SM58-LC" && p3.plan.overrides[0].deviceTypeKey === undefined,
+    "Grid notes #2 plan: the whole-category box re-types the raw category once and clears the picked parts' own overrides");
+  const p3m = DTP.planPartTypeEdit([sm58], "microphones", true, types, [{ sku: "MATE", category: "AUDIO", deviceTypeKey: "speakers" }, { sku: "ELSE", category: "Video", deviceTypeKey: "cameras" }, { sku: "SM58-LC", category: "Audio", deviceTypeKey: "x" }]);
+  ok(p3m.ok && p3m.plan.overrides.map((o) => o.sku).sort().join() === "MATE,SM58-LC" && p3m.plan.overrides.every((o) => o.deviceTypeKey === undefined),
+    "Grid notes #2 plan: whole category clears the own type of EVERY part in that category (catalog-wide mates too), never another category's");
+  ok(TE.wholeCategoryLabel("'Audio'", 1, 37, 2) === "Apply to the whole 'Audio' category (37 parts — 2 with their own type will follow it too)" &&
+     TE.wholeCategoryLabel("'Audio'", 1, 1, 0) === "Apply to the whole 'Audio' category (1 part)",
+    "Grid notes #2 control: the whole-category label counts the parts and says how many own types will follow");
+  const refusals = [
+    DTP.planPartTypeEdit([sm58], null, true, types),
+    DTP.planPartTypeEdit([sm58], "no-such", false, types),
+    DTP.planPartTypeEdit([sm58], "microphones", false, archived),
+    DTP.planPartTypeEdit([{ sku: "F", category: "Fabric" }], "drapery", false, types),
+    DTP.planPartTypeEdit([{ sku: "L", category: "Labor" }], "fixtures", true, types),
+    DTP.planPartTypeEdit([{ sku: "N", category: "" }], "fixtures", true, types),
+    DTP.planPartTypeEdit([], "fixtures", false, types),
+  ];
+  ok(refusals.every((r) => !r.ok), "Grid notes #2 plan: refuses Auto for a whole category, unknown/archived types, Fabric/Labor, a blank category (category mode) and an empty pick");
+  ok(DTP.planPartTypeEdit([{ sku: "N", category: "" }], "fixtures", false, types).ok, "Grid notes #2 plan: a part with no category can still take its own type");
+
+  // ---- 3. every surface reads it through gridPartsFrom; the review rows count overrides
+  const sym = (id: string, extra: Partial<import("@/lib/stores/grid-catalog").GridSymbol> = {}) =>
+    ({ id, name: "Cardioid Dynamic", manufacturer: "Shure", modelNumber: id, scope: "Audio", category: "Audio", width: 40, height: 40, ports: [], pricingPartId: id, createdBy: "t", createdAt: 0, updatedAt: 0, ...extra }) as import("@/lib/stores/grid-catalog").GridSymbol;
+  const cpart = (o: Partial<CP> & { id: string }): CP => ({ sku: o.id, desc: "Cardioid Dynamic", category: "Audio", unit: "ea", list: 100, cost: 50, ...o }) as CP;
+  const ctx = { types, map };
+  const [before] = GP.gridPartsFrom([sym("SM58-LC", { icon: "microphone" })], [cpart({ id: "SM58-LC" })], {}, { deviceTypes: ctx });
+  const [after] = GP.gridPartsFrom([sym("SM58-LC", { icon: "microphone" })], [cpart({ id: "SM58-LC", deviceTypeKey: "microphones" })], {}, { deviceTypes: ctx });
+  ok(before.deviceType === "dimming-power" && before.gridScope === "Lighting" && after.deviceType === "microphones" && after.deviceTypeLabel === "Microphones" && after.gridScope === "Audio",
+    "Grid notes #2: gridPartsFrom types (and scopes) the part by its override — palette, layers, legends, schedule all follow");
+  ok(after.catalogCategory === "Audio" && after.deviceTypeOverride === "microphones" && after.categoryDeviceType === "dimming-power" && before.deviceTypeOverride === undefined,
+    "Grid notes #2: gridPartsFrom stamps the raw category, the stored override and the category's own type for the Type control");
+  const fb = GP.gridPartsFrom([], [cpart({ id: "FB1", deviceTypeKey: "speakers" })], {}, { catalogFallback: true, deviceTypes: ctx });
+  ok(fb[0].deviceType === "speakers" && fb[0].gridScope === "Audio" && fb[0].deviceTypeOverride === "speakers", "Grid notes #2: catalog-fallback rows honour the override too");
+  const rows = DTP.typeReviewRows([{ category: "Audio" }, { category: "Audio", deviceTypeKey: "microphones" }, { category: "audio ", deviceTypeKey: "speakers" }], map, types);
+  ok(rows.length === 1 && rows[0].count === 3 && rows[0].overrides === 2, "Grid notes #2: Catalog → Device types counts the parts with their own type per category");
+  ok(rd("src/lib/design/grid-catalog-search.ts").includes('"deviceTypeKey",'), "Grid notes #2: the Product Library's catalog search reads the override with its light fields (node filters follow it)");
+
+  // ---- 4. the SM58 legend: a per-entry icon split the row as "type — desc"; the override fixes the head
+  const symCtx = GI.symbolContext({}, types);
+  const legBefore = GI.legendRows([before], symCtx);
+  const legAfter = GI.legendRows([after], symCtx);
+  ok(legBefore.length === 1 && legBefore[0].label === "Dimming & Power — Cardioid Dynamic",
+    "Grid notes #2 legend: the SM58 read 'Dimming & Power — Cardioid Dynamic' because its entry's own mic icon differs from the Dimming & Power icon");
+  ok(legAfter.length === 1 && legAfter[0].label === "Microphones", "Grid notes #2 legend: with the part typed Microphones the entry's icon matches the type's, so the row reads just 'Microphones'");
+
+  // ---- 5. the Grid Type control's helpers
+  const lite = new Map<string, import("@/lib/design/grid-type-edit").TypeEditPart>([
+    ["SM58-LC", { ...after, deviceTypeOverride: undefined, deviceType: "dimming-power" }],
+    ["sym-b", { id: "sym-b", pricingPartId: "CAT-B", catalogCategory: "Audio", categoryDeviceType: "dimming-power", deviceType: "dimming-power" }],
+    ["asm:1", { id: "asm:1", virtual: true, kind: "assembly" }],
+    ["CRO", { id: "CRO", catalogCategory: "Relays", deviceType: "dimming-power", designatorCode: "CRO" }],
+  ]);
+  const tg = TE.typeEditTargets([{ partId: "SM58-LC" }, { partId: "SM58-LC" }, { partId: "sym-b" }, { partId: "asm:1" }, { partId: "SM58-LC", curtain: {} }], lite);
+  ok(tg.map((t) => t.sku).join() === "SM58-LC,CAT-B", "Grid notes #2 control: a selection edits its distinct catalog parts (pricing id), never assemblies/virtual parts or curtains");
+  ok(TE.sharedOverride(tg) === "" && TE.autoTypeOptionLabel(tg, types) === "Auto (from category: Audio → Dimming & Power)",
+    "Grid notes #2 control: Auto names the category and what it maps to");
+  ok(TE.prefixWouldChange([{ partId: "SM58-LC", designator: "DIM-3" }], lite, "microphones", false, types) &&
+     !TE.prefixWouldChange([{ partId: "SM58-LC" }], lite, "microphones", false, types) &&
+     !TE.prefixWouldChange([{ partId: "CRO", designator: "CRO-01" }], lite, "microphones", false, types) &&
+     !TE.prefixWouldChange([{ partId: "SM58-LC", designator: "DIM-3" }], lite, null, false, types),
+    "Grid notes #2 control: the Renumber hint shows only when a numbered device's prefix would change (not for an own designator code, nor when Auto keeps the type)");
+  ok(TE.PREFIX_HINT === "Designators keep their numbers — Renumber to apply the new prefix.", "Grid notes #2 control: the hint text");
+
+  // ---- 6. admin only: the action re-checks manage_users; clients see a flag
+  const acts = rd("src/app/(app)/catalog/device-types/actions.ts");
+  const body = acts.slice(acts.indexOf("export async function setPartDeviceTypeAction"));
+  ok(/\): Promise<Result> \{\n  await requirePerm\("manage_users"\);/.test(body) && body.includes("setPartsDeviceType(") && can("manage_users", ["Admin"]) && !can("manage_users", ["Estimator"]) && !can("manage_users", ["Manager"]),
+    "Grid notes #2: setPartDeviceTypeAction calls requirePerm(\"manage_users\") first — a non-admin is refused on the server");
+  const page = rd("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(page.includes('canEditTypes={can("manage_users", user.roles)}'), "Grid notes #2: the Grid page passes the admin flag the Type control reads");
+  ok(!rd("src/app/(app)/catalog/part-form.ts").includes("deviceTypeKey"), "Grid notes #2: the part form's save never carries deviceTypeKey (only the admin action writes it)");
+  for (const f of ["src/app/(app)/design/grid/[id]/workspace/type-space-controls.tsx", "src/app/(app)/catalog/part-device-type-field.tsx", "src/lib/design/grid-type-edit.ts"])
+    ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(rd(f)), `Grid notes #2: ${f} imports no store at runtime (type-only imports are erased — client-safe)`);
+
+  // ---- 7. the space pin resolver (pure)
+  const sq = (x0: number, y0: number, x1: number, y1: number) => [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+  const spaces = [
+    { id: "sp-house", sheetId: "S1", page: 1, name: "House", points: sq(0, 0, 1, 1) },
+    { id: "sp-booth", sheetId: "S1", page: 1, name: "Booth", points: sq(0.6, 0.6, 0.9, 0.9) },
+    { id: "sp-other", sheetId: "S1", page: 2, name: "Lobby", points: sq(0, 0, 1, 1) },
+  ];
+  const at = { sheetId: "S1", page: 1, x: 0.2, y: 0.2 };
+  ok(GEO.spaceOfPlacement(at, spaces)?.id === "sp-house" && GEO.spaceOfPlacement({ ...at, spaceId: "sp-booth" }, spaces)?.id === "sp-booth",
+    "Grid notes #2 pin: an unpinned device is in the room it sits in; a pinned one is in its pinned room whatever its position");
+  ok(GEO.spaceOfPlacement({ ...at, spaceId: "sp-gone" }, spaces)?.id === "sp-house" && GEO.pinnedSpaceOf({ ...at, spaceId: "sp-gone" }, spaces) === null,
+    "Grid notes #2 pin: a pin to a deleted space is dead — the position decides");
+  ok(GEO.spaceOfPlacement({ ...at, spaceId: "sp-other" }, spaces)?.id === "sp-house" && GEO.pinnedSpaceOf({ ...at, spaceId: "sp-other" }, spaces) === null,
+    "Grid notes #2 pin: a pin to a space on another page is ignored");
+  ok(GEO.spacePinRefusal([at], spaces, "sp-booth") === null && GEO.spacePinRefusal([at], spaces, "sp-other") !== null && GEO.spacePinRefusal([at], spaces, "sp-gone") !== null,
+    "Grid notes #2 pin: spacePinRefusal accepts a room on the device's page, refuses another page's or a missing one");
+
+  // ---- 8. rollups follow the pin: BOM by space, schedule, riser, reading order, Spreadsheet rows
+  const pls = [
+    { id: "gp-a", sheetId: "S1", page: 1, x: 0.2, y: 0.2, partId: "SM58-LC", spaceId: "sp-booth" },
+    { id: "gp-b", sheetId: "S1", page: 1, x: 0.25, y: 0.2, partId: "SM58-LC" },
+  ];
+  const parts = [after];
+  const roll = BOM.bomBySpace(pls, parts, spaces);
+  ok(roll.find((r) => r.spaceId === "sp-booth")?.count === 1 && roll.find((r) => r.spaceId === "sp-house")?.count === 1, "Grid notes #2 pin: per-space BOM rollups follow the pin");
+  const sched = SCH.buildSchedule({ placements: pls, spaces, descOf: () => "Mic", wires: [] });
+  ok(sched.sections.map((x) => `${x.key}:${x.rows[0]?.qty}`).join() === "sp-house:1,sp-booth:1", "Grid notes #2 pin: schedule sections follow the pin");
+  const graph = RIS.riserGraph(pls, [], spaces, parts, []);
+  ok(graph.nodes.some((n) => n.spaceId === "sp-booth" && n.groups[0]?.qty === 1), "Grid notes #2 pin: the riser sketch puts a pinned device in its pinned room");
+  const order = DES.readingOrder(pls.map((p) => ({ ...p, designator: "" })), { sheetIds: ["S1"], spaces });
+  ok(order.map((p) => p.id).join() === "gp-b,gp-a", "Grid notes #2 pin: designator reading order groups by the pinned room (House before Booth)");
+  const drows = ROWS.deviceRows({
+    placements: pls.map((p) => ({ ...p, by: "t", at: 0 })) as import("@/lib/stores/grid-projects").GridPlacement[],
+    sheets: [{ id: "S1", name: "Plan" }],
+    spaces: spaces.map((x) => ({ ...x, color: "#000", by: "t", at: 0 })),
+    typeKeyOf: () => "microphones",
+    typeLabelOf: () => "Microphones",
+    modelOf: () => "",
+    descOf: () => "Mic",
+    duplicates: new Set(),
+  });
+  const ra = drows.find((r) => r.id === "gp-a")!;
+  ok(ra.space === "Booth" && ra.spacePinned && ra.autoSpace === "House" && !drows.find((r) => r.id === "gp-b")!.spacePinned,
+    "Grid notes #2 pin: a Spreadsheet row shows the pinned room, marks it pinned, and knows what Auto would give");
+  ok(ROWS.DEVICE_COLUMNS.find((c) => c.key === "space")?.pick === true && ROWS.DEVICE_COLUMNS.find((c) => c.key === "type")?.pick === true && !ROWS.EDIT_COLUMNS.includes("space" as never),
+    "Grid notes #2: Type and Space are select cells in the Spreadsheet, outside the typed-cell Tab walk");
+  const leftovers = ["src/app/(app)/design/grid/[id]/workspace/property-editor.tsx", "src/lib/design/grid-bom.ts", "src/lib/design/grid-schedule.ts", "src/lib/design/designators.ts", "src/lib/design/grid-browser-tree.ts", "src/lib/stores/grid-riser.ts", "src/lib/design/conduit-riser-server.ts", "src/lib/design/grid-riser-doc.ts"]
+    .filter((f) => /\bspaceOf\(/.test(rd(f)));
+  ok(leftovers.length === 0, `Grid notes #2 pin: placement → space reads go through spaceOfPlacement (${leftovers.join(", ") || "none left"})`);
+
+  // ---- 9. scratch DB: setPartsDeviceType + setPlacementsSpace
+  const ids = ["gridTypeMap"];
+  const db = await getDbGn2();
+  const snapshot = await db.select().from(blobsGn2).where(inArray(blobsGn2.id, ids));
+  const CAT = "TESTgn2 Audio Gear";
+  const A = fixtureId("gn2", "sm58");
+  const B = fixtureId("gn2", "beta58");
+  try {
+    for (const id of [A, B]) {
+      registerFixture("catalog_parts", id);
+      await DS.upsertDoc("catalog_parts", { id, sku: id, desc: "Cardioid Dynamic", category: CAT, unit: "ea", list: 100, cost: 50, note: "keep" } as never);
+    }
+    await DT.assignDeviceType([CAT], "dimming-power");
+    const r1 = await DT.setPartsDeviceType([A], "microphones");
+    const a1 = await Cat.get(A);
+    const tctx = { types: await DT.getDeviceTypes(), map: await DT.getTypeMap() };
+    ok(r1.ok && r1.parts === 1 && a1?.deviceTypeKey === "microphones" && a1.note === "keep" && a1.list === 100 && DTP.typeOfPart(a1, tctx.map, tctx.types) === "microphones" &&
+       DTP.typeOfPart((await Cat.get(B))!, tctx.map, tctx.types) === "dimming-power",
+      "Grid notes #2 store: a per-part type lands on that part only (merged — nothing else on the part changes); its category-mate keeps the category's type");
+    const r2 = await DT.setPartsDeviceType([A], null);
+    ok(r2.ok && (await Cat.get(A))?.deviceTypeKey === undefined, "Grid notes #2 store: Auto (null) clears the override");
+    await Cat.mergeUpsert(A, { deviceTypeKey: "speakers", note: "merged" });
+    const am = await Cat.get(A);
+    ok(am?.deviceTypeKey === undefined && am?.note === "merged", "Grid notes #2 store: mergeUpsert strips deviceTypeKey — the admin writer is the only one");
+    await DT.setPartsDeviceType([A], "microphones");
+    await Cat.mergeUpsert(A, { deviceTypeKey: undefined, note: "keep" });
+    ok((await Cat.get(A))?.deviceTypeKey === "microphones", "Grid notes #2 store: a patch can't clear the override either");
+    // Full replace and insert paths never set or clear it either (writePart / insertIfAbsent).
+    const aNow = (await Cat.get(A))!;
+    await Cat.upsert({ ...aNow, deviceTypeKey: undefined, desc: "Replaced" });
+    const aRep = await Cat.get(A);
+    await Cat.upsert({ ...aRep!, deviceTypeKey: "cameras" });
+    ok(aRep?.deviceTypeKey === "microphones" && aRep.desc === "Replaced" && (await Cat.get(A))?.deviceTypeKey === "microphones",
+      "Grid notes #2 store: a full-replace upsert keeps the stored override and ignores one carried in");
+    const INS = fixtureId("gn2", "ins");
+    registerFixture("catalog_parts", INS);
+    ok((await Cat.insertIfAbsent({ sku: INS, desc: "x", category: CAT, unit: "ea", list: 1, cost: 1, deviceTypeKey: "speakers" })) && (await Cat.get(INS))?.deviceTypeKey === undefined,
+      "Grid notes #2 store: insertIfAbsent never sets an override");
+    // Lost update / revive: the writer is an in-place key update, not a read-modify-write.
+    const planned = (await Cat.get(A))!; // "planning" read
+    await Cat.mergeUpsert(A, { list: 777, specBody: "concurrent spec" }); // a write lands after the plan
+    const cw = await Cat.setPartDeviceTypeKeys([{ sku: planned.sku, deviceTypeKey: undefined }]);
+    const aCw = await Cat.get(A);
+    ok(cw.saved === 1 && !!aCw && aCw.deviceTypeKey === undefined && aCw.list === 777 && aCw.specBody === "concurrent spec" && (aCw.updatedAt ?? 0) >= (planned.updatedAt ?? 0),
+      "Grid notes #2 store: clearing an override keeps a price/spec written after the plan (no lost update) and stamps updatedAt");
+    const DEL = fixtureId("gn2", "deleted");
+    registerFixture("catalog_parts", DEL);
+    await DS.upsertDoc("catalog_parts", { id: DEL, sku: DEL, desc: "gone", category: CAT, unit: "ea", list: 1, cost: 1, deviceTypeKey: "speakers" } as never);
+    await DS.softDeleteDoc("catalog_parts", DEL);
+    const dw = await Cat.setPartDeviceTypeKeys([{ sku: DEL, deviceTypeKey: undefined }, { sku: A, deviceTypeKey: "microphones" }]);
+    const [delRow] = await DS.getDocRows<CP>("catalog_parts", [DEL]);
+    ok(dw.saved === 1 && delRow?.deleted === true && delRow.doc.deviceTypeKey === "speakers" && (await Cat.get(A))?.deviceTypeKey === "microphones",
+      "Grid notes #2 store: a part deleted meanwhile stays deleted and untouched — only live rows are written");
+    const pk = await DS.patchDocKey("catalog_parts", [A, B, DEL, fixtureId("gn2", "none")], "gn2Probe", { n: 1 }, { chunkSize: 1 });
+    const aPk = await Cat.get(A);
+    ok(pk.ids.sort().join() === [A, B].sort().join() && (aPk as unknown as { gn2Probe?: { n: number } }).gn2Probe?.n === 1 && aPk?.list === 777 &&
+       (await DS.patchDocKey("catalog_parts", [A, B], "gn2Probe", undefined)).ids.length === 2 && !("gn2Probe" in (await Cat.get(A))!),
+      "Grid notes #2 doc-store: patchDocKey sets / removes one key on live rows only, chunked, leaving the rest of each doc alone");
+    const kw = await Cat.setPartDeviceTypeKeys([{ sku: A, deviceTypeKey: "speakers" }, { sku: B, deviceTypeKey: "cameras" }, { sku: fixtureId("gn2", "nope"), deviceTypeKey: "speakers" }], { chunkSize: 1 });
+    ok(kw.saved === 2 && kw.total === 3 && !kw.failed && (await Cat.get(B))?.deviceTypeKey === "cameras" && (await Cat.get(B))?.note === "keep",
+      "Grid notes #2 store: setPartDeviceTypeKeys writes in chunks, skips a missing part and leaves the rest of each part alone");
+    const acts2 = rd("src/lib/stores/device-types.ts");
+    const fnSrc = acts2.slice(acts2.indexOf("export async function setPartsDeviceType"), acts2.indexOf('/** "Accept all suggestions"'));
+    ok(fnSrc.indexOf("setPartDeviceTypeKeys(res.plan.overrides)") < fnSrc.indexOf("assignDeviceType(res.plan.categories") && fnSrc.includes("saved — reload to see the current types.") && fnSrc.includes("partial: true"),
+      "Grid notes #2 store: overrides are cleared before the category is re-typed; a failure mid-way reports N of M saved (partial)");
+    const catSrc = rd("src/lib/stores/catalog.ts");
+    const writerSrc = catSrc.slice(catSrc.indexOf("export async function setPartDeviceTypeKeys"), catSrc.indexOf("export async function partsWithOwnDeviceType"));
+    ok(writerSrc.includes('patchDocKey("catalog_parts"') && !/upsertDocs?\(/.test(writerSrc) && !writerSrc.includes("getDocRows"),
+      "Grid notes #2 store: the override writer is an in-place key update — no read-then-full-doc write");
+    const r3 = await DT.setPartsDeviceType([A], "microphones", { wholeCategory: true });
+    const m3 = await DT.getTypeMap();
+    const a3 = await Cat.get(A);
+    ok(r3.ok && r3.categories === 1 && r3.parts === 2 && a3?.deviceTypeKey === undefined && (await Cat.get(B))?.deviceTypeKey === undefined && m3[DTP.normalizeRawCategory(CAT)]?.typeKey === "microphones" && m3[DTP.normalizeRawCategory(CAT)]?.by === "admin" &&
+       DTP.typeOfPart((await Cat.get(B))!, m3, tctx.types) === "microphones",
+      "Grid notes #2 store: the whole-category box clears every own type in the category (the unpicked mate's too), re-types it (admin entry), and the whole category follows");
+    ok(!(await DT.setPartsDeviceType([fixtureId("gn2", "missing")], "microphones")).ok && !(await DT.setPartsDeviceType([A], "no-such")).ok && !(await DT.setPartsDeviceType([], "microphones")).ok,
+      "Grid notes #2 store: refuses a missing part, an unknown type and an empty pick");
+  } finally {
+    await db.delete(blobsGn2).where(inArray(blobsGn2.id, ids));
+    for (const row of snapshot) await db.insert(blobsGn2).values(row);
+  }
+
+  const by = "Test";
+  const project = await G.createProject({ name: "Grid notes 2 design", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", project.id);
+  const sh = (await G.addSheet(project.id, { name: "Plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", sh.id);
+  const opt = ensureOptions((await G.getProject(project.id))!).options[0].id;
+  await G.addSpace(project.id, { sheetId: sh.id, page: 1, name: "House", points: sq(0, 0, 1, 1), by });
+  await G.addSpace(project.id, { sheetId: sh.id, page: 1, name: "Booth", points: sq(0.6, 0.6, 0.9, 0.9), by });
+  await G.addSpace(project.id, { sheetId: sh.id, page: 2, name: "Lobby", points: sq(0, 0, 1, 1), by });
+  const live = async () => (await G.getProject(project.id))!;
+  const spIds = Object.fromEntries((await live()).spaces!.map((x) => [x.name, x.id]));
+  const pl1 = (await G.addPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.2, y: 0.2, partId: A, optionId: opt, by }))!.placements!.at(-1)!;
+  const pl2 = (await G.addPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.3, y: 0.2, partId: A, optionId: opt, by }))!.placements!.at(-1)!;
+  const pin = await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.Booth }]);
+  const q1 = await live();
+  const got1 = q1.placements!.find((x) => x.id === pl1.id)!;
+  ok(pin.ok && pin.value[0].spaceId === null && got1.spaceId === spIds.Booth && GEO.spaceOfPlacement(got1, q1.spaces!)?.name === "Booth",
+    "Grid notes #2 store: setPlacementsSpace pins a device and hands back the previous pin (none) for undo");
+  const refused = await G.setPlacementsSpace(project.id, [{ id: pl2.id, spaceId: spIds.Booth }, { id: pl1.id, spaceId: spIds.Lobby }]);
+  const q2 = await live();
+  ok(!refused.ok && /own sheet and page/.test(refused.error) && !q2.placements!.find((x) => x.id === pl2.id)!.spaceId && q2.placements!.find((x) => x.id === pl1.id)!.spaceId === spIds.Booth && q2.updatedAt === q1.updatedAt,
+    "Grid notes #2 store: a pin to a space on another page refuses the whole batch and writes nothing");
+  ok(!(await G.setPlacementsSpace(project.id, [{ id: pl2.id, spaceId: "sp-nope" }])).ok, "Grid notes #2 store: a pin to a space not on the design is refused");
+  const sched2 = SCH.buildSchedule({ placements: q2.placements!, spaces: q2.spaces!, descOf: () => "Mic", wires: [] });
+  ok(sched2.sections.find((x) => x.name === "Booth")?.rows[0]?.qty === 1 && sched2.sections.find((x) => x.name === "House")?.rows[0]?.qty === 1,
+    "Grid notes #2 store: the stored pin drives the schedule's sections");
+  const undo = await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: null }]);
+  ok(undo.ok && undo.value[0].spaceId === spIds.Booth && (await live()).placements!.find((x) => x.id === pl1.id)!.spaceId === undefined,
+    "Grid notes #2 store: null unpins (back to position) and returns the old pin");
+  // A dead pin (here: a space on another page, forced in) undoes to null, never to the dead space.
+  await DS.patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", project.id, (p) => {
+    p.placements = p.placements!.map((x) => (x.id === pl2.id ? { ...x, spaceId: spIds.Lobby } : x));
+  });
+  const dead = await G.setPlacementsSpace(project.id, [{ id: pl2.id, spaceId: spIds.House }]);
+  ok(dead.ok && dead.value[0].spaceId === null && (await G.setPlacementsSpace(project.id, dead.value)).ok,
+    "Grid notes #2 store: the undo of a pin over a dead one sends null (Auto) — undo never sticks on a gone space");
+  await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.Booth }, { id: pl2.id, spaceId: spIds.Booth }]);
+  const gone = await G.removePlacements(project.id, [pl1.id]);
+  await G.removeSpace(project.id, spIds.Booth);
+  const q3 = await live();
+  ok(q3.placements!.every((x) => x.spaceId === undefined), "Grid notes #2 store: deleting a space clears the pins to it");
+  const back = gone.ok ? await G.restoreItems(project.id, gone.value) : null;
+  const q4 = await live();
+  ok(!!gone.ok && gone.value.placements[0].spaceId === spIds.Booth && !!back?.ok && q4.placements!.some((x) => x.id === pl1.id) && q4.placements!.find((x) => x.id === pl1.id)!.spaceId === undefined,
+    "Grid notes #2 store: an undo of a delete drops a pin whose space is gone");
+  await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.House }]);
+  const gone2 = await G.removePlacements(project.id, [pl1.id]);
+  const back2 = gone2.ok ? await G.restoreItems(project.id, gone2.value) : null;
+  ok(!!back2?.ok && (await live()).placements!.find((x) => x.id === pl1.id)!.spaceId === spIds.House, "Grid notes #2 store: …and keeps a live one");
+  const actSrc = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  const restoreSrc = actSrc.slice(actSrc.indexOf("async function cleanRestoredPlacement"), actSrc.indexOf("export async function restoreItemsAction"));
+  const spaceAct = actSrc.slice(actSrc.indexOf("export async function setPlacementsSpaceAction"));
+  ok(restoreSrc.includes("...(spaceId ? { spaceId } : {})") && /\{\n  await requireUser\(\);\n  if \(!Array\.isArray\(items\) \|\| items\.length > MAX_BATCH\)/.test(spaceAct),
+    "Grid notes #2: undo of a delete carries a device's pin; the pin action requires a signed-in user and caps the batch before validating it");
+}
+
 /* ======================================================================
    Grid notes #9 — the Peak standard header on specs (first page only) and
    the plain-name PDFs; company default (Settings → Branding, absent = on) +
@@ -66807,13 +67116,13 @@ async function gridNotes9Checks(): Promise<void> {
   ok(!!bogus?.image && bogus.image.full, "Grid notes #9 review: an unreadable logo falls back to the baked sheet");
   const LP = await import("@/lib/letterhead-path");
   const globRe = new RegExp("^" + LP.BAKED_LETTERHEAD_TRACE_GLOB.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]+") + "$");
-  ok(globRe.test("./" + LP.BAKED_LETTERHEAD) && src9("src/lib/letterhead-server.ts").includes("path.join(process.cwd(), BAKED_LETTERHEAD)") && /console\.error\(`\[letterhead\] \$\{BAKED_LETTERHEAD\} could not be read/.test(src9("src/lib/letterhead-server.ts")),
+  ok(globRe.test("./" + LP.BAKED_LETTERHEAD) && src9("src/lib/letterhead-server.ts").includes(`path.join(process.cwd(), "${LP.BAKED_LETTERHEAD}")`) && /console\.error\(`\[letterhead\] \$\{BAKED_LETTERHEAD\} could not be read/.test(src9("src/lib/letterhead-server.ts")),
     "Grid notes #9 review: one path for the baked sheet — the reader and next.config's trace glob agree; a missing file is logged");
 
   // The estimate zip cache is keyed by the RESOLVED header; the build prints that same value.
   const Z9 = await import("@/lib/estimate-output/package-zip-server");
   const ZP9 = await import("@/lib/estimate-output/package-zip");
-  ok(ZP9.packageZipCachePath("Q-1", 2, true) !== ZP9.packageZipCachePath("Q-1", 2, false) && ZP9.packageZipCachePath("Q-1", 2, false).endsWith("rev-2-h0-v2.zip"), // #329: + the contents version
+  ok(ZP9.packageZipCachePath("Q-1", 2, true, "ab12cd34") !== ZP9.packageZipCachePath("Q-1", 2, false, "ab12cd34") && ZP9.packageZipCachePath("Q-1", 2, false, "ab12cd34").endsWith("rev-2-h0-cab12cd34-v3.zip"), // #329: + the contents version
     "Grid notes #9 review: the zip cache path carries the header (-h1 / -h0)");
   const got9: string[] = [];
   const built9: boolean[] = [];
@@ -66828,9 +67137,9 @@ async function gridNotes9Checks(): Promise<void> {
   });
   await serve9(false);
   await serve9(true);
-  ok(got9[0].endsWith("-h0-v2.zip") && got9[1].endsWith("-h1-v2.zip") && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
+  ok(/-h0-c[0-9a-f]{8}-v3\.zip$/.test(got9[0]) && /-h1-c[0-9a-f]{8}-v3\.zip$/.test(got9[1]) && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
   const zsrc9 = src9("src/lib/estimate-output/package-zip-server.ts");
-  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader)") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader)"),
+  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, bookCoverFingerprint(front.cover, front.letterhead))") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
     "Grid notes #9 review: servePackageZip resolves the header once (estimate's choice ?? company default) for both the cache key and the build");
 
   // Toggle actions: a boolean or null only, the D94 toggle gated on create; the Grid menu never guesses ON.
@@ -67207,6 +67516,36 @@ async function datasheetBook329Checks(): Promise<void> {
     } finally {
       console.warn = warn2;
     }
+  }
+
+  // #329b — the #298 merges reach the client package and the estimate zip (names, groups, loose files).
+  {
+    const { canonicalMfrResolver: res329b } = await import("@/lib/part-docs/datasheet-book");
+    const merged = res329b([{ key: "alphalighting", name: "Alpha Lighting Co" }, { key: "zuluaudio", name: "Zulu Audio", mergedInto: "alphalighting" }]);
+    const qDeps = (canonicalMfr: () => Promise<((m: string) => string) | null>): NonNullable<Parameters<typeof CPS.createQuoteClientPackage>[2]>["deps"] => ({
+      blobOn: () => true,
+      put: async (pathname: string, bytes: Buffer) => { stored.push(bytes); return { pathname }; },
+      save: async (input) => ({ ...input, id: "PKG-329m", createdAt: 0 }),
+      secret: () => "s329",
+      findGrid: async () => null,
+      readDoc: read,
+      canonicalMfr,
+    });
+    const quoteNow = (await Q.get(QID))!;
+    await CPS.createQuoteClientPackage(quoteNow, "Tester", { deps: qDeps(async () => merged) });
+    const mFiles = zipNamesGn7(stored[stored.length - 1]);
+    const mDs = mFiles.map((f) => f.name).filter((x) => x.startsWith("datasheets/"));
+    const mText = (await b329PageTexts(mFiles.find((f) => f.name === "Datasheets.pdf")!.data))[0];
+    ok(mDs.join("|") === "datasheets/Alpha Lighting Co - Alpha_Lighting_AS.pdf|datasheets/Alpha Lighting Co - zulu-za10.pdf" && mText.includes("Alpha Lighting Co") && !mText.includes("Zulu Audio") && !mText.includes("alpha lighting"),
+      "#329b quote package: merged spellings print and sort under the canonical name, loose files too: " + mDs.join("|"));
+    await CPS.createQuoteClientPackage(quoteNow, "Tester", { deps: qDeps(async () => null) });
+    const fDs = zipNamesGn7(stored[stored.length - 1]).map((f) => f.name).filter((x) => x.startsWith("datasheets/"));
+    ok(fDs.join("|") === "datasheets/Alpha Lighting - AS.pdf|datasheets/Zulu Audio - zulu-za10.pdf",
+      "#329b quote package: with no merges (a failed read) the book groups by each part's own manufacturer, as before");
+    const zm = await Z.buildRevisionPackageZip(q2, rev, { read: async (key) => read(key), sections: async () => [], letterhead: async () => null, canonicalMfr: async () => merged });
+    const zmNames = zm ? zipNamesGn7(zm.zip).map((f) => f.name) : [];
+    ok(zmNames.includes("datasheets/Alpha Lighting Co - Alpha_Lighting_AS.pdf") && zmNames.includes("datasheets/Alpha Lighting Co - zulu-za10.pdf"),
+      "#329b estimate zip: the merges apply to the loose names (and the book) there too");
   }
 }
 
@@ -67783,4 +68122,408 @@ async function bonusFinalFixChecks(): Promise<void> {
   const fr2Set = fr2Store.slice(fr2Store.indexOf("export async function setStatus("), fr2Store.indexOf("/** Estimator bonuses: rebuild a won quote's record"));
   const fr2Pool = fr2Set.indexOf("await syncProjectBonusPool(id, out.bonusRecord?.packageBonusCost ?? 0);");
   ok(fr2Pool > fr2Set.indexOf("await reconcileRewardsSafely(out, by);") && !/syncProjectBonusPool\(id, result/.test(fr2Set) && /if \(out && moved\.value && status === "won" && isBonusEligibleQuote\(out\)\) \{\s*await syncProjectBonusPool/.test(fr2Set), "#bonus fr2 source pin: the re-win pool sync runs after the status transaction, on the committed quote, same gate");
+}
+
+/* ===== #329b — the #298 manufacturer merges in the datasheet book ===== */
+import { canonicalMfrResolver as m329Res, planDatasheetBook as m329Plan, sortPartsForBook as m329Sort, withCanonicalMfrs as m329With } from "@/lib/part-docs/datasheet-book";
+import { datasheetEntryName as m329Entry } from "@/lib/part-docs/package";
+{
+  const etc = m329Res([
+    { key: "etc", name: "ETC", aliasKeys: ["electronictheatrecontrols"] },
+    { key: "electronictheatrecontrols", name: "Electronic Theatre Controls", mergedInto: "etc" },
+    { key: "rosebrand", name: "Rose Brand" },
+  ]);
+  const plan = m329Plan([
+    { sku: "S4", mfr: "Electronic Theatre Controls", model: "S4", desc: "Source Four", docId: "D-s4" },
+    { sku: "CS", mfr: "ETC", model: "ColorSource", desc: "ColorSource", docId: "D-cs" },
+    { sku: "P", mfr: "rose brand", model: "Pipe", desc: "Pipe", docId: null },
+    { sku: "Z", mfr: "Zeta Audio", model: "Z", desc: "Zeta", docId: "D-z" },
+  ], etc);
+  ok(plan.parts.map((p) => `${p.sku}:${p.mfrLabel}`).join() === "CS:ETC,S4:ETC,P:Rose Brand,Z:Zeta Audio" && plan.parts[0].group === plan.parts[1].group,
+    "#329b: two merged spellings are one group printed by the canonical record's name; an unmerged record prints its own record name; a manufacturer with no record is unchanged: " + plan.parts.map((p) => `${p.sku}:${p.mfrLabel}`).join());
+  ok(m329Entry({ documentId: "PD-s4", kind: "datasheet", name: "s4.pdf" }, plan.docMfr.get("D-s4")!, new Set()) === "datasheets/ETC - s4.pdf",
+    "#329b: the loose file of a merged spelling uses the canonical name, so it sorts with the rest of that manufacturer");
+  const chain = m329Res([{ key: "a", name: "A Co", mergedInto: "b" }, { key: "b", name: "B Co", mergedInto: "c" }, { key: "c", name: "C Co" }]);
+  ok(chain("a") === "C Co" && chain("B") === "C Co" && chain("c") === "C Co", "#329b: a merge chain A → B → C resolves to C's name");
+  const t0 = Date.now();
+  const cyc = m329Res([{ key: "x", name: "X", mergedInto: "y" }, { key: "y", name: "Y", mergedInto: "x" }]);
+  const cx = cyc("x"), cy = cyc("y");
+  ok(Date.now() - t0 < 1000 && cx === "x" && cy === "y" && m329Sort([{ sku: "1", mfr: "x", model: "", desc: "", docId: null }], cyc).length === 1,
+    "#329b: a merge cycle stops (no record outside the cycle is canonical, so each part keeps its own text)");
+  const boom = () => { throw new Error("resolver down"); };
+  const kept = m329With([{ sku: "S4", mfr: "Electronic Theatre Controls", model: "S4", desc: "", docId: null }], boom);
+  ok(kept[0].mfr === "Electronic Theatre Controls" && m329Plan([{ sku: "S4", mfr: "ETC", model: "", desc: "", docId: "D" }], boom).docMfr.get("D") === "ETC" && m329With([{ sku: "B", mfr: "", model: "", desc: "", docId: null }], etc)[0].mfr === "",
+    "#329b: a resolver that throws keeps each part's own manufacturer; a blank manufacturer stays blank");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const cps = rd("src/lib/client-package-server.ts"), zs = rd("src/lib/estimate-output/package-zip-server.ts"), rs = rd("src/lib/rack/submittal-server.ts");
+  ok((cps.match(/withCanonicalMfrs\(/g) || []).length === 2 && (cps.match(/await d\.canonicalMfr\(\)/g) || []).length === 2 && zs.includes("await d.canonicalMfr()") && rs.includes('await loadCanonicalMfr(undefined, "[rack]")'),
+    "#329b: the Grid and quote packages, the estimate zip and the rack submittal each read the merges once per build");
+}
+
+async function mfrMerges329bChecks(): Promise<void> {
+  const { loadCanonicalMfr } = await import("@/lib/part-docs/datasheet-book-server");
+  const warn = console.warn;
+  const warned: string[] = [];
+  console.warn = (...a: unknown[]) => { warned.push(a.map(String).join(" ")); };
+  try {
+    const down = await loadCanonicalMfr(async () => { throw new Error("db down"); }, "[t329b]");
+    const up = await loadCanonicalMfr(async () => [{ key: "etc", name: "ETC", aliasKeys: ["electronictheatrecontrols"] }]);
+    ok(down === null && warned.some((w) => w.includes("[t329b] manufacturer merges not loaded")) && !!up && up("Electronic Theatre Controls") === "ETC",
+      "#329b: a failed manufacturer read logs and returns null (each part's own manufacturer); a good read resolves aliases");
+    const live = await loadCanonicalMfr();
+    ok(typeof live === "function", "#329b: the live loader reads the manufacturers collection");
+    // The optional `canonicalMfr` input field (for callers that build the book directly); applying it twice is a no-op.
+    const { buildDatasheetBook } = await import("@/lib/part-docs/datasheet-book-server");
+    const { canonicalMfrResolver, withCanonicalMfrs } = await import("@/lib/part-docs/datasheet-book");
+    const res = canonicalMfrResolver([{ key: "etc", name: "ETC", aliasKeys: ["electronictheatrecontrols"] }]);
+    const parts = [
+      { sku: "S4", mfr: "Electronic Theatre Controls", model: "S4", desc: "Source Four", docId: null, reason: "No datasheet on file" },
+      { sku: "CS", mfr: "ETC", model: "CS", desc: "ColorSource", docId: null, reason: "No datasheet on file" },
+    ];
+    const direct = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs: new Map(), emptyOk: true, canonicalMfr: res });
+    const twice = await buildDatasheetBook({ subtitleLines: ["x"], parts: withCanonicalMfrs(parts, res), docs: new Map(), emptyOk: true, canonicalMfr: res });
+    const groups = (b: typeof direct) => (b.ok ? b.index.notIncluded.map((r) => `${r.mfr}:${r.groupStart}`).join() : "");
+    ok(direct.ok && groups(direct) === "ETC:true,ETC:false" && groups(twice) === groups(direct),
+      "#329b: buildDatasheetBook's optional canonicalMfr field groups merged spellings under one name; pre-resolved parts give the same book");
+  } finally {
+    console.warn = warn;
+  }
+}
+
+/* Grid notes #8 — the datasheet book (#329) gains the job cover + customer logos; "Download all datasheets" serves the book. */
+async function gridNotes8Checks(): Promise<void> {
+  const BC = await import("@/lib/part-docs/datasheet-book-cover");
+  const BS = await import("@/lib/part-docs/datasheet-book-server");
+  const BD = await import("@/lib/part-docs/datasheet-book-download");
+  const BCS = await import("@/lib/part-docs/datasheet-book-cover-server");
+  const BK = await import("@/lib/part-docs/datasheet-book");
+  const L8 = await import("@/lib/company-logo");
+  const LS8 = await import("@/lib/company-logo-server");
+  const CPS = await import("@/lib/client-package-server");
+  const Z = await import("@/lib/estimate-output/package-zip-server");
+  const Q = await import("@/lib/stores/quotes");
+  const { PDFDocument } = await import("pdf-lib");
+  const sharp = (await import("sharp")).default;
+  const rd8 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const tiny = async (pages: number) => {
+    const d = await PDFDocument.create();
+    for (let i = 0; i < pages; i++) d.addPage([612, 792]);
+    return Buffer.from(await d.save());
+  };
+  const png = await sharp({ create: { width: 40, height: 20, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 0.5 } } }).png().toBuffer();
+  const jpg = await sharp({ create: { width: 60, height: 20, channels: 3, background: { r: 200, g: 20, b: 30 } } }).jpeg().toBuffer();
+  const sheet = await sharp({ create: { width: 2179, height: 275, channels: 3, background: { r: 250, g: 250, b: 250 } } }).jpeg().toBuffer();
+  const lh = { companyName: "Peak Systems Group, Inc.", image: { jpeg: sheet, png: null, full: true, w: 2179, h: 275 } } as never;
+  const warn = console.warn;
+  console.warn = () => undefined;
+  try {
+    // ---- 1. the cover text: both contacts, the no-logo name, the contact ladder
+    const base = {
+      jobName: "  North HS  auditorium ", jobRef: "Estimate EST-1042 · Rev 2", customerName: "North High School", customerLogo: null,
+      venueName: "Main campus — Auditorium", venueAddress: ["100 Main St", "", "Springfield, IL 62701"],
+      preparedFor: { name: "Dana Whitlock", title: "Director", email: "dana@north.test", phone: "555-0100" },
+      preparedBy: { name: "Jeff Chesebro", title: "Owner", email: "jeff@peak.test", phone: "555-0199" },
+      peakName: "Peak Systems Group", date: Date.UTC(2026, 9, 12, 17),
+    };
+    const t1 = BC.bookCoverText(base);
+    ok(t1.job === "North HS auditorium" && t1.jobRef === "Estimate EST-1042 · Rev 2" && t1.dateLine === "October 12, 2026" && t1.customerName === "North High School" &&
+       t1.venue.join("|") === "Main campus — Auditorium|100 Main St|Springfield, IL 62701" &&
+       t1.preparedFor.join("|") === "North High School|Dana Whitlock|Director|dana@north.test|555-0100" &&
+       t1.preparedBy.join("|") === "Peak Systems Group|Jeff Chesebro|Owner|jeff@peak.test|555-0199" &&
+       BC.bookCoverText({ ...base, preparedFor: null, preparedBy: null }).preparedBy.join() === "Peak Systems Group",
+      "Grid notes #8: the book's job cover carries the job + number, venue + address, both contacts (Prepared for / Prepared by) and the date; no contact → the company line only");
+    const people = [{ name: "Ann Lee", role: "Buyer", email: "ann@x.test", phone: "", mobile: "555-1", primary: false }, { name: "Bo Diaz", role: "", email: "bo@x.test", primary: true }];
+    const viaNull = BC.coverContact(people, null), viaGone = BC.coverContact(people, "Former Person"), exact = BC.coverContact(people, "Ann Lee");
+    ok(viaNull?.name === "Bo Diaz" && viaNull.email === "bo@x.test" && viaGone?.name === "Bo Diaz" && BC.coverContact(people, "") === null &&
+       exact?.title === "Buyer" && exact.phone === "555-1" && BC.coverContact(people, "Former Person", false)?.name === "Former Person" && BC.coverContact(people, "", false) === null,
+      "Grid notes #8: Prepared for follows the estimate's Attn ladder (never set / gone → the primary contact — Jeff confirmed; \"\" → none); a Grid design's contact is read exactly");
+    ok(BC.addressLines({ address: "1 A St", city: "Peoria", state: "IL", zip: "61602" }).join("|") === "1 A St|Peoria, IL 61602" && BC.addressLines(null).length === 0 &&
+       BC.coverImageFromDataUrl(`data:image/png;base64,${png.toString("base64")}`)?.format === "png" && BC.coverImageFromDataUrl("data:image/svg+xml;base64,PHN2Zz4=") === null &&
+       BC.bookDownloadName("North HS: phase 2", "EST-1042") === "EST-1042 North HS phase 2 Datasheets.pdf" &&
+       BC.bookCachePath("estimate-package/Q-1/", 3, "ab12cd34") === "estimate-package/Q-1/rev-3-ab12cd34-Datasheets.pdf",
+      "Grid notes #8: address lines, the stored logo's data URL (SVG never), the download name and the cover-keyed cache path beside the zip");
+
+    // ---- 2. the book with the job cover (and without it — unchanged)
+    const one = await tiny(1), two = await tiny(2);
+    const parts = [
+      { sku: "Z1", mfr: "Zulu", model: "Z-1", desc: "Zulu amp", docId: "DZ" },
+      { sku: "A1", mfr: "Alpha", model: "A-1", desc: "Alpha spot", docId: "DA" },
+      { sku: "A2", mfr: "Alpha", model: "A-2", desc: "Alpha lens", docId: "DA", coveredBy: ["A1"] },
+      { sku: "C1", mfr: "", model: "", desc: "Cable", docId: null, reason: BK.BOOK_REASON.noDatasheet },
+    ];
+    const docs = new Map([["DZ", { bytes: two }], ["DA", { bytes: one }]]);
+    const withCover = await BS.buildDatasheetBook({ subtitleLines: ["Old subtitle line"], parts, docs, letterhead: lh, cover: { ...base, customerLogo: { bytes: new Uint8Array(png), format: "png" } } });
+    const plain = await BS.buildDatasheetBook({ subtitleLines: ["Old subtitle line"], parts, docs, letterhead: lh });
+    const cTexts = withCover.ok ? await b329PageTexts(withCover.bytes) : [];
+    const pTexts = plain.ok ? await b329PageTexts(plain.bytes) : [];
+    ok(withCover.ok && withCover.pageCount === 4 && withCover.frontPages === 1 && cTexts[0].includes("North HS auditorium") && cTexts[0].includes("Estimate EST-1042 · Rev 2") &&
+       cTexts[0].includes("PREPARED FOR") && cTexts[0].includes("Dana Whitlock") && cTexts[0].includes("dana@north.test") && cTexts[0].includes("PREPARED BY") && cTexts[0].includes("Jeff Chesebro") &&
+       cTexts[0].includes("Main campus — Auditorium") && cTexts[0].includes("Springfield, IL 62701") && cTexts[0].includes("Date: October 12, 2026") &&
+       cTexts[0].includes("4 parts · 2 datasheets · 4 pages") && !cTexts[0].includes("Old subtitle line") && cTexts[0].indexOf("Alpha") < cTexts[0].indexOf("Zulu") &&
+       !cTexts[0].includes("North High School\nProduct") && cTexts.every((t, i) => t.includes(`Page ${i + 1} of 4`)),
+      "Grid notes #8: the book's cover prints the job, number, venue + address, Prepared for / by, the date and the book's own counts line; the A→Z index and page stamps are unchanged");
+    ok(plain.ok && pTexts[0].includes("Old subtitle line") && !pTexts[0].includes("PREPARED FOR") && plain.pageCount === 4,
+      "Grid notes #8: a book built without `cover` is the #329 book exactly (subtitle lines, no job block)");
+    const named = await BS.buildDatasheetBook({ subtitleLines: [], parts, docs, letterhead: lh, cover: base });
+    const badLogo = await BS.buildDatasheetBook({ subtitleLines: [], parts, docs, letterhead: null, cover: { ...base, customerLogo: { bytes: new Uint8Array([1, 2, 3]), format: "png" } } });
+    const nTexts = named.ok ? await b329PageTexts(named.bytes) : [];
+    const bTexts = badLogo.ok ? await b329PageTexts(badLogo.bytes) : [];
+    ok(named.ok && nTexts[0].split("\n").filter((l) => l === "North High School").length === 2 && badLogo.ok && bTexts[0].split("\n").includes("North High School") && badLogo.pageCount === 4,
+      "Grid notes #8: no customer logo → the company name set large top-right (and on Prepared for); a logo that won't embed falls back to the name, never breaking the book");
+    const long = "A very long job name that keeps going ".repeat(20), longAddr = "1234 Extremely Long Industrial Parkway Building Seven ".repeat(8);
+    const crowded = await BS.buildDatasheetBook({ subtitleLines: [], parts, docs, letterhead: lh,
+      cover: { ...base, jobName: long, venueAddress: [longAddr, longAddr, longAddr], customerName: "A Customer Name ".repeat(20), preparedFor: { ...base.preparedFor, title: longAddr } } });
+    const crTexts = crowded.ok ? await b329PageTexts(crowded.bytes) : [];
+    ok(crowded.ok && crowded.frontPages === 1 && crowded.pageCount === 4 && crTexts[0].includes("…"),
+      "Grid notes #8: very long job names, addresses, titles and company names are clamped with \"…\" so the cover and index still fit page 1");
+    const bs8 = rd8("src/lib/part-docs/datasheet-book-server.ts");
+    ok(bs8.includes("cover?: BookCover | null;") && bs8.includes("if (input.cover) {") && bs8.includes("y = layoutJobCover(input.cover, input.title, y, ops, f);") &&
+       bs8.includes("const px = letterheadBoxPx(lh.image, ((PAGE_W - 2 * MARGIN) * 96) / 72);") &&
+       !/import [^;]*from "@\/(lib\/stores|db)\//.test(rd8("src/lib/part-docs/datasheet-book-cover.ts")) && !rd8("src/lib/part-docs/datasheet-book-cover.ts").includes('from "pdf-lib"'),
+      "Grid notes #8: the job cover is an additive, optional field on the book (the full-width letterhead band is the book's own sizing); the cover rules stay pure");
+
+    // ---- 3. one helper plans every download (A→Z, a shared sheet once, the missing part listed)
+    const inputs = BD.loadBookInputs({
+      rows: [{ sku: "Z1", desc: "Zulu amp" }, { sku: "A1", desc: "Alpha spot" }, { sku: "C1", desc: "Cable" }, { sku: "A2", desc: "Alpha lens" }, { sku: "X", desc: "Allowance" }],
+      partOf: (sku) => (sku === "X" ? null : { sku, mfr: sku.startsWith("Z") ? "Zulu" : sku.startsWith("A") ? "Alpha" : "", desc: sku, manufacturerModelNumber: sku }),
+      docsOf: (sku) => (sku === "Z1" ? { datasheet: { documentId: "DZ" }, datasheetOk: true } : sku.startsWith("A") ? { datasheet: { documentId: "DA" }, datasheetCoveredBy: sku === "A2" ? ["A1"] : [], datasheetOk: true } : { datasheet: null, datasheetOk: false }),
+      canonicalMfr: null,
+    });
+    // #329b: the #298 merges reach every download through the same helper (and on into the book).
+    const merged = BD.loadBookInputs({
+      rows: [{ sku: "M1", desc: "m1" }, { sku: "M2", desc: "m2" }],
+      partOf: (sku) => ({ sku, mfr: sku === "M1" ? "Electronic Theatre Controls" : "ETC", desc: sku, manufacturerModelNumber: sku }),
+      docsOf: (sku) => ({ datasheet: { documentId: `D${sku}` }, datasheetOk: true }),
+      canonicalMfr: (m) => (m.toLowerCase().startsWith("electronic theatre") ? "ETC" : m),
+    });
+    const dlSrc = rd8("src/lib/part-docs/datasheet-book-download.ts");
+    ok(merged.parts.every((p) => p.mfr === "ETC") && new Set(merged.plan.docMfr.values()).size === 1 && !!merged.canonicalMfr &&
+       (dlSrc.match(/loadCanonicalMfr\(undefined, "\[datasheets\]"\)/g) || []).length === 3 && dlSrc.includes("canonicalMfr: input.inputs.canonicalMfr,") &&
+       rd8("src/lib/client-package-server.ts").includes("canonicalMfr: () => loadCanonicalMfr(undefined, \"[package]\"),") && rd8("src/lib/estimate-output/package-zip-server.ts").includes("await d.canonicalMfr()"),
+      "Grid notes #8: every download passes #329b's canonical-manufacturer resolver through loadBookInputs into the book; the packages keep their own resolver wiring");
+    ok(inputs.plan.docOrder.join() === "DA,DZ" && inputs.parts.length === 5 && inputs.parts.find((p) => p.sku === "C1")?.reason === BK.BOOK_REASON.noDatasheet &&
+       inputs.parts.find((p) => p.sku === "X")?.reason === BK.BOOK_REASON.notCatalog &&
+       ["quoteBookPdf", "gridBookPdf", "revisionBookPdf"].every((n) => { const src = rd8("src/lib/part-docs/datasheet-book-download.ts"); const at = src.indexOf(`export async function ${n}(`); return src.slice(at, src.indexOf("\n}\n", at)).includes("inputs: loadBookInputs({"); }),
+      "Grid notes #8: every download plans through loadBookInputs (the book's own A→Z plan: a shared datasheet once, missing and non-catalog rows listed)");
+
+    // ---- 4. reads + build: caps, the clean flag, the failure codes
+    const idx = { docsById: new Map<string, { blobKey: string | null; size: number }>([["DA", { blobKey: "k/a", size: one.length }], ["DZ", { blobKey: "k/z", size: two.length }], ["DB", { blobKey: null, size: 0 }], ["DC", { blobKey: "k/c", size: 26 * 1024 * 1024 }]]) } as never;
+    const planX = { ...inputs.plan, docOrder: ["DA", "DZ", "DB", "DC"] };
+    const reads: string[] = [];
+    const r4 = await BD.readBookDocs(planX, idx, Date.now() + 60_000, { now: Date.now, read: async (k) => { reads.push(k); return k === "k/a" ? new Response(new Uint8Array(one)).body : null; } });
+    ok(reads.join() === "k/a,k/z" && !!r4.docs.get("DA")?.bytes && r4.docs.get("DZ")?.reason === BK.BOOK_REASON.missing && r4.docs.get("DB")?.reason === BK.BOOK_REASON.missing &&
+       r4.docs.get("DC")?.reason === BK.BOOK_REASON.tooBig && r4.clean === false,
+      "Grid notes #8: downloads read each datasheet once under the zip's caps; a missing blob or an over-25 MB file is listed, never thrown");
+    const r4b = await BD.readBookDocs({ ...inputs.plan, docOrder: ["DA", "DC"] }, idx, Date.now() + 60_000, { now: Date.now, read: async () => new Response(new Uint8Array(one)).body });
+    ok(r4b.clean === true, "Grid notes #8: only the size cap keeps a build cacheable (the zip's rule)");
+    const read8 = async (k: string) => (k === "k/a" ? new Response(new Uint8Array(one)).body : k === "k/z" ? new Response(new Uint8Array(two)).body : null);
+    const dl = await BD.buildBookDownload({ startedAt: Date.now(), inputs, index: idx, cover: base, letterhead: null, fileName: "x Datasheets.pdf", logTag: "[t]", deps: { now: Date.now, read: read8 } });
+    const none = await BD.buildBookDownload({ startedAt: Date.now(), inputs: { parts: [], plan: { parts: [], docOrder: [], docMfr: new Map() }, canonicalMfr: null }, index: idx, cover: base, letterhead: null, fileName: "x", logTag: "[t]" });
+    const big = await BD.buildBookDownload({ startedAt: Date.now(), inputs, index: idx, cover: base, letterhead: null, fileName: "x", logTag: "[t]", deps: { now: Date.now, read: read8 }, build: async () => ({ ok: false, cause: "too-big", detail: "" }) });
+    const late = await BD.buildBookDownload({ startedAt: Date.now(), inputs, index: idx, cover: base, letterhead: null, fileName: "x", logTag: "[t]", deps: { now: Date.now, read: read8 }, build: async () => ({ ok: false, cause: "late", detail: "" }) });
+    const unread = await BD.buildBookDownload({ startedAt: Date.now(), inputs, index: idx, cover: base, letterhead: null, fileName: "x", logTag: "[t]", deps: { now: Date.now, read: async () => null } });
+    ok(dl.ok && dl.pageCount === 4 && dl.cacheable && (await b329PageTexts(dl.pdf))[0].includes("PREPARED FOR") &&
+       !none.ok && none.status === 404 && !big.ok && big.status === 413 && big.error === BC.BOOK_COVER_COPY.tooBig && !late.ok && late.status === 503 && !unread.ok && unread.status === 404,
+      "Grid notes #8: a download is the book with the job cover; nothing to combine → 404, too large → 413 with a message, late → 503");
+    let preludeReads = 0;
+    const slowPrelude = await BD.buildBookDownload({ startedAt: Date.now() - BD.BOOK_DOWNLOAD_READ_MS - 1, inputs, index: idx, cover: base, letterhead: null, fileName: "x", logTag: "[t]",
+      deps: { now: Date.now, read: async (k) => { preludeReads++; return read8(k); } } });
+    const routes8 = ["src/app/api/quotes/[id]/datasheets-pdf/route.ts", "src/app/api/grid/[id]/datasheets-pdf/route.ts", "src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts"].map(rd8);
+    ok(!slowPrelude.ok && slowPrelude.status === 503 && slowPrelude.error === BC.BOOK_COVER_COPY.late && preludeReads === 0 &&
+       routes8.every((r) => /export async function GET\([^)]*\)[^{]*\{\n  \/\/ The time budget starts HERE[^\n]*\n  const startedAt = Date\.now\(\);/.test(r) && r.includes("startedAt")) &&
+       BD.BOOK_DOWNLOAD_READ_MS + BD.BOOK_DOWNLOAD_MERGE_MS + 30_000 <= BD.BOOK_DOWNLOAD_MAX_DURATION_S * 1000 && dlSrc.includes("deadline: readsBy + BOOK_DOWNLOAD_MERGE_MS,"),
+      "Grid notes #8: the budget starts at route entry — a prelude that ate the read budget answers 503 with a clear message and reads nothing; read + merge leave 30 s of the 120 s to stream");
+
+    // ---- 5. the cache key fingerprints the front matter
+    const fp = BCS.bookCoverFingerprint(base, lh), fpSame = BCS.bookCoverFingerprint({ ...base }, lh);
+    const fpLogo = BCS.bookCoverFingerprint({ ...base, customerLogo: { bytes: new Uint8Array(png), format: "png" } }, lh);
+    const fpContact = BCS.bookCoverFingerprint({ ...base, preparedFor: { ...base.preparedFor, email: "new@north.test" } }, lh);
+    const fpNoHead = BCS.bookCoverFingerprint(base, null);
+    const fpOtherHead = BCS.bookCoverFingerprint(base, { companyName: "Peak", image: { jpeg: jpg, png: null, full: false, w: 60, h: 20 } } as never);
+    const fpPlain = BCS.bookCoverFingerprint(null, lh);
+    ok(/^[0-9a-f]{8}$/.test(fp) && fp === fpSame && new Set([fp, fpLogo, fpContact, fpNoHead, fpOtherHead, fpPlain]).size === 6,
+      "Grid notes #8: the cover fingerprint is stable and changes with the customer logo, the contact, the letterhead (or none) and a plain cover");
+
+    // ---- 6. the packages' books carry the job cover
+    const { fixtureId: fid8 } = await import("./test-fixtures");
+    const C = await import("@/lib/stores/catalog");
+    const D = await import("@/lib/stores/part-documents");
+    const SA = fid8("gn8", "amp"), SB = fid8("gn8", "lens"), SC = fid8("gn8", "cable");
+    await C.mergeUpsert(SA, { desc: "GN8 amp", category: "GN8", unit: "ea", list: 1, cost: 1, mfr: "Crown", manufacturerModelNumber: "XTi 4002" });
+    await C.mergeUpsert(SB, { desc: "GN8 lens", category: "GN8", unit: "ea", list: 1, cost: 1, mfr: "Crown" });
+    await C.mergeUpsert(SC, { desc: "GN8 cable", category: "GN8", unit: "ea", list: 1, cost: 1 });
+    for (const s of [SA, SB, SC]) registerFixture("catalog_parts", s);
+    const ds = await D.createDocument({ kind: "datasheet", fileName: "crown-xti.pdf", contentType: "application/pdf", size: two.length, blobKey: "part-docs/gn8/crown-xti.pdf", sourceUrl: null, source: "upload", by: "Test" });
+    if (!ds) throw new Error("Grid notes #8: fixture datasheet failed to create");
+    registerFixture("part_documents", ds.id);
+    await D.attachDocument(ds.id, [SA, SB], "Test");
+    for (const s of [SA, SB]) registerFixture("part_document_links", D.documentLinkId(s, ds.id));
+    const QID8 = fid8("gn8", "quote");
+    const item = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 });
+    await Q.create({ id: QID8, name: "Grid notes 8 quote", customer: "Spec fixture", owner: "spec", quoteType: "system",
+      spec: { sections: [{ id: "s1", name: "Audio", kind: "materials", mfr: "", freightPct: 0, items: [item(1, SA), item(2, SC), item(3, SB)] }], mobs: [] } });
+    registerFixture("quotes", QID8);
+    const quote8 = (await Q.get(QID8))!;
+    const stored8: Buffer[] = [];
+    const covers: string[] = [];
+    const readDoc = async (key: string) => (key === "part-docs/gn8/crown-xti.pdf" ? new Response(new Uint8Array(two)).body : null);
+    const deps8 = {
+      blobOn: () => true,
+      put: async (pathname: string, bytes: Buffer) => { stored8.push(bytes); return { pathname }; },
+      save: async (input: Omit<ClientPackageRecordGn7, "id" | "createdAt">) => ({ ...input, id: "PKG-GN8", createdAt: 0 }),
+      findGrid: async () => null,
+      readDoc,
+      bookCover: async (src: { kind: string }) => { covers.push(src.kind); return { ...base, jobName: "GN8 package job" }; },
+    };
+    const built8 = await CPS.createQuoteClientPackage(quote8, "Tester", { deps: deps8 as never });
+    const zip8 = zipNamesGn7(stored8[stored8.length - 1]);
+    const book8 = zip8.find((f) => f.name === "Datasheets.pdf");
+    const b8Texts = book8 ? await b329PageTexts(book8.data) : [];
+    ok(!!book8 && covers.join() === "quote" && b8Texts[0].includes("GN8 package job") && b8Texts[0].includes("PREPARED FOR") && b8Texts.length === 3 &&
+       !zip8.some((f) => f.name.includes("combined")) && built8.record.datasheetCount === 1,
+      "Grid notes #8: the quote package's ONE Datasheets.pdf carries the job cover (no second combined PDF); a datasheet covering two parts is in it once");
+    const failCover = await CPS.createQuoteClientPackage(quote8, "Tester", { deps: { ...deps8, bookCover: async () => { throw new Error("db down"); } } as never });
+    const fTexts = await b329PageTexts(zipNamesGn7(stored8[stored8.length - 1]).find((f) => f.name === "Datasheets.pdf")!.data);
+    ok(!!failCover.record && fTexts[0].includes("Grid notes 8 quote") && !fTexts[0].includes("PREPARED FOR"),
+      "Grid notes #8: a job cover that can't be loaded leaves the book's plain cover — the package never fails over it");
+    await Q.update(QID8, { status: "sent" });
+    const rev8 = (await Q.addQuoteRevision(QID8, { by: "Test", reason: "sent" }))!;
+    const q8 = (await Q.get(QID8))!;
+    let zipCoverRev = -1;
+    const zipped = await Z.buildRevisionPackageZip(q8, rev8, { read: async (k) => readDoc(k), sections: async () => [], letterhead: async () => null,
+      bookCover: async (_q, r) => { zipCoverRev = r.rev; return { ...base, jobName: "GN8 revision job" }; } });
+    const zBook = zipped ? zipNamesGn7(zipped.zip).find((f) => f.name === "Datasheets.pdf") : undefined;
+    const zipNoCover = await Z.buildRevisionPackageZip(q8, rev8, { read: async (k) => readDoc(k), sections: async () => [], letterhead: async () => null, bookCover: async () => { throw new Error("db down"); } });
+    ok(!!zBook && zipCoverRev === rev8.rev && (await b329PageTexts(zBook.data))[0].includes("GN8 revision job") && zipped?.coverOk === true &&
+       !!zipNoCover && zipNoCover.book === true && zipNoCover.coverOk === false,
+      "Grid notes #8: the estimate package zip's Datasheets.pdf carries the sent revision's job cover; a cover that won't load still ships the book (plain cover) but marks the zip not cacheable");
+    // The zip cache: keyed by the cover's fingerprint too; a plain (failed) cover is never frozen.
+    const ZP8 = await import("@/lib/estimate-output/package-zip");
+    const zPkg = { q: q8, rev: rev8, state: { kind: "ok" }, currentPath: null } as never;
+    let zFront = { cover: base as typeof base | null, coverOk: true, letterhead: null };
+    const zGets: string[] = [];
+    const zPuts: string[] = [];
+    const zFronts: string[] = [];
+    const zDeps = {
+      cacheOn: true,
+      get: async (path: string) => { zGets.push(path); return null; },
+      put: async (path: string) => { zPuts.push(path); },
+      defer: (t: () => Promise<void>) => { void t(); },
+      peakHeader: async () => true,
+      front: async () => zFront,
+      build: async (_q: unknown, _r: unknown, _h: boolean, f: { cover: typeof base | null }) => { zFronts.push(f.cover?.preparedFor.email ?? "plain"); return { zip: Buffer.from("Z"), leftOut: [], datasheets: 1, specsheets: 0, specifications: false, book: true, coverOk: true }; },
+    };
+    await Z.servePackageZip(zPkg, zDeps as never);
+    zFront = { cover: { ...base, preparedFor: { ...base.preparedFor, email: "edit@north.test" } }, coverOk: true, letterhead: null };
+    await Z.servePackageZip(zPkg, zDeps as never);
+    zFront = { cover: null, coverOk: false, letterhead: null };
+    await Z.servePackageZip(zPkg, zDeps as never);
+    await new Promise((r) => setImmediate(r));
+    ok(ZP8.PACKAGE_ZIP_CACHE_VERSION === 3 && zGets.length === 3 && new Set(zGets).size === 3 && zGets[0].endsWith(`-h1-c${BCS.bookCoverFingerprint(base, null)}-v3.zip`) &&
+       zPuts.length === 2 && zPuts.join() === zGets.slice(0, 2).join() && zFronts.join() === "dana@north.test,edit@north.test,plain",
+      "Grid notes #8: the estimate zip's cache key carries the book cover's fingerprint (v3) — a contact edit names a fresh zip, the build prints exactly the keyed cover, and a cover that failed to load is never cached");
+    const liveRevCover = await (await import("@/lib/part-docs/datasheet-book-cover-server")).quoteBookCover(q8, { rev: rev8 });
+    ok(liveRevCover.jobName === "Grid notes 8 quote" && /^Estimate .+ · Rev \d+$/.test(liveRevCover.jobRef || "") && liveRevCover.customerName === "Spec fixture" && liveRevCover.customerLogo === null,
+      "Grid notes #8: a revision's cover reads the frozen name and number with Rev N; an unlinked customer prints its name (no logo)");
+
+    // ---- 7. the share download: package.zip's rules, a cover-keyed cache
+    const route8 = await import("@/app/share/quote/[id]/[token]/datasheets.pdf/route");
+    const req8 = (ip: string) => new Request("https://app.test/share/quote/Q-1/x/datasheets.pdf", { headers: { "x-forwarded-for": ip } });
+    const bad1 = await route8.GET(req8("10.8.0.1"), { params: Promise.resolve({ id: "Q-2041", token: "not-a-token" }) });
+    const bad2 = await route8.GET(req8("10.8.0.2"), { params: Promise.resolve({ id: QID8, token: `${Date.now() + 86_400_000}.1.${"A".repeat(43)}` }) });
+    const shareSrc = rd8("src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts");
+    ok(bad1.status === 404 && bad2.status === 404 && shareSrc.includes('rateLimit("share-zip:" + (clientIp(req) || "unknown"), SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS)') &&
+       shareSrc.indexOf("rateLimit(") < shareSrc.indexOf("isShareTokenV2(token)") && shareSrc.indexOf("isShareTokenV2(token)") < shareSrc.indexOf("resolveSharedPackage(") &&
+       shareSrc.includes("serveSharedBook(pkg, {}, startedAt)") && shareSrc.includes("export const maxDuration = 120;"),
+      "Grid notes #8: the share download uses package.zip's share-zip: bucket, refuses a malformed or forged token with the uniform 404, then serves the pinned revision's book");
+    const pkg8 = { q: q8, rev: rev8, state: { kind: "ok" }, currentPath: null } as never;
+    let coverNow = base;
+    const builtWith: string[] = [];
+    let cached: Buffer | null = null;
+    const puts: string[] = [];
+    const deferred: Array<() => Promise<void>> = [];
+    const sdeps = {
+      cacheOn: true,
+      get: async (path: string) => (cached && path === puts[puts.length - 1] ? new Response(new Uint8Array(cached)).body : null),
+      put: async (path: string, bytes: Buffer) => { puts.push(path); cached = bytes; },
+      defer: (t: () => Promise<void>) => { deferred.push(t); },
+      cover: async () => coverNow,
+      letterhead: async () => null,
+      build: async (_q: unknown, _r: unknown, c: typeof base) => { builtWith.push(c.preparedFor.email); return { ok: true as const, pdf: Buffer.from("%PDF-gn8"), fileName: "x.pdf", pageCount: 2, cacheable: true }; },
+    };
+    ok(BD.parsePeakHeaderParam(null) === undefined && BD.parsePeakHeaderParam("1") === true && BD.parsePeakHeaderParam("0") === false &&
+       BD.parsePeakHeaderParam("true") === "bad" && BD.parsePeakHeaderParam("") === "bad" &&
+       rd8("src/app/api/grid/[id]/datasheets-pdf/route.ts").includes('if (header === "bad") return bookTextResponse("Choose on or off for the Peak header.", 400);') &&
+       rd8("src/app/api/grid/[id]/datasheets-pdf/route.ts").includes("{ startedAt, peakHeader: header }") && dlSrc.includes("loadDocumentLetterhead(opts.peakHeader)") &&
+       rd8("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx").includes('${peakHeader === null ? "" : `&header=${peakHeader ? 1 : 0}`}'),
+      "Grid notes #8: the Grid book honours the Outputs menu's \"Include Peak header\" (?header=1|0, absent = the company default, anything else refused)");
+    const s1 = await BD.serveSharedBook(pkg8, sdeps as never);
+    await deferred.shift()?.();
+    const s2 = await BD.serveSharedBook(pkg8, sdeps as never);
+    coverNow = { ...base, preparedFor: { ...base.preparedFor, email: "changed@north.test" } };
+    const s3 = await BD.serveSharedBook(pkg8, sdeps as never);
+    await deferred.shift()?.();
+    const sNone = await BD.serveSharedBook(pkg8, { ...sdeps, get: async () => null, build: async () => ({ ok: false as const, status: 404 as const, error: BC.BOOK_COVER_COPY.nothing }) } as never);
+    const sDirty = await BD.serveSharedBook(pkg8, { ...sdeps, get: async () => null, defer: () => { throw new Error("should not cache"); }, build: async () => ({ ok: true as const, pdf: Buffer.from("%PDF-d"), fileName: "x", pageCount: 1, cacheable: false }) } as never);
+    ok(s1.status === 200 && s2.status === 200 && (await s2.text()) === "%PDF-gn8" && s3.status === 200 && builtWith.join() === "dana@north.test,changed@north.test" &&
+       puts.length === 2 && puts[0] !== puts[1] && puts.every((p) => /^estimate-package\/.+\/rev-\d+-[0-9a-f]{8}-Datasheets\.pdf$/.test(p)) &&
+       s1.headers.get("content-type") === "application/pdf" && /Rev \d+ Grid notes 8 quote Datasheets\.pdf/.test(s1.headers.get("content-disposition") || "") &&
+       sNone.status === 404 && (await sNone.text()) === BC.BOOK_COVER_COPY.nothing && sDirty.status === 200,
+      "Grid notes #8: the share book is built once and streamed from the cache; a cover edit (cover-keyed) builds a fresh file; an unclean build is never cached; nothing to combine is a plain 404");
+
+    // ---- 8. the customer logo: upload gate + store
+    const svg = Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>');
+    const svgDoctype = Buffer.from('<?xml version="1.0"?>\n<!-- Generator: Illustrator -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg version="1.1"></svg>');
+    const c1 = L8.checkLogoUpload(svg), cd = L8.checkLogoUpload(svgDoctype), cc = L8.checkLogoUpload(Buffer.from("<!-- logo --><svg viewBox='0 0 1 1'/>"));
+    const c2 = L8.checkLogoUpload(Buffer.from("GIF89a not allowed here")), c3 = L8.checkLogoUpload(Buffer.concat([png, Buffer.alloc(L8.COMPANY_LOGO_MAX_BYTES)]));
+    ok(!c1.ok && c1.error === "SVG isn't supported — use PNG, JPEG or WebP." && !cd.ok && cd.error === c1.error && !cc.ok && cc.error === c1.error &&
+       !c2.ok && c2.error === L8.COMPANY_LOGO_COPY.notImage && !c3.ok && c3.error === L8.COMPANY_LOGO_COPY.tooBig && !L8.checkLogoUpload(new Uint8Array(0)).ok &&
+       L8.checkLogoUpload(png).ok && L8.sniffLogo(jpg) === "jpeg" && L8.sniffLogo(Buffer.from("<html><body>hi</body></html>")) === null,
+      "Grid notes #8: a logo upload refuses SVG (also behind a DOCTYPE or comment), non-images by magic bytes, oversize and empty files");
+    const bigImg = await sharp({ create: { width: 2400, height: 600, channels: 3, background: { r: 1, g: 2, b: 3 } } }).jpeg().toBuffer();
+    const prepped = await LS8.prepareCompanyLogo(bigImg, "Tester", 123);
+    const bomb = await sharp({ create: { width: 6000, height: 5000, channels: 3, background: { r: 255, g: 255, b: 255 } } }).jpeg({ quality: 10 }).toBuffer();
+    const bombed = await LS8.prepareCompanyLogo(bomb, "Tester");
+    ok(prepped.ok && prepped.logo.width === L8.COMPANY_LOGO_MAX_EDGE && prepped.logo.height === 200 && prepped.logo.dataUrl.startsWith("data:image/png;base64,") &&
+       bomb.length <= L8.COMPANY_LOGO_MAX_BYTES && !bombed.ok && bombed.error === L8.COMPANY_LOGO_COPY.unreadable && LS8.COMPANY_LOGO_MAX_INPUT_PIXELS === 25_000_000 &&
+       L8.sanitizeCompanyLogo({ dataUrl: null }) === null && L8.sanitizeCompanyLogo({ dataUrl: "data:image/svg+xml;base64,AAAA" }) === null,
+      "Grid notes #8: an accepted logo is shrunk to 800 px PNG; a small file that decodes past 25 megapixels is refused; a removed or foreign record reads as no logo");
+    const LS = await import("@/lib/stores/company-logos");
+    const CO8 = fid8("gn8", "company");
+    if (prepped.ok) await LS.setCompanyLogo(CO8, prepped.logo);
+    const got8 = await LS.getCompanyLogo(CO8);
+    await LS.clearCompanyLogo(CO8, "Tester");
+    const gone8 = await LS.getCompanyLogo(CO8);
+    ok(!!got8 && got8.width === 800 && gone8 === null && (await LS.getCompanyLogo(null)) === null, "Grid notes #8: a company logo round-trips through its own blob and Remove clears it");
+    const { getDb } = await import("@/db");
+    const { blobs } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, LS.companyLogoBlobId(CO8)));
+
+    // ---- 9. wiring pins
+    const acts8 = rd8("src/app/(app)/companies/[id]/logo-actions.ts");
+    ok(acts8.startsWith('"use server"') && (acts8.match(/await requireUser\(\)/g) || []).length === 2 && acts8.includes("file.size > COMPANY_LOGO_MAX_BYTES") &&
+       rd8("src/app/(app)/companies/[id]/page.tsx").includes("<CompanyLogoCard companyId={cust.id}"),
+      "Grid notes #8: logo actions are signed-in only (as editing a company), size-check before reading, and the company page shows the card");
+    ok(rd8("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx").includes("/api/grid/${id}/datasheets-pdf?option=${opt}") &&
+       rd8("src/app/(app)/estimator/package-staff-panel.tsx").includes("/api/quotes/${encodeURIComponent(quoteId)}/datasheets-pdf") &&
+       rd8("src/components/estimate-output/package-extras.tsx").includes("view.datasheetsPdfHref") &&
+       rd8("src/app/api/quotes/[id]/datasheets-pdf/route.ts").includes("await requireUser();") && rd8("src/app/api/grid/[id]/datasheets-pdf/route.ts").includes("await requireUser();") &&
+       rd8("src/app/api/quotes/[id]/datasheets-pdf/route.ts").includes("quoteBookPdf(") && rd8("src/app/api/grid/[id]/datasheets-pdf/route.ts").includes("gridBookPdf("),
+      "Grid notes #8: \"Download all datasheets\" on the Grid Outputs menu, the Build package step and the package page all serve the book; both staff routes require a signed-in user");
+    const { downloadsView } = await import("@/lib/estimate-output/package-extras-model");
+    ok(downloadsView([{ documentId: "PD-1", name: "a.pdf", kind: "datasheet" }], false, "/b")?.datasheetsPdfHref === "/b/datasheets.pdf" &&
+       downloadsView([{ documentId: "PD-2", name: "b.pdf", kind: "specsheet" }], false, "/b")?.datasheetsPdfHref === null,
+      "Grid notes #8: the package page offers the book only when there is a datasheet");
+    const LP8 = await import("@/lib/letterhead-path");
+    const lhs8 = rd8("src/lib/letterhead-server.ts");
+    const lit8 = /readFile\(path\.join\(process\.cwd\(\), "([^"]+)"\)\)/.exec(lhs8);
+    ok(!!lit8 && lit8[1] === LP8.BAKED_LETTERHEAD && lhs8.includes('import { readFile } from "node:fs/promises";') && lhs8.includes('import path from "node:path";') &&
+       !lhs8.includes('await import("node:fs/promises")') && !/datasheets-pdf|datasheets\.pdf/.test(rd8("next.config.ts")),
+      "Grid notes #8: the baked letterhead is read through a LITERAL path equal to BAKED_LETTERHEAD with static fs/path imports (no whole-project trace)");
+    ok(!rd8("src/lib/client-package-server.ts").includes("combined-datasheets") && !existsSync(join(process.cwd(), "src/lib/datasheet-package")) && !existsSync(join(process.cwd(), "src/lib/pdf-merge.ts")),
+      "Grid notes #8: no second merge engine — the book is the one combined PDF");
+  } finally {
+    console.warn = warn;
+  }
 }

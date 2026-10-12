@@ -5,6 +5,7 @@ import { peakHeaderDefaultAction } from "@/app/(app)/peak-header-actions";
 import { cutSheetsUnreadableNote } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import type { GridEditor } from "../use-grid-editor";
 import { GRID_LINK_COPY, specFromDesignHref } from "@/lib/design/estimate-grid-link";
+import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
 import Menu from "./menu";
 import { BTN, FIELD_LABEL } from "./toolbar-style";
 
@@ -115,6 +116,15 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
           Include Peak header
         </label>
       )}
+      {/* Grid notes #8 — this option's datasheet book (#329) with the job cover, on its own; it follows the header checkbox above (unknown = the server's default). */}
+      <a
+        href={`/api/grid/${id}/datasheets-pdf?option=${opt}${peakHeader === null ? "" : `&header=${peakHeader ? 1 : 0}`}`}
+        download
+        style={{ ...BTN, display: "inline-block", marginTop: 6, textDecoration: "none" }}
+        title="The datasheet book: a job cover (logos, job, venue, contacts), the index, then every datasheet A→Z by manufacturer"
+      >
+        {BOOK_COVER_COPY.button}
+      </a>
       {packageUrl && packageUnreadable.length > 0 && (
         <div
           style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 6, lineHeight: 1.4 }}

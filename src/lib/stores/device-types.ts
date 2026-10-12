@@ -12,6 +12,7 @@ import {
   deviceTypesFrom,
   favoritesBlobId,
   mergeTypeEntries,
+  planPartTypeEdit,
   recentBlobId,
   sanitizeTypeMap,
   toggleInList,
@@ -24,6 +25,7 @@ import {
   type TypeMap,
 } from "@/lib/design/device-types";
 import { isDocumentId } from "@/lib/part-docs/types";
+import { getManyBySku, partsWithOwnDeviceType, setPartDeviceTypeKeys } from "@/lib/stores/catalog";
 
 /**
  * Grid device types store (#226). Four doc-store blobs, no table and no
@@ -105,6 +107,53 @@ export async function assignDeviceType(
   if (!count) return { ok: false, error: "Pick at least one category." };
   await setBlob(TYPE_MAP_BLOB, patch);
   return { ok: true, count };
+}
+
+/** Most distinct catalog parts one Type edit may touch (the Grid's multi-select). */
+export const MAX_TYPE_EDIT_PARTS = 200;
+
+/**
+ * Grid notes #2 — an admin's Type edit from the Grid (or the part editor):
+ * per part, store/clear each part's `deviceTypeKey`; whole category, clear
+ * the override of EVERY part in the parts' raw categories (catalog-wide) and
+ * then re-type those categories through the map (assignDeviceType). Clears
+ * go first, batched (setPartDeviceTypeKeys), so a failure never leaves a
+ * re-typed category whose parts still ignore it; a failure mid-way returns
+ * "N of M saved — reload to see the current types" with `partial`. The
+ * caller has checked manage_users. Every sku must be a live catalog part
+ * (a renamed SKU follows to the part it became).
+ */
+export async function setPartsDeviceType(
+  skus: readonly string[],
+  typeKey: string | null,
+  opts: { wholeCategory?: boolean; now?: number } = {}
+): Promise<{ ok: true; parts: number; categories: number } | { ok: false; error: string; partial?: true }> {
+  const wanted = [...new Set(skus.filter((s) => typeof s === "string" && s.trim()))];
+  if (!wanted.length) return { ok: false, error: "Pick at least one catalog part." };
+  if (wanted.length > MAX_TYPE_EDIT_PARTS) return { ok: false, error: `Change at most ${MAX_TYPE_EDIT_PARTS} different parts at once.` };
+  const whole = opts.wholeCategory === true;
+  const [types, bySku, mates] = await Promise.all([getDeviceTypes(), getManyBySku(wanted), whole ? partsWithOwnDeviceType() : Promise.resolve([])]);
+  if (wanted.some((s) => !bySku.has(s))) return { ok: false, error: "A part is no longer in the catalog — reload and try again." };
+  const parts = [...new Map([...bySku.values()].map((p) => [p.sku, p])).values()];
+  const res = planPartTypeEdit(parts, typeKey, whole, types, mates.map((m) => ({ sku: m.sku || m.id, category: m.category || "", deviceTypeKey: m.deviceTypeKey })));
+  if (!res.ok) return res;
+  const steps = res.plan.overrides.length + (res.plan.categories.length ? 1 : 0);
+  const partial = (done: number) => ({ ok: false as const, partial: true as const, error: `${done} of ${steps} saved — reload to see the current types.` });
+  const w = await setPartDeviceTypeKeys(res.plan.overrides);
+  if (w.failed) return partial(w.saved);
+  let categories = 0;
+  if (res.plan.categories.length) {
+    let a: Awaited<ReturnType<typeof assignDeviceType>>;
+    try {
+      a = await assignDeviceType(res.plan.categories, typeKey, opts.now);
+    } catch (e) {
+      console.error("[device-types] category assign failed:", e);
+      return w.saved ? partial(w.saved) : { ok: false, error: "That didn't save — check your connection and try again." };
+    }
+    if (!a.ok) return w.saved ? partial(w.saved) : a;
+    categories = a.count;
+  }
+  return { ok: true, parts: w.saved, categories };
 }
 
 /** "Accept all suggestions" — low ones included — for categories that still

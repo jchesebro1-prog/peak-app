@@ -32,6 +32,9 @@ import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
 import RackDataField from "./rack-data-field";
 import TagDefaultsField from "./tag-defaults-field";
+import PartDeviceTypeField, { type PartTypeChoice } from "./part-device-type-field";
+import { getDeviceTypes, getTypeMap } from "@/lib/stores/device-types";
+import { autoTypeEntries, isExcludedCategory, typeLabel, typeOfCategory } from "@/lib/design/device-types";
 import { rackFactsOf } from "@/lib/rack/part-facts";
 import { isPerLengthUnit } from "@/lib/design/grid-bom";
 import { formatCableOd, suggestCableOd } from "@/lib/design/conduit-riser/cable-od";
@@ -225,6 +228,22 @@ export default async function CatalogPage({
         return { ...view, drawings: drawingSlotsFor(state.documents, state.links, editingPart.sku) };
       })()
     : null;
+
+  // Grid notes #2: the admin-only Device type control — the active types and
+  // what the part's category maps to on its own. Reads the map WITHOUT
+  // writing (the Grid's own auto-apply, in memory — the riser sheet's rule).
+  const deviceTypeField =
+    isAdmin && editingPart && !isExcludedCategory(editingPart.category)
+      ? await (async () => {
+          const [types, stored] = await Promise.all([getDeviceTypes(), getTypeMap()]);
+          const map = { ...stored, ...autoTypeEntries([editingPart], stored, types, 0) /* in memory only — never written, so no timestamp */ };
+          const catKey = typeOfCategory(editingPart.category || "", map, types);
+          const choices: PartTypeChoice[] = types.filter((t) => !t.archived).map((t) => ({ key: t.key, label: t.label }));
+          const own = editingPart.deviceTypeKey || "";
+          if (own && !choices.some((c) => c.key === own)) choices.push({ key: own, label: `${typeLabel(own, types)} (archived — reads as Auto)` });
+          return { categoryTypeLabel: catKey ? typeLabel(catKey, types) : null, initial: own, types: choices };
+        })()
+      : null;
 
   // Customer visibility (#245) — the reason line under the part editor's
   // Auto/Show/Hide selector, read from the portal's cached catalog index
@@ -685,6 +704,7 @@ export default async function CatalogPage({
           specTemplates={specTemplates}
           defaultArticleId={defaultArticleId}
           partDocs={partDocs}
+          deviceTypeField={deviceTypeField}
           visibilityReason={visibilityReason}
           error={partError}
         />
@@ -798,6 +818,7 @@ function PartFormModal({
   specTemplates,
   defaultArticleId,
   partDocs,
+  deviceTypeField,
   visibilityReason,
   error,
 }: {
@@ -818,6 +839,9 @@ function PartFormModal({
   defaultArticleId: string | null;
   /** Part documents (#207) — null for a new, unsaved part. */
   partDocs: PartDocsView | null;
+  /** Grid notes #2: the admin-only Device type control's data; null hides it
+   *  (not an admin, a new part, or Fabric/Labor). */
+  deviceTypeField: { categoryTypeLabel: string | null; initial: string; types: PartTypeChoice[] } | null;
   /** #245 Task 5 — the reason line under the visibility selector, computed
    *  server-side from the current facts + the browse rule. Null when the
    *  form isn't showing at all (never both showForm and null in practice). */
@@ -1040,6 +1064,20 @@ function PartFormModal({
                 Letters the Grid puts on this part&apos;s devices (CRO gives CRO-01). Leave blank to use the device type&apos;s code.
               </div>
             </div>
+            {part && deviceTypeField && (
+              <div style={{ marginTop: 13, marginBottom: 4 }}>
+                {/* key={part.sku}: the modal is reused across parts without remounting. */}
+                <PartDeviceTypeField
+                  key={part.sku}
+                  sku={part.sku}
+                  category={part.category || ""}
+                  categoryTypeLabel={deviceTypeField.categoryTypeLabel}
+                  initial={deviceTypeField.initial}
+                  types={deviceTypeField.types}
+                  inputStyle={inputStyle}
+                />
+              </div>
+            )}
             <div style={{ marginTop: 13, marginBottom: 4 }}>
               <TagDefaultsField key={part?.sku ?? "new"} initial={part?.tagDefaults ?? {}} />
             </div>

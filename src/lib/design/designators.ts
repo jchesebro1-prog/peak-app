@@ -13,7 +13,7 @@
  * read these rules. The server-side code resolver lives in
  * designators-server.ts.
  * ------------------------------------------------------------------ */
-import { spaceOf, type SpaceLite } from "./grid-geometry";
+import { spaceOfPlacement, type SpaceLite } from "./grid-geometry";
 import { placementQty } from "./grid-bom";
 import { DRAWING_SYSTEMS, drawingSystemOf, scopeOfPart, type GridLayer } from "./grid-scopes";
 import {
@@ -42,6 +42,8 @@ export type DesignatorPlacement = {
   page: number;
   x: number;
   y: number;
+  /** Grid notes #2: a space pin — reading order groups by the pinned room. */
+  spaceId?: string;
   partId: string;
   designator?: string;
   qty?: number;
@@ -142,7 +144,7 @@ export function readingOrder<P extends DesignatorPlacement>(placements: readonly
   const spaceIdx = new Map(spaces.map((s, i) => [s.id, i]));
   const LAST = Number.MAX_SAFE_INTEGER;
   const keyed = placements.map((pl) => {
-    const home = spaceOf(pl, spaces);
+    const home = spaceOfPlacement(pl, spaces);
     return { pl, k: [sheetIdx.get(pl.sheetId) ?? LAST, pl.page, home ? spaceIdx.get(home.id) ?? LAST : LAST, Math.floor(pl.y / READING_BAND), pl.x] };
   });
   keyed.sort((a, b) => {

@@ -16,10 +16,12 @@
  */
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { letterheadBoxPx, type Letterhead } from "@/lib/letterhead";
+import { listManufacturers } from "@/lib/stores/manufacturers";
 import {
-  BOOK_MAX_BYTES, BOOK_REASON, BOOK_TITLE, bookIndex, bookSummary, planDatasheetBook,
+  BOOK_MAX_BYTES, BOOK_REASON, BOOK_TITLE, bookIndex, bookSummary, canonicalMfrResolver, planDatasheetBook, type CanonicalMfr,
   type BookIndex, type BookIndexRow, type BookPart, type BookPlan,
 } from "./datasheet-book";
+import { BOOK_COVER_COPY, bookCoverText, type BookCover, type BookCoverText } from "./datasheet-book-cover";
 
 /** `name`: the document's loose zip entry, when the caller ships one (for its notes). */
 export type BookDoc = { bytes: Uint8Array | null; reason?: string; name?: string };
@@ -41,6 +43,18 @@ export type BuildBookInput = {
   logTag?: string;
   /** Build even when no datasheet merged (the rack's cover-only index, #296). Default false: no merged page → `failed`. */
   emptyOk?: boolean;
+  /**
+   * #329b — the #298 manufacturer merges (from `loadCanonicalMfr()`), applied before sorting, grouping and printing.
+   * Optional: callers that already resolved their parts (`withCanonicalMfrs`) may omit it; applying it twice is a no-op.
+   */
+  canonicalMfr?: CanonicalMfr | null;
+  /**
+   * Grid notes #8 — the JOB cover: the customer's logo (or name set large)
+   * top-right below the letterhead, job name + number, venue + address,
+   * Prepared for / Prepared by and the date, in place of `subtitleLines`.
+   * Absent = the cover exactly as before.
+   */
+  cover?: BookCover | null;
 };
 
 export type BuiltBook =
@@ -53,6 +67,23 @@ export const BOOK_SKIPPED_REASON: Record<"too-big" | "late" | "failed", string> 
   late: BOOK_REASON.late,
   failed: "Left out — the combined datasheet book couldn't be built",
 };
+
+/**
+ * #329b — the #298 merges for ONE package build: one read of the manufacturer
+ * records. A failed read logs and returns null — the book then groups by each
+ * part's own manufacturer text, as before; it never fails the package.
+ */
+export async function loadCanonicalMfr(
+  list: () => Promise<ReadonlyArray<{ key: string; name?: string; aliasKeys?: string[]; mergedInto?: string | null }>> = listManufacturers,
+  tag = "[datasheet-book]",
+): Promise<CanonicalMfr | null> {
+  try {
+    return canonicalMfrResolver(await list());
+  } catch (err) {
+    console.warn(`${tag} manufacturer merges not loaded — grouping by each part's own manufacturer: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
 
 /* ---------- text helpers (moved from the rack submittal) ---------- */
 
@@ -168,6 +199,8 @@ type Fonts = { regular: PDFFont; bold: PDFFont };
 /** One laid-out thing on a front page, top-down. */
 type Op =
   | { k: "logo"; y: number; w: number; h: number }
+  /** Grid notes #8 — the customer's logo, top-right. */
+  | { k: "customer"; x: number; y: number; w: number; h: number }
   | { k: "company"; y: number; text: string }
   | { k: "text"; y: number; x: number; text: string; size: number; bold?: boolean; muted?: boolean }
   | { k: "rule"; y: number; light?: boolean }
@@ -182,6 +215,8 @@ type FrontInput = {
   company: string | null;
   index: BookIndex;
   parts: number;
+  /** Grid notes #8 — the job cover's text + the customer logo's drawn box (null = name set large). */
+  cover?: { text: BookCoverText; customer: { w: number; h: number } | null } | null;
 };
 
 /**
@@ -216,13 +251,17 @@ function layoutFront(input: FrontInput, f: Fonts): Op[][] {
     ops().push({ k: "company", y, text: input.company });
     y -= 22;
   }
-  y -= 24;
-  ops().push({ k: "text", y, x: MARGIN, text: input.title, size: 24, bold: true });
-  y -= 10;
-  for (const line of input.subtitleLines) {
-    for (const l of clamp(f.regular, line, 11.5, PAGE_W - 2 * MARGIN, 2)) {
-      y -= 16;
-      ops().push({ k: "text", y, x: MARGIN, text: l, size: 11.5 });
+  if (input.cover) {
+    y = layoutJobCover(input.cover, input.title, y, ops, f);
+  } else {
+    y -= 24;
+    ops().push({ k: "text", y, x: MARGIN, text: input.title, size: 24, bold: true });
+    y -= 10;
+    for (const line of input.subtitleLines) {
+      for (const l of clamp(f.regular, line, 11.5, PAGE_W - 2 * MARGIN, 2)) {
+        y -= 16;
+        ops().push({ k: "text", y, x: MARGIN, text: l, size: 11.5 });
+      }
     }
   }
   y -= 18;
@@ -268,9 +307,71 @@ function layoutFront(input: FrontInput, f: Fonts): Op[][] {
   return pages;
 }
 
-function drawFront(page: PDFPage, ops: Op[], f: Fonts, logo: PDFImage | null): void {
+/**
+ * Grid notes #8 — the job cover block, from `y` (just below the letterhead):
+ * the title left with the customer's logo (≤ 200 × 72 pt) or name (18 pt,
+ * ≤ 3 lines) right; a rule; the job name (≤ 2 lines, "…") and number; then
+ * Venue · Prepared for · Prepared by columns (each line ≤ 2 lines) and the
+ * date. Every run is clamped, so the block's height is bounded and the
+ * index still starts on page 1. Returns the new `y`.
+ */
+function layoutJobCover(cover: NonNullable<FrontInput["cover"]>, title: string, y: number, ops: () => Op[], f: Fonts): number {
+  const t = cover.text;
+  const cw = PAGE_W - 2 * MARGIN;
+  const text = (x: number, yy: number, size: number, s: string, bold?: boolean, muted?: boolean) => ops().push({ k: "text", y: yy, x, text: s, size, bold, muted });
+  const right = (yy: number, size: number, s: string) => text(PAGE_W - MARGIN - f.bold.widthOfTextAtSize(encodable(f.bold, s), size), yy, size, s, true);
+  const rowTop = y;
+  let rightBottom = rowTop;
+  if (cover.customer) {
+    ops().push({ k: "customer", x: PAGE_W - MARGIN - cover.customer.w, y: rowTop - cover.customer.h, w: cover.customer.w, h: cover.customer.h });
+    rightBottom = rowTop - cover.customer.h;
+  } else if (t.customerName) {
+    const rows = clamp(f.bold, t.customerName, 18, 220, 3);
+    rows.forEach((r, i) => right(rowTop - 18 - i * 22, 18, r));
+    rightBottom = rowTop - 18 - (rows.length - 1) * 22 - 6;
+  }
+  text(MARGIN, rowTop - 24, 24, title, true);
+  y = Math.min(rowTop - 34, rightBottom) - 10;
+  ops().push({ k: "rule", y, light: true });
+  y -= 6;
+  for (const l of clamp(f.bold, t.job, 17, cw, 2)) {
+    y -= 21;
+    text(MARGIN, y, 17, l, true);
+  }
+  if (t.jobRef) {
+    y -= 14;
+    text(MARGIN, y, 10, t.jobRef, false, true);
+  }
+  y -= 22;
+  const cols: Array<{ label: string; rows: string[] }> = [];
+  if (t.venue.length) cols.push({ label: BOOK_COVER_COPY.venue, rows: t.venue });
+  cols.push({ label: BOOK_COVER_COPY.preparedFor, rows: t.preparedFor });
+  cols.push({ label: BOOK_COVER_COPY.preparedBy, rows: t.preparedBy });
+  const gap = 16;
+  const colW = (cw - gap * (cols.length - 1)) / cols.length;
+  let blockH = 0;
+  cols.forEach((c, i) => {
+    const x = MARGIN + i * (colW + gap);
+    let cy = y;
+    text(x, cy, 7.5, c.label.toUpperCase(), true, true);
+    cy -= 4;
+    (c.rows.length ? c.rows : ["—"]).forEach((row, j) => {
+      for (const l of clamp(j === 0 ? f.bold : f.regular, row, 9.5, colW, 2)) {
+        cy -= 12;
+        text(x, cy, 9.5, l, j === 0 && c.rows.length > 0, !c.rows.length);
+      }
+    });
+    blockH = Math.max(blockH, y - cy);
+  });
+  y -= blockH + 18;
+  text(MARGIN, y, 9.5, `Date: ${t.dateLine}`);
+  return y;
+}
+
+function drawFront(page: PDFPage, ops: Op[], f: Fonts, logo: PDFImage | null, customer: PDFImage | null = null): void {
   for (const op of ops) {
     if (op.k === "logo" && logo) page.drawImage(logo, { x: MARGIN, y: op.y, width: op.w, height: op.h });
+    else if (op.k === "customer" && customer) page.drawImage(customer, { x: op.x, y: op.y, width: op.w, height: op.h });
     else if (op.k === "company") page.drawText(encodable(f.bold, op.text), { x: MARGIN, y: op.y, size: 16, font: f.bold, color: INK });
     else if (op.k === "text") {
       const font = op.bold ? f.bold : f.regular;
@@ -312,7 +413,7 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
   const now = input.now ?? Date.now;
   const maxBytes = input.maxBytes ?? BOOK_MAX_BYTES;
   try {
-    const plan = planDatasheetBook(input.parts);
+    const plan = planDatasheetBook(input.parts, input.canonicalMfr);
     let inBytes = 0;
     for (const id of plan.docOrder) inBytes += input.docs.get(id)?.bytes?.byteLength ?? 0;
     if (inBytes > maxBytes) return { ok: false, cause: "too-big", detail: `${inBytes} bytes of datasheets` };
@@ -364,18 +465,34 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
       }
     }
     const company = lh && !logo ? lh.companyName || null : null;
+    // Grid notes #8 — the job cover's customer logo (≤ 200 × 72 pt); one that won't embed falls back to the name set large.
+    let customer: PDFImage | null = null;
+    let cover: FrontInput["cover"] = null;
+    if (input.cover) {
+      const img = input.cover.customerLogo;
+      if (img) {
+        try {
+          customer = img.format === "png" ? await out.embedPng(img.bytes) : await out.embedJpg(img.bytes);
+        } catch (err) {
+          console.warn(`${tag} customer logo not embedded: ${err instanceof Error ? err.message : String(err)}`);
+          customer = null;
+        }
+      }
+      const k = customer ? Math.min(1, 200 / customer.width, 72 / customer.height) : 0;
+      cover = { text: bookCoverText(input.cover), customer: customer ? { w: customer.width * k, h: customer.height * k } : null };
+    }
     const title = input.title || BOOK_TITLE;
     const subtitleLines = input.subtitleLines.map((s) => String(s ?? "").trim()).filter(Boolean);
     // The front-page count feeds the page numbers, which never change the layout: settle once more to be sure.
     let front = 1;
     let index = bookIndex(plan, pages, reasons, front);
-    let laid = layoutFront({ title, subtitleLines, logo: logoBox, company, index, parts: plan.parts.length }, f);
+    let laid = layoutFront({ title, subtitleLines, logo: logoBox, company, index, parts: plan.parts.length, cover }, f);
     for (let i = 0; i < 4 && laid.length !== front; i++) {
       front = laid.length;
       index = bookIndex(plan, pages, reasons, front);
-      laid = layoutFront({ title, subtitleLines, logo: logoBox, company, index, parts: plan.parts.length }, f);
+      laid = layoutFront({ title, subtitleLines, logo: logoBox, company, index, parts: plan.parts.length, cover }, f);
     }
-    laid.forEach((ops, i) => drawFront(out.insertPage(i, [PAGE_W, PAGE_H]), ops, f, logo));
+    laid.forEach((ops, i) => drawFront(out.insertPage(i, [PAGE_W, PAGE_H]), ops, f, logo, customer));
     const all = out.getPages();
     all.forEach((p, i) => {
       try {
@@ -385,7 +502,8 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
         console.warn(`${tag} page ${i + 1} not stamped: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
-    out.setTitle(subtitleLines[0] ? `${title} — ${subtitleLines[0]}` : title);
+    const docTitle = cover ? cover.text.job : subtitleLines[0];
+    out.setTitle(docTitle ? `${title} — ${docTitle}` : title);
     out.setCreator("Peak Systems Group");
     out.setProducer("Quartzite");
     if (input.deadline !== undefined && now() >= input.deadline) return { ok: false, cause: "late", detail: "the merge ran past its deadline" };

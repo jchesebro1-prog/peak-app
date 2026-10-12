@@ -5,7 +5,7 @@
  */
 
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
-import { spaceOf, type SpaceLite } from "./grid-geometry";
+import { spaceOfPlacement, type SpaceLite } from "./grid-geometry";
 import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
 import { partModel } from "@/lib/catalog-rename/sku";
@@ -68,7 +68,7 @@ export function scheduleWiresFromView(view: RiserView): ScheduleWire[] {
  * group: each drop is its own made-to-size drape.
  */
 export function buildSchedule(input: {
-  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number; designator?: string }>;
+  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number; designator?: string; spaceId?: string }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
   /** #304: the printed Model # per part id; blank/absent = print the part id as before. */
@@ -83,7 +83,7 @@ export function buildSchedule(input: {
   const bySpace = new Map<string | null, ScheduleRow[]>();
   const held = new Map<ScheduleRow, Array<{ designator?: string; qty?: number }>>();
   for (const pl of input.placements) {
-    const home = spaceOf(pl, input.spaces);
+    const home = spaceOfPlacement(pl, input.spaces);
     const key = home ? home.id : null;
     const rows = bySpace.get(key) || [];
     if (pl.curtain) {
