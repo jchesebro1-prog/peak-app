@@ -11669,6 +11669,7 @@ seeded()
   .then(() => datasheetBook329Checks())
   .then(() => bonusLeakChecks())
   .then(() => bonusStoreChecks())
+  .then(() => bonusFinalFixChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -34992,7 +34993,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
   ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,120}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
     && (t254Client.match(/setSectionsState\(/g) || []).length === 6,
-    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo and the site-visit goals pre-fill write the raw state");
+    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill and the #bonus effect write the raw state (6)");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
     "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
   ok(!/from "@\/(lib\/stores|db)/.test(t254Pure) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(t254Client),
@@ -54584,7 +54585,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
   ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
   ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 6,
-    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (still 5 raw writes)");
+    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (6 raw writes: 5 + the #bonus effect)");
   const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
   ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
     "#P2a hook: un-marking ignores the Rewards credit line (a re-pin after a reorder is not an edit)");
@@ -57394,7 +57395,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
     "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
-  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 6, "#P4 pins: setSectionsState( count unchanged");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 6, "#P4 pins: setSectionsState( count stays 6 (5 + the #bonus effect)");
 }
 
 // ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
@@ -58201,7 +58202,7 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
   ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus);") &&
      /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
-    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count unchanged");
+    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 6 (5 + the #bonus effect)");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
 }
@@ -58241,7 +58242,7 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
-    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count unchanged");
+    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 6 (5 + the #bonus effect)");
 
   // (2) Remove document: the unmount flush never brings the removed document back.
   ok(pkgStep.includes("const discardRef = useRef(false);") && /const removeDocument = \(\) => \{\s*discardRef\.current = true;/.test(pkgStep) &&
@@ -58755,7 +58756,7 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
     "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
      (hook.match(/setSectionsState\(/g) || []).length === 6 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
-    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count unchanged; `next` stays last");
+    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 6 (5 + the #bonus effect); `next` stays last");
   // Fix round 1
   ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
     "#P6 estimator: the category load is fail-soft ([] + a server warning) and runs inside the page's Promise.all, not serially after it");
@@ -67417,11 +67418,12 @@ function bnLeakFixture(): EstimatorSpecSection[] {
   ]) ok(src(p).includes("isBonusItem"), "#bonus leak pin: " + p + " skips bonus lines");
 }
 async function bonusLeakChecks(): Promise<void> {
-  const { upsertDoc } = await import("@/db/doc-store");
   const { bomFromQuote } = await import("@/lib/specs/quote-bom");
   const sections = bnLeakFixture();
-  await upsertDoc("quotes", { id: "Q-BONUS-LEAK-1", name: "Bonus leak", spec: { sections } } as never);
-  const r = await bomFromQuote("Q-BONUS-LEAK-1");
+  const leakId = fixtureId("bonus", "leak-1");
+  await createFixture("quotes", { id: leakId, name: "Bonus leak", spec: { sections } } as never);
+  ok((await findFixtureDocs()).some((e) => e.coll === "quotes" && e.id === leakId), "#bonus M10: the leak fixture is a marked, registered fixture (torn down with the suite)");
+  const r = await bomFromQuote(leakId);
   ok(r.ok && r.rows.length === 1 && r.rows[0].sku === "P-1" && !/BON-|bonus/i.test(JSON.stringify(r.rows)), "#bonus leak: Word spec BOM lists only the real part");
 }
 
@@ -67573,11 +67575,11 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
 
 {
   const bnHook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
-  const bnFx = bnHook.indexOf("withBonusLines(sections, nextId)");
+  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId)");
   const bnFxStart = bnHook.lastIndexOf("useEffect(", bnFx);
   const bnFxBody = bnHook.slice(bnFxStart, bnHook.indexOf("}, [sections, status]);", bnFx) + 30);
-  ok(bnFx > 0 && /bonusRulesApply\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType, status \}, sections\)/.test(bnFxBody), "#bonus client pin: the effect gates on bonusRulesApply with the hook's own status");
-  ok(/setSectionsState\(next\)/.test(bnFxBody) && !/\bsetSections\(/.test(bnFxBody), "#bonus client pin: the effect writes setSectionsState directly (never un-marks a built system)");
+  ok(bnFx > 0 && /bonusRulesApply\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType, status \}, cur\)/.test(bnFxBody), "#bonus client pin: the effect gates on bonusRulesApply with the hook's own status, judged on the current sections");
+  ok(/setSectionsState\(\(cur\) =>/.test(bnFxBody) && !/\bsetSections\(/.test(bnFxBody), "#bonus client pin: the effect writes setSectionsState directly with a functional update (never un-marks a built system, never overwrites a newer edit)");
   ok(bnHook.indexOf("const [status, setStatus]") > 0 && bnHook.indexOf("const [status, setStatus]") < bnFxStart && bnHook.indexOf("const nextId =") < bnFxStart, "#bonus client pin: status and nextId are declared before the effect");
   const bnRemove = bnHook.slice(bnHook.indexOf("const removeItem = (id: number) => {"), bnHook.indexOf("const setMarginAll"));
   ok(/if \(isBonusId\(id\)\) return;/.test(bnRemove), "#bonus client pin: removeItem refuses a bonus line");
@@ -67609,7 +67611,7 @@ import { alternateChoices as bn8Alts, liveEstimatorBonus as bn8Live, showSplitRo
   ok(bn8Parse("70.4") === 70 && bn8Parse("140") === 100 && bn8Parse("-5") === 0 && bn8Parse("") === null && bn8Parse("abc") === null, "#bonus card: parseLeadPct clamps and rejects");
   const hook8 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
   const cs8 = hook8.slice(hook8.indexOf("const changeStatus = (v: QuoteStatus) => {"), hook8.indexOf("const changeStage ="));
-  ok(/setStatusAction\(id, v, v === "won" \? \{ alternatesTaken \} : undefined\)/.test(cs8), "#bonus source pin: changeStatus passes alternatesTaken to setStatusAction when moving to won");
+  ok(/setStatusAction\(id, v, v === "won" && alternatesTouched \? \{ alternatesTaken \} : undefined\)/.test(cs8), "#bonus source pin: changeStatus passes alternatesTaken to setStatusAction when moving to won, only once the user has ticked one");
   const step8 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/send-step.tsx"), "utf8");
   ok(/isBonusEligibleQuote\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType \}\)/.test(step8) && step8.includes("<BonusCard"), "#bonus source pin: Send & track renders the bonus card only for eligible quotes");
 }
@@ -67619,7 +67621,7 @@ import { alternateChoices as bn8Alts, liveEstimatorBonus as bn8Live, showSplitRo
   const actF1 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   const storeF1 = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const stageF1 = hookF1.slice(hookF1.indexOf("const changeStage = (stageId: string) => {"), hookF1.indexOf("const changePipeline ="));
-  ok(/setQuoteStageAction\(id, stageId, alternatesTaken\)/.test(stageF1), "#bonus fix1 source pin: the stage bar passes the ticked alternates to setQuoteStageAction");
+  ok(/setQuoteStageAction\(id, stageId, alternatesTouched \? alternatesTaken : undefined\)/.test(stageF1), "#bonus fix1 source pin: the stage bar passes the ticked alternates to setQuoteStageAction (only once touched)");
   const stageActF1 = actF1.slice(actF1.indexOf("export async function setQuoteStageAction("), actF1.indexOf("export async function setQuotePipelineAction("));
   ok(/alternatesTaken\?: string\[\]/.test(stageActF1) && /Array\.isArray\(alternatesTaken\)/.test(stageActF1) && /setQuoteStage\(id, stageId, user\.name, /.test(stageActF1), "#bonus fix1 source pin: setQuoteStageAction sanitizes alternatesTaken and hands it to setQuoteStage");
   const stageStoreF1 = storeF1.slice(storeF1.indexOf("export async function setQuoteStage("), storeF1.indexOf("export async function setQuotePipeline("));
@@ -67662,4 +67664,106 @@ import { bonusReportRange as bn9Range, chicagoDayStart as bn9DayStart } from "@/
   const r = bn9Range("2026-10-01", "2026-10-31", Date.UTC(2026, 9, 12));
   ok(r.from === Date.UTC(2026, 9, 1, 5) && r.to === Date.UTC(2026, 10, 1, 5), "#bonus report: range end is inclusive of the last day");
   ok(bn9Range(null, null, Date.UTC(2026, 9, 12)).fromDay === "2026-01-01", "#bonus report: default range starts Jan 1 this year");
+}
+
+// Estimator bonuses — final review fix round (I1–I4, M1–M11).
+import { estimatorBonus as bnfEstBonus, isBonusEligibleQuote as bnfEligible, bonusNotFigured as bnfNotFigured, withBonusLines as bnfWith, idCounterFrom as bnfIds } from "@/lib/estimate-bonus/rules";
+import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice";
+{
+  const bnfRead = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const empty = { id: "e1", name: "Empty", kind: "materials", mfr: "", freightPct: 0, items: [], sellOverride: 5100 } as unknown as EstimatorSpecSection;
+  ok(bnfEstBonus(empty) === null, "#bonus M1: a typed sell on a system with no base lines figures no estimator bonus");
+  const one = { ...empty, items: [{ id: 1, sku: "P-1", desc: "P", qty: 1, unit: "ea", cost: 100, price: 150 }] } as unknown as EstimatorSpecSection;
+  ok((bnfEstBonus(one)?.sell ?? 0) > 0, "#bonus M1: a typed sell with a base line still figures the 2%");
+  ok(bnfEligible({ quoteType: "", source: "estimator" }) && !bnfEligible({ quoteType: "rental", source: "estimator" }), "#bonus M2: an empty quoteType counts as absent (system)");
+  const nanSec = { ...empty, sellOverride: undefined, items: [{ id: 1, sku: "P-1", desc: "P", qty: 1, unit: "ea", cost: Number.NaN, price: 150 }] } as unknown as EstimatorSpecSection;
+  const okSec = { ...nanSec, items: [{ id: 1, sku: "P-1", desc: "P", qty: 1, unit: "ea", cost: 100, price: 150 }] } as unknown as EstimatorSpecSection;
+  ok(bnfNotFigured(nanSec) && !bnfNotFigured(okSec), "#bonus I2: bonusNotFigured flags a non-finite line cost, not a good one");
+  const optNan = { ...okSec, items: [...okSec.items, { id: 2, sku: "P-2", desc: "Opt", qty: 1, unit: "ea", cost: Number.NaN, price: 1, option: true }] } as unknown as EstimatorSpecSection;
+  ok(!bnfNotFigured(optNan), "#bonus I2: bonusNotFigured ignores option lines (not in the bonus base)");
+  const labSec = { id: "r1", name: "R", kind: "materials", mfr: "", freightPct: 0, items: [
+    { id: 1, sku: "P-1", desc: "Part", qty: 1, unit: "ea", cost: 1000, price: 1500 },
+    { id: 2, sku: "L-2", desc: "Labor", qty: 1, unit: "lot", cost: 400, price: 600, labor: true },
+  ] } as unknown as EstimatorSpecSection;
+  const withB = bnfWith([labSec], bnfIds([labSec]));
+  const bonusOnly = [{ ...withB[0], items: withB[0].items.filter((x) => x.bonus) }];
+  const rp = bnfReprice(bonusOnly, 0.3, 0.4);
+  ok(rp.handPriced === 0 && rp.untouched === 0 && rp.repriced === 0 && rp.sections === bonusOnly, "#bonus M9: a tier re-price skips bonus lines (never counted as hand-priced)");
+
+  const page = bnfRead("src/app/(app)/estimator/page.tsx");
+  ok(page.includes('bonusSource: sourceForSave(q.source, "estimator")') && !page.includes("bonusSource: q.source"), "#bonus I1 source pin: the page judges eligibility on the source the save will write (sourceForSave)");
+  const card = bnfRead("src/app/(app)/estimator/steps/bonus-card.tsx");
+  ok(card.includes('Bonus not recorded {"\\u2014"} re-save Won') && /won && !record && hasBonusLines && canApprove/.test(card) && /onClick=\{\(\) => onTaken\(taken\)\}/.test(card), "#bonus I2 source pin: a Won with bonus lines and no record tells approvers, with a Record now that re-saves the alternates");
+  ok(card.includes("(no matching team member)") && !card.includes("(removed user)"), "#bonus M7: an unresolved credit says (no matching team member)");
+  const step = bnfRead("src/app/(app)/estimator/steps/send-step.tsx");
+  ok(step.includes("hasBonusLines={quoteHasBonusLines(sections)}") && /\n {6}<Fragment key="status">\n {8}<section id=\{SEND_STEP_IDS\.status\}/.test(step), "#bonus I2/M5 source pin: Send & track passes hasBonusLines; the status Fragment's children are indented");
+  const sc = bnfRead("src/app/(app)/estimator/section-card.tsx");
+  const bs = bnfRead("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(sc.includes('Bonus not figured {"\\u2014"} check line costs') && /\{p\.bonusNotFigured && \(/.test(sc) && bs.includes("bonusNotFigured={bonusOn && bonusNotFigured(sec)}") && /const bonusOn = bonusRulesApply\(/.test(bs), "#bonus I2 source pin: Build shows Bonus not figured where the rules apply and a line cost isn't a number");
+  const acts = bnfRead("src/app/(app)/estimator/actions.ts");
+  const altAct = acts.slice(acts.indexOf("export async function saveBonusAlternatesAction("), acts.indexOf("\n}\n", acts.indexOf("export async function saveBonusAlternatesAction(")));
+  const splitAct = acts.slice(acts.indexOf("export async function saveBonusSplitAction("), acts.indexOf("\n}\n", acts.indexOf("export async function saveBonusSplitAction(")));
+  ok(altAct.includes('"This estimate has no bonus lines"') && altAct.includes('saved === "not-won"'), "#bonus I2 source pin: the alternates action names a won quote with no bonus lines on its own");
+  ok([altAct, splitAct].every((b) => !b.includes("String(e)") && b.includes(`"Couldn't save — try again"`) && /console\.error\(/.test(b)), "#bonus M6: the bonus actions log the error and return a generic message");
+  const hook = bnfRead("src/app/(app)/estimator/use-estimator-state.ts");
+  const pick = hook.slice(hook.indexOf("const pickAlternatesTaken ="), hook.indexOf("const [peopleBusy"));
+  ok(/setAlternatesTouched\(true\)/.test(pick) && /const \[alternatesTouched, setAlternatesTouched\] = useState\(false\)/.test(hook), "#bonus I3 source pin: ticking an alternate marks the list touched (untouched → the server decides)");
+  const save = hook.slice(hook.indexOf("const saveNow = async"), hook.indexOf("const doSave ="));
+  ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
+  const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
+  ok(sum.includes("5% package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
+  const pr = bnfRead("src/app/(app)/estimator/pricing.ts");
+  const prDoc = pr.slice(pr.lastIndexOf("/**", pr.indexOf("function customerLinesRaw(")), pr.indexOf("function customerLinesRaw("));
+  ok(/bonus: "package"/.test(prDoc) && /bonus: "estimator"/.test(prDoc) && /absorbSellAdjustment/.test(prDoc), "#bonus M11: customerLinesRaw's doc comment covers the 5% fold and the 2% spread");
+  ok(bnfRead("src/app/(app)/estimator/parts-csv.ts").includes("less the labor lines' share (header above)") && bnfRead("src/app/(app)/reports/estimator-bonuses/page.tsx").includes("Only system quotes carry a bonus record"), "#bonus M11: parts-csv and the bonuses report carry accurate comments");
+  const store = bnfRead("src/lib/stores/quotes.ts");
+  const ss = store.slice(store.indexOf("export async function setEstimatorBonusSplit("), store.indexOf("export async function setBonusAlternatesTaken("));
+  ok(/if \(out && cost\.rebuilt\) await syncProjectBonusPool\(id, cost\.after\);/.test(ss), "#bonus I4 source pin: every split rebuild syncs the project pool");
+}
+
+async function bonusFinalFixChecks(): Promise<void> {
+  const bnfQ = await import("@/lib/stores/quotes");
+  const { getProjectByQuote: bnfProj, removeProject: bnfRemoveProject } = await import("@/lib/stores/projects");
+  const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
+  const base = (partCost: number) => [{ id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [
+    { id: 1, sku: "P-1", desc: "Part", qty: 1, unit: "ea", cost: partCost, price: partCost * 1.5 },
+    { id: 2, sku: "L-2", desc: "Labor", qty: 1, unit: "lot", cost: 400, price: 600, labor: true },
+  ] }];
+  const withLines = (partCost: number) => { const b = base(partCost); return bnfWith(b as never, bnfIds(b as never)); };
+  const ids: string[] = [];
+  try {
+    // I4: a re-win with a changed spec moves the existing project's pool.
+    const q = await bnfQ.create({ name: "Bonus rewin", source: "estimator", quoteType: "system", owner: "Bonus Lead", spec: { sections: withLines(1000), mobs: [] } } as never);
+    ids.push(q.id);
+    await bnfQ.setStatus(q.id, "sent", "test", bypass);
+    await bnfQ.setStatus(q.id, "won", "test", bypass);
+    ok((await bnfProj(q.id))?.performanceBonusPool === 70, "#bonus I4: first Won — the project pool is the record's package cost");
+    await bnfQ.setStatus(q.id, "sent", "test", bypass);
+    await bnfQ.update(q.id, { spec: { sections: withLines(2000), mobs: [] } } as never);
+    await bnfQ.setStatus(q.id, "won", "test", bypass);
+    const rewon = (await bnfQ.get(q.id))!.bonusRecord;
+    const proj = await bnfProj(q.id);
+    ok(rewon?.packageBonusCost === 120 && proj?.performanceBonusPool === rewon.packageBonusCost, "#bonus I4: won → sent → cost change → won again moves the project pool to the new record's package cost");
+
+    // I2: a won quote with no bonus lines reports so; one with lines but no record gets it rebuilt.
+    const nr = await bnfQ.create({ name: "Bonus norecord", source: "estimator", quoteType: "system", owner: "Bonus Lead", spec: { sections: base(1000), mobs: [] } } as never);
+    ids.push(nr.id);
+    await bnfQ.setStatus(nr.id, "sent", "test", bypass);
+    await bnfQ.setStatus(nr.id, "won", "test", bypass);
+    ok((await bnfQ.setBonusAlternatesTaken(nr.id, [])) === "no-bonus-lines", "#bonus I2: alternates on a won quote with no bonus lines report no-bonus-lines (not not-won)");
+    await bnfQ.update(nr.id, { spec: { sections: withLines(1000), mobs: [] } } as never);
+    const nrBefore = (await bnfQ.get(nr.id))!;
+    ok(nrBefore.status === "won" && !nrBefore.bonusRecord, "#bonus I2 fixture: won, carries bonus lines, no record");
+    const wonEntry = (nrBefore.history || []).filter((h) => h.to === "won").pop();
+    const res = await bnfQ.setBonusAlternatesTaken(nr.id, []);
+    const nrAfter = (await bnfQ.get(nr.id))!;
+    ok(res !== null && typeof res === "object" && nrAfter.bonusRecord?.packageBonusCost === 70 && nrAfter.bonusRecord.wonAt === wonEntry?.at, "#bonus I2: saving alternates rebuilds a missing record on a won quote, wonAt = its move into Won");
+    ok((await bnfProj(nr.id))?.performanceBonusPool === 70, "#bonus I2/I4: the rebuilt record syncs the project pool");
+  } finally {
+    for (const id of ids) {
+      const p = await bnfProj(id);
+      if (p) await bnfRemoveProject(p.id);
+      await bnfQ.remove(id);
+    }
+  }
 }
