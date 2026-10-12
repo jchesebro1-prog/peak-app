@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
+import { stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
@@ -874,7 +875,7 @@ async function placeSystemInEstimate(
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
     // re-pinned after the order is normalised, so it really is the last one.
-    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([withoutGroupMeta(placed)])], existingGroups);
+    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))])], existingGroups);
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
     // Before the credit re-pin below, so value/margin include the bonus.
@@ -908,7 +909,7 @@ async function placeSystemInEstimate(
   }
 
   // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
-  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([withoutGroupMeta(placed)]));
+  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]));
   const t = totals(newSections, 0);
   let created: Quote;
   try {

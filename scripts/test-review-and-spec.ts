@@ -54552,8 +54552,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
-  ok(/\.\.\.withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[withoutGroupMeta\(placed\)\]\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/\.\.\.withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -67548,4 +67548,25 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
   ok(bnCanon({ source: "portal-catalog", status: "draft" }, s) === s, "#bonus canonical: portal untouched");
   const tampered = bnCanon({ source: "estimator", status: "draft" }, s).map((x) => ({ ...x, items: x.items.map((i) => (i.bonus ? { ...i, price: 1 } : i)) }));
   ok(bnCanon({ source: "estimator", status: "draft" }, tampered)[0].items.find((x) => x.bonus === "estimator")!.price === 3, "#bonus canonical: a tampered bonus price is recomputed (2% of 150 = 3)");
+}
+
+{
+  const s = [{ id: "s1", name: "R", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "P", desc: "P", qty: 1, unit: "ea", cost: 100, price: 150 }] }] as EstimatorSpecSection[];
+  ok(bnCanon({ source: "estimator", status: "sent" }, s) === s, "#bonus canonical: a legacy sent estimate (no bonus line) is left untouched");
+  const withBonus = bnCanon({ source: "estimator", status: "draft" }, s);
+  const sentRe = bnCanon({ source: "estimator", status: "sent" }, withBonus.map((x) => ({ ...x, items: x.items.map((i) => (i.bonus ? { ...i, price: 1 } : i)) })));
+  ok(sentRe[0].items.find((x) => x.bonus === "estimator")!.price === 3, "#bonus canonical: a sent estimate that already carries a bonus line is re-derived");
+  ok(bnCanon({ source: "estimator", quoteType: "flame_test", status: "draft" }, s) === s, "#bonus canonical: a flame_test draft is untouched");
+  // The move path: strip the moved system, then canonicalize against the TARGET.
+  const moved = bnStrip(withBonus[0]);
+  ok(!moved.items.some((i) => i.bonus) && bnCanon({ source: "estimator", status: "won" }, [moved])[0].items.every((i) => !i.bonus), "#bonus move: a bonus-carrying system moved into a won target leaves no bonus line");
+  ok(bnCanon({ source: "estimator", status: "sent" }, [moved]) !== undefined && !bnCanon({ source: "estimator", status: "sent" }, [moved])[0].items.some((i) => i.bonus), "#bonus move: a moved-in system cannot flip a legacy sent target onto the new rules");
+  const bnActs = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  const bnSaveStart = bnActs.indexOf("export async function saveQuoteAction(");
+  const bnSaveBody = bnActs.slice(bnSaveStart, bnActs.indexOf("\n}\n", bnSaveStart));
+  const bnCanonAt = bnSaveBody.indexOf("canonicalBonusSections(");
+  ok(bnSaveStart >= 0 && bnCanonAt >= 0 && bnCanonAt < bnSaveBody.indexOf("settleRewardCredit("), "#bonus source pin: saveQuoteAction canonicalizes bonus lines before settleRewardCredit");
+  const bnPlaceStart = bnActs.indexOf("async function placeSystemInEstimate(");
+  const bnPlaceBody = bnActs.slice(bnPlaceStart, bnActs.indexOf("\n}\n", bnPlaceStart));
+  ok(bnPlaceStart >= 0 && (bnPlaceBody.match(/stripBonusLines\(withoutGroupMeta\(placed\)\)/g) || []).length === 2, "#bonus source pin: placeSystemInEstimate strips bonus lines from the placed system in both the existing and the new target branch");
 }
