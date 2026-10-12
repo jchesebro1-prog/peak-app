@@ -1,0 +1,219 @@
+{
+ "documents": [
+  {
+   "id": "PD-p3fixa-ds",
+   "kind": "datasheet",
+   "title": "FixA Datasheet.pdf",
+   "fileName": "FixA Datasheet.pdf",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3fixa-ds/FixA Datasheet.pdf",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  },
+  {
+   "id": "PD-p3fixa-ss",
+   "kind": "specsheet",
+   "title": "FixA Guide.docx",
+   "fileName": "FixA Guide.docx",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3fixa-ss/FixA Guide.docx",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  },
+  {
+   "id": "PD-p3fixa-mn",
+   "kind": "manual",
+   "title": "FixA Manual.pdf",
+   "fileName": "FixA Manual.pdf",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3fixa-mn/FixA Manual.pdf",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  },
+  {
+   "id": "PD-p3fixb-ds",
+   "kind": "datasheet",
+   "title": "FixB Datasheet.pdf",
+   "fileName": "FixB Datasheet.pdf",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3fixb-ds/FixB Datasheet.pdf",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  },
+  {
+   "id": "PD-p3own-ds",
+   "kind": "datasheet",
+   "title": "Own Datasheet.pdf",
+   "fileName": "Own Datasheet.pdf",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3own-ds/Own Datasheet.pdf",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  },
+  {
+   "id": "PD-p3own-ss",
+   "kind": "specsheet",
+   "title": "Own Guide.pdf",
+   "fileName": "Own Guide.pdf",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3own-ss/Own Guide.pdf",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  },
+  {
+   "id": "PD-p3shared-ds",
+   "kind": "datasheet",
+   "title": "Shared Datasheet.pdf",
+   "fileName": "Shared Datasheet.pdf",
+   "contentType": "application/pdf",
+   "size": 1,
+   "blobKey": "part-docs/PD-p3shared-ds/Shared Datasheet.pdf",
+   "sourceUrl": null,
+   "source": "upload",
+   "uploadedAt": 1,
+   "uploadedBy": "t",
+   "history": []
+  }
+ ],
+ "links": [
+  {
+   "id": "L-P3-FIXA-PD-p3fixa-ds",
+   "partSku": "P3-FIXA",
+   "documentId": "PD-p3fixa-ds",
+   "kind": "datasheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-FIXA-PD-p3fixa-ss",
+   "partSku": "P3-FIXA",
+   "documentId": "PD-p3fixa-ss",
+   "kind": "specsheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-FIXA-PD-p3fixa-mn",
+   "partSku": "P3-FIXA",
+   "documentId": "PD-p3fixa-mn",
+   "kind": "manual",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-FIXB-PD-p3fixb-ds",
+   "partSku": "P3-FIXB",
+   "documentId": "PD-p3fixb-ds",
+   "kind": "datasheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-OWN-PD-p3own-ds",
+   "partSku": "P3-OWN",
+   "documentId": "PD-p3own-ds",
+   "kind": "datasheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-OWN-PD-p3own-ss",
+   "partSku": "P3-OWN",
+   "documentId": "PD-p3own-ss",
+   "kind": "specsheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-SH1-PD-p3shared-ds",
+   "partSku": "P3-SH1",
+   "documentId": "PD-p3shared-ds",
+   "kind": "datasheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  },
+  {
+   "id": "L-P3-SH2-PD-p3shared-ds",
+   "partSku": "P3-SH2",
+   "documentId": "PD-p3shared-ds",
+   "kind": "datasheet",
+   "createdAt": 1,
+   "createdBy": "t"
+  }
+ ],
+ "accessoryLinks": [
+  {
+   "id": "a1",
+   "parentSku": "P3-FIXA",
+   "accessorySku": "P3-LENS",
+   "source": "assembly"
+  },
+  {
+   "id": "a2",
+   "parentSku": "P3-FIXA",
+   "accessorySku": "P3-CLAMP",
+   "source": "assembly"
+  },
+  {
+   "id": "a3",
+   "parentSku": "P3-FIXB",
+   "accessorySku": "P3-CLAMP",
+   "source": "davinci"
+  }
+ ],
+ "parts": [
+  {
+   "sku": "P3-NN",
+   "docNotNeeded": {
+    "datasheet": true
+   }
+  },
+  {
+   "sku": "P3-LINK",
+   "productMetadata": {
+    "datasheets": [
+     {
+      "kind": "datasheet",
+      "sourceUrl": "https://mfr.example/link.pdf"
+     }
+    ]
+   }
+  }
+ ],
+ "skus": [
+  "P3-FIXA",
+  "P3-FIXB",
+  "P3-LENS",
+  "P3-CLAMP",
+  "P3-OWN",
+  "P3-SH1",
+  "P3-SH2",
+  "P3-NN",
+  "P3-MISS",
+  "P3-LINK"
+ ]
+}

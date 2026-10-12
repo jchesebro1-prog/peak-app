@@ -1,0 +1,359 @@
+[
+ {
+  "bySku": [
+   [
+    "P3-FIXA",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixa-ds",
+      "name": "FixA Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": {
+      "documentId": "PD-p3fixa-ss",
+      "name": "FixA Guide.docx"
+     },
+     "manual": {
+      "documentId": "PD-p3fixa-mn",
+      "name": "FixA Manual.pdf"
+     }
+    }
+   ],
+   [
+    "P3-FIXB",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixb-ds",
+      "name": "FixB Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ],
+   [
+    "P3-LENS",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixa-ds",
+      "name": "FixA Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [
+      "P3-FIXA"
+     ],
+     "datasheetOk": true,
+     "specsheet": {
+      "documentId": "PD-p3fixa-ss",
+      "name": "FixA Guide.docx"
+     },
+     "manual": {
+      "documentId": "PD-p3fixa-mn",
+      "name": "FixA Manual.pdf"
+     }
+    }
+   ],
+   [
+    "P3-CLAMP",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixa-ds",
+      "name": "FixA Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [
+      "P3-FIXA",
+      "P3-FIXB"
+     ],
+     "datasheetOk": true,
+     "specsheet": {
+      "documentId": "PD-p3fixa-ss",
+      "name": "FixA Guide.docx"
+     },
+     "manual": {
+      "documentId": "PD-p3fixa-mn",
+      "name": "FixA Manual.pdf"
+     }
+    }
+   ],
+   [
+    "P3-OWN",
+    {
+     "datasheet": {
+      "documentId": "PD-p3own-ds",
+      "name": "Own Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": {
+      "documentId": "PD-p3own-ss",
+      "name": "Own Guide.pdf"
+     },
+     "manual": null
+    }
+   ],
+   [
+    "P3-SH1",
+    {
+     "datasheet": {
+      "documentId": "PD-p3shared-ds",
+      "name": "Shared Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ],
+   [
+    "P3-SH2",
+    {
+     "datasheet": {
+      "documentId": "PD-p3shared-ds",
+      "name": "Shared Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ],
+   [
+    "P3-NN",
+    {
+     "datasheet": null,
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ],
+   [
+    "P3-MISS",
+    {
+     "datasheet": null,
+     "datasheetCoveredBy": [],
+     "datasheetOk": false,
+     "specsheet": null,
+     "manual": null
+    }
+   ],
+   [
+    "P3-LINK",
+    {
+     "datasheet": null,
+     "datasheetCoveredBy": [],
+     "datasheetOk": false,
+     "specsheet": null,
+     "manual": null
+    }
+   ]
+  ],
+  "documents": [
+   {
+    "documentId": "PD-p3fixa-ds",
+    "name": "FixA Datasheet.pdf",
+    "kind": "datasheet",
+    "skus": [
+     "P3-FIXA",
+     "P3-LENS",
+     "P3-CLAMP"
+    ]
+   },
+   {
+    "documentId": "PD-p3fixa-ss",
+    "name": "FixA Guide.docx",
+    "kind": "specsheet",
+    "skus": [
+     "P3-FIXA",
+     "P3-LENS",
+     "P3-CLAMP"
+    ]
+   },
+   {
+    "documentId": "PD-p3fixa-mn",
+    "name": "FixA Manual.pdf",
+    "kind": "manual",
+    "skus": [
+     "P3-FIXA",
+     "P3-LENS",
+     "P3-CLAMP"
+    ]
+   },
+   {
+    "documentId": "PD-p3fixb-ds",
+    "name": "FixB Datasheet.pdf",
+    "kind": "datasheet",
+    "skus": [
+     "P3-FIXB"
+    ]
+   },
+   {
+    "documentId": "PD-p3own-ds",
+    "name": "Own Datasheet.pdf",
+    "kind": "datasheet",
+    "skus": [
+     "P3-OWN"
+    ]
+   },
+   {
+    "documentId": "PD-p3own-ss",
+    "name": "Own Guide.pdf",
+    "kind": "specsheet",
+    "skus": [
+     "P3-OWN"
+    ]
+   },
+   {
+    "documentId": "PD-p3shared-ds",
+    "name": "Shared Datasheet.pdf",
+    "kind": "datasheet",
+    "skus": [
+     "P3-SH1",
+     "P3-SH2"
+    ]
+   }
+  ]
+ },
+ {
+  "bySku": [
+   [
+    "P3-LENS",
+    {
+     "datasheet": null,
+     "datasheetCoveredBy": [],
+     "datasheetOk": false,
+     "specsheet": null,
+     "manual": null
+    }
+   ]
+  ],
+  "documents": []
+ },
+ {
+  "bySku": [
+   [
+    "P3-CLAMP",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixb-ds",
+      "name": "FixB Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [
+      "P3-FIXB"
+     ],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ],
+   [
+    "P3-FIXB",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixb-ds",
+      "name": "FixB Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ]
+  ],
+  "documents": [
+   {
+    "documentId": "PD-p3fixb-ds",
+    "name": "FixB Datasheet.pdf",
+    "kind": "datasheet",
+    "skus": [
+     "P3-CLAMP",
+     "P3-FIXB"
+    ]
+   }
+  ]
+ },
+ {
+  "bySku": [
+   [
+    "P3-FIXA",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixa-ds",
+      "name": "FixA Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": {
+      "documentId": "PD-p3fixa-ss",
+      "name": "FixA Guide.docx"
+     },
+     "manual": {
+      "documentId": "PD-p3fixa-mn",
+      "name": "FixA Manual.pdf"
+     }
+    }
+   ],
+   [
+    "P3-LENS",
+    {
+     "datasheet": {
+      "documentId": "PD-p3fixa-ds",
+      "name": "FixA Datasheet.pdf"
+     },
+     "datasheetCoveredBy": [
+      "P3-FIXA"
+     ],
+     "datasheetOk": true,
+     "specsheet": {
+      "documentId": "PD-p3fixa-ss",
+      "name": "FixA Guide.docx"
+     },
+     "manual": {
+      "documentId": "PD-p3fixa-mn",
+      "name": "FixA Manual.pdf"
+     }
+    }
+   ],
+   [
+    "P3-NN",
+    {
+     "datasheet": null,
+     "datasheetCoveredBy": [],
+     "datasheetOk": true,
+     "specsheet": null,
+     "manual": null
+    }
+   ]
+  ],
+  "documents": [
+   {
+    "documentId": "PD-p3fixa-ds",
+    "name": "FixA Datasheet.pdf",
+    "kind": "datasheet",
+    "skus": [
+     "P3-FIXA",
+     "P3-LENS"
+    ]
+   },
+   {
+    "documentId": "PD-p3fixa-ss",
+    "name": "FixA Guide.docx",
+    "kind": "specsheet",
+    "skus": [
+     "P3-FIXA",
+     "P3-LENS"
+    ]
+   },
+   {
+    "documentId": "PD-p3fixa-mn",
+    "name": "FixA Manual.pdf",
+    "kind": "manual",
+    "skus": [
+     "P3-FIXA",
+     "P3-LENS"
+    ]
+   }
+  ]
+ }
+]

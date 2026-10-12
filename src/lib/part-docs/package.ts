@@ -1,5 +1,6 @@
-import { slotCoverage, type CoverageIndex } from "./coverage";
+import { ownFiles, slotCoverage, type CoverageIndex } from "./coverage";
 import { datasheetLooseName, zipEntrySafe } from "./datasheet-book";
+import { datasheetExclusion, type DatasheetExclusion } from "./exclusions";
 import { isDocSlotKind, type DocSlotKind, type PartDocKind } from "./types";
 
 /**
@@ -9,6 +10,14 @@ import { isDocSlotKind, type DocSlotKind, type PartDocKind } from "./types";
  * without any of its fixtures is a `missing-datasheet` gap on that package
  * only. Every document is listed ONCE with every SKU it serves, so a fixture
  * datasheet that also covers its lens and clamps goes in the zip one time.
+ *
+ * #333: `opts.excludedDatasheets` (a project's left-out datasheets) leaves a
+ * SKU's datasheet out — itself, or an accessory every covering fixture of
+ * which is out (exclusions.ts). An excluded SKU is no gap and never `take`s
+ * its datasheet, so a document reaches `documents` only through an included
+ * SKU; an accessory still covered by an included fixture takes that
+ * fixture's datasheet. Spec sheets and manuals are untouched (Q1). With no
+ * opts the output is exactly the pre-#333 output.
  */
 
 export type PackageDocRef = { documentId: string; name: string };
@@ -23,11 +32,14 @@ export type PackageSkuDocs = {
   specsheet: PackageDocRef | null;
   /** The part's own manual, or a fixture manual covering it (#290). */
   manual: PackageDocRef | null;
+  /** #333: this project leaves the datasheet out — the SKU itself, or every fixture covering it. Absent = included. */
+  datasheetExcluded?: DatasheetExclusion;
 };
 
 export function resolvePackageDocs(
   index: CoverageIndex | null | undefined,
-  skus: readonly string[]
+  skus: readonly string[],
+  opts?: { excludedDatasheets?: ReadonlySet<string> }
 ): { bySku: Map<string, PackageSkuDocs>; documents: PackageDocument[] } {
   const bySku = new Map<string, PackageSkuDocs>();
   const documents = new Map<string, PackageDocument>();
@@ -45,16 +57,27 @@ export function resolvePackageDocs(
     }
     const ds = slotCoverage(index, sku, "datasheet", context);
     const firstFile = (s: typeof ds) => (s.state === "own" || s.state === "covered" ? s.docs[0] ?? null : null);
-    const dsDoc = firstFile(ds);
+    const excluded = opts?.excludedDatasheets;
+    const ex = excluded ? datasheetExclusion({ sku, state: ds.state, coveredBy: ds.state === "covered" ? ds.parents : [] }, excluded) : null;
+    let dsDoc: { id: string; fileName: string } | null = ex ? null : firstFile(ds);
+    let coveredBy = ds.state === "covered" ? ds.parents : [];
+    if (!ex && excluded && ds.state === "covered" && coveredBy.some((p) => excluded.has(p))) {
+      // Some covering fixtures are left out: cover through the included ones' datasheets only.
+      coveredBy = coveredBy.filter((p) => !excluded.has(p));
+      const f = ownFiles(index, coveredBy[0], "datasheet")[0];
+      dsDoc = f ? { id: f.id, fileName: f.fileName } : null;
+    }
     const ssDoc = firstFile(slotCoverage(index, sku, "specsheet", context));
     const mnDoc = firstFile(slotCoverage(index, sku, "manual", context));
-    bySku.set(sku, {
+    const row: PackageSkuDocs = {
       datasheet: dsDoc ? take("datasheet", sku, dsDoc.id, dsDoc.fileName) : null,
-      datasheetCoveredBy: ds.state === "covered" ? ds.parents : [],
-      datasheetOk: ds.state === "own" || ds.state === "covered" || ds.state === "not-needed",
+      datasheetCoveredBy: coveredBy,
+      datasheetOk: ex ? true : ds.state === "own" || ds.state === "covered" || ds.state === "not-needed",
       specsheet: ssDoc ? take("specsheet", sku, ssDoc.id, ssDoc.fileName) : null,
       manual: mnDoc ? take("manual", sku, mnDoc.id, mnDoc.fileName) : null,
-    });
+    };
+    if (ex) row.datasheetExcluded = ex;
+    bySku.set(sku, row);
   }
   return { bySku, documents: [...documents.values()] };
 }

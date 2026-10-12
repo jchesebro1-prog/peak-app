@@ -69194,3 +69194,62 @@ import * as p3Sel from "@/lib/estimate-output/package-selection";
     "#333 summary: cut sheets on with none to print, and no datasheet rows, add nothing");
   ok(!/^import (?!type )/m.test(readFileSync(join(process.cwd(), "src/lib/estimate-output/package-selection.ts"), "utf8")), "#333 selection: package-selection.ts is pure (type imports only)");
 }
+
+// ---- Task 3: the datasheet exclusion rule + resolvePackageDocs(…, opts) ----
+import { datasheetExclusion as p3Excl } from "@/lib/part-docs/exclusions";
+import { resolvePackageDocs as p3Resolve } from "@/lib/part-docs/package";
+import { buildCoverageIndex as p3BuildIdx } from "@/lib/part-docs/coverage";
+{
+  const rdj = (f: string) => JSON.parse(readFileSync(join(process.cwd(), f), "utf8"));
+  const fx = rdj("docs/test-fixtures/pkg-tabs/coverage-input.json");
+  const baseline = rdj("docs/test-fixtures/pkg-tabs/resolve-baseline.json") as unknown[];
+  const idx = p3BuildIdx(fx);
+  const ser = (r: ReturnType<typeof p3Resolve>) => JSON.parse(JSON.stringify({ bySku: [...r.bySku.entries()], documents: r.documents }));
+  const ctxs: string[][] = [fx.skus, ["P3-LENS"], ["P3-CLAMP", "P3-FIXB"], ["P3-FIXA", "P3-LENS", "P3-NN"]];
+  ctxs.forEach((ctx, i) => {
+    const want = JSON.stringify(baseline[i]);
+    ok(JSON.stringify(ser(p3Resolve(idx, ctx))) === want && JSON.stringify(ser(p3Resolve(idx, ctx, {}))) === want && JSON.stringify(ser(p3Resolve(idx, ctx, { excludedDatasheets: new Set() }))) === want,
+      `#333 exclusions: with no exclusions resolvePackageDocs is deep-equal to the pre-#333 output (context ${i})`);
+    ok([...p3Resolve(idx, ctx).bySku.values()].every((r) => !("datasheetExcluded" in r)), `#333 exclusions: no datasheetExcluded key without opts (context ${i})`);
+  });
+  ok(JSON.stringify(ser(p3Resolve(null, ["P3-FIXA"], { excludedDatasheets: new Set(["P3-FIXA"]) }))) === JSON.stringify(ser(p3Resolve(null, ["P3-FIXA"]))), "#333 exclusions: no index → unchanged (nothing to resolve)");
+
+  // Pure rule.
+  const ex = new Set(["A", "F1"]);
+  ok(p3Excl({ sku: "A", state: "own", coveredBy: [] }, ex) === "self" && p3Excl({ sku: "A", state: "missing", coveredBy: [] }, ex) === "self" && p3Excl({ sku: "A", state: "not-needed", coveredBy: [] }, ex) === "self",
+    "#333 exclusions: a SKU in the set is excluded \"self\" whatever its state");
+  ok(p3Excl({ sku: "L", state: "covered", coveredBy: ["F1"] }, ex) === "parent", "#333 exclusions: covered only by an excluded fixture → \"parent\"");
+  ok(p3Excl({ sku: "L", state: "covered", coveredBy: ["F1", "F2"] }, ex) === null, "#333 exclusions: one covering parent still included → not excluded");
+  ok(p3Excl({ sku: "L", state: "covered", coveredBy: [] }, ex) === null && p3Excl({ sku: "B", state: "own", coveredBy: ["F1"] }, ex) === null && p3Excl({ sku: "B", state: "missing", coveredBy: [] }, new Set()) === null,
+    "#333 exclusions: only a covered row inherits; an empty set excludes nothing");
+
+  // 2. self: the fixture's datasheet leaves; its spec sheet and manual stay (Q1: datasheets only).
+  const a = p3Resolve(idx, fx.skus, { excludedDatasheets: new Set(["P3-FIXA"]) });
+  const fa = a.bySku.get("P3-FIXA")!;
+  ok(fa.datasheet === null && fa.datasheetOk === true && fa.datasheetExcluded === "self", "#333 exclusions: a left-out datasheet → datasheet null, no gap, excluded self");
+  ok(fa.specsheet?.documentId === "PD-p3fixa-ss" && fa.manual?.documentId === "PD-p3fixa-mn" && a.documents.some((d) => d.documentId === "PD-p3fixa-ss") && a.documents.some((d) => d.documentId === "PD-p3fixa-mn"),
+    "#333 exclusions (Q1): the left-out product's spec sheet and manual still ship");
+  // 3. an accessory covered only by the excluded fixture follows it.
+  const lens = a.bySku.get("P3-LENS")!;
+  ok(lens.datasheet === null && lens.datasheetOk && lens.datasheetExcluded === "parent", "#333 exclusions: an accessory covered only by a left-out fixture is left out with it (\"parent\")");
+  // 4. covered by two fixtures, one excluded: still covered, through the included one's document only.
+  const clamp = a.bySku.get("P3-CLAMP")!;
+  ok(!clamp.datasheetExcluded && clamp.datasheetOk && clamp.datasheet?.documentId === "PD-p3fixb-ds" && clamp.datasheetCoveredBy.join() === "P3-FIXB",
+    "#333 exclusions: an accessory with a second, included fixture stays covered through that fixture's datasheet: " + JSON.stringify(clamp));
+  ok(!a.documents.some((d) => d.documentId === "PD-p3fixa-ds") && a.documents.find((d) => d.documentId === "PD-p3fixb-ds")?.skus.join() === "P3-FIXB,P3-CLAMP",
+    "#333 exclusions: the left-out fixture's datasheet reaches documents through no SKU");
+  // Both fixtures out → the clamp is out too.
+  const both = p3Resolve(idx, fx.skus, { excludedDatasheets: new Set(["P3-FIXA", "P3-FIXB"]) });
+  ok(both.bySku.get("P3-CLAMP")!.datasheetExcluded === "parent" && !both.documents.some((d) => d.kind === "datasheet" && d.documentId.startsWith("PD-p3fix")), "#333 exclusions: every covering fixture out → the accessory is out");
+  // 5. missing / link-only excluded → no gap.
+  const m = p3Resolve(idx, fx.skus, { excludedDatasheets: new Set(["P3-MISS", "P3-LINK"]) });
+  ok(m.bySku.get("P3-MISS")!.datasheetOk && m.bySku.get("P3-MISS")!.datasheetExcluded === "self" && m.bySku.get("P3-LINK")!.datasheetOk && !p3Resolve(idx, fx.skus).bySku.get("P3-MISS")!.datasheetOk,
+    "#333 exclusions: a left-out product with no datasheet is not a gap");
+  // 6. not-needed in the set → self, nothing visible changes.
+  const nn = p3Resolve(idx, fx.skus, { excludedDatasheets: new Set(["P3-NN"]) }).bySku.get("P3-NN")!;
+  ok(nn.datasheetExcluded === "self" && nn.datasheet === null && nn.datasheetOk, "#333 exclusions: a not-needed SKU in the set → self, still no file and no gap");
+  // A shared document stays through the SKU still included.
+  const sh = p3Resolve(idx, fx.skus, { excludedDatasheets: new Set(["P3-SH1"]) });
+  ok(sh.bySku.get("P3-SH1")!.datasheet === null && sh.documents.find((d) => d.documentId === "PD-p3shared-ds")?.skus.join() === "P3-SH2", "#333 exclusions: a document shared with an included SKU still ships, serving only that SKU");
+  ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(readFileSync(join(process.cwd(), "src/lib/part-docs/exclusions.ts"), "utf8")), "#333 exclusions: exclusions.ts is client-safe");
+}
