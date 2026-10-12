@@ -121,7 +121,8 @@ export type ReviewDatasheetRow = {
   excluded?: DatasheetExclusion;
 };
 export type ReviewDrawingRow = { id: string; name: string; kindLabel: string; sizeLabel: string; href: string };
-export type ReviewDocsView = { datasheets: ReviewDatasheetRow[]; drawings: ReviewDrawingRow[]; gaps: string[] };
+/** `drawingsOff` (#333): the project switched drawings off — the tab still lists the files, with a note. */
+export type ReviewDocsView = { datasheets: ReviewDatasheetRow[]; drawings: ReviewDrawingRow[]; gaps: string[]; drawingsOff: boolean };
 
 const docLink = (d: { documentId: string; name: string } | null): DocLinkView | null => (d ? { href: staffPartDocHref(d.documentId), name: d.name } : null);
 

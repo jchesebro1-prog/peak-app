@@ -1,3 +1,4 @@
+import { normalizePackageSelection } from "./package-selection";
 import { cleanText, displayFileName, formatBytes, isUploadKey, safeFileName } from "@/lib/document-files";
 import { sniffImageType } from "@/lib/part-docs/files";
 
@@ -178,6 +179,17 @@ export function appendPackageFile(list: unknown, file: PackageFile): PackageFile
 export function visiblePackageFiles(files: readonly PackageFile[]): PackageFile[] {
   const uploaded = new Set(files.filter((f) => f.source === "upload").map((f) => f.kind));
   return files.filter((f) => f.source === "upload" || !uploaded.has(f.kind));
+}
+
+/** #333 (D-TBD-g) — the drawings the client is shown: none when the
+ *  selection has drawings off (absent = on), else the visible files. */
+export function shownPackageFiles(files: readonly PackageFile[], sel: unknown): PackageFile[] {
+  return normalizePackageSelection(sel).drawings ? visiblePackageFiles(files) : [];
+}
+
+/** #333 — a SENT revision's Plans & risers: its frozen list, as the selection it was sent with allows. */
+export function revisionShownPackageFiles(rev: { docFields?: { packageFiles?: unknown; packageSelection?: unknown } | null }): PackageFile[] {
+  return shownPackageFiles(cleanPackageFiles(rev.docFields?.packageFiles), rev.docFields?.packageSelection);
 }
 
 type RefSource = { packageFiles?: unknown; revisions?: Array<{ docFields?: { packageFiles?: unknown } | null } | null> | null };

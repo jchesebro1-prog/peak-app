@@ -111,7 +111,7 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
         ) : tab === "datasheets" ? (
           <DatasheetsTable rows={docs.datasheets} />
         ) : (
-          <DrawingsList rows={docs.drawings} />
+          <DrawingsList rows={docs.drawings} off={docs.drawingsOff} />
         )}
       </div>
     );
@@ -227,19 +227,26 @@ function DatasheetsTable({ rows }: { rows: ReviewDatasheetRow[] }) {
   );
 }
 
-function DrawingsList({ rows }: { rows: ReviewDrawingRow[] }) {
-  if (!rows.length) return <p style={NOTE}>{COPY.noDrawings}</p>;
+function DrawingsList({ rows, off }: { rows: ReviewDrawingRow[]; off: boolean }) {
+  // #333: drawings switched off in Client package — say so, and still list the files.
   return (
-    <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {rows.map((d) => (
-        <li key={d.id} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "8px 0", borderBottom: "1px solid #ececf0", fontSize: 13 }}>
-          <a href={d.href} target="_blank" rel="noopener noreferrer" style={LINK}>
-            {d.name} ↗
-          </a>
-          <span style={{ fontSize: 12, color: "#5b616e" }}>{d.kindLabel}</span>
-          <span style={MONO}>{d.sizeLabel}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      {off ? <p style={NOTE}>{COPY.drawingsOff}</p> : null}
+      {!rows.length ? (
+        <p style={NOTE}>{COPY.noDrawings}</p>
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {rows.map((d) => (
+            <li key={d.id} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "8px 0", borderBottom: "1px solid #ececf0", fontSize: 13 }}>
+              <a href={d.href} target="_blank" rel="noopener noreferrer" style={LINK}>
+                {d.name} ↗
+              </a>
+              <span style={{ fontSize: 12, color: "#5b616e" }}>{d.kindLabel}</span>
+              <span style={MONO}>{d.sizeLabel}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

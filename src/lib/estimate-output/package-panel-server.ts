@@ -6,6 +6,7 @@ import type { Quote } from "@/lib/stores/quotes";
 import { datasheetGapCount, type DatasheetSelection } from "./package-docs-server";
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./package-gaps";
 import { cleanPackageFiles, packageFileRows, visiblePackageFiles, type PackageFileRow } from "./package-files";
+import { normalizePackageSelection } from "./package-selection";
 import { responseRows, type ResponseRow } from "./responses";
 import { quoteQualifiesForGrid } from "@/lib/design/estimate-grid-link";
 import { resolvePeakHeader } from "@/lib/letterhead";
@@ -93,6 +94,7 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
     gaps: packageGapChips({
       noDatasheet,
       drawings: visiblePackageFiles(files).length,
+      drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,
       keyProductsNeedText: keyProductsNeedingText(sections),
       scopesNoGoals: scopesWithoutGoals(sections),
     }),

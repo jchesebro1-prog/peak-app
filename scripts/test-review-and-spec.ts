@@ -11678,6 +11678,7 @@ seeded()
   .then(() => assemblyMembers332Checks())
   .then(() => pkg333StoreChecks())
   .then(() => pkg333DatasheetChecks())
+  .then(() => pkg333DrawingChecks())
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -52413,7 +52414,7 @@ import {
   ok(e301cfIsId(e301cfNewId()) && e301cfNewId() !== e301cfNewId() && e301cfGridPath("Q 2041/x") === "estimate-files/Q_2041_x/grid/drawing-set.pdf",
     "#301 files: ids are PF- + 12 hex; the Grid set has its own folder");
   const src = readFileSync(join(process.cwd(), "src/lib/estimate-output/package-files.ts"), "utf8");
-  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/lib\/part-docs\/files")/m.test(src), "#301 files purity: value imports only document-files and part-docs/files");
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/lib\/part-docs\/files"|\.\/package-selection")/m.test(src), "#301 files purity: value imports only document-files, part-docs/files and (#333) the pure package-selection");
 }
 
 /* ===== #301 slice C — package files hardening ===== */
@@ -69505,4 +69506,53 @@ async function pkg333DatasheetChecks(): Promise<void> {
   } finally {
     console.warn = warn;
   }
+}
+
+// ---- Task 6: drawings off hides Plans & risers ----
+import * as p3Files from "@/lib/estimate-output/package-files";
+import { packageFileForRevision as p3FileForRev } from "@/lib/estimate-output/package-files-server";
+import { packageGapChips as p3GapChips } from "@/lib/estimate-output/package-gaps";
+{
+  const F = p3Files;
+  const file = (id: string, kind: "plan" | "riser" | "drawing", source: "upload" | "grid") => ({
+    id, kind, source, name: `${id}.pdf`, contentType: "application/pdf", size: 10, blobPath: `estimate-files/Q/${source === "grid" ? "grid" : "UP-0123456789abcdef"}/${id}.pdf`, addedAt: 1, addedBy: "t",
+  });
+  const files = [file("PF-aaaaaaaaaaaa", "plan", "grid"), file("PF-bbbbbbbbbbbb", "plan", "upload"), file("PF-cccccccccccc", "riser", "grid")];
+  const clean = F.cleanPackageFiles(files);
+  ok(clean.length === 3, "#333 drawings: fixture files are well-formed: " + clean.length);
+  const vis = JSON.stringify(F.visiblePackageFiles(clean));
+  ok(JSON.stringify(F.revisionShownPackageFiles({ docFields: { packageFiles: files } })) === vis && JSON.stringify(F.revisionShownPackageFiles({ docFields: { packageFiles: files, packageSelection: { drawings: true } } })) === vis &&
+     JSON.stringify(F.revisionShownPackageFiles({})) === "[]" && JSON.stringify(F.revisionShownPackageFiles({ docFields: null })) === "[]",
+    "#333 drawings: revisionShownPackageFiles = the visible files when drawings are on or the selection is absent");
+  ok(F.revisionShownPackageFiles({ docFields: { packageFiles: files, packageSelection: { drawings: false } } }).length === 0, "#333 drawings: a revision sent with drawings off shows none");
+  ok(JSON.stringify(F.shownPackageFiles(clean, undefined)) === vis && F.shownPackageFiles(clean, { drawings: false }).length === 0, "#333 drawings: shownPackageFiles (the live quote's rule)");
+  const id = clean.find((f) => f.source === "upload")!.id;
+  ok(p3FileForRev({ docFields: { packageFiles: files } } as never, id)?.id === id && p3FileForRev({ docFields: { packageFiles: files, packageSelection: { drawings: false } } } as never, id) === null,
+    "#333 drawings: the package file route resolves nothing for a revision sent with drawings off");
+  const base = { noDatasheet: 0, drawings: 0, keyProductsNeedText: 0, scopesNoGoals: 0 };
+  ok(p3GapChips(base).includes("No drawings") && !p3GapChips({ ...base, drawingsOff: true }).includes("No drawings") && JSON.stringify(p3GapChips({ ...base, drawingsOff: false })) === JSON.stringify(p3GapChips(base)),
+    "#333 gap chip: drawings switched off → no \"No drawings\" chip");
+  const rdq = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rdq("src/lib/estimate-output/package-extras.ts").includes("extras.plans = plansView(revisionShownPackageFiles(hit.rev), base);"), "#333 package page (source): Plans & risers read the revision's shown files");
+  ok(rdq("src/lib/estimate-output/package-files-server.ts").includes("return revisionShownPackageFiles(rev).find((f) => f.id === fileId) ?? null;"), "#333 file route (source): through the same helper");
+  ok(rdq("src/lib/estimate-output/package-live-loader.ts").includes("const files = shownPackageFiles(cleanPackageFiles(q.packageFiles), q.packageSelection);"), "#333 staff preview (source): plans follow the live quote's drawings switch");
+  const panel = rdq("src/lib/estimate-output/package-panel-server.ts");
+  ok(panel.includes("drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,"), "#333 panel (source): the gap chips know drawings are off");
+  const ra = rdq("src/app/(app)/estimator/review-actions.ts");
+  ok(ra.includes("drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,") && rdq("src/app/(app)/estimator/steps/review-tabs.tsx").includes("<DrawingsList rows={docs.drawings} off={docs.drawingsOff} />"),
+    "#333 Customer review (source): the Drawings tab gets the off flag and still lists the files");
+}
+
+async function pkg333DrawingChecks(): Promise<void> {
+  const PE = await import("@/lib/estimate-output/package-extras");
+  const PP = await import("@/lib/estimate-output/package-panel-server");
+  const file = { id: "PF-dddddddddddd", kind: "plan", source: "upload", name: "plan.pdf", contentType: "application/pdf", size: 10, blobPath: "estimate-files/Q/UP-0123456789abcdef/plan.pdf", addedAt: 1, addedBy: "t" };
+  const spec = { sections: [], mobs: [] };
+  const on = await PE.loadPackageExtras({ rev: { spec, docFields: { packageFiles: [file] } } } as never, "/share/quote/Q/t");
+  const off = await PE.loadPackageExtras({ rev: { spec, docFields: { packageFiles: [file], packageSelection: { drawings: false } } } } as never, "/share/quote/Q/t");
+  ok(on.plans.length === 1 && off.plans.length === 0, "#333 package page: Plans & risers are empty for a revision sent with drawings off");
+  const deps = { datasheetGaps: async () => 0, findGrid: async () => null, uploads: () => false, peakHeaderDefault: async () => true };
+  const pOn = await PP.loadPackagePanel({ id: "Q-333d", spec } as never, false, deps as never);
+  const pOff = await PP.loadPackagePanel({ id: "Q-333d", spec, packageSelection: { drawings: false } } as never, false, deps as never);
+  ok(pOn.gaps.includes("No drawings") && !pOff.gaps.includes("No drawings"), "#333 panel: drawings off suppresses the \"No drawings\" chip");
 }

@@ -10,7 +10,7 @@ import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-project
 import { addPackageFile, get as getQuote, removePackageFile, type QuoteRevision } from "@/lib/stores/quotes";
 import {
   cleanPackageFiles, gridSetBlobPath, isPackageFileId, isPackageFileKind, MAX_PACKAGE_FILE_BYTES, MAX_PACKAGE_FILES, newPackageFileId, PACKAGE_FILE_SNIFF_BYTES, PACKAGE_FILE_TYPES, PACKAGE_FILES_COPY,
-  packageBlobReferenced, packageFileName, packageFilePathInScope, sniffPackageFile, visiblePackageFiles, type PackageFile,
+  packageBlobReferenced, packageFileName, packageFilePathInScope, revisionShownPackageFiles, sniffPackageFile, type PackageFile,
 } from "./package-files";
 
 /**
@@ -101,7 +101,8 @@ export async function removePackageFileAndBlob(quoteId: string, fileId: string, 
 /** R12 — the pinned revision's frozen, VISIBLE files only (never the live list). */
 export function packageFileForRevision(rev: Pick<QuoteRevision, "docFields">, fileId: string): PackageFile | null {
   if (!isPackageFileId(fileId)) return null;
-  return visiblePackageFiles(cleanPackageFiles(rev.docFields?.packageFiles)).find((f) => f.id === fileId) ?? null;
+  // #333: none when the revision was sent with drawings off (the uniform 404).
+  return revisionShownPackageFiles(rev).find((f) => f.id === fileId) ?? null;
 }
 
 const notFound = () => new Response("Not found", { status: 404 });

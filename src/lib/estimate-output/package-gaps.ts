@@ -9,7 +9,8 @@ import { outputScopes } from "./scopes";
  * Counts come from the LIVE quote — the next send (Slice C adaptation 10).
  */
 
-export type PackageGapCounts = { noDatasheet: number; drawings: number; keyProductsNeedText: number; scopesNoGoals: number };
+/** `drawingsOff` (#333): the project switched drawings off (Client package) — no "No drawings" chip. */
+export type PackageGapCounts = { noDatasheet: number; drawings: number; keyProductsNeedText: number; scopesNoGoals: number; drawingsOff?: boolean };
 
 /** Key products on printed systems whose paragraph is blank. */
 export function keyProductsNeedingText(sections: SpecSection[]): number {
@@ -26,7 +27,7 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
 export function packageGapChips(c: PackageGapCounts): string[] {
   const out: string[] = [];
   if (c.noDatasheet > 0) out.push(`${n(c.noDatasheet, "part", "parts")} without a datasheet`);
-  if (c.drawings === 0) out.push("No drawings");
+  if (c.drawings === 0 && !c.drawingsOff) out.push("No drawings");
   if (c.keyProductsNeedText > 0) out.push(`${n(c.keyProductsNeedText, "key product needs", "key products need")} a paragraph`);
   if (c.scopesNoGoals > 0) out.push(`No client goals on ${n(c.scopesNoGoals, "scope", "scopes")}`);
   return out;

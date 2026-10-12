@@ -45,6 +45,7 @@ export const REVIEW_UI_COPY = {
   cancel: "Cancel",
   noDatasheets: "No catalog parts print on this estimate.",
   noDrawings: "No drawings on this estimate.",
+  drawingsOff: "Drawings are off for this package (Client package).",
   docsError: "Couldn't load the package documents.",
   datasheetMissing: "Missing",
   notNeeded: "not needed",

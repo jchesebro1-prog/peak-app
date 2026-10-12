@@ -5,6 +5,7 @@ import {
   type NumberedComment, type ReviewComment,
 } from "@/lib/estimate-review/comments";
 import { specPackageDocs, type RevisionPackageDocs } from "@/lib/estimate-output/package-docs-server";
+import { normalizePackageSelection } from "@/lib/estimate-output/package-selection";
 import { loadPackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { reviewDatasheetRows, reviewDrawingRows, type ReviewDocsView } from "@/lib/estimate-output/package-preview";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
@@ -109,5 +110,6 @@ export async function reviewDocsAction(quoteId: string): Promise<ReviewDocsResul
     datasheets: docs ? reviewDatasheetRows(docs.bom, docs.bySku) : [],
     drawings: reviewDrawingRows(q.id, panel.files),
     gaps: panel.gaps,
+    drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,
   };
 }
