@@ -1,6 +1,7 @@
 import { syncLaborDraftMargins } from "./labor-group";
 import { round2 } from "./pricing";
 import type { SpecItem, SpecSection } from "./types";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 /**
  * #254 (D87 amended) — a customer/contact change that moves the quote's
@@ -140,6 +141,7 @@ type Verdict = { kind: "reprice"; price: number } | { kind: "hand" } | { kind: "
 
 function classify(it: SpecItem, prev: number | null, next: number): Verdict {
   if (it.rewardCredit) return { kind: "skip" }; // #282 phase 2: never tier-priced, never counted
+  if (isBonusItem(it)) return { kind: "skip" }; // Estimator bonuses: derived from the system, never tier-priced, never counted
   if (it.fixture) return { kind: "untouched" };
   if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return { kind: "hand" };
   if (it.por) return { kind: "untouched" };

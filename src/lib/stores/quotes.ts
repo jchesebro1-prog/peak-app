@@ -2011,6 +2011,11 @@ export async function setStatus(
   if (result) {
     const { spawnFromQuote } = await import("./quote-spawn");
     await spawnFromQuote(result, q.status);
+    // Estimator bonuses: a re-win keeps the project the first win spawned —
+    // bring its 5% pool to this record's package cost (no-op write skipped).
+    if (moved.value && status === "won" && isBonusEligibleQuote(result)) {
+      await syncProjectBonusPool(id, result.bonusRecord?.packageBonusCost ?? 0);
+    }
   }
   return result;
   });
@@ -2085,44 +2090,59 @@ async function syncProjectBonusPool(quoteId: string, cost: number): Promise<void
  */
 export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Promise<Quote | null> {
   const users = await bonusUserList();
-  const cost = { before: 0, after: 0, rebuilt: false };
+  const cost = { after: 0, rebuilt: false };
   const out = await patchQuote(id, (doc) => {
     doc.estimatorBonusSplit = normalizeSplit(split);
     if (doc.status === "won" && doc.bonusRecord) {
-      cost.before = doc.bonusRecord.packageBonusCost;
+      const before = doc.bonusRecord.packageBonusCost;
       rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
-      cost.after = doc.bonusRecord?.packageBonusCost ?? cost.before;
+      cost.after = doc.bonusRecord?.packageBonusCost ?? before;
       cost.rebuilt = true;
     }
   });
-  if (out && cost.rebuilt && cost.after !== cost.before) await syncProjectBonusPool(id, cost.after);
+  // Every rebuild syncs (the sync skips a no-op write), so a pool a failed
+  // earlier sync left stale is repaired here too.
+  if (out && cost.rebuilt) await syncProjectBonusPool(id, cost.after);
   return out;
 }
 
 /**
  * Estimator bonuses — the alternates the customer took, on a won quote only.
  * Ids are filtered to the quote's own alternate systems; no `updatedAt` bump.
- * Returns null when the quote doesn't exist and "not-won" when it isn't won
- * (nothing written). The install project's pool follows the rebuilt record.
+ * A won, eligible quote that carries bonus lines but has no record (its Won
+ * write failed) gets one built here — `wonAt` = its last move into Won. Returns
+ * null when the quote doesn't exist, "not-won" when it isn't won and
+ * "no-bonus-lines" when it is won but has nothing to record (nothing written
+ * either way). Every rebuild syncs the install project's pool (no-op skipped).
  */
-export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null | "not-won"> {
+export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null | "not-won" | "no-bonus-lines"> {
   const users = await bonusUserList();
-  const st = { notWon: false, before: 0, after: 0, rebuilt: false };
+  const st: { refused: "not-won" | "no-bonus-lines" | null; after: number; rebuilt: boolean } = { refused: null, after: 0, rebuilt: false };
   const out = await patchQuote(id, (doc) => {
-    if (doc.status !== "won" || !doc.bonusRecord) {
-      st.notWon = true;
+    if (doc.status !== "won") {
+      st.refused = "not-won";
       return;
     }
     const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
-    if (!Array.isArray(secs)) return;
+    if (!Array.isArray(secs) || !isBonusEligibleQuote(doc) || !quoteHasBonusLines(secs)) {
+      st.refused = "no-bonus-lines";
+      return;
+    }
     const alts = new Set(secs.filter((x) => x.alternate === true).map((x) => x.id));
-    st.before = doc.bonusRecord.packageBonusCost;
-    rebuildBonusRecord(doc, (Array.isArray(ids) ? ids : []).filter((aid) => alts.has(aid)), users);
-    st.after = doc.bonusRecord?.packageBonusCost ?? st.before;
+    const taken = (Array.isArray(ids) ? ids : []).filter((aid) => alts.has(aid));
+    if (doc.bonusRecord) {
+      const before = doc.bonusRecord.packageBonusCost;
+      rebuildBonusRecord(doc, taken, users);
+      st.after = doc.bonusRecord?.packageBonusCost ?? before;
+    } else {
+      const intoWon = (doc.history || []).filter((h) => h.to === "won").pop();
+      doc.bonusRecord = buildBonusRecord({ sections: secs, owner: doc.owner, preparedBy: doc.preparedBy, split: doc.estimatorBonusSplit, alternatesTaken: taken, users, wonAt: intoWon?.at ?? Date.now() });
+      st.after = doc.bonusRecord.packageBonusCost;
+    }
     st.rebuilt = true;
   });
-  if (out && st.notWon) return "not-won";
-  if (out && st.rebuilt && st.after !== st.before) await syncProjectBonusPool(id, st.after);
+  if (out && st.refused) return st.refused;
+  if (out && st.rebuilt) await syncProjectBonusPool(id, st.after);
   return out;
 }
 

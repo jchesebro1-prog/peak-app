@@ -33,6 +33,14 @@ export function hasLaborLine(sec: SpecSection): boolean {
   return sec.kind === "labor" || lines.some((it) => it.labor === true);
 }
 
+/** Spec "Bonus not figured — check line costs": an in-total line with a
+ *  non-finite qty / cost / price, so the bonus lines can't be figured. */
+export function bonusNotFigured(sec: SpecSection): boolean {
+  return baseLines(stripBonusLines(sec)).some(
+    (it) => !Number.isFinite(it.qty) || !Number.isFinite(it.cost) || !Number.isFinite(it.price)
+  );
+}
+
 export function packageBonus(sec: SpecSection): BonusAmount | null {
   if (!hasLaborLine(sec)) return null;
   const lines = baseLines(sec);
@@ -48,6 +56,8 @@ export function estimatorBonus(sec: SpecSection, pkg: BonusAmount | null = packa
   const typed = validSellOverride(sec.sellOverride);
   let s: number;
   if (typed != null) {
+    // A typed sell on a system with no base lines figures nothing (M1).
+    if (!baseLines(stripBonusLines(sec)).length) return null;
     s = round2((typed * BONUS_ESTIMATOR_PCT) / (1 + BONUS_ESTIMATOR_PCT));
   } else {
     const stripped = stripBonusLines(sec);
@@ -117,7 +127,7 @@ export function idCounterFrom(sections: SpecSection[]): () => number {
 }
 
 export function isBonusEligibleQuote(q: { source?: string | null; quoteType?: string | null }): boolean {
-  const t = q.quoteType ?? "system";
+  const t = q.quoteType || "system"; // "" counts as absent
   if (t !== "system") return false;
   const s = q.source || "";
   return !s.startsWith("portal") && s !== "grid";

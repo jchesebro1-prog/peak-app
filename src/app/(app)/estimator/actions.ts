@@ -1253,7 +1253,7 @@ export async function saveBonusSplitAction(id: string, leadPct: number): Promise
     return { ok: true };
   } catch (e) {
     console.error("[estimator] saveBonusSplitAction failed:", e);
-    return { ok: false, error: String(e) };
+    return { ok: false, error: "Couldn't save — try again" };
   }
 }
 
@@ -1265,11 +1265,12 @@ export async function saveBonusAlternatesAction(id: string, ids: string[]): Prom
     const saved = await setBonusAlternatesTaken(id, Array.isArray(ids) ? ids.filter((x) => typeof x === "string") : []);
     if (!saved) return { ok: false, error: "Quote not found" };
     if (saved === "not-won") return { ok: false, error: "Only a won estimate records alternates here" };
+    if (saved === "no-bonus-lines") return { ok: false, error: "This estimate has no bonus lines" };
     revalidatePath("/estimator");
     return { ok: true };
   } catch (e) {
     console.error("[estimator] saveBonusAlternatesAction failed:", e);
-    return { ok: false, error: String(e) };
+    return { ok: false, error: "Couldn't save — try again" };
   }
 }
 
