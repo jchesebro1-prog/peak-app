@@ -26,8 +26,12 @@ export function packageZipCacheDir(quoteId: string): string {
   return `${PACKAGE_ZIP_CACHE_PREFIX}${quotePathSegment(quoteId)}/`;
 }
 
-export function packageZipCachePath(quoteId: string, rev: number): string {
-  return `${packageZipCacheDir(quoteId)}rev-${rev}.zip`;
+/** Grid notes #9 review: keyed by the RESOLVED Peak-header value too (`-h1` /
+ *  `-h0`), so a company-default change or a toggle racing a build can never
+ *  serve a zip with the wrong header. The header is LIVE, not frozen with the
+ *  revision: a toggle after send applies to the next download. */
+export function packageZipCachePath(quoteId: string, rev: number, peakHeader: boolean): string {
+  return `${packageZipCacheDir(quoteId)}rev-${rev}-h${peakHeader ? 1 : 0}.zip`;
 }
 
 export function packageZipFileName(number: string, revNo: number): string {

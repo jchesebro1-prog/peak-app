@@ -307,11 +307,11 @@ export async function setSpecPrintQuantitiesAction(id: string, on: boolean): Pro
  *  follow the company default, Settings → Branding). */
 export async function setSpecPeakHeaderAction(id: string, on: boolean | null): Promise<Result> {
   const user = await requirePerm("create");
-  const value = typeof on === "boolean" ? on : null;
+  if (typeof on !== "boolean" && on !== null) return { ok: false, error: "Choose on or off." };
   return applyPatch(id, user, (d) => {
     const next: SpecDocument = { ...d };
-    if (value === null) delete next.peakHeader;
-    else next.peakHeader = value;
+    if (on === null) delete next.peakHeader;
+    else next.peakHeader = on;
     return next;
   });
 }

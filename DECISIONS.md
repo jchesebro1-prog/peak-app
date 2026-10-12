@@ -11137,8 +11137,8 @@ Settings → Branding → "Put the Peak header on documents" (`settings.peakHead
 The choice is saved on the Spec builder record (`spec_documents.peakHeader`, the checkbox under the Header card) and on the
 D94 spec (`generated_specs.peakHeader`, beside Print / Download on its page; presentation only, the frozen `spec` never
 changes). An estimate saves it as `Quote.packagePeakHeader`, from the staff package panel beside Rebuild package. That
-field has one writer, `setPackagePeakHeader`, and `update()` drops it. It is not content and is not snapshotted. Changing
-it drops the cached package zips, so the next download carries the change. The Grid Outputs menu's checkbox applies to
+field has one writer, `setPackagePeakHeader`, and `update()` drops it. It is not content and is not snapshotted. The
+cached package zip is keyed by the resolved header (D827), so the next download carries a change. The Grid Outputs menu's checkbox applies to
 one build only: it starts at the company default and is passed into `createClientPackage`. The Quotes hub's
 "Build client package" follows the estimate's saved choice, then the default. A checkbox ticked to match the company
 default stores **nothing** (null), so the document keeps following a later change of the default.
@@ -11158,3 +11158,20 @@ the letterhead and are untouched.
 can't see (the `path` import is dynamic), so a deployed function may have been falling back to the company name in
 type. `next.config.ts` now includes it for `"/**"` (120 KB per function), so specs, packages, rentals and renewal PDFs
 find it in production. This was a choice over a per-route list, which would drift as callers are added.
+
+## D827. Peak header review fixes: every logo format, a header-keyed zip cache, strict toggles (Grid notes #9, 2026-10-12)
+
+A dark logo uploaded as PNG, WebP or SVG used to be replaced by the baked sheet on every PDF and Word output, because
+only JPEG could be embedded. The logo's format is now sniffed from its bytes. A JPEG is used as-is. Anything else is
+rasterised with sharp: SVG at 288 dpi, everything capped at 2400×800. The result is kept as PNG for Word, pdf-lib and
+the HTML view, and as a JPEG flattened on white for `lib/pdf.ts`. That reaches renewal and rental letters too, which now
+print a PNG/SVG logo instead of the baked sheet, as the on-screen letters already did (D59). An unreadable logo falls
+back to the baked sheet. A missing baked file is logged once. Its path lives in one module, `src/lib/letterhead-path.ts`,
+shared with `next.config.ts`. The estimate package zip's cache path now carries the **resolved** header
+(`rev-<n>-h1.zip` / `-h0.zip`). `servePackageZip` resolves the header once per download (the estimate's choice, else the
+company default) and uses that one value for both the cache key and the build. A company-default change or a toggle
+racing a build can therefore never serve the other header's zip. The header is **live**, not frozen with the revision: a
+toggle after send applies to the next download. Older un-suffixed cache files are simply never read again. Every header
+toggle accepts only `true`, `false` or `null` (follow the default), with no coercion. The D94 spec's toggle needs `create`,
+like the Spec builder's. If the Grid Outputs menu can't read the default, it sends nothing and the server applies it.
+

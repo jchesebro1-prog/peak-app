@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/session";
+import { requirePerm, requireUser } from "@/lib/session";
 import { removeGeneratedSpec, setGeneratedSpecPeakHeader } from "@/lib/stores/generated-specs";
 
 /**
@@ -28,16 +28,17 @@ export async function removeGeneratedSpecAction(
 }
 
 /** Grid notes #9 — this saved spec's "Include Peak header" (true/false; null
- *  = follow the company default). Same requireUser()-only gate as delete. */
+ *  = follow the company default). Gated like the spec builder's toggle
+ *  (`create`); anything but a boolean or null is refused. */
 export async function setGeneratedSpecPeakHeaderAction(
   id: string,
   on: boolean | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requireUser();
+  await requirePerm("create");
   if (!id) return { ok: false, error: "Specification not found." };
-  const value = typeof on === "boolean" ? on : null;
+  if (typeof on !== "boolean" && on !== null) return { ok: false, error: "Choose on or off." };
   try {
-    const out = await setGeneratedSpecPeakHeader(String(id), value);
+    const out = await setGeneratedSpecPeakHeader(String(id), on);
     if (!out) return { ok: false, error: "That specification no longer exists." };
   } catch (error) {
     console.error("setGeneratedSpecPeakHeaderAction: save failed", error);

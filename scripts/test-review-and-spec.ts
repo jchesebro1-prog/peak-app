@@ -52732,7 +52732,7 @@ import { createElement as createElement301cz } from "react";
 import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/server";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(e301czPath("Q-2041", 3) === "estimate-package/Q-2041/rev-3.zip" && e301czPath("Q 1/x", 1) === "estimate-package/Q_1_x/rev-1.zip" &&
+  ok(e301czPath("Q-2041", 3, true) === "estimate-package/Q-2041/rev-3-h1.zip" && e301czPath("Q 1/x", 1, false) === "estimate-package/Q_1_x/rev-1-h0.zip" &&
      e301czName("EST-1042", 2) === "EST-1042 Rev 2 package.zip" && e301czDocMax === 25 * 1024 * 1024 && e301czTotalMax === 60 * 1024 * 1024 && e301czDeadline === 45_000,
     "#301 zip: the cache path per (quote, rev), the download name, the rack caps");
   const lo = e301czLeftOut([{ name: "datasheets/Big.pdf", reason: e301czReason.tooBig }]);
@@ -52794,7 +52794,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("buildSpecDocx(sp.spec, { letterhead: await d.letterhead(q.packagePeakHeader) })") && srv.includes("zipCacheable(built.leftOut)") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('buildSpecDocx(sp.spec, { letterhead: await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader) })') && srv.includes("zipCacheable(built.leftOut)") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -52876,6 +52876,7 @@ async function e301cZipAsyncChecks(): Promise<void> {
     get: async () => (cached ? new Response(new Uint8Array(cached)).body : null),
     put: async (path: string, bytes: Buffer) => { puts.push(path); cached = bytes; },
     build: async () => { builds++; return { zip: Buffer.from("ZIP"), leftOut: [], datasheets: 1, specsheets: 0, specifications: false }; },
+    peakHeader: async () => true, // Grid notes #9 review: the cache path carries the resolved header
   };
   const deferred: Array<() => Promise<void>> = [];
   const defer = (task: () => Promise<void>) => { deferred.push(task); };
@@ -52883,7 +52884,7 @@ async function e301cZipAsyncChecks(): Promise<void> {
   ok(puts.length === 0 && cached === null && deferred.length === 1, "#301 zip (serve): the cache write is deferred, not awaited before the response");
   await deferred.shift()!();
   const r2 = await Z.servePackageZip(pkg, { ...deps, defer });
-  ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}.zip` && (await r2.text()) === "ZIP" &&
+  ok(r1.status === 200 && r2.status === 200 && builds === 1 && puts.join() === `estimate-package/${QID.replace(/[^A-Za-z0-9_-]+/g, "_")}/rev-${rev.rev}-h1.zip` && (await r2.text()) === "ZIP" &&
      /attachment; filename="EST-\d+ Rev 1 package\.zip"/.test(r1.headers.get("content-disposition") || "") && r1.headers.get("content-type") === "application/zip",
     "#301 zip (serve): the first download builds and caches; the second streams the cache");
   const failDefer: Array<() => Promise<void>> = [];
@@ -66760,7 +66761,77 @@ async function gridNotes9Checks(): Promise<void> {
   const sa9 = src9("src/app/(app)/settings/actions.ts");
   ok(sa9.includes('if (typeof patch.peakHeader === "boolean") clean.peakHeader = patch.peakHeader;') && sa9.indexOf('await requirePerm("manage_users")', sa9.indexOf("export async function saveSettingsAction")) < sa9.indexOf("clean.peakHeader"),
     "Grid notes #9: Settings → Branding saves only a boolean, admin-gated (manage_users)");
-  ok(src9("src/lib/renewal-outreach.ts").includes('import { letterheadJpeg } from "@/lib/letterhead-server";') && src9("src/lib/renewal-outreach.ts").includes("export { letterheadJpeg };") && src9("next.config.ts").includes('"./src/app/*/flame-tests/letter/peak-letterhead.jpg"'),
+  ok(src9("src/lib/renewal-outreach.ts").includes('import { letterheadJpeg } from "@/lib/letterhead-server";') && src9("src/lib/renewal-outreach.ts").includes("export { letterheadJpeg };") && src9("next.config.ts").includes('"/**": [BAKED_LETTERHEAD_TRACE_GLOB]') && src9("next.config.ts").includes('from "./src/lib/letterhead-path"'),
     "Grid notes #9: letterheadJpeg moved to letterhead-server (renewal-outreach re-exports it); the baked sheet ships with every function");
   ok(!/from "@\/(lib\/stores|lib\/settings|db)\//.test(src9("src/lib/letterhead.ts")) && !/^import /m.test(src9("src/lib/letterhead.ts")), "Grid notes #9: letterhead.ts stays pure (the client-safe bid-spec module imports it)");
+
+  // ---- 7. review fixes (2199f6bc): every logo format, the header-keyed zip cache, toggle validation
+  const sharp9 = (await import("sharp")).default;
+  const png9 = await sharp9({ create: { width: 400, height: 100, channels: 4, background: { r: 200, g: 30, b: 30, alpha: 0.5 } } }).png().toBuffer();
+  const webp9 = await sharp9(png9).webp().toBuffer();
+  const svg9 = Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="50"><rect width="200" height="50" fill="#123456"/></svg>');
+  const jpg9 = await sharp9(png9).flatten({ background: "#fff" }).jpeg().toBuffer();
+  ok(LHS.sniffLogo(jpg9) === "jpeg" && LHS.sniffLogo(png9) === "png" && LHS.sniffLogo(webp9) === "webp" && LHS.sniffLogo(svg9) === "svg" && LHS.sniffLogo(Buffer.from("hello")) === null,
+    "Grid notes #9 review: logos are sniffed by magic bytes (JPEG, PNG, WebP, SVG)");
+  const url9 = (mime: string, b: Buffer) => `data:${mime};base64,${b.toString("base64")}`;
+  const { jpegInfo: jpegInfo9 } = await import("@/lib/pdf");
+  for (const [label, url] of [["PNG", url9("image/png", png9)], ["WebP", url9("image/webp", webp9)], ["SVG", url9("image/svg+xml", svg9)], ["PNG mislabelled as JPEG", url9("image/jpeg", png9)]] as const) {
+    const l9 = await LHS.documentLetterhead({ companyName: "Peak Systems Group", logoDark: url } as never, true);
+    const j9 = await LHS.letterheadJpeg({ logoDark: url } as never);
+    ok(!!l9?.image && !l9.image.full && LHS.sniffLogo(l9.image.png!) === "png" && !!jpegInfo9(l9.image.jpeg) && !!j9.jpeg && !j9.full && !!jpegInfo9(j9.jpeg) && l9.image.w > 0,
+      `Grid notes #9 review: a ${label} logo heads documents (PNG for Word/pdf-lib/HTML, JPEG on white for lib/pdf.ts) instead of the baked sheet`);
+  }
+  const lhPng = (await LHS.documentLetterhead({ companyName: "Peak Systems Group", logoDark: url9("image/png", png9) } as never, true))!;
+  const onPng = await unzip9(await buildSectionDocx(sec9, { letterhead: lhPng }));
+  ok(onPng.media.length === 1 && onPng.media[0].endsWith(".png") && /<a:blip r:embed="/.test(onPng.firstHeader || ""), "Grid notes #9 review: a PNG logo embeds in the Word header as a real PNG");
+  ok(renderSpecHtml(spec9, { letterhead: lhPng }).includes('src="data:image/png;base64,') && hasImage(CPS.roughQuoteDrawing(q9, "pkg", lhPng)) && (await xobj(await mergeDatasheets([], "T", undefined, { letterhead: lhPng }))),
+    "Grid notes #9 review: the PNG logo prints in the HTML view (PNG), the summary PDF (JPEG) and the rack index (pdf-lib PNG)");
+  const jpgLogo = (await LHS.documentLetterhead({ companyName: "P", logoDark: url9("image/jpeg", jpg9) } as never, true))!;
+  ok(!!jpgLogo.image && jpgLogo.image.png === null && jpgLogo.image.jpeg.equals(jpg9) && !jpgLogo.image.full, "Grid notes #9 review: a JPEG logo is used as-is");
+  const bogus = await LHS.documentLetterhead({ companyName: "P", logoDark: "data:image/png;base64," + Buffer.from("not an image").toString("base64") } as never, true);
+  ok(!!bogus?.image && bogus.image.full, "Grid notes #9 review: an unreadable logo falls back to the baked sheet");
+  const LP = await import("@/lib/letterhead-path");
+  const globRe = new RegExp("^" + LP.BAKED_LETTERHEAD_TRACE_GLOB.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]+") + "$");
+  ok(globRe.test("./" + LP.BAKED_LETTERHEAD) && src9("src/lib/letterhead-server.ts").includes("path.join(process.cwd(), BAKED_LETTERHEAD)") && /console\.error\(`\[letterhead\] \$\{BAKED_LETTERHEAD\} could not be read/.test(src9("src/lib/letterhead-server.ts")),
+    "Grid notes #9 review: one path for the baked sheet — the reader and next.config's trace glob agree; a missing file is logged");
+
+  // The estimate zip cache is keyed by the RESOLVED header; the build prints that same value.
+  const Z9 = await import("@/lib/estimate-output/package-zip-server");
+  const ZP9 = await import("@/lib/estimate-output/package-zip");
+  ok(ZP9.packageZipCachePath("Q-1", 2, true) !== ZP9.packageZipCachePath("Q-1", 2, false) && ZP9.packageZipCachePath("Q-1", 2, false).endsWith("rev-2-h0.zip"),
+    "Grid notes #9 review: the zip cache path carries the header (-h1 / -h0)");
+  const got9: string[] = [];
+  const built9: boolean[] = [];
+  const pkg9 = { q: { ...q9b, id: QID }, rev: { rev: 1, at: 1 }, state: { kind: "ok" }, currentPath: null } as never;
+  const serve9 = (header: boolean) => Z9.servePackageZip(pkg9, {
+    cacheOn: true,
+    get: async (path: string) => { got9.push(path); return null; },
+    put: async () => {},
+    defer: () => {},
+    build: async (_q, _r, h) => { built9.push(h); return { zip: Buffer.from("Z"), leftOut: [], datasheets: 0, specsheets: 0, specifications: false }; },
+    peakHeader: async () => header,
+  });
+  await serve9(false);
+  await serve9(true);
+  ok(got9[0].endsWith("-h0.zip") && got9[1].endsWith("-h1.zip") && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
+  const zsrc9 = src9("src/lib/estimate-output/package-zip-server.ts");
+  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader)") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader)"),
+    "Grid notes #9 review: servePackageZip resolves the header once (estimate's choice ?? company default) for both the cache key and the build");
+
+  // Toggle actions: a boolean or null only, the D94 toggle gated on create; the Grid menu never guesses ON.
+  const ga9 = src9("src/app/(app)/design/engagements/spec/generated-actions.ts");
+  const gaBody = ga9.slice(ga9.indexOf("export async function setGeneratedSpecPeakHeaderAction"));
+  const pa9 = src9("src/app/(app)/estimator/package-actions.ts");
+  const paBody = pa9.slice(pa9.indexOf("export async function setPackagePeakHeaderAction"), pa9.indexOf("/** D-j"));
+  const ba9 = src9("src/app/(app)/design/specs/builder-actions.ts");
+  const baBody = ba9.slice(ba9.indexOf("export async function setSpecPeakHeaderAction"), ba9.indexOf("export async function deleteSpecDocumentAction"));
+  const guard9 = 'if (typeof on !== "boolean" && on !== null) return { ok: false, error: "Choose on or off." };';
+  ok(gaBody.includes('await requirePerm("create");') && !gaBody.includes("requireUser()") && [gaBody, paBody, baBody].every((b) => b.includes(guard9)) && !paBody.includes("!!on"),
+    "Grid notes #9 review: every header toggle refuses anything but a boolean or null; the D94 toggle needs create like the builder's");
+  const gridAct9 = src9("src/app/(app)/design/grid/[id]/actions.ts");
+  ok(gridAct9.includes('if (peakHeader !== undefined && peakHeader !== null && typeof peakHeader !== "boolean") return { ok: false, error: "Choose on or off for the Peak header." };'),
+    "Grid notes #9 review: the Grid package build refuses a non-boolean header choice");
+  const om9 = src9("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx");
+  ok(!om9.includes("cur === null ? true : cur") && !om9.includes("peakHeader ?? true") && om9.includes("buildClientPackage(peakHeader ?? undefined)") && om9.includes("if (live) setHeaderUnknown(true);"),
+    "Grid notes #9 review: if the default can't be read the Grid menu sends nothing (the server applies the default), never a guessed ON");
 }

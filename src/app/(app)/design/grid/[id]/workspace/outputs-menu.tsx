@@ -32,8 +32,10 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
     deleteDesign,
     busy,
   } = ed;
-  // Grid notes #9 — "Include Peak header" for this build; starts at the company default.
+  // Grid notes #9 — "Include Peak header" for this build; starts at the company default. Until that is known
+  // (or if reading it fails) it stays null and the build sends nothing, so the server applies the default.
   const [peakHeader, setPeakHeader] = useState<boolean | null>(null);
+  const [headerUnknown, setHeaderUnknown] = useState(false);
   useEffect(() => {
     let live = true;
     peakHeaderDefaultAction().then(
@@ -41,7 +43,7 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
         if (live) setPeakHeader((cur) => (cur === null ? on : cur));
       },
       () => {
-        if (live) setPeakHeader((cur) => (cur === null ? true : cur));
+        if (live) setHeaderUnknown(true);
       }
     );
     return () => {
@@ -103,10 +105,16 @@ export default function OutputsMenu({ ed }: { ed: GridEditor }) {
           </a>
         )}
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3d424e", marginTop: 6, cursor: "pointer" }} title="The Peak letterhead on the package's specification and summary (default: Settings → Branding)">
-        <input type="checkbox" checked={peakHeader ?? true} disabled={peakHeader === null || packageBusy} onChange={(e) => setPeakHeader(e.target.checked)} />
-        Include Peak header
-      </label>
+      {peakHeader === null ? (
+        <div style={{ fontSize: 12, color: "#8c919c", marginTop: 6 }}>
+          {headerUnknown ? "Peak header: the company default (Settings → Branding)" : "Peak header: loading…"}
+        </div>
+      ) : (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3d424e", marginTop: 6, cursor: "pointer" }} title="The Peak letterhead on the package's specification and summary (default: Settings → Branding)">
+          <input type="checkbox" checked={peakHeader} disabled={packageBusy} onChange={(e) => setPeakHeader(e.target.checked)} />
+          Include Peak header
+        </label>
+      )}
       {packageUrl && packageUnreadable.length > 0 && (
         <div
           style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 6, lineHeight: 1.4 }}

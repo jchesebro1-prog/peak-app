@@ -28,6 +28,7 @@ export default function SpecDocView({
   filename,
   peakHeader,
   peakHeaderDefault,
+  canEditHeader,
 }: {
   specId: string;
   engagementId: string;
@@ -41,6 +42,8 @@ export default function SpecDocView({
   /** Grid notes #9 — whether this spec prints the Peak letterhead (its own choice ?? the company default). */
   peakHeader: boolean;
   peakHeaderDefault: boolean;
+  /** The toggle saves through a `create`-gated action. */
+  canEditHeader: boolean;
 }) {
   const router = useRouter();
   const [headerErr, setHeaderErr] = useState("");
@@ -101,8 +104,8 @@ export default function SpecDocView({
         sub={`Specification · ${sectionCount} section${sectionCount === 1 ? "" : "s"} · prepared by ${createdBy} on ${new Date(createdAt).toLocaleDateString()}`}
         actions={
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#3d424e", cursor: "pointer" }} title="The Peak letterhead at the top of the first page (default: Settings → Branding)">
-              <input type="checkbox" checked={peakHeader} disabled={headerPending} onChange={(e) => setHeader(e.target.checked)} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#3d424e", cursor: canEditHeader ? "pointer" : "default" }} title="The Peak letterhead at the top of the first page (default: Settings → Branding)">
+              <input type="checkbox" checked={peakHeader} disabled={headerPending || !canEditHeader} onChange={(e) => setHeader(e.target.checked)} />
               Include Peak header
             </label>
             <Link href={`/design/engagements/spec?id=${engagementId}`} style={BTN}>

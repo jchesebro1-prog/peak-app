@@ -16,10 +16,13 @@
  * the rack datasheet index) print it where they printed the company name.
  */
 
-/** The letterhead a document prints. `image` null = the company name in type. */
+/** The letterhead a document prints. `image` null = the company name in type.
+ *  `jpeg` is always there (flattened on white — what lib/pdf.ts can embed);
+ *  `png` is the lossless raster when the uploaded logo wasn't a JPEG (PNG,
+ *  WebP or SVG), for the outputs that can carry PNG (Word, pdf-lib, HTML). */
 export type Letterhead = {
   companyName: string;
-  image: { jpeg: Buffer; full: boolean; w: number; h: number } | null;
+  image: { jpeg: Buffer; png: Buffer | null; full: boolean; w: number; h: number } | null;
 };
 
 /** The company default: ON unless Settings → Branding stored an explicit false. */
@@ -77,7 +80,7 @@ export function letterheadHtml(lh: Letterhead | null | undefined, esc: (s: strin
   if (!lh) return "";
   if (!lh.image) return `<div class="peak-letterhead" style="font-size:18pt;font-weight:bold;margin:0 0 14pt">${esc(lh.companyName)}</div>\n`;
   const box = letterheadBoxPx(lh.image);
-  const src = `data:image/jpeg;base64,${lh.image.jpeg.toString("base64")}`;
+  const src = lh.image.png ? `data:image/png;base64,${lh.image.png.toString("base64")}` : `data:image/jpeg;base64,${lh.image.jpeg.toString("base64")}`;
   const style = lh.image.full ? "display:block;width:100%;max-width:7.5in;height:auto" : `display:block;height:${box.height}px;width:auto`;
   return `<div class="peak-letterhead" style="margin:0 0 14pt"><img src="${src}" width="${box.width}" height="${box.height}" alt="${esc(lh.companyName)}" style="${style}"></div>\n`;
 }

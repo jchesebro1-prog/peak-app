@@ -22,8 +22,7 @@ export function letterheadParagraph(lh: Letterhead, font?: IRunOptions["font"]):
     spacing: { after: 120 },
     children: [
       new ImageRun({
-        type: "jpg",
-        data: lh.image.jpeg,
+        ...(lh.image.png ? { type: "png" as const, data: lh.image.png } : { type: "jpg" as const, data: lh.image.jpeg }),
         transformation: box,
         altText: { name: "Letterhead", title: clean(lh.companyName), description: `${clean(lh.companyName)} letterhead` },
       }),

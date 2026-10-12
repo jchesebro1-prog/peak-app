@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { getGeneratedSpec } from "@/lib/stores/generated-specs";
 import { renderSpecHtml } from "@/lib/bid-spec";
 import { getSettings } from "@/lib/settings";
@@ -16,7 +17,7 @@ export default async function GeneratedSpecPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const rec = await getGeneratedSpec(id);
 
@@ -47,6 +48,7 @@ export default async function GeneratedSpecPage({
       html={renderSpecHtml(rec.spec, { letterhead })}
       peakHeader={!!letterhead}
       peakHeaderDefault={peakHeaderDefault(settings)}
+      canEditHeader={can("create", user.roles)}
       filename={`${rec.spec.projectName.replace(/[^a-z0-9]+/gi, "-")}-specification`}
     />
   );

@@ -371,11 +371,12 @@ export async function mergeDatasheets(
   const bold = await out.embedFont(StandardFonts.HelveticaBold);
   // Grid notes #9 — the letterhead (image, or the company name in type) takes the top of the first page.
   const lh = opts.letterhead ?? null;
-  let headImage: Awaited<ReturnType<typeof out.embedJpg>> | null = null;
+  let headImage: Awaited<ReturnType<typeof out.embedPng>> | null = null;
   let headBox: { width: number; height: number } | null = null;
   if (lh?.image) {
     try {
-      headImage = await out.embedJpg(lh.image.jpeg);
+      // A PNG/WebP/SVG logo embeds losslessly as PNG; a JPEG logo or the baked sheet as JPEG.
+      headImage = lh.image.png ? await out.embedPng(lh.image.png) : await out.embedJpg(lh.image.jpeg);
       // letterheadBoxPx is in 96-dpi pixels; PDF points are 72 per inch.
       const px = letterheadBoxPx(lh.image, ((PAGE_W - 2 * MARGIN) * 96) / 72);
       headBox = { width: (px.width * 72) / 96, height: (px.height * 72) / 96 };

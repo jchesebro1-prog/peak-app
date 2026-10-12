@@ -12,7 +12,8 @@ import type { SharedPackage } from "@/lib/quote-share/links";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
 import { allSections } from "@/lib/stores/spec-sections";
 import type { Letterhead } from "@/lib/letterhead";
-import { loadDocumentLetterhead } from "@/lib/letterhead-server";
+import { loadDocumentLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
+import { resolvePeakHeader } from "@/lib/letterhead";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { createStoredZip, zipStream, type ZipFile } from "@/lib/zip";
 import { revisionPackageDocs } from "./package-docs-server";
@@ -48,7 +49,9 @@ const liveZipDeps: ZipDeps = {
   letterhead: loadDocumentLetterhead,
 };
 
-export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps: Partial<ZipDeps> = {}): Promise<BuiltPackageZip> {
+/** `peakHeader` (Grid notes #9 review): the header value resolved by the caller (servePackageZip keys the
+ *  cache by it, so the build must print exactly that value); absent = resolve the estimate's choice here. */
+export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps: Partial<ZipDeps> = {}, opts: { peakHeader?: boolean } = {}): Promise<BuiltPackageZip> {
   const d: ZipDeps = { ...liveZipDeps, ...deps };
   const deadline = d.now() + PACKAGE_ZIP_DEADLINE_MS;
   const docs = await revisionPackageDocs(rev);
@@ -67,7 +70,7 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
   });
   const specifications = sp.spec.sections.length > 0;
   // Grid notes #9 — the estimate's own "Include Peak header" (staff package panel) ?? the company default.
-  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead: await d.letterhead(q.packagePeakHeader) }) });
+  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead: await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader) }) });
 
   const used = new Set<string>();
   let total = 0;
@@ -126,7 +129,9 @@ type ServeDeps = {
   put: (path: string, bytes: Buffer) => Promise<void>;
   /** Run a task after the response goes out (Next's `after()`; fire-and-forget outside a request). */
   defer: (task: () => Promise<void>) => void;
-  build: (q: Quote, rev: QuoteRevision) => Promise<BuiltPackageZip>;
+  build: (q: Quote, rev: QuoteRevision, peakHeader: boolean) => Promise<BuiltPackageZip>;
+  /** Grid notes #9 review: the header this download prints — the estimate's choice ?? the company default. */
+  peakHeader: (q: Quote) => Promise<boolean>;
 };
 
 /** Next's `after()` where there is a request scope, else a plain un-awaited call; a rejection is the task's own to catch. */
@@ -150,7 +155,8 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
       await putBlobAt(path, bytes, "application/zip");
     },
     defer: deferTask,
-    build: (q, rev) => buildRevisionPackageZip(q, rev),
+    build: (q, rev, peakHeader) => buildRevisionPackageZip(q, rev, {}, { peakHeader }),
+    peakHeader: async (q) => resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault()),
     ...deps,
   };
   const { revNo } = sentDocumentStamp(pkg.q, pkg.rev);
@@ -160,7 +166,10 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
     "x-content-type-options": "nosniff",
     "cache-control": "private, no-store",
   };
-  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev);
+  // The header is LIVE (not frozen with the revision): resolved once per download, it keys the cache AND
+  // drives the build, so a default change or a toggle mid-build never serves the other header's zip.
+  const peakHeader = await d.peakHeader(pkg.q);
+  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader);
   if (d.cacheOn) {
     try {
       const cached = await d.get(path);
@@ -169,7 +178,7 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
       console.warn("[package] zip cache read failed", e instanceof Error ? e.message : e);
     }
   }
-  const built = await d.build(pkg.q, pkg.rev);
+  const built = await d.build(pkg.q, pkg.rev, peakHeader);
   if (!built) return textResponse(NOTHING_TO_DOWNLOAD, 404);
   if (d.cacheOn && zipCacheable(built.leftOut)) {
     const zip = built.zip;
