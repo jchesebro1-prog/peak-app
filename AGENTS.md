@@ -1001,5 +1001,25 @@ See `.env.example`.
     the riser data sheet and cable diameters on production, the wire-type
     symbol fill, and trying the A/V riser on a real job. Punch item #328.
 
+51. ✅ **Estimator bonuses** (#330, D843–D849) — the 5%-of-labor performance
+    bonus is replaced by two hidden, locked auto lines per system
+    (`SpecItem.bonus`, pure rules in `src/lib/estimate-bonus/`): a **5% package
+    bonus** on the system's cost when it has labor, marked up at the system's
+    blended margin, and a **2% estimator bonus** on the system's price (freight
+    in, $25 round-up after, a typed sell kept), paid at cost. Both raise the
+    price; customer surfaces fold the 5% into labor and spread the 2% across
+    every row by price, and twelve other readers skip them explicitly. Applies
+    to eligible Estimator system quotes that are drafts, or sent and already
+    carrying a bonus line; legacy sent/won/lost are never rewritten, and the
+    server re-derives the lines on save and on moving a system. Marking a quote
+    Won writes a store-owned `Quote.bonusRecord` (2% split 50/50 between Lead
+    estimator and Prepared by, approver-editable, taken alternates counted;
+    Record now rebuilds a missing one) shown on Send & track and in Reports →
+    Estimator bonuses (admins all, estimators their own; CSV), and sets the
+    install project's `performanceBonusPool` to the 5% payout. No migration.
+    Remaining is Jeff-gated: who holds `approve`, a real draft's new price on
+    production, whether the rates become Settings, and a CSV formula-injection
+    guard codebase-wide. Punch item #330.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

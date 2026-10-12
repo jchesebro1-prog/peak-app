@@ -11806,3 +11806,31 @@ printing, and the loose `datasheets/<Manufacturer> - <file>` names use the same 
 packages, the estimate package zip and the rack submittal. One manufacturers read per build
 (`loadCanonicalMfr()` in `src/lib/part-docs/datasheet-book-server.ts`); a failed read falls back to each part's own
 manufacturer with a warning.
+
+## 330. Estimator bonuses — 5% package + 2% estimator — DONE 2026-10-12 (D843–D849)
+
+**Reported (Jeff, 2026-10-12):** "confirm 5% of each package if there is a labor line … overall 2% bonus on the total of the
+estimate that moves forward, tracked for each estimator … never on the estimate or anything client facing."
+
+**Done:** the Estimator adds two locked, auto-computed lines per system, flagged `SpecItem.bonus`, from the pure rules in
+`src/lib/estimate-bonus/`: a **5% package bonus** (5% of the system's cost, only when it has labor, marked up at the
+system's blended margin) and a **2% estimator bonus** (2% of the system's price before the 2%, freight in, $25 round-up
+after, paid at cost; a typed sell keeps the typed total). Both raise the price and both are folded into other rows on the
+PDF, package page, package BOM and every other customer surface; the server re-derives them on save. Marking an estimate
+Won writes a `bonusRecord` (2% split 50/50 between Lead estimator and Prepared by, approver-editable; taken alternates
+counted) shown in a Send & track card and in Reports → Estimator bonuses (admins see everyone, each estimator their own,
+CSV export), and sets the install project's performance-bonus pool to the 5% payout. The old 5%-of-labor line is gone from
+Add labor. Drafts switch on their next save; legacy sent, won and lost quotes keep their numbers.
+
+**Browser check (scratch DB):** a $1,000 / $1,500 part plus one labor day ($690 cost) gave a Package bonus of $84.50 cost /
+$124.29 sell and an Estimator bonus of $52.88, total $2,700 (rounded from $2,696.68), the same after save and reload. The
+customer PDF, package page and customer BOM showed no bonus row and the same $2,700. After Won the card read "Recorded at
+Won … Jeff Chesebro (lead) 100% — $52.88", Reports listed it, and the project header showed "Performance bonus pool $85".
+
+**Remaining (Jeff-gated):**
+- (a) Settings → Team: check who holds `approve` — they edit the split and the alternates after Won.
+- (b) Open one real draft on production and confirm its new price: drafts rise (5% now on the whole system cost, plus the
+  new 2%).
+- (c) Decide whether the 5% and 2% rates should become Settings (they are constants today).
+- (d) The 5% pool payout itself happens outside the app.
+- (e) Codebase-wide CSV formula-injection guard (none of the app's exports have one).

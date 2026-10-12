@@ -11394,3 +11394,65 @@ it with a 25-megapixel input limit, makes it upright, drops metadata, caps it at
 company name in its place. Separately, `letterhead-server.ts` now reads the baked letterhead through a **literal** path
 with static `fs`/`path` imports. `next build` no longer traces the whole project into every function, and the harness
 checks the literal equals `BAKED_LETTERHEAD`.
+
+## D843. Estimator bonuses replace the 5%-of-labor performance bonus (#330, 2026-10-12)
+
+Supersedes the 5% of D136 and D251. Two bonuses, both hidden from every customer surface, both recomputed by pure rules in
+`src/lib/estimate-bonus/`:
+- **Package bonus, 5% of the system's cost**, only when the system has a labor line. Marked up at the system's blended
+  margin (sell = cost × Σ ext sell ÷ Σ ext cost, over the same in-total, non-option lines). Earned per system; it raises
+  the price and is paid at cost.
+- **Estimator bonus, 2% of the system's price**, on every eligible system, paid at cost (cost = sell). The base is the
+  price before the 2%: every in-total line (the 5% line in) plus freight. The $25 round-up (#267) applies after, to the
+  total that includes the 2%. With a typed sell the 2% sits inside the typed total (typed × 0.02 ÷ 1.02), so the customer
+  still pays the typed figure.
+
+Each system carries at most two auto lines flagged `SpecItem.bonus` (`"package"` / `"estimator"`), SKUs `BON-PKG-<id>` and
+`BON-EST-<id>`. Code reads the flag, never the SKU. Legacy `laborOverhead: "bonus"` / `LAB-BONUS-` lines are still
+recognised so frozen quotes print as before; `computeLabor` no longer produces one.
+
+## D844. When the bonus rules apply (#330, 2026-10-12)
+
+A quote is **eligible** when its type is system/blank and its source is not `portal*` or `grid`, as judged by
+`sourceForSave`. A Quick Design or Grid quote therefore becomes eligible once it is saved in the Estimator. Rules apply
+when an eligible quote is a draft (or unsaved), **or** is sent and already carries a bonus line. Legacy sent, won and lost
+quotes are never rewritten. The spec said only "sent quotes keep their numbers", but sent quotes stay editable here; a
+bonus frozen under the new rules would go stale the moment a line changed, so a sent quote that already has bonus lines
+keeps recomputing.
+
+## D845. How the bonuses stay off the customer's page (#330, 2026-10-12)
+
+`customerLines()` folds the 5% into labor exactly as D251 folds shop & engineering (mobilization first, then other labor).
+The 2% spreads across **all** of the system's visible rows in proportion to price (`absorbSellAdjustment`), so a system
+with no labor never grows a row. A system's printed total is unchanged to the cent. In `totals()` the 2% splits
+material/labor like #267's adjustment, and the 2% line is **not** `labor`, so it does not move the review limits. Twelve
+other readers of `spec.sections` (package BOM, document chips, client package, Word BOM, cut sheets, system library and the
+rest) skip bonus lines by an explicit `isBonusItem` check, pinned by the harness's leak checks.
+
+## D846. The server re-derives the bonus lines (#330, 2026-10-12)
+
+`saveQuoteAction` and `placeSystemInEstimate` run `withBonusLines` before persisting, so a stale or hand-built client cannot
+save a wrong bonus. A system moved to another estimate is stripped of bonus lines first, so the target quote's own rules
+(eligible or not, draft or frozen) decide what it carries.
+
+## D847. The won record (#330, 2026-10-12)
+
+Setting a bonus-carrying quote to Won writes a store-owned `Quote.bonusRecord` inside `setStatus`'s own patch (a quote with
+no bonus lines gets none). The 2% is split 50/50 between Lead estimator and Prepared by by default; a user with `approve`
+edits the split. Credits resolve a name to a user id by a unique case-insensitive match; no match records the name with
+"(no matching team member)". Alternates default to the ones the client accepted most recently; an approver can change the
+set after Won. **Record now** rebuilds a missing record (a quote won before this shipped, or a failed write). Leaving Won
+withdraws the record.
+
+## D848. The project's performance-bonus pool (#330, 2026-10-12)
+
+The install project's `performanceBonusPool` is set to the record's 5% payout (at cost). It is synced after the status
+transaction commits, on a win, a re-win and every rebuild, and kept as it is if the quote later leaves Won.
+
+## D849. Small deviations (#330, 2026-10-12)
+
+- The two locked bonus rows sit at the end of each system's line table; they stand in for the spec's footer line.
+- The internal cost summary shows the 5% payout (cost), not its marked-up sell.
+- The Reports → Estimator bonuses report reads only records, so a quote won before this shipped is absent until Record now.
+- The report's CSV export has no formula-injection guard. None of the app's CSVs have one; that is a codebase-wide gap,
+  flagged in PUNCHLIST #330 rather than fixed in one export.
