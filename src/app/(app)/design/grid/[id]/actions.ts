@@ -874,7 +874,8 @@ export async function setPlacementsSpaceAction(
   items: { id: string; spaceId: string | null }[]
 ): Promise<{ ok: true; previous: { id: string; spaceId: string | null }[] } | { ok: false; error: string }> {
   await requireUser();
-  if (!isStr(projectId) || !Array.isArray(items) || !items.every((it) => isObj(it) && isStr(it.id) && (it.spaceId === null || isSpaceId(it.spaceId))))
+  if (!Array.isArray(items) || items.length > MAX_BATCH) return { ok: false, error: "Select 2,000 items or fewer." };
+  if (!isStr(projectId) || !items.every((it) => isObj(it) && isStr(it.id) && (it.spaceId === null || isSpaceId(it.spaceId))))
     return { ok: false, error: BATCH_INVALID };
   const r = await setPlacementsSpace(projectId, items.map((it) => ({ id: it.id, spaceId: it.spaceId })));
   if (!r.ok) return r;

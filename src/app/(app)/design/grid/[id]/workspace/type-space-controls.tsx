@@ -10,6 +10,7 @@ import {
   targetCategories,
   TYPE_NOT_UNDOABLE,
   typeEditTargets,
+  wholeCategoryLabel,
 } from "@/lib/design/grid-type-edit";
 import type { GridPlacement } from "@/lib/stores/grid-projects";
 import type { GridEditor } from "../use-grid-editor";
@@ -75,7 +76,7 @@ export function typeTextOf(ed: GridEditor, pls: readonly GridPlacement[]): strin
  * type as text (with "Ask an admin to change the type" for non-admins).
  */
 export function TypeEditControl({ ed, pls }: { ed: GridEditor; pls: readonly GridPlacement[] }) {
-  const { canEditTypes, deviceTypes, partById, typeCategoryCounts, saveDeviceType, busy } = ed;
+  const { canEditTypes, deviceTypes, partById, typeCategoryCounts, typeCategoryOverrides, saveDeviceType, busy } = ed;
   const targets = typeEditTargets(pls, partById);
   const current = sharedOverride(targets);
   const [value, setValue] = useState(current);
@@ -94,6 +95,7 @@ export function TypeEditControl({ ed, pls }: { ed: GridEditor; pls: readonly Gri
 
   const cats = targetCategories(targets);
   const catCount = cats.reduce((n, c) => n + (typeCategoryCounts[c.key] ?? 0), 0);
+  const ownCount = cats.reduce((n, c) => n + (typeCategoryOverrides[c.key] ?? 0), 0);
   const catNames = cats.map((c) => `'${c.label}'`).join(", ");
   const active = deviceTypes.filter((t) => !t.archived);
   const dirty = whole ? value !== "" && value !== MIXED_TYPE : value !== current && value !== MIXED_TYPE;
@@ -136,12 +138,12 @@ export function TypeEditControl({ ed, pls }: { ed: GridEditor; pls: readonly Gri
         <label style={{ display: "flex", gap: 5, alignItems: "flex-start", fontSize: 10.5, color: "#5b606b", marginTop: 4, lineHeight: 1.35 }}>
           <input type="checkbox" checked={whole} disabled={busy} onChange={(e) => setWhole(e.target.checked)} style={{ marginTop: 1 }} />
           <span>
-            Apply to the whole {catNames} {cats.length === 1 ? "category" : "categories"} ({catCount.toLocaleString("en-US")} {catCount === 1 ? "part" : "parts"})
+            {wholeCategoryLabel(catNames, cats.length, catCount, ownCount)}
           </span>
         </label>
       )}
       <span style={{ display: "block", ...NOTE }}>
-        {hint || (whole ? "Re-types every part in the category; clears this part's own type." : "This part, everywhere it's used. Not undoable with ⌘Z.")}
+        {hint || (whole ? "Every part in the category follows its type — own types in it are cleared." : "This part, everywhere it's used. Not undoable with ⌘Z.")}
       </span>
     </span>
   );
@@ -201,4 +203,3 @@ export function SpacePinControl({ ed, pls, autoFocus, onDone }: { ed: GridEditor
     </select>
   );
 }
-

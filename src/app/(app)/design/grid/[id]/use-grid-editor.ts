@@ -371,6 +371,8 @@ export type GridEditorProps = {
   /** Grid notes #2: normalized raw category → live catalog parts in it, for
    *  the "Apply to the whole category (N parts)" checkbox (library categories only). */
   typeCategoryCounts?: Record<string, number>;
+  /** Grid notes #2: …of which carry their own type (cleared by "whole category"). */
+  typeCategoryOverrides?: Record<string, number>;
   /** #321: digits a designator number prints with (Grid Settings → Designator numbers). */
   designatorDigits: 1 | 2;
   /** #321: the active option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
@@ -441,6 +443,7 @@ function useGridEditorImpl(props: GridEditorProps) {
   } = props;
   const canEditTypes = props.canEditTypes ?? false;
   const typeCategoryCounts = props.typeCategoryCounts ?? NO_COUNTS;
+  const typeCategoryOverrides = props.typeCategoryOverrides ?? NO_COUNTS;
   const estimateLink = props.estimateLink ?? null;
   const estimateTray = props.estimateTray ?? null;
   const intakeNotices = props.intakeNotices ?? [];
@@ -2515,6 +2518,8 @@ function useGridEditorImpl(props: GridEditorProps) {
         const r = await setPartDeviceTypeAction(targets.map((t) => t.sku), typeKey, { wholeCategory });
         if (!r.ok) {
           setErr(r.error);
+          // Some of it landed ("N of M saved — reload…"): show what is stored now.
+          if (r.partial) router.refresh();
           return null;
         }
         noteAction(`${r.message ?? "Device type saved."}${hint ? ` ${hint}` : ""}`);
@@ -3272,6 +3277,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     saveDeviceType,
     canEditTypes,
     typeCategoryCounts,
+    typeCategoryOverrides,
     renumberDesignators,
     focusPlacements,
     clipboard,

@@ -25,7 +25,7 @@ import {
   type TypeMap,
 } from "@/lib/design/device-types";
 import { isDocumentId } from "@/lib/part-docs/types";
-import { getManyBySku, mergeUpsert } from "@/lib/stores/catalog";
+import { getManyBySku, partsWithOwnDeviceType, setPartDeviceTypeKeys } from "@/lib/stores/catalog";
 
 /**
  * Grid device types store (#226). Four doc-store blobs, no table and no
@@ -114,33 +114,46 @@ export const MAX_TYPE_EDIT_PARTS = 200;
 
 /**
  * Grid notes #2 — an admin's Type edit from the Grid (or the part editor):
- * per part, store/clear each part's `deviceTypeKey`; whole category, re-type
- * the parts' raw categories through the map (assignDeviceType) and clear any
- * override on these parts so the category rule shows. The caller has
- * checked manage_users. Every sku must be a live catalog part (a renamed SKU
- * follows to the part it became). Returns how many parts and categories changed.
+ * per part, store/clear each part's `deviceTypeKey`; whole category, clear
+ * the override of EVERY part in the parts' raw categories (catalog-wide) and
+ * then re-type those categories through the map (assignDeviceType). Clears
+ * go first, batched (setPartDeviceTypeKeys), so a failure never leaves a
+ * re-typed category whose parts still ignore it; a failure mid-way returns
+ * "N of M saved — reload to see the current types" with `partial`. The
+ * caller has checked manage_users. Every sku must be a live catalog part
+ * (a renamed SKU follows to the part it became).
  */
 export async function setPartsDeviceType(
   skus: readonly string[],
   typeKey: string | null,
   opts: { wholeCategory?: boolean; now?: number } = {}
-): Promise<{ ok: true; parts: number; categories: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; parts: number; categories: number } | { ok: false; error: string; partial?: true }> {
   const wanted = [...new Set(skus.filter((s) => typeof s === "string" && s.trim()))];
   if (!wanted.length) return { ok: false, error: "Pick at least one catalog part." };
   if (wanted.length > MAX_TYPE_EDIT_PARTS) return { ok: false, error: `Change at most ${MAX_TYPE_EDIT_PARTS} different parts at once.` };
-  const [types, bySku] = await Promise.all([getDeviceTypes(), getManyBySku(wanted)]);
+  const whole = opts.wholeCategory === true;
+  const [types, bySku, mates] = await Promise.all([getDeviceTypes(), getManyBySku(wanted), whole ? partsWithOwnDeviceType() : Promise.resolve([])]);
   if (wanted.some((s) => !bySku.has(s))) return { ok: false, error: "A part is no longer in the catalog — reload and try again." };
   const parts = [...new Map([...bySku.values()].map((p) => [p.sku, p])).values()];
-  const res = planPartTypeEdit(parts, typeKey, opts.wholeCategory === true, types);
+  const res = planPartTypeEdit(parts, typeKey, whole, types, mates.map((m) => ({ sku: m.sku || m.id, category: m.category || "", deviceTypeKey: m.deviceTypeKey })));
   if (!res.ok) return res;
+  const steps = res.plan.overrides.length + (res.plan.categories.length ? 1 : 0);
+  const partial = (done: number) => ({ ok: false as const, partial: true as const, error: `${done} of ${steps} saved — reload to see the current types.` });
+  const w = await setPartDeviceTypeKeys(res.plan.overrides);
+  if (w.failed) return partial(w.saved);
   let categories = 0;
   if (res.plan.categories.length) {
-    const a = await assignDeviceType(res.plan.categories, typeKey, opts.now);
-    if (!a.ok) return a;
+    let a: Awaited<ReturnType<typeof assignDeviceType>>;
+    try {
+      a = await assignDeviceType(res.plan.categories, typeKey, opts.now);
+    } catch (e) {
+      console.error("[device-types] category assign failed:", e);
+      return w.saved ? partial(w.saved) : { ok: false, error: "That didn't save — check your connection and try again." };
+    }
+    if (!a.ok) return w.saved ? partial(w.saved) : a;
     categories = a.count;
   }
-  for (const o of res.plan.overrides) await mergeUpsert(o.sku, { deviceTypeKey: o.deviceTypeKey });
-  return { ok: true, parts: res.plan.overrides.length, categories };
+  return { ok: true, parts: w.saved, categories };
 }
 
 /** "Accept all suggestions" — low ones included — for categories that still

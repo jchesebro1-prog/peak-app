@@ -102,3 +102,10 @@ export function prefixWouldChange(
 
 export const PREFIX_HINT = "Designators keep their numbers — Renumber to apply the new prefix.";
 export const TYPE_NOT_UNDOABLE = "Changes the catalog part's type everywhere it is used — not on the Grid's undo stack (⌘Z).";
+
+/** "Apply to the whole 'Audio' category (37 parts — 2 with their own type will follow it too)". */
+export function wholeCategoryLabel(catNames: string, nCats: number, parts: number, own: number): string {
+  const count = `${parts.toLocaleString("en-US")} ${parts === 1 ? "part" : "parts"}`;
+  const follow = own > 0 ? ` — ${own.toLocaleString("en-US")} with their own type will follow it too` : "";
+  return `Apply to the whole ${catNames} ${nCats === 1 ? "category" : "categories"} (${count}${follow})`;
+}

@@ -11,7 +11,8 @@ import { acceptAllSuggestions, assignDeviceType, MAX_TYPE_EDIT_PARTS, mergeDevic
  * every Grid page, whose palette/Layers/legends read the same map.
  */
 
-type Result = { ok: true; message?: string } | { ok: false; error: string };
+/** `partial` (Grid notes #2): some of a type edit landed — the caller refreshes. */
+type Result = { ok: true; message?: string } | { ok: false; error: string; partial?: true };
 
 function touched() {
   revalidatePath("/catalog/device-types");
@@ -68,7 +69,10 @@ export async function setPartDeviceTypeAction(
   if (typeKey !== null && typeof typeKey !== "string") return { ok: false, error: "Pick an active device type." };
   const wholeCategory = opts?.wholeCategory === true;
   const res = await setPartsDeviceType(skus, typeKey, { wholeCategory });
-  if (!res.ok) return res;
+  if (!res.ok) {
+    if (res.partial) touched();
+    return res;
+  }
   touched();
   revalidatePath("/catalog");
   const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;

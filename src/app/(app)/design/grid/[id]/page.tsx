@@ -233,10 +233,14 @@ export default async function GridEditorPage({
   // Grid notes #2: catalog parts per raw category, for the Type control's
   // "Apply to the whole category (N parts)" — only the library's categories.
   const typeCategoryCounts: Record<string, number> = {};
+  // …and how many of those carry their own type (they follow the category too).
+  const typeCategoryOverrides: Record<string, number> = {};
   const libraryCategories = new Set(parts.flatMap((p) => (p.catalogCategory !== undefined ? [normalizeRawCategory(p.catalogCategory)] : [])));
   for (const p of catalog) {
     const k = normalizeRawCategory(p.category);
-    if (k && libraryCategories.has(k)) typeCategoryCounts[k] = (typeCategoryCounts[k] || 0) + 1;
+    if (!k || !libraryCategories.has(k)) continue;
+    typeCategoryCounts[k] = (typeCategoryCounts[k] || 0) + 1;
+    if (p.deviceTypeKey) typeCategoryOverrides[k] = (typeCategoryOverrides[k] || 0) + 1;
   }
   // #300 (D609): each part's object drawing URLs, resolved here so the client
   // never reads documents. A lookup failure must never break the editor — it
@@ -407,6 +411,7 @@ export default async function GridEditorPage({
       deviceTypes={deviceTypes.types}
       canEditTypes={can("manage_users", user.roles)}
       typeCategoryCounts={typeCategoryCounts}
+      typeCategoryOverrides={typeCategoryOverrides}
       designatorDigits={designatorDigitsOf(settings)}
       conduitRiser={liveConduitRiser(designed, activeOptionId, "lighting")}
       avRiser={liveConduitRiser(designed, activeOptionId, "av")}

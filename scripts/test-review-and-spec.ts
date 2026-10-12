@@ -66649,7 +66649,13 @@ async function gridNotes2Checks(): Promise<void> {
   ok(p2.ok && p2.plan.overrides.length === 1 && p2.plan.overrides[0].deviceTypeKey === undefined, "Grid notes #2 plan: Auto (null) clears the part's override");
   const p3 = DTP.planPartTypeEdit([{ ...sm58, deviceTypeKey: "speakers" }, { sku: "X", category: " audio " }], "microphones", true, types);
   ok(p3.ok && p3.plan.categories.join() === "Audio" && p3.plan.overrides.length === 1 && p3.plan.overrides[0].sku === "SM58-LC" && p3.plan.overrides[0].deviceTypeKey === undefined,
-    "Grid notes #2 plan: the whole-category box re-types the raw category once and clears THESE parts' own overrides");
+    "Grid notes #2 plan: the whole-category box re-types the raw category once and clears the picked parts' own overrides");
+  const p3m = DTP.planPartTypeEdit([sm58], "microphones", true, types, [{ sku: "MATE", category: "AUDIO", deviceTypeKey: "speakers" }, { sku: "ELSE", category: "Video", deviceTypeKey: "cameras" }, { sku: "SM58-LC", category: "Audio", deviceTypeKey: "x" }]);
+  ok(p3m.ok && p3m.plan.overrides.map((o) => o.sku).sort().join() === "MATE,SM58-LC" && p3m.plan.overrides.every((o) => o.deviceTypeKey === undefined),
+    "Grid notes #2 plan: whole category clears the own type of EVERY part in that category (catalog-wide mates too), never another category's");
+  ok(TE.wholeCategoryLabel("'Audio'", 1, 37, 2) === "Apply to the whole 'Audio' category (37 parts — 2 with their own type will follow it too)" &&
+     TE.wholeCategoryLabel("'Audio'", 1, 1, 0) === "Apply to the whole 'Audio' category (1 part)",
+    "Grid notes #2 control: the whole-category label counts the parts and says how many own types will follow");
   const refusals = [
     DTP.planPartTypeEdit([sm58], null, true, types),
     DTP.planPartTypeEdit([sm58], "no-such", false, types),
@@ -66787,13 +66793,25 @@ async function gridNotes2Checks(): Promise<void> {
       "Grid notes #2 store: a per-part type lands on that part only (merged — nothing else on the part changes); its category-mate keeps the category's type");
     const r2 = await DT.setPartsDeviceType([A], null);
     ok(r2.ok && (await Cat.get(A))?.deviceTypeKey === undefined, "Grid notes #2 store: Auto (null) clears the override");
-    await DT.setPartsDeviceType([A], "speakers");
+    await Cat.mergeUpsert(A, { deviceTypeKey: "speakers", note: "merged" });
+    const am = await Cat.get(A);
+    ok(am?.deviceTypeKey === undefined && am?.note === "merged", "Grid notes #2 store: mergeUpsert strips deviceTypeKey — the admin writer is the only one");
+    await DT.setPartsDeviceType([A], "microphones");
+    await Cat.mergeUpsert(A, { deviceTypeKey: undefined, note: "keep" });
+    ok((await Cat.get(A))?.deviceTypeKey === "microphones", "Grid notes #2 store: a patch can't clear the override either");
+    const kw = await Cat.setPartDeviceTypeKeys([{ sku: A, deviceTypeKey: "speakers" }, { sku: B, deviceTypeKey: "cameras" }, { sku: fixtureId("gn2", "nope"), deviceTypeKey: "speakers" }], { chunkSize: 1 });
+    ok(kw.saved === 2 && kw.total === 3 && !kw.failed && (await Cat.get(B))?.deviceTypeKey === "cameras" && (await Cat.get(B))?.note === "keep",
+      "Grid notes #2 store: setPartDeviceTypeKeys writes in chunks, skips a missing part and leaves the rest of each part alone");
+    const acts2 = rd("src/lib/stores/device-types.ts");
+    const fnSrc = acts2.slice(acts2.indexOf("export async function setPartsDeviceType"), acts2.indexOf('/** "Accept all suggestions"'));
+    ok(fnSrc.indexOf("setPartDeviceTypeKeys(res.plan.overrides)") < fnSrc.indexOf("assignDeviceType(res.plan.categories") && fnSrc.includes("saved — reload to see the current types.") && fnSrc.includes("partial: true"),
+      "Grid notes #2 store: overrides are cleared before the category is re-typed; a failure mid-way reports N of M saved (partial)");
     const r3 = await DT.setPartsDeviceType([A], "microphones", { wholeCategory: true });
     const m3 = await DT.getTypeMap();
     const a3 = await Cat.get(A);
-    ok(r3.ok && r3.categories === 1 && r3.parts === 1 && a3?.deviceTypeKey === undefined && m3[DTP.normalizeRawCategory(CAT)]?.typeKey === "microphones" && m3[DTP.normalizeRawCategory(CAT)]?.by === "admin" &&
+    ok(r3.ok && r3.categories === 1 && r3.parts === 2 && a3?.deviceTypeKey === undefined && (await Cat.get(B))?.deviceTypeKey === undefined && m3[DTP.normalizeRawCategory(CAT)]?.typeKey === "microphones" && m3[DTP.normalizeRawCategory(CAT)]?.by === "admin" &&
        DTP.typeOfPart((await Cat.get(B))!, m3, tctx.types) === "microphones",
-      "Grid notes #2 store: the whole-category box re-types the category (admin entry), clears this part's override, and its category-mates follow");
+      "Grid notes #2 store: the whole-category box clears every own type in the category (the unpicked mate's too), re-types it (admin entry), and the whole category follows");
     ok(!(await DT.setPartsDeviceType([fixtureId("gn2", "missing")], "microphones")).ok && !(await DT.setPartsDeviceType([A], "no-such")).ok && !(await DT.setPartsDeviceType([], "microphones")).ok,
       "Grid notes #2 store: refuses a missing part, an unknown type and an empty pick");
   } finally {
@@ -66830,12 +66848,29 @@ async function gridNotes2Checks(): Promise<void> {
   const undo = await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: null }]);
   ok(undo.ok && undo.value[0].spaceId === spIds.Booth && (await live()).placements!.find((x) => x.id === pl1.id)!.spaceId === undefined,
     "Grid notes #2 store: null unpins (back to position) and returns the old pin");
+  // A dead pin (here: a space on another page, forced in) undoes to null, never to the dead space.
+  await DS.patchDoc<import("@/lib/stores/grid-projects").GridProject>("grid_projects", project.id, (p) => {
+    p.placements = p.placements!.map((x) => (x.id === pl2.id ? { ...x, spaceId: spIds.Lobby } : x));
+  });
+  const dead = await G.setPlacementsSpace(project.id, [{ id: pl2.id, spaceId: spIds.House }]);
+  ok(dead.ok && dead.value[0].spaceId === null && (await G.setPlacementsSpace(project.id, dead.value)).ok,
+    "Grid notes #2 store: the undo of a pin over a dead one sends null (Auto) — undo never sticks on a gone space");
   await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.Booth }, { id: pl2.id, spaceId: spIds.Booth }]);
+  const gone = await G.removePlacements(project.id, [pl1.id]);
   await G.removeSpace(project.id, spIds.Booth);
   const q3 = await live();
   ok(q3.placements!.every((x) => x.spaceId === undefined), "Grid notes #2 store: deleting a space clears the pins to it");
+  const back = gone.ok ? await G.restoreItems(project.id, gone.value) : null;
+  const q4 = await live();
+  ok(!!gone.ok && gone.value.placements[0].spaceId === spIds.Booth && !!back?.ok && q4.placements!.some((x) => x.id === pl1.id) && q4.placements!.find((x) => x.id === pl1.id)!.spaceId === undefined,
+    "Grid notes #2 store: an undo of a delete drops a pin whose space is gone");
+  await G.setPlacementsSpace(project.id, [{ id: pl1.id, spaceId: spIds.House }]);
+  const gone2 = await G.removePlacements(project.id, [pl1.id]);
+  const back2 = gone2.ok ? await G.restoreItems(project.id, gone2.value) : null;
+  ok(!!back2?.ok && (await live()).placements!.find((x) => x.id === pl1.id)!.spaceId === spIds.House, "Grid notes #2 store: …and keeps a live one");
   const actSrc = rd("src/app/(app)/design/grid/[id]/actions.ts");
   const restoreSrc = actSrc.slice(actSrc.indexOf("async function cleanRestoredPlacement"), actSrc.indexOf("export async function restoreItemsAction"));
-  ok(restoreSrc.includes("...(spaceId ? { spaceId } : {})") && actSrc.includes("export async function setPlacementsSpaceAction") && /setPlacementsSpaceAction\([\s\S]*?\{\n  await requireUser\(\);/.test(actSrc),
-    "Grid notes #2: undo of a delete restores a device's pin; the pin action requires a signed-in user");
+  const spaceAct = actSrc.slice(actSrc.indexOf("export async function setPlacementsSpaceAction"));
+  ok(restoreSrc.includes("...(spaceId ? { spaceId } : {})") && /\{\n  await requireUser\(\);\n  if \(!Array\.isArray\(items\) \|\| items\.length > MAX_BATCH\)/.test(spaceAct),
+    "Grid notes #2: undo of a delete carries a device's pin; the pin action requires a signed-in user and caps the batch before validating it");
 }

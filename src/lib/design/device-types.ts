@@ -461,16 +461,19 @@ export type PartTypeEditPlan = {
  * Grid notes #2 — what one admin Type edit writes. Per part (`wholeCategory`
  * false): each part's override becomes `typeKey`; null clears it so the part
  * reads its category again. Whole category: the parts' raw categories are
- * re-typed through the map and any per-part override on THESE parts is
- * cleared, so the category rule is what shows. Refuses an unknown/archived
- * type, Fabric/Labor parts, and (category mode) "Auto" or a part with no
- * mappable category. Pure: the store applies the plan.
+ * re-typed through the map and the per-part override of EVERY part in those
+ * categories is cleared — the picked parts and `categoryMates` (the
+ * catalog's other parts that carry their own type) alike — so the whole
+ * category follows the category rule. Refuses an unknown/archived type,
+ * Fabric/Labor parts, and (category mode) "Auto" or a part with no mappable
+ * category. Pure: the store applies the plan (clears first, then the map).
  */
 export function planPartTypeEdit(
   parts: readonly PartTypeEditPart[],
   typeKey: string | null,
   wholeCategory: boolean,
-  types: readonly DeviceType[]
+  types: readonly DeviceType[],
+  categoryMates: readonly PartTypeEditPart[] = []
 ): { ok: true; plan: PartTypeEditPlan } | { ok: false; error: string } {
   if (!parts.length) return { ok: false, error: "Pick at least one catalog part." };
   if (typeKey !== null && !activeTypeKey(typeKey, types)) return { ok: false, error: "Pick an active device type." };
@@ -491,8 +494,10 @@ export function planPartTypeEdit(
     seen.add(key);
     categories.push((p.category || "").trim());
   }
-  const overrides = parts.filter((p) => !!p.deviceTypeKey).map((p) => ({ sku: p.sku, deviceTypeKey: undefined }));
-  return { ok: true, plan: { overrides, categories } };
+  const clear = new Map<string, { sku: string; deviceTypeKey: undefined }>();
+  for (const p of [...parts, ...categoryMates])
+    if (p.deviceTypeKey && seen.has(normalizeRawCategory(p.category)) && !clear.has(p.sku)) clear.set(p.sku, { sku: p.sku, deviceTypeKey: undefined });
+  return { ok: true, plan: { overrides: [...clear.values()], categories } };
 }
 
 export function scopeOfType(typeKey: string | null | undefined, types: readonly DeviceType[]): GridLayer {

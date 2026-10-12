@@ -47,7 +47,7 @@ import {
 } from "@/lib/design/designators";
 import { designatorDigitsOf, getSettings } from "@/lib/settings";
 import { cleanLevels, type GridLevel } from "@/lib/design/grid-levels";
-import { spacePinRefusal } from "@/lib/design/grid-geometry";
+import { pinnedSpaceOf, spacePinRefusal } from "@/lib/design/grid-geometry";
 import { applyTagPatch, cleanPlacementTag, type PlacementTag, type TagPatch } from "@/lib/design/conduit-riser/tags";
 import { copyConduitRiserDoc, crMakeId, type ConduitRiserDoc } from "@/lib/design/conduit-riser/model";
 import type { Landed } from "@/lib/design/conduit-riser/edit";
@@ -1409,10 +1409,13 @@ export async function setPlacementsSpace(
     items.map((it) => it.id),
     (p) => {
       const previous: { id: string; spaceId: string | null }[] = [];
+      const spaces = p.spaces || [];
       p.placements = (p.placements || []).map((pl) => {
         const it = next.get(pl.id);
         if (!it) return pl;
-        previous.push({ id: pl.id, spaceId: pl.spaceId ?? null });
+        // A dead pin (space gone / another page) undoes to null, never to a
+        // space the write would refuse — undo can't get stuck on it.
+        previous.push({ id: pl.id, spaceId: pinnedSpaceOf(pl, spaces)?.id ?? null });
         if ((pl.spaceId ?? null) === it.spaceId) return pl;
         const edited = withoutAuto({ ...pl });
         if (it.spaceId) edited.spaceId = it.spaceId;
@@ -1663,7 +1666,16 @@ export async function restoreItems(projectId: string, bundle: RemovedBundle): Pr
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     refusal = refusalFor(p);
     if (refusal) return;
-    p.placements = [...(p.placements || []), ...placements];
+    // Grid notes #2: a restored device keeps its space pin only while that
+    // space still exists on its sheet + page; a dead pin is dropped.
+    const spaces = p.spaces || [];
+    const back = placements.map((pl) => {
+      if (!pl.spaceId || pinnedSpaceOf(pl, spaces)) return pl;
+      const next = { ...pl };
+      delete next.spaceId;
+      return next;
+    });
+    p.placements = [...(p.placements || []), ...back];
     if (numbering) stampNewDesignators(p, new Set(unnumbered.map((pl) => pl.id)), numbering.codeOf, numbering.digits);
     const first = defaultOptionId(p);
     const optionOf = new Map(p.placements.map((pl) => [pl.id, pl.optionId || first]));

@@ -56,6 +56,7 @@ export default function PartDeviceTypeField({
       const r = await setPartDeviceTypeAction([sku], value || null);
       if (!r.ok) {
         setMsg({ ok: false, text: r.error });
+        if (r.partial) router.refresh();
         return;
       }
       setSaved(value);
