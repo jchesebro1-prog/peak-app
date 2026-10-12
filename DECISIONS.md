@@ -11404,7 +11404,9 @@ last device leaves. There is **no migration**. Every write checks the link throu
 exists, is on the same option and on the same sheet and page, is not itself inside another device, and is not a
 curtain. The device going in is not a curtain and holds nothing. A holder takes **at most 200** devices (a default).
 Every placement write ends with the one repair rule, `settleGroups`. A broken link (holder gone, nested, curtain, another
-option, past 200) is dropped and the device stays where it stands. A device that holds others keeps them and loses its
+option, another sheet or page, past 200) is dropped and the device stays where it stands — a member is never carried to
+another page. Writes that add links (paste, an undo putting devices back) check the 200 cap first (`groupCapRefusal`) and
+refuse with the reason rather than letting the repair trim the group. A device that holds others keeps them and loses its
 own link. Moving a holder, a revision recall, an option copy (`copyOptionMembers` remaps the link), a paste
 (`groupSrcId`), an Auto re-fill and every removal path all go through it. Pricing, the BOM, designators and Auto fill
 are unchanged. A rack assembly's own RU layout is not coupled to groups yet (an open question for Jeff).
@@ -11437,7 +11439,9 @@ themselves and never with loose devices. The Browser lists them as the holder's 
 
 A **Delete** of a holder whose devices weren't selected with it asks every time, in a line over the plan: "Delete the N
 devices inside too" or "Keep them on the plan beside it" (`removePlacements(…, { members })`). A store call that doesn't
-say which keeps them, so nothing that wasn't named is ever deleted. **Cut** takes the devices with it with no question,
+say which keeps them, so nothing that wasn't named is ever deleted; so do the removals that can't ask — the single
+`removePlacement` and the riser editor's row delete and qty cut (`keepMembersBeside`). Any selection change drops the
+question. "Place inside" ends, with "That holder is no longer on the plan.", the moment its holder leaves the option. **Cut** takes the devices with it with no question,
 because they go on the clipboard too, and Copy and Duplicate of a holder copy its devices. Every step is one undo step.
 The new `group` command's inverse is the previous links and spots. The delete bundle's `regroup` puts kept devices back
 inside on undo.

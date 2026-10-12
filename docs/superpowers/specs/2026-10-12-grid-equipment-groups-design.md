@@ -24,7 +24,8 @@ absent = not grouped).
 2. **One level only**: a holder is never itself a member; a member never holds.
 3. **Curtains** never hold and are never held.
 4. A holder holds at most **200** members (`MAX_GROUP_MEMBERS`) — **default**.
-5. **Mirror**: a member's `sheetId`, `page`, `x`, `y` and `spaceId` (pin) always equal its holder's.
+5. **Same page, mirrored spot**: a member is on its holder's `sheetId` + `page` (a link across pages
+   is dropped, never followed — review fix), and its `x`, `y` and `spaceId` (pin) always equal its holder's.
    So every consumer that reads a placement's position (spaces, schedule sections, riser rooms,
    reading order, drawing-set plan sheets, wires, BOM by space) puts the member exactly where its
    holder is with no change of its own.
@@ -32,7 +33,9 @@ absent = not grouped).
 `settleGroups(placements, defaultOptionId)` (pure, `src/lib/design/grid-groups.ts`) is the single
 repair rule, run at the end of every store write that touches placements: a member whose link breaks
 an invariant loses `groupId` and stays where it is (it shows on the plan at the holder's last spot);
-a valid member is mirrored onto its holder. Precedence when a doc is inconsistent (only reachable by
+a valid member is mirrored onto its holder. Writes that ADD links (paste, an undo that puts devices back)
+check the 200 cap first (`groupCapRefusal`) and refuse with the reason, so the repair never trims a
+group the person asked for. Precedence when a doc is inconsistent (only reachable by
 tampered or racing data): a placement that has members keeps them and loses its own `groupId`; past
 200, the later members (stored order) drop out.
 
@@ -85,6 +88,9 @@ Client-safe (type-only store import).
   with `settleGroups`.
 - `movePlacement(s)`, `setPlacementsSpace`, `removePlacement`, `replaceAutoPlacements` and
   `restoreRevision` end with `settleGroups` (members follow; orphans are released).
+- Removals with no question — `removePlacement` and the riser editor's row delete / qty cut
+  (`removeNodeDevices`, `setNodeDeviceQty`) — keep a removed holder's devices on the plan beside it
+  (`keepMembersBeside`, the "keep" answer). The unused `removePlacementAction` was deleted (review).
 - `setPlacementsPart` on a holder: unchanged (the holder keeps its id, its members stay).
 
 Actions (`grid/[id]/actions.ts`): `setPlacementsGroupAction`, `placeInsideAction` (same part gate as

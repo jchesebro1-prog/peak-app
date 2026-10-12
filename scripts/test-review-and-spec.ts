@@ -68265,7 +68265,8 @@ async function gridNotes4Checks(): Promise<void> {
   const kid = await put(0.06, 0.9);
   await G.setPlacementsGroup(project.id, [{ id: kid.id, groupId: solo.id }]);
   await G.removePlacement(project.id, solo.id);
-  ok((await get(kid.id))?.groupId === undefined, "Grid notes #4 store: any other removal of a holder releases its devices where they stand");
+  const kidAfter = await get(kid.id);
+  ok(!!kidAfter && kidAfter.groupId === undefined && kidAfter.x > 0.05, "Grid notes #4 store: any other removal of a holder keeps its devices, beside it (review fix 3)");
   // the schedule of the stored design nests them
   const q7 = await live();
   const sched = SCH.buildSchedule({ placements: OPT.optionSlice(q7, opt).placements, spaces: q7.spaces!, descOf: (id) => id, wires: [] });
@@ -68273,7 +68274,80 @@ async function gridNotes4Checks(): Promise<void> {
     "Grid notes #4 store: the stored design's schedule lists the devices under their holder");
   void DS;
 
-  // ---- 10. wiring pins
+  // ---- 10. review fixes (0 red, 7 amber)
+  // fix 1: a link across sheets/pages is dropped — a member is never carried to another page
+  const xp = GG.settleGroups([P("gp-hp", { page: 1, x: 0.4 }), P("gp-mp", { page: 2, x: 0.9, groupId: "gp-hp" }), P("gp-ms", { sheetId: "S2", groupId: "gp-hp" })], "o1");
+  ok(xp.find((p) => p.id === "gp-mp")!.groupId === undefined && xp.find((p) => p.id === "gp-mp")!.page === 2 && xp.find((p) => p.id === "gp-mp")!.x === 0.9 &&
+     xp.find((p) => p.id === "gp-ms")!.groupId === undefined && xp.find((p) => p.id === "gp-ms")!.sheetId === "S2",
+    "Grid notes #4 review fix 1: settleGroups drops a link to a holder on another sheet or page and leaves the device where it is");
+  ok(GG.settleGroups([P("gp-hq"), P("gp-mq", { page: 2, groupId: "gp-hq" }), P("gp-kq", { groupId: "gp-mq" })], "o1").find((p) => p.id === "gp-mq")!.groupId === undefined,
+    "Grid notes #4 review fix 1: a cross-page link doesn't count as holding either");
+  // fix 2: the 200 cap is refused before writing on paste and on an undo
+  ok(GG.groupCapRefusal([], Array.from({ length: 201 }, (_, i) => ({ id: `s${i}`, groupId: "h" }))) === "That device already holds 200 devices." &&
+     GG.groupCapRefusal([], Array.from({ length: 200 }, (_, i) => ({ id: `s${i}`, groupId: "h" }))) === null &&
+     GG.groupCapRefusal(full, [{ id: "gp-n1", groupId: "gp-big" }, { id: "gp-n2", groupId: "gp-big" }], () => "RK-9") === "RK-9 already holds 200 devices." &&
+     GG.groupCapRefusal(full, [{ id: "gp-m0", groupId: "gp-big" }, { id: "gp-n1", groupId: "gp-big" }]) === null,
+    "Grid notes #4 review fix 2: groupCapRefusal counts live members plus the new links (a device re-added isn't counted twice)");
+  const capItems = [{ srcId: "src-h", x: 0.5, y: 0.1, partId: fixtureId("gn4", "rack") }, ...Array.from({ length: 201 }, (_, i) => ({ srcId: `src-${i}`, x: 0.5, y: 0.1, partId: fixtureId("gn4", "part"), groupSrcId: "src-h" }))];
+  const capBefore = (await live()).updatedAt;
+  const capPaste = await G.pastePlacements(project.id, { sheetId: sh.id, page: 1, optionId: opt, by, routeIds: [], items: capItems });
+  ok(!capPaste.ok && capPaste.error === "That device already holds 200 devices." && (await live()).updatedAt === capBefore,
+    "Grid notes #4 review fix 2: a paste putting 201 devices into one holder is refused whole, nothing written");
+  const okPaste = await G.pastePlacements(project.id, { sheetId: sh.id, page: 1, optionId: opt, by, routeIds: [], items: capItems.slice(0, 201) });
+  const capHolder = okPaste.ok ? okPaste.value.placements[0].id : "";
+  ok(okPaste.ok && (await live()).placements!.filter((x) => x.groupId === capHolder).length === 200, "Grid notes #4 review fix 2: …200 fit");
+  const oneOut = await G.removePlacements(project.id, [okPaste.ok ? okPaste.value.placements[1].id : ""]);
+  const filler = await put(0.5, 0.1);
+  await G.setPlacementsGroup(project.id, [{ id: filler.id, groupId: capHolder }]);
+  const capUndoBefore = (await live()).updatedAt;
+  const capUndo = oneOut.ok ? await G.restoreItems(project.id, oneOut.value) : null;
+  ok(!!capUndo && !capUndo.ok && /^Couldn't undo — .* already holds 200 devices\.$/.test(capUndo.error) && (await live()).updatedAt === capUndoBefore,
+    "Grid notes #4 review fix 2: an undo that would put a 201st device into a full holder is refused with the reason, nothing written");
+  // fix 3: the riser editor's row delete / qty cut keep a removed holder's devices beside it
+  const RG = await import("@/lib/stores/grid-riser");
+  const { nodeKeyOf } = await import("@/lib/design/grid-riser-doc");
+  const rp = await G.createProject({ name: "Grid notes 4 riser", customer: "Spec fixture", customerId: null, by });
+  registerFixture("grid_projects", rp.id);
+  const rsh = (await G.addSheet(rp.id, { name: "Plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by }))!;
+  registerFixture("grid_sheets", rsh.id);
+  const ropt = ensureOptions((await G.getProject(rp.id))!).options[0].id;
+  const rput = async (x: number, partId: string) => (await G.addPlacement(rp.id, { sheetId: rsh.id, page: 1, x, y: 0.5, partId, optionId: ropt, by }))!.placements!.at(-1)!;
+  const RX = fixtureId("gn4", "rackx");
+  const RY = fixtureId("gn4", "racky");
+  const MEM = fixtureId("gn4", "mem");
+  const hx = await rput(0.3, RX);
+  const mx = await rput(0.1, MEM);
+  await G.setPlacementsGroup(rp.id, [{ id: mx.id, groupId: hx.id }]);
+  const rr = await RG.removeNodeDevices(rp.id, { optionId: ropt, nodeKey: nodeKeyOf(null), partId: RX });
+  const mxAfter = (await G.getProject(rp.id))!.placements!.find((x) => x.id === mx.id);
+  ok(rr.ok && !!mxAfter && mxAfter.groupId === undefined && mxAfter.x > 0.3, "Grid notes #4 review fix 3: deleting a riser row of holders keeps their devices on the plan beside them");
+  await rput(0.2, RY);
+  await new Promise((r) => setTimeout(r, 5));
+  const hy2 = await rput(0.6, RY);
+  const my = await rput(0.1, MEM);
+  await G.setPlacementsGroup(rp.id, [{ id: my.id, groupId: hy2.id }]);
+  const rq = await RG.setNodeDeviceQty(rp.id, { optionId: ropt, nodeKey: nodeKeyOf(null), partId: RY, qty: 1, by });
+  const ryAfter = (await G.getProject(rp.id))!;
+  const myAfter = ryAfter.placements!.find((x) => x.id === my.id);
+  ok(rq.ok && rq.removed === 1 && !ryAfter.placements!.some((x) => x.id === hy2.id) && !!myAfter && myAfter.groupId === undefined && myAfter.x > 0.6,
+    "Grid notes #4 review fix 3: cutting a riser row's qty removes the newest holder and keeps its devices beside it");
+  const rsrc = rd("src/lib/stores/grid-riser.ts");
+  ok((rsrc.match(/keepMembersBeside\(p, gone\)/g) || []).length === 2 && (rsrc.match(/settleGroupsIn\(p\);/g) || []).length === 2,
+    "Grid notes #4 review fix 3: both riser removals go through keepMembersBeside + settleGroupsIn");
+  // fix 4: the unused single-removal action is gone
+  ok(!/removePlacementAction\b/.test(rd("src/app/(app)/design/grid/[id]/actions.ts")) && !/removePlacementAction\b/.test(rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts")),
+    "Grid notes #4 review fix 4: removePlacementAction (no caller, no members choice) is deleted");
+  // fixes 5–7: the editor
+  const edSrc = rd("src/app/(app)/design/grid/[id]/use-grid-editor.ts");
+  ok(edSrc.includes("if (deleteAsk && deleteAsk.selection !== selectedIds) setDeleteAsk(null);") && edSrc.includes("selection: selectedIds });"),
+    "Grid notes #4 review fix 5: any selection change drops the delete question");
+  ok(edSrc.includes("dropTargetRef.current = into ? into.id : null;") && edSrc.includes("const into = dropTargetRef.current;") && edSrc.includes("if (into && placementsById.has(into)) {"),
+    "Grid notes #4 review fix 6: the drop target is a ref written in onMove and read in onUp (a fast release still groups)");
+  ok(edSrc.includes("if (placeInsideId && !placeInsideHolder) {\n    setPlaceInsideId(null);\n    setErr(HOLDER_GONE);") && edSrc.includes('const HOLDER_GONE = "That holder is no longer on the plan.";') &&
+     (edSrc.match(/setErr\(HOLDER_GONE\)/g) || []).length === 2,
+    "Grid notes #4 review fix 7: Place inside stops, and says so, when its holder leaves the plan — never silently");
+
+  // ---- 11. wiring pins
   const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
   const grpAct = acts.slice(acts.indexOf("export async function setPlacementsGroupAction"), acts.indexOf("export async function placeInsideAction"));
   const insAct = acts.slice(acts.indexOf("export async function placeInsideAction"), acts.indexOf("/** #299: one batch edit resolves"));

@@ -191,6 +191,8 @@ const SAVE_FAILED = "That didn't save — check your connection and try again.";
 /** What a refused undo/redo step says (#299) — another person (or tab) changed
  *  the design since the step was recorded; the stack is cleared with it. */
 const UNDO_STALE = "Couldn't undo — the design changed.";
+/** Grid notes #4: "Place inside" lost its holder. */
+const HOLDER_GONE = "That holder is no longer on the plan.";
 const REDO_STALE = "Couldn't redo — the design changed.";
 
 /** Status-bar words for an align mode ("Aligned 3 devices left"). */
@@ -457,6 +459,12 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** #299 multi-select: every selected device, in the order picked. The
    *  single-device `selected` is derived — set only when exactly one is. */
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** Grid notes #4: what a Delete of the selection must ask first — a holder
+   *  whose devices weren't selected with it. `selection` is the selectedIds
+   *  array it asked about: ANY selection change (every setSelectedIds call
+   *  makes a new array) drops the question, adjusted during render. */
+  const [deleteAsk, setDeleteAsk] = useState<{ ids: string[]; inside: number; holders: number; selection: string[] } | null>(null);
+  if (deleteAsk && deleteAsk.selection !== selectedIds) setDeleteAsk(null);
   /** The pre-multi-select setter, kept so single-device call sites read the same. */
   const setSelected = useCallback((id: string | null) => setSelectedIds(id ? [id] : []), []);
   /** The marquee being dragged on empty plan (plan coords), null otherwise.
@@ -731,6 +739,9 @@ function useGridEditorImpl(props: GridEditorProps) {
   const [drag, setDrag] = useState<MarkerDrag | null>(null);
   /** Grid notes #4: the holder a marker drag would drop into right now (null = a plain move). */
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  /** The same target, written in onMove and read in onUp — a fast release can
+   *  land before the state above re-renders (the cursorAtRef pattern). */
+  const dropTargetRef = useRef<string | null>(null);
   const [movedLocal, setMovedLocal] = useState<Record<string, MoveOverride>>({});
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The nudge positions painted but not yet written (the 400 ms debounce). */
@@ -1823,6 +1834,7 @@ function useGridEditorImpl(props: GridEditorProps) {
       if (!inSelection) setSelectedIds([hit.id]);
       const from: Record<string, Point> = {};
       for (const pl of visiblePlacements) if (ids.includes(pl.id)) from[pl.id] = { x: pl.x, y: pl.y };
+      dropTargetRef.current = null; // Grid notes #4: a new gesture starts with no drop target
       setDrag({
         id: hit.id,
         ids: ids.filter((id) => from[id]),
@@ -1904,7 +1916,8 @@ function useGridEditorImpl(props: GridEditorProps) {
       setDrag((prev) => (prev ? { ...prev, at, moved: true } : prev));
       // Grid notes #4: over a device that can take every dragged one → drop into it.
       const into = dropHolderAt(at, visiblePlacements, drag.ids, placements, deviceHitRadius, aspect || 1, project.options[0].id);
-      setDropTargetId(into ? into.id : null);
+      dropTargetRef.current = into ? into.id : null;
+      setDropTargetId(dropTargetRef.current);
       return;
     }
     if (!calDraft) return;
@@ -1935,10 +1948,13 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (drag) {
       const d = drag;
       setDrag(null);
-      const into = dropTargetId;
+      const into = dropTargetRef.current;
+      dropTargetRef.current = null;
       setDropTargetId(null);
       // Grid notes #4: released over a holder — the dragged devices go inside it.
-      if (d.moved && into && placementsById.has(into)) {
+      // The ref is only ever set past DRAG_PX, so it needs no `moved` (which a
+      // fast release can read before its re-render).
+      if (into && placementsById.has(into)) {
         void groupInto(into, d.ids);
         return;
       }
@@ -1971,6 +1987,7 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  or marquee rather than committing wherever it stopped. */
   function cancelGesture() {
     setDrag(null);
+    dropTargetRef.current = null;
     setDropTargetId(null);
     marqueeStart.current = null;
     setMarquee(null);
@@ -2192,12 +2209,27 @@ function useGridEditorImpl(props: GridEditorProps) {
   /** "Place inside": the holder every Product Library pick now goes into (null = off). */
   const [placeInsideId, setPlaceInsideId] = useState<string | null>(null);
   const placeInsideHolder = placeInsideId ? placementsById.get(placeInsideId) ?? null : null;
+  // The holder left the plan (deleted, undone, another option, another tab):
+  // stop placing inside it and say so — adjusted during render, no effect.
+  if (placeInsideId && !placeInsideHolder) {
+    setPlaceInsideId(null);
+    setErr(HOLDER_GONE);
+  }
 
   /** One library pick into the "Place inside" holder — one undo step (undo removes it). */
   const placeInside = useCallback(
     async (partId: string) => {
       const holder = placeInsideId ? placementsById.get(placeInsideId) : undefined;
-      if (!holder || busy) return;
+      // Never silent: a gone holder or a write still in flight says so.
+      if (!holder) {
+        setPlaceInsideId(null);
+        setErr(HOLDER_GONE);
+        return;
+      }
+      if (busy) {
+        setErr("Still saving the last change — click the part again in a moment.");
+        return;
+      }
       setErr(null);
       setBusy(true);
       try {
@@ -2217,9 +2249,6 @@ function useGridEditorImpl(props: GridEditorProps) {
     },
     [placeInsideId, placementsById, busy, project.id, noteAction, partLabel, holderLabel, recordPlace, router]
   );
-
-  /** What a Delete of the selection must ask first: a holder whose devices weren't selected with it. */
-  const [deleteAsk, setDeleteAsk] = useState<{ ids: string[]; inside: number; holders: number } | null>(null);
 
   const clearModes = useCallback(() => {
     setPlaceInsideId(null);
@@ -2503,11 +2532,11 @@ function useGridEditorImpl(props: GridEditorProps) {
     if (verb === "Cut") return removeTargets(targets, verb, "delete");
     const behind = membersLeftBehind(placements, ids);
     if (behind.length) {
-      setDeleteAsk({ ids, inside: behind.length, holders: new Set(behind.map((pl) => pl.groupId)).size });
+      setDeleteAsk({ ids, inside: behind.length, holders: new Set(behind.map((pl) => pl.groupId)).size, selection: selectedIds });
       return null;
     }
     return removeTargets(targets, verb);
-  }, [selectedPlacements, placements, removeTargets]);
+  }, [selectedPlacements, selectedIds, placements, removeTargets]);
   const removeSelected = useCallback(() => removeSelectedAs("Delete"), [removeSelectedAs]);
   /** Grid notes #4: the answer to "delete the devices inside too?" (null = Cancel). */
   const answerDeleteAsk = useCallback(
@@ -3249,8 +3278,7 @@ function useGridEditorImpl(props: GridEditorProps) {
     placeInsideHolder,
     startPlaceInside,
     stopPlaceInside,
-    // The question stands only while the selection it asked about does.
-    deleteAsk: deleteAsk && deleteAsk.ids.join("|") === selectedPlacements.map((pl) => pl.id).join("|") ? deleteAsk : null,
+    deleteAsk,
     answerDeleteAsk,
     router,
     estimateLink,

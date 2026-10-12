@@ -6,8 +6,9 @@
  * a holder is a placement some other placement names. One level only; curtains
  * never hold and are never held; a holder takes at most MAX_GROUP_MEMBERS.
  *
- * A member has no plan spot of its own: its sheet, page, x, y and space pin
- * MIRROR its holder's (settleGroups), so every reader of a placement's position
+ * A member has no plan spot of its own: it is always on its holder's sheet
+ * and page (a link across pages is dropped, never followed), and its x, y and
+ * space pin MIRROR the holder's (settleGroups), so every reader of a placement's position
  * (spaces, schedule, riser, reading order, wires) puts it where its holder is.
  * The editor simply doesn't draw it. Spec:
  * docs/superpowers/specs/2026-10-12-grid-equipment-groups-design.md.
@@ -100,6 +101,26 @@ export function groupRefusal(
   return null;
 }
 
+/**
+ * The ≤ MAX_GROUP_MEMBERS check for a write that ADDS links (a paste, an undo
+ * that puts devices back): each holder's live members (other than the ids
+ * being added) plus the new links must fit. `nameOf` names a holder in the
+ * refusal. null = fits. Checked before anything is written, so the repair
+ * rule never has to drop a link the person asked for.
+ */
+export function groupCapRefusal(
+  placements: readonly GroupLite[],
+  adds: ReadonlyArray<{ id: string; groupId: string }>,
+  nameOf: (holderId: string) => string = () => "That device"
+): string | null {
+  const adding = new Set(adds.map((a) => a.id));
+  const n = new Map<string, number>();
+  for (const pl of placements) if (pl.groupId && !adding.has(pl.id)) n.set(pl.groupId, (n.get(pl.groupId) || 0) + 1);
+  for (const a of adds) n.set(a.groupId, (n.get(a.groupId) || 0) + 1);
+  for (const [holderId, count] of n) if (count > MAX_GROUP_MEMBERS && adds.some((a) => a.groupId === holderId)) return groupFull(nameOf(holderId));
+  return null;
+}
+
 /** Spots beside a holder for `n` devices taken out: a row to its right
  *  (`step` of the page apart), wrapping every 8, mirrored to the left when
  *  the right edge is too close; clamped to the page. */
@@ -171,10 +192,10 @@ export function withMembers(placements: readonly GroupLite[], ids: readonly stri
 
 /**
  * The one repair rule (spec §1): a member whose link breaks an invariant
- * (holder missing, itself a member, a curtain, another option; the member a
- * curtain or itself a holder; past MAX_GROUP_MEMBERS) loses `groupId` where it
- * stands; every valid member mirrors its holder's sheet, page, x, y and space
- * pin. Returns the same array when nothing changes; never mutates inputs.
+ * (holder missing, itself a member, a curtain, another option, another sheet
+ * or page; the member a curtain or itself a holder; past MAX_GROUP_MEMBERS)
+ * loses `groupId` where it stands; every valid member mirrors its holder's x,
+ * y and space pin (never its page — a member is never moved across pages). Returns the same array when nothing changes; never mutates inputs.
  */
 export function settleGroups<P extends GroupLite>(placements: readonly P[], defaultOpt: string): P[] {
   if (!placements.some((pl) => pl.groupId)) return placements as P[];
@@ -183,7 +204,7 @@ export function settleGroups<P extends GroupLite>(placements: readonly P[], defa
   const named = new Set<string>();
   for (const pl of placements) {
     const h = pl.groupId && pl.groupId !== pl.id ? byId.get(pl.groupId) : undefined;
-    if (h && !h.curtain && !pl.curtain && optionOf(pl, defaultOpt) === optionOf(h, defaultOpt)) named.add(h.id);
+    if (h && !h.curtain && !pl.curtain && optionOf(pl, defaultOpt) === optionOf(h, defaultOpt) && pl.sheetId === h.sheetId && pl.page === h.page) named.add(h.id);
   }
   // A named holder keeps its members and loses its own link (one level).
   const valid = new Map<string, string>();
@@ -199,7 +220,10 @@ export function settleGroups<P extends GroupLite>(placements: readonly P[], defa
       // A member never holds: one that is named by others keeps them and
       // loses its own link (its holder, being named, never has one kept).
       !named.has(pl.id) &&
-      optionOf(pl, defaultOpt) === optionOf(holder, defaultOpt);
+      optionOf(pl, defaultOpt) === optionOf(holder, defaultOpt) &&
+      // Review: never carry a device to another page — a link across pages is dropped.
+      pl.sheetId === holder.sheetId &&
+      pl.page === holder.page;
     if (!ok) continue;
     const n = (taken.get(holder.id) || 0) + 1;
     if (n > MAX_GROUP_MEMBERS) continue;
@@ -218,10 +242,11 @@ export function settleGroups<P extends GroupLite>(placements: readonly P[], defa
       return next;
     }
     const h = byId.get(holderId)!;
-    const sameSpot = pl.sheetId === h.sheetId && pl.page === h.page && pl.x === h.x && pl.y === h.y && (pl.spaceId ?? undefined) === (h.spaceId ?? undefined);
+    // Same sheet + page is part of a valid link (above), so only the spot and the pin can differ.
+    const sameSpot = pl.x === h.x && pl.y === h.y && (pl.spaceId ?? undefined) === (h.spaceId ?? undefined);
     if (sameSpot) return pl;
     changed = true;
-    const next = { ...pl, sheetId: h.sheetId, page: h.page, x: h.x, y: h.y };
+    const next = { ...pl, x: h.x, y: h.y };
     if (h.spaceId) next.spaceId = h.spaceId;
     else delete next.spaceId;
     return next;

@@ -20,7 +20,6 @@ import {
   removeAccessory,
   removeCustomItem,
   removeOption,
-  removePlacement,
   removePlacements,
   movePlacements,
   setPlacementsCategory,
@@ -805,17 +804,6 @@ export async function setSymbolLookAction(
   if (!s) return { ok: false, error: "That part is not in the Grid library." };
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/riser`);
-  return { ok: true };
-}
-
-export async function removePlacementAction(
-  projectId: string,
-  placementId: string
-): Promise<Result> {
-  await requireUser();
-  const p = await removePlacement(projectId, placementId);
-  if (!p) return { ok: false, error: "Design not found." };
-  revalidatePath(editorPath(projectId));
   return { ok: true };
 }
 
