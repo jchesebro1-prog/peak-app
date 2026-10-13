@@ -179,6 +179,24 @@ export async function setCrmMode(on: boolean, user: string): Promise<void> {
   await writeRow(user, mine);
 }
 
+/* ---- Inbox organization (#335): keep threads in my inbox after I reply ---- */
+
+/** Per-user opt-out of archive-on-reply (spec §4). Same sparse row, non-category
+ *  key, OPT-IN like CRM mode: a missing key = false = archive-on-reply stays on
+ *  for this user. */
+export const KEEP_IN_INBOX_KEY = "inbox_keep_after_reply";
+
+export async function keepInInboxOn(user: string): Promise<boolean> {
+  const stored = await readRow(user);
+  return stored[KEEP_IN_INBOX_KEY] === true;
+}
+
+export async function setKeepInInboxOn(on: boolean, user: string): Promise<void> {
+  const mine = { ...(await readRow(user)) };
+  mine[KEEP_IN_INBOX_KEY] = !!on;
+  await writeRow(user, mine);
+}
+
 const DASHBOARD_OVERRIDE_KEY = "dashboard_override";
 
 export async function getDashboardOverride(user: string): Promise<DashboardOverride | null> {

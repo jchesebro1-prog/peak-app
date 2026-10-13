@@ -15,7 +15,7 @@
  *             `FW:`/`Fwd:` subject, because Outlook writes the same block for a reply.
  * A `Re:` subject is never a forward (a reply quoting a forward isn't one).
  * Nested forwards (Pat → Ann → Bob → me): given `isInternal`, a first block
- * from a teammate is followed down to the deepest external sender.
+ * from a teammate is followed inward to the OUTERMOST external sender.
  */
 import { parseAddress } from "@/lib/gmail/mime";
 
@@ -168,8 +168,8 @@ function isFyiNote(note: string): boolean {
 
 /** `isInternal` (optional): when the first forwarded block's sender is
  *  internal (a teammate passing along a teammate's forward), report the
- *  deepest nested block whose sender is external — the original customer —
- *  else the innermost block. Without it, the first block is reported. */
+ *  outermost nested block whose sender is external — the customer who wrote
+ *  to us, walking inward — else the innermost block. Without it, the first block is reported. */
 export function parseForward(subject: string, body: string, isInternal?: (email: string) => boolean): ParsedForward {
   const subj = String(subject ?? "");
   const notForward: ParsedForward = { isForward: false, original: null, note: "", fyi: false };
@@ -182,7 +182,7 @@ export function parseForward(subject: string, body: string, isInternal?: (email:
   let original: ParsedForward["original"] = block ? originalOf(lines, block, subj) : null;
   if (block && original && isInternal && original.fromEmail && isInternal(original.fromEmail)) {
     const all = nestedOriginals(lines, block, subj);
-    const external = [...all].reverse().find((o) => o.fromEmail && !isInternal(o.fromEmail));
+    const external = all.find((o) => o.fromEmail && !isInternal(o.fromEmail));
     original = external ?? all[all.length - 1] ?? original;
   }
   const note = ownText(body);

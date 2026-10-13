@@ -96,9 +96,14 @@ function resolveDay(text: string, anchor: string): string | null {
     const [y, mo] = anchor.split("-").map(Number);
     return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
   }
-  const named = WEEKDAYS.find(([re]) => re.test(t));
+  // several weekdays named ("Friday or Monday"): the one written first wins
+  let named: { day: number; at: number } | null = null;
+  for (const [re, day] of WEEKDAYS) {
+    const at = t.search(re);
+    if (at >= 0 && (!named || at < named.at)) named = { day, at };
+  }
   if (named) {
-    const day = named[1];
+    const day = named.day;
     if (/\bnext week\b/.test(t)) return addDays(nextMonday, (day + 6) % 7);
     return addDays(anchor, ((day - wd + 7) % 7) || 7);
   }

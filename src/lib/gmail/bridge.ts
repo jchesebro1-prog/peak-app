@@ -225,6 +225,11 @@ async function recordMessage(
     // only: the THREAD's cc below stays "" because deliverThreadOutbound
     // copies thread.cc onto every reply we send.
     cc: p.cc || undefined,
+    // #335 — header signals the organization pipeline reads; stored only when
+    // true so ordinary messages stay byte-identical. One message object feeds
+    // both the existing-thread patch and the new-thread insert below.
+    bulk: p.bulk || undefined,
+    autoSubmitted: p.autoSubmitted || undefined,
   };
 
   // attach to an existing thread sharing the Gmail thread id

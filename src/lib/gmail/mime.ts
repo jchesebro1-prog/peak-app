@@ -167,7 +167,22 @@ export type ParsedInbound = {
   /** Set when the mail carries X-Peak-Site-Visit — one of the app's own
    *  .ics invite emails; the import poll skips these (D76-F). */
   siteVisitId?: string;
+  /** Inbox organization (#335) — a bulk / mailing-list sender:
+   *  List-Unsubscribe present, or Precedence bulk|list|junk. */
+  bulk: boolean;
+  /** Inbox organization (#335) — an automatic message: Auto-Submitted set
+   *  to anything but "no" (RFC 3834). */
+  autoSubmitted: boolean;
 };
+
+/** Inbox organization (#335) — the two bulk/automatic signals off the headers. */
+export function bulkAutoFlags(hs: GmailHeader[] | undefined): { bulk: boolean; autoSubmitted: boolean } {
+  const auto = header(hs, "Auto-Submitted").trim();
+  return {
+    bulk: !!header(hs, "List-Unsubscribe").trim() || /^(bulk|list|junk)$/i.test(header(hs, "Precedence").trim()),
+    autoSubmitted: !!auto && !/^no$/i.test(auto),
+  };
+}
 
 /** Map a full Gmail message into the shape the bridge records into comms. */
 export function parseInbound(msg: GmailFullMessage): ParsedInbound {
@@ -186,5 +201,6 @@ export function parseInbound(msg: GmailFullMessage): ParsedInbound {
     isOutbound: (msg.labelIds || []).includes("SENT"),
     labelIds: msg.labelIds || [],
     siteVisitId: header(hs, "X-Peak-Site-Visit") || undefined,
+    ...bulkAutoFlags(hs),
   };
 }

@@ -1,4 +1,5 @@
 import { outsideTransaction } from "@/db";
+import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -257,6 +258,13 @@ export type CommMessage = {
    *  connected), "failed" (Gmail refused it) or "unknown" (Gmail didn't
    *  answer in time). Stamped together with noAutoRetry. */
   deliveryNote?: OutboundDeliveryNote;
+  /** Inbox organization (#335) — stamped by the Gmail bridge on import from
+   *  the message headers: a mailing-list / bulk sender (List-Unsubscribe, or
+   *  Precedence bulk|list|junk). Absent = not bulk (or pre-#335). */
+  bulk?: boolean;
+  /** Inbox organization (#335) — an automatic message (Auto-Submitted other
+   *  than "no": out-of-office, delivery reports). Absent = a person wrote it. */
+  autoSubmitted?: boolean;
 };
 
 export type OutboundDeliveryNote = "local" | "failed" | "unknown";
@@ -345,6 +353,13 @@ export type CommThread = {
    *  and quick-add (inbound → its From; outbound → its first recipient).
    *  null/absent = today's behaviour, the thread counterpart. */
   identityMessageId?: string | null;
+  /** Inbox organization (#335) — the filing suggestion / result. Written only
+   *  by the organization pipeline and its actions, through `setOrg`. */
+  filing?: Filing;
+  /** Inbox organization (#335) — whose court the thread is in. */
+  court?: Court;
+  /** Inbox organization (#335) — the "Looks like noise" flag. */
+  noise?: NoiseFlag;
 };
 
 function mid(n: number): string {
@@ -1730,6 +1745,26 @@ export async function moveTo(
     t.mailbox = mailbox;
     t.mailboxUser = mailbox === "personal" ? user || DEFAULT_USER : null;
     touch(t);
+  });
+}
+
+/** Inbox organization (#335): write the thread's `filing` / `court` / `noise`
+ *  fields — and only those three keys, nothing else on the doc. A key left out
+ *  (or undefined) is untouched; `null` clears it (undo). Organization is
+ *  metadata about the thread, not activity on it, so this deliberately does NOT
+ *  `touch()` — `updatedAt`, `rev` and `syncedAt` keep their values and the
+ *  thread doesn't jump in a date-sorted list. */
+export async function setOrg(
+  threadId: string,
+  patch: { filing?: Filing | null; court?: Court | null; noise?: NoiseFlag | null }
+): Promise<CommThread | null> {
+  return patchDoc<CommThread>("comms", threadId, (t) => {
+    for (const k of ["filing", "court", "noise"] as const) {
+      const v = patch[k];
+      if (v === undefined) continue;
+      if (v === null) delete t[k];
+      else (t as Record<string, unknown>)[k] = v;
+    }
   });
 }
 

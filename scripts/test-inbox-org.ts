@@ -12,6 +12,22 @@ import type { SenderRule } from "@/lib/inbox-org/types";
 import { dueStampForDay } from "@/lib/task-plan/due";
 import { chicagoWallMs } from "@/lib/visit-plan/hours";
 import { chicagoParts, dayKey } from "@/lib/triage/clock";
+import { readFileSync } from "node:fs";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db";
+import { blobs, notifPrefs } from "@/db/schema";
+import { getDoc, setBlob } from "@/db/doc-store";
+import { parseInbound } from "@/lib/gmail/mime";
+import type { GmailFullMessage } from "@/lib/gmail/api";
+import { setOrg, type CommThread } from "@/lib/stores/comms";
+import {
+  FILING_LOG_BLOB, MAX_FILING_LOG, MAX_SENDER_RULES, ORG_SETTINGS_BLOB, SENDER_RULES_BLOB,
+  addSenderRule, appendFilingLog, appendFilingLogs, getFilingLog, getOwnDomainOverride, getSenderRules,
+  keepInInbox, removeSenderRule, setKeepInInbox, setOwnDomainOverride, type FilingLogEntry,
+} from "@/lib/stores/inbox-org";
+import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
+import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
+import { createFixture, fixtureId } from "./test-fixtures";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -190,6 +206,10 @@ function forwardChecks(ok: Ok): void {
   const quotedNested = parseForward("Fwd: x", "Take a look.\n\n---------- Forwarded ----------\nFrom: Ann Bell <ann@peaksystemsgroup.com>\n\n> ---------- Forwarded message ---------\n> From: Pat Lee <pat.lee@lincolnhs.org>\n> Subject: Seats\n>\n> Hi", internal);
   ok(quotedNested.original?.fromEmail === "pat.lee@lincolnhs.org" && quotedNested.original?.subject === "Seats", "forward: nested — a block quoted under Peak's own Forward is found");
   ok(parseForward("Fwd: Main curtain replacement", GMAIL_FWD, internal).original?.fromEmail === "pat.lee@lincolnhs.org", "forward: isInternal leaves an external first block alone");
+  // two external senders: the customer is outermost, a vendor sits deeper — walking inward, the first external one wins
+  const twoExt = nested.replace("From: Sam Ruiz <sam@peaksystemsgroup.com>", "From: Dee Vendor <dee@vendor.com>");
+  const outer = parseForward("Fwd: Fwd: Main curtain replacement", twoExt, internal);
+  ok(outer.original?.fromEmail === "pat.lee@lincolnhs.org", "forward: nested — with two external senders the OUTERMOST (the customer, Pat) wins over a deeper vendor");
 }
 
 /* ---------- sign-offs (§3 rules) ---------- */
@@ -325,6 +345,9 @@ function dueChecks(ok: Ok): void {
     ["end of next week", MON, "2026-10-23"], ["end of next week", FRI, "2026-10-23"], ["end of next week", SAT, "2026-10-23"],
     ["Wednesday of next week", MON, "2026-10-21"], ["Wednesday of next week", FRI, "2026-10-21"], ["next week Wednesday", SAT, "2026-10-21"],
     ["tomorrow EOD", FRI, "2026-10-17"],
+    // several weekdays named: the one written first wins, not the first in the week
+    ["Friday or Monday", MON, FRI], ["Monday or Friday", MON, "2026-10-19"], ["Thursday or Tuesday", MON, "2026-10-15"],
+    ["by Wednesday, otherwise Tuesday", MON, "2026-10-14"],
   ];
   for (const [phrase, anchor, want] of cases) {
     const got = resolveDue(phrase, at10(anchor));
@@ -377,6 +400,160 @@ function idChecks(ok: Ok): void {
   ok(promiseTaskId("C-1|0", "m", "x") !== promiseTaskId("C-1", "0|m", "x"), "ids: the separator can't be forged by shifting text between fields");
 }
 
+/* ---------- data fields, headers, stores (Task 2) ---------- */
+
+function fakeGmail(headers: Array<[string, string]>): GmailFullMessage {
+  const base: Array<[string, string]> = [["From", "News <news@vendor.com>"], ["To", "mike@peaksystemsgroup.com"], ["Subject", "Hello"], ["Message-ID", "<m1@vendor.com>"]];
+  return {
+    id: "g1", threadId: "t1", labelIds: ["INBOX"], internalDate: "1760000000000",
+    payload: { mimeType: "text/plain", headers: [...base, ...headers].map(([name, value]) => ({ name, value })), body: { data: Buffer.from("Hi there").toString("base64url") } },
+  } as GmailFullMessage;
+}
+
+const RULE_BASE = { scope: "user" as const, userId: "u-org", createdBy: "u-org", action: { type: "noise" as const } };
+
+export async function inboxOrgDbChecks(ok: Ok): Promise<void> {
+  /* header fields */
+  const plain = parseInbound(fakeGmail([]));
+  ok(plain.bulk === false && plain.autoSubmitted === false, "org headers: an ordinary message is neither bulk nor automatic");
+  ok(parseInbound(fakeGmail([["List-Unsubscribe", "<mailto:u@vendor.com>"]])).bulk === true, "org headers: List-Unsubscribe → bulk");
+  ok(parseInbound(fakeGmail([["list-unsubscribe", "<https://v.com/u>"]])).bulk === true, "org headers: header names are case-insensitive");
+  for (const v of ["bulk", "list", "junk", " Bulk "]) ok(parseInbound(fakeGmail([["Precedence", v]])).bulk === true, `org headers: Precedence ${JSON.stringify(v)} → bulk`);
+  ok(parseInbound(fakeGmail([["Precedence", "first-class"]])).bulk === false, "org headers: another Precedence value is not bulk");
+  ok(parseInbound(fakeGmail([["List-Unsubscribe", "  "]])).bulk === false, "org headers: a blank List-Unsubscribe is not bulk");
+  ok(parseInbound(fakeGmail([["Auto-Submitted", "auto-replied"]])).autoSubmitted === true, "org headers: Auto-Submitted: auto-replied → automatic");
+  ok(parseInbound(fakeGmail([["Auto-Submitted", "auto-generated"]])).autoSubmitted === true, "org headers: Auto-Submitted: auto-generated → automatic");
+  ok(parseInbound(fakeGmail([["Auto-Submitted", "no"]])).autoSubmitted === false && parseInbound(fakeGmail([["Auto-Submitted", " No "]])).autoSubmitted === false, "org headers: Auto-Submitted: no → not automatic");
+  const both = parseInbound(fakeGmail([["Precedence", "bulk"], ["Auto-Submitted", "auto-generated"]]));
+  ok(both.bulk && both.autoSubmitted && both.from.email === "news@vendor.com" && both.subject === "Hello", "org headers: both flags together; the rest of the parse is unchanged");
+  const bridgeSrc = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+  const msgLit = bridgeSrc.slice(bridgeSrc.indexOf("const msg: CommMessage = {"), bridgeSrc.indexOf("// attach to an existing thread"));
+  ok(msgLit.includes("bulk: p.bulk || undefined") && msgLit.includes("autoSubmitted: p.autoSubmitted || undefined"), "org headers: recordMessage stamps both flags on the one message that feeds both record paths");
+  ok(bridgeSrc.split("const msg: CommMessage = {").length === 2 && bridgeSrc.includes("d.messages = (d.messages || []).concat([msg])") && bridgeSrc.includes("messages: [msg]"), "org headers: the existing-thread patch and the new-thread insert both use that one message object");
+
+  /* snapshot every blob / pref row this block writes; restore in finally */
+  const db = await getDb();
+  const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB, ORG_SETTINGS_BLOB];
+  const before = new Map<string, typeof blobs.$inferSelect | undefined>();
+  for (const id of BLOBS) before.set(id, (await db.select().from(blobs).where(eq(blobs.id, id)).limit(1))[0]);
+  const PREF_USER = "TEST335 Pref User";
+  try {
+    for (const id of BLOBS) await db.delete(blobs).where(eq(blobs.id, id));
+
+    /* sender rules */
+    ok((await getSenderRules()).length === 0, "org rules: none to start");
+    const a = await addSenderRule({ ...RULE_BASE, match: { email: "  Pat@Lincoln.ORG " } });
+    ok(a !== null && a.match.email === "pat@lincoln.org" && a.id.startsWith("SR-") && a.createdAt > 0, "org rules: add normalizes the match and fills id + createdAt");
+    ok(a !== null && (await getSenderRules()).length === 1 && (await getSenderRules())[0].id === a.id, "org rules: stored in the blob");
+    const dom = await addSenderRule({ ...RULE_BASE, match: { domain: "@Lincoln.org" } });
+    ok(dom?.match.domain === "lincoln.org" && (await getSenderRules()).length === 2, "org rules: a domain rule is separate from an email rule; leading @ stripped");
+    const again = await addSenderRule({ ...RULE_BASE, match: { email: "pat@lincoln.org" }, action: { type: "never-noise" } });
+    const afterDup = await getSenderRules();
+    ok(afterDup.length === 2 && afterDup.filter((r) => r.match.email === "pat@lincoln.org").length === 1, "org rules: the same match + scope + user dedupes");
+    ok(afterDup.find((r) => r.match.email === "pat@lincoln.org")?.action.type === "never-noise" && again !== null && again.id !== a?.id, "org rules: the newer rule replaces the older one");
+    await addSenderRule({ ...RULE_BASE, userId: "u-other", createdBy: "u-other", match: { email: "pat@lincoln.org" } });
+    await addSenderRule({ ...RULE_BASE, scope: "company", userId: undefined, createdBy: "u-admin", match: { email: "pat@lincoln.org" } });
+    ok((await getSenderRules()).length === 4, "org rules: another user's, and a company rule, for the same address are distinct");
+    ok((await addSenderRule({ ...RULE_BASE, match: {} })) === null && (await addSenderRule({ ...RULE_BASE, match: { email: "nope" } })) === null, "org rules: no usable match → refused");
+    ok((await addSenderRule({ ...RULE_BASE, userId: undefined, match: { domain: "x.com" } })) === null, "org rules: a personal rule needs a user");
+    ok((await getSenderRules()).length === 4, "org rules: refused rules store nothing");
+    const co = (await getSenderRules()).find((r) => r.scope === "company");
+    ok(co !== undefined && !(await removeSenderRule(co.id, { userId: "u-org", admin: false })), "org rules: a non-admin can't delete a company rule");
+    const theirs = (await getSenderRules()).find((r) => r.userId === "u-other");
+    ok(theirs !== undefined && !(await removeSenderRule(theirs.id, { userId: "u-org", admin: false })), "org rules: you can't delete another user's personal rule");
+    ok(theirs !== undefined && (await removeSenderRule(theirs.id, { userId: "u-admin", admin: true })) && (await getSenderRules()).length === 3, "org rules: an admin can delete any rule");
+    ok(again !== null && (await removeSenderRule(again.id, { userId: "u-org", admin: false })) && (await getSenderRules()).length === 2, "org rules: you can delete your own personal rule");
+    ok(!(await removeSenderRule("SR-missing", { userId: "u-admin", admin: true })), "org rules: deleting an unknown id is false");
+    ok(co !== undefined && (await removeSenderRule(co.id, { userId: "u-admin", admin: true })), "org rules: an admin deletes the company rule");
+    // parallel adds don't lose each other
+    await Promise.all([1, 2, 3, 4, 5].map((n) => addSenderRule({ ...RULE_BASE, match: { email: `p${n}@par.com` } })));
+    ok((await getSenderRules()).filter((r) => r.match.email?.endsWith("@par.com")).length === 5, "org rules: five parallel adds all land");
+    // the cap: seed the blob one under, then add past it — the oldest drops
+    const seed = Array.from({ length: MAX_SENDER_RULES - 1 }, (_, i) => ({ id: `SR-seed${i}`, scope: "company", match: { email: `s${i}@seed.com` }, action: { type: "noise" }, createdBy: "t", createdAt: 1000 + i }));
+    await setBlob(SENDER_RULES_BLOB, { rules: seed });
+    await addSenderRule({ ...RULE_BASE, match: { email: "last-fits@cap.com" } });
+    ok((await getSenderRules()).length === MAX_SENDER_RULES && (await getSenderRules())[0].id === "SR-seed0", "org rules: exactly at the cap nothing drops");
+    await addSenderRule({ ...RULE_BASE, match: { email: "over@cap.com" } });
+    const capped = await getSenderRules();
+    ok(capped.length === MAX_SENDER_RULES && capped[0].id === "SR-seed1" && capped[capped.length - 1].match.email === "over@cap.com", "org rules: past the cap the oldest rule drops, the newest is kept");
+
+    /* filing log */
+    const entry = (n: number): FilingLogEntry => ({ at: n, threadId: `C-${n}`, source: "rule", strength: "strong", outcome: "suggested" });
+    ok((await getFilingLog()).length === 0, "org log: empty to start");
+    await appendFilingLog(entry(1));
+    await appendFilingLogs([entry(2), entry(3)]);
+    await appendFilingLogs([]);
+    ok((await getFilingLog()).map((e) => e.at).join(",") === "1,2,3", "org log: appended newest last");
+    await setBlob(FILING_LOG_BLOB, { entries: Array.from({ length: MAX_FILING_LOG - 1 }, (_, i) => entry(100 + i)) });
+    await appendFilingLog(entry(9001));
+    ok((await getFilingLog()).length === MAX_FILING_LOG && (await getFilingLog())[0].at === 100, "org log: exactly at the cap nothing drops");
+    await appendFilingLogs([entry(9002), entry(9003)]);
+    const log = await getFilingLog();
+    ok(log.length === MAX_FILING_LOG && log[0].at === 102 && log[log.length - 1].at === 9003 && log[log.length - 2].at === 9002, "org log: past the cap the oldest entries drop, newest last");
+
+    /* own domain override */
+    ok((await getOwnDomainOverride()) === null, "org settings: no override by default");
+    await setOwnDomainOverride("  peaksystemsgroup.com, peak.example  ");
+    ok((await getOwnDomainOverride()) === "peaksystemsgroup.com, peak.example", "org settings: override saved trimmed");
+    await setOwnDomainOverride("   ");
+    ok((await getOwnDomainOverride()) === null, "org settings: a blank value clears the override");
+
+    /* keepInInbox: same notif_prefs row as the bell flags */
+    ok((await keepInInbox(PREF_USER)) === false, "org prefs: keepInInbox defaults to false (archive-on-reply on)");
+    await setKeepInInbox(PREF_USER, true);
+    ok((await keepInInbox(PREF_USER)) === true, "org prefs: keepInInbox round trip → true");
+    ok((await keepInInbox(PREF_USER + " other")) === false, "org prefs: it is per user");
+    await setKeepInInbox(PREF_USER, false);
+    ok((await keepInInbox(PREF_USER)) === false, "org prefs: keepInInbox round trip → false");
+    await setKeepInInbox(PREF_USER, true);
+    await setCrmMode(true, PREF_USER);
+    ok((await keepInInbox(PREF_USER)) && (await crmModeOn(PREF_USER)), "org prefs: keepInInbox and CRM mode share one row without clobbering each other");
+
+    /* setOrg */
+    const id = fixtureId(335, "org-thread");
+    const base = {
+      id, mailbox: "personal", mailboxUser: "Mike", unread: true, archived: false, customerId: "cust-1", customer: "Lincoln HS",
+      contactName: "Pat", contactEmail: "pat@lincoln.org", cc: "", subject: "Curtains", channel: "email", status: "waiting_us",
+      assignedTo: "Mike", link: { type: "quote", id: "Q-2041" }, messages: [{ id: "m1", at: 1000, direction: "in", channel: "email", author: "Pat", body: "Hi", gmailId: "g1" }],
+      createdAt: 1000, updatedAt: 5000, syncState: "synced", syncedAt: 6000, rev: 7, siteId: "loc-1",
+    } as unknown as CommThread;
+    await createFixture("comms", base);
+    const filing: Filing = { customerId: "cust-1", work: null, noise: false, source: "rule", reason: "known sender", strength: "strong", needsReply: true, state: "suggested", at: 111 };
+    const court: Court = { owner: "me", reason: "customer asked", source: "rule", at: 112 };
+    const noise: NoiseFlag = { flagged: false, reason: "", moved: false };
+    const written = await setOrg(id, { filing, court });
+    ok(written !== null && written.filing?.reason === "known sender" && written.court?.owner === "me", "org setOrg: writes filing and court");
+    const got = (await getDoc<CommThread>("comms", id))!;
+    // jsonb round trips reorder keys, so compare with sorted keys
+    const sorted = (v: unknown): unknown => (Array.isArray(v) ? v.map(sorted) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : 1)).map(([k, x]) => [k, sorted(x)])) : v);
+    const rest = (t: CommThread) => JSON.stringify(sorted({ ...t, filing: undefined, court: undefined, noise: undefined }));
+    ok(rest(got) === rest({ ...base, id }), "org setOrg: every other field is untouched");
+    ok(got.updatedAt === 5000 && got.rev === 7 && got.syncedAt === 6000, "org setOrg: no touch() — updatedAt, rev and syncedAt keep their values");
+    await setOrg(id, { noise });
+    const got2 = (await getDoc<CommThread>("comms", id))!;
+    ok(got2.noise?.flagged === false && got2.filing?.at === 111 && got2.court?.at === 112, "org setOrg: a patch with one key leaves the other two");
+    await setOrg(id, { filing: { ...filing, state: "filed", at: 200 } });
+    ok((await getDoc<CommThread>("comms", id))?.filing?.state === "filed", "org setOrg: a key present replaces that key");
+    await setOrg(id, { court: null });
+    const got3 = (await getDoc<CommThread>("comms", id))!;
+    ok(got3.court === undefined && !("court" in got3) && got3.filing?.at === 200, "org setOrg: null clears one key");
+    await setOrg(id, {});
+    ok(JSON.stringify(await getDoc<CommThread>("comms", id)) === JSON.stringify(got3), "org setOrg: an empty patch changes nothing");
+    await setOrg(id, { subject: "hacked", archived: true, link: null } as never);
+    const got4 = (await getDoc<CommThread>("comms", id))!;
+    ok(got4.subject === "Curtains" && got4.archived === false && got4.link?.id === "Q-2041", "org setOrg: only filing / court / noise are ever written");
+    ok((await setOrg("TEST335:missing", { filing })) === null, "org setOrg: a missing thread → null");
+  } finally {
+    for (const id of BLOBS) {
+      const row = before.get(id);
+      if (row) await db.update(blobs).set({ data: row.data, updatedAt: row.updatedAt }).where(eq(blobs.id, id));
+      else await db.delete(blobs).where(eq(blobs.id, id));
+    }
+    await db.delete(notifPrefs).where(eq(notifPrefs.userName, PREF_USER));
+    await db.delete(notifPrefs).where(eq(notifPrefs.userName, PREF_USER + " other"));
+  }
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -401,6 +578,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
   }
   (async () => {
     await inboxOrgPureChecks(ok);
+    await inboxOrgDbChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);
