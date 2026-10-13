@@ -170,6 +170,12 @@ export type AppSettingsData = {
   /** Pilot gate (spec §1.3, Settings → Beta): user ids allowed to see the
    *  Record button. Empty = everyone. See canRecord(). */
   recordingsBetaUsers: string[];
+  /** #334 Assist pilot (Settings → Beta): allow-listed user ids. Empty = NOBODY (unlike recordingsBetaUsers). Read via assistSettingsOf(). */
+  assistUsers?: string[];
+  /** #334: per-feature switches; a missing key counts as on. */
+  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean };
+  /** #334: monthly API spend cap in dollars (default 200). */
+  assistMonthlyCapUsd?: number;
   /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown
    *  on Settings → Recordings. Optional: absent until the job has run once. */
   recordingsArchiveLastRun?: RecordingsArchiveLastRun | null;

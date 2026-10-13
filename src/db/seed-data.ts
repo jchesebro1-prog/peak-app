@@ -171,6 +171,7 @@ export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
   "subassemblies",
   "spec_records",
   "spec_record_revisions",
+  "assist_runs", // #334: trial history + monthly spend survive the go-live wipe
 ];
 
 export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(

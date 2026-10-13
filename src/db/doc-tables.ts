@@ -105,6 +105,7 @@ export const rewardLedger = docTable("reward_ledger"); // Customer Rewards (#282
 export const manufacturers = docTable("manufacturers"); // Manufacturer section Part 1 — one record per mfrKey with its image (an unlinked part_documents image); spec 2026-10-02-manufacturer-images-placeholders-design.md; migration 0035_manufacturers
 export const triageSnapshots = docTable("triage_snapshots"); // Morning triage — one frozen ranked list per user per slot, id `<userId>:<YYYY-MM-DD>:<slot>` (spec 2026-10-09-morning-triage-design.md); migration 0036_triage
 export const triageMarks = docTable("triage_marks"); // Morning triage — Done / Snooze / Dismiss per user per item, id `<userId>:<itemKey>`; migration 0036_triage
+export const assistRuns = docTable("assist_runs"); // Assist layer (#334) — one row per model call with tokens, cost and outcome (spec 2026-10-12-assist-layer-design.md §6); migration 0039_assist_runs
 
 export const DOC_TABLES = {
   quotes,
@@ -152,6 +153,7 @@ export const DOC_TABLES = {
   triage_snapshots: triageSnapshots,
   triage_marks: triageMarks,
   meetings,
+  assist_runs: assistRuns,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
