@@ -78,3 +78,15 @@ export type AssistNudge = {
   /** The model ran but gave nothing usable (note/subject/body are ""); the queue retries after DRAFT_RETRY_MS. */
   error?: string;
 };
+
+/** What the Inbox reader gets of a stored pre-draft (spec §4 "Reader
+ *  integration") — built on the server only for a fresh, court-me thread of
+ *  mine (`readerPreDraft`); lease and error internals stay server-side. */
+export type ReaderPreDraftVM = {
+  /** Non-null only when a reply body was drafted: the "Draft reply ready · Use it" line. */
+  reply: { body: string; runId: string | null } | null;
+  /** Stored task suggestions — Suggest tasks opens its dialog on these, no model call. */
+  tasks: { suggestions: TaskSuggestion[]; runId: string } | null;
+  /** "6:47 AM" (Chicago) — when the pre-draft was made. */
+  preparedLabel: string;
+};

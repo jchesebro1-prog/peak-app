@@ -7,6 +7,9 @@ import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
+import { withSignature } from "@/lib/inbox-signature";
+import { composePrefillFrom, prefillRecipient } from "@/lib/inbox-compose-prefill";
+import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
@@ -935,7 +938,28 @@ export default async function InboxPage({
       isAdmin: can("manage_users", user.roles),
     });
 
-    const messages: MessageVM[] = (sel.messages || []).map((m) => ({
+    // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
+    // stored suggestions keep only this dialog's link keys and team ids.
+    const storedDraft = readerPreDraft(sel, { name: me });
+    const linkKeySet = new Set(taskLinks.map((l) => l.key));
+    const teamIds = new Set(roster.map((u) => u.id));
+    const preDraft: ReaderVM["preDraft"] = storedDraft
+      ? {
+          ...storedDraft,
+          tasks: storedDraft.tasks
+            ? {
+                runId: storedDraft.tasks.runId,
+                suggestions: storedDraft.tasks.suggestions.map((s) => ({
+                  ...s,
+                  linkKeys: s.linkKeys.filter((k) => linkKeySet.has(k)),
+                  assigneeUserId: teamIds.has(s.assigneeUserId) ? s.assigneeUserId : "",
+                })),
+              }
+            : null,
+        }
+      : null;
+
+    const messages: MessageVM[] =(sel.messages || []).map((m) => ({
       id: m.id,
       author: m.author,
       initials: initialsOf(m.author),
@@ -1034,6 +1058,7 @@ export default async function InboxPage({
       meId: user.id,
       threadTasks,
       org,
+      preDraft,
     };
   }
 
@@ -1079,7 +1104,11 @@ export default async function InboxPage({
   // #122: ?customer=<companyId> is the same pre-filled composer (vendor pages
   // link here), and ?customer=<companyId>&log=1 opens the Log call / meeting
   // modal with that company preset instead.
+  // AI daily brief §4 — ?subject= / ?body= (+ ?contact=) prefill the composer
+  // (the Home card's Send nudge); capped server-side; nothing sends by itself.
   let initialCompose: ComposeInit | null = null;
+  const prefill = composePrefillFrom({ subject: str(params.subject), body: str(params.body), contact: str(params.contact) });
+  const prefillBody = prefill.body ? withSignature(prefill.body, signature, "add") : "";
   const customerParam = str(params.customer);
   const logCust = str(params.log) === "1" ? customerParam : "";
   const newCust = logCust ? "" : str(params.new) || customerParam;
@@ -1103,28 +1132,29 @@ export default async function InboxPage({
     };
   } else if (newCust) {
     const c = customerVMs.find((x) => x.id === newCust);
+    const who = prefillRecipient(c, prefill);
     initialCompose = {
       id: null,
       mailbox: "personal",
-      to: c?.primaryEmail || "",
+      to: who.to,
       cc: "",
       showCc: false,
-      subject: "",
-      body: "",
+      subject: prefill.subject,
+      body: prefillBody,
       customerId: c ? c.id : "",
-      contactName: c?.primaryName || "",
+      contactName: who.contactName,
     };
-  } else if (str(params.compose)) {
+  } else if (str(params.compose) || prefill.active) {
     initialCompose = {
       id: null,
       mailbox: box !== "personal" && !isView ? box : "personal",
       to: "",
       cc: "",
       showCc: false,
-      subject: "",
-      body: "",
+      subject: prefill.subject,
+      body: prefillBody,
       customerId: "",
-      contactName: "",
+      contactName: prefill.active ? prefill.contact : "",
     };
   }
 

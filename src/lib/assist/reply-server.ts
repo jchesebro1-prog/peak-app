@@ -37,7 +37,10 @@ export type ReplyDraftResult = { ok: true; runId: string; draft: string } | Thre
 /** Data a background caller already loaded once for the whole run. */
 export type ReplyPreloaded = { quotes?: Quote[]; threads?: CommThread[]; signature?: string };
 
-export const OUT_OF_TIME: ThreadAssistFail = { ok: false, error: "Not enough time left before the deadline.", kind: "deadline", runId: null };
+/** A fresh object every call, so no caller can mutate a shared result. */
+export function outOfTime(): ThreadAssistFail {
+  return { ok: false, error: "Not enough time left before the deadline.", kind: "deadline", runId: null };
+}
 
 /**
  * Split a caller's options into runAssist's deps and the call's own
@@ -87,7 +90,7 @@ export async function draftReplyForThread(
     m.direction === "out" && signature ? { ...m, body: stripSignature(m.body, signature) } : m
   );
   const split = splitCallDeps(deps, "reply");
-  if (!split) return OUT_OF_TIME;
+  if (!split) return outOfTime();
   const r = await runAssist(
     {
       feature: "reply",

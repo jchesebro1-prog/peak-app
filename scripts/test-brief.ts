@@ -879,6 +879,131 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** Task 4 — the Home card VM, the reader's stored pre-draft, the compose prefill, and source pins. Pure (no DB writes). */
+export async function briefCardChecks(ok: Ok): Promise<void> {
+  const { briefCardVM, nudgeComposeHref, COMPOSE_BODY_MAX, COMPOSE_SUBJECT_MAX, ORGANIZE_HREF } = await import("@/lib/brief/card-vm");
+  const { composePrefillFrom, prefillRecipient, COMPOSE_CONTACT_MAX } = await import("@/lib/inbox-compose-prefill");
+  const { readerPreDraft } = await import("@/lib/brief/reader-predraft");
+  const { outOfTime } = await import("@/lib/assist/reply-server");
+  type ThreadArg = Parameters<typeof readerPreDraft>[0];
+
+  /* 1. the card VM */
+  const doFirstBrief: Brief = {
+    ...BRIEF,
+    doFirst: [
+      { key: "email:T1", why: "Pat has waited 2 days" },
+      { key: "quote:Q-1", why: "Awaiting your approval" },
+      { key: "lead:L1", why: "SLA breached" },
+      { key: "task:gone", why: "" },
+    ],
+  };
+  const rows = {
+    "email:T1": { title: "Reply to Pat at North HS", href: "/inbox?thread=T1" },
+    "quote:Q-1": { title: "Stage curtain", href: "/estimator?id=Q-1" },
+    "lead:L1": { title: "New lead — Lincoln HS", href: "/leads?lead=L1" },
+  };
+  const nudge = { note: "Six days quiet — a short check-in.", emailSubject: "Following up on EST-1001", emailBody: "Hi Pat,\n\nJust checking in on the estimate.\n\nThanks" };
+  const vm = briefCardVM({
+    brief: doFirstBrief,
+    stale: null,
+    transient: false,
+    rows,
+    threads: { T1: { draft: true, tasks: true } },
+    quotes: { "Q-1": { href: "/estimator?id=Q-1", customerId: "C1", contactName: "Pat Lee", nudge } },
+  });
+  ok(vm.id === "brief:u1:2026-10-12:morning" && vm.title === "Morning brief · 6:45" && vm.builtLabel === "built 6:45 AM" && vm.canRebuild && vm.notes.length === 0, `brief card: header — title, built time, Rebuild shown (${vm.builtLabel})`);
+  const [e, q, l, gone] = vm.doFirst;
+  ok(e.title === "Reply to Pat at North HS" && e.href === "/inbox?thread=T1" && e.why === "Pat has waited 2 days" && e.source === "Email" && e.draftReady && e.tasksReady && !e.pricingRequest, "brief card: a Do-these-first item links to its snapshot row, with Draft ready / Tasks ready chips from the thread");
+  ok(q.draftReady && !q.tasksReady && q.href === "/estimator?id=Q-1", "brief card: a quote item with a ready nudge shows Draft ready");
+  ok(l.pricingRequest && !l.draftReady && l.source === "Lead", "brief card: a lead item offers 'Looks like a pricing request → Open Estimator'");
+  ok(gone.href === null && gone.title === "An item on your list" && gone.why === "", "brief card: a key missing from the snapshot shows no link and never the raw key");
+  ok(vm.organize?.label === "5 to file (2 strong) · 3 noise" && vm.organize.href === ORGANIZE_HREF && ORGANIZE_HREF === "/inbox?view=organize", `brief card: Inbox organization line → Review (${vm.organize?.label})`);
+  ok(briefCardVM({ brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} }).organize === null, "brief card: Inbox organization hidden when every count is zero");
+  ok(vm.today === "2 visits (first at 9:30 AM) · 1 h 10 min driving · 3 tasks on today’s plan" && vm.approvals === "1 quote waiting on your approval", `brief card: Today line (${vm.today})`);
+  ok(vm.promises.length === 1 && vm.promises[0].title === "Send drawings" && vm.promises[0].dueLabel === null, "brief card: new tasks from promises (title · due)");
+  const qq = vm.quiet[0];
+  ok(qq.label === "EST-1001 · Stage · North HS" && qq.daysLabel === "6 business days, no reply" && qq.note === nudge.note && qq.openHref === "/estimator?id=Q-1", "brief card: a quiet quote shows its note and Open estimate");
+  const u = new URL(qq.nudgeHref || "", "http://x");
+  ok(u.pathname === "/inbox" && u.searchParams.get("new") === "C1" && u.searchParams.get("contact") === "Pat Lee" && u.searchParams.get("subject") === nudge.emailSubject && u.searchParams.get("body") === nudge.emailBody, `brief card: Send nudge opens the Inbox composer prefilled for the quote's customer + contact (${qq.nudgeHref})`);
+  const bare = briefCardVM({ brief: BRIEF, stale: null, transient: false, rows: {}, threads: {}, quotes: {} });
+  ok(bare.quiet[0].nudgeHref === null && bare.quiet[0].note === null && bare.quiet[0].openHref === "/estimator?id=Q-1", "brief card: no ready nudge → no Send nudge; Open estimate still links");
+  const noCust = new URL(nudgeComposeHref({ customerId: null, contactName: "" }, { emailSubject: "s".repeat(500), emailBody: "b".repeat(9000) }), "http://x");
+  ok(noCust.searchParams.get("compose") === "1" && !noCust.searchParams.has("new") && !noCust.searchParams.has("contact") && noCust.searchParams.get("subject")!.length === COMPOSE_SUBJECT_MAX && noCust.searchParams.get("body")!.length === COMPOSE_BODY_MAX, "brief card: a quote with no customer opens a blank-To composer; the link is capped");
+  ok(vm.since === null && vm.counts.includes("Inbox: 5 to file (2 strong) · 3 noise") && vm.counts.some((c) => c.startsWith("Today: 2 visits")) && vm.counts.includes("1 sent quote has gone quiet") && vm.counts.includes("1 new task from a promise"), `brief card: big-text counts (${vm.counts.join(" | ")})`);
+  ok(vm.speech.includes("First, Reply to Pat at North HS. Pat has waited 2 days.") && !vm.speech.includes("task:gone") && !vm.speech.includes("email:T1"), "brief card: Listen reads the row titles, never a raw key");
+  const pm = briefCardVM({ brief: { ...BRIEF, slot: "midday", since: { done: 3, open: 2, new: 1 }, builtBy: "rebuild", error: "Assist failed — the brief was built from the counts." }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} });
+  ok(pm.title === "Afternoon brief · 1:45" && pm.since === "Since this morning: 3 done · 2 still open · 1 new" && pm.builtLabel.startsWith("rebuilt ") && pm.notes.includes("Assist failed — the brief was built from the counts."), "brief card: afternoon adds the since line; a rebuilt brief and its error show");
+  const stale = briefCardVM({ brief: { ...BRIEF, slot: "midday", day: "2026-10-11" }, stale: "yesterday-afternoon", transient: false, rows: {}, threads: {}, quotes: {} });
+  ok(!stale.canRebuild && stale.notes[0].startsWith("Yesterday’s afternoon brief") && stale.builtLabel.includes("Oct"), `brief card: before 6:45 yesterday's afternoon brief shows, with no Rebuild (${stale.builtLabel})`);
+
+  /* 2. compose prefill (server-side caps) */
+  const p0 = composePrefillFrom({});
+  ok(!p0.active && p0.subject === "" && p0.body === "" && p0.contact === "", "compose prefill: nothing given → inactive (old ?new= behaviour)");
+  const p1 = composePrefillFrom({ subject: "Re:\n  hello\u0007", body: "Hi\r\nthere\u0000\u0007\n\tok", contact: " Pat Lee " });
+  ok(p1.active && p1.subject === "Re: hello" && p1.body === "Hi\nthere\n\tok" && p1.contact === "Pat Lee", `compose prefill: one-line subject, control characters out, newlines kept in the body (${JSON.stringify(p1)})`);
+  const p2 = composePrefillFrom({ subject: "s".repeat(999), body: "b".repeat(99_999), contact: "c".repeat(999) });
+  ok(p2.subject.length === COMPOSE_SUBJECT_MAX && p2.body.length === COMPOSE_BODY_MAX && p2.contact.length === COMPOSE_CONTACT_MAX, "compose prefill: subject, body and contact are capped server-side");
+  ok(!composePrefillFrom({ subject: ["x"], body: 5 }).active, "compose prefill: non-string params are ignored");
+  const cust = { contacts: [{ name: "Pat Lee", email: "pat@north.example" }, { name: "Sam Roe", email: "" }], primaryName: "Ann Primary", primaryEmail: "ann@north.example" };
+  ok(prefillRecipient(cust, p0).to === "ann@north.example" && prefillRecipient(cust, p0).contactName === "Ann Primary", "compose prefill: a plain ?new= still addresses the primary contact");
+  ok(prefillRecipient(cust, composePrefillFrom({ body: "x", contact: "pat lee" })).to === "pat@north.example", "compose prefill: a prefilled compose addresses the quote's contact, matched by name");
+  ok(prefillRecipient(cust, composePrefillFrom({ body: "x", contact: "Sam Roe" })).to === "" && prefillRecipient(cust, composePrefillFrom({ body: "x", contact: "Nobody" })).to === "" && prefillRecipient(cust, composePrefillFrom({ body: "x" })).to === "" && prefillRecipient(undefined, composePrefillFrom({ body: "x", contact: "Pat Lee" })).to === "", "compose prefill: an unknown, email-less or unnamed contact leaves To blank (never the primary)");
+
+  /* 3. the reader's stored pre-draft: fresh + court me + mine; reply needs a body */
+  const msgs = [
+    { id: "m1", direction: "in" as const, at: MON(8), body: "", author: "Pat" },
+    { id: "m2", direction: "in" as const, at: MON(9), body: "", author: "Pat" },
+  ];
+  const sugg = [{ title: "Send drawings", notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "normal", size: "s" }];
+  const pd = { body: "Hi Pat — attached.", runId: "AR-r", taskSuggestions: sugg, taskRunId: "AR-t", basis: "m2", at: MON(6, 47) };
+  const th = (over: Record<string, unknown> = {}) => ({ status: "waiting_us", assignedTo: "Dana Diaz", noise: null, court: null, messages: msgs, preDraft: pd, ...over }) as unknown as ThreadArg;
+  const DANA = { name: "Dana Diaz" };
+  const env = {};
+  const r1 = readerPreDraft(th(), DANA, env);
+  ok(!!r1 && r1.reply?.body === pd.body && r1.reply.runId === "AR-r" && r1.tasks?.runId === "AR-t" && r1.tasks.suggestions.length === 1 && r1.preparedLabel === "6:47 AM", "reader pre-draft: fresh, court me, mine → Use it (body + runId) and the stored suggestions");
+  ok(readerPreDraft(th({ preDraft: { ...pd, basis: "m1" } }), DANA, env) === null, "reader pre-draft: stale (a newer inbound message) → nothing; the reader drafts live");
+  ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), DANA, env) === null, "reader pre-draft: someone else's thread → nothing");
+  ok(readerPreDraft(th({ status: "waiting_them" }), DANA, env) === null && readerPreDraft(th({ noise: { flagged: true } }), DANA, env) === null, "reader pre-draft: not on my court (waiting on them, or noise) → nothing");
+  const noBody = readerPreDraft(th({ preDraft: { ...pd, body: "  " } }), DANA, env);
+  ok(!!noBody && noBody.reply === null && !!noBody.tasks, "reader pre-draft: an empty body never shows Use it (stored suggestions still do)");
+  ok(readerPreDraft(th({ preDraft: { ...pd, body: "", taskSuggestions: null, taskRunId: null } }), DANA, env) === null && readerPreDraft(th({ preDraft: undefined }), DANA, env) === null, "reader pre-draft: nothing usable → null");
+
+  /* 4. carry-over: the out-of-time result is a fresh object each time */
+  const a = outOfTime();
+  const b2 = outOfTime();
+  ok(a !== b2 && !a.ok && a.kind === "deadline" && JSON.stringify(a) === JSON.stringify(b2), "assist: outOfTime() returns a fresh object per call");
+
+  /* 5. source pins */
+  const home = readFileSync("src/app/(app)/page.tsx", "utf8");
+  const briefAt = home.indexOf("<BriefCard user={user}");
+  const startAt = home.indexOf("<StartHereCard user={user}");
+  ok(briefAt > 0 && startAt > briefAt && home.slice(briefAt - 260, briefAt).includes("Preparing your brief…") && /\{briefFlags && \(\s*<Suspense/.test(home), "brief pins: Home renders BriefCard above StartHereCard, in its own Suspense ('Preparing your brief…'), only when gated on");
+  ok(/assistSettings\.users\.includes\(user\.id\) && assistSettings\.features\.brief/.test(home) && /assistUiFlags\(user\.id, assistSettings, await getAssistEnv\(\)\)/.test(home) && /if \(flags\.brief\) briefFlags = flags;/.test(home), "brief pins: the Home gate — cheap settings check first, then the Assist gate with the stored key");
+  ok(/export const maxDuration = 120;/.test(home), "brief pins: Home keeps maxDuration 120 (Rebuild's 90 s deadline)");
+  const reader = readFileSync("src/app/(app)/inbox/thread-reader.tsx", "utf8");
+  ok(/const storedReply = assist\.reply && pre\?\.reply && pre\.reply\.body\.trim\(\) \? pre\.reply : null;/.test(reader) && /\{vm\.isEmail && !composerOpen && storedReply && \(/.test(reader) && reader.includes("Draft reply ready") && reader.includes("Use it"), "brief pins: the reader shows 'Draft reply ready · Use it' only for a stored reply with a body");
+  const useFn = reader.slice(reader.indexOf("const useStoredDraft"), reader.indexOf("const closeComposer"));
+  ok(useFn.includes('openMode("reply")') && useFn.includes("withSignature(storedReply.body, signature, \"add\")") && useFn.includes("assistDraftRef.current = d") && !useFn.includes("draftReplyAction"), "brief pins: Use it opens the reply with the stored body + signature and tracks its runId — no model call");
+  const tasksClick = reader.slice(reader.indexOf("if (storedTasks) {"), reader.indexOf("tasksInFlight.current = true;", reader.indexOf("if (storedTasks) {")));
+  ok(tasksClick.includes("runId: storedTasks.runId") && tasksClick.includes("return;") && !tasksClick.includes("suggestTasksAction"), "brief pins: Suggest tasks opens the dialog on fresh stored suggestions with their runId — no model call");
+  const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
+  ok(/const storedDraft = readerPreDraft\(sel, \{ name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
+  ok(/composePrefillFrom\(\{ subject: str\(params\.subject\), body: str\(params\.body\), contact: str\(params\.contact\) \}\)/.test(inbox) && /subject: prefill\.subject,/.test(inbox) && /body: prefillBody,/.test(inbox) && /str\(params\.compose\) \|\| prefill\.active/.test(inbox), "brief pins: Inbox compose init accepts ?subject= / ?body= / ?contact=");
+  const rp = readFileSync("src/lib/brief/reader-predraft.ts", "utf8");
+  ok(rp.includes("preDraftFresh(t)") && rp.includes("onMyCourt(t, env)") && rp.includes("sameName(t.assignedTo, me.name)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
+  const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
+  ok(view.includes("rebuildBriefAction()") && view.includes('postChanged("inbox")') && view.includes("router.refresh()"), "brief pins: Rebuild refreshes the page and tells other windows (postChanged)");
+  ok(view.includes("@media (max-width:899px)") && view.includes(".pkb-big{display:block}") && view.includes("new SpeechSynthesisUtterance(vm.speech)") && /const listenBtn = canSpeak \?/.test(view) && view.includes('useSearchParams().get("brief")') && view.includes('briefParam === "1"') && view.includes("[vm.id, briefParam]") && view.includes("scrollIntoView"), "brief pins: big-text under 900 px, Listen only when speech is supported, ?brief=1 scrolls to the card");
+  ok(/localStorage\.getItem\(COLLAPSE_KEY\(vm\.id\)\)/.test(view) && view.includes("try {"), "brief pins: collapse remembered per brief id, storage in try/catch");
+  const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
+  ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { name: user.name })") && card.includes("nudgeFresh(q)"), "brief pins: the server card reads the lazy view, ready pre-drafts and fresh nudges");
+  for (const f of ["src/components/brief/brief-card-view.tsx", "src/app/(app)/inbox/thread-reader.tsx", "src/lib/brief/card-vm.ts", "src/lib/inbox-compose-prefill.ts"]) {
+    const src = readFileSync(f, "utf8");
+    const bad = [...src.matchAll(/^import (?!type )[^;]*from "([^"]+)";/gm)].map((m) => m[1]).filter((p) => /stores\/|@\/db|\/build$|reader-predraft|server|session|triage\/feeds|triage\/store|triage\/service/.test(p));
+    ok(bad.length === 0, `brief purity: ${f} imports no store/db/server module${bad.length ? ` (${bad.join(", ")})` : ""}`);
+  }
+}
+
 if (process.argv[1] && /test-brief\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -893,6 +1018,7 @@ if (process.argv[1] && /test-brief\.ts$/.test(process.argv[1])) {
     await briefPureChecks(ok);
     await briefDraftDbChecks(ok);
     await briefBuildDbChecks(ok);
+    await briefCardChecks(ok);
     // later tasks append: await briefXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall brief checks passed");
     process.exit(fail ? 1 : 0);

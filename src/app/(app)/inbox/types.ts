@@ -8,6 +8,7 @@ import type { ParsedSignature, SigPhone } from "@/lib/inbox-signature-parse";
 import type { ParticipantRole } from "@/lib/inbox-participants";
 import type { ThreadTaskLinkKind, ThreadTaskRow } from "@/lib/inbox-task";
 import type { VenueType } from "@/lib/venue-types";
+import type { ReaderPreDraftVM } from "@/lib/brief/types";
 
 export type Opt = { value: string; label: string };
 
@@ -272,6 +273,9 @@ export type ReaderVM = {
   /** #335 inbox organization — court chip, noise tag, filing line and
    *  promise-task (null on a thread the pipeline never touched) */
   org?: ReaderOrgVM | null;
+  /** AI daily brief §4 — the stored pre-draft, only for a fresh, court-me
+   *  thread of mine (`readerPreDraft`); null → the live Assist paths. */
+  preDraft?: ReaderPreDraftVM | null;
 };
 
 /** #335 — the reader's organization strip (spec §2, §3, §7). Built on the

@@ -8,6 +8,10 @@ import { money } from "@/lib/format";
 import { makeDashboardData } from "@/lib/dashboard/data";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor } from "@/lib/dashboard/home-metrics";
 import StartHereCard from "@/components/triage/start-here-card";
+import BriefCard from "@/components/brief/brief-card";
+import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
+import { getAssistEnv } from "@/lib/assist/key-store";
+import type { AssistFeature } from "@/lib/assist/types";
 import HomeTabs from "./home-tabs";
 import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
@@ -95,6 +99,19 @@ export default async function HomePage({
     meetingsReadOr(toFileCount(user.id), 0, "home count"), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
   ]);
 
+  // AI daily brief (spec §4) — only for an Assist pilot user with Daily brief
+  // on. The cheap settings check runs first; the key is read only for them.
+  const assistSettings = assistSettingsOf(appSettings);
+  let briefFlags: Record<AssistFeature, boolean> | null = null;
+  if (assistSettings.users.includes(user.id) && assistSettings.features.brief) {
+    try {
+      const flags = assistUiFlags(user.id, assistSettings, await getAssistEnv());
+      if (flags.brief) briefFlags = flags;
+    } catch (err) {
+      console.error("[brief] Home gate failed:", err);
+    }
+  }
+
   const pipe = resolvePipe(first(sp.pipe));
   const sheetHref = sheetHrefFor(pipe);
   const s = myQuoteStats(quotesAll, me);
@@ -128,6 +145,11 @@ export default async function HomePage({
     <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
       <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} meetingsToFile={meetingsToFile} />
+      {briefFlags && (
+        <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Preparing your brief…</div>}>
+          <BriefCard user={user} flags={briefFlags} />
+        </Suspense>
+      )}
       <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Building your Start here list…</div>}>
         <StartHereCard user={user} />
       </Suspense>

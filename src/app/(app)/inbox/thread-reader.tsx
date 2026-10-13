@@ -704,6 +704,27 @@ export default function ThreadReader({
     }
   };
 
+  // AI daily brief §4 — the stored pre-draft. The server sends it only for a
+  // fresh, court-me thread of mine (readerPreDraft); the reply line needs a
+  // non-empty body too. Shown only while Draft reply itself would show.
+  const pre = vm.preDraft ?? null;
+  const storedReply = assist.reply && pre?.reply && pre.reply.body.trim() ? pre.reply : null;
+  const storedTasks = assist.tasks && pre?.tasks ? pre.tasks : null;
+
+  // "Use it" — the Draft reply path with the stored body and runId: no model
+  // call. Outcomes are recorded exactly as for Draft reply (edit ratio on
+  // send, discarded on cancel / leaving the thread).
+  const useStoredDraft = () => {
+    if (!storedReply || draftBusy || replyInFlight.current) return;
+    openMode("reply");
+    setCBody(withSignature(storedReply.body, signature, "add"));
+    if (storedReply.runId) {
+      const d = { runId: storedReply.runId, draft: storedReply.body };
+      assistDraftRef.current = d;
+      setAssistDraft(d);
+    }
+  };
+
   const closeComposer = () => {
     // Cancel / ✕ / Discard with a draft still pending. After a send the
     // draft is already settled, so this is a no-op then.
@@ -1132,6 +1153,19 @@ export default function ThreadReader({
                 title="Assist — drafts suggestions for you to review"
                 onClick={async () => {
                   if (assistBusy || tasksInFlight.current) return;
+                  // AI daily brief — fresh stored suggestions open the same
+                  // dialog with their own runId: no model call.
+                  if (storedTasks) {
+                    setAssistError(null);
+                    setAssistTasks({
+                      ok: true,
+                      runId: storedTasks.runId,
+                      suggestions: storedTasks.suggestions,
+                      team: vm.taskTeam,
+                      links: vm.taskLinks.map((l) => ({ key: l.key, label: l.label })),
+                    });
+                    return;
+                  }
                   tasksInFlight.current = true;
                   setAssistBusy(true);
                   setAssistError(null);
@@ -1233,6 +1267,46 @@ export default function ThreadReader({
             <p role="alert" style={{ margin: "-4px 0 10px", fontSize: 12, color: "#b4543a" }}>
               {promiseNote}
             </p>
+          )}
+
+          {/* AI daily brief §4 — a pre-made reply, ready to use */}
+          {vm.isEmail && !composerOpen && storedReply && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                margin: "0 0 10px",
+                padding: "7px 11px",
+                borderRadius: 9,
+                background: ACCENT_SOFT,
+                fontSize: 12.5,
+                color: ACCENT_INK,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>Draft reply ready</span>
+              {pre?.preparedLabel && <span>· prepared {pre.preparedLabel}</span>}
+              <span aria-hidden>·</span>
+              <button
+                type="button"
+                onClick={useStoredDraft}
+                disabled={draftBusy}
+                title="Opens the reply with the prepared draft — review it before sending"
+                style={{
+                  border: "none",
+                  background: "none",
+                  padding: 0,
+                  font: "inherit",
+                  fontWeight: 700,
+                  color: "var(--accent)",
+                  cursor: draftBusy ? "default" : "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Use it
+              </button>
+            </div>
           )}
 
           {/* EMAIL: reply / reply-all / forward */}

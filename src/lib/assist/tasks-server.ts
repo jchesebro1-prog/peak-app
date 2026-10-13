@@ -13,7 +13,7 @@ import { buildTasksUserText, sanitizeTaskSuggestions, TaskSuggestSchema, TASKS_S
 import { runAssist, type AssistCallDeps } from "./run";
 import { loadThreadFor } from "./thread-access";
 import { gateFor } from "./gate-server";
-import { OUT_OF_TIME, splitCallDeps, type ThreadAssistFail } from "./reply-server";
+import { outOfTime, splitCallDeps, type ThreadAssistFail } from "./reply-server";
 
 export type TaskSuggestResult =
   | { ok: true; runId: string; suggestions: TaskSuggestion[]; team: { id: string; name: string }[]; links: { key: string; label: string }[] }
@@ -34,7 +34,7 @@ export async function suggestTasksForThread(
   ]);
   const today = chicagoToday(deps.now ?? Date.now());
   const split = splitCallDeps(deps, "tasks");
-  if (!split) return OUT_OF_TIME;
+  if (!split) return outOfTime();
   const { run, call } = split;
   const r = await runAssist(
     {
