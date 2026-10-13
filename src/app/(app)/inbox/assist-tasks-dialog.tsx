@@ -63,6 +63,22 @@ const linkChip = (on: boolean, locked: boolean): CSSProperties => ({
 });
 
 type Row = TaskSuggestion & { on: boolean; done: boolean };
+type Tally = { suggested: number; created: number; edited: number };
+
+function tallyOf(rs: Row[], originals: TaskSuggestion[]): Tally {
+  return {
+    suggested: originals.length,
+    created: rs.filter((r) => r.done).length,
+    edited: rs.filter((r, i) => r.done && suggestionEdited(r, originals[i])).length,
+  };
+}
+
+/** Log the run's outcome once per dialog (the store is first-write-wins too). */
+function recordOnce(recorded: { current: boolean }, runId: string, detail: Tally): void {
+  if (recorded.current) return;
+  recorded.current = true;
+  void recordAssistOutcomeAction(runId, taskSuggestOutcome(detail), detail).catch(() => {});
+}
 
 export default function AssistTasksDialog({ threadId, runId, suggestions, team, links, meId, onClose, onCreated }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -78,28 +94,53 @@ export default function AssistTasksDialog({ threadId, runId, suggestions, team, 
   const others = team.filter((u) => u.id !== meId);
   const labelOf = new Map(links.map((l) => [l.key, l.label] as const));
 
-  const tally = (rs: Row[]) => {
-    const created = rs.filter((r) => r.done);
-    return {
-      suggested: originals.length,
-      created: created.length,
-      edited: rs.filter((r, i) => r.done && suggestionEdited(r, originals[i])).length,
-    };
-  };
-
-  const record = (detail: { suggested: number; created: number; edited: number }) => {
-    if (recorded.current) return;
-    recorded.current = true;
-    void recordAssistOutcomeAction(runId, taskSuggestOutcome(detail), detail).catch(() => {});
-  };
+  const tally = (rs: Row[]) => tallyOf(rs, originals);
+  const record = (detail: Tally) => recordOnce(recorded, runId, detail);
 
   // Closing without creating everything still logs what happened (rows
-  // created before an error count).
+  // created before an error count); if any task was created, the reader
+  // refreshes so it shows.
   const close = () => {
     if (busy) return;
-    record(tally(rows));
-    onClose();
+    const t = tally(rows);
+    record(t);
+    if (t.created > 0) onCreated();
+    else onClose();
   };
+
+  // Unmount without Cancel/✕/Escape (browser Back, a refresh that remounts
+  // the keyed reader): record what happened so far. Deferred so React
+  // StrictMode's dev mount → unmount → remount doesn't lock in a premature
+  // "discarded" — the remount (same instance, same refs) cancels the timer.
+  // While a create loop is still running, the loop records when it ends.
+  const latest = useRef({ rows, originals, runId });
+  const busyRef = useRef(false);
+  const mountedRef = useRef(false);
+  const unmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    latest.current = { rows, originals, runId };
+  });
+  useEffect(() => {
+    mountedRef.current = true;
+    if (unmountTimer.current) {
+      clearTimeout(unmountTimer.current);
+      unmountTimer.current = null;
+    }
+    const recordedFlag = recorded;
+    const latestRef = latest;
+    const busyFlag = busyRef;
+    const mounted = mountedRef;
+    const timer = unmountTimer;
+    return () => {
+      mounted.current = false;
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        if (busyFlag.current) return;
+        const l = latestRef.current;
+        recordOnce(recordedFlag, l.runId, tallyOf(l.rows, l.originals));
+      }, 0);
+    };
+  }, []);
 
   useEffect(() => {
     openerRef.current = document.activeElement;
@@ -162,6 +203,7 @@ export default function AssistTasksDialog({ threadId, runId, suggestions, team, 
   const create = async () => {
     if (busy || pendingCount === 0) return;
     setBusy(true);
+    busyRef.current = true;
     setError(null);
     let current = rows;
     for (let i = 0; i < current.length; i++) {
@@ -183,6 +225,9 @@ export default function AssistTasksDialog({ threadId, runId, suggestions, team, 
         res = { ok: false, error: "Couldn’t create the task — please try again." };
       }
       if (!res.ok) {
+        busyRef.current = false;
+        // Unmounted mid-loop: nobody is left to press Cancel — record now.
+        if (!mountedRef.current) record(tally(current));
         setRows(current);
         setError(`“${r.title || "Untitled"}”: ${res.error}`);
         setBusy(false);
@@ -190,6 +235,7 @@ export default function AssistTasksDialog({ threadId, runId, suggestions, team, 
       }
       current = current.map((x, j) => (j === i ? { ...x, done: true } : x));
     }
+    busyRef.current = false;
     setRows(current);
     setBusy(false);
     record(tally(current));

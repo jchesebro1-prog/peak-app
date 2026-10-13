@@ -6,7 +6,7 @@ import { activeUsers } from "@/lib/users";
 import { threadTaskLinkOptions } from "@/lib/inbox-task-write";
 import { runAssist } from "@/lib/assist/run";
 import { chicagoToday } from "@/lib/assist/config";
-import { setRunOutcome } from "@/lib/stores/assist-runs";
+import { getRun, setRunOutcome } from "@/lib/stores/assist-runs";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
 import {
   buildTasksUserText,
@@ -15,12 +15,13 @@ import {
   TASKS_SYSTEM,
   type TaskSuggestion,
 } from "@/lib/assist/features/task-suggest";
-import type { AssistOutcome } from "@/lib/assist/types";
+import type { AssistFeature, AssistOutcome } from "@/lib/assist/types";
 
 /** #334 Assist — Suggest tasks. Suggestions only: nothing is created here;
  *  the dialog creates ticked rows through the existing #215 task action. */
 
 const OUTCOMES: AssistOutcome[] = ["accepted", "edited", "discarded"];
+const CLIENT_OUTCOME_FEATURES: AssistFeature[] = ["tasks", "reply"];
 
 async function loadThreadFor(threadId: string, meName: string): Promise<CommThread | null> {
   const t = await getThread(String(threadId || ""));
@@ -69,6 +70,9 @@ export async function recordAssistOutcomeAction(
 ): Promise<{ ok: boolean }> {
   const me = await requireUser();
   if (!OUTCOMES.includes(outcome)) return { ok: false };
+  // Only client-judged features: estimate outcomes are computed server-side.
+  const run = await getRun(String(runId || ""));
+  if (!run || run.userId !== me.id || !CLIENT_OUTCOME_FEATURES.includes(run.feature)) return { ok: false };
   let safe: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(JSON.stringify(detail ?? {}));
