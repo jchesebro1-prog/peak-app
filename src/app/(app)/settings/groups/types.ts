@@ -115,6 +115,9 @@ export type AssistVM = {
    *  the company-wide sender rules and the own-domain override. */
   org: {
     filing: FilingReport;
+    /** rule suggestions "Organize my inbox" made this month, by source (the
+     *  filing log leaves them out so a mass cleanup can't evict its entries) */
+    cleanupSuggested: Record<string, number>;
     companyRules: SenderRuleRowVM[];
     ownDomainOverride: string;
     /** the domains in effect now (Peak's own + the override's, else the team's) */

@@ -18,7 +18,7 @@
  * abandoned one) starts a new run; threads already filed — or already
  * suggested during this run — are skipped.
  */
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, listBlobIds, setBlob } from "@/db/doc-store";
 import { get as getThread, getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
 import { appendFilingLogs, type FilingLogEntry } from "@/lib/stores/inbox-org";
 import { AI_CALL_MARGIN_MS, callWorstCaseMs, runAiPass, type AiPassDeps } from "./ai-pass";
@@ -162,6 +162,28 @@ export async function getCleanupState(userId: string): Promise<CleanupState | nu
     summary: b.summary && typeof b.summary === "object" ? (b.summary as CleanupSummary) : null,
     ruleSuggestions: b.ruleSuggestions && typeof b.ruleSuggestions === "object" ? (b.ruleSuggestions as Record<string, number>) : {},
   };
+}
+
+/**
+ * The rule suggestions the 90-day cleanup made in runs that STARTED in the
+ * window, summed over every user's state blob, by source. The cleanup counts
+ * them here instead of the capped filing log, so the Assist report reads them
+ * back from the blobs. Never throws (an unreadable blob counts as none).
+ */
+export async function cleanupRuleSuggestions(inWindow: (startedAt: number) => boolean): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  let ids: string[] = [];
+  try {
+    ids = await listBlobIds(CLEANUP_BLOB_PREFIX);
+  } catch {
+    return out;
+  }
+  for (const id of ids) {
+    const st = await getCleanupState(id.slice(CLEANUP_BLOB_PREFIX.length)).catch(() => null);
+    if (!st || !inWindow(st.startedAt)) continue;
+    for (const [src, n] of Object.entries(st.ruleSuggestions ?? {})) if (Number.isFinite(n) && n > 0) out[src] = (out[src] ?? 0) + n;
+  }
+  return out;
 }
 
 /* ---- one batch ----------------------------------------------------------------- */

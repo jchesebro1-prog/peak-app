@@ -2,6 +2,7 @@ import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo
 import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
 import { estimateOutcomeFor, type DraftLine } from "@/lib/assist/outcome";
 import { assistReport, filingReport, recentMonthKeys, type FilingReport } from "@/lib/assist/report";
+import { cleanupRuleSuggestions } from "@/lib/inbox-org/cleanup";
 import { loadOrgContext } from "@/lib/inbox-org/pipeline";
 import { loadSenderRuleRows } from "@/lib/inbox-org/rule-list-server";
 import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
@@ -78,6 +79,12 @@ async function loadOrgVM(runs: AssistRun[], month: string): Promise<AssistVM["or
     console.error("[inbox-org] loading the filing report failed", e instanceof Error ? e.name : "error");
     filing = filingReport([], [], []);
   }
+  let cleanupSuggested: Record<string, number> = {};
+  try {
+    cleanupSuggested = await cleanupRuleSuggestions(inMonth);
+  } catch {
+    cleanupSuggested = {};
+  }
   let companyRules: SenderRuleRowVM[] = [];
   let ownDomainOverride = "";
   let ownDomains: string[] = [];
@@ -89,5 +96,5 @@ async function loadOrgVM(runs: AssistRun[], month: string): Promise<AssistVM["or
   } catch (e) {
     console.error("[inbox-org] loading sender rules / own domains failed", e instanceof Error ? e.name : "error");
   }
-  return { filing, companyRules, ownDomainOverride, ownDomains };
+  return { filing, cleanupSuggested, companyRules, ownDomainOverride, ownDomains };
 }

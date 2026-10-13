@@ -110,8 +110,10 @@ export function AssistOrgSettings({ org, run }: { org: AssistVM["org"]; run: Run
   );
 }
 
-export function FilingReportTable({ report }: { report: AssistVM["org"]["filing"] }) {
+export function FilingReportTable({ report, cleanupSuggested }: { report: AssistVM["org"]["filing"]; cleanupSuggested: AssistVM["org"]["cleanupSuggested"] }) {
   const t = report.totals;
+  const cleanupParts = Object.entries(cleanupSuggested ?? {}).filter(([, n]) => n > 0);
+  const cleanupTotal = cleanupParts.reduce((sum, [, n]) => sum + n, 0);
   return (
     <div style={{ marginTop: 12, overflowX: "auto" }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Inbox filings by source</div>
@@ -161,6 +163,12 @@ export function FilingReportTable({ report }: { report: AssistVM["org"]["filing"
         auto-filed <b>{t.autoFiled}</b> · promise-tasks created <b>{report.promiseTasks.created}</b>, undone{" "}
         <b>{report.promiseTasks.undone}</b> · court overrides <b>{report.courtOverrides}</b>
       </div>
+      {cleanupTotal > 0 && (
+        <div style={{ fontSize: 12, color: "#5b6170", marginTop: 4 }}>
+          From &ldquo;Organize my inbox&rdquo;: <b>{cleanupTotal}</b> suggested (
+          {cleanupParts.map(([src, n]) => `${SOURCE_LABEL[src] ?? src} ${n}`).join(" · ")}) — not in the Suggested column above.
+        </div>
+      )}
     </div>
   );
 }

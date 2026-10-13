@@ -301,7 +301,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <ReportTable title="By feature" rows={report.byFeature} />
       <ReportTable title="By person" rows={report.byUser} />
       <ReportTable title="By model" rows={report.byModel} />
-      <FilingReportTable report={assist.org.filing} />
+      <FilingReportTable report={assist.org.filing} cleanupSuggested={assist.org.cleanupSuggested} />
       <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
         Costs are estimates from token counts × list prices; check the Claude Console for the bill.
       </div>

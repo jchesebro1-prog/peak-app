@@ -40,7 +40,7 @@ import { cleanupProgressText, cleanupSummaryText, courtChipLabel, filedByLabel, 
 import { assistReport, filingReport } from "@/lib/assist/report";
 import type { AssistRun } from "@/lib/stores/assist-runs";
 import { senderRuleRows } from "@/lib/inbox-org/rule-list";
-import { CLEANUP_BLOB_PREFIX, cleanupVMOf, getCleanupState, runCleanupBatch } from "@/lib/inbox-org/cleanup";
+import { CLEANUP_BLOB_PREFIX, cleanupRuleSuggestions, cleanupVMOf, getCleanupState, runCleanupBatch } from "@/lib/inbox-org/cleanup";
 import { aiCourtOverride, applyPromises, COURT_SYSTEM, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
 import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
@@ -2118,6 +2118,8 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     const r1 = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW, run: { provider }, batchSize: 2 });
     const s1 = await getCleanupState(CLEO_ID);
     ok(s1?.ruleSuggestions?.number === 1 && s1.ruleSuggestions["noise-rule"] === 1, "fix: the cleanup counts its rule suggestions in the state, by source");
+    const cs = await cleanupRuleSuggestions((t) => t === NOW);
+    ok(cs.number === 1 && cs["noise-rule"] === 1 && Object.keys(await cleanupRuleSuggestions(() => false)).length === 0, "report: cleanupRuleSuggestions sums the state blobs of runs started in the window, by source");
     ok(!(await getFilingLog()).some((e) => (e.threadId === a || e.threadId === b) && !e.action), "fix: … and writes no mass \"suggested\" entries to the capped filing log");
     ok(r1.ok && r1.checked === 2 && r1.total === 4 && !r1.done && r1.summary === null, "cleanup: batch 1 checks 2 of 4 and is not done");
     ok(!!s1 && s1.cursor === 2 && s1.checked === 2 && s1.total === 4 && !s1.done && s1.startedAt === NOW && !s1.runningUntil, "cleanup: the cursor and counts are saved in inbox_cleanup:<userId> (lease released)");
@@ -2276,7 +2278,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
   /* settings card */
   const card = read("src/app/(app)/settings/groups/assist-pilot.tsx");
   ok(card.includes('{ key: "file", label: "Inbox organization" }') && card.includes('{ key: "promise", label: "Promise tasks" }'), "settings: the pilot card gains the Inbox organization and Promise tasks switches");
-  ok(card.includes("<AssistOrgSettings org={assist.org} run={run} />") && card.includes("<FilingReportTable report={assist.org.filing} />"), "settings: the card shows the org settings and the filing report");
+  ok(card.includes("<AssistOrgSettings org={assist.org} run={run} />") && card.includes("<FilingReportTable report={assist.org.filing} cleanupSuggested={assist.org.cleanupSuggested} />"), "settings: the card shows the org settings and the filing report");
   const data = read("src/app/(app)/settings/assist-data.ts");
   ok(data.includes("filingReport(runs, log.filter((e) => inMonth(e.at)), tasks.filter((t) => inMonth(t.createdAt)))") && data.includes('loadSenderRuleRows({ scope: "company" })') && data.includes("ctx.ownDomains"), "settings: the card data loads the month's filing report, the company rules and the domains in effect");
 
