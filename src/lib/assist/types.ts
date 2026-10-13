@@ -11,7 +11,7 @@ export type ProviderUsage = {
   cacheWriteTokens: number;
 };
 
-export const ZERO_USAGE: ProviderUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+export const ZERO_USAGE: Readonly<ProviderUsage> = Object.freeze({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
 export type ProviderRequest = {
   model: string;
@@ -21,6 +21,12 @@ export type ProviderRequest = {
   effort: AssistEffort;
   maxTokens: number;
   fallbacks: boolean;
+  /** Wall clock for one attempt (SLOT_SETTINGS); unset = the provider's default. */
+  timeoutMs?: number;
+  /** SDK retries (timeouts included); unset = the provider's default. */
+  maxRetries?: number;
+  /** Claude: stream the answer (the estimate draft). */
+  stream?: boolean;
 };
 
 export type ProviderResult =

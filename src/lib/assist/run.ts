@@ -5,7 +5,7 @@ import { getSettings } from "@/lib/settings";
 import { rateLimit } from "@/lib/rate-limit";
 import { createRun, monthSpend, newRunId, type AssistRun } from "@/lib/stores/assist-runs";
 import { assistGate, assistSettingsOf, monthKeyChicago } from "./config";
-import { costUsd, FALLBACK_HAIKU, modelFor, SLOT_SETTINGS, wantsFallbacks, type ModelSlot } from "./models";
+import { claudeCostUsd, FALLBACK_HAIKU, modelFor, SLOT_SETTINGS, wantsFallbacks, type ModelSlot } from "./models";
 import { pickProvider } from "./provider";
 import { ZERO_USAGE, type AssistFeature, type AssistProvider, type AssistSettings, type AssistStep, type Env, type ProviderRequest } from "./types";
 
@@ -58,15 +58,20 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     effort: s.effort,
     maxTokens: s.maxTokens,
     fallbacks: picked.primary.name !== "local" && wantsFallbacks(requestedModel),
+    timeoutMs: s.timeoutMs,
+    maxRetries: s.maxRetries,
+    stream: s.stream,
   };
 
   const t0 = Date.now();
   let provider = picked.primary;
   let res = await provider.complete(req);
   let fellBack = false;
+  let sentModel = req.model;
   if (!res.ok && res.unreachable && picked.fallback) {
     provider = picked.fallback;
     fellBack = true;
+    sentModel = FALLBACK_HAIKU;
     res = await provider.complete({ ...req, model: FALLBACK_HAIKU, fallbacks: false });
   }
   const latencyMs = Date.now() - t0;
@@ -106,7 +111,8 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
-    costUsd: provider.name === "anthropic" ? costUsd(res.model, usage) : provider.name === "fake" ? costUsd(res.model, usage) : 0,
+    // Claude (and the test fake) bill by billedPrice: answered → requested → dearest row. Local is $0.
+    costUsd: provider.name === "local" ? 0 : claudeCostUsd(res.model, sentModel, usage),
     latencyMs,
     inputHash: createHash("sha256").update(args.system + "\n" + args.userText).digest("hex"),
     output: res.ok ? res.text : "",
