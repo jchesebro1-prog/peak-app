@@ -4,6 +4,8 @@ import { modelFor } from "./models";
 
 export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate", "file", "promise"];
 export const DEFAULT_CAP_USD = 200;
+/** Features that stay off until an admin turns them on (D897). */
+export const OPT_IN_FEATURES: ReadonlySet<AssistFeature> = new Set<AssistFeature>(["file", "promise"]);
 
 type StoredAssist = {
   assistUsers?: unknown;
@@ -14,7 +16,11 @@ type StoredAssist = {
 export function assistSettingsOf(s: StoredAssist | null | undefined): AssistSettings {
   const users = Array.isArray(s?.assistUsers) ? (s!.assistUsers as unknown[]).filter((x): x is string => typeof x === "string") : [];
   const f = (s?.assistFeatures && typeof s.assistFeatures === "object" ? s.assistFeatures : {}) as Record<string, unknown>;
-  const features = Object.fromEntries(ASSIST_FEATURES.map((k) => [k, f[k] !== false])) as Record<AssistFeature, boolean>;
+  // tasks / reply / estimate are on unless switched off; the #335 Inbox
+  // organization switches (file, promise) are off until turned on (D897)
+  const features = Object.fromEntries(
+    ASSIST_FEATURES.map((k) => [k, OPT_IN_FEATURES.has(k) ? f[k] === true : f[k] !== false])
+  ) as Record<AssistFeature, boolean>;
   const capRaw = Number(s?.assistMonthlyCapUsd);
   const capUsd = Number.isFinite(capRaw) && s?.assistMonthlyCapUsd !== undefined && s?.assistMonthlyCapUsd !== null
     ? Math.min(10_000, Math.max(0, capRaw))

@@ -11,7 +11,8 @@ import { AssistOrgSettings, FilingReportTable } from "./assist-org";
 /**
  * #334 — Settings → Data & Tools → Beta → Assist pilot: who has Assist
  * (an empty list = nobody), the feature switches (#335 adds Inbox
- * organization `file` and Promise tasks `promise`), the monthly spend cap,
+ * organization `file` and Promise tasks `promise`, both off until turned
+ * on — D897), the monthly spend cap,
  * and the month's usage report. Costs are estimates (D879). The Claude API key
  * block (D881) is write-only: the card sees the key's source and last four
  * characters, never the key; the input is never prefilled.
@@ -250,6 +251,9 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
             {f.label}
           </label>
         ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>
+        Inbox organization and Promise tasks start off — turn them on for the pilot users above.
       </div>
 
       {/* Monthly cap */}

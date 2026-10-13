@@ -56,8 +56,12 @@ export async function assistPureChecks(ok: Ok): Promise<void> {
   ok(assistSettingsOf({ assistMonthlyCapUsd: 99999 }).capUsd === 10000 && assistSettingsOf({ assistMonthlyCapUsd: -5 }).capUsd === 0, "assist settings: cap clamps 0..10000");
   ok(assistSettingsOf({ assistFeatures: { reply: false } }).features.reply === false, "assist settings: a feature toggled off");
   /* #335 Inbox organization features */
-  ok(ASSIST_FEATURES.join(",") === "tasks,reply,estimate,file,promise" && s0.features.file && s0.features.promise, "assist settings: file + promise are features, on by default");
-  const fileOff = assistSettingsOf({ assistUsers: ["u1"], assistFeatures: { file: false } });
+  ok(ASSIST_FEATURES.join(",") === "tasks,reply,estimate,file,promise" && !s0.features.file && !s0.features.promise, "assist settings: file + promise are features, OFF by default (D897)");
+  const optIn = assistSettingsOf({ assistFeatures: { tasks: true, file: "yes", promise: 1 } });
+  ok(!optIn.features.file && !optIn.features.promise && optIn.features.reply && optIn.features.estimate, "assist settings: only file/promise === true turns them on; tasks/reply/estimate keep their on-unless-false default");
+  const optOn = assistSettingsOf({ assistFeatures: { file: true, promise: true } });
+  ok(optOn.features.file && optOn.features.promise, "assist settings: file + promise on when stored true");
+  const fileOff = assistSettingsOf({ assistUsers: ["u1"], assistFeatures: { file: false, promise: true } });
   ok(!assistGate("file", "u1", fileOff, ENV_KEY).ok && assistGate("promise", "u1", fileOff, ENV_KEY).ok, "assist gate: file and promise switch separately");
   ok(RATE_LIMITS.file === 600 && RATE_LIMITS.promise === 600, "assist run: file / promise rate limits 600/h (background passes)");
   ok(modelFor("file", {}) === "claude-haiku-5-5" && modelFor("promise", {}) === "claude-haiku-5-5" && modelFor("file", { ASSIST_MODEL_FILE: "m-f" }) === "m-f" && modelFor("promise", { ASSIST_MODEL_PROMISE: "m-p" }) === "m-p", "assist models: file / promise on Haiku, env-overridable");
