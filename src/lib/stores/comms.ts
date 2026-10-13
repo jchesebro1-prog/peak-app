@@ -5,6 +5,7 @@ import {
   insertWithPrefixedId,
   listDocs,
   patchDoc,
+  patchDocKey,
   searchDocs,
   softDeleteDoc,
   upsertDoc,
@@ -1750,22 +1751,24 @@ export async function moveTo(
 
 /** Inbox organization (#335): write the thread's `filing` / `court` / `noise`
  *  fields — and only those three keys, nothing else on the doc. A key left out
- *  (or undefined) is untouched; `null` clears it (undo). Organization is
- *  metadata about the thread, not activity on it, so this deliberately does NOT
- *  `touch()` — `updatedAt`, `rev` and `syncedAt` keep their values and the
- *  thread doesn't jump in a date-sorted list. */
+ *  (or undefined) is untouched; `null` clears it (undo). Each key is its own
+ *  in-SQL `doc || {key: value}` (patchDocKey), never a read-modify-write of the
+ *  whole thread, so a message the Gmail import appends — or another org write
+ *  to a different key — landing meanwhile is kept. Organization is metadata
+ *  about the thread, not activity on it, so the doc's own `updatedAt`, `rev`
+ *  and `syncedAt` fields are not touched (the table row's rev/seq still bump,
+ *  so sync clients see the change). A soft-deleted or missing thread → null. */
 export async function setOrg(
   threadId: string,
   patch: { filing?: Filing | null; court?: Court | null; noise?: NoiseFlag | null }
 ): Promise<CommThread | null> {
-  return patchDoc<CommThread>("comms", threadId, (t) => {
-    for (const k of ["filing", "court", "noise"] as const) {
-      const v = patch[k];
-      if (v === undefined) continue;
-      if (v === null) delete t[k];
-      else (t as Record<string, unknown>)[k] = v;
-    }
-  });
+  for (const k of ["filing", "court", "noise"] as const) {
+    const v = patch[k];
+    if (v === undefined) continue;
+    const res = await patchDocKey("comms", [threadId], k, v === null ? undefined : v);
+    if (!res.ids.length) return null;
+  }
+  return getDoc<CommThread>("comms", threadId);
 }
 
 export async function update(

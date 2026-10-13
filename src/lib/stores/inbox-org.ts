@@ -51,6 +51,15 @@ function normalizeMatch(m: SenderRule["match"] | undefined): SenderRule["match"]
   return domain && !/[\s@]/.test(domain) ? { domain } : null;
 }
 
+/** The action with only its known fields; null when it isn't a known action. */
+function cleanAction(a: SenderRule["action"] | undefined): SenderRule["action"] | null {
+  if (a?.type === "noise" || a?.type === "never-noise") return { type: a.type };
+  if (a?.type === "file" && typeof a.customerId === "string" && a.customerId) {
+    return a.work ? { type: "file", customerId: a.customerId, work: a.work } : { type: "file", customerId: a.customerId };
+  }
+  return null;
+}
+
 function sameTarget(a: SenderRule, b: SenderRule): boolean {
   return (
     a.scope === b.scope &&
@@ -70,11 +79,17 @@ export async function addSenderRule(input: NewSenderRule): Promise<SenderRule | 
   if (!match) return null;
   if (input.scope !== "user" && input.scope !== "company") return null;
   if (input.scope === "user" && !input.userId) return null;
+  const action = cleanAction(input.action);
+  const createdBy = typeof input.createdBy === "string" ? input.createdBy.trim() : "";
+  if (!action || !createdBy) return null;
+  // Known fields only — nothing else a caller spread in reaches the blob.
   const rule: SenderRule = {
-    ...input,
-    userId: input.scope === "user" ? input.userId : undefined,
-    match,
     id: input.id || `SR-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+    scope: input.scope,
+    ...(input.scope === "user" ? { userId: input.userId } : {}),
+    match,
+    action,
+    createdBy,
     createdAt: input.createdAt ?? Date.now(),
   };
   return serialized(SENDER_RULES_BLOB, async () => {

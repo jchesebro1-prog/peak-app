@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { blobs, notifPrefs } from "@/db/schema";
-import { getDoc, setBlob } from "@/db/doc-store";
+import { getDoc, patchDoc, setBlob, softDeleteDoc } from "@/db/doc-store";
 import { parseInbound } from "@/lib/gmail/mime";
 import type { GmailFullMessage } from "@/lib/gmail/api";
 import { setOrg, type CommThread } from "@/lib/stores/comms";
@@ -200,7 +200,7 @@ function forwardChecks(ok: Ok): void {
   const internal = (e: string) => e.endsWith("@peaksystemsgroup.com");
   ok(parseForward("Fwd: Fwd: Main curtain replacement", nested).original?.fromEmail === "ann@peaksystemsgroup.com", "forward: nested — without isInternal the first block is reported");
   const deep = parseForward("Fwd: Fwd: Main curtain replacement", nested, internal);
-  ok(deep.original?.fromEmail === "pat.lee@lincolnhs.org" && deep.original?.subject === "Main curtain replacement", "forward: nested — the deepest external sender (Pat) is reported, past an internal one below it");
+  ok(deep.original?.fromEmail === "pat.lee@lincolnhs.org" && deep.original?.subject === "Main curtain replacement", "forward: nested — the external sender (Pat) is reported, past the internal forwarder above and the internal reply below");
   const allInt = parseForward("Fwd: Fwd: x", nested.replace(/pat\.lee@lincolnhs\.org/g, "pat@peaksystemsgroup.com"), internal);
   ok(allInt.original?.fromEmail === "sam@peaksystemsgroup.com", "forward: nested — all internal → the innermost block");
   const quotedNested = parseForward("Fwd: x", "Take a look.\n\n---------- Forwarded ----------\nFrom: Ann Bell <ann@peaksystemsgroup.com>\n\n> ---------- Forwarded message ---------\n> From: Pat Lee <pat.lee@lincolnhs.org>\n> Subject: Seats\n>\n> Hi", internal);
@@ -543,6 +543,36 @@ export async function inboxOrgDbChecks(ok: Ok): Promise<void> {
     const got4 = (await getDoc<CommThread>("comms", id))!;
     ok(got4.subject === "Curtains" && got4.archived === false && got4.link?.id === "Q-2041", "org setOrg: only filing / court / noise are ever written");
     ok((await setOrg("TEST335:missing", { filing })) === null, "org setOrg: a missing thread → null");
+
+    /* key-level atomicity: setOrg never writes back a stale whole doc */
+    const id2 = fixtureId(335, "org-thread-race");
+    await createFixture("comms", { ...base, id: id2 });
+    // the same shape recordMessage's existing-thread path uses: patchDoc appending to `messages`
+    const appendMsg = (mid: string) =>
+      patchDoc<CommThread>("comms", id2, (d) => {
+        d.messages = (d.messages || []).concat([{ id: mid, at: 2000, direction: "in", channel: "email", author: "Pat", body: "More", gmailId: mid }]);
+        d.updatedAt = Math.max(d.updatedAt || 0, 2000);
+      });
+    // setOrg's UPDATE is one SQL statement issued before the append's read-then-write lands; the old
+    // patchDoc-based setOrg read the doc, then wrote it all back and lost the append (or the filing).
+    await Promise.all([setOrg(id2, { filing }), appendMsg("gm-race1")]);
+    const race1 = (await getDoc<CommThread>("comms", id2))!;
+    ok(race1.filing?.reason === "known sender" && race1.messages.some((m) => m.id === "gm-race1") && race1.messages.length === 2, "org setOrg: a concurrent message append and a filing write both survive");
+    await Promise.all([setOrg(id2, { court }), setOrg(id2, { noise }), setOrg(id2, { filing: { ...filing, state: "filed", at: 300 } })]);
+    const race2 = (await getDoc<CommThread>("comms", id2))!;
+    ok(race2.court?.owner === "me" && race2.noise?.flagged === false && race2.filing?.state === "filed" && race2.messages.length === 2, "org setOrg: three concurrent org writes to different keys all survive");
+    await softDeleteDoc("comms", id2);
+    ok((await setOrg(id2, { court: null })) === null, "org setOrg: a soft-deleted thread → null, and is not revived");
+    ok((await getDoc<CommThread>("comms", id2)) === null, "org setOrg: the soft-deleted thread stays deleted");
+
+    /* addSenderRule stores known fields only and needs a createdBy */
+    const clean = await addSenderRule({ ...RULE_BASE, match: { email: "clean@x.com" }, evil: "x", action: { type: "noise", extra: 1 } } as never);
+    const cleanStored = (await getSenderRules()).find((r) => r.match.email === "clean@x.com");
+    ok(clean !== null && cleanStored !== undefined && Object.keys(cleanStored).sort().join(",") === "action,createdAt,createdBy,id,match,scope,userId" && JSON.stringify(cleanStored.action) === '{"type":"noise"}', "org rules: only known fields reach the blob");
+    ok((await addSenderRule({ ...RULE_BASE, createdBy: "  ", match: { email: "nob@x.com" } })) === null && (await addSenderRule({ ...RULE_BASE, createdBy: undefined as never, match: { email: "nob@x.com" } })) === null, "org rules: a blank or missing createdBy is refused");
+    ok((await addSenderRule({ ...RULE_BASE, match: { email: "nob@x.com" }, action: { type: "bogus" } as never })) === null && (await addSenderRule({ ...RULE_BASE, match: { email: "nob@x.com" }, action: { type: "file", customerId: "" } })) === null, "org rules: an unknown action, or a file action without a customer, is refused");
+    const fileRule = await addSenderRule({ ...RULE_BASE, match: { email: "file@x.com" }, action: { type: "file", customerId: "cust-1", work: { type: "quote", id: "Q-2041" } } });
+    ok(fileRule?.action.type === "file" && fileRule.action.work?.id === "Q-2041", "org rules: a file action keeps its customer and work");
   } finally {
     for (const id of BLOBS) {
       const row = before.get(id);
