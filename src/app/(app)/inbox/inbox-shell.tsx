@@ -51,6 +51,8 @@ import {
 import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
 import { meetingsTickAction } from "./meetings/actions";
+import { organizeHref, ORGANIZE_BASE_HREF, type OrganizeTab } from "./organize/format";
+import InboxChangedListener from "@/components/inbox-changed-listener";
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
 
@@ -68,6 +70,7 @@ const BOX_SEL_OPTIONS: Opt[] = [
   { value: "needs", label: "Needs reply" },
   { value: "calls", label: "Calls & meetings" },
   { value: "meetings", label: "Meetings" },
+  { value: "organize", label: "Organize" },
   { value: "unmatched", label: "Unmatched" },
 ];
 
@@ -108,6 +111,8 @@ export default function InboxShell({
   crmMode: initialCrmMode,
   signature,
   meetings = null,
+  organize = null,
+  organizeTab = "to-file",
   assist = NO_ASSIST,
 }: {
   box: string;
@@ -135,6 +140,11 @@ export default function InboxShell({
   /** #323 — ?view=meetings: the Meetings box and meeting reader (server-rendered
    *  slots) replace the thread list and thread reader; null on every mail view. */
   meetings?: { list: ReactNode; reader: ReactNode; overlayReader: ReactNode; selected: boolean; closeHref: string } | null;
+  /** #335 — ?view=organize: the Organize box replaces the thread list; the
+   *  reader stays the thread reader. null on every other view. */
+  organize?: { list: ReactNode } | null;
+  /** #335 — the Organize tab, kept on the URL while a thread is open */
+  organizeTab?: OrganizeTab;
   /** #334 — which Assist buttons this user sees (all off unless gated in). */
   assist?: AssistFlags;
 }) {
@@ -309,6 +319,7 @@ export default function InboxShell({
     .join("&");
   const baseQuery =
     (isView ? `view=${box}` : `box=${box}&folder=${folder}`) +
+    (organize ? `&tab=${organizeTab}` : "") +
     (refineQuery ? `&${refineQuery}` : "");
 
   const selectThread = useCallback(
@@ -691,7 +702,8 @@ export default function InboxShell({
 
   const onBoxSel = useCallback(
     (v: string) => {
-      if (v === "needs" || v === "calls" || v === "unmatched" || v === "meetings")
+      if (v === "organize") router.push(organizeHref(ORGANIZE_BASE_HREF, "to-file"));
+      else if (v === "needs" || v === "calls" || v === "unmatched" || v === "meetings")
         router.push(`/inbox?view=${v}`);
       else {
         const [b, f] = v.split(":");
@@ -1020,8 +1032,11 @@ export default function InboxShell({
         </div>
       </div>
 
-      {/* ===== message list (or the #323 Meetings box) ===== */}
-      {meetings ? (
+      {/* #335 §9 — another window/tab changed a thread: refresh (debounced) */}
+      <InboxChangedListener />
+
+      {/* ===== message list (or the #323 Meetings box / the #335 Organize box) ===== */}
+      {meetings || organize ? (
         <div
           className="ib-list"
           style={{
@@ -1036,7 +1051,7 @@ export default function InboxShell({
         >
           <div style={{ padding: "11px 15px 0", flexShrink: 0 }} className="ib-boxsel">
             <select
-              value="meetings"
+              value={meetings ? "meetings" : "organize"}
               onChange={(e) => onBoxSel(e.target.value)}
               aria-label="Mailbox"
               style={{
@@ -1059,7 +1074,7 @@ export default function InboxShell({
               ))}
             </select>
           </div>
-          {meetings.list}
+          {meetings ? meetings.list : organize?.list}
         </div>
       ) : (
       <ThreadList

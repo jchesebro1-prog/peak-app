@@ -214,6 +214,59 @@ function orgNames(t: CommThread, sender: { email: string; name: string; body: st
   return [...new Set(out.map((s) => s.trim()).filter((s) => s.length >= 2))].slice(0, 3);
 }
 
+/** The customer a thread's filing is anchored on (see `likelyCustomer`) —
+ *  the Organize view's Change… opens on this customer's records. */
+export function likelyFilingCustomer(t: CommThread, senderEmail: string): Promise<string | null> {
+  return likelyCustomer(t, senderEmail);
+}
+
+/** One customer's open quotes (draft/sent), active projects and open leads,
+ *  newest first, at most `limit` — the records half of the candidate list,
+ *  shared by the AI step and the Organize view's Change… picker. */
+export async function customerRecordCandidates(
+  cid: string,
+  cname: string,
+  limit: number = MAX_RECORD_CANDIDATES
+): Promise<FilingCandidate[]> {
+  const [quotes, projects, leads] = await Promise.all([
+    listDocsByField<QuoteDoc>("quotes", "customerId", [cid]).catch(() => [] as QuoteDoc[]),
+    projectsForCustomer(cid).catch(() => []),
+    listDocsByField<LeadDoc>("leads", "customerId", [cid]).catch(() => [] as LeadDoc[]),
+  ]);
+  const records: Array<FilingCandidate & { at: number }> = [
+    ...quotes
+      .filter((q) => OPEN_QUOTE_STATUSES.has(String(q.status || "")))
+      .map((q) => ({
+        id: q.id,
+        type: "quote" as const,
+        label: [displayQuoteNumber({ ...q, id: q.id }), q.name].filter(Boolean).join(" "),
+        customerId: cid,
+        customerName: cname,
+        at: Number(q.updatedAt) || 0,
+      })),
+    ...projects
+      .filter((p) => !isDone(p))
+      .map((p) => ({ id: p.id, type: "project" as const, label: `${p.id} ${p.name || ""}`.trim(), customerId: cid, customerName: cname, at: p.updatedAt || 0 })),
+    ...leads
+      .filter((l) => (OPEN_STAGES as readonly string[]).includes(String(l.stage || "new")))
+      .map((l) => ({
+        id: l.id,
+        type: "lead" as const,
+        label: [displayLeadNumber({ id: l.id, estNo: l.estNo ?? null }), l.interest || l.org].filter(Boolean).join(" "),
+        customerId: cid,
+        customerName: cname,
+        at: Number(l.updatedAt) || 0,
+      })),
+  ];
+  return records
+    .sort((a, b) => b.at - a.at)
+    .slice(0, Math.max(0, limit))
+    .map(({ at, ...c }) => {
+      void at;
+      return c;
+    });
+}
+
 /**
  * The candidate list for one thread (spec §1 step 5): the likely customer,
  * its open quotes (draft/sent), active projects and open leads (newest
@@ -238,43 +291,7 @@ export async function buildFilingCandidates(
   if (cid) {
     cname = (await customerNameFor(cid).catch(() => "")) || "";
     add({ id: cid, type: "customer", label: cname || cid, customerId: cid, customerName: cname });
-    const [quotes, projects, leads] = await Promise.all([
-      listDocsByField<QuoteDoc>("quotes", "customerId", [cid]).catch(() => [] as QuoteDoc[]),
-      projectsForCustomer(cid).catch(() => []),
-      listDocsByField<LeadDoc>("leads", "customerId", [cid]).catch(() => [] as LeadDoc[]),
-    ]);
-    const records: Array<FilingCandidate & { at: number }> = [
-      ...quotes
-        .filter((q) => OPEN_QUOTE_STATUSES.has(String(q.status || "")))
-        .map((q) => ({
-          id: q.id,
-          type: "quote" as const,
-          label: [displayQuoteNumber({ ...q, id: q.id }), q.name].filter(Boolean).join(" "),
-          customerId: cid,
-          customerName: cname,
-          at: Number(q.updatedAt) || 0,
-        })),
-      ...projects
-        .filter((p) => !isDone(p))
-        .map((p) => ({ id: p.id, type: "project" as const, label: `${p.id} ${p.name || ""}`.trim(), customerId: cid, customerName: cname, at: p.updatedAt || 0 })),
-      ...leads
-        .filter((l) => (OPEN_STAGES as readonly string[]).includes(String(l.stage || "new")))
-        .map((l) => ({
-          id: l.id,
-          type: "lead" as const,
-          label: [displayLeadNumber({ id: l.id, estNo: l.estNo ?? null }), l.interest || l.org].filter(Boolean).join(" "),
-          customerId: cid,
-          customerName: cname,
-          at: Number(l.updatedAt) || 0,
-        })),
-    ];
-    records
-      .sort((a, b) => b.at - a.at)
-      .slice(0, MAX_RECORD_CANDIDATES)
-      .forEach(({ at, ...c }) => {
-        void at;
-        add(c);
-      });
+    for (const c of await customerRecordCandidates(cid, cname)) add(c);
   }
   const names = orgNames(t, sender);
   if (names.length) {

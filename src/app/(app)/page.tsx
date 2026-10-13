@@ -8,6 +8,7 @@ import { money } from "@/lib/format";
 import { makeDashboardData } from "@/lib/dashboard/data";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor } from "@/lib/dashboard/home-metrics";
 import StartHereCard from "@/components/triage/start-here-card";
+import InboxChangedListener from "@/components/inbox-changed-listener";
 import HomeTabs from "./home-tabs";
 import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
@@ -125,6 +126,8 @@ export default async function HomePage({
         <StartHereCard user={user} />
       </Suspense>
       <WidgetHost user={user} surface="home" sp={sp} data={data} />
+      {/* #335 §9 — an Inbox change in another window/tab refreshes Home (debounced) */}
+      <InboxChangedListener />
       {sheetQuote && <HomeStageSheet quote={sheetQuote} closeHref={closeHref} />}
     </HomeTabs>
   );

@@ -21,6 +21,10 @@ import {
   type RuleOffer,
 } from "@/lib/inbox-org/apply";
 import type { CourtOwner, Filing } from "@/lib/inbox-org/types";
+import { customerRecordCandidates, likelyFilingCustomer } from "@/lib/inbox-org/ai-filing";
+import { filingSenderOf } from "@/lib/inbox-org/pipeline";
+import { get as getThread, visibleTo } from "@/lib/stores/comms";
+import { nameFor as customerNameFor } from "@/lib/stores/customers";
 
 /** #335 Inbox organization — run the time-boxed AI pass over my own
  *  pendingAi threads now (the Organize view's "Sync now"-style button).
@@ -129,4 +133,34 @@ export async function undoPromiseTaskAction(threadId: string, taskId: string) {
   const r = await undoPromiseTask(str(threadId), str(taskId), await actor());
   revalidate();
   return r;
+}
+
+/** Change…'s second group (spec §2): the open quotes, active projects and open
+ *  leads of one customer — `customerId` when the person picked a company,
+ *  else the thread's likely customer (the same store reads the AI candidate
+ *  list uses). Only for the person's own thread; ids only — every pick is
+ *  re-checked by changeFiling. */
+const FILING_RECORDS_MAX = 30;
+
+export async function filingRecordsAction(
+  threadId: string,
+  customerId?: string | null
+): Promise<
+  | { ok: true; customer: { id: string; name: string } | null; records: Array<{ id: string; type: "quote" | "project" | "lead"; label: string }> }
+  | { ok: false; error: string }
+> {
+  const me = await requireUser();
+  const t = await getThread(str(threadId));
+  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  let cid = str(customerId);
+  if (!cid) cid = (await likelyFilingCustomer(t, filingSenderOf(t, await loadOrgContext()))) || "";
+  if (!cid) return { ok: true, customer: null, records: [] };
+  const name = await customerNameFor(cid).catch(() => "");
+  if (!name) return { ok: true, customer: null, records: [] };
+  const recs = await customerRecordCandidates(cid, name, FILING_RECORDS_MAX);
+  return {
+    ok: true,
+    customer: { id: cid, name },
+    records: recs.flatMap((r) => (r.type === "customer" ? [] : [{ id: r.id, type: r.type, label: r.label }])),
+  };
 }

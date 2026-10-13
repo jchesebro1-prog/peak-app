@@ -19,6 +19,10 @@ import LinkSidebar from "./link-sidebar";
 import TaskDialog from "./task-dialog";
 import AssistTasksDialog from "./assist-tasks-dialog";
 import { draftEstimateAction, draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
+import { completeThreadTaskAction } from "./task-actions";
+import ReaderOrgStrip from "./organize/reader-org";
+import { shortTaskTitle } from "./organize/format";
+import { postInboxChanged } from "@/lib/inbox-org/broadcast";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 import { replyOutcome } from "@/lib/assist/outcome";
 import type { AssistOutcome } from "@/lib/assist/types";
@@ -577,6 +581,9 @@ export default function ThreadReader({
     };
   }, []);
   const [sending, setSending] = useState(false);
+  // #335 §7 — "Mark '…' done?" above Send while the thread's promise-task is
+  // open; unticked by default, never auto-closed
+  const [markPromiseDone, setMarkPromiseDone] = useState(false);
 
   // call/meeting quick log
   const [logDir, setLogDir] = useState<"in" | "out" | null>(null);
@@ -623,6 +630,9 @@ export default function ThreadReader({
       </div>
     );
   }
+
+  // #335 §7 — the thread's promise-task while it is still open
+  const openPromise = vm.org?.promise?.open ? vm.org.promise : null;
 
   const openMode = (m: Mode) => {
     if (m === "forward") {
@@ -720,6 +730,17 @@ export default function ThreadReader({
         const o = replyOutcome(assistDraftRef.current.draft, stripSignature(b, signature || ""));
         settleDraft(o.outcome, { editRatio: o.editRatio });
       }
+      // #335 §7 — the person ticked "Mark '…' done?": complete the
+      // promise-task through the ordinary task status action
+      if (res.ok && markPromiseDone && openPromise) {
+        try {
+          await completeThreadTaskAction(openPromise.taskId);
+        } catch {
+          // the reply went out; the task stays open (the sidebar can close it)
+        }
+      }
+      if (res.ok) postInboxChanged(vm.id);
+      setMarkPromiseDone(false);
       closeComposer();
       if (onAfterSend) onAfterSend(vm.id);
       else router.refresh();
@@ -963,6 +984,7 @@ export default function ThreadReader({
                 to {vm.boxLabel} ·{" "}
                 <span style={{ fontFamily: "var(--font-mono)" }}>{vm.boxAddress}</span>
               </div>
+              {vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}
             </div>
           </div>
 
@@ -1055,6 +1077,7 @@ export default function ThreadReader({
                 colors={["#1f7a52", "#eaf6ef", "#cce9da"]}
                 onClick={async () => {
                   await setStatusAction(vm.id, "replied");
+                  postInboxChanged(vm.id);
                   router.refresh();
                 }}
               >
@@ -1066,6 +1089,7 @@ export default function ThreadReader({
                 colors={["#5b616e", "#f1f2f5", "#e4e7ec"]}
                 onClick={async () => {
                   await setStatusAction(vm.id, "closed");
+                  postInboxChanged(vm.id);
                   router.refresh();
                 }}
               >
@@ -1148,6 +1172,7 @@ export default function ThreadReader({
               onClick={async () => {
                 if (vm.archived) await unarchiveAction(vm.id);
                 else await archiveAction(vm.id);
+                postInboxChanged(vm.id);
                 if (onClose) onClose();
                 else router.refresh();
               }}
@@ -1331,6 +1356,27 @@ export default function ThreadReader({
                 <p style={{ margin: 0, padding: "0 12px 8px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}>
                   Drafted by Assist — review before sending.
                 </p>
+              )}
+              {openPromise && (
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "0 12px 8px",
+                    fontSize: 12,
+                    color: "#3a3f4a",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={markPromiseDone}
+                    onChange={(e) => setMarkPromiseDone(e.target.checked)}
+                  />
+                  Mark ‘{shortTaskTitle(openPromise.title)}’ done?
+                </label>
               )}
               <div
                 style={{

@@ -547,7 +547,7 @@ function Row({
   // only takes up space when it actually has content — a plain read thread
   // with none of these renders as a clean 3-line row.
   const hasMetaChips =
-    r.showBoxTag || r.showStatus || r.showWait || r.showQueued || r.showAssignee;
+    r.showBoxTag || r.showStatus || r.showWait || r.showQueued || r.showAssignee || !!r.noiseTag;
   return (
     <div
       className="ib-row"
@@ -779,6 +779,22 @@ function Row({
               }}
             >
               Outbox
+            </span>
+          )}
+          {r.noiseTag && (
+            <span
+              title={r.noiseTag}
+              style={{
+                fontSize: 9.5,
+                fontWeight: 600,
+                color: "#5b616e",
+                background: "#f1f2f5",
+                border: "1px solid #e4e7ec",
+                padding: "1px 7px",
+                borderRadius: 20,
+              }}
+            >
+              Looks like noise
             </span>
           )}
           <span style={{ flex: 1 }} />

@@ -124,6 +124,9 @@ export type ThreadRowVM = {
   showWait: boolean;
   waitLabel: string;
   showQueued: boolean;
+  /** #335 — the pipeline's "Looks like noise" tag (flagged but still in the
+   *  inbox — everyone who isn't in the Assist pilot); null otherwise */
+  noiseTag?: string | null;
   showBoxTag: boolean;
   boxTag: string;
   boxColor: string;
@@ -266,6 +269,38 @@ export type ReaderVM = {
   meId: string;
   /** open tasks created from / linked to this thread, for the sidebar */
   threadTasks: ThreadTaskRow[];
+  /** #335 inbox organization — court chip, noise tag, filing line and
+   *  promise-task (null on a thread the pipeline never touched) */
+  org?: ReaderOrgVM | null;
+};
+
+/** #335 — the reader's organization strip (spec §2, §3, §7). Built on the
+ *  server (organize/load.ts `buildReaderOrg`). */
+export type ReaderOrgVM = {
+  court: {
+    owner: "me" | "teammate" | "customer" | "nobody";
+    /** "On you: …" / "On Dana" / "Waiting on customer" / "Done" */
+    label: string;
+    reason: string;
+    override: boolean;
+  } | null;
+  /** flagged as noise; `moved` = held in the Noise tab (else the
+   *  "Looks like noise" tag) */
+  noise: { reason: string; moved: boolean } | null;
+  filing: {
+    state: "suggested" | "filed" | "skipped" | "dismissed";
+    /** "Lincoln HS → EST-1042 Main curtain" / "Noise" / null */
+    suggestion: string | null;
+    reason: string;
+    strength: "strong" | "weak";
+    canApprove: boolean;
+    /** filed: "approved" / "on reply" / "sender rule" / "teammate reply" */
+    filedBy: string | null;
+  } | null;
+  /** the court's promise-task, while the task exists */
+  promise: { taskId: string; title: string; due: string | null; open: boolean } | null;
+  /** company-wide sender rules (the rule offer's checkbox) */
+  isAdmin: boolean;
 };
 
 /** #214 — one address on the link panel's message, matched to a contact. */

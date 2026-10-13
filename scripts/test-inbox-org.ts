@@ -34,7 +34,9 @@ import {
 import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
-import { buildFilingUserText, candidateLine, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
+import { buildFilingUserText, candidateLine, customerRecordCandidates, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
+import { buildOrganizeVM, buildReaderOrg, dueLabel } from "@/app/(app)/inbox/organize/load";
+import { courtChipLabel, filedByLabel, ORGANIZE_BASE_HREF, organizeHref, organizeTabOf, suggestionLabel } from "@/app/(app)/inbox/organize/format";
 import { aiCourtOverride, applyPromises, COURT_SYSTEM, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
 import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
@@ -1783,6 +1785,163 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
   }
 }
 
+/* ---------- Task 6: the Organize view + reader UI (spec §2, §3, §7, §9) ---------- */
+
+/** Non-type imports of a source file (`import type …` lines skipped). */
+function valueImports(src: string): string[] {
+  const out: string[] = [];
+  for (const m of src.matchAll(/^import\s+(?!type\s)([\s\S]*?)\s+from\s+"([^"]+)";?/gm)) out.push(m[2]);
+  for (const m of src.matchAll(/^import\s+"([^"]+)";?/gm)) out.push(m[1]);
+  return out;
+}
+
+export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
+  const { existsSync } = await import("node:fs");
+  const read = (p: string) => readFileSync(p, "utf8");
+  const DIR = "src/app/(app)/inbox/organize";
+
+  /* the route + files */
+  for (const f of ["format.ts", "load.ts", "organize-box.tsx", "change-filing.tsx", "rule-offer.tsx", "reader-org.tsx"])
+    ok(existsSync(`${DIR}/${f}`), `ui: organize/${f} exists`);
+  const page = read("src/app/(app)/inbox/page.tsx");
+  ok(page.includes('const isOrganize = viewParam === "organize";') && page.includes("<OrganizeBox") && page.includes("loadOrganize(user, organizeTab"), "ui: /inbox?view=organize renders the Organize box from loadOrganize");
+  ok(page.includes('key: "organize"') && page.includes("count: organizeToFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
+  ok(page.includes("view === \"unmatched\" || isMeetings || isOrganize") && page.includes("const isView = !!view || isMeetings || isOrganize;"), "ui: Organize is a view and skips the thread-list query");
+  ok(page.includes("explicitThread && visibleTo(explicitThread, me)"), "ui: Organize opens only my own thread in the reader");
+  ok(page.includes("org,") && page.includes("buildReaderOrg(sel,"), "ui: the reader VM carries the organization strip");
+  const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
+  ok(shell.includes("meetings || organize ?") && shell.includes("organize?.list") && shell.includes('{ value: "organize", label: "Organize" }'), "ui: the shell swaps the list column for the Organize box (and the narrow picker knows it)");
+  ok(shell.includes("(organize ? `&tab=${organizeTab}` : \"\")"), "ui: an open thread keeps the Organize tab on the URL");
+
+  /* client-bundle rule: client files import only actions, pure modules and types */
+  const clientFiles = [
+    `${DIR}/organize-box.tsx`,
+    `${DIR}/change-filing.tsx`,
+    `${DIR}/rule-offer.tsx`,
+    `${DIR}/reader-org.tsx`,
+    "src/app/(app)/inbox/thread-reader.tsx",
+    "src/app/(app)/inbox/inbox-shell.tsx",
+    "src/app/(app)/inbox/thread-list.tsx",
+    "src/components/inbox-changed-listener.tsx",
+  ];
+  const banned = /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/(apply|pipeline|ai-|court|due|noise|forward|numbers|sender-rules|internal|ids|signoff)\b)|(^|\/)load$/;
+  for (const f of clientFiles) {
+    const src = read(f);
+    ok(src.startsWith('"use client";'), `ui: ${f.split("/").pop()} is a client component`);
+    const bad = valueImports(src).filter((p) => banned.test(p));
+    ok(bad.length === 0, `ui: ${f.split("/").pop()} imports no store, db or server module${bad.length ? ` (found ${bad.join(", ")})` : ""}`);
+  }
+  const fmt = read(`${DIR}/format.ts`);
+  ok(valueImports(fmt).length === 0, "ui: organize/format.ts (shared with the client) has no value imports");
+  const bc = read("src/lib/inbox-org/broadcast.ts");
+  ok(valueImports(bc).length === 0, "ui: inbox-org/broadcast.ts has no imports (client-safe)");
+  const oa = read("src/app/(app)/inbox/organize-actions.ts");
+  ok(oa.startsWith('"use server";') && !/^export (const|let|function|class|type\b)/m.test(oa.replace(/^export type [^\n]*$/gm, "")) && oa.includes("export async function filingRecordsAction("), "ui: organize-actions.ts exports only async server actions (filingRecordsAction added)");
+
+  /* BroadcastChannel (spec §9) */
+  ok(bc.includes('export const PEAK_CHANNEL = "peak";') && bc.includes("new BroadcastChannel(PEAK_CHANNEL)") && bc.includes('ch.postMessage({ type: "inbox-changed", threadId });'), "ui: postInboxChanged posts {type:\"inbox-changed\", threadId} on BroadcastChannel(\"peak\")");
+  ok(/export function postInboxChanged[\s\S]*?try \{[\s\S]*?\} catch/.test(bc), "ui: the post is wrapped in try/catch");
+  ok(/subscribeInboxChanged\(onChange: \(\) => void, debounceMs = 1000\)/.test(bc), "ui: the listener debounces 1 s");
+  for (const f of [`${DIR}/organize-box.tsx`, `${DIR}/change-filing.tsx`, `${DIR}/rule-offer.tsx`, `${DIR}/reader-org.tsx`, "src/app/(app)/inbox/thread-reader.tsx"])
+    ok(read(f).includes("postInboxChanged("), `ui: ${f.split("/").pop()} posts inbox-changed after a change`);
+  ok(read("src/components/inbox-changed-listener.tsx").includes("subscribeInboxChanged(() => router.refresh(), 1000)"), "ui: the listener refreshes the router");
+  ok(shell.includes("<InboxChangedListener />") && read("src/app/(app)/page.tsx").includes("<InboxChangedListener />"), "ui: the Inbox shell and Home listen");
+
+  /* reader: promise-task checkbox, unticked, completes through the task status action */
+  const tr = read("src/app/(app)/inbox/thread-reader.tsx");
+  ok(tr.includes("const [markPromiseDone, setMarkPromiseDone] = useState(false);") && tr.includes("Mark ‘{shortTaskTitle(openPromise.title)}’ done?"), "ui: the composer shows an unticked “Mark ‘…’ done?” while a promise-task is open");
+  ok(tr.includes("if (res.ok && markPromiseDone && openPromise)") && tr.includes("await completeThreadTaskAction(openPromise.taskId);"), "ui: a ticked box completes the task via completeThreadTaskAction after a successful send");
+  ok(tr.includes("{vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}"), "ui: the reader shows the organization strip");
+  const ro = read(`${DIR}/reader-org.tsx`);
+  ok(ro.includes('overrideCourtAction(threadId, "nobody")') && ro.includes('overrideCourtAction(threadId, "me")') && ro.includes("Not on me") && ro.includes("On me"), "ui: Not on me / On me override the court");
+  ok(ro.includes("undoPromiseTaskAction(threadId, promise.taskId)") && ro.includes("Task created:"), "ui: Task created … Undo calls undoPromiseTask");
+  ok(ro.includes('"Looks like noise"') && ro.includes("notNoiseAction(threadId)"), "ui: the Looks like noise tag offers Not noise");
+  ok(ro.includes('filing.state === "suggested"') && ro.includes("approveFilingAction(threadId)"), "ui: a suggested filing line has Approve");
+  const ob = read(`${DIR}/organize-box.tsx`);
+  ok(!ob.includes("Organize my inbox"), "ui: no Organize my inbox button yet (Task 7 adds it)");
+  ok(ob.includes("approveAllStrongAction(vm.strongIds)") && ob.includes("Approve {vm.strongIds.length} strong suggestion"), "ui: Approve all strong asks for a confirm that shows the count");
+  const cf = read(`${DIR}/change-filing.tsx`);
+  ok(cf.includes("searchLinkTargetsAction(query)") && cf.includes("filingRecordsAction(threadId, pickedCustomer || null)") && cf.includes("changeFilingAction(threadId, target)"), "ui: Change… reuses the link search plus the customer's quotes/projects/leads");
+  const rof = read(`${DIR}/rule-offer.tsx`);
+  ok(rof.includes("Just this sender") && rof.includes("Whole domain") && rof.includes("No thanks") && rof.includes("{isAdmin && ("), "ui: the rule offer has Just this sender / Whole domain / No thanks, company scope admin-only");
+
+  /* pure: format */
+  ok(organizeTabOf("noise") === "noise" && organizeTabOf("filed") === "filed" && organizeTabOf("x") === "to-file" && organizeTabOf(null) === "to-file", "ui: organizeTabOf defaults to To file");
+  ok(organizeHref(ORGANIZE_BASE_HREF, "filed", "C 1") === "/inbox?view=organize&tab=filed&thread=C%201" && organizeHref("/organize", "noise") === "/organize?tab=noise", "ui: organizeHref builds tab + thread links on any base");
+  ok(courtChipLabel("me", "Customer wrote last", null) === "On you: Customer wrote last" && courtChipLabel("teammate", "", "Dana") === "On Dana" && courtChipLabel("customer", "x", null) === "Waiting on customer" && courtChipLabel("nobody", "x", null) === "Done", "ui: court chip labels");
+  ok(suggestionLabel({ noise: false, customerId: "c1", work: { type: "quote", id: "Q-1", label: "EST-1042 Main curtain" } }, "Lincoln HS") === "Lincoln HS → EST-1042 Main curtain" && suggestionLabel({ noise: true, customerId: null, work: null }, null) === "Noise" && suggestionLabel({ noise: false, customerId: null, work: null }, null) === null, "ui: suggestion label");
+  ok(filedByLabel("approved") === "approved" && filedByLabel("reply") === "on reply" && filedByLabel("rule") === "sender rule" && filedByLabel("teammate-reply") === "teammate reply", "ui: filed-by labels");
+
+  /* pure: the Organize VM over fake threads */
+  const NOW = Date.UTC(2026, 9, 13, 17, 0); // Tue 13 Oct 2026, noon Chicago
+  const DAY = 86_400_000;
+  const ME = "TEST335 Ui";
+  const fil = (o: Partial<Filing>): Filing => ({ customerId: "c1", work: null, noise: false, source: "rule", reason: "Sender rule", strength: "strong", needsReply: false, state: "suggested", at: NOW, ...o });
+  const th = (id: string, o: Partial<CommThread>): CommThread =>
+    ({ id, mailbox: "personal", mailboxUser: ME, status: "waiting_us", archived: false, deleted: false, subject: `Subj ${id}`, contactName: `Sender ${id}`, contactEmail: `${id}@x.test`, updatedAt: NOW - 1000, messages: [], ...o }) as unknown as CommThread;
+  const threads: CommThread[] = [
+    th("a", { filing: fil({ work: { type: "quote", id: "Q-1", label: "EST-1042 Main curtain" } }), updatedAt: NOW - 5000 }),
+    th("b", { filing: fil({ strength: "weak", needsReply: true }), updatedAt: NOW - 2000 }),
+    th("c", { filing: fil({ archivedOnReply: true, strength: "weak" }), archived: true }),
+    th("d", { filing: fil({ customerId: null }) }), // strong but unresolved: not strong-approvable
+    th("e", { filing: fil({ noise: true }), noise: { flagged: true, reason: "Promotions", moved: true }, archived: true, updatedAt: NOW - 100 }),
+    th("f", { noise: { flagged: true, reason: "No-reply sender", moved: true }, updatedAt: NOW - 50 }), // moved but still in the inbox
+    th("g", { filing: fil({ state: "filed", filedBy: "reply", filedAt: NOW - 3 * DAY }), archived: true }),
+    th("h", { filing: fil({ state: "filed", filedBy: "rule", filedAt: NOW - 20 * DAY }), archived: true }), // older than 14 days
+    th("i", { filing: fil({ state: "filed", filedBy: "approved", filedAt: NOW - DAY }), archived: true }),
+    th("j", { filing: fil({}), archived: true }), // archived, not on reply: no To file row
+    th("k", { filing: fil({}), deleted: true }),
+    th("l", { filing: fil({ state: "skipped" }) }),
+  ];
+  const names = (id: string) => (id === "c1" ? "Lincoln HS" : null);
+  const vmT = buildOrganizeVM(threads, { tab: "to-file", now: NOW, customerName: names, isAdmin: true });
+  ok(vmT.rows.map((r) => r.id).join(",") === "c,d,b,a", "ui vm: To file lists the toFileThreads rows newest first (skipped, archived-not-on-reply, deleted, noise and filed left out)");
+  ok(vmT.counts.toFile === 4 && vmT.counts.noise === 2 && vmT.counts.filed === 2, "ui vm: counts — To file 4, Noise 2, Filed 2 (the 20-day-old filing left out)");
+  ok(vmT.strongIds.join(",") === "a", "ui vm: Approve all strong takes only strong, resolved rows");
+  const ra = vmT.rows.find((r) => r.id === "a")!;
+  ok(ra.suggestion === "Lincoln HS → EST-1042 Main curtain" && ra.strength === "strong" && ra.canApprove && ra.href === "/inbox?view=organize&tab=to-file&thread=a", "ui vm: a row carries its suggestion, strength and reader link");
+  ok(vmT.rows.find((r) => r.id === "b")!.needsReply && vmT.rows.find((r) => r.id === "c")!.archived && !vmT.rows.find((r) => r.id === "b")!.archived, "ui vm: the needs-reply dot and the Archived chip (archived-on-reply only)");
+  ok(!vmT.rows.find((r) => r.id === "d")!.canApprove && vmT.rows.find((r) => r.id === "d")!.suggestion === null, "ui vm: a suggestion with nothing to file under can't be approved");
+  ok(vmT.isAdmin && vmT.noiseInInboxIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
+  const vmN = buildOrganizeVM(threads, { tab: "noise", now: NOW, customerName: names });
+  ok(vmN.rows.map((r) => r.id).join(",") === "f,e" && vmN.rows[0].reason === "No-reply sender" && vmN.rows[1].reason === "Promotions", "ui vm: Noise lists moved noise newest first, each with its reason");
+  ok(vmN.noiseInInboxIds.join(",") === "f" && vmN.strongIds.length === 0 && !vmN.isAdmin, "ui vm: Archive all shown takes the noise still in the inbox");
+  const vmF = buildOrganizeVM(threads, { tab: "filed", now: NOW, customerName: names });
+  ok(vmF.rows.map((r) => r.id).join(",") === "i,g" && vmF.rows[0].filedBy === "approved" && vmF.rows[1].filedBy === "on reply" && !!vmF.rows[0].filedWhen, "ui vm: Filed lists the last 14 days, newest filing first, with how it was filed");
+  const many = Array.from({ length: 205 }, (_, i) => th(`m${i}`, { filing: fil({ state: "filed", filedAt: NOW - i * 1000 }) }));
+  const vmCap = buildOrganizeVM(many, { tab: "filed", now: NOW, customerName: names });
+  ok(vmCap.rows.length === 200 && vmCap.counts.filed === 205, "ui vm: Filed is capped at 200 rows (the count stays true)");
+
+  /* pure: the reader strip */
+  const org = (o: Partial<CommThread>, task: { id: string; title: string; dueAt: number | null; status: string } | null = null, isAdmin = false) =>
+    buildReaderOrg(th("r", o), { now: NOW, customerName: names, teammateName: (id) => (id === "u-dana" ? "Dana" : null), task, isAdmin });
+  ok(org({}) === null, "ui reader: a thread the pipeline never touched has no strip");
+  const c1 = org({ court: { owner: "me", reason: "Customer wrote last", source: "rule", at: NOW } })!;
+  ok(c1.court?.label === "On you: Customer wrote last" && !c1.court.override && c1.filing === null && c1.noise === null && c1.promise === null, "ui reader: court me → On you: <reason>");
+  ok(org({ court: { owner: "teammate", teammateId: "u-dana", reason: "x", source: "ai", at: NOW } })!.court?.label === "On Dana", "ui reader: a teammate court names the teammate");
+  const ov = org({ court: { owner: "me", reason: "On you — set by Ann", source: "override", at: NOW } })!;
+  ok(ov.court?.label === "On you" && ov.court.override, "ui reader: an override court reads plainly On you");
+  ok(org({ noise: { flagged: true, reason: "Newsletter", moved: false } })!.noise?.moved === false && org({ noise: { flagged: false, reason: "", moved: false, rescued: true } }) === null, "ui reader: the Looks like noise tag (not moved); a rescued thread has none");
+  const due = Date.UTC(2026, 9, 15, 22, 0); // Thu 15 Oct, 5 pm Chicago
+  const pr = org({ court: { owner: "customer", reason: "x", source: "rule", at: NOW, promise: { text: "send the drawings", ownerUserId: "u1", due, taskId: "T-prm-1", messageId: "m1" } } }, { id: "T-prm-1", title: "Send the drawings", dueAt: due, status: "todo" })!;
+  ok(pr.promise?.title === "Send the drawings" && pr.promise.due === "due Thu" && pr.promise.open, "ui reader: Task created … · due Thu for the court's open promise-task");
+  ok(org({ court: { owner: "customer", reason: "x", source: "rule", at: NOW, promise: { text: "t", ownerUserId: "u1", due, taskId: "T-prm-1", messageId: "m1" } } }, null)!.promise === null, "ui reader: a removed promise-task shows no line");
+  ok(org({ court: { owner: "customer", reason: "x", source: "rule", at: NOW, promise: { text: "t", ownerUserId: "u1", due, taskId: "T-prm-1", messageId: "m1" } } }, { id: "T-prm-1", title: "t", dueAt: due, status: "done" })!.promise?.open === false, "ui reader: a done promise-task is not open (no composer checkbox)");
+  const fs = org({ filing: fil({ work: { type: "quote", id: "Q-1", label: "EST-1042 Main curtain" } }) }, null, true)!;
+  ok(fs.filing?.state === "suggested" && fs.filing.suggestion === "Lincoln HS → EST-1042 Main curtain" && fs.filing.canApprove && fs.isAdmin, "ui reader: a suggested filing line can be approved");
+  ok(org({ filing: fil({ state: "filed", filedBy: "teammate-reply" }) })!.filing?.filedBy === "teammate reply", "ui reader: a filed line says how it was filed");
+  ok(dueLabel(NOW - DAY, NOW)?.startsWith("overdue ") === true && dueLabel(NOW + 20 * DAY, NOW) === "due Nov 2" && dueLabel(null, NOW) === null, "ui reader: due labels — overdue, a date beyond the week, none");
+
+  /* db: Change…'s customer records (the AI candidate reads) */
+  const CUST = fixtureId(335, "ui-cust");
+  await createFixture("quotes", { id: fixtureId(335, "ui-q-sent"), name: "Main curtain", customer: "UI School", customerId: CUST, quoteType: "system", status: "sent", updatedAt: NOW - 10 });
+  await createFixture("quotes", { id: fixtureId(335, "ui-q-draft"), name: "Rigging", customer: "UI School", customerId: CUST, quoteType: "system", status: "draft", updatedAt: NOW - 5 });
+  await createFixture("quotes", { id: fixtureId(335, "ui-q-won"), name: "Old job", customer: "UI School", customerId: CUST, quoteType: "system", status: "won", updatedAt: NOW });
+  const recs = await customerRecordCandidates(CUST, "UI School");
+  ok(recs.length === 2 && recs[0].id === fixtureId(335, "ui-q-draft") && recs.every((r) => r.type === "quote" && r.customerId === CUST && r.customerName === "UI School"), "ui db: customerRecordCandidates lists the customer's open quotes newest first (won left out)");
+  ok((await customerRecordCandidates(CUST, "UI School", 1)).length === 1, "ui db: the record list honours its limit");
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -1811,6 +1970,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgPipelineChecks(ok);
     await inboxOrgAiChecks(ok);
     await inboxOrgApplyChecks(ok);
+    await inboxOrgUiChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);
