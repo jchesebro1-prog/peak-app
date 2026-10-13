@@ -66,7 +66,7 @@ import {
 } from "@/lib/stores/inbox-org";
 import { courtByRules, type CourtMessage } from "./court";
 import { parseForward } from "./forward";
-import { PEAK_OWN_DOMAIN, makeInternalChecker, ownDomainsFrom } from "./internal";
+import { makeInternalChecker, ownDomainsFrom } from "./internal";
 import { noiseByRules } from "./noise";
 import { findEstimateNumbers, findRecordIds, type FoundEstimateNumber } from "./numbers";
 import { matchSenderRule } from "./sender-rules";
@@ -107,9 +107,8 @@ export type OrgContextInput = {
 
 const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false }, capUsd: 0 };
 
-/** Pure: the context from already-loaded rows. Own domains are the admin
- *  override when it names any, else the team's domains plus Peak's own
- *  (`PEAK_OWN_DOMAIN`, the inbox identity picker's internal domain). */
+/** Pure: the context from already-loaded rows. Own domains are Peak's own,
+ *  the team's and the admin override's (additive — see ownDomainsFrom). */
 export function buildOrgContext(input: OrgContextInput): OrgContext {
   const conns = (input.connections ?? []).map((c) => ({ address: lc(c.address), userId: c.userId || null }));
   const users: OrgUser[] = input.users.map((u) => {
@@ -119,8 +118,7 @@ export function buildOrgContext(input: OrgContextInput): OrgContext {
   const teamByEmail = new Map<string, string>();
   for (const u of users) for (const e of u.emails) if (!teamByEmail.has(e)) teamByEmail.set(e, u.id);
   const teamEmails = [...new Set([...users.flatMap((u) => u.emails), ...conns.map((c) => c.address).filter((e) => e.includes("@"))])];
-  const fromOverride = input.ownDomainOverride ? ownDomainsFrom([], input.ownDomainOverride) : [];
-  const ownDomains = fromOverride.length ? fromOverride : [...new Set([...ownDomainsFrom(teamEmails), PEAK_OWN_DOMAIN])];
+  const ownDomains = ownDomainsFrom(teamEmails, input.ownDomainOverride);
   return {
     loadedAt: input.now ?? Date.now(),
     users,
@@ -326,6 +324,9 @@ type FilingOutcome = {
   quiet: boolean;
   /** the AI step may still improve it */
   weakOrNone: boolean;
+  /** rule noise on a thread whose only identity is a weak domain guess
+   *  (customer-domain bulk mail, an RFP notifier): tagged, never moved */
+  tagOnly?: boolean;
 };
 
 async function nameOf(customerId: string): Promise<string> {
@@ -408,17 +409,26 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   }
   if (hit) return { filing: { ...hit, noise: false, source: "number", strength: "strong" }, quiet: false, weakOrNone: false };
 
-  // 4. noise rules — never a known contact, an internal-only thread (a
-  // teammate's forward included), a rescued thread, or one the owner wrote in
-  const ownerWrote = msgs.some((m) => m.direction === "out");
-  if (!neverNoise && !internalOnly && !t.noise?.rescued && !ownerWrote && inbound) {
+  // 4. noise rules — never a known contact, an internal sender, an
+  // internal-only thread (a teammate's forward included), a rescued thread,
+  // or one the owner wrote in (from any of the owner's addresses)
+  const ownerWrote = msgs.some((m) => roleOf(t, m, owner, ctx) === "owner");
+  const internalSender = !!inbound && ctx.isInternal(senderOf(t, inbound));
+  if (!neverNoise && !internalOnly && !internalSender && !t.noise?.rescued && !ownerWrote && inbound) {
     const why = noiseByRules(
       { labelIds: inbound.gmailLabelIds, bulk: inbound.bulk, autoSubmitted: inbound.autoSubmitted, fromEmail: senderOf(t, inbound), subject: t.subject || "" },
       { knownContact: false, internalOnly: false }
     );
     if (why) {
       if (knownContact === null) knownContact = !!(await contactByEmail(senderOf(t, inbound)).catch(() => null));
-      if (!knownContact) return { filing: { ...unresolved, noise: true, source: "noise-rule", strength: "strong", reason: why.reason }, quiet: false, weakOrNone: false };
+      if (!knownContact) {
+        return {
+          filing: { ...unresolved, noise: true, source: "noise-rule", strength: "strong", reason: weak ? `${why.reason} (${weak.reason})` : why.reason },
+          quiet: false,
+          weakOrNone: false,
+          ...(weak ? { tagOnly: true } : {}),
+        };
+      }
     }
   }
 
@@ -540,7 +550,8 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
       source: "rule",
       at: now,
       basis,
-      ...(prevCourt?.promise ? { promise: prevCourt.promise } : {}),
+      // a newer message drops the old promise — the AI reading re-derives it
+      ...(prevCourt?.promise && !courtNew ? { promise: prevCourt.promise } : {}),
       ...(pending ? { pendingAi: true } : {}),
     };
     court = prevCourt && sameRecord(prevCourt, next) ? prevCourt : next;
@@ -583,10 +594,16 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
         };
       }
       // noise: pilot owners' moves out of the inbox; everyone else's is a tag
-      if (next.noise) noise = { flagged: true, reason: next.reason, moved: pilotFile };
+      if (next.noise) noise = { flagged: true, reason: next.reason, moved: pilotFile && !out.tagOnly };
       else if (t.noise?.rescued) noise = { flagged: false, reason: "", moved: false, rescued: true };
       else noise = null;
     }
+  }
+
+  // a filed / dismissed filing only tracks whether a reply is still owed
+  if (locked && prevFiling) {
+    const needsReply = !prevFiling.noise && court.owner === "me";
+    if (prevFiling.needsReply !== needsReply) filing = { ...prevFiling, needsReply };
   }
 
   /* writes */

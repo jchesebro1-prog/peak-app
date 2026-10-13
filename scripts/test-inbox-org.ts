@@ -25,6 +25,7 @@ import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, organi
 import { onMyCourt, selectEmail } from "@/lib/triage/feeds/email";
 import { organizeAfterImport, recordMessage } from "@/lib/gmail/bridge";
 import { saveContact, setEmails } from "@/lib/identity/contacts";
+import { INTERNAL_DOMAIN as INBOX_IDENTITY_INTERNAL_DOMAIN, firstRecipient } from "@/lib/inbox-identity";
 import {
   FILING_LOG_BLOB, MAX_FILING_LOG, MAX_SENDER_RULES, ORG_SETTINGS_BLOB, SENDER_RULES_BLOB,
   addSenderRule, appendFilingLog, appendFilingLogs, getFilingLog, getOwnDomainOverride, getSenderRules,
@@ -255,11 +256,12 @@ function internalChecks(ok: Ok): void {
   ok(isInt("ops@mail.peaksystemsgroup.com"), "internal: a subdomain of the own domain");
 
   const ov = ownDomainsFrom(team, " @peak-av.com, PeakSystems.co ");
-  ok(ov.join(",") === "peak-av.com,peaksystems.co", "internal: the admin override replaces the derived domains (list, @ and case tolerant)");
+  ok(ov.join(",") === "peaksystemsgroup.com,peak-av.com,peaksystems.co", "internal: the admin override adds to Peak's own + the derived domains (list, @ and case tolerant)");
   const isOv = makeInternalChecker(team, ov);
   ok(isOv("bob@peak-av.com") && isOv("ann@peaksystems.co"), "internal: override domains are internal");
-  ok(!isOv("someone.new@peaksystemsgroup.com") && isOv("mike@peaksystemsgroup.com"), "internal: with an override, team addresses stay internal but the old domain alone does not");
-  ok(ownDomainsFrom(team, "gmail.com").length === 0, "internal: a freemail override is refused");
+  ok(isOv("someone.new@peaksystemsgroup.com") && isOv("mike@peaksystemsgroup.com"), "internal: with an override, Peak's own domain stays internal");
+  ok(ownDomainsFrom(team, "gmail.com").join(",") === "peaksystemsgroup.com", "internal: a freemail override is refused");
+  ok(ownDomainsFrom([]).join(",") === "peaksystemsgroup.com" && ownDomainsFrom(["a@gmail.com"], null).join(",") === "peaksystemsgroup.com", "internal: Peak's own domain is always an own domain, even with no team addresses");
   ok(ownDomainsFrom(team, "  ").join(",") === "peaksystemsgroup.com", "internal: a blank override falls back to the derived domains");
 }
 
@@ -589,6 +591,14 @@ export async function inboxOrgDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** The inbox identity picker's internal rule, read through its public
+ *  surface: firstRecipient skips internal addresses. */
+const INBOX_IDENTITY_INTERNAL = (email: string) => firstRecipient(email) === null;
+const sortedJson = (v: unknown): string => {
+  const s = (x: unknown): unknown => (Array.isArray(x) ? x.map(s) : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, y]) => [k, s(y)])) : x);
+  return JSON.stringify(s(v));
+};
+
 /* ---------- Task 3: the rule pipeline, the import hook, court-driven status + triage ---------- */
 
 export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
@@ -609,7 +619,8 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
   const withConn = buildOrgContext({ users, connections: [{ address: "Mike.Personal@gmail.com", userId: MIKE_ID }] });
   ok(withConn.users[0].emails.includes("mike.personal@gmail.com") && withConn.isInternal("mike.personal@gmail.com") && !withConn.isInternal("someone@gmail.com") && !withConn.ownDomains.includes("gmail.com"), "org pipeline ctx: a connected personal Gmail is internal; gmail.com never an own domain");
   const over = buildOrgContext({ users, ownDomainOverride: "peak.example" });
-  ok(over.ownDomains.join(",") === "peak.example" && over.isInternal("x@peak.example") && over.isInternal("mike@peaksystemsgroup.com"), "org pipeline ctx: an admin override replaces the derived domains (team addresses stay internal)");
+  ok(over.ownDomains.join(",") === "peaksystemsgroup.com,peak.example" && over.isInternal("x@peak.example") && over.isInternal("new.hire@peaksystemsgroup.com"), "org pipeline ctx: an admin override adds to Peak's own domain");
+  ok(over.isInternal("ops@peaksystemsgroup.com") === INBOX_IDENTITY_INTERNAL("ops@peaksystemsgroup.com") && INBOX_IDENTITY_INTERNAL_DOMAIN === "peaksystemsgroup.com", "org pipeline ctx: the pipeline and inbox-identity agree on Peak's own domain");
   ok(!isOrgPilot(MIKE_ID, "file", ctx) && isOrgPilot(MIKE_ID, "file", pilot) && isOrgPilot(MIKE_ID, "promise", pilot) && !isOrgPilot(DANA_ID, "file", pilot) && !isOrgPilot(null, "file", pilot), "org pipeline: isOrgPilot — pilot user + Assist configured only");
   ok(!isOrgPilot(MIKE_ID, "file", { assist: pilotAssist, env: {} }), "org pipeline: isOrgPilot — no key → not pilot");
   ok(COURT_STATUS.me === "waiting_us" && COURT_STATUS.customer === "waiting_them" && COURT_STATUS.teammate === "waiting_them" && COURT_STATUS.nobody === "closed", "org pipeline: court → status mapping");
@@ -710,6 +721,27 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const replied = await mk("noise-owner-wrote", { messages: [msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "deals@shop.test" }), msg({ fromEmail: "deals@shop.test", gmailLabelIds: ["CATEGORY_PROMOTIONS"] })], contactEmail: "deals@shop.test" });
     await organizeThread(replied, { ctx: pilot });
     ok(!(await read(replied)).noise && !(await read(replied)).archived, "org pipeline: a thread the owner wrote in is never noise");
+    const ownerFromGmail = await mk("noise-owner-inbound", {
+      contactEmail: "deals@shop.test",
+      messages: [msg({ direction: "in", fromEmail: "mike@peaksystemsgroup.com", to: "deals@shop.test" }), msg({ fromEmail: "deals@shop.test", gmailLabelIds: ["CATEGORY_PROMOTIONS"] })],
+    });
+    await organizeThread(ownerFromGmail, { ctx: pilot });
+    ok(!(await read(ownerFromGmail)).noise, "org pipeline: the owner writing from their own address (imported as inbound) still blocks noise");
+    const weakNoise = await mk("noise-weak-domain", {
+      resolution: "suggested",
+      suggestedCustomerId: CUST,
+      contactEmail: "rfp-notify@district.test",
+      messages: [msg({ fromEmail: "rfp-notify@district.test", bulk: true })],
+    });
+    await organizeThread(weakNoise, { ctx: pilot });
+    const tWeak = await read(weakNoise);
+    ok(tWeak.noise?.flagged === true && tWeak.noise.moved === false && tWeak.archived === false && tWeak.filing?.noise === true, "org pipeline: rule noise on a weak-domain thread is tag-only, even for a pilot owner");
+    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
+    const mixed = await mk("noise-internal-sender", {
+      messages: [msg({ fromEmail: "pat@school.test" }), msg({ fromEmail: "noreply@peaksystemsgroup.com", author: "Peak App", bulk: true, autoSubmitted: true, gmailLabelIds: ["CATEGORY_FORUMS"] })],
+    });
+    await organizeThread(mixed, { ctx: pilot });
+    ok(!(await read(mixed)).noise && !(await read(mixed)).archived && (await read(mixed)).filing?.noise === false, "org pipeline: an internal sender (noreply@peaksystemsgroup.com) is never noise, even in a mixed thread");
 
     /* 5. court: a teammate's last message → customer, status waiting_them */
     const mateId = await mk("teammate", {
@@ -773,6 +805,24 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const filedId = await mk("filed", { subject: "EST-987654", filing: filedFiling });
     await organizeThread(filedId, { ctx });
     ok((await read(filedId)).filing?.customerId === "TEST335:kept" && (await read(filedId)).filing?.state === "filed" && (await read(filedId)).court?.owner === "me", "org pipeline: a filed thread keeps its filing; the court still updates");
+    const { needsReply: nr, ...filedRest } = (await read(filedId)).filing!;
+    const { needsReply: _was, ...origRest } = filedFiling;
+    void _was;
+    ok(nr === true && sortedJson(filedRest) === sortedJson(origRest), "org pipeline: a filed filing refreshes needsReply from the court and nothing else");
+    const dismissedId = await mk("dismissed", { messages: [msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "pat@school.test" })], filing: { ...filedFiling, state: "dismissed", needsReply: true } });
+    await organizeThread(dismissedId, { ctx });
+    ok((await read(dismissedId)).filing?.state === "dismissed" && (await read(dismissedId)).filing?.needsReply === false, "org pipeline: a dismissed filing's needsReply clears once the court leaves me");
+    /* court.promise: kept while the newest message is the same, dropped on a newer one */
+    const pm = msg({ fromEmail: "pat@school.test" });
+    const promise = { text: "I'll send it Friday", ownerUserId: MIKE_ID, due: null, messageId: pm.id };
+    const promId = await mk("promise", { messages: [pm], court: { owner: "me", reason: "x", source: "rule", at: pm.at + 1, basis: pm.id, promise } });
+    await organizeThread(promId, { ctx });
+    ok((await read(promId)).court?.promise?.text === promise.text, "org pipeline: court.promise kept while no newer message arrived");
+    await patchDoc<CommThread>("comms", promId, (d) => {
+      d.messages = [...d.messages, msg({ fromEmail: "pat@school.test", body: "Also, the stage depth?" })];
+    });
+    await organizeThread(promId, { ctx });
+    ok(!(await read(promId)).court?.promise, "org pipeline: a newer message drops court.promise (the AI reading re-derives it)");
     const lastMsg = msg({ fromEmail: "pat@school.test", body: "Can you call me?" });
     const overrideId = await mk("override", { messages: [lastMsg], court: { owner: "nobody", reason: "Not on me", source: "override", at: lastMsg.at + 1, basis: lastMsg.id }, status: "closed" });
     await organizeThread(overrideId, { ctx });
@@ -825,13 +875,24 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
       ({ id, mailbox: "personal", mailboxUser: MIKE, unread: true, customerId: null, customer: "Acme", contactName: "Pat", contactEmail: "pat@acme.test", subject: "Q", channel: "email", status: "waiting_us", assignedTo: MIKE, link: null, messages: [{ id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" }], createdAt: T0, updatedAt: T0, ...extra }) as unknown as CommThread;
     const court = (owner: Court["owner"]): Court => ({ owner, reason: "", source: "rule", at: T0 });
     const picked = selectEmail(
-      [tri("C-a", { court: court("me") }), tri("C-b", { court: court("customer") }), tri("C-c", {}), tri("C-d", { status: "waiting_them" }), tri("C-e", { court: court("me"), status: "waiting_them" }), tri("C-f", { court: court("nobody") })],
+      [
+        tri("C-a", { court: court("me") }),
+        tri("C-b", { court: court("customer") }),
+        tri("C-c", {}),
+        tri("C-d", { status: "waiting_them" }),
+        tri("C-e", { court: court("me"), status: "waiting_them" }),
+        tri("C-f", { court: court("nobody") }),
+        tri("C-g", { court: court("me"), noise: { flagged: true, reason: "promo", moved: false } }),
+        tri("C-h", { noise: { flagged: false, reason: "", moved: false, rescued: true } }),
+      ],
       { quotes: new Map(), leads: new Map() },
       { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
     );
-    ok(picked.map((c) => c.key).join(",") === "email:C-a,email:C-c,email:C-e", "org triage: court 'me' counts, a teammate-replied (customer) / nobody court doesn't; no court → waiting_us fallback");
-    ok(picked.find((c) => c.key === "email:C-e")?.since === T0, "org triage: a court-me thread whose status lags still dates from the last inbound");
-    ok(onMyCourt({ court: undefined, status: "waiting_us" }) && !onMyCourt({ court: court("teammate"), status: "waiting_us" }), "org triage: onMyCourt");
+    ok(picked.map((c) => c.key).join(",") === "email:C-a,email:C-c,email:C-h", "org triage: waiting_us AND court 'me' (or no court); a customer / nobody court doesn't count; a rescued thread does");
+    ok(!picked.some((c) => c.key === "email:C-e"), "org triage: court 'me' but status waiting_them (an in-app reply / Mark replied moved on) → not picked");
+    ok(!picked.some((c) => c.key === "email:C-g"), "org triage: a flagged-noise thread is never picked");
+    ok(picked[0]?.since === T0, "org triage: the row dates from the last inbound");
+    ok(onMyCourt({ court: undefined, status: "waiting_us" }) && !onMyCourt({ court: court("teammate"), status: "waiting_us" }) && !onMyCourt({ court: court("me"), status: "replied" }), "org triage: onMyCourt");
 
     /* 8. the import hook: organize errors never break recordMessage */
     let threw = false;

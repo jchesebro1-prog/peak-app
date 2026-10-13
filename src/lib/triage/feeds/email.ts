@@ -30,17 +30,19 @@ export function linkedDealLabel(t: Pick<CommThread, "link">, deals: DealIndex): 
   return null;
 }
 
-/** #335 — the ball is in my court: the inbox-organization court says "me";
- *  a thread the pipeline hasn't organized yet falls back to waiting_us. A
- *  teammate's reply (court customer) no longer counts against me. */
-export function onMyCourt(t: Pick<CommThread, "court" | "status">): boolean {
-  return t.court ? t.court.owner === "me" : t.status === "waiting_us";
+/** #335 — the ball is in my court: status waiting_us AND (no court yet, or
+ *  the court says "me"). Status stays the gate because in-app replies, Mark
+ *  replied / Close and Gmail status labels change it without re-organizing
+ *  the thread — a court can be stale, a status can't. A teammate's reply
+ *  (court customer) no longer counts against me; noise never does. */
+export function onMyCourt(t: Pick<CommThread, "court" | "status" | "noise">): boolean {
+  return t.status === "waiting_us" && (!t.court || t.court.owner === "me") && !t.noise?.flagged;
 }
 
 /**
  * Threads assigned to me that are waiting on us — the bell's own rule
- * (nav-counts.ts "Customers waiting on a reply"): in my court (#335; status
- * waiting_us when no court yet), assignedTo me, not archived (Peak or Gmail
+ * (nav-counts.ts "Customers waiting on a reply"): status waiting_us and in my
+ * court (#335 onMyCourt; not flagged noise), assignedTo me, not archived (Peak or Gmail
  * side), not in Deleted.
  * ≥ 1 business day → "customer waiting"; younger → "customer message".
  */

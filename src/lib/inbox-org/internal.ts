@@ -29,9 +29,11 @@ function domainOf(email: string): string {
 
 const DOMAIN_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
 
-/** The own domains: the admin override when it names any (comma/space
- *  separated, `@` and case tolerant), else every non-freemail domain on the
- *  team's addresses. Deduped, in first-seen order. */
+/** The own domains, additive: Peak's own (`PEAK_OWN_DOMAIN`, always — so the
+ *  pipeline and the inbox identity picker agree), every non-freemail domain
+ *  on the team's addresses, and the admin override's (comma/space separated,
+ *  `@` and case tolerant). Freemail is never an own domain. Deduped, in that
+ *  order. */
 export function ownDomainsFrom(teamEmails: string[], override?: string | null): string[] {
   const pick = (list: string[]) => {
     const out: string[] = [];
@@ -42,8 +44,7 @@ export function ownDomainsFrom(teamEmails: string[], override?: string | null): 
     return out;
   };
   const tokens = lc(override).split(/[\s,;]+/).filter(Boolean);
-  if (tokens.length) return pick(tokens);
-  return pick(teamEmails.map(domainOf));
+  return pick([PEAK_OWN_DOMAIN, ...teamEmails.map(domainOf), ...tokens]);
 }
 
 /** `(email) => internal?` — a team address, or an address on (or under) an
