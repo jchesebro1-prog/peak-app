@@ -12015,3 +12015,27 @@ link/archive paths a person would.
 - Undo doesn't restore a cleared noise flag; a stale court can hide a manual `waiting_us` until the next organize.
 
 **Next roadmap pieces:** pop-out windows → AI daily brief → estimate suggestion → AI sidebar.
+
+## 336. Pop-out windows — Inbox, thread, Estimator and customer record in their own windows — BUILT 2026-10-13 on `worktree-assist-layer` (D902–D909)
+
+**Asked (Jeff, 2026-10-13):** roadmap piece 1b. Keep the dashboard open as home base; the Inbox, an email, an estimate or a customer record each get their own window, and the windows keep each other current. Spec `docs/superpowers/specs/2026-10-13-popout-windows-design.md`, plan `docs/superpowers/plans/2026-10-13-popout-windows.md`. All client-side; no migration, no env var.
+
+**Done:**
+- **Named windows** `peak-pop:<kind>:<id>`, one per item; popping out the same item again focuses it without reloading, so typing survives (D902, D904). A `<head>` script adds `pk-pop` before first paint; pop-out mode hides the nav and shows a small header with the title, **Open in main window** and ✕ (D903).
+- **Ways in:** a ⧉ on the Inbox, the thread reader, the Estimator (once saved) and the customer record; a hover ⧉ on the nav's Inbox, Estimator and Companies rows; shift-click on email rows, estimate rows (Quotes hub, customer record, Home cards) and Companies rows (D904, D909).
+- **Remembers size and position per screen type**, as the inner size so it does not creep (D905). Hidden under 900 px and in the native shell.
+- **Open in main window** goes to the most recently focused main window, or a new tab if none answers in 500 ms (D906).
+- **Live refresh (`LiveSync`):** a save in one window refreshes the others after 1 s, never while someone is typing, plus a refresh on focus when over 30 s stale (D907). The old Inbox-only listener is gone.
+- **Posters** on the Estimator, customer record and task saves, including the `TasksCard` status and assignee selects (D908).
+
+**Remaining (Jeff-gated):**
+- (1) Try it in Chrome and Safari: pop out an estimate, a customer and the Inbox; allow pop-ups for the site if asked.
+- (2) Pop an estimate out next to the dashboard, edit something, and watch the dashboard refresh.
+- (3) Close a pop-out, reopen it and confirm it comes back at the size and place you left it.
+- (4) Press **Open in main window** and confirm the main window goes to that page (Chrome may only flash the tab).
+
+**Known follow-ups:**
+- ⧉ on other screens (Portal quotes queue, Organize and Meetings lists, Projects, Leads) is a one-liner each with `PopoutButton`.
+- Uncovered form-action posters: the Quotes-hub `setQuoteStatus` and the `PortalPanel` Approve rely on the 30 s focus refresh until wrapped.
+- A second main tab (or an SSO / COOP redirect) can open a duplicate window of the same name; browser behaviour, not handled.
+- The new-tab fallback for Open in main window can be popup-blocked in Safari.

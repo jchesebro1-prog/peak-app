@@ -268,6 +268,46 @@ filings by source, % approved as suggested, corrections, noise rescues, promise-
 created/undone, and an admin can set Peak's own mail domain and delete company-wide
 sender rules there.
 
+## 6c. Pop-out windows (#336, D902–D909)
+
+Put the dashboard on one screen and the work on another. Nothing to turn on: it is all
+in the browser, so there is no setting, no env var and no kill switch.
+
+**Open one**
+
+- Click the small **⧉** (it says "Open in its own window") on the Inbox, on an email
+  in the reader, on an estimate in the Estimator (once it is saved), or on a customer
+  record.
+- Hover **Inbox**, **Estimator** or **Customers → Companies** in the nav and click the
+  ⧉ beside it.
+- **Shift-click** an email row, an estimate row (Quotes hub, a customer's quotes, Home
+  cards) or a company row.
+- Opening the same item again just brings its window forward; whatever you were typing
+  is still there. If the browser blocks the window, allow pop-ups for the site.
+
+**In the window**
+
+- The nav is gone; the bar at the top shows the page name, **Open in main window** and
+  **✕**. Open in main window sends your main window to this page (Chrome may only flash
+  its tab); if none is open it uses a new tab.
+- Each kind of window comes back at the size and place you last left it.
+- On a phone, a narrow window or the app shell the ⧉ buttons are hidden.
+
+**Keeping windows current**
+
+- Save something in one window and the others showing it refresh about a second later.
+- A window never refreshes while you are typing in it; it catches up after you stop.
+- Coming back to a window that has not refreshed for 30 seconds refreshes it. A few
+  buttons (changing a quote's status from the Quotes hub, Approve on a portal quote)
+  rely on that instead of the instant refresh.
+
+**Limits**
+
+- Browsers find a window by name only from the page that opened it. Pop an item out from
+  two different main tabs and you can get two windows of it. Close the extra one.
+- After a Google sign-in redirect the link to old pop-outs can break; close them and
+  open again.
+
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 
 Everything you need to move Peak from demo data to your real business is in

@@ -1136,5 +1136,28 @@ See `.env.example`.
     all three promises on `court.promise`. Next: pop-out windows → AI brief →
     estimate suggestion → AI sidebar. Punch item #335.
 
+55. ✅ **Pop-out windows** (#336, D902–D909) — roadmap piece 1b, all client-side
+    (no migration, no env var). The Inbox, a thread, an estimate or a customer
+    record opens in its own named browser window (`peak-pop:<kind>:<id>`, one per
+    item; popping out the same item again focuses it and never reloads it —
+    `window.open("", name)` then a location replace, D904). A `<head>` script adds
+    `pk-pop` to `<html>` before first paint; pop-out mode hides the nav and shows a
+    header with the title, **Open in main window** (the most recently focused main
+    window answers, else a new tab after 500 ms) and ✕. Ways in: a ⧉ on the Inbox,
+    thread reader, Estimator and customer record; a hover ⧉ on the nav's Inbox,
+    Estimator and Companies rows; shift-click on email, estimate and Companies rows.
+    Hidden under 900 px and in the native shell. Size and position are remembered per
+    screen type as inner size. Pure core in `src/lib/popout/` (`names`, `geometry`,
+    `channel`, `guard`, `click`, `live`, `open`), `PopoutButton`, `PopHeader` and one `LiveSync`
+    (replaces #335's Inbox listener): a save in one window posts `changed` on
+    `BroadcastChannel("peak")` and the others refresh after 1 s, never while typing,
+    plus a refresh on focus when over 30 s stale. Posters cover the Estimator,
+    customer record and task saves; the Quotes-hub `setQuoteStatus` and the
+    PortalPanel Approve rely on the focus refresh. Remaining is Jeff-gated: try it
+    in Chrome and Safari, an estimate beside the dashboard, the remembered size, and
+    Open in main window. Follow-ups: ⧉ on other screens, the form-action posters, a
+    duplicate window from a second main tab. Next: AI brief → estimate suggestion →
+    AI sidebar. Punch item #336.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
