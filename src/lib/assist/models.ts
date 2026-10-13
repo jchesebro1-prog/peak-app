@@ -9,6 +9,8 @@ export const DEFAULT_MODELS = {
   /** #335 Inbox organization — filing suggestions + court/promise reading. */
   file: "claude-haiku-5-5",
   promise: "claude-haiku-5-5",
+  /** AI daily brief — the summary + quiet-quote nudges. */
+  brief: "claude-haiku-5-5",
 } as const;
 export type ModelSlot = keyof typeof DEFAULT_MODELS;
 
@@ -19,6 +21,7 @@ const ENV_KEY: Record<ModelSlot, string> = {
   estimate: "ASSIST_MODEL_ESTIMATE",
   file: "ASSIST_MODEL_FILE",
   promise: "ASSIST_MODEL_PROMISE",
+  brief: "ASSIST_MODEL_BRIEF",
 };
 
 /** The Mac-mini fallback always runs on Haiku (Jeff, 2026-10-12). */
@@ -46,6 +49,8 @@ export const SLOT_SETTINGS: Record<ModelSlot, SlotSettings> = {
   // (a failure leaves the thread pendingAi for the next pass).
   file: { effort: "low", maxTokens: 2000, timeoutMs: 30_000, maxRetries: 0, stream: false },
   promise: { effort: "low", maxTokens: 2000, timeoutMs: 30_000, maxRetries: 0, stream: false },
+  // AI daily brief — one call per user inside a 60 s cron or a 20 s lazy build; a failure falls back to the rule-built brief.
+  brief: { effort: "low", maxTokens: 2000, timeoutMs: 30_000, maxRetries: 0, stream: false },
 };
 
 /** Pure — the SDK per-request options for a slot. */

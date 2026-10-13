@@ -10,8 +10,9 @@ import { pickProvider } from "./provider";
 import { getAssistEnv } from "./key-store";
 import { ZERO_USAGE, type AssistFeature, type AssistProvider, type AssistSettings, type AssistStep, type Env, type ProviderRequest } from "./types";
 
-/** Per user per hour. `file` / `promise` run in background sync passes (#335). */
-export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20, file: 600, promise: 600 };
+/** Per user per hour. `file` / `promise` run in background sync passes (#335);
+ *  `brief` covers the brief summary and quiet-quote nudges (Rebuild has its own 3/h). */
+export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20, file: 600, promise: 600, brief: 60 };
 
 /** zod → JSON Schema for output_config.format; `$schema` dropped. */
 export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {

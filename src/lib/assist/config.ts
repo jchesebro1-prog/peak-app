@@ -2,10 +2,10 @@
 import type { AssistFeature, AssistSettings, Env } from "./types";
 import { modelFor } from "./models";
 
-export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate", "file", "promise"];
+export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate", "file", "promise", "brief"];
 export const DEFAULT_CAP_USD = 200;
-/** Features that stay off until an admin turns them on (D897). */
-export const OPT_IN_FEATURES: ReadonlySet<AssistFeature> = new Set<AssistFeature>(["file", "promise"]);
+/** Features that stay off until an admin turns them on (D897; `brief` — AI daily brief). */
+export const OPT_IN_FEATURES: ReadonlySet<AssistFeature> = new Set<AssistFeature>(["file", "promise", "brief"]);
 
 type StoredAssist = {
   assistUsers?: unknown;
@@ -17,7 +17,8 @@ export function assistSettingsOf(s: StoredAssist | null | undefined): AssistSett
   const users = Array.isArray(s?.assistUsers) ? (s!.assistUsers as unknown[]).filter((x): x is string => typeof x === "string") : [];
   const f = (s?.assistFeatures && typeof s.assistFeatures === "object" ? s.assistFeatures : {}) as Record<string, unknown>;
   // tasks / reply / estimate are on unless switched off; the #335 Inbox
-  // organization switches (file, promise) are off until turned on (D897)
+  // organization switches (file, promise) and the daily brief are off until
+  // turned on (D897)
   const features = Object.fromEntries(
     ASSIST_FEATURES.map((k) => [k, OPT_IN_FEATURES.has(k) ? f[k] === true : f[k] !== false])
   ) as Record<AssistFeature, boolean>;
@@ -116,7 +117,7 @@ export function assistStatusLine(env: Env = process.env, keyInfo?: AssistKeyInfo
   if ((env.ASSIST_DISABLED || "").trim() === "true") return "Kill switch on (ASSIST_DISABLED=true) — Assist is off.";
   const c = assistConfigured(env);
   if (!c.ok) return keyInfo ? "Not configured — paste a Claude API key below, or set ANTHROPIC_API_KEY." : "Not configured — set ANTHROPIC_API_KEY.";
-  const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)} · file ${modelFor("file", env)} · promise ${modelFor("promise", env)}`;
+  const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)} · file ${modelFor("file", env)} · promise ${modelFor("promise", env)} · brief ${modelFor("brief", env)}`;
   if (c.provider === "local") {
     const hasKey = !!(env.ANTHROPIC_API_KEY || "").trim();
     const fb = hasKey ? `, Claude Haiku fallback${keyInfo ? ` (key ${keySourceNote(keyInfo)})` : ""}` : ", no fallback";
