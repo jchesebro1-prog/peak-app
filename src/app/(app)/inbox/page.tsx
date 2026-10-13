@@ -9,6 +9,7 @@ import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
 import { withSignature } from "@/lib/inbox-signature";
 import { nudgePrefill, prefillRecipient } from "@/lib/inbox-compose-prefill";
+import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { groupCompanyOptions } from "@/lib/vendor-status";
@@ -1110,7 +1111,10 @@ export default async function InboxPage({
   // To = the quote's contact by name, else blank. Nothing sends by itself.
   let initialCompose: ComposeInit | null = null;
   const nudgeId = str(params.nudge).slice(0, 100);
-  const nudge = nudgeId ? nudgePrefill(await getQuote(nudgeId).catch(() => null), me) : null;
+  const nudgeQuote = nudgeId ? await getQuote(nudgeId).catch(() => null) : null;
+  const nudge = nudgePrefill(nudgeQuote, me);
+  // the report's "nudges opened": the composer opening is the hook (idempotent, first write wins)
+  if (nudge) await recordNudgeOpened(nudgeQuote?.assistNudge?.runId, user.id);
   const customerParam = str(params.customer);
   const logCust = str(params.log) === "1" ? customerParam : "";
   const newCust = logCust ? "" : str(params.new) || customerParam;

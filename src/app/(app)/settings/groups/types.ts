@@ -13,7 +13,7 @@ import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import type { SchedulingSettings } from "@/lib/visit-plan/settings";
 import type { AssistSettings } from "@/lib/assist/types";
 import type { AssistKeyInfo } from "@/lib/assist/config";
-import type { AssistReport, FilingReport } from "@/lib/assist/report";
+import type { AssistReport, BriefReport, FilingReport } from "@/lib/assist/report";
 import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
 
 export type UserVM = {
@@ -111,6 +111,8 @@ export type AssistVM = {
   months: string[];
   spendUsd: number;
   report: AssistReport;
+  /** AI daily brief (spec §6) — briefs built, pre-drafts made / used, nudges. */
+  brief: BriefReport;
   /** #335 Inbox organization — the month's filing / court / promise rows,
    *  the company-wide sender rules and the own-domain override. */
   org: {

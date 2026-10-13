@@ -28,6 +28,15 @@ export function briefSlotAt(ms: number): { day: string; slot: BriefSlot; beforeM
   return { day, slot, beforeMorning: minuteOfDay(ms) < MORNING_AT_MIN };
 }
 
+/** The brief blob ids (`brief:<userId>:<day>:<slot>`) whose day falls in `month` (YYYY-MM); anything else under the prefix is left out. */
+export function briefIdsInMonth(ids: readonly string[], month: string): string[] {
+  return ids.filter((id) => {
+    const parts = id.split(":");
+    const day = parts.length >= 4 && parts[0] === "brief" ? parts[parts.length - 2] : "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) && day.startsWith(month + "-");
+  });
+}
+
 /** "YYYY-MM-DD" of the calendar day before. */
 export function prevDayKey(day: string): string {
   const [y, m, d] = day.split("-").map(Number);

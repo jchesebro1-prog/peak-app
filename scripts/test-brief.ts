@@ -320,7 +320,7 @@ export async function briefPureChecks(ok: Ok): Promise<void> {
   nudgeChecks(ok);
   promptChecks(ok);
   // pure modules stay client-safe: no store / db / server imports
-  for (const f of ["types", "slots", "sanitize", "fallback", "diff", "quiet", "speech", "fresh", "nudge", "prompt"]) {
+  for (const f of ["types", "slots", "sanitize", "fallback", "diff", "quiet", "speech", "fresh", "nudge", "prompt", "reminders", "report-keys"]) {
     const src = readFileSync(`src/lib/brief/${f}.ts`, "utf8");
     const bad = [...src.matchAll(/^import (?!type )[^;]*from "([^"]+)";/gm)].map((m) => m[1]).filter((p) => /stores\/|@\/db|server|next\/|session/.test(p));
     ok(bad.length === 0, `brief purity: src/lib/brief/${f}.ts imports no store/db/server module${bad.length ? ` (${bad.join(", ")})` : ""}`);
@@ -484,6 +484,8 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     ok(run1.replies === 2 && run1.tasks === 2 && run1.fresh === 1 && run1.nudges === 1 && run1.failed === 1 && run1.stoppedBy === null && run1.skipped === null, `brief queue: drafts the two court-me threads without a fresh draft, skips the fresh one, nudges the quiet quote, refuses the hostile nudge (${JSON.stringify(run1)})`);
     const mine = (await getThread(TH.mine))!;
     ok(mine.preDraft?.body === "Hi Pat,\nThanks — we'll follow up." && mine.preDraft.basis === "m-mine-1" && mine.preDraft.at === NOW && !!mine.preDraft.runId && mine.preDraft.taskSuggestions?.[0]?.title === "Send the drawings" && !!mine.preDraft.taskRunId, "brief queue: the pre-draft stores body, runId, task suggestions, taskRunId, basis = newest inbound id and at");
+    const mineRun = await getDoc<{ id: string; outcomeDetail: Record<string, unknown> | null }>("assist_runs", mine.preDraft!.runId!);
+    ok(mineRun?.outcomeDetail?.queued === true, "brief queue: the landed reply run is marked queued (the report's pre-draft marker)");
     const stale = (await getThread(TH.stale))!;
     ok(stale.preDraft?.basis === "m-stale-2" && stale.preDraft.body !== "old draft", "brief queue: a stale pre-draft is redrafted against the newest inbound message");
     ok((await getThread(TH.fresh))!.preDraft?.body === "kept draft", "brief queue: a fresh pre-draft is left alone");
@@ -1026,7 +1028,7 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(tasksClick.includes("runId: storedTasks.runId") && tasksClick.includes("return;") && !tasksClick.includes("suggestTasksAction"), "brief pins: Suggest tasks opens the dialog on fresh stored suggestions with their runId — no model call");
   const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
   ok(/const storedDraft = readerPreDraft\(sel, \{ name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
-  ok(/const nudge = nudgeId \? nudgePrefill\(await getQuote\(nudgeId\)\.catch\(\(\) => null\), me\) : null;/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
+  ok(/const nudgeQuote = nudgeId \? await getQuote\(nudgeId\)\.catch\(\(\) => null\) : null;\s+const nudge = nudgePrefill\(nudgeQuote, me\);/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
   const rp = readFileSync("src/lib/brief/reader-predraft.ts", "utf8");
   ok(rp.includes("preDraftFresh(t)") && rp.includes("onMyCourt(t, env)") && rp.includes("sameName(t.assignedTo, me.name)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
   const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
@@ -1047,6 +1049,101 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** Task 5 — phone reminders (pins on the component + pure schedule), the Account pref (default on), and the report math. */
+export async function briefReminderChecks(ok: Ok): Promise<void> {
+  const R = await import("@/lib/brief/reminders");
+  const { briefReport, featureKey } = await import("@/lib/assist/report");
+  const { briefIdsInMonth } = await import("@/lib/brief/slots");
+  type Run = Parameters<typeof briefReport>[0][number];
+
+  /* 1. the schedule */
+  const n = R.reminderNotifications();
+  ok(n.length === 2 && n[0].id === 64501 && n[1].id === 64502 && R.BRIEF_REMINDER_IDS.join(",") === "64501,64502", "brief reminders: two notifications with ids 64501 and 64502");
+  ok(n[0].schedule.on.hour === 6 && n[0].schedule.on.minute === 45 && n[1].schedule.on.hour === 13 && n[1].schedule.on.minute === 45, "brief reminders: 6:45 and 13:45");
+  ok(n.every((x) => x.schedule.repeats === true && Object.keys(x.schedule).sort().join() === "on,repeats"), "brief reminders: both repeat daily via schedule.on (hour/minute) + repeats: true");
+  ok(n[0].body === "Your morning brief is ready" && n[1].body === "Your afternoon brief is ready", "brief reminders: the two texts");
+  ok(R.BRIEF_REMINDER_TARGET === "/?brief=1" && R.isBriefReminderId(64501) && R.isBriefReminderId(64502) && !R.isBriefReminderId(1) && !R.isBriefReminderId("64501"), "brief reminders: a tap goes to /?brief=1, only for the brief's own ids");
+  ok(R.BRIEF_REMINDERS_PREF_KEY === "brief_reminders", "brief reminders: the notif_prefs key");
+  const settings = { users: ["u1"], features: { brief: true } };
+  ok(R.briefOnFor("u1", settings) && !R.briefOnFor("u2", settings) && !R.briefOnFor("", settings) && !R.briefOnFor("u1", { users: ["u1"], features: { brief: false } }) && !R.briefOnFor("u1", { users: ["u1"], features: {} }), "brief reminders: only a pilot user with the Daily brief on");
+
+  /* 2. the component and its wiring (source pins) */
+  const comp = readFileSync("src/components/brief/native-brief-reminders.tsx", "utf8");
+  ok(!/^import [^;]*@capacitor\/local-notifications/m.test(comp) && /await import\("@capacitor\/local-notifications"\)/.test(comp), "brief reminders: the plugin is loaded by dynamic import only — never statically imported");
+  ok(comp.split("await import(").length - 1 === 2 && !comp.slice(0, comp.indexOf("export default")).includes("import("), "brief reminders: both dynamic imports sit inside the effects — none at module load");
+  ok(/isNativePlatform\(\)/.test(comp) && comp.split("isNativePlatform()").length - 1 >= 2, "brief reminders: both effects return early off the native app");
+  ok(/localNotificationActionPerformed/.test(comp) && /router\.push\(BRIEF_REMINDER_TARGET\)/.test(comp), "brief reminders: a tap does router.push to the brief target");
+  ok(/LocalNotifications\.cancel\(/.test(comp) && /LocalNotifications\.schedule\(/.test(comp) && /requestPermissions\(\)/.test(comp) && /checkPermissions\(\)/.test(comp), "brief reminders: cancels when off, schedules when on, asks permission only after a check");
+  ok(comp.split("try {").length - 1 >= 2 && comp.split("catch").length - 1 >= 2, "brief reminders: the native calls are inside try/catch");
+  const layout = readFileSync("src/app/(app)/layout.tsx", "utf8");
+  ok(/<NativeBriefReminders enabled=\{remindersOn\}/.test(layout) && /briefOnFor\(user\.id, assistSettingsOf\(settings\)\)/.test(layout) && /briefRemindersOn\(user\.name\)/.test(layout), "brief reminders: the layout mounts it with pilot + brief + the pref, computed on the server");
+  const account = readFileSync("src/app/(app)/account/page.tsx", "utf8");
+  ok(/briefOnFor\(user\.id, assistSettingsOf\(settings\)\)/.test(account) && /briefReminders !== null && <BriefRemindersToggle/.test(account), "brief reminders: the Account toggle shows only for pilot + brief users");
+  const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { dependencies: Record<string, string> };
+  ok(pkg.dependencies["@capacitor/local-notifications"] === "8.3.1", "brief reminders: @capacitor/local-notifications is pinned exactly to 8.3.1");
+  const toggle = readFileSync("src/app/(app)/account/brief-reminders-toggle.tsx", "utf8");
+  ok(/Brief reminders on this phone/.test(toggle) && /setBriefRemindersPrefAction/.test(toggle), "brief reminders: the toggle is labelled 'Brief reminders on this phone'");
+  const reader = readFileSync("src/app/(app)/inbox/thread-reader.tsx", "utf8");
+  ok(/parked && parked\.runId !== runId\) settleDraftRef\(\{ current: parked \}, "discarded"/.test(reader), "brief reader: a parked pre-draft of an older run is settled as discarded when Use it picks a newer one");
+
+  /* 3. the Account pref: default on, off/on round trip, other prefs survive */
+  const { getDb } = await import("@/db");
+  const { notifPrefs } = await import("@/db/schema");
+  const { eq } = await import("drizzle-orm");
+  const NP = await import("@/lib/stores/notif-prefs");
+  const U = "Reminder Pref Test";
+  try {
+    ok((await NP.briefRemindersOn(U)) === true, "brief pref: a person who never touched it reads as ON");
+    await NP.setBriefRemindersOn(false, U);
+    ok((await NP.briefRemindersOn(U)) === false, "brief pref: off sticks");
+    await NP.setAll(false, U);
+    ok((await NP.briefRemindersOn(U)) === false, "brief pref: 'mute all' leaves the key alone");
+    await NP.setBriefRemindersOn(true, U);
+    ok((await NP.briefRemindersOn(U)) === true && (await NP.invitesOn(U)) === true, "brief pref: back on, and the invite pref is untouched");
+  } finally {
+    await (await getDb()).delete(notifPrefs).where(eq(notifPrefs.userName, U));
+  }
+
+  /* 4. the report math */
+  let i = 0;
+  const run = (over: Partial<Run>): Run =>
+    ({ id: "AR-t" + i++, feature: "reply", step: null, userId: "u1", userName: "U", provider: "fake", model: "m", requestedModel: "m", fellBack: false, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, latencyMs: 0, inputHash: "h", output: "", ok: true, error: null, stopReason: null, contextRef: "thread:T1", monthKey: "2035-03", outcome: null, outcomeDetail: null, outcomeAt: null, createdAt: 1, ...over }) as Run;
+  const Q = { queued: true };
+  const rep = briefReport(
+    [
+      run({ outcomeDetail: Q, outcome: "accepted" }),
+      run({ outcomeDetail: Q, outcome: "edited" }),
+      run({ outcomeDetail: Q, outcome: "discarded" }),
+      run({ outcomeDetail: Q }),
+      run({ outcomeDetail: { ...Q, editRatio: 0.2 }, outcome: "edited" }),
+      run({ outcomeDetail: Q, ok: false }), // failed call — not made
+      run({ outcome: "accepted" }), // a live Draft reply — not a pre-draft
+      run({ outcomeDetail: { queued: false }, outcome: "accepted" }),
+      run({ feature: "tasks", outcomeDetail: Q }), // task suggestions aren't counted
+      run({ feature: "brief", contextRef: "quote:Q-1" }),
+      run({ feature: "brief", contextRef: "quote:Q-2", outcome: "accepted", outcomeDetail: { opened: true } }),
+      run({ feature: "brief", contextRef: "quote:Q-3", outcome: "accepted" }), // accepted without the opened mark
+      run({ feature: "brief", contextRef: "quote:Q-4", ok: false }),
+      run({ feature: "brief", contextRef: "brief:u1:2035-03-14:morning" }), // a brief build, not a nudge
+    ],
+    [{ builtBy: "cron" }, { builtBy: "cron" }, { builtBy: "lazy" }, { builtBy: "rebuild" }, { builtBy: "weird" }]
+  );
+  ok(rep.preDrafts.made === 5 && rep.preDrafts.used === 3 && rep.preDrafts.discarded === 1 && rep.preDrafts.unused === 1, `brief report: pre-drafts made 5 = used 3 (accepted + edited) + discarded 1 + unused 1 (${JSON.stringify(rep.preDrafts)})`);
+  ok(rep.preDrafts.used + rep.preDrafts.discarded + rep.preDrafts.unused === rep.preDrafts.made, "brief report: made always equals used + discarded + unused");
+  ok(rep.nudges.made === 3 && rep.nudges.opened === 1, `brief report: nudges — 3 ok quote runs made, 1 opened in the composer (${JSON.stringify(rep.nudges)})`);
+  ok(rep.built.cron === 2 && rep.built.lazy === 1 && rep.built.rebuild === 1 && rep.built.total === 5, `brief report: briefs built by cron / lazy / rebuild, total counts every brief (${JSON.stringify(rep.built)})`);
+  const empty = briefReport([], []);
+  ok(empty.built.total === 0 && empty.preDrafts.made === 0 && empty.nudges.made === 0, "brief report: empty month → zeros");
+  ok(featureKey({ feature: "brief", step: null }) === "Daily brief", "brief report: the by-feature table still labels brief runs 'Daily brief'");
+  const ids = ["brief:u1:2035-03-14:morning", "brief:u1:2035-03-31:midday", "brief:u1:2035-04-01:morning", "brief:u:x:2035-03-14:midday", "brief:u1:2035-3-14:morning", "brief:u1:2034-03-14:morning", "brief:bad"];
+  ok(briefIdsInMonth(ids, "2035-03").join("|") === "brief:u1:2035-03-14:morning|brief:u1:2035-03-31:midday|brief:u:x:2035-03-14:midday", "brief report: the month filter reads the day from the id (a colon in the user id is fine; malformed ids are skipped)");
+  const keys = await import("@/lib/brief/report-keys");
+  const drafts = readFileSync("src/lib/brief/drafts.ts", "utf8");
+  ok(keys.PREDRAFT_RUN_KEY === "queued" && /mergeRunDetail\(next\.runId, \{ \[PREDRAFT_RUN_KEY\]: true \}\)/.test(drafts), "brief report: the queue marks a landed reply run as a pre-draft");
+  const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
+  ok(/recordNudgeOpened\(nudgeQuote\?\.assistNudge\?\.runId, user\.id\)/.test(inbox), "brief report: ?nudge= opening the composer records the nudge as opened");
+}
+
 if (process.argv[1] && /test-brief\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -1062,6 +1159,7 @@ if (process.argv[1] && /test-brief\.ts$/.test(process.argv[1])) {
     await briefDraftDbChecks(ok);
     await briefBuildDbChecks(ok);
     await briefCardChecks(ok);
+    await briefReminderChecks(ok);
     // later tasks append: await briefXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall brief checks passed");
     process.exit(fail ? 1 : 0);

@@ -76,7 +76,37 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
   );
 }
 
-const SAVED_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
+/** AI daily brief (spec §6) — briefs built, pre-drafts made / used, nudges. Only what is measured. */
+function BriefReportTable({ brief }: { brief: AssistVM["brief"] }) {
+  const { built, preDrafts: p, nudges } = brief;
+  const rows: Array<[string, string | number, string]> = [
+    ["Briefs built", built.total, `${built.cron} cron · ${built.lazy} on first view · ${built.rebuild} rebuilt`],
+    ["Pre-drafts made", p.made, "reply drafts the queue wrote ahead of time"],
+    ["Pre-drafts used", p.used, "sent as drafted or after editing"],
+    ["Pre-drafts discarded", p.discarded, "thrown away or replaced"],
+    ["Pre-drafts not used", p.unused, "no outcome yet (never opened, or made stale by newer mail)"],
+    ["Nudges made", nudges.made, "follow-ups drafted for quiet quotes"],
+    ["Nudges opened", nudges.opened, "opened in the composer via Send nudge — a send is not tracked back"],
+  ];
+  return (
+    <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Daily brief</div>
+      <table style={{ borderCollapse: "collapse", minWidth: 460, width: "100%" }}>
+        <tbody>
+          {rows.map(([label, n, note]) => (
+            <tr key={label} style={{ borderTop: "1px solid #f3f4f7" }}>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}>{label}</td>
+              <td style={td}>{n}</td>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit", color: "#9aa0ab", fontSize: 11.5 }}>{note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const SAVED_FMT =new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
 
 /** D881 — the one line saying where the Claude key comes from. Never the key: last four characters at most. */
 function keyInfoLine(k: AssistVM["keyInfo"]): { text: string; warn: boolean } {
@@ -307,6 +337,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <ReportTable title="By feature" rows={report.byFeature} />
       <ReportTable title="By person" rows={report.byUser} />
       <ReportTable title="By model" rows={report.byModel} />
+      <BriefReportTable brief={assist.brief} />
       <FilingReportTable report={assist.org.filing} cleanupSuggested={assist.org.cleanupSuggested} />
       <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
         Costs are estimates from token counts × list prices; check the Claude Console for the bill.

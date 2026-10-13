@@ -40,6 +40,8 @@ import { sameName } from "@/lib/quote-approval-rules";
 import { signatureFor } from "@/lib/stores/signatures";
 import { casPreDraftKey, get as getThread, getAll as allThreads, lastInbound, visibleTo, waitingSince, type CommThread } from "@/lib/stores/comms";
 import { casAssistNudgeKey, get as getQuote, getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
+import { mergeRunDetail } from "@/lib/stores/assist-runs";
+import { PREDRAFT_RUN_KEY } from "./report-keys";
 import { lastSentAt, newestInboundId, nudgeFresh, preDraftFresh } from "./fresh";
 import { selectQuietQuotes } from "./quiet";
 import { buildNudgeUserText, NUDGE_SYSTEM, NudgeSchema, sanitizeNudge } from "./nudge";
@@ -310,7 +312,13 @@ export async function runDraftQueue(
             const cur = await getThread(t.id);
             const landed = !!cur && newestInboundId(cur) === basis && (await casPreDraftKey(t.id, "preDraft", t.preDraft, next));
             if (landed) {
-              if (replied) res.replies++;
+              if (replied) {
+                res.replies++;
+                // Marks this reply run as a queue pre-draft (the Assist report
+                // tells it from a live Draft reply by this detail key). A
+                // dropped draft is never marked: it was never shown.
+                if (next.runId) await mergeRunDetail(next.runId, { [PREDRAFT_RUN_KEY]: true }).catch(() => false);
+              }
               if (suggested) res.tasks++;
               res.failed += failed;
             } else {

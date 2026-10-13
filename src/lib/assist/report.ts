@@ -3,6 +3,7 @@ import type { AssistRun } from "@/lib/stores/assist-runs";
 import type { AssistOutcome } from "./types";
 import type { FilingLogEntry } from "@/lib/stores/inbox-org";
 import type { FilingSource } from "@/lib/inbox-org/types";
+import { NUDGE_OPENED_KEY, PREDRAFT_RUN_KEY } from "@/lib/brief/report-keys";
 
 export type ReportRow = { key: string; runs: number; okRuns: number; accepted: number; edited: number; discarded: number; pending: number; costUsd: number };
 
@@ -166,4 +167,56 @@ export function filingReport(runs: AssistRun[], log: FilingLogEntry[], promiseTa
     courtOverrides,
     promiseTasks: { created: promiseTasks.length, undone: promiseTasks.filter((t) => t.deleted).length },
   };
+}
+
+/* ---- AI daily brief rows (spec §6) ------------------------------------------- */
+
+/** One stored brief's facts the report needs (the blob's `builtBy`). */
+export type BriefBuildRow = { builtBy: string };
+
+export type BriefReport = {
+  /** briefs stored this month, by how they were built */
+  built: { cron: number; lazy: number; rebuild: number; total: number };
+  /** Reply runs the draft queue made (marked `queued`), and what people did with them. Task suggestions are not counted. */
+  preDrafts: {
+    made: number;
+    /** accepted or edited — the person used it (Use it, then sent) */
+    used: number;
+    /** thrown away: the composer closed unsent and the reader left, or replaced by a newer run */
+    discarded: number;
+    /** no outcome yet: never opened, or opened and still parked. Includes drafts made stale by newer mail. */
+    unused: number;
+  };
+  /** Follow-up nudges: `made` = ok quiet-quote runs; `opened` = the composer opened via ?nudge= (not proof it was sent — Gmail send isn't tied back to the run). */
+  nudges: { made: number; opened: number };
+};
+
+/**
+ * Pure: the month's brief rows. `runs` are the month's assist_runs; `briefs`
+ * the month's stored briefs. Brief builds themselves are `brief` runs with a
+ * `brief:` contextRef and are NOT nudges; nudges are the `brief` runs on a
+ * `quote:` contextRef.
+ */
+export function briefReport(runs: AssistRun[], briefs: BriefBuildRow[]): BriefReport {
+  const built = { cron: 0, lazy: 0, rebuild: 0, total: 0 };
+  for (const b of briefs) {
+    if (b.builtBy === "cron" || b.builtBy === "lazy" || b.builtBy === "rebuild") built[b.builtBy]++;
+    built.total++;
+  }
+  const preDrafts = { made: 0, used: 0, discarded: 0, unused: 0 };
+  const nudges = { made: 0, opened: 0 };
+  for (const r of runs) {
+    if (!r.ok) continue;
+    const d = (r.outcomeDetail ?? {}) as Record<string, unknown>;
+    if (r.feature === "reply" && d[PREDRAFT_RUN_KEY] === true) {
+      preDrafts.made++;
+      if (r.outcome === "accepted" || r.outcome === "edited") preDrafts.used++;
+      else if (r.outcome === "discarded") preDrafts.discarded++;
+      else preDrafts.unused++;
+    } else if (r.feature === "brief" && String(r.contextRef || "").startsWith("quote:")) {
+      nudges.made++;
+      if (r.outcome === "accepted" && d[NUDGE_OPENED_KEY] === true) nudges.opened++;
+    }
+  }
+  return { built, preDrafts, nudges };
 }

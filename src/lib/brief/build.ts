@@ -53,6 +53,7 @@ import { BRIEF_ROWS_MAX, BRIEF_SYSTEM, buildBriefUserText } from "./prompt";
 import { selectQuietQuotes } from "./quiet";
 import { BriefSchema, sanitizeBrief } from "./sanitize";
 import { briefId, briefSlotAt, previousBriefSlot } from "./slots";
+import { briefOnFor } from "./reminders";
 import type { Brief, BriefBuiltBy, BriefOrganize, BriefPromiseTask, BriefSince, BriefSlot, BriefToday } from "./types";
 
 /** The lazy first view builds inline within this (spec §1). */
@@ -97,7 +98,7 @@ export type BuildBriefOpts = { builtBy: BriefBuiltBy; deadlineMs: number; deps?:
 
 /** Pilot + the Daily brief switch — the brief shows (rule-built when Assist itself is off or unset). */
 export function briefEnabledFor(userId: string, settings: AssistSettings): boolean {
-  return !!userId && settings.users.includes(userId) && !!settings.features.brief;
+  return briefOnFor(userId, settings);
 }
 
 /* ---------------- storage ---------------- */

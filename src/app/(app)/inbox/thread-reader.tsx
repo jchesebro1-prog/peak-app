@@ -732,6 +732,9 @@ export default function ThreadReader({
     if (!runId || sentStoredRef.current.has(runId)) return;
     const parked = parkedDraftRef.current;
     parkedDraftRef.current = null;
+    // A parked pre-draft from an OLDER run (the queue redrafted meanwhile) is
+    // replaced here: settle it as discarded rather than leave it pending.
+    if (parked && parked.runId !== runId) settleDraftRef({ current: parked }, "discarded", {});
     const d: AssistDraft = parked && parked.runId === runId ? parked : { runId, draft: storedReply.body, stored: true };
     assistDraftRef.current = d;
     setAssistDraft(d);
