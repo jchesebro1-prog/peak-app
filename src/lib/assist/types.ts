@@ -1,5 +1,7 @@
 /** Assist layer (#334, spec 2026-10-12-assist-layer-design.md) — shared types. */
-export type AssistFeature = "tasks" | "reply" | "estimate";
+/** `file` / `promise` (#335 Inbox organization): background Haiku passes —
+ *  filing suggestions and the court / promise reading. */
+export type AssistFeature = "tasks" | "reply" | "estimate" | "file" | "promise";
 export type AssistStep = "extract" | "draft";
 export type AssistEffort = "low" | "medium" | "high";
 export type AssistOutcome = "accepted" | "edited" | "discarded";

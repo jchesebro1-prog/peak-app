@@ -6,8 +6,11 @@ export type ReportRow = { key: string; runs: number; okRuns: number; accepted: n
 
 const blank = (key: string): ReportRow => ({ key, runs: 0, okRuns: 0, accepted: 0, edited: 0, discarded: 0, pending: 0, costUsd: 0 });
 
+/** #335 — the Inbox-organization passes read as what they do. */
+const FEATURE_LABEL: Partial<Record<AssistRun["feature"], string>> = { file: "file (filing)", promise: "promise (court + promises)" };
+
 export function featureKey(r: Pick<AssistRun, "feature" | "step">): string {
-  return r.feature === "estimate" ? `estimate (${r.step ?? "draft"})` : r.feature;
+  return r.feature === "estimate" ? `estimate (${r.step ?? "draft"})` : FEATURE_LABEL[r.feature] ?? r.feature;
 }
 
 export function assistReport(runs: AssistRun[], estimateOutcomes: Map<string, AssistOutcome>) {

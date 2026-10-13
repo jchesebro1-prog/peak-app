@@ -252,6 +252,30 @@ export async function listDocsByField<T extends Doc = Doc>(
   return out;
 }
 
+/**
+ * Live rows where ANY of the two-level JSON paths holds boolean true
+ * (`doc->a->>b = 'true'`), filtered in SQL — #335's `pendingAi` worklist.
+ * Path segments are code constants, passed as bound parameters. Ordered by
+ * the numeric top-level field `orderByNumericAsc` (oldest first), else id.
+ */
+export async function listDocsWithFlag<T extends Doc = Doc>(
+  coll: CollectionName,
+  paths: ReadonlyArray<readonly [string, string]>,
+  opts: { limit?: number; orderByNumericAsc?: string } = {}
+): Promise<T[]> {
+  if (!paths.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const any = sql.join(
+    paths.map(([a, b]) => sql`(${t.doc}->${a}->>${b}) = 'true'`),
+    sql` OR `
+  );
+  const order = opts.orderByNumericAsc ? asc(sql`(${t.doc}->>${opts.orderByNumericAsc})::numeric`) : asc(t.id);
+  const q = db.select().from(t).where(and(eq(t.deleted, false), sql`(${any})`)).orderBy(order, asc(t.id));
+  const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+}
+
 export async function getDoc<T extends Doc = Doc>(
   coll: CollectionName,
   id: string

@@ -28,6 +28,9 @@ export type Filing = {
   filedAt?: number;
   /** the AI step still has to look at this thread (resumes next sync) */
   pendingAi?: boolean;
+  /** failed AI attempts on this basis; the pass gives up (clears
+   *  `pendingAi`) at MAX_AI_ATTEMPTS. New mail starts over. */
+  aiAttempts?: number;
   /** id of the thread's newest message when this filing was computed — "new
    *  mail since" is a different newest message (a late-imported message can
    *  carry an older Gmail date, so `at` alone can't tell). */
@@ -46,6 +49,8 @@ export type Court = {
   at: number;
   promise?: Promise_;
   pendingAi?: boolean;
+  /** see `Filing.aiAttempts` */
+  aiAttempts?: number;
   /** id of the thread's newest message when this court was set (see
    *  `Filing.basis`). An override / AI court sticks until it changes. */
   basis?: string;

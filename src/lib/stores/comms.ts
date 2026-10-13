@@ -4,6 +4,7 @@ import {
   getDoc,
   insertWithPrefixedId,
   listDocs,
+  listDocsWithFlag,
   patchDoc,
   patchDocKey,
   searchDocs,
@@ -1782,6 +1783,21 @@ export async function setOrg(
     if (!res.ids.length) return null;
   }
   return getDoc<CommThread>("comms", threadId);
+}
+
+/** #335 — threads the AI pass still has to read (`filing.pendingAi` or
+ *  `court.pendingAi`), filtered in SQL, least recently updated first. The
+ *  caller drops deleted-folder / draft / shared threads and orders by the
+ *  newest message. */
+export async function pendingAiThreads(limit = 300): Promise<CommThread[]> {
+  return listDocsWithFlag<CommThread>(
+    "comms",
+    [
+      ["filing", "pendingAi"],
+      ["court", "pendingAi"],
+    ],
+    { limit, orderByNumericAsc: "updatedAt" }
+  );
 }
 
 export async function update(

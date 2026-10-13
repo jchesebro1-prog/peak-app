@@ -3,13 +3,13 @@ import { billedPrice, claudeCostUsd, costUsd, modelFor, requestOptionsFor, SLOT_
 import { anthropicRequestOptions, buildAnthropicParams, FALLBACK_BETA } from "@/lib/assist/anthropic";
 import { buildLocalBody } from "@/lib/assist/local";
 import { pickProvider } from "@/lib/assist/provider";
-import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured, assistStatusLine, cleanApiKey, effectiveAnthropicKey } from "@/lib/assist/config";
+import { ASSIST_FEATURES, assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured, assistStatusLine, cleanApiKey, effectiveAnthropicKey } from "@/lib/assist/config";
 import { ASSIST_SECRETS_BLOB, assistKeyInfo, clearAssistKey, getAssistEnv, readAssistKey, resetAssistKeyCache, saveAssistKey } from "@/lib/assist/key-store";
 import { blobs } from "@/db/schema";
 import { z } from "zod";
-import { runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
+import { RATE_LIMITS, runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
 import { editRatio, estimateKeep, estimateOutcomeFor, replyOutcome } from "@/lib/assist/outcome";
-import { assistReport, recentMonthKeys } from "@/lib/assist/report";
+import { assistReport, featureKey, recentMonthKeys } from "@/lib/assist/report";
 import { ZERO_USAGE, type AssistProvider, type ProviderRequest } from "@/lib/assist/types";
 import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
 import { cleanPromptField, promptMessages, threadBlock, UNTRUSTED_NOTE } from "@/lib/assist/features/thread-text";
@@ -55,6 +55,14 @@ export async function assistPureChecks(ok: Ok): Promise<void> {
   ok(s0.users.length === 0 && s0.capUsd === 200 && s0.features.tasks && s0.features.reply && s0.features.estimate, "assist settings: defaults (nobody, $200, all features on)");
   ok(assistSettingsOf({ assistMonthlyCapUsd: 99999 }).capUsd === 10000 && assistSettingsOf({ assistMonthlyCapUsd: -5 }).capUsd === 0, "assist settings: cap clamps 0..10000");
   ok(assistSettingsOf({ assistFeatures: { reply: false } }).features.reply === false, "assist settings: a feature toggled off");
+  /* #335 Inbox organization features */
+  ok(ASSIST_FEATURES.join(",") === "tasks,reply,estimate,file,promise" && s0.features.file && s0.features.promise, "assist settings: file + promise are features, on by default");
+  const fileOff = assistSettingsOf({ assistUsers: ["u1"], assistFeatures: { file: false } });
+  ok(!assistGate("file", "u1", fileOff, ENV_KEY).ok && assistGate("promise", "u1", fileOff, ENV_KEY).ok, "assist gate: file and promise switch separately");
+  ok(RATE_LIMITS.file === 600 && RATE_LIMITS.promise === 600, "assist run: file / promise rate limits 600/h (background passes)");
+  ok(modelFor("file", {}) === "claude-haiku-5-5" && modelFor("promise", {}) === "claude-haiku-5-5" && modelFor("file", { ASSIST_MODEL_FILE: "m-f" }) === "m-f" && modelFor("promise", { ASSIST_MODEL_PROMISE: "m-p" }) === "m-p", "assist models: file / promise on Haiku, env-overridable");
+  ok((["file", "promise"] as const).every((sl) => SLOT_SETTINGS[sl].effort === "low" && SLOT_SETTINGS[sl].maxTokens === 2000 && SLOT_SETTINGS[sl].timeoutMs === 30_000 && SLOT_SETTINGS[sl].maxRetries === 0 && !SLOT_SETTINGS[sl].stream), "assist budget: file / promise low effort, 2000 tokens, 30 s, no retries");
+  ok(featureKey({ feature: "file", step: null }) === "file (filing)" && featureKey({ feature: "promise", step: null }) === "promise (court + promises)" && featureKey({ feature: "tasks", step: null }) === "tasks", "assist report: file / promise feature keys");
   /* gate */
   const on = assistSettingsOf({ assistUsers: ["u1"] });
   ok(assistGate("tasks", "u1", on, ENV_KEY).ok, "assist gate: listed user + key = ok");

@@ -105,10 +105,10 @@ export type OrgContextInput = {
   now?: number;
 };
 
-const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false }, capUsd: 0 };
+const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false }, capUsd: 0 };
 
-/** Pure: the context from already-loaded rows. Own domains are Peak's own,
- *  the team's and the admin override's (additive — see ownDomainsFrom). */
+/** Pure: the context from already-loaded rows. Own domains are Peak's own
+ *  plus the admin override's, else plus the team's (see ownDomainsFrom). */
 export function buildOrgContext(input: OrgContextInput): OrgContext {
   const conns = (input.connections ?? []).map((c) => ({ address: lc(c.address), userId: c.userId || null }));
   const users: OrgUser[] = input.users.map((u) => {
@@ -167,18 +167,17 @@ export function invalidateOrgContext(): void {
   cached = null;
 }
 
-/** THE one place the pipeline asks "is this owner in the Assist pilot for
- *  `feature`?" (noise moved out of the inbox, `pendingAi` marks). Until the
- *  `file` / `promise` Assist features exist (Task 4) it reads the existing
- *  `tasks` gate: a pilot user, Assist configured and not switched off. */
+/** THE one place the organization code asks "is this owner in the Assist
+ *  pilot for `feature`?" (noise moved out of the inbox, `pendingAi` marks,
+ *  the AI pass): the Assist gate for `file` / `promise` — a pilot user,
+ *  Assist configured, not switched off, that feature on. */
 export function isOrgPilot(
   userId: string | null | undefined,
   feature: "file" | "promise",
   gate: Pick<OrgContext, "assist" | "env">
 ): boolean {
-  void feature;
   if (!userId) return false;
-  return assistGate("tasks", userId, gate.assist, gate.env).ok;
+  return assistGate(feature, userId, gate.assist, gate.env).ok;
 }
 
 /* ---- thread reading ---------------------------------------------------------- */
@@ -187,7 +186,7 @@ const FWD_MARKER = /^\s*(?:-{2,}\s*Forwarded(?: message)?\s*-{2,}|Begin forwarde
 const SUBJECT_PREFIXES = /^\s*(?:(?:fwd?|re|aw|sv)\s*:\s*)+/i;
 
 /** The thread's email messages, oldest first (stable). */
-function emailMessages(t: CommThread): CommMessage[] {
+export function emailMessages(t: CommThread): CommMessage[] {
   return (t.messages || [])
     .map((m, i) => ({ m, i }))
     .filter(({ m }) => !m.channel || m.channel === "email")
@@ -204,7 +203,7 @@ function subjectAt(t: CommThread, msgs: CommMessage[], i: number): string {
   return (FWD_MARKER.test(msgs[i].body || "") ? "Fwd: " : "Re: ") + base;
 }
 
-function senderOf(t: CommThread, m: CommMessage): string {
+export function senderOf(t: CommThread, m: CommMessage): string {
   return m.direction === "in" ? lc(m.fromEmail) || lc(t.contactEmail) : lc(m.fromEmail);
 }
 
@@ -215,15 +214,15 @@ function addressesIn(header: string | undefined): string[] {
     .filter((e) => e.includes("@") && !/\s/.test(e));
 }
 
-type Role = "owner" | "teammate" | "customer";
+export type Role = "owner" | "teammate" | "customer";
 
-function roleOf(t: CommThread, m: CommMessage, owner: OrgUser | null, ctx: OrgContext): Role {
+export function roleOf(t: CommThread, m: CommMessage, owner: OrgUser | null, ctx: OrgContext): Role {
   const from = senderOf(t, m);
   if (m.direction === "out" || (owner && owner.emails.includes(from))) return "owner";
   return from && ctx.isInternal(from) ? "teammate" : "customer";
 }
 
-function ownerOf(t: CommThread, ctx: OrgContext): OrgUser | null {
+export function ownerOf(t: CommThread, ctx: OrgContext): OrgUser | null {
   const byName = t.mailboxUser ? ctx.users.find((u) => sameName(u.name, t.mailboxUser)) : undefined;
   if (byName) return byName;
   const uid = t.gmailAccountKey ? userIdOfKey(t.gmailAccountKey) : null;
@@ -325,7 +324,9 @@ type FilingOutcome = {
   /** the AI step may still improve it */
   weakOrNone: boolean;
   /** rule noise on a thread whose only identity is a weak domain guess
-   *  (customer-domain bulk mail, an RFP notifier): tagged, never moved */
+   *  (customer-domain bulk mail, an RFP notifier): tagged, never moved by
+   *  the rules — the guess stays on the filing and the AI step (pilot)
+   *  decides between that customer and noise */
   tagOnly?: boolean;
 };
 
@@ -422,10 +423,20 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
     if (why) {
       if (knownContact === null) knownContact = !!(await contactByEmail(senderOf(t, inbound)).catch(() => null));
       if (!knownContact) {
+        // On a weak domain guess the noise is only a tag: the guessed
+        // customer stays on the filing and the AI step (pilot) decides
+        // between that customer and noise.
         return {
-          filing: { ...unresolved, noise: true, source: "noise-rule", strength: "strong", reason: weak ? `${why.reason} (${weak.reason})` : why.reason },
+          filing: {
+            ...unresolved,
+            customerId: weak?.customerId ?? null,
+            noise: true,
+            source: "noise-rule",
+            strength: "strong",
+            reason: weak ? `${why.reason} (${weak.reason})` : why.reason,
+          },
           quiet: false,
-          weakOrNone: false,
+          weakOrNone: !!weak,
           ...(weak ? { tagOnly: true } : {}),
         };
       }
@@ -624,8 +635,9 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
   if (movedNow && !archived) {
     await archive(threadId, { quiet: true });
     archived = true;
-  } else if (!movedNow && archived && t.noise?.flagged && t.noise.moved && !noise?.flagged) {
-    // the pipeline moved it as noise and it no longer is
+  } else if (!movedNow && archived && t.noise?.flagged && t.noise.moved && !noise?.moved) {
+    // the pipeline moved it as noise and it no longer is moved (not noise,
+    // or now only a tag)
     await unarchive(threadId, { quiet: true });
     archived = false;
     unarchived = true;

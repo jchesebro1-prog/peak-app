@@ -2,7 +2,7 @@
 import type { AssistFeature, AssistSettings, Env } from "./types";
 import { modelFor } from "./models";
 
-export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate"];
+export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate", "file", "promise"];
 export const DEFAULT_CAP_USD = 200;
 
 type StoredAssist = {
@@ -110,7 +110,7 @@ export function assistStatusLine(env: Env = process.env, keyInfo?: AssistKeyInfo
   if ((env.ASSIST_DISABLED || "").trim() === "true") return "Kill switch on (ASSIST_DISABLED=true) — Assist is off.";
   const c = assistConfigured(env);
   if (!c.ok) return keyInfo ? "Not configured — paste a Claude API key below, or set ANTHROPIC_API_KEY." : "Not configured — set ANTHROPIC_API_KEY.";
-  const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)}`;
+  const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)} · file ${modelFor("file", env)} · promise ${modelFor("promise", env)}`;
   if (c.provider === "local") {
     const hasKey = !!(env.ANTHROPIC_API_KEY || "").trim();
     const fb = hasKey ? `, Claude Haiku fallback${keyInfo ? ` (key ${keySourceNote(keyInfo)})` : ""}` : ", no fallback";

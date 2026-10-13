@@ -809,7 +809,16 @@ async function syncMailbox(
   } catch (err) {
     console.error("[gmail] dormant label reconcile failed for", key, err);
   }
-  return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged };
+  // #335 — the time-boxed AI pass (≈20 s) over this mailbox owner's
+  // pendingAi threads, after the import committed; never fails the sync.
+  let aiChanged = false;
+  try {
+    const owner = userIdOfKey(key);
+    if (owner) aiChanged = (await (await import("@/lib/inbox-org/ai-pass")).runAiPass({ onlyUserId: owner })).changed;
+  } catch (err) {
+    console.error("[inbox-org] AI pass failed for", key, err);
+  }
+  return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged || aiChanged };
 }
 
 /** Read the persisted Gmail history cursor for a mailbox. */

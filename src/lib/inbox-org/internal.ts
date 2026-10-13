@@ -3,7 +3,7 @@
  * belongs to a Peak user (team list, users' emails, connected Gmail
  * addresses — the caller passes them all as `teamEmails`) or is on Peak's own
  * domain. The own domain is derived from the team's addresses, or replaced by
- * an optional admin override. Public mail providers are never an own domain:
+ * an optional admin override (Peak's own domain stays either way). Public mail providers are never an own domain:
  * a teammate's connected personal Gmail would otherwise make every Gmail
  * address internal. Pure.
  */
@@ -29,11 +29,12 @@ function domainOf(email: string): string {
 
 const DOMAIN_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
 
-/** The own domains, additive: Peak's own (`PEAK_OWN_DOMAIN`, always — so the
- *  pipeline and the inbox identity picker agree), every non-freemail domain
- *  on the team's addresses, and the admin override's (comma/space separated,
- *  `@` and case tolerant). Freemail is never an own domain. Deduped, in that
- *  order. */
+/** The own domains: Peak's own (`PEAK_OWN_DOMAIN`, always — so the pipeline
+ *  and the inbox identity picker agree), then EITHER the admin override's
+ *  domains (comma/space separated, `@` and case tolerant) when the override
+ *  names at least one valid domain — they replace the team-derived ones — OR
+ *  every non-freemail domain on the team's addresses. Freemail is never an
+ *  own domain. Deduped, in that order. */
 export function ownDomainsFrom(teamEmails: string[], override?: string | null): string[] {
   const pick = (list: string[]) => {
     const out: string[] = [];
@@ -43,8 +44,8 @@ export function ownDomainsFrom(teamEmails: string[], override?: string | null): 
     }
     return out;
   };
-  const tokens = lc(override).split(/[\s,;]+/).filter(Boolean);
-  return pick([PEAK_OWN_DOMAIN, ...teamEmails.map(domainOf), ...tokens]);
+  const overridden = pick(lc(override).split(/[\s,;]+/).filter(Boolean));
+  return pick([PEAK_OWN_DOMAIN, ...(overridden.length ? overridden : teamEmails.map(domainOf))]);
 }
 
 /** `(email) => internal?` — a team address, or an address on (or under) an

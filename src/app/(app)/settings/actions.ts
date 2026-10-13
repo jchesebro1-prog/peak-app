@@ -755,7 +755,7 @@ export async function setRecordingsBetaUsersAction(userIds: string[]) {
  *  switches and the monthly spend cap. Each field is optional; omitted = untouched. */
 export async function setAssistSettingsAction(patch: {
   users?: string[];
-  features?: Partial<Record<"tasks" | "reply" | "estimate", boolean>>;
+  features?: Partial<Record<"tasks" | "reply" | "estimate" | "file" | "promise", boolean>>;
   capUsd?: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requirePerm("manage_users");
@@ -770,6 +770,8 @@ export async function setAssistSettingsAction(patch: {
       tasks: typeof patch.features.tasks === "boolean" ? patch.features.tasks : cur.tasks,
       reply: typeof patch.features.reply === "boolean" ? patch.features.reply : cur.reply,
       estimate: typeof patch.features.estimate === "boolean" ? patch.features.estimate : cur.estimate,
+      file: typeof patch.features.file === "boolean" ? patch.features.file : cur.file,
+      promise: typeof patch.features.promise === "boolean" ? patch.features.promise : cur.promise,
     };
   }
   if (patch.capUsd !== undefined) {

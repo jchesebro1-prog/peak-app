@@ -33,7 +33,15 @@ import {
 } from "@/lib/stores/inbox-org";
 import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
-import { createFixture, fixtureId } from "./test-fixtures";
+import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
+import { buildFilingUserText, candidateLine, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
+import { aiCourtOverride, applyPromises, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
+import { MAX_AI_ATTEMPTS, runAiPass } from "@/lib/inbox-org/ai-pass";
+import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
+import { listDocsByField } from "@/db/doc-store";
+import type { TaskRecord } from "@/lib/stores/tasks";
+import { listRunsByMonth } from "@/lib/stores/assist-runs";
+import { monthKeyChicago } from "@/lib/assist/config";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -256,7 +264,14 @@ function internalChecks(ok: Ok): void {
   ok(isInt("ops@mail.peaksystemsgroup.com"), "internal: a subdomain of the own domain");
 
   const ov = ownDomainsFrom(team, " @peak-av.com, PeakSystems.co ");
-  ok(ov.join(",") === "peaksystemsgroup.com,peak-av.com,peaksystems.co", "internal: the admin override adds to Peak's own + the derived domains (list, @ and case tolerant)");
+  ok(ov.join(",") === "peaksystemsgroup.com,peak-av.com,peaksystems.co", "internal: the admin override's domains follow Peak's own (list, @ and case tolerant)");
+  const mixedTeam = ["jeff@peaksystemsgroup.com", "ann@peak-old.com"];
+  ok(ownDomainsFrom(mixedTeam).join(",") === "peaksystemsgroup.com,peak-old.com", "internal: with no override, Peak's own + every derived team domain");
+  const repl = ownDomainsFrom(mixedTeam, "peak-av.com");
+  ok(repl.join(",") === "peaksystemsgroup.com,peak-av.com", "internal: an override REPLACES the team-derived domains (Peak's own stays)");
+  const isRepl = makeInternalChecker(mixedTeam, repl);
+  ok(!isRepl("bob@peak-old.com") && isRepl("ann@peak-old.com") && isRepl("x@peak-av.com"), "internal: with an override, a derived-only domain is external (team addresses stay internal)");
+  ok(ownDomainsFrom(mixedTeam, "gmail.com, not a domain").join(",") === "peaksystemsgroup.com,peak-old.com", "internal: an override with no valid domain falls back to the derived ones");
   const isOv = makeInternalChecker(team, ov);
   ok(isOv("bob@peak-av.com") && isOv("ann@peaksystems.co"), "internal: override domains are internal");
   ok(isOv("someone.new@peaksystemsgroup.com") && isOv("mike@peaksystemsgroup.com"), "internal: with an override, Peak's own domain stays internal");
@@ -610,7 +625,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const ctx = buildOrgContext({ users });
-  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true }, capUsd: 200 };
+  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true }, capUsd: 200 };
   const pilot = buildOrgContext({ users, assist: pilotAssist, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
 
   /* context + pilot gate (pure) */
@@ -623,6 +638,8 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
   ok(over.isInternal("ops@peaksystemsgroup.com") === INBOX_IDENTITY_INTERNAL("ops@peaksystemsgroup.com") && INBOX_IDENTITY_INTERNAL_DOMAIN === "peaksystemsgroup.com", "org pipeline ctx: the pipeline and inbox-identity agree on Peak's own domain");
   ok(!isOrgPilot(MIKE_ID, "file", ctx) && isOrgPilot(MIKE_ID, "file", pilot) && isOrgPilot(MIKE_ID, "promise", pilot) && !isOrgPilot(DANA_ID, "file", pilot) && !isOrgPilot(null, "file", pilot), "org pipeline: isOrgPilot — pilot user + Assist configured only");
   ok(!isOrgPilot(MIKE_ID, "file", { assist: pilotAssist, env: {} }), "org pipeline: isOrgPilot — no key → not pilot");
+  const fileOff = { assist: { ...pilotAssist, features: { ...pilotAssist.features, file: false } }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } };
+  ok(!isOrgPilot(MIKE_ID, "file", fileOff) && isOrgPilot(MIKE_ID, "promise", fileOff), "org pipeline: isOrgPilot reads the real file / promise switches (file off, promise on)");
   ok(COURT_STATUS.me === "waiting_us" && COURT_STATUS.customer === "waiting_them" && COURT_STATUS.teammate === "waiting_them" && COURT_STATUS.nobody === "closed", "org pipeline: court → status mapping");
 
   /* fixtures */
@@ -737,6 +754,22 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const tWeak = await read(weakNoise);
     ok(tWeak.noise?.flagged === true && tWeak.noise.moved === false && tWeak.archived === false && tWeak.filing?.noise === true, "org pipeline: rule noise on a weak-domain thread is tag-only, even for a pilot owner");
     ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
+    ok(tWeak.filing?.customerId === CUST && tWeak.filing.pendingAi === true, "org pipeline: tag-only weak-domain noise keeps the guessed customer and is pendingAi for a pilot owner (the AI decides)");
+    const weakNoisePlain = await mk("noise-weak-domain-plain", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "rfp-notify@district.test", messages: [msg({ fromEmail: "rfp-notify@district.test", bulk: true })] });
+    await organizeThread(weakNoisePlain, { ctx });
+    ok((await read(weakNoisePlain)).filing?.customerId === CUST && !(await read(weakNoisePlain)).filing?.pendingAi, "org pipeline: a non-pilot owner's tag-only noise keeps the guess, no pendingAi");
+    /* (a) moved noise that becomes tag-only comes back to the inbox */
+    const movedThenTag = await mk("noise-moved-then-tag", promo());
+    await organizeThread(movedThenTag, { ctx: pilot });
+    ok((await read(movedThenTag)).noise?.moved === true && (await read(movedThenTag)).archived === true, "org pipeline: (setup) pilot noise moved + archived");
+    await patchDoc<CommThread>("comms", movedThenTag, (d) => {
+      d.resolution = "suggested";
+      d.suggestedCustomerId = CUST;
+    });
+    const rMtt = await organizeThread(movedThenTag, { ctx: pilot });
+    const tMtt = await read(movedThenTag);
+    ok(tMtt.noise?.flagged === true && tMtt.noise.moved === false && tMtt.archived === false && !rMtt.skipped && rMtt.unarchived === true, "org pipeline: moved noise that is now only a tag (a weak domain guess appeared, no new mail) is un-archived");
+    ok(tMtt.filing?.pendingAi === true && tMtt.filing.customerId === CUST, "org pipeline: …and the AI step gets to decide it");
     const mixed = await mk("noise-internal-sender", {
       messages: [msg({ fromEmail: "pat@school.test" }), msg({ fromEmail: "noreply@peaksystemsgroup.com", author: "Peak App", bulk: true, autoSubmitted: true, gmailLabelIds: ["CATEGORY_FORUMS"] })],
     });
@@ -930,6 +963,291 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
   }
 }
 
+/* ---------- Task 4: Haiku filing + court/promise reading, the time-boxed AI pass ---------- */
+
+/** A fake provider that answers the filing and the court prompts separately. */
+function routedProvider(answers: { file?: string; promise?: string }, opts: { calls?: ProviderRequest[]; onCall?: () => void } = {}): AssistProvider {
+  return {
+    name: "fake",
+    async complete(req) {
+      opts.calls?.push(req);
+      opts.onCall?.();
+      const text = req.system === FILING_SYSTEM ? answers.file : answers.promise;
+      if (text === undefined) return { ok: false, error: "no answer", model: req.model, usage: null, stopReason: null };
+      return { ok: true, text, model: req.model, usage: { inputTokens: 500, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }, stopReason: "end_turn" };
+    },
+  };
+}
+
+function aiPureChecks(ok: Ok): void {
+  const CUST = "co-match";
+  const cands: FilingCandidate[] = [
+    { id: CUST, type: "customer", label: "Lincoln HS", customerId: CUST, customerName: "Lincoln HS" },
+    { id: "Q-1", type: "quote", label: "EST-1042 Main | curtain", customerId: CUST, customerName: "Lincoln HS" },
+    { id: "co-other", type: "customer", label: "Lincoln Theatre", customerId: "co-other", customerName: "Lincoln Theatre" },
+  ];
+  ok(candidateLine(cands[1]) === "Q-1 | quote | EST-1042 Main / curtain | Lincoln HS", "ai filing: a candidate line is id | type | label | customer (no stray separator)");
+  const strong = sanitizeFiling({ target: "Q-1", confidence: "strong", reason: " Asks about\nthe curtain ", needsReply: true }, cands, CUST);
+  ok(strong.kind === "record" && strong.candidate.id === "Q-1" && strong.strength === "strong" && strong.reason === "Asks about the curtain" && strong.needsReply, "ai filing: a strong pick inside the candidates on the matched customer stays strong");
+  ok(sanitizeFiling({ target: CUST, confidence: "strong", reason: "", needsReply: false }, cands, CUST).kind === "record", "ai filing: the matched customer itself is a valid target");
+  const off = sanitizeFiling({ target: "co-other", confidence: "strong", reason: "x", needsReply: false }, cands, CUST);
+  ok(off.kind === "record" && off.strength === "weak", "ai filing: strong is downgraded to weak when the target isn't the matched customer's");
+  const noMatch = sanitizeFiling({ target: "Q-1", confidence: "strong", reason: "x", needsReply: false }, cands, null);
+  ok(noMatch.kind === "record" && noMatch.strength === "weak", "ai filing: no matched customer → never strong");
+  const out = sanitizeFiling({ target: "Q-999", confidence: "strong", reason: "made up", needsReply: true }, cands, CUST);
+  ok(out.kind === "none" && out.dropped === true, "ai filing: an id outside the candidate list is dropped (→ none)");
+  ok(sanitizeFiling({ target: "NOISE", confidence: "strong", reason: "promo", needsReply: true }, cands, CUST).kind === "noise" && sanitizeFiling({ target: "none", confidence: "weak", reason: "", needsReply: false }, cands, CUST).kind === "none", "ai filing: noise / none words accepted");
+  const prev = { customerId: CUST, work: null, noise: false, source: "identity" as const, reason: "domain", strength: "weak" as const, needsReply: true, state: "suggested" as const, at: 1, pendingAi: true, aiAttempts: 1, basis: "m1" };
+  const rec = filingFromPick(strong, prev, { now: 5, runId: "AR-1", courtOwnerIsMe: true, prevNoise: { flagged: true, reason: "bulk", moved: false } });
+  ok(rec.filing.source === "ai" && rec.filing.work?.id === "Q-1" && rec.filing.customerId === CUST && rec.filing.runId === "AR-1" && rec.filing.needsReply && !rec.filing.pendingAi && rec.filing.aiAttempts === undefined && rec.filing.basis === "m1" && rec.noise === null, "ai filing: a record pick → ai filing (work + customer + runId), pending cleared, the rules' noise tag dropped");
+  const nz = filingFromPick({ kind: "noise", strength: "weak", reason: "promo", needsReply: false }, prev, { now: 5, runId: "AR-2", courtOwnerIsMe: true, prevNoise: null });
+  ok(nz.filing.noise && nz.noise?.flagged === true && nz.noise.moved === false, "ai filing: weak AI noise is a tag, not moved");
+  const none = filingFromPick({ kind: "none", reason: "", needsReply: false }, prev, { now: 5, runId: "AR-3", courtOwnerIsMe: true, prevNoise: null });
+  ok(none.filing.source === "identity" && none.filing.customerId === CUST && !none.filing.pendingAi && none.noise === undefined, "ai filing: none keeps the rule filing, clears pending");
+  const ut = buildFilingUserText({ thread: "<email_thread></email_thread>", today: "2026-10-13", weekday: "Tuesday", candidates: [], matchedCustomerName: "" });
+  ok(ut.includes("- (none)") && ut.includes("No customer matched"), "ai filing: an empty candidate list is said plainly");
+
+  const teamIds = new Set(["u-ari", "u-dana"]);
+  const c1 = sanitizeCourt({ owner: "teammate", teammateId: "u-ari", reason: "Dana handed it to Ari", promises: [] }, { teamIds, ownerId: "u-ari" });
+  ok(c1.owner === "me" && c1.teammateId === "", "ai court: a hand-off to the thread owner (named as a teammate) reads as me");
+  const c2 = sanitizeCourt({ owner: "teammate", teammateId: "u-ghost", reason: "x", promises: [{ text: "Call Pat", ownerUserId: "u-ghost", dueText: "" }] }, { teamIds, ownerId: "u-ari" });
+  ok(c2.owner === "teammate" && c2.teammateId === "" && c2.promises[0].ownerUserId === "", "ai court: an unknown teammate / promise owner id is dropped");
+  ok(!aiCourtOverride({ owner: "customer" }, c2), "ai court: a teammate with no real id never overrides the rules");
+  ok(aiCourtOverride({ owner: "customer" }, c1) && !aiCourtOverride({ owner: "me" }, c1), "ai court: 'me' overrides a non-me rule court only");
+  ok(!aiCourtOverride({ owner: "me" }, { owner: "customer", teammateId: "", reason: "", promises: [] }) && !aiCourtOverride({ owner: "customer" }, { owner: "nobody", teammateId: "", reason: "", promises: [] }), "ai court: customer / nobody readings never override");
+  ok(aiCourtOverride({ owner: "customer" }, { owner: "teammate", teammateId: "u-dana", reason: "", promises: [] }), "ai court: a named real teammate overrides");
+  const many = sanitizeCourt(
+    {
+      owner: "me",
+      teammateId: "",
+      reason: "r",
+      promises: [1, 2, 3, 4, 5].map((i) => ({ text: `  promise\n${i} `, ownerUserId: "u-dana", dueText: " Friday " })),
+    },
+    { teamIds, ownerId: "u-ari" }
+  );
+  ok(many.promises.length === 3 && many.promises[0].text === "promise 1" && many.promises[0].dueText === "Friday" && many.promises[0].ownerUserId === "u-dana", "ai court: at most 3 promises, text/due trimmed, real owner ids kept");
+  ok(sanitizeCourt({ owner: "me", teammateId: "", reason: "", promises: [{ text: "   ", ownerUserId: "", dueText: "" }] }, { teamIds, ownerId: "u-ari" }).promises.length === 0, "ai court: an empty promise is dropped");
+}
+
+export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
+  aiPureChecks(ok);
+  const ARI = "TEST335 Ari";
+  const ARI_ID = "TEST335-u-ari";
+  const DANA_ID = "TEST335-u-dana";
+  const users = [
+    { id: ARI_ID, name: ARI, email: "ari@peaksystemsgroup.com", googleEmail: null },
+    { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
+  ];
+  const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true };
+  const pilot = buildOrgContext({ users, assist: { users: [ARI_ID], features: allOn, capUsd: 200 }, env });
+  const offCtx = buildOrgContext({ users, assist: { users: [], features: allOn, capUsd: 200 }, env });
+  const T0 = Date.UTC(2026, 9, 12, 15, 0); // Mon 12 Oct 2026, 10:00 Chicago
+  const NOW = T0 + 3_600_000;
+  let n = 0;
+  const msg = (o: Partial<CommMessage>): CommMessage =>
+    ({ id: `ai${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Hello there, can you help?", fromEmail: "pat@ai-school.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread>): Promise<string> => {
+    const id = fixtureId(335, "ai-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ARI, unread: true, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@ai-school.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg({})], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const CUST = fixtureId(335, "ai-cust");
+  const QUOTE = fixtureId(335, "ai-quote");
+  await createFixture("quotes", { id: QUOTE, name: "Stage curtain", customer: "AI School", customerId: CUST, quoteType: "system", status: "sent", updatedAt: T0 });
+  const run = (provider: AssistProvider, o: { budgetMs?: number; ctx?: typeof pilot; clock?: () => number } = {}) =>
+    runAiPass({ onlyUserId: ARI_ID, budgetMs: o.budgetMs }, { ctx: o.ctx ?? pilot, run: { provider }, now: NOW, clock: o.clock });
+  const tasksOn = async (threadId: string) => {
+    const rows = await listDocsByField<TaskRecord>("tasks", "threadId", [threadId]);
+    rows.forEach((t) => registerFixture("tasks", t.id));
+    return rows;
+  };
+  const fileAns = (target: string, confidence = "strong", needsReply = true) => JSON.stringify({ target, confidence, reason: "Asks about the stage curtain", needsReply });
+  const courtAns = (o: { owner: string; teammateId?: string; promises?: Array<{ text: string; ownerUserId: string; dueText: string }> }) =>
+    JSON.stringify({ owner: o.owner, teammateId: o.teammateId ?? "", reason: "read by the fake", promises: o.promises ?? [] });
+  const team = users.map((u) => ({ id: u.id, name: u.name }));
+
+  /* 1. a strong pick inside the candidates */
+  const pick = await mk("pick", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(pick, { ctx: pilot, backlog: true });
+  ok((await read(pick)).filing?.pendingAi === true && !(await read(pick)).court?.pendingAi, "ai pass: (setup) a weak domain guess is pendingAi; backlog → no court reading");
+  const calls1: ProviderRequest[] = [];
+  const r1 = await run(routedProvider({ file: fileAns(QUOTE) }, { calls: calls1 }));
+  const t1 = await read(pick);
+  ok(r1.calls === 1 && calls1.length === 1 && calls1[0].model === "claude-haiku-5-5" && calls1[0].maxTokens === 2000 && calls1[0].effort === "low" && calls1[0].maxRetries === 0, "ai pass: one Haiku call (low effort, 2000 max tokens, no retries) for the filing");
+  ok(calls1[0].user.includes(`${QUOTE} | quote | `) && calls1[0].user.includes(`${CUST} | customer | `) && calls1[0].user.includes("<email_thread"), "ai pass: the prompt carries the candidate list and the wrapped thread");
+  ok(t1.filing?.source === "ai" && t1.filing.work?.id === QUOTE && t1.filing.customerId === CUST && t1.filing.strength === "strong" && !t1.filing.pendingAi && !!t1.filing.runId && t1.filing.state === "suggested", "ai pass: a strong pick inside the candidates is stored as a strong AI suggestion, pending cleared");
+  ok(r1.filed === 1 && r1.changed, "ai pass: the result counts the filing");
+  ok((await run(routedProvider({ file: fileAns(QUOTE) }))).calls === 0, "ai pass: a re-run finds nothing pending (no second call)");
+  await organizeThread(pick, { ctx: pilot });
+  ok((await read(pick)).filing?.source === "ai", "ai pass: re-organizing with no new mail keeps the AI filing");
+
+  /* 2. an out-of-list id is dropped */
+  const bogus = await mk("bogus", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(bogus, { ctx: pilot, backlog: true });
+  await run(routedProvider({ file: fileAns("Q-NOT-A-CANDIDATE") }));
+  const tB = await read(bogus);
+  ok(tB.filing?.source === "identity" && tB.filing.customerId === CUST && tB.filing.strength === "weak" && !tB.filing.pendingAi, "ai pass: an out-of-list id is dropped — the rule suggestion stays, pending cleared");
+
+  /* 3. "noise" moves the thread for a pilot owner */
+  const nz = await mk("noise", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "news@ai-school.test", messages: [msg({ fromEmail: "news@ai-school.test", body: "Our October newsletter" })] });
+  await organizeThread(nz, { ctx: pilot, backlog: true });
+  await run(routedProvider({ file: fileAns("noise") }));
+  const tN = await read(nz);
+  ok(tN.filing?.noise === true && tN.filing.source === "ai" && tN.noise?.flagged === true && tN.noise.moved === true && tN.archived === true, "ai pass: strong AI noise moves a pilot owner's thread (flagged, moved, archived)");
+  ok((await threadsIn("personal", "noise", ARI)).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
+
+  /* 3b. tag-only rule noise on a weak guess: the AI says it's the customer's */
+  const tagged = await mk("tagged", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "rfp@ai-school.test", messages: [msg({ fromEmail: "rfp@ai-school.test", bulk: true, body: "New RFP posted" })] });
+  await organizeThread(tagged, { ctx: pilot, backlog: true });
+  ok((await read(tagged)).noise?.flagged === true && (await read(tagged)).filing?.pendingAi === true, "ai pass: (setup) tag-only noise on a weak guess is pending");
+  await run(routedProvider({ file: fileAns(CUST, "weak", false) }));
+  const tT = await read(tagged);
+  ok(tT.filing?.noise === false && tT.filing.customerId === CUST && tT.filing.source === "ai" && !tT.noise && !tT.archived, "ai pass: the AI picking the customer clears the rules' noise tag");
+
+  /* 4. gated-off owner → no call, pending cleared */
+  const gated = await mk("gated", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(gated, { ctx: pilot });
+  ok((await read(gated)).filing?.pendingAi === true && (await read(gated)).court?.pendingAi === true, "ai pass: (setup) live mail → filing and court both pending");
+  const callsG: ProviderRequest[] = [];
+  const rG = await run(routedProvider({ file: fileAns(QUOTE), promise: courtAns({ owner: "me" }) }, { calls: callsG }), { ctx: offCtx });
+  ok(callsG.length === 0 && rG.cleared === 2 && !(await read(gated)).filing?.pendingAi && !(await read(gated)).court?.pendingAi, "ai pass: an owner the gate refuses gets pendingAi cleared without a call");
+
+  /* 5. court: a teammate hands the thread to me (named) → me, with a promise-task */
+  const handoff = await mk("handoff", {
+    customerId: CUST,
+    customer: "AI School",
+    resolution: "linked",
+    resolvedContactId: "ct-ai",
+    messages: [
+      msg({ body: "Can we get pricing on the stage curtain?" }),
+      msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "pat@ai-school.test", cc: "ari@peaksystemsgroup.com", body: "Hi Pat, Ari will send you pricing by Friday." }),
+    ],
+  });
+  await organizeThread(handoff, { ctx: pilot });
+  const h0 = await read(handoff);
+  ok(h0.court?.owner === "customer" && h0.court.pendingAi === true && !h0.filing?.pendingAi && h0.status === "waiting_them", "ai pass: (setup) a teammate's last message → rule court customer, court pending");
+  const lastH = h0.messages[h0.messages.length - 1];
+  const callsH: ProviderRequest[] = [];
+  const rH = await run(
+    routedProvider(
+      { promise: courtAns({ owner: "teammate", teammateId: ARI_ID, promises: [{ text: "Send Pat pricing on the stage curtain", ownerUserId: ARI_ID, dueText: "by Friday" }] }) },
+      { calls: callsH }
+    )
+  );
+  const h1 = await read(handoff);
+  ok(callsH.length === 1 && callsH[0].user.includes(`Thread owner ("me"): ${ARI_ID}`) && callsH[0].user.includes(`Peak teammate ${DANA_ID}`) && callsH[0].user.includes(`${DANA_ID} — TEST335 Dana`), "ai pass: the court prompt names the owner, the team, and who wrote each message");
+  ok(h1.court?.owner === "me" && h1.court.source === "ai" && !h1.court.pendingAi && h1.court.basis === lastH.id && h1.status === "waiting_us" && rH.courts === 1, "ai pass: a hand-off to a named teammate who is me → court me (AI), status waiting_us");
+  const hTasks = await tasksOn(handoff);
+  const due = resolveDue("by Friday", lastH.at);
+  ok(
+    hTasks.length === 1 &&
+      hTasks[0].id === promiseTaskId(handoff, lastH.id, "Send Pat pricing on the stage curtain") &&
+      hTasks[0].assigneeUserId === ARI_ID &&
+      hTasks[0].dueAt === due &&
+      hTasks[0].section === "Email" &&
+      hTasks[0].customerId === CUST &&
+      hTasks[0].notes.startsWith("From email: "),
+    "ai pass: the promise becomes one Email task for the named owner, due Friday 5 pm, linked to the thread's customer"
+  );
+  ok(h1.court?.promise?.taskId === hTasks[0]?.id && h1.court.promise.due === due && h1.court.promise.messageId === lastH.id && rH.tasks === 1, "ai pass: court.promise records the task");
+  ok(dayKey(due) === "2026-10-16" && chicagoParts(due).hour === 17, "ai pass: 'by Friday' from a Monday message is Fri 16 Oct, 5 pm Chicago");
+  /* idempotent: the same promise again makes no second task */
+  const again = await applyPromises(h1, lastH, [{ text: "send pat pricing on the stage   curtain", ownerUserId: ARI_ID, dueText: "Friday" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team });
+  ok(again.length === 1 && again[0].taskId === hTasks[0]?.id && (await tasksOn(handoff)).length === 1, "ai pass: a promise-task is created once (a re-run is idempotent)");
+  /* backlog / old mail → no task */
+  ok((await applyPromises(h1, lastH, [{ text: "Another thing", ownerUserId: "", dueText: "" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team, backlog: true })).length === 0, "ai pass: backlog → no promise-task");
+  ok(
+    (await applyPromises(h1, lastH, [{ text: "Another thing", ownerUserId: "", dueText: "" }], lastH.at + PROMISE_MAX_AGE_MS + 1, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team })).length === 0 &&
+      (await tasksOn(handoff)).length === 1,
+    "ai pass: mail older than a week → no promise-task"
+  );
+
+  /* 6. "someone will be in touch" → a promise owned by the internal author */
+  const vague = await mk("vague", {
+    messages: [msg({ body: "Is anyone looking at this?" }), msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "pat@ai-school.test", body: "Someone from our team will be in touch next week." })],
+  });
+  await organizeThread(vague, { ctx: pilot });
+  await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "customer", promises: [{ text: "Get in touch with Pat", ownerUserId: "", dueText: "next week" }] }) }));
+  const v1 = await read(vague);
+  const vLast = v1.messages[v1.messages.length - 1];
+  const vTasks = await tasksOn(vague);
+  ok(vTasks.length === 1 && vTasks[0].assigneeUserId === DANA_ID && vTasks[0].dueAt === resolveDue("next week", vLast.at), "ai pass: 'someone will be in touch' → a task owned by the internal author (Dana), due next Monday");
+  ok(v1.court?.source === "rule" && v1.court.owner === "customer" && !v1.court.pendingAi && v1.court.promise?.ownerUserId === DANA_ID, "ai pass: a 'customer' reading never overrides the rules; the promise is still recorded");
+
+  /* 7. an unknown name is dropped */
+  const ghost = await mk("ghost", {
+    messages: [msg({ body: "Who handles rigging?" }), msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "pat@ai-school.test", body: "Bob will call you." })],
+  });
+  await organizeThread(ghost, { ctx: pilot });
+  await run(
+    routedProvider({
+      file: fileAns("none", "weak", false),
+      promise: courtAns({ owner: "teammate", teammateId: "u-bob-not-real", promises: [{ text: "Call Pat about rigging", ownerUserId: "u-bob-not-real", dueText: "" }] }),
+    })
+  );
+  const g1 = await read(ghost);
+  const gLast = g1.messages[g1.messages.length - 1];
+  const gTasks = await tasksOn(ghost);
+  ok(g1.court?.source === "rule" && g1.court.owner === "customer" && g1.court.teammateId === DANA_ID && !g1.court.pendingAi, "ai pass: an unknown teammate id is dropped — the rule court stands");
+  ok(gTasks.length === 1 && gTasks[0].assigneeUserId === DANA_ID && gTasks[0].dueAt === resolveDue("", gLast.at), "ai pass: an unknown promise owner falls back to the internal author; no due words → 2 business days");
+
+  /* 8. a customer's own message makes no promise-tasks */
+  const custMsg = await mk("customer-promise", { messages: [msg({ body: "We will send the PO Friday." })] });
+  await organizeThread(custMsg, { ctx: pilot });
+  await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "me", promises: [{ text: "Send the PO", ownerUserId: "", dueText: "Friday" }] }) }));
+  ok((await tasksOn(custMsg)).length === 0 && !(await read(custMsg)).court?.pendingAi, "ai pass: promises in a customer's message never become tasks");
+
+  /* 9. backlog threads never get a court reading */
+  const bl = await mk("backlog-court", { messages: [msg({ body: "Can you call?" }), msg({ fromEmail: "dana@peaksystemsgroup.com", to: "pat@ai-school.test", body: "I'll call you Friday." })] });
+  await organizeThread(bl, { ctx: pilot, backlog: true });
+  const callsBl: ProviderRequest[] = [];
+  await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "me", promises: [{ text: "Call Pat", ownerUserId: DANA_ID, dueText: "Friday" }] }) }, { calls: callsBl }));
+  ok(!callsBl.some((c) => c.system !== FILING_SYSTEM) && (await tasksOn(bl)).length === 0, "ai pass: backlog → no court call, no task");
+
+  /* 10. errors: attempts counted, gives up at MAX_AI_ATTEMPTS */
+  const flaky = await mk("flaky", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(flaky, { ctx: pilot, backlog: true });
+  await run(routedProvider({ file: "not json" }));
+  ok((await read(flaky)).filing?.pendingAi === true && (await read(flaky)).filing?.aiAttempts === 1, "ai pass: an unreadable answer stays pending with one attempt counted");
+  for (let i = 1; i < MAX_AI_ATTEMPTS; i++) await run(routedProvider({ file: "not json" }));
+  const tF = await read(flaky);
+  ok(!tF.filing?.pendingAi && tF.filing?.aiAttempts === MAX_AI_ATTEMPTS && tF.filing?.source === "identity", "ai pass: after MAX_AI_ATTEMPTS failures it gives up, the rule suggestion stays");
+
+  /* 11. the budget stops the pass; oldest first; the rest resumes next pass */
+  const b: string[] = [];
+  for (const slug of ["budget-c", "budget-a", "budget-b"]) b.push(await mk(slug, { resolution: "suggested", suggestedCustomerId: CUST }));
+  // make "budget-a" the thread with the oldest newest-message
+  await patchDoc<CommThread>("comms", b[1], (d) => {
+    d.messages = d.messages.map((m) => ({ ...m, at: T0 - 86_400_000 }));
+  });
+  for (const id of b) await organizeThread(id, { ctx: pilot, backlog: true });
+  let fake = 0;
+  const callsB: ProviderRequest[] = [];
+  const rB = await run(routedProvider({ file: fileAns(QUOTE) }, { calls: callsB, onCall: () => (fake += 25_000) }), { budgetMs: 20_000, clock: () => fake });
+  ok(rB.stoppedByBudget && callsB.length === 1 && rB.looked === 1, "ai pass: the budget stops the pass (no new call once ~20 s have passed)");
+  ok((await read(b[1])).filing?.source === "ai" && (await read(b[0])).filing?.pendingAi === true && (await read(b[2])).filing?.pendingAi === true, "ai pass: the oldest thread went first; the rest stay pending");
+  const rB2 = await run(routedProvider({ file: fileAns(QUOTE) }));
+  ok(!rB2.stoppedByBudget && rB2.calls === 2 && !(await read(b[0])).filing?.pendingAi && !(await read(b[2])).filing?.pendingAi, "ai pass: the next pass resumes the rest");
+
+  // every assist_runs row this section made goes with the fixtures
+  for (const r of await listRunsByMonth(monthKeyChicago(NOW))) if (r.contextRef.startsWith("thread:" + fixtureId(335, "ai-"))) registerFixture("assist_runs" as never, r.id);
+
+  /* 12. the sync hook */
+  const bridgeSrc = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+  const syncBody = bridgeSrc.slice(bridgeSrc.indexOf("async function syncMailbox("), bridgeSrc.indexOf("async function currentHistoryId("));
+  ok(
+    /try \{\s*const owner = userIdOfKey\(key\);\s*if \(owner\) aiChanged = \(await \(await import\("@\/lib\/inbox-org\/ai-pass"\)\)\.runAiPass\(\{ onlyUserId: owner \}\)\)\.changed;\s*\} catch/.test(syncBody) &&
+      syncBody.indexOf("runAiPass") > syncBody.indexOf("reconcilePeakLabelsForMailbox"),
+    "ai hook: syncMailbox runs the AI pass last, for the mailbox owner, in its own try"
+  );
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -956,6 +1274,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgPureChecks(ok);
     await inboxOrgDbChecks(ok);
     await inboxOrgPipelineChecks(ok);
+    await inboxOrgAiChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

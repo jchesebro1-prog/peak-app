@@ -3,6 +3,7 @@ import {
   getDoc,
   insertWithPrefixedId,
   listDocs,
+  listDocsByField,
   patchDoc,
   setBlob,
   softDeleteDoc,
@@ -376,6 +377,16 @@ export async function getAllProjects(): Promise<ProjectRecord[]> {
 export async function getProject(id: string): Promise<ProjectRecord | null> {
   const p = await getDoc<ProjectRecord>("projects", id);
   return p ? normalizeProject(p, await loadPipelines()) : null;
+}
+
+/** #335 — one customer's projects & orders (filtered in SQL), normalized,
+ *  newest activity first. */
+export async function projectsForCustomer(customerId: string): Promise<ProjectRecord[]> {
+  if (!customerId) return [];
+  const list = await listDocsByField<ProjectRecord>("projects", "customerId", [customerId]);
+  if (!list.length) return [];
+  const pipes = await loadPipelines();
+  return list.map((p) => normalizeProject(p, pipes)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 /** Port of byQuote(qid). */
