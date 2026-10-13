@@ -135,7 +135,7 @@ Rendered above `StartHereCard` on Home, only for pilot + brief users.
 ## Testing
 
 - **Pure checks:**
-  - minute-precise `slotAt` (06:44 → previous day's midday? No: before 06:45 counts as the morning slot of the same day, same as today's behaviour; pin the existing semantics and the new 13:45 boundary)
+  - minute-precise `slotAt`: anything before 13:45 Chicago is the same day's `morning` slot (as today), and 13:45 or later is `midday`. Pin 13:44 → morning and 13:45 → midday.
   - brief sanitizer (keys only from the snapshot)
   - rule-built fallback
   - afternoon diff
