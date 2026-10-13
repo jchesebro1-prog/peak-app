@@ -1084,8 +1084,8 @@ See `.env.example`.
     supersedes D39 for this layer. Remaining is Jeff-gated: a Console key with a
     $200 spend limit, `ANTHROPIC_API_KEY` in Vercel production, tick Jeff and one
     estimator, try each button on a real thread, read the report after 30 days and
-    keep or kill it; open question — should the reply prompt show draft quotes'
-    dollar values. Punch item #334.
+    keep or kill it. Draft quotes show no price in the reply prompt (only sent
+    quotes do) — Jeff may opt in. Punch item #334.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

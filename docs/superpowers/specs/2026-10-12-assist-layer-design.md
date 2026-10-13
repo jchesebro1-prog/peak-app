@@ -76,12 +76,12 @@ existing store paths.
 
 ## 4. Models, routing, cost (D870)
 
-| Feature/step | Default model | Effort | max_tokens | Fallbacks |
-|---|---|---|---|---|
-| `tasks` | `claude-haiku-5-5` | low | 4000 | none (Haiku has none) |
-| `reply` | `claude-sonnet-5-5` | low | 4000 | `"default"` |
-| `estimate:extract` | `claude-haiku-5-5` | low | 4000 | none |
-| `estimate:draft` | `claude-opus-5-5` | medium | 16000 | `"default"` |
+| Feature/step | Default model | Effort | max_tokens | Timeout / retries | Call | Fallbacks |
+|---|---|---|---|---|---|---|
+| `tasks` | `claude-haiku-5-5` | low | 4000 | 60 s / 1 | create | none (Haiku has none) |
+| `reply` | `claude-sonnet-5-5` | low | 4000 | 60 s / 1 | create | `"default"` |
+| `estimate:extract` | `claude-haiku-5-5` | low | 4000 | 45 s / 0 | create | none |
+| `estimate:draft` | `claude-opus-5-5` | medium | 32000 | 210 s / 0 | stream | `"default"` |
 
 - **Env overrides:** `ASSIST_MODEL_TASKS`, `ASSIST_MODEL_REPLY`,
   `ASSIST_MODEL_ESTIMATE` (the draft step) and `ASSIST_MODEL_EXTRACT`.
@@ -104,8 +104,23 @@ existing store paths.
 - **Prompt caching.** The system prompt is one text block with
   `cache_control:{type:"ephemeral"}`. Volatile content goes in the user
   message.
-- **Client settings.** Timeout is `ASSIST_TIMEOUT_MS` (default 90 000), with
-  `maxRetries: 1`.
+- **Request budget.** Each slot's `timeoutMs` / `maxRetries` (`SLOT_SETTINGS`,
+  read through the pure `requestOptionsFor(slot)`) go to the SDK **per
+  request** — `client.beta.messages.create(params, { timeout, maxRetries })` —
+  never on the client, so the cached client carries no timeout and there is no
+  `ASSIST_TIMEOUT_MS`. The SDK retries timeouts too, so a slot's worst case is
+  timeout × (retries + 1). Extract + draft (45 s + 210 s) fit the Inbox page's
+  `maxDuration = 300`.
+- **Streaming draft.** The estimate draft runs through
+  `client.beta.messages.stream(params, opts).finalMessage()` (SDK 0.128.0
+  accepts `betas` and `fallbacks` on the stream params) at 32 000 max_tokens,
+  so adaptive thinking can't push it into "too long". The SDK timeout only
+  covers the response headers on a stream, so the stream gets its own
+  wall-clock abort at the slot timeout ("timed out").
+- **Time budget.** `draftEstimateFromThread` records its start; before the draft
+  call it refuses with "Assist ran out of time before drafting" when less than
+  `DRAFT_MIN_REMAINING_MS` (220 s) of `ESTIMATE_BUDGET_MS` (300 s) is left,
+  logs the refusal and stamps `draftSkipped:"time budget"` on the extract run.
 
 **Cost.** `MODEL_PRICES` maps each model to $/MTok for input, output, cache
 read and cache write:
@@ -115,14 +130,18 @@ read and cache write:
 | `claude-haiku-5-5` | 0.10 | 0.50 | 0.01 | 0.125 |
 | `claude-sonnet-5-5` | 2 | 10 | 0.20 | 2.50 |
 | `claude-opus-5-5` | 4 | 20 | 0.20 | 5.00 |
+| `claude-opus-5` | 5 | 25 | 0.50 | 6.25 |
+| `claude-fable-5-1` | 10 | 50 | 1.00 | 12.50 |
 
 - Haiku's rates step to 0.50 / 2.50 when a prompt's total input is over
   100 000 tokens.
 - Cache-write rates are an assumed 1.25× input. Haiku's cache-read rate is an
   assumed 0.1× input. The report labels all costs "estimated".
-- A local or unknown model costs $0.
-- `costUsd(model, usage)` is pure and is computed on `response.model` (the
-  model that actually served the request).
+- A local run costs $0.
+- A Claude run is priced by `claudeCostUsd(response.model, requestedModel,
+  usage)` (pure): the answering model's row; when `response.model` isn't in
+  the table (a server-side fallback or a dated alias), the requested model's
+  row; when that is unknown too, the dearest row in the table — never $0.
 
 ## 5. Providers (D871)
 
@@ -132,16 +151,18 @@ interface AssistProvider {
   complete(req: ProviderRequest): Promise<ProviderResult>;
 }
 type ProviderRequest = { model: string; system: string; user: string; jsonSchema?: object;
-  effort: "low"|"medium"|"high"; maxTokens: number; fallbacks: boolean };
+  effort: "low"|"medium"|"high"; maxTokens: number; fallbacks: boolean;
+  timeoutMs?: number; maxRetries?: number; stream?: boolean };   // from SLOT_SETTINGS
 type ProviderResult =
   | { ok: true; text: string; model: string; usage: ProviderUsage; stopReason: string }
   | { ok: false; error: string; model: string; usage: ProviderUsage | null; stopReason: string | null };
 ```
 
-- **`anthropic.ts`** constructs `new Anthropic({ apiKey, timeout, maxRetries:1 })`
-  lazily, once per process. Typed SDK errors become short messages: 429 →
-  "rate limited", 401 → "API key rejected", 5xx/connection → "service
-  unavailable".
+- **`anthropic.ts`** constructs `new Anthropic({ apiKey })` lazily, once per
+  key; timeout and retries come per request from `anthropicRequestOptions(req)`
+  (§4). Typed SDK errors become short messages: 429 → "rate limited", 401 →
+  "API key rejected", a timeout (or the stream's own abort) → "timed out",
+  5xx/connection → "service unavailable".
 - **`local.ts`** sends `POST {ASSIST_LOCAL_URL}/v1/chat/completions` with
   `Authorization: Bearer ASSIST_LOCAL_TOKEN`, body
   `{ model, messages:[system,user], response_format?: {type:"json_schema", json_schema:{name:"out", schema}} , max_tokens }`
@@ -178,12 +199,20 @@ The steps run in this order:
    with no log row.
 3. **Rate limit.** `rateLimit("assist:"+feature+":"+user.id, LIMIT[feature], 3_600_000)`.
    The limits are tasks 60, reply 60, estimate 20 (counted once per button press, on the extract step; the draft step passes `countRate:false`).
-4. **Provider call.** Uses the model and settings from §4.
+4. **Provider call.** Uses the model and settings from §4, including the
+   slot's timeout, retries and stream flag.
 5. **Validate.** With a schema, run `JSON.parse` then `schema.safeParse`. A
    failure gives `ok:false, error:"unreadable answer"`, and the row is still
    logged.
 6. **Log.** Write an `assist_runs` row whether the call succeeded or failed,
-   then return.
+   then return. `costUsd` is `claudeCostUsd(response.model, requested, usage)`
+   for Claude and 0 for a local run (§4).
+
+The three Inbox actions also check `assistGate` **first**, before loading the
+thread, quotes or comms (full-table loads), and return `{ok:false, error}` on a
+refusal; `runAssist` keeps its own gate. The Suggest tasks, Draft reply and
+Draft estimate buttons carry a `useRef` in-flight guard against a double
+click.
 
 **`assist_runs` doc table** (migration `0039_assist_runs`, idempotent per
 D141). The doc shape:
@@ -275,21 +304,34 @@ The detail is `{ suggested, created, edited }`.
 - The customer and contact names.
 - Open quotes for the thread's customer (`resolveCustomerId`): status `draft`
   or `sent`, newest 8. Each entry carries `displayQuoteNumber`, name, type,
-  status, value (rounded dollars) and the sent date (the last `history`
-  entry with `to==="sent"`), or "not sent".
+  status and the sent date (the last `history` entry with `to==="sent"`), or
+  "not sent". **Only a sent quote carries its value (rounded dollars)**; a
+  draft reads "price not yet approved", and `REPLY_SYSTEM` allows a price only
+  for a quote listed as sent.
+- Every single-line name outside the thread wrapper (customer, contact, quote
+  number/name/type/status, sender) goes through `cleanPromptField` (newlines →
+  spaces, `</email_thread` / `</style_examples` / `</example` defanged, 120
+  chars) — the same clean as a thread author. The tasks prompt does the same
+  for link labels and team names.
 - The sender's name.
 - Tone: `"short"|"normal"|"formal"`, default `"normal"`.
 
-**Style examples (D873).** The sender's last 5 outgoing messages are found by
-flattening the threads where `visibleTo(t, me.name)` holds:
+**Style examples (D873).** The sender's last 5 outgoing emails come from their
+own personal mailbox (`mailbox==="personal"`, `mailboxUser===me.name`):
 
-- Keep messages with `direction==="out"` and `author===me.name`.
-- Sort by `at` descending and take 5.
-- Strip the signature and trim each to 1 200 chars.
+- Keep email messages with `direction==="out"`, not queued, in live threads.
+  The author is **not** matched — Gmail-imported sent mail carries the Gmail
+  display name as author, and everything outbound in the box is the writer's.
 - Exclude the current thread.
+- Cut quoted customer text (`stripQuotedText`): drop lines starting with `>`,
+  and cut at an "On … wrote:" line (also wrapped onto the next line) or an
+  Outlook "-----Original Message-----" line.
+- Strip the signature, defang wrapper closes, trim each to 1 200 chars; sort by
+  `at` descending and take 5 non-empty examples.
 
-They are labelled "examples of how this person writes — match tone and
-length, never copy facts".
+They sit inside `<style_examples>`, labelled "examples of how this person
+writes — match tone and length, never copy facts", and `UNTRUSTED_NOTE` covers
+the block as data.
 
 **Output.** Plain text only: no subject, greeting optional, no signature.
 `cleanReplyText` strips a leading `Subject:` line, any trailing `-- ` block
@@ -297,8 +339,9 @@ and surrounding whitespace, and caps the result at 6 000 chars. An empty
 result counts as `ok:false`.
 
 **Untrusted input (D874).** Thread text is wrapped in
-`<email_thread>…</email_thread>`, and the system prompt states that it is
-data written by outside parties. No output is ever acted on except as draft
+`<email_thread>…</email_thread>`, and the system prompt states that it — and
+the `<style_examples>` block — is data written by outside parties or quoted
+from past mail. No output is ever acted on except as draft
 text that a person reviews.
 
 **UI.** A "Draft reply" button sits beside Reply. It calls `draftReplyAction`,
@@ -321,8 +364,8 @@ count, with the inputs capped at 2 000 words.
 
 **Action:** `draftEstimateAction(threadId) → {ok:true, quoteId, href} | {ok:false, error}`.
 
-**Step A — extract** (Haiku, `step:"extract"`). It receives the thread (same
-trim as the reply) and returns:
+**Step A — extract** (Haiku, `step:"extract"`, 45 s, no retry). It receives the
+thread (same trim as the reply) and returns:
 
 ```
 { quoteName: string; venue: string; requests: Array<{ phrase: string; qty: number }> ; systems: string[] }
@@ -350,10 +393,17 @@ price:
 **Resolution.** Every SKU from 1–4 is resolved with `getManyBySku`, which
 follows renames. A SKU with no live part is dropped. The candidate list given
 to the model is
-`{ sku, desc, mfr, unit, category }`, capped at 400 parts. The examples (2 and
-3) are shown as `system name: sku×qty, …`.
+`{ sku, desc, mfr, unit, category }`, capped at 400 parts. **Category items and
+example lines (4, then 2, then 3) take their seats in the cap first; catalog
+hits (1) fill the rest** (pure `selectCandidateParts`). The examples (2 and 3)
+and category items are shown as `system name: sku×qty, …` under each line's
+**live (renamed) SKU**; a line whose SKU didn't resolve or didn't make the cap
+is dropped (pure `remapExampleLines`), so the model never sees a SKU it may not
+use.
 
-**Step B — draft** (Opus, `step:"draft"`). The input is the request summary,
+**Step B — draft** (Opus, `step:"draft"`, streamed, 32 000 max_tokens, 210 s,
+no retry; it starts only with ≥ 220 s of the 300 s budget left — §4). The input
+is the request summary,
 the thread, the categories, the examples and the candidate parts. The output
 schema:
 
@@ -399,9 +449,16 @@ new-estimate branch of `placeSystemInEstimate`:
 resolveTier(cid, contactName) → canonicalBonusSections({source:"estimator",status:"draft"}, sections)
 → totals(sections, 0) → create({ name, customer, customerId, contactName, source:"estimator",
   quoteType:"system", spec:{sections, mobs:[]}, value, margin, owner:me.name, preparedBy:me.name,
-  pricingTier, tierMargin, leadId: thread.link?.type==="lead" ? thread.link.id : undefined,
-  assistDraft }) → scheduleQuotePdf(q.id)
+  pricingTier, tierMargin }) → update(q.id, { assistDraft }) → scheduleQuotePdf(q.id)
 ```
+
+- **No `leadId`**, even when the thread is linked to a lead: it would carry the
+  lead's estimate number (#223) onto a throw-away draft and stretch "no
+  auto-link". The thread reference lives in `assistDraft.threadId` only.
+- Once `create` has returned, the rest is best-effort: a failing
+  `assistDraft` write is logged, `mergeRunDetail(runId, { quoteId: q.id, … })`
+  still runs (in a `finally`), and the action returns ok with the quote — a
+  retry would only create a duplicate.
 
 - `source` stays `"estimator"`, so bonuses, approval, the library and
   everything else behave exactly as they do for a hand-built estimate. The
@@ -437,6 +494,13 @@ The outcome follows from those counts:
 - `accepted` when kept/total ≥ 0.9.
 - `discarded` when the quote is gone or kept + changed is under 10 %.
 - `edited` otherwise.
+
+`estimateOutcomeFor(detail, quote)` wraps it: a run whose detail has an
+explicit `quoteId: null` (no systems built, or the create failed) is
+`discarded`; a run with no `quoteId` key yet stays pending. `loadAssistVM`
+fetches the runs' quotes with `Promise.all` and never throws — on a DB error
+(a preview deploy can reach the shared database before migration 0039) the
+card shows an empty report.
 
 ## 10. Settings → Beta: Assist pilot (D879)
 
@@ -477,7 +541,6 @@ ANTHROPIC_API_KEY=
 # ASSIST_MODEL_REPLY=claude-sonnet-5-5
 # ASSIST_MODEL_EXTRACT=claude-haiku-5-5
 # ASSIST_MODEL_ESTIMATE=claude-opus-5-5
-# ASSIST_TIMEOUT_MS=90000
 # ASSIST_PROVIDER=local         # Mac mini phase
 # ASSIST_LOCAL_URL=https://mini.example/   ASSIST_LOCAL_TOKEN=   ASSIST_LOCAL_MODEL=
 # ASSIST_LOCAL_TIMEOUT_MS=60000

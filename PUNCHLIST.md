@@ -11924,7 +11924,7 @@ on its own.
 - **Suggest tasks** (Haiku 5.5) — up to 5 suggestions in a dialog, tick what you want, created through the existing #215
   task path (D870, D874).
 - **Draft reply** (Sonnet 5.5) — into the inline composer, never sent; examples of the sender's own recent sent mail; open
-  quotes for the thread's resolved customer only; an edit-ratio outcome on send (D873).
+  quotes for the thread's resolved customer only (prices for sent quotes only); an edit-ratio outcome on send (D873).
 - **Draft estimate** (Haiku extract, then Opus draft) — a new draft Estimator quote (`source:"estimator"`,
   `Quote.assistDraft`) priced only by `catalogAddPrice`, systems rounded to $25, line ids unique across the quote, unknown
   parts as $0 custom lines; banner with the model's notes and "Why these parts", Dismiss (does not bump `updatedAt`); the
@@ -11939,9 +11939,16 @@ on its own.
 - **D880** — the official SDK supersedes D39 for this layer; D89's deletions stay deleted; the opt-in gate replaces D89's
   "no model calls" posture. MASTER-HOWTO §6 has the turn-on steps; `.env.example` has the `ASSIST_*` block.
 
-**Open question for Jeff:** should the reply prompt show **draft** quotes' dollar values? They are not approved yet, so a
-reply could quote a price nobody has signed off. The default shipping now includes them (status draft or sent); say the
-word and it narrows to sent quotes only (or drops dollar values for drafts). Pending the final fix wave.
+**Shipped (final fix wave): draft quotes show no price in the reply prompt — Jeff may opt in.** Draft quotes are still
+listed (number, name, type, status) but read "price not yet approved", and the reply prompt allows a price only for a
+sent quote (D873). Say the word to show draft values too.
+
+**Final fix wave (2026-10-12):** per-slot request budgets (tasks/reply 60 s / 1 retry, extract 45 s / 0, draft 210 s / 0,
+streamed at 32K max tokens) with a 220-of-300 s refusal before the draft call (D870); unknown answering models bill at the
+requested model's rate, else the dearest row (D870); style examples from every outbound email in the writer's own box,
+quoted customer text cut (D873); names outside the thread wrapper defanged (D874); no `leadId` on a draft quote, and a
+created quote survives a later failure (D877); category/example SKUs reserved in the 400-part cap and shown by their live
+SKU (D876); gate-first actions, `quoteId: null` = discarded, a report that never 500s, double-click guards (D878).
 
 **Remaining (Jeff-gated):**
 - (1) Create a Console API key with billing and a $200 Console spend limit (match the in-app cap).
