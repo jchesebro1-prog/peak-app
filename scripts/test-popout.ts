@@ -1,7 +1,20 @@
 /** Pop-out window checks. Standalone: `npm run test:popout`; also chained into test:specs. */
 import { isPopName, parsePopName, popName, POP_KINDS } from "@/lib/popout/names";
 import { DEFAULT_GEO, clampGeo, featuresFor, geoKey } from "@/lib/popout/geometry";
-import { shouldFocusRefresh, shouldRefreshNow } from "@/lib/popout/guard";
+import {
+  CHANGE_THROTTLE_MS,
+  EDITABLE_RECHECK_MS,
+  FOCUS_SETTLE_MS,
+  ONLINE_RETRY_MS,
+  canRefreshOnline,
+  canYieldToOpenInMain,
+  changeDelayMs,
+  nextRefreshStep,
+  shouldFocusRefresh,
+  shouldRefreshNow,
+  throttleWaitMs,
+} from "@/lib/popout/guard";
+import { hasUnsavedHold, setUnsavedHold } from "@/lib/popout/hold";
 import {
   WINDOW_ID_KEY,
   __resetWindowIdForTests,
@@ -112,17 +125,92 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok(tinyScreen.width === 300 && tinyScreen.height === 200, "popout: the 320x240 minimum is still capped to a smaller screen");
   ok(featuresFor({ left: 10, top: 20, width: 760, height: 800 }) === "popup=yes,left=10,top=20,width=760,height=800", "popout: featuresFor builds the window.open features string");
 
-  /* guard */
-  ok(shouldRefreshNow({ lastKeyAt: null, now: 10_000, activeIsEditable: true }) === "now", "popout: no keystroke yet refreshes now");
-  ok(shouldRefreshNow({ lastKeyAt: 9_000, now: 10_000, activeIsEditable: false }) === "now", "popout: a recent key outside an editable field refreshes now");
-  const d1 = shouldRefreshNow({ lastKeyAt: 9_500, now: 10_000, activeIsEditable: true });
-  ok(typeof d1 === "object" && d1.deferMs === 2500, "popout: typing 0.5s ago defers 2.5s (until 3s after the last key)");
-  const d2 = shouldRefreshNow({ lastKeyAt: 10_000, now: 10_000, activeIsEditable: true });
-  ok(typeof d2 === "object" && d2.deferMs === 3000, "popout: typing just now defers a full 3s");
-  ok(shouldRefreshNow({ lastKeyAt: 7_000, now: 10_000, activeIsEditable: true }) === "now", "popout: 3s after the last key refreshes now");
-  ok(shouldRefreshNow({ lastKeyAt: 1_000, now: 10_000, activeIsEditable: true }) === "now", "popout: long after the last key refreshes now");
-  const d3 = shouldRefreshNow({ lastKeyAt: 20_000, now: 10_000, activeIsEditable: true });
-  ok(typeof d3 === "object" && d3.deferMs === 3000, "popout: a clock that went backwards defers the full 3s");
+  /* guard — typing (D913): a focused editable field always defers; a change refresh also waits 3 s after the last key */
+  {
+    const def = (r: ReturnType<typeof shouldRefreshNow>) => (typeof r === "object" ? r.deferMs : -1);
+    ok(shouldRefreshNow({ lastKeyAt: null, now: 10_000, activeIsEditable: false }) === "now", "popout: no keystroke and no focused field refreshes now");
+    ok(def(shouldRefreshNow({ lastKeyAt: null, now: 10_000, activeIsEditable: true })) === EDITABLE_RECHECK_MS, "popout: a focused editable field defers even with no keystroke (re-checked every 3 s)");
+    ok(def(shouldRefreshNow({ lastKeyAt: 9_000, now: 10_000, activeIsEditable: false })) === 2000, "popout: a change refresh waits 3 s after the last key even after the field lost focus (OR, not AND)");
+    ok(def(shouldRefreshNow({ lastKeyAt: 9_500, now: 10_000, activeIsEditable: true })) === 2500, "popout: typing 0.5s ago defers 2.5s (until 3s after the last key)");
+    ok(def(shouldRefreshNow({ lastKeyAt: 10_000, now: 10_000, activeIsEditable: true })) === 3000, "popout: typing just now defers a full 3s");
+    ok(shouldRefreshNow({ lastKeyAt: 7_000, now: 10_000, activeIsEditable: false }) === "now", "popout: 3s after the last key, unfocused, refreshes now");
+    ok(def(shouldRefreshNow({ lastKeyAt: 1_000, now: 10_000, activeIsEditable: true })) === EDITABLE_RECHECK_MS, "popout: long after the last key, a still-focused field keeps deferring");
+    ok(def(shouldRefreshNow({ lastKeyAt: 20_000, now: 10_000, activeIsEditable: false })) === 3000, "popout: a clock that went backwards defers the full 3s");
+    ok(shouldRefreshNow({ kind: "focus", lastKeyAt: 9_900, now: 10_000, activeIsEditable: false }) === "now", "popout: a focus refresh ignores recent typing once the field is blurred");
+    ok(def(shouldRefreshNow({ kind: "focus", lastKeyAt: null, now: 10_000, activeIsEditable: true })) === EDITABLE_RECHECK_MS, "popout: a focus refresh defers while an editable field is focused");
+  }
+
+  /* guard — offline gate (D910) */
+  ok(canRefreshOnline({ navigatorOnline: true, engineConnected: true }), "popout: online + engine connected may refresh");
+  ok(!canRefreshOnline({ navigatorOnline: false, engineConnected: true }), "popout: navigator offline blocks a refresh");
+  ok(!canRefreshOnline({ navigatorOnline: true, engineConnected: false }), "popout: engine disconnected (\"Work offline\") blocks a refresh");
+  ok(canRefreshOnline({}) && canRefreshOnline({ navigatorOnline: undefined, engineConnected: undefined }), "popout: unknown network state does not block");
+  ok(FOCUS_SETTLE_MS === 1500 && ONLINE_RETRY_MS === 2000 && CHANGE_THROTTLE_MS === 5000, "popout: 1.5 s focus settle, 2 s online retry, 5 s change throttle");
+
+  /* guard — trailing throttle (D911) */
+  ok(throttleWaitMs(null, 10_000) === 0 && throttleWaitMs(undefined, 10_000) === 0, "popout: no refresh yet → no throttle wait");
+  ok(throttleWaitMs(9_000, 10_000) === 4000 && throttleWaitMs(5_000, 10_000) === 0 && throttleWaitMs(1_000, 10_000) === 0, "popout: change refreshes are at least 5 s apart");
+  ok(throttleWaitMs(20_000, 10_000) === 5000, "popout: a clock that went backwards waits the full 5 s");
+  ok(changeDelayMs(null, 10_000, 1000) === 1000 && changeDelayMs(1_000, 10_000, 1000) === 1000, "popout: outside the throttle a change keeps the 1 s debounce");
+  ok(changeDelayMs(9_500, 10_000, 1000) === 4500, "popout: inside the throttle a change waits out the 5 s");
+  {
+    // Autosave every 1.5 s for 12 s: refreshes land >= 5 s apart and the last change is honoured.
+    let lastRefresh: number | null = 0;
+    let pendingAt: number | null = null;
+    const fired: number[] = [];
+    const base = { owedFocus: false, navigatorOnline: true, engineConnected: true, hold: false, lastKeyAt: null, activeIsEditable: false };
+    for (let t = 0; t <= 20_000; t += 100) {
+      if (pendingAt !== null && t >= pendingAt) {
+        pendingAt = null;
+        const step = nextRefreshStep({ ...base, owedChange: true, lastRefreshAt: lastRefresh, now: t });
+        if (step.action === "refresh") {
+          fired.push(t);
+          lastRefresh = t;
+        } else if (step.action === "wait") pendingAt = t + step.ms;
+      }
+      if (t > 0 && t <= 12_000 && t % 1500 === 0 && pendingAt === null) pendingAt = t + changeDelayMs(lastRefresh, t, 1000);
+    }
+    const gaps = fired.slice(1).map((f, i) => f - fired[i]);
+    ok(fired.length >= 2 && gaps.every((g) => g >= 5000), `popout: a 1.5 s autosave stream refreshes at most every 5 s (${fired.join(", ")})`);
+    ok(fired.length > 0 && fired[fired.length - 1] >= 12_000, "popout: the trailing change after the stream still refreshes");
+  }
+
+  /* guard — nextRefreshStep order */
+  {
+    const base = { owedChange: false, owedFocus: false, navigatorOnline: true, engineConnected: true, hold: false, lastKeyAt: null, activeIsEditable: false, lastRefreshAt: 0, now: 100_000 };
+    ok(nextRefreshStep(base).action === "idle", "popout: nothing owed → idle");
+    ok(nextRefreshStep({ ...base, owedChange: true }).action === "refresh", "popout: an owed change refreshes");
+    ok(nextRefreshStep({ ...base, owedFocus: true }).action === "refresh", "popout: an owed focus refresh refreshes");
+    ok(nextRefreshStep({ ...base, owedChange: true, navigatorOnline: false }).action === "offline", "popout: offline parks a change refresh");
+    ok(nextRefreshStep({ ...base, owedFocus: true, engineConnected: false }).action === "offline", "popout: Work offline parks a focus refresh");
+    ok(nextRefreshStep({ ...base, owedFocus: true, hold: true }).action === "drop", "popout: the unsaved hold drops a focus refresh");
+    ok(nextRefreshStep({ ...base, owedChange: true, hold: true }).action === "refresh", "popout: the unsaved hold does not block a change refresh");
+    ok(nextRefreshStep({ ...base, owedChange: true, owedFocus: true, hold: true }).action === "refresh", "popout: an owed change wins over a held focus refresh");
+    ok(nextRefreshStep({ ...base, owedFocus: true, hold: true, navigatorOnline: false }).action === "offline", "popout: offline is checked before the hold");
+    const w = nextRefreshStep({ ...base, owedFocus: true, activeIsEditable: true });
+    ok(w.action === "wait" && w.ms === EDITABLE_RECHECK_MS, "popout: a focus refresh waits while an editable field is focused");
+    const w2 = nextRefreshStep({ ...base, owedChange: true, lastKeyAt: 99_000 });
+    ok(w2.action === "wait" && w2.ms === 2000, "popout: a change refresh waits out the typing window");
+    const w3 = nextRefreshStep({ ...base, owedChange: true, lastRefreshAt: 98_000 });
+    ok(w3.action === "wait" && w3.ms === 3000, "popout: a change refresh waits out the 5 s throttle");
+    ok(nextRefreshStep({ ...base, owedFocus: true, lastRefreshAt: 98_000 }).action === "refresh", "popout: the throttle applies to change refreshes only");
+  }
+
+  /* guard — open in main (D912) */
+  {
+    const base = { activeIsEditable: false, lastKeyAt: null, now: 100_000, hold: false };
+    ok(canYieldToOpenInMain(base), "popout: an idle main window answers open-in-main");
+    ok(!canYieldToOpenInMain({ ...base, activeIsEditable: true }), "popout: a focused editable field keeps the main window from answering");
+    ok(!canYieldToOpenInMain({ ...base, lastKeyAt: 98_000 }), "popout: typing in the last 3 s keeps the main window from answering");
+    ok(canYieldToOpenInMain({ ...base, lastKeyAt: 97_000 }), "popout: 3 s after the last key the main window answers");
+    ok(!canYieldToOpenInMain({ ...base, lastKeyAt: 200_000 }), "popout: a clock that went backwards does not answer");
+    ok(!canYieldToOpenInMain({ ...base, hold: true }), "popout: the page hold keeps the main window from answering");
+    setUnsavedHold(true);
+    const on = hasUnsavedHold();
+    setUnsavedHold(false);
+    ok(on && !hasUnsavedHold(), "popout: setUnsavedHold / hasUnsavedHold toggle the module flag");
+  }
+
   ok(shouldFocusRefresh(null, 100_000) && shouldFocusRefresh(undefined, 100_000), "popout: focus refreshes when nothing has refreshed yet");
   ok(!shouldFocusRefresh(80_000, 100_000) && !shouldFocusRefresh(70_000, 100_000), "popout: focus does not refresh within 30s (30s exactly included)");
   ok(shouldFocusRefresh(69_999, 100_000), "popout: focus refreshes after more than 30s");
@@ -201,8 +289,12 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(bad.length === 0, `popout: ${f} imports no store, db or server module${bad.length ? ` (found ${bad.join(", ")})` : ""}`);
   }
   ok(live.includes('document.addEventListener("keydown", onKey, true)') && live.includes("isEditableTarget(e.target"), "popout: LiveSync tracks the last keystroke in a capture-phase keydown on editable targets");
-  ok(live.includes("shouldRefreshNow({") && live.includes("const CHANGED_DEBOUNCE_MS = 1000;") && live.includes("schedule(CHANGED_DEBOUNCE_MS)"), "popout: a changed message refreshes through the typing guard, debounced 1 s");
-  ok(live.includes('"visibilitychange", onVisible') && live.includes('"focus", onFocus') && live.includes("shouldFocusRefresh(lastRefreshAt.current"), "popout: visible/focus refreshes under the 30 s rule");
+  ok(live.includes("nextRefreshStep({") && live.includes("const CHANGED_DEBOUNCE_MS = 1000;") && live.includes("schedule(changeDelayMs(lastRefreshAt.current, Date.now(), CHANGED_DEBOUNCE_MS))"), "popout: a changed message refreshes through nextRefreshStep, debounced 1 s and throttled 5 s");
+  ok(live.includes('"visibilitychange", onVisible') && live.includes('"focus", onFocus') && live.includes("shouldFocusRefresh(lastRefreshAt.current") && live.includes("schedule(FOCUS_SETTLE_MS)"), "popout: visible/focus refreshes under the 30 s rule after a 1.5 s settle");
+  ok(live.includes("getEngine().getStatus().connected") && live.includes("navigator.onLine") && live.includes('window.addEventListener("online", onBackOnline)') && live.includes("window.addEventListener(SYNC_EVENT, onBackOnline)") && live.includes("schedule(ONLINE_RETRY_MS)"), "popout: LiveSync gates refreshes on navigator.onLine + the sync engine and retries on reconnect (D910)");
+  ok(live.includes("hold: hasUnsavedHold()") && /canYieldToOpenInMain\(\{[^}]*hold: hasUnsavedHold\(\) \}\)\) return;\s*const path/.test(live), "popout: the unsaved hold feeds the refresh step and blocks open-in-main before navigating (D912)");
+  const estState = readSrc("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(/const unsavedHold = pdfDirty \|\| \(!loadedId && sections\.some\(\(s\) => s\.items\.length > 0\)\);\s*useEffect\(\(\) => \{\s*setUnsavedHold\(unsavedHold\);\s*return \(\) => setUnsavedHold\(false\);\s*\}, \[unsavedHold\]\);/.test(estState), "popout: the Estimator sets the unsaved hold from pdfDirty / a new estimate with lines, keyed on the boolean");
   ok(/if \(m\.type === "open-in-main"\) \{\s*if \(isPopWindow\(\)\) return;/.test(live) && /postMainAck\(m\.url\);\s*try \{\s*window\.focus\(\);/.test(live) && live.includes("router.push(path)"), "popout: a main window answers open-in-main — ack, focus, then router.push");
   ok(header.includes("postOpenInMain(url, ACK_MS)") && header.includes("const ACK_MS = 500;") && header.includes('window.open(url, "_blank", "noopener")') && header.includes("window.close()"), "popout: PopHeader asks the main window (500 ms) else opens a tab; ✕ closes");
   const css = readSrc("src/app/globals.css");

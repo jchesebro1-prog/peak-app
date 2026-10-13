@@ -5,11 +5,20 @@
  * (app) layout; replaces the #335 Inbox/Home listener. Renders nothing.
  *
  * - A `changed` message from another window → `router.refresh()`, debounced
- *   1 s, deferred while the person is typing (guard.ts: until 3 s after the
- *   last keystroke in an editable field). `router.refresh()` keeps client state.
- * - Visible again / window focus → refresh when the last one was > 30 s ago.
+ *   1 s and trailing-throttled to one per 5 s (D911), deferred while an
+ *   editable field is focused or until 3 s after the last keystroke (D913).
+ *   `router.refresh()` keeps client state.
+ * - Visible again / window focus → refresh when the last one was > 30 s ago,
+ *   after a 1.5 s settle; skipped while an editable field is focused (waits)
+ *   or the page holds unsaved work (hold.ts, D912).
+ * - Offline gate (D910): never refresh while the browser is offline or the
+ *   sync engine is disconnected (Next falls back to a full reload, which the
+ *   SW answers from cache and in-memory edits are lost). The refresh is
+ *   parked and runs ~2 s after `online` / the engine reconnects.
  * - In a main window (not a pop-out): answer "Open in main window" — ack,
- *   focus, navigate. Only the main window focused most recently answers.
+ *   focus, navigate. Only the main window focused most recently answers,
+ *   and never while it has unsaved work (focused field, typed < 3 s ago, or
+ *   the page hold — D912); the pop-out then opens a tab.
  * - Re-applies `pk-pop` (dev Strict Mode resets <html> attributes) and tags
  *   the native shell with `pk-native` so pop-out affordances can hide there.
  * - In a pop-out: saves its position + inner size per kind (spec §4) on resize (debounced
@@ -18,7 +27,16 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { onMessage, postMainAck, windowId } from "@/lib/popout/channel";
-import { shouldFocusRefresh, shouldRefreshNow } from "@/lib/popout/guard";
+import {
+  FOCUS_SETTLE_MS,
+  ONLINE_RETRY_MS,
+  canRefreshOnline,
+  canYieldToOpenInMain,
+  changeDelayMs,
+  nextRefreshStep,
+  shouldFocusRefresh,
+} from "@/lib/popout/guard";
+import { hasUnsavedHold } from "@/lib/popout/hold";
 import { isPopWindow, savePopGeometry } from "@/lib/popout/open";
 import {
   MAIN_FOCUS_KEY,
@@ -29,6 +47,7 @@ import {
   toAppPath,
 } from "@/lib/popout/live";
 import { isNativePlatform } from "@/lib/platform";
+import { SYNC_EVENT, getEngine } from "@/lib/sync/engine";
 
 const CHANGED_DEBOUNCE_MS = 1000;
 const GEOMETRY_DEBOUNCE_MS = 500;
@@ -84,25 +103,78 @@ export default function LiveSync() {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // What this window is owed (see guard.ts `nextRefreshStep`).
+    let owedChange = false;
+    let owedFocus = false;
+    let parkedOffline = false;
+
+    const activeIsEditable = () => isEditableTarget(document.activeElement as HTMLInputElement | null);
+    const network = () => {
+      let engineConnected: boolean | undefined;
+      try {
+        engineConnected = getEngine().getStatus().connected;
+      } catch {
+        // no engine — navigator.onLine alone decides
+      }
+      return { navigatorOnline: typeof navigator === "undefined" ? undefined : navigator.onLine, engineConnected };
+    };
 
     const refresh = () => {
+      owedChange = false;
+      owedFocus = false;
       lastRefreshAt.current = Date.now();
       router.refresh();
     };
-    // Run a refresh now, or after the typing guard says it may.
+    // Run an owed refresh now, wait, park it until online (D910), or drop it.
     const attempt = () => {
       timer = null;
-      const decision = shouldRefreshNow({
+      const step = nextRefreshStep({
+        owedChange,
+        owedFocus,
+        ...network(),
+        hold: hasUnsavedHold(),
         lastKeyAt: lastKeyAt.current,
+        activeIsEditable: activeIsEditable(),
+        lastRefreshAt: lastRefreshAt.current,
         now: Date.now(),
-        activeIsEditable: isEditableTarget(document.activeElement as HTMLInputElement | null),
       });
-      if (decision === "now") refresh();
-      else timer = setTimeout(attempt, decision.deferMs);
+      if (step.action === "refresh") refresh();
+      else if (step.action === "wait") timer = setTimeout(attempt, step.ms);
+      else if (step.action === "offline") parkedOffline = true;
+      else if (step.action === "drop") owedFocus = false;
     };
     const schedule = (delayMs: number) => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(attempt, delayMs);
+    };
+    // Back online (or "Work offline" switched off): run a parked refresh ~2 s later.
+    const onBackOnline = () => {
+      if (!parkedOffline) return;
+      if (!canRefreshOnline(network())) return;
+      parkedOffline = false;
+      schedule(ONLINE_RETRY_MS);
+    };
+    // A `changed` message: trailing-throttled to one refresh per 5 s (D911).
+    // A pending timer is kept — the refresh it runs fetches every save so far.
+    const onChanged = () => {
+      owedChange = true;
+      if (parkedOffline) {
+        onBackOnline();
+        return;
+      }
+      if (timer) return;
+      schedule(changeDelayMs(lastRefreshAt.current, Date.now(), CHANGED_DEBOUNCE_MS));
+    };
+    // Visible again / focus: settle 1.5 s, then the gate re-checks online (D910).
+    const onFocusBack = () => {
+      if (!shouldFocusRefresh(lastRefreshAt.current, Date.now())) return;
+      owedFocus = true;
+      if (parkedOffline) {
+        onBackOnline();
+        return;
+      }
+      if (timer) return;
+      schedule(FOCUS_SETTLE_MS);
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -130,16 +202,16 @@ export default function LiveSync() {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       recordMainFocus();
-      if (shouldFocusRefresh(lastRefreshAt.current, Date.now())) schedule(0);
+      onFocusBack();
     };
     const onFocus = () => {
       recordMainFocus();
-      if (shouldFocusRefresh(lastRefreshAt.current, Date.now())) schedule(0);
+      onFocusBack();
     };
 
     const off = onMessage((m) => {
       if (m.type === "changed") {
-        schedule(CHANGED_DEBOUNCE_MS);
+        onChanged();
         return;
       }
       if (m.type === "open-in-main") {
@@ -151,6 +223,9 @@ export default function LiveSync() {
           // storage blocked — answer
         }
         if (!answer) return;
+        // Never navigate away from unsaved work (D912): stay silent so the
+        // pop-out falls back to a new tab.
+        if (!canYieldToOpenInMain({ activeIsEditable: activeIsEditable(), lastKeyAt: lastKeyAt.current, now: Date.now(), hold: hasUnsavedHold() })) return;
         const path = toAppPath(m.url, window.location.origin);
         if (!path) return;
         postMainAck(m.url);
@@ -171,6 +246,8 @@ export default function LiveSync() {
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onBackOnline);
+    window.addEventListener(SYNC_EVENT, onBackOnline);
     window.addEventListener("pagehide", forgetMainFocus);
     return () => {
       if (timer) clearTimeout(timer);
@@ -178,6 +255,8 @@ export default function LiveSync() {
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onBackOnline);
+      window.removeEventListener(SYNC_EVENT, onBackOnline);
       window.removeEventListener("pagehide", forgetMainFocus);
       forgetMainFocus();
     };

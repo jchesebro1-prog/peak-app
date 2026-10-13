@@ -59,6 +59,7 @@ import { systemFromCategory } from "@/lib/system-categories";
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
+import { setUnsavedHold } from "@/lib/popout/hold";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -982,6 +983,14 @@ export function useEstimatorState(props: EstimatorProps) {
   );
   const savedDocKey = useMemo(() => pdfDocKey(savedDoc), [savedDoc]);
   const pdfDirty = !!loadedId && docKey !== savedDocKey;
+  // Pop-outs (D912): while this estimate has unsaved work — edits since the
+  // last Save, or a new estimate with lines — this window won't answer "Open
+  // in main window" and skips its focus refresh. Keyed on the boolean only.
+  const unsavedHold = pdfDirty || (!loadedId && sections.some((s) => s.items.length > 0));
+  useEffect(() => {
+    setUnsavedHold(unsavedHold);
+    return () => setUnsavedHold(false);
+  }, [unsavedHold]);
 
   /* ---------------- persistence ---------------- */
   /** #254 (D87 amended) — re-price the lines still at `prev`'s margin to
