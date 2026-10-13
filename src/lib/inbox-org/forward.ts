@@ -14,6 +14,8 @@
  *             `[mailto:…]` addresses, `*From:*` bold labels) — only with an
  *             `FW:`/`Fwd:` subject, because Outlook writes the same block for a reply.
  * A `Re:` subject is never a forward (a reply quoting a forward isn't one).
+ * Nested forwards (Pat → Ann → Bob → me): given `isInternal`, a first block
+ * from a teammate is followed down to the deepest external sender.
  */
 import { parseAddress } from "@/lib/gmail/mime";
 
@@ -113,7 +115,7 @@ function parseFrom(v: string): { fromName: string; fromEmail: string } {
   return { fromName: value.replace(/^"|"$/g, "").replace(/\s*<\s*>\s*$/, "").trim(), fromEmail: "" };
 }
 
-function readHeaders(lines: string[], start: number): Record<string, string> {
+function readHeaders(lines: string[], start: number): { h: Record<string, string>; end: number } {
   const h: Record<string, string> = {};
   let i = start;
   while (i < lines.length && !lines[i].trim()) i++;
@@ -123,7 +125,37 @@ function readHeaders(lines: string[], start: number): Record<string, string> {
     const key = m[1].toLowerCase();
     if (!(key in h)) h[key] = m[2].trim();
   }
-  return h;
+  return { h, end: i };
+}
+
+type Original = NonNullable<ParsedForward["original"]>;
+
+function originalOf(lines: string[], block: Block, subj: string): Original | null {
+  const { h } = readHeaders(lines, block.headerStart);
+  if (h.from === undefined) return null;
+  const { fromName, fromEmail } = parseFrom(h.from);
+  return { fromEmail, fromName, subject: h.subject ?? subj.replace(FWD_PREFIXES, "").trim(), date: h.date ?? h.sent ?? "" };
+}
+
+/** The original of the first block, then of every forwarded block nested
+ *  inside it, outermost first. Nested blocks may sit under `>` quoting (Peak's
+ *  own Forward quotes the forwarded text), so the scan reads lines with the
+ *  quote marks off. */
+function nestedOriginals(lines: string[], first: Block, subj: string): Original[] {
+  const plain = lines.map((l) => l.replace(/^(?:\s*>)+\s?/, ""));
+  const blocks = [first];
+  for (let i = readHeaders(plain, first.headerStart).end; i < plain.length; i++) {
+    let b: Block | null = null;
+    if (EXPLICIT_MARKER.test(plain[i])) b = { at: i, headerStart: i + 1, explicit: true };
+    else if (OUTLOOK_RULE.test(plain[i])) {
+      const h = headerAfter(plain, i);
+      if (h >= 0) b = { at: i, headerStart: h, explicit: false };
+    } else if (outlookBlockAt(plain, i)) b = { at: i, headerStart: i, explicit: false };
+    if (!b) continue;
+    blocks.push(b);
+    i = Math.max(i, readHeaders(plain, b.headerStart).end - 1);
+  }
+  return blocks.map((b) => originalOf(plain, b, subj)).filter((o): o is Original => o !== null);
 }
 
 const FYI = /(?:^|[^\p{L}])(?:fyi|f\.y\.i)(?=[^\p{L}]|$)|\bfor your (?:records|files|information|info|reference)\b|\bno action\b|\bnothing (?:needed|to do)\b|\bjust so you know\b|\bfor reference\b/iu;
@@ -134,7 +166,11 @@ function isFyiNote(note: string): boolean {
   return !!note && !note.includes("?") && FYI.test(note) && !ASK.test(note);
 }
 
-export function parseForward(subject: string, body: string): ParsedForward {
+/** `isInternal` (optional): when the first forwarded block's sender is
+ *  internal (a teammate passing along a teammate's forward), report the
+ *  deepest nested block whose sender is external — the original customer —
+ *  else the innermost block. Without it, the first block is reported. */
+export function parseForward(subject: string, body: string, isInternal?: (email: string) => boolean): ParsedForward {
   const subj = String(subject ?? "");
   const notForward: ParsedForward = { isForward: false, original: null, note: "", fyi: false };
   if (REPLY_SUBJECT.test(subj)) return notForward;
@@ -143,18 +179,11 @@ export function parseForward(subject: string, body: string): ParsedForward {
   const block = findBlock(lines, subjectFwd);
   if (!subjectFwd && !block) return notForward;
 
-  let original: ParsedForward["original"] = null;
-  if (block) {
-    const h = readHeaders(lines, block.headerStart);
-    if (h.from !== undefined) {
-      const { fromName, fromEmail } = parseFrom(h.from);
-      original = {
-        fromEmail,
-        fromName,
-        subject: h.subject ?? subj.replace(FWD_PREFIXES, "").trim(),
-        date: h.date ?? h.sent ?? "",
-      };
-    }
+  let original: ParsedForward["original"] = block ? originalOf(lines, block, subj) : null;
+  if (block && original && isInternal && original.fromEmail && isInternal(original.fromEmail)) {
+    const all = nestedOriginals(lines, block, subj);
+    const external = [...all].reverse().find((o) => o.fromEmail && !isInternal(o.fromEmail));
+    original = external ?? all[all.length - 1] ?? original;
   }
   const note = ownText(body);
   return { isForward: true, original, note, fyi: isFyiNote(note) };

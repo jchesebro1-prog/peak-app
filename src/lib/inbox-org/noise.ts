@@ -9,7 +9,9 @@ const CATEGORY_REASON: Record<string, string> = {
   CATEGORY_FORUMS: "Gmail filed it under Forums",
 };
 
-const ROBOT_LOCAL = /no-?reply|notifications?|mailer-daemon|bounce/i;
+/** The spec's list, plus `do-?not-?reply` (a common no-reply spelling the
+ *  spec's `no-?reply` misses: "do-not-reply" has no "noreply" in it). */
+const ROBOT_LOCAL = /no-?reply|do-?not-?reply|notifications?|mailer-daemon|bounce/i;
 const OUT_OF_OFFICE = /\b(?:out of (?:the )?office|automatic reply|auto[- ]?reply|autoreply)\b/i;
 
 export function noiseByRules(

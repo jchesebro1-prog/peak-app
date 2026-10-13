@@ -18,12 +18,19 @@ export type Ok = (cond: boolean, msg: string) => void;
 /* ---------- numbers (§1 step 3) ---------- */
 
 function numberChecks(ok: Ok): void {
-  const a = findEstimateNumbers("Re: EST-1042-2 main curtain (was EST-1042) — see also flm-1002.");
+  const a = findEstimateNumbers("Re: EST-1042-2 main curtain (was EST-1042) — see also FLM-1002.");
   ok(a.length === 3, "numbers: three distinct estimate numbers found");
   ok(a[0]?.prefix === "EST" && a[0]?.estNo === 1042 && a[0]?.suffix === 2 && a[0]?.raw === "EST-1042-2", "numbers: suffixed EST-1042-2 parsed with suffix 2");
   ok(a[1]?.estNo === 1042 && a[1]?.suffix === null, "numbers: unsuffixed EST-1042 is its own match");
-  ok(a[2]?.prefix === "FLM" && a[2]?.estNo === 1002, "numbers: lower-case flm-1002 found, prefix upper-cased");
+  ok(a[2]?.prefix === "FLM" && a[2]?.estNo === 1002, "numbers: FLM-1002 found");
   ok(findEstimateNumbers("EST-1042 and again EST-1042, est-1042").length === 1, "numbers: duplicates collapse to the first appearance");
+  const lowEst = findEstimateNumbers("quote est-1042 attached");
+  ok(lowEst.length === 1 && lowEst[0].prefix === "EST", "numbers: lower-case est- is read (EST only), prefix upper-cased");
+  ok(findEstimateNumbers("con-2026 rep-2026 rnt-2026 flm-1002 rig-1201 opp-1100 Est-1042x").length === 0, "numbers: other prefixes must be upper-case (con-2026 / rep-2026 are ordinary text)");
+  const one = findEstimateNumbers("EST-1042-1 and EST-1042");
+  ok(one.length === 1 && one[0].suffix === null && one[0].raw === "EST-1042-1", "numbers: a -1 suffix is the bare number (deduped with EST-1042)");
+  ok(findEstimateNumbers("https://x.com/files/REP-1234.pdf ?ref=EST-1042 a=EST-1043 v.EST-1044 est-1045@x.com x@EST-1046").length === 0, "numbers: URL / query / email noise ignored (/ . = ? @ before, @ after)");
+  ok(findEstimateNumbers("See EST-1042.pdf and (EST-1043): EST-1044!").length === 3, "numbers: ordinary punctuation around a number still matches");
   const order = findEstimateNumbers("OPP-1100 then RIG-1201 then CON-1300 then REP-1400 then RNT-1500").map((x) => x.prefix);
   ok(order.join(",") === "OPP,RIG,CON,REP,RNT", "numbers: every prefix, in order of appearance");
   ok(findEstimateNumbers("EST-9999999").length === 1 && findEstimateNumbers("EST-9999999")[0].estNo === 9999999, "numbers: a dead (non-existent) number still parses — resolution is the pipeline's job");
@@ -38,6 +45,8 @@ function numberChecks(ok: Ok): void {
   ok(r.projects.join(",") === "P-3001,S-4001", "numbers: project ids P-/S- found, deduped, in order");
   ok(r.leads.join(",") === "L-1050", "numbers: lead id L- found");
   ok(findRecordIds("p-3001 l-1050").projects.length === 0, "numbers: record ids are upper-case only");
+  const noisy = findRecordIds("/projects/P-3001 ?id=L-1050 P-3002@x.com");
+  ok(noisy.projects.length === 0 && noisy.leads.length === 0, "numbers: record ids in URLs / addresses ignored");
 }
 
 /* ---------- noise (§1 step 4) ---------- */
@@ -50,7 +59,7 @@ function noiseChecks(ok: Ok): void {
   ok(noiseByRules({ ...base, labelIds: ["CATEGORY_FORUMS"] }, ctx) !== null, "noise: Gmail Forums");
   ok(noiseByRules({ ...base, labelIds: ["INBOX", "CATEGORY_UPDATES", "IMPORTANT"] }, ctx) === null, "noise: Updates / Important alone are not noise");
   ok(noiseByRules({ ...base, bulk: true }, ctx) !== null, "noise: List-Unsubscribe / Precedence bulk");
-  for (const from of ["noreply@x.com", "no-reply@x.com", "notification@x.com", "notifications@x.com", "MAILER-DAEMON@x.com", "bounce+abc@x.com", "info-noreply@x.com"]) {
+  for (const from of ["noreply@x.com", "no-reply@x.com", "notification@x.com", "notifications@x.com", "MAILER-DAEMON@x.com", "bounce+abc@x.com", "info-noreply@x.com", "donotreply@x.com", "do-not-reply@x.com", "do-notreply@x.com"]) {
     ok(noiseByRules({ fromEmail: from, subject: "Hello" }, ctx) !== null, `noise: local part ${from}`);
   }
   ok(noiseByRules({ fromEmail: "pat@noreply.com", subject: "Hello" }, ctx) === null, "noise: only the local part is checked, not the domain");
@@ -144,6 +153,43 @@ function forwardChecks(ok: Ok): void {
   ok(!fyiQ.fyi, "forward: FYI with a question is not FYI-only");
   const fyiSig = parseForward("Fwd: Seats", "FYI\n-- \nMike Smith\nPeak Systems Group\n\n" + GMAIL_FWD.split("\n").slice(2).join("\n"));
   ok(fyiSig.fyi && fyiSig.note === "FYI", "forward: the note drops the -- signature");
+
+  // Pat → Ann → Bob → owner: two nested Gmail blocks, then an Outlook one inside.
+  const nested = [
+    "Over to you.",
+    "",
+    "---------- Forwarded message ---------",
+    "From: Ann Bell <ann@peaksystemsgroup.com>",
+    "Date: Tue, Oct 13, 2026 at 8:00 AM",
+    "Subject: Fwd: Main curtain replacement",
+    "To: Bob <bob@peaksystemsgroup.com>",
+    "",
+    "Bob, can you pass this on?",
+    "",
+    "---------- Forwarded message ---------",
+    "From: Pat Lee <pat.lee@lincolnhs.org>",
+    "Date: Mon, Oct 12, 2026 at 9:14 AM",
+    "Subject: Main curtain replacement",
+    "To: Ann Bell <ann@peaksystemsgroup.com>",
+    "",
+    "Hi Ann, see the thread below.",
+    "",
+    "From: Sam Ruiz <sam@peaksystemsgroup.com>",
+    "Sent: Friday, October 9, 2026 3:00 PM",
+    "To: Pat Lee <pat.lee@lincolnhs.org>",
+    "Subject: Main curtain",
+    "",
+    "Pat, we'll get you a number.",
+  ].join("\n");
+  const internal = (e: string) => e.endsWith("@peaksystemsgroup.com");
+  ok(parseForward("Fwd: Fwd: Main curtain replacement", nested).original?.fromEmail === "ann@peaksystemsgroup.com", "forward: nested — without isInternal the first block is reported");
+  const deep = parseForward("Fwd: Fwd: Main curtain replacement", nested, internal);
+  ok(deep.original?.fromEmail === "pat.lee@lincolnhs.org" && deep.original?.subject === "Main curtain replacement", "forward: nested — the deepest external sender (Pat) is reported, past an internal one below it");
+  const allInt = parseForward("Fwd: Fwd: x", nested.replace(/pat\.lee@lincolnhs\.org/g, "pat@peaksystemsgroup.com"), internal);
+  ok(allInt.original?.fromEmail === "sam@peaksystemsgroup.com", "forward: nested — all internal → the innermost block");
+  const quotedNested = parseForward("Fwd: x", "Take a look.\n\n---------- Forwarded ----------\nFrom: Ann Bell <ann@peaksystemsgroup.com>\n\n> ---------- Forwarded message ---------\n> From: Pat Lee <pat.lee@lincolnhs.org>\n> Subject: Seats\n>\n> Hi", internal);
+  ok(quotedNested.original?.fromEmail === "pat.lee@lincolnhs.org" && quotedNested.original?.subject === "Seats", "forward: nested — a block quoted under Peak's own Forward is found");
+  ok(parseForward("Fwd: Main curtain replacement", GMAIL_FWD, internal).original?.fromEmail === "pat.lee@lincolnhs.org", "forward: isInternal leaves an external first block alone");
 }
 
 /* ---------- sign-offs (§3 rules) ---------- */
@@ -163,6 +209,10 @@ function signOffChecks(ok: Ok): void {
   ok(isSignOff("Sounds good!\n-- \nPat Lee\nDid you know? We have a new number."), "signoff: the -- signature is stripped first");
   ok(!isSignOff("Thanks!\nI will check with the principal and get back to you next week."), "signoff: a real second sentence is not a signature");
   ok(!isSignOff("Thank you thank you thank you thank you thank you so much"), "signoff: more than ~8 words is not a sign-off");
+  ok(!isSignOff("Thanks!\nSend Invoice"), "signoff: a capitalised imperative line ('Send Invoice') is not a signature");
+  ok(!isSignOff("Thanks!\nDeclined"), "signoff: a capitalised status line ('Declined') is not a signature");
+  ok(!isSignOff("Thanks Declined"), "signoff: an action word is never a name");
+  ok(isSignOff("Thanks!\n- Pat"), "signoff: a dashed name line is still a signature");
 }
 
 /* ---------- internal addresses (§3 Internal sender) ---------- */
@@ -230,6 +280,9 @@ function courtChecks(ok: Ok): void {
   ok(intMine.owner === "teammate" && intMine.teammateId === "u2", "court: internal-only — I wrote last → that teammate's court");
   ok(courtByRules([msg("out", OWNER, "Done?", "Lincoln"), msg("in", MIKE, "Got it, thanks.", "Re: Lincoln")], ctx).owner === "nobody", "court: internal-only — a teammate's sign-off → nobody");
   ok(courtByRules([msg("in", MIKE, OUTLOOK_FWD, "FW: Invoice")], ctx).owner === "nobody", "court: internal-only — an FYI forward → nobody");
+  const intDone = courtByRules([msg("out", OWNER, "Mike, what's the Lincoln PO number?", "Lincoln"), msg("in", MIKE, "It's 4471.", "Re: Lincoln"), msg("out", OWNER, "Thanks, got it", "Re: Lincoln")], ctx);
+  ok(intDone.owner === "nobody", "court: internal-only — my sign-off after a teammate's answer → nobody");
+  ok(courtByRules([ask, msg("out", OWNER, "Thanks!")], ctx).owner === "customer", "court: in a customer thread my own sign-off still waits on them");
 
   const unordered = [msg("out", OWNER, "Attached."), ask];
   unordered[1] = { ...unordered[1], at: 0 };
@@ -260,8 +313,18 @@ function dueChecks(ok: Ok): void {
     ["end of month", MON, "2026-10-31"], ["by the end of the month", FRI, "2026-10-31"], ["end of the month", SAT, "2026-10-31"],
     ["10/22", MON, "2026-10-22"], ["by 10/22/2026", FRI, "2026-10-22"], ["Oct 22", SAT, "2026-10-22"],
     ["October 22nd", MON, "2026-10-22"], ["2026-10-22", MON, "2026-10-22"], ["22 October", MON, "2026-10-22"],
-    ["10/1", MON, "2027-10-01"], ["Jan 5", MON, "2027-01-05"],
+    // a recently passed date → the default; one > ~180 days back rolls to next year
+    ["10/1", MON, "2026-10-14"], ["Sep 1", FRI, "2026-10-20"], ["10/1/2026", MON, "2026-10-14"],
+    ["Jan 5", MON, "2027-01-05"], ["April 1", MON, "2027-04-01"],
     ["13/45", MON, "2026-10-14"],
+    // a month name only counts as a whole word
+    ["2 marketing calls", MON, "2026-10-14"], ["3 decks", FRI, "2026-10-20"],
+    // compound phrases resolve to their most specific part
+    ["by EOD Friday", MON, FRI], ["Friday EOD", MON, FRI], ["COB Thursday", MON, "2026-10-15"],
+    ["by EOD Friday", SAT, "2026-10-23"], ["COB Thursday", FRI, "2026-10-22"],
+    ["end of next week", MON, "2026-10-23"], ["end of next week", FRI, "2026-10-23"], ["end of next week", SAT, "2026-10-23"],
+    ["Wednesday of next week", MON, "2026-10-21"], ["Wednesday of next week", FRI, "2026-10-21"], ["next week Wednesday", SAT, "2026-10-21"],
+    ["tomorrow EOD", FRI, "2026-10-17"],
   ];
   for (const [phrase, anchor, want] of cases) {
     const got = resolveDue(phrase, at10(anchor));

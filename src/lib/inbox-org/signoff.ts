@@ -7,7 +7,8 @@
  * trailing signature block (from the first valediction or name-like line
  * after the first line); the rest must be at most 8 words, contain one of the
  * sign-off phrases, and nothing else but filler ("so much", "for the quote")
- * and up to two capitalised name words ("Thanks Jeff!").
+ * and up to two capitalised name words ("Thanks Jeff!") — never an action
+ * word ("Send Invoice", "Declined": `NOT_NAMES`).
  */
 import { ownText } from "./forward";
 
@@ -26,13 +27,26 @@ const FILLER = new Set([
 const PRONOUNS = new Set(["i", "i'll", "i'm", "i've", "i'd", "we", "we'll", "we're"]);
 
 const VALEDICTION = /^(?:best|best regards|regards|kind regards|warm regards|warmly|cheers|sincerely|respectfully|thanks|thank you|many thanks|take care|-+)[\s,.!]*$/i;
-const NAME_LINE = /^[-–—~]*\s*\p{Lu}[\p{L}'.-]*(?:\s+\p{Lu}[\p{L}'.-]*){0,3}\s*$/u;
+/** A name line: 1–3 capitalised words (an optional leading dash), none of
+ *  them an action word — so "Send Invoice" / "Declined" under "Thanks!" stay
+ *  part of the message instead of passing as a signature. */
+const NAME_LINE = /^[-–—~]*\s*\p{Lu}[\p{L}'.-]*(?:\s+\p{Lu}[\p{L}'.-]*){0,2}\s*$/u;
+/** Action / status words that are never a name. */
+const NOT_NAMES = new Set([
+  "send", "sent", "resend", "please", "call", "decline", "declined", "approve", "approved", "confirm", "confirmed",
+  "check", "cancel", "cancelled", "canceled", "pay", "paid", "order", "ordered", "ship", "shipped", "sign", "signed",
+  "schedule", "scheduled", "update", "updated", "review", "attach", "attached", "need", "needed", "stop", "hold",
+  "wait", "invoice", "quote", "yes", "no", "not", "email", "reply", "book", "booked", "reject", "rejected",
+]);
+const bare = (w: string) => w.toLowerCase().replace(/[^\p{L}']/gu, "");
+const isNameLine = (line: string) =>
+  NAME_LINE.test(line) && !line.replace(/^[-–—~\s]+/, "").split(/\s+/).some((w) => NOT_NAMES.has(bare(w)));
 
 function bodyCore(text: string): string {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   let cut = lines.length;
   for (let i = 1; i < lines.length; i++) {
-    if (VALEDICTION.test(lines[i]) || NAME_LINE.test(lines[i])) {
+    if (VALEDICTION.test(lines[i]) || isNameLine(lines[i])) {
       cut = i;
       break;
     }
@@ -66,5 +80,5 @@ export function isSignOff(body: string): boolean {
     i++;
   }
   if (!hit || residue.length > 2) return false;
-  return residue.every((w) => /^\p{Lu}/u.test(w) && !PRONOUNS.has(w.toLowerCase()));
+  return residue.every((w) => /^\p{Lu}/u.test(w) && !PRONOUNS.has(w.toLowerCase()) && !NOT_NAMES.has(bare(w)));
 }

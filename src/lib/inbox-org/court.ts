@@ -12,7 +12,7 @@
  *     against me).
  *  5. Internal-only threads (a teammate and no customer in it) follow the same
  *     rules between teammates: a teammate wrote last → me (sign-off → nobody);
- *     I wrote last → that teammate's court.
+ *     I wrote last → that teammate's court (my sign-off → nobody).
  * My own forwards out (to a vendor, say) are skipped: they don't move the
  * court. Inbound mail from an internal address is a teammate's unless it is
  * one of the owner's own addresses (then it counts as me writing).
@@ -76,6 +76,7 @@ export function courtByRules(msgs: CourtMessage[], ctx: CourtCtx): Omit<Court, "
   }
 
   if (internalOnly) {
+    if (isSignOff(last.body)) return { owner: "nobody", reason: "You signed off" };
     const mate = [...sorted].reverse().find((m) => role(m) === "teammate");
     const teammateId = mate ? teamId(mate) : undefined;
     return {
