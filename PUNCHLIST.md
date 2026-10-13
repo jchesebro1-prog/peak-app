@@ -12016,7 +12016,7 @@ link/archive paths a person would.
 
 **Next roadmap pieces:** pop-out windows → AI daily brief → estimate suggestion → AI sidebar.
 
-## 336. Pop-out windows — Inbox, thread, Estimator and customer record in their own windows — BUILT 2026-10-13 on `worktree-assist-layer` (D902–D909)
+## 336. Pop-out windows — Inbox, thread, Estimator and customer record in their own windows — BUILT 2026-10-13 on `worktree-assist-layer` (D902–D913)
 
 **Asked (Jeff, 2026-10-13):** roadmap piece 1b. Keep the dashboard open as home base; the Inbox, an email, an estimate or a customer record each get their own window, and the windows keep each other current. Spec `docs/superpowers/specs/2026-10-13-popout-windows-design.md`, plan `docs/superpowers/plans/2026-10-13-popout-windows.md`. All client-side; no migration, no env var.
 
@@ -12027,6 +12027,7 @@ link/archive paths a person would.
 - **Open in main window** goes to the most recently focused main window, or a new tab if none answers in 500 ms (D906).
 - **Live refresh (`LiveSync`):** a save in one window refreshes the others after 1 s, never while someone is typing, plus a refresh on focus when over 30 s stale (D907). The old Inbox-only listener is gone.
 - **Posters** on the Estimator, customer record and task saves, including the `TasksCard` status and assignee selects (D908).
+- **Final-review fixes (D910–D913):** no refresh while offline or on Work offline, so a failed refresh can never fall back to a full reload that loses typing (parked, retried 2 s after reconnect; focus refreshes settle 1.5 s); change refreshes throttled to one per 5 s per window, last one honoured; an unsaved-work hold (`setUnsavedHold`, set by the Estimator) that skips the focus refresh and keeps the main window from answering Open in main window, as do a focused field and typing in the last 3 s; the typing guard is OR per the spec; the nav ⧉ stays visible on touch screens (`@media (hover: none)`).
 
 **Remaining (Jeff-gated):**
 - (1) Try it in Chrome and Safari: pop out an estimate, a customer and the Inbox; allow pop-ups for the site if asked.

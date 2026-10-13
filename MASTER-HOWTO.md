@@ -268,7 +268,7 @@ filings by source, % approved as suggested, corrections, noise rescues, promise-
 created/undone, and an admin can set Peak's own mail domain and delete company-wide
 sender rules there.
 
-## 6c. Pop-out windows (#336, D902–D909)
+## 6c. Pop-out windows (#336, D902–D913)
 
 Put the dashboard on one screen and the work on another. Nothing to turn on: it is all
 in the browser, so there is no setting, no env var and no kill switch.
@@ -289,17 +289,26 @@ in the browser, so there is no setting, no env var and no kill switch.
 
 - The nav is gone; the bar at the top shows the page name, **Open in main window** and
   **✕**. Open in main window sends your main window to this page (Chrome may only flash
-  its tab); if none is open it uses a new tab.
+  its tab); if none is open, or the main window has unsaved work (an unsaved estimate,
+  a field you are typing in), it uses a new tab instead.
 - Each kind of window comes back at the size and place you last left it.
 - On a phone, a narrow window or the app shell the ⧉ buttons are hidden.
 
 **Keeping windows current**
 
-- Save something in one window and the others showing it refresh about a second later.
-- A window never refreshes while you are typing in it; it catches up after you stop.
-- Coming back to a window that has not refreshed for 30 seconds refreshes it. A few
-  buttons (changing a quote's status from the Quotes hub, Approve on a portal quote)
-  rely on that instead of the instant refresh.
+- Save something in one window and every other open window refreshes about a second
+  later, whatever it is showing. While someone keeps saving (typing in an autosaved
+  estimate note, say), the others refresh at most every 5 seconds and once more after
+  the last save.
+- A window never refreshes while your cursor is in a text field in it, or within 3
+  seconds of your last keystroke; it catches up after you leave the field.
+- Coming back to a window that has not refreshed for 30 seconds refreshes it, a moment
+  later. An estimate with unsaved changes skips this. A few buttons (changing a
+  quote's status from the Quotes hub, Approve on a portal quote) rely on it instead of
+  the instant refresh.
+- Nothing refreshes while you are offline or on **Work offline**; windows catch up a
+  couple of seconds after the connection is back, so a laptop waking up before its
+  Wi-Fi never reloads a page and loses what you typed.
 
 **Limits**
 

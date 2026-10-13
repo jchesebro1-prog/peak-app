@@ -1136,7 +1136,7 @@ See `.env.example`.
     all three promises on `court.promise`. Next: pop-out windows → AI brief →
     estimate suggestion → AI sidebar. Punch item #335.
 
-55. ✅ **Pop-out windows** (#336, D902–D909) — roadmap piece 1b, all client-side
+55. ✅ **Pop-out windows** (#336, D902–D913) — roadmap piece 1b, all client-side
     (no migration, no env var). The Inbox, a thread, an estimate or a customer
     record opens in its own named browser window (`peak-pop:<kind>:<id>`, one per
     item; popping out the same item again focuses it and never reloads it —
@@ -1150,8 +1150,12 @@ See `.env.example`.
     screen type as inner size. Pure core in `src/lib/popout/` (`names`, `geometry`,
     `channel`, `guard`, `click`, `live`, `open`), `PopoutButton`, `PopHeader` and one `LiveSync`
     (replaces #335's Inbox listener): a save in one window posts `changed` on
-    `BroadcastChannel("peak")` and the others refresh after 1 s, never while typing,
-    plus a refresh on focus when over 30 s stale. Posters cover the Estimator,
+    `BroadcastChannel("peak")` and every other window refreshes after 1 s (at most
+    one per 5 s), never while a field is focused or within 3 s of a keystroke, never
+    offline (a failed `router.refresh()` becomes a full reload — D910), plus a
+    refresh on focus when over 30 s stale; an unsaved-work hold (`popout/hold.ts`,
+    set by the Estimator) skips that and keeps Open in main window from navigating
+    away (D912). Posters cover the Estimator,
     customer record and task saves; the Quotes-hub `setQuoteStatus` and the
     PortalPanel Approve rely on the focus refresh. Remaining is Jeff-gated: try it
     in Chrome and Safari, an estimate beside the dashboard, the remembered size, and

@@ -81,10 +81,12 @@ onChanged(handler): () => void
   - Customer record: edits, contacts, venues, notes, documents.
   - Tasks: create, complete, delete (task dialogs, Home queue, thread task actions).
 - **Listener** (`LiveSync`, one per window, mounted in `(app)/layout.tsx`, replacing the Inbox/Home `inbox-changed-listener`):
-  - Every "changed" message causes a debounced `router.refresh()` (1 s).
-  - **Typing guard:** if the focused element is an editable field with unsaved input, or the user typed in the last 3 s, defer the refresh until 3 s after the last keystroke.
+  - Every "changed" message, whatever the window shows, causes a `router.refresh()` armed 1 s later and trailing-throttled to at most one per 5 s per window; the last change is always honoured (D911).
+  - **Typing guard** (as built, D913): a change-driven refresh waits until 3 s after the last keystroke in an editable field, and also while an editable field is focused (no reliable "unsaved input" signal exists, so focused counts as unsaved; re-checked every 3 s). A focus refresh waits only while an editable field is focused.
   - **Self-ignore:** ignore messages this window posted (a per-window id in the message, not a time window).
-  - **Focus refresh:** on `visibilitychange` to visible or window `focus`, refresh if the last refresh was more than 30 s ago.
+  - **Focus refresh:** on `visibilitychange` to visible or window `focus`, refresh if the last refresh was more than 30 s ago (mount and pathname changes count as refreshes; search-param changes do not), after a 1.5 s settle. Skipped while the page holds unsaved work (`setUnsavedHold`, D912).
+  - **Offline gate** (D910): never refresh while `navigator.onLine` is false or the sync engine is disconnected (including Work offline). A failed `router.refresh()` in Next 16 becomes a full reload that the service worker answers from cache, losing in-memory edits. The refresh is parked and runs about 2 s after the network comes back.
+  - **Open in main window** (D912): a main window does not answer while an editable field is focused, a key was typed in it in the last 3 s, or the page holds unsaved work; the pop-out then opens a new tab.
   - Nav counts and the bell refresh because they are part of the layout's server render.
 
 Pages already persist their own unsaved state where they need it: Estimator drafts and composer text are client state, and `router.refresh()` keeps client state. The guard is a second safety net.
