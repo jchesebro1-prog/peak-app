@@ -371,3 +371,6 @@ export type ListVM = {
   /** true in the Deleted folder — bulk actions offer Restore, not Delete */
   isDeleted: boolean;
 };
+
+/** #334 Assist — which Assist buttons this user sees (server-computed gate). */
+export type AssistFlags = { tasks: boolean; reply: boolean; estimate: boolean };

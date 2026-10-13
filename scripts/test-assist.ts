@@ -8,6 +8,8 @@ import { z } from "zod";
 import { runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
 import { editRatio, estimateKeep, replyOutcome } from "@/lib/assist/outcome";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
+import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
+import { threadBlock } from "@/lib/assist/features/thread-text";
 
 import { readFileSync, readdirSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -210,6 +212,31 @@ export async function assistOutcomeChecks(ok: Ok): Promise<void> {
   ok(estimateKeep([{ sku: "A", qty: 2 }, { sku: "B", qty: 5 }], q).outcome === "accepted", "assist outcome: all kept = accepted");
 }
 
+export async function assistTaskChecks(ok: Ok): Promise<void> {
+  const tb = threadBlock({ subject: 'Re: <Quote> "X"', messages: [
+    { direction: "out", author: "Jeff", at: Date.UTC(2026, 9, 2), body: "second" },
+    { direction: "in", author: "Pat", at: Date.UTC(2026, 9, 1), body: "first " + "y".repeat(50) },
+  ] }, { maxMessages: 8, maxChars: 20 });
+  ok(tb.startsWith('<email_thread subject="Re: Quote X">') && tb.indexOf("first") < tb.indexOf("second") && tb.includes("[trimmed]"), "assist thread: wrapped, oldest-first, trimmed, subject defanged");
+  const ctx = { today: "2026-10-12", teamIds: new Set(["u1", "u2"]), linkKeys: new Set(["thread", "customer"]) };
+  const out = sanitizeTaskSuggestions({ tasks: [
+    { title: "  Send quote ", notes: "n", dueDate: "2026-10-15", assigneeUserId: "u2", linkKeys: ["customer", "bogus"], tier: "high", size: "s" },
+    { title: "send QUOTE", notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "low", size: "l" },
+    { title: "Call back", notes: "", dueDate: "2026-10-01", assigneeUserId: "ghost", linkKeys: [], tier: "normal", size: "m" },
+    { title: "", notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "normal", size: "m" },
+  ] }, ctx);
+  ok(out.length === 2, "assist tasks: blank + case-insensitive duplicate titles dropped");
+  ok(out[0].title === "Send quote" && out[0].dueDate === "2026-10-15" && out[0].assigneeUserId === "u2", "assist tasks: valid fields kept");
+  ok(out[0].linkKeys.join(",") === "thread,customer", "assist tasks: thread link always on, unknown links dropped");
+  ok(out[1].dueDate === "" && out[1].assigneeUserId === "", "assist tasks: past date + unknown assignee cleared");
+  const many = sanitizeTaskSuggestions({ tasks: Array.from({ length: 9 }, (_, i) => ({ title: "T" + i, notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "normal" as const, size: "m" as const })) }, ctx);
+  ok(many.length === 5, "assist tasks: at most 5");
+  const ut = buildTasksUserText({ thread: "<email_thread/>", today: "2026-10-12", weekday: "Monday", team: [{ id: "u1", name: "A" }], links: [{ key: "thread", label: "This email" }] });
+  ok(ut.includes("Monday 2026-10-12") && ut.includes("u1 — A") && ut.includes("thread — This email"), "assist tasks: user text lists date, team, links");
+  ok(taskSuggestOutcome({ suggested: 3, created: 0, edited: 0 }) === "discarded" && taskSuggestOutcome({ suggested: 3, created: 3, edited: 0 }) === "accepted" && taskSuggestOutcome({ suggested: 3, created: 2, edited: 0 }) === "edited" && taskSuggestOutcome({ suggested: 3, created: 3, edited: 1 }) === "edited", "assist tasks: outcome discarded / accepted / edited");
+  ok(!suggestionEdited(out[0], { ...out[0], linkKeys: [...out[0].linkKeys].reverse() }) && suggestionEdited(out[0], { ...out[0], size: "l" }) && suggestionEdited(out[0], { ...out[0], title: "Send quote now" }), "assist tasks: edit detection ignores link order, sees field changes");
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -227,6 +254,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistProviderChecks(ok);
     await assistRunChecks(ok);
     await assistOutcomeChecks(ok);
+    await assistTaskChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);

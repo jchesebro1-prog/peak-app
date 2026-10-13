@@ -66,6 +66,7 @@ import {
   type SortKey,
 } from "@/lib/stores/comms";
 import type {
+  AssistFlags,
   ChanIcon,
   ComposeInit,
   ConnectionVM,
@@ -88,6 +89,7 @@ import { MEETINGS_BASE_HREF, meetingsHref, meetingsTabOf } from "./meetings/form
 import HomeTabs from "../home-tabs";
 import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
+import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
@@ -209,6 +211,8 @@ export default async function InboxPage({
   const user = await requireUser();
   const me = user.name;
   const settings = await getSettings();
+  // #334 — Assist buttons render only for gated-in users (no provider = none).
+  const assistFlags: AssistFlags = assistUiFlags(user.id, assistSettingsOf(settings));
   const domain = companyDomain(settings.companyName);
   // Whose mailbox this is, in order of how much we actually know:
   //   1. the address Google authorized for this user's Gmail connection,
@@ -1161,6 +1165,7 @@ export default async function InboxPage({
             crmMode={crmMode}
             signature={signature}
             meetings={meetingsSlot}
+            assist={assistFlags}
           />
         </div>
       </div>

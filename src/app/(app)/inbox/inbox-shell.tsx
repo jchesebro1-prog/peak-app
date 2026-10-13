@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
+  AssistFlags,
   CategoryOpt,
   ComposeInit,
   CustomerVM,
@@ -56,6 +57,8 @@ import LogModal from "./log-modal";
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
+const NO_ASSIST: AssistFlags = { tasks: false, reply: false, estimate: false };
+
 // Only the signed-in user's own mailbox — the shared sales/installs/info
 // boxes were retired (comms.ts SHARED_BOXES).
 const BOX_SEL_OPTIONS: Opt[] = [
@@ -105,6 +108,7 @@ export default function InboxShell({
   crmMode: initialCrmMode,
   signature,
   meetings = null,
+  assist = NO_ASSIST,
 }: {
   box: string;
   folder: string;
@@ -131,6 +135,8 @@ export default function InboxShell({
   /** #323 — ?view=meetings: the Meetings box and meeting reader (server-rendered
    *  slots) replace the thread list and thread reader; null on every mail view. */
   meetings?: { list: ReactNode; reader: ReactNode; overlayReader: ReactNode; selected: boolean; closeHref: string } | null;
+  /** #334 — which Assist buttons this user sees (all off unless gated in). */
+  assist?: AssistFlags;
 }) {
   const router = useRouter();
   // #126 — both remembered per browser (localStorage), hydration-safe: the
@@ -1186,6 +1192,7 @@ export default function InboxShell({
             rosterOptions={rosterOptions}
             onAfterSend={selectThread}
             signature={signature}
+            assist={assist}
           />
         )}
       </div>
@@ -1265,6 +1272,7 @@ export default function InboxShell({
               onClose={closeOverlay}
               onAfterSend={selectThread}
               signature={signature}
+              assist={assist}
             />
           </div>
         </>

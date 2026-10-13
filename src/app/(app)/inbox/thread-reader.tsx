@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { MessageVM, Opt, ReaderVM } from "./types";
+import type { AssistFlags, MessageVM, Opt, ReaderVM } from "./types";
 import {
   archiveAction,
   assignAction,
@@ -17,12 +17,17 @@ import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import TaskDialog from "./task-dialog";
+import AssistTasksDialog from "./assist-tasks-dialog";
+import { suggestTasksAction } from "./assist-actions";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
 type Mode = "reply" | "replyAll" | "forward";
+
+type SuggestTasksResult = Awaited<ReturnType<typeof suggestTasksAction>>;
+const NO_ASSIST: AssistFlags = { tasks: false, reply: false, estimate: false };
 
 /* ---- conversation (Gmail-style) ------------------------------------------
  * Gmail shows the newest message open and everything before it as one-line
@@ -460,6 +465,7 @@ export default function ThreadReader({
   onClose,
   onAfterSend,
   signature,
+  assist = NO_ASSIST,
 }: {
   vm: ReaderVM | null;
   variant: "pane" | "overlay";
@@ -469,6 +475,8 @@ export default function ThreadReader({
   onAfterSend?: (id: string) => void;
   /** #127 — seeded below a "-- " line on Reply / Reply all / Forward */
   signature: string;
+  /** #334 — which Assist buttons this user sees (all off by default). */
+  assist?: AssistFlags;
 }) {
   const router = useRouter();
   // #215 fix wave 1 — TaskDialog's fallback focus target when its own
@@ -508,6 +516,10 @@ export default function ThreadReader({
   const linkGuardRef = useRef<(() => boolean) | null>(null);
   // #215 — the create-task dialog; messageId = the message it was opened from
   const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
+  // #334 Assist — Suggest tasks: busy while the model runs, then the dialog.
+  const [assistBusy, setAssistBusy] = useState(false);
+  const [assistError, setAssistError] = useState<string | null>(null);
+  const [assistTasks, setAssistTasks] = useState<Extract<SuggestTasksResult, { ok: true }> | null>(null);
   const [sending, setSending] = useState(false);
 
   // call/meeting quick log
@@ -974,6 +986,29 @@ export default function ThreadReader({
                 Site visit
               </ActionBtn>
             )}
+            {assist.tasks && vm.isEmail && (
+              <ActionBtn
+                colors={["#5b616e", "#fff", "#e4e7ec"]}
+                disabled={assistBusy}
+                title="Assist — drafts suggestions for you to review"
+                onClick={async () => {
+                  if (assistBusy) return;
+                  setAssistBusy(true);
+                  setAssistError(null);
+                  try {
+                    const r = await suggestTasksAction(vm.id);
+                    if (r.ok) setAssistTasks(r);
+                    else setAssistError(r.error);
+                  } catch {
+                    setAssistError("Assist couldn’t respond — please try again.");
+                  } finally {
+                    setAssistBusy(false);
+                  }
+                }}
+              >
+                {assistBusy ? "Thinking…" : "Suggest tasks"}
+              </ActionBtn>
+            )}
             <ActionBtn
               colors={["#8c919c", "#fff", "#e4e7ec"]}
               onClick={async () => {
@@ -1004,7 +1039,27 @@ export default function ThreadReader({
                 containerRef={readerRootRef}
               />
             )}
+            {assistTasks && (
+              <AssistTasksDialog
+                threadId={vm.id}
+                runId={assistTasks.runId}
+                suggestions={assistTasks.suggestions}
+                team={assistTasks.team}
+                links={assistTasks.links}
+                meId={vm.meId}
+                onClose={() => setAssistTasks(null)}
+                onCreated={() => {
+                  setAssistTasks(null);
+                  router.refresh();
+                }}
+              />
+            )}
           </div>
+          {assistError && (
+            <p role="alert" style={{ margin: "-4px 0 10px", fontSize: 12, color: "#b4543a" }}>
+              {assistError}
+            </p>
+          )}
 
           {/* EMAIL: reply / reply-all / forward */}
           {vm.isEmail && !composerOpen && (
@@ -1339,15 +1394,22 @@ function ActionBtn({
   colors: [ink, soft, bd],
   onClick,
   children,
+  disabled = false,
+  title,
 }: {
   colors: [string, string, string];
   onClick: () => void;
   children: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       style={{
+        opacity: disabled ? 0.6 : 1,
         fontSize: 11.5,
         fontWeight: 600,
         color: ink,
@@ -1355,7 +1417,7 @@ function ActionBtn({
         border: `1px solid ${bd}`,
         borderRadius: 8,
         padding: "6px 10px",
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
         fontFamily: "var(--font-ui)",
       }}
     >
