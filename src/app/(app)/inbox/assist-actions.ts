@@ -21,7 +21,8 @@ import { loadThreadFor } from "@/lib/assist/thread-access";
 import { draftEstimateFromThread } from "@/lib/assist/estimate-draft-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { chicagoToday } from "@/lib/assist/config";
+import { assistGate, assistSettingsOf, chicagoToday } from "@/lib/assist/config";
+import { getSettings } from "@/lib/settings";
 import { getRun, setRunOutcome } from "@/lib/stores/assist-runs";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
 import {
@@ -39,11 +40,20 @@ import type { AssistFeature, AssistOutcome } from "@/lib/assist/types";
 const OUTCOMES: AssistOutcome[] = ["accepted", "edited", "discarded"];
 const CLIENT_OUTCOME_FEATURES: AssistFeature[] = ["tasks", "reply"];
 
+/** Gate first (D869): a refused user never triggers the full-table loads
+ *  below. runAssist re-checks — this is the cheap early exit. */
+async function gateFor(feature: AssistFeature, userId: string): Promise<string | null> {
+  const g = assistGate(feature, userId, assistSettingsOf(await getSettings()));
+  return g.ok ? null : g.reason;
+}
+
 export async function suggestTasksAction(threadId: string): Promise<
   | { ok: true; runId: string; suggestions: TaskSuggestion[]; team: { id: string; name: string }[]; links: { key: string; label: string }[] }
   | { ok: false; error: string }
 > {
   const me = await requireUser();
+  const refused = await gateFor("tasks", me.id);
+  if (refused) return { ok: false, error: refused };
   const t = await loadThreadFor(threadId, me.name);
   if (!t) return { ok: false, error: "That email isn't available." };
   const [users, links] = await Promise.all([activeUsers(), threadTaskLinkOptions(t)]);
@@ -84,6 +94,8 @@ export async function draftReplyAction(
   tone: ReplyTone = "normal"
 ): Promise<{ ok: true; runId: string; draft: string } | { ok: false; error: string }> {
   const me = await requireUser();
+  const refused = await gateFor("reply", me.id);
+  if (refused) return { ok: false, error: refused };
   const t = await loadThreadFor(threadId, me.name);
   if (!t) return { ok: false, error: "That email isn't available." };
   const safeTone: ReplyTone = TONES.includes(tone) ? tone : "normal";
@@ -152,6 +164,8 @@ export async function draftEstimateAction(
   threadId: string
 ): Promise<{ ok: true; quoteId: string; href: string } | { ok: false; error: string }> {
   const me = await requireUser();
+  const refused = await gateFor("estimate", me.id);
+  if (refused) return { ok: false, error: refused };
   const r = await draftEstimateFromThread(String(threadId || ""), { id: me.id, name: me.name });
   if (!r.ok) return r;
   await scheduleQuotePdf(r.quoteId);

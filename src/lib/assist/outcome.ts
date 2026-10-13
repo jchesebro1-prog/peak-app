@@ -55,3 +55,15 @@ export function estimateKeep(
   const outcome: AssistOutcome = kept / total >= 0.9 ? "accepted" : (kept + changed) / total < 0.1 ? "discarded" : "edited";
   return { outcome, kept, changed, removed, total };
 }
+
+/**
+ * A draft-estimate run's outcome from its stored detail (D879): no `quoteId`
+ * key yet = pending (null); an explicit `quoteId: null` (no systems built, or
+ * the create failed) = discarded; else estimateKeep against the quote as it
+ * stands now (null = deleted = discarded).
+ */
+export function estimateOutcomeFor(detail: { quoteId?: string | null; lines?: DraftLine[] } | null | undefined, quote: QuoteLike | null): AssistOutcome | null {
+  if (!detail || detail.quoteId === undefined) return null;
+  if (detail.quoteId === null || detail.quoteId === "") return "discarded";
+  return estimateKeep(detail.lines ?? [], quote).outcome;
+}

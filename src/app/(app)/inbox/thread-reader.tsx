@@ -545,6 +545,10 @@ export default function ThreadReader({
   const [draftBusy, setDraftBusy] = useState(false);
   const [assistDraft, setAssistDraft] = useState<AssistDraft | null>(null);
   const assistDraftRef = useRef<AssistDraft | null>(null);
+  // In-flight guards: a double click lands before the busy state re-renders.
+  const tasksInFlight = useRef(false);
+  const estimateInFlight = useRef(false);
+  const replyInFlight = useRef(false);
   const mountedRef = useRef(false);
   const sendingRef = useRef(false);
   const unmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -658,7 +662,8 @@ export default function ThreadReader({
   // #334 — Draft reply: opens the Reply composer with the draft above the
   // signature. Nothing is sent; the user reviews and presses Send.
   const startDraft = async () => {
-    if (draftBusy) return;
+    if (draftBusy || replyInFlight.current) return;
+    replyInFlight.current = true;
     setDraftBusy(true);
     setAssistError(null);
     try {
@@ -681,6 +686,7 @@ export default function ThreadReader({
     } catch {
       setAssistError("Assist couldn’t respond — please try again.");
     } finally {
+      replyInFlight.current = false;
       setDraftBusy(false);
     }
   };
@@ -1091,7 +1097,8 @@ export default function ThreadReader({
                 disabled={assistBusy}
                 title="Assist — drafts suggestions for you to review"
                 onClick={async () => {
-                  if (assistBusy) return;
+                  if (assistBusy || tasksInFlight.current) return;
+                  tasksInFlight.current = true;
                   setAssistBusy(true);
                   setAssistError(null);
                   try {
@@ -1101,6 +1108,7 @@ export default function ThreadReader({
                   } catch {
                     setAssistError("Assist couldn’t respond — please try again.");
                   } finally {
+                    tasksInFlight.current = false;
                     setAssistBusy(false);
                   }
                 }}
@@ -1114,23 +1122,25 @@ export default function ThreadReader({
                 disabled={estimateBusy}
                 title="Assist — builds a draft estimate from this email for you to check line by line"
                 onClick={async () => {
-                  if (estimateBusy) return;
+                  if (estimateBusy || estimateInFlight.current) return;
+                  estimateInFlight.current = true;
                   setEstimateBusy(true);
                   setAssistError(null);
                   try {
                     const r = await draftEstimateAction(vm.id);
                     if (r.ok) {
                       router.push(r.href);
-                      return; // stay busy while the Estimator opens
+                      return; // stay busy (and guarded) while the Estimator opens
                     }
                     setAssistError(r.error);
                   } catch {
                     setAssistError("Assist couldn’t respond — please try again.");
                   }
+                  estimateInFlight.current = false;
                   setEstimateBusy(false);
                 }}
               >
-                {estimateBusy ? "Drafting… (up to a minute)" : "Draft estimate"}
+                {estimateBusy ? "Drafting… (can take a few minutes)" : "Draft estimate"}
               </ActionBtn>
             )}
             <ActionBtn
