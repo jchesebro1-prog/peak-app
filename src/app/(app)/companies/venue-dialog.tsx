@@ -13,6 +13,7 @@ import {
   type VenueDialogInitial,
   type VenueType,
 } from "@/lib/venue-types";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * #216 — add or edit ONE venue. The name is never typed: it is derived
@@ -231,6 +232,7 @@ export default function VenueDialog({
         setError(res.error);
         return;
       }
+      postChanged("customer", companyId);
       done = true;
       router.push(closeHref, { scroll: false });
       router.refresh();

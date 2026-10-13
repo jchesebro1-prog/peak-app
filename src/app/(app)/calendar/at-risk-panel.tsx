@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CalendarAtRisk, CalendarFuturePin } from "@/lib/task-plan/calendar-view";
 import { handOffAction, pushDueDateAction, unpinBlockAction } from "./plan-actions";
+import { postChanged } from "@/lib/popout/channel";
 
 type Result = { ok: true } | { ok: false; error: string };
 const when = (ms: number) => new Date(ms).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
@@ -66,7 +67,7 @@ export default function AtRiskPanel({
       if (!r.ok) {
         keepError.current = true;
         setError(r.error);
-      }
+      } else postChanged("task");
       router.refresh();
     });
 

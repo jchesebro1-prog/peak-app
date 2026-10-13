@@ -15,6 +15,7 @@ import { defaultThreadTaskNotes, THREAD_TASK_TITLE_MAX } from "@/lib/inbox-task"
 import { BTN, CHECK_ROW, PRIMARY } from "./sidebar-styles";
 import TierSizeChips from "@/components/task-plan/tier-size-chips";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
+import { postChanged } from "@/lib/popout/channel";
 
 const inStyle: CSSProperties = {
   width: "100%",
@@ -180,6 +181,8 @@ export default function TaskDialog({
         setError(r.error);
         return;
       }
+      postChanged("task");
+      postChanged("thread", vm.id);
       onClose();
       router.refresh();
     });

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addCustomerNoteAction } from "../actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * #21 — the Activity card's note composer. Imports ONLY the server-action
@@ -29,6 +30,7 @@ export default function ActivityComposer({ customerId }: { customerId: string })
         setErr(res.error);
         return;
       }
+      postChanged("customer", customerId);
       setText("");
       router.refresh();
     });

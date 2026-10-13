@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { deleteCustomerAction } from "./actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /** #278 — two-step Delete on a directory row. Same soft delete as the Edit
  *  dialog (CustomerStore.remove); quotes keep their link. */
@@ -22,6 +23,7 @@ export function DeleteCompanyButton({ id, name, quoteCount }: { id: string; name
       onConfirm={async () => {
         const res = await deleteCustomerAction(id);
         if (!res.ok) throw new Error(res.error);
+        postChanged("customer", id);
         router.refresh();
       }}
     />

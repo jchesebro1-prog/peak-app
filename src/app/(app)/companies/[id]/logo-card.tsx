@@ -4,6 +4,7 @@ import { useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { COMPANY_LOGO_ACCEPT, COMPANY_LOGO_COPY, COMPANY_LOGO_MAX_BYTES } from "@/lib/company-logo";
 import { removeCompanyLogoAction, saveCompanyLogoAction } from "./logo-actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * Grid notes #8 — the company record's Logo card: a small preview, Upload /
@@ -36,7 +37,10 @@ export function CompanyLogoCard({ companyId, companyName, logoSrc }: { companyId
       try {
         const r = await saveCompanyLogoAction(companyId, fd);
         if (!r.ok) setErr(r.error);
-        else router.refresh();
+        else {
+          postChanged("customer", companyId);
+          router.refresh();
+        }
       } catch {
         setErr(FAILED);
       }
@@ -48,7 +52,10 @@ export function CompanyLogoCard({ companyId, companyName, logoSrc }: { companyId
       try {
         const r = await removeCompanyLogoAction(companyId);
         if (!r.ok) setErr(r.error);
-        else router.refresh();
+        else {
+          postChanged("customer", companyId);
+          router.refresh();
+        }
       } catch {
         setErr(FAILED);
       }

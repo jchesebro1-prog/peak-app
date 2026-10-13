@@ -15,6 +15,7 @@ import {
 import { estimateEmailDefaultsAction, openEstimateInInboxAction, sendEstimateEmailAction } from "../send-actions";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import type { EstimatorState } from "../use-estimator-state";
+import { postChanged } from "@/lib/popout/channel";
 
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
 const FIELD_LABEL: CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#6b7079", marginBottom: 4 };
@@ -138,6 +139,7 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
         const sync = sendSync(r);
         if (sync) applySync(sync);
         if (r.ok) {
+          postChanged("quote", loadedId);
           setActionError(null);
           setGateRefused(false);
           setOpen(false);
@@ -149,6 +151,7 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
         const sync = sendSync(r);
         if (sync) applySync(sync);
         if (r.ok) {
+          postChanged("quote", loadedId);
           window.location.assign(r.href);
           return;
         }

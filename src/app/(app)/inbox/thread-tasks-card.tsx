@@ -15,6 +15,7 @@ import type { ReaderVM } from "./types";
 import { completeThreadTaskAction } from "./task-actions";
 import { dayKeyDiff, localDayKey } from "@/lib/calendar-tasks";
 import { CARD, H, MUTED } from "./sidebar-styles";
+import { postChanged } from "@/lib/popout/channel";
 
 const emptySubscribe = () => () => {};
 
@@ -58,6 +59,7 @@ export default function ThreadTasksCard({
         setError(r.error);
         return;
       }
+      postChanged("task", id);
       router.refresh();
     });
   };

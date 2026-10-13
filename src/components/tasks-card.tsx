@@ -6,6 +6,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
 import TierSizeChips from "@/components/task-plan/tier-size-chips";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * Shared tasks card (#17) — renders + mutates one parent record's rows from
@@ -119,6 +120,7 @@ export function TasksCard({
     fd.set("id", parentId);
     fd.set(field, value);
     await updateAction(fd);
+    postChanged("task", taskId);
     router.refresh();
   }
   const groupsMap: Record<string, TaskRecord[]> = {};
@@ -248,6 +250,7 @@ export function TasksCard({
                       fd.set("taskId", t.id);
                       fd.set("id", parentId);
                       await removeAction(fd);
+                      postChanged("task", t.id);
                       router.refresh();
                     }}
                   />
@@ -268,6 +271,7 @@ export function TasksCard({
             setAddError(result.error);
             return;
           }
+          postChanged("task");
           form.reset();
           setNewTier("normal");
           setNewSize("m");

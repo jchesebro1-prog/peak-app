@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import { deletePersonAction, savePersonAction } from "./actions";
 import type { ChannelInputVM, CompanyOptionVM, SavePersonInput } from "./types";
 import { ConfirmButton } from "@/components/confirm-button";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * New / Edit person modal (identity core, D85). A person is one row for
@@ -107,6 +108,7 @@ export default function EditPersonModal({
         setError(res.error);
         return;
       }
+      if (companyId) postChanged("customer", companyId);
       router.push(`/people/${encodeURIComponent(res.id)}`);
       router.refresh();
     });
@@ -116,6 +118,7 @@ export default function EditPersonModal({
     if (!initial?.id) return;
     startTransition(async () => {
       await deletePersonAction(initial.id!);
+      if (companyId) postChanged("customer", companyId);
       router.push("/people");
       router.refresh();
     });

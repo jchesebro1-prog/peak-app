@@ -393,6 +393,56 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(/\.pk-dropdown-row:hover \.pk-nav-pop,\s*\.pk-nav-pop:focus-visible \{\s*opacity: 1;/.test(css2), "popout: the nav ⧉ shows on row hover or keyboard focus");
   }
 
+  /* Task 4 — posters: each client site posts `changed` after its action succeeds (spec §5) */
+  {
+    // [file, entity, minimum number of postChanged("<entity>", ...) calls]
+    const POSTERS: Array<[string, "quote" | "customer" | "task" | "thread", number]> = [
+      ["src/app/(app)/estimator/use-estimator-state.ts", "quote", 11], // save, status, stage, pipeline, meta, selection, people, bonus split + alternates, move + copy target
+      ["src/components/quote-review/quote-next-step.tsx", "quote", 1], // submit / withdraw / approve / send back / attest / send
+      ["src/app/(app)/estimator/steps/review-sidebar.tsx", "quote", 2], // send back with comments, review comments
+      ["src/app/(app)/estimator/steps/send-composer.tsx", "quote", 2], // send, open in Inbox
+      ["src/app/(app)/estimator/steps/send-activity.tsx", "thread", 2], // reply, mark read
+      ["src/app/(app)/estimator/package-staff-panel.tsx", "quote", 5], // add / remove file, Peak header, drawings, Grid link
+      ["src/app/(app)/estimator/client-link-panel.tsx", "quote", 1],
+      ["src/app/(app)/estimator/comment-pins.tsx", "quote", 1],
+      ["src/app/(app)/estimator/portal-panel.tsx", "quote", 1],
+      ["src/app/(app)/companies/edit-modal.tsx", "customer", 2], // save, delete
+      ["src/app/(app)/companies/venue-dialog.tsx", "customer", 1],
+      ["src/app/(app)/companies/delete-company-button.tsx", "customer", 1],
+      ["src/app/(app)/companies/[id]/activity-composer.tsx", "customer", 1],
+      ["src/app/(app)/companies/[id]/note-delete-button.tsx", "customer", 1],
+      ["src/app/(app)/companies/[id]/portal-access.tsx", "customer", 2],
+      ["src/app/(app)/companies/[id]/logo-card.tsx", "customer", 2],
+      ["src/app/(app)/people/edit-modal.tsx", "customer", 2],
+      ["src/components/documents/documents-card-client.tsx", "customer", 3], // upload, delete, edit
+      ["src/app/(app)/inbox/task-dialog.tsx", "task", 1],
+      ["src/app/(app)/inbox/task-dialog.tsx", "thread", 1],
+      ["src/app/(app)/inbox/assist-tasks-dialog.tsx", "task", 1],
+      ["src/app/(app)/inbox/assist-tasks-dialog.tsx", "thread", 1],
+      ["src/app/(app)/inbox/thread-tasks-card.tsx", "task", 1],
+      ["src/app/(app)/inbox/thread-reader.tsx", "task", 1], // Mark done on reply
+      ["src/app/(app)/inbox/organize/reader-org.tsx", "task", 1], // promise-task undo
+      ["src/app/(app)/queue/view.tsx", "task", 5], // assign, done, delete, reopen, delete done
+      ["src/app/(app)/calendar/task-chip.tsx", "task", 2],
+      ["src/app/(app)/calendar/task-block-popover.tsx", "task", 1],
+      ["src/app/(app)/calendar/at-risk-panel.tsx", "task", 1],
+      ["src/components/tasks-card.tsx", "task", 3],
+    ];
+    for (const [file, entity, min] of POSTERS) {
+      const src = readSrc(file);
+      const n = (src.match(new RegExp(`postChanged\\("${entity}"`, "g")) || []).length;
+      ok(
+        /import \{[^}]*\bpostChanged\b[^}]*\} from "@\/lib\/popout\/channel";/.test(src) && n >= min,
+        `popout: ${file} imports postChanged and posts "${entity}" (${n}/${min})`
+      );
+    }
+    // a poster never fires from render: the only top-level call shapes are inside handlers (indented 4+ spaces)
+    ok(
+      POSTERS.every(([file]) => !/^postChanged\(/m.test(readSrc(file))),
+      "popout: no poster site calls postChanged at module top level"
+    );
+  }
+
   /* real BroadcastChannel round trip (Node has one): own posts are ignored, another window's arrive */
   if (typeof BroadcastChannel !== "undefined") {
     const got: PeakMessage[] = [];

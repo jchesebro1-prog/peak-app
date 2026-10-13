@@ -193,7 +193,13 @@ export default function ReaderOrgStrip({ threadId, org }: { threadId: string; or
                 style={LINK_BTN}
                 disabled={pending}
                 aria-label={`Undo task ${promise.title}`}
-                onClick={() => run(() => undoPromiseTaskAction(threadId, promise.taskId), "Task removed")}
+                onClick={() =>
+                  run(async () => {
+                    const r = await undoPromiseTaskAction(threadId, promise.taskId);
+                    if (r.ok) postChanged("task", promise.taskId);
+                    return r;
+                  }, "Task removed")
+                }
               >
                 Undo
               </button>

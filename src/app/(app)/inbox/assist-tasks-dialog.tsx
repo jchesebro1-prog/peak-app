@@ -14,6 +14,7 @@ import { recordAssistOutcomeAction } from "./assist-actions";
 import { BTN, PRIMARY } from "./sidebar-styles";
 import TierSizeChips from "@/components/task-plan/tier-size-chips";
 import { suggestionEdited, taskSuggestOutcome, type TaskSuggestion } from "@/lib/assist/features/task-suggest";
+import { postChanged } from "@/lib/popout/channel";
 
 type Props = {
   threadId: string;
@@ -233,6 +234,8 @@ export default function AssistTasksDialog({ threadId, runId, suggestions, team, 
         setBusy(false);
         return;
       }
+      postChanged("task");
+      postChanged("thread", threadId);
       current = current.map((x, j) => (j === i ? { ...x, done: true } : x));
     }
     busyRef.current = false;

@@ -16,6 +16,7 @@ import { clockText, localInputToMs, msToLocalInput, pinArgs, type CalendarPlanBl
 import { BLOCK_MOVED_ERROR, type TaskSize, type TaskTier } from "@/lib/task-plan/types";
 import { completeCalendarTaskAction } from "./task-actions";
 import { markInProgressAction, pinBlockAction, setTierSizeAction, unpinBlockAction } from "./plan-actions";
+import { postChanged } from "@/lib/popout/channel";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -85,6 +86,7 @@ export default function TaskBlockPopover({ block, onClose }: { block: CalendarPl
         onFail?.();
         return;
       }
+      postChanged("task");
       if (close) onClose();
       router.refresh();
     });

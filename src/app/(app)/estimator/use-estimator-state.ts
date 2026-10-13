@@ -58,6 +58,7 @@ import { vendorDraftTotal, vendorDraftTotalSource, vendorKeptLines, vendorLinesT
 import { systemFromCategory } from "@/lib/system-categories";
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
+import { postChanged } from "@/lib/popout/channel";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -758,6 +759,7 @@ export function useEstimatorState(props: EstimatorProps) {
         const r = await updateQuoteMetaAction(id, { packageSelection: latest });
         if (!r || !r.ok) throw new Error((r && r.error) || SELECTION_NOT_SAVED);
         selectionAckedKey.current = key;
+        postChanged("quote", id);
         if (selectionKey(selectionLatest.current) === key) setSelectionError(null);
       })
       .catch((e: unknown) => setSelectionError(e instanceof Error && e.message ? e.message : SELECTION_NOT_SAVED))
@@ -1064,6 +1066,7 @@ export function useEstimatorState(props: EstimatorProps) {
       // pick resolves it through resolveTierFor, and Save persists it with
       // the re-priced lines.
       if (r && r.ok) {
+        postChanged("quote", id);
         setSavedDoc((d) => withSavedMeta(d, meta));
         if (r.pdf) setPdf(r.pdf);
       }
@@ -1126,6 +1129,7 @@ export function useEstimatorState(props: EstimatorProps) {
         setBonusError(r.error || "Could not save the split.");
         return;
       }
+      postChanged("quote", loadedId);
       if (status === "won" && bonusEligible) router.refresh();
     });
   };
@@ -1144,6 +1148,7 @@ export function useEstimatorState(props: EstimatorProps) {
           setBonusError(r.error || "Could not save the alternates.");
           return;
         }
+        postChanged("quote", loadedId);
         router.refresh();
       } finally {
         setBonusSaving(false);
@@ -1166,6 +1171,7 @@ export function useEstimatorState(props: EstimatorProps) {
         if (r.next !== undefined) setNext(r.next ?? null);
         setGateRefused(false);
         if (r.ok) {
+          postChanged("quote", id);
           setActionError(null);
           if (r.pdf) setPdf(r.pdf);
         } else {
@@ -1366,6 +1372,7 @@ export function useEstimatorState(props: EstimatorProps) {
           // the gate's message), so the banner stops asking to Save.
           setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
           setLoadedId(res.id);
+          postChanged("quote", res.id);
           // #333 review (A, E): the first save writes an edited selection; any
           // later Save retries one that failed. Untouched → nothing written.
           if (res.id && (!loadedId || selectionError)) flushSelection(res.id);
@@ -1463,6 +1470,7 @@ export function useEstimatorState(props: EstimatorProps) {
           setActionError(null);
           setGateRefused(false);
           applySync(r);
+          postChanged("quote", id);
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
@@ -1503,6 +1511,7 @@ export function useEstimatorState(props: EstimatorProps) {
         setActionError(null);
         setGateRefused(false);
         applyStageSync(r);
+        postChanged("quote", id);
       } finally {
         setStatusChanging(false);
       }
@@ -1535,6 +1544,7 @@ export function useEstimatorState(props: EstimatorProps) {
       setActionError(null);
       setGateRefused(false);
       applyStageSync(r);
+      postChanged("quote", id);
     });
   };
 
@@ -1777,6 +1787,7 @@ export function useEstimatorState(props: EstimatorProps) {
         movedVq
       );
       if (res.ok) {
+        postChanged("quote", res.targetId);
         // #282 phase 2: the Rewards credit stays on this quote (the server
         // never moves it with a system).
         const list = withRewardCredit(sections.filter((s) => s.id !== secId), rewardCreditOf(sections), nextId());
@@ -1852,6 +1863,7 @@ export function useEstimatorState(props: EstimatorProps) {
         requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(newId)));
         setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Copied", detail });
       } else {
+        postChanged("quote", res.targetId);
         setMoveNotice({
           ok: true,
           targetId: res.targetId,

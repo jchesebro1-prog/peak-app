@@ -5,6 +5,7 @@ import type { TrackedEmail } from "@/lib/estimate-email/track-server";
 import { activityTime, applyLoad, deliveryLabel, deliveryTone, newRepliesOf, patchEmail, SEND_UI_COPY, shouldFocusLoad } from "@/lib/estimate-email/send-ui";
 import { markEstimateEmailReadAction, replyToEstimateEmailAction, sendTrackAction } from "../send-actions";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
+import { postChanged } from "@/lib/popout/channel";
 
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
 const SMALL: CSSProperties = { fontSize: 11.5, color: "#5b616e", lineHeight: 1.45 };
@@ -162,6 +163,7 @@ function EmailRow({ quoteId, email: e, onPatch }: { quoteId: string; email: Trac
         setErr(r.error);
         return;
       }
+      postChanged("thread", e.threadId);
       onPatch(r.summary);
       setText("");
       setReplyOpen(false);
@@ -175,6 +177,7 @@ function EmailRow({ quoteId, email: e, onPatch }: { quoteId: string; email: Trac
         setErr(r.error);
         return;
       }
+      postChanged("thread", e.threadId);
       onPatch(r.summary);
     });
 

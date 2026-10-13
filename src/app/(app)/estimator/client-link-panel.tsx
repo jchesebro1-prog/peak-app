@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition, type CSSProperties } from "react";
 import { getShareLinkAction, revokeShareLinkAction, shareLinkStatusAction } from "./share-actions";
 import { PackageStaffPanel } from "./package-staff-panel";
 import { ONLINE_COPY, type ShareLinkStatus } from "@/lib/quote-share/view";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * #293 slice 3 — the customer preview's Client link block (spec §5.5): Copy
@@ -136,6 +137,7 @@ export function ClientLinkPanel({ quoteId, withPackage = true }: { quoteId: stri
         await reload();
         return;
       }
+      postChanged("quote", quoteId);
       setConfirmRevoke(false);
       setManualUrl(null);
       setNote(ONLINE_COPY.revoked);

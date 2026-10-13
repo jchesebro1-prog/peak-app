@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortalGrantAction, revokePortalGrantAction } from "../actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * Portal access card (IDEAS #47) — the team side of the customer portal.
@@ -67,6 +68,7 @@ export function PortalAccessCard({
         setError(res.error || "Couldn’t create the link.");
         return;
       }
+      postChanged("customer", customerId);
       await copy(res.path, "new");
       setManualName("");
       setManualEmail("");
@@ -78,6 +80,7 @@ export function PortalAccessCard({
     setError(null);
     startTransition(async () => {
       await revokePortalGrantAction({ customerId, grantId });
+      postChanged("customer", customerId);
       router.refresh();
     });
   }

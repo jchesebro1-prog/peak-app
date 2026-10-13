@@ -742,6 +742,7 @@ export default function ThreadReader({
         try {
           const done = await completeThreadTaskAction(openPromise.taskId);
           if (!done.ok) setPromiseNote(`Reply sent — the task wasn’t marked done: ${done.error}`);
+          else postChanged("task", openPromise.taskId);
         } catch {
           setPromiseNote(failed);
         }

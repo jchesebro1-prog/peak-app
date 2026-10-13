@@ -13,6 +13,7 @@ import {
   markCustomerDocumentsSeenAction,
   updateDocumentAction,
 } from "@/app/(app)/documents/actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * The Documents card (#218) on the company page, the venue page and a
@@ -273,6 +274,7 @@ export function DocumentsCardClient({
       setBusy(false);
     }
     if (saved) {
+      postChanged("customer", customerId);
       setNotice(saved === 1 ? "1 file uploaded." : `${saved} files uploaded.`);
       router.refresh();
     }
@@ -563,6 +565,7 @@ export function DocumentsCardClient({
                   onConfirm={async () => {
                     const res = await deleteDocumentAction(r.id);
                     if (!res.ok) throw new Error(res.error);
+                    postChanged("customer", customerId);
                     router.refresh();
                   }}
                 />
@@ -589,6 +592,7 @@ export function DocumentsCardClient({
           projects={projects}
           onClose={() => setDraft(null)}
           onSaved={() => {
+            postChanged("customer", customerId);
             setDraft(null);
             router.refresh();
           }}

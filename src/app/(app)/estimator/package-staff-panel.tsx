@@ -11,6 +11,7 @@ import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKA
 import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
 import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * #301 slice C — the package's staff side under the Client link block:
@@ -109,8 +110,10 @@ export function PackageStaffPanel({
         setErr(FAILED);
         return;
       }
-      if (r.ok) setNote(`${file.name} added.`);
-      else setErr(r.error);
+      if (r.ok) {
+        postChanged("quote", quoteId);
+        setNote(`${file.name} added.`);
+      } else setErr(r.error);
       await reload();
     });
 
@@ -127,6 +130,7 @@ export function PackageStaffPanel({
       }
       setConfirmId(null);
       if (!r.ok) setErr(r.error);
+      else postChanged("quote", quoteId);
       await reload();
     });
 
@@ -143,6 +147,7 @@ export function PackageStaffPanel({
         return;
       }
       if (!r.ok) setErr(r.error);
+      else postChanged("quote", quoteId);
       await reload();
     });
 
@@ -160,6 +165,7 @@ export function PackageStaffPanel({
       }
       setNote(r.ok ? GRID_SET_COPY.generated : null);
       if (!r.ok) setErr(r.error);
+      else postChanged("quote", quoteId);
       await reload();
     });
 
@@ -215,6 +221,7 @@ export function PackageStaffPanel({
         setErr(r.error);
         return;
       }
+      postChanged("quote", quoteId);
       router.push(`/design/grid/${encodeURIComponent(r.projectId)}`);
     });
 

@@ -6,6 +6,7 @@ import { commentActionLabel, commentTime, REVIEW_UI_COPY } from "@/lib/estimate-
 import { resolveReviewCommentAction } from "./review-actions";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import type { EstimatorState } from "./use-estimator-state";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * Phase 4 (spec §11.3) — review comment pins. A "💬 N" badge on a system card
@@ -40,6 +41,7 @@ export function useResolveComment(s: EstimatorState): (commentId: string) => Pro
     try {
       const r = await resolveReviewCommentAction(loadedId, commentId);
       if (r.ok) {
+        postChanged("quote", loadedId);
         setReviewComments(r.comments);
         return null;
       }

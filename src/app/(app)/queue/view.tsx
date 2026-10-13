@@ -15,6 +15,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import TierSizeChips from "@/components/task-plan/tier-size-chips";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 import { createAssignmentAction, removeAssignmentAction, setAssignmentDoneAction } from "./actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * My Queue view (D93). Rows are mostly DERIVED — clicking one takes you to
@@ -97,6 +98,7 @@ export default function QueueView({
       setErr(r.error);
       return;
     }
+    postChanged("task");
     setTitle("");
     setDueStr("");
     setTier("normal");
@@ -184,6 +186,7 @@ export default function QueueView({
                         setErr(r.error);
                         return;
                       }
+                      postChanged("task", it.key.replace("assignment:", ""));
                       router.refresh();
                     }}
                     title="Mark done"
@@ -212,6 +215,7 @@ export default function QueueView({
                     onConfirm={async () => {
                       const r = await removeAssignmentAction(it.key.replace("assignment:", ""));
                       if (!r.ok) throw new Error(r.error);
+                      postChanged("task", it.key.replace("assignment:", ""));
                       router.refresh();
                     }}
                   />
@@ -242,6 +246,7 @@ export default function QueueView({
                     setErr(r.error);
                     return;
                   }
+                  postChanged("task", a.id);
                   router.refresh();
                 }}
               >
@@ -255,6 +260,7 @@ export default function QueueView({
                 onConfirm={async () => {
                   const r = await removeAssignmentAction(a.id);
                   if (!r.ok) throw new Error(r.error);
+                  postChanged("task", a.id);
                   router.refresh();
                 }}
               />

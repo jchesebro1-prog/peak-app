@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { PlacedTask } from "@/lib/calendar-tasks";
 import { completeCalendarTaskAction, deleteCalendarTaskAction } from "./task-actions";
+import { postChanged } from "@/lib/popout/channel";
 
 export default function TaskChip({ placed, showAssignee }: { placed: PlacedTask; showAssignee: boolean }) {
   const router = useRouter();
@@ -30,6 +31,7 @@ export default function TaskChip({ placed, showAssignee }: { placed: PlacedTask;
         setError(r.error);
         return;
       }
+      postChanged("task", item.id);
       router.refresh();
     });
 
@@ -93,6 +95,7 @@ export default function TaskChip({ placed, showAssignee }: { placed: PlacedTask;
         onConfirm={async () => {
           const r = await deleteCalendarTaskAction(item.kind, item.id);
           if (!r.ok) throw new Error(r.error);
+          postChanged("task", item.id);
           router.refresh();
         }}
       />

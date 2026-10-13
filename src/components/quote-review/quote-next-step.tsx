@@ -24,6 +24,7 @@ import {
   type NextStepSync,
 } from "@/app/(app)/quotes/review-actions";
 import type { NextStepAction, NextStepTone, QuoteNextStepView } from "@/lib/quote-next-step";
+import { postChanged } from "@/lib/popout/channel";
 
 type Props = {
   quoteId: string;
@@ -205,6 +206,7 @@ export function QuoteNextStep({ quoteId, view, variant, approverOnly, onSync, on
         const keepShown = !!opts.skipBefore || !!opts.versioned;
         const r = !res.ok && keepShown && res.next ? { ...res, next: { ...res.next, asOf: shown } } : res;
         if (!r.ok) report(r.error || "That didn't go through.");
+        else postChanged("quote", quoteId);
         (onSync ?? (() => router.refresh()))(r, action);
       } catch (e) {
         // A dropped connection or a thrown action must not reach the error boundary.

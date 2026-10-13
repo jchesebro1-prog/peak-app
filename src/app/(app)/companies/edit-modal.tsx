@@ -15,6 +15,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { AddressHitVM, SaveCustomerInput } from "./types";
 import { defsForType, type CustomFieldDef } from "@/lib/customer-fields";
 import { LIFECYCLES, LIFECYCLE_LABEL } from "@/lib/identity/config";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * New / Edit customer modal (Customers.dc.html edit sheet). Overlays the
@@ -412,6 +413,7 @@ export default function EditCustomerModal({
         })),
       });
       if (res.ok) {
+        postChanged("customer", res.id);
         router.push(`/companies/${encodeURIComponent(res.id)}`);
         router.refresh();
       }
@@ -426,6 +428,7 @@ export default function EditCustomerModal({
         setDelErr(res.error);
         return;
       }
+      postChanged("customer", initial.id);
       router.push("/companies");
       router.refresh();
     });

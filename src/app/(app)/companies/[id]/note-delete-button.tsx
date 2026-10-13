@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { removeCustomerNoteAction } from "../actions";
+import { postChanged } from "@/lib/popout/channel";
 
 /** Delete control for one user-authored note in a customer's Activity feed. */
 export default function NoteDeleteButton({ customerId, noteId }: { customerId: string; noteId: string }) {
@@ -15,6 +16,7 @@ export default function NoteDeleteButton({ customerId, noteId }: { customerId: s
       style={{ fontSize: 10.5, padding: "4px 8px", flexShrink: 0 }}
       onConfirm={async () => {
         await removeCustomerNoteAction(customerId, noteId);
+        postChanged("customer", customerId);
         router.refresh();
       }}
     />

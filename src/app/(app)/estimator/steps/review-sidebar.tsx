@@ -16,6 +16,7 @@ import { fmt } from "../pricing";
 import { ReviewCostSummary } from "../review-cost-summary";
 import { addReviewCommentAction, deleteReviewCommentAction, listReviewCommentsAction, resolveReviewCommentAction, type ReviewCommentsResult, type ReviewDocsResult } from "../review-actions";
 import type { EstimatorState } from "../use-estimator-state";
+import { postChanged } from "@/lib/popout/channel";
 
 const TITLE: CSSProperties = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 };
 const CELL: CSSProperties = { padding: "4px 6px", fontSize: 12, borderBottom: "1px solid #ececf0", textAlign: "left" };
@@ -144,6 +145,7 @@ function SendBackWithComments({ s, onActed }: { s: EstimatorState; onActed: (a: 
       const r = await nsSendBackAction(loadedId, sendBackNoteFromNumbered(fresh.numbered, extra), next.asOf);
       applySync(r);
       if (r.ok) {
+        postChanged("quote", loadedId);
         setActionError(null);
         setGateRefused(false);
         setOpen(false);
@@ -344,6 +346,7 @@ function ReviewComments({ s }: { s: EstimatorState }) {
     try {
       const r = await fn();
       if (r.ok) {
+        postChanged("quote", loadedId ?? undefined);
         setReviewComments(r.comments);
         after?.();
       } else setErr(r.error);

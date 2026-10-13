@@ -5,6 +5,7 @@ import { setQuoteStatus } from "@/app/(app)/quotes/actions";
 import { declinePortalAcceptanceAction } from "./actions";
 import { PURCHASE_METHOD_LABEL, reviewBannerHeading } from "@/lib/portal-quote-mode";
 import type { PortalPanelData } from "./types";
+import { postChanged } from "@/lib/popout/channel";
 
 /**
  * Staff Portal panel (#245 Task 13, spec §5; generalized #248 Task 4, spec
@@ -72,6 +73,7 @@ export function PortalPanel({
       const r = await declinePortalAcceptanceAction(data.quoteId, note);
       if (!r.ok) setError(r.error);
       else {
+        postChanged("quote", data.quoteId);
         setDeclining(false);
         setNote("");
       }
