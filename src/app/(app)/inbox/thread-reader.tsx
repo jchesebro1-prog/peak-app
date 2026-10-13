@@ -18,8 +18,10 @@ import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import TaskDialog from "./task-dialog";
 import AssistTasksDialog from "./assist-tasks-dialog";
-import { suggestTasksAction } from "./assist-actions";
+import { draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
+import { replyOutcome } from "@/lib/assist/outcome";
+import type { AssistOutcome } from "@/lib/assist/types";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -28,6 +30,21 @@ type Mode = "reply" | "replyAll" | "forward";
 
 type SuggestTasksResult = Awaited<ReturnType<typeof suggestTasksAction>>;
 const NO_ASSIST: AssistFlags = { tasks: false, reply: false, estimate: false };
+type AssistDraft = { runId: string; draft: string };
+
+/** Log a pending Assist draft's outcome once and clear it (the store is
+ *  first-write-wins too). Fire and forget. */
+function settleDraftRef(
+  ref: { current: AssistDraft | null },
+  outcome: AssistOutcome,
+  detail: Record<string, unknown>
+): AssistDraft | null {
+  const d = ref.current;
+  if (!d) return null;
+  ref.current = null;
+  void recordAssistOutcomeAction(d.runId, outcome, detail).catch(() => {});
+  return d;
+}
 
 /* ---- conversation (Gmail-style) ------------------------------------------
  * Gmail shows the newest message open and everything before it as one-line
@@ -520,6 +537,39 @@ export default function ThreadReader({
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistTasks, setAssistTasks] = useState<Extract<SuggestTasksResult, { ok: true }> | null>(null);
+  // #334 Assist — Draft reply: the draft in the composer, pending until it is
+  // sent (accepted / edited by edit ratio) or thrown away (discarded). The
+  // ref is the source of truth so send / close / unmount settle it once.
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [assistDraft, setAssistDraft] = useState<AssistDraft | null>(null);
+  const assistDraftRef = useRef<AssistDraft | null>(null);
+  const mountedRef = useRef(false);
+  const sendingRef = useRef(false);
+  const unmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Unmount (thread switch — the reader is keyed by thread — or leaving the
+  // Inbox) with a draft still pending = discarded. Deferred so StrictMode's
+  // dev mount → unmount → remount doesn't record it early: the remount (same
+  // instance, same refs) cancels the timer. A send still in flight settles
+  // the draft itself when it returns.
+  useEffect(() => {
+    mountedRef.current = true;
+    if (unmountTimer.current) {
+      clearTimeout(unmountTimer.current);
+      unmountTimer.current = null;
+    }
+    const pending = assistDraftRef;
+    const mounted = mountedRef;
+    const sendingFlag = sendingRef;
+    const timer = unmountTimer;
+    return () => {
+      mounted.current = false;
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        if (sendingFlag.current) return;
+        settleDraftRef(pending, "discarded", {});
+      }, 0);
+    };
+  }, []);
   const [sending, setSending] = useState(false);
 
   // call/meeting quick log
@@ -598,7 +648,45 @@ export default function ThreadReader({
     }
   };
 
+  const settleDraft = (outcome: AssistOutcome, detail: Record<string, unknown>) => {
+    settleDraftRef(assistDraftRef, outcome, detail);
+    setAssistDraft(null);
+  };
+
+  // #334 — Draft reply: opens the Reply composer with the draft above the
+  // signature. Nothing is sent; the user reviews and presses Send.
+  const startDraft = async () => {
+    if (draftBusy) return;
+    setDraftBusy(true);
+    setAssistError(null);
+    try {
+      const r = await draftReplyAction(vm.id);
+      if (!r.ok) {
+        setAssistError(r.error);
+        return;
+      }
+      const d = { runId: r.runId, draft: r.draft };
+      if (!mountedRef.current) {
+        // Left the thread while the model ran: the draft was never seen.
+        settleDraftRef({ current: d }, "discarded", {});
+        return;
+      }
+      openMode("reply");
+      // openMode seeds the bare signature; the draft goes above it.
+      setCBody(withSignature(r.draft, signature, "add"));
+      assistDraftRef.current = d;
+      setAssistDraft(d);
+    } catch {
+      setAssistError("Assist couldn’t respond — please try again.");
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
   const closeComposer = () => {
+    // Cancel / ✕ / Discard with a draft still pending. After a send the
+    // draft is already settled, so this is a no-op then.
+    if (assistDraftRef.current) settleDraft("discarded", {});
     setMode(null);
     setCBody("");
     setCTo("");
@@ -613,16 +701,25 @@ export default function ThreadReader({
     const b = cBody.trim();
     if (!b || sending) return;
     setSending(true);
+    sendingRef.current = true;
     try {
       // I2 — the #127 flow ran (and gets the final say on the body,
       // signature kept or stripped) whenever this account has a signature
       // configured; the server skips its own legacy footer in that case.
-      await replyAction(vm.id, b, !!signature);
+      const res = await replyAction(vm.id, b, !!signature);
+      if (res.ok && assistDraftRef.current) {
+        // #334 — judged against what was actually sent, signature left out.
+        const o = replyOutcome(assistDraftRef.current.draft, stripSignature(b, signature || ""));
+        settleDraft(o.outcome, { editRatio: o.editRatio });
+      }
       closeComposer();
       if (onAfterSend) onAfterSend(vm.id);
       else router.refresh();
     } finally {
+      sendingRef.current = false;
       setSending(false);
+      // Unmounted mid-send and the send didn't go through: the draft is gone.
+      if (!mountedRef.current) settleDraftRef(assistDraftRef, "discarded", {});
     }
   };
 
@@ -1064,16 +1161,29 @@ export default function ThreadReader({
           {/* EMAIL: reply / reply-all / forward */}
           {vm.isEmail && !composerOpen && (
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => openMode("reply")} style={btnStyle("primary")}>
+              {/* While Assist drafts, the composer stays shut so the draft
+                  never lands on top of something typed meanwhile. */}
+              <button onClick={() => openMode("reply")} disabled={draftBusy} style={btnStyle("primary")}>
                 <ReplyIcon size={14} />
                 Reply
               </button>
-              <button onClick={() => openMode("replyAll")} style={btnStyle("ghost")}>
+              <button onClick={() => openMode("replyAll")} disabled={draftBusy} style={btnStyle("ghost")}>
                 Reply all
               </button>
-              <button onClick={() => openMode("forward")} style={btnStyle("ghost")}>
+              <button onClick={() => openMode("forward")} disabled={draftBusy} style={btnStyle("ghost")}>
                 Forward
               </button>
+              {assist.reply && (
+                <button
+                  onClick={startDraft}
+                  disabled={draftBusy}
+                  aria-busy={draftBusy}
+                  title="Assist — drafts a reply for you to review before sending"
+                  style={btnStyle("ghost")}
+                >
+                  {draftBusy ? "Drafting…" : "Draft reply"}
+                </button>
+              )}
             </div>
           )}
 
@@ -1180,6 +1290,11 @@ export default function ThreadReader({
                   display: "block",
                 }}
               />
+              {assistDraft && (
+                <p style={{ margin: 0, padding: "0 12px 8px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}>
+                  Drafted by Assist — review before sending.
+                </p>
+              )}
               <div
                 style={{
                   display: "flex",

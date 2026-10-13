@@ -1,7 +1,18 @@
 "use server";
 
 import { requireUser } from "@/lib/session";
-import { get as getThread, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { get as getThread, getAll as allThreads, resolveCustomerId, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
+import { signatureFor } from "@/lib/stores/signatures";
+import { stripSignature } from "@/lib/inbox-signature";
+import {
+  buildReplyUserText,
+  cleanReplyText,
+  openQuotesFor,
+  pickStyleExamples,
+  REPLY_SYSTEM,
+} from "@/lib/assist/features/reply-draft";
 import { activeUsers } from "@/lib/users";
 import { threadTaskLinkOptions } from "@/lib/inbox-task-write";
 import { runAssist } from "@/lib/assist/run";
@@ -61,6 +72,56 @@ export async function suggestTasksAction(threadId: string): Promise<
     linkKeys: new Set(links.map((l) => l.key)),
   });
   return { ok: true, runId: r.runId, suggestions, team, links };
+}
+
+const TONES = ["short", "normal", "formal"] as const;
+type ReplyTone = (typeof TONES)[number];
+
+/** #334 Assist — Draft reply. Returns text for the composer only: nothing
+ *  is sent or saved here (getAll on quotes/comms already excludes deleted
+ *  rows). */
+export async function draftReplyAction(
+  threadId: string,
+  tone: ReplyTone = "normal"
+): Promise<{ ok: true; runId: string; draft: string } | { ok: false; error: string }> {
+  const me = await requireUser();
+  const t = await loadThreadFor(threadId, me.name);
+  if (!t) return { ok: false, error: "That email isn't available." };
+  const safeTone: ReplyTone = TONES.includes(tone) ? tone : "normal";
+  const [customerId, quotes, threads, signature] = await Promise.all([
+    resolveCustomerId(t),
+    allQuotes(),
+    allThreads(),
+    signatureFor(me.name),
+  ]);
+  const open = openQuotesFor(
+    quotes.map((q) => ({ ...q, number: displayQuoteNumber(q) })),
+    customerId
+  );
+  const examples = pickStyleExamples(threads, me.name, t.id, signature);
+  const messages = promptMessages(t).map((m) =>
+    m.direction === "out" && signature ? { ...m, body: stripSignature(m.body, signature) } : m
+  );
+  const r = await runAssist({
+    feature: "reply",
+    slot: "reply",
+    user: { id: me.id, name: me.name },
+    system: REPLY_SYSTEM,
+    userText: buildReplyUserText({
+      thread: threadBlock({ subject: t.subject, messages }, { maxMessages: 10, maxChars: 2500 }),
+      customer: t.customer || "",
+      contact: t.contactName || "",
+      quotes: open,
+      sender: me.name,
+      tone: safeTone,
+      examples,
+    }),
+    contextRef: "thread:" + t.id,
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  const draft = cleanReplyText(String(r.value ?? ""));
+  if (!draft) return { ok: false, error: "Assist returned an empty draft." };
+  return { ok: true, runId: r.runId, draft };
 }
 
 export async function recordAssistOutcomeAction(
