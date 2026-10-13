@@ -177,8 +177,7 @@ The steps run in this order:
    (default 200) → `{ok:false, error:"Assist paused for the month (cap reached)"}`,
    with no log row.
 3. **Rate limit.** `rateLimit("assist:"+feature+":"+user.id, LIMIT[feature], 3_600_000)`.
-   The limits are tasks 60, reply 60, estimate 20 (counted on the draft step
-   only).
+   The limits are tasks 60, reply 60, estimate 20 (counted once per button press, on the extract step; the draft step passes `countRate:false`).
 4. **Provider call.** Uses the model and settings from §4.
 5. **Validate.** With a schema, run `JSON.parse` then `schema.safeParse`. A
    failure gives `ok:false, error:"unreadable answer"`, and the row is still
@@ -387,7 +386,8 @@ It produces `SpecSection[]` with `kind:"materials"`. Each system's
 - **Catalog line:** `{ id, sku, desc: part.desc, qty, unit: part.unit, cost: part.cost, price: catalogAddPrice(part.cost, part.list, tierMargin) }`.
 - **Unmatched or empty SKU:** `{ id, sku:"", desc, qty, unit:"ea", cost:0, price:0, custom:true, internalNote:"Assist: needs a part and price" }`.
 - An empty system is dropped.
-- It returns `{ sections, reasons: Record<lineId, string>, dropped: number }`.
+- It returns `{ sections, reasons: Record<lineId, string>, lines, dropped, unresolved }`: `dropped` counts blank lines removed; `unresolved` counts SKUs outside the candidate set, kept only as custom lines.
+- Line ids are unique across the whole drafted quote (the Estimator finds and removes a line by id alone), and each system gets `priceRound` of $25, like the Estimator's own new-system path.
 - Freight and price rounding use the same defaults the Estimator applies to a
   new section. The plan reads those from `freight-default.ts` and the section
   factory.
@@ -483,7 +483,7 @@ ANTHROPIC_API_KEY=
 # ASSIST_LOCAL_TIMEOUT_MS=60000
 ```
 
-The Inbox page exports `maxDuration = 120` so the estimate action (two model
+The Inbox page exports `maxDuration = 300` so the estimate action (two model
 calls) fits in one server-action budget.
 
 ## 12. Testing

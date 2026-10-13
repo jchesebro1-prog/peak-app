@@ -11910,3 +11910,44 @@ intro", "No price yet — not on the PDF", "Left out", "Left out with …", "Lef
 - (b) Jeff-gated: try a real estimate on production — leave a datasheet out, send, and check the client's package page,
   Datasheets.pdf and zip; switch drawings off on a sent-next revision.
 - (c) Blob-cached zips for revisions sent before this keep their contents (see #332 (b)).
+
+## 334. Assist layer — suggest tasks, draft reply, draft estimate — BUILT 2026-10-12 on `worktree-assist-layer` (D869–D880)
+
+**Asked (Jeff, 2026-10-12):** an opt-in trial of model help on an email thread, without bringing back what D89 removed.
+Brief + spec + plan `docs/superpowers/specs/2026-10-12-assist-layer-{brief,design}.md`,
+`docs/superpowers/plans/2026-10-12-assist-layer.md`. Three Inbox-reader actions; nothing sends, links or changes a status
+on its own.
+
+**Done:**
+- **Gate** — off unless a key (or a local URL) is set, `ASSIST_DISABLED` is not `true`, the user is in `assistUsers`
+  (**empty = nobody**) and the feature is on; the server re-checks every action (D869). No key = no UI and no network call.
+- **Suggest tasks** (Haiku 5.5) — up to 5 suggestions in a dialog, tick what you want, created through the existing #215
+  task path (D870, D874).
+- **Draft reply** (Sonnet 5.5) — into the inline composer, never sent; examples of the sender's own recent sent mail; open
+  quotes for the thread's resolved customer only; an edit-ratio outcome on send (D873).
+- **Draft estimate** (Haiku extract, then Opus draft) — a new draft Estimator quote (`source:"estimator"`,
+  `Quote.assistDraft`) priced only by `catalogAddPrice`, systems rounded to $25, line ids unique across the quote, unknown
+  parts as $0 custom lines; banner with the model's notes and "Why these parts", Dismiss (does not bump `updatedAt`); the
+  thread is not auto-linked (D875–D878).
+- **`runAssist`** — gate, monthly cap ($200 default, no row at the cap), per-hour rate limit (estimate counted once per
+  button press, on the extract step), provider with a local → Haiku fallback, zod validation, a row in `assist_runs`
+  (migration 0039, kept through the go-live wipe) (D871, D872). The Inbox page has `maxDuration = 300`.
+  `recordAssistOutcomeAction` accepts only tasks and reply runs; thread access is shared in
+  `src/lib/assist/thread-access.ts`.
+- **Settings → Beta → Assist pilot** — pilot users, three feature toggles, the cap, and an estimated-cost report (this
+  month and the two before); report data loads only for admins on `?section=data` (D879).
+- **D880** — the official SDK supersedes D39 for this layer; D89's deletions stay deleted; the opt-in gate replaces D89's
+  "no model calls" posture. MASTER-HOWTO §6 has the turn-on steps; `.env.example` has the `ASSIST_*` block.
+
+**Open question for Jeff:** should the reply prompt show **draft** quotes' dollar values? They are not approved yet, so a
+reply could quote a price nobody has signed off. The default shipping now includes them (status draft or sent); say the
+word and it narrows to sent quotes only (or drops dollar values for drafts). Pending the final fix wave.
+
+**Remaining (Jeff-gated):**
+- (1) Create a Console API key with billing and a $200 Console spend limit (match the in-app cap).
+- (2) Set `ANTHROPIC_API_KEY` in Vercel production.
+- (3) Tick Jeff and one estimator in Settings → Beta → Assist pilot.
+- (4) Try each button on a real thread (the live SDK call has not run in dev; only the request builder is tested).
+- (5) Read the report after 30 days and make the keep / kill call.
+
+No new permission; no new env var is required (only `ANTHROPIC_API_KEY`). Migration 0039 adds the `assist_runs` table.

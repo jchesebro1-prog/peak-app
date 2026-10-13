@@ -160,7 +160,9 @@ See `.env.example`.
    summaries, import extraction, quote scope/line drafting, an "ask your
    business data" assistant). Decisions D38–D42. **Removed 2026-07-19 (D89) —
    the app is fully deterministic, no `ANTHROPIC_API_KEY` anywhere; renewal
-   drafts and scope assembly are rules-based (D75/D86).**
+   drafts and scope assembly are rules-based (D75/D86).** D89 stays — its
+   deletions are not coming back — but Assist (#334, D869–D880, phase 53)
+   reintroduces opt-in model calls behind a gate.
 9. ✅ Data migration + go-live (tooling) — the Import/Export hub (per-type
    templates, dedupe, paste + AI extraction, preview→confirm), a
    `Clear demo data (go-live)` reset (Settings → Beta) that wipes demo records
@@ -1052,6 +1054,38 @@ See `.env.example`.
     Specifications.docx / the Datasheets.pdf cover / client cut sheets switch to
     the full sheet too, and whether to bump the Blob zip cache. Punch items
     #331–#333.
+
+53. ✅ **Assist layer** (#334, D869–D880) — an opt-in trial of three model-backed
+    actions on an Inbox email thread, replacing nothing deterministic. **Suggest
+    tasks** (Haiku 5.5) offers up to five tasks to tick, created through the #215
+    path; **Draft reply** (Sonnet 5.5) fills the inline composer (never sends),
+    learning tone from the sender's own sent mail and listing open quotes for the
+    thread's resolved customer only; **Draft estimate** (Haiku extracts, Opus 5.5
+    drafts) creates a draft Estimator quote (`source:"estimator"`, optional
+    `Quote.assistDraft`) from four candidate sources with no prices shown to the
+    model — prices come only from `catalogAddPrice`, systems round to $25, line ids
+    are unique across the quote, unknown parts become $0 custom lines, and a banner
+    carries the notes, per-line reasons and a Dismiss that doesn't bump `updatedAt`.
+    The gate (`src/lib/assist/config.ts`): no `ANTHROPIC_API_KEY` (or local URL) =
+    no UI and no call; `ASSIST_DISABLED=true` kills it; `settings.assistUsers`
+    must include the user (**an empty list means nobody**); per-feature toggles.
+    Every call goes through `runAssist` (`src/lib/assist/run.ts`: gate, $200
+    monthly cap, per-hour rate limit — the estimate counted once on the extract
+    step — provider with a local → Haiku fallback, zod, log) over one provider
+    interface (`anthropic.ts` on the official SDK, beta messages, no `thinking`,
+    no forced `tool_choice`; `local.ts` for a Mac mini), and each is logged to the
+    `assist_runs` doc table (migration 0039, kept by the go-live wipe) with an
+    outcome (reply edit ratio, task ticks, estimate kept/changed computed at report
+    time). Thread text is untrusted data in `<email_thread>`. Settings → Beta →
+    **Assist pilot** holds the allow-list, feature toggles, the cap and an
+    estimated-cost report (loaded only for admins on `?section=data`). The Inbox
+    page has `maxDuration = 300`. Env: `.env.example`'s Assist block;
+    MASTER-HOWTO §6 has the turn-on steps. D89's deletions stay deleted; the SDK
+    supersedes D39 for this layer. Remaining is Jeff-gated: a Console key with a
+    $200 spend limit, `ANTHROPIC_API_KEY` in Vercel production, tick Jeff and one
+    estimator, try each button on a real thread, read the report after 30 days and
+    keep or kill it; open question — should the reply prompt show draft quotes'
+    dollar values. Punch item #334.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -11658,3 +11658,157 @@ changes, sequence-guarded (latest wins). The server re-sanitises (≤ 200 sectio
 shipped, the projection is also byte-budgeted (900 kB) under the server-action ceiling; anything cut shows "List truncated
 — N items not checked" (client and server counts). Assembly members indent under "Part of: …" (D854); `partOf` comes from
 the member expansion, not the removed `lineMemberRows`. Punch item #333.
+
+## D869. The Assist gate — opt-in, an empty list means nobody (#334, 2026-10-12)
+
+A button renders, and its server action runs, only when all of these hold: `ASSIST_DISABLED` is not `"true"`; a provider
+is configured (`ANTHROPIC_API_KEY`, or `ASSIST_PROVIDER=local` with `ASSIST_LOCAL_URL`); `settings.assistUsers` includes
+the user's id; `settings.assistFeatures[feature]` is not `false` (a missing key is on); and the thread is an email thread
+the user can see. **An empty `assistUsers` list means nobody**, the opposite of `recordingsBetaUsers`, so merging this
+switches nothing on. `assistGate` is a pure function over (feature, user id, settings, env); `assistUiFlags` feeds the
+Inbox reader; the action re-checks on the server and returns `{ ok:false, error }` with no network call when the gate
+fails. With no key the layer is inert and nothing renders. Thread access is one shared read, `loadThreadFor`
+(`src/lib/assist/thread-access.ts`): a live email thread in the user's own mailbox. Punch item #334.
+Verified: gate truth table in `scripts/test-assist.ts` (empty list, kill switch, missing provider, feature off, each
+passing); smoke renders Inbox / Estimator / Settings sections with no key and no Assist UI.
+
+## D870. Per-feature model routing and a cost table (#334, 2026-10-12)
+
+Tasks and the estimate's extract step run on `claude-haiku-5-5` (low effort), Draft reply on `claude-sonnet-5-5` (low),
+the estimate draft on `claude-opus-5-5` (medium, 16,000 max tokens). Env overrides: `ASSIST_MODEL_TASKS`,
+`ASSIST_MODEL_REPLY`, `ASSIST_MODEL_EXTRACT`, `ASSIST_MODEL_ESTIMATE`. Every call goes through
+`client.beta.messages.create`; `fallbacks:"default"` plus the `server-side-fallback-2026-07-01` beta ride only on
+`claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5` and `claude-fable-5-1` (Haiku has none). The `thinking` param is
+never sent (the models are adaptive by default, and `disabled` 400s on Sonnet and Opus) and `tool_choice` is never forced;
+effort goes in `output_config.effort` and JSON in `output_config.format = {type:"json_schema"}` built from `z.strictObject`
+schemas. The system prompt is one `cache_control: ephemeral` block. Cost is `costUsd(model, usage)` on `response.model`
+(the model that served the call) from a `MODEL_PRICES` table (Haiku steps up past 100K input tokens; cache-write 1.25× and
+Haiku cache-read 0.1× are assumed rates), so every report cost is labelled estimated; a local or unknown model costs $0.
+This is the beta path only — no deterministic feature changed. Punch item #334.
+Verified: cost math (including the Haiku >100K step) and `buildAnthropicParams` asserted in `scripts/test-assist.ts` —
+the exact params object, with no `thinking` and no `tool_choice`.
+
+## D871. One provider interface; Claude by default, a local OpenAI-compatible endpoint later (#334, 2026-10-12)
+
+`AssistProvider.complete(req)` has two implementations: `anthropic.ts` (the official `@anthropic-ai/sdk`, one lazy client
+per process, `ASSIST_TIMEOUT_MS` default 90,000, `maxRetries: 1`, typed errors mapped to short messages, `refusal` and
+`max_tokens` stop reasons read before content) and `local.ts` (`POST {ASSIST_LOCAL_URL}/v1/chat/completions`, Bearer
+token, its own timeout; Ollama / LM Studio / MLX on the Mac mini; cost $0). With `ASSIST_PROVIDER=local` the Anthropic
+provider is the fallback when a key exists: an unreachable local endpoint re-runs once on **Haiku 5.5** for every feature
+(Jeff's call) and the row logs `fellBack:true`. Tests inject a `FakeProvider` through `runAssist`'s deps. The live SDK call
+is not run in dev (no key); the first real call is the Jeff-gated pilot step. Punch item #334.
+Verified: provider selection and the fallback path in `scripts/test-assist.ts` with `FakeProvider`; `anthropic.ts` checked
+through its request builder, not a network call.
+
+## D872. `runAssist` order and the `assist_runs` table (#334, 2026-10-12)
+
+Every model call runs through `runAssist`: gate, then the monthly cap (`monthSpend(Chicago month) >= assistMonthlyCapUsd`,
+default $200; no row is written), then the rate limit (`assist:<feature>:<user>`, per hour: tasks 60, reply 60, estimate
+20; **the estimate counts once per button press, on the extract step — the draft step passes `countRate:false`**), then the
+provider (with the local → Haiku fallback), then `JSON.parse` + zod `safeParse` ("unreadable answer" on failure), and last
+a log row, written whether the call succeeded or failed. `assist_runs` is a doc table (migration `0039_assist_runs`,
+idempotent) holding feature, step, user, provider, requested and served model, `fellBack`, the four token counts, cost,
+latency, an input hash, the raw output (capped at 20,000 chars), ok/error/stop reason, `contextRef`, the Chicago
+`monthKey`, and an outcome (`accepted | edited | discarded`) with detail. `setRunOutcome` is first-write-wins and own-user
+only, atomically. The table is in `DOC_TABLES` and `CONFIG_COLLECTIONS`, so the go-live wipe keeps the trial's history and
+its spend. `recordAssistOutcomeAction` accepts outcomes only for tasks and reply runs (the client judges those); an
+estimate's outcome is computed at report time (D878). The Inbox page exports `maxDuration = 300` so the two-call estimate
+fits one server-action budget. Punch item #334.
+Verified: `scripts/test-assist.ts` DB checks on a scratch PGlite — rows logged for ok and failed calls, the cap writes no
+row at the limit, a failed gate makes no call, outcome is first-write-wins and own-user only, migration 0039 exists, and
+the table is registered in both lists.
+
+## D873. Reply style comes from the sender's own sent mail (#334, 2026-10-12)
+
+Draft reply is shown up to 5 of the sender's last outgoing messages from threads they can see (excluding the current
+thread, signatures stripped, each trimmed to 1,200 chars), labelled as examples of how this person writes — match tone
+and length, never copy facts. The prompt also carries the last 10 messages of the thread (2,500 chars each), the customer
+and contact names and a tone (`short | normal | formal`). **Open quotes are listed for the thread's resolved customer only**
+(draft or sent, newest 8, with number, name, type, status, rounded value and sent date or "not sent"); with no resolved
+customer the prompt says there are none on file. The answer is plain text (`cleanReplyText` strips a `Subject:` line and a
+trailing `-- ` block, caps at 6,000 chars); it lands in the inline composer with the signature added and a "Drafted by
+Assist — review before sending" note, and never sends. Outcome on send: word-level edit ratio ≤ 0.10 is accepted, else
+edited; closing the composer with a pending draft is discarded. Punch item #334.
+Verified: `pickStyleExamples`, `cleanReplyText`, `openQuotesFor`, `editRatio` and `replyOutcome` in `scripts/test-assist.ts`.
+
+## D874. Thread text is untrusted data (#334, 2026-10-12)
+
+Email text is written by outside parties. Every prompt wraps it in `<email_thread>…</email_thread>` and the system prompt
+says it is data, never an instruction; a body or author containing a close tag or a line break is defanged so it cannot end
+the wrapper early or forge a header. Nothing a model returns is acted on except as text a person reviews: tasks need a tick
+and go through the existing #215 path, a reply is a composer draft, an estimate is a draft quote. Nothing auto-sends,
+auto-links, or changes a status. Model output is re-validated server-side (`sanitize*`: caps, allowed ids and link keys,
+date shape) before it is used. Punch item #334.
+Verified: `scripts/test-assist.ts` — wrapper defanging, author line-break stripping, and the task sanitizer's
+unknown-assignee / unknown-link / past-date rules.
+
+## D875. Draft estimate is two steps: Haiku extracts, Opus drafts (#334, 2026-10-12)
+
+`draftEstimateAction(threadId)` first runs a cheap Haiku **extract** (quote name, venue, up to 15 equipment requests with
+quantities, up to 8 system names), then, only if it found a request, gathers candidates (D876) and runs an Opus **draft**
+that returns systems and lines with a reason per line and notes. The model never outputs a price: a line's SKU must be a
+candidate SKU or empty (an empty or unknown SKU becomes a custom line flagged "Assist: needs a part and price"), quantities
+are integers 1–9999, at most 12 systems and 60 lines each. `buildDraftSections` (pure) turns the answer into `SpecItem`
+sections: catalog lines are priced only by `catalogAddPrice(cost, list, tierMargin)`, systems take `priceRound` of $25 like
+the Estimator's own new-system path, and **line ids are unique across the whole drafted quote** (the Estimator finds and
+removes a line by id alone). It reports `dropped` (blank lines removed) and `unresolved` (SKUs outside the candidate set,
+kept only as custom lines). Punch item #334.
+Verified: `buildDraftSections` checks in `scripts/test-assist.ts` — candidate-only SKUs, custom lines for unknowns, prices
+from `catalogAddPrice` and never from model output, unique line ids across systems, `priceRound`.
+
+## D876. Candidates come from four sources and carry no money (#334, 2026-10-12)
+
+The draft sees only parts the server found: (1) the Estimator's own catalog ranking for each requested phrase (the logic of
+`searchCatalog` extracted as `rankCatalogParts` so it runs without a request scope; `searchCatalog` calls the shared
+function), top 8 each; (2) similar past systems from the system library; (3) this customer's last five system quotes
+(Daylite history excluded); (4) the system categories with their typical items. Every SKU is resolved through
+`getManyBySku`, which follows model-number renames (D636–D642); a SKU with no live part is dropped, and the list given to
+the model is `{ sku, desc, mfr, unit, category }`, capped at 400 parts, with no cost or price. Punch item #334.
+Verified: `rankCatalogParts` and the draft prompt in `scripts/test-assist.ts` — candidates found by description, and the draft
+prompt text carries no cost or price figure (the DB-level check greps the prompt for the part's cost and list).
+
+## D877. A draft is an ordinary Estimator quote with an `assistDraft` marker (#334, 2026-10-12)
+
+The result is created through the same chain as a new estimate (`resolveTier`, `canonicalBonusSections`, `totals`,
+`create`, then `scheduleQuotePdf`) with `source: "estimator"`, `status: "draft"`, `owner` and `preparedBy` the requesting
+user, and the thread's lead link when it has one. Because the source stays `"estimator"`, bonuses (D846–D852), approval
+(D517–D520), the library and every report behave as for a hand-built estimate. The only trace is the optional
+`Quote.assistDraft { runId, threadId, at, notes, reasons, dismissedAt? }`. The thread's own link is **not** changed. The
+action returns the builder href and the client navigates there. Punch item #334.
+Verified: `scripts/test-assist.ts` creation chain on a seeded customer with a fake provider — a `draft` quote,
+`source:"estimator"`, `assistDraft` set, thread link unchanged.
+
+## D878. The draft banner, Dismiss, and an outcome computed at report time (#334, 2026-10-12)
+
+The Estimator shows "Drafted from an email by Assist — check every line before submitting" with a link back to the thread,
+the model's notes and a collapsible "Why these parts" list for lines that still exist. **Dismiss** sets
+`assistDraft.dismissedAt` through `dismissAssistDraft`, which does not bump the quote's `updatedAt` (a dismiss is not an
+edit, so it cannot make an in-flight save or an approval go stale). An estimate stores no outcome: the report compares the
+run's drafted `[{sku, qty}]` with the quote's materials lines now (`estimateKeep`: kept, changed, removed) — accepted at
+≥ 90 % kept, discarded when the quote is gone or under 10 % kept-or-changed, else edited. Punch item #334.
+Verified: `estimateKeep` thresholds and `dismissAssistDraft` (no `updatedAt` change, idempotent) in
+`scripts/test-assist.ts`.
+
+## D879. Settings → Beta → Assist pilot, and the usage report (#334, 2026-10-12)
+
+`app_settings` gains `assistUsers` (default `[]`), `assistFeatures` (default `{}`; a missing key is on) and
+`assistMonthlyCapUsd` (default 200, clamped 0–10,000). The card in Settings → Beta shows a status line (provider, models per
+feature, "Kill switch on"), a checkbox per team member, three feature toggles, the cap, and a report of estimated cost —
+this month's spend against the cap, a table per feature (runs, ok %, accepted / edited / discarded / no outcome, cost), a
+per-person and a per-model row, and a picker for this month and the two before. It saves through `setAssistSettingsAction`
+(`manage_users`, unknown user ids filtered out). **Report data loads only for admins on `?section=data`** (`loadAssistVM`),
+so no other settings view reads `assist_runs`. Punch item #334.
+Verified: report aggregation and settings sanitising in `scripts/test-assist.ts`; smoke renders `/settings?section=*`.
+
+## D880. The SDK supersedes D39 for this layer; D89's deletions stay deleted; the Assist gate replaces "no model calls" (#334, 2026-10-12)
+
+Three things, stated together because they touch the same earlier decisions. (1) **D39** ("no new npm dependency — Anthropic
+over plain fetch") is superseded for this layer only: Assist uses the official `@anthropic-ai/sdk` (0.128.0, beta messages)
+for typed errors, retries and the fallback beta. (2) **D89**'s deletions stay deleted — the thread and customer summaries,
+import extraction, the assistant Q&A and the `/assistant` nav entry are not coming back, and `src/lib/ai/` is not
+restored; Assist is a fresh, smaller build with three jobs (tasks, reply, estimate), no chat, no tool use, no agents.
+(3) **D89's "no model calls remain" posture is replaced by the opt-in Assist gate**: with no key, an empty pilot list, or
+`ASSIST_DISABLED=true`, the app makes zero model calls and renders no Assist UI, exactly as under D89; with the gate open
+it makes exactly the calls D869–D879 describe. Renewal drafts (D75) and rules-based scope drafting (D86) stay
+deterministic. Rollback is to leave `ANTHROPIC_API_KEY` unset or the pilot list empty; nothing is rewritten. Punch item #334.
+Verified: tsc 0 errors; `test:specs` 17,987 PASS / 3 FAIL (the three are stale source-pins that predate this layer's file moves, listed in the Task 10 report; the 417 `assist` checks all PASS); `test:smoke` every one of the 245 routes returned its expected status on this branch (218 in the full runs, the last 27 print / PDF / Grid-set routes in a filtered run), including /inbox, /estimator and /settings?section=* with no key and no Assist UI; no single full run finished because the dev server died mid-run (Turbopack panic, clean exit, ENOSPC), with no failing route; eslint 0 errors, 0 warnings on all 28 changed paths; `next build` OK (Next 16.3.5, 137 static pages).

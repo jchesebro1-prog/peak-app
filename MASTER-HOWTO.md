@@ -193,11 +193,27 @@ box); Google Calendar sync for calls/meetings (manual log for now, C5); and
 smart parsing of forward-to-`log@` messages (inbound is matched to customers
 by email address today, C6).
 
-## 6. AI features — removed (2026-07-19, D89)
+## 6. AI features — removed (2026-07-19, D89); Assist is opt-in (#334)
 
 The model-backed features (summaries, import extraction, assistant Q&A) were
-removed per `docs/superpowers/specs/2026-07-19-ai-removal-design.md` — the app
-is fully deterministic and needs no `ANTHROPIC_API_KEY`. Recover via git history.
+removed per `docs/superpowers/specs/2026-07-19-ai-removal-design.md` and stay
+removed — the app is fully deterministic with no key set. Recover via version history.
+
+**Turning Assist on (D869–D880).** A small opt-in layer — Suggest tasks, Draft
+reply and Draft estimate, on an email thread in the Inbox — is the one place
+the app calls a model:
+
+1. Create an API key at console.anthropic.com with billing, and set a Console
+   spend limit that matches the monthly cap (default $200).
+2. Set `ANTHROPIC_API_KEY` in Vercel production (see `.env.example` for the
+   optional `ASSIST_*` overrides; `ASSIST_DISABLED=true` is the kill switch).
+3. In Settings → Beta → Assist pilot, tick the pilot users. An empty list means
+   nobody. The same card has the three feature toggles, the cap and the report.
+4. Try each button on a real thread. Assist only drafts: tasks need a tick,
+   replies land in the composer unsent, and an estimate is a draft Estimator
+   quote to check line by line.
+5. After about 30 days read the report (estimated cost, outcome per feature)
+   and decide whether to keep it.
 
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 
