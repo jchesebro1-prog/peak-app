@@ -8,7 +8,7 @@ import { get as getQuote, type Quote } from "@/lib/stores/quotes";
 import { getSystemCategories } from "@/lib/stores/system-categories";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import type { SystemCategory } from "@/lib/system-categories";
-import type { CandidatePart, ExampleSystem, PricePart } from "./features/estimate-draft";
+import { remapExampleLines, selectCandidateParts, type CandidatePart, type ExampleSystem, type PricePart } from "./features/estimate-draft";
 
 const CANDIDATE_CAP = 400;
 const PER_QUERY = 8;
@@ -35,12 +35,11 @@ export type EstimateCandidates = {
 };
 
 export async function gatherEstimateCandidates(input: { phrases: string[]; systems: string[]; customerId: string | null }): Promise<EstimateCandidates> {
-  const skus = new Set<string>();
-
-  // 1. catalog hits — each phrase plus each significant word of it
+  // 1. catalog hits — each phrase plus each significant word of it (live SKUs already)
   const all = await catalogList();
+  const hits: string[] = [];
   const queries = [...new Set(input.phrases.flatMap((p) => [p, ...p.split(/\s+/).filter((w) => w.length >= 4)]))];
-  for (const q of queries) for (const { p } of rankCatalogParts(all, q).slice(0, PER_QUERY)) skus.add(p.sku);
+  for (const q of queries) for (const { p } of rankCatalogParts(all, q).slice(0, PER_QUERY)) hits.push(p.sku);
 
   // 2. similar past systems (#293 library) — top 5 across system names + phrases
   const lib = await systemLibraryIndex();
@@ -49,17 +48,15 @@ export async function gatherEstimateCandidates(input: { phrases: string[]; syste
     .flatMap((q) => searchSystemLibrary(lib, q, { limit: 3 }))
     .filter((e) => (seen.has(e.key) ? false : (seen.add(e.key), true)))
     .slice(0, PAST_SYSTEMS);
-  const pastSystems: ExampleSystem[] = [];
+  const pastRaw: ExampleSystem[] = [];
   for (const e of entries) {
     const live = exampleLines(itemsOf(await getQuote(e.quoteId), e.sectionId));
     const lines = live.length ? live : e.skus.map((sku, i) => ({ sku, desc: e.descs[i] || "", qty: 1 }));
-    if (!lines.length) continue;
-    lines.forEach((l) => skus.add(l.sku));
-    pastSystems.push({ label: `${e.estNumber} ${e.systemName}`.trim(), lines });
+    if (lines.length) pastRaw.push({ label: `${e.estNumber} ${e.systemName}`.trim(), lines });
   }
 
   // 3. this customer's past system estimates (newest 5, no Daylite history)
-  const customerSystems: ExampleSystem[] = [];
+  const customerRaw: ExampleSystem[] = [];
   if (input.customerId) {
     const qs = (await listDocsByField<Quote>("quotes", "customerId", [input.customerId]))
       .filter((q) => (q.quoteType || "system") === "system" && q.source !== "daylite")
@@ -67,24 +64,33 @@ export async function gatherEstimateCandidates(input: { phrases: string[]; syste
       .slice(0, CUSTOMER_QUOTES);
     for (const q of qs) {
       const lines = exampleLines(itemsOf(q));
-      if (!lines.length) continue;
-      lines.forEach((l) => skus.add(l.sku));
-      customerSystems.push({ label: `${displayQuoteNumber(q)} ${q.name || ""}`.trim(), lines });
+      if (lines.length) customerRaw.push({ label: `${displayQuoteNumber(q)} ${q.name || ""}`.trim(), lines });
     }
   }
 
   // 4. system categories (Estimating Rules → System categories)
-  const categories = await getSystemCategories();
-  categories.forEach((c) => c.items.forEach((i) => skus.add(i.sku)));
+  const rawCategories = await getSystemCategories();
 
-  // Resolve to live parts (renames followed, retired/deleted parts absent), cap, build both views.
-  const live = await getManyBySku([...skus]);
+  // Resolve every SKU to its live part (renames followed, retired/deleted
+  // parts absent). Category items and example lines take their seats in the
+  // cap first, so catalog hits can never crowd them out; hits fill the rest.
+  const priority = [
+    ...rawCategories.flatMap((c) => c.items.map((i) => i.sku)),
+    ...pastRaw.flatMap((e) => e.lines.map((l) => l.sku)),
+    ...customerRaw.flatMap((e) => e.lines.map((l) => l.sku)),
+  ];
+  const live = await getManyBySku([...new Set([...priority, ...hits])]);
+  const chosen = selectCandidateParts(priority, hits, live, CANDIDATE_CAP);
+  const allowed = new Set(chosen.map((p) => p.sku));
   const candidates: CandidatePart[] = [];
   const parts = new Map<string, PricePart>();
-  for (const p of live.values()) {
-    if (parts.has(p.sku) || candidates.length >= CANDIDATE_CAP) continue;
+  for (const p of chosen) {
     parts.set(p.sku, { sku: p.sku, desc: p.desc || "", unit: p.unit || "ea", cost: p.cost || 0, list: p.list || 0 });
     candidates.push({ sku: p.sku, desc: p.desc || "", mfr: p.mfr || "", unit: p.unit || "ea", category: p.category || "" });
   }
-  return { candidates, parts, pastSystems, customerSystems, categories };
+  // Examples and category items show the model only SKUs it may use, by their live names.
+  const remap = (xs: ExampleSystem[]) =>
+    xs.map((e) => ({ ...e, lines: remapExampleLines(e.lines, live, allowed) })).filter((e) => e.lines.length);
+  const categories: SystemCategory[] = rawCategories.map((c) => ({ ...c, items: remapExampleLines(c.items, live, allowed) }));
+  return { candidates, parts, pastSystems: remap(pastRaw), customerSystems: remap(customerRaw), categories };
 }

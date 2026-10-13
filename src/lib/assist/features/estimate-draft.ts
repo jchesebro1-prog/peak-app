@@ -57,6 +57,39 @@ export const DRAFT_SYSTEM = [
 export type CandidatePart = { sku: string; desc: string; mfr: string; unit: string; category: string };
 export type ExampleSystem = { label: string; lines: { sku: string; desc: string; qty: number }[] };
 
+/**
+ * Pure — the candidate parts, in priority order (D876): `priority` SKUs
+ * (system-category items, then example lines) first, then catalog `hits`,
+ * up to `cap`. Each requested SKU resolves through `live` (keyed by the
+ * requested SKU, renames followed); unresolved SKUs and repeats are skipped.
+ */
+export function selectCandidateParts<P extends { sku: string }>(priority: string[], hits: string[], live: Map<string, P>, cap: number): P[] {
+  const out: P[] = [];
+  const seen = new Set<string>();
+  for (const sku of [...priority, ...hits]) {
+    if (out.length >= cap) break;
+    const p = live.get(sku);
+    if (!p || seen.has(p.sku)) continue;
+    seen.add(p.sku);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Pure — example lines rewritten to the SKU each one means today (#304
+ * renames), keeping only lines whose part is in the candidate set: an
+ * example must never show the model a SKU it may not use.
+ */
+export function remapExampleLines<L extends { sku: string }>(lines: L[], live: Map<string, { sku: string }>, allowed: Set<string>): L[] {
+  const out: L[] = [];
+  for (const l of lines) {
+    const sku = live.get(l.sku)?.sku;
+    if (sku && allowed.has(sku)) out.push({ ...l, sku });
+  }
+  return out;
+}
+
 const exampleLine = (e: ExampleSystem) => `- ${e.label}: ${e.lines.slice(0, 40).map((l) => `${l.sku}×${l.qty}`).join(", ")}`;
 
 export function buildDraftUserText(ctx: {
