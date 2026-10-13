@@ -20,7 +20,8 @@ import { comms as commsTable } from "@/db/doc-tables";
 import { getDoc, patchDoc, setBlob, softDeleteDoc } from "@/db/doc-store";
 import { parseInbound } from "@/lib/gmail/mime";
 import type { GmailFullMessage } from "@/lib/gmail/api";
-import { addMessage, archive, flushOutbox, reply, replyLeft, setOrg, threadsIn, type CommMessage, type CommThread } from "@/lib/stores/comms";
+import { addMessage, archive, flushOutbox, reinboxFromGmail, reply, replyLeft, runPostReply, setOrg, setStatus, threadsIn, unarchive, type CommMessage, type CommThread } from "@/lib/stores/comms";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, loadOrgContext, organizeThread } from "@/lib/inbox-org/pipeline";
 import { onMyCourt, selectEmail } from "@/lib/triage/feeds/email";
 import { organizeAfterImport, recordMessage } from "@/lib/gmail/bridge";
@@ -42,7 +43,7 @@ import type { AssistRun } from "@/lib/stores/assist-runs";
 import { senderRuleRows } from "@/lib/inbox-org/rule-list";
 import { CLEANUP_BLOB_PREFIX, cleanupRuleSuggestions, cleanupVMOf, getCleanupState, runCleanupBatch } from "@/lib/inbox-org/cleanup";
 import { aiCourtOverride, applyPromises, COURT_SYSTEM, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
-import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
+import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, resetAiPassSweep, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
 import { listDocsByField, upsertDoc, upsertDocs } from "@/db/doc-store";
 import type { TaskRecord } from "@/lib/stores/tasks";
@@ -1162,8 +1163,14 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   await organizeThread(gated, { ctx: pilot });
   ok((await read(gated)).filing?.pendingAi === true && (await read(gated)).court?.pendingAi === true, "ai pass: (setup) live mail → filing and court both pending");
   const callsG: ProviderRequest[] = [];
-  const rG = await run(routedProvider({ file: fileAns(QUOTE), promise: courtAns({ owner: "me" }) }, { calls: callsG }), { ctx: offCtx });
-  ok(callsG.length === 0 && rG.cleared === 2 && !(await read(gated)).filing?.pendingAi && !(await read(gated)).court?.pendingAi, "ai pass: an owner the gate refuses gets pendingAi cleared without a call");
+  /* D895 — no pilot among the owners → the pass returns at once: no call, no query, nothing cleared */
+  const rOff = await run(routedProvider({ file: fileAns(QUOTE), promise: courtAns({ owner: "me" }) }, { calls: callsG }), { ctx: offCtx });
+  ok(callsG.length === 0 && rOff.looked === 0 && rOff.cleared === 0 && (await read(gated)).filing?.pendingAi === true, "ai pass: no owner in the list is a pilot → returns early (no call, nothing read or cleared)");
+  const offFeatures = buildOrgContext({ users, assist: { users: [ARI_ID], features: { ...allOn, file: false, promise: false }, capUsd: 200 }, env });
+  ok((await run(routedProvider({ file: fileAns(QUOTE) }, { calls: callsG }), { ctx: offFeatures })).looked === 0 && callsG.length === 0, "ai pass: a pilot user with file + promise both off counts as no pilot");
+  const danaPilot = buildOrgContext({ users, assist: { users: [DANA_ID], features: allOn, capUsd: 200 }, env });
+  const rG = await run(routedProvider({ file: fileAns(QUOTE), promise: courtAns({ owner: "me" }) }, { calls: callsG }), { ctx: danaPilot, ownerIds: [ARI_ID, DANA_ID] });
+  ok(callsG.length === 0 && rG.cleared === 2 &&!(await read(gated)).filing?.pendingAi && !(await read(gated)).court?.pendingAi, "ai pass: an owner the gate refuses gets pendingAi cleared without a call");
 
   /* 5. court: a teammate hands the thread to me (named) → me, with a promise-task */
   const handoff = await mk("handoff", {
@@ -1383,8 +1390,18 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   await patchDoc<CommThread>("comms", orphan, (d) => {
     d.filing = { customerId: CUST, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0, pendingAi: true };
   });
+  resetAiPassSweep();
   await run(routedProvider({ file: fileAns(QUOTE) }));
   ok(!(await read(orphan)).filing?.pendingAi, "ai stuck: a pending row nobody can own is cleared");
+  /* D895 — the sweep runs at most once an hour per process */
+  const orphan2 = await mk("orphan-2", { mailboxUser: "TEST335 Nobody", resolution: "suggested", suggestedCustomerId: CUST });
+  await patchDoc<CommThread>("comms", orphan2, (d) => {
+    d.filing = { customerId: CUST, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0, pendingAi: true };
+  });
+  await run(routedProvider({ file: fileAns(QUOTE) }));
+  ok((await read(orphan2)).filing?.pendingAi === true, "ai stuck: a second pass within the hour doesn't sweep again");
+  await run(routedProvider({ file: fileAns(QUOTE) }), { clock: () => Date.now() + 3_600_001 });
+  ok(!(await read(orphan2)).filing?.pendingAi, "ai stuck: …an hour later it does");
   const stale = await mk("stale-basis", {});
   await patchDoc<CommThread>("comms", stale, (d) => {
     d.filing = { customerId: null, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "filed", at: T0, pendingAi: true, basis: "gone" };
@@ -1635,6 +1652,89 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
     await recordMessage(key, parseInbound(gm("TEST335-ap-g4", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "pat@apply-school.test", "Pat — scratch that, Friday works too.")));
     ok((await read(tid!)).archived === true, "apply teammate: with 'Keep threads in my inbox' on, a teammate's reply still never brings back a thread I archived");
     await setKeepInInbox(ANN, false);
+
+    /* D896 — the pipeline's quiet archive / unarchive / setStatus are key-level: a message appended meanwhile survives */
+    const nBefore = (await read(tid!)).messages.length;
+    // one mailbox's imports run one after another (a sync is claimed per
+    // mailbox); the pipeline / apply writes race them
+    const imports = (async () => {
+      await recordMessage(key, parseInbound(gm("TEST335-ap-c1", "TEST335-ap-thread", "Pat <pat@apply-school.test>", "ann.t335@peaksystemsgroup.com", "Concurrent one?")));
+      await recordMessage(key, parseInbound(gm("TEST335-ap-c2", "TEST335-ap-thread", "Pat <pat@apply-school.test>", "ann.t335@peaksystemsgroup.com", "Concurrent two?")));
+    })();
+    const quietWrites = async () => {
+      for (let i = 0; i < 6; i++) {
+        await Promise.all([archive(tid!, { quiet: true }), setStatus(tid!, i % 2 ? "waiting_us" : "waiting_them", { quiet: true }), unarchive(tid!, { quiet: true })]);
+      }
+    };
+    await Promise.all([imports, quietWrites(), quietWrites()]);
+    const tc = await read(tid!);
+    ok(tc.messages.length === nBefore + 2 && tc.messages.some((m) => m.gmailId === "TEST335-ap-c1") && tc.messages.some((m) => m.gmailId === "TEST335-ap-c2"), "apply concurrency: messages imported while quiet archive / unarchive / setStatus run all survive");
+    const commsSrc2 = readFileSync("src/lib/stores/comms.ts", "utf8");
+    const archBody = commsSrc2.slice(commsSrc2.indexOf("export async function archive("), commsSrc2.indexOf("/** The Gmail bridge's record of whether"));
+    const statusBody = commsSrc2.slice(commsSrc2.indexOf("export async function setStatus("), commsSrc2.indexOf("export async function reopen("));
+    ok((archBody.match(/quietKeyWrite\(id, "archived", (true|false)\)/g) || []).length === 2 && statusBody.includes('quietKeyWrite(threadId, "status", status)') && commsSrc2.includes('patchDocKey("comms", [id], key, value)'), "apply concurrency: quiet archive / unarchive / setStatus write one key (patchDocKey), never the whole doc");
+    const hb = await read(tid!);
+    await archive(tid!, { quiet: true });
+    await setOrg(tid!, { filing: { ...(await read(tid!)).filing!, archivedOnReply: true } });
+    await unarchive(tid!, { quiet: true });
+    const ua = await read(tid!);
+    ok(ua.archived === false && !ua.filing?.archivedOnReply && ua.updatedAt === hb.updatedAt && ua.messages.length === hb.messages.length, "apply concurrency: a quiet unarchive clears archivedOnReply key-level, no updatedAt bump");
+    await setStatus(tid!, "not-a-status", { quiet: true });
+    ok((await read(tid!)).status === ua.status, "apply concurrency: a quiet setStatus with an unknown status changes nothing");
+
+    /* D898 — re-inboxed in Gmail → back in the app (archived off, archivedOnReply cleared) */
+    const reinb = await mk("gmail-reinbox", { customerId: CUST, customer: "TEST335 Apply School", resolution: "linked" });
+    await patchDoc<CommThread>("comms", reinb, (d) => {
+      d.archived = true;
+      d.gmailInboxed = false;
+      d.filing = { ...d.filing!, archivedOnReply: true };
+    });
+    const rb0 = await read(reinb);
+    await reinboxFromGmail(reinb);
+    const rb1 = await read(reinb);
+    ok(rb1.gmailInboxed === true && rb1.archived === false && !rb1.filing?.archivedOnReply && rb1.messages.length === rb0.messages.length && rb1.updatedAt === rb0.updatedAt, "gmail re-inbox: a thread moved back to the Gmail inbox comes back in the app (archived off, archivedOnReply cleared, quiet)");
+    const nzRe = await mk("gmail-reinbox-noise", {});
+    await patchDoc<CommThread>("comms", nzRe, (d) => {
+      d.archived = true;
+      d.gmailInboxed = false;
+      d.noise = { flagged: true, reason: "Bulk mail", moved: true };
+    });
+    await reinboxFromGmail(nzRe);
+    ok((await read(nzRe)).noise?.rescued === true && (await read(nzRe)).noise?.moved === false && (await read(nzRe)).archived === false, "gmail re-inbox: moved noise brought back from Gmail counts as rescued (not moved out again)");
+    const bridgeSrc2 = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+    const recon = bridgeSrc2.slice(bridgeSrc2.indexOf("async function reconcileInboxState("), bridgeSrc2.indexOf("/* ---- status re-derive"));
+    ok(recon.includes("if (desired && t.gmailInboxed === false) await reinboxFromGmail(t.id);") && recon.includes("else await setGmailInboxed(t.id, desired);") && !recon.includes("patchDoc<CommThread>"), "gmail re-inbox: reconcileInboxState brings an explicit false → true flip back in the app, key-level");
+
+    /* D900 — INBOX_ORG_DISABLED=true turns off the import hook, the post-reply step, the Mark replied / Close archive and the AI pass */
+    ok(inboxOrgDisabled({ INBOX_ORG_DISABLED: "true" }) && inboxOrgDisabled({ INBOX_ORG_DISABLED: " TRUE " }) && !inboxOrgDisabled({}) && !inboxOrgDisabled({ INBOX_ORG_DISABLED: "1" }), "kill switch: INBOX_ORG_DISABLED=true only");
+    const prevKill = process.env.INBOX_ORG_DISABLED;
+    process.env.INBOX_ORG_DISABLED = "true";
+    try {
+      let organized = 0;
+      await organizeAfterImport(tid!, {}, async () => {
+        organized++;
+        return null as never;
+      });
+      ok(organized === 0, "kill switch: the import hook doesn't organize");
+      const killT = await mk("kill-reply", { customerId: CUST, customer: "TEST335 Apply School", resolution: "linked" });
+      await patchDoc<CommThread>("comms", killT, (d) => {
+        d.messages = [...d.messages, msg({ direction: "out", fromEmail: "ann.t335@peaksystemsgroup.com", to: "pat@apply-school.test", body: "Here you go." })];
+      });
+      const kr = await archiveAfterReply(killT, "reply", ann, { manual: true });
+      ok(kr.ok && kr.archived === false && kr.skipped === "disabled" && (await read(killT)).archived === false, "kill switch: archiveAfterReply (Mark replied / Close / reply) archives nothing");
+      await runPostReply(killT);
+      ok((await read(killT)).archived === false, "kill switch: the post-reply step archives nothing");
+      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
+      const kp = await runAiPass({ ownerIds: [ANN_ID] }, { ctx: killCtx });
+      ok(kp.looked === 0 && kp.calls === 0 && kp.cleared === 0, "kill switch: the AI pass does nothing");
+    } finally {
+      if (prevKill === undefined) delete process.env.INBOX_ORG_DISABLED;
+      else process.env.INBOX_ORG_DISABLED = prevKill;
+    }
+    const actSrc = readFileSync("src/app/(app)/inbox/actions.ts", "utf8");
+    const schedBody = actSrc.slice(actSrc.indexOf("function scheduleAiPass("), actSrc.indexOf("export async function autoSyncAction("));
+    ok(actSrc.includes('if ((status === "replied" || status === "closed") && !inboxOrgDisabled()) {') && schedBody.includes("if (!ownerIds.length || inboxOrgDisabled()) return;"), "kill switch: setStatusAction skips the archive and scheduleAiPass schedules nothing");
+    ok(readFileSync(".env.example", "utf8").includes("INBOX_ORG_DISABLED="), "kill switch: documented in .env.example");
 
     /* change → rule offer → rule → re-sweep files a second thread from the same sender */
     const s1 = await mk("rule-1", { contactEmail: "buyer@newco-apply.test", messages: [msg({ fromEmail: "buyer@newco-apply.test", body: "Do you sell drapes?" })] });
