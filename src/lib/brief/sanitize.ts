@@ -27,14 +27,26 @@ function cap(s: string, max: number): string {
 }
 
 /**
- * Plain text: control characters dropped, markdown emphasis / headings /
+ * Markdown links and images keep only their text (`[the quote](https://…)` →
+ * "the quote"), HTML tags go (`<b>`, `<script …>`), and any `[ ] < >` left
+ * over is dropped — model text never carries a link or markup. Shared with
+ * the Listen text (speech.ts).
+ */
+export function stripLinksAndTags(s: string): string {
+  return s
+    .replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, "$1")
+    .replace(/<\/?[A-Za-z][^<>]*>/g, " ")
+    .replace(/[[\]<>]/g, "");
+}
+
+/**
+ * Plain text: control characters dropped, markdown links / images reduced to
+ * their text, HTML tags and `[ ] < >` removed, markdown emphasis / headings /
  * bullets / code ticks removed, whitespace collapsed to single spaces, capped.
- * HTML is left as text — React escapes it.
  */
 export function cleanBriefText(raw: unknown, max: number): string {
   if (typeof raw !== "string") return "";
-  const s = raw
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+  const s = stripLinksAndTags(raw.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ""))
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s*(?:[-*+•]|\d+[.)])\s+/gm, "")
     .replace(/(\*\*|__|\*|`)/g, "")

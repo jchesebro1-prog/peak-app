@@ -623,6 +623,11 @@ function scheduleAiPass(owners: string[], startedAt: number, meId: string): void
     // in the pilot (file or promise), so a non-pilot tick costs no queries
     const [{ runAiPass }, { POLL_AI_DEADLINE_MS }] = await Promise.all([import("@/lib/inbox-org/ai-pass"), import("@/lib/gmail/bridge")]);
     await runAiPass({ ownerIds, deadlineMs: startedAt + POLL_AI_DEADLINE_MS });
+    // AI daily brief (spec §2) — the signed-in user's pre-made drafts, on the
+    // courts this pass just settled, in the time left of the same deadline;
+    // returns at once unless they're in the pilot with reply, tasks or brief on
+    const { runDraftQueue } = await import("@/lib/brief/drafts");
+    await runDraftQueue({ ownerId: meId, deadlineMs: startedAt + POLL_AI_DEADLINE_MS }).catch((err) => console.error("[brief] draft queue failed:", err));
   });
 }
 

@@ -1,5 +1,6 @@
 import { outsideTransaction } from "@/db";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
+import type { PreDraft } from "@/lib/brief/types";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import {
   getDoc,
@@ -367,6 +368,11 @@ export type CommThread = {
   court?: Court;
   /** Inbox organization (#335) — the "Looks like noise" flag. */
   noise?: NoiseFlag;
+  /** AI daily brief (spec §2) — a pre-made reply + task suggestions, written
+   *  only by the brief's draft queue through `setPreDraft` (a key-level
+   *  write). Fresh while `basis` is the newest inbound message id
+   *  (`preDraftFresh`); a stale one is ignored and redrafted. */
+  preDraft?: PreDraft;
 };
 
 function mid(n: number): string {
@@ -1929,6 +1935,15 @@ export async function setOrg(
     if (!res.ids.length) return null;
   }
   return getDoc<CommThread>("comms", threadId);
+}
+
+/** AI daily brief (spec §2) — set (or, with null, remove) a thread's
+ *  pre-made draft: one key-level write (`doc || {preDraft}`), never a
+ *  whole-doc rewrite, so mail the Gmail import appends meanwhile is kept.
+ *  Quiet like setOrg (no updatedAt bump). False = missing / deleted thread. */
+export async function setPreDraft(threadId: string, preDraft: PreDraft | null): Promise<boolean> {
+  const res = await patchDocKey("comms", [threadId], "preDraft", preDraft === null ? undefined : preDraft);
+  return res.ids.length > 0;
 }
 
 /** #335 — threads the AI pass still has to read (`filing.pendingAi` or

@@ -105,8 +105,9 @@ export function slotAt(ms: number): { day: string; slot: Slot } {
   return { day: dayKey(ms), slot: minuteOfDay(ms) >= MIDDAY_AT_MIN ? "midday" : "morning" };
 }
 
+/** The stored slot `midday` is built at 13:45 — it reads as the afternoon list (AI daily brief). */
 export function slotLabel(slot: Slot): string {
-  return slot === "morning" ? "Morning list" : "Midday list";
+  return slot === "morning" ? "Morning list" : "Afternoon list";
 }
 
 export function snapshotId(userId: string, day: string, slot: Slot): string {

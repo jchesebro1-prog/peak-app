@@ -572,7 +572,9 @@ export async function assistKeyChecks(ok: Ok): Promise<void> {
   /* explicit env never sees the stored key */
   const runSrc = readFileSync("src/lib/assist/run.ts", "utf8");
   ok(/const env = deps\.env \?\? \(await getAssistEnv\(\)\)/.test(runSrc), "assist key: runAssist uses the stored key only when the caller passed no env");
-  for (const f of ["src/app/(app)/inbox/assist-actions.ts", "src/app/(app)/inbox/page.tsx", "src/app/(app)/settings/assist-data.ts"]) {
+  // the Inbox actions' early gate moved to src/lib/assist/gate-server.ts (brief Task 2)
+  ok(readFileSync("src/app/(app)/inbox/assist-actions.ts", "utf8").includes('from "@/lib/assist/gate-server"'), "assist key: the Inbox actions gate through gate-server");
+  for (const f of ["src/lib/assist/gate-server.ts", "src/app/(app)/inbox/page.tsx", "src/app/(app)/settings/assist-data.ts"]) {
     ok(readFileSync(f, "utf8").includes("getAssistEnv("), `assist key: ${f} reads the effective env`);
   }
   const card = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");

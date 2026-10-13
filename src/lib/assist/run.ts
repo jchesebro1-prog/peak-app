@@ -30,11 +30,21 @@ export type RunArgs<T> = {
   userText: string;
   schema?: z.ZodType<T>;
   contextRef: string;
-  /** false = don't count this call against the per-hour limit (the estimate's 2nd call). */
+  /** false = don't count this call against the per-hour limit (the estimate's 2nd call; background pre-drafting). */
   countRate?: boolean;
+  /** Background callers (the brief's draft queue): cap this call below the slot's own timeout / retries. */
+  limits?: CallLimits;
 };
+/** Caps only ever shorten a slot's SLOT_SETTINGS values, never lengthen them. */
+export type CallLimits = { timeoutMs?: number; maxRetries?: number };
 export type RunDeps = { provider?: AssistProvider; fallback?: AssistProvider | null; now?: number; settings?: AssistSettings; env?: Env };
+/** A reusable server function's options: runAssist's deps plus the call's own rate/limit choices. */
+export type AssistCallDeps = RunDeps & { countRate?: boolean; limits?: CallLimits };
 export type RunResult<T> = { ok: true; runId: string; value: T } | { ok: false; runId: string | null; error: string };
+
+function capAt(slotValue: number, cap: number | undefined): number {
+  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? Math.min(slotValue, Math.floor(cap)) : slotValue;
+}
 
 export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}): Promise<RunResult<T>> {
   // D881: the effective key (Settings ?? env var) unless the caller passed its own env.
@@ -62,8 +72,8 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     effort: s.effort,
     maxTokens: s.maxTokens,
     fallbacks: picked.primary.name !== "local" && wantsFallbacks(requestedModel),
-    timeoutMs: s.timeoutMs,
-    maxRetries: s.maxRetries,
+    timeoutMs: capAt(s.timeoutMs, args.limits?.timeoutMs),
+    maxRetries: capAt(s.maxRetries, args.limits?.maxRetries),
     stream: s.stream,
   };
 

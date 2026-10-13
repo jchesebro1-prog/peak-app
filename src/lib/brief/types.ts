@@ -53,12 +53,17 @@ export type BriefText = { summary: string; doFirst: BriefDoFirst[] };
 /** `CommThread.preDraft` (§2) — a pre-made reply + task suggestions. Fresh while
  *  `basis` is the thread's newest inbound message id. */
 export type PreDraft = {
+  /** "" = no reply drafted (reply off, or it failed — see `replyError`). */
   body: string;
   runId: string | null;
+  /** null = no suggestions made (tasks off, or it failed — see `tasksError`). */
   taskSuggestions: TaskSuggestion[] | null;
   taskRunId: string | null;
   basis: string;
   at: number;
+  /** The model ran but gave nothing usable; the queue retries after DRAFT_RETRY_MS. */
+  replyError?: string;
+  tasksError?: string;
 };
 
 /** `Quote.assistNudge` (§2) — a follow-up note + nudge email for a quiet quote.
@@ -70,4 +75,6 @@ export type AssistNudge = {
   runId: string | null;
   basis: number;
   at: number;
+  /** The model ran but gave nothing usable (note/subject/body are ""); the queue retries after DRAFT_RETRY_MS. */
+  error?: string;
 };

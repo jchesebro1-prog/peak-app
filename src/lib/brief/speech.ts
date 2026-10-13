@@ -4,6 +4,7 @@
  * `window.speechSynthesis` by the card. Pure, client-safe.
  */
 import { chicagoParts } from "@/lib/triage/clock";
+import { stripLinksAndTags } from "./sanitize";
 import type { Brief } from "./types";
 
 const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
@@ -41,11 +42,11 @@ export function spokenDuration(totalMin: number): string {
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const ORDINAL = ["First", "Second", "Third", "Fourth", "Fifth"];
 
-/** Text for the voice: symbols become pauses, markdown marks vanish, every sentence ends with a stop. */
+/** Text for the voice: links read as their text, HTML tags and `[ ] < >` vanish, symbols become pauses, markdown marks vanish, every sentence ends with a stop. */
 function speakable(raw: string): string {
-  const s = raw
+  const s = stripLinksAndTags(raw)
     .replace(/\s*[·•|]\s*/g, ", ")
-    .replace(/[*#_`~>]/g, "")
+    .replace(/[*#_`~]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/,\s*([.!?])/g, "$1")

@@ -83,6 +83,13 @@ export default async function HomePage({
     await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
   });
   const now = Date.now();
+  // AI daily brief (spec §2) — pre-made replies / task suggestions / quote
+  // nudges, after the response, within this page's 120 s; returns at once
+  // unless the user is in the Assist pilot with reply, tasks or brief on.
+  after(async () => {
+    const { runDraftQueue, HOME_DRAFT_DEADLINE_MS } = await import("@/lib/brief/drafts");
+    await runDraftQueue({ ownerId: user.id, deadlineMs: now + HOME_DRAFT_DEADLINE_MS }).catch((err) => console.error("[brief] draft queue failed:", err));
+  });
   const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
     meetingsReadOr(toFileCount(user.id), 0, "home count"), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
