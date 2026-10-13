@@ -300,6 +300,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   const css = readSrc("src/app/globals.css");
   ok(/\.pk-pop-header \{\s*display: none;\s*\}/.test(css) && /html\.pk-pop \.pk-pop-header \{[\s\S]*?display: flex;/.test(css) && /html\.pk-pop \.pk-nav \{\s*display: none !important;/.test(css), "popout: CSS hides the nav and shows the header only under html.pk-pop");
   ok(/@media \(max-width: 899px\) \{\s*\.pk-popout-affordance \{\s*display: none !important;/.test(css) && /html\.pk-native \.pk-popout-affordance \{\s*display: none !important;/.test(css), "popout: pop-out affordances hide below 900 px and in the native shell");
+  ok(/@media \(hover: none\) \{\s*\.pk-nav-pop \{\s*opacity: 1;/.test(css), "popout: the nav ⧉ stays visible on touch screens (no hover)");
 
   const legacy = parseMessage({ type: "inbox-changed", threadId: "T-1" });
   ok(!!legacy && legacy.type === "changed" && legacy.entity === "thread" && legacy.id === "T-1", "popout: legacy inbox-changed maps to changed/thread");

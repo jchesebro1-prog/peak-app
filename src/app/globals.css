@@ -192,6 +192,12 @@ html.pk-pop .pk-pop-header {
 .pk-nav-pop:focus-visible {
   opacity: 1;
 }
+/* Touch screens have no hover: keep the nav ⧉ visible as a tap target. */
+@media (hover: none) {
+  .pk-nav-pop {
+    opacity: 1;
+  }
+}
 /* "Pop-up blocked" notice (PopBlockedNotice). */
 .pk-pop-blocked {
   position: fixed;
