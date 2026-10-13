@@ -13,7 +13,7 @@ import { buildTasksUserText, sanitizeTaskSuggestions, TaskSuggestSchema, TASKS_S
 import { runAssist, type AssistCallDeps } from "./run";
 import { loadThreadFor } from "./thread-access";
 import { gateFor } from "./gate-server";
-import { splitCallDeps, type ThreadAssistFail } from "./reply-server";
+import { OUT_OF_TIME, splitCallDeps, type ThreadAssistFail } from "./reply-server";
 
 export type TaskSuggestResult =
   | { ok: true; runId: string; suggestions: TaskSuggestion[]; team: { id: string; name: string }[]; links: { key: string; label: string }[] }
@@ -22,16 +22,20 @@ export type TaskSuggestResult =
 export async function suggestTasksForThread(
   threadId: string,
   me: { id: string; name: string },
-  deps: AssistCallDeps = {}
+  deps: AssistCallDeps & { preloaded?: { team?: { id: string; name: string }[] } } = {}
 ): Promise<TaskSuggestResult> {
   const refused = await gateFor("tasks", me.id, deps);
   if (refused) return { ok: false, error: refused, kind: "gate", runId: null };
   const t = await loadThreadFor(threadId, me.name);
   if (!t) return { ok: false, error: "That email isn't available.", kind: "thread", runId: null };
-  const [users, links] = await Promise.all([activeUsers(), threadTaskLinkOptions(t)]);
-  const team = users.map((u) => ({ id: u.id, name: u.name }));
+  const [team, links] = await Promise.all([
+    deps.preloaded?.team ?? activeUsers().then((users) => users.map((u) => ({ id: u.id, name: u.name }))),
+    threadTaskLinkOptions(t),
+  ]);
   const today = chicagoToday(deps.now ?? Date.now());
-  const { run, call } = splitCallDeps(deps);
+  const split = splitCallDeps(deps, "tasks");
+  if (!split) return OUT_OF_TIME;
+  const { run, call } = split;
   const r = await runAssist(
     {
       feature: "tasks",

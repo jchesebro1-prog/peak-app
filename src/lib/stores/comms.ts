@@ -373,6 +373,11 @@ export type CommThread = {
    *  write). Fresh while `basis` is the newest inbound message id
    *  (`preDraftFresh`); a stale one is ignored and redrafted. */
   preDraft?: PreDraft;
+  /** AI daily brief — the draft queue's per-thread lease (epoch-ms; a live
+   *  value = another queue is drafting this thread). Taken and released by
+   *  compare-and-set (`casPreDraftKey`), a key of its own so it never
+   *  clobbers `preDraft`. */
+  preDraftLeaseUntil?: number;
 };
 
 function mid(n: number): string {
@@ -1944,6 +1949,18 @@ export async function setOrg(
 export async function setPreDraft(threadId: string, preDraft: PreDraft | null): Promise<boolean> {
   const res = await patchDocKey("comms", [threadId], "preDraft", preDraft === null ? undefined : preDraft);
   return res.ids.length > 0;
+}
+
+/** AI daily brief — compare-and-set the pre-draft or its lease (the draft
+ *  queue's writes): `next` lands only if the stored value still equals
+ *  `expected` (undefined = absent). Quiet, like casOrg. */
+export async function casPreDraftKey<K extends "preDraft" | "preDraftLeaseUntil">(
+  threadId: string,
+  key: K,
+  expected: CommThread[K] | undefined,
+  next: CommThread[K] | undefined
+): Promise<boolean> {
+  return casDocKey("comms", threadId, key, expected, next);
 }
 
 /** #335 — threads the AI pass still has to read (`filing.pendingAi` or

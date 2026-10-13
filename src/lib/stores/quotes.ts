@@ -3,6 +3,7 @@ import {
   getDoc,
   insertWithPrefixedId,
   listDocs,
+  casDocKey,
   patchDoc,
   patchDocKey,
   softDeleteDoc,
@@ -404,6 +405,9 @@ export type Quote = {
    *  staff-only. Fresh while the quote is still sent and `basis` is its send
    *  time (`nudgeFresh`). */
   assistNudge?: AssistNudge | null;
+  /** AI daily brief — the draft queue's per-quote lease (epoch-ms), taken and
+   *  released by compare-and-set (`casAssistNudgeKey`); update() drops it. */
+  assistNudgeLeaseUntil?: number | null;
 };
 
 /** #334 (D877) — where an Assist-drafted estimate came from. `reasons` is
@@ -897,6 +901,7 @@ export async function update(
     delete clean.emailSending;
     // AI daily brief: the nudge is setAssistNudge's alone.
     delete clean.assistNudge;
+    delete clean.assistNudgeLeaseUntil;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -910,6 +915,18 @@ export async function update(
 export async function setAssistNudge(quoteId: string, nudge: AssistNudge | null): Promise<boolean> {
   const res = await patchDocKey("quotes", [quoteId], "assistNudge", nudge === null ? undefined : nudge);
   return res.ids.length > 0;
+}
+
+/** AI daily brief — compare-and-set the nudge or its lease (the draft queue's
+ *  writes): `next` lands only if the stored value still equals `expected`
+ *  (undefined = absent). One key, in SQL — estNo and updatedAt untouched. */
+export async function casAssistNudgeKey<K extends "assistNudge" | "assistNudgeLeaseUntil">(
+  quoteId: string,
+  key: K,
+  expected: Quote[K] | undefined,
+  next: Quote[K] | undefined
+): Promise<boolean> {
+  return casDocKey("quotes", quoteId, key, expected, next);
 }
 
 /** #334 (D877) — hide an Assist-drafted estimate's banner. Under the row

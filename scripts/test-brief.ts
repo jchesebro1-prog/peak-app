@@ -12,7 +12,7 @@ import { lastSentAt, newestInboundId, nudgeFresh, preDraftFresh } from "@/lib/br
 import type { Brief } from "@/lib/brief/types";
 import type { QuoteHistoryEntry } from "@/lib/stores/quotes";
 import { ASSIST_FEATURES, OPT_IN_FEATURES, assistSettingsOf } from "@/lib/assist/config";
-import { RATE_LIMITS, toJsonSchema } from "@/lib/assist/run";
+import { capAt, RATE_LIMITS, toJsonSchema } from "@/lib/assist/run";
 import { SLOT_SETTINGS, modelFor } from "@/lib/assist/models";
 import { featureKey } from "@/lib/assist/report";
 import type { Ok } from "./test-inbox-org";
@@ -89,7 +89,9 @@ function sanitizeChecks(ok: Ok): void {
   // Task 1 review carry-over: no links, no markup, no [ ] < > in model text
   ok(cleanBriefText("See [the quote](https://evil.example/q) and ![logo](https://x/y.png) now", 200) === "See the quote and logo now", "brief sanitize: markdown links / images keep only their text");
   ok(cleanBriefText("<b>Busy</b> day <script>alert(1)</script><a href=\"https://x\">open</a>", 200) === "Busy day alert(1) open", `brief sanitize: HTML tags removed (${JSON.stringify(cleanBriefText("<b>Busy</b> day <script>alert(1)</script><a href=\"https://x\">open</a>", 200))})`);
-  ok(cleanBriefText("a < b > c [x] [y](", 200) === "a b c x y(", `brief sanitize: stray [ ] < > dropped (${JSON.stringify(cleanBriefText("a < b > c [x] [y](", 200))})`);
+  ok(cleanBriefText("a < b > c [x] [y](", 200) === "a b c x y", `brief sanitize: stray [ ] < > dropped (${JSON.stringify(cleanBriefText("a < b > c [x] [y](", 200))})`);
+  const paren = cleanBriefText("See [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) and [x](javascript:alert(1)) then [y](https://a.example/(c then", 200);
+  ok(paren === "See Foo and x then y then", `brief sanitize: link targets with balanced parentheses go whole; an unbalanced one leaves no ")" fragment (${JSON.stringify(paren)})`);
   const hostile = sanitizeBrief({ summary: "Call [Pat](javascript:alert(1)) <img src=x onerror=alert(1)>", doFirst: [{ key: "email:a", why: "[click](https://x) <i>now</i>" }] }, ROWS)!;
   ok(!/[[\]<>]|javascript|https?:/.test(hostile.summary + hostile.doFirst[0].why) && hostile.summary.startsWith("Call Pat") && hostile.doFirst[0].why === "click now", `brief sanitize: summary and why carry no link target or tag (${JSON.stringify(hostile)})`);
 }
@@ -308,10 +310,11 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
   const { draftReplyForThread } = await import("@/lib/assist/reply-server");
   const { suggestTasksForThread } = await import("@/lib/assist/tasks-server");
   const { REPLY_SYSTEM } = await import("@/lib/assist/features/reply-draft");
+  const { anthropicRequestOptions } = await import("@/lib/assist/anthropic");
   const { TASKS_SYSTEM } = await import("@/lib/assist/features/task-suggest");
   const { runDraftQueue, resetDraftQueue, courtMeThreads, DRAFT_MIN_CALL_MS, DRAFT_RETRY_MS } = await import("@/lib/brief/drafts");
-  const { get: getThread, setPreDraft } = await import("@/lib/stores/comms");
-  const { get: getQuote, update: updateQuote, setAssistNudge } = await import("@/lib/stores/quotes");
+  const { get: getThread, setPreDraft, casPreDraftKey } = await import("@/lib/stores/comms");
+  const { get: getQuote, update: updateQuote, setAssistNudge, casAssistNudgeKey } = await import("@/lib/stores/quotes");
   const { createFixture, fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
   const { fakeProvider } = await import("./test-assist");
   type Req = import("@/lib/assist/types").ProviderRequest;
@@ -333,10 +336,13 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
 
   /** One fake model for the whole queue: replies, task suggestions and nudges by system prompt. */
   const calls: Req[] = [];
+  /** Runs inside a model call — mail / writes landing while the model thinks. */
+  let onCall: ((req: Req) => Promise<void>) | null = null;
   const router = {
     name: "fake" as const,
     async complete(req: Req) {
       calls.push(req);
+      if (onCall) await onCall(req);
       const usage = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 };
       let text = "";
       if (req.system === REPLY_SYSTEM) text = "Subject: re\n\nHi Pat,\nThanks — we'll follow up.\n-- \nBrie";
@@ -407,6 +413,30 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     ok(r2.ok && rCalls[1].user.includes("Tone: normal.") && rCalls[1].timeoutMs === 20_000 && rCalls[1].maxRetries === 0, "brief drafts: an unknown tone reads as normal; limits cap the call (20 s, no retries)");
     const capUp = await draftReplyForThread(TH.mine, ME, { provider: fakeProvider("ok", { calls: rCalls }), settings: pilot, env, now: NOW, limits: { timeoutMs: 999_999, maxRetries: 9 } });
     ok(capUp.ok && rCalls[2].timeoutMs === 60_000 && rCalls[2].maxRetries === 1, "brief drafts: limits never lengthen a call past the slot");
+    ok(capAt(60_000, 0, 1) === 1 && capAt(60_000, -5, 1) === 1 && capAt(60_000, undefined, 1) === 60_000 && capAt(1, 0, 0) === 0 && capAt(60_000, Number.NaN, 1) === 60_000, "brief drafts: capAt — a 0 / negative timeout clamps to 1 ms, never 'unset'");
+    const zCalls: Req[] = [];
+    await draftReplyForThread(TH.mine, ME, { provider: fakeProvider("ok", { calls: zCalls }), settings: pilot, env, now: NOW, limits: { timeoutMs: 0, maxRetries: -1 } });
+    ok(zCalls[0]?.timeoutMs === 1 && zCalls[0].maxRetries === 0 && anthropicRequestOptions(zCalls[0]).timeout === 1, "brief drafts: limits { timeoutMs: 0 } reach the provider as 1 ms, not the longer default");
+    // preloaded data + a deadline, the cap computed after the loads
+    const pCalls: Req[] = [];
+    const styleThread = { ...baseThread, id: "PRE-1", status: "replied", messages: [{ id: "o1", at: NOW - DAYS, direction: "out", channel: "email", author: ME.name, body: "PRELOADED-STYLE-EXAMPLE text" }] } as unknown as Thread;
+    const tick = () => NOW;
+    const pre = await draftReplyForThread(TH.mine, ME, {
+      provider: fakeProvider("ok", { calls: pCalls }), settings: pilot, env, now: NOW, countRate: false,
+      preloaded: { quotes: [], threads: [styleThread], signature: "" },
+      deadline: { at: NOW + 35_000, hasFallback: false, minCallMs: 15_000, clock: tick },
+    });
+    ok(pre.ok && pCalls[0].user.includes("PRELOADED-STYLE-EXAMPLE") && pCalls[0].timeoutMs === 30_000 && pCalls[0].maxRetries === 0, `brief drafts: preloaded threads feed the style examples; the deadline caps the call to the time left (30 s) (${pCalls[0]?.timeoutMs})`);
+    const tight = await draftReplyForThread(TH.mine, ME, {
+      provider: fakeProvider("ok", { calls: pCalls }), settings: pilot, env, now: NOW,
+      preloaded: { quotes: [], threads: [], signature: "" },
+      deadline: { at: NOW + 19_000, hasFallback: false, minCallMs: 15_000, clock: tick },
+    });
+    const fb = await suggestTasksForThread(TH.mine, ME, {
+      provider: fakeProvider("{}", { calls: pCalls }), settings: pilot, env, now: NOW, preloaded: { team: [{ id: ME.id, name: ME.name }] },
+      deadline: { at: NOW + 30_000, hasFallback: true, minCallMs: 15_000, clock: tick },
+    });
+    ok(!tight.ok && tight.kind === "deadline" && !fb.ok && fb.kind === "deadline" && pCalls.length === 1, "brief drafts: too little time after the loads → kind deadline, no call (a fallback halves the room)");
     const declined = await draftReplyForThread(TH.mine, ME, { provider: fakeProvider("", { fail: "declined" }), settings: pilot, env, now: NOW });
     ok(!declined.ok && declined.kind === "model" && !!declined.runId, "brief drafts: a refused answer is a model failure carrying its run id");
     const tk = await suggestTasksForThread(TH.mine, ME, { provider: fakeProvider(JSON.stringify({ tasks: [{ title: "Call Pat", notes: "", dueDate: "", assigneeUserId: ME.id, linkKeys: [], tier: "high", size: "m" }] }), { calls: rCalls }), settings: pilot, env, now: NOW });
@@ -454,8 +484,10 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     ok(run2.replies === 0 && run2.tasks === 0 && run2.nudges === 0 && run2.fresh === 5 && calls.length === 0, `brief queue: a second run finds every draft fresh (the refused nudge waits DRAFT_RETRY_MS) and calls nothing (${JSON.stringify(run2)})`);
     const recent = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ force: false }));
     ok(recent.skipped === "recent", "brief queue: a queue started < 60 s ago for the same owner is not started again");
-    const [a, b] = await Promise.all([runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps()), runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps())]);
-    ok(a.skipped === null && b.skipped === "busy", "brief queue: one queue per owner at a time");
+    // nothing injected: the first queue awaits the real settings while the second asks
+    const [a, b] = await Promise.all([runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, { force: true }), runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, { force: true })]);
+    const c = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, { force: true });
+    ok(a.skipped === "gated" && b.skipped === "busy" && c.skipped === "gated", `brief queue: one queue per owner per process — claimed before the first await, released on a gated return (${a.skipped}, ${b.skipped}, ${c.skipped})`);
     calls.length = 0;
     const later = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ now: NOW + DRAFT_RETRY_MS + 60_000 }));
     ok(later.failed === 1 && later.nudges === 0 && later.replies === 0 && calls.length === 1 && calls[0].user.includes("Hostile job") && (await getQuote(Q.hostile))!.assistNudge?.at === NOW + DRAFT_RETRY_MS + 60_000, `brief queue: an unusable answer is retried after DRAFT_RETRY_MS, nothing else is redrafted (${JSON.stringify(later)})`);
@@ -472,11 +504,58 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const late = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + DRAFT_MIN_CALL_MS }, deps());
     ok(late.stoppedBy === "deadline" && calls.length === 0 && (await getThread(TH.mine))!.preDraft?.basis === "m-mine-2", "brief queue: no call starts without room before the deadline");
 
+    /* leases — overlapping queues (other server instances) */
+    await patchDoc<Thread>("comms", TH.stale, (t) => { t.messages.push(inbound("m-stale-3", NOW - 20_000, "STALE-3 body") as never); });
+    await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-4", NOW - 10_000, "MINE-4 body") as never); });
+    calls.length = 0;
+    const inst = deps({ separateInstance: true });
+    const [i1, i2] = await Promise.all([runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, inst), runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, inst)]);
+    const replyFor = (marker: string) => calls.filter((x) => x.system === REPLY_SYSTEM && x.user.includes(marker)).length;
+    const tasksFor = (marker: string) => calls.filter((x) => x.system === TASKS_SYSTEM && x.user.includes(marker)).length;
+    ok(replyFor("MINE-4") === 1 && replyFor("STALE-3") === 1 && tasksFor("MINE-4") === 1 && tasksFor("STALE-3") === 1 && i1.replies + i2.replies === 2, `brief lease: two overlapping queues draft each stale thread exactly once (${JSON.stringify([i1, i2])})`);
+    const afterLease = [(await getThread(TH.mine))!, (await getThread(TH.stale))!];
+    ok(afterLease[0].preDraft?.basis === "m-mine-4" && afterLease[1].preDraft?.basis === "m-stale-3" && afterLease.every((t) => t.preDraftLeaseUntil === undefined), "brief lease: both pre-drafts landed and every lease was released");
+
+    await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-5", NOW - 5_000, "MINE-5 body") as never); });
+    ok(await casPreDraftKey(TH.mine, "preDraftLeaseUntil", undefined, NOW + 60_000), "brief lease: (setup) another instance holds a live lease on a stale thread");
+    calls.length = 0;
+    const held = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    ok(held.leased === 1 && calls.length === 0 && (await getThread(TH.mine))!.preDraft?.basis === "m-mine-4" && (await getThread(TH.mine))!.preDraftLeaseUntil === NOW + 60_000, `brief lease: a live lease held elsewhere is skipped — no call, the lease left alone (${JSON.stringify(held)})`);
+    await casPreDraftKey(TH.mine, "preDraftLeaseUntil", NOW + 60_000, NOW - 1);
+    const expired = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    ok(expired.replies === 1 && (await getThread(TH.mine))!.preDraft?.basis === "m-mine-5" && (await getThread(TH.mine))!.preDraftLeaseUntil === undefined, "brief lease: an expired lease is taken over, the thread drafted, the lease released");
+
+    // new mail lands while the model is drafting: the older result is dropped
+    await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-6", NOW - 4_000, "MINE-6 body") as never); });
+    const newer = { body: "newer draft", runId: "AR-newer", taskSuggestions: [], taskRunId: "AR-newer-t", basis: "m-mine-7", at: NOW + 1 };
+    onCall = async (req) => {
+      if (req.system !== REPLY_SYSTEM || !req.user.includes("MINE-6")) return;
+      onCall = null;
+      await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-7", NOW - 1_000, "MINE-7 body") as never); });
+      await setPreDraft(TH.mine, newer);
+    };
+    const raced = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    const kept = (await getThread(TH.mine))!;
+    ok(raced.dropped === 1 && raced.replies === 0 && kept.preDraft?.body === "newer draft" && kept.preDraft.basis === "m-mine-7" && kept.preDraftLeaseUntil === undefined, `brief lease: a result drafted against older mail never overwrites a newer pre-draft (${JSON.stringify(raced)})`);
+    // same mail, but another writer replaced the pre-draft meanwhile: compare-and-set refuses
+    await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-8", NOW - 500, "MINE-8 body") as never); });
+    const other = { body: "other writer", runId: "AR-other", taskSuggestions: [], taskRunId: "AR-other-t", basis: "m-mine-8", at: NOW + 2 };
+    onCall = async (req) => {
+      if (req.system !== REPLY_SYSTEM || !req.user.includes("MINE-8")) return;
+      onCall = null;
+      await setPreDraft(TH.mine, other);
+    };
+    const cas = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    ok(cas.dropped === 1 && (await getThread(TH.mine))!.preDraft?.body === "other writer", `brief lease: a pre-draft another writer replaced mid-call is kept (compare-and-set) (${JSON.stringify(cas)})`);
+    onCall = null;
+
     /* per-feature gating */
     const replyOff = assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { reply: false, brief: true } });
+    await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-9", NOW - 100) as never); });
+    calls.length = 0;
     const ronly = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: replyOff }));
     const pdTasksOnly = (await getThread(TH.mine))!.preDraft!;
-    ok(ronly.replies === 0 && ronly.tasks === 1 && pdTasksOnly.basis === "m-mine-3" && pdTasksOnly.body === "" && pdTasksOnly.runId === null && Array.isArray(pdTasksOnly.taskSuggestions) && calls.every((c) => c.system !== REPLY_SYSTEM), "brief queue: reply switched off → task suggestions only, body empty");
+    ok(ronly.replies === 0 && ronly.tasks === 1 && pdTasksOnly.basis === "m-mine-9" && pdTasksOnly.body === "" && pdTasksOnly.runId === null && Array.isArray(pdTasksOnly.taskSuggestions) && calls.every((c) => c.system !== REPLY_SYSTEM), "brief queue: reply switched off → task suggestions only, body empty");
     const backOn = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
     ok(backOn.replies === 1 && backOn.tasks === 0 && (await getThread(TH.mine))!.preDraft?.body !== "" && (await getThread(TH.mine))!.preDraft?.taskRunId === pdTasksOnly.taskRunId, "brief queue: reply back on → the missing reply is filled in, the fresh suggestions kept");
     const gated = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: ["someone-else"], assistFeatures: { brief: true } }) }));
@@ -490,7 +569,24 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     /* the spend cap stops the queue */
     calls.length = 0;
     const capped = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { brief: true }, assistMonthlyCapUsd: 0 }) }));
-    ok(capped.stoppedBy === "cap" && calls.length === 0 && !(await getQuote(Q.recent))!.assistNudge, `brief queue: at the monthly cap the queue stops with no call and no write (${JSON.stringify(capped)})`);
+    ok(capped.stoppedBy === "cap" && calls.length === 0 && !(await getQuote(Q.recent))!.assistNudge && (await getQuote(Q.recent))!.assistNudgeLeaseUntil == null, `brief queue: at the monthly cap the queue stops with no call and no write, the lease released (${JSON.stringify(capped)})`);
+
+    /* nudge leases */
+    ok(await casAssistNudgeKey(Q.recent, "assistNudgeLeaseUntil", undefined, NOW + 60_000), "brief lease: (setup) another instance holds a quote's nudge lease");
+    calls.length = 0;
+    const nHeld = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    ok(nHeld.leased === 1 && nHeld.nudges === 0 && calls.every((x) => x.system !== NUDGE_SYSTEM) && !(await getQuote(Q.recent))!.assistNudge, `brief lease: a quote whose nudge lease is live elsewhere is skipped (${JSON.stringify(nHeld)})`);
+    await casAssistNudgeKey(Q.recent, "assistNudgeLeaseUntil", NOW + 60_000, undefined);
+    // the quote is re-sent while the model drafts: the nudge for the old send is dropped
+    onCall = async (req) => {
+      if (req.system !== NUDGE_SYSTEM) return;
+      onCall = null;
+      await updateQuote(Q.recent, { history: [{ at: sentAt, to: "sent" }, { at: NOW - 60_000, from: "sent", to: "sent" }] } as never);
+    };
+    const nRaced = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    const qr = (await getQuote(Q.recent))!;
+    ok(nRaced.dropped === 1 && nRaced.nudges === 0 && !qr.assistNudge && qr.assistNudgeLeaseUntil == null, `brief lease: a nudge drafted for an older send is dropped, the lease released (${JSON.stringify(nRaced)})`);
+    onCall = null;
 
     /* writers */
     ok((await setPreDraft(TH.mine, null)) && !(await getThread(TH.mine))!.preDraft && (await setPreDraft("TEST337:missing", null)) === false, "brief store: setPreDraft(null) removes the key; a missing thread → false");
@@ -500,7 +596,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const afterUpd = (await getQuote(Q.quiet))!;
     ok(afterUpd.name === "Renamed" && afterUpd.assistNudge?.note === "n", "brief store: quotes update() can't overwrite the nudge (setAssistNudge's alone)");
     const raw = await getDoc<{ id: string; messages?: unknown }>("comms", TH.stale);
-    ok(!!raw && Array.isArray(raw.messages) && (raw.messages as unknown[]).length === 2, "brief store: setPreDraft left the thread's messages as they were");
+    ok(!!raw && Array.isArray(raw.messages) && (raw.messages as unknown[]).length === 3, "brief store: setPreDraft left the thread's messages as they were");
   } finally {
     for (const id of [...Object.values(TH), ...Object.values(Q)]) await runsFor((id.includes("q-") ? "quote:" : "thread:") + id);
     await dropFixtures(337);

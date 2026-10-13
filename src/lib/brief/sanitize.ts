@@ -34,7 +34,10 @@ function cap(s: string, max: number): string {
  */
 export function stripLinksAndTags(s: string): string {
   return s
-    .replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, "$1")
+    // a URL may hold one level of balanced parentheses (…/Foo_(bar), alert(1))
+    .replace(/!?\[([^\]\n]*)\]\((?:[^()\n]|\([^()\n]*\))*\)/g, "$1")
+    // an unbalanced one: drop the target up to whitespace, with any trailing ")"
+    .replace(/!?\[([^\]\n]*)\]\([^\s]*/g, "$1")
     .replace(/<\/?[A-Za-z][^<>]*>/g, " ")
     .replace(/[[\]<>]/g, "");
 }

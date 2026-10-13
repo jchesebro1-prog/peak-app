@@ -1,18 +1,21 @@
 /**
  * #334 Assist — Draft reply, as a reusable server function (AI daily brief,
  * spec §2). `draftReplyAction` (Inbox) is a thin wrapper around it; the
- * brief's draft queue (`src/lib/brief/drafts.ts`) calls it in the background.
+ * brief's draft queue (`src/lib/brief/drafts.ts`) calls it in the background
+ * with the run's preloaded quotes / threads / signature and a deadline.
  * Returns text only: nothing is sent or saved here (getAll on quotes/comms
  * already excludes deleted rows).
  */
-import { getAll as allThreads, resolveCustomerId } from "@/lib/stores/comms";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { getAll as allThreads, resolveCustomerId, type CommThread } from "@/lib/stores/comms";
+import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { signatureFor } from "@/lib/stores/signatures";
 import { stripSignature } from "@/lib/inbox-signature";
 import { buildReplyUserText, cleanReplyText, openQuotesFor, pickStyleExamples, REPLY_SYSTEM } from "./features/reply-draft";
 import { promptMessages, threadBlock } from "./features/thread-text";
 import { runAssist, type AssistCallDeps, type RunArgs, type RunDeps } from "./run";
+import { limitsBefore, stricter } from "./call-budget";
+import type { ModelSlot } from "./models";
 import { loadThreadFor } from "./thread-access";
 import { gateFor } from "./gate-server";
 
@@ -22,38 +25,58 @@ export type ReplyTone = (typeof REPLY_TONES)[number];
 /**
  * Why a call failed — for background callers. `gate`: refused before any
  * model call (pilot list, feature switch, kill switch, monthly cap, rate
- * limit); `thread`: not the user's live email thread; `model`: the model ran
- * (a run row exists) but gave no usable answer.
+ * limit); `thread`: not the user's live email thread; `deadline`: too little
+ * time left after the loads to start the call; `model`: the model ran (a run
+ * row exists) but gave no usable answer.
  */
-export type AssistFailKind = "gate" | "thread" | "model";
+export type AssistFailKind = "gate" | "thread" | "deadline" | "model";
 export type ThreadAssistFail = { ok: false; error: string; kind: AssistFailKind; runId: string | null };
 
 export type ReplyDraftResult = { ok: true; runId: string; draft: string } | ThreadAssistFail;
 
-/** Split a caller's options into runAssist's deps and the call's own rate/limit args. */
-export function splitCallDeps(deps: AssistCallDeps): { run: RunDeps; call: Pick<RunArgs<unknown>, "countRate" | "limits"> } {
-  const { countRate, limits, provider, fallback, now, settings, env } = deps;
+/** Data a background caller already loaded once for the whole run. */
+export type ReplyPreloaded = { quotes?: Quote[]; threads?: CommThread[]; signature?: string };
+
+export const OUT_OF_TIME: ThreadAssistFail = { ok: false, error: "Not enough time left before the deadline.", kind: "deadline", runId: null };
+
+/**
+ * Split a caller's options into runAssist's deps and the call's own
+ * rate/limit args. With a `deadline`, the cap is computed NOW — call this
+ * after the function's own loads — and null means "don't start".
+ */
+export function splitCallDeps(
+  deps: AssistCallDeps,
+  slot: ModelSlot
+): { run: RunDeps; call: Pick<RunArgs<unknown>, "countRate" | "limits"> } | null {
+  const { countRate, limits, deadline, provider, fallback, now, settings, env } = deps;
   const call: Pick<RunArgs<unknown>, "countRate" | "limits"> = {};
   if (countRate === false) call.countRate = false;
-  if (limits) call.limits = limits;
+  let cap = limits;
+  if (deadline) {
+    const left = limitsBefore(deadline, slot);
+    if (!left) return null;
+    cap = stricter(limits, left);
+  }
+  if (cap) call.limits = cap;
   return { run: { provider, fallback, now, settings, env }, call };
 }
 
 export async function draftReplyForThread(
   threadId: string,
   me: { id: string; name: string },
-  deps: AssistCallDeps & { tone?: ReplyTone } = {}
+  deps: AssistCallDeps & { tone?: ReplyTone; preloaded?: ReplyPreloaded } = {}
 ): Promise<ReplyDraftResult> {
   const refused = await gateFor("reply", me.id, deps);
   if (refused) return { ok: false, error: refused, kind: "gate", runId: null };
   const t = await loadThreadFor(threadId, me.name);
   if (!t) return { ok: false, error: "That email isn't available.", kind: "thread", runId: null };
   const tone: ReplyTone = deps.tone && REPLY_TONES.includes(deps.tone) ? deps.tone : "normal";
+  const pre = deps.preloaded ?? {};
   const [customerId, quotes, threads, signature] = await Promise.all([
     resolveCustomerId(t),
-    allQuotes(),
-    allThreads(),
-    signatureFor(me.name),
+    pre.quotes ?? allQuotes(),
+    pre.threads ?? allThreads(),
+    pre.signature ?? signatureFor(me.name),
   ]);
   const open = openQuotesFor(
     quotes.map((q) => ({ ...q, number: displayQuoteNumber(q) })),
@@ -63,7 +86,8 @@ export async function draftReplyForThread(
   const messages = promptMessages(t).map((m) =>
     m.direction === "out" && signature ? { ...m, body: stripSignature(m.body, signature) } : m
   );
-  const { run, call } = splitCallDeps(deps);
+  const split = splitCallDeps(deps, "reply");
+  if (!split) return OUT_OF_TIME;
   const r = await runAssist(
     {
       feature: "reply",
@@ -80,9 +104,9 @@ export async function draftReplyForThread(
         examples,
       }),
       contextRef: "thread:" + t.id,
-      ...call,
+      ...split.call,
     },
-    run
+    split.run
   );
   if (!r.ok) return { ok: false, error: r.error, kind: r.runId ? "model" : "gate", runId: r.runId };
   const draft = cleanReplyText(String(r.value ?? ""));

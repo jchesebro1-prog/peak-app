@@ -38,12 +38,19 @@ export type RunArgs<T> = {
 /** Caps only ever shorten a slot's SLOT_SETTINGS values, never lengthen them. */
 export type CallLimits = { timeoutMs?: number; maxRetries?: number };
 export type RunDeps = { provider?: AssistProvider; fallback?: AssistProvider | null; now?: number; settings?: AssistSettings; env?: Env };
+/** A background caller's hard stop: the call is capped to the time left after
+ *  the function's own loads (call-budget.ts `limitsBefore`), and refused
+ *  (kind "deadline") when less than `minCallMs` would be left. */
+export type CallDeadline = { at: number; hasFallback: boolean; minCallMs: number; clock?: () => number };
 /** A reusable server function's options: runAssist's deps plus the call's own rate/limit choices. */
-export type AssistCallDeps = RunDeps & { countRate?: boolean; limits?: CallLimits };
+export type AssistCallDeps = RunDeps & { countRate?: boolean; limits?: CallLimits; deadline?: CallDeadline };
 export type RunResult<T> = { ok: true; runId: string; value: T } | { ok: false; runId: string | null; error: string };
 
-function capAt(slotValue: number, cap: number | undefined): number {
-  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? Math.min(slotValue, Math.floor(cap)) : slotValue;
+/** A cap only ever shortens: min(slot, cap), clamped to `floor` — a 0 / negative
+ *  timeout must never read as "unset" (the provider's longer default). */
+export function capAt(slotValue: number, cap: number | undefined, floor: number): number {
+  if (typeof cap !== "number" || !Number.isFinite(cap)) return slotValue;
+  return Math.min(slotValue, Math.max(floor, Math.floor(cap)));
 }
 
 export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}): Promise<RunResult<T>> {
@@ -72,8 +79,8 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     effort: s.effort,
     maxTokens: s.maxTokens,
     fallbacks: picked.primary.name !== "local" && wantsFallbacks(requestedModel),
-    timeoutMs: capAt(s.timeoutMs, args.limits?.timeoutMs),
-    maxRetries: capAt(s.maxRetries, args.limits?.maxRetries),
+    timeoutMs: capAt(s.timeoutMs, args.limits?.timeoutMs, 1),
+    maxRetries: capAt(s.maxRetries, args.limits?.maxRetries, 0),
     stream: s.stream,
   };
 
