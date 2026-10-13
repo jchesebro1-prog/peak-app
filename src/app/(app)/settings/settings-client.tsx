@@ -150,6 +150,7 @@ export default function SettingsClient({
             users={data.users}
             documentCategories={data.documentCategories}
             recordingsBetaUsers={data.recordings.betaUsers}
+            assist={data.assist}
             run={run}
             setError={setError}
           />

@@ -15,7 +15,8 @@ import { DocumentCategoriesCard } from "../document-categories-card";
 import type { DocumentCategory } from "@/lib/document-categories";
 import { GROUP_LINKS } from "../settings-sections";
 import { inputStyle, labelStyle, LinkTiles, Toggle, type Run } from "./shared";
-import type { CompanySettingsVM, UserVM } from "./types";
+import type { AssistVM, CompanySettingsVM, UserVM } from "./types";
+import { AssistPilotCard } from "./assist-pilot";
 
 /**
  * Settings → Data & Tools (settings cleanup): the Import / Export, Task
@@ -29,6 +30,7 @@ export function DataGroup({
   users,
   documentCategories,
   recordingsBetaUsers,
+  assist,
   run,
   setError,
 }: {
@@ -38,6 +40,8 @@ export function DataGroup({
   documentCategories: DocumentCategory[];
   /** Recordings pilot gate (spec §1.3) — user ids allowed to see Record. */
   recordingsBetaUsers: string[];
+  /** #334 Assist pilot card + report; null while another group is open. */
+  assist: AssistVM | null;
   run: Run;
   setError: (msg: string | null) => void;
 }) {
@@ -359,6 +363,8 @@ export function DataGroup({
               })}
           </div>
         </div>
+
+        {assist && <AssistPilotCard key={assist.month} assist={assist} users={users} run={run} />}
 
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7", maxWidth: 380 }}>
           <label style={labelStyle}>Feedback email</label>

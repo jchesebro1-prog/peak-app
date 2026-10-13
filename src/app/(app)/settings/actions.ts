@@ -18,6 +18,7 @@ import {
   type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
+import { assistSettingsOf } from "@/lib/assist/config";
 import { saveEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import {
@@ -745,6 +746,37 @@ export async function setRecordingsBetaUsersAction(userIds: string[]) {
   await setSettings({ recordingsBetaUsers: clean });
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** #334 Assist pilot (Settings → Beta): allow-list (empty = NOBODY), per-feature
+ *  switches and the monthly spend cap. Each field is optional; omitted = untouched. */
+export async function setAssistSettingsAction(patch: {
+  users?: string[];
+  features?: Partial<Record<"tasks" | "reply" | "estimate", boolean>>;
+  capUsd?: number;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const next: Record<string, unknown> = {};
+  if (Array.isArray(patch.users)) {
+    const known = new Set((await allUsers()).map((u) => u.id));
+    next.assistUsers = Array.from(new Set(patch.users.filter((id) => typeof id === "string" && known.has(id))));
+  }
+  if (patch.features && typeof patch.features === "object") {
+    const cur = assistSettingsOf(await getSettings()).features;
+    next.assistFeatures = {
+      tasks: typeof patch.features.tasks === "boolean" ? patch.features.tasks : cur.tasks,
+      reply: typeof patch.features.reply === "boolean" ? patch.features.reply : cur.reply,
+      estimate: typeof patch.features.estimate === "boolean" ? patch.features.estimate : cur.estimate,
+    };
+  }
+  if (patch.capUsd !== undefined) {
+    const n = Number(patch.capUsd);
+    if (!Number.isFinite(n) || n < 0 || n > 10_000) return { ok: false, error: "Cap must be between $0 and $10,000." };
+    next.assistMonthlyCapUsd = Math.round(n * 100) / 100;
+  }
+  await setSettings(next);
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 /* ---- Pipelines (Settings → Pipelines) ---- */

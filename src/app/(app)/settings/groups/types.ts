@@ -11,6 +11,8 @@ import type { DocumentCategory } from "@/lib/document-categories";
 import type { ReviewLimits } from "@/lib/review-limits";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import type { SchedulingSettings } from "@/lib/visit-plan/settings";
+import type { AssistSettings } from "@/lib/assist/types";
+import type { AssistReport } from "@/lib/assist/report";
 
 export type UserVM = {
   id: string;
@@ -95,12 +97,26 @@ export type CompanySettingsVM = {
   dashboardDefaults: DashboardLayout;
 };
 
+/** #334 — Settings → Data & Tools → Beta → Assist pilot (loaded only for an admin viewing that group). */
+export type AssistVM = {
+  settings: AssistSettings;
+  status: string;
+  /** YYYY-MM (America/Chicago) the report covers. */
+  month: string;
+  /** Month picker options, current month first. */
+  months: string[];
+  spendUsd: number;
+  report: AssistReport;
+};
+
 /** Everything page.tsx loads for the Settings client. */
 export type SettingsData = {
   meId: string;
   meName: string;
   gmail: GmailVM;
   recordings: RecordingsVM;
+  /** #334 — null unless the viewer is an admin on the Data & Tools group. */
+  assist: AssistVM | null;
   catalogPhotos: CatalogPhotosVM;
   settings: CompanySettingsVM;
   intakeCatalog: Record<string, string[]>;

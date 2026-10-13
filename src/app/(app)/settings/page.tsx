@@ -29,7 +29,8 @@ import {
 import { listConnections } from "@/lib/gmail/connections";
 import { loadPipelines, stageUsage } from "@/lib/pipelines-server";
 import SettingsClient from "./settings-client";
-import { visibleSettingsSections } from "./settings-sections";
+import { resolveSettingsSection, visibleSettingsSections } from "./settings-sections";
+import { loadAssistVM } from "./assist-data";
 
 export const metadata = { title: "Settings — Quartzite-6" };
 
@@ -58,7 +59,13 @@ const SHARED_LABEL: Record<string, string> = {
   info: "Info",
 };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
   const me = await requireUser();
   const isAdmin = can("manage_users", me.roles);
   // Settings cleanup: the left-menu groups this viewer may open. Every group
@@ -136,6 +143,13 @@ export default async function SettingsPage() {
     mailboxes: connections.map((c) => ({ key: c.mailboxKey, address: c.address, connectedBy: c.connectedBy, readOn: hasDriveReadScope(c.scope) })),
   };
 
+  // #334 — Assist pilot card + monthly report. Admin only, and only when the
+  // Data & Tools group is the one being opened (the report scans a month of runs).
+  const assist =
+    isAdmin && resolveSettingsSection(one(sp.section) ?? null, { visible: sections }) === "data"
+      ? await loadAssistVM(settings, one(sp.assistMonth))
+      : null;
+
   return (
     <div className="pk-content" style={{ maxWidth: 1200, padding: "26px 30px 64px" }}>
       <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.015em" }}>
@@ -194,6 +208,7 @@ export default async function SettingsPage() {
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
           recordings={recordings}
+          assist={assist}
           catalogPhotos={catalogPhotos}
           pipelines={pipelines!}
           pipelineUsage={pipelineUsage}

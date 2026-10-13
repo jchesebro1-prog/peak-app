@@ -7,6 +7,7 @@ import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoTo
 import { z } from "zod";
 import { runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
 import { editRatio, estimateKeep, replyOutcome } from "@/lib/assist/outcome";
+import { assistReport, recentMonthKeys } from "@/lib/assist/report";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
 import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
@@ -424,6 +425,27 @@ export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+export async function assistReportChecks(ok: Ok): Promise<void> {
+  const runs = [
+    fakeRun({ id: "r1", feature: "tasks", outcome: "accepted", costUsd: 0.001, userName: "A" }),
+    fakeRun({ id: "r2", feature: "reply", outcome: null, costUsd: 0.01, userName: "A", model: "claude-sonnet-5-5" }),
+    fakeRun({ id: "r3", feature: "estimate", step: "extract", costUsd: 0.002, userName: "B" }),
+    fakeRun({ id: "r4", feature: "estimate", step: "draft", costUsd: 0.2, userName: "B", model: "claude-opus-5-5" }),
+    fakeRun({ id: "r5", feature: "tasks", ok: false, error: "declined", costUsd: 0, userName: "B" }),
+  ];
+  const rep = assistReport(runs, new Map([["r4", "edited" as const]]));
+  const f = (k: string) => rep.byFeature.find((r) => r.key === k)!;
+  ok(Math.abs(rep.totalUsd - 0.213) < 1e-9 && rep.runs === 5, "assist report: total spend + runs");
+  ok(f("tasks").runs === 2 && f("tasks").okRuns === 1 && f("tasks").accepted === 1 && f("tasks").pending === 0, "assist report: failed runs don't count as pending outcomes");
+  ok(f("reply").pending === 1, "assist report: no outcome yet = pending");
+  ok(f("estimate (extract)").pending === 0 && f("estimate (draft)").edited === 1, "assist report: extract carries no outcome; draft outcome from estimateKeep map");
+  ok(rep.byUser.find((r) => r.key === "B")!.costUsd === 0.202, "assist report: per-person cost");
+  ok(recentMonthKeys(Date.UTC(2026, 0, 15), 3, (ms) => new Date(ms).toISOString().slice(0, 7)).join() === "2026-01,2025-12,2025-11", "assist report: month picker rolls the year");
+  // A draft run whose quote was deleted counts as discarded (estimateKeep with a null quote).
+  const gone = estimateKeep([{ sku: "A", qty: 1 }], null).outcome;
+  ok(assistReport([fakeRun({ id: "r6", feature: "estimate", step: "draft" })], new Map([["r6", gone]])).byFeature[0].discarded === 1, "assist report: a draft whose quote is gone is discarded");
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -445,6 +467,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistReplyChecks(ok);
     await assistEstimatePureChecks(ok);
     await assistEstimateDbChecks(ok);
+    await assistReportChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);
