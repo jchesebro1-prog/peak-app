@@ -22,7 +22,9 @@ export async function register(): Promise<void> {
 
   const { checkMailIfStale } = await import("@/lib/stores/comms");
   g.__peakGmailSyncTimer = setInterval(() => {
-    checkMailIfStale(AUTO_SYNC_MIN_AGE_MS).catch((err) => {
+    // #335 — on Vercel a frozen function can't finish a ~20-55 s AI pass;
+    // the Inbox actions schedule it there instead.
+    checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: !process.env.VERCEL }).catch((err) => {
       console.error("[gmail] server sync tick failed:", err);
     });
   }, AUTO_SYNC_MIN_AGE_MS);

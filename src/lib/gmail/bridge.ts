@@ -840,8 +840,10 @@ export const POLL_AI_DEADLINE_MS = 240_000;
 export type PollOptions = {
   /** hard wall clock (epoch-ms) for the AI pass — the caller's route limit */
   deadlineMs?: number;
-  /** false = no AI pass on this poll (the 60 s cron, whose budget its
-   *  riders share) */
+  /** false = no AI pass on this poll: the 60 s cron (its budget is shared
+   *  by its riders), the Inbox server actions (they schedule the pass in
+   *  after() so a user's next action never waits on it) and the timer on
+   *  Vercel */
   aiPass?: boolean;
 };
 
@@ -855,7 +857,7 @@ export async function pollInbound(
   onlyKeys?: MailboxKey[],
   claimMinAgeMs: number = MANUAL_CLAIM_AGE_MS,
   opts: PollOptions = {}
-): Promise<{ ran: boolean; id: string | null; changed: boolean }> {
+): Promise<{ ran: boolean; id: string | null; changed: boolean; owners: string[] }> {
   const started = Date.now();
   const keys = onlyKeys ?? (await connectedMailboxKeys());
   let ran = false;
@@ -888,7 +890,7 @@ export async function pollInbound(
       console.error("[inbox-org] AI pass failed", err);
     }
   }
-  return { ran, id: last, changed };
+  return { ran, id: last, changed, owners: [...owners] };
 }
 
 export { DEFAULT_DOMAIN };

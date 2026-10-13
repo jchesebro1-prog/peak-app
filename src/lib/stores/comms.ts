@@ -1605,20 +1605,35 @@ function incomingQueue(): IncomingItem[] {
 /** Simulate receiving mail: pull one canned inbound in.
  *  Returns the touched thread id or null. (Inbound half of the Gmail seam.) */
 export async function checkMail(): Promise<string | null> {
+  return (await checkMailFor()).id;
+}
+
+/** checkMail() that also reports the owners whose mailboxes it synced
+ *  (#335 — the caller schedules the AI pass for them off the request path,
+ *  passing `{ aiPass: false }` here). */
+export async function checkMailFor(
+  opts: { deadlineMs?: number; aiPass?: boolean } = {}
+): Promise<{ id: string | null; owners: string[] }> {
+  const none = { id: null, owners: [] as string[] };
   await flushOutbox();
-  if (!online()) return null;
+  if (!online()) return none;
   // Real inbound poll when the Gmail gate is on; canned simulation otherwise.
   // (pollInbound claims each mailbox with a short 10s window — a click always
   // syncs unless the very same mailbox was started seconds ago.)
   if (gmailBridgeActive()) {
     try {
       const { pollInbound } = await import("@/lib/gmail/bridge");
-      return (await pollInbound()).id;
+      const r = await pollInbound(undefined, undefined, opts);
+      return { id: r.id, owners: r.owners };
     } catch (err) {
       console.error("[gmail] inbound poll failed:", err);
-      return null;
+      return none;
     }
   }
+  return { id: await simulatedCheck(), owners: [] };
+}
+
+async function simulatedCheck(): Promise<string | null> {
   const q = incomingQueue();
   if (!q.length) return null;
   const item = q.shift();
@@ -1651,8 +1666,8 @@ export async function checkMailIfStale(
   maxAgeMs: number,
   /** #335 — passed to pollInbound: the AI pass's deadline, or no pass */
   opts: { deadlineMs?: number; aiPass?: boolean } = {}
-): Promise<{ ran: boolean; changed: boolean; id: string | null }> {
-  const none = { ran: false, changed: false, id: null };
+): Promise<{ ran: boolean; changed: boolean; id: string | null; owners: string[] }> {
+  const none = { ran: false, changed: false, id: null, owners: [] as string[] };
   if (!gmailBridgeActive()) return none;
   try {
     const { listConnections } = await import("@/lib/gmail/connections");
@@ -1664,7 +1679,7 @@ export async function checkMailIfStale(
     // so overlapping clients/ticks are cheap and can't double-sync a slot.
     const { pollInbound } = await import("@/lib/gmail/bridge");
     const r = await pollInbound(eligible, maxAgeMs, opts);
-    return { ran: r.ran, changed: r.changed, id: r.id };
+    return { ran: r.ran, changed: r.changed, id: r.id, owners: r.owners };
   } catch (err) {
     console.error("[gmail] background sync failed:", err);
     return none;
@@ -1796,15 +1811,21 @@ export async function setOrg(
  *  the given owners (the unresolvable-owner sweep). The caller re-checks the
  *  owner and drops deleted-folder / draft / shared threads. */
 export async function pendingAiThreads(
-  opts: { limit?: number; owner?: { names: string[]; keys: string[] }; notOwners?: { names: string[]; keys: string[] } } = {}
+  opts: {
+    limit?: number;
+    owner?: { names: string[]; keys: string[] };
+    notOwners?: { names: string[]; keys: string[] };
+    /** which mark to look for (default either) */
+    only?: "court" | "filing";
+  } = {}
 ): Promise<CommThread[]> {
   const who = opts.owner ?? opts.notOwners;
+  const paths: Array<readonly [string, string]> = [];
+  if (opts.only !== "court") paths.push(["filing", "pendingAi"]);
+  if (opts.only !== "filing") paths.push(["court", "pendingAi"]);
   return listDocsWithFlag<CommThread>(
     "comms",
-    [
-      ["filing", "pendingAi"],
-      ["court", "pendingAi"],
-    ],
+    paths,
     {
       limit: opts.limit ?? 300,
       orderByNumericAsc: "updatedAt",

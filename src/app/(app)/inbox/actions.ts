@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
 import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
@@ -9,7 +10,7 @@ import {
   archive,
   assign,
   channelMeta,
-  checkMail,
+  checkMailFor,
   checkMailIfStale,
   compose,
   create,
@@ -582,11 +583,26 @@ export async function logInteractionAction(d: LogPayload) {
 /* ---- send / receive ---- */
 
 export async function sendReceiveAction() {
+  const started = Date.now();
   await requireUser();
   await flushOutbox();
-  const id = await checkMail();
+  const { id, owners } = await checkMailFor({ aiPass: false });
+  scheduleAiPass(owners, started);
   revalidate();
   return { ok: true as const, id };
+}
+
+/** #335 — the Inbox-organization AI pass runs AFTER the response (after()),
+ *  never inline: Next runs one Server Action at a time per tab, so an
+ *  inline pass would hold the user's next archive / reply / link for up to
+ *  ~55 s. after() runs within this page's maxDuration (300 s), so the
+ *  pass's deadline is taken from the START of the action. */
+function scheduleAiPass(owners: string[], startedAt: number): void {
+  if (!owners.length) return;
+  after(async () => {
+    const [{ runAiPass }, { POLL_AI_DEADLINE_MS }] = await Promise.all([import("@/lib/inbox-org/ai-pass"), import("@/lib/gmail/bridge")]);
+    await runAiPass({ ownerIds: owners, deadlineMs: startedAt + POLL_AI_DEADLINE_MS });
+  });
 }
 
 // (AUTO_SYNC_MIN_AGE_MS — the shared staleness window — is imported above.)
@@ -598,7 +614,9 @@ export async function sendReceiveAction() {
  *  while the user is typing. The client decides when to surface the change
  *  (router.refresh() at the next non-typing moment). */
 export async function autoSyncAction() {
+  const started = Date.now();
   await requireUser();
-  const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS);
+  const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false });
+  scheduleAiPass(r.owners, started);
   return { ok: true as const, ran: r.ran, changed: r.changed, id: r.id };
 }

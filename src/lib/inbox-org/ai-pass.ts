@@ -1,7 +1,9 @@
 /**
  * Inbox organization §8 — the time-boxed AI pass. Runs once per Gmail poll,
- * AFTER every mailbox's import committed (`pollInbound`), and from the
- * Organize view's button: picks up threads the rule pipeline marked
+ * AFTER every mailbox's import committed: scheduled in after() by the Inbox
+ * sync actions (off the request path — never inline in a Server Action),
+ * inline in `pollInbound` for the long-lived server timer, and from the
+ * Organize view's button. It picks up threads the rule pipeline marked
  * `court.pendingAi` / `filing.pendingAi` and runs the Haiku court / promise
  * reading (`promise`) and filing step (`file`) through `runAssist` (gate,
  * cap, rate limit, logging to assist_runs, zod validation).
@@ -63,7 +65,7 @@ import {
   sanitizeFiling,
   type CandidateCache,
 } from "./ai-filing";
-import { aiCourtOverride, applyPromises, buildCourtUserText, COURT_SYSTEM, CourtSchema, sanitizeCourt, type AuthorNote } from "./ai-court";
+import { aiCourtOverride, applyPromises, buildCourtUserText, COURT_SYSTEM, CourtSchema, PROMISE_MAX_AGE_MS, sanitizeCourt, type AuthorNote } from "./ai-court";
 import { COURT_STATUS, emailMessages, loadOrgContext, organizeThread, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
 import type { Court, Filing } from "./types";
 
@@ -74,7 +76,10 @@ export const AI_CALL_MARGIN_MS = 5_000;
 /** How long a pass holds a thread it is calling the model for. */
 export const AI_LEASE_MS = 120_000;
 export const MAX_AI_ATTEMPTS = 3;
-/** Pending threads read per owner per pass (the budget normally stops first). */
+/** Pending threads read per owner per pass, per mark — court reads (live
+ *  work) are queried on their own first, then filing rows fill in, so a
+ *  large filing backlog never hides a new court read. The budget normally
+ *  stops the pass long before either cap. */
 export const AI_PASS_MAX_PER_OWNER = 100;
 /** Unownable pending rows cleared per pass. */
 export const AI_PASS_SWEEP_LIMIT = 50;
@@ -229,12 +234,17 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
       const owner = ctx.users.find((u) => u.id === id);
       if (!owner) continue;
       const rows: CommThread[] = [];
-      for (const t of await pendingAiThreads({ owner: { names: [owner.name], keys: [personalKey(owner.id)] }, limit: AI_PASS_MAX_PER_OWNER })) {
-        if (ownerOf(t, ctx)?.id !== owner.id) continue;
+      const seen = new Set<string>();
+      const who = { names: [owner.name], keys: [personalKey(owner.id)] };
+      const courtRows = await pendingAiThreads({ owner: who, only: "court", limit: AI_PASS_MAX_PER_OWNER });
+      const filingRows = await pendingAiThreads({ owner: who, only: "filing", limit: AI_PASS_MAX_PER_OWNER });
+      for (const t of [...courtRows, ...filingRows]) {
+        if (seen.has(t.id) || ownerOf(t, ctx)?.id !== owner.id) continue;
+        seen.add(t.id);
         if (!workable(t)) await clearPending(st, t);
         else rows.push(t);
       }
-      rows.sort((a, b) => Number(!b.court?.pendingAi) - Number(!a.court?.pendingAi) || latestAt(a) - latestAt(b));
+      rows.sort((a, b) => Number(!a.court?.pendingAi) - Number(!b.court?.pendingAi) || latestAt(a) - latestAt(b));
       if (rows.length) queues.push({ owner, rows });
     }
 
@@ -267,9 +277,12 @@ async function passThread(st: PassState, t0: CommThread, owner: OrgUser): Promis
   let msgs = emailMessages(t);
   if (!msgs.length) return clearPending(st, t);
   // a pending record not computed against the newest message: the pipeline
-  // missed that message — organize it now; still stale → clear
+  // missed that message — organize it now (as backlog when that mail is
+  // older than a week: no court reading, no promise-tasks); still stale →
+  // clear
+  const newestAt = msgs[msgs.length - 1].at || 0;
   if ((t.court?.pendingAi && !isFresh(t.court, msgs[msgs.length - 1])) || (t.filing?.pendingAi && !isFresh(t.filing, msgs[msgs.length - 1]))) {
-    await organizeThread(t.id, { ctx });
+    await organizeThread(t.id, { ctx, backlog: st.now() - newestAt > PROMISE_MAX_AGE_MS });
     const again = await getThread(t.id);
     if (!again || !workable(again)) return;
     t = again;

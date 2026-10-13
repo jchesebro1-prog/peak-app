@@ -35,7 +35,7 @@ import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
 import { buildFilingUserText, candidateLine, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
-import { aiCourtOverride, applyPromises, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
+import { aiCourtOverride, applyPromises, COURT_SYSTEM, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
 import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
 import { listDocsByField, upsertDocs } from "@/db/doc-store";
@@ -1319,6 +1319,16 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const tStaleOpen = await read(staleOpen);
   ok(!tStale.filing?.pendingAi && tStale.filing?.state === "filed", "ai stuck: a stale-basis row the pipeline can't refresh (filed) is cleared");
   ok(tStaleOpen.filing?.basis === tStaleOpen.messages.slice(-1)[0].id && !tStaleOpen.filing?.pendingAi, "ai stuck: a stale-basis row is re-organized onto the newest message, then read");
+  const staleOld = await mk("stale-old", {
+    messages: [msg({ at: T0 - 30 * 86_400_000, body: "Can you call?" }), msg({ at: T0 - 30 * 86_400_000 + 1, fromEmail: "dana@peaksystemsgroup.com", to: "pat@ai-school.test", body: "I'll call you Friday." })],
+  });
+  await patchDoc<CommThread>("comms", staleOld, (d) => {
+    d.filing = { customerId: CUST, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "filed", at: T0, pendingAi: true, basis: "gone" };
+  });
+  const callsOld: ProviderRequest[] = [];
+  await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "me", promises: [{ text: "Call Pat", ownerUserId: DANA_ID, dueText: "Friday" }] }) }, { calls: callsOld }));
+  const tOld = await read(staleOld);
+  ok(callsOld.length === 0 && !tOld.court?.pendingAi && !tOld.filing?.pendingAi && (await tasksOn(staleOld)).length === 0, "ai stuck: stale mail older than a week is re-organized as backlog — no model call, no task");
 
   /* 16. one user's backlog doesn't starve another */
   const ANN = "TEST335 Ann";
@@ -1343,6 +1353,34 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   fake = 0;
   await run(routedProvider({ file: fileAns(QUOTE) }, { onCall: () => (fake += 10_000) }), { ctx: both, ownerIds: [ANN_ID, ARI_ID], clock: () => fake });
   ok((await read(bThread)).filing?.source === "ai", "ai queue: user A's 400 backlog rows don't block user B's pending thread");
+  const annLive = await mk("ann-live", {
+    mailboxUser: ANN,
+    customerId: CUST,
+    customer: "AI School",
+    resolution: "linked",
+    resolvedContactId: "ct-ai",
+    messages: [msg({ body: "Is the install still on for Monday?" })],
+  });
+  await organizeThread(annLive, { ctx: both });
+  ok((await read(annLive)).court?.pendingAi === true, "ai queue: (setup) a new live court read for the user with the backlog");
+  fake = 0;
+  const callsAnn: ProviderRequest[] = [];
+  await run(routedProvider({ file: fileAns(QUOTE), promise: courtAns({ owner: "me" }) }, { calls: callsAnn, onCall: () => (fake += 25_000) }), { ctx: both, ownerIds: [ANN_ID], clock: () => fake });
+  ok(callsAnn.length === 1 && callsAnn[0].system === COURT_SYSTEM && !(await read(annLive)).court?.pendingAi, "ai queue: past 100 backlog filing rows, a new live court row is read in the first pass, first");
+
+  /* 17. the Inbox actions never run the pass inline */
+  const actionsSrc = readFileSync("src/app/(app)/inbox/actions.ts", "utf8");
+  const sched = actionsSrc.slice(actionsSrc.indexOf("function scheduleAiPass("), actionsSrc.indexOf("export async function autoSyncAction("));
+  ok(
+    actionsSrc.includes("checkMailFor({ aiPass: false })") &&
+      actionsSrc.includes("checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false })") &&
+      actionsSrc.includes("scheduleAiPass(owners, started)") &&
+      actionsSrc.includes("scheduleAiPass(r.owners, started)") &&
+      (actionsSrc.match(/runAiPass\(/g) || []).length === 1 &&
+      /after\(async \(\) => \{[\s\S]*runAiPass\(\{ ownerIds: owners, deadlineMs: startedAt \+ POLL_AI_DEADLINE_MS \}\)/.test(sched),
+    "ai hook: Send/Receive and auto-sync poll with aiPass:false and run the pass only in after(), deadline from the action's start"
+  );
+  ok(readFileSync("src/instrumentation.ts", "utf8").includes("checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: !process.env.VERCEL })"), "ai hook: the server timer runs no inline pass on Vercel");
 
   // every assist_runs row this section made goes with the fixtures
   for (const r of await listRunsByMonth(monthKeyChicago(NOW))) if (r.contextRef.startsWith("thread:" + fixtureId(335, "ai-"))) registerFixture("assist_runs" as never, r.id);
