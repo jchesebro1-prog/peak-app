@@ -66,7 +66,7 @@ import {
   type CandidateCache,
 } from "./ai-filing";
 import { aiCourtOverride, applyPromises, buildCourtUserText, COURT_SYSTEM, CourtSchema, PROMISE_MAX_AGE_MS, sanitizeCourt, type AuthorNote } from "./ai-court";
-import { COURT_STATUS, emailMessages, loadOrgContext, organizeThread, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
+import { COURT_STATUS, emailMessages, filingBasisMessage, loadOrgContext, organizeThread, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
 import type { Court, Filing } from "./types";
 
 /** The window in which the pass may START calls (spec §8: ~20 s per pass). */
@@ -281,16 +281,18 @@ async function passThread(st: PassState, t0: CommThread, owner: OrgUser): Promis
   // older than a week: no court reading, no promise-tasks); still stale →
   // clear
   const newestAt = msgs[msgs.length - 1].at || 0;
-  if ((t.court?.pendingAi && !isFresh(t.court, msgs[msgs.length - 1])) || (t.filing?.pendingAi && !isFresh(t.filing, msgs[msgs.length - 1]))) {
+  // the court follows the newest message; the filing the newest OUTSIDE one
+  // (filingBasisMessage — my own / a teammate's reply doesn't reset it)
+  const basisFor = (key: "court" | "filing", th: CommThread, ms: CommMessage[]) => (key === "court" ? ms[ms.length - 1] : filingBasisMessage(th, ms, owner, ctx));
+  if ((t.court?.pendingAi && !isFresh(t.court, basisFor("court", t, msgs))) || (t.filing?.pendingAi && !isFresh(t.filing, basisFor("filing", t, msgs)))) {
     await organizeThread(t.id, { ctx, backlog: st.now() - newestAt > PROMISE_MAX_AGE_MS });
     const again = await getThread(t.id);
     if (!again || !workable(again)) return;
     t = again;
     msgs = emailMessages(t);
-    const newest = msgs[msgs.length - 1];
     for (const key of ["court", "filing"] as const) {
       const rec = t[key];
-      if (rec?.pendingAi && !isFresh(rec, newest) && (await casOrg(t.id, key, rec, cleared(rec) as never))) {
+      if (rec?.pendingAi && !isFresh(rec, basisFor(key, t, msgs)) && (await casOrg(t.id, key, rec, cleared(rec) as never))) {
         res.cleared++;
         res.changed = true;
       }
@@ -317,7 +319,7 @@ async function passThread(st: PassState, t0: CommThread, owner: OrgUser): Promis
   /* filing (§1 step 5) */
   const t2 = (await getThread(t.id)) ?? t;
   const f = t2.filing;
-  if (f?.pendingAi && isFresh(f, latest)) {
+  if (f?.pendingAi && isFresh(f, filingBasisMessage(t2, emailMessages(t2), owner, ctx))) {
     if (!gateOk("file") || f.state !== "suggested") {
       if (await casOrg(t2.id, "filing", f, cleared(f))) {
         res.cleared++;

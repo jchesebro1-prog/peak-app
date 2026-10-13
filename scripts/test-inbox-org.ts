@@ -21,7 +21,7 @@ import { getDoc, patchDoc, setBlob, softDeleteDoc } from "@/db/doc-store";
 import { parseInbound } from "@/lib/gmail/mime";
 import type { GmailFullMessage } from "@/lib/gmail/api";
 import { addMessage, archive, flushOutbox, reply, replyLeft, setOrg, threadsIn, type CommMessage, type CommThread } from "@/lib/stores/comms";
-import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, organizeThread } from "@/lib/inbox-org/pipeline";
+import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, loadOrgContext, organizeThread } from "@/lib/inbox-org/pipeline";
 import { onMyCourt, selectEmail } from "@/lib/triage/feeds/email";
 import { organizeAfterImport, recordMessage } from "@/lib/gmail/bridge";
 import { saveContact, setEmails } from "@/lib/identity/contacts";
@@ -43,6 +43,7 @@ import type { TaskRecord } from "@/lib/stores/tasks";
 import { listRunsByMonth } from "@/lib/stores/assist-runs";
 import { monthKeyChicago } from "@/lib/assist/config";
 import { getRun } from "@/lib/stores/assist-runs";
+import { getSettingsPatch, setSettings } from "@/lib/settings";
 import { saveCompany } from "@/lib/identity/companies";
 import { saveSite } from "@/lib/identity/sites";
 import { desiredPeakLabels } from "@/lib/gmail/peak-labels";
@@ -1657,14 +1658,42 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
     await archiveAfterReply(conflict, "reply", ann, { manual: true });
     const cf = await read(conflict);
     ok(cf.customerId === CUST_A && cf.filing?.customerId === CUST_A && cf.filing.filedBy === "reply" && cf.archived === true, "apply fix: on reply, a strong suggestion for another customer never overrides the hand link (the hand link is filed)");
+    // a pilot owner's strong AI suggestion survives their own reply and is
+    // filed by archive-on-reply (the real comms.reply + post-reply path)
     const autoId = await mk("ai-auto", {});
     const ARUN = fixtureId(335, "apply-arun");
     await upsertDoc("assist_runs" as never, runRow(ARUN, "file", "thread:" + autoId) as never);
     registerFixture("assist_runs" as never, ARUN);
-    await setOrg(autoId, { filing: { ...aiFiling, runId: ARUN } });
-    await archiveAfterReply(autoId, "reply", ann, { manual: true });
-    const autoRun = await getRun(ARUN);
-    ok((await read(autoId)).filing?.filedBy === "reply" && autoRun?.outcome === null && autoRun?.outcomeDetail?.autoFiled === "reply", "apply fix: auto-filing an AI suggestion leaves the run's outcome null and notes autoFiled");
+    const settingsBefore = await getSettingsPatch();
+    const keyBefore = process.env.ANTHROPIC_API_KEY;
+    try {
+      await setSettings({ assistUsers: [ANN_ID], assistFeatures: { file: true, promise: true } });
+      process.env.ANTHROPIC_API_KEY = "sk-test-not-real";
+      invalidateOrgContext();
+      ok(isOrgPilot(ANN_ID, "file", await loadOrgContext()), "apply fix 2: (setup) Ann is an Assist pilot user");
+      const custMsg = (await read(autoId)).messages[0];
+      await setOrg(autoId, { filing: { ...aiFiling, runId: ARUN, basis: custMsg.id, needsReply: true } });
+      await reply(autoId, { body: "Here's the price.", me: ANN });
+      const af = await read(autoId);
+      const autoRun = await getRun(ARUN);
+      ok(af.filing?.state === "filed" && af.filing.filedBy === "reply" && af.filing.source === "ai" && af.customerId === CUST && af.link?.id === QUOTE, "apply fix 2: my reply doesn't reset the AI suggestion — archive-on-reply files the thread under it (filedBy reply)");
+      ok(autoRun?.outcome === null && autoRun?.outcomeDetail?.autoFiled === "reply", "apply fix 2: the run's outcome stays null; its detail notes autoFiled 'reply'");
+      ok(af.archived === true && af.court?.owner === "customer", "apply fix 2: …and the thread is archived (court customer)");
+    } finally {
+      await setSettings({ assistUsers: settingsBefore.assistUsers ?? [], assistFeatures: settingsBefore.assistFeatures ?? {} });
+      if (keyBefore === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = keyBefore;
+      invalidateOrgContext();
+    }
+    // only outside mail resets a skipped filing; the court follows every message
+    const sk2 = await mk("skip-own-reply", {});
+    await skipFiling(sk2, ann);
+    await addMessage(sk2, { direction: "out", body: "Will check.", me: ANN });
+    await organizeThread(sk2);
+    ok((await read(sk2)).filing?.state === "skipped" && (await read(sk2)).court?.owner === "customer", "apply fix 2: my own message leaves a skipped filing skipped (the court still moves)");
+    await addMessage(sk2, { direction: "in", body: "Any update?" });
+    await organizeThread(sk2);
+    ok((await read(sk2)).filing?.state === "suggested" && (await read(sk2)).court?.owner === "me", "apply fix 2: new outside mail brings it back to To file");
     ok((await toFileThreads(ann)).some((t) => t.id === weakId) && (await read(weakId)).archived === true, "apply fix: To file includes an archived thread whose weak suggestion still waits");
     const archStrong = await mk("all-archived-strong", { archived: true, subject: "EST-987700", messages: [msg({}), msg({ direction: "out", fromEmail: "ann.t335@peaksystemsgroup.com", to: "pat@apply-school.test" })], status: "waiting_them" });
     const rAll2 = await approveAllStrong("all-visible", ann);

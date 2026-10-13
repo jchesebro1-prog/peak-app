@@ -237,6 +237,17 @@ function newSince(rec: { at: number; basis?: string } | undefined, latest: CommM
   return (latest.at || 0) > (rec.at || 0);
 }
 
+/** The message a FILING is computed against: the newest one from an outside
+ *  sender (not the owner, not a teammate) — my own reply or a teammate's
+ *  never resets or recomputes a pending filing (a strong AI suggestion must
+ *  survive until archive-on-reply files it). With no outside message yet,
+ *  the first message (so nothing internal resets it either). The court
+ *  still follows the newest message of all. `msgs` oldest first, non-empty. */
+export function filingBasisMessage(t: CommThread, msgs: CommMessage[], owner: OrgUser | null, ctx: OrgContext): CommMessage {
+  for (let i = msgs.length - 1; i >= 0; i--) if (roleOf(t, msgs[i], owner, ctx) === "customer") return msgs[i];
+  return msgs[0];
+}
+
 /* ---- numbers (§1 step 3) ------------------------------------------------------- */
 
 type WorkRef = NonNullable<Filing["work"]>;
@@ -609,7 +620,9 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
 
   /* filing (§1) + noise */
   const prevFiling = t.filing;
-  const filingNew = newSince(prevFiling, latest);
+  // only new mail from an outside sender counts for the filing (see filingBasisMessage)
+  const filingBasis = filingBasisMessage(t, msgs, owner, ctx);
+  const filingNew = newSince(prevFiling, filingBasis);
   let filing: Filing | null = prevFiling ?? null;
   let noise: NoiseFlag | null = t.noise ?? null;
   let logEntry: FilingLogEntry | null = null;
@@ -625,7 +638,7 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
         needsReply: !out.filing.noise && court.owner === "me",
         state: out.quiet ? "skipped" : "suggested",
         at: now,
-        basis,
+        basis: filingBasis.id,
         ...(pendingAi ? { pendingAi: true, ...aiBookkeeping(prevFiling, !filingNew) } : {}),
       };
       filing = prevFiling && sameRecord(prevFiling, next) ? prevFiling : next;
@@ -650,8 +663,10 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
     }
   }
 
-  // a filed / dismissed filing only tracks whether a reply is still owed
-  if (locked && prevFiling) {
+  // a filing kept as it was (filed / dismissed / skipped, or an AI
+  // suggestion no outside mail has reset) only tracks whether a reply is
+  // still owed
+  if (prevFiling && filing === prevFiling) {
     const needsReply = !prevFiling.noise && court.owner === "me";
     if (prevFiling.needsReply !== needsReply) filing = { ...prevFiling, needsReply };
   }
