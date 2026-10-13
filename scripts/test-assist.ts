@@ -299,10 +299,10 @@ export async function assistEstimatePureChecks(ok: Ok): Promise<void> {
     { name: "Empty", categoryId: "", lines: [] },
   ] }, { parts, tierMargin: 0.3, freightPct: 8, categories: cats, sectionIdBase: 1000 });
   const s = r.sections[0];
-  ok(r.sections.length === 1 && s.id === "sys1000" && s.kind === "materials" && s.freightPct === 8 && s.discipline === "curtain", "assist estimate: one materials system, empty system dropped, discipline from category");
+  ok(r.sections.length === 1 && s.id === "sys1000" && s.kind === "materials" && s.freightPct === 8 && s.discipline === "curtain" && s.priceRound === 25, "assist estimate: one materials system, empty system dropped, discipline from category");
   ok(s.items[0].sku === "VEL-1" && s.items[0].price === catalogAddPrice(10, 20, 0.3) && s.items[0].cost === 10 && s.items[0].qty === 3, "assist estimate: catalog line priced by catalogAddPrice at the tier");
   ok(s.items[1].sku === "" && s.items[1].price === 0 && s.items[1].custom === true && s.items[1].desc === "Mystery part", "assist estimate: sku outside the candidate set becomes an unpriced custom line");
-  ok(s.items[2].qty === 1 && s.items.length === 3 && r.dropped === 2, "assist estimate: qty clamped >= 1; blank line dropped; dropped counted");
+  ok(s.items[2].qty === 1 && s.items.length === 3 && r.dropped === 1 && r.unresolved === 1, "assist estimate: qty clamped >= 1; blank line dropped, unresolved sku counted separately");
   ok(r.reasons["sys1000:1"] === "requested" && r.lines.length === 3 && r.lines[0].sku === "VEL-1", "assist estimate: reasons keyed by section:line, drafted lines recorded");
   const ut = buildDraftUserText({ thread: "<email_thread/>", extract: ex, categories: [{ id: "c1", name: "Fixtures", items: [{ sku: "A", qty: 2 }] }] as never[], pastSystems: [{ label: "EST-1 Main", lines: [{ sku: "A", desc: "a", qty: 1 }] }], customerSystems: [], candidates: [{ sku: "VEL-1", desc: "Velour", mfr: "Rose Brand", unit: "yd", category: "Fabric" }] });
   ok(ut.includes("2 \u00d7 black velour") && ut.includes("c1 \u2014 Fixtures: A\u00d72") && ut.includes("EST-1 Main: A\u00d71") && ut.includes("VEL-1 | Velour") && !/\$|cost|price/i.test(ut.replace("Never output prices", "")), "assist estimate: prompt carries request, categories, examples, candidates, no money");

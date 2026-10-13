@@ -37481,7 +37481,7 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   const est = src("src/app/(app)/estimator/page.tsx");
   const line = src("src/app/(app)/design/lineset/page.tsx");
   ok(est.includes("fabricParts(),") && !est.includes('byCategory("Fabric")') && line.includes("listFabricParts()") && !line.includes('byCategory("Fabric")'), "#264: the Estimator and Lineset read fabrics through fabricParts(), not byCategory(\"Fabric\")");
-  const ea = src("src/app/(app)/estimator/actions.ts");
+  const ea = src("src/app/(app)/estimator/catalog-rank.ts");
   ok(ea.includes('cat === "Fabric" ? isFabricPart(p)'), "#264: searchCatalog's \"Fabric\" filter (the Grid curtain swap) matches every fabric part");
   const lib = ["src/lib/design/grid-palette.ts", "src/lib/design/grid-accessories.ts", "src/lib/stores/grid-projects.ts", "src/lib/stores/grid-catalog.ts", "src/lib/portal-catalog-index.ts", "src/lib/design/grid-curtains.ts", "src/lib/design/equipment-map.ts", "src/lib/design/equipment-map-view.ts"];
   ok(lib.every((f) => !/category\s*[!=]==\s*"Fabric"/.test(src(f)) && src(f).includes("isFabricPart")), "#264: no Grid, portal or Equipment-map fabric test reads category === \"Fabric\" directly — all go through isFabricPart");
@@ -64369,7 +64369,8 @@ async function riserPolish3Checks(): Promise<void> {
   // ---- 3. conduit-part search filters per-foot inside the catalog query, before the cap
   const est = srcOf("src/app/(app)/estimator/actions.ts");
   const sc = est.slice(est.indexOf("export async function searchCatalog("), est.indexOf("export type ResolvedCatalogSku"));
-  ok(/limit = 40,\s*perLengthOnly = false/.test(sc) && sc.includes(".filter((p) => !perLengthOnly || isPerLengthUnit(p.unit || \"\"))") && sc.indexOf("perLengthOnly || isPerLengthUnit") < sc.indexOf(".slice(0, Math.max(1, limit))") && sc.includes("total: scored.length"),
+  const rank = srcOf("src/app/(app)/estimator/catalog-rank.ts");
+  ok(/limit = 40,\s*perLengthOnly = false/.test(sc) && rank.includes(".filter((p) => !opts.perLengthOnly || isPerLengthUnit(p.unit || \"\"))") && sc.includes("rankCatalogParts(parts, q, { category: cat, perLengthOnly })") && sc.indexOf("rankCatalogParts(") < sc.indexOf(".slice(0, Math.max(1, limit))") && sc.includes("total: scored.length"),
     "#321 polish conduit search: searchCatalog takes perLengthOnly and applies it before scoring, the cap and the total");
   const csa = srcOf("src/app/(app)/estimating-rules/conduit-sizes/actions.ts");
   const csaSearch = csa.slice(csa.indexOf("export async function searchConduitPartsAction("));

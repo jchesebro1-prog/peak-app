@@ -1,5 +1,6 @@
 /** Draft estimate (spec §9). Pure: schemas, prompts, sanitizer, section builder. Prices ONLY via catalogAddPrice. */
 import { z } from "zod";
+import { SYSTEM_PRICE_STEP } from "@/app/(app)/estimator/pricing";
 import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import type { SystemCategory } from "@/lib/system-categories";
@@ -87,11 +88,12 @@ export type PricePart = { sku: string; desc: string; unit: string; cost: number;
 export function buildDraftSections(
   draft: z.infer<typeof DraftSchema>,
   ctx: { parts: Map<string, PricePart>; tierMargin: number; freightPct: number; categories: SystemCategory[]; sectionIdBase: number }
-): { sections: SpecSection[]; reasons: Record<string, string>; lines: DraftLine[]; dropped: number } {
+): { sections: SpecSection[]; reasons: Record<string, string>; lines: DraftLine[]; dropped: number; unresolved: number } {
   const sections: SpecSection[] = [];
   const reasons: Record<string, string> = {};
   const lines: DraftLine[] = [];
-  let dropped = 0;
+  let dropped = 0; // blank lines removed
+  let unresolved = 0; // skus outside the candidate set, kept as custom lines
   const catById = new Map(ctx.categories.map((c) => [c.id, c]));
   for (const sys of (draft?.systems ?? []).slice(0, 12)) {
     const sectionId = "sys" + (ctx.sectionIdBase + sections.length);
@@ -108,7 +110,7 @@ export function buildDraftSections(
       } else {
         const desc = (l.desc || l.sku || "").replace(/\s+/g, " ").trim().slice(0, 200);
         if (!desc) { dropped++; nextId--; continue; }
-        if (l.sku) dropped++; // a sku outside the candidate set — kept only as a custom line
+        if (l.sku) unresolved++; // a sku outside the candidate set — kept only as a custom line
         items.push({ id, sku: "", desc, qty, unit: "ea", cost: 0, price: 0, custom: true, internalNote: "Assist: needs a part and price" });
         lines.push({ sku: "", qty });
       }
@@ -124,9 +126,10 @@ export function buildDraftSections(
       mfr: "",
       freightPct: ctx.freightPct,
       freightAuto: true,
+      priceRound: SYSTEM_PRICE_STEP, // same as the Estimator's own new-system path
       items,
       ...(cat?.discipline ? { discipline: cat.discipline } : {}),
     });
   }
-  return { sections, reasons, lines, dropped };
+  return { sections, reasons, lines, dropped, unresolved };
 }
