@@ -33,6 +33,7 @@ import {
   canRefreshOnline,
   canYieldToOpenInMain,
   changeDelayMs,
+  editableBlocksRefresh,
   nextRefreshStep,
   shouldFocusRefresh,
 } from "@/lib/popout/guard";
@@ -109,6 +110,13 @@ export default function LiveSync() {
     let parkedOffline = false;
 
     const activeIsEditable = () => isEditableTarget(document.activeElement as HTMLInputElement | null);
+    const hasFocus = () => {
+      try {
+        return document.hasFocus();
+      } catch {
+        return true;
+      }
+    };
     const network = () => {
       let engineConnected: boolean | undefined;
       try {
@@ -134,7 +142,7 @@ export default function LiveSync() {
         ...network(),
         hold: hasUnsavedHold(),
         lastKeyAt: lastKeyAt.current,
-        activeIsEditable: activeIsEditable(),
+        activeIsEditable: editableBlocksRefresh(hasFocus(), activeIsEditable()),
         lastRefreshAt: lastRefreshAt.current,
         now: Date.now(),
       });

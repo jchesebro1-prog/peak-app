@@ -12225,6 +12225,7 @@ The Estimator autosaves its note, assumptions, cover summary and Not included 50
 D907 shipped with AND (defer only while a field is focused AND a key was pressed in the last 3 s). Spec §5 says OR. `shouldRefreshNow` now does this:
 - **Change-driven refresh:** waits until 3 s after the last keystroke in an editable field, even if the field has since lost focus. It also waits while an editable field is focused, re-checking every 3 s.
 - **Focus refresh:** waits only while an editable field is focused.
+- "Focused" means focused in a window that has focus (`document.hasFocus() && isEditableTarget(activeElement)`, `editableBlocksRefresh`): a caret left in a background window's field does not block its refreshes; Open in main window still uses the raw caret (D912).
 
 There is no reliable "unsaved input" signal for an arbitrary field, because React keeps a controlled input's `value` attribute in sync, so a focused editable field counts as unsaved. A person who leaves the cursor in a search box gets the refresh when they leave it.
 Verified 2026-10-13 (D910–D913): see PUNCHLIST #336 "Final-review fixes".

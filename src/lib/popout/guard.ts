@@ -47,6 +47,13 @@ export function shouldRefreshNow(i: {
   return "now";
 }
 
+/** The `activeIsEditable` the refresh guard uses: a caret left in a field of a
+ *  window that is not focused (a background main window) does not block its
+ *  refreshes. `canYieldToOpenInMain` keeps using the raw value (conservative). */
+export function editableBlocksRefresh(windowHasFocus: boolean, activeIsEditable: boolean): boolean {
+  return windowHasFocus && activeIsEditable;
+}
+
 /** True when more than 30 s have passed since the last refresh (or none yet). */
 export function shouldFocusRefresh(lastRefreshAt: number | null | undefined, now: number): boolean {
   if (typeof lastRefreshAt !== "number") return true;

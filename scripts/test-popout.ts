@@ -9,6 +9,7 @@ import {
   canRefreshOnline,
   canYieldToOpenInMain,
   changeDelayMs,
+  editableBlocksRefresh,
   nextRefreshStep,
   shouldFocusRefresh,
   shouldRefreshNow,
@@ -139,6 +140,11 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(shouldRefreshNow({ kind: "focus", lastKeyAt: 9_900, now: 10_000, activeIsEditable: false }) === "now", "popout: a focus refresh ignores recent typing once the field is blurred");
     ok(def(shouldRefreshNow({ kind: "focus", lastKeyAt: null, now: 10_000, activeIsEditable: true })) === EDITABLE_RECHECK_MS, "popout: a focus refresh defers while an editable field is focused");
   }
+
+  /* guard — a background window's stale caret (D913) */
+  ok(editableBlocksRefresh(true, true) && !editableBlocksRefresh(true, false), "popout: a focused window's editable field blocks refreshes");
+  ok(!editableBlocksRefresh(false, true) && !editableBlocksRefresh(false, false), "popout: a field focused in an unfocused window counts as not editable");
+  ok(nextRefreshStep({ owedChange: false, owedFocus: true, navigatorOnline: true, engineConnected: true, hold: false, lastKeyAt: null, activeIsEditable: editableBlocksRefresh(false, true), lastRefreshAt: 0, now: 100_000 }).action === "refresh", "popout: a background window with a stale caret still takes its refresh");
 
   /* guard — offline gate (D910) */
   ok(canRefreshOnline({ navigatorOnline: true, engineConnected: true }), "popout: online + engine connected may refresh");
@@ -293,6 +299,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok(live.includes('"visibilitychange", onVisible') && live.includes('"focus", onFocus') && live.includes("shouldFocusRefresh(lastRefreshAt.current") && live.includes("schedule(FOCUS_SETTLE_MS)"), "popout: visible/focus refreshes under the 30 s rule after a 1.5 s settle");
   ok(live.includes("getEngine().getStatus().connected") && live.includes("navigator.onLine") && live.includes('window.addEventListener("online", onBackOnline)') && live.includes("window.addEventListener(SYNC_EVENT, onBackOnline)") && live.includes("schedule(ONLINE_RETRY_MS)"), "popout: LiveSync gates refreshes on navigator.onLine + the sync engine and retries on reconnect (D910)");
   ok(live.includes("hold: hasUnsavedHold()") && /canYieldToOpenInMain\(\{[^}]*hold: hasUnsavedHold\(\) \}\)\) return;\s*const path/.test(live), "popout: the unsaved hold feeds the refresh step and blocks open-in-main before navigating (D912)");
+  ok(live.includes("activeIsEditable: editableBlocksRefresh(hasFocus(), activeIsEditable())") && live.includes("canYieldToOpenInMain({ activeIsEditable: activeIsEditable(),"), "popout: the refresh guard gates the caret on document.hasFocus(); open-in-main stays on the raw caret");
   const estState = readSrc("src/app/(app)/estimator/use-estimator-state.ts");
   ok(/const unsavedHold = pdfDirty \|\| \(!loadedId && sections\.some\(\(s\) => s\.items\.length > 0\)\);\s*useEffect\(\(\) => \{\s*setUnsavedHold\(unsavedHold\);\s*return \(\) => setUnsavedHold\(false\);\s*\}, \[unsavedHold\]\);/.test(estState), "popout: the Estimator sets the unsaved hold from pdfDirty / a new estimate with lines, keyed on the boolean");
   ok(/if \(m\.type === "open-in-main"\) \{\s*if \(isPopWindow\(\)\) return;/.test(live) && /postMainAck\(m\.url\);\s*try \{\s*window\.focus\(\);/.test(live) && live.includes("router.push(path)"), "popout: a main window answers open-in-main — ack, focus, then router.push");
