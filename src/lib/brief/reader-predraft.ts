@@ -7,7 +7,8 @@
  * Shown ONLY when all hold — the draft queue's own rule for making one:
  *   - fresh: `basis` is still the newest inbound message (`preDraftFresh`);
  *   - court me: waiting on us and on my court (`onMyCourt`), assigned to me;
- *   - for the reply: a non-empty drafted body.
+ *   - for the reply: a non-empty drafted body; for the tasks: at least one
+ *     stored suggestion (an empty list leaves the live Suggest tasks call).
  * Anything else → the reader's live Draft reply / Suggest tasks paths.
  */
 import { onMyCourt } from "@/lib/triage/feeds/email";
@@ -29,7 +30,8 @@ export function readerPreDraft(
   if (!sameName(t.assignedTo, me.name) || !onMyCourt(t, env)) return null;
   const body = typeof pd.body === "string" ? pd.body : "";
   const reply = body.trim() ? { body, runId: pd.runId ?? null } : null;
-  const tasks = Array.isArray(pd.taskSuggestions) && pd.taskRunId ? { suggestions: pd.taskSuggestions, runId: pd.taskRunId } : null;
+  // An empty stored list never replaces the live Suggest tasks call.
+  const tasks = Array.isArray(pd.taskSuggestions) && pd.taskSuggestions.length > 0 && pd.taskRunId ? { suggestions: pd.taskSuggestions, runId: pd.taskRunId } : null;
   if (!reply && !tasks) return null;
   return { reply, tasks, preparedLabel: Number.isFinite(pd.at) ? chicagoTime(pd.at) : "" };
 }

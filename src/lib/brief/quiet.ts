@@ -25,7 +25,7 @@ export type QuietThreadInput = {
 
 const norm = (s: string | null | undefined) => (s || "").trim().toLowerCase();
 
-/** The quote's person: its owner, falling back to preparedBy (one person follows up — quoteOwnerName's rule). */
+/** The quote's person: its owner, falling back to preparedBy (one person follows up — quoteOwnerName's rule). `me` is normalized (trimmed, lower case). */
 function isMine(q: Pick<Quote, "owner" | "preparedBy">, me: string): boolean {
   const who = norm(q.owner) || norm(q.preparedBy);
   return !!me && who === me;
@@ -68,4 +68,9 @@ export function selectQuietQuotes(
   }
   out.sort((a, b) => a.sentAt - b.sentAt || a.quoteId.localeCompare(b.quoteId));
   return out.slice(0, QUIET_MAX);
+}
+
+/** Is this quote `meName`'s to follow up (owner, else preparedBy) — the quiet selector's own rule. */
+export function quoteIsMine(q: Pick<Quote, "owner" | "preparedBy">, meName: string): boolean {
+  return isMine(q, norm(meName));
 }

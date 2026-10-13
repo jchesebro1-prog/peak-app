@@ -36,7 +36,8 @@ type Mode = "reply" | "replyAll" | "forward";
 
 type SuggestTasksResult = Awaited<ReturnType<typeof suggestTasksAction>>;
 const NO_ASSIST: AssistFlags = { tasks: false, reply: false, estimate: false };
-type AssistDraft = { runId: string; draft: string };
+/** `stored`: an AI-brief pre-draft opened with Use it (its runId outlives one composer). */
+type AssistDraft = { runId: string; draft: string; stored?: boolean };
 
 /** Log a pending Assist draft's outcome once and clear it (the store is
  *  first-write-wins too). Fire and forget. */
@@ -551,6 +552,12 @@ export default function ThreadReader({
   const [draftBusy, setDraftBusy] = useState(false);
   const [assistDraft, setAssistDraft] = useState<AssistDraft | null>(null);
   const assistDraftRef = useRef<AssistDraft | null>(null);
+  // AI daily brief — a stored pre-draft whose composer was closed unsent is
+  // PARKED, not settled: Use it again re-attaches it, so the run's one
+  // (first-write-wins) outcome is the real one. It settles as discarded only
+  // when the reader goes away. A stored runId already sent is never re-attached.
+  const parkedDraftRef = useRef<AssistDraft | null>(null);
+  const sentStoredRef = useRef<Set<string>>(new Set());
   // In-flight guards: a double click lands before the busy state re-renders.
   const tasksInFlight = useRef(false);
   const estimateInFlight = useRef(false);
@@ -570,6 +577,7 @@ export default function ThreadReader({
       unmountTimer.current = null;
     }
     const pending = assistDraftRef;
+    const parked = parkedDraftRef;
     const mounted = mountedRef;
     const sendingFlag = sendingRef;
     const timer = unmountTimer;
@@ -577,6 +585,7 @@ export default function ThreadReader({
       mounted.current = false;
       timer.current = setTimeout(() => {
         timer.current = null;
+        settleDraftRef(parked, "discarded", {});
         if (sendingFlag.current) return;
         settleDraftRef(pending, "discarded", {});
       }, 0);
@@ -718,17 +727,26 @@ export default function ThreadReader({
     if (!storedReply || draftBusy || replyInFlight.current) return;
     openMode("reply");
     setCBody(withSignature(storedReply.body, signature, "add"));
-    if (storedReply.runId) {
-      const d = { runId: storedReply.runId, draft: storedReply.body };
-      assistDraftRef.current = d;
-      setAssistDraft(d);
-    }
+    const runId = storedReply.runId;
+    // Already sent from this reader: its outcome is recorded — open the text only.
+    if (!runId || sentStoredRef.current.has(runId)) return;
+    const parked = parkedDraftRef.current;
+    parkedDraftRef.current = null;
+    const d: AssistDraft = parked && parked.runId === runId ? parked : { runId, draft: storedReply.body, stored: true };
+    assistDraftRef.current = d;
+    setAssistDraft(d);
   };
 
   const closeComposer = () => {
     // Cancel / ✕ / Discard with a draft still pending. After a send the
     // draft is already settled, so this is a no-op then.
-    if (assistDraftRef.current) settleDraft("discarded", {});
+    const pendingDraft = assistDraftRef.current;
+    if (pendingDraft?.stored) {
+      // a stored pre-draft is parked (see parkedDraftRef), not discarded yet
+      parkedDraftRef.current = pendingDraft;
+      assistDraftRef.current = null;
+      setAssistDraft(null);
+    } else if (pendingDraft) settleDraft("discarded", {});
     setMode(null);
     setCBody("");
     setCTo("");
@@ -752,6 +770,7 @@ export default function ThreadReader({
       if (res.ok && assistDraftRef.current) {
         // #334 — judged against what was actually sent, signature left out.
         const o = replyOutcome(assistDraftRef.current.draft, stripSignature(b, signature || ""));
+        if (assistDraftRef.current.stored) sentStoredRef.current.add(assistDraftRef.current.runId);
         settleDraft(o.outcome, { editRatio: o.editRatio });
       }
       // #335 §7 — the person ticked "Mark '…' done?": complete the

@@ -17,12 +17,10 @@ import type { Brief } from "./types";
 export type CardRow = { title: string; href: string };
 /** A thread's ready pre-draft parts (server: `readerPreDraft`). */
 export type CardThreadReady = { draft: boolean; tasks: boolean };
-/** A quote the card mentions: its builder link, contact, and a fresh, usable nudge (else null). */
+/** A quote the card mentions: its builder link, and a fresh, usable nudge (else null). */
 export type CardQuoteInfo = {
   href: string;
-  customerId: string | null;
-  contactName: string;
-  nudge: { note: string; emailSubject: string; emailBody: string } | null;
+  nudge: { note: string } | null;
 };
 
 export type BriefCardInput = {
@@ -42,8 +40,8 @@ export type BriefCardDoFirst = {
   source: string;
   draftReady: boolean;
   tasksReady: boolean;
-  /** A lead row: "Looks like a pricing request → Open Estimator" (estimate suggestions are a later piece). */
-  pricingRequest: boolean;
+  /** A lead row: "Ready to quote? → Open lead" (the lead's own page, where it converts); null otherwise. */
+  leadHref: string | null;
 };
 
 export type BriefCardQuiet = {
@@ -53,7 +51,7 @@ export type BriefCardQuiet = {
   /** "6 business days, no reply" */
   daysLabel: string;
   note: string | null;
-  /** The Inbox composer prefilled with the nudge (nothing sends by itself); null without a ready nudge. */
+  /** `/inbox?nudge=<quoteId>` — the composer prefilled server-side with the nudge (nothing sends by itself); null without a ready nudge. */
   nudgeHref: string | null;
   openHref: string;
 };
@@ -81,22 +79,12 @@ export type BriefCardVM = {
 };
 
 export const ORGANIZE_HREF = "/inbox?view=organize";
-export const ESTIMATOR_HREF = "/estimator";
-/** Server-side caps on the Inbox compose prefill (`?subject=` / `?body=`). */
-export const COMPOSE_SUBJECT_MAX = 200;
-export const COMPOSE_BODY_MAX = 5000;
 
 const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/** The Inbox compose link for a quiet quote's nudge: `?new=<customer>` (or `?compose=1`) + contact/subject/body. */
-export function nudgeComposeHref(q: Pick<CardQuoteInfo, "customerId" | "contactName">, nudge: { emailSubject: string; emailBody: string }): string {
-  const p = new URLSearchParams();
-  if (q.customerId) p.set("new", q.customerId);
-  else p.set("compose", "1");
-  if (q.contactName.trim()) p.set("contact", q.contactName.trim());
-  p.set("subject", nudge.emailSubject.slice(0, COMPOSE_SUBJECT_MAX));
-  p.set("body", nudge.emailBody.slice(0, COMPOSE_BODY_MAX));
-  return `/inbox?${p.toString()}`;
+/** Send nudge: the Inbox reads the quote's stored nudge itself (inbox-compose-prefill.ts `nudgePrefill`) — only the id travels. */
+export function nudgeComposeHref(quoteId: string): string {
+  return `/inbox?nudge=${encodeURIComponent(quoteId)}`;
 }
 
 export function briefCardVM(input: BriefCardInput): BriefCardVM {
@@ -120,7 +108,7 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
       source: parsed ? SOURCE_LABEL[parsed.source] : "",
       draftReady: !!thread?.draft || !!quote?.nudge,
       tasksReady: !!thread?.tasks,
-      pricingRequest: parsed?.source === "lead",
+      leadHref: parsed?.source === "lead" && row?.href ? row.href : null,
     };
   });
 
@@ -140,13 +128,13 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
 
   const quiet: BriefCardQuiet[] = b.quiet.map((q) => {
     const info = input.quotes[q.quoteId];
-    const nudge = info?.nudge && info.nudge.emailBody.trim() ? info.nudge : null;
+    const nudge = info?.nudge ?? null;
     return {
       quoteId: q.quoteId,
       label: [q.number, q.name, q.customer].filter(Boolean).join(" · "),
       daysLabel: `${n(q.days, "business day", "business days")}, no reply`,
       note: nudge?.note || null,
-      nudgeHref: nudge && info ? nudgeComposeHref(info, nudge) : null,
+      nudgeHref: nudge ? nudgeComposeHref(q.quoteId) : null,
       openHref: info?.href || `/estimator?id=${encodeURIComponent(q.quoteId)}`,
     };
   });

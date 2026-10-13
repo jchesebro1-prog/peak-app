@@ -8,12 +8,12 @@ import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
 import { withSignature } from "@/lib/inbox-signature";
-import { composePrefillFrom, prefillRecipient } from "@/lib/inbox-compose-prefill";
+import { nudgePrefill, prefillRecipient } from "@/lib/inbox-compose-prefill";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { get as getQuote, getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
@@ -959,7 +959,7 @@ export default async function InboxPage({
         }
       : null;
 
-    const messages: MessageVM[] =(sel.messages || []).map((m) => ({
+    const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
       author: m.author,
       initials: initialsOf(m.author),
@@ -1104,11 +1104,13 @@ export default async function InboxPage({
   // #122: ?customer=<companyId> is the same pre-filled composer (vendor pages
   // link here), and ?customer=<companyId>&log=1 opens the Log call / meeting
   // modal with that company preset instead.
-  // AI daily brief §4 — ?subject= / ?body= (+ ?contact=) prefill the composer
-  // (the Home card's Send nudge); capped server-side; nothing sends by itself.
+  // AI daily brief §4 — ?nudge=<quoteId> (the Home card's Send nudge) opens
+  // the composer with that quote's stored nudge email: read here, on the
+  // server, only when fresh and the viewer's quote (nudgePrefill); capped;
+  // To = the quote's contact by name, else blank. Nothing sends by itself.
   let initialCompose: ComposeInit | null = null;
-  const prefill = composePrefillFrom({ subject: str(params.subject), body: str(params.body), contact: str(params.contact) });
-  const prefillBody = prefill.body ? withSignature(prefill.body, signature, "add") : "";
+  const nudgeId = str(params.nudge).slice(0, 100);
+  const nudge = nudgeId ? nudgePrefill(await getQuote(nudgeId).catch(() => null), me) : null;
   const customerParam = str(params.customer);
   const logCust = str(params.log) === "1" ? customerParam : "";
   const newCust = logCust ? "" : str(params.new) || customerParam;
@@ -1130,31 +1132,44 @@ export default async function InboxPage({
         size: a.size,
       })),
     };
-  } else if (newCust) {
-    const c = customerVMs.find((x) => x.id === newCust);
-    const who = prefillRecipient(c, prefill);
+  } else if (nudge) {
+    const c = nudge.customerId ? customerVMs.find((x) => x.id === nudge.customerId) : undefined;
+    const who = prefillRecipient(c, nudge.contact);
     initialCompose = {
       id: null,
       mailbox: "personal",
       to: who.to,
       cc: "",
       showCc: false,
-      subject: prefill.subject,
-      body: prefillBody,
+      subject: nudge.subject,
+      body: withSignature(nudge.body, signature, "add"),
       customerId: c ? c.id : "",
       contactName: who.contactName,
     };
-  } else if (str(params.compose) || prefill.active) {
+  } else if (newCust) {
+    const c = customerVMs.find((x) => x.id === newCust);
+    initialCompose = {
+      id: null,
+      mailbox: "personal",
+      to: c?.primaryEmail || "",
+      cc: "",
+      showCc: false,
+      subject: "",
+      body: "",
+      customerId: c ? c.id : "",
+      contactName: c?.primaryName || "",
+    };
+  } else if (str(params.compose)) {
     initialCompose = {
       id: null,
       mailbox: box !== "personal" && !isView ? box : "personal",
       to: "",
       cc: "",
       showCc: false,
-      subject: prefill.subject,
-      body: prefillBody,
+      subject: "",
+      body: "",
       customerId: "",
-      contactName: prefill.active ? prefill.contact : "",
+      contactName: "",
     };
   }
 

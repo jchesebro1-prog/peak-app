@@ -1,9 +1,11 @@
 import type { SessionUser } from "@/lib/session";
-import type { AssistFeature } from "@/lib/assist/types";
-import { loadBriefView, type BriefView } from "@/lib/brief/build";
-import { briefCardVM, type CardQuoteInfo, type CardRow, type CardThreadReady } from "@/lib/brief/card-vm";
-import { nudgeFresh } from "@/lib/brief/fresh";
+import type { AssistSettings } from "@/lib/assist/types";
+import { assistUiFlags } from "@/lib/assist/config";
+import { getAssistEnv } from "@/lib/assist/key-store";
+import { loadBriefView } from "@/lib/brief/build";
+import { briefCardVM, type BriefCardVM, type CardQuoteInfo, type CardRow, type CardThreadReady } from "@/lib/brief/card-vm";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
+import { nudgePrefill } from "@/lib/inbox-compose-prefill";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { get as getThread } from "@/lib/stores/comms";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -14,18 +16,22 @@ import { triageNow } from "@/lib/triage/service";
 import BriefCardView from "./brief-card-view";
 
 /**
- * AI daily brief — the Home card (spec §4), above Start here. Home renders it
- * only for an Assist pilot user with Daily brief on, inside its own Suspense
- * ("Preparing your brief…": a missing brief builds lazily here, ≤ 20 s).
- * Server half: the stored brief, the snapshot rows its Do-these-first keys
- * point at, ready pre-drafts / nudges, and each quiet quote's builder link.
- * `flags` = the viewer's Assist UI flags — a chip only shows when the reader
- * would offer that draft. A failure here never breaks Home.
+ * AI daily brief — the Home card (spec §4), above Start here. Home mounts it
+ * (inside its own Suspense, "Preparing your brief…") only after the cheap
+ * settings check — Assist pilot + Daily brief on; the Assist gate itself
+ * (it reads the stored key) runs here, behind the Suspense. A missing brief
+ * builds lazily (≤ 20 s). Server half: the stored brief, the snapshot rows
+ * its Do-these-first keys point at, ready pre-drafts / nudges (a chip shows
+ * only when the reader would offer that draft), and each quiet quote's
+ * builder link.
+ *
+ * It never breaks Home: anything that throws — the gate, the load, a store
+ * read, the VM — renders the "couldn't load" notice instead.
  */
-export default async function BriefCard({ user, flags }: { user: SessionUser; flags: Record<AssistFeature, boolean> }) {
-  let view: BriefView | null;
+export default async function BriefCard({ user, settings }: { user: SessionUser; settings: AssistSettings }) {
+  let vm: BriefCardVM | null;
   try {
-    view = await loadBriefView(user, triageNow());
+    vm = await loadCardVM(user, settings);
   } catch (err) {
     console.error("[brief] Home card failed", err);
     return (
@@ -34,6 +40,13 @@ export default async function BriefCard({ user, flags }: { user: SessionUser; fl
       </section>
     );
   }
+  return vm ? <BriefCardView vm={vm} /> : null;
+}
+
+async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<BriefCardVM | null> {
+  const flags = assistUiFlags(user.id, settings, await getAssistEnv());
+  if (!flags.brief) return null;
+  const view = await loadBriefView(user, triageNow());
   if (!view) return null;
   const b = view.brief;
 
@@ -54,29 +67,23 @@ export default async function BriefCard({ user, flags }: { user: SessionUser; fl
   const rows: Record<string, CardRow> = {};
   const want = new Set(b.doFirst.map((d) => d.key));
   for (const r of Array.isArray(snap?.rows) ? snap.rows : []) {
-    if (want.has(r.key)) rows[r.key] = { title: r.title, href: r.href };
+    if (r && want.has(r.key)) rows[r.key] = { title: String(r.title || ""), href: String(r.href || "") };
   }
 
   const threadReady: Record<string, CardThreadReady> = {};
   for (const t of threads) {
     if (!t) continue;
     const pd = readerPreDraft(t, { name: user.name });
-    threadReady[t.id] = { draft: flags.reply && !!pd?.reply, tasks: flags.tasks && !!pd?.tasks && pd.tasks.suggestions.length > 0 };
+    threadReady[t.id] = { draft: flags.reply && !!pd?.reply, tasks: flags.tasks && !!pd?.tasks };
   }
 
   const quoteInfo: Record<string, CardQuoteInfo> = {};
   for (const q of quotes) {
     if (!q) continue;
-    const n = q.assistNudge;
-    const usable = flags.brief && !!n && nudgeFresh(q) && !n.error && !!n.emailBody.trim();
-    quoteInfo[q.id] = {
-      href: quoteBuilderHref(q),
-      customerId: q.customerId || null,
-      contactName: q.contactName || "",
-      nudge: usable && n ? { note: n.note, emailSubject: n.emailSubject, emailBody: n.emailBody } : null,
-    };
+    // Send nudge shows only when the Inbox will prefill it (its own rule).
+    const usable = nudgePrefill(q, user.name) !== null;
+    quoteInfo[q.id] = { href: quoteBuilderHref(q), nudge: usable ? { note: String(q.assistNudge?.note || "") } : null };
   }
 
-  const vm = briefCardVM({ brief: b, stale: view.stale, transient: view.transient, rows, threads: threadReady, quotes: quoteInfo });
-  return <BriefCardView vm={vm} />;
+  return briefCardVM({ brief: b, stale: view.stale, transient: view.transient, rows, threads: threadReady, quotes: quoteInfo });
 }

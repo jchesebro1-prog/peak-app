@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { rebuildBriefAction } from "@/app/(app)/brief-actions";
 import { postChanged } from "@/lib/popout/channel";
-import { ESTIMATOR_HREF, type BriefCardVM } from "@/lib/brief/card-vm";
+import type { BriefCardVM } from "@/lib/brief/card-vm";
 
 const COLLAPSE_KEY = (id: string) => `peak-brief-collapsed:${id}`;
 
@@ -206,11 +206,11 @@ function FullVariant({ vm }: { vm: BriefCardVM }) {
                   {d.tasksReady && <span className="pkb-chip">Tasks ready</span>}
                 </span>
                 {d.why && <div style={{ fontSize: 12.5, color: "#5b616e" }}>{d.why}</div>}
-                {d.pricingRequest && (
+                {d.leadHref && (
                   <div style={{ fontSize: 12, color: "#5b616e" }}>
-                    Looks like a pricing request →{" "}
-                    <Link href={ESTIMATOR_HREF} className="pkb-link">
-                      Open Estimator
+                    Ready to quote? →{" "}
+                    <Link href={d.leadHref} className="pkb-link">
+                      Open lead
                     </Link>
                   </div>
                 )}

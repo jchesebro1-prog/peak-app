@@ -102,9 +102,29 @@ export function briefEnabledFor(userId: string, settings: AssistSettings): boole
 
 /* ---------------- storage ---------------- */
 
-/** A stored blob → a Brief, or null when there is none (getBlob's `{}`) or it isn't one. Null optional keys drop. */
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const arrOf = (v: unknown, ok: (x: Record<string, unknown>) => boolean): boolean => Array.isArray(v) && v.every((x) => isObj(x) && ok(x));
+
+/**
+ * A stored blob → a Brief, or null when there is none (getBlob's `{}`) or it
+ * isn't a whole one — every array / object field the card reads must have
+ * its shape, so a malformed or older blob counts as missing (the view then
+ * builds lazily, or falls back) and never reaches the Home card. Null
+ * optional keys drop.
+ */
 export function briefFromBlob(raw: Record<string, unknown> | null | undefined): Brief | null {
-  if (!raw || typeof raw.userId !== "string" || typeof raw.summary !== "string" || typeof raw.builtAt !== "number") return null;
+  if (!isObj(raw) || typeof raw.userId !== "string" || typeof raw.day !== "string" || typeof raw.summary !== "string" || !isNum(raw.builtAt)) return null;
+  if (raw.slot !== "morning" && raw.slot !== "midday") return null;
+  if (!arrOf(raw.doFirst, (d) => typeof d.key === "string" && typeof d.why === "string")) return null;
+  const o = raw.organize;
+  if (!isObj(o) || !isNum(o.toFile) || !isNum(o.strong) || !isNum(o.noise)) return null;
+  const t = raw.today;
+  if (!isObj(t) || !isNum(t.visits) || !isNum(t.tasksDue) || !(t.firstVisitAt == null || isNum(t.firstVisitAt)) || !(t.driveMin == null || isNum(t.driveMin))) return null;
+  if (!arrOf(raw.quiet, (q) => typeof q.quoteId === "string" && typeof q.number === "string" && typeof q.name === "string" && typeof q.customer === "string" && isNum(q.days))) return null;
+  if (!arrOf(raw.newPromiseTasks, (p) => typeof p.taskId === "string" && typeof p.title === "string" && (p.due == null || isNum(p.due)))) return null;
+  if (!isNum(raw.approvals)) return null;
+  if (raw.since != null && (!isObj(raw.since) || !isNum(raw.since.done) || !isNum(raw.since.open) || !isNum(raw.since.new))) return null;
   const b = { ...raw } as Record<string, unknown>;
   if (b.since == null) delete b.since;
   if (b.error == null) delete b.error;
@@ -128,7 +148,14 @@ export async function readBrief(userId: string, day: string, slot: BriefSlot): P
 export async function writeBrief(b: Brief, mode: "insert" | "replace"): Promise<Brief> {
   const id = briefId(b.userId, b.day, b.slot);
   if (mode === "replace") await setBlob(id, briefToBlob(b));
-  else await setBlobKeysIfAbsent(id, briefToBlob(b));
+  else {
+    await setBlobKeysIfAbsent(id, briefToBlob(b));
+    const stored = await readBrief(b.userId, b.day, b.slot);
+    if (stored) return stored;
+    // The stored blob is malformed (its keys won the merge): replace it whole,
+    // so the next view doesn't build again.
+    await setBlob(id, briefToBlob(b));
+  }
   return (await readBrief(b.userId, b.day, b.slot)) ?? b;
 }
 
