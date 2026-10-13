@@ -1,5 +1,8 @@
 /** Assist layer checks (#334). Standalone: `npm run test:assist`; also chained into test:specs. */
 import { costUsd, modelFor, wantsFallbacks } from "@/lib/assist/models";
+import { buildAnthropicParams, FALLBACK_BETA } from "@/lib/assist/anthropic";
+import { buildLocalBody } from "@/lib/assist/local";
+import { pickProvider } from "@/lib/assist/provider";
 import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured } from "@/lib/assist/config";
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -116,6 +119,24 @@ export async function assistStoreChecks(ok: Ok): Promise<void> {
   ok((await mk({ output: "x".repeat(30_000) })).output.length === 20_000, "assist store: output capped at 20,000 chars");
 }
 
+export async function assistProviderChecks(ok: Ok): Promise<void> {
+  const base = { model: "claude-opus-5-5", system: "SYS", user: "USER", effort: "medium" as const, maxTokens: 16000, fallbacks: true };
+  const p = buildAnthropicParams({ ...base, jsonSchema: { type: "object" } });
+  ok(p.model === "claude-opus-5-5" && p.max_tokens === 16000, "assist anthropic: model + max_tokens");
+  ok(!("thinking" in p) && !("tool_choice" in p), "assist anthropic: never sends thinking or tool_choice");
+  ok(p.system[0].cache_control?.type === "ephemeral" && p.system[0].text === "SYS", "assist anthropic: cached system block");
+  ok(p.output_config.effort === "medium" && (p.output_config as { format?: { type: string } }).format?.type === "json_schema", "assist anthropic: effort + json_schema format in output_config");
+  ok((p as { fallbacks?: string }).fallbacks === "default" && (p as { betas?: string[] }).betas?.[0] === FALLBACK_BETA, "assist anthropic: fallbacks default with the 2026-07-01 beta");
+  const h = buildAnthropicParams({ ...base, model: "claude-haiku-5-5", fallbacks: false, effort: "low" });
+  ok(!("fallbacks" in h) && !("betas" in h) && !("format" in h.output_config), "assist anthropic: haiku text call has no fallbacks/betas/format");
+  const l = buildLocalBody({ ...base, jsonSchema: { type: "object" } });
+  ok(l.messages[0].role === "system" && (l as { response_format?: { type: string } }).response_format?.type === "json_schema", "assist local: OpenAI-compatible body with json_schema");
+  ok(pickProvider({ ANTHROPIC_API_KEY: "k" }).primary.name === "anthropic" && pickProvider({ ANTHROPIC_API_KEY: "k" }).fallback === null, "assist provider: Claude by default, no fallback");
+  const loc = pickProvider({ ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini", ANTHROPIC_API_KEY: "k" });
+  ok(loc.primary.name === "local" && loc.fallback?.name === "anthropic", "assist provider: local primary with Claude fallback");
+  ok(pickProvider({ ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini" }).fallback === null, "assist provider: no key = no fallback");
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -130,6 +151,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   (async () => {
     await assistPureChecks(ok);
     await assistStoreChecks(ok);
+    await assistProviderChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);
