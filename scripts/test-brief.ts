@@ -115,14 +115,14 @@ function fallbackChecks(ok: Ok): void {
   const r = ruleBrief(facts());
   ok(r.doFirst.map((d) => d.key).join(",") === "email:a,task:b,lead:c" && r.doFirst[0].why === "Customer waiting 2 days", "brief fallback: doFirst is the top 3 snapshot rows with their reasons");
   ok(
-    r.summary.includes("6 items on your list") && r.summary.includes("2 site visits today, the first at 9:30 AM") && r.summary.includes("1 h 10 min of driving") && r.summary.includes("3 tasks due today") && r.summary.includes("2 quotes waiting on your approval") && r.summary.includes("5 threads to file (2 strong)") && r.summary.includes("3 noise") && r.summary.includes("1 new task from a promise"),
+    r.summary.includes("6 items on your list") && r.summary.includes("2 site visits today, the first at 9:30 AM") && r.summary.includes("1 h 10 min of driving") && r.summary.includes("3 tasks on today's plan") && r.summary.includes("2 quotes waiting on your approval") && r.summary.includes("5 threads to file (2 strong)") && r.summary.includes("3 noise") && r.summary.includes("1 new task from a promise"),
     `brief fallback: summary is composed from the counts (${r.summary})`
   );
   const quiet = [{ quoteId: "Q-1", number: "EST-1001", name: "Stage", customer: "North HS", sentAt: MON(9), days: 6 }];
   const clear = ruleBrief(facts({ rows: [], organize: { toFile: 0, strong: 0, noise: 0 }, newPromiseTasks: [], today: { visits: 0, firstVisitAt: null, driveMin: null, tasksDue: 0 }, approvals: 0, quiet }));
   ok(clear.doFirst.length === 0 && clear.summary.includes("Your list is clear") && clear.summary.includes("1 sent quote has gone quiet") && !/visit|approval|to file|promise/.test(clear.summary), `brief fallback: zero counts are left out; singular wording (${clear.summary})`);
   const one = ruleBrief(facts({ rows: ROW_OBJS.slice(0, 1), today: { visits: 1, firstVisitAt: MON(14), driveMin: 25, tasksDue: 1 } }));
-  ok(one.summary.includes("1 item on your list") && one.summary.includes("1 site visit today, at 2:00 PM") && one.summary.includes("25 min of driving") && one.summary.includes("1 task due today"), `brief fallback: singular counts (${one.summary})`);
+  ok(one.summary.includes("1 item on your list") && one.summary.includes("1 site visit today, at 2:00 PM") && one.summary.includes("25 min of driving") && one.summary.includes("1 task on today's plan"), `brief fallback: singular counts (${one.summary})`);
   const pm = ruleBrief(facts({ slot: "midday", since: { done: 4, open: 2, new: 1 } }));
   ok(pm.summary.startsWith("Since this morning: 4 done, 2 still open, 1 new."), `brief fallback: the afternoon summary leads with the since-morning line (${pm.summary.slice(0, 60)})`);
   ok(ruleBrief(facts({ rows: Array.from({ length: 400 }, (_, i) => ({ key: `k${i}`, title: "t", reason: "r" })) })).summary.length <= BRIEF_SUMMARY_MAX, "brief fallback: summary within the cap");
@@ -211,10 +211,10 @@ function speechChecks(ok: Ok): void {
   ok(s.includes("Busy Monday, two visits.") && !s.includes("·"), "brief speech: the summary is read with symbols turned into pauses");
   ok(s.includes("Do these first. First, Reply to Pat at North HS. Pat has waited 2 days."), "brief speech: Do these first reads the row title, then why");
   ok(!s.includes("task:b"), "brief speech: an item with no title and no why is never read as a raw key");
-  ok(s.includes("You have two site visits today. The first is at nine thirty a.m.") && s.includes("About one hour and ten minutes of driving.") && s.includes("Three tasks are due today."), "brief speech: today read with spelled numbers");
+  ok(s.includes("You have two site visits today. The first is at nine thirty a.m.") && s.includes("About one hour and ten minutes of driving.") && s.includes("Three tasks are on today's plan."), "brief speech: today read with spelled numbers");
   ok(s.includes("One quote is waiting on your approval.") && s.includes("One sent quote has gone quiet.") && s.includes("Five threads to file, two of them strong, and three noise.") && s.includes("One new task from a promise."), "brief speech: counts read with singular/plural wording");
   const pm = briefSpeech({ ...BRIEF, slot: "midday", since: { done: 4, open: 1, new: 0 }, organize: { toFile: 0, strong: 0, noise: 0 }, quiet: [], approvals: 0, newPromiseTasks: [], today: { visits: 0, firstVisitAt: null, driveMin: null, tasksDue: 0 } });
-  ok(pm.startsWith("Good afternoon. Here is your afternoon brief.") && pm.includes("Since this morning, four done, one still open, and none new.") && !/site visit|approval|quiet|to file|promise|due today/.test(pm), `brief speech: afternoon reads the since line; zero counts are skipped (${pm})`);
+  ok(pm.startsWith("Good afternoon. Here is your afternoon brief.") && pm.includes("Since this morning, four done, one still open, and none new.") && !/site visit|approval|quiet|to file|promise|today's plan/.test(pm), `brief speech: afternoon reads the since line; zero counts are skipped (${pm})`);
   ok(!/[*#_`]/.test(briefSpeech({ ...BRIEF, summary: "**Bold** _x_ `y` # z" })), "brief speech: no markdown symbols are read aloud");
   const linked = briefSpeech({ ...BRIEF, summary: "Call [Pat](https://x.example/p) about <b>the</b> [quote] <now>", doFirst: [{ key: "x", why: "[open](https://y) <i>it</i>" }] });
   ok(linked.includes("Call Pat about the quote") && !/[[\]<>]|https?:|x\.example/.test(linked) && linked.includes("First, open it."), `brief speech: links read as their text, tags and [ ] < > never read (${linked})`);
@@ -768,10 +768,21 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
 
     /* 3. the AI-pass slice runs only with room for its worst case + the brief's call */
     answer = { summary: "Fine.", doFirst: [] };
-    const passDl = soon(60_000);
+    // the deadlines the real paths pass: Rebuild (90 s) runs the slice; lazy (20 s) and the crons (≤ 55 s from route start) never do
+    const passDl = soon(B.BRIEF_REBUILD_DEADLINE_MS);
     await B.buildBrief(meT, "morning", AM, { builtBy: "rebuild", deadlineMs: passDl, deps: deps() });
     for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${DAY}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
-    ok(passCalls.length === 1 && passCalls[0].ownerIds?.join() === ME.id && passCalls[0].budgetMs === 8_000 && passCalls[0].deadlineMs === passDl - B.BRIEF_CALL_RESERVE_MS, "brief build: with a 60 s deadline the AI pass gets an 8 s slice for me, ending 15 s before the brief's own deadline");
+    ok(B.BRIEF_REBUILD_DEADLINE_MS === 90_000 && passCalls.length === 1 && passCalls[0].ownerIds?.join() === ME.id && passCalls[0].budgetMs === 8_000 && passCalls[0].deadlineMs === passDl - B.BRIEF_CALL_RESERVE_MS, "brief build: Rebuild's 90 s deadline gives the AI pass an 8 s slice for me, ending 15 s before the brief's own deadline");
+    await B.buildBrief(meT, "morning", AM, { builtBy: "cron", deadlineMs: soon(55_000), deps: deps() });
+    for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${DAY}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
+    ok(passCalls.length === 1 && B.BRIEF_LAZY_DEADLINE_MS === 20_000, "brief build: a cron's 55 s (and the lazy 20 s) leave no room — the slice is skipped");
+    const home = readFileSync("src/app/(app)/page.tsx", "utf8");
+    ok(/export const maxDuration = 120;/.test(home), "brief build: Rebuild runs under Home's 120 s maxDuration (90 s deadline fits)");
+
+    /* 3b. runAssist throwing (spend read, run log) → the rule-built brief, with its rows */
+    const throwing = { ...pilot, get capUsd(): number { throw new Error("db down"); } } as typeof pilot;
+    const thrown = await B.buildBrief(meT, "morning", AM, { builtBy: "lazy", deadlineMs: soon(), deps: deps({ settings: throwing }) });
+    ok(thrown.error === "Assist failed — the brief was built from the counts." && thrown.runId === null && thrown.doFirst.map((d) => d.key).join(",") === "lead:TEST3373-1,visit:TEST3373-2,renewal:TEST3373-3" && thrown.summary.includes("4 items on your list."), `brief fallback: a throw inside the Assist call keeps the facts — rule-built from the rows, error set (${thrown.summary})`);
 
     /* 4. the view: stored, lazy, not eligible, before 6:45 */
     const v1 = await B.loadBriefView(ME, AM, { deps: deps() });
@@ -829,6 +840,10 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
     const cronB = await B.readBrief(ME.id, dayKey(at(16, 9)), "morning");
     ok(roomy.built === 1 && roomy.kept === 1 && roomy.skipped.length === 0 && roomy.failed.length === 0 && cronB?.builtBy === "cron" && cronB.summary === "Cron.", `brief cron: builds a missing brief, keeps a stored one (${JSON.stringify(roomy)})`);
     ok((await B.readBrief(OTHER.id, dayKey(at(16, 9)), "morning")) === null, "brief cron: a non-pilot user gets no brief");
+    await snap(ME.id, dayKey(at(16, 15)), "midday", [row("lead:TEST3373-6"), row("lead:TEST3373-7"), row("lead:TEST3373-8")], at(16, 15));
+    const thrownView = await B.loadBriefView(ME, at(16, 15), { deps: deps({ settings: throwing }) });
+    const thrownStored = await B.readBrief(ME.id, dayKey(at(16, 15)), "midday");
+    ok(!!thrownView && !thrownView.transient && thrownStored?.error === "Assist failed — the brief was built from the counts." && thrownStored.doFirst.length === 3, "brief fallback: a lazy build whose Assist call throws is stored rule-built (rows kept) — no empty brief, no endless retry");
 
     const qCalls: string[] = [];
     const queue = async (o: { ownerId: string; deadlineMs: number }) => {
@@ -843,10 +858,19 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
     const gmail = readFileSync("src/app/api/gmail/sync/route.ts", "utf8");
     const mid = readFileSync("src/app/api/triage/build/route.ts", "utf8");
     const act = readFileSync("src/app/(app)/brief-actions.ts", "utf8");
-    ok(gmail.indexOf("buildSlotForAll(\"morning\"") < gmail.indexOf("buildBriefsForAll(\"morning\"") && /try \{\s*briefs = await buildBriefsForAll\("morning", Date\.now\(\), \{ deadlineMs: started \+ 45_000 \}\)/.test(gmail) && /drafts = await runDraftsForAll\(briefs\.userIds, started \+ 55_000\)/.test(gmail), "brief wiring: the Gmail cron builds the morning briefs after the morning list (own try, 45 s) and drafts last (55 s)");
+    ok(
+      /BRIEF_CRON_CUTOFF_MS = 35_000;/.test(gmail) &&
+        gmail.indexOf("buildSlotForAll(\"morning\"") < gmail.indexOf("buildBriefsForAll(\"morning\"") &&
+        /try \{\s*briefs = await buildBriefsForAll\("morning", Date\.now\(\), \{ deadlineMs: started \+ BRIEF_CRON_CUTOFF_MS \}\)/.test(gmail) &&
+        /try \{\s*if \("userIds" in briefs\) drafts = await runDraftsForAll\(briefs\.userIds, started \+ BRIEF_CRON_CUTOFF_MS\)/.test(gmail) &&
+        gmail.indexOf("runDraftsForAll(briefs.userIds") < gmail.indexOf("syncDrivePhotos(budget)") &&
+        gmail.indexOf("runDraftsForAll(briefs.userIds") < gmail.indexOf("syncAllMeetings("),
+      "brief wiring: the Gmail cron builds the morning briefs, then drafts, after the morning list and before photos / meetings — each in its own try, both capped at 35 s"
+    );
     ok(mid.indexOf("buildSlotForAll(slot") < mid.indexOf("buildBriefsForAll(slot") && /BRIEF_DEADLINE_MS = 55_000/.test(mid) && /runDraftsForAll\(briefs\.userIds/.test(mid), "brief wiring: the midday cron builds the slot's briefs after the list, then drafts, ending by 55 s");
     ok(/^"use server";/.test(act) && /requireUser\(\)/.test(act) && /rebuildBrief\(user\)/.test(act) && /revalidatePath\("\/"\)/.test(act), "brief wiring: rebuildBriefAction — a Server Action: requireUser → rebuildBrief → revalidatePath('/')");
     const lib = readFileSync("src/lib/brief/build.ts", "utf8");
+    ok(/drive: async \(\{ userId, dayKeys, events, visits: v \}\) => \{\s*const out = await planDriveDays\(\{ userId, dayKeys, events, mode: "cache"/.test(lib), "brief wiring: drive minutes come from the task plan's own drive layer, with its calendar events (no second plan)");
     ok(/rateLimit\("brief-rebuild:" \+ user\.id, BRIEF_REBUILD_LIMIT, 3_600_000\)/.test(lib) && B.BRIEF_REBUILD_LIMIT === 3 && /countRate: false/.test(lib), "brief wiring: Rebuild's own 3/h key; the brief call never counts against the interactive rate limit");
   } finally {
     for (const c of created) await db.delete(DOC_TABLES[c.coll]).where(eq(DOC_TABLES[c.coll].id, c.id));

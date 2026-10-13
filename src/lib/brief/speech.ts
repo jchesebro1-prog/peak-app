@@ -88,7 +88,7 @@ export function briefSpeech(brief: Brief, titles: Readonly<Record<string, string
     if (t.firstVisitAt) out.push(`${t.visits === 1 ? "It is" : "The first is"} at ${spokenTime(t.firstVisitAt)}`);
   }
   if (t.driveMin && t.driveMin > 0) out.push(`About ${spokenDuration(t.driveMin)} of driving.`);
-  if (t.tasksDue > 0) out.push(`${cap1(spellNumber(t.tasksDue))} ${t.tasksDue === 1 ? "task is" : "tasks are"} due today.`);
+  if (t.tasksDue > 0) out.push(`${cap1(spellNumber(t.tasksDue))} ${t.tasksDue === 1 ? "task is" : "tasks are"} on today's plan.`);
   if (brief.approvals > 0) out.push(`${cap1(spellNumber(brief.approvals))} ${brief.approvals === 1 ? "quote is" : "quotes are"} waiting on your approval.`);
   if (brief.quiet.length > 0) out.push(`${cap1(spellNumber(brief.quiet.length))} sent ${brief.quiet.length === 1 ? "quote has" : "quotes have"} gone quiet.`);
   const o = brief.organize;

@@ -44,7 +44,7 @@ export function ruleBrief(f: BriefFacts): BriefText {
     parts.push(`${n(t.visits, "site visit", "site visits")} today${first}.`);
   }
   if (t.driveMin && t.driveMin > 0) parts.push(`About ${driveLabel(t.driveMin)} of driving.`);
-  if (t.tasksDue > 0) parts.push(`${n(t.tasksDue, "task", "tasks")} due today.`);
+  if (t.tasksDue > 0) parts.push(`${n(t.tasksDue, "task", "tasks")} on today's plan.`);
   if (f.approvals > 0) parts.push(`${n(f.approvals, "quote", "quotes")} waiting on your approval.`);
   if (f.quiet.length > 0) parts.push(`${n(f.quiet.length, "sent quote has", "sent quotes have")} gone quiet.`);
   const o = f.organize;

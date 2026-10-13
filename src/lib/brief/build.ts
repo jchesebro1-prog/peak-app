@@ -3,9 +3,10 @@
  * Server-only (stores, settings, Assist); never import it from a client file.
  *
  * `buildBrief(me, slot, now, opts)`:
- *   1. a short Inbox AI-pass slice for me, so court and filing are fresh —
- *      only when the deadline leaves room for the pass's worst-case call AND
- *      the brief's own call after it (skipped otherwise, e.g. a lazy build);
+ *   1. Rebuild only: a short Inbox AI-pass slice for me, so court and
+ *      filing are fresh — when the deadline leaves room for the pass's
+ *      worst-case call AND the brief's own call after it (Rebuild's 90 s
+ *      does; lazy and cron builds never run it);
  *   2. the slot's triage list (`loadTriageView`, built lazily if missing);
  *   3. the facts: Organize counts, new promise-tasks, today (planned tasks,
  *      visits, drive minutes), approvals waiting, quiet quotes — each one
@@ -56,8 +57,11 @@ import type { Brief, BriefBuiltBy, BriefOrganize, BriefPromiseTask, BriefSince, 
 
 /** The lazy first view builds inline within this (spec §1). */
 export const BRIEF_LAZY_DEADLINE_MS = 20_000;
-/** Rebuild's budget (a Server Action on Home, whose maxDuration is 120 s). */
-export const BRIEF_REBUILD_DEADLINE_MS = 45_000;
+/** Rebuild's budget (a Server Action on Home, whose maxDuration is 120 s) —
+ *  long enough for the AI-pass slice (its worst-case call + the brief's
+ *  reserve = 50 s) and the brief's own call after it. Lazy (20 s) and cron
+ *  builds never have that room, so only Rebuild runs the slice. */
+export const BRIEF_REBUILD_DEADLINE_MS = 90_000;
 /** No brief call starts with less than this much time for it. */
 export const BRIEF_MIN_CALL_MS = 4_000;
 /** Kept for the brief's own call when an AI-pass slice runs before it. */
@@ -190,9 +194,11 @@ export async function buildBrief(me: TriageUser, slot: BriefSlot, now: number, o
   const env = deps.env ?? (await getAssistEnv());
   const hasFallback = passHasFallback(env, deps.run);
 
-  // 1. the AI-pass slice: its calls must end before the brief's reserved time
+  // 1. the AI-pass slice — Rebuild only (a cron shares its 60 s across every
+  // user and its other riders; a lazy build has 20 s). Its calls must end
+  // before the brief's reserved time.
   const passDeadline = deadline - BRIEF_CALL_RESERVE_MS;
-  if (passDeadline - clock() >= callWorstCaseMs("promise", hasFallback) + AI_CALL_MARGIN_MS) {
+  if (opts.builtBy === "rebuild" && passDeadline - clock() >= callWorstCaseMs("promise", hasFallback) + AI_CALL_MARGIN_MS) {
     await soft("AI pass", (deps.aiPass ?? runAiPass)({ ownerIds: [me.id], deadlineMs: passDeadline, budgetMs: BRIEF_AI_PASS_SLICE_MS }, deps.run ? { run: deps.run } : {}), null);
   }
 
@@ -213,10 +219,36 @@ export async function buildBrief(me: TriageUser, slot: BriefSlot, now: number, o
     slot === "midday" ? soft("morning snapshot", getSnapshot(snapshotId(me.id, day, "morning")), null) : Promise.resolve(null),
   ]);
   const mineToday = todaysVisitsFor(visits, me.name, now);
-  const [plans, driveMin] = await Promise.all([
-    soft("task plan", deps.taskPlans ? deps.taskPlans(me) : loadTaskPlans({ userIds: [me.id], meId: me.id, deps: { calendarTimeoutMs: VIEW_PLAN_CALENDAR_MS } }), [] as PersonPlan[]),
-    soft("drive minutes", (deps.driveMin ?? defaultDriveMin)(me, day, visits), null),
-  ]);
+  // Drive minutes ride the plan's own drive layer: it already reads my
+  // calendar and plans every day of the horizon in "cache" mode, so today's
+  // total (calendar stops included) comes free. Only when the plan didn't
+  // reach it (no plan for me, a failed drive layer) is today planned alone,
+  // with no events.
+  let planDriveMin: number | null | undefined;
+  const plans = await soft(
+    "task plan",
+    deps.taskPlans
+      ? deps.taskPlans(me)
+      : loadTaskPlans({
+          userIds: [me.id],
+          meId: me.id,
+          deps: {
+            calendarTimeoutMs: VIEW_PLAN_CALENDAR_MS,
+            drive: async ({ userId, dayKeys, events, visits: v }) => {
+              const out = await planDriveDays({ userId, dayKeys, events, mode: "cache", deps: { visits: v } });
+              if (userId === me.id) planDriveMin = out.find((p) => p.dayKey === day)?.totalMin;
+              return out;
+            },
+          },
+        }),
+    [] as PersonPlan[]
+  );
+  const driveMin =
+    deps.driveMin
+      ? await soft("drive minutes", deps.driveMin(me, day, visits), null)
+      : planDriveMin !== undefined
+        ? planDriveMin
+        : await soft("drive minutes", defaultDriveMin(me, day, visits), null);
   const starts = mineToday.map((v) => v.startAt || 0).filter((x) => x > 0);
   const today: BriefToday = {
     visits: mineToday.length,
@@ -249,27 +281,35 @@ export async function buildBrief(me: TriageUser, slot: BriefSlot, now: number, o
   if (!gate.ok) error = gate.reason;
   else if (!limits) error = "No time left for Assist — the brief was built from the counts.";
   else {
-    const { date, weekday } = chicagoToday(now);
-    const r = await runAssist(
-      {
-        feature: "brief",
-        slot: "brief",
-        user: { id: me.id, name: me.name },
-        system: BRIEF_SYSTEM,
-        userText: buildBriefUserText({ ...facts, rows, name: me.name, dayLabel: `${weekday}, ${date}` }),
-        schema: BriefSchema,
-        contextRef: briefId(me.id, day, slot),
-        countRate: false,
-        limits,
-      },
-      { ...(deps.run ?? {}), settings, env, now }
-    );
-    runId = r.runId;
-    if (!r.ok) error = r.error;
-    else {
-      const clean = sanitizeBrief(r.value, rowKeys, reasons);
-      if (clean) text = clean;
-      else error = "Assist returned an unusable brief.";
+    // A throw here (the spend read, the run log, a provider bug) must not
+    // lose the gathered facts: the rule-built brief is kept and stored.
+    try {
+      const { date, weekday } = chicagoToday(now);
+      const r = await runAssist(
+        {
+          feature: "brief",
+          slot: "brief",
+          user: { id: me.id, name: me.name },
+          system: BRIEF_SYSTEM,
+          userText: buildBriefUserText({ ...facts, rows, name: me.name, dayLabel: `${weekday}, ${date}` }),
+          schema: BriefSchema,
+          contextRef: briefId(me.id, day, slot),
+          countRate: false,
+          limits,
+        },
+        { ...(deps.run ?? {}), settings, env, now }
+      );
+      runId = r.runId;
+      if (!r.ok) error = r.error;
+      else {
+        const clean = sanitizeBrief(r.value, rowKeys, reasons);
+        if (clean) text = clean;
+        else error = "Assist returned an unusable brief.";
+      }
+    } catch (err) {
+      console.error("[brief] Assist call failed:", err);
+      text = ruleBrief(facts);
+      error = "Assist failed — the brief was built from the counts.";
     }
   }
 
