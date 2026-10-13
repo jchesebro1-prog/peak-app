@@ -584,6 +584,7 @@ export default function ThreadReader({
   // #335 §7 — "Mark '…' done?" above Send while the thread's promise-task is
   // open; unticked by default, never auto-closed
   const [markPromiseDone, setMarkPromiseDone] = useState(false);
+  const [promiseNote, setPromiseNote] = useState<string | null>(null);
 
   // call/meeting quick log
   const [logDir, setLogDir] = useState<"in" | "out" | null>(null);
@@ -732,11 +733,15 @@ export default function ThreadReader({
       }
       // #335 §7 — the person ticked "Mark '…' done?": complete the
       // promise-task through the ordinary task status action
+      setPromiseNote(null);
       if (res.ok && markPromiseDone && openPromise) {
+        // the reply went out either way; a failure leaves the task open
+        const failed = "Reply sent — but the task couldn’t be marked done. Close it from the task list.";
         try {
-          await completeThreadTaskAction(openPromise.taskId);
+          const done = await completeThreadTaskAction(openPromise.taskId);
+          if (!done.ok) setPromiseNote(`Reply sent — the task wasn’t marked done: ${done.error}`);
         } catch {
-          // the reply went out; the task stays open (the sidebar can close it)
+          setPromiseNote(failed);
         }
       }
       if (res.ok) postInboxChanged(vm.id);
@@ -1217,6 +1222,11 @@ export default function ThreadReader({
           {assistError && (
             <p role="alert" style={{ margin: "-4px 0 10px", fontSize: 12, color: "#b4543a" }}>
               {assistError}
+            </p>
+          )}
+          {promiseNote && (
+            <p role="alert" style={{ margin: "-4px 0 10px", fontSize: 12, color: "#b4543a" }}>
+              {promiseNote}
             </p>
           )}
 

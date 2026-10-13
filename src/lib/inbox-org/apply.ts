@@ -538,7 +538,9 @@ export async function approveAllStrong(
       break;
     }
     const t = await myThread(id, me);
-    if (!t || !isStrongRow(t)) {
+    // a passed id is only taken while it is still one of my To file rows
+    // (not archived in Gmail or by hand since the list was drawn)
+    if (!t || !isToFileRow(t) || !isStrongRow(t)) {
       skipped++;
       continue;
     }

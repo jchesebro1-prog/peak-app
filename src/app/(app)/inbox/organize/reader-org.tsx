@@ -184,16 +184,20 @@ export default function ReaderOrgStrip({ threadId, org }: { threadId: string; or
           <b style={{ color: "#26292f" }}>{promise.title}</b>
           {promise.due && <span>· {promise.due}</span>}
           {!promise.open && <span>· done</span>}
-          <span>·</span>
-          <button
-            type="button"
-            style={LINK_BTN}
-            disabled={pending}
-            aria-label={`Undo task ${promise.title}`}
-            onClick={() => run(() => undoPromiseTaskAction(threadId, promise.taskId), "Task removed")}
-          >
-            Undo
-          </button>
+          {promise.open && (
+            <>
+              <span>·</span>
+              <button
+                type="button"
+                style={LINK_BTN}
+                disabled={pending}
+                aria-label={`Undo task ${promise.title}`}
+                onClick={() => run(() => undoPromiseTaskAction(threadId, promise.taskId), "Task removed")}
+              >
+                Undo
+              </button>
+            </>
+          )}
         </div>
       )}
 

@@ -2,8 +2,9 @@
  * #335 Inbox organization — the Organize view's loader (spec §2). One scan of
  * the person's own threads (`visibleTo`), partitioned by `buildOrganizeVM`
  * (pure — test-inbox-org drives it over fake threads) into To file (the
- * `toFileThreads` rows: `isToFileRow`), Noise (the pipeline / a person moved
- * it out of the inbox — the `threadsIn(…, "noise")` rule) and Filed (the
+ * `toFileThreads` rows: `isToFileRow`), Noise (everything flagged as noise and
+ * not rescued — moved out of the inbox for pilot users, or only tagged
+ * "Looks like noise" and still in it) and Filed (the
  * last 14 days, at most 200). The client gets plain view models only — no
  * store, db or sync import crosses into the client bundle (the box imports
  * this module's types only).
@@ -80,9 +81,10 @@ function whenLabel(ms: number | null | undefined, now: number): string {
   return (Math.abs(now - ms) < 300 * DAY_MS ? DAY : DAY_YEAR).format(ms);
 }
 
-/** The Noise tab's rule — the same as `threadsIn(…, "noise")`. */
+/** The Noise tab's rule (spec §2 "everything flagged as noise"): flagged and
+ *  not rescued — moved (archived) or only tagged and still in the inbox. */
 export function isNoiseRow(t: CommThread): boolean {
-  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !!t.noise.moved;
+  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued;
 }
 
 /** The Filed tab's rule: filed within the last FILED_DAYS. */

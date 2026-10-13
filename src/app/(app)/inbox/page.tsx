@@ -1161,8 +1161,9 @@ export default async function InboxPage({
       baseHref: ORGANIZE_BASE_HREF,
     });
     organizeSlot = {
-      // keyed: rendered inside InboxShell's child lists
-      list: <OrganizeBox key="organize-list" vm={vm} selectedId={reader ? reader.id : null} />,
+      // keyed by tab: a tab switch remounts the box, so its confirm / rule
+      // offer / note state never carries over to another tab
+      list: <OrganizeBox key={`organize-list-${vm.tab}`} vm={vm} selectedId={reader ? reader.id : null} />,
     };
   }
 

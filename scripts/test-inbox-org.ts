@@ -1722,6 +1722,8 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
     ok(!toFile.includes(gmailArch) && !toFile.includes(archStrong) && toFile.includes(inboxStrong), "apply fix 3: To file is the inbox (+ archived-on-reply) — mail archived in Gmail or archived by hand isn't in it");
     const rAll2 = await approveAllStrong("all-visible", ann);
     ok(rAll2.approved >= 1 && (await read(inboxStrong)).filing?.state === "filed" && (await read(gmailArch)).filing?.state === "suggested" && !(await read(gmailArch)).customerId && (await read(archStrong)).filing?.state === "suggested", "apply fix 3: approve-all ('all-visible') takes inbox rows only — the Gmail-archived one is untouched");
+    const rIds = await approveAllStrong([gmailArch], ann);
+    ok(rIds.approved === 0 && rIds.skipped === 1 && (await read(gmailArch)).filing?.state === "suggested" && (await read(gmailArch)).filing?.strength === "strong" && !(await read(gmailArch)).customerId, "polish: approve-all with ids skips my own strong suggestion that's archived in Gmail (not a To file row)");
     await approveFiling(archStrong, ann);
     ok((await read(archStrong)).filing?.state === "filed" && !(await read(archStrong)).filing?.applied?.archived, "apply fix: (setup) a thread archived before filing, approved directly");
     await undoFiling(archStrong, ann);
@@ -1851,10 +1853,13 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   const tr = read("src/app/(app)/inbox/thread-reader.tsx");
   ok(tr.includes("const [markPromiseDone, setMarkPromiseDone] = useState(false);") && tr.includes("Mark ‘{shortTaskTitle(openPromise.title)}’ done?"), "ui: the composer shows an unticked “Mark ‘…’ done?” while a promise-task is open");
   ok(tr.includes("if (res.ok && markPromiseDone && openPromise)") && tr.includes("await completeThreadTaskAction(openPromise.taskId);"), "ui: a ticked box completes the task via completeThreadTaskAction after a successful send");
+  ok(tr.includes("const done = await completeThreadTaskAction(openPromise.taskId);") && tr.includes("if (!done.ok) setPromiseNote("), "polish: a failed “Mark done” shows a note (the reply still went out)");
+  ok(page.includes("<OrganizeBox key={`organize-list-${vm.tab}`}"), "polish: the Organize box is keyed by tab (no confirm / offer / note carry-over)");
   ok(tr.includes("{vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}"), "ui: the reader shows the organization strip");
   const ro = read(`${DIR}/reader-org.tsx`);
   ok(ro.includes('overrideCourtAction(threadId, "nobody")') && ro.includes('overrideCourtAction(threadId, "me")') && ro.includes("Not on me") && ro.includes("On me"), "ui: Not on me / On me override the court");
   ok(ro.includes("undoPromiseTaskAction(threadId, promise.taskId)") && ro.includes("Task created:"), "ui: Task created … Undo calls undoPromiseTask");
+  ok(/\{promise\.open && \([\s\S]{0,500}?undoPromiseTaskAction/.test(ro), "polish: Undo shows only while the promise-task is open");
   ok(ro.includes('"Looks like noise"') && ro.includes("notNoiseAction(threadId)"), "ui: the Looks like noise tag offers Not noise");
   ok(ro.includes('filing.state === "suggested"') && ro.includes("approveFilingAction(threadId)"), "ui: a suggested filing line has Approve");
   const ob = read(`${DIR}/organize-box.tsx`);
@@ -1892,11 +1897,13 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
     th("j", { filing: fil({}), archived: true }), // archived, not on reply: no To file row
     th("k", { filing: fil({}), deleted: true }),
     th("l", { filing: fil({ state: "skipped" }) }),
+    th("n", { filing: fil({ noise: true }), noise: { flagged: true, reason: "Newsletter", moved: false }, updatedAt: NOW - 20 }), // tagged only (non-pilot), still in the inbox
+    th("o", { noise: { flagged: false, reason: "", moved: false, rescued: true }, updatedAt: NOW - 10 }), // rescued: not noise
   ];
   const names = (id: string) => (id === "c1" ? "Lincoln HS" : null);
   const vmT = buildOrganizeVM(threads, { tab: "to-file", now: NOW, customerName: names, isAdmin: true });
   ok(vmT.rows.map((r) => r.id).join(",") === "c,d,b,a", "ui vm: To file lists the toFileThreads rows newest first (skipped, archived-not-on-reply, deleted, noise and filed left out)");
-  ok(vmT.counts.toFile === 4 && vmT.counts.noise === 2 && vmT.counts.filed === 2, "ui vm: counts — To file 4, Noise 2, Filed 2 (the 20-day-old filing left out)");
+  ok(vmT.counts.toFile === 4 && vmT.counts.noise === 3 && vmT.counts.filed === 2, "ui vm: counts — To file 4, Noise 3, Filed 2 (the 20-day-old filing left out)");
   ok(vmT.strongIds.join(",") === "a", "ui vm: Approve all strong takes only strong, resolved rows");
   const ra = vmT.rows.find((r) => r.id === "a")!;
   ok(ra.suggestion === "Lincoln HS → EST-1042 Main curtain" && ra.strength === "strong" && ra.canApprove && ra.href === "/inbox?view=organize&tab=to-file&thread=a", "ui vm: a row carries its suggestion, strength and reader link");
@@ -1904,8 +1911,8 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(!vmT.rows.find((r) => r.id === "d")!.canApprove && vmT.rows.find((r) => r.id === "d")!.suggestion === null, "ui vm: a suggestion with nothing to file under can't be approved");
   ok(vmT.isAdmin && vmT.noiseInInboxIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
   const vmN = buildOrganizeVM(threads, { tab: "noise", now: NOW, customerName: names });
-  ok(vmN.rows.map((r) => r.id).join(",") === "f,e" && vmN.rows[0].reason === "No-reply sender" && vmN.rows[1].reason === "Promotions", "ui vm: Noise lists moved noise newest first, each with its reason");
-  ok(vmN.noiseInInboxIds.join(",") === "f" && vmN.strongIds.length === 0 && !vmN.isAdmin, "ui vm: Archive all shown takes the noise still in the inbox");
+  ok(vmN.rows.map((r) => r.id).join(",") === "n,f,e" && vmN.rows[0].reason === "Newsletter" && vmN.rows[1].reason === "No-reply sender" && vmN.rows[2].reason === "Promotions", "polish: Noise lists everything flagged as noise (moved and tagged-only), newest first, each with its reason; rescued left out");
+  ok(vmN.noiseInInboxIds.join(",") === "n,f" && vmN.strongIds.length === 0 && !vmN.isAdmin, "polish: Archive all shown takes the noise still in the inbox (a tagged-only thread included)");
   const vmF = buildOrganizeVM(threads, { tab: "filed", now: NOW, customerName: names });
   ok(vmF.rows.map((r) => r.id).join(",") === "i,g" && vmF.rows[0].filedBy === "approved" && vmF.rows[1].filedBy === "on reply" && !!vmF.rows[0].filedWhen, "ui vm: Filed lists the last 14 days, newest filing first, with how it was filed");
   const many = Array.from({ length: 205 }, (_, i) => th(`m${i}`, { filing: fil({ state: "filed", filedAt: NOW - i * 1000 }) }));

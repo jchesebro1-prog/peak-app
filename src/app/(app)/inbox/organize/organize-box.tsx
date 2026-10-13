@@ -126,7 +126,7 @@ export default function OrganizeBox({ vm, selectedId }: { vm: OrganizeVM; select
           {tab === "to-file"
             ? "File each thread to a customer — or tell it it's noise"
             : tab === "noise"
-              ? "Held out of your inbox as noise, newest first"
+              ? "Flagged as noise — newsletters, promotions, notifications — newest first"
               : `Filed in the last ${FILED_DAYS} days`}
         </div>
 
@@ -399,7 +399,7 @@ function Empty({ tab }: { tab: OrganizeTab }) {
     tab === "to-file"
       ? ["Nothing to file", "Suggestions for new mail land here until you approve them."]
       : tab === "noise"
-        ? ["No noise", "Newsletters, promotions and notifications held out of your inbox land here."]
+        ? ["No noise", "Newsletters, promotions and notifications flagged as noise land here."]
         : ["Nothing filed lately", `Threads filed in the last ${FILED_DAYS} days show up here.`];
   return (
     <div style={{ padding: "40px 24px", textAlign: "center", color: "#9aa0ab" }}>
