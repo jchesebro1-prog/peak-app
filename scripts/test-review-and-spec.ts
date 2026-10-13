@@ -1134,7 +1134,7 @@ ok(
   "go-live reset covers every business-document collection"
 );
 ok(
-  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions" && !resetCollections.includes("subassemblies"),
+  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions,assist_runs" && !resetCollections.includes("subassemblies") && !resetCollections.includes("assist_runs"),
   "#210 final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
 );
 ok(
@@ -11133,7 +11133,9 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src304(rel)) && src304(rel).includes(name), `#304 search ${rel}: reads the shared haystack (${name})`);
   pinRel("src/app/api/search/route.ts", "partSearchHaystack(");
   pinRel("src/app/(app)/catalog/page.tsx", "partSearchHaystack(");
-  pinRel("src/app/(app)/estimator/actions.ts", "partSearchHaystack(");
+  // #334: the Estimator's ranking moved to catalog-rank.ts (shared with Assist); searchCatalog calls it.
+  pinRel("src/app/(app)/estimator/catalog-rank.ts", "partSearchHaystack(");
+  ok(/export async function searchCatalog[\s\S]*?rankCatalogParts\(/.test(src304("src/app/(app)/estimator/actions.ts")), "#304 search src/app/(app)/estimator/actions.ts: searchCatalog ranks through rankCatalogParts (the shared haystack)");
   pinRel("src/app/(app)/catalog/documents/actions.ts", "partMatchesQuery(");
   pinRel("src/lib/design/grid-bom.ts", "partSearchHaystack(");
   ok(["grid-library", "grid-palette", "grid-accessories"].every((f) => src304(`src/lib/design/${f}.ts`).includes("partLiteHaystack(")), "#304 search: the Grid library, palette and accessory pickers share partLiteHaystack");
@@ -42849,8 +42851,10 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
   ok(shell.split("\n").length < 400 && !/<section className="pk-card"/.test(shell),
     "settings cleanup: settings-client.tsx is a shell — no cards left in it");
   ok(scReadDir(join(process.cwd(), groupDir)).filter((f) => f.endsWith(".tsx")).sort().join(",") ===
-    "company.tsx,consulting.tsx,data.tsx,field.tsx,integrations.tsx,sales.tsx,shared.tsx,team.tsx",
-    "settings cleanup: one component file per group (+ shared.tsx)");
+    "assist-pilot.tsx,company.tsx,consulting.tsx,data.tsx,field.tsx,integrations.tsx,sales.tsx,shared.tsx,team.tsx",
+    "settings cleanup: one component file per group (+ shared.tsx, + assist-pilot.tsx)");
+  ok(groupSrc.data.includes('from "./assist-pilot"') && groupSrc.data.includes("<AssistPilotCard"),
+    "settings cleanup: assist-pilot.tsx is the Data group's Assist pilot card (#334), not a group of its own");
   ok(/hidden=\{s\.key !== section\}/.test(shell) && /if \(!visited\.includes\(section\)\) setVisited/.test(shell),
     "settings cleanup: only the selected group shows; groups opened earlier stay mounted (hidden) so drafts and the geocode run survive a switch");
 
