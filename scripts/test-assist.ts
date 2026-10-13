@@ -10,6 +10,9 @@ import { editRatio, estimateKeep, replyOutcome } from "@/lib/assist/outcome";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
 import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
+import { buildDraftSections, buildDraftUserText, sanitizeExtract } from "@/lib/assist/features/estimate-draft";
+import { rankCatalogParts } from "@/app/(app)/estimator/catalog-rank";
+import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
 import { buildReplyUserText, cleanReplyText, openQuotesFor, pickStyleExamples } from "@/lib/assist/features/reply-draft";
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -281,6 +284,38 @@ export async function assistReplyChecks(ok: Ok): Promise<void> {
   ok(ut.includes("EST-1002") && ut.includes("<style_examples") && ut.includes("writing as Jeff"), "assist reply: user text carries quotes, examples, sender");
 }
 
+export async function assistEstimatePureChecks(ok: Ok): Promise<void> {
+  const ex = sanitizeExtract({ quoteName: " Lincoln ", venue: "", requests: [{ phrase: "  black   velour ", qty: 2.7 }, { phrase: "", qty: 1 }, { phrase: "hoist", qty: -3 }], systems: ["Curtains", "Curtains", ""] });
+  ok(ex.requests.length === 2 && ex.requests[0].phrase === "black velour" && ex.requests[0].qty === 2 && ex.requests[1].qty === 1 && ex.systems.join() === "Curtains", "assist estimate: extract sanitized (trim, int qty >= 1, dedupe)");
+  const parts = new Map([["VEL-1", { sku: "VEL-1", desc: "Velour 25oz", unit: "yd", cost: 10, list: 20 }]]);
+  const cats = [{ id: "cat-fixtures", name: "Fixtures", discipline: "curtain", items: [] }] as never[];
+  const r = buildDraftSections({ quoteName: "x", notes: "", systems: [
+    { name: "Main curtain", categoryId: "cat-fixtures", lines: [
+      { sku: "VEL-1", qty: 3, desc: "", reason: "requested" },
+      { sku: "NOT-IN-SET", qty: 1, desc: "Mystery part", reason: "" },
+      { sku: "", qty: 0, desc: "Custom pipe batten", reason: "" },
+      { sku: "", qty: 1, desc: "", reason: "" },
+    ] },
+    { name: "Empty", categoryId: "", lines: [] },
+  ] }, { parts, tierMargin: 0.3, freightPct: 8, categories: cats, sectionIdBase: 1000 });
+  const s = r.sections[0];
+  ok(r.sections.length === 1 && s.id === "sys1000" && s.kind === "materials" && s.freightPct === 8 && s.discipline === "curtain", "assist estimate: one materials system, empty system dropped, discipline from category");
+  ok(s.items[0].sku === "VEL-1" && s.items[0].price === catalogAddPrice(10, 20, 0.3) && s.items[0].cost === 10 && s.items[0].qty === 3, "assist estimate: catalog line priced by catalogAddPrice at the tier");
+  ok(s.items[1].sku === "" && s.items[1].price === 0 && s.items[1].custom === true && s.items[1].desc === "Mystery part", "assist estimate: sku outside the candidate set becomes an unpriced custom line");
+  ok(s.items[2].qty === 1 && s.items.length === 3 && r.dropped === 2, "assist estimate: qty clamped >= 1; blank line dropped; dropped counted");
+  ok(r.reasons["sys1000:1"] === "requested" && r.lines.length === 3 && r.lines[0].sku === "VEL-1", "assist estimate: reasons keyed by section:line, drafted lines recorded");
+  const ut = buildDraftUserText({ thread: "<email_thread/>", extract: ex, categories: [{ id: "c1", name: "Fixtures", items: [{ sku: "A", qty: 2 }] }] as never[], pastSystems: [{ label: "EST-1 Main", lines: [{ sku: "A", desc: "a", qty: 1 }] }], customerSystems: [], candidates: [{ sku: "VEL-1", desc: "Velour", mfr: "Rose Brand", unit: "yd", category: "Fabric" }] });
+  ok(ut.includes("2 \u00d7 black velour") && ut.includes("c1 \u2014 Fixtures: A\u00d72") && ut.includes("EST-1 Main: A\u00d71") && ut.includes("VEL-1 | Velour") && !/\$|cost|price/i.test(ut.replace("Never output prices", "")), "assist estimate: prompt carries request, categories, examples, candidates, no money");
+  const ranked = rankCatalogParts([{ sku: "VEL-1", desc: "Velour 25oz", category: "Fabric" }, { sku: "X", desc: "Other" }], "velour");
+  ok(ranked.length === 1 && ranked[0].p.sku === "VEL-1", "assist estimate: rankCatalogParts finds by description");
+  // Hostile draft: prices/costs the model tries to smuggle in are never read; a prototype-ish sku is just a custom line.
+  const hostile = buildDraftSections({ quoteName: "x", notes: "", systems: [{ name: "S", categoryId: "", lines: [
+    { sku: "VEL-1", qty: 1, desc: "", reason: "", price: 0.01, cost: 0.01 } as never,
+    { sku: "__proto__", qty: 1, desc: "x", reason: "" },
+  ] }] }, { parts, tierMargin: 0.3, freightPct: 0, categories: [], sectionIdBase: 1 });
+  ok(hostile.sections[0].items[0].price === catalogAddPrice(10, 20, 0.3) && hostile.sections[0].items[0].cost === 10 && hostile.sections[0].items[1].sku === "" && hostile.sections[0].items[1].price === 0, "assist estimate: model-supplied price/cost ignored; unknown sku is a $0 custom line");
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -300,6 +335,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistOutcomeChecks(ok);
     await assistTaskChecks(ok);
     await assistReplyChecks(ok);
+    await assistEstimatePureChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);

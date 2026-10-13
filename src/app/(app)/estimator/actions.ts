@@ -28,10 +28,10 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { travelForId } from "@/lib/stores/customers";
-import { isPerLengthUnit } from "@/lib/design/grid-bom";
 import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
 import type { QuoteLite, TravelLite } from "./types";
+import { rankCatalogParts } from "./catalog-rank";
 import { withSanitizedKeyProducts } from "./narrative";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import type { DraftedLine } from "./ai-scope-modal";
@@ -69,10 +69,8 @@ import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
-import { isFabricPart } from "@/lib/fabric-part";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
-import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 
 export async function saveEstimatorCustomPartAction(input: {
@@ -1540,27 +1538,7 @@ export async function searchCatalog(
   if (!q && !cat) return { hits: [], total: 0 };
 
   const parts = await catalogList();
-  const scored = parts
-    // #264: "Fabric" means every fabric part (isFabricPart — Fabric, or
-    // Theatrical/Soft Goods sold per sq ft); any other category is exact.
-    .filter((p) => (!cat ? true : cat === "Fabric" ? isFabricPart(p) : (p.category || "") === cat))
-    .filter((p) => !perLengthOnly || isPerLengthUnit(p.unit || ""))
-    .map((p) => {
-      const sku = (p.sku || "").toLowerCase();
-      const desc = (p.desc || "").toLowerCase();
-      const cat = (p.category || "").toLowerCase();
-      // #304: the Model # and old order numbers rank like the SKU does.
-      const names = [sku, (p.manufacturerModelNumber || "").toLowerCase(), ...(p.formerSkus ?? []).map((s) => s.toLowerCase())].filter(Boolean);
-      if (!q) return { p, score: 0 };
-      let score = -1;
-      if (names.includes(q) || desc === q) score = 5;
-      else if (names.some((n) => n.startsWith(q)) || desc.startsWith(q)) score = 4;
-      else if (desc.includes(q) || names.some((n) => n.includes(q))) score = 2;
-      else if (cat.includes(q) || partSearchHaystack(p).includes(q)) score = 1; // mfr, MFR P/N …
-      return { p, score };
-    })
-    .filter((s) => s.score >= 0)
-    .sort((a, b) => b.score - a.score || (a.p.desc || "").localeCompare(b.p.desc || ""));
+  const scored = rankCatalogParts(parts, q, { category: cat, perLengthOnly });
 
   const hits = scored.slice(0, Math.max(1, limit)).map(({ p }) => ({
     sku: p.sku,
