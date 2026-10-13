@@ -1090,27 +1090,37 @@ See `.env.example`.
     keep or kill it. Draft quotes show no price in the reply prompt (only sent
     quotes do) — Jeff may opt in. Punch item #334.
 
-54. ✅ **Inbox organization** (#335, D882–D893) — piece 1 of the AI roadmap, on top of
+54. ✅ **Inbox organization** (#335, D882–D900) — piece 1 of the AI roadmap, on top of
     Assist. Every imported message runs a pure-core pipeline
     (`src/lib/inbox-org/`, `pipeline.ts`): sender rule → identity → record number
     (`EST|FLM|RIG|REP|RNT|CON|OPP-####`) → noise rules → Haiku (pilot only), a weak
     domain guess ranked after numbers; the result is a `CommThread.filing`
-    suggestion, a `court` (me / teammate / customer / nobody — a teammate's reply no
-    longer counts against the owner, a hand-off does, sign-offs go to nobody;
-    `status` and Morning triage follow it) and a `noise` flag. **Everyone** gets
+    suggestion, a `court` (me / teammate / customer / nobody — a teammate's reply to
+    the customer no longer counts against the owner; the rules put it on the owner for
+    a teammate's forward, a teammate's internal note (To/Cc all internal; sign-off/FYI
+    → nobody) and a reply naming the owner ("Jeff will be in touch", `names.ts`), the
+    AI (pilot) for unnamed hand-offs and hand-offs to another teammate (D894);
+    sign-offs go to nobody; `status` and Morning triage follow it) and a `noise` flag.
+    **Everyone** gets
     archive-on-reply (a reply, or a teammate's reply that leaves the ball with the
     customer, files a linked/strong thread and archives it; Account → Keep threads
     in my inbox opts out; outbound messages and logged calls never un-archive; Mark
     replied / Close archive), tag-only "Looks like noise", and saved sender rules
     (`inbox_sender_rules`; accepting "always file under X" sweeps that sender's own
     unlinked or same-customer threads, everything else gets a suggestion). **Assist
-    pilot users** (`file` / `promise` features, Haiku, `ASSIST_MODEL_FILE|PROMISE`)
+    pilot users** (`file` / `promise` features, off until an admin turns on Inbox
+    organization / Promise tasks — D897; Haiku, `ASSIST_MODEL_FILE|PROMISE`)
     also get AI filing from a server-built candidate list, AI court/promise reading,
     noise moved to a Noise tab, automatic promise-tasks (`T-prm-…`, due-date
     resolver, owner/teammate messages only, mail under 7 days, never backlog) and
     **Organize my inbox**, a resumable suggest-only 90-day cleanup. The AI pass runs
     in `after()` with a deadline, leases (`aiLeaseUntil`, `promisesFor`) and a
-    per-owner court-first queue; the Gmail cron runs none. Inbox → **Organize**
+    per-owner court-first queue, and does nothing unless an owner is a pilot (D895);
+    the Gmail cron runs none. Promise-tasks go only to someone the newest message names
+    (D899). Quiet archive / unarchive / setStatus are key-level writes (D896); a Gmail
+    re-inbox brings a thread back (D898); `INBOX_ORG_DISABLED=true` turns off the import
+    hook, archive-on-reply, the Mark replied / Close archive and the AI pass (D900).
+    Inbox → **Organize**
     (`?view=organize`: To file / Noise / Filed, Approve · Change… · Noise · Skip,
     Approve all strong, Undo from `filing.applied`) and the reader's court chip,
     filing line and promise-task line; changes post `inbox-changed` on
@@ -1118,8 +1128,10 @@ See `.env.example`.
     (replaces derived domains; Peak's domain always kept), company sender rules and a
     filing report (by source, % approved, rescues, auto-filed apart, promise-tasks,
     court overrides). Auto-filings leave the AI outcome null (`outcomeDetail.autoFiled`).
-    No migration. Remaining is Jeff-gated: the Assist key, tick the pilot users and the
-    new switches, run Organize my inbox, review To file / Noise and the sender rules
+    No migration. Remaining is Jeff-gated: tell the team before deploy (replies / Mark
+    replied / Close / teammate replies archive in Gmail by default; Account → Keep threads
+    in my inbox; INBOX_ORG_DISABLED=true), the Assist key, tick the pilot users and turn
+    on Inbox organization / Promise tasks, run Organize my inbox, review To file / Noise and the sender rules
     for a week. Follow-ups: atomic append in `recordMessage`, an AI pass on the cron,
     all three promises on `court.promise`. Next: pop-out windows → AI brief →
     estimate suggestion → AI sidebar. Punch item #335.

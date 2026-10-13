@@ -112,6 +112,9 @@ The court is recomputed on every new message. "Me" means the thread's mailbox ow
 - Last message from the customer → **me**. This is today's `waiting_us`.
 - Last message from me → **customer**.
 - Last message from a **teammate** → **customer**. This is the fix: it stops counting against me.
+  *As built (D894):* only when it went to the customer. A teammate's internal note (To/Cc with no outside address) → **me**
+  (a sign-off or FYI note → **nobody**); a teammate's reply to the customer that names me in its own text ("Jeff will be in
+  touch") → **me**. The AI reading still catches unnamed hand-offs and hand-offs to another teammate.
 - A customer message that is only a sign-off (a short list: "thanks", "thank you", "got it", "sounds good", "perfect", "will do"; at most about 8 words; no question mark) → **nobody**.
 
 **Forwards.**

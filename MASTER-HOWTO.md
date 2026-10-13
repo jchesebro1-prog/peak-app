@@ -221,7 +221,7 @@ the app calls a model:
 5. After about 30 days read the report (estimated cost, outcome per feature)
    and decide whether to keep it.
 
-## 6b. Inbox organization (#335, D882–D893)
+## 6b. Inbox organization (#335, D882–D900)
 
 Mail now sorts itself, in two layers.
 
@@ -230,9 +230,13 @@ Mail now sorts itself, in two layers.
 - **Replying files the thread and takes it out of the inbox.** If the thread is
   already linked (or has a strong suggestion) it is filed first; a weak or missing
   suggestion waits in Inbox → **Organize → To file**. It comes back when the ball is
-  in your court again (new customer mail or a hand-off). A teammate's reply no longer
-  counts against you. Mark replied and Close archive too. To turn this off, Account →
-  **Keep threads in my inbox after I reply**.
+  in your court again (new customer mail or a hand-off). A teammate's reply to the
+  customer no longer counts against you — but a teammate's **internal note** to you on
+  the thread (nobody outside on To/Cc), or a reply that **names you** ("Jeff will be in
+  touch"), puts it on you and never archives it. Mark replied and Close archive too.
+  Archiving happens in Gmail as well. To turn this off, Account → **Keep threads in my
+  inbox after I reply**. Emergency off for everyone: `INBOX_ORG_DISABLED=true` (D900).
+- Moving a thread back to the inbox in Gmail brings it back in the app too.
 - A **court chip** in the reader ("On you: …", "On Dana", "Waiting on customer",
   "Done") with **Not on me** / **On me** to correct it.
 - **Looks like noise** on newsletters, promotions, no-reply and auto-replies. Known
@@ -242,7 +246,7 @@ Mail now sorts itself, in two layers.
   matching threads; you can list and delete your rules in Account → Sender rules.
 
 **Assist pilot users also see** (Settings → Beta → Assist pilot: tick the user, and
-the **Inbox organization** and **Promise tasks** switches):
+turn on **Inbox organization** / **Promise tasks** — both start off):
 
 - **Organize** (Inbox → Organize) with three tabs: **To file** (suggestion, reason,
   Strong/Weak chip: **Approve**, **Change…**, **Noise**, **Skip**, and **Approve all

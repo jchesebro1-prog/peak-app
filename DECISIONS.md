@@ -11889,7 +11889,9 @@ number-beats-weak, strong identity + number, forward parsing, filing log written
 
 `CommThread.court` ({owner: me | teammate | customer | nobody, source: rule | ai | override, basis, promise?}) is recomputed on
 every new message. Rules: the last message from the customer → **me**; from me → **customer**; from a **teammate** →
-**customer** (the fix: it no longer counts against the mailbox owner); a customer message that is only a sign-off ("thanks",
+**customer** (the fix: it no longer counts against the mailbox owner) — except, since D894, a teammate's **internal note**
+(To/Cc with no outside address: → **me**, or **nobody** on a sign-off/FYI) and a teammate's reply whose own text **names
+the owner** ("Jeff will call you" → **me**); a customer message that is only a sign-off ("thanks",
 "got it", "sounds good", ≤ ~8 words, no question mark) → **nobody**. **Forwards:** a teammate forwarding to me is a hand-off
 (court **me**), unless the note is FYI-only (court **nobody**, filed and archived on the original sender); my own forward out
 to a vendor never moves the customer thread's court; the forwarded original is parsed outermost-external-first (Gmail and
@@ -11909,7 +11911,7 @@ and the triage feed's court selection.
 ## D884. Archive-on-reply for everyone; outbound never un-archives; Mark replied / Close archive (#335, 2026-10-13)
 
 When I reply (`comms.reply`, so also reply-all and forward) or a teammate's reply arrives that leaves the court on the
-customer or nobody, the thread is archived in the app and in Gmail (`pushInboxState`) — for **every** user, not only
+customer or nobody (never a teammate's internal note to me or a reply naming me — D894), the thread is archived in the app and in Gmail (`pushInboxState`) — for **every** user, not only
 pilots. It is **filed first** when it already has a link or a strong suggestion (`filedBy: "reply"`, or `"teammate-reply"`);
 a weak or missing suggestion waits in To file (stamped `archivedOnReply`, D889). Settings → Account **"Keep threads in my
 inbox after I reply"** (`keepInInbox` in the user's notification prefs, default off = archive-on-reply on) turns it off per
@@ -11945,7 +11947,7 @@ contact and internal sender exempt, rescued stays rescued, filing clears the fla
 ## D886. AI filing and AI court/promise reading are two Assist features on Haiku: `file` and `promise` (#335, 2026-10-13)
 
 `AssistFeature` gains `file` (Haiku picks a filing target) and `promise` (Haiku reads the court and promises); each has its
-own switch on the Assist pilot card (**Inbox organization**, **Promise tasks**, on by default like the others), a model env
+own switch on the Assist pilot card (**Inbox organization**, **Promise tasks**; off until an admin turns them on — D897), a model env
 var (`ASSIST_MODEL_FILE`, `ASSIST_MODEL_PROMISE`, both default `claude-haiku-5-5`), a 600/hour rate limit and a report row;
 `isOrgPilot` is the one pilot check. **Filing** runs only when the rules left a thread unresolved or weak. The model sees
 the thread in the untrusted wrapper plus a **server-built candidate list** (`id | type | label | customer`: the likely
@@ -11971,7 +11973,8 @@ another pass makes a stale result drop), and **`court.promisesFor = messageId` i
 is created**, so two passes make one task. Trade-off accepted: a process killed between the marker and the task writes drops
 those tasks instead of duplicating them. The queue is **per owner** (SQL-filtered, so one user's 400 backlog rows can't
 starve another), **court reads before filing**, oldest first; failed calls count an attempt (gives up at 3), a pre-call
-refusal (cap, rate limit) skips the owner for the pass without one, stuck rows nobody can own are swept (50 per pass), and
+refusal (cap, rate limit) skips the owner for the pass without one, stuck rows nobody can own are swept (50 per pass, at
+most once an hour per process; the pass returns at once when no owner in its list is a pilot — D895), and
 a stale-basis row is re-organized first and treated as backlog when its newest message is over 7 days old. **The
 `/api/gmail/sync` cron runs no AI pass** (`aiPass: false`: a call needs ~35 s and the cron's 60 s is already shared by the
 40 s import budget); on Vercel the server timer passes `aiPass: !process.env.VERCEL`. AI work therefore happens on Inbox ticks
@@ -11986,7 +11989,7 @@ When the court reading returns promises on a message **I or a teammate sent** (o
 is created through `createTaskOnce` with section `Email`, the thread/customer/site links, and the quote/project/lead
 from the filing **only when it is filed or strong** (else the thread's own links), `notes: "From email: …"`, tier normal,
 not `waitingOn`. **Id** `T-prm-<hash(threadId, messageId, promiseText)>`, so a re-sync never duplicates. **Owner:** the named
-real team member; else, for "we will…"/"someone will…", the message author if internal; else the thread owner; the creator
+real team member (only when the newest message's own text names them — D899); else, for "we will…"/"someone will…", the message author if internal; else the thread owner; the creator
 is the promise owner. **Due** (pure `resolveDue`, America/Chicago, 5:00 pm like the task calendar): today, tomorrow, a
 weekday name (next occurrence, by text order), end of week → Friday, next week → next Monday, end of month, an explicit
 date; otherwise 2 business days after the message. **Never** from a customer's own "we will…", **never** for mail older than 7
@@ -12066,7 +12069,8 @@ pending/skipped filing, new outside mail resets it.
 
 ## D893. Follow-up risks accepted at ship; gates (#335, 2026-10-13)
 
-(1) **`recordMessage` appends with a whole-doc `patchDoc`**, so an org key (`filing`, `court`, `noise`) written by a
+(1) **`recordMessage` appends with a whole-doc `patchDoc`** (the pipeline's own quiet archive / unarchive / setStatus no
+longer do — they are key-level since D896), so an org key (`filing`, `court`, `noise`) written by a
 concurrent AI pass or an apply action in that window can be clobbered; org writes themselves are key-level (`setOrg`,
 compare-and-set where it matters) and the pipeline self-heals a missing filing/court/noise on the next organize. The fix is an
 atomic append. (2) `setOrg` filing writes are last-write-wins, so an organize racing an Approve can overwrite `filed` in a
@@ -12078,3 +12082,90 @@ re-bases a suggested filing, which can replace a kept AI suggestion. (9) Undo do
 flag. No migration (the org fields ride the comms doc; `inbox_sender_rules`, `inbox_filing_log`, `inbox_cleanup:<userId>`
 and the own-domain override are blobs). Punch item #335.
 Verified (2026-10-13): `test:inbox-org` 701 PASS / 0 FAIL; `test:assist` 211 PASS / 0 FAIL; tsc 0 errors; eslint 0 errors, 1 warning (pre-existing `react-hooks/purity` at `src/app/(app)/page.tsx`, also on main) on the 63 changed src/ + test paths; `next build` OK (137 static pages); `test:specs` 18,780 PASS / 0 FAIL ("ALL PASSED" — one stale pin retargeted: the settings-groups file list now includes `assist-org.tsx`); `test:smoke` 248 / 248 (the three `/inbox?view=organize` tabs added to the route list; /inbox, /settings?section=data and /account 200). A first smoke run lost its dev server at `/design/specs` (57 `fetch failed`, none an HTTP error) and passed whole on re-run.
+
+## D894. A teammate's internal note never archives a customer thread; a reply naming the owner is a rule hand-off (#335, 2026-10-13)
+
+Final review found that court rule 4 looked only at the sender: a teammate's note to the owner alone on a customer thread
+("Jeff, can you take this, they want pricing Friday"), or one cc'ing the owner as a hand-off, made the court **customer**,
+and `afterImportedMessage` then archived the thread in the app and in Gmail for every user. `CourtMessage` now carries the
+message's **To/Cc** (the pipeline passes `addressesIn(m.to/cc)`), and a teammate's last message (a shared Peak address counts
+as a teammate) reads: **To/Cc with no outside address** = an internal note the customer never saw → a pure sign-off or an FYI
+note (`isFyiNote`, now exported) → **nobody**; anything else → **me** (addressed to me, a question, my name, or just a note I
+was sent — the safe side is never archiving on a guess). **To the customer, with the owner's first or full name in its own
+text** (`ownText`, quoted reply and signature stripped) → **me** ("Jeff will be in touch tomorrow" — a rule-level hand-off,
+for everyone, no AI). Otherwise → **customer** as before; a message with no recorded To/Cc is read as a reply to the
+customer. Names come from the team list's display name (`src/lib/inbox-org/names.ts`): name words only (a token with digits
+such as `TEST335` is skipped), case-insensitive and word-bounded — except a first name that is an everyday word (Will, Mark,
+Grant, May…) matches only capitalised, so "I will call" never names Will. **What each layer catches:** the rules catch an
+internal note and a hand-off that names the owner; the AI reading (pilot only) still catches a hand-off to another teammate
+and one phrased without the owner's name ("our account lead will send pricing"). Punch item #335.
+Verified: `scripts/test-inbox-org.ts` court checks (note to the owner only → me; cc'd internal note → me; internal sign-off
+/ FYI → nobody; "Jeff will be in touch" to the customer → me; full name; a name only in the quoted text doesn't count;
+plain reply → customer; everyday-word names; a shared address both ways) and imported-mail checks through `recordMessage`
+(a teammate's note to me → court me, not archived; it brings an archived thread back; "Ann will be in touch" → me by rule
+for a non-pilot owner).
+
+## D895. The AI pass does nothing unless an owner in its list is a pilot; the stuck-row sweep runs hourly (#335, 2026-10-13)
+
+`scheduleAiPass` runs on every Inbox tick, so `runAiPass` returns before any query unless at least one owner in its list
+passes `isOrgPilot(owner, "file" | "promise")` (a pilot user with both switches off counts as no pilot). The sweep that
+clears pending rows nobody can own (an unindexed jsonb scan) runs only when the pass got that far and at most once an hour
+per process (a module timestamp; `resetAiPassSweep()` for the checks). Trade-off: rows left pending for an owner who later
+leaves the pilot stay marked until a pilot's pass reaches them or the owner rejoins — harmless, the rules already ran.
+Verified: no pilot → `looked 0`, nothing cleared, no call; a gated-off owner beside a pilot still gets pending cleared; a
+second pass within the hour doesn't sweep, one an hour later does.
+
+## D896. The pipeline's quiet archive / unarchive / setStatus write one key (#335, 2026-10-13)
+
+`comms.archive` / `unarchive` / `setStatus` with `{quiet: true}` (every pipeline, AI-pass and apply path) write only
+`archived` / `status` with `patchDocKey` (in-SQL `doc || {key: value}`), never a read-modify-write of the whole doc, so a
+message the Gmail import appends meanwhile can no longer be lost. A quiet unarchive drops `filing.archivedOnReply` by
+compare-and-set on the `filing` key (re-read and retried up to 3 times). A quiet `setStatus` with an unknown status writes
+nothing. `dispatchInboxState` / `queuePeakLabelSync` run exactly as before; a person's (non-quiet) archive / status change
+still touches the doc as before. `pushInboxState` stamps `gmailInboxed` key-level too (`setGmailInboxed`). Still open (D893):
+`recordMessage`'s own append is a whole-doc write, so two appends to one thread at once can clobber each other — one
+mailbox's imports run one after another, so this needs an atomic append, not this fix.
+Verified: imports racing repeated quiet archive / unarchive / setStatus keep every message (the same check fails with the
+old whole-doc write), plus source pins.
+
+## D897. Inbox organization and Promise tasks are off until turned on (#335, 2026-10-13)
+
+`assistSettingsOf` reads the `file` and `promise` features as on only when stored `=== true` (`OPT_IN_FEATURES`); tasks /
+reply / estimate keep their on-unless-switched-off default. Ticking someone as an Assist pilot therefore never starts AI
+filing, moved noise, promise-tasks or the cleanup by itself — an admin turns on **Inbox organization** and **Promise tasks**
+on the Assist pilot card, which now says so under the switches. Supersedes D886's "on by default like the others".
+Verified: `scripts/test-assist.ts` (defaults off, only `true` turns them on, the other three unchanged).
+
+## D898. Moving a thread back to the Gmail inbox brings it back in the app (#335, 2026-10-13)
+
+`reconcileInboxState` now treats an explicit `gmailInboxed` false → true flip (the person moved the thread back to INBOX in
+Gmail) as "bring it back": `reinboxFromGmail` sets `gmailInboxed` true, `archived` false and clears
+`filing.archivedOnReply`, all key-level, with no push back to Gmail. Pipeline-moved noise brought back this way counts as
+**rescued** (like Not noise), so the next organize doesn't move it out again. Before this, a thread archived on reply and
+re-inboxed in Gmail stayed hidden in the app (`archived` stayed true). Known race, accepted: an app archive whose Gmail push
+lands between the reconcile's `in:inbox` listing and its read of the threads can be undone; the next reconcile sees it out
+of the inbox and the person archives it again.
+Verified: `reinboxFromGmail` on an archived-on-reply thread and on moved noise, and a source pin on the reconcile branch.
+
+## D899. A promise-task goes to the person the newest message names, never to a name the model was steered to (#335, 2026-10-13)
+
+`applyPromises` accepts the model's `ownerUserId` only when that person's first or full name appears in the newest
+message's own text (`ownText`: quotes and signature stripped; `names.ts` rules). Otherwise the task goes to the message's
+internal author, else the thread owner. A quoted customer line ("Can Ari send the drawings?") or text injected into the
+thread can no longer route a task to someone the Peak author didn't name. Supersedes D888's "the named real team member".
+Verified: a model owner named only in quoted text → the internal author; no author → the thread owner; an unnamed AI
+hand-off's promise → the author.
+
+## D900. `INBOX_ORG_DISABLED=true` — the emergency off switch for what everyone sees (#335, 2026-10-13)
+
+Inbox organization's everyone-facing behaviour (archive-on-reply in the app and Gmail) ships on, so it gets an env switch
+(`src/lib/inbox-org/kill-switch.ts`, documented in `.env.example`). `INBOX_ORG_DISABLED=true` turns off the import hook
+(`organizeAfterImport`: court / filing / noise / status on new mail and the teammate-reply archive), the post-reply step
+(`runPostReply` → `afterOwnReply`; `archiveAfterReply` returns `skipped: "disabled"`), the Mark replied / Close archive in
+`setStatusAction` (the status change itself still happens) and the AI pass (`scheduleAiPass` schedules nothing; `runAiPass`
+returns at once). Hand actions in Organize (Approve, Change…, Noise, Undo, On me / Not on me) still work. Before deploy the
+team is told that replies, Mark replied, Close and teammate replies now archive in Gmail by default, how to opt out
+(Account → Keep threads in my inbox) and that this switch exists.
+Verified: the import hook doesn't organize, `archiveAfterReply` and the post-reply step archive nothing, the AI pass does
+nothing, source pins on `setStatusAction` and `scheduleAiPass`, `.env.example` names it.
+Final-review wave (D894–D900) verified 2026-10-13: `test:inbox-org` 741 PASS / 0 FAIL; `test:assist` 213 PASS / 0 FAIL; tsc 0 errors; eslint 0 errors / 0 warnings on the 15 changed `.ts`/`.tsx` paths; `next build` OK (137 static pages); `test:specs` 18,822 PASS / 0 FAIL ("ALL PASSED", no pin changed); `test:smoke` 248 / 248 (`/inbox`, the three `/inbox?view=organize` tabs, `/settings?section=data` and `/account` 200).
