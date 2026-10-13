@@ -48,6 +48,7 @@ import {
   organizeThread,
   type OrgContext,
 } from "./pipeline";
+import { inboxOrgDisabled } from "./kill-switch";
 import type { Court, CourtOwner, Filing, FilingAction, FilingApplied, SenderRule } from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
@@ -688,7 +689,7 @@ async function sweepSender(
 /* ---- archive-on-reply (§4) ---------------------------------------------------------- */
 
 export type ReplyArchiveResult =
-  | { ok: true; archived: boolean; filed: boolean; skipped?: "keep-in-inbox" | "court-me" | "not-applicable" }
+  | { ok: true; archived: boolean; filed: boolean; skipped?: "keep-in-inbox" | "court-me" | "not-applicable" | "disabled" }
   | ApplyFail;
 
 /** After a reply (mine, or a teammate's that left the court with the
@@ -706,6 +707,7 @@ export async function archiveAfterReply(
   opts: { manual?: boolean; wasArchived?: boolean; now?: number } = {}
 ): Promise<ReplyArchiveResult> {
   const now = opts.now ?? Date.now();
+  if (inboxOrgDisabled()) return { ok: true, archived: false, filed: false, skipped: "disabled" };
   const t = await getThread(threadId);
   if (!t || t.deleted || t.status === "draft" || t.mailbox !== "personal") return { ok: true, archived: false, filed: false, skipped: "not-applicable" };
   if (me && !visibleTo(t, me.name)) return NOT_FOUND();
@@ -771,6 +773,7 @@ export async function archiveAfterReply(
  *  the court (my reply → customer), then archive-on-reply. Best-effort —
  *  never throws, so it can never fail a send. */
 export async function afterOwnReply(threadId: string): Promise<void> {
+  if (inboxOrgDisabled()) return;
   try {
     const r = await organizeThread(threadId);
     if (r.skipped) return;

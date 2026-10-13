@@ -67,7 +67,8 @@ import {
   type CandidateCache,
 } from "./ai-filing";
 import { aiCourtOverride, applyPromises, buildCourtUserText, COURT_SYSTEM, CourtSchema, PROMISE_MAX_AGE_MS, sanitizeCourt, type AuthorNote } from "./ai-court";
-import { COURT_STATUS, emailMessages, filingBasisMessage, loadOrgContext, organizeThread, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
+import { inboxOrgDisabled } from "./kill-switch";
+import { COURT_STATUS, emailMessages, filingBasisMessage, isOrgPilot, loadOrgContext, organizeThread, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
 import type { Court, Filing } from "./types";
 
 /** The window in which the pass may START calls (spec §8: ~20 s per pass). */
@@ -84,6 +85,14 @@ export const MAX_AI_ATTEMPTS = 3;
 export const AI_PASS_MAX_PER_OWNER = 100;
 /** Unownable pending rows cleared per pass. */
 export const AI_PASS_SWEEP_LIMIT = 50;
+/** The unownable-row sweep runs at most this often per process (D895). */
+export const AI_PASS_SWEEP_EVERY_MS = 3_600_000;
+
+let lastSweepAt = 0;
+/** Checks only: let the next pass sweep again. */
+export function resetAiPassSweep(): void {
+  lastSweepAt = 0;
+}
 
 type Feature = "file" | "promise";
 
@@ -205,7 +214,12 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
   const started = clock();
   const budget = opts.budgetMs ?? AI_PASS_BUDGET_MS;
   try {
+    if (inboxOrgDisabled()) return res;
     const ctx = deps.ctx ?? (await loadOrgContext());
+    // D895 — nothing to do (and no queries) unless an owner in the list is
+    // in the pilot for filing or promise reading; Inbox ticks call this a lot
+    const ownerIds = opts.ownerIds ?? ctx.users.map((u) => u.id);
+    if (!ownerIds.some((id) => isOrgPilot(id, "file", ctx) || isOrgPilot(id, "promise", ctx))) return res;
     const hasFallback = passHasFallback(ctx.env, deps.run);
     const deadline = opts.deadlineMs ?? started + budget + callWorstCaseMs("promise", hasFallback) + AI_CALL_MARGIN_MS;
     const team = ctx.users.map((u) => ({ id: u.id, name: u.name }));
@@ -227,14 +241,17 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
       filingOnly: !!opts.filingOnly,
     };
 
-    // rows nobody can own never get processed: clear them
-    const everyone = { names: ctx.users.map((u) => u.name), keys: ctx.users.map((u) => personalKey(u.id)) };
-    for (const t of await pendingAiThreads({ notOwners: everyone, limit: AI_PASS_SWEEP_LIMIT })) {
-      if (!ownerOf(t, ctx)) await clearPending(st, t);
+    // rows nobody can own never get processed: clear them — at most once an
+    // hour per process (an unindexed jsonb scan; D895)
+    if (clock() - lastSweepAt >= AI_PASS_SWEEP_EVERY_MS) {
+      lastSweepAt = clock();
+      const everyone = { names: ctx.users.map((u) => u.name), keys: ctx.users.map((u) => personalKey(u.id)) };
+      for (const t of await pendingAiThreads({ notOwners: everyone, limit: AI_PASS_SWEEP_LIMIT })) {
+        if (!ownerOf(t, ctx)) await clearPending(st, t);
+      }
     }
 
     // per-owner queues: live work (court reads) first, then oldest first
-    const ownerIds = opts.ownerIds ?? ctx.users.map((u) => u.id);
     const queues: Array<{ owner: OrgUser; rows: CommThread[] }> = [];
     for (const id of [...new Set(ownerIds)]) {
       const owner = ctx.users.find((u) => u.id === id);

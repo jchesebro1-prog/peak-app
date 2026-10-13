@@ -67,6 +67,7 @@ import {
   get as getInspectionRecord,
   setRenewalOutreach as setInspectionRenewalOutreach,
 } from "@/lib/stores/inspections";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 
 /**
  * Inbox server actions — thin wrappers over the comms store (the prototype's
@@ -267,7 +268,7 @@ export async function setStatusAction(id: string, status: string) {
   await setStatus(id, status);
   // #335 §4 — Mark replied / Close also archive (same per-user setting as
   // archive-on-reply); best-effort, never fails the status change
-  if (status === "replied" || status === "closed") {
+  if ((status === "replied" || status === "closed") && !inboxOrgDisabled()) {
     try {
       const { archiveAfterReply } = await import("@/lib/inbox-org/apply");
       await archiveAfterReply(id, "reply", { id: user.id, name: user.name }, { manual: true });
@@ -616,8 +617,10 @@ function scheduleAiPass(owners: string[], startedAt: number, meId: string): void
   // The signed-in user always rides along: their own pending reads resume
   // even when this poll synced nobody's mailbox (or only other people's).
   const ownerIds = [...new Set([meId, ...owners].filter(Boolean))];
-  if (!ownerIds.length) return;
+  if (!ownerIds.length || inboxOrgDisabled()) return;
   after(async () => {
+    // D895 — runAiPass itself returns at once unless one of these owners is
+    // in the pilot (file or promise), so a non-pilot tick costs no queries
     const [{ runAiPass }, { POLL_AI_DEADLINE_MS }] = await Promise.all([import("@/lib/inbox-org/ai-pass"), import("@/lib/gmail/bridge")]);
     await runAiPass({ ownerIds, deadlineMs: startedAt + POLL_AI_DEADLINE_MS });
   });
