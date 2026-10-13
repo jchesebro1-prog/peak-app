@@ -12,7 +12,7 @@
  *   focus, navigate. Only the main window focused most recently answers.
  * - Re-applies `pk-pop` (dev Strict Mode resets <html> attributes) and tags
  *   the native shell with `pk-native` so pop-out affordances can hide there.
- * - In a pop-out: saves its frame per kind (spec §4) on resize (debounced
+ * - In a pop-out: saves its position + inner size per kind (spec §4) on resize (debounced
  *   500 ms) and on beforeunload / pagehide.
  */
 import { useEffect, useLayoutEffect, useRef } from "react";
@@ -50,7 +50,7 @@ export default function LiveSync() {
     }
   }, []);
 
-  // Window memory (spec §4): a pop-out saves its frame under its kind.
+  // Window memory (spec §4): a pop-out saves its position + inner size under its kind.
   useEffect(() => {
     if (!isPopWindow()) return;
     let timer: ReturnType<typeof setTimeout> | null = null;

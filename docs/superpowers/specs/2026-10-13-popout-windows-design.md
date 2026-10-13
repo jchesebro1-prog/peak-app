@@ -61,7 +61,7 @@ openPopout(kind: PopKind, id: string, url: string): void
 
 ## 4. Window memory
 
-- Each pop-out saves `{left: screenX, top: screenY, width: outerWidth, height: outerHeight}` under `localStorage["peak-pop-geo:<kind>"]` on `resize` (debounced) and `beforeunload`. The kind is parsed from `window.name`.
+- Each pop-out saves `{left: screenX, top: screenY, width: innerWidth, height: innerHeight}` under `localStorage["peak-pop-geo:<kind>"]` on `resize` (debounced) and `beforeunload`. The kind is parsed from `window.name`. The size is the **inner** (content) size, because `window.open`'s `width`/`height` features set the inner size; saving the outer frame would grow the window by its chrome on every reopen.
 - `openPopout` reads it. All storage access is wrapped in try/catch; when storage is unavailable, use the defaults.
 
 ## 5. Live sync

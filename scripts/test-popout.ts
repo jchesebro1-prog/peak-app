@@ -233,9 +233,9 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(threadPopUrl("gmail:18f/3") === "/inbox?thread=gmail%3A18f%2F3" && customerPopUrl("C 1") === "/companies/C%201", "popout: thread and customer pop-out URLs are encoded");
     ok(JSON.stringify(parseSavedGeo(JSON.stringify({ left: 1, top: 2, width: 3, height: 4, x: 9 }))) === JSON.stringify({ left: 1, top: 2, width: 3, height: 4 }), "popout: a saved geometry parses its four numbers only");
     ok(parseSavedGeo(null) === null && parseSavedGeo("{bad") === null && parseSavedGeo("[]") === null && parseSavedGeo(JSON.stringify({ left: "1" })) === null, "popout: missing or junk saved geometry parses to null");
-    const g = geoFromWindow({ screenX: 10.4, screenY: -20, outerWidth: 800, outerHeight: 600 });
-    ok(!!g && g.left === 10 && g.top === -20 && g.width === 800 && g.height === 600, "popout: geoFromWindow saves the outer frame (negative origins kept)");
-    ok(geoFromWindow({ screenX: 0, screenY: 0, outerWidth: 0, outerHeight: 600 }) === null && geoFromWindow({ screenX: NaN, screenY: 0, outerWidth: 1, outerHeight: 1 }) === null, "popout: an empty or junk frame is not saved");
+    const g = geoFromWindow({ screenX: 10.4, screenY: -20, innerWidth: 800, innerHeight: 600 });
+    ok(!!g && g.left === 10 && g.top === -20 && g.width === 800 && g.height === 600, "popout: geoFromWindow saves screen position + inner size (negative origins kept)");
+    ok(geoFromWindow({ screenX: 0, screenY: 0, innerWidth: 0, innerHeight: 600 }) === null && geoFromWindow({ screenX: NaN, screenY: 0, innerWidth: 1, innerHeight: 1 }) === null, "popout: an empty or junk frame is not saved");
     ok(NAV_POPOUT.inbox.kind === "inbox" && NAV_POPOUT.inbox.id === "box" && NAV_POPOUT.inbox.url === "/inbox", "popout: nav Inbox ⧉ opens inbox:box at /inbox");
     ok(NAV_POPOUT.estimator.kind === "estimate" && NAV_POPOUT.estimator.id === "new" && NAV_POPOUT.estimator.url === "/estimator", "popout: nav Estimator ⧉ opens estimate:new at /estimator");
     ok(NAV_POPOUT.companies.kind === "customer" && NAV_POPOUT.companies.id === "list" && NAV_POPOUT.companies.url === "/companies", "popout: nav Customers ⧉ opens customer:list at /companies");
@@ -260,8 +260,10 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
       innerWidth: 1200,
       screenX: 30,
       screenY: 40,
-      outerWidth: 900,
-      outerHeight: 700,
+      innerHeight: 700,
+      // chrome: the outer frame is bigger than the content — never what is saved
+      outerWidth: 1216,
+      outerHeight: 790,
       screen: { availLeft: 0, availTop: 25, availWidth: 1440, availHeight: 875 },
       location: { origin: "https://app.example.test" },
       open: (url: string, name: string, features: string) => {
@@ -316,7 +318,16 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
       ok(!("peak-pop-geo:thread" in store.data) && Object.keys(store.data).length === 1, "popout: a main window saves no geometry");
       fakeWindow.name = "peak-pop:thread:T-9";
       savePopGeometry();
-      ok(store.data["peak-pop-geo:thread"] === JSON.stringify({ left: 30, top: 40, width: 900, height: 700 }), "popout: a pop-out saves its frame under its own kind");
+      ok(store.data["peak-pop-geo:thread"] === JSON.stringify({ left: 30, top: 40, width: 1200, height: 700 }), "popout: a pop-out saves its screen position + INNER size (not the outer frame) under its own kind");
+      // Round trip: window.open's width/height set the inner size, so reopening
+      // with the saved inner size gives back exactly that size — it never grows.
+      openPopout("thread", "T-9", "/inbox?thread=T-9");
+      ok(calls[calls.length - 1].features === "popup=yes,left=30,top=40,width=1200,height=700", "popout: a saved inner size round-trips into window.open unchanged (no growth by the chrome)");
+      fakeWindow.innerWidth = 1200;
+      fakeWindow.innerHeight = 700;
+      savePopGeometry();
+      openPopout("thread", "T-9", "/inbox?thread=T-9");
+      ok(store.data["peak-pop-geo:thread"] === JSON.stringify({ left: 30, top: 40, width: 1200, height: 700 }) && calls[calls.length - 1].features.endsWith("width=1200,height=700"), "popout: save → reopen → save keeps the same size");
       g0.localStorage = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
       savePopGeometry();
       ok(openPopout("inbox", "box", "/inbox") === true && calls[calls.length - 1].features === "popup=yes,left=340,top=63,width=760,height=800", "popout: blocked storage falls back to the defaults without throwing");
@@ -332,7 +343,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     const link = readSrc("src/components/popout/pop-link.tsx");
     const notice = readSrc("src/components/popout/pop-blocked-notice.tsx");
     const openSrc = readSrc("src/lib/popout/open.ts");
-    ok(btn.includes('"pk-popout-affordance"') && btn.includes('aria-label="Open in its own window"') && btn.includes('type="button"'), "popout: the ⧉ button carries pk-popout-affordance and the aria-label");
+    ok(btn.includes('"pk-popout-affordance"') && btn.includes("aria-label={POP_AFFORDANCE_LABEL}") && btn.includes("title={POP_AFFORDANCE_LABEL}") && !/aria-label="/.test(btn) && btn.includes('type="button"'), "popout: the ⧉ button carries pk-popout-affordance, and its aria-label and title both come from POP_AFFORDANCE_LABEL");
     ok(link.includes("handlePopoutClick(e, popKind, popId, popUrl ?? href)") && /if \(handlePopoutClick[^\n]*\) return;\s*onClick\?\.\(e\);/.test(link), "popout: PopLink pops on Shift-click and otherwise hands the click to the link unchanged");
     ok(notice.includes("POP_BLOCKED_EVENT") && notice.includes("setTimeout(() => setShownAt(null), POP_BLOCKED_MS)"), "popout: the blocked notice listens for the event and hides after 6 s");
     for (const [f, src] of [["popout-button", btn], ["pop-link", link], ["pop-blocked-notice", notice]] as const) {
@@ -345,6 +356,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
 
     const shell = readSrc("src/app/(app)/inbox/inbox-shell.tsx");
     ok(/<PopoutButton kind="inbox" id="box" url=\{`\/inbox\?\$\{baseQuery\}`\}/.test(shell), "popout: the Inbox shell header pops the whole box (current box URL)");
+    ok(!/\{!sideCollapsed && \(\s*<PopoutButton kind="inbox"/.test(shell) && shell.includes('flexDirection: sideCollapsed ? "column-reverse" : "row"'), "popout: the whole-box ⧉ also shows in the collapsed sidebar rail (stacked under the toggle)");
     const reader = readSrc("src/app/(app)/inbox/thread-reader.tsx");
     ok(reader.includes('<PopoutButton kind="thread" id={vm.id} url={threadPopUrl(vm.id)} />'), "popout: the thread reader header pops that thread");
     const estHeader = readSrc("src/app/(app)/estimator/estimator-header.tsx");

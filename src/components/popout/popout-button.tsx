@@ -36,7 +36,7 @@ export default function PopoutButton({
     <button
       type="button"
       className={cls}
-      aria-label="Open in its own window"
+      aria-label={POP_AFFORDANCE_LABEL}
       title={POP_AFFORDANCE_LABEL}
       style={style}
       onClick={(e) => {

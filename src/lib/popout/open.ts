@@ -121,7 +121,7 @@ export function handlePopoutClick(
   return true;
 }
 
-/** In a pop-out window: save its frame under that window's kind. */
+/** In a pop-out window: save its position + inner size under that window's kind. */
 export function savePopGeometry(): void {
   try {
     const p = parsePopName(window.name);

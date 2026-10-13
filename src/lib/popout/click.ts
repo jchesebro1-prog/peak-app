@@ -55,10 +55,13 @@ export function parseSavedGeo(raw: string | null | undefined): Partial<Geo> | nu
   }
 }
 
-/** What a pop-out window saves on resize / close: its outer frame. Null when
- *  the browser reports nothing usable (a minimised or closing window). */
-export function geoFromWindow(w: { screenX: number; screenY: number; outerWidth: number; outerHeight: number }): Geo | null {
-  const g = { left: w.screenX, top: w.screenY, width: w.outerWidth, height: w.outerHeight };
+/** What a pop-out window saves on resize / close: its screen position and its
+ *  INNER (content) size — window.open's width/height features set the inner
+ *  size, so saving the outer frame would grow the window by its chrome on
+ *  every reopen. Null when the browser reports nothing usable (a minimised or
+ *  closing window). */
+export function geoFromWindow(w: { screenX: number; screenY: number; innerWidth: number; innerHeight: number }): Geo | null {
+  const g = { left: w.screenX, top: w.screenY, width: w.innerWidth, height: w.innerHeight };
   if (![g.left, g.top, g.width, g.height].every((n) => typeof n === "number" && Number.isFinite(n))) return null;
   if (g.width <= 0 || g.height <= 0) return null;
   return { left: Math.round(g.left), top: Math.round(g.top), width: Math.round(g.width), height: Math.round(g.height) };

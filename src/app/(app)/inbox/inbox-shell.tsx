@@ -747,11 +747,20 @@ export default function InboxShell({
           overflow: "hidden",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, margin: "8px 8px 0", flexShrink: 0 }}>
-          {/* Pop-out windows: this whole box in its own window. */}
-          {!sideCollapsed && (
-            <PopoutButton kind="inbox" id="box" url={`/inbox?${baseQuery}`} style={{ width: 28, height: 26 }} />
-          )}
+        {/* Collapsed: the 54 px rail stacks the toggle on top, the ⧉ under it. */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: sideCollapsed ? "column-reverse" : "row",
+            alignItems: sideCollapsed ? "flex-end" : "center",
+            justifyContent: "flex-end",
+            gap: 6,
+            margin: "8px 8px 0",
+            flexShrink: 0,
+          }}
+        >
+          {/* Pop-out windows: this whole box in its own window (expanded or collapsed). */}
+          <PopoutButton kind="inbox" id="box" url={`/inbox?${baseQuery}`} style={{ width: 28, height: 26 }} />
           <button
             type="button"
             onClick={() => setSideCollapsed(!sideCollapsed)}
