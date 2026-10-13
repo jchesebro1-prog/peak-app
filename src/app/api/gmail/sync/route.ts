@@ -10,6 +10,7 @@ import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
 import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
 import { buildSlotForAll } from "@/lib/triage/service";
+import { buildBriefsForAll, runDraftsForAll } from "@/lib/brief/build";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
@@ -47,6 +48,8 @@ export const maxDuration = 60;
  * Morning triage adds the morning snapshot build the same way (its midday
  * build is /api/triage/build, the second daily cron).
  * #323 adds the Krisp meeting sync (syncAllMeetings) the same way.
+ * The AI daily brief adds the morning briefs right after the morning list,
+ * and the pre-made draft queue last, the same way.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -107,6 +110,18 @@ export async function GET(req: Request): Promise<NextResponse> {
     triage = { error: (err as Error).message };
   }
 
+  // AI daily brief (spec §1) — the morning brief for every Assist pilot user
+  // with Daily brief on, right after their list. A user starts only with
+  // ≥ 12 s left before the 45 s cutoff (Assist calls end 5 s before it), so
+  // the photo / meeting riders below keep their windows; whoever doesn't fit
+  // builds on first view. Own try/catch like the other riders.
+  let briefs: Awaited<ReturnType<typeof buildBriefsForAll>> | { error: string };
+  try {
+    briefs = await buildBriefsForAll("morning", Date.now(), { deadlineMs: started + 45_000 });
+  } catch (err) {
+    briefs = { error: (err as Error).message };
+  }
+
   // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
   // budgeted against a 45 s cutoff (the sync's hard deadline is budget +
   // 10 s, leaving ~5 s under the 60 s ceiling for the last shrink + store),
@@ -134,5 +149,16 @@ export async function GET(req: Request): Promise<NextResponse> {
     meetings = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, triage, drivePhotos });
+  // AI daily brief (spec §2) — the pre-made draft queue for the brief users,
+  // LAST, in whatever is left before 55 s (5 s under the ceiling): a queue
+  // starts only with room for one capped call (≥ 20 s), so on a busy morning
+  // it is skipped and Home's after() drafts instead. Own try/catch.
+  let drafts: Awaited<ReturnType<typeof runDraftsForAll>> | { error: string } | null = null;
+  try {
+    if ("userIds" in briefs) drafts = await runDraftsForAll(briefs.userIds, started + 55_000);
+  } catch (err) {
+    drafts = { error: (err as Error).message };
+  }
+
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, triage, briefs, drivePhotos, drafts });
 }

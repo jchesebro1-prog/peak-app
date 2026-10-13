@@ -511,6 +511,13 @@ export function isToFileRow(t: CommThread): boolean {
   );
 }
 
+/** The Organize view's Noise tab rule (spec §2 "everything flagged as noise"):
+ *  flagged and not rescued — moved (archived) or only tagged and still in the
+ *  inbox. Shared with the daily brief's Organize counts. */
+export function isNoiseRow(t: CommThread): boolean {
+  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued;
+}
+
 /** The person's To file list (spec §2), newest first. Task 6's selector. */
 export async function toFileThreads(me: Pick<OrgActor, "name">): Promise<CommThread[]> {
   return (await listDocs<CommThread>("comms"))

@@ -122,9 +122,11 @@ export async function loadTriageView(
     save?: (s: TriageSnapshot) => Promise<unknown>;
     /** Snapshot reader (test seam). */
     read?: (id: string) => Promise<TriageSnapshot | null>;
+    /** This slot instead of the one `now` falls in (the brief's cron passes its slot explicitly, as buildSlotForAll does). */
+    at?: { day: string; slot: Slot };
   } = {}
 ): Promise<TriageView> {
-  const { day, slot } = slotAt(now);
+  const { day, slot } = opts.at ?? slotAt(now);
   const id = snapshotId(me.id, day, slot);
   const read = opts.read ?? getSnapshot;
   const live = async (): Promise<TriageSnapshot> => ({ ...(await computeSnapshot(me, { day, slot }, now, "lazy", { feeds: opts.feeds })), builtBy: "live" });
