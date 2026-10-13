@@ -22,7 +22,7 @@ import { draftEstimateAction, draftReplyAction, recordAssistOutcomeAction, sugge
 import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { shortTaskTitle } from "./organize/format";
-import { postInboxChanged } from "@/lib/inbox-org/broadcast";
+import { postChanged } from "@/lib/popout/channel";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 import { replyOutcome } from "@/lib/assist/outcome";
 import type { AssistOutcome } from "@/lib/assist/types";
@@ -744,7 +744,7 @@ export default function ThreadReader({
           setPromiseNote(failed);
         }
       }
-      if (res.ok) postInboxChanged(vm.id);
+      if (res.ok) postChanged("thread", vm.id);
       setMarkPromiseDone(false);
       closeComposer();
       if (onAfterSend) onAfterSend(vm.id);
@@ -1082,7 +1082,7 @@ export default function ThreadReader({
                 colors={["#1f7a52", "#eaf6ef", "#cce9da"]}
                 onClick={async () => {
                   await setStatusAction(vm.id, "replied");
-                  postInboxChanged(vm.id);
+                  postChanged("thread", vm.id);
                   router.refresh();
                 }}
               >
@@ -1094,7 +1094,7 @@ export default function ThreadReader({
                 colors={["#5b616e", "#f1f2f5", "#e4e7ec"]}
                 onClick={async () => {
                   await setStatusAction(vm.id, "closed");
-                  postInboxChanged(vm.id);
+                  postChanged("thread", vm.id);
                   router.refresh();
                 }}
               >
@@ -1177,7 +1177,7 @@ export default function ThreadReader({
               onClick={async () => {
                 if (vm.archived) await unarchiveAction(vm.id);
                 else await archiveAction(vm.id);
-                postInboxChanged(vm.id);
+                postChanged("thread", vm.id);
                 if (onClose) onClose();
                 else router.refresh();
               }}

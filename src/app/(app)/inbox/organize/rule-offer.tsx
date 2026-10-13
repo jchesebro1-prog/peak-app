@@ -9,7 +9,7 @@
  */
 import { useState, useTransition } from "react";
 import type { RuleOffer } from "@/lib/inbox-org/apply";
-import { postInboxChanged } from "@/lib/inbox-org/broadcast";
+import { postChanged } from "@/lib/popout/channel";
 import { acceptRuleOfferAction } from "../organize-actions";
 
 const BTN: React.CSSProperties = {
@@ -57,7 +57,7 @@ export default function RuleOfferBanner({
           setError(r.message);
           return;
         }
-        postInboxChanged(threadId);
+        postChanged("thread", threadId);
         const more = r.more ? " (more next time)" : "";
         onSaved(r.filed ? `Rule saved — filed ${r.filed} more thread${r.filed === 1 ? "" : "s"}${more}` : `Rule saved${more}`);
       } catch {

@@ -10,7 +10,7 @@
 import { useEffect, useState, useTransition } from "react";
 import type { LinkTargetGroups, LinkTargetHit } from "@/lib/inbox-link-targets";
 import type { RuleOffer } from "@/lib/inbox-org/apply";
-import { postInboxChanged } from "@/lib/inbox-org/broadcast";
+import { postChanged } from "@/lib/popout/channel";
 import { searchLinkTargetsAction } from "../link-popup-actions";
 import { changeFilingAction, filingRecordsAction } from "../organize-actions";
 
@@ -116,7 +116,7 @@ export default function ChangeFiling({
           setError(r.message);
           return;
         }
-        postInboxChanged(threadId);
+        postChanged("thread", threadId);
         onDone({ ruleOffer: r.ruleOffer, message: r.archived ? "Filed and archived" : "Filed" });
       } catch {
         setError("Something went wrong — try again.");

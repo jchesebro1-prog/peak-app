@@ -6,13 +6,13 @@
  * narrow box picker); a row's sender/subject opens the ordinary thread reader
  * beside it (`?view=organize&tab=…&thread=<id>`). Plain view models from
  * load.ts (types only) — no store imports. Every change posts
- * `inbox-changed` on BroadcastChannel("peak") (spec §9); the actions
+ * `changed` (postChanged) on BroadcastChannel("peak") (spec §9); the actions
  * revalidate this page themselves.
  */
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import type { RuleOffer } from "@/lib/inbox-org/apply";
-import { postInboxChanged } from "@/lib/inbox-org/broadcast";
+import { postChanged } from "@/lib/popout/channel";
 import type { OrganizeRowVM, OrganizeVM } from "./load";
 import { FILED_CAP, FILED_DAYS, organizeHref, type OrganizeTab } from "./format";
 import {
@@ -87,7 +87,7 @@ export default function OrganizeBox({
         const r = await fn();
         if (!r.ok) setNote({ text: r.message, bad: true });
         else {
-          postInboxChanged(id);
+          postChanged("thread", id);
           setNote({ text: done, bad: false });
           if (r.ruleOffer) setOffer({ offer: r.ruleOffer, threadId: id });
         }
@@ -104,7 +104,7 @@ export default function OrganizeBox({
       setConfirmAll(false);
       try {
         const r = await approveAllStrongAction(vm.strongIds);
-        postInboxChanged("");
+        postChanged("inbox");
         setNote({
           text: `Approved ${r.approved}${r.skipped ? ` · ${r.skipped} left` : ""}${r.more ? " — press again for the rest" : ""}`,
           bad: false,
@@ -119,7 +119,7 @@ export default function OrganizeBox({
       setNote(null);
       try {
         await bulkArchiveAction(vm.noiseInInboxIds);
-        for (const id of vm.noiseInInboxIds) postInboxChanged(id);
+        for (const id of vm.noiseInInboxIds) postChanged("thread", id);
         setNote({ text: `Archived ${vm.noiseInInboxIds.length}`, bad: false });
       } catch {
         setNote({ text: "Something went wrong — try again.", bad: true });

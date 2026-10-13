@@ -2035,18 +2035,18 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   }
   const fmt = read(`${DIR}/format.ts`);
   ok(valueImports(fmt).length === 0, "ui: organize/format.ts (shared with the client) has no value imports");
-  const bc = read("src/lib/inbox-org/broadcast.ts");
-  ok(valueImports(bc).length === 0, "ui: inbox-org/broadcast.ts has no imports (client-safe)");
+  const bc = read("src/lib/popout/channel.ts");
+  ok(valueImports(bc).length === 0, "ui: popout/channel.ts has no imports (client-safe)");
   const oa = read("src/app/(app)/inbox/organize-actions.ts");
   ok(oa.startsWith('"use server";') && !/^export (const|let|function|class|type\b)/m.test(oa.replace(/^export type [^\n]*$/gm, "")) && oa.includes("export async function filingRecordsAction("), "ui: organize-actions.ts exports only async server actions (filingRecordsAction added)");
 
   /* BroadcastChannel (spec §9) */
-  ok(bc.includes('export const PEAK_CHANNEL = "peak";') && bc.includes("new BroadcastChannel(PEAK_CHANNEL)") && bc.includes('ch.postMessage({ type: "inbox-changed", threadId });'), "ui: postInboxChanged posts {type:\"inbox-changed\", threadId} on BroadcastChannel(\"peak\")");
-  ok(/export function postInboxChanged[\s\S]*?try \{[\s\S]*?\} catch/.test(bc), "ui: the post is wrapped in try/catch");
-  ok(/subscribeInboxChanged\(onChange: \(\) => void, debounceMs = 1000\)/.test(bc), "ui: the listener debounces 1 s");
+  ok(bc.includes('export const PEAK_CHANNEL = "peak";') && bc.includes("new BroadcastChannel(PEAK_CHANNEL)") && bc.includes("ch.postMessage(msg);"), "ui: postChanged posts a {type:\"changed\"} message on BroadcastChannel(\"peak\")");
+  ok(/function post\(msg: PeakMessage\): boolean \{\s*try \{[\s\S]*?\} catch/.test(bc), "ui: the post is wrapped in try/catch");
+  ok(bc.includes('d.type === "inbox-changed"'), "ui: onMessage still maps the legacy inbox-changed message");
   for (const f of [`${DIR}/organize-box.tsx`, `${DIR}/change-filing.tsx`, `${DIR}/rule-offer.tsx`, `${DIR}/reader-org.tsx`, "src/app/(app)/inbox/thread-reader.tsx"])
-    ok(read(f).includes("postInboxChanged("), `ui: ${f.split("/").pop()} posts inbox-changed after a change`);
-  ok(read("src/components/inbox-changed-listener.tsx").includes("subscribeInboxChanged(() => router.refresh(), 1000)"), "ui: the listener refreshes the router");
+    ok(/postChanged\("(thread|inbox)"/.test(read(f)), `ui: ${f.split("/").pop()} posts changed after a change`);
+  ok(/onMessage\(/.test(read("src/components/inbox-changed-listener.tsx")) && read("src/components/inbox-changed-listener.tsx").includes("router.refresh()") && read("src/components/inbox-changed-listener.tsx").includes("}, 1000);"), "ui: the listener refreshes the router, debounced 1 s");
   ok(shell.includes("<InboxChangedListener />") && read("src/app/(app)/page.tsx").includes("<InboxChangedListener />"), "ui: the Inbox shell and Home listen");
 
   /* reader: promise-task checkbox, unticked, completes through the task status action */

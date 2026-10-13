@@ -9,7 +9,7 @@
  */
 import { useState, useTransition } from "react";
 import type { RuleOffer } from "@/lib/inbox-org/apply";
-import { postInboxChanged } from "@/lib/inbox-org/broadcast";
+import { postChanged } from "@/lib/popout/channel";
 import type { ReaderOrgVM } from "../types";
 import {
   approveFilingAction,
@@ -89,7 +89,7 @@ export default function ReaderOrgStrip({ threadId, org }: { threadId: string; or
         const r = await fn();
         if (!r.ok) setNote({ text: r.message, bad: true });
         else {
-          postInboxChanged(threadId);
+          postChanged("thread", threadId);
           setNote({ text: done, bad: false });
           if (r.ruleOffer) setOffer(r.ruleOffer);
         }

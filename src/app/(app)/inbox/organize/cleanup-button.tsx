@@ -9,7 +9,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { CleanupVM } from "@/lib/inbox-org/cleanup";
-import { postInboxChanged } from "@/lib/inbox-org/broadcast";
+import { postChanged } from "@/lib/popout/channel";
 import { organizeInboxAction } from "../organize-actions";
 import { cleanupProgressText, cleanupSummaryText } from "./format";
 
@@ -64,7 +64,7 @@ export default function CleanupButton({ cleanup }: { cleanup: CleanupVM | null }
       } catch {
         setLine({ text: "Stopped — press Organize my inbox to continue where it left off.", bad: true });
       }
-      postInboxChanged("");
+      postChanged("inbox");
       router.refresh();
     });
 
