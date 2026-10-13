@@ -549,6 +549,12 @@ ANTHROPIC_API_KEY=
 The Inbox page exports `maxDuration = 300` so the estimate action (two model
 calls) fits in one server-action budget.
 
+Follow-up (D881): an admin can instead paste the key in Settings → Beta → Assist
+pilot — stored AES-256-GCM-encrypted in the `assist_secrets` blob
+(`src/lib/assist/key-store.ts`), it wins over `ANTHROPIC_API_KEY`, is ignored on a
+Vercel preview unless `ASSIST_ALLOW_PREVIEW_KEY=true`, and is never sent back to
+the browser (the card sees its source and last four characters only).
+
 ## 12. Testing
 
 - **Pure checks** in a new `scripts/test-assist.ts`, wired into `test:specs`:

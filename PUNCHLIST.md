@@ -11952,9 +11952,9 @@ SKU (D876); gate-first actions, `quoteId: null` = discarded, a report that never
 
 **Remaining (Jeff-gated):**
 - (1) Create a Console API key with billing and a $200 Console spend limit (match the in-app cap).
-- (2) Set `ANTHROPIC_API_KEY` in Vercel production.
+- (2) Paste the key in Settings → Beta → Assist pilot and press Save key, then Test key (or set `ANTHROPIC_API_KEY` in Vercel). The key is stored encrypted and wins over the env var; previews ignore it (D881).
 - (3) Tick Jeff and one estimator in Settings → Beta → Assist pilot.
 - (4) Try each button on a real thread (the live SDK call has not run in dev; only the request builder is tested).
 - (5) Read the report after 30 days and make the keep / kill call.
 
-No new permission; no new env var is required (only `ANTHROPIC_API_KEY`). Migration 0039 adds the `assist_runs` table.
+No new permission; no new env var is required (only `ANTHROPIC_API_KEY`, or the key saved in Settings — D881; optional `ASSIST_ALLOW_PREVIEW_KEY`). Migration 0039 adds the `assist_runs` table; the saved key lives in the `assist_secrets` blob (no migration).

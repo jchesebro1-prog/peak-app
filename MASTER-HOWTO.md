@@ -205,8 +205,12 @@ the app calls a model:
 
 1. Create an API key at console.anthropic.com with billing, and set a Console
    spend limit that matches the monthly cap (default $200).
-2. Set `ANTHROPIC_API_KEY` in Vercel production (see `.env.example` for the
-   optional `ASSIST_*` overrides; `ASSIST_DISABLED=true` is the kill switch).
+2. Paste the key in Settings → Beta → Assist pilot → Claude API key and press
+   **Save key**, then **Test key** (D881: stored encrypted, never shown again;
+   **Remove key** to take it out). Or set `ANTHROPIC_API_KEY` in Vercel
+   production — a key saved in Settings wins over it, and preview deploys ignore
+   the saved key unless `ASSIST_ALLOW_PREVIEW_KEY=true`. See `.env.example` for
+   the optional `ASSIST_*` overrides; `ASSIST_DISABLED=true` is the kill switch.
 3. In Settings → Beta → Assist pilot, tick the pilot users. An empty list means
    nobody. The same card has the three feature toggles, the cap and the report.
 4. Try each button on a real thread. Assist only drafts: tasks need a tick,

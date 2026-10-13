@@ -11842,3 +11842,26 @@ restored; Assist is a fresh, smaller build with three jobs (tasks, reply, estima
 it makes exactly the calls D869–D879 describe. Renewal drafts (D75) and rules-based scope drafting (D86) stay
 deterministic. Rollback is to leave `ANTHROPIC_API_KEY` unset or the pilot list empty; nothing is rewritten. Punch item #334.
 Verified (after the final fix wave, 2026-10-12): `test:assist` 160 PASS / 0 FAIL; tsc 0 errors; `test:specs` 18,028 PASS / 0 FAIL ("ALL PASSED" — the three stale pins retargeted: #210 M5 keeps `assist_runs`, #304 search reads `catalog-rank.ts`, the settings groups list `assist-pilot.tsx`); `test:smoke` 245 / 245 routes returned their expected status in one full run, including /inbox, /estimator and /settings?section=data with no key and no Assist UI; eslint 0 errors, 0 warnings on the 15 changed source/test paths (the 70k-line harness still crashes eslint-plugin-react-hooks, as before this layer); `next build` OK (Next 16.3.5, 137 static pages).
+
+## D881. The Claude key can be pasted in Settings; the saved key wins over the env var, except on previews (#334 follow-up, 2026-10-13)
+
+An admin (`manage_users`) pastes the Claude API key in Settings → Beta → Assist pilot → **Claude API key** instead of
+setting `ANTHROPIC_API_KEY` in Vercel. **Precedence** (pure `effectiveAnthropicKey`, `src/lib/assist/config.ts`): a
+readable saved key wins; else the env var (trimmed); else none. **On a Vercel preview** (`VERCEL_ENV=preview`) the saved
+key is ignored unless `ASSIST_ALLOW_PREVIEW_KEY=true` — previews share the production DB and must not spend on it; an env
+var set on the preview still applies. **Storage**: `src/lib/assist/key-store.ts` encrypts with `encryptWith` (AES-256-GCM,
+keyed on `AUTH_SECRET`) into its own `blobs` row `assist_secrets` (`anthropicKeyEnc`, `last4`, `savedAt`, `savedBy`) — not
+`app_settings`, so the ciphertext never rides along in settings props; Remove nulls the fields (`setBlob` merges). A
+decrypt failure (e.g. `AUTH_SECRET` rotated) falls back to the env var and the card says "Saved key can't be read —
+re-enter it". The decrypted read is cached in-process for 30 s and dropped on save/remove. **Wiring**: `getAssistEnv()`
+returns the base env with `ANTHROPIC_API_KEY` replaced by the effective key; `runAssist` uses it only when the caller
+passed no `env` (tests that pass `env` never see the saved key), and the Inbox page's UI flags, the Inbox actions'
+early gate and the Settings status line read it too. **Never to the browser**: no action returns the key, the card gets
+`AssistKeyInfo` (source, last four, saved at/by, unreadable, preview-ignored), the input is a never-prefilled password
+field, and errors never echo it. **Test key** makes one free `models.retrieve("claude-haiku-5-5")` call (15 s, no
+retries, 20 per hour per admin) and writes no `assist_runs` row. No migration, no new required env var. Punch item #334.
+Verified (2026-10-13): `test:assist` 197 PASS / 0 FAIL (37 new `assistKeyChecks`: `cleanApiKey`, the precedence truth
+table incl. preview / preview + allow / unreadable, ciphertext-only blob, wrong secret = unreadable, `getAssistEnv`,
+`assistKeyInfo` never carrying a key, clear nulls every field, an explicit empty `env` to `runAssist` stays closed with a
+key saved); tsc 0 errors; eslint 0 problems on the 11 changed source/test files; `next build` OK (137 static pages);
+`test:specs` 18,065 PASS / 0 FAIL ("ALL PASSED"); `test:smoke` 245 / 245, incl. /settings?section=data and /inbox 200.

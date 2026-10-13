@@ -1081,8 +1081,11 @@ See `.env.example`.
     estimated-cost report (loaded only for admins on `?section=data`). The Inbox
     page has `maxDuration = 300`. Env: `.env.example`'s Assist block;
     MASTER-HOWTO §6 has the turn-on steps. D89's deletions stay deleted; the SDK
-    supersedes D39 for this layer. Remaining is Jeff-gated: a Console key with a
-    $200 spend limit, `ANTHROPIC_API_KEY` in Vercel production, tick Jeff and one
+    supersedes D39 for this layer. The key can also be pasted in Settings → Beta →
+    Assist pilot — encrypted in the `assist_secrets` blob, it wins over the env var
+    and never reaches the browser (D881, `src/lib/assist/key-store.ts`). Remaining
+    is Jeff-gated: a Console key with a $200 spend limit, pasted in Settings (or
+    `ANTHROPIC_API_KEY` in Vercel production), tick Jeff and one
     estimator, try each button on a real thread, read the report after 30 days and
     keep or kill it. Draft quotes show no price in the reply prompt (only sent
     quotes do) — Jeff may opt in. Punch item #334.
