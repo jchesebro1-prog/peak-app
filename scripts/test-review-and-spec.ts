@@ -42860,8 +42860,8 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
   ok(shell.split("\n").length < 400 && !/<section className="pk-card"/.test(shell),
     "settings cleanup: settings-client.tsx is a shell — no cards left in it");
   ok(scReadDir(join(process.cwd(), groupDir)).filter((f) => f.endsWith(".tsx")).sort().join(",") ===
-    "assist-pilot.tsx,company.tsx,consulting.tsx,data.tsx,field.tsx,integrations.tsx,sales.tsx,shared.tsx,team.tsx",
-    "settings cleanup: one component file per group (+ shared.tsx, + assist-pilot.tsx)");
+    "assist-org.tsx,assist-pilot.tsx,company.tsx,consulting.tsx,data.tsx,field.tsx,integrations.tsx,sales.tsx,shared.tsx,team.tsx",
+    "settings cleanup: one component file per group (+ shared.tsx, + assist-pilot.tsx, + assist-org.tsx)");
   ok(groupSrc.data.includes('from "./assist-pilot"') && groupSrc.data.includes("<AssistPilotCard"),
     "settings cleanup: assist-pilot.tsx is the Data group's Assist pilot card (#334), not a group of its own");
   ok(/hidden=\{s\.key !== section\}/.test(shell) && /if \(!visited\.includes\(section\)\) setVisited/.test(shell),

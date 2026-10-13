@@ -128,6 +128,9 @@ const ROUTES = [
   "/inbox",
   "/inbox?view=unmatched",
   "/inbox?view=meetings",
+  "/inbox?view=organize", // #335 Inbox organization
+  "/inbox?view=organize&tab=noise",
+  "/inbox?view=organize&tab=filed",
   "/queue",
   "/triage", // Morning triage — the full ranked list (lazily builds the slot on the scratch db)
   "/templates",
