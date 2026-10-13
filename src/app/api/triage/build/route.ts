@@ -6,8 +6,9 @@ export const maxDuration = 60;
 
 /**
  * Morning triage — the midday list (spec "Snapshots and refresh"). Vercel
- * Cron calls `/api/triage/build?slot=midday` once a day at 17:00 UTC (noon
- * CDT, 11:00 CST — still "midday" for today's Chicago date). The morning
+ * Cron calls `/api/triage/build?slot=midday` once a day at 18:45 UTC (13:45
+ * CDT, the midday boundary; 12:45 CST — the slot is passed explicitly, and
+ * whoever views after 13:45 builds lazily anyway). The morning
  * list rides the daily Gmail cron instead. `?slot=morning` builds any user's
  * missing morning list by hand — a slot that already has a snapshot is left
  * as it is (D709). It stops starting new users 50 s in; whoever it skipped

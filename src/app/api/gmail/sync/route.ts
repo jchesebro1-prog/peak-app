@@ -95,8 +95,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   // Morning triage (spec 2026-10-09-morning-triage-design.md) — today's
-  // morning list for every active user. 12:00 UTC is 7:00 CDT (6:00 CST);
-  // either way it builds today's Chicago "morning" slot. Before the photo
+  // morning list for every active user. 11:45 UTC is 6:45 CDT (5:45 CST) —
+  // the morning brief's time; either way it builds today's Chicago "morning" slot. Before the photo
   // sync so the photo budget below absorbs whatever this used. Own
   // try/catch like the other riders.
   let triage: Awaited<ReturnType<typeof buildSlotForAll>> | { error: string };

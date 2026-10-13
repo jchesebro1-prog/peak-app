@@ -89,11 +89,20 @@ export function businessDaysBetween(from: number, to: number): number {
   return Math.floor(businessMsBetween(from, to) / DAY);
 }
 
-/** Noon Chicago splits the morning list from the midday list. */
-export const MIDDAY_HOUR = 12;
+/** 6:45 Chicago (minute of day) — the morning brief's time (AI brief, 2026-10-13). Before it, the day's morning slot still applies. */
+export const MORNING_AT_MIN = 6 * 60 + 45;
+/** 13:45 Chicago (minute of day) splits the morning list from the midday list
+ *  (AI brief, 2026-10-13; was noon). The stored slot names stay morning/midday. */
+export const MIDDAY_AT_MIN = 13 * 60 + 45;
+
+/** Minutes since 00:00 Chicago. */
+export function minuteOfDay(ms: number): number {
+  const p = chicagoParts(ms);
+  return p.hour * 60 + p.minute;
+}
 
 export function slotAt(ms: number): { day: string; slot: Slot } {
-  return { day: dayKey(ms), slot: chicagoParts(ms).hour >= MIDDAY_HOUR ? "midday" : "morning" };
+  return { day: dayKey(ms), slot: minuteOfDay(ms) >= MIDDAY_AT_MIN ? "midday" : "morning" };
 }
 
 export function slotLabel(slot: Slot): string {

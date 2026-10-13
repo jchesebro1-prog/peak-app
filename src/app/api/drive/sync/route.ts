@@ -8,7 +8,7 @@ export const maxDuration = 60;
 /**
  * Address verification + drive time — the daily drive cron. Vercel Cron calls
  * `/api/drive/sync` once a day at 11:00 UTC (6:00 CDT, 5:00 CST), before the
- * Gmail/triage cron at 12:00, so the morning list reads fresh drive events.
+ * Gmail/triage cron at 11:45, so the morning list reads fresh drive events.
  * It has its own route because the Gmail route's 60 s budget is already
  * shared by triage and the photo sync.
  *
