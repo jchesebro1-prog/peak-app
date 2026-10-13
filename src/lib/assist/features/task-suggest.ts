@@ -1,7 +1,7 @@
 /** Suggest tasks (spec §7). Pure prompt + schema + sanitizer. */
 import { z } from "zod";
 import { cleanSize, cleanTier, DEFAULT_SIZE, DEFAULT_TIER, type TaskSize, type TaskTier } from "@/lib/task-plan/types";
-import { UNTRUSTED_NOTE } from "./thread-text";
+import { cleanPromptField, UNTRUSTED_NOTE } from "./thread-text";
 
 export const TaskSuggestSchema = z.strictObject({
   tasks: z.array(
@@ -38,9 +38,10 @@ export function buildTasksUserText(ctx: {
   return [
     `Today is ${ctx.weekday} ${ctx.today} (America/Chicago).`,
     "Team (id — name):",
-    ...ctx.team.map((t) => `- ${t.id} — ${t.name}`),
+    ...ctx.team.map((t) => `- ${t.id} — ${cleanPromptField(t.name)}`),
     "Links you may use (key — label):",
-    ...ctx.links.map((l) => `- ${l.key} — ${l.label}`),
+    // Labels carry customer / contact / venue names: untrusted, one line each.
+    ...ctx.links.map((l) => `- ${l.key} — ${cleanPromptField(l.label)}`),
     "",
     ctx.thread,
   ].join("\n");
