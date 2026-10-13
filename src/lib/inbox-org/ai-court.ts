@@ -18,6 +18,7 @@ import { cleanPromptField, UNTRUSTED_NOTE } from "@/lib/assist/features/thread-t
 import type { CommMessage, CommThread } from "@/lib/stores/comms";
 import { createTaskOnce } from "@/lib/stores/tasks";
 import { resolveDue } from "./due";
+import { ownTextNames } from "./names";
 import { promiseTaskId } from "./ids";
 import type { Court, CourtOwner, Promise_ } from "./types";
 
@@ -139,8 +140,10 @@ const titleOf = (text: string) => {
 };
 
 /**
- * Create one task per promise on `msg` (§7): owner = the named team member,
- * else the message's internal author, else the thread owner; due =
+ * Create one task per promise on `msg` (§7): owner = the team member the
+ * model named, only when the message's own text (quotes stripped) names them
+ * by first or full name (D899), else the message's internal author, else the
+ * thread owner; due =
  * `resolveDue(dueText, msg.at)` (5 pm Chicago, default 2 business days);
  * section "Email"; linked to the thread, its customer / venue and the
  * quote / project / lead the filing points at. Idempotent by id. Nothing on
@@ -149,7 +152,7 @@ const titleOf = (text: string) => {
  */
 export async function applyPromises(
   thread: CommThread,
-  msg: Pick<CommMessage, "id" | "at">,
+  msg: Pick<CommMessage, "id" | "at"> & { body?: string },
   promises: CourtReading["promises"],
   nowMs: number,
   opts: { owner: TeamMember; authorUserId: string | null; users: TeamMember[]; backlog?: boolean }
@@ -164,7 +167,11 @@ export async function applyPromises(
   const work = (fileOk ? f!.work : null) ?? (thread.link && ["quote", "project", "lead"].includes(thread.link.type) ? thread.link : null);
   const out: Promise_[] = [];
   for (const p of promises.slice(0, MAX_PROMISES)) {
-    const owner = byId.get(p.ownerUserId) ?? (opts.authorUserId ? byId.get(opts.authorUserId) : undefined) ?? opts.owner;
+    // the model's owner only when the newest message's own words name them
+    // (D899) — a quoted customer line or an injected name can't steer it
+    const named = byId.get(p.ownerUserId);
+    const picked = named && ownTextNames(msg.body || "", named.name) ? named : undefined;
+    const owner = picked ?? (opts.authorUserId ? byId.get(opts.authorUserId) : undefined) ?? opts.owner;
     const due = resolveDue(p.dueText, msg.at);
     const id = promiseTaskId(thread.id, msg.id, p.text);
     const task = await createTaskOnce(

@@ -620,8 +620,15 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
       body: m.body || "",
       subject: subjectAt(t, msgs, i),
       at: m.at || 0,
+      to: addressesIn(m.to),
+      cc: addressesIn(m.cc),
     }));
-    const rc = courtByRules(courtMsgs, { ownerEmails: owner?.emails ?? [], isInternal: ctx.isInternal, teamByEmail: ctx.teamByEmail });
+    const rc = courtByRules(courtMsgs, {
+      ownerEmails: owner?.emails ?? [],
+      isInternal: ctx.isInternal,
+      teamByEmail: ctx.teamByEmail,
+      ownerName: owner?.name ?? null,
+    });
     const pending =
       pilotPromise && !opts.backlog && !isSignOff(latest.body || "") && (courtNew || !prevCourt || prevCourt.pendingAi === true);
     const next: Court = {

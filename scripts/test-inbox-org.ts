@@ -347,6 +347,29 @@ function courtChecks(ok: Ok): void {
   ok(courtByRules(unordered, ctx).owner === "customer", "court: the last message is chosen by time, not array order");
   ok(courtByRules([], ctx).owner === "nobody", "court: no messages → nobody");
   ok(courtByRules([ask], ctx).reason.length > 0, "court: carries a reason line");
+
+  /* D894 — a teammate's internal note on a customer thread, and a by-name hand-off */
+  const nctx = { ...ctx, ownerName: "Jeff Chesebro" };
+  const to = (m: CourtMessage, toList: string[], cc: string[] = []): CourtMessage => ({ ...m, to: toList, cc });
+  const SHARED = "sales@peaksystemsgroup.com";
+  const note = courtByRules([ask, to(msg("in", MIKE, "Jeff, can you take this, they want pricing Friday"), [OWNER])], nctx);
+  ok(note.owner === "me", "court: a teammate's note to the owner only, on a customer thread → me (not the customer's court)");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Can you take this one? They want pricing Friday."), [OWNER])], ctx).owner === "me", "court: …even with no owner name on file (a question to me)");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Taking this one, I'll quote them Friday."), ["dana@peaksystemsgroup.com"], [OWNER])], nctx).owner === "me", "court: an internal note cc'ing me (no outside address) → me, never archived on a guess");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Thanks Jeff!"), [OWNER])], nctx).owner === "nobody", "court: a teammate's internal sign-off → nobody");
+  ok(courtByRules([ask, to(msg("in", MIKE, "FYI — they signed the PO, for your records."), [OWNER])], nctx).owner === "nobody", "court: a teammate's internal FYI note → nobody");
+  const byName = courtByRules([ask, to(msg("in", MIKE, "Hi Pat, Jeff will be in touch tomorrow about the curtain."), [PAT], [OWNER])], nctx);
+  ok(byName.owner === "me" && /hand-off/.test(byName.reason), "court: a teammate's reply to the customer naming the owner ('Jeff will be in touch') → me (rule hand-off)");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Hi Pat, Jeff Chesebro will call you."), [PAT])], nctx).owner === "me", "court: the owner's full name counts too");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Hi Pat, quote attached.\n\nOn Mon, Oct 12, 2026 at 9:00 AM Jeff <jeff@peaksystemsgroup.com> wrote:\n> Jeff here, can you send it?"), [PAT])], nctx).owner === "customer", "court: the owner's name only in the quoted text doesn't count");
+  const plain = courtByRules([ask, to(msg("in", MIKE, "Pat, quote attached."), [PAT], [OWNER])], nctx);
+  ok(plain.owner === "customer" && plain.teammateId === "u2", "court: a plain teammate reply to the customer (owner cc'd) → customer, unchanged");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Hi Pat, I will call you."), [PAT])], { ...ctx, ownerName: "Will Turner" }).owner === "customer", "court: an everyday-word first name ('will') only counts capitalised");
+  ok(courtByRules([ask, to(msg("in", MIKE, "Hi Pat, Will will call you."), [PAT])], { ...ctx, ownerName: "Will Turner" }).owner === "me", "court: …and a capitalised Will is a hand-off");
+  ok(courtByRules([ask, to(msg("in", SHARED, "Jeff, can you call them back?"), [OWNER])], nctx).owner === "me", "court: a shared Peak address's internal note to the owner behaves like a teammate's → me");
+  const sharedOut = courtByRules([ask, to(msg("in", SHARED, "Hi Pat, thanks for your order."), [PAT])], nctx);
+  ok(sharedOut.owner === "customer" && !sharedOut.teammateId, "court: a shared address's reply to the customer → customer (no teammate id)");
+  ok(courtByRules([ask, to(msg("in", SHARED, "Hi Pat, Jeff will follow up."), [PAT])], nctx).owner === "me", "court: a shared address naming the owner to the customer → me");
 }
 
 /* ---------- due dates (§7 Due date) ---------- */
@@ -961,15 +984,15 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     ok(bridgeSrc.includes("backlog: !info.initialImportDone") && bridgeSrc.includes("appendFilingLogs(org.log.splice(0))"), "org hook: the 90-day import is backlog; the filing log is appended once per sync");
     // a real import: the hook organizes the new thread; a failing organize still returns the id
     invalidateOrgContext();
-    const gm = (id: string, from: string, body: string): GmailFullMessage =>
+    const gm = (id: string, from: string, body: string, to = "mike@peaksystemsgroup.com"): GmailFullMessage =>
       ({
         id, threadId: "TEST335-gthread", labelIds: ["INBOX"], internalDate: String(T0 + 9_000_000),
-        payload: { mimeType: "text/plain", headers: [["From", from], ["To", "mike@peaksystemsgroup.com"], ["Subject", "Re: EST-987654"], ["Message-ID", `<${id}@x.test>`]].map(([name, value]) => ({ name, value })), body: { data: Buffer.from(body).toString("base64url") } },
+        payload: { mimeType: "text/plain", headers: [["From", from], ["To", to], ["Subject", "Re: EST-987654"], ["Message-ID", `<${id}@x.test>`]].map(([name, value]) => ({ name, value })), body: { data: Buffer.from(body).toString("base64url") } },
       }) as GmailFullMessage;
     const created = await recordMessage("personal:TEST335-nobody", parseInbound(gm("TEST335-g1", "Pat <pat@school.test>", "Any news?")));
     const imported = created ? await read(created) : null;
     ok(!!created && imported?.court?.owner === "me" && imported.filing?.work?.id === QUOTE, "org hook: a real recordMessage organizes the new thread (court + number filing)");
-    const again = await recordMessage("personal:TEST335-nobody", parseInbound(gm("TEST335-g2", "Dana <dana@peaksystemsgroup.com>", "I'll handle it, Pat.")));
+    const again = await recordMessage("personal:TEST335-nobody", parseInbound(gm("TEST335-g2", "Dana <dana@peaksystemsgroup.com>", "I'll handle it, Pat.", "pat@school.test")));
     ok(again === created && (await read(created!)).court?.owner === "customer" && (await read(created!)).status === "waiting_them", "org hook: the next message on the thread re-organizes it (a teammate's reply → customer)");
     if (created) await db.delete(commsTable).where(eq(commsTable.id, created));
   } finally {
@@ -1155,7 +1178,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   });
   await organizeThread(handoff, { ctx: pilot });
   const h0 = await read(handoff);
-  ok(h0.court?.owner === "customer" && h0.court.pendingAi === true && !h0.filing?.pendingAi && h0.status === "waiting_them", "ai pass: (setup) a teammate's last message → rule court customer, court pending");
+  ok(h0.court?.owner === "me" && h0.court.source === "rule" && h0.court.pendingAi === true && !h0.filing?.pendingAi && h0.status === "waiting_us", "ai pass: (setup) a teammate's reply naming the owner → rule court me (D894 hand-off), court still pending for the promise reading");
   const lastH = h0.messages[h0.messages.length - 1];
   const callsH: ProviderRequest[] = [];
   const rH = await run(
@@ -1166,7 +1189,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   );
   const h1 = await read(handoff);
   ok(callsH.length === 1 && callsH[0].user.includes(`Thread owner ("me"): ${ARI_ID}`) && callsH[0].user.includes(`Peak teammate ${DANA_ID}`) && callsH[0].user.includes(`${DANA_ID} — TEST335 Dana`), "ai pass: the court prompt names the owner, the team, and who wrote each message");
-  ok(h1.court?.owner === "me" && h1.court.source === "ai" && !h1.court.pendingAi && h1.court.basis === lastH.id && h1.status === "waiting_us" && rH.courts === 1, "ai pass: a hand-off to a named teammate who is me → court me (AI), status waiting_us");
+  ok(h1.court?.owner === "me" && h1.court.source === "rule" && !h1.court.pendingAi && h1.court.basis === lastH.id && h1.status === "waiting_us" && rH.courts === 0, "ai pass: the AI agreeing with a rule hand-off (me) leaves the rule court, pending cleared, status waiting_us");
   const hTasks = await tasksOn(handoff);
   const due = resolveDue("by Friday", lastH.at);
   ok(
@@ -1191,6 +1214,46 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
       (await tasksOn(handoff)).length === 1,
     "ai pass: mail older than a week → no promise-task"
   );
+
+  /* 5b. a hand-off the rules can't see (no name) — only the AI reading catches it */
+  const unnamed = await mk("handoff-unnamed", {
+    customerId: CUST,
+    customer: "AI School",
+    resolution: "linked",
+    resolvedContactId: "ct-ai",
+    messages: [
+      msg({ body: "Can we get pricing on the stage curtain?" }),
+      msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "pat@ai-school.test", body: "Hi Pat, I'm passing this to our account lead, who will send pricing by Friday." }),
+    ],
+  });
+  await organizeThread(unnamed, { ctx: pilot });
+  ok((await read(unnamed)).court?.owner === "customer" && (await read(unnamed)).court?.pendingAi === true, "ai pass: (setup) an unnamed hand-off → rule court customer, pending");
+  const rU = await run(
+    routedProvider({ promise: courtAns({ owner: "teammate", teammateId: ARI_ID, promises: [{ text: "Send Pat pricing", ownerUserId: ARI_ID, dueText: "by Friday" }] }) })
+  );
+  const u1 = await read(unnamed);
+  ok(u1.court?.owner === "me" && u1.court.source === "ai" && u1.status === "waiting_us" && rU.courts === 1, "ai pass: a hand-off to a named teammate who is me → court me (AI), status waiting_us");
+  const uTasks = await tasksOn(unnamed);
+  ok(uTasks.length === 1 && uTasks[0].assigneeUserId === DANA_ID, "ai pass: a promise owner the newest message doesn't name falls back to the internal author (D899)");
+
+  /* 5c. D899 — a quoted customer text naming a teammate can't route the task to them */
+  const quotedName = await mk("promise-quoted-name", {
+    messages: [
+      msg({ body: "Can Ari send the drawings?" }),
+      msg({
+        fromEmail: "dana@peaksystemsgroup.com",
+        author: "Dana",
+        to: "pat@ai-school.test",
+        body: "Hi Pat, we'll send the drawings Monday.\n\nOn Mon, Oct 12, 2026 at 9:00 AM Pat <pat@ai-school.test> wrote:\n> Can Ari send the drawings?",
+      }),
+    ],
+  });
+  const qT = await read(quotedName);
+  const qLast = qT.messages[qT.messages.length - 1];
+  const qMade = await applyPromises(qT, qLast, [{ text: "Send Pat the drawings", ownerUserId: ARI_ID, dueText: "Monday" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team });
+  ok(qMade.length === 1 && qMade[0].ownerUserId === DANA_ID && (await tasksOn(quotedName))[0]?.assigneeUserId === DANA_ID, "ai pass: a model owner named only in the quoted customer text is refused — the task goes to the internal author");
+  const qNoAuthor = await applyPromises(qT, { ...qLast, id: qLast.id + "-x" }, [{ text: "Send Pat the drawings", ownerUserId: DANA_ID, dueText: "" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: null, users: team });
+  ok(qNoAuthor.length === 1 && qNoAuthor[0].ownerUserId === ARI_ID && (await tasksOn(quotedName)).length === 2, "ai pass: …and with no internal author it goes to the thread owner");
 
   /* 6. "someone will be in touch" → a promise owned by the internal author */
   const vague = await mk("vague", {
@@ -1557,9 +1620,19 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
     await recordMessage(key, parseInbound(gm("TEST335-ap-g3", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "ann.t335@peaksystemsgroup.com", fwd)));
     const th = await read(tid!);
     ok(th.court?.owner === "me" && th.archived === false, "apply teammate: a hand-off (a teammate's forward to me) un-archives and puts the court on me");
+    /* D894 — a teammate's internal note to me on the customer thread never archives it */
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g3b", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "ann.t335@peaksystemsgroup.com", "Ann, can you take this, they want pricing Friday")));
+    const tNote = await read(tid!);
+    ok(tNote.court?.owner === "me" && tNote.court.source === "rule" && tNote.archived === false && tNote.status === "waiting_us", "apply teammate: a teammate's note to me only on a customer thread → court me, not archived (app or Gmail)");
+    await archive(tid!, { quiet: true });
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g3c", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "ann.t335@peaksystemsgroup.com", "Heads up — they're asking for the install date too.")));
+    ok((await read(tid!)).court?.owner === "me" && (await read(tid!)).archived === false, "apply teammate: …and an internal note to me brings an archived customer thread back");
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g3d", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "pat@apply-school.test", "Hi Pat, Ann will be in touch tomorrow with the price.")));
+    const tName = await read(tid!);
+    ok(tName.court?.owner === "me" && tName.court.source === "rule" && tName.archived === false, "apply teammate: a teammate's reply to the customer saying 'Ann will be in touch' → me by rule (non-pilot), not archived");
     await setKeepInInbox(ANN, true);
     await archive(tid!, { quiet: true });
-    await recordMessage(key, parseInbound(gm("TEST335-ap-g4", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "pat@apply-school.test", "Pat — scratch that, Ann has it.")));
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g4", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "pat@apply-school.test", "Pat — scratch that, Friday works too.")));
     ok((await read(tid!)).archived === true, "apply teammate: with 'Keep threads in my inbox' on, a teammate's reply still never brings back a thread I archived");
     await setKeepInInbox(ANN, false);
 

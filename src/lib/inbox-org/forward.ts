@@ -162,7 +162,7 @@ const FYI = /(?:^|[^\p{L}])(?:fyi|f\.y\.i)(?=[^\p{L}]|$)|\bfor your (?:records|f
 const ASK = /\b(?:please|pls|can you|could you|would you|will you|need(?:s)? you|let me know|lmk|follow up|get back to|take care of|reach out|handle (?:this|it)|your call)\b/i;
 
 /** FYI-only: an FYI phrase, no question, nothing asked of the reader. */
-function isFyiNote(note: string): boolean {
+export function isFyiNote(note: string): boolean {
   return !!note && !note.includes("?") && FYI.test(note) && !ASK.test(note);
 }
 
