@@ -41,6 +41,10 @@ export type Filing = {
   /** What filing this thread changed (set when `state` becomes "filed"), so
    *  Undo puts back exactly that and nothing a person set by hand. */
   applied?: FilingApplied;
+  /** archive-on-reply archived the thread without filing it (a weak or no
+   *  suggestion) — it stays in To file while archived. Cleared when the
+   *  thread is filed or un-archived. */
+  archivedOnReply?: boolean;
 };
 
 /** The thread's link fields before a filing changed them. A part that is
@@ -62,6 +66,8 @@ export type FilingApplied = {
   site?: { prev: string | null };
   /** filing archived the thread */
   archived?: boolean;
+  /** the suggestion was an archived-on-reply To file row (Undo puts that back) */
+  archivedOnReply?: boolean;
 };
 
 /** How a person (or a reply) acted on a filing suggestion — the filing log's

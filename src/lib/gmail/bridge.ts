@@ -9,6 +9,7 @@ import { allUsers, getUser } from "@/lib/users";
 import {
   DEFAULT_DOMAIN,
   boxAddress,
+  clearArchivedOnReply,
   deriveStatus,
   isAutoDeliverable,
   lastInbound,
@@ -289,6 +290,7 @@ export async function recordMessage(
       if (dir === "in") {
         d.unread = true;
         d.archived = false;
+        clearArchivedOnReply(d);
       }
     });
     if (statusChanged) queueLabelSync(existing.id);

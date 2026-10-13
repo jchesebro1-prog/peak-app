@@ -237,14 +237,36 @@ function newSince(rec: { at: number; basis?: string } | undefined, latest: CommM
   return (latest.at || 0) > (rec.at || 0);
 }
 
+/** Every participant is internal (Peak's own addresses). */
+export function isInternalOnly(t: CommThread, msgs: CommMessage[], ctx: OrgContext): boolean {
+  const participants = [
+    lc(t.contactEmail),
+    ...msgs.flatMap((m) => [...(m.direction === "in" ? [senderOf(t, m)] : []), ...addressesIn(m.to), ...addressesIn(m.cc)]),
+  ].filter((e) => e.includes("@"));
+  return participants.length > 0 && participants.every((e) => ctx.isInternal(e));
+}
+
+/** An internal message (mine or a teammate's) that passes along an outside
+ *  email — new content to file on, like outside mail. */
+function carriesOutsideForward(t: CommThread, msgs: CommMessage[], i: number, ctx: OrgContext): boolean {
+  const fwd = parseForward(subjectAt(t, msgs, i), msgs[i].body || "", ctx.isInternal);
+  const from = lc(fwd.original?.fromEmail);
+  return fwd.isForward && !!from && !ctx.isInternal(from);
+}
+
 /** The message a FILING is computed against: the newest one from an outside
- *  sender (not the owner, not a teammate) — my own reply or a teammate's
- *  never resets or recomputes a pending filing (a strong AI suggestion must
- *  survive until archive-on-reply files it). With no outside message yet,
- *  the first message (so nothing internal resets it either). The court
- *  still follows the newest message of all. `msgs` oldest first, non-empty. */
+ *  sender (not the owner, not a teammate) or an internal one that forwards
+ *  outside mail — a plain reply of mine or a teammate's never resets or
+ *  recomputes a pending filing (a strong AI suggestion must survive until
+ *  archive-on-reply files it). An internal-only thread (filed by record
+ *  numbers alone) follows its newest message, so a teammate naming EST-1042
+ *  later re-files it. With neither, the first message. The court still
+ *  follows the newest message of all. `msgs` oldest first, non-empty. */
 export function filingBasisMessage(t: CommThread, msgs: CommMessage[], owner: OrgUser | null, ctx: OrgContext): CommMessage {
-  for (let i = msgs.length - 1; i >= 0; i--) if (roleOf(t, msgs[i], owner, ctx) === "customer") return msgs[i];
+  if (isInternalOnly(t, msgs, ctx)) return msgs[msgs.length - 1];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (roleOf(t, msgs[i], owner, ctx) === "customer" || carriesOutsideForward(t, msgs, i, ctx)) return msgs[i];
+  }
   return msgs[0];
 }
 
@@ -579,11 +601,7 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
   const pilotFile = isOrgPilot(owner?.id, "file", ctx);
   const pilotPromise = isOrgPilot(owner?.id, "promise", ctx);
 
-  const participants = [
-    lc(t.contactEmail),
-    ...msgs.flatMap((m) => [...(m.direction === "in" ? [senderOf(t, m)] : []), ...addressesIn(m.to), ...addressesIn(m.cc)]),
-  ].filter((e) => e.includes("@"));
-  const internalOnly = participants.length > 0 && participants.every((e) => ctx.isInternal(e));
+  const internalOnly = isInternalOnly(t, msgs, ctx);
 
   /* court (§3) */
   const prevCourt = t.court;
@@ -639,6 +657,8 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
         state: out.quiet ? "skipped" : "suggested",
         at: now,
         basis: filingBasis.id,
+        // still archived after archive-on-reply: stays a To file row
+        ...(prevFiling?.archivedOnReply && t.archived && !out.filing.noise ? { archivedOnReply: true } : {}),
         ...(pendingAi ? { pendingAi: true, ...aiBookkeeping(prevFiling, !filingNew) } : {}),
       };
       filing = prevFiling && sameRecord(prevFiling, next) ? prevFiling : next;

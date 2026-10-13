@@ -1087,6 +1087,16 @@ export async function markUnread(id: string): Promise<CommThread | null> {
  *  keeps the newest message's time. The Gmail push is the same either way. */
 export type QuietOpt = { quiet?: boolean };
 
+/** #335 — a thread back in the inbox is no longer an archived-on-reply To
+ *  file row (`filing.archivedOnReply`). Mutates the doc being patched. */
+export function clearArchivedOnReply(d: CommThread): void {
+  if (d.filing?.archivedOnReply) {
+    const f = { ...d.filing };
+    delete f.archivedOnReply;
+    d.filing = f;
+  }
+}
+
 export async function archive(id: string, opts: QuietOpt = {}): Promise<CommThread | null> {
   const t = await patchDoc<CommThread>("comms", id, (d) => {
     d.archived = true;
@@ -1099,6 +1109,7 @@ export async function archive(id: string, opts: QuietOpt = {}): Promise<CommThre
 export async function unarchive(id: string, opts: QuietOpt = {}): Promise<CommThread | null> {
   const t = await patchDoc<CommThread>("comms", id, (d) => {
     d.archived = false;
+    clearArchivedOnReply(d);
     if (!opts.quiet) touch(d);
   });
   await dispatchInboxState(id, true); // two-way archive (D74)
@@ -1336,7 +1347,10 @@ export async function addMessage(
     else t.unread = false;
     // #335 — new inbound mail resurfaces an archived thread; my own outbound
     // message never does (archive-on-reply takes a replied thread out).
-    if (dir === "in" && t.status !== "draft") t.archived = false;
+    if (dir === "in" && t.status !== "draft") {
+      t.archived = false;
+      clearArchivedOnReply(t);
+    }
     touch(t);
   });
   // real Gmail send happens after the optimistic write (async, gated)
@@ -1571,10 +1585,16 @@ export async function discard(id: string): Promise<void> {
 /* ---- offline outbox + receiving ---------------------------------------------- */
 
 /** Deliver every queued outbound message (offline → online catch-up). */
-export async function flushOutbox(): Promise<number> {
+export async function flushOutbox(
+  /** #335 — `defer` runs the post-reply steps for delivered queued replies
+   *  off the request path (a server action passes after()); without it they
+   *  run inline. */
+  opts: { defer?: (run: () => Promise<void>) => void } = {}
+): Promise<number> {
   if (!online()) return 0;
   const list = await listDocs<CommThread>("comms");
   let n = 0;
+  const replied: string[] = [];
   for (const t of list) {
     if (!hasQueued(t)) continue;
     // #335 — a queued REPLY (an outbound email after the thread's first
@@ -1591,7 +1611,15 @@ export async function flushOutbox(): Promise<number> {
       d.updatedAt = now();
     });
     await dispatchOutbound(t.id); // real send of the just-unqueued messages (gated)
-    if (repliedNow && t.status !== "draft") await runPostReply(t.id);
+    if (repliedNow && t.status !== "draft") replied.push(t.id);
+  }
+  if (replied.length) {
+    const run = async () => {
+      for (const id of replied) await runPostReply(id);
+    };
+    // inside a request the caller defers it (after()); otherwise inline
+    if (opts.defer) opts.defer(run);
+    else await run();
   }
   return n;
 }

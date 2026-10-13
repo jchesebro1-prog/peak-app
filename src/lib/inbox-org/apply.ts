@@ -267,6 +267,7 @@ async function fileThread(t: CommThread, base: Filing, target: ResolvedTarget, o
   }
   const archiveNow = o.archive && !t.archived;
   if (archiveNow) applied.archived = true;
+  if (base.archivedOnReply) applied.archivedOnReply = true;
   const filing: Filing = {
     ...settled(base),
     customerId: target.customerId,
@@ -280,6 +281,7 @@ async function fileThread(t: CommThread, base: Filing, target: ResolvedTarget, o
     applied,
   };
   if (!target.siteId) delete filing.siteId;
+  delete filing.archivedOnReply;
   await setOrg(t.id, { filing });
   if (archiveNow) await archive(t.id, { quiet: o.quiet !== false });
   return { filing, archived: archiveNow || !!t.archived };
@@ -465,6 +467,8 @@ export async function undoFiling(threadId: string, me: OrgActor, now: number = D
   delete filing.filedBy;
   delete filing.filedAt;
   delete filing.applied;
+  // an archived-on-reply To file row that stays archived is one again
+  if (a.archivedOnReply && t.archived && !a.archived) filing.archivedOnReply = true;
   await setOrg(t.id, { filing });
   await logAction(t, f, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
   return { ok: true, filing };
@@ -481,11 +485,26 @@ export function isStrongRow(t: Pick<CommThread, "filing">): boolean {
   return !!f && f.state === "suggested" && f.strength === "strong" && !f.noise && !!(f.customerId || f.work);
 }
 
-/** A To file row: a suggestion still waiting (not noise), archived or not —
- *  a weak suggestion on a thread archived on reply stays reachable here. */
+/** In the inbox, app and Gmail side (not archived in either). */
+export function inInbox(t: CommThread): boolean {
+  return !t.archived && t.gmailInboxed !== false;
+}
+
+/** A To file row: a suggestion still waiting (not noise) on an inbox thread,
+ *  or on one archive-on-reply archived without filing (`archivedOnReply` —
+ *  a weak suggestion stays reachable). Mail archived in Gmail or by the
+ *  90-day import never is. */
 export function isToFileRow(t: CommThread): boolean {
   const f = t.filing;
-  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!f && f.state === "suggested" && !f.noise;
+  return (
+    t.mailbox === "personal" &&
+    !t.deleted &&
+    t.status !== "draft" &&
+    !!f &&
+    f.state === "suggested" &&
+    !f.noise &&
+    (inInbox(t) || !!f.archivedOnReply)
+  );
 }
 
 /** The person's To file list (spec §2), newest first. Task 6's selector. */
@@ -619,7 +638,7 @@ async function sweepSender(
         (rule.scope === "company" || visibleTo(t, me.name)) &&
         t.filing?.state !== "filed" &&
         t.filing?.state !== "dismissed" &&
-        ((!t.archived && t.gmailInboxed !== false) || isToFileRow(t)) &&
+        (inInbox(t) || isToFileRow(t)) &&
         senderMatches(t, rule.match, ctx)
     )
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -644,6 +663,12 @@ async function sweepSender(
       if (fresh.customerId && fresh.customerId !== f.customerId) continue;
       const target = await resolveTarget({ customerId: f.customerId, work: f.work }, f.work?.label);
       if (!target) continue;
+      // a rule's work never replaces a hand-picked link on the same customer;
+      // only a link to another customer's record is stale and replaced
+      if (target.work && fresh.link && !(fresh.link.type === target.work.type && fresh.link.id === target.work.id)) {
+        const linked = await resolveWork(fresh.link);
+        if (!linked?.customerId || linked.customerId === target.customerId) target.work = null;
+      }
       const owesReply = f.needsReply && fresh.court?.owner === "me";
       await fileThread(fresh, f, target, { filedBy: "rule", archive: !owesReply, quiet: true, clearForeignLink: true, now: opts.now });
       await logAction(fresh, f, "rule", { userId: me.id, outcome: "auto", state: "filed", now: opts.now });
@@ -721,14 +746,19 @@ export async function archiveAfterReply(
     }
     if (target && base) {
       // filing archives too, so Undo knows to bring the thread back
-      await fileThread(t, base, target, { filedBy: by, archive: true, quiet: by === "teammate-reply", now });
+      await fileThread(t, base, target, { filedBy: by, archive: true, quiet: by === "teammate-reply", clearForeignLink: true, now });
       const ctx = await loadOrgContext();
       // automatic: never sets an AI run's outcome (noted as autoFiled)
       await logAction(t, base, by, { userId: me?.id ?? ownerIdOf(t, ctx), outcome: "auto", state: "filed", now });
       filed = true;
     }
   }
-  if (!filed && !t.archived) await archive(t.id, { quiet: by === "teammate-reply" });
+  if (!filed && !t.archived) {
+    // a weak / missing suggestion waits in To file while archived
+    const cur = (await getThread(t.id))?.filing;
+    if (cur && cur.state === "suggested" && !cur.noise && !cur.archivedOnReply) await setOrg(t.id, { filing: { ...cur, archivedOnReply: true } });
+    await archive(t.id, { quiet: by === "teammate-reply" });
+  }
   return { ok: true, archived: true, filed };
 }
 

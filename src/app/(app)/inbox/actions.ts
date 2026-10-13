@@ -599,7 +599,8 @@ export async function logInteractionAction(d: LogPayload) {
 export async function sendReceiveAction() {
   const started = Date.now();
   const user = await requireUser();
-  await flushOutbox();
+  // #335 — delivered queued replies get their post-reply step after the response
+  await flushOutbox({ defer: (run) => after(run) });
   const { id, owners } = await checkMailFor({ aiPass: false });
   scheduleAiPass(owners, started, user.id);
   revalidate();
