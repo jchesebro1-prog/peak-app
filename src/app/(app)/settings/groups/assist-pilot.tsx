@@ -106,7 +106,7 @@ function BriefReportTable({ brief }: { brief: AssistVM["brief"] }) {
   );
 }
 
-const SAVED_FMT =new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
+const SAVED_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
 
 /** D881 — the one line saying where the Claude key comes from. Never the key: last four characters at most. */
 function keyInfoLine(k: AssistVM["keyInfo"]): { text: string; warn: boolean } {

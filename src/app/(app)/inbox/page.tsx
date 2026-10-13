@@ -10,6 +10,7 @@ import { signatureFor } from "@/lib/stores/signatures";
 import { withSignature } from "@/lib/inbox-signature";
 import { nudgePrefill, prefillRecipient } from "@/lib/inbox-compose-prefill";
 import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
+import { after } from "next/server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { groupCompanyOptions } from "@/lib/vendor-status";
@@ -1113,8 +1114,13 @@ export default async function InboxPage({
   const nudgeId = str(params.nudge).slice(0, 100);
   const nudgeQuote = nudgeId ? await getQuote(nudgeId).catch(() => null) : null;
   const nudge = nudgePrefill(nudgeQuote, me);
-  // the report's "nudges opened": the composer opening is the hook (idempotent, first write wins)
-  if (nudge) await recordNudgeOpened(nudgeQuote?.assistNudge?.runId, user.id);
+  // the report's "nudges opened": the composer opening is the hook. A write,
+  // so it runs after the response (not in the render); first write wins.
+  if (nudge) {
+    const nudgeRunId = nudgeQuote?.assistNudge?.runId;
+    const nudgeUserId = user.id;
+    after(() => recordNudgeOpened(nudgeRunId, nudgeUserId));
+  }
   const customerParam = str(params.customer);
   const logCust = str(params.log) === "1" ? customerParam : "";
   const newCust = logCust ? "" : str(params.new) || customerParam;

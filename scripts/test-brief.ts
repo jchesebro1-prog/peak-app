@@ -1141,7 +1141,7 @@ export async function briefReminderChecks(ok: Ok): Promise<void> {
   const drafts = readFileSync("src/lib/brief/drafts.ts", "utf8");
   ok(keys.PREDRAFT_RUN_KEY === "queued" && /mergeRunDetail\(next\.runId, \{ \[PREDRAFT_RUN_KEY\]: true \}\)/.test(drafts), "brief report: the queue marks a landed reply run as a pre-draft");
   const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
-  ok(/recordNudgeOpened\(nudgeQuote\?\.assistNudge\?\.runId, user\.id\)/.test(inbox), "brief report: ?nudge= opening the composer records the nudge as opened");
+  ok(/after\(\(\) => recordNudgeOpened\(nudgeRunId, nudgeUserId\)\)/.test(inbox) && /nudgeUserId = user\.id/.test(inbox) && !/await recordNudgeOpened/.test(inbox) && /import \{ after \} from "next\/server"/.test(inbox), "brief report: ?nudge= opening the composer records the nudge as opened in after(), never awaited in the render");
 }
 
 if (process.argv[1] && /test-brief\.ts$/.test(process.argv[1])) {
