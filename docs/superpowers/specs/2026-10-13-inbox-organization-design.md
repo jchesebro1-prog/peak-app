@@ -1,6 +1,6 @@
 # Inbox organization — design
 
-Date: 2026-10-13 · Status: approved in brainstorm (Jeff, 2026-10-13) · Punch # and D-numbers: assigned at build (recheck `origin/main`).
+Date: 2026-10-13 · Status: approved in brainstorm (Jeff, 2026-10-13); built as punch #335, D882–D893 (the "As built" notes below record where the build differs from the first draft).
 
 Piece 1 of Jeff's AI roadmap: Inbox organization → pop-out windows → AI daily brief → estimate suggestion → AI sidebar. It builds on Assist (#334: `src/lib/assist/`, `runAssist`, the gate, `assist_runs`, and the Claude key stored in Settings, D881).
 
@@ -40,7 +40,7 @@ The pilot gate is the existing `assistGate`. It gains two new feature keys, `fil
 The pipeline runs in two places. The first is inside the existing Gmail import (`pollInbound` / `bridge.ts`), after `applyResolution`, for each thread that gained a message. It is time-boxed (§8). The second is the 90-day cleanup (§6).
 
 1. **Sender rules.** Saved rules match on the exact address first, then the domain. A rule either says "file under X" or "noise / never noise". Personal rules win over company-wide ones. Strong.
-2. **Identity.** This is the existing `resolveSender`/`applyResolution`. A contact-email match is strong. A domain match is weak and only a suggestion.
+2. **Identity.** This is the existing `resolveSender`/`applyResolution`. A contact-email match is strong. A domain match is weak and only a suggestion. *As built (D882):* a weak domain guess ranks **after** numbers and noise (a fallback), and a strong identity takes a number only when it points at the same customer's record.
 3. **Number match.** A display estimate number (`EST|FLM|RIG|REP|RNT|CON|OPP-####`, including `-2`/`-3` suffixes) is searched for in the subject, then the body. Then project ids, then lead numbers. A match links that exact record and its customer. Numbers that do not resolve to a live record are ignored. Strong.
 4. **Noise rules.** Never applied if the sender is a known customer contact or the thread is internal-only. Any of these makes a thread noise:
    - the message carries Gmail `CATEGORY_PROMOTIONS`, `CATEGORY_SOCIAL` or `CATEGORY_FORUMS` (`gmailLabelIds`);
@@ -72,7 +72,7 @@ New mail on the thread resets `skipped` to `suggested` and recomputes the sugges
 
 There are three tabs. Each user sees only their own threads (`visibleTo`).
 
-- **To file.** Every inbox thread whose `filing.state === "suggested"` and which is not noise.
+- **To file.** Every inbox thread whose `filing.state === "suggested"` and which is not noise. *As built (D889):* also a thread archive-on-reply archived without filing (`Filing.archivedOnReply`); a thread archived by hand or in Gmail never appears.
   - Each row shows: sender, subject, the suggestion ("Lincoln HS → EST-1042 Main curtain"), the reason line, a Strong/Weak chip, and a needs-reply dot.
   - Row actions:
     - **Approve**
@@ -80,7 +80,7 @@ There are three tabs. Each user sees only their own threads (`visibleTo`).
     - **Noise**
     - **Skip**
   - **Approve all strong** at the top, with a confirm that shows the count.
-- **Noise.** Newest first, each with its reason.
+- **Noise.** Newest first, each with its reason. *As built (D885):* every flagged, unrescued thread I own, moved or still in the inbox (a non-pilot user's tagged threads too).
   - **Not noise** returns the thread to the inbox and To file.
   - **Archive all shown**.
 - **Filed.** The last 14 days. Each row says how it was filed (approved / on reply / sender rule / teammate reply).
@@ -154,7 +154,7 @@ The court is recomputed on every new message. "Me" means the thread's mailbox ow
 - **Where you see them:**
   - Settings → Account → **Sender rules** lists and deletes your own rules.
   - The Assist pilot card has an admin company-wide list.
-- **Applying a new rule re-sweeps** that sender's unfiled inbox threads, the same pattern as `resweepThreads`.
+- **Applying a new rule re-sweeps** that sender's unfiled inbox threads, the same pattern as `resweepThreads`. *As built (D889):* a "file under X" rule **auto-files** (link + archive unless a reply is owed, `filedBy: "rule"`) only the person's own threads that have no customer or already carry the rule's customer; hand-linked threads and other people's threads get a strong **suggestion** only. The sweep covers inbox threads plus archived To file rows, at most 200 threads and ~20 s.
 
 ## 6. 90-day cleanup (pilot users)
 
@@ -162,11 +162,11 @@ The court is recomputed on every new message. "Me" means the thread's mailbox ow
 - It runs the full pipeline in resumable batches with a 40 s budget each (the photo-sheet and Drive-sync pattern), with progress like "212 of 480 checked".
 - It **only suggests**: nothing is linked or archived until approved. Noise moves to the Noise tab.
 - It runs the **court rules only**. The AI court reading and promise-tasks are **not** run on backlog mail, so old commitments don't flood the task list.
-- It can be re-run; already-suggested and filed threads are skipped.
+- It can be re-run. *As built (D892):* filed and dismissed threads are skipped; a thread already suggested is re-organized, which is a no-op (the pipeline keeps the same record). Rule suggestions are counted by source in the run's state blob, not in the filing log. A backlog organize keeps a live court's AI state untouched.
 
 ## 7. Promise tasks (pilot users; mail that arrives after launch)
 
-- **Trigger:** the AI reading (§3) returns promises, either on a message I or a teammate sent, or a forward note addressed to me.
+- **Trigger:** the AI reading (§3) returns promises, either on a message I or a teammate sent, or a forward note addressed to me. *As built (D888):* never from a customer's own message, and never for mail older than 7 days.
 - **Owner:**
   - the named team member;
   - else, for "we will…" / "someone will…", the message author if internal;
@@ -191,12 +191,12 @@ The court is recomputed on every new message. "Me" means the thread's mailbox ow
   - `filing`, `court`, `noise` (`noise: { flagged: boolean; reason: string; rescued?: boolean }`);
   - per-message `bulk?: boolean`, `autoSubmitted?: boolean` (new import fields).
 - **Logging:**
-  - AI calls go to the existing `assist_runs` with features `file` and `promise`. The outcome is set on approve / change / rescue / undo.
+  - AI calls go to the existing `assist_runs` with features `file` and `promise`. The outcome is set on approve / change / rescue / skip; undo is noted in the detail. *As built (D890):* a filing nobody decided (on reply, teammate reply, sender rule) leaves the outcome null and records `outcomeDetail.autoFiled`.
   - Rule-based filings append to a small capped log, the `inbox_filing_log` blob, last 2,000 entries, so the report can compare sources.
 - **Report** (Assist pilot card): filings by source, % approved as suggested, corrections, noise rescues, and promise-tasks created / undone.
 - **Failure modes:**
   - With no key, a non-pilot user, the cap reached, a refusal or an error, the pipeline stops after the free rules.
-  - AI work runs **after** the import commits, time-boxed (about 20 s per sync pass, oldest unprocessed first). It is marked `pending-ai` and resumes on the next sync, so the Gmail sync never fails or slows past its budget because of AI.
+  - AI work runs **after** the import commits, time-boxed (about 20 s per pass, court reads first, oldest unprocessed first). It is marked `pendingAi` and resumes on the next pass, so the Gmail sync never fails or slows past its budget because of AI. *As built (D887):* the pass runs in `after()` from Send/Receive and the Inbox auto-sync (deadline = action start + 240 s), per owner, under compare-and-set leases; **the Gmail cron runs no AI pass**, so AI happens on Inbox ticks.
 - **Safety:**
   - Thread text is untrusted (the existing wrapper; names are cleaned).
   - Only candidate ids are accepted, and only real team ids.
@@ -233,5 +233,5 @@ The court is recomputed on every new message. "Me" means the thread's mailbox ow
 
 ## Small defaults taken in this spec
 
-- **Peak's own domain:** derived from the team's addresses, with an optional admin override on the Assist pilot card.
-- **Rule-only noise for non-pilot users:** tagged "Looks like noise", not moved. Jeff approved this split in section 2 of the brainstorm.
+- **Peak's own domain:** `peaksystemsgroup.com` is always internal, plus the team's non-freemail domains, with an optional admin override on the Assist pilot card. *As built (D891):* the override **replaces** the derived domains (Peak's stays), and a freemail domain is refused.
+- **Rule-only noise for non-pilot users:** tagged "Looks like noise", not moved. Jeff approved this split in section 2 of the brainstorm. *As built (D885):* a manual Noise click moves the thread for everyone, and noise on a weak domain guess is tag-only even for a pilot.

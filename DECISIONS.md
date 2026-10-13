@@ -11867,3 +11867,214 @@ table incl. preview / preview + allow / unreadable, ciphertext-only blob, wrong 
 `assistKeyInfo` never carrying a key, clear nulls every field, an explicit empty `env` to `runAssist` stays closed with a
 key saved); tsc 0 errors; eslint 0 problems on the 11 changed source/test files; `next build` OK (137 static pages);
 `test:specs` 18,065 PASS / 0 FAIL ("ALL PASSED"); `test:smoke` 245 / 245, incl. /settings?section=data and /inbox 200.
+
+## D882. The filing pipeline: sender rule → identity → numbers → noise → Haiku; a weak domain guess ranks after numbers (#335, 2026-10-13)
+
+Every thread that gains a message is organized (`organizeThread`, `src/lib/inbox-org/pipeline.ts`) in a fixed order, first
+match wins: a saved **sender rule** (exact address, then domain; personal beats company), the existing **identity** match
+(a contact-email match is strong), a **record number** (`EST|FLM|RIG|REP|RNT|CON|OPP-####` incl. `-2`/`-3`, then project and
+lead ids; subject first, then body; a number that doesn't resolve to a live record is ignored), the **noise rules**, and
+for pilot owners **Haiku**. Spec §1 says "first match wins"; I read a **weak domain guess as a fallback ranked below numbers
+and noise**, because the AI step treats "only weak" as unresolved. A strong identity takes a number only when the number
+points at the same customer's record (the filing becomes identity plus work). An unresolved thread is stored as
+`{customerId: null, work: null, noise: false, strength: "weak", state: "suggested"}` and shows in To file. Forwards: the
+forwarded sender drives filing only when the forwarder is internal; a customer forwarding a third party's mail stays filed
+under the customer; the original subject is always scanned for numbers. The suggestion lives on `CommThread.filing`; a
+`filed`/`dismissed` filing is kept (only `needsReply` refreshes), `skipped` and an AI suggestion are kept until new
+outside mail. Rule suggestions append to the capped `inbox_filing_log` blob only when they change. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` pipeline checks — number in subject/body, dead number, rule beats identity,
+number-beats-weak, strong identity + number, forward parsing, filing log written once per change.
+
+## D883. Whose court it is: teammate replies stop counting against you; status follows the court (#335, 2026-10-13)
+
+`CommThread.court` ({owner: me | teammate | customer | nobody, source: rule | ai | override, basis, promise?}) is recomputed on
+every new message. Rules: the last message from the customer → **me**; from me → **customer**; from a **teammate** →
+**customer** (the fix: it no longer counts against the mailbox owner); a customer message that is only a sign-off ("thanks",
+"got it", "sounds good", ≤ ~8 words, no question mark) → **nobody**. **Forwards:** a teammate forwarding to me is a hand-off
+(court **me**), unless the note is FYI-only (court **nobody**, filed and archived on the original sender); my own forward out
+to a vendor never moves the customer thread's court; the forwarded original is parsed outermost-external-first (Gmail and
+Outlook formats), and a forward block in a later reply counts as `Fwd:`, not every reply in a thread that began as one.
+**Internal-only threads** (every participant a Peak user or on Peak's own domain) are never noise, are filed only by a
+number or a customer mention (otherwise `skipped`, no nagging), and follow the same rules between teammates. `status` keeps
+its old meaning and is kept in step: me ↔ `waiting_us`, customer/teammate ↔ `waiting_them`, nobody ↔ `closed`; a manual
+Mark replied/Close is kept until new mail, and a backlog run never reopens one. The pipeline's own writes
+(`setStatus`/`archive`/`unarchive`/`setLink`) take **`{quiet}`**, so organizing never bumps `updatedAt` or reorders the inbox.
+Morning triage's email feed reads the court (`me`) instead of raw `waiting_us`, and also requires the status to agree and the
+thread not to be flagged noise, because a court can go stale (D893). "Not on me" / "On me" in the reader set
+`source: "override"` by compare-and-set; it sticks until the next message. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` court checks — teammate reply → customer/`waiting_them`, sign-off → closed, teammate
+forward → me filed on the original sender, FYI forward → nobody, customer forward, internal-only, override sticks then ends,
+and the triage feed's court selection.
+
+## D884. Archive-on-reply for everyone; outbound never un-archives; Mark replied / Close archive (#335, 2026-10-13)
+
+When I reply (`comms.reply`, so also reply-all and forward) or a teammate's reply arrives that leaves the court on the
+customer or nobody, the thread is archived in the app and in Gmail (`pushInboxState`) — for **every** user, not only
+pilots. It is **filed first** when it already has a link or a strong suggestion (`filedBy: "reply"`, or `"teammate-reply"`);
+a weak or missing suggestion waits in To file (stamped `archivedOnReply`, D889). Settings → Account **"Keep threads in my
+inbox after I reply"** (`keepInInbox` in the user's notification prefs, default off = archive-on-reply on) turns it off per
+user; with it on, a teammate's reply still never brings back a thread the owner had archived (it is re-archived quietly).
+**`addMessage` no longer un-archives on an outbound message** — that covers app replies, sent drafts and logged outbound
+calls/meetings; inbound mail (and inbound logged calls) still un-archive, and any message that makes the court **me**
+un-archives. **Mark replied** and **Close** (`setStatusAction`) now archive too, honouring Keep, and ignore the court (after a
+manual change the court is still "me"). The post-reply step runs in `after()` (`comms.reply(…, {postReply: "caller"})`); a
+queued reply gets it when `flushOutbox` delivers it. A reply sent from Gmail itself (imported) does not archive-on-reply. A
+strong suggestion for a different customer than the thread's hand link is ignored and the hand link is filed instead; a
+foreign link is cleared and recorded so Undo restores it. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` apply checks — reply archives and files, keep-in-inbox, teammate reply archives and
+doesn't count against me, hand-off un-archives, outbound call doesn't un-archive, queued reply via `flushOutbox`, Mark
+replied/Close archive.
+
+## D885. Noise: moved for pilots, tag-only for everyone else, never on a weak domain or an internal sender (#335, 2026-10-13)
+
+Noise rules: Gmail `CATEGORY_PROMOTIONS|SOCIAL|FORUMS`, `List-Unsubscribe` or `Precedence: bulk|list` (the import now stores
+`bulk`/`autoSubmitted` per message), a `no-?reply|notifications?|mailer-daemon|bounce` local part, an `Auto-Submitted`
+header other than `no`, an out-of-office subject. **Never noise:** a known contact, an internal sender, an internal-only
+thread, a thread the owner has written in (role check, so the owner's own address imported as inbound counts), a rescued
+thread, and a sender rule `never-noise`. A **pilot** owner's noise is **moved** (`noise.moved`, archived, in the Noise tab);
+anyone else gets the tag "Looks like noise" only. Noise on a thread whose only identity is a **weak domain guess** is
+tag-only even for a pilot, and keeps the guess. AI noise moves only when the model says strong **and** no customer was
+matched or guessed. A **manual Noise click moves the thread for everyone** (an explicit choice; the filing becomes
+`dismissed`). **Not noise** sets `rescued`, un-archives, recomputes the filing, and offers a "never noise" rule; the AI
+filing never makes a rescued thread noise again, and filing a flagged thread clears the flag. The Noise tab is every
+flagged, unrescued thread I own, moved or still in the inbox ("Archive all shown" archives the tagged ones). Punch item
+#335.
+Verified: `scripts/test-inbox-org.ts` — pilot noise moved/archived/quiet, non-pilot tag-only, weak-domain tag-only, known
+contact and internal sender exempt, rescued stays rescued, filing clears the flag.
+
+## D886. AI filing and AI court/promise reading are two Assist features on Haiku: `file` and `promise` (#335, 2026-10-13)
+
+`AssistFeature` gains `file` (Haiku picks a filing target) and `promise` (Haiku reads the court and promises); each has its
+own switch on the Assist pilot card (**Inbox organization**, **Promise tasks**, on by default like the others), a model env
+var (`ASSIST_MODEL_FILE`, `ASSIST_MODEL_PROMISE`, both default `claude-haiku-5-5`), a 600/hour rate limit and a report row;
+`isOrgPilot` is the one pilot check. **Filing** runs only when the rules left a thread unresolved or weak. The model sees
+the thread in the untrusted wrapper plus a **server-built candidate list** (`id | type | label | customer`: the likely
+customer's draft/sent quotes, non-done projects and open leads, newest 15, plus the top 5 company matches); any id outside
+the list is discarded, and a result is **strong only when the model says so and the target is the matched customer or one of
+its records**. `needsReply` = the model's flag AND the court is me. **Court reading** runs on the newest message unless it is a
+pure sign-off, sees the last 3 messages and a server-verified who-wrote-each-message list, and overrides the rule court only
+for a hand-off to "me" or a named real teammate; unknown ids are dropped, a teammate equal to the owner becomes me. No
+model call on backlog mail, for a non-pilot owner, with no key, at the cap, or on a refusal — the pipeline stops after the
+free rules. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` and `scripts/test-assist.ts` (feature defaults, models, rate limits, report rows) with
+a fake provider — strong/weak, out-of-list id dropped, hand-off to a named teammate, unknown name dropped.
+
+## D887. The AI pass runs after the response, is leased, and reads live court work first; the cron runs none (#335, 2026-10-13)
+
+Rows needing AI carry `pendingAi` (filing and court). `runAiPass` runs **once per poll**, for the owners that poll synced, and
+**never inside the request**: `sendReceiveAction` and `autoSyncAction` sync with `aiPass: false` and call the pass in
+`after()` (Inbox page `maxDuration` 300) with a hard deadline of the action's start + 240 s. A call starts only inside the
+~20 s window **and** with its worst case (30 s; 60 s when a local provider can fall back to Claude) plus 5 s left before
+the deadline, so a pass is bounded at about 50 s. Concurrency: before each call the pass stamps `aiLeaseUntil` (now + 2 min)
+by compare-and-set on the court and on the filing, every later write compares against what it last wrote (new mail or
+another pass makes a stale result drop), and **`court.promisesFor = messageId` is written by compare-and-set before any task
+is created**, so two passes make one task. Trade-off accepted: a process killed between the marker and the task writes drops
+those tasks instead of duplicating them. The queue is **per owner** (SQL-filtered, so one user's 400 backlog rows can't
+starve another), **court reads before filing**, oldest first; failed calls count an attempt (gives up at 3), a pre-call
+refusal (cap, rate limit) skips the owner for the pass without one, stuck rows nobody can own are swept (50 per pass), and
+a stale-basis row is re-organized first and treated as backlog when its newest message is over 7 days old. **The
+`/api/gmail/sync` cron runs no AI pass** (`aiPass: false`: a call needs ~35 s and the cron's 60 s is already shared by the
+40 s import budget); on Vercel the server timer passes `aiPass: !process.env.VERCEL`. AI work therefore happens on Inbox ticks
+and Send/Receive. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — the deadline (no call under 35 s left; fallback doubles it), budget window and
+resume, two concurrent passes → one call and one task, live and expired leases, an exception counts an attempt, 400 backlog
+rows don't starve another user, source pins that both actions use `after()` and the cron/timer pass `aiPass: false`.
+
+## D888. Promise-tasks: deterministic id, due-date rules, owner/teammate only, under 7 days, never backlog (#335, 2026-10-13)
+
+When the court reading returns promises on a message **I or a teammate sent** (or a forward note addressed to me), a task
+is created through `createTaskOnce` with section `Email`, the thread/customer/site links, and the quote/project/lead
+from the filing **only when it is filed or strong** (else the thread's own links), `notes: "From email: …"`, tier normal,
+not `waitingOn`. **Id** `T-prm-<hash(threadId, messageId, promiseText)>`, so a re-sync never duplicates. **Owner:** the named
+real team member; else, for "we will…"/"someone will…", the message author if internal; else the thread owner; the creator
+is the promise owner. **Due** (pure `resolveDue`, America/Chicago, 5:00 pm like the task calendar): today, tomorrow, a
+weekday name (next occurrence, by text order), end of week → Friday, next week → next Monday, end of month, an explicit
+date; otherwise 2 business days after the message. **Never** from a customer's own "we will…", **never** for mail older than 7
+days (`PROMISE_MAX_AGE_MS`, a second guard behind backlog), never on the 90-day cleanup (D892). The reader shows "Task
+created: … · due Thu" with **Undo** (soft-deletes the task, drops `court.promise`, logs `discarded`; shown only while the
+task is open), and the composer offers an **unticked** "Mark '…' done?" — tasks are never auto-closed. Open: `court.promise`
+holds only the first of up to 3 promises (all 3 tasks are created). Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — `resolveDue` for every phrase and the 2-business-day-5-pm default across a weekend,
+deterministic ids, idempotent creation, owner resolution, a customer's "we will" makes none, mail over 7 days makes none,
+Undo, the composer checkbox.
+
+## D889. Sender rules, the To file scope, and what Undo restores (#335, 2026-10-13)
+
+Corrections offer a rule — "Always file mail from this sender / @domain under X", "Never / Always treat as noise" — stored in
+the `inbox_sender_rules` blob (cap 2,000; user beats company, email beats domain; company-wide needs `manage_users` and
+refuses public domains, own domains and internal addresses). **Accepting a "file under X" rule sweeps** that sender's threads:
+it **auto-files (link + archive unless a reply is owed, `filedBy: "rule"`) only the person's own threads that have no
+customer or already carry the rule's customer** (a foreign-customer link is cleared, recorded for Undo); hand-linked threads
+and other people's threads under a company rule only get a strong **suggestion**; a rule's `work` never replaces a
+hand-picked work link on the same customer. The sweep covers inbox threads plus archived To file rows, at most 200 threads
+and ~20 s, and a `skipped` thread of the person's own is reset to `suggested` first. **To file** is the person's non-deleted,
+non-draft threads with a `suggested`, non-noise filing that are **in the inbox, or were archived by archive-on-reply without
+filing** (`Filing.archivedOnReply`, cleared on filing, on un-archive and on new inbound mail, put back by Undo) — a thread
+archived by hand or in Gmail never appears. **Undo** restores only what filing changed (`filing.applied`: customer identity
+fields, work link, venue, archive, `archivedOnReply`), each part only while it is still the value filing set, and returns the
+thread to `suggested`. `approveAllStrong` (capped at 500 / 20 s) requires a To file, strong row. Settings → Account lists and
+deletes my own rules; the Assist pilot card has the admin company list. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — precedence, rule sweep (own / same-customer / hand-linked / other person's /
+archived skipped), the To file scope (Gmail-archived and hand-archived excluded, archived-on-reply included), Undo restoring
+each part, approve-all on strong rows only, rule delete authorization.
+
+## D890. Logging: auto-filings never set an AI outcome; the report counts them apart (#335, 2026-10-13)
+
+AI filings are logged in `assist_runs` (`file` runs). A human action sets the outcome — Approve `accepted`, Change/Not noise
+`edited`, Skip `discarded`, first write wins; Undo notes `undone` in the detail. A filing nobody decided (on reply, teammate
+reply, sender rule) records **`outcomeDetail.autoFiled`** (`reply` | `teammate-reply` | `rule`) and **leaves the outcome
+null**, so "% approved" isn't inflated. Rule/identity/number/noise-rule filings go to the capped `inbox_filing_log` (2,000)
+with an `action`. The Assist pilot card's report (`filingReport`, pure) has a row per source with suggested, approved,
+corrected, rescued, skipped, undone and auto-filed, **% approved = approved ÷ (approved + corrected + rescued + skipped)**
+(auto-filed excluded), court overrides, and promise-tasks created/undone (`T-prm-%` tasks, deleted = undone), for the chosen
+month. The 90-day cleanup's rule suggestions are counted in its own state blob, not the log (D892), and shown as a
+separate "From 'Organize my inbox': N suggested (by source)" line under the table. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — report math and AI/log mapping, an empty month, `autoFiled` leaves the outcome null,
+`cleanupRuleSuggestions` sums the state blobs of runs started in the month.
+
+## D891. Peak's own domain: an admin override replaces the derived domains; Peak's domain is always kept; freemail refused (#335, 2026-10-13)
+
+"Internal" means a Peak user (team list, users' emails, connected Gmail addresses) or an address on Peak's own domain.
+`ownDomainsFrom` = `peaksystemsgroup.com` (**always**, subdomains included — the shared `isPeakAddress` check) plus **either**
+the admin override on the Assist pilot card **or**, with no valid override, the team's non-freemail domains. An override
+**replaces** the derived domains, it doesn't add to them. A public mail provider (`FREEMAIL_DOMAINS`) is refused by
+`setOwnDomainOverrideAction` ("… can't be Peak's own domain"). The organization context is cached 60 s per process;
+every settings change (pilot list, feature switches, override, key save/remove, an accepted rule) calls
+`invalidateOrgContext()`. The pipeline and `inbox-identity.ts` use the same Peak domain. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — override replaces derived, Peak domain kept under any override, a freemail override
+leaves Peak's domain only, an empty team still gives Peak's domain, pipeline and identity agree.
+
+## D892. "Organize my inbox": a suggest-only 90-day cleanup, and the one-time filing-basis recompute (#335, 2026-10-13)
+
+Pilot users get an **Organize my inbox** button (Organize header) that walks their personal, live, in-inbox email threads last
+active within 90 days (newest email, capped at 5,000), not filed or dismissed, newest first, in resumable batches of 40 s
+(state blob `inbox_cleanup:<userId>`, the id list fixed at start, "212 of 480 checked", a lease against a second tab, a new
+run when the last finished or went a day stale). **It only suggests:** nothing is linked or archived (the one archive is a
+pilot's noise moving to the Noise tab), rules run as **backlog** — court rules only, **no promise-tasks and no court
+reading**, and a backlog organize **keeps a live court's `pendingAi`/lease/`promisesFor`/`promise` exactly as it is**
+(`filingOnly` AI pass; live court AI work from a sync isn't lost). The rules phase stops 15 s early and the rest of the budget
+goes to the filing AI; what doesn't fit resumes on later passes ("still with AI"). It is **not logged per entry**: the mass
+rule suggestions are counted by source in the state blob (`ruleSuggestions`) so they can't evict the 2,000-entry filing log;
+decisions on them are logged as usual. A re-run is a no-op on already-suggested threads (the pipeline keeps the same
+record). **One-time recompute:** a filing's `basis` was the newest message id; it is now the **newest outside message**
+(`filingBasisMessage`), so my own or a teammate's reply never resets a pending suggestion. Filings written before this carry
+the old basis, so the first organize of each such thread recomputes it once (the court keeps its newest-message basis).
+Internal-only threads use their newest message, and a teammate's forward of outside mail also re-bases. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — pilot-only, resumable across two batches, suggest-only, no tasks with a
+promise-reading fake model, a live court's `pendingAi` deep-equal after a batch, the summary, the lease, own replies keep a
+pending/skipped filing, new outside mail resets it.
+
+## D893. Follow-up risks accepted at ship; gates (#335, 2026-10-13)
+
+(1) **`recordMessage` appends with a whole-doc `patchDoc`**, so an org key (`filing`, `court`, `noise`) written by a
+concurrent AI pass or an apply action in that window can be clobbered; org writes themselves are key-level (`setOrg`,
+compare-and-set where it matters) and the pipeline self-heals a missing filing/court/noise on the next organize. The fix is an
+atomic append. (2) `setOrg` filing writes are last-write-wins, so an organize racing an Approve can overwrite `filed` in a
+small window. (3) A court can go stale when a status changes without a re-organize (in-app replies, Mark replied, Gmail status
+labels), which is why triage also checks `status`. (4) `autoSyncAction`'s inline `flushOutbox` still runs the post-reply
+step on the request path when it delivers offline-queued mail. (5) The AI pass scans `comms` by jsonb `pendingAi`, unindexed.
+(6) The cron runs no AI pass (D887). (7) `court.promise` keeps only the first of 3 promises (D888). (8) My own forward out
+re-bases a suggested filing, which can replace a kept AI suggestion. (9) Undo doesn't restore a cleared noise
+flag. No migration (the org fields ride the comms doc; `inbox_sender_rules`, `inbox_filing_log`, `inbox_cleanup:<userId>`
+and the own-domain override are blobs). Punch item #335.
+Verified (2026-10-13): `test:inbox-org` 701 PASS / 0 FAIL; `test:assist` 211 PASS / 0 FAIL; tsc 0 errors; eslint 0 errors, 1 warning (pre-existing `react-hooks/purity` at `src/app/(app)/page.tsx`, also on main) on the 63 changed src/ + test paths; `next build` OK (137 static pages); `test:specs` 18,780 PASS / 0 FAIL ("ALL PASSED" — one stale pin retargeted: the settings-groups file list now includes `assist-org.tsx`); `test:smoke` 248 / 248 (the three `/inbox?view=organize` tabs added to the route list; /inbox, /settings?section=data and /account 200). A first smoke run lost its dev server at `/design/specs` (57 `fetch failed`, none an HTTP error) and passed whole on re-run.

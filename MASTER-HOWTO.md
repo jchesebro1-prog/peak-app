@@ -221,6 +221,49 @@ the app calls a model:
 5. After about 30 days read the report (estimated cost, outcome per feature)
    and decide whether to keep it.
 
+## 6b. Inbox organization (#335, D882–D893)
+
+Mail now sorts itself, in two layers.
+
+**Everyone sees:**
+
+- **Replying files the thread and takes it out of the inbox.** If the thread is
+  already linked (or has a strong suggestion) it is filed first; a weak or missing
+  suggestion waits in Inbox → **Organize → To file**. It comes back when the ball is
+  in your court again (new customer mail or a hand-off). A teammate's reply no longer
+  counts against you. Mark replied and Close archive too. To turn this off, Account →
+  **Keep threads in my inbox after I reply**.
+- A **court chip** in the reader ("On you: …", "On Dana", "Waiting on customer",
+  "Done") with **Not on me** / **On me** to correct it.
+- **Looks like noise** on newsletters, promotions, no-reply and auto-replies. Known
+  customers and teammates are never marked.
+- **Sender rules.** After Change… or Not noise a one-line offer asks "Always file
+  mail from this sender / domain under X?" Accepting it files that sender's own
+  matching threads; you can list and delete your rules in Account → Sender rules.
+
+**Assist pilot users also see** (Settings → Beta → Assist pilot: tick the user, and
+the **Inbox organization** and **Promise tasks** switches):
+
+- **Organize** (Inbox → Organize) with three tabs: **To file** (suggestion, reason,
+  Strong/Weak chip: **Approve**, **Change…**, **Noise**, **Skip**, and **Approve all
+  strong**), **Noise** (**Not noise**, **Archive all shown**) and **Filed** (the last
+  14 days, **Undo**). Approve links the thread and archives it unless a reply is
+  owed; nothing is ever sent.
+- **Organize my inbox** at the top of Organize: a one-time sweep of the last 90 days
+  of unfiled inbox threads, in 40-second batches ("212 of 480 checked", press again
+  to continue). It only suggests; it never links or archives (noise moves to the
+  Noise tab) and it creates no tasks from old mail.
+- **Promise tasks.** When you or a teammate writes "I'll send the drawings Friday",
+  a task is created with that due date (2 business days at 5 pm if none is named).
+  The reader shows "Task created … · Undo"; the composer offers an unticked "Mark
+  '…' done?" when you reply.
+
+The AI part runs after a Send/Receive or Inbox refresh, not on the nightly Gmail
+cron, so it catches up as people use the Inbox. The Assist pilot card's report shows
+filings by source, % approved as suggested, corrections, noise rescues, promise-tasks
+created/undone, and an admin can set Peak's own mail domain and delete company-wide
+sender rules there.
+
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 
 Everything you need to move Peak from demo data to your real business is in

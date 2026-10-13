@@ -11958,3 +11958,47 @@ SKU (D876); gate-first actions, `quoteId: null` = discarded, a report that never
 - (5) Read the report after 30 days and make the keep / kill call.
 
 No new permission; no new env var is required (only `ANTHROPIC_API_KEY`, or the key saved in Settings — D881; optional `ASSIST_ALLOW_PREVIEW_KEY`). Migration 0039 adds the `assist_runs` table; the saved key lives in the `assist_secrets` blob (no migration).
+
+## 335. Inbox organization — filing, court, noise, promise-tasks, archive-on-reply — BUILT 2026-10-13 on `worktree-assist-layer` (D882–D893)
+
+**Asked (Jeff, 2026-10-13):** piece 1 of the AI roadmap. Spec `docs/superpowers/specs/2026-10-13-inbox-organization-design.md`,
+plan `docs/superpowers/plans/2026-10-13-inbox-organization.md`. Builds on Assist (#334). Nothing sends; filing uses the same
+link/archive paths a person would.
+
+**Done:**
+- **Everyone** — archive-on-reply (a reply, or a teammate's reply that leaves the ball with the customer, files a linked or
+  strong thread and archives it; Account → "Keep threads in my inbox after I reply" turns it off; an outbound message never
+  un-archives; Mark replied / Close archive) (D884); the rule pipeline on every imported message — sender rules → identity →
+  record numbers → noise rules, forward parsing (D882); the **court** (a teammate's reply no longer counts against you; a
+  hand-off does; sign-offs go to nobody), kept in step with `status` and read by Morning triage (D883); rule noise shown as a
+  "Looks like noise" tag (D885); sender rules you can list and delete in Account (D889).
+- **Assist pilot users** (`file` and `promise` switches on the Assist pilot card) — Haiku filing suggestions from a server-built
+  candidate list and Haiku court/promise reading (D886); the AI pass runs in `after()`, leased, per owner, court-first, with
+  no AI on the cron (D887); promise-tasks `T-prm-…` with due dates, Undo, and an unticked "Mark done?" in the composer (D888);
+  noise **moved** to the Noise tab (D885); **Organize my inbox**, the suggest-only 90-day cleanup (D892).
+- **Inbox → Organize** (`/inbox?view=organize`): To file (Approve · Change… · Noise · Skip · Approve all strong), Noise (Not
+  noise · Archive all shown), Filed (14 days, Undo), plus a rule offer after Change… / Not noise (D889). The reader shows the
+  court chip with Not on me / On me, the filing line and the promise-task line.
+- **Assist pilot card** — own-domain override with the domains in effect (D891), company sender rules (delete), and the
+  month's filing report: by source, % approved, corrections, rescues, auto-filed apart, promise-tasks created/undone, court
+  overrides, plus the cleanup's suggestions (D890).
+- Pop-out readiness: every change posts `{type: "inbox-changed", threadId}` on `BroadcastChannel("peak")`; the current window
+  just refreshes. No migration; org fields ride the comms doc, the rest are blobs.
+
+**Remaining (Jeff-gated):**
+- (1) The Claude key must be set (Settings → Beta → Assist pilot → Claude API key, D881).
+- (2) Tick the pilot users and check the new **Inbox organization** and **Promise tasks** switches on that card.
+- (3) Each pilot user presses **Organize my inbox** (Inbox → Organize), approves the strong rows, and skims To file and Noise.
+- (4) Review the To file and Noise tabs for a week, and the sender rules offered along the way (Account → Sender rules; the
+  card's company list). Read the report after a month and tune the rules/prompts.
+
+**Known follow-ups:**
+- `recordMessage` appends with a whole-doc `patchDoc`; an atomic append (or a row lock) would stop it clobbering org keys
+  written mid-write (the pipeline self-heals, D893).
+- The Gmail cron runs no AI pass, so AI filing and promise-tasks happen on Inbox ticks and Send/Receive (D887).
+- `court.promise` holds only the first of up to 3 promises (all tasks are created).
+- The `pendingAi` scan is an unindexed jsonb filter on `comms`.
+- `autoSyncAction`'s `flushOutbox` still runs the post-reply step inline when it delivers offline-queued mail.
+- Undo doesn't restore a cleared noise flag; a stale court can hide a manual `waiting_us` until the next organize.
+
+**Next roadmap pieces:** pop-out windows → AI daily brief → estimate suggestion → AI sidebar.
