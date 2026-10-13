@@ -1347,14 +1347,35 @@ export async function addMessage(
   return res;
 }
 
+/** #335 — the inbox organization step after a reply left (court recompute,
+ *  then archive-on-reply). Best-effort: never throws, so it can never fail a
+ *  send. Callers inside a request schedule it with `after()`; everything else
+ *  awaits it. */
+export async function runPostReply(threadId: string): Promise<void> {
+  try {
+    const { afterOwnReply } = await import("@/lib/inbox-org/apply");
+    await afterOwnReply(threadId);
+  } catch (err) {
+    console.error("[inbox-org] archive-on-reply failed for", threadId, err);
+  }
+}
+
+/** Whether the reply just written (the thread's newest message) has left —
+ *  a queued (offline) reply runs the post-reply step when flushOutbox
+ *  delivers it instead. */
+export function replyLeft(t: CommThread | null): boolean {
+  if (!t || t.status === "draft") return false;
+  const last = (t.messages || [])[(t.messages || []).length - 1];
+  return !!last && last.direction === "out" && !last.queued;
+}
+
 /** Reply to a thread as an email (honours offline → Outbox). #335: once the
- *  message is written (and handed to Gmail), the inbox organization step
- *  recomputes the court and archives the thread (archive-on-reply) —
- *  best-effort, it never fails the send. A queued (offline) reply hasn't
- *  left yet, so it isn't archived. */
+ *  message has left, the inbox organization step runs (`runPostReply`) —
+ *  awaited here by default; `postReply: "caller"` leaves it to the caller
+ *  (a server action schedules it with after() so the send returns fast). */
 export async function reply(
   threadId: string,
-  opts: { body?: string; status?: ThreadStatus; me?: string } = {}
+  opts: { body?: string; status?: ThreadStatus; me?: string; postReply?: "await" | "caller" } = {}
 ): Promise<CommThread | null> {
   const res = await addMessage(threadId, {
     direction: "out",
@@ -1363,13 +1384,8 @@ export async function reply(
     status: opts.status,
     me: opts.me,
   });
-  if (res && res.status !== "draft" && !hasQueued(res)) {
-    try {
-      const { afterOwnReply } = await import("@/lib/inbox-org/apply");
-      await afterOwnReply(threadId);
-    } catch (err) {
-      console.error("[inbox-org] archive-on-reply failed for", threadId, err);
-    }
+  if (opts.postReply !== "caller" && replyLeft(res)) {
+    await runPostReply(threadId);
     return (await get(threadId)) ?? res;
   }
   return res;
@@ -1380,7 +1396,7 @@ export async function reply(
  *  persisted per-message. The stored effect is identical to reply(). */
 export async function replyAll(
   threadId: string,
-  opts: { body?: string; status?: ThreadStatus; me?: string } = {}
+  opts: Parameters<typeof reply>[1] = {}
 ): Promise<CommThread | null> {
   return reply(threadId, opts);
 }
@@ -1390,7 +1406,7 @@ export async function replyAll(
  *  To is not persisted (fromToFor derives addressing from mailbox+contact). */
 export async function forward(
   threadId: string,
-  opts: { body?: string; status?: ThreadStatus; me?: string } = {}
+  opts: Parameters<typeof reply>[1] = {}
 ): Promise<CommThread | null> {
   return reply(threadId, opts);
 }
@@ -1561,16 +1577,21 @@ export async function flushOutbox(): Promise<number> {
   let n = 0;
   for (const t of list) {
     if (!hasQueued(t)) continue;
+    // #335 — a queued REPLY (an outbound email after the thread's first
+    // message) gets the post-reply step once it actually leaves
+    let repliedNow = false;
     await patchDoc<CommThread>("comms", t.id, (d) => {
-      (d.messages || []).forEach((m) => {
+      (d.messages || []).forEach((m, i) => {
         if (m.queued) {
           deliverMessage(m); // GMAIL BRIDGE SEAM (local stamp)
           n++;
+          if (i > 0 && m.direction === "out" && (!m.channel || m.channel === "email")) repliedNow = true;
         }
       });
       d.updatedAt = now();
     });
     await dispatchOutbound(t.id); // real send of the just-unqueued messages (gated)
+    if (repliedNow && t.status !== "draft") await runPostReply(t.id);
   }
   return n;
 }

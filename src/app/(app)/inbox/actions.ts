@@ -22,7 +22,9 @@ import {
   markUnread,
   reopen,
   reply,
+  replyLeft,
   restore,
+  runPostReply,
   saveDraft,
   searchThreads,
   sendDraft,
@@ -345,7 +347,9 @@ export async function replyAction(id: string, body: string, signatureHandled?: b
   if (!b) return { ok: false as const };
   const profile = await getUser(user.id);
   const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
-  await reply(id, { body: out, me: user.name });
+  // #335 — archive-on-reply runs after the response, off the send's path
+  const sent = await reply(id, { body: out, me: user.name, postReply: "caller" });
+  if (replyLeft(sent)) after(() => runPostReply(id));
   revalidate();
   return { ok: true as const };
 }

@@ -25,7 +25,6 @@ import {
   setLink,
   setOrg,
   setStatus,
-  threadsIn,
   unarchive,
   visibleTo,
   type CommThread,
@@ -183,18 +182,23 @@ function ownerIdOf(t: CommThread, ctx: OrgContext): string | null {
   return u?.id ?? null;
 }
 
-/** Log a person's (or a reply's) action on a suggestion: the AI run's
- *  outcome for an AI suggestion, the filing log otherwise. Never throws. */
+/** Log an action on a suggestion: for an AI suggestion, a person's action
+ *  sets the run's outcome (approve / change / noise / rescue / skip) or notes
+ *  an undo; an automatic filing (on reply, a teammate's reply, a sender
+ *  rule) never sets an outcome — it is noted as `autoFiled` in the run's
+ *  detail and the outcome stays null, so the pilot report counts it apart.
+ *  Anything else goes to the filing log. Never throws. */
 async function logAction(
   t: CommThread,
   f: Filing | undefined,
   action: FilingAction,
-  opts: { userId: string | null; outcome?: AssistOutcome | "undo"; state: Filing["state"]; now: number }
+  opts: { userId: string | null; outcome?: AssistOutcome | "undo" | "auto"; state: Filing["state"]; now: number }
 ): Promise<void> {
   if (!f) return;
   try {
     if (f.source === "ai" && f.runId) {
       if (opts.outcome === "undo") await mergeRunDetail(f.runId, { undone: true, undoneAt: opts.now, undoneBy: opts.userId });
+      else if (opts.outcome === "auto") await mergeRunDetail(f.runId, { autoFiled: action, autoFiledAt: opts.now });
       else if (opts.outcome && opts.userId) await setRunOutcome(f.runId, opts.userId, opts.outcome, { threadId: t.id, action });
       return;
     }
@@ -221,6 +225,9 @@ type FileOpts = {
   archive: boolean;
   quiet?: boolean;
   reason?: string;
+  /** with no work in the target, drop a work link that belongs to another
+   *  customer (it would be stale under the new customer) */
+  clearForeignLink?: boolean;
   now: number;
 };
 
@@ -245,6 +252,12 @@ async function fileThread(t: CommThread, base: Filing, target: ResolvedTarget, o
   if (w && !(t.link && t.link.type === w.type && t.link.id === w.id)) {
     applied.link = { prev: t.link ? { type: t.link.type, id: t.link.id, ...(t.link.label ? { label: t.link.label } : {}) } : null };
     await setLink(t.id, { type: w.type, id: w.id, ...(w.label ? { label: w.label } : {}) }, { quiet: true });
+  } else if (!w && o.clearForeignLink && t.link && target.customerId) {
+    const linked = await resolveWork(t.link);
+    if (linked?.customerId && linked.customerId !== target.customerId) {
+      applied.link = { prev: { type: t.link.type, id: t.link.id, ...(t.link.label ? { label: t.link.label } : {}) } };
+      await setLink(t.id, null, { quiet: true });
+    }
   }
   // linkThread to a different customer already dropped the old venue
   const siteNow = applied.customer ? null : (t.siteId ?? null);
@@ -344,7 +357,13 @@ export async function changeFiling(
   };
   if (t.noise?.flagged) await setOrg(t.id, { noise: { flagged: false, reason: "", moved: false, rescued: true } });
   const owesReply = t.court?.owner === "me";
-  const r = await fileThread(t, { ...base, strength: "strong" }, resolved, {
+  // moved noise that still owes a reply comes back to the inbox (as Not noise would)
+  let cur = t;
+  if (t.noise?.flagged && t.noise.moved && t.archived && owesReply) {
+    await unarchive(t.id, { quiet: true });
+    cur = { ...t, archived: false };
+  }
+  const r = await fileThread(cur, { ...base, strength: "strong" }, resolved, {
     filedBy: "approved",
     archive: !owesReply,
     reason: `Filed by ${me.name}`,
@@ -428,18 +447,20 @@ export async function skipFiling(threadId: string, me: OrgActor, now: number = D
 
 /** Undo a filing: put back exactly what filing changed (the work link, the
  *  venue, the customer link — each only while it is still the one filing
- *  set), let the label mirror take the Peak labels off, bring the thread back
- *  to the inbox, and return the suggestion to To file. */
+ *  set), let the label mirror take the Peak labels off, un-archive it if
+ *  filing archived it, and return the suggestion to To file. */
 export async function undoFiling(threadId: string, me: OrgActor, now: number = Date.now()): Promise<{ ok: true; filing: Filing } | ApplyFail> {
   const t = await myThread(threadId, me);
   if (!t) return NOT_FOUND();
   const f = t.filing;
   if (!f || f.state !== "filed") return fail("not-filed", "This thread isn't filed.");
   const a = f.applied ?? {};
-  if (a.link && f.work && t.link?.type === f.work.type && t.link.id === f.work.id) await setLink(t.id, a.link.prev, { quiet: true });
+  const linkStillOurs = f.work ? t.link?.type === f.work.type && t.link.id === f.work.id : !t.link;
+  if (a.link && linkStillOurs) await setLink(t.id, a.link.prev, { quiet: true });
   if (a.site && !a.customer && (t.siteId ?? null) === (f.siteId ?? null)) await setThreadSite(t.id, a.site.prev);
   if (a.customer && f.customerId) await restoreThreadIdentity(t.id, f.customerId, a.customer);
-  if (t.archived) await unarchive(t.id, { quiet: true });
+  // the archive state the thread had before filing: un-archive only what filing archived
+  if (a.archived && t.archived) await unarchive(t.id, { quiet: true });
   const filing: Filing = { ...f, state: "suggested", at: now };
   delete filing.filedBy;
   delete filing.filedAt;
@@ -460,6 +481,20 @@ export function isStrongRow(t: Pick<CommThread, "filing">): boolean {
   return !!f && f.state === "suggested" && f.strength === "strong" && !f.noise && !!(f.customerId || f.work);
 }
 
+/** A To file row: a suggestion still waiting (not noise), archived or not —
+ *  a weak suggestion on a thread archived on reply stays reachable here. */
+export function isToFileRow(t: CommThread): boolean {
+  const f = t.filing;
+  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!f && f.state === "suggested" && !f.noise;
+}
+
+/** The person's To file list (spec §2), newest first. Task 6's selector. */
+export async function toFileThreads(me: Pick<OrgActor, "name">): Promise<CommThread[]> {
+  return (await listDocs<CommThread>("comms"))
+    .filter((t) => visibleTo(t, me.name) && isToFileRow(t))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
 /** Approve every strong suggestion among `ids` (or the person's whole To file
  *  list). Weak / noise / unresolved rows are left alone. Time-boxed; `more`
  *  says some were left for the next press. */
@@ -472,7 +507,7 @@ export async function approveAllStrong(
   const budget = opts.budgetMs ?? APPROVE_ALL_BUDGET_MS;
   const list =
     ids === "all-visible"
-      ? (await threadsIn("personal", "inbox", me.name)).filter(isStrongRow).map((t) => t.id)
+      ? (await toFileThreads(me)).filter(isStrongRow).map((t) => t.id)
       : [...new Set(ids.map((x) => String(x || "").trim()).filter(Boolean))];
   let approved = 0;
   let skipped = 0;
@@ -508,9 +543,11 @@ export type RuleResult = { ok: true; rule: SenderRule; checked: number; filed: n
 /** Accept a rule offer: save the sender rule (a company-wide rule needs
  *  `manage_users`), then re-sweep that sender's unfiled threads through the
  *  pipeline. A "file under X" rule also files the person's OWN matching
- *  threads (`filedBy: "rule"`) — they just said "always" — while other
- *  people's threads only get the new suggestion. Bounded (200 threads,
- *  ~20 s); `more` = some were left for the next sync. */
+ *  threads (`filedBy: "rule"`) — they just said "always" — but only where
+ *  that can't override a hand link: the thread has no customer, or already
+ *  the rule's. Every other matched thread (someone else's, or one
+ *  hand-linked to another customer) gets the rule as a strong suggestion
+ *  only. Bounded (200 threads, ~20 s); `more` = some were left. */
 export async function acceptRuleOffer(
   offer: RuleOffer,
   choice: RuleChoice,
@@ -559,10 +596,11 @@ function senderMatches(t: CommThread, match: SenderRule["match"], ctx: OrgContex
   return match.email ? email === match.email : !!match.domain && domainOf(email) === match.domain;
 }
 
-/** Re-run the pipeline over the rule's sender's unfiled threads (the
- *  person's own for a personal rule; everyone's for a company rule), newest
- *  first. `skipped` threads of the person's own come back as suggestions —
- *  the rule is the answer they skipped. */
+/** Re-run the pipeline over the rule's sender's unfiled threads — inbox
+ *  threads plus archived ones still in To file (the person's own for a
+ *  personal rule; everyone's for a company rule), newest first. `skipped`
+ *  inbox threads of the person's own come back as suggestions — the rule is
+ *  the answer they skipped. */
 async function sweepSender(
   rule: SenderRule,
   me: OrgActor,
@@ -581,6 +619,7 @@ async function sweepSender(
         (rule.scope === "company" || visibleTo(t, me.name)) &&
         t.filing?.state !== "filed" &&
         t.filing?.state !== "dismissed" &&
+        ((!t.archived && t.gmailInboxed !== false) || isToFileRow(t)) &&
         senderMatches(t, rule.match, ctx)
     )
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -601,11 +640,13 @@ async function sweepSender(
       const fresh = await getThread(t.id);
       const f = fresh?.filing;
       if (!fresh || !f || f.source !== "rule" || f.state !== "suggested" || f.noise || !f.customerId) continue;
+      // never over a hand link to another customer: that one keeps the suggestion
+      if (fresh.customerId && fresh.customerId !== f.customerId) continue;
       const target = await resolveTarget({ customerId: f.customerId, work: f.work }, f.work?.label);
       if (!target) continue;
       const owesReply = f.needsReply && fresh.court?.owner === "me";
-      await fileThread(fresh, f, target, { filedBy: "rule", archive: !owesReply, quiet: true, now: opts.now });
-      await logAction(fresh, f, "rule", { userId: me.id, state: "filed", now: opts.now });
+      await fileThread(fresh, f, target, { filedBy: "rule", archive: !owesReply, quiet: true, clearForeignLink: true, now: opts.now });
+      await logAction(fresh, f, "rule", { userId: me.id, outcome: "auto", state: "filed", now: opts.now });
       filed++;
     } catch (err) {
       console.error("[inbox-org] rule sweep failed for", t.id, err);
@@ -652,8 +693,9 @@ export async function archiveAfterReply(
   if (f?.state !== "filed" && f?.state !== "dismissed") {
     let base: Filing | null = null;
     let target: ResolvedTarget | null = null;
-    // a strong suggestion is filed as suggested …
-    if (f && isStrongRow(t)) {
+    // a strong suggestion is filed as suggested — unless it names another
+    // customer than the thread's hand link (the hand link wins) …
+    if (f && isStrongRow(t) && !(t.customerId && f.customerId && f.customerId !== t.customerId)) {
       target = await resolveTarget({ customerId: f.customerId, siteId: f.siteId, work: f.work }, f.work?.label);
       if (target) base = f;
     }
@@ -678,13 +720,15 @@ export async function archiveAfterReply(
       if (target) base = own;
     }
     if (target && base) {
-      await fileThread(t, base, target, { filedBy: by, archive: false, now });
+      // filing archives too, so Undo knows to bring the thread back
+      await fileThread(t, base, target, { filedBy: by, archive: true, quiet: by === "teammate-reply", now });
       const ctx = await loadOrgContext();
-      await logAction(t, base, by, { userId: me?.id ?? ownerIdOf(t, ctx), outcome: "accepted", state: "filed", now });
+      // automatic: never sets an AI run's outcome (noted as autoFiled)
+      await logAction(t, base, by, { userId: me?.id ?? ownerIdOf(t, ctx), outcome: "auto", state: "filed", now });
       filed = true;
     }
   }
-  if (!t.archived) await archive(t.id, { quiet: by === "teammate-reply" });
+  if (!filed && !t.archived) await archive(t.id, { quiet: by === "teammate-reply" });
   return { ok: true, archived: true, filed };
 }
 
