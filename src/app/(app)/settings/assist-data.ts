@@ -42,8 +42,9 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     estOutcomes.clear();
   }
   // D881: where the key comes from — the card gets last4 + source, never the key.
-  const [env, keyInfo] = await Promise.all([getAssistEnv(), assistKeyInfo()]).catch((e): [Record<string, string | undefined>, AssistKeyInfo] => {
-    console.error("[assist] reading the Assist key state failed", e instanceof Error ? e.message : "");
+  // noCache: right after a save/remove on another instance, never show a stale key.
+  const [env, keyInfo] = await Promise.all([getAssistEnv({ noCache: true }), assistKeyInfo({ noCache: true })]).catch((e): [Record<string, string | undefined>, AssistKeyInfo] => {
+    console.error("[assist] reading the Assist key state failed", e instanceof Error ? e.name : "error");
     return [process.env, { source: "none", last4: null, savedAt: null, savedBy: null, unreadable: false, previewIgnored: false }];
   });
   return {

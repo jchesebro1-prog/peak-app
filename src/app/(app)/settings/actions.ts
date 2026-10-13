@@ -792,7 +792,9 @@ export async function setAssistKeyAction(raw: string): Promise<{ ok: true; last4
     const { last4 } = await saveAssistKey(key, me.name);
     revalidatePath("/", "layout");
     return { ok: true, last4 };
-  } catch {
+  } catch (e) {
+    // e.name only — never e.message: a Drizzle error embeds the query params, which here include the ciphertext.
+    console.error("[assist] saving the Assist key failed", e instanceof Error ? e.name : "error");
     return { ok: false, error: "Couldn't save the key (is AUTH_SECRET set?)." };
   }
 }
@@ -809,8 +811,10 @@ export async function clearAssistKeyAction(): Promise<{ ok: true }> {
  *  no retries). Writes no assist_runs row and spends nothing. */
 export async function testAssistKeyAction(): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   const me = await requirePerm("manage_users");
+  if ((process.env.ASSIST_DISABLED || "").trim() === "true") return { ok: false, error: "Assist is off (kill switch)." };
   if (!rateLimit(`assist-key-test:${me.id}`, 20, 3_600_000).ok) return { ok: false, error: "Too many tests — try again in a bit." };
-  const key = ((await getAssistEnv()).ANTHROPIC_API_KEY || "").trim();
+  // noCache: a warm instance must not test a key another instance just replaced or removed.
+  const key = ((await getAssistEnv({ noCache: true })).ANTHROPIC_API_KEY || "").trim();
   if (!key) return { ok: false, error: "No key set." };
   const r = await pingAnthropicKey(key);
   return r.ok ? { ok: true, message: "Key works — Claude API reachable." } : { ok: false, error: `Key test failed: ${r.error}.` };

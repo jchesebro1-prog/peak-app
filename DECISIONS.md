@@ -11859,7 +11859,9 @@ passed no `env` (tests that pass `env` never see the saved key), and the Inbox p
 early gate and the Settings status line read it too. **Never to the browser**: no action returns the key, the card gets
 `AssistKeyInfo` (source, last four, saved at/by, unreadable, preview-ignored), the input is a never-prefilled password
 field, and errors never echo it. **Test key** makes one free `models.retrieve("claude-haiku-5-5")` call (15 s, no
-retries, 20 per hour per admin) and writes no `assist_runs` row. No migration, no new required env var. Punch item #334.
+retries, 20 per hour per admin) and writes no `assist_runs` row. A leaked key must be revoked in the Anthropic Console —
+Remove only stops this app using it (other server instances may keep it for up to ~30 s). No migration, no new required
+env var. Punch item #334.
 Verified (2026-10-13): `test:assist` 197 PASS / 0 FAIL (37 new `assistKeyChecks`: `cleanApiKey`, the precedence truth
 table incl. preview / preview + allow / unreadable, ciphertext-only blob, wrong secret = unreadable, `getAssistEnv`,
 `assistKeyInfo` never carrying a key, clear nulls every field, an explicit empty `env` to `runAssist` stays closed with a

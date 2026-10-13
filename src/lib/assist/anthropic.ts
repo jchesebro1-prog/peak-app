@@ -2,6 +2,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessage } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import type { AssistProvider, Env, ProviderRequest, ProviderResult, ProviderUsage } from "./types";
+import { FALLBACK_HAIKU } from "./models";
 
 export const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
@@ -52,7 +53,6 @@ function clientFor(env: Env): Anthropic {
   return cached.client;
 }
 
-export const KEY_TEST_MODEL = "claude-haiku-5-5";
 export const KEY_TEST_TIMEOUT_MS = 15_000;
 
 /**
@@ -62,7 +62,7 @@ export const KEY_TEST_TIMEOUT_MS = 15_000;
  */
 export async function pingAnthropicKey(apiKey: string): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    await new Anthropic({ apiKey }).models.retrieve(KEY_TEST_MODEL, null, { timeout: KEY_TEST_TIMEOUT_MS, maxRetries: 0 });
+    await new Anthropic({ apiKey }).models.retrieve(FALLBACK_HAIKU, null, { timeout: KEY_TEST_TIMEOUT_MS, maxRetries: 0 });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: anthropicErrorMessage(e).error };

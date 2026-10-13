@@ -561,12 +561,12 @@ export async function assistKeyChecks(ok: Ok): Promise<void> {
   const runSrc = readFileSync("src/lib/assist/run.ts", "utf8");
   ok(/const env = deps\.env \?\? \(await getAssistEnv\(\)\)/.test(runSrc), "assist key: runAssist uses the stored key only when the caller passed no env");
   for (const f of ["src/app/(app)/inbox/assist-actions.ts", "src/app/(app)/inbox/page.tsx", "src/app/(app)/settings/assist-data.ts"]) {
-    ok(readFileSync(f, "utf8").includes("getAssistEnv()"), `assist key: ${f} reads the effective env`);
+    ok(readFileSync(f, "utf8").includes("getAssistEnv("), `assist key: ${f} reads the effective env`);
   }
   const card = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");
   ok(!/from "@\/lib\/assist\/key-store"/.test(card) && !/from "@\/lib\/stores\//.test(card) && /type="password"/.test(card) && /autoComplete="off"/.test(card), "assist key: the card imports no key-store/store module and uses a password input");
   const anth = readFileSync("src/lib/assist/anthropic.ts", "utf8");
-  ok(/models\.retrieve\(KEY_TEST_MODEL, null, \{ timeout: KEY_TEST_TIMEOUT_MS, maxRetries: 0 \}\)/.test(anth), "assist key: Test key is one models.retrieve, 15 s, no retries");
+  ok(/models\.retrieve\(FALLBACK_HAIKU, null, \{ timeout: KEY_TEST_TIMEOUT_MS, maxRetries: 0 \}\)/.test(anth) && !anth.includes("KEY_TEST_MODEL"), "assist key: Test key is one models.retrieve of FALLBACK_HAIKU, 15 s, no retries");
   const act = readFileSync("src/app/(app)/settings/actions.ts", "utf8");
   const testFn = act.slice(act.indexOf("export async function testAssistKeyAction"), act.indexOf("/* ---- Pipelines"));
   ok(testFn.includes('requirePerm("manage_users")') && !testFn.includes("createRun") && !testFn.includes("runAssist"), "assist key: testAssistKeyAction is admin-only and writes no assist_runs row");
@@ -610,6 +610,26 @@ export async function assistKeyChecks(ok: Ok): Promise<void> {
     threw = "";
     try { await saveAssistKey(K, "x", { ...deps, secret: "" }); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
     ok(/AUTH_SECRET/.test(threw) && !threw.includes(K), "assist key: no secret = refuse to store");
+    // The 30 s cache path (no noCache): save and clear invalidate a warm cache,
+    // and a read in flight across a clear can't put the old key back.
+    const cached = { secret: "test-secret", env: {} as Record<string, string> };
+    resetAssistKeyCache();
+    ok((await readAssistKey(cached)).stored === K && (await readAssistKey(cached)).stored === K, "assist key cache: warm read returns the saved key");
+    await saveAssistKey(K2, "Jeff Tester", cached);
+    ok((await readAssistKey(cached)).stored === K2, "assist key cache: save invalidates a warm cache");
+    const inFlight = readAssistKey(cached);
+    await clearAssistKey();
+    await inFlight;
+    ok((await readAssistKey(cached)).stored === null, "assist key cache: clear invalidates a warm cache, even with a read in flight");
+    await saveAssistKey(K, "Jeff Tester", cached);
+    ok((await readAssistKey(cached)).stored === K, "assist key cache: a re-save after clear reads back through the cache");
+    const ksSrc = readFileSync("src/lib/assist/key-store.ts", "utf8");
+    ok(/const gen = generation;[\s\S]*getBlob[\s\S]*gen === generation\) cache =/.test(ksSrc), "assist key cache: the cache is written only if no save/clear ran during the read");
+    ok(/getAssistEnv\(\{ noCache: true \}\)/.test(testFn) && testFn.indexOf("ASSIST_DISABLED") < testFn.indexOf("pingAnthropicKey") && testFn.includes("Assist is off (kill switch)."), "assist key: Test key reads uncached and stops at the kill switch before any network call");
+    const vmSrcKey = readFileSync("src/app/(app)/settings/assist-data.ts", "utf8");
+    ok(vmSrcKey.includes("getAssistEnv({ noCache: true })") && vmSrcKey.includes("assistKeyInfo({ noCache: true })"), "assist key: the Settings card reads the key state uncached");
+    const setFn = act.slice(act.indexOf("export async function setAssistKeyAction"), act.indexOf("export async function clearAssistKeyAction"));
+    ok(/console\.error\([^)]*e\.name/.test(setFn) && !/console\.error\([^;]*e\.message/.test(setFn), "assist key: a failed save logs e.name only, never e.message");
     await clearAssistKey();
     const cleared = await rawRow();
     const cd = (cleared?.data ?? {}) as Record<string, unknown>;

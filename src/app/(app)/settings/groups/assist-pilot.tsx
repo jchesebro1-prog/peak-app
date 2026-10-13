@@ -164,7 +164,12 @@ function AssistKeyBlock({ keyInfo }: { keyInfo: AssistVM["keyInfo"] }) {
             disabled={!!busy}
             style={busy ? { opacity: 0.5, cursor: "not-allowed", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
             onClick={() => {
-              if (!confirm("Remove the saved Claude API key? Assist falls back to the Vercel env var, if one is set.")) return;
+              if (
+                !confirm(
+                  "Remove the saved Claude API key? Assist falls back to the Vercel env var, if one is set.\n\nA leaked key must be revoked in the Anthropic Console — Remove only stops this app using it (other server instances may keep it for up to ~30 s)."
+                )
+              )
+                return;
               void go("clear", () => clearAssistKeyAction(), "Key removed.");
             }}
           >

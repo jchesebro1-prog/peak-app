@@ -51,6 +51,16 @@ export type StoredKeyRead = {
 
 const CACHE_MS = 30_000;
 let cache: { secret: string; at: number; value: StoredKeyRead } | null = null;
+/**
+ * Bumped on every save/clear (before AND after the write). A cached read
+ * captures it before getBlob and writes the cache only if it is unchanged, so
+ * a read in flight across a save/clear can never put the old key back.
+ */
+let generation = 0;
+function invalidate(): void {
+  generation++;
+  cache = null;
+}
 
 function secretOf(deps: KeyDeps): string {
   return deps.secret ?? process.env.AUTH_SECRET ?? "";
@@ -69,15 +79,23 @@ export async function saveAssistKey(plain: string, by: string, deps: KeyDeps = {
     savedAt: deps.now ?? Date.now(),
     savedBy: (by || "").slice(0, 120) || null,
   };
-  await setBlob(ASSIST_SECRETS_BLOB, row);
-  cache = null;
+  invalidate();
+  try {
+    await setBlob(ASSIST_SECRETS_BLOB, row);
+  } finally {
+    invalidate();
+  }
   return { last4 };
 }
 
 /** Remove the stored key (setBlob merges, so the fields are nulled). */
 export async function clearAssistKey(): Promise<void> {
-  await setBlob(ASSIST_SECRETS_BLOB, { ...EMPTY });
-  cache = null;
+  invalidate();
+  try {
+    await setBlob(ASSIST_SECRETS_BLOB, { ...EMPTY });
+  } finally {
+    invalidate();
+  }
 }
 
 /** Decrypt the stored key. Never throws: a DB error reads as "nothing stored". */
@@ -85,11 +103,13 @@ export async function readAssistKey(deps: KeyDeps = {}): Promise<StoredKeyRead> 
   const secret = secretOf(deps);
   const now = deps.now ?? Date.now();
   if (!deps.noCache && cache && cache.secret === secret && now - cache.at < CACHE_MS) return cache.value;
+  const gen = generation;
   let row: AssistSecretsBlob;
   try {
     row = await getBlob<AssistSecretsBlob>(ASSIST_SECRETS_BLOB, { ...EMPTY });
   } catch (e) {
-    console.error("[assist] reading the stored Assist key failed — using the env var", e instanceof Error ? e.message : "");
+    // e.name only: a driver error message can embed query params.
+    console.error("[assist] reading the stored Assist key failed — using the env var", e instanceof Error ? e.name : "error");
     return { stored: null, storedUnreadable: false, last4: null, savedAt: null, savedBy: null };
   }
   const meta = {
@@ -111,7 +131,7 @@ export async function readAssistKey(deps: KeyDeps = {}): Promise<StoredKeyRead> 
     }
     value = plain ? { stored: plain, storedUnreadable: false, ...meta } : { stored: null, storedUnreadable: true, ...meta };
   }
-  if (!deps.noCache) cache = { secret, at: now, value };
+  if (!deps.noCache && gen === generation) cache = { secret, at: now, value };
   return value;
 }
 
@@ -146,5 +166,5 @@ export async function assistKeyInfo(deps: KeyDeps = {}): Promise<AssistKeyInfo> 
 
 /** Test hook: forget the cached decrypt. */
 export function resetAssistKeyCache(): void {
-  cache = null;
+  invalidate();
 }

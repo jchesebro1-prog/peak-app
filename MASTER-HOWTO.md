@@ -211,6 +211,8 @@ the app calls a model:
    production — a key saved in Settings wins over it, and preview deploys ignore
    the saved key unless `ASSIST_ALLOW_PREVIEW_KEY=true`. See `.env.example` for
    the optional `ASSIST_*` overrides; `ASSIST_DISABLED=true` is the kill switch.
+   A leaked key must be revoked in the Anthropic Console — Remove only stops this
+   app using it (other server instances may keep it for up to ~30 s).
 3. In Settings → Beta → Assist pilot, tick the pilot users. An empty list means
    nobody. The same card has the three feature toggles, the cap and the report.
 4. Try each button on a real thread. Assist only drafts: tasks need a tick,
