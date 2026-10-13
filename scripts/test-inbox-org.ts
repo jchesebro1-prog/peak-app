@@ -24,6 +24,7 @@ import { addMessage, archive, flushOutbox, reinboxFromGmail, reply, replyLeft, r
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, loadOrgContext, organizeThread } from "@/lib/inbox-org/pipeline";
 import { onMyCourt, selectEmail } from "@/lib/triage/feeds/email";
+import { courtIsCurrent } from "@/lib/inbox-org/court-current";
 import { organizeAfterImport, recordMessage } from "@/lib/gmail/bridge";
 import { saveContact, setEmails } from "@/lib/identity/contacts";
 import { INTERNAL_DOMAIN as INBOX_IDENTITY_INTERNAL_DOMAIN, firstRecipient } from "@/lib/inbox-identity";
@@ -966,6 +967,28 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     ok(!picked.some((c) => c.key === "email:C-g"), "org triage: a flagged-noise thread is never picked");
     ok(picked[0]?.since === T0, "org triage: the row dates from the last inbound");
     ok(onMyCourt({ court: undefined, status: "waiting_us" }) && !onMyCourt({ court: court("teammate"), status: "waiting_us" }) && !onMyCourt({ court: court("me"), status: "replied" }), "org triage: onMyCourt");
+    /* D901 — a stale court (new mail never organized) doesn't hide that mail; the kill switch reads status only */
+    const newMsgs = [
+      { id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" },
+      { id: "m2", at: T0 + 60_000, direction: "out", channel: "email", author: "Mike", body: "On it" },
+      { id: "m3", at: T0 + 120_000, direction: "in", channel: "email", author: "Pat", body: "Any news?" },
+    ];
+    const staleCust: Court = { owner: "customer", reason: "", source: "rule", at: T0 + 60_000, basis: "m2" };
+    const fresh = selectEmail(
+      [
+        tri("S-stale", { court: staleCust, messages: newMsgs }),
+        tri("S-current", { court: { ...staleCust, basis: "m3" }, messages: newMsgs }),
+        tri("S-nobasis", { court: { owner: "customer", reason: "", source: "rule", at: T0 + 60_000 }, messages: newMsgs }),
+      ],
+      { quotes: new Map(), leads: new Map() },
+      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+    );
+    ok(fresh.map((c) => c.key).join(",") === "email:S-stale,email:S-nobasis", "org triage: a stale customer court plus new inbound mail → picked (status decides); a current customer court still hides it");
+    ok(courtIsCurrent({ court: { basis: "m3", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: { basis: "m2", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: null, messages: newMsgs }) && courtIsCurrent({ court: { basis: "x", at: 0 }, messages: [] }), "org triage: courtIsCurrent follows the newest email message's id");
+    ok(courtIsCurrent({ court: { at: T0 }, messages: [{ id: "c", at: T0 + 5, channel: "call" }, { id: "e", at: T0, channel: "email" }] }), "org triage: a newer call / meeting doesn't make the court stale");
+    const KILL = { INBOX_ORG_DISABLED: "true" };
+    ok(onMyCourt({ court: court("customer"), status: "waiting_us" }, KILL) && onMyCourt({ court: court("me"), status: "waiting_us", noise: { flagged: true, reason: "promo", moved: false } }, KILL) && !onMyCourt({ court: court("me"), status: "waiting_them" }, KILL), "org triage: kill switch on → status only (court and noise tag ignored)");
+    ok(!onMyCourt({ court: court("customer"), status: "waiting_us" }, {}), "org triage: kill switch off → a current customer court still hides it");
 
     /* 8. the import hook: organize errors never break recordMessage */
     let threw = false;
@@ -981,7 +1004,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const recBody = bridgeSrc.slice(bridgeSrc.indexOf("export async function recordMessage("), bridgeSrc.indexOf("async function userNameOfKey("));
     ok((recBody.match(/await organizeAfterImport\((existing\.id|id), org(, undefined, \{ wasArchived \})?\)/g) || []).length === 2, "org hook: recordMessage organizes on both the existing-thread and the new-thread path");
     ok(recBody.indexOf("await organizeAfterImport(existing.id, org, undefined, { wasArchived })") > recBody.indexOf("await patchDoc<CommThread>(\"comms\", existing.id") && recBody.indexOf("await organizeAfterImport(id, org)") > recBody.indexOf("insertDocIfAbsent"), "org hook: organizing runs after the write resolves");
-    ok(bridgeSrc.includes("const next = t.court ? t.status : deriveStatus(") && bridgeSrc.includes("if (!d.court && (d.status ==="), "org hook: rederiveStatuses leaves a court-driven status alone");
+    ok(bridgeSrc.includes("const next = courtIsCurrent({ court: t.court, messages: sorted }) ? t.status : deriveStatus(") && bridgeSrc.includes("if (!courtIsCurrent(d) && (d.status ==="), "org hook: rederiveStatuses leaves a current court's status alone and re-derives under a stale one (D901)");
     ok(bridgeSrc.includes("backlog: !info.initialImportDone") && bridgeSrc.includes("appendFilingLogs(org.log.splice(0))"), "org hook: the 90-day import is backlog; the filing log is appended once per sync");
     // a real import: the hook organizes the new thread; a failing organize still returns the id
     invalidateOrgContext();

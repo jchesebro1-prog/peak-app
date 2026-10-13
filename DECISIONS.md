@@ -12169,3 +12169,8 @@ team is told that replies, Mark replied, Close and teammate replies now archive 
 Verified: the import hook doesn't organize, `archiveAfterReply` and the post-reply step archive nothing, the AI pass does
 nothing, source pins on `setStatusAction` and `scheduleAiPass`, `.env.example` names it.
 Final-review wave (D894–D900) verified 2026-10-13: `test:inbox-org` 741 PASS / 0 FAIL; `test:assist` 213 PASS / 0 FAIL; tsc 0 errors; eslint 0 errors / 0 warnings on the 15 changed `.ts`/`.tsx` paths; `next build` OK (137 static pages); `test:specs` 18,822 PASS / 0 FAIL ("ALL PASSED", no pin changed); `test:smoke` 248 / 248 (`/inbox`, the three `/inbox?view=organize` tabs, `/settings?section=data` and `/account` 200).
+
+## D901. Triage and the status re-derive ignore a stale court (#335, 2026-10-13)
+
+A court not computed against the thread's newest email message (`court.basis` ≠ that id; no basis → judged by time; `src/lib/inbox-org/court-current.ts`) is stale — organizing failed, or `INBOX_ORG_DISABLED` is on — and must not hide new customer mail. `onMyCourt` (Morning triage's email feed) then decides by status alone, and with the kill switch on reads only the status (court and noise tag ignored). `rederiveStatuses` (Gmail bridge) keeps a court-driven status only while the court is current; under a stale court it re-derives the status as before #335. Punch item #335.
+Verified: `scripts/test-inbox-org.ts` — a stale customer court plus new inbound mail is picked, a current one still hides it, a newer call doesn't make the court stale, kill switch on → status only, and the retargeted `rederiveStatuses` pin; `test:inbox-org` 746/0, `test:assist` 213/0, tsc 0, eslint 0 on the 4 changed files, `next build` OK (137 pages).

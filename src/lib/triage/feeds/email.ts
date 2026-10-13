@@ -1,4 +1,6 @@
 import { lastInbound, waitingSince, type CommThread } from "@/lib/stores/comms";
+import { courtIsCurrent } from "@/lib/inbox-org/court-current";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { isOpen as leadIsOpen } from "@/lib/stores/leads";
 import { sameName } from "@/lib/quote-approval-rules";
 import { money } from "@/lib/format";
@@ -34,9 +36,19 @@ export function linkedDealLabel(t: Pick<CommThread, "link">, deals: DealIndex): 
  *  the court says "me"). Status stays the gate because in-app replies, Mark
  *  replied / Close and Gmail status labels change it without re-organizing
  *  the thread — a court can be stale, a status can't. A teammate's reply
- *  (court customer) no longer counts against me; noise never does. */
-export function onMyCourt(t: Pick<CommThread, "court" | "status" | "noise">): boolean {
-  return t.status === "waiting_us" && (!t.court || t.court.owner === "me") && !t.noise?.flagged;
+ *  (court customer) no longer counts against me; noise never does. D901: a
+ *  court not computed against the newest email message (organizing failed or
+ *  INBOX_ORG_DISABLED is on) is ignored — status alone decides — and while
+ *  the kill switch is on only the status counts (court and noise tag unread). */
+export function onMyCourt(
+  t: Pick<CommThread, "court" | "status" | "noise"> & { messages?: CommThread["messages"] },
+  env?: Record<string, string | undefined>
+): boolean {
+  if (t.status !== "waiting_us") return false;
+  if (inboxOrgDisabled(env)) return true; // status only — no court, no noise tag
+  if (t.noise?.flagged) return false;
+  if (!t.court || !courtIsCurrent(t)) return true;
+  return t.court.owner === "me";
 }
 
 /**

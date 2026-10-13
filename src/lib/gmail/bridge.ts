@@ -62,6 +62,7 @@ import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
 import { interpretLabelEvents } from "./label-interpret";
 import { appendFilingLogs, type FilingLogEntry } from "@/lib/stores/inbox-org";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { courtIsCurrent } from "@/lib/inbox-org/court-current";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -461,15 +462,16 @@ async function rederiveStatuses(key: MailboxKey): Promise<number> {
     if (t.status !== "waiting_us" && t.status !== "waiting_them") continue;
     if ((t.gmailAccountKey ?? keyForThreadWith(t, users)) !== key) continue;
     const sorted = [...(t.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
-    // #335 — a thread the organization pipeline has a court for keeps the
-    // court's status (a teammate's reply is waiting_them, not waiting_us);
-    // only the message order is still repaired here.
-    const next = t.court ? t.status : deriveStatus({ status: t.status, messages: sorted });
+    // #335 — a thread the organization pipeline has a CURRENT court for keeps
+    // the court's status (a teammate's reply is waiting_them, not waiting_us);
+    // only the message order is still repaired here. A stale court (newer
+    // mail never organized — D901) is ignored: the status is re-derived.
+    const next = courtIsCurrent({ court: t.court, messages: sorted }) ? t.status : deriveStatus({ status: t.status, messages: sorted });
     const orderChanged = sorted.some((m, i) => m !== (t.messages || [])[i]);
     if (next === t.status && !orderChanged) continue;
     await patchDoc<CommThread>("comms", t.id, (d) => {
       d.messages = [...(d.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
-      if (!d.court && (d.status === "waiting_us" || d.status === "waiting_them")) d.status = deriveStatus(d);
+      if (!courtIsCurrent(d) && (d.status === "waiting_us" || d.status === "waiting_them")) d.status = deriveStatus(d);
     });
     queueLabelSync(t.id);
     changed++;
