@@ -1,5 +1,6 @@
 import { outsideTransaction } from "@/db";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -1097,23 +1098,77 @@ export function clearArchivedOnReply(d: CommThread): void {
   }
 }
 
+/** #335 (D896) — a quiet (pipeline / apply) write of one top-level key: an
+ *  in-SQL `doc || {key: value}`, never a whole-doc rewrite, so a message the
+ *  Gmail import appends meanwhile is kept. null = missing / deleted thread. */
+async function quietKeyWrite(id: string, key: "archived" | "status", value: unknown): Promise<CommThread | null> {
+  const res = await patchDocKey("comms", [id], key, value);
+  return res.ids.length ? getDoc<CommThread>("comms", id) : null;
+}
+
+/** #335 (D896) — drop `filing.archivedOnReply` by compare-and-set on the
+ *  filing key (a concurrent filing write wins; it is re-read and retried). */
+async function clearArchivedOnReplyKey(id: string): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    const f = (await getDoc<CommThread>("comms", id))?.filing;
+    if (!f?.archivedOnReply) return;
+    const next = { ...f };
+    delete next.archivedOnReply;
+    if (await casDocKey("comms", id, "filing", f, next)) return;
+  }
+}
+
 export async function archive(id: string, opts: QuietOpt = {}): Promise<CommThread | null> {
-  const t = await patchDoc<CommThread>("comms", id, (d) => {
-    d.archived = true;
-    if (!opts.quiet) touch(d);
-  });
+  const t = opts.quiet
+    ? await quietKeyWrite(id, "archived", true)
+    : await patchDoc<CommThread>("comms", id, (d) => {
+        d.archived = true;
+        touch(d);
+      });
   await dispatchInboxState(id, false); // two-way archive (D74)
   return t;
 }
 
 export async function unarchive(id: string, opts: QuietOpt = {}): Promise<CommThread | null> {
-  const t = await patchDoc<CommThread>("comms", id, (d) => {
-    d.archived = false;
-    clearArchivedOnReply(d);
-    if (!opts.quiet) touch(d);
-  });
+  let t: CommThread | null;
+  if (opts.quiet) {
+    t = await quietKeyWrite(id, "archived", false);
+    if (t?.filing?.archivedOnReply) {
+      await clearArchivedOnReplyKey(id);
+      t = await getDoc<CommThread>("comms", id);
+    }
+  } else {
+    t = await patchDoc<CommThread>("comms", id, (d) => {
+      d.archived = false;
+      clearArchivedOnReply(d);
+      touch(d);
+    });
+  }
   await dispatchInboxState(id, true); // two-way archive (D74)
   return t;
+}
+
+/** The Gmail bridge's record of whether the thread is in Gmail's INBOX
+ *  (D74), written as one key (D896) so it never rewrites the messages. */
+export async function setGmailInboxed(id: string, inboxed: boolean): Promise<boolean> {
+  return (await patchDocKey("comms", [id], "gmailInboxed", inboxed)).ids.length > 0;
+}
+
+/** #335 (D898) — the person moved the thread back to Gmail's INBOX
+ *  (gmailInboxed false → true on reconcile): it comes back in the app too —
+ *  `archived` false and `filing.archivedOnReply` cleared — so a thread
+ *  archived on reply and re-inboxed in Gmail isn't left hidden in the app.
+ *  Pipeline-moved noise brought back this way counts as rescued (like Not
+ *  noise), so the next organize doesn't move it out again.
+ *  Key-level writes only; no push back to Gmail (it is already there). */
+export async function reinboxFromGmail(id: string): Promise<void> {
+  if (!(await setGmailInboxed(id, true))) return;
+  await patchDocKey("comms", [id], "archived", false);
+  await clearArchivedOnReplyKey(id);
+  const noise = (await getDoc<CommThread>("comms", id))?.noise;
+  if (noise?.flagged && noise.moved) {
+    await casDocKey("comms", id, "noise", noise, { flagged: false, reason: "", moved: false, rescued: true });
+  }
 }
 
 /* ---- flag / pin / category (Outlook parity) ------------------------------- */
@@ -1367,6 +1422,8 @@ export async function addMessage(
  *  awaits it. */
 export async function runPostReply(threadId: string): Promise<void> {
   try {
+    // D900 — INBOX_ORG_DISABLED=true: no court recompute, no archive-on-reply
+    if (inboxOrgDisabled()) return;
     const { afterOwnReply } = await import("@/lib/inbox-org/apply");
     await afterOwnReply(threadId);
   } catch (err) {
@@ -1786,14 +1843,18 @@ export async function setStatus(
   status: string,
   opts: QuietOpt = {}
 ): Promise<CommThread | null> {
-  const res = await patchDoc<CommThread>("comms", threadId, (t) => {
-    t.status = (STATUSES as readonly string[]).includes(status)
-      ? (status as ThreadStatus)
-      : t.status;
-    // #335 — the organization pipeline keeps status in step with the court
-    // quietly (see QuietOpt); a person's status change still touches.
-    if (!opts.quiet) touch(t);
-  });
+  // #335 — the organization pipeline keeps status in step with the court
+  // quietly (see QuietOpt) as a key-level write (D896); a person's status
+  // change still touches.
+  const valid = (STATUSES as readonly string[]).includes(status);
+  const res = opts.quiet
+    ? valid
+      ? await quietKeyWrite(threadId, "status", status)
+      : await get(threadId)
+    : await patchDoc<CommThread>("comms", threadId, (t) => {
+        t.status = valid ? (status as ThreadStatus) : t.status;
+        touch(t);
+      });
   if (res) queuePeakLabelSync(threadId);
   return res;
 }

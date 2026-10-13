@@ -13,6 +13,8 @@ import {
   deriveStatus,
   isAutoDeliverable,
   lastInbound,
+  reinboxFromGmail,
+  setGmailInboxed,
   statusFromDirection,
   type CommMessage,
   type CommThread,
@@ -59,6 +61,7 @@ import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
 import { interpretLabelEvents } from "./label-interpret";
 import { appendFilingLogs, type FilingLogEntry } from "@/lib/stores/inbox-org";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -210,6 +213,8 @@ export async function organizeAfterImport(
   opts: { wasArchived?: boolean } = {}
 ): Promise<void> {
   try {
+    // D900 — INBOX_ORG_DISABLED=true: imported mail is left as the import wrote it
+    if (inboxOrgDisabled()) return;
     const fn: Organize = organize ?? (await import("@/lib/inbox-org/pipeline")).organizeThread;
     const organized = await fn(threadId, { backlog: run.backlog, log: run.log });
     // a teammate's reply that left the court with the customer (or nobody)
@@ -424,9 +429,10 @@ async function reconcileInboxState(key: MailboxKey): Promise<number> {
     )
       continue;
     if (t.gmailInboxed !== desired) {
-      await patchDoc<CommThread>("comms", t.id, (d) => {
-        d.gmailInboxed = desired;
-      });
+      // D898 — re-inboxed in Gmail (an explicit false → true): it comes back
+      // in the app as well (archived off, archivedOnReply cleared)
+      if (desired && t.gmailInboxed === false) await reinboxFromGmail(t.id);
+      else await setGmailInboxed(t.id, desired);
       flips++;
     }
   }
@@ -563,9 +569,7 @@ export async function pushInboxState(
   await modifyThread(key, t.gmailThreadId, {
     [inboxed ? "addLabelIds" : "removeLabelIds"]: ["INBOX"],
   });
-  await patchDoc<CommThread>("comms", threadId, (d) => {
-    d.gmailInboxed = inboxed;
-  });
+  await setGmailInboxed(threadId, inboxed); // key-level (D896)
 }
 
 /**
