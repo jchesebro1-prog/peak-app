@@ -22,6 +22,7 @@ import { assistSettingsOf, cleanApiKey } from "@/lib/assist/config";
 import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
 import { pingAnthropicKey } from "@/lib/assist/anthropic";
 import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
+import { FREEMAIL_DOMAINS } from "@/lib/inbox-org/internal";
 import { removeSenderRule, setOwnDomainOverride } from "@/lib/stores/inbox-org";
 import { rateLimit } from "@/lib/rate-limit";
 import { saveEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
@@ -810,6 +811,8 @@ export async function setOwnDomainOverrideAction(value: string): Promise<{ ok: t
   const parts = raw.split(/[\s,;]+/).filter(Boolean);
   const bad = parts.find((d) => !/^@?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(d));
   if (bad) return { ok: false, error: `"${bad.slice(0, 60)}" isn't a domain (like peaksystemsgroup.com).` };
+  const free = parts.find((d) => FREEMAIL_DOMAINS.has(d.toLowerCase().replace(/^@+/, "")));
+  if (free) return { ok: false, error: `${free.replace(/^@+/, "")} is a public mail provider — it can't be Peak's own domain (everyone there would count as a teammate).` };
   await setOwnDomainOverride(parts.join(", "));
   invalidateOrgContext();
   revalidatePath("/", "layout");
@@ -824,6 +827,8 @@ export async function setAssistKeyAction(raw: string): Promise<{ ok: true; last4
   if (!key) return { ok: false, error: "That doesn't look like a Claude API key (it starts with sk-ant-)." };
   try {
     const { last4 } = await saveAssistKey(key, me.name);
+    // #335 — the org context carries the Assist env (the pilot gate)
+    invalidateOrgContext();
     revalidatePath("/", "layout");
     return { ok: true, last4 };
   } catch (e) {
@@ -837,6 +842,7 @@ export async function setAssistKeyAction(raw: string): Promise<{ ok: true; last4
 export async function clearAssistKeyAction(): Promise<{ ok: true }> {
   await requirePerm("manage_users");
   await clearAssistKey();
+  invalidateOrgContext();
   revalidatePath("/", "layout");
   return { ok: true };
 }

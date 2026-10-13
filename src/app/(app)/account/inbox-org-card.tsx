@@ -23,6 +23,7 @@ export default function InboxOrgCard({ keepInInbox, rules }: { keepInInbox: bool
     start(async () => {
       try {
         await setKeepInInboxAction(v);
+        setNote(null);
       } catch {
         setOn(!v);
         setNote("Couldn't save — try again.");

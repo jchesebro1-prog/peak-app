@@ -282,7 +282,10 @@ async function fileThread(t: CommThread, base: Filing, target: ResolvedTarget, o
   };
   if (!target.siteId) delete filing.siteId;
   delete filing.archivedOnReply;
-  await setOrg(t.id, { filing });
+  // a filed thread is no longer noise (else it shows in Filed AND Noise, and
+  // Not noise refuses a filed thread) — cleared the way Not noise / Change…
+  // clear it (`rescued`, so the rules don't re-flag mail someone filed)
+  await setOrg(t.id, t.noise?.flagged ? { filing, noise: { flagged: false, reason: "", moved: false, rescued: true } } : { filing });
   if (archiveNow) await archive(t.id, { quiet: o.quiet !== false });
   return { filing, archived: archiveNow || !!t.archived };
 }

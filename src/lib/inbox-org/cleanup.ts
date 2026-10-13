@@ -51,6 +51,10 @@ export type CleanupState = {
   /** epoch-ms: a batch is running until then */
   runningUntil?: number | null;
   summary?: CleanupSummary | null;
+  /** the rule suggestions this run made, by source — counted here instead of
+   *  the 2,000-entry filing log, so a mass cleanup never evicts the log's
+   *  approve / correct / override entries */
+  ruleSuggestions?: Record<string, number>;
 };
 
 /** What the Organize header shows (no ids). */
@@ -156,6 +160,7 @@ export async function getCleanupState(userId: string): Promise<CleanupState | nu
     doneAt: typeof b.doneAt === "number" ? b.doneAt : null,
     runningUntil: typeof b.runningUntil === "number" ? b.runningUntil : null,
     summary: b.summary && typeof b.summary === "object" ? (b.summary as CleanupSummary) : null,
+    ruleSuggestions: b.ruleSuggestions && typeof b.ruleSuggestions === "object" ? (b.ruleSuggestions as Record<string, number>) : {},
   };
 }
 
@@ -177,6 +182,12 @@ export async function runCleanupBatch(
   const ctx = deps.ctx ?? (await loadOrgContext());
   if (!isOrgPilot(me.id, "file", ctx)) return { ok: false, error: "Organize my inbox is part of the Assist pilot." };
 
+  // The lease is a plain read-then-write, not atomic: two batches landing
+  // in the same instant could both pass. Harmless — organizeThread is
+  // idempotent (same record kept), the AI pass holds its own per-thread
+  // compare-and-set leases, and the worst case is one run's cursor / counts
+  // written twice (a redo of a few threads). It only stops the common case:
+  // a double click or a second tab starting a parallel run.
   let st = await getCleanupState(me.id);
   if (st && !st.done && st.runningUntil && st.runningUntil > Date.now()) {
     return { ok: false, error: "Organize my inbox is already running — try again in a minute." };
@@ -184,7 +195,7 @@ export async function runCleanupBatch(
   const lease = Date.now() + budgetMs + CLEANUP_LEASE_EXTRA_MS;
   if (!st || st.done || now - st.startedAt > CLEANUP_STALE_MS || st.cursor > st.ids.length) {
     const ids = cleanupCandidates(await allThreads(), me, now);
-    st = { startedAt: now, cursor: 0, checked: 0, total: ids.length, done: false, ids, doneAt: null, summary: null, runningUntil: lease };
+    st = { startedAt: now, cursor: 0, checked: 0, total: ids.length, done: false, ids, doneAt: null, summary: null, runningUntil: lease, ruleSuggestions: {} };
     await setBlob(blobId(me.id), st as unknown as Record<string, unknown>);
   } else {
     await setBlob(blobId(me.id), { runningUntil: lease });
@@ -215,12 +226,17 @@ export async function runCleanupBatch(
         checked++;
       }
     } finally {
+      // the pipeline's own "suggested" entries are counted in the state, not
+      // logged (see ruleSuggestions); anything else it collected is logged
+      const keep = log.filter((e) => !!e.action || e.outcome !== "suggested");
       try {
-        await appendFilingLogs(log);
+        await appendFilingLogs(keep);
       } catch (err) {
         console.error("[inbox-org] cleanup: filing log append failed", err);
       }
     }
+    const ruleSuggestions = { ...(st.ruleSuggestions ?? {}) };
+    for (const e of log) if (!e.action && e.outcome === "suggested") ruleSuggestions[e.source] = (ruleSuggestions[e.source] ?? 0) + 1;
     const done = i >= st.ids.length;
 
     // what is left of the budget goes to the AI filing step (filing only — no
@@ -255,6 +271,7 @@ export async function runCleanupBatch(
       total,
       done,
       runningUntil: null,
+      ruleSuggestions,
       ...(done ? { doneAt: Date.now(), summary } : {}),
     };
     await setBlob(blobId(me.id), next);

@@ -35,7 +35,7 @@ import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
 import { buildFilingUserText, candidateLine, customerRecordCandidates, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
-import { buildOrganizeVM, buildReaderOrg, dueLabel } from "@/app/(app)/inbox/organize/load";
+import { buildOrganizeVM, buildReaderOrg, dueLabel, isNoiseRow } from "@/app/(app)/inbox/organize/load";
 import { cleanupProgressText, cleanupSummaryText, courtChipLabel, filedByLabel, ORGANIZE_BASE_HREF, organizeHref, organizeTabOf, suggestionLabel } from "@/app/(app)/inbox/organize/format";
 import { assistReport, filingReport } from "@/lib/assist/report";
 import type { AssistRun } from "@/lib/stores/assist-runs";
@@ -2074,7 +2074,9 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     rows.forEach((t) => registerFixture("tasks", t.id));
     return rows;
   };
-  const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB, CLEANUP_BLOB_PREFIX + CLEO_ID, CLEANUP_BLOB_PREFIX + NOP_ID];
+  const LIV = "TEST335 Liv Cleanup";
+  const LIV_ID = "TEST335-u-liv";
+  const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB, CLEANUP_BLOB_PREFIX + CLEO_ID, CLEANUP_BLOB_PREFIX + NOP_ID, CLEANUP_BLOB_PREFIX + LIV_ID];
   const before = new Map<string, typeof blobs.$inferSelect | undefined>();
   for (const id of BLOBS) before.set(id, (await db.select().from(blobs).where(eq(blobs.id, id)).limit(1))[0]);
   try {
@@ -2115,6 +2117,8 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     /* batch 1: two threads, then stop */
     const r1 = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW, run: { provider }, batchSize: 2 });
     const s1 = await getCleanupState(CLEO_ID);
+    ok(s1?.ruleSuggestions?.number === 1 && s1.ruleSuggestions["noise-rule"] === 1, "fix: the cleanup counts its rule suggestions in the state, by source");
+    ok(!(await getFilingLog()).some((e) => (e.threadId === a || e.threadId === b) && !e.action), "fix: … and writes no mass \"suggested\" entries to the capped filing log");
     ok(r1.ok && r1.checked === 2 && r1.total === 4 && !r1.done && r1.summary === null, "cleanup: batch 1 checks 2 of 4 and is not done");
     ok(!!s1 && s1.cursor === 2 && s1.checked === 2 && s1.total === 4 && !s1.done && s1.startedAt === NOW && !s1.runningUntil, "cleanup: the cursor and counts are saved in inbox_cleanup:<userId> (lease released)");
     ok(s1!.ids.join(",") === [a, b, g, c].join(","), "cleanup: the run covers my inbox threads from the last 90 days, newest first — filed, older, archived and other people's threads left out");
@@ -2157,6 +2161,50 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     await setBlob(CLEANUP_BLOB_PREFIX + CLEO_ID, { done: false, runningUntil: Date.now() + 60_000 });
     const busy = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW + 120_000, run: { provider } });
     ok(!busy.ok && /already running/.test(busy.error), "cleanup: a second batch while one runs is refused");
+
+    /* fix: a live court still waiting for its AI reading survives a cleanup batch */
+    const livCtx = buildOrgContext({
+      users: [...users, { id: LIV_ID, name: LIV, email: "liv.t335@peaksystemsgroup.com", googleEmail: null }],
+      assist: { users: [CLEO_ID, LIV_ID], features: allOn, capUsd: 200 },
+      env,
+    });
+    const live = await mk(
+      "live-court",
+      {
+        contactEmail: "sam@cl-liv.test",
+        messages: [
+          msg(NOW - DAY - 3_600_000, { fromEmail: "sam@cl-liv.test", body: "Can you send the drawings?" }),
+          msg(NOW - DAY, { direction: "out", fromEmail: "liv.t335@peaksystemsgroup.com", to: "sam@cl-liv.test", body: "I will send the drawings by Friday." }),
+        ],
+        status: "waiting_them",
+      },
+      LIV
+    );
+    await organizeThread(live, { ctx: livCtx, now: NOW }); // the live sync
+    const pendingBefore = (await get(live)).court;
+    ok(pendingBefore?.pendingAi === true, "fix: (setup) the live sync left the court pendingAi");
+    const livProvider = routedProvider({
+      file: JSON.stringify({ target: "none", confidence: "weak", reason: "x", needsReply: false }),
+      promise: JSON.stringify({ owner: "customer", teammateId: "", reason: "fake", promises: [{ text: "send the drawings", ownerUserId: LIV_ID, dueText: "Friday" }] }),
+    });
+    const rl = await runCleanupBatch({ id: LIV_ID, name: LIV }, 40_000, { ctx: livCtx, now: NOW, run: { provider: livProvider } });
+    const afterCleanup = (await get(live)).court;
+    ok(rl.ok && rl.done && afterCleanup?.pendingAi === true && afterCleanup.basis === pendingBefore!.basis && sortedJson(afterCleanup) === sortedJson(pendingBefore), "fix: a cleanup batch keeps a live court exactly as it was — still pendingAi");
+    ok((await tasksOn(live)).length === 0, "fix: … and the cleanup itself makes no task");
+    const livePass = await runAiPass({ ownerIds: [LIV_ID] }, { ctx: livCtx, run: { provider: livProvider }, now: NOW });
+    const liveTasks = await tasksOn(live);
+    const afterPass = (await get(live)).court;
+    ok(livePass.tasks === 1 && liveTasks.length === 1 && liveTasks[0].id.startsWith("T-prm-") && afterPass?.promise?.taskId === liveTasks[0].id && !afterPass.pendingAi, "fix: the next normal pass reads the court and makes the promise-task");
+
+    /* fix: filing a thread clears its noise flag (not in Filed AND Noise) */
+    const noisy = await mk("noisy-filed", { messages: [msg(NOW - DAY / 5)] });
+    await setOrg(noisy, {
+      filing: { customerId: CUST, work: null, noise: false, source: "identity", reason: "Known contact", strength: "strong", needsReply: false, state: "suggested", at: NOW } as Filing,
+      noise: { flagged: true, reason: "Newsletter", moved: false },
+    });
+    const ap = await approveFiling(noisy, { id: CLEO_ID, name: CLEO, roles: ["Estimator"] }, NOW);
+    const nf = await get(noisy);
+    ok(ap.ok && nf.filing?.state === "filed" && !nf.noise?.flagged && !isNoiseRow(nf), "fix: filing a noise-tagged thread clears the noise flag — it leaves the Noise tab");
 
     /* the AI pass's filing-only mode */
     const pass = read("src/lib/inbox-org/ai-pass.ts");
@@ -2219,6 +2267,10 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
   const sa = read("src/app/(app)/settings/actions.ts");
   ok(/export async function removeCompanySenderRuleAction[\s\S]*?requirePerm\("manage_users"\)[\s\S]*?removeSenderRule\(ruleId, \{ userId: me\.id, admin: true \}\)[\s\S]*?invalidateOrgContext\(\)/.test(sa), "rules delete: the company list's delete is admin-only and drops the cached context");
   ok(/export async function setOwnDomainOverrideAction[\s\S]*?requirePerm\("manage_users"\)[\s\S]*?setOwnDomainOverride\([\s\S]*?invalidateOrgContext\(\)/.test(sa), "settings: the own-domain override is admin-only and drops the cached context");
+  ok(sa.includes("FREEMAIL_DOMAINS.has(") && /setOwnDomainOverrideAction[\s\S]*?FREEMAIL_DOMAINS\.has\([\s\S]*?is a public mail provider/.test(sa), "fix: the own-domain override refuses a public mail provider with a clear error");
+  ok(/const \{ last4 \} = await saveAssistKey\(key, me\.name\);[\s\S]{0,120}invalidateOrgContext\(\);/.test(sa) && /await clearAssistKey\(\);\s*invalidateOrgContext\(\);/.test(sa), "fix: saving or clearing the Assist key drops the cached org context");
+  ok(/await setKeepInInboxAction\(v\);\s*setNote\(null\);/.test(read("src/app/(app)/account/inbox-org-card.tsx")), "fix: the account switch clears its error note after a later successful save");
+  ok(/not atomic[\s\S]{0,400}Harmless/.test(read("src/lib/inbox-org/cleanup.ts")), "fix: the cleanup lease says it isn't atomic and why that's harmless");
   ok(/export async function setAssistSettingsAction[\s\S]*?await setSettings\(next\);\s*\/\/[^\n]*\n\s*invalidateOrgContext\(\);/.test(sa), "settings: changing the pilot / feature switches drops the cached context");
 
   /* settings card */

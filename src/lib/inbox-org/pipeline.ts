@@ -608,7 +608,10 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
   const courtNew = newSince(prevCourt, latest);
   const newMail = prevCourt ? courtNew : !opts.backlog;
   let court: Court;
-  if (prevCourt && (prevCourt.source === "override" || prevCourt.source === "ai") && !courtNew) court = prevCourt;
+  // A backlog run (the 90-day cleanup) never touches a court with no new
+  // mail: a live sync may have left it pendingAi (lease, attempts,
+  // promisesFor) and the AI court / promise reading must still happen.
+  if (prevCourt && !courtNew && (opts.backlog || prevCourt.source === "override" || prevCourt.source === "ai")) court = prevCourt;
   else {
     const courtMsgs: CourtMessage[] = msgs.map((m, i) => ({
       id: m.id,
