@@ -31,33 +31,64 @@ function randomId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+/** The sessionStorage key holding this window's `{id, name}`. */
+export const WINDOW_ID_KEY = "peak-window-id";
+
+/** The slice of Storage `windowIdFor` needs (sessionStorage in the browser). */
+export type IdStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
+
+/** The window id for a window called `name`, given its sessionStorage.
+ *  Stored as `{id, name}` under one key; when the stored name differs from
+ *  the current one a fresh id is minted (a pop-out whose sessionStorage was
+ *  copied from its opener, session restore into a renamed window, a
+ *  cross-site navigation that cleared `window.name`). A duplicated unnamed
+ *  tab copies `{id, name: ""}` and keeps the same id — accepted: the two tabs
+ *  then ignore each other's posts, and the focus refresh keeps them current. */
+export function windowIdFor(name: string, storage: IdStorage | null | undefined): string {
+  if (storage) {
+    try {
+      const raw = storage.getItem(WINDOW_ID_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as { id?: unknown; name?: unknown } | null;
+        if (saved && typeof saved.id === "string" && saved.id && saved.name === name) return saved.id;
+      }
+    } catch {
+      // blocked storage or a junk entry — mint a fresh id
+    }
+  }
+  const id = randomId();
+  if (storage) {
+    try {
+      storage.setItem(WINDOW_ID_KEY, JSON.stringify({ id, name }));
+    } catch {
+      // storage blocked — the caller's module variable still holds
+    }
+  }
+  return id;
+}
+
 /** This window's id: stable for the page (module variable) and across its
- *  reloads (sessionStorage, keyed by window.name so a pop-out never inherits
- *  the opener's copied storage entry). */
+ *  reloads (sessionStorage, see `windowIdFor`). */
 export function windowId(): string {
   if (cachedId) return cachedId;
-  let key = "peak-window-id";
+  let name = "";
   try {
-    if (typeof window !== "undefined") key += ":" + (window.name || "");
+    if (typeof window !== "undefined") name = window.name || "";
   } catch {
-    // keep the plain key
+    // keep ""
   }
+  let storage: IdStorage | null = null;
   try {
-    if (typeof sessionStorage !== "undefined") {
-      const saved = sessionStorage.getItem(key);
-      if (saved) return (cachedId = saved);
-    }
+    if (typeof sessionStorage !== "undefined") storage = sessionStorage;
   } catch {
     // storage blocked
   }
-  const id = randomId();
-  cachedId = id;
-  try {
-    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, id);
-  } catch {
-    // storage blocked — the module variable still holds
-  }
-  return id;
+  return (cachedId = windowIdFor(name, storage));
+}
+
+/** Tests only: forget the cached id so the next `windowId()` re-reads. */
+export function __resetWindowIdForTests(): void {
+  cachedId = null;
 }
 
 /** True for a message another window posted (never this window's own). */

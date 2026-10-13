@@ -2024,7 +2024,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
     "src/app/(app)/inbox/thread-reader.tsx",
     "src/app/(app)/inbox/inbox-shell.tsx",
     "src/app/(app)/inbox/thread-list.tsx",
-    "src/components/inbox-changed-listener.tsx",
+    "src/components/popout/live-sync.tsx",
   ];
   const banned = /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/(apply|pipeline|ai-|court|due|noise|forward|numbers|sender-rules|internal|ids|signoff)\b)|(^|\/)load$/;
   for (const f of clientFiles) {
@@ -2046,8 +2046,9 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(bc.includes('d.type === "inbox-changed"'), "ui: onMessage still maps the legacy inbox-changed message");
   for (const f of [`${DIR}/organize-box.tsx`, `${DIR}/change-filing.tsx`, `${DIR}/rule-offer.tsx`, `${DIR}/reader-org.tsx`, "src/app/(app)/inbox/thread-reader.tsx"])
     ok(/postChanged\("(thread|inbox)"/.test(read(f)), `ui: ${f.split("/").pop()} posts changed after a change`);
-  ok(/onMessage\(/.test(read("src/components/inbox-changed-listener.tsx")) && read("src/components/inbox-changed-listener.tsx").includes("router.refresh()") && read("src/components/inbox-changed-listener.tsx").includes("}, 1000);"), "ui: the listener refreshes the router, debounced 1 s");
-  ok(shell.includes("<InboxChangedListener />") && read("src/app/(app)/page.tsx").includes("<InboxChangedListener />"), "ui: the Inbox shell and Home listen");
+  const liveSync = read("src/components/popout/live-sync.tsx");
+  ok(/onMessage\(/.test(liveSync) && liveSync.includes("router.refresh()") && liveSync.includes("const CHANGED_DEBOUNCE_MS = 1000;"), "ui: LiveSync (pop-out spec §5) refreshes the router on a changed message, debounced 1 s");
+  ok(!shell.includes("InboxChangedListener") && !read("src/app/(app)/page.tsx").includes("InboxChangedListener") && read("src/app/(app)/layout.tsx").includes("<LiveSync />"), "ui: the Inbox shell and Home no longer mount their own listener — LiveSync in the (app) layout covers them");
 
   /* reader: promise-task checkbox, unticked, completes through the task status action */
   const tr = read("src/app/(app)/inbox/thread-reader.tsx");

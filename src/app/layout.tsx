@@ -3,6 +3,7 @@ import { Public_Sans, IBM_Plex_Mono } from "next/font/google";
 import type { CSSProperties } from "react";
 import { getSettings } from "@/lib/settings";
 import { accentContrast } from "@/lib/color";
+import { POP_HEAD_SCRIPT } from "@/lib/popout/live";
 import "./globals.css";
 
 const publicSans = Public_Sans({
@@ -39,6 +40,8 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
+      // The head script below may add `pk-pop` before React hydrates.
+      suppressHydrationWarning
       style={
         {
           "--accent": settings.accent,
@@ -46,6 +49,13 @@ export default async function RootLayout({
         } as CSSProperties
       }
     >
+      <head>
+        {/* Pop-out mode (spec §2): a plain inline script runs synchronously
+            while the HTML parses, so a pop-out never paints its nav. Next 16
+            docs ("Preventing flash before hydration") — next/script
+            beforeInteractive doesn't block, so it could paint first. */}
+        <script dangerouslySetInnerHTML={{ __html: POP_HEAD_SCRIPT }} />
+      </head>
       <body className={`${publicSans.variable} ${plexMono.variable}`}>
         {children}
       </body>

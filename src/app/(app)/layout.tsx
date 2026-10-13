@@ -6,6 +6,8 @@ import { can } from "@/lib/team";
 import { navData } from "@/lib/nav-counts";
 import Nav, { type RosterEntry } from "@/components/nav/Nav";
 import { SyncProvider } from "@/lib/sync/SyncProvider";
+import PopHeader from "@/components/popout/pop-header";
+import LiveSync from "@/components/popout/live-sync";
 
 export default async function AppLayout({
   children,
@@ -45,8 +47,12 @@ export default async function AppLayout({
           devLogin={devLogin}
           roster={roster}
         />
+        {/* Pop-out windows (spec §2, §5): the slim header shows only in a
+            pop-out (html.pk-pop); LiveSync keeps every window current. */}
+        <PopHeader />
         <main className="pk-main">{children}</main>
       </div>
+      <LiveSync />
     </SyncProvider>
   );
 }

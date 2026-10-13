@@ -67,6 +67,85 @@ body {
   flex: 1;
   overflow-y: auto;
 }
+
+/* ============ Pop-out windows (spec §2) ============
+   The root layout's head script adds html.pk-pop when window.name starts
+   with "peak-pop:". A pop-out drops the nav for a slim header; the shell is
+   one full-width column. */
+.pk-pop-header {
+  display: none;
+}
+html.pk-pop .pk-nav {
+  display: none !important;
+}
+html.pk-pop .pk-shell {
+  flex-direction: column;
+}
+html.pk-pop .pk-main {
+  width: 100%;
+  max-width: none;
+}
+html.pk-pop .pk-pop-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--nav-border);
+  padding: calc(7px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 7px max(14px, env(safe-area-inset-left));
+}
+.pk-pop-header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--steel-hi);
+  font-size: 13px;
+  font-weight: 600;
+}
+.pk-pop-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pk-pop-header-btn {
+  background: var(--nav-chip-bg);
+  border: 1px solid var(--nav-chip-border);
+  color: var(--steel-hi);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.pk-pop-header-btn:hover {
+  background: var(--nav-item-bg-hover);
+}
+.pk-pop-header-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.pk-pop-header-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.pk-pop-header-close {
+  padding: 6px 9px;
+}
+/* Ways to open a pop-out (⧉ buttons, nav hover ⧉): hidden on narrow screens
+   and in the Capacitor native shell (LiveSync tags it html.pk-native). */
+@media (max-width: 899px) {
+  .pk-popout-affordance {
+    display: none !important;
+  }
+}
+html.pk-native .pk-popout-affordance {
+  display: none !important;
+}
 .pk-content {
   max-width: 1240px;
   margin: 0 auto;
@@ -804,6 +883,7 @@ button.pk-searchbar-glass {
 }
 @media print {
   .pk-nav,
+  .pk-pop-header,
   .pk-doc-toolbar,
   .pk-no-print {
     display: none !important;

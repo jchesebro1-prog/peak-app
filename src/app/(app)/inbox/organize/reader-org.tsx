@@ -5,7 +5,8 @@
  * court chip with "Not on me" / "On me" (spec §3), the "Looks like noise" tag
  * with Not noise, the filing line with Approve / Change… (§2), and the
  * promise-task line "Task created: … · due Thu · Undo" (§7). Plain view model
- * (ReaderOrgVM) — no store imports; every change posts `inbox-changed`.
+ * (ReaderOrgVM) — no store imports; every change posts `postChanged("thread")`
+ * on the pop-out channel (LiveSync refreshes the other windows).
  */
 import { useState, useTransition } from "react";
 import type { RuleOffer } from "@/lib/inbox-org/apply";

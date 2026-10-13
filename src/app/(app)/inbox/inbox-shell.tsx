@@ -52,7 +52,6 @@ import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
 import { meetingsTickAction } from "./meetings/actions";
 import { organizeHref, ORGANIZE_BASE_HREF, type OrganizeTab } from "./organize/format";
-import InboxChangedListener from "@/components/inbox-changed-listener";
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
 
@@ -1031,9 +1030,6 @@ export default function InboxShell({
         </div>
         </div>
       </div>
-
-      {/* #335 §9 — another window/tab changed a thread: refresh (debounced) */}
-      <InboxChangedListener />
 
       {/* ===== message list (or the #323 Meetings box / the #335 Organize box) ===== */}
       {meetings || organize ? (

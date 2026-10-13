@@ -16,6 +16,9 @@ export const DEFAULT_GEO: Record<PopKind, { width: number; height: number }> = {
 
 /** At least this many px of the window must stay on the screen. */
 export const MIN_VISIBLE = 100;
+/** A saved size is never reopened smaller than this (still capped to the screen). */
+export const MIN_WIDTH = 320;
+export const MIN_HEIGHT = 240;
 
 export function geoKey(kind: PopKind): string {
   return `peak-pop-geo:${kind}`;
@@ -26,7 +29,9 @@ function finite(n: unknown): n is number {
 }
 
 /** A saved geometry (or null → the kind's default, centred) forced onto the
- *  screen: size capped to the screen, and at least MIN_VISIBLE px showing. */
+ *  screen: a saved size raised to MIN_WIDTH×MIN_HEIGHT, then capped to the
+ *  screen, and at least MIN_VISIBLE px showing. Screens left of / above the
+ *  primary (negative availLeft/availTop) clamp the same way. */
 export function clampGeo(saved: Partial<Geo> | null | undefined, screen: Screen, kind: PopKind = "thread"): Geo {
   const def = DEFAULT_GEO[kind];
   const sw = Math.max(finite(screen.availWidth) ? screen.availWidth : def.width, MIN_VISIBLE);
@@ -35,8 +40,8 @@ export function clampGeo(saved: Partial<Geo> | null | undefined, screen: Screen,
   const st = finite(screen.availTop) ? screen.availTop : 0;
 
   const usable = !!saved && finite(saved.width) && finite(saved.height) && saved.width > 0 && saved.height > 0;
-  const width = Math.min(Math.round(usable ? (saved!.width as number) : def.width), Math.round(sw));
-  const height = Math.min(Math.round(usable ? (saved!.height as number) : def.height), Math.round(sh));
+  const width = Math.min(Math.round(usable ? Math.max(saved!.width as number, MIN_WIDTH) : def.width), Math.round(sw));
+  const height = Math.min(Math.round(usable ? Math.max(saved!.height as number, MIN_HEIGHT) : def.height), Math.round(sh));
 
   let left: number;
   let top: number;
