@@ -190,7 +190,13 @@ export function TasksCard({
                   )}
                 </div>
 
-                <form action={setStatusAction} style={{ margin: 0 }}>
+                <form
+                  action={async (fd) => {
+                    await setStatusAction(fd);
+                    postChanged("task", t.id);
+                  }}
+                  style={{ margin: 0 }}
+                >
                   <input type="hidden" name="taskId" value={t.id} />
                   <input type="hidden" name="id" value={parentId} />
                   <select
@@ -207,7 +213,13 @@ export function TasksCard({
                   </select>
                 </form>
 
-                <form action={updateAction} style={{ margin: 0, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <form
+                  action={async (fd) => {
+                    await updateAction(fd);
+                    postChanged("task", t.id);
+                  }}
+                  style={{ margin: 0, display: "flex", gap: 6, flexWrap: "wrap" }}
+                >
                   <input type="hidden" name="taskId" value={t.id} />
                   <input type="hidden" name="id" value={parentId} />
                   <select

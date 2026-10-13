@@ -426,7 +426,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
       ["src/app/(app)/calendar/task-chip.tsx", "task", 2],
       ["src/app/(app)/calendar/task-block-popover.tsx", "task", 1],
       ["src/app/(app)/calendar/at-risk-panel.tsx", "task", 1],
-      ["src/components/tasks-card.tsx", "task", 3],
+      ["src/components/tasks-card.tsx", "task", 5], // chips, add, status select, assignee/due select
     ];
     for (const [file, entity, min] of POSTERS) {
       const src = readSrc(file);
@@ -434,6 +434,19 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
       ok(
         /import \{[^}]*\bpostChanged\b[^}]*\} from "@\/lib\/popout\/channel";/.test(src) && n >= min,
         `popout: ${file} imports postChanged and posts "${entity}" (${n}/${min})`
+      );
+    }
+    // TasksCard's status and assignee selects submit through <form action>; each action is wrapped so a pop-out posts after the write
+    {
+      const tc = readSrc("src/components/tasks-card.tsx");
+      ok(
+        /action=\{async \(fd\) => \{\s*await setStatusAction\(fd\);\s*postChanged\("task", t\.id\);/.test(tc) &&
+          /action=\{async \(fd\) => \{\s*await updateAction\(fd\);\s*postChanged\("task", t\.id\);/.test(tc),
+        "popout: TasksCard status + assignee form actions post a task change after the write"
+      );
+      ok(
+        !/<form action=\{(setStatusAction|updateAction)\}/.test(tc) && (tc.match(/requestSubmit\(\)/g) || []).length >= 3,
+        "popout: TasksCard no longer passes a bare action to <form> and still auto-submits on change"
       );
     }
     // a poster never fires from render: the only top-level call shapes are inside handlers (indented 4+ spaces)
