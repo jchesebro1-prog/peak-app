@@ -3,6 +3,8 @@ import { costUsd, modelFor, wantsFallbacks } from "@/lib/assist/models";
 import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured } from "@/lib/assist/config";
 
 import { readFileSync, readdirSync } from "node:fs";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
 import { CONFIG_COLLECTIONS } from "@/db/seed-data";
 import { createRun, getRun, listRunsByMonth, mergeRunDetail, monthSpend, newRunId, setRunOutcome, type AssistRun } from "@/lib/stores/assist-runs";
@@ -82,6 +84,35 @@ export async function assistStoreChecks(ok: Ok): Promise<void> {
   await mergeRunDetail(a.id, { lines: [{ sku: "X", qty: 2 }] });
   const back = await getRun(a.id);
   ok(back?.outcome === "edited" && (back?.outcomeDetail as { created?: number })?.created === 1 && Array.isArray((back?.outcomeDetail as { lines?: unknown })?.lines), "assist store: mergeRunDetail keeps the outcome and adds facts");
+  // Atomicity: concurrent outcome writes -> exactly one wins, and it is the stored one.
+  const c = await mk();
+  const [r1, r2] = await Promise.all([
+    setRunOutcome(c.id, "u-assist", "accepted", { who: "one" }),
+    setRunOutcome(c.id, "u-assist", "edited", { who: "two" }),
+  ]);
+  ok(r1 !== r2, "assist store: concurrent setRunOutcome applies exactly once");
+  const cb = await getRun(c.id);
+  ok(cb?.outcome === (r1 ? "accepted" : "edited") && (cb?.outcomeDetail as { who?: string })?.who === (r1 ? "one" : "two"), "assist store: the stored outcome is the winner's");
+  // A rejected attempt writes nothing (rev unchanged).
+  const revOf = async (id: string): Promise<number> => {
+    const db = await getDb();
+    const t = DOC_TABLES.assist_runs;
+    const rows = await db.select({ rev: t.rev }).from(t).where(eq(t.id, id));
+    return Number(rows[0]?.rev);
+  };
+  const rev0 = await revOf(c.id);
+  ok(!(await setRunOutcome(c.id, "u-assist", "discarded", null)) && !(await setRunOutcome(c.id, "someone-else", "discarded", null)), "assist store: rejected attempts return false");
+  ok((await revOf(c.id)) === rev0, "assist store: a rejected attempt does not bump rev");
+  // mergeRunDetail after an outcome keeps it; a JSON-null outcomeDetail is handled.
+  ok(await mergeRunDetail(c.id, { extra: 1 }), "assist store: mergeRunDetail returns true on a live run");
+  const cm = await getRun(c.id);
+  ok(cm?.outcome === cb?.outcome && (cm?.outcomeDetail as { extra?: number; who?: string })?.extra === 1 && (cm?.outcomeDetail as { who?: string })?.who === (r1 ? "one" : "two"), "assist store: mergeRunDetail does not clobber the outcome");
+  const nd = await mk({ outcomeDetail: null });
+  ok(await mergeRunDetail(nd.id, { k: 1 }), "assist store: mergeRunDetail on a null outcomeDetail");
+  ok(((await getRun(nd.id))?.outcomeDetail as { k?: number })?.k === 1, "assist store: null outcomeDetail merges into an object");
+  const nd2 = await mk({ outcomeDetail: null });
+  ok(await setRunOutcome(nd2.id, "u-assist", "accepted", { z: 2 }) && ((await getRun(nd2.id))?.outcomeDetail as { z?: number })?.z === 2, "assist store: setRunOutcome over a null outcomeDetail");
+  ok(!(await setRunOutcome("AR-missing", "u-assist", "accepted", null)) && !(await mergeRunDetail("AR-missing", { a: 1 })), "assist store: missing run returns false");
   ok((await mk({ output: "x".repeat(30_000) })).output.length === 20_000, "assist store: output capped at 20,000 chars");
 }
 

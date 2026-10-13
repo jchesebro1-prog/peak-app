@@ -1,5 +1,8 @@
 /** assist_runs store (#334, spec §6). One row per model call. */
-import { getDoc, listDocsByField, patchDoc, upsertDoc } from "@/db/doc-store";
+import { and, eq, sql } from "drizzle-orm";
+import { getDb } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
+import { getDoc, listDocsByField, upsertDoc } from "@/db/doc-store";
 import type { AssistFeature, AssistOutcome, AssistStep } from "@/lib/assist/types";
 
 export type AssistRun = {
@@ -46,7 +49,13 @@ export async function getRun(id: string): Promise<AssistRun | null> {
   return getDoc<AssistRun>(COLL, id);
 }
 
-/** First write wins; only the run's own user may record its outcome. */
+/**
+ * First write wins; only the run's own user may record its outcome. One atomic
+ * UPDATE (never a read-modify-write): the WHERE clause is re-checked under the
+ * row lock, so of two concurrent calls exactly one applies and a no-op attempt
+ * writes nothing. `doc->>'outcome' IS NULL` covers both a missing key and the
+ * stored JSON null.
+ */
 export async function setRunOutcome(
   id: string,
   userId: string,
@@ -54,24 +63,37 @@ export async function setRunOutcome(
   detail: Record<string, unknown> | null,
   now: number = Date.now()
 ): Promise<boolean> {
-  let applied = false;
-  await patchDoc<AssistRun>(COLL, id, (d) => {
-    if (d.userId !== userId || d.outcome) return d;
-    applied = true;
-    d.outcome = outcome;
-    d.outcomeDetail = { ...(d.outcomeDetail ?? {}), ...(detail ?? {}) };
-    d.outcomeAt = now;
-    return d;
-  });
-  return applied;
+  const db = await getDb();
+  const t = DOC_TABLES[COLL];
+  const rows = await db
+    .update(t)
+    .set({
+      doc: sql`jsonb_set(jsonb_set(jsonb_set(${t.doc}, '{outcome}', to_jsonb(${outcome}::text)), '{outcomeAt}', to_jsonb(${now}::bigint)), '{outcomeDetail}', COALESCE(NULLIF(${t.doc}->'outcomeDetail', 'null'::jsonb), '{}'::jsonb) || ${JSON.stringify(detail ?? {})}::jsonb)`,
+      rev: sql`${t.rev} + 1`,
+      updatedAt: now,
+      receivedAt: now,
+    })
+    .where(and(eq(t.id, id), eq(t.deleted, false), sql`${t.doc}->>'userId' = ${userId}`, sql`${t.doc}->>'outcome' IS NULL`))
+    .returning({ id: t.id });
+  return rows.length > 0;
 }
 
-/** Merge facts into outcomeDetail without setting an outcome (e.g. the estimate's drafted lines). */
-export async function mergeRunDetail(id: string, patch: Record<string, unknown>): Promise<void> {
-  await patchDoc<AssistRun>(COLL, id, (d) => {
-    d.outcomeDetail = { ...(d.outcomeDetail ?? {}), ...patch };
-    return d;
-  });
+/** Merge facts into outcomeDetail without setting an outcome (e.g. the estimate's drafted lines). Atomic; false if the run is missing. */
+export async function mergeRunDetail(id: string, patch: Record<string, unknown>): Promise<boolean> {
+  const db = await getDb();
+  const t = DOC_TABLES[COLL];
+  const now = Date.now();
+  const rows = await db
+    .update(t)
+    .set({
+      doc: sql`jsonb_set(${t.doc}, '{outcomeDetail}', COALESCE(NULLIF(${t.doc}->'outcomeDetail', 'null'::jsonb), '{}'::jsonb) || ${JSON.stringify(patch ?? {})}::jsonb)`,
+      rev: sql`${t.rev} + 1`,
+      updatedAt: now,
+      receivedAt: now,
+    })
+    .where(and(eq(t.id, id), eq(t.deleted, false)))
+    .returning({ id: t.id });
+  return rows.length > 0;
 }
 
 export async function listRunsByMonth(monthKey: string): Promise<AssistRun[]> {
