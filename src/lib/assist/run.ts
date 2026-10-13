@@ -1,0 +1,125 @@
+/** runAssist (D872): gate → cap → rate limit → provider → validate → log. */
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import { getSettings } from "@/lib/settings";
+import { rateLimit } from "@/lib/rate-limit";
+import { createRun, monthSpend, newRunId, type AssistRun } from "@/lib/stores/assist-runs";
+import { assistGate, assistSettingsOf, monthKeyChicago } from "./config";
+import { costUsd, FALLBACK_HAIKU, modelFor, SLOT_SETTINGS, wantsFallbacks, type ModelSlot } from "./models";
+import { pickProvider } from "./provider";
+import { ZERO_USAGE, type AssistFeature, type AssistProvider, type AssistSettings, type AssistStep, type Env, type ProviderRequest } from "./types";
+
+export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20 };
+
+/** zod → JSON Schema for output_config.format; `$schema` dropped. */
+export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
+  const out = z.toJSONSchema(schema) as Record<string, unknown>;
+  delete out.$schema;
+  return out;
+}
+
+export type RunArgs<T> = {
+  feature: AssistFeature;
+  step?: AssistStep | null;
+  slot: ModelSlot;
+  user: { id: string; name: string };
+  system: string;
+  userText: string;
+  schema?: z.ZodType<T>;
+  contextRef: string;
+  /** false = don't count this call against the per-hour limit (the estimate's 2nd call). */
+  countRate?: boolean;
+};
+export type RunDeps = { provider?: AssistProvider; fallback?: AssistProvider | null; now?: number; settings?: AssistSettings; env?: Env };
+export type RunResult<T> = { ok: true; runId: string; value: T } | { ok: false; runId: string | null; error: string };
+
+export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}): Promise<RunResult<T>> {
+  const env = deps.env ?? process.env;
+  const now = deps.now ?? Date.now();
+  const settings = deps.settings ?? assistSettingsOf(await getSettings());
+  const gate = assistGate(args.feature, args.user.id, settings, env);
+  if (!gate.ok) return { ok: false, runId: null, error: gate.reason };
+  const monthKey = monthKeyChicago(now);
+  if ((await monthSpend(monthKey)) >= settings.capUsd) {
+    return { ok: false, runId: null, error: "Assist paused for the month (spend cap reached)." };
+  }
+  if (args.countRate !== false && !rateLimit(`assist:${args.feature}:${args.user.id}`, RATE_LIMITS[args.feature], 3_600_000).ok) {
+    return { ok: false, runId: null, error: "Too many Assist requests — try again in a bit." };
+  }
+
+  const picked = deps.provider ? { primary: deps.provider, fallback: deps.fallback ?? null } : pickProvider(env);
+  const requestedModel = modelFor(args.slot, env);
+  const s = SLOT_SETTINGS[args.slot];
+  const req: ProviderRequest = {
+    model: picked.primary.name === "local" ? (env.ASSIST_LOCAL_MODEL || "").trim() || requestedModel : requestedModel,
+    system: args.system,
+    user: args.userText,
+    jsonSchema: args.schema ? toJsonSchema(args.schema) : undefined,
+    effort: s.effort,
+    maxTokens: s.maxTokens,
+    fallbacks: picked.primary.name !== "local" && wantsFallbacks(requestedModel),
+  };
+
+  const t0 = Date.now();
+  let provider = picked.primary;
+  let res = await provider.complete(req);
+  let fellBack = false;
+  if (!res.ok && res.unreachable && picked.fallback) {
+    provider = picked.fallback;
+    fellBack = true;
+    res = await provider.complete({ ...req, model: FALLBACK_HAIKU, fallbacks: false });
+  }
+  const latencyMs = Date.now() - t0;
+
+  let ok = res.ok;
+  let error: string | null = res.ok ? null : res.error;
+  let value: unknown = undefined;
+  if (res.ok) {
+    if (args.schema) {
+      try {
+        const parsed = args.schema.safeParse(JSON.parse(res.text));
+        if (parsed.success) value = parsed.data;
+        else { ok = false; error = "unreadable answer"; }
+      } catch {
+        ok = false;
+        error = "unreadable answer";
+      }
+    } else if (!res.text.trim()) {
+      ok = false;
+      error = "empty answer";
+    } else {
+      value = res.text;
+    }
+  }
+  const usage = res.usage ?? ZERO_USAGE;
+  const run: AssistRun = {
+    id: newRunId(now),
+    feature: args.feature,
+    step: args.step ?? null,
+    userId: args.user.id,
+    userName: args.user.name,
+    provider: provider.name,
+    model: res.model,
+    requestedModel,
+    fellBack,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    costUsd: provider.name === "anthropic" ? costUsd(res.model, usage) : provider.name === "fake" ? costUsd(res.model, usage) : 0,
+    latencyMs,
+    inputHash: createHash("sha256").update(args.system + "\n" + args.userText).digest("hex"),
+    output: res.ok ? res.text : "",
+    ok,
+    error,
+    stopReason: res.stopReason,
+    contextRef: args.contextRef,
+    monthKey,
+    outcome: null,
+    outcomeDetail: null,
+    outcomeAt: null,
+    createdAt: now,
+  };
+  await createRun(run);
+  return ok ? { ok: true, runId: run.id, value: value as T } : { ok: false, runId: run.id, error: error || "Assist failed." };
+}

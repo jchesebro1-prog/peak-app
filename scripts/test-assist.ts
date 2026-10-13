@@ -4,6 +4,10 @@ import { buildAnthropicParams, FALLBACK_BETA } from "@/lib/assist/anthropic";
 import { buildLocalBody } from "@/lib/assist/local";
 import { pickProvider } from "@/lib/assist/provider";
 import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured } from "@/lib/assist/config";
+import { z } from "zod";
+import { runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
+import { editRatio, estimateKeep, replyOutcome } from "@/lib/assist/outcome";
+import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
 
 import { readFileSync, readdirSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -137,6 +141,75 @@ export async function assistProviderChecks(ok: Ok): Promise<void> {
   ok(pickProvider({ ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini" }).fallback === null, "assist provider: no key = no fallback");
 }
 
+export function fakeProvider(text: string, opts: { fail?: "unreachable" | "declined"; calls?: ProviderRequest[]; name?: "fake" | "local" } = {}): AssistProvider {
+  return {
+    name: opts.name ?? "fake",
+    async complete(req) {
+      opts.calls?.push(req);
+      if (opts.fail === "unreachable") return { ok: false, error: "local model unavailable", model: req.model, usage: null, stopReason: null, unreachable: true };
+      if (opts.fail === "declined") return { ok: false, error: "declined", model: req.model, usage: { inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, stopReason: "refusal" };
+      return { ok: true, text, model: req.model, usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }, stopReason: "end_turn" };
+    },
+  };
+}
+const USER = { id: "u-run", name: "Runa Tester" };
+const ENV = { ANTHROPIC_API_KEY: "test" };
+// Fixed month far from real data so the cap check is isolated.
+const NOW_RUN = Date.UTC(2032, 2, 10, 15, 0);
+
+/** Register the row a runAssist call created so the harness teardown sweeps it. */
+function reg<T>(r: RunResult<T>): RunResult<T> {
+  if (r.runId) registerFixture("assist_runs" as never, r.runId);
+  return r;
+}
+
+export async function assistRunChecks(ok: Ok): Promise<void> {
+  const Schema = z.strictObject({ n: z.number() });
+  const js = toJsonSchema(Schema);
+  ok(js.type === "object" && (js as { additionalProperties?: unknown }).additionalProperties === false && !("$schema" in js), "assist run: strictObject → additionalProperties:false, no $schema");
+
+  const settings = assistSettingsOf({ assistUsers: [USER.id], assistMonthlyCapUsd: 1 });
+  const calls: ProviderRequest[] = [];
+  const r1 = reg(await runAssist({ feature: "tasks", slot: "tasks", user: USER, system: "S", userText: "U", schema: Schema, contextRef: "thread:C-9" }, { provider: fakeProvider('{"n":3}', { calls }), settings, env: ENV, now: NOW_RUN }));
+  ok(r1.ok && r1.value.n === 3 && !!r1.runId, "assist run: parses + validates JSON");
+  ok(calls[0].model === "claude-haiku-5-5" && calls[0].effort === "low" && !calls[0].fallbacks && !!calls[0].jsonSchema, "assist run: tasks → Haiku, low effort, schema sent");
+  const bad = reg(await runAssist({ feature: "tasks", slot: "tasks", user: USER, system: "S", userText: "U", schema: Schema, contextRef: "thread:C-9" }, { provider: fakeProvider('{"n":"x"}'), settings, env: ENV, now: NOW_RUN }));
+  ok(!bad.ok && bad.error === "unreadable answer" && !!bad.runId, "assist run: schema failure logged, not returned");
+  const refused = reg(await runAssist({ feature: "reply", slot: "reply", user: USER, system: "S", userText: "U", contextRef: "thread:C-9" }, { provider: fakeProvider("", { fail: "declined" }), settings, env: ENV, now: NOW_RUN }));
+  ok(!refused.ok && refused.error === "declined", "assist run: refusal = no draft");
+  const empty = reg(await runAssist({ feature: "reply", slot: "reply", user: USER, system: "S", userText: "U", contextRef: "thread:C-9" }, { provider: fakeProvider("  \n "), settings, env: ENV, now: NOW_RUN }));
+  ok(!empty.ok && empty.error === "empty answer" && !!empty.runId, "assist run: blank text with no schema = empty answer, still logged");
+  const gated = reg(await runAssist({ feature: "tasks", slot: "tasks", user: { id: "nobody", name: "N" }, system: "S", userText: "U", contextRef: "x" }, { provider: fakeProvider("{}"), settings, env: ENV, now: NOW_RUN }));
+  ok(!gated.ok && gated.runId === null, "assist run: gate refusal makes no call and no row");
+  // Cap: $1. Push spend over the cap with a big fake run.
+  const big = fakeRun({ userId: USER.id, monthKey: "2032-03", costUsd: 5 });
+  registerFixture("assist_runs" as never, big.id);
+  await createRun(big);
+  const capped = reg(await runAssist({ feature: "tasks", slot: "tasks", user: USER, system: "S", userText: "U", contextRef: "x" }, { provider: fakeProvider("ok"), settings, env: ENV, now: NOW_RUN }));
+  ok(!capped.ok && /cap/.test(capped.error) && capped.runId === null, "assist run: at the cap → paused, no row");
+  // Local fallback → Haiku.
+  const fbCalls: ProviderRequest[] = [];
+  const settings2 = assistSettingsOf({ assistUsers: [USER.id] });
+  const fb = reg(await runAssist({ feature: "reply", slot: "reply", user: USER, system: "S", userText: "U", contextRef: "x" }, {
+    provider: fakeProvider("", { fail: "unreachable", name: "local" }), fallback: fakeProvider("hello", { calls: fbCalls }), settings: settings2, env: ENV, now: Date.UTC(2033, 0, 5),
+  }));
+  ok(fb.ok && fb.value === "hello" && fbCalls[0]?.model === "claude-haiku-5-5" && fbCalls[0]?.fallbacks === false, "assist run: unreachable local falls back to Haiku");
+  const fbRow = fb.runId ? await getRun(fb.runId) : null;
+  ok(fbRow?.fellBack === true && fbRow?.requestedModel === "claude-sonnet-5-5" && fbRow?.monthKey === "2033-01", "assist run: the logged row records the fallback and the requested model");
+}
+
+export async function assistOutcomeChecks(ok: Ok): Promise<void> {
+  ok(editRatio("a b c", "a b c") === 0 && editRatio("", "") === 0, "assist outcome: identical = 0");
+  ok(Math.abs(editRatio("a b c d", "a b x d") - 0.25) < 1e-9, "assist outcome: one word swapped of four = 0.25");
+  ok(replyOutcome("thanks for the note we will send the revised drawings over on friday", "thanks for the note we will send the revised drawings over on friday morning").outcome === "accepted", "assist outcome: light edit = accepted");
+  ok(replyOutcome("thanks for the note", "completely different reply text here").outcome === "edited", "assist outcome: rewrite = edited");
+  const q = { spec: { sections: [{ kind: "materials", items: [{ sku: "A", qty: 2 }, { sku: "B", qty: 5 }, { sku: "Z", qty: 1, bonus: { kind: "package" } }] }] } };
+  const k = estimateKeep([{ sku: "A", qty: 2 }, { sku: "B", qty: 3 }, { sku: "C", qty: 1 }, { sku: "", qty: 1 }], q);
+  ok(k.kept === 1 && k.changed === 1 && k.removed === 1 && k.total === 3 && k.outcome === "edited", "assist outcome: estimate kept/changed/removed, custom lines ignored");
+  ok(estimateKeep([{ sku: "A", qty: 2 }], null).outcome === "discarded", "assist outcome: deleted quote = discarded");
+  ok(estimateKeep([{ sku: "A", qty: 2 }, { sku: "B", qty: 5 }], q).outcome === "accepted", "assist outcome: all kept = accepted");
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -152,6 +225,8 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistPureChecks(ok);
     await assistStoreChecks(ok);
     await assistProviderChecks(ok);
+    await assistRunChecks(ok);
+    await assistOutcomeChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);
