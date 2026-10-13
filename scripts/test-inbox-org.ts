@@ -15,11 +15,16 @@ import { chicagoParts, dayKey } from "@/lib/triage/clock";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { blobs, notifPrefs } from "@/db/schema";
+import { blobs, contactEmails, contacts, notifPrefs } from "@/db/schema";
+import { comms as commsTable } from "@/db/doc-tables";
 import { getDoc, patchDoc, setBlob, softDeleteDoc } from "@/db/doc-store";
 import { parseInbound } from "@/lib/gmail/mime";
 import type { GmailFullMessage } from "@/lib/gmail/api";
-import { setOrg, type CommThread } from "@/lib/stores/comms";
+import { setOrg, threadsIn, type CommMessage, type CommThread } from "@/lib/stores/comms";
+import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, organizeThread } from "@/lib/inbox-org/pipeline";
+import { onMyCourt, selectEmail } from "@/lib/triage/feeds/email";
+import { organizeAfterImport, recordMessage } from "@/lib/gmail/bridge";
+import { saveContact, setEmails } from "@/lib/identity/contacts";
 import {
   FILING_LOG_BLOB, MAX_FILING_LOG, MAX_SENDER_RULES, ORG_SETTINGS_BLOB, SENDER_RULES_BLOB,
   addSenderRule, appendFilingLog, appendFilingLogs, getFilingLog, getOwnDomainOverride, getSenderRules,
@@ -584,6 +589,286 @@ export async function inboxOrgDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/* ---------- Task 3: the rule pipeline, the import hook, court-driven status + triage ---------- */
+
+export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
+  const MIKE = "TEST335 Mike";
+  const MIKE_ID = "TEST335-u-mike";
+  const DANA_ID = "TEST335-u-dana";
+  const users = [
+    { id: MIKE_ID, name: MIKE, email: "mike@peaksystemsgroup.com", googleEmail: null },
+    { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
+  ];
+  const ctx = buildOrgContext({ users });
+  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true }, capUsd: 200 };
+  const pilot = buildOrgContext({ users, assist: pilotAssist, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
+
+  /* context + pilot gate (pure) */
+  ok(ctx.ownDomains.includes("peaksystemsgroup.com") && ctx.isInternal("dana@peaksystemsgroup.com") && !ctx.isInternal("pat@school.test"), "org pipeline ctx: Peak's own domain is internal, a customer's isn't");
+  ok(ctx.teamByEmail.get("dana@peaksystemsgroup.com") === DANA_ID, "org pipeline ctx: team address → user id");
+  const withConn = buildOrgContext({ users, connections: [{ address: "Mike.Personal@gmail.com", userId: MIKE_ID }] });
+  ok(withConn.users[0].emails.includes("mike.personal@gmail.com") && withConn.isInternal("mike.personal@gmail.com") && !withConn.isInternal("someone@gmail.com") && !withConn.ownDomains.includes("gmail.com"), "org pipeline ctx: a connected personal Gmail is internal; gmail.com never an own domain");
+  const over = buildOrgContext({ users, ownDomainOverride: "peak.example" });
+  ok(over.ownDomains.join(",") === "peak.example" && over.isInternal("x@peak.example") && over.isInternal("mike@peaksystemsgroup.com"), "org pipeline ctx: an admin override replaces the derived domains (team addresses stay internal)");
+  ok(!isOrgPilot(MIKE_ID, "file", ctx) && isOrgPilot(MIKE_ID, "file", pilot) && isOrgPilot(MIKE_ID, "promise", pilot) && !isOrgPilot(DANA_ID, "file", pilot) && !isOrgPilot(null, "file", pilot), "org pipeline: isOrgPilot — pilot user + Assist configured only");
+  ok(!isOrgPilot(MIKE_ID, "file", { assist: pilotAssist, env: {} }), "org pipeline: isOrgPilot — no key → not pilot");
+  ok(COURT_STATUS.me === "waiting_us" && COURT_STATUS.customer === "waiting_them" && COURT_STATUS.teammate === "waiting_them" && COURT_STATUS.nobody === "closed", "org pipeline: court → status mapping");
+
+  /* fixtures */
+  const T0 = 1_760_000_000_000;
+  let n = 0;
+  const msg = (o: Partial<CommMessage>): CommMessage => ({ id: `pm${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Hello there, can you help?", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread>): Promise<string> => {
+    const id = fixtureId(335, "pipe-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: MIKE, unread: true, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@school.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg({ fromEmail: "pat@school.test" })], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const QUOTE = fixtureId(335, "pipe-quote");
+  const CUST = fixtureId(335, "pipe-cust");
+  await createFixture("quotes", { id: QUOTE, name: "Main curtain", customer: "Lincoln HS", customerId: CUST, estNo: 987654, quoteType: "system", status: "sent" });
+  const PEAK_CONTACT = fixtureId(335, "pipe-contact");
+  const db = await getDb();
+  try {
+    /* 1. a number in the subject links the quote (strong) */
+    const log: FilingLogEntry[] = [];
+    const numId = await mk("number", { subject: "Re: EST-987654 curtain question" });
+    const r1 = await organizeThread(numId, { ctx, log });
+    const t1 = await read(numId);
+    ok(!r1.skipped && t1.filing?.work?.type === "quote" && t1.filing.work.id === QUOTE && t1.filing.customerId === CUST, "org pipeline: a number in the subject files the thread under that quote and its customer");
+    ok(t1.filing?.source === "number" && t1.filing.strength === "strong" && t1.filing.state === "suggested" && t1.filing.reason.includes("EST-987654") && t1.filing.reason.includes("subject"), "org pipeline: number filing is strong, suggested, and says where the number was");
+    ok(t1.filing?.work?.label === "EST-987654 Main curtain", "org pipeline: the work label is the quote's number + name");
+    ok(t1.filing?.needsReply === true && t1.court?.owner === "me" && !t1.filing.pendingAi, "org pipeline: a customer's question → needsReply, court me; non-pilot → no pendingAi");
+    ok(log.length === 1 && log[0].threadId === numId && log[0].source === "number" && log[0].outcome === "suggested" && log[0].customerId === CUST && log[0].workType === "quote", "org pipeline: a rule-sourced suggestion lands in the filing log (collected by the caller)");
+    await organizeThread(numId, { ctx, log });
+    ok(log.length === 1 && JSON.stringify((await read(numId)).filing) === JSON.stringify(t1.filing), "org pipeline: re-organizing an unchanged thread writes and logs nothing new");
+    const deadId = await mk("dead-number", { subject: "EST-987999 question" });
+    await organizeThread(deadId, { ctx });
+    const tDead = await read(deadId);
+    ok(tDead.filing?.work === null && tDead.filing.customerId === null && tDead.filing.state === "suggested" && !tDead.filing.noise, "org pipeline: a dead number is ignored → unresolved suggestion");
+    const deadPilot = await mk("dead-pilot", { subject: "EST-987999 question" });
+    await organizeThread(deadPilot, { ctx: pilot });
+    ok((await read(deadPilot)).filing?.pendingAi === true, "org pipeline: an unresolved filing for a pilot owner is marked pendingAi");
+    const bodyNum = await mk("body-number", { messages: [msg({ fromEmail: "pat@school.test", body: "Following up on est-987654 please" })] });
+    await organizeThread(bodyNum, { ctx });
+    ok((await read(bodyNum)).filing?.work?.id === QUOTE && (await read(bodyNum)).filing!.reason.includes("message"), "org pipeline: a number in the body is found too");
+
+    /* 2. a sender rule wins */
+    const ruled = buildOrgContext({
+      users,
+      senderRules: [{ id: "SR-t1", scope: "user", userId: MIKE_ID, match: { email: "pat@school.test" }, action: { type: "file", customerId: "TEST335:other-cust" }, createdBy: MIKE_ID, createdAt: 1 }],
+    });
+    const ruleId = await mk("rule", { subject: "EST-987654 again", customerId: CUST, resolution: "linked" });
+    await organizeThread(ruleId, { ctx: ruled });
+    const tRule = await read(ruleId);
+    ok(tRule.filing?.source === "rule" && tRule.filing.customerId === "TEST335:other-cust" && tRule.filing.strength === "strong" && tRule.filing.reason.startsWith("Your sender rule"), "org pipeline: a sender rule beats identity and numbers");
+    const noiseRule = buildOrgContext({ users, senderRules: [{ id: "SR-t2", scope: "company", match: { domain: "school.test" }, action: { type: "noise" }, createdBy: MIKE_ID, createdAt: 1 }] });
+    const nrId = await mk("rule-noise", {});
+    await organizeThread(nrId, { ctx: noiseRule });
+    ok((await read(nrId)).filing?.noise === true && (await read(nrId)).noise?.flagged === true && (await read(nrId)).noise?.moved === false, "org pipeline: a company noise rule flags noise (non-pilot: tag only)");
+
+    /* 3. identity */
+    const linkedId = await mk("linked", { customerId: CUST, customer: "Lincoln HS", resolution: "linked", resolvedContactId: "ct-x" });
+    await organizeThread(linkedId, { ctx });
+    const tLinked = await read(linkedId);
+    ok(tLinked.filing?.source === "identity" && tLinked.filing.strength === "strong" && tLinked.filing.customerId === CUST && tLinked.filing.reason.includes("known contact"), "org pipeline: a contact-matched thread is a strong identity filing");
+    const suggId = await mk("suggested", { resolution: "suggested", suggestedCustomerId: CUST });
+    await organizeThread(suggId, { ctx });
+    ok((await read(suggId)).filing?.strength === "weak" && (await read(suggId)).filing?.customerId === CUST, "org pipeline: a domain suggestion is a weak identity filing");
+    const suggNum = await mk("suggested-number", { resolution: "suggested", suggestedCustomerId: "TEST335:dom-cust", subject: "EST-987654" });
+    await organizeThread(suggNum, { ctx });
+    ok((await read(suggNum)).filing?.source === "number" && (await read(suggNum)).filing?.customerId === CUST, "org pipeline: a number beats a weak domain guess");
+
+    /* 4. noise: a known contact is never noise; pilot moved + archived; non-pilot tagged */
+    await saveContact({ id: PEAK_CONTACT, firstName: "Known", lastName: "Sender", homeCompanyId: fixtureId(335, "pipe-co"), title: "" });
+    await setEmails(PEAK_CONTACT, [{ value: "known@vendor-news.test", label: "work", isPrimary: true }]);
+    const knownId = await mk("known", { contactEmail: "known@vendor-news.test", messages: [msg({ fromEmail: "known@vendor-news.test", bulk: true, gmailLabelIds: ["CATEGORY_PROMOTIONS"] })] });
+    await organizeThread(knownId, { ctx: pilot });
+    const tKnown = await read(knownId);
+    ok(!tKnown.filing?.noise && !tKnown.noise && !tKnown.archived, "org pipeline: a known contact is never noise, even with promo/bulk signals");
+    const promo = () => ({ contactEmail: "deals@shop.test", messages: [msg({ fromEmail: "deals@shop.test", gmailLabelIds: ["INBOX", "CATEGORY_PROMOTIONS"] })] });
+    const pNoise = await mk("noise-pilot", promo());
+    const rP = await organizeThread(pNoise, { ctx: pilot });
+    const tP = await read(pNoise);
+    ok(tP.noise?.flagged === true && tP.noise.moved === true && tP.archived === true && tP.filing?.noise === true && tP.filing.source === "noise-rule", "org pipeline: a pilot owner's noise is moved — flagged, moved, archived");
+    ok(tP.updatedAt === T0 + 5 && !rP.skipped && rP.archived === true, "org pipeline: the noise move is quiet (the list order keeps the message time)");
+    const noiseList = await threadsIn("personal", "noise", MIKE);
+    ok(noiseList.some((t) => t.id === pNoise) && !noiseList.some((t) => t.id === knownId), "org pipeline: threadsIn(…, 'noise') lists moved noise only");
+    ok(!(await threadsIn("personal", "inbox", MIKE)).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
+    const nNoise = await mk("noise-plain", promo());
+    await organizeThread(nNoise, { ctx });
+    const tN = await read(nNoise);
+    ok(tN.noise?.flagged === true && tN.noise.moved === false && tN.archived === false, "org pipeline: a non-pilot owner's noise is only tagged (stays in the inbox)");
+    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
+    const rescued = await mk("noise-rescued", { ...promo(), noise: { flagged: false, reason: "", moved: false, rescued: true } });
+    await organizeThread(rescued, { ctx: pilot });
+    ok(!(await read(rescued)).noise?.flagged && (await read(rescued)).noise?.rescued === true && !(await read(rescued)).archived, "org pipeline: a rescued thread is never flagged again");
+    const replied = await mk("noise-owner-wrote", { messages: [msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "deals@shop.test" }), msg({ fromEmail: "deals@shop.test", gmailLabelIds: ["CATEGORY_PROMOTIONS"] })], contactEmail: "deals@shop.test" });
+    await organizeThread(replied, { ctx: pilot });
+    ok(!(await read(replied)).noise && !(await read(replied)).archived, "org pipeline: a thread the owner wrote in is never noise");
+
+    /* 5. court: a teammate's last message → customer, status waiting_them */
+    const mateId = await mk("teammate", {
+      messages: [msg({ fromEmail: "pat@school.test" }), msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", body: "Hi Pat, I'll get you a price Friday.", to: "pat@school.test", cc: "mike@peaksystemsgroup.com" })],
+    });
+    const rMate = await organizeThread(mateId, { ctx });
+    const tMate = await read(mateId);
+    ok(tMate.court?.owner === "customer" && tMate.court.teammateId === DANA_ID && tMate.court.source === "rule" && tMate.status === "waiting_them", "org pipeline: a teammate's last message → court customer (teammate named), status waiting_them");
+    ok(!rMate.skipped && rMate.lastAuthor === "teammate" && rMate.newMail === true, "org pipeline: the result names a teammate as the last author (Task 5's teammate-reply archive)");
+    ok(tMate.updatedAt === T0 + 5 && tMate.filing?.needsReply === false, "org pipeline: the status sync is quiet; needsReply false when the court isn't me");
+    const myReply = await mk("my-reply", { messages: [msg({ fromEmail: "pat@school.test" }), msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "pat@school.test" })], status: "waiting_them" });
+    await organizeThread(myReply, { ctx });
+    ok((await read(myReply)).court?.owner === "customer" && (await read(myReply)).status === "waiting_them", "org pipeline: my reply → court customer");
+    const thanks = await mk("signoff", { messages: [msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "pat@school.test" }), msg({ fromEmail: "pat@school.test", body: "Thanks so much!" })] });
+    await organizeThread(thanks, { ctx });
+    ok((await read(thanks)).court?.owner === "nobody" && (await read(thanks)).status === "closed", "org pipeline: a customer's sign-off → nobody, status closed");
+
+    /* 6. forwards: from a teammate → me (filed on the original sender); FYI → nobody */
+    const fwdBody = (note: string) =>
+      `${note}\n\n---------- Forwarded message ---------\nFrom: Pat Doe <pat@lincoln-fwd.test>\nDate: Mon, Oct 12, 2026 at 9:00 AM\nSubject: Bleachers\nTo: Dana <dana@peaksystemsgroup.com>\n\nWe need a bleacher curtain quote.`;
+    const fwdRule = buildOrgContext({
+      users,
+      senderRules: [{ id: "SR-t3", scope: "company", match: { email: "pat@lincoln-fwd.test" }, action: { type: "file", customerId: CUST }, createdBy: MIKE_ID, createdAt: 1 }],
+    });
+    const fwdId = await mk("forward", { subject: "Fwd: Bleachers", contactEmail: "dana@peaksystemsgroup.com", messages: [msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "mike@peaksystemsgroup.com", body: fwdBody("Mike, can you take this one?") })] });
+    await organizeThread(fwdId, { ctx: fwdRule });
+    const tFwd = await read(fwdId);
+    ok(tFwd.court?.owner === "me" && tFwd.status === "waiting_us", "org pipeline: a teammate's forward to me → court me (hand-off)");
+    ok(tFwd.filing?.source === "rule" && tFwd.filing.customerId === CUST && !tFwd.noise, "org pipeline: the forward is filed on the original (external) sender — the sender rule for Pat applies");
+    const fyiId = await mk("forward-fyi", { subject: "Fwd: Bleachers", contactEmail: "dana@peaksystemsgroup.com", messages: [msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "mike@peaksystemsgroup.com", body: fwdBody("FYI — for your records.") })] });
+    await organizeThread(fyiId, { ctx });
+    ok((await read(fyiId)).court?.owner === "nobody" && (await read(fyiId)).status === "closed", "org pipeline: an FYI forward → court nobody, status closed");
+    const custFwd = await mk("customer-forward", {
+      subject: "Fwd: Bleachers",
+      customerId: "TEST335:fwd-owner",
+      customer: "Pat's school",
+      resolution: "linked",
+      messages: [msg({ fromEmail: "pat@school.test", body: fwdBody("Can you price this?") })],
+    });
+    await organizeThread(custFwd, { ctx: fwdRule });
+    ok((await read(custFwd)).filing?.customerId === "TEST335:fwd-owner" && (await read(custFwd)).filing?.source === "identity", "org pipeline: a customer's own forward stays filed under the customer (not the forwarded sender's rule)");
+    const fwdReply = await mk("forward-then-reply", {
+      subject: "Fwd: Bleachers",
+      contactEmail: "dana@peaksystemsgroup.com",
+      messages: [msg({ fromEmail: "dana@peaksystemsgroup.com", to: "mike@peaksystemsgroup.com", body: fwdBody("Can you take this?") }), msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "dana@peaksystemsgroup.com", body: "On it." })],
+    });
+    await organizeThread(fwdReply, { ctx });
+    ok((await read(fwdReply)).court?.owner === "teammate", "org pipeline: my reply in a thread that began as a forward is a reply, not 'my forward out'");
+
+    /* internal-only threads: never noise, no nagging suggestion */
+    const internal = await mk("internal", { contactEmail: "dana@peaksystemsgroup.com", subject: "Lunch?", messages: [msg({ fromEmail: "dana@peaksystemsgroup.com", to: "mike@peaksystemsgroup.com", body: "Lunch at noon?", bulk: true })] });
+    await organizeThread(internal, { ctx });
+    const tInt = await read(internal);
+    ok(tInt.filing?.state === "skipped" && !tInt.noise && tInt.court?.owner === "me", "org pipeline: an internal-only thread with no number → skipped filing, never noise, court me");
+    const internalNum = await mk("internal-number", { contactEmail: "dana@peaksystemsgroup.com", subject: "EST-987654 pricing", messages: [msg({ fromEmail: "dana@peaksystemsgroup.com", to: "mike@peaksystemsgroup.com" })] });
+    await organizeThread(internalNum, { ctx });
+    ok((await read(internalNum)).filing?.work?.id === QUOTE && (await read(internalNum)).filing?.state === "suggested", "org pipeline: an internal-only thread is filed by a number");
+
+    /* preservation: filed / skipped / override */
+    const filedFiling: Filing = { customerId: "TEST335:kept", work: null, noise: false, source: "identity", reason: "kept", strength: "strong", needsReply: false, state: "filed", at: 1, filedBy: "approved", filedAt: 1 };
+    const filedId = await mk("filed", { subject: "EST-987654", filing: filedFiling });
+    await organizeThread(filedId, { ctx });
+    ok((await read(filedId)).filing?.customerId === "TEST335:kept" && (await read(filedId)).filing?.state === "filed" && (await read(filedId)).court?.owner === "me", "org pipeline: a filed thread keeps its filing; the court still updates");
+    const lastMsg = msg({ fromEmail: "pat@school.test", body: "Can you call me?" });
+    const overrideId = await mk("override", { messages: [lastMsg], court: { owner: "nobody", reason: "Not on me", source: "override", at: lastMsg.at + 1, basis: lastMsg.id }, status: "closed" });
+    await organizeThread(overrideId, { ctx });
+    ok((await read(overrideId)).court?.source === "override" && (await read(overrideId)).court?.owner === "nobody" && (await read(overrideId)).status === "closed", "org pipeline: an override sticks while no new message has arrived");
+    await patchDoc<CommThread>("comms", overrideId, (d) => {
+      d.messages = [...d.messages, msg({ fromEmail: "pat@school.test", body: "Any update on this?" })];
+    });
+    await organizeThread(overrideId, { ctx });
+    ok((await read(overrideId)).court?.source === "rule" && (await read(overrideId)).court?.owner === "me" && (await read(overrideId)).status === "waiting_us", "org pipeline: a newer message ends the override and reopens the thread");
+    const manualClosed = await mk("manual-closed", { status: "closed" });
+    await organizeThread(manualClosed, { ctx, backlog: true });
+    ok((await read(manualClosed)).status === "closed" && (await read(manualClosed)).court?.owner === "me", "org pipeline: backlog never reopens a manually closed thread (court computed, status kept)");
+    const closedMine = await mk("closed-mine", { status: "closed", messages: [msg({ fromEmail: "pat@school.test" }), msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "pat@school.test" })] });
+    await organizeThread(closedMine, { ctx });
+    ok((await read(closedMine)).status === "closed", "org pipeline: closed stays closed after the owner's own message (deriveStatus's rule)");
+
+    /* pendingAi on the court (pilot, not backlog, not a sign-off) */
+    const cp = await mk("court-pilot", {});
+    await organizeThread(cp, { ctx: pilot });
+    ok((await read(cp)).court?.pendingAi === true, "org pipeline: a pilot owner's court is marked pendingAi for the AI reading");
+    const cpb = await mk("court-pilot-backlog", {});
+    await organizeThread(cpb, { ctx: pilot, backlog: true });
+    ok(!(await read(cpb)).court?.pendingAi, "org pipeline: backlog → no court pendingAi (no promise-tasks from old mail)");
+    const cps = await mk("court-pilot-signoff", { messages: [msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "pat@school.test" }), msg({ fromEmail: "pat@school.test", body: "Got it, thanks!" })] });
+    await organizeThread(cps, { ctx: pilot });
+    ok(!(await read(cps)).court?.pendingAi, "org pipeline: a sign-off isn't sent to the AI reading");
+
+    /* un-archive: archived, court becomes me through new mail */
+    const arch = await mk("unarchive", { archived: true, status: "waiting_them", messages: [msg({ direction: "out", fromEmail: "mike@peaksystemsgroup.com", to: "pat@school.test" })] });
+    await organizeThread(arch, { ctx });
+    ok((await read(arch)).archived === true && (await read(arch)).court?.owner === "customer", "org pipeline: my last message leaves an archived thread archived");
+    await patchDoc<CommThread>("comms", arch, (d) => {
+      d.messages = [...d.messages, msg({ fromEmail: "pat@school.test", body: "One more question?" })];
+    });
+    const rArch = await organizeThread(arch, { ctx });
+    ok((await read(arch)).archived === false && !rArch.skipped && rArch.unarchived === true, "org pipeline: new customer mail making the court 'me' un-archives");
+    const stillArch = await mk("stays-archived", { archived: true });
+    await organizeThread(stillArch, { ctx, backlog: true });
+    ok((await read(stillArch)).archived === true, "org pipeline: a first organize (no earlier court) never un-archives a thread someone archived");
+
+    /* skips */
+    const draft = await mk("draft", { status: "draft" });
+    ok((await organizeThread(draft, { ctx })).skipped === "draft" && !(await read(draft)).court, "org pipeline: drafts are skipped untouched");
+    const del = await mk("deleted", { deleted: true });
+    ok((await organizeThread(del, { ctx })).skipped === "deleted" && !(await read(del)).court, "org pipeline: deleted-folder threads are skipped untouched");
+    ok((await organizeThread("TEST335:nope", { ctx })).skipped === "missing", "org pipeline: a missing thread is skipped");
+
+    /* 7. the triage email feed respects the court */
+    const tri = (id: string, extra: Record<string, unknown>) =>
+      ({ id, mailbox: "personal", mailboxUser: MIKE, unread: true, customerId: null, customer: "Acme", contactName: "Pat", contactEmail: "pat@acme.test", subject: "Q", channel: "email", status: "waiting_us", assignedTo: MIKE, link: null, messages: [{ id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" }], createdAt: T0, updatedAt: T0, ...extra }) as unknown as CommThread;
+    const court = (owner: Court["owner"]): Court => ({ owner, reason: "", source: "rule", at: T0 });
+    const picked = selectEmail(
+      [tri("C-a", { court: court("me") }), tri("C-b", { court: court("customer") }), tri("C-c", {}), tri("C-d", { status: "waiting_them" }), tri("C-e", { court: court("me"), status: "waiting_them" }), tri("C-f", { court: court("nobody") })],
+      { quotes: new Map(), leads: new Map() },
+      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+    );
+    ok(picked.map((c) => c.key).join(",") === "email:C-a,email:C-c,email:C-e", "org triage: court 'me' counts, a teammate-replied (customer) / nobody court doesn't; no court → waiting_us fallback");
+    ok(picked.find((c) => c.key === "email:C-e")?.since === T0, "org triage: a court-me thread whose status lags still dates from the last inbound");
+    ok(onMyCourt({ court: undefined, status: "waiting_us" }) && !onMyCourt({ court: court("teammate"), status: "waiting_us" }), "org triage: onMyCourt");
+
+    /* 8. the import hook: organize errors never break recordMessage */
+    let threw = false;
+    try {
+      await organizeAfterImport("TEST335:any", {}, async () => {
+        throw new Error("boom");
+      });
+    } catch {
+      threw = true;
+    }
+    ok(!threw, "org hook: a throwing organizer never escapes organizeAfterImport");
+    const bridgeSrc = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+    const recBody = bridgeSrc.slice(bridgeSrc.indexOf("export async function recordMessage("), bridgeSrc.indexOf("async function userNameOfKey("));
+    ok((recBody.match(/await organizeAfterImport\((existing\.id|id), org\)/g) || []).length === 2, "org hook: recordMessage organizes on both the existing-thread and the new-thread path");
+    ok(recBody.indexOf("await organizeAfterImport(existing.id, org)") > recBody.indexOf("await patchDoc<CommThread>(\"comms\", existing.id") && recBody.indexOf("await organizeAfterImport(id, org)") > recBody.indexOf("insertDocIfAbsent"), "org hook: organizing runs after the write resolves");
+    ok(bridgeSrc.includes("const next = t.court ? t.status : deriveStatus(") && bridgeSrc.includes("if (!d.court && (d.status ==="), "org hook: rederiveStatuses leaves a court-driven status alone");
+    ok(bridgeSrc.includes("backlog: !info.initialImportDone") && bridgeSrc.includes("appendFilingLogs(org.log.splice(0))"), "org hook: the 90-day import is backlog; the filing log is appended once per sync");
+    // a real import: the hook organizes the new thread; a failing organize still returns the id
+    invalidateOrgContext();
+    const gm = (id: string, from: string, body: string): GmailFullMessage =>
+      ({
+        id, threadId: "TEST335-gthread", labelIds: ["INBOX"], internalDate: String(T0 + 9_000_000),
+        payload: { mimeType: "text/plain", headers: [["From", from], ["To", "mike@peaksystemsgroup.com"], ["Subject", "Re: EST-987654"], ["Message-ID", `<${id}@x.test>`]].map(([name, value]) => ({ name, value })), body: { data: Buffer.from(body).toString("base64url") } },
+      }) as GmailFullMessage;
+    const created = await recordMessage("personal:TEST335-nobody", parseInbound(gm("TEST335-g1", "Pat <pat@school.test>", "Any news?")));
+    const imported = created ? await read(created) : null;
+    ok(!!created && imported?.court?.owner === "me" && imported.filing?.work?.id === QUOTE, "org hook: a real recordMessage organizes the new thread (court + number filing)");
+    const again = await recordMessage("personal:TEST335-nobody", parseInbound(gm("TEST335-g2", "Dana <dana@peaksystemsgroup.com>", "I'll handle it, Pat.")));
+    ok(again === created && (await read(created!)).court?.owner === "customer" && (await read(created!)).status === "waiting_them", "org hook: the next message on the thread re-organizes it (a teammate's reply → customer)");
+    if (created) await db.delete(commsTable).where(eq(commsTable.id, created));
+  } finally {
+    await db.delete(contactEmails).where(eq(contactEmails.contactId, PEAK_CONTACT));
+    await db.delete(contacts).where(eq(contacts.id, PEAK_CONTACT));
+    invalidateOrgContext();
+  }
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -609,6 +894,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
   (async () => {
     await inboxOrgPureChecks(ok);
     await inboxOrgDbChecks(ok);
+    await inboxOrgPipelineChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

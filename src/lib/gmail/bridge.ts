@@ -57,6 +57,7 @@ import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound }
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
 import { interpretLabelEvents } from "./label-interpret";
+import { appendFilingLogs, type FilingLogEntry } from "@/lib/stores/inbox-org";
 
 /**
  * The real Gmail bridge (Phase 7). comms.ts delegates here — but ONLY when the
@@ -187,15 +188,38 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
 
 /* ---- inbound -------------------------------------------------------------- */
 
+/** #335 — one sync run's inbox-organization state: whether this is the
+ *  one-time 90-day import (backlog: no AI court reading, no promise-tasks)
+ *  and the filing-log entries collected for one append at the end. */
+export type OrgImportRun = { backlog?: boolean; log?: FilingLogEntry[] };
+
+type Organize = (threadId: string, opts: { backlog?: boolean; log?: FilingLogEntry[] }) => Promise<unknown>;
+
+/** #335 — run the inbox-organization rules on a thread the import just
+ *  wrote. Never throws: the message is already stored, and organizing is
+ *  bookkeeping on top of it — a failure is logged and the next message (or
+ *  the cleanup) organizes the thread again. `organize` is injectable for the
+ *  checks; the pipeline is loaded lazily (it pulls in users, settings,
+ *  quotes and projects). */
+export async function organizeAfterImport(threadId: string, run: OrgImportRun = {}, organize?: Organize): Promise<void> {
+  try {
+    const fn: Organize = organize ?? (await import("@/lib/inbox-org/pipeline")).organizeThread;
+    await fn(threadId, { backlog: run.backlog, log: run.log });
+  } catch (err) {
+    console.error("[inbox-org] organize failed for", threadId, err);
+  }
+}
+
 /** Record one Gmail message into comms, deduped by Gmail message id. Returns
  *  the touched thread id (or null if it was a duplicate). `attempt` guards the
  *  id-collision redo (D73): concurrent syncs can compute the same
  *  nextPrefixedId, so creation inserts-if-absent and re-runs the whole dedup
  *  on collision rather than clobbering the other writer's thread. */
-async function recordMessage(
+export async function recordMessage(
   key: MailboxKey,
   p: ParsedInbound,
-  attempt = 0
+  attempt = 0,
+  org: OrgImportRun = {}
 ): Promise<string | null> {
   // The app's own site-visit .ics invites (D76-F) — self-addressed mail that
   // would otherwise reappear as stray inbox threads. Recognized by the
@@ -254,6 +278,7 @@ async function recordMessage(
       }
     });
     if (statusChanged) queueLabelSync(existing.id);
+    await organizeAfterImport(existing.id, org);
     return existing.id;
   }
 
@@ -308,9 +333,10 @@ async function recordMessage(
       console.error("[gmail] id collision persisted for", p.gmailId);
       return null;
     }
-    return recordMessage(key, p, attempt + 1);
+    return recordMessage(key, p, attempt + 1, org);
   }
   if (rec.resolution === "linked") queueLabelSync(id);
+  await organizeAfterImport(id, org);
   return id;
 }
 
@@ -413,12 +439,15 @@ async function rederiveStatuses(key: MailboxKey): Promise<number> {
     if (t.status !== "waiting_us" && t.status !== "waiting_them") continue;
     if ((t.gmailAccountKey ?? keyForThreadWith(t, users)) !== key) continue;
     const sorted = [...(t.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
-    const next = deriveStatus({ status: t.status, messages: sorted });
+    // #335 — a thread the organization pipeline has a court for keeps the
+    // court's status (a teammate's reply is waiting_them, not waiting_us);
+    // only the message order is still repaired here.
+    const next = t.court ? t.status : deriveStatus({ status: t.status, messages: sorted });
     const orderChanged = sorted.some((m, i) => m !== (t.messages || [])[i]);
     if (next === t.status && !orderChanged) continue;
     await patchDoc<CommThread>("comms", t.id, (d) => {
       d.messages = [...(d.messages || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
-      if (d.status === "waiting_us" || d.status === "waiting_them") d.status = deriveStatus(d);
+      if (!d.court && (d.status === "waiting_us" || d.status === "waiting_them")) d.status = deriveStatus(d);
     });
     queueLabelSync(t.id);
     changed++;
@@ -581,7 +610,8 @@ async function buildImportDedup(): Promise<Set<string>> {
 async function syncMailboxMessages(
   key: MailboxKey,
   info: NonNullable<Awaited<ReturnType<typeof getConnectionInfo>>>,
-  known: Set<string>
+  known: Set<string>,
+  org: OrgImportRun = {}
 ): Promise<{ last: string | null; more: boolean; labelsChanged: boolean }> {
   let last: string | null = null;
   // Tracked separately from `last` (#96 review Minor 2): `last` must stay a
@@ -605,7 +635,7 @@ async function syncMailboxMessages(
         let touched: string | null = null;
         try {
           const full = await getMessage(key, meta.id);
-          touched = await recordMessage(key, parseInbound(full));
+          touched = await recordMessage(key, parseInbound(full), 0, org);
           if (touched) last = touched;
         } catch (err) {
           if (isRateLimit(err)) {
@@ -660,7 +690,7 @@ async function syncMailboxMessages(
       if (page.historyId) newestHistoryId = page.historyId;
       for (const meta of page.added) {
         const full = await getMessage(key, meta.id);
-        const touched = await recordMessage(key, parseInbound(full));
+        const touched = await recordMessage(key, parseInbound(full), 0, org);
         if (touched) last = touched;
       }
       labelEvents.push(...page.labelEvents);
@@ -716,6 +746,9 @@ async function syncMailbox(
     return { ran: false, last: null, changed: false };
   let last: string | null = null;
   let labelsChanged = false;
+  // #335 — the one-time 90-day import is backlog for the organization
+  // pipeline; filing-log entries are appended once, after the messages.
+  const org: OrgImportRun = { backlog: !info.initialImportDone, log: [] };
   try {
     // Built once for this run (not per chunk) and passed through — a manual
     // Send/Receive click can drain several chunks back-to-back, and rebuilding
@@ -728,7 +761,7 @@ async function syncMailbox(
     let r: { last: string | null; more: boolean; labelsChanged: boolean };
     do {
       const chunkStarted = Date.now();
-      r = await syncMailboxMessages(key, info, known);
+      r = await syncMailboxMessages(key, info, known, org);
       lastChunkMs = Date.now() - chunkStarted;
       if (r.last) last = r.last;
       if (r.labelsChanged) labelsChanged = true;
@@ -744,6 +777,11 @@ async function syncMailbox(
     // successfully, and a later chunk's failure must not lose that progress
     // (it's what keeps `changed` true for this run).
     console.error("[gmail] message sync failed for", key, err);
+  }
+  try {
+    if (org.log?.length) await appendFilingLogs(org.log.splice(0));
+  } catch (err) {
+    console.error("[inbox-org] filing log append failed for", key, err);
   }
   let flips = 0;
   try {

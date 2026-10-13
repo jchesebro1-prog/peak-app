@@ -8,6 +8,11 @@
  * address internal. Pure.
  */
 
+/** Peak's own mail domain — the literal inbox-identity / team.ts / comms'
+ *  DEFAULT_DOMAIN have always used. Always an own domain unless an admin
+ *  override names the own domains explicitly. */
+export const PEAK_OWN_DOMAIN = "peaksystemsgroup.com";
+
 export const FREEMAIL_DOMAINS: ReadonlySet<string> = new Set([
   "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
   "icloud.com", "me.com", "mac.com", "aol.com", "protonmail.com", "proton.me", "gmx.com", "mail.com",
@@ -54,3 +59,7 @@ export function makeInternalChecker(teamEmails: string[], ownDomains: string[]):
     return !!d && domains.some((own) => d === own || d.endsWith("." + own));
   };
 }
+
+/** The shared checker for callers that have no team list in hand (the inbox
+ *  identity picker): an address on Peak's own domain (or a subdomain). */
+export const isPeakAddress: (email: string) => boolean = makeInternalChecker([], [PEAK_OWN_DOMAIN]);

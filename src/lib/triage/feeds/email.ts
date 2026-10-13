@@ -1,4 +1,4 @@
-import { waitingSince, type CommThread } from "@/lib/stores/comms";
+import { lastInbound, waitingSince, type CommThread } from "@/lib/stores/comms";
 import { isOpen as leadIsOpen } from "@/lib/stores/leads";
 import { sameName } from "@/lib/quote-approval-rules";
 import { money } from "@/lib/format";
@@ -30,18 +30,26 @@ export function linkedDealLabel(t: Pick<CommThread, "link">, deals: DealIndex): 
   return null;
 }
 
+/** #335 — the ball is in my court: the inbox-organization court says "me";
+ *  a thread the pipeline hasn't organized yet falls back to waiting_us. A
+ *  teammate's reply (court customer) no longer counts against me. */
+export function onMyCourt(t: Pick<CommThread, "court" | "status">): boolean {
+  return t.court ? t.court.owner === "me" : t.status === "waiting_us";
+}
+
 /**
  * Threads assigned to me that are waiting on us — the bell's own rule
- * (nav-counts.ts "Customers waiting on a reply"): status waiting_us,
- * assignedTo me, not archived (Peak or Gmail side), not in Deleted.
+ * (nav-counts.ts "Customers waiting on a reply"): in my court (#335; status
+ * waiting_us when no court yet), assignedTo me, not archived (Peak or Gmail
+ * side), not in Deleted.
  * ≥ 1 business day → "customer waiting"; younger → "customer message".
  */
 export function selectEmail(threads: readonly CommThread[], deals: DealIndex, ctx: Pick<FeedCtx, "me" | "now">): TriageCandidate[] {
   const out: TriageCandidate[] = [];
   for (const t of threads) {
-    if (t.status !== "waiting_us" || !sameName(t.assignedTo, ctx.me.name)) continue;
+    if (!onMyCourt(t) || !sameName(t.assignedTo, ctx.me.name)) continue;
     if (t.archived || t.deleted || t.gmailInboxed === false) continue;
-    const since = waitingSince(t) ?? t.updatedAt ?? 0;
+    const since = waitingSince(t) ?? lastInbound(t)?.at ?? t.updatedAt ?? 0;
     const biz = since ? businessMsBetween(since, ctx.now) : 0;
     const days = Math.floor(biz / DAY);
     const facts: TriageFact[] = [

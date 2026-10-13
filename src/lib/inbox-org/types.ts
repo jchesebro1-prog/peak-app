@@ -28,6 +28,10 @@ export type Filing = {
   filedAt?: number;
   /** the AI step still has to look at this thread (resumes next sync) */
   pendingAi?: boolean;
+  /** id of the thread's newest message when this filing was computed — "new
+   *  mail since" is a different newest message (a late-imported message can
+   *  carry an older Gmail date, so `at` alone can't tell). */
+  basis?: string;
 };
 
 /** A promise read from a message (spec §7). `due` is epoch-ms (5 pm Chicago). */
@@ -42,6 +46,9 @@ export type Court = {
   at: number;
   promise?: Promise_;
   pendingAi?: boolean;
+  /** id of the thread's newest message when this court was set (see
+   *  `Filing.basis`). An override / AI court sticks until it changes. */
+  basis?: string;
 };
 
 /** `CommThread.noise`. `moved` = held out of the inbox (pilot users only);

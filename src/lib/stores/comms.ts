@@ -154,6 +154,9 @@ function asChannel(x: string | undefined, fallback: Channel): Channel {
 
 export type MailboxId = "personal" | "sales" | "installs" | "info";
 export type SmartView = "needs" | "calls" | "flagged";
+/** #335 — the Organize view's Noise tab: threads the pipeline held out of the
+ *  inbox as noise (pilot users), newest first. Not a sidebar folder. */
+export type OrgFolder = "noise";
 export type FolderId =
   | "inbox"
   | "sent"
@@ -771,7 +774,7 @@ function pinnedFirst(list: CommThread[]): CommThread[] {
  *  "waiting on us" first ordering for the plain inbox folder — punch #42). */
 export async function threadsIn(
   boxId: MailboxId | SmartView,
-  folder?: FolderId | null,
+  folder?: FolderId | OrgFolder | null,
   me?: string,
   opts: {
     query?: string;
@@ -811,6 +814,8 @@ export async function threadsIn(
   else {
     base = all.filter((t) => inBox(t, boxId, user));
     if (folder === "deleted") base = base.filter((t) => !!t.deleted);
+    else if (folder === "noise")
+      base = base.filter((t) => !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !!t.noise.moved);
     else {
       // Every non-Deleted folder hides deleted threads.
       base = base.filter((t) => !t.deleted);
@@ -1075,19 +1080,24 @@ export async function markUnread(id: string): Promise<CommThread | null> {
   });
 }
 
-export async function archive(id: string): Promise<CommThread | null> {
+/** `quiet` (#335 inbox organization): the move is the pipeline's bookkeeping,
+ *  not activity on the thread — skip touch(), so `updatedAt` (the list order)
+ *  keeps the newest message's time. The Gmail push is the same either way. */
+export type QuietOpt = { quiet?: boolean };
+
+export async function archive(id: string, opts: QuietOpt = {}): Promise<CommThread | null> {
   const t = await patchDoc<CommThread>("comms", id, (d) => {
     d.archived = true;
-    touch(d);
+    if (!opts.quiet) touch(d);
   });
   await dispatchInboxState(id, false); // two-way archive (D74)
   return t;
 }
 
-export async function unarchive(id: string): Promise<CommThread | null> {
+export async function unarchive(id: string, opts: QuietOpt = {}): Promise<CommThread | null> {
   const t = await patchDoc<CommThread>("comms", id, (d) => {
     d.archived = false;
-    touch(d);
+    if (!opts.quiet) touch(d);
   });
   await dispatchInboxState(id, true); // two-way archive (D74)
   return t;
@@ -1689,13 +1699,16 @@ function queuePeakLabelSync(threadId: string): void {
 
 export async function setStatus(
   threadId: string,
-  status: string
+  status: string,
+  opts: QuietOpt = {}
 ): Promise<CommThread | null> {
   const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     t.status = (STATUSES as readonly string[]).includes(status)
       ? (status as ThreadStatus)
       : t.status;
-    touch(t);
+    // #335 — the organization pipeline keeps status in step with the court
+    // quietly (see QuietOpt); a person's status change still touches.
+    if (!opts.quiet) touch(t);
   });
   if (res) queuePeakLabelSync(threadId);
   return res;

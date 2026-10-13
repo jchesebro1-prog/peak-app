@@ -9,6 +9,7 @@
  */
 import type { CommMessage, CommThread } from "@/lib/stores/comms";
 import { parseAddress } from "@/lib/gmail/mime";
+import { PEAK_OWN_DOMAIN, isPeakAddress } from "@/lib/inbox-org/internal";
 
 export type IdentityAddress = { email: string; name: string; messageId: string };
 
@@ -25,13 +26,15 @@ function lc(s: string | undefined | null): string {
  *  hardcodes for its firstinitial+lastname@ address guess); an outbound
  *  message's To/Cc routinely carries a self-CC or a teammate before the
  *  actual external recipient ("Jeff Chesebro <jeff@peaksystemsgroup.com>,
- *  AP Clerk <ap@lakefront…>"), which is never who the thread is WITH. */
-const INTERNAL_DOMAIN = "peaksystemsgroup.com";
+ *  AP Clerk <ap@lakefront…>"), which is never who the thread is WITH.
+ *  #335 — the domain and the check are the inbox-organization pipeline's
+ *  shared ones (`@/lib/inbox-org/internal`), so both agree on "internal". */
+export const INTERNAL_DOMAIN = PEAK_OWN_DOMAIN;
 
 function isInternal(email: string, selfEmail?: string): boolean {
   if (!email) return false;
   if (selfEmail && email === lc(selfEmail)) return true;
-  return email.endsWith("@" + INTERNAL_DOMAIN);
+  return isPeakAddress(email);
 }
 
 /** First non-empty, non-internal address in a To header ("AP <ap@x.org>,
