@@ -3,7 +3,9 @@ import { billedPrice, claudeCostUsd, costUsd, modelFor, requestOptionsFor, SLOT_
 import { anthropicRequestOptions, buildAnthropicParams, FALLBACK_BETA } from "@/lib/assist/anthropic";
 import { buildLocalBody } from "@/lib/assist/local";
 import { pickProvider } from "@/lib/assist/provider";
-import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured } from "@/lib/assist/config";
+import { assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured, assistStatusLine, cleanApiKey, effectiveAnthropicKey } from "@/lib/assist/config";
+import { ASSIST_SECRETS_BLOB, assistKeyInfo, clearAssistKey, getAssistEnv, readAssistKey, resetAssistKeyCache, saveAssistKey } from "@/lib/assist/key-store";
+import { blobs } from "@/db/schema";
 import { z } from "zod";
 import { runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
 import { editRatio, estimateKeep, estimateOutcomeFor, replyOutcome } from "@/lib/assist/outcome";
@@ -533,6 +535,97 @@ export async function assistReportChecks(ok: Ok): Promise<void> {
   ok(vmSrc.includes("Promise.all(") && vmSrc.includes("estimateOutcomeFor(") && /try \{[\s\S]*listRunsByMonth[\s\S]*\} catch/.test(vmSrc), "assist report: loadAssistVM fetches quotes in parallel and never throws (empty report on DB error)");
 }
 
+/** D881 — admin-entered Claude key: pure precedence + the encrypted blob on scratch PGlite. */
+export async function assistKeyChecks(ok: Ok): Promise<void> {
+  const K = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0_-xyz" + "a3F9";
+  const K2 = "sk-ant-api03-" + "Z9y8X7w6V5u4T3s2R1q0-_abc" + "Q7w2";
+  /* cleanApiKey */
+  ok(cleanApiKey(`  ${K}\n`) === K, "assist key: cleanApiKey trims a valid key");
+  ok(cleanApiKey("") === null && cleanApiKey("sk-live-" + "x".repeat(40)) === null && cleanApiKey("sk-ant-api03-abc def ghi jkl mno pqr") === null, "assist key: cleanApiKey rejects empty, non-Anthropic and inner spaces");
+  ok(cleanApiKey("sk-ant-" + "a".repeat(301)) === null && cleanApiKey("sk-ant-short") === null && cleanApiKey(42) === null, "assist key: cleanApiKey rejects over-long, too short and non-string");
+  /* effectiveAnthropicKey truth table */
+  const eff = (stored: string | null, env: Record<string, string>, unreadable = false) => effectiveAnthropicKey({ stored, storedUnreadable: unreadable, env });
+  ok(eff(K, { ANTHROPIC_API_KEY: K2 }).key === K && eff(K, { ANTHROPIC_API_KEY: K2 }).source === "settings", "assist key: the stored key wins over the env var");
+  ok(eff(null, { ANTHROPIC_API_KEY: ` ${K2} ` }).key === K2 && eff(null, { ANTHROPIC_API_KEY: K2 }).source === "env", "assist key: env var fallback (trimmed)");
+  ok(eff(null, {}).key === null && eff(null, { ANTHROPIC_API_KEY: "  " }).source === "none", "assist key: neither = none");
+  ok(eff(K, { VERCEL_ENV: "preview", ANTHROPIC_API_KEY: K2 }).key === K2 && eff(K, { VERCEL_ENV: "preview" }).source === "none", "assist key: a preview deploy ignores the stored key");
+  ok(eff(K, { VERCEL_ENV: "preview", ASSIST_ALLOW_PREVIEW_KEY: "true" }).source === "settings", "assist key: preview + ASSIST_ALLOW_PREVIEW_KEY=true uses the stored key");
+  ok(eff(K, { VERCEL_ENV: "production" }).source === "settings", "assist key: production uses the stored key");
+  ok(eff(K, { ANTHROPIC_API_KEY: K2 }, true).key === K2 && eff(K, {}, true).source === "none", "assist key: an unreadable stored key falls back to the env var");
+  /* status line */
+  const info = { source: "settings" as const, last4: "a3F9", savedAt: 1, savedBy: "J", unreadable: false, previewIgnored: false };
+  ok(assistStatusLine({ ANTHROPIC_API_KEY: K }, info).includes("from Settings (…a3F9)") && !assistStatusLine({ ANTHROPIC_API_KEY: K }, info).includes(K), "assist key: status line names Settings + last4, never the key");
+  ok(assistStatusLine({ ANTHROPIC_API_KEY: K2 }, { ...info, source: "env", last4: null }).includes("from the Vercel env var"), "assist key: status line names the env var");
+  ok(assistStatusLine({ ANTHROPIC_API_KEY: K }) === `Claude API — ${assistStatusLine({ ANTHROPIC_API_KEY: K }).split(" — ")[1]}`, "assist key: status line without keyInfo is unchanged");
+  /* explicit env never sees the stored key */
+  const runSrc = readFileSync("src/lib/assist/run.ts", "utf8");
+  ok(/const env = deps\.env \?\? \(await getAssistEnv\(\)\)/.test(runSrc), "assist key: runAssist uses the stored key only when the caller passed no env");
+  for (const f of ["src/app/(app)/inbox/assist-actions.ts", "src/app/(app)/inbox/page.tsx", "src/app/(app)/settings/assist-data.ts"]) {
+    ok(readFileSync(f, "utf8").includes("getAssistEnv()"), `assist key: ${f} reads the effective env`);
+  }
+  const card = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");
+  ok(!/from "@\/lib\/assist\/key-store"/.test(card) && !/from "@\/lib\/stores\//.test(card) && /type="password"/.test(card) && /autoComplete="off"/.test(card), "assist key: the card imports no key-store/store module and uses a password input");
+  const anth = readFileSync("src/lib/assist/anthropic.ts", "utf8");
+  ok(/models\.retrieve\(KEY_TEST_MODEL, null, \{ timeout: KEY_TEST_TIMEOUT_MS, maxRetries: 0 \}\)/.test(anth), "assist key: Test key is one models.retrieve, 15 s, no retries");
+  const act = readFileSync("src/app/(app)/settings/actions.ts", "utf8");
+  const testFn = act.slice(act.indexOf("export async function testAssistKeyAction"), act.indexOf("/* ---- Pipelines"));
+  ok(testFn.includes('requirePerm("manage_users")') && !testFn.includes("createRun") && !testFn.includes("runAssist"), "assist key: testAssistKeyAction is admin-only and writes no assist_runs row");
+
+  /* DB: the encrypted blob (scratch PGlite) */
+  const db = await getDb();
+  const rawRow = async () => (await db.select().from(blobs).where(eq(blobs.id, ASSIST_SECRETS_BLOB)))[0];
+  const before = await rawRow();
+  const deps = { secret: "test-secret", noCache: true, env: {} as Record<string, string> };
+  try {
+    const saved = await saveAssistKey(`  ${K} `, "Jeff Tester", { ...deps, now: Date.UTC(2026, 9, 13) });
+    const row = await rawRow();
+    const rawText = JSON.stringify(row?.data ?? {});
+    ok(saved.last4 === "a3F9" && (row?.data as { last4?: string })?.last4 === "a3F9", "assist key: last4 stored");
+    ok(!!row && !rawText.includes(K) && !rawText.includes(K.slice(7, 30)) && typeof (row.data as { anthropicKeyEnc?: string }).anthropicKeyEnc === "string", "assist key: the raw blob holds ciphertext, never the plaintext key");
+    const r = await readAssistKey(deps);
+    ok(r.stored === K && !r.storedUnreadable && r.savedBy === "Jeff Tester" && r.savedAt === Date.UTC(2026, 9, 13), "assist key: readAssistKey round-trips");
+    const wrong = await readAssistKey({ ...deps, secret: "other-secret" });
+    ok(wrong.stored === null && wrong.storedUnreadable, "assist key: a wrong secret reads as unreadable");
+    const noSecret = await readAssistKey({ ...deps, secret: "" });
+    ok(noSecret.stored === null && noSecret.storedUnreadable, "assist key: a missing secret reads as unreadable");
+    const e1 = await getAssistEnv({ ...deps, env: { ANTHROPIC_API_KEY: K2, OTHER: "x" } });
+    ok(e1.ANTHROPIC_API_KEY === K && e1.ASSIST_KEY_SOURCE === "settings" && e1.OTHER === "x", "assist key: getAssistEnv returns the stored key (source settings) over the env var");
+    const ePrev = await getAssistEnv({ ...deps, env: { ANTHROPIC_API_KEY: K2, VERCEL_ENV: "preview" } });
+    ok(ePrev.ANTHROPIC_API_KEY === K2 && ePrev.ASSIST_KEY_SOURCE === "env", "assist key: getAssistEnv on a preview ignores the stored key");
+    const eBad = await getAssistEnv({ ...deps, secret: "other-secret", env: { ANTHROPIC_API_KEY: K2 } });
+    ok(eBad.ANTHROPIC_API_KEY === K2 && eBad.ASSIST_KEY_SOURCE === "env", "assist key: unreadable stored key → env var");
+    const inf = await assistKeyInfo({ ...deps, env: { ANTHROPIC_API_KEY: K2 } });
+    ok(inf.source === "settings" && inf.last4 === "a3F9" && !inf.unreadable && !JSON.stringify(inf).includes(K) && !JSON.stringify(inf).includes(K2), "assist key: assistKeyInfo carries source + last4, never a key");
+    const infPrev = await assistKeyInfo({ ...deps, env: { VERCEL_ENV: "preview" } });
+    ok(infPrev.previewIgnored && infPrev.source === "none", "assist key: assistKeyInfo flags a preview ignoring the stored key");
+    const infBad = await assistKeyInfo({ ...deps, secret: "other-secret", env: {} });
+    ok(infBad.unreadable && infBad.source === "none" && infBad.last4 === "a3F9", "assist key: assistKeyInfo reports an unreadable key");
+    // An explicit env passed to runAssist is used as-is: the stored key never leaks in.
+    const settings = assistSettingsOf({ assistUsers: ["u-key"] });
+    const gated = await runAssist({ feature: "tasks", slot: "tasks", user: { id: "u-key", name: "K" }, system: "S", userText: "U", contextRef: "x" }, { provider: fakeProvider("ok"), settings, env: {}, now: Date.UTC(2034, 0, 1) });
+    ok(!gated.ok && gated.runId === null && /not set up/.test(gated.error), "assist key: runAssist with an explicit empty env stays closed despite a stored key");
+    let threw = "";
+    try { await saveAssistKey("not-a-key", "x", deps); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    ok(!!threw && !threw.includes("not-a-key"), "assist key: saving an invalid key throws without echoing it");
+    threw = "";
+    try { await saveAssistKey(K, "x", { ...deps, secret: "" }); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    ok(/AUTH_SECRET/.test(threw) && !threw.includes(K), "assist key: no secret = refuse to store");
+    await clearAssistKey();
+    const cleared = await rawRow();
+    const cd = (cleared?.data ?? {}) as Record<string, unknown>;
+    ok(cd.anthropicKeyEnc === null && cd.last4 === null && cd.savedAt === null && cd.savedBy === null, "assist key: clearAssistKey nulls every field");
+    const eClr = await getAssistEnv({ ...deps, env: { ANTHROPIC_API_KEY: K2 } });
+    ok(eClr.ANTHROPIC_API_KEY === K2 && eClr.ASSIST_KEY_SOURCE === "env", "assist key: after clear, getAssistEnv uses the env var");
+    const eNone = await getAssistEnv({ ...deps, env: {} });
+    ok(eNone.ANTHROPIC_API_KEY === "" && eNone.ASSIST_KEY_SOURCE === "none", "assist key: after clear with no env var, no key");
+  } finally {
+    // Leave the shared harness DB as it was.
+    if (before) await db.update(blobs).set({ data: before.data, updatedAt: before.updatedAt }).where(eq(blobs.id, ASSIST_SECRETS_BLOB));
+    else await db.delete(blobs).where(eq(blobs.id, ASSIST_SECRETS_BLOB));
+    resetAssistKeyCache();
+  }
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -555,6 +648,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistEstimatePureChecks(ok);
     await assistEstimateDbChecks(ok);
     await assistReportChecks(ok);
+    await assistKeyChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);

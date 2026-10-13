@@ -18,7 +18,10 @@ import {
   type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
-import { assistSettingsOf } from "@/lib/assist/config";
+import { assistSettingsOf, cleanApiKey } from "@/lib/assist/config";
+import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
+import { pingAnthropicKey } from "@/lib/assist/anthropic";
+import { rateLimit } from "@/lib/rate-limit";
 import { saveEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import {
@@ -777,6 +780,40 @@ export async function setAssistSettingsAction(patch: {
   await setSettings(next);
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/** D881 — store the Claude API key, encrypted. The key is never echoed back,
+ *  not even in an error; the result carries only its last four characters. */
+export async function setAssistKeyAction(raw: string): Promise<{ ok: true; last4: string } | { ok: false; error: string }> {
+  const me = await requirePerm("manage_users");
+  const key = cleanApiKey(raw);
+  if (!key) return { ok: false, error: "That doesn't look like a Claude API key (it starts with sk-ant-)." };
+  try {
+    const { last4 } = await saveAssistKey(key, me.name);
+    revalidatePath("/", "layout");
+    return { ok: true, last4 };
+  } catch {
+    return { ok: false, error: "Couldn't save the key (is AUTH_SECRET set?)." };
+  }
+}
+
+/** D881 — remove the stored key; the env var (if any) takes over. */
+export async function clearAssistKeyAction(): Promise<{ ok: true }> {
+  await requirePerm("manage_users");
+  await clearAssistKey();
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** D881 — check the effective key with one free call (models.retrieve, 15 s,
+ *  no retries). Writes no assist_runs row and spends nothing. */
+export async function testAssistKeyAction(): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  const me = await requirePerm("manage_users");
+  if (!rateLimit(`assist-key-test:${me.id}`, 20, 3_600_000).ok) return { ok: false, error: "Too many tests — try again in a bit." };
+  const key = ((await getAssistEnv()).ANTHROPIC_API_KEY || "").trim();
+  if (!key) return { ok: false, error: "No key set." };
+  const r = await pingAnthropicKey(key);
+  return r.ok ? { ok: true, message: "Key works — Claude API reachable." } : { ok: false, error: `Key test failed: ${r.error}.` };
 }
 
 /* ---- Pipelines (Settings → Pipelines) ---- */

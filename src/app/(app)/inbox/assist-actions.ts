@@ -22,6 +22,7 @@ import { draftEstimateFromThread } from "@/lib/assist/estimate-draft-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { assistGate, assistSettingsOf, chicagoToday } from "@/lib/assist/config";
+import { getAssistEnv } from "@/lib/assist/key-store";
 import { getSettings } from "@/lib/settings";
 import { getRun, setRunOutcome } from "@/lib/stores/assist-runs";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
@@ -43,7 +44,8 @@ const CLIENT_OUTCOME_FEATURES: AssistFeature[] = ["tasks", "reply"];
 /** Gate first (D869): a refused user never triggers the full-table loads
  *  below. runAssist re-checks — this is the cheap early exit. */
 async function gateFor(feature: AssistFeature, userId: string): Promise<string | null> {
-  const g = assistGate(feature, userId, assistSettingsOf(await getSettings()));
+  const [settings, env] = await Promise.all([getSettings(), getAssistEnv()]);
+  const g = assistGate(feature, userId, assistSettingsOf(settings), env);
   return g.ok ? null : g.reason;
 }
 

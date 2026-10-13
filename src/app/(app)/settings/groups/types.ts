@@ -12,6 +12,7 @@ import type { ReviewLimits } from "@/lib/review-limits";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import type { SchedulingSettings } from "@/lib/visit-plan/settings";
 import type { AssistSettings } from "@/lib/assist/types";
+import type { AssistKeyInfo } from "@/lib/assist/config";
 import type { AssistReport } from "@/lib/assist/report";
 
 export type UserVM = {
@@ -101,6 +102,8 @@ export type CompanySettingsVM = {
 export type AssistVM = {
   settings: AssistSettings;
   status: string;
+  /** D881 — where the Claude key comes from; carries last4, never the key. */
+  keyInfo: AssistKeyInfo;
   /** YYYY-MM (America/Chicago) the report covers. */
   month: string;
   /** Month picker options, current month first. */

@@ -90,6 +90,7 @@ import HomeTabs from "../home-tabs";
 import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
+import { getAssistEnv } from "@/lib/assist/key-store";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
@@ -213,7 +214,7 @@ export default async function InboxPage({
   const me = user.name;
   const settings = await getSettings();
   // #334 — Assist buttons render only for gated-in users (no provider = none).
-  const assistFlags: AssistFlags = assistUiFlags(user.id, assistSettingsOf(settings));
+  const assistFlags: AssistFlags = assistUiFlags(user.id, assistSettingsOf(settings), await getAssistEnv());
   const domain = companyDomain(settings.companyName);
   // Whose mailbox this is, in order of how much we actually know:
   //   1. the address Google authorized for this user's Gmail connection,

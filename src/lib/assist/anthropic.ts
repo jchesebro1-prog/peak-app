@@ -52,6 +52,23 @@ function clientFor(env: Env): Anthropic {
   return cached.client;
 }
 
+export const KEY_TEST_MODEL = "claude-haiku-5-5";
+export const KEY_TEST_TIMEOUT_MS = 15_000;
+
+/**
+ * D881 — Settings → Test key: one free call (`models.retrieve`, no tokens
+ * billed), 15 s, no retries, never logged as a run. The error is the mapped
+ * message only — never the key.
+ */
+export async function pingAnthropicKey(apiKey: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await new Anthropic({ apiKey }).models.retrieve(KEY_TEST_MODEL, null, { timeout: KEY_TEST_TIMEOUT_MS, maxRetries: 0 });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: anthropicErrorMessage(e).error };
+  }
+}
+
 async function send(client: Anthropic, req: ProviderRequest): Promise<BetaMessage> {
   const params = buildAnthropicParams(req);
   const opts = anthropicRequestOptions(req);

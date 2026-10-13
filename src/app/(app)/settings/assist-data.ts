@@ -1,4 +1,5 @@
-import { assistSettingsOf, assistStatusLine, monthKeyChicago } from "@/lib/assist/config";
+import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo } from "@/lib/assist/config";
+import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
 import { estimateOutcomeFor, type DraftLine } from "@/lib/assist/outcome";
 import { assistReport, recentMonthKeys } from "@/lib/assist/report";
 import type { AssistOutcome } from "@/lib/assist/types";
@@ -40,9 +41,15 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     runs = [];
     estOutcomes.clear();
   }
+  // D881: where the key comes from — the card gets last4 + source, never the key.
+  const [env, keyInfo] = await Promise.all([getAssistEnv(), assistKeyInfo()]).catch((e): [Record<string, string | undefined>, AssistKeyInfo] => {
+    console.error("[assist] reading the Assist key state failed", e instanceof Error ? e.message : "");
+    return [process.env, { source: "none", last4: null, savedAt: null, savedBy: null, unreadable: false, previewIgnored: false }];
+  });
   return {
     settings: assistSettingsOf(settings),
-    status: assistStatusLine(),
+    status: assistStatusLine(env, keyInfo),
+    keyInfo,
     month,
     months: Array.from(new Set([...recentMonthKeys(now, 3, monthKeyChicago), month])),
     spendUsd: runs.reduce((sum, r) => sum + (r.costUsd || 0), 0),

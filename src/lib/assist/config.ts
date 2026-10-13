@@ -60,13 +60,61 @@ export function chicagoToday(ms: number): { date: string; weekday: string } {
   return { date: DAY_FMT.format(new Date(ms)), weekday: WEEKDAY_FMT.format(new Date(ms)) };
 }
 
-export function assistStatusLine(env: Env = process.env): string {
+/** Where the Claude key comes from (D881). */
+export type KeySource = "settings" | "env" | "none";
+
+/** What the Settings card may know about the key — never the key itself (D881). */
+export type AssistKeyInfo = {
+  /** The effective source after the preview rule. */
+  source: KeySource;
+  /** Last four characters of the stored key; null when none is stored. */
+  last4: string | null;
+  savedAt: number | null;
+  savedBy: string | null;
+  /** A key is stored but can't be decrypted (AUTH_SECRET changed?). */
+  unreadable: boolean;
+  /** A key is stored, but this is a Vercel preview deploy that ignores it. */
+  previewIgnored: boolean;
+};
+
+const API_KEY_RE = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
+
+/** Trim; must look like an Anthropic key. Returns the cleaned key or null. */
+export function cleanApiKey(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const k = raw.trim();
+  return API_KEY_RE.test(k) ? k : null;
+}
+
+/** A Vercel preview deploy that must not use the stored key (D881 — previews share the production DB). */
+export function storedKeyBlocked(env: Env): boolean {
+  return (env.VERCEL_ENV || "").trim() === "preview" && (env.ASSIST_ALLOW_PREVIEW_KEY || "").trim() !== "true";
+}
+
+/** Pure precedence rule (D881): a readable, allowed stored key wins; else the env var; else none. */
+export function effectiveAnthropicKey(input: { stored: string | null; storedUnreadable: boolean; env: Env }): { key: string | null; source: KeySource } {
+  const stored = input.storedUnreadable ? null : cleanApiKey(input.stored);
+  if (stored && !storedKeyBlocked(input.env)) return { key: stored, source: "settings" };
+  const envKey = (input.env.ANTHROPIC_API_KEY || "").trim();
+  if (envKey) return { key: envKey, source: "env" };
+  return { key: null, source: "none" };
+}
+
+function keySourceNote(k: AssistKeyInfo): string {
+  if (k.source === "settings") return `from Settings (…${k.last4 ?? "????"})`;
+  if (k.source === "env") return "from the Vercel env var";
+  return "no key";
+}
+
+export function assistStatusLine(env: Env = process.env, keyInfo?: AssistKeyInfo): string {
   if ((env.ASSIST_DISABLED || "").trim() === "true") return "Kill switch on (ASSIST_DISABLED=true) — Assist is off.";
   const c = assistConfigured(env);
-  if (!c.ok) return "Not configured — set ANTHROPIC_API_KEY.";
+  if (!c.ok) return keyInfo ? "Not configured — paste a Claude API key below, or set ANTHROPIC_API_KEY." : "Not configured — set ANTHROPIC_API_KEY.";
   const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)}`;
   if (c.provider === "local") {
-    return `Mac mini (local${env.ASSIST_LOCAL_MODEL ? ": " + env.ASSIST_LOCAL_MODEL : ""})${(env.ANTHROPIC_API_KEY || "").trim() ? ", Claude Haiku fallback" : ", no fallback"}.`;
+    const hasKey = !!(env.ANTHROPIC_API_KEY || "").trim();
+    const fb = hasKey ? `, Claude Haiku fallback${keyInfo ? ` (key ${keySourceNote(keyInfo)})` : ""}` : ", no fallback";
+    return `Mac mini (local${env.ASSIST_LOCAL_MODEL ? ": " + env.ASSIST_LOCAL_MODEL : ""})${fb}.`;
   }
-  return `Claude API — ${models}.`;
+  return `Claude API${keyInfo ? ` (key ${keySourceNote(keyInfo)})` : ""} — ${models}.`;
 }

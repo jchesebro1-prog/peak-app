@@ -7,6 +7,7 @@ import { createRun, monthSpend, newRunId, type AssistRun } from "@/lib/stores/as
 import { assistGate, assistSettingsOf, monthKeyChicago } from "./config";
 import { claudeCostUsd, FALLBACK_HAIKU, modelFor, SLOT_SETTINGS, wantsFallbacks, type ModelSlot } from "./models";
 import { pickProvider } from "./provider";
+import { getAssistEnv } from "./key-store";
 import { ZERO_USAGE, type AssistFeature, type AssistProvider, type AssistSettings, type AssistStep, type Env, type ProviderRequest } from "./types";
 
 export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20 };
@@ -34,7 +35,8 @@ export type RunDeps = { provider?: AssistProvider; fallback?: AssistProvider | n
 export type RunResult<T> = { ok: true; runId: string; value: T } | { ok: false; runId: string | null; error: string };
 
 export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}): Promise<RunResult<T>> {
-  const env = deps.env ?? process.env;
+  // D881: the effective key (Settings ?? env var) unless the caller passed its own env.
+  const env = deps.env ?? (await getAssistEnv());
   const now = deps.now ?? Date.now();
   const settings = deps.settings ?? assistSettingsOf(await getSettings());
   const gate = assistGate(args.feature, args.user.id, settings, env);

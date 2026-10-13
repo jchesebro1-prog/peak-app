@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { setAssistSettingsAction } from "../actions";
+import { clearAssistKeyAction, setAssistKeyAction, setAssistSettingsAction, testAssistKeyAction } from "../actions";
 import { inputStyle, type Run } from "./shared";
 import type { AssistVM, UserVM } from "./types";
 import type { ReportRow } from "@/lib/assist/report";
@@ -10,7 +10,9 @@ import type { ReportRow } from "@/lib/assist/report";
 /**
  * #334 — Settings → Data & Tools → Beta → Assist pilot: who has Assist
  * (an empty list = nobody), the three feature switches, the monthly spend cap,
- * and the month's usage report. Costs are estimates (D879).
+ * and the month's usage report. Costs are estimates (D879). The Claude API key
+ * block (D881) is write-only: the card sees the key's source and last four
+ * characters, never the key; the input is never prefilled.
  */
 
 const FEATURES = [
@@ -67,6 +69,117 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
   );
 }
 
+const SAVED_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
+
+/** D881 — the one line saying where the Claude key comes from. Never the key: last four characters at most. */
+function keyInfoLine(k: AssistVM["keyInfo"]): { text: string; warn: boolean } {
+  if (k.unreadable) {
+    return {
+      text: `Saved key can't be read — re-enter it.${k.source === "env" ? " Using the Vercel env var (ANTHROPIC_API_KEY) meanwhile." : " Assist is off until then."}`,
+      warn: true,
+    };
+  }
+  if (k.source === "settings") {
+    const when = k.savedAt ? ` · saved ${SAVED_FMT.format(new Date(k.savedAt))}` : "";
+    const who = k.savedBy ? ` by ${k.savedBy}` : "";
+    return { text: `Saved in Settings — ends …${k.last4 ?? "????"}${when}${who}`, warn: false };
+  }
+  if (k.source === "env") return { text: "Using the Vercel env var (ANTHROPIC_API_KEY)", warn: false };
+  return { text: "No key set — Assist is off", warn: false };
+}
+
+function AssistKeyBlock({ keyInfo }: { keyInfo: AssistVM["keyInfo"] }) {
+  const router = useRouter();
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<null | "save" | "test" | "clear">(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const line = keyInfoLine(keyInfo);
+  const hasStored = !!keyInfo.last4 || keyInfo.unreadable;
+
+  const go = async (kind: "save" | "test" | "clear", fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, okText?: string) => {
+    if (busy) return;
+    setBusy(kind);
+    setMsg(null);
+    try {
+      const r = await fn();
+      if (r.ok) {
+        if (kind === "save") setDraft("");
+        setMsg({ text: r.message || okText || "Done.", ok: true });
+      } else {
+        setMsg({ text: r.error || "Something went wrong.", ok: false });
+      }
+      if (kind !== "test") router.refresh();
+    } catch {
+      setMsg({ text: "Something went wrong.", ok: false });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const canSave = draft.trim().length > 0 && !busy;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600 }}>Claude API key</div>
+      <div style={{ fontSize: 12, marginTop: 2, color: line.warn ? "#b45309" : "#5b6170" }}>{line.text}</div>
+      {keyInfo.previewIgnored && (
+        <div style={{ fontSize: 12, marginTop: 2, color: "#b45309" }}>
+          This is a preview deploy: the saved key is ignored here (set ASSIST_ALLOW_PREVIEW_KEY=true to use it).
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <input
+          type="password"
+          aria-label="Claude API key"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="sk-ant-…"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          style={{ ...inputStyle, width: 280, fontFamily: "var(--font-mono)", fontSize: 13 }}
+        />
+        <button
+          className="pk-btn-accent"
+          disabled={!canSave}
+          style={!canSave ? { opacity: 0.5, cursor: "not-allowed", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
+          onClick={() =>
+            go("save", async () => {
+              const r = await setAssistKeyAction(draft);
+              return r.ok ? { ok: true, message: `Key saved — ends …${r.last4}.` } : r;
+            })
+          }
+        >
+          {busy === "save" ? "Saving…" : "Save key"}
+        </button>
+        <button
+          className="pk-btn-outline"
+          disabled={!!busy || keyInfo.source === "none"}
+          style={busy || keyInfo.source === "none" ? { opacity: 0.5, cursor: "not-allowed", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
+          onClick={() => go("test", () => testAssistKeyAction())}
+        >
+          {busy === "test" ? "Testing…" : "Test key"}
+        </button>
+        {hasStored && (
+          <button
+            className="pk-btn-outline"
+            disabled={!!busy}
+            style={busy ? { opacity: 0.5, cursor: "not-allowed", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
+            onClick={() => {
+              if (!confirm("Remove the saved Claude API key? Assist falls back to the Vercel env var, if one is set.")) return;
+              void go("clear", () => clearAssistKeyAction(), "Key removed.");
+            }}
+          >
+            {busy === "clear" ? "Removing…" : "Remove key"}
+          </button>
+        )}
+      </div>
+      {msg && <div style={{ fontSize: 12, marginTop: 4, color: msg.ok ? "#15803d" : "#b91c1c" }}>{msg.text}</div>}
+      <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 4 }}>
+        Stored encrypted. The key is never shown again; paste a new one to replace it.
+      </div>
+    </div>
+  );
+}
+
 export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; users: UserVM[]; run: Run }) {
   const router = useRouter();
   const { settings, report } = assist;
@@ -80,6 +193,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
     <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
       <div style={{ fontSize: 13.5, fontWeight: 600 }}>Assist pilot</div>
       <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{assist.status}</div>
+      <AssistKeyBlock keyInfo={assist.keyInfo} />
       <div style={{ fontSize: 12.5, marginTop: 6 }}>
         This month: <b>{money(assist.spendUsd)}</b> of ${settings.capUsd.toFixed(2)} (estimated)
       </div>
