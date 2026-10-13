@@ -75,3 +75,14 @@ export function shortTaskTitle(title: string, max = 60): string {
   const t = (title || "").replace(/\s+/g, " ").trim();
   return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }
+
+/** "Organize my inbox" progress — "212 of 480 checked". */
+export function cleanupProgressText(checked: number, total: number): string {
+  return `${Math.min(checked, total)} of ${total} checked`;
+}
+
+/** The finished run's line — "Done: 120 suggested · 80 noise · 30 skipped"
+ *  (plus "· 12 still with AI" while the AI step works through the rest). */
+export function cleanupSummaryText(s: { suggested: number; noise: number; skipped: number; waitingAi: number }): string {
+  return `Done: ${s.suggested} suggested · ${s.noise} noise · ${s.skipped} skipped${s.waitingAi ? ` · ${s.waitingAi} still with AI` : ""}`;
+}

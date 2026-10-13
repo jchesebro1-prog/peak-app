@@ -6,10 +6,12 @@ import { clearAssistKeyAction, setAssistKeyAction, setAssistSettingsAction, test
 import { inputStyle, type Run } from "./shared";
 import type { AssistVM, UserVM } from "./types";
 import type { ReportRow } from "@/lib/assist/report";
+import { AssistOrgSettings, FilingReportTable } from "./assist-org";
 
 /**
  * #334 — Settings → Data & Tools → Beta → Assist pilot: who has Assist
- * (an empty list = nobody), the three feature switches, the monthly spend cap,
+ * (an empty list = nobody), the feature switches (#335 adds Inbox
+ * organization `file` and Promise tasks `promise`), the monthly spend cap,
  * and the month's usage report. Costs are estimates (D879). The Claude API key
  * block (D881) is write-only: the card sees the key's source and last four
  * characters, never the key; the input is never prefilled.
@@ -19,6 +21,8 @@ const FEATURES = [
   { key: "tasks", label: "Suggest tasks" },
   { key: "reply", label: "Draft reply" },
   { key: "estimate", label: "Draft estimate" },
+  { key: "file", label: "Inbox organization" },
+  { key: "promise", label: "Promise tasks" },
 ] as const;
 
 const money = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
@@ -273,6 +277,8 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
         </button>
       </div>
 
+      <AssistOrgSettings org={assist.org} run={run} />
+
       {/* Report */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600 }}>Usage report</div>
@@ -295,6 +301,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <ReportTable title="By feature" rows={report.byFeature} />
       <ReportTable title="By person" rows={report.byUser} />
       <ReportTable title="By model" rows={report.byModel} />
+      <FilingReportTable report={assist.org.filing} />
       <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
         Costs are estimates from token counts × list prices; check the Claude Console for the bill.
       </div>

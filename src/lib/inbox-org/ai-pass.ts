@@ -2,8 +2,9 @@
  * Inbox organization §8 — the time-boxed AI pass. Runs once per Gmail poll,
  * AFTER every mailbox's import committed: scheduled in after() by the Inbox
  * sync actions (off the request path — never inline in a Server Action),
- * inline in `pollInbound` for the long-lived server timer, and from the
- * Organize view's button. It picks up threads the rule pipeline marked
+ * inline in `pollInbound` for the long-lived server timer, from the
+ * Organize view's button, and by each 90-day cleanup batch (`filingOnly` —
+ * no court reading, so no promise-tasks). It picks up threads the rule pipeline marked
  * `court.pendingAi` / `filing.pendingAi` and runs the Haiku court / promise
  * reading (`promise`) and filing step (`file`) through `runAssist` (gate,
  * cap, rate limit, logging to assist_runs, zod validation).
@@ -107,6 +108,9 @@ export type AiPassOptions = {
   budgetMs?: number;
   /** owners to work for (default: every active user) */
   ownerIds?: string[] | null;
+  /** filing only — no court / promise reading, so no promise-tasks (the
+   *  90-day cleanup, spec §6) */
+  filingOnly?: boolean;
 };
 
 export type AiPassDeps = {
@@ -181,6 +185,7 @@ type PassState = {
   canStart: (slot: Feature) => boolean;
   clock: () => number;
   now: () => number;
+  filingOnly: boolean;
 };
 
 /** Clear both pending marks (compare-and-set; a changed record is left). */
@@ -219,6 +224,7 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
       },
       clock,
       now: () => deps.now ?? Date.now(),
+      filingOnly: !!opts.filingOnly,
     };
 
     // rows nobody can own never get processed: clear them
@@ -236,7 +242,7 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
       const rows: CommThread[] = [];
       const seen = new Set<string>();
       const who = { names: [owner.name], keys: [personalKey(owner.id)] };
-      const courtRows = await pendingAiThreads({ owner: who, only: "court", limit: AI_PASS_MAX_PER_OWNER });
+      const courtRows = opts.filingOnly ? [] : await pendingAiThreads({ owner: who, only: "court", limit: AI_PASS_MAX_PER_OWNER });
       const filingRows = await pendingAiThreads({ owner: who, only: "filing", limit: AI_PASS_MAX_PER_OWNER });
       for (const t of [...courtRows, ...filingRows]) {
         if (seen.has(t.id) || ownerOf(t, ctx)?.id !== owner.id) continue;
@@ -305,7 +311,7 @@ async function passThread(st: PassState, t0: CommThread, owner: OrgUser): Promis
 
   /* court + promises first (§3 AI reading, §7) — live work */
   const c = t.court;
-  if (c?.pendingAi && isFresh(c, latest)) {
+  if (c?.pendingAi && isFresh(c, latest) && !st.filingOnly) {
     if (!gateOk("promise")) {
       if (await casOrg(t.id, "court", c, cleared(c))) {
         res.cleared++;

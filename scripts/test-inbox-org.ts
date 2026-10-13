@@ -36,7 +36,11 @@ import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
 import { buildFilingUserText, candidateLine, customerRecordCandidates, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
 import { buildOrganizeVM, buildReaderOrg, dueLabel } from "@/app/(app)/inbox/organize/load";
-import { courtChipLabel, filedByLabel, ORGANIZE_BASE_HREF, organizeHref, organizeTabOf, suggestionLabel } from "@/app/(app)/inbox/organize/format";
+import { cleanupProgressText, cleanupSummaryText, courtChipLabel, filedByLabel, ORGANIZE_BASE_HREF, organizeHref, organizeTabOf, suggestionLabel } from "@/app/(app)/inbox/organize/format";
+import { assistReport, filingReport } from "@/lib/assist/report";
+import type { AssistRun } from "@/lib/stores/assist-runs";
+import { senderRuleRows } from "@/lib/inbox-org/rule-list";
+import { CLEANUP_BLOB_PREFIX, cleanupVMOf, getCleanupState, runCleanupBatch } from "@/lib/inbox-org/cleanup";
 import { aiCourtOverride, applyPromises, COURT_SYSTEM, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
 import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
@@ -1863,7 +1867,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(ro.includes('"Looks like noise"') && ro.includes("notNoiseAction(threadId)"), "ui: the Looks like noise tag offers Not noise");
   ok(ro.includes('filing.state === "suggested"') && ro.includes("approveFilingAction(threadId)"), "ui: a suggested filing line has Approve");
   const ob = read(`${DIR}/organize-box.tsx`);
-  ok(!ob.includes("Organize my inbox"), "ui: no Organize my inbox button yet (Task 7 adds it)");
+  ok(ob.includes("<CleanupButton cleanup={cleanup.state} />") && ob.includes("cleanup?: { state: CleanupVM | null } | null;"), "ui: the Organize my inbox button renders only when the page passes it (pilot users, Task 7)");
   ok(ob.includes("approveAllStrongAction(vm.strongIds)") && ob.includes("Approve {vm.strongIds.length} strong suggestion"), "ui: Approve all strong asks for a confirm that shows the count");
   const cf = read(`${DIR}/change-filing.tsx`);
   ok(cf.includes("searchLinkTargetsAction(query)") && cf.includes("filingRecordsAction(threadId, pickedCustomer || null)") && cf.includes("changeFilingAction(threadId, target)"), "ui: Change… reuses the link search plus the customer's quotes/projects/leads");
@@ -1949,6 +1953,296 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok((await customerRecordCandidates(CUST, "UI School", 1)).length === 1, "ui db: the record list honours its limit");
 }
 
+/* ---------- Task 7: 90-day cleanup, settings, report (spec §4, §5, §6, §8) ---------- */
+
+function reportMathChecks(ok: Ok): void {
+  const run = (o: Partial<AssistRun>): AssistRun =>
+    ({ id: "r" + Math.random().toString(36).slice(2), feature: "file", step: null, ok: true, outcome: null, outcomeDetail: null, costUsd: 0.001, userId: "u", userName: "U", model: "claude-haiku-5-5", ...o }) as AssistRun;
+  const runs: AssistRun[] = [
+    run({ outcome: "accepted", outcomeDetail: { action: "approved" } }),
+    run({ outcome: "accepted", outcomeDetail: { action: "noise" } }),
+    run({ outcome: "edited", outcomeDetail: { action: "changed" } }),
+    run({ outcome: "edited", outcomeDetail: { action: "rescued" } }),
+    run({ outcome: "discarded", outcomeDetail: { action: "skipped" } }),
+    run({ outcome: null, outcomeDetail: { autoFiled: "reply" } }), // auto-filed: outcome stays null
+    run({ outcome: "accepted", outcomeDetail: { action: "approved", undone: true } }),
+    run({ outcome: null }), // still waiting
+    run({ ok: false }), // a failed call is no suggestion
+    run({ feature: "promise", outcome: "discarded" }), // not a filing
+  ];
+  const e = (o: Partial<FilingLogEntry>): FilingLogEntry => ({ at: 1, threadId: "t", source: "number", strength: "strong", outcome: "suggested", ...o });
+  const log: FilingLogEntry[] = [
+    e({}), e({}), e({}), e({}), // 4 number suggestions
+    e({ action: "approved", outcome: "filed" }),
+    e({ action: "approved", outcome: "filed" }),
+    e({ action: "changed", outcome: "filed" }),
+    e({ action: "reply", outcome: "filed" }),
+    e({ source: "noise-rule", noise: true }),
+    e({ source: "noise-rule", noise: true }),
+    e({ source: "noise-rule", noise: true, action: "noise", outcome: "dismissed" }), // approved as suggested
+    e({ source: "noise-rule", noise: true, action: "rescued" }),
+    e({ source: "identity", strength: "weak" }),
+    e({ source: "identity", action: "noise", noise: false, outcome: "dismissed" }), // a filing marked noise = corrected
+    e({ source: "identity", action: "skipped", outcome: "skipped" }),
+    e({ source: "identity", action: "undone" }),
+    e({ source: "rule", action: "rule", outcome: "filed" }),
+    e({ source: "rule", action: "teammate-reply", outcome: "filed" }),
+    e({ action: "court-override" }),
+    e({ action: "court-override" }),
+    e({ source: "ai", action: "approved" }), // AI is counted from its runs, never the log
+  ];
+  const tasks = [
+    { id: "T-prm-a", createdAt: 1, deleted: false },
+    { id: "T-prm-b", createdAt: 2, deleted: true },
+    { id: "T-prm-c", createdAt: 3, deleted: false },
+  ];
+  const r = filingReport(runs, log, tasks);
+  const by = (s: string) => r.bySource.find((x) => x.source === s)!;
+  ok(r.bySource.map((x) => x.source).join(",") === "rule,identity,number,noise-rule,ai", "report: one row per filing source, in pipeline order");
+  const ai = by("ai");
+  ok(ai.suggested === 8 && ai.approved === 3 && ai.corrected === 1 && ai.rescued === 1 && ai.skipped === 1 && ai.undone === 1 && ai.autoFiled === 1, "report: AI rows from the file runs — ok runs only, outcomes mapped, rescue split from corrections, auto-filed apart (outcome null)");
+  ok(ai.approvedPct === 50, "report: AI % approved as suggested = 3 ÷ (3 + 1 + 1 + 1) = 50%");
+  const num = by("number");
+  ok(num.suggested === 4 && num.approved === 2 && num.corrected === 1 && num.autoFiled === 1 && num.approvedPct === 66.7, "report: number rows from the log — 2 approved of 3 decided (66.7%); the reply filing is auto, not approved");
+  const nz = by("noise-rule");
+  ok(nz.suggested === 2 && nz.approved === 1 && nz.rescued === 1 && nz.approvedPct === 50, "report: Noise on a noise suggestion counts as approved; Not noise as a rescue");
+  const id = by("identity");
+  ok(id.suggested === 1 && id.corrected === 1 && id.skipped === 1 && id.undone === 1 && id.approved === 0 && id.approvedPct === 0, "report: Noise on a filing is a correction; skip and undo are counted");
+  const rule = by("rule");
+  ok(rule.autoFiled === 2 && rule.approvedPct === null, "report: sender-rule and teammate-reply filings are auto-filed; no decisions → no %");
+  ok(r.totals.suggested === 15 && r.totals.approved === 6 && r.totals.corrected === 3 && r.totals.rescued === 2 && r.totals.skipped === 2 && r.totals.autoFiled === 4 && r.totals.undone === 2, "report: totals add the sources");
+  ok(r.totals.approvedPct === 46.2, "report: overall % approved = 6 ÷ 13 = 46.2%");
+  ok(r.courtOverrides === 2 && r.promiseTasks.created === 3 && r.promiseTasks.undone === 1, "report: court overrides from the log; promise-tasks created / undone (deleted)");
+  const empty = filingReport([], [], []);
+  ok(empty.totals.suggested === 0 && empty.totals.approvedPct === null && empty.promiseTasks.created === 0, "report: an empty month is all zeros, no %");
+  // the existing per-feature / person / model tables keep working beside it
+  const old = assistReport(runs, new Map());
+  ok(old.runs === runs.length && old.byFeature.some((x) => x.key === "file (filing)") && old.byModel.length === 1, "report: the per-feature / person / model tables are unchanged");
+}
+
+function ruleListChecks(ok: Ok): void {
+  const rules: SenderRule[] = [
+    { id: "SR-1", scope: "user", userId: "u-a", match: { email: "pat@school.org" }, action: { type: "file", customerId: "co-1", work: { type: "quote", id: "Q-1", label: "EST-1042" } }, createdBy: "u-a", createdAt: 10 },
+    { id: "SR-2", scope: "user", userId: "u-b", match: { domain: "vendor.com" }, action: { type: "noise" }, createdBy: "u-b", createdAt: 20 },
+    { id: "SR-3", scope: "company", match: { domain: "news.com" }, action: { type: "noise" }, createdBy: "u-boss", createdAt: 30 },
+    { id: "SR-4", scope: "user", userId: "u-a", match: { domain: "school.org" }, action: { type: "never-noise" }, createdBy: "u-a", createdAt: 40 },
+  ];
+  const names = { customer: (id: string) => (id === "co-1" ? "Lincoln HS" : null), user: (id: string) => (id === "u-boss" ? "Boss" : null) };
+  const mine = senderRuleRows(rules, { scope: "mine", userId: "u-a" }, names);
+  ok(mine.map((r) => r.id).join(",") === "SR-4,SR-1", "rules list: My sender rules are only my personal rules, newest first");
+  ok(mine[1].match === "pat@school.org" && mine[1].action === "File under Lincoln HS → EST-1042" && mine[0].match === "@school.org" && mine[0].action === "Never noise", "rules list: match + action labels");
+  const co = senderRuleRows(rules, { scope: "company" }, names);
+  ok(co.length === 1 && co[0].id === "SR-3" && co[0].action === "Treat as noise" && co[0].createdBy === "Boss", "rules list: the company list holds only company-wide rules, with who made it");
+}
+
+export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
+  reportMathChecks(ok);
+  ruleListChecks(ok);
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  const CLEO = "TEST335 Cleo Cleanup";
+  const CLEO_ID = "TEST335-u-cleo";
+  const NOP = "TEST335 Nopa Cleanup";
+  const NOP_ID = "TEST335-u-nopa";
+  const users = [
+    { id: CLEO_ID, name: CLEO, email: "cleo.t335@peaksystemsgroup.com", googleEmail: null },
+    { id: NOP_ID, name: NOP, email: "nopa.t335@peaksystemsgroup.com", googleEmail: null },
+  ];
+  const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true };
+  const pilot = buildOrgContext({ users, assist: { users: [CLEO_ID], features: allOn, capUsd: 200 }, env });
+  const NOW = Date.UTC(2026, 9, 13, 15, 0); // Tue 13 Oct 2026, 10:00 Chicago
+  const DAY = 86_400_000;
+  const db = await getDb();
+  const CUST = fixtureId(335, "cl-cust");
+  const QUOTE = fixtureId(335, "cl-quote");
+  let n = 0;
+  const msg = (at: number, o: Partial<CommMessage> = {}): CommMessage =>
+    ({ id: `cl${++n}`, at, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@cl-school.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread>, user = CLEO): Promise<string> => {
+    const id = fixtureId(335, "cl-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: user, unread: true, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@cl-school.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg(NOW - DAY)], createdAt: NOW - 200 * DAY, updatedAt: NOW - DAY, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const get = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const tasksOn = async (threadId: string) => {
+    const rows = await listDocsByField<TaskRecord>("tasks", "threadId", [threadId]);
+    rows.forEach((t) => registerFixture("tasks", t.id));
+    return rows;
+  };
+  const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB, CLEANUP_BLOB_PREFIX + CLEO_ID, CLEANUP_BLOB_PREFIX + NOP_ID];
+  const before = new Map<string, typeof blobs.$inferSelect | undefined>();
+  for (const id of BLOBS) before.set(id, (await db.select().from(blobs).where(eq(blobs.id, id)).limit(1))[0]);
+  try {
+    await saveCompany({ id: CUST, name: "TEST335 Cleanup School", type: "school" });
+    await createFixture("quotes", { id: QUOTE, name: "Stage curtain", customer: "TEST335 Cleanup School", customerId: CUST, estNo: 987750, quoteType: "system", status: "sent", updatedAt: NOW - DAY });
+    invalidateOrgContext();
+
+    // newest first: a (number), b (noise), g (a promise of mine), c (weak identity → AI)
+    const a = await mk("number", { subject: "Re: EST-987750 pricing", messages: [msg(NOW - 1 * DAY)] });
+    const b = await mk("noise", { contactEmail: "noreply@cl-letters.test", messages: [msg(NOW - 2 * DAY, { fromEmail: "noreply@cl-letters.test", author: "Letters", body: "Our October newsletter" })] });
+    const g = await mk("promise", {
+      contactEmail: "sam@cl-unknown.test",
+      messages: [
+        msg(NOW - 3 * DAY - 3_600_000, { fromEmail: "sam@cl-unknown.test", body: "Can you send the drawings?" }),
+        msg(NOW - 3 * DAY, { direction: "out", fromEmail: "cleo.t335@peaksystemsgroup.com", to: "sam@cl-unknown.test", body: "I will send the drawings by Friday." }),
+      ],
+      status: "waiting_them",
+    });
+    const c = await mk("weak", { resolution: "suggested", suggestedCustomerId: CUST, messages: [msg(NOW - 4 * DAY)] });
+    // not in the run
+    const filed = await mk("filed", { messages: [msg(NOW - DAY / 2)] });
+    await setOrg(filed, { filing: { customerId: CUST, work: null, noise: false, source: "identity", reason: "x", strength: "strong", needsReply: false, state: "filed", at: NOW - DAY, filedBy: "approved", filedAt: NOW - DAY } as Filing });
+    const old = await mk("old", { messages: [msg(NOW - 120 * DAY)], updatedAt: NOW - 120 * DAY });
+    const archived = await mk("archived", { archived: true, messages: [msg(NOW - DAY / 3)] });
+    const other = await mk("other", { messages: [msg(NOW - DAY / 4)] }, NOP);
+
+    const provider = routedProvider({
+      file: JSON.stringify({ target: QUOTE, confidence: "strong", reason: "Asks about the stage curtain", needsReply: true }),
+      promise: JSON.stringify({ owner: "customer", teammateId: "", reason: "fake", promises: [{ text: "send the drawings", ownerUserId: CLEO_ID, dueText: "Friday" }] }),
+    });
+    const me = { id: CLEO_ID, name: CLEO };
+
+    /* pilot only */
+    const refused = await runCleanupBatch({ id: NOP_ID, name: NOP }, 40_000, { ctx: pilot, now: NOW, run: { provider } });
+    ok(!refused.ok && /pilot/i.test(refused.error), "cleanup: a non-pilot user is refused (pilot only)");
+    ok((await getCleanupState(NOP_ID)) === null, "cleanup: a refused run writes no state");
+
+    /* batch 1: two threads, then stop */
+    const r1 = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW, run: { provider }, batchSize: 2 });
+    const s1 = await getCleanupState(CLEO_ID);
+    ok(r1.ok && r1.checked === 2 && r1.total === 4 && !r1.done && r1.summary === null, "cleanup: batch 1 checks 2 of 4 and is not done");
+    ok(!!s1 && s1.cursor === 2 && s1.checked === 2 && s1.total === 4 && !s1.done && s1.startedAt === NOW && !s1.runningUntil, "cleanup: the cursor and counts are saved in inbox_cleanup:<userId> (lease released)");
+    ok(s1!.ids.join(",") === [a, b, g, c].join(","), "cleanup: the run covers my inbox threads from the last 90 days, newest first — filed, older, archived and other people's threads left out");
+    ok(cleanupProgressText(s1!.checked, s1!.total) === "2 of 4 checked", "cleanup: progress reads \"2 of 4 checked\"");
+    const a1 = await get(a);
+    ok(a1.filing?.source === "number" && a1.filing.state === "suggested" && a1.filing.strength === "strong" && a1.filing.work?.id === QUOTE, "cleanup: a record number becomes a strong suggestion");
+    ok(!a1.customerId && !a1.link && !a1.archived, "cleanup: … only a suggestion — nothing linked, not archived");
+    const b1 = await get(b);
+    ok(b1.noise?.flagged === true && b1.noise.moved === true && b1.archived === true, "cleanup: a pilot user's noise moves to the Noise tab (the only archive)");
+    ok(!(await get(c)).filing && !(await get(g)).filing, "cleanup: threads past the cursor are untouched after batch 1");
+
+    /* batch 2: resumes at the cursor and finishes; the AI filing step runs in the budget */
+    const r2 = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW, run: { provider } });
+    const s2 = await getCleanupState(CLEO_ID);
+    ok(r2.ok && r2.done && r2.checked === 4 && r2.total === 4 && s2!.cursor === 4 && s2!.done && s2!.startedAt === NOW, "cleanup: batch 2 resumes at the cursor and finishes the same run (4 of 4)");
+    const c2 = await get(c);
+    ok(r2.ok && r2.aiCalls >= 1 && c2.filing?.source === "ai" && c2.filing.state === "suggested" && c2.filing.work?.id === QUOTE && !c2.filing.pendingAi, "cleanup: the weak guess goes to the AI filing step inside the batch — still only suggested");
+    ok(!c2.customerId && !c2.link && !c2.archived, "cleanup: the AI suggestion links and archives nothing");
+    const g2 = await get(g);
+    ok(!g2.court?.pendingAi && !g2.court?.promise && !g2.court?.promisesFor && g2.court?.owner === "customer", "cleanup: backlog runs the court rules only — no AI court reading, no promise");
+    let taskCount = 0;
+    for (const id of [a, b, c, g]) taskCount += (await tasksOn(id)).length;
+    ok(taskCount === 0, "cleanup: no tasks are made (even with a promise in the mail and a model that reads one)");
+    ok(r2.ok && !!r2.summary && r2.summary.suggested === 2 && r2.summary.noise === 1 && r2.summary.skipped === 1 && r2.summary.waitingAi === 0, "cleanup: the final summary — 2 suggested · 1 noise · 1 skipped");
+    ok(r2.ok && cleanupSummaryText(r2.summary!) === "Done: 2 suggested · 1 noise · 1 skipped" && cleanupSummaryText({ suggested: 1, noise: 0, skipped: 0, waitingAi: 3 }).endsWith("· 3 still with AI"), "cleanup: the summary line");
+    const vm = cleanupVMOf(s2);
+    ok(!!vm && vm.done && vm.checked === 4 && !!vm.summary && !("ids" in vm), "cleanup: the header VM carries progress + summary, not the id list");
+    ok((await get(filed)).filing?.state === "filed" && !(await get(old)).filing && !(await get(archived)).filing && !(await get(other)).filing, "cleanup: threads outside the run are untouched");
+
+    /* re-runnable: a finished run starts over; filed / already-suggested stay as they were */
+    const r3 = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW + 60_000, run: { provider } });
+    const s3 = await getCleanupState(CLEO_ID);
+    ok(r3.ok && r3.done && r3.total === 3 && s3!.startedAt === NOW + 60_000, "cleanup: pressing it again starts a new run (the moved noise is out of the inbox now)");
+    ok((await get(a)).filing?.state === "suggested" && (await get(c)).filing?.source === "ai" && r3.ok && r3.summary?.suggested === 2, "cleanup: a re-run keeps the earlier suggestions");
+    taskCount = 0;
+    for (const id of [a, b, c, g]) taskCount += (await tasksOn(id)).length;
+    ok(taskCount === 0, "cleanup: a re-run makes no tasks either");
+
+    /* a batch already running is refused (double click / a second tab) */
+    await setBlob(CLEANUP_BLOB_PREFIX + CLEO_ID, { done: false, runningUntil: Date.now() + 60_000 });
+    const busy = await runCleanupBatch(me, 40_000, { ctx: pilot, now: NOW + 120_000, run: { provider } });
+    ok(!busy.ok && /already running/.test(busy.error), "cleanup: a second batch while one runs is refused");
+
+    /* the AI pass's filing-only mode */
+    const pass = read("src/lib/inbox-org/ai-pass.ts");
+    ok(pass.includes("const courtRows = opts.filingOnly ? [] :") && pass.includes("&& !st.filingOnly) {"), "cleanup: runAiPass({ filingOnly }) reads no court (no promise-tasks)");
+    const cl = read("src/lib/inbox-org/cleanup.ts");
+    ok(cl.includes("organizeThread(id, { ctx, backlog: true, log, now })") && cl.includes("filingOnly: true") && cl.includes("deadlineMs: started + budgetMs"), "cleanup: organizes as backlog and calls the deadline-aware AI pass, filing only");
+
+    /* the Organize header button (pilot only) + the action */
+    const oa = read("src/app/(app)/inbox/organize-actions.ts");
+    ok(oa.includes("export async function organizeInboxAction()") && oa.includes("runCleanupBatch({ id: me.id, name: me.name })"), "cleanup: organizeInboxAction runs one batch for the signed-in user");
+    const page = read("src/app/(app)/inbox/page.tsx");
+    ok(page.includes("const cleanup = assistAll.file ?") && page.includes("cleanup={cleanup}"), "cleanup: the button is passed only for Assist pilot users (feature file)");
+    const box = read("src/app/(app)/inbox/organize/organize-box.tsx");
+    ok(box.includes("<CleanupButton cleanup={cleanup.state} />"), "cleanup: Organize my inbox sits in the Organize header");
+    const btn = read("src/app/(app)/inbox/organize/cleanup-button.tsx");
+    ok(btn.includes("await organizeInboxAction()") && btn.includes("if (r.done)") && btn.includes("r.checked === lastChecked") && btn.includes("cleanupProgressText("), "cleanup: the button loops the batch until done (stops when a batch makes no progress)");
+  } finally {
+    for (const id of BLOBS) {
+      const row = before.get(id);
+      if (row) await db.update(blobs).set({ data: row.data, updatedAt: row.updatedAt }).where(eq(blobs.id, id));
+      else await db.delete(blobs).where(eq(blobs.id, id));
+    }
+    await db.delete(companies).where(eq(companies.id, CUST));
+    invalidateOrgContext();
+  }
+
+  /* account: keep-in-inbox toggle persists */
+  const KEEP_USER = "TEST335 Keeper";
+  try {
+    ok((await keepInInbox(KEEP_USER)) === false, "account: Keep threads in my inbox is off by default");
+    await setKeepInInbox(KEEP_USER, true);
+    ok((await keepInInbox(KEEP_USER)) === true, "account: turning it on persists");
+    await setKeepInInbox(KEEP_USER, false);
+    ok((await keepInInbox(KEEP_USER)) === false, "account: turning it off persists");
+  } finally {
+    await db.delete(notifPrefs).where(eq(notifPrefs.userName, KEEP_USER));
+  }
+  const acts = read("src/app/(app)/account/actions.ts");
+  ok(/export async function setKeepInInboxAction\(on: boolean\)[\s\S]*?requireUser\(\)[\s\S]*?setKeepInInbox\(me\.name, on === true\)/.test(acts), "account: setKeepInInboxAction writes the signed-in user's own flag");
+  const acct = read("src/app/(app)/account/page.tsx");
+  ok(acct.includes("<InboxOrgCard keepInInbox={keepInbox} rules={mySenderRules} />") && acct.includes('loadSenderRuleRows({ scope: "mine", userId: user.id })'), "account: the page shows the toggle and My sender rules");
+
+  /* rules list delete is authorized */
+  const rulesBefore = (await db.select().from(blobs).where(eq(blobs.id, SENDER_RULES_BLOB)).limit(1))[0];
+  try {
+    const mine = await addSenderRule({ scope: "user", userId: "TEST335-u-del-a", match: { email: "x@del.test" }, action: { type: "noise" }, createdBy: "TEST335-u-del-a" });
+    const theirs = await addSenderRule({ scope: "user", userId: "TEST335-u-del-b", match: { email: "y@del.test" }, action: { type: "noise" }, createdBy: "TEST335-u-del-b" });
+    const company = await addSenderRule({ scope: "company", match: { domain: "del.test" }, action: { type: "noise" }, createdBy: "TEST335-u-boss" });
+    ok(!(await removeSenderRule(theirs!.id, { userId: "TEST335-u-del-a", admin: false })), "rules delete: My sender rules can't delete someone else's rule");
+    ok(!(await removeSenderRule(company!.id, { userId: "TEST335-u-del-a", admin: false })), "rules delete: … nor a company-wide rule");
+    ok(await removeSenderRule(mine!.id, { userId: "TEST335-u-del-a", admin: false }), "rules delete: my own rule deletes");
+    ok(await removeSenderRule(company!.id, { userId: "TEST335-u-boss", admin: true }), "rules delete: an admin deletes a company-wide rule");
+    const left = (await getSenderRules()).map((r) => r.id);
+    ok(!left.includes(mine!.id) && !left.includes(company!.id) && left.includes(theirs!.id), "rules delete: only the deleted rules are gone");
+  } finally {
+    if (rulesBefore) await db.update(blobs).set({ data: rulesBefore.data, updatedAt: rulesBefore.updatedAt }).where(eq(blobs.id, SENDER_RULES_BLOB));
+    else await db.delete(blobs).where(eq(blobs.id, SENDER_RULES_BLOB));
+  }
+  ok(/export async function removeMySenderRuleAction[\s\S]*?requireUser\(\)[\s\S]*?removeSenderRule\(ruleId, \{ userId: me\.id, admin: false \}\)[\s\S]*?invalidateOrgContext\(\)/.test(acts), "rules delete: the account action deletes only my own rules (admin: false) and drops the cached context");
+  const sa = read("src/app/(app)/settings/actions.ts");
+  ok(/export async function removeCompanySenderRuleAction[\s\S]*?requirePerm\("manage_users"\)[\s\S]*?removeSenderRule\(ruleId, \{ userId: me\.id, admin: true \}\)[\s\S]*?invalidateOrgContext\(\)/.test(sa), "rules delete: the company list's delete is admin-only and drops the cached context");
+  ok(/export async function setOwnDomainOverrideAction[\s\S]*?requirePerm\("manage_users"\)[\s\S]*?setOwnDomainOverride\([\s\S]*?invalidateOrgContext\(\)/.test(sa), "settings: the own-domain override is admin-only and drops the cached context");
+  ok(/export async function setAssistSettingsAction[\s\S]*?await setSettings\(next\);\s*\/\/[^\n]*\n\s*invalidateOrgContext\(\);/.test(sa), "settings: changing the pilot / feature switches drops the cached context");
+
+  /* settings card */
+  const card = read("src/app/(app)/settings/groups/assist-pilot.tsx");
+  ok(card.includes('{ key: "file", label: "Inbox organization" }') && card.includes('{ key: "promise", label: "Promise tasks" }'), "settings: the pilot card gains the Inbox organization and Promise tasks switches");
+  ok(card.includes("<AssistOrgSettings org={assist.org} run={run} />") && card.includes("<FilingReportTable report={assist.org.filing} />"), "settings: the card shows the org settings and the filing report");
+  const data = read("src/app/(app)/settings/assist-data.ts");
+  ok(data.includes("filingReport(runs, log.filter((e) => inMonth(e.at)), tasks.filter((t) => inMonth(t.createdAt)))") && data.includes('loadSenderRuleRows({ scope: "company" })') && data.includes("ctx.ownDomains"), "settings: the card data loads the month's filing report, the company rules and the domains in effect");
+
+  /* client-bundle rule for the new client files */
+  const banned = /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/(apply|pipeline|cleanup|ai-|court|due|noise|forward|numbers|sender-rules|internal|ids|signoff|rule-list-server)\b)|(^|\/)load$/;
+  for (const f of [
+    "src/app/(app)/inbox/organize/cleanup-button.tsx",
+    "src/app/(app)/account/inbox-org-card.tsx",
+    "src/app/(app)/settings/groups/assist-org.tsx",
+    "src/app/(app)/settings/groups/assist-pilot.tsx",
+  ]) {
+    const src = read(f);
+    const bad = valueImports(src).filter((p) => banned.test(p));
+    ok(src.startsWith('"use client";') && bad.length === 0, `client: ${f.split("/").pop()} imports only actions, pure modules and types${bad.length ? ` (found ${bad.join(", ")})` : ""}`);
+  }
+  ok(valueImports(read("src/lib/inbox-org/rule-list.ts")).length === 0, "client: inbox-org/rule-list.ts is pure (no value imports)");
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -1978,6 +2272,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgAiChecks(ok);
     await inboxOrgApplyChecks(ok);
     await inboxOrgUiChecks(ok);
+    await inboxOrgCleanupChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

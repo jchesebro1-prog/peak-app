@@ -21,6 +21,8 @@ import { permsFor, ROLES } from "@/lib/team";
 import { assistSettingsOf, cleanApiKey } from "@/lib/assist/config";
 import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
 import { pingAnthropicKey } from "@/lib/assist/anthropic";
+import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
+import { removeSenderRule, setOwnDomainOverride } from "@/lib/stores/inbox-org";
 import { rateLimit } from "@/lib/rate-limit";
 import { saveEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
@@ -780,6 +782,36 @@ export async function setAssistSettingsAction(patch: {
     next.assistMonthlyCapUsd = Math.round(n * 100) / 100;
   }
   await setSettings(next);
+  // #335 — the pilot list / file + promise switches gate the inbox pipeline
+  invalidateOrgContext();
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** #335 Inbox organization (Assist pilot card, admin): delete a company-wide
+ *  sender rule — or any rule (removeSenderRule re-checks). */
+export async function removeCompanySenderRuleAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const me = await requirePerm("manage_users");
+  const ruleId = typeof id === "string" ? id.trim().slice(0, 80) : "";
+  if (!ruleId) return { ok: false, error: "Rule not found." };
+  const removed = await removeSenderRule(ruleId, { userId: me.id, admin: true });
+  if (!removed) return { ok: false, error: "Rule not found." };
+  invalidateOrgContext();
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** #335 — Peak's own mail domain(s) override (comma / space separated; blank
+ *  = derive from the team's addresses). Peak's own domain always stays. */
+export async function setOwnDomainOverrideAction(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (raw.length > 200) return { ok: false, error: "Keep it under 200 characters." };
+  const parts = raw.split(/[\s,;]+/).filter(Boolean);
+  const bad = parts.find((d) => !/^@?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(d));
+  if (bad) return { ok: false, error: `"${bad.slice(0, 60)}" isn't a domain (like peaksystemsgroup.com).` };
+  await setOwnDomainOverride(parts.join(", "));
+  invalidateOrgContext();
   revalidatePath("/", "layout");
   return { ok: true };
 }

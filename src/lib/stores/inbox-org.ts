@@ -1,3 +1,6 @@
+import { sql } from "drizzle-orm";
+import { getDb } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
 import { getBlob, setBlob } from "@/db/doc-store";
 import { keepInInboxOn, setKeepInInboxOn } from "@/lib/stores/notif-prefs";
 import type { Filing, FilingAction, FilingSource, SenderRule } from "@/lib/inbox-org/types";
@@ -166,6 +169,21 @@ export async function getOwnDomainOverride(): Promise<string | null> {
 export async function setOwnDomainOverride(v: string | null): Promise<void> {
   const value = String(v ?? "").trim().slice(0, 200);
   await serialized(ORG_SETTINGS_BLOB, () => setBlob(ORG_SETTINGS_BLOB, { ownDomainOverride: value || null }));
+}
+
+/* ---- promise-tasks for the report (§8) ------------------------------------ */
+
+/** Every promise-task (`T-prm-…`), deleted ones included — `deleted` is how
+ *  the report counts Undo. Filtered by id prefix in SQL, so only the
+ *  promise-task rows come back (id, created, deleted — not the documents). */
+export async function promiseTaskRows(): Promise<Array<{ id: string; createdAt: number; deleted: boolean }>> {
+  const db = await getDb();
+  const t = DOC_TABLES.tasks;
+  const rows = await db
+    .select({ id: t.id, deleted: t.deleted, createdAt: sql<string | null>`${t.doc}->>'createdAt'` })
+    .from(t)
+    .where(sql`${t.id} like 'T-prm-%'`);
+  return rows.map((r) => ({ id: r.id, deleted: !!r.deleted, createdAt: Number(r.createdAt) || 0 }));
 }
 
 /* ---- keep threads in my inbox after I reply (§4) -------------------------- */

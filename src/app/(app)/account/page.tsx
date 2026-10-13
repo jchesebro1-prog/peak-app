@@ -22,6 +22,9 @@ import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import { getDashboardOverride } from "@/lib/stores/notif-prefs";
 import SignatureCard from "./signature-card";
 import { signatureFor } from "@/lib/stores/signatures";
+import InboxOrgCard from "./inbox-org-card";
+import { keepInInbox } from "@/lib/stores/inbox-org";
+import { loadSenderRuleRows } from "@/lib/inbox-org/rule-list-server";
 
 export const metadata = { title: "Account settings — Quartzite-6" };
 
@@ -29,6 +32,8 @@ export default async function AccountPage() {
   const user = await requireUser();
   const prefs = await getPrefs(user.name);
   const invites = await invitesOn(user.name);
+  // #335 — archive-on-reply opt-out + my own sender rules
+  const [keepInbox, mySenderRules] = await Promise.all([keepInInbox(user.name), loadSenderRuleRows({ scope: "mine", userId: user.id })]);
 
   // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
@@ -261,6 +266,9 @@ export default async function AccountPage() {
           )}
         </div>
       </div>
+
+      {/* ---- inbox organization (#335 §4, §5) ---- */}
+      <InboxOrgCard keepInInbox={keepInbox} rules={mySenderRules} />
 
       {/* ---- my Krisp key (Recordings spec §1.2 / §6) ---- */}
       <KrispCard info={krisp} />

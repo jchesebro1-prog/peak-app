@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { runAiPass } from "@/lib/inbox-org/ai-pass";
+import { runCleanupBatch, type CleanupBatchResult } from "@/lib/inbox-org/cleanup";
 import { isOrgPilot, loadOrgContext } from "@/lib/inbox-org/pipeline";
 import {
   acceptRuleOffer,
@@ -39,6 +40,17 @@ export async function runAiPassAction(): Promise<
   const r = await runAiPass({ ownerIds: [me.id] }, { ctx });
   if (r.changed) revalidatePath("/inbox");
   return { ok: true, looked: r.looked, filed: r.filed, courts: r.courts, tasks: r.tasks, more: r.stoppedByBudget };
+}
+
+/** #335 §6 "Organize my inbox" — one budgeted (40 s) batch of the 90-day
+ *  cleanup for me; the Organize header loops it while `done` is false.
+ *  Pilot only (re-checked inside runCleanupBatch). Only suggests — no task,
+ *  no link, no filing; a pilot user's noise moves to the Noise tab. */
+export async function organizeInboxAction(): Promise<CleanupBatchResult> {
+  const me = await requireUser();
+  const r = await runCleanupBatch({ id: me.id, name: me.name });
+  if (r.ok) revalidatePath("/inbox");
+  return r;
 }
 
 /* ---- thin wrappers over src/lib/inbox-org/apply.ts (the Organize view and

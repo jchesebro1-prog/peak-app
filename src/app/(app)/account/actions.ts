@@ -10,6 +10,8 @@ import {
   type NotifCategoryKey,
 } from "@/lib/stores/notif-prefs";
 import { getSettings } from "@/lib/settings";
+import { removeSenderRule, setKeepInInbox } from "@/lib/stores/inbox-org";
+import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
 import { updateUser } from "@/lib/users";
 import { createKrispClient, KrispAuthError, KrispApiError } from "@/lib/krisp/client";
 import { deleteKrispConnection, saveKrispConnection } from "@/lib/krisp/connections";
@@ -47,6 +49,25 @@ export async function setInvitePrefAction(on: boolean) {
   await setInvitesOn(on, me.name);
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** #335 §4: "Keep threads in my inbox after I reply" (default off = archive-on-reply on). */
+export async function setKeepInInboxAction(on: boolean) {
+  const me = await requireUser();
+  await setKeepInInbox(me.name, on === true);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** #335 §5: delete one of MY sender rules — only my own personal rules, even
+ *  for an admin (company-wide rules are deleted on the Assist pilot card). */
+export async function removeMySenderRuleAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const me = await requireUser();
+  const ruleId = typeof id === "string" ? id.trim().slice(0, 80) : "";
+  if (!ruleId || !(await removeSenderRule(ruleId, { userId: me.id, admin: false }))) return { ok: false, error: "Rule not found." };
+  invalidateOrgContext();
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 export async function saveDashboardOverrideAction(override: DashboardOverride | null) {

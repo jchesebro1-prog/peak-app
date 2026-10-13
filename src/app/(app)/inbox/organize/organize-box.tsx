@@ -26,6 +26,8 @@ import {
 import { bulkArchiveAction } from "../actions";
 import ChangeFiling from "./change-filing";
 import RuleOfferBanner from "./rule-offer";
+import CleanupButton from "./cleanup-button";
+import type { CleanupVM } from "@/lib/inbox-org/cleanup";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -52,7 +54,16 @@ const PRIMARY: React.CSSProperties = { ...BTN, color: "#fff", background: "var(-
 type Note = { text: string; bad: boolean };
 type Offer = { offer: RuleOffer; threadId: string };
 
-export default function OrganizeBox({ vm, selectedId }: { vm: OrganizeVM; selectedId: string | null }) {
+export default function OrganizeBox({
+  vm,
+  selectedId,
+  cleanup = null,
+}: {
+  vm: OrganizeVM;
+  selectedId: string | null;
+  /** "Organize my inbox" (spec §6) — set only for Assist pilot users */
+  cleanup?: { state: CleanupVM | null } | null;
+}) {
   const [pending, start] = useTransition();
   const [note, setNote] = useState<Note | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
@@ -129,6 +140,11 @@ export default function OrganizeBox({ vm, selectedId }: { vm: OrganizeVM; select
               ? "Flagged as noise — newsletters, promotions, notifications — newest first"
               : `Filed in the last ${FILED_DAYS} days`}
         </div>
+        {cleanup && (
+          <div style={{ marginTop: 8 }}>
+            <CleanupButton cleanup={cleanup.state} />
+          </div>
+        )}
 
         {tab === "to-file" && (
           <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>

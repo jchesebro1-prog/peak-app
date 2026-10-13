@@ -88,6 +88,7 @@ import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { MEETINGS_BASE_HREF, meetingsHref, meetingsTabOf } from "./meetings/format";
 import OrganizeBox from "./organize/organize-box";
 import { buildReaderOrg, loadOrganize, organizeToFileCount } from "./organize/load";
+import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
 import { ORGANIZE_BASE_HREF, organizeTabOf } from "./organize/format";
 import { getTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
@@ -219,7 +220,8 @@ export default async function InboxPage({
   const me = user.name;
   const settings = await getSettings();
   // #334 — Assist buttons render only for gated-in users (no provider = none).
-  const assistFlags: AssistFlags = assistUiFlags(user.id, assistSettingsOf(settings), await getAssistEnv());
+  const assistAll = assistUiFlags(user.id, assistSettingsOf(settings), await getAssistEnv());
+  const assistFlags: AssistFlags = assistAll;
   const domain = companyDomain(settings.companyName);
   // Whose mailbox this is, in order of how much we actually know:
   //   1. the address Google authorized for this user's Gmail connection,
@@ -1160,10 +1162,12 @@ export default async function InboxPage({
       isAdmin: can("manage_users", user.roles),
       baseHref: ORGANIZE_BASE_HREF,
     });
+    // #335 §6 — "Organize my inbox" is for Assist pilot users (feature `file`)
+    const cleanup = assistAll.file ? { state: cleanupVMOf(await getCleanupState(user.id).catch(() => null)) } : null;
     organizeSlot = {
       // keyed by tab: a tab switch remounts the box, so its confirm / rule
       // offer / note state never carries over to another tab
-      list: <OrganizeBox key={`organize-list-${vm.tab}`} vm={vm} selectedId={reader ? reader.id : null} />,
+      list: <OrganizeBox key={`organize-list-${vm.tab}`} vm={vm} selectedId={reader ? reader.id : null} cleanup={cleanup} />,
     };
   }
 

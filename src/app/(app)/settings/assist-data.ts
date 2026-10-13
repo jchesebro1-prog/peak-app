@@ -1,7 +1,11 @@
 import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo } from "@/lib/assist/config";
 import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
 import { estimateOutcomeFor, type DraftLine } from "@/lib/assist/outcome";
-import { assistReport, recentMonthKeys } from "@/lib/assist/report";
+import { assistReport, filingReport, recentMonthKeys, type FilingReport } from "@/lib/assist/report";
+import { loadOrgContext } from "@/lib/inbox-org/pipeline";
+import { loadSenderRuleRows } from "@/lib/inbox-org/rule-list-server";
+import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
+import { getFilingLog, getOwnDomainOverride, promiseTaskRows } from "@/lib/stores/inbox-org";
 import type { AssistOutcome } from "@/lib/assist/types";
 import { listRunsByMonth, type AssistRun } from "@/lib/stores/assist-runs";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -47,6 +51,7 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     console.error("[assist] reading the Assist key state failed", e instanceof Error ? e.name : "error");
     return [process.env, { source: "none", last4: null, savedAt: null, savedBy: null, unreadable: false, previewIgnored: false }];
   });
+  const org = await loadOrgVM(runs, month);
   return {
     settings: assistSettingsOf(settings),
     status: assistStatusLine(env, keyInfo),
@@ -55,5 +60,34 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     months: Array.from(new Set([...recentMonthKeys(now, 3, monthKeyChicago), month])),
     spendUsd: runs.reduce((sum, r) => sum + (r.costUsd || 0), 0),
     report: assistReport(runs, estOutcomes),
+    org,
   };
+}
+
+/** #335 — the Inbox-organization half of the card: the month's filing report
+ *  (AI `file` runs + the filing log + promise-tasks), the company-wide sender
+ *  rules and the own-domain override with the domains in effect. Never
+ *  throws: each part falls back to empty. */
+async function loadOrgVM(runs: AssistRun[], month: string): Promise<AssistVM["org"]> {
+  const inMonth = (ms: number) => !!ms && monthKeyChicago(ms) === month;
+  let filing: FilingReport;
+  try {
+    const [log, tasks] = await Promise.all([getFilingLog(), promiseTaskRows()]);
+    filing = filingReport(runs, log.filter((e) => inMonth(e.at)), tasks.filter((t) => inMonth(t.createdAt)));
+  } catch (e) {
+    console.error("[inbox-org] loading the filing report failed", e instanceof Error ? e.name : "error");
+    filing = filingReport([], [], []);
+  }
+  let companyRules: SenderRuleRowVM[] = [];
+  let ownDomainOverride = "";
+  let ownDomains: string[] = [];
+  try {
+    const [rules, override, ctx] = await Promise.all([loadSenderRuleRows({ scope: "company" }), getOwnDomainOverride(), loadOrgContext({ fresh: true })]);
+    companyRules = rules;
+    ownDomainOverride = override ?? "";
+    ownDomains = ctx.ownDomains;
+  } catch (e) {
+    console.error("[inbox-org] loading sender rules / own domains failed", e instanceof Error ? e.name : "error");
+  }
+  return { filing, companyRules, ownDomainOverride, ownDomains };
 }
