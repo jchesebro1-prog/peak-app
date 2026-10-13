@@ -261,8 +261,18 @@ export async function searchInboxAction(
 }
 
 export async function setStatusAction(id: string, status: string) {
-  await requireUser();
+  const user = await requireUser();
   await setStatus(id, status);
+  // #335 §4 — Mark replied / Close also archive (same per-user setting as
+  // archive-on-reply); best-effort, never fails the status change
+  if (status === "replied" || status === "closed") {
+    try {
+      const { archiveAfterReply } = await import("@/lib/inbox-org/apply");
+      await archiveAfterReply(id, "reply", { id: user.id, name: user.name }, { manual: true });
+    } catch (err) {
+      console.error("[inbox-org] archive on Mark replied / Close failed for", id, err);
+    }
+  }
   revalidate();
 }
 
@@ -584,10 +594,10 @@ export async function logInteractionAction(d: LogPayload) {
 
 export async function sendReceiveAction() {
   const started = Date.now();
-  await requireUser();
+  const user = await requireUser();
   await flushOutbox();
   const { id, owners } = await checkMailFor({ aiPass: false });
-  scheduleAiPass(owners, started);
+  scheduleAiPass(owners, started, user.id);
   revalidate();
   return { ok: true as const, id };
 }
@@ -597,11 +607,14 @@ export async function sendReceiveAction() {
  *  inline pass would hold the user's next archive / reply / link for up to
  *  ~55 s. after() runs within this page's maxDuration (300 s), so the
  *  pass's deadline is taken from the START of the action. */
-function scheduleAiPass(owners: string[], startedAt: number): void {
-  if (!owners.length) return;
+function scheduleAiPass(owners: string[], startedAt: number, meId: string): void {
+  // The signed-in user always rides along: their own pending reads resume
+  // even when this poll synced nobody's mailbox (or only other people's).
+  const ownerIds = [...new Set([meId, ...owners].filter(Boolean))];
+  if (!ownerIds.length) return;
   after(async () => {
     const [{ runAiPass }, { POLL_AI_DEADLINE_MS }] = await Promise.all([import("@/lib/inbox-org/ai-pass"), import("@/lib/gmail/bridge")]);
-    await runAiPass({ ownerIds: owners, deadlineMs: startedAt + POLL_AI_DEADLINE_MS });
+    await runAiPass({ ownerIds, deadlineMs: startedAt + POLL_AI_DEADLINE_MS });
   });
 }
 
@@ -615,8 +628,8 @@ function scheduleAiPass(owners: string[], startedAt: number): void {
  *  (router.refresh() at the next non-typing moment). */
 export async function autoSyncAction() {
   const started = Date.now();
-  await requireUser();
+  const user = await requireUser();
   const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false });
-  scheduleAiPass(r.owners, started);
+  scheduleAiPass(r.owners, started, user.id);
   return { ok: true as const, ran: r.ran, changed: r.changed, id: r.id };
 }

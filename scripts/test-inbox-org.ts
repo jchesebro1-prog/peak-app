@@ -15,12 +15,12 @@ import { chicagoParts, dayKey } from "@/lib/triage/clock";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { blobs, contactEmails, contacts, notifPrefs } from "@/db/schema";
+import { blobs, companies, contactEmails, contacts, notifPrefs, sites, users } from "@/db/schema";
 import { comms as commsTable } from "@/db/doc-tables";
 import { getDoc, patchDoc, setBlob, softDeleteDoc } from "@/db/doc-store";
 import { parseInbound } from "@/lib/gmail/mime";
 import type { GmailFullMessage } from "@/lib/gmail/api";
-import { setOrg, threadsIn, type CommMessage, type CommThread } from "@/lib/stores/comms";
+import { addMessage, archive, reply, setOrg, threadsIn, type CommMessage, type CommThread } from "@/lib/stores/comms";
 import { COURT_STATUS, buildOrgContext, invalidateOrgContext, isOrgPilot, organizeThread } from "@/lib/inbox-org/pipeline";
 import { onMyCourt, selectEmail } from "@/lib/triage/feeds/email";
 import { organizeAfterImport, recordMessage } from "@/lib/gmail/bridge";
@@ -38,10 +38,19 @@ import { buildFilingUserText, candidateLine, filingFromPick, FILING_SYSTEM, sani
 import { aiCourtOverride, applyPromises, COURT_SYSTEM, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
 import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
-import { listDocsByField, upsertDocs } from "@/db/doc-store";
+import { listDocsByField, upsertDoc, upsertDocs } from "@/db/doc-store";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import { listRunsByMonth } from "@/lib/stores/assist-runs";
 import { monthKeyChicago } from "@/lib/assist/config";
+import { getRun } from "@/lib/stores/assist-runs";
+import { saveCompany } from "@/lib/identity/companies";
+import { saveSite } from "@/lib/identity/sites";
+import { desiredPeakLabels } from "@/lib/gmail/peak-labels";
+import { personalKey } from "@/lib/gmail/config";
+import {
+  acceptRuleOffer, approveAllStrong, approveFiling, archiveAfterReply, changeFiling, markNoise, notNoise,
+  overrideCourt, skipFiling, undoFiling, undoPromiseTask,
+} from "@/lib/inbox-org/apply";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -939,8 +948,8 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     ok(!threw, "org hook: a throwing organizer never escapes organizeAfterImport");
     const bridgeSrc = readFileSync("src/lib/gmail/bridge.ts", "utf8");
     const recBody = bridgeSrc.slice(bridgeSrc.indexOf("export async function recordMessage("), bridgeSrc.indexOf("async function userNameOfKey("));
-    ok((recBody.match(/await organizeAfterImport\((existing\.id|id), org\)/g) || []).length === 2, "org hook: recordMessage organizes on both the existing-thread and the new-thread path");
-    ok(recBody.indexOf("await organizeAfterImport(existing.id, org)") > recBody.indexOf("await patchDoc<CommThread>(\"comms\", existing.id") && recBody.indexOf("await organizeAfterImport(id, org)") > recBody.indexOf("insertDocIfAbsent"), "org hook: organizing runs after the write resolves");
+    ok((recBody.match(/await organizeAfterImport\((existing\.id|id), org(, undefined, \{ wasArchived \})?\)/g) || []).length === 2, "org hook: recordMessage organizes on both the existing-thread and the new-thread path");
+    ok(recBody.indexOf("await organizeAfterImport(existing.id, org, undefined, { wasArchived })") > recBody.indexOf("await patchDoc<CommThread>(\"comms\", existing.id") && recBody.indexOf("await organizeAfterImport(id, org)") > recBody.indexOf("insertDocIfAbsent"), "org hook: organizing runs after the write resolves");
     ok(bridgeSrc.includes("const next = t.court ? t.status : deriveStatus(") && bridgeSrc.includes("if (!d.court && (d.status ==="), "org hook: rederiveStatuses leaves a court-driven status alone");
     ok(bridgeSrc.includes("backlog: !info.initialImportDone") && bridgeSrc.includes("appendFilingLogs(org.log.splice(0))"), "org hook: the 90-day import is backlog; the filing log is appended once per sync");
     // a real import: the hook organizes the new thread; a failing organize still returns the id
@@ -1374,12 +1383,13 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   ok(
     actionsSrc.includes("checkMailFor({ aiPass: false })") &&
       actionsSrc.includes("checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false })") &&
-      actionsSrc.includes("scheduleAiPass(owners, started)") &&
-      actionsSrc.includes("scheduleAiPass(r.owners, started)") &&
+      actionsSrc.includes("scheduleAiPass(owners, started, user.id)") &&
+      actionsSrc.includes("scheduleAiPass(r.owners, started, user.id)") &&
       (actionsSrc.match(/runAiPass\(/g) || []).length === 1 &&
-      /after\(async \(\) => \{[\s\S]*runAiPass\(\{ ownerIds: owners, deadlineMs: startedAt \+ POLL_AI_DEADLINE_MS \}\)/.test(sched),
+      /after\(async \(\) => \{[\s\S]*runAiPass\(\{ ownerIds, deadlineMs: startedAt \+ POLL_AI_DEADLINE_MS \}\)/.test(sched),
     "ai hook: Send/Receive and auto-sync poll with aiPass:false and run the pass only in after(), deadline from the action's start"
   );
+  ok(/const ownerIds = \[\.\.\.new Set\(\[meId, \.\.\.owners\]/.test(sched), "ai hook: the signed-in user is always in the pass's owner list");
   ok(readFileSync("src/instrumentation.ts", "utf8").includes("checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: !process.env.VERCEL })"), "ai hook: the server timer runs no inline pass on Vercel");
 
   // every assist_runs row this section made goes with the fixtures
@@ -1398,6 +1408,241 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   );
   ok(readFileSync("src/app/api/gmail/sync/route.ts", "utf8").includes("checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false })"), "ai hook: the 60 s cron route runs no AI pass");
   ok(readFileSync("src/lib/stores/comms.ts", "utf8").includes("await pollInbound(eligible, maxAgeMs, opts)"), "ai hook: checkMailIfStale passes the options through");
+}
+
+/* ---------- Task 5: apply actions + archive-on-reply ---------- */
+
+export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
+  const ANN = "TEST335 Ann Apply";
+  const ANN_ID = "TEST335-u-ann";
+  const BEN_ID = "TEST335-u-ben";
+  const BOSS_ID = "TEST335-u-boss";
+  const ann = { id: ANN_ID, name: ANN, roles: ["Estimator"] };
+  const boss = { id: BOSS_ID, name: "TEST335 Boss Apply", roles: ["Admin"] };
+  const db = await getDb();
+  const CUST = fixtureId(335, "apply-cust");
+  const QUOTE = fixtureId(335, "apply-quote");
+  const SITE = fixtureId(335, "apply-site");
+  const T0 = Date.now() - 3 * 3_600_000;
+  let n = 0;
+  const msg = (o: Partial<CommMessage>): CommMessage =>
+    ({ id: `ap${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@apply-school.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread>): Promise<string> => {
+    const id = fixtureId(335, "apply-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ANN, unread: true, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@apply-school.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg({})], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    await organizeThread(id);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB];
+  const before = new Map<string, typeof blobs.$inferSelect | undefined>();
+  for (const id of BLOBS) before.set(id, (await db.select().from(blobs).where(eq(blobs.id, id)).limit(1))[0]);
+  const imported: string[] = [];
+  try {
+    const nowMs = Date.now();
+    for (const [id, name, email, roles] of [
+      [ANN_ID, ANN, "ann.t335@peaksystemsgroup.com", ["Estimator"]],
+      [BEN_ID, "TEST335 Ben Apply", "ben.t335@peaksystemsgroup.com", ["Estimator"]],
+      [BOSS_ID, boss.name, "boss.t335@peaksystemsgroup.com", ["Admin"]],
+    ] as const) {
+      await db.insert(users).values({ id, name, email, roles: [...roles], color: "#333333", initials: "TT", status: "active", createdAt: nowMs }).onConflictDoNothing();
+    }
+    await saveCompany({ id: CUST, name: "TEST335 Apply School", type: "school" });
+    await saveSite({ id: SITE, companyId: CUST, name: "Main gym", isPrimary: true, venueKind: "proscenium" });
+    await createFixture("quotes", { id: QUOTE, name: "Gym curtain", customer: "TEST335 Apply School", customerId: CUST, estNo: 987700, quoteType: "system", status: "sent" });
+    invalidateOrgContext();
+    const labels = (t: CommThread) => desiredPeakLabels(t).filter((l) => l.startsWith("Peak/Customers/") || l.includes(QUOTE));
+
+    /* approve: links + labels + archives only when no reply is owed */
+    const quiet = await mk("approve-quiet", { subject: "Re: EST-987700", messages: [msg({}), msg({ direction: "out", fromEmail: "ann.t335@peaksystemsgroup.com", to: "pat@apply-school.test", body: "Here it is." })], status: "waiting_them" });
+    const q0 = await read(quiet);
+    ok(q0.filing?.source === "number" && q0.filing.state === "suggested" && q0.court?.owner === "customer", "apply: (setup) a strong number suggestion, court customer");
+    const ra = await approveFiling(quiet, ann);
+    const q1 = await read(quiet);
+    ok(ra.ok && q1.customerId === CUST && q1.customer === "TEST335 Apply School" && q1.link?.type === "quote" && q1.link.id === QUOTE, "apply approve: links the customer (linkThread) and the quote (setLink)");
+    ok(labels(q1).length === 2, "apply approve: the Peak label mirror now wants the customer + quote labels");
+    ok(q1.filing?.state === "filed" && q1.filing.filedBy === "approved" && !!q1.filing.applied?.customer && !!q1.filing.applied?.link && q1.archived === true, "apply approve: filed, records what it changed, and archives (no reply owed)");
+    const log1 = await getFilingLog();
+    ok(log1.some((e) => e.threadId === quiet && e.action === "approved" && e.outcome === "filed" && e.userId === ANN_ID), "apply approve: a rule suggestion's approval lands in the filing log");
+    ok((await approveFiling(quiet, ann)).ok && ((await approveFiling(quiet, ann)) as { already?: boolean }).already === true, "apply approve: approving again is a no-op");
+    const owes = await mk("approve-owes", { subject: "EST-987700 question" });
+    await approveFiling(owes, ann);
+    ok((await read(owes)).filing?.state === "filed" && (await read(owes)).archived === false && (await read(owes)).court?.owner === "me", "apply approve: a thread still owed a reply is filed but stays in the inbox");
+    const others = await mk("approve-others", { mailboxUser: "TEST335 Ben Apply", subject: "EST-987700" });
+    const ro = await approveFiling(others, ann);
+    ok(!ro.ok && ro.error === "not-found" && !(await read(others)).customerId, "apply approve: someone else's thread is refused (visibleTo)");
+
+    /* undo restores */
+    const ru = await undoFiling(quiet, ann);
+    const q2 = await read(quiet);
+    ok(ru.ok && q2.customerId === null && q2.customer === "" && q2.link === null && q2.resolution === "unknown", "apply undo: unlinks the customer and the quote it set, identity fields restored");
+    ok(labels(q2).length === 0, "apply undo: the label mirror no longer wants the Peak labels (syncPeakLabels removes them)");
+    ok(q2.archived === false && q2.filing?.state === "suggested" && !q2.filing.applied && !q2.filing.filedBy, "apply undo: un-archived, back to To file");
+    ok((await getFilingLog()).some((e) => e.threadId === quiet && e.action === "undone"), "apply undo: logged");
+    const kept = await mk("undo-keeps-link", { customerId: CUST, customer: "TEST335 Apply School", resolution: "linked", link: { type: "quote", id: QUOTE }, subject: "EST-987700" });
+    await approveFiling(kept, ann);
+    await undoFiling(kept, ann);
+    ok((await read(kept)).customerId === CUST && (await read(kept)).link?.id === QUOTE, "apply undo: a link the thread already had before filing is left alone");
+    ok(!(await undoFiling(owes + "x", ann)).ok && !(await undoFiling(kept, ann)).ok, "apply undo: refused for a missing or unfiled thread");
+
+    /* reply archives; the per-user setting keeps it */
+    const replyId = await mk("reply", { customerId: CUST, customer: "TEST335 Apply School", resolution: "linked" });
+    ok((await read(replyId)).court?.owner === "me" && (await read(replyId)).filing?.strength === "strong", "apply reply: (setup) linked thread, court me");
+    await reply(replyId, { body: "Price attached.", me: ANN });
+    const r1 = await read(replyId);
+    ok(r1.archived === true && r1.court?.owner === "customer" && r1.status === "waiting_them", "apply reply: my reply recomputes the court (customer) and archives the thread");
+    ok(r1.filing?.state === "filed" && r1.filing.filedBy === "reply" && r1.filing.customerId === CUST, "apply reply: the linked thread is filed on reply");
+    await setKeepInInbox(ANN, true);
+    const keepId = await mk("reply-keep", { customerId: CUST, customer: "TEST335 Apply School", resolution: "linked" });
+    await reply(keepId, { body: "On it.", me: ANN });
+    ok((await read(keepId)).archived === false && (await read(keepId)).filing?.state === "suggested" && (await read(keepId)).court?.owner === "customer", "apply reply: with 'Keep threads in my inbox' on, it stays (and isn't filed)");
+    const archKeep = await mk("reply-archived-keep", { archived: true, customerId: CUST, customer: "TEST335 Apply School", resolution: "linked" });
+    await reply(archKeep, { body: "Following up.", me: ANN });
+    ok((await read(archKeep)).archived === true, "apply addMessage: my outbound message never un-archives a thread");
+    await addMessage(archKeep, { direction: "in", body: "Thanks — one more question?" });
+    ok((await read(archKeep)).archived === false, "apply addMessage: new inbound mail still un-archives");
+    await setKeepInInbox(ANN, false);
+    const weakId = await mk("reply-weak", { resolution: "suggested", suggestedCustomerId: CUST });
+    await reply(weakId, { body: "Sure.", me: ANN });
+    ok((await read(weakId)).archived === true && (await read(weakId)).filing?.state === "suggested" && !(await read(weakId)).customerId, "apply reply: a weak suggestion waits in To file (archived, not filed)");
+    const draftRes = await archiveAfterReply(fixtureId(335, "apply-nope"), "reply");
+    ok(draftRes.ok && draftRes.archived === false, "apply reply: a missing thread is a no-op, never a throw");
+
+    /* Mark replied / Close (manual) archive whatever the court says */
+    const manual = await mk("manual", { customerId: CUST, customer: "TEST335 Apply School", resolution: "linked" });
+    const rm = await archiveAfterReply(manual, "reply", ann, { manual: true });
+    ok(rm.ok && rm.archived && (await read(manual)).archived === true && (await read(manual)).filing?.filedBy === "reply", "apply manual: Mark replied / Close archives (and files) even with the court on me");
+    const actionsSrc = readFileSync("src/app/(app)/inbox/actions.ts", "utf8");
+    const setStatusBody = actionsSrc.slice(actionsSrc.indexOf("export async function setStatusAction("), actionsSrc.indexOf("export async function reopenAction("));
+    ok(/status === "replied" \|\| status === "closed"/.test(setStatusBody) && setStatusBody.includes('archiveAfterReply(id, "reply", { id: user.id, name: user.name }, { manual: true })'), "apply manual: setStatusAction runs archiveAfterReply on replied / closed");
+    const commsSrc = readFileSync("src/lib/stores/comms.ts", "utf8");
+    const replyBody = commsSrc.slice(commsSrc.indexOf("export async function reply("), commsSrc.indexOf("export async function replyAll("));
+    ok(replyBody.includes("afterOwnReply(threadId)") && /catch \(err\)/.test(replyBody) && commsSrc.includes("return reply(threadId, opts);"), "apply reply: comms.reply (and replyAll / forward through it) runs the post-send step best-effort");
+
+    /* teammate reply (import) archives; a hand-off un-archives */
+    const gm = (gid: string, gthread: string, from: string, to: string, body: string, subject = "Re: EST-987700"): GmailFullMessage =>
+      ({
+        id: gid, threadId: gthread, labelIds: ["INBOX"], internalDate: String(Date.now() - 60_000 + (++n)),
+        payload: { mimeType: "text/plain", headers: [["From", from], ["To", to], ["Subject", subject], ["Message-ID", `<${gid}@x.test>`]].map(([name, value]) => ({ name, value })), body: { data: Buffer.from(body).toString("base64url") } },
+      }) as GmailFullMessage;
+    const key = personalKey(ANN_ID);
+    const tid = await recordMessage(key, parseInbound(gm("TEST335-ap-g1", "TEST335-ap-thread", "Pat <pat@apply-school.test>", "ann.t335@peaksystemsgroup.com", "Any news on the curtain?")));
+    if (tid) imported.push(tid);
+    ok(!!tid && (await read(tid!)).mailboxUser === ANN && (await read(tid!)).court?.owner === "me" && (await read(tid!)).archived === false, "apply teammate: (setup) imported customer mail, court me");
+    const upd0 = (await read(tid!)).updatedAt;
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g2", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "pat@apply-school.test", "Hi Pat, I'll get you the price Friday.")));
+    const tm = await read(tid!);
+    ok(tm.court?.owner === "customer" && tm.court.teammateId === BEN_ID && tm.archived === true, "apply teammate: a teammate's reply makes the court customer and archives the thread");
+    ok(tm.filing?.state === "filed" && tm.filing.filedBy === "teammate-reply" && tm.filing.work?.id === QUOTE, "apply teammate: its strong suggestion is filed as teammate-reply");
+    ok(tm.updatedAt === Math.max(upd0, tm.messages[tm.messages.length - 1].at), "apply teammate: the archive is quiet (the list order keeps the message time)");
+    const fwd = `Ann, can you take this one?\n\n---------- Forwarded message ---------\nFrom: Pat <pat@apply-school.test>\nDate: Mon, Oct 12, 2026 at 9:00 AM\nSubject: Curtain\nTo: Ben <ben.t335@peaksystemsgroup.com>\n\nWe need a price.`;
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g3", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "ann.t335@peaksystemsgroup.com", fwd)));
+    const th = await read(tid!);
+    ok(th.court?.owner === "me" && th.archived === false, "apply teammate: a hand-off (a teammate's forward to me) un-archives and puts the court on me");
+    await setKeepInInbox(ANN, true);
+    await archive(tid!, { quiet: true });
+    await recordMessage(key, parseInbound(gm("TEST335-ap-g4", "TEST335-ap-thread", "Ben <ben.t335@peaksystemsgroup.com>", "pat@apply-school.test", "Pat — scratch that, Ann has it.")));
+    ok((await read(tid!)).archived === true, "apply teammate: with 'Keep threads in my inbox' on, a teammate's reply still never brings back a thread I archived");
+    await setKeepInInbox(ANN, false);
+
+    /* change → rule offer → rule → re-sweep files a second thread from the same sender */
+    const s1 = await mk("rule-1", { contactEmail: "buyer@newco-apply.test", messages: [msg({ fromEmail: "buyer@newco-apply.test", body: "Do you sell drapes?" })] });
+    const s2 = await mk("rule-2", { contactEmail: "buyer@newco-apply.test", messages: [msg({ fromEmail: "buyer@newco-apply.test" }), msg({ direction: "out", fromEmail: "ann.t335@peaksystemsgroup.com", to: "buyer@newco-apply.test", body: "Yes." })] });
+    const rc = await changeFiling(s1, { customerId: CUST, siteId: SITE }, ann);
+    ok(rc.ok && (await read(s1)).customerId === CUST && (await read(s1)).siteId === SITE && (await read(s1)).filing?.state === "filed", "apply change: files under the picked customer + venue");
+    ok(rc.ok && rc.ruleOffer?.email === "buyer@newco-apply.test" && rc.ruleOffer.domain === "newco-apply.test" && typeof rc.ruleOffer.target === "object" && rc.ruleOffer.target.customerId === CUST, "apply change: returns the sender's rule offer (email + domain → the customer)");
+    ok(!(await changeFiling(s2, { customerId: fixtureId(335, "apply-no-such") }, ann)).ok && !(await changeFiling(s2, { customerId: CUST, siteId: "no-such-site" }, ann)).ok, "apply change: an unknown customer or a venue not on it is refused");
+    ok(!(await changeFiling(s2, { work: { type: "quote", id: QUOTE }, customerId: fixtureId(335, "apply-other-cust") }, ann)).ok, "apply change: a quote that isn't the customer's is refused");
+    const co = await acceptRuleOffer(rc.ok ? rc.ruleOffer! : ({} as never), { match: "email", scope: "company" }, ann);
+    ok(!co.ok && co.error === "forbidden" && !(await getSenderRules()).some((r) => r.match.email === "buyer@newco-apply.test"), "apply rule: a company-wide rule needs an admin");
+    const rr = await acceptRuleOffer(rc.ok ? rc.ruleOffer! : ({} as never), { match: "email", scope: "user" }, ann);
+    const t2 = await read(s2);
+    ok(rr.ok && rr.rule.scope === "user" && rr.rule.userId === ANN_ID && rr.rule.action.type === "file", "apply rule: a personal rule is saved");
+    ok(rr.ok && rr.filed >= 1 && t2.filing?.source === "rule" && t2.filing.state === "filed" && t2.filing.filedBy === "rule" && t2.customerId === CUST, "apply rule: the re-sweep files the sender's other thread (filedBy rule)");
+    ok(t2.archived === true, "apply rule: …and archives it (no reply owed there)");
+    const cr = await acceptRuleOffer({ email: "x@admin-apply.test", domain: "admin-apply.test", target: "noise" }, { match: "domain", scope: "company" }, boss);
+    ok(cr.ok && cr.rule.scope === "company" && cr.rule.match.domain === "admin-apply.test", "apply rule: an admin saves a company-wide domain rule");
+    ok(!(await acceptRuleOffer({ email: "x@gmail.com", domain: "gmail.com", target: "noise" }, { match: "domain", scope: "user" }, ann)).ok && !(await acceptRuleOffer({ email: "ben.t335@peaksystemsgroup.com", domain: null, target: "noise" }, { match: "email", scope: "user" }, ann)).ok, "apply rule: no rule for a public mail domain or a teammate's address");
+
+    /* approve all strong only touches strong rows */
+    const strongA = await mk("all-strong", { subject: "EST-987700", messages: [msg({}), msg({ direction: "out", fromEmail: "ann.t335@peaksystemsgroup.com", to: "pat@apply-school.test" })], status: "waiting_them" });
+    const weakA = await mk("all-weak", { resolution: "suggested", suggestedCustomerId: CUST });
+    const noiseA = await mk("all-noise", { contactEmail: "deals@shop-apply.test", messages: [msg({ fromEmail: "deals@shop-apply.test", gmailLabelIds: ["CATEGORY_PROMOTIONS"] })] });
+    ok((await read(weakA)).filing?.strength === "weak" && (await read(noiseA)).filing?.noise === true, "apply all: (setup) a weak row and a noise row");
+    const rAll = await approveAllStrong([strongA, weakA, noiseA, others], ann);
+    ok(rAll.approved === 1 && rAll.skipped === 3 && (await read(strongA)).filing?.state === "filed", "apply all: only the strong row is approved");
+    ok((await read(weakA)).filing?.state === "suggested" && !(await read(weakA)).customerId && (await read(noiseA)).filing?.state === "suggested" && (await read(others)).filing?.state === "suggested", "apply all: weak, noise and other people's rows are untouched");
+
+    /* noise / not noise / skip */
+    const rn = await markNoise(noiseA, ann);
+    ok(rn.ok && (await read(noiseA)).noise?.flagged === true && (await read(noiseA)).noise?.moved === true && (await read(noiseA)).archived === true && (await read(noiseA)).filing?.state === "dismissed", "apply noise: marked noise moves it to the Noise tab");
+    const rnn = await notNoise(noiseA, ann);
+    const nn = await read(noiseA);
+    ok(rnn.ok && nn.noise?.rescued === true && !nn.noise.flagged && nn.archived === false && nn.filing?.state === "suggested" && !nn.filing.noise, "apply not noise: back in the inbox and To file, never flagged again");
+    ok(rnn.ok && rnn.ruleOffer?.email === "deals@shop-apply.test" && rnn.ruleOffer.target === "never-noise", "apply not noise: offers 'never treat as noise'");
+    await organizeThread(noiseA);
+    ok(!(await read(noiseA)).noise?.flagged && !(await read(noiseA)).archived, "apply not noise: the pipeline keeps it rescued");
+    const sk = await skipFiling(weakA, ann);
+    ok(sk.ok && (await read(weakA)).filing?.state === "skipped", "apply skip: the suggestion is skipped");
+    ok((await getFilingLog()).some((e) => e.threadId === weakA && e.action === "skipped") && (await getFilingLog()).some((e) => e.threadId === noiseA && e.action === "rescued"), "apply: skip and rescue are logged");
+    const rescuedPick = filingFromPick(
+      { kind: "noise", strength: "strong", reason: "promo", needsReply: false } as never,
+      (await read(noiseA)).filing!,
+      { now: Date.now(), runId: "R-x", courtOwnerIsMe: true, prevNoise: { flagged: false, reason: "", moved: false, rescued: true } }
+    );
+    ok(rescuedPick.noise === undefined && !rescuedPick.filing.noise && rescuedPick.filing.source !== "ai", "apply not noise: the AI filing never makes a rescued thread noise again");
+
+    /* court override */
+    const ov = await mk("override", {});
+    const rov = await overrideCourt(ov, "nobody", ann);
+    ok(rov.ok && (await read(ov)).court?.source === "override" && (await read(ov)).court?.owner === "nobody" && (await read(ov)).status === "closed" && (await read(ov)).filing?.needsReply === false, "apply override: Not on me sets an override court, status follows");
+    await organizeThread(ov);
+    ok((await read(ov)).court?.source === "override", "apply override: it sticks until the next message");
+    ok(!(await overrideCourt(ov, "teammate", ann, { teammateId: "nobody-real" })).ok, "apply override: a teammate court needs a real teammate");
+
+    /* AI outcomes: approve → accepted, undo → noted */
+    const runRow = (id: string, feature: "file" | "promise", contextRef: string) =>
+      ({ id, feature, step: null, userId: ANN_ID, userName: ANN, provider: "fake", model: "m", requestedModel: "m", fellBack: false, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, latencyMs: 0, inputHash: "h", output: "", ok: true, error: null, stopReason: null, contextRef, monthKey: "2026-10", outcome: null, outcomeDetail: null, outcomeAt: null, createdAt: Date.now() - 1000 });
+    const aiId = await mk("ai", {});
+    const RUN = fixtureId(335, "apply-run");
+    await upsertDoc("assist_runs" as never, runRow(RUN, "file", "thread:" + aiId) as never);
+    registerFixture("assist_runs" as never, RUN);
+    const aiFiling: Filing = { customerId: CUST, work: { type: "quote", id: QUOTE, label: "EST-987700 Gym curtain" }, noise: false, source: "ai", reason: "Looks like the gym curtain", strength: "strong", needsReply: false, state: "suggested", at: Date.now(), runId: RUN };
+    await setOrg(aiId, { filing: aiFiling });
+    await approveFiling(aiId, ann);
+    ok((await getRun(RUN))?.outcome === "accepted", "apply AI: approving an AI suggestion sets its run outcome 'accepted'");
+    await undoFiling(aiId, ann);
+    ok((await getRun(RUN))?.outcome === "accepted" && (await getRun(RUN))?.outcomeDetail?.undone === true, "apply AI: undo notes it on the run (first outcome kept)");
+
+    /* promise-task Undo */
+    const pt = await mk("promise", {});
+    const TASK = fixtureId(335, "apply-task");
+    await createFixture("tasks", { id: TASK, title: "Send the price", section: "Email", threadId: pt, assigneeUserId: ANN_ID, assigneeName: ANN, createdAt: Date.now() - 500, updatedAt: Date.now() - 500, doneAt: null } as never);
+    const PRUN = fixtureId(335, "apply-prun");
+    await upsertDoc("assist_runs" as never, runRow(PRUN, "promise", "thread:" + pt) as never);
+    registerFixture("assist_runs" as never, PRUN);
+    const ptc = (await read(pt)).court!;
+    await setOrg(pt, { court: { ...ptc, promise: { text: "Send the price", ownerUserId: ANN_ID, due: null, taskId: TASK, messageId: "m" } } });
+    const rpt = await undoPromiseTask(pt, TASK, ann);
+    ok(rpt.ok && (await getDoc("tasks", TASK)) === null && !(await read(pt)).court?.promise, "apply promise undo: the task is soft-deleted and dropped from the court");
+    ok((await getRun(PRUN))?.outcome === "discarded", "apply promise undo: the reading's run is logged 'discarded'");
+  } finally {
+    for (const id of imported) await db.delete(commsTable).where(eq(commsTable.id, id));
+    for (const id of BLOBS) {
+      const row = before.get(id);
+      if (row) await db.update(blobs).set({ data: row.data, updatedAt: row.updatedAt }).where(eq(blobs.id, id));
+      else await db.delete(blobs).where(eq(blobs.id, id));
+    }
+    await db.delete(notifPrefs).where(eq(notifPrefs.userName, ANN));
+    await db.delete(sites).where(eq(sites.id, SITE));
+    await db.delete(companies).where(eq(companies.id, CUST));
+    for (const id of [ANN_ID, BEN_ID, BOSS_ID]) await db.delete(users).where(eq(users.id, id));
+    invalidateOrgContext();
+  }
 }
 
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
@@ -1427,6 +1672,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgDbChecks(ok);
     await inboxOrgPipelineChecks(ok);
     await inboxOrgAiChecks(ok);
+    await inboxOrgApplyChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

@@ -135,6 +135,8 @@ export function filingFromPick(
   delete base.aiAttempts;
   delete base.aiLeaseUntil;
   if (pick.kind === "none") return { filing: base, noise: undefined };
+  // a person said "Not noise" — the model never makes it noise again
+  if (pick.kind === "noise" && ctx.prevNoise?.rescued) return { filing: base, noise: undefined };
   const needsReply = pick.needsReply && ctx.courtOwnerIsMe;
   if (pick.kind === "noise") {
     const reason = pick.reason || "Looks like a newsletter or automated mail";

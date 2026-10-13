@@ -334,7 +334,19 @@ async function nameOf(customerId: string): Promise<string> {
   return (await customerNameFor(customerId).catch(() => "")) || "this customer";
 }
 
-async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput): Promise<FilingOutcome> {
+type FilingParty = {
+  inbound: CommMessage | null;
+  /** an internal sender (or the owner) passed along an outside email */
+  externalForward: boolean;
+  fwd: ReturnType<typeof parseForward>;
+  /** the address filing (and a sender rule) keys on, lower-cased ("" = none) */
+  senderEmail: string;
+};
+
+/** Whose mail the thread is, for filing: the newest inbound sender, or the
+ *  forwarded (external) sender when a teammate / the owner passed one along,
+ *  or — on an all-outbound thread — the first outside recipient. */
+function filingParty(t: CommThread, ctx: OrgContext, owner: OrgUser | null, msgs: CommMessage[]): FilingParty {
   const inbound = [...msgs].reverse().find((m) => m.direction === "in") ?? null;
   const primary = inbound ?? msgs[msgs.length - 1];
   const pIndex = msgs.indexOf(primary);
@@ -351,6 +363,21 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
     : primary.direction === "in"
       ? senderOf(t, primary)
       : lc(firstRecipient(primary.to, ownerEmail)?.email) || lc(t.contactEmail);
+  return { inbound, externalForward, fwd, senderEmail };
+}
+
+/** The sender a correction's rule offer names ("Always file mail from …"):
+ *  the same address the filing keys on. "" when the thread has no email
+ *  messages or that address is internal. */
+export function filingSenderOf(t: CommThread, ctx: OrgContext): string {
+  const msgs = emailMessages(t);
+  if (!msgs.length) return "";
+  const email = filingParty(t, ctx, ownerOf(t, ctx), msgs).senderEmail;
+  return email && !ctx.isInternal(email) ? email : "";
+}
+
+async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput): Promise<FilingOutcome> {
+  const { inbound, externalForward, fwd, senderEmail } = filingParty(t, ctx, owner, msgs);
   const internal = internalOnly && !externalForward;
 
   const texts = [

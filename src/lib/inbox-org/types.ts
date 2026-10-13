@@ -38,7 +38,45 @@ export type Filing = {
    *  mail since" is a different newest message (a late-imported message can
    *  carry an older Gmail date, so `at` alone can't tell). */
   basis?: string;
+  /** What filing this thread changed (set when `state` becomes "filed"), so
+   *  Undo puts back exactly that and nothing a person set by hand. */
+  applied?: FilingApplied;
 };
+
+/** The thread's link fields before a filing changed them. A part that is
+ *  absent was left alone by the filing. */
+export type FilingApplied = {
+  /** the customer link (linkThread) — its previous identity fields */
+  customer?: {
+    customerId: string | null;
+    customer: string;
+    resolvedContactId: string | null;
+    resolution: "linked" | "suggested" | "ambiguous" | "unknown" | null;
+    suggestedCustomerId: string | null;
+    candidates: Array<{ customerId: string; name: string }>;
+    siteId: string | null;
+  };
+  /** the work link (setLink) — the link it replaced */
+  link?: { prev: { type: string; id: string; label?: string } | null };
+  /** the venue (setThreadSite) — the venue it replaced */
+  site?: { prev: string | null };
+  /** filing archived the thread */
+  archived?: boolean;
+};
+
+/** How a person (or a reply) acted on a filing suggestion — the filing log's
+ *  `action`, so the pilot report can compare sources. */
+export type FilingAction =
+  | "approved"
+  | "changed"
+  | "noise"
+  | "rescued"
+  | "skipped"
+  | "undone"
+  | "reply"
+  | "teammate-reply"
+  | "rule"
+  | "court-override";
 
 /** A promise read from a message (spec §7). `due` is epoch-ms (5 pm Chicago). */
 export type Promise_ = { text: string; ownerUserId: string; due: number | null; taskId?: string; messageId: string };

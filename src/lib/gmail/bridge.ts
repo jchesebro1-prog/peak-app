@@ -201,10 +201,22 @@ type Organize = (threadId: string, opts: { backlog?: boolean; log?: FilingLogEnt
  *  the cleanup) organizes the thread again. `organize` is injectable for the
  *  checks; the pipeline is loaded lazily (it pulls in users, settings,
  *  quotes and projects). */
-export async function organizeAfterImport(threadId: string, run: OrgImportRun = {}, organize?: Organize): Promise<void> {
+export async function organizeAfterImport(
+  threadId: string,
+  run: OrgImportRun = {},
+  organize?: Organize,
+  /** the thread was archived before this message un-archived it */
+  opts: { wasArchived?: boolean } = {}
+): Promise<void> {
   try {
     const fn: Organize = organize ?? (await import("@/lib/inbox-org/pipeline")).organizeThread;
-    await fn(threadId, { backlog: run.backlog, log: run.log });
+    const organized = await fn(threadId, { backlog: run.backlog, log: run.log });
+    // a teammate's reply that left the court with the customer (or nobody)
+    // archives the thread again (archive-on-reply, §4) — never on backlog
+    if (!run.backlog) {
+      const { afterImportedMessage } = await import("@/lib/inbox-org/apply");
+      await afterImportedMessage(threadId, organized, { wasArchived: opts.wasArchived });
+    }
   } catch (err) {
     console.error("[inbox-org] organize failed for", threadId, err);
   }
@@ -260,8 +272,10 @@ export async function recordMessage(
   const existing = all.find((t) => t.gmailThreadId === p.gmailThreadId);
   if (existing) {
     let statusChanged = false;
+    let wasArchived = false;
     await patchDoc<CommThread>("comms", existing.id, (d) => {
       const prevStatus = d.status;
+      wasArchived = !!d.archived;
       d.messages = (d.messages || []).concat([msg]);
       d.updatedAt = Math.max(d.updatedAt || 0, p.at);
       d.messages.sort((a, b) => (a.at || 0) - (b.at || 0));
@@ -278,7 +292,7 @@ export async function recordMessage(
       }
     });
     if (statusChanged) queueLabelSync(existing.id);
-    await organizeAfterImport(existing.id, org);
+    await organizeAfterImport(existing.id, org, undefined, { wasArchived });
     return existing.id;
   }
 

@@ -258,6 +258,44 @@ export async function linkThread(
   queueLabelSync(threadId);
 }
 
+/** #335 Undo of an inbox-organization filing — put back the identity fields
+ *  `linkThread` overwrote (the snapshot the filing took first), but only
+ *  while the thread is still linked to the customer that filing set: a
+ *  person who re-linked it since keeps their link. Queues the label mirror so
+ *  the Peak/Customers label comes off in Gmail. Returns whether it restored. */
+export async function restoreThreadIdentity(
+  threadId: string,
+  linkedTo: string,
+  prev: {
+    customerId: string | null;
+    customer: string;
+    resolvedContactId: string | null;
+    resolution: CommThread["resolution"] | null;
+    suggestedCustomerId: string | null;
+    candidates: Array<{ customerId: string; name: string }>;
+    siteId: string | null;
+  }
+): Promise<boolean> {
+  let restored = false;
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    if (d.customerId !== linkedTo) return;
+    d.customerId = prev.customerId;
+    d.customer = prev.customer;
+    d.resolvedContactId = prev.resolvedContactId;
+    if (prev.resolution) d.resolution = prev.resolution;
+    else delete d.resolution;
+    d.suggestedCustomerId = prev.suggestedCustomerId;
+    d.candidates = prev.candidates;
+    d.siteId = prev.siteId;
+    restored = true;
+  });
+  if (restored) {
+    const { queueLabelSync } = await import("./label-sync");
+    queueLabelSync(threadId);
+  }
+  return restored;
+}
+
 export type LinkThreadToNewQuoteInput = {
   customerId: string;
   customer: string;

@@ -1,6 +1,6 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { keepInInboxOn, setKeepInInboxOn } from "@/lib/stores/notif-prefs";
-import type { Filing, FilingSource, SenderRule } from "@/lib/inbox-org/types";
+import type { Filing, FilingAction, FilingSource, SenderRule } from "@/lib/inbox-org/types";
 
 /* ============================================================
    Inbox organization stores (#335, spec §5 and §8). Three settings blobs
@@ -131,6 +131,9 @@ export type FilingLogEntry = {
   workType?: string | null;
   noise?: boolean;
   userId?: string;
+  /** what a person (or a reply) did with the suggestion; absent on the
+   *  pipeline's own "suggested" entries */
+  action?: FilingAction;
 };
 
 export async function getFilingLog(): Promise<FilingLogEntry[]> {

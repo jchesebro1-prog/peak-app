@@ -11347,7 +11347,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 
 
 import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChecks, assistOutcomeChecks, assistTaskChecks, assistReplyChecks, assistEstimatePureChecks, assistEstimateDbChecks, assistReportChecks, assistKeyChecks } from "./test-assist";
-import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks } from "./test-inbox-org";
+import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks } from "./test-inbox-org";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11703,6 +11703,7 @@ seeded()
   .then(() => inboxOrgDbChecks(ok))
   .then(() => inboxOrgPipelineChecks(ok))
   .then(() => inboxOrgAiChecks(ok))
+  .then(() => inboxOrgApplyChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

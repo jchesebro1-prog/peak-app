@@ -1334,7 +1334,9 @@ export async function addMessage(
     statusChanged = t.status !== prevStatus;
     if (dir === "in") t.unread = true;
     else t.unread = false;
-    if (t.status !== "draft") t.archived = false;
+    // #335 — new inbound mail resurfaces an archived thread; my own outbound
+    // message never does (archive-on-reply takes a replied thread out).
+    if (dir === "in" && t.status !== "draft") t.archived = false;
     touch(t);
   });
   // real Gmail send happens after the optimistic write (async, gated)
@@ -1345,18 +1347,32 @@ export async function addMessage(
   return res;
 }
 
-/** Reply to a thread as an email (honours offline → Outbox). */
+/** Reply to a thread as an email (honours offline → Outbox). #335: once the
+ *  message is written (and handed to Gmail), the inbox organization step
+ *  recomputes the court and archives the thread (archive-on-reply) —
+ *  best-effort, it never fails the send. A queued (offline) reply hasn't
+ *  left yet, so it isn't archived. */
 export async function reply(
   threadId: string,
   opts: { body?: string; status?: ThreadStatus; me?: string } = {}
 ): Promise<CommThread | null> {
-  return addMessage(threadId, {
+  const res = await addMessage(threadId, {
     direction: "out",
     channel: "email",
     body: opts.body || "",
     status: opts.status,
     me: opts.me,
   });
+  if (res && res.status !== "draft" && !hasQueued(res)) {
+    try {
+      const { afterOwnReply } = await import("@/lib/inbox-org/apply");
+      await afterOwnReply(threadId);
+    } catch (err) {
+      console.error("[inbox-org] archive-on-reply failed for", threadId, err);
+    }
+    return (await get(threadId)) ?? res;
+  }
+  return res;
 }
 
 /** Reply-all — in the prototype this is a composer MODE over reply(): the Cc
@@ -1758,11 +1774,13 @@ export async function assign(
 
 export async function setLink(
   threadId: string,
-  link?: CommLink | null
+  link?: CommLink | null,
+  /** #335 — a filing (approve / reply / undo) links quietly (see QuietOpt) */
+  opts: QuietOpt = {}
 ): Promise<CommThread | null> {
   const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     t.link = link || null;
-    touch(t);
+    if (!opts.quiet) touch(t);
   });
   if (res) queuePeakLabelSync(threadId);
   return res;
