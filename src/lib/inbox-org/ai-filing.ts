@@ -122,23 +122,25 @@ export function sanitizeFiling(raw: FilingAnswer | null | undefined, candidates:
 
 /** The filing (and noise flag) an AI pick writes over the pending rule
  *  filing `prev`. `undefined` noise = leave the thread's noise flag alone.
- *  AI noise is moved out of the inbox only when strong (and the caller only
- *  runs this for pilot owners); a weak noise guess is a tag. */
+ *  AI noise is moved out of the inbox only when strong AND no customer was
+ *  matched or guessed for the thread (the caller only runs this for pilot
+ *  owners); otherwise it is a tag the person reviews. */
 export function filingFromPick(
   pick: FilingPick,
   prev: Filing,
-  ctx: { now: number; runId: string; courtOwnerIsMe: boolean; prevNoise: NoiseFlag | null | undefined }
+  ctx: { now: number; runId: string; courtOwnerIsMe: boolean; prevNoise: NoiseFlag | null | undefined; matchedCustomerId?: string | null }
 ): { filing: Filing; noise: NoiseFlag | null | undefined } {
   const base: Filing = { ...prev, at: ctx.now };
   delete base.pendingAi;
   delete base.aiAttempts;
+  delete base.aiLeaseUntil;
   if (pick.kind === "none") return { filing: base, noise: undefined };
   const needsReply = pick.needsReply && ctx.courtOwnerIsMe;
   if (pick.kind === "noise") {
     const reason = pick.reason || "Looks like a newsletter or automated mail";
     return {
       filing: { ...base, noise: true, work: null, source: "ai", strength: pick.strength, reason, needsReply: false, runId: ctx.runId },
-      noise: { flagged: true, reason, moved: pick.strength === "strong" },
+      noise: { flagged: true, reason, moved: pick.strength === "strong" && !ctx.matchedCustomerId && !prev.customerId },
     };
   }
   const c = pick.candidate;

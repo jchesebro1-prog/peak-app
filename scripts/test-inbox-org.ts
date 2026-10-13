@@ -36,9 +36,9 @@ import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
 import { buildFilingUserText, candidateLine, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
 import { aiCourtOverride, applyPromises, PROMISE_MAX_AGE_MS, sanitizeCourt } from "@/lib/inbox-org/ai-court";
-import { MAX_AI_ATTEMPTS, runAiPass } from "@/lib/inbox-org/ai-pass";
+import { callWorstCaseMs, MAX_AI_ATTEMPTS, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
-import { listDocsByField } from "@/db/doc-store";
+import { listDocsByField, upsertDocs } from "@/db/doc-store";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import { listRunsByMonth } from "@/lib/stores/assist-runs";
 import { monthKeyChicago } from "@/lib/assist/config";
@@ -1060,8 +1060,11 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const CUST = fixtureId(335, "ai-cust");
   const QUOTE = fixtureId(335, "ai-quote");
   await createFixture("quotes", { id: QUOTE, name: "Stage curtain", customer: "AI School", customerId: CUST, quoteType: "system", status: "sent", updatedAt: T0 });
-  const run = (provider: AssistProvider, o: { budgetMs?: number; ctx?: typeof pilot; clock?: () => number } = {}) =>
-    runAiPass({ onlyUserId: ARI_ID, budgetMs: o.budgetMs }, { ctx: o.ctx ?? pilot, run: { provider }, now: NOW, clock: o.clock });
+  const run = (provider: AssistProvider, o: { budgetMs?: number; deadlineMs?: number; ctx?: typeof pilot; clock?: () => number; fallback?: AssistProvider; ownerIds?: string[] } = {}) =>
+    runAiPass(
+      { ownerIds: o.ownerIds ?? [ARI_ID], budgetMs: o.budgetMs, deadlineMs: o.deadlineMs },
+      { ctx: o.ctx ?? pilot, run: { provider, ...(o.fallback ? { fallback: o.fallback } : {}) }, now: NOW, clock: o.clock }
+    );
   const tasksOn = async (threadId: string) => {
     const rows = await listDocsByField<TaskRecord>("tasks", "threadId", [threadId]);
     rows.forEach((t) => registerFixture("tasks", t.id));
@@ -1094,13 +1097,18 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const tB = await read(bogus);
   ok(tB.filing?.source === "identity" && tB.filing.customerId === CUST && tB.filing.strength === "weak" && !tB.filing.pendingAi, "ai pass: an out-of-list id is dropped — the rule suggestion stays, pending cleared");
 
-  /* 3. "noise" moves the thread for a pilot owner */
-  const nz = await mk("noise", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "news@ai-school.test", messages: [msg({ fromEmail: "news@ai-school.test", body: "Our October newsletter" })] });
+  /* 3. "noise" moves the thread for a pilot owner — only with no customer guessed */
+  const nz = await mk("noise", { contactEmail: "news@ai-letters.test", messages: [msg({ fromEmail: "news@ai-letters.test", body: "Our October newsletter" })] });
   await organizeThread(nz, { ctx: pilot, backlog: true });
   await run(routedProvider({ file: fileAns("noise") }));
   const tN = await read(nz);
-  ok(tN.filing?.noise === true && tN.filing.source === "ai" && tN.noise?.flagged === true && tN.noise.moved === true && tN.archived === true, "ai pass: strong AI noise moves a pilot owner's thread (flagged, moved, archived)");
+  ok(tN.filing?.noise === true && tN.filing.source === "ai" && tN.noise?.flagged === true && tN.noise.moved === true && tN.archived === true, "ai pass: strong AI noise moves a pilot owner's thread with no customer guess (flagged, moved, archived)");
   ok((await threadsIn("personal", "noise", ARI)).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
+  const nzGuess = await mk("noise-guessed", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "news@ai-school.test", messages: [msg({ fromEmail: "news@ai-school.test", body: "Our October newsletter" })] });
+  await organizeThread(nzGuess, { ctx: pilot, backlog: true });
+  await run(routedProvider({ file: fileAns("noise") }));
+  const tNg = await read(nzGuess);
+  ok(tNg.filing?.noise === true && tNg.noise?.flagged === true && tNg.noise.moved === false && !tNg.archived && tNg.filing.customerId === CUST, "ai pass: strong AI noise on a thread with a guessed customer is tag-only (stays in the inbox, guess kept)");
 
   /* 3b. tag-only rule noise on a weak guess: the AI says it's the customer's */
   const tagged = await mk("tagged", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "rfp@ai-school.test", messages: [msg({ fromEmail: "rfp@ai-school.test", bulk: true, body: "New RFP posted" })] });
@@ -1219,33 +1227,139 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const tF = await read(flaky);
   ok(!tF.filing?.pendingAi && tF.filing?.aiAttempts === MAX_AI_ATTEMPTS && tF.filing?.source === "identity", "ai pass: after MAX_AI_ATTEMPTS failures it gives up, the rule suggestion stays");
 
-  /* 11. the budget stops the pass; oldest first; the rest resumes next pass */
+  /* 11. time: budget window, the caller's deadline, oldest first, resume */
   const b: string[] = [];
-  for (const slug of ["budget-c", "budget-a", "budget-b"]) b.push(await mk(slug, { resolution: "suggested", suggestedCustomerId: CUST }));
-  // make "budget-a" the thread with the oldest newest-message
-  await patchDoc<CommThread>("comms", b[1], (d) => {
-    d.messages = d.messages.map((m) => ({ ...m, at: T0 - 86_400_000 }));
-  });
+  for (const slug of ["time-a", "time-b", "time-c", "time-d"]) b.push(await mk(slug, { resolution: "suggested", suggestedCustomerId: CUST }));
   for (const id of b) await organizeThread(id, { ctx: pilot, backlog: true });
+  ok(callWorstCaseMs("file", false) === 30_000 && callWorstCaseMs("file", true) === 60_000, "ai pass: a call's worst case is 30 s, doubled when a local provider can fall back");
+  ok(passHasFallback({ ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini", ANTHROPIC_API_KEY: "k" }) && !passHasFallback({ ANTHROPIC_API_KEY: "k" }) && !passHasFallback({ ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini" }), "ai pass: fallback only for the local provider with a Claude key");
   let fake = 0;
-  const callsB: ProviderRequest[] = [];
-  const rB = await run(routedProvider({ file: fileAns(QUOTE) }, { calls: callsB, onCall: () => (fake += 25_000) }), { budgetMs: 20_000, clock: () => fake });
-  ok(rB.stoppedByBudget && callsB.length === 1 && rB.looked === 1, "ai pass: the budget stops the pass (no new call once ~20 s have passed)");
-  ok((await read(b[1])).filing?.source === "ai" && (await read(b[0])).filing?.pendingAi === true && (await read(b[2])).filing?.pendingAi === true, "ai pass: the oldest thread went first; the rest stay pending");
-  const rB2 = await run(routedProvider({ file: fileAns(QUOTE) }));
-  ok(!rB2.stoppedByBudget && rB2.calls === 2 && !(await read(b[0])).filing?.pendingAi && !(await read(b[2])).filing?.pendingAi, "ai pass: the next pass resumes the rest");
+  const callsT: ProviderRequest[] = [];
+  const tick = (ms: number) => routedProvider({ file: fileAns(QUOTE) }, { calls: callsT, onCall: () => (fake += ms) });
+  const rT0 = await run(tick(10_000), { deadlineMs: 30_000, clock: () => fake });
+  ok(rT0.calls === 0 && rT0.stoppedByBudget && b.every(Boolean) && (await read(b[0])).filing?.pendingAi === true, "ai pass: no call starts when the time left before the deadline is under the call timeout (+5 s)");
+  const rTf = await run(tick(10_000), { deadlineMs: 50_000, clock: () => fake, fallback: routedProvider({}) });
+  ok(rTf.calls === 0, "ai pass: with a fallback provider a call needs twice the timeout before the deadline");
+  fake = 0;
+  const rT1 = await run(tick(10_000), { deadlineMs: 50_000, budgetMs: 100_000, clock: () => fake });
+  ok(rT1.calls === 2 && rT1.stoppedByBudget && fake === 20_000, "ai pass: the deadline is honoured — calls stop once under 35 s is left");
+  ok((await read(b[0])).filing?.source === "ai" && (await read(b[1])).filing?.source === "ai" && (await read(b[2])).filing?.pendingAi === true, "ai pass: oldest threads first; the rest stay pending");
+  fake = 0;
+  const rT2 = await run(tick(25_000), { budgetMs: 20_000, clock: () => fake });
+  ok(rT2.calls === 1 && rT2.stoppedByBudget && (await read(b[2])).filing?.source === "ai" && (await read(b[3])).filing?.pendingAi === true, "ai pass: no new call once the ~20 s budget has passed");
+  const rT3 = await run(routedProvider({ file: fileAns(QUOTE) }));
+  ok(!rT3.stoppedByBudget && rT3.calls === 1 && !(await read(b[3])).filing?.pendingAi, "ai pass: the next pass resumes the rest");
+
+  /* 13. leases + the promisesFor marker: concurrent passes make tasks once */
+  const dup = await mk("dup", {
+    customerId: CUST,
+    customer: "AI School",
+    resolution: "linked",
+    resolvedContactId: "ct-ai",
+    messages: [msg({ body: "When can we expect pricing?" }), msg({ fromEmail: "dana@peaksystemsgroup.com", author: "Dana", to: "pat@ai-school.test", body: "I'll get it to you Thursday." })],
+  });
+  await organizeThread(dup, { ctx: pilot });
+  ok((await read(dup)).court?.pendingAi === true, "ai lease: (setup) court pending");
+  const callsD: ProviderRequest[] = [];
+  const say = (text: string) => routedProvider({ promise: courtAns({ owner: "customer", promises: [{ text, ownerUserId: DANA_ID, dueText: "Thursday" }] }) }, { calls: callsD });
+  const [rd1, rd2] = await Promise.all([run(say("Send Pat the pricing")), run(say("Get pricing over to Pat"))]);
+  const dTasks = await tasksOn(dup);
+  const dLast = (await read(dup)).messages.slice(-1)[0];
+  ok(dTasks.length === 1 && callsD.length === 1 && rd1.tasks + rd2.tasks === 1, "ai lease: two passes at once on one thread (different wording) → one call, one task");
+  ok((await read(dup)).court?.promisesFor === dLast.id && !(await read(dup)).court?.aiLeaseUntil && !(await read(dup)).court?.pendingAi, "ai lease: the court records promisesFor the message; the lease is released");
+  await patchDoc<CommThread>("comms", dup, (d) => {
+    d.court = { ...d.court!, pendingAi: true };
+  });
+  await run(say("Email Pat the price list"));
+  ok((await tasksOn(dup)).length === 1 && !(await read(dup)).court?.pendingAi, "ai lease: a re-run after the marker creates nothing");
+  const held = await mk("leased", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(held, { ctx: pilot, backlog: true });
+  await patchDoc<CommThread>("comms", held, (d) => {
+    d.filing = { ...d.filing!, aiLeaseUntil: NOW + 60_000 };
+  });
+  const callsL: ProviderRequest[] = [];
+  await run(routedProvider({ file: fileAns(QUOTE) }, { calls: callsL }));
+  ok(callsL.length === 0 && (await read(held)).filing?.pendingAi === true, "ai lease: a live lease is skipped (no call)");
+  await patchDoc<CommThread>("comms", held, (d) => {
+    d.filing = { ...d.filing!, aiLeaseUntil: NOW - 1 };
+  });
+  await run(routedProvider({ file: fileAns(QUOTE) }, { calls: callsL }));
+  ok(callsL.length === 1 && (await read(held)).filing?.source === "ai" && !(await read(held)).filing?.aiLeaseUntil, "ai lease: an expired lease is taken over");
+
+  /* 14. an exception during / after the call counts as an attempt */
+  const boom = await mk("boom", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(boom, { ctx: pilot, backlog: true });
+  const thrower: AssistProvider = {
+    name: "fake",
+    async complete() {
+      throw new Error("socket hang up");
+    },
+  };
+  const rBoom = await run(thrower);
+  const tBoom = await read(boom);
+  ok(rBoom.failed === 1 && tBoom.filing?.pendingAi === true && tBoom.filing.aiAttempts === 1 && !tBoom.filing.aiLeaseUntil, "ai pass: an exception around the call counts an attempt and releases the lease");
+
+  /* 15. stuck rows are cleared */
+  const orphan = await mk("orphan", { mailboxUser: "TEST335 Nobody", resolution: "suggested", suggestedCustomerId: CUST });
+  await patchDoc<CommThread>("comms", orphan, (d) => {
+    d.filing = { customerId: CUST, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0, pendingAi: true };
+  });
+  await run(routedProvider({ file: fileAns(QUOTE) }));
+  ok(!(await read(orphan)).filing?.pendingAi, "ai stuck: a pending row nobody can own is cleared");
+  const stale = await mk("stale-basis", {});
+  await patchDoc<CommThread>("comms", stale, (d) => {
+    d.filing = { customerId: null, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "filed", at: T0, pendingAi: true, basis: "gone" };
+  });
+  const staleOpen = await mk("stale-open", {});
+  await patchDoc<CommThread>("comms", staleOpen, (d) => {
+    d.filing = { customerId: null, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0, pendingAi: true, basis: "gone" };
+  });
+  await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "customer" }) }));
+  const tStale = await read(stale);
+  const tStaleOpen = await read(staleOpen);
+  ok(!tStale.filing?.pendingAi && tStale.filing?.state === "filed", "ai stuck: a stale-basis row the pipeline can't refresh (filed) is cleared");
+  ok(tStaleOpen.filing?.basis === tStaleOpen.messages.slice(-1)[0].id && !tStaleOpen.filing?.pendingAi, "ai stuck: a stale-basis row is re-organized onto the newest message, then read");
+
+  /* 16. one user's backlog doesn't starve another */
+  const ANN = "TEST335 Ann";
+  const ANN_ID = "TEST335-u-ann";
+  const both = buildOrgContext({ users: [...users, { id: ANN_ID, name: ANN, email: "ann@peaksystemsgroup.com", googleEmail: null }], assist: { users: [ARI_ID, ANN_ID], features: allOn, capUsd: 200 }, env });
+  // drain Ari's queue so the only thing of Ari's left is the one below
+  await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "customer" }) }));
+  const backlog: CommThread[] = [];
+  for (let i = 0; i < 400; i++) {
+    const id = fixtureId(335, "ai-ann-" + i);
+    registerFixture("comms", id);
+    const m = { id: "ann-m" + i, at: T0 - 30 * 86_400_000 + i, direction: "in", channel: "email", author: "Pat", body: "old", fromEmail: "pat@ai-school.test" } as CommMessage;
+    backlog.push({
+      id, mailbox: "personal", mailboxUser: ANN, unread: false, archived: false, customerId: null, customer: "", contactName: "Pat", contactEmail: "pat@ai-school.test",
+      subject: "Old", channel: "email", status: "waiting_us", assignedTo: "", link: null, messages: [m], createdAt: T0 - 40 * 86_400_000, updatedAt: T0 - 40 * 86_400_000 + i,
+      filing: { customerId: CUST, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0, pendingAi: true, basis: m.id },
+    } as unknown as CommThread);
+  }
+  await upsertDocs("comms", backlog);
+  const bThread = await mk("not-starved", { resolution: "suggested", suggestedCustomerId: CUST });
+  await organizeThread(bThread, { ctx: both, backlog: true });
+  fake = 0;
+  await run(routedProvider({ file: fileAns(QUOTE) }, { onCall: () => (fake += 10_000) }), { ctx: both, ownerIds: [ANN_ID, ARI_ID], clock: () => fake });
+  ok((await read(bThread)).filing?.source === "ai", "ai queue: user A's 400 backlog rows don't block user B's pending thread");
 
   // every assist_runs row this section made goes with the fixtures
   for (const r of await listRunsByMonth(monthKeyChicago(NOW))) if (r.contextRef.startsWith("thread:" + fixtureId(335, "ai-"))) registerFixture("assist_runs" as never, r.id);
 
-  /* 12. the sync hook */
+  /* 12. the sync hook: one pass per poll, after every mailbox, deadline-bound */
   const bridgeSrc = readFileSync("src/lib/gmail/bridge.ts", "utf8");
   const syncBody = bridgeSrc.slice(bridgeSrc.indexOf("async function syncMailbox("), bridgeSrc.indexOf("async function currentHistoryId("));
+  const pollBody = bridgeSrc.slice(bridgeSrc.indexOf("export async function pollInbound("));
+  ok(!syncBody.includes("runAiPass"), "ai hook: no AI pass per mailbox");
   ok(
-    /try \{\s*const owner = userIdOfKey\(key\);\s*if \(owner\) aiChanged = \(await \(await import\("@\/lib\/inbox-org\/ai-pass"\)\)\.runAiPass\(\{ onlyUserId: owner \}\)\)\.changed;\s*\} catch/.test(syncBody) &&
-      syncBody.indexOf("runAiPass") > syncBody.indexOf("reconcilePeakLabelsForMailbox"),
-    "ai hook: syncMailbox runs the AI pass last, for the mailbox owner, in its own try"
+    pollBody.indexOf("runAiPass({ ownerIds: [...owners], deadlineMs: opts.deadlineMs ?? started + POLL_AI_DEADLINE_MS })") > pollBody.indexOf("for (const key of keys)") &&
+      /opts\.aiPass !== false && owners\.size/.test(pollBody) &&
+      /try \{\s*const \{ runAiPass \}/.test(pollBody),
+    "ai hook: pollInbound runs ONE pass after all mailboxes, for the owners it synced, inside the caller's deadline, in its own try"
   );
+  ok(readFileSync("src/app/api/gmail/sync/route.ts", "utf8").includes("checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false })"), "ai hook: the 60 s cron route runs no AI pass");
+  ok(readFileSync("src/lib/stores/comms.ts", "utf8").includes("await pollInbound(eligible, maxAgeMs, opts)"), "ai hook: checkMailIfStale passes the options through");
 }
 
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {

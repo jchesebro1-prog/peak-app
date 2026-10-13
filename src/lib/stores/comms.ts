@@ -5,6 +5,7 @@ import {
   insertWithPrefixedId,
   listDocs,
   listDocsWithFlag,
+  casDocKey,
   patchDoc,
   patchDocKey,
   searchDocs,
@@ -1647,7 +1648,9 @@ export async function checkMail(): Promise<string | null> {
  * mode: the canned queue only moves on the manual button.
  */
 export async function checkMailIfStale(
-  maxAgeMs: number
+  maxAgeMs: number,
+  /** #335 — passed to pollInbound: the AI pass's deadline, or no pass */
+  opts: { deadlineMs?: number; aiPass?: boolean } = {}
 ): Promise<{ ran: boolean; changed: boolean; id: string | null }> {
   const none = { ran: false, changed: false, id: null };
   if (!gmailBridgeActive()) return none;
@@ -1660,7 +1663,7 @@ export async function checkMailIfStale(
     // with OUR staleness window — mailboxes synced more recently are skipped,
     // so overlapping clients/ticks are cheap and can't double-sync a slot.
     const { pollInbound } = await import("@/lib/gmail/bridge");
-    const r = await pollInbound(eligible, maxAgeMs);
+    const r = await pollInbound(eligible, maxAgeMs, opts);
     return { ran: r.ran, changed: r.changed, id: r.id };
   } catch (err) {
     console.error("[gmail] background sync failed:", err);
@@ -1786,18 +1789,48 @@ export async function setOrg(
 }
 
 /** #335 — threads the AI pass still has to read (`filing.pendingAi` or
- *  `court.pendingAi`), filtered in SQL, least recently updated first. The
- *  caller drops deleted-folder / draft / shared threads and orders by the
- *  newest message. */
-export async function pendingAiThreads(limit = 300): Promise<CommThread[]> {
+ *  `court.pendingAi`), filtered in SQL, least recently updated first, with
+ *  the limit applied AFTER the owner filter: `owner` keeps one owner's
+ *  threads (personal mailbox user name, compared trimmed + lower-cased, or
+ *  their Gmail account key); `notOwners` keeps threads belonging to none of
+ *  the given owners (the unresolvable-owner sweep). The caller re-checks the
+ *  owner and drops deleted-folder / draft / shared threads. */
+export async function pendingAiThreads(
+  opts: { limit?: number; owner?: { names: string[]; keys: string[] }; notOwners?: { names: string[]; keys: string[] } } = {}
+): Promise<CommThread[]> {
+  const who = opts.owner ?? opts.notOwners;
   return listDocsWithFlag<CommThread>(
     "comms",
     [
       ["filing", "pendingAi"],
       ["court", "pendingAi"],
     ],
-    { limit, orderByNumericAsc: "updatedAt" }
+    {
+      limit: opts.limit ?? 300,
+      orderByNumericAsc: "updatedAt",
+      ...(who
+        ? {
+            fieldIn: [
+              { field: "mailboxUser", values: who.names.map((n) => n.trim().toLowerCase()).filter(Boolean), lower: true },
+              { field: "gmailAccountKey", values: who.keys.filter(Boolean) },
+            ],
+            negateFieldIn: !opts.owner,
+          }
+        : {}),
+    }
   );
+}
+
+/** #335 — compare-and-set one organization key (the AI pass's lease and
+ *  result writes): writes `next` only if the stored value still equals
+ *  `expected`. Quiet (no updatedAt bump), like setOrg. */
+export async function casOrg<K extends "filing" | "court">(
+  threadId: string,
+  key: K,
+  expected: CommThread[K] | undefined,
+  next: CommThread[K] | undefined
+): Promise<boolean> {
+  return casDocKey("comms", threadId, key, expected, next);
 }
 
 export async function update(

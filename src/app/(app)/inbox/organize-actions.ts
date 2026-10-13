@@ -14,7 +14,8 @@ export async function runAiPassAction(): Promise<
   const me = await requireUser();
   const ctx = await loadOrgContext();
   if (!isOrgPilot(me.id, "file", ctx) && !isOrgPilot(me.id, "promise", ctx)) return { ok: false, error: "Assist isn't enabled for you." };
-  const r = await runAiPass({ onlyUserId: me.id }, { ctx });
+  // leases make it safe beside a sync pass running for the same threads
+  const r = await runAiPass({ ownerIds: [me.id] }, { ctx });
   if (r.changed) revalidatePath("/inbox");
   return { ok: true, looked: r.looked, filed: r.filed, courts: r.courts, tasks: r.tasks, more: r.stoppedByBudget };
 }

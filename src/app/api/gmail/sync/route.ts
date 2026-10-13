@@ -57,7 +57,11 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (req.headers.get("authorization") !== "Bearer " + secret) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS);
+  // #335 — no Inbox-organization AI pass here: a call needs ~35 s and this
+  // route's 60 s is already shared by the import (40 s budget) and the
+  // riders below. The pass runs on the Inbox tick / Send-Receive and the
+  // server timer instead; pending threads simply wait for one of those.
+  const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false });
 
   let googleTasks: Awaited<ReturnType<typeof syncAllGoogleTasks>> | { error: string };
   try {

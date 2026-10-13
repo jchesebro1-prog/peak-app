@@ -477,6 +477,17 @@ function canon(v: unknown): unknown {
   );
 }
 
+/** A still-pending record re-computed with no new mail keeps the AI pass's
+ *  bookkeeping (attempt count, a live lease), so re-organizing never resets
+ *  the attempt cap or breaks a pass that holds the lease. */
+function aiBookkeeping(prev: { pendingAi?: boolean; aiAttempts?: number; aiLeaseUntil?: number } | undefined, sameMail: boolean) {
+  if (!prev?.pendingAi || !sameMail) return {};
+  return {
+    ...(prev.aiAttempts ? { aiAttempts: prev.aiAttempts } : {}),
+    ...(prev.aiLeaseUntil ? { aiLeaseUntil: prev.aiLeaseUntil } : {}),
+  };
+}
+
 /* ---- the pipeline -------------------------------------------------------------- */
 
 export const COURT_STATUS: Record<CourtOwner, ThreadStatus> = {
@@ -563,7 +574,8 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
       basis,
       // a newer message drops the old promise — the AI reading re-derives it
       ...(prevCourt?.promise && !courtNew ? { promise: prevCourt.promise } : {}),
-      ...(pending ? { pendingAi: true } : {}),
+      ...(prevCourt?.promisesFor && !courtNew ? { promisesFor: prevCourt.promisesFor } : {}),
+      ...(pending ? { pendingAi: true, ...aiBookkeeping(prevCourt, !courtNew) } : {}),
     };
     court = prevCourt && sameRecord(prevCourt, next) ? prevCourt : next;
   }
@@ -587,7 +599,7 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
         state: out.quiet ? "skipped" : "suggested",
         at: now,
         basis,
-        ...(pendingAi ? { pendingAi: true } : {}),
+        ...(pendingAi ? { pendingAi: true, ...aiBookkeeping(prevFiling, !filingNew) } : {}),
       };
       filing = prevFiling && sameRecord(prevFiling, next) ? prevFiling : next;
       const resolved = !!(next.customerId || next.work || next.noise);

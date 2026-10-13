@@ -31,6 +31,9 @@ export type Filing = {
   /** failed AI attempts on this basis; the pass gives up (clears
    *  `pendingAi`) at MAX_AI_ATTEMPTS. New mail starts over. */
   aiAttempts?: number;
+  /** epoch-ms: an AI pass holds this thread until then (no second pass
+   *  calls the model for it meanwhile) */
+  aiLeaseUntil?: number;
   /** id of the thread's newest message when this filing was computed — "new
    *  mail since" is a different newest message (a late-imported message can
    *  carry an older Gmail date, so `at` alone can't tell). */
@@ -51,6 +54,12 @@ export type Court = {
   pendingAi?: boolean;
   /** see `Filing.aiAttempts` */
   aiAttempts?: number;
+  /** see `Filing.aiLeaseUntil` */
+  aiLeaseUntil?: number;
+  /** the message id whose promises were already turned into tasks —
+   *  written BEFORE the tasks are created, so a re-run (or a second pass)
+   *  never makes them twice */
+  promisesFor?: string;
   /** id of the thread's newest message when this court was set (see
    *  `Filing.basis`). An override / AI court sticks until it changes. */
   basis?: string;

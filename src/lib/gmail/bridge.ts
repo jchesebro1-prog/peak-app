@@ -809,16 +809,7 @@ async function syncMailbox(
   } catch (err) {
     console.error("[gmail] dormant label reconcile failed for", key, err);
   }
-  // #335 — the time-boxed AI pass (≈20 s) over this mailbox owner's
-  // pendingAi threads, after the import committed; never fails the sync.
-  let aiChanged = false;
-  try {
-    const owner = userIdOfKey(key);
-    if (owner) aiChanged = (await (await import("@/lib/inbox-org/ai-pass")).runAiPass({ onlyUserId: owner })).changed;
-  } catch (err) {
-    console.error("[inbox-org] AI pass failed for", key, err);
-  }
-  return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged || aiChanged };
+  return { ran: true, last, changed: last !== null || flips > 0 || labelsChanged };
 }
 
 /** Read the persisted Gmail history cursor for a mailbox. */
@@ -840,6 +831,20 @@ async function currentHistoryId(key: MailboxKey): Promise<string | null> {
  *  user's click) started syncing seconds ago instead of racing it. */
 const MANUAL_CLAIM_AGE_MS = 10_000;
 
+/** #335 — the AI pass's hard deadline when the caller names none, measured
+ *  from the start of the poll: inside the Inbox page's 300 s maxDuration
+ *  (the manual Send/Receive and the client auto-sync are its server
+ *  actions), with room to answer. The instrumentation timer has no limit. */
+export const POLL_AI_DEADLINE_MS = 240_000;
+
+export type PollOptions = {
+  /** hard wall clock (epoch-ms) for the AI pass — the caller's route limit */
+  deadlineMs?: number;
+  /** false = no AI pass on this poll (the 60 s cron, whose budget its
+   *  riders share) */
+  aiPass?: boolean;
+};
+
 /** Poll connected mailboxes — all of them (manual path, 10s claim guard) or a
  *  given subset with a caller-chosen claim window (the auto path passes its
  *  staleness threshold, D73). Each mailbox is claimed atomically right before
@@ -848,20 +853,39 @@ const MANUAL_CLAIM_AGE_MS = 10_000;
  *  mailbox actually ran, and whether anything changed. */
 export async function pollInbound(
   onlyKeys?: MailboxKey[],
-  claimMinAgeMs: number = MANUAL_CLAIM_AGE_MS
+  claimMinAgeMs: number = MANUAL_CLAIM_AGE_MS,
+  opts: PollOptions = {}
 ): Promise<{ ran: boolean; id: string | null; changed: boolean }> {
+  const started = Date.now();
   const keys = onlyKeys ?? (await connectedMailboxKeys());
   let ran = false;
   let last: string | null = null;
   let changed = false;
+  const owners = new Set<string>();
   for (const key of keys) {
     try {
       const r = await syncMailbox(key, claimMinAgeMs);
-      if (r.ran) ran = true;
+      if (r.ran) {
+        ran = true;
+        const uid = userIdOfKey(key);
+        if (uid) owners.add(uid);
+      }
       if (r.last) last = r.last;
       if (r.changed) changed = true;
     } catch (err) {
       console.error("[gmail] mailbox sync failed for", key, err);
+    }
+  }
+  // #335 — ONE time-boxed AI pass after every mailbox's import committed,
+  // for the owners whose mailboxes this poll actually synced, inside what is
+  // left of the caller's deadline. Never fails the poll.
+  if (opts.aiPass !== false && owners.size) {
+    try {
+      const { runAiPass } = await import("@/lib/inbox-org/ai-pass");
+      const ai = await runAiPass({ ownerIds: [...owners], deadlineMs: opts.deadlineMs ?? started + POLL_AI_DEADLINE_MS });
+      if (ai.changed) changed = true;
+    } catch (err) {
+      console.error("[inbox-org] AI pass failed", err);
     }
   }
   return { ran, id: last, changed };

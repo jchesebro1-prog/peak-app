@@ -1,32 +1,51 @@
 /**
- * Inbox organization §8 — the time-boxed AI pass. Runs AFTER the Gmail import
- * commits (end of `syncMailbox`) and from the Organize view's button: picks
- * up threads the rule pipeline marked `filing.pendingAi` / `court.pendingAi`,
- * oldest newest-message first, and runs the Haiku filing step (`file`) and
- * the court / promise reading (`promise`) through `runAssist` (gate, cap,
- * rate limit, logging to assist_runs, zod validation).
+ * Inbox organization §8 — the time-boxed AI pass. Runs once per Gmail poll,
+ * AFTER every mailbox's import committed (`pollInbound`), and from the
+ * Organize view's button: picks up threads the rule pipeline marked
+ * `court.pendingAi` / `filing.pendingAi` and runs the Haiku court / promise
+ * reading (`promise`) and filing step (`file`) through `runAssist` (gate,
+ * cap, rate limit, logging to assist_runs, zod validation).
  *
- *  - Stops starting new calls once `budgetMs` (≈20 s) has passed; whatever is
- *    left keeps `pendingAi` and resumes on the next sync.
- *  - An owner the Assist gate refuses for that feature (not in the pilot, no
- *    key, kill switch, feature off) has `pendingAi` cleared with no call.
- *  - A failed run (error, refusal, unreadable answer) counts an attempt on
- *    the field (`aiAttempts`) and stays pending; at MAX_AI_ATTEMPTS it gives
- *    up. A run refused before any call (spend cap, rate limit) is not an
- *    attempt: that owner + feature is skipped for the rest of the pass.
- *  - Every write re-reads the thread and only lands if the thread still sits
- *    on the same newest message and is still pending (new mail in between
- *    means the pipeline recomputed it).
+ *  - Time: the caller passes a hard `deadlineMs` (its route's limit). A call
+ *    starts only inside the `budgetMs` window (≈20 s) AND when the time left
+ *    before the deadline covers the call's worst case (timeout × tries, ×2
+ *    when a local provider can fall back to Claude) plus a 5 s margin.
+ *    Whatever is left keeps `pendingAi` and resumes next time.
+ *  - Queue: per owner, filtered in SQL with the limit after the owner filter
+ *    (one user's backlog can't starve another), live work first (court /
+ *    promise reads, then filing), oldest first within each, owners
+ *    interleaved. Rows nobody can own, deleted-folder / draft / shared
+ *    threads, threads with no mail, and records whose basis isn't the newest
+ *    message even after re-organizing are cleared instead of staying pending.
+ *  - Lease: before a call the record is stamped `aiLeaseUntil` (now + 2 min)
+ *    by an atomic compare-and-set; a second pass (or the Organize button)
+ *    skips a live lease. Every later write is a compare-and-set on the value
+ *    this pass wrote, so new mail in between (the pipeline rewrote it)
+ *    drops the stale result.
+ *  - Promises: `court.promisesFor = messageId` is written (compare-and-set)
+ *    BEFORE the tasks are made, and a court already carrying it for the
+ *    newest message makes none. A process killed between the marker and the
+ *    task writes drops those tasks rather than duplicating them.
+ *  - An owner the Assist gate refuses (not in the pilot, no key, kill switch,
+ *    feature off) has `pendingAi` cleared with no call. A failed run — or an
+ *    exception after the call — counts an attempt (`aiAttempts`); at
+ *    MAX_AI_ATTEMPTS it gives up. A run refused before any call (spend cap,
+ *    rate limit) is not an attempt: that owner + feature is skipped for the
+ *    rest of the pass.
  *  - Court `pendingAi` is never set on backlog mail (the pipeline's
  *    `backlog` flag), so promise-tasks never come from the 90-day import or
  *    the cleanup; `applyPromises` also refuses mail older than 7 days.
  * Never throws.
  */
-import { assistGate, chicagoToday } from "@/lib/assist/config";
+import { assistConfigured, assistGate, chicagoToday } from "@/lib/assist/config";
 import { threadBlock, type PromptMessage } from "@/lib/assist/features/thread-text";
+import { slotWorstCaseMs } from "@/lib/assist/models";
 import { runAssist, type RunDeps } from "@/lib/assist/run";
+import type { Env } from "@/lib/assist/types";
+import { personalKey } from "@/lib/gmail/config";
 import {
   archive,
+  casOrg,
   get as getThread,
   pendingAiThreads,
   setOrg,
@@ -45,20 +64,52 @@ import {
   type CandidateCache,
 } from "./ai-filing";
 import { aiCourtOverride, applyPromises, buildCourtUserText, COURT_SYSTEM, CourtSchema, sanitizeCourt, type AuthorNote } from "./ai-court";
-import { COURT_STATUS, emailMessages, loadOrgContext, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
+import { COURT_STATUS, emailMessages, loadOrgContext, organizeThread, ownerOf, roleOf, senderOf, type OrgContext, type OrgUser } from "./pipeline";
 import type { Court, Filing } from "./types";
 
+/** The window in which the pass may START calls (spec §8: ~20 s per pass). */
 export const AI_PASS_BUDGET_MS = 20_000;
+/** Kept free before the caller's deadline after a call's worst case. */
+export const AI_CALL_MARGIN_MS = 5_000;
+/** How long a pass holds a thread it is calling the model for. */
+export const AI_LEASE_MS = 120_000;
 export const MAX_AI_ATTEMPTS = 3;
-/** Threads read per pass at most (the budget normally stops it first). */
-export const AI_PASS_MAX_THREADS = 300;
+/** Pending threads read per owner per pass (the budget normally stops first). */
+export const AI_PASS_MAX_PER_OWNER = 100;
+/** Unownable pending rows cleared per pass. */
+export const AI_PASS_SWEEP_LIMIT = 50;
+
+type Feature = "file" | "promise";
+
+/** The longest one call can take: the slot's timeout × tries, doubled when a
+ *  local provider can fall back to Claude. */
+export function callWorstCaseMs(slot: Feature, hasFallback: boolean): number {
+  return slotWorstCaseMs(slot) * (hasFallback ? 2 : 1);
+}
+
+/** Whether runAssist may make a second (fallback) call — the Mac-mini
+ *  provider with a Claude key behind it, or an injected fallback. */
+export function passHasFallback(env: Env, injected?: Pick<RunDeps, "provider" | "fallback">): boolean {
+  if (injected?.provider) return !!injected.fallback;
+  return assistConfigured(env).provider === "local" && !!(env.ANTHROPIC_API_KEY || "").trim();
+}
+
+export type AiPassOptions = {
+  /** hard wall clock (epoch-ms) — the caller's route limit. Default: the
+   *  budget plus one worst-case call from now. */
+  deadlineMs?: number;
+  /** window for starting calls (default AI_PASS_BUDGET_MS) */
+  budgetMs?: number;
+  /** owners to work for (default: every active user) */
+  ownerIds?: string[] | null;
+};
 
 export type AiPassDeps = {
   ctx?: OrgContext;
   /** provider injection for the checks (settings / env always come from ctx) */
   run?: Pick<RunDeps, "provider" | "fallback">;
   now?: number;
-  /** wall clock for the budget (injectable for the checks) */
+  /** wall clock for the budget / deadline (injectable for the checks) */
   clock?: () => number;
 };
 
@@ -70,7 +121,7 @@ export type AiPassResult = {
   filed: number;
   courts: number;
   tasks: number;
-  /** pendingAi cleared without a call (gated off / nothing to read) */
+  /** pendingAi cleared without a call (gated off / stuck / nothing to read) */
   cleared: number;
   failed: number;
   stoppedByBudget: boolean;
@@ -78,38 +129,30 @@ export type AiPassResult = {
   changed: boolean;
 };
 
-type Feature = "file" | "promise";
+type Rec = { pendingAi?: boolean; aiAttempts?: number; aiLeaseUntil?: number };
 
-const isFresh = (rec: { basis?: string } | undefined, latest: CommMessage) => !rec?.basis || rec.basis === latest.id;
-
-/** Re-read, check the field is still pending on the same newest message,
- *  then write the new value (key-level, via setOrg). */
-async function writeIfStill(threadId: string, key: "filing" | "court", basis: string | undefined, value: Filing | Court): Promise<CommThread | null> {
-  const t = await getThread(threadId);
-  if (!t || t.deleted) return null;
-  const cur = t[key];
-  if (!cur?.pendingAi || (cur.basis ?? undefined) !== basis) return null;
-  const msgs = emailMessages(t);
-  if (basis && msgs[msgs.length - 1]?.id !== basis) return null;
-  return key === "filing" ? setOrg(threadId, { filing: value as Filing }) : setOrg(threadId, { court: value as Court });
+function unleased<T extends Rec>(rec: T): T {
+  const next = { ...rec };
+  delete next.aiLeaseUntil;
+  return next;
 }
 
-function cleared<T extends { pendingAi?: boolean; aiAttempts?: number }>(rec: T): T {
-  const next = { ...rec };
+function cleared<T extends Rec>(rec: T): T {
+  const next = unleased(rec);
   delete next.pendingAi;
   delete next.aiAttempts;
   return next;
 }
 
-function failedAttempt<T extends { pendingAi?: boolean; aiAttempts?: number }>(rec: T): T {
+function failedAttempt<T extends Rec>(rec: T): T {
   const attempts = (rec.aiAttempts ?? 0) + 1;
-  if (attempts >= MAX_AI_ATTEMPTS) {
-    const next = { ...rec, aiAttempts: attempts };
-    delete next.pendingAi;
-    return next;
-  }
-  return { ...rec, pendingAi: true, aiAttempts: attempts };
+  const next = { ...unleased(rec), aiAttempts: attempts };
+  if (attempts >= MAX_AI_ATTEMPTS) delete next.pendingAi;
+  else next.pendingAi = true;
+  return next;
 }
+
+const isFresh = (rec: { basis?: string } | undefined, latest: CommMessage | undefined) => !!latest && (!rec?.basis || rec.basis === latest.id);
 
 /** The newest-message time of a thread (oldest first ordering). */
 function latestAt(t: CommThread): number {
@@ -117,55 +160,99 @@ function latestAt(t: CommThread): number {
   return msgs.length ? msgs[msgs.length - 1].at || 0 : t.updatedAt || 0;
 }
 
+const workable = (t: CommThread) => !t.deleted && t.status !== "draft" && t.mailbox === "personal";
+
 type PassState = {
   ctx: OrgContext;
   res: AiPassResult;
   runDeps: RunDeps;
+  hasFallback: boolean;
   /** owner + feature refused before any call this pass (cap / rate limit) */
   blocked: Set<string>;
   cache: CandidateCache;
   team: Array<{ id: string; name: string }>;
   teamIds: Set<string>;
-  overBudget: () => boolean;
+  /** may a call for `slot` start now? */
+  canStart: (slot: Feature) => boolean;
+  clock: () => number;
   now: () => number;
 };
 
-export async function runAiPass(opts: { budgetMs?: number; onlyUserId?: string | null } = {}, deps: AiPassDeps = {}): Promise<AiPassResult> {
+/** Clear both pending marks (compare-and-set; a changed record is left). */
+async function clearPending(st: PassState, t: CommThread): Promise<void> {
+  for (const key of ["court", "filing"] as const) {
+    const rec = t[key];
+    if (rec?.pendingAi && (await casOrg(t.id, key, rec, cleared(rec) as never))) {
+      st.res.cleared++;
+      st.res.changed = true;
+    }
+  }
+}
+
+export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {}): Promise<AiPassResult> {
   const res: AiPassResult = { looked: 0, calls: 0, filed: 0, courts: 0, tasks: 0, cleared: 0, failed: 0, stoppedByBudget: false, changed: false };
   const clock = deps.clock ?? Date.now;
   const started = clock();
   const budget = opts.budgetMs ?? AI_PASS_BUDGET_MS;
   try {
     const ctx = deps.ctx ?? (await loadOrgContext());
-    const rows = (await pendingAiThreads(AI_PASS_MAX_THREADS))
-      .filter((t) => !t.deleted && t.status !== "draft" && t.mailbox === "personal")
-      .map((t) => ({ t, owner: ownerOf(t, ctx) }))
-      .filter(({ owner }) => !opts.onlyUserId || owner?.id === opts.onlyUserId)
-      .sort((a, b) => latestAt(a.t) - latestAt(b.t));
-    if (!rows.length) return res;
+    const hasFallback = passHasFallback(ctx.env, deps.run);
+    const deadline = opts.deadlineMs ?? started + budget + callWorstCaseMs("promise", hasFallback) + AI_CALL_MARGIN_MS;
     const team = ctx.users.map((u) => ({ id: u.id, name: u.name }));
     const st: PassState = {
       ctx,
       res,
       runDeps: { ...(deps.run ?? {}), settings: ctx.assist, env: ctx.env },
+      hasFallback,
       blocked: new Set(),
       cache: {},
       team,
       teamIds: new Set(team.map((u) => u.id)),
-      overBudget: () => clock() - started >= budget,
+      canStart: (slot) => {
+        const at = clock();
+        return at - started < budget && deadline - at >= callWorstCaseMs(slot, hasFallback) + AI_CALL_MARGIN_MS;
+      },
+      clock,
       now: () => deps.now ?? Date.now(),
     };
-    for (const { t, owner } of rows) {
-      if (st.overBudget()) {
-        res.stoppedByBudget = true;
-        break;
+
+    // rows nobody can own never get processed: clear them
+    const everyone = { names: ctx.users.map((u) => u.name), keys: ctx.users.map((u) => personalKey(u.id)) };
+    for (const t of await pendingAiThreads({ notOwners: everyone, limit: AI_PASS_SWEEP_LIMIT })) {
+      if (!ownerOf(t, ctx)) await clearPending(st, t);
+    }
+
+    // per-owner queues: live work (court reads) first, then oldest first
+    const ownerIds = opts.ownerIds ?? ctx.users.map((u) => u.id);
+    const queues: Array<{ owner: OrgUser; rows: CommThread[] }> = [];
+    for (const id of [...new Set(ownerIds)]) {
+      const owner = ctx.users.find((u) => u.id === id);
+      if (!owner) continue;
+      const rows: CommThread[] = [];
+      for (const t of await pendingAiThreads({ owner: { names: [owner.name], keys: [personalKey(owner.id)] }, limit: AI_PASS_MAX_PER_OWNER })) {
+        if (ownerOf(t, ctx)?.id !== owner.id) continue;
+        if (!workable(t)) await clearPending(st, t);
+        else rows.push(t);
       }
-      res.looked++;
-      try {
-        await passThread(st, t, owner);
-      } catch (err) {
-        res.failed++;
-        console.error("[inbox-org] AI pass failed for", t.id, err);
+      rows.sort((a, b) => Number(!b.court?.pendingAi) - Number(!a.court?.pendingAi) || latestAt(a) - latestAt(b));
+      if (rows.length) queues.push({ owner, rows });
+    }
+
+    for (let i = 0; queues.some((q) => i < q.rows.length) && !res.stoppedByBudget; i++) {
+      for (const q of queues) {
+        const t = q.rows[i];
+        if (!t) continue;
+        if (!st.canStart("promise") && !st.canStart("file")) {
+          res.stoppedByBudget = true;
+          break;
+        }
+        res.looked++;
+        try {
+          await passThread(st, t, q.owner);
+        } catch (err) {
+          res.failed++;
+          console.error("[inbox-org] AI pass failed for", t.id, err);
+        }
       }
     }
   } catch (err) {
@@ -174,36 +261,57 @@ export async function runAiPass(opts: { budgetMs?: number; onlyUserId?: string |
   return res;
 }
 
-async function passThread(st: PassState, t0: CommThread, owner: OrgUser | null): Promise<void> {
+async function passThread(st: PassState, t0: CommThread, owner: OrgUser): Promise<void> {
   const { ctx, res } = st;
-  const msgs = emailMessages(t0);
-  const latest: CommMessage | undefined = msgs[msgs.length - 1];
-  const gateOk = (f: Feature) => !!owner && assistGate(f, owner.id, ctx.assist, ctx.env).ok;
-
-  /* filing (§1 step 5) */
-  const f = t0.filing;
-  if (f?.pendingAi && (!latest || isFresh(f, latest))) {
-    if (!latest || !owner || !gateOk("file") || f.state !== "suggested") {
-      if (await writeIfStill(t0.id, "filing", f.basis, cleared(f))) {
+  let t = t0;
+  let msgs = emailMessages(t);
+  if (!msgs.length) return clearPending(st, t);
+  // a pending record not computed against the newest message: the pipeline
+  // missed that message — organize it now; still stale → clear
+  if ((t.court?.pendingAi && !isFresh(t.court, msgs[msgs.length - 1])) || (t.filing?.pendingAi && !isFresh(t.filing, msgs[msgs.length - 1]))) {
+    await organizeThread(t.id, { ctx });
+    const again = await getThread(t.id);
+    if (!again || !workable(again)) return;
+    t = again;
+    msgs = emailMessages(t);
+    const newest = msgs[msgs.length - 1];
+    for (const key of ["court", "filing"] as const) {
+      const rec = t[key];
+      if (rec?.pendingAi && !isFresh(rec, newest) && (await casOrg(t.id, key, rec, cleared(rec) as never))) {
         res.cleared++;
         res.changed = true;
       }
-    } else if (!st.blocked.has(owner.id + ":file") && !st.overBudget()) {
-      await fileThread(st, t0, f, owner, msgs);
+    }
+    t = (await getThread(t.id)) ?? t;
+  }
+  const latest = msgs[msgs.length - 1];
+  const gateOk = (f: Feature) => assistGate(f, owner.id, ctx.assist, ctx.env).ok;
+  const leaseLive = (rec: Rec) => !!rec.aiLeaseUntil && rec.aiLeaseUntil > st.now();
+
+  /* court + promises first (§3 AI reading, §7) — live work */
+  const c = t.court;
+  if (c?.pendingAi && isFresh(c, latest)) {
+    if (!gateOk("promise")) {
+      if (await casOrg(t.id, "court", c, cleared(c))) {
+        res.cleared++;
+        res.changed = true;
+      }
+    } else if (!leaseLive(c) && !st.blocked.has(owner.id + ":promise") && st.canStart("promise")) {
+      await readCourt(st, t, c, owner, msgs, latest);
     }
   }
 
-  /* court + promises (§3 AI reading, §7) */
-  const t = (await getThread(t0.id)) ?? t0;
-  const c = t.court;
-  if (c?.pendingAi && (!latest || isFresh(c, latest))) {
-    if (!latest || !owner || !gateOk("promise")) {
-      if (await writeIfStill(t.id, "court", c.basis, cleared(c))) {
+  /* filing (§1 step 5) */
+  const t2 = (await getThread(t.id)) ?? t;
+  const f = t2.filing;
+  if (f?.pendingAi && isFresh(f, latest)) {
+    if (!gateOk("file") || f.state !== "suggested") {
+      if (await casOrg(t2.id, "filing", f, cleared(f))) {
         res.cleared++;
         res.changed = true;
       }
-    } else if (!st.blocked.has(owner.id + ":promise") && !st.overBudget()) {
-      await readCourt(st, t, c, owner, msgs, latest);
+    } else if (!leaseLive(f) && !st.blocked.has(owner.id + ":file") && st.canStart("file")) {
+      await fileThread(st, t2, f, owner, msgs);
     }
   }
 }
@@ -211,127 +319,156 @@ async function passThread(st: PassState, t0: CommThread, owner: OrgUser | null):
 async function fileThread(st: PassState, t: CommThread, f: Filing, owner: OrgUser, msgs: CommMessage[]): Promise<void> {
   const { res } = st;
   const now = st.now();
-  const inbound = [...msgs].reverse().find((m) => m.direction === "in") ?? null;
-  const sender = inbound ? { email: senderOf(t, inbound), name: inbound.author || "", body: inbound.body || "" } : null;
-  const { candidates, matchedCustomerId, matchedCustomerName } = await buildFilingCandidates(t, sender, st.cache);
-  const today = chicagoToday(now);
-  res.calls++;
-  const r = await runAssist(
-    {
-      feature: "file",
-      slot: "file",
-      user: { id: owner.id, name: owner.name },
-      system: FILING_SYSTEM,
-      userText: buildFilingUserText({
-        thread: threadBlock({ subject: t.subject || "", messages: promptOf(msgs) }, { maxMessages: 6, maxChars: 1500 }),
-        today: today.date,
-        weekday: today.weekday,
-        candidates,
-        matchedCustomerName,
-      }),
-      schema: FilingSchema,
-      contextRef: "thread:" + t.id,
-    },
-    { ...st.runDeps, now }
-  );
-  if (!r.ok) {
-    if (!r.runId) {
-      st.blocked.add(owner.id + ":file");
+  const leased: Filing = { ...f, aiLeaseUntil: now + AI_LEASE_MS };
+  if (!(await casOrg(t.id, "filing", f, leased))) return;
+  let held: Filing = leased;
+  try {
+    const inbound = [...msgs].reverse().find((m) => m.direction === "in") ?? null;
+    const sender = inbound ? { email: senderOf(t, inbound), name: inbound.author || "", body: inbound.body || "" } : null;
+    const { candidates, matchedCustomerId, matchedCustomerName } = await buildFilingCandidates(t, sender, st.cache);
+    const today = chicagoToday(now);
+    res.calls++;
+    const r = await runAssist(
+      {
+        feature: "file",
+        slot: "file",
+        user: { id: owner.id, name: owner.name },
+        system: FILING_SYSTEM,
+        userText: buildFilingUserText({
+          thread: threadBlock({ subject: t.subject || "", messages: promptOf(msgs) }, { maxMessages: 6, maxChars: 1500 }),
+          today: today.date,
+          weekday: today.weekday,
+          candidates,
+          matchedCustomerName,
+        }),
+        schema: FilingSchema,
+        contextRef: "thread:" + t.id,
+      },
+      { ...st.runDeps, now }
+    );
+    if (!r.ok) {
+      if (!r.runId) {
+        st.blocked.add(owner.id + ":file");
+        if (await casOrg(t.id, "filing", leased, unleased(f))) held = unleased(f);
+        return;
+      }
+      res.failed++;
+      if (await casOrg(t.id, "filing", leased, failedAttempt(f))) res.changed = true;
       return;
     }
+    const pick = sanitizeFiling(r.value, candidates, matchedCustomerId);
+    const out = filingFromPick(pick, f, { now, runId: r.runId, courtOwnerIsMe: t.court?.owner === "me", prevNoise: t.noise, matchedCustomerId });
+    if (!(await casOrg(t.id, "filing", leased, out.filing))) return;
+    held = out.filing;
+    res.changed = true;
+    if (pick.kind !== "none") res.filed++;
+    if (out.noise !== undefined) {
+      const after = await setOrg(t.id, { noise: out.noise });
+      if (out.noise?.moved && after && !after.archived) await archive(t.id, { quiet: true });
+    }
+  } catch (err) {
     res.failed++;
-    if (await writeIfStill(t.id, "filing", f.basis, failedAttempt(f))) res.changed = true;
-    return;
-  }
-  const pick = sanitizeFiling(r.value, candidates, matchedCustomerId);
-  const out = filingFromPick(pick, f, { now, runId: r.runId, courtOwnerIsMe: t.court?.owner === "me", prevNoise: t.noise });
-  const wrote = await writeIfStill(t.id, "filing", f.basis, out.filing);
-  if (!wrote) return;
-  res.changed = true;
-  if (pick.kind !== "none") res.filed++;
-  if (out.noise !== undefined) {
-    await setOrg(t.id, { noise: out.noise });
-    if (out.noise?.moved && !wrote.archived) await archive(t.id, { quiet: true });
+    console.error("[inbox-org] AI filing failed for", t.id, err);
+    if (held === leased && (await casOrg(t.id, "filing", leased, failedAttempt(f)))) res.changed = true;
   }
 }
 
 async function readCourt(st: PassState, t: CommThread, c: Court, owner: OrgUser, msgs: CommMessage[], latest: CommMessage): Promise<void> {
   const { ctx, res } = st;
   const now = st.now();
-  const last3 = msgs.filter((m) => !(m.direction === "out" && m.queued)).slice(-3);
-  const authors: AuthorNote[] = last3.map((m) => {
-    const role = roleOf(t, m, owner, ctx);
-    const email = senderOf(t, m);
-    const uid = role === "teammate" ? ctx.teamByEmail.get(email) ?? null : null;
-    return { at: m.at || 0, role, userId: uid, name: uid ? ctx.users.find((u) => u.id === uid)?.name : undefined, email };
-  });
-  const today = chicagoToday(now);
-  res.calls++;
-  const r = await runAssist(
-    {
-      feature: "promise",
-      slot: "promise",
-      user: { id: owner.id, name: owner.name },
-      system: COURT_SYSTEM,
-      userText: buildCourtUserText({
-        thread: threadBlock({ subject: t.subject || "", messages: promptOf(last3) }, { maxMessages: 3, maxChars: 2500 }),
-        today: today.date,
-        weekday: today.weekday,
-        team: st.team,
-        owner: { id: owner.id, name: owner.name },
-        authors,
-      }),
-      schema: CourtSchema,
-      contextRef: "thread:" + t.id,
-    },
-    { ...st.runDeps, now }
-  );
-  if (!r.ok) {
-    if (!r.runId) {
-      st.blocked.add(owner.id + ":promise");
+  const leased: Court = { ...c, aiLeaseUntil: now + AI_LEASE_MS };
+  if (!(await casOrg(t.id, "court", c, leased))) return;
+  // `held` = what this pass last wrote; every write compares against it
+  let held: Court = leased;
+  try {
+    const last3 = msgs.filter((m) => !(m.direction === "out" && m.queued)).slice(-3);
+    const authors: AuthorNote[] = last3.map((m) => {
+      const role = roleOf(t, m, owner, ctx);
+      const email = senderOf(t, m);
+      const uid = role === "teammate" ? ctx.teamByEmail.get(email) ?? null : null;
+      return { at: m.at || 0, role, userId: uid, name: uid ? ctx.users.find((u) => u.id === uid)?.name : undefined, email };
+    });
+    const today = chicagoToday(now);
+    res.calls++;
+    const r = await runAssist(
+      {
+        feature: "promise",
+        slot: "promise",
+        user: { id: owner.id, name: owner.name },
+        system: COURT_SYSTEM,
+        userText: buildCourtUserText({
+          thread: threadBlock({ subject: t.subject || "", messages: promptOf(last3) }, { maxMessages: 3, maxChars: 2500 }),
+          today: today.date,
+          weekday: today.weekday,
+          team: st.team,
+          owner: { id: owner.id, name: owner.name },
+          authors,
+        }),
+        schema: CourtSchema,
+        contextRef: "thread:" + t.id,
+      },
+      { ...st.runDeps, now }
+    );
+    if (!r.ok) {
+      if (!r.runId) {
+        st.blocked.add(owner.id + ":promise");
+        if (await casOrg(t.id, "court", leased, unleased(c))) held = unleased(c);
+        return;
+      }
+      res.failed++;
+      if (await casOrg(t.id, "court", leased, failedAttempt(c))) {
+        held = failedAttempt(c);
+        res.changed = true;
+      }
       return;
     }
-    res.failed++;
-    if (await writeIfStill(t.id, "court", c.basis, failedAttempt(c))) res.changed = true;
-    return;
-  }
-  const reading = sanitizeCourt(r.value, { teamIds: st.teamIds, ownerId: owner.id });
-  const override = aiCourtOverride(c, reading);
-  let next: Court = override
-    ? {
-        owner: reading.owner,
-        ...(reading.owner === "teammate" && reading.teammateId ? { teammateId: reading.teammateId } : {}),
-        reason: reading.reason || c.reason,
-        source: "ai",
-        at: now,
-        ...(c.basis ? { basis: c.basis } : {}),
-      }
-    : cleared(c);
-  // re-check before making tasks: new mail since means the pipeline
-  // recomputed the court and this reading is stale
-  const fresh = await getThread(t.id);
-  if (!fresh?.court?.pendingAi || fresh.court.basis !== c.basis) return;
-  const lastRole = roleOf(fresh, latest, owner, ctx);
-  if (reading.promises.length && lastRole !== "customer") {
-    const authorUserId = lastRole === "owner" ? owner.id : ctx.teamByEmail.get(senderOf(fresh, latest)) ?? null;
-    // court pendingAi is never set on backlog mail (pipeline), so this is live mail
-    const made = await applyPromises(fresh, latest, reading.promises, now, { owner, authorUserId, users: st.team, backlog: false });
-    if (made.length) {
-      next = { ...next, promise: made[0] };
+    const reading = sanitizeCourt(r.value, { teamIds: st.teamIds, ownerId: owner.id });
+    const override = aiCourtOverride(c, reading);
+    // promises: mark the message first, then make the tasks
+    let made: Awaited<ReturnType<typeof applyPromises>> = [];
+    const lastRole = roleOf(t, latest, owner, ctx);
+    if (reading.promises.length && lastRole !== "customer" && c.promisesFor !== latest.id) {
+      const marked: Court = { ...leased, promisesFor: latest.id };
+      if (!(await casOrg(t.id, "court", leased, marked))) return;
+      held = marked;
+      const authorUserId = lastRole === "owner" ? owner.id : ctx.teamByEmail.get(senderOf(t, latest)) ?? null;
+      // court pendingAi is never set on backlog mail (pipeline), so this is live mail
+      made = await applyPromises(t, latest, reading.promises, now, { owner, authorUserId, users: st.team, backlog: false });
       res.tasks += made.length;
     }
+    const base = cleared(held);
+    const next: Court = override
+      ? {
+          owner: reading.owner,
+          ...(reading.owner === "teammate" && reading.teammateId ? { teammateId: reading.teammateId } : {}),
+          reason: reading.reason || c.reason,
+          source: "ai",
+          at: now,
+          ...(c.basis ? { basis: c.basis } : {}),
+          ...(base.promise ? { promise: base.promise } : {}),
+          ...(base.promisesFor ? { promisesFor: base.promisesFor } : {}),
+        }
+      : base;
+    if (made.length) next.promise = made[0];
+    if (!(await casOrg(t.id, "court", held, next))) return;
+    held = next;
+    res.changed = true;
+    if (!override) return;
+    res.courts++;
+    const wrote = await getThread(t.id);
+    if (!wrote) return;
+    // status follows the court while it still follows the rule court
+    const desired = COURT_STATUS[next.owner];
+    const followed = wrote.status === "waiting_us" || wrote.status === "waiting_them" || wrote.status === COURT_STATUS[c.owner];
+    if (desired !== wrote.status && followed) await setStatus(t.id, desired, { quiet: true });
+    // a hand-off to me brings the thread back (§4)
+    if (next.owner === "me" && wrote.archived && !wrote.noise?.moved) await unarchive(t.id, { quiet: true });
+  } catch (err) {
+    res.failed++;
+    console.error("[inbox-org] AI court reading failed for", t.id, err);
+    // an exception after the call is an attempt; a promisesFor mark stays
+    if ((held === leased || held.aiLeaseUntil) && (await casOrg(t.id, "court", held, failedAttempt(held)))) res.changed = true;
   }
-  const wrote = await writeIfStill(t.id, "court", c.basis, next);
-  if (!wrote) return;
-  res.changed = true;
-  if (!override) return;
-  res.courts++;
-  // status follows the court while it still follows the rule court
-  const desired = COURT_STATUS[next.owner];
-  const followed = wrote.status === "waiting_us" || wrote.status === "waiting_them" || wrote.status === COURT_STATUS[c.owner];
-  if (desired !== wrote.status && followed) await setStatus(t.id, desired, { quiet: true });
-  // a hand-off to me brings the thread back (§4)
-  if (next.owner === "me" && wrote.archived && !wrote.noise?.moved) await unarchive(t.id, { quiet: true });
 }
 
 function promptOf(msgs: CommMessage[]): PromptMessage[] {

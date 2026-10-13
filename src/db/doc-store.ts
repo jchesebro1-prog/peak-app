@@ -255,13 +255,23 @@ export async function listDocsByField<T extends Doc = Doc>(
 /**
  * Live rows where ANY of the two-level JSON paths holds boolean true
  * (`doc->a->>b = 'true'`), filtered in SQL — #335's `pendingAi` worklist.
- * Path segments are code constants, passed as bound parameters. Ordered by
- * the numeric top-level field `orderByNumericAsc` (oldest first), else id.
+ * `fieldIn` further keeps rows where ANY of those top-level string fields is
+ * one of its values (`lower: true` compares trimmed + lower-cased, values
+ * given lower-cased); `negateFieldIn` keeps the rows matching NONE of them
+ * (an absent field reads as ""). Field names / path segments are code
+ * constants, passed as bound parameters. Ordered by the numeric top-level
+ * field `orderByNumericAsc` (oldest first), else id; `limit` applies after
+ * every filter.
  */
 export async function listDocsWithFlag<T extends Doc = Doc>(
   coll: CollectionName,
   paths: ReadonlyArray<readonly [string, string]>,
-  opts: { limit?: number; orderByNumericAsc?: string } = {}
+  opts: {
+    limit?: number;
+    orderByNumericAsc?: string;
+    fieldIn?: ReadonlyArray<{ field: string; values: readonly string[]; lower?: boolean }>;
+    negateFieldIn?: boolean;
+  } = {}
 ): Promise<T[]> {
   if (!paths.length) return [];
   const db = await getDb();
@@ -270,10 +280,49 @@ export async function listDocsWithFlag<T extends Doc = Doc>(
     paths.map(([a, b]) => sql`(${t.doc}->${a}->>${b}) = 'true'`),
     sql` OR `
   );
+  const where = [eq(t.deleted, false), sql`(${any})`];
+  const ins = (opts.fieldIn ?? []).filter((f) => f.values.length);
+  if (ins.length) {
+    const match = sql.join(
+      ins.map(({ field, values, lower }) => {
+        const col = lower ? sql`lower(trim(coalesce(${t.doc}->>${field}, '')))` : sql`coalesce(${t.doc}->>${field}, '')`;
+        return sql`${col} IN (${sql.join(values.map((v) => sql`${v}`), sql`, `)})`;
+      }),
+      sql` OR `
+    );
+    where.push(opts.negateFieldIn ? sql`NOT (${match})` : sql`(${match})`);
+  } else if (opts.fieldIn && !opts.negateFieldIn) {
+    return [];
+  }
   const order = opts.orderByNumericAsc ? asc(sql`(${t.doc}->>${opts.orderByNumericAsc})::numeric`) : asc(t.id);
-  const q = db.select().from(t).where(and(eq(t.deleted, false), sql`(${any})`)).orderBy(order, asc(t.id));
+  const q = db.select().from(t).where(and(...where)).orderBy(order, asc(t.id));
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+}
+
+/**
+ * Compare-and-set ONE top-level key of a live row: writes `next` (undefined
+ * removes the key) only if the stored value still equals `expected` (jsonb
+ * equality — key order doesn't matter; undefined = absent or null). Atomic in
+ * one UPDATE, so two writers racing on the same read can't both win (#335's
+ * AI-pass lease). Returns whether it wrote. Bumps rev like patchDocKey.
+ */
+export async function casDocKey(coll: CollectionName, id: string, key: string, expected: unknown, next: unknown): Promise<boolean> {
+  const db = await getDb();
+  const t = table(coll);
+  const nextDoc =
+    next === undefined ? sql`(${t.doc} - ${key}::text)` : sql`(${t.doc} || jsonb_build_object(${key}::text, ${JSON.stringify(next)}::jsonb))`;
+  const same =
+    expected === undefined || expected === null
+      ? sql`(${t.doc}->${key}) IS NULL OR jsonb_typeof(${t.doc}->${key}) = 'null'`
+      : sql`(${t.doc}->${key}) = ${JSON.stringify(expected)}::jsonb`;
+  const now = Date.now();
+  const rows = await db
+    .update(t)
+    .set({ doc: nextDoc, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
+    .where(and(eq(t.id, id), eq(t.deleted, false), sql`(${same})`))
+    .returning({ id: t.id });
+  return rows.length > 0;
 }
 
 export async function getDoc<T extends Doc = Doc>(
