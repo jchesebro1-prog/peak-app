@@ -8,6 +8,7 @@ import Nav, { type RosterEntry } from "@/components/nav/Nav";
 import { SyncProvider } from "@/lib/sync/SyncProvider";
 import PopHeader from "@/components/popout/pop-header";
 import LiveSync from "@/components/popout/live-sync";
+import PopBlockedNotice from "@/components/popout/pop-blocked-notice";
 
 export default async function AppLayout({
   children,
@@ -53,6 +54,7 @@ export default async function AppLayout({
         <main className="pk-main">{children}</main>
       </div>
       <LiveSync />
+      <PopBlockedNotice />
     </SyncProvider>
   );
 }

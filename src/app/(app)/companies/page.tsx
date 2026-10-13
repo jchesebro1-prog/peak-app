@@ -10,6 +10,8 @@ import { coordsOf } from "@/lib/geo";
 import { Avatar } from "@/components/ui";
 import { FilterBar } from "./controls";
 import { CompanyMapClient } from "./map-client";
+import PopLink from "@/components/popout/pop-link";
+import { customerPopUrl } from "@/lib/popout/click";
 import type { CompanyMapFilters, CompanyMapPoint } from "./map-filter";
 import EditCustomerModal from "./edit-modal";
 import { custLocation, mono, moneyK } from "./lib";
@@ -369,8 +371,10 @@ export default async function CustomersPage({
                 const d = travel.byId.get(c.id);
                 return (
                   <div key={c.id} className="cu-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8" }}>
-                  <Link
-                    href={`/companies/${encodeURIComponent(c.id)}`}
+                  <PopLink
+                    href={customerPopUrl(c.id)}
+                    popKind="customer"
+                    popId={c.id}
                     style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "inherit" }}
                   >
                     <span style={{ width: 38, height: 38, borderRadius: 9, background: "#f1f2f5", color: "#5b616e", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12.5, fontFamily: "var(--font-mono)", flexShrink: 0 }}>
@@ -414,7 +418,7 @@ export default async function CustomersPage({
                         {quoteCount} quote{quoteCount === 1 ? "" : "s"}
                       </span>
                     </span>
-                  </Link>
+                  </PopLink>
                   {/* #278 — delete from the directory; same soft delete as the Edit dialog */}
                   {canDelete && <DeleteCompanyButton id={c.id} name={c.name} quoteCount={quoteCount} />}
                   </div>

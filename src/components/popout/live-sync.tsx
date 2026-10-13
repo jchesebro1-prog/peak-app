@@ -12,12 +12,14 @@
  *   focus, navigate. Only the main window focused most recently answers.
  * - Re-applies `pk-pop` (dev Strict Mode resets <html> attributes) and tags
  *   the native shell with `pk-native` so pop-out affordances can hide there.
+ * - In a pop-out: saves its frame per kind (spec §4) on resize (debounced
+ *   500 ms) and on beforeunload / pagehide.
  */
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { onMessage, postMainAck, windowId } from "@/lib/popout/channel";
 import { shouldFocusRefresh, shouldRefreshNow } from "@/lib/popout/guard";
-import { isPopName } from "@/lib/popout/names";
+import { isPopWindow, savePopGeometry } from "@/lib/popout/open";
 import {
   MAIN_FOCUS_KEY,
   NATIVE_CLASS,
@@ -29,14 +31,7 @@ import {
 import { isNativePlatform } from "@/lib/platform";
 
 const CHANGED_DEBOUNCE_MS = 1000;
-
-function isPopWindow(): boolean {
-  try {
-    return isPopName(window.name);
-  } catch {
-    return false;
-  }
-}
+const GEOMETRY_DEBOUNCE_MS = 500;
 
 export default function LiveSync() {
   const router = useRouter();
@@ -53,6 +48,33 @@ export default function LiveSync() {
     } catch {
       // no Capacitor bridge — a plain browser
     }
+  }, []);
+
+  // Window memory (spec §4): a pop-out saves its frame under its kind.
+  useEffect(() => {
+    if (!isPopWindow()) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        savePopGeometry();
+      }, GEOMETRY_DEBOUNCE_MS);
+    };
+    const saveNow = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      savePopGeometry();
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("beforeunload", saveNow);
+    window.addEventListener("pagehide", saveNow);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("beforeunload", saveNow);
+      window.removeEventListener("pagehide", saveNow);
+    };
   }, []);
 
   // A navigation renders fresh server data: it counts as a refresh.
@@ -157,6 +179,7 @@ export default function LiveSync() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("pagehide", forgetMainFocus);
+      forgetMainFocus();
     };
   }, [router]);
 

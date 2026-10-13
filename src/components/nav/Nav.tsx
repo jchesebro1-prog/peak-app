@@ -6,12 +6,14 @@ import { usePathname } from "next/navigation";
 import { signIn, signOut } from "next-auth/react";
 import {
   NAV,
+  NAV_POPOUT,
   activeKeyFor,
   parentGroupOf,
   type NavCounts,
   type BellGroup,
 } from "./nav-data";
 import SyncChip from "./SyncChip";
+import PopoutButton from "@/components/popout/popout-button";
 
 /**
  * The shared app shell — port of Nav.dc.html (spec: docs/specs/nav-shell.json).
@@ -242,18 +244,35 @@ export default function Nav({
                     </button>
                     {openGroup === entry.key && (
                       <div className="pk-dropdown">
-                        {entry.children.map((c) => (
-                          <Link
-                            key={c.key}
-                            href={c.href}
-                            className={`pk-dropdown-item${activeKey === c.key ? " active" : ""}`}
-                          >
-                            <span>{c.label}</span>
-                            {(counts[c.key] ?? 0) > 0 && (
-                              <span className="pk-badge">{counts[c.key]}</span>
-                            )}
-                          </Link>
-                        ))}
+                        {entry.children.map((c) => {
+                          const item = (
+                            <Link
+                              key={c.key}
+                              href={c.href}
+                              className={`pk-dropdown-item${activeKey === c.key ? " active" : ""}`}
+                            >
+                              <span>{c.label}</span>
+                              {(counts[c.key] ?? 0) > 0 && (
+                                <span className="pk-badge">{counts[c.key]}</span>
+                              )}
+                            </Link>
+                          );
+                          // Pop-out windows: a hover ⧉ opens the section in its own window.
+                          const pop = NAV_POPOUT[c.key];
+                          if (!pop) return item;
+                          return (
+                            <div key={c.key} className="pk-dropdown-row">
+                              {item}
+                              <PopoutButton
+                                kind={pop.kind}
+                                id={pop.id}
+                                url={pop.url}
+                                className="pk-nav-pop"
+                                onOpen={closeAll}
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

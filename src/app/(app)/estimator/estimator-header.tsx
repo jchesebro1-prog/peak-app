@@ -10,6 +10,8 @@ import type { EstimateStep } from "@/lib/estimate-steps/steps";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { QuotePeopleFields } from "./quote-people-fields";
 import { canSendBackFromReview, withoutSendBack } from "@/lib/estimate-review/review-ui";
+import PopoutButton from "@/components/popout/popout-button";
+import { quoteBuilderHref } from "@/lib/quote-links";
 
 /**
  * #305 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
@@ -310,6 +312,10 @@ export function EstimatorHeader({
                 setGateRefused(false);
               }}
             />
+          )}
+          {/* Pop-out windows: this estimate in its own window — only once it has an id. */}
+          {loadedId && (
+            <PopoutButton kind="estimate" id={loadedId} url={quoteBuilderHref({ id: loadedId })} tone="dark" />
           )}
           <HeaderMoreMenu s={s} onStep={onStep} />
         </div>

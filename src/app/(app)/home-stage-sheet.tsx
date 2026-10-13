@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { removeQuoteAction, setQuoteStatusAction } from "./home-actions";
 import { ConfirmButton } from "@/components/confirm-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import PopLink from "@/components/popout/pop-link";
 
 /**
  * Stage sheet — port of Home.dc.html's quote sheet (open a pipeline row →
@@ -222,8 +222,10 @@ export default function HomeStageSheet({
             background: "#fbfbfc",
           }}
         >
-          <Link
+          <PopLink
             href={quoteBuilderHref(quote)}
+            popKind="estimate"
+            popId={quote.id}
             style={{
               flex: 1,
               display: "flex",
@@ -240,7 +242,7 @@ export default function HomeStageSheet({
             }}
           >
             Open in Estimator →
-          </Link>
+          </PopLink>
           <ConfirmButton
             onConfirm={del}
             disabled={pending}

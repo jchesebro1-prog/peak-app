@@ -22,6 +22,19 @@ import {
   shouldAnswerOpenInMain,
   toAppPath,
 } from "@/lib/popout/live";
+import {
+  POP_AFFORDANCE_LABEL,
+  POP_BLOCKED_EVENT,
+  POP_BLOCKED_MESSAGE,
+  POP_BLOCKED_MS,
+  customerPopUrl,
+  geoFromWindow,
+  isPopoutClick,
+  parseSavedGeo,
+  threadPopUrl,
+} from "@/lib/popout/click";
+import { handlePopoutClick, openPopout, savePopGeometry } from "@/lib/popout/open";
+import { NAV_POPOUT } from "@/components/nav/nav-data";
 import { readFileSync, existsSync } from "node:fs";
 import type { Ok } from "./test-inbox-org";
 
@@ -207,6 +220,166 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok(!!oim && oim.type === "open-in-main" && oim.url === "/inbox", "popout: open-in-main parses");
   ok(parseMessage({ type: "main-ack", url: "/inbox", from: "w" })?.type === "main-ack", "popout: main-ack parses");
   ok(parseMessage(null) === null && parseMessage("x") === null && parseMessage({ type: "zzz", from: "w" }) === null, "popout: junk is dropped");
+
+  /* Task 3 — ways to open (spec §1, §3, §4) */
+  {
+    const ev = (o: Partial<{ shiftKey: boolean; metaKey: boolean; ctrlKey: boolean; button: number }>) => ({ shiftKey: false, metaKey: false, ctrlKey: false, button: 0, ...o });
+    ok(isPopoutClick(ev({ shiftKey: true })), "popout: Shift + left click is a pop-out click");
+    ok(!isPopoutClick(ev({})), "popout: a plain click is not a pop-out click");
+    ok(!isPopoutClick(ev({ metaKey: true })) && !isPopoutClick(ev({ ctrlKey: true })), "popout: Cmd-click and Ctrl-click are not pop-out clicks");
+    ok(!isPopoutClick(ev({ shiftKey: true, metaKey: true })) && !isPopoutClick(ev({ shiftKey: true, ctrlKey: true })), "popout: Shift with Cmd or Ctrl is not a pop-out click");
+    ok(!isPopoutClick(ev({ shiftKey: true, button: 1 })) && !isPopoutClick(ev({ shiftKey: true, button: 2 })), "popout: Shift with the middle or right button is not a pop-out click");
+    ok(POP_AFFORDANCE_LABEL === "Open in its own window" && POP_BLOCKED_MESSAGE === "Your browser blocked the window — allow pop-ups for this site." && POP_BLOCKED_MS === 6000, "popout: affordance label, blocked message and 6 s notice");
+    ok(threadPopUrl("gmail:18f/3") === "/inbox?thread=gmail%3A18f%2F3" && customerPopUrl("C 1") === "/companies/C%201", "popout: thread and customer pop-out URLs are encoded");
+    ok(JSON.stringify(parseSavedGeo(JSON.stringify({ left: 1, top: 2, width: 3, height: 4, x: 9 }))) === JSON.stringify({ left: 1, top: 2, width: 3, height: 4 }), "popout: a saved geometry parses its four numbers only");
+    ok(parseSavedGeo(null) === null && parseSavedGeo("{bad") === null && parseSavedGeo("[]") === null && parseSavedGeo(JSON.stringify({ left: "1" })) === null, "popout: missing or junk saved geometry parses to null");
+    const g = geoFromWindow({ screenX: 10.4, screenY: -20, outerWidth: 800, outerHeight: 600 });
+    ok(!!g && g.left === 10 && g.top === -20 && g.width === 800 && g.height === 600, "popout: geoFromWindow saves the outer frame (negative origins kept)");
+    ok(geoFromWindow({ screenX: 0, screenY: 0, outerWidth: 0, outerHeight: 600 }) === null && geoFromWindow({ screenX: NaN, screenY: 0, outerWidth: 1, outerHeight: 1 }) === null, "popout: an empty or junk frame is not saved");
+    ok(NAV_POPOUT.inbox.kind === "inbox" && NAV_POPOUT.inbox.id === "box" && NAV_POPOUT.inbox.url === "/inbox", "popout: nav Inbox ⧉ opens inbox:box at /inbox");
+    ok(NAV_POPOUT.estimator.kind === "estimate" && NAV_POPOUT.estimator.id === "new" && NAV_POPOUT.estimator.url === "/estimator", "popout: nav Estimator ⧉ opens estimate:new at /estimator");
+    ok(NAV_POPOUT.companies.kind === "customer" && NAV_POPOUT.companies.id === "list" && NAV_POPOUT.companies.url === "/companies", "popout: nav Customers ⧉ opens customer:list at /companies");
+    ok(Object.keys(NAV_POPOUT).length === 3, "popout: exactly three nav rows carry a ⧉");
+
+    /* openPopout / handlePopoutClick / savePopGeometry against a fake browser */
+    const g0 = globalThis as unknown as Record<string, unknown>;
+    const saved = { window: g0.window, document: g0.document, localStorage: g0.localStorage };
+    const store = memStorage({ "peak-pop-geo:estimate": JSON.stringify({ left: 50, top: 60, width: 700, height: 500 }) });
+    const calls: { url: string; name: string; features: string }[] = [];
+    let blocked = 0;
+    let classes: string[] = [];
+    type FakeWin = { location: { href: string; replace: (u: string) => void }; focus: () => void; focused: number };
+    const mkWin = (href: string): FakeWin => {
+      const w: FakeWin = { location: { href, replace: (u: string) => { w.location.href = u; } }, focus: () => { w.focused++; }, focused: 0 };
+      return w;
+    };
+    const named = new Map<string, FakeWin>();
+    let blockAll = false;
+    const fakeWindow = {
+      name: "",
+      innerWidth: 1200,
+      screenX: 30,
+      screenY: 40,
+      outerWidth: 900,
+      outerHeight: 700,
+      screen: { availLeft: 0, availTop: 25, availWidth: 1440, availHeight: 875 },
+      location: { origin: "https://app.example.test" },
+      open: (url: string, name: string, features: string) => {
+        calls.push({ url, name, features });
+        if (blockAll) return null;
+        if (!named.has(name)) named.set(name, mkWin("about:blank"));
+        return named.get(name);
+      },
+      dispatchEvent: (e: Event) => {
+        if (e.type === POP_BLOCKED_EVENT) blocked++;
+        return true;
+      },
+    };
+    try {
+      g0.window = fakeWindow;
+      g0.document = { documentElement: { classList: { contains: (c: string) => classes.includes(c) } } };
+      g0.localStorage = { getItem: store.getItem, setItem: store.setItem, removeItem: () => {} };
+
+      ok(openPopout("estimate", "Q-1", "/estimator?id=Q-1") === true, "popout: openPopout returns true when the window opens");
+      const first = calls[0];
+      ok(first.url === "" && first.name === "peak-pop:estimate:Q-1" && first.features === "popup=yes,left=50,top=60,width=700,height=500", "popout: openPopout opens by name with the saved geometry for that kind");
+      const w1 = named.get("peak-pop:estimate:Q-1")!;
+      ok(w1.location.href === "https://app.example.test/estimator?id=Q-1" && w1.focused === 1, "popout: a fresh (about:blank) window is sent to the URL and focused");
+      w1.location.href = "https://app.example.test/estimator?id=Q-1&step=review";
+      openPopout("estimate", "Q-1", "/estimator?id=Q-1");
+      ok(w1.location.href === "https://app.example.test/estimator?id=Q-1&step=review" && w1.focused === 2, "popout: popping the same item again focuses its window without reloading it");
+      openPopout("customer", "C-1", "/companies/C-1");
+      ok(calls[2].features === "popup=yes,left=270,top=63,width=900,height=800", "popout: no saved geometry opens the kind's default, centred");
+      blockAll = true;
+      ok(openPopout("thread", "T-1", "/inbox?thread=T-1") === false && blocked === 1, "popout: a blocked window returns false and raises the blocked notice");
+      blockAll = false;
+
+      let prevented = 0;
+      let stopped = 0;
+      const click = (o: Partial<{ shiftKey: boolean; metaKey: boolean; ctrlKey: boolean; button: number }>) => ({
+        ...ev(o),
+        preventDefault: () => { prevented++; },
+        stopPropagation: () => { stopped++; },
+      });
+      const before = calls.length;
+      ok(!handlePopoutClick(click({}), "thread", "T-2", "/inbox?thread=T-2") && !handlePopoutClick(click({ metaKey: true }), "thread", "T-2", "/x") && !handlePopoutClick(click({ ctrlKey: true }), "thread", "T-2", "/x"), "popout: plain, Cmd and Ctrl clicks are left alone");
+      ok(prevented === 0 && stopped === 0 && calls.length === before, "popout: a click that is left alone is not prevented and opens nothing");
+      ok(handlePopoutClick(click({ shiftKey: true }), "thread", "T-2", "/inbox?thread=T-2") && prevented === 1 && stopped === 1 && calls[calls.length - 1].name === "peak-pop:thread:T-2", "popout: Shift-click prevents the default and opens the pop-out");
+      fakeWindow.innerWidth = 800;
+      ok(!handlePopoutClick(click({ shiftKey: true }), "thread", "T-3", "/x") && prevented === 1, "popout: below 900 px Shift-click stays an ordinary click");
+      fakeWindow.innerWidth = 1200;
+      classes = ["pk-native"];
+      ok(!handlePopoutClick(click({ shiftKey: true }), "thread", "T-3", "/x") && prevented === 1, "popout: in the native shell Shift-click stays an ordinary click");
+      classes = [];
+
+      savePopGeometry();
+      ok(!("peak-pop-geo:thread" in store.data) && Object.keys(store.data).length === 1, "popout: a main window saves no geometry");
+      fakeWindow.name = "peak-pop:thread:T-9";
+      savePopGeometry();
+      ok(store.data["peak-pop-geo:thread"] === JSON.stringify({ left: 30, top: 40, width: 900, height: 700 }), "popout: a pop-out saves its frame under its own kind");
+      g0.localStorage = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+      savePopGeometry();
+      ok(openPopout("inbox", "box", "/inbox") === true && calls[calls.length - 1].features === "popup=yes,left=340,top=63,width=760,height=800", "popout: blocked storage falls back to the defaults without throwing");
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete g0[k];
+        else g0[k] = v;
+      }
+    }
+
+    /* source pins: headers, nav, shift-click sites, mounts */
+    const btn = readSrc("src/components/popout/popout-button.tsx");
+    const link = readSrc("src/components/popout/pop-link.tsx");
+    const notice = readSrc("src/components/popout/pop-blocked-notice.tsx");
+    const openSrc = readSrc("src/lib/popout/open.ts");
+    ok(btn.includes('"pk-popout-affordance"') && btn.includes('aria-label="Open in its own window"') && btn.includes('type="button"'), "popout: the ⧉ button carries pk-popout-affordance and the aria-label");
+    ok(link.includes("handlePopoutClick(e, popKind, popId, popUrl ?? href)") && /if \(handlePopoutClick[^\n]*\) return;\s*onClick\?\.\(e\);/.test(link), "popout: PopLink pops on Shift-click and otherwise hands the click to the link unchanged");
+    ok(notice.includes("POP_BLOCKED_EVENT") && notice.includes("setTimeout(() => setShownAt(null), POP_BLOCKED_MS)"), "popout: the blocked notice listens for the event and hides after 6 s");
+    for (const [f, src] of [["popout-button", btn], ["pop-link", link], ["pop-blocked-notice", notice]] as const) {
+      const imports = [...src.matchAll(/^import (?!type )[\s\S]*? from "([^"]+)";/gm)].map((m) => m[1]);
+      const bad = imports.filter((p) => /^@\/(db\b|lib\/stores\/|lib\/settings|lib\/session|auth)/.test(p));
+      ok(src.startsWith('"use client";') && bad.length === 0, `popout: ${f} is a client component importing no store, db or server module`);
+    }
+    ok(/try \{\s*const features = featuresFor\(clampGeo\(savedGeo\(kind\), openerScreen\(\), kind\)\);\s*w = window\.open\("", name, features\);\s*\} catch/.test(openSrc), "popout: window.open sits in try/catch");
+    ok(/try \{\s*return parseSavedGeo\(localStorage\.getItem\(geoKey\(kind\)\)\);\s*\} catch/.test(openSrc) && /try \{[\s\S]*?localStorage\.setItem\(geoKey\(p\.kind\)[\s\S]*?\} catch/.test(openSrc), "popout: geometry localStorage reads and writes sit in try/catch");
+
+    const shell = readSrc("src/app/(app)/inbox/inbox-shell.tsx");
+    ok(/<PopoutButton kind="inbox" id="box" url=\{`\/inbox\?\$\{baseQuery\}`\}/.test(shell), "popout: the Inbox shell header pops the whole box (current box URL)");
+    const reader = readSrc("src/app/(app)/inbox/thread-reader.tsx");
+    ok(reader.includes('<PopoutButton kind="thread" id={vm.id} url={threadPopUrl(vm.id)} />'), "popout: the thread reader header pops that thread");
+    const estHeader = readSrc("src/app/(app)/estimator/estimator-header.tsx");
+    ok(/\{loadedId && \(\s*<PopoutButton kind="estimate" id=\{loadedId\} url=\{quoteBuilderHref\(\{ id: loadedId \}\)\} tone="dark" \/>\s*\)\}/.test(estHeader), "popout: the Estimator header pops the estimate — only once it has an id");
+    const custPage = readSrc("src/app/(app)/companies/[id]/page.tsx");
+    ok(custPage.includes('<PopoutButton kind="customer" id={cust.id} url={customerPopUrl(cust.id)}'), "popout: the customer record header pops the customer");
+    const nav = readSrc("src/components/nav/Nav.tsx");
+    ok(/const pop = NAV_POPOUT\[c\.key\];\s*if \(!pop\) return item;/.test(nav) && /<PopoutButton\s+kind=\{pop\.kind\}\s+id=\{pop\.id\}\s+url=\{pop\.url\}\s+className="pk-nav-pop"\s+onOpen=\{closeAll\}/.test(nav), "popout: the nav dropdown rows for Inbox/Estimator/Companies carry a hover ⧉");
+
+    const list = readSrc("src/app/(app)/inbox/thread-list.tsx");
+    ok(list.includes('if (!r.isDraft && handlePopoutClick(e, "thread", r.id, threadPopUrl(r.id))) return;'), "popout: Shift-click on an Inbox thread row pops the thread (drafts excluded)");
+    ok(/if \(handlePopoutClick\(e, "thread", r\.id, threadPopUrl\(r\.id\)\)\) return;\s*onOpen\(r\.id\);/.test(list), "popout: Shift-click on an Inbox search result pops the thread");
+    const hub = readSrc("src/app/(app)/quotes/page.tsx");
+    ok(/<PopLink\s+href=\{hrefFor\(\{ id: selected \? null : q\.id \}\)\}\s+popKind="estimate"\s+popId=\{q\.id\}\s+popUrl=\{quoteBuilderHref\(q\)\}/.test(hub), "popout: Shift-click on a Quotes hub row pops the estimate");
+    ok(/<PopLink\s+href=\{editHrefFor\(q\)\.href\}\s+popKind="estimate"\s+popId=\{q\.id\}/.test(hub), "popout: Shift-click on the hub's Open link pops the estimate");
+    ok(/<PopLink\s+key=\{qt\.id\}\s+href=\{quoteBuilderHref\(qt\)\}\s+popKind="estimate"\s+popId=\{qt\.id\}/.test(custPage), "popout: Shift-click on a customer record quote row pops the estimate");
+    const pipeline = readSrc("src/app/(app)/home-pipeline.tsx");
+    ok(/<PopLink\s+key=\{q\.id\}\s+href=\{q\.href\}\s+popKind="estimate"\s+popId=\{q\.id\}\s+popUrl=\{quoteBuilderHref\(q\)\}/.test(pipeline), "popout: Shift-click on a Home pipeline quote card pops the estimate");
+    const sheet = readSrc("src/app/(app)/home-stage-sheet.tsx");
+    ok(/<PopLink\s+href=\{quoteBuilderHref\(quote\)\}\s+popKind="estimate"\s+popId=\{quote\.id\}/.test(sheet), "popout: Shift-click on the Home stage sheet's Open link pops the estimate");
+    const dir = readSrc("src/app/(app)/companies/page.tsx");
+    ok(/<PopLink\s+href=\{customerPopUrl\(c\.id\)\}\s+popKind="customer"\s+popId=\{c\.id\}/.test(dir), "popout: Shift-click on a companies directory row pops the customer");
+
+    const appLayout2 = readSrc("src/app/(app)/layout.tsx");
+    ok((appLayout2.match(/<PopBlockedNotice \/>/g) || []).length === 1, "popout: the blocked notice is mounted once in the (app) layout");
+    const live2 = readSrc("src/components/popout/live-sync.tsx");
+    ok(live2.includes("const GEOMETRY_DEBOUNCE_MS = 500;") && /if \(!isPopWindow\(\)\) return;[\s\S]*?addEventListener\("resize", onResize\);\s*window\.addEventListener\("beforeunload", saveNow\);\s*window\.addEventListener\("pagehide", saveNow\);/.test(live2), "popout: a pop-out saves its geometry on resize (500 ms) and on beforeunload/pagehide");
+    ok(/window\.removeEventListener\("pagehide", forgetMainFocus\);\s*forgetMainFocus\(\);\s*\};/.test(live2), "popout: LiveSync forgets main focus in its cleanup, not only on pagehide");
+    const header2 = readSrc("src/components/popout/pop-header.tsx");
+    ok(/if \(!document\.documentElement\.classList\.contains\(POP_CLASS\)\) return;\s*\/\/[^\n]*\n\s*let obs: MutationObserver/.test(header2), "popout: PopHeader watches the title only in a pop-out (html.pk-pop)");
+    const chan = readSrc("src/lib/popout/channel.ts");
+    ok(chan.includes("Only the most recently focused") && !chan.includes("(any window without pk-pop)"), "popout: the open-in-main comment says only the most recently focused main window answers");
+    const css2 = readSrc("src/app/globals.css");
+    ok(/\.pk-dropdown-row:hover \.pk-nav-pop,\s*\.pk-nav-pop:focus-visible \{\s*opacity: 1;/.test(css2), "popout: the nav ⧉ shows on row hover or keyboard focus");
+  }
 
   /* real BroadcastChannel round trip (Node has one): own posts are ignored, another window's arrive */
   if (typeof BroadcastChannel !== "undefined") {

@@ -23,6 +23,8 @@ import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { shortTaskTitle } from "./organize/format";
 import { postChanged } from "@/lib/popout/channel";
+import { threadPopUrl } from "@/lib/popout/click";
+import PopoutButton from "@/components/popout/popout-button";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 import { replyOutcome } from "@/lib/assist/outcome";
 import type { AssistOutcome } from "@/lib/assist/types";
@@ -991,6 +993,8 @@ export default function ThreadReader({
               </div>
               {vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}
             </div>
+            {/* Pop-out windows: this thread in its own window. */}
+            <PopoutButton kind="thread" id={vm.id} url={threadPopUrl(vm.id)} />
           </div>
 
         </div>

@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { postOpenInMain } from "@/lib/popout/channel";
-import { popHeaderTitle } from "@/lib/popout/live";
+import { POP_CLASS, popHeaderTitle } from "@/lib/popout/live";
 
 const ACK_MS = 500;
 
@@ -22,6 +22,8 @@ export default function PopHeader() {
   useEffect(() => {
     const read = () => setTitle(popHeaderTitle(document.title));
     read();
+    // The header only shows in a pop-out — a main window doesn't watch <head>.
+    if (!document.documentElement.classList.contains(POP_CLASS)) return;
     // Next swaps the <title> after a client navigation — follow it.
     let obs: MutationObserver | null = null;
     try {

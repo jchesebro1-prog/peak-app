@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { DraftPayload, ListVM, Opt, ThreadRowVM } from "./types";
 import type { SearchRow } from "./actions";
 import { ChanGlyph, CheckIcon, FlagIcon, Magnifier, PinIcon, RestoreIcon, TrashIcon } from "./icons";
+import { handlePopoutClick } from "@/lib/popout/open";
+import { threadPopUrl } from "@/lib/popout/click";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 
@@ -315,7 +317,9 @@ export default function ThreadList({
                 isDeleted={list.isDeleted}
                 onToggle={(shift) => onToggleSelect(r.id, shift)}
                 actions={rowActions}
-                onClick={() => {
+                onClick={(e) => {
+                  // Pop-out windows: Shift-click opens the thread in its own window.
+                  if (!r.isDraft && handlePopoutClick(e, "thread", r.id, threadPopUrl(r.id))) return;
                   if (r.isDraft && r.draft) onOpenDraft(r.draft, r.id);
                   else onSelect(r.id);
                 }}
@@ -422,7 +426,11 @@ function SearchResults({
       {rows.map((r) => (
         <button
           key={r.id}
-          onClick={() => onOpen(r.id)}
+          onClick={(e) => {
+            // Pop-out windows: Shift-click opens the thread in its own window.
+            if (handlePopoutClick(e, "thread", r.id, threadPopUrl(r.id))) return;
+            onOpen(r.id);
+          }}
           style={{
             width: "100%",
             display: "flex",
@@ -537,7 +545,7 @@ function Row({
   selected: boolean;
   isDeleted: boolean;
   onToggle: (shift: boolean) => void;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
   actions: RowActions;
 }) {
   const [expanded, setExpanded] = useState(false);

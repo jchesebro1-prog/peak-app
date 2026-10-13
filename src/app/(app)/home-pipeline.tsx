@@ -4,6 +4,8 @@ import { timeAgo as quoteTimeAgo, type Quote, type QuoteStatus } from "@/lib/sto
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { CardHeadTitle } from "./home-shared";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { quoteBuilderHref } from "@/lib/quote-links";
+import PopLink from "@/components/popout/pop-link";
 
 /**
  * My pipeline card — the filter strip + quote rows, port of Home.dc.html's
@@ -118,9 +120,12 @@ export default function HomePipeline({
           q.requote ? " · needs requote" : ""
         }`;
         return (
-          <Link
+          <PopLink
             key={q.id}
             href={q.href}
+            popKind="estimate"
+            popId={q.id}
+            popUrl={quoteBuilderHref(q)}
             scroll={false}
             className="pkh-hover"
             style={{
@@ -187,7 +192,7 @@ export default function HomePipeline({
               </StatusPill>
             </div>
             <span style={{ color: "#c4c9d2", fontSize: 18, flexShrink: 0 }}>›</span>
-          </Link>
+          </PopLink>
         );
       })}
 

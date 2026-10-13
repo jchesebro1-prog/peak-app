@@ -54,6 +54,7 @@ import { meetingsTickAction } from "./meetings/actions";
 import { organizeHref, ORGANIZE_BASE_HREF, type OrganizeTab } from "./organize/format";
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
+import PopoutButton from "@/components/popout/popout-button";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -746,15 +747,21 @@ export default function InboxShell({
           overflow: "hidden",
         }}
       >
-        <button
-          type="button"
-          onClick={() => setSideCollapsed(!sideCollapsed)}
-          title={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
-          aria-label={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
-          style={{ alignSelf: "flex-end", margin: "8px 8px 0", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", cursor: "pointer", width: 28, height: 26, flexShrink: 0 }}
-        >
-          {sideCollapsed ? "›" : "‹"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, margin: "8px 8px 0", flexShrink: 0 }}>
+          {/* Pop-out windows: this whole box in its own window. */}
+          {!sideCollapsed && (
+            <PopoutButton kind="inbox" id="box" url={`/inbox?${baseQuery}`} style={{ width: 28, height: 26 }} />
+          )}
+          <button
+            type="button"
+            onClick={() => setSideCollapsed(!sideCollapsed)}
+            title={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
+            aria-label={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
+            style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", cursor: "pointer", width: 28, height: 26, flexShrink: 0 }}
+          >
+            {sideCollapsed ? "›" : "‹"}
+          </button>
+        </div>
         <div style={{ display: sideCollapsed ? "none" : "contents" }}>
         <div style={{ padding: "14px 13px 10px", flexShrink: 0 }}>
           <button

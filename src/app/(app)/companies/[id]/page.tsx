@@ -30,6 +30,9 @@ import { dateYear, shortDate, timeAgo } from "@/lib/format";
 import { docLocId, getSiteByDocLocId, sitesForCompany } from "@/lib/identity/sites";
 import { venueDialogInitial } from "@/lib/identity/venue-save";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import PopoutButton from "@/components/popout/popout-button";
+import PopLink from "@/components/popout/pop-link";
+import { customerPopUrl } from "@/lib/popout/click";
 import { hasVenueCalendar } from "@/lib/stores/venue-calendars";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
@@ -393,7 +396,9 @@ export default async function CustomerDetailPage({
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 9, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0 }}>
+            {/* Pop-out windows: this customer record in its own window. */}
+            <PopoutButton kind="customer" id={cust.id} url={customerPopUrl(cust.id)} style={{ width: 34, height: 34 }} />
             <Link
               href={`/companies/${encodeURIComponent(cust.id)}?edit=1`}
               style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 14px", textDecoration: "none" }}
@@ -703,9 +708,11 @@ export default async function CustomerDetailPage({
                 items={custQuotes.map((qt) => {
                   const m = quoteStatusMeta(qt.status);
                   return (
-                    <Link
+                    <PopLink
                       key={qt.id}
                       href={quoteBuilderHref(qt)}
+                      popKind="estimate"
+                      popId={qt.id}
                       className="cu-d-row"
                       style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 102px 96px 92px", gap: 10, padding: "13px 18px", alignItems: "center", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
                     >
@@ -722,7 +729,7 @@ export default async function CustomerDetailPage({
                       </span>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, textAlign: "right" }}>{moneyDash(qt.value)}</span>
                       <span style={{ fontSize: 11.5, color: "#8c919c", textAlign: "right" }}>{shortDate(qt.updatedAt)}</span>
-                    </Link>
+                    </PopLink>
                   );
                 })}
                 searchText={custQuotes.map((qt) => [qt.name, qt.id, quoteStatusMeta(qt.status).label].filter(Boolean).join(" "))}

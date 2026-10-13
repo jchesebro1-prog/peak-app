@@ -136,6 +136,88 @@ html.pk-pop .pk-pop-header {
 .pk-pop-header-close {
   padding: 6px 9px;
 }
+/* The ⧉ button (PopoutButton). */
+.pk-popout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid #e4e7ec;
+  background: #fff;
+  color: #5b616e;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pk-popout-btn:hover {
+  background: var(--hover-light);
+  color: var(--ink);
+}
+.pk-popout-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.pk-popout-btn--dark {
+  background: #2b2e35;
+  border-color: #3a3e46;
+  color: #cfd3da;
+}
+.pk-popout-btn--dark:hover {
+  background: #353840;
+  color: #fff;
+}
+/* Nav dropdown rows with a hover ⧉ (Inbox, Estimator, Companies). */
+.pk-dropdown-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pk-dropdown-row > .pk-dropdown-item {
+  flex: 1;
+  min-width: 0;
+}
+.pk-nav-pop {
+  width: 26px;
+  height: 26px;
+  border-color: transparent;
+  background: transparent;
+  opacity: 0;
+}
+.pk-dropdown-row:hover .pk-nav-pop,
+.pk-nav-pop:focus-visible {
+  opacity: 1;
+}
+/* "Pop-up blocked" notice (PopBlockedNotice). */
+.pk-pop-blocked {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px 10px 16px;
+  border-radius: 10px;
+  background: #16181d;
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.pk-pop-blocked-close {
+  background: transparent;
+  border: none;
+  color: #cfd3da;
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+}
 /* Ways to open a pop-out (⧉ buttons, nav hover ⧉): hidden on narrow screens
    and in the Capacitor native shell (LiveSync tags it html.pk-native). */
 @media (max-width: 899px) {

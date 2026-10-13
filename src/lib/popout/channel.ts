@@ -141,9 +141,10 @@ export function postChanged(entity: ChangedEntity, id?: string): void {
   post({ type: "changed", entity, ...(id ? { id } : {}), from: windowId() });
 }
 
-/** Ask the main window (any window without pk-pop) to navigate to `url`.
- *  Resolves true when a main window acks within `ackMs`, false otherwise —
- *  the caller then opens `url` in a normal tab. */
+/** Ask the main window to navigate to `url`. Only the most recently focused
+ *  main window (not a pop-out) answers — see `shouldAnswerOpenInMain` in
+ *  live.ts. Resolves true when it acks within `ackMs`, false otherwise — the
+ *  caller then opens `url` in a normal tab. */
 export function postOpenInMain(url: string, ackMs = 500): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false;

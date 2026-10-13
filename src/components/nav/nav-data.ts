@@ -5,6 +5,16 @@
  */
 
 import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
+import type { PopKind } from "@/lib/popout/names";
+
+/** Pop-out windows (spec §3): nav rows with a hover ⧉ that opens the
+ *  section's landing page in its own window — Inbox (`inbox:box`), Estimator
+ *  (`estimate:new`) and Customers (the Companies directory, `customer:list`). */
+export const NAV_POPOUT: Record<string, { kind: PopKind; id: string; url: string }> = {
+  inbox: { kind: "inbox", id: "box", url: "/inbox" },
+  estimator: { kind: "estimate", id: "new", url: "/estimator" },
+  companies: { kind: "customer", id: "list", url: "/companies" },
+};
 
 export type NavChild = { key: string; label: string; href: string; mobileLabel?: string };
 export type NavEntry =

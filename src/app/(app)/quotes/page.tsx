@@ -21,6 +21,7 @@ import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, createQuoteClientPackageAction } from "./actions";
 import { DeleteQuoteButton } from "./delete-quote-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import PopLink from "@/components/popout/pop-link";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
@@ -561,8 +562,11 @@ export default async function QuotesPage({
               : "";
           return (
             <div key={q.id}>
-              <Link
+              <PopLink
                 href={hrefFor({ id: selected ? null : q.id })}
+                popKind="estimate"
+                popId={q.id}
+                popUrl={quoteBuilderHref(q)}
                 scroll={false}
                 className="qt-row qt-rowlink"
                 style={{
@@ -788,7 +792,7 @@ export default async function QuotesPage({
                 >
                   {timeAgo(q.updatedAt)}
                 </div>
-              </Link>
+              </PopLink>
 
               {selected && (
                 <SelectedPanel
@@ -1027,8 +1031,10 @@ function SelectedPanel({
               );
             })}
           </form>
-          <Link
+          <PopLink
             href={editHrefFor(q).href}
+            popKind="estimate"
+            popId={q.id}
             style={{
               fontSize: 12.5,
               fontWeight: 600,
@@ -1040,7 +1046,7 @@ function SelectedPanel({
             }}
           >
             {editHrefFor(q).label}
-          </Link>
+          </PopLink>
           <DeleteQuoteButton id={q.id} won={q.status === "won"} />
         </div>
       </div>
