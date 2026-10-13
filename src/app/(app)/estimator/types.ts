@@ -621,6 +621,15 @@ export type AiSource = {
   label: string;
 };
 
+/** #334 (D877) — what the Build banner shows for an Assist-drafted estimate:
+ *  the source email, the model's notes, and why each still-present line was picked. */
+export type AssistDraftView = {
+  quoteId: string;
+  threadId: string;
+  notes: string;
+  reasons: { desc: string; reason: string }[];
+};
+
 export type EstimatorProps = {
   initial: InitialQuote;
   /** Settings → Pipelines (Task 6) — the Daylite stage bar reads the loaded
@@ -677,6 +686,9 @@ export type EstimatorProps = {
   /** #245 Task 13 — a Portal panel Approve refusal's message (?statusError=
    *  from the Quotes-hub status action), or null. */
   portalStatusError: string | null;
+  /** #334 (D877) — the Build banner for an estimate Assist drafted from an
+   *  email (null when not an Assist draft, or once dismissed). */
+  assistDraft: AssistDraftView | null;
   /** Spec records design §6 — the Spec select's options: every non-archived
    *  system record's match key (`systemMatchKeys`), read on the server so the
    *  client never imports the records store. */

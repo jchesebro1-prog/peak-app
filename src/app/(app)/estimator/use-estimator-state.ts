@@ -212,7 +212,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
-    quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, specKeys, canApplyCredit,
+    quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
@@ -3128,6 +3128,7 @@ export function useEstimatorState(props: EstimatorProps) {
     pipelines,
     placeLibrarySystem,
     portalStatusError,
+    assistDraft,
     preparedValue,
     projectName,
     qdChipLabel,

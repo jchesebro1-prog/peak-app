@@ -1,7 +1,8 @@
 "use server";
 
 import { requireUser } from "@/lib/session";
-import { get as getThread, getAll as allThreads, resolveCustomerId, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { revalidatePath } from "next/cache";
+import { getAll as allThreads, resolveCustomerId } from "@/lib/stores/comms";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { signatureFor } from "@/lib/stores/signatures";
@@ -16,6 +17,10 @@ import {
 import { activeUsers } from "@/lib/users";
 import { threadTaskLinkOptions } from "@/lib/inbox-task-write";
 import { runAssist } from "@/lib/assist/run";
+import { loadThreadFor } from "@/lib/assist/thread-access";
+import { draftEstimateFromThread } from "@/lib/assist/estimate-draft-server";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { quoteBuilderHref } from "@/lib/quote-links";
 import { chicagoToday } from "@/lib/assist/config";
 import { getRun, setRunOutcome } from "@/lib/stores/assist-runs";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
@@ -33,12 +38,6 @@ import type { AssistFeature, AssistOutcome } from "@/lib/assist/types";
 
 const OUTCOMES: AssistOutcome[] = ["accepted", "edited", "discarded"];
 const CLIENT_OUTCOME_FEATURES: AssistFeature[] = ["tasks", "reply"];
-
-async function loadThreadFor(threadId: string, meName: string): Promise<CommThread | null> {
-  const t = await getThread(String(threadId || ""));
-  if (!t || t.deleted || !visibleTo(t, meName) || t.channel !== "email") return null;
-  return t;
-}
 
 export async function suggestTasksAction(threadId: string): Promise<
   | { ok: true; runId: string; suggestions: TaskSuggestion[]; team: { id: string; name: string }[]; links: { key: string; label: string }[] }
@@ -144,4 +143,18 @@ export async function recordAssistOutcomeAction(
   }
   if (JSON.stringify(safe).length > 4000) return { ok: false };
   return { ok: await setRunOutcome(String(runId || ""), me.id, outcome, safe) };
+}
+
+/** #334 Assist — Draft estimate: a new DRAFT Estimator quote from this email
+ *  (extract → candidates → draft → server pricing). Never sent, linked or
+ *  status-changed; the estimator reviews every line in the Estimator. */
+export async function draftEstimateAction(
+  threadId: string
+): Promise<{ ok: true; quoteId: string; href: string } | { ok: false; error: string }> {
+  const me = await requireUser();
+  const r = await draftEstimateFromThread(String(threadId || ""), { id: me.id, name: me.name });
+  if (!r.ok) return r;
+  await scheduleQuotePdf(r.quoteId);
+  revalidatePath("/quotes");
+  return { ok: true, quoteId: r.quoteId, href: quoteBuilderHref(r.quote) };
 }

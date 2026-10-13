@@ -44,6 +44,7 @@ import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/grou
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
+import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
 import type {
   AiSource,
   CustomerLite,
@@ -513,6 +514,8 @@ export default async function EstimatorPage({
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
       freightRule={freightRule}
       portalStatusError={portalStatusError}
+      // #334 (D877): the Assist-draft banner — null unless an undismissed Assist draft.
+      assistDraft={assistDraftViewOf(q)}
       // Spec records design §6: the Spec select's options, as plain strings.
       specKeys={systemMatchKeys(specRecords)}
       canApplyCredit={can("create", user.roles)}

@@ -2,7 +2,8 @@
 import { z } from "zod";
 import { SYSTEM_PRICE_STEP } from "@/app/(app)/estimator/pricing";
 import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { AssistDraftView, SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { AssistDraftInfo } from "@/lib/stores/quotes";
 import type { SystemCategory } from "@/lib/system-categories";
 import type { DraftLine } from "../outcome";
 import { UNTRUSTED_NOTE } from "./thread-text";
@@ -95,10 +96,11 @@ export function buildDraftSections(
   let dropped = 0; // blank lines removed
   let unresolved = 0; // skus outside the candidate set, kept as custom lines
   const catById = new Map(ctx.categories.map((c) => [c.id, c]));
+  // Line ids are unique across the WHOLE quote — the Estimator finds/removes a line by id alone.
+  let nextId = 1;
   for (const sys of (draft?.systems ?? []).slice(0, 12)) {
     const sectionId = "sys" + (ctx.sectionIdBase + sections.length);
     const items: SpecItem[] = [];
-    let nextId = 1;
     for (const l of (sys.lines ?? []).slice(0, 60)) {
       const qty = Math.min(9999, Math.max(1, Math.floor(Number(l.qty) || 1)));
       // Only a part from the server-built candidate map is priced, and only from ITS cost/list — never from the draft.
@@ -132,4 +134,23 @@ export function buildDraftSections(
     });
   }
   return { sections, reasons, lines, dropped, unresolved };
+}
+
+/** The Estimator banner's view of an Assist draft (D877): null when the quote
+ *  isn't one or the banner was dismissed. Reasons follow the quote's CURRENT
+ *  lines in order — a line the estimator removed drops out. */
+export function assistDraftViewOf(q: { id: string; assistDraft?: AssistDraftInfo | null; spec?: unknown } | null): AssistDraftView | null {
+  const d = q?.assistDraft;
+  if (!q || !d || typeof d !== "object" || d.dismissedAt || typeof d.threadId !== "string" || !d.threadId) return null;
+  const reasons: { desc: string; reason: string }[] = [];
+  const map = d.reasons && typeof d.reasons === "object" ? d.reasons : {};
+  const secs = (q.spec as { sections?: unknown } | null | undefined)?.sections;
+  for (const sec of Array.isArray(secs) ? (secs as Array<{ id?: unknown; items?: unknown }>) : []) {
+    for (const it of Array.isArray(sec?.items) ? (sec.items as Array<{ id?: unknown; desc?: unknown }>) : []) {
+      const key = `${String(sec.id)}:${String(it?.id)}`;
+      const reason = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
+      if (typeof reason === "string" && reason) reasons.push({ desc: typeof it.desc === "string" ? it.desc : "", reason });
+    }
+  }
+  return { quoteId: q.id, threadId: d.threadId, notes: typeof d.notes === "string" ? d.notes : "", reasons };
 }

@@ -392,6 +392,20 @@ export type Quote = {
    *  update() drops it; never content (not a QUOTE_CONTENT_FIELDS member),
    *  never snapshotted, never bumps updatedAt. An expired claim is ignored. */
   emailSending?: EstimateEmailClaim | null;
+  /** #334: set when Assist drafted this estimate from an email (D877). Never
+   *  content, never snapshotted, never copied by buildQuote; staff-only. */
+  assistDraft?: AssistDraftInfo;
+};
+
+/** #334 (D877) — where an Assist-drafted estimate came from. `reasons` is
+ *  keyed `"<sectionId>:<lineId>"`; `dismissedAt` hides the Estimator banner. */
+export type AssistDraftInfo = {
+  runId: string;
+  threadId: string;
+  at: number;
+  notes: string;
+  reasons: Record<string, string>;
+  dismissedAt?: number;
 };
 
 /** One in-flight estimate email (`Quote.emailSending`). */
@@ -875,6 +889,20 @@ export async function update(
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
+}
+
+/** #334 (D877) — hide an Assist-drafted estimate's banner. Under the row
+ *  lock; never bumps updatedAt (a dismiss is not an edit, so it can't stale an
+ *  open Estimator's version-checked send). False when there is no live draft
+ *  marker to dismiss. */
+export async function dismissAssistDraft(id: string, now: number = Date.now()): Promise<boolean> {
+  let wrote = false;
+  await patchQuote(id, (q) => {
+    if (!q.assistDraft || typeof q.assistDraft !== "object" || q.assistDraft.dismissedAt) return;
+    q.assistDraft = { ...q.assistDraft, dismissedAt: now };
+    wrote = true;
+  });
+  return wrote;
 }
 
 /* ---- revisions (punch item 24) ---- */

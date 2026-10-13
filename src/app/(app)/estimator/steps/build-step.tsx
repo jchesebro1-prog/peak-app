@@ -22,6 +22,7 @@ import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
 import { PortalPanel } from "../portal-panel";
+import { AssistDraftBanner } from "../assist-draft-banner";
 import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
 
 /**
@@ -125,6 +126,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     openVendorEdit,
     placeLibrarySystem,
     portalStatusError,
+    assistDraft,
     rate,
     removeCredit,
     removeItem,
@@ -398,6 +400,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
             position: "relative",
           }}
         >
+          <AssistDraftBanner view={assistDraft} />
           {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
           {pinned.whole.length > 0 && (
             <div style={{ margin: "0 0 12px" }}>

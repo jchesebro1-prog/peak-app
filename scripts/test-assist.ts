@@ -10,7 +10,7 @@ import { editRatio, estimateKeep, replyOutcome } from "@/lib/assist/outcome";
 import type { AssistProvider, ProviderRequest } from "@/lib/assist/types";
 import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
 import { promptMessages, threadBlock } from "@/lib/assist/features/thread-text";
-import { buildDraftSections, buildDraftUserText, sanitizeExtract } from "@/lib/assist/features/estimate-draft";
+import { assistDraftViewOf, buildDraftSections, buildDraftUserText, sanitizeExtract } from "@/lib/assist/features/estimate-draft";
 import { rankCatalogParts } from "@/app/(app)/estimator/catalog-rank";
 import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
 import { buildReplyUserText, cleanReplyText, openQuotesFor, pickStyleExamples } from "@/lib/assist/features/reply-draft";
@@ -314,6 +314,114 @@ export async function assistEstimatePureChecks(ok: Ok): Promise<void> {
     { sku: "__proto__", qty: 1, desc: "x", reason: "" },
   ] }] }, { parts, tierMargin: 0.3, freightPct: 0, categories: [], sectionIdBase: 1 });
   ok(hostile.sections[0].items[0].price === catalogAddPrice(10, 20, 0.3) && hostile.sections[0].items[0].cost === 10 && hostile.sections[0].items[1].sku === "" && hostile.sections[0].items[1].price === 0, "assist estimate: model-supplied price/cost ignored; unknown sku is a $0 custom line");
+  // The Estimator finds/removes a line by id alone, so ids are unique across systems.
+  const two = buildDraftSections({ quoteName: "x", notes: "", systems: [
+    { name: "A", categoryId: "", lines: [{ sku: "VEL-1", qty: 1, desc: "", reason: "a" }, { sku: "", qty: 1, desc: "", reason: "" }] },
+    { name: "B", categoryId: "", lines: [{ sku: "VEL-1", qty: 1, desc: "", reason: "b" }] },
+  ] }, { parts, tierMargin: 0.3, freightPct: 0, categories: [], sectionIdBase: 5 });
+  const ids = two.sections.flatMap((x) => x.items.map((i) => i.id));
+  ok(ids.join() === "1,2" && two.reasons["sys5:1"] === "a" && two.reasons["sys6:2"] === "b", "assist estimate: line ids unique across systems; a dropped line frees its id");
+  const view = assistDraftViewOf({ id: "Q-1", assistDraft: { runId: "AR-1", threadId: "C-1", at: 1, notes: "n", reasons: { "sys5:1": "a", "sys6:2": "b", "sys6:9": "gone", toString: "x" } }, spec: { sections: two.sections } });
+  ok(!!view && view.reasons.map((x) => x.reason).join() === "a,b" && view.threadId === "C-1", "assist estimate: banner reasons follow the current lines; removed lines drop out");
+  ok(assistDraftViewOf({ id: "Q-1", assistDraft: { runId: "AR-1", threadId: "C-1", at: 1, notes: "", reasons: {}, dismissedAt: 2 }, spec: null }) === null && assistDraftViewOf({ id: "Q-1", spec: null }) === null, "assist estimate: dismissed or non-Assist quote → no banner");
+}
+
+/** #334 Task 8 — Draft estimate end to end against the DB, fake providers only (no network). */
+export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
+  const { draftEstimateFromThread } = await import("@/lib/assist/estimate-draft-server");
+  const { upsert: upsertPart } = await import("@/lib/stores/catalog");
+  const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
+  const { get: getQuote, dismissAssistDraft } = await import("@/lib/stores/quotes");
+  const { get: getThread } = await import("@/lib/stores/comms");
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const { listDocsByField } = await import("@/db/doc-store");
+  const { createFixture, fixtureId } = await import("./test-fixtures");
+
+  const ME = { id: "u-assist-est", name: "Esti Mator" };
+  const SKU = fixtureId(334, "zorbaflex-velour");
+  const CID = fixtureId(334, "co");
+  const T = fixtureId(334, "thread");
+  const T_OTHER = fixtureId(334, "thread-other");
+  // A far month so the spend cap never sees real rows.
+  const NOW = Date.UTC(2034, 1, 10, 15, 0);
+  const settings = assistSettingsOf({ assistUsers: [ME.id] });
+  const env = { ANTHROPIC_API_KEY: "test" };
+  const extractText = JSON.stringify({ quoteName: "Test", venue: "", requests: [{ phrase: "zorbaflex", qty: 2 }], systems: ["Curtains"] });
+  const draftText = JSON.stringify({ quoteName: "Test draft", notes: "check width", systems: [{ name: "Curtains", categoryId: "", lines: [
+    { sku: SKU, qty: 2, desc: "", reason: "asked" },
+    { sku: "", qty: 1, desc: "Custom batten", reason: "" },
+  ] }] });
+
+  const baseThread = {
+    mailbox: "personal", mailboxUser: ME.name, unread: false, customerId: CID, customer: "Zorbaflex Test Co",
+    contactName: "Pat Lee", contactEmail: "pat@example.com", subject: "Pricing for curtains", channel: "email", status: "waiting_us",
+    assignedTo: "", link: null, createdAt: NOW, updatedAt: NOW,
+    messages: [{ id: "m1-test", at: NOW, direction: "in", channel: "email", author: "Pat Lee", body: "Please price 2 zorbaflex velour panels." }],
+  };
+  try {
+    await upsertPart({ id: SKU, sku: SKU, desc: "Zorbaflex assist velour panel", category: "Fabric", unit: "ea", list: 200, cost: 100 });
+    registerFixture("catalog_parts", SKU);
+    await upsertCustomer({ id: CID, name: "Zorbaflex Test Co", type: "Education", locations: [], contacts: [] });
+    await createFixture("comms", { ...baseThread, id: T } as never);
+    await createFixture("comms", { ...baseThread, id: T_OTHER, mailboxUser: "Somebody Else" } as never);
+
+    // A thread outside the user's own mailbox: refused before any model call.
+    const hidden = await draftEstimateFromThread(T_OTHER, ME, { extract: { provider: fakeProvider(extractText), settings, env, now: NOW } });
+    ok(!hidden.ok && (await listDocsByField("assist_runs", "contextRef", ["thread:" + T_OTHER])).length === 0, "assist estimate db: another user's thread is refused with no run");
+
+    const xCalls: ProviderRequest[] = [];
+    const dCalls: ProviderRequest[] = [];
+    const r = await draftEstimateFromThread(T, ME, {
+      extract: { provider: fakeProvider(extractText, { calls: xCalls }), settings, env, now: NOW },
+      draft: { provider: fakeProvider(draftText, { calls: dCalls }), settings, env, now: NOW },
+      now: NOW,
+    });
+    const runs = await listDocsByField<AssistRun>("assist_runs", "contextRef", ["thread:" + T]);
+    runs.forEach((x) => registerFixture("assist_runs" as never, x.id));
+    if (r.ok) registerFixture("quotes", r.quoteId);
+    ok(r.ok, "assist estimate db: a draft estimate is created" + (r.ok ? "" : ` (${r.error})`));
+    if (!r.ok) return;
+
+    ok(xCalls[0]?.model === "claude-haiku-5-5" && dCalls[0]?.model === "claude-opus-5-5", "assist estimate db: extract on Haiku, draft on Opus");
+    ok(!!dCalls[0] && dCalls[0].user.includes(`${SKU} | Zorbaflex assist velour panel`) && !/\b(100|200)(\.0+)?\b/.test(dCalls[0].user.replace(SKU, "")), "assist estimate db: the fixture part is a candidate; no cost/list in the prompt");
+
+    const q = await getQuote(r.quoteId);
+    ok(!!q && q.status === "draft" && q.source === "estimator" && q.quoteType === "system" && q.owner === ME.name && q.preparedBy === ME.name && q.customerId === CID, "assist estimate db: draft · estimator · system · owned and prepared by the user");
+    const tier = await resolveTier(CID, "Pat Lee");
+    const sec = (q?.spec as { sections?: Array<{ items: Array<{ id: number; sku: string; desc: string; price: number; custom?: boolean; bonus?: unknown }> }> } | null)?.sections?.[0];
+    const first = sec?.items[0];
+    const custom = sec?.items.find((i) => i.desc === "Custom batten");
+    ok(q?.tierMargin === tier.margin && first?.sku === SKU && first.price === catalogAddPrice(100, 200, tier.margin), "assist estimate db: the catalog line is priced by catalogAddPrice at the customer's tier");
+    ok(!!custom && custom.price === 0 && custom.custom === true && custom.sku === "", "assist estimate db: the unmatched line is a $0 custom line");
+    ok(q?.assistDraft?.threadId === T && q?.assistDraft?.runId === runs.find((x) => x.step === "draft")?.id && q?.assistDraft?.notes === "check width", "assist estimate db: assistDraft points at the thread and the draft run");
+    ok((await getThread(T))?.link === null, "assist estimate db: the thread is not auto-linked");
+    ok(runs.length === 2 && runs.some((x) => x.step === "extract") && runs.some((x) => x.step === "draft"), "assist estimate db: two runs logged for the thread (extract + draft)");
+    const dRun = runs.find((x) => x.step === "draft");
+    const det = (dRun?.outcomeDetail ?? {}) as { lines?: unknown; quoteId?: string; extractRunId?: string; dropped?: number; unresolved?: number };
+    const lineKey = (ls: unknown) => (Array.isArray(ls) ? ls : []).map((l: { sku?: string; qty?: number }) => `${l.sku}×${l.qty}`).join("|");
+    ok(lineKey(det.lines) === `${SKU}×2|×1` && det.quoteId === r.quoteId && det.extractRunId === runs.find((x) => x.step === "extract")?.id && det.dropped === 0 && det.unresolved === 0 && dRun?.outcome === null, "assist estimate db: the draft run records lines, quote, extract run and counters (no outcome yet)");
+
+    // Banner view + dismiss (never bumps updatedAt).
+    const v = assistDraftViewOf(q);
+    ok(!!v && v.quoteId === r.quoteId && v.threadId === T && v.notes === "check width" && v.reasons.length === 1 && v.reasons[0].desc === "Zorbaflex assist velour panel" && v.reasons[0].reason === "asked", "assist estimate db: the banner view lists the email, notes and current lines' reasons");
+    const before = q?.updatedAt;
+    ok(await dismissAssistDraft(r.quoteId, NOW + 1), "assist estimate db: dismiss writes");
+    const qd = await getQuote(r.quoteId);
+    ok(qd?.assistDraft?.dismissedAt === NOW + 1 && qd?.updatedAt === before && assistDraftViewOf(qd) === null, "assist estimate db: dismissed → no banner, updatedAt unchanged");
+    ok(!(await dismissAssistDraft(r.quoteId)), "assist estimate db: a second dismiss is a no-op");
+
+    // An email with no equipment request creates nothing.
+    const empty = await draftEstimateFromThread(T, ME, {
+      extract: { provider: fakeProvider(JSON.stringify({ quoteName: "", venue: "", requests: [], systems: [] })), settings, env, now: NOW },
+      draft: { provider: fakeProvider(draftText), settings, env, now: NOW },
+      now: NOW,
+    });
+    const runs2 = await listDocsByField<AssistRun>("assist_runs", "contextRef", ["thread:" + T]);
+    runs2.forEach((x) => registerFixture("assist_runs" as never, x.id));
+    ok(!empty.ok && /didn't find/.test(empty.error) && runs2.length === 3, "assist estimate db: no request found → no draft call, no quote");
+  } finally {
+    await removeCustomer(CID);
+  }
 }
 
 // Standalone runner (npm run test:assist).
@@ -336,6 +444,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistTaskChecks(ok);
     await assistReplyChecks(ok);
     await assistEstimatePureChecks(ok);
+    await assistEstimateDbChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);

@@ -11344,7 +11344,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 }
 
 
-import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChecks, assistOutcomeChecks, assistTaskChecks, assistReplyChecks, assistEstimatePureChecks } from "./test-assist";
+import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChecks, assistOutcomeChecks, assistTaskChecks, assistReplyChecks, assistEstimatePureChecks, assistEstimateDbChecks } from "./test-assist";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11693,6 +11693,7 @@ seeded()
   .then(() => assistTaskChecks(ok))
   .then(() => assistReplyChecks(ok))
   .then(() => assistEstimatePureChecks(ok))
+  .then(() => assistEstimateDbChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
