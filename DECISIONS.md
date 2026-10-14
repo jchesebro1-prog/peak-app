@@ -12497,7 +12497,7 @@ The printed ID embeds the category and its per-category sequence, so changing th
 
 ## D980. Printed IDs are allocated under an advisory lock; voided numbers are never reused (#340, 2026-10-14)
 
-The server allocates `NNN` as max+1 per (company code, venue code, category) under a Postgres advisory lock (namespace 337, key `customer:site:category`; the lock helper is in `src/db/index.ts`). Voided findings keep their number and it is never reused. Codes are resolved first, outside the transaction. The exclusion across connections is proven only on PGlite; it needs a check on a preview deploy (PUNCHLIST #340). `src/lib/stores/findings.ts`, `src/lib/stores/assessment-rows.ts`. The namespace number 337 is the pre-merge item number and is kept so the lock key doesn't change.
+The server allocates `NNN` as max+1 per (company code, venue code, category) under a Postgres advisory lock (namespace 337, key `customer:site:category`; the lock helper is in `src/db/index.ts`). Voided findings keep their number and it is never reused. Codes are resolved first, outside the transaction. The exclusion across connections is proven only on PGlite; it is checked in production after the merge deploy applies migration 0040, with a throwaway customer — not on a preview, because previews skip migrations (`scripts/migrate.mjs`) and their company and venue reads would fail without `short_code` (PUNCHLIST #340, Remaining 4). **Final review:** the number is also unique per printed prefix across code changes (D997). `src/lib/stores/findings.ts`, `src/lib/stores/assessment-rows.ts`. The namespace number 337 is the pre-merge item number and is kept so the lock key doesn't change.
 
 ## D981. Inline (base64) photos are dev-only (#340, 2026-10-14)
 
@@ -12505,7 +12505,7 @@ When Vercel Blob is off, the shrunken photo is stored inline on the assessment s
 
 ## D982. Photo ids are `p_` + hex with no hyphens (#340, 2026-10-14)
 
-One photo's id can't alias another's blob path. The upload broker also re-checks that every path is under the assessment's prefix and never trusts a client path. `src/lib/assessments/photos.ts`, `src/app/api/assessments/[id]/photos/[photoId]/route.ts`.
+One photo's id can't alias another's blob path. The upload broker also re-checks that every path is under the assessment's prefix and never trusts a client path. `src/lib/assessments/photos.ts`, the broker `src/app/api/assessments/[id]/photos/upload/route.ts`.
 
 ## D983. Photo uploads that can't succeed become terminal (#340, 2026-10-14)
 
@@ -12539,9 +12539,9 @@ If linking findings fails after the quote was created, the quote is kept and a n
 
 The spec said a Field group; there is none. Every `/assessments/*` route lights the Assessments child. `src/components/nav/nav-data.ts`.
 
-## D991. The report is emailed as an inline-attachment Inbox draft (#340, 2026-10-14)
+## D991. The report is emailed as an Inbox draft (#340, 2026-10-14)
 
-The spec said to attach from the composer's existing document picker, but the composer has no picker. **Email report** on the report page renders the PDF and creates an Inbox draft with the PDF attached inline, tied to the customer. The draft has no link chip and nothing is sent. `src/app/(app)/assessments/[id]/report/actions.ts`, `report/toolbar.tsx`.
+The spec said to attach from the composer's existing document picker, but the composer has no picker. **Email report** on the report page renders the PDF and creates an Inbox draft with the PDF attached, tied to the customer. The draft has no link chip and nothing is sent. `src/app/(app)/assessments/[id]/report/actions.ts`, `report/toolbar.tsx`. **Final review:** the PDF is stored in Blob and attached by reference, not inline (D999).
 
 ## D992. The PDF render waits for the report-ready marker, and PDFs are streamed (#340, 2026-10-14)
 
@@ -12553,8 +12553,40 @@ The register and the venue card link straight to the findings-only PDF (`/api/as
 
 ## D994. `venue_profiles` survive the go-live wipe; assessments and findings are demo data (#340, 2026-10-14)
 
-Venue profiles are carried-forward facts about real venues, like venues themselves; assessments and findings made before go-live are test data. Short codes are kept. `src/app/(app)/settings/actions.ts`, `src/db/seed-data.ts`.
+Venue profiles are carried-forward facts about real venues, like venues themselves; assessments and findings made before go-live are test data. Short codes are kept. `venue_profiles` is listed in `CONFIG_COLLECTIONS` in `src/db/seed-data.ts`, which the wipe skips.
 
 ## D995. Save actions return `{ ok: false }` instead of redirecting (#340, 2026-10-14)
 
 Assessment and finding save actions use `getOptionalUser` + `can("create")` and return `{ ok: false }` when the user is signed out or lacks the permission, so a background autosave never navigates away and drops on-screen answers. `src/app/(app)/assessments/[id]/actions.ts`, `findings/actions.ts`.
+
+## D996. Merging findings needs only `create` (#340 final review, 2026-10-14)
+
+Merge (and split) stay on the `create` permission, not `approve`. Both are field operations inside one open assessment: every finding must belong to the same assessment, the assessment must not be completed, and the merged-away findings are voided with `mergedInto` (never deleted), so their numbers and history survive and the merge is auditable. Gating it on `approve` would stop the assessor tidying up duplicate findings on site. `src/app/(app)/assessments/[id]/actions.ts` (`mergeFindingsAction`, `splitFindingAction`), `src/lib/stores/findings.ts`.
+
+## D997. Printed IDs are unique per printed prefix, across code changes (#340 final review, 2026-10-14)
+
+After an approved code change (venue LIN → LN2) another venue of the company can take LIN, and numbering per venue alone would issue `…-LIN-RIG-001` a second time. The next number is now 1 + the highest `seq` over both the findings of this venue + category and every finding whose printed ID starts with the same prefix (`${companyCode}-${siteCode}-${category}`), voided and deleted ones included. Allocation takes an advisory lock on `printed:<prefix>`, then the venue lock, then the finding's own lock — always in that order — so two venues sharing a prefix can't race. `printedPrefix` in `src/lib/assessments/findings-model.ts`; `maxSeq` / `allocatePrintedId` in `src/lib/stores/findings.ts`.
+
+## D998. A push that throws is `retry`; the editor folds this device's outbox entry before it saves (#340 final review, 2026-10-14)
+
+`/api/sync/push` gains a per-record `retry` status. `pushAssessment` and `pushFinding` reply `retry` for anything thrown (a lock timeout, a database error) and keep `error` for permanent refusals (no permission, an unknown or malformed id, a different venue). The SyncEngine leaves a `retry` entry pending and flushes again after 30 s; an unknown status still parks as `error` (`pushOutcome` in `src/lib/sync/engine.ts`). On mount the editor reads this device's outbox entry for the assessment (`engine.outboxEntry`) and folds it in before any save (`foldOutboxEntry` in `src/lib/assessments/editor-model.ts`): answers merge per key keeping their original `at`, missing photo refs and dismissed prompts are added as dirty, and a queued scalar is taken only when the entry was built on the current rev — otherwise it is reported as dropped. An online save then clears the entry only when it covers it (`outboxEntryCovered`, passed to `recordSynced` through the new `keepOutbox` option of `saveThroughOutbox`). A completed assessment's entry is left to the push, which records it in `syncRejects`.
+
+## D999. Email report stores the PDF in Blob and attaches it by reference (#340 final review, 2026-10-14)
+
+`navData` reads every comms doc on every page, so a multi-MB base64 PDF must not sit in one. With Blob configured, Email report stores the render at `assessment-pdfs/<AS-id>/<ms>.pdf` (Blob adds a suffix) and the draft carries `pdfPath` + `href` (`/api/assessments/<id>/report-pdf?file=…`), the way Estimator Phase 3 attaches quote PDFs; it is still refused past 10 MB. The Gmail bridge reads it only when `assessmentPdfFitsThread` passes — an assessment PDF path, an existing assessment, and a thread for that assessment's customer or one with no customer and no link; never a quote-linked thread — and streams the bytes from Blob. Without Blob (local dev) the PDF rides inline up to 1.5 MB; above that Email report says "Report is too large to email from this computer — download it instead". Stored report PDFs are not removed by the go-live wipe. `src/lib/assessments/report-pdf-path.ts` (pure), `report-pdf-storage.ts`, `report-model.ts` (`emailAttachmentMode`), `src/lib/gmail/bridge.ts`, `src/app/api/assessments/[id]/report-pdf/route.ts`.
+
+## D1000. The editor's save status follows the outbox (#340 final review, 2026-10-14)
+
+The header label is derived, not remembered: `saveStatusLabel` (`src/lib/assessments/editor-model.ts`) reads the editor's last save, the SyncEngine's connected state and this assessment's outbox entry, re-read on every SyncEngine change, so it changes when the outbox drains. Errored entry → "Couldn't sync — <reason>"; queued and offline → "Saved on this device — will sync when you're back online"; queued and online → "Syncing…"; nothing queued → "Saved".
+
+## D1001. Unknown answer keys are capped per assessment (#340 final review, 2026-10-14)
+
+Answers to keys the definition doesn't know (a newer client's questions) are kept, but at most 100 such keys and 200 KB of them per assessment, counting what is already stored; a re-answered stored key replaces its old size. Over a cap the action refuses the save, naming the key; a push records the answer in `syncRejects` and keeps the rest. Known questions are never capped. `capUnknownAnswers` in `src/lib/stores/assessments.ts`.
+
+## D1002. New assessment checks its links (#340 final review, 2026-10-14)
+
+`createAssessmentAction` refuses, before anything is created, an assessor who isn't an active user and a lead, site visit or project that doesn't exist or belongs to another customer. A linked record that names no customer yet (a fresh lead) can't belong to another one, so it is accepted. `checkAssessmentLinks` in `src/lib/stores/assessments.ts`, `src/app/(app)/assessments/new/actions.ts`.
+
+## D1003. Ask AI's search returns assessment and finding rows without links (#340 final review, 2026-10-14)
+
+Ask AI's `search` tool is the ⌘K core (`globalSearch`), so since #340 it also returns **Assessments** (`AS-####`) and **Findings** (printed IDs) rows. They print under "(no link)" with their ids: there is no `assessment` or `finding` ref kind. Adding one means a new `RefKind`, an href, a loader and a `resolveAskRef` case in `src/lib/assist/ask-tools-server.ts` — more than the two-line change the final review allowed — so it is left for a later slice.

@@ -1283,7 +1283,7 @@ See `.env.example`.
     company scans headers, lead/project notes post no LiveSync entity. This
     completes the AI roadmap. Punch item #339.
 
-59. ✅ **Assessments engine — slice 1** (#340, D961–D995) — Condition
+59. ✅ **Assessments engine — slice 1** (#340, D961–D1003) — Condition
     assessment + a findings register, from Jeff's three Oct 13 briefs
     (`docs/assessments/briefs/`; spec `docs/superpowers/specs/2026-10-13-assessments-engine-design.md`).
     Questions are code-first definitions (`src/lib/assessments/defs/`: scopes
@@ -1315,21 +1315,25 @@ See `.env.example`.
     PDF) render through signed print routes (`/print/assessment/[id]`,
     `/print/assessment-findings/[scope]`; token kinds `assessment`,
     `assessment-findings`) with photos inlined as data URIs (20 MB budget) and
-    the PDF streamed, not buffered; **Email report** drops it into an Inbox
-    draft. Integration: Assessments in the Customers nav group, Start
+    the PDF streamed, not buffered; **Email report** stores it in Blob and
+    drops it into an Inbox draft by reference (inline ≤ 1.5 MB only without
+    Blob). Integration: Assessments in the Customers nav group, Start
     assessment on a site visit, cards on venue / company / lead / project
     pages, a read-only Venue profile card, ⌘K for `AS-####` and printed IDs,
-    `assessments` in the offline field collections, `venue_profiles` kept by the
-    go-live wipe. Tests: `scripts/test-assessments.ts` (inside test:specs) and
+    `assessments` and `findings` joined the offline field collections (a push
+    that throws replies `retry`; the editor folds this device's outbox entry
+    before saving and its save status follows the outbox), `venue_profiles`
+    kept by the go-live wipe. Tests: `scripts/test-assessments.ts` (inside test:specs) and
     new smoke routes. Code comments and the migration header still say #337
     (the pre-merge number). Not in scope: the portal, Venue Assessments / RI
     migration, flame-test and re-inspection visits (slices 2–5 in PUNCHLIST
     #340). Remaining is Jeff-gated: set real MPSD venue codes before the first
     finding, run a real Manitowoc assessment, confirm the five added flag
-    prompts (D972, assumed defaults), a preview-deploy check of a Blob photo
-    and two parallel finding pushes (previews write production data), and
-    `QUOTE_PDF_ORIGIN` / Chrome rendering of the PDF in production. Punch item
-    #340.
+    prompts (D972, assumed defaults), and a production check after the merge
+    deploy applies 0040 — with a throwaway customer: one Blob photo upload, two
+    parallel finding pushes and the PDF render (`QUOTE_PDF_ORIGIN` / Chrome).
+    Not on a preview: previews skip migrations, so their company and venue
+    reads fail without `short_code`. Punch item #340.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

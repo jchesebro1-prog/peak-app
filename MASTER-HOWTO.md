@@ -527,7 +527,7 @@ card's button.
   the monthly cap applies. If the Claude key is wrong, Ask says "The Claude API key
   was rejected — check Settings → Beta → Assist pilot."
 
-## 6g. Running a condition assessment (#340, D961–D995)
+## 6g. Running a condition assessment (#340, D961–D1003)
 
 A condition assessment is a site walk-through of a venue — stage, rigging, soft goods,
 fire, lighting, audio/video, access — answered on a phone or tablet. Each problem you
@@ -561,8 +561,10 @@ them, print them, or email the report to the customer.
    can also add a finding by hand. An **Immediate attention** finding needs a photo,
    whether the hazard contact was told, the lockout state and a recommended action.
 4. Photos taken offline wait on the device and upload when you reconnect; the sync chip
-   counts them. Anything that couldn't sync appears in a banner with **Re-enter** /
-   **Use mine**.
+   counts them. The header says **Saved**, **Syncing…**, **Saved on this device — will
+   sync when you're back online** or **Couldn't sync — <reason>**. Anything that couldn't
+   sync appears in a banner with **Re-enter** / **Use mine**; answers this device still
+   holds are sent again the next time you open the assessment.
 5. **Mark complete** lists every gap: required questions, required photos, unresolved
    prompts. You can complete anyway — each gap you skip is recorded and printed in the
    report's follow-up list. Photos still uploading block it until they finish or you
@@ -575,8 +577,10 @@ them, print them, or email the report to the customer.
   priority and budget tier; Immediate items sit first. Select rows for **Triage**,
   **Quote these findings** or **Export CSV**.
 - **Report:** open the assessment's **Report** to read it, **Download PDF**, or
-  **Email report** — that renders the PDF and puts it in an Inbox draft tied to the
-  customer. Nothing is sent until you send the draft. The findings-only PDF (open
+  **Email report** — that renders the PDF, stores it, and puts it in an Inbox draft
+  tied to the customer. Nothing is sent until you send the draft. (On a computer without
+  file storage — local dev — only a report under 1.5 MB can be emailed; download larger
+  ones.) The findings-only PDF (open
   findings across visits for a venue or company) is linked from the register and the
   venue card.
 - **Quote these findings:** select findings in the register → **Quote these findings**
