@@ -151,6 +151,23 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#342 A8: the engine's scope rail renders the shared SectionRail");
   ok(!/\.as-rail[\s{-]/.test(engEditor) && engEditor.includes("${SECTION_RAIL_CSS}"), "#342 A8: the engine's CSS takes the rail rules from the shared component");
 
+  /* ---- Task 6: editor flow (source pins) ---- */
+  const vaDir = "src/app/(app)/venue-assessments/[id]";
+  const ctl = readFileSync(join(process.cwd(), `${vaDir}/controls.tsx`), "utf8");
+  const sys = readFileSync(join(process.cwd(), `${vaDir}/sections/systems.tsx`), "utf8");
+  const kq = readFileSync(join(process.cwd(), `${vaDir}/sections/kill-questions.tsx`), "utf8");
+  const vaPage = readFileSync(join(process.cwd(), `${vaDir}/page.tsx`), "utf8");
+  const vaActsId = readFileSync(join(process.cwd(), `${vaDir}/actions.ts`), "utf8");
+  ok(ctl.includes('from "@/lib/survey-flow"') && !/const ORDER = \[/.test(ctl) && !/const STEP_BY_ID/.test(ctl), "#342 A1: the editor takes order, steps and groups from survey-flow");
+  ok(!ctl.includes("SignoffSection") && !ctl.includes('kind: "signoff"'), "#342 A6: the Sign-off section is gone from the editor");
+  ok(/isQuoteVisit\(draft\)/.test(ctl), "#342 A3: the quote half of Existing materials & quote is gated on isQuoteVisit");
+  ok(/sectionVisible\(draft, s\.id\)/.test(ctl), "#342 R2: the section list is filtered by sectionVisible");
+  ok(!sys.includes("Venue-class guidance") && !sys.includes("doctrine"), "#342 A9: the Venue-class guidance panel is removed from the intake");
+  ok(sys.includes("presentFromKill") && sys.includes("from Kill questions"), "#342 R3: the Rigging intake shows the rig system read-only");
+  ok(kq.includes("SCOPE_KEYS") && kq.includes("RIG_SYSTEMS") && kq.includes("TIER1_WIDTH_BY_CLASS"), "#342 A2: Kill questions carries Scope, Rigging system and stage W/D inputs");
+  ok(!vaPage.includes("resolveVenueDoctrine") && vaPage.includes("resolveSurveyTags"), "#342: the editor page drops doctrine and passes internal tags");
+  ok(/\| "scope"/.test(vaActsId) && /\| "internalTags"/.test(vaActsId), "#342: SurveyPatch carries scope and internalTags");
+  ok(/legacyNotes: _legacy/.test(ctl), "#342 R1: the outbox doc strips legacyNotes (derived, never stored)");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

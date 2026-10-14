@@ -9,7 +9,6 @@ import {
   type SystemField,
 } from "@/lib/stores/survey-intake";
 import type { VenueClass } from "@/lib/stores/venue-classes";
-import type { VenueDoctrineEntry } from "@/lib/venue-doctrine";
 import {
   ACCENT_BORDER_LT,
   ACCENT_INK,
@@ -26,7 +25,6 @@ type DisciplineValue = DisciplineData[string];
 type Props = {
   group: DisciplineGroup;
   venueClass: VenueClass;
-  doctrine: VenueDoctrineEntry;
   intakeCatalog: Record<string, string[]>;
   value: (disc: DisciplineKey, key: string) => DisciplineValue;
   setValue: (disc: DisciplineKey, key: string, value: DisciplineValue) => void;
@@ -35,6 +33,9 @@ type Props = {
   addInventoryRow: (disc: DisciplineKey, category: string) => void;
   patchInventoryRow: (id: string, patch: Partial<InventoryRow>) => void;
   removeInventoryRow: (id: string) => void;
+  /** #342 R3 — Rigging's Present is the Kill-questions rigging system: shown read-only here */
+  presentFromKill?: boolean;
+  onJumpKill?: () => void;
 };
 
 const boxStyle = (checked: boolean): CSSProperties => ({
@@ -162,12 +163,6 @@ function Inventory({
 
 export function SystemsSection(props: Props) {
   const { group, venueClass } = props;
-  const guidance =
-    group.key === "curtain"
-      ? props.doctrine.curtains
-      : group.key === "lighting"
-        ? props.doctrine.lighting
-        : "";
   const rawPresent = props.value(group.key, "present");
   const present = Array.isArray(rawPresent) ? rawPresent : [];
   const options = presentOptionsFor(group.key, venueClass);
@@ -204,37 +199,31 @@ export function SystemsSection(props: Props) {
           style={taStyle}
         />
       </div>
-      {(group.key === "curtain" || group.key === "lighting") && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "11px 13px",
-            borderRadius: 9,
-            border: "1px solid #e4e7ec",
-            background: "#fbfbfc",
-          }}
-        >
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8c919c", letterSpacing: ".05em", textTransform: "uppercase" }}>
-            Venue-class guidance
+      {props.presentFromKill ? (
+        <div>
+          <label style={labelStyle}>Rigging system</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 13.5, color: "#3a3f4a" }}>
+            <span>{present.length ? present.join(" · ") : "Not answered yet"}</span>
+            <span style={{ fontSize: 12, color: "#9aa0ab" }}>from Kill questions</span>
+            {props.onJumpKill && (
+              <button type="button" onClick={props.onJumpKill} style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: "none", border: 0, padding: 0, textDecoration: "underline", cursor: "pointer" }}>
+                Change
+              </button>
+            )}
           </div>
-          <div style={{ marginTop: 4, fontSize: 13, color: guidance ? "#3a3f4a" : "#9aa0ab" }}>
-            {guidance || "No default specified"}
-          </div>
-          {!props.doctrine.confirmed && (
-            <div style={{ marginTop: 5, fontSize: 11.5, fontWeight: 600, color: "#8a6d1f" }}>
-              Default unconfirmed for this venue class
-            </div>
-          )}
         </div>
+      ) : (
+        <>
+          <label style={labelStyle}>Present</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {options.map((option) => (
+              <button type="button" key={option} onClick={() => togglePresent(option)} style={chipStyle(present.includes(option))}>
+                {option}
+              </button>
+            ))}
+          </div>
+        </>
       )}
-      <label style={labelStyle}>Present</label>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {options.map((option) => (
-          <button type="button" key={option} onClick={() => togglePresent(option)} style={chipStyle(present.includes(option))}>
-            {option}
-          </button>
-        ))}
-      </div>
 
       {!noneOnly && (
         <>

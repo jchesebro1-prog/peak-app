@@ -48,7 +48,10 @@ import { LinesetsSection } from "./sections/linesets";
 import { AssessmentUsageSection } from "./sections/assessment-usage";
 import { AssessmentConditionSection } from "./sections/assessment-condition";
 import { AssessmentFindingsSection } from "./sections/assessment-findings";
-import { SignoffSection } from "./sections/signoff";
+import {
+  SECTION_ORDER, STEP_LABELS, STEP_BY_ID, GROUP_BY_ID, GROUP_META, isQuoteVisit, sectionVisible,
+} from "@/lib/survey-flow";
+import { KillQuestions } from "./sections/kill-questions";
 import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
@@ -56,17 +59,6 @@ import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
  * over as plain props. The shapes now live in ./sections/types. */
 export type { EditorCustomer, EditorMeta } from "./sections/types";
 
-const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details", "Assessment"];
-const STEP_BY_ID: Record<string, number> = {
-  cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
-  mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
-  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3, assessmentToggle: 3,
-  assessmentUsage: 5, assessmentCondition: 5, assessmentFindings: 5,
-  photos: 4, notes: 4, signoff: 4,
-};
-const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true, assessmentToggle: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "signoff", "assessmentUsage", "assessmentCondition", "assessmentFindings"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
@@ -165,6 +157,9 @@ function toDraft(r: SurveyRecord): Draft {
     assessment: r.assessment,
     templateRev: r.templateRev,
     signoff: { ...r.signoff },
+    scope: Array.isArray(r.scope) ? [...r.scope] : [],
+    internalTags: Array.isArray(r.internalTags) ? [...r.internalTags] : [],
+    legacyNotes: Array.isArray(r.legacyNotes) ? [...r.legacyNotes] : [],
     updatedAt: r.updatedAt || 0,
   };
 }
@@ -478,23 +473,27 @@ export default function SurveyEditor({
     });
     secs.push({
       id: "project", title: "Existing materials & quote",
-      // the sheets' QUOTE QUESTIONS subtitle, kept verbatim as help text
-      subtitle: "What we have on file, and what the quote needs. A “no” does not end the visit — it changes what you collect.",
-      group: "brief", step: 1, kind: "fields",
+      subtitle: isQuoteVisit(draft)
+        ? "What we have on file, and what the quote needs. Ask these last, once the customer is comfortable."
+        : "What we have on file. The quote questions show when the purpose is New system design.",
+      group: "wrapup", step: 5, kind: "fields",
       fields: [
         { kind: "checkTop", key: "hasBOM", label: "Existing BOM on file" },
         { kind: "checkTop", key: "hasDrawings", label: "Existing drawings on file" },
         { kind: "checkTop", key: "hasPhotos", label: "Existing photos on file" },
-        { kind: "text", key: "quoteNeededBy", label: "Quote needed by", type: "date" },
-        { kind: "toggle", key: "budgetary", label: "Is it budgetary?" },
-        { kind: "text", key: "projectCompletion", label: "Project completion", type: "date" },
-        { kind: "select", key: "installTimeframe", label: "Install timeframe", options: meta.installTimeframes },
-        // QUOTE QUESTIONS, from the sheets (quoteNeededBy above is the sheets'
-        // QUOTE DEADLINE — deliberately not duplicated here)
-        { kind: "text", key: "budget", label: "Budget" },
-        { kind: "text", key: "fiscalYearSpendBy", label: "Fiscal year / spend-by date" },
-        { kind: "text", key: "whoDecides", label: "Who decides" },
-        { kind: "text", key: "targetInstallWindow", label: "Target install window" },
+        // #342 A3: the quote / budget half only on a quote visit (answers stay stored either way)
+        ...(isQuoteVisit(draft)
+          ? ([
+              { kind: "text", key: "quoteNeededBy", label: "Quote needed by", type: "date" },
+              { kind: "toggle", key: "budgetary", label: "Is it budgetary?" },
+              { kind: "text", key: "projectCompletion", label: "Project completion", type: "date" },
+              { kind: "select", key: "installTimeframe", label: "Install timeframe", options: meta.installTimeframes },
+              { kind: "text", key: "budget", label: "Budget" },
+              { kind: "text", key: "fiscalYearSpendBy", label: "Fiscal year / spend-by date" },
+              { kind: "text", key: "whoDecides", label: "Who decides" },
+              { kind: "text", key: "targetInstallWindow", label: "Target install window" },
+            ] as FieldDef[])
+          : []),
       ],
     });
     secs.push({
@@ -551,7 +550,7 @@ export default function SurveyEditor({
     // branches. Soft gate — sections lock until Tier 1 is done,
     // but the record always saves as a draft.
     secs.push({
-      id: "tier1", title: "Kill questions", subtitle: "Required before the discipline intakes unlock",
+      id: "tier1", title: "Kill questions", subtitle: "Scope, rigging system and the basics — the discipline intakes unlock once these are in",
       group: "intake", step: 3, kind: "tier1",
     });
     DISCIPLINE_GROUPS.forEach((g) => {
@@ -571,21 +570,22 @@ export default function SurveyEditor({
         { kind: "textarea", key: "notes", label: "Generic notes", placeholder: "Access, hazards, scheduling constraints…" },
       ],
     });
-    secs.push({ id: "signoff", title: "Sign-off", subtitle: "Peak representative, site contact, and optional technical reviewer", group: "field", step: 4, kind: "signoff" });
     if (draft.assessmentEnabled) {
       secs.push({ id: "assessmentUsage", title: "Usage & needs profile", subtitle: "How the room is used, operated, and expected to grow", group: "assessment", step: 5, kind: "assessmentUsage" });
       secs.push({ id: "assessmentCondition", title: "Condition ratings", subtitle: "Good, monitor, or replace—with formal inspection references", group: "assessment", step: 5, kind: "assessmentCondition" });
       secs.push({ id: "assessmentFindings", title: "Findings & recommendations", subtitle: "Priorities, planning ranges, and supporting photos", group: "assessment", step: 5, kind: "assessmentFindings" });
     }
     secs.forEach((s) => {
-      if (s.group !== "assessment") {
-        s.group = BRIEF_IDS[s.id] ? "brief" : INTAKE_IDS[s.id] ? "intake" : "field";
-      }
+      if (GROUP_BY_ID[s.id]) s.group = GROUP_BY_ID[s.id];
       if (STEP_BY_ID[s.id] != null) s.step = STEP_BY_ID[s.id];
     });
-    secs.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-    return secs;
-  }, [draft.assessmentEnabled, draft.venueClass, draft.requestedBy, meta, roster]);
+    // Site conditions is not in SECTION_ORDER (#342 replaces it with Final thoughts) — until then it keeps its
+    // place right after Site access & logistics instead of sorting to the top.
+    const rank = (id: string) => (id === "conditions" ? SECTION_ORDER.indexOf("site") + 0.5 : SECTION_ORDER.indexOf(id));
+    return secs
+      .filter((s) => sectionVisible(draft, s.id))
+      .sort((a, b) => rank(a.id) - rank(b.id));
+  }, [draft, meta, roster]);
 
   const measFilled = (fields: FieldDef[]): number =>
     fields.filter((f) => {
@@ -676,6 +676,8 @@ export default function SurveyEditor({
       assessment: draft.assessment,
       templateRev: draft.templateRev,
       signoff: draft.signoff,
+      scope: draft.scope,
+      internalTags: draft.internalTags,
       ...over,
     };
   }
@@ -686,8 +688,11 @@ export default function SurveyEditor({
    * write reaches the cloud (synced, rev bumped).
    */
   function buildFullDoc(over?: Partial<SurveyPatch>): Record<string, unknown> {
+    // legacyNotes is derived on every read (src/lib/survey-migrate.ts) — never write it back
+    const { legacyNotes: _legacy, ...rec } = record as unknown as Record<string, unknown>;
+    void _legacy;
     return {
-      ...(record as unknown as Record<string, unknown>),
+      ...rec,
       ...(buildPatch(over) as Record<string, unknown>),
       updatedAt: Date.now(),
       rev: (record.rev || 1) + 1,
@@ -837,7 +842,7 @@ export default function SurveyEditor({
 
   const visibleSections = layoutMode === "wizard" ? sections.filter((s) => s.step === step) : sections;
 
-  function jumpTo(id: string) {
+  function scrollToSection(id: string) {
     try {
       const el = document.getElementById("sec-" + id);
       if (el) {
@@ -845,6 +850,17 @@ export default function SurveyEditor({
         window.scrollTo({ top: y, behavior: "smooth" });
       }
     } catch {}
+  }
+  function jumpTo(id: string) {
+    // #342: Kill questions sit in Brief while the intakes they unlock sit in Site intake — in Stepped
+    // layout a jump to another step switches to it first, then scrolls once it has rendered.
+    const target = sections.find((s) => s.id === id);
+    if (layoutMode === "wizard" && target && target.step !== step) {
+      setStep(target.step);
+      window.setTimeout(() => scrollToSection(id), 60);
+      return;
+    }
+    scrollToSection(id);
   }
   function gotoStep(i: number) {
     setStep(i);
@@ -909,8 +925,6 @@ export default function SurveyEditor({
 
   const stageBg = (i: number) => (i === curStageIdx ? ACCENT : i < curStageIdx ? ACCENT_SOFT : "#f1f2f5");
   const stageCol = (i: number) => (i === curStageIdx ? "#fff" : i < curStageIdx ? ACCENT_INK : "#9aa0ab");
-
-  let prevGroup: string | null = null;
 
   return (
     <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d", background: "#f7f8fa" }}>
@@ -1013,12 +1027,11 @@ export default function SurveyEditor({
       <div className="sv-pad" style={{ maxWidth: 900, margin: "0 auto", padding: "20px 24px 90px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {meetingsSlot}
-          {visibleSections.map((sec) => {
+          {visibleSections.map((sec, secIdx) => {
             const locked = sec.kind === "discipline" && !tier1Done;
             const collapsible = isCollapsible(sec) || sec.kind === "discipline";
             const open = locked ? false : isOpen(sec);
-            const showGroupHeader = layoutMode !== "wizard" && sec.group !== prevGroup;
-            prevGroup = sec.group;
+            const showGroupHeader = layoutMode !== "wizard" && (secIdx === 0 || visibleSections[secIdx - 1].group !== sec.group);
             const filled = sec.kind === "fields" && sec.advanced ? measFilled(sec.fields) : 0;
             const discFilled =
               sec.kind === "discipline"
@@ -1041,16 +1054,10 @@ export default function SurveyEditor({
                 {showGroupHeader && (
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
-                      {sec.group === "brief" ? "Office brief" : sec.group === "intake" ? "Site intake" : sec.group === "assessment" ? "Condition & needs" : "Field capture"}
+                      {GROUP_META[sec.group].label}
                     </span>
                     <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
-                      {sec.group === "brief"
-                        ? "Filled when the request is created"
-                        : sec.group === "intake"
-                          ? "Venue baseline, then branch into a discipline"
-                          : sec.group === "assessment"
-                            ? "Advisory condition and planning profile"
-                          : "Filled on-site by the surveyor"}
+                      {GROUP_META[sec.group].blurb}
                     </span>
                   </div>
                 )}
@@ -1135,49 +1142,39 @@ export default function SurveyEditor({
                         </div>
                       )}
                       {sec.kind === "tier1" && (
-                        <div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                            {tier1.map((item) => (
-                              <button
-                                key={item.key}
-                                onClick={() => jumpTo(item.section)}
-                                title={item.done ? "Answered" : "Missing — tap to jump to the field"}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 7,
-                                  fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600,
-                                  padding: "9px 13px", borderRadius: 20, cursor: "pointer", minHeight: 40,
-                                  border: `1px solid ${item.done ? "#cce9da" : "#f0e2bd"}`,
-                                  background: item.done ? "#eaf6ef" : "#fbf3dd",
-                                  color: item.done ? "#1f7a52" : "#8a6d1f",
-                                }}
-                              >
-                                <span style={{ fontSize: 12 }}>{item.done ? "✓" : "○"}</span>
-                                {item.label}
-                              </button>
-                            ))}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
-                              {intakeMeta.label}
-                            </span>
-                            <span style={{ fontSize: 12, color: "#9aa0ab" }}>
-                              {tier1Done
-                                ? "Discipline intakes are unlocked."
-                                : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
-                            </span>
-                            <div style={{ flex: 1, minWidth: 8 }} />
-                            {intakeSt === "discipline-added" && (
-                              <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
-                                Mark ready for quote
-                              </button>
-                            )}
-                            {intakeSt === "ready-for-quote" && (
-                              <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
-                                ✓ Ready — undo
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                        <KillQuestions
+                          draft={draft}
+                          items={tier1}
+                          onJump={jumpTo}
+                          onScope={(next) => setField("scope", next)}
+                          onRigSystems={(next) => setDisc("rigging", "present", next)}
+                          mv={mv}
+                          setMeasure={setMeasure}
+                          chipStyle={chipStyle}
+                          footer={
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
+                                {intakeMeta.label}
+                              </span>
+                              <span style={{ fontSize: 12, color: "#9aa0ab" }}>
+                                {tier1Done
+                                  ? "Discipline intakes are unlocked."
+                                  : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
+                              </span>
+                              <div style={{ flex: 1, minWidth: 8 }} />
+                              {intakeSt === "discipline-added" && (
+                                <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                  Mark ready for quote
+                                </button>
+                              )}
+                              {intakeSt === "ready-for-quote" && (
+                                <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                  ✓ Ready — undo
+                                </button>
+                              )}
+                            </div>
+                          }
+                        />
                       )}
                       {sec.kind === "discipline" && (() => {
                         const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
@@ -1186,7 +1183,6 @@ export default function SurveyEditor({
                           <SystemsSection
                             group={g}
                             venueClass={draft.venueClass}
-                            doctrine={meta.venueDoctrine[draft.venueClass]}
                             intakeCatalog={meta.intakeCatalog}
                             value={dv}
                             setValue={setDisc}
@@ -1195,6 +1191,8 @@ export default function SurveyEditor({
                             addInventoryRow={addInvRow}
                             patchInventoryRow={patchInvRow}
                             removeInventoryRow={removeInvRow}
+                            presentFromKill={g.key === "rigging"}
+                            onJumpKill={() => jumpTo("tier1")}
                           />
                         );
                       })()}
@@ -1232,9 +1230,6 @@ export default function SurveyEditor({
                       )}
                       {sec.kind === "assessmentFindings" && (
                         <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
-                      )}
-                      {sec.kind === "signoff" && (
-                        <SignoffSection value={draft.signoff} templateRev={draft.templateRev} onChange={(signoff) => setField("signoff", signoff)} />
                       )}
                       {sec.kind === "conditions" && (
                         <ConditionsSection

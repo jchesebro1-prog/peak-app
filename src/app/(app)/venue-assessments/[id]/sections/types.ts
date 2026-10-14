@@ -13,7 +13,9 @@ import type { VenueClass } from "@/lib/stores/venue-classes";
 import type { LinesetRow } from "@/lib/stores/linesets";
 import type { AssessmentData, InspectionRef } from "@/lib/stores/assessment";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
-import type { VenueDoctrine } from "@/lib/venue-doctrine";
+import type { LegacyNote } from "@/lib/survey-migrate";
+import type { SurveyTag } from "@/lib/survey-tags";
+import type { FlowGroup } from "@/lib/survey-flow";
 
 /* ============================================================
  * Serializable props from the server. The store is DB-backed and cannot be
@@ -42,7 +44,8 @@ export type EditorMeta = {
   /** settings-merged site-intake type catalog, keyed by category */
   intakeCatalog: Record<string, string[]>;
   autoCerts: Record<string, InspectionRef>;
-  venueDoctrine: VenueDoctrine;
+  /** #342 — Final thoughts tags (settings, starter list when absent) */
+  internalTags: SurveyTag[];
 };
 
 /** Local draft — the editable slice of the record plus updatedAt for display. */
@@ -124,6 +127,12 @@ export type Draft = {
     reviewerRole: string;
     reviewerSignedAt: string;
   };
+  /** #342 — scope kill question (DisciplineKey[]; empty = unanswered) */
+  scope: string[];
+  /** #342 — Final thoughts internal tag ids */
+  internalTags: string[];
+  /** #342 — derived by the read-time migration; shown under "Older notes"; never saved */
+  legacyNotes: LegacyNote[];
   updatedAt: number;
 };
 
@@ -146,7 +155,7 @@ export type SectionDef = {
   id: string;
   title: string;
   subtitle: string;
-  group: "brief" | "field" | "intake" | "assessment";
+  group: FlowGroup;
   step: number;
   advanced?: boolean;
 } & (
@@ -161,6 +170,5 @@ export type SectionDef = {
   | { kind: "assessmentUsage" }
   | { kind: "assessmentCondition" }
   | { kind: "assessmentFindings" }
-  | { kind: "signoff" }
   | { kind: "discipline"; disc: DisciplineKey }
 );

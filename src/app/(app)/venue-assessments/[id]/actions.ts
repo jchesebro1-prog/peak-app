@@ -100,6 +100,8 @@ export type SurveyPatch = Partial<
     | "signoff"
     | "leadId"
     | "visitId"
+    | "scope"
+    | "internalTags"
   >
 >;
 
