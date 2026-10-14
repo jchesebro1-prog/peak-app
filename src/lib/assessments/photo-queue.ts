@@ -324,13 +324,17 @@ async function uploadOne(meta: PhotoMeta, cfg: { blobEnabled: boolean; onDone: P
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
       try {
-        const res = await upload(photoBlobPath(assessmentId, photoId), blob, {
-          access: "private",
-          handleUploadUrl: `/api/assessments/${assessmentId}/photos/upload`,
-          clientPayload: JSON.stringify({ photoId }),
-          contentType: "image/jpeg",
-          abortSignal: ctrl.signal,
-        });
+        const res = await withTimeout(
+          upload(photoBlobPath(assessmentId, photoId), blob, {
+            access: "private",
+            handleUploadUrl: `/api/assessments/${assessmentId}/photos/upload`,
+            clientPayload: JSON.stringify({ photoId }),
+            contentType: "image/jpeg",
+            abortSignal: ctrl.signal,
+          }),
+          UPLOAD_TIMEOUT_MS,
+          "The upload took too long; it will be retried.",
+        );
         path = res.pathname;
       } catch (e) {
         if (ctrl.signal.aborted) throw new Error("The upload took too long; it will be retried.");

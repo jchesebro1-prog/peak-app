@@ -7,7 +7,7 @@ import { ASSESSMENT_DEF, VISIT_TYPES, allModules, allQuestions, getDef } from "@
 import type { ScopeCode } from "@/lib/assessments/defs/types";
 import { mergeAnswers, validateAnswer, type Answer, type Answers } from "@/lib/assessments/answers";
 import { evaluate, type ScopeSel } from "@/lib/assessments/evaluate";
-import { PHOTO_CAPS, INLINE_TOTAL_MAX, inlinePhotoProblem, photoPathInScope, photoPathMatches, type PhotoRef } from "@/lib/assessments/photos";
+import { PHOTO_CAPS, PHOTO_ID_RE, INLINE_TOTAL_MAX, inlinePhotoProblem, photoPathInScope, photoPathMatches, type PhotoRef } from "@/lib/assessments/photos";
 import { blobEnabled } from "@/lib/blob";
 import { getCompany } from "@/lib/identity/companies";
 import { getSite } from "@/lib/identity/sites";
@@ -301,7 +301,7 @@ function mergePhotos(stored: PhotoRef[], raw: unknown, assessmentId: string, use
     const key = `photo:${rawId.slice(0, PHOTO_ID_MAX) || "?"}`;
     // Action mode: refuse with the message. Push mode: record and skip this photo.
     const skip = (message: string, error: string): Err | null => { if (!rej) return fail(message); rej.add(key, error, x); return null; };
-    if (!isObj(x) || !rawId || rawId.length > PHOTO_ID_MAX) { const e = skip("Each photo needs an id", "Each photo needs an id"); if (e) return e; continue; }
+    if (!isObj(x) || !PHOTO_ID_RE.test(rawId)) { const e = skip("Each photo needs a valid id (p_ and 8–32 lowercase letters or digits)", "Each photo needs a valid id"); if (e) return e; continue; }
     const id = rawId;
     let blobPath: string | undefined;
     let inline: string | undefined;
@@ -552,12 +552,31 @@ export async function applyFinalizedPhoto(
  * Escape hatch for a photo whose device copy is gone: remove its ref while it is still `pending` (no blobPath /
  * inline), and drop its id from every answer's `photoIds`. Refuses a finished photo (it has a file) and a completed
  * assessment (`terminal`). A ref that is already gone is a quiet success. A leftover `photo:<id>` sync reject goes
- * too. Bumps `rev` when anything changed; returns the stored rev for the editor to adopt.
+ * too. Bumps `rev` when anything changed; returns the stored rev for the editor to adopt. Afterwards the id is also
+ * dropped from the `photoIds` of this assessment's findings (`findingsNotCleaned` lists any the finding rules refused).
  */
-export async function removePendingPhoto(id: string, photoId: string, user: { id: string }): Promise<{ ok: true; rev: number; doc: Assessment } | PhotoErr> {
+export async function removePendingPhoto(id: string, photoId: string, user: { id: string }): Promise<{ ok: true; rev: number; doc: Assessment; findingsNotCleaned?: string[] } | PhotoErr> {
+  const done = await removePendingPhotoRef(id, photoId, user);
+  if (!done.ok) return done;
+  // The photo is gone from the assessment: drop its id from this assessment's findings too, each through the finding's
+  // own save path (rev bump, immediate-attention rules). Dynamic import — findings.ts imports this module. Runs on the
+  // quiet "already removed" path as well, so a retry finishes a clean-up an earlier call didn't reach.
+  const { listFindings, saveFinding } = await import("./findings");
+  const notCleaned: string[] = [];
+  for (const f of await listFindings({ assessmentId: id })) {
+    if (!f.photoIds.includes(photoId)) continue;
+    const saved = await saveFinding({ key: f.key, rev: f.rev, photoIds: f.photoIds.filter((x) => x !== photoId) }, user);
+    // Refused (e.g. an Immediate attention finding that would be left with no photo): the dangling id is harmless
+    // (it resolves to no file) and is reported so the editor can tell the person to add a photo or lower the rating.
+    if (!saved.ok) notCleaned.push(f.key);
+  }
+  return notCleaned.length ? { ...done, findingsNotCleaned: notCleaned } : done;
+}
+
+async function removePendingPhotoRef(id: string, photoId: string, user: { id: string }): Promise<{ ok: true; rev: number; doc: Assessment } | PhotoErr> {
   if (typeof user?.id !== "string" || !user.id) return fail("Unknown user");
   if (typeof id !== "string" || !ID_RE.test(id)) return terminalErr("Assessment not found");
-  if (typeof photoId !== "string" || !photoId || photoId.length > PHOTO_ID_MAX) return terminalErr("That photo isn't valid");
+  if (typeof photoId !== "string" || !PHOTO_ID_RE.test(photoId)) return terminalErr("That photo isn't valid");
   return withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `assessment:${id}`, async () => {
     const row = await readRow("assessments", id);
     if (!row || row.deleted) return terminalErr("Assessment not found");

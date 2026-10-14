@@ -3,7 +3,7 @@ import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth } from "@/auth";
 import { blobEnabled } from "@/lib/blob";
 import { can } from "@/lib/team";
-import { photoBlobPath, photoPathMatches } from "@/lib/assessments/photos";
+import { PHOTO_ID_RE, photoBlobPath, photoPathMatches } from "@/lib/assessments/photos";
 import { getAssessment } from "@/lib/stores/assessments";
 
 // Token minting only — no bytes pass through this function.
@@ -26,7 +26,6 @@ class UploadRefused extends Error {
   }
 }
 
-const PHOTO_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const MAX_PHOTO_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<NextResponse> {

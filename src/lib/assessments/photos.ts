@@ -21,7 +21,18 @@ export const PHOTO_PREFIX = "assessments/";
 
 export const PHOTO_CAPS = { perAssessment: 200, originalBytes: 25 * 1024 * 1024, longEdge: 1600, quality: 0.8 };
 
+/** A photo id: `p_` + 8–32 lowercase letters/digits. No `-`, so no id can ever be another id plus Blob's `-<suffix>`. */
+export const PHOTO_ID_RE = /^p_[a-z0-9]{8,32}$/;
+
+/** A fresh photo id (`p_` + 12 random lowercase hex), safe in the browser and on the server. */
+export function newPhotoId(): string {
+  const b = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(b);
+  return "p_" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
 export function photoBlobPath(assessmentId: string, photoId: string): string {
+  if (typeof photoId !== "string" || !PHOTO_ID_RE.test(photoId)) throw new Error("That photo id isn't valid");
   return `${PHOTO_PREFIX}${assessmentId}/${photoId}.jpg`;
 }
 
@@ -35,11 +46,11 @@ export function photoPathInScope(path: string, assessmentId: string): boolean {
   return !/^\.+$/.test(rest) && !rest.includes("..") && /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.jpg$/.test(rest);
 }
 
-/** The one Blob path an upload for `photoId` may land at: its own folder, its own file name — `<photoId>.jpg`, or with
- *  Blob's random suffix `<photoId>-<suffix>.jpg`. A different photo's file (or a prefix-alike id) never matches, so one
- *  photo can't alias another's blob. */
+/** The one Blob path an upload for `photoId` may land at: its own folder, its own file name — exactly `<photoId>.jpg`,
+ *  or with Blob's random suffix `<photoId>-<suffix>.jpg` (suffix `[A-Za-z0-9]+`). Photo ids never contain `-`
+ *  (PHOTO_ID_RE), so a different id can't be a hyphenated prefix of this file and one photo can't alias another's blob. */
 export function photoPathMatches(path: string, assessmentId: string, photoId: string): boolean {
-  if (typeof photoId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(photoId) || !photoPathInScope(path, assessmentId)) return false;
+  if (typeof photoId !== "string" || !PHOTO_ID_RE.test(photoId) || !photoPathInScope(path, assessmentId)) return false;
   const file = path.slice(`${PHOTO_PREFIX}${assessmentId}/`.length);
   return file === `${photoId}.jpg` || (file.startsWith(`${photoId}-`) && /^[A-Za-z0-9]+\.jpg$/.test(file.slice(photoId.length + 1)));
 }

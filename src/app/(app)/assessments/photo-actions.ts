@@ -4,7 +4,7 @@ import { getOptionalUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { blobEnabled, deleteBlob, getBlobHead, isBlobNotFound } from "@/lib/blob";
 import { sniffImageType } from "@/lib/part-docs/files";
-import { photoPathMatches } from "@/lib/assessments/photos";
+import { PHOTO_ID_RE, photoPathMatches } from "@/lib/assessments/photos";
 import { applyFinalizedPhoto, getAssessment, removePendingPhoto } from "@/lib/stores/assessments";
 
 /**
@@ -20,8 +20,6 @@ import { applyFinalizedPhoto, getAssessment, removePendingPhoto } from "@/lib/st
 export type FinalizePhotoResult =
   | { ok: true; ref: { blobPath: string } | { inline: string }; rev: number }
   | { ok: false; error: string; reupload?: true; terminal?: true };
-
-const PHOTO_ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 
 /** Best effort: drop an uploaded file nothing refers to. The path must be this photo's own file, and no stored photo
  *  ref (of any photo) may point at it. */
