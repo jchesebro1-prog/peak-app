@@ -12040,3 +12040,34 @@ link/archive paths a person would.
 - Uncovered form-action posters: the Quotes-hub `setQuoteStatus` and the `PortalPanel` Approve rely on the 30 s focus refresh until wrapped.
 - A second main tab (or an SSO / COOP redirect) can open a duplicate window of the same name; browser behaviour, not handled.
 - The new-tab fallback for Open in main window can be popup-blocked in Safari.
+
+## 337. AI daily brief — a 6:45 / 1:45 summary, pre-made drafts, quote nudges, phone reminders — BUILT 2026-10-13 on `worktree-assist-layer` (D914–D926)
+
+**Asked (Jeff, 2026-10-13):** roadmap piece 2. A written brief above Start here with drafts already made, for Assist pilot users who are switched on. Spec `docs/superpowers/specs/2026-10-13-ai-brief-design.md`, plan `docs/superpowers/plans/2026-10-13-ai-brief.md`. Builds on Assist (#334), Inbox organization (#335), Morning triage (#324) and the pop-out `LiveSync` (#336). No migration. New env var: `ASSIST_MODEL_BRIEF` (optional, defaults to Haiku).
+
+**Done:**
+- **Slots** 6:45 and 13:45 Chicago: minute-precise `slotAt`, crons `45 11` and `45 18` UTC, lazy build covers winter drift, yesterday's afternoon brief shows before 6:45 (D914).
+- **The brief** (`src/lib/brief/`): one blob per user and slot, insert-if-absent, Rebuild replaces (3/h, 90 s, runs the Organize AI pass); a Haiku summary limited to snapshot rows with a rule-built fallback; Do these first, Organize counts, new promise-tasks, Today (visits, first visit, drive minutes, plan size), approvals, quiet quotes, and an afternoon "since this morning" line (D915–D917).
+- **Pre-made drafts:** for every thread on my court, a Sonnet reply and Haiku task suggestions; for each quiet quote, a Haiku nudge (note + email). Cap-bounded, leased, basis-checked, 6 h error retry; runs in Home and Inbox `after()` and the cron riders (D918–D922).
+- **Home card** above Start here, never breaks Home; **Use it** in the reader opens the stored draft with no model call; **Send nudge** opens the composer pre-filled by id and never sends; a lead row shows "Ready to quote? → Open lead" (D923–D924).
+- **Phone:** big-text view, **Listen** (device speech), two repeating local notifications (ids 64501 / 64502 at 6:45 and 13:45), Account → **Brief reminders on this phone** on by default (D925).
+- **Assist report:** a Daily brief table — briefs built by source, pre-drafts made / used / discarded / not used, nudges made and opened (D926).
+
+**Remaining (Jeff-gated):**
+- (1) Settings → Beta → Assist pilot: tick the pilot users and turn on **Daily brief** (it starts off, like Inbox organization). The Claude key must already be set (D881).
+- (2) Run `npx cap sync`, then rebuild and reinstall the iOS and Android apps so the reminders exist. Until then the phone shows no notifications and nothing else changes. Check on a real device that a repeating 6:45 notification arrives and that tapping it opens the brief.
+- (3) After the first morning, check the cost in the Assist report and in the Anthropic Console against the monthly cap. The first run drafts every thread on each person's court, so expect it to be the most expensive; later runs only redo stale drafts.
+- (4) Try **Listen** in the car (iPhone Safari/app and Android).
+- (5) Read the report after a month: how many pre-drafts were used, and whether the nudge "opened" count is real use.
+
+**Known follow-ups:**
+- The next roadmap piece, **estimate suggestion**: an estimate request currently gets only a link (spec §4); no estimate is drafted.
+- Comms whole-doc writers (`patchDoc`, the Gmail import) can erase a lease or pre-draft written between their read and their write. The cost is one duplicate model call (D919); the ai-pass lease has the same exposure.
+- The Rebuild limit (3 per hour) and the queue's one-at-a-time and 60 s-gap guards are per process, so on serverless two instances can each act once.
+- Every user's build scans all threads and quotes (Organize counts, court threads, quiet quotes); it is fine at today's size but is O(users × records) per slot.
+- Nudge "opened" is not "sent": a Gmail send is not tied back to the nudge run (D926).
+- The Gmail cron rider rarely has time for a draft queue (35 s cap); Home's `after()` does most of the drafting.
+- With `INBOX_ORG_DISABLED` the Inbox schedules no queue; Home still drafts.
+- Task suggestions are not counted in the report; pre-drafts made before this change have no marker.
+
+**Next roadmap pieces:** estimate suggestion → AI sidebar.

@@ -863,7 +863,7 @@ See `.env.example`.
     codes, then Renumber → Apply current type codes on designs already
     opened; try it on a real design in production. Punch item #320.
 
-44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning) and `/api/triage/build` (midday, 17:00 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
+44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning, 11:45 UTC; the brief moved the slots to 6:45 and 13:45 Chicago, D914) and `/api/triage/build` (midday, 18:45 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
 
 45. ✅ **Address verification + drive time** (#325, D712–D724) — every address
     is `verified` / `needs_check` / `unresolved` (only verified gets drive
@@ -1160,8 +1160,42 @@ See `.env.example`.
     PortalPanel Approve rely on the focus refresh. Remaining is Jeff-gated: try it
     in Chrome and Safari, an estimate beside the dashboard, the remembered size, and
     Open in main window. Follow-ups: ⧉ on other screens, the form-action posters, a
-    duplicate window from a second main tab. Next: AI brief → estimate suggestion →
+    duplicate window from a second main tab. Next: AI brief (now shipped, #337) → estimate suggestion →
     AI sidebar. Punch item #336.
+
+56. ✅ **AI daily brief** (#337, D914–D926) — roadmap piece 2, for Assist pilot
+    users with the new opt-in **Daily brief** switch (Settings → Beta → Assist
+    pilot; no migration; `ASSIST_MODEL_BRIEF` optional). A BriefCard above Start
+    here at 6:45 and 13:45 Chicago (`slotAt` is minute-precise; crons `45 11` and
+    `45 18` UTC, lazy build covers winter drift; before 6:45 yesterday's afternoon
+    brief shows): a Haiku summary limited to the triage snapshot's rows, with a
+    rule-built fallback, plus Do these first, Organize counts, new promise-tasks,
+    Today, approvals, quiet quotes and an afternoon "since this morning" line.
+    One blob per user and slot (`brief:<u>:<day>:<slot>`, insert-if-absent;
+    Rebuild replaces it, 3/h, 90 s, and is the only path that runs the Organize AI
+    pass). Pure core in `src/lib/brief/` (`slots`, `types`, `sanitize`, `prompt`,
+    `quiet`, `nudge`, `speech`, `card-vm`, `reminders`), server in `build.ts` and
+    `drafts.ts`. **Pre-made drafts:** `runDraftQueue` drafts a Sonnet reply and Haiku
+    task suggestions for every thread on my court (`CommThread.preDraft`) and a
+    Haiku follow-up note + email for each quiet quote — sent, the owner's (else
+    Prepared by), ≥ 5 business days old, no inbound reply, at most 8
+    (`Quote.assistNudge`); `countRate: false` so only the monthly cap bounds it,
+    per-thread / per-quote leases, basis-checked key-level writes, 6 h error retry;
+    run from Home and Inbox `after()` and the two cron riders. The reply and task
+    calls are reusable server functions (`reply-server`, `tasks-server`) with
+    per-call limits that can only shorten. In the reader, **Use it** opens a fresh
+    stored draft with no model call; **Send nudge** opens `/inbox?nudge=<quoteId>`
+    pre-filled (recipient resolved server-side, nothing sends). On a phone: a
+    big-text view, **Listen** (`speechSynthesis`) and two repeating local
+    notifications (ids 64501 / 64502, 6:45 / 13:45; `@capacitor/local-notifications`
+    8.3.1; Account → Brief reminders on this phone, on by default). The Assist
+    report gains a Daily brief table (nudge "opened" stands in for "sent"). The
+    card never breaks Home. Remaining is Jeff-gated: turn Daily brief on for the
+    pilot, `npx cap sync` and rebuild both apps, check the first morning's cost,
+    try Listen in the car. Follow-ups: estimate suggestion (next), whole-doc
+    writers that can clobber leases, per-process Rebuild limit, every user's
+    build scanning all threads and quotes. Next: estimate suggestion → AI
+    sidebar. Punch item #337.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

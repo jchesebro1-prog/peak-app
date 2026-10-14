@@ -317,6 +317,69 @@ in the browser, so there is no setting, no env var and no kill switch.
 - After a Google sign-in redirect the link to old pop-outs can break; close them and
   open again.
 
+## 6d. AI daily brief (#337, D914–D926)
+
+A short written brief at the top of Home twice a day, with the drafts already made.
+It is part of the Assist pilot, so nothing changes for anyone you have not switched on.
+
+**Turn it on**
+
+- Settings → Beta → Assist pilot. The Claude key must be set (see section 6) and the
+  person must be ticked in the pilot list.
+- Turn on **Daily brief** on that card. It starts off, like Inbox organization. Reply
+  and Task suggestions need to be on too if you want the pre-made drafts; the brief
+  itself works without them.
+- Optional: `ASSIST_MODEL_BRIEF` in the environment changes the model (default Haiku).
+  The kill switch is `ASSIST_DISABLED`.
+
+**Read it**
+
+- The card sits above **Start here**. It is built at **6:45 am** and **1:45 pm**
+  Central. Before 6:45 you see yesterday afternoon's brief, marked as such.
+- It lists the few things to do first (each links to its row), what is waiting in
+  Organize, promises that became tasks, today's visits and drive time, approvals
+  waiting on you, and quotes that have gone quiet. The afternoon brief adds what
+  changed since the morning.
+- **Rebuild** remakes the brief now (3 per hour, up to about a minute). If the model
+  is unavailable you get a plainer brief built from the counts, with a note.
+- The card collapses, and it never stops Home from loading.
+
+**Use the drafts**
+
+- A row with **Draft ready** or **Tasks ready** has a reply or task list already made.
+  Open the email: "Draft reply ready · prepared 6:52 · **Use it**" puts the reply in
+  the composer. You edit and press Send; nothing sends by itself. The draft is shown
+  only while it is still current: new mail, a reply from you, or a thread that is no
+  longer yours makes it disappear.
+- A quote that has been **sent**, is yours (the Lead estimator, else Prepared by) and
+  has had no reply for 5 business days shows under quiet quotes. **Send nudge** opens
+  the composer with a short follow-up already written. Check the recipient (it picks
+  the quote's contact by name, or leaves To blank), edit it and send. A lead row shows
+  **Ready to quote? → Open lead**.
+- Drafts are made in the background when you open Home or the Inbox and by the
+  morning and afternoon jobs, within the monthly cost cap in Settings.
+
+**On the phone**
+
+- Under 900 px wide the card shows a big-text version: the summary, what to do first
+  and the counts.
+- **Listen** reads the brief aloud with the phone's own voice (no cost). Press Stop to
+  end it. It does not appear on a browser that cannot speak.
+- **Reminders:** the app schedules two quiet notifications, "Your morning brief is
+  ready" at 6:45 and "Your afternoon brief is ready" at 1:45, on the phone's clock;
+  tapping one opens the brief. They are on by default; turn them off at Account →
+  **Brief reminders on this phone**. They only exist after the apps are rebuilt:
+  run `npx cap sync`, then rebuild and reinstall the iOS and Android apps. Until then
+  everything else works and there are simply no notifications.
+
+**Watch the cost and use**
+
+- Assist pilot card → report: briefs built, pre-drafts made / used / discarded / not
+  used, and nudges made / opened. "Opened" means the composer was opened from the
+  card; the app cannot tell whether the nudge was then sent.
+- Check the first morning's cost in the Anthropic Console too. The first run drafts
+  every thread on each person's court; later runs only redo drafts that went stale.
+
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 
 Everything you need to move Peak from demo data to your real business is in
