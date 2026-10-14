@@ -25,6 +25,12 @@ import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identit
 import { saveSite, getSite, setSiteShortCode } from "../src/lib/identity/sites";
 import { registerFixture } from "./test-fixtures";
 import { createAssessment, saveAssessment, applyFinalizedPhoto, removePendingPhoto, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, clearSyncRejects, type Assessment } from "../src/lib/stores/assessments";
+import {
+  answeredWith, buildFullDoc, buildPatch, changedAnswers, clearMarker, contactValue, createEditorStore, dateInputToMs, editorReducer,
+  formatValue, hiddenAnswered, initEditorState, msToDateInput, notApplicable, optionsFor, parseFtinInput, parseNumberInput,
+  profileOnFile, reenterAnswer, refusalParts, rejectLabel, resolvedPromptIds, scopeSummaries, setScopeOn, showCounter, textAnswer,
+  toggleMany, unableWith, flagsForScope, offScopesWithAnswers, formatRejectPayload, type EditorDoc, type FindingVM,
+} from "../src/lib/assessments/editor-model";
 import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
@@ -509,6 +515,7 @@ export async function assessmentChecks(ok: Ok) {
   ok(toCsv(["a"], [[-3]]) === "﻿a\r\n-3\r\n" && toCsv(["a"], [["-3"]]) === "﻿a\r\n'-3\r\n" && toCsv(["a"], [["x"]]).charCodeAt(0) === 0xfeff, "csv: BOM is U+FEFF; a numeric -3 stays -3");
   // carry-over: blank profile values never satisfy a numeric profile condition
   ok(!holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: "  " } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: [] } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: NaN } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 1931 } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 0 } }), "holds: blank / [] / NaN profile value never satisfies lt");
+  editorModelChecks(ok);
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
@@ -588,6 +595,7 @@ export async function assessmentDbChecks(ok: Ok) {
   }
   await assessmentStoreChecks(ok);
   await assessmentPhotoDbChecks(ok);
+  await assessmentEditorDbChecks(ok);
 }
 
 /** Task 5 — the stores, printed-id allocation under the advisory lock, and the push-handler branches. */
@@ -990,6 +998,214 @@ async function assessmentPhotoDbChecks(ok: Ok) {
     await dropAssessIdentityFixtures();
   }
 }
+/* ---------- Task 7: the editor's pure state model ---------- */
+
+function editorDoc(over: Partial<EditorDoc> = {}): EditorDoc {
+  return {
+    id: "AS-1001", defVersion: 1, visitType: "condition",
+    scopes: [{ code: "S0", on: true }, { code: "S1", on: true }, { code: "S2", on: true, depth: "screen" }, { code: "S8", on: false }],
+    customerId: "c1", siteId: "s1", status: "onsite", visitDate: 1, assessorId: "u1",
+    answers: {}, dismissedPrompts: [], photos: [], rev: 3, createdAt: 1, updatedAt: 1, createdBy: "u1", ...over,
+  };
+}
+
+function editorModelChecks(ok: Ok) {
+  const def = ASSESSMENT_DEF;
+  const A = (v: unknown, at: number, by = "u1"): Answer => ({ v, state: "answered", at, by });
+  // changedAnswers: same `at` = the edit the server holds; newer or new keys are changed
+  const ack = { "core.seats": A(200, 10) };
+  ok(Object.keys(changedAnswers(ack, { "core.seats": A(200, 10, "server-attributed") })).length === 0, "editor: an answer the server holds (same at; by may differ) is not resent");
+  ok(Object.keys(changedAnswers(ack, { "core.seats": A(201, 11), "core.use": A(["school"], 12) })).join() === "core.seats,core.use", "editor: a newer answer and a new key are the changed ones");
+
+  // buildPatch: changed answers only, the adopted rev, dirty scalars only
+  let st = initEditorState(editorDoc({ answers: { "core.seats": A(200, 10) } }));
+  ok(buildPatch(st) === null, "editor: nothing changed → no save");
+  st = editorReducer(st, { type: "answer", key: "core.use", answer: A(["school"], 20) });
+  let p = buildPatch(st)!;
+  ok(p.rev === 3 && Object.keys(p.answers!).join() === "core.use" && p.scopes === undefined && p.spaceLabel === undefined, "editor: a save carries only the changed answers, no untouched scalars, and the rev the copy is based on");
+  const fd = buildFullDoc({ ...st, doc: { ...st.doc, syncRejects: [{ key: "x", error: "e", at: 1, by: "u1" }] } }, 999);
+  ok(fd.rev === 4 && fd.updatedAt === 999 && !("syncRejects" in fd) && (fd.answers as Record<string, unknown>)["core.seats"] !== undefined && (fd.answers as Record<string, unknown>)["core.use"] !== undefined, "editor: the outbox doc is the whole record at adopted rev + 1, stamped now, without syncRejects");
+  st = editorReducer(st, { type: "scalar", field: "spaceLabel", value: "" });
+  p = buildPatch(st)!;
+  ok(p.spaceLabel === "" && st.dirty.includes("spaceLabel"), "editor: a cleared space label is sent as \"\" (JSON drops undefined)");
+  st = editorReducer(st, { type: "scalar", field: "scopes", value: setScopeOn(def, st.doc.scopes, "S8", true) });
+  p = buildPatch(st)!;
+  ok(p.scopes!.find((s) => s.code === "S8")?.on === true, "editor: a changed scope list is sent");
+
+  // saved: ack + rev adopted; a value changed in flight stays dirty; dropped fields are refused and reported
+  const inFlight = editorReducer(st, { type: "answer", key: "core.use", answer: A(["community"], 30) });
+  const saved = editorReducer(inFlight, { type: "saved", patch: p, rev: 7, dropped: ["scopes"] });
+  ok(saved.doc.rev === 7, "editor: a save reply's rev is adopted");
+  ok(Object.keys(buildPatch(saved)?.answers ?? {}).join() === "core.use" && buildPatch(saved)!.answers!["core.use"].at === 30, "editor: an answer changed while its save was in flight is sent again");
+  ok(!saved.dirty.includes("scopes") && saved.dropped.join() === "scopes" && !saved.dirty.includes("spaceLabel"), "editor: a dropped scalar stops being dirty and is reported; an acknowledged one is clean");
+  ok(editorReducer(saved, { type: "saved", patch: { rev: 7 }, rev: 5 }).doc.rev === 7, "editor: the rev never moves backwards");
+  ok(editorReducer(saved, { type: "dismissDropped" }).dropped.length === 0, "editor: the dropped notice can be dismissed");
+  ok(buildPatch(saved)!.rev === 7 && buildFullDoc(saved, 1).rev === 8, "editor: the next save and outbox doc build on the latest adopted rev");
+  const flight2 = editorReducer(editorReducer(initEditorState(editorDoc()), { type: "scalar", field: "accompanying", value: "Pat" }), { type: "scalar", field: "accompanying", value: "Pat" });
+  const sentPat = buildPatch(flight2)!;
+  const changedInFlight = editorReducer(flight2, { type: "scalar", field: "accompanying", value: "Pat and Lee" });
+  ok(editorReducer(changedInFlight, { type: "saved", patch: sentPat, rev: 4 }).dirty.includes("accompanying") && !editorReducer(flight2, { type: "saved", patch: sentPat, rev: 4 }).dirty.includes("accompanying"), "editor: a scalar changed again while its save was in flight stays dirty");
+
+  // adopt a server copy: newest answer wins per key; dirty scalars kept; server-owned fields taken; rev forward only
+  let local = initEditorState(editorDoc({ answers: { "core.seats": A(200, 10), "core.use": A(["school"], 10) }, spaceLabel: "Aud" }));
+  local = editorReducer(local, { type: "answer", key: "core.use", answer: A(["rentals"], 50) });
+  local = editorReducer(local, { type: "scalar", field: "accompanying", value: "Pat" });
+  const server = editorDoc({
+    rev: 9, updatedAt: 9, spaceLabel: "Auditorium 132", accompanying: "Someone else", status: "onsite",
+    answers: { "core.seats": A(250, 40, "u2"), "core.use": A(["school"], 10) },
+    syncRejects: [{ key: "core.seats", error: "bad", at: 1, by: "u1", payload: A(-1, 5) }],
+  });
+  const ad = editorReducer(local, { type: "adopt", server });
+  ok(ad.doc.answers["core.seats"].v === 250 && (ad.doc.answers["core.use"].v as string[])[0] === "rentals", "editor: adopting a server copy takes its newer answers and keeps newer local ones");
+  ok(ad.doc.rev === 9 && ad.doc.spaceLabel === "Auditorium 132" && ad.doc.accompanying === "Pat" && ad.doc.syncRejects?.length === 1, "editor: adopt takes the rev, untouched scalars and syncRejects; a scalar changed here is kept");
+  ok(Object.keys(buildPatch(ad)!.answers!).join() === "core.use" && buildPatch(ad)!.accompanying === "Pat", "editor: after adopt only the unacknowledged edits are pending");
+  const old = editorReducer(ad, { type: "adopt", server: { ...server, rev: 4, spaceLabel: "Stale" } });
+  ok(old.doc.rev === 9 && old.doc.spaceLabel === "Auditorium 132", "editor: an older server copy never rolls the rev or fields back");
+  const rj = editorReducer(ad, { type: "rejects", syncRejects: [], rev: 10 });
+  ok(rj.doc.rev === 10 && rj.doc.syncRejects === undefined, "editor: clearing sync rejects adopts the returned rev and list");
+  // photos: the server's ref wins; a local-only one survives only while unacknowledged
+  const withPh = { ...ad, doc: { ...ad.doc, photos: [{ id: "p_local0001", pending: true as const, takenAt: 1, by: "u1" }, { id: "p_both00001", pending: true as const, takenAt: 1, by: "u1" }, { id: "p_gone00001", pending: true as const, takenAt: 1, by: "u1" }] }, dirtyPhotos: ["p_local0001"] };
+  const adPh = editorReducer(withPh, { type: "adopt", server: { ...server, rev: 11, updatedAt: 11, photos: [{ id: "p_both00001", blobPath: "assessments/AS-1001/p_both00001.jpg", takenAt: 1, by: "u1" }] } });
+  ok(adPh.doc.photos.length === 2 && adPh.doc.photos.find((x) => x.id === "p_both00001")?.blobPath !== undefined && adPh.doc.photos.some((x) => x.id === "p_local0001"), "editor: adopt keeps the server's uploaded ref and an unacknowledged local photo; an acknowledged one the server removed goes");
+
+  // the store adopts each server copy once and notifies
+  const store = createEditorStore(editorDoc());
+  let calls = 0;
+  const off = store.subscribe(() => calls++);
+  store.adoptServer(editorDoc());
+  ok(calls === 0, "editor store: the copy it started from is not adopted again");
+  store.adoptServer(editorDoc({ rev: 4, updatedAt: 4 }));
+  store.adoptServer(editorDoc({ rev: 4, updatedAt: 4 }));
+  ok(calls === 1 && store.getState().doc.rev === 4, "editor store: a new server copy is adopted once");
+  store.dispatch({ type: "answer", key: "core.seats", answer: A(1, 1) });
+  off();
+  store.dispatch({ type: "answer", key: "core.seats", answer: A(2, 2) });
+  ok(calls === 2 && store.getState().doc.answers["core.seats"].v === 2, "editor store: dispatch is synchronous; unsubscribe stops notices");
+
+  // controls → answers
+  ok(textAnswer("   ", "u1", 5).v === null && textAnswer("   ", "u1", 5).state === "answered" && textAnswer(" hi ", "u1", 5).v === " hi ", "editor: a text trimmed to nothing is the Clear marker, never \"\"");
+  const q = allQuestions(def);
+  const cm = validateAnswer(q.get("core.owner_concerns")!.q, clearMarker("u1", 5), def, {});
+  ok(cm.ok && cm.answer.v === null, "editor: the Clear marker validates for a longtext question");
+  ok(validateAnswer(q.get("core.use")!.q, clearMarker("u1", 5), def, {}).ok, "editor: the Clear marker validates for a many question (never [])");
+  ok(JSON.stringify(toggleMany(["school", "rentals"], "none")) === '["none"]' && JSON.stringify(toggleMany(["none"], "school")) === '["school"]' && toggleMany(["school"], "school") === null && JSON.stringify(toggleMany(["school"], "rentals")) === '["school","rentals"]', "editor: many chips — none clears the others, another clears none, the last deselect is null (clear)");
+  ok(dateInputToMs("2026-10-13") === Date.UTC(2026, 9, 13) && msToDateInput(Date.UTC(2026, 9, 13)) === "2026-10-13" && dateInputToMs("2026-02-30") === null && dateInputToMs("13/10/2026") === null && msToDateInput("x") === "", "editor: dates are UTC midnight ms and round-trip; impossible dates refused");
+  ok(parseNumberInput("") === null && parseNumberInput(" 12.5 ") === 12.5 && parseNumberInput("1e") === "invalid", "editor: number input — blank clears, junk waits");
+  ok(parseFtinInput("", "") === null && JSON.stringify(parseFtinInput("12", "")) === '{"ft":12,"in":0}' && parseFtinInput("12.5", "1") === "invalid" && parseFtinInput("1", "12") === "invalid" && JSON.stringify(parseFtinInput("0", "6.5")) === '{"ft":0,"in":6.5}', "editor: ft/in — whole feet, inches 0 to under 12, blank both clears");
+  ok(contactValue({}) === null && contactValue({ phone: "555" }) === "needsName" && JSON.stringify(contactValue({ name: "Pat", title: " " })) === '{"name":"Pat"}', "editor: contact needs a name; all blank clears");
+  ok(unableWith("  ", "u1", 1) === null && unableWith("x".repeat(501), "u1", 1) === null && unableWith(" locked ", "u1", 1)?.reason === "locked" && unableWith("x".repeat(500), "u1", 1) !== null, "editor: Unable needs a 1–500 character reason");
+  ok(notApplicable("u1", 3).state === "na" && answeredWith("yes", "u1", 3).v === "yes", "editor: N/A and answered constructors");
+  ok(!showCounter(399, 500) && showCounter(400, 500) && showCounter(4000, 5000), "editor: the counter shows from 80 % of the cap");
+
+  // pick lists: def options + active extras; a retired extra shows only when it is the current answer
+  const extras = { space_type: [{ value: "arena_bowl", label: "Arena bowl" }, { value: "old_one", label: "Old one", retired: true }] };
+  const o1 = optionsFor(def, extras, "space_type");
+  ok(o1.some((o) => o.value === "arena_bowl") && !o1.some((o) => o.value === "old_one") && o1[0].value === "proscenium", "editor: options = definition + non-retired extras");
+  ok(optionsFor(def, extras, "space_type", "old_one").some((o) => o.value === "old_one") && optionsFor(def, extras, "constructor").length === 0, "editor: a retired current value still shows; an inherited list id is no list");
+
+  // profile pre-fill: offered only with a stored value and no answer; Still true is an ordinary answer
+  const facts = { "core.space_type": { v: "thrust", at: 5, from: "AS-1001" }, "core.seats": { v: "", at: 5, from: "AS-1001" } };
+  const spaceQ = q.get("core.space_type")!.q;
+  ok(profileOnFile(spaceQ, facts, {})?.from === "AS-1001" && profileOnFile(spaceQ, facts, { "core.space_type": clearMarker("u1", 1) }) === null && profileOnFile(q.get("core.seats")!.q, facts, {}) === null && profileOnFile(q.get("core.use")!.q, facts, {}) === null, "editor: On file shows only for a profile question with a stored value and no answer");
+  const evalBase = { def, visitType: "condition", scopes: editorDoc().scopes, photos: [], dismissed: [], resolved: [], now: Date.UTC(2026, 9, 13) };
+  const before = evaluate({ ...evalBase, answers: {}, profile: { "core.space_type": "thrust" } });
+  const after = evaluate({ ...evalBase, answers: { "core.space_type": answeredWith("thrust", "u1", 1) }, profile: { "core.space_type": "thrust" } });
+  ok(before.missingRequired.includes("core.space_type") && !after.missingRequired.includes("core.space_type"), "editor: a profile fact alone doesn't answer a required question; Still true (an answered entry) does");
+
+  // gates: counterweight appears; "none" hides it and its answers move under Hidden by earlier answers
+  const cw = { "rigging.overhead": A("counterweight", 1), "rigging.cw_sets": A(12, 2) };
+  const r1 = evaluate({ ...evalBase, answers: cw, profile: {} });
+  ok(r1.visibleModules.has("rigging.counterweight") && r1.visible.has("rigging.cw_sets") && hiddenAnswered(def, "S2", r1, cw).length === 0, "editor: overhead = counterweight shows the counterweight module");
+  const none = { ...cw, "rigging.overhead": A("none", 3) };
+  const r2 = evaluate({ ...evalBase, answers: none, profile: {} });
+  const hid = hiddenAnswered(def, "S2", r2, none);
+  ok(!r2.visibleModules.has("rigging.counterweight") && hid.some((h) => h.q.key === "rigging.cw_sets" && h.moduleTitle === "Counterweight"), "editor: overhead = none hides it; its answer is listed under Hidden by earlier answers");
+  ok(hiddenAnswered(def, "S2", r2, { ...none, "rigging.cw_purchase": clearMarker("u1", 4) }).every((h) => h.q.key !== "rigging.cw_purchase"), "editor: a cleared hidden answer isn't listed");
+
+  // rail summaries: scopes that are on; S8 off is absent; counts line up with evaluate
+  const sums = scopeSummaries(def, editorDoc().scopes, r1);
+  const s2 = sums.find((x) => x.code === "S2")!;
+  ok(sums[0].code === "S0" && !sums.some((x) => x.code === "S8") && !sums.some((x) => x.code === "S3"), "editor: the rail lists only scopes that are on (S0 always)");
+  ok(s2.total === r1.progress.rigging.total && s2.done === r1.progress.rigging.done && s2.missingPhotos === r1.missingPhotos.filter((m) => m.moduleId.startsWith("rigging.")).length && s2.missingPhotos > 0, "editor: rail progress and missing photos come from evaluate");
+  ok(sums.reduce((n, x) => n + x.prompts, 0) <= r1.prompts.length, "editor: rail prompt badges never exceed the open prompts");
+  ok(flagsForScope(def, r1, "S2").every((f) => r1.flags.some((x) => x.ruleId === f.ruleId)), "editor: a scope's flags are evaluate's flags");
+  const offScopes = editorDoc().scopes.map((s) => (s.code === "S2" ? { ...s, on: false } : s));
+  ok(offScopesWithAnswers(def, offScopes, cw).join() === "S2", "editor: a scope switched off with answers is reported (its answers are kept)");
+  const sc = setScopeOn(def, [{ code: "S0", on: true }], "S2", true);
+  ok(sc.find((x) => x.code === "S2")?.depth === "screen" && setScopeOn(def, sc, "S0", false) === sc, "editor: turning S2 on takes its screen depth; S0 can't be turned off");
+
+  // messages
+  const rp = refusalParts("rigging.overhead: \"x\" is not one of the options", def);
+  ok(rp.key === "rigging.overhead" && rp.label === "Overhead rigging system type" && rp.error.startsWith("\"x\""), "editor: a refusal names the question it refused");
+  ok(refusalParts("Enter the visit date", def).key === undefined, "editor: a refusal without a key is shown as is");
+  ok(rejectLabel("core.seats", def) === "Seat count" && rejectLabel("photo:p_1", def) === "Photo p_1" && rejectLabel("field:spaceLabel", def) === "Space", "editor: sync rejects are labelled by question, photo or field");
+  ok(formatRejectPayload("field:scopes", [{ code: "S0", on: true }, { code: "S2", on: false }], def, {}) === "Core", "editor: a rejected scope list reads as the titles of the scopes it had on");
+  ok(formatRejectPayload("core.space_type", A("thrust", 1), def, {}) === "Thrust", "editor: a rejected answer reads as its value");
+  ok(reenterAnswer(A("thrust", 1, "x"), "u1", 99)?.at === 99 && reenterAnswer({ state: "unable", reason: "locked" }, "u1", 9)?.reason === "locked" && reenterAnswer("junk", "u1", 1) === null, "editor: Re-enter restamps a rejected answer");
+  ok(formatValue(q.get("core.stage_width")!.q, { ft: 40, in: 6 }, def, {}) === "40′ 6″" && formatValue(q.get("core.use")!.q, ["school", "rentals"], def, {}) === "School, Rentals", "editor: values format for display");
+
+  const fv: FindingVM[] = [
+    { key: "fd_a", printedId: null, category: "RIG", rating: "needs", description: "", questionKeys: ["rigging.x"], ruleId: "X5", status: "open", voided: false, photoIds: [] },
+    { key: "fd_b", printedId: null, category: "RIG", rating: "needs", description: "", questionKeys: [], ruleId: "R9", status: "open", voided: false, photoIds: [] },
+    { key: "fd_c", printedId: null, category: "RIG", rating: "needs", description: "", questionKeys: [], ruleId: "R2", status: "open", voided: true, photoIds: [] },
+  ];
+  ok(resolvedPromptIds(fv).join() === "flag:rigging.x,rule:R9", "editor: findings resolve their prompts (voided ones don't)");
+}
+
+/** Task 7 — the editor's save contract against the real store: a patch built by the editor model, the reply's rev
+ *  adopted, a stale copy's scalars dropped, and the offline outbox doc through the push branch. */
+async function assessmentEditorDbChecks(ok: Ok) {
+  const db = await getDb();
+  const created: string[] = [];
+  try {
+    await assessIdentityFixtures();
+    const a = await createAssessment({ visitType: "condition", customerId: ASSESS_FIX.co1, siteId: ASSESS_FIX.site1, visitDate: Date.UTC(2026, 9, 13), assessorId: "u1" }, "u1");
+    created.push(a.id);
+    registerFixture("assessments", a.id);
+    const U1 = { id: "u1" };
+    let st = initEditorState(JSON.parse(JSON.stringify(a)) as EditorDoc);
+    st = editorReducer(st, { type: "answer", key: "rigging.overhead", answer: answeredWith("counterweight", "u1", Date.now()) });
+    const p1 = buildPatch(st)!;
+    const r1 = await saveAssessment(a.id, p1, U1, { mode: "action" });
+    ok(r1.ok && r1.doc.rev === a.rev + 1, "editor db: an editor patch saves and returns the stored rev");
+    if (!r1.ok) return;
+    st = editorReducer(st, { type: "saved", patch: p1, rev: r1.doc.rev });
+    ok(st.doc.rev === r1.doc.rev && buildPatch(st) === null, "editor db: after adopting the reply nothing is pending");
+    // another device moves the record on
+    const other = await saveAssessment(a.id, { rev: r1.doc.rev, spaceLabel: "Stage left" }, { id: "u2" }, { mode: "action" });
+    ok(other.ok, "editor db: a second device saves");
+    // this device changes the space label from its now-stale copy → dropped, answers still merge
+    st = editorReducer(st, { type: "scalar", field: "spaceLabel", value: "Mine" });
+    st = editorReducer(st, { type: "answer", key: "rigging.cw_sets", answer: answeredWith(8, "u1", Date.now()) });
+    const p2 = buildPatch(st)!;
+    const r2 = await saveAssessment(a.id, p2, U1, { mode: "action" });
+    ok(r2.ok && JSON.stringify(r2.dropped) === '["spaceLabel"]' && r2.doc.spaceLabel === "Stage left" && r2.doc.answers["rigging.cw_sets"]?.v === 8, "editor db: a stale copy's scalar is dropped (reported), its answers merge");
+    if (!r2.ok) return;
+    st = editorReducer(st, { type: "saved", patch: p2, rev: r2.doc.rev, dropped: r2.dropped });
+    st = editorReducer(st, { type: "adopt", server: JSON.parse(JSON.stringify(r2.doc)) as EditorDoc });
+    ok(st.doc.spaceLabel === "Stage left" && st.dropped.join() === "spaceLabel" && st.doc.rev === r2.doc.rev, "editor db: after the refreshed copy the stored space label shows and the drop is reported");
+    // a refused answer names the key and changes nothing
+    const bad = await saveAssessment(a.id, { rev: st.doc.rev, answers: { "rigging.overhead": answeredWith("spaceship", "u1", Date.now()) } }, U1, { mode: "action" });
+    ok(!bad.ok && refusalParts(bad.error, ASSESSMENT_DEF).key === "rigging.overhead", "editor db: a refused save names the question (red banner)");
+    // offline: the whole doc goes through the push branch; its clear marker merges; rev returned
+    st = editorReducer(st, { type: "answer", key: "rigging.cw_sets", answer: clearMarker("u1", Date.now() + 1) });
+    const full = buildFullDoc(st, Date.now());
+    const pushed = await pushAssessment({ id: a.id, rev: full.rev as number, doc: full }, { id: "u1", roles: ["Estimator"] });
+    const stored = (await getAssessment(a.id))!;
+    ok(pushed.status === "ok" && pushed.rev === stored.rev && stored.answers["rigging.cw_sets"]?.v === null && "rigging.cw_sets" in stored.answers, "editor db: the outbox doc pushes ok with the stored rev; Clear keeps the key with v null");
+    // clearSyncRejects: a pushed bad answer is recorded, then cleared with its rev returned
+    const badFull = { ...full, answers: { ...(full.answers as Record<string, unknown>), "core.space_type": { v: "spaceship", state: "answered", at: Date.now() + 2, by: "u1" } }, rev: stored.rev + 1 };
+    await pushAssessment({ id: a.id, rev: badFull.rev, doc: badFull }, { id: "u1", roles: ["Estimator"] });
+    const withRej = (await getAssessment(a.id))!;
+    ok(withRej.syncRejects?.some((r) => r.key === "core.space_type") === true, "editor db: a bad pushed answer lands in syncRejects");
+    const cleared = await clearSyncRejects(a.id, ["core.space_type"], U1);
+    ok(cleared.ok && cleared.doc.rev === withRej.rev + 1 && !cleared.doc.syncRejects?.some((r) => r.key === "core.space_type"), "editor db: clearing a sync reject returns the new rev to adopt");
+  } finally {
+    if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    await dropAssessIdentityFixtures();
+  }
+}
+
 if (process.argv[1] && /test-assessments\.ts$/.test(process.argv[1])) {
   let fail = 0; const ok: Ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
   assessmentChecks(ok).then(() => { console.log(fail ? `${fail} FAIL` : "all PASS"); process.exit(fail ? 1 : 0); });

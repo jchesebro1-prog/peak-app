@@ -279,6 +279,14 @@ class SyncEngine {
     return { ...(row.doc as T), id: row.id };
   }
 
+  /** Outbox entries the server refused (state "error"), with the reason it gave when it gave one. */
+  async erroredEntries(): Promise<Array<{ collection: string; id: string; doc: Record<string, unknown>; error?: string }>> {
+    const rows = await idb.getAll<OutboxEntry>("outbox");
+    return rows
+      .filter((r) => r.state === "error")
+      .map((r) => ({ collection: r.collection, id: r.id, doc: r.doc, ...(r.error ? { error: r.error } : {}) }));
+  }
+
   /* ---------- transport ---------- */
 
   /** Flush the outbox to /api/sync/push, then pull to converge. */
@@ -319,6 +327,7 @@ class SyncEngine {
             status: "ok" | "conflict" | "error";
             rev?: number;
             server?: Record<string, unknown>;
+            error?: string;
           }>
         >;
       };
@@ -343,7 +352,8 @@ class SyncEngine {
           } else {
             // Malformed — flag but keep out of the retry loop until re-saved.
             const entry = await idb.get<OutboxEntry>("outbox", key);
-            if (entry) await idb.put("outbox", { ...entry, state: "error" });
+            // Keep the server's reason so an editor can name it (#337).
+            if (entry) await idb.put("outbox", { ...entry, state: "error", ...(typeof r.error === "string" ? { error: r.error.slice(0, 300) } : {}) });
           }
         }
       }
