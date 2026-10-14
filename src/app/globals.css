@@ -35,6 +35,12 @@
   --amber: #d98a2b;
   --blue: #3d8bf2;
   --red: #b4543a;
+  /* Condition scale, Bad → New (#344). The app themes light only, so no dark variants. */
+  --cond-0: #c0392b;
+  --cond-1: #d9772b;
+  --cond-2: #c9a227;
+  --cond-3: #6aa84f;
+  --cond-4: #2e8b57;
   --font-brand: var(--font-michroma), "Michroma", var(--font-ui); /* wired in layout.tsx (Task 4) */
   --font-ui: var(--font-public-sans), "Public Sans", sans-serif;
   --font-mono: var(--font-plex-mono), "IBM Plex Mono", monospace;

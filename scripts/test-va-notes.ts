@@ -521,6 +521,27 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* idempotency over everything above */
   const fixtures: MigratableSurvey[] = [ac1, ac2, ac3, ml1, ml2, ml3, ml4, ml5, bd1, sr1, sr2, gl, cu1, cu2, cu3, li1, li2, av1, av2, ls1];
   ok(fixtures.every((f) => JSON.stringify(mm(f)) === JSON.stringify(f)), "#344 B2: migrating twice gives identical JSON");
+
+  /* B3: shared UI pieces (source pins) */
+  const b3dir = "src/app/(app)/venue-assessments/[id]/sections";
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const slider = rd(`${b3dir}/condition-slider.tsx`);
+  const goals = rd(`${b3dir}/goals-list.tsx`);
+  const chips = rd(`${b3dir}/scope-chips.tsx`);
+  const css = rd("src/app/globals.css");
+  ok(/type="range"/.test(slider) && /min=\{0\}/.test(slider) && /max=\{4\}/.test(slider) && /step=\{1\}/.test(slider) && slider.includes("var(--cond-") && slider.includes("aria-valuetext"),
+    "#344 B3: condition slider is a 0–4 native range, coloured from --cond-N, with aria-valuetext");
+  ok(slider.includes("CONDITION_STEPS") && slider.includes("onChange(undefined)") && slider.includes("Not rated"),
+    "#344 B3: condition slider shows step labels, 'Not rated' until touched, and Clear resets to undefined");
+  ok(goals.includes("maxLength={300}") && /MAX_GOALS\s*=\s*20/.test(goals) && goals.includes("+ Add goal") && goals.includes("disabled={value.length >= MAX_GOALS}"),
+    "#344 B3: goals editor caps typing at 300 chars a line and 20 goals");
+  ok(goals.includes("Enter") && goals.includes("focus()") && goals.includes("↑") && goals.includes("↓") && goals.includes("×"),
+    "#344 B3: goals editor adds-after on Enter, reorders and removes");
+  ok(/value\.includes\("Other"\)/.test(chips) && chips.includes("Explain the scope") && chips.includes("maxLength={500}"),
+    "#344 B3: scope chips show the 500-char explain box only when Other is selected");
+  ok([0, 1, 2, 3, 4].every((i) => new RegExp(`--cond-${i}:\\s*#[0-9a-f]{6}`, "i").test(css)), "#344 B3: globals.css defines --cond-0 … --cond-4");
+  ok(![slider, goals, chips].some((f) => /from "@\/db|stores\/|"server-only"/.test(f)) && [slider, goals, chips].every((f) => f.startsWith('"use client"')),
+    "#344 B3: the three components are client-safe (use client, no store imports)");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
