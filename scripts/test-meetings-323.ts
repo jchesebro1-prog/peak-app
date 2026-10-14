@@ -1002,7 +1002,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
      ["src/app/(app)/venue-assessments/[id]/controls.tsx", "src/app/(app)/leads/lead-drawer.tsx", "src/app/(app)/projects/view.tsx"].every((p) => !/meetings-card/.test(src(p))),
     "#323 client editors (survey, lead drawer) render the server card through a ReactNode slot, never importing it");
 
-  const search = src("src/app/api/search/route.ts");
+  const search = src("src/lib/search/global-search.ts");
   const sBlock = search.slice(search.indexOf("#323 Krisp meetings"), search.indexOf('"Catalog"'));
   ok(/searchMeetingCandidates\(q, CANDIDATES, meId\)/.test(search) && /"Meetings"/.test(sBlock) && /canSeeMeeting\(m, meId\)/.test(sBlock) &&
      /renderMeeting\(m, NO_NAMES\)/.test(sBlock) && /letter: "M"/.test(sBlock) && /color: "#6b4fa1"/.test(sBlock) &&
@@ -1318,7 +1318,7 @@ export async function meetings323FinalChecks(ok: Ok): Promise<void> {
   const inboxPage = src("src/app/(app)/inbox/page.tsx");
   const card = src("src/components/meetings/meetings-card.tsx");
   const feedSrc = src("src/lib/customer-feed.ts");
-  const search = src("src/app/api/search/route.ts");
+  const search = src("src/lib/search/global-search.ts");
   ok(/meetingsReadOr\(toFileCount\(user\.id\), 0,/.test(home) && /meetingsReadOr\(toFileCount\(user\.id\), 0,/.test(inboxPage) &&
      /meetingsReadOr\(meetingRowsLinkedTo\(kind, id, viewerId\), \[\]/.test(card) &&
      /meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feedSrc) &&

@@ -56,7 +56,7 @@ export async function assistPureChecks(ok: Ok): Promise<void> {
   ok(assistSettingsOf({ assistMonthlyCapUsd: 99999 }).capUsd === 10000 && assistSettingsOf({ assistMonthlyCapUsd: -5 }).capUsd === 0, "assist settings: cap clamps 0..10000");
   ok(assistSettingsOf({ assistFeatures: { reply: false } }).features.reply === false, "assist settings: a feature toggled off");
   /* #335 Inbox organization features */
-  ok(ASSIST_FEATURES.join(",") === "tasks,reply,estimate,file,promise,brief" && !s0.features.file && !s0.features.promise && !s0.features.brief, "assist settings: file + promise (D897) and brief (daily brief) are features, OFF by default");
+  ok(ASSIST_FEATURES.join(",") === "tasks,reply,estimate,file,promise,brief,ask" && !s0.features.file && !s0.features.promise && !s0.features.brief, "assist settings: file + promise (D897) and brief (daily brief) are features, OFF by default");
   const optIn = assistSettingsOf({ assistFeatures: { tasks: true, file: "yes", promise: 1 } });
   ok(!optIn.features.file && !optIn.features.promise && optIn.features.reply && optIn.features.estimate, "assist settings: only file/promise === true turns them on; tasks/reply/estimate keep their on-unless-false default");
   const optOn = assistSettingsOf({ assistFeatures: { file: true, promise: true } });

@@ -26,6 +26,7 @@ const FEATURES = [
   { key: "file", label: "Inbox organization" },
   { key: "promise", label: "Promise tasks" },
   { key: "brief", label: "Daily brief" },
+  { key: "ask", label: "Ask AI" },
 ] as const;
 
 const money = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
@@ -287,7 +288,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
         ))}
       </div>
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>
-        Inbox organization, Promise tasks and Daily brief start off — turn them on for the pilot users above.
+        Inbox organization, Promise tasks, Daily brief and Ask AI start off — turn them on for the pilot users above.
       </div>
 
       {/* Monthly cap */}

@@ -47,6 +47,7 @@
     "test:popout": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-popout.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:brief": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-brief.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:suggest": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-suggest.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
+    "test:ask": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-ask.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:smoke:upload": "tsx scripts/smoke-upload.ts",
     "test:smoke:grid-sheet": "tsx scripts/smoke-grid-sheet-upload.ts",
     "test:review:regressions": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-review-regressions.ts && tsx scripts/test-quote-email-regression.ts",

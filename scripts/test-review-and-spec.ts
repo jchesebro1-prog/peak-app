@@ -11131,7 +11131,7 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
 {
   const src304 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
   const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src304(rel)) && src304(rel).includes(name), `#304 search ${rel}: reads the shared haystack (${name})`);
-  pinRel("src/app/api/search/route.ts", "partSearchHaystack(");
+  pinRel("src/lib/search/global-search.ts", "partSearchHaystack(");
   pinRel("src/app/(app)/catalog/page.tsx", "partSearchHaystack(");
   // #334: the Estimator's ranking moved to catalog-rank.ts (shared with Assist); searchCatalog calls it.
   pinRel("src/app/(app)/estimator/catalog-rank.ts", "partSearchHaystack(");
@@ -11284,7 +11284,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   ok(src304("src/components/cutsheets/cut-sheet-pages.tsx").includes("{h.model}") && src304("src/lib/curtain-cut-sheets/load.ts").includes("model: partModel(p)"), "#304 cut sheets: the printer + loader read the model");
 
   // Staff rows.
-  ok(src304("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src304("src/app/api/search/route.ts").includes("staffPartLabel(p)") && src304("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#304 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
+  ok(src304("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src304("src/lib/search/global-search.ts").includes("staffPartLabel(p)") && src304("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#304 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
   ok(src304("src/app/(app)/estimator/actions.ts").includes("model: p.manufacturerModelNumber.trim()") && src304("src/app/(app)/estimator/actions.ts").includes("mpn: p.manufacturerPartNumber.trim()"), "#304 staff rows: searchCatalog hits carry the model / order # when present");
   const dr = cr304DocRow({ sku: JUP.sku, quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: JUP.sku, desc: "DSP", category: "Audio", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }, buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), () => "");
   ok(dr.model === "Jupiter 4", "#304 datasheets row: the Model # (partModel)");
@@ -11351,6 +11351,7 @@ import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgA
 import { popoutPureChecks } from "./test-popout";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
+import { askPureChecks, askSearchDbChecks } from "./test-ask";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11725,6 +11726,8 @@ seeded()
   .then(() => suggestEntryChecks(ok))
   .then(() => suggestEntryDbChecks(ok))
   .then(() => suggestEntryPins(ok))
+  .then(() => askPureChecks(ok))
+  .then(() => askSearchDbChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -28335,7 +28338,7 @@ function e223Src(rel: string): string {
   ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
   ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
   ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
-  const search = e223Src("src/app/api/search/route.ts");
+  const search = e223Src("src/lib/search/global-search.ts");
   ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
   // Designs/surveys/inspections keep their own ids; only the Quotes → Designs span is checked.
   const quoteGroups = search.slice(search.indexOf('"Quotes",'), search.indexOf('"Designs",'));
@@ -28500,7 +28503,7 @@ import { linkThreadToNewQuote as e223LinkNewQuote } from "@/lib/gmail/linking";
       engActions.includes('String(quoteId || "").trim().slice(0, 120)'),
     "#223 engagement quote fields (install + consulting) resolve through resolveQuoteInput, scoped to the company, bounded, and report ambiguity / another company"
   );
-  ok(e223Src("src/app/api/search/route.ts").includes("quotesByPartialNumber("), "#223 ⌘K: partial numbers reach the quote candidates");
+  ok(e223Src("src/lib/search/global-search.ts").includes("quotesByPartialNumber("), "#223 ⌘K: partial numbers reach the quote candidates");
   ok(e223Src("src/lib/gmail/linking.ts").includes("leadId"), "#223 inbox + New quote passes the thread's lead");
 }
 
