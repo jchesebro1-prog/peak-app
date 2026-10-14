@@ -937,6 +937,19 @@ export default function SurveyEditor({
   });
 
   /* ---------- the section rail (long scroll, #342 A8) ---------- */
+  // the phone <select> is controlled — if a scope toggle hid the active section, fall back to a shown one
+  const shownActive = sections.some((s) => s.id === activeSec) ? activeSec : (sections[0]?.id ?? "cust");
+  const LOCKED_MSG = "Answer the kill questions to unlock the discipline intakes";
+  // a locked discipline picked in the rail goes to Kill questions (its own card stays shut)
+  function pickFromRail(id: string) {
+    const t = sections.find((s) => s.id === id);
+    if (t?.kind === "discipline" && !tier1Done) {
+      flash(LOCKED_MSG);
+      jumpTo("tier1");
+      return;
+    }
+    jumpTo(id);
+  }
   const railItems: RailItem[] = sections.map((sec) => {
     const p = sectionProgress(sec, draft, { tier1Done });
     return {
@@ -944,7 +957,7 @@ export default function SurveyEditor({
       label: sec.title,
       done: p.done,
       total: p.total,
-      badges: p.gate ? [{ tone: "prompt", n: 1, title: "Answer the kill questions to unlock the discipline intakes", text: "needs answers" }] : [],
+      badges: p.gate ? [{ tone: "prompt", n: 1, title: LOCKED_MSG, text: "needs answers" }] : [],
       muted: sec.kind === "discipline" && !tier1Done,
     };
   });
@@ -1045,7 +1058,7 @@ export default function SurveyEditor({
       <div className="sv-pad" style={{ padding: "20px 24px 90px" }}>
         <div className={layoutMode === "long" ? "va-layout" : undefined} style={layoutMode === "long" ? undefined : { maxWidth: 900, margin: "0 auto" }}>
           {layoutMode === "long" && (
-            <SectionRail items={railItems} active={activeSec} onPick={jumpTo} ariaLabel="Sections" sheetLabel="Jump to section" top={headH + 12} />
+            <SectionRail items={railItems} active={shownActive} onPick={pickFromRail} ariaLabel="Sections" sheetLabel="Jump to section" top={headH + 12} />
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1057,7 +1070,7 @@ export default function SurveyEditor({
                 const showGroupHeader = layoutMode !== "wizard" && (secIdx === 0 || visibleSections[secIdx - 1].group !== sec.group);
                 const headerClick = () => {
                   if (locked) {
-                    flash("Answer the kill questions to unlock the discipline intakes");
+                    flash(LOCKED_MSG);
                     jumpTo("tier1");
                   } else {
                     toggleSection(sec);
@@ -1078,6 +1091,17 @@ export default function SurveyEditor({
                     <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
                       <div
                         onClick={headerClick}
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={open}
+                        aria-controls={open ? "sec-body-" + sec.id : undefined}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            headerClick();
+                          }
+                        }}
                         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: `16px 18px ${open ? "10px" : "16px"}`, cursor: "pointer" }}
                       >
                         <div style={{ minWidth: 0 }}>
@@ -1100,7 +1124,7 @@ export default function SurveyEditor({
                       </div>
 
                       {open && (
-                        <div style={{ padding: "4px 18px 20px" }}>
+                        <div id={"sec-body-" + sec.id} style={{ padding: "4px 18px 20px" }}>
                           {sec.kind === "custvenue" && (
                             <CustVenueSection
                               draft={draft}

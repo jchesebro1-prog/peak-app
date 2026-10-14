@@ -204,6 +204,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
 
   const ctl7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
   ok(!ctl7.includes('"accordion"') && ctl7.includes("<SectionRail") && ctl7.includes("SECTION_RAIL_CSS"), "#342 A8: Accordion mode is gone; long scroll has the shared rail");
+  ok(ctl7.includes('role="button"') && ctl7.includes("tabIndex={0}") && ctl7.includes("aria-expanded={open}") && ctl7.includes("aria-controls={") && ctl7.includes("onKeyDown"),
+    "#342 A8: the section header is keyboard-operable (role=button, tabIndex, aria-expanded, key handler)");
+  ok(ctl7.includes("active={shownActive}") && ctl7.includes("const shownActive"), "#342 A8: the rail's active section is always a shown one");
+  ok(ctl7.includes("onPick={pickFromRail}"), "#342 A8: the rail routes a locked discipline to Kill questions");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
