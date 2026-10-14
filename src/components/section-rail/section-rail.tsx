@@ -85,10 +85,10 @@ export function SectionRail({
     if (!nav || maxHeight == null) return;
     const row = nav.querySelector<HTMLElement>(".sr-rail-row.on");
     if (!row || nav.clientHeight === 0) return;
-    const rowTop = row.offsetTop - nav.offsetTop;
-    const rowBottom = rowTop + row.offsetHeight;
-    if (rowTop < nav.scrollTop) nav.scrollTop = rowTop - 6;
-    else if (rowBottom > nav.scrollTop + nav.clientHeight) nav.scrollTop = rowBottom - nav.clientHeight + 6;
+    const nr = nav.getBoundingClientRect();
+    const rr = row.getBoundingClientRect();
+    if (rr.top < nr.top) nav.scrollTop -= nr.top - rr.top + 6;
+    else if (rr.bottom > nr.bottom) nav.scrollTop += rr.bottom - nr.bottom + 6;
   }, [active, maxHeight]);
   const navStyle = maxHeight != null ? { ...stick, maxHeight, overflowY: "auto" as const } : stick;
   return (
