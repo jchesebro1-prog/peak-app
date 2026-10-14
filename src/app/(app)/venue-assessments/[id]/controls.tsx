@@ -53,6 +53,9 @@ import {
 } from "@/lib/survey-flow";
 import { KillQuestions } from "./sections/kill-questions";
 import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
+import { SectionRail, SECTION_RAIL_CSS, type RailItem } from "@/components/section-rail/section-rail";
+import { sectionProgress } from "./sections/progress";
+import { useCollapsed, isCollapsed } from "./sections/collapse";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
  * imported into a client bundle, so its pure meta/option-lists are handed
@@ -164,7 +167,7 @@ function toDraft(r: SurveyRecord): Draft {
   };
 }
 
-type LayoutMode = "long" | "wizard" | "accordion";
+type LayoutMode = "long" | "wizard";
 
 /**
  * Two-step arm/confirm in front of the page's `onDelete` (never
@@ -260,7 +263,18 @@ export default function SurveyEditor({
   const [venueOther, setVenueOther] = useState(false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("long");
   const [step, setStep] = useState(0);
-  const [openSet, setOpenSet] = useState<Record<string, boolean>>({ cust: true });
+  // #342 A8: every section collapses; the choice is remembered per viewer per survey (localStorage)
+  const [collapsedMap, setCollapsedFor] = useCollapsed(record.id);
+  const [activeSec, setActiveSec] = useState("cust");
+  const headRef = useRef<HTMLDivElement | null>(null);
+  const [headH, setHeadH] = useState(128);
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setHeadH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function flash(msg: string) {
@@ -587,12 +601,6 @@ export default function SurveyEditor({
       .sort((a, b) => rank(a.id) - rank(b.id));
   }, [draft, meta, roster]);
 
-  const measFilled = (fields: FieldDef[]): number =>
-    fields.filter((f) => {
-      const v = mv(f.key);
-      return f.kind === "checkMeasure" ? !!v : String(v ?? "").trim() !== "";
-    }).length;
-
   /* ---------- persistence ---------- */
   function validate(): boolean {
     if (!(draft.customer || "").trim()) {
@@ -837,9 +845,8 @@ export default function SurveyEditor({
   }, [sections]);
   const curStepIdx = stepsPresent.indexOf(step);
 
-  const isCollapsible = (sec: SectionDef) => layoutMode === "accordion" || !!sec.advanced;
-  const isOpen = (sec: SectionDef) => (isCollapsible(sec) ? !!openSet[sec.id] : true);
-  const toggleSection = (id: string) => setOpenSet((o) => ({ ...o, [id]: !o[id] }));
+  const isOpen = (sec: SectionDef) => !isCollapsed(collapsedMap, sec);
+  const toggleSection = (sec: SectionDef) => setCollapsedFor(sec.id, isOpen(sec));
 
   const visibleSections = layoutMode === "wizard" ? sections.filter((s) => s.step === step) : sections;
 
@@ -847,21 +854,26 @@ export default function SurveyEditor({
     try {
       const el = document.getElementById("sec-" + id);
       if (el) {
-        const y = el.getBoundingClientRect().top + window.pageYOffset - 128;
+        const y = el.getBoundingClientRect().top + window.pageYOffset - headH - 12;
         window.scrollTo({ top: y, behavior: "smooth" });
       }
     } catch {}
   }
   function jumpTo(id: string) {
     // #342: Kill questions sit in Brief while the intakes they unlock sit in Site intake — in Stepped
-    // layout a jump to another step switches to it first, then scrolls once it has rendered.
+    // layout a jump to another step switches to it first, then scrolls once it has rendered. A collapsed
+    // target opens first (A8), so the scroll waits a frame for it to lay out.
     const target = sections.find((s) => s.id === id);
+    // a locked discipline stays shut (and its stored choice untouched) until the kill questions are in
+    const locked = target?.kind === "discipline" && !tier1Done;
+    if (target && !locked && !isOpen(target)) setCollapsedFor(id, false);
+    setActiveSec(id);
     if (layoutMode === "wizard" && target && target.step !== step) {
       setStep(target.step);
       window.setTimeout(() => scrollToSection(id), 60);
       return;
     }
-    scrollToSection(id);
+    requestAnimationFrame(() => scrollToSection(id));
   }
   function gotoStep(i: number) {
     setStep(i);
@@ -924,6 +936,19 @@ export default function SurveyEditor({
     background: checked ? "var(--accent)" : "#fff",
   });
 
+  /* ---------- the section rail (long scroll, #342 A8) ---------- */
+  const railItems: RailItem[] = sections.map((sec) => {
+    const p = sectionProgress(sec, draft, { tier1Done });
+    return {
+      key: sec.id,
+      label: sec.title,
+      done: p.done,
+      total: p.total,
+      badges: p.gate ? [{ tone: "prompt", n: 1, title: "Answer the kill questions to unlock the discipline intakes", text: "needs answers" }] : [],
+      muted: sec.kind === "discipline" && !tier1Done,
+    };
+  });
+
   const stageBg = (i: number) => (i === curStageIdx ? ACCENT : i < curStageIdx ? ACCENT_SOFT : "#f1f2f5");
   const stageCol = (i: number) => (i === curStageIdx ? "#fff" : i < curStageIdx ? ACCENT_INK : "#9aa0ab");
 
@@ -934,11 +959,14 @@ export default function SurveyEditor({
         .sv-rail::-webkit-scrollbar { display:none; }
         .sv-rail { -ms-overflow-style:none; scrollbar-width:none; }
         .sv-inv-row { display:grid; grid-template-columns:minmax(130px,1.3fr) 68px 44px minmax(110px,1fr) 40px; gap:7px; align-items:stretch; }
+        .va-layout { display:grid; grid-template-columns: 230px minmax(0,1fr); gap: 18px; align-items: start; max-width: 1160px; margin: 0 auto; }
+        @media (max-width:759px){ .va-layout{ display:block; } }
+        ${SECTION_RAIL_CSS}
         @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } .va-condition-row,.va-cert-row{ grid-template-columns:1fr !important; } }
       `}</style>
 
       {/* sticky header */}
-      <div style={{ position: "sticky", top: 0, zIndex: 24, background: "#fff", borderBottom: "1px solid #ececf0", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
+      <div ref={headRef} style={{ position: "sticky", top: 0, zIndex: 24, background: "#fff", borderBottom: "1px solid #ececf0", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
         <div className="sv-pad" style={{ display: "flex", alignItems: "center", gap: 14, maxWidth: 900, margin: "0 auto", padding: "11px 24px", flexWrap: "wrap", rowGap: 10 }}>
           <Link href="/venue-assessments" style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", borderRadius: 9, padding: "9px 13px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
             <span style={{ fontSize: 15, lineHeight: 1 }}>←</span> Assessments
@@ -994,19 +1022,8 @@ export default function SurveyEditor({
             <div style={{ display: "flex", background: "#eceef1", borderRadius: 10, padding: 3 }}>
               <button onClick={() => setLayoutMode("long")} style={modeBtn(layoutMode === "long")}>Long scroll</button>
               <button onClick={() => setLayoutMode("wizard")} style={modeBtn(layoutMode === "wizard")}>Stepped</button>
-              <button onClick={() => setLayoutMode("accordion")} style={modeBtn(layoutMode === "accordion")}>Sections</button>
             </div>
           </div>
-
-          {layoutMode === "long" && (
-            <div className="sv-rail" style={{ display: "flex", alignItems: "center", gap: 7, overflowX: "auto", flex: 1, minWidth: 0 }}>
-              {sections.map((s) => (
-                <button key={s.id} onClick={() => jumpTo(s.id)} style={{ flexShrink: 0, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "#5b616e", background: "#f4f5f7", border: "1px solid #eceef1", borderRadius: 20, padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                  {s.title}
-                </button>
-              ))}
-            </div>
-          )}
 
           {layoutMode === "wizard" && (
             <div className="sv-rail" style={{ display: "flex", alignItems: "center", gap: 8, overflowX: "auto", flex: 1, minWidth: 0 }}>
@@ -1025,256 +1042,244 @@ export default function SurveyEditor({
       </div>
 
       {/* body */}
-      <div className="sv-pad" style={{ maxWidth: 900, margin: "0 auto", padding: "20px 24px 90px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {meetingsSlot}
-          {visibleSections.map((sec, secIdx) => {
-            const locked = sec.kind === "discipline" && !tier1Done;
-            const collapsible = isCollapsible(sec) || sec.kind === "discipline";
-            const open = locked ? false : isOpen(sec);
-            const showGroupHeader = layoutMode !== "wizard" && (secIdx === 0 || visibleSections[secIdx - 1].group !== sec.group);
-            const filled = sec.kind === "fields" && sec.advanced ? measFilled(sec.fields) : 0;
-            const discFilled =
-              sec.kind === "discipline"
-                ? Object.values(draft.disciplines[sec.disc] || {}).filter((v) =>
-                    Array.isArray(v) ? v.length > 0 : typeof v === "boolean" ? v : String(v ?? "").trim() !== ""
-                  ).length + draft.inventory.filter((r) => r.discipline === sec.disc).length
-                : 0;
-            const headerClick = collapsible
-              ? () => {
+      <div className="sv-pad" style={{ padding: "20px 24px 90px" }}>
+        <div className={layoutMode === "long" ? "va-layout" : undefined} style={layoutMode === "long" ? undefined : { maxWidth: 900, margin: "0 auto" }}>
+          {layoutMode === "long" && (
+            <SectionRail items={railItems} active={activeSec} onPick={jumpTo} ariaLabel="Sections" sheetLabel="Jump to section" top={headH + 12} />
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {meetingsSlot}
+              {visibleSections.map((sec, secIdx) => {
+                const locked = sec.kind === "discipline" && !tier1Done;
+                const collapsible = !locked;
+                const open = locked ? false : isOpen(sec);
+                const showGroupHeader = layoutMode !== "wizard" && (secIdx === 0 || visibleSections[secIdx - 1].group !== sec.group);
+                const headerClick = () => {
                   if (locked) {
                     flash("Answer the kill questions to unlock the discipline intakes");
                     jumpTo("tier1");
                   } else {
-                    toggleSection(sec.id);
+                    toggleSection(sec);
                   }
-                }
-              : undefined;
-            return (
-              <div key={sec.id}>
-                {showGroupHeader && (
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
-                      {GROUP_META[sec.group].label}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
-                      {GROUP_META[sec.group].blurb}
-                    </span>
-                  </div>
-                )}
-                <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
-                  <div
-                    onClick={headerClick}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: `16px 18px ${open ? "10px" : "16px"}`, cursor: collapsible ? "pointer" : "default" }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em" }}>{sec.title}</div>
-                      {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                      {sec.advanced && filled > 0 && (
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, padding: "3px 9px", borderRadius: 20 }}>
-                          {filled} filled
+                };
+                return (
+                  <div key={sec.id}>
+                    {showGroupHeader && (
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
+                          {GROUP_META[sec.group].label}
                         </span>
-                      )}
-                      {sec.kind === "discipline" && !locked && discFilled > 0 && (
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, padding: "3px 9px", borderRadius: 20 }}>
-                          {discFilled} captured
+                        <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
+                          {GROUP_META[sec.group].blurb}
                         </span>
-                      )}
-                      {locked && (
-                        <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <rect x="3" y="11" width="18" height="11" rx="2" />
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                          </svg>
-                        </span>
-                      )}
-                      {collapsible && !locked && (
-                        <span style={{ fontSize: 11, color: "#aab0bb", display: "inline-block", transition: "transform .15s ease", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+                    )}
+                    <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
+                      <div
+                        onClick={headerClick}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: `16px 18px ${open ? "10px" : "16px"}`, cursor: "pointer" }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em" }}>{sec.title}</div>
+                          {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          {locked && (
+                            <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <rect x="3" y="11" width="18" height="11" rx="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
+                            </span>
+                          )}
+                          {collapsible && (
+                            <span style={{ fontSize: 11, color: "#aab0bb", display: "inline-block", transition: "transform .15s ease", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
+                          )}
+                        </div>
+                      </div>
 
-                  {open && (
-                    <div style={{ padding: "4px 18px 20px" }}>
-                      {sec.kind === "custvenue" && (
-                        <CustVenueSection
-                          draft={draft}
-                          patchDraft={patchDraft}
-                          setField={setField}
-                          customers={customers}
-                          linkedCust={linkedCust}
-                          custLocs={custLocs}
-                          venueHasLocs={venueHasLocs}
-                          custNew={custNew}
-                          setCustNew={setCustNew}
-                          venueOther={venueOther}
-                          setCustomerSel={setCustomerSel}
-                          setVenueSel={setVenueSel}
-                        />
-                      )}
-                      {sec.kind === "fields" && (
-                        <FieldsSection
-                          fields={sec.fields}
-                          draft={draft}
-                          patchDraft={patchDraft}
-                          mv={mv}
-                          setMeasure={setMeasure}
-                          toggleMeasure={toggleMeasure}
-                          toggleBtn={toggleBtn}
-                          boxStyle={boxStyle}
-                        />
-                      )}
-                      {sec.id === "notes" && fromRecording.length > 0 && (
-                        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-                          {fromRecording.map((p) => (
-                            <FromRecordingPanel
-                              key={p.recordingId}
-                              recordingId={p.recordingId}
-                              title={p.title}
-                              sections={p.sections}
-                              target="survey"
-                              disabled={dirty}
-                              disabledHint="Save your changes first — Insert appends to the saved survey."
-                              onInserted={() => setAdoptNextRecord(true)}
+                      {open && (
+                        <div style={{ padding: "4px 18px 20px" }}>
+                          {sec.kind === "custvenue" && (
+                            <CustVenueSection
+                              draft={draft}
+                              patchDraft={patchDraft}
+                              setField={setField}
+                              customers={customers}
+                              linkedCust={linkedCust}
+                              custLocs={custLocs}
+                              venueHasLocs={venueHasLocs}
+                              custNew={custNew}
+                              setCustNew={setCustNew}
+                              venueOther={venueOther}
+                              setCustomerSel={setCustomerSel}
+                              setVenueSel={setVenueSel}
                             />
-                          ))}
+                          )}
+                          {sec.kind === "fields" && (
+                            <FieldsSection
+                              fields={sec.fields}
+                              draft={draft}
+                              patchDraft={patchDraft}
+                              mv={mv}
+                              setMeasure={setMeasure}
+                              toggleMeasure={toggleMeasure}
+                              toggleBtn={toggleBtn}
+                              boxStyle={boxStyle}
+                            />
+                          )}
+                          {sec.id === "notes" && fromRecording.length > 0 && (
+                            <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                              {fromRecording.map((p) => (
+                                <FromRecordingPanel
+                                  key={p.recordingId}
+                                  recordingId={p.recordingId}
+                                  title={p.title}
+                                  sections={p.sections}
+                                  target="survey"
+                                  disabled={dirty}
+                                  disabledHint="Save your changes first — Insert appends to the saved survey."
+                                  onInserted={() => setAdoptNextRecord(true)}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {sec.kind === "tier1" && (
+                            <KillQuestions
+                              draft={draft}
+                              items={tier1}
+                              onJump={jumpTo}
+                              onScope={(next) => setField("scope", next)}
+                              onRigSystems={(next) =>
+                                patchDraft({
+                                  disciplines: { ...draft.disciplines, rigging: { ...(draft.disciplines.rigging || {}), present: next } },
+                                })
+                              }
+                              mv={mv}
+                              setMeasure={setMeasure}
+                              chipStyle={chipStyle}
+                              footer={
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+                                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
+                                    {intakeMeta.label}
+                                  </span>
+                                  <span style={{ fontSize: 12, color: "#9aa0ab" }}>
+                                    {tier1Done
+                                      ? "Discipline intakes are unlocked."
+                                      : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
+                                  </span>
+                                  <div style={{ flex: 1, minWidth: 8 }} />
+                                  {intakeSt === "discipline-added" && (
+                                    <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                      Mark ready for quote
+                                    </button>
+                                  )}
+                                  {intakeSt === "ready-for-quote" && (
+                                    <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                      ✓ Ready — undo
+                                    </button>
+                                  )}
+                                </div>
+                              }
+                            />
+                          )}
+                          {sec.kind === "discipline" && (() => {
+                            const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
+                            if (!g) return null;
+                            return (
+                              <SystemsSection
+                                group={g}
+                                venueClass={draft.venueClass}
+                                intakeCatalog={meta.intakeCatalog}
+                                value={dv}
+                                setValue={setDisc}
+                                toggleScope={toggleDiscScope}
+                                inventoryRows={invRows}
+                                addInventoryRow={addInvRow}
+                                patchInventoryRow={patchInvRow}
+                                removeInventoryRow={removeInvRow}
+                                presentFromKill={g.key === "rigging"}
+                                onJumpKill={() => jumpTo("tier1")}
+                              />
+                            );
+                          })()}
+                          {sec.kind === "linesets" && (
+                            <LinesetsSection
+                              enabled={draft.linesetsEnabled}
+                              rows={draft.linesets}
+                              onEnabled={(enabled) => setField("linesetsEnabled", enabled)}
+                              onAdd={addLineset}
+                              onRemove={removeLineset}
+                              onChange={patchLineset}
+                            />
+                          )}
+                          {sec.kind === "assessmentToggle" && (
+                            <button
+                              type="button"
+                              onClick={() => setField("assessmentEnabled", !draft.assessmentEnabled)}
+                              style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", border: `1px solid ${draft.assessmentEnabled ? ACCENT_BORDER_LT : "#e4e7ec"}`, borderRadius: 10, padding: "12px 13px", background: draft.assessmentEnabled ? ACCENT_SOFT : "#fff", color: draft.assessmentEnabled ? ACCENT_INK : "#5b616e", cursor: "pointer" }}
+                            >
+                              <span style={boxStyle(draft.assessmentEnabled)}>{draft.assessmentEnabled ? "✓" : ""}</span>
+                              <span><strong style={{ display: "block", fontSize: 13.5 }}>Add Condition & Needs assessment</strong><span style={{ display: "block", marginTop: 2, fontSize: 11.5, color: "#8c919c" }}>Use when the customer has no defined ask or needs a formal deliverable.</span></span>
+                            </button>
+                          )}
+                          {sec.kind === "assessmentUsage" && (
+                            <AssessmentUsageSection
+                              assessment={draft.assessment}
+                              roster={roster}
+                              quote={{ budget: draft.budget, fiscalYearSpendBy: draft.fiscalYearSpendBy, whoDecides: draft.whoDecides, targetInstallWindow: draft.targetInstallWindow, quoteNeededBy: draft.quoteNeededBy }}
+                              onAssessment={(assessment) => setField("assessment", assessment)}
+                              onQuoteField={(key, value) => setField(key, value)}
+                            />
+                          )}
+                          {sec.kind === "assessmentCondition" && (
+                            <AssessmentConditionSection assessment={draft.assessment} autoCerts={meta.autoCerts} onChange={(assessment) => setField("assessment", assessment)} />
+                          )}
+                          {sec.kind === "assessmentFindings" && (
+                            <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
+                          )}
+                          {sec.kind === "conditions" && (
+                            <ConditionsSection
+                              draft={draft}
+                              conditions={meta.conditions}
+                              toggleCondition={toggleCondition}
+                              chipStyle={chipStyle}
+                            />
+                          )}
+                          {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
+                          {sec.kind === "photos" && (
+                            <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
+                          )}
                         </div>
                       )}
-                      {sec.kind === "tier1" && (
-                        <KillQuestions
-                          draft={draft}
-                          items={tier1}
-                          onJump={jumpTo}
-                          onScope={(next) => setField("scope", next)}
-                          onRigSystems={(next) =>
-                            patchDraft({
-                              disciplines: { ...draft.disciplines, rigging: { ...(draft.disciplines.rigging || {}), present: next } },
-                            })
-                          }
-                          mv={mv}
-                          setMeasure={setMeasure}
-                          chipStyle={chipStyle}
-                          footer={
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
-                                {intakeMeta.label}
-                              </span>
-                              <span style={{ fontSize: 12, color: "#9aa0ab" }}>
-                                {tier1Done
-                                  ? "Discipline intakes are unlocked."
-                                  : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
-                              </span>
-                              <div style={{ flex: 1, minWidth: 8 }} />
-                              {intakeSt === "discipline-added" && (
-                                <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
-                                  Mark ready for quote
-                                </button>
-                              )}
-                              {intakeSt === "ready-for-quote" && (
-                                <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
-                                  ✓ Ready — undo
-                                </button>
-                              )}
-                            </div>
-                          }
-                        />
-                      )}
-                      {sec.kind === "discipline" && (() => {
-                        const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
-                        if (!g) return null;
-                        return (
-                          <SystemsSection
-                            group={g}
-                            venueClass={draft.venueClass}
-                            intakeCatalog={meta.intakeCatalog}
-                            value={dv}
-                            setValue={setDisc}
-                            toggleScope={toggleDiscScope}
-                            inventoryRows={invRows}
-                            addInventoryRow={addInvRow}
-                            patchInventoryRow={patchInvRow}
-                            removeInventoryRow={removeInvRow}
-                            presentFromKill={g.key === "rigging"}
-                            onJumpKill={() => jumpTo("tier1")}
-                          />
-                        );
-                      })()}
-                      {sec.kind === "linesets" && (
-                        <LinesetsSection
-                          enabled={draft.linesetsEnabled}
-                          rows={draft.linesets}
-                          onEnabled={(enabled) => setField("linesetsEnabled", enabled)}
-                          onAdd={addLineset}
-                          onRemove={removeLineset}
-                          onChange={patchLineset}
-                        />
-                      )}
-                      {sec.kind === "assessmentToggle" && (
-                        <button
-                          type="button"
-                          onClick={() => setField("assessmentEnabled", !draft.assessmentEnabled)}
-                          style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", border: `1px solid ${draft.assessmentEnabled ? ACCENT_BORDER_LT : "#e4e7ec"}`, borderRadius: 10, padding: "12px 13px", background: draft.assessmentEnabled ? ACCENT_SOFT : "#fff", color: draft.assessmentEnabled ? ACCENT_INK : "#5b616e", cursor: "pointer" }}
-                        >
-                          <span style={boxStyle(draft.assessmentEnabled)}>{draft.assessmentEnabled ? "✓" : ""}</span>
-                          <span><strong style={{ display: "block", fontSize: 13.5 }}>Add Condition & Needs assessment</strong><span style={{ display: "block", marginTop: 2, fontSize: 11.5, color: "#8c919c" }}>Use when the customer has no defined ask or needs a formal deliverable.</span></span>
-                        </button>
-                      )}
-                      {sec.kind === "assessmentUsage" && (
-                        <AssessmentUsageSection
-                          assessment={draft.assessment}
-                          roster={roster}
-                          quote={{ budget: draft.budget, fiscalYearSpendBy: draft.fiscalYearSpendBy, whoDecides: draft.whoDecides, targetInstallWindow: draft.targetInstallWindow, quoteNeededBy: draft.quoteNeededBy }}
-                          onAssessment={(assessment) => setField("assessment", assessment)}
-                          onQuoteField={(key, value) => setField(key, value)}
-                        />
-                      )}
-                      {sec.kind === "assessmentCondition" && (
-                        <AssessmentConditionSection assessment={draft.assessment} autoCerts={meta.autoCerts} onChange={(assessment) => setField("assessment", assessment)} />
-                      )}
-                      {sec.kind === "assessmentFindings" && (
-                        <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
-                      )}
-                      {sec.kind === "conditions" && (
-                        <ConditionsSection
-                          draft={draft}
-                          conditions={meta.conditions}
-                          toggleCondition={toggleCondition}
-                          chipStyle={chipStyle}
-                        />
-                      )}
-                      {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
-                      {sec.kind === "photos" && (
-                        <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
-                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {saveError && (
+              <div style={{ marginTop: 16, display: "flex", alignItems: "flex-start", gap: 9, background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 11, padding: "13px 15px", color: "#b4543a", fontSize: 13, lineHeight: 1.5 }}>
+                {saveError}
               </div>
-            );
-          })}
+            )}
+
+            {layoutMode === "wizard" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+                {curStepIdx > 0 && (
+                  <button onClick={() => gotoStep(stepsPresent[Math.max(0, curStepIdx - 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, padding: "12px 20px", cursor: "pointer", minHeight: 46 }}>← Back</button>
+                )}
+                <div style={{ flex: 1 }} />
+                {curStepIdx < stepsPresent.length - 1 ? (
+                  <button onClick={() => gotoStep(stepsPresent[Math.min(stepsPresent.length - 1, curStepIdx + 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: "pointer", minHeight: 46 }}>Next →</button>
+                ) : (
+                  <button onClick={onSave} disabled={saving} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: saving ? "default" : "pointer", minHeight: 46 }}>{saving ? "Saving…" : "Save changes"}</button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-
-        {saveError && (
-          <div style={{ marginTop: 16, display: "flex", alignItems: "flex-start", gap: 9, background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 11, padding: "13px 15px", color: "#b4543a", fontSize: 13, lineHeight: 1.5 }}>
-            {saveError}
-          </div>
-        )}
-
-        {layoutMode === "wizard" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
-            {curStepIdx > 0 && (
-              <button onClick={() => gotoStep(stepsPresent[Math.max(0, curStepIdx - 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, padding: "12px 20px", cursor: "pointer", minHeight: 46 }}>← Back</button>
-            )}
-            <div style={{ flex: 1 }} />
-            {curStepIdx < stepsPresent.length - 1 ? (
-              <button onClick={() => gotoStep(stepsPresent[Math.min(stepsPresent.length - 1, curStepIdx + 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: "pointer", minHeight: 46 }}>Next →</button>
-            ) : (
-              <button onClick={onSave} disabled={saving} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: saving ? "default" : "pointer", minHeight: 46 }}>{saving ? "Saving…" : "Save changes"}</button>
-            )}
-          </div>
-        )}
       </div>
 
       {toast && (

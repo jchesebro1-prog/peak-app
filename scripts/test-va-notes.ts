@@ -12,6 +12,8 @@ import { tier1Items, tier1Complete, intakeStatus, DISCIPLINE_GROUPS, presentOpti
 import { BEAM_FIELDS } from "../src/lib/stores/surveys";
 import { railSheetLabel, SECTION_RAIL_CSS } from "../src/components/section-rail/section-rail";
 import { STARTER_SURVEY_TAGS, resolveSurveyTags, mergeSurveyTags, activeSurveyTags, surveyTagLabel } from "../src/lib/survey-tags";
+import { sectionProgress } from "../src/app/(app)/venue-assessments/[id]/sections/progress";
+import { parseCollapsed, isCollapsed, collapseStorageKey } from "../src/app/(app)/venue-assessments/[id]/sections/collapse";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -172,6 +174,36 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(!vaPage.includes("resolveVenueDoctrine") && vaPage.includes("resolveSurveyTags"), "#342: the editor page drops doctrine and passes internal tags");
   ok(/\| "scope"/.test(vaActsId) && /\| "internalTags"/.test(vaActsId), "#342: SurveyPatch carries scope and internalTags");
   ok(/legacyNotes: _legacy/.test(ctl), "#342 R1: the outbox doc strips legacyNotes (derived, never stored)");
+
+  /* ---- Task 7: progress + collapse ---- */
+  const d0 = {
+    customer: "Acme", venue: "Hall", address: "", contact: "Pat", contactEmail: "", contactPhone: "", venueClass: "theatre",
+    measurements: { proW: "40" } as Record<string, string | boolean>, disciplines: {} as Record<string, Record<string, unknown>>,
+    lifeSafety: { deluge: "Yes", smokeVent: "", adaNotes: "", egressNotes: "" }, linesets: [] as unknown[], scope: [] as string[],
+    travelTime: "35 min", distance: "", reason: "", visitPurpose: "Bid walk",
+  } as never;
+  const fieldsSec = { id: "visit", title: "", subtitle: "", group: "brief", step: 0, kind: "fields", fields: [
+    { kind: "select", key: "visitPurpose", label: "", options: [] }, { kind: "text", key: "travelTime", label: "" },
+    { kind: "text", key: "distance", label: "" }, { kind: "textarea", key: "reason", label: "" }, { kind: "toggle", key: "budgetary", label: "" },
+  ] } as never;
+  const p1 = sectionProgress(fieldsSec, d0, { tier1Done: true });
+  ok(p1.done === 2 && p1.total === 4 && !p1.gate, "#342 A8: fields progress counts answered text/select/textarea and skips yes/no toggles");
+  const measSec = { id: "mLayout", kind: "fields", fields: [{ kind: "measure", key: "proW", label: "" }, { kind: "measure", key: "proH", label: "" }] } as never;
+  ok(sectionProgress(measSec, d0, { tier1Done: true }).done === 1, "#342 A8: measure fields read measurements");
+  const subSec = { id: "lifeSafety", kind: "fields", fields: [{ kind: "sub", obj: "lifeSafety", key: "deluge", label: "" }, { kind: "sub", obj: "lifeSafety", key: "smokeVent", label: "" }] } as never;
+  ok(sectionProgress(subSec, d0, { tier1Done: true }).done === 1, "#342 A8: sub fields read the sub-object");
+  const t1 = sectionProgress({ id: "tier1", kind: "tier1" } as never, d0, { tier1Done: false });
+  ok(t1.total === 6 && t1.gate, "#342 A8: Kill questions counts its items and flags the gate while incomplete");
+  ok(sectionProgress({ id: "recap", kind: "recap" } as never, d0, { tier1Done: true }).total === 0, "#342 A8: read-only sections have no ring");
+
+  ok(collapseStorageKey("FS-1100") === "va:collapsed:FS-1100", "#342 A8: collapsed state is remembered per survey");
+  ok(JSON.stringify(parseCollapsed('{"a":true,"b":"x","c":false}')) === '{"a":true,"c":false}' && JSON.stringify(parseCollapsed("not json")) === "{}" && JSON.stringify(parseCollapsed("[1]")) === "{}",
+    "#342 A8: stored state parses defensively");
+  ok(isCollapsed({}, { id: "m", advanced: true }) && !isCollapsed({}, { id: "v" }) && !isCollapsed({ m: false }, { id: "m", advanced: true }),
+    "#342 A8: default collapsed = advanced; a stored choice wins");
+
+  const ctl7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
+  ok(!ctl7.includes('"accordion"') && ctl7.includes("<SectionRail") && ctl7.includes("SECTION_RAIL_CSS"), "#342 A8: Accordion mode is gone; long scroll has the shared rail");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
