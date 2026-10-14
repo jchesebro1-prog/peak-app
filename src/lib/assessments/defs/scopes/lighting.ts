@@ -48,6 +48,7 @@ export const LIGHTING_SCOPE: ScopeDef = {
         text("control.splitters", "Splitters and terminators"),
         yn("fixtures.overhead", "Overhead fixtures?"),
         num("lighting.pipes", "Number of pipes (electrics)"),
+        many("lighting.positions", "Lighting positions", "lighting_position"),
         num("lighting.circuits", "Circuits"),
         text("lighting.data_outs", "Data outs: DMX or Ethernet drop locations"),
         one("lighting.connector", "Connector type", "connector"),
