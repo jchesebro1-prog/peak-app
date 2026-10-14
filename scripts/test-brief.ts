@@ -340,7 +340,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
   const { REPLY_SYSTEM } = await import("@/lib/assist/features/reply-draft");
   const { anthropicRequestOptions } = await import("@/lib/assist/anthropic");
   const { TASKS_SYSTEM } = await import("@/lib/assist/features/task-suggest");
-  const { runDraftQueue, resetDraftQueue, courtMeThreads, BACKGROUND_CAP_SHARE, DRAFT_MIN_CALL_MS, DRAFT_RETRY_MS } = await import("@/lib/brief/drafts");
+  const { runDraftQueue, resetDraftQueue, courtMeThreads, BACKGROUND_CAP_SHARE, BACKGROUND_SPEND_RECHECK_CALLS, DRAFT_MIN_CALL_MS, DRAFT_RETRY_MS } = await import("@/lib/brief/drafts");
   const { get: getThread, setPreDraft, casPreDraftKey } = await import("@/lib/stores/comms");
   const { get: getQuote, update: updateQuote, setAssistNudge, casAssistNudgeKey } = await import("@/lib/stores/quotes");
   const { createFixture, fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
@@ -610,13 +610,20 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     calls.length = 0;
     const bgCap = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => 60 }));
     ok(BACKGROUND_CAP_SHARE === 0.6 && bgCap.skipped === "background-cap" && calls.length === 0 && (await getThread(TH.mine))!.preDraft?.basis !== "m-mine-10", `brief queue: this month's spend at 60 % of the cap → skipped "background-cap", no call (${JSON.stringify(bgCap)})`);
+    // a second stale thread, so a mid-run re-read has a next item to stop before
+    await patchDoc<Thread>("comms", TH.stale, (t) => { t.messages.push(inbound("m-stale-4", NOW - 40, "STALE-4 body") as never); });
     let spendReads = 0;
-    const midCap = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => (spendReads++ === 0 ? 59.99 : 60) }));
-    ok(midCap.skipped === null && midCap.stoppedBy === "background-cap" && calls.length === 0 && midCap.replies === 0 && (await getThread(TH.mine))!.preDraftLeaseUntil === undefined, `brief queue: spend crossing 60 % mid-run stops the queue before the next call (${JSON.stringify(midCap)})`);
-    const under = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => 59.99 }));
-    ok(under.skipped === null && under.stoppedBy === null && under.replies === 1 && (await getThread(TH.mine))!.preDraft?.basis === "m-mine-10", `brief queue: under 60 % of the cap the queue drafts as before (${JSON.stringify(under)})`);
+    const midCap = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, spendRecheckCalls: 1, monthSpend: async () => (spendReads++ === 0 ? 59.99 : 60) }));
+    const bases = async () => [(await getThread(TH.mine))!.preDraft?.basis, (await getThread(TH.stale))!.preDraft?.basis];
+    const midBases = await bases();
+    ok(midCap.skipped === null && midCap.stoppedBy === "background-cap" && midCap.replies === 1 && midCap.tasks === 1 && calls.length === 2 && spendReads === 2 && (midBases[0] === "m-mine-10") !== (midBases[1] === "m-stale-4") && (await getThread(TH.mine))!.preDraftLeaseUntil === undefined && (await getThread(TH.stale))!.preDraftLeaseUntil === undefined, `brief queue: spend crossing 60 % mid-run, seen at the cached re-read after the calls, stops the queue before the next item (${JSON.stringify(midCap)}, reads ${spendReads})`);
+    let underReads = 0;
+    const under = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => (underReads++, 59.99) }));
+    const underBases = await bases();
+    ok(under.skipped === null && under.stoppedBy === null && under.replies === 1 && underBases[0] === "m-mine-10" && underBases[1] === "m-stale-4", `brief queue: under 60 % of the cap the queue drafts as before (${JSON.stringify(under)})`);
+    ok(BACKGROUND_SPEND_RECHECK_CALLS === 10 && underReads === 1, `brief queue: the month's spend is read once per run, not before every item — re-read only after every 10 calls (${underReads} read)`);
     const draftsSrc = readFileSync("src/lib/brief/drafts.ts", "utf8");
-    ok(/const backgroundCapped = async \(\) => \(await spentFn\(monthKey\)\) >= settings\.capUsd \* BACKGROUND_CAP_SHARE;/.test(draftsSrc) && /deps\.monthSpend \?\? monthSpend/.test(draftsSrc), "brief queue: the guard reads this month's real spend (monthSpend) against the pilot card's cap");
+    ok(/const capLine = settings\.capUsd \* BACKGROUND_CAP_SHARE;/.test(draftsSrc) && /let spent = await spentFn\(monthKey\);/.test(draftsSrc) && /deps\.monthSpend \?\? monthSpend/.test(draftsSrc), "brief queue: the guard reads this month's real spend (monthSpend) against the pilot card's cap");
 
     /* the spend cap stops the queue (the guard passes; runAssist's own cap check refuses) */
     await updateQuote(Q.recent, { history: [{ at: sentAt, to: "sent" }] } as never);
@@ -660,7 +667,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const afterUpd = (await getQuote(Q.quiet))!;
     ok(afterUpd.name === "Renamed" && afterUpd.assistNudge?.note === "n", "brief store: quotes update() can't overwrite the nudge (setAssistNudge's alone)");
     const raw = await getDoc<{ id: string; messages?: unknown }>("comms", TH.stale);
-    ok(!!raw && Array.isArray(raw.messages) && (raw.messages as unknown[]).length === 3, "brief store: setPreDraft left the thread's messages as they were");
+    ok(!!raw && Array.isArray(raw.messages) && (raw.messages as unknown[]).length === 4, "brief store: setPreDraft left the thread's messages as they were");
   } finally {
     for (const id of [...Object.values(TH), ...Object.values(Q)]) await runsFor((id.includes("q-") ? "quote:" : "thread:") + id);
     await dropFixtures(337);
@@ -913,6 +920,15 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
     for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${D18}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
     const fixed = await B.readBrief(ME.id, D18, "morning");
     ok(fixCron.replaced === 1 && fixCron.built === 0 && fixed?.builtBy === "cron" && fixed.summary === "Cron fixed it." && fixed.error === undefined, `brief cron: a stored lazy brief with an error is replaced by a good cron build (${JSON.stringify(fixCron)})`);
+    // a cron build that runs out of time before its Assist call stores nothing: the first Home view builds it
+    const D19 = dayKey(at(19, 9));
+    await snap(ME.id, D19, "morning", AM_ROWS, at(19, 9) - 60_000);
+    const cw = Date.now();
+    let ticks = 0;
+    const jumpy = () => (ticks++ === 0 ? cw : cw + 14_000);
+    const nNT = calls.length;
+    const noTimeCron = await B.buildBriefsForAll("morning", at(19, 9), { deadlineMs: cw + 15_000, users: [meT], deps: deps({ clock: jumpy }) });
+    ok(noTimeCron.built === 0 && noTimeCron.kept === 0 && noTimeCron.skipped.join() === ME.id && calls.length === nNT && (await B.readBrief(ME.id, D19, "morning")) === null, `brief cron: a cron build with no time left for its Assist call is not stored — the user is skipped for a lazy first view (${JSON.stringify(noTimeCron)})`);
     const nK = calls.length;
     const keepCron = await B.buildBriefsForAll("morning", at(18, 9), { deadlineMs: soon(), users: [meT], deps: deps() });
     ok(keepCron.kept === 1 && keepCron.replaced === 0 && calls.length === nK, "brief cron: a good stored brief is kept, nothing built");

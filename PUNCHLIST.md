@@ -12055,7 +12055,7 @@ link/archive paths a person would.
 
 **Final-review fixes (2026-10-13, D918/D920 reworded, D927–D929):**
 - The draft queue runs only for pilot users with **Daily brief** on. Before, Reply and Task suggestions (on by default) were enough, so every pilot user got background Sonnet drafting from Home and the Inbox with the brief off (D918).
-- **Background spending guard:** pre-drafting pauses once this month's Assist spend reaches 60 % of the monthly cap (`skipped`/`stoppedBy: "background-cap"`), checked at the gate and before each call; interactive Assist, the brief summary and Rebuild still use the full cap. The pilot card says so under the cap field (D927).
+- **Background spending guard:** pre-drafting pauses once this month's Assist spend reaches 60 % of the monthly cap (`skipped`/`stoppedBy: "background-cap"`), read once per run and re-read every 10 calls; interactive Assist, the brief summary and Rebuild still use the full cap. The pilot card says so under the cap field (D927).
 - A lazy brief that ran out of time before its Assist call is shown unstored (`transient`), and the cron replaces a stored lazy brief that has an error with a good cron build, so one slow first view no longer locks the slot to a counts-only brief (D928).
 - Pre-drafts and nudges carry `ownerId`; a thread or quote reassigned since shows its new owner nothing of the old draft, and the queue redrafts it for them (D929).
 - Gmail cron order: triage → Krisp meetings (ending by 35 s) → briefs → drafts (35 s) → photos (≥ 10 s before 45 s). The midday cron's brief deadline is 50 s, not 55 s (D920). D918 now says the interactive limit is 60 per hour, not 20.
@@ -12074,7 +12074,7 @@ link/archive paths a person would.
 - Every user's build scans all threads and quotes (Organize counts, court threads, quiet quotes); it is fine at today's size but is O(users × records) per slot.
 - Nudge "opened" is not "sent": a Gmail send is not tied back to the nudge run (D926).
 - The Gmail cron rider rarely has time for a draft queue (35 s cap, and meetings now go first); Home's `after()` does most of the drafting. A Krisp call in flight at 35 s can run its 20 s timeout and leave the briefs, drafts and photos no time that morning.
-- The 60 % background guard reads the month's runs once per call-making item (on top of `runAssist`'s own read); fine at pilot volume. The cron's replace of a lazy error brief has no blob compare-and-set (re-read, then write).
+- The 60 % background guard reads the month's spend once per queue run and again every 10 calls, so a run can overshoot 60 % by about 10 calls. A cron build that runs out of time stores nothing; the user's first Home view builds it. The cron's replace of a lazy error brief has no blob compare-and-set (re-read, then write).
 - With `INBOX_ORG_DISABLED` the Inbox schedules no queue; Home still drafts.
 - Task suggestions are not counted in the report; pre-drafts made before this change have no marker.
 

@@ -15,7 +15,8 @@
  * on its own feature (reply / tasks / brief). Every call goes through
  * `runAssist` with `countRate: false`, so the monthly cap — not the person's
  * interactive per-hour limits — bounds it; and the queue itself stops once
- * this month's spend reaches BACKGROUND_CAP_SHARE of the cap, so pre-drafting
+ * this month's spend reaches BACKGROUND_CAP_SHARE of the cap (read once per
+ * run, re-read every BACKGROUND_SPEND_RECHECK_CALLS calls), so pre-drafting
  * never spends what interactive Assist needs (D927). Calls are capped to the
  * time left after their loads (no retries) and none starts without
  * DRAFT_MIN_CALL_MS of room. Nothing is sent, linked or created here.
@@ -64,6 +65,8 @@ export const HOME_DRAFT_DEADLINE_MS = 110_000;
 export const DRAFT_LEASE_GRACE_MS = 30_000;
 /** Pre-drafting pauses once this month's Assist spend reaches this share of the monthly cap (D927). */
 export const BACKGROUND_CAP_SHARE = 0.6;
+/** The month's spend is read once per queue run, then re-read after every this many model calls (D927). */
+export const BACKGROUND_SPEND_RECHECK_CALLS = 10;
 
 export type DraftQueueDeps = {
   /** Model provider overrides (checks): passed to every runAssist. */
@@ -80,6 +83,8 @@ export type DraftQueueDeps = {
   separateInstance?: boolean;
   /** Checks only: this month's spend for the background-cap check (default `monthSpend`). */
   monthSpend?: (monthKey: string) => Promise<number>;
+  /** Checks only: re-read the spend after this many calls (default BACKGROUND_SPEND_RECHECK_CALLS). */
+  spendRecheckCalls?: number;
 };
 
 export type DraftQueueResult = {
@@ -214,10 +219,25 @@ export async function runDraftQueue(
     const now = deps.now ?? Date.now();
     // Background spending guard (D927): pre-drafting stops at
     // BACKGROUND_CAP_SHARE of the month's cap, leaving the rest for
-    // interactive Assist. Checked here and again before each call-making item.
+    // interactive Assist. The month's spend is read once here and cached;
+    // before each call-making item the cache is used, re-read only after
+    // every BACKGROUND_SPEND_RECHECK_CALLS model calls.
     const spentFn = deps.monthSpend ?? monthSpend;
     const monthKey = monthKeyChicago(now);
-    const backgroundCapped = async () => (await spentFn(monthKey)) >= settings.capUsd * BACKGROUND_CAP_SHARE;
+    const recheckEvery = Math.max(1, deps.spendRecheckCalls ?? BACKGROUND_SPEND_RECHECK_CALLS);
+    const capLine = settings.capUsd * BACKGROUND_CAP_SHARE;
+    let spent = await spentFn(monthKey);
+    let callsSinceRead = 0;
+    const countCall = () => {
+      callsSinceRead++;
+    };
+    const backgroundCapped = async (): Promise<boolean> => {
+      if (callsSinceRead >= recheckEvery) {
+        spent = await spentFn(monthKey);
+        callsSinceRead = 0;
+      }
+      return spent >= capLine;
+    };
     if (await backgroundCapped()) {
       if (guarded) lastStart.set(ownerId, clock());
       return { ...res, skipped: "background-cap" };
@@ -301,6 +321,7 @@ export async function runDraftQueue(
 
           if (needReply) {
             const r = await draftReplyForThread(t.id, me, { ...callDeps, preloaded: { quotes, threads, signature } });
+            countCall();
             if (r.ok) {
               next.body = r.draft;
               next.runId = r.runId;
@@ -319,6 +340,7 @@ export async function runDraftQueue(
 
           if (needTasks && !res.stoppedBy && !skipThread) {
             const r = await suggestTasksForThread(t.id, me, { ...callDeps, preloaded: { team } });
+            countCall();
             if (r.ok) {
               next.taskSuggestions = r.suggestions;
               next.taskRunId = r.runId;
@@ -387,6 +409,7 @@ export async function runDraftQueue(
         }
         try {
           const r = await draftNudge(q, quiet, me, { run: runDeps, limits });
+          countCall();
           let nudge: AssistNudge;
           if (r.ok) {
             nudge = { ...r.nudge, runId: r.runId, basis, at: now, ownerId: me.id };

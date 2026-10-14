@@ -479,7 +479,7 @@ export type BriefsForAllResult = {
   kept: number;
   /** a stored lazy brief that fell back to the counts, replaced by a good cron build (D928) */
   replaced: number;
-  /** pilot + brief users left for their first view (out of time) */
+  /** pilot + brief users left for their first view (out of time — before starting, or before their Assist call) */
   skipped: string[];
   failed: string[];
   /** the pilot + brief users the run covered (the draft queue runs for them next) */
@@ -519,6 +519,12 @@ export async function buildBriefsForAll(
         continue;
       }
       const b = await buildBrief(u, slot, now, { builtBy: "cron", deadlineMs: opts.deadlineMs, deps: { ...deps, settings, env } });
+      // Out of time before the Assist call: store nothing, so the first Home
+      // view builds it lazily instead of finding a counts-only brief (D928).
+      if (b.error === BRIEF_NO_TIME_ERROR) {
+        res.skipped.push(u.id);
+        continue;
+      }
       if (existing) {
         // Replace the lazy counts-only brief only with a real one, and only if
         // it is still the one stored (a Rebuild may have landed meanwhile).
