@@ -223,3 +223,72 @@ export function briefReport(runs: AssistRun[], briefs: BriefBuildRow[]): BriefRe
   }
   return { built, preDrafts, nudges };
 }
+
+/* ---- Ask AI rows (spec 2026-10-13 §6) ---------------------------------------- */
+
+export const ASK_REPORT_KINDS = ["task", "note", "email", "estimate"] as const;
+type AskReportKind = (typeof ASK_REPORT_KINDS)[number];
+type KindCounts = Record<AskReportKind, number>;
+
+/** One person's (or everyone's) Ask AI month. */
+export type AskReportRow = {
+  key: string;
+  questions: number;
+  /** answered by a Haiku / a Sonnet model (Try harder asks Sonnet); anything else counts in `other` */
+  haiku: number;
+  sonnet: number;
+  other: number;
+  /** questions re-asked with Try harder (`retryOf` set) */
+  tryHarder: number;
+  /** tryHarder ÷ questions, %, one decimal; null with no questions */
+  tryHarderPct: number | null;
+  /** cards shown, by kind (`outcomeDetail.cardKinds`); `cardsShown` also counts runs logged before kinds were kept */
+  proposed: KindCounts;
+  cardsShown: number;
+  /** cards confirmed, by kind (`outcomeDetail.confirmed`) */
+  confirmed: KindCounts;
+  webSearches: number;
+  costUsd: number;
+};
+
+export type AskReport = { total: AskReportRow; byPerson: AskReportRow[] };
+
+const kinds = (): KindCounts => ({ task: 0, note: 0, email: 0, estimate: 0 });
+const blankAsk = (key: string): AskReportRow => ({ key, questions: 0, haiku: 0, sonnet: 0, other: 0, tryHarder: 0, tryHarderPct: null, proposed: kinds(), cardsShown: 0, confirmed: kinds(), webSearches: 0, costUsd: 0 });
+const isKind = (k: unknown): k is AskReportKind => typeof k === "string" && (ASK_REPORT_KINDS as readonly string[]).includes(k);
+const count = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+
+/**
+ * Pure: the month's Ask AI table. One `ask` run = one question (failed and
+ * refused-after-start runs included); other features are ignored. The model
+ * is the one that answered (`model`). Cost is rounded like the main report.
+ */
+export function askReport(runs: AssistRun[]): AskReport {
+  const total = blankAsk("All");
+  const people = new Map<string, AskReportRow>();
+  for (const r of runs) {
+    if (r.feature !== "ask") continue;
+    const d = (r.outcomeDetail ?? {}) as Record<string, unknown>;
+    const who = r.userName || r.userId;
+    for (const row of [total, people.get(who) ?? blankAsk(who)]) {
+      row.questions++;
+      const m = String(r.model || "").toLowerCase();
+      if (m.includes("haiku")) row.haiku++;
+      else if (m.includes("sonnet")) row.sonnet++;
+      else row.other++;
+      if (typeof d.retryOf === "string" && d.retryOf) row.tryHarder++;
+      row.cardsShown += Math.max(count(d.cards), Array.isArray(d.cardKinds) ? d.cardKinds.length : 0);
+      for (const k of Array.isArray(d.cardKinds) ? d.cardKinds : []) if (isKind(k)) row.proposed[k]++;
+      for (const k of Array.isArray(d.confirmed) ? d.confirmed : []) if (isKind(k)) row.confirmed[k]++;
+      row.webSearches += count(d.web);
+      row.costUsd += r.costUsd || 0;
+      if (row !== total) people.set(who, row);
+    }
+  }
+  const done = (x: AskReportRow): AskReportRow => ({
+    ...x,
+    tryHarderPct: x.questions ? Math.round((x.tryHarder / x.questions) * 1000) / 10 : null,
+    costUsd: Math.round(x.costUsd * 10000) / 10000,
+  });
+  return { total: done(total), byPerson: [...people.values()].map(done).sort((a, b) => a.key.localeCompare(b.key)) };
+}

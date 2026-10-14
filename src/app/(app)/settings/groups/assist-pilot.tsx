@@ -109,6 +109,58 @@ function BriefReportTable({ brief }: { brief: AssistVM["brief"] }) {
   );
 }
 
+/** Ask AI (spec 2026-10-13 §6) — questions per person, Haiku vs Sonnet, Try harder rate, cards proposed / confirmed by kind, web searches, cost. */
+function AskReportTable({ ask }: { ask: AssistVM["ask"] }) {
+  const rows = ask.total.questions ? [...ask.byPerson, ask.total] : [];
+  const byKind = (k: { task: number; note: number; email: number; estimate: number }) => `${k.task} · ${k.note} · ${k.email} · ${k.estimate}`;
+  return (
+    <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Ask AI</div>
+      <table style={{ borderCollapse: "collapse", minWidth: 560, width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>Person</th>
+            <th style={th}>Questions</th>
+            <th style={th}>Haiku</th>
+            <th style={th}>Sonnet</th>
+            <th style={th} title="Questions re-asked with Try harder, and their share of all questions">Try harder</th>
+            <th style={th} title="Cards shown: task · note · email · estimate">Cards proposed</th>
+            <th style={th} title="Cards confirmed: task · note · email · estimate">Confirmed</th>
+            <th style={th}>Web searches</th>
+            <th style={th}>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={9} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
+                No questions this month.
+              </td>
+            </tr>
+          )}
+          {rows.map((r) => (
+            <tr key={r.key} style={{ borderTop: "1px solid #f3f4f7", fontWeight: r === ask.total ? 600 : undefined }}>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}>{r.key}</td>
+              <td style={td}>{r.questions}</td>
+              <td style={td}>{r.haiku}</td>
+              <td style={td}>{r.sonnet}</td>
+              <td style={td}>
+                {r.tryHarder}
+                {r.tryHarderPct !== null ? ` (${r.tryHarderPct}%)` : ""}
+              </td>
+              <td style={td} title={`${r.cardsShown} shown`}>{byKind(r.proposed)}</td>
+              <td style={td}>{byKind(r.confirmed)}</td>
+              <td style={td}>{r.webSearches}</td>
+              <td style={td}>{money(r.costUsd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>Cards read task · note · email · estimate.</div>
+    </div>
+  );
+}
+
 const SAVED_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
 
 /** D881 — the one line saying where the Claude key comes from. Never the key: last four characters at most. */
@@ -290,6 +342,9 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>
         Inbox organization, Promise tasks, Daily brief and Ask AI start off — turn them on for the pilot users above.
       </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
+        Ask AI (in ⌘K search) answers with {assist.askModels.ask}; Try harder re-asks with {assist.askModels.askHard}. It needs a Claude API key, reads only what each person can open, and changes nothing until they confirm a card.
+      </div>
 
       {/* Monthly cap */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
@@ -342,6 +397,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <ReportTable title="By person" rows={report.byUser} />
       <ReportTable title="By model" rows={report.byModel} />
       <BriefReportTable brief={assist.brief} />
+      <AskReportTable ask={assist.ask} />
       <FilingReportTable report={assist.org.filing} cleanupSuggested={assist.org.cleanupSuggested} />
       <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
         Costs are estimates from token counts × list prices; check the Claude Console for the bill.

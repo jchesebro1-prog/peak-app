@@ -13,6 +13,7 @@ import NativeBriefReminders from "@/components/brief/native-brief-reminders";
 import { assistSettingsOf } from "@/lib/assist/config";
 import { briefOnFor } from "@/lib/brief/reminders";
 import { briefRemindersOn } from "@/lib/stores/notif-prefs";
+import { askGateFor } from "@/lib/assist/gate-server";
 
 export default async function AppLayout({
   children,
@@ -37,6 +38,12 @@ export default async function AppLayout({
   const remindersOn =
     briefOnFor(user.id, assistSettingsOf(settings)) && (await briefRemindersOn(user.name).catch(() => true));
 
+  // Ask AI (spec 2026-10-13 §1): the ⌘K "Ask AI" row shows only when the
+  // ask gate (pilot + switch + a Claude key) lets this user in. A failed
+  // check hides the row rather than breaking the page.
+  const askEnabled = (await askGateFor(user.id, { settings: assistSettingsOf(settings) }).catch(() => "error")) === null;
+  const askTeam = askEnabled ? (await activeUsers().catch(() => [])).map((u) => ({ id: u.id, name: u.name })) : [];
+
   return (
     <SyncProvider>
       <div className="pk-shell">
@@ -56,6 +63,8 @@ export default async function AppLayout({
           feedbackEmail={settings.feedbackEmail}
           devLogin={devLogin}
           roster={roster}
+          askEnabled={askEnabled}
+          askTeam={askTeam}
         />
         {/* Pop-out windows (spec §2, §5): the slim header shows only in a
             pop-out (html.pk-pop); LiveSync keeps every window current. */}

@@ -26,7 +26,7 @@ import type {
 import { getSettings } from "@/lib/settings";
 import { rateLimit } from "@/lib/rate-limit";
 import { activeUsers } from "@/lib/users";
-import { createRun, getRun, monthSpend, newRunId, setRunOutcome, type AssistRun } from "@/lib/stores/assist-runs";
+import { ASK_CONFIRMED_MAX, createRun, getRun, monthSpend, newRunId, setRunOutcome, type AssistRun } from "@/lib/stores/assist-runs";
 import { assistSettingsOf, chicagoToday, monthKeyChicago } from "./config";
 import { askGateFor } from "./gate-server";
 import { getAssistEnv } from "./key-store";
@@ -292,6 +292,8 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
   let webSearches = 0;
   let toolCalls = 0;
   let cards = 0;
+  /** Each shown card's kind, in order (the report's "proposed by kind"); capped like `confirmed`. */
+  const cardKinds: string[] = [];
   let lastStopReason: string | null = null;
   let stop: Stop = "end";
   let error: string | null = null;
@@ -469,6 +471,7 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
         toolCalls++;
         results.push(await runToolCall(u, me, exposeRef, emails, cardCtx, (card) => {
           cards++;
+          if (cardKinds.length < ASK_CONFIRMED_MAX) cardKinds.push(card.kind);
           emit({ t: "card", card });
         }));
       }
@@ -521,6 +524,7 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
       toolCalls,
       refs: [...refs.keys()].slice(0, ASK_LOG_REFS_MAX),
       cards,
+      cardKinds,
       web: webSearches,
       hard: input.hard,
       retryOf: input.retryOf,

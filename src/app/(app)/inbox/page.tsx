@@ -8,6 +8,7 @@ import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
 import { withSignature } from "@/lib/inbox-signature";
+import { ASK_COMPOSE_PARAM } from "@/lib/assist/ask-compose";
 import { nudgePrefill, prefillRecipient } from "@/lib/inbox-compose-prefill";
 import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { after } from "next/server";
@@ -1115,6 +1116,10 @@ export default async function InboxPage({
   // server, only when fresh and the viewer's quote (nudgePrefill); capped;
   // To = the quote's contact by name, else blank. Nothing sends by itself.
   let initialCompose: ComposeInit | null = null;
+  // Ask AI (spec 2026-10-13 §4) — ?compose=ask: the email card's To/Subject/
+  // Body wait in the tab's sessionStorage; the shell opens the composer from
+  // them on the client, and only when nothing above claimed the composer.
+  const askCompose = str(params.compose) === ASK_COMPOSE_PARAM;
   const nudgeId = str(params.nudge).slice(0, 100);
   const nudgeQuote = nudgeId ? await getQuote(nudgeId).catch(() => null) : null;
   const nudge = nudgePrefill(nudgeQuote, { id: user.id, name: me });
@@ -1173,7 +1178,7 @@ export default async function InboxPage({
       customerId: c ? c.id : "",
       contactName: c?.primaryName || "",
     };
-  } else if (str(params.compose)) {
+  } else if (str(params.compose) && !askCompose) {
     initialCompose = {
       id: null,
       mailbox: box !== "personal" && !isView ? box : "personal",
@@ -1294,6 +1299,7 @@ export default async function InboxPage({
             organize={organizeSlot}
             organizeTab={organizeTab}
             assist={assistFlags}
+            askCompose={askCompose && !initialCompose ? str(params.n).slice(0, 24) || "1" : null}
           />
         </div>
       </div>

@@ -33,6 +33,7 @@ import { claudeCostUsd, modelFor, SLOT_SETTINGS } from "@/lib/assist/models";
 import { RATE_LIMITS, toJsonSchema } from "@/lib/assist/run";
 import { featureKey } from "@/lib/assist/report";
 import type { Ok } from "./test-inbox-org";
+import type { AssistRun } from "@/lib/stores/assist-runs";
 
 /** Real closers of `tag`, whitespace forms included (`</record>`, `< / record>`). */
 const closes = (s: string, tag: string) => (s.match(new RegExp(`<\\s*\\/\\s*${tag}\\b`, "gi")) || []).length;
@@ -1061,6 +1062,7 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
         "runAsk: cards keep only exposed ids — the unknown quote link, thread and note target drop; a stranger assignee becomes me; only user-typed / exposed emails survive"
       );
       ok(String(res[1].content).startsWith("No card was shown") && String(res[0].content).startsWith("Shown to the user") && (a.run?.outcomeDetail as { cards: number }).cards === 3, "runAsk: the model is told which cards were shown and which were dropped");
+      ok(JSON.stringify((a.run?.outcomeDetail as { cardKinds: string[] }).cardKinds) === JSON.stringify(["task", "note", "email"]), "runAsk: each shown card's kind is logged in order (cardKinds)");
       const pg = await ask(q("draft an email to the TD"), [{ content: [toolUse("e1", "propose_email", { to: ["robin@vellumcrest.test"], subject: "Hi", body: "Hello" })], stop: "tool_use" }, {}], { page: `/companies/${encodeURIComponent(CID)}` });
       const em = pg.events.find((e): e is Extract<AskEvent, { t: "card" }> => e.t === "card")?.card;
       ok(pg.events.some((e) => e.t === "ref" && e.id === CID) && em?.kind === "email" && JSON.stringify(em.to) === JSON.stringify(["robin@vellumcrest.test"]) && pg.run?.contextRef === `ask:company:${CID}` && pg.calls[0].params.messages[0].content !== undefined && String(pg.calls[0].params.messages[0].content).includes("<current_screen"), "runAsk: page context is the first ref, its contact emails feed the email card, contextRef ask:<kind:id>, the screen rides in the first message");
@@ -1116,6 +1118,232 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** Task 4 — the panel's pure core (render, client, compose), the report, the client-file pins, and the no-thread task write. */
+export async function askUiChecks(ok: Ok): Promise<void> {
+  const { renderAnswerBlocks, renderInline, safeSourceUrl, sourceLabel, isSitePath } = await import("@/lib/assist/features/ask-render");
+  const C = await import("@/lib/assist/ask-client");
+  const { askComposePayload, parseAskCompose, ASK_COMPOSE_HREF, ASK_COMPOSE_TTL_MS } = await import("@/lib/assist/ask-compose");
+  const { askReport } = await import("@/lib/assist/report");
+  const { existsSync, readdirSync } = await import("node:fs");
+
+  /* ---- safe rendering ---- */
+  const wl = new Map([
+    ["company:C-1", { title: "Vellumcrest Arts", href: "/companies/C-1" }],
+    ["quote:Q-bad", { title: "Evil", href: "//evil.test/x" }],
+  ]);
+  const flat = (blocks: ReturnType<typeof renderAnswerBlocks>) => JSON.stringify(blocks);
+  const b1 = renderAnswerBlocks('Hi <script>alert(1)</script> <img src=x onerror=alert(1)> see [[company:C-1]] and [[quote:Q-9]].', wl);
+  const p1 = b1[0].type === "p" ? b1[0].lines[0] : [];
+  ok(
+    b1.length === 1 && b1[0].type === "p" &&
+      p1.some((r) => "text" in r && r.text.includes("<script>alert(1)</script>") && r.text.includes("<img src=x onerror=alert(1)>")) &&
+      p1.some((r) => "link" in r && r.link.href === "/companies/C-1" && r.link.title === "Vellumcrest Arts" && r.link.kind === "company") &&
+      p1.some((r) => "text" in r && r.text.includes("and Q-9.")) &&
+      !p1.some((r) => "link" in r && r.link.id === "Q-9"),
+    "ask render: HTML in model text stays literal text; a whitelisted ref links with its title; an un-whitelisted ref prints its id as text"
+  );
+  const bad = renderInline("x [[quote:Q-bad]] y", wl);
+  ok(bad.every((r) => "text" in r) && bad.map((r) => ("text" in r ? r.text : "")).join("") === "x Q-bad y", "ask render: a whitelisted ref whose href isn't site-relative renders as text");
+  const b2 = renderAnswerBlocks("**Open quotes** for [[company:C-1]]:\n- one **big**\n* two\n\n# Next\nplain **unclosed", wl);
+  ok(
+    b2.length === 3 && b2[0].type === "p" && b2[1].type === "ul" && b2[2].type === "p" &&
+      b2[1].items.length === 2 && JSON.stringify(b2[1].items[0]) === JSON.stringify([{ text: "one ", bold: false }, { text: "big", bold: true }]) &&
+      JSON.stringify(b2[0].lines[0][0]) === JSON.stringify({ text: "Open quotes", bold: true }) &&
+      JSON.stringify(b2[2].lines[0]) === JSON.stringify([{ text: "Next", bold: true }]) &&
+      JSON.stringify(b2[2].lines[1]) === JSON.stringify([{ text: "plain **unclosed", bold: false }]),
+    "ask render: paragraphs, - / * bullets, **bold**, # headings as bold; an unpaired ** stays literal"
+  );
+  ok(JSON.stringify(renderInline("**[[company:C-1]]**", wl)) === JSON.stringify([{ link: { kind: "company", id: "C-1", title: "Vellumcrest Arts", href: "/companies/C-1" }, bold: true }]), "ask render: bold wraps a link");
+  ok(flat(renderAnswerBlocks("", wl)) === "[]" && flat(renderAnswerBlocks("a\r\nb", wl)) === flat(renderAnswerBlocks("a\nb", wl)), "ask render: empty text → no blocks; CRLF reads as LF");
+  ok(
+    safeSourceUrl("https://a.test/x") === "https://a.test/x" && safeSourceUrl("http://b.test") === "http://b.test" && safeSourceUrl("javascript:alert(1)") === null && safeSourceUrl("data:text/html,x") === null && safeSourceUrl("//a.test") === null && safeSourceUrl(42) === null,
+    "ask render: sources are http(s) only"
+  );
+  ok(sourceLabel("https://www.a.test/p", "") === "www.a.test" && sourceLabel("https://a.test", "  A  page ") === "A page" && isSitePath("/x") && !isSitePath("//x") && !isSitePath("/\\x") && !isSitePath("https://x"), "ask render: source labels fall back to the host; site paths only");
+
+  /* ---- NDJSON reader + reply check ---- */
+  const enc = new TextEncoder();
+  const chunks = ['{"t":"status","text":"Looking up quotes…"}\n{"t":"ref","kind":"company","id":"C-1","ti', 'tle":"V","href":"/companies/C-1"}\nnot json\n{"t":"source","url":"javascript:alert(1)","title":"x"}\n', '{"t":"text","d":"Hi"}\n{"t":"done","runId":"AR-1"}'];
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      for (const ch of chunks) c.enqueue(enc.encode(ch));
+      c.close();
+    },
+  });
+  const got: string[] = [];
+  await C.readAskStream(stream, (e) => got.push(e.t));
+  ok(got.join(",") === "status,ref,text,done", "ask client: the NDJSON reader joins split lines, drops junk and a non-http source, and reads a last line with no newline");
+  const multi = new ReadableStream<Uint8Array>({
+    start(c) {
+      const bytes = enc.encode('{"t":"text","d":"café ✦"}\n');
+      c.enqueue(bytes.slice(0, 21));
+      c.enqueue(bytes.slice(21));
+      c.close();
+    },
+  });
+  const texts: string[] = [];
+  await C.readAskStream(multi, (e) => e.t === "text" && texts.push(e.d));
+  ok(texts.join("") === "café ✦", "ask client: a multi-byte character split across chunks decodes intact");
+  const resp = (status: number, type: string, body: unknown) => ({ ok: status >= 200 && status < 300, status, headers: { get: (n: string) => (n === "content-type" ? type : null) }, json: async () => body });
+  ok(
+    (await C.askResponseProblem(resp(200, "application/x-ndjson; charset=utf-8", null))) === null &&
+      (await C.askResponseProblem(resp(200, "text/html", null))) === C.ASK_SIGNED_OUT_TEXT &&
+      (await C.askResponseProblem(resp(415, "application/json", { error: "Send JSON." }))) === "Send JSON." &&
+      (await C.askResponseProblem(resp(500, "text/html", null)))!.includes("500"),
+    "ask client: NDJSON is read; a non-NDJSON 200 is a signed-out session; a 4xx shows its error; anything else a generic line"
+  );
+
+  /* ---- answer state ---- */
+  let t = C.newAskTurn(1, "q", { hard: false, web: true });
+  for (const e of [
+    { t: "status", text: "Looking up companies…" },
+    { t: "ref", kind: "company", id: "C-1", title: "V", href: "/companies/C-1" },
+    { t: "ref", kind: "company", id: "C-1", title: "V", href: "/companies/C-1" },
+    { t: "text", d: "Hello " },
+    { t: "text", d: "[[company:C-1]]" },
+    { t: "source", url: "https://a.test", title: "A" },
+    { t: "source", url: "https://a.test", title: "A" },
+    { t: "card", card: { kind: "note", target: { kind: "company", id: "C-1" }, text: "x" } },
+  ] as AskEvent[])
+    t = C.applyAskEvent(t, e);
+  ok(t.looked.length === 1 && t.answer === "Hello [[company:C-1]]" && t.status === null && t.sources.length === 1 && t.cards.length === 1 && t.streaming && !C.canTryHarder(t, true), "ask client: refs, sources de-duplicated; text clears the status; no Try harder mid-stream");
+  const fin = C.finishAskTurn(C.applyAskEvent(t, { t: "done", runId: "AR-1" }), { aborted: false });
+  ok(fin.runId === "AR-1" && !fin.streaming && C.canTryHarder(fin, true) && !C.canTryHarder(fin, false) && !C.canTryHarder({ ...fin, hard: true }, true), "ask client: Try harder on the latest finished Haiku answer only");
+  const refused = C.finishAskTurn(C.applyAskEvent(C.newAskTurn(2, "q", { hard: false, web: false }), { t: "error", message: "Assist isn't enabled for you." }), { aborted: false });
+  ok(C.askTurnRefused(refused) && !C.canTryHarder(refused, true) && refused.error === "Assist isn't enabled for you.", "ask client: an error with no done is a refusal — shown, no Try harder");
+  const failed = C.finishAskTurn(C.applyAskEvent(C.applyAskEvent(C.newAskTurn(3, "q", { hard: false, web: false }), { t: "error", message: "Ask AI couldn't answer — please try again." }), { t: "done", runId: "AR-2" }), { aborted: false });
+  ok(!C.askTurnRefused(failed) && C.canTryHarder(failed, true), "ask client: error then done is a logged failure — Try harder offered");
+  const cut = C.finishAskTurn(C.newAskTurn(4, "q", { hard: false, web: false }), { aborted: false });
+  const stopped = C.finishAskTurn(C.newAskTurn(5, "q", { hard: false, web: false }), { aborted: true });
+  ok(cut.error === C.ASK_DROPPED_TEXT && stopped.stopped && !stopped.error && !C.canTryHarder(stopped, true), "ask client: a stream cut off without done says so; Stop marks the answer stopped");
+
+  /* ---- the request body ---- */
+  const prior = Array.from({ length: 20 }, (_, i) => ({ question: `q${i}`, answer: i === 18 ? "" : `a${i}` }));
+  const msgs = C.buildAskMessages(prior, "  newest  ")!;
+  ok(
+    msgs.length <= 12 && msgs[msgs.length - 1].role === "user" && msgs[msgs.length - 1].text === "newest" && msgs[0].role === "user" && msgs.some((m) => m.text === "q19") && !msgs.some((m) => m.text === "q0") && !msgs.some((m) => m.role === "assistant" && !m.text),
+    "ask client: messages keep the newest turns under 12, the question last, no empty answers"
+  );
+  const big = C.buildAskMessages([{ question: "x".repeat(9000), answer: "y".repeat(30_000) }, { question: "z", answer: "w".repeat(9000) }], "q")!;
+  ok(big.every((m) => m.text.length <= 8000) && big.reduce((n, m) => n + m.text.length, 0) <= 40_000 && C.buildAskMessages([], "   ") === null, "ask client: each turn ≤ 8,000 and the total ≤ 40,000; a blank question sends nothing");
+  const parsed = (await import("@/lib/assist/features/ask-body")).parseAskBody({ messages: msgs, page: "/companies/C-1", web: false, hard: true, retryOf: "AR-x1" });
+  ok(parsed.ok, "ask client: the built body passes the route's parseAskBody");
+
+  /* ---- the email hand-off ---- */
+  const NOW = Date.UTC(2034, 0, 2, 15);
+  const payload = askComposePayload({ to: ["Kim@Example.test", "not an email", "kim@example.test"], subject: "Hi\nthere", body: "Line 1\r\nLine 2" }, NOW);
+  const pre = parseAskCompose(payload, NOW + 1000);
+  ok(!!pre && pre.to === "kim@example.test" && pre.subject === "Hi there" && pre.body === "Line 1\nLine 2", "ask compose: To cleaned and de-duplicated, subject one line, body kept");
+  ok(parseAskCompose(payload, NOW + ASK_COMPOSE_TTL_MS + 1) === null && parseAskCompose("{", NOW) === null && parseAskCompose(JSON.stringify({ v: 2, at: NOW }), NOW) === null && parseAskCompose(null, NOW) === null, "ask compose: stale, junk, foreign or missing hand-offs are ignored");
+  ok(ASK_COMPOSE_HREF === "/inbox?compose=ask", "ask compose: the composer opens at /inbox?compose=ask (the body never rides in the URL)");
+
+  /* ---- the report ---- */
+  const run = (o: Partial<AssistRun>): AssistRun => ({ id: "AR-r", feature: "ask", step: null, userId: "u1", userName: "Jeff", provider: "anthropic", model: "claude-haiku-5-5", requestedModel: "claude-haiku-5-5", fellBack: false, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, latencyMs: 0, inputHash: "", output: "", ok: true, error: null, stopReason: null, contextRef: "ask:none", monthKey: "2034-01", outcome: null, outcomeDetail: { cards: 0, web: 0, retryOf: null }, outcomeAt: null, createdAt: NOW, ...o });
+  const rep = askReport([
+    run({ outcomeDetail: { cards: 2, cardKinds: ["task", "email"], web: 2, retryOf: null, confirmed: ["task"] } }),
+    run({ model: "claude-sonnet-5-5", costUsd: 0.05, outcomeDetail: { cards: 1, cardKinds: ["note"], web: 0, retryOf: "AR-a" } }),
+    run({ userName: "Kim", userId: "u2", ok: false, outcomeDetail: { cards: 3, web: 1, retryOf: null } }),
+    run({ feature: "reply", costUsd: 9 }),
+  ]);
+  const jeff = rep.byPerson.find((r) => r.key === "Jeff")!;
+  ok(
+    rep.total.questions === 3 && rep.total.haiku === 2 && rep.total.sonnet === 1 && rep.total.tryHarder === 1 && rep.total.tryHarderPct === 33.3 &&
+      JSON.stringify(rep.total.proposed) === JSON.stringify({ task: 1, note: 1, email: 1, estimate: 0 }) && rep.total.cardsShown === 6 &&
+      JSON.stringify(rep.total.confirmed) === JSON.stringify({ task: 1, note: 0, email: 0, estimate: 0 }) && rep.total.webSearches === 3 && Math.abs(rep.total.costUsd - 0.07) < 1e-9 &&
+      rep.byPerson.map((r) => r.key).join(",") === "Jeff,Kim" && jeff.questions === 2 && jeff.tryHarderPct === 50,
+    "ask report: questions per person, Haiku vs Sonnet, Try harder rate, cards proposed / confirmed by kind, web searches, cost; other features ignored"
+  );
+  ok(askReport([]).total.questions === 0 && askReport([]).total.tryHarderPct === null && askReport([]).byPerson.length === 0, "ask report: an empty month");
+
+  /* ---- pins ---- */
+  const read = (p: string) => readFileSync(p, "utf8");
+  const valueImports = (src: string): string[] => {
+    const out: string[] = [];
+    for (const m of src.matchAll(/^import\s+(?!type\s)([\s\S]*?)\s+from\s+"([^"]+)";?/gm)) out.push(m[2]);
+    for (const m of src.matchAll(/^import\s+"([^"]+)";?/gm)) out.push(m[1]);
+    return out;
+  };
+  const banned = /^@\/(db\b|lib\/stores\/|lib\/search\/)|-server$|^@\/lib\/assist\/(ask-runner|ask-task-write|gate-server|run|anthropic|key-store|local)$|^\.\/(ask-runner|ask-task-write|gate-server|run|anthropic|key-store|local)$|^node:/;
+  const dir = "src/components/ask";
+  const askFiles = readdirSync(dir).map((f) => `${dir}/${f}`);
+  ok(askFiles.length >= 2 && existsSync(`${dir}/AskPanel.tsx`) && existsSync(`${dir}/AskCards.tsx`), "ask ui: AskPanel.tsx and AskCards.tsx exist");
+  for (const f of [...askFiles, "src/lib/assist/ask-client.ts", "src/lib/assist/ask-compose.ts", "src/lib/assist/features/ask-render.ts"]) {
+    const src = read(f);
+    const bad = valueImports(src).filter((p) => banned.test(p));
+    ok(bad.length === 0 && (!f.startsWith(dir) || src.startsWith('"use client";')), `ask ui: ${f.split("/").pop()} imports only actions, pure modules and types${bad.length ? ` (found ${bad.join(", ")})` : ""}`);
+  }
+  ok(askFiles.every((f) => !read(f).includes("dangerouslySetInnerHTML")) && !read("src/lib/assist/features/ask-render.ts").includes("dangerouslySetInnerHTML"), "ask ui: no dangerouslySetInnerHTML in src/components/ask/");
+  const panel = read(`${dir}/AskPanel.tsx`);
+  ok(/target="_blank" rel="noopener noreferrer"/.test(panel) && /renderAnswerBlocks\(text, whitelist\)/.test(panel) && /handlePopoutClick\(e, pop, link\.id, link\.href\)/.test(panel) && /readAskStream\(res\.body,/.test(panel) && /askResponseProblem\(res\)/.test(panel) && /ctlRef\.current\?\.abort\(\)/.test(panel), "ask ui: the panel streams through readAskStream after the reply check, renders through the whitelist, pops out on Shift-click, Stop aborts, sources open in a new tab");
+  ok(/@media \(max-width: 700px\)/.test(panel) && /e\.key === "Escape"\) onClose\(\)/.test(panel) && /fetch\(`\$\{ASK_CONTEXT_ROUTE\}\?page=\$\{encodeURIComponent\(pagePath\)\}`/.test(panel), "ask ui: full screen under 700 px, Esc closes, the context chip comes from the context route");
+  const nav = read("src/components/nav/Nav.tsx");
+  ok(
+    /\{askEnabled && \(\s*<button[\s\S]{0,300}onClick=\{\(\) => openAsk\(searchQ\)\}[\s\S]{0,1600}Ask AI:<\/span>/.test(nav) &&
+      /if \(askEnabled && e\.key === "Enter" && \(e\.metaKey \|\| e\.ctrlKey\)/.test(nav) &&
+      /if \(!askEnabled \|\| question\.length < 2\) return;/.test(nav) &&
+      /\{askEnabled && ask && \(\s*<AskPanel /.test(nav) &&
+      /setSearchOpen\(false\);\s*setAsk\(null\);\s*\}/.test(nav),
+    "ask ui: the ⌘K Ask AI row, ⌘↵ and the panel are all gated on askEnabled; a route change closes the panel"
+  );
+  const layout = read("src/app/(app)/layout.tsx");
+  ok(/const askEnabled = \(await askGateFor\(user\.id, \{ settings: assistSettingsOf\(settings\) \}\)\.catch\(\(\) => "error"\)\) === null;/.test(layout) && /askEnabled=\{askEnabled\}/.test(layout), "ask ui: the (app) layout computes askEnabled with askGateFor (=== null) and passes it to Nav");
+  const cards = read(`${dir}/AskCards.tsx`);
+  ok(
+    /createTaskFromThreadAction\(\{ threadId,/.test(cards) && /createAskTaskAction\(\{ title,/.test(cards) && /addCustomerNoteAction\(id, card\.text\)/.test(cards) && /addVenueNoteAction\(id, card\.text\)/.test(cards) &&
+      /logActivityAction\(id, \{ type: "note", note: card\.text \}\)/.test(cards) && /addProjectNoteAction\(fd\)/.test(cards) && /startSuggestion\(\{ kind, id \}/.test(cards) &&
+      /sessionStorage\.setItem\(ASK_COMPOSE_KEY, askComposePayload\(card, Date\.now\(\)\)\)/.test(cards) && !/encodeURIComponent\(card\.body/.test(cards) &&
+      (cards.match(/await recordConfirm\(runId, "(task|note|email|estimate)"\)/g) || []).length === 4 && /postChanged\("task"\)/.test(cards) && /postChanged\("customer", id\)/.test(cards),
+    "ask ui: each card confirms through its existing action, then records the confirm (and posts postChanged)"
+  );
+  const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
+  ok(/window\.sessionStorage\.getItem\(ASK_COMPOSE_KEY\);\s*window\.sessionStorage\.removeItem\(ASK_COMPOSE_KEY\);/.test(shell) && /parseAskCompose\(raw, Date\.now\(\)\)/.test(shell), "ask ui: the Inbox reads the hand-off once (and removes it) before opening the composer");
+  const inboxPage = read("src/app/(app)/inbox/page.tsx");
+  ok(/\} else if \(str\(params\.compose\) && !askCompose\) \{/.test(inboxPage) && /askCompose=\{askCompose && !initialCompose \?/.test(inboxPage), "ask ui: ?compose=ask opens nothing on the server; the shell fills it");
+  ok(/cardKinds\.push\(card\.kind\)/.test(read("src/lib/assist/ask-runner.ts")), "ask runner: each shown card's kind is logged (cardKinds) for the report");
+  const pilot = read("src/app/(app)/settings/groups/assist-pilot.tsx");
+  ok(pilot.includes("<AskReportTable ask={assist.ask} />") && pilot.includes("{assist.askModels.ask}") && pilot.includes("{assist.askModels.askHard}") && read("src/app/(app)/settings/assist-data.ts").includes("ask: askReport(runs),"), "settings: the pilot card shows the Ask AI model hint and table");
+  const companyActions = read("src/app/(app)/companies/actions.ts");
+  ok(/export async function addVenueNoteAction\(siteId: string, text: string\) \{\s*const me = await requireUser\(\);/.test(companyActions) && /parentKind: "site", parentId: site\.id, customerId: site\.companyId \|\| null/.test(companyActions), "ask ui: the venue note action requires a user and writes a site note");
+  const actions = read("src/lib/assist/ask-actions.ts");
+  ok(/export async function createAskTaskAction[\s\S]*?const me = await requireUser\(\);[\s\S]*?createAskTask\(req, \{ id: me\.id, name: me\.name \}\)/.test(actions), "ask ui: createAskTaskAction requires a user");
+
+  /* ---- the no-thread task write (scratch DB) ---- */
+  const { createAskTask } = await import("@/lib/assist/ask-task-write");
+  const { getTask, removeTask } = await import("@/lib/stores/tasks");
+  const { activeUsers } = await import("@/lib/users");
+  const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
+  const { fixtureId } = await import("./test-fixtures");
+  const { seeded } = await import("@/db");
+  await seeded();
+  const users = await activeUsers();
+  const me = { id: users[0].id, name: users[0].name };
+  const CID = fixtureId("ask4", "co");
+  const made: string[] = [];
+  try {
+    await upsertCustomer({ id: CID, name: "Ask4 Co", type: "Education", locations: [], contacts: [] } as never);
+    const r = await createAskTask({ title: "  Call   Robin ", notes: "about the bid", assigneeUserId: "", dueDate: "", links: { customerId: CID, leadId: "L-ask4-missing", quoteId: "x]" } }, me);
+    if (r.ok) made.push(r.task.id);
+    const task = r.ok ? await getTask(r.task.id) : null;
+    ok(
+      r.ok && !!task && task.title === "Call Robin" && task.customerId === CID && !task.leadId && !task.quoteId && task.assigneeUserId === me.id && task.assigneeName === me.name && typeof task.dueAt === "number" && task.dueAt > Date.now() && task.notes === "about the bid",
+      "createAskTask: the title tidied, an existing company linked, a missing lead dropped, the assignee defaults to me, the #327 due default applies"
+    );
+    const r2 = await createAskTask({ title: "Dated", notes: "", assigneeUserId: users[users.length - 1].id, dueDate: "2034-02-03", links: {} }, me);
+    if (r2.ok) made.push(r2.task.id);
+    ok(r2.ok && r2.task.assigneeUserId === users[users.length - 1].id && r2.task.dueAt === new Date("2034-02-03T12:00:00").getTime(), "createAskTask: a picked assignee and date are kept (noon, like the Inbox dialog)");
+    const bads = await Promise.all([
+      createAskTask({ title: "  ", notes: "", assigneeUserId: "", dueDate: "", links: {} }, me),
+      createAskTask({ title: "x", notes: "", assigneeUserId: "u-nobody", dueDate: "", links: {} }, me),
+      createAskTask({ title: "x", notes: "", assigneeUserId: "", dueDate: "2034-02-31", links: {} }, me),
+      createAskTask({ title: "x".repeat(201), notes: "", assigneeUserId: "", dueDate: "", links: {} }, me),
+    ]);
+    ok(bads.every((b) => !b.ok), "createAskTask: refuses a blank title, a stranger assignee, an impossible date and an over-long title");
+  } finally {
+    for (const id of made) await removeTask(id).catch(() => {});
+    await removeCustomer(CID).catch(() => {});
+  }
+}
+
 if (process.argv[1] && /test-ask\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -1131,6 +1359,7 @@ if (process.argv[1] && /test-ask\.ts$/.test(process.argv[1])) {
     await askSearchDbChecks(ok);
     await askToolsDbChecks(ok);
     await askRunnerChecks(ok);
+    await askUiChecks(ok);
     // later tasks append: await askXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall ask checks passed");
     process.exit(fail ? 1 : 0);

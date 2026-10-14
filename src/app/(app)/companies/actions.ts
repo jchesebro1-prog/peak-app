@@ -18,7 +18,7 @@ import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
 import { getSettings } from "@/lib/settings";
 import { getCompanySummary, type CompanySummary } from "@/lib/company-summary";
 import { applyVenueMoveRule, saveVenue } from "@/lib/identity/venue-save";
-import { setNameAutoForLocIds } from "@/lib/identity/sites";
+import { getSite, setNameAutoForLocIds } from "@/lib/identity/sites";
 import { deriveLocationLabels, venueTypesFrom, type SaveVenueInput, type SaveVenueResult } from "@/lib/venue-types";
 
 /**
@@ -247,6 +247,26 @@ export async function addCustomerNoteAction(customerId: string, text: string) {
     // through the failure shape this action already has instead of letting a
     // raw exception escape as a 500.
     console.error("addCustomerNoteAction: note mint failed", err);
+    return { ok: false as const, error: "Couldn’t save that note — please try again." };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Ask AI (spec 2026-10-13 §4) — a note on a venue, the same NoteRecord the
+ *  Krisp to-do "note" decision writes (parentKind "site", the venue's company
+ *  denormalized). There was no venue note composer before; this is its one
+ *  writer outside the meeting path. */
+export async function addVenueNoteAction(siteId: string, text: string) {
+  const me = await requireUser();
+  const t = (text || "").trim();
+  if (!siteId || !t) return { ok: false as const, error: "Write a note first." };
+  const site = await getSite(siteId);
+  if (!site) return { ok: false as const, error: "That venue no longer exists." };
+  try {
+    await addNoteRecord({ parentKind: "site", parentId: site.id, customerId: site.companyId || null, text: t }, me.name);
+  } catch (err) {
+    console.error("addVenueNoteAction: note mint failed", err);
     return { ok: false as const, error: "Couldn’t save that note — please try again." };
   }
   revalidatePath("/", "layout");
