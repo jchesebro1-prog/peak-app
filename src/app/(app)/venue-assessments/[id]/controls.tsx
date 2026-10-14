@@ -676,7 +676,8 @@ export default function SurveyEditor({
       assessment: draft.assessment,
       templateRev: draft.templateRev,
       signoff: draft.signoff,
-      scope: draft.scope,
+      // an unanswered scope stays unset (R2) so the read-time seed can still run
+      scope: draft.scope.length ? draft.scope : undefined,
       internalTags: draft.internalTags,
       ...over,
     };
@@ -1147,7 +1148,11 @@ export default function SurveyEditor({
                           items={tier1}
                           onJump={jumpTo}
                           onScope={(next) => setField("scope", next)}
-                          onRigSystems={(next) => setDisc("rigging", "present", next)}
+                          onRigSystems={(next) =>
+                            patchDraft({
+                              disciplines: { ...draft.disciplines, rigging: { ...(draft.disciplines.rigging || {}), present: next } },
+                            })
+                          }
                           mv={mv}
                           setMeasure={setMeasure}
                           chipStyle={chipStyle}

@@ -391,7 +391,15 @@ export function disciplineHasData(d: DisciplineData | undefined, inv: InventoryR
 export function intakeStatus(s: IntakeSlice): IntakeStatus {
   if (!tier1Complete(s)) return "draft";
   const inv = s.inventory || [];
-  const added = DISCIPLINE_GROUPS.some((g) => disciplineHasData(s.disciplines?.[g.key], inv, g.key));
+  // #342: Rigging's `present` is the Kill questions' rigging-system answer now, not intake data.
+  const added = DISCIPLINE_GROUPS.some((g) => {
+    let d = s.disciplines?.[g.key];
+    if (g.key === "rigging" && d) {
+      d = { ...d };
+      delete d.present;
+    }
+    return disciplineHasData(d, inv, g.key);
+  });
   if (!added) return "general-complete";
   return s.intakeReady ? "ready-for-quote" : "discipline-added";
 }

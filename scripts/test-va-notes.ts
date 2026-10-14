@@ -8,7 +8,7 @@ import {
   rigSystems, hasCounterweight, hasLinesets, sectionVisible, splitGoalLines, recapFor, recapScopeText,
 } from "../src/lib/survey-flow";
 import { migrateSurvey, addLegacyNote, type MigratableSurvey } from "../src/lib/survey-migrate";
-import { tier1Items, tier1Complete, DISCIPLINE_GROUPS, presentOptionsFor } from "../src/lib/stores/survey-intake";
+import { tier1Items, tier1Complete, intakeStatus, DISCIPLINE_GROUPS, presentOptionsFor } from "../src/lib/stores/survey-intake";
 import { BEAM_FIELDS } from "../src/lib/stores/surveys";
 import { railSheetLabel, SECTION_RAIL_CSS } from "../src/components/section-rail/section-rail";
 import { STARTER_SURVEY_TAGS, resolveSurveyTags, mergeSurveyTags, activeSurveyTags, surveyTagLabel } from "../src/lib/survey-tags";
@@ -108,6 +108,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(tier1Items({ ...base, scope: ["rigging"] }).some((i) => i.key === "rigSystem" && !i.done) && !tier1Complete({ ...base, scope: ["rigging"] }),
     "#342 A2: Rigging in scope adds an unanswered Rigging system item");
   ok(tier1Complete({ ...base, scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } }), "#342 A2: answering the rigging system completes Tier 1");
+  const rigOnly = { ...base, scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } };
+  ok(intakeStatus(rigOnly) === "general-complete", "#342 A2: the rigging-system kill answer alone doesn't count as a discipline added");
+  ok(intakeStatus({ ...rigOnly, disciplines: { rigging: { present: ["Hemp"], gridHeight: "30" } } }) === "discipline-added",
+    "#342 A2: real Rigging intake data still flips the status to discipline-added");
   ok(tier1Items(base).find((i) => i.key === "stageWidth")?.section === "tier1" && tier1Items(base).find((i) => i.key === "contact")?.section === "cust",
     "#342 A2: stage W/D are answered on the card; contact jumps to Customer & venue");
 
