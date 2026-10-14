@@ -12275,3 +12275,26 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - The `src/lib/settings-lists.ts` header comment still says "the two Settings list editors".
 
 **Remaining:** slices B and C, plus the Jeff-gated items above.
+
+## 345. Inbox Organize is hard to find, and it suggests junk companies ("UNKNOWN") — DONE 2026-10-14 on `worktree-assist-layer` (D1033–D1036)
+
+Jeff (Oct 14): on a computer he couldn't find Organize or "Organize my inbox"; two of his three suggestions pointed at a company named "UNKNOWN".
+
+**Why he missed it (diagnosis):**
+- The sidebar "Organize" row has **no gate**: every user sees it on every Inbox view, and its count badge shows only when To file > 0. It was there before 8:20. The row uses the Archive-box icon and sits second under **Views**, below the mailbox folders.
+- The rail **scrolls inside its own column**. With the Compose / Log call buttons above it and the connection panel below it, the Organize row is under the fold at common laptop heights. Measured on a scratch DB: at a 650 px-tall viewport the scroll area is 259 px and the row sits about 20 px below it (it shows at roughly 705 px and up; more folder rows, like Archived or Deleted, push that higher). If the rail was ever collapsed (the ‹ button, remembered per browser, #126), Views don't show at all. Under 720 px wide the rail is hidden and Organize is only an option in the mailbox `<select>`.
+- **"Organize my inbox" was hidden until 8:20.** It renders only for an Assist pilot user with Inbox organization (`file`) on. That was off until this morning, so before 8:20 even the Organize view had no button.
+- **The service worker is not the cause.** `public/sw.js` is network-first for documents (the cache is only an offline fallback); RSC, `/api` and `/share` are never cached; `/_next/static` files are content-hashed. A deploy is picked up on the next load. No change.
+
+**Built:**
+- **Tab row** at the top of the Inbox list, desktop and phone: Inbox · Organize (N) · Noise (N) (D1033).
+- **Banner** on the plain inbox: "AI has filing suggestions for N emails — Review", dismissed per session, back when the count grows (D1034).
+- **Daily brief:** "N emails to file · M noise — Review", plus "Organize my inbox" / "Finish organizing my inbox" while the 90-day cleanup was never run or is unfinished. It lands on To file with the button called out, and never starts the run by itself (D1035).
+- All three show whenever Organize is available, which is the view's own rule: everyone, unless `INBOX_ORG_DISABLED`. The sidebar row and the select option stay.
+- **Placeholder companies** (`isPlaceholderCompany`: UNKNOWN / UKN / TBD / N/A / NA / None / Test, whole name) are skipped by the sender-rule, identity and number steps, the AI candidate list, the Link / Change… company search and every filing write. Suggestions already stored under one read as "No match yet". The app no longer creates or applies `Peak/Customers/<placeholder>` Gmail labels (it did before); a label like that applied in Gmail links nothing. Company records are untouched (D1036).
+- **Tests:** `scripts/test-inbox-org.ts` (`inboxOrgEntryChecks`, `inboxOrgPlaceholderChecks`, both chained into test:specs) and `scripts/test-brief.ts` (`briefOrganizeEntryChecks`). No migration, no env var.
+
+**Follow-ups / Jeff-gated:**
+- The existing `Peak/Customers/UNKNOWN` label in Gmail stays on the threads that carry it. Remove or delete it in Gmail if you want it gone.
+- The Gmail identity resolver still auto-links a contact parked under UNKNOWN to UNKNOWN (`thread.customerId`). Filing ignores that link, but the reader still shows the thread as linked to UNKNOWN. The real fix is re-homing those Daylite contacts, or teaching `resolveForThread` to skip placeholders.
+- The new tab row and banner show for the whole team, not only the pilot, because the view was never pilot-only. Say if you want them pilot-only.
