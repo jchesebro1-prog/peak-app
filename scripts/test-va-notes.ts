@@ -537,6 +537,14 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#344 B3: goals editor caps typing at 300 chars a line and 20 goals");
   ok(goals.includes("Enter") && goals.includes("focus()") && goals.includes("↑") && goals.includes("↓") && goals.includes("×"),
     "#344 B3: goals editor adds-after on Enter, reorders and removes");
+  ok(goals.includes("nativeEvent.isComposing") && goals.includes("role=\"group\"") && goals.includes("aria-label={`${label} ${i + 1}`}"),
+    "#344 B3 fix: goals Enter ignores IME composition; group + per-input names come from the label prop");
+  ok(goals.includes("pending.current") && goals.includes("ups.current") && goals.includes("downs.current") && goals.includes("addBtn"),
+    "#344 B3 fix: goals reorder/remove restore keyboard focus (same ↑/↓ button, next/previous row, or + Add goal)");
+  ok(slider.includes("aria-label={`Clear ${label}`}") && slider.includes("aria-label={`Rate ${label}`}") && slider.includes("onPointerUp"),
+    "#344 B3 fix: slider Rate/Clear buttons carry unique names; a tap on the unrated thumb rates it");
+  ok(chips.includes("role=\"group\"") && chips.includes("aria-labelledby") && chips.includes("useId") && chips.includes("htmlFor={otherId}"),
+    "#344 B3 fix: scope chips are a labelled group and the explain box has a real label");
   ok(/value\.includes\("Other"\)/.test(chips) && chips.includes("Explain the scope") && chips.includes("maxLength={500}"),
     "#344 B3: scope chips show the 500-char explain box only when Other is selected");
   ok([0, 1, 2, 3, 4].every((i) => new RegExp(`--cond-${i}:\\s*#[0-9a-f]{6}`, "i").test(css)), "#344 B3: globals.css defines --cond-0 … --cond-4");

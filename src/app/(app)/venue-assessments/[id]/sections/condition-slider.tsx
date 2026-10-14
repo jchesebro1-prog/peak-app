@@ -48,6 +48,10 @@ export function ConditionSlider({
             const n = Number(e.target.value);
             if (isConditionLevel(n)) onChange(n);
           }}
+          /* While unrated the thumb sits at 2, so a tap on it fires no change; rate it on release. */
+          onPointerUp={() => {
+            if (!rated) onChange(2);
+          }}
           style={{
             flex: "1 1 140px",
             minWidth: 120,
@@ -69,11 +73,11 @@ export function ConditionSlider({
           {step}
         </span>
         {rated ? (
-          <button type="button" style={linkBtn} onClick={() => onChange(undefined)}>
+          <button type="button" style={linkBtn} aria-label={`Clear ${label}`} onClick={() => onChange(undefined)}>
             Clear
           </button>
         ) : (
-          <button type="button" style={linkBtn} onClick={() => onChange(2)}>
+          <button type="button" style={linkBtn} aria-label={`Rate ${label}`} onClick={() => onChange(2)}>
             Rate
           </button>
         )}
