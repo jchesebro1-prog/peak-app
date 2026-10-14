@@ -312,6 +312,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
           Save
         </button>
       </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>Background drafts pause at 60% of the cap.</div>
 
       <AssistOrgSettings org={assist.org} run={run} />
 

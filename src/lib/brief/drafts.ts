@@ -10,9 +10,13 @@
  *   2. every quiet quote (`selectQuietQuotes`) without a fresh nudge → a
  *      follow-up note + nudge email (Haiku), stored as `Quote.assistNudge`.
  *
- * Each part is gated on its own feature (reply / tasks / brief) and goes
- * through `runAssist` with `countRate: false`, so the monthly cap — not the
- * person's interactive per-hour limits — bounds it. Calls are capped to the
+ * The queue belongs to the Daily brief: it runs only for a pilot user with
+ * the Daily brief switch on (`briefOnFor`, D918), and then each part is gated
+ * on its own feature (reply / tasks / brief). Every call goes through
+ * `runAssist` with `countRate: false`, so the monthly cap — not the person's
+ * interactive per-hour limits — bounds it; and the queue itself stops once
+ * this month's spend reaches BACKGROUND_CAP_SHARE of the cap, so pre-drafting
+ * never spends what interactive Assist needs (D927). Calls are capped to the
  * time left after their loads (no retries) and none starts without
  * DRAFT_MIN_CALL_MS of room. Nothing is sent, linked or created here.
  *
@@ -27,7 +31,7 @@
  */
 import { getSettings } from "@/lib/settings";
 import { activeUsers, getUser } from "@/lib/users";
-import { assistGate, assistSettingsOf } from "@/lib/assist/config";
+import { assistGate, assistSettingsOf, monthKeyChicago } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
 import { limitsBefore } from "@/lib/assist/call-budget";
 import { runAssist, type CallDeadline, type CallLimits, type RunDeps } from "@/lib/assist/run";
@@ -40,9 +44,10 @@ import { sameName } from "@/lib/quote-approval-rules";
 import { signatureFor } from "@/lib/stores/signatures";
 import { casPreDraftKey, get as getThread, getAll as allThreads, lastInbound, visibleTo, waitingSince, type CommThread } from "@/lib/stores/comms";
 import { casAssistNudgeKey, get as getQuote, getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
-import { mergeRunDetail } from "@/lib/stores/assist-runs";
+import { mergeRunDetail, monthSpend } from "@/lib/stores/assist-runs";
 import { PREDRAFT_RUN_KEY } from "./report-keys";
-import { lastSentAt, newestInboundId, nudgeFresh, preDraftFresh } from "./fresh";
+import { lastSentAt, newestInboundId, nudgeFreshFor, preDraftFreshFor } from "./fresh";
+import { briefOnFor } from "./reminders";
 import { selectQuietQuotes } from "./quiet";
 import { buildNudgeUserText, NUDGE_SYSTEM, NudgeSchema, sanitizeNudge } from "./nudge";
 import type { AssistNudge, PreDraft, QuietQuote } from "./types";
@@ -57,6 +62,8 @@ export const DRAFT_QUEUE_MIN_GAP_MS = 60_000;
 export const HOME_DRAFT_DEADLINE_MS = 110_000;
 /** A lease outlives the queue's own deadline by this much (no call of ours runs past the deadline). */
 export const DRAFT_LEASE_GRACE_MS = 30_000;
+/** Pre-drafting pauses once this month's Assist spend reaches this share of the monthly cap (D927). */
+export const BACKGROUND_CAP_SHARE = 0.6;
 
 export type DraftQueueDeps = {
   /** Model provider overrides (checks): passed to every runAssist. */
@@ -71,11 +78,14 @@ export type DraftQueueDeps = {
   force?: boolean;
   /** Checks only: act as another server instance — no in-process guards, only the leases. */
   separateInstance?: boolean;
+  /** Checks only: this month's spend for the background-cap check (default `monthSpend`). */
+  monthSpend?: (monthKey: string) => Promise<number>;
 };
 
 export type DraftQueueResult = {
-  /** Why nothing ran: not pilot / no feature on / unknown user, a queue already running, or one ran < 60 s ago. */
-  skipped: "gated" | "busy" | "recent" | null;
+  /** Why nothing ran: not pilot / Daily brief off / no feature on / unknown user, a queue already
+   *  running, one ran < 60 s ago, or this month's spend is at BACKGROUND_CAP_SHARE of the cap. */
+  skipped: "gated" | "busy" | "recent" | "background-cap" | null;
   replies: number;
   tasks: number;
   nudges: number;
@@ -87,7 +97,8 @@ export type DraftQueueResult = {
   leased: number;
   /** Results dropped because new mail / a resend / another writer overtook them. */
   dropped: number;
-  stoppedBy: "deadline" | "cap" | null;
+  /** "cap": the monthly cap refused a call; "background-cap": spend reached BACKGROUND_CAP_SHARE mid-run. */
+  stoppedBy: "deadline" | "cap" | "background-cap" | null;
 };
 
 const running = new Set<string>();
@@ -115,14 +126,15 @@ function isCourtMe(t: CommThread, me: { name: string }): boolean {
   return !!newestInboundId(t);
 }
 
-/** Is this part of a fresh pre-draft already done (an answer, or a recent unusable one)? */
-function partDone(pd: PreDraft, part: "reply" | "tasks", now: number): boolean {
+/** Is this part of a fresh pre-draft already done (an answer, or a recent unusable one)? One made for someone else never is. */
+function partDone(pd: PreDraft, part: "reply" | "tasks", now: number, ownerId: string): boolean {
+  if (pd.ownerId !== ownerId) return false;
   if (part === "reply") return !!pd.body || (!!pd.replyError && now - pd.at < DRAFT_RETRY_MS);
   return Array.isArray(pd.taskSuggestions) || (!!pd.tasksError && now - pd.at < DRAFT_RETRY_MS);
 }
 
-function nudgeDone(q: Quote, now: number): boolean {
-  if (!nudgeFresh(q)) return false;
+function nudgeDone(q: Quote, now: number, ownerId: string): boolean {
+  if (!nudgeFreshFor(q, ownerId)) return false;
   const n = q.assistNudge!;
   return !n.error || now - n.at < DRAFT_RETRY_MS;
 }
@@ -188,9 +200,10 @@ export async function runDraftQueue(
   }
   try {
     // Cheap gate first: settings + the effective env only. Nothing else is
-    // read unless the owner is in the pilot with reply, tasks or brief on.
+    // read unless the owner is in the pilot with Daily brief on (the queue
+    // is the brief's — D918) and reply, tasks or brief usable.
     const settings = deps.settings ?? assistSettingsOf(await getSettings());
-    if (!settings.users.includes(ownerId)) return { ...res, skipped: "gated" };
+    if (!briefOnFor(ownerId, settings)) return { ...res, skipped: "gated" };
     const env = deps.env ?? (await getAssistEnv());
     const gate = {
       reply: assistGate("reply", ownerId, settings, env).ok,
@@ -198,16 +211,26 @@ export async function runDraftQueue(
       brief: assistGate("brief", ownerId, settings, env).ok,
     };
     if (!gate.reply && !gate.tasks && !gate.brief) return { ...res, skipped: "gated" };
+    const now = deps.now ?? Date.now();
+    // Background spending guard (D927): pre-drafting stops at
+    // BACKGROUND_CAP_SHARE of the month's cap, leaving the rest for
+    // interactive Assist. Checked here and again before each call-making item.
+    const spentFn = deps.monthSpend ?? monthSpend;
+    const monthKey = monthKeyChicago(now);
+    const backgroundCapped = async () => (await spentFn(monthKey)) >= settings.capUsd * BACKGROUND_CAP_SHARE;
+    if (await backgroundCapped()) {
+      if (guarded) lastStart.set(ownerId, clock());
+      return { ...res, skipped: "background-cap" };
+    }
     const user = await getUser(ownerId);
     if (!user || user.status !== "active") return { ...res, skipped: "gated" };
     if (guarded) lastStart.set(ownerId, clock());
 
     const me = { id: user.id, name: user.name };
-    const now = deps.now ?? Date.now();
     const runDeps: RunDeps = { ...(deps.run ?? {}), settings, env, ...(deps.now !== undefined ? { now: deps.now } : {}) };
     const deadline: CallDeadline = { at: opts.deadlineMs, hasFallback: passHasFallback(env, deps.run), minCallMs: DRAFT_MIN_CALL_MS, clock };
     const leaseUntil = opts.deadlineMs + DRAFT_LEASE_GRACE_MS;
-    const stop = (why: "deadline" | "cap") => {
+    const stop = (why: "deadline" | "cap" | "background-cap") => {
       res.stoppedBy = why;
     };
     /** A failure before any model call (cap reached, a switch flipped meanwhile) ends the queue; so does running out of time. */
@@ -234,15 +257,20 @@ export async function runDraftQueue(
         const t = await getThread(snap.id);
         if (!t || !isCourtMe(t, me)) continue;
         const basis = newestInboundId(t)!;
-        const pd = preDraftFresh(t) ? t.preDraft! : null;
-        const needReply = gate.reply && !(pd && partDone(pd, "reply", now));
-        const needTasks = gate.tasks && !(pd && partDone(pd, "tasks", now));
+        // fresh AND made for me: a reassigned thread's old draft is stale, never reused
+        const pd = preDraftFreshFor(t, me.id) ? t.preDraft! : null;
+        const needReply = gate.reply && !(pd && partDone(pd, "reply", now, me.id));
+        const needTasks = gate.tasks && !(pd && partDone(pd, "tasks", now, me.id));
         if (!needReply && !needTasks) {
           res.fresh++;
           continue;
         }
         if (!limitsBefore(deadline, needReply ? "reply" : "tasks")) {
           stop("deadline");
+          break;
+        }
+        if (await backgroundCapped()) {
+          stop("background-cap");
           break;
         }
         if (liveLease(t.preDraftLeaseUntil, clock())) {
@@ -261,6 +289,7 @@ export async function runDraftQueue(
             taskRunId: pd?.taskRunId ?? null,
             basis,
             at: now,
+            ownerId: me.id,
             ...(pd?.replyError && !pd.body ? { replyError: pd.replyError } : {}),
             ...(pd?.tasksError && !Array.isArray(pd.taskSuggestions) ? { tasksError: pd.tasksError } : {}),
           };
@@ -339,13 +368,17 @@ export async function runDraftQueue(
         if (!q || q.status !== "sent") continue;
         const basis = lastSentAt(q);
         if (basis === null || basis !== quiet.sentAt) continue;
-        if (nudgeDone(q, now)) {
+        if (nudgeDone(q, now, me.id)) {
           res.fresh++;
           continue;
         }
         const limits = limitsBefore(deadline, "brief");
         if (!limits) {
           stop("deadline");
+          break;
+        }
+        if (await backgroundCapped()) {
+          stop("background-cap");
           break;
         }
         if (liveLease(q.assistNudgeLeaseUntil, clock()) || !(await casAssistNudgeKey(q.id, "assistNudgeLeaseUntil", q.assistNudgeLeaseUntil ?? undefined, leaseUntil))) {
@@ -356,11 +389,11 @@ export async function runDraftQueue(
           const r = await draftNudge(q, quiet, me, { run: runDeps, limits });
           let nudge: AssistNudge;
           if (r.ok) {
-            nudge = { ...r.nudge, runId: r.runId, basis, at: now };
+            nudge = { ...r.nudge, runId: r.runId, basis, at: now, ownerId: me.id };
           } else if (halt(r.kind)) {
             break;
           } else {
-            nudge = { note: "", emailSubject: "", emailBody: "", runId: null, basis, at: now, error: r.error };
+            nudge = { note: "", emailSubject: "", emailBody: "", runId: null, basis, at: now, ownerId: me.id, error: r.error };
           }
           const cur = await getQuote(q.id);
           const landed = !!cur && cur.status === "sent" && lastSentAt(cur) === basis && (await casAssistNudgeKey(q.id, "assistNudge", q.assistNudge ?? undefined, nudge));

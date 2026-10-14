@@ -942,7 +942,7 @@ export default async function InboxPage({
 
     // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
     // stored suggestions keep only this dialog's link keys and team ids.
-    const storedDraft = readerPreDraft(sel, { name: me });
+    const storedDraft = readerPreDraft(sel, { id: user.id, name: me });
     const linkKeySet = new Set(taskLinks.map((l) => l.key));
     const teamIds = new Set(roster.map((u) => u.id));
     const preDraft: ReaderVM["preDraft"] = storedDraft
@@ -1113,7 +1113,7 @@ export default async function InboxPage({
   let initialCompose: ComposeInit | null = null;
   const nudgeId = str(params.nudge).slice(0, 100);
   const nudgeQuote = nudgeId ? await getQuote(nudgeId).catch(() => null) : null;
-  const nudge = nudgePrefill(nudgeQuote, me);
+  const nudge = nudgePrefill(nudgeQuote, { id: user.id, name: me });
   // the report's "nudges opened": the composer opening is the hook. A write,
   // so it runs after the response (not in the render); first write wins.
   if (nudge) {

@@ -61,6 +61,9 @@ export type PreDraft = {
   taskRunId: string | null;
   basis: string;
   at: number;
+  /** The user id the draft was made for. A thread reassigned since reads as
+   *  stale: the new owner never sees (or reuses) it, and the queue redrafts. */
+  ownerId: string;
   /** The model ran but gave nothing usable; the queue retries after DRAFT_RETRY_MS. */
   replyError?: string;
   tasksError?: string;
@@ -75,6 +78,9 @@ export type AssistNudge = {
   runId: string | null;
   basis: number;
   at: number;
+  /** The user id the nudge was made for. A quote handed to someone else since
+   *  reads as stale: the new owner never gets it, and the queue redrafts. */
+  ownerId: string;
   /** The model ran but gave nothing usable (note/subject/body are ""); the queue retries after DRAFT_RETRY_MS. */
   error?: string;
 };

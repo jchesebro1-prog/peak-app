@@ -73,7 +73,7 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
   const threadReady: Record<string, CardThreadReady> = {};
   for (const t of threads) {
     if (!t) continue;
-    const pd = readerPreDraft(t, { name: user.name });
+    const pd = readerPreDraft(t, { id: user.id, name: user.name });
     threadReady[t.id] = { draft: flags.reply && !!pd?.reply, tasks: flags.tasks && !!pd?.tasks };
   }
 
@@ -81,7 +81,7 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
   for (const q of quotes) {
     if (!q) continue;
     // Send nudge shows only when the Inbox will prefill it (its own rule).
-    const usable = nudgePrefill(q, user.name) !== null;
+    const usable = nudgePrefill(q, { id: user.id, name: user.name }) !== null;
     quoteInfo[q.id] = { href: quoteBuilderHref(q), nudge: usable ? { note: String(q.assistNudge?.note || "") } : null };
   }
 

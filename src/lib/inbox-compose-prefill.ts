@@ -6,7 +6,7 @@
  * picks the recipient. Nothing travels in the URL but the quote id, and
  * nothing sends until the person presses Send. Pure, client-safe.
  */
-import { nudgeFresh } from "@/lib/brief/fresh";
+import { nudgeFreshFor } from "@/lib/brief/fresh";
 import { quoteIsMine } from "@/lib/brief/quiet";
 import type { AssistNudge } from "@/lib/brief/types";
 import type { QuoteHistoryEntry, QuoteStatus } from "@/lib/stores/quotes";
@@ -50,12 +50,13 @@ type NudgeQuote = {
 
 /**
  * The prefill for `?nudge=<quoteId>`, or null: only a fresh nudge
- * (`nudgeFresh`: still sent, same send) with no error and a body, on a quote
- * that is the viewer's to follow up (owner, else preparedBy).
+ * (`nudgeFreshFor`: still sent, same send, made for the viewer) with no error
+ * and a body, on a quote that is the viewer's to follow up (owner, else
+ * preparedBy). A nudge made for the quote's previous owner is stale.
  */
-export function nudgePrefill(q: NudgeQuote | null | undefined, meName: string): ComposePrefill | null {
+export function nudgePrefill(q: NudgeQuote | null | undefined, me: { id: string; name: string }): ComposePrefill | null {
   const n = q?.assistNudge;
-  if (!q || !n || n.error || !nudgeFresh(q) || !quoteIsMine(q, meName)) return null;
+  if (!q || !n || n.error || !nudgeFreshFor(q, me.id) || !quoteIsMine(q, me.name)) return null;
   const body = capBody(n.emailBody, COMPOSE_BODY_MAX);
   if (!body) return null;
   return {
