@@ -106,7 +106,8 @@ import { getAssistEnv } from "@/lib/assist/key-store";
 export const metadata = { title: "Inbox — Quartzite-6" };
 
 // #97 — the Gmail import/poll can take longer than the platform default
-// #334 — Draft estimate makes two model calls (Haiku extract + Opus draft) inside one server-action budget.
+// and the Inbox's Assist actions (draft reply, suggest tasks, the AI pass) run model calls inside one server-action budget.
+// (Suggest estimate is its own POST route, /api/assist/suggest-estimate, with its own 300 s.)
 export const maxDuration = 300;
 
 // One mailbox: the signed-in user's own connected Gmail account. The shared

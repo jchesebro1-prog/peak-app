@@ -18,7 +18,7 @@ import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import TaskDialog from "./task-dialog";
 import AssistTasksDialog from "./assist-tasks-dialog";
-import { draftEstimateAction, draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
+import { draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
 import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { shortTaskTitle } from "./organize/format";
@@ -544,8 +544,6 @@ export default function ThreadReader({
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistTasks, setAssistTasks] = useState<Extract<SuggestTasksResult, { ok: true }> | null>(null);
-  // #334 Assist — Draft estimate: busy while two model calls run, then the new draft quote opens.
-  const [estimateBusy, setEstimateBusy] = useState(false);
   // #334 Assist — Draft reply: the draft in the composer, pending until it is
   // sent (accepted / edited by edit ratio) or thrown away (discarded). The
   // ref is the source of truth so send / close / unmount settle it once.
@@ -560,7 +558,6 @@ export default function ThreadReader({
   const sentStoredRef = useRef<Set<string>>(new Set());
   // In-flight guards: a double click lands before the busy state re-renders.
   const tasksInFlight = useRef(false);
-  const estimateInFlight = useRef(false);
   const replyInFlight = useRef(false);
   const mountedRef = useRef(false);
   const sendingRef = useRef(false);
@@ -1204,33 +1201,6 @@ export default function ThreadReader({
                 }}
               >
                 {assistBusy ? "Thinking…" : "Suggest tasks"}
-              </ActionBtn>
-            )}
-            {assist.estimate && vm.isEmail && (
-              <ActionBtn
-                colors={["#5b616e", "#fff", "#e4e7ec"]}
-                disabled={estimateBusy}
-                title="Assist — builds a draft estimate from this email for you to check line by line"
-                onClick={async () => {
-                  if (estimateBusy || estimateInFlight.current) return;
-                  estimateInFlight.current = true;
-                  setEstimateBusy(true);
-                  setAssistError(null);
-                  try {
-                    const r = await draftEstimateAction(vm.id);
-                    if (r.ok) {
-                      router.push(r.href);
-                      return; // stay busy (and guarded) while the Estimator opens
-                    }
-                    setAssistError(r.error);
-                  } catch {
-                    setAssistError("Assist couldn’t respond — please try again.");
-                  }
-                  estimateInFlight.current = false;
-                  setEstimateBusy(false);
-                }}
-              >
-                {estimateBusy ? "Drafting… (can take a few minutes)" : "Draft estimate"}
               </ActionBtn>
             )}
             <ActionBtn

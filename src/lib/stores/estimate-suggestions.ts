@@ -41,6 +41,7 @@ function shape(id: string, raw: Record<string, unknown>): EstimateSuggestion | n
     quoteName: str(raw.quoteName),
     systems: Array.isArray(raw.systems) ? (raw.systems as SuggestionSystem[]).filter((s) => s && typeof s === "object" && Array.isArray(s.lines)) : [],
     notes: str(raw.notes),
+    truncated: typeof raw.truncated === "number" && Number.isFinite(raw.truncated) && raw.truncated > 0 ? Math.floor(raw.truncated) : 0,
     runIds: { extract: strOrNull(runs.extract), draft: strOrNull(runs.draft) },
     quoteId: strOrNull(raw.quoteId),
   };
@@ -66,6 +67,7 @@ export async function saveSuggestion(s: EstimateSuggestion): Promise<void> {
     quoteName: s.quoteName || "",
     systems: s.systems,
     notes: s.notes || "",
+    truncated: Number.isFinite(s.truncated) && s.truncated > 0 ? Math.floor(s.truncated) : 0,
     runIds: { extract: s.runIds?.extract ?? null, draft: s.runIds?.draft ?? null },
     quoteId: s.quoteId ?? null,
   };

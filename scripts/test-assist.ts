@@ -13,11 +13,11 @@ import { assistReport, featureKey, recentMonthKeys } from "@/lib/assist/report";
 import { ZERO_USAGE, type AssistProvider, type ProviderRequest } from "@/lib/assist/types";
 import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
 import { cleanPromptField, promptMessages, threadBlock, UNTRUSTED_NOTE } from "@/lib/assist/features/thread-text";
-import { assistDraftViewOf, buildDraftSections, buildDraftUserText, remapExampleLines, sanitizeExtract, selectCandidateParts } from "@/lib/assist/features/estimate-draft";
+import { assistDraftViewOf, buildDraftUserText, remapExampleLines, sanitizeExtract, selectCandidateParts } from "@/lib/assist/features/estimate-draft";
+import { sanitizeSuggestion } from "@/lib/assist/features/suggestion";
 import { rankCatalogParts } from "@/app/(app)/estimator/catalog-rank";
-import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
 import { buildReplyUserText, cleanReplyText, openQuotesFor, pickStyleExamples, REPLY_SYSTEM, stripQuotedText } from "@/lib/assist/features/reply-draft";
-import { DRAFT_MIN_REMAINING_MS, draftTimeLeft, ESTIMATE_BUDGET_MS, estimateBudgetFits, OUT_OF_TIME_ERROR } from "@/lib/assist/estimate-draft-server";
+import { DRAFT_MIN_REMAINING_MS, draftTimeLeft, ESTIMATE_BUDGET_MS, estimateBudgetFits, OUT_OF_TIME_ERROR } from "@/lib/assist/estimate-suggest-server";
 
 import { readFileSync, readdirSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -352,9 +352,11 @@ export async function assistReplyChecks(ok: Ok): Promise<void> {
 export async function assistEstimatePureChecks(ok: Ok): Promise<void> {
   const ex = sanitizeExtract({ quoteName: " Lincoln ", venue: "", requests: [{ phrase: "  black   velour ", qty: 2.7 }, { phrase: "", qty: 1 }, { phrase: "hoist", qty: -3 }], systems: ["Curtains", "Curtains", ""] });
   ok(ex.requests.length === 2 && ex.requests[0].phrase === "black velour" && ex.requests[0].qty === 2 && ex.requests[1].qty === 1 && ex.systems.join() === "Curtains", "assist estimate: extract sanitized (trim, int qty >= 1, dedupe)");
-  const parts = new Map([["VEL-1", { sku: "VEL-1", desc: "Velour 25oz", unit: "yd", cost: 10, list: 20 }]]);
+  // Draft estimate's priced builder is gone (Estimate suggestion): the draft
+  // now becomes a price-free suggestion through sanitizeSuggestion.
+  const cands = [{ sku: "VEL-1", desc: "Velour 25oz" }];
   const cats = [{ id: "cat-fixtures", name: "Fixtures", discipline: "curtain", items: [] }] as never[];
-  const r = buildDraftSections({ quoteName: "x", notes: "", systems: [
+  const r = sanitizeSuggestion({ quoteName: "x", notes: "", systems: [
     { name: "Main curtain", categoryId: "cat-fixtures", lines: [
       { sku: "VEL-1", qty: 3, desc: "", reason: "requested" },
       { sku: "NOT-IN-SET", qty: 1, desc: "Mystery part", reason: "" },
@@ -362,13 +364,12 @@ export async function assistEstimatePureChecks(ok: Ok): Promise<void> {
       { sku: "", qty: 1, desc: "", reason: "" },
     ] },
     { name: "Empty", categoryId: "", lines: [] },
-  ] }, { parts, tierMargin: 0.3, freightPct: 8, categories: cats, sectionIdBase: 1000 });
-  const s = r.sections[0];
-  ok(r.sections.length === 1 && s.id === "sys1000" && s.kind === "materials" && s.freightPct === 8 && s.discipline === "curtain" && s.priceRound === 25, "assist estimate: one materials system, empty system dropped, discipline from category");
-  ok(s.items[0].sku === "VEL-1" && s.items[0].price === catalogAddPrice(10, 20, 0.3) && s.items[0].cost === 10 && s.items[0].qty === 3, "assist estimate: catalog line priced by catalogAddPrice at the tier");
-  ok(s.items[1].sku === "" && s.items[1].price === 0 && s.items[1].custom === true && s.items[1].desc === "Mystery part", "assist estimate: sku outside the candidate set becomes an unpriced custom line");
-  ok(s.items[2].qty === 1 && s.items.length === 3 && r.dropped === 1 && r.unresolved === 1, "assist estimate: qty clamped >= 1; blank line dropped, unresolved sku counted separately");
-  ok(r.reasons["sys1000:1"] === "requested" && r.lines.length === 3 && r.lines[0].sku === "VEL-1", "assist estimate: reasons keyed by section:line, drafted lines recorded");
+  ] }, cands, cats);
+  const sys0 = r.systems[0];
+  ok(r.systems.length === 1 && sys0.name === "Main curtain" && sys0.categoryId === "cat-fixtures" && sys0.discipline === "curtain", "assist estimate: one suggested system, empty system dropped, discipline from category");
+  ok(sys0.lines[0].sku === "VEL-1" && !sys0.lines[0].custom && sys0.lines[0].desc === "Velour 25oz" && sys0.lines[0].qty === 3 && sys0.lines[0].reason === "requested", "assist estimate: a candidate line keeps its sku, the catalog description and its reason");
+  ok(sys0.lines[1].sku === "" && sys0.lines[1].custom && sys0.lines[1].desc === "Mystery part", "assist estimate: sku outside the candidate set becomes a custom line");
+  ok(sys0.lines[2].qty === 1 && sys0.lines.length === 3 && r.dropped === 1 && r.unresolved === 1, "assist estimate: qty clamped >= 1; blank line dropped, unresolved sku counted separately");
   const ut = buildDraftUserText({ thread: "<email_thread/>", extract: ex, categories: [{ id: "c1", name: "Fixtures", items: [{ sku: "A", qty: 2 }] }] as never[], pastSystems: [{ label: "EST-1 Main", lines: [{ sku: "A", desc: "a", qty: 1 }] }], customerSystems: [], candidates: [{ sku: "VEL-1", desc: "Velour", mfr: "Rose Brand", unit: "yd", category: "Fabric" }] });
   ok(ut.includes("2 \u00d7 black velour") && ut.includes("c1 \u2014 Fixtures: A\u00d72") && ut.includes("EST-1 Main: A\u00d71") && ut.includes("VEL-1 | Velour") && !/\$|cost|price/i.test(ut.replace("Never output prices", "")), "assist estimate: prompt carries request, categories, examples, candidates, no money");
   const liveMap = new Map([["OLD-1", { sku: "NEW-1" }], ["CAT-1", { sku: "CAT-1" }], ["HIT-1", { sku: "HIT-1" }], ["HIT-2", { sku: "HIT-2" }], ["NEW-1", { sku: "NEW-1" }]]);
@@ -379,33 +380,38 @@ export async function assistEstimatePureChecks(ok: Ok): Promise<void> {
   ok(rl.length === 1 && rl[0].sku === "NEW-1" && rl[0].qty === 2, "assist estimate: example lines use the live (renamed) SKU; unresolved or capped-out lines dropped");
   const ranked = rankCatalogParts([{ sku: "VEL-1", desc: "Velour 25oz", category: "Fabric" }, { sku: "X", desc: "Other" }], "velour");
   ok(ranked.length === 1 && ranked[0].p.sku === "VEL-1", "assist estimate: rankCatalogParts finds by description");
-  // Hostile draft: prices/costs the model tries to smuggle in are never read; a prototype-ish sku is just a custom line.
-  const hostile = buildDraftSections({ quoteName: "x", notes: "", systems: [{ name: "S", categoryId: "", lines: [
+  // Hostile draft: prices/costs the model tries to smuggle in never ride through; a prototype-ish sku is just a custom line.
+  const hostile = sanitizeSuggestion({ quoteName: "x", notes: "", systems: [{ name: "S", categoryId: "", lines: [
     { sku: "VEL-1", qty: 1, desc: "", reason: "", price: 0.01, cost: 0.01 } as never,
     { sku: "__proto__", qty: 1, desc: "x", reason: "" },
-  ] }] }, { parts, tierMargin: 0.3, freightPct: 0, categories: [], sectionIdBase: 1 });
-  ok(hostile.sections[0].items[0].price === catalogAddPrice(10, 20, 0.3) && hostile.sections[0].items[0].cost === 10 && hostile.sections[0].items[1].sku === "" && hostile.sections[0].items[1].price === 0, "assist estimate: model-supplied price/cost ignored; unknown sku is a $0 custom line");
-  // The Estimator finds/removes a line by id alone, so ids are unique across systems.
-  const two = buildDraftSections({ quoteName: "x", notes: "", systems: [
-    { name: "A", categoryId: "", lines: [{ sku: "VEL-1", qty: 1, desc: "", reason: "a" }, { sku: "", qty: 1, desc: "", reason: "" }] },
-    { name: "B", categoryId: "", lines: [{ sku: "VEL-1", qty: 1, desc: "", reason: "b" }] },
-  ] }, { parts, tierMargin: 0.3, freightPct: 0, categories: [], sectionIdBase: 5 });
-  const ids = two.sections.flatMap((x) => x.items.map((i) => i.id));
-  ok(ids.join() === "1,2" && two.reasons["sys5:1"] === "a" && two.reasons["sys6:2"] === "b", "assist estimate: line ids unique across systems; a dropped line frees its id");
-  const view = assistDraftViewOf({ id: "Q-1", assistDraft: { runId: "AR-1", threadId: "C-1", at: 1, notes: "n", reasons: { "sys5:1": "a", "sys6:2": "b", "sys6:9": "gone", toString: "x" } }, spec: { sections: two.sections } });
+  ] }] }, cands);
+  const hl = hostile.systems[0]?.lines ?? [];
+  ok(!/"(price|cost|list|sell)"/.test(JSON.stringify(hostile)) && hl[0]?.sku === "VEL-1" && hl[1]?.sku === "" && hl[1]?.custom === true, "assist estimate: model-supplied price/cost never ride through; an unknown sku is a custom line");
+  // The old quotes' banner (D877) still reads: reasons follow the quote's current lines.
+  const bannerSections = [
+    { id: "sys5", items: [{ id: 1, desc: "Velour 25oz" }, { id: 2, desc: "Custom" }] },
+    { id: "sys6", items: [{ id: 2, desc: "Velour 25oz" }] },
+  ];
+  const view = assistDraftViewOf({ id: "Q-1", assistDraft: { runId: "AR-1", threadId: "C-1", at: 1, notes: "n", reasons: { "sys5:1": "a", "sys6:2": "b", "sys6:9": "gone", toString: "x" } }, spec: { sections: bannerSections } });
   ok(!!view && view.reasons.map((x) => x.reason).join() === "a,b" && view.threadId === "C-1", "assist estimate: banner reasons follow the current lines; removed lines drop out");
   ok(assistDraftViewOf({ id: "Q-1", assistDraft: { runId: "AR-1", threadId: "C-1", at: 1, notes: "", reasons: {}, dismissedAt: 2 }, spec: null }) === null && assistDraftViewOf({ id: "Q-1", spec: null }) === null, "assist estimate: dismissed or non-Assist quote → no banner");
 }
 
-/** #334 Task 8 — Draft estimate end to end against the DB, fake providers only (no network). */
+/**
+ * #334 Task 8 → Estimate suggestion (spec 2026-10-13): the email path end to
+ * end against the DB, fake providers only (no network). The old Draft
+ * estimate created a priced quote; suggesting now stores a price-free blob
+ * suggestion and creates NO quote. The other source kinds: test-suggest.ts.
+ */
 export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
-  const { draftEstimateFromThread } = await import("@/lib/assist/estimate-draft-server");
+  const { suggestEstimate } = await import("@/lib/assist/estimate-suggest-server");
+  const { suggestionForSource, suggestionBlobId, sourceIndexBlobId } = await import("@/lib/stores/estimate-suggestions");
   const { upsert: upsertPart } = await import("@/lib/stores/catalog");
   const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
-  const { get: getQuote, dismissAssistDraft } = await import("@/lib/stores/quotes");
   const { get: getThread } = await import("@/lib/stores/comms");
-  const { resolveTier } = await import("@/lib/pricing-tiers");
   const { listDocsByField } = await import("@/db/doc-store");
+  const { blobs: blobTable } = await import("@/db/schema");
+  const { inArray } = await import("drizzle-orm");
   const { createFixture, fixtureId } = await import("./test-fixtures");
 
   const ME = { id: "u-assist-est", name: "Esti Mator" };
@@ -414,6 +420,7 @@ export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
   const T = fixtureId(334, "thread");
   const T_OTHER = fixtureId(334, "thread-other");
   const T_LEAD = fixtureId(334, "thread-lead");
+  const LEAD = fixtureId(334, "lead");
   // A far month so the spend cap never sees real rows.
   const NOW = Date.UTC(2034, 1, 10, 15, 0);
   const settings = assistSettingsOf({ assistUsers: [ME.id] });
@@ -430,84 +437,79 @@ export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
     assignedTo: "", link: null, createdAt: NOW, updatedAt: NOW,
     messages: [{ id: "m1-test", at: NOW, direction: "in", channel: "email", author: "Pat Lee", body: "Please price 2 zorbaflex velour panels." }],
   };
+  const blobIds = [T, T_OTHER, T_LEAD].map((id) => sourceIndexBlobId("thread", id));
+  const quotesFor = async () => (await listDocsByField("quotes", "customerId", [CID])).length;
   try {
     await upsertPart({ id: SKU, sku: SKU, desc: "Zorbaflex assist velour panel", category: "Fabric", unit: "ea", list: 200, cost: 100 });
     registerFixture("catalog_parts", SKU);
     await upsertCustomer({ id: CID, name: "Zorbaflex Test Co", type: "Education", locations: [], contacts: [] });
     await createFixture("comms", { ...baseThread, id: T } as never);
     await createFixture("comms", { ...baseThread, id: T_OTHER, mailboxUser: "Somebody Else" } as never);
-    await createFixture("comms", { ...baseThread, id: T_LEAD, link: { type: "lead", id: fixtureId(334, "lead") } } as never);
+    await createFixture("comms", { ...baseThread, id: T_LEAD, link: { type: "lead", id: LEAD, label: "Lead" } } as never);
+    await createFixture("leads", { id: LEAD, org: "Zorbaflex Test Co", contact: "Pat Lee", stage: "new", activities: [], createdAt: NOW, updatedAt: NOW } as never);
+    const quotesBefore = await quotesFor();
 
     // A thread outside the user's own mailbox: refused before any model call.
-    const hidden = await draftEstimateFromThread(T_OTHER, ME, { extract: { provider: fakeProvider(extractText), settings, env, now: NOW } });
-    ok(!hidden.ok && (await listDocsByField("assist_runs", "contextRef", ["thread:" + T_OTHER])).length === 0, "assist estimate db: another user's thread is refused with no run");
+    const xHidden: ProviderRequest[] = [];
+    const hidden = await suggestEstimate({ kind: "thread", id: T_OTHER }, ME, { extract: { provider: fakeProvider(extractText, { calls: xHidden }), settings, env, now: NOW } });
+    ok(!hidden.ok && xHidden.length === 0 && (await listDocsByField("assist_runs", "contextRef", ["thread:" + T_OTHER])).length === 0 && !(await suggestionForSource("thread", T_OTHER)), "assist estimate db: another user's thread is refused — no model call, no run, no suggestion");
 
     const xCalls: ProviderRequest[] = [];
     const dCalls: ProviderRequest[] = [];
-    const r = await draftEstimateFromThread(T, ME, {
+    const r = await suggestEstimate({ kind: "thread", id: T }, ME, {
       extract: { provider: fakeProvider(extractText, { calls: xCalls }), settings, env, now: NOW },
       draft: { provider: fakeProvider(draftText, { calls: dCalls }), settings, env, now: NOW },
       now: NOW,
     });
     const runs = await listDocsByField<AssistRun>("assist_runs", "contextRef", ["thread:" + T]);
     runs.forEach((x) => registerFixture("assist_runs" as never, x.id));
-    if (r.ok) registerFixture("quotes", r.quoteId);
-    ok(r.ok, "assist estimate db: a draft estimate is created" + (r.ok ? "" : ` (${r.error})`));
+    if (r.ok) blobIds.push(suggestionBlobId(r.suggestionId));
+    ok(r.ok, "assist estimate db: an estimate suggestion is stored" + (r.ok ? "" : ` (${r.error})`));
     if (!r.ok) return;
 
     ok(xCalls[0]?.model === "claude-haiku-5-5" && dCalls[0]?.model === "claude-opus-5-5", "assist estimate db: extract on Haiku, draft on Opus");
     ok(!!dCalls[0] && dCalls[0].user.includes(`${SKU} | Zorbaflex assist velour panel`) && !/\b(100|200)(\.0+)?\b/.test(dCalls[0].user.replace(SKU, "")), "assist estimate db: the fixture part is a candidate; no cost/list in the prompt");
+    ok(dCalls[0]?.system.includes("This is a suggestion") && dCalls[0]?.user.includes('<email_thread subject="Pricing for curtains">'), "assist estimate db: the draft prompt says it is a suggestion and carries the wrapped thread");
 
-    const q = await getQuote(r.quoteId);
-    ok(!!q && q.status === "draft" && q.source === "estimator" && q.quoteType === "system" && q.owner === ME.name && q.preparedBy === ME.name && q.customerId === CID, "assist estimate db: draft · estimator · system · owned and prepared by the user");
-    const tier = await resolveTier(CID, "Pat Lee");
-    const sec = (q?.spec as { sections?: Array<{ items: Array<{ id: number; sku: string; desc: string; price: number; custom?: boolean; bonus?: unknown }> }> } | null)?.sections?.[0];
-    const first = sec?.items[0];
-    const custom = sec?.items.find((i) => i.desc === "Custom batten");
-    ok(q?.tierMargin === tier.margin && first?.sku === SKU && first.price === catalogAddPrice(100, 200, tier.margin), "assist estimate db: the catalog line is priced by catalogAddPrice at the customer's tier");
-    ok(!!custom && custom.price === 0 && custom.custom === true && custom.sku === "", "assist estimate db: the unmatched line is a $0 custom line");
-    ok(q?.assistDraft?.threadId === T && q?.assistDraft?.runId === runs.find((x) => x.step === "draft")?.id && q?.assistDraft?.notes === "check width", "assist estimate db: assistDraft points at the thread and the draft run");
+    const sg = r.suggestion;
+    ok(sg.source.kind === "thread" && sg.source.id === T && sg.source.label === "Pricing for curtains" && sg.customerId === CID && sg.contactName === "Pat Lee" && sg.leadId === null && sg.venueId === null && sg.quoteName === "Test draft" && sg.createdBy.id === ME.id && sg.quoteId === null, "assist estimate db: the suggestion carries the thread's customer, contact and header");
+    const lines = sg.systems[0]?.lines ?? [];
+    ok(sg.systems.length === 1 && lines[0]?.sku === SKU && !lines[0].custom && lines[0].desc === "Zorbaflex assist velour panel" && lines[1]?.custom === true && lines[1].sku === "" && lines[1].desc === "Custom batten", "assist estimate db: candidate-only SKUs; the unmatched line is a custom line");
+    ok(!/"(price|cost|list|sell)"/.test(JSON.stringify(sg)), "assist estimate db: no price anywhere in the suggestion");
+    ok((await suggestionForSource("thread", T))?.id === r.suggestionId && r.href.startsWith(`/estimator?suggestion=${r.suggestionId}&customer=`), "assist estimate db: the source index points at it; href opens the Estimator header-only");
+    ok((await quotesFor()) === quotesBefore, "assist estimate db: suggesting creates no quote");
     ok((await getThread(T))?.link === null, "assist estimate db: the thread is not auto-linked");
     ok(runs.length === 2 && runs.some((x) => x.step === "extract") && runs.some((x) => x.step === "draft"), "assist estimate db: two runs logged for the thread (extract + draft)");
     const dRun = runs.find((x) => x.step === "draft");
-    const det = (dRun?.outcomeDetail ?? {}) as { lines?: unknown; quoteId?: string; extractRunId?: string; dropped?: number; unresolved?: number };
+    const det = (dRun?.outcomeDetail ?? {}) as { lines?: unknown; suggestionId?: string; extractRunId?: string; dropped?: number; unresolved?: number; truncated?: number };
     const lineKey = (ls: unknown) => (Array.isArray(ls) ? ls : []).map((l: { sku?: string; qty?: number }) => `${l.sku}×${l.qty}`).join("|");
-    ok(lineKey(det.lines) === `${SKU}×2|×1` && det.quoteId === r.quoteId && det.extractRunId === runs.find((x) => x.step === "extract")?.id && det.dropped === 0 && det.unresolved === 0 && dRun?.outcome === null, "assist estimate db: the draft run records lines, quote, extract run and counters (no outcome yet)");
+    ok(lineKey(det.lines) === `${SKU}×2|×1` && det.suggestionId === r.suggestionId && !("quoteId" in det) && det.extractRunId === runs.find((x) => x.step === "extract")?.id && det.dropped === 0 && det.unresolved === 0 && det.truncated === 0 && dRun?.outcome === null, "assist estimate db: the draft run records {suggestionId, lines} + counters (no quote, no outcome yet)");
+    ok(sg.runIds.extract === runs.find((x) => x.step === "extract")?.id && sg.runIds.draft === dRun?.id, "assist estimate db: the suggestion points at both runs");
 
-    // Banner view + dismiss (never bumps updatedAt).
-    const v = assistDraftViewOf(q);
-    ok(!!v && v.quoteId === r.quoteId && v.threadId === T && v.notes === "check width" && v.reasons.length === 1 && v.reasons[0].desc === "Zorbaflex assist velour panel" && v.reasons[0].reason === "asked", "assist estimate db: the banner view lists the email, notes and current lines' reasons");
-    const before = q?.updatedAt;
-    ok(await dismissAssistDraft(r.quoteId, NOW + 1), "assist estimate db: dismiss writes");
-    const qd = await getQuote(r.quoteId);
-    ok(qd?.assistDraft?.dismissedAt === NOW + 1 && qd?.updatedAt === before && assistDraftViewOf(qd) === null, "assist estimate db: dismissed → no banner, updatedAt unchanged");
-    ok(!(await dismissAssistDraft(r.quoteId)), "assist estimate db: a second dismiss is a no-op");
-
-    // An email with no equipment request creates nothing.
-    const empty = await draftEstimateFromThread(T, ME, {
+    // An email with no equipment request saves nothing; the index keeps the earlier suggestion.
+    const empty = await suggestEstimate({ kind: "thread", id: T }, ME, {
       extract: { provider: fakeProvider(JSON.stringify({ quoteName: "", venue: "", requests: [], systems: [] })), settings, env, now: NOW },
       draft: { provider: fakeProvider(draftText), settings, env, now: NOW },
       now: NOW,
     });
     const runs2 = await listDocsByField<AssistRun>("assist_runs", "contextRef", ["thread:" + T]);
     runs2.forEach((x) => registerFixture("assist_runs" as never, x.id));
-    ok(!empty.ok && /didn't find/.test(empty.error) && runs2.length === 3, "assist estimate db: no request found → no draft call, no quote");
+    ok(!empty.ok && /didn't find an equipment request in this email/.test(empty.error) && runs2.length === 3 && (await suggestionForSource("thread", T))?.id === r.suggestionId, "assist estimate db: no request found → no draft call, nothing saved");
 
-    // A lead-linked thread: the draft quote still carries no leadId (D877).
-    const lr = await draftEstimateFromThread(T_LEAD, ME, {
+    // A lead-linked thread: the suggestion carries the lead (the Estimator saves it on create).
+    const lr = await suggestEstimate({ kind: "thread", id: T_LEAD }, ME, {
       extract: { provider: fakeProvider(extractText), settings, env, now: NOW },
       draft: { provider: fakeProvider(draftText), settings, env, now: NOW },
       now: NOW,
     });
     (await listDocsByField<AssistRun>("assist_runs", "contextRef", ["thread:" + T_LEAD])).forEach((x) => registerFixture("assist_runs" as never, x.id));
-    if (lr.ok) registerFixture("quotes", lr.quoteId);
-    const lq = lr.ok ? await getQuote(lr.quoteId) : null;
-    ok(lr.ok && !!lq && !lq.leadId && lq.assistDraft?.threadId === T_LEAD, "assist estimate db: a lead-linked email's draft quote has no leadId; the thread rides in assistDraft only");
+    if (lr.ok) blobIds.push(suggestionBlobId(lr.suggestionId));
+    ok(lr.ok && lr.suggestion.leadId === LEAD && lr.href.includes(`lead=${encodeURIComponent(LEAD)}`) && (await quotesFor()) === quotesBefore, "assist estimate db: a lead-linked email's suggestion carries the lead id; still no quote");
 
-    // Time budget: extract ran long → the draft call never starts, nothing is created.
+    // Time budget: extract ran long → the draft call never starts, nothing is saved.
     const slowCalls: ProviderRequest[] = [];
     let tick = 0;
-    const slow = await draftEstimateFromThread(T, ME, {
+    const slow = await suggestEstimate({ kind: "thread", id: T }, ME, {
       extract: { provider: fakeProvider(extractText), settings, env, now: NOW },
       draft: { provider: fakeProvider(draftText, { calls: slowCalls }), settings, env, now: NOW },
       now: NOW,
@@ -516,9 +518,18 @@ export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
     const runs3 = await listDocsByField<AssistRun>("assist_runs", "contextRef", ["thread:" + T]);
     runs3.forEach((x) => registerFixture("assist_runs" as never, x.id));
     const skipped = runs3.filter((x) => x.step === "extract" && (x.outcomeDetail as { draftSkipped?: string } | null)?.draftSkipped === "time budget");
-    ok(!slow.ok && slow.error === OUT_OF_TIME_ERROR && slowCalls.length === 0 && runs3.length === 4 && skipped.length === 1, "assist estimate db: too little time left → refused before the draft call, logged on the extract run");
+    ok(!slow.ok && slow.error === OUT_OF_TIME_ERROR && slowCalls.length === 0 && runs3.length === 4 && skipped.length === 1 && (await suggestionForSource("thread", T))?.id === r.suggestionId, "assist estimate db: too little time left → refused before the draft call, logged on the extract run");
+
+    // The quote-creating path is gone (spec pins).
+    const actions = readFileSync("src/app/(app)/inbox/assist-actions.ts", "utf8");
+    const reader = readFileSync("src/app/(app)/inbox/thread-reader.tsx", "utf8");
+    const server = readFileSync("src/lib/assist/estimate-suggest-server.ts", "utf8");
+    ok(!/draftEstimate/.test(actions + reader) && !/Draft estimate/.test(reader) && !readdirSync("src/lib/assist").includes("estimate-draft-server.ts"), "assist estimate pins: draftEstimateAction, the reader's Draft estimate button and estimate-draft-server.ts are gone");
+    ok(!/stores\/quotes|createQuote|updateQuote|catalogAddPrice|resolveTier/.test(server), "assist estimate pins: suggestEstimate never touches quotes or prices");
   } finally {
     await removeCustomer(CID);
+    const db = await getDb();
+    await db.delete(blobTable).where(inArray(blobTable.id, blobIds));
   }
 }
 
@@ -572,8 +583,9 @@ export async function assistKeyChecks(ok: Ok): Promise<void> {
   /* explicit env never sees the stored key */
   const runSrc = readFileSync("src/lib/assist/run.ts", "utf8");
   ok(/const env = deps\.env \?\? \(await getAssistEnv\(\)\)/.test(runSrc), "assist key: runAssist uses the stored key only when the caller passed no env");
-  // the Inbox actions' early gate moved to src/lib/assist/gate-server.ts (brief Task 2)
-  ok(readFileSync("src/app/(app)/inbox/assist-actions.ts", "utf8").includes('from "@/lib/assist/gate-server"'), "assist key: the Inbox actions gate through gate-server");
+  // the Inbox actions' early gate moved to src/lib/assist/gate-server.ts (brief Task 2); the
+  // actions call the shared server functions, which gate there (Suggest estimate: its own route).
+  ok(["src/lib/assist/tasks-server.ts", "src/lib/assist/reply-server.ts"].every((f) => readFileSync(f, "utf8").includes('from "./gate-server"')), "assist key: the Inbox actions' server functions gate through gate-server");
   for (const f of ["src/lib/assist/gate-server.ts", "src/app/(app)/inbox/page.tsx", "src/app/(app)/settings/assist-data.ts"]) {
     ok(readFileSync(f, "utf8").includes("getAssistEnv("), `assist key: ${f} reads the effective env`);
   }

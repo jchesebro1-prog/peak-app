@@ -1,11 +1,6 @@
 "use server";
 
 import { requireUser } from "@/lib/session";
-import { revalidatePath } from "next/cache";
-import { draftEstimateFromThread } from "@/lib/assist/estimate-draft-server";
-import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
-import { quoteBuilderHref } from "@/lib/quote-links";
-import { gateFor } from "@/lib/assist/gate-server";
 import { draftReplyForThread, type ReplyTone } from "@/lib/assist/reply-server";
 import { suggestTasksForThread } from "@/lib/assist/tasks-server";
 import { getRun, setRunOutcome } from "@/lib/stores/assist-runs";
@@ -63,20 +58,4 @@ export async function recordAssistOutcomeAction(
   }
   if (JSON.stringify(safe).length > 4000) return { ok: false };
   return { ok: await setRunOutcome(String(runId || ""), me.id, outcome, safe) };
-}
-
-/** #334 Assist — Draft estimate: a new DRAFT Estimator quote from this email
- *  (extract → candidates → draft → server pricing). Never sent, linked or
- *  status-changed; the estimator reviews every line in the Estimator. */
-export async function draftEstimateAction(
-  threadId: string
-): Promise<{ ok: true; quoteId: string; href: string } | { ok: false; error: string }> {
-  const me = await requireUser();
-  const refused = await gateFor("estimate", me.id);
-  if (refused) return { ok: false, error: refused };
-  const r = await draftEstimateFromThread(String(threadId || ""), { id: me.id, name: me.name });
-  if (!r.ok) return r;
-  await scheduleQuotePdf(r.quoteId);
-  revalidatePath("/quotes");
-  return { ok: true, quoteId: r.quoteId, href: quoteBuilderHref(r.quote) };
 }

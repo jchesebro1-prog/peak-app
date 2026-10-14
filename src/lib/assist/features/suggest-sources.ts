@@ -135,13 +135,17 @@ export function surveyText(s: SurveySourceInput): string {
     if (!g && !fields.length) continue;
     discBlocks.push([`${DISCIPLINE_LABEL[k]}:`, g ? `  Client goals: ${g.replace(/\n+/g, " ")}` : "", ...fields].filter(Boolean).join("\n"));
   }
-  const inv = (Array.isArray(s.inventory) ? s.inventory : []).slice(0, SURVEY_INVENTORY_MAX).map((r) => {
+  // A synced doc can carry anything: null / non-object rows are skipped.
+  const rows = (Array.isArray(s.inventory) ? s.inventory : []).filter(
+    (r): r is NonNullable<SurveySourceInput["inventory"]>[number] => !!r && typeof r === "object" && !Array.isArray(r)
+  );
+  const inv = rows.slice(0, SURVEY_INVENTORY_MAX).map((r) => {
     const bits = [cleanPromptField(r.discipline, 20), cleanPromptField(r.category, 60), cleanPromptField(r.type, 80)].filter(Boolean).join(" · ");
     const qty = cleanPromptField(r.quantity, 20);
     const notes = cleanPromptField(r.notes, 200);
     return `  - ${bits}${qty ? ` × ${qty}` : ""}${r.flag ? " [flagged]" : ""}${notes ? ` — ${notes}` : ""}`;
   });
-  const more = Array.isArray(s.inventory) && s.inventory.length > SURVEY_INVENTORY_MAX ? `  …and ${s.inventory.length - SURVEY_INVENTORY_MAX} more rows` : "";
+  const more = rows.length > SURVEY_INVENTORY_MAX ? `  …and ${rows.length - SURVEY_INVENTORY_MAX} more rows` : "";
   return [
     `<site_visit id="${attr(s.id)}">`,
     ...head,
@@ -186,7 +190,9 @@ export function trimTranscriptEnd(lines: readonly string[], max = MEETING_TRANSC
  * characters keeping the END (the newest talk is the most decided).
  */
 export function meetingText(meta: MeetingSourceMeta, parts: MeetingRenderedParts): string {
-  const date = typeof meta.startedAt === "number" && Number.isFinite(meta.startedAt) ? new Date(meta.startedAt).toISOString().slice(0, 10) : "";
+  // A finite number can still be outside Date's range (toISOString would throw).
+  const d = typeof meta.startedAt === "number" ? new Date(meta.startedAt) : null;
+  const date = d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : "";
   const attendees = (meta.attendees || []).map((a) => cleanPromptField(a, 80)).filter(Boolean).slice(0, 25);
   const summary = block(
     parts.summary.map((s) => `- ${cleanPromptField(s.title, 200)}${s.description ? `: ${(s.description || "").replace(/[\r\n]+/g, " ").trim()}` : ""}`).join("\n"),

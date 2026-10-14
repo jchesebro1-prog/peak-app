@@ -47,6 +47,8 @@ export type EstimateSuggestion = {
   quoteName: string;
   systems: SuggestionSystem[];
   notes: string;
+  /** Lines the model drafted past the caps (12 systems / 60 lines), dropped — "N more lines not shown". */
+  truncated: number;
   runIds: { extract: string | null; draft: string | null };
   /** The first quote saved from this suggestion; null until then. */
   quoteId: string | null;
@@ -65,13 +67,17 @@ export type SanitizedSuggestion = {
   dropped: number;
   /** Lines whose sku was outside the candidate set, kept as custom lines. */
   unresolved: number;
+  /** Lines past the 12-system / 60-line caps, never read. */
+  truncated: number;
 };
 
 /**
  * The model's draft → a suggestion's body. A line keeps its sku ONLY when it
  * is in the candidate set; otherwise it becomes a custom line described by
- * `desc` (else the stray sku text). Qty is a whole number 1–9999. At most 12
- * systems and 60 lines in all; a system left with no lines is dropped.
+ * `desc` (else the stray sku text); a catalog line reads the catalog's own
+ * description first. Qty is a whole number 1–9999. At most 12 systems and 60
+ * lines in all (lines past the caps are counted in `truncated`); a system
+ * left with no lines is dropped.
  * Every output object is built key by key — nothing the model adds (a price,
  * a cost) can ride through.
  */
@@ -86,21 +92,33 @@ export function sanitizeSuggestion(
   let lineCount = 0;
   let dropped = 0;
   let unresolved = 0;
+  let truncated = 0;
+  type DraftLine = z.infer<typeof DraftSchema>["systems"][number]["lines"][number];
+  const linesOf = (sys: { lines?: unknown }): DraftLine[] =>
+    Array.isArray(sys.lines) ? (sys.lines as unknown[]).filter((l): l is DraftLine => !!l && typeof l === "object") : [];
   for (const sys of Array.isArray(draft?.systems) ? draft!.systems : []) {
-    if (systems.length >= SUGGESTION_SYSTEMS_MAX || lineCount >= SUGGESTION_LINES_MAX) break;
     if (!sys || typeof sys !== "object") continue;
+    const sysLines = linesOf(sys);
+    if (systems.length >= SUGGESTION_SYSTEMS_MAX || lineCount >= SUGGESTION_LINES_MAX) {
+      truncated += sysLines.length;
+      continue;
+    }
     const sysKey = `s${systems.length + 1}`;
     const lines: SuggestionLine[] = [];
-    for (const l of Array.isArray(sys.lines) ? sys.lines : []) {
-      if (lineCount + lines.length >= SUGGESTION_LINES_MAX) break;
-      if (!l || typeof l !== "object") continue;
+    for (let i = 0; i < sysLines.length; i++) {
+      if (lineCount + lines.length >= SUGGESTION_LINES_MAX) {
+        truncated += sysLines.length - i;
+        break;
+      }
+      const l = sysLines[i];
       const rawSku = typeof l.sku === "string" ? l.sku.trim() : "";
       const qty = Math.min(SUGGESTION_QTY_MAX, Math.max(1, Math.floor(Number(l.qty) || 1)));
       const reason = oneLine(l.reason, SUGGESTION_REASON_MAX);
       const hit = rawSku ? cand.get(rawSku) : undefined;
       const key = `${sysKey}-l${lines.length + 1}`;
       if (hit) {
-        const desc = oneLine(l.desc, SUGGESTION_DESC_MAX) || oneLine(hit.desc, SUGGESTION_DESC_MAX);
+        // The catalog's own words first: the model's desc only fills a blank one.
+        const desc = oneLine(hit.desc, SUGGESTION_DESC_MAX) || oneLine(l.desc, SUGGESTION_DESC_MAX);
         lines.push({ key, sku: hit.sku, desc, qty, reason, custom: false });
         continue;
       }
@@ -131,6 +149,7 @@ export function sanitizeSuggestion(
     systems,
     dropped,
     unresolved,
+    truncated,
   };
 }
 

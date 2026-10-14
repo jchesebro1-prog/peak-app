@@ -7,7 +7,8 @@ export const UNTRUSTED_NOTE =
 /** Text must never close an untrusted wrapper early — the email wrappers and
  *  the estimate suggestion's source wrappers (suggest-sources.ts) alike. */
 function defangClose(s: string): string {
-  return s.replace(/<\/(email_thread|style_examples|example|lead_record|site_visit|meeting_notes)/gi, "&lt;/$1");
+  // Whitespace inside the closer ("< /lead_record", "</ meeting_notes") counts too.
+  return s.replace(/<\s*\/\s*(email_thread|style_examples|example|lead_record|site_visit|meeting_notes)/gi, "&lt;/$1");
 }
 
 export const FIELD_MAX = 120;
@@ -61,6 +62,7 @@ export function threadBlock(t: { subject: string; messages: PromptMessage[] }, o
     (m) =>
       `--- ${m.direction === "in" ? "RECEIVED" : "SENT BY PEAK"} · ${cleanPromptField(m.author) || "unknown"} · ${new Date(m.at).toISOString().slice(0, 10)}\n${trimBody(m.body, opts.maxChars)}`
   );
-  const subject = (t.subject || "").replace(/[<>"]/g, "");
+  // An attribute value: one line (no forged "--- RECEIVED" line), capped, no quote/angle brackets.
+  const subject = cleanPromptField((t.subject || "").replace(/[<>"]/g, ""));
   return `<email_thread subject="${subject}">\n${parts.join("\n")}\n</email_thread>`;
 }

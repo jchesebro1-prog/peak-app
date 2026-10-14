@@ -1,11 +1,14 @@
-/** Draft estimate (spec §9). Pure: schemas, prompts, sanitizer, section builder. Prices ONLY via catalogAddPrice. */
+/**
+ * Draft estimate (spec §9) → Estimate suggestion (spec 2026-10-13). Pure:
+ * schemas, the thread prompts, the extract sanitizer, candidate selection and
+ * the draft prompt's user text. Nothing here prices: the quote-creating
+ * builder went with "Draft estimate" — a suggestion carries no money, and
+ * the Estimator prices a line only when the rep adds it (catalogAddPrice).
+ */
 import { z } from "zod";
-import { SYSTEM_PRICE_STEP } from "@/app/(app)/estimator/pricing";
-import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
-import type { AssistDraftView, SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { AssistDraftView } from "@/app/(app)/estimator/types";
 import type { AssistDraftInfo } from "@/lib/stores/quotes";
 import type { SystemCategory } from "@/lib/system-categories";
-import type { DraftLine } from "../outcome";
 import { UNTRUSTED_NOTE } from "./thread-text";
 
 export const ExtractSchema = z.strictObject({
@@ -94,9 +97,11 @@ const exampleLine = (e: ExampleSystem) => `- ${e.label}: ${e.lines.slice(0, 40).
 
 export function buildDraftUserText(ctx: {
   thread: string; extract: Extract; categories: SystemCategory[]; pastSystems: ExampleSystem[]; customerSystems: ExampleSystem[]; candidates: CandidatePart[];
+  /** Where the request came from ("the email", "the lead", …); the source text is `thread`. */
+  requestedFrom?: string;
 }): string {
   return [
-    "Requested (from the email):",
+    `Requested (from ${ctx.requestedFrom || "the email"}):`,
     ...ctx.extract.requests.map((r) => `- ${r.qty} × ${r.phrase}`),
     ctx.extract.systems.length ? `Systems mentioned: ${ctx.extract.systems.join("; ")}` : "",
     ctx.extract.venue ? `Venue: ${ctx.extract.venue}` : "",
@@ -118,56 +123,6 @@ export function buildDraftUserText(ctx: {
 }
 
 export type PricePart = { sku: string; desc: string; unit: string; cost: number; list: number };
-
-export function buildDraftSections(
-  draft: z.infer<typeof DraftSchema>,
-  ctx: { parts: Map<string, PricePart>; tierMargin: number; freightPct: number; categories: SystemCategory[]; sectionIdBase: number }
-): { sections: SpecSection[]; reasons: Record<string, string>; lines: DraftLine[]; dropped: number; unresolved: number } {
-  const sections: SpecSection[] = [];
-  const reasons: Record<string, string> = {};
-  const lines: DraftLine[] = [];
-  let dropped = 0; // blank lines removed
-  let unresolved = 0; // skus outside the candidate set, kept as custom lines
-  const catById = new Map(ctx.categories.map((c) => [c.id, c]));
-  // Line ids are unique across the WHOLE quote — the Estimator finds/removes a line by id alone.
-  let nextId = 1;
-  for (const sys of (draft?.systems ?? []).slice(0, 12)) {
-    const sectionId = "sys" + (ctx.sectionIdBase + sections.length);
-    const items: SpecItem[] = [];
-    for (const l of (sys.lines ?? []).slice(0, 60)) {
-      const qty = Math.min(9999, Math.max(1, Math.floor(Number(l.qty) || 1)));
-      // Only a part from the server-built candidate map is priced, and only from ITS cost/list — never from the draft.
-      const part = l.sku ? ctx.parts.get(l.sku) : undefined;
-      const id = nextId++;
-      if (part) {
-        items.push({ id, sku: part.sku, desc: part.desc, qty, unit: part.unit || "ea", cost: part.cost || 0, price: catalogAddPrice(part.cost || 0, part.list || 0, ctx.tierMargin) });
-        lines.push({ sku: part.sku, qty });
-      } else {
-        const desc = (l.desc || l.sku || "").replace(/\s+/g, " ").trim().slice(0, 200);
-        if (!desc) { dropped++; nextId--; continue; }
-        if (l.sku) unresolved++; // a sku outside the candidate set — kept only as a custom line
-        items.push({ id, sku: "", desc, qty, unit: "ea", cost: 0, price: 0, custom: true, internalNote: "Assist: needs a part and price" });
-        lines.push({ sku: "", qty });
-      }
-      const why = (l.reason || "").trim().slice(0, 200);
-      if (why) reasons[`${sectionId}:${id}`] = why;
-    }
-    if (!items.length) continue;
-    const cat = catById.get(sys.categoryId);
-    sections.push({
-      id: sectionId,
-      name: (sys.name || cat?.name || "System").trim().slice(0, 80),
-      kind: "materials",
-      mfr: "",
-      freightPct: ctx.freightPct,
-      freightAuto: true,
-      priceRound: SYSTEM_PRICE_STEP, // same as the Estimator's own new-system path
-      items,
-      ...(cat?.discipline ? { discipline: cat.discipline } : {}),
-    });
-  }
-  return { sections, reasons, lines, dropped, unresolved };
-}
 
 /** The Estimator banner's view of an Assist draft (D877): null when the quote
  *  isn't one or the banner was dismissed. Reasons follow the quote's CURRENT
