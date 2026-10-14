@@ -1,4 +1,4 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, updateBlob } from "@/db/doc-store";
 import {
   FLAMETEST_RATE_DEFAULTS,
   TRAVEL_RATE_DEFAULTS,
@@ -99,8 +99,15 @@ export async function getRates(): Promise<FlameTestRates> {
 export async function setRates(
   patch: Partial<FlameTestRates> = {}
 ): Promise<FlameTestRates> {
-  const next = { ...(await getRates()), ...patch };
-  await setBlob(RATES_BLOB_ID, next);
+  // #343: merged onto the STORED rates under the blob's row lock — the old
+  // read-then-write-everything put back a stale copy of every other rate,
+  // undoing one saved by a concurrent quote. Same stored result otherwise
+  // (defaults, then stored, then the patch, written whole).
+  let next = { ...FLAMETEST_RATE_DEFAULTS } as FlameTestRates;
+  await updateBlob(RATES_BLOB_ID, (raw) => {
+    next = { ...FLAMETEST_RATE_DEFAULTS, ...(raw as Partial<FlameTestRates>), ...patch } as FlameTestRates;
+    return next as unknown as Record<string, unknown>;
+  });
   return next;
 }
 

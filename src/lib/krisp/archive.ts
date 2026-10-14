@@ -1,4 +1,4 @@
-import { getSettings, setSettings, type AppSettingsData } from "@/lib/settings";
+import { getSettings, updateSettings, type AppSettingsData } from "@/lib/settings";
 import { hasDriveScope } from "@/lib/gmail/config";
 import { accessTokenFor, getConnectionInfo } from "@/lib/gmail/connections";
 import { deleteBlob as blobDelete, getBlobStream } from "@/lib/blob";
@@ -27,6 +27,52 @@ import { ensureFolder, uploadFileResumable, type DriveFetch, type FolderCache } 
 
 export type ArchiveResult = { archived: number; failed: number; skipped: string | null };
 
+/** What a pass read before it started (#343): the archive mailbox and the
+ *  folder cache it worked from. */
+export type ArchiveBasis = { mailbox: string | null; folders: Record<string, string> };
+
+/**
+ * #343 — rebase a pass's settings patch onto the CURRENT stored settings (run
+ * under the settings row lock). The pass reads the folder cache, spends a
+ * minute in Drive, then writes it back; without this a cache an admin reset
+ * meanwhile (a new archive account) came back with the old Drive's ids, and
+ * two passes overwrote each other's new folders. Pure.
+ *  - mailbox changed since the pass read it → the cache keys are dropped (the
+ *    ids belong to the previous Drive); the last-run stamp still lands;
+ *  - otherwise only this pass's own changes apply to the stored map: entries
+ *    it added or changed are set, entries it deleted (a 404) are removed,
+ *    everything else is the stored value.
+ */
+export function rebaseArchivePatch(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  basis: ArchiveBasis | undefined
+): Record<string, unknown> {
+  const out = { ...patch };
+  if (!basis || !("recordingsArchiveFolders" in out || "recordingsArchiveFolderId" in out)) return out;
+  const nowMailbox = (current.recordingsArchiveMailbox as string | null | undefined) ?? null;
+  if (nowMailbox !== basis.mailbox) {
+    delete out.recordingsArchiveFolders;
+    delete out.recordingsArchiveFolderId;
+    return out;
+  }
+  if ("recordingsArchiveFolders" in out) {
+    const mine = (out.recordingsArchiveFolders || {}) as Record<string, string>;
+    const storedRaw = current.recordingsArchiveFolders;
+    const stored: Record<string, string> =
+      storedRaw && typeof storedRaw === "object" && !Array.isArray(storedRaw) ? { ...(storedRaw as Record<string, string>) } : {};
+    for (const k of Object.keys(basis.folders)) if (!(k in mine)) delete stored[k];
+    for (const [k, v] of Object.entries(mine)) if (basis.folders[k] !== v) stored[k] = v;
+    out.recordingsArchiveFolders = stored;
+  }
+  return out;
+}
+
+/** The pass's default settings write (#343): rebased under the row lock. */
+export async function saveArchiveSettings(patch: Record<string, unknown>, basis?: ArchiveBasis): Promise<void> {
+  await updateSettings((cur) => rebaseArchivePatch(cur, patch, basis));
+}
+
 export const ARCHIVE_ROOT_FOLDER = "Peak Recordings";
 export const ARCHIVE_UNFILED_FOLDER = "Unfiled";
 /** Krisp settled this long ago → eligible (room for same-day retries, spec §5.2). */
@@ -45,7 +91,9 @@ type ArchiveSettings = Pick<
 
 export type ArchiveDeps = {
   settings: () => Promise<ArchiveSettings>;
-  saveSettings: (patch: Record<string, unknown>) => Promise<void>;
+  /** `basis` (#343): what the pass read — the default rebases the patch onto
+   *  the stored settings under the row lock (rebaseArchivePatch). */
+  saveSettings: (patch: Record<string, unknown>, basis?: ArchiveBasis) => Promise<void>;
   /** The archive account's access token + granted scope; null when not connected. */
   tokenFor: (mailboxKey: string) => Promise<{ token: string; scope: string } | null>;
   candidates: (olderThanMs: number) => Promise<RecordingRecord[]>;
@@ -60,7 +108,7 @@ export type ArchiveDeps = {
 
 const defaultDeps: ArchiveDeps = {
   settings: () => getSettings(),
-  saveSettings: (patch) => setSettings(patch),
+  saveSettings: (patch, basis) => saveArchiveSettings(patch, basis),
   tokenFor: async (mailboxKey) => {
     const info = await getConnectionInfo(mailboxKey);
     if (!info) return null;
@@ -222,8 +270,10 @@ export async function archiveRecordings(overrides: Partial<ArchiveDeps> = {}): P
   const deps: ArchiveDeps = { ...defaultDeps, ...overrides };
   const result: ArchiveResult = { archived: 0, failed: 0, skipped: null };
   let settingsPatch: Record<string, unknown> = {};
+  let basis: ArchiveBasis | undefined;
   try {
     const settings = await deps.settings();
+    basis = { mailbox: settings.recordingsArchiveMailbox ?? null, folders: { ...(settings.recordingsArchiveFolders || {}) } };
     const candidates = (await deps.candidates(ARCHIVE_MIN_AGE_MS)).slice(0, ARCHIVE_MAX_PER_RUN);
 
     const mailbox = settings.recordingsArchiveMailbox;
@@ -281,7 +331,7 @@ export async function archiveRecordings(overrides: Partial<ArchiveDeps> = {}): P
       ...settingsPatch,
       recordingsArchiveLastRun: { at: deps.now(), ...result },
     };
-    await deps.saveSettings(settingsPatch);
+    await deps.saveSettings(settingsPatch, basis);
   } catch (e) {
     deps.log(`could not save archive settings: ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -2,12 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { getSettings, setSettings } from "@/lib/settings";
-import {
-  TEMPLATES,
-  getTemplateDef,
-  type TemplateOverrides,
-} from "@/lib/templates";
+import { writeTemplateOverrides } from "@/lib/settings";
+import { TEMPLATES, getTemplateDef } from "@/lib/templates";
 
 /**
  * Templates screen server actions (IDEAS — centralized templates). Editing is
@@ -57,15 +53,10 @@ export async function saveTemplateAction(
   if (!getTemplateDef(templateId))
     return { ok: false, error: "Unknown template." };
 
-  const settings = await getSettings();
-  const templates: TemplateOverrides = { ...(settings.templates || {}) };
   const clean = sanitizeFields(templateId, fields);
-  if (Object.keys(clean).length) templates[templateId] = clean;
-  else delete templates[templateId];
-
   const at = Date.now();
-  const meta = { ...(settings.templatesMeta || {}), [templateId]: { by: user.name, at } };
-  await setSettings({ templates, templatesMeta: meta });
+  // #343 — this template only, under the settings row lock (empty = cleared).
+  await writeTemplateOverrides({ [templateId]: clean }, { by: user.name, at });
   revalidatePath("/templates");
   return { ok: true, meta: { by: user.name, at } };
 }
@@ -78,12 +69,8 @@ export async function resetTemplateAction(
   if (!canEditTemplates(user.roles))
     return { ok: false, error: "Only Admins and Managers can edit templates." };
 
-  const settings = await getSettings();
-  const templates: TemplateOverrides = { ...(settings.templates || {}) };
-  delete templates[templateId];
   const at = Date.now();
-  const meta = { ...(settings.templatesMeta || {}), [templateId]: { by: user.name, at } };
-  await setSettings({ templates, templatesMeta: meta });
+  await writeTemplateOverrides({ [templateId]: null }, { by: user.name, at });
   revalidatePath("/templates");
   return { ok: true, meta: { by: user.name, at } };
 }
@@ -105,25 +92,21 @@ export async function importTemplatesAction(
     return { ok: false, error: "That file isn't a valid template backup." };
 
   const src = incoming as Record<string, unknown>;
-  const settings = await getSettings();
-  const templates: TemplateOverrides = { ...(settings.templates || {}) };
-  const metaSrc = { ...(settings.templatesMeta || {}) };
   const at = Date.now();
+  const changes: Record<string, Record<string, string>> = {};
   let count = 0;
 
   for (const def of TEMPLATES) {
     const block = src[def.id];
     if (!block || typeof block !== "object" || Array.isArray(block)) continue;
-    const clean = sanitizeFields(def.id, block as Record<string, unknown>);
-    if (Object.keys(clean).length) templates[def.id] = clean;
-    else delete templates[def.id];
-    metaSrc[def.id] = { by: user.name, at };
+    changes[def.id] = sanitizeFields(def.id, block as Record<string, unknown>);
     count++;
   }
   if (!count)
     return { ok: false, error: "No recognized templates were found in that file." };
 
-  await setSettings({ templates, templatesMeta: metaSrc });
+  // #343 — only the uploaded templates change, under the settings row lock.
+  await writeTemplateOverrides(changes, { by: user.name, at });
   revalidatePath("/templates");
   return { ok: true, count };
 }

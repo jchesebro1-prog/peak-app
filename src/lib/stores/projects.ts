@@ -5,8 +5,8 @@ import {
   listDocs,
   listDocsByField,
   patchDoc,
-  setBlob,
   softDeleteDoc,
+  updateBlob,
   upsertDoc,
 } from "@/db/doc-store";
 import { withQuoteLock } from "@/db";
@@ -361,8 +361,11 @@ export async function dismissedQuoteIds(): Promise<string[]> {
 
 async function addDismissed(quoteId: string | null | undefined): Promise<void> {
   if (!quoteId) return;
-  const ids = await dismissedQuoteIds();
-  if (!ids.includes(quoteId)) await setBlob(DISMISSED_BLOB_ID, { ids: [...ids, quoteId] });
+  // #343: appended to the stored list under the blob's row lock.
+  await updateBlob(DISMISSED_BLOB_ID, (raw) => {
+    const ids = Array.isArray(raw.ids) ? (raw.ids as string[]) : [];
+    return ids.includes(quoteId) ? null : { ids: [...ids, quoteId] };
+  });
 }
 
 /* ---------- CRUD ---------- */

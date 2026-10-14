@@ -25,7 +25,6 @@
  * edit could be overwritten.
  */
 import {
-  getBlob,
   getDoc,
   getDocRows,
   insertDocsIfAbsent,
@@ -33,9 +32,9 @@ import {
   listDeletedDocs,
   listDocs,
   patchDoc,
-  setBlob,
   softDeleteDoc,
   softDeleteDocs,
+  updateBlob,
   upsertDoc,
   type Doc,
 } from "@/db/doc-store";
@@ -48,7 +47,7 @@ import { EQUIPMENT_MAP_BLOB } from "@/lib/design/equipment-map";
 import { DRIVE_PHOTO_SYNC_BLOB } from "@/lib/part-docs/drive-photo-sync";
 import type { PartAccessoryLink, PartDocumentLink } from "@/lib/part-docs/types";
 import { RACK_DEFAULTS_BLOB } from "@/lib/rack/defaults";
-import { getSettings, getSettingsPatchStrict, setPriceListEffective, setSettings } from "@/lib/settings";
+import { settingsFrom, updateSettings } from "@/lib/settings";
 import { list as listCatalog, renamePartDocs, type CatalogPart } from "@/lib/stores/catalog";
 import { allSkuRenames, appendSkuRenames, liveRenameRefs, renameMapOf, type SkuRename } from "@/lib/stores/catalog-renames";
 import { accessoryLinkId, allAccessoryLinks } from "@/lib/stores/part-accessory-links";
@@ -235,17 +234,23 @@ async function gridSymbolsStep(ctx: Ctx): Promise<StepOut> {
   return { done: rest.done, changed: changed + rest.changed };
 }
 
-/** Write back only the top-level keys `rewrite` changed (setBlob merges per
- *  top-level key, so a concurrent per-key save to another row survives). */
-async function sweepBlob(id: string, rewrite: (raw: Rec) => Rec | null): Promise<number> {
-  const raw = await getBlob<Rec>(id, {});
-  const next = rewrite(raw);
-  if (!next) return 0;
-  const patch: Rec = {};
-  for (const [k, v] of Object.entries(next)) if (v !== raw[k]) patch[k] = v;
-  if (!Object.keys(patch).length) return 0;
-  await setBlob(id, patch);
-  return 1;
+/** Write back only the top-level keys `rewrite` changed, under the blob's row
+ *  lock (#343): a concurrent save to the same key (a Grid favourite toggled
+ *  mid-sweep) is rewritten, never overwritten by the copy read before it.
+ *  `rewrite` must be pure — it runs inside the lock. */
+export async function sweepBlob(id: string, rewrite: (raw: Rec) => Rec | null): Promise<number> {
+  let wrote = false;
+  await updateBlob(id, (raw) => {
+    wrote = false;
+    const next = rewrite(raw);
+    if (!next) return null;
+    const patch: Rec = {};
+    for (const [k, v] of Object.entries(next)) if (v !== raw[k]) patch[k] = v;
+    if (!Object.keys(patch).length) return null;
+    wrote = true;
+    return patch;
+  });
+  return wrote ? 1 : 0;
 }
 
 async function blobsStep(ctx: Ctx): Promise<StepOut> {
@@ -286,14 +291,23 @@ async function blobsStep(ctx: Ctx): Promise<StepOut> {
     changed += await sweepBlob(id, rw);
   }
   if (ctx.over()) return { done: false, changed };
-  // settings.wireTypes: only a stored list (the defaults are code). Read
-  // strictly — a failed read must not look like "no wire types".
-  const wireTypes = RW.rewriteWireTypes((await getSettingsPatchStrict()).wireTypes, m);
-  if (wireTypes) {
-    await setSettings({ wireTypes });
-    changed++;
-  }
+  if (await renameStoredWireTypes(m)) changed++;
   return { done: true, changed };
+}
+
+/** settings.wireTypes: only a stored list (the defaults are code). Read
+ *  under the settings row lock (#343) — a failed read throws instead of
+ *  looking like "no wire types", and an admin's Wire types save landing
+ *  mid-sweep is rewritten, never overwritten with the list read before it.
+ *  True when the list changed. Exported for the race checks. */
+export async function renameStoredWireTypes(m: Parameters<typeof RW.rewriteWireTypes>[1]): Promise<boolean> {
+  let rewrote = false;
+  await updateSettings((cur) => {
+    const wireTypes = RW.rewriteWireTypes(cur.wireTypes, m);
+    rewrote = !!wireTypes;
+    return wireTypes ? { wireTypes } : null;
+  });
+  return rewrote;
 }
 
 function refStep(step: RefStep, ctx: Ctx): Promise<StepOut> {
@@ -327,17 +341,23 @@ function refStep(step: RefStep, ctx: Ctx): Promise<StepOut> {
 /** #313 — a part moved to a new manufacturer: when that manufacturer has no
  *  price-list effective date yet, it takes the previous one's (never
  *  overwriting a date, silent when the old manufacturer has none). */
-async function carryPriceDates(moves: Array<{ fromMfr: string; mfr: string }>): Promise<void> {
+export async function carryPriceDates(moves: Array<{ fromMfr: string; mfr: string }>): Promise<void> {
   if (!moves.length) return;
-  const dates = (await getSettings()).priceListEffective ?? {};
-  const seen = new Set<string>();
-  for (const { fromMfr, mfr } of moves) {
-    const key = mfrKey(mfr);
-    const at = dates[mfrKey(fromMfr)];
-    if (!key || seen.has(key) || dates[key] != null || at == null) continue;
-    seen.add(key);
-    await setPriceListEffective(key, at);
-  }
+  // #343 — decided and written under the settings row lock, so a date an
+  // admin sets meanwhile is never overwritten and never lost.
+  await updateSettings((cur) => {
+    const dates = settingsFrom(cur).priceListEffective ?? {};
+    const next: Record<string, number> = { ...dates };
+    const seen = new Set<string>();
+    for (const { fromMfr, mfr } of moves) {
+      const key = mfrKey(mfr);
+      const at = dates[mfrKey(fromMfr)];
+      if (!key || seen.has(key) || dates[key] != null || at == null) continue;
+      seen.add(key);
+      next[key] = at;
+    }
+    return seen.size ? { priceListEffective: next } : null;
+  });
 }
 
 /** The parts step: re-plan, then rename one part at a time — the budget is

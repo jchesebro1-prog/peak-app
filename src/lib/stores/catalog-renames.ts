@@ -1,4 +1,4 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, updateBlob } from "@/db/doc-store";
 import { buildImportResolver, type ImportResolver, type ResolvablePart } from "@/lib/catalog-rename/import-resolve";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
@@ -35,12 +35,16 @@ export async function allSkuRenames(): Promise<SkuRename[]> {
  *  whose log append was lost; a retired SKU is never renamed a second time). */
 export async function appendSkuRenames(entries: SkuRename[]): Promise<void> {
   if (!entries.length) return;
-  const byFrom = new Map<string, SkuRename>();
-  for (const e of [...(await allSkuRenames()), ...clean(entries)]) {
-    byFrom.delete(e.from); // re-insert so the last write also sorts last
-    byFrom.set(e.from, e);
-  }
-  await setBlob(SKU_RENAMES_BLOB, { renames: [...byFrom.values()] });
+  // #343: appended to the stored log under the blob's row lock.
+  const incoming = clean(entries);
+  await updateBlob(SKU_RENAMES_BLOB, (raw) => {
+    const byFrom = new Map<string, SkuRename>();
+    for (const e of [...clean(raw.renames), ...incoming]) {
+      byFrom.delete(e.from); // re-insert so the last write also sorts last
+      byFrom.set(e.from, e);
+    }
+    return { renames: [...byFrom.values()] };
+  });
 }
 
 /** old SKU → the SKU it ended up as. Pure; a chain a→b→c collapses to

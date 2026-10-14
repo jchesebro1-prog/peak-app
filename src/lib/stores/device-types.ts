@@ -1,4 +1,4 @@
-import { getBlob, setBlob, setBlobKeysIfAbsent } from "@/db/doc-store";
+import { getBlob, setBlob, setBlobKeysIfAbsent, updateBlob } from "@/db/doc-store";
 import {
   DEVICE_TYPES_BLOB,
   FAVORITES_CAP,
@@ -51,9 +51,20 @@ export async function saveDeviceTypes(input: unknown): Promise<{ ok: true; types
 
 /** Grid Settings → Device type icons. Validation (isGridIconId) is the action's job. */
 export async function setDeviceTypeIcons(icons: Record<string, string | null>): Promise<DeviceType[]> {
-  const next = withTypeIcons(await getDeviceTypes(), icons);
-  await setBlob(DEVICE_TYPES_BLOB, { types: next });
+  // #343: applied to the stored list under the row lock (editDeviceTypes).
+  let next: DeviceType[] = [];
+  await editDeviceTypes((types) => (next = withTypeIcons(types, icons)));
   return next;
+}
+
+/** #343 — the `types` list edited under the blob's row lock: `edit` gets the
+ *  stored list (seeded when absent, as getDeviceTypes reads it) and returns
+ *  the new one, or null to write nothing. Pure, synchronous. */
+async function editDeviceTypes(edit: (types: DeviceType[]) => DeviceType[] | null): Promise<void> {
+  await updateBlob(DEVICE_TYPES_BLOB, (raw) => {
+    const next = edit(deviceTypesFrom(raw.types));
+    return next ? { types: next } : null;
+  });
 }
 
 /** Grid Settings → Device types drawing slot (#300). `docId` null clears.
@@ -63,12 +74,23 @@ export async function setDeviceTypeSymbol(
   typeKey: string,
   docId: string | null
 ): Promise<{ ok: true; types: DeviceType[] } | { ok: false; error: string }> {
-  const types = await getDeviceTypes();
-  if (!types.some((t) => t.key === typeKey)) return { ok: false, error: "That device type no longer exists." };
-  if (docId !== null && !isDocumentId(docId)) return { ok: false, error: "Not a document id." };
-  const next = withTypeSymbol(types, typeKey, docId);
-  await setBlob(DEVICE_TYPES_BLOB, { types: next });
-  return { ok: true, types: next };
+  // #343: checked and written against the stored list under the row lock
+  // (same checks, same order, as before).
+  let res: { ok: true; types: DeviceType[] } | { ok: false; error: string } = { ok: false, error: "That device type no longer exists." };
+  await editDeviceTypes((types) => {
+    if (!types.some((t) => t.key === typeKey)) {
+      res = { ok: false, error: "That device type no longer exists." };
+      return null;
+    }
+    if (docId !== null && !isDocumentId(docId)) {
+      res = { ok: false, error: "Not a document id." };
+      return null;
+    }
+    const next = withTypeSymbol(types, typeKey, docId);
+    res = { ok: true, types: next };
+    return next;
+  });
+  return res;
 }
 
 export async function getTypeMap(): Promise<TypeMap> {
@@ -182,7 +204,9 @@ export async function mergeDeviceType(
   const patch = mergeTypeEntries(await getTypeMap(), fromKey, toKey, now);
   const moved = Object.keys(patch).length;
   if (moved) await setBlob(TYPE_MAP_BLOB, patch);
-  await setBlob(DEVICE_TYPES_BLOB, { types: types.map((t) => (t.key === fromKey ? { ...t, archived: true } : t)) });
+  // #343: archive `fromKey` in the STORED list (row lock), not the copy read
+  // above — a type added or edited meanwhile is kept.
+  await editDeviceTypes((cur) => cur.map((t) => (t.key === fromKey ? { ...t, archived: true } : t)));
   return { ok: true, moved };
 }
 
@@ -195,9 +219,14 @@ export async function toggleGridFavorite(
   userId: string,
   partId: string
 ): Promise<{ ok: true; favorites: string[]; on: boolean } | { ok: false; error: string }> {
-  const res = toggleInList(await getGridFavorites(userId), partId, FAVORITES_CAP);
+  // #343: toggled in the stored list under the row lock (two stars clicked
+  // in quick succession both stick).
+  let res = toggleInList([], partId, FAVORITES_CAP);
+  await updateBlob(favoritesBlobId(userId), (raw) => {
+    res = toggleInList(cleanIdList(raw.ids, FAVORITES_CAP), partId, FAVORITES_CAP);
+    return res.ok ? { ids: res.list } : null;
+  });
   if (!res.ok) return res;
-  await setBlob(favoritesBlobId(userId), { ids: res.list });
   return { ok: true, favorites: res.list, on: res.on };
 }
 
@@ -207,7 +236,11 @@ export async function getGridRecent(userId: string): Promise<string[]> {
 }
 
 export async function pushGridRecent(userId: string, partId: string): Promise<string[]> {
-  const next = withRecent(await getGridRecent(userId), partId, RECENT_CAP);
-  await setBlob(recentBlobId(userId), { ids: next });
+  // #343: pushed onto the stored list under the row lock.
+  let next: string[] = [];
+  await updateBlob(recentBlobId(userId), (raw) => {
+    next = withRecent(cleanIdList(raw.ids, RECENT_CAP), partId, RECENT_CAP);
+    return { ids: next };
+  });
   return next;
 }

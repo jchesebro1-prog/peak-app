@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getSettings, getSettingsStrict, mergeSettingsObject, setSettings, type Office } from "@/lib/settings";
+import { getSettings, getSettingsStrict, mergeSettingsObject, removeOffice, setDefaultQuoteOffice, setSettings, upsertOffice, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
   type GeoSearchHit,
@@ -506,8 +506,6 @@ export async function saveOfficeAction(input: {
     }
   }
 
-  const settings = await getSettings();
-  const offices = Array.isArray(settings.offices) ? settings.offices.slice() : [];
   const isNew = !input.id;
   const clean: Office = {
     id: isNew ? "of" + Date.now() : (input.id as string),
@@ -525,40 +523,23 @@ export async function saveOfficeAction(input: {
     lng,
     timezone: (input.timezone || "America/Chicago").trim() || "America/Chicago",
   };
-  if (isNew) {
-    if (!offices.some((o) => o.quoteDefault)) clean.quoteDefault = true;
-    offices.push(clean);
-  } else {
-    const i = offices.findIndex((o) => o.id === input.id);
-    if (i >= 0) offices[i] = { ...offices[i], ...clean };
-    else offices.push(clean);
-  }
-  await setSettings({ offices });
+  // #343 — one entry of `offices`, edited under the settings row lock.
+  await upsertOffice(clean, isNew);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
 export async function removeOfficeAction(id: string) {
   await requirePerm("manage_users");
-  const settings = await getSettings();
-  const offices = (Array.isArray(settings.offices) ? settings.offices : []).filter(
-    (o) => o.id !== id
-  );
-  if (offices.length && !offices.some((o) => o.quoteDefault)) offices[0].quoteDefault = true;
-  await setSettings({ offices });
+  await removeOffice(id);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
 export async function setDefaultQuoteOfficeAction(id: string) {
   await requirePerm("manage_users");
-  const settings = await getSettings();
-  const current = Array.isArray(settings.offices) ? settings.offices : [];
-  if (!current.some((o) => o.id === id))
+  if (!(await setDefaultQuoteOffice(id)))
     return { ok: false as const, error: "Location not found." };
-  await setSettings({
-    offices: current.map((o) => ({ ...o, quoteDefault: o.id === id })),
-  });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

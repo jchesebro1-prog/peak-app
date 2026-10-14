@@ -1,4 +1,5 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
+import { withTransaction } from "@/db";
 import { isSuggestionId, type EstimateSuggestion, type SuggestionSystem } from "@/lib/assist/features/suggestion";
 import { SUGGEST_SOURCE_KINDS, type SuggestSourceKind } from "@/lib/assist/features/suggest-sources";
 
@@ -98,12 +99,21 @@ export async function linkSuggestionToQuote(id: string, quoteId: string): Promis
   if (!isRefId(quoteId)) return false;
   const s = await getSuggestion(id);
   if (!s) return false;
-  // A quote already indexed to a DIFFERENT suggestion keeps it (nothing written).
-  const had = await getBlob<{ id?: unknown }>(quoteIndexBlobId(quoteId), {});
-  if (isSuggestionId(had.id) && had.id !== id) return false;
-  if (!s.quoteId) await setBlob(suggestionBlobId(id), { quoteId });
-  await setBlob(quoteIndexBlobId(quoteId), { id });
-  return true;
+  // #343: both checks are made under the blobs' row locks (index, then the
+  // suggestion — always that order), so two quotes saved from one suggestion
+  // at once can't both become "the first", and two suggestions can't both
+  // claim one quote.
+  return withTransaction(async () => {
+    let refused = false;
+    await updateBlob(quoteIndexBlobId(quoteId), (had) => {
+      // A quote already indexed to a DIFFERENT suggestion keeps it (nothing written).
+      refused = isSuggestionId(had.id) && had.id !== id;
+      return refused ? null : { id };
+    });
+    if (refused) return false;
+    await updateBlob(suggestionBlobId(id), (raw) => (raw.quoteId ? null : { quoteId }));
+    return true;
+  });
 }
 
 /** The suggestion a quote was saved from, or null. */

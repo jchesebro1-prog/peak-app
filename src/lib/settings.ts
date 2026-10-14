@@ -1,8 +1,10 @@
 import { eq, sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, withTransaction } from "@/db";
 import { appSettings } from "@/db/schema";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
+import { resolveVenueDoctrine, type VenueDoctrineEntry } from "@/lib/venue-doctrine";
+import type { VenueClass } from "@/lib/stores/venue-classes";
 
 /**
  * AppSettings — port of settings.js. The DB row stores a sparse patch over
@@ -292,7 +294,13 @@ export async function getSettingsPatch(): Promise<Record<string, unknown>> {
 }
 
 export async function getSettings(): Promise<AppSettingsData> {
-  const patch = await getSettingsPatch();
+  return settingsFrom(await getSettingsPatch());
+}
+
+/** The stored sparse patch over DEFAULT_SETTINGS — what getSettings() returns
+ *  for a given row. Pure; updateSettings callbacks use it to read the same
+ *  defaulted view a getSettings() caller sees. */
+export function settingsFrom(patch: Record<string, unknown>): AppSettingsData {
   return { ...DEFAULT_SETTINGS, ...patch } as AppSettingsData;
 }
 
@@ -398,18 +406,175 @@ export async function mergeSettingsObject(
     });
 }
 
+/**
+ * setSettings' merge, in JS (#343): each patch key replaces the stored value;
+ * an `undefined` value removes the key. Pure — never mutates `current`.
+ */
+export function applySettingsPatch(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete next[k];
+    else next[k] = v;
+  }
+  return next;
+}
+
+/**
+ * Read-modify-write of the settings row under a row lock (#343). For a writer
+ * whose new value depends on the current one — one entry of a shared map or
+ * list (an office, a template, a manufacturer's price date) — so two people
+ * editing different entries at the same moment both keep their change.
+ *
+ * Runs in a transaction (joins an outer one): `SELECT data … FOR UPDATE`,
+ * then `fn(current)` returns a top-level patch merged exactly like setSettings
+ * (a key replaces the stored value, `undefined` deletes it), or `null` to
+ * write nothing. `current` is the raw stored patch — wrap it in settingsFrom()
+ * for the defaulted view. `fn` must be pure, synchronous and fast: it can run
+ * more than once (see below) and runs while the row is locked.
+ *
+ * No row yet: `fn({})` is asked first, and `null` returns without writing.
+ * Otherwise `INSERT … ON CONFLICT DO NOTHING` (a racing first writer may land
+ * it instead — this one then waits on it) and the row is re-selected FOR
+ * UPDATE, so `fn` sees whatever the winner wrote. Returns the stored patch
+ * after the call.
+ */
+export async function updateSettings(
+  fn: (current: Record<string, unknown>) => Record<string, unknown> | null
+): Promise<Record<string, unknown>> {
+  return withTransaction(async () => {
+    const db = await getDb();
+    const lock = () =>
+      db
+        .select({ data: appSettings.data })
+        .from(appSettings)
+        .where(eq(appSettings.id, "main"))
+        .for("update")
+        .limit(1);
+    let rows = await lock();
+    if (!rows.length) {
+      if (fn({}) === null) return {};
+      await db
+        .insert(appSettings)
+        .values({ id: "main", data: {}, updatedAt: Date.now() })
+        .onConflictDoNothing({ target: appSettings.id });
+      rows = await lock();
+    }
+    const current = (rows[0]?.data ?? {}) as Record<string, unknown>;
+    const patch = fn(current);
+    if (patch === null) return current;
+    const next = applySettingsPatch(current, patch);
+    await db
+      .update(appSettings)
+      .set({ data: next, updatedAt: Date.now() })
+      .where(eq(appSettings.id, "main"));
+    return next;
+  });
+}
+
 /** #133 — set (or with `at: null`, clear) one manufacturer's price-list
  *  effective date. `key` must already be an mfrKey(); an empty key is a
- *  no-op. Returns the full map after the write. */
+ *  no-op. Returns the full map after the write. #343: the one entry is edited
+ *  under the settings row lock (updateSettings), so two manufacturers' dates
+ *  set at the same moment both persist. */
 export async function setPriceListEffective(
   key: string,
   at: number | null
 ): Promise<Record<string, number>> {
-  const current = await getSettings();
-  const next: Record<string, number> = { ...(current.priceListEffective || {}) };
-  if (!key) return next;
-  if (at == null) delete next[key];
-  else next[key] = at;
-  await setSettings({ priceListEffective: next });
+  if (!key) return { ...((await getSettings()).priceListEffective || {}) };
+  let next: Record<string, number> = {};
+  await updateSettings((cur) => {
+    next = { ...(settingsFrom(cur).priceListEffective || {}) };
+    if (at == null) delete next[key];
+    else next[key] = at;
+    return { priceListEffective: next };
+  });
   return next;
+}
+
+/* ---- Locations (offices) — #343 per-entry writes under the row lock ----
+   The Settings → Locations actions validate and build the Office, then call
+   these; each edits one entry of `offices` inside updateSettings so two
+   admins saving different locations at once both keep their change. */
+
+/** Add (`isNew`) or update one office. A new office becomes the quote default
+ *  when none is; an update merges over the stored entry (an unknown id is
+ *  appended, as before). */
+export async function upsertOffice(office: Office, isNew: boolean): Promise<void> {
+  await updateSettings((cur) => {
+    const s = settingsFrom(cur);
+    const offices = Array.isArray(s.offices) ? s.offices.slice() : [];
+    const clean: Office = { ...office };
+    if (isNew) {
+      if (!offices.some((o) => o.quoteDefault)) clean.quoteDefault = true;
+      offices.push(clean);
+    } else {
+      const i = offices.findIndex((o) => o.id === clean.id);
+      if (i >= 0) offices[i] = { ...offices[i], ...clean };
+      else offices.push(clean);
+    }
+    return { offices };
+  });
+}
+
+/** Remove one office; if that leaves no quote default, the first becomes it. */
+export async function removeOffice(id: string): Promise<void> {
+  await updateSettings((cur) => {
+    const s = settingsFrom(cur);
+    const offices = (Array.isArray(s.offices) ? s.offices : []).filter((o) => o.id !== id);
+    if (offices.length && !offices.some((o) => o.quoteDefault)) offices[0] = { ...offices[0], quoteDefault: true };
+    return { offices };
+  });
+}
+
+/** Make one office the quote default. False (nothing written) for an unknown id. */
+export async function setDefaultQuoteOffice(id: string): Promise<boolean> {
+  let found = false;
+  await updateSettings((cur) => {
+    const s = settingsFrom(cur);
+    const current = Array.isArray(s.offices) ? s.offices : [];
+    found = current.some((o) => o.id === id);
+    if (!found) return null;
+    return { offices: current.map((o) => ({ ...o, quoteDefault: o.id === id })) };
+  });
+  return found;
+}
+
+/** Templates screen (#343): set or clear the wording overrides of the named
+ *  templates and stamp each one's "last edited" meta, under the settings row
+ *  lock — every other template's overrides and meta are the stored ones, so
+ *  two people saving different templates at once both keep their edit. A
+ *  non-empty field map replaces that template's overrides; `null` or `{}`
+ *  removes them (back to the built-in defaults). Validation is the caller's. */
+export async function writeTemplateOverrides(
+  changes: Record<string, Record<string, string> | null>,
+  stamp: { by: string; at: number }
+): Promise<void> {
+  await updateSettings((cur) => {
+    const s = settingsFrom(cur);
+    const templates: NonNullable<AppSettingsData["templates"]> = { ...(s.templates || {}) };
+    const templatesMeta = { ...(s.templatesMeta || {}) };
+    for (const [id, fields] of Object.entries(changes)) {
+      if (fields && Object.keys(fields).length) templates[id] = fields;
+      else delete templates[id];
+      templatesMeta[id] = { ...stamp };
+    }
+    return { templates, templatesMeta };
+  });
+}
+
+/** Estimating Rules → venue doctrine (#343): replace one venue class's entry
+ *  under the settings row lock. The stored map is resolved over the source-
+ *  sheet defaults first and written whole, exactly as the action did before. */
+export async function setVenueDoctrineEntry(
+  venueClass: VenueClass,
+  entry: VenueDoctrineEntry
+): Promise<void> {
+  await updateSettings((cur) => {
+    const venueDoctrine = resolveVenueDoctrine(settingsFrom(cur).venueDoctrine);
+    venueDoctrine[venueClass] = { ...entry };
+    return { venueDoctrine };
+  });
 }

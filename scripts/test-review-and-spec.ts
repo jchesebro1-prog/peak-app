@@ -11354,6 +11354,7 @@ import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardCheck
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
 import { threadVisibilityPureChecks, threadVisibilityDbChecks, threadVisibilityPins } from "./test-thread-visibility";
+import { settingsRaceHelperChecks, settingsRaceCallerChecks, settingsRaceBlobChecks } from "./test-settings-race";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11738,6 +11739,9 @@ seeded()
   .then(() => threadVisibilityPureChecks(ok))
   .then(() => threadVisibilityDbChecks(ok))
   .then(() => threadVisibilityPins(ok))
+  .then(() => settingsRaceHelperChecks(ok))
+  .then(() => settingsRaceCallerChecks(ok))
+  .then(() => settingsRaceBlobChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

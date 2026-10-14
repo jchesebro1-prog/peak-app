@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES } from "@/db/doc-tables";
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
 import { keepInInboxOn, setKeepInInboxOn } from "@/lib/stores/notif-prefs";
 import type { Filing, FilingAction, FilingSource, SenderRule } from "@/lib/inbox-org/types";
 
@@ -13,10 +13,10 @@ import type { Filing, FilingAction, FilingSource, SenderRule } from "@/lib/inbox
      inbox_org_settings  { ownDomainOverride: string }  admin override
      notif_prefs row     "inbox_keep_after_reply"       keepInInbox(userName)
 
-   The blob helpers read-modify-write one top-level key. Concurrent writers
-   in one server process are serialized below; two separate serverless
-   instances can still last-write-wins on the same blob (the accepted gap
-   documented on setBlob).
+   The rules list and the filing log are read-modify-written under the blob's
+   row lock (updateBlob, #343), so concurrent writers — in one process or on
+   two serverless instances — never lose each other's entry. The override is
+   a single scalar written through setBlob.
    ============================================================ */
 
 export const SENDER_RULES_BLOB = "inbox_sender_rules";
@@ -95,13 +95,16 @@ export async function addSenderRule(input: NewSenderRule): Promise<SenderRule | 
     createdBy,
     createdAt: input.createdAt ?? Date.now(),
   };
-  return serialized(SENDER_RULES_BLOB, async () => {
-    const rest = (await getSenderRules()).filter((r) => !sameTarget(r, rule) && r.id !== rule.id);
-    const next = [...rest, rule].slice(-MAX_SENDER_RULES);
-    await setBlob(SENDER_RULES_BLOB, { rules: next });
-    return rule;
+  // #343: under the blob's row lock (the in-process queue it replaces did not
+  // cover a second server instance).
+  await updateBlob(SENDER_RULES_BLOB, (raw) => {
+    const rest = rulesOf(raw).filter((r) => !sameTarget(r, rule) && r.id !== rule.id);
+    return { rules: [...rest, rule].slice(-MAX_SENDER_RULES) };
   });
+  return rule;
 }
+
+const rulesOf = (raw: Record<string, unknown>): SenderRule[] => (Array.isArray(raw.rules) ? (raw.rules as SenderRule[]) : []);
 
 /** Who is deleting: their user id, and whether they are an admin. */
 export type RuleRemover = { userId: string; admin: boolean };
@@ -109,15 +112,15 @@ export type RuleRemover = { userId: string; admin: boolean };
 /** Delete a rule. Your own personal rule — or any rule, for an admin; a
  *  company-wide rule is admin-only. Returns whether a rule was removed. */
 export async function removeSenderRule(id: string, by: RuleRemover): Promise<boolean> {
-  return serialized(SENDER_RULES_BLOB, async () => {
-    const rules = await getSenderRules();
+  let removed = false;
+  await updateBlob(SENDER_RULES_BLOB, (raw) => {
+    const rules = rulesOf(raw);
     const rule = rules.find((r) => r.id === id);
-    if (!rule) return false;
-    const mine = rule.scope === "user" && !!by.userId && rule.userId === by.userId;
-    if (!mine && !by.admin) return false;
-    await setBlob(SENDER_RULES_BLOB, { rules: rules.filter((r) => r.id !== id) });
-    return true;
+    const mine = !!rule && rule.scope === "user" && !!by.userId && rule.userId === by.userId;
+    removed = !!rule && (mine || by.admin);
+    return removed ? { rules: rules.filter((r) => r.id !== id) } : null;
   });
+  return removed;
 }
 
 /* ---- filing log (§8) ------------------------------------------------------ */
@@ -147,9 +150,10 @@ export async function getFilingLog(): Promise<FilingLogEntry[]> {
 /** Append entries, newest last, keeping the last 2,000. */
 export async function appendFilingLogs(entries: FilingLogEntry[]): Promise<void> {
   if (!entries.length) return;
-  await serialized(FILING_LOG_BLOB, async () => {
-    const next = [...(await getFilingLog()), ...entries].slice(-MAX_FILING_LOG);
-    await setBlob(FILING_LOG_BLOB, { entries: next });
+  // #343: appended under the blob's row lock, across server instances.
+  await updateBlob(FILING_LOG_BLOB, (raw) => {
+    const cur = Array.isArray(raw.entries) ? (raw.entries as FilingLogEntry[]) : [];
+    return { entries: [...cur, ...entries].slice(-MAX_FILING_LOG) };
   });
 }
 

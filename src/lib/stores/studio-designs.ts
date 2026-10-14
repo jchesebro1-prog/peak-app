@@ -1,4 +1,4 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
 
 /**
  * Design Studio saved designs (IDEAS — design tab, save per venue). Small
@@ -86,8 +86,12 @@ export async function saveDesign(input: {
 
 /** Soft-delete a design (blob merge can't drop keys). */
 export async function removeDesign(id: string): Promise<void> {
-  const map = await allMap();
-  const d = map[id];
-  if (!d) return;
-  await setBlob(BLOB_ID, { [id]: { ...d, deleted: true, updatedAt: Date.now() } });
+  // #343: re-read under the row lock — a save landing first is kept (marked
+  // deleted), never replaced by the copy read before it.
+  const at = Date.now();
+  await updateBlob(BLOB_ID, (map) => {
+    const d = map[id] as StudioDesign | undefined;
+    if (!d) return null;
+    return { [id]: { ...d, deleted: true, updatedAt: at } };
+  });
 }

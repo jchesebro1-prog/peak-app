@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, sql, type SQL, type SQLWrapper } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, withTransaction } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
 /**
@@ -885,6 +885,51 @@ export async function setBlob(
         updatedAt: Date.now(),
       },
     });
+}
+
+/**
+ * Read-modify-write of blob `id` under a row lock (#343) — the closing of the
+ * "residual gap" setBlob's comment above describes. For a writer whose new
+ * value depends on the current one (append to a list kept under one key, edit
+ * one entry of it, a check-then-set), so concurrent writers never lose each
+ * other's change.
+ *
+ * Runs in a transaction (joins an outer one): `SELECT data … FOR UPDATE`,
+ * then `fn(current)` returns a top-level patch merged exactly like setBlob
+ * (a key replaces the stored value; an `undefined` value is skipped — use
+ * null to clear, as setBlob callers do), or `null` to write nothing. `current`
+ * is the raw stored object ({} when the blob doesn't exist). `fn` must be
+ * pure, synchronous and fast: it can run more than once and runs while the
+ * row is locked. A missing row: `fn({})` is asked first (null → nothing is
+ * written), then `INSERT … ON CONFLICT DO NOTHING` and a re-select FOR
+ * UPDATE, so a racing first writer is waited on, never overwritten. Returns
+ * the stored object after the call.
+ */
+export async function updateBlob(
+  id: string,
+  fn: (current: Record<string, unknown>) => Record<string, unknown> | null
+): Promise<Record<string, unknown>> {
+  return withTransaction(async () => {
+    const db = await getDb();
+    const lock = () =>
+      db.select({ data: blobs.data }).from(blobs).where(eq(blobs.id, id)).for("update").limit(1);
+    let rows = await lock();
+    if (!rows.length) {
+      if (fn({}) === null) return {};
+      await db
+        .insert(blobs)
+        .values({ id, data: {}, updatedAt: Date.now() })
+        .onConflictDoNothing({ target: blobs.id });
+      rows = await lock();
+    }
+    const current = ((rows[0]?.data as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+    const patch = fn(current);
+    if (patch === null) return current;
+    const next: Record<string, unknown> = { ...current };
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) next[k] = v;
+    await db.update(blobs).set({ data: next, updatedAt: Date.now() }).where(eq(blobs.id, id));
+    return next;
+  });
 }
 
 /**
