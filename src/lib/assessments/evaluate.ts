@@ -82,7 +82,7 @@ export function holds(c: Cond, ctx: CondCtx): boolean {
   if ("visitType" in c) return c.visitType.includes(ctx.visitType);
   if ("profile" in c) {
     const v = ctx.profile[c.profile];
-    if (v === undefined || v === null || v === "") return false;
+    if (!hasValue(v)) return false;
     if (c.lt !== undefined && !(Number(v) < c.lt)) return false;
     if (c.gt !== undefined && !(Number(v) > c.gt)) return false;
     const want = c.in;
