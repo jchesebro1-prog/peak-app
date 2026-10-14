@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getSettings, getSettingsStrict, mergeSettingsObject, removeOffice, setDefaultQuoteOffice, setSettings, upsertOffice, type Office } from "@/lib/settings";
+import { getSettings, mergeSettingsObject, removeOffice, setDefaultQuoteOffice, setSettings, upsertOffice, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
   type GeoSearchHit,
@@ -35,13 +35,10 @@ import {
 } from "@/lib/customer-fields";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
-import {
-  mergeDocumentCategories,
-  resolveDocumentCategories,
-  type DocumentCategoryInput,
-} from "@/lib/document-categories";
+import type { DocumentCategoryInput } from "@/lib/document-categories";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
-import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
+import type { VenueTypeInput } from "@/lib/venue-types";
+import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
@@ -508,7 +505,9 @@ export async function saveOfficeAction(input: {
 
   const isNew = !input.id;
   const clean: Office = {
-    id: isNew ? "of" + Date.now() : (input.id as string),
+    // #343: a random suffix keeps two locations added in the same
+    // millisecond apart (nothing parses the id).
+    id: isNew ? "of" + Date.now() + Math.random().toString(36).slice(2, 6) : (input.id as string),
     type,
     name,
     street: (input.street || "").trim(),
@@ -655,21 +654,12 @@ export async function saveVenueTypesAction(
   input: VenueTypeInput[]
 ): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   await requirePerm("manage_users");
-  const current = venueTypesFrom((await getSettings()).venueTypes);
   // Keys still on any site (soft-deleted too) are never minted again.
   const reserved = await storedSiteVenueKinds();
-  const res = mergeVenueTypes(current, Array.isArray(input) ? input : [], reserved);
+  // #343 — merged with the stored list under the settings row lock; a type
+  // removed outright is refused while any venue uses it.
+  const res = await saveVenueTypesLocked(Array.isArray(input) ? input : [], reserved, countSitesByVenueKind);
   if (!res.ok) return res;
-  if (res.removed.length) {
-    const used = await countSitesByVenueKind(res.removed);
-    const busy = res.removed.find((k) => (used[k] || 0) > 0);
-    if (busy) {
-      const label = current.find((t) => t.key === busy)?.label ?? busy;
-      const n = used[busy];
-      return { ok: false, error: `"${label}" is used by ${n} venue${n === 1 ? "" : "s"} — archive it instead of removing it.` };
-    }
-  }
-  await setSettings({ venueTypes: res.types });
   let warning: string | undefined;
   if (res.renamed.length) {
     try {
@@ -885,12 +875,10 @@ export async function saveDocumentCategoriesAction(
   input: DocumentCategoryInput[]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requirePerm("manage_users");
-  // Strict read: a failed read must never pass for "no list saved yet" —
-  // merging onto the seed would silently lose every custom category.
-  const stored = resolveDocumentCategories((await getSettingsStrict()).documentCategories);
-  const merged = mergeDocumentCategories(stored, input);
+  // #343 — merged on the stored list under the settings row lock (a failed
+  // read throws: it must never pass for "no list saved yet").
+  const merged = await saveDocumentCategoriesLocked(input);
   if (!merged.ok) return merged;
-  await setSettings({ documentCategories: merged.categories });
   revalidatePath("/", "layout");
   return { ok: true };
 }

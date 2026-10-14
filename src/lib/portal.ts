@@ -124,6 +124,8 @@ export async function touchGrantSeen(id: string, at = Date.now()): Promise<void>
   await updateBlob(BLOB_ID, (map) => {
     const g = map[id] as PortalGrant | undefined;
     if (!g || typeof g !== "object" || g.revokedAt) return null;
+    // Two renders racing: the second sees the first's stamp and skips.
+    if (g.lastSeenAt && at - g.lastSeenAt < SEEN_REFRESH_MS) return null;
     return { [id]: { ...g, lastSeenAt: at } };
   });
 }

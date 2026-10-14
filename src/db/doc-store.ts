@@ -926,8 +926,13 @@ export async function updateBlob(
     const patch = fn(current);
     if (patch === null) return current;
     const next: Record<string, unknown> = { ...current };
-    for (const [k, v] of Object.entries(patch)) if (v !== undefined) next[k] = v;
-    await db.update(blobs).set({ data: next, updatedAt: Date.now() }).where(eq(blobs.id, id));
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) next[k] = kept[k] = v;
+    // Only the patched keys travel (setBlob's `data || patch`), not the whole row.
+    await db
+      .update(blobs)
+      .set({ data: sql`${blobs.data} || ${JSON.stringify(kept)}::jsonb`, updatedAt: Date.now() })
+      .where(eq(blobs.id, id));
     return next;
   });
 }

@@ -61,7 +61,8 @@ export function rebaseArchivePatch(
     const storedRaw = current.recordingsArchiveFolders;
     const stored: Record<string, string> =
       storedRaw && typeof storedRaw === "object" && !Array.isArray(storedRaw) ? { ...(storedRaw as Record<string, string>) } : {};
-    for (const k of Object.keys(basis.folders)) if (!(k in mine)) delete stored[k];
+    // Drop only what this pass dropped AND nobody re-cached since it read.
+    for (const k of Object.keys(basis.folders)) if (!(k in mine) && stored[k] === basis.folders[k]) delete stored[k];
     for (const [k, v] of Object.entries(mine)) if (basis.folders[k] !== v) stored[k] = v;
     out.recordingsArchiveFolders = stored;
   }

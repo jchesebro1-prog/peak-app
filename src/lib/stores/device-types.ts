@@ -43,10 +43,16 @@ export async function getDeviceTypes(): Promise<DeviceType[]> {
 }
 
 export async function saveDeviceTypes(input: unknown): Promise<{ ok: true; types: DeviceType[] } | { ok: false; error: string }> {
-  const res = cleanDeviceTypesInput(input, await getDeviceTypes());
-  if (!res.ok) return res;
-  await setBlob(DEVICE_TYPES_BLOB, { types: res.types });
-  return res;
+  // #343: merged with the STORED list under the row lock — the stored icon,
+  // drawing and code it carries over (and the stored types it archives) are
+  // the current ones, not a copy an icon or drawing save has since replaced.
+  const out: { res?: ReturnType<typeof cleanDeviceTypesInput> } = {};
+  await editDeviceTypes((types) => {
+    const res = cleanDeviceTypesInput(input, types);
+    out.res = res;
+    return res.ok ? res.types : null;
+  });
+  return out.res!;
 }
 
 /** Grid Settings → Device type icons. Validation (isGridIconId) is the action's job. */

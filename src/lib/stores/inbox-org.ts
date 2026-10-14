@@ -26,14 +26,6 @@ export const ORG_SETTINGS_BLOB = "inbox_org_settings";
 export const MAX_SENDER_RULES = 2000;
 export const MAX_FILING_LOG = 2000;
 
-/** In-process write queue per blob — keeps two awaited-in-parallel writers from
- *  reading the same snapshot. */
-const queues = new Map<string, Promise<unknown>>();
-function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const run = (queues.get(key) ?? Promise.resolve()).then(fn, fn);
-  queues.set(key, run.catch(() => undefined));
-  return run;
-}
 
 /* ---- sender rules (§5) ---------------------------------------------------- */
 
@@ -172,7 +164,7 @@ export async function getOwnDomainOverride(): Promise<string | null> {
 /** Save the override as typed (trimmed); blank clears it. */
 export async function setOwnDomainOverride(v: string | null): Promise<void> {
   const value = String(v ?? "").trim().slice(0, 200);
-  await serialized(ORG_SETTINGS_BLOB, () => setBlob(ORG_SETTINGS_BLOB, { ownDomainOverride: value || null }));
+  await setBlob(ORG_SETTINGS_BLOB, { ownDomainOverride: value || null });
 }
 
 /* ---- promise-tasks for the report (§8) ------------------------------------ */

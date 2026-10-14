@@ -347,6 +347,21 @@ export async function setSettings(
   patch: Record<string, unknown>
 ): Promise<void> {
   const db = await getDb();
+  const { kept, expr } = settingsPatchSql(patch);
+  const now = Date.now();
+  await db
+    .insert(appSettings)
+    .values({ id: "main", data: kept, updatedAt: now })
+    .onConflictDoUpdate({
+      target: appSettings.id,
+      set: { data: expr, updatedAt: now },
+    });
+}
+
+/** The in-database merge setSettings and updateSettings write: keys whose
+ *  patch value is `undefined` are removed (`data - 'key'`), then the rest is
+ *  merged on top (`|| kept`). Values bind as one jsonb parameter. */
+function settingsPatchSql(patch: Record<string, unknown>) {
   const dropped: string[] = [];
   const kept: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -355,17 +370,7 @@ export async function setSettings(
   }
   let base = sql`${appSettings.data}`;
   for (const k of dropped) base = sql`(${base} - ${k}::text)`;
-  const now = Date.now();
-  await db
-    .insert(appSettings)
-    .values({ id: "main", data: kept, updatedAt: now })
-    .onConflictDoUpdate({
-      target: appSettings.id,
-      set: {
-        data: sql`${base} || ${JSON.stringify(kept)}::jsonb`,
-        updatedAt: now,
-      },
-    });
+  return { kept, expr: sql`${base} || ${JSON.stringify(kept)}::jsonb` };
 }
 
 /** Keys mergeSettingsObject may nest-merge. A fixed list, never caller text:
@@ -465,12 +470,13 @@ export async function updateSettings(
     const current = (rows[0]?.data ?? {}) as Record<string, unknown>;
     const patch = fn(current);
     if (patch === null) return current;
-    const next = applySettingsPatch(current, patch);
+    // Only the patched keys travel (`(data - dropped) || kept`, as setSettings
+    // writes them), never the whole document — the logos stay where they are.
     await db
       .update(appSettings)
-      .set({ data: next, updatedAt: Date.now() })
+      .set({ data: settingsPatchSql(patch).expr, updatedAt: Date.now() })
       .where(eq(appSettings.id, "main"));
-    return next;
+    return applySettingsPatch(current, patch);
   });
 }
 

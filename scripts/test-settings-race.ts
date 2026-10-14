@@ -33,7 +33,10 @@ import { rebaseArchivePatch, saveArchiveSettings } from "@/lib/krisp/archive";
 import { revokeGrant, touchGrantSeen } from "@/lib/portal";
 import { removeDesign, saveDesign, getDesign } from "@/lib/stores/studio-designs";
 import { addWindow, getVenueCalendar, importCsvWindows, removeWindow } from "@/lib/stores/venue-calendars";
-import { getDeviceTypes, getGridFavorites, getGridRecent, mergeDeviceType, pushGridRecent, setDeviceTypeIcons, setDeviceTypeSymbol, toggleGridFavorite } from "@/lib/stores/device-types";
+import { getDeviceTypes, getGridFavorites, getGridRecent, mergeDeviceType, pushGridRecent, saveDeviceTypes, setDeviceTypeIcons, setDeviceTypeSymbol, toggleGridFavorite } from "@/lib/stores/device-types";
+import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
+import { venueTypesFrom } from "@/lib/venue-types";
+import { resolveDocumentCategories } from "@/lib/document-categories";
 import { DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { addSenderRule, appendFilingLogs, getFilingLog, getSenderRules, removeSenderRule, FILING_LOG_BLOB, SENDER_RULES_BLOB, type FilingLogEntry } from "@/lib/stores/inbox-org";
 import { allSkuRenames, appendSkuRenames, SKU_RENAMES_BLOB } from "@/lib/stores/catalog-renames";
@@ -464,6 +467,127 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* Review follow-ups (#343): merging list saves, the lock pins            */
+/* ------------------------------------------------------------------ */
+
+export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+
+  /* The row lock exists: both helpers select FOR UPDATE (source pin + the
+     SQL drizzle renders for that exact builder chain). PGlite has one
+     connection, so the multi-connection blocking itself is reasoned, not run. */
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const body = (file: string, name: string) => {
+    const s = readFileSync(join(process.cwd(), file), "utf8");
+    const i = s.indexOf(`export async function ${name}(`);
+    return i < 0 ? "" : s.slice(i, s.indexOf("\n}\n", i));
+  };
+  const us = body("src/lib/settings.ts", "updateSettings");
+  const ub = body("src/db/doc-store.ts", "updateBlob");
+  ok(/\.from\(appSettings\)\s*\.where\(eq\(appSettings\.id, "main"\)\)\s*\.for\("update"\)/.test(us) && us.includes("withTransaction("), "updateSettings: selects the settings row FOR UPDATE inside a transaction (pin)");
+  ok(/\.from\(blobs\)\.where\(eq\(blobs\.id, id\)\)\.for\("update"\)/.test(ub) && ub.includes("withTransaction("), "updateBlob: selects the blob row FOR UPDATE inside a transaction (pin)");
+  ok(us.includes("onConflictDoNothing") && ub.includes("onConflictDoNothing") && (us.match(/await lock\(\)/g) || []).length === 2 && (ub.match(/await lock\(\)/g) || []).length === 2, "updateSettings / updateBlob: first insert is ON CONFLICT DO NOTHING, then re-selected FOR UPDATE (pin)");
+  const qs = db.select({ data: appSettings.data }).from(appSettings).where(eq(appSettings.id, "main")).for("update").limit(1).toSQL().sql;
+  const qb = db.select({ data: blobs.data }).from(blobs).where(eq(blobs.id, "x")).for("update").limit(1).toSQL().sql;
+  ok(/\bfor update\b/i.test(qs) && /\bfor update\b/i.test(qb), `drizzle renders the lock chain as SQL "… for update" (${qs.replace(/\s+/g, " ").slice(-40)})`);
+  ok(us.includes("settingsPatchSql(patch).expr") && /\$\{blobs\.data\} \|\| \$\{JSON\.stringify\(kept\)\}::jsonb/.test(ub), "updateSettings / updateBlob: write only the patched keys (data - dropped || patch), not the whole row (pin)");
+  const sa = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
+  ok(sa.includes('"of" + Date.now() + Math.random().toString(36).slice(2, 6)'), "saveOfficeAction: a new location id carries a random suffix (two in one millisecond stay apart)");
+  ok(!readFileSync(join(process.cwd(), "src/lib/stores/inbox-org.ts"), "utf8").includes("function serialized"), "inbox-org: the per-process write queue is gone (the row lock replaced it)");
+
+  /* Partial writes keep every other key byte-identical (and delete / skip as before). */
+  await withSettingsRestored(async () => {
+    await setSettings({ t343Big: { logo: "x".repeat(2000) }, t343Gone: 1 });
+    await updateSettings(() => ({ t343Small: 1, t343Gone: undefined }));
+    const p = await getSettingsPatchStrict();
+    ok((p.t343Big as { logo: string }).logo.length === 2000 && p.t343Small === 1 && !("t343Gone" in p), "updateSettings: a partial write keeps other keys and still deletes an undefined key");
+    const r = await updateSettings((cur) => ({ t343Small: Number(cur.t343Small) + 1 }));
+    ok(r.t343Small === 2 && (await getSettingsPatchStrict()).t343Small === 2, "updateSettings: the returned patch matches what was stored");
+  });
+
+  /* Device types save: merged with the stored list under the lock. */
+  await withBlobsRestored([DEVICE_TYPES_BLOB], async () => {
+    await db.delete(blobs).where(eq(blobs.id, DEVICE_TYPES_BLOB));
+    const base = await getDeviceTypes();
+    const posted = base.map((t) => ({ key: t.key, label: t.key === base[0].key ? "T343 Renamed" : t.label, scope: t.scope, archived: t.archived }));
+    const [saved] = await Promise.all([
+      saveDeviceTypes(posted),
+      setDeviceTypeIcons({ [base[1].key]: "dimmer" }),
+      setDeviceTypeSymbol(base[2].key, "PD-T343dddd"),
+    ]);
+    let types = await getDeviceTypes();
+    ok(saved.ok && types.find((t) => t.key === base[0].key)?.label === "T343 Renamed", "saveDeviceTypes: the editor's save lands");
+    ok(types.find((t) => t.key === base[1].key)?.icon === "dimmer" && types.find((t) => t.key === base[2].key)?.symbolDocId === "PD-T343dddd", "saveDeviceTypes: an icon and a drawing set at the same moment are kept, not reverted");
+    const plus = (label: string) => [...base.map((t) => ({ key: t.key, label: t.label, scope: t.scope, archived: t.archived })), { label, scope: base[0].scope }];
+    const both = await Promise.all([saveDeviceTypes(plus("T343 New A")), saveDeviceTypes(plus("T343 New B"))]);
+    types = await getDeviceTypes();
+    ok(both.every((r) => r.ok) && types.some((t) => t.label === "T343 New A") && types.some((t) => t.label === "T343 New B"), "saveDeviceTypes: two saves each adding a type — neither new type is dropped (the later save archives the other's)");
+    const bad = await saveDeviceTypes("nope");
+    ok(!bad.ok && bad.error === "Nothing to save.", "saveDeviceTypes: refusals are unchanged");
+  });
+
+  await withSettingsRestored(async () => {
+    await setSettings({ t343Sentinel: 1 });
+
+    /* Venue types: merged under the lock; an in-use type is never dropped. */
+    const base = venueTypesFrom(undefined).map((t) => ({ key: t.key, label: t.label, worksLike: t.worksLike, archived: t.archived }));
+    let alphaKey = "";
+    const countUsed = async (keys: string[]) => Object.fromEntries(keys.map((k) => [k, k === alphaKey || k.startsWith("t343alpha") ? 1 : 0]));
+    const [ra, rb] = await Promise.all([
+      saveVenueTypesLocked([...base, { label: "T343 Alpha", worksLike: "proscenium" }], [], countUsed),
+      saveVenueTypesLocked([...base, { label: "T343 Beta", worksLike: "proscenium" }], [], countUsed),
+      setPriceListEffective("t343venue", 3),
+    ]);
+    alphaKey = ra.ok ? ra.types.find((t) => t.label === "T343 Alpha")?.key ?? "" : "";
+    const vt = venueTypesFrom(settingsFrom(await getSettingsPatchStrict()).venueTypes);
+    ok(ra.ok && vt.some((t) => t.label === "T343 Alpha"), "saveVenueTypesLocked: a type in use (Alpha) is never dropped by a save racing it");
+    ok(!rb.ok ? /is used by 1 venue/.test(rb.error) : true, "saveVenueTypesLocked: the racing save is refused with the usual in-use message when it would drop it");
+    ok(((await getSettingsPatchStrict()).priceListEffective as Record<string, number>).t343venue === 3 && (await getSettingsPatchStrict()).t343Sentinel === 1, "saveVenueTypesLocked: other settings keys unchanged");
+    const renamed = await Promise.all([
+      saveVenueTypesLocked(vt.map((t) => ({ key: t.key, label: t.key === "church" ? "T343 Church" : t.label, worksLike: t.worksLike, archived: t.archived })), [], async () => ({})),
+      saveVenueTypesLocked(vt.map((t) => ({ key: t.key, label: t.label, worksLike: t.worksLike, archived: t.archived })), [], async () => ({})),
+    ]);
+    ok(renamed.every((r) => r.ok) && renamed[0].ok && renamed[0].renamed.includes("church"), "saveVenueTypesLocked: concurrent whole-list saves both succeed; renamed keys are reported");
+    const bad = await saveVenueTypesLocked([], [], async () => ({}));
+    ok(!bad.ok, "saveVenueTypesLocked: refusals are unchanged");
+
+    /* Document categories: merged under the lock; a concurrent new row is archived, not lost. */
+    await setSettings({ documentCategories: undefined });
+    const cats = resolveDocumentCategories(undefined).map((c) => ({ key: c.key, label: c.label, archived: c.archived }));
+    const res = await Promise.all([
+      saveDocumentCategoriesLocked([...cats, { label: "T343 Cat A" }]),
+      saveDocumentCategoriesLocked([...cats, { label: "T343 Cat B" }]),
+    ]);
+    const stored = resolveDocumentCategories(settingsFrom(await getSettingsPatchStrict()).documentCategories);
+    ok(res.every((r) => r.ok) && stored.some((c) => c.label === "T343 Cat A") && stored.some((c) => c.label === "T343 Cat B"), "saveDocumentCategoriesLocked: two saves each adding a category — neither is lost (the later archives the other's)");
+    ok(new Set(stored.map((c) => c.key)).size === stored.length, "saveDocumentCategoriesLocked: keys stay unique across the racing saves");
+    const badC = await saveDocumentCategoriesLocked("nope");
+    ok(!badC.ok && badC.error === "Nothing to save.", "saveDocumentCategoriesLocked: refusals are unchanged");
+    ok((await getSettingsPatchStrict()).t343Sentinel === 1, "document categories: other settings keys unchanged");
+
+    /* Krisp rebase: a folder re-cached since the pass read it is kept. */
+    const basis = { mailbox: "mb", folders: { a: "A-old", b: "B" } };
+    const reb = rebaseArchivePatch({ recordingsArchiveMailbox: "mb", recordingsArchiveFolders: { a: "A-new", b: "B" } }, { recordingsArchiveFolders: {} }, basis);
+    ok(json(reb.recordingsArchiveFolders) === '{"a":"A-new"}', "rebaseArchivePatch: a dropped key is removed only when the stored id is still the one the pass read");
+  });
+
+  /* touchGrantSeen: two renders at once write once. */
+  await withBlobsRestored(["portal_grants"], async () => {
+    await setBlob("portal_grants", { G9: { id: "G9", customerId: "TEST343-c", revokedAt: null, lastSeenAt: null } });
+    const t0 = 1_800_000_000_000;
+    await Promise.all([touchGrantSeen("G9", t0), touchGrantSeen("G9", t0 + 1000)]);
+    const g = (await getBlob<Record<string, { lastSeenAt: number }>>("portal_grants", {})).G9;
+    ok(g.lastSeenAt === t0 || g.lastSeenAt === t0 + 1000, "touchGrantSeen: two parallel touches — the second sees the first's stamp and skips");
+    const before = await blobRow("portal_grants");
+    await touchGrantSeen("G9", g.lastSeenAt + 60_000);
+    ok((await blobRow("portal_grants"))?.updatedAt === before?.updatedAt, "touchGrantSeen: within the refresh window nothing is written");
+    await touchGrantSeen("G9", g.lastSeenAt + 11 * 60_000);
+    ok((await getBlob<Record<string, { lastSeenAt: number }>>("portal_grants", {})).G9.lastSeenAt === g.lastSeenAt + 11 * 60_000, "touchGrantSeen: past the refresh window it stamps again");
+  });
+}
+
 // Standalone runner (npm run test:settings-race).
 if (process.argv[1] && /test-settings-race\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -483,6 +607,7 @@ if (process.argv[1] && /test-settings-race\.ts$/.test(process.argv[1])) {
     await settingsRaceHelperChecks(ok);
     await settingsRaceCallerChecks(ok);
     await settingsRaceBlobChecks(ok);
+    await settingsRaceFollowupChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall settings-race checks passed");
     process.exit(fail ? 1 : 0);
   })().catch((err) => {

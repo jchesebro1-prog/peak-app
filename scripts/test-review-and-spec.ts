@@ -11354,7 +11354,7 @@ import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardCheck
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
 import { threadVisibilityPureChecks, threadVisibilityDbChecks, threadVisibilityPins } from "./test-thread-visibility";
-import { settingsRaceHelperChecks, settingsRaceCallerChecks, settingsRaceBlobChecks } from "./test-settings-race";
+import { settingsRaceHelperChecks, settingsRaceCallerChecks, settingsRaceBlobChecks, settingsRaceFollowupChecks } from "./test-settings-race";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11742,6 +11742,7 @@ seeded()
   .then(() => settingsRaceHelperChecks(ok))
   .then(() => settingsRaceCallerChecks(ok))
   .then(() => settingsRaceBlobChecks(ok))
+  .then(() => settingsRaceFollowupChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -25360,7 +25361,9 @@ async function venues216AsyncChecks(): Promise<void> {
   const sa = v216Read("src/app/(app)/settings/actions.ts");
   const s = sa.indexOf("export async function saveVenueTypesAction");
   const body = sa.slice(s, sa.indexOf("\nexport ", s + 10));
-  ok(s > 0 && body.includes('requirePerm("manage_users")') && body.includes("mergeVenueTypes(") && body.includes("countSitesByVenueKind(res.removed)") && body.includes("setSettings({ venueTypes: res.types })"),
+  // #343: the merge + in-use refusal + store moved to saveVenueTypesLocked (src/lib/settings-lists.ts), run under the settings row lock.
+  const sl216 = v216Read("src/lib/settings-lists.ts");
+  ok(s > 0 && body.includes('requirePerm("manage_users")') && body.includes("saveVenueTypesLocked(") && body.includes("countSitesByVenueKind)") && sl216.includes("mergeVenueTypes(") && sl216.includes("await countUsed(toCheck)") && sl216.includes("return { venueTypes: res.types }"),
     "#216 T3: saveVenueTypesAction is admin-only, merges, refuses in-use removals, stores the list");
   ok(v216Read("src/app/(app)/settings/groups/field.tsx").includes("<VenueTypesCard") && v216Read("src/app/(app)/settings/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"),
     "#216 T3: Settings renders the card from the resolved list");
@@ -25452,7 +25455,7 @@ async function venues216SaveFixesAsyncChecks(): Promise<void> {
   const sa = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
   const s0 = sa.indexOf("export async function saveVenueTypesAction");
   const body = sa.slice(s0, sa.indexOf("\nexport ", s0 + 10));
-  ok(body.includes("storedSiteVenueKinds()") && body.includes("input : [], reserved)"),
+  ok(body.includes("storedSiteVenueKinds()") && body.includes("input : [], reserved, countSitesByVenueKind)"),
     "#216 Task 3 fix: saveVenueTypesAction reserves every venueKind stored on a site, soft-deleted included");
 }
 import { storedSiteVenueKinds as v216StoredKinds } from "@/lib/identity/sites";
@@ -25970,7 +25973,7 @@ import {
   const src218s = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(src218s("src/app/(app)/settings/groups/data.tsx").includes("<DocumentCategoriesCard"), "#218 settings: the Document categories card is on Settings → Data & Tools (was Admin)");
   const sa = src218s("src/app/(app)/settings/actions.ts");
-  ok(/export async function saveDocumentCategoriesAction[\s\S]{0,400}await requirePerm\("manage_users"\)[\s\S]{0,400}mergeDocumentCategories\(/.test(sa), "#218 settings: saving categories is admin-only and goes through mergeDocumentCategories");
+  ok(/export async function saveDocumentCategoriesAction[\s\S]{0,400}await requirePerm\("manage_users"\)[\s\S]{0,400}saveDocumentCategoriesLocked\(/.test(sa) && /export async function saveDocumentCategoriesLocked[\s\S]{0,600}mergeDocumentCategories\(/.test(readFileSync(join(process.cwd(), "src/lib/settings-lists.ts"), "utf8")), "#218 settings: saving categories is admin-only and goes through mergeDocumentCategories");
 }
 
 async function documentsStoreAsyncChecks(): Promise<void> {
@@ -35802,7 +35805,7 @@ import { defaultBackground as c255T5Default, effectiveTemplateFor as c255T5Effec
   const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const act = read("src/app/(app)/settings/actions.ts");
   const fn = act.slice(act.indexOf("export async function saveVenueTypesAction"));
-  ok(fn.indexOf('requirePerm("manage_users")') > -1 && fn.indexOf('requirePerm("manage_users")') < fn.indexOf("mergeVenueTypes("), "#255 T5: saving Backgrounds is admin-only, like the rest of the card");
+  ok(fn.indexOf('requirePerm("manage_users")') > -1 && fn.indexOf('requirePerm("manage_users")') < fn.indexOf("saveVenueTypesLocked("), "#255 T5: saving Backgrounds is admin-only, like the rest of the card");
   const card = read("src/app/(app)/settings/venue-types-card.tsx");
   ok(card.includes("Background") && card.includes("templatesFor(") && card.includes("BUILT_IN_SCHEMATIC_LABEL") && card.includes("background: r.background || null"), "#255 T5: the card shows a Background per type and sends it on save");
   const qd = read("src/app/(app)/design/quick/quick-design-client.tsx"), dc = read("src/app/(app)/design/designs/design-client.tsx");
