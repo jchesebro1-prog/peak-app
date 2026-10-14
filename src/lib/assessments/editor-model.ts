@@ -154,6 +154,23 @@ function fieldEquals(a: unknown, b: unknown): boolean {
   return canon(a ?? null) === canon(b ?? null);
 }
 
+const PHOTO_META: (keyof PhotoRef)[] = ["takenAt", "questionKey", "moduleId", "reqId", "findingKey", "caption", "by"];
+
+/** True when the two refs agree on every non-file field (a cleared `findingKey` null equals an absent one). */
+function photoMetaEquals(a: PhotoRef, b: PhotoRef): boolean {
+  return PHOTO_META.every((k) => fieldEquals(a[k], b[k]));
+}
+
+/** The local ref's metadata with the server's file fields (`blobPath`, `inline`, `pending`). */
+function mergeDirtyPhoto(local: PhotoRef, remote: PhotoRef): PhotoRef {
+  const out: PhotoRef = { ...local };
+  delete out.blobPath; delete out.inline; delete out.pending;
+  if (remote.blobPath !== undefined) out.blobPath = remote.blobPath;
+  if (remote.inline !== undefined) out.inline = remote.inline;
+  if (remote.pending !== undefined) out.pending = remote.pending;
+  return out;
+}
+
 /** Adopt a server copy (an action's revalidated page, a pull): answers merge per key, newest `at` wins; scalars and
  *  photos changed here and not yet acknowledged are kept; everything server-owned (status, syncRejects…) is taken
  *  when the copy is at least as new as ours. The rev only ever moves forward. */
@@ -168,9 +185,12 @@ function adopt(s: EditorState, server: EditorDoc): EditorState {
     const rec = doc as unknown as Record<string, unknown>;
     if (v === undefined) delete rec[f]; else rec[f] = v;
   }
-  // Photos: the server's ref wins (it holds the uploaded file); a local-only one survives while it is unacknowledged.
+  // Photos: the server's file fields win (it holds the uploaded file). A photo changed here and not yet acknowledged
+  // keeps its local metadata (findingKey incl. a local null, caption…) until the server's copy matches it; a local-only
+  // one survives while it is unacknowledged.
   const byId = new Map(server.photos.map((p) => [p.id, p]));
-  const photos = newer ? [...server.photos] : [...s.doc.photos.map((p) => byId.get(p.id) ?? p)];
+  const pick = (local: PhotoRef, remote: PhotoRef): PhotoRef => (s.dirtyPhotos.includes(local.id) && !photoMetaEquals(local, remote) ? mergeDirtyPhoto(local, remote) : remote);
+  const photos = newer ? server.photos.map((r) => { const l = s.doc.photos.find((x) => x.id === r.id); return l ? pick(l, r) : r; }) : s.doc.photos.map((p) => { const r = byId.get(p.id); return r ? pick(p, r) : p; });
   for (const p of s.doc.photos) if (!photos.some((x) => x.id === p.id) && s.dirtyPhotos.includes(p.id)) photos.push(p);
   doc.photos = photos;
   const dismissed = [...server.dismissedPrompts];
@@ -178,7 +198,11 @@ function adopt(s: EditorState, server: EditorDoc): EditorState {
   doc.dismissedPrompts = dismissed;
   const ack = mergeAnswers(s.ack, server.answers);
   const dirty = s.dirty.filter((f) => !(newer && fieldEquals(server[f], s.doc[f])));
-  const dirtyPhotos = s.dirtyPhotos.filter((id) => !server.photos.some((p) => p.id === id));
+  const dirtyPhotos = s.dirtyPhotos.filter((id) => {
+    const r = byId.get(id);
+    const l = s.doc.photos.find((p) => p.id === id);
+    return !(r && (!l || photoMetaEquals(l, r)));
+  });
   const dirtyPrompts = s.dirtyPrompts.filter((id) => !server.dismissedPrompts.some((p) => p.id === id));
   return { ...s, doc, ack, dirty, dirtyPhotos, dirtyPrompts };
 }

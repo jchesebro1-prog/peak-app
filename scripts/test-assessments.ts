@@ -1335,6 +1335,15 @@ function task8Checks(ok: Ok) {
   const unlPatch = buildPatch(unl);
   ok(unl.doc.photos.length === 2 && unl.doc.photos[0].findingKey === null && unl.doc.photos[0].questionKey === "rigging.overhead" && unl.doc.photos[1].findingKey === "fd_other" && unlPatch!.photos!.length === 1 && unlPatch!.photos![0].id === "p_ffffffffffff" && unlPatch!.photos![0].findingKey === null && editorReducer(unl, { type: "unlinkFindingPhotos", findingKey: "fd_0123456789abcdef" }) === unl && editorReducer(base0, { type: "unlinkFindingPhotos", findingKey: "fd_none" }) === base0, "sheet: cancelling a new finding clears findingKey (null on the wire) from its photos only, keeps their question, and resends once");
 
+  // a same-rev server copy that still holds the key must not undo the unlink (the null must still be sent)
+  const srvSame = editorDoc({ photos: [{ ...fph, blobPath: "assessments/AS-1001/p_ffffffffffff.jpg" }, { ...ph, id: "p_gggggggggggg", findingKey: "fd_other" }] });
+  const adopted = editorReducer(unl, { type: "adopt", server: srvSame });
+  const adoptedPatch = buildPatch(adopted);
+  ok(adopted.doc.photos[0].findingKey === null && adopted.doc.photos[0].blobPath === "assessments/AS-1001/p_ffffffffffff.jpg" && adopted.dirtyPhotos.join() === "p_ffffffffffff" && !!adoptedPatch && adoptedPatch.photos!.length === 1 && adoptedPatch.photos![0].findingKey === null, "sheet: adopting a same-rev server copy keeps the local unlink (findingKey null, still dirty, still sent) and takes the server's file fields");
+  const srvCleared = editorDoc({ photos: [{ ...fph, findingKey: undefined }, { ...ph, id: "p_gggggggggggg", findingKey: "fd_other" }] });
+  const adopted2 = editorReducer(unl, { type: "adopt", server: srvCleared });
+  ok(adopted2.dirtyPhotos.length === 0 && adopted2.doc.photos[0].findingKey === undefined, "sheet: once the server copy has the key cleared the photo stops being dirty");
+
   // the audit-estimate field keeps what is typed and parses it on blur
   ok(parseMoney("").ok && parseMoney("  ").ok && (parseMoney("") as { value?: number }).value === undefined && (parseMoney("12.50") as { value: number }).value === 12.5 && (parseMoney("$4,000") as { value: number }).value === 4000 && (parseMoney("12.") as { value: number }).value === 12 && !parseMoney("abc").ok && !parseMoney("-5").ok && !parseMoney("1e3x").ok && !parseMoney("1.2.3").ok, "sheet: the audit estimate parses decimals, $ and commas, empty clears, junk is an error");
 
@@ -1453,6 +1462,20 @@ async function task8DbChecks(ok: Ok) {
     const forged = await voidFinding(k8(4), "Merged into " + f1.doc.printedId, U1).then(() => true, () => false);
     const blankVoid = await voidFinding(k8(4), "  ", U1).then(() => true, () => false);
     ok(!forged && !blankVoid && !(await getFinding(k8(4)))?.voided, "void db: a blank reason and a typed \"Merged into …\" reason are refused");
+    // a voided keeper can't be "merged" even when every other key is already merged into it
+    const f16 = await mk(16); const f17 = await mk(17);
+    const m16 = await mergeFindings([k8(16), k8(17)], U1);
+    await voidFinding(k8(16), "Entered in error", U1);
+    const m16b = await mergeFindings([k8(16), k8(17)], U1);
+    ok(f16.ok && f17.ok && m16.ok && !m16b.ok && /voided/i.test(m16b.error), "merge db: a voided keeper is refused on the idempotent retry too");
+    // rollback: a failure after the keeper's save and the first void persists nothing
+    const f18 = await mk(18, { photoIds: ["p_t8dddddddd"] }); await mk(19, { photoIds: ["p_t8eeeeeeee"] }); await mk(20);
+    const before18 = await getFinding(k8(18));
+    const rb = await mergeFindings([k8(18), k8(19), k8(20)], U1, { __failAfterFirstWriteForTest: true });
+    const after = [await getFinding(k8(18)), await getFinding(k8(19)), await getFinding(k8(20))];
+    ok(f18.ok && !rb.ok && after[0]?.rev === before18?.rev && after[0]?.description === "Finding 18" && after[0]?.photoIds.join() === "p_t8dddddddd" && !after[1]?.voided && !after[2]?.voided, "merge db: a failure part-way rolls back the keeper save and the first void");
+    const retry18 = await mergeFindings([k8(18), k8(19), k8(20)], U1);
+    ok(retry18.ok && retry18.voided.length === 2, "merge db: the merge succeeds when retried after the rollback");
     // photos: findingKey null clears the link (a cancelled new-finding sheet), keeping the photo on the assessment
     await saveAssessment(a.id, { photos: [{ id: "p_t8cccccccc", findingKey: k8(30) } as PhotoRef] }, U1);
     const withKey = (await getAssessment(a.id))!.photos.find((p) => p.id === "p_t8cccccccc");
@@ -1462,6 +1485,12 @@ async function task8DbChecks(ok: Ok) {
     // split
     const s = await splitFinding(k8(1), { photoIds: ["p_t8bbbbbbbb"], questionKeys: ["rigging.fall_hazard"] }, k8(5), U1);
     ok(s.ok && s.created.key === k8(5) && s.created.photoIds.join() === "p_t8bbbbbbbb" && s.kept.photoIds.join() === "p_t8aaaaaaaa" && s.kept.questionKeys.join() === "rigging.overhead" && !!s.created.printedId && s.created.printedId !== s.kept.printedId && f4.ok && s.created.seq! > f4.doc.seq!, "split db: the chosen photo + question move to a new, newly numbered finding");
+    // splitting an unnumbered original numbers it before the new finding (original seq < new seq)
+    const f21 = await mk(21, { photoIds: ["p_t8ffffffff"], questionKeys: ["rigging.overhead", "rigging.fall_hazard"] });
+    await db.update(DOC_TABLES.findings).set({ doc: sql`doc || '{"printedId":null,"seq":null}'::jsonb` }).where(eq(DOC_TABLES.findings.id, k8(21)));
+    const un = await getFinding(k8(21));
+    const s21 = await splitFinding(k8(21), { photoIds: [], questionKeys: ["rigging.fall_hazard"] }, k8(22), U1);
+    ok(f21.ok && un?.printedId == null && s21.ok && !!s21.kept.printedId && !!s21.created.printedId && s21.kept.seq! < s21.created.seq!, "split db: splitting an unnumbered original numbers it before the new finding");
     ok(!(await splitFinding(k8(1), { photoIds: [], questionKeys: [] }, k8(6), U1)).ok, "split db: nothing chosen is refused");
     // voiding the keeper takes the merged-away finding's prompt with it: R10 is a gap again
     await voidFinding(k8(1), "Entered in error", U1);

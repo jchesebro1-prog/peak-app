@@ -414,7 +414,7 @@ export async function voidFinding(key: string, reason: string, user: { id: strin
  * idempotent (descriptions are deduped by paragraph too). The kept finding is saved first (through saveFinding: rev
  * bump, immediate rules). The caller checks `create`.
  */
-export async function mergeFindings(keys: string[], user: { id: string }): Promise<{ ok: true; kept: Finding; voided: Finding[] } | Err> {
+export async function mergeFindings(keys: string[], user: { id: string }, opts?: { __failAfterFirstWriteForTest?: boolean }): Promise<{ ok: true; kept: Finding; voided: Finding[] } | Err> {
   if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) return fail("Choose the findings to merge");
   if (new Set(keys).size !== keys.length) return fail("A finding was chosen twice.");
   const first = keys.length ? await getFinding(keys[0]) : null;
@@ -433,6 +433,7 @@ export async function mergeFindings(keys: string[], user: { id: string }): Promi
       if (keeper.assessmentId !== first.assessmentId) return fail("Finding not found");
       const done = list.slice(1).filter((f) => f.voided?.mergedInto === keeper.key);
       const todo = [keeper, ...list.slice(1).filter((f) => f.voided?.mergedInto !== keeper.key)];
+      if (todo.length === 1 && done.length && keeper.voided) return fail("A voided finding can't be merged.");
       if (todo.length === 1 && done.length) return { ok: true, kept: keeper, voided: done }; // a retry of a finished merge
       if (todo.length >= 2 && new Set(todo.map((f) => f.assessmentId)).size === 1) {
         const as = await getAssessment(keeper.assessmentId);
@@ -446,6 +447,8 @@ export async function mergeFindings(keys: string[], user: { id: string }): Promi
       const voided: Finding[] = [...done];
       for (const v of plan.voids) {
         try {
+          // Test seam only: fail after the keeper save (and the first void when there are several).
+          if (opts?.__failAfterFirstWriteForTest && (voided.length > done.length || plan.voids.length === 1)) throw new Error("forced failure");
           voided.push(await voidOne(v.key, v.reason, user, v.mergedInto));
         } catch (e) {
           throw new UnitAbort(`The merge couldn't be completed (${v.key}: ${(e as Error)?.message ?? e}). Nothing was changed.`);
@@ -470,6 +473,8 @@ export async function splitFinding(key: string, move: { photoIds: string[]; ques
   if (typeof newKey !== "string" || !KEY_RE.test(newKey)) return fail("A finding key is fd_ followed by 16 letters or digits");
   const f0 = await getFinding(key);
   if (!f0) return fail("Finding not found");
+  // Numbering runs outside any transaction: an unnumbered original gets its number before the new finding's.
+  if (!f0.printedId && !f0.voided) await allocateOrKeep(f0);
   try {
     const r = await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `merge:${f0.assessmentId}`, async (): Promise<{ ok: true; kept: Finding; created: Finding } | Err> => {
       const f = await getFinding(key);
