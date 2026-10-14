@@ -47,7 +47,7 @@ export function anthropicErrorMessage(e: unknown): { error: string; unreachable:
 
 /** One client per key; timeouts and retries are per request, never per client. */
 let cached: { key: string; client: Anthropic } | null = null;
-function clientFor(env: Env): Anthropic {
+export function clientFor(env: Env): Anthropic {
   const key = (env.ANTHROPIC_API_KEY || "").trim();
   if (!cached || cached.key !== key) cached = { key, client: new Anthropic({ apiKey: key }) };
   return cached.client;

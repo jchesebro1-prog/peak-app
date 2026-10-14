@@ -763,6 +763,359 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/* ---------------- Task 3: the runner, the route and the card-confirm outcome ---------------- */
+
+type FakeRound = {
+  content?: Record<string, unknown>[];
+  stop?: string;
+  model?: string;
+  usage?: { input?: number; output?: number; web?: number };
+  throws?: unknown;
+  /** Wait for the request's abort signal, then reject. */
+  hang?: boolean;
+  before?: () => void;
+};
+type FakeCall = { params: Record<string, unknown> & { messages: { role: string; content: unknown }[]; tools: Record<string, unknown>[] }; opts: { timeout: number; maxRetries: number } };
+
+/** A scripted AskModelClient: one FakeRound per call (the last repeats), streamed as raw events. */
+async function fakeAskClient(rounds: FakeRound[], calls: FakeCall[]) {
+  type Client = import("@/lib/assist/ask-runner").AskModelClient;
+  let i = 0;
+  const client: Client = {
+    name: "fake",
+    stream(params, opts) {
+      calls.push({ params: JSON.parse(JSON.stringify(params)), opts: { timeout: opts.timeout, maxRetries: opts.maxRetries } });
+      const r = rounds[Math.min(i++, rounds.length - 1)];
+      r.before?.();
+      const content = r.content ?? [{ type: "text", text: "ok", citations: null }];
+      const msg = {
+        id: `msg_${i}`,
+        type: "message",
+        role: "assistant",
+        model: r.model ?? params.model,
+        content,
+        stop_reason: r.stop ?? "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: r.usage?.input ?? 1000, output_tokens: r.usage?.output ?? 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, server_tool_use: r.usage?.web ? { web_search_requests: r.usage.web, web_fetch_requests: 0 } : null },
+      };
+      const events: unknown[] = [];
+      content.forEach((b, index) => {
+        events.push({ type: "content_block_start", index, content_block: b.type === "text" ? { ...b, text: "" } : b });
+        if (b.type === "text") events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: b.text } });
+        events.push({ type: "content_block_stop", index });
+      });
+      const waitAbort = () =>
+        new Promise<never>((_, reject) => {
+          if (opts.signal.aborted) reject(new Error("Request was aborted."));
+          opts.signal.addEventListener("abort", () => reject(new Error("Request was aborted.")));
+        });
+      return {
+        async *[Symbol.asyncIterator]() {
+          if (r.throws) throw r.throws;
+          if (r.hang) await waitAbort();
+          for (const e of events) yield e as never;
+        },
+        async finalMessage() {
+          if (r.throws) throw r.throws;
+          return msg as never;
+        },
+      };
+    },
+  };
+  return client;
+}
+
+export async function askRunnerChecks(ok: Ok): Promise<void> {
+  const R = await import("@/lib/assist/ask-runner");
+  const { runAsk, buildAskParams, webSearchToolFor, ASK_CUSTOM_TOOLS, webSourcesOf, typedEmails, isToolInputJsonError, isWebToolRejection } = R;
+  const { getRun, createRun, newRunId, recordAskConfirm, ASK_CONFIRMED_MAX } = await import("@/lib/stores/assist-runs");
+  const { softDeleteDoc } = await import("@/db/doc-store");
+  const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
+  const { fixtureId } = await import("./test-fixtures");
+  const { ASK_CUT_OFF_NOTE, ASK_FINAL_NOTE, ASK_NO_KEY_TEXT, ASK_REFUSAL_TEXT, ASK_TIMEOUT_NOTE } = await import("@/lib/assist/features/ask-limits");
+  const { seeded } = await import("@/db");
+  await seeded();
+
+  /* ---- pure: params ---- */
+  const base = { model: "claude-haiku-5-5", system: "SYS", messages: [{ role: "user" as const, content: "Q" }], tools: ASK_CUSTOM_TOOLS, effort: "low" as const, maxTokens: 4000, fallbacks: false };
+  const p0 = buildAskParams({ ...base, web: false }) as unknown as Record<string, unknown> & { tools: Record<string, unknown>[]; system: Record<string, unknown>[] };
+  ok(
+    p0.model === "claude-haiku-5-5" &&
+      p0.max_tokens === 4000 &&
+      JSON.stringify(p0.system) === JSON.stringify([{ type: "text", text: "SYS", cache_control: { type: "ephemeral" } }]) &&
+      JSON.stringify(p0.output_config) === JSON.stringify({ effort: "low" }) &&
+      !("thinking" in p0) &&
+      !("tool_choice" in p0) &&
+      !("betas" in p0) &&
+      !("fallbacks" in p0),
+    "buildAskParams: cached system, effort, no thinking key, no tool_choice, no fallbacks unless asked"
+  );
+  ok(
+    p0.tools.length === 15 &&
+      p0.tools.every((t) => t.eager_input_streaming === true && (t.input_schema as { type?: string }).type === "object") &&
+      p0.tools.map((t) => t.name).join(",") === "search,get_company,get_venue,get_quote,list_quotes,get_lead,get_project,get_thread,get_meeting,search_catalog,my_tasks,propose_task,propose_note,propose_email,propose_suggest_estimate",
+    "buildAskParams: the 11 read + 4 proposal tools, fixed order, eager input streaming, no web tool when web is off"
+  );
+  const pw = buildAskParams({ ...base, web: true }) as unknown as { tools: Record<string, unknown>[] };
+  const ps = buildAskParams({ ...base, model: "claude-sonnet-5-5", effort: "medium", web: true, fallbacks: true }) as unknown as Record<string, unknown> & { tools: Record<string, unknown>[] };
+  ok(
+    JSON.stringify(pw.tools[15]) === JSON.stringify({ type: "web_search_20250305", name: "web_search", max_uses: 3 }) &&
+      JSON.stringify(ps.tools[15]) === JSON.stringify({ type: "web_search_20260209", name: "web_search", max_uses: 3 }) &&
+      (webSearchToolFor("claude-made-up") as { type: string }).type === "web_search_20250305" &&
+      JSON.stringify(ps.betas) === JSON.stringify(["server-side-fallback-2026-07-01"]) &&
+      ps.fallbacks === "default",
+    "buildAskParams: web adds web_search (20250305 for Haiku, 20260209 for Sonnet 5.5, max_uses 3); fallbacks add the beta + \"default\""
+  );
+  const pf = buildAskParams({ ...base, web: true, final: true }) as unknown as Record<string, unknown> & { tools: Record<string, unknown>[] };
+  ok(JSON.stringify(pf.tool_choice) === JSON.stringify({ type: "none" }) && pf.tools.length === 16, "buildAskParams: the final round keeps every tool defined and sends tool_choice none");
+  const srcs = webSourcesOf([
+    { type: "text", text: "x", citations: [{ type: "web_search_result_location", url: "https://a.test/1", title: "A", cited_text: "", encrypted_index: "" }] },
+    { type: "web_search_tool_result", tool_use_id: "s1", content: [{ type: "web_search_result", url: "https://a.test/1", title: "A again", encrypted_content: "", page_age: null }, { type: "web_search_result", url: "javascript:alert(1)", title: "bad", encrypted_content: "", page_age: null }, { type: "web_search_result", url: "http://b.test/", title: "", encrypted_content: "", page_age: null }] },
+    { type: "web_search_tool_result", tool_use_id: "s2", content: { type: "web_search_tool_result_error", error_code: "unavailable" } },
+  ] as never);
+  ok(srcs.length === 2 && srcs[0].url === "https://a.test/1" && srcs[0].title === "A" && srcs[1].url === "http://b.test/" && srcs[1].title === "http://b.test/", "webSourcesOf: cited pages first, then results; http(s) only, deduped, an error result skipped");
+  ok(JSON.stringify(typedEmails([{ role: "user", text: "Email Kim@Example.test. and x@y" }, { role: "assistant", text: "a@b.test" }])) === JSON.stringify(["kim@example.test"]), "typedEmails: only the user's own turns, lower-cased, trailing period dropped");
+  const e400 = Object.assign(new Error("400 tools.15: web_search_20260209 is not supported"), { status: 400 });
+  ok(isWebToolRejection(e400) && !isWebToolRejection(Object.assign(new Error("400 bad thinking"), { status: 400 })) && !isWebToolRejection(Object.assign(new Error("web_search"), { status: 500 })) && isToolInputJsonError(new Error("Unable to parse tool parameter JSON from model. x")) && !isToolInputJsonError(new Error("nope")), "isWebToolRejection / isToolInputJsonError");
+
+  /* ---- runner (fake client, scratch DB) ---- */
+  const ME = { id: "u-ask3-me", name: "Ask3 Me" };
+  const OTHER = { id: "u-ask3-other", name: "Ask3 Other" };
+  const NOW = Date.UTC(2033, 4, 10, 15, 0);
+  const settings = assistSettingsOf({ assistUsers: [ME.id, OTHER.id], assistFeatures: { ask: true } });
+  const env = { ANTHROPIC_API_KEY: "test" };
+  const team = [{ id: ME.id }, { id: OTHER.id }];
+  const CID = fixtureId("ask3", "co");
+  const runIds: string[] = [];
+  const ask = async (messages: { role: "user" | "assistant"; text: string }[], rounds: FakeRound[], o: { page?: string | null; web?: boolean; hard?: boolean; retryOf?: string | null; me?: typeof ME; clock?: () => number; signal?: AbortSignal; settings?: typeof settings; env?: Record<string, string> } = {}) => {
+    const events: AskEvent[] = [];
+    const calls: FakeCall[] = [];
+    const client = await fakeAskClient(rounds, calls);
+    const res = await runAsk(
+      { messages, page: o.page ?? null, web: o.web ?? false, hard: o.hard ?? false, retryOf: o.retryOf ?? null },
+      o.me ?? ME,
+      (e) => events.push(e),
+      { client, settings: o.settings ?? settings, env: o.env ?? env, now: NOW, team, clock: o.clock, signal: o.signal }
+    );
+    if (res.runId) runIds.push(res.runId);
+    const text = events.filter((e): e is Extract<AskEvent, { t: "text" }> => e.t === "text").map((e) => e.d).join("");
+    return { res, events, calls, text, run: res.runId ? await getRun(res.runId) : null };
+  };
+  const q = (text: string) => [{ role: "user" as const, text }];
+  const toolUse = (id: string, name: string, input: unknown) => ({ type: "tool_use", id, name, input });
+  const lastUser = (c: FakeCall) => c.params.messages[c.params.messages.length - 1] as { role: string; content: Record<string, unknown>[] };
+
+  try {
+    await upsertCustomer({ id: CID, name: "Vellumcrest Arts", type: "Education", locations: [], contacts: [{ name: "Robin Vale", role: "TD", email: "robin@vellumcrest.test", phone: "555-0101", primary: true }] } as never);
+
+    // Gate
+    {
+      const off = await ask(q("hi"), [{}], { settings: assistSettingsOf({ assistUsers: [ME.id] }) });
+      const noKey = await ask(q("hi"), [{}], { env: { ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://localhost:11434" } });
+      ok(
+        off.events.length === 1 && off.events[0].t === "error" && off.calls.length === 0 && off.res.runId === null &&
+          noKey.events.length === 1 && noKey.events[0].t === "error" && (noKey.events[0] as { message: string }).message === ASK_NO_KEY_TEXT,
+        "runAsk: the gate refuses with one error event — switch off, or no Claude key (\"Ask AI needs the Claude API key.\") — no call, no run, no done"
+      );
+    }
+
+    // A tool round-trip: ref emitted, thinking + tool_use replayed unmodified, the record sent back, text across rounds.
+    {
+      const r1 = [{ type: "thinking", thinking: "", signature: "sig-1" }, { type: "text", text: "Let me check.", citations: null }, toolUse("tu1", "get_company", { id: CID })];
+      const a = await ask(q("Who is the TD at Vellumcrest?"), [{ content: r1, stop: "tool_use" }, { content: [{ type: "text", text: `Robin Vale is the TD at [[company:${CID}]].`, citations: null }] }]);
+      const refEv = a.events.filter((e) => e.t === "ref");
+      const second = a.calls[1];
+      const tr = lastUser(second).content[0];
+      ok(a.calls.length === 2 && refEv.length >= 1 && (refEv[0] as { id: string; kind: string; href: string }).id === CID && (refEv[0] as { href: string }).href === `/companies/${encodeURIComponent(CID)}`, "runAsk: a read tool's record becomes a ref event (the link whitelist)");
+      ok(JSON.stringify(second.params.messages[1]) === JSON.stringify({ role: "assistant", content: r1 }), "runAsk: the assistant content (thinking, text, tool_use) is replayed unmodified");
+      ok(tr.type === "tool_result" && tr.tool_use_id === "tu1" && typeof tr.content === "string" && (tr.content as string).includes('<record kind="company"') && (tr.content as string).includes("Robin Vale") && !("is_error" in tr), "runAsk: the tool result goes back as a tool_result wrapping the record");
+      ok(a.text === `Let me check.\n\nRobin Vale is the TD at [[company:${CID}]].` && a.events.some((e) => e.t === "status" && e.text === "Looking up companies…"), "runAsk: text streams across rounds (a paragraph break between), status names the lookup");
+      const doneEv = a.events[a.events.length - 1];
+      ok(doneEv.t === "done" && doneEv.runId === a.res.runId && !!a.run, "runAsk: done carries the logged runId, last");
+      const d = a.run?.outcomeDetail as Record<string, unknown> | undefined;
+      ok(
+        !!a.run && a.run.feature === "ask" && a.run.step === null && a.run.ok && a.run.provider === "fake" && a.run.model === "claude-haiku-5-5" && a.run.requestedModel === "claude-haiku-5-5" &&
+          a.run.inputTokens === 2000 && a.run.outputTokens === 200 && a.run.contextRef === "ask:none" && a.run.output === a.text && a.run.stopReason === "end_turn" &&
+          d?.rounds === 2 && d?.toolCalls === 1 && Array.isArray(d?.refs) && (d.refs as string[]).includes(`company:${CID}`) && d?.cards === 0 && d?.web === 0 && d?.hard === false && d?.retryOf === null && a.run.outcome === null,
+        "runAsk: one run row — feature ask, usage summed over rounds, contextRef, output, outcomeDetail {rounds, toolCalls, refs, cards, web, hard, retryOf}"
+      );
+      ok(a.calls[0].opts.maxRetries === 0 && a.calls[0].opts.timeout > 55_000 && a.calls[0].opts.timeout <= 60_000 && (a.calls[0].params.output_config as { effort: string }).effort === "low", "runAsk: Haiku — low effort, no SDK retries, the round's timeout is the time left (≤ 60 s)");
+    }
+
+    // An invalid tool input becomes is_error (read tool and proposal tool), and the loop continues.
+    {
+      const a = await ask(q("x"), [{ content: [toolUse("t1", "get_company", { id: "" }), toolUse("t2", "propose_task", { title: 5 }), toolUse("t3", "drop_tables", {})], stop: "tool_use" }, {}]);
+      const res = lastUser(a.calls[1]).content;
+      ok(res.length === 3 && res.every((r) => r.type === "tool_result" && r.is_error === true) && String(res[1].content).startsWith("Invalid input for propose_task") && String(res[2].content).startsWith("Unknown tool"), "runAsk: invalid read / proposal input and an unknown tool each get an is_error tool_result");
+    }
+
+    // Caps: rounds — the 6th round is the final, no-tools one; a tool_use there is ignored.
+    {
+      const loop = { content: [toolUse("x", "my_tasks", {})], stop: "tool_use" };
+      const a = await ask(q("loop"), [loop]);
+      const fin = a.calls[5];
+      const lu = fin ? lastUser(fin).content : [];
+      ok(
+        a.calls.length === 6 && a.calls.slice(0, 5).every((c) => !("tool_choice" in c.params)) && JSON.stringify(fin.params.tool_choice) === JSON.stringify({ type: "none" }) && fin.params.tools.length === 15 &&
+          lu[lu.length - 1].type === "text" && lu[lu.length - 1].text === ASK_FINAL_NOTE && (a.run?.outcomeDetail as { rounds: number }).rounds === 6 && (a.run?.outcomeDetail as { toolCalls: number }).toolCalls === 5,
+        "runAsk: round cap — round 6 keeps the tools, sends tool_choice none + the answer-now note; its tool_use is ignored (no 7th call)"
+      );
+    }
+    // Caps: tool calls — 12 per question; extras get is_error, then the final round.
+    {
+      const five = { content: [1, 2, 3, 4, 5].map((n) => toolUse(`m${n}`, "my_tasks", {})), stop: "tool_use" };
+      const a = await ask(q("many"), [five]);
+      const third = lastUser(a.calls[3]).content.filter((r) => r.type === "tool_result");
+      ok(
+        a.calls.length === 4 && third.filter((r) => r.is_error === true).length === 3 && String(third[4].content).startsWith("Not run") && JSON.stringify(a.calls[3].params.tool_choice) === JSON.stringify({ type: "none" }) && (a.run?.outcomeDetail as { toolCalls: number }).toolCalls === 12,
+        "runAsk: tool-call cap — 12 run, the rest get is_error, and the next round is the final no-tools one"
+      );
+    }
+
+    // Refusal / max_tokens
+    {
+      const a = await ask(q("bad"), [{ content: [], stop: "refusal" }]);
+      ok(a.text === ASK_REFUSAL_TEXT && a.run?.ok === false && a.run.error === "declined" && a.run.stopReason === "refusal" && a.events[a.events.length - 1].t === "done", "runAsk: a refusal answers \"I can't help with that one.\" and is logged as declined");
+      const m = await ask(q("long"), [{ content: [{ type: "text", text: "Part one", citations: null }, toolUse("z", "my_tasks", {})], stop: "max_tokens" }]);
+      ok(m.calls.length === 1 && m.text === "Part one" + ASK_CUT_OFF_NOTE && m.run?.stopReason === "max_tokens" && (m.run.outcomeDetail as { toolCalls: number }).toolCalls === 0, "runAsk: max_tokens keeps the text, appends …(cut off), runs no tools");
+    }
+
+    // Wall clock: past the deadline after a round → stop with the note, still logged.
+    {
+      let t = 1_000_000;
+      const a = await ask(q("slow"), [{ content: [{ type: "text", text: "Looking.", citations: null }, toolUse("s", "my_tasks", {})], stop: "tool_use", before: () => (t += 61_000) }, {}], { clock: () => t });
+      ok(a.calls.length === 1 && a.text === "Looking.\n\n" + ASK_TIMEOUT_NOTE && a.run?.ok === false && a.run.error === "timed out" && a.run.stopReason === "timeout" && a.run.latencyMs === 61_000, "runAsk: the wall clock stops the loop — what it has + \"Stopped — took too long.\", logged");
+    }
+
+    // Abort (client disconnect) mid-stream → still logged.
+    {
+      const ac = new AbortController();
+      const a = await ask(q("bye"), [{ content: [toolUse("a", "my_tasks", {})], stop: "tool_use" }, { hang: true, before: () => ac.abort() }], { signal: ac.signal });
+      ok(a.calls.length === 2 && !!a.run && a.run.ok === false && a.run.error === "aborted" && a.run.stopReason === "aborted" && (a.run.outcomeDetail as { rounds: number }).rounds === 1 && !a.events.some((e) => e.t === "error"), "runAsk: an abort stops the stream and the run is still logged (aborted)");
+    }
+
+    // Web: only when toggled; sources mapped; cost sums the rounds + searches; a tool 400 retries without web.
+    {
+      const off = await ask(q("web?"), [{}]);
+      ok(!off.calls[0].params.tools.some((t) => t.name === "web_search"), "runAsk: no web tool when the toggle is off");
+      const webContent = [
+        { type: "server_tool_use", id: "srv1", name: "web_search", input: { query: "x" } },
+        { type: "web_search_tool_result", tool_use_id: "srv1", content: [{ type: "web_search_result", url: "https://maker.test/spec", title: "Spec", encrypted_content: "e", page_age: null }] },
+        { type: "text", text: "Per the maker.", citations: [{ type: "web_search_result_location", url: "https://maker.test/spec", title: "Spec", cited_text: "c", encrypted_index: "i" }] },
+      ];
+      const on = await ask(q("web!"), [{ content: webContent, usage: { input: 2000, output: 300, web: 2 } }], { web: true });
+      const { askCostUsd } = await import("@/lib/assist/features/ask-limits");
+      const roundsOnly = askCostUsd([{ answered: "claude-haiku-5-5", requested: "claude-haiku-5-5", usage: { inputTokens: 2000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 } }], 0);
+      ok(
+        on.calls[0].params.tools.some((t) => t.type === "web_search_20250305") && on.events.some((e) => e.t === "source" && e.url === "https://maker.test/spec") && on.events.some((e) => e.t === "status" && e.text === "Searching the web…") &&
+          (on.run?.outcomeDetail as { web: number }).web === 2 && Math.abs((on.run?.costUsd ?? 0) - (roundsOnly + 0.02)) < 1e-9,
+        "runAsk: web on → web_search_20250305 for Haiku, a source event per cited page, cost = rounds + 2 searches × $0.01"
+      );
+      const rej = await ask(q("web retry"), [{ throws: Object.assign(new Error("400 web_search_20250305 is not available"), { status: 400 }) }, { content: [{ type: "text", text: "From records.", citations: null }] }], { web: true });
+      ok(rej.calls.length === 2 && rej.calls[0].params.tools.some((t) => t.name === "web_search") && !rej.calls[1].params.tools.some((t) => t.name === "web_search") && rej.text.includes("Web search wasn't available") && rej.text.endsWith("From records.") && rej.run?.ok === true, "runAsk: a 400 naming the web tool retries the round once without web, with a note");
+      const bad = await ask(q("boom"), [{ throws: Object.assign(new Error("400 something else"), { status: 400 }) }]);
+      ok(bad.events.some((e) => e.t === "error") && bad.events[bad.events.length - 1].t === "done" && bad.run?.ok === false && bad.run.stopReason === "error", "runAsk: any other failure → an error event, then done; still logged");
+    }
+
+    // pause_turn resumes once with the paused content; an unreadable streamed tool input re-issues the round once.
+    {
+      const paused = [{ type: "server_tool_use", id: "srv2", name: "web_search", input: { query: "y" } }];
+      const a = await ask(q("p"), [{ content: paused, stop: "pause_turn" }, {}], { web: true });
+      ok(a.calls.length === 2 && JSON.stringify(a.calls[1].params.messages[a.calls[1].params.messages.length - 1]) === JSON.stringify({ role: "assistant", content: paused }), "runAsk: pause_turn sends the conversation back once more, ending in the paused assistant turn");
+      const j = await ask(q("j"), [{ throws: new Error("Unable to parse tool parameter JSON from model. Please retry") }, { content: [{ type: "text", text: "fine", citations: null }] }]);
+      ok(j.calls.length === 2 && j.text === "fine" && (j.run?.outcomeDetail as { rounds: number }).rounds === 2, "runAsk: an unreadable streamed tool input re-issues the round once (counted)");
+    }
+
+    // hard → the Sonnet slot (medium effort, fallbacks, 20260209 web tool, 90 s).
+    {
+      const h = await ask(q("harder"), [{}], { hard: true, web: true });
+      const p = h.calls[0].params;
+      ok(p.model === "claude-sonnet-5-5" && (p.output_config as { effort: string }).effort === "medium" && p.fallbacks === "default" && p.tools.some((t) => t.type === "web_search_20260209") && h.calls[0].opts.timeout > 85_000 && h.run?.requestedModel === "claude-sonnet-5-5" && (h.run.outcomeDetail as { hard: boolean }).hard === true, "runAsk: hard uses the askHard slot — Sonnet 5.5, medium effort, fallbacks, web_search_20260209, 90 s");
+    }
+
+    // Cards: page context + prior tokens feed the whitelist; unknown ids / emails are dropped.
+    {
+      const prior = [
+        { role: "user" as const, text: "Who runs Vellumcrest? cc me at me@peak.test" },
+        { role: "assistant" as const, text: `That's [[company:${CID}]], not [[company:${fixtureId("ask3", "nope")}]] or [[quote:Q-NOPE]].` },
+        { role: "user" as const, text: "Make a task and a note, and draft an email." },
+      ];
+      const proposals = [
+        toolUse("c1", "propose_task", { title: "Call Robin", due: "2033-05-20", assigneeId: "u-stranger", links: { customerId: CID, quoteId: "Q-NOPE" } }),
+        toolUse("c2", "propose_note", { target: { kind: "company", id: fixtureId("ask3", "nope") }, text: "x" }),
+        toolUse("c3", "propose_note", { target: { kind: "company", id: CID }, text: "Spoke with Robin." }),
+        toolUse("c4", "propose_email", { to: ["robin@vellumcrest.test", "me@peak.test", "evil@attacker.test"], subject: "Hi", body: "Hello", threadId: "T-NOPE" }),
+      ];
+      const a = await ask(prior, [{ content: proposals, stop: "tool_use" }, {}]);
+      const cardsEv = a.events.filter((e): e is Extract<AskEvent, { t: "card" }> => e.t === "card").map((e) => e.card);
+      const refKeys = a.events.filter((e): e is Extract<AskEvent, { t: "ref" }> => e.t === "ref").map((e) => `${e.kind}:${e.id}`);
+      const task = cardsEv.find((c) => c.kind === "task");
+      const note = cardsEv.find((c) => c.kind === "note");
+      const email = cardsEv.find((c) => c.kind === "email");
+      const res = lastUser(a.calls[1]).content;
+      ok(refKeys.join(",") === `company:${CID}`, "runAsk: earlier [[kind:id]] tokens are re-checked — only a real record is emitted as a ref");
+      ok(
+        cardsEv.length === 3 && !!task && task.kind === "task" && JSON.stringify(task.links) === JSON.stringify({ customerId: CID }) && task.assigneeId === ME.id && task.dueYmd === "2033-05-20" &&
+          !!note && note.kind === "note" && note.target.id === CID &&
+          !!email && email.kind === "email" && JSON.stringify(email.to) === JSON.stringify(["me@peak.test"]) && email.threadId === null,
+        "runAsk: cards keep only exposed ids — the unknown quote link, thread and note target drop; a stranger assignee becomes me; only user-typed / exposed emails survive"
+      );
+      ok(String(res[1].content).startsWith("No card was shown") && String(res[0].content).startsWith("Shown to the user") && (a.run?.outcomeDetail as { cards: number }).cards === 3, "runAsk: the model is told which cards were shown and which were dropped");
+      const pg = await ask(q("draft an email to the TD"), [{ content: [toolUse("e1", "propose_email", { to: ["robin@vellumcrest.test"], subject: "Hi", body: "Hello" })], stop: "tool_use" }, {}], { page: `/companies/${encodeURIComponent(CID)}` });
+      const em = pg.events.find((e): e is Extract<AskEvent, { t: "card" }> => e.t === "card")?.card;
+      ok(pg.events.some((e) => e.t === "ref" && e.id === CID) && em?.kind === "email" && JSON.stringify(em.to) === JSON.stringify(["robin@vellumcrest.test"]) && pg.run?.contextRef === `ask:company:${CID}` && pg.calls[0].params.messages[0].content !== undefined && String(pg.calls[0].params.messages[0].content).includes("<current_screen"), "runAsk: page context is the first ref, its contact emails feed the email card, contextRef ask:<kind:id>, the screen rides in the first message");
+    }
+
+    // retryOf: discarded, owner-checked, Ask runs only, first decision wins.
+    {
+      const first = await ask(q("one"), [{}]);
+      const second = await ask(q("one"), [{}], { hard: true, retryOf: first.res.runId });
+      ok((await getRun(first.res.runId!))?.outcome === "discarded" && (await getRun(first.res.runId!))?.outcomeDetail?.retriedBy === second.res.runId && (second.run?.outcomeDetail as { retryOf: string }).retryOf === first.res.runId, "runAsk: Try harder marks the retried run discarded");
+      const theirs = await ask(q("mine"), [{}], { me: OTHER });
+      await ask(q("steal"), [{}], { retryOf: theirs.res.runId });
+      ok((await getRun(theirs.res.runId!))?.outcome === null, "runAsk: retryOf of another user's run is ignored (owner-checked)");
+      const replyRun = { ...(await getRun(first.res.runId!))!, id: newRunId(NOW), feature: "reply" as const, outcome: null, outcomeDetail: null, outcomeAt: null };
+      await createRun(replyRun);
+      runIds.push(replyRun.id);
+      await ask(q("x"), [{}], { retryOf: replyRun.id });
+      ok((await getRun(replyRun.id))?.outcome === null, "runAsk: retryOf only discards an Ask run");
+
+      // recordAskConfirm — the card-confirm outcome
+      const c = await ask(q("c"), [{}]);
+      const id = c.res.runId!;
+      const r1 = await recordAskConfirm(id, ME.id, "task", NOW + 5);
+      const after1 = await getRun(id);
+      const r2 = await recordAskConfirm(id, ME.id, "note", NOW + 9);
+      const after2 = await getRun(id);
+      ok(r1 && r2 && after1?.outcome === "accepted" && after1.outcomeAt === NOW + 5 && JSON.stringify((after2?.outcomeDetail as { confirmed: string[] }).confirmed) === JSON.stringify(["task", "note"]) && after2?.outcomeAt === NOW + 5 && (after2?.outcomeDetail as { rounds: number }).rounds === 1, "recordAskConfirm: accepted on the first confirm (outcomeAt kept after), kinds appended, the run's own detail kept");
+      ok(!(await recordAskConfirm(id, OTHER.id, "task")) && !(await recordAskConfirm(replyRun.id, ME.id, "task")) && !(await recordAskConfirm("AR-none", ME.id, "task")), "recordAskConfirm: owner-checked, Ask runs only, a missing run is false");
+      for (let n = 0; n < ASK_CONFIRMED_MAX + 3; n++) await recordAskConfirm(id, ME.id, "email");
+      ok((await getRun(id))?.outcomeDetail?.confirmed instanceof Array && ((await getRun(id))!.outcomeDetail!.confirmed as string[]).length === ASK_CONFIRMED_MAX, "recordAskConfirm: confirmed is capped at 20");
+      const d = first.res.runId!;
+      ok((await recordAskConfirm(d, ME.id, "task")) && (await getRun(d))?.outcome === "discarded" && JSON.stringify((await getRun(d))?.outcomeDetail?.confirmed) === JSON.stringify(["task"]), "recordAskConfirm: a discarded run stays discarded (first decision wins); the confirm is still counted");
+    }
+
+    // Pins: the route and the action.
+    const route = readFileSync("src/app/api/assist/ask/route.ts", "utf8");
+    ok(
+      /export const maxDuration = 120;/.test(route) &&
+        /if \(type !== "application\/json"\) return bad\(".*?", 415\);\s*try \{\s*const me = await requireUser\(\);/.test(route) &&
+        /parseAskBody\(raw\);\s*if \(!parsed\.ok\) return bad\(parsed\.error, 400\);/.test(route) &&
+        /"application\/x-ndjson; charset=utf-8"/.test(route) &&
+        /"cache-control": "no-store"/.test(route) &&
+        /runAsk\(body, \{ id: me\.id, name: me\.name \}, emit, \{ signal: ctl\.signal \}\)/.test(route) &&
+        /request\.signal\.addEventListener\("abort"/.test(route) &&
+        /unstable_rethrow\(err\)/.test(route),
+      "ask route: maxDuration 120; 415 before requireUser; 400 on a bad body; NDJSON no-store stream; request.signal aborts runAsk; the redirect passes through"
+    );
+    const action = readFileSync("src/lib/assist/ask-actions.ts", "utf8");
+    ok(/^"use server";/.test(action) && /const me = await requireUser\(\);/.test(action) && /recordAskConfirm\(id, me\.id, kind\)/.test(action) && /ASK_CARD_KINDS\.includes\(kind\)/.test(action), "recordAskCardAction: a server action — requireUser, kind checked, recordAskConfirm(runId, me.id, kind)");
+  } finally {
+    for (const id of runIds) await softDeleteDoc("assist_runs" as never, id).catch(() => {});
+    await removeCustomer(CID).catch(() => {});
+  }
+}
+
 if (process.argv[1] && /test-ask\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -777,6 +1130,7 @@ if (process.argv[1] && /test-ask\.ts$/.test(process.argv[1])) {
     await askPureChecks(ok);
     await askSearchDbChecks(ok);
     await askToolsDbChecks(ok);
+    await askRunnerChecks(ok);
     // later tasks append: await askXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall ask checks passed");
     process.exit(fail ? 1 : 0);
