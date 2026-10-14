@@ -205,18 +205,24 @@ export async function setSiteShortCode(
   id: string,
   code: string | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (code !== null && !CODE_RE.test(code)) {
+  // Normalised before validating: " lin " → "LIN". A blank string is refused,
+  // never read as a clear — clearing sends null deliberately.
+  const next = code === null ? null : code.trim().toUpperCase();
+  if (next !== null && !CODE_RE.test(next)) {
     return { ok: false, error: "A code is 2 to 6 letters or digits (A to Z, 0 to 9)" };
   }
   const db = await getDb();
+  let rows: { id: string }[];
   try {
-    await db
+    rows = await db
       .update(sites)
-      .set({ shortCode: code, updatedAt: Date.now() })
-      .where(eq(sites.id, id));
+      .set({ shortCode: next, updatedAt: Date.now() })
+      .where(eq(sites.id, id))
+      .returning({ id: sites.id });
   } catch (e) {
     if (isUniqueViolation(e)) return { ok: false, error: "That code is already used by another venue of this company" };
     throw e;
   }
+  if (!rows.length) return { ok: false, error: "Venue not found" };
   return { ok: true };
 }

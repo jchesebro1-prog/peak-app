@@ -13,14 +13,19 @@ import { STATUSES, CATEGORY_ROUTING, formatPrintedId, pendingPrintedLabel, immed
 import { csvCell, toCsv } from "../src/lib/assessments/csv";
 import { PHOTO_PREFIX, PHOTO_CAPS, photoBlobPath, photoPathInScope } from "../src/lib/assessments/photos";
 import coverage from "../docs/assessments/manitowoc-coverage.json";
-import { like, eq, sql } from "drizzle-orm";
+import { like, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, sites } from "../src/db/schema";
-import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "../src/db/doc-tables";
+import { DOC_TABLES, SYNCABLE_COLLECTIONS, blobs } from "../src/db/doc-tables";
 import { CONFIG_COLLECTIONS } from "../src/db/seed-data";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
 import { saveSite, getSite, setSiteShortCode } from "../src/lib/identity/sites";
+import { registerFixture } from "./test-fixtures";
+import { createAssessment, saveAssessment, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, type Assessment } from "../src/lib/stores/assessments";
+import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding } from "../src/lib/stores/findings";
+import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
+import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
 
 const ROOT = process.cwd();
 
@@ -523,7 +528,7 @@ export async function assessmentDbChecks(ok: Ok) {
     try { await db.update(companies).set({ shortCode: "tsta" }).where(eq(companies.id, co2)); } catch (e) { pgCode = String((e as { code?: string; cause?: { code?: string } }).code ?? (e as { cause?: { code?: string } }).cause?.code ?? ""); }
     ok(pgCode === "23505", "codes db: company code unique case-insensitively (index on lower(short_code))");
     const bad = await setCompanyShortCode(co2, "tsta");
-    ok(!bad.ok, "codes db: a lowercase / malformed code is rejected by CODE_RE");
+    ok(!bad.ok && bad.error === "That code is already used by another company", "codes db: a lowercase code is normalised (tsta → TSTA) and still collides");
     ok(!(await setCompanyShortCode(co2, "A")).ok && !(await setCompanyShortCode(co2, "TOOLONG7")).ok && !(await setCompanyShortCode(co2, "AB-C")).ok, "codes db: CODE_RE bounds enforced");
     ok((await getCompany(co2))!.shortCode === null, "codes db: a failed set leaves the code untouched");
     await saveCompany({ ...(await getCompany(co1))!, name: "Renamed" });
@@ -555,6 +560,200 @@ export async function assessmentDbChecks(ok: Ok) {
     await db.update(sites).set({ deleted: true }).where(eq(sites.id, site1));
     ok((await setSiteShortCode(site2, "HAL")).ok, "codes db: a soft-deleted venue does not hold its code");
   } finally {
+    await dropAssessIdentityFixtures();
+  }
+  await assessmentStoreChecks(ok);
+}
+
+/** Task 5 — the stores, printed-id allocation under the advisory lock, and the push-handler branches. */
+async function assessmentStoreChecks(ok: Ok) {
+  const db = await getDb();
+  const created: string[] = [];
+  const prevPicklists = (await db.select().from(blobs).where(eq(blobs.id, ASSESSMENT_PICKLISTS_BLOB)))[0];
+  const track = (a: Assessment) => { created.push(a.id); registerFixture("assessments", a.id); return a; };
+  const U1 = { id: "u1" };
+  try {
+    await assessIdentityFixtures();
+    const { co1, co2, site1, site2, site3 } = ASSESS_FIX;
+    const CO = co1, SITE = site1;
+
+    // carry-over from Task 4: normalised input, "" refused, zero rows → not found
+    ok((await setCompanyShortCode(co2, " tsx ")).ok && (await getCompany(co2))!.shortCode === "TSX", "codes db: company code input is trimmed + uppercased");
+    const blankCo = await setCompanyShortCode(co2, "   ");
+    ok(!blankCo.ok && (await getCompany(co2))!.shortCode === "TSX", "codes db: a blank company code is refused (a clear sends null)");
+    const noCo = await setCompanyShortCode("TESTassess:nope", "ABC");
+    ok(!noCo.ok && noCo.error === "Company not found", "codes db: unknown company → Company not found");
+    ok((await setSiteShortCode(site3, " oth ")).ok && (await getSite(site3))!.shortCode === "OTH", "codes db: site code input is trimmed + uppercased");
+    ok(!(await setSiteShortCode(site3, "")).ok && (await getSite(site3))!.shortCode === "OTH", "codes db: a blank site code is refused");
+    const noSite = await setSiteShortCode("TESTassess:nope", "ABC");
+    ok(!noSite.ok && noSite.error === "Venue not found", "codes db: unknown venue → Venue not found");
+    ok((await setCompanyShortCode(co2, null)).ok && (await setSiteShortCode(site3, null)).ok, "codes db: null still clears");
+
+    // assessments
+    const a = track(await createAssessment({ visitType: "condition", customerId: CO, siteId: SITE, visitDate: Date.now(), assessorId: "u1" }, "u1"));
+    ok(/^AS-\d{4,}$/.test(a.id) && a.defVersion === 1 && a.scopes.find((s) => s.code === "S2")?.depth === "screen", "store: create AS with condition scopes");
+    ok(a.status === "draft" && a.rev === 1 && a.createdBy === "u1" && Object.keys(a.answers).length === 0, "store: a new assessment is a draft at rev 1");
+    let threw = "";
+    try { await createAssessment({ visitType: "condition", customerId: co2, siteId: SITE, visitDate: Date.now(), assessorId: "u1" }, "u1"); } catch (e) { threw = String(e); }
+    ok(/venue/i.test(threw), "store: create refuses a venue that isn't the customer's");
+    threw = "";
+    try { await createAssessment({ visitType: "moonwalk", customerId: CO, siteId: SITE, visitDate: Date.now(), assessorId: "u1" }, "u1"); } catch (e) { threw = String(e); }
+    ok(/visit type/i.test(threw), "store: create refuses an unknown visit type");
+    let s = await saveAssessment(a.id, { answers: { "core.space_type": { v: "proscenium", state: "answered", at: 10, by: "u1" } } }, U1);
+    ok(s.ok, "store: valid answer saves");
+    ok(s.ok && s.doc.status === "onsite" && typeof s.doc.startedAt === "number" && s.doc.rev === 2, "store: the first answer moves a draft onsite and bumps rev");
+    s = await saveAssessment(a.id, { answers: { "core.space_type": { v: "spaceship", state: "answered", at: 11, by: "u1" } } }, U1);
+    ok(!s.ok && /core\.space_type/.test((s as { error: string }).error), "store: invalid answer refused with key");
+    await saveAssessment(a.id, { answers: { "core.space_type": { v: "thrust", state: "answered", at: 5, by: "u2" } } }, { id: "u2" });
+    ok((await getAssessment(a.id))!.answers["core.space_type"].v === "proscenium", "store: older answer loses merge");
+    await saveAssessment(a.id, { answers: { "future.key": { v: 1, state: "answered", at: 12, by: "u1" } } as Answers }, U1);
+    ok("future.key" in (await getAssessment(a.id))!.answers, "store: unknown keys kept");
+    // attribution + clock clamp (controller addition)
+    await saveAssessment(a.id, { answers: { "core.use": { v: ["school"], state: "answered", at: 20, by: "mallory" } } }, U1);
+    ok((await getAssessment(a.id))!.answers["core.use"]?.by === "u1", "store: answer.by is always the session user, never the client's");
+    const future = Date.now() + 86_400_000;
+    await saveAssessment(a.id, { answers: { "core.use": { v: ["community"], state: "answered", at: future, by: "u1" } } }, U1);
+    const clamped = (await getAssessment(a.id))!.answers["core.use"];
+    ok(JSON.stringify(clamped.v) === '["community"]' && clamped.at <= Date.now() + 5 * 60_000 && clamped.at < future, "store: a future answer.at is clamped to now + 5 min");
+    await saveAssessment(a.id, { answers: { "core.use": { v: ["rentals"], state: "answered", at: Date.now() + 10 * 60_000, by: "u1" } } }, U1);
+    ok(((await getAssessment(a.id))!.answers["core.use"].v as string[])[0] === "rentals", "store: a clamped answer can't lock out every later edit");
+    // scalars, photos, dismissed prompts
+    s = await saveAssessment(a.id, { spaceLabel: "Auditorium rm 132", status: "completed", customerId: co2, defVersion: 99, dismissedPrompts: [{ id: "rule:R10", by: "x", at: 1 }] } as Partial<Assessment>, U1);
+    const a1 = (await getAssessment(a.id))!;
+    ok(s.ok && a1.spaceLabel === "Auditorium rm 132" && a1.status === "onsite" && a1.customerId === CO && a1.defVersion === 1, "store: scalars replace; status/customerId/defVersion never from a save");
+    ok(a1.dismissedPrompts.length === 1 && a1.dismissedPrompts[0].by === "u1", "store: a dismissed prompt is stored, attributed to the session user");
+    await saveAssessment(a.id, { dismissedPrompts: [{ id: "rule:R10", by: "u1", at: 2 }, { id: "flag:x", by: "u1", at: 3 }] }, U1);
+    ok((await getAssessment(a.id))!.dismissedPrompts.map((d) => d.id).sort().join() === "flag:x,rule:R10", "store: dismissed prompts union by id");
+    const stale = await saveAssessment(a.id, { spaceLabel: "Stale label", rev: 1, answers: { "core.seats": { v: 640, state: "answered", at: 30, by: "u1" } } } as Partial<Assessment>, U1);
+    const a1b = (await getAssessment(a.id))!;
+    ok(stale.ok && a1b.spaceLabel === "Auditorium rm 132" && a1b.answers["core.seats"]?.v === 640, "store: a stale rev still merges answers but keeps the server's scalars");
+    const badPath = await saveAssessment(a.id, { photos: [{ id: "px", blobPath: "assessments/AS-1/px.jpg", takenAt: 1, by: "u1" }] }, U1);
+    ok(!badPath.ok && /px/.test((badPath as { error: string }).error), "store: a photo path outside the assessment is refused");
+    const tooMany = Array.from({ length: 201 }, (_, i) => ({ id: `p${i}`, pending: true as const, takenAt: 1, by: "u1" }));
+    ok(!(await saveAssessment(a.id, { photos: tooMany }, U1)).ok, "store: more than 200 photos refused");
+    // the clear marker
+    const a3 = track(await createAssessment({ visitType: "condition", customerId: CO, siteId: SITE, visitDate: Date.now(), assessorId: "u1" }, "u1"));
+    await saveAssessment(a3.id, { answers: { "core.space_type": { v: "thrust", state: "answered", at: 10, by: "u1" } } }, U1);
+    s = await saveAssessment(a3.id, { answers: { "core.space_type": { v: null, state: "answered", at: 20, by: "u1" } } }, U1);
+    ok(s.ok && (await getAssessment(a3.id))!.answers["core.space_type"].v === null, "store: the clear marker (v: null) saves and wins by at");
+
+    // complete refused with gaps, override records them, profile written
+    const c1 = await completeAssessment(a.id, U1, false);
+    ok(!c1.ok && (c1 as { gaps: string[] }).gaps.length > 0, "store: complete lists gaps");
+    ok(!c1.ok && (c1 as { gaps: string[] }).gaps.some((g) => g.includes("Overhead rigging system type")), "store: gaps name questions by label");
+    ok((await getAssessment(a.id))!.status === "onsite", "store: a refused completion leaves the status");
+    ok((await completeAssessment(a.id, U1, true)).ok, "store: complete with override");
+    const done = (await getAssessment(a.id))!;
+    ok(done.status === "completed" && done.completedBy === "u1" && typeof done.completedAt === "number" && (done.overriddenGaps?.length ?? 0) > 0, "store: completion stamps who/when and records overridden gaps");
+    ok((await getVenueProfile(SITE))?.facts["core.space_type"]?.v === "proscenium", "store: completion writes profile facts");
+    ok((await getVenueProfile(SITE))?.facts["core.space_type"]?.from === a.id && (await getVenueProfile(SITE))?.customerId === CO, "store: a profile fact names its assessment");
+    ok(!("future.key" in (await getVenueProfile(SITE))!.facts) && !("core.use" in (await getVenueProfile(SITE))!.facts), "store: only profile:true questions reach the profile");
+    ok(profileValues(await getVenueProfile(SITE))["core.space_type"] === "proscenium" && Object.keys(profileValues(null)).length === 0, "store: profileValues flattens facts");
+    ok(!(await saveAssessment(a.id, { spaceLabel: "late" }, U1)).ok, "store: a completed assessment refuses edits");
+    await completeAssessment(a3.id, U1, true);
+    ok((await getVenueProfile(SITE))?.facts["core.space_type"]?.from === a.id, "store: a cleared (null) answer never overwrites a profile fact");
+    await reopenAssessment(a.id, U1);
+    const reo = (await getAssessment(a.id))!;
+    ok(reo.status === "onsite" && reo.completedAt === undefined, "store: reopen → onsite");
+    ok((await saveAssessment(a.id, { spaceLabel: "Auditorium rm 132" }, U1)).ok, "store: a reopened assessment saves again");
+    // pending photo blocks even with override
+    const a2 = track(await createAssessment({ visitType: "condition", customerId: CO, siteId: SITE, visitDate: Date.now(), assessorId: "u1" }, "u1"));
+    await saveAssessment(a2.id, { photos: [{ id: "p1", pending: true, takenAt: 1, by: "u1" }] }, U1);
+    const c2 = await completeAssessment(a2.id, U1, true);
+    ok(!c2.ok && (c2 as { uploading: number }).uploading === 1, "store: uploading photos hard-block completion");
+    await saveAssessment(a2.id, { photos: [{ id: "p1", pending: true, takenAt: 1, by: "u1" }, { id: "p2", inline: "data:image/jpeg;base64,AAAA", takenAt: 2, by: "u1" }] }, U1);
+    await saveAssessment(a2.id, { photos: [{ id: "p1", blobPath: `assessments/${a2.id}/p1.jpg`, takenAt: 1, by: "u1" }] }, U1);
+    await saveAssessment(a2.id, { photos: [{ id: "p1", pending: true, takenAt: 1, by: "u1" }] }, U1);
+    const ph = (await getAssessment(a2.id))!.photos;
+    ok(ph.length === 2 && ph.find((p) => p.id === "p1")?.blobPath === `assessments/${a2.id}/p1.jpg` && !ph.find((p) => p.id === "p1")?.pending, "store: photos merge by id; an upload beats a stale pending");
+    ok((await completeAssessment(a2.id, U1, true)).ok, "store: once uploaded, completion goes through");
+
+    // pick-list extras
+    ok((await addPicklistValue("space_type", "Arena Bowl")).ok, "picklists: add a value");
+    ok(!(await addPicklistValue("space_type", "Proscenium")).ok && !(await addPicklistValue("space_type", "arena  bowl")).ok, "picklists: a code collision (definition or added) is refused");
+    ok(!(await addPicklistValue("no_such_list", "X")).ok && !(await addPicklistValue("space_type", "  ")).ok, "picklists: unknown list or blank label refused");
+    const ex = await getPicklistExtras();
+    ok(ex.space_type?.[0]?.value === "arena_bowl" && ex.space_type[0].label === "Arena Bowl", "picklists: value = slug(label)");
+    await setPicklistRetired("space_type", "arena_bowl", true);
+    ok((await getPicklistExtras()).space_type[0].retired === true && extrasForValidation(await getPicklistExtras()).space_type.includes("arena_bowl"), "picklists: a retired value still validates stored answers");
+    const a5 = track(await createAssessment({ visitType: "condition", customerId: CO, siteId: SITE, visitDate: Date.now(), assessorId: "u1" }, "u1"));
+    ok((await saveAssessment(a5.id, { answers: { "core.space_type": { v: "arena_bowl", state: "answered", at: 10, by: "u1" } } }, U1)).ok, "picklists: an added value validates in saveAssessment");
+
+    // findings: allocation + concurrency + void never reused
+    const mk = (k: string) => ({ key: k, customerId: CO, siteId: SITE, assessmentId: a.id, category: "RIG" as const, rating: "needs" as const, description: "x", questionKeys: [], photoIds: [], quoteRefs: [] });
+    const [f1, f2] = await Promise.all([saveFinding(mk("fd_test000000000001"), U1), saveFinding(mk("fd_test000000000002"), U1)]);
+    ok(f1.ok && f2.ok, "findings: both concurrent creates save");
+    const ids = [(f1 as { doc: Finding }).doc.printedId!, (f2 as { doc: Finding }).doc.printedId!].sort();
+    ok(ids[0].endsWith("-RIG-001") && ids[1].endsWith("-RIG-002"), "findings: concurrent allocation gives 001/002");
+    ok(ids[0] === "ACO-ASS-RIG-001", "findings: missing codes are assigned from the suggestions (Assess Co One → ACO, Assess Hall → ASS)");
+    ok((await getCompany(CO))!.shortCode === "ACO" && (await getSite(SITE))!.shortCode === "ASS", "findings: the assigned codes are stored on the company and venue");
+    await voidFinding("fd_test000000000002", "dup", U1);
+    ok((await getFinding("fd_test000000000002"))!.voided?.reason === "dup", "findings: void records the reason");
+    const f3 = await saveFinding(mk("fd_test000000000003"), U1);
+    ok((f3 as { doc: Finding }).doc.printedId!.endsWith("-RIG-003"), "findings: voided number never reused");
+    const elc = await saveFinding({ ...mk("fd_test000000000005"), category: "ELC" }, U1);
+    ok((elc as { doc: Finding }).doc.printedId === "ACO-ASS-ELC-001", "findings: the sequence is per category");
+    const a4 = track(await createAssessment({ visitType: "condition", customerId: CO, siteId: site2, visitDate: Date.now(), assessorId: "u1" }, "u1"));
+    const other = await saveFinding({ ...mk("fd_test000000000006"), siteId: site2, assessmentId: a4.id }, U1);
+    ok((other as { doc: Finding }).doc.printedId === "ACO-ASS2-RIG-001", "findings: a venue code collision within the company gets a suffix (ASS2)");
+    ok(!(await saveFinding({ ...mk("fd_test000000000007"), siteId: site2 }, U1)).ok, "findings: a finding's venue must match its assessment");
+    ok(!(await saveFinding({ ...mk("fd_test000000000004"), rating: "immediate" }, U1)).ok, "findings: immediate without photo/notify refused");
+    ok(!(await saveFinding({ ...mk("NOT-A-KEY"), description: "x" }, U1)).ok, "findings: a malformed key is refused");
+    const imm = await saveFinding({ ...mk("fd_test000000000008"), rating: "immediate", photoIds: ["p1"], immediate: { hazardContactNotified: true, notifiedAt: 1, lockout: "tagged" }, recommendedAction: "Take out of service" }, U1);
+    ok(imm.ok, "findings: a complete immediate finding saves");
+    // protected fields + optimistic rev
+    const hack = await saveFinding({ key: "fd_test000000000001", printedId: "HACK-1", seq: 99, status: "closed", history: [], description: "edited", quoteRefs: ["Q-HACK"] } as Partial<Finding> & { key: string }, U1);
+    const fh = (await getFinding("fd_test000000000001"))!;
+    ok(hack.ok && fh.description === "edited" && fh.printedId!.endsWith("-RIG-00" + fh.seq) && fh.status === "open" && fh.history.length === 1 && fh.quoteRefs.length === 0, "findings: printedId/seq/status/history/quoteRefs never come from a save");
+    ok((await saveFinding({ key: "fd_test000000000001", rev: 1, description: "stale" }, U1)).ok === false, "findings: a stale rev is a conflict");
+    ok(!(await saveFinding({ key: "fd_test000000000001", category: "HAZ" }, U1)).ok, "findings: the category is fixed once the number is issued");
+    ok((await transitionFinding("fd_test000000000001", "inspected", U1)).ok === false, "findings: inspected without specialist refused");
+    const tr = await transitionFinding("fd_test000000000001", "inspected", U1, { patch: { specialist: { rating: "needs", by: "Rigger" } } });
+    ok(tr.ok && tr.doc.status === "inspected" && tr.doc.history.at(-1)?.status === "inspected" && tr.doc.history.at(-1)?.by === "u1", "findings: a transition with its precondition appends history");
+    ok(!(await transitionFinding("fd_test000000000001", "triaged", U1)).ok && (await transitionFinding("fd_test000000000001", "triaged", U1, { note: "Re-triage" })).ok, "findings: a backward move needs a note");
+    ok((await transitionFinding("fd_test000000000002", "triaged", U1)).ok === false, "findings: a voided finding can't change status");
+    await linkQuote(["fd_test000000000001"], "Q-TEST", U1);
+    ok((await getFinding("fd_test000000000001"))!.status === "quoted", "findings: linking a quote → quoted");
+    ok((await getFinding("fd_test000000000001"))!.quoteRefs.join() === "Q-TEST", "findings: linkQuote adds the quote ref");
+    await linkQuote(["fd_test000000000001"], "Q-TEST", U1);
+    ok((await getFinding("fd_test000000000001"))!.quoteRefs.length === 1, "findings: linking the same quote twice is idempotent");
+    const lf = await listFindings({ siteId: SITE, category: ["RIG"] });
+    ok(lf.length === 3 && lf.every((f) => !f.voided) && (await listFindings({ siteId: SITE, category: ["RIG"], includeVoided: true })).length === 4, "findings: list filters and hides voided by default");
+    ok((await listFindings({ assessmentId: a.id, status: ["quoted"] })).length === 1 && (await listFindings({ customerId: CO, rating: ["immediate"] })).length === 1, "findings: list filters by assessment/status/rating");
+
+    // allocation helper: no-op when already numbered; offline null → numbered on the next save
+    const already = (await getFinding("fd_test000000000003"))!;
+    ok((await allocatePrintedId(already)).printedId === already.printedId, "findings: allocatePrintedId is a no-op once numbered");
+    ok((await listAssessments({ siteId: SITE })).every((x) => x.siteId === SITE) && (await listAssessments({ customerId: CO, status: "completed" })).some((x) => x.id === a2.id), "store: listAssessments filters");
+
+    // push-handler branches
+    const noPerm = await pushAssessment({ id: a5.id, rev: 1, doc: { answers: {} } }, { id: "u9", roles: [] });
+    ok(noPerm.status === "error", "push: assessments need the create permission");
+    const ROLES = ["Estimator"];
+    const pOk = await pushAssessment({ id: a5.id, rev: 99, doc: { answers: { "core.seats": { v: 300, state: "answered", at: 50, by: "zz" } } } }, { id: "u1", roles: ROLES });
+    ok(pOk.status === "ok" && (await getAssessment(a5.id))!.answers["core.seats"]?.by === "u1" && pOk.rev === (await getAssessment(a5.id))!.rev, "push: an assessment push merges through saveAssessment and returns the stored rev");
+    const pBad = await pushAssessment({ id: a5.id, rev: 99, doc: { answers: { "core.space_type": { v: "spaceship", state: "answered", at: 60, by: "u1" } } } }, { id: "u1", roles: ROLES });
+    ok(pBad.status === "conflict" && (pBad.server as { id?: string })?.id === a5.id, "push: a validation refusal is a conflict carrying the server doc");
+    const offId = "AS-987654";
+    created.push(offId); registerFixture("assessments", offId);
+    const pNew = await pushAssessment({ id: offId, rev: 2, doc: { id: offId, visitType: "condition", customerId: CO, siteId: SITE, visitDate: 5, assessorId: "u1", answers: { "core.seats": { v: 120, state: "answered", at: 40, by: "u1" } } } }, { id: "u1", roles: ROLES });
+    ok(pNew.status === "ok" && (await getAssessment(offId))?.answers["core.seats"]?.v === 120, "push: an assessment created offline is created, then saved");
+    ok((await pushAssessment({ id: "AS-987655", rev: 1, doc: { visitType: "condition", customerId: co2, siteId: SITE, visitDate: 5, assessorId: "u1" } }, { id: "u1", roles: ROLES })).status === "error", "push: an offline create with a mismatched venue is an error");
+    ok((await pushFinding({ id: "fd_test00000000000a", rev: 1, doc: mk("fd_test00000000000a") }, { id: "u9", roles: [] })).status === "error", "push: findings need the create permission");
+    const pf = await pushFinding({ id: "fd_test00000000000a", rev: 1, doc: { ...mk("fd_test00000000000a"), printedId: null, status: "triaged" } }, { id: "u1", roles: ROLES });
+    const pfDoc = (await getFinding("fd_test00000000000a"))!;
+    ok(pf.status === "ok" && pfDoc.printedId === "ACO-ASS-RIG-005" && pfDoc.status === "triaged" && pf.rev === pfDoc.rev, "push: an offline finding (printedId null) is numbered on sync and its intended status applied");
+    const pfBad = await pushFinding({ id: "fd_test00000000000a", rev: pfDoc.rev, doc: { ...pfDoc, status: "repaired" } }, { id: "u1", roles: ROLES });
+    ok(pfBad.status === "conflict" && (pfBad.server as { status?: string })?.status === "triaged", "push: a refused transition is a conflict carrying the server doc");
+    const pfStale = await pushFinding({ id: "fd_test00000000000a", rev: 1, doc: { ...pfDoc, description: "old" } }, { id: "u1", roles: ROLES });
+    ok(pfStale.status === "conflict" && (await getFinding("fd_test00000000000a"))!.description === "x", "push: a stale finding push is a conflict");
+    ok((await pushFinding({ id: "fd_test00000000000b", rev: 1, doc: { ...mk("fd_test00000000000b"), rating: "immediate" } }, { id: "u1", roles: ROLES })).status === "error", "push: a refused new finding stays an error (no server copy to fall back on)");
+  } finally {
+    await db.delete(DOC_TABLES.findings).where(like(DOC_TABLES.findings.id, "fd_test%"));
+    if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    await db.delete(DOC_TABLES.venue_profiles).where(like(DOC_TABLES.venue_profiles.id, "TESTassess:%"));
+    await db.delete(blobs).where(eq(blobs.id, ASSESSMENT_PICKLISTS_BLOB));
+    if (prevPicklists) await db.insert(blobs).values(prevPicklists);
     await dropAssessIdentityFixtures();
   }
 }

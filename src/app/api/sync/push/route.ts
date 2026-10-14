@@ -10,6 +10,8 @@ import { eq, sql } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
 import type { Pipelines } from "@/lib/pipelines";
+import { pushAssessment } from "@/lib/stores/assessments";
+import { pushFinding } from "@/lib/stores/findings";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -75,6 +77,16 @@ export async function POST(req: Request) {
       }
       if (JSON.stringify(rec.doc).length > MAX_DOC_BYTES) {
         results[coll].push({ id: rec.id, status: "error" });
+        continue;
+      }
+      // Assessments engine (#337): never a whole-document replace. Each needs
+      // `create`; answers merge per key and findings get their printed id
+      // from the server (see the stores). Same reply shape: ok + the stored
+      // rev, or conflict + the server copy, or error (left in the outbox).
+      if (coll === "assessments" || coll === "findings") {
+        const user = { id: String(session.user.id ?? ""), roles: session.user.roles };
+        const one = { id: rec.id, rev: rec.rev, doc: rec.doc };
+        results[coll].push(coll === "assessments" ? await pushAssessment(one, user) : await pushFinding(one, user));
         continue;
       }
       try {
