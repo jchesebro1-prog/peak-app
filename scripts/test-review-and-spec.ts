@@ -35227,7 +35227,8 @@ import {
 
   // Fix wave 2 — a new estimate opens at its customer's tier (server-side).
   const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
-  const pgNew = pg.slice(pg.indexOf("if (preCustomer) {"), pg.indexOf("const lite = ("));
+  // Estimate suggestion (#338): the intake seed is `seedCustomer` (the URL's customer, else the suggestion's).
+  const pgNew = pg.slice(pg.indexOf("if (seedCustomer) {"), pg.indexOf("const lite = ("));
   ok(/^import \{ resolveTier \} from "@\/lib\/pricing-tiers";$/m.test(pg)
     && /if \(!q\) \{\s*const t = await resolveTier\(initial\.customerId, initial\.contactName\);\s*initial\.pricingTier = t\.tier;\s*initial\.tierMargin = t\.margin;\s*\}/.test(pgNew)
     && pgNew.indexOf("if (!q) {") > pgNew.indexOf("initial.contactName = pickContactName("),
@@ -35258,7 +35259,7 @@ import {
   const saveA = fn("saveQuoteAction");
   ok(/const tier = await resolveTier\(payload\.customerId \|\| null, payload\.contactName \|\| ""\);/.test(saveA)
     && /pricingTier: tier\.tier,\s*tierMargin: tier\.margin,/.test(saveA)
-    && /create\(\{ \.\.\.patch, owner: user\.name \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
+    && /create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
     "#254 review: saveQuoteAction stamps the tier server-side into the one patch both create and update write");
   const rta = fn("resolveTierAction");
   ok(/await requireUser\(\)/.test(rta) && /resolveTier\(/.test(rta) && /ok: true, pricingTier: r\.tier, tierMargin: r\.margin, label:/.test(rta)
@@ -42704,7 +42705,7 @@ import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-docum
   const meta = acts.slice(acts.indexOf("export async function updateQuoteMetaAction"), acts.indexOf("export type QuotePeopleSync"));
   ok(meta.length > 0 && !/patch\.owner\b/.test(meta) && !/patch\.preparedBy\b/.test(meta), "#287 B: the header autosave's allowlist still excludes owner (and preparedBy)");
   const save = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
-  ok(save.length > 0 && !/patch\.owner\s*=/.test(save) && !/owner:\s*(input|body|data|args)\./.test(save) && save.includes("create({ ...patch, owner: user.name })"),
+  ok(save.length > 0 && !/patch\.owner\s*=/.test(save) && !/owner:\s*(input|body|data|args)\./.test(save) && save.includes("create({ ...patch, owner: user.name, ...(leadId ? { leadId } : {}) })"),
     "#287 B: Save never writes owner from the client — only a new quote's creator");
   const people = acts.slice(acts.indexOf("export async function setQuotePeopleAction"));
   ok(people.includes("await requireUser()") && people.includes("setQuotePeopleAs(id, user,") && people.includes("quoteNextStepFor(q, user)") && people.includes("scheduleQuotePdf(q.id)"),

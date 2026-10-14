@@ -1168,8 +1168,9 @@ export default function LeadDrawer({
                     </div>
                   )}
 
-                  {/* footer actions — Suggest estimate gets its own line above the
-                      Convert / Lost / Delete row, which keeps its own layout */}
+                  {/* footer actions */}
+                  {/* Suggest estimate gets its own line above the Convert / Lost /
+                      Delete row, which keeps its own layout. */}
                   <div
                     style={{
                       marginTop: "auto",
