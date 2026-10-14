@@ -1163,7 +1163,7 @@ See `.env.example`.
     duplicate window from a second main tab. Next: AI brief (now shipped, #337) → estimate suggestion →
     AI sidebar. Punch item #336.
 
-56. ✅ **AI daily brief** (#337, D914–D926) — roadmap piece 2, for Assist pilot
+56. ✅ **AI daily brief** (#337, D914–D929) — roadmap piece 2, for Assist pilot
     users with the new opt-in **Daily brief** switch (Settings → Beta → Assist
     pilot; no migration; `ASSIST_MODEL_BRIEF` optional). A BriefCard above Start
     here at 6:45 and 13:45 Chicago (`slotAt` is minute-precise; crons `45 11` and
@@ -1179,9 +1179,13 @@ See `.env.example`.
     task suggestions for every thread on my court (`CommThread.preDraft`) and a
     Haiku follow-up note + email for each quiet quote — sent, the owner's (else
     Prepared by), ≥ 5 business days old, no inbound reply, at most 8
-    (`Quote.assistNudge`); `countRate: false` so only the monthly cap bounds it,
-    per-thread / per-quote leases, basis-checked key-level writes, 6 h error retry;
-    run from Home and Inbox `after()` and the two cron riders. The reply and task
+    (`Quote.assistNudge`); only for pilot users with Daily brief on; `countRate:
+    false`, bounded by the monthly cap and paused at 60 % of it (D927);
+    per-thread / per-quote leases, basis- and owner-checked key-level writes
+    (`ownerId`, D929), 6 h error retry; run from Home and Inbox `after()` and the
+    two cron riders (Gmail cron: meetings, then briefs + drafts by 35 s, then
+    photos; midday cron ends by 50 s). A lazy brief that ran out of time is not
+    stored, and the cron replaces a stored lazy brief with an error (D928). The reply and task
     calls are reusable server functions (`reply-server`, `tasks-server`) with
     per-call limits that can only shorten. In the reader, **Use it** opens a fresh
     stored draft with no model call; **Send nudge** opens `/inbox?nudge=<quoteId>`

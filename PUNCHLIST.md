@@ -12041,7 +12041,7 @@ link/archive paths a person would.
 - A second main tab (or an SSO / COOP redirect) can open a duplicate window of the same name; browser behaviour, not handled.
 - The new-tab fallback for Open in main window can be popup-blocked in Safari.
 
-## 337. AI daily brief — a 6:45 / 1:45 summary, pre-made drafts, quote nudges, phone reminders — BUILT 2026-10-13 on `worktree-assist-layer` (D914–D926)
+## 337. AI daily brief — a 6:45 / 1:45 summary, pre-made drafts, quote nudges, phone reminders — BUILT 2026-10-13 on `worktree-assist-layer` (D914–D929)
 
 **Asked (Jeff, 2026-10-13):** roadmap piece 2. A written brief above Start here with drafts already made, for Assist pilot users who are switched on. Spec `docs/superpowers/specs/2026-10-13-ai-brief-design.md`, plan `docs/superpowers/plans/2026-10-13-ai-brief.md`. Builds on Assist (#334), Inbox organization (#335), Morning triage (#324) and the pop-out `LiveSync` (#336). No migration. New env var: `ASSIST_MODEL_BRIEF` (optional, defaults to Haiku).
 
@@ -12053,10 +12053,17 @@ link/archive paths a person would.
 - **Phone:** big-text view, **Listen** (device speech), two repeating local notifications (ids 64501 / 64502 at 6:45 and 13:45), Account → **Brief reminders on this phone** on by default (D925).
 - **Assist report:** a Daily brief table — briefs built by source, pre-drafts made / used / discarded / not used, nudges made and opened (D926).
 
+**Final-review fixes (2026-10-13, D918/D920 reworded, D927–D929):**
+- The draft queue runs only for pilot users with **Daily brief** on. Before, Reply and Task suggestions (on by default) were enough, so every pilot user got background Sonnet drafting from Home and the Inbox with the brief off (D918).
+- **Background spending guard:** pre-drafting pauses once this month's Assist spend reaches 60 % of the monthly cap (`skipped`/`stoppedBy: "background-cap"`), checked at the gate and before each call; interactive Assist, the brief summary and Rebuild still use the full cap. The pilot card says so under the cap field (D927).
+- A lazy brief that ran out of time before its Assist call is shown unstored (`transient`), and the cron replaces a stored lazy brief that has an error with a good cron build, so one slow first view no longer locks the slot to a counts-only brief (D928).
+- Pre-drafts and nudges carry `ownerId`; a thread or quote reassigned since shows its new owner nothing of the old draft, and the queue redrafts it for them (D929).
+- Gmail cron order: triage → Krisp meetings (ending by 35 s) → briefs → drafts (35 s) → photos (≥ 10 s before 45 s). The midday cron's brief deadline is 50 s, not 55 s (D920). D918 now says the interactive limit is 60 per hour, not 20.
+
 **Remaining (Jeff-gated):**
 - (1) Settings → Beta → Assist pilot: tick the pilot users and turn on **Daily brief** (it starts off, like Inbox organization). The Claude key must already be set (D881).
 - (2) Run `npx cap sync`, then rebuild and reinstall the iOS and Android apps so the reminders exist. Until then the phone shows no notifications and nothing else changes. Check on a real device that a repeating 6:45 notification arrives and that tapping it opens the brief.
-- (3) After the first morning, check the cost in the Assist report and in the Anthropic Console against the monthly cap. The first run drafts every thread on each person's court, so expect it to be the most expensive; later runs only redo stale drafts.
+- (3) After the first morning, check the cost in the Assist report and in the Anthropic Console against the monthly cap. Pre-drafting pauses by itself at 60 % of the cap; raise the cap if drafts stop mid-month. The first run drafts every thread on each person's court, so expect it to be the most expensive; later runs only redo stale drafts.
 - (4) Try **Listen** in the car (iPhone Safari/app and Android).
 - (5) Read the report after a month: how many pre-drafts were used, and whether the nudge "opened" count is real use.
 
@@ -12066,7 +12073,8 @@ link/archive paths a person would.
 - The Rebuild limit (3 per hour) and the queue's one-at-a-time and 60 s-gap guards are per process, so on serverless two instances can each act once.
 - Every user's build scans all threads and quotes (Organize counts, court threads, quiet quotes); it is fine at today's size but is O(users × records) per slot.
 - Nudge "opened" is not "sent": a Gmail send is not tied back to the nudge run (D926).
-- The Gmail cron rider rarely has time for a draft queue (35 s cap); Home's `after()` does most of the drafting.
+- The Gmail cron rider rarely has time for a draft queue (35 s cap, and meetings now go first); Home's `after()` does most of the drafting. A Krisp call in flight at 35 s can run its 20 s timeout and leave the briefs, drafts and photos no time that morning.
+- The 60 % background guard reads the month's runs once per call-making item (on top of `runAssist`'s own read); fine at pilot volume. The cron's replace of a lazy error brief has no blob compare-and-set (re-read, then write).
 - With `INBOX_ORG_DISABLED` the Inbox schedules no queue; Home still drafts.
 - Task suggestions are not counted in the report; pre-drafts made before this change have no marker.
 

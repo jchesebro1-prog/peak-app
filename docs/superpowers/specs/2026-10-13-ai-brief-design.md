@@ -83,7 +83,7 @@ Work order is oldest first, until the deadline:
 
 **Fresh** means `preDraft.basis` equals the thread's newest inbound message id. When the reader opens a thread whose pre-draft is stale, it drafts live (the existing Draft reply path).
 
-**Gating.** The owner must be pilot + `reply` for replies, `tasks` for task suggestions, and `brief` for nudges. Each call goes through `runAssist`, so the cap, rate limits and logging all apply. Use background rate-limit keys (`countRate: false`) so pre-drafting never uses up the person's interactive limits; the monthly cap is the bound.
+**Gating.** The queue runs only for a pilot user with Daily brief on (final review, D918); then `reply` for replies, `tasks` for task suggestions, and `brief` for nudges. It pauses at 60 % of the monthly cap (D927). Each call goes through `runAssist`, so the cap, rate limits and logging all apply. Use background rate-limit keys (`countRate: false`) so pre-drafting never uses up the person's interactive limits; the monthly cap is the bound.
 
 ## 3. Quiet quotes (pure selector)
 

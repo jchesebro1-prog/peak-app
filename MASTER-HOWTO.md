@@ -317,7 +317,7 @@ in the browser, so there is no setting, no env var and no kill switch.
 - After a Google sign-in redirect the link to old pop-outs can break; close them and
   open again.
 
-## 6d. AI daily brief (#337, D914–D926)
+## 6d. AI daily brief (#337, D914–D929)
 
 A short written brief at the top of Home twice a day, with the drafts already made.
 It is part of the Assist pilot, so nothing changes for anyone you have not switched on.
@@ -328,7 +328,8 @@ It is part of the Assist pilot, so nothing changes for anyone you have not switc
   person must be ticked in the pilot list.
 - Turn on **Daily brief** on that card. It starts off, like Inbox organization. Reply
   and Task suggestions need to be on too if you want the pre-made drafts; the brief
-  itself works without them.
+  itself works without them. Nobody gets pre-made drafts without Daily brief, even
+  with Reply and Task suggestions on.
 - Optional: `ASSIST_MODEL_BRIEF` in the environment changes the model (default Haiku).
   The kill switch is `ASSIST_DISABLED`.
 
@@ -341,7 +342,9 @@ It is part of the Assist pilot, so nothing changes for anyone you have not switc
   waiting on you, and quotes that have gone quiet. The afternoon brief adds what
   changed since the morning.
 - **Rebuild** remakes the brief now (3 per hour, up to about a minute). If the model
-  is unavailable you get a plainer brief built from the counts, with a note.
+  is unavailable you get a plainer brief built from the counts, with a note. If the
+  first view of the day simply ran out of time, that plainer brief is not kept: the
+  next view, or the next scheduled job, makes the real one.
 - The card collapses, and it never stops Home from loading.
 
 **Use the drafts**
@@ -350,14 +353,18 @@ It is part of the Assist pilot, so nothing changes for anyone you have not switc
   Open the email: "Draft reply ready · prepared 6:52 · **Use it**" puts the reply in
   the composer. You edit and press Send; nothing sends by itself. The draft is shown
   only while it is still current: new mail, a reply from you, or a thread that is no
-  longer yours makes it disappear.
+  longer yours makes it disappear. A thread or quote handed to someone else never
+  shows them the previous person's draft; a new one is made for them.
 - A quote that has been **sent**, is yours (the Lead estimator, else Prepared by) and
   has had no reply for 5 business days shows under quiet quotes. **Send nudge** opens
   the composer with a short follow-up already written. Check the recipient (it picks
   the quote's contact by name, or leaves To blank), edit it and send. A lead row shows
   **Ready to quote? → Open lead**.
 - Drafts are made in the background when you open Home or the Inbox and by the
-  morning and afternoon jobs, within the monthly cost cap in Settings.
+  morning and afternoon jobs, within the monthly cost cap in Settings. Background
+  drafting pauses once the month's Assist spend reaches **60 % of the cap**, so the
+  rest stays free for Draft reply, Suggest tasks and the brief itself. Raise the cap
+  on the pilot card if drafts stop appearing late in the month.
 
 **On the phone**
 
