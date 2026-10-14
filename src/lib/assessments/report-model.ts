@@ -418,9 +418,22 @@ export function findingsPdfName(subject: string, now: number): string {
 
 export const INLINE_CONCURRENCY = 4;
 export const INLINE_TOTAL_BYTES = 20 * 1024 * 1024;
-/** Email attachments ride inside the thread doc; past this the PDF is a download only. */
+/** Past this the PDF is a download only (a Gmail message carries it base64-encoded). */
 export const EMAIL_PDF_MAX_BYTES = 10 * 1024 * 1024;
 export const EMAIL_TOO_LARGE = "Report is too large to email — download it instead";
+/** Without Blob (local dev) the PDF rides inline in the thread doc as a data URL, so it is kept small. */
+export const EMAIL_INLINE_MAX_BYTES = 1.5 * 1024 * 1024;
+export const EMAIL_TOO_LARGE_LOCAL = "Report is too large to email from this computer — download it instead";
+
+/**
+ * How Email report attaches a rendered PDF of `size` bytes (#340 final review I2): with Blob configured it is stored
+ * and attached BY REFERENCE (never base64 in the comms doc), up to 10 MB; without Blob it rides inline as a data URL,
+ * up to 1.5 MB. Anything larger is refused with the matching message.
+ */
+export function emailAttachmentMode(size: number, blobOn: boolean): { mode: "reference" } | { mode: "inline" } | { mode: "refuse"; error: string } {
+  if (blobOn) return size > EMAIL_PDF_MAX_BYTES ? { mode: "refuse", error: EMAIL_TOO_LARGE } : { mode: "reference" };
+  return size > EMAIL_INLINE_MAX_BYTES ? { mode: "refuse", error: EMAIL_TOO_LARGE_LOCAL } : { mode: "inline" };
+}
 
 /**
  * Photos as data URIs for the print route, at most `concurrency` reads at a time. Pending photos are skipped, a read

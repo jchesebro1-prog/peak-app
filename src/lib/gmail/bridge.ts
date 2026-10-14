@@ -56,6 +56,8 @@ import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
 import { icsMimeType } from "@/lib/ics";
 import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
+import { assessmentIdOfPdfPath, assessmentPdfFitsThread, isAssessmentPdfPath } from "@/lib/assessments/report-pdf-path";
+import { readAssessmentPdf } from "@/lib/assessments/report-pdf-storage";
 import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
@@ -146,7 +148,16 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
   const lastIn = lastInbound(t);
   const inReplyTo = lastIn?.gmailMessageId || undefined;
 
-  const readPdfForThread = (path: string) => (pdfPathFitsLink(path, t.link) ? readQuotePdf(path) : Promise.resolve(null));
+  const readPdfForThread = async (path: string): Promise<Buffer | null> => {
+    // #340: an emailed assessment report rides by reference too — read only on a thread for that assessment's
+    // customer (or an unlinked one), streamed from Blob.
+    if (isAssessmentPdfPath(path)) {
+      const { getAssessment } = await import("@/lib/stores/assessments");
+      const a = await getAssessment(assessmentIdOfPdfPath(path) ?? "");
+      return assessmentPdfFitsThread(path, t, a?.customerId ?? null) ? readAssessmentPdf(path) : null;
+    }
+    return pdfPathFitsLink(path, t.link) ? readQuotePdf(path) : null;
+  };
   for (const m of pending) {
     try {
       // data-URL attachments → raw base64 MIME parts (IDEAS #36); a

@@ -49,11 +49,13 @@ import {
 import { REGISTER_COLUMNS, parseRegisterFilters, registerCells, registerCsvName, registerList, registerQuery } from "../src/lib/assessments/register";
 import { LINK_FAILED_NOTICE, OTHER_VENUE_NOTICE, findingKeysForSave, linkOnCreate, linkOnCreateSafe, quoteFromFindings } from "../src/lib/assessments/quote-from-findings";
 import {
-  EMAIL_PDF_MAX_BYTES, EMAIL_TOO_LARGE, INLINE_TOTAL_BYTES, PHOTO_UNAVAILABLE, REPORT_SECTIONS, REPORT_WAIT_FOR, STANDING_LINE, assessmentPdfName,
+  EMAIL_INLINE_MAX_BYTES, EMAIL_PDF_MAX_BYTES, EMAIL_TOO_LARGE, EMAIL_TOO_LARGE_LOCAL, INLINE_TOTAL_BYTES, emailAttachmentMode, PHOTO_UNAVAILABLE, REPORT_SECTIONS, REPORT_WAIT_FOR, STANDING_LINE, assessmentPdfName,
   buildAssessmentReport, buildFindingsReport, contactText, documentsToRequest, fileNamePart, findingsPdfName, followUpGaps, inlinePhotoSources,
   liveKeeper, openFindings, reportAnswerText, reportEmailCopy, reportRegisterFindings, reportTable,
 } from "../src/lib/assessments/report-model";
 import { findingsPdfHref, parseFindingsScope } from "../src/lib/assessments/register";
+import { assessmentIdOfPdfPath, assessmentPdfAttachment, assessmentPdfFitsThread, assessmentPdfPath, isAssessmentPdfFile, isAssessmentPdfPath } from "../src/lib/assessments/report-pdf-path";
+import { attachmentHref, attachmentMimePart } from "../src/lib/comms-attachments";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { VISIT_TYPES } from "../src/lib/assessments/defs";
 import { NAV, activeKeyFor, parentGroupOf } from "../src/components/nav/nav-data";
@@ -550,6 +552,7 @@ export async function assessmentChecks(ok: Ok) {
   await task10Checks(ok);
   task11Checks(ok);
   finalReviewChecks(ok);
+  await finalReviewEmailChecks(ok);
 }
 
 /** Final whole-branch review fixes (I1 outbox loss, I3 the save-status label). Pure. */
@@ -609,6 +612,48 @@ function finalReviewChecks(ok: Ok) {
   ok(L("idle", false, { state: "error" }) === "Couldn't sync — the server refused it", "final I3: an errored entry with no reason still says why it's shown");
   ok(L("saved", false, null) === "Saved" && L("idle", true, null) === "" && L("saving", true, { state: "pending" }) === "Saving…" && L("error", true, null) === "Not saved", "final I3: saving / not saved / idle");
   ok(/saveStatusLabel\(\{ local: saveState, connected: sync\.connected, entry: sync\.entry \}\)/.test(ed) && /engine\.subscribe\(load\)/.test(ed) && !ed.includes(`"queued" ? "Saved on this device`), "final I3: the editor's label comes from saveStatusLabel, re-read on every SyncEngine change");
+}
+
+/** Final review I2: Email report stores the PDF in Blob and attaches it by reference; inline only without Blob. */
+async function finalReviewEmailChecks(ok: Ok) {
+  // the path guard
+  const P = "assessment-pdfs/AS-1001/1760000000000.pdf";
+  ok(isAssessmentPdfPath(P) && isAssessmentPdfPath("assessment-pdfs/AS-1001/1760000000000-Ab12Cd34Ef.pdf") && assessmentIdOfPdfPath(P) === "AS-1001", "final I2: a stored report path (with or without Blob's suffix) passes and names its assessment");
+  for (const bad of ["assessment-pdfs/AS-1001/../x.pdf", "assessment-pdfs/AS-1/1760000000000.pdf", "assessment-pdfs/AS-1001/report.pdf", "assessment-pdfs/AS-1001/1760000000000.pdf.exe", "quote-pdfs/Q-1/1760000000000.pdf", "assessments/AS-1001/1760000000000.pdf", "/assessment-pdfs/AS-1001/1760000000000.pdf", "assessment-pdfs/AS-1001/sub/1760000000000.pdf"])
+    ok(!isAssessmentPdfPath(bad) && assessmentIdOfPdfPath(bad) === null, `final I2: path guard refuses ${bad}`);
+  ok(isAssessmentPdfFile("1760000000000.pdf") && isAssessmentPdfFile("1760000000000-x9.pdf") && !isAssessmentPdfFile("../1760000000000.pdf") && !isAssessmentPdfFile("a/1760000000000.pdf") && !isAssessmentPdfFile("x.pdf"), "final I2: the download route's ?file= is a bare stored file name");
+  ok(assessmentPdfPath("AS-1001", 1760000000000.7) === P, "final I2: new reports go to assessment-pdfs/<AS-id>/<ms>.pdf");
+  let threw = false;
+  try { assessmentPdfPath("../AS-1", 1); } catch { threw = true; }
+  ok(threw, "final I2: a malformed assessment id never makes a path");
+  // the by-reference attachment shape
+  const att = assessmentPdfAttachment("AS-1001", "Assessment AS-1001 — Hall.pdf", 3_000_000, P);
+  ok(att.pdfPath === P && att.href === "/api/assessments/AS-1001/report-pdf?file=1760000000000.pdf&download=1" && att.mime === "application/pdf" && att.size === 3_000_000 && !("dataUrl" in att), "final I2: the draft attachment carries pdfPath + a team download href, never the bytes");
+  threw = false;
+  try { assessmentPdfAttachment("AS-1002", "x.pdf", 1, P); } catch { threw = true; }
+  ok(threw, "final I2: an attachment for another assessment's folder is refused");
+  ok(attachmentHref(att) === att.href, "final I2: the Inbox reader links the stored copy");
+  const reads: string[] = [];
+  const part = await attachmentMimePart(att, async (p) => { reads.push(p); return Buffer.from("%PDF-1.7"); });
+  ok(part?.dataBase64 === Buffer.from("%PDF-1.7").toString("base64") && part.mime === "application/pdf" && reads.join() === P, "final I2: the sender builds the MIME part from the stored bytes");
+  // which threads may read it
+  ok(assessmentPdfFitsThread(P, { customerId: "c1", link: null }, "c1") && !assessmentPdfFitsThread(P, { customerId: "c2", link: null }, "c1"), "final I2: a thread for the assessment's customer reads it; another customer's doesn't");
+  ok(assessmentPdfFitsThread(P, { customerId: null, link: null }, "c1") && !assessmentPdfFitsThread(P, { customerId: null, link: { type: "lead", id: "L-1" } }, "c1"), "final I2: an unlinked thread with no customer reads it; a linked one without a customer doesn't");
+  ok(!assessmentPdfFitsThread(P, { customerId: "c1", link: { type: "quote", id: "Q-1" } }, "c1") && !assessmentPdfFitsThread(P, { customerId: "c1" }, null) && !assessmentPdfFitsThread("quote-pdfs/Q-1/1.pdf", { customerId: "c1" }, "c1"), "final I2: never on a quote thread, for a missing assessment, or for a non-assessment path");
+  // the cap
+  ok(EMAIL_INLINE_MAX_BYTES === 1.5 * 1024 * 1024 && EMAIL_TOO_LARGE_LOCAL === "Report is too large to email from this computer — download it instead", "final I2: 1.5 MB inline cap and its wording");
+  ok(emailAttachmentMode(5 * 1024 * 1024, true).mode === "reference" && emailAttachmentMode(100, true).mode === "reference", "final I2: with Blob every report rides by reference");
+  const over = emailAttachmentMode(EMAIL_PDF_MAX_BYTES + 1, true);
+  ok(over.mode === "refuse" && over.error === EMAIL_TOO_LARGE, "final I2: past 10 MB it is refused even with Blob");
+  const local = emailAttachmentMode(EMAIL_INLINE_MAX_BYTES + 1, false);
+  ok(emailAttachmentMode(EMAIL_INLINE_MAX_BYTES, false).mode === "inline" && local.mode === "refuse" && local.error === EMAIL_TOO_LARGE_LOCAL, "final I2: without Blob it rides inline up to 1.5 MB, then refuses");
+  // wiring
+  const act = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/report/actions.ts"), "utf8");
+  ok(/emailAttachmentMode\(r\.pdf\.length, blobEnabled\(\)\)/.test(act) && /storeAssessmentPdf\(a\.id, r\.pdf/.test(act) && /assessmentPdfAttachment\(/.test(act) && act.indexOf("dataUrl") > act.indexOf('plan.mode === "reference"'), "final I2: Email report stores + attaches by reference, inline only in the no-Blob branch");
+  const br = readFileSync(join(ROOT, "src/lib/gmail/bridge.ts"), "utf8");
+  ok(/isAssessmentPdfPath\(path\)/.test(br) && /assessmentPdfFitsThread\(path, t, a\?\.customerId \?\? null\) \? readAssessmentPdf\(path\)/.test(br), "final I2: the Gmail bridge reads an assessment PDF only when it fits the thread, from Blob");
+  const rt = readFileSync(join(ROOT, "src/app/api/assessments/[id]/report-pdf/route.ts"), "utf8");
+  ok(/isAssessmentPdfFile\(file\)/.test(rt) && /streamAssessmentPdf\(`assessment-pdfs\/\$\{id\}\/\$\{file\}`\)/.test(rt), "final I2: the report route serves a stored copy by ?file=, guarded");
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
