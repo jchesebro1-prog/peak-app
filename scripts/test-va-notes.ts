@@ -208,6 +208,16 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#342 A8: the section header is keyboard-operable (role=button, tabIndex, aria-expanded, key handler)");
   ok(ctl7.includes("active={shownActive}") && ctl7.includes("const shownActive"), "#342 A8: the rail's active section is always a shown one");
   ok(ctl7.includes("onPick={pickFromRail}"), "#342 A8: the rail routes a locked discipline to Kill questions");
+
+  /* ---- Task 8: recap, final thoughts, older notes ---- */
+  const dir8 = "src/app/(app)/venue-assessments/[id]";
+  const ctl8 = readFileSync(join(process.cwd(), `${dir8}/controls.tsx`), "utf8");
+  const ft = readFileSync(join(process.cwd(), `${dir8}/sections/final-thoughts.tsx`), "utf8");
+  const rcp = readFileSync(join(process.cwd(), `${dir8}/sections/recap.tsx`), "utf8");
+  ok(ctl8.includes('id: "recap"') && ctl8.includes('id: "finalThoughts"') && !ctl8.includes('id: "conditions"'), "#342 A5/A7: Customer recap and Final thoughts replace Site conditions");
+  ok(ft.includes("activeSurveyTags") && ft.includes("Older site conditions") && ft.includes("Internal only"), "#342 A5: Final thoughts shows active tags, retired-but-carried tags and the old chips read-only");
+  ok(rcp.includes("recapFor(") && rcp.includes("What we heard"), "#342 A7: the recap reads recapFor");
+  ok(/<OlderNotes notes=\{draft\.legacyNotes\.filter\(\(n\) => n\.section === sec\.id\)\}/.test(ctl8), "#342 R1: every section shows its Older notes");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

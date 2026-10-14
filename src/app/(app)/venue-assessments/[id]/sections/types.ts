@@ -37,7 +37,6 @@ export type EditorMeta = {
   liftTypes: string[];
   liftSuppliers: string[];
   installTimeframes: string[];
-  conditions: string[];
   stages: Array<{ key: SurveyStage; label: string }>;
   stageMeta: Record<SurveyStage, SurveyStageMeta>;
   measureGroups: MeasureGroup[];
@@ -161,7 +160,8 @@ export type SectionDef = {
 } & (
   | { kind: "custvenue" }
   | { kind: "fields"; fields: FieldDef[] }
-  | { kind: "conditions" }
+  | { kind: "recap" }
+  | { kind: "finalThoughts" }
   | { kind: "photos" }
   | { kind: "viz3d" }
   | { kind: "tier1" }

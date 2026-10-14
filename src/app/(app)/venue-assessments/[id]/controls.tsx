@@ -41,7 +41,9 @@ import {
 } from "./sections/styles";
 import { FieldsSection } from "./sections/fields";
 import { CustVenueSection } from "./sections/custvenue";
-import { ConditionsSection } from "./sections/conditions";
+import { RecapSection } from "./sections/recap";
+import { FinalThoughtsSection } from "./sections/final-thoughts";
+import { OlderNotes } from "./sections/older-notes";
 import { PhotosSection } from "./sections/photos";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
@@ -291,13 +293,6 @@ export default function SurveyEditor({
   const setMeasure = (key: string, val: string | boolean) =>
     patchDraft({ measurements: { ...draft.measurements, [key]: val } });
   const toggleMeasure = (key: string) => setMeasure(key, !mv(key));
-  const toggleCondition = (c: string) => {
-    const set = draft.conditions.slice();
-    const i = set.indexOf(c);
-    if (i >= 0) set.splice(i, 1);
-    else set.push(c);
-    patchDraft({ conditions: set });
-  };
 
   /* ---------- site intake: discipline data + inventory helpers ---------- */
   const tier1 = tier1Items(draft);
@@ -539,7 +534,6 @@ export default function SurveyEditor({
         { kind: "textarea", key: "firstImpressions", label: "First impressions / notes" },
       ],
     });
-    secs.push({ id: "conditions", title: "Site conditions", subtitle: "Quick tags", group: "field", step: 1, kind: "conditions" });
     // Life safety — auditorium sheet p.5, offered on any class. Collapsed by
     // default; the values live one level down on draft.lifeSafety.
     secs.push({
@@ -584,6 +578,8 @@ export default function SurveyEditor({
         { kind: "textarea", key: "notes", label: "Generic notes", placeholder: "Access, hazards, scheduling constraints…" },
       ],
     });
+    secs.push({ id: "recap", title: "Customer recap", subtitle: "Read back what we heard", group: "wrapup", step: 5, kind: "recap" });
+    secs.push({ id: "finalThoughts", title: "Final thoughts", subtitle: "Internal tags — never shown to the customer", group: "wrapup", step: 5, kind: "finalThoughts" });
     if (draft.assessmentEnabled) {
       secs.push({ id: "assessmentUsage", title: "Usage & needs profile", subtitle: "How the room is used, operated, and expected to grow", group: "assessment", step: 5, kind: "assessmentUsage" });
       secs.push({ id: "assessmentCondition", title: "Condition ratings", subtitle: "Good, monitor, or replace—with formal inspection references", group: "assessment", step: 5, kind: "assessmentCondition" });
@@ -593,12 +589,9 @@ export default function SurveyEditor({
       if (GROUP_BY_ID[s.id]) s.group = GROUP_BY_ID[s.id];
       if (STEP_BY_ID[s.id] != null) s.step = STEP_BY_ID[s.id];
     });
-    // Site conditions is not in SECTION_ORDER (#342 replaces it with Final thoughts) — until then it keeps its
-    // place right after Site access & logistics instead of sorting to the top.
-    const rank = (id: string) => (id === "conditions" ? SECTION_ORDER.indexOf("site") + 0.5 : SECTION_ORDER.indexOf(id));
     return secs
       .filter((s) => sectionVisible(draft, s.id))
-      .sort((a, b) => rank(a.id) - rank(b.id));
+      .sort((a, b) => SECTION_ORDER.indexOf(a.id) - SECTION_ORDER.indexOf(b.id));
   }, [draft, meta, roster]);
 
   /* ---------- persistence ---------- */
@@ -1263,18 +1256,15 @@ export default function SurveyEditor({
                           {sec.kind === "assessmentFindings" && (
                             <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
                           )}
-                          {sec.kind === "conditions" && (
-                            <ConditionsSection
-                              draft={draft}
-                              conditions={meta.conditions}
-                              toggleCondition={toggleCondition}
-                              chipStyle={chipStyle}
-                            />
+                          {sec.kind === "recap" && <RecapSection draft={draft} />}
+                          {sec.kind === "finalThoughts" && (
+                            <FinalThoughtsSection draft={draft} tags={meta.internalTags} onTags={(next) => setField("internalTags", next)} chipStyle={chipStyle} />
                           )}
                           {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
                           {sec.kind === "photos" && (
                             <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
                           )}
+                          <OlderNotes notes={draft.legacyNotes.filter((n) => n.section === sec.id)} />
                         </div>
                       )}
                     </div>
