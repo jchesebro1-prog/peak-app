@@ -1283,5 +1283,53 @@ See `.env.example`.
     company scans headers, lead/project notes post no LiveSync entity. This
     completes the AI roadmap. Punch item #339.
 
+59. ✅ **Assessments engine — slice 1** (#340, D961–D995) — Condition
+    assessment + a findings register, from Jeff's three Oct 13 briefs
+    (`docs/assessments/briefs/`; spec `docs/superpowers/specs/2026-10-13-assessments-engine-design.md`).
+    Questions are code-first definitions (`src/lib/assessments/defs/`: scopes
+    S0–S8, modules, pick lists, every gate rule R/F/G/L/A/H/X as data;
+    `ASSESSMENT_DEF` version 1 stamped as `defVersion`, stable dotted keys,
+    admin-addable pick-list values in the `assessment_picklists` blob) and one
+    pure `evaluate()` (`evaluate.ts`) serves the editor, Mark complete, the
+    report and the server. Three doc collections — `assessments` (`AS-####`
+    from 1001), `findings` (`fd_<16 hex>`), `venue_profiles` (id = site id) —
+    plus `companies.short_code` / `sites.short_code` with unique partial
+    indexes (migration 0040_assessments; stores `src/lib/stores/assessments.ts`,
+    `findings.ts`, `venue-profiles.ts`, row layer `assessment-rows.ts`). The
+    editor (`/assessments/[id]`, phone-first) starts **online only**, then works
+    offline through the outbox: answers merge per key (newest `at` wins, server
+    stamps `by` and clamps `at`), invalid / late / stale pushes land in
+    `syncRejects` with Re-enter / Use mine, and the push rev base is `sent − 1`.
+    Photos shrink to 1,600 px, queue in IndexedDB (`photo-queue.ts`, backoff,
+    terminal-failed list with Retry / Discard) and upload to private Blob
+    through a prefix-checked broker; inline base64 is dev-only. The register
+    (`/assessments/findings`) prints IDs `CUST-VENUE-CAT-###` (e.g.
+    `MPSD-LIN-RIG-003`): the server allocates the number under an advisory
+    lock, voided numbers are never reused, a code locks once used (changing it
+    needs `approve`), and the category freezes after numbering; Immediate
+    findings need a photo, hazard-contact and lockout; merge / split are
+    transactional; statuses open → closed carry a history. **Quote these
+    findings** opens the repair builder intake (`?findings=`, linked on first
+    save) or creates an Estimator draft, with quote-level `findingKeys` and the
+    printed ID in each line. Reports (`/assessments/[id]/report`, a findings-only
+    PDF) render through signed print routes (`/print/assessment/[id]`,
+    `/print/assessment-findings/[scope]`; token kinds `assessment`,
+    `assessment-findings`) with photos inlined as data URIs (20 MB budget) and
+    the PDF streamed, not buffered; **Email report** drops it into an Inbox
+    draft. Integration: Assessments in the Customers nav group, Start
+    assessment on a site visit, cards on venue / company / lead / project
+    pages, a read-only Venue profile card, ⌘K for `AS-####` and printed IDs,
+    `assessments` in the offline field collections, `venue_profiles` kept by the
+    go-live wipe. Tests: `scripts/test-assessments.ts` (inside test:specs) and
+    new smoke routes. Code comments and the migration header still say #337
+    (the pre-merge number). Not in scope: the portal, Venue Assessments / RI
+    migration, flame-test and re-inspection visits (slices 2–5 in PUNCHLIST
+    #340). Remaining is Jeff-gated: set real MPSD venue codes before the first
+    finding, run a real Manitowoc assessment, confirm the five added flag
+    prompts (D972, assumed defaults), a preview-deploy check of a Blob photo
+    and two parallel finding pushes (previews write production data), and
+    `QUOTE_PDF_ORIGIN` / Chrome rendering of the PDF in production. Punch item
+    #340.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -12139,3 +12139,43 @@ link/archive paths a person would.
 - `max_uses` is per round, so a web question can make up to 18 searches; tighten if the report shows heavy use (D949).
 
 **This completes the AI roadmap** (Inbox organization #335 → pop-outs #336 → AI brief #337 → estimate suggestion #338 → Ask AI #339).
+
+## 340. Assessments engine — slice 1 (Condition assessment + findings register) — BUILT 2026-10-14 on `worktree-assessments-engine` (D961–D995)
+
+**Asked (Jeff, 2026-10-13):** three briefs (`docs/assessments/briefs/`) — the site-visit app brief, the rigging intake alignment brief and the Manitowoc (MPSD) field checklist — become one assessments engine. Slice 1 is the **Condition assessment** visit type and the **findings register**; Venue Assessments (`FS`) and the rigging inspection (`RI`) are untouched until slices 2 and 3. Spec `docs/superpowers/specs/2026-10-13-assessments-engine-design.md`, plan `docs/superpowers/plans/2026-10-13-assessments-engine.md`. Migration `0040_assessments`.
+
+**Done:**
+- **Definitions** (`src/lib/assessments/defs/`): code-first scopes S0–S8, modules, questions, pick lists and every brief gate rule (R1–R12, F1–F5, G1–G4, L1–L9, A1–A9, H1–H7, X1–X5) as data; `ASSESSMENT_DEF` version 1 stamped on each assessment as `defVersion`. The `condition` visit type turns on S0–S7 (S2 at screen depth), S8 optional. One pure `evaluate()` (`evaluate.ts`) serves the editor, Mark complete, the report and the server (visible, required, missing answers/photos, pending prompts, flags, progress). Every Manitowoc "every venue" line maps to a key (`docs/assessments/manitowoc-coverage.json`) (D962, D967, D970–D973).
+- **Data:** `assessments` (`AS-####` from 1001), `findings` (doc id `fd_<16 hex>`) and `venue_profiles` (id = site id) doc tables with their `seq_bump` triggers; `companies.short_code` and `sites.short_code` with unique partial indexes (D964, D968).
+- **Editor** (`/assessments/[id]`, phone/tablet first): scope rail with progress rings, one module at a time, ⋯ menu (N/A, Unable with a reason), gates that reveal dependent questions, inline **Create finding?** chips, a venue-profile pre-fill with a Changed? toggle, and a Mark complete dialog listing every gap (questions, photos, prompts overridable; photos still uploading block). Starts online only (`/assessments/new`, prefilled from `?site=`, `?company=`, `?visit=`, `?lead=`, `?project=`); after that it works offline through the outbox: answers merge per key (newest `at` wins, server stamps `by` and clamps `at`), invalid or late pushes land in `syncRejects` with Re-enter / Use mine (D973–D978, D995).
+- **Photos:** resized on the device to 1,600 px, queued in IndexedDB (`photo-queue.ts`) with backoff, uploaded to private Blob under `assessments/<AS-id>/<photoId>.jpg` through a broker that re-checks the prefix; terminal failures keep their bytes with Retry / Discard; inline base64 only in dev when Blob is off (D981–D983).
+- **Findings register** (`/assessments/findings`): table with customer / venue / category / rating / status / priority / budget filters, Immediate pinned first, bulk Triage, CSV export with a formula-injection guard. Printed IDs `CUST-VENUE-CAT-###` (e.g. `MPSD-LIN-RIG-003`) allocated by the server under an advisory lock, voided numbers never reused, a code locked once used; category frozen after numbering; merge / split under a per-assessment lock; Immediate attention requires a photo, hazard-contact notified, lockout and a recommended action; statuses open → … → closed with a history (D964, D979, D980, D985, D989).
+- **Quote these findings:** Repair quote opens the repair builder intake (`?findings=`) and links on the first save; Estimator quote creates a draft and links it; quote-level `findingKeys` plus the printed ID in each line's text; **Link existing quote** in the register (D986–D988).
+- **Reports:** `/assessments/[id]/report` (cover + intake, scope + exclusions, summary, one section per scope, register table, follow-up list, photo appendix) and a findings-only PDF, rendered by headless Chrome through signed print routes (`/print/assessment/[id]`, `/print/assessment-findings/[scope]`, print token kinds `assessment`, `assessment-findings`) with the photos inlined as data URIs (20 MB budget) and the PDF streamed, not buffered. **Email report** drops the PDF into an Inbox draft tied to the customer (D984, D991–D993).
+- **Integration:** Assessments nav item in Customers after Venue Assessments; Start assessment on a site visit; Assessments / Findings cards on the venue and company pages and linked assessments on lead and project pages; a read-only Venue profile card ("confirmed on AS-1004 · date"); short-code editing on the company and venue; ⌘K finds `AS-####` and printed finding IDs; Settings-level pick-list admin at `/assessments/pick-lists` (39 lists); `assessments` joins the offline field collections; `venue_profiles` survive the go-live wipe (D990, D994).
+- **Tests:** `scripts/test-assessments.ts` (imported by `scripts/test-review-and-spec.ts`, so it runs inside test:specs) and new `scripts/smoke-routes.ts` routes.
+
+**Remaining (Jeff-gated):**
+- (1) Set real codes for the MPSD venues (e.g. `WIL` for Wilson, `WAS` for Washington) before the first finding is created — a code locks once a finding uses it, and changing it then needs `approve`. The suggested codes are the first three letters of the first meaningful word.
+- (2) Run a real Manitowoc condition assessment end to end (Lincoln HS, Wilson MS, Washington MS) and tell us what the checklist is missing or words badly.
+- (3) Confirm the five flagged-answer prompts added beyond the brief — **assumed default** (D972): exits blocked → GEN / Immediate; trap door or pit unguarded → GEN / Immediate; no e-stop → RIG / Needs attention; no hold-to-run → RIG / Needs attention; panel clearance under 36" → ELC / Needs attention.
+- (4) Preview-deploy check of one Blob photo upload (capture, queue, upload, report) and two parallel finding pushes to the same venue and category, to prove the advisory lock on Neon. **Preview deploys write production data** (they share the production DB) — use a throwaway customer and void or delete the records afterwards.
+- (5) Confirm `QUOTE_PDF_ORIGIN` and Chrome rendering of the assessment PDF in production: open a report with photos, check the PDF (page count, photos, letterhead), the findings-only PDF, and Email report to a draft.
+
+**Known limitations:**
+- Two devices editing the same finding offline: the server copy wins and the second device sees a conflict.
+- Errored outbox entries are shown but only retried on a local re-save.
+- Photo uploads from several browser tabs aren't Web-Locked; a duplicate blob is cleaned up.
+- The Blob photo upload, the upload token route and the advisory-lock exclusion across connections are untested against real Blob and Neon (see Remaining 4).
+- **Link existing quote** exists only in the register, not in the editor's finding sheet.
+- A failed repair save drops the findings intake (the existing `quoteFailure` behaviour).
+- Restoring a deleted company or venue whose code was taken in the meantime throws a unique violation (rare).
+- The register loads every finding; it needs pagination later.
+- The migration header and some code comments still say #337 (the pre-merge number); the advisory-lock namespace 337 is kept on purpose (D980).
+
+**Follow-ups (later slices, each its own spec → plan → build):**
+- **Slice 2 — Quote survey:** S8 plus the Black River Falls measurement set, line-set table, logistics and client goals → Estimator; `FS` moves onto the engine and the old editor retires.
+- **Slice 3 — Rigging inspection:** S2 full intake depth replaces the `RI` rubric capture; `ISSUE_LIBRARY` becomes Settings data; the RI reports read the register; L1/L2 renewals stay. The legacy rating map (D963) applies here.
+- **Slice 4 — Flame test, service checks, re-inspection:** per-curtain inventory → flame-test results, fire-curtain and emergency-lighting checks, re-inspection of open findings, status driven by repair jobs (D965).
+- **Slice 5 — Portal and reminders:** customer register, acknowledgment, immediate-hazard alerts, next-due reminders (fire curtain 90 days, emergency lighting, flame cert, E1.47 rigging) (D966).
+- **Open questions:** (a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).
