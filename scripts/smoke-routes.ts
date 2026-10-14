@@ -136,6 +136,10 @@ const ROUTES = [
   "/templates",
   "/consulting",
   "/venue-assessments",
+  "/assessments", // #337 assessments engine
+  "/assessments/new",
+  "/assessments/findings", // #337 Task 9: the findings register
+  "/assessments/pick-lists", // #337 Task 11: the pick-list admin (manage_users)
   "/field-work",
   "/design-studio/lineset",
   "/design-studio/motors",
@@ -376,6 +380,16 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — no rack is seeded, so the staff submittal preview is checked on its
   // not-found path: the module compiles and an unknown id is a clean 404, not a 500.
   { route: "/design/assemblies/rack/SA-NOPE", expectNotFound: true },
+  // #337 — an unknown assessment is a clean 404 from the editor page, never a 500.
+  { route: "/assessments/AS-NOPE", expectNotFound: true },
+  // #337 Task 10 — the assessment report: an unknown id is a clean 404 (page and PDF); the signed print routes
+  // without a token (or with a well-formed bad one) are clean 404s before any read.
+  { route: "/assessments/AS-NOPE/report", expectNotFound: true },
+  { route: "/api/assessments/AS-NOPE/report-pdf", expectNotFound: true },
+  { route: "/api/assessments/findings-pdf?scope=site:st-nope", expectNotFound: true },
+  { route: "/print/assessment/AS-NOPE", expectNotFound: true },
+  { route: "/print/assessment/AS-1001?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
+  { route: "/print/assessment-findings/site%3Ast-nope", expectNotFound: true },
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },

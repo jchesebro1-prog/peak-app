@@ -41,6 +41,8 @@ export type VisitRequestVM = {
   address: string;
   /** Spec 2026-10-09 — other Peak people already on the visit (never the lead). */
   attendees: string[];
+  /** #340 — the viewer holds `create`, so the row offers "Start assessment" (omitted = no link). */
+  canAssess?: boolean;
 };
 
 const chipBtn: CSSProperties = {
@@ -179,6 +181,11 @@ function VisitRequestRow({ row, team, me }: { row: VisitRequestVM; team: string[
             {row.leadId && (
               <Link href={`/leads?lead=${encodeURIComponent(row.leadId)}`} style={linkStyle}>
                 Lead {row.leadId} →
+              </Link>
+            )}
+            {row.canAssess && (
+              <Link href={`/assessments/new?visit=${encodeURIComponent(row.id)}`} style={linkStyle}>
+                Start assessment →
               </Link>
             )}
           </div>

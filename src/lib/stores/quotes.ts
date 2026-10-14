@@ -1,6 +1,7 @@
 import { checkSelectionPatch, DEFAULT_PACKAGE_SELECTION, mergePackageSelection, normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import {
   getDoc,
+  getDocRows,
   insertWithPrefixedId,
   listDocs,
   casDocKey,
@@ -284,6 +285,8 @@ export type Quote = {
    *  record this quote renews — the ✉ one-click outreach reuses an existing
    *  renewal quote for the cycle instead of minting a duplicate. */
   renewalOf?: string | null;
+  /** #340 assessments: the findings (fd_… keys) this quote was made from — set at creation only, when any. */
+  findingKeys?: string[];
   /** PO received on a WON quote (#18, D119) — an annex flag, NOT a fifth
    *  pipeline status. Set/cleared only via setPoReceived; meaningless (null)
    *  on draft/sent/lost. Absent on pre-D119 docs — read with `?? null`. */
@@ -773,6 +776,18 @@ export async function get(id: string): Promise<Quote | null> {
   return q ? normalizeQuotePipeline(q, await loadPipelines()) : null;
 }
 
+/** The live quotes among `ids`, as `get` returns them — one batched read (not one per id) and the pipelines loaded
+ *  once. Missing and soft-deleted ids are simply absent; the result is keyed by id. (#340 Task 9 review: the
+ *  findings register used to fan out one `get` per linked quote.) */
+export async function getMany(ids: readonly string[]): Promise<Map<string, Quote>> {
+  const out = new Map<string, Quote>();
+  const rows = (await getDocRows<Quote>("quotes", ids)).filter((r) => !r.deleted);
+  if (!rows.length) return out;
+  const pipes = await loadPipelines();
+  for (const r of rows) out.set(r.id, normalizeQuotePipeline(r.doc, pipes));
+  return out;
+}
+
 /** The live (not lost) renewal quote already minted for a completed job /
  *  record this cycle, if any (IDEAS #36 idempotence). */
 export async function byRenewalOf(recordId: string): Promise<Quote | null> {
@@ -841,6 +856,8 @@ export function buildQuote(
     ...(typeof partial.notIncluded === "string" ? { notIncluded: partial.notIncluded } : {}),
     // #333: only when the caller set it, like the cover fields.
     ...(partial.packageSelection ? { packageSelection: normalizePackageSelection(partial.packageSelection) } : {}),
+    // #340: the assessment findings this quote answers — only when the caller set some.
+    ...(Array.isArray(partial.findingKeys) && partial.findingKeys.length ? { findingKeys: partial.findingKeys } : {}),
   };
 }
 
@@ -899,6 +916,8 @@ export async function update(
     // Phase 4: the review comments are the add/resolve/delete writers' alone.
     delete clean.reviewComments;
     delete clean.emailSending;
+    // #340: the finding keys are set at creation only — a patch never rewrites them.
+    delete clean.findingKeys;
     // AI daily brief: the nudge is setAssistNudge's alone.
     delete clean.assistNudge;
     delete clean.assistNudgeLeaseUntil;

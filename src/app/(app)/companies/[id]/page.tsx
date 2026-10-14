@@ -10,6 +10,7 @@ import { CustomerRecordingsCard } from "@/components/recordings/recordings-card"
 import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
+import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
@@ -784,6 +785,10 @@ export default async function CustomerDetailPage({
               )}
             </div>
 
+            {/* #340 assessments engine — this company's assessments and findings (with the customer code) */}
+            <AssessmentsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
+            <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
+
             {/* ---- details (#23) — populated custom fields ---- */}
             {detailRows.length > 0 && (
               <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
@@ -919,6 +924,14 @@ export default async function CustomerDetailPage({
                                 team={teamNames}
                               />
                             ) : null}
+                            {can("create", me.roles) && (
+                              <Link
+                                href={`/assessments/new?visit=${encodeURIComponent(v.id)}`}
+                                style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}
+                              >
+                                Start assessment
+                              </Link>
+                            )}
                             <DeleteVisitButton id={v.id} />
                           </span>
                         </div>

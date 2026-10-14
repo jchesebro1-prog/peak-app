@@ -12,7 +12,7 @@ import {
   type SurveyStage,
 } from "@/lib/stores/surveys";
 import { VENUE_CLASSES } from "@/lib/stores/venue-classes";
-import { IDENTITY, deriveInitials, fallbackColor } from "@/lib/team";
+import { IDENTITY, can, deriveInitials, fallbackColor } from "@/lib/team";
 import { createSurvey, quoteFromSurvey } from "./actions";
 import CsvUploadForm from "./csv-upload-form";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
@@ -155,6 +155,7 @@ export default async function FieldSurveyPage({
       locationId: v.locationId,
       address: v.address,
       attendees: v.attendees,
+      canAssess: can("create", user.roles),
       addressFlag: (() => {
         const st = visitAddr.get(v.id);
         return st && st.status !== "verified" ? { text: FLAG_TEXT.unverified, fix: st.fix } : null;

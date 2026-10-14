@@ -527,6 +527,72 @@ card's button.
   the monthly cap applies. If the Claude key is wrong, Ask says "The Claude API key
   was rejected — check Settings → Beta → Assist pilot."
 
+## 6g. Running a condition assessment (#340, D961–D1003)
+
+A condition assessment is a site walk-through of a venue — stage, rigging, soft goods,
+fire, lighting, audio/video, access — answered on a phone or tablet. Each problem you
+find becomes a **finding** with its own printed ID (`MPSD-LIN-RIG-003`: customer, venue,
+category, number). Findings from every visit land in one register, and you can quote
+them, print them, or email the report to the customer.
+
+**Before you go**
+
+- Give the customer and the venue short codes (they show on the company and venue
+  pages with an edit control). Codes are suggested from the name — the customer's initials, and the first three letters of
+  the venue's first meaningful word (Wilson Middle School → `WIL`). Fix a wrong
+  suggestion **before the first finding**: a code locks once a finding uses it, and
+  changing it then needs the approve permission.
+- You must be online to **start** an assessment. After it is open it works offline.
+
+**Run it**
+
+1. Start from the venue page (**Assessments** card), the company page, the site visit
+   (**Start assessment →** on the visit) or **Assessments → + New**. Pick the customer
+   and venue, the visit type (**Condition assessment**) and the scopes; the usual set
+   is pre-selected and you can add or remove scopes, even mid-visit. Removing a scope
+   with answers hides it and keeps them.
+2. Answer module by module. The ⋯ menu on a question marks it **N/A** or **Unable to
+   inspect** (a reason is required, and the report lists it as a follow-up). The camera
+   button adds a photo. Facts the venue already has (stage size, install year…) are
+   pre-filled with a **Changed?** toggle.
+3. When an answer trips a rule — a fall hazard, no e-stop, a missing safety cable — a
+   **Create finding?** chip appears under the question. **Create** opens the finding
+   sheet with the category and a suggested rating filled in; **Dismiss** removes it. You
+   can also add a finding by hand. An **Immediate attention** finding needs a photo,
+   whether the hazard contact was told, the lockout state and a recommended action.
+4. Photos taken offline wait on the device and upload when you reconnect; the sync chip
+   counts them. The header says **Saved**, **Syncing…**, **Saved on this device — will
+   sync when you're back online** or **Couldn't sync — <reason>**. Anything that couldn't
+   sync appears in a banner with **Re-enter** / **Use mine**; answers this device still
+   holds are sent again the next time you open the assessment.
+5. **Mark complete** lists every gap: required questions, required photos, unresolved
+   prompts. You can complete anyway — each gap you skip is recorded and printed in the
+   report's follow-up list. Photos still uploading block it until they finish or you
+   remove them. Reopening a completed assessment needs the approve permission.
+
+**Findings, reports and quotes**
+
+- **Findings register** (`/assessments/findings`, also linked from the venue and
+  company **Findings** cards): filter by customer, venue, category, rating, status,
+  priority and budget tier; Immediate items sit first. Select rows for **Triage**,
+  **Quote these findings** or **Export CSV**.
+- **Report:** open the assessment's **Report** to read it, **Download PDF**, or
+  **Email report** — that renders the PDF, stores it, and puts it in an Inbox draft
+  tied to the customer. Nothing is sent until you send the draft. (On a computer without
+  file storage — local dev — only a report under 1.5 MB can be emailed; download larger
+  ones.) The findings-only PDF (open
+  findings across visits for a venue or company) is linked from the register and the
+  venue card.
+- **Quote these findings:** select findings in the register → **Quote these findings**
+  → **Repair quote** (opens the repair builder with the findings as scope lines; the
+  link is made when you save) or **Estimator quote** (creates a draft and links it).
+  The findings move to *quoted*, and each quote line starts with the printed ID. To
+  attach a finding to an existing quote open the finding from the register and use **Link existing quote** in its sheet (not available in the assessment editor).
+- A finding's category can't change once it has a number: void it and create a new one.
+
+**Not yet:** customers can't see assessments or findings in the portal, and Venue
+Assessments and rigging inspections still use their own screens (later slices).
+
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 
 Everything you need to move Peak from demo data to your real business is in

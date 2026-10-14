@@ -172,6 +172,7 @@ export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
   "spec_records",
   "spec_record_revisions",
   "assist_runs", // #334: trial history + monthly spend survive the go-live wipe
+  "venue_profiles", // #340: the rolling per-venue profile is authored knowledge, not demo data
 ];
 
 export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(

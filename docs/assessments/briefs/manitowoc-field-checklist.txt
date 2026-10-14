@@ -1,0 +1,258 @@
+Manitowoc Theatrical Assessment Field Checklist
+Oct 13, 2026 · @Jeff Chesebro
+Every venue: capture the same basics
+The CESA 10 audit (April 2024) calls the auditorium AV and stage lighting at all three houses "problematic" but never inventories equipment, so your inventory is the gap to fill. Lincoln comes first because it carries the most theatrical findings.
+	•	☐ Stage dimensions: width, depth, proscenium opening, wing space, trap or pit if any
+	•	☐ Seat count, house layout, balcony or not, ADA wheelchair positions and companion seating
+	•	☐ Stage lighting: fixture types and counts, dimmer rack make and model, control console, circuits, condition of cabling
+	•	☐ House lighting and work lights: controls, dimming, working order
+	•	☐ Sound: console, speakers, mics, wireless units, intercom or paging, assisted listening, whether it works
+	•	☐ Video: projector or screen, signal sources, cabling, control location
+	•	☐ Rigging: fly system or counterweight, battens, soft goods (curtain, legs, borders, cyc), who inspects it and when
+	•	☐ Booth or control position: size, access, ventilation, sight lines
+	•	☐ Power: stage panels, spare capacity, grounding, any fused disconnects
+	•	☐ Egress, exit signs, emergency lighting, fire curtain or smoke vent, fire alarm notification on stage
+	•	☐ Water damage, mold smell, plaster condition, roof leak evidence
+	•	☐ Floor: stage deck condition, house flooring, asbestos tile suspected
+	•	☐ Photos of every item above, nameplates and labels included
+	•	☐ Ask who uses the space and how often, and any recent incidents
+Site visit intake: record at every venue
+Fill this in once per venue before you start walking. The fields match the rigging reports, so the record can be handed to a rigging inspector without re-asking.
+Field
+Entry
+Finding ID prefix
+For example MPSD-LHS
+Building and space
+
+Visit date and start time
+
+Assessor, and anyone accompanying
+
+On-site contact: name, title, phone, email
+
+Secondary contact
+
+Owner concerns, in their words
+
+Current use: school, community, rentals
+
+Facility type: proscenium, thrust, black box, cafetorium, gym
+
+Seating capacity, and ADA positions
+
+Stage width, depth, proscenium height and width
+
+Height to grid, steel and head block, if applicable
+
+Last rigging inspection: date, firm, report on file
+
+Last electrical or lighting service: date, who
+
+Existing documents: drawings, lighting plot, hookup sheets, manuals, logs
+
+Areas not accessible during the visit, and why
+
+Rigging triage: every venue
+These are screening items only. An ETCP-certified rigger does the actual inspection.
+	•	☐ Rigging system type: counterweight, motorized, dead hung, none
+	•	☐ Number of line sets, manufacturer, single or double purchase
+	•	☐ Fire safety curtain present: type, manufacturer, last test date, test log on site
+	•	☐ Smoke vents above the stage: present, last test date, tested with the curtain
+	•	☐ Loading gallery, grid or catwalk: present, access control, handrails, fall protection, lighting
+	•	☐ Orchestra pit lift or filler: present, manufacturer, condition
+	•	☐ Operating signage, operations manuals and maintenance log: present or not
+	•	☐ Visible red flags: unrated hardware, taped or improvised rigging, bent or overloaded battens, unmoused shackles, frayed cable, loose locking collars, unlabeled weights
+	•	☐ Soft goods: curtain, legs, borders and cyclorama; flame test tag or date; visible damage
+	•	☐ Who operates the system, and what training they have
+	•	☐ Line set schedule: what hangs on each set, photographed or copied
+	•	☐ Photos with line set numbers
+Power and control: every venue
+The assessment is observation only. Do not open panels or test energized equipment.
+	•	☐ Power path: source, disconnect, feeder, distribution and branch circuits for the stage; panel locations and labels
+	•	☐ Dimmer and relay racks: make, model, age, condition, manufacturer support
+	•	☐ Spare capacity: ask what the service supports, and note signs of overload or heat
+	•	☐ Grounding and GFCI where the stage meets damp locations; connector condition; improvised adapters or bare-end feeders
+	•	☐ Cable condition: damage, tape repairs, missing strain relief, cable carrying a load
+	•	☐ Control console: make, type, working or not
+	•	☐ Control signals in use: DMX or Ethernet or sACN; splitters, terminators, network isolation; fixture addressing documented
+	•	☐ Sound and video systems: type (analog or digital), signal paths, what works
+	•	☐ Overhead fixtures: secondary safety cables, cable support, overloaded pipes
+	•	☐ Emergency lighting, exit signs, labeling of panels and disconnects, panel clearance of 36 inches
+	•	☐ Lockout/tagout procedure for stage equipment, and who is allowed to operate lighting
+	•	☐ Lighting plot, hookup sheets and riser diagram: present, and whether they match what is installed
+Added from the comparison sheets: every venue
+These items come from the Black River Falls sheet, the 2013 evaluation sheet and a generic AV checklist. Take the ones that fit the venue; skip what the school does not use.
+Access and logistics
+	•	☐ Load-in: dock or door location and dimensions, route to stage, elevator size, floor type
+	•	☐ Lift needed for work, who supplies it, and whether it can get into the building
+	•	☐ Fall-arrest anchor points, ladders and lifts available on site
+Measurements and photos
+	•	☐ Stage layout: proscenium width and height, depth, stage right and left width, apron depth and curve
+	•	☐ Stage and house sections: steel, roof, grid, head block heights; house depth and width
+	•	☐ Front-of-house positions: depth, height, length of each, and the mix position with sightlines
+	•	☐ Photo set: stage, house and FOH from the named corners; overhead views; stage access; rig wall; storage; control booth; flame test certificate
+Rigging detail
+	•	☐ Rigging points: number, style, spacing; beam type, spacing and direction
+	•	☐ Weight capacity documentation for the grid or beams, and any engineer's letter
+	•	☐ Hardware on hand: span sets, shackles, cable, tie lines, motor controllers
+	•	☐ Draw side, rig type, loading bridge, midrail, H&H sheet and brick drawing on file
+	•	☐ Line set schedule: distance from plaster line, what hangs, fabric, quantity, size, condition
+Soft goods
+	•	☐ Present and condition: main curtain, legs, borders, cyc, scrims
+	•	☐ Fabric type (flame retardant or not), NFPA 701 tag, last field flame test (NFPA 705)
+	•	☐ Track type, draw direction (center-split or single part), operation smoothness
+Lighting
+	•	☐ Age and type of system, console, power control, emergency lighting arrangement
+	•	☐ Fixtures by model and quantity: profile (ERS), par, cyc, other; lamp and gel availability
+	•	☐ Number of pipes, trim heights, side arms, ladder positions, beam paths; circuits per electric
+	•	☐ Data outs, DMX or Ethernet drop locations, connector type
+	•	☐ House and work lights: quantity, button stations, plug-ins, circuits
+Audio, video and comms
+	•	☐ Audio problems: dead spots, voice clarity, wireless issues, lack of inputs, monitors, hearing assist
+	•	☐ House PA, flown arrays, delay speakers, acoustic reflections; dedicated sound power with isolated ground
+	•	☐ Mix position, snake routing, intercom and backstage-to-booth feeds
+	•	☐ Video: projector mount points, screen size and type, throw distance, cabling types, ambient light control
+	•	☐ Control interface: what operates the room today
+	•	☐ Network: Wi-Fi coverage and bandwidth where streaming or show control is needed
+Room construction
+	•	☐ Seating type, ceiling, wall and floor types, floor pockets
+	•	☐ Access routes: basement, attic, open ceiling
+Project and decision
+	•	☐ Completion deadline, budget, and whether pricing is budgetary or firm
+	•	☐ Project type: design and build, bid, or consulting; part of a larger building project
+	•	☐ Final decision maker, and other firms involved
+	•	☐ Link to the April 2024 audit item and its estimate, where one exists
+Added from rigging standards and manufacturer guides: every venue
+These come from ANSI E1.47 and the Wenger and J.R. Clancy guides. Record what you see; do not judge pass or fail. Verify figures against the source documents.
+Records to request
+	•	☐ As-built drawings, operation manuals, known modifications and incident reports
+	•	☐ Maintenance logs, prior inspection reports, user training records and the authorized user list
+	•	☐ Fire curtain test log and smoke vent test log
+	•	☐ Install year, installer, manufacturer of the rigging system, and renovation history
+	•	☐ Level and date of the last rigging inspection (E1.47: manual systems annually, with a deeper inspection at least every 5 years; motorized systems annually)
+Operating practices to observe or ask about
+	•	☐ Who is authorized to operate the system, and how they are trained
+	•	☐ Hold-to-run controls and emergency stop on any motorized system; clear sight line from control stations
+	•	☐ Fall protection on the loading bridge or gallery
+	•	☐ Operating signage, posted working load limits, and guards in place
+	•	☐ Key switches or padlocks controlling access; system locked when not in use
+	•	☐ Fire curtain closed when the stage is not in use
+	•	☐ Designated contact for an immediate hazard, and a lockout and tag step if one is found
+Screening measurements to record
+	•	☐ Stagehouse height compared with proscenium height (guides suggest about 2½ times for dramatic work)
+	•	☐ Proscenium opening area (a fire curtain rule applies under 850 square feet)
+	•	☐ Rigging extent: proscenium wall to back wall
+	•	☐ Line set spacing, and lighting sets on 10-foot centers
+	•	☐ Fire curtain: side and top overlap, storage height above the proscenium, lift line spacing
+	•	☐ Counterweight system: handline clearance, fleet angle, loft block well openings, lockrail height, guide to loading gallery edge, arbor pit clearances
+	•	☐ Typical batten loads in use (lighting battens are often 25 to 40 pounds per foot in schools)
+	•	☐ Head block beam and loft beam spacing; any bar joists in the roof framing
+	•	☐ Power available for hoists, and where control stations are
+	•	☐ Structure above the stage: flag for a structural engineer; do not rate it
+Program and operators
+	•	☐ Programs using the space: band, choir, drama, musicals, assemblies, rentals, tours
+	•	☐ Operator skill: students, volunteers, professionals
+	•	☐ Expansion plans, and whether a theatre consultant has been involved
+	•	☐ Whether an annual inspection contract exists, and who owns maintenance
+Added from the Stagecraft questionnaire and a school stage safety checklist: every venue
+The safety checklist is a software vendor's, with no sources; verify what you rely on against NFPA 101, ANSI E1.4 and the local authority.
+Rigging and history
+	•	☐ Rope (sandbag) sets present, and the total number of rigged sets
+	•	☐ Motorized sets: number of motors, manufacturer, model
+	•	☐ Year of construction or rigging install; year of any rigging renovation; architect or theatre consultant
+	•	☐ Plaster line to rear wall; ceiling height for dead-hung sets
+	•	☐ Walking grid versus loading bridge (they are different)
+	•	☐ Rail log kept and available
+	•	☐ For the rigging inspector's visit: personnel lift available, helper available, other spaces to inspect (studio, black box)
+	•	☐ Operator training offered or documented
+Routine checks the district may already run
+	•	☐ Pre-event checks: safety cable on every hung fixture, tightened clamps, working lamps, clear stage
+	•	☐ Monthly emergency light test; annual battery discharge test; results recorded
+	•	☐ Quarterly checks of lighting, curtains, electrical, seating and egress
+	•	☐ Annual rigger inspection certificate posted at the fly rail; fire curtain drop test documented
+House, egress and fire safety
+	•	☐ Seat anchorage and broken seats; aisle width (36 inches is typical minimum); aisle step lights
+	•	☐ Wheelchair spaces and companion seating; assisted listening or hearing loop working
+	•	☐ Exit doors and panic hardware working; exits clear
+	•	☐ Extinguishers present and charged; alarm panel status; sprinklers and detectors in the stage area
+	•	☐ Policy on open flame or pyrotechnics, and who approves it
+	•	☐ Trap doors and orchestra pit: present, guarded, condition
+Electrical and sound
+	•	☐ Posted panel schedule at the stage panel; dimmer supply breakers not heavily loaded; separate work-light circuit
+	•	☐ GFCI where the public can reach outlets
+	•	☐ Dimmer rack fans and ventilation clear; saved backup scenes on the console
+	•	☐ Flown speakers on independent safety cables; amplifier ventilation; patch bay and permanent cabling condition
+	•	☐ Microphone and wireless battery practice
+Added from the Thern equipment introduction: identify, do not judge
+These are things a walk-through can easily miss. Name what is installed, photograph nameplates, and leave judgment to the rigging inspector. I read the guide through a web summary, so verify the details against the source.
+	•	☐ Wire rope: type and age if known (on systems over about 30 years old, capacity cannot be assumed); termination type, such as copper swage sleeves
+	•	☐ Arbor type: front-loading, side-loading rod arbor, or wire-guided; guide type: T-bar, J-bar or T-strut
+	•	☐ Block hardware: head, loft, idler and floor blocks; combination floor block and rope lock where there is no lock rail; block clips sized to the beam
+	•	☐ Idlers carrying only wire rope and not a hanging load; rope locks never holding an unbalanced set
+	•	☐ Batten spans over 10 feet between lift lines; end caps or paint on batten ends; cable cradles on electrics
+	•	☐ Lock rail labeling that separates temporary from permanent line sets
+	•	☐ Other hoists: clew winch, counterweight assist, pile wind, line shaft, roll drop, self-climbing truss
+	•	☐ Roll drop or screen type, if any (plastic projection screens are not recommended on roll drops)
+	•	☐ Fire curtain type: manual counterweight or motorized, since older manual curtains may not meet current code
+	•	☐ Fire curtain accessories: smoke seals, smoke pockets, release stations, release link type as labeled, alarm interface, vent closure winch
+Lincoln High School (built 1923): auditorium rm 132, about 11,000 sq ft; theater rm 135, about 2,500 sq ft
+The audit budgets $785,000 for an auditorium renovation and $100,000 for an AV upgrade. Verify each item below on site.
+	•	☐ AV system: confirm it is analog and past service life; note what still works, what staff work around, and what fails during shows ($100,000 audit estimate)
+	•	☐ Stage lighting, sound and video: compare actual equipment to the audit scope for the $785,000 renovation
+	•	☐ Catwalk above the stage: metal channels at the top of the spiral staircase with a gap about every 15 feet, large enough to fall through from several stories up; poorly lit ($15,000 audit estimate for a handrail catwalk and lighting)
+	•	☐ Spiral staircase: is the bottom still unlocked and open to students? The audit wants a locked safety cage and lockout/tagout
+	•	☐ Who has access to the catwalk, grid or booth, and what fall protection exists today
+	•	☐ Auditorium smoke vent on the roof: poor condition, non-manufacturer roof installed over it, and the audit doubts it would open in a fire ($85,000 audit estimate at Lincoln)
+	•	☐ Roof and plaster: leaks, historic plaster cracking, water stains; renovation scope includes new roofing and plaster repair
+	•	☐ Seating: count, upholstery, broken seats, aisle width, ADA positions
+	•	☐ HVAC and stage temperature: noise, comfort, ventilation during performances
+	•	☐ Brick face on the auditorium steps wall: deteriorated, $8,500 repair
+	•	☐ Theater room 135: purpose, equipment, and whether it works as a black box or classroom
+	•	☐ Band and choir wing: practice-room soundproofing wish from staff, ceiling and wall damage from roof leaks, flooring; $250,000 audit estimate
+	•	☐ Clutter, electrical panel clearance (36 inches required by code), blocked exits near the stage and wings
+	•	☐ Whether any of these items have been fixed since April 2024
+Wilson Middle School (built 1931): auditorium and stage rm 211, about 7,700 sq ft
+The audit puts the auditorium renovation at $1.5 million and says the sound system does not work.
+	•	☐ Sound system: confirm it is dead, find out why, and note what a stopgap or replacement would need
+	•	☐ Stage lighting and AV: audit calls them antiquated and problematic; inventory what exists
+	•	☐ Seating: original, upholstery shredded; count usable seats
+	•	☐ ADA access: the lift to the auditorium is permanently out of service, so there is no accessible route in ($20,000 audit estimate); check the alternatives
+	•	☐ Door O, the stair entrance: cracking concrete, deteriorating masonry sidewalls, no ramp ($125,000 audit estimate to rebuild)
+	•	☐ Door P near the auditorium entrance: water comes in during rain and thaw, floor tile and stair treads damaged ($100,000 audit estimate)
+	•	☐ HVAC: original 1930s air handlers serve the southwest auditorium; check noise, temperature, airflow during use
+	•	☐ Electrical: 1930s and 1950s fused disconnects and subpanels, parts unavailable; check panels near the stage and booth
+	•	☐ Flooring and paint condition in the house
+	•	☐ Where stage and house lighting are controlled, and whether the dimmers work
+	•	☐ Fire alarm and emergency exit lighting, including exits from the stage
+	•	☐ Band and orchestra rooms: sizes and condition
+	•	☐ How the space is used by the school and community today
+Washington Middle School (built 1936): auditorium rm 224, about 4,800 sq ft
+The audit puts the auditorium renovation at $1.5 million, and the leaks above it are the root problem.
+	•	☐ Water damage and mold: major water damage, "mold likely present" in the plaster; look and smell, and ask whether anyone has tested
+	•	☐ Roof leak source: cornice stone and roof transition, and the masonry gutter and roof line; any active leaks into the house or stage
+	•	☐ Smoke vent above the auditorium: original and deteriorated, audit doubts it works in a fire ($85,000 audit estimate); look at the roof hatch or controls
+	•	☐ Repainting of the roof smoke vent penthouses ($2,000 audit estimate)
+	•	☐ Stage lighting and AV: antiquated and problematic; inventory what exists
+	•	☐ Seating: deteriorating; count usable seats
+	•	☐ Theater prep area: painted concrete floor severely peeling; test before grinding ($7,500 audit estimate)
+	•	☐ HVAC: original and in poor condition
+	•	☐ Band room: sound panels falling off and leaving likely asbestos mastic, so do not touch ($75,000 audit estimate with corridors)
+	•	☐ Band and orchestra carpet: badly worn ($40,000 audit estimate)
+	•	☐ Chorus and music room: condition and acoustics
+	•	☐ Access, exits and ADA route into the auditorium
+	•	☐ Whether the school is expected to keep this auditorium long term
+Other spaces
+The audit has no stage or theatrical findings for the elementary schools, so treat these as quick checks only if time allows.
+	•	☐ Elementary cafeterias and gyms used for concerts: is there any stage, curtain, sound or lighting in use
+	•	☐ Jackson cafeteria: the audit flags an egress concern
+	•	☐ Jefferson rotunda: egress concern and a 2nd-floor rail issue
+	•	☐ Public address systems at Jackson and Monroe: not audible in several areas
+	•	☐ Any portable sound or lighting gear the district owns and where it is stored
+Questions for district staff
+	•	Which of the three auditoriums does the district plan to keep, given declining enrollment and underused buildings?
+	•	Has any work from the April 2024 audit been done, especially the Wilson ADA lift, the Lincoln catwalk and the smoke vents?
+	•	Has anyone tested the Washington auditorium plaster for mold, or the band-room mastic and corridor panels for asbestos?
+	•	Who runs shows, who maintains the equipment, and who inspects rigging, if any exists?
+	•	What do school and community groups use each venue for, how often, and how many attend?
+	•	What budget or referendum timing is assumed for these projects?
+	•	Are there drawings, past AV or lighting vendor quotes, or inspection records for the stage?

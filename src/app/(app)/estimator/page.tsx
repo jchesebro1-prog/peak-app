@@ -43,6 +43,7 @@ import { sourceForSave } from "@/lib/portal-quote-mode";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
+import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
 import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
@@ -551,6 +552,9 @@ export default async function EstimatorPage({
   const next = q ? await quoteNextStepFor(q, user) : null;
 
   return (
+    <>
+    {/* #340: "Quote these findings" created this quote but couldn't link its findings. */}
+    <ActionError message={one(sp.err)} />
     <EstimatorClient
       initial={initial}
       pipelines={pipelines}
@@ -597,5 +601,6 @@ export default async function EstimatorPage({
       suggestion={suggestion.view}
       suggestionParts={suggestion.parts}
     />
+    </>
   );
 }

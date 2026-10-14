@@ -10,6 +10,8 @@ import { eq, sql } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
 import type { Pipelines } from "@/lib/pipelines";
+import { pushAssessment } from "@/lib/stores/assessments";
+import { pushFinding } from "@/lib/stores/findings";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -48,9 +50,10 @@ export async function POST(req: Request) {
     string,
     Array<{
       id: string;
-      status: "ok" | "conflict" | "error";
+      status: "ok" | "conflict" | "error" | "retry";
       rev?: number;
       server?: Record<string, unknown>;
+      error?: string;
     }>
   > = {};
 
@@ -75,6 +78,19 @@ export async function POST(req: Request) {
       }
       if (JSON.stringify(rec.doc).length > MAX_DOC_BYTES) {
         results[coll].push({ id: rec.id, status: "error" });
+        continue;
+      }
+      // Assessments engine (#340): never a whole-document replace. Each needs
+      // `create`; answers merge per key and findings get their printed id
+      // from the server (see the stores). Assessments are never created here
+      // and never reply conflict: ok + the stored rev (anything skipped is in
+      // the doc's server-written syncRejects), error + a message (a permanent
+      // refusal, parked in the outbox), or retry (a throw — the entry stays
+      // pending). Findings: ok, conflict + the server copy, error, or retry.
+      if (coll === "assessments" || coll === "findings") {
+        const user = { id: String(session.user.id ?? ""), roles: session.user.roles };
+        const one = { id: rec.id, rev: rec.rev, doc: rec.doc };
+        results[coll].push(coll === "assessments" ? await pushAssessment(one, user) : await pushFinding(one, user));
         continue;
       }
       try {

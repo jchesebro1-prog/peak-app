@@ -36,6 +36,7 @@ import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
 import { grossQuoteValue } from "@/lib/rewards/credit-line";
 import { netServiceTotal } from "@/lib/rewards/service-credit";
 import { getLiftRate } from "@/lib/service-quote-inputs";
+import { findingKeysForSave, linkOnCreateSafe } from "@/lib/assessments/quote-from-findings";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -60,7 +61,7 @@ type PostedVenue = { id: string; label: string };
 type PostedPart = { name: string; qty: number; cost: number };
 
 /** Re-price + persist a repair quote; returns the saved quote id. */
-async function persist(formData: FormData, out?: { creditNote?: string }): Promise<string | null> {
+async function persist(formData: FormData, out?: { creditNote?: string; findingNote?: string }): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
   const customerId = String(formData.get("customerId") || "");
@@ -291,9 +292,15 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
     },
   };
 
+  // #340: a quote started from assessment findings (the builder's `findingKeys` field) carries their keys and
+  // links them once created. Absent → [] and the create below writes exactly what it always wrote.
+  const { keys: findingKeys, notice: findingVenueNotice } = await findingKeysForSave(formData.get("findingKeys"), customerId, !!editingId, venues.map((v) => v.id));
   const q = editingId
     ? await updateQuote(editingId, payload)
-    : await createQuote({ ...payload, owner: user.name });
+    : await createQuote({ ...payload, owner: user.name, ...(findingKeys.length ? { findingKeys } : {}) });
+  // The quote exists now: a link failure is logged and noted, never thrown (a throw reads as "nothing saved").
+  const findingNote = findingVenueNotice || (await linkOnCreateSafe(findingKeys, q?.id, user, !!editingId));
+  if (out && findingNote) out.findingNote = findingNote;
   // D205: first save of a "Change type" replacement retires the old draft.
   // The new quote already exists, so a failed retire is logged, never thrown —
   // a throw would read as "nothing was written" and a re-save would duplicate.
@@ -308,7 +315,7 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
 export async function saveRepairQuote(formData: FormData): Promise<void> {
   let id: string | null;
   // #282 phase 3: set when the server clamped or dropped the Rewards credit.
-  const note: { creditNote?: string } = {};
+  const note: { creditNote?: string; findingNote?: string } = {};
   try {
     id = await persist(formData, note);
   } catch (error) {
@@ -322,14 +329,17 @@ export async function saveRepairQuote(formData: FormData): Promise<void> {
   revalidatePath("/", "layout");
   if (id)
     redirect(
-      "/repairs/quote?id=" + encodeURIComponent(id) + "&saved=1" + (note.creditNote ? "&credit=" + encodeURIComponent(note.creditNote) : "")
+      "/repairs/quote?id=" + encodeURIComponent(id) + "&saved=1" + (note.creditNote ? "&credit=" + encodeURIComponent(note.creditNote) : "") +
+        (note.findingNote ? "&findingnote=" + encodeURIComponent(note.findingNote) : "")
     );
 }
 
 export async function approveRepairQuote(formData: FormData): Promise<void> {
   let id: string | null;
+  // #340: set when the findings couldn't be linked to the quote this approval created (mirrors saveRepairQuote).
+  const note: { creditNote?: string; findingNote?: string } = {};
   try {
-    id = await persist(formData);
+    id = await persist(formData, note);
     if (!id) {
       revalidatePath("/", "layout");
       return;
@@ -352,5 +362,9 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
     );
   }
   revalidatePath("/", "layout");
-  redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1");
+  redirect(
+    "/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1" +
+      (note.creditNote ? "&credit=" + encodeURIComponent(note.creditNote) : "") +
+      (note.findingNote ? "&findingnote=" + encodeURIComponent(note.findingNote) : "")
+  );
 }
