@@ -74,6 +74,15 @@ export function distanceText(miles: number): string {
   return `${Math.max(1, Math.round(miles))} mi`;
 }
 
+/** #344 B5 — the Visit card's travel pre-fill takes only a real drive (a manual override or an OSRM route), never the
+    straight-line "auto" guess or nothing; both numbers must be finite. */
+export function acceptTravel(est: { source: string; minutes: number | null; miles: number | null }): { min: number; miles: number } | null {
+  if (est.source !== "manual" && est.source !== "routed") return null;
+  const { minutes, miles } = est;
+  if (typeof minutes !== "number" || typeof miles !== "number" || !Number.isFinite(minutes) || !Number.isFinite(miles)) return null;
+  return { min: minutes, miles };
+}
+
 /** Engine pick-list code for a label: "Ladder >12ft" → "ladder_12ft". */
 export function listSlug(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");

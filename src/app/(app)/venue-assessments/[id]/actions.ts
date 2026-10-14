@@ -81,6 +81,13 @@ export type SurveyPatch = Partial<
     | "visitPurpose"
     | "loadingDoorSize"
     | "liftHeight"
+    // #344 B5 — access fields replacing loadingDoorSize / liftNeeded / liftHeight (those keys stay stored)
+    | "loadingDoorType"
+    | "loadingDoorLocation"
+    | "loadingDoorWH"
+    | "liftRequired"
+    | "liftType"
+    | "liftWorkingHeight"
     | "pathToFloor"
     | "workingHours"
     | "blackoutDates"

@@ -23,6 +23,7 @@ import { parseCollapsed, isCollapsed, collapseStorageKey } from "../src/app/(app
 import {
   LIFT_TYPES, LOADING_DOOR_TYPES, TRACK_SERIES, TRACK_OPERATIONS, PLUG_TYPES, LIGHTING_POSITIONS, FIXTURE_POSITIONS, CONSOLE_LOCATIONS,
   CONDITION_STEPS, conditionLabel, conditionFromText, parseMonthYear, consoleLocationFrom, travelTimeText, distanceText, listSlug,
+  acceptTravel,
 } from "../src/lib/field-lists";
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
 import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
@@ -630,6 +631,52 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(lB.done === lA.done + 2 && lB.total === lA.total + 1, "#344 B4: progress counts the lighting positions and, once picked, their rows");
   const nA = sectionProgress(curSec, dp({ curtain: { present: ["None"], scope: ["Flame test"] } }), { tier1Done: true });
   ok(nA.total === 3 && nA.done === 2, "#344 B4: with Present = None only, progress counts just scope, goals and Present");
+
+  /* B5: travel pre-fill, access fields, beams drawing gate, Final questions */
+  ok(JSON.stringify(acceptTravel({ source: "manual", minutes: 35, miles: 22.4 })) === JSON.stringify({ min: 35, miles: 22.4 }) &&
+     JSON.stringify(acceptTravel({ source: "routed", minutes: 80, miles: 61 })) === JSON.stringify({ min: 80, miles: 61 }),
+    "#344 B5: acceptTravel keeps a manual or routed estimate");
+  ok(acceptTravel({ source: "auto", minutes: 35, miles: 22 }) === null && acceptTravel({ source: "none", minutes: null, miles: null }) === null,
+    "#344 B5: acceptTravel rejects auto (straight-line) and none estimates");
+  ok(acceptTravel({ source: "routed", minutes: null, miles: 22 }) === null && acceptTravel({ source: "manual", minutes: 35, miles: null }) === null &&
+     acceptTravel({ source: "routed", minutes: Number.NaN, miles: 22 }) === null,
+    "#344 B5: acceptTravel rejects a missing or non-finite minutes / miles");
+  const ctlB5 = rd("src/app/(app)/venue-assessments/[id]/controls.tsx");
+  const pageB5 = rd("src/app/(app)/venue-assessments/[id]/page.tsx");
+  const actsB5 = rd("src/app/(app)/venue-assessments/[id]/actions.ts");
+  const fieldsB5 = rd(`${b3dir}/fields.tsx`);
+  const travelSrv = rd("src/lib/survey-travel-server.ts");
+  const siteSec = ctlB5.slice(ctlB5.indexOf('id: "site"'), ctlB5.indexOf('id: "lifeSafety"'));
+  ok(siteSec.length > 0 && ["loadingDock", "elevatorSize", "floorType", "accessDoorSize", "loadingDoorType", "loadingDoorLocation", "loadingDoorWH",
+      "liftRequired", "liftType", "liftWorkingHeight", "liftSupplier", "workingHours", "firstImpressions"].every((k) => siteSec.includes(`key: "${k}"`)),
+    "#344 B5: Site access carries the loading door type / location / W × H and the lift fields");
+  ok(!["liftNeeded", "loadingDoorSize", "liftHeight"].some((k) => siteSec.includes(`key: "${k}"`)),
+    "#344 B5: the old liftNeeded / loadingDoorSize / liftHeight fields are gone from Site access");
+  ok(siteSec.includes('{ kind: "textarea", key: "pathToFloor", label: "Path: truck → floor"') && siteSec.includes("LOADING_DOOR_TYPES") && siteSec.includes("LIFT_TYPES"),
+    "#344 B5: Path: truck → floor is a textarea; door type and lift type use the fixed lists");
+  ok(/draft\.liftRequired === "yes"/.test(siteSec) && ["Loading door type", "Loading door location", "Loading door W × H", "Lift needed?", "Lift type", "Working height", "Who supplies lift"].every((l) => siteSec.includes(`label: "${l}"`)),
+    "#344 B5: Lift type, Working height and Who supplies lift show only when a lift is needed");
+  ok(["loadingDoorType", "loadingDoorLocation", "loadingDoorWH", "liftRequired", "liftType", "liftWorkingHeight"].every((k) =>
+      actsB5.includes(`| "${k}"`) && ctlB5.includes(`${k}: draft.${k}`) && ctlB5.includes(`${k}: r.${k}`)),
+    "#344 B5: the new access keys are in SurveyPatch, toDraft and buildPatch");
+  ok(fieldsB5.includes('f.kind === "choice"') && fieldsB5.includes("aria-pressed") && fieldsB5.includes('f.kind === "note"') && fieldsB5.includes("f.hint"),
+    "#344 B5: the field renderer gains a value/label choice, a note line and a hint under a text field");
+  const beamsB5 = ctlB5.slice(ctlB5.indexOf("beamFields"), ctlB5.indexOf('id: "m3d"'));
+  ok(beamsB5.includes("hasCounterweight(draft)") && beamsB5.includes("structuralDrawingOnFile") && beamsB5.includes("brickDrawingOnFile") &&
+     beamsB5.includes("cwElevationOnFile") && beamsB5.includes("The structural drawing covers the beam measurements."),
+    "#344 B5: the Beams builder gates the brick / CW drawings on counterweight and hides measurements when the structural drawing is on file");
+  ok(ctlB5.includes('id: "finalQuestions", title: "Final questions", subtitle: "Last things to settle before you leave"') &&
+     ctlB5.includes('key: "replaceVsReuse", label: "Replace vs. reuse (curtains)"') && ctlB5.includes("REPLACE_VS_REUSE_OPTIONS") && /disc: "curtain"/.test(ctlB5),
+    "#344 B5: Final questions holds Replace vs. reuse (curtains), written to disciplines.curtain");
+  ok(travelSrv.includes("acceptTravel(") && travelSrv.includes("venueAddressState(") && travelSrv.includes("getSiteByDocLocId(") &&
+     travelSrv.includes("officesFromSettings()") && /catch\s*\{\s*return null;/.test(travelSrv) && /!== "verified"\) return null/.test(travelSrv),
+    "#344 B5: the travel lookup needs a verified venue address, uses acceptTravel and never throws");
+  ok(pageB5.includes("surveyTravelSuggestion(") && pageB5.includes("travelSuggestion={travelSuggestion}") && ctlB5.includes("toDraft(record, travelSuggestion)") &&
+     ctlB5.includes("travelTimeText(") && ctlB5.includes("distanceText(") && ctlB5.includes("From the venue's verified address"),
+    "#344 B5: the page passes the suggestion; toDraft fills blank Travel time / Distance and the hint shows while it matches");
+  ok(sectionVisible({ scope: ["rigging"] }, "finalQuestions") === false && sectionVisible({ scope: ["curtain"] }, "finalQuestions") === true,
+    "#344 B5: Final questions shows only with curtains in scope");
+  ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctlB5), "#344 B5: the meetings slot still sits right before the sections");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

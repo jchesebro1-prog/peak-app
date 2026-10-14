@@ -85,6 +85,13 @@ export type Draft = {
   // ---- site-visit sheet additions (D132) ----
   loadingDoorSize: string;
   liftHeight: string;
+  // #344 B5 — the access fields that replace loadingDoorSize / liftNeeded / liftHeight on screen
+  loadingDoorType: string;
+  loadingDoorLocation: string;
+  loadingDoorWH: string;
+  liftRequired: "" | "yes" | "no";
+  liftType: string;
+  liftWorkingHeight: string;
   pathToFloor: string;
   workingHours: string;
   blackoutDates: string;
@@ -142,8 +149,15 @@ export type Draft = {
 /** Draft keys holding a flat string sub-object, addressable by `kind: "sub"`. */
 export type SubObjKey = "lifeSafety";
 export type FieldDef =
-  | { kind: "text"; key: string; label: string; full?: boolean; type?: string; inputMode?: string; placeholder?: string }
-  | { kind: "select"; key: string; label: string; options: string[]; full?: boolean; measure?: boolean }
+  /** `hint` — one muted line under the input (#344 B5: "From the venue's verified address") */
+  | { kind: "text"; key: string; label: string; full?: boolean; type?: string; inputMode?: string; placeholder?: string; hint?: string }
+  /** `disc` — reads/writes disciplines[disc][key] instead of a top-level draft key (#344 B5 Final questions) */
+  | { kind: "select"; key: string; label: string; options: readonly string[]; full?: boolean; measure?: boolean; disc?: DisciplineKey }
+  /** toggle-style buttons whose stored value differs from the label (#344 B5: Lift needed? stores "yes" / "no");
+      tapping the selected one clears it to "" */
+  | { kind: "choice"; key: string; label: string; options: ReadonlyArray<{ value: string; label: string }>; full?: boolean }
+  /** a read-only line spanning the grid (#344 B5: the structural drawing note) */
+  | { kind: "note"; key: string; text: string }
   | { kind: "measure"; key: string; label: string; full?: boolean }
   | { kind: "toggle"; key: string; label: string; full?: boolean }
   | { kind: "textarea"; key: string; label: string; placeholder?: string }

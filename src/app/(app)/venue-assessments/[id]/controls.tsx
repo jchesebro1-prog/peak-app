@@ -27,7 +27,9 @@ import {
   type DisciplineKey,
   type DisciplineValue,
   type InventoryRow,
+  REPLACE_VS_REUSE_OPTIONS,
 } from "@/lib/stores/survey-intake";
+import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, travelTimeText } from "@/lib/field-lists";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
@@ -53,7 +55,7 @@ import { AssessmentUsageSection } from "./sections/assessment-usage";
 import { AssessmentConditionSection } from "./sections/assessment-condition";
 import { AssessmentFindingsSection } from "./sections/assessment-findings";
 import {
-  SECTION_ORDER, STEP_LABELS, STEP_BY_ID, GROUP_BY_ID, GROUP_META, isQuoteVisit, sectionVisible,
+  SECTION_ORDER, STEP_LABELS, STEP_BY_ID, GROUP_BY_ID, GROUP_META, isQuoteVisit, sectionVisible, hasCounterweight,
 } from "@/lib/survey-flow";
 import { KillQuestions } from "./sections/kill-questions";
 import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
@@ -92,7 +94,13 @@ function timeAgo(ts: number | null | undefined): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function toDraft(r: SurveyRecord): Draft {
+/** #344 B5 — the page's one-way drive from the office to a verified venue address (null = none). */
+type TravelSuggestion = { min: number; miles: number } | null;
+const TRAVEL_HINT = "From the venue's verified address";
+
+/** `travel` fills a blank Travel time / Distance on open (#344 B5); not a change, so the draft stays clean — any save
+    stores it. */
+function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
   return {
     customer: r.customer || "",
     customerId: r.customerId ?? null,
@@ -108,8 +116,8 @@ function toDraft(r: SurveyRecord): Draft {
     visitType: r.visitType || "",
     visitPurpose: r.visitPurpose || "",
     reason: r.reason || "",
-    travelTime: r.travelTime || "",
-    distance: r.distance || "",
+    travelTime: r.travelTime || (travel ? travelTimeText(travel.min) : ""),
+    distance: r.distance || (travel ? distanceText(travel.miles) : ""),
     hasBOM: !!r.hasBOM,
     hasDrawings: !!r.hasDrawings,
     hasPhotos: !!r.hasPhotos,
@@ -125,6 +133,12 @@ function toDraft(r: SurveyRecord): Draft {
     liftSupplier: r.liftSupplier || "",
     loadingDoorSize: r.loadingDoorSize || "",
     liftHeight: r.liftHeight || "",
+    loadingDoorType: r.loadingDoorType || "",
+    loadingDoorLocation: r.loadingDoorLocation || "",
+    loadingDoorWH: r.loadingDoorWH || "",
+    liftRequired: r.liftRequired === "yes" || r.liftRequired === "no" ? r.liftRequired : "",
+    liftType: r.liftType || "",
+    liftWorkingHeight: r.liftWorkingHeight || "",
     pathToFloor: r.pathToFloor || "",
     workingHours: r.workingHours || "",
     blackoutDates: r.blackoutDates || "",
@@ -225,6 +239,7 @@ export default function SurveyEditor({
   meetingsSlot = null,
   canSuggest = false,
   suggestionHref = null,
+  travelSuggestion = null,
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
@@ -242,8 +257,10 @@ export default function SurveyEditor({
   canSuggest?: boolean;
   /** This assessment's latest suggestion ("Suggestion ready → Open"); null when none. */
   suggestionHref?: string | null;
+  /** #344 B5 — one-way drive to the venue's verified address, for a blank Travel time / Distance; null when none. */
+  travelSuggestion?: TravelSuggestion;
 }) {
-  const initial = useMemo<Draft>(() => toDraft(record), [record]);
+  const initial = useMemo<Draft>(() => toDraft(record, travelSuggestion), [record, travelSuggestion]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(false);
   // A "From recording" Insert (spec §4.4) writes into the SAVED survey and
@@ -480,6 +497,18 @@ export default function SurveyEditor({
         if (f.type === "check") return { kind: "checkMeasure", key: f.key, label: f.label };
         return { kind: "measure", key: f.key, label: f.label };
       });
+    /* #344 B5 — Beams & rigging: the drawings on file sit at the top (brick / CW elevation only with a counterweight
+       system); a structural drawing on file hides the beam measurements (their values stay stored). */
+    const DRAWING_KEYS = ["structuralDrawingOnFile", "brickDrawingOnFile", "cwElevationOnFile"];
+    const beamFields = (g: MeasureGroup): FieldDef[] => {
+      const all = groupFields(g);
+      const cw = hasCounterweight(draft);
+      const drawings = all.filter((f) => f.key === "structuralDrawingOnFile" || (cw && (f.key === "brickDrawingOnFile" || f.key === "cwElevationOnFile")));
+      if (draft.measurements.structuralDrawingOnFile) {
+        return [...drawings, { kind: "note", key: "structuralDrawingNote", text: "The structural drawing covers the beam measurements." }];
+      }
+      return [...drawings, ...all.filter((f) => !DRAWING_KEYS.includes(f.key))];
+    };
 
     const secs: SectionDef[] = [];
     secs.push({ id: "cust", title: "Customer & venue", subtitle: "Who and where", group: "brief", step: 0, kind: "custvenue" });
@@ -487,8 +516,15 @@ export default function SurveyEditor({
       id: "visit", title: "Visit", subtitle: "Purpose & travel", group: "brief", step: 0, kind: "fields",
       fields: [
         { kind: "select", key: "visitPurpose", label: "Purpose of visit", options: VISIT_PURPOSES },
-        { kind: "text", key: "travelTime", label: "Travel time", placeholder: "e.g. 35 min" },
-        { kind: "text", key: "distance", label: "Distance", placeholder: "e.g. 22 mi" },
+        // #344 B5: the hint shows while the value is still the verified-address suggestion
+        {
+          kind: "text", key: "travelTime", label: "Travel time", placeholder: "e.g. 35 min",
+          hint: travelSuggestion && draft.travelTime === travelTimeText(travelSuggestion.min) ? TRAVEL_HINT : undefined,
+        },
+        {
+          kind: "text", key: "distance", label: "Distance", placeholder: "e.g. 22 mi",
+          hint: travelSuggestion && draft.distance === distanceText(travelSuggestion.miles) ? TRAVEL_HINT : undefined,
+        },
         { kind: "textarea", key: "reason", label: "Reason / scope of visit", placeholder: "Why are we here? What triggered the visit?" },
       ],
     });
@@ -533,12 +569,19 @@ export default function SurveyEditor({
         { kind: "text", key: "elevatorSize", label: "Elevator size", placeholder: "e.g. 5' × 7' or none" },
         { kind: "select", key: "floorType", label: "Floor type", options: meta.floorTypes },
         { kind: "text", key: "accessDoorSize", label: "Access door size", placeholder: "e.g. 8' × 10'" },
-        { kind: "select", key: "liftNeeded", label: "Kind of lift needed", options: meta.liftTypes },
-        { kind: "select", key: "liftSupplier", label: "Who supplies lift", options: meta.liftSuppliers },
-        // ACCESS & SITE CONDITIONS, from the sheets
-        { kind: "text", key: "loadingDoorSize", label: "Loading door location & W × H" },
-        { kind: "text", key: "liftHeight", label: "Lift needed — type / height" },
-        { kind: "text", key: "pathToFloor", label: "Path: truck → floor" },
+        // #344 B5: loading door + lift replace loadingDoorSize / liftNeeded / liftHeight (old keys stay stored)
+        { kind: "select", key: "loadingDoorType", label: "Loading door type", options: LOADING_DOOR_TYPES },
+        { kind: "text", key: "loadingDoorLocation", label: "Loading door location" },
+        { kind: "text", key: "loadingDoorWH", label: "Loading door W × H", placeholder: "e.g. 10' × 12'" },
+        { kind: "choice", key: "liftRequired", label: "Lift needed?", options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }] },
+        ...(draft.liftRequired === "yes"
+          ? ([
+              { kind: "select", key: "liftType", label: "Lift type", options: LIFT_TYPES },
+              { kind: "text", key: "liftWorkingHeight", label: "Working height", placeholder: "e.g. 32'" },
+              { kind: "select", key: "liftSupplier", label: "Who supplies lift", options: meta.liftSuppliers },
+            ] as FieldDef[])
+          : []),
+        { kind: "textarea", key: "pathToFloor", label: "Path: truck → floor" },
         { kind: "text", key: "workingHours", label: "Working hours allowed" },
         { kind: "text", key: "blackoutDates", label: "Blackout dates / events" },
         { kind: "text", key: "floorProtection", label: "Floor protection required" },
@@ -562,7 +605,8 @@ export default function SurveyEditor({
       fields: quick.map((f) => ({ kind: "measure", key: f.key, label: f.label })),
     });
     meta.measureGroups.forEach((g) => {
-      secs.push({ id: g.id, title: g.title, subtitle: g.subtitle, group: "field", step: 2, advanced: true, kind: "fields", fields: groupFields(g) });
+      const fields = g.id === "mBeams" ? beamFields(g) : groupFields(g);
+      secs.push({ id: g.id, title: g.title, subtitle: g.subtitle, group: "field", step: 2, advanced: true, kind: "fields", fields });
     });
     // 3D preview (IDEAS #49 P1) — parametric model auto-built from measurements
     secs.push({ id: "m3d", title: "3D preview", subtitle: "Auto-built from measurements — drag to orbit", group: "field", step: 2, advanced: true, kind: "viz3d" });
@@ -589,6 +633,13 @@ export default function SurveyEditor({
         { kind: "textarea", key: "notes", label: "Generic notes", placeholder: "Access, hazards, scheduling constraints…" },
       ],
     });
+    // #344 B5 — wrap-up questions asked last; visible per sectionVisible (curtains in scope)
+    secs.push({
+      id: "finalQuestions", title: "Final questions", subtitle: "Last things to settle before you leave", group: "wrapup", step: 5, kind: "fields",
+      fields: [
+        { kind: "select", key: "replaceVsReuse", label: "Replace vs. reuse (curtains)", options: REPLACE_VS_REUSE_OPTIONS, disc: "curtain" },
+      ],
+    });
     secs.push({ id: "recap", title: "Customer recap", subtitle: "Read back what we heard", group: "wrapup", step: 5, kind: "recap" });
     secs.push({ id: "finalThoughts", title: "Final thoughts", subtitle: "Internal tags — never shown to the customer", group: "wrapup", step: 5, kind: "finalThoughts" });
     if (draft.assessmentEnabled) {
@@ -603,7 +654,7 @@ export default function SurveyEditor({
     return secs
       .filter((s) => sectionVisible(draft, s.id))
       .sort((a, b) => SECTION_ORDER.indexOf(a.id) - SECTION_ORDER.indexOf(b.id));
-  }, [draft, meta, roster]);
+  }, [draft, meta, roster, travelSuggestion]);
 
   /* ---------- persistence ---------- */
   function validate(): boolean {
@@ -654,6 +705,12 @@ export default function SurveyEditor({
       liftSupplier: draft.liftSupplier,
       loadingDoorSize: draft.loadingDoorSize,
       liftHeight: draft.liftHeight,
+      loadingDoorType: draft.loadingDoorType,
+      loadingDoorLocation: draft.loadingDoorLocation,
+      loadingDoorWH: draft.loadingDoorWH,
+      liftRequired: draft.liftRequired,
+      liftType: draft.liftType,
+      liftWorkingHeight: draft.liftWorkingHeight,
       pathToFloor: draft.pathToFloor,
       workingHours: draft.workingHours,
       blackoutDates: draft.blackoutDates,
@@ -1158,6 +1215,8 @@ export default function SurveyEditor({
                               toggleMeasure={toggleMeasure}
                               toggleBtn={toggleBtn}
                               boxStyle={boxStyle}
+                              dv={dv}
+                              setDisc={setDisc}
                             />
                           )}
                           {sec.id === "notes" && fromRecording.length > 0 && (

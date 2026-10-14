@@ -1,5 +1,5 @@
 /* Section progress for the Venue Assessments rail (#344 A8) — pure. Counts the visible, answerable fields of a
-   section: text / select / textarea / measure / sub. Yes/no toggles and checks are left out (unticked is a valid
+   section: text / select / textarea / measure / sub. Yes/no toggles (and #344 B5's Yes/No choice), notes and checks are left out (unticked is a valid
    answer). Read-only sections (recap, 3D, photos, final thoughts…) have total 0 and no ring. */
 import { DISCIPLINE_GROUPS, PIPES_LABEL, tier1Items, visibleFields } from "@/lib/stores/survey-intake";
 import type { Draft, FieldDef, SectionDef } from "./types";
@@ -25,6 +25,7 @@ function fieldValue(f: FieldDef, d: Draft): unknown {
     case "checkMeasure":
       return d.measurements[f.key];
     case "select":
+      if (f.disc) return d.disciplines[f.disc]?.[f.key];
       return f.measure ? d.measurements[f.key] : rec[f.key];
     case "sub":
       return (rec[f.obj] as Record<string, unknown> | undefined)?.[f.key];

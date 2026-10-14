@@ -23,6 +23,7 @@ import ActionError from "@/components/action-error";
 import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { visitIdsForSurvey } from "@/lib/stores/site-visits";
 import { estimateSuggestEnabled, suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
+import { surveyTravelSuggestion } from "@/lib/survey-travel-server";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
@@ -49,7 +50,7 @@ export default async function SurveyEditorPage({
   // Curtains are in play when the discipline is active or in scope, or the scope is still unanswered (shows every discipline).
   const needsFabric =
     (rec.disciplinesActive || []).includes("curtain") || !(rec.scope && rec.scope.length) || rec.scope.includes("curtain");
-  const [autoCerts, recordings, fromRecording, visitIds, canSuggest, fabricRows] = await Promise.all([
+  const [autoCerts, recordings, fromRecording, visitIds, canSuggest, fabricRows, travelSuggestion] = await Promise.all([
     resolveCerts(rec.customerId, rec.locationId),
     loadRecordingsStrip("survey", rec.id),
     loadPrefillPanels("survey", rec.id),
@@ -57,6 +58,8 @@ export default async function SurveyEditorPage({
     estimateSuggestEnabled(user.id),
     // #344 B4 — the curtain rows' Fabric type suggestions; a failed read just means no datalist.
     needsFabric ? fabricPartsByCategory().catch(() => []) : Promise.resolve([] as Awaited<ReturnType<typeof fabricPartsByCategory>>),
+    // #344 B5 — one-way drive from the office to a verified venue address; null (never a throw) otherwise.
+    surveyTravelSuggestion(rec),
   ]);
   const fabricOptions = [...new Set(fabricRows.map((p) => (p.desc || "").trim()).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b))
@@ -116,6 +119,7 @@ export default async function SurveyEditorPage({
         fromRecording={fromRecording}
         canSuggest={canSuggest}
         suggestionHref={suggestionHref}
+        travelSuggestion={travelSuggestion}
         // #323 — Krisp meetings linked to this survey or one of its site visits (site visits have no page of
         // their own; their meetings show here, like their recordings do).
         meetingsSlot={<MeetingsCard kind="work" id={[rec.id, ...visitIds]} viewerId={user.id} />}
