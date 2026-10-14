@@ -35,7 +35,27 @@ export function photoPathInScope(path: string, assessmentId: string): boolean {
   return !/^\.+$/.test(rest) && !rest.includes("..") && /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.jpg$/.test(rest);
 }
 
+/** The one Blob path an upload for `photoId` may land at: its own folder, its own file name — `<photoId>.jpg`, or with
+ *  Blob's random suffix `<photoId>-<suffix>.jpg`. A different photo's file (or a prefix-alike id) never matches, so one
+ *  photo can't alias another's blob. */
+export function photoPathMatches(path: string, assessmentId: string, photoId: string): boolean {
+  if (typeof photoId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(photoId) || !photoPathInScope(path, assessmentId)) return false;
+  const file = path.slice(`${PHOTO_PREFIX}${assessmentId}/`.length);
+  return file === `${photoId}.jpg` || (file.startsWith(`${photoId}-`) && /^[A-Za-z0-9]+\.jpg$/.test(file.slice(photoId.length + 1)));
+}
+
+/** A queued photo older than this is given up on (kept on the device, marked failed) however the server answers. */
+export const PHOTO_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
+export function photoTooOld(createdAt: number, now: number): boolean {
+  return Number.isFinite(createdAt) && now - createdAt > PHOTO_MAX_AGE_MS;
+}
+
 export const INLINE_PHOTO_PREFIX = "data:image/jpeg;base64,";
+/** All inline data URLs on one assessment together (characters); past this a photo waits for its Blob upload. */
+export const INLINE_TOTAL_MAX = 300 * 1024;
+/** Local dev without Blob: the byte target the device shrinks a photo to before inlining. Base64 grows it by 4/3, so
+ *  this plus the data-URL prefix stays under INLINE_TOTAL_MAX (one inline photo always fits an empty assessment). */
+export const INLINE_BLOB_MAX = 200 * 1024;
 /** One inline (dev / no-Blob) photo: a data URL up to 400 KB. */
 export const INLINE_PHOTO_MAX = 400 * 1024;
 

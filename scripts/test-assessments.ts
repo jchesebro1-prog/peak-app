@@ -11,7 +11,7 @@ import { validateAnswer, mergeAnswers } from "../src/lib/assessments/answers";
 import { CODE_RE, suggestCompanyCode, suggestSiteCode, withCollisionSuffix } from "../src/lib/assessments/codes";
 import { STATUSES, CATEGORY_ROUTING, formatPrintedId, pendingPrintedLabel, immediateProblems, transitionProblems, legacyRating, codeInUse, type Finding } from "../src/lib/assessments/findings-model";
 import { csvCell, toCsv } from "../src/lib/assessments/csv";
-import { PHOTO_PREFIX, PHOTO_CAPS, photoBlobPath, photoPathInScope, inlinePhotoProblem, photoBackoffMs } from "../src/lib/assessments/photos";
+import { PHOTO_PREFIX, PHOTO_CAPS, photoBlobPath, photoPathInScope, photoPathMatches, photoTooOld, PHOTO_MAX_AGE_MS, INLINE_TOTAL_MAX, INLINE_BLOB_MAX, inlinePhotoProblem, photoBackoffMs } from "../src/lib/assessments/photos";
 import { scaledSize, photoFileProblem, HEIC_MESSAGE } from "../src/lib/assessments/photo-resize";
 import { photoBytes } from "../src/lib/assessments/photo-bytes";
 import coverage from "../docs/assessments/manitowoc-coverage.json";
@@ -24,7 +24,7 @@ import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
 import { saveSite, getSite, setSiteShortCode } from "../src/lib/identity/sites";
 import { registerFixture } from "./test-fixtures";
-import { createAssessment, saveAssessment, applyFinalizedPhoto, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, clearSyncRejects, type Assessment } from "../src/lib/stores/assessments";
+import { createAssessment, saveAssessment, applyFinalizedPhoto, removePendingPhoto, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, clearSyncRejects, type Assessment } from "../src/lib/stores/assessments";
 import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
@@ -388,6 +388,10 @@ export async function assessmentChecks(ok: Ok) {
   const okJpeg = "data:image/jpeg;base64," + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]).toString("base64");
   ok(inlinePhotoProblem(okJpeg) === null && inlinePhotoProblem("data:image/png;base64,iVBORw0KGgo=") !== null && inlinePhotoProblem("data:image/jpeg;base64,AAAA") !== null && inlinePhotoProblem("data:image/jpeg;base64,/9j/" + "A".repeat(400 * 1024)) !== null && inlinePhotoProblem("data:image/jpeg;base64,/9j/ !!") !== null && inlinePhotoProblem(5 as never) !== null, "inline photo: JPEG magic, base64 body and ≤ 400 KB are all required");
   ok(photoBackoffMs(0) === 0 && photoBackoffMs(1) === 5000 && photoBackoffMs(2) === 10000 && photoBackoffMs(3) === 20000 && photoBackoffMs(7) === 300000 && photoBackoffMs(500) === 300000, "photo queue: backoff doubles from 5 s and is capped at 5 min");
+  ok(photoPathMatches("assessments/AS-1001/p1.jpg", "AS-1001", "p1") && photoPathMatches("assessments/AS-1001/p1-Ab12Cd.jpg", "AS-1001", "p1") && photoPathMatches("assessments/AS-1001/p_1-x-Ab12.jpg", "AS-1001", "p_1-x"), "photo path: a photo's own file (with or without Blob's suffix) matches");
+  ok(!photoPathMatches("assessments/AS-1001/p10.jpg", "AS-1001", "p1") && !photoPathMatches("assessments/AS-1001/p2-Ab12.jpg", "AS-1001", "p1") && !photoPathMatches("assessments/AS-1001/p1x-Ab12.jpg", "AS-1001", "p1") && !photoPathMatches("assessments/AS-1002/p1.jpg", "AS-1001", "p1") && !photoPathMatches("assessments/AS-1001/p1.jpg", "AS-1001", "") && !photoPathMatches("assessments/AS-1001/../p1.jpg", "AS-1001", "p1"), "photo path: another photo's blob, a prefix-alike id or another assessment never matches");
+  ok(!photoTooOld(1000, 1000 + PHOTO_MAX_AGE_MS) && photoTooOld(1000, 1001 + PHOTO_MAX_AGE_MS) && PHOTO_MAX_AGE_MS === 7 * 86_400_000, "photo queue: an item older than 7 days is given up on");
+  ok(INLINE_BLOB_MAX <= 200 * 1024 && Math.ceil(INLINE_BLOB_MAX * 4 / 3) + "data:image/jpeg;base64,".length + 8 < INLINE_TOTAL_MAX, "photo queue: the dev inline byte target (base64 + prefix) fits the store's 300 KB total cap");
   // answers
   const aq = allQuestions(ASSESSMENT_DEF);
   const QD = (k: string) => aq.get(k)!.q;
@@ -890,11 +894,67 @@ async function assessmentPhotoDbChecks(ok: Ok) {
     const evil = { ...asm, photos: [{ id: "x1", blobPath: "assessments/AS-9999/x1.jpg", takenAt: 1, by: "u1" }, { id: "x2", inline: "data:image/jpeg;base64,AAAA", takenAt: 1, by: "u1" }] };
     ok((await photoBytes(evil, "x1")) === null && (await photoBytes(evil, "x2")) === null, "photoBytes: an out-of-scope path or a fake inline JPEG is null without any Blob read");
 
+    // Fix round 1 — rev returned, terminal states, dev-only inline, pending-ref removal, own-file paths
+    {
+      const b = await createAssessment({ visitType: "condition", customerId: co1, siteId: site1, visitDate: Date.now(), assessorId: "u1" }, "u1");
+      created.push(b.id); registerFixture("assessments", b.id);
+      const PUSHER = { id: "u1", roles: ["Estimator"] };
+      await saveAssessment(b.id, { photos: [{ id: "q1", pending: true, takenAt: 1, by: "u1" }, { id: "q2", pending: true, takenAt: 2, by: "u1" }] }, U1);
+      const f1 = await applyFinalizedPhoto(b.id, "q1", { inline: jpeg }, U1);
+      ok(f1.ok && f1.rev === (await getAssessment(b.id))!.rev, "finalize: the returned rev equals the stored rev after the write");
+      const f1b = await applyFinalizedPhoto(b.id, "q1", { inline: jpeg }, U1);
+      ok(f1b.ok && f1b.already === true && f1b.rev === (await getAssessment(b.id))!.rev, "finalize: an already-finished run returns the current stored rev");
+      const mis = await applyFinalizedPhoto(b.id, "q2", { blobPath: `assessments/${b.id}/q1-Ab12.jpg` }, U1);
+      ok(!mis.ok && mis.terminal === true && (await getAssessment(b.id))!.photos.find((p) => p.id === "q2")!.pending === true, "finalize: another photo's blob path is refused (terminal) and the photo stays pending");
+      const unk = await applyFinalizedPhoto("AS-9999", "q2", { inline: jpeg }, U1);
+      ok(!unk.ok && unk.terminal === true, "finalize: an unknown assessment is terminal");
+      const bad = await applyFinalizedPhoto(b.id, "q2", { inline: "data:image/png;base64,iVBORw0KGgo=" }, U1);
+      const outs = await applyFinalizedPhoto(b.id, "q2", { blobPath: "assessments/AS-9999/q2.jpg" }, U1);
+      const both2 = await applyFinalizedPhoto(b.id, "q2", {}, U1);
+      ok(!bad.ok && bad.terminal === true && !outs.ok && outs.terminal === true && !both2.ok && both2.terminal === true, "finalize: every validation refusal is terminal");
+      const ghost = await applyFinalizedPhoto(b.id, "ghost", { inline: jpeg }, U1);
+      ok(!ghost.ok && ghost.terminal !== true, "finalize: a ref that isn't there yet (no reject) stays retryable");
+      await pushAssessment({ id: b.id, rev: 99, doc: { photos: [{ id: "ghost2", blobPath: "assessments/AS-9999/x.jpg", takenAt: 1, by: "u1" }] } }, PUSHER);
+      const ghost2 = await applyFinalizedPhoto(b.id, "ghost2", { inline: jpeg }, U1);
+      ok(!ghost2.ok && ghost2.terminal === true && !(await getAssessment(b.id))!.photos.some((p) => p.id === "ghost2"), "finalize: a ref absent AND rejected at push (photo:<id> in syncRejects) is terminal");
+
+      // I2 — inline is dev-only: with Blob configured it is refused at finalize and stripped by both save modes
+      const prevTok = process.env.BLOB_READ_WRITE_TOKEN;
+      process.env.BLOB_READ_WRITE_TOKEN = "test-token-never-used";
+      try {
+        const inl = await applyFinalizedPhoto(b.id, "q2", { inline: jpeg }, U1);
+        ok(!inl.ok && inl.terminal === true && /file storage/.test(inl.error) && (await getAssessment(b.id))!.photos.find((p) => p.id === "q2")!.pending === true, "inline: refused (terminal) at finalize when Blob is configured");
+        const act = await saveAssessment(b.id, { photos: [{ id: "q3", inline: jpeg, takenAt: 3, by: "u1" }] as never }, U1);
+        const q3 = act.ok ? act.doc.photos.find((p) => p.id === "q3") : undefined;
+        ok(act.ok && !!q3 && q3.pending === true && !q3.inline, "inline: stripped by an action-mode save when Blob is configured (ref stays pending)");
+        const psh = await pushAssessment({ id: b.id, rev: 99, doc: { photos: [{ id: "q4", inline: jpeg, takenAt: 4, by: "u1" }] } }, PUSHER);
+        const q4 = (await getAssessment(b.id))!.photos.find((p) => p.id === "q4");
+        ok(psh.status === "ok" && !!q4 && q4.pending === true && !q4.inline, "inline: stripped by a push-mode save when Blob is configured (ref stays pending)");
+      } finally {
+        if (prevTok === undefined) delete process.env.BLOB_READ_WRITE_TOKEN; else process.env.BLOB_READ_WRITE_TOKEN = prevTok;
+      }
+
+      // removePendingPhoto — the escape hatch for a pending ref whose bytes are gone
+      await saveAssessment(b.id, { answers: { "core.seats": { v: 300, state: "answered", at: Date.now(), by: "u1", photoIds: ["q2", "q1"] } } }, U1);
+      const revBefore = (await getAssessment(b.id))!.rev;
+      const rm = await removePendingPhoto(b.id, "q2", U1);
+      const after = (await getAssessment(b.id))!;
+      ok(rm.ok && rm.rev === after.rev && after.rev === revBefore + 1 && !after.photos.some((p) => p.id === "q2"), "remove pending: a pending ref is removed and rev bumps");
+      ok(JSON.stringify(after.answers["core.seats"]?.photoIds) === '["q1"]', "remove pending: the id is dropped from the answers' photoIds");
+      const rmDone = await removePendingPhoto(b.id, "q1", U1);
+      ok(!rmDone.ok && rmDone.terminal === true && (await getAssessment(b.id))!.photos.some((p) => p.id === "q1" && !!p.inline), "remove pending: a finished photo is refused and kept");
+      const rmGone = await removePendingPhoto(b.id, "q2", U1);
+      ok(rmGone.ok && rmGone.rev === after.rev, "remove pending: an already-removed ref is a quiet success (no rev bump)");
+      await db.update(DOC_TABLES.assessments).set({ doc: sql`jsonb_set(doc, '{status}', '"completed"')` }).where(eq(DOC_TABLES.assessments.id, b.id));
+      const rmComp = await removePendingPhoto(b.id, "q3", U1);
+      ok(!rmComp.ok && rmComp.terminal === true, "remove pending: a completed assessment refuses it");
+    }
+
     // completed assessments refuse a finalize
     await saveAssessment(a.id, { photos: [{ id: "p4", pending: true, takenAt: 9, by: "u1" }] }, U1);
     await db.update(DOC_TABLES.assessments).set({ doc: sql`jsonb_set(doc, '{status}', '"completed"')` }).where(eq(DOC_TABLES.assessments.id, a.id));
     const done = await applyFinalizedPhoto(a.id, "p4", { inline: jpeg }, U1);
-    ok(!done.ok && /completed/i.test(done.error), "finalize: a completed assessment refuses it (reopen first)");
+    ok(!done.ok && /completed/i.test(done.error) && done.terminal === true, "finalize: a completed assessment refuses it (reopen first) — terminal");
   } finally {
     if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
     await dropAssessIdentityFixtures();

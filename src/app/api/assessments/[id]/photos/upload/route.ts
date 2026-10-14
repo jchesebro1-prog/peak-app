@@ -3,7 +3,7 @@ import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth } from "@/auth";
 import { blobEnabled } from "@/lib/blob";
 import { can } from "@/lib/team";
-import { photoBlobPath, photoPathInScope } from "@/lib/assessments/photos";
+import { photoBlobPath, photoPathMatches } from "@/lib/assessments/photos";
 import { getAssessment } from "@/lib/stores/assessments";
 
 // Token minting only — no bytes pass through this function.
@@ -61,7 +61,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         }
         if (!PHOTO_ID_RE.test(photoId)) throw new UploadRefused(400, "clientPayload must be {photoId}");
         if (!(await getAssessment(id))) throw new UploadRefused(404, "That assessment no longer exists.");
-        if (!photoPathInScope(pathname, id) || pathname !== photoBlobPath(id, photoId)) {
+        if (!photoPathMatches(pathname, id, photoId) || pathname !== photoBlobPath(id, photoId)) {
           throw new UploadRefused(400, "That file path isn't allowed for this assessment.");
         }
         return {
