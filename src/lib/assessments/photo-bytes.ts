@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — a photo's JPEG bytes, read on the server. The serve route streams from it and the
+/* Assessments engine (#340) — a photo's JPEG bytes, read on the server. The serve route streams from it and the
    print route (Task 10) inlines photos as data URIs through it, so headless Chrome never needs a session or a token.
    Server-only: it reads private Blob. */
 import { dataUrlToBytes, getBlobStream, isBlobNotFound } from "@/lib/blob";

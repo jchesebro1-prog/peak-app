@@ -135,7 +135,7 @@ export type BuilderInitial = {
   marginPts?: number | null;
   /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
   stampedTierMargin?: number | null;
-  /** #337: the assessment findings this new quote is built from (posted as `findingKeys`; linked on first save). */
+  /** #340: the assessment findings this new quote is built from (posted as `findingKeys`; linked on first save). */
   findingKeys?: string[];
 };
 
@@ -630,7 +630,7 @@ export function QuoteBuilder({
     fd.set("sourceRef", source?.refId || "");
     fd.set("sourceLog", source?.logId != null ? String(source.logId) : "");
     fd.set("sourceLabel", source?.label || "");
-    // #337: the findings intake rides along as one comma-separated field — absent for every other quote.
+    // #340: the findings intake rides along as one comma-separated field — absent for every other quote.
     if (initial.findingKeys?.length) fd.set("findingKeys", initial.findingKeys.join(","));
     return fd;
   }

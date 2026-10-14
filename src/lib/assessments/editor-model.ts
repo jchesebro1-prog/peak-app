@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the editor's pure state model (Task 7). The client editor keeps one EditorState in a
+/* Assessments engine (#340) — the editor's pure state model (Task 7). The client editor keeps one EditorState in a
    reducer; everything here is pure (no React, no db, no clock — time comes in as `now`), so the harness can pin the
    save contract: which answers a save sends, the whole doc the outbox queues, how a server copy is adopted (the rev
    contract) and how each answer control turns input into an Answer (the clear marker included). */

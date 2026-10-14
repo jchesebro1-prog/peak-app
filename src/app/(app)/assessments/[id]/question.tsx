@@ -1,6 +1,6 @@
 "use client";
 
-/* One question of the assessment editor (#337, Task 7): its label, the answer control for its type, the ⋯ menu
+/* One question of the assessment editor (#340, Task 7): its label, the answer control for its type, the ⋯ menu
    (N/A, Unable…, Clear), the venue-profile "On file" line and any photos already attached. Every change goes up as a
    whole Answer through `onAnswer`; the editor stamps nothing itself, the control does (at = now, by = me). */
 import { useState, type ReactNode } from "react";

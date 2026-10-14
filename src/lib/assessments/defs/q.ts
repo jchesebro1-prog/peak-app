@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — tiny constructors that keep the scope files readable. Pure data. */
+/* Assessments engine (#340) — tiny constructors that keep the scope files readable. Pure data. */
 import type { Cond, QuestionDef } from "./types";
 
 type Extra = Omit<QuestionDef, "key" | "label" | "type" | "options">;

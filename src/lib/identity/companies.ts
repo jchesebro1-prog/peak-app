@@ -79,7 +79,7 @@ export async function saveCompany(
 ): Promise<void> {
   const db = await getDb();
   const t = Date.now();
-  // shortCode is written only by setCompanyShortCode (#337): a regular save
+  // shortCode is written only by setCompanyShortCode (#340): a regular save
   // never writes, clears or inserts it.
   const { shortCode: _sc, ...clean } = row;
   void _sc;
@@ -103,7 +103,7 @@ export function isUniqueViolation(e: unknown): boolean {
 }
 
 /**
- * Set (or clear, with null) a company's assessment short code (#337). The only
+ * Set (or clear, with null) a company's assessment short code (#340). The only
  * writer of `companies.short_code`. Must match CODE_RE; the partial unique
  * index from migration 0040 (lower(short_code), live rows) turns a clash into
  * a friendly error instead of a throw.

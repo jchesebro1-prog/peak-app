@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the finding record and its pure rules (immediate-attention requirements,
+/* Assessments engine (#340) — the finding record and its pure rules (immediate-attention requirements,
    status preconditions, legacy rating map). Spec §3 "Record: findings collection". No db / next imports. */
 import type { Category, Rating } from "./defs/types";
 

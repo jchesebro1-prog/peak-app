@@ -1,6 +1,6 @@
 "use client";
 
-/* Mark complete (#337 spec §2, Task 8). The server runs `evaluate` on the stored answers and lists every gap:
+/* Mark complete (#340 spec §2, Task 8). The server runs `evaluate` on the stored answers and lists every gap:
    required questions (by label), required photos (by label), open prompts (by text) — overridable with
    Complete anyway, and recorded for the report's follow-up list — plus photos still uploading, which hard-block
    (the override is disabled). A pending photo with no bytes queued on THIS device can't finish from here: the

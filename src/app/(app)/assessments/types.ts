@@ -1,4 +1,4 @@
-/* Assessments (#337) — the plain, serializable view models the server pages hand the client components. Type-only:
+/* Assessments (#340) — the plain, serializable view models the server pages hand the client components. Type-only:
    nothing here imports a store, so a client component can import it freely. */
 import type { EditorDoc, FindingVM, PicklistExtrasVM, ProfileFactVM, SyncRejectVM } from "@/lib/assessments/editor-model";
 

@@ -292,7 +292,7 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
     },
   };
 
-  // #337: a quote started from assessment findings (the builder's `findingKeys` field) carries their keys and
+  // #340: a quote started from assessment findings (the builder's `findingKeys` field) carries their keys and
   // links them once created. Absent → [] and the create below writes exactly what it always wrote.
   const { keys: findingKeys, notice: findingVenueNotice } = await findingKeysForSave(formData.get("findingKeys"), customerId, !!editingId, venues.map((v) => v.id));
   const q = editingId
@@ -336,7 +336,7 @@ export async function saveRepairQuote(formData: FormData): Promise<void> {
 
 export async function approveRepairQuote(formData: FormData): Promise<void> {
   let id: string | null;
-  // #337: set when the findings couldn't be linked to the quote this approval created (mirrors saveRepairQuote).
+  // #340: set when the findings couldn't be linked to the quote this approval created (mirrors saveRepairQuote).
   const note: { creditNote?: string; findingNote?: string } = {};
   try {
     id = await persist(formData, note);

@@ -1,6 +1,6 @@
 "use client";
 
-/* The findings register (#337, Task 9): filters as query params, a table (stacked cards on a phone), checkbox
+/* The findings register (#340, Task 9): filters as query params, a table (stacked cards on a phone), checkbox
    selection with bulk Triage / Quote these findings / Export CSV, a status menu built from transitionProblems, and
    the editor's finding sheet on row click. Never imports a store: rows arrive as plain props, mutations go through
    server actions, and router.refresh() re-reads the page after each one. */

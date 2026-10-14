@@ -14,7 +14,7 @@ const TOOLBAR_CSS = `
 `;
 
 /**
- * The venue assessment report in the browser (#337, spec §4) — the same component the signed print route renders,
+ * The venue assessment report in the browser (#340, spec §4) — the same component the signed print route renders,
  * with photos from the session photo route, plus Download PDF and Email report.
  */
 export default async function AssessmentReportPage({ params }: { params: Promise<{ id: string }> }) {

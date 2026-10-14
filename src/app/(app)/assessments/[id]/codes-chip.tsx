@@ -1,6 +1,6 @@
 "use client";
 
-/* The short codes behind printed finding ids (#337 spec §3 Printed IDs, Task 8): "MPSD · LIN" on the editor header,
+/* The short codes behind printed finding ids (#340 spec §3 Printed IDs, Task 8): "MPSD · LIN" on the editor header,
    or "No codes yet — will be suggested on first finding". Anyone with `create` edits a code until a live finding
    carries it; after that changing it needs `approve` (issued ids keep their text either way). */
 import { useState } from "react";

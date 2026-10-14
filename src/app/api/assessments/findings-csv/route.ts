@@ -4,7 +4,7 @@ import { toCsv } from "@/lib/assessments/csv";
 import { REGISTER_COLUMNS, parseRegisterFilters, registerCsvName } from "@/lib/assessments/register";
 import { loadRegister } from "@/lib/assessments/register-server";
 
-/** The findings register as CSV (#337, Task 9): the same filters as /assessments/findings, the brief's register
+/** The findings register as CSV (#340, Task 9): the same filters as /assessments/findings, the brief's register
  *  columns in order, formula-injection guarded by toCsv. */
 export async function GET(req: NextRequest) {
   await requireUser();

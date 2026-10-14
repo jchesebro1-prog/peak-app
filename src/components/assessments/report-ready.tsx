@@ -6,7 +6,7 @@ import { useEffect } from "react";
 const READY_CAP_MS = 20_000;
 
 /**
- * #337 Task 10 — the print route's one client island. It sets each deferred <img data-photo-id> src from `sources`
+ * #340 Task 10 — the print route's one client island. It sets each deferred <img data-photo-id> src from `sources`
  * (the data URIs travel the page once, here, instead of in every <img> the report draws), waits for every image in the
  * report to decode, then sets `data-report-ready` on the report root so headless Chrome prints. Renders nothing.
  */

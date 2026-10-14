@@ -1,6 +1,6 @@
 "use client";
 
-/* Assessments engine (#337) — shrink a camera photo on the device before it is queued or uploaded: a 1600 px long
+/* Assessments engine (#340) — shrink a camera photo on the device before it is queued or uploaded: a 1600 px long
    edge as JPEG q0.8 (a 4000×3000 phone shot becomes a few hundred KB). No EXIF dependency: `takenAt` is the file's
    last-modified time. The browser applies the camera's rotation when it decodes, so the output is upright.
    Client-only — nothing here may import a server module. */

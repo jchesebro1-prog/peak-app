@@ -14,7 +14,7 @@ function tokenOk(t: string | undefined, id: string): boolean {
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 /**
- * #337 Task 10 — the signed print route for a venue assessment report. Outside the team login (middleware exempts
+ * #340 Task 10 — the signed print route for a venue assessment report. Outside the team login (middleware exempts
  * /print/); the token is the only key, checked before any read. Photos are read on the server (photoBytes) and inlined
  * as data URIs — headless Chrome never needs a session and the photo route never takes a token. The ReportReady island
  * sets them and marks the report ready once they have decoded (the render's `waitFor`).

@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — short codes for printed finding ids (MPSD-LIN-RIG-003). Pure. */
+/* Assessments engine (#340) — short codes for printed finding ids (MPSD-LIN-RIG-003). Pure. */
 
 /** 2–6 characters of A–Z / 0–9. */
 export const CODE_RE = /^[A-Z0-9]{2,6}$/;

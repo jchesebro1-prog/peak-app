@@ -49,7 +49,7 @@ export const maxDuration = 120;
  * ?customer=<customerId> to start a new quote for a customer, or
  * ?inspection=<inspId>&log=<logId> to quote a flagged inspection finding, or
  * ?customer=<customerId>&findings=<fd_…,fd_…> to quote assessment findings
- * (#337: pre-filled from the findings, linked to them when first saved).
+ * (#340: pre-filled from the findings, linked to them when first saved).
  */
 
 function one(v: string | string[] | undefined): string {
@@ -105,7 +105,7 @@ export default async function RepairQuotePage({
   const logId = one(sp.log);
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
-  // #337: "Quote these findings → Repair quote" — only for a NEW quote for that customer.
+  // #340: "Quote these findings → Repair quote" — only for a NEW quote for that customer.
   const findingsParam = !editId && !inspId && preCustomer ? one(sp.findings) : "";
 
   /* ---- serializable customer directory with per-venue coords + travel ---- */
@@ -178,7 +178,7 @@ export default async function RepairQuotePage({
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
-  // #337: the findings intake, checked like the register checks it (one customer, one venue, none voided).
+  // #340: the findings intake, checked like the register checks it (one customer, one venue, none voided).
   let findingsIntake: { venueName: string; locId: string; list: Parameters<typeof repairPrefillFromFindings>[0] } | null = null;
   let intakeError = "";
   if (findingsParam) {

@@ -6,7 +6,7 @@ import { INLINE_BLOB_MAX, photoBackoffMs, photoBlobPath, photoTooOld } from "./p
 import { shrinkForInline } from "./photo-resize";
 
 /*
- * Assessment photo queue (#337) — the device half of photo upload, modelled on the Recordings upload queue
+ * Assessment photo queue (#340) — the device half of photo upload, modelled on the Recordings upload queue
  * (`lib/recorder/upload-queue.ts`) and deliberately SEPARATE from the document outbox (`lib/sync`): the photo bytes
  * never ride /api/sync/push, they go straight to private Blob. The assessment's own save carries only the photo's
  * reference (`pending: true`, capture time, links); this queue turns that reference into a file.

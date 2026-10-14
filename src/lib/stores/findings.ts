@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the findings register (spec §3). Doc id = the finding's stable key (fd_…); the
+/* Assessments engine (#340) — the findings register (spec §3). Doc id = the finding's stable key (fd_…); the
    printed id (MPSD-LIN-RIG-003) is a field the SERVER allocates under an advisory lock per (company, venue,
    category), max + 1, never reused — voided findings keep their number. Status changes only through
    transitionFinding / linkQuote; findings are voided, never deleted. Server-only. */

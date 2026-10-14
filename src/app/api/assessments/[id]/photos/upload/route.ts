@@ -10,7 +10,7 @@ import { getAssessment } from "@/lib/stores/assessments";
 export const maxDuration = 30;
 
 /**
- * Vercel Blob client-upload broker for assessment photos (#337), the team-documents route's pattern. Only
+ * Vercel Blob client-upload broker for assessment photos (#340), the team-documents route's pattern. Only
  * `blob.generate-client-token` is handled (no onUploadCompleted, so no callback and no middleware exemption).
  * The grant is for ONE path — `assessments/<AS-id>/<photoId>.jpg` of an assessment that exists — a JPEG of at most
  * 5 MB (photos are already shrunk on the device). The finalize action (finalizeAssessmentPhoto) re-reads the real

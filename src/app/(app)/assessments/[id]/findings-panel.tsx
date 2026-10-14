@@ -1,6 +1,6 @@
 "use client";
 
-/* The editor's findings (#337 spec §3, Task 8): the prompt chip that turns a rule's suggestion into a finding, and
+/* The editor's findings (#340 spec §3, Task 8): the prompt chip that turns a rule's suggestion into a finding, and
    the panel listing this assessment's findings with Edit, Merge and Split (until the assessment is completed).
    Merge keeps the first selected finding (list order) and voids the others "Merged into <printedId>"; Split moves the
    chosen photos and questions to a new finding. Both are online-only server actions (the kept finding needs its

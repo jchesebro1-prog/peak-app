@@ -355,7 +355,7 @@ export default async function VenuePage({
       {/* documents (#218) — this venue's files; uploads default to it */}
       <DocumentsCard customerId={site.companyId} siteId={locationId} />
 
-      {/* #337 assessments engine — the venue's rolling profile, its assessments and its findings (with the venue code) */}
+      {/* #340 assessments engine — the venue's rolling profile, its assessments and its findings (with the venue code) */}
       <VenueProfileCard siteId={site.id} style={card} headStyle={cardHead} />
       <AssessmentsCard siteId={site.id} style={card} headStyle={cardHead} />
       <FindingsCard siteId={site.id} customerId={site.companyId} style={card} headStyle={cardHead} />

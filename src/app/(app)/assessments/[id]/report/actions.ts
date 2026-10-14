@@ -15,7 +15,7 @@ import { EMAIL_PDF_MAX_BYTES, EMAIL_TOO_LARGE, reportEmailCopy } from "@/lib/ass
 export type EmailReportReply = { ok: false; error: string };
 
 /**
- * Email report (#337 Task 10): render the assessment report PDF (the same render Download PDF serves), attach it
+ * Email report (#340 Task 10): render the assessment report PDF (the same render Download PDF serves), attach it
  * inline as a data URL (the renewal-outreach pattern) when it is 10 MB or less, land a draft in the sender's own
  * mailbox linked to the customer and addressed to the primary contact, then open it in the Inbox composer. Needs
  * `send`. Refusals come back as `{ ok: false, error }`; success redirects.

@@ -13,7 +13,7 @@ import { quoteFromFindings, type QuoteKind } from "@/lib/assessments/quote-from-
 import type { PhotoRef } from "@/lib/assessments/photos";
 
 /**
- * The findings register's server actions (#337, Task 9). Every mutation needs `create`. Status moves and finding
+ * The findings register's server actions (#340, Task 9). Every mutation needs `create`. Status moves and finding
  * edits reuse the editor's own actions (transitionFindingAction / saveFindingAction); these are the register's own:
  * bulk Triage, Quote these findings, Link existing quote, and the sheet's context (photos + definition version).
  */

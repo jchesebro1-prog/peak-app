@@ -24,7 +24,7 @@ function tokenOk(t: string | undefined, scope: string): boolean {
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 /**
- * #337 Task 10 — the signed print route for the findings-only report: the open findings for one venue
+ * #340 Task 10 — the signed print route for the findings-only report: the open findings for one venue
  * (`site:<id>`) or one company (`company:<id>`), URL-encoded in the segment. Outside the team login (middleware
  * exempts /print/); the token is the only key, checked before any read.
  */

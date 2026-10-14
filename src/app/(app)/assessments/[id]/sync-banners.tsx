@@ -1,6 +1,6 @@
 "use client";
 
-/* The assessment editor's banners (#337, Task 7):
+/* The assessment editor's banners (#340, Task 7):
    - red: a save the server refused (naming the question), and outbox entries the sync push refused;
    - amber: scalar edits an online save dropped because the copy was stale;
    - yellow: `syncRejects` — what an offline push couldn't apply, with Re-enter / Use mine / Dismiss. */

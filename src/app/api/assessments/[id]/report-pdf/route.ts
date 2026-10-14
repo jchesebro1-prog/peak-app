@@ -11,7 +11,7 @@ const text = (body: string, status: number) =>
   new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
 
 /**
- * #337 Task 10 — a venue assessment report as a PDF, for staff: rendered on demand through the signed
+ * #340 Task 10 — a venue assessment report as a PDF, for staff: rendered on demand through the signed
  * /print/assessment/[id] route (renderAssessmentPdf — Email report attaches the same render). `?download=1` downloads;
  * otherwise it opens inline. An unknown id is a 404; no Chrome / no secret / no origin is a 503.
  */

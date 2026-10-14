@@ -16,7 +16,7 @@ import AssessmentEditor from "./editor";
 
 export const metadata = { title: "Assessment — Quartzite-6" };
 
-/** The assessment editor (#337, spec §2). Loads everything server-side and hands the client editor plain props;
+/** The assessment editor (#340, spec §2). Loads everything server-side and hands the client editor plain props;
  *  the client never imports a store. */
 export default async function AssessmentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

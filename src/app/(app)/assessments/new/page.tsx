@@ -23,7 +23,7 @@ function chicagoToday(): string {
 const SEARCH_MAX = 25;
 
 /**
- * Start an assessment (#337, spec §2 "Starting"): customer → venue → space → visit type → scopes → date → assessor.
+ * Start an assessment (#340, spec §2 "Starting"): customer → venue → space → visit type → scopes → date → assessor.
  * Pre-fills from ?company=, ?site=, ?visit= (the site visit's customer and venue), ?lead= and ?project=. Without a
  * customer it shows a name search; picking one reloads with ?company= so the venues load server-side.
  */

@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the rolling venue profile (spec §4): one `venue_profiles` doc per venue, doc id =
+/* Assessments engine (#340) — the rolling venue profile (spec §4): one `venue_profiles` doc per venue, doc id =
    sites.id. Only a completed assessment writes here (completeAssessment), and only its `profile: true` answers.
    Kept through the go-live wipe, like venues. */
 import { ASSESSMENT_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";

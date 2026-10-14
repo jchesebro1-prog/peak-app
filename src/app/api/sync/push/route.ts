@@ -80,7 +80,7 @@ export async function POST(req: Request) {
         results[coll].push({ id: rec.id, status: "error" });
         continue;
       }
-      // Assessments engine (#337): never a whole-document replace. Each needs
+      // Assessments engine (#340): never a whole-document replace. Each needs
       // `create`; answers merge per key and findings get their printed id
       // from the server (see the stores). Assessments are never created here
       // and never reply conflict: ok + the stored rev (anything skipped is in

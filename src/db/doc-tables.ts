@@ -106,9 +106,9 @@ export const manufacturers = docTable("manufacturers"); // Manufacturer section 
 export const triageSnapshots = docTable("triage_snapshots"); // Morning triage — one frozen ranked list per user per slot, id `<userId>:<YYYY-MM-DD>:<slot>` (spec 2026-10-09-morning-triage-design.md); migration 0036_triage
 export const triageMarks = docTable("triage_marks"); // Morning triage — Done / Snooze / Dismiss per user per item, id `<userId>:<itemKey>`; migration 0036_triage
 export const assistRuns = docTable("assist_runs"); // Assist layer (#334) — one row per model call with tokens, cost and outcome (spec 2026-10-12-assist-layer-design.md §6); migration 0039_assist_runs
-export const assessments = docTable("assessments"); // Assessments engine (#337) — one venue assessment per row, id AS-####; migration 0040_assessments
-export const findings = docTable("findings"); // Assessments engine (#337) — one finding per row, id fd_<16 hex>; migration 0040_assessments
-export const venueProfiles = docTable("venue_profiles"); // Assessments engine (#337) — one rolling profile per venue, id = sites.id; migration 0040_assessments
+export const assessments = docTable("assessments"); // Assessments engine (#340) — one venue assessment per row, id AS-####; migration 0040_assessments
+export const findings = docTable("findings"); // Assessments engine (#340) — one finding per row, id fd_<16 hex>; migration 0040_assessments
+export const venueProfiles = docTable("venue_profiles"); // Assessments engine (#340) — one rolling profile per venue, id = sites.id; migration 0040_assessments
 
 export const DOC_TABLES = {
   quotes,

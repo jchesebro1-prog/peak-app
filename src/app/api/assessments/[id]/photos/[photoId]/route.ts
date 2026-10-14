@@ -3,7 +3,7 @@ import { getAssessment } from "@/lib/stores/assessments";
 import { photoBytes } from "@/lib/assessments/photo-bytes";
 
 /**
- * One assessment photo (#337). Signed-in team only — the middleware already turns away a visitor with no session, and
+ * One assessment photo (#340). Signed-in team only — the middleware already turns away a visitor with no session, and
  * this checks again. The print route does not come through here: it reads `photoBytes` on the server and inlines the
  * image, so headless Chrome never needs a session or a token. The private Blob is never exposed; the bytes stream
  * through this route as `image/jpeg` + `nosniff`.

@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the versioned definition. A meaning-changing edit (renamed key, removed
+/* Assessments engine (#340) — the versioned definition. A meaning-changing edit (renamed key, removed
    option, changed type) bumps `version` and keeps the old one under defs/versions/; wording-only edits
    don't. Pure data: safe to import from client components. */
 import type { AssessmentDef, ModuleDef, QuestionDef, ScopeCode, VisitTypeDef } from "./types";

@@ -3,7 +3,7 @@ import type { FindingsReportModel } from "@/lib/assessments/report-model";
 import { RegisterTable, ReportFrame } from "./assessment-report";
 
 /**
- * #337 Task 10 — the findings-only report (spec §4): the open findings across visits for one venue or one company,
+ * #340 Task 10 — the findings-only report (spec §4): the open findings across visits for one venue or one company,
  * for the rigger or the district facilities lead. Same letterhead and table as the assessment report; no photos.
  * Printed by /print/assessment-findings/[scope].
  */

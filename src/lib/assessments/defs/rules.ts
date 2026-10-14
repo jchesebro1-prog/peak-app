@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — one Rule per row of the brief's if/then tables, keeping its id.
+/* Assessments engine (#340) — one Rule per row of the brief's if/then tables, keeping its id.
    F1b / F3b split the prompt half off F1 / F3 (a Rule has one `when`). X4 (unable → follow-up list) and
    X5 (flagged answer → offer a finding, from QuestionDef.flag) are evaluator behaviours, not Rules.
    A rule's scope is the scope of the first key it references, so rules whose effect belongs to one scope

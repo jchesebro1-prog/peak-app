@@ -1,4 +1,4 @@
-/* Assessments engine (#337, Task 10) — the report's pure data shaping. The assessment report (spec §4: seven sections,
+/* Assessments engine (#340, Task 10) — the report's pure data shaping. The assessment report (spec §4: seven sections,
    in the sample rigging reports' order) and the findings-only report are both built here from plain inputs, so the
    harness can pin section order, answer wording, the follow-up list and the register sort. No db / next / React
    imports, no clock (time comes in as `now`). The loaders live in report-data.ts; the markup in

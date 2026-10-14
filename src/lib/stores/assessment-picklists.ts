@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — admin-added pick-list values (Settings → Assessments → Pick lists). The definition's
+/* Assessments engine (#340) — admin-added pick-list values (Settings → Assessments → Pick lists). The definition's
    own values live in code (defs/picklists.ts) and never change; additions live in one settings blob keyed by list
    id. A value is never removed, only retired: retired values stay valid for stored answers but aren't offered. */
 import { ASSESSMENT_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";

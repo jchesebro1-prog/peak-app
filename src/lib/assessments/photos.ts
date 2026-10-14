@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — photo references and the Blob path rules. Pure. */
+/* Assessments engine (#340) — photo references and the Blob path rules. Pure. */
 
 export interface PhotoRef {
   id: string;

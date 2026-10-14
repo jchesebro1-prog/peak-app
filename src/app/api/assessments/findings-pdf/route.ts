@@ -11,7 +11,7 @@ const text = (body: string, status: number) =>
   new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
 
 /**
- * #337 Task 10 — the findings-only PDF (spec §4) for staff: the open findings across visits for one venue or one
+ * #340 Task 10 — the findings-only PDF (spec §4) for staff: the open findings across visits for one venue or one
  * company. `?scope=site:<id>` | `?scope=company:<id>` (or `?site=<id>` / `?company=<id>`); `?download=1` downloads,
  * otherwise it opens inline. An unknown venue / company is a 404; no Chrome / no secret / no origin is a 503.
  */

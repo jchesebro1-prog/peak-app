@@ -112,7 +112,7 @@ export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">, op
       // #323 — title / notes-text ILIKE in SQL, visible to me (in the WHERE, before the LIMIT), no transcript;
       // visibility + the rendered summary re-checked below
       meetingsReadOr(searchMeetingCandidates(q, CANDIDATES, meId), [], "search"),
-      // #337 — assessments and findings: SQL candidates (anywhere in the doc), the precise match below.
+      // #340 — assessments and findings: SQL candidates (anywhere in the doc), the precise match below.
       searchDocs("assessments", q, CANDIDATES),
       searchDocs("findings", q, CANDIDATES),
     ]);
@@ -312,7 +312,7 @@ export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">, op
         }))
     );
   }
-  // #337 assessments (AS-1001 · customer, venue · status) and findings (the printed id, the description). A company
+  // #340 assessments (AS-1001 · customer, venue · status) and findings (the printed id, the description). A company
   // whose NAME matches also brings its assessments in (the doc holds the customer id, never the name).
   {
     const byName = companies.filter((c) => matches(q, c.name)).slice(0, 10).map((c) => c.id);

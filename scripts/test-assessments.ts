@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — harness checks. `assessmentChecks` is pure; `assessmentDbChecks` needs the
+/* Assessments engine (#340) — harness checks. `assessmentChecks` is pure; `assessmentDbChecks` needs the
    test DB. Run alone with `npx tsx scripts/test-assessments.ts` (pure checks only). */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

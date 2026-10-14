@@ -11,7 +11,7 @@ import { codeChangeNeedsApprove, codeScopeMismatch, voidReasonProblem, type Find
 import { toFindingVM, type FindingVM, type SavePatch, type SyncRejectVM } from "@/lib/assessments/editor-model";
 
 /**
- * The editor's server actions (#337, Task 7). Saves never throw on a refusal and never redirect: the editor saves
+ * The editor's server actions (#340, Task 7). Saves never throw on a refusal and never redirect: the editor saves
  * through `saveThroughOutbox`, which counts a resolved promise as synced unless it is `{ ok: false, error }` (the
  * `ServerSaveResult` shape), and a redirect mid-visit would drop the answers still on screen. A missing session or
  * permission therefore comes back as `{ ok: false }` too. Every success carries the stored `rev` for the editor to

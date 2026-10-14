@@ -1,6 +1,6 @@
 "use client";
 
-/* Assessment photos in the editor (#337, Task 8): the camera button (one per question, one per required-photo slot,
+/* Assessment photos in the editor (#340, Task 8): the camera button (one per question, one per required-photo slot,
    one in the finding sheet), a module's photo slots, thumbnails that show the device copy while a photo is still
    uploading, and the list of photos the queue gave up on. The capture itself (resize → pending ref → save →
    queue) lives in the editor, which owns the record; these components only collect the file and show state. */

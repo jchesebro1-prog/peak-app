@@ -41,7 +41,7 @@ export type VisitRequestVM = {
   address: string;
   /** Spec 2026-10-09 — other Peak people already on the visit (never the lead). */
   attendees: string[];
-  /** #337 — the viewer holds `create`, so the row offers "Start assessment" (omitted = no link). */
+  /** #340 — the viewer holds `create`, so the row offers "Start assessment" (omitted = no link). */
   canAssess?: boolean;
 };
 

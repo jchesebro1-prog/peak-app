@@ -5,7 +5,7 @@ import { getOptionalUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { addPicklistValue, setPicklistRetired } from "@/lib/stores/assessment-picklists";
 
-/* Pick-list admin (#337 Task 11): adding and retiring the values an administrator adds to the assessment's code
+/* Pick-list admin (#340 Task 11): adding and retiring the values an administrator adds to the assessment's code
    lists. The definition's own values never change. Needs `manage_users`; answers rather than throws, so the form
    can show the sentence. */
 

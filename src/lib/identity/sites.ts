@@ -81,7 +81,7 @@ export async function saveSite(
     updatedAt?: number;
   }
 ): Promise<void> {
-  // shortCode is written only by setSiteShortCode (#337): a regular save never
+  // shortCode is written only by setSiteShortCode (#340): a regular save never
   // writes, clears or inserts it.
   const { shortCode: _sc, ...row } = input;
   void _sc;
@@ -197,7 +197,7 @@ export async function getSiteByDocLocId(
 }
 
 /**
- * Set (or clear, with null) a venue's assessment short code (#337). The only
+ * Set (or clear, with null) a venue's assessment short code (#340). The only
  * writer of `sites.short_code`. Must match CODE_RE; unique per company among
  * live venues (partial index `sites_short_code_uniq`, migration 0040).
  */

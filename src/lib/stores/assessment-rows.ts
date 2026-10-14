@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — row-level read/write for the assessment collections, keeping the document's own
+/* Assessments engine (#340) — row-level read/write for the assessment collections, keeping the document's own
    `rev` and the table's `rev` column equal. The offline outbox sends `doc.rev` (save.ts) and pull serves the
    column (listSince), so the two must never drift. Callers hold the record's advisory lock
    (ASSESSMENT_LOCK_NAMESPACE) around read → check → write, so every query here runs in that transaction. */

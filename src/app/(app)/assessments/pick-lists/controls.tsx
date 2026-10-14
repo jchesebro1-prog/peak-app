@@ -1,6 +1,6 @@
 "use client";
 
-/* Pick-list admin (#337 Task 11): per list, the built-in values (read-only), the added values with Retire /
+/* Pick-list admin (#340 Task 11): per list, the built-in values (read-only), the added values with Retire /
    Restore, and an Add box. The server actions answer with a sentence on a refusal. */
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";

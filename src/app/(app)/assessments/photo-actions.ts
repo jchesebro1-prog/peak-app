@@ -8,7 +8,7 @@ import { PHOTO_ID_RE, photoPathMatches } from "@/lib/assessments/photos";
 import { applyFinalizedPhoto, getAssessment, removePendingPhoto } from "@/lib/stores/assessments";
 
 /**
- * Assessment photos (#337) — the server half of the device upload queue. Called from the browser's photo queue after
+ * Assessment photos (#340) — the server half of the device upload queue. Called from the browser's photo queue after
  * its bytes have gone straight to private Blob (or, in local dev with no Blob, with the shrunken JPEG as a small data
  * URL). It never redirects: the queue needs `{ ok:false, error }` to back off and try again.
  *

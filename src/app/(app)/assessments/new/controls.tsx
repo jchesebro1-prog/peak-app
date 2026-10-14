@@ -1,6 +1,6 @@
 "use client";
 
-/* The /assessments/new form (#337, Task 7). Server-rendered choices (customer, venues, scopes) come in as props; this
+/* The /assessments/new form (#340, Task 7). Server-rendered choices (customer, venues, scopes) come in as props; this
    only adds the online check — assessments are started online, then answered offline — and the pending state. */
 import { useActionState, useSyncExternalStore } from "react";
 import type { CreateState, NewAssessmentPrefill } from "../types";

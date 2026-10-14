@@ -1,4 +1,4 @@
-/* Assessments engine (#337, Task 9) — "Quote these findings", the server half. Server-only (stores).
+/* Assessments engine (#340, Task 9) — "Quote these findings", the server half. Server-only (stores).
    - Repair quote: nothing is created here. The selection is checked and the caller is sent to the repair builder's
      intake (/repairs/quote?customer=…&findings=…), which pre-fills from the findings and prices them like any
      repair; the builder's save links the findings to the quote it creates (findingKeysForSave + linkOnCreate).

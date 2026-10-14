@@ -122,7 +122,7 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     unseenCustomerDocuments(),
     // #282 perks+points — one SQL-filtered read of perk ledger entries (usually few).
     perksToFulfil(),
-    // #337 — open Immediate-attention findings: one SQL count, no documents read.
+    // #340 — open Immediate-attention findings: one SQL count, no documents read.
     countOpenImmediateFindings().catch((error) => {
       console.error("[assessments] nav badge: findings count failed", error);
       return 0;

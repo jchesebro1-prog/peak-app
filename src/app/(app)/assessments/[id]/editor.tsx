@@ -1,6 +1,6 @@
 "use client";
 
-/* The assessment editor (#337, spec §2, Task 7). Scope rail + module pane; every answer re-runs the pure evaluator
+/* The assessment editor (#340, spec §2, Task 7). Scope rail + module pane; every answer re-runs the pure evaluator
    locally, so gates open and close as you type. Saves are debounced (600 ms) and go through saveThroughOutbox: online,
    the server action merges just the changed answers; offline, the whole record waits in the outbox. Every reply's rev
    is adopted (the rev contract), and a refreshed server copy is merged in, newest answer wins. */

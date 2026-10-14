@@ -352,7 +352,7 @@ class SyncEngine {
           } else {
             // Malformed — flag but keep out of the retry loop until re-saved.
             const entry = await idb.get<OutboxEntry>("outbox", key);
-            // Keep the server's reason so an editor can name it (#337).
+            // Keep the server's reason so an editor can name it (#340).
             if (entry) await idb.put("outbox", { ...entry, state: "error", ...(typeof r.error === "string" ? { error: r.error.slice(0, 300) } : {}) });
           }
         }

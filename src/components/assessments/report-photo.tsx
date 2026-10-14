@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * #337 Task 10 — an on-screen report photo. A photo whose image fails to load (a deleted or unreadable blob) shows the
+ * #340 Task 10 — an on-screen report photo. A photo whose image fails to load (a deleted or unreadable blob) shows the
  * same "Photo unavailable" placeholder the PDF prints, instead of a broken-image icon. The error can fire before
  * hydration, so the effect also checks an already-failed image.
  */

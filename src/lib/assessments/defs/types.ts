@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — definition types. Pure data, no React or DB imports.
+/* Assessments engine (#340) — definition types. Pure data, no React or DB imports.
    Source of truth for wording, keys and rule ids: docs/assessments/briefs/site-visit-app-brief.txt. */
 
 export type AnswerType = "yesno" | "one" | "many" | "number" | "ftin" | "date" | "text" | "longtext" | "contact" | "table";

@@ -8,7 +8,7 @@ import PickListAdmin from "./controls";
 export const metadata = { title: "Pick lists — Quartzite-6" };
 
 /**
- * Pick-list admin (#337, Task 11): every code list the assessment asks from, with its built-in values (read-only)
+ * Pick-list admin (#340, Task 11): every code list the assessment asks from, with its built-in values (read-only)
  * and the values added here. An added value can be retired (it stays valid on stored answers, it just stops being
  * offered) and brought back; nothing is ever deleted. Administrators only.
  */

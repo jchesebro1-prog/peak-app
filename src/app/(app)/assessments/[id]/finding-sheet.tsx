@@ -1,6 +1,6 @@
 "use client";
 
-/* The finding sheet (#337 spec §3, Task 8): create or edit one finding from the assessment editor. Category (with its
+/* The finding sheet (#340 spec §3, Task 8): create or edit one finding from the assessment editor. Category (with its
    routing line), rating, description, location / line set, action tag, recommended action, qualification, priority,
    budget tier, owner, audit reference and the photos it links. Immediate attention adds the hazard-contact
    notification, the lockout state and a photo — the same immediateProblems rules the server enforces are shown live

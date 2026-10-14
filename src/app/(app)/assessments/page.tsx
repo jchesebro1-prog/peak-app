@@ -33,7 +33,7 @@ const CSS = `
 
 const fmtDate = (ms: number) => (ms ? new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : "—");
 
-/** The assessment list (#337, spec §2): newest visit first, filtered by ?status= and ?customer=. */
+/** The assessment list (#340, spec §2): newest visit first, filtered by ?status= and ?customer=. */
 export default async function AssessmentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [user, sp] = await Promise.all([requireUser(), searchParams]);
   const statusParam = one(sp.status);

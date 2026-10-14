@@ -1,6 +1,6 @@
 "use client";
 
-/* The assessment editor's scope rail (#337, Task 7): one row per scope that is on, with a progress ring and badges for
+/* The assessment editor's scope rail (#340, Task 7): one row per scope that is on, with a progress ring and badges for
    open prompts and missing photos. Below 760 px wide it collapses to a select at the top (the CSS in editor.tsx
    switches between the two). "Scopes…" turns scopes on or off mid-visit; switching one off hides it and keeps its
    answers. */

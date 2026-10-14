@@ -4,7 +4,7 @@ import ScreenPhoto from "./report-photo";
 import { PHOTOS_OVER_CAP_NOTE, PHOTO_UNAVAILABLE, REPORT_SECTIONS, type AssessmentReportModel, type ReportFinding, type ReportPhoto } from "@/lib/assessments/report-model";
 
 /**
- * #337 Task 10 — the venue assessment report (spec §4): the full Peak letterhead, then the seven sections in order.
+ * #340 Task 10 — the venue assessment report (spec §4): the full Peak letterhead, then the seven sections in order.
  * A server component with plain props, shared by the in-app page (/assessments/[id]/report — photos from the session
  * route) and the signed print route (/print/assessment/[id] — photos as data URIs). With `deferPhotos` the <img>s
  * render without a src and the print page's ReportReady island fills them in once, so each photo's bytes ride the

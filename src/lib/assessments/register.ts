@@ -1,4 +1,4 @@
-/* Assessments engine (#337, Task 9) — the findings register's pure rules: the filters it reads from the query
+/* Assessments engine (#340, Task 9) — the findings register's pure rules: the filters it reads from the query
    string, its sort (Immediate attention pinned first), and the cells of one row in the brief's column order, which
    the CSV export and the table share. No db / next imports, so the client register may import it. */
 import type { Category, Rating } from "./defs/types";

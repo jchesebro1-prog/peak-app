@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the answer shape, validation and merge. Pure, safe for client and server. */
+/* Assessments engine (#340) — the answer shape, validation and merge. Pure, safe for client and server. */
 import type { AssessmentDef, ColumnDef, QuestionDef } from "./defs/types";
 
 /** "answered" has a value; "na" = not applicable; "unable" = could not be answered on this visit (needs a reason). */

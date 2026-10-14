@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { emailAssessmentReportAction } from "./actions";
 
-/** The report page's toolbar (#337 Task 10): back to the editor, Download PDF, Email report. */
+/** The report page's toolbar (#340 Task 10): back to the editor, Download PDF, Email report. */
 export default function ReportToolbar({ id, canSend }: { id: string; canSend: boolean }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);

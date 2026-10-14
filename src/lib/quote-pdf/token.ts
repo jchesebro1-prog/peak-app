@@ -14,7 +14,7 @@ export const PRINT_TOKEN_TTL_MS = 120_000;
  *  (`PdfKind`, unwidened: other code still switches on it exhaustively) plus
  *  #245's datasheet-thumbnail render, #292's cut sheets and #296's rack
  *  sheets and #301's estimate cover and #301 slice C's Grid drawing set
- *  (one token for the page, one per asset it draws), and #337's venue
+ *  (one token for the page, one per asset it draws), and #340's venue
  *  assessment report and findings-only report (id = the AS-id / the
  *  `site:<id>` | `company:<id>` scope), none of which prints a quote
  *  document. */

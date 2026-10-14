@@ -782,7 +782,7 @@ export default async function CustomerDetailPage({
               )}
             </div>
 
-            {/* #337 assessments engine — this company's assessments and findings (with the customer code) */}
+            {/* #340 assessments engine — this company's assessments and findings (with the customer code) */}
             <AssessmentsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
 

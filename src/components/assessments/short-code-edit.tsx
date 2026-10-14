@@ -1,6 +1,6 @@
 "use client";
 
-/* The short code behind printed finding ids (#337 Task 11), shown on a venue's / company's Findings card with an
+/* The short code behind printed finding ids (#340 Task 11), shown on a venue's / company's Findings card with an
    Edit control. It reuses the editor's setShortCodesAction, so the in-use / approve rule is the server's one: anyone
    with `create` edits a code until a live finding carries it; after that changing it needs `approve`. */
 import { useState } from "react";

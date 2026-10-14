@@ -1,4 +1,4 @@
-/* Assessments engine (#337) — the pure evaluator. Given a definition, the visit's scopes and the answers so
+/* Assessments engine (#340) — the pure evaluator. Given a definition, the visit's scopes and the answers so
    far it works out what is visible, what is required, which photos are missing, which findings to offer
    and how far along each scope is. Used by the client editor (live), the server (Mark complete) and the
    report, so it must stay pure: no db / store / next imports, no clock (time comes in as `now`), and the
