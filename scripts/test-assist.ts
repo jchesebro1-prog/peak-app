@@ -520,6 +520,22 @@ export async function assistEstimateDbChecks(ok: Ok): Promise<void> {
     const skipped = runs3.filter((x) => x.step === "extract" && (x.outcomeDetail as { draftSkipped?: string } | null)?.draftSkipped === "time budget");
     ok(!slow.ok && slow.error === OUT_OF_TIME_ERROR && slowCalls.length === 0 && runs3.length === 4 && skipped.length === 1 && (await suggestionForSource("thread", T))?.id === r.suggestionId, "assist estimate db: too little time left → refused before the draft call, logged on the extract run");
 
+    // Quotes drafted before Estimate suggestion keep their banner: set assistDraft
+    // through the store's real path (create → update, as the old draft did) and dismiss it.
+    const { create: createQuote, update: updateQuote, get: getQuote, dismissAssistDraft } = await import("@/lib/stores/quotes");
+    const old = await createQuote({ name: "TEST old assist draft", source: "estimator", status: "draft", quoteType: "system", owner: ME.name,
+      spec: { sections: [{ id: "sys9", name: "Curtains", kind: "materials", mfr: "", items: [{ id: 1, sku: SKU, desc: "Zorbaflex assist velour panel", qty: 2, unit: "ea", cost: 100, price: 150 }] }], mobs: [] } as never });
+    registerFixture("quotes", old.id);
+    const withDraft = await updateQuote(old.id, { assistDraft: { runId: "AR-old", threadId: T, at: NOW, notes: "old notes", reasons: { "sys9:1": "asked" } } });
+    const v0 = assistDraftViewOf(withDraft);
+    ok(!!v0 && v0.threadId === T && v0.notes === "old notes" && v0.reasons.length === 1 && v0.reasons[0].reason === "asked" && v0.reasons[0].desc === "Zorbaflex assist velour panel", "assist estimate db: an old Assist draft's banner still reads (update path keeps assistDraft)");
+    const before = (await getQuote(old.id))?.updatedAt;
+    ok(await dismissAssistDraft(old.id, NOW + 1), "assist estimate db: dismiss writes");
+    const qd = await getQuote(old.id);
+    ok(qd?.assistDraft?.dismissedAt === NOW + 1 && typeof before === "number" && qd?.updatedAt === before, "assist estimate db: dismiss sets dismissedAt without bumping updatedAt");
+    ok(!(await dismissAssistDraft(old.id, NOW + 2)) && (await getQuote(old.id))?.assistDraft?.dismissedAt === NOW + 1, "assist estimate db: a second dismiss is a no-op");
+    ok(assistDraftViewOf(qd) === null, "assist estimate db: a dismissed draft shows no banner");
+
     // The quote-creating path is gone (spec pins).
     const actions = readFileSync("src/app/(app)/inbox/assist-actions.ts", "utf8");
     const reader = readFileSync("src/app/(app)/inbox/thread-reader.tsx", "utf8");

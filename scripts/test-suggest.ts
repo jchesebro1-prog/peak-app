@@ -334,7 +334,11 @@ export async function suggestRoutePins(ok: Ok): Promise<void> {
   ok(/export const maxDuration = 300;/.test(src) && /export async function POST\(request: Request\)/.test(src) && !/export async function (GET|PUT|DELETE)/.test(src), "suggest route: POST only, maxDuration 300");
   ok(/const me = await requireUser\(\);/.test(src) && /assistGate\("estimate", me\.id, assistSettingsOf\(await getSettings\(\)\), await getAssistEnv\(\)\)/.test(src) && src.indexOf("assistGate(") < src.indexOf("suggestEstimate(parsed.data"), "suggest route: requireUser, then the estimate gate, before any work");
   ok(/kind: z\.enum\(\["thread", "lead", "survey", "meeting"\]\)/.test(src) && /id: z\.string\(\)\.trim\(\)\.min\(1\)\.max\(100\)/.test(src) && /z\.strictObject\(/.test(src) && /Body\.safeParse\(raw\)/.test(src) && SUGGEST_SOURCE_KINDS.join() === "thread,lead,survey,meeting", "suggest route: zod body {kind: the four source kinds, id ≤ 100}");
-  ok(/"cache-control": "private, no-store"/.test(src) && /force-dynamic/.test(src) && !/status: [45]\d\d/.test(src), "suggest route: never cached; every answer is HTTP 200 JSON");
+  ok(/"cache-control": "private, no-store"/.test(src) && /force-dynamic/.test(src) && [...new Set(src.match(/\b[45]\d\d\b/g) || [])].join() === "415", "suggest route: never cached; every answer is JSON — HTTP 200, except 415 for a non-JSON body");
+  const ctAt = src.indexOf('type !== "application/json"');
+  const tryAt = src.indexOf("try {");
+  ok(ctAt > src.indexOf("await requireUser()") && ctAt < tryAt && /reply\(\{ ok: false, error: "Send JSON[^"]*" \}, 415\)/.test(src), "suggest route: requires content-type application/json (415 JSON otherwise) before any work");
+  ok(tryAt < src.indexOf("await getSettings()") && tryAt < src.indexOf("await getAssistEnv()") && tryAt < src.indexOf("assistGate(") && /\} catch \(err\) \{\s*console\.error\([^)]*\);\s*return reply\(\{ ok: false/.test(src), "suggest route: settings, key and gate run inside the try — every failure answers JSON");
   const mw = readFileSync("src/middleware.ts", "utf8");
   ok(!/api\/assist/.test(mw) && /matcher:/.test(mw), "suggest route: /api/assist/* is not exempted from the middleware session gate");
   ok(SUGGEST_EXTRACT_SYSTEM.includes(SOURCE_UNTRUSTED_NOTE) && SUGGEST_DRAFT_SYSTEM.includes(SOURCE_UNTRUSTED_NOTE) && SUGGEST_DRAFT_SYSTEM.includes("This is a suggestion") && SUGGEST_DRAFT_SYSTEM.includes("Never output prices"), "suggest prompts: every source wrapper is untrusted data; the draft is a suggestion, never priced");

@@ -1,6 +1,6 @@
 /**
  * Draft estimate (spec §9) → Estimate suggestion (spec 2026-10-13). Pure:
- * schemas, the thread prompts, the extract sanitizer, candidate selection and
+ * schemas (the prompts live in suggest-prompt.ts), the extract sanitizer, candidate selection and
  * the draft prompt's user text. Nothing here prices: the quote-creating
  * builder went with "Draft estimate" — a suggestion carries no money, and
  * the Estimator prices a line only when the rep adds it (catalogAddPrice).
@@ -9,7 +9,6 @@ import { z } from "zod";
 import type { AssistDraftView } from "@/app/(app)/estimator/types";
 import type { AssistDraftInfo } from "@/lib/stores/quotes";
 import type { SystemCategory } from "@/lib/system-categories";
-import { UNTRUSTED_NOTE } from "./thread-text";
 
 export const ExtractSchema = z.strictObject({
   quoteName: z.string(),
@@ -18,14 +17,6 @@ export const ExtractSchema = z.strictObject({
   systems: z.array(z.string()),
 });
 export type Extract = { quoteName: string; venue: string; requests: { phrase: string; qty: number }[]; systems: string[] };
-
-export const EXTRACT_SYSTEM = [
-  "You read an email asking Peak Systems Group (theatrical rigging, curtains, lighting, AV) for pricing.",
-  "List the equipment or work requested. phrase: a short catalog-style search phrase (\"black velour main curtain\", \"LED ellipsoidal\", \"motorized rigging hoist\"). qty: the stated quantity, else 1.",
-  "systems: up to 8 short system names the request breaks into (\"Main curtain\", \"Stage lighting\"). quoteName: a short estimate name (\"Lincoln HS — stage curtains\"). venue: the venue or room if named, else \"\".",
-  "Return empty lists if the email asks for no equipment or work.",
-  UNTRUSTED_NOTE,
-].join("\n");
 
 export function sanitizeExtract(raw: z.infer<typeof ExtractSchema>): Extract {
   const requests = (raw?.requests ?? [])
@@ -47,15 +38,6 @@ export const DraftSchema = z.strictObject({
   ),
   notes: z.string(),
 });
-
-export const DRAFT_SYSTEM = [
-  "You draft a first-pass equipment estimate for Peak Systems Group, a theatrical rigging, curtain, lighting and AV contractor. A Peak estimator reviews every line before anything is sent.",
-  "Group the request into systems (one per category of work). For each line: sku MUST be copied exactly from the candidate parts list, or \"\" when no candidate fits — then put a clear description in desc for the estimator to source.",
-  "qty: whole numbers. Use the past systems as evidence of what Peak usually includes alongside the requested items (accessories, hardware), but only add an item when the request implies it.",
-  "categoryId: the matching category id from the list, or \"\". reason: one short line on why this part/qty.",
-  "notes: assumptions and questions for the estimator (missing dimensions, venue details). Never output prices or costs.",
-  UNTRUSTED_NOTE,
-].join("\n");
 
 export type CandidatePart = { sku: string; desc: string; mfr: string; unit: string; category: string };
 export type ExampleSystem = { label: string; lines: { sku: string; desc: string; qty: number }[] };
