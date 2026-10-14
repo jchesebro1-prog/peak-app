@@ -1134,7 +1134,7 @@ ok(
   "go-live reset covers every business-document collection"
 );
 ok(
-  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions,assist_runs" && !resetCollections.includes("subassemblies") && !resetCollections.includes("assist_runs"),
+  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions,assist_runs,venue_profiles" && !resetCollections.includes("subassemblies") && !resetCollections.includes("assist_runs"),
   "#210 final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
 );
 ok(

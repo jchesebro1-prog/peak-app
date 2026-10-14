@@ -13,6 +13,14 @@ import { STATUSES, CATEGORY_ROUTING, formatPrintedId, pendingPrintedLabel, immed
 import { csvCell, toCsv } from "../src/lib/assessments/csv";
 import { PHOTO_PREFIX, PHOTO_CAPS, photoBlobPath, photoPathInScope } from "../src/lib/assessments/photos";
 import coverage from "../docs/assessments/manitowoc-coverage.json";
+import { like, eq, sql } from "drizzle-orm";
+import { getDb } from "../src/db";
+import { companies, sites } from "../src/db/schema";
+import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "../src/db/doc-tables";
+import { CONFIG_COLLECTIONS } from "../src/db/seed-data";
+import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
+import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
+import { saveSite, getSite, setSiteShortCode } from "../src/lib/identity/sites";
 
 const ROOT = process.cwd();
 
@@ -473,7 +481,83 @@ export async function assessmentChecks(ok: Ok) {
   // carry-over: blank profile values never satisfy a numeric profile condition
   ok(!holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: "  " } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: [] } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: NaN } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 1931 } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 0 } }), "holds: blank / [] / NaN profile value never satisfies lt");
 }
-export async function assessmentDbChecks(_ok: Ok) {}
+
+/** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
+export const ASSESS_FIX = { co1: "TESTassess:co1", co2: "TESTassess:co2", site1: "TESTassess:site1", site2: "TESTassess:site2", site3: "TESTassess:site3" } as const;
+export async function assessIdentityFixtures() {
+  await dropAssessIdentityFixtures();
+  for (const [id, name] of [[ASSESS_FIX.co1, "Assess Co One"], [ASSESS_FIX.co2, "Assess Co Two"]] as const)
+    await saveCompany({ id, name, type: "customer", lifecycle: "active", deleted: false });
+  await saveSite({ id: ASSESS_FIX.site1, companyId: ASSESS_FIX.co1, name: "Assess Hall", locationName: "Assess Hall", venueKind: "proscenium" });
+  await saveSite({ id: ASSESS_FIX.site2, companyId: ASSESS_FIX.co1, name: "Assess Gym", locationName: "Assess Gym", venueKind: "proscenium" });
+  await saveSite({ id: ASSESS_FIX.site3, companyId: ASSESS_FIX.co2, name: "Assess Other", locationName: "Assess Other", venueKind: "proscenium" });
+}
+export async function dropAssessIdentityFixtures() {
+  const db = await getDb();
+  await db.delete(sites).where(like(sites.id, "TESTassess:%"));
+  await db.delete(companies).where(like(companies.id, "TESTassess:%"));
+}
+
+export async function assessmentDbChecks(ok: Ok) {
+  // registration + pins
+  for (const c of ["assessments", "findings", "venue_profiles"]) ok(c in DOC_TABLES, `assess db: ${c} is a registered doc collection`);
+  ok(SYNCABLE_COLLECTIONS.slice(-2).join() === "assessments,findings" && FIELD_COLLECTIONS.slice(-2).join() === "assessments,findings", "assess db: assessments + findings appended to SYNCABLE and FIELD collections in the same order");
+  ok(!(SYNCABLE_COLLECTIONS as string[]).includes("venue_profiles") && CONFIG_COLLECTIONS.includes("venue_profiles" as never), "assess db: venue_profiles is config (kept through the go-live wipe), not syncable");
+  const db = await getDb();
+  try {
+    await assessIdentityFixtures();
+    const { co1, co2, site1, site2, site3 } = ASSESS_FIX;
+    // migration 0040: the three tables exist, seq bumps on update
+    for (const t of ["assessments", "findings", "venue_profiles"]) {
+      const r = await db.execute(sql.raw(`select count(*)::int as n from "${t}"`));
+      ok((r.rows[0] as { n: number }).n >= 0, `assess db: table ${t} exists`);
+    }
+    const trg = await db.execute(sql`select tgname from pg_trigger where tgname in ('assessments_seq_bump','findings_seq_bump','venue_profiles_seq_bump')`);
+    ok(trg.rows.length === 3, "assess db: three seq-bump triggers installed");
+    // company codes
+    ok((await getCompany(co1))!.shortCode === null, "codes db: a new company has a null short code");
+    ok((await setCompanyShortCode(co1, "TSTA")).ok && (await getCompany(co1))!.shortCode === "TSTA", "codes db: set company code");
+    const dup = await setCompanyShortCode(co2, "TSTA");
+    ok(!dup.ok && dup.error === "That code is already used by another company", "codes db: company code unique (exact)");
+    let pgCode = "";
+    try { await db.update(companies).set({ shortCode: "tsta" }).where(eq(companies.id, co2)); } catch (e) { pgCode = String((e as { code?: string; cause?: { code?: string } }).code ?? (e as { cause?: { code?: string } }).cause?.code ?? ""); }
+    ok(pgCode === "23505", "codes db: company code unique case-insensitively (index on lower(short_code))");
+    const bad = await setCompanyShortCode(co2, "tsta");
+    ok(!bad.ok, "codes db: a lowercase / malformed code is rejected by CODE_RE");
+    ok(!(await setCompanyShortCode(co2, "A")).ok && !(await setCompanyShortCode(co2, "TOOLONG7")).ok && !(await setCompanyShortCode(co2, "AB-C")).ok, "codes db: CODE_RE bounds enforced");
+    ok((await getCompany(co2))!.shortCode === null, "codes db: a failed set leaves the code untouched");
+    await saveCompany({ ...(await getCompany(co1))!, name: "Renamed" });
+    ok((await getCompany(co1))!.shortCode === "TSTA" && (await getCompany(co1))!.name === "Renamed", "codes db: regular save never clears short code");
+    await saveCompany({ ...(await getCompany(co1))!, shortCode: "ZZZZ" });
+    ok((await getCompany(co1))!.shortCode === "TSTA", "codes db: regular save never writes short code either");
+    await saveCompany({ id: co1, name: "Renamed", type: "customer", lifecycle: "active", deleted: false });
+    ok((await getCompany(co1))!.shortCode === "TSTA", "codes db: a save with no shortCode key keeps it");
+    await saveCompany({ id: "TESTassess:co3", name: "Assess Co Three", type: "customer", lifecycle: "active", deleted: false, shortCode: "NOPE" });
+    ok((await getCompany("TESTassess:co3"))!.shortCode === null, "codes db: insert strips shortCode (null on create)");
+    ok((await setCompanyShortCode(co1, null)).ok && (await getCompany(co1))!.shortCode === null, "codes db: null clears the company code");
+    ok((await setCompanyShortCode(co2, "TSTA")).ok, "codes db: a cleared code is free again");
+    // site codes (unique per company)
+    ok((await setSiteShortCode(site1, "HAL")).ok && (await getSite(site1))!.shortCode === "HAL", "codes db: set site code");
+    ok(!(await setSiteShortCode(site1, "h")).ok && (await getSite(site1))!.shortCode === "HAL", "codes db: a malformed site code is rejected and leaves the old one");
+    const sdup = await setSiteShortCode(site2, "HAL");
+    ok(!sdup.ok && sdup.error === "That code is already used by another venue of this company", "codes db: site code unique within a company");
+    ok((await setSiteShortCode(site3, "HAL")).ok, "codes db: the same site code is fine under a different company");
+    let sCode = "";
+    try { await db.update(sites).set({ shortCode: "hal" }).where(eq(sites.id, site2)); } catch (e) { sCode = String((e as { code?: string }).code ?? (e as { cause?: { code?: string } }).cause?.code ?? ""); }
+    ok(sCode === "23505", "codes db: site code unique case-insensitively within a company");
+    await saveSite({ ...(await getSite(site1))!, name: "Assess Hall 2" });
+    ok((await getSite(site1))!.shortCode === "HAL", "codes db: regular site save never clears short code");
+    await saveSite({ ...(await getSite(site1))!, shortCode: "ZZZ" });
+    ok((await getSite(site1))!.shortCode === "HAL", "codes db: regular site save never writes short code");
+    ok((await setSiteShortCode(site1, null)).ok && (await getSite(site1))!.shortCode === null, "codes db: null clears the site code");
+    // soft-deleted rows do not hold a code
+    await setSiteShortCode(site1, "HAL");
+    await db.update(sites).set({ deleted: true }).where(eq(sites.id, site1));
+    ok((await setSiteShortCode(site2, "HAL")).ok, "codes db: a soft-deleted venue does not hold its code");
+  } finally {
+    await dropAssessIdentityFixtures();
+  }
+}
 if (process.argv[1] && /test-assessments\.ts$/.test(process.argv[1])) {
   let fail = 0; const ok: Ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
   assessmentChecks(ok).then(() => { console.log(fail ? `${fail} FAIL` : "all PASS"); process.exit(fail ? 1 : 0); });

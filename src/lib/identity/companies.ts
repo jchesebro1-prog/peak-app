@@ -1,4 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { CODE_RE } from "@/lib/assessments/codes";
 import { getDb } from "@/db";
 import {
   companies,
@@ -78,17 +79,53 @@ export async function saveCompany(
 ): Promise<void> {
   const db = await getDb();
   const t = Date.now();
-  const rest: Partial<NewCompanyRow> = { ...row };
+  // shortCode is written only by setCompanyShortCode (#337): a regular save
+  // never writes, clears or inserts it.
+  const { shortCode: _sc, ...clean } = row;
+  void _sc;
+  const rest: Partial<NewCompanyRow> = { ...clean };
   delete rest.id;
   delete rest.createdAt;
   delete rest.updatedAt;
   await db
     .insert(companies)
-    .values({ ...row, createdAt: row.createdAt ?? t, updatedAt: t })
+    .values({ ...clean, createdAt: row.createdAt ?? t, updatedAt: t })
     .onConflictDoUpdate({
       target: companies.id,
       set: { ...rest, deleted: rest.deleted ?? false, updatedAt: t },
     });
+}
+
+/** Postgres unique_violation, seen directly or one level down (drizzle wraps driver errors in `cause`). */
+export function isUniqueViolation(e: unknown): boolean {
+  const x = e as { code?: string; cause?: { code?: string } } | null;
+  return x?.code === "23505" || x?.cause?.code === "23505";
+}
+
+/**
+ * Set (or clear, with null) a company's assessment short code (#337). The only
+ * writer of `companies.short_code`. Must match CODE_RE; the partial unique
+ * index from migration 0040 (lower(short_code), live rows) turns a clash into
+ * a friendly error instead of a throw.
+ */
+export async function setCompanyShortCode(
+  id: string,
+  code: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (code !== null && !CODE_RE.test(code)) {
+    return { ok: false, error: "A code is 2 to 6 letters or digits (A to Z, 0 to 9)" };
+  }
+  const db = await getDb();
+  try {
+    await db
+      .update(companies)
+      .set({ shortCode: code, updatedAt: Date.now() })
+      .where(eq(companies.id, id));
+  } catch (e) {
+    if (isUniqueViolation(e)) return { ok: false, error: "That code is already used by another company" };
+    throw e;
+  }
+  return { ok: true };
 }
 
 /**

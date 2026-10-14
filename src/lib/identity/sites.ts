@@ -3,6 +3,8 @@ import { getDb } from "@/db";
 import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
 import { geoStampForSave, sameVenueAddress } from "@/lib/address-verify/state";
 import { compareVenueOrder } from "@/lib/venue-types";
+import { CODE_RE } from "@/lib/assessments/codes";
+import { isUniqueViolation } from "@/lib/identity/companies";
 
 /**
  * Sites — venues owned by a company (D85, spec §4.4). "What is this job
@@ -74,11 +76,15 @@ export async function getSite(
  * caller omits (undefined) count as unchanged.
  */
 export async function saveSite(
-  row: Omit<NewSiteRow, "createdAt" | "updatedAt"> & {
+  input: Omit<NewSiteRow, "createdAt" | "updatedAt"> & {
     createdAt?: number;
     updatedAt?: number;
   }
 ): Promise<void> {
+  // shortCode is written only by setSiteShortCode (#337): a regular save never
+  // writes, clears or inserts it.
+  const { shortCode: _sc, ...row } = input;
+  void _sc;
   const db = await getDb();
   const t = Date.now();
   const [prev] = await db.select().from(sites).where(eq(sites.id, row.id)).limit(1);
@@ -188,4 +194,29 @@ export async function getSiteByDocLocId(
     .where(and(eq(sites.deleted, false), or(eq(sites.legacyLocId, locationId), eq(sites.id, locationId))))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Set (or clear, with null) a venue's assessment short code (#337). The only
+ * writer of `sites.short_code`. Must match CODE_RE; unique per company among
+ * live venues (partial index `sites_short_code_uniq`, migration 0040).
+ */
+export async function setSiteShortCode(
+  id: string,
+  code: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (code !== null && !CODE_RE.test(code)) {
+    return { ok: false, error: "A code is 2 to 6 letters or digits (A to Z, 0 to 9)" };
+  }
+  const db = await getDb();
+  try {
+    await db
+      .update(sites)
+      .set({ shortCode: code, updatedAt: Date.now() })
+      .where(eq(sites.id, id));
+  } catch (e) {
+    if (isUniqueViolation(e)) return { ok: false, error: "That code is already used by another venue of this company" };
+    throw e;
+  }
+  return { ok: true };
 }

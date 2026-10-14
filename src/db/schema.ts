@@ -254,6 +254,11 @@ export const companies = pgTable(
       .$type<Record<string, string | number | boolean | null>>()
       .notNull()
       .default({}),
+    /** Assessments engine (#337): 2–6 chars of [A-Z0-9], printed in finding ids
+     *  (MPSD-LIN-RIG-003). Written only by setCompanyShortCode. The partial
+     *  unique index (lower(short_code), live rows) is hand-written SQL in
+     *  migration 0040 — deliberately not declared here. */
+    shortCode: text("short_code"),
     deleted: boolean("deleted").notNull().default(false),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
@@ -384,6 +389,11 @@ export const sites = pgTable(
     geoVerifiedAt: bigint("geo_verified_at", { mode: "number" }),
     /** Placeholder for the later Drive integration (§4.4) — free now. */
     driveFolderId: text("drive_folder_id"),
+    /** Assessments engine (#337): 2–6 chars of [A-Z0-9], unique per company
+     *  among live venues. Written only by setSiteShortCode. The partial unique
+     *  index (company_id, lower(short_code)) is hand-written SQL in migration
+     *  0040 — deliberately not declared here. */
+    shortCode: text("short_code"),
     deleted: boolean("deleted").notNull().default(false),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
