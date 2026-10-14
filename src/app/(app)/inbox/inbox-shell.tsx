@@ -322,7 +322,8 @@ export default function InboxShell({
   // external deep links (?thread=) mark the thread read, like the prototype
   const sentReads = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (explicitSelected && reader && reader.unread && !sentReads.current.has(reader.id)) {
+    // #340 — never on a read-only thread: another person's read state isn't mine
+    if (explicitSelected && reader && !reader.readOnly && reader.unread && !sentReads.current.has(reader.id)) {
       sentReads.current.add(reader.id);
       void markReadAction(reader.id);
     }

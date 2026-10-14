@@ -1,4 +1,4 @@
-import { byCustomer as commsByCustomer } from "@/lib/stores/comms";
+import { byCustomer as commsByCustomer, isSharedThread } from "@/lib/stores/comms";
 import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
 import { completedAtOf, getAll as getAllInspections } from "@/lib/stores/inspections";
 import { notesForCustomer } from "@/lib/stores/notes";
@@ -72,7 +72,11 @@ export async function loadCustomerFeed(cust: { id: string; name: string }, viewe
   for (const q of quotes.filter((qt) => (qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name)))
     rows.push(...quoteFeedRows(q));
 
-  for (const t of threads) rows.push(...commFeedRows(t));
+  // #340 — the feed is shared by every viewer (and the vendor page and the
+  // company summary have none): only shared threads — linked, live, not a
+  // draft (isSharedThread; every thread on a customer is linked). The rows
+  // open the Inbox reader, read-only for anyone but the mailbox owner.
+  for (const t of threads.filter(isSharedThread)) rows.push(...commFeedRows(t));
   for (const v of visits) rows.push(...visitFeedRows(v));
 
   for (const f of flames.filter((r) => r.customerId === cust.id))

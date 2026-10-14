@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
@@ -74,6 +74,60 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
 }
 
 /**
+ * #340 — a small predicate language over a doc's JSON, compiled to SQL by
+ * `docCondSql` (searchDocs' `where`). `path` is a field path from the doc
+ * root (["customerId"], ["link", "type"]); every segment and value is a bound
+ * parameter. Leaves:
+ *  - `is`: the text at path equals the value (null/absent never matches);
+ *  - `isNot`: the text at path, absent read as "", differs from the value;
+ *  - `isFolded`: the text at path, trimmed and lower-cased, equals the value
+ *    (pass the value already folded; "" never matches);
+ *  - `filled: "text"`: a non-empty string; `filled: "array"`: a non-empty
+ *    JSON array.
+ * `all` of nothing is true; `any` of nothing is false.
+ */
+export type DocCond =
+  | { all: readonly DocCond[] }
+  | { any: readonly DocCond[] }
+  | { path: readonly string[]; is: string }
+  | { path: readonly string[]; isNot: string }
+  | { path: readonly string[]; isFolded: string }
+  | { path: readonly string[]; filled: "text" | "array" };
+
+/** JS whitespace `trim()` strips, for the SQL btrim in `isFolded`. */
+const TRIM_CHARS = " \t\n\r\f\v\u00a0\ufeff";
+
+function jsonAtPath(doc: SQLWrapper, path: readonly string[]): SQL {
+  let e: SQL = sql`${doc}`;
+  for (const seg of path) e = sql`(${e} -> ${seg})`;
+  return e;
+}
+
+function textAtPath(doc: SQLWrapper, path: readonly string[]): SQL {
+  if (!path.length) throw new Error("DocCond: empty path");
+  return sql`(${jsonAtPath(doc, path.slice(0, -1))} ->> ${path[path.length - 1]})`;
+}
+
+export function docCondSql(doc: SQLWrapper, c: DocCond): SQL {
+  if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x)), sql` AND `)})` : sql`TRUE`;
+  if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x)), sql` OR `)})` : sql`FALSE`;
+  if ("is" in c) return sql`(${textAtPath(doc, c.path)} = ${c.is})`;
+  if ("isNot" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> ${c.isNot})`;
+  if ("isFolded" in c) {
+    if (!c.isFolded) return sql`FALSE`;
+    return sql`(lower(btrim(coalesce(${textAtPath(doc, c.path)}, ''), ${TRIM_CHARS})) = ${c.isFolded})`;
+  }
+  if (!c.path.length) throw new Error("DocCond: empty path");
+  if (c.filled === "array") {
+    const j = jsonAtPath(doc, c.path);
+    // CASE, not AND: Postgres doesn't promise AND short-circuits, and
+    // jsonb_array_length throws on a non-array.
+    return sql`(CASE WHEN jsonb_typeof(${j}) = 'array' THEN jsonb_array_length(${j}) > 0 ELSE FALSE END)`;
+  }
+  return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> '')`;
+}
+
+/**
  * Candidate rows whose JSON contains `query` (case-insensitive), capped at
  * `limit`. Filters in SQL so global search never materializes a whole table
  * (the catalog is ~10.7k rows) — the caller applies its precise per-field
@@ -85,12 +139,18 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  * (one user's mailbox) is never crowded out by rows it would discard. Field
  * names are code constants, passed as bound parameters. Omitted = the
  * unscoped query exactly as before.
+ *
+ * `where` (#340) is one more predicate over the doc, built from `DocCond`
+ * (and / or / equals / not-equals / folded-equals / filled), also applied in
+ * SQL before the LIMIT — how ⌘K keeps only the email threads the viewer may
+ * see (comms-visibility.ts canSeeThreadCond) without other mailboxes'
+ * threads crowding the visible ones out of the candidate cut.
  */
 export async function searchDocs<T extends Doc = Doc>(
   coll: CollectionName,
   query: string,
   limit: number,
-  opts: { fieldEquals?: Readonly<Record<string, string>> } = {}
+  opts: { fieldEquals?: Readonly<Record<string, string>>; where?: DocCond } = {}
 ): Promise<T[]> {
   const q = query.trim();
   if (!q) return [];
@@ -99,10 +159,11 @@ export async function searchDocs<T extends Doc = Doc>(
   // Escape LIKE metacharacters so a user typing % or _ isn't a wildcard.
   const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
   const eqs = Object.entries(opts.fieldEquals ?? {}).map(([f, v]) => sql`${t.doc}->>${f} = ${v}`);
+  const extra = opts.where ? [docCondSql(t.doc, opts.where)] : [];
   const rows = await db
     .select()
     .from(t)
-    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`, ...eqs))
+    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`, ...eqs, ...extra))
     .orderBy(asc(t.id))
     .limit(limit);
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));

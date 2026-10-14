@@ -18,7 +18,7 @@ import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { isDone } from "@/lib/pipelines";
 import { formatJobValue } from "@/lib/job-value";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
-import { byCustomer as commsByCustomer, snippet as commSnippet, statusMeta as commStatusMeta } from "@/lib/stores/comms";
+import { snippet as commSnippet, statusMeta as commStatusMeta, visibleByCustomer } from "@/lib/stores/comms";
 import {
   coordsOf,
   estimate,
@@ -139,7 +139,10 @@ export default async function CustomerDetailPage({
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
-    commsByCustomer(id),
+    // #340 — threads on this company are linked (customerId), so every
+    // teammate sees them, read-only when not their own; one in Deleted (or
+    // another person's draft) is not listed (canSeeThread).
+    visibleByCustomer(id, me.name),
     officesFromSettings(),
     activeUsers(),
     loadCustomerFeed({ id: cust.id, name: cust.name }, me.id),

@@ -20,7 +20,7 @@ import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { canSeeMeeting } from "@/lib/meetings/visibility";
 import { renderMeeting, type RenderNames } from "@/lib/meetings/render";
 import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
-import type { SessionUser } from "@/lib/session";
+import { canSeeThread, canSeeThreadCond, type CommThread } from "@/lib/stores/comms";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -69,18 +69,26 @@ function staffLabelText(p: SearchPartLike): string {
 
 /**
  * The ⌘K search's groups for `rawQ` as `me` may see them (meetings through
- * canSeeMeeting). The query is trimmed and lower-cased; under 2 characters
- * there are no groups. Only `me.id` is read.
+ * canSeeMeeting, email threads through canSeeThread). The query is trimmed
+ * and lower-cased; under 2 characters there are no groups. `me.id` scopes
+ * meetings, `me.name` email threads (mailboxUser / assignedTo hold names).
  *
- * `opts.threadsOf` (Ask AI) scopes the email-thread candidates to one user's
- * own mailbox (personal, mailboxUser = that name; live email threads only)
- * in SQL, before the per-group cut — so other mailboxes' rows can't crowd the
- * user's own out of the 5. ⌘K never passes it: its output is unchanged.
+ * #340 — email-thread candidates are cut to the threads `me` may see — my
+ * own mailbox's, ones assigned to me, and ones linked to an entity; never one
+ * in Deleted or another person's draft — in SQL (canSeeThreadCond), before
+ * the per-group cut, so other people's private mail can't crowd the visible
+ * threads out of the 5; canSeeThread re-checks each row. ⌘K and Ask AI share
+ * the rule. `opts.emailOnly` (Ask AI) also keeps only email threads (no
+ * logged calls or meetings).
  */
-export type GlobalSearchOpts = { threadsOf?: string };
+export type GlobalSearchOpts = { emailOnly?: boolean };
 
-export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">, opts: GlobalSearchOpts = {}): Promise<Group[]> {
-  const threadsOf = opts.threadsOf;
+export async function globalSearch(
+  rawQ: string,
+  me: { id: string; name?: string | null },
+  opts: GlobalSearchOpts = {}
+): Promise<Group[]> {
+  const meName = me.name || "";
   const q = (rawQ || "")
     .trim()
     .toLowerCase();
@@ -97,9 +105,10 @@ export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">, op
       searchDocs("designs", q, CANDIDATES),
       searchDocs("surveys", q, CANDIDATES),
       searchDocs("inspections", q, CANDIDATES),
-      threadsOf !== undefined
-        ? searchDocs("comms", q, CANDIDATES, { fieldEquals: { mailbox: "personal", mailboxUser: threadsOf, channel: "email" } })
-        : searchDocs("comms", q, CANDIDATES),
+      searchDocs<CommThread & Doc>("comms", q, CANDIDATES, {
+        ...(opts.emailOnly ? { fieldEquals: { channel: "email" } } : {}),
+        where: canSeeThreadCond(meName),
+      }),
       allCompanies(),
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
@@ -209,8 +218,8 @@ export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">, op
   add(
     "Email threads",
     comms
-      // Ask AI's scoped search also leaves out threads in Deleted (loadThreadFor's rule).
-      .filter((d) => threadsOf === undefined || d.deleted !== true)
+      // #340 — the SQL cut above, re-checked row by row (one rule, comms-visibility.ts)
+      .filter((d) => canSeeThread(d, meName))
       .filter((d) => matches(q, d.subject, d.customer, d.contactName, d.contactEmail))
       .map((d) => ({
         id: d.id,

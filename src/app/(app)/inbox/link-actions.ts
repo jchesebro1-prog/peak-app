@@ -50,7 +50,8 @@ export async function linkThreadToCustomerAction(
 ): Promise<R> {
   const me = await requireUser();
   const t = await getThread(threadId);
-  if (!t) return { ok: false, error: "Thread not found." };
+  // #340 — only my own mailbox's threads are linked from here
+  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
 
   // #125 — the picked identity message's address, else the thread contact.
@@ -110,8 +111,9 @@ export async function releaseDomainAction(domain: string, customerId: string): P
 
 /** Link sidebar's "not them" on a suggested match. */
 export async function dismissSuggestionAction(threadId: string): Promise<R> {
-  await requireUser();
-  if (!(await getThread(threadId))) return { ok: false, error: "Thread not found." };
+  const me = await requireUser();
+  const t = await getThread(threadId);
+  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
   await patchDoc<CommThread>("comms", threadId, (d) => {
     d.suggestionDismissed = true;
     if (d.resolution === "suggested") d.resolution = "unknown";
@@ -132,7 +134,8 @@ export async function quickAddCustomerAction(input: {
   threadId: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const me = await requireUser();
-  if (!(await getThread(input.threadId))) return { ok: false, error: "Thread not found." };
+  const thread = await getThread(input.threadId);
+  if (!thread || !visibleTo(thread, me.name)) return { ok: false, error: "Thread not found." };
   const name = (input.name || "").trim();
   if (!name) return { ok: false, error: "Enter a name for the new customer." };
 

@@ -8,7 +8,10 @@
  * default to an assigned task), an active assignee ("" = me), and a task
  * linked to an email thread is filed under the "Email" section like the
  * Inbox's. Every link is re-checked with the read tools' own rule
- * (`resolveAskRef`; a thread must be the user's own via `loadThreadFor`); a
+ * (`resolveAskRef`), except a thread: it must be the user's own
+ * (`loadThreadFor`) — #340: Ask may READ a linked thread from another
+ * mailbox, but a task's thread link stays own-only, the Inbox's own rule
+ * (createTaskFromThread requires visibleTo); a
  * venue must belong to the linked company; a link that no longer resolves is
  * dropped, never written blind. Kept out of the "use server" file so the
  * harness can drive the real write.
@@ -19,6 +22,7 @@ import { dueAtFromDateInput, THREAD_TASK_NOTES_MAX, THREAD_TASK_TITLE_MAX } from
 import { REF_ID_MAX, type RefKind } from "./features/ask-refs";
 import { TASK_LINK_KINDS, type AskTaskLinks } from "./features/ask-cards";
 import { resolveAskRef, type AskUser } from "./ask-tools-server";
+import { loadThreadFor } from "./thread-access";
 import { getSite } from "@/lib/identity/sites";
 
 export type AskTaskRequest = {
@@ -59,7 +63,8 @@ export async function createAskTask(
     const raw = links[field];
     const id = typeof raw === "string" ? raw.trim() : "";
     if (!id || id.length > REF_ID_MAX) continue;
-    if (await resolveAskRef(kind, id, me)) (input as Record<string, unknown>)[field] = id;
+    const linkable = kind === "thread" ? !!(await loadThreadFor(id, me.name)) : !!(await resolveAskRef(kind, id, me));
+    if (linkable) (input as Record<string, unknown>)[field] = id;
   }
   // A venue rides only with its own company (the Inbox's rule: the thread's venue must be its company's).
   if (input.siteId && input.customerId) {

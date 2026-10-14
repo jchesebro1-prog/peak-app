@@ -420,7 +420,15 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
     for (const r of rechecked) if (r) exposeRef(r);
 
     const team = deps.team ?? (await activeUsers()).map((u) => ({ id: u.id }));
-    const cardCtx = (): CardContext => ({ refs: new Set(refs.keys()), emails, team, meId: me.id, todayYmd: chicagoToday(now).date });
+    const cardCtx = (): CardContext => ({
+      refs: new Set(refs.keys()),
+      emails,
+      team,
+      meId: me.id,
+      todayYmd: chicagoToday(now).date,
+      // #340 — threads read from another mailbox: shown, never task-linked
+      readOnlyThreads: new Set([...refs.values()].filter((r) => r.kind === "thread" && r.readOnly).map((r) => r.id)),
+    });
 
     firstUser = packFirstUserMessage({ messages: input.messages, screen, today: chicagoToday(now) });
     const messages: BetaMessageParam[] = [{ role: "user", content: firstUser }];

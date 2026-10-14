@@ -2,6 +2,7 @@ import { outsideTransaction } from "@/db";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import type { PreDraft } from "@/lib/brief/types";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { canSeeThread, visibleTo } from "./comms-visibility";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -464,12 +465,23 @@ function inBox(t: CommThread, boxId: string, me: string): boolean {
   return boxId === "personal" && t.mailbox === "personal" && t.mailboxUser === me;
 }
 
-// Every thread the current user can see. Legacy shared-mailbox threads stay
-// stored for history but are no longer part of the active Inbox. Exported so
-// the Unmatched view (#96 §5) applies the same rule as the other views.
-export function visibleTo(t: CommThread, me: string): boolean {
-  return t.mailbox === "personal" && t.mailboxUser === me;
-}
+// The threads in the current user's own mailbox. Legacy shared-mailbox
+// threads stay stored for history but are no longer part of the active Inbox.
+// Exported so the Unmatched view (#96 §5) applies the same rule as the other
+// views. #340: `visibleTo` and the cross-user rule (`canSeeThread` — own,
+// assigned or linked; `isOwnThread` for every write) live in the pure
+// comms-visibility.ts and are re-exported here.
+export {
+  visibleTo,
+  canOpenThread,
+  canSeeThread,
+  canSeeThreadCond,
+  isAssignedTo,
+  isOwnThread,
+  isSharedThread,
+  isThreadLinked,
+  readOnlyBanner,
+} from "./comms-visibility";
 
 export type MailboxInfo = {
   id: MailboxId;
@@ -708,6 +720,13 @@ export async function get(id: string): Promise<CommThread | null> {
 
 export async function byCustomer(customerId: string): Promise<CommThread[]> {
   return (await getAll()).filter((t) => t.customerId === customerId);
+}
+
+/** #340 — a company's threads as `me` may see them (canSeeThread): every
+ *  live, non-draft thread linked to it (from anyone's mailbox), plus my own
+ *  drafts; nothing in Deleted. The company page's Communications list. */
+export async function visibleByCustomer(customerId: string, me: string): Promise<CommThread[]> {
+  return (await byCustomer(customerId)).filter((t) => canSeeThread(t, me));
 }
 
 /** Client-sync bookkeeping filter (server writes land synced, so normally []). */

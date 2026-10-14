@@ -171,6 +171,7 @@ function ExpandedMessage({
   onOpenLinks,
   onTask,
   isEmail,
+  readOnly = false,
 }: {
   m: MessageVM;
   collapsible: boolean;
@@ -185,6 +186,8 @@ function ExpandedMessage({
   /** #214 fix wave 1 — the old picker was gated to email threads only;
    *  "Link…" is hidden on a call/meeting thread for the same reason. */
   isEmail: boolean;
+  /** #340 — a read-only thread: the per-message write controls are hidden */
+  readOnly?: boolean;
 }) {
   return (
     <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
@@ -239,7 +242,7 @@ function ExpandedMessage({
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
-          {isEmail && (
+          {isEmail && !readOnly && (
             <button
               type="button"
               onClick={(e) => {
@@ -262,7 +265,7 @@ function ExpandedMessage({
               Link…
             </button>
           )}
-          {isEmail && (
+          {isEmail && !readOnly && (
             <button
               type="button"
               onClick={(e) => {
@@ -285,6 +288,12 @@ function ExpandedMessage({
               Task…
             </button>
           )}
+          {readOnly && m.link && (
+            <span style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "2px 7px", color: "#68707b", fontSize: 10.5, background: "#fff" }}>
+              {m.link.kindLabel} · {m.link.label}
+            </span>
+          )}
+          {!readOnly && (
           <select
             value={m.link ? `${m.link.type}|${m.link.label}` : ""}
             onClick={(e) => e.stopPropagation()}
@@ -305,6 +314,7 @@ function ExpandedMessage({
             )))}
             {m.link && <option value="">Remove message link</option>}
           </select>
+          )}
         </div>
         <div
           style={{
@@ -374,6 +384,7 @@ function Conversation({
   onOpenLinks,
   onTask,
   isEmail,
+  readOnly = false,
 }: {
   messages: MessageVM[];
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
@@ -384,6 +395,8 @@ function Conversation({
   onTask: (messageId: string) => void;
   /** #214 fix wave 1 — hide "Link…" on a non-email thread */
   isEmail: boolean;
+  /** #340 — a read-only thread: no Link… / Task… / Link message… */
+  readOnly?: boolean;
 }) {
   // id -> explicit user choice; anything absent falls back to "newest is open"
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -417,6 +430,7 @@ function Conversation({
         onOpenLinks={(el) => onOpenLinks(m.id, el)}
         onTask={() => onTask(m.id)}
         isEmail={isEmail}
+        readOnly={readOnly}
       />
     ) : (
       <CollapsedMessage key={m.id} m={m} onOpen={() => toggle(m.id, true)} />
@@ -471,6 +485,7 @@ function Conversation({
             onOpenLinks={(el) => onOpenLinks(newest.id, el)}
             onTask={() => onTask(newest.id)}
             isEmail={isEmail}
+            readOnly={readOnly}
           />
         ) : (
           <CollapsedMessage
@@ -1033,6 +1048,27 @@ export default function ThreadReader({
                 to {vm.boxLabel} ·{" "}
                 <span style={{ fontFamily: "var(--font-mono)" }}>{vm.boxAddress}</span>
               </div>
+              {vm.readOnly && (
+                <div
+                  role="status"
+                  data-testid="reader-read-only"
+                  style={{
+                    marginTop: 9,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    background: "#f4f5f7",
+                    border: "1px solid #e4e7ec",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#5b616e",
+                  }}
+                >
+                  {vm.readOnlyLabel}
+                  {vm.resolvedCustomerId && vm.resolvedCustomerName ? (
+                    <span style={{ fontWeight: 400 }}> · linked to {vm.resolvedCustomerName}</span>
+                  ) : null}
+                </div>
+              )}
               {vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}
             </div>
             {/* Pop-out windows: this thread in its own window. */}
@@ -1040,7 +1076,7 @@ export default function ThreadReader({
           </div>
 
         </div>
-        {variant === "overlay" && sidebar}
+        {variant === "overlay" && !vm.readOnly && sidebar}
         {/* conversation */}
         <div
           className="ib-scroll"
@@ -1071,10 +1107,12 @@ export default function ThreadReader({
             }}
             onTask={(messageId) => openTask(messageId)}
             isEmail={vm.isEmail}
+            readOnly={vm.readOnly}
           />
         </div>
 
-        {/* actions + composer */}
+        {/* actions + composer — #340: none on a read-only thread */}
+        {!vm.readOnly && (
         <div
           style={{
             flexShrink: 0,
@@ -1642,8 +1680,9 @@ export default function ThreadReader({
             </>
           )}
         </div>
+        )}
       </div>
-      {variant === "pane" && sidebar}
+      {variant === "pane" && !vm.readOnly && sidebar}
     </div>
   );
 }

@@ -142,6 +142,10 @@ export type CardContext = {
   meId: string;
   /** Today in America/Chicago, YYYY-MM-DD. */
   todayYmd: string;
+  /** #340 — exposed thread ids outside the asker's own mailbox (readable
+   *  because linked or assigned): a task card never links one, so the card
+   *  shows only what createAskTask will write (its thread link is own-only). */
+  readOnlyThreads?: ReadonlySet<string>;
 };
 
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
@@ -228,7 +232,7 @@ export function sanitizeCard(kind: AskCardKind, input: unknown, ctx: CardContext
       const links: AskTaskLinks = {};
       for (const [field, refKind] of Object.entries(TASK_LINK_KINDS) as [keyof AskTaskLinks, RefKind][]) {
         const id = exposed(refKind, p.data.links?.[field], ctx.refs);
-        if (id) links[field] = id;
+        if (id && !(refKind === "thread" && ctx.readOnlyThreads?.has(id))) links[field] = id;
       }
       const want = typeof p.data.assigneeId === "string" ? p.data.assigneeId.trim() : "";
       const assigneeId = want && ctx.team.some((u) => u.id === want) ? want : ctx.meId || null;

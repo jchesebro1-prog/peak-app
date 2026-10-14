@@ -68,12 +68,18 @@ import {
   setRenewalOutreach as setInspectionRenewalOutreach,
 } from "@/lib/stores/inspections";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { ownThread, ownThreadIds } from "@/lib/inbox-thread-guard";
 
 /**
  * Inbox server actions — thin wrappers over the comms store (the prototype's
  * CommStore calls, 1:1). Every mutation revalidates the whole layout so the
  * nav unread badge and the bell stay in step, like the prototype's rss-comm
  * event fan-out.
+ *
+ * #340 — every action that takes a thread id runs `ownThread` first (the
+ * bulk ones `ownThreadIds`): a thread in someone else's mailbox — even one
+ * the viewer may READ because it is linked or assigned — is never written
+ * here, and a refused id answers like a missing thread.
  */
 
 // Shared mailboxes were retired — everything lands in the signed-in user's own
@@ -91,25 +97,29 @@ function revalidate() {
 /* ---- read state / lifecycle ---- */
 
 export async function markReadAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await markRead(id);
   revalidate();
 }
 
 export async function archiveAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await archive(id);
   revalidate();
 }
 
 export async function unarchiveAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await unarchive(id);
   revalidate();
 }
 
 export async function markUnreadAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await markUnread(id);
   revalidate();
 }
@@ -117,19 +127,22 @@ export async function markUnreadAction(id: string) {
 /* ---- flag / pin / category (Outlook parity) ---- */
 
 export async function flagAction(id: string, on: boolean) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await setFlag(id, on);
   revalidate();
 }
 
 export async function pinAction(id: string, on: boolean) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await setPin(id, on);
   revalidate();
 }
 
 export async function categoryAction(id: string, key: string | null) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await setCategory(id, key);
   revalidate();
 }
@@ -137,13 +150,15 @@ export async function categoryAction(id: string, key: string | null) {
 /* ---- delete / restore (recoverable — the Deleted folder) ---- */
 
 export async function deleteAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await softDelete(id);
   revalidate();
 }
 
 export async function restoreAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await restore(id);
   revalidate();
 }
@@ -153,43 +168,45 @@ export async function restoreAction(id: string) {
  * small (a selection is a handful of threads), so a simple sequential loop is
  * fine and keeps the store's per-write invariants intact. */
 
-function ids(list: string[]): string[] {
-  return Array.isArray(list) ? list.filter((s) => typeof s === "string" && s) : [];
+/** The selection, cut to the signed-in user's own threads (#340). */
+async function ids(list: string[]): Promise<string[]> {
+  const user = await requireUser();
+  return ownThreadIds(list, user.name);
 }
 
 export async function bulkArchiveAction(list: string[]) {
   await requireUser();
-  for (const id of ids(list)) await archive(id);
+  for (const id of await ids(list)) await archive(id);
   revalidate();
 }
 
 export async function bulkDeleteAction(list: string[]) {
   await requireUser();
-  for (const id of ids(list)) await softDelete(id);
+  for (const id of await ids(list)) await softDelete(id);
   revalidate();
 }
 
 export async function bulkRestoreAction(list: string[]) {
   await requireUser();
-  for (const id of ids(list)) await restore(id);
+  for (const id of await ids(list)) await restore(id);
   revalidate();
 }
 
 export async function bulkMarkReadAction(list: string[], read: boolean) {
   await requireUser();
-  for (const id of ids(list)) await (read ? markRead(id) : markUnread(id));
+  for (const id of await ids(list)) await (read ? markRead(id) : markUnread(id));
   revalidate();
 }
 
 export async function bulkFlagAction(list: string[], on: boolean) {
   await requireUser();
-  for (const id of ids(list)) await setFlag(id, on);
+  for (const id of await ids(list)) await setFlag(id, on);
   revalidate();
 }
 
 export async function bulkCategoryAction(list: string[], key: string | null) {
   await requireUser();
-  for (const id of ids(list)) await setCategory(id, key);
+  for (const id of await ids(list)) await setCategory(id, key);
   revalidate();
 }
 
@@ -265,6 +282,7 @@ export async function searchInboxAction(
 
 export async function setStatusAction(id: string, status: string) {
   const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await setStatus(id, status);
   // #335 §4 — Mark replied / Close also archive (same per-user setting as
   // archive-on-reply); best-effort, never fails the status change
@@ -280,13 +298,15 @@ export async function setStatusAction(id: string, status: string) {
 }
 
 export async function reopenAction(id: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await reopen(id);
   revalidate();
 }
 
 export async function assignAction(id: string, name: string) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   await assign(id, name || "");
   revalidate();
 }
@@ -308,7 +328,8 @@ export async function setLinkAction(
   link: CommLink | null,
   adopt?: { customerId: string; customer: string } | null
 ) {
-  await requireUser();
+  const user = await requireUser();
+  if (!(await ownThread(id, user.name))) return;
   // picking a record on an unlinked thread also adopts the resolved customer
   // (port of Comm Thread onLinkRec)
   if (adopt && adopt.customerId) {
@@ -325,8 +346,8 @@ export async function setMessageLinkAction(
   messageId: string,
   link: CommLink | null,
 ) {
-  await requireUser();
-  const thread = await getThread(threadId);
+  const user = await requireUser();
+  const thread = await ownThread(threadId, user.name);
   if (!thread) return { ok: false as const, error: "Thread not found." };
   if (!(thread.messages || []).some((m) => m.id === messageId))
     return { ok: false as const, error: "Message not found." };
@@ -346,6 +367,7 @@ export async function replyAction(id: string, body: string, signatureHandled?: b
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
+  if (!(await ownThread(id, user.name))) return { ok: false as const };
   const profile = await getUser(user.id);
   const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
   // #335 — archive-on-reply runs after the response, off the send's path
@@ -364,6 +386,7 @@ export async function logNoteAction(
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
+  if (!(await ownThread(id, user.name))) return { ok: false as const };
   await addMessage(id, {
     direction,
     channel,
@@ -487,6 +510,7 @@ export async function composeSendAction(d: ComposePayload) {
     return { ok: false as const, id: null };
   }
   if (d.id) {
+    if (!(await ownThread(d.id, me))) return { ok: false as const, id: null, error: "Draft not found." };
     const stale = await staleEstimateDraft(d.id);
     if (stale) return { ok: false as const, id: null, error: stale };
   }
@@ -526,6 +550,7 @@ export async function saveDraftAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
   if (d.id) {
+    if (!(await ownThread(d.id, me))) return { ok: false as const, id: null };
     await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body });
     revalidate();
     return { ok: true as const, id: d.id };

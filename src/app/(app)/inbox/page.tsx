@@ -46,6 +46,7 @@ import {
   flaggedCount,
   folderCounts,
   forwardAddress,
+  canOpenThread,
   get as getThread,
   getAll as allThreads,
   hasQueued,
@@ -57,6 +58,7 @@ import {
   resolveCustomerId,
   snippet,
   statusMeta,
+  readOnlyBanner,
   threadsIn,
   timeAgo,
   timeFull,
@@ -288,9 +290,15 @@ export default async function InboxPage({
     : "inbox";
 
   const threadParam = str(params.thread);
-  const explicitThread = threadParam ? await getThread(threadParam) : null;
-  // deep links carry only ?thread= (global search does) — land in its mailbox
-  if (explicitThread && !params.box && !view && !isMeetings && !isOrganize) {
+  // #340 — ?thread= opens a thread only when the viewer may see it: their
+  // own (Deleted included), assigned to them, or linked to an entity
+  // (canOpenThread). Anything else reads as no thread at all. A thread that
+  // isn't in their own mailbox opens read-only (reader.readOnly below).
+  const threadHit = threadParam ? await getThread(threadParam) : null;
+  const explicitThread = threadHit && canOpenThread(threadHit, me) ? threadHit : null;
+  // deep links carry only ?thread= (global search does) — land in its
+  // mailbox, but only ever my own (never switch to someone else's box)
+  if (explicitThread && visibleTo(explicitThread, me) && !params.box && !view && !isMeetings && !isOrganize) {
     box = explicitThread.mailbox === "personal" ? "personal" : explicitThread.mailbox;
     folder = "inbox";
   }
@@ -299,8 +307,9 @@ export default async function InboxPage({
   // composer (the ✉ renewal outreach redirects here after landing its draft)
   const draftParam = str(params.draft);
   const draftThread = draftParam ? await getThread(draftParam) : null;
+  // #340 — only my own draft opens in the composer
   const openDraftThread =
-    draftThread && draftThread.status === "draft" ? draftThread : null;
+    draftThread && draftThread.status === "draft" && visibleTo(draftThread, me) ? draftThread : null;
 
   const isView = !!view || isMeetings || isOrganize;
   const isDrafts = !isView && folder === "drafts";
@@ -686,6 +695,10 @@ export default async function InboxPage({
 
   let reader: ReaderVM | null = null;
   if (sel) {
+    // #340 — a thread outside my own mailbox (linked or assigned to me) is
+    // read-only: no reply, status, filing, links, tasks or Assist — every
+    // write action refuses it server-side too (lib/inbox-thread-guard.ts).
+    const readOnly = !visibleTo(sel, me);
     const sm = statusMeta(sel.status);
     const cm = channelMeta(sel.channel);
     const bm = boxMeta(sel.mailbox || "personal", sel.mailboxUser || undefined, {
@@ -945,7 +958,7 @@ export default async function InboxPage({
 
     // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
     // stored suggestions keep only this dialog's link keys and team ids.
-    const storedDraft = readerPreDraft(sel, { id: user.id, name: me });
+    const storedDraft = readOnly ? null : readerPreDraft(sel, { id: user.id, name: me });
     const linkKeySet = new Set(taskLinks.map((l) => l.key));
     const teamIds = new Set(roster.map((u) => u.id));
     const preDraft: ReaderVM["preDraft"] = storedDraft
@@ -993,7 +1006,10 @@ export default async function InboxPage({
 
     reader = {
       id: sel.id,
-      unread: !!sel.unread,
+      // #340 — another person's read state is never mine to show or clear
+      unread: readOnly ? false : !!sel.unread,
+      readOnly,
+      readOnlyLabel: readOnly ? readOnlyBanner(sel) : "",
       archived: !!sel.archived || sel.gmailInboxed === false,
       subject: sel.subject,
       status: sel.status,
@@ -1029,7 +1045,7 @@ export default async function InboxPage({
       resolvedCustomerName: resolvedCustomer || sel.customer || "this contact",
       needsAdopt: !sel.customerId && !!resolvedCid,
       linkOptions,
-      visit,
+      visit: readOnly ? null : visit,
       lastBody: lastMsg(sel)?.body || "",
       forwardFrom: sel.contactName || sel.contactEmail || "",
       resolution,
@@ -1062,9 +1078,9 @@ export default async function InboxPage({
       taskTeam: roster.map((u) => ({ id: u.id, name: u.name })),
       meId: user.id,
       threadTasks,
-      org,
+      org: readOnly ? null : org,
       // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
-      suggestionHref: assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
+      suggestionHref: !readOnly && assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
       preDraft,
     };
   }

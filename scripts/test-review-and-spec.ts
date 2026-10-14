@@ -11352,6 +11352,7 @@ import { popoutPureChecks } from "./test-popout";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
+import { threadVisibilityPureChecks, threadVisibilityDbChecks, threadVisibilityPins } from "./test-thread-visibility";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11731,6 +11732,9 @@ seeded()
   .then(() => askToolsDbChecks(ok))
   .then(() => askRunnerChecks(ok))
   .then(() => askUiChecks(ok))
+  .then(() => threadVisibilityPureChecks(ok))
+  .then(() => threadVisibilityDbChecks(ok))
+  .then(() => threadVisibilityPins(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -21439,6 +21443,37 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
       acts214.includes("if (!t || !visibleTo(t, me.name)) return { ok: false, error: \"Thread not found.\" };") &&
       fn214("setThreadContactsAction").includes("visibleTo(t, me.name)"),
     "#214 actions: thread actions only reach threads in the user's own mailbox"
+  );
+  // #340 — thread visibility: the reader opens only what canOpenThread allows,
+  // read-only off-mailbox; ⌘K's thread candidates follow canSeeThread in SQL.
+  const inbox340 = read("src/app/(app)/inbox/page.tsx");
+  const reader340 = read("src/app/(app)/inbox/thread-reader.tsx");
+  const search340 = read("src/lib/search/global-search.ts");
+  ok(
+    /const explicitThread = threadHit && canOpenThread\(threadHit, me\) \? threadHit : null;/.test(inbox340) &&
+      /if \(explicitThread && visibleTo\(explicitThread, me\) && !params\.box/.test(inbox340) &&
+      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, me\)/.test(inbox340),
+    "#340 reader: ?thread= opens only a thread the viewer may see (canOpenThread), never switches to another person's box, and ?draft= opens only my own draft"
+  );
+  ok(
+    /const readOnly = !visibleTo\(sel, me\);/.test(inbox340) &&
+      /unread: readOnly \? false : !!sel\.unread,/.test(inbox340) &&
+      /org: readOnly \? null : org,/.test(inbox340) &&
+      /visit: readOnly \? null : visit,/.test(inbox340) &&
+      /const storedDraft = readOnly \? null : readerPreDraft\(/.test(inbox340) &&
+      /\{!vm\.readOnly && \(\s*<div/.test(reader340) &&
+      /\{variant === "pane" && !vm\.readOnly && sidebar\}/.test(reader340) &&
+      /\{variant === "overlay" && !vm\.readOnly && sidebar\}/.test(reader340) &&
+      /\{isEmail && !readOnly && \(/.test(reader340) &&
+      /data-testid="reader-read-only"/.test(reader340) &&
+      /!reader\.readOnly && reader\.unread/.test(read("src/app/(app)/inbox/inbox-shell.tsx")),
+    "#340 reader: a read-only thread shows the banner and no write control — no actions/composer footer (reply, status, archive, Assist, pre-draft), no link sidebar, no per-message Link… / Task… / link picker, no court strip, and no mark-read"
+  );
+  ok(
+    /where: canSeeThreadCond\(meName\),/.test(search340) &&
+      /\.filter\(\(d\) => canSeeThread\(d, meName\)\)/.test(search340) &&
+      !/threadsOf/.test(search340),
+    "#340 ⌘K: email-thread candidates are cut to canSeeThread in SQL before the per-group limit, and re-checked per row"
   );
   const cc214 = fn214("fetchMessageCcAction");
   ok(
