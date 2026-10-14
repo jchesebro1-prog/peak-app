@@ -724,7 +724,9 @@ export async function pushAssessment(rec: PushRec, user: PushUser): Promise<Push
     for (const k of ["customerId", "siteId"] as const) {
       if (str(doc[k]) !== undefined && doc[k] !== stored[k]) return { id, status: "error", error: "Assessment belongs to a different venue" };
     }
-    const rev = typeof rec.rev === "number" ? rec.rev : doc.rev;
+    // The outbox carries base rev + 1 (the generic push convention); saveAssessment's stale rule takes the BASE rev.
+    const sent = typeof rec.rev === "number" ? rec.rev : typeof doc.rev === "number" ? doc.rev : undefined;
+    const rev = sent === undefined ? undefined : sent - 1;
     const r = await saveAssessment(id, { ...doc, rev } as Partial<Assessment>, { id: user.id }, { mode: "push" });
     return r.ok ? { id, status: "ok", rev: r.doc.rev } : { id, status: "error", error: r.error };
   } catch {

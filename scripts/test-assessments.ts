@@ -29,7 +29,7 @@ import {
   answeredWith, buildFullDoc, buildPatch, changedAnswers, clearMarker, contactValue, createEditorStore, dateInputToMs, editorReducer,
   formatValue, hiddenAnswered, initEditorState, msToDateInput, notApplicable, optionsFor, parseFtinInput, parseNumberInput,
   profileOnFile, reenterAnswer, refusalParts, rejectLabel, resolvedPromptIds, scopeSummaries, setScopeOn, showCounter, textAnswer,
-  toggleMany, unableWith, flagsForScope, offScopesWithAnswers, formatRejectPayload, type EditorDoc, type FindingVM,
+  toggleMany, unableWith, flagsForScope, placePrompts, offScopesWithAnswers, formatRejectPayload, type EditorDoc, type FindingVM,
 } from "../src/lib/assessments/editor-model";
 import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
@@ -1028,6 +1028,11 @@ function editorModelChecks(ok: Ok) {
   st = editorReducer(st, { type: "scalar", field: "spaceLabel", value: "" });
   p = buildPatch(st)!;
   ok(p.spaceLabel === "" && st.dirty.includes("spaceLabel"), "editor: a cleared space label is sent as \"\" (JSON drops undefined)");
+  ok(buildFullDoc(st, 1).spaceLabel === "", "editor: a cleared space label is sent as \"\" in the outbox doc too");
+  const clr = editorReducer(initEditorState(editorDoc({ accompanying: "Pat" })), { type: "scalar", field: "accompanying", value: "" });
+  ok(buildFullDoc(clr, 1).accompanying === "", "editor: a cleared Accompanying goes offline as \"\"");
+  const dirtyOnly = buildFullDoc(editorReducer(initEditorState(editorDoc({ spaceLabel: "Aud", accompanying: "Pat", photoSetOffered: true })), { type: "scalar", field: "accompanying", value: "Lee" }), 1);
+  ok(dirtyOnly.accompanying === "Lee" && !("spaceLabel" in dirtyOnly) && !("scopes" in dirtyOnly) && !("visitDate" in dirtyOnly) && !("photoSetOffered" in dirtyOnly), "editor: the outbox doc carries only the dirty scalars");
   st = editorReducer(st, { type: "scalar", field: "scopes", value: setScopeOn(def, st.doc.scopes, "S8", true) });
   p = buildPatch(st)!;
   ok(p.scopes!.find((s) => s.code === "S8")?.on === true, "editor: a changed scope list is sent");
@@ -1122,6 +1127,18 @@ function editorModelChecks(ok: Ok) {
   ok(!r2.visibleModules.has("rigging.counterweight") && hid.some((h) => h.q.key === "rigging.cw_sets" && h.moduleTitle === "Counterweight"), "editor: overhead = none hides it; its answer is listed under Hidden by earlier answers");
   ok(hiddenAnswered(def, "S2", r2, { ...none, "rigging.cw_purchase": clearMarker("u1", 4) }).every((h) => h.q.key !== "rigging.cw_purchase"), "editor: a cleared hidden answer isn't listed");
 
+  // placePrompts: each prompt once, under the first visible question it references
+  const placed = placePrompts(def, r1);
+  const placedIds = [...placed.values()].flat().map((x) => x.id);
+  const r10 = r1.prompts.find((x) => x.ruleId === "R10");
+  const r10Home = [...placed].find(([, ps]) => ps.some((x) => x.id === r10?.id))?.[0];
+  const firstVisibleHome = def.scopes.flatMap((x) => x.modules).find((m) => r1.visibleModules.has(m.id) && m.questions.some((qq) => r10?.questionKeys.includes(qq.key) && r1.visible.has(qq.key)))?.id;
+  ok(!!r10 && placedIds.length === new Set(placedIds).size && placedIds.length === r1.prompts.filter((x) => x.questionKeys.length > 0).length, "editor: no rule prompt id is placed twice (and none is lost)");
+  ok(!!r10 && r10.questionKeys.length > 1 && r10Home === firstVisibleHome, "editor: a prompt that references several modules (R10) shows once, under the first one with a visible question");
+  const hiddenQs = placePrompts(def, { prompts: [{ ...r10!, questionKeys: ["rigging.alteration_since"] }], visible: new Set<string>(), visibleModules: new Set(["rigging.system", "rigging.screen"]) });
+  const rigScope = def.scopes.find((x) => x.code === "S2")!;
+  ok([...hiddenQs.keys()].join() === rigScope.modules.find((m) => ["rigging.system", "rigging.screen"].includes(m.id))!.id, "editor: with none of its questions visible a prompt lands on the first visible module of its scope");
+
   // rail summaries: scopes that are on; S8 off is absent; counts line up with evaluate
   const sums = scopeSummaries(def, editorDoc().scopes, r1);
   const s2 = sums.find((x) => x.code === "S2")!;
@@ -1193,6 +1210,20 @@ async function assessmentEditorDbChecks(ok: Ok) {
     const pushed = await pushAssessment({ id: a.id, rev: full.rev as number, doc: full }, { id: "u1", roles: ["Estimator"] });
     const stored = (await getAssessment(a.id))!;
     ok(pushed.status === "ok" && pushed.rev === stored.rev && stored.answers["rigging.cw_sets"]?.v === null && "rigging.cw_sets" in stored.answers, "editor db: the outbox doc pushes ok with the stored rev; Clear keeps the key with v null");
+    // the outbox carries base rev + 1: a device whose base is behind loses its dirty scalar; an up-to-date one keeps it
+    const base0 = (await getAssessment(a.id))!;
+    let dev = initEditorState(JSON.parse(JSON.stringify(base0)) as EditorDoc);
+    await saveAssessment(a.id, { rev: base0.rev, spaceLabel: "Second device" }, { id: "u2" }, { mode: "action" });
+    dev = editorReducer(dev, { type: "scalar", field: "spaceLabel", value: "Old label" });
+    const staleFull = buildFullDoc(dev, Date.now());
+    const sPush = await pushAssessment({ id: a.id, rev: staleFull.rev as number, doc: staleFull }, { id: "u1", roles: ["Estimator"] });
+    const afterStale = (await getAssessment(a.id))!;
+    ok(sPush.status === "ok" && afterStale.spaceLabel === "Second device" && afterStale.syncRejects?.some((r) => r.key === "field:spaceLabel") === true, "editor db: an offline doc from a stale base keeps the other device's label and records field:spaceLabel");
+    let cur = initEditorState(JSON.parse(JSON.stringify(afterStale)) as EditorDoc);
+    cur = editorReducer(cur, { type: "scalar", field: "spaceLabel", value: "Up to date" });
+    const freshFull = buildFullDoc(cur, Date.now());
+    await pushAssessment({ id: a.id, rev: freshFull.rev as number, doc: freshFull }, { id: "u1", roles: ["Estimator"] });
+    ok((await getAssessment(a.id))!.spaceLabel === "Up to date", "editor db: an offline doc from an up-to-date base applies its edit");
     // clearSyncRejects: a pushed bad answer is recorded, then cleared with its rev returned
     const badFull = { ...full, answers: { ...(full.answers as Record<string, unknown>), "core.space_type": { v: "spaceship", state: "answered", at: Date.now() + 2, by: "u1" } }, rev: stored.rev + 1 };
     await pushAssessment({ id: a.id, rev: badFull.rev, doc: badFull }, { id: "u1", roles: ["Estimator"] });

@@ -21,6 +21,7 @@ import {
   parseFtinInput,
   parseNumberInput,
   showCounter,
+  stampNow,
   textAnswer,
   textCap,
   toggleMany,
@@ -295,7 +296,7 @@ export default function Question({ q, def, extras, answer, onAnswer, me, disable
 
   /** v → an answered entry; null → the Clear marker. Returns the answer it sent (controls note its `at`). */
   const commit = (v: unknown | null): Answer => {
-    const at = Date.now();
+    const at = stampNow();
     const a = v === null ? clearMarker(me, at) : answeredWith(v, me, at);
     onAnswer(a);
     return a;

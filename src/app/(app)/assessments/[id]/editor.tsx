@@ -22,6 +22,7 @@ import {
   profileOnFile,
   reenterAnswer,
   refusalParts,
+  placePrompts,
   resolvedPromptIds,
   scopeSummaries,
   setScopeOn,
@@ -67,7 +68,7 @@ const CSS = `
   .as-control { margin-top: 8px; }
   .as-more { background: none; border: 1px solid transparent; border-radius: 6px; color: #8c919c; font-size: 16px; line-height: 1; padding: 2px 7px; cursor: pointer; }
   .as-more:hover { border-color: #e4e7ec; color: #3a3f4a; }
-  .as-menu { position: absolute; right: 0; top: 26px; z-index: 20; min-width: 140px; }
+  .as-q-head .as-menu { position: absolute; left: auto; right: 0; top: 26px; z-index: 20; min-width: 140px; max-width: calc(100vw - 32px); }
   .as-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid #d6d9e0; border-radius: 9px; overflow: hidden; }
   .as-seg button { font: inherit; font-size: 13px; padding: 8px 14px; background: #fff; border: 0; border-right: 1px solid #e4e7ec; color: #3a3f4a; cursor: pointer; min-height: 38px; }
   .as-seg button:last-child { border-right: 0; }
@@ -139,6 +140,7 @@ export default function AssessmentEditor(props: EditorProps) {
     }),
     [def, doc.visitType, doc.scopes, doc.answers, doc.photos, doc.dismissedPrompts, profileVals, resolved, now],
   );
+  const placedPrompts = useMemo(() => placePrompts(def, res), [def, res]);
   const summaries = useMemo(() => scopeSummaries(def, doc.scopes, res), [def, doc.scopes, res]);
   const [picked, setPicked] = useState<ScopeCode>("S0");
   const active: ScopeCode = summaries.some((s) => s.code === picked) ? picked : "S0";
@@ -277,10 +279,10 @@ export default function AssessmentEditor(props: EditorProps) {
     if (a) { onAnswer(r.key, a); goTo(r.key); }
     void clearRejects([r.key]);
   };
-  const onUseMine = (r: SyncRejectVM) => {
+  const onUseMine = async (r: SyncRejectVM) => {
     const f = r.key.slice(6) as EditorField;
+    await clearRejects([r.key]); // the clear's reply carries the rev; set the field after it so the save builds on it
     setField(f, r.payload);
-    void clearRejects([r.key]);
   };
 
   /* ---------- complete / reopen ---------- */
@@ -435,8 +437,7 @@ export default function AssessmentEditor(props: EditorProps) {
           ))}
           {modules.length === 0 && <div className="pk-card as-module" style={{ color: "#8c919c", fontSize: 13 }}>Nothing to ask in this scope yet.</div>}
           {modules.map((m) => {
-            const keys = new Set(m.questions.map((q) => q.key));
-            const prompts = res.prompts.filter((p) => p.questionKeys.some((k) => keys.has(k)));
+            const prompts = placedPrompts.get(m.id) ?? [];
             const missing = res.missingPhotos.filter((x) => x.moduleId === m.id);
             const modulePhotos = doc.photos.filter((p) => p.moduleId === m.id && !p.questionKey);
             return (

@@ -25,8 +25,9 @@ export async function createAssessmentAction(_prev: CreateState, fd: FormData): 
     const on = s.code === "S0" || fd.get(`scope_${s.code}`) === "on";
     const depths = s.depths ?? [];
     if (!depths.length) return { code: s.code as ScopeCode, on };
+    // Slice 1 allows the screen depth only: "full" (or anything else) is normalised, never stored.
     const d = str(fd, `depth_${s.code}`) as Depth;
-    return { code: s.code as ScopeCode, on, depth: depths.includes(d) ? d : depths[0] };
+    return { code: s.code as ScopeCode, on, depth: d === "screen" && depths.includes(d) ? d : "screen" };
   });
   let id: string;
   try {

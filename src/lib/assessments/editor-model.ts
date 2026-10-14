@@ -4,7 +4,7 @@
    contract) and how each answer control turns input into an Answer (the clear marker included). */
 import { ANSWER_CAPS, mergeAnswers, type Answer, type Answers } from "./answers";
 import type { AssessmentDef, Category, Cond, PickOption, QuestionDef, Rating, ScopeCode } from "./defs/types";
-import type { EvalResult, ScopeSel } from "./evaluate";
+import type { EvalResult, PendingPrompt, ScopeSel } from "./evaluate";
 import type { PhotoRef } from "./photos";
 
 /* ---------- the record as the editor holds it ---------- */
@@ -121,10 +121,18 @@ export function buildPatch(s: EditorState): SavePatch | null {
 }
 
 /** The WHOLE record the outbox queues when offline: the local copy at the next rev (latest adopted rev + 1), stamped
- *  now. syncRejects is server-written and never sent. */
+ *  now. syncRejects is server-written and never sent; of the editable scalars only the dirty ones are sent, so a push
+ *  can't overwrite a field another device changed. */
 export function buildFullDoc(s: EditorState, now: number): Record<string, unknown> {
   const d: Record<string, unknown> = { ...s.doc, rev: s.doc.rev + 1, updatedAt: now };
   delete d.syncRejects;
+  // Scalars: only the dirty ones travel (a missing field means "keep" on the server); a cleared one goes as "".
+  for (const f of EDITOR_FIELDS) {
+    if (!s.dirty.includes(f)) delete d[f];
+    else if (s.doc[f] === undefined) d[f] = "";
+  }
+  delete d.visitDate; // not editable here
+  delete d.photoSetOffered;
   return d;
 }
 
@@ -242,6 +250,9 @@ export function hasUnsaved(s: EditorState): boolean {
 /* ---------- answers from controls ---------- */
 
 export const REASON_MAX = 500;
+
+/** The wall clock for a stamp (kept out of components so render-purity lint stays clean). */
+export const stampNow = (): number => Date.now();
 
 export const answeredWith = (v: unknown, by: string, at: number): Answer => ({ v, state: "answered", at, by });
 /** The Clear marker: an explicit, newer answer with no value. The key is never deleted (merge never drops keys). */
@@ -443,6 +454,31 @@ function firstKey(c: Cond, keys: Map<string, ScopeCode>): string | undefined {
   if ("not" in c) return firstKey(c.not, keys);
   if ("key" in c) return keys.has(c.key) ? c.key : undefined;
   return undefined;
+}
+
+/** Where each rule prompt shows, once: module id → its prompts. A prompt goes under the first VISIBLE question it
+ *  references (display order); when none of its questions is visible, at the top of the first visible module of the
+ *  scope that holds its questions. A prompt that references no question of the definition is not placed. */
+export function placePrompts(def: AssessmentDef, res: Pick<EvalResult, "visible" | "visibleModules" | "prompts">): Map<string, PendingPrompt[]> {
+  const out = new Map<string, PendingPrompt[]>();
+  const put = (moduleId: string, p: PendingPrompt) => out.set(moduleId, [...(out.get(moduleId) ?? []), p]);
+  for (const p of res.prompts) {
+    const refs = new Set(p.questionKeys);
+    let target: string | undefined;
+    for (const sc of def.scopes) {
+      for (const m of sc.modules) {
+        const shown = res.visibleModules.has(m.id);
+        if (shown && m.questions.some((q) => refs.has(q.key) && res.visible.has(q.key))) { target = m.id; break; }
+      }
+      if (target) break;
+    }
+    if (!target) {
+      const sc = def.scopes.find((x) => x.modules.some((m) => m.questions.some((q) => refs.has(q.key))));
+      target = sc?.modules.find((m) => res.visibleModules.has(m.id))?.id;
+    }
+    if (target) put(target, p);
+  }
+  return out;
 }
 
 export interface ScopeSummary { code: ScopeCode; key: string; title: string; done: number; total: number; prompts: number; missingPhotos: number }
