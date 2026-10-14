@@ -1983,7 +1983,7 @@ export function useEstimatorState(props: EstimatorProps) {
    *  wins. Read ONCE per suggestion id after mount (hydration-safe), judged by
    *  whether the quote was saved AT MOUNT — a save giving it an id (and the
    *  refresh after it) never re-reads, so the panel can't collapse mid-session.
-   *  The first read writes the default back. */
+   *  Only Hide / Show writes a value (toggleSuggestOpen). */
   const [suggestOpen, setSuggestOpen] = useState(() => suggestPanelOpen(null, !!initial.loadedId));
   const suggestSavedAtMount = useRef(!!initial.loadedId);
   const suggestReadFor = useRef<string | null>(null);
@@ -1992,10 +1992,7 @@ export function useEstimatorState(props: EstimatorProps) {
     if (!suggestionKeyId || suggestReadFor.current === suggestionKeyId) return;
     suggestReadFor.current = suggestionKeyId;
     try {
-      const key = suggestPanelKey(suggestionKeyId);
-      const first = suggestPanelFirstRead(window.localStorage.getItem(key), suggestSavedAtMount.current);
-      setSuggestOpen(first.open);
-      if (first.store) window.localStorage.setItem(key, first.store);
+      setSuggestOpen(suggestPanelFirstRead(window.localStorage.getItem(suggestPanelKey(suggestionKeyId)), suggestSavedAtMount.current));
     } catch {
       /* storage unavailable — keep the default */
     }

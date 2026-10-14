@@ -46,7 +46,7 @@ import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
 import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
-import { suggestionViewOf, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
+import { suggestionViewOf, unlinkedRetryAllowed, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { EstimateSuggestion } from "@/lib/assist/features/suggestion";
 import type {
   AiSource,
@@ -282,20 +282,23 @@ async function initialFrom(
  * keyed by the suggestion's OWN sku (getManyBySku follows renames). Fail-soft:
  * a blob or catalog read error just means no panel.
  */
-async function loadSuggestion(suggestionId: string, quoteId: string | null): Promise<{ record: EstimateSuggestion | null; view: EstimateSuggestionView | null; parts: SuggestionParts }> {
+async function loadSuggestion(
+  suggestionId: string,
+  quote: { id: string; createdAt?: number | null; customerId?: string | null } | null
+): Promise<{ record: EstimateSuggestion | null; view: EstimateSuggestionView | null; parts: SuggestionParts }> {
   try {
     let record: EstimateSuggestion | null = null;
     let linked = false;
-    if (quoteId) {
-      record = await suggestionForQuote(quoteId);
+    if (quote) {
+      record = await suggestionForQuote(quote.id);
       linked = !!record;
       // The first save's link didn't land but the URL still names the
       // suggestion (stepSearch keeps ?suggestion= after the first save): show
       // it unlinked, so the next save retries the link — never a write here.
-      // Only a suggestion with no first quote yet (or this one) qualifies.
+      // unlinkedRetryAllowed keeps a crafted URL off older / other-customer quotes.
       if (!record && suggestionId) {
         const s = await getSuggestion(suggestionId);
-        if (s && (!s.quoteId || s.quoteId === quoteId)) record = s;
+        if (s && unlinkedRetryAllowed(s, quote)) record = s;
       }
     } else if (suggestionId) {
       record = await getSuggestion(suggestionId);
@@ -388,7 +391,7 @@ export default async function EstimatorPage({
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
   // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
   // saved quote's linked one (else, unlinked, the one its URL still names).
-  const suggestion = await loadSuggestion(readHandoff(sp).suggestionId, q ? q.id : null);
+  const suggestion = await loadSuggestion(readHandoff(sp).suggestionId, q);
 
   const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([

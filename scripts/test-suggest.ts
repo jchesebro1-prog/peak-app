@@ -558,15 +558,23 @@ export async function suggestPanelChecks(ok: Ok): Promise<void> {
       P.suggestPanelKey("ES-abc123") === "quartzite.estimator.suggestOpen:ES-abc123",
     "suggest panel: open on a new estimate, collapsed on a saved quote; a remembered choice (per suggestion) wins"
   );
-  const fr = (st: string | null, saved: boolean) => JSON.stringify(P.suggestPanelFirstRead(st, saved));
   ok(
-    fr(null, false) === '{"open":true,"store":"1"}' && fr(null, true) === '{"open":false,"store":"0"}' && fr("0", false) === '{"open":false,"store":null}' && fr("1", true) === '{"open":true,"store":null}' && fr("junk", true) === '{"open":false,"store":"0"}',
-    "suggest panel: the first read uses the saved-AT-MOUNT state and writes the default back when nothing is remembered"
+    P.suggestPanelFirstRead(null, false) === true && P.suggestPanelFirstRead(null, true) === false && P.suggestPanelFirstRead("0", false) === false && P.suggestPanelFirstRead("1", true) === true && P.suggestPanelFirstRead("junk", true) === false,
+    "suggest panel: the first read is suggestPanelOpen at the saved-AT-MOUNT state — nothing stored means open on a new estimate, hidden on a saved quote"
   );
-  // A new estimate opened from a suggestion, collapsed by nobody: its first read stores "1", so the
-  // refresh after a save (now a saved quote) reads "1" back — the panel stays open.
-  const stored = P.suggestPanelFirstRead(null, false).store;
-  ok(P.suggestPanelFirstRead(stored, true).open === true && P.suggestPanelOpen(stored, true) === true, "suggest panel: a save that gives the estimate its id can't collapse an open panel (the default was remembered on first read)");
+  // Nothing is written on first sight: the creator reopening the saved quote later (nothing stored) gets it hidden.
+  ok(P.suggestPanelFirstRead(null, true) === false, "suggest panel: a quote created from a suggestion and reopened later starts hidden (no write-back on first read)");
+  const sAt = 1_000;
+  ok(
+    P.unlinkedRetryAllowed({ quoteId: null, createdAt: sAt, customerId: "c1" }, { id: "Q-1", createdAt: sAt + 5, customerId: "c1" }) &&
+      P.unlinkedRetryAllowed({ quoteId: "Q-1", createdAt: sAt, customerId: "c1" }, { id: "Q-1", createdAt: 0, customerId: "other" }) &&
+      P.unlinkedRetryAllowed({ quoteId: null, createdAt: sAt, customerId: null }, { id: "Q-1", createdAt: sAt, customerId: "anyone" }) &&
+      !P.unlinkedRetryAllowed({ quoteId: "Q-9", createdAt: sAt, customerId: "c1" }, { id: "Q-1", createdAt: sAt + 5, customerId: "c1" }) &&
+      !P.unlinkedRetryAllowed({ quoteId: null, createdAt: sAt, customerId: "c1" }, { id: "Q-1", createdAt: sAt - 1, customerId: "c1" }) &&
+      !P.unlinkedRetryAllowed({ quoteId: null, createdAt: sAt, customerId: "c1" }, { id: "Q-1", createdAt: sAt + 5, customerId: "c2" }) &&
+      !P.unlinkedRetryAllowed({ quoteId: null, createdAt: sAt, customerId: null }, { id: "Q-1" }),
+    "suggest panel: a saved quote shows an unlinked ?suggestion= only for the retry case — unclaimed (or its own), created after the suggestion, same customer"
+  );
   ok(
     P.sendSuggestionId({ linked: false }, false) && !P.sendSuggestionId({ linked: false }, true) && !P.sendSuggestionId({ linked: true }, false) && !P.sendSuggestionId(null, false),
     "suggest panel: the suggestion id rides a save only until the quote is linked (first save, or a retry when that link didn't land)"
@@ -587,8 +595,8 @@ export async function suggestPanelChecks(ok: Ok): Promise<void> {
 /** Task 3 — wiring pins: the page loads the suggestion, the Build step shows the panel, the save carries leadId/suggestionId. */
 export async function suggestPanelPins(ok: Ok): Promise<void> {
   const page = readFileSync("src/app/(app)/estimator/page.tsx", "utf8");
-  ok(/const suggestion = await loadSuggestion\(readHandoff\(sp\)\.suggestionId, q \? q\.id : null\);/.test(page) && /record = await getSuggestion\(suggestionId\);/.test(page) && /record = await suggestionForQuote\(quoteId\);\s*linked = !!record;/.test(page), "suggest estimator page: loads ?suggestion= on a new estimate, else the saved quote's linked suggestion");
-  ok(/if \(!record && suggestionId\) \{\s*const s = await getSuggestion\(suggestionId\);\s*if \(s && \(!s\.quoteId \|\| s\.quoteId === quoteId\)\) record = s;/.test(page) && /view: suggestionViewOf\(record, linked\)/.test(page) && !/linkSavedQuoteToSuggestion|linkSuggestionToQuote/.test(page), "suggest estimator page: a saved quote whose link didn't land shows the URL's suggestion UNLINKED (no write on a page load) so the next save retries");
+  ok(/const suggestion = await loadSuggestion\(readHandoff\(sp\)\.suggestionId, q\);/.test(page) && /record = await getSuggestion\(suggestionId\);/.test(page) && /record = await suggestionForQuote\(quote\.id\);\s*linked = !!record;/.test(page), "suggest estimator page: loads ?suggestion= on a new estimate, else the saved quote's linked suggestion");
+  ok(/if \(!record && suggestionId\) \{\s*const s = await getSuggestion\(suggestionId\);\s*if \(s && unlinkedRetryAllowed\(s, quote\)\) record = s;/.test(page) && /view: suggestionViewOf\(record, linked\)/.test(page) && !/linkSavedQuoteToSuggestion|linkSuggestionToQuote/.test(page), "suggest estimator page: a saved quote whose link didn't land shows the URL's suggestion UNLINKED (no write on a page load) so the next save retries");
   ok(/await getManyBySku\(skus\)/.test(page) && /parts\[sku\] = \{ sku: p\.sku/.test(page) && /suggestion=\{suggestion\.view\}/.test(page) && /suggestionParts=\{suggestion\.parts\}/.test(page), "suggest estimator page: live parts via getManyBySku, keyed by the suggestion's own sku, passed as props");
   ok(/const sugg = !q && handoff\?\.suggestionId \? suggestion\.record : null;/.test(page) && /pickVenueId\(cust, seedVenue\)/.test(page) && /const suggSameCustomer = !!sugg && \(sugg\.customerId \|\| undefined\) === seedCustomer;/.test(page) && /handoff\?\.venueId \|\| \(suggSameCustomer \?/.test(page) && /handoff\?\.contactName \|\| \(suggSameCustomer \?/.test(page) && /if \(!q\) initial\.leadId = handoff\?\.leadId \|\| \(suggSameCustomer \? sugg\?\.leadId : null\) \|\| null;/.test(page) && /leadId: q\.leadId \|\| null,/.test(page), "suggest estimator page: the suggestion's header fills only what the URL left blank; its venue, contact and lead only for the customer being seeded (venue through pickVenueId); a saved quote shows its own lead");
   const build = readFileSync("src/app/(app)/estimator/steps/build-step.tsx", "utf8");
@@ -596,7 +604,7 @@ export async function suggestPanelPins(ok: Ok): Promise<void> {
   const hook = readFileSync("src/app/(app)/estimator/use-estimator-state.ts", "utf8");
   ok(/const sec = systemFromSuggestion\(sys, suggestionLookup, \{\s*nextId,\s*tierMargin,\s*price: catalogAddPrice,/.test(hook) && /if \(part\) addPart\(targetSecId, /.test(hook) && /else pushItems\(targetSecId, \[itemFromSuggestionLine\(line, suggestionLookup, \{ nextId, tierMargin, price: catalogAddPrice \}\)\]\);/.test(hook), "suggest Estimator hook: + Add system / + line price only through catalogAddPrice at the tier (addPart for a live part)");
   ok(/\.\.\.\(!loadedId && initial\.leadId \? \{ leadId: initial\.leadId \} : \{\}\),/.test(hook) && /\.\.\.\(suggestion && sendSuggestionId\(suggestion, suggestionLinkedRef\.current\) \? \{ suggestionId: suggestion\.id \} : \{\}\),/.test(hook) && /if \(res\.suggestionLinked\) suggestionLinkedRef\.current = true;/.test(hook), "suggest Estimator hook: leadId rides the create save only; suggestionId only until a save reports the quote linked");
-  ok(/const suggestSavedAtMount = useRef\(!!initial\.loadedId\);/.test(hook) && /if \(!suggestionKeyId \|\| suggestReadFor\.current === suggestionKeyId\) return;/.test(hook) && /suggestPanelFirstRead\(window\.localStorage\.getItem\(key\), suggestSavedAtMount\.current\)/.test(hook) && /if \(first\.store\) window\.localStorage\.setItem\(key, first\.store\);/.test(hook) && /\}, \[suggestionKeyId\]\);/.test(hook) && !/\[suggestion, initial\.loadedId\]/.test(hook), "suggest Estimator hook: the panel's open state is read once per suggestion id, judged at mount — a save's refresh never re-collapses it");
+  ok(/const suggestSavedAtMount = useRef\(!!initial\.loadedId\);/.test(hook) && /if \(!suggestionKeyId \|\| suggestReadFor\.current === suggestionKeyId\) return;/.test(hook) && /setSuggestOpen\(suggestPanelFirstRead\(window\.localStorage\.getItem\(suggestPanelKey\(suggestionKeyId\)\), suggestSavedAtMount\.current\)\);/.test(hook) && (hook.match(/window\.localStorage\.setItem\(suggestPanelKey\(/g) || []).length === 1 && /window\.localStorage\.setItem\(suggestPanelKey\(suggestion\.id\), next \? "1" : "0"\);/.test(hook) && /\}, \[suggestionKeyId\]\);/.test(hook) && !/\[suggestion, initial\.loadedId\]/.test(hook), "suggest Estimator hook: the panel's open state is read once per suggestion id, judged at mount — a save's refresh never re-collapses it, and only Hide / Show stores a value");
   ok(/defaultSuggestionTarget\(systemKey, suggestionTargets, sections\.map\(\(s\) => s\.id\), activeId\)/.test(hook), "suggest Estimator hook: the line target falls back to the active system");
   const panel = readFileSync("src/app/(app)/estimator/suggested-bom-panel.tsx", "utf8");
   ok(/<a href=\{view\.sourceHref\} target="_blank" rel="noopener"/.test(panel), "suggest panel: the source link opens in a new tab (noopener), keeping unsaved estimate edits");

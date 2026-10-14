@@ -145,13 +145,29 @@ export function suggestPanelOpen(stored: string | null | undefined, savedQuote: 
  * The ONE read of a suggestion's remembered open state (per suggestion id, on
  * first sight): `savedAtMount` is whether the estimate was a saved quote when
  * the Estimator mounted — never re-judged after a save gives it an id, so a
- * save can't collapse the panel mid-session. With nothing remembered yet, the
- * default is written back (`store`) so later loads keep it.
+ * save can't collapse the panel mid-session. Nothing is written here: a value
+ * is stored only when the user presses Hide / Show, so a quote reopened later
+ * still starts hidden.
  */
-export function suggestPanelFirstRead(stored: string | null | undefined, savedAtMount: boolean): { open: boolean; store: "1" | "0" | null } {
-  if (stored === "1" || stored === "0") return { open: stored === "1", store: null };
-  const open = suggestPanelOpen(null, savedAtMount);
-  return { open, store: open ? "1" : "0" };
+export function suggestPanelFirstRead(stored: string | null | undefined, savedAtMount: boolean): boolean {
+  return suggestPanelOpen(stored, savedAtMount);
+}
+
+/**
+ * May a saved quote with NO linked suggestion show the URL's `?suggestion=`
+ * unlinked (so its next save retries a first-save link that didn't land)?
+ * Only when the suggestion is unclaimed (or already this quote's), the quote
+ * was created no earlier than the suggestion, and — when the suggestion names
+ * a customer — the quote is for that customer. A crafted `?id=…&suggestion=…`
+ * can't attach a suggestion to an older or another customer's quote.
+ */
+export function unlinkedRetryAllowed(
+  s: Pick<EstimateSuggestion, "quoteId" | "createdAt" | "customerId">,
+  q: { id: string; createdAt?: number | null; customerId?: string | null }
+): boolean {
+  if (s.quoteId) return s.quoteId === q.id;
+  if (typeof q.createdAt !== "number" || q.createdAt < s.createdAt) return false;
+  return !s.customerId || s.customerId === (q.customerId || null);
 }
 
 /** Send the suggestion id with this save? Only until the quote is linked to
