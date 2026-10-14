@@ -32,7 +32,12 @@ export interface QuestionDef {
   when?: Cond;
 }
 
-export interface PhotoReq { id: string; label: string }
+export interface PhotoReq {
+  id: string;
+  label: string;
+  /** offered as a slot but never a Mark-complete gap — for photos the brief makes conditional ("every gap", "if posted", "any broken seats") and the named photo set, which is offered once per space */
+  optional?: boolean;
+}
 
 export interface ModuleDef { id: string; title: string; when?: Cond; questions: QuestionDef[]; photos?: PhotoReq[] }
 

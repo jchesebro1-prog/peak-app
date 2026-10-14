@@ -99,6 +99,25 @@ export async function assessmentChecks(ok: Ok) {
   const fall = qs.get("rigging.fall_hazard");
   ok(fall?.moduleId === "rigging.access_fall" && fall.q.flag?.rating === "immediate" && fall.q.flag.requirePhoto === true && fall.q.flag.category === "RIG", "assess defs: fall hazard flag → RIG Immediate + photo, inside the access module");
 
+  // R1 (no overhead rigging) must not hide the pit lift or the access / fall questions.
+  const r1 = def.rules.find((r) => r.id === "R1");
+  const r1Skip = r1?.skip || [];
+  for (const t of ["rigging.pit_lift", "rigging.pit_lift_detail", "rigging.access", "rigging.access_fall"])
+    ok(!r1Skip.includes(t), `assess defs: R1 does not skip ${t}`);
+  const pitMod = qs.get("rigging.pit_lift")?.moduleId;
+  const accMod = qs.get("rigging.access")?.moduleId;
+  const skipped = new Set(def.rules.flatMap((r) => r.skip || []));
+  ok(!!pitMod && !ms.get(pitMod)?.m.when && !skipped.has(pitMod) && !skipped.has("rigging.pit_lift"), "assess defs: rigging.pit_lift lives in a module with no `when`, targeted by no rule's skip");
+  ok(!!accMod && !ms.get(accMod)?.m.when && !skipped.has(accMod) && !skipped.has("rigging.access"), "assess defs: rigging.access lives in a module with no `when`, targeted by no rule's skip");
+  // Conditionally-worded photos never gate Mark complete.
+  for (const { m } of ms.values()) for (const p of m.photos || [])
+    if (/^(every|any)\b/i.test(p.label) || /if (posted|visible)/i.test(p.label)) ok(p.optional === true, `assess defs: photo ${p.id} ("${p.label}") is optional`);
+  ok(["stage", "house", "foh", "overhead"].every((s) => ms.get("core.photo_set")?.m.photos?.find((p) => p.id === `core.photo_set:${s}`)?.optional === true), "assess defs: the named photo set is all optional");
+  for (const k of ["house.exits_clear", "house.traps_guarded"]) {
+    const f = qs.get(k)?.q.flag;
+    ok(f?.category === "GEN" && f.rating === "immediate", `assess defs: ${k} flag → GEN Immediate`);
+  }
+
   // Coverage map
   const rows = coverage as { line: string; keys: string[] }[];
   for (const row of rows)

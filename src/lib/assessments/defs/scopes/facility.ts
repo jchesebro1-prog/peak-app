@@ -46,12 +46,12 @@ export const FACILITY_SCOPE: ScopeDef = {
         num("house.companion_seats", "Companion seats"),
         one("house.exit_hardware", "Exit doors and panic hardware working", "working"),
         yn("house.exits_clear", "Exits clear?", {
-          flag: { values: ["no"], category: "STR", rating: "immediate", text: "Exit blocked", requirePhoto: true },
+          flag: { values: ["no"], category: "GEN", rating: "immediate", text: "Exit blocked", requirePhoto: true },
         }),
       ],
       photos: [
         { id: "house.seating:exits", label: "Exits" },
-        { id: "house.seating:broken_seats", label: "Any broken seats" },
+        { id: "house.seating:broken_seats", label: "Any broken seats", optional: true },
       ],
     },
     {
@@ -102,7 +102,7 @@ export const FACILITY_SCOPE: ScopeDef = {
       when: RULE_ONLY,
       questions: [
         yn("house.traps_guarded", "Guarded?", {
-          flag: { values: ["no"], category: "STR", rating: "immediate", text: "Trap door or orchestra pit unguarded", requirePhoto: true },
+          flag: { values: ["no"], category: "GEN", rating: "immediate", text: "Trap door or orchestra pit unguarded", requirePhoto: true },
         }),
         one("house.traps_condition", "Condition", "condition"),
         text("house.traps_access", "Access control"),

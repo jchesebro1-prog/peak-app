@@ -10,10 +10,13 @@ import { is } from "./q";
 /** There is an overhead rigging system to screen (anything but "none"). */
 const HAS_RIGGING: Cond = is("rigging.overhead", "dead_hung", "counterweight", "motorized", "mixed");
 
-/** Every rigging module except `rigging.system` (R1: "skip every other rigging question"). */
+/** Every rigging module except `rigging.system` (R1: "skip every other rigging question"), less the access/fall module
+    and the pit lift detail: a catwalk fall hazard is still a fall hazard and a pit lift isn't overhead rigging, so
+    `rigging.access`, `rigging.pit_lift`, `rigging.access_fall` and `rigging.pit_lift_detail` stay reachable (the first
+    two live in `rigging.system`, which R1 never skips). */
 const OTHER_RIGGING = [
   "rigging.screen", "rigging.counterweight", "rigging.wire_rope", "rigging.motorized", "rigging.rope_set_detail",
-  "rigging.dead_hung", "rigging.access_fall", "rigging.training", "rigging.pit_lift_detail", "rigging.dimensions",
+  "rigging.dead_hung", "rigging.training", "rigging.dimensions",
   "rigging.lineset_schedule", "rigging.hardware_inventory",
   "core.last_inspection_date", "core.last_inspection_firm", "core.last_inspection_level", "core.last_inspection_report",
 ];

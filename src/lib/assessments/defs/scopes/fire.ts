@@ -38,7 +38,7 @@ export const FIRE_SCOPE: ScopeDef = {
       ],
       photos: [
         { id: "fire.curtain:release_station", label: "Release station" },
-        { id: "fire.curtain:curtain_face", label: "Curtain face, if visible" },
+        { id: "fire.curtain:curtain_face", label: "Curtain face, if visible", optional: true },
         { id: "fire.curtain:test_log", label: "Test log" },
       ],
     },

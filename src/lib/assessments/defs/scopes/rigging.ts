@@ -17,6 +17,8 @@ export const RIGGING_SCOPE: ScopeDef = {
       questions: [
         one("rigging.overhead", "Overhead rigging system type", "overhead", { profile: true, required: true }),
         yn("rigging.hanging_positions", "Any hanging positions for fixtures?", { when: is("rigging.overhead", "none") }),
+        many("rigging.access", "Grid, loading bridge or catwalk present", "rig_access"),
+        yn("rigging.pit_lift", "Orchestra pit lift or filler present?"),
       ],
     },
     {
@@ -26,11 +28,9 @@ export const RIGGING_SCOPE: ScopeDef = {
       questions: [
         num("rigging.total_sets", "Total number of rigged sets", { profile: true }),
         yn("rigging.rope_sets", "Rope (sandbag) sets present?"),
-        many("rigging.access", "Grid, loading bridge or catwalk present", "rig_access"),
         num("rigging.install_year", "Year the rigging was installed, if known", { profile: true }),
         many("rigging.operators", "Who operates the system", "operators"),
         text("rigging.training_summary", "What training the operators have"),
-        yn("rigging.pit_lift", "Orchestra pit lift or filler present?"),
         many("rigging.red_flags", "Visible red flags", "red_flags", {
           flag: {
             values: ["unrated_hardware", "improvised", "bent_battens", "unmoused_shackles", "frayed_cable", "loose_collars", "unlabeled_weights"],
@@ -96,7 +96,7 @@ export const RIGGING_SCOPE: ScopeDef = {
       photos: [
         { id: "rigging.motorized:nameplates", label: "Nameplates" },
         { id: "rigging.motorized:control_station", label: "Control station" },
-        { id: "rigging.motorized:hoist", label: "Any hoist" },
+        { id: "rigging.motorized:hoist", label: "Any hoist", optional: true },
       ],
     },
     {
@@ -144,7 +144,7 @@ export const RIGGING_SCOPE: ScopeDef = {
         }),
       ],
       photos: [
-        { id: "rigging.access_fall:gaps", label: "Every gap or missing rail" },
+        { id: "rigging.access_fall:gaps", label: "Every gap or missing rail", optional: true },
         { id: "rigging.access_fall:access_point", label: "The access point" },
       ],
     },
@@ -200,7 +200,7 @@ export const RIGGING_SCOPE: ScopeDef = {
           ],
         },
       ],
-      photos: [{ id: "rigging.lineset_schedule:schedule", label: "Photo of the schedule, if posted" }],
+      photos: [{ id: "rigging.lineset_schedule:schedule", label: "Photo of the schedule, if posted", optional: true }],
     },
     {
       id: "rigging.hardware_inventory",
@@ -216,7 +216,7 @@ export const RIGGING_SCOPE: ScopeDef = {
         count("rigging.hw_end_caps", "End caps"),
         count("rigging.hw_cable_cradles", "Cable cradles"),
       ],
-      photos: [{ id: "rigging.hardware_inventory:unrated", label: "Any unrated or improvised hardware" }],
+      photos: [{ id: "rigging.hardware_inventory:unrated", label: "Any unrated or improvised hardware", optional: true }],
     },
   ],
 };
