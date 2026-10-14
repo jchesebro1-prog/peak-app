@@ -854,7 +854,7 @@ export default async function LeadsPage({
             drawerMode === "detail" && leadRec ? (
               <>
                 <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />
-                <AssessmentsCard leadId={leadRec.id} compact />
+                <AssessmentsCard leadId={leadRec.id} customerId={leadRec.customerId ?? leadRec.convertedCustomerId ?? undefined} compact />
               </>
             ) : null
           }

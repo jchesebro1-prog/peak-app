@@ -123,14 +123,20 @@ export function confirmedLine(from: string, at: number): string {
   return ["confirmed" + (from ? ` on ${from}` : ""), chicagoDay(at)].filter(Boolean).join(" · ");
 }
 
-/** The register link for a card's counts chip: `?customer=` or `?venue=` plus an optional rating. */
+/** The register link for a card's counts chip: `?customer=` or `?venue=` plus an optional rating. A rating chip counts
+ *  open findings only, so it also asks for `open=1`; the plain Register link shows everything. */
 export function registerHref(scope: { customerId?: string; siteId?: string }, rating?: Rating): string {
   const u = new URLSearchParams();
   if (scope.customerId) u.set("customer", scope.customerId);
   if (scope.siteId) u.set("venue", scope.siteId);
-  if (rating) u.set("rating", rating);
+  if (rating) { u.set("rating", rating); u.set("open", "1"); }
   const s = u.toString();
   return s ? `/assessments/findings?${s}` : "/assessments/findings";
+}
+
+/** The lead a new assessment attaches to: an explicit `?lead=` wins, else the site visit's own lead. */
+export function carryLeadId(param: string, visit: { leadId?: string | null } | null | undefined): string {
+  return param || visit?.leadId || "";
 }
 
 /** Where "Start assessment" goes from each context. */

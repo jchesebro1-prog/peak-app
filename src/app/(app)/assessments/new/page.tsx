@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requirePerm } from "@/lib/session";
 import { ASSESSMENT_DEF, VISIT_TYPES } from "@/lib/assessments/defs";
+import { carryLeadId } from "@/lib/assessments/integration";
 import { allCompanies, getCompany } from "@/lib/identity/companies";
 import { docLocId, getSite, sitesForCompany } from "@/lib/identity/sites";
 import { getVisit } from "@/lib/stores/site-visits";
@@ -31,7 +32,7 @@ export default async function NewAssessmentPage({ searchParams }: { searchParams
   let companyId = one(sp.company);
   let siteId = one(sp.site);
   const visitId = one(sp.visit);
-  const leadId = one(sp.lead);
+  let leadId = one(sp.lead);
   const projectId = one(sp.project);
   const q = one(sp.q);
 
@@ -40,6 +41,7 @@ export default async function NewAssessmentPage({ searchParams }: { searchParams
     const v = await getVisit(visitId);
     if (!v) visitNote = `Site visit ${visitId} wasn't found.`;
     else {
+      leadId = carryLeadId(leadId, v); // an assessment started from a lead's site visit shows on that lead
       // A doc location id is the venue's legacyLocId ('loc1', shared across companies) or its own sites.id, so it
       // only means something inside the visit's customer.
       if (v.customerId) {

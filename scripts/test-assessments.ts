@@ -34,7 +34,7 @@ import {
   findingSheetProblems, findingSaveDoc, parseMoney, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
 } from "../src/lib/assessments/editor-model";
 import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch, liveMergeTarget } from "../src/lib/assessments/findings-model";
-import { normalizeFinding, saveFinding, getFinding, getFindings, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
+import { normalizeFinding, saveFinding, getFinding, getFindings, listFindings, countOpenImmediateFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues, writeProfileFacts } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, slugValue, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
 import { buildQuote, create as createQuote, get as getQuote, getMany as getQuotes, update as updateQuote } from "../src/lib/stores/quotes";
@@ -58,7 +58,7 @@ import { VISIT_TYPES } from "../src/lib/assessments/defs";
 import { NAV, activeKeyFor, parentGroupOf } from "../src/components/nav/nav-data";
 import {
   assessmentCardRows, assessmentSearchResult, chicagoDay, confirmedLine, findingSearchResult, immediateOpenCount, isOpenFinding, listTitle,
-  matchesAssessment, matchesFinding, openRatingCounts, pickListAdminRows, profileFactRows, registerHref, startHref,
+  carryLeadId, matchesAssessment, matchesFinding, openRatingCounts, pickListAdminRows, profileFactRows, registerHref, startHref,
 } from "../src/lib/assessments/integration";
 import { quoteCoversVenue, quoteVenueIds } from "../src/lib/assessments/findings-quote";
 import { searchDocs, setBlob } from "../src/db/doc-store";
@@ -1981,8 +1981,23 @@ function task11Checks(ok: Ok) {
   ok(pf.length === 1 && pf[0].key === p1.q.key && pf[0].label === p1.q.label && pf[0].from === "AS-1001", "cards: profile facts list only profile questions with a non-empty value, labelled");
   ok(profileFactRows(undefined, ASSESSMENT_DEF).length === 0 && profileFactRows({}, ASSESSMENT_DEF).length === 0, "cards: no profile → no rows (the card hides)");
   ok(confirmedLine("AS-1001", Date.UTC(2026, 9, 13, 18)) === "confirmed on AS-1001 · Oct 13, 2026" && chicagoDay(0) === "" && confirmedLine("", Date.UTC(2026, 9, 13, 18)) === "confirmed · Oct 13, 2026", "cards: \"confirmed on AS-xxxx · date\"");
-  ok(registerHref({ siteId: "st-1" }) === "/assessments/findings?venue=st-1" && registerHref({ customerId: "c 1" }, "immediate") === "/assessments/findings?customer=c+1&rating=immediate" && registerHref({}) === "/assessments/findings", "cards: count chips link the filtered register");
+  ok(registerHref({ siteId: "st-1" }) === "/assessments/findings?venue=st-1" && registerHref({ customerId: "c 1" }, "immediate") === "/assessments/findings?customer=c+1&rating=immediate&open=1" && registerHref({}) === "/assessments/findings", "cards: count chips link the filtered register");
   ok(startHref({ siteId: "st-1" }) === "/assessments/new?site=st-1" && startHref({ visitId: "SV-1", customerId: "c1", siteId: "st-1" }) === "/assessments/new?visit=SV-1" && startHref({ customerId: "c1" }) === "/assessments/new?company=c1" && startHref({ leadId: "L-1" }) === "/assessments/new?lead=L-1" && startHref({ projectId: "P-1" }) === "/assessments/new?project=P-1", "cards: Start assessment hrefs (visit wins; company / site / lead / project)");
+  ok(startHref({ customerId: "c1", leadId: "L-1" }) === "/assessments/new?company=c1&lead=L-1" && startHref({ customerId: "c1", projectId: "P-1" }) === "/assessments/new?company=c1&project=P-1", "fix 5: a lead / project Start link carries the customer too");
+  ok(carryLeadId("", { leadId: "L-9" }) === "L-9" && carryLeadId("L-1", { leadId: "L-9" }) === "L-1" && carryLeadId("", { leadId: null }) === "" && carryLeadId("", null) === "", "fix 5: a visit's lead rides onto the new assessment unless ?lead= says otherwise");
+  const src = (f: string) => readFileSync(join(ROOT, f), "utf8");
+  const leadsSrc = src("src/app/(app)/leads/page.tsx");
+  const projSrc = src("src/app/(app)/projects/[id]/page.tsx");
+  ok(/<AssessmentsCard leadId=\{leadRec\.id\} customerId=\{/.test(leadsSrc) && /<AssessmentsCard projectId=\{sel\.id\} customerId=\{/.test(projSrc), "fix 5: the lead and project cards are given the customer");
+  ok(/leadId = carryLeadId\(leadId, v\)/.test(src("src/app/(app)/assessments/new/page.tsx")), "fix 5: /assessments/new?visit= carries the visit's lead");
+  ok(isOpenFinding({ status: "triaged" }) && !/status !== "closed"/.test(src("src/components/assessments/assessment-cards.tsx")) && /isOpenFinding\(f\)/.test(src("src/components/assessments/assessment-cards.tsx")), "fix 4: the cards use the shared open rule");
+  // the open-only register filter
+  const of = parseRegisterFilters({ open: "1", rating: "immediate" });
+  const openList = [t9Finding({ key: "fd_s0000000000000011", printedId: "A-B-RIG-001", rating: "immediate", status: "open" }), t9Finding({ key: "fd_s0000000000000012", printedId: "A-B-RIG-002", rating: "immediate", status: "closed" })];
+  ok(of.open && !parseRegisterFilters({}).open && !parseRegisterFilters({ open: "0" }).open, "fix 3: ?open=1 parses; absent or other values are off");
+  ok(registerQuery(of) === "rating=immediate&open=1" && JSON.stringify(parseRegisterFilters(new URLSearchParams(registerQuery(of)))) === JSON.stringify(of) && registerQuery({ rating: "immediate" }) === "rating=immediate", "fix 3: open=1 round-trips through the query string and is omitted when off");
+  ok(registerList(openList, of).map((f) => f.printedId).join() === "A-B-RIG-001" && registerList(openList, parseRegisterFilters({ rating: "immediate" })).length === 2, "fix 3: Open only hides closed findings; without it they stay");
+  ok(/Open only/.test(src("src/app/(app)/assessments/findings/controls.tsx")) && /go\(\{ open: false \}\)/.test(src("src/app/(app)/assessments/findings/controls.tsx")), "fix 3: the filter bar shows a removable Open only chip");
 
   // pick-list admin
   const extras = { [Object.keys(ASSESSMENT_DEF.pickLists)[0]]: [{ value: "a_b", label: "A b" }, { value: "old", label: "Old", retired: true }] };
@@ -2006,9 +2021,10 @@ function task11Checks(ok: Ok) {
   const read = (f: string) => readFileSync(join(ROOT, f), "utf8");
   const repairActions = read("src/app/(app)/repairs/quote/actions.ts");
   const approve = repairActions.slice(repairActions.indexOf("export async function approveRepairQuote"));
-  ok(/persist\(formData, note\)/.test(approve) && /&approved=1" \+\s*\(note\.findingNote \? "&findingnote=" \+ encodeURIComponent\(note\.findingNote\)/.test(approve), "carry-over: approveRepairQuote passes a notice sink to persist and appends &findingnote= to its approved redirect");
+  ok(/&approved=1" \+\s*\(note\.creditNote \? "&credit=" \+ encodeURIComponent\(note\.creditNote\) : ""\)/.test(approve), "fix 1: approveRepairQuote also appends &credit= from note.creditNote (mirrors saveRepairQuote)");
+  ok(/persist\(formData, note\)/.test(approve) && /&approved=1"[\s\S]*\(note\.findingNote \? "&findingnote=" \+ encodeURIComponent\(note\.findingNote\)/.test(approve), "carry-over: approveRepairQuote passes a notice sink to persist and appends &findingnote= to its approved redirect");
   ok(/quoteCoversVenue\(q, docLocId\(site\)\)/.test(read("src/app/(app)/assessments/findings/actions.ts")), "carry-over: Link existing quote checks the quote's venues (repair.venues included)");
-  ok(/assessments: immediateOpenCount\(immediateFindings\)/.test(read("src/lib/nav-counts.ts")) && /listFindings\(\{ rating: \["immediate"\] \}\)/.test(read("src/lib/nav-counts.ts")), "nav badge: key assessments = immediate open findings from one listFindings read");
+  ok(/assessments: immediateFindingCount/.test(read("src/lib/nav-counts.ts")) && /countOpenImmediateFindings\(\)/.test(read("src/lib/nav-counts.ts")) && !/listFindings/.test(read("src/lib/nav-counts.ts")), "nav badge: key assessments = one countOpenImmediateFindings() SQL count, no findings read");
   const search = read("src/app/api/search/route.ts");
   ok(/searchDocs\("assessments", q, CANDIDATES\)/.test(search) && /searchDocs\("findings", q, CANDIDATES\)/.test(search) && /"Assessments"/.test(search) && /"Findings"/.test(search), "search route: assessments and findings join the ⌘K Promise.all and add their groups");
   const venuePage = read("src/app/(app)/venues/[id]/page.tsx");
@@ -2061,11 +2077,26 @@ async function task11DbChecks(ok: Ok) {
     await same({ customerId: co1 }, (x) => x.customerId === co1 && !x.voided, "customerId");
     await same({ assessmentId: a2.id }, (x) => x.assessmentId === a2.id && !x.voided, "assessmentId");
     await same({ customerId: co1, rating: ["needs"] }, (x) => x.customerId === co1 && x.rating === "needs" && !x.voided, "customerId + rating");
-    ok((await listFindings({ siteId: site1, includeVoided: true })).filter((f) => f.key.startsWith("fd_t11")).length === 3 && (await listFindings({ siteId: site1 })).filter((f) => f.key.startsWith("fd_t11")).length === 2, "t11 db: includeVoided brings the voided finding back")
+    ok((await listFindings({ siteId: site1, includeVoided: true })).filter((f) => f.key.startsWith("fd_t11")).length === 3 && (await listFindings({ siteId: site1 })).filter((f) => f.key.startsWith("fd_t11")).length === 2, "t11 db: includeVoided brings the voided finding back");
 
     // the badge: immediate, open, not voided
     const badge = await listFindings({ rating: ["immediate"] });
     ok(mine(badge).join() === [kk(1), kk(2), kk(4)].join() && immediateOpenCount(badge.filter((f) => f.key.startsWith("fd_t11"))) === 3, "t11 db: the badge read has the three live immediate findings (the voided one is out)");
+
+    // the badge count: one SQL count equals the JS rule over the whole register, closed and voided included
+    const mk6 = await mk(6, a1, { rating: "immediate", ...imm });
+    const mk7 = await mk(7, a2, { rating: "immediate", ...imm });
+    ok(mk6.ok && mk7.ok, "t11 db: badge fixtures — an immediate finding to close and one with a JSON-null voided");
+    await db.execute(sql`update ${DOC_TABLES.findings} set doc = jsonb_set(doc, '{status}', '"closed"') where id = ${kk(6)}`);
+    await db.execute(sql`update ${DOC_TABLES.findings} set doc = jsonb_set(doc, '{voided}', 'null'::jsonb) where id = ${kk(7)}`);
+    const sqlCount = await countOpenImmediateFindings();
+    const jsCount = immediateOpenCount(await listFindings({ rating: ["immediate"], includeVoided: true }));
+    ok(sqlCount === jsCount, `t11 db: countOpenImmediateFindings (${sqlCount}) equals immediateOpenCount over the register (${jsCount})`);
+    ok(sqlCount >= 4, "t11 db: the count includes the three live fixtures and the JSON-null voided one; the closed and voided ones are out");
+    const before = sqlCount;
+    await db.execute(sql`update ${DOC_TABLES.findings} set doc = jsonb_set(doc, '{status}', '"closed"') where id = ${kk(7)}`);
+    ok((await countOpenImmediateFindings()) === before - 1, "t11 db: closing a finding drops the count by one");
+    await db.delete(DOC_TABLES.findings).where(inArray(DOC_TABLES.findings.id, [kk(6), kk(7)]));
 
     // listAssessments narrowing
     const allA = await listAssessments();
@@ -2081,7 +2112,7 @@ async function task11DbChecks(ok: Ok) {
 
     // ⌘K: the candidate scan finds an assessment by id and a finding by printed id, and the mapping opens them
     const f1 = (await getFinding(kk(1)))!;
-    const hitsF = (await searchDocs("findings", f1.printedId!.toLowerCase(), 100)).map((d) => normalizeFindingForTest(d));
+    const hitsF = (await searchDocs("findings", f1.printedId!.toLowerCase(), 100)).map((d) => normalizeFinding(d));
     ok(hitsF.some((f) => f.key === kk(1)) && hitsF.filter((f) => matchesFinding(f1.printedId!.toLowerCase(), f)).length >= 1, "t11 db: ⌘K finds a finding by its printed id");
     const hitA = (await searchDocs("assessments", a2.id.toLowerCase(), 100)).find((d) => d.id === a2.id);
     ok(!!hitA && assessmentSearchResult({ id: a2.id, status: "draft" }, { customer: "Assess Co One", venue: "Assess Gym" }).href === `/assessments/${a2.id}`, "t11 db: ⌘K finds an assessment by its id");
@@ -2104,9 +2135,17 @@ async function task11DbChecks(ok: Ok) {
     ok(added.ok, "t11 db: Add puts a new value on a list");
     const dupBuiltIn = await addPicklistValue(listId, ASSESSMENT_DEF.pickLists[listId][0].label);
     ok(!dupBuiltIn.ok, "t11 db: Add refuses a duplicate of a built-in value");
+    const dupLabel = await addPicklistValue(listId, ASSESSMENT_DEF.pickLists[listId][0].label.toUpperCase());
+    ok(!dupLabel.ok && dupLabel.error === "That choice already exists", "fix 2: a built-in label in other case is refused with 'That choice already exists'");
+    const partly = await addPicklistValue("working", "Partly");
+    const partlyLower = await addPicklistValue("working", " partly ");
+    ok(!partly.ok && !partlyLower.ok && partly.error === "That choice already exists", "fix 2: 'Partly' on the working list is refused (the built-in label is Partly, value partial)");
+    ok(!(await getPicklistExtras()).working?.length, "fix 2: nothing was stored for the refused 'Partly'");
     const dupAdded = await addPicklistValue(listId, label);
-    ok(!dupAdded.ok, "t11 db: Add refuses a duplicate of an added value");
-    const slug = slugValueForTest(label);
+    ok(!dupAdded.ok && dupAdded.error === "That choice already exists", "t11 db: Add refuses a duplicate of an added value (fix 2: same message)");
+    const dupAddedCase = await addPicklistValue(listId, label.toUpperCase());
+    ok(!dupAddedCase.ok, "fix 2: an added label in other case is refused too");
+    const slug = slugValue(label);
     await setPicklistRetired(listId, slug, true);
     let row = pickListAdminRows(ASSESSMENT_DEF, await getPicklistExtras()).find((x) => x.id === listId)!;
     ok(row.added.find((o) => o.value === slug)?.retired === true, "t11 db: Retire marks an added value retired");
@@ -2122,8 +2161,6 @@ async function task11DbChecks(ok: Ok) {
   }
 }
 
-const normalizeFindingForTest = (d: unknown): Finding => normalizeFinding(d);
-const slugValueForTest = (s: string) => slugValue(s);
 async function removeTestPicklistValues() {
   // the admin blob is shared: take the T11 additions back out so a re-run starts clean
   const cur = await getPicklistExtras();

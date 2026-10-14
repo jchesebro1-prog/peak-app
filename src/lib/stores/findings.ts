@@ -197,6 +197,26 @@ export async function listFindings(f: { customerId?: string; siteId?: string; as
 }
 
 /**
+ * The nav badge: open (not closed) Immediate-attention findings that aren't voided — one SQL count, no document
+ * is read. Same rule as `immediateOpenCount` over `listFindings({ rating: ["immediate"] })` (a JSON-null `voided`
+ * and a missing/unknown status both count as live/open, as normalizeFinding reads them).
+ */
+export async function countOpenImmediateFindings(): Promise<number> {
+  const db = await getDb();
+  const t = DOC_TABLES.findings;
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(t)
+    .where(and(
+      eq(t.deleted, false),
+      sql`${t.doc}->>'rating' = 'immediate'`,
+      sql`${t.doc}->>'status' IS DISTINCT FROM 'closed'`,
+      sql`coalesce(${t.doc}->'voided', 'null'::jsonb) IN ('null'::jsonb, 'false'::jsonb)`,
+    ));
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
  * Creates (when the key is new) or edits a finding.
  * - Create needs customerId, siteId, assessmentId (and they must match that assessment), category, rating and
  *   description; it starts "open" with one history entry, then gets its printed id (allocatePrintedId).

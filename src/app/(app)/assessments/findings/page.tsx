@@ -13,7 +13,7 @@ function one(v: string | string[] | undefined): string {
 
 /**
  * The findings register (#337, spec §3 "Register screens"): every finding across assessments, filtered by
- * ?customer= ?venue= ?category= ?rating= ?status= ?priority= ?budget= (and ?voided=1), Immediate attention pinned
+ * ?customer= ?venue= ?category= ?rating= ?status= ?priority= ?budget= (and ?voided=1, ?open=1 hides closed), Immediate attention pinned
  * first. Select rows for bulk Triage, Quote these findings or Export CSV; a row opens the finding sheet.
  * ?focus=<key> scrolls to that finding and opens it (⌘K) — shown even when the filters would leave it out.
  */

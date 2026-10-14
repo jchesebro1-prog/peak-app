@@ -46,7 +46,8 @@ export async function getPicklistExtras(): Promise<PicklistExtras> {
 }
 
 /** Adds `label` to list `listId` as value slug(label). Refuses an unknown list, a blank label, or a value that
- *  collides with the definition's codes or an earlier addition (retired ones included). */
+ *  collides with the definition's codes, or whose label matches (case-insensitively) a
+ *  built-in or earlier-added label (retired ones included). */
 export async function addPicklistValue(listId: string, label: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (UNSAFE_KEYS.has(listId) || !Object.hasOwn(ASSESSMENT_DEF.pickLists, listId)) return { ok: false, error: "Unknown pick list" };
   const clean = String(label ?? "").trim().replace(/\s+/g, " ");
@@ -58,7 +59,8 @@ export async function addPicklistValue(listId: string, label: string): Promise<{
     const extras = await getPicklistExtras();
     const cur = extras[listId] ?? [];
     const taken = new Set([...ASSESSMENT_DEF.pickLists[listId].map((o) => o.value), ...cur.map((o) => o.value)]);
-    if (taken.has(value)) return { ok: false as const, error: `"${clean}" is already on this list` };
+    const labels = new Set([...ASSESSMENT_DEF.pickLists[listId].map((o) => o.label), ...cur.map((o) => o.label)].map((l) => l.trim().toLowerCase()));
+    if (taken.has(value) || labels.has(clean.toLowerCase())) return { ok: false as const, error: "That choice already exists" };
     await setBlob(ASSESSMENT_PICKLISTS_BLOB, { [listId]: [...cur, { value, label: clean }] });
     return { ok: true as const };
   });

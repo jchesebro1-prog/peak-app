@@ -35,6 +35,8 @@ export interface RegisterFilters {
   priority: Priority | "";
   budget: BudgetTier | "";
   voided: boolean;
+  /** hide closed findings (the cards' count chips count open ones only) */
+  open: boolean;
 }
 
 type Params = URLSearchParams | Record<string, string | string[] | undefined>;
@@ -47,7 +49,7 @@ const pick = <T extends string>(list: readonly T[], v: string): T | "" => ((list
 /** A customer / venue id from the query string: trimmed, capped, nothing else enforced (it only filters). */
 const idParam = (v: string) => v.trim().slice(0, 120);
 
-/** The filters from `?customer=&venue=&category=&rating=&status=&priority=&budget=&voided=1`; unknown values drop. */
+/** The filters from `?customer=&venue=&category=&rating=&status=&priority=&budget=&voided=1&open=1`; unknown values drop. */
 export function parseRegisterFilters(p: Params): RegisterFilters {
   return {
     customer: idParam(read(p, "customer")),
@@ -58,6 +60,7 @@ export function parseRegisterFilters(p: Params): RegisterFilters {
     priority: pick(PRIORITIES, read(p, "priority")),
     budget: pick(BUDGET_TIERS, read(p, "budget")),
     voided: read(p, "voided") === "1",
+    open: read(p, "open") === "1",
   };
 }
 
@@ -69,6 +72,7 @@ export function registerQuery(f: Partial<RegisterFilters>): string {
     if (v) u.set(k, v);
   }
   if (f.voided) u.set("voided", "1");
+  if (f.open) u.set("open", "1");
   return u.toString();
 }
 
@@ -80,6 +84,7 @@ export function matchesFilters(x: Finding, f: RegisterFilters): boolean {
     (!f.venue || x.siteId === f.venue) &&
     (!f.category || x.category === f.category) &&
     (!f.rating || x.rating === f.rating) &&
+    (!f.open || x.status !== "closed") &&
     (!f.status || x.status === f.status) &&
     (!f.priority || x.priority === f.priority) &&
     (!f.budget || x.budgetTier === f.budget)

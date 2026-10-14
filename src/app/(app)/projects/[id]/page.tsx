@@ -61,7 +61,7 @@ export default async function ProjectDetailPage({
         meetingsSlot={
           <>
             <MeetingsCard kind="work" id={sel.id} viewerId={user.id} style={{ marginTop: 18 }} />
-            <AssessmentsCard projectId={sel.id} compact />
+            <AssessmentsCard projectId={sel.id} customerId={sel.customerId ?? undefined} compact />
           </>
         }
       />

@@ -1,6 +1,6 @@
 /* Assessments engine (#337) — code pick lists. Shared across modules so reports sort consistently.
-   Code values are stable: never rename or remove one (an admin can add values in Settings → Assessments →
-   Pick lists; those live in the `assessment_picklists` blob, not here). */
+   Code values are stable: never rename or remove one (an admin can add values in Assessments → Pick lists
+   (/assessments/pick-lists); those live in the `assessment_picklists` blob, not here). */
 import type { PickOption } from "./types";
 
 const o = (value: string, label: string): PickOption => ({ value, label });

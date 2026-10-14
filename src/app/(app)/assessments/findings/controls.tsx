@@ -374,6 +374,11 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
         <label style={{ fontSize: 12.5, color: "#5b616e", display: "inline-flex", alignItems: "center", gap: 5 }}>
           <input type="checkbox" checked={filters.voided} onChange={(e) => go({ voided: e.target.checked })} /> Show voided
         </label>
+        {filters.open && (
+          <button type="button" className="fr-chip" title="Show closed findings too" aria-label="Open only — remove this filter" style={{ color: "#3a3f4a", background: "#f1f2f5", borderColor: "#d6d9e0", cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 600, padding: "4px 10px" }} onClick={() => go({ open: false })}>
+            Open only <span aria-hidden="true">×</span>
+          </button>
+        )}
         {registerQuery(filters) && <button type="button" className="pk-btn-outline" onClick={() => router.push("/assessments/findings")}>Clear</button>}
       </div>
 

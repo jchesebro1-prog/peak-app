@@ -15,7 +15,7 @@ import { getCompany } from "@/lib/identity/companies";
 import { getSite, sitesForCompany } from "@/lib/identity/sites";
 import { codeInUse } from "@/lib/assessments/findings-model";
 import { findingsPdfHref } from "@/lib/assessments/register";
-import { assessmentCardRows, chicagoDay, confirmedLine, openRatingCounts, profileFactRows, registerHref, startHref } from "@/lib/assessments/integration";
+import { assessmentCardRows, chicagoDay, confirmedLine, isOpenFinding, openRatingCounts, profileFactRows, registerHref, startHref } from "@/lib/assessments/integration";
 import { ShortList } from "@/components/short-list";
 import ShortCodeEdit from "./short-code-edit";
 
@@ -119,7 +119,7 @@ export async function AssessmentsCard({ siteId, customerId, leadId, projectId, t
     !siteId && !workScope && customerId ? sitesForCompany(customerId) : Promise.resolve([]),
   ]);
   const openCounts = new Map<string, number>();
-  for (const f of findings) if (f.status !== "closed") openCounts.set(f.assessmentId, (openCounts.get(f.assessmentId) ?? 0) + 1);
+  for (const f of findings) if (isOpenFinding(f)) openCounts.set(f.assessmentId, (openCounts.get(f.assessmentId) ?? 0) + 1);
   const siteNames = new Map(siteList.map((s) => [s.id, s.name || s.locationName || s.id]));
   const rows = assessmentCardRows(list, { showVenue: !siteId, siteNames, openCounts });
   const start = startHref({ siteId, customerId, leadId, projectId });

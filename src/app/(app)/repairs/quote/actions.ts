@@ -364,6 +364,7 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
   revalidatePath("/", "layout");
   redirect(
     "/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1" +
+      (note.creditNote ? "&credit=" + encodeURIComponent(note.creditNote) : "") +
       (note.findingNote ? "&findingnote=" + encodeURIComponent(note.findingNote) : "")
   );
 }
