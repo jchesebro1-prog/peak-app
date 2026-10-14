@@ -15,7 +15,7 @@ export const SECTION_ORDER: readonly string[] = [
   "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d",
   "dRigging", "dCurtain", "dLighting", "dAv", "linesets",
   "assessmentToggle", "assessmentUsage", "assessmentCondition", "assessmentFindings",
-  "photos", "notes", "project", "recap", "finalThoughts", "assign",
+  "photos", "notes", "project", "finalQuestions", "recap", "finalThoughts", "assign",
 ];
 
 export const STEP_LABELS: readonly string[] = ["Brief", "Site & access", "Measurements", "Site intake", "Assessment", "Wrap-up"];
@@ -26,7 +26,7 @@ const IDS_BY_STEP: string[][] = [
   ["mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d"],
   ["dRigging", "dCurtain", "dLighting", "dAv", "linesets"],
   ["assessmentToggle", "assessmentUsage", "assessmentCondition", "assessmentFindings"],
-  ["photos", "notes", "project", "recap", "finalThoughts", "assign"],
+  ["photos", "notes", "project", "finalQuestions", "recap", "finalThoughts", "assign"],
 ];
 const GROUP_BY_STEP: FlowGroup[] = ["brief", "field", "field", "intake", "assessment", "wrapup"];
 
@@ -84,7 +84,7 @@ export const hasLinesets = (s: FlowSlice): boolean => rigSystems(s).some((x) => 
 /** Sections that belong to one discipline's scope. */
 const SECTION_SCOPE: Record<string, DisciplineKey> = {
   dRigging: "rigging", mBeams: "rigging", linesets: "rigging",
-  dCurtain: "curtain",
+  dCurtain: "curtain", finalQuestions: "curtain",
   dLighting: "lighting", mFOH: "lighting",
   dAv: "av",
 };

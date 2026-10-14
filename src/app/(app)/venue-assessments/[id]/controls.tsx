@@ -24,6 +24,7 @@ import {
   tier1Items,
   tier1Complete,
   type DisciplineKey,
+  type DisciplineValue,
   type InventoryRow,
 } from "@/lib/stores/survey-intake";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
@@ -313,11 +314,11 @@ export default function SurveyEditor({
   const intakeSt = intakeStatus(draft);
   const intakeMeta = INTAKE_STATUS_META[intakeSt];
 
-  const dv = (disc: DisciplineKey, key: string): string | boolean | string[] => {
+  const dv = (disc: DisciplineKey, key: string): DisciplineValue => {
     const d = draft.disciplines[disc];
     return d && d[key] != null ? d[key] : "";
   };
-  const setDisc = (disc: DisciplineKey, key: string, val: string | boolean | string[]) =>
+  const setDisc = (disc: DisciplineKey, key: string, val: DisciplineValue) =>
     patchDraft({
       disciplines: { ...draft.disciplines, [disc]: { ...(draft.disciplines[disc] || {}), [key]: val } },
       disciplinesActive: draft.disciplinesActive.includes(disc)

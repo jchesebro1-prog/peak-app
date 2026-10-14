@@ -224,6 +224,10 @@ export const SECTION_FIELDS: MeasureField[] = [
   { key: "upperLevel", label: "Upper / raised level" },
 ];
 export const BEAM_FIELDS: MeasureField[] = [
+  // #344 B2: the drawings on file come first (B5 gates them); the old hhSheet / brickDrawing checks fold in on read.
+  { key: "structuralDrawingOnFile", label: "Structural drawing on file", type: "check" },
+  { key: "brickDrawingOnFile", label: "Brick drawing on file", type: "check" },
+  { key: "cwElevationOnFile", label: "CW Elevation sheet on file", type: "check" },
   { key: "beam1SRDist", label: "1st beam — distance from SR wall" },
   { key: "beamSpacing", label: "Beam spacing (on center)" },
   { key: "beamDirection", label: "Beam direction", type: "select", options: BEAM_DIRECTIONS },
@@ -231,8 +235,6 @@ export const BEAM_FIELDS: MeasureField[] = [
   { key: "drawSide", label: "Draw side", type: "select", options: DRAW_SIDES },
   { key: "loadingBridge", label: "Loading bridge present", type: "check" },
   { key: "midrail", label: "Midrail height" },
-  { key: "hhSheet", label: "H&H sheet attached", type: "check" },
-  { key: "brickDrawing", label: "Brick / structural drawing on file", type: "check" },
 ];
 export const FOH_FIELDS: MeasureField[] = [
   { key: "foh1Dist", label: "1st FOH — distance from plaster" },
@@ -360,6 +362,13 @@ export interface SurveyDraft {
   // access & site conditions, from the sheets
   loadingDoorSize: string;
   liftHeight: string;
+  // #344 B2 — access, replacing loadingDoorSize / liftNeeded / liftHeight (old keys kept; migrated on read)
+  loadingDoorType: string;
+  loadingDoorLocation: string;
+  loadingDoorWH: string;
+  liftRequired: "" | "yes" | "no";
+  liftType: string;
+  liftWorkingHeight: string;
   pathToFloor: string;
   workingHours: string;
   blackoutDates: string;
@@ -376,6 +385,8 @@ export interface SurveyDraft {
   // lineset schedule
   linesetsEnabled: boolean;
   linesets: LinesetRow[];
+  /** #344 B2 — how many line sets; drives the schedule's row count (unset until answered or migrated) */
+  linesetQty?: number;
   // close-out
   signoff: {
     repName: string; repSignedAt: string;
@@ -460,6 +471,12 @@ export function blank(partial: Partial<SurveyDraft> = {}): SurveyDraft {
     templateRev: TEMPLATE_REV,
     loadingDoorSize: "",
     liftHeight: "",
+    loadingDoorType: "",
+    loadingDoorLocation: "",
+    loadingDoorWH: "",
+    liftRequired: "",
+    liftType: "",
+    liftWorkingHeight: "",
     pathToFloor: "",
     workingHours: "",
     blackoutDates: "",

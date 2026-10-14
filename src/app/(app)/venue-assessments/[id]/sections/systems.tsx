@@ -9,6 +9,7 @@ import {
   type SystemField,
 } from "@/lib/stores/survey-intake";
 import type { VenueClass } from "@/lib/stores/venue-classes";
+import { CONDITION_STEPS, isConditionLevel } from "@/lib/field-lists";
 import {
   ACCENT_BORDER_LT,
   ACCENT_INK,
@@ -21,6 +22,11 @@ import {
 } from "./styles";
 
 type DisciplineValue = DisciplineData[string];
+
+/** #344 B2: goals read as a list now (B4 gives them a list editor); until then the textarea shows one per line. */
+const goalsText = (v: DisciplineValue): string => (Array.isArray(v) ? v.join("\n") : typeof v === "string" ? v : "");
+/** Text inputs only show text: a number / object value (condition level, rows) renders blank until B4's controls. */
+const textOf = (v: DisciplineValue): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 
 type Props = {
   group: DisciplineGroup;
@@ -92,11 +98,24 @@ function Field({
       </div>
     );
   }
+  if (field.type === "condition") {
+    /* #344 B2 interim: a plain Bad…New select storing the 0–4 level (B4 replaces it with the slider). */
+    const level = value(disc, field.key);
+    return (
+      <div>
+        <label style={labelStyle}>{field.label}</label>
+        <select value={isConditionLevel(level) ? String(level) : ""} onChange={(event) => event.target.value !== "" && setValue(disc, field.key, Number(event.target.value))} style={selStyle}>
+          <option value="" disabled>— Select —</option>
+          {CONDITION_STEPS.map((step, i) => <option key={step} value={String(i)}>{step}</option>)}
+        </select>
+      </div>
+    );
+  }
   if (field.type === "select") {
     return (
       <div>
         <label style={labelStyle}>{field.label}</label>
-        <select value={String(value(disc, field.key) || "")} onChange={(event) => setValue(disc, field.key, event.target.value)} style={selStyle}>
+        <select value={textOf(value(disc, field.key))} onChange={(event) => setValue(disc, field.key, event.target.value)} style={selStyle}>
           <option value="">— Select —</option>
           {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
@@ -106,7 +125,7 @@ function Field({
   return (
     <div>
       <label style={labelStyle}>{field.label}</label>
-      <input value={String(value(disc, field.key) || "")} onChange={(event) => setValue(disc, field.key, event.target.value)} style={inpStyle} />
+      <input value={textOf(value(disc, field.key))} onChange={(event) => setValue(disc, field.key, event.target.value)} style={inpStyle} />
     </div>
   );
 }
@@ -192,7 +211,7 @@ export function SystemsSection(props: Props) {
       <div style={{ marginBottom: 14 }}>
         <label style={labelStyle}>Client goals</label>
         <textarea
-          value={String(props.value(group.key, "goals") || "")}
+          value={goalsText(props.value(group.key, "goals"))}
           onChange={(event) => props.setValue(group.key, "goals", event.target.value)}
           maxLength={1000}
           placeholder="What is the client trying to solve?"
@@ -259,7 +278,7 @@ export function SystemsSection(props: Props) {
           )}
           <div style={{ marginTop: 14 }}>
             <label style={labelStyle}>Notes</label>
-            <textarea value={String(props.value(group.key, "notes") || "")} onChange={(event) => props.setValue(group.key, "notes", event.target.value)} style={taStyle} />
+            <textarea value={textOf(props.value(group.key, "notes"))} onChange={(event) => props.setValue(group.key, "notes", event.target.value)} style={taStyle} />
           </div>
         </>
       )}

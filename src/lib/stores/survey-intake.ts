@@ -13,8 +13,8 @@
  * structured types are the handoff to the quote side.
  */
 
-import type { MeasureField } from "./surveys";
 import type { VenueClass } from "./venue-classes";
+import { CONSOLE_LOCATIONS, PLUG_TYPES, TRACK_OPERATIONS, type ConditionLevel } from "../field-lists";
 
 /* ---- Tier 1: the kill questions ----
  * Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#344 — contact phone is no longer a kill question).
@@ -116,12 +116,46 @@ export const RIG_SYSTEMS = ["Counterweight", "Dead-hung", "Motorized", "Hemp", "
 
 export type DisciplineKey = "rigging" | "curtain" | "lighting" | "av";
 
-/** One discipline's captured data: field values + a scope-of-interest list. */
-export type DisciplineData = Record<string, string | boolean | string[]>;
+/** One stored discipline value. #344 B2 widened it: numbers (condition levels) and plain objects keyed by a
+ *  label (curtain rows at `items`, lighting position rows at `positionRows`). */
+export type DisciplineValue = string | boolean | number | string[] | Record<string, Record<string, unknown>>;
 
-export interface SystemField extends MeasureField {
+/** One discipline's captured data: field values + a scope-of-interest list. */
+export type DisciplineData = Record<string, DisciplineValue>;
+
+/** One discipline field. `textarea` / `month` / `condition` are #344 B2 types (B4 gives them their own controls).
+ *  `bind` names a measurement key the field shares its value with (one fact, two places). */
+export type SystemField = {
+  key: string;
+  label: string;
+  type?: "text" | "select" | "check" | "textarea" | "month" | "condition";
+  options?: readonly string[];
   visibleFor?: VenueClass[];
-}
+  bind?: string;
+  placeholder?: string;
+};
+
+/** #344 B2 — one row per ticked curtain type, at `disciplines.curtain.items[<Present label>]`. */
+export type CurtainItem = {
+  qty?: string;
+  fabric?: string;
+  oz?: string;
+  trackSeries?: string;
+  w?: string;
+  h?: string;
+  condition?: ConditionLevel;
+};
+
+/** #344 B2 — one row per chosen lighting position, at `disciplines.lighting.positionRows[<position>]`;
+ *  the chosen positions are `disciplines.lighting.positionList`. */
+export type PositionRow = { circuits?: string; length?: string; trim?: string; notes?: string };
+
+/** #344 B2 — the curtain Present option that replaced "Fixed pipe". */
+export const PIPES_LABEL = "Additional general purpose / scenery pipes";
+/** #344 B2 — every scope list ends with it; picking it asks for `scopeOther`. */
+export const SCOPE_OTHER = "Other";
+/** #344 B2 — Replace vs. reuse moved to Final questions; its options stay here. */
+export const REPLACE_VS_REUSE_OPTIONS: readonly string[] = ["Replace", "Reuse", "Mixed", "TBD"];
 
 export interface DisciplineGroup {
   key: DisciplineKey;
@@ -146,41 +180,39 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     fields: [
       { key: "gridPresent", label: "Existing grid", type: "check" },
       { key: "gridType", label: "Grid construction & spacing" },
-      { key: "gridHeight", label: "Grid height" },
+      { key: "gridHeight", label: "Grid height", bind: "gridH" },
       { key: "loadPoints", label: "Load-bearing points (SR / SL / center)" },
       { key: "counterweightNotes", label: "Rail condition, capacity, age" },
       { key: "chainHoists", label: "Chain hoists (brand, capacity, age)" },
       { key: "deckLoad", label: "Deck load capacity (lbs/sqft)" },
-      { key: "battenCount", label: "Batten count" },
       { key: "flyType", label: "Fly system type", visibleFor: ["auditorium"] },
-      { key: "linesetCount", label: "Lineset count", visibleFor: ["auditorium"] },
       { key: "battenLength", label: "Batten length", visibleFor: ["auditorium"] },
       { key: "arborCapacity", label: "Arbor / motor capacity", visibleFor: ["auditorium"] },
       { key: "gridBlockCondition", label: "Grid / block condition", visibleFor: ["auditorium"] },
       { key: "hempLineCondition", label: "Hemp line condition", visibleFor: ["auditorium"] },
       { key: "motorControl", label: "Motor control", visibleFor: ["auditorium"] },
-      { key: "loadingGalleryNotes", label: "Loading gallery notes", visibleFor: ["auditorium"] },
+      { key: "loadingGalleryNotes", label: "Loading gallery notes", visibleFor: ["auditorium"], bind: "loadingGallery" },
       { key: "fireCurtainPresent", label: "Fire curtain present", type: "check", visibleFor: ["auditorium"] },
       { key: "fireCurtainRating", label: "Fire curtain rating", visibleFor: ["auditorium"] },
       { key: "releaseMechanism", label: "Release mechanism", visibleFor: ["auditorium"] },
       { key: "fireCurtainLastInspection", label: "Fire curtain last inspection", visibleFor: ["auditorium"] },
     ],
     scopeLabel: "Rigging scope of interest",
-    scopeOptions: ["New grid", "Grid refurbish", "Add hoists", "Capacity upgrade", "Inspection only"],
+    scopeOptions: ["New grid", "System refurbish", "Add hoists", "Capacity upgrade", "Inspection only", SCOPE_OTHER],
     inventories: [],
   },
   {
     key: "curtain",
     title: "Curtain intake",
     subtitle: "Drapery, masking, flame-test & replacement planning",
-    presentOptions: ["Divider curtain", "Track — straight", "Track — curved", "Fixed pipe", "Wall bracket", "Cyc / backdrop", "None"],
+    presentOptions: ["Divider curtain", "Track — straight", "Track — curved", PIPES_LABEL, "Wall bracket", "Cyc / backdrop", "None"],
     presentOptionsByClass: {
       auditorium: ["Main / act curtain", "Grand drape", "Traveler", "Teaser / tormentors", "Legs", "Borders", "Cyc / scrim", "None"],
     },
+    /* #344 B2: removed defs (maskingNeeds, mainCondition, legsBorders, fabricColor, fabricWeightOz, finishedWH, condition,
+       trackSeries, pipeDiameter, mounting, operation, legsQtyPairs, bordersQty, cycScrimFabric) keep their stored values —
+       src/lib/survey-migrate.ts folds them into curtain rows or Older notes. replaceVsReuse moved to Final questions. */
     fields: [
-      { key: "maskingNeeds", label: "Masking needed (legs, borders, cyc, traveler)" },
-      { key: "mainCondition", label: "Main curtain (type, material, age, condition)" },
-      { key: "legsBorders", label: "Legs & borders (count, condition, color)" },
       { key: "prosHeightToGrid", label: "Proscenium height to grid" },
       {
         key: "travelerCondition",
@@ -188,32 +220,16 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
         type: "select",
         options: ["Good", "Fair", "Needs replacement"],
       },
-      { key: "fabricColor", label: "Fabric / colour" },
-      { key: "fabricWeightOz", label: "Fabric weight (oz)" },
-      { key: "finishedWH", label: "Finished width × height" },
-      { key: "condition", label: "Condition" },
-      { key: "trackSeries", label: "Track series" },
-      { key: "trackOperation", label: "Track operation" },
-      { key: "fixedPipeQty", label: "Fixed pipe quantity" },
-      { key: "pipeDiameter", label: "Pipe diameter" },
-      { key: "mounting", label: "Mounting" },
+      { key: "trackOperation", label: "Track operation", type: "select", options: TRACK_OPERATIONS },
+      { key: "fixedPipeQty", label: "Additional general purpose / scenery pipes (qty)" },
+      { key: "pipeTrackLengths", label: "Pipe / track lengths", type: "textarea" },
       { key: "heightAboveFloor", label: "Height above floor" },
       { key: "loadCapacity", label: "Load capacity per position" },
       { key: "curtainType", label: "Curtain type", visibleFor: ["auditorium"] },
-      { key: "operation", label: "Operation", visibleFor: ["auditorium"] },
-      { key: "legsQtyPairs", label: "Legs quantity (pairs)", visibleFor: ["auditorium"] },
-      { key: "bordersQty", label: "Borders quantity", visibleFor: ["auditorium"] },
-      { key: "cycScrimFabric", label: "Cyc / scrim fabric", visibleFor: ["auditorium"] },
-      { key: "lastFlameTest", label: "Last flame test (date, if known)" },
-      {
-        key: "replaceVsReuse",
-        label: "Replace vs. reuse",
-        type: "select",
-        options: ["Replace", "Reuse", "Mixed", "TBD"],
-      },
+      { key: "lastFlameTest", label: "Last flame test", type: "month" },
     ],
     scopeLabel: "Curtain scope of interest",
-    scopeOptions: ["New main", "New legs / borders", "Traveler replacement", "Flame test", "Full masking upgrade"],
+    scopeOptions: ["Single curtain replacement", "Single set replacement", "Flame test", "Full curtain replacement", SCOPE_OTHER],
     inventories: [],
   },
   {
@@ -224,12 +240,9 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     presentOptionsByClass: {},
     fields: [
       { key: "consoleMfr", label: "Console manufacturer / model" },
-      { key: "consoleLocation", label: "Console location" },
-      { key: "fixtureQty", label: "Fixture quantity (estimated)" },
+      { key: "consoleLocation", label: "Console location", type: "select", options: CONSOLE_LOCATIONS },
       { key: "installYear", label: "Install year" },
-      { key: "fixtureTypes", label: "Fixture types" },
-      { key: "positions", label: "Lighting positions" },
-      { key: "controls", label: "Controls" },
+      { key: "controls", label: "Architectural control — manufacturer / model" },
       {
         key: "controlProtocol",
         label: "Control protocol",
@@ -238,19 +251,14 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
       },
       { key: "dimmerRack", label: "Dimmer / relay rack location + capacity", visibleFor: ["auditorium"] },
       { key: "dmxUniverses", label: "DMX universes / protocol", visibleFor: ["auditorium"] },
-      { key: "fohPositions", label: "FOH positions", visibleFor: ["auditorium"] },
       { key: "followSpotBooth", label: "Follow-spot booth", visibleFor: ["auditorium"] },
-      { key: "electricalService", label: "Electrical service (amperage, spare circuits)" },
-      { key: "console", label: "Control console (brand, model, age)" },
-      {
-        key: "circuitAccess",
-        label: "Circuit accessibility",
-        type: "select",
-        options: ["Good", "Fair", "Poor"],
-      },
+      { key: "electricalService", label: "Panel power feeds & locations" },
+      { key: "plugType", label: "Plug type", type: "select", options: PLUG_TYPES },
+      /* #344 B2: removed defs fixtureQty, fixtureTypes, positions, fohPositions, console, circuitAccess keep their stored
+         values as Older notes. consoleLocationOther, positionList and positionRows have dedicated UI, not defs. */
     ],
     scopeLabel: "Lighting scope of interest",
-    scopeOptions: ["New rig", "Dimmer upgrade", "Fixture replacement", "Console upgrade", "Full system audit"],
+    scopeOptions: ["New rig", "Controls upgrade", "Fixture replacement", "Console upgrade", "Full system audit", SCOPE_OTHER],
     inventories: [
       { category: "lighting.fixture", label: "Fixtures" },
       { category: "lighting.infrastructure", label: "Infrastructure" },
@@ -266,7 +274,7 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
       { key: "soundMfr", label: "PA / sound manufacturer" },
       { key: "speakerLocationsQty", label: "Speaker locations / quantity" },
       { key: "micPagingInputs", label: "Microphone / paging inputs" },
-      { key: "condition", label: "Condition" },
+      { key: "conditionLevel", label: "Condition", type: "condition" },
       { key: "electricalPanelLocation", label: "Electrical panel location" },
       { key: "spareBreakerCapacity", label: "Spare breaker capacity" },
       { key: "companySwitch", label: "Company switch / generator tie-in" },
@@ -283,6 +291,7 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
       "Unified control",
       "Streaming capability",
       "Acoustic treatment",
+      SCOPE_OTHER,
     ],
     inventories: [
       { category: "audio.device", label: "Audio devices" },
@@ -312,6 +321,8 @@ export interface InventoryRow {
   quantity: string; // free string — "12", "~20"
   flag: boolean; // rep flag — needs attention / replace / verify
   notes: string;
+  /** #344 B2 — lighting fixture position (FIXTURE_POSITIONS) */
+  position?: string;
 }
 
 /** Default type catalog (spec's Fixture Type Catalog). Editable in Settings —
@@ -384,7 +395,15 @@ export function disciplineHasData(d: DisciplineData | undefined, inv: InventoryR
   if (inv.some((r) => r.discipline === key)) return true;
   if (!d) return false;
   return Object.values(d).some((v) =>
-    Array.isArray(v) ? v.length > 0 : typeof v === "boolean" ? v : String(v ?? "").trim() !== ""
+    Array.isArray(v)
+      ? v.length > 0
+      : typeof v === "boolean"
+        ? v
+        : typeof v === "number"
+          ? Number.isFinite(v)
+          : v && typeof v === "object"
+            ? Object.keys(v).length > 0
+            : String(v ?? "").trim() !== ""
   );
 }
 

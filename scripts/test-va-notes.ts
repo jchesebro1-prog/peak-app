@@ -8,8 +8,10 @@ import {
   rigSystems, hasCounterweight, hasLinesets, sectionVisible, splitGoalLines, recapFor, recapScopeText,
 } from "../src/lib/survey-flow";
 import { migrateSurvey, addLegacyNote, type MigratableSurvey } from "../src/lib/survey-migrate";
-import { tier1Items, tier1Complete, intakeStatus, DISCIPLINE_GROUPS, presentOptionsFor } from "../src/lib/stores/survey-intake";
-import { BEAM_FIELDS } from "../src/lib/stores/surveys";
+import {
+  tier1Items, tier1Complete, intakeStatus, DISCIPLINE_GROUPS, presentOptionsFor, disciplineHasData, PIPES_LABEL, SCOPE_OTHER, REPLACE_VS_REUSE_OPTIONS,
+} from "../src/lib/stores/survey-intake";
+import { BEAM_FIELDS, blank as blankSurvey } from "../src/lib/stores/surveys";
 import { railSheetLabel, SECTION_RAIL_CSS } from "../src/components/section-rail/section-rail";
 import { STARTER_SURVEY_TAGS, resolveSurveyTags, mergeSurveyTags, activeSurveyTags, surveyTagLabel } from "../src/lib/survey-tags";
 import { sectionProgress } from "../src/app/(app)/venue-assessments/[id]/sections/progress";
@@ -22,6 +24,7 @@ import {
   CONDITION_STEPS, conditionLabel, conditionFromText, parseMonthYear, consoleLocationFrom, travelTimeText, distanceText, listSlug,
 } from "../src/lib/field-lists";
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
+import { sanitizeSurveyDisciplineGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -297,6 +300,190 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   const qk = [...allQuestions(ASSESSMENT_DEF).keys()];
   ok(["access.lift_type", "access.lift_height", "access.load_in_door_type", "lighting.positions"].every((k) => qk.includes(k)) && ASSESSMENT_DEF.version === 1,
     "#344 B1 (R4): additive engine questions; definition version unchanged");
+
+  /* ---- B2: field definitions + read-time migration ---- */
+  const mm = (s: MigratableSurvey) => migrateSurvey(JSON.parse(JSON.stringify(s)) as MigratableSurvey);
+  const notes = (s: MigratableSurvey) => s.legacyNotes || [];
+  const hasNote = (s: MigratableSurvey, section: string, label: string, text?: string) =>
+    notes(s).some((n) => n.section === section && n.label === label && (text === undefined || n.text === text));
+  const grp = (k: string) => DISCIPLINE_GROUPS.find((g) => g.key === k)!;
+  const fkeys = (k: string) => grp(k).fields.map((f) => f.key);
+
+  /* definitions */
+  ok(DISCIPLINE_GROUPS.every((g) => g.scopeOptions.at(-1) === "Other") && SCOPE_OTHER === "Other", "#344 B2: every scope list ends with Other");
+  ok(grp("rigging").scopeOptions.join("|") === "New grid|System refurbish|Add hoists|Capacity upgrade|Inspection only|Other", "#344 B2: rigging scope options");
+  ok(grp("curtain").scopeOptions.join("|") === "Single curtain replacement|Single set replacement|Flame test|Full curtain replacement|Other", "#344 B2: curtain scope options");
+  ok(grp("lighting").scopeOptions.join("|") === "New rig|Controls upgrade|Fixture replacement|Console upgrade|Full system audit|Other", "#344 B2: lighting scope options");
+  ok(grp("av").scopeOptions.length === 7 && grp("av").scopeOptions[0] === "New projector", "#344 B2: AV keeps its six scopes plus Other");
+  ok(PIPES_LABEL === "Additional general purpose / scenery pipes" && grp("curtain").presentOptions.includes(PIPES_LABEL) && !grp("curtain").presentOptions.includes("Fixed pipe"),
+    "#344 B2: curtain Present offers the pipes label instead of Fixed pipe");
+  ok(fkeys("curtain").join("|") === "prosHeightToGrid|travelerCondition|trackOperation|fixedPipeQty|pipeTrackLengths|heightAboveFloor|loadCapacity|curtainType|lastFlameTest",
+    "#344 B2: curtain fields, in order");
+  {
+    const f = (k: string) => grp("curtain").fields.find((x) => x.key === k)!;
+    ok(f("trackOperation").type === "select" && (f("trackOperation").options || []).join() === TRACK_OPERATIONS.join() && f("trackOperation").label === "Track operation" &&
+       f("fixedPipeQty").label === "Additional general purpose / scenery pipes (qty)" && f("pipeTrackLengths").type === "textarea" && f("pipeTrackLengths").label === "Pipe / track lengths" &&
+       f("lastFlameTest").type === "month" && f("lastFlameTest").label === "Last flame test" && f("curtainType").visibleFor?.join() === "auditorium",
+      "#344 B2: curtain field labels and types");
+  }
+  ok(REPLACE_VS_REUSE_OPTIONS.join("|") === "Replace|Reuse|Mixed|TBD" && !fkeys("curtain").includes("replaceVsReuse"), "#344 B2: Replace vs. reuse leaves the curtain list (options exported)");
+  ok(fkeys("lighting").join("|") === "consoleMfr|consoleLocation|installYear|controls|controlProtocol|dimmerRack|dmxUniverses|followSpotBooth|electricalService|plugType",
+    "#344 B2: lighting fields, in order");
+  {
+    const f = (k: string) => grp("lighting").fields.find((x) => x.key === k)!;
+    ok(f("consoleLocation").type === "select" && (f("consoleLocation").options || []).join() === CONSOLE_LOCATIONS.join() &&
+       f("controls").label === "Architectural control — manufacturer / model" && f("electricalService").label === "Panel power feeds & locations" &&
+       f("plugType").label === "Plug type" && (f("plugType").options || []).join() === PLUG_TYPES.join(),
+      "#344 B2: lighting field labels and lists");
+  }
+  {
+    const rf = grp("rigging").fields;
+    ok(rf.find((x) => x.key === "gridHeight")?.bind === "gridH" && rf.find((x) => x.key === "loadingGalleryNotes")?.bind === "loadingGallery" &&
+       !rf.some((x) => x.key === "battenCount" || x.key === "linesetCount"), "#344 B2: rigging binds grid height / loading gallery; no batten or lineset count");
+  }
+  ok(grp("av").fields.some((x) => x.key === "conditionLevel" && x.type === "condition" && x.label === "Condition") && !fkeys("av").includes("condition"),
+    "#344 B2: AV condition is a condition-type field");
+  ok(BEAM_FIELDS.slice(0, 3).map((f) => `${f.key}:${f.type}:${f.label}`).join("|") ===
+       "structuralDrawingOnFile:check:Structural drawing on file|brickDrawingOnFile:check:Brick drawing on file|cwElevationOnFile:check:CW Elevation sheet on file" &&
+     !BEAM_FIELDS.some((f) => f.key === "hhSheet" || f.key === "brickDrawing"),
+    "#344 B2: Beams starts with the three drawing checks (no H&H / brick)");
+  ok(!disciplineHasData({ items: {} }, [], "curtain") && disciplineHasData({ items: { Legs: { qty: "4" } } }, [], "curtain") && disciplineHasData({ linesetN: 0 }, [], "rigging"),
+    "#344 B2: disciplineHasData ignores {} and counts a number");
+  ok(SECTION_ORDER.indexOf("finalQuestions") === SECTION_ORDER.indexOf("project") + 1 && SECTION_ORDER.indexOf("recap") === SECTION_ORDER.indexOf("finalQuestions") + 1 &&
+     STEP_BY_ID.finalQuestions === 5 && GROUP_BY_ID.finalQuestions === "wrapup", "#344 B2: Final questions sits between Existing materials & quote and the recap");
+  ok(!sectionVisible({ scope: ["rigging"] }, "finalQuestions") && sectionVisible({ scope: ["curtain"] }, "finalQuestions") && sectionVisible({}, "finalQuestions"),
+    "#344 B2: Final questions needs Curtains in scope");
+  {
+    const blankRec = blankSurvey();
+    ok(["loadingDoorType", "loadingDoorLocation", "loadingDoorWH", "liftRequired", "liftType", "liftWorkingHeight"].every((k) => blankRec[k] === "") && !("linesetQty" in blankRec),
+      "#344 B2: blank() carries the new access fields (linesetQty stays optional)");
+  }
+
+  /* stepAccess */
+  const ac1 = mm({ loadingDoorSize: "Rear dock 10x12", liftNeeded: "Scaffold", liftHeight: "30 ft" } as MigratableSurvey);
+  ok(ac1.loadingDoorLocation === "Rear dock 10x12" && ac1.loadingDoorSize === "Rear dock 10x12" && ac1.liftRequired === "yes" && ac1.liftType === "Scaffolding" && ac1.liftNeeded === "Scaffold" &&
+     hasNote(ac1, "site", "Lift needed — type / height (before #344)", "30 ft") && ac1.liftHeight === "30 ft",
+    "#344 B2 stepAccess: door size → location, Scaffold → Scaffolding, lift height → note; old keys kept");
+  const ac2 = mm({ loadingDoorSize: "Side door", loadingDoorLocation: "Stage left", liftNeeded: "Articulating boom" } as MigratableSurvey);
+  ok(ac2.loadingDoorLocation === "Stage left" && hasNote(ac2, "site", "Loading door location & W × H (before #344)", "Side door") &&
+     ac2.liftRequired === "yes" && !ac2.liftType && hasNote(ac2, "site", "Kind of lift needed (before #344)", "Articulating boom"),
+    "#344 B2 stepAccess: a filled location keeps the old size as a note; an unmapped lift kind is a note");
+  const ac3 = mm({ liftNeeded: "None needed" } as MigratableSurvey);
+  ok(ac3.liftRequired === "no" && !ac3.liftType && notes(ac3).length === 0 && ac3.liftNeeded === "None needed", "#344 B2 stepAccess: None needed → Lift required: no");
+  const ac4 = mm({ liftNeeded: "Scissor lift", liftRequired: "no", liftType: "Scissor >20ft" } as MigratableSurvey);
+  ok(ac4.liftRequired === "no" && ac4.liftType === "Scissor >20ft" && notes(ac4).length === 0, "#344 B2 stepAccess: answered lift fields are never overwritten");
+
+  /* stepMeasureLinks */
+  const ml1 = mm({ disciplines: { rigging: { present: ["Hemp"], gridHeight: "48'", loadingGalleryNotes: "SR, 40'" } } } as MigratableSurvey);
+  ok(ml1.measurements?.gridH === "48'" && ml1.measurements?.loadingGallery === "SR, 40'" && ml1.disciplines?.rigging?.gridHeight === "48'" && notes(ml1).length === 0,
+    "#344 B2 stepMeasureLinks: rigging grid height / loading gallery copy into the measurements");
+  const ml2 = mm({ measurements: { gridH: "50'", loadingGallery: "SR, 40'" }, disciplines: { rigging: { present: ["Hemp"], gridHeight: "48'", loadingGalleryNotes: " SR, 40' " } } } as MigratableSurvey);
+  ok(ml2.measurements?.gridH === "50'" && hasNote(ml2, "dRigging", "Grid height (Rigging, before #344)", "48'") && !notes(ml2).some((n) => n.label.startsWith("Loading gallery")),
+    "#344 B2 stepMeasureLinks: a disagreeing rigging value becomes a note; an equal one doesn't");
+  const ml3 = mm({ disciplines: { rigging: { present: ["Hemp"], linesetCount: "24", battenCount: "30" } } } as MigratableSurvey);
+  ok(ml3.linesetQty === 24 && ml3.disciplines?.rigging?.linesetCount === "24" && hasNote(ml3, "dRigging", "Lineset count / Batten count (before #344)", "Batten count: 30"),
+    "#344 B2 stepMeasureLinks: line set quantity from Lineset count; a different Batten count is a note");
+  const ml4 = mm({ linesets: [{ id: "a" }, { id: "b" }], disciplines: { rigging: { present: ["Hemp"], battenCount: "about 12" } } } as unknown as MigratableSurvey);
+  ok(ml4.linesetQty === 2 && hasNote(ml4, "dRigging", "Lineset count / Batten count (before #344)", "Batten count: about 12"),
+    "#344 B2 stepMeasureLinks: existing rows set the line set quantity");
+  const ml5 = mm({ linesetQty: 9, disciplines: { rigging: { present: ["Hemp"], battenCount: "9", linesetCount: "300" } } } as MigratableSurvey);
+  ok(ml5.linesetQty === 9 && hasNote(ml5, "dRigging", "Lineset count / Batten count (before #344)", "Lineset count: 300"), "#344 B2 stepMeasureLinks: a stored quantity wins; out-of-range counts note");
+
+  /* stepBeamsDrawings */
+  const bd1 = mm({ measurements: { brickDrawing: true, hhSheet: true } });
+  ok(bd1.measurements?.structuralDrawingOnFile === true && bd1.measurements?.cwElevationOnFile === true && bd1.measurements?.brickDrawing === true && bd1.measurements?.hhSheet === true &&
+     hasNote(bd1, "mBeams", "Brick / structural drawing on file (before #344)", "Yes — check whether it was the structural or the brick drawing"),
+    "#344 B2 stepBeamsDrawings: old drawing checks copy forward with a which-drawing note");
+  const bd2 = mm({ measurements: { brickDrawing: true, structuralDrawingOnFile: false, brickDrawingOnFile: true, hhSheet: true, cwElevationOnFile: false } });
+  ok(bd2.measurements?.structuralDrawingOnFile === false && bd2.measurements?.cwElevationOnFile === false && notes(bd2).length === 0,
+    "#344 B2 stepBeamsDrawings: answered drawing checks are never overwritten");
+
+  /* stepScopeRelabels */
+  const sr1 = mm({ disciplines: {
+    rigging: { scope: ["Grid refurbish", "System refurbish", "New grid"] },
+    curtain: { present: ["Fixed pipe", "Cyc / backdrop"], scope: ["New main", "New legs / borders", "Traveler replacement", "Full masking upgrade"] },
+    lighting: { scope: ["Dimmer upgrade"] },
+  } });
+  ok(JSON.stringify(sr1.disciplines?.rigging?.scope) === '["System refurbish","New grid"]', "#344 B2 stepScopeRelabels: rigging relabels and de-duplicates");
+  ok(JSON.stringify(sr1.disciplines?.curtain?.scope) === '["Single curtain replacement","Single set replacement","Other","Full curtain replacement"]' &&
+     sr1.disciplines?.curtain?.scopeOther === "Traveler replacement", "#344 B2 stepScopeRelabels: curtain relabels; Traveler replacement → Other with its text");
+  ok(JSON.stringify(sr1.disciplines?.lighting?.scope) === '["Controls upgrade"]' && JSON.stringify(sr1.disciplines?.curtain?.present) === JSON.stringify([PIPES_LABEL, "Cyc / backdrop"]),
+    "#344 B2 stepScopeRelabels: lighting relabel; curtain Present Fixed pipe → pipes label");
+  const sr2 = mm({ disciplines: { curtain: { scope: ["Traveler replacement"], scopeOther: "Rehang the cyc" } } });
+  ok(JSON.stringify(sr2.disciplines?.curtain?.scope) === '["Other"]' && sr2.disciplines?.curtain?.scopeOther === "Traveler replacement; Rehang the cyc",
+    "#344 B2 stepScopeRelabels: a filled Other text keeps Traveler replacement in front of it");
+
+  /* stepGoalsList */
+  const gl = mm({ disciplines: { rigging: { goals: "- Safer rail\n• Faster changeovers" }, av: { goals: ["kept"] } } });
+  ok(JSON.stringify(gl.disciplines?.rigging?.goals) === '["Safer rail","Faster changeovers"]' && JSON.stringify(gl.disciplines?.av?.goals) === '["kept"]',
+    "#344 B2 stepGoalsList: goal text becomes a list; lists stay");
+
+  /* stepCurtain */
+  const cu1 = mm({ venueClass: "auditorium", disciplines: { curtain: {
+    present: ["Legs", "Borders"], maskingNeeds: "Legs + borders", pipeDiameter: "1.5\"", mounting: "Batten", fabricColor: "Black", fabricWeightOz: "25",
+    finishedWH: "20x30", condition: "Worn", legsBorders: "4 pr", mainCondition: "Faded", trackSeries: "ADC 280",
+    legsQtyPairs: "4", bordersQty: "3", cycScrimFabric: "Muslin", trackOperation: "sr", operation: "Walk-along", lastFlameTest: "March 2023",
+  } } } as MigratableSurvey);
+  const c1 = cu1.disciplines?.curtain as Record<string, unknown>;
+  const it1 = c1.items as Record<string, Record<string, string>>;
+  ok([["Masking needed", "Legs + borders"], ["Pipe diameter", "1.5\""], ["Mounting", "Batten"], ["Fabric / colour", "Black"], ["Fabric weight (oz)", "25"],
+      ["Finished width × height", "20x30"], ["Condition", "Worn"], ["Legs & borders", "4 pr"], ["Main curtain", "Faded"], ["Track series", "ADC 280"]]
+      .every(([l, t]) => hasNote(cu1, "dCurtain", `${l} (before #344)`, t)) && c1.maskingNeeds === "Legs + borders" && c1.trackSeries === "ADC 280",
+    "#344 B2 stepCurtain: removed curtain fields become notes; keys kept");
+  ok(it1?.Legs?.qty === "4" && it1?.Borders?.qty === "3" && c1.legsQtyPairs === "4" && hasNote(cu1, "dCurtain", "Cyc / scrim fabric (before #344)", "Muslin") && !it1?.["Cyc / scrim"],
+    "#344 B2 stepCurtain: legs / borders fold into ticked curtain rows; an unticked cyc stays a note");
+  ok(c1.trackOperation === "SR" && hasNote(cu1, "dCurtain", "Operation (before #344)", "Walk-along") && c1.operation === "Walk-along", "#344 B2 stepCurtain: track operation normalises; other operation text is a note");
+  ok(c1.lastFlameTest === "2023-03" && !notes(cu1).some((n) => n.label.startsWith("Last flame")), "#344 B2 stepCurtain: last flame test parses to a month");
+  const cu2 = mm({ disciplines: { curtain: { present: ["Legs"], items: { Legs: { qty: "6" } }, legsQtyPairs: "4", trackOperation: "Both sides", operation: "SL", lastFlameTest: "a while ago" } } });
+  const c2 = cu2.disciplines?.curtain as Record<string, unknown>;
+  ok((c2.items as Record<string, Record<string, string>>).Legs.qty === "6" && hasNote(cu2, "dCurtain", "Legs quantity (pairs) (before #344)", "4"),
+    "#344 B2 stepCurtain: a filled row isn't overwritten; the old quantity is a note");
+  ok(c2.trackOperation === "Both sides" && hasNote(cu2, "dCurtain", "Track operation (before #344)", "Both sides") && hasNote(cu2, "dCurtain", "Operation (before #344)", "SL"),
+    "#344 B2 stepCurtain: unmapped track operation stays stored + noted; a disagreeing SL/SR operation is a note");
+  ok(c2.lastFlameTest === "a while ago" && hasNote(cu2, "dCurtain", "Last flame test (before #344)", "a while ago"), "#344 B2 stepCurtain: an unparseable flame test date stays + notes");
+  const cu3 = mm({ disciplines: { curtain: { operation: "sl", lastFlameTest: "2024-05" } } });
+  ok((cu3.disciplines?.curtain as Record<string, unknown>).trackOperation === "SL" && (cu3.disciplines?.curtain as Record<string, unknown>).lastFlameTest === "2024-05" && notes(cu3).length === 0,
+    "#344 B2 stepCurtain: SL/SR operation fills an empty track operation");
+
+  /* stepLighting */
+  const li1 = mm({ disciplines: { lighting: { fixtureQty: "60", fixtureTypes: "Source 4", console: "ETC Ion", fohPositions: "2 pipes", positions: "Electrics 1-3", circuitAccess: "Fair", consoleLocation: "Booth at rear" } } });
+  const l1 = li1.disciplines?.lighting as Record<string, unknown>;
+  ok([["Fixture quantity", "60"], ["Fixture types", "Source 4"], ["Control console", "ETC Ion"], ["FOH positions", "2 pipes"], ["Lighting positions", "Electrics 1-3"], ["Circuit accessibility", "Fair"]]
+      .every(([l, t]) => hasNote(li1, "dLighting", `${l} (before #344)`, t)) && l1.fixtureQty === "60" && l1.circuitAccess === "Fair",
+    "#344 B2 stepLighting: removed lighting fields become notes; keys kept");
+  ok(l1.consoleLocation === "Booth" && hasNote(li1, "dLighting", "Console location (before #344)", "Booth at rear"), "#344 B2 stepLighting: console location maps to Booth, extra words noted");
+  const li2 = mm({ disciplines: { lighting: { consoleLocation: "Rear balcony" } } });
+  const l2 = li2.disciplines?.lighting as Record<string, unknown>;
+  ok(l2.consoleLocation === "Other" && l2.consoleLocationOther === "Rear balcony" && notes(li2).length === 0, "#344 B2 stepLighting: other console locations go to Other + its text");
+  const li3 = mm({ disciplines: { lighting: { consoleLocation: "Stage", positions: ["FOH 1"] } } });
+  ok((li3.disciplines?.lighting as Record<string, unknown>).consoleLocation === "Stage" && notes(li3).length === 0, "#344 B2 stepLighting: a listed location and a non-string positions are left alone");
+
+  /* stepAvCondition */
+  const av1 = mm({ disciplines: { av: { condition: "good" } } });
+  ok((av1.disciplines?.av as Record<string, unknown>).conditionLevel === 3 && (av1.disciplines?.av as Record<string, unknown>).condition === "good" && notes(av1).length === 0,
+    "#344 B2 stepAvCondition: an exact word maps to a level");
+  const av2 = mm({ disciplines: { av: { condition: "Speakers blown", conditionLevel: 1 } } });
+  ok((av2.disciplines?.av as Record<string, unknown>).conditionLevel === 1 && hasNote(av2, "dAv", "Condition (before #344)", "Speakers blown"),
+    "#344 B2 stepAvCondition: free text is a note; a set level is kept");
+
+  /* stepLinesets */
+  const ls1 = mm({ linesets: [{ id: "a", cond: "G" }, { id: "b", cond: "X" }, { id: "c", cond: "P", condition: 4 }, { id: "d", cond: "" }] } as unknown as MigratableSurvey);
+  const rows = (ls1 as unknown as { linesets: Array<Record<string, unknown>> }).linesets;
+  ok(rows[0].condition === 3 && rows[1].condition === 0 && rows[2].condition === 4 && rows[3].condition === undefined && rows[0].cond === "G",
+    "#344 B2 stepLinesets: lineset codes map to condition levels once");
+
+  /* goals lists survive the save sanitizer and still reach the Estimator as text (interim; B7 adds goalListsFromSurvey) */
+  {
+    const san = sanitizeSurveyDisciplineGoals({ rigging: { goals: [" Safer rail ", "", "x".repeat(400), ...Array(30).fill("g")] }, av: { goals: ["  "] } }) as Record<string, Record<string, unknown>>;
+    const list = san.rigging.goals as string[];
+    ok(Array.isArray(list) && list.length === 20 && list[0] === "Safer rail" && list[1].length === 300 && !("goals" in san.av),
+      "#344 B2: the save sanitizer keeps a goals list (≤ 20 × 300, blanks dropped)");
+    ok(goalsFromSurvey(gl).rigging === "Safer rail\nFaster changeovers", "#344 B2: a migrated goals list still reads as text for the Estimator");
+  }
+
+  /* idempotency over everything above */
+  const fixtures: MigratableSurvey[] = [ac1, ac2, ac3, ml1, ml2, ml3, ml4, ml5, bd1, sr1, sr2, gl, cu1, cu2, cu3, li1, li2, av1, av2, ls1];
+  ok(fixtures.every((f) => JSON.stringify(mm(f)) === JSON.stringify(f)), "#344 B2: migrating twice gives identical JSON");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

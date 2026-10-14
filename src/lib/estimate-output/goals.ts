@@ -8,8 +8,17 @@ import { CLIENT_GOALS_MAX, DISCIPLINES, DISCIPLINE_LABEL, cleanPlainText, effect
 
 export type DisciplineGoals = Partial<Record<ScopeDiscipline, string>>;
 
+/** #344: a survey goal list — at most 20 goals of ≤ 300 characters, blanks dropped. */
+const GOAL_LINE_MAX = 300;
+const GOAL_LINES_MAX = 20;
+function cleanGoalList(v: unknown[]): string[] {
+  return v.map((x) => cleanPlainText(x, GOAL_LINE_MAX)).filter(Boolean).slice(0, GOAL_LINES_MAX);
+}
+
 /** R4: each discipline's `goals` cleaned (trimmed, ≤ 1,000); a blank or
- *  non-string one removed; every other field and key untouched. */
+ *  non-string one removed; every other field and key untouched. #344: a goals
+ *  list (the read-time migration turns goal text into one) is kept as a cleaned
+ *  list, removed when nothing is left. */
 export function sanitizeSurveyDisciplineGoals(disciplines: unknown): unknown {
   if (!disciplines || typeof disciplines !== "object" || Array.isArray(disciplines)) return disciplines;
   const out: Record<string, unknown> = {};
@@ -19,6 +28,13 @@ export function sanitizeSurveyDisciplineGoals(disciplines: unknown): unknown {
       continue;
     }
     const d = { ...(v as Record<string, unknown>) };
+    if (Array.isArray(d.goals)) {
+      const list = cleanGoalList(d.goals);
+      if (list.length) d.goals = list;
+      else delete d.goals;
+      out[k] = d;
+      continue;
+    }
     const g = cleanPlainText(d.goals, CLIENT_GOALS_MAX);
     if (g) d.goals = g;
     else delete d.goals;
@@ -33,13 +49,16 @@ export function withSanitizedSurveyGoals<T extends object>(patch: T): T {
   return { ...patch, disciplines: sanitizeSurveyDisciplineGoals((patch as { disciplines?: unknown }).disciplines) } as T;
 }
 
-/** The four disciplines' goals, cleaned again (the sync push path has no sanitizer — R4). */
+/** The four disciplines' goals, cleaned again (the sync push path has no sanitizer — R4). #344: a goals list
+ *  reads as its lines joined with newlines, so the Estimator, cover and package see the same text as before. */
 export function goalsFromSurvey(s: { disciplines?: unknown } | null | undefined): DisciplineGoals {
   const out: DisciplineGoals = {};
   const d = s && s.disciplines && typeof s.disciplines === "object" ? (s.disciplines as Record<string, unknown>) : {};
   for (const k of DISCIPLINES) {
     const branch = d[k];
-    const g = branch && typeof branch === "object" ? cleanPlainText((branch as Record<string, unknown>).goals, CLIENT_GOALS_MAX) : "";
+    const raw = branch && typeof branch === "object" ? (branch as Record<string, unknown>).goals : undefined;
+    const text = Array.isArray(raw) ? raw.map((x) => cleanPlainText(x, CLIENT_GOALS_MAX)).filter(Boolean).join("\n") : raw;
+    const g = cleanPlainText(text, CLIENT_GOALS_MAX);
     if (g) out[k] = g;
   }
   return out;

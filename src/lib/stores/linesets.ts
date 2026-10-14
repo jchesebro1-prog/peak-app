@@ -13,6 +13,7 @@
  *
  * Pure module — no DB imports.
  */
+import type { ConditionLevel } from "../field-lists";
 
 export type LinesetType = "" | "D" | "M" | "R" | "L" | "B" | "C" | "S" | "E" | "T" | "O";
 export type LinesetCond = "" | "G" | "F" | "P" | "X";
@@ -52,6 +53,8 @@ export interface LinesetRow {
   trimHigh: string;
   cond: LinesetCond;
   notes: string;
+  /** #344 B2 — Bad → New level (0–4); old `cond` codes map on read (G 3, F 2, P 1, X 0) */
+  condition?: ConditionLevel;
 }
 
 export function linesetTypeLabel(t: LinesetType): string {
