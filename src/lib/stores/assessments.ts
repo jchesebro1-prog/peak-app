@@ -7,7 +7,7 @@ import { ASSESSMENT_DEF, VISIT_TYPES, allModules, allQuestions, getDef } from "@
 import type { ScopeCode } from "@/lib/assessments/defs/types";
 import { mergeAnswers, validateAnswer, type Answer, type Answers } from "@/lib/assessments/answers";
 import { evaluate, type ScopeSel } from "@/lib/assessments/evaluate";
-import { PHOTO_CAPS, photoPathInScope, type PhotoRef } from "@/lib/assessments/photos";
+import { PHOTO_CAPS, inlinePhotoProblem, photoPathInScope, type PhotoRef } from "@/lib/assessments/photos";
 import { getCompany } from "@/lib/identity/companies";
 import { getSite } from "@/lib/identity/sites";
 import { can } from "@/lib/team";
@@ -492,6 +492,42 @@ export async function saveAssessment(
     const doc = await write(next);
     return !rej && dropped.length ? { ok: true as const, doc, dropped } : { ok: true as const, doc };
   });
+}
+
+/** A photo's finished file: a private Blob path, or (local dev without Blob) a small inline JPEG data URL. */
+export type FinalPhotoRef = { blobPath: string; inline?: undefined } | { inline: string; blobPath?: undefined };
+
+/**
+ * An uploaded photo is now on the server: replace its `pending` marker with the file. Only a photo the assessment
+ * already lists is finished (the queue retries until the capture's own save has arrived, so a ref is never invented
+ * here and its capture time and links are kept). A path must sit in this assessment's folder; an inline image must
+ * really be a JPEG ≤ 400 KB. A photo that already has its file is left alone and its stored ref returned
+ * (`already: true`), so a retry — or a second upload — can't replace or duplicate it. Goes through `saveAssessment`
+ * in action mode, so a completed assessment refuses it.
+ */
+export async function applyFinalizedPhoto(
+  assessmentId: string,
+  photoId: string,
+  ref: { blobPath?: string | null; inline?: string | null },
+  user: { id: string },
+): Promise<{ ok: true; ref: FinalPhotoRef; already?: true } | Err> {
+  const cur = await getAssessment(assessmentId);
+  if (!cur) return fail("Assessment not found");
+  const blobPath = typeof ref?.blobPath === "string" && ref.blobPath ? ref.blobPath : undefined;
+  const inline = typeof ref?.inline === "string" && ref.inline ? ref.inline : undefined;
+  if (!!blobPath === !!inline) return fail("A photo needs a stored file path or an inline image, not both");
+  if (blobPath && !photoPathInScope(blobPath, assessmentId)) return fail("The file path is outside this assessment");
+  if (inline) { const bad = inlinePhotoProblem(inline); if (bad) return fail(bad); }
+  const p = cur.photos.find((x) => x.id === photoId);
+  if (!p) return fail("That photo isn't on this assessment yet");
+  if (p.blobPath) return { ok: true, ref: { blobPath: p.blobPath }, already: true };
+  if (p.inline && inline === p.inline) return { ok: true, ref: { inline: p.inline }, already: true };
+  const saved = await saveAssessment(assessmentId, { photos: [blobPath ? { id: photoId, blobPath } : { id: photoId, inline }] as PhotoRef[] }, user);
+  if (!saved.ok) return saved;
+  const done = saved.doc.photos.find((x) => x.id === photoId);
+  if (done?.blobPath) return { ok: true, ref: { blobPath: done.blobPath } };
+  if (done?.inline) return { ok: true, ref: { inline: done.inline } };
+  return fail("The photo could not be saved");
 }
 
 /** The editor has shown (or re-entered) these rejected items: remove every syncRejects entry with one of `keys`. */
