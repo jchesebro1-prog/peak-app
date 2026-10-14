@@ -138,6 +138,7 @@ const ROUTES = [
   "/venue-assessments",
   "/assessments", // #337 assessments engine
   "/assessments/new",
+  "/assessments/findings", // #337 Task 9: the findings register
   "/field-work",
   "/design-studio/lineset",
   "/design-studio/motors",

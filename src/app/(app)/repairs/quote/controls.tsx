@@ -135,6 +135,8 @@ export type BuilderInitial = {
   marginPts?: number | null;
   /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
   stampedTierMargin?: number | null;
+  /** #337: the assessment findings this new quote is built from (posted as `findingKeys`; linked on first save). */
+  findingKeys?: string[];
 };
 
 /* ---------- inlined pure pricing (port of repair-engine.ts) ---------- */
@@ -628,6 +630,8 @@ export function QuoteBuilder({
     fd.set("sourceRef", source?.refId || "");
     fd.set("sourceLog", source?.logId != null ? String(source.logId) : "");
     fd.set("sourceLabel", source?.label || "");
+    // #337: the findings intake rides along as one comma-separated field — absent for every other quote.
+    if (initial.findingKeys?.length) fd.set("findingKeys", initial.findingKeys.join(","));
     return fd;
   }
   function doSave() {
@@ -741,6 +745,24 @@ export function QuoteBuilder({
                   </Link>
                 </>
               )}
+            </div>
+          )}
+          {!editingId && !!initial.findingKeys?.length && (
+            <div
+              role="status"
+              style={{
+                display: "inline-block",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#3a3f4a",
+                background: "#f1f2f5",
+                border: "1px solid #e4e7ec",
+                borderRadius: 8,
+                padding: "5px 10px",
+                marginTop: 8,
+              }}
+            >
+              Quoting {initial.findingKeys.length} assessment finding{initial.findingKeys.length === 1 ? "" : "s"}
             </div>
           )}
         </div>

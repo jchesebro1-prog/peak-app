@@ -36,6 +36,7 @@ import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
 import { grossQuoteValue } from "@/lib/rewards/credit-line";
 import { netServiceTotal } from "@/lib/rewards/service-credit";
 import { getLiftRate } from "@/lib/service-quote-inputs";
+import { findingKeysForSave, linkOnCreate } from "@/lib/assessments/quote-from-findings";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -291,9 +292,13 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
     },
   };
 
+  // #337: a quote started from assessment findings (the builder's `findingKeys` field) carries their keys and
+  // links them once created. Absent → [] and the create below writes exactly what it always wrote.
+  const findingKeys = await findingKeysForSave(formData.get("findingKeys"), customerId, !!editingId);
   const q = editingId
     ? await updateQuote(editingId, payload)
-    : await createQuote({ ...payload, owner: user.name });
+    : await createQuote({ ...payload, owner: user.name, ...(findingKeys.length ? { findingKeys } : {}) });
+  await linkOnCreate(findingKeys, q?.id, user, !!editingId);
   // D205: first save of a "Change type" replacement retires the old draft.
   // The new quote already exists, so a failed retire is logged, never thrown —
   // a throw would read as "nothing was written" and a re-save would duplicate.

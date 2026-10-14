@@ -37,6 +37,15 @@ import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromF
 import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
+import { buildQuote, create as createQuote, get as getQuote } from "../src/lib/stores/quotes";
+import { CATEGORIES as REPAIR_CATEGORIES, PRIORITIES as REPAIR_PRIORITIES } from "../src/lib/stores/repair-jobs";
+import type { SpecSection } from "../src/app/(app)/estimator/types";
+import {
+  ONE_VENUE_ERROR, QUOTE_FINDINGS_MAX, REPAIR_CATEGORY, findingLineText, findingsEstimatorSection, findingsSourceLabel, parseFindingKeys,
+  quoteSelectionProblem, repairCategoryFor, repairPrefillFromFindings,
+} from "../src/lib/assessments/findings-quote";
+import { REGISTER_COLUMNS, parseRegisterFilters, registerCells, registerCsvName, registerList, registerQuery } from "../src/lib/assessments/register";
+import { findingKeysForSave, linkOnCreate, quoteFromFindings } from "../src/lib/assessments/quote-from-findings";
 
 const ROOT = process.cwd();
 
@@ -520,6 +529,7 @@ export async function assessmentChecks(ok: Ok) {
   ok(!holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: "  " } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: [] } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: NaN } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 1931 } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 0 } }), "holds: blank / [] / NaN profile value never satisfies lt");
   editorModelChecks(ok);
   task8Checks(ok);
+  task9Checks(ok);
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
@@ -601,6 +611,7 @@ export async function assessmentDbChecks(ok: Ok) {
   await assessmentPhotoDbChecks(ok);
   await assessmentEditorDbChecks(ok);
   await task8DbChecks(ok);
+  await task9DbChecks(ok);
 }
 
 /** Task 5 — the stores, printed-id allocation under the advisory lock, and the push-handler branches. */
@@ -1509,6 +1520,178 @@ async function task8DbChecks(ok: Ok) {
   } finally {
     await db.delete(DOC_TABLES.findings).where(like(DOC_TABLES.findings.id, "fd_t8%"));
     if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    await dropAssessIdentityFixtures();
+  }
+}
+
+/* ---------- Task 9: the findings register, Quote these findings, CSV ---------- */
+
+const t9Finding = (o: Partial<Finding> = {}): Finding => ({
+  key: "fd_t9pure0000000001", printedId: "TSTA-HAL-RIG-001", customerId: "c1", siteId: "s1", category: "RIG",
+  description: "Frayed lift line", assessmentId: "AS-1001", questionKeys: [], photoIds: [], rating: "needs", quoteRefs: [],
+  status: "open", history: [], createdAt: 1, createdBy: "u1", updatedAt: 1, seq: 1, companyCode: "TSTA", siteCode: "HAL", ...o,
+});
+
+function task9Checks(ok: Ok) {
+  // buildQuote carries findingKeys only when set
+  const withKeys = buildQuote("Q-T9", { name: "x", findingKeys: ["fd_aaaaaaaaaaaaaaaa"] }, "repair", null, 1);
+  const without = buildQuote("Q-T9", { name: "x" }, "repair", null, 1);
+  const emptyKeys = buildQuote("Q-T9", { name: "x", findingKeys: [] }, "repair", null, 1);
+  ok(withKeys.findingKeys?.join() === "fd_aaaaaaaaaaaaaaaa" && !("findingKeys" in without) && !("findingKeys" in emptyKeys), "quote findingKeys: buildQuote keeps them when set; absent (no key at all) when unset or empty");
+  ok(JSON.stringify(buildQuote("Q-T9", { name: "x", owner: "A" }, "system", null, 7)) === JSON.stringify(buildQuote("Q-T9", { name: "x", owner: "A", findingKeys: undefined }, "system", null, 7)), "quote findingKeys: a quote without findings is built byte-identically");
+
+  // finding keys from a URL / form field
+  const k1 = "fd_0123456789abcdef", k2 = "fd_fedcba9876543210";
+  ok(parseFindingKeys(` ${k1},${k2},${k1},fd_BAD,nope,fd_0123`).join() === `${k1},${k2}` && parseFindingKeys([k2, 3, k1]).join() === `${k2},${k1}` && parseFindingKeys(undefined).length === 0, "quote keys: fd_ keys only, trimmed, de-duplicated, first-seen order");
+  ok(parseFindingKeys(Array.from({ length: 150 }, (_, i) => "fd_" + String(i).padStart(16, "0"))).length === QUOTE_FINDINGS_MAX, "quote keys: capped at QUOTE_FINDINGS_MAX");
+
+  // the selection rule
+  ok(quoteSelectionProblem([t9Finding(), t9Finding({ key: "fd_t9pure0000000002", siteId: "s2" })]) === ONE_VENUE_ERROR && ONE_VENUE_ERROR === "Pick findings from one venue", "quote selection: two venues → \"Pick findings from one venue\"");
+  ok(quoteSelectionProblem([t9Finding(), t9Finding({ key: "fd_t9pure0000000002", customerId: "c2" })]) === ONE_VENUE_ERROR, "quote selection: two customers → refused the same way");
+  ok(quoteSelectionProblem([t9Finding({ voided: { by: "u", at: 1, reason: "x" } })]) !== null && quoteSelectionProblem([]) !== null && quoteSelectionProblem([t9Finding(), t9Finding({ key: "fd_t9pure0000000002" })]) === null, "quote selection: voided or empty refused; one venue is fine");
+
+  // category / priority mapping
+  ok(REPAIR_CATEGORY.RIG === "rigging" && REPAIR_CATEGORY.ELC === "electrics" && REPAIR_CATEGORY.STR === "structural" && REPAIR_CATEGORY.HAZ === "other" && REPAIR_CATEGORY.GEN === "other", "repair intake: RIG→rigging, ELC→electrics, STR→structural, HAZ/GEN→other");
+  ok(repairCategoryFor(["ELC", "RIG", "RIG"]) === "rigging" && repairCategoryFor(["HAZ", "GEN", "RIG"]) === "other" && repairCategoryFor(["ELC", "RIG"]) === "electrics" && repairCategoryFor([]) === "other", "repair intake: the most common mapped category wins; a tie goes to the first seen");
+  const repairCats = new Set<string>(REPAIR_CATEGORIES.map((c) => c.key));
+  const repairPris = new Set<string>(REPAIR_PRIORITIES.map((p) => p.key));
+  ok(Object.values(REPAIR_CATEGORY).every((c) => repairCats.has(c)) && repairPris.has("urgent") && repairPris.has("standard"), "repair intake: every mapped category / priority is a real repair builder key");
+
+  // the repair builder's pre-fill
+  const fa = t9Finding({ rating: "immediate", description: "Frayed\n  lift line", recommendedAction: "Take the set out of service" });
+  const fb = t9Finding({ key: "fd_t9pure0000000002", printedId: "TSTA-HAL-ELC-001", category: "ELC", description: "Loose dimmer cover" });
+  const pre = repairPrefillFromFindings([fa, fb], "Assess Hall");
+  ok(pre.scopeItems.length === 2 && pre.scopeItems[0] === "TSTA-HAL-RIG-001 — Frayed lift line" && pre.scopeItems[1].startsWith("TSTA-HAL-ELC-001 — "), "repair intake: one scope item per finding, \"<printedId> — <description>\" (whitespace collapsed)");
+  ok(pre.notes === "TSTA-HAL-RIG-001: Take the set out of service" && pre.priority === "urgent" && pre.category === "rigging", "repair intake: notes carry each recommended action; any immediate → urgent");
+  ok(repairPrefillFromFindings([fb], "Assess Hall").priority === "standard", "repair intake: no immediate finding → standard");
+  ok(pre.source.kind === "direct" && pre.source.label === "Assessment findings TSTA-HAL-RIG-001, TSTA-HAL-ELC-001" && pre.quoteName === "Repairs — Assess Hall" && pre.findingKeys.join() === `${fa.key},${fb.key}`, "repair intake: a direct source labelled with the printed ids; the keys ride along");
+  ok(findingLineText(t9Finding({ description: "x".repeat(400) })).length === 240 && findingLineText(t9Finding({ printedId: null })).startsWith("TSTA-HAL-RIG-… — "), "repair intake: long lines are capped; an unnumbered finding shows its pending label");
+  ok(findingsSourceLabel(Array.from({ length: 12 }, (_, i) => t9Finding({ printedId: `X-Y-RIG-${i}` }))).endsWith("X-Y-RIG-9 + 2 more"), "repair intake: the source label lists ten ids, then + N more");
+
+  // the Estimator system
+  const sec = findingsEstimatorSection([fa, fb], { sectionId: "sys9", venueName: "Assess Hall", freightPct: 4 });
+  ok(sec.id === "sys9" && sec.kind === "materials" && sec.items.length === 2 && sec.items.every((it) => it.qty === 1 && it.unit === "ea" && it.cost === 0 && it.price === 0 && it.sku === "" && it.custom === true) && sec.items[0].desc.startsWith("TSTA-HAL-RIG-001 — ") && sec.items.map((it) => it.id).join() === "1,2", "estimator findings: one zero-priced ea line per finding, desc starts with the printed id");
+
+  // register filters + sort
+  const pf = parseRegisterFilters({ customer: " c1 ", category: "RIG", rating: "bogus", status: "quoted", priority: "high", budget: "lt10k", voided: "1", venue: ["s1", "s2"] });
+  ok(pf.customer === "c1" && pf.venue === "s1" && pf.category === "RIG" && pf.rating === "" && pf.status === "quoted" && pf.priority === "high" && pf.budget === "lt10k" && pf.voided, "register filters: read from the query; unknown values drop");
+  ok(registerQuery(pf) === "customer=c1&venue=s1&category=RIG&status=quoted&priority=high&budget=lt10k&voided=1" && JSON.stringify(parseRegisterFilters(new URLSearchParams(registerQuery(pf)))) === JSON.stringify(pf), "register filters: round-trip through the query string");
+  const list = [
+    t9Finding({ key: "fd_s0000000000000001", printedId: "A-B-RIG-010", rating: "good" }),
+    t9Finding({ key: "fd_s0000000000000002", printedId: "A-B-RIG-002", rating: "needs", priority: "low" }),
+    t9Finding({ key: "fd_s0000000000000003", printedId: "A-B-RIG-009", rating: "immediate" }),
+    t9Finding({ key: "fd_s0000000000000004", printedId: "A-B-RIG-003", rating: "needs", priority: "high" }),
+    t9Finding({ key: "fd_s0000000000000005", printedId: "A-B-RIG-001", rating: "immediate", voided: { by: "u", at: 1, reason: "x" } }),
+  ];
+  ok(registerList(list, parseRegisterFilters({})).map((f) => f.printedId).join() === "A-B-RIG-009,A-B-RIG-003,A-B-RIG-002,A-B-RIG-010", "register sort: immediate pinned first, then rating, priority, printed id; voided hidden");
+  ok(registerList(list, parseRegisterFilters({ voided: "1" })).at(-1)?.printedId === "A-B-RIG-001" && registerList(list, parseRegisterFilters({ priority: "high" })).length === 1, "register: voided shown last with ?voided=1; priority filters");
+
+  // the CSV rows
+  ok(REGISTER_COLUMNS.join("|") === "Finding ID|Building and space|Category|Description|Photos|Rating at visit|Audit reference|Inspector rating|Recommended action|Priority|Budget tier|Owner|Quote reference|Repair|Verified|Next due|Status", "register csv: the brief's columns, in order");
+  const full = t9Finding({
+    description: "=HYPERLINK(\"x\")", spaceLabel: "Stage", location: "LS 14", photoIds: ["p1", "p2"], auditRef: { item: "A-12", estimate: 4500 },
+    specialist: { rating: "good", standard: "ANSI E1.47" }, recommendedAction: "Replace", priority: "high", budgetTier: "lt10k",
+    owner: { kind: "contractor", name: "J. Rigger" }, quoteRefs: ["Q-1", "Q-2"], repair: { date: Date.UTC(2026, 9, 1, 18), by: "Peak", work: "New line" },
+    verified: { by: "Jeff", at: Date.UTC(2026, 9, 2, 18) }, nextDue: Date.UTC(2027, 9, 2, 18), status: "verified",
+  });
+  const cells = registerCells(full, { siteName: "Assess Hall", quoteLabels: { "Q-1": "RIG-1001" } });
+  ok(cells.length === REGISTER_COLUMNS.length && cells.join("|") === "TSTA-HAL-RIG-001|Assess Hall · Stage · LS 14|RIG|=HYPERLINK(\"x\")|2|Needs attention|A-12 ($4,500)|Good — ANSI E1.47|Replace|High|Under $10,000|J. Rigger (Contractor)|RIG-1001, Q-2|2026-10-01 — Peak — New line|Jeff — 2026-10-02|2027-10-02|Verified", "register csv: one row's cells in column order (labels, dates as Chicago days, quote labels)");
+  const csv = toCsv([...REGISTER_COLUMNS], [cells]);
+  ok(csv.split("\r\n")[1].startsWith("TSTA-HAL-RIG-001,Assess Hall · Stage · LS 14,RIG,\"'=HYPERLINK(\"\"x\"\")\",2,"), "register csv: a formula-looking description is guarded and quoted; the photo count stays a number");
+  ok(registerCells(t9Finding({ voided: { by: "u", at: 1, reason: "x" } }), { siteName: "H" }).at(-1) === "Voided (Open)" && registerCsvName(Date.UTC(2026, 9, 13, 18)) === "findings-2026-10-13.csv", "register csv: a voided row says so; the file is findings-<date>.csv");
+
+  // source pins: the repair builder's findings intake leaves every other path alone
+  const ra = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/actions.ts"), "utf8");
+  ok(ra.includes("await createQuote({ ...payload, owner: user.name, ...(findingKeys.length ? { findingKeys } : {}) })") && ra.includes("await findingKeysForSave(formData.get(\"findingKeys\"), customerId, !!editingId)") && ra.includes("await linkOnCreate(findingKeys, q?.id, user, !!editingId)"), "repair builder: persist carries findingKeys on create only and links them once created");
+  const rc = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/controls.tsx"), "utf8");
+  ok(rc.includes('if (initial.findingKeys?.length) fd.set("findingKeys", initial.findingKeys.join(","));') && rc.includes("Quoting {initial.findingKeys.length} assessment finding"), "repair builder: the findingKeys field is posted only for a findings intake, with its banner");
+  const rp = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/page.tsx"), "utf8");
+  ok(rp.includes('const findingsParam = !editId && !inspId && preCustomer ? one(sp.findings) : "";') && rp.includes("repairPrefillFromFindings(findingsIntake.list, findingsIntake.venueName)"), "repair builder: ?findings= is read only for a new quote for that customer");
+  const fc = readFileSync(join(ROOT, "src/app/(app)/assessments/findings/controls.tsx"), "utf8");
+  ok(/from "\.\.\/\[id\]\/finding-sheet"/.test(fc) && !/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(fc) && !/register-server/.test(fc), "register: reuses the editor's finding sheet and imports no store");
+  const smoke = readFileSync(join(ROOT, "scripts/smoke-routes.ts"), "utf8");
+  ok(smoke.includes('"/assessments/findings"'), "register: /assessments/findings is a smoke route");
+}
+
+/** Task 9 — Quote these findings against the real stores: the Estimator quote links its findings, mixed venues are
+ *  refused, the repair kind only hands over the builder's intake, and the builder's link-on-create helper. */
+async function task9DbChecks(ok: Ok) {
+  const db = await getDb();
+  const assessments: string[] = [];
+  const quoteIds: string[] = [];
+  const k9 = (n: number) => `fd_t9${String(n).padStart(14, "0")}`;
+  const U = { id: "u1", name: "Test Estimator" };
+  try {
+    await assessIdentityFixtures();
+    const { co1, co2, site1, site2, site3 } = ASSESS_FIX;
+    const mkA = async (customerId: string, siteId: string) => {
+      const a = await createAssessment({ visitType: "condition", customerId, siteId, visitDate: Date.UTC(2026, 9, 13), assessorId: "u1" }, "u1");
+      assessments.push(a.id);
+      registerFixture("assessments", a.id);
+      return a;
+    };
+    const a1 = await mkA(co1, site1);
+    const a2 = await mkA(co1, site2);
+    const a3 = await mkA(co2, site3);
+    const mk = (n: number, a: Assessment, o: Partial<Finding> = {}) => saveFinding({ key: k9(n), customerId: a.customerId, siteId: a.siteId, assessmentId: a.id, category: "RIG", rating: "needs", description: `T9 finding ${n}`, ...o }, U);
+    const [f1, f2, f3, f4, f5] = [
+      await mk(1, a1, { recommendedAction: "Replace the line" }),
+      await mk(2, a1, { category: "ELC" }),
+      await mk(3, a2),
+      await mk(4, a3),
+      await mk(5, a1),
+    ];
+    ok(f1.ok && f2.ok && f3.ok && f4.ok && f5.ok, "quote db: fixtures — findings on two venues of one customer and one of another");
+    if (!f1.ok || !f2.ok || !f3.ok || !f4.ok || !f5.ok) return;
+
+    // mixed venues refused, nothing created or linked
+    const mixed = await quoteFromFindings([k9(1), k9(3)], "estimator", U);
+    ok(!mixed.ok && mixed.error === "Pick findings from one venue" && (await getFinding(k9(1)))!.quoteRefs.length === 0, "quote db: findings from two venues are refused (\"Pick findings from one venue\") and nothing is linked");
+    const mixedCo = await quoteFromFindings([k9(1), k9(4)], "repair", U);
+    ok(!mixedCo.ok && mixedCo.error === "Pick findings from one venue", "quote db: findings from two customers are refused too");
+    ok(!(await quoteFromFindings([k9(1), "fd_t9nothere0000000"], "estimator", U)).ok, "quote db: a key that names no finding refuses the selection");
+
+    // repair: only the builder's intake — no quote created. Printed-id order: f2 is ELC, which sorts before RIG.
+    const ordered = [f1.doc, f2.doc].sort((a, b) => a.printedId!.localeCompare(b.printedId!, undefined, { numeric: true }));
+    ok(ordered[0].key === k9(2), "quote db: precondition — the ELC finding's printed id sorts first");
+    const rep = await quoteFromFindings([k9(1), k9(2)], "repair", U);
+    ok(rep.ok && !rep.quote && rep.href === `/repairs/quote?customer=${encodeURIComponent(co1)}&findings=${encodeURIComponent(`${k9(2)},${k9(1)}`)}` && (await getFinding(k9(1)))!.status === "open", "quote db: Repair quote hands over /repairs/quote?customer=&findings= (printed-id order) and creates nothing");
+
+    // estimator: a draft quote, linked
+    const est = await quoteFromFindings([k9(2), k9(1)], "estimator", U);
+    ok(est.ok && !!est.quote && est.href === `/estimator?id=${encodeURIComponent(est.quote.id)}`, "quote db: Estimator quote creates a quote and redirects to it");
+    if (est.ok && est.quote) {
+      quoteIds.push(est.quote.id);
+      const q = (await getQuote(est.quote.id))!;
+      const items = ((q.spec as { sections: SpecSection[] }).sections[0]?.items ?? []).filter((it) => !it.bonus);
+      ok(q.status === "draft" && q.source === "estimator" && q.customerId === co1 && q.findingKeys?.join() === `${k9(2)},${k9(1)}` && q.owner === U.name, "quote db: a draft Estimator quote for that customer, carrying the finding keys");
+      ok(items.length === 2 && items[0].desc.startsWith(`${f2.doc.printedId} — `) && items[1].desc.startsWith(`${f1.doc.printedId} — `) && items.every((it) => it.price === 0 && it.qty === 1), "quote db: one zero-priced line per finding, starting with its printed id");
+      const g1 = (await getFinding(k9(1)))!, g2 = (await getFinding(k9(2)))!;
+      ok(g1.status === "quoted" && g2.status === "quoted" && g1.quoteRefs.includes(q.id) && g2.quoteRefs.includes(q.id) && g1.history.at(-1)?.status === "quoted", "quote db: the findings get the quote in quoteRefs and move to quoted (with history)");
+    }
+
+    // the repair builder's save: keys kept only for live findings of the quote's customer, only on create
+    await voidFinding(k9(5), "Entered in error", U);
+    const raw = [k9(3), k9(4), k9(5), "fd_t9nothere0000000", "junk", k9(3)].join(",");
+    ok((await findingKeysForSave(raw, co1, false)).join() === k9(3), "repair save: only live findings of the quote's own customer are kept (other customer, voided, missing, junk dropped)");
+    ok((await findingKeysForSave(raw, co1, true)).length === 0 && (await findingKeysForSave(null, co1, false)).length === 0 && (await findingKeysForSave("", co1, false)).length === 0, "repair save: an edit, or no field, carries no keys");
+    const keys = await findingKeysForSave(k9(3), co1, false);
+    const rq = await createQuote({ name: "T9 repair", customer: "Assess Co One", customerId: co1, quoteType: "repair", source: "repair", owner: U.name, ...(keys.length ? { findingKeys: keys } : {}) });
+    quoteIds.push(rq.id);
+    await linkOnCreate(keys, rq.id, U, true);
+    ok((await getFinding(k9(3)))!.quoteRefs.length === 0, "repair save: an edit never links");
+    await linkOnCreate(keys, rq.id, U, false);
+    const g3 = (await getFinding(k9(3)))!;
+    ok(rq.findingKeys?.join() === k9(3) && g3.status === "quoted" && g3.quoteRefs.join() === rq.id, "repair save: a created repair quote carries its finding keys and links them (quoted)");
+    await linkOnCreate(keys, rq.id, U, false);
+    ok((await getFinding(k9(3)))!.history.filter((h) => h.status === "quoted").length === 1, "repair save: linking twice is a no-op");
+    const plain = await createQuote({ name: "T9 plain", customerId: co1, quoteType: "repair", source: "repair", owner: U.name });
+    quoteIds.push(plain.id);
+    ok(!("findingKeys" in plain), "repair save: a quote without findings has no findingKeys");
+  } finally {
+    await db.delete(DOC_TABLES.findings).where(like(DOC_TABLES.findings.id, "fd_t9%"));
+    if (assessments.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, assessments));
+    if (quoteIds.length) await db.delete(DOC_TABLES.quotes).where(inArray(DOC_TABLES.quotes.id, quoteIds));
     await dropAssessIdentityFixtures();
   }
 }

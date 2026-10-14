@@ -5,7 +5,9 @@
    budget tier, owner, audit reference and the photos it links. Immediate attention adds the hazard-contact
    notification, the lockout state and a photo — the same immediateProblems rules the server enforces are shown live
    and keep Save disabled. Saving goes through the editor (saveThroughOutbox), so it works offline: an offline finding
-   shows its pending printed id ("MPSD-LIN-RIG-…") until the server numbers it. */
+   shows its pending printed id ("MPSD-LIN-RIG-…") until the server numbers it.
+   The findings register (Task 9) opens the same sheet with its own onSave, no camera (onTakePhoto absent) and the
+   quote links (quoteLinks + onLinkQuote: "Link existing quote…"). */
 import { useRef, useState } from "react";
 import Link from "next/link";
 import type { AssessmentDef, Category, Rating } from "@/lib/assessments/defs/types";
@@ -104,15 +106,33 @@ export interface FindingSheetProps {
   disabled: boolean;
   /** saves through the editor; resolves to an error message, or null when saved / queued */
   onSave: (f: FindingVM) => Promise<string | null>;
-  /** takes a photo into the assessment, linked to this finding; resolves to its id (null when refused) */
-  onTakePhoto: (f: File, findingKey: string) => Promise<string | null>;
+  /** takes a photo into the assessment, linked to this finding; resolves to its id (null when refused). Absent (the
+   *  register): no camera button — the assessment's own photos can still be linked. */
+  onTakePhoto?: (f: File, findingKey: string) => Promise<string | null>;
+  /** the quotes this finding is linked to (the register); shown with links when given */
+  quoteLinks?: { id: string; label: string; href: string }[];
+  /** "Link existing quote…": links a quote id to this finding; resolves to an error message, or null when linked */
+  onLinkQuote?: (quoteId: string) => Promise<string | null>;
   /** a NEW finding's sheet was closed without saving: release the photos taken in it (they stay on the assessment) */
   onAbandonNew?: (findingKey: string) => void;
   onClose: () => void;
 }
 
-export default function FindingSheet({ initial, isNew, def, photos, assessmentId, localUrls, codes, venueLocId, disabled, onSave, onTakePhoto, onAbandonNew, onClose: closeSheet }: FindingSheetProps) {
+export default function FindingSheet({ initial, isNew, def, photos, assessmentId, localUrls, codes, venueLocId, disabled, onSave, onTakePhoto, quoteLinks, onLinkQuote, onAbandonNew, onClose: closeSheet }: FindingSheetProps) {
   const [f, setF] = useState<FindingVM>(initial);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkId, setLinkId] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const linkQuote = async () => {
+    if (!onLinkQuote || linkBusy || !linkId.trim()) return;
+    setLinkBusy(true);
+    setLinkError(null);
+    const err = await onLinkQuote(linkId.trim());
+    setLinkBusy(false);
+    if (err) setLinkError(err);
+    else { setLinkId(""); setLinkOpen(false); }
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The audit estimate keeps exactly what is typed (so "12." and "1,2" aren't mangled); it is parsed on blur and on save.
@@ -226,10 +246,10 @@ export default function FindingSheet({ initial, isNew, def, photos, assessmentId
         <div className="as-row">
           <div className="pk-field-label">Photos</div>
           <PhotoThumbs photos={linked} assessmentId={assessmentId} localUrls={localUrls} selected={f.photoIds} onToggle={disabled ? undefined : (id) => set({ photoIds: f.photoIds.filter((x) => x !== id) })} />
-          {!disabled && (
+          {!disabled && (onTakePhoto || others.length > 0) && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-              <PhotoButton label="Take photo" onFile={async (file) => { const id = await onTakePhoto(file, f.key); if (id) setF((x) => ({ ...x, photoIds: x.photoIds.includes(id) ? x.photoIds : [...x.photoIds, id] })); }} />
-              {others.length > 0 && <span className="as-mono-sm">or pick one of this assessment&apos;s photos:</span>}
+              {onTakePhoto && <PhotoButton label="Take photo" onFile={async (file) => { const id = await onTakePhoto(file, f.key); if (id) setF((x) => ({ ...x, photoIds: x.photoIds.includes(id) ? x.photoIds : [...x.photoIds, id] })); }} />}
+              {others.length > 0 && <span className="as-mono-sm">{onTakePhoto ? "or pick" : "Pick"} one of this assessment&apos;s photos:</span>}
             </div>
           )}
           {!disabled && others.length > 0 && <PhotoThumbs photos={others} assessmentId={assessmentId} localUrls={localUrls} selected={[]} onToggle={(id) => set({ photoIds: [...f.photoIds, id] })} />}
@@ -295,6 +315,39 @@ export default function FindingSheet({ initial, isNew, def, photos, assessmentId
             {estTouched && estBad && <div className="as-mono-sm" style={{ color: "#8c3b26", marginTop: 3 }} role="alert">Enter a dollar amount, like 4500 or 1,250.50.</div>}
           </label>
         </div>
+
+        {(quoteLinks || onLinkQuote) && (
+          <div className="as-row">
+            <div className="pk-field-label">Quotes</div>
+            {quoteLinks && quoteLinks.length > 0 ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 13 }}>
+                {quoteLinks.map((q) => <Link key={q.id} href={q.href} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none", fontFamily: "var(--font-mono)" }}>{q.label}</Link>)}
+              </div>
+            ) : (
+              <div className="as-mono-sm">No quote linked yet.</div>
+            )}
+            {onLinkQuote && !linkOpen && (
+              <button type="button" className="pk-btn-outline" style={{ marginTop: 8 }} onClick={() => setLinkOpen(true)}>Link existing quote…</button>
+            )}
+            {onLinkQuote && linkOpen && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                <input
+                  className="pk-input"
+                  style={{ maxWidth: 180 }}
+                  aria-label="Quote id"
+                  placeholder="Q-2041"
+                  maxLength={40}
+                  value={linkId}
+                  onChange={(e) => setLinkId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void linkQuote(); } }}
+                />
+                <button type="button" className="pk-btn-accent" disabled={linkBusy || !linkId.trim()} onClick={() => void linkQuote()}>{linkBusy ? "Linking…" : "Link"}</button>
+                <button type="button" className="pk-btn-outline" onClick={() => { setLinkOpen(false); setLinkError(null); }}>Cancel</button>
+              </div>
+            )}
+            {linkError && <div className="as-problems" role="alert">{linkError}</div>}
+          </div>
+        )}
 
         {problems.length > 0 && (
           <div className="as-problems" role="status">

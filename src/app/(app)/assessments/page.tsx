@@ -89,6 +89,10 @@ export default async function AssessmentsPage({ searchParams }: { searchParams: 
           <span style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Assessments</span>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "#9aa0ab" }}>{all.length}</span>
         </div>
+        <span style={{ flex: 1 }} />
+        <Link href={customer ? `/assessments/findings?customer=${encodeURIComponent(customer)}` : "/assessments/findings"} style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none" }}>
+          Findings →
+        </Link>
         <Link
           href={customer ? `/assessments/new?company=${encodeURIComponent(customer)}` : "/assessments/new"}
           style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent-contrast, #16181b)", background: "var(--accent)", borderRadius: 8, padding: "9px 14px", textDecoration: "none" }}

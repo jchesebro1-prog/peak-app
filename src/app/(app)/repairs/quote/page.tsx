@@ -28,6 +28,9 @@ import ActionError from "@/components/action-error";
 import { RewardCreditNotice } from "@/components/rewards/credit-notice";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
+import { loadQuotableFindings, venueNameOf } from "@/lib/assessments/quote-from-findings";
+import { repairPrefillFromFindings } from "@/lib/assessments/findings-quote";
+import { docLocId, getSite } from "@/lib/identity/sites";
 
 export const metadata = { title: "Repair quote — Quartzite-6" };
 /** #222: Save/Approve render the proposal PDF in `after()`, inside this budget
@@ -44,7 +47,9 @@ export const maxDuration = 120;
  *
  * Deep-linked as /repairs/quote?id=<quoteId> to edit,
  * ?customer=<customerId> to start a new quote for a customer, or
- * ?inspection=<inspId>&log=<logId> to quote a flagged inspection finding.
+ * ?inspection=<inspId>&log=<logId> to quote a flagged inspection finding, or
+ * ?customer=<customerId>&findings=<fd_…,fd_…> to quote assessment findings
+ * (#337: pre-filled from the findings, linked to them when first saved).
  */
 
 function one(v: string | string[] | undefined): string {
@@ -100,6 +105,8 @@ export default async function RepairQuotePage({
   const logId = one(sp.log);
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
+  // #337: "Quote these findings → Repair quote" — only for a NEW quote for that customer.
+  const findingsParam = !editId && !inspId && preCustomer ? one(sp.findings) : "";
 
   /* ---- serializable customer directory with per-venue coords + travel ---- */
   // Customer tier margins seed the builder's margin knob (item 11, D88).
@@ -171,6 +178,18 @@ export default async function RepairQuotePage({
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
+  // #337: the findings intake, checked like the register checks it (one customer, one venue, none voided).
+  let findingsIntake: { venueName: string; locId: string; list: Parameters<typeof repairPrefillFromFindings>[0] } | null = null;
+  let intakeError = "";
+  if (findingsParam) {
+    const r = await loadQuotableFindings(findingsParam);
+    if (!r.ok) intakeError = r.error;
+    else if (r.list[0].customerId !== preCustomer) intakeError = "Those findings belong to a different customer.";
+    else {
+      const site = await getSite(r.list[0].siteId);
+      findingsIntake = { venueName: venueNameOf(site) || r.list[0].siteId, locId: site ? docLocId(site) : "", list: r.list };
+    }
+  }
   // #242: the owner's review-limit chip for a saved quote (a new quote has no owner/value yet).
   const reviewLimit =
     editQuote && editQuote.quoteType === "repair" ? await reviewLimitChipFor(editQuote, user.name) : null;
@@ -309,6 +328,27 @@ export default async function RepairQuotePage({
         replaces: "",
       };
     }
+  } else if (findingsIntake && customers.some((c) => c.id === preCustomer)) {
+    const cust = customers.find((c) => c.id === preCustomer)!;
+    const pre = repairPrefillFromFindings(findingsIntake.list, findingsIntake.venueName);
+    const on = seedVenueOn(cust.locations, findingsIntake.locId);
+    const venueSel: BuilderInitial["venueSel"] = {};
+    cust.locations.forEach((l) => {
+      venueSel[l.id] = { on: !!on[l.id] };
+    });
+    initial = {
+      ...initial,
+      customerId: cust.id,
+      quoteName: pre.quoteName,
+      venueSel,
+      contactSel: pickContactName(cust, ""),
+      category: pre.category,
+      priority: pre.priority,
+      scopeItems: pre.scopeItems,
+      notes: pre.notes,
+      source: pre.source,
+      findingKeys: pre.findingKeys,
+    };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;
     if (cust) {
@@ -347,7 +387,7 @@ export default async function RepairQuotePage({
 
   return (
     <>
-      <ActionError message={one(sp.err)} />
+      <ActionError message={one(sp.err) || intakeError} />
       <RewardCreditNotice message={one(sp.credit)} />
       <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
