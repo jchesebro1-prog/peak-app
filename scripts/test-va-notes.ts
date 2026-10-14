@@ -26,9 +26,11 @@ import {
   acceptTravel,
 } from "../src/lib/field-lists";
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
-import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
+import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey, goalListsFromSurvey } from "../src/lib/estimate-output/goals";
+import { surveyText } from "../src/lib/assist/features/suggest-sources";
+import { curtainItemText, positionRowLine, monthText } from "../src/lib/survey-format";
 import { cleanPlainText } from "../src/lib/estimate-output/fields";
-import { blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, fillDownImpact, addMissingSets, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
+import { linesetCondLabel, blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, fillDownImpact, addMissingSets, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -774,6 +776,114 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   const lsTsx = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/sections/linesets.tsx"), "utf8");
   ok(lsTsx.includes("rowIsEmpty(") && lsTsx.includes("requestRemove(row)") && !lsTsx.includes("onClick={() => onRemove(row.id)}"),
     "#344 B6: removing a line set row that holds data asks first (rowIsEmpty gates the immediate remove)");
+
+  /* ---- B7: goals as lists downstream; field sheet, findings and Assist print the new fields ---- */
+  {
+    const gls = goalListsFromSurvey({ disciplines: { rigging: { goals: "- Safer rail\n• Quieter\n" }, av: { goals: [" Stream it ", "", "Clear mics"] }, curtain: { goals: [] }, lighting: { goals: "  " } } });
+    ok(JSON.stringify(gls) === '{"rigging":["Safer rail","Quieter"],"av":["Stream it","Clear mics"]}',
+      "#344 B7: goalListsFromSurvey cleans lists, splits old goal text one per line, and leaves out disciplines with none");
+    const glLong = goalListsFromSurvey({ disciplines: { av: { goals: ["a".repeat(600), "b".repeat(600)] } } });
+    ok(glLong.av!.length === 1 && glLong.av![0].length === 600, "#344 B7: goal lists keep the save sanitizer's 1,000-character joined rule");
+    ok(goalsFromSurvey({ disciplines: { av: { goals: ["Stream it", "Clear mics"] } } }).av === "Stream it\nClear mics", "#344 B7: goalsFromSurvey still joins a list with newlines");
+    const rcl = recapFor({ scope: ["av"], disciplines: { av: { goals: [" Stream it ", "Clear mics"] } } });
+    ok(rcl.length === 1 && rcl[0].goals.join("|") === "Stream it|Clear mics", "#344 B7: the recap reads goal lists");
+    ok(splitGoalLines === (await import("../src/lib/estimate-output/goals")).splitGoalLines, "#344 B7: survey-flow re-exports splitGoalLines from goals.ts");
+
+    ok(curtainItemText({ qty: "4", fabric: "Velour", oz: "25", trackSeries: "Standard", w: "40", h: "22", condition: 3 }) === "qty 4 · Velour 25 oz · Standard track · 40' × 22' · Good",
+      "#344 B7: a curtain row reads qty · fabric oz · track · W × H · condition");
+    ok(curtainItemText({ fabric: "IFR Velour", trackSeries: "N/A", w: "40'-6\"" }) === "IFR Velour · W 40'-6\"" && curtainItemText({}) === "",
+      "#344 B7: a curtain row skips empty parts and N/A, and keeps typed units");
+    ok(positionRowLine("Electric 1", { circuits: "24", length: "40", trim: "22", notes: "needs  new cable" }) === "Electric 1 · 24 circuits · 40' · trim 22' · needs new cable",
+      "#344 B7: a lighting position row reads position · circuits · length · trim · notes");
+    ok(monthText("2024-03") === "Mar 2024" && monthText("3/2024") === "Mar 2024" && monthText("spring") === "spring" && monthText(undefined) === "",
+      "#344 B7: month fields print as Mar 2024 (unreadable text as typed)");
+
+    const b7 = {
+      ...(sheetBase as object),
+      venueClass: "auditorium",
+      measurements: { gridH: "58'" },
+      loadingDoorType: "Roll-up / overhead", loadingDoorLocation: "Dock B", loadingDoorWH: "10' × 12'",
+      liftRequired: "yes", liftType: "Scissor >20ft", liftWorkingHeight: "32'", liftSupplier: "Peak", pathToFloor: "Ramp to stage",
+      loadingDoorSize: "OLD-DOOR", liftNeeded: "Scaffold", liftHeight: "OLD-HEIGHT",
+      scope: ["rigging", "curtain", "lighting", "av"],
+      disciplines: {
+        rigging: { gridHeight: "OLD-GRID", scope: ["New grid"] },
+        curtain: {
+          present: ["Main / act curtain", "Legs"],
+          items: {
+            "Main / act curtain": { qty: "4", fabric: "Velour", oz: "25", trackSeries: "Standard", w: "40", h: "22", condition: 3 },
+            Borders: { qty: "9", fabric: "Unticked" },
+          },
+          lastFlameTest: "2024-03", replaceVsReuse: "Reuse", scope: ["Flame test", "Other"], scopeOther: "Re-hang the teaser",
+          goals: ["Even wash", "Quieter tracks"],
+        },
+        lighting: {
+          consoleLocation: "Other", consoleLocationOther: "Balcony rail", plugType: "Stage-pin",
+          positionList: ["FOH 1", "Electric 1"], positionRows: { "Electric 1": { circuits: "24", length: "40", trim: "22", notes: "needs new cable" } },
+        },
+        av: { conditionLevel: 2 },
+      },
+      linesets: [{ ...blankLinesetRow(1), setName: "Border 1", condition: 1, cond: "G" }, { ...blankLinesetRow(2), setName: "Legs 1", cond: "F" }],
+      legacyNotes: [],
+      internalTags: ["tg_price_sensitive"],
+    } as never;
+    const sh7 = buildAssessmentSheet(b7);
+    const secs7 = sh7.fieldSheet!.pages.flatMap((p) => p.sections);
+    const sec = (h: string) => secs7.find((x) => x.heading === h)!;
+    const val = (h: string, label: string) => sec(h)?.rows.find((r) => r.label === label)?.value;
+    ok(sec("Site access").rows.slice(0, 8).map((r) => `${r.label}=${r.value}`).join("|") ===
+      "Loading door type=Roll-up / overhead|Loading door location=Dock B|Loading door W × H=10' × 12'|Lift needed=Yes|Lift type=Scissor >20ft|Working height=32'|Who supplies lift=Peak|Path to floor=Ramp to stage",
+      "#344 B7: Site access prints the loading door and lift answers first, then Path to floor");
+    ok(!JSON.stringify(sec("Site access")).includes("OLD-"), "#344 B7: a migrated record (legacyNotes set) never prints the old access keys again");
+    ok(val("Rigging intake", "Grid height") === "58'", "#344 B7: a bound field prints its measurement value");
+    ok(val("Curtain intake", "Main / act curtain") === "qty 4 · Velour 25 oz · Standard track · 40' × 22' · Good" && val("Curtain intake", "Legs") === "" &&
+       !sec("Curtain intake").rows.some((r) => r.label === "Borders"),
+      "#344 B7: one curtain row per ticked type (blank write-in when empty); an unticked type's stored row doesn't print");
+    ok(val("Curtain intake", "Last flame test") === "Mar 2024", "#344 B7: month fields print as Mar 2024 on the sheet");
+    ok(val("Curtain intake", "Replace vs. reuse (curtains)") === "Reuse", "#344 B7: the Final questions Replace vs. reuse prints with the curtains");
+    ok(val("Curtain intake", "Curtain scope of interest") === "Flame test, Other: Re-hang the teaser", "#344 B7: scope prints with Other's text");
+    ok(val("Curtain intake", "Client goals") === "Even wash; Quieter tracks", "#344 B7: discipline goals print as a ; list");
+    ok(val("Lighting intake", "Console location") === "Other: Balcony rail" && val("Lighting intake", "Plug type") === "Stage-pin",
+      "#344 B7: console location prints Other's text; plug type prints");
+    const litRows = sec("Lighting intake").rows.map((r) => r.label);
+    ok(val("Lighting intake", "Electric 1") === "24 circuits · 40' · trim 22' · needs new cable" && val("Lighting intake", "FOH 1") === "" &&
+       litRows.indexOf("Electric 1") < litRows.indexOf("FOH 1"),
+      "#344 B7: one row per chosen lighting position, in the editor's order");
+    ok(val("AV intake", "Condition") === "Fair", "#344 B7: a condition field prints its label");
+    const lsRows = sec("Linesets").rows;
+    ok(lsRows[0].value.includes("Poor") && !lsRows[0].value.includes("Good") && lsRows[1].value.includes(linesetCondLabel("F")),
+      "#344 B7: a line set's condition level prints, else the old code's label");
+    ok(!JSON.stringify(sh7).includes("tg_price_sensitive") && !JSON.stringify(sh7).includes("[object Object]"), "#344 B7: no internal tags or raw objects on the sheet");
+
+    const oldOnly = buildAssessmentSheet({ ...(sheetBase as object), legacyNotes: undefined, loadingDoorSize: "8' × 10' at dock", liftNeeded: "Scissor lift", liftHeight: "30'", liftSupplier: "Sunbelt" } as never);
+    const oldAccess = oldOnly.fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Site access")!.rows;
+    const ov = (l: string) => oldAccess.find((r) => r.label === l)?.value;
+    ok(ov("Loading door location") === "8' × 10' at dock" && ov("Lift needed") === "Yes" && ov("Lift type") === "Scissor lift" && ov("Working height") === "30'" && ov("Who supplies lift") === "Sunbelt",
+      "#344 B7: an unmigrated old survey still prints its access answers from the old keys");
+    const noneNeeded = buildAssessmentSheet({ ...(sheetBase as object), legacyNotes: undefined, liftNeeded: "None needed" } as never);
+    const nn = noneNeeded.fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Site access")!.rows;
+    ok(nn.find((r) => r.label === "Lift needed")?.value === "No" && nn.find((r) => r.label === "Lift type")?.value === "", "#344 B7: old None needed prints Lift needed No");
+
+    const fx7 = surveyFindings(b7);
+    ok(fx7.includes("Access/logistics: loading door: Roll-up / overhead, Dock B, 10' × 12'; lift: Yes — Scissor >20ft, working height 32' (Peak)"),
+      "#344 B7: the findings access line reads the new loading door + lift answers");
+    ok(surveyFindings({ liftRequired: "no", liftType: "Scissor >20ft", liftSupplier: "Peak" } as never) === "Access/logistics: lift: No",
+      "#344 B7: findings say lift: No without the details");
+    ok(surveyFindings({ loadingDoorSize: "8x10", liftNeeded: "Scissor", liftSupplier: "Sunbelt" } as never) === "Access/logistics: loading door: 8x10; lift: Scissor (Sunbelt)",
+      "#344 B7: findings fall back to the old access keys when the new ones are empty");
+    ok(!fx7.includes("tg_price_sensitive"), "#344 B7: internal tags never reach the findings");
+
+    const st7 = surveyText(b7);
+    ok(st7.includes("  - Main / act curtain: qty 4 · Velour 25 oz · Standard track · 40' × 22' · Good") && !st7.includes("Unticked"),
+      "#344 B7: Assist's site-visit text carries each ticked curtain row");
+    ok(st7.includes("  - Electric 1 · 24 circuits · 40' · trim 22' · needs new cable") && st7.includes("  - conditionLevel: Fair") && st7.includes("  - lastFlameTest: Mar 2024"),
+      "#344 B7: Assist's text carries lighting position rows, the AV condition label and month fields");
+    ok(!st7.includes("[object Object]") && !st7.includes("tg_price_sensitive"), "#344 B7: no raw objects or internal tags in Assist's text");
+    const many: Record<string, unknown> = { present: Array.from({ length: 30 }, (_, i) => `Type ${i}`), items: {} };
+    for (let i = 0; i < 30; i++) { many[`f${i}`] = `v${i}`; (many.items as Record<string, unknown>)[`Type ${i}`] = { qty: String(i + 1) }; }
+    const stMany = surveyText({ id: "FS-B7", disciplines: { curtain: many } } as never);
+    ok(stMany.split("\n").filter((l) => l.startsWith("  - ")).length === 40, "#344 B7: Assist's discipline lines stay within their 40-line budget");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

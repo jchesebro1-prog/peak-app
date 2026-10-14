@@ -5,6 +5,7 @@ import {
   DISCIPLINE_GROUPS,
   visibleFields,
   type DisciplineData,
+  type SystemField,
 } from "@/lib/stores/survey-intake";
 import {
   BUDGET_TIERS,
@@ -15,10 +16,14 @@ import {
   FINDING_BUCKETS,
   STAFF_TIERS,
 } from "@/lib/stores/assessment";
-import { goalsFromSurvey } from "@/lib/estimate-output/goals";
+import { goalListsFromSurvey } from "@/lib/estimate-output/goals";
 import { recapFor, recapScopeText } from "@/lib/survey-flow";
 import type { LegacyNote } from "@/lib/survey-migrate";
 import { linesetCondLabel, linesetTypeLabel } from "@/lib/stores/linesets";
+import { conditionLabel, isConditionLevel } from "@/lib/field-lists";
+import {
+  accessFacts, consoleLocationText, curtainItemText, curtainItemsOf, monthText, positionRowText, positionRowsOf, scopeText,
+} from "@/lib/survey-format";
 
 type SheetRecord = Pick<
   SurveyRecord,
@@ -27,6 +32,8 @@ type SheetRecord = Pick<
   | "scheduledDate" | "createdAt" | "assignedTo" | "requestedBy"
   | "measurements" | "disciplines" | "linesetsEnabled" | "linesets"
   | "lifeSafety" | "loadingDoorSize" | "liftHeight" | "pathToFloor"
+  | "loadingDoorType" | "loadingDoorLocation" | "loadingDoorWH" | "liftRequired" | "liftType"
+  | "liftWorkingHeight" | "liftSupplier" | "liftNeeded"
   | "workingHours" | "blackoutDates" | "floorProtection" | "badgingRequired"
   | "firstImpressions" | "budget" | "fiscalYearSpendBy" | "whoDecides"
   | "targetInstallWindow" | "scopeOfWork" | "quoteLook" | "notes"
@@ -50,15 +57,36 @@ function compactRows(rows: ReturnType<typeof row>[]) {
   return rows.filter((item) => item.value);
 }
 
+/** One discipline field as printed: a bound field shows its measurement, a condition its label, a month "Mar 2024",
+ *  the console location Other's text; a stored object (never a def's value) prints nothing. */
+function fieldText(field: SystemField, data: DisciplineData, measurements: Record<string, string> | undefined): string {
+  const raw: unknown = field.bind ? (text(measurements?.[field.bind]) || data[field.key]) : data[field.key];
+  if (field.type === "condition") return conditionLabel(raw);
+  if (field.type === "month") return monthText(raw);
+  if (field.key === "consoleLocation") return consoleLocationText(data);
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return "";
+  return text(raw);
+}
+
 function disciplineSection(record: SheetRecord, index: number): FieldSheetSection {
   const group = DISCIPLINE_GROUPS[index];
   const data: DisciplineData = record.disciplines?.[group.key] || {};
-  const goals = goalsFromSurvey(record)[group.key as keyof ReturnType<typeof goalsFromSurvey>];
+  const goals = goalListsFromSurvey(record)[group.key] ?? [];
+  const extra: ReturnType<typeof row>[] = [];
+  if (group.key === "curtain") {
+    extra.push(...curtainItemsOf(data).map(({ label, item }) => row(label, curtainItemText(item))));
+    extra.push(row("Replace vs. reuse (curtains)", data.replaceVsReuse));
+  }
+  if (group.key === "lighting") {
+    const positions = positionRowsOf(data);
+    extra.push(...(positions.length ? positions.map(({ pos, row: r }) => row(pos, positionRowText(r))) : [row("Lighting positions", "")]));
+  }
   const rows = [
-    row("Client goals", goals),
+    row("Client goals", goals.join("; ")),
     row("Present", data.present),
-    ...visibleFields(group, record.venueClass).map((field) => row(field.label, data[field.key])),
-    row(group.scopeLabel, data.scope),
+    ...visibleFields(group, record.venueClass).map((field) => row(field.label, fieldText(field, data, record.measurements))),
+    ...extra,
+    row(group.scopeLabel, scopeText(data)),
     row("Notes", data.notes),
   ];
   return { heading: group.title, rows };
@@ -69,6 +97,8 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
   const classLabel =
     VENUE_CLASSES.find((item) => item.key === record.venueClass)?.label || "Other";
   const title = `${classLabel} Venue Assessment`;
+  /* A migrated record (get() always derives legacyNotes) already moved or noted its old access answers. */
+  const access = accessFacts(record, !Array.isArray(record.legacyNotes));
   const pages: FieldSheetPage[] = [
     page(
       title,
@@ -100,7 +130,10 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
       {
         heading: "Site access",
         rows: [
-          row("Loading door size", record.loadingDoorSize), row("Lift height", record.liftHeight),
+          row("Loading door type", access.doorType), row("Loading door location", access.doorLocation),
+          row("Loading door W × H", access.doorWH), row("Lift needed", access.liftNeeded),
+          row("Lift type", access.liftType), row("Working height", access.liftWorkingHeight),
+          row("Who supplies lift", access.liftSupplier),
           row("Path to floor", record.pathToFloor), row("Working hours", record.workingHours),
           row("Blackout dates", record.blackoutDates), row("Floor protection", record.floorProtection),
           row("Badging required", record.badgingRequired), row("First impressions", record.firstImpressions),
@@ -127,7 +160,7 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
           line.battenLength && `batten ${line.battenLength}`,
           line.goods, line.finishedWH,
           (line.trimLow || line.trimHigh) && `trim ${line.trimLow || "—"}/${line.trimHigh || "—"}`,
-          linesetCondLabel(line.cond), line.notes,
+          isConditionLevel(line.condition) ? conditionLabel(line.condition) : linesetCondLabel(line.cond), line.notes,
         ].filter(Boolean).join(" · ")
       )),
     }));

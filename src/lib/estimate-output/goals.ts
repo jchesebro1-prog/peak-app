@@ -74,6 +74,31 @@ export function goalsFromSurvey(s: { disciplines?: unknown } | null | undefined)
   return out;
 }
 
+const BULLET = /^\s*(?:[-•*]|\d+[.)])\s+/;
+
+/** One goal per line: a stored string splits on newlines with leading bullets dropped; an array is trimmed.
+ *  (#344 B7: moved here from survey-flow, which re-exports it, so goals.ts needs no survey-flow import.) */
+export function splitGoalLines(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map((x) => String(x ?? "").trim()).filter(Boolean);
+  if (typeof v !== "string") return [];
+  return v.split(/\r?\n/).map((line) => line.replace(BULLET, "").trim()).filter(Boolean);
+}
+
+/** #344 B7: the four disciplines' goals as lists, for the recap and the field sheet. A list is cleaned by the same
+ *  rule as the save sanitizer (joined text within CLIENT_GOALS_MAX); old goal text is cleaned like goalsFromSurvey's,
+ *  then split one goal per line. Disciplines with no goals are left out. */
+export function goalListsFromSurvey(s: { disciplines?: unknown } | null | undefined): Partial<Record<ScopeDiscipline, string[]>> {
+  const out: Partial<Record<ScopeDiscipline, string[]>> = {};
+  const d = s && s.disciplines && typeof s.disciplines === "object" ? (s.disciplines as Record<string, unknown>) : {};
+  for (const k of DISCIPLINES) {
+    const branch = d[k];
+    const raw = branch && typeof branch === "object" ? (branch as Record<string, unknown>).goals : undefined;
+    const list = Array.isArray(raw) ? cleanGoalList(raw) : splitGoalLines(cleanPlainText(raw, CLIENT_GOALS_MAX));
+    if (list.length) out[k] = list;
+  }
+  return out;
+}
+
 /** R3: blank goals on a system whose discipline (stored, else inferred)
  *  matches get the visit's goals. Returns the SAME array when nothing changes. */
 export function fillClientGoals(sections: SpecSection[], goals: DisciplineGoals): SpecSection[] {

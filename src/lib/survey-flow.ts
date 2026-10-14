@@ -1,7 +1,7 @@
 /* Venue Assessments flow (#344, slice A) — the editor's section order, wizard steps and groups, the scope filter
    (Kill questions → which sections show), the one rigging-system answer, the quote-visit rule and the customer
    recap. Pure and client-safe: the editor, the field sheet, the findings text and the tests read it. */
-import { goalsFromSurvey } from "./estimate-output/goals";
+import { goalListsFromSurvey, splitGoalLines } from "./estimate-output/goals";
 import { DISCIPLINE_GROUPS, RIG_SYSTEMS, type DisciplineData, type DisciplineKey } from "./stores/survey-intake";
 
 export { RIG_SYSTEMS };
@@ -100,14 +100,8 @@ export function sectionVisible(s: FlowSlice, id: string): boolean {
   return true;
 }
 
-const BULLET = /^\s*(?:[-•*]|\d+[.)])\s+/;
-
-/** One goal per line: a stored string splits on newlines with leading bullets dropped; an array is trimmed. */
-export function splitGoalLines(v: unknown): string[] {
-  if (Array.isArray(v)) return v.map((x) => String(x ?? "").trim()).filter(Boolean);
-  if (typeof v !== "string") return [];
-  return v.split(/\r?\n/).map((line) => line.replace(BULLET, "").trim()).filter(Boolean);
-}
+/** One goal per line — lives in estimate-output/goals.ts now (#344 B7); re-exported so existing imports keep working. */
+export { splitGoalLines };
 
 export type RecapEntry = { disc: DisciplineKey; label: string; scopes: string[]; other: string; goals: string[] };
 
@@ -116,12 +110,12 @@ export type RecapEntry = { disc: DisciplineKey; label: string; scopes: string[];
 export function recapFor(s: FlowSlice): RecapEntry[] {
   const set = scopeSet(s);
   const out: RecapEntry[] = [];
-  const cleanGoals = goalsFromSurvey(s) as Record<string, string | undefined>;
+  const goalLists = goalListsFromSurvey(s);
   for (const g of DISCIPLINE_GROUPS) {
     const d: DisciplineData = s.disciplines?.[g.key] || {};
     const scopes = Array.isArray(d.scope) ? d.scope.map((x) => String(x)).filter(Boolean) : [];
     const other = typeof d.scopeOther === "string" ? d.scopeOther.trim() : "";
-    const goals = splitGoalLines(cleanGoals[g.key]);
+    const goals = goalLists[g.key] ?? [];
     const listed = set ? set.includes(g.key) : scopes.length > 0 || goals.length > 0 || other !== "";
     if (listed) out.push({ disc: g.key, label: SCOPE_LABEL[g.key], scopes, other, goals });
   }

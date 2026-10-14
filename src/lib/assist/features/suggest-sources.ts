@@ -10,6 +10,10 @@ import type { SurveyRecord } from "@/lib/stores/surveys";
 import { surveyFindings } from "@/lib/survey-findings";
 import { DISCIPLINE_LABEL, DISCIPLINES } from "@/lib/estimate-output/fields";
 import { goalsFromSurvey } from "@/lib/estimate-output/goals";
+import { conditionLabel } from "@/lib/field-lists";
+import {
+  curtainItemLine, curtainItemText, curtainItemsOf, disciplineFieldType, monthText, positionRowLine, positionRowText, positionRowsOf,
+} from "@/lib/survey-format";
 import { cleanPromptAttr, cleanPromptField, defangWrappers, promptMessages, threadBlock, type PromptMessage } from "./thread-text";
 
 export { promptMessages, threadBlock };
@@ -102,6 +106,7 @@ export type SurveySourceInput = Partial<
     SurveyRecord,
     | "id" | "customer" | "venue" | "visitPurpose" | "venueType" | "reason" | "scopeOfWork" | "notes" | "conditions" | "installTimeframe"
     | "loadingDock" | "elevatorSize" | "floorType" | "accessDoorSize" | "liftNeeded" | "liftSupplier" | "measurements"
+    | "loadingDoorSize" | "liftHeight" | "loadingDoorType" | "loadingDoorLocation" | "loadingDoorWH" | "liftRequired" | "liftType" | "liftWorkingHeight"
     | "disciplines" | "inventory"
   >
 >;
@@ -109,11 +114,35 @@ export type SurveySourceInput = Partial<
 function disciplineFieldLines(d: unknown): string[] {
   if (!d || typeof d !== "object" || Array.isArray(d)) return [];
   const out: string[] = [];
+  const push = (t: string) => {
+    if (t && out.length < SURVEY_DISCIPLINE_FIELDS_MAX) out.push(`  - ${t}`);
+  };
   for (const [k, v] of Object.entries(d as Record<string, unknown>)) {
     if (k === "goals" || out.length >= SURVEY_DISCIPLINE_FIELDS_MAX) continue;
-    const val = Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).join(", ") : typeof v === "boolean" ? (v ? "yes" : "") : typeof v === "string" ? v : "";
+    // #344 B7: curtain rows and lighting position rows read as the field sheet prints them (one line each).
+    if (k === "items") {
+      for (const { label, item } of curtainItemsOf(d as Record<string, unknown>)) {
+        if (curtainItemText(item)) push(cleanPromptField(curtainItemLine(label, item), 300));
+      }
+      continue;
+    }
+    if (k === "positionRows") {
+      for (const { pos, row } of positionRowsOf(d as Record<string, unknown>)) {
+        if (positionRowText(row)) push(cleanPromptField(positionRowLine(pos, row), 300));
+      }
+      continue;
+    }
+    const type = disciplineFieldType(k);
+    const val =
+      type === "condition" || k === "conditionLevel" ? conditionLabel(v)
+      : type === "month" ? monthText(v)
+      : Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).join(", ")
+      : typeof v === "boolean" ? (v ? "yes" : "")
+      : typeof v === "string" ? v
+      : typeof v === "number" && Number.isFinite(v) ? String(v)
+      : "";
     const t = cleanPromptField(val, 300);
-    if (t) out.push(`  - ${cleanPromptField(k, 60)}: ${t}`);
+    if (t) push(`${cleanPromptField(k, 60)}: ${t}`);
   }
   return out;
 }

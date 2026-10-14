@@ -1,5 +1,6 @@
 import type { SurveyRecord } from "@/lib/stores/surveys";
 import { recapFor, recapScopeText } from "./survey-flow";
+import { accessFacts } from "./survey-format";
 
 /**
  * A field survey flattened into plain-text findings. Pure and shared: the
@@ -38,14 +39,36 @@ export type SurveyFindingsInput = Partial<
     | "accessDoorSize"
     | "liftNeeded"
     | "liftSupplier"
+    | "loadingDoorSize"
+    | "liftHeight"
+    | "loadingDoorType"
+    | "loadingDoorLocation"
+    | "loadingDoorWH"
+    | "liftRequired"
+    | "liftType"
+    | "liftWorkingHeight"
     | "measurements"
     | "disciplines"
     | "scope"
   >
 >;
 
+/** #344 B7: "lift: Yes — Scissor >20ft, working height 32' (Peak)" from the B5 answers; "lift: No"; before B5 the old
+ *  answer exactly as it always printed ("lift: Scissor (Sunbelt)"). */
+function liftLine(s: SurveyFindingsInput, f: ReturnType<typeof accessFacts>): string {
+  if (s.liftRequired === "no") return "lift: No";
+  if (s.liftRequired === "yes") {
+    const bits = [f.liftType, f.liftWorkingHeight ? `working height ${f.liftWorkingHeight}` : ""].filter(Boolean);
+    return `lift: Yes${bits.length ? ` — ${bits.join(", ")}` : ""}${f.liftSupplier ? ` (${f.liftSupplier})` : ""}`;
+  }
+  const old = (s.liftNeeded || "").trim();
+  if (!old) return "";
+  return `lift: ${old}${f.liftWorkingHeight ? `, working height ${f.liftWorkingHeight}` : ""}${f.liftSupplier ? ` (${f.liftSupplier})` : ""}`;
+}
+
 /** Flatten a field survey's brief + field capture into plain-text findings. */
 export function surveyFindings(s: SurveyFindingsInput): string {
+  const door = accessFacts(s);
   const parts: string[] = [
     kv("Venue type", s.venueType),
     kv("Reason for visit", s.reason),
@@ -59,9 +82,8 @@ export function surveyFindings(s: SurveyFindingsInput): string {
     kv("elevator", s.elevatorSize),
     kv("floor", s.floorType),
     kv("access door", s.accessDoorSize),
-    s.liftNeeded
-      ? `lift: ${s.liftNeeded}${s.liftSupplier ? ` (${s.liftSupplier})` : ""}`
-      : "",
+    kv("loading door", [door.doorType, door.doorLocation, door.doorWH].filter(Boolean).join(", ")),
+    liftLine(s, door),
   ].filter(Boolean);
   if (access.length) parts.push("Access/logistics: " + access.join("; "));
   const meas = recordLines(s.measurements);
