@@ -35,7 +35,8 @@ import { rankCatalogParts } from "./catalog-rank";
 import { withSanitizedKeyProducts } from "./narrative";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import type { DraftedLine } from "./ai-scope-modal";
-import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
+import { get as getSurvey } from "@/lib/stores/surveys";
+import { kv, recordLines, surveyFindings } from "@/lib/survey-findings";
 import {
   get as getInspection,
   type InspectionRecord,
@@ -1396,46 +1397,6 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
 export type DraftScopeResult =
   | { ok: true; scope: string; lines: DraftedLine[] }
   | { ok: false; error: string };
-
-/** Plain-text "key: value" line, dropped when the value is empty. */
-function kv(label: string, value: unknown): string {
-  const v = (value == null ? "" : String(value)).trim();
-  return v ? `${label}: ${v}` : "";
-}
-
-/** Non-empty measurements/facts as indented "  - key: value" lines. */
-function recordLines(rec: Record<string, string> | undefined): string {
-  if (!rec) return "";
-  return Object.entries(rec)
-    .filter(([, v]) => (v == null ? "" : String(v)).trim())
-    .map(([k, v]) => `  - ${k}: ${String(v).trim()}`)
-    .join("\n");
-}
-
-/** Flatten a field survey's brief + field capture into plain-text findings. */
-function surveyFindings(s: SurveyRecord): string {
-  const parts: string[] = [
-    kv("Venue type", s.venueType),
-    kv("Reason for visit", s.reason),
-    kv("Scope of work (field)", s.scopeOfWork),
-    kv("Field notes", s.notes),
-    s.conditions?.length ? kv("Site conditions", s.conditions.join(", ")) : "",
-    kv("Install timeframe", s.installTimeframe),
-  ];
-  const access = [
-    kv("loading dock", s.loadingDock),
-    kv("elevator", s.elevatorSize),
-    kv("floor", s.floorType),
-    kv("access door", s.accessDoorSize),
-    s.liftNeeded
-      ? `lift: ${s.liftNeeded}${s.liftSupplier ? ` (${s.liftSupplier})` : ""}`
-      : "",
-  ].filter(Boolean);
-  if (access.length) parts.push("Access/logistics: " + access.join("; "));
-  const meas = recordLines(s.measurements);
-  if (meas) parts.push("Measurements:\n" + meas);
-  return parts.filter(Boolean).join("\n");
-}
 
 /** Flatten an inspection report (findings/logs + measurements) into plain text. */
 function inspectionFindings(ins: InspectionRecord): string {
