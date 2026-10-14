@@ -677,6 +677,30 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(sectionVisible({ scope: ["rigging"] }, "finalQuestions") === false && sectionVisible({ scope: ["curtain"] }, "finalQuestions") === true,
     "#344 B5: Final questions shows only with curtains in scope");
   ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctlB5), "#344 B5: the meetings slot still sits right before the sections");
+  {
+    /* a cleared access / track-operation answer stays cleared; the old answer stays visible as an Older note */
+    const L = "Kind of lift needed (before #344)";
+    const lc = mm({ liftNeeded: "Scissor lift", liftRequired: "" } as MigratableSurvey);
+    ok(lc.liftRequired === "" && hasNote(lc, "site", L, "Scissor lift"), "#344 B5: a cleared Lift needed? stays cleared and the old lift answer shows as an Older note");
+    const lc2 = mm(lc);
+    ok(lc2.liftRequired === "" && notes(lc2).filter((n) => n.label === L).length === 1, "#344 B5: the cleared Lift needed? migration is idempotent");
+    const lt = mm({ liftNeeded: "Scaffold", liftRequired: "yes", liftType: "" } as MigratableSurvey);
+    ok(lt.liftType === "" && hasNote(lt, "site", L, "Scaffold"), "#344 B5: a cleared Lift type stays cleared and the old answer shows as an Older note");
+    const ln = mm({ liftNeeded: "None needed", liftRequired: "" } as MigratableSurvey);
+    ok(ln.liftRequired === "" && hasNote(ln, "site", L, "None needed"), "#344 B5: a cleared Lift needed? is not refilled from None needed");
+    const dc = mm({ loadingDoorSize: "Rear dock 10x12", loadingDoorLocation: "" } as MigratableSurvey);
+    const dl = "Loading door location & W × H (before #344)";
+    ok(dc.loadingDoorLocation === "" && hasNote(dc, "site", dl, "Rear dock 10x12") && mm(dc).loadingDoorLocation === "" && notes(mm(dc)).filter((n) => n.label === dl).length === 1,
+      "#344 B5: a cleared Loading door location stays cleared (twice) and the old text shows as an Older note");
+    const nv = mm({ loadingDoorSize: "Rear dock 10x12", liftNeeded: "Scaffold" } as MigratableSurvey);
+    ok(nv.loadingDoorLocation === "Rear dock 10x12" && nv.liftRequired === "yes" && nv.liftType === "Scaffolding" && notes(nv).length === 0,
+      "#344 B5: never-answered access keys still fill from the old fields");
+    const tc = mm({ disciplines: { curtain: { operation: "SL", trackOperation: "" } } } as MigratableSurvey);
+    ok(tc.disciplines?.curtain?.trackOperation === "" && hasNote(tc, "dCurtain", "Operation (before #344)", "SL") && mm(tc).disciplines?.curtain?.trackOperation === "",
+      "#344 B5: a cleared Track operation stays cleared and the auditorium Operation shows as an Older note");
+    const tn = mm({ disciplines: { curtain: { operation: "SR" } } } as MigratableSurvey);
+    ok(tn.disciplines?.curtain?.trackOperation === "SR" && !hasNote(tn, "dCurtain", "Operation (before #344)"), "#344 B5: a never-answered Track operation still takes the auditorium SL / SR");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

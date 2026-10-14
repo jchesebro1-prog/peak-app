@@ -143,23 +143,24 @@ const BEFORE = " (before #344)";
 const blankStr = (v: unknown): boolean => typeof v !== "string" || v.trim() === "";
 const strOf = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 
-/** B5 access: the old loading-door text fills Location; the old lift answer fills Lift required / Lift type. */
+/** B5 access: the old loading-door text fills Location; the old lift answer fills Lift required / Lift type. A key is
+ *  filled only when never answered (`undefined`); a cleared ("") one stays cleared and the old answer shows as a note. */
 export function stepAccess(s: MigratableSurvey): void {
   const door = strOf(s.loadingDoorSize);
   if (door) {
-    if (blankStr(s.loadingDoorLocation)) s.loadingDoorLocation = door;
+    if (s.loadingDoorLocation === undefined) s.loadingDoorLocation = door;
     else if (strOf(s.loadingDoorLocation) !== door) {
       addLegacyNote(s, { section: "site", label: "Loading door location & W × H" + BEFORE, text: door });
     }
   }
   const lift = strOf(s.liftNeeded);
-  if (lift === "None needed") {
-    if (!s.liftRequired) s.liftRequired = "no";
-  } else if (lift) {
-    if (!s.liftRequired) s.liftRequired = "yes";
-    if (blankStr(s.liftType)) {
-      if (lift === "Scaffold") s.liftType = "Scaffolding";
-      else addLegacyNote(s, { section: "site", label: "Kind of lift needed" + BEFORE, text: lift });
+  if (lift) {
+    const liftNote = () => addLegacyNote(s, { section: "site", label: "Kind of lift needed" + BEFORE, text: lift });
+    if (s.liftRequired === undefined) s.liftRequired = lift === "None needed" ? "no" : "yes";
+    else if (blankStr(s.liftRequired)) liftNote();
+    if (lift !== "None needed") {
+      if (s.liftType === undefined && lift === "Scaffold") s.liftType = "Scaffolding";
+      else if (blankStr(s.liftType)) liftNote();
     }
   }
   if (!blankStr(s.liftHeight)) addLegacyNote(s, { section: "site", label: "Lift needed — type / height" + BEFORE, text: strOf(s.liftHeight) });
@@ -298,7 +299,8 @@ export function stepCurtain(s: MigratableSurvey): void {
   if (!blankStr(c.trackOperationOld)) note("Track operation", c.trackOperationOld);
   const audOp = strOf(c.operation);
   if (audOp) {
-    if (SL_SR.test(audOp) && !strOf(c.trackOperation)) c.trackOperation = audOp.toUpperCase();
+    /* Only a never-answered Track operation takes the auditorium SL / SR; "" means it was cleared (the old value stays as a note). */
+    if (SL_SR.test(audOp) && c.trackOperation === undefined) c.trackOperation = audOp.toUpperCase();
     else if (!(SL_SR.test(audOp) && strOf(c.trackOperation).toUpperCase() === audOp.toUpperCase())) note("Operation", audOp);
   }
   const flame = strOf(c.lastFlameTest);
