@@ -8,7 +8,7 @@ import { ruleBrief, type BriefFacts } from "@/lib/brief/fallback";
 import { sinceMorning } from "@/lib/brief/diff";
 import { QUIET_BUSINESS_DAYS, QUIET_MAX, selectQuietQuotes, type QuietQuoteInput, type QuietThreadInput } from "@/lib/brief/quiet";
 import { briefSpeech, spellNumber, spokenDuration, spokenTime } from "@/lib/brief/speech";
-import { lastSentAt, newestInboundId, nudgeFresh, preDraftFresh } from "@/lib/brief/fresh";
+import { lastSentAt, newestInboundId, nudgeFresh, nudgeFreshFor, preDraftFresh, preDraftFreshFor } from "@/lib/brief/fresh";
 import type { Brief } from "@/lib/brief/types";
 import { BRIEF_ROWS_MAX, BRIEF_SYSTEM, briefField, buildBriefUserText } from "@/lib/brief/prompt";
 import type { QuoteHistoryEntry } from "@/lib/stores/quotes";
@@ -237,6 +237,8 @@ function freshChecks(ok: Ok): void {
   ok(lastSentAt(q) === 50 && lastSentAt({ history: [{ at: 50, to: "sent" }, { at: 60, from: "sent", to: "won" }] as H[] }) === null && lastSentAt({ history: [] }) === null, "brief fresh: lastSentAt is the final history entry → sent");
   ok(nudgeFresh({ ...q, assistNudge: { basis: 50 } }) && !nudgeFresh({ ...q, assistNudge: { basis: 40 } }) && !nudgeFresh({ ...q, assistNudge: null }) && !nudgeFresh(q), "brief fresh: a nudge is fresh only for the current send");
   ok(!nudgeFresh({ status: "won", history: [{ at: 50, to: "sent" }] as H[], assistNudge: { basis: 50 } }), "brief fresh: a nudge on a quote that is no longer sent is stale");
+  ok(preDraftFreshFor({ messages: msgs, preDraft: { basis: "m3", ownerId: "u1" } }, "u1") && !preDraftFreshFor({ messages: msgs, preDraft: { basis: "m3", ownerId: "u1" } }, "u2") && !preDraftFreshFor({ messages: msgs, preDraft: { basis: "m3" } }, "u1") && !preDraftFreshFor({ messages: msgs, preDraft: { basis: "m3", ownerId: "" } }, ""), "brief fresh: a pre-draft is fresh for its owner only — made for someone else (or no owner) is stale");
+  ok(nudgeFreshFor({ ...q, assistNudge: { basis: 50, ownerId: "u1" } }, "u1") && !nudgeFreshFor({ ...q, assistNudge: { basis: 50, ownerId: "u1" } }, "u2") && !nudgeFreshFor({ ...q, assistNudge: { basis: 50 } }, "u1") && !nudgeFreshFor({ ...q, assistNudge: { basis: 40, ownerId: "u1" } }, "u1"), "brief fresh: a nudge is fresh for its owner only, and only for the current send");
 }
 
 function featureChecks(ok: Ok): void {
@@ -338,7 +340,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
   const { REPLY_SYSTEM } = await import("@/lib/assist/features/reply-draft");
   const { anthropicRequestOptions } = await import("@/lib/assist/anthropic");
   const { TASKS_SYSTEM } = await import("@/lib/assist/features/task-suggest");
-  const { runDraftQueue, resetDraftQueue, courtMeThreads, DRAFT_MIN_CALL_MS, DRAFT_RETRY_MS } = await import("@/lib/brief/drafts");
+  const { runDraftQueue, resetDraftQueue, courtMeThreads, BACKGROUND_CAP_SHARE, DRAFT_MIN_CALL_MS, DRAFT_RETRY_MS } = await import("@/lib/brief/drafts");
   const { get: getThread, setPreDraft, casPreDraftKey } = await import("@/lib/stores/comms");
   const { get: getQuote, update: updateQuote, setAssistNudge, casAssistNudgeKey } = await import("@/lib/stores/quotes");
   const { createFixture, fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
@@ -409,9 +411,9 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     }
     await createFixture("comms", { ...baseThread, id: TH.mine, messages: [inbound("m-mine-1", NOW - 2 * DAYS)] } as never);
     await createFixture("comms", { ...baseThread, id: TH.stale, messages: [inbound("m-stale-1", NOW - 3 * DAYS), inbound("m-stale-2", NOW - 1.5 * DAYS)],
-      preDraft: { body: "old draft", runId: "AR-old", taskSuggestions: [], taskRunId: "AR-old-t", basis: "m-stale-1", at: NOW - 3 * DAYS } } as never);
+      preDraft: { body: "old draft", runId: "AR-old", taskSuggestions: [], taskRunId: "AR-old-t", basis: "m-stale-1", at: NOW - 3 * DAYS, ownerId: ME.id } } as never);
     await createFixture("comms", { ...baseThread, id: TH.fresh, messages: [inbound("m-fresh-1", NOW - DAYS)],
-      preDraft: { body: "kept draft", runId: "AR-keep", taskSuggestions: [], taskRunId: "AR-keep-t", basis: "m-fresh-1", at: NOW - 3_600_000 } } as never);
+      preDraft: { body: "kept draft", runId: "AR-keep", taskSuggestions: [], taskRunId: "AR-keep-t", basis: "m-fresh-1", at: NOW - 3_600_000, ownerId: ME.id } } as never);
     await createFixture("comms", { ...baseThread, id: TH.them, status: "waiting_them", messages: [inbound("m-them-1", NOW - DAYS)] } as never);
     await createFixture("comms", { ...baseThread, id: TH.otherBox, mailboxUser: OTHER.name, assignedTo: ME.name, messages: [inbound("m-ob-1", NOW - DAYS)] } as never);
     await createFixture("comms", { ...baseThread, id: TH.unassigned, assignedTo: OTHER.name, messages: [inbound("m-un-1", NOW - DAYS)] } as never);
@@ -483,7 +485,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const run1 = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
     ok(run1.replies === 2 && run1.tasks === 2 && run1.fresh === 1 && run1.nudges === 1 && run1.failed === 1 && run1.stoppedBy === null && run1.skipped === null, `brief queue: drafts the two court-me threads without a fresh draft, skips the fresh one, nudges the quiet quote, refuses the hostile nudge (${JSON.stringify(run1)})`);
     const mine = (await getThread(TH.mine))!;
-    ok(mine.preDraft?.body === "Hi Pat,\nThanks — we'll follow up." && mine.preDraft.basis === "m-mine-1" && mine.preDraft.at === NOW && !!mine.preDraft.runId && mine.preDraft.taskSuggestions?.[0]?.title === "Send the drawings" && !!mine.preDraft.taskRunId, "brief queue: the pre-draft stores body, runId, task suggestions, taskRunId, basis = newest inbound id and at");
+    ok(mine.preDraft?.body === "Hi Pat,\nThanks — we'll follow up." && mine.preDraft.basis === "m-mine-1" && mine.preDraft.at === NOW && mine.preDraft.ownerId === ME.id && !!mine.preDraft.runId && mine.preDraft.taskSuggestions?.[0]?.title === "Send the drawings" && !!mine.preDraft.taskRunId, "brief queue: the pre-draft stores body, runId, task suggestions, taskRunId, basis = newest inbound id and at");
     const mineRun = await getDoc<{ id: string; outcomeDetail: Record<string, unknown> | null }>("assist_runs", mine.preDraft!.runId!);
     ok(mineRun?.outcomeDetail?.queued === true, "brief queue: the landed reply run is marked queued (the report's pre-draft marker)");
     const stale = (await getThread(TH.stale))!;
@@ -495,7 +497,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const replyCalls = calls.filter((c) => c.system === REPLY_SYSTEM);
     ok(replyCalls.length === 2 && replyCalls.every((c) => c.maxRetries === 0 && (c.timeoutMs ?? 0) <= 60_000), "brief queue: background calls are capped (no retries, ≤ the slot timeout)");
     const qa = (await getQuote(Q.quiet))!;
-    ok(qa.assistNudge?.note === "Quiet for a while — check in." && qa.assistNudge.emailSubject === "Following up on your quote" && qa.assistNudge.emailBody === "Hi Pat,\nJust checking in on the $12,500 quote." && qa.assistNudge.basis === sentAt && !!qa.assistNudge.runId && !qa.assistNudge.error, "brief queue: the quiet quote's nudge is stored (note, subject, body, runId, basis = sent time)");
+    ok(qa.assistNudge?.note === "Quiet for a while — check in." && qa.assistNudge.emailSubject === "Following up on your quote" && qa.assistNudge.emailBody === "Hi Pat,\nJust checking in on the $12,500 quote." && qa.assistNudge.basis === sentAt && qa.assistNudge.ownerId === ME.id && !!qa.assistNudge.runId && !qa.assistNudge.error, "brief queue: the quiet quote's nudge is stored (note, subject, body, runId, basis = sent time, ownerId)");
     ok(qa.estNo === quoteBefore.estNo && qa.updatedAt === quoteBefore.updatedAt && qa.name === quoteBefore.name && qa.status === "sent", "brief queue: the key-level nudge write keeps estNo, updatedAt and the rest of the quote");
     const qh = (await getQuote(Q.hostile))!;
     ok(qh.assistNudge?.emailBody === "" && !!qh.assistNudge.error && qh.assistNudge.runId === null, "brief queue: a nudge naming another price is stored only as an error (no text)");
@@ -555,7 +557,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
 
     // new mail lands while the model is drafting: the older result is dropped
     await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-6", NOW - 4_000, "MINE-6 body") as never); });
-    const newer = { body: "newer draft", runId: "AR-newer", taskSuggestions: [], taskRunId: "AR-newer-t", basis: "m-mine-7", at: NOW + 1 };
+    const newer = { body: "newer draft", runId: "AR-newer", taskSuggestions: [], taskRunId: "AR-newer-t", basis: "m-mine-7", at: NOW + 1, ownerId: ME.id };
     onCall = async (req) => {
       if (req.system !== REPLY_SYSTEM || !req.user.includes("MINE-6")) return;
       onCall = null;
@@ -567,7 +569,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     ok(raced.dropped === 1 && raced.replies === 0 && kept.preDraft?.body === "newer draft" && kept.preDraft.basis === "m-mine-7" && kept.preDraftLeaseUntil === undefined, `brief lease: a result drafted against older mail never overwrites a newer pre-draft (${JSON.stringify(raced)})`);
     // same mail, but another writer replaced the pre-draft meanwhile: compare-and-set refuses
     await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-8", NOW - 500, "MINE-8 body") as never); });
-    const other = { body: "other writer", runId: "AR-other", taskSuggestions: [], taskRunId: "AR-other-t", basis: "m-mine-8", at: NOW + 2 };
+    const other = { body: "other writer", runId: "AR-other", taskSuggestions: [], taskRunId: "AR-other-t", basis: "m-mine-8", at: NOW + 2, ownerId: ME.id };
     onCall = async (req) => {
       if (req.system !== REPLY_SYSTEM || !req.user.includes("MINE-8")) return;
       onCall = null;
@@ -576,6 +578,14 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const cas = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
     ok(cas.dropped === 1 && (await getThread(TH.mine))!.preDraft?.body === "other writer", `brief lease: a pre-draft another writer replaced mid-call is kept (compare-and-set) (${JSON.stringify(cas)})`);
     onCall = null;
+
+    /* a pre-draft made for someone else (the thread was reassigned since) is stale for me */
+    const cur = (await getThread(TH.mine))!;
+    await setPreDraft(TH.mine, { ...cur.preDraft!, ownerId: OTHER.id, body: "OTHER'S DRAFT" });
+    calls.length = 0;
+    const reassigned = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    const rePd = (await getThread(TH.mine))!.preDraft!;
+    ok(reassigned.replies === 1 && reassigned.tasks === 1 && rePd.ownerId === ME.id && rePd.body !== "OTHER'S DRAFT" && rePd.basis === cur.preDraft!.basis, `brief queue: a fresh pre-draft made for the previous owner is redrafted for me, never reused (${JSON.stringify(reassigned)})`);
 
     /* per-feature gating */
     const replyOff = assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { reply: false, brief: true } });
@@ -589,14 +599,32 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     const gated = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: ["someone-else"], assistFeatures: { brief: true } }) }));
     const allOff = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { reply: false, tasks: false } }) }));
     ok(gated.skipped === "gated" && allOff.skipped === "gated", "brief queue: not in the pilot, or reply + tasks + brief all off → nothing runs");
-    await updateQuote(Q.recent, { history: [{ at: sentAt, to: "sent" }] } as never);
+    await patchDoc<Thread>("comms", TH.mine, (t) => { t.messages.push(inbound("m-mine-10", NOW - 50) as never); });
     calls.length = 0;
+    // reply + tasks are on by default, but the queue is the Daily brief's: off → nothing at all
     const briefOff = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: [ME.id] }) }));
-    ok(briefOff.nudges === 0 && !(await getQuote(Q.recent))!.assistNudge && calls.every((c) => c.system !== NUDGE_SYSTEM), "brief queue: brief off → no nudges");
+    ok(briefOff.skipped === "gated" && briefOff.replies === 0 && briefOff.tasks === 0 && briefOff.nudges === 0 && calls.length === 0 && !(await getQuote(Q.recent))!.assistNudge && (await getThread(TH.mine))!.preDraft?.basis !== "m-mine-10", `brief queue: Daily brief off → gated before any read: no replies, no tasks, no nudges, even with reply + tasks on (${JSON.stringify(briefOff)})`);
 
-    /* the spend cap stops the queue */
+    /* the background spending guard: pre-drafting pauses at 60 % of the cap */
+    const cap100 = assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { brief: true }, assistMonthlyCapUsd: 100 });
     calls.length = 0;
-    const capped = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { brief: true }, assistMonthlyCapUsd: 0 }) }));
+    const bgCap = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => 60 }));
+    ok(BACKGROUND_CAP_SHARE === 0.6 && bgCap.skipped === "background-cap" && calls.length === 0 && (await getThread(TH.mine))!.preDraft?.basis !== "m-mine-10", `brief queue: this month's spend at 60 % of the cap → skipped "background-cap", no call (${JSON.stringify(bgCap)})`);
+    let spendReads = 0;
+    const midCap = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => (spendReads++ === 0 ? 59.99 : 60) }));
+    ok(midCap.skipped === null && midCap.stoppedBy === "background-cap" && calls.length === 0 && midCap.replies === 0 && (await getThread(TH.mine))!.preDraftLeaseUntil === undefined, `brief queue: spend crossing 60 % mid-run stops the queue before the next call (${JSON.stringify(midCap)})`);
+    const under = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: cap100, monthSpend: async () => 59.99 }));
+    ok(under.skipped === null && under.stoppedBy === null && under.replies === 1 && (await getThread(TH.mine))!.preDraft?.basis === "m-mine-10", `brief queue: under 60 % of the cap the queue drafts as before (${JSON.stringify(under)})`);
+    const draftsSrc = readFileSync("src/lib/brief/drafts.ts", "utf8");
+    ok(/const backgroundCapped = async \(\) => \(await spentFn\(monthKey\)\) >= settings\.capUsd \* BACKGROUND_CAP_SHARE;/.test(draftsSrc) && /deps\.monthSpend \?\? monthSpend/.test(draftsSrc), "brief queue: the guard reads this month's real spend (monthSpend) against the pilot card's cap");
+
+    /* the spend cap stops the queue (the guard passes; runAssist's own cap check refuses) */
+    await updateQuote(Q.recent, { history: [{ at: sentAt, to: "sent" }] } as never);
+    const { monthSpend: realSpend } = await import("@/lib/stores/assist-runs");
+    const { monthKeyChicago } = await import("@/lib/assist/config");
+    ok((await realSpend(monthKeyChicago(NOW))) > 0, "brief queue: (setup) this test month already has Assist spend");
+    calls.length = 0;
+    const capped = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps({ settings: assistSettingsOf({ assistUsers: [ME.id], assistFeatures: { brief: true, reply: false, tasks: false }, assistMonthlyCapUsd: 0.0000001 }), monthSpend: async () => 0 }));
     ok(capped.stoppedBy === "cap" && calls.length === 0 && !(await getQuote(Q.recent))!.assistNudge && (await getQuote(Q.recent))!.assistNudgeLeaseUntil == null, `brief queue: at the monthly cap the queue stops with no call and no write, the lease released (${JSON.stringify(capped)})`);
 
     /* nudge leases */
@@ -616,10 +644,18 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
     ok(nRaced.dropped === 1 && nRaced.nudges === 0 && !qr.assistNudge && qr.assistNudgeLeaseUntil == null, `brief lease: a nudge drafted for an older send is dropped, the lease released (${JSON.stringify(nRaced)})`);
     onCall = null;
 
+    /* a nudge made for the quote's previous owner is stale for me: redrafted */
+    const qBefore = (await getQuote(Q.quiet))!;
+    await setAssistNudge(Q.quiet, { ...qBefore.assistNudge!, ownerId: OTHER.id, note: "OTHER'S NUDGE" });
+    calls.length = 0;
+    const nOwner = await runDraftQueue({ ownerId: ME.id, deadlineMs: NOW + 600_000 }, deps());
+    const qAfter = (await getQuote(Q.quiet))!;
+    ok(nOwner.nudges === 1 && qAfter.assistNudge?.ownerId === ME.id && qAfter.assistNudge.note !== "OTHER'S NUDGE" && qAfter.assistNudge.basis === qBefore.assistNudge!.basis, `brief queue: a fresh nudge made for the previous owner is redrafted for me (${JSON.stringify(nOwner)})`);
+
     /* writers */
     ok((await setPreDraft(TH.mine, null)) && !(await getThread(TH.mine))!.preDraft && (await setPreDraft("TEST337:missing", null)) === false, "brief store: setPreDraft(null) removes the key; a missing thread → false");
     ok((await setAssistNudge(Q.quiet, null)) && !(await getQuote(Q.quiet))!.assistNudge && (await getQuote(Q.quiet))!.estNo === 993700, "brief store: setAssistNudge(null) removes the nudge and keeps estNo");
-    await setAssistNudge(Q.quiet, { note: "n", emailSubject: "s", emailBody: "b", runId: null, basis: sentAt, at: NOW });
+    await setAssistNudge(Q.quiet, { note: "n", emailSubject: "s", emailBody: "b", runId: null, basis: sentAt, at: NOW, ownerId: ME.id });
     await updateQuote(Q.quiet, { name: "Renamed", assistNudge: null } as never);
     const afterUpd = (await getQuote(Q.quiet))!;
     ok(afterUpd.name === "Renamed" && afterUpd.assistNudge?.note === "n", "brief store: quotes update() can't overwrite the nudge (setAssistNudge's alone)");
@@ -770,14 +806,14 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
 
     /* 3. the AI-pass slice runs only with room for its worst case + the brief's call */
     answer = { summary: "Fine.", doFirst: [] };
-    // the deadlines the real paths pass: Rebuild (90 s) runs the slice; lazy (20 s) and the crons (≤ 55 s from route start) never do
+    // the deadlines the real paths pass: Rebuild (90 s) runs the slice; lazy (20 s) and the crons (≤ 50 s from route start) never do
     const passDl = soon(B.BRIEF_REBUILD_DEADLINE_MS);
     await B.buildBrief(meT, "morning", AM, { builtBy: "rebuild", deadlineMs: passDl, deps: deps() });
     for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${DAY}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
     ok(B.BRIEF_REBUILD_DEADLINE_MS === 90_000 && passCalls.length === 1 && passCalls[0].ownerIds?.join() === ME.id && passCalls[0].budgetMs === 8_000 && passCalls[0].deadlineMs === passDl - B.BRIEF_CALL_RESERVE_MS, "brief build: Rebuild's 90 s deadline gives the AI pass an 8 s slice for me, ending 15 s before the brief's own deadline");
-    await B.buildBrief(meT, "morning", AM, { builtBy: "cron", deadlineMs: soon(55_000), deps: deps() });
+    await B.buildBrief(meT, "morning", AM, { builtBy: "cron", deadlineMs: soon(50_000), deps: deps() });
     for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${DAY}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
-    ok(passCalls.length === 1 && B.BRIEF_LAZY_DEADLINE_MS === 20_000, "brief build: a cron's 55 s (and the lazy 20 s) leave no room — the slice is skipped");
+    ok(passCalls.length === 1 && B.BRIEF_LAZY_DEADLINE_MS === 20_000, "brief build: a cron's 50 s (and the lazy 20 s) leave no room — the slice is skipped");
     const home = readFileSync("src/app/(app)/page.tsx", "utf8");
     ok(/export const maxDuration = 120;/.test(home), "brief build: Rebuild runs under Home's 120 s maxDuration (90 s deadline fits)");
 
@@ -857,6 +893,31 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
     const thrownStored = await B.readBrief(ME.id, dayKey(at(16, 15)), "midday");
     ok(!!thrownView && !thrownView.transient && thrownStored?.error === "Assist failed — the brief was built from the counts." && thrownStored.doFirst.length === 3, "brief fallback: a lazy build whose Assist call throws is stored rule-built (rows kept) — no empty brief, no endless retry");
 
+    /* 7b. a lazy build never locks the slot to the counts (D928) */
+    const D17 = dayKey(at(17, 9));
+    await snap(ME.id, D17, "morning", AM_ROWS, at(17, 9) - 60_000);
+    answer = { summary: "Real one.", doFirst: [] };
+    const nT = calls.length;
+    const noTime = await B.loadBriefView(ME, at(17, 9), { deps: deps(), deadlineMs: Date.now() + 3_000 });
+    ok(!!noTime && noTime.transient && noTime.brief.error === B.BRIEF_NO_TIME_ERROR && noTime.brief.doFirst.length === 3 && calls.length === nT && (await B.readBrief(ME.id, D17, "morning")) === null, "brief view: a lazy build whose only failure is no time left is shown unstored (transient) — the slot stays open");
+    const cron17 = await B.buildBriefsForAll("morning", at(17, 9), { deadlineMs: soon(), users: [meT], deps: deps() });
+    for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${D17}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
+    ok(cron17.built === 1 && (await B.readBrief(ME.id, D17, "morning"))?.summary === "Real one.", `brief cron: after a no-time lazy view, the cron builds the real brief (${JSON.stringify(cron17)})`);
+    const D18 = dayKey(at(18, 9));
+    await snap(ME.id, D18, "morning", AM_ROWS, at(18, 9) - 60_000);
+    await B.writeBrief({ ...b1, day: D18, builtBy: "lazy", runId: null, error: "Assist failed — the brief was built from the counts." }, "insert");
+    const offCron = await B.buildBriefsForAll("morning", at(18, 9), { deadlineMs: soon(), users: [meT], deps: deps({ env: {} }) });
+    ok(offCron.kept === 1 && offCron.replaced === 0 && (await B.readBrief(ME.id, D18, "morning"))?.builtBy === "lazy", "brief cron: a lazy counts-only brief is not replaced by a cron build that also failed");
+    answer = { summary: "Cron fixed it.", doFirst: [] };
+    const fixCron = await B.buildBriefsForAll("morning", at(18, 9), { deadlineMs: soon(), users: [meT], deps: deps() });
+    for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${D18}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
+    const fixed = await B.readBrief(ME.id, D18, "morning");
+    ok(fixCron.replaced === 1 && fixCron.built === 0 && fixed?.builtBy === "cron" && fixed.summary === "Cron fixed it." && fixed.error === undefined, `brief cron: a stored lazy brief with an error is replaced by a good cron build (${JSON.stringify(fixCron)})`);
+    const nK = calls.length;
+    const keepCron = await B.buildBriefsForAll("morning", at(18, 9), { deadlineMs: soon(), users: [meT], deps: deps() });
+    ok(keepCron.kept === 1 && keepCron.replaced === 0 && calls.length === nK, "brief cron: a good stored brief is kept, nothing built");
+    ok(B.briefReplaceableByCron({ ...b1, builtBy: "lazy", error: "x" }) && !B.briefReplaceableByCron({ ...b1, builtBy: "lazy" }) && !B.briefReplaceableByCron({ ...b1, builtBy: "rebuild", error: "x" }) && !B.briefReplaceableByCron({ ...b1, builtBy: "cron", error: "x" }), "brief cron: only a lazy brief with an error is replaceable — never a Rebuild or a cron brief");
+
     const qCalls: string[] = [];
     const queue = async (o: { ownerId: string; deadlineMs: number }) => {
       qCalls.push(o.ownerId);
@@ -876,10 +937,14 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
         /try \{\s*briefs = await buildBriefsForAll\("morning", Date\.now\(\), \{ deadlineMs: started \+ BRIEF_CRON_CUTOFF_MS \}\)/.test(gmail) &&
         /try \{\s*if \("userIds" in briefs\) drafts = await runDraftsForAll\(briefs\.userIds, started \+ BRIEF_CRON_CUTOFF_MS\)/.test(gmail) &&
         gmail.indexOf("runDraftsForAll(briefs.userIds") < gmail.indexOf("syncDrivePhotos(budget)") &&
-        gmail.indexOf("runDraftsForAll(briefs.userIds") < gmail.indexOf("syncAllMeetings("),
-      "brief wiring: the Gmail cron builds the morning briefs, then drafts, after the morning list and before photos / meetings — each in its own try, both capped at 35 s"
+        gmail.indexOf("buildSlotForAll(\"morning\"") < gmail.indexOf("syncAllMeetings(") &&
+        gmail.indexOf("syncAllMeetings(") < gmail.indexOf("buildBriefsForAll(\"morning\"") &&
+        gmail.split("syncAllMeetings(").length === 2 &&
+        /syncAllMeetings\(Math\.max\(0, Math\.min\(20_000, BRIEF_CRON_CUTOFF_MS - \(Date\.now\(\) - started\)\)\)\)/.test(gmail) &&
+        /cronPhotoBudgetMs\(45_000 - \(Date\.now\(\) - started\)\)/.test(gmail),
+      "brief wiring: the Gmail cron runs the meeting sync (ending by 35 s), then the morning briefs and drafts (35 s), then photos (≥ 10 s before 45 s) — each in its own try"
     );
-    ok(mid.indexOf("buildSlotForAll(slot") < mid.indexOf("buildBriefsForAll(slot") && /BRIEF_DEADLINE_MS = 55_000/.test(mid) && /runDraftsForAll\(briefs\.userIds/.test(mid), "brief wiring: the midday cron builds the slot's briefs after the list, then drafts, ending by 55 s");
+    ok(mid.indexOf("buildSlotForAll(slot") < mid.indexOf("buildBriefsForAll(slot") && /BRIEF_DEADLINE_MS = 50_000/.test(mid) && /runDraftsForAll\(briefs\.userIds/.test(mid), "brief wiring: the midday cron builds the slot's briefs after the list, then drafts, ending by 50 s");
     ok(/^"use server";/.test(act) && /requireUser\(\)/.test(act) && /rebuildBrief\(user\)/.test(act) && /revalidatePath\("\/"\)/.test(act), "brief wiring: rebuildBriefAction — a Server Action: requireUser → rebuildBrief → revalidatePath('/')");
     const lib = readFileSync("src/lib/brief/build.ts", "utf8");
     ok(/drive: async \(\{ userId, dayKeys, events, visits: v \}\) => \{\s*const out = await planDriveDays\(\{ userId, dayKeys, events, mode: "cache"/.test(lib), "brief wiring: drive minutes come from the task plan's own drive layer, with its calendar events (no second plan)");
@@ -956,15 +1021,17 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
     preparedBy: "",
     customerId: "C1",
     contactName: "Pat Lee",
-    assistNudge: { ...nudge, runId: "AR-n", basis: MON(9), at: MON(10) },
+    assistNudge: { ...nudge, runId: "AR-n", basis: MON(9), at: MON(10), ownerId: "u-dana" },
     ...over,
   }) as Parameters<typeof nudgePrefill>[0];
-  const np = nudgePrefill(sentQ(), "dana diaz");
+  const DANA_U = { id: "u-dana", name: "Dana Diaz" };
+  const np = nudgePrefill(sentQ(), { id: "u-dana", name: "dana diaz" });
   ok(!!np && np.subject === nudge.emailSubject && np.body === nudge.emailBody && np.customerId === "C1" && np.contact === "Pat Lee", "nudge prefill: a fresh nudge on my quote fills subject, body, customer and contact");
-  ok(nudgePrefill(sentQ(), "Sam Roe") === null && nudgePrefill(sentQ({ owner: "", preparedBy: "Dana Diaz" }), "Dana Diaz") !== null, "nudge prefill: only the quote's person (owner, else preparedBy) gets it");
-  ok(nudgePrefill(sentQ({ status: "won" }), "Dana Diaz") === null && nudgePrefill(sentQ({ assistNudge: { ...nudge, runId: "AR-n", basis: MON(8), at: MON(10) } }), "Dana Diaz") === null, "nudge prefill: a stale nudge (re-sent, or no longer sent) → nothing");
-  ok(nudgePrefill(sentQ({ assistNudge: { note: "", emailSubject: "", emailBody: "", runId: "AR-n", basis: MON(9), at: MON(10), error: "unusable" } }), "Dana Diaz") === null && nudgePrefill(sentQ({ assistNudge: null }), "Dana Diaz") === null && nudgePrefill(null, "Dana Diaz") === null, "nudge prefill: an errored, missing or unknown nudge → nothing");
-  const long = nudgePrefill(sentQ({ contactName: "c".repeat(999), assistNudge: { note: "", emailSubject: "Re:\n  s\u0007" + "s".repeat(999), emailBody: "Hi\r\nthere\u0000\u0007\n\tok" + "b".repeat(99_999), runId: "AR-n", basis: MON(9), at: MON(10) } }), "Dana Diaz");
+  ok(nudgePrefill(sentQ(), { id: "u-sam", name: "Sam Roe" }) === null && nudgePrefill(sentQ({ owner: "", preparedBy: "Dana Diaz" }), DANA_U) !== null, "nudge prefill: only the quote's person (owner, else preparedBy) gets it");
+  ok(nudgePrefill(sentQ({ owner: "Sam Roe" }), { id: "u-sam", name: "Sam Roe" }) === null && nudgePrefill(sentQ(), { id: "u-other", name: "Dana Diaz" }) === null, "nudge prefill: a quote handed to someone else shows them nothing of the nudge made for its previous owner (ownerId must match)");
+  ok(nudgePrefill(sentQ({ status: "won" }), DANA_U) === null && nudgePrefill(sentQ({ assistNudge: { ...nudge, runId: "AR-n", basis: MON(8), at: MON(10), ownerId: "u-dana" } }), DANA_U) === null, "nudge prefill: a stale nudge (re-sent, or no longer sent) → nothing");
+  ok(nudgePrefill(sentQ({ assistNudge: { note: "", emailSubject: "", emailBody: "", runId: "AR-n", basis: MON(9), at: MON(10), ownerId: "u-dana", error: "unusable" } }), DANA_U) === null && nudgePrefill(sentQ({ assistNudge: null }), DANA_U) === null && nudgePrefill(null, DANA_U) === null, "nudge prefill: an errored, missing or unknown nudge → nothing");
+  const long = nudgePrefill(sentQ({ contactName: "c".repeat(999), assistNudge: { note: "", emailSubject: "Re:\n  s\u0007" + "s".repeat(999), emailBody: "Hi\r\nthere\u0000\u0007\n\tok" + "b".repeat(99_999), runId: "AR-n", basis: MON(9), at: MON(10), ownerId: "u-dana" } }), DANA_U);
   ok(!!long && long.subject.startsWith("Re: s") && long.subject.length === COMPOSE_SUBJECT_MAX && long.body.startsWith("Hi\nthere\n\tok") && long.body.length === COMPOSE_BODY_MAX && long.contact.length === COMPOSE_CONTACT_MAX, "nudge prefill: one-line subject, control characters out, every field capped server-side");
   const cust = { contacts: [{ name: "Pat Lee", email: "pat@north.example" }, { name: "Sam Roe", email: "" }] };
   ok(prefillRecipient(cust, "pat lee").to === "pat@north.example" && prefillRecipient(cust, "pat lee").contactName === "Pat Lee", "nudge prefill: To is the quote's contact, matched by name among the customer's people");
@@ -993,14 +1060,15 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
     { id: "m2", direction: "in" as const, at: MON(9), body: "", author: "Pat" },
   ];
   const sugg = [{ title: "Send drawings", notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "normal", size: "s" }];
-  const pd = { body: "Hi Pat — attached.", runId: "AR-r", taskSuggestions: sugg, taskRunId: "AR-t", basis: "m2", at: MON(6, 47) };
+  const pd = { body: "Hi Pat — attached.", runId: "AR-r", taskSuggestions: sugg, taskRunId: "AR-t", basis: "m2", at: MON(6, 47), ownerId: "u-dana" };
   const th = (over: Record<string, unknown> = {}) => ({ status: "waiting_us", assignedTo: "Dana Diaz", noise: null, court: null, messages: msgs, preDraft: pd, ...over }) as unknown as ThreadArg;
-  const DANA = { name: "Dana Diaz" };
+  const DANA = { id: "u-dana", name: "Dana Diaz" };
   const env = {};
   const r1 = readerPreDraft(th(), DANA, env);
   ok(!!r1 && r1.reply?.body === pd.body && r1.reply.runId === "AR-r" && r1.tasks?.runId === "AR-t" && r1.tasks.suggestions.length === 1 && r1.preparedLabel === "6:47 AM", "reader pre-draft: fresh, court me, mine → Use it (body + runId) and the stored suggestions");
   ok(readerPreDraft(th({ preDraft: { ...pd, basis: "m1" } }), DANA, env) === null, "reader pre-draft: stale (a newer inbound message) → nothing; the reader drafts live");
   ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), DANA, env) === null, "reader pre-draft: someone else's thread → nothing");
+  ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), { id: "u-sam", name: "Sam Roe" }, env) === null && readerPreDraft(th({ preDraft: { ...pd, ownerId: undefined } }), DANA, env) === null, "reader pre-draft: a thread reassigned since the draft was made shows its new owner nothing (ownerId must match)");
   ok(readerPreDraft(th({ status: "waiting_them" }), DANA, env) === null && readerPreDraft(th({ noise: { flagged: true } }), DANA, env) === null, "reader pre-draft: not on my court (waiting on them, or noise) → nothing");
   const noBody = readerPreDraft(th({ preDraft: { ...pd, body: "  " } }), DANA, env);
   ok(!!noBody && noBody.reply === null && !!noBody.tasks, "reader pre-draft: an empty body never shows Use it (stored suggestions still do)");
@@ -1027,16 +1095,16 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   const tasksClick = reader.slice(reader.indexOf("if (storedTasks) {"), reader.indexOf("tasksInFlight.current = true;", reader.indexOf("if (storedTasks) {")));
   ok(tasksClick.includes("runId: storedTasks.runId") && tasksClick.includes("return;") && !tasksClick.includes("suggestTasksAction"), "brief pins: Suggest tasks opens the dialog on fresh stored suggestions with their runId — no model call");
   const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
-  ok(/const storedDraft = readerPreDraft\(sel, \{ name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
-  ok(/const nudgeQuote = nudgeId \? await getQuote\(nudgeId\)\.catch\(\(\) => null\) : null;\s+const nudge = nudgePrefill\(nudgeQuote, me\);/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
+  ok(/const storedDraft = readerPreDraft\(sel, \{ id: user\.id, name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
+  ok(/const nudgeQuote = nudgeId \? await getQuote\(nudgeId\)\.catch\(\(\) => null\) : null;\s+const nudge = nudgePrefill\(nudgeQuote, \{ id: user\.id, name: me \}\);/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
   const rp = readFileSync("src/lib/brief/reader-predraft.ts", "utf8");
-  ok(rp.includes("preDraftFresh(t)") && rp.includes("onMyCourt(t, env)") && rp.includes("sameName(t.assignedTo, me.name)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
+  ok(rp.includes("preDraftFreshFor(t, me.id)") && rp.includes("onMyCourt(t, env)") && rp.includes("sameName(t.assignedTo, me.name)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
   const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
   ok(view.includes("rebuildBriefAction()") && view.includes('postChanged("inbox")') && view.includes("router.refresh()"), "brief pins: Rebuild refreshes the page and tells other windows (postChanged)");
   ok(view.includes("@media (max-width:899px)") && view.includes(".pkb-big{display:block}") && view.includes("new SpeechSynthesisUtterance(vm.speech)") && /const listenBtn = canSpeak \?/.test(view) && view.includes('useSearchParams().get("brief")') && view.includes('briefParam === "1"') && view.includes("[vm.id, briefParam]") && view.includes("scrollIntoView"), "brief pins: big-text under 900 px, Listen only when speech is supported, ?brief=1 scrolls to the card");
   ok(/localStorage\.getItem\(COLLAPSE_KEY\(vm\.id\)\)/.test(view) && view.includes("try {"), "brief pins: collapse remembered per brief id, storage in try/catch");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
-  ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { name: user.name })") && card.includes("nudgePrefill(q, user.name) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
+  ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { id: user.id, name: user.name })") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
   const cardFn = card.slice(card.indexOf("export default async function BriefCard"), card.indexOf("async function loadCardVM"));
   ok(/try \{\s*vm = await loadCardVM\(user, settings\);\s*\} catch/.test(cardFn) && cardFn.includes("Your brief couldn’t load"), "brief pins: everything after the gate (load, store reads, VM) is inside one try — the card never breaks Home");
   const useFn2 = reader.slice(reader.indexOf("const useStoredDraft"), reader.indexOf("const closeComposer"));

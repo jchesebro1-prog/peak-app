@@ -1297,14 +1297,16 @@ export async function meetings323FinalChecks(ok: Ok): Promise<void> {
   const syncSrc = src("src/lib/meetings/sync.ts");
   ok((syncSrc.match(/step\(snap\)/g) || []).length === 1, "#323 final 3: the sync matches a changed meeting once (step(snap) computed once, reused)");
 
-  // (6) Home's stale-sync rides after(); (10) the cron's meetings rider runs last
+  // (6) Home's stale-sync rides after(); (10) the cron's meetings rider runs after the vendor rider and,
+  // since the AI daily brief's D920, ahead of the brief / draft / photo riders so it keeps its window
   const home = src("src/app/(app)/page.tsx");
   ok(/import \{ after \} from "next\/server";/.test(home) && /after\(\(\) => syncMeetingsIfStale\(user\.id\)/.test(home) &&
      !/void syncMeetingsIfStale/.test(home), "#323 final 6: Home schedules the stale meeting sync with after()");
   const cron = src("src/app/api/gmail/sync/route.ts");
   const at = (s: string) => cron.indexOf(s);
-  ok(at("await syncAllMeetings(") > at("await syncDrivePhotos(") && at("await syncAllMeetings(") > at("await ensureVendorAssignments(") &&
-     at("await syncDrivePhotos(") > 0, "#323 final 10: the cron runs the Krisp meetings rider last");
+  ok(at("await syncAllMeetings(") > at("await ensureVendorAssignments(") && at("await syncAllMeetings(") < at("await buildBriefsForAll(") &&
+     at("await syncAllMeetings(") < at("await syncDrivePhotos(") && at("await syncDrivePhotos(") > 0,
+     "#323 final 10 (D920): the cron runs the Krisp meetings rider after the vendor rider, ahead of the brief, draft and photo riders");
 
   // (5) a meetings-table error degrades to empty / 0 on pages that could not fail before
   const safe = await tryImport<{ meetingsReadOr: <T>(p: Promise<T>, fb: T, where: string) => Promise<T> }>("@/lib/meetings/safe-read");
