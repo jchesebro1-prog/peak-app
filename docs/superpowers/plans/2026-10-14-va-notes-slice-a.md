@@ -108,7 +108,7 @@ Expected: tsc clean. Record the eslint problem count — Task 10 compares agains
 In `src/lib/stores/survey-intake.ts`, directly above `export type DisciplineKey = …` (line ~102), add:
 
 ```ts
-/** #342 — the one rigging-system answer (Kill questions; stored at disciplines.rigging.present). "None" is
+/** #344 — the one rigging-system answer (Kill questions; stored at disciplines.rigging.present). "None" is
  *  exclusive. Old labels map on read in src/lib/survey-migrate.ts. */
 export const RIG_SYSTEMS = ["Counterweight", "Dead-hung", "Motorized", "Hemp", "Fixed points", "None"] as const;
 ```
@@ -118,7 +118,7 @@ export const RIG_SYSTEMS = ["Counterweight", "Dead-hung", "Motorized", "Hemp", "
 Create `scripts/test-va-notes.ts`:
 
 ```ts
-/* Venue Assessment notes (#342) — harness checks. `vaNotesChecks` is pure; `vaNotesDbChecks` needs the test DB.
+/* Venue Assessment notes (#344) — harness checks. `vaNotesChecks` is pure; `vaNotesDbChecks` needs the test DB.
    Run alone with `npx tsx scripts/test-va-notes.ts` (pure checks only). */
 import type { Ok } from "./test-inbox-org";
 import {
@@ -129,43 +129,43 @@ import {
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
   ok(SECTION_ORDER.indexOf("tier1") === 2 && SECTION_ORDER[0] === "cust" && SECTION_ORDER[1] === "visit",
-    "#342 A1: Kill questions come third, right after Customer & venue and Visit");
+    "#344 A1: Kill questions come third, right after Customer & venue and Visit");
   ok(SECTION_ORDER.at(-1) === "assign" && SECTION_ORDER.indexOf("project") > SECTION_ORDER.indexOf("notes") &&
      SECTION_ORDER.indexOf("recap") > SECTION_ORDER.indexOf("project") && SECTION_ORDER.indexOf("finalThoughts") > SECTION_ORDER.indexOf("recap"),
-    "#342 A1: wrap-up runs Scope & notes → Existing materials & quote → Customer recap → Final thoughts → Assignment (last)");
+    "#344 A1: wrap-up runs Scope & notes → Existing materials & quote → Customer recap → Final thoughts → Assignment (last)");
   ok(SECTION_ORDER.indexOf("m3d") === SECTION_ORDER.indexOf("mHouse") + 1 && SECTION_ORDER.indexOf("m3d") < SECTION_ORDER.indexOf("dRigging"),
-    "#342 A1: the 3D preview is the last of the site information");
-  ok(!SECTION_ORDER.includes("signoff") && !SECTION_ORDER.includes("conditions"), "#342 A6/A5: no Sign-off, no Site conditions section");
-  ok(STEP_LABELS.join("|") === "Brief|Site & access|Measurements|Site intake|Assessment|Wrap-up", "#342 A1: wizard step labels");
-  ok(SECTION_ORDER.every((id) => STEP_BY_ID[id] != null && GROUP_BY_ID[id] != null), "#342 A1: every section has a step and a group");
-  ok(STEP_BY_ID.tier1 === 0 && STEP_BY_ID.assign === 5 && STEP_BY_ID.linesets === 3 && STEP_BY_ID.assessmentToggle === 4, "#342 A1: steps by id");
-  ok(GROUP_BY_ID.tier1 === "brief" && GROUP_BY_ID.assign === "wrapup" && GROUP_META.wrapup.label === "Wrap-up", "#342 A1: groups by id");
-  ok(RIG_SYSTEMS.join("|") === "Counterweight|Dead-hung|Motorized|Hemp|Fixed points|None", "#342 R3: rigging system options");
+    "#344 A1: the 3D preview is the last of the site information");
+  ok(!SECTION_ORDER.includes("signoff") && !SECTION_ORDER.includes("conditions"), "#344 A6/A5: no Sign-off, no Site conditions section");
+  ok(STEP_LABELS.join("|") === "Brief|Site & access|Measurements|Site intake|Assessment|Wrap-up", "#344 A1: wizard step labels");
+  ok(SECTION_ORDER.every((id) => STEP_BY_ID[id] != null && GROUP_BY_ID[id] != null), "#344 A1: every section has a step and a group");
+  ok(STEP_BY_ID.tier1 === 0 && STEP_BY_ID.assign === 5 && STEP_BY_ID.linesets === 3 && STEP_BY_ID.assessmentToggle === 4, "#344 A1: steps by id");
+  ok(GROUP_BY_ID.tier1 === "brief" && GROUP_BY_ID.assign === "wrapup" && GROUP_META.wrapup.label === "Wrap-up", "#344 A1: groups by id");
+  ok(RIG_SYSTEMS.join("|") === "Counterweight|Dead-hung|Motorized|Hemp|Fixed points|None", "#344 R3: rigging system options");
 
   ok(isQuoteVisit({ visitPurpose: "New system design" }) && !isQuoteVisit({ visitPurpose: "Bid walk" }) && !isQuoteVisit({}),
-    "#342 A3: only New system design counts as a quote visit (Jeff, Q2)");
+    "#344 A3: only New system design counts as a quote visit (Jeff, Q2)");
 
-  ok(scopeSet({}) === null && scopeSet({ scope: [] }) === null && scopeSet({ scope: ["junk"] }) === null, "#342 R2: no known scope = unset");
-  ok(JSON.stringify(scopeSet({ scope: ["av", "rigging", "x"] })) === '["rigging","av"]', "#342 R2: scope keeps known keys in canonical order");
-  ok(inScope({}, "av") && inScope({ scope: ["av"] }, "av") && !inScope({ scope: ["rigging"] }, "av"), "#342 R2: unset scope filters nothing");
+  ok(scopeSet({}) === null && scopeSet({ scope: [] }) === null && scopeSet({ scope: ["junk"] }) === null, "#344 R2: no known scope = unset");
+  ok(JSON.stringify(scopeSet({ scope: ["av", "rigging", "x"] })) === '["rigging","av"]', "#344 R2: scope keeps known keys in canonical order");
+  ok(inScope({}, "av") && inScope({ scope: ["av"] }, "av") && !inScope({ scope: ["rigging"] }, "av"), "#344 R2: unset scope filters nothing");
 
   const cw = { disciplines: { rigging: { present: ["Counterweight", "Motorized"] } } };
-  ok(rigSystems(cw).join() === "Counterweight,Motorized" && hasCounterweight(cw) && hasLinesets(cw), "#342 R3: rig helpers read disciplines.rigging.present");
-  ok(!hasLinesets({ disciplines: { rigging: { present: ["Fixed points"] } } }) && !hasCounterweight({}), "#342 R3: fixed points has no line sets");
+  ok(rigSystems(cw).join() === "Counterweight,Motorized" && hasCounterweight(cw) && hasLinesets(cw), "#344 R3: rig helpers read disciplines.rigging.present");
+  ok(!hasLinesets({ disciplines: { rigging: { present: ["Fixed points"] } } }) && !hasCounterweight({}), "#344 R3: fixed points has no line sets");
 
-  ok(sectionVisible({}, "dAv") && sectionVisible({}, "linesets"), "#342 R2: everything shows while scope is unset");
+  ok(sectionVisible({}, "dAv") && sectionVisible({}, "linesets"), "#344 R2: everything shows while scope is unset");
   ok(!sectionVisible({ scope: ["curtain"] }, "mBeams") && !sectionVisible({ scope: ["curtain"] }, "dRigging") && !sectionVisible({ scope: ["curtain"] }, "linesets"),
-    "#342 R2: Beams, Rigging and Line sets need Rigging in scope");
-  ok(!sectionVisible({ scope: ["rigging"] }, "mFOH") && sectionVisible({ scope: ["lighting"] }, "mFOH"), "#342 R2: FOH positions needs Lighting");
-  ok(sectionVisible({ scope: ["rigging"] }, "mLayout") && sectionVisible({ scope: ["rigging"] }, "cust"), "#342 R2: unscoped sections always show");
+    "#344 R2: Beams, Rigging and Line sets need Rigging in scope");
+  ok(!sectionVisible({ scope: ["rigging"] }, "mFOH") && sectionVisible({ scope: ["lighting"] }, "mFOH"), "#344 R2: FOH positions needs Lighting");
+  ok(sectionVisible({ scope: ["rigging"] }, "mLayout") && sectionVisible({ scope: ["rigging"] }, "cust"), "#344 R2: unscoped sections always show");
   ok(!sectionVisible({ scope: ["rigging"], disciplines: { rigging: { present: ["None"] } } }, "linesets") &&
      sectionVisible({ scope: ["rigging"], disciplines: { rigging: { present: ["None"] } }, linesets: [{}] }, "linesets") &&
      sectionVisible({ scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } }, "linesets"),
-    "#342 A1: Line set schedule hides for None / Fixed points unless rows exist");
+    "#344 A1: Line set schedule hides for None / Fixed points unless rows exist");
 
   ok(JSON.stringify(splitGoalLines("- Fix the main\n• Add a cyc\n\n2. Quieter fly system  \nplain")) === '["Fix the main","Add a cyc","Quieter fly system","plain"]',
-    "#342 A7: goal text splits on lines and drops bullets");
-  ok(JSON.stringify(splitGoalLines([" a ", "", "b"])) === '["a","b"]' && splitGoalLines(undefined).length === 0, "#342 A7: goal arrays are trimmed");
+    "#344 A7: goal text splits on lines and drops bullets");
+  ok(JSON.stringify(splitGoalLines([" a ", "", "b"])) === '["a","b"]' && splitGoalLines(undefined).length === 0, "#344 A7: goal arrays are trimmed");
 
   const rc = recapFor({
     scope: ["rigging", "lighting"],
@@ -175,12 +175,12 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       curtain: { scope: ["Flame test"] },
     },
   });
-  ok(rc.map((e) => e.disc).join() === "rigging,lighting", "#342 A7: the recap lists in-scope disciplines only (curtain is out of scope)");
+  ok(rc.map((e) => e.disc).join() === "rigging,lighting", "#344 A7: the recap lists in-scope disciplines only (curtain is out of scope)");
   ok(rc[0].label === "Rigging" && rc[0].scopes.join() === "New grid" && rc[0].goals.join() === "Safer fly rail" && rc[1].other === "LED retrofit study",
-    "#342 A7: each entry carries scopes, Other text and goal lines");
+    "#344 A7: each entry carries scopes, Other text and goal lines");
   ok(recapFor({ disciplines: { curtain: { scope: ["Flame test"] }, av: {} } }).map((e) => e.disc).join() === "curtain",
-    "#342 A7: with scope unset the recap lists disciplines that have scopes or goals");
-  ok(recapScopeText(rc[1]) === "Other: LED retrofit study" && recapScopeText(rc[0]) === "New grid", "#342 A7: recap scope text");
+    "#344 A7: with scope unset the recap lists disciplines that have scopes or goals");
+  ok(recapScopeText(rc[1]) === "Other: LED retrofit study" && recapScopeText(rc[0]) === "New grid", "#344 A7: recap scope text");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
@@ -212,7 +212,7 @@ Expected: FAIL — cannot find module `../src/lib/survey-flow`.
 - [ ] **Step 4: Write `src/lib/survey-flow.ts`**
 
 ```ts
-/* Venue Assessments flow (#342, slice A) — the editor's section order, wizard steps and groups, the scope filter
+/* Venue Assessments flow (#344, slice A) — the editor's section order, wizard steps and groups, the scope filter
    (Kill questions → which sections show), the one rigging-system answer, the quote-visit rule and the customer
    recap. Pure and client-safe: the editor, the field sheet, the findings text and the tests read it. */
 import { DISCIPLINE_GROUPS, RIG_SYSTEMS, type DisciplineData, type DisciplineKey } from "./stores/survey-intake";
@@ -371,7 +371,7 @@ and change the chain line `.then(() => assessmentChecks(ok)).then(() => assessme
 ```bash
 npx tsc --noEmit
 git add src/lib/survey-flow.ts src/lib/stores/survey-intake.ts scripts/test-va-notes.ts scripts/test-review-and-spec.ts
-git commit -m "feat(venue-assessments): #342 survey-flow — order, scope filter, rig system, quote rule, recap
+git commit -m "feat(venue-assessments): #344 survey-flow — order, scope filter, rig system, quote rule, recap
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -411,43 +411,43 @@ import { BEAM_FIELDS } from "../src/lib/stores/surveys";
   const m = (s: MigratableSurvey) => migrateSurvey(JSON.parse(JSON.stringify(s)) as MigratableSurvey);
   const a1 = m({ measurements: { rigType: "Hemp" } });
   ok(JSON.stringify(a1.disciplines?.rigging?.present) === '["Hemp"]' && (a1.legacyNotes || []).length === 0,
-    "#342 R3: an unanswered rigging system copies up from Beams' Existing rig type");
+    "#344 R3: an unanswered rigging system copies up from Beams' Existing rig type");
   const a2 = m({ measurements: { rigType: "None existing" }, disciplines: { rigging: { counterweight: true } } });
-  ok(JSON.stringify(a2.disciplines?.rigging?.present) === '["Counterweight"]', "#342 R3: None drops out when another source names a system");
+  ok(JSON.stringify(a2.disciplines?.rigging?.present) === '["Counterweight"]', "#344 R3: None drops out when another source names a system");
   const a3 = m({ conditions: ["Existing rigging — hemp", "Motorized hoists present", "Low grid clearance"] });
-  ok(JSON.stringify(a3.disciplines?.rigging?.present) === '["Hemp","Motorized"]', "#342 R3: the old condition chips copy up");
+  ok(JSON.stringify(a3.disciplines?.rigging?.present) === '["Hemp","Motorized"]', "#344 R3: the old condition chips copy up");
   const a4 = m({ measurements: { rigType: "Hemp" }, disciplines: { rigging: { present: ["Counterweight system", "Dead-hung battens"], counterweight: true } } });
-  ok(JSON.stringify(a4.disciplines?.rigging?.present) === '["Counterweight","Dead-hung"]', "#342 R3: old Present labels relabel on read");
+  ok(JSON.stringify(a4.disciplines?.rigging?.present) === '["Counterweight","Dead-hung"]', "#344 R3: old Present labels relabel on read");
   ok((a4.legacyNotes || []).some((n) => n.section === "mBeams" && n.text === "Hemp") && !(a4.legacyNotes || []).some((n) => n.section === "dRigging"),
-    "#342 R1: an answered system keeps a disagreeing rig type as an Older note");
-  ok(a4.measurements?.rigType === "Hemp" && a4.disciplines?.rigging?.counterweight === true, "#342 R1: migration never deletes the old keys");
+    "#344 R1: an answered system keeps a disagreeing rig type as an Older note");
+  ok(a4.measurements?.rigType === "Hemp" && a4.disciplines?.rigging?.counterweight === true, "#344 R1: migration never deletes the old keys");
   const a5 = m({ systemsState: { rigging: { installed: "yes", desc: "" } } });
   ok(JSON.stringify(a5.disciplines?.rigging?.present) === JSON.stringify([presentOptionsFor("rigging", "theatre")[0]]) && a5.disciplines?.rigging?.present?.[0] === "Counterweight",
-    "#342: the systemsState fold still seeds Present (now the new first option)");
+    "#344: the systemsState fold still seeds Present (now the new first option)");
   const a6 = m({ disciplines: { lighting: { goals: "Brighter wash" }, curtain: { present: ["None"] } } });
-  ok(JSON.stringify(a6.scope) === '["lighting"]', "#342 R2: scope seeds from disciplines with data (None-only doesn't count)");
-  ok(m({}).scope === undefined && JSON.stringify(m({ scope: [] }).scope) === "[]", "#342 R2: nothing to seed → scope stays unset; an answered scope is kept");
+  ok(JSON.stringify(a6.scope) === '["lighting"]', "#344 R2: scope seeds from disciplines with data (None-only doesn't count)");
+  ok(m({}).scope === undefined && JSON.stringify(m({ scope: [] }).scope) === "[]", "#344 R2: nothing to seed → scope stays unset; an answered scope is kept");
   const twice = m(m({ measurements: { rigType: "Bogus" }, disciplines: { rigging: { present: ["Hemp"] } } }) as MigratableSurvey);
-  ok((twice.legacyNotes || []).filter((n) => n.text === "Bogus").length === 1, "#342 R1: migration is idempotent (notes de-duplicate)");
+  ok((twice.legacyNotes || []).filter((n) => n.text === "Bogus").length === 1, "#344 R1: migration is idempotent (notes de-duplicate)");
   const stored = m({ legacyNotes: [{ section: "x", label: "y", text: "stale" }] });
-  ok((stored.legacyNotes || []).length === 0, "#342 R1: legacyNotes are re-derived on every read, never trusted from storage");
+  ok((stored.legacyNotes || []).length === 0, "#344 R1: legacyNotes are re-derived on every read, never trusted from storage");
   const ln: MigratableSurvey = {};
   addLegacyNote(ln, { section: "s", label: "l", text: "   " });
-  ok(!(ln.legacyNotes || []).length, "#342 R1: a blank note is dropped");
+  ok(!(ln.legacyNotes || []).length, "#344 R1: a blank note is dropped");
 
-  ok(!BEAM_FIELDS.some((f) => f.key === "rigType"), "#342 R3: Beams & rigging no longer asks Existing rig type");
+  ok(!BEAM_FIELDS.some((f) => f.key === "rigType"), "#344 R3: Beams & rigging no longer asks Existing rig type");
   const rigGroup = DISCIPLINE_GROUPS.find((g) => g.key === "rigging")!;
   ok(rigGroup.presentOptions.join("|") === "Counterweight|Dead-hung|Motorized|Hemp|Fixed points|None" && !rigGroup.fields.some((f) => f.key === "counterweight"),
-    "#342 R3: Rigging Present uses the rig-system list; its Counterweight check is gone");
+    "#344 R3: Rigging Present uses the rig-system list; its Counterweight check is gone");
 
   const base = { venue: "Hall", contact: "Pat", contactEmail: "p@x.org", measurements: { proW: "40", stageDepth: "30" } };
-  ok(tier1Items(base).map((i) => i.key).join() === "venue,contact,contactEmail,stageWidth,stageDepth,scope", "#342 A2: Tier 1 items (no phone; scope added)");
-  ok(!tier1Complete(base) && tier1Complete({ ...base, scope: ["curtain"] }), "#342 A2: Tier 1 needs a scope; contact phone isn't required");
+  ok(tier1Items(base).map((i) => i.key).join() === "venue,contact,contactEmail,stageWidth,stageDepth,scope", "#344 A2: Tier 1 items (no phone; scope added)");
+  ok(!tier1Complete(base) && tier1Complete({ ...base, scope: ["curtain"] }), "#344 A2: Tier 1 needs a scope; contact phone isn't required");
   ok(tier1Items({ ...base, scope: ["rigging"] }).some((i) => i.key === "rigSystem" && !i.done) && !tier1Complete({ ...base, scope: ["rigging"] }),
-    "#342 A2: Rigging in scope adds an unanswered Rigging system item");
-  ok(tier1Complete({ ...base, scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } }), "#342 A2: answering the rigging system completes Tier 1");
+    "#344 A2: Rigging in scope adds an unanswered Rigging system item");
+  ok(tier1Complete({ ...base, scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } }), "#344 A2: answering the rigging system completes Tier 1");
   ok(tier1Items(base).find((i) => i.key === "stageWidth")?.section === "tier1" && tier1Items(base).find((i) => i.key === "contact")?.section === "cust",
-    "#342 A2: stage W/D are answered on the card; contact jumps to Customer & venue");
+    "#344 A2: stage W/D are answered on the card; contact jumps to Customer & venue");
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -458,7 +458,7 @@ Expected: FAIL — cannot find module `../src/lib/survey-migrate`.
 - [ ] **Step 3: Create `src/lib/survey-migrate.ts`**
 
 ```ts
-/* Venue Assessments read-time migration (#342). normalize() in src/lib/stores/surveys.ts runs migrateSurvey on
+/* Venue Assessments read-time migration (#344). normalize() in src/lib/stores/surveys.ts runs migrateSurvey on
    every read. Each step is pure, idempotent and never deletes a key: an old value that doesn't map is kept and
    surfaced as a LegacyNote. legacyNotes is re-derived on every read and never stored (the editor strips it before
    a save), so a rollback still reads the old keys. Client-safe. */
@@ -528,7 +528,7 @@ export function stepRigSystem(s: MigratableSurvey): void {
     const present = dedupe(rig.present.map((p) => RIG_RELABEL[String(p)] ?? String(p)));
     rig.present = present;
     if (rigTypeRaw && !(fromType && present.includes(fromType))) {
-      addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #342)", text: rigTypeRaw });
+      addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #344)", text: rigTypeRaw });
     }
     if (cwCheck && !present.includes("Counterweight")) {
       addLegacyNote(s, { section: "dRigging", label: "Counterweight system (old check)", text: "Yes" });
@@ -536,7 +536,7 @@ export function stepRigSystem(s: MigratableSurvey): void {
     return;
   }
 
-  if (rigTypeRaw && !fromType) addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #342)", text: rigTypeRaw });
+  if (rigTypeRaw && !fromType) addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #344)", text: rigTypeRaw });
   let seed = dedupe(
     [fromType, cwCheck ? "Counterweight" : "", ...(s.conditions || []).map((c) => CONDITION_TO_SYSTEM[c] ?? "")].filter(Boolean)
   );
@@ -612,7 +612,7 @@ export interface Tier1Slice {
   contactEmail?: string;
   contactPhone?: string;
   measurements?: Record<string, string | boolean>;
-  /** #342 — the scope kill question (DisciplineKey[]); unset / empty = unanswered */
+  /** #344 — the scope kill question (DisciplineKey[]); unset / empty = unanswered */
   scope?: unknown;
   disciplines?: Record<string, DisciplineData>;
 }
@@ -647,7 +647,7 @@ export function tier1Items(s: Tier1Slice): Tier1Item[] {
 }
 ```
 
-Also update the comment above `TIER1_WIDTH_KEYS` ("Venue name, contact name/email/phone…") to "Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#342 — contact phone is no longer a kill question)."
+Also update the comment above `TIER1_WIDTH_KEYS` ("Venue name, contact name/email/phone…") to "Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#344 — contact phone is no longer a kill question)."
 
 - [ ] **Step 5: Update `src/lib/stores/surveys.ts`**
 
@@ -656,7 +656,7 @@ Also update the comment above `TIER1_WIDTH_KEYS` ("Venue name, contact name/emai
 3. In `SurveyDraft`, after `visitId: string | null;` add:
 
 ```ts
-  // ---- #342 Venue Assessment notes ----
+  // ---- #344 Venue Assessment notes ----
   /** the scope kill question — DisciplineKey[]; absent/empty = unanswered (filters nothing) */
   scope?: string[];
   /** Final thoughts — internal tag ids (settings.surveyInternalTags); never printed for the customer */
@@ -665,7 +665,7 @@ Also update the comment above `TIER1_WIDTH_KEYS` ("Venue name, contact name/emai
   legacyNotes?: LegacyNote[];
 ```
 
-4. In `normalize()`, delete the `SYSTEM_KEYS.forEach(...)` fold block (now `stepSystemsStateFold`) and replace it with `migrateSurvey(s);` immediately before `return s;`. Update the doc comment's last paragraph: "#342: the rig-system copy-up, the systemsState fold and the scope seed run in src/lib/survey-migrate.ts (migrateSurvey)." Remove imports that become unused (`SYSTEM_KEYS`, `presentOptionsFor`, `DisciplineKey` if no longer referenced — check with `grep -n` before removing).
+4. In `normalize()`, delete the `SYSTEM_KEYS.forEach(...)` fold block (now `stepSystemsStateFold`) and replace it with `migrateSurvey(s);` immediately before `return s;`. Update the doc comment's last paragraph: "#344: the rig-system copy-up, the systemsState fold and the scope seed run in src/lib/survey-migrate.ts (migrateSurvey)." Remove imports that become unused (`SYSTEM_KEYS`, `presentOptionsFor`, `DisciplineKey` if no longer referenced — check with `grep -n` before removing).
 
 - [ ] **Step 6: Update the existing Tier 1 checks**
 
@@ -688,7 +688,7 @@ Expected: all PASS; tsc clean. If tsc reports `rigType` / `counterweight` usages
 
 ```bash
 git add src/lib/survey-migrate.ts src/lib/stores/survey-intake.ts src/lib/stores/surveys.ts scripts/test-va-notes.ts scripts/test-review-and-spec.ts
-git commit -m "feat(venue-assessments): #342 read-time migration — one rigging system, scope seed, Tier 1 scope
+git commit -m "feat(venue-assessments): #344 read-time migration — one rigging system, scope seed, Tier 1 scope
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -729,24 +729,24 @@ and append to `vaNotesChecks`:
   /* ---- Task 3: internal tags ---- */
   ok(STARTER_SURVEY_TAGS.map((t) => t.label).join("|") ===
     "Tight timeline|Price-sensitive|Strong champion|Competitor involved|Budget not confirmed|Decision-maker not met|Active venue (work around events)|Volunteer install crew available|Historic / preservation constraints",
-    "#342 A5: the nine starter tags (Jeff, Q6)");
-  ok(STARTER_SURVEY_TAGS.every((t) => /^tg_[a-z0-9_]+$/.test(t.id)) && new Set(STARTER_SURVEY_TAGS.map((t) => t.id)).size === 9, "#342 A5: starter ids are tg_ slugs, unique");
-  ok(resolveSurveyTags(undefined).length === 9 && resolveSurveyTags([]).length === 9, "#342 A5: absent / empty reads as the starter list");
+    "#344 A5: the nine starter tags (Jeff, Q6)");
+  ok(STARTER_SURVEY_TAGS.every((t) => /^tg_[a-z0-9_]+$/.test(t.id)) && new Set(STARTER_SURVEY_TAGS.map((t) => t.id)).size === 9, "#344 A5: starter ids are tg_ slugs, unique");
+  ok(resolveSurveyTags(undefined).length === 9 && resolveSurveyTags([]).length === 9, "#344 A5: absent / empty reads as the starter list");
   ok(resolveSurveyTags([{ id: "tg_a", label: " A " }, { id: "bad id", label: "B" }, { id: "tg_a", label: "dup" }, { id: "tg_c", label: "" }]).map((t) => t.id + ":" + t.label).join() === "tg_a:A",
-    "#342 A5: resolve drops bad ids, duplicates and blank labels");
+    "#344 A5: resolve drops bad ids, duplicates and blank labels");
   const st = resolveSurveyTags(undefined);
   const r1 = mergeSurveyTags(st, [{ id: "tg_tight_timeline", label: "Very tight timeline" }, { label: "Board approval needed" }]);
   ok(r1.ok && r1.tags[0].label === "Very tight timeline" && r1.tags[1].id === "tg_board_approval_needed" && !r1.tags[1].retired,
-    "#342 A5: rename keeps the id; a new row mints a tg_ id");
-  ok(r1.ok && r1.tags.filter((t) => t.retired).length === 8, "#342 A5: rows dropped from the editor are kept, retired (stored surveys keep their label)");
+    "#344 A5: rename keeps the id; a new row mints a tg_ id");
+  ok(r1.ok && r1.tags.filter((t) => t.retired).length === 8, "#344 A5: rows dropped from the editor are kept, retired (stored surveys keep their label)");
   ok(r1.ok && activeSurveyTags(r1.tags).length === 2 && surveyTagLabel(r1.tags, "tg_price_sensitive") === "Price-sensitive" && surveyTagLabel(r1.tags, "tg_gone") === "tg_gone",
-    "#342 A5: active filter and labels (unknown id shows raw)");
+    "#344 A5: active filter and labels (unknown id shows raw)");
   const r2 = mergeSurveyTags(st, [{ label: "X" }, { label: "x" }]);
-  ok(!r2.ok && /Two tags/.test(r2.error), "#342 A5: duplicate active labels are refused");
+  ok(!r2.ok && /Two tags/.test(r2.error), "#344 A5: duplicate active labels are refused");
   const r3 = mergeSurveyTags(st, [{ id: "tg_nope", label: "Y" }]);
-  ok(!r3.ok && /Unknown tag/.test(r3.error), "#342 A5: an unknown id is refused");
+  ok(!r3.ok && /Unknown tag/.test(r3.error), "#344 A5: an unknown id is refused");
   const r4 = mergeSurveyTags(st, [{ label: "" }]);
-  ok(!r4.ok, "#342 A5: a blank label is refused");
+  ok(!r4.ok, "#344 A5: a blank label is refused");
 ```
 
 Run `npx tsx scripts/test-va-notes.ts` → FAIL (module not found).
@@ -754,7 +754,7 @@ Run `npx tsx scripts/test-va-notes.ts` → FAIL (module not found).
 - [ ] **Step 2: Create `src/lib/survey-tags.ts`**
 
 ```ts
-/* Venue Assessments — internal "Final thoughts" tags (#342, note 6). Judgments for internal use only ("Tight
+/* Venue Assessments — internal "Final thoughts" tags (#344, note 6). Judgments for internal use only ("Tight
    timeline", "Price-sensitive"…), never printed for the customer. Pure. Stored whole in the settings row as
    `surveyInternalTags` (Settings → Field); absent reads as the starter list. Ids are minted from the label once and
    never change; a row dropped in the editor is kept retired, so a survey that carries it still shows its label. */
@@ -875,7 +875,7 @@ Run `npx tsx scripts/test-va-notes.ts` → all PASS.
 1. `src/lib/settings.ts`: next to `documentCategories?: …` in the settings type, add:
 
 ```ts
-  /** #342 — Venue Assessments Final thoughts: internal tags. FULL REPLACEMENT on save; resolveSurveyTags in
+  /** #344 — Venue Assessments Final thoughts: internal tags. FULL REPLACEMENT on save; resolveSurveyTags in
    *  lib/survey-tags returns the starter list when absent. Edited in Settings → Field. */
   surveyInternalTags?: import("@/lib/survey-tags").SurveyTag[];
 ```
@@ -883,7 +883,7 @@ Run `npx tsx scripts/test-va-notes.ts` → all PASS.
 2. `src/app/(app)/settings/actions.ts`: import `{ mergeSurveyTags, resolveSurveyTags, type SurveyTagInput } from "@/lib/survey-tags"` and add after `saveDocumentCategoriesAction`:
 
 ```ts
-/* ---- Venue Assessments internal tags (#342) ---- */
+/* ---- Venue Assessments internal tags (#344) ---- */
 
 /** Whole-list save of Settings → Field → Final thoughts tags. Strict read: a failed read must never merge onto the
  *  starter list and silently drop custom tags. */
@@ -908,7 +908,7 @@ Create `src/app/(app)/settings/survey-tags-card.tsx` by copying `document-catego
 - save: `saveSurveyTagsAction(rows.map((x) => ({ id: x.id || undefined, label: x.label, retired: x.retired })))`.
 - title `Final thoughts — internal tags`; description: `Quick judgments the surveyor tags at the end of a venue assessment — for the team only, never printed for the customer. Retire a tag to stop offering it; assessments that already carry it keep the label.`
 - input `maxLength={60}`, placeholder `Tag name`, aria-label `Tag name`; mono column shows `r.id || "new"`; checkbox label `Retired` bound to `retired` (no disabled rule); add button `+ Add tag`; save button `Save tags`; move buttons' aria-labels say `tag`.
-- keep the header comment short: `/* Settings → Field → Final thoughts tags (#342). The DocumentCategoriesCard idiom: whole-list save, ids minted server-side, a dropped row is kept retired. */`
+- keep the header comment short: `/* Settings → Field → Final thoughts tags (#344). The DocumentCategoriesCard idiom: whole-list save, ids minted server-side, a dropped row is kept retired. */`
 
 - [ ] **Step 5: Wire it into Settings → Field**
 
@@ -922,7 +922,7 @@ Create `src/app/(app)/settings/survey-tags-card.tsx` by copying `document-catego
 ```bash
 npx tsc --noEmit && npx tsx scripts/test-va-notes.ts | tail -1
 git add src/lib/survey-tags.ts src/lib/settings.ts "src/app/(app)/settings" scripts/test-va-notes.ts
-git commit -m "feat(settings): #342 Final thoughts internal tags — list, merge rules, Settings → Field card
+git commit -m "feat(settings): #344 Final thoughts internal tags — list, merge rules, Settings → Field card
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -955,7 +955,7 @@ Append to `vaNotesChecks`:
   /* ---- Task 4: assignment defaults (source pin) ---- */
   const vaActs = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/actions.ts"), "utf8");
   ok(/create\(\{ owner: user\.name, requestedBy: user\.name, stage: "requested", assignedTo: user\.name, scheduledDate: chicagoDayKey\(Date\.now\(\)\) \}, user\.name\)/.test(vaActs),
-    "#342 A4: New request defaults Assigned to = me and Scheduled date = today (Chicago); stage stays requested");
+    "#344 A4: New request defaults Assigned to = me and Scheduled date = today (Chicago); stage stays requested");
 ```
 
 Replace the body of `vaNotesDbChecks` with:
@@ -972,18 +972,18 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
   if (r1.ok) { registerFixture("site_visits", r1.visitId); registerFixture("surveys", r1.surveyId); }
   const s1 = r1.ok ? await S.get(r1.surveyId) : null;
   ok(!!s1 && s1.assignedTo === "Sam Surveyor" && s1.scheduledDate === chicagoDayKey(Date.now()) && s1.stage === "requested",
-    "#342 A4: a lead's visit request pre-fills the survey with the visit's assignee and today; stage stays requested");
+    "#344 A4: a lead's visit request pre-fills the survey with the visit's assignee and today; stage stays requested");
 
   const r2 = await requestVisitForLead(lead("lead-b"), { reason: "walk", timing: "", assignee: "  " }, "Office Person");
   if (r2.ok) { registerFixture("site_visits", r2.visitId); registerFixture("surveys", r2.surveyId); }
   const s2 = r2.ok ? await S.get(r2.surveyId) : null;
-  ok(!!s2 && s2.assignedTo === "Office Person", "#342 A4: with no assignee the survey defaults to whoever requested it");
+  ok(!!s2 && s2.assignedTo === "Office Person", "#344 A4: with no assignee the survey defaults to whoever requested it");
 }
 ```
 
 > Check `scripts/test-fixtures.ts` for the exact `registerFixture(collection, id)` and `fixtureId(n, tag)` signatures before running; adjust the call shape if they differ.
 
-Run: `npm run test:specs 2>&1 | grep "#342" | grep -v PASS` → the A4 lines FAIL.
+Run: `npm run test:specs 2>&1 | grep "#344" | grep -v PASS` → the A4 lines FAIL.
 
 - [ ] **Step 2: Implement**
 
@@ -993,12 +993,12 @@ Run: `npm run test:specs 2>&1 | grep "#342" | grep -v PASS` → the A4 lines FAI
     rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested", assignedTo: user.name, scheduledDate: chicagoDayKey(Date.now()) }, user.name);
 ```
 
-Update the doc comment: append "#342: it opens assigned to the creator and scheduled for today (Chicago); both stay editable and the stage stays requested."
+Update the doc comment: append "#344: it opens assigned to the creator and scheduled for today (Chicago); both stay editable and the stage stays requested."
 
 2. `src/lib/stores/site-visits.ts`: add `import { chicagoDayKey } from "../drive-plan/day";` (match the file's import style) and in the `createSurvey({...}, me)` call inside `requestVisitForLead` add:
 
 ```ts
-      // #342 — pre-filled, editable: the visit's assignee (else whoever asked) and today
+      // #344 — pre-filled, editable: the visit's assignee (else whoever asked) and today
       assignedTo: opts.assignee.trim() || me,
       scheduledDate: chicagoDayKey(Date.now()),
 ```
@@ -1006,13 +1006,13 @@ Update the doc comment: append "#342: it opens assigned to the creator and sched
 - [ ] **Step 3: Verify + commit**
 
 ```bash
-npx tsc --noEmit && npm run test:specs 2>&1 | grep -E "#342|FAIL" | grep -v PASS | head
+npx tsc --noEmit && npm run test:specs 2>&1 | grep -E "#344|FAIL" | grep -v PASS | head
 ```
-Expected: no `#342` failures (pre-existing unrelated FAIL lines, if any, must match the baseline — note them).
+Expected: no `#344` failures (pre-existing unrelated FAIL lines, if any, must match the baseline — note them).
 
 ```bash
 git add "src/app/(app)/venue-assessments/actions.ts" src/lib/stores/site-visits.ts scripts/test-va-notes.ts
-git commit -m "feat(venue-assessments): #342 new assessments default to the creator (or visit assignee) and today
+git commit -m "feat(venue-assessments): #344 new assessments default to the creator (or visit assignee) and today
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1048,15 +1048,15 @@ Append to `vaNotesChecks`:
   /* ---- Task 5: shared rail ---- */
   ok(railSheetLabel({ key: "S1", label: "Core", done: 3, total: 7, badges: [
       { tone: "prompt", n: 2, title: "", text: "2 to review" }, { tone: "photo", n: 1, title: "", text: "1 photo" }, { tone: "photo", n: 0, title: "", text: "0 photos" }] }, true) === "Core — 3/7 · 2 to review · 1 photo",
-    "#342 A8: the phone select label matches the engine's old format (zero badges skipped)");
+    "#344 A8: the phone select label matches the engine's old format (zero badges skipped)");
   ok(railSheetLabel({ key: "recap", label: "Customer recap", done: 0, total: 0 }) === "Customer recap" &&
-     railSheetLabel({ key: "x", label: "X", done: 0, total: 0 }, true) === "X — 0/0", "#342 A8: no count for a section without fields unless showEmpty");
-  ok(SECTION_RAIL_CSS.includes("@media (max-width: 759px)") && SECTION_RAIL_CSS.includes(".sr-rail-sheet"), "#342 A8: the rail carries its own phone breakpoint");
+     railSheetLabel({ key: "x", label: "X", done: 0, total: 0 }, true) === "X — 0/0", "#344 A8: no count for a section without fields unless showEmpty");
+  ok(SECTION_RAIL_CSS.includes("@media (max-width: 759px)") && SECTION_RAIL_CSS.includes(".sr-rail-sheet"), "#344 A8: the rail carries its own phone breakpoint");
   const engRail = readFileSync(join(process.cwd(), "src/app/(app)/assessments/[id]/scope-rail.tsx"), "utf8");
   const engEditor = readFileSync(join(process.cwd(), "src/app/(app)/assessments/[id]/editor.tsx"), "utf8");
   ok(engRail.includes('from "@/components/section-rail/section-rail"') && !/function Ring\(/.test(engRail) && engRail.includes("showEmpty"),
-    "#342 A8: the engine's scope rail renders the shared SectionRail");
-  ok(!/\.as-rail[\s{-]/.test(engEditor) && engEditor.includes("${SECTION_RAIL_CSS}"), "#342 A8: the engine's CSS takes the rail rules from the shared component");
+    "#344 A8: the engine's scope rail renders the shared SectionRail");
+  ok(!/\.as-rail[\s{-]/.test(engEditor) && engEditor.includes("${SECTION_RAIL_CSS}"), "#344 A8: the engine's CSS takes the rail rules from the shared component");
 ```
 
 Run → FAIL (module not found).
@@ -1067,7 +1067,7 @@ Run → FAIL (module not found).
 "use client";
 
 /* The section rail shared by the Assessments engine editor (one row per scope) and the Venue Assessments editor
-   (one row per section) — #342, extracted from assessments/[id]/scope-rail.tsx. A row is a progress ring, a label,
+   (one row per section) — #344, extracted from assessments/[id]/scope-rail.tsx. A row is a progress ring, a label,
    done/total and badges. Below 760 px wide the rail hides and a sticky <select> takes its place. Include
    SECTION_RAIL_CSS once in the page's <style>. */
 import type { ReactNode } from "react";
@@ -1178,7 +1178,7 @@ Replace `src/app/(app)/assessments/[id]/scope-rail.tsx` with:
 "use client";
 
 /* The assessment editor's scope rail (#340, Task 7): one row per scope that is on, with a progress ring and badges for
-   open prompts and missing photos. The rail itself is the shared SectionRail (#342); this file adds the "Scopes…"
+   open prompts and missing photos. The rail itself is the shared SectionRail (#344); this file adds the "Scopes…"
    panel that turns scopes on or off mid-visit (switching one off hides it and keeps its answers). */
 import { useState } from "react";
 import type { AssessmentDef, ScopeCode } from "@/lib/assessments/defs/types";
@@ -1264,7 +1264,7 @@ Expected: no new FAIL lines (test-assessments may pin rail behaviour — if one 
 
 ```bash
 git add src/components/section-rail "src/app/(app)/assessments/[id]/scope-rail.tsx" "src/app/(app)/assessments/[id]/editor.tsx" scripts/test-va-notes.ts
-git commit -m "refactor(assessments): #342 extract the scope rail into a shared SectionRail
+git commit -m "refactor(assessments): #344 extract the scope rail into a shared SectionRail
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1301,16 +1301,16 @@ Append to `vaNotesChecks`:
   const kq = readFileSync(join(process.cwd(), `${vaDir}/sections/kill-questions.tsx`), "utf8");
   const vaPage = readFileSync(join(process.cwd(), `${vaDir}/page.tsx`), "utf8");
   const vaActsId = readFileSync(join(process.cwd(), `${vaDir}/actions.ts`), "utf8");
-  ok(ctl.includes('from "@/lib/survey-flow"') && !/const ORDER = \[/.test(ctl) && !/const STEP_BY_ID/.test(ctl), "#342 A1: the editor takes order, steps and groups from survey-flow");
-  ok(!ctl.includes("SignoffSection") && !ctl.includes('kind: "signoff"'), "#342 A6: the Sign-off section is gone from the editor");
-  ok(/isQuoteVisit\(draft\)/.test(ctl), "#342 A3: the quote half of Existing materials & quote is gated on isQuoteVisit");
-  ok(/sectionVisible\(draft, s\.id\)/.test(ctl), "#342 R2: the section list is filtered by sectionVisible");
-  ok(!sys.includes("Venue-class guidance") && !sys.includes("doctrine"), "#342 A9: the Venue-class guidance panel is removed from the intake");
-  ok(sys.includes("presentFromKill") && sys.includes("from Kill questions"), "#342 R3: the Rigging intake shows the rig system read-only");
-  ok(kq.includes("SCOPE_KEYS") && kq.includes("RIG_SYSTEMS") && kq.includes("TIER1_WIDTH_BY_CLASS"), "#342 A2: Kill questions carries Scope, Rigging system and stage W/D inputs");
-  ok(!vaPage.includes("resolveVenueDoctrine") && vaPage.includes("resolveSurveyTags"), "#342: the editor page drops doctrine and passes internal tags");
-  ok(/\| "scope"/.test(vaActsId) && /\| "internalTags"/.test(vaActsId), "#342: SurveyPatch carries scope and internalTags");
-  ok(/legacyNotes: _legacy/.test(ctl), "#342 R1: the outbox doc strips legacyNotes (derived, never stored)");
+  ok(ctl.includes('from "@/lib/survey-flow"') && !/const ORDER = \[/.test(ctl) && !/const STEP_BY_ID/.test(ctl), "#344 A1: the editor takes order, steps and groups from survey-flow");
+  ok(!ctl.includes("SignoffSection") && !ctl.includes('kind: "signoff"'), "#344 A6: the Sign-off section is gone from the editor");
+  ok(/isQuoteVisit\(draft\)/.test(ctl), "#344 A3: the quote half of Existing materials & quote is gated on isQuoteVisit");
+  ok(/sectionVisible\(draft, s\.id\)/.test(ctl), "#344 R2: the section list is filtered by sectionVisible");
+  ok(!sys.includes("Venue-class guidance") && !sys.includes("doctrine"), "#344 A9: the Venue-class guidance panel is removed from the intake");
+  ok(sys.includes("presentFromKill") && sys.includes("from Kill questions"), "#344 R3: the Rigging intake shows the rig system read-only");
+  ok(kq.includes("SCOPE_KEYS") && kq.includes("RIG_SYSTEMS") && kq.includes("TIER1_WIDTH_BY_CLASS"), "#344 A2: Kill questions carries Scope, Rigging system and stage W/D inputs");
+  ok(!vaPage.includes("resolveVenueDoctrine") && vaPage.includes("resolveSurveyTags"), "#344: the editor page drops doctrine and passes internal tags");
+  ok(/\| "scope"/.test(vaActsId) && /\| "internalTags"/.test(vaActsId), "#344: SurveyPatch carries scope and internalTags");
+  ok(/legacyNotes: _legacy/.test(ctl), "#344 R1: the outbox doc strips legacyNotes (derived, never stored)");
 ```
 
 Run → FAIL (kill-questions.tsx missing).
@@ -1318,15 +1318,15 @@ Run → FAIL (kill-questions.tsx missing).
 - [ ] **Step 2: `sections/types.ts`**
 
 1. Imports: add `import type { LegacyNote } from "@/lib/survey-migrate";`, `import type { SurveyTag } from "@/lib/survey-tags";`, `import type { FlowGroup } from "@/lib/survey-flow";`. Remove the `VenueDoctrine` import.
-2. `EditorMeta`: delete `venueDoctrine: VenueDoctrine;`; add `/** #342 — Final thoughts tags (settings, starter list when absent) */ internalTags: SurveyTag[];`.
+2. `EditorMeta`: delete `venueDoctrine: VenueDoctrine;`; add `/** #344 — Final thoughts tags (settings, starter list when absent) */ internalTags: SurveyTag[];`.
 3. `Draft`: after `signoff: {…};` add:
 
 ```ts
-  /** #342 — scope kill question (DisciplineKey[]; empty = unanswered) */
+  /** #344 — scope kill question (DisciplineKey[]; empty = unanswered) */
   scope: string[];
-  /** #342 — Final thoughts internal tag ids */
+  /** #344 — Final thoughts internal tag ids */
   internalTags: string[];
-  /** #342 — derived by the read-time migration; shown under "Older notes"; never saved */
+  /** #344 — derived by the read-time migration; shown under "Older notes"; never saved */
   legacyNotes: LegacyNote[];
 ```
 
@@ -1337,7 +1337,7 @@ Run → FAIL (kill-questions.tsx missing).
 ```tsx
 "use client";
 
-/* Kill questions (#342, notes 13/14) — the gate before the discipline intakes. Venue, contact name and email are
+/* Kill questions (#344, notes 13/14) — the gate before the discipline intakes. Venue, contact name and email are
    answered in Customer & venue (their chips jump there); Scope, the Rigging system and stage width/depth are answered
    right here. Stage width/depth write the same measurement keys the Measurements card edits, so it stays one value. */
 import type { CSSProperties, ReactNode } from "react";
@@ -1453,7 +1453,7 @@ export function KillQuestions({
 2. Add to `Props`:
 
 ```ts
-  /** #342 R3 — Rigging's Present is the Kill-questions rigging system: shown read-only here */
+  /** #344 R3 — Rigging's Present is the Kill-questions rigging system: shown read-only here */
   presentFromKill?: boolean;
   onJumpKill?: () => void;
 ```
@@ -1527,7 +1527,7 @@ import { KillQuestions } from "./sections/kill-questions";
         { kind: "checkTop", key: "hasBOM", label: "Existing BOM on file" },
         { kind: "checkTop", key: "hasDrawings", label: "Existing drawings on file" },
         { kind: "checkTop", key: "hasPhotos", label: "Existing photos on file" },
-        // #342 A3: the quote / budget half only on a quote visit (answers stay stored either way)
+        // #344 A3: the quote / budget half only on a quote visit (answers stay stored either way)
         ...(isQuoteVisit(draft)
           ? ([
               { kind: "text", key: "quoteNeededBy", label: "Quote needed by", type: "date" },
@@ -1630,7 +1630,7 @@ Expected: tsc clean; all PASS; no new eslint errors vs the baseline.
 
 ```bash
 git add -A "src/app/(app)/venue-assessments/[id]" scripts/test-va-notes.ts
-git commit -m "feat(venue-assessments): #342 new section order, Kill questions with scope + rigging system, quote half for design visits, Sign-off removed
+git commit -m "feat(venue-assessments): #344 new section order, Kill questions with scope + rigging system, quote half for design visits, Sign-off removed
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1675,23 +1675,23 @@ Append to `vaNotesChecks`:
     { kind: "text", key: "distance", label: "" }, { kind: "textarea", key: "reason", label: "" }, { kind: "toggle", key: "budgetary", label: "" },
   ] } as never;
   const p1 = sectionProgress(fieldsSec, d0, { tier1Done: true });
-  ok(p1.done === 2 && p1.total === 4 && !p1.gate, "#342 A8: fields progress counts answered text/select/textarea and skips yes/no toggles");
+  ok(p1.done === 2 && p1.total === 4 && !p1.gate, "#344 A8: fields progress counts answered text/select/textarea and skips yes/no toggles");
   const measSec = { id: "mLayout", kind: "fields", fields: [{ kind: "measure", key: "proW", label: "" }, { kind: "measure", key: "proH", label: "" }] } as never;
-  ok(sectionProgress(measSec, d0, { tier1Done: true }).done === 1, "#342 A8: measure fields read measurements");
+  ok(sectionProgress(measSec, d0, { tier1Done: true }).done === 1, "#344 A8: measure fields read measurements");
   const subSec = { id: "lifeSafety", kind: "fields", fields: [{ kind: "sub", obj: "lifeSafety", key: "deluge", label: "" }, { kind: "sub", obj: "lifeSafety", key: "smokeVent", label: "" }] } as never;
-  ok(sectionProgress(subSec, d0, { tier1Done: true }).done === 1, "#342 A8: sub fields read the sub-object");
+  ok(sectionProgress(subSec, d0, { tier1Done: true }).done === 1, "#344 A8: sub fields read the sub-object");
   const t1 = sectionProgress({ id: "tier1", kind: "tier1" } as never, d0, { tier1Done: false });
-  ok(t1.total === 6 && t1.gate, "#342 A8: Kill questions counts its items and flags the gate while incomplete");
-  ok(sectionProgress({ id: "recap", kind: "recap" } as never, d0, { tier1Done: true }).total === 0, "#342 A8: read-only sections have no ring");
+  ok(t1.total === 6 && t1.gate, "#344 A8: Kill questions counts its items and flags the gate while incomplete");
+  ok(sectionProgress({ id: "recap", kind: "recap" } as never, d0, { tier1Done: true }).total === 0, "#344 A8: read-only sections have no ring");
 
-  ok(collapseStorageKey("FS-1100") === "va:collapsed:FS-1100", "#342 A8: collapsed state is remembered per survey");
+  ok(collapseStorageKey("FS-1100") === "va:collapsed:FS-1100", "#344 A8: collapsed state is remembered per survey");
   ok(JSON.stringify(parseCollapsed('{"a":true,"b":"x","c":false}')) === '{"a":true,"c":false}' && JSON.stringify(parseCollapsed("not json")) === "{}" && JSON.stringify(parseCollapsed("[1]")) === "{}",
-    "#342 A8: stored state parses defensively");
+    "#344 A8: stored state parses defensively");
   ok(isCollapsed({}, { id: "m", advanced: true }) && !isCollapsed({}, { id: "v" }) && !isCollapsed({ m: false }, { id: "m", advanced: true }),
-    "#342 A8: default collapsed = advanced; a stored choice wins");
+    "#344 A8: default collapsed = advanced; a stored choice wins");
 
   const ctl7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
-  ok(!ctl7.includes('"accordion"') && ctl7.includes("<SectionRail") && ctl7.includes("SECTION_RAIL_CSS"), "#342 A8: Accordion mode is gone; long scroll has the shared rail");
+  ok(!ctl7.includes('"accordion"') && ctl7.includes("<SectionRail") && ctl7.includes("SECTION_RAIL_CSS"), "#344 A8: Accordion mode is gone; long scroll has the shared rail");
 ```
 
 Run → FAIL.
@@ -1699,7 +1699,7 @@ Run → FAIL.
 - [ ] **Step 2: `sections/progress.ts`**
 
 ```ts
-/* Section progress for the Venue Assessments rail (#342 A8) — pure. Counts the visible, answerable fields of a
+/* Section progress for the Venue Assessments rail (#344 A8) — pure. Counts the visible, answerable fields of a
    section: text / select / textarea / measure / sub. Yes/no toggles and checks are left out (unticked is a valid
    answer). Read-only sections (recap, 3D, photos, final thoughts…) have total 0 and no ring. */
 import { DISCIPLINE_GROUPS, tier1Items, visibleFields } from "@/lib/stores/survey-intake";
@@ -1763,7 +1763,7 @@ export function sectionProgress(sec: SectionDef, d: Draft, ctx: { tier1Done: boo
 ```ts
 "use client";
 
-/* Per-viewer, per-survey collapsed sections (#342 A8). localStorage read through useSyncExternalStore so SSR and
+/* Per-viewer, per-survey collapsed sections (#344 A8). localStorage read through useSyncExternalStore so SSR and
    hydration agree (the plan-legend idiom). The snapshot is the raw string, so it stays referentially stable. */
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
@@ -1930,7 +1930,7 @@ Expected: clean; the grep shows `{meetingsSlot}` on the line right before `{visi
 
 ```bash
 git add "src/app/(app)/venue-assessments/[id]" scripts/test-va-notes.ts
-git commit -m "feat(venue-assessments): #342 collapsible sections remembered per viewer + progress rail; Accordion mode retired
+git commit -m "feat(venue-assessments): #344 collapsible sections remembered per viewer + progress rail; Accordion mode retired
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1959,16 +1959,16 @@ Append to `vaNotesChecks`:
   const ctl8 = readFileSync(join(process.cwd(), `${dir8}/controls.tsx`), "utf8");
   const ft = readFileSync(join(process.cwd(), `${dir8}/sections/final-thoughts.tsx`), "utf8");
   const rcp = readFileSync(join(process.cwd(), `${dir8}/sections/recap.tsx`), "utf8");
-  ok(ctl8.includes('id: "recap"') && ctl8.includes('id: "finalThoughts"') && !ctl8.includes('id: "conditions"'), "#342 A5/A7: Customer recap and Final thoughts replace Site conditions");
-  ok(ft.includes("activeSurveyTags") && ft.includes("Older site conditions") && ft.includes("Internal only"), "#342 A5: Final thoughts shows active tags, retired-but-carried tags and the old chips read-only");
-  ok(rcp.includes("recapFor(") && rcp.includes("What we heard"), "#342 A7: the recap reads recapFor");
-  ok(/<OlderNotes notes=\{draft\.legacyNotes\.filter\(\(n\) => n\.section === sec\.id\)\}/.test(ctl8), "#342 R1: every section shows its Older notes");
+  ok(ctl8.includes('id: "recap"') && ctl8.includes('id: "finalThoughts"') && !ctl8.includes('id: "conditions"'), "#344 A5/A7: Customer recap and Final thoughts replace Site conditions");
+  ok(ft.includes("activeSurveyTags") && ft.includes("Older site conditions") && ft.includes("Internal only"), "#344 A5: Final thoughts shows active tags, retired-but-carried tags and the old chips read-only");
+  ok(rcp.includes("recapFor(") && rcp.includes("What we heard"), "#344 A7: the recap reads recapFor");
+  ok(/<OlderNotes notes=\{draft\.legacyNotes\.filter\(\(n\) => n\.section === sec\.id\)\}/.test(ctl8), "#344 R1: every section shows its Older notes");
 ```
 
 - [ ] **Step 2: `sections/older-notes.tsx`**
 
 ```tsx
-/* "Older notes" (#342 R1) — answers from before a field was renamed or removed, shown read-only at the foot of their
+/* "Older notes" (#344 R1) — answers from before a field was renamed or removed, shown read-only at the foot of their
    section. Derived on read by src/lib/survey-migrate.ts; nothing here is editable or saved. */
 import type { LegacyNote } from "@/lib/survey-migrate";
 
@@ -1992,7 +1992,7 @@ export function OlderNotes({ notes }: { notes: LegacyNote[] }) {
 - [ ] **Step 3: `sections/recap.tsx`**
 
 ```tsx
-/* Customer recap (#342 A7) — the end-of-visit read-back: per discipline in scope, what the customer said they're
+/* Customer recap (#344 A7) — the end-of-visit read-back: per discipline in scope, what the customer said they're
    interested in and their goals, in larger type so the rep can read it aloud. Read-only. */
 import { recapFor } from "@/lib/survey-flow";
 import type { Draft } from "./types";
@@ -2032,7 +2032,7 @@ export function RecapSection({ draft }: { draft: Draft }) {
 - [ ] **Step 4: `sections/final-thoughts.tsx`**
 
 ```tsx
-/* Final thoughts (#342 A5) — internal judgment tags at the end of the visit. Internal only: never printed on the
+/* Final thoughts (#344 A5) — internal judgment tags at the end of the visit. Internal only: never printed on the
    field sheet or any customer document. Retired tags still show on a survey that carries them; the old Site
    conditions chips stay readable underneath. */
 import type { CSSProperties } from "react";
@@ -2113,7 +2113,7 @@ export function FinalThoughtsSection({
 ```bash
 npx tsc --noEmit && npx tsx scripts/test-va-notes.ts | tail -1 && npx eslint "src/app/(app)/venue-assessments/[id]"
 git add -A "src/app/(app)/venue-assessments/[id]" scripts/test-va-notes.ts
-git commit -m "feat(venue-assessments): #342 customer recap, Final thoughts tags, Older notes per section
+git commit -m "feat(venue-assessments): #344 customer recap, Final thoughts tags, Older notes per section
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2149,26 +2149,26 @@ Append:
     lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" }, assessmentEnabled: false, assessment: blankAssessment(), templateRev: "5.1",
     signoff: { repName: "", repSignedAt: "", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" },
     scope: ["rigging"], disciplines: { rigging: { scope: ["New grid"], goals: "Safer rail\nQuieter" } },
-    legacyNotes: [{ section: "mBeams", label: "Existing rig type (before #342)", text: "Hemp" }],
+    legacyNotes: [{ section: "mBeams", label: "Existing rig type (before #344)", text: "Hemp" }],
     internalTags: ["tg_price_sensitive"],
   } as never;
   const sh = buildAssessmentSheet(sheetBase);
   const pages = sh.fieldSheet!.pages;
   const heard = pages[0].sections.find((s) => s.heading === "What we heard");
   ok(!!heard && heard.rows.some((r) => r.label === "Rigging" && r.value === "New grid") && heard.rows.some((r) => r.label === "Rigging goals" && r.value === "Safer rail; Quieter"),
-    "#342 A7: the field sheet prints the recap on page 1");
-  ok(!pages.some((p) => p.sections.some((s) => s.heading === "Sign-off")), "#342 A6: no Close-out page when nobody signed (new surveys)");
-  ok(pages.some((p) => p.sections.some((s) => s.heading === "Older notes" && s.rows.some((r) => r.value === "Hemp"))), "#342 R1: Older notes print");
-  ok(!JSON.stringify(sh).includes("Price-sensitive") && !JSON.stringify(sh).includes("tg_price_sensitive"), "#342 A5: internal tags never print");
+    "#344 A7: the field sheet prints the recap on page 1");
+  ok(!pages.some((p) => p.sections.some((s) => s.heading === "Sign-off")), "#344 A6: no Close-out page when nobody signed (new surveys)");
+  ok(pages.some((p) => p.sections.some((s) => s.heading === "Older notes" && s.rows.some((r) => r.value === "Hemp"))), "#344 R1: Older notes print");
+  ok(!JSON.stringify(sh).includes("Price-sensitive") && !JSON.stringify(sh).includes("tg_price_sensitive"), "#344 A5: internal tags never print");
   const signed = buildAssessmentSheet({ ...(sheetBase as object), signoff: { repName: "Rep", repSignedAt: "2026-09-20", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" } } as never);
-  ok(signed.fieldSheet!.pages.at(-1)!.sections.at(-1)!.heading === "Sign-off", "#342 A6: an old signed survey still prints its Close-out page");
+  ok(signed.fieldSheet!.pages.at(-1)!.sections.at(-1)!.heading === "Sign-off", "#344 A6: an old signed survey still prints its Close-out page");
 
   const fx = surveyFindings({ reason: "walk", scope: ["rigging"], disciplines: { rigging: { scope: ["New grid"], goals: "Safer rail" } } } as never);
-  ok(fx.includes("What we heard:\n  - Rigging: New grid\n    Goal: Safer rail"), "#342 A7: the plain-text findings carry the recap");
-  ok(surveyFindings({ reason: "walk" }) === "Reason for visit: walk", "#342 A7: no recap block when there's nothing to read back");
+  ok(fx.includes("What we heard:\n  - Rigging: New grid\n    Goal: Safer rail"), "#344 A7: the plain-text findings carry the recap");
+  ok(surveyFindings({ reason: "walk" }) === "Reason for visit: walk", "#344 A7: no recap block when there's nothing to read back");
 
   const listSrc = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/page.tsx"), "utf8");
-  ok(/sp\.tag/.test(listSrc) && listSrc.includes("internalTags") && listSrc.includes("resolveSurveyTags"), "#342 A5: the list filters by internal tag");
+  ok(/sp\.tag/.test(listSrc) && listSrc.includes("internalTags") && listSrc.includes("resolveSurveyTags"), "#344 A5: the list filters by internal tag");
 ```
 
 - [ ] **Step 2: Sheet**
@@ -2287,7 +2287,7 @@ In `src/app/(app)/venue-assessments/page.tsx`:
 npx tsc --noEmit && npx tsx scripts/test-va-notes.ts | tail -1
 npm run test:specs 2>&1 | grep -E "FAIL" | head
 git add src/lib/venue-assessment-sheet.ts src/lib/survey-findings.ts "src/app/(app)/venue-assessments/page.tsx" scripts/test-va-notes.ts scripts/test-review-and-spec.ts
-git commit -m "feat(venue-assessments): #342 field sheet recap + older notes, close-out only when signed, findings recap, list tag filter
+git commit -m "feat(venue-assessments): #344 field sheet recap + older notes, close-out only when signed, findings recap, list tag filter
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2311,7 +2311,7 @@ npm run build 2>&1 | tail -15
 df -h . | tail -1
 ```
 
-Expected: tsc clean; test:specs PASS count = baseline + the new `#342` checks, 0 FAIL; smoke all pass; eslint problems ≤ the Task 0 baseline; build succeeds (catches a client component importing a store). If `df` shows low space, clean temp PGlite dirs (`ls -d /var/folders/*/*/T/tmp.* 2>/dev/null | head`) before re-running.
+Expected: tsc clean; test:specs PASS count = baseline + the new `#344` checks, 0 FAIL; smoke all pass; eslint problems ≤ the Task 0 baseline; build succeeds (catches a client component importing a store). If `df` shows low space, clean temp PGlite dirs (`ls -d /var/folders/*/*/T/tmp.* 2>/dev/null | head`) before re-running.
 
 - [ ] **Step 2: Browser pass on a scratch datadir**
 
@@ -2343,13 +2343,13 @@ git show origin/main:AGENTS.md | grep -oE "^[0-9]+\. ✅" | tail -1
 Then:
 - `DECISIONS.md`: one entry per decision taken in this slice, next free D-numbers: quote purposes = New system design only (Jeff); kill questions moved up + scope + rig system, contact phone dropped; one rigging-system answer + read-time copy-up; scope unset filters nothing / seeded from data; Sign-off removed, Close-out prints only for old signed surveys; internal tags in the settings row (not a separate blob — deviation from spec A5 wording), never printed; assignment defaults (visit assignee, else creator; today Chicago; stage unchanged); Accordion retired; shared SectionRail; legacyNotes derived never stored; field-sheet Older notes print on the Project notes page (spec said "under the section").
 - `PUNCHLIST.md`: `## 342` with slice A done, slices B and C pending, and the Jeff-gated items (review the internal tag list in Settings → Field; old in-progress surveys now ask for Scope before their discipline intakes unlock).
-- `AGENTS.md`: new phase entry "61. 🚧 **Venue Assessment notes** (#342, D…)" summarising slice A in the house style, noting B and C pending.
+- `AGENTS.md`: new phase entry "61. 🚧 **Venue Assessment notes** (#344, D…)" summarising slice A in the house style, noting B and C pending.
 
 Commit:
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md AGENTS.md
-git commit -m "docs(venue-assessments): #342 slice A — decisions, punch item, phase entry
+git commit -m "docs(venue-assessments): #344 slice A — decisions, punch item, phase entry
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```

@@ -42880,7 +42880,7 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
     "venueTypes", "intakeCatalog", "visitReasons", "consultingPhases", "consultingDisciplines", "consultingAssumptions",
     "mailboxes", "recordings", "team", "documentCategories", "beta",
   ];
-  const ADDED_CARDS = ["estimateOutput", "surveyTags"]; // #301 — Estimate output; #342 — Final thoughts internal tags
+  const ADDED_CARDS = ["estimateOutput", "surveyTags"]; // #301 — Estimate output; #344 — Final thoughts internal tags
   const cardKeys = scCards.map((c) => c.key as string);
   ok(cardKeys.length === new Set(cardKeys).size, "settings cleanup: no card is registered twice");
   ok([...OLD_CARDS, ...ADDED_CARDS].every((k) => cardKeys.filter((x) => x === k).length === 1) && cardKeys.length === OLD_CARDS.length + ADDED_CARDS.length,

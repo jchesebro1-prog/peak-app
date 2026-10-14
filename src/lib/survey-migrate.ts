@@ -1,4 +1,4 @@
-/* Venue Assessments read-time migration (#342). normalize() in src/lib/stores/surveys.ts runs migrateSurvey on
+/* Venue Assessments read-time migration (#344). normalize() in src/lib/stores/surveys.ts runs migrateSurvey on
    every read. Each step is pure, idempotent and never deletes a key: an old value that doesn't map is kept and
    surfaced as a LegacyNote. legacyNotes is re-derived on every read and never stored (the editor strips it before
    a save), so a rollback still reads the old keys. Client-safe. */
@@ -68,7 +68,7 @@ export function stepRigSystem(s: MigratableSurvey): void {
     const present = dedupe(rig.present.map((p) => RIG_RELABEL[String(p)] ?? String(p)));
     rig.present = present;
     if (rigTypeRaw && !(fromType && present.includes(fromType))) {
-      addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #342)", text: rigTypeRaw });
+      addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #344)", text: rigTypeRaw });
     }
     if (cwCheck && !present.includes("Counterweight")) {
       addLegacyNote(s, { section: "dRigging", label: "Counterweight system (old check)", text: "Yes" });
@@ -83,7 +83,7 @@ export function stepRigSystem(s: MigratableSurvey): void {
   /* Same rule as the answered branch, so the notes don't depend on whether the record was saved: a rig type the
      seed doesn't carry (unmapped, or "None existing" dropped for another source) stays visible. */
   if (rigTypeRaw && !(fromType && seed.includes(fromType))) {
-    addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #342)", text: rigTypeRaw });
+    addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #344)", text: rigTypeRaw });
   }
   if (!seed.length) return;
   const d = (s.disciplines ||= {});

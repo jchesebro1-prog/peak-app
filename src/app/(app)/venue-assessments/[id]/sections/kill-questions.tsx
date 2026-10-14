@@ -1,6 +1,6 @@
 "use client";
 
-/* Kill questions (#342, notes 13/14) — the gate before the discipline intakes. Venue, contact name and email are
+/* Kill questions (#344, notes 13/14) — the gate before the discipline intakes. Venue, contact name and email are
    answered in Customer & venue (their chips jump there); Scope, the Rigging system and stage width/depth are answered
    right here. Stage width/depth write the same measurement keys the Measurements card edits, so it stays one value. */
 import type { CSSProperties, ReactNode } from "react";

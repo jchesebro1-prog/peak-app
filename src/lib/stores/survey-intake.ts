@@ -17,7 +17,7 @@ import type { MeasureField } from "./surveys";
 import type { VenueClass } from "./venue-classes";
 
 /* ---- Tier 1: the kill questions ----
- * Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#342 — contact phone is no longer a kill question).
+ * Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#344 — contact phone is no longer a kill question).
  * Width/depth live in `measurements` under venue-type-specific keys (the
  * quick set), so completeness accepts any of the equivalent keys. */
 
@@ -40,7 +40,7 @@ export interface Tier1Slice {
   contactEmail?: string;
   contactPhone?: string;
   measurements?: Record<string, string | boolean>;
-  /** #342 — the scope kill question (DisciplineKey[]); unset / empty = unanswered */
+  /** #344 — the scope kill question (DisciplineKey[]); unset / empty = unanswered */
   scope?: unknown;
   disciplines?: Record<string, DisciplineData>;
 }
@@ -110,7 +110,7 @@ export function blankSystemsState(): Record<string, SystemState> {
 
 /* ---- Discipline branch forms ---- */
 
-/** #342 — the one rigging-system answer (Kill questions; stored at disciplines.rigging.present). "None" is
+/** #344 — the one rigging-system answer (Kill questions; stored at disciplines.rigging.present). "None" is
  *  exclusive. Old labels map on read in src/lib/survey-migrate.ts. */
 export const RIG_SYSTEMS = ["Counterweight", "Dead-hung", "Motorized", "Hemp", "Fixed points", "None"] as const;
 
@@ -391,7 +391,7 @@ export function disciplineHasData(d: DisciplineData | undefined, inv: InventoryR
 export function intakeStatus(s: IntakeSlice): IntakeStatus {
   if (!tier1Complete(s)) return "draft";
   const inv = s.inventory || [];
-  // #342: Rigging's `present` is the Kill questions' rigging-system answer now, not intake data.
+  // #344: Rigging's `present` is the Kill questions' rigging-system answer now, not intake data.
   const added = DISCIPLINE_GROUPS.some((g) => {
     let d = s.disciplines?.[g.key];
     if (g.key === "rigging" && d) {

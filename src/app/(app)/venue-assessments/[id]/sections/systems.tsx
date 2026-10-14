@@ -33,7 +33,7 @@ type Props = {
   addInventoryRow: (disc: DisciplineKey, category: string) => void;
   patchInventoryRow: (id: string, patch: Partial<InventoryRow>) => void;
   removeInventoryRow: (id: string) => void;
-  /** #342 R3 — Rigging's Present is the Kill-questions rigging system: shown read-only here */
+  /** #344 R3 — Rigging's Present is the Kill-questions rigging system: shown read-only here */
   presentFromKill?: boolean;
   onJumpKill?: () => void;
 };

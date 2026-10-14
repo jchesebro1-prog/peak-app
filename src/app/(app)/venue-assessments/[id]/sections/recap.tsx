@@ -1,4 +1,4 @@
-/* Customer recap (#342 A7) — the end-of-visit read-back: per discipline in scope, what the customer said they're
+/* Customer recap (#344 A7) — the end-of-visit read-back: per discipline in scope, what the customer said they're
    interested in and their goals, in larger type so the rep can read it aloud. Read-only. */
 import { recapFor, recapScopeText } from "@/lib/survey-flow";
 import type { Draft } from "./types";

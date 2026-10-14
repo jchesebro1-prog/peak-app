@@ -12,7 +12,7 @@ import { chicagoDayKey } from "@/lib/drive-plan/day";
  * "New request" button (Field Survey.dc.html → Survey.dc.html?new=1): we spin
  * up a fresh `requested` survey owned by the acting user (recorded as the
  * requester) and open its capture editor. FormData-shaped so the button works
- * without client JS. #342: it opens assigned to the creator and scheduled for
+ * without client JS. #344: it opens assigned to the creator and scheduled for
  * today (Chicago); both stay editable and the stage stays requested.
  */
 export async function createSurvey(): Promise<void> {

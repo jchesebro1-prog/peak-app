@@ -1,7 +1,7 @@
 "use client";
 
 /* The assessment editor's scope rail (#340, Task 7): one row per scope that is on, with a progress ring and badges for
-   open prompts and missing photos. The rail itself is the shared SectionRail (#342); this file adds the "Scopes…"
+   open prompts and missing photos. The rail itself is the shared SectionRail (#344); this file adds the "Scopes…"
    panel that turns scopes on or off mid-visit (switching one off hides it and keeps its answers). */
 import { useState } from "react";
 import type { AssessmentDef, ScopeCode } from "@/lib/assessments/defs/types";

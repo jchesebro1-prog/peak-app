@@ -1,4 +1,4 @@
-/* "Older notes" (#342 R1) — answers from before a field was renamed or removed, shown read-only at the foot of their
+/* "Older notes" (#344 R1) — answers from before a field was renamed or removed, shown read-only at the foot of their
    section. Derived on read by src/lib/survey-migrate.ts; nothing here is editable or saved. */
 import type { LegacyNote } from "@/lib/survey-migrate";
 

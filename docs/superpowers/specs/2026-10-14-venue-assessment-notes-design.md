@@ -1,7 +1,7 @@
 # Venue Assessment notes (Jeff, 2026-10-14) — design
 
-Source: `docs/notes-2026-10-14.md` (23 notes). Punch item **#342** (tentative — recompute from
-origin/main before writing docs; last used #341, D1016, phase 60, migration 0040).
+Source: `docs/notes-2026-10-14.md` (23 notes). Punch item **#344** (tentative — recompute from
+origin/main before writing docs; last used #343, D1018, phase 60, migration 0040).
 
 Scope: the Venue Assessments (field survey, `FS-####`) editor —
 `src/app/(app)/venue-assessments/[id]/controls.tsx` + `sections/*`, `src/lib/stores/surveys.ts`,

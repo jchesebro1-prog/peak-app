@@ -388,7 +388,7 @@ export interface SurveyDraft {
   // ---- Lead thread (#34): the visit request that spawned this survey ----
   leadId: string | null;
   visitId: string | null;
-  // ---- #342 Venue Assessment notes ----
+  // ---- #344 Venue Assessment notes ----
   /** the scope kill question — DisciplineKey[]; absent/empty = unanswered (filters nothing) */
   scope?: string[];
   /** Final thoughts — internal tag ids (settings.surveyInternalTags); never printed for the customer */
@@ -509,7 +509,7 @@ const DEFAULT_ME = "Jeff Chesebro";
  * by construction: nothing here overwrites a value that is already present,
  * and no result is ever written back to the doc-store.
  *
- * #342: the rig-system copy-up, the systemsState fold and the scope seed run in
+ * #344: the rig-system copy-up, the systemsState fold and the scope seed run in
  * src/lib/survey-migrate.ts (migrateSurvey).
  */
 function normalize(s: SurveyRecord): SurveyRecord {

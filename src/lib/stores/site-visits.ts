@@ -362,7 +362,7 @@ export async function requestVisitForLead(
       stage: "requested",
       leadId: lead.id,
       visitId: rec.id,
-      // #342 — pre-filled, editable: the visit's assignee (else whoever asked) and today
+      // #344 — pre-filled, editable: the visit's assignee (else whoever asked) and today
       assignedTo: opts.assignee.trim() || me,
       scheduledDate: chicagoDayKey(Date.now()),
     },

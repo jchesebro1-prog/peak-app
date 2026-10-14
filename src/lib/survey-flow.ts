@@ -1,4 +1,4 @@
-/* Venue Assessments flow (#342, slice A) — the editor's section order, wizard steps and groups, the scope filter
+/* Venue Assessments flow (#344, slice A) — the editor's section order, wizard steps and groups, the scope filter
    (Kill questions → which sections show), the one rigging-system answer, the quote-visit rule and the customer
    recap. Pure and client-safe: the editor, the field sheet, the findings text and the tests read it. */
 import { goalsFromSurvey } from "./estimate-output/goals";

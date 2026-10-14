@@ -1,4 +1,4 @@
-/* Section progress for the Venue Assessments rail (#342 A8) — pure. Counts the visible, answerable fields of a
+/* Section progress for the Venue Assessments rail (#344 A8) — pure. Counts the visible, answerable fields of a
    section: text / select / textarea / measure / sub. Yes/no toggles and checks are left out (unticked is a valid
    answer). Read-only sections (recap, 3D, photos, final thoughts…) have total 0 and no ring. */
 import { DISCIPLINE_GROUPS, tier1Items, visibleFields } from "@/lib/stores/survey-intake";

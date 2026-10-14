@@ -1,6 +1,6 @@
 "use client";
 
-/* Per-viewer, per-survey collapsed sections (#342 A8). localStorage read through useSyncExternalStore so SSR and
+/* Per-viewer, per-survey collapsed sections (#344 A8). localStorage read through useSyncExternalStore so SSR and
    hydration agree (the plan-legend idiom). The snapshot is the raw string, so it stays referentially stable. */
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 

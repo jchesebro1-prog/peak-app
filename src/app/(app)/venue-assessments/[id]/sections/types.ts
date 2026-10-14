@@ -43,7 +43,7 @@ export type EditorMeta = {
   /** settings-merged site-intake type catalog, keyed by category */
   intakeCatalog: Record<string, string[]>;
   autoCerts: Record<string, InspectionRef>;
-  /** #342 — Final thoughts tags (settings, starter list when absent) */
+  /** #344 — Final thoughts tags (settings, starter list when absent) */
   internalTags: SurveyTag[];
 };
 
@@ -126,11 +126,11 @@ export type Draft = {
     reviewerRole: string;
     reviewerSignedAt: string;
   };
-  /** #342 — scope kill question (DisciplineKey[]; empty = unanswered) */
+  /** #344 — scope kill question (DisciplineKey[]; empty = unanswered) */
   scope: string[];
-  /** #342 — Final thoughts internal tag ids */
+  /** #344 — Final thoughts internal tag ids */
   internalTags: string[];
-  /** #342 — derived by the read-time migration; shown under "Older notes"; never saved */
+  /** #344 — derived by the read-time migration; shown under "Older notes"; never saved */
   legacyNotes: LegacyNote[];
   updatedAt: number;
 };

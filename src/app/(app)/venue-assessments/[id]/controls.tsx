@@ -265,7 +265,7 @@ export default function SurveyEditor({
   const [venueOther, setVenueOther] = useState(false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("long");
   const [step, setStep] = useState(0);
-  // #342 A8: every section collapses; the choice is remembered per viewer per survey (localStorage)
+  // #344 A8: every section collapses; the choice is remembered per viewer per survey (localStorage)
   const [collapsedMap, setCollapsedFor] = useCollapsed(record.id);
   const [activeSec, setActiveSec] = useState("cust");
   const headRef = useRef<HTMLDivElement | null>(null);
@@ -276,7 +276,7 @@ export default function SurveyEditor({
     const el = headRef.current;
     if (!el) return;
     const main = el.closest("main");
-    // the rail may be at most the scroll pane's height minus the sticky header and its gaps (#342 A8)
+    // the rail may be at most the scroll pane's height minus the sticky header and its gaps (#344 A8)
     const measure = () => {
       setHeadH(Math.round(el.getBoundingClientRect().height));
       const paneH = main ? main.clientHeight : window.innerHeight;
@@ -503,7 +503,7 @@ export default function SurveyEditor({
         { kind: "checkTop", key: "hasBOM", label: "Existing BOM on file" },
         { kind: "checkTop", key: "hasDrawings", label: "Existing drawings on file" },
         { kind: "checkTop", key: "hasPhotos", label: "Existing photos on file" },
-        // #342 A3: the quote / budget half only on a quote visit (answers stay stored either way)
+        // #344 A3: the quote / budget half only on a quote visit (answers stay stored either way)
         ...(isQuoteVisit(draft)
           ? ([
               { kind: "text", key: "quoteNeededBy", label: "Quote needed by", type: "date" },
@@ -866,7 +866,7 @@ export default function SurveyEditor({
     } catch {}
   }
   function jumpTo(id: string) {
-    // #342: Kill questions sit in Brief while the intakes they unlock sit in Site intake — in Stepped
+    // #344: Kill questions sit in Brief while the intakes they unlock sit in Site intake — in Stepped
     // layout a jump to another step switches to it first, then scrolls once it has rendered. A collapsed
     // target opens first (A8), so the scroll waits a frame for it to lay out.
     const target = sections.find((s) => s.id === id);
@@ -942,7 +942,7 @@ export default function SurveyEditor({
     background: checked ? "var(--accent)" : "#fff",
   });
 
-  /* ---------- the section rail (long scroll, #342 A8) ---------- */
+  /* ---------- the section rail (long scroll, #344 A8) ---------- */
   // the phone <select> is controlled — if a scope toggle hid the active section, fall back to a shown one
   const shownActive = sections.some((s) => s.id === activeSec) ? activeSec : (sections[0]?.id ?? "cust");
   const LOCKED_MSG = "Answer the kill questions to unlock the discipline intakes";

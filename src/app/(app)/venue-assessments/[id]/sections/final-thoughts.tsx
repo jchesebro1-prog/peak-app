@@ -1,4 +1,4 @@
-/* Final thoughts (#342 A5) — internal judgment tags at the end of the visit. Internal only: never printed on the
+/* Final thoughts (#344 A5) — internal judgment tags at the end of the visit. Internal only: never printed on the
    field sheet or any customer document. Retired tags still show on a survey that carries them; the old Site
    conditions chips stay readable underneath. */
 import type { CSSProperties } from "react";

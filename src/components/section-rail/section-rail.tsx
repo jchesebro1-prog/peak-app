@@ -1,7 +1,7 @@
 "use client";
 
 /* The section rail shared by the Assessments engine editor (one row per scope) and the Venue Assessments editor
-   (one row per section) — #342, extracted from assessments/[id]/scope-rail.tsx. A row is a progress ring, a label,
+   (one row per section) — #344, extracted from assessments/[id]/scope-rail.tsx. A row is a progress ring, a label,
    done/total and badges. Below 760 px wide the rail hides and a sticky <select> takes its place. Include
    SECTION_RAIL_CSS once in the page's <style>. */
 import { useEffect, useRef, type ReactNode } from "react";

@@ -1,4 +1,4 @@
-/* Venue Assessments — internal "Final thoughts" tags (#342, note 6). Judgments for internal use only ("Tight
+/* Venue Assessments — internal "Final thoughts" tags (#344, note 6). Judgments for internal use only ("Tight
    timeline", "Price-sensitive"…), never printed for the customer. Pure. Stored whole in the settings row as
    `surveyInternalTags` (Settings → Field); absent reads as the starter list. Ids are minted from the label once and
    never change; a row dropped in the editor is kept retired, so a survey that carries it still shows its label. */

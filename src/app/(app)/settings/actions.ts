@@ -884,7 +884,7 @@ export async function saveDocumentCategoriesAction(
   return { ok: true };
 }
 
-/* ---- Venue Assessments internal tags (#342) ---- */
+/* ---- Venue Assessments internal tags (#344) ---- */
 
 /** Whole-list save of Settings → Field → Final thoughts tags, merged on the stored list under the settings lock
  *  (a failed read throws — it must never merge onto the starter list and silently drop custom tags). */

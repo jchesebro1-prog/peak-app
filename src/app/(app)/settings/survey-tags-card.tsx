@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { SurveyTag } from "@/lib/survey-tags";
 import { saveSurveyTagsAction } from "./actions";
 
-/* Settings → Field → Final thoughts tags (#342). The DocumentCategoriesCard idiom: whole-list save, ids minted server-side, a dropped row is kept retired. */
+/* Settings → Field → Final thoughts tags (#344). The DocumentCategoriesCard idiom: whole-list save, ids minted server-side, a dropped row is kept retired. */
 
 type Row = { id: string; label: string; retired: boolean };
 
