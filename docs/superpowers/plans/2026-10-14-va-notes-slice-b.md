@@ -58,7 +58,7 @@
 
 ---
 
-### Task B1: `field-lists.ts` + engine additions
+### Task 1 (B1): `field-lists.ts` + engine additions
 
 **Files:** Create `src/lib/field-lists.ts`; modify `src/lib/assessments/defs/picklists.ts`, `defs/scopes/access.ts`, `defs/scopes/lighting.ts`; modify `scripts/test-va-notes.ts`.
 
@@ -198,7 +198,7 @@ export function listSlug(label: string): string {
 
 ---
 
-### Task B2: Data model + field definitions + read-time migration
+### Task 2 (B2): Data model + field definitions + read-time migration
 
 **Files:** modify `src/lib/stores/survey-intake.ts`, `src/lib/stores/surveys.ts`, `src/lib/stores/linesets.ts`, `src/lib/survey-migrate.ts`, `src/lib/survey-flow.ts`, `scripts/test-va-notes.ts`, and any harness pin that asserts an old option label (grep).
 
@@ -245,7 +245,7 @@ export function listSlug(label: string): string {
 
 ---
 
-### Task B3: Shared UI pieces — condition slider, goals list, scope chips
+### Task 3 (B3): Shared UI pieces — condition slider, goals list, scope chips
 
 **Files:** create `sections/condition-slider.tsx`, `sections/goals-list.tsx`, `sections/scope-chips.tsx` (under `src/app/(app)/venue-assessments/[id]/`); modify `src/app/globals.css`; checks in `scripts/test-va-notes.ts`.
 
@@ -259,7 +259,7 @@ export function listSlug(label: string): string {
 
 ---
 
-### Task B4: Discipline sections (systems.tsx)
+### Task 4 (B4): Discipline sections (systems.tsx)
 
 **Files:** modify `sections/systems.tsx`; create `sections/curtain-rows.tsx`, `sections/lighting-positions.tsx`; modify `controls.tsx` (props), `types.ts`; checks.
 
@@ -283,7 +283,7 @@ Checks (source pins + a pure helper): export a pure `fixtureTotals(rows: Invento
 
 ---
 
-### Task B5: Visit travel, access fields, Beams top, Final questions
+### Task 5 (B5): Visit travel, access fields, Beams top, Final questions
 
 **Files:** create `src/lib/survey-travel-server.ts`; modify `page.tsx`, `controls.tsx`, `types.ts`, `[id]/actions.ts` (SurveyPatch), checks.
 
@@ -295,7 +295,7 @@ Checks (source pins + a pure helper): export a pure `fixtureTotals(rows: Invento
 
 ---
 
-### Task B6: Line set schedule — quantity first
+### Task 6 (B6): Line set schedule — quantity first
 
 **Files:** modify `sections/linesets.tsx`, `src/lib/stores/linesets.ts`, `controls.tsx`; checks.
 
@@ -306,7 +306,7 @@ Checks (source pins + a pure helper): export a pure `fixtureTotals(rows: Invento
 
 ---
 
-### Task B7: Goals downstream, field sheet, findings
+### Task 7 (B7): Goals downstream, field sheet, findings
 
 **Files:** modify `src/lib/estimate-output/goals.ts`, `src/lib/survey-flow.ts`, `src/lib/venue-assessment-sheet.ts`, `src/lib/survey-findings.ts`; checks; update #301 goal checks only where an array input is new behaviour.
 
@@ -323,7 +323,7 @@ Checks (source pins + a pure helper): export a pure `fixtureTotals(rows: Invento
 
 ---
 
-### Task B8: Gates, browser pass, docs, merge
+### Task 8 (B8): Gates, browser pass, docs, merge
 
 - Four gates + build (as slice A: tsc, `npm run test:specs`, `npm run test:smoke` with ≥ 45 GB free — clean `$TMPDIR` (`-mmin +60` guard) and finished worktrees' `.next` first; eslint vs baseline; `npm run build`).
 - Browser pass on a scratch datadir (main checkout's `.claude/launch.json` temporary entry; restore after): access fields + lift gating; beams toggles with/without Counterweight; curtain rows + slider colours; lighting positions + console Other + fixture totals; AV slider; goals list add/reorder; scope Other explain; line set quantity grow/shrink-with-confirm, fill down, mark spare; Final questions; travel fill on a verified venue (if the scratch DB has one — else note it); print sheet renders.
