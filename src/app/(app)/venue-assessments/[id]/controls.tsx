@@ -269,6 +269,7 @@ export default function SurveyEditor({
   const [collapsedMap, setCollapsedFor] = useCollapsed(record.id);
   const [activeSec, setActiveSec] = useState("cust");
   const headRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [headH, setHeadH] = useState(128);
   useEffect(() => {
     const el = headRef.current;
@@ -846,8 +847,9 @@ export default function SurveyEditor({
     try {
       const el = document.getElementById("sec-" + id);
       if (el) {
-        const y = el.getBoundingClientRect().top + window.pageYOffset - headH - 12;
-        window.scrollTo({ top: y, behavior: "smooth" });
+        // the app shell scrolls <main class="pk-main">, not the window, so let the browser find the container;
+        // each section card's scrollMarginTop keeps it clear of the sticky header
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     } catch {}
   }
@@ -870,7 +872,7 @@ export default function SurveyEditor({
   function gotoStep(i: number) {
     setStep(i);
     try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch {}
   }
 
@@ -958,7 +960,7 @@ export default function SurveyEditor({
   const stageCol = (i: number) => (i === curStageIdx ? "#fff" : i < curStageIdx ? ACCENT_INK : "#9aa0ab");
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d", background: "#f7f8fa" }}>
+    <div ref={rootRef} style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d", background: "#f7f8fa" }}>
       <style>{`
         .sv-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 14px; }
         .sv-rail::-webkit-scrollbar { display:none; }
@@ -1080,7 +1082,7 @@ export default function SurveyEditor({
                         </span>
                       </div>
                     )}
-                    <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
+                    <div id={"sec-" + sec.id} style={{ scrollMarginTop: headH + 12, background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
                       <div
                         onClick={headerClick}
                         role="button"

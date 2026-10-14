@@ -233,6 +233,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(ft.includes("activeSurveyTags") && ft.includes("Older site conditions") && ft.includes("Internal only"), "#342 A5: Final thoughts shows active tags, retired-but-carried tags and the old chips read-only");
   ok(rcp.includes("recapFor(") && rcp.includes("What we heard"), "#342 A7: the recap reads recapFor");
   ok(/<OlderNotes notes=\{draft\.legacyNotes\.filter\(\(n\) => n\.section === sec\.id\)\}/.test(ctl8), "#342 R1: every section shows its Older notes");
+  ok(ctl8.includes("scrollIntoView(") && ctl8.includes("scrollMarginTop") && !ctl8.includes("window.scrollTo(") && !ctl8.includes("pageYOffset"),
+    "#342 A8: jumps scroll the section into view (the app scrolls main.pk-main, not the window)");
 
   /* ---- Task 9: sheet + findings + list ---- */
   const sheetBase = {
