@@ -99,6 +99,10 @@ export function blankSystemsState(): Record<string, SystemState> {
 
 /* ---- Discipline branch forms ---- */
 
+/** #342 — the one rigging-system answer (Kill questions; stored at disciplines.rigging.present). "None" is
+ *  exclusive. Old labels map on read in src/lib/survey-migrate.ts. */
+export const RIG_SYSTEMS = ["Counterweight", "Dead-hung", "Motorized", "Hemp", "Fixed points", "None"] as const;
+
 export type DisciplineKey = "rigging" | "curtain" | "lighting" | "av";
 
 /** One discipline's captured data: field values + a scope-of-interest list. */
