@@ -19,6 +19,10 @@ export const ASK_MIN_ROUND_MS = 5_000;
 /** Web search server tool: uses per round, and the per-search price. */
 export const ASK_WEB_MAX_USES = 3;
 export const ASK_WEB_SEARCH_USD = 0.01;
+/** Spend per user per Chicago day across all Ask AI questions (logged `costUsd`, feature `ask`). */
+export const ASK_DAILY_USD_PER_USER = 5;
+/** Try harder (Sonnet) questions per user per hour — its own limit, on top of the shared 60/h for Ask AI. */
+export const ASK_HARD_PER_HOUR = 15;
 /** `[[kind:id]]` tokens re-checked from the earlier conversation. */
 export const ASK_PRIOR_REFS_MAX = 20;
 /** Logged answer text and refs. */
@@ -31,6 +35,9 @@ export const ASK_TIMEOUT_NOTE = "Stopped — took too long.";
 export const ASK_REFUSAL_TEXT = "I can't help with that one.";
 export const ASK_CUT_OFF_NOTE = "…(cut off)";
 export const ASK_NO_KEY_TEXT = "Ask AI needs the Claude API key.";
+export const ASK_DAILY_TEXT = "Ask AI daily limit reached — try again tomorrow.";
+export const ASK_HARD_RATE_TEXT = "Too many Try harder requests — try again in a bit.";
+export const ASK_KEY_REJECTED_TEXT = "The Claude API key was rejected — check Settings → Beta → Assist pilot.";
 
 export function askWallMs(hard: boolean): number {
   return hard ? ASK_WALL_MS_HARD : ASK_WALL_MS;

@@ -13,7 +13,7 @@
  * fake in scripts/test-ask.ts.
  */
 import { createHash } from "node:crypto";
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import type {
   BetaContentBlock,
   BetaMessage,
@@ -26,7 +26,8 @@ import type {
 import { getSettings } from "@/lib/settings";
 import { rateLimit } from "@/lib/rate-limit";
 import { activeUsers } from "@/lib/users";
-import { ASK_CONFIRMED_MAX, createRun, getRun, monthSpend, newRunId, setRunOutcome, type AssistRun } from "@/lib/stores/assist-runs";
+import { ASK_CONFIRMED_MAX, createRun, getRun, monthSpend, newRunId, setRunOutcome, userFeatureSpend, type AssistRun } from "@/lib/stores/assist-runs";
+import { chicagoMidnight } from "@/lib/triage/clock";
 import { assistSettingsOf, chicagoToday, monthKeyChicago } from "./config";
 import { askGateFor } from "./gate-server";
 import { getAssistEnv } from "./key-store";
@@ -43,7 +44,12 @@ import { ASK_PROPOSAL_TOOLS, cleanEmail, proposalToolKind, sanitizeCard, type Ca
 import { ASK_SYSTEM, packFirstUserMessage, type AskScreen } from "./features/ask-prompt";
 import {
   ASK_CUT_OFF_NOTE,
+  ASK_DAILY_TEXT,
+  ASK_DAILY_USD_PER_USER,
   ASK_FINAL_NOTE,
+  ASK_HARD_PER_HOUR,
+  ASK_HARD_RATE_TEXT,
+  ASK_KEY_REJECTED_TEXT,
   ASK_LOG_REFS_MAX,
   ASK_MIN_ROUND_MS,
   ASK_OUTPUT_MAX,
@@ -119,17 +125,43 @@ export type AskParamsInput = {
 };
 
 /**
- * The exact params for client.beta.messages.stream. The system prompt is
- * cached (tools render before it, so the tool list is cached with it). No
- * `thinking` key (adaptive by default; `disabled` 400s on Sonnet 5.5) and no
- * forced tool_choice — only `none` on the final round.
+ * The messages with one cache breakpoint on the newest user message (the
+ * first question, or the latest tool results) — on its last block, so the
+ * growing conversation is read from cache by the next round. A copy: the
+ * runner's own history is never marked, so earlier rounds' breakpoints don't
+ * pile up. Assistant content (thinking, tool_use) is never touched.
+ */
+export function withConversationBreakpoint(messages: readonly BetaMessageParam[]): BetaMessageParam[] {
+  const out = [...messages];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (m.role !== "user") continue;
+    const blocks = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : [...m.content];
+    if (!blocks.length) break;
+    const lastIdx = blocks.length - 1;
+    const last = blocks[lastIdx];
+    if (last.type !== "text" && last.type !== "tool_result") break;
+    blocks[lastIdx] = { ...last, cache_control: { type: "ephemeral" } };
+    out[i] = { ...m, content: blocks };
+    break;
+  }
+  return out;
+}
+
+/**
+ * The exact params for client.beta.messages.stream. Two cache breakpoints of
+ * the four a request allows: the system prompt (tools render before it, so the
+ * tool list is cached with it) and the newest user message
+ * (withConversationBreakpoint). No `thinking` key (adaptive by default;
+ * `disabled` 400s on Sonnet 5.5) and no forced tool_choice — only `none` on
+ * the final round.
  */
 export function buildAskParams(p: AskParamsInput): AskParams {
   return {
     model: p.model,
     max_tokens: p.maxTokens,
     system: [{ type: "text", text: p.system, cache_control: { type: "ephemeral" } }],
-    messages: p.messages,
+    messages: withConversationBreakpoint(p.messages),
     tools: [...p.tools, ...(p.web ? [webSearchToolFor(p.model)] : [])],
     ...(p.final ? { tool_choice: { type: "none" as const } } : {}),
     output_config: { effort: p.effort },
@@ -157,9 +189,27 @@ export function toolStatus(name: string): string {
   return name.startsWith("propose_") ? "Drafting a suggestion…" : "Looking things up…";
 }
 
+/*
+ * Why these two match message text: @anthropic-ai/sdk 0.128 has no typed error
+ * for either case (checked in node_modules). The tool-input JSON failure is a
+ * plain base `AnthropicError` built in lib/BetaMessageStream.js with the text
+ * "Unable to parse tool parameter JSON from model…" — no subclass, no code. A
+ * rejected web search tool is an ordinary `BadRequestError` (400,
+ * `invalid_request_error`), the same class as any other bad request, so only
+ * its message says which tool it was. If a later SDK adds a dedicated class or
+ * error code, switch to it here.
+ */
+
 /** The SDK's error for a tool input whose streamed JSON didn't parse (eager input streaming). */
 export function isToolInputJsonError(e: unknown): boolean {
   return e instanceof Error && /Unable to parse tool parameter JSON/i.test(e.message);
+}
+
+/** A rejected Claude key: 401 (AuthenticationError) or 403 (PermissionDeniedError). */
+export function isKeyRejected(e: unknown): boolean {
+  if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return true;
+  const status = e instanceof Error ? (e as { status?: unknown }).status : undefined;
+  return status === 401 || status === 403;
 }
 
 /** A 400 that names the web search tool — retry the round once without web. */
@@ -260,19 +310,41 @@ type Stop = "end" | "refusal" | "max_tokens" | "timeout" | "aborted" | "error" |
 export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) => void, deps: AskRunDeps = {}): Promise<AskRunResult> {
   const now = deps.now ?? Date.now();
   const clock = deps.clock ?? Date.now;
-  const env = deps.env ?? (await getAssistEnv());
-  const settings = deps.settings ?? assistSettingsOf(await getSettings());
-
-  // 1. Gate (Claude key required), cap, rate limit — a refusal is one error event, no run.
-  const refused = await askGateFor(me.id, { settings, env });
-  if (refused) {
-    emit({ t: "error", message: refused });
-    return { runId: null, ok: false, error: refused };
-  }
   const monthKey = monthKeyChicago(now);
-  if ((await monthSpend(monthKey)) >= settings.capUsd) {
-    emit({ t: "error", message: ASK_CAP_TEXT });
-    return { runId: null, ok: false, error: ASK_CAP_TEXT };
+
+  // 1. Gate (Claude key required), monthly cap, daily per-user budget, rate limits — a
+  // refusal is one error event, no run. A failure while checking (settings, key store,
+  // the spend sums) is refused the same way: runAsk never throws (D958).
+  let env: Env;
+  let settings: AssistSettings;
+  try {
+    env = deps.env ?? (await getAssistEnv());
+    settings = deps.settings ?? assistSettingsOf(await getSettings());
+    const refused = await askGateFor(me.id, { settings, env });
+    if (refused) {
+      emit({ t: "error", message: refused });
+      return { runId: null, ok: false, error: refused };
+    }
+    if ((await monthSpend(monthKey)) >= settings.capUsd) {
+      emit({ t: "error", message: ASK_CAP_TEXT });
+      return { runId: null, ok: false, error: ASK_CAP_TEXT };
+    }
+    const dayStart = chicagoMidnight(now);
+    const dayEnd = chicagoMidnight(dayStart + 26 * 3_600_000);
+    if ((await userFeatureSpend(me.id, "ask", dayStart, dayEnd)) >= ASK_DAILY_USD_PER_USER) {
+      emit({ t: "error", message: ASK_DAILY_TEXT });
+      return { runId: null, ok: false, error: ASK_DAILY_TEXT };
+    }
+  } catch (err) {
+    console.error("[ask] pre-run checks failed:", err);
+    emit({ t: "error", message: ASK_FAILED_TEXT });
+    return { runId: null, ok: false, error: errorText(err) };
+  }
+  // Try harder (Sonnet) has its own hourly limit, checked first so a refusal there
+  // doesn't also spend one of the shared 60.
+  if (input.hard && !rateLimit(`assist:ask-hard:${me.id}`, ASK_HARD_PER_HOUR, 3_600_000).ok) {
+    emit({ t: "error", message: ASK_HARD_RATE_TEXT });
+    return { runId: null, ok: false, error: ASK_HARD_RATE_TEXT };
   }
   if (!rateLimit(`assist:ask:${me.id}`, RATE_LIMITS.ask, 3_600_000).ok) {
     emit({ t: "error", message: ASK_RATE_TEXT });
@@ -283,7 +355,14 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
   const slot = input.hard ? "askHard" : "ask";
   const model = modelFor(slot, env);
   const s = SLOT_SETTINGS[slot];
-  const client = deps.client ?? anthropicAskClient(env);
+  let client: AskModelClient;
+  try {
+    client = deps.client ?? anthropicAskClient(env);
+  } catch (err) {
+    console.error("[ask] client setup failed:", err);
+    emit({ t: "error", message: ASK_FAILED_TEXT });
+    return { runId: null, ok: false, error: errorText(err) };
+  }
   const t0 = clock();
   const deadline = t0 + askWallMs(input.hard);
 
@@ -349,16 +428,19 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
     let web = input.web;
     let webRetried = false;
     let jsonRetried = false;
+    /** Attempts re-issued after a tool-JSON error: logged (and billed) in `rounds`, never counted toward ASK_MAX_ROUNDS. */
+    let reissued = 0;
     let resumed = false;
     let final = false;
     const fallbacks = wantsFallbacks(model);
+    const roundsUsed = () => rounds.length - reissued;
 
     // 3. The loop.
     for (;;) {
       const msLeft = deadline - clock();
-      const policy = nextRoundPolicy({ round: rounds.length, toolCalls, msLeft });
+      const policy = nextRoundPolicy({ round: roundsUsed(), toolCalls, msLeft });
       if (policy === "stop") {
-        // Out of time, or (after a re-issued round) out of rounds.
+        // Out of time, or out of rounds.
         stop = msLeft > ASK_MIN_ROUND_MS ? "end" : "timeout";
         break;
       }
@@ -453,9 +535,12 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
             break;
           }
           if (!jsonRetried) {
-            // Nothing shown yet: re-issue the round once (it counts as a round).
+            // Nothing shown yet: re-issue the round once. The failed attempt is logged as a
+            // round (its usage is billed) but doesn't use up one of the question's rounds,
+            // so a re-issued final round still gets its answer.
             jsonRetried = true;
             if (!live.started) rounds.push(livePartial());
+            reissued++;
             continue;
           }
         }
@@ -501,7 +586,7 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
       }
       if (msg.stop_reason === "pause_turn") {
         // A server tool paused: send the conversation back once more, as is (a tools round only).
-        if (resumed || nextRoundPolicy({ round: rounds.length, toolCalls, msLeft: deadline - clock() }) !== "tools") {
+        if (resumed || nextRoundPolicy({ round: roundsUsed(), toolCalls, msLeft: deadline - clock() }) !== "tools") {
           stop = "end";
           break;
         }
@@ -556,8 +641,9 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
   } catch (err) {
     console.error("[ask] run failed:", err);
     stop = "error";
+    // A rejected key says so (the run is still logged below); anything else is the generic failure.
     error = errorText(err);
-    emit({ t: "error", message: ASK_FAILED_TEXT });
+    emit({ t: "error", message: isKeyRejected(err) ? ASK_KEY_REJECTED_TEXT : ASK_FAILED_TEXT });
   }
 
   // 6. Log one run per question.

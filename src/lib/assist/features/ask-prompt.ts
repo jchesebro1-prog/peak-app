@@ -8,7 +8,7 @@
  * screen and the new question. Tool results are `<record>` blocks. Every
  * wrapper close inside untrusted text is defanged (thread-text.ts).
  */
-import { cleanPromptField, defangWrappers } from "./thread-text";
+import { cleanPromptAttr, defangWrappers } from "./thread-text";
 import type { RefKind } from "./ask-refs";
 
 export const ASK_TOOL_RESULT_MAX = 6000;
@@ -42,8 +42,8 @@ export function capText(text: string, max: number = ASK_TOOL_RESULT_MAX): string
   return (head + noteFor(s.length - head.length)).slice(0, Math.max(0, max));
 }
 
-/** An attribute value: one line, no quotes or angle brackets, capped. */
-const attr = (s: string | null | undefined, max = 120) => cleanPromptField((s || "").replace(/[<>"]/g, ""), max);
+/** An attribute value: folded first (fullwidth ＂ ＞ ＜), then one line, no quotes or angle brackets, capped. */
+const attr = (s: string | null | undefined, max = 120) => cleanPromptAttr(s, max);
 
 /** Untrusted multi-line text: CRs dropped, wrapper closes defanged. */
 const body = (s: string | null | undefined) => defangWrappers((s || "").replace(/\r\n?/g, "\n")).trim();

@@ -12122,6 +12122,7 @@ link/archive paths a person would.
 - **Page context** for companies, venues, every quote builder, threads, meetings (`?m=`), leads, projects and venue assessments; the chip route returns only `{ref, title}` (D956).
 - **Settings + report:** Ask AI switch and model hint on the Assist pilot card; an Ask AI report table — questions per person, Haiku / Sonnet, Try harder rate, cards proposed / confirmed by kind, web searches, cost (D959).
 - **Tests:** `npm run test:ask` (chained into test:specs).
+- **Final-review fixes (2026-10-14):** attribute values fold (NFKC) before the quote/bracket strip, so fullwidth `＂` `＞` `＜` can't break out (D953); spend guard — Try harder 15/h of its own and a $5/day per-user Ask budget (D945, D946, D949); a second cache breakpoint on the newest user message (D948); a re-issued round doesn't count toward the 6 (D948); pre-run check failures never throw (D958); a 401/403 says the key was rejected (D958); the report counts Try harder by `hard` (D959); Try harder keeps the original web setting (D945); the lead note card says it logs on the lead's activity and can count as first contact (D955).
 
 **Remaining (Jeff-gated):**
 - (1) Settings → Beta → Assist pilot: the Claude key must be set (D881), the person ticked, and the **Ask AI** switch on (it starts off). Without a key the ⌘K row never shows.
@@ -12132,6 +12133,7 @@ link/archive paths a person would.
 
 **Known follow-ups:**
 - ⌘K itself still lists other mailboxes' email-thread subjects (pre-existing; Ask's own search is scoped) (D960).
+- **Privacy gap, its own item:** ⌘K search itself (`globalSearch` without `{threadsOf}`) lists the subjects of email threads in *other people's* mailboxes to any signed-in user. This predates Ask AI and isn't fixed by #339 (Ask's own search is scoped to the asker's mailbox, D950); it needs its own punch item to scope the ⌘K thread group the same way.
 - `list_quotes` with no company scans every quote row's header projection; fine today, revisit past ~10k quotes.
 - Lead and project note cards post nothing on the pop-out LiveSync channel (#336 has no lead or project entity); other windows catch up on focus.
 - `max_uses` is per round, so a web question can make up to 18 searches; tighten if the report shows heavy use (D949).

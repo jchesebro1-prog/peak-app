@@ -10,7 +10,7 @@ import type { SurveyRecord } from "@/lib/stores/surveys";
 import { surveyFindings } from "@/lib/survey-findings";
 import { DISCIPLINE_LABEL, DISCIPLINES } from "@/lib/estimate-output/fields";
 import { goalsFromSurvey } from "@/lib/estimate-output/goals";
-import { cleanPromptField, defangWrappers, promptMessages, threadBlock, type PromptMessage } from "./thread-text";
+import { cleanPromptAttr, cleanPromptField, defangWrappers, promptMessages, threadBlock, type PromptMessage } from "./thread-text";
 
 export { promptMessages, threadBlock };
 
@@ -42,8 +42,8 @@ function block(s: string | null | undefined, max: number): string {
   return t.length > max ? t.slice(0, max).trimEnd() + " …[trimmed]" : t;
 }
 
-/** An attribute value on a wrapper's opening tag. */
-const attr = (s: string | null | undefined) => cleanPromptField((s || "").replace(/[<>"]/g, ""));
+/** An attribute value on a wrapper's opening tag (folded before the quote / bracket strip). */
+const attr = (s: string | null | undefined) => cleanPromptAttr(s);
 
 const line = (label: string, v: unknown) => {
   const t = cleanPromptField(v == null ? "" : String(v), 300);

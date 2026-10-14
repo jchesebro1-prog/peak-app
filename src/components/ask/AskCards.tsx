@@ -209,6 +209,11 @@ function NoteCardView({ card, runId, streaming, whitelist }: CardProps & { card:
         Note on {NOTE_LABEL[kind]} · <span style={{ textTransform: "none", letterSpacing: 0, color: "#3a3f4a" }}>{titleOf(whitelist, kind, id)}</span>
       </div>
       <p style={pre}>{card.text}</p>
+      {kind === "lead" && (
+        <div style={{ marginTop: 4, fontSize: 11, color: "#9aa0ab" }} data-ask-lead-note-hint>
+          Logs on the lead’s activity. If the lead hasn’t been contacted yet, this counts as its first contact for response time.
+        </div>
+      )}
       <Footer label="Add note" busyLabel="Adding…" doneLabel="Note added ✓" busy={c.busy} done={c.done} error={c.error} disabled={streaming} disabledTitle={WAIT_TITLE} onClick={() => void confirm()} />
     </div>
   );

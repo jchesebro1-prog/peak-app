@@ -522,7 +522,10 @@ card's button.
 
 - Assist pilot card → report → **Ask AI**: questions per person, Haiku vs Sonnet, how
   often Try harder is used, cards proposed and confirmed by kind, web searches and
-  cost. Each person can ask 60 questions an hour, and the monthly cap applies.
+  cost. Each person can ask 60 questions an hour (Try harder: 15 an hour) and spend
+  up to $5 a day on Ask AI ("Ask AI daily limit reached — try again tomorrow."), and
+  the monthly cap applies. If the Claude key is wrong, Ask says "The Claude API key
+  was rejected — check Settings → Beta → Assist pilot."
 
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 

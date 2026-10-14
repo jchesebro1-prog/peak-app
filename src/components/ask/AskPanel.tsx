@@ -164,7 +164,7 @@ export default function AskPanel({
 
   /** Ask one question (or re-ask the latest with Sonnet: `retry`). One stream at a time. */
   const ask = useCallback(
-    async (question: string, retry: { key: number; runId: string | null } | null = null) => {
+    async (question: string, retry: { key: number; runId: string | null; web: boolean } | null = null) => {
       if (ctlRef.current) return;
       const all = turnsRef.current;
       const prior = retry ? all.filter((t) => t.key !== retry.key) : all;
@@ -172,7 +172,9 @@ export default function AskPanel({
       if (!messages) return;
       const key = ++keyRef.current;
       const hard = !!retry;
-      const turn = newAskTurn(key, question.trim(), { hard, web });
+      // Try harder re-asks with the original question's web setting (kept on its answer), not today's toggle.
+      const useWeb = retry ? retry.web : web;
+      const turn = newAskTurn(key, question.trim(), { hard, web: useWeb });
       setTurns((ts) => (retry ? ts.map((t) => (t.key === retry.key ? turn : t)) : [...ts, turn]));
       const update = (f: (t: AskTurnState) => AskTurnState) => setTurns((ts) => ts.map((t) => (t.key === key ? f(t) : t)));
       const ctl = new AbortController();
@@ -182,7 +184,7 @@ export default function AskPanel({
         const res = await fetch(ASK_ROUTE, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messages, page: ctxDropped ? null : pagePath || null, web, hard, retryOf: retry?.runId ?? null }),
+          body: JSON.stringify({ messages, page: ctxDropped ? null : pagePath || null, web: useWeb, hard, retryOf: retry?.runId ?? null }),
           signal: ctl.signal,
           credentials: "same-origin",
           cache: "no-store",
@@ -358,7 +360,7 @@ export default function AskPanel({
                 </div>
               )}
               {canTryHarder(t, latest) && !busy && !askTurnRefused(t) && (
-                <button type="button" className="pk-btn-outline" style={{ marginTop: 8 }} title="Re-ask this question with Sonnet, replacing this answer" onClick={() => void ask(t.question, { key: t.key, runId: t.runId })}>
+                <button type="button" className="pk-btn-outline" style={{ marginTop: 8 }} title="Re-ask this question with Sonnet, replacing this answer" onClick={() => void ask(t.question, { key: t.key, runId: t.runId, web: t.web })}>
                   Try harder
                 </button>
               )}

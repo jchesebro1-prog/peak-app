@@ -238,7 +238,7 @@ export type AskReportRow = {
   haiku: number;
   sonnet: number;
   other: number;
-  /** questions re-asked with Try harder (`retryOf` set) */
+  /** questions asked with Try harder (`outcomeDetail.hard === true`; `retryOf` can be null when the earlier answer never logged) */
   tryHarder: number;
   /** tryHarder ÷ questions, %, one decimal; null with no questions */
   tryHarderPct: number | null;
@@ -276,7 +276,7 @@ export function askReport(runs: AssistRun[]): AskReport {
       if (m.includes("haiku")) row.haiku++;
       else if (m.includes("sonnet")) row.sonnet++;
       else row.other++;
-      if (typeof d.retryOf === "string" && d.retryOf) row.tryHarder++;
+      if (d.hard === true) row.tryHarder++;
       row.cardsShown += Math.max(count(d.cards), Array.isArray(d.cardKinds) ? d.cardKinds.length : 0);
       for (const k of Array.isArray(d.cardKinds) ? d.cardKinds : []) if (isKind(k)) row.proposed[k]++;
       for (const k of Array.isArray(d.confirmed) ? d.confirmed : []) if (isKind(k)) row.confirmed[k]++;

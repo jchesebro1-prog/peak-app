@@ -7,13 +7,24 @@ export const UNTRUSTED_NOTE =
 /** Zero-width space / non-joiner / joiner, word joiner, BOM. */
 const INVISIBLE = /[\u200b-\u200d\u2060\ufeff]/g;
 
+/**
+ * Untrusted text folded to its plain form: zero-width characters dropped and
+ * fullwidth / compatibility forms folded (NFKC), so "\uff02" becomes `"` and
+ * "\uff1e" `>`. Always fold BEFORE stripping or checking characters: a strip
+ * that runs first lets the fullwidth form through, and a later fold turns it
+ * back into the very character the strip was meant to remove.
+ */
+export function foldUntrusted(s: string | null | undefined): string {
+  return (s || "").replace(INVISIBLE, "").normalize("NFKC");
+}
+
 /** Text must never close an untrusted wrapper early — the email wrappers, the
  *  estimate suggestion's source wrappers (suggest-sources.ts) and Ask AI's
  *  record / conversation wrappers (ask-prompt.ts) alike. */
 function defangClose(s: string): string {
   // Zero-width characters are dropped and fullwidth / compatibility forms
   // folded (NFKC) first, so "<\u200b/record>" or "\uff1c/record\uff1e" can't slip past.
-  const t = s.replace(INVISIBLE, "").normalize("NFKC");
+  const t = foldUntrusted(s);
   // Whitespace inside the closer ("< /lead_record", "</ meeting_notes") counts too.
   return (
     t
@@ -32,8 +43,19 @@ export const FIELD_MAX = 120;
  * PEAK" line), no wrapper close, at most FIELD_MAX characters.
  */
 export function cleanPromptField(s: string | null | undefined, max = FIELD_MAX): string {
-  const t = defangClose((s || "").replace(/[\r\n]+/g, " ").trim());
+  // Folded first, so a caller's own strip afterwards (brief, nudge, reply-draft) sees the folded form.
+  const t = defangClose(foldUntrusted(s).replace(/[\r\n]+/g, " ").trim());
   return t.length > max ? t.slice(0, max).trimEnd() + "…" : t;
+}
+
+/**
+ * One untrusted attribute value (`subject="…"`, `title="…"`, `id="…"`): folded
+ * FIRST, then no quote or angle bracket, then cleaned like any field. Folding
+ * after the strip would let "＂" / "＞" / "＜" survive it and come
+ * back as `"` / `>` / `<` — an attribute break-out.
+ */
+export function cleanPromptAttr(s: string | null | undefined, max = FIELD_MAX): string {
+  return cleanPromptField(foldUntrusted(s).replace(/[<>"]/g, ""), max);
 }
 
 /** Untrusted multi-line text (a sent body used as a style example): wrapper closes defanged. */
@@ -75,7 +97,7 @@ export function threadBlock(t: { subject: string; messages: PromptMessage[] }, o
     (m) =>
       `--- ${m.direction === "in" ? "RECEIVED" : "SENT BY PEAK"} · ${cleanPromptField(m.author) || "unknown"} · ${new Date(m.at).toISOString().slice(0, 10)}\n${trimBody(m.body, opts.maxChars)}`
   );
-  // An attribute value: one line (no forged "--- RECEIVED" line), capped, no quote/angle brackets.
-  const subject = cleanPromptField((t.subject || "").replace(/[<>"]/g, ""));
+  // An attribute value: one line (no forged "--- RECEIVED" line), capped, no quote/angle brackets (folded first).
+  const subject = cleanPromptAttr(t.subject);
   return `<email_thread subject="${subject}">\n${parts.join("\n")}\n</email_thread>`;
 }

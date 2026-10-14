@@ -134,3 +134,21 @@ export async function monthSpend(monthKey: string): Promise<number> {
   const runs = await listRunsByMonth(monthKey);
   return runs.reduce((s, r) => s + (Number(r.costUsd) || 0), 0);
 }
+
+/**
+ * One user's logged spend on one feature in [fromMs, toMs) by `createdAt` —
+ * Ask AI's daily per-user budget. One SQL SUM, no rows loaded; a non-numeric
+ * cost or timestamp counts as nothing.
+ */
+export async function userFeatureSpend(userId: string, feature: AssistFeature, fromMs: number, toMs: number): Promise<number> {
+  const db = await getDb();
+  const t = DOC_TABLES[COLL];
+  const cost = sql`CASE WHEN jsonb_typeof(${t.doc}->'costUsd') = 'number' THEN (${t.doc}->>'costUsd')::numeric ELSE 0 END`;
+  const at = sql`CASE WHEN jsonb_typeof(${t.doc}->'createdAt') = 'number' THEN (${t.doc}->>'createdAt')::numeric ELSE NULL END`;
+  const rows = await db
+    .select({ total: sql<string | number | null>`COALESCE(SUM(${cost}), 0)` })
+    .from(t)
+    .where(and(eq(t.deleted, false), sql`${t.doc}->>'userId' = ${userId}`, sql`${t.doc}->>'feature' = ${feature}`, sql`${at} >= ${fromMs}`, sql`${at} < ${toMs}`));
+  const n = Number(rows[0]?.total ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
