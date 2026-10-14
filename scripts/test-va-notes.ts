@@ -10,6 +10,7 @@ import {
 import { migrateSurvey, addLegacyNote, type MigratableSurvey } from "../src/lib/survey-migrate";
 import { tier1Items, tier1Complete, DISCIPLINE_GROUPS, presentOptionsFor } from "../src/lib/stores/survey-intake";
 import { BEAM_FIELDS } from "../src/lib/stores/surveys";
+import { railSheetLabel, SECTION_RAIL_CSS } from "../src/components/section-rail/section-rail";
 import { STARTER_SURVEY_TAGS, resolveSurveyTags, mergeSurveyTags, activeSurveyTags, surveyTagLabel } from "../src/lib/survey-tags";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
@@ -136,6 +137,20 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   const vaActs = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/actions.ts"), "utf8");
   ok(/create\(\{ owner: user\.name, requestedBy: user\.name, stage: "requested", assignedTo: user\.name, scheduledDate: chicagoDayKey\(Date\.now\(\)\) \}, user\.name\)/.test(vaActs),
     "#342 A4: New request defaults Assigned to = me and Scheduled date = today (Chicago); stage stays requested");
+
+  /* ---- Task 5: shared rail ---- */
+  ok(railSheetLabel({ key: "S1", label: "Core", done: 3, total: 7, badges: [
+      { tone: "prompt", n: 2, title: "", text: "2 to review" }, { tone: "photo", n: 1, title: "", text: "1 photo" }, { tone: "photo", n: 0, title: "", text: "0 photos" }] }, true) === "Core — 3/7 · 2 to review · 1 photo",
+    "#342 A8: the phone select label matches the engine's old format (zero badges skipped)");
+  ok(railSheetLabel({ key: "recap", label: "Customer recap", done: 0, total: 0 }) === "Customer recap" &&
+     railSheetLabel({ key: "x", label: "X", done: 0, total: 0 }, true) === "X — 0/0", "#342 A8: no count for a section without fields unless showEmpty");
+  ok(SECTION_RAIL_CSS.includes("@media (max-width: 759px)") && SECTION_RAIL_CSS.includes(".sr-rail-sheet"), "#342 A8: the rail carries its own phone breakpoint");
+  const engRail = readFileSync(join(process.cwd(), "src/app/(app)/assessments/[id]/scope-rail.tsx"), "utf8");
+  const engEditor = readFileSync(join(process.cwd(), "src/app/(app)/assessments/[id]/editor.tsx"), "utf8");
+  ok(engRail.includes('from "@/components/section-rail/section-rail"') && !/function Ring\(/.test(engRail) && engRail.includes("showEmpty"),
+    "#342 A8: the engine's scope rail renders the shared SectionRail");
+  ok(!/\.as-rail[\s{-]/.test(engEditor) && engEditor.includes("${SECTION_RAIL_CSS}"), "#342 A8: the engine's CSS takes the rail rules from the shared component");
+
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
