@@ -336,8 +336,10 @@ export async function saveRepairQuote(formData: FormData): Promise<void> {
 
 export async function approveRepairQuote(formData: FormData): Promise<void> {
   let id: string | null;
+  // #337: set when the findings couldn't be linked to the quote this approval created (mirrors saveRepairQuote).
+  const note: { creditNote?: string; findingNote?: string } = {};
   try {
-    id = await persist(formData);
+    id = await persist(formData, note);
     if (!id) {
       revalidatePath("/", "layout");
       return;
@@ -360,5 +362,8 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
     );
   }
   revalidatePath("/", "layout");
-  redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1");
+  redirect(
+    "/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1" +
+      (note.findingNote ? "&findingnote=" + encodeURIComponent(note.findingNote) : "")
+  );
 }

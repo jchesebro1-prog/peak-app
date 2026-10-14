@@ -128,3 +128,25 @@ export function findingsEstimatorSection(list: Quotable[], opts: { sectionId: st
     items,
   };
 }
+
+/** The venue ids (location ids, as `docLocId` reads them) a quote is for: its own `locationId`, plus every venue a
+ *  repair quote was saved with (`repair.venues[].id`; a repair quote's `locationId` is only its FIRST venue). */
+export function quoteVenueIds(q: { locationId?: string | null; repair?: unknown }): string[] {
+  const ids: string[] = [];
+  if (typeof q.locationId === "string" && q.locationId) ids.push(q.locationId);
+  const venues = (q.repair as { venues?: unknown } | null | undefined)?.venues;
+  if (Array.isArray(venues)) {
+    for (const v of venues) {
+      const id = v && typeof v === "object" ? (v as { id?: unknown }).id : undefined;
+      if (typeof id === "string" && id && !ids.includes(id)) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/** Can a finding at venue `locId` link to this quote? A quote that names no venue at all can (as before); one that
+ *  names venues must include this one, whether as its `locationId` or among a repair quote's venues. */
+export function quoteCoversVenue(q: { locationId?: string | null; repair?: unknown }, locId: string): boolean {
+  const ids = quoteVenueIds(q);
+  return ids.length === 0 || ids.includes(locId);
+}

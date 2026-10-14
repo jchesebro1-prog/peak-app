@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { VISIT_TYPES } from "@/lib/assessments/defs";
 import { listAssessments } from "@/lib/stores/assessments";
 import { listFindings } from "@/lib/stores/findings";
@@ -34,7 +35,7 @@ const fmtDate = (ms: number) => (ms ? new Date(ms).toLocaleDateString("en-US", {
 
 /** The assessment list (#337, spec §2): newest visit first, filtered by ?status= and ?customer=. */
 export default async function AssessmentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  const [user, sp] = await Promise.all([requireUser(), searchParams]);
   const statusParam = one(sp.status);
   const status = (STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
   const customer = one(sp.customer);
@@ -90,6 +91,11 @@ export default async function AssessmentsPage({ searchParams }: { searchParams: 
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "#9aa0ab" }}>{all.length}</span>
         </div>
         <span style={{ flex: 1 }} />
+        {can("manage_users", user.roles) && (
+          <Link href="/assessments/pick-lists" style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none" }}>
+            Pick lists
+          </Link>
+        )}
         <Link href={customer ? `/assessments/findings?customer=${encodeURIComponent(customer)}` : "/assessments/findings"} style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", textDecoration: "none" }}>
           Findings →
         </Link>

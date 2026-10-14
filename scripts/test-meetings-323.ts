@@ -987,7 +987,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
     ["src/app/(app)/venues/[id]/page.tsx", /<MeetingsCard kind="venue" id=\{site\.id\} viewerId=\{user\.id\}/],
     ["src/app/(app)/people/[id]/page.tsx", /<MeetingsCard kind="contact" id=\{person\.id\} viewerId=\{user\.id\}/],
     ["src/app/(app)/venue-assessments/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{\[rec\.id, \.\.\.visitIds\]\} viewerId=\{user\.id\} \/>\}/],
-    ["src/app/(app)/projects/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\}/],
+    ["src/app/(app)/projects/[id]/page.tsx", /meetingsSlot=\{(?:\s*<>\s*)?<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\}/],
     ["src/app/(app)/design/engagements/[id]/page.tsx", /<RecordingsCard parentKind="engagement" parentId=\{sel\.id\} \/>\s*<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\} \/>/],
     ["src/app/(app)/leads/page.tsx", /<MeetingsCard kind="work" id=\{leadRec\.id\} viewerId=\{me\.id\}/],
   ];

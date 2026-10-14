@@ -8,7 +8,7 @@ import { getAssessment } from "@/lib/stores/assessments";
 import { getFinding, linkQuote, transitionFinding } from "@/lib/stores/findings";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { docLocId, getSite } from "@/lib/identity/sites";
-import { parseFindingKeys } from "@/lib/assessments/findings-quote";
+import { parseFindingKeys, quoteCoversVenue, quoteVenueIds } from "@/lib/assessments/findings-quote";
 import { quoteFromFindings, type QuoteKind } from "@/lib/assessments/quote-from-findings";
 import type { PhotoRef } from "@/lib/assessments/photos";
 
@@ -85,9 +85,10 @@ export async function linkExistingQuoteAction(key: string, quoteId: string): Pro
   if (!q.customerId) return { ok: false, error: `${id} isn't linked to a customer, so it can't be linked to a finding.` };
   if (q.customerId !== f.customerId) return { ok: false, error: `${id} is for a different customer.` };
   if (q.status === "lost") return { ok: false, error: `${id} is lost; link an open quote.` };
-  if (q.locationId) {
+  if (quoteVenueIds(q).length) {
+    // A repair quote may cover several venues (`repair.venues[].id`) while its `locationId` is only the first.
     const site = await getSite(f.siteId);
-    if (site && q.locationId !== docLocId(site)) return { ok: false, error: `${id} is for a different venue.` };
+    if (site && !quoteCoversVenue(q, docLocId(site))) return { ok: false, error: `${id} is for a different venue.` };
   }
   await linkQuote([f.key], q.id, user);
   const after = await getFinding(f.key);

@@ -15,6 +15,8 @@ import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
+import { listFindings } from "@/lib/stores/findings";
+import { immediateOpenCount } from "@/lib/assessments/integration";
 import { unseenCustomerDocuments } from "@/lib/stores/documents";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { customerUploadBell } from "@/lib/document-rules";
@@ -100,6 +102,7 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     prefs,
     unseenDocs,
     perkRedemptions,
+    immediateFindings,
   ] = await Promise.all([
     allQuotes(),
     // Fix wave 3 (I3): the badge needs review / owner only — a plain record
@@ -120,6 +123,11 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     unseenCustomerDocuments(),
     // #282 perks+points — one SQL-filtered read of perk ledger entries (usually few).
     perksToFulfil(),
+    // #337 — open findings rated Immediate attention: one read (SQL-narrowed to that rating), never per row.
+    listFindings({ rating: ["immediate"] }).catch((error) => {
+      console.error("[assessments] nav badge: findings read failed", error);
+      return [];
+    }),
   ]);
   // Everything below is derived from the arrays already fetched above — no
   // extra table scans. Previously these re-fetched inspections+repairs
@@ -169,6 +177,7 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     inspections: requestedInspections.length,
     repairs: approvedRepairs.length + flagged.length,
     field: requestedSurveys.length,
+    assessments: immediateOpenCount(immediateFindings),
   };
 
   const groups: BellGroup[] = [];

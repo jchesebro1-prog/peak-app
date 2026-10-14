@@ -19,7 +19,7 @@ import { like, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, sites } from "../src/db/schema";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS, blobs } from "../src/db/doc-tables";
-import { CONFIG_COLLECTIONS } from "../src/db/seed-data";
+import { CONFIG_COLLECTIONS, DEMO_COLLECTIONS } from "../src/db/seed-data";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
 import { saveSite, getSite, setSiteShortCode, docLocId } from "../src/lib/identity/sites";
@@ -34,9 +34,9 @@ import {
   findingSheetProblems, findingSaveDoc, parseMoney, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
 } from "../src/lib/assessments/editor-model";
 import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch, liveMergeTarget } from "../src/lib/assessments/findings-model";
-import { saveFinding, getFinding, getFindings, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
-import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
-import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
+import { normalizeFinding, saveFinding, getFinding, getFindings, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
+import { getVenueProfile, profileValues, writeProfileFacts } from "../src/lib/stores/venue-profiles";
+import { ASSESSMENT_PICKLISTS_BLOB, slugValue, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
 import { buildQuote, create as createQuote, get as getQuote, getMany as getQuotes, update as updateQuote } from "../src/lib/stores/quotes";
 import { softDeleteDoc } from "../src/db/doc-store";
 import { CATEGORIES as REPAIR_CATEGORIES, PRIORITIES as REPAIR_PRIORITIES } from "../src/lib/stores/repair-jobs";
@@ -55,6 +55,13 @@ import {
 import { findingsPdfHref, parseFindingsScope } from "../src/lib/assessments/register";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { VISIT_TYPES } from "../src/lib/assessments/defs";
+import { NAV, activeKeyFor, parentGroupOf } from "../src/components/nav/nav-data";
+import {
+  assessmentCardRows, assessmentSearchResult, chicagoDay, confirmedLine, findingSearchResult, immediateOpenCount, isOpenFinding, listTitle,
+  matchesAssessment, matchesFinding, openRatingCounts, pickListAdminRows, profileFactRows, registerHref, startHref,
+} from "../src/lib/assessments/integration";
+import { quoteCoversVenue, quoteVenueIds } from "../src/lib/assessments/findings-quote";
+import { searchDocs, setBlob } from "../src/db/doc-store";
 
 const ROOT = process.cwd();
 
@@ -540,6 +547,7 @@ export async function assessmentChecks(ok: Ok) {
   task8Checks(ok);
   task9Checks(ok);
   await task10Checks(ok);
+  task11Checks(ok);
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
@@ -622,6 +630,7 @@ export async function assessmentDbChecks(ok: Ok) {
   await assessmentEditorDbChecks(ok);
   await task8DbChecks(ok);
   await task9DbChecks(ok);
+  await task11DbChecks(ok);
 }
 
 /** Task 5 — the stores, printed-id allocation under the advisory lock, and the push-handler branches. */
@@ -1620,7 +1629,7 @@ function task9Checks(ok: Ok) {
   const fc = readFileSync(join(ROOT, "src/app/(app)/assessments/findings/controls.tsx"), "utf8");
   ok(fc.includes("const selectable = shown.filter((r) => !r.finding.voided);") && fc.indexOf("const shown = ") < fc.indexOf("const selectable = ") && fc.includes("document.getElementById(`frc-${focus}`)"), "register: select-all follows the shown rows; the focus scroll finds the phone card too");
   const fsrc = readFileSync(join(ROOT, "src/app/(app)/assessments/findings/actions.ts"), "utf8");
-  ok(fsrc.includes("if (!q.customerId)") && fsrc.includes('q.status === "lost"') && fsrc.includes("q.locationId !== docLocId(site)") && fsrc.includes("refresh(r.assessmentIds ?? [])") && fsrc.includes('"&err=" + encodeURIComponent(r.linkNotice)'), "register actions: Link existing refuses no-customer, lost and other-venue quotes; Estimator quote revalidates assessment pages and surfaces a link failure");
+  ok(fsrc.includes("if (!q.customerId)") && fsrc.includes('q.status === "lost"') && fsrc.includes("!quoteCoversVenue(q, docLocId(site))") && fsrc.includes("refresh(r.assessmentIds ?? [])") && fsrc.includes('"&err=" + encodeURIComponent(r.linkNotice)'), "register actions: Link existing refuses no-customer, lost and other-venue quotes; Estimator quote revalidates assessment pages and surfaces a link failure");
   ok(/from "\.\.\/\[id\]\/finding-sheet"/.test(fc) && !/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(fc) && !/register-server/.test(fc), "register: reuses the editor's finding sheet and imports no store");
   const smoke = readFileSync(join(ROOT, "scripts/smoke-routes.ts"), "utf8");
   ok(smoke.includes('"/assessments/findings"'), "register: /assessments/findings is a smoke route");
@@ -1729,6 +1738,15 @@ async function task9DbChecks(ok: Ok) {
     // store: getMany / getFindings / findingKeys is creation-only
     const many = await getQuotes([rq.id, rq2.id, "Q-nope-0000", rq.id]);
     ok(many.size === 2 && JSON.stringify(many.get(rq.id)) === JSON.stringify(await getQuote(rq.id)), "quotes.getMany: returns the same docs as get and skips missing ids");
+    // a SYSTEM (Estimator) quote carries a pipeline: stored without one, get() and getMany() must both normalise it the same way
+    const sysQ = await createQuote({ name: "T9 system", customer: "Assess Co One", customerId: co1, source: "estimator", owner: U.name });
+    quoteIds.push(sysQ.id);
+    await db.execute(sql`update quotes set doc = doc - 'pipelineId' - 'stage' where id = ${sysQ.id}`);
+    const rawSys = await db.select({ doc: DOC_TABLES.quotes.doc }).from(DOC_TABLES.quotes).where(eq(DOC_TABLES.quotes.id, sysQ.id));
+    const sysMany = await getQuotes([sysQ.id, rq.id]);
+    const sysOne = (await getQuote(sysQ.id))!;
+    ok(!("pipelineId" in (rawSys[0].doc as object)) && !!sysOne.pipelineId && !!sysOne.stage, "quotes.getMany: precondition — the stored system quote has no pipeline; get() gives it one");
+    ok(sysMany.size === 2 && JSON.stringify(sysMany.get(sysQ.id)) === JSON.stringify(sysOne) && JSON.stringify(sysMany.get(rq.id)) === JSON.stringify(await getQuote(rq.id)), "quotes.getMany: a system (Estimator) quote reads exactly as get() does (pipeline normalised), repair quote too");
     const gone = await createQuote({ name: "T9 gone", customerId: co1, quoteType: "repair", source: "repair", owner: U.name });
     quoteIds.push(gone.id);
     await softDeleteDoc("quotes", gone.id);
@@ -1905,6 +1923,213 @@ async function task10Checks(ok: Ok) {
   const capped = await inlinePhotoSources([{ id: "p_a" }, { id: "p_big" }, { id: "p_c" }], read, { maxBytes: 50 });
   ok(capped.overCap && capped.sources.p_a !== null && capped.sources.p_big === null && capped.sources.p_c === null && capped.inlinedBytes === 10, "photo inlining: past the byte budget that photo and every later one are left out (overCap)");
   ok(INLINE_TOTAL_BYTES === 20 * 1024 * 1024 && PHOTO_UNAVAILABLE === "Photo unavailable", "photo inlining: 20 MB total; placeholder wording");
+}
+
+/* ---------- Task 11: nav, search, cards, pick-list admin, carry-overs ---------- */
+
+function task11Checks(ok: Ok) {
+  // nav: the Customers group gets Assessments right after Venue Assessments; /assessments* lights it
+  const crm = NAV.find((e) => e.kind === "group" && e.key === "crm");
+  const keys = crm && crm.kind === "group" ? crm.children.map((c) => c.key) : [];
+  const at = keys.indexOf("field");
+  ok(at >= 0 && keys[at + 1] === "assessments", "nav: Assessments sits directly after Venue Assessments in the Customers group");
+  const item = crm && crm.kind === "group" ? crm.children.find((c) => c.key === "assessments") : undefined;
+  ok(item?.label === "Assessments" && item?.href === "/assessments", "nav: the item is { key assessments, label Assessments, href /assessments }");
+  ok(NAV.filter((e) => e.kind === "group").every((g) => g.kind !== "group" || g.key !== "field"), "nav: there is no Field group");
+  ok(["/assessments", "/assessments/AS-1001", "/assessments/findings", "/assessments/new", "/assessments/pick-lists"].every((p) => activeKeyFor(p) === "assessments") && activeKeyFor("/venue-assessments") === "field", "nav: every /assessments* route lights Assessments; /venue-assessments still lights Venue Assessments");
+  ok(parentGroupOf("assessments") === "crm", "nav: the Assessments child lights the Customers group");
+
+  // badge: open (not closed, not voided) findings rated immediate
+  const fx = (o: Partial<Finding>) => ({ rating: "immediate" as const, status: "open" as const, ...o });
+  ok(immediateOpenCount([fx({}), fx({ status: "triaged" }), fx({ status: "closed" }), fx({ voided: { by: "u", at: 1, reason: "x" } }), fx({ rating: "needs" }), fx({ rating: "good" })]) === 2, "badge: counts immediate findings that are neither closed nor voided");
+  ok(immediateOpenCount([]) === 0 && isOpenFinding({ status: "scheduled" }) && !isOpenFinding({ status: "closed" }), "badge: empty is 0; open means not closed");
+
+  // ⌘K mapping
+  const names = { customer: "Mercy Prep", venue: "Lincoln Auditorium" };
+  const r = assessmentSearchResult({ id: "AS-1001", status: "onsite" }, names);
+  ok(r.title === "AS-1001 · Mercy Prep" && r.sub === "Lincoln Auditorium · On site" && r.href === "/assessments/AS-1001" && r.letter === "A" && r.color === "#7a4f1f" && r.id === "AS-1001", "search: an assessment reads \"AS-1001 · customer\" / \"venue · status\" and opens its editor");
+  ok(assessmentSearchResult({ id: "AS-1002", status: "draft", spaceLabel: "Stage" }, names).sub === "Lincoln Auditorium — Stage · Draft", "search: a space label follows the venue");
+  ok(matchesAssessment("as-1001", { id: "AS-1001" }, names) && matchesAssessment("mercy", { id: "AS-1" }, names) && matchesAssessment("lincoln", { id: "AS-1" }, names) && matchesAssessment("on site", { id: "AS-1", status: "onsite" }, names) && !matchesAssessment("zzz", { id: "AS-1", status: "draft" }, names), "search: an assessment matches its id, customer, venue, status and space");
+  const fnd = { key: "fd_0123456789abcdef", printedId: "MPSD-LIN-RIG-003", companyCode: "MPSD", siteCode: "LIN", category: "RIG" as const, description: "Fly line 7 is frayed at the termination.", voided: undefined };
+  const fr = findingSearchResult(fnd);
+  ok(fr.title === "MPSD-LIN-RIG-003" && fr.sub === "Fly line 7 is frayed at the termination." && fr.href === "/assessments/findings?focus=fd_0123456789abcdef" && fr.letter === "F" && fr.color === "#7a4f1f", "search: a finding reads its printed id / description and opens the register on it (?focus=)");
+  ok(findingSearchResult({ ...fnd, printedId: null }).title === "MPSD-LIN-RIG-…", "search: an unnumbered finding shows its pending label");
+  ok(findingSearchResult({ ...fnd, description: "x".repeat(200) }).sub.length === 80 && findingSearchResult({ ...fnd, description: "x".repeat(200) }).sub.endsWith("…"), "search: a long description is cut to 80 characters");
+  ok(findingSearchResult({ ...fnd, voided: { by: "u", at: 1, reason: "dup" } }).sub.startsWith("Voided — ") && findingSearchResult({ ...fnd, voided: { by: "u", at: 1, reason: "dup" }, description: "y".repeat(200) }).sub.length === 80, "search: a voided finding is marked and still ≤ 80 characters");
+  ok(matchesFinding("mpsd-lin", fnd) && matchesFinding("frayed", fnd) && !matchesFinding("zzz", fnd), "search: a finding matches its printed id and description (case-insensitive)");
+
+  // cards
+  const f2 = (rating: Finding["rating"], status: Finding["status"], voided = false) => ({ rating, status, ...(voided ? { voided: { by: "u", at: 1, reason: "x" } } : {}) });
+  const oc = openRatingCounts([f2("immediate", "open"), f2("immediate", "closed"), f2("needs", "quoted"), f2("needs", "open", true), f2("good", "open")]);
+  ok(oc.total === 3 && oc.counts.map((c) => `${c.rating}:${c.n}`).join() === "immediate:1,needs:1,good:1" && oc.counts[0].label === "Immediate attention" && oc.counts[1].label === "Needs attention" && oc.counts[2].label === "Good", "cards: open counts by rating skip closed and voided, in the register's order, with the brief's labels");
+  const rows = assessmentCardRows(
+    [
+      { id: "AS-1001", visitType: "condition", status: "completed", visitDate: 100, siteId: "s1", customerId: "c1" },
+      { id: "AS-1003", visitType: "condition", status: "draft", visitDate: 300, siteId: "s2", customerId: "c1", spaceLabel: "Pit" },
+      { id: "AS-1002", visitType: "condition", status: "onsite", visitDate: 300, siteId: "s1", customerId: "c1" },
+    ],
+    { showVenue: true, siteNames: new Map([["s1", "Hall"], ["s2", "Gym"]]), openCounts: new Map([["AS-1003", 2], ["AS-1002", 1]]) },
+  );
+  ok(rows.map((x) => x.id).join() === "AS-1003,AS-1002,AS-1001", "cards: assessments list newest visit first (ties: newest id)");
+  ok(rows[0].sub === "Gym — Pit · Condition assessment · Draft · 2 open findings" && rows[1].sub === "Hall · Condition assessment · On site · 1 open finding" && rows[2].sub === "Hall · Condition assessment · Completed" && rows[0].href === "/assessments/AS-1003", "cards: a row names the venue (company card), visit type, status and open findings");
+  ok(assessmentCardRows([{ id: "AS-1", visitType: "condition", status: "draft", visitDate: 1, siteId: "s1", customerId: "c1", spaceLabel: "Pit" }])[0].sub === "Pit · Condition assessment · Draft", "cards: a venue card leaves the venue out and keeps the space");
+  const pq = [...allQuestions(ASSESSMENT_DEF).values()].filter((x) => x.q.profile);
+  ok(pq.length >= 2, "cards: precondition — the definition has profile questions");
+  const [p1, p2] = pq;
+  const facts = { [p1.q.key]: { v: p1.q.type === "yesno" ? "yes" : p1.q.type === "number" ? 7 : "x", at: Date.UTC(2026, 9, 13, 18), from: "AS-1001" }, [p2.q.key]: { v: "", at: 1, from: "AS-1001" }, "not.a.question": { v: "z", at: 1, from: "AS-1" } };
+  const pf = profileFactRows(facts, ASSESSMENT_DEF);
+  ok(pf.length === 1 && pf[0].key === p1.q.key && pf[0].label === p1.q.label && pf[0].from === "AS-1001", "cards: profile facts list only profile questions with a non-empty value, labelled");
+  ok(profileFactRows(undefined, ASSESSMENT_DEF).length === 0 && profileFactRows({}, ASSESSMENT_DEF).length === 0, "cards: no profile → no rows (the card hides)");
+  ok(confirmedLine("AS-1001", Date.UTC(2026, 9, 13, 18)) === "confirmed on AS-1001 · Oct 13, 2026" && chicagoDay(0) === "" && confirmedLine("", Date.UTC(2026, 9, 13, 18)) === "confirmed · Oct 13, 2026", "cards: \"confirmed on AS-xxxx · date\"");
+  ok(registerHref({ siteId: "st-1" }) === "/assessments/findings?venue=st-1" && registerHref({ customerId: "c 1" }, "immediate") === "/assessments/findings?customer=c+1&rating=immediate" && registerHref({}) === "/assessments/findings", "cards: count chips link the filtered register");
+  ok(startHref({ siteId: "st-1" }) === "/assessments/new?site=st-1" && startHref({ visitId: "SV-1", customerId: "c1", siteId: "st-1" }) === "/assessments/new?visit=SV-1" && startHref({ customerId: "c1" }) === "/assessments/new?company=c1" && startHref({ leadId: "L-1" }) === "/assessments/new?lead=L-1" && startHref({ projectId: "P-1" }) === "/assessments/new?project=P-1", "cards: Start assessment hrefs (visit wins; company / site / lead / project)");
+
+  // pick-list admin
+  const extras = { [Object.keys(ASSESSMENT_DEF.pickLists)[0]]: [{ value: "a_b", label: "A b" }, { value: "old", label: "Old", retired: true }] };
+  const pl = pickListAdminRows(ASSESSMENT_DEF, extras);
+  const ids = Object.keys(ASSESSMENT_DEF.pickLists);
+  ok(pl.length === ids.length && pl.map((x) => x.id).join() === [...ids].sort().join(), "pick lists: one row per code list, sorted by id");
+  const first = pl.find((x) => x.id === ids[0])!;
+  ok(first.builtIn.length === ASSESSMENT_DEF.pickLists[ids[0]].length && first.added.length === 2 && first.added[0].retired === false && first.added[1].retired === true && pl.filter((x) => x.id !== ids[0]).every((x) => x.added.length === 0), "pick lists: built-in values listed, added values carry their retired flag");
+  ok(pl.some((x) => x.usedBy.length > 0) && listTitle("arena_bowl") === "Arena bowl" && listTitle("venue-types") === "Venue types", "pick lists: a list names the questions that use it; titles read plainly");
+
+  // go-live wipe: assessments + findings are demo data; the venue profile is authored knowledge
+  ok(DEMO_COLLECTIONS.includes("assessments" as never) && DEMO_COLLECTIONS.includes("findings" as never), "go-live: assessments and findings are wiped with the demo data");
+  ok(CONFIG_COLLECTIONS.includes("venue_profiles" as never) && !DEMO_COLLECTIONS.includes("venue_profiles" as never), "go-live: venue_profiles is config, kept through the wipe");
+
+  // Task 9 carry-over 3: a repair quote covers every venue it was saved with
+  const rq = { locationId: "loc1", repair: { venues: [{ id: "loc1", label: "A" }, { id: "loc2", label: "B" }, { id: null, label: "C" }] } };
+  ok(quoteVenueIds(rq).join() === "loc1,loc2" && quoteCoversVenue(rq, "loc2") && quoteCoversVenue(rq, "loc1") && !quoteCoversVenue(rq, "loc3"), "link quote: a repair quote covers its locationId and every repair.venues[].id");
+  ok(quoteCoversVenue({ locationId: "loc1" }, "loc1") && !quoteCoversVenue({ locationId: "loc1" }, "loc2") && quoteCoversVenue({}, "loc9") && quoteCoversVenue({ locationId: null, repair: null }, "loc9") && quoteCoversVenue({ repair: { venues: [{ id: "x" }] } }, "x"), "link quote: a quote naming no venue links anywhere; a venue-less repair falls back to its venues");
+
+  // source pins for the wiring that has no pure seam
+  const read = (f: string) => readFileSync(join(ROOT, f), "utf8");
+  const repairActions = read("src/app/(app)/repairs/quote/actions.ts");
+  const approve = repairActions.slice(repairActions.indexOf("export async function approveRepairQuote"));
+  ok(/persist\(formData, note\)/.test(approve) && /&approved=1" \+\s*\(note\.findingNote \? "&findingnote=" \+ encodeURIComponent\(note\.findingNote\)/.test(approve), "carry-over: approveRepairQuote passes a notice sink to persist and appends &findingnote= to its approved redirect");
+  ok(/quoteCoversVenue\(q, docLocId\(site\)\)/.test(read("src/app/(app)/assessments/findings/actions.ts")), "carry-over: Link existing quote checks the quote's venues (repair.venues included)");
+  ok(/assessments: immediateOpenCount\(immediateFindings\)/.test(read("src/lib/nav-counts.ts")) && /listFindings\(\{ rating: \["immediate"\] \}\)/.test(read("src/lib/nav-counts.ts")), "nav badge: key assessments = immediate open findings from one listFindings read");
+  const search = read("src/app/api/search/route.ts");
+  ok(/searchDocs\("assessments", q, CANDIDATES\)/.test(search) && /searchDocs\("findings", q, CANDIDATES\)/.test(search) && /"Assessments"/.test(search) && /"Findings"/.test(search), "search route: assessments and findings join the ⌘K Promise.all and add their groups");
+  const venuePage = read("src/app/(app)/venues/[id]/page.tsx");
+  ok(venuePage.indexOf("<DocumentsCard") < venuePage.indexOf("<VenueProfileCard") && venuePage.indexOf("<VenueProfileCard") < venuePage.indexOf("<AssessmentsCard") && venuePage.indexOf("<AssessmentsCard") < venuePage.indexOf("<FindingsCard"), "venue page: Venue profile, Assessments and Findings follow the Documents card, in that order");
+  const companyPage = read("src/app/(app)/companies/[id]/page.tsx");
+  ok(companyPage.indexOf("No site surveys yet.") < companyPage.indexOf("<AssessmentsCard") && companyPage.indexOf("<AssessmentsCard") < companyPage.indexOf("<FindingsCard") && /assessments\/new\?visit=/.test(companyPage), "company page: Assessments + Findings follow Site surveys; each site visit row links Start assessment");
+  ok(/assessments\/new\?visit=/.test(read("src/app/(app)/venue-assessments/visit-requests.tsx")), "visit queue: a row links Start assessment");
+  ok(/AssessmentsCard leadId=/.test(read("src/app/(app)/leads/page.tsx")) && /AssessmentsCard projectId=/.test(read("src/app/(app)/projects/[id]/page.tsx")), "lead drawer and project page list the assessments linked to them");
+  ok(/can\("manage_users", user\.roles\)/.test(read("src/app/(app)/assessments/page.tsx")) && /requirePerm\("manage_users"\)/.test(read("src/app/(app)/assessments/pick-lists/page.tsx")), "pick lists: the button and the page are manage_users only");
+}
+
+async function task11DbChecks(ok: Ok) {
+  const db = await getDb();
+  const assessments: string[] = [];
+  const kk = (n: number) => `fd_t11${String(n).padStart(13, "0")}`;
+  const U = { id: "u1", name: "Test Estimator" };
+  try {
+    await assessIdentityFixtures();
+    const { co1, co2, site1, site2, site3 } = ASSESS_FIX;
+    const mkA = async (customerId: string, siteId: string, extra: { leadId?: string; projectId?: string } = {}) => {
+      const a = await createAssessment({ visitType: "condition", customerId, siteId, visitDate: Date.UTC(2026, 9, 13), assessorId: "u1", ...extra }, "u1");
+      assessments.push(a.id);
+      registerFixture("assessments", a.id);
+      return a;
+    };
+    const a1 = await mkA(co1, site1, { leadId: "L-t11a", projectId: "P-t11a" });
+    const a2 = await mkA(co1, site2, { leadId: "L-t11b" });
+    const a3 = await mkA(co2, site3);
+    const imm = { recommendedAction: "Take the line out of service", photoIds: ["ph_t11"], immediate: { hazardContactNotified: false, lockout: "none" as const } };
+    const mk = (n: number, a: Assessment, o: Partial<Finding> = {}) => saveFinding({ key: kk(n), customerId: a.customerId, siteId: a.siteId, assessmentId: a.id, category: "RIG", rating: "needs", description: `T11 finding ${n}`, ...o }, U);
+    const saved = [
+      await mk(1, a1, { rating: "immediate", ...imm }),
+      await mk(2, a2, { rating: "immediate", ...imm }),
+      await mk(3, a1),
+      await mk(4, a3, { rating: "immediate", ...imm }),
+      await mk(5, a1, { rating: "immediate", ...imm }),
+    ];
+    ok(saved.every((x) => x.ok), "t11 db: fixtures — findings on three venues, four rated immediate");
+    if (!saved.every((x) => x.ok)) return;
+    await voidFinding(kk(5), "Entered in error", U);
+    const mine = (list: { key: string }[]) => list.filter((f) => f.key.startsWith("fd_t11")).map((f) => f.key).sort();
+
+    // the SQL-narrowed reads return exactly what the JS filters would
+    const all = await listFindings();
+    const same = async (f: Parameters<typeof listFindings>[0], pick: (x: Finding) => boolean, label: string) =>
+      ok(JSON.stringify(await listFindings(f)) === JSON.stringify(all.filter(pick)), `t11 db: listFindings(${label}) equals the unfiltered read filtered in JS`);
+    await same({ rating: ["immediate"] }, (x) => x.rating === "immediate" && !x.voided, "rating immediate");
+    await same({ rating: ["immediate", "needs"] }, (x) => (x.rating === "immediate" || x.rating === "needs") && !x.voided, "rating immediate+needs");
+    await same({ siteId: site1 }, (x) => x.siteId === site1 && !x.voided, "siteId");
+    await same({ customerId: co1 }, (x) => x.customerId === co1 && !x.voided, "customerId");
+    await same({ assessmentId: a2.id }, (x) => x.assessmentId === a2.id && !x.voided, "assessmentId");
+    await same({ customerId: co1, rating: ["needs"] }, (x) => x.customerId === co1 && x.rating === "needs" && !x.voided, "customerId + rating");
+    ok((await listFindings({ siteId: site1, includeVoided: true })).filter((f) => f.key.startsWith("fd_t11")).length === 3 && (await listFindings({ siteId: site1 })).filter((f) => f.key.startsWith("fd_t11")).length === 2, "t11 db: includeVoided brings the voided finding back")
+
+    // the badge: immediate, open, not voided
+    const badge = await listFindings({ rating: ["immediate"] });
+    ok(mine(badge).join() === [kk(1), kk(2), kk(4)].join() && immediateOpenCount(badge.filter((f) => f.key.startsWith("fd_t11"))) === 3, "t11 db: the badge read has the three live immediate findings (the voided one is out)");
+
+    // listAssessments narrowing
+    const allA = await listAssessments();
+    const sameA = async (f: Parameters<typeof listAssessments>[0], pick: (x: Assessment) => boolean, label: string) =>
+      ok(JSON.stringify(await listAssessments(f)) === JSON.stringify(allA.filter(pick)), `t11 db: listAssessments(${label}) equals the unfiltered read filtered in JS`);
+    await sameA({ siteId: site1 }, (x) => x.siteId === site1, "siteId");
+    await sameA({ customerId: co1 }, (x) => x.customerId === co1, "customerId");
+    await sameA({ leadId: "L-t11a" }, (x) => x.leadId === "L-t11a", "leadId");
+    await sameA({ projectId: "P-t11a" }, (x) => x.projectId === "P-t11a", "projectId");
+    await sameA({ customerId: co1, status: "draft" }, (x) => x.customerId === co1 && x.status === "draft", "customerId + status");
+    ok((await listAssessments({ leadId: "L-t11a" })).map((x) => x.id).join() === a1.id && (await listAssessments({ leadId: "L-t11b" })).map((x) => x.id).join() === a2.id && (await listAssessments({ projectId: "P-t11a" })).map((x) => x.id).join() === a1.id && (await listAssessments({ leadId: "L-none" })).length === 0, "t11 db: an assessment shows under the lead and project it was created with");
+    ok((await listAssessments({ customerId: co2 })).map((x) => x.id).join() === a3.id, "t11 db: the company card's read is the customer's assessments");
+
+    // ⌘K: the candidate scan finds an assessment by id and a finding by printed id, and the mapping opens them
+    const f1 = (await getFinding(kk(1)))!;
+    const hitsF = (await searchDocs("findings", f1.printedId!.toLowerCase(), 100)).map((d) => normalizeFindingForTest(d));
+    ok(hitsF.some((f) => f.key === kk(1)) && hitsF.filter((f) => matchesFinding(f1.printedId!.toLowerCase(), f)).length >= 1, "t11 db: ⌘K finds a finding by its printed id");
+    const hitA = (await searchDocs("assessments", a2.id.toLowerCase(), 100)).find((d) => d.id === a2.id);
+    ok(!!hitA && assessmentSearchResult({ id: a2.id, status: "draft" }, { customer: "Assess Co One", venue: "Assess Gym" }).href === `/assessments/${a2.id}`, "t11 db: ⌘K finds an assessment by its id");
+    const hitTitle = findingSearchResult(f1);
+    ok(hitTitle.title === f1.printedId && hitTitle.href === `/assessments/findings?focus=${kk(1)}`, "t11 db: the finding result titles the printed id and focuses its key");
+
+    // the venue profile card reads what a completed assessment confirmed
+    const pkey = [...allQuestions(ASSESSMENT_DEF).values()].find((x) => x.q.profile && x.q.type === "yesno")?.q.key;
+    if (pkey) {
+      await writeProfileFacts(site1, co1, { [pkey]: "yes" }, a1.id);
+      const rows = profileFactRows((await getVenueProfile(site1))?.facts, ASSESSMENT_DEF);
+      ok(rows.length === 1 && rows[0].key === pkey && rows[0].from === a1.id && rows[0].value === "Yes", "t11 db: the venue profile card lists the confirmed fact and the assessment that confirmed it");
+      ok(profileFactRows((await getVenueProfile(site2))?.facts, ASSESSMENT_DEF).length === 0, "t11 db: a venue with no profile shows no rows");
+    }
+
+    // pick lists: add / duplicate / retire / restore (the admin page's own calls)
+    const listId = Object.keys(ASSESSMENT_DEF.pickLists)[0];
+    const label = `T11 choice ${Date.now()}`;
+    const added = await addPicklistValue(listId, label);
+    ok(added.ok, "t11 db: Add puts a new value on a list");
+    const dupBuiltIn = await addPicklistValue(listId, ASSESSMENT_DEF.pickLists[listId][0].label);
+    ok(!dupBuiltIn.ok, "t11 db: Add refuses a duplicate of a built-in value");
+    const dupAdded = await addPicklistValue(listId, label);
+    ok(!dupAdded.ok, "t11 db: Add refuses a duplicate of an added value");
+    const slug = slugValueForTest(label);
+    await setPicklistRetired(listId, slug, true);
+    let row = pickListAdminRows(ASSESSMENT_DEF, await getPicklistExtras()).find((x) => x.id === listId)!;
+    ok(row.added.find((o) => o.value === slug)?.retired === true, "t11 db: Retire marks an added value retired");
+    await setPicklistRetired(listId, slug, false);
+    row = pickListAdminRows(ASSESSMENT_DEF, await getPicklistExtras()).find((x) => x.id === listId)!;
+    ok(row.added.find((o) => o.value === slug)?.retired === false && row.builtIn.length === ASSESSMENT_DEF.pickLists[listId].length, "t11 db: Restore brings it back; built-in values are untouched");
+  } finally {
+    await db.delete(DOC_TABLES.findings).where(like(DOC_TABLES.findings.id, "fd_t11%"));
+    if (assessments.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, assessments));
+    await db.delete(DOC_TABLES.venue_profiles).where(like(DOC_TABLES.venue_profiles.id, "TESTassess:%"));
+    await removeTestPicklistValues();
+    await dropAssessIdentityFixtures();
+  }
+}
+
+const normalizeFindingForTest = (d: unknown): Finding => normalizeFinding(d);
+const slugValueForTest = (s: string) => slugValue(s);
+async function removeTestPicklistValues() {
+  // the admin blob is shared: take the T11 additions back out so a re-run starts clean
+  const cur = await getPicklistExtras();
+  const next: Record<string, unknown> = {};
+  for (const [id, list] of Object.entries(cur)) next[id] = list.filter((o) => !o.label.startsWith("T11 choice"));
+  await setBlob(ASSESSMENT_PICKLISTS_BLOB, next);
 }
 
 if (process.argv[1] && /test-assessments\.ts$/.test(process.argv[1])) {

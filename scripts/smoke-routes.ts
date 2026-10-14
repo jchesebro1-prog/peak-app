@@ -139,6 +139,7 @@ const ROUTES = [
   "/assessments", // #337 assessments engine
   "/assessments/new",
   "/assessments/findings", // #337 Task 9: the findings register
+  "/assessments/pick-lists", // #337 Task 11: the pick-list admin (manage_users)
   "/field-work",
   "/design-studio/lineset",
   "/design-studio/motors",

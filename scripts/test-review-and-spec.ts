@@ -2046,17 +2046,17 @@ ok(
 // Opportunities joined as the first child (#18) — six children as of plan 02.
 const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
-  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 9),
-  "CRM has nine children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122), Rewards added (#282)",
+  !!(d99Sales && d99Sales.kind === "group" && d99Sales.children.length === 10),
+  "CRM has ten children — Quotes and Reviews moved to EST (D117), Opportunities added (#18), My Leads added (#22), Vendors added (#122), Rewards added (#282), Assessments added (#337)",
 );
 ok(
   !!(
     d99Sales &&
     d99Sales.kind === "group" &&
     d99Sales.children.map((c) => c.key).join(",") ===
-      "opportunities,leads,myleads,companies,rewards,vendors,people,venues,field"
+      "opportunities,leads,myleads,companies,rewards,vendors,people,venues,field,assessments"
   ),
-  "CRM children are opportunities, leads, myleads, companies, rewards, vendors, people, venues, field in order",
+  "CRM children are opportunities, leads, myleads, companies, rewards, vendors, people, venues, field, assessments in order",
 );
 ok(
   parentGroupOf("companies") === "crm" &&

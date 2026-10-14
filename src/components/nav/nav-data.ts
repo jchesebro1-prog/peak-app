@@ -94,6 +94,7 @@ export const NAV: NavEntry[] = [
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
       { key: "field", label: "Venue Assessments", href: "/venue-assessments" },
+      { key: "assessments", label: "Assessments", href: "/assessments" }, // #337 — the assessments engine
     ],
   },
   {
@@ -181,6 +182,7 @@ export function activeKeyFor(pathname: string): string {
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/venue-assessments": "field",
+    "/assessments": "assessments", // #337 — every /assessments/* route lights the Assessments child
     "/catalog": "catalog", // #213 — lights the Catalog child of Estimating
     "/reports": "reports",
     "/templates": "settings",

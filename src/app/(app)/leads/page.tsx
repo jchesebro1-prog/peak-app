@@ -32,6 +32,7 @@ import BoardView from "@/components/board/board-view";
 import WorklistRow from "./worklist-row";
 import LeadDrawer from "./lead-drawer";
 import { MeetingsCard } from "@/components/meetings/meetings-card";
+import { AssessmentsCard } from "@/components/assessments/assessment-cards";
 import { OwnerDot } from "./avatar";
 import { setStageAction } from "./actions";
 import { getSettings } from "@/lib/settings";
@@ -851,7 +852,10 @@ export default async function LeadsPage({
           canDelete={canDelete}
           meetingsSlot={
             drawerMode === "detail" && leadRec ? (
-              <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />
+              <>
+                <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />
+                <AssessmentsCard leadId={leadRec.id} compact />
+              </>
             ) : null
           }
         />

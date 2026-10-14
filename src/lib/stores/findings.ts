@@ -4,7 +4,7 @@
    transitionFinding / linkQuote; findings are voided, never deleted. Server-only. */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { ASSESSMENT_LOCK_NAMESPACE, getDb, inTransaction, withAdvisoryLock } from "@/db";
-import { listDocs } from "@/db/doc-store";
+import { listDocs, listDocsByField } from "@/db/doc-store";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { suggestCompanyCode, suggestSiteCode, withCollisionSuffix } from "@/lib/assessments/codes";
 import type { Category, Rating } from "@/lib/assessments/defs/types";
@@ -176,7 +176,14 @@ export async function getFindings(keys: readonly string[]): Promise<Map<string, 
 
 /** Voided findings are left out unless `includeVoided`. Sorted by printed id (unnumbered last), then key. */
 export async function listFindings(f: { customerId?: string; siteId?: string; assessmentId?: string; status?: FindingStatus[]; category?: Category[]; rating?: Rating[]; includeVoided?: boolean } = {}): Promise<Finding[]> {
-  return (await listDocs("findings"))
+  // Narrowed in SQL by the most selective filter given (doc->>field IN …) instead of reading every finding: the nav
+  // badge asks for the Immediate ones on every page. The JS filters below still apply, so the result is identical.
+  const docs = f.assessmentId ? await listDocsByField("findings", "assessmentId", [f.assessmentId])
+    : f.siteId ? await listDocsByField("findings", "siteId", [f.siteId])
+    : f.customerId ? await listDocsByField("findings", "customerId", [f.customerId])
+    : f.rating?.length ? await listDocsByField("findings", "rating", f.rating)
+    : await listDocs("findings");
+  return docs
     .map((d) => normalizeFinding(d, d.id))
     .filter((x) =>
       (f.includeVoided || !x.voided) &&

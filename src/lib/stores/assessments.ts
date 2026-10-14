@@ -198,10 +198,17 @@ export async function getAssessment(id: string): Promise<Assessment | null> {
 }
 
 /** Newest visit date first (then newest id). */
-export async function listAssessments(f: { customerId?: string; siteId?: string; status?: string } = {}): Promise<Assessment[]> {
-  const all = (await listDocs("assessments")).map(normalizeAssessment);
+export async function listAssessments(f: { customerId?: string; siteId?: string; leadId?: string; projectId?: string; status?: string } = {}): Promise<Assessment[]> {
+  // Narrowed in SQL by the most selective filter given (the cards on venue / company / lead / project pages); the
+  // JS filters still apply, so the result is the same as reading everything.
+  const docs = f.siteId ? await listDocsByField("assessments", "siteId", [f.siteId])
+    : f.leadId ? await listDocsByField("assessments", "leadId", [f.leadId])
+    : f.projectId ? await listDocsByField("assessments", "projectId", [f.projectId])
+    : f.customerId ? await listDocsByField("assessments", "customerId", [f.customerId])
+    : await listDocs("assessments");
+  const all = docs.map(normalizeAssessment);
   return all
-    .filter((a) => (!f.customerId || a.customerId === f.customerId) && (!f.siteId || a.siteId === f.siteId) && (!f.status || a.status === f.status))
+    .filter((a) => (!f.customerId || a.customerId === f.customerId) && (!f.siteId || a.siteId === f.siteId) && (!f.leadId || a.leadId === f.leadId) && (!f.projectId || a.projectId === f.projectId) && (!f.status || a.status === f.status))
     .sort((a, b) => b.visitDate - a.visitDate || b.id.localeCompare(a.id, undefined, { numeric: true }));
 }
 
