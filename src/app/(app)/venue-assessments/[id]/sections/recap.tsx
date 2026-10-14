@@ -1,6 +1,6 @@
 /* Customer recap (#342 A7) — the end-of-visit read-back: per discipline in scope, what the customer said they're
    interested in and their goals, in larger type so the rep can read it aloud. Read-only. */
-import { recapFor } from "@/lib/survey-flow";
+import { recapFor, recapScopeText } from "@/lib/survey-flow";
 import type { Draft } from "./types";
 
 export function RecapSection({ draft }: { draft: Draft }) {
@@ -16,7 +16,7 @@ export function RecapSection({ draft }: { draft: Draft }) {
           <div style={{ fontSize: 16, fontWeight: 650, marginBottom: 6 }}>{e.label}</div>
           {e.scopes.length > 0 || e.other ? (
             <div style={{ fontSize: 16, lineHeight: 1.5, color: "#16181d" }}>
-              Interested in: {[...e.scopes.filter((s) => s !== "Other"), e.other ? `Other — ${e.other}` : ""].filter(Boolean).join(", ")}
+              Interested in: {recapScopeText(e)}
             </div>
           ) : (
             <div style={{ fontSize: 14, color: "#9aa0ab" }}>No scopes of interest captured.</div>

@@ -72,6 +72,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#342 A7: each entry carries scopes, Other text and goal lines");
   ok(recapFor({ disciplines: { curtain: { scope: ["Flame test"] }, av: {} } }).map((e) => e.disc).join() === "curtain",
     "#342 A7: with scope unset the recap lists disciplines that have scopes or goals");
+  const rcLong = recapFor({ scope: ["rigging"], disciplines: { rigging: { goals: "x".repeat(1200) } } });
+  ok(rcLong[0].goals.length === 1 && rcLong[0].goals[0].length === 1000, "#342 A7: the recap reads sanitized goals (capped like the Estimator's)");
   ok(recapScopeText(rc[1]) === "Other: LED retrofit study" && recapScopeText(rc[0]) === "New grid", "#342 A7: recap scope text");
 
   /* ---- Task 2: migration + Tier 1 ---- */
@@ -91,6 +93,16 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   const a5 = m({ systemsState: { rigging: { installed: "yes", desc: "" } } });
   ok(JSON.stringify(a5.disciplines?.rigging?.present) === JSON.stringify([presentOptionsFor("rigging", "theatre")[0]]) && (a5.disciplines?.rigging?.present as string[] | undefined)?.[0] === "Counterweight",
     "#342: the systemsState fold still seeds Present (now the new first option)");
+  const a5b = m({ measurements: { rigType: "Hemp" }, systemsState: { rigging: { installed: "yes", desc: "" } } });
+  ok(JSON.stringify(a5b.disciplines?.rigging?.present) === '["Hemp"]', "#342 R3: Beams' rig type beats the systemsState fold's first option");
+  const a5c = m({ measurements: { rigType: "Hemp" }, disciplines: { rigging: { present: [] } } });
+  ok(JSON.stringify(a5c.disciplines?.rigging?.present) === '["Hemp"]', "#342 R3: an empty Present counts as unanswered and copies up");
+  const a5d = m({ disciplines: { rigging: { present: [], counterweight: true } } });
+  ok(JSON.stringify(a5d.disciplines?.rigging?.present) === '["Counterweight"]', "#342 R3: an empty Present copies up from the old Counterweight check");
+  const sv1 = m({ measurements: { rigType: "None existing" }, disciplines: { rigging: { counterweight: true } } });
+  const sv2 = m({ measurements: { rigType: "None existing" }, disciplines: { rigging: { counterweight: true, present: ["Counterweight"] } } });
+  ok(JSON.stringify(sv1.legacyNotes) === JSON.stringify(sv2.legacyNotes) && (sv1.legacyNotes || []).some((n) => n.section === "mBeams" && n.text === "None existing"),
+    "#342 R1: Older notes are the same whether or not the record was saved (a dropped rig type keeps its note)");
   const a6 = m({ disciplines: { lighting: { goals: "Brighter wash" }, curtain: { present: ["None"] } } });
   ok(JSON.stringify(a6.scope) === '["lighting"]', "#342 R2: scope seeds from disciplines with data (None-only doesn't count)");
   ok(m({}).scope === undefined && JSON.stringify(m({ scope: [] }).scope) === "[]", "#342 R2: nothing to seed → scope stays unset; an answered scope is kept");
@@ -267,6 +279,17 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
   if (r2.ok) { registerFixture("site_visits", r2.visitId); registerFixture("surveys", r2.surveyId); }
   const s2 = r2.ok ? await S.get(r2.surveyId) : null;
   ok(!!s2 && s2.assignedTo === "Office Person", "#342 A4: with no assignee the survey defaults to whoever requested it");
+
+  /* R1/R2: clearing a scope stores no scope key, and a save never persists the derived legacyNotes */
+  const { getDoc } = await import("../src/db/doc-store");
+  const made = await S.create({ owner: "Sam Surveyor" } as never);
+  registerFixture("surveys", made.id);
+  await S.update(made.id, { scope: ["rigging"] } as never);
+  await S.update(made.id, { scope: undefined } as never);
+  const raw = (await getDoc("surveys", made.id)) as Record<string, unknown> | null;
+  const back = await S.get(made.id);
+  ok(!!raw && !("scope" in raw) && !("legacyNotes" in raw) && !!back && Array.isArray(back.legacyNotes),
+    "#342 R1/R2: clearing scope leaves no scope key and a save never stores legacyNotes (get() still derives them)");
 }
 
 if (process.argv[1] && /test-va-notes\.ts$/.test(process.argv[1])) {

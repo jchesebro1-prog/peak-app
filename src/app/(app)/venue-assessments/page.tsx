@@ -119,7 +119,7 @@ export default async function FieldSurveyPage({
     ? (stageParam as Seg)
     : "all";
   const mine = one(sp.mine) === "1";
-  const tagFilter = (Array.isArray(sp.tag) ? sp.tag : sp.tag ? [sp.tag] : []).filter((t) => tags.some((x) => x.id === t));
+  const tagFilter = (Array.isArray(sp.tag) ? sp.tag : sp.tag ? [sp.tag] : []).filter((t) => activeSurveyTags(tags).some((x) => x.id === t));
 
   const me = user.name;
   // #34 — the open-visit queue: unclaimed requests for EVERYONE, plus my

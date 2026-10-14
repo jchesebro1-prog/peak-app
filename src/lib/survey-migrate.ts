@@ -56,7 +56,7 @@ const CONDITION_TO_SYSTEM: Record<string, string> = {
   "Motorized hoists present": "Motorized",
 };
 
-/** R3: one rigging-system answer at disciplines.rigging.present. Relabels old options; when never answered,
+/** R3: one rigging-system answer at disciplines.rigging.present. Relabels old options; when never answered (absent or an empty list),
  *  copies up from Beams' Existing rig type, the old Counterweight check and the old condition chips. */
 export function stepRigSystem(s: MigratableSurvey): void {
   const rig = s.disciplines?.rigging;
@@ -64,7 +64,7 @@ export function stepRigSystem(s: MigratableSurvey): void {
   const fromType = RIG_TYPE_TO_SYSTEM[rigTypeRaw] ?? "";
   const cwCheck = rig?.counterweight === true;
 
-  if (rig && Array.isArray(rig.present)) {
+  if (rig && Array.isArray(rig.present) && rig.present.length > 0) {
     const present = dedupe(rig.present.map((p) => RIG_RELABEL[String(p)] ?? String(p)));
     rig.present = present;
     if (rigTypeRaw && !(fromType && present.includes(fromType))) {
@@ -76,11 +76,15 @@ export function stepRigSystem(s: MigratableSurvey): void {
     return;
   }
 
-  if (rigTypeRaw && !fromType) addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #342)", text: rigTypeRaw });
   let seed = dedupe(
     [fromType, cwCheck ? "Counterweight" : "", ...(s.conditions || []).map((c) => CONDITION_TO_SYSTEM[c] ?? "")].filter(Boolean)
   );
   if (seed.length > 1) seed = seed.filter((x) => x !== "None");
+  /* Same rule as the answered branch, so the notes don't depend on whether the record was saved: a rig type the
+     seed doesn't carry (unmapped, or "None existing" dropped for another source) stays visible. */
+  if (rigTypeRaw && !(fromType && seed.includes(fromType))) {
+    addLegacyNote(s, { section: "mBeams", label: "Existing rig type (before #342)", text: rigTypeRaw });
+  }
   if (!seed.length) return;
   const d = (s.disciplines ||= {});
   d.rigging = { ...(rig || {}), present: seed };

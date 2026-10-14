@@ -41,25 +41,41 @@ export function KillQuestions({
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {items.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => (item.section === "tier1" ? undefined : onJump(item.section))}
-            title={item.done ? "Answered" : item.section === "tier1" ? "Answer it below" : "Missing — tap to jump to the field"}
-            style={{
-              display: "flex", alignItems: "center", gap: 7,
-              fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600,
-              padding: "9px 13px", borderRadius: 20, cursor: item.section === "tier1" ? "default" : "pointer", minHeight: 40,
-              border: `1px solid ${item.done ? "#cce9da" : "#f0e2bd"}`,
-              background: item.done ? "#eaf6ef" : "#fbf3dd",
-              color: item.done ? "#1f7a52" : "#8a6d1f",
-            }}
-          >
-            <span style={{ fontSize: 12 }}>{item.done ? "✓" : "○"}</span>
-            {item.label}
-          </button>
-        ))}
+        {items.map((item) => {
+          const style: CSSProperties = {
+            display: "flex", alignItems: "center", gap: 7,
+            fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600,
+            padding: "9px 13px", borderRadius: 20, minHeight: 40,
+            border: `1px solid ${item.done ? "#cce9da" : "#f0e2bd"}`,
+            background: item.done ? "#eaf6ef" : "#fbf3dd",
+            color: item.done ? "#1f7a52" : "#8a6d1f",
+          };
+          const body = (
+            <>
+              <span style={{ fontSize: 12 }}>{item.done ? "✓" : "○"}</span>
+              {item.label}
+            </>
+          );
+          // answered on this card: a status chip, not a control
+          if (item.section === "tier1") {
+            return (
+              <span key={item.key} title={item.done ? "Answered" : "Answer it below"} style={style}>
+                {body}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onJump(item.section)}
+              title={item.done ? "Answered" : "Missing — tap to jump to the field"}
+              style={{ ...style, cursor: "pointer" }}
+            >
+              {body}
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ marginTop: 16 }}>

@@ -42872,7 +42872,7 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
     "venueTypes", "intakeCatalog", "visitReasons", "consultingPhases", "consultingDisciplines", "consultingAssumptions",
     "mailboxes", "recordings", "team", "documentCategories", "beta",
   ];
-  const ADDED_CARDS = ["estimateOutput"]; // #301 — Settings → Sales & Rewards → Estimate output
+  const ADDED_CARDS = ["estimateOutput", "surveyTags"]; // #301 — Estimate output; #342 — Final thoughts internal tags
   const cardKeys = scCards.map((c) => c.key as string);
   ok(cardKeys.length === new Set(cardKeys).size, "settings cleanup: no card is registered twice");
   ok([...OLD_CARDS, ...ADDED_CARDS].every((k) => cardKeys.filter((x) => x === k).length === 1) && cardKeys.length === OLD_CARDS.length + ADDED_CARDS.length,
@@ -42881,7 +42881,7 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
   ok(groupKeys.every((g) => scCardsIn(g).length + scLinks[g].length > 0), "settings cleanup: no group is empty");
   ok(scCardsIn("company").join(",") === "branding,locations,federalHolidays,dashboardDefaults" &&
     scCardsIn("sales").join(",") === "reviewLimits,pipelines,customerFields,estimateOutput" &&
-    scCardsIn("field").join(",") === "venueTypes,intakeCatalog,visitReasons" &&
+    scCardsIn("field").join(",") === "venueTypes,intakeCatalog,visitReasons,surveyTags" &&
     scCardsIn("consulting").join(",") === "consultingPhases,consultingDisciplines,consultingAssumptions" &&
     scCardsIn("integrations").join(",") === "mailboxes,recordings" &&
     scCardsIn("team").join(",") === "team" &&
@@ -42904,6 +42904,7 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
     venueTypes: "<VenueTypesCard",
     intakeCatalog: ">Site intake — type catalog</div>",
     visitReasons: ">Site visits — reason picklist</div>",
+    surveyTags: "<SurveyTagsCard",
     consultingPhases: ">Consulting — phase menu</div>",
     consultingDisciplines: ">Consulting — disciplines</div>",
     consultingAssumptions: ">Consulting — assumptions library</div>",

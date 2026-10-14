@@ -554,12 +554,11 @@ export default function SurveyEditor({
     });
     // 3D preview (IDEAS #49 P1) — parametric model auto-built from measurements
     secs.push({ id: "m3d", title: "3D preview", subtitle: "Auto-built from measurements — drag to orbit", group: "field", step: 2, advanced: true, kind: "viz3d" });
-    // ---- Site intake (IDEAS #45): kill-question gate and discipline
-    // branches. Soft gate — sections lock until Tier 1 is done,
-    // but the record always saves as a draft.
+    // ---- Kill questions (the first step's gate) and the discipline branches. Soft gate — the
+    // discipline sections lock until the kill questions are answered, but the record always saves as a draft.
     secs.push({
       id: "tier1", title: "Kill questions", subtitle: "Scope, rigging system and the basics — the discipline intakes unlock once these are in",
-      group: "intake", step: 3, kind: "tier1",
+      group: "brief", step: 0, kind: "tier1",
     });
     DISCIPLINE_GROUPS.forEach((g) => {
       secs.push({
@@ -1085,6 +1084,7 @@ export default function SurveyEditor({
                       <div
                         onClick={headerClick}
                         role="button"
+                        aria-disabled={locked || undefined}
                         tabIndex={0}
                         aria-expanded={open}
                         aria-controls={open ? "sec-body-" + sec.id : undefined}

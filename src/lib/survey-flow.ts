@@ -1,6 +1,7 @@
 /* Venue Assessments flow (#342, slice A) — the editor's section order, wizard steps and groups, the scope filter
    (Kill questions → which sections show), the one rigging-system answer, the quote-visit rule and the customer
    recap. Pure and client-safe: the editor, the field sheet, the findings text and the tests read it. */
+import { goalsFromSurvey } from "./estimate-output/goals";
 import { DISCIPLINE_GROUPS, RIG_SYSTEMS, type DisciplineData, type DisciplineKey } from "./stores/survey-intake";
 
 export { RIG_SYSTEMS };
@@ -115,11 +116,12 @@ export type RecapEntry = { disc: DisciplineKey; label: string; scopes: string[];
 export function recapFor(s: FlowSlice): RecapEntry[] {
   const set = scopeSet(s);
   const out: RecapEntry[] = [];
+  const cleanGoals = goalsFromSurvey(s) as Record<string, string | undefined>;
   for (const g of DISCIPLINE_GROUPS) {
     const d: DisciplineData = s.disciplines?.[g.key] || {};
     const scopes = Array.isArray(d.scope) ? d.scope.map((x) => String(x)).filter(Boolean) : [];
     const other = typeof d.scopeOther === "string" ? d.scopeOther.trim() : "";
-    const goals = splitGoalLines(d.goals);
+    const goals = splitGoalLines(cleanGoals[g.key]);
     const listed = set ? set.includes(g.key) : scopes.length > 0 || goals.length > 0 || other !== "";
     if (listed) out.push({ disc: g.key, label: SCOPE_LABEL[g.key], scopes, other, goals });
   }
