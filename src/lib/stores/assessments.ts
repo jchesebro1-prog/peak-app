@@ -59,7 +59,7 @@ export interface SyncReject { key: string; error: string; at: number; by: string
 
 /** A record as /api/sync/push receives it, the reply it gives back, and the signed-in user it acts as. */
 export type PushRec = { id: string; rev?: number; doc: Record<string, unknown> };
-export type PushResult = { id: string; status: "ok" | "conflict" | "error"; rev?: number; server?: Record<string, unknown>; error?: string };
+export type PushResult = { id: string; status: "ok" | "conflict" | "error" | "retry"; rev?: number; server?: Record<string, unknown>; error?: string };
 export type PushUser = { id: string; roles: string[] | null | undefined };
 
 type Err = { ok: false; error: string };
@@ -723,8 +723,10 @@ export async function reopenAssessment(id: string, user: { id: string }): Promis
  * saveAssessment in push mode, never a whole-document replace:
  * - ok + the stored rev: everything valid merged; anything skipped is in the stored doc's `syncRejects`
  *   (which the pull after every flush brings to the editor).
- * - error + message (the entry stays in the outbox): no permission, an unknown or malformed id, a pushed
- *   customerId / siteId that differs from the stored one (nothing merged), or a throw.
+ * - error + message (the entry is parked as refused): a permanent refusal only — no permission, an unknown or
+ *   malformed id, a pushed customerId / siteId that differs from the stored one (nothing merged).
+ * - retry (the entry stays pending and is pushed again): anything thrown — a lock timeout, a database error. Nothing
+ *   was refused, so the capture must not be parked (#340 final review I1).
  */
 export async function pushAssessment(rec: PushRec, user: PushUser): Promise<PushResult> {
   const id = rec.id;
@@ -742,7 +744,8 @@ export async function pushAssessment(rec: PushRec, user: PushUser): Promise<Push
     const rev = sent === undefined ? undefined : sent - 1;
     const r = await saveAssessment(id, { ...doc, rev } as Partial<Assessment>, { id: user.id }, { mode: "push" });
     return r.ok ? { id, status: "ok", rev: r.doc.rev } : { id, status: "error", error: r.error };
-  } catch {
-    return { id, status: "error", error: "The assessment couldn't be saved" };
+  } catch (e) {
+    console.error("[assessments] push failed; the device will retry", id, e);
+    return { id, status: "retry", error: "The server couldn't save it just now; it will try again" };
   }
 }

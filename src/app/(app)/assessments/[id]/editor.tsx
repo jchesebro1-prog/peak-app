@@ -28,11 +28,13 @@ import {
   mergeFindingLists,
   msToDateInput,
   offScopesWithAnswers,
+  outboxEntryCovered,
   photoSetOfferDue,
   photosForQuestions,
   profileOnFile,
   reenterAnswer,
   refusalParts,
+  saveStatusLabel,
   placePrompts,
   resolvedPromptIds,
   scopeSummaries,
@@ -41,6 +43,8 @@ import {
   stuckPendingPhotos,
   type EditorField,
   type FindingVM,
+  type LocalSaveState,
+  type SaveLabelInput,
   type SyncRejectVM,
 } from "@/lib/assessments/editor-model";
 import { newFindingKey } from "@/lib/assessments/findings-model";
@@ -57,7 +61,7 @@ import {
   type QueuedPhotoInfo,
 } from "@/lib/assessments/photo-queue";
 import { saveThroughOutbox } from "@/lib/sync/save";
-import { DATA_PULLED_EVENT, getEngine } from "@/lib/sync/engine";
+import { DATA_PULLED_EVENT, getEngine, type SyncStatus } from "@/lib/sync/engine";
 import type { EditorProps } from "../types";
 import { removePendingPhotoAction } from "../photo-actions";
 import {
@@ -156,7 +160,6 @@ const STATUS_CHIP: Record<string, { label: string; ink: string; soft: string; bd
   completed: { label: "Completed", ink: "#2f6b3d", soft: "#e9f5ec", bd: "#cbe6d2" },
 };
 
-type SaveState = "idle" | "saving" | "saved" | "queued" | "error";
 
 export default function AssessmentEditor(props: EditorProps) {
   const { me, profile, picklistExtras: extras, findings } = props;
@@ -193,16 +196,24 @@ export default function AssessmentEditor(props: EditorProps) {
   const disabled = !props.canEdit || doc.status === "completed";
 
   /* ---------- saving ---------- */
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveState, setSaveState] = useState<LocalSaveState>("idle");
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
   const again = useRef(false);
   const flushRef = useRef<() => Promise<void>>(async () => {});
+  /** Pending photo refs removed here (discarded): an outbox entry that still lists one is not lost by clearing it. */
+  const removedPhotos = useRef<Set<string>>(new Set());
+  /** Resolves once this device's outbox entry (if any) is folded in; every save waits for it (final review I1). */
+  const outboxFolded = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     flushRef.current = async () => {
       if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+      if (inFlight.current) { again.current = true; return inFlight.current; }
+      // A capture still in this device's outbox must be in the editor before any save: an online save clears the
+      // entry and an offline one replaces it.
+      if (outboxFolded.current) await outboxFolded.current;
       if (inFlight.current) { again.current = true; return inFlight.current; }
       const s = store.getState();
       const patch = buildPatch(s);
@@ -218,15 +229,16 @@ export default function AssessmentEditor(props: EditorProps) {
             doc: fullDoc,
             action: async () => {
               reply = await saveAssessmentAction(id, patch);
+              // Adopt the reply before the outbox entry is looked at, so keepOutbox sees what the server now holds.
+              if (reply.ok) store.dispatch({ type: "saved", patch, rev: reply.rev, dropped: reply.dropped });
               return reply.ok ? { ok: true as const } : reply;
             },
+            // Never clear an entry holding something this save didn't carry (another tab's capture, a refused push).
+            keepOutbox: (entryDoc) => !outboxEntryCovered(entryDoc, store.getState(), removedPhotos.current),
           });
           const rep = reply as SaveReply | null;
           if (r.queued) setSaveState("queued");
-          else if (rep?.ok) {
-            store.dispatch({ type: "saved", patch, rev: rep.rev, dropped: rep.dropped });
-            setSaveState("saved");
-          }
+          else if (rep?.ok) setSaveState("saved");
           setRefusal(null);
         } catch (e) {
           setRefusal(refusalParts(e instanceof Error && e.message ? e.message : "The assessment couldn't be saved.", def));
@@ -266,12 +278,31 @@ export default function AssessmentEditor(props: EditorProps) {
     return () => window.removeEventListener(DATA_PULLED_EVENT, onPulled);
   }, [router]);
 
+  // This device's outbox entry for the assessment (a capture still pending, or one the push refused): fold it into the
+  // editor once, before any save, so the next save carries it. A completed assessment is left to the sync push.
+  useEffect(() => {
+    let alive = true;
+    outboxFolded.current = getEngine().outboxEntry("assessments", id).then((e) => {
+      if (!alive || !e || store.getState().doc.status === "completed") return;
+      const before = store.getState();
+      store.dispatch({ type: "foldOutbox", entry: e.doc });
+      if (store.getState() !== before) schedule();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [id, store, schedule]);
+
+  // The save status follows the SyncEngine and this assessment's outbox entry, so it changes when the outbox drains.
+  const [sync, setSync] = useState<{ connected: boolean; entry: SaveLabelInput["entry"] }>({ connected: true, entry: null });
+
   // Outbox entries the sync push refused for this assessment or its findings.
   const [outboxErrors, setOutboxErrors] = useState<OutboxError[]>([]);
   useEffect(() => {
     const engine = getEngine();
     let alive = true;
-    const load = () => {
+    const load = (status: SyncStatus) => {
+      void engine.outboxEntry("assessments", id).then((e) => {
+        if (alive) setSync({ connected: status.connected, entry: e ? { state: e.state, ...(e.error ? { error: e.error } : {}) } : null });
+      }).catch(() => {});
       void engine.erroredEntries().then((rows) => {
         if (!alive) return;
         const mine = rows.filter((r) => (r.collection === "assessments" && r.id === id) || (r.collection === "findings" && r.doc.assessmentId === id));
@@ -281,7 +312,7 @@ export default function AssessmentEditor(props: EditorProps) {
         })));
       }).catch(() => {});
     };
-    const off = engine.subscribe(() => load());
+    const off = engine.subscribe(load);
     return () => { alive = false; off(); };
   }, [id]);
 
@@ -420,7 +451,7 @@ export default function AssessmentEditor(props: EditorProps) {
     try {
       const r = await discardPhoto(id, photoId);
       if (r.refRemoved) {
-        store.dispatch({ type: "removePhoto", photoId, rev: r.rev ?? 0 });
+        removedPhotos.current.add(photoId); store.dispatch({ type: "removePhoto", photoId, rev: r.rev ?? 0 });
         router.refresh(); // its id was dropped from findings on the server too
       } else if (!navigator.onLine) {
         pendingRemovals.current.add(photoId);
@@ -435,7 +466,7 @@ export default function AssessmentEditor(props: EditorProps) {
       for (const photoId of [...pendingRemovals.current]) {
         try {
           const r = await removePendingPhotoAction(id, photoId);
-          if (r.ok) { store.dispatch({ type: "removePhoto", photoId, rev: r.rev }); pendingRemovals.current.delete(photoId); }
+          if (r.ok) { removedPhotos.current.add(photoId); store.dispatch({ type: "removePhoto", photoId, rev: r.rev }); pendingRemovals.current.delete(photoId); }
           else if (r.terminal) pendingRemovals.current.delete(photoId);
         } catch {
           /* still offline: the next `online` tries again */
@@ -453,7 +484,7 @@ export default function AssessmentEditor(props: EditorProps) {
     try {
       const r = await removePendingPhotoAction(id, photoId);
       if (!r.ok) return r.error;
-      store.dispatch({ type: "removePhoto", photoId, rev: r.rev });
+      removedPhotos.current.add(photoId); store.dispatch({ type: "removePhoto", photoId, rev: r.rev });
       router.refresh();
       return null;
     } catch {
@@ -555,11 +586,7 @@ export default function AssessmentEditor(props: EditorProps) {
   const photoSetReqs = def.scopes.flatMap((s) => s.modules).find((m) => m.id === PHOTO_SET_MODULE)?.photos ?? [];
   const offWithAnswers = offScopesWithAnswers(def, doc.scopes, doc.answers);
   const chip = STATUS_CHIP[doc.status] ?? STATUS_CHIP.draft;
-  const saveText =
-    saveState === "saving" ? "Saving…" :
-    saveState === "saved" ? "Saved" :
-    saveState === "queued" ? "Saved on this device — will sync when you're back online" :
-    saveState === "error" ? "Not saved" : "";
+  const saveLabel = saveStatusLabel({ local: saveState, connected: sync.connected, entry: sync.entry });
   const visitDate = doc.visitDate ? new Date(doc.visitDate).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : "—";
 
   return (
@@ -576,7 +603,7 @@ export default function AssessmentEditor(props: EditorProps) {
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6, fontSize: 12.5, color: "#5b616e" }}>
           <span>Condition assessment · {visitDate} · {props.userNames[doc.assessorId] ?? doc.assessorId}</span>
           <span className="as-mono-sm">rev {doc.rev}</span>
-          {saveText && <span style={{ color: saveState === "error" ? "#8c3b26" : "#8c919c" }}>{saveText}</span>}
+          {saveLabel.text && <span role="status" style={{ color: saveLabel.tone === "error" ? "#8c3b26" : "#8c919c" }}>{saveLabel.text}</span>}
           <span style={{ flex: 1 }} />
           <Link href={`/assessments/${encodeURIComponent(doc.id)}/report`} className="pk-btn-outline" style={{ textDecoration: "none", padding: "7px 12px" }}>Report</Link>
           <CodesChip codes={props.codes} canEdit={props.canEdit} canApprove={props.canReopen} />

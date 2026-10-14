@@ -550,7 +550,8 @@ export async function splitFinding(key: string, move: { photoIds: string[]; ques
  * replace; an offline finding's null printedId is allocated here). If the pushed status differs from the stored
  * one it is applied through transitionFinding afterwards (a backward move's note is read from the pushed
  * history's last entry for that status). A refusal is a `conflict` carrying the server copy when one exists;
- * a refused NEW finding has no server copy, so it is an `error` and stays in the client's outbox.
+ * a refused NEW finding has no server copy, so it is an `error` and stays in the client's outbox. A throw (a lock
+ * timeout, a database error) is `retry`: the entry stays pending and is pushed again.
  *
  * Deliberate asymmetry: saveFindingAction refuses a NEW finding on an assessment that is already completed (online,
  * the user can reopen it), but this push does NOT. A finding created offline before completion — or on a device
@@ -579,7 +580,9 @@ export async function pushFinding(rec: PushRec, user: PushUser): Promise<PushRes
       doc = t.doc;
     }
     return { id, status: "ok", rev: doc.rev };
-  } catch {
-    return { id, status: "error" };
+  } catch (e) {
+    // A throw (lock timeout, database error) refuses nothing: the device keeps the entry pending and retries.
+    console.error("[findings] push failed; the device will retry", id, e);
+    return { id, status: "retry", error: "The server couldn't save it just now; it will try again" };
   }
 }

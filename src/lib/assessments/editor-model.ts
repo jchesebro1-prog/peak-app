@@ -92,7 +92,9 @@ export type EditorAction =
   | { type: "dismissPrompt"; entry: { id: string; by: string; at: number } }
   /** a NEW finding's sheet was cancelled: its photos stay on the assessment but stop pointing at the finding.
    *  The photo carries `findingKey: null`, which the server reads as "clear it". */
-  | { type: "unlinkFindingPhotos"; findingKey: string };
+  | { type: "unlinkFindingPhotos"; findingKey: string }
+  /** this device's outbox entry for the assessment, read on mount: fold it in so the next save carries it */
+  | { type: "foldOutbox"; entry: Record<string, unknown> };
 
 export function initEditorState(doc: EditorDoc): EditorState {
   return { doc, ack: { ...doc.answers }, dirty: [], dirtyPhotos: [], dirtyPrompts: [], dropped: [] };
@@ -291,6 +293,8 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
         dirtyPhotos: [...new Set([...s.dirtyPhotos, ...ids])],
       };
     }
+    case "foldOutbox":
+      return foldOutboxEntry(s, a.entry);
     case "dismissPrompt":
       if (s.doc.dismissedPrompts.some((d) => d.id === a.entry.id)) return s;
       return { ...s, doc: { ...s.doc, dismissedPrompts: [...s.doc.dismissedPrompts, a.entry] }, dirtyPrompts: [...s.dirtyPrompts, a.entry.id] };
@@ -332,6 +336,122 @@ export function createEditorStore(doc: EditorDoc): EditorStore {
 /** Unsaved local work (changed answers, scalars, photos or prompts). */
 export function hasUnsaved(s: EditorState): boolean {
   return buildPatch(s) !== null;
+}
+
+/* ---------- this device's outbox entry (final review I1) ---------- */
+
+const isRec = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+const entryAnswers = (d: Record<string, unknown>): Answers => {
+  const out: Answers = {};
+  if (isRec(d.answers)) for (const [k, a] of Object.entries(d.answers)) if (isRec(a) && typeof a.at === "number" && k !== "__proto__" && k !== "constructor" && k !== "prototype") out[k] = a as unknown as Answer;
+  return out;
+};
+const entryPhotos = (d: Record<string, unknown>): PhotoRef[] => (Array.isArray(d.photos) ? d.photos.filter((p): p is PhotoRef => isRec(p) && typeof p.id === "string" && !!p.id) : []);
+const entryPrompts = (d: Record<string, unknown>): { id: string; by: string; at: number }[] =>
+  Array.isArray(d.dismissedPrompts) ? d.dismissedPrompts.filter((p): p is { id: string; by: string; at: number } => isRec(p) && typeof p.id === "string" && !!p.id) : [];
+
+/**
+ * Folds this device's outbox entry for the assessment (a capture still pending, or one the push refused) into the
+ * editor, so the next save carries it — otherwise an online save's recordSynced would drop the entry and lose it.
+ * - answers merge per key, newest `at` wins, each keeping its original `at`; one newer than the server's copy differs
+ *   from `ack`, so it is dirty and the next save sends it;
+ * - photo refs and dismissed prompts the editor doesn't hold are added as dirty;
+ * - a scalar the entry carries (only dirty scalars are queued) is taken as dirty when the entry was built on the
+ *   current rev or later; built on an older rev, the server would drop it as stale anyway, so it goes to `dropped`
+ *   (the amber "someone else changed it" note) instead of overwriting another device's edit.
+ * Returns `s` itself when there is nothing to fold.
+ */
+export function foldOutboxEntry(s: EditorState, entryDoc: Record<string, unknown>): EditorState {
+  if (!isRec(entryDoc)) return s;
+  let changed = false;
+  const inc = entryAnswers(entryDoc);
+  const answers = mergeAnswers(s.doc.answers, inc);
+  if (Object.keys(inc).some((k) => answers[k] !== s.doc.answers[k])) changed = true;
+  const photos = [...s.doc.photos];
+  const dirtyPhotos = [...s.dirtyPhotos];
+  for (const p of entryPhotos(entryDoc)) {
+    if (photos.some((x) => x.id === p.id)) continue;
+    photos.push({ ...p });
+    dirtyPhotos.push(p.id);
+    changed = true;
+  }
+  const dismissed = [...s.doc.dismissedPrompts];
+  const dirtyPrompts = [...s.dirtyPrompts];
+  for (const d of entryPrompts(entryDoc)) {
+    if (dismissed.some((x) => x.id === d.id)) continue;
+    dismissed.push({ id: d.id, by: typeof d.by === "string" ? d.by : "", at: typeof d.at === "number" ? d.at : 0 });
+    dirtyPrompts.push(d.id);
+    changed = true;
+  }
+  const doc = { ...s.doc, answers, photos, dismissedPrompts: dismissed } as unknown as Record<string, unknown>;
+  const dirty = [...s.dirty];
+  const dropped = [...s.dropped];
+  // The outbox carries base rev + 1 (buildFullDoc).
+  const base = typeof entryDoc.rev === "number" ? entryDoc.rev - 1 : -1;
+  for (const f of EDITOR_FIELDS) {
+    if (!Object.hasOwn(entryDoc, f) || dirty.includes(f)) continue;
+    const raw = entryDoc[f];
+    const v = raw === "" ? undefined : raw;
+    if (fieldEquals(v, s.doc[f])) continue;
+    changed = true;
+    if (base >= s.doc.rev) {
+      if (v === undefined) delete doc[f]; else doc[f] = v;
+      dirty.push(f);
+    } else if (!dropped.includes(f)) dropped.push(f);
+  }
+  return changed ? { ...s, doc: doc as unknown as EditorDoc, dirty, dirtyPhotos, dirtyPrompts, dropped } : s;
+}
+
+/**
+ * True when everything the outbox entry holds is already on the server as far as this editor knows (after a save
+ * reply was adopted), so an online save may clear the entry: every answer is matched or beaten by the acknowledged
+ * copy, every photo and dismissed prompt is held and acknowledged (or the photo was removed here), and every scalar is
+ * no longer dirty and either matches or was reported dropped. Anything else keeps the entry for the sync push.
+ */
+export function outboxEntryCovered(entryDoc: Record<string, unknown>, s: EditorState, removedPhotos: Iterable<string> = []): boolean {
+  if (!isRec(entryDoc)) return true;
+  for (const [k, a] of Object.entries(entryAnswers(entryDoc))) {
+    const acked = Object.hasOwn(s.ack, k) ? s.ack[k] : undefined;
+    if (!acked || acked.at < a.at || (acked.at === a.at && canon({ ...acked, by: undefined }) !== canon({ ...a, by: undefined }))) return false;
+  }
+  const removed = new Set(removedPhotos);
+  for (const p of entryPhotos(entryDoc)) {
+    if (removed.has(p.id)) continue;
+    if (!s.doc.photos.some((x) => x.id === p.id) || s.dirtyPhotos.includes(p.id)) return false;
+  }
+  for (const d of entryPrompts(entryDoc)) if (!s.doc.dismissedPrompts.some((x) => x.id === d.id) || s.dirtyPrompts.includes(d.id)) return false;
+  for (const f of EDITOR_FIELDS) {
+    if (!Object.hasOwn(entryDoc, f)) continue;
+    if (s.dirty.includes(f)) return false;
+    const v = entryDoc[f] === "" ? undefined : entryDoc[f];
+    if (!fieldEquals(v, s.doc[f]) && !s.dropped.includes(f)) return false;
+  }
+  return true;
+}
+
+/* ---------- the save-status label (final review I3) ---------- */
+
+export type LocalSaveState = "idle" | "saving" | "saved" | "queued" | "error";
+export interface SaveLabelInput {
+  /** what this editor's last save did */
+  local: LocalSaveState;
+  /** the SyncEngine's view: online and not "Work offline" */
+  connected: boolean;
+  /** this assessment's outbox entry on this device, if any */
+  entry: { state: "pending" | "error"; error?: string } | null;
+}
+
+/** The header's save status, from the editor's last save, the SyncEngine and this assessment's outbox entry:
+ *  an errored entry → "Couldn't sync — <error>"; a queued one → "Saved on this device — will sync…" offline, else
+ *  "Syncing…"; nothing queued → "Saved" (once anything was saved). It follows the outbox, so it changes when the
+ *  outbox drains. */
+export function saveStatusLabel(i: SaveLabelInput): { text: string; tone: "muted" | "error" } {
+  if (i.local === "saving") return { text: "Saving…", tone: "muted" };
+  if (i.local === "error") return { text: "Not saved", tone: "error" };
+  if (i.entry?.state === "error") return { text: `Couldn't sync — ${i.entry.error?.trim() || "the server refused it"}`, tone: "error" };
+  const queued = i.entry?.state === "pending" || (i.local === "queued" && !i.connected);
+  if (queued) return { text: i.connected ? "Syncing…" : "Saved on this device — will sync when you're back online", tone: "muted" };
+  return { text: i.local === "idle" ? "" : "Saved", tone: "muted" };
 }
 
 /* ---------- answers from controls ---------- */

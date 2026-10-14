@@ -42,6 +42,18 @@ export const FIELD_COLLECTIONS = [
 ] as const;
 
 const PAUSED_KEY = "rss_sync_paused_v1";
+/** How long a `retry` reply waits before the next flush. */
+const RETRY_DELAY_MS = 30_000;
+
+/** A push reply's per-record status. `retry` (#340 final review I1): the server failed transiently (a lock
+ *  timeout, a database error) — nothing was refused, so the entry stays pending rather than turning `error`. */
+export type PushStatus = "ok" | "conflict" | "error" | "retry";
+
+/** What the outbox does with one push reply: drop it (ok), take the server copy (conflict), keep it pending for the
+ *  next flush (retry), or park it as refused (error — and any status this client doesn't know). */
+export function pushOutcome(status: unknown): "ok" | "conflict" | "retry" | "error" {
+  return status === "ok" || status === "conflict" || status === "retry" ? status : "error";
+}
 const LAST_KEY = "rss_sync_last_v1";
 const CURSORS_META = "cursors";
 
@@ -90,6 +102,16 @@ class SyncEngine {
   private lastSyncAt: number | null = null;
   private started = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** One delayed re-flush after a push replied `retry` (no tight loop: one timer at a time). */
+  private scheduleRetry() {
+    if (this.retryTimer || typeof window === "undefined") return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.syncNow();
+    }, RETRY_DELAY_MS);
+  }
 
   /* ---------- lifecycle ---------- */
 
@@ -115,6 +137,8 @@ class SyncEngine {
     window.removeEventListener("online", this.onOnline);
     window.removeEventListener("offline", this.onOffline);
     if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     this.started = false;
   }
 
@@ -235,11 +259,23 @@ class SyncEngine {
     collection: string,
     id: string,
     doc: Record<string, unknown>,
-    rev = 1
+    rev = 1,
+    opts?: { keepEntry?: (entryDoc: Record<string, unknown>) => boolean }
   ): Promise<void> {
-    await idb.delete("outbox", outboxKey(collection, id));
+    const key = outboxKey(collection, id);
+    // #340 final review (I1): a caller that knows the save did NOT carry everything the entry holds keeps it for
+    // the sync push, instead of losing a capture the online save never sent.
+    const entry = opts?.keepEntry ? await idb.get<OutboxEntry>("outbox", key) : undefined;
+    if (!entry || !opts?.keepEntry?.(entry.doc)) await idb.delete("outbox", key);
     await this.writeMirror(collection, id, doc, rev, false);
     await this.refreshCounts();
+  }
+
+  /** This device's outbox entry for one record (pending, or refused with its reason), or null. */
+  async outboxEntry(collection: string, id: string): Promise<{ state: "pending" | "error"; doc: Record<string, unknown>; rev: number; error?: string } | null> {
+    const e = await idb.get<OutboxEntry>("outbox", outboxKey(collection, id));
+    if (!e) return null;
+    return { state: e.state, doc: e.doc, rev: e.rev, ...(e.error ? { error: e.error } : {}) };
   }
 
   private async writeMirror(
@@ -324,7 +360,7 @@ class SyncEngine {
           string,
           Array<{
             id: string;
-            status: "ok" | "conflict" | "error";
+            status: PushStatus;
             rev?: number;
             server?: Record<string, unknown>;
             error?: string;
@@ -332,10 +368,17 @@ class SyncEngine {
         >;
       };
       let conflicts = 0;
+      let retry = false;
       for (const [coll, recs] of Object.entries(data.results || {})) {
         for (const r of recs) {
           const key = outboxKey(coll, r.id);
-          if (r.status === "ok") {
+          const outcome = pushOutcome(r.status);
+          if (outcome === "retry") {
+            // A transient server failure (lock timeout, database error): stays pending for the next flush.
+            retry = true;
+            continue;
+          }
+          if (outcome === "ok") {
             await idb.delete("outbox", key);
             await this.writeMirror(
               coll,
@@ -344,7 +387,7 @@ class SyncEngine {
               r.rev ?? 1,
               false
             );
-          } else if (r.status === "conflict") {
+          } else if (outcome === "conflict") {
             // Office edits are newer — keep the server copy, drop our capture.
             conflicts++;
             await idb.delete("outbox", key);
@@ -358,6 +401,7 @@ class SyncEngine {
         }
       }
       this.conflicts += conflicts;
+      if (retry) this.scheduleRetry();
       this.stampLast();
       await this.refreshCounts();
       await this.pull();

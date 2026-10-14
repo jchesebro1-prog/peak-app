@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     string,
     Array<{
       id: string;
-      status: "ok" | "conflict" | "error";
+      status: "ok" | "conflict" | "error" | "retry";
       rev?: number;
       server?: Record<string, unknown>;
       error?: string;
@@ -84,8 +84,9 @@ export async function POST(req: Request) {
       // `create`; answers merge per key and findings get their printed id
       // from the server (see the stores). Assessments are never created here
       // and never reply conflict: ok + the stored rev (anything skipped is in
-      // the doc's server-written syncRejects), or error + a message (left in
-      // the outbox). Findings: ok, conflict + the server copy, or error.
+      // the doc's server-written syncRejects), error + a message (a permanent
+      // refusal, parked in the outbox), or retry (a throw — the entry stays
+      // pending). Findings: ok, conflict + the server copy, error, or retry.
       if (coll === "assessments" || coll === "findings") {
         const user = { id: String(session.user.id ?? ""), roles: session.user.roles };
         const one = { id: rec.id, rev: rec.rev, doc: rec.doc };

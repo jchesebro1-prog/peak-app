@@ -38,6 +38,9 @@ export async function saveThroughOutbox(opts: {
   id: string;
   doc: Record<string, unknown>;
   action: () => Promise<void | ServerSaveResult>;
+  /** After a successful online save: true keeps this record's existing outbox entry (the save didn't carry all of
+   *  it) for the sync push instead of clearing it. Omitted, the entry is cleared as before. */
+  keepOutbox?: (entryDoc: Record<string, unknown>) => boolean;
 }): Promise<SaveResult> {
   const engine = getEngine();
   const rev = Number(opts.doc.rev) || 1;
@@ -46,7 +49,7 @@ export async function saveThroughOutbox(opts: {
     try {
       const result = await opts.action();
       if (result && !result.ok) throw new Error(result.error);
-      await engine.recordSynced(opts.collection, opts.id, opts.doc, rev);
+      await engine.recordSynced(opts.collection, opts.id, opts.doc, rev, opts.keepOutbox ? { keepEntry: opts.keepOutbox } : undefined);
       return { queued: false };
     } catch (e) {
       if (isControlFlowError(e)) throw e; // redirect/notFound — let it propagate

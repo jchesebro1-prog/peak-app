@@ -20,7 +20,7 @@ import { getDb } from "../src/db";
 import { companies, sites } from "../src/db/schema";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS, blobs } from "../src/db/doc-tables";
 import { CONFIG_COLLECTIONS, DEMO_COLLECTIONS } from "../src/db/seed-data";
-import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
+import { FIELD_COLLECTIONS, pushOutcome } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
 import { saveSite, getSite, setSiteShortCode, docLocId } from "../src/lib/identity/sites";
 import { registerFixture } from "./test-fixtures";
@@ -32,6 +32,7 @@ import {
   toggleMany, unableWith, flagsForScope, placePrompts, offScopesWithAnswers, formatRejectPayload, type EditorDoc, type FindingVM,
   placementScope, promptScope, PHOTO_LIMIT_MESSAGE, canAddPhoto, stuckPendingPhotos, findingFromPrompt, photosForQuestions,
   findingSheetProblems, findingSaveDoc, parseMoney, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
+  foldOutboxEntry, outboxEntryCovered, saveStatusLabel,
 } from "../src/lib/assessments/editor-model";
 import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch, liveMergeTarget } from "../src/lib/assessments/findings-model";
 import { normalizeFinding, saveFinding, getFinding, getFindings, listFindings, countOpenImmediateFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
@@ -548,6 +549,66 @@ export async function assessmentChecks(ok: Ok) {
   task9Checks(ok);
   await task10Checks(ok);
   task11Checks(ok);
+  finalReviewChecks(ok);
+}
+
+/** Final whole-branch review fixes (I1 outbox loss, I3 the save-status label). Pure. */
+function finalReviewChecks(ok: Ok) {
+  const A = (v: unknown, at: number, by = "u1"): Answer => ({ v, state: "answered", at, by });
+  // I1: a push reply's per-record outcome — retry stays pending, only a real refusal parks the entry
+  ok(pushOutcome("retry") === "retry" && pushOutcome("ok") === "ok" && pushOutcome("conflict") === "conflict" && pushOutcome("error") === "error" && pushOutcome("weird") === "error" && pushOutcome(undefined) === "error", "final I1: push outcome — retry kept pending, unknown statuses park as error");
+  // I1: an errored / pending outbox entry is folded in as dirty work, original `at` kept
+  const server = initEditorState(editorDoc({ answers: { "core.seats": A(200, 10) }, dismissedPrompts: [{ id: "rule:R1", by: "u1", at: 1 }], spaceLabel: "Aud" }));
+  const entry = {
+    id: "AS-1001", rev: 4, answers: { "core.seats": A(300, 20), "core.use": A(["school"], 15), "core.year_built": A(1950, 5) },
+    photos: [{ id: "p_fold0001", pending: true, takenAt: 7, by: "u1", questionKey: "core.seats" }],
+    dismissedPrompts: [{ id: "rule:R1", by: "u1", at: 1 }, { id: "rule:R10", by: "u1", at: 9 }], spaceLabel: "Lab",
+  };
+  const folded = foldOutboxEntry(server, entry);
+  const fp = buildPatch(folded)!;
+  ok(!!fp && Object.keys(fp.answers!).sort().join() === "core.seats,core.use,core.year_built" && fp.answers!["core.seats"].at === 20 && fp.answers!["core.use"].at === 15, "final I1: folded answers are dirty (the next save carries them) and keep their original at");
+  ok(fp?.photos?.map((x) => x.id).join() === "p_fold0001" && fp?.dismissedPrompts?.map((x) => x.id).join() === "rule:R10" && fp?.spaceLabel === "Lab", "final I1: folded photo refs, dismissed prompts and a fresh scalar travel with the next save");
+  const older = foldOutboxEntry(server, { rev: 4, answers: { "core.seats": A(100, 5) } });
+  ok(older === server && buildPatch(older) === null, "final I1: an entry answer older than the server's changes nothing");
+  const staleScalar = foldOutboxEntry(server, { rev: 3, spaceLabel: "Old room" });
+  ok(staleScalar.doc.spaceLabel === "Aud" && !staleScalar.dirty.includes("spaceLabel") && staleScalar.dropped.includes("spaceLabel"), "final I1: a scalar queued on an older rev isn't forced over the server's; it is reported dropped");
+  ok(foldOutboxEntry(server, { rev: 4, answers: { "core.seats": A(200, 10) } }) === server, "final I1: an entry the server already holds folds to the same state");
+  ok(buildPatch(editorReducer(server, { type: "foldOutbox", entry }))!.answers!["core.use"].at === 15, "final I1: the foldOutbox action folds the entry");
+  // I1: the online save may only clear an entry it covered
+  ok(!outboxEntryCovered(entry, server), "final I1: before any save the entry is not covered (an online save keeps it)");
+  // the bug: an errored entry, an unrelated online save — the save didn't carry the entry, so it must stay
+  let unrelated = editorReducer(server, { type: "answer", key: "core.notes", answer: A("x", 30) });
+  const up = buildPatch(unrelated)!;
+  unrelated = editorReducer(unrelated, { type: "saved", patch: up, rev: 4 });
+  ok(!outboxEntryCovered(entry, unrelated), "final I1: an online save that didn't fold the entry does not cover it (recordSynced keeps it)");
+  const savedFold = editorReducer(folded, { type: "saved", patch: fp, rev: 4 });
+  ok(outboxEntryCovered(entry, savedFold), "final I1: after the folded save is acknowledged, the entry is covered and may be cleared");
+  const inFlightEdit = editorReducer(folded, { type: "answer", key: "core.use", answer: A(["community"], 40) });
+  ok(outboxEntryCovered(entry, editorReducer(inFlightEdit, { type: "saved", patch: buildPatch(inFlightEdit)!, rev: 4 })), "final I1: a newer local edit, once saved, covers the entry's older answer");
+  const photoOnly = { rev: 4, photos: [{ id: "p_gone0001", pending: true, takenAt: 1, by: "u1" }] };
+  ok(!outboxEntryCovered(photoOnly, server) && outboxEntryCovered(photoOnly, server, ["p_gone0001"]), "final I1: an entry photo the editor never held keeps the entry, unless it was removed here");
+  ok(!outboxEntryCovered({ rev: 4, answers: { "core.seats": A(999, 10) } }, server), "final I1: same at but different content is not covered");
+  ok(outboxEntryCovered({ rev: 4, answers: { "core.seats": A(200, 10, "someone") } }, server), "final I1: the server's own answer (by differs) is covered");
+  ok(!outboxEntryCovered({ rev: 4, spaceLabel: "Lab" }, folded) && outboxEntryCovered({ rev: 3, spaceLabel: "Old room" }, staleScalar), "final I1: a dirty scalar keeps the entry; a dropped one doesn't");
+  // the editor wires it: fold on mount, every save waits for it, keepOutbox guards recordSynced
+  const ed = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/editor.tsx"), "utf8");
+  ok(/outboxEntry\("assessments", id\)/.test(ed) && /type: "foldOutbox"/.test(ed) && /await outboxFolded\.current/.test(ed) && /keepOutbox: \(entryDoc\) => !outboxEntryCovered\(/.test(ed), "final I1: the editor folds this device's entry before saving and guards recordSynced with keepOutbox");
+  const sv = readFileSync(join(ROOT, "src/lib/sync/save.ts"), "utf8");
+  const en = readFileSync(join(ROOT, "src/lib/sync/engine.ts"), "utf8");
+  ok(/keepEntry: opts\.keepOutbox/.test(sv) && /!opts\?\.keepEntry\?\.\(entry\.doc\)/.test(en), "final I1: saveThroughOutbox passes keepOutbox to recordSynced, which keeps an uncovered entry");
+
+  // I3: the save-status label
+  type LI = Parameters<typeof saveStatusLabel>[0];
+  const L = (local: LI["local"], connected: boolean, entry: LI["entry"]) => saveStatusLabel({ local, connected, entry }).text;
+  const DEVICE = "Saved on this device — will sync when you're back online";
+  ok(L("saved", true, null) === "Saved" && L("queued", true, null) === "Saved", "final I3: online, nothing queued → Saved (also once a queued save drained)");
+  ok(L("queued", false, { state: "pending" }) === DEVICE && L("idle", false, { state: "pending" }) === DEVICE, "final I3: queued and offline → saved on this device");
+  ok(L("queued", false, null) === DEVICE, "final I3: just queued offline, before the outbox read lands → still saved on this device (never a premature Saved)");
+  ok(L("queued", true, { state: "pending" }) === "Syncing…" && L("saved", true, { state: "pending" }) === "Syncing…", "final I3: queued and online → Syncing…");
+  ok(L("saved", true, { state: "error", error: "Assessment belongs to a different venue" }) === "Couldn't sync — Assessment belongs to a different venue" && saveStatusLabel({ local: "idle", connected: false, entry: { state: "error" } }).tone === "error", "final I3: errored → Couldn't sync — <error>");
+  ok(L("idle", false, { state: "error" }) === "Couldn't sync — the server refused it", "final I3: an errored entry with no reason still says why it's shown");
+  ok(L("saved", false, null) === "Saved" && L("idle", true, null) === "" && L("saving", true, { state: "pending" }) === "Saving…" && L("error", true, null) === "Not saved", "final I3: saving / not saved / idle");
+  ok(/saveStatusLabel\(\{ local: saveState, connected: sync\.connected, entry: sync\.entry \}\)/.test(ed) && /engine\.subscribe\(load\)/.test(ed) && !ed.includes(`"queued" ? "Saved on this device`), "final I3: the editor's label comes from saveStatusLabel, re-read on every SyncEngine change");
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
@@ -631,6 +692,31 @@ export async function assessmentDbChecks(ok: Ok) {
   await task8DbChecks(ok);
   await task9DbChecks(ok);
   await task11DbChecks(ok);
+  await finalReviewPushDbChecks(ok);
+}
+
+/** Final review I1: a push that throws replies `retry` (the device keeps the entry pending). */
+async function finalReviewPushDbChecks(ok: Ok) {
+  const db = await getDb();
+  const created: string[] = [];
+  const PU = { id: "u1", roles: ["Estimator"] };
+  try {
+    await assessIdentityFixtures();
+    const a = await createAssessment({ visitType: "condition", customerId: ASSESS_FIX.co1, siteId: ASSESS_FIX.site1, visitDate: Date.now(), assessorId: "u1" }, "u1");
+    created.push(a.id); registerFixture("assessments", a.id);
+    // a throw is `retry`; a permanent refusal stays `error`
+    const throwing = { get answers(): unknown { throw new Error("database went away"); } } as unknown as Record<string, unknown>;
+    const pThrow = await pushAssessment({ id: a.id, rev: 2, doc: throwing }, PU);
+    ok(pThrow.status === "retry" && typeof pThrow.error === "string", "final I1: a push that throws replies retry, not error");
+    ok((await pushAssessment({ id: "AS-999999", rev: 2, doc: {} }, PU)).status === "error" && (await pushAssessment({ id: a.id, rev: 2, doc: {} }, { id: "u9", roles: [] })).status === "error", "final I1: an unknown id or no permission is still a permanent error");
+    const fThrow = await pushFinding({ id: "fd_frv0000000000099", rev: 1, doc: throwing }, PU);
+    ok(fThrow.status === "retry", "final I1: a finding push that throws replies retry too");
+    const route = readFileSync(join(ROOT, "src/app/api/sync/push/route.ts"), "utf8");
+    ok(/"ok" \| "conflict" \| "error" \| "retry"/.test(route), "final I1: the push route's reply type carries retry");
+  } finally {
+    if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    await dropAssessIdentityFixtures();
+  }
 }
 
 /** Task 5 — the stores, printed-id allocation under the advisory lock, and the push-handler branches. */
