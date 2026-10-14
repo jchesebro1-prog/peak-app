@@ -5,7 +5,8 @@ import { buildLocalBody } from "@/lib/assist/local";
 import { pickProvider } from "@/lib/assist/provider";
 import { ASSIST_FEATURES, assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured, assistStatusLine, cleanApiKey, effectiveAnthropicKey } from "@/lib/assist/config";
 import { ASSIST_SECRETS_BLOB, assistKeyInfo, clearAssistKey, getAssistEnv, readAssistKey, resetAssistKeyCache, saveAssistKey } from "@/lib/assist/key-store";
-import { blobs } from "@/db/schema";
+import { appSettings, blobs } from "@/db/schema";
+import { getSettingsPatchStrict, mergeSettingsObject, setSettings } from "@/lib/settings";
 import { z } from "zod";
 import { RATE_LIMITS, runAssist, toJsonSchema, type RunResult } from "@/lib/assist/run";
 import { editRatio, estimateKeep, estimateOutcomeFor, replyOutcome } from "@/lib/assist/outcome";
@@ -688,6 +689,67 @@ export async function assistKeyChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** #342 — settings writes are atomic: concurrent writers of different keys, and
+ *  concurrent single-switch merges into assistFeatures, all persist. */
+export async function assistSettingsRaceChecks(ok: Ok): Promise<void> {
+  const db = await getDb();
+  const [before] = await db.select().from(appSettings).where(eq(appSettings.id, "main")).limit(1);
+  const read = async () => (await getSettingsPatchStrict()) as Record<string, unknown>;
+  try {
+    await db.delete(appSettings).where(eq(appSettings.id, "main"));
+    // No row yet: the first write creates it.
+    await setSettings({ raceA: 1 });
+    ok((await read()).raceA === 1, "settings race: setSettings creates the row when absent");
+    await setSettings({ raceKeep: { nested: [1, 2] }, raceDrop: "x" });
+    await setSettings({ raceB: "b" });
+    const k = await read();
+    ok(k.raceA === 1 && k.raceB === "b" && JSON.stringify(k.raceKeep) === '{"nested":[1,2]}', "settings race: setSettings keeps unrelated keys");
+    await setSettings({ raceKeep: { other: true } });
+    ok(JSON.stringify((await read()).raceKeep) === '{"other":true}', "settings race: a patch key replaces the whole stored value (shallow, as before)");
+    await setSettings({ raceDrop: undefined, raceNull: null });
+    const u = await read();
+    ok(!("raceDrop" in u) && u.raceNull === null && u.raceA === 1, "settings race: an undefined patch value removes the key (as the old spread did), null is stored");
+    await setSettings({});
+    ok((await read()).raceA === 1, "settings race: an empty patch changes nothing");
+
+    // Concurrent whole-doc writers, different keys.
+    await Promise.all([setSettings({ raceP: 1 }), setSettings({ raceQ: 2 }), setSettings({ raceR: 3 })]);
+    const c = await read();
+    ok(c.raceP === 1 && c.raceQ === 2 && c.raceR === 3 && c.raceA === 1, "settings race: concurrent setSettings of different keys all persist");
+
+    // Seven concurrent single-switch merges into assistFeatures.
+    await setSettings({ assistFeatures: { tasks: true }, assistUsers: ["u1"] });
+    await Promise.all(ASSIST_FEATURES.map((f, i) => mergeSettingsObject("assistFeatures", { [f]: i % 2 === 0 })));
+    const m = await read();
+    const feats = m.assistFeatures as Record<string, boolean>;
+    ok(ASSIST_FEATURES.every((f, i) => feats[f] === (i % 2 === 0)), "settings race: seven concurrent assistFeatures merges all persist");
+    ok(JSON.stringify(m.assistUsers) === '["u1"]' && m.raceP === 1 && m.raceA === 1, "settings race: a nested merge leaves every other key alone");
+    await mergeSettingsObject("assistFeatures", { reply: true });
+    const f2 = (await read()).assistFeatures as Record<string, boolean>;
+    ok(f2.reply === true && f2.tasks === true && f2.estimate === true && f2.file === false, "settings race: a single-key merge changes only that key");
+    // Mixed concurrency: whole-doc writes and a nested merge together.
+    await Promise.all([setSettings({ raceMix: 1 }), mergeSettingsObject("assistFeatures", { ask: true }), setSettings({ raceMix2: 2 })]);
+    const mx = await read();
+    ok(mx.raceMix === 1 && mx.raceMix2 === 2 && (mx.assistFeatures as Record<string, boolean>).ask === true, "settings race: setSettings and a nested merge together both persist");
+    // A non-object stored value is replaced from the partial.
+    await setSettings({ assistFeatures: "garbage" });
+    await mergeSettingsObject("assistFeatures", { brief: true });
+    ok(JSON.stringify((await read()).assistFeatures) === '{"brief":true}', "settings race: a non-object stored value is replaced by the partial");
+    // No row at all: the merge creates it.
+    await db.delete(appSettings).where(eq(appSettings.id, "main"));
+    await mergeSettingsObject("assistFeatures", { ask: true });
+    ok(JSON.stringify((await read()).assistFeatures) === '{"ask":true}', "settings race: a nested merge creates the row when absent");
+    const s = assistSettingsOf(await read());
+    ok(s.features.ask === true && s.features.tasks === true && s.features.file === false, "settings race: unset switches read their defaults");
+    let threw = "";
+    try { await mergeSettingsObject("users; drop table" as never, { a: 1 }); } catch (e) { threw = e instanceof Error ? e.message : String(e); }
+    ok(/not a mergeable/.test(threw), "settings race: mergeSettingsObject refuses a key that is not allow-listed");
+  } finally {
+    await db.delete(appSettings).where(eq(appSettings.id, "main"));
+    if (before) await db.insert(appSettings).values(before);
+  }
+}
+
 // Standalone runner (npm run test:assist).
 if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
   let fail = 0;
@@ -711,6 +773,7 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistEstimateDbChecks(ok);
     await assistReportChecks(ok);
     await assistKeyChecks(ok);
+    await assistSettingsRaceChecks(ok);
     // later tasks append: await assistXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall assist checks passed");
     process.exit(fail ? 1 : 0);

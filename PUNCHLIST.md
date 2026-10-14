@@ -12214,3 +12214,29 @@ link/archive paths a person would.
 - A person adding a Peak/Customers label in Gmail to a thread the app had already matched automatically to that same customer doesn't share it (indistinguishable from the label writer's own echo); link it in the app instead.
 - Inbox search (`searchThreads`) stays own-mailbox only; linked teammates' threads are found through ⌘K, not the Inbox search box.
 - `byCustomer` / `visibleByCustomer` and the feed still read the whole comms table (pre-existing).
+
+## 342. Settings writes are atomic — Assist feature switches no longer lose clicks — DONE 2026-10-14 on `worktree-assist-layer` (D1017)
+
+In production, clicking four Assist-pilot feature switches quickly saved only one. Two causes: `setAssistSettingsAction` rewrote the whole `assistFeatures` object (read current, write all seven keys), and `setSettings` was a read → spread → write-back of the whole settings doc whose read (`getSettingsPatch`) swallows errors to `{}`.
+
+- **`setSettings`** is one `INSERT … ON CONFLICT (id) DO UPDATE SET data = data || patch` — no read, no lost update between concurrent writers of different keys, and a failed read can no longer wipe the doc. Same meaning as the old spread: top-level shallow merge, a patch key replaces the whole stored value; an `undefined` patch value still removes the key (`data - 'key'` first).
+- **`mergeSettingsObject(key, partial)`** merges into one stored object atomically (`jsonb_set(data, {key}, coalesce(data->key,{}) || partial)`), key allow-listed (`assistFeatures`), values bound. `setAssistSettingsAction` now writes only the switches present in the patch through it; users and cap still go through `setSettings`. An unset switch reads `assistSettingsOf`'s default, as before.
+- **Settings → Beta → Assist pilot:** while a switch save is in flight every switch is disabled; the clicked value shows at once and reverts on error.
+- **Tests:** `assistSettingsRaceChecks` in `scripts/test-assist.ts` (also chained into test:specs) — concurrent `setSettings` of different keys, seven concurrent single-key merges, unrelated keys kept, `undefined`/`null`/empty patches, absent row, non-object stored value, key allow-list.
+
+**Remaining:** none. The read-modify-write callers this left open (`setPriceListEffective` and the rest) were closed by #343 (D1018).
+
+## 343. Settings and settings-blob read-modify-writes run under a row lock — DONE 2026-10-14 on `worktree-assist-layer` (D1018)
+
+Follow-up to #342. A writer that computed a key's new value from its current one (read the map or list, edit one entry, write it back whole) could still lose a concurrent edit of a *different* entry of the same key — two manufacturers' price-list dates set at once kept one. The same pattern sat on several settings-style blobs.
+
+- **`updateSettings(fn)`** (`src/lib/settings.ts`) — a transaction: `SELECT data … FOR UPDATE`, `fn(current)` returns a top-level patch merged like `setSettings` (`undefined` deletes) or `null` for no write; an empty table asks `fn({})` first, then `INSERT … ON CONFLICT DO NOTHING` and re-selects FOR UPDATE. Joins an outer transaction. `settingsFrom(patch)` gives `fn` the defaulted view.
+- **`updateBlob(id, fn)`** (`src/db/doc-store.ts`) — the same lock pattern on a `blobs` row, merged like `setBlob`.
+- **Converted (settings):** `setPriceListEffective` (still returns the full map), Locations save / remove / make default (`upsertOffice`, `removeOffice`, `setDefaultQuoteOffice`), Templates save / reset / import (`writeTemplateOverrides`), Estimating Rules venue doctrine (`setVenueDoctrineEntry`), the catalog rename's `carryPriceDates` (never-overwrite now checked under the lock) and wire-type rewrite (`renameStoredWireTypes`), the Grid wire-starter linking (`linkStoredWireTypes`), and the recordings archive's folder-cache write-back (`saveArchiveSettings` / `rebaseArchivePatch`: only the pass's own changes apply; a mailbox changed mid-pass drops the old Drive's ids).
+- **Converted (blobs):** portal grant revoke + the `lastSeenAt` touch (a touch could put back a revoke landed in between — `touchGrantSeen` now skips a revoked grant), Design Studio delete, venue calendar add / remove / CSV import of windows, device-type icons / drawing / merge-archive, Grid favourites and recents, Inbox sender rules add / remove and the filing log (the in-process queue didn't cover a second instance), the SKU-rename log, the projects dismissed list, flame-test rates, narrative intros, the catalog-rename blob sweep, and estimate-suggestion → quote linking (first quote wins, one suggestion per quote).
+- **Converted (merging list saves):** device types save, Settings → Venue types and Settings → Document categories merge the posted list with the stored one (`src/lib/settings-lists.ts` for the last two) — now on the stored list under the lock, so an icon / drawing set or a type added meanwhile is kept, and a type in use is never dropped by a racing save.
+- **Review follow-ups:** the helpers write only the patched keys under the lock; `touchGrantSeen` writes once per refresh window; the archive rebase deletes a folder only if nobody re-cached it; new Location ids get a random suffix; the in-process `serialized()` queue is gone.
+- **Left as last-write-wins by design** (whole-value saves from an editor) and **already-safe scalar / per-key writes** are listed in D1018.
+- **Tests:** `npm run test:settings-race` (`scripts/test-settings-race.ts`, also chained into test:specs) — N concurrent calls on different entries for every converted writer, other keys unchanged, null patch writes nothing, first insert on an empty table. PGlite is one connection: these prove the lock-and-merge semantics and serialization, not multi-connection Postgres concurrency (reasoned, not executed; a pin checks both helpers select FOR UPDATE).
+
+**Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.

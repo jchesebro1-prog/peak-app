@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
 import { encryptToken, decryptToken } from "@/lib/gmail/crypto";
 
 /**
@@ -106,11 +106,28 @@ export async function createGrant(input: {
   return grant;
 }
 
+/** #343: the grant is re-read under the blob's row lock, so a revoke and a
+ *  lastSeenAt touch landing together never undo each other. */
 export async function revokeGrant(id: string): Promise<void> {
-  const map = await allGrants();
-  const g = map[id];
-  if (!g) return;
-  await setBlob(BLOB_ID, { [id]: { ...g, revokedAt: Date.now() } });
+  const at = Date.now();
+  await updateBlob(BLOB_ID, (map) => {
+    const g = map[id] as PortalGrant | undefined;
+    if (!g || typeof g !== "object") return null;
+    return { [id]: { ...g, revokedAt: at } };
+  });
+}
+
+/** Stamp a grant's lastSeenAt (#343, under the row lock): only a grant that
+ *  still exists and is NOT revoked is touched — the old write spread the copy
+ *  read at sign-in, which could put back a revoke landed in between. */
+export async function touchGrantSeen(id: string, at = Date.now()): Promise<void> {
+  await updateBlob(BLOB_ID, (map) => {
+    const g = map[id] as PortalGrant | undefined;
+    if (!g || typeof g !== "object" || g.revokedAt) return null;
+    // Two renders racing: the second sees the first's stamp and skips.
+    if (g.lastSeenAt && at - g.lastSeenAt < SEEN_REFRESH_MS) return null;
+    return { [id]: { ...g, lastSeenAt: at } };
+  });
 }
 
 /** The raw magic-link token for a grant — decrypted from tokenEnc (or the
@@ -161,7 +178,7 @@ export async function portalSession(): Promise<PortalSession | null> {
   if (!g) return null;
   // touch lastSeenAt occasionally (fire-and-forget semantics)
   if (!g.lastSeenAt || Date.now() - g.lastSeenAt > SEEN_REFRESH_MS) {
-    await setBlob(BLOB_ID, { [g.id]: { ...g, lastSeenAt: Date.now() } });
+    await touchGrantSeen(g.id);
   }
   return { grantId: g.id, customerId: g.customerId, name: g.name, email: g.email };
 }

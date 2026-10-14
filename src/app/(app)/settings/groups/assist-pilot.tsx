@@ -28,6 +28,7 @@ const FEATURES = [
   { key: "brief", label: "Daily brief" },
   { key: "ask", label: "Ask AI" },
 ] as const;
+type FeatureKey = (typeof FEATURES)[number]["key"];
 
 const money = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 
@@ -286,6 +287,35 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
   const capNum = Number(cap);
   const capDirty = cap.trim() !== "" && Number.isFinite(capNum) && capNum !== settings.capUsd;
 
+  // #342 — a feature switch saves on click. While one save is in flight every
+  // switch is disabled, and the clicked value shows at once (optimistic) until
+  // the refreshed settings carry it; a failed save reverts it. An optimistic
+  // entry only applies while the stored value is still the one it was clicked
+  // from (`base`), so it expires by itself once the refresh lands.
+  const [savingFeature, setSavingFeature] = useState(false);
+  const [optimistic, setOptimistic] = useState<Partial<Record<FeatureKey, { value: boolean; base: boolean } | null>>>({});
+  const shownFeature = (k: FeatureKey): boolean => {
+    const o = optimistic[k];
+    return o && settings.features[k] === o.base ? o.value : settings.features[k];
+  };
+  const toggleFeature = (key: FeatureKey, checked: boolean) => {
+    setSavingFeature(true);
+    setOptimistic((prev) => ({ ...prev, [key]: { value: checked, base: settings.features[key] } }));
+    const revert = () => setOptimistic((prev) => ({ ...prev, [key]: null }));
+    run(async () => {
+      try {
+        const res = await setAssistSettingsAction({ features: { [key]: checked } });
+        if (!res.ok) revert();
+        return res;
+      } catch (e) {
+        revert();
+        throw e;
+      } finally {
+        setSavingFeature(false);
+      }
+    });
+  };
+
   return (
     <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
       <div style={{ fontSize: 13.5, fontWeight: 600 }}>Assist pilot</div>
@@ -329,11 +359,15 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       {/* Feature switches */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px", marginTop: 12 }}>
         {FEATURES.map((f) => (
-          <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}>
+          <label
+            key={f.key}
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: savingFeature ? "progress" : "pointer", opacity: savingFeature ? 0.7 : 1 }}
+          >
             <input
               type="checkbox"
-              checked={settings.features[f.key]}
-              onChange={(e) => run(() => setAssistSettingsAction({ features: { [f.key]: e.target.checked } }))}
+              checked={shownFeature(f.key)}
+              disabled={savingFeature}
+              onChange={(e) => toggleFeature(f.key, e.target.checked)}
             />
             {f.label}
           </label>

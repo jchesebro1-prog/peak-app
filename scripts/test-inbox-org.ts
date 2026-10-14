@@ -2470,7 +2470,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
   ok(/const \{ last4 \} = await saveAssistKey\(key, me\.name\);[\s\S]{0,120}invalidateOrgContext\(\);/.test(sa) && /await clearAssistKey\(\);\s*invalidateOrgContext\(\);/.test(sa), "fix: saving or clearing the Assist key drops the cached org context");
   ok(/await setKeepInInboxAction\(v\);\s*setNote\(null\);/.test(read("src/app/(app)/account/inbox-org-card.tsx")), "fix: the account switch clears its error note after a later successful save");
   ok(/not atomic[\s\S]{0,400}Harmless/.test(read("src/lib/inbox-org/cleanup.ts")), "fix: the cleanup lease says it isn't atomic and why that's harmless");
-  ok(/export async function setAssistSettingsAction[\s\S]*?await setSettings\(next\);\s*\/\/[^\n]*\n\s*invalidateOrgContext\(\);/.test(sa), "settings: changing the pilot / feature switches drops the cached context");
+  ok(/export async function setAssistSettingsAction[\s\S]*?await mergeSettingsObject\("assistFeatures", featurePartial\);\s*\/\/[^\n]*\n\s*invalidateOrgContext\(\);/.test(sa), "settings: changing the pilot / feature switches drops the cached context");
 
   /* settings card */
   const card = read("src/app/(app)/settings/groups/assist-pilot.tsx");
