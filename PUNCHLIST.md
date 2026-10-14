@@ -12214,3 +12214,14 @@ link/archive paths a person would.
 - A person adding a Peak/Customers label in Gmail to a thread the app had already matched automatically to that same customer doesn't share it (indistinguishable from the label writer's own echo); link it in the app instead.
 - Inbox search (`searchThreads`) stays own-mailbox only; linked teammates' threads are found through ⌘K, not the Inbox search box.
 - `byCustomer` / `visibleByCustomer` and the feed still read the whole comms table (pre-existing).
+
+## 342. Settings writes are atomic — Assist feature switches no longer lose clicks — DONE 2026-10-14 on `worktree-assist-layer` (D1017)
+
+In production, clicking four Assist-pilot feature switches quickly saved only one. Two causes: `setAssistSettingsAction` rewrote the whole `assistFeatures` object (read current, write all seven keys), and `setSettings` was a read → spread → write-back of the whole settings doc whose read (`getSettingsPatch`) swallows errors to `{}`.
+
+- **`setSettings`** is one `INSERT … ON CONFLICT (id) DO UPDATE SET data = data || patch` — no read, no lost update between concurrent writers of different keys, and a failed read can no longer wipe the doc. Same meaning as the old spread: top-level shallow merge, a patch key replaces the whole stored value; an `undefined` patch value still removes the key (`data - 'key'` first).
+- **`mergeSettingsObject(key, partial)`** merges into one stored object atomically (`jsonb_set(data, {key}, coalesce(data->key,{}) || partial)`), key allow-listed (`assistFeatures`), values bound. `setAssistSettingsAction` now writes only the switches present in the patch through it; users and cap still go through `setSettings`. An unset switch reads `assistSettingsOf`'s default, as before.
+- **Settings → Beta → Assist pilot:** while a switch save is in flight every switch is disabled; the clicked value shows at once and reverts on error.
+- **Tests:** `assistSettingsRaceChecks` in `scripts/test-assist.ts` (also chained into test:specs) — concurrent `setSettings` of different keys, seven concurrent single-key merges, unrelated keys kept, `undefined`/`null`/empty patches, absent row, non-object stored value, key allow-list.
+
+**Remaining:** none. Not changed: other read-modify-write callers of `setSettings` that compute a nested value from `getSettings()` first (e.g. `setPriceListEffective`) can still lose a concurrent change to that same key.

@@ -11346,7 +11346,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 }
 
 
-import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChecks, assistOutcomeChecks, assistTaskChecks, assistReplyChecks, assistEstimatePureChecks, assistEstimateDbChecks, assistReportChecks, assistKeyChecks } from "./test-assist";
+import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChecks, assistOutcomeChecks, assistTaskChecks, assistReplyChecks, assistEstimatePureChecks, assistEstimateDbChecks, assistReportChecks, assistKeyChecks, assistSettingsRaceChecks } from "./test-assist";
 import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks, inboxOrgUiChecks, inboxOrgCleanupChecks } from "./test-inbox-org";
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
@@ -11705,6 +11705,7 @@ seeded()
   .then(() => assistEstimateDbChecks(ok))
   .then(() => assistReportChecks(ok))
   .then(() => assistKeyChecks(ok))
+  .then(() => assistSettingsRaceChecks(ok))
   .then(() => inboxOrgPureChecks(ok))
   .then(() => inboxOrgDbChecks(ok))
   .then(() => inboxOrgPipelineChecks(ok))

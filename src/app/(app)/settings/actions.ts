@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getSettings, getSettingsStrict, setSettings, type Office } from "@/lib/settings";
+import { getSettings, getSettingsStrict, mergeSettingsObject, setSettings, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
   type GeoSearchHit,
@@ -18,7 +18,7 @@ import {
   type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
-import { assistSettingsOf, cleanApiKey } from "@/lib/assist/config";
+import { ASSIST_FEATURES, cleanApiKey } from "@/lib/assist/config";
 import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
 import { pingAnthropicKey } from "@/lib/assist/anthropic";
 import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
@@ -767,24 +767,24 @@ export async function setAssistSettingsAction(patch: {
     const known = new Set((await allUsers()).map((u) => u.id));
     next.assistUsers = Array.from(new Set(patch.users.filter((id) => typeof id === "string" && known.has(id))));
   }
+  // #342 — only the switches PRESENT in the patch are written, as a nested
+  // atomic merge: one click can no longer rewrite (and lose a concurrent click
+  // on) the other six. Absent keys keep their stored value, or
+  // assistSettingsOf's default when never stored.
+  const featurePartial: Record<string, boolean> = {};
   if (patch.features && typeof patch.features === "object") {
-    const cur = assistSettingsOf(await getSettings()).features;
-    next.assistFeatures = {
-      tasks: typeof patch.features.tasks === "boolean" ? patch.features.tasks : cur.tasks,
-      reply: typeof patch.features.reply === "boolean" ? patch.features.reply : cur.reply,
-      estimate: typeof patch.features.estimate === "boolean" ? patch.features.estimate : cur.estimate,
-      file: typeof patch.features.file === "boolean" ? patch.features.file : cur.file,
-      promise: typeof patch.features.promise === "boolean" ? patch.features.promise : cur.promise,
-      brief: typeof patch.features.brief === "boolean" ? patch.features.brief : cur.brief,
-      ask: typeof patch.features.ask === "boolean" ? patch.features.ask : cur.ask,
-    };
+    for (const f of ASSIST_FEATURES) {
+      const v = patch.features[f];
+      if (typeof v === "boolean") featurePartial[f] = v;
+    }
   }
   if (patch.capUsd !== undefined) {
     const n = Number(patch.capUsd);
     if (!Number.isFinite(n) || n < 0 || n > 10_000) return { ok: false, error: "Cap must be between $0 and $10,000." };
     next.assistMonthlyCapUsd = Math.round(n * 100) / 100;
   }
-  await setSettings(next);
+  if (Object.keys(next).length) await setSettings(next);
+  if (Object.keys(featurePartial).length) await mergeSettingsObject("assistFeatures", featurePartial);
   // #335 — the pilot list / file + promise switches gate the inbox pipeline
   invalidateOrgContext();
   revalidatePath("/", "layout");

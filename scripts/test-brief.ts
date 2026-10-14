@@ -252,7 +252,7 @@ function featureChecks(ok: Ok): void {
   const pilot = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");
   ok(/\{ key: "brief", label: "Daily brief" \}/.test(pilot), "brief feature: the pilot card has a Daily brief switch");
   const act = readFileSync("src/app/(app)/settings/actions.ts", "utf8");
-  ok(/"promise" \| "brief"( \| "ask")?, boolean/.test(act) && /brief: typeof patch\.features\.brief === "boolean" \? patch\.features\.brief : cur\.brief/.test(act), "brief feature: setAssistSettingsAction accepts and writes brief");
+  ok(/"promise" \| "brief"( \| "ask")?, boolean/.test(act) && /for \(const f of ASSIST_FEATURES\) \{[^}]*typeof v === "boolean"\) featurePartial\[f\] = v;/.test(act) && ASSIST_FEATURES.includes("brief"), "brief feature: setAssistSettingsAction accepts and writes brief");
   const settings = readFileSync("src/lib/settings.ts", "utf8");
   ok(/assistFeatures\?: \{[^}]*brief\?: boolean/.test(settings), "brief feature: the settings type carries assistFeatures.brief");
 }

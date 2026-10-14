@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { appSettings } from "@/db/schema";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
@@ -322,28 +322,80 @@ export async function getSettingsStrict(): Promise<AppSettingsData> {
   return { ...DEFAULT_SETTINGS, ...patch } as AppSettingsData;
 }
 
-/** Merge a patch into the stored settings (port of AppSettings.set). */
+/**
+ * Merge a patch into the stored settings (port of AppSettings.set).
+ *
+ * ONE atomic statement (#342): `INSERT … ON CONFLICT DO UPDATE SET data =
+ * data || patch`, so two concurrent writers of different keys can never lose
+ * each other (the old read → spread → write-back did, and a failed read
+ * swallowed to `{}` would have wiped every setting). Same meaning as the old
+ * `{ ...current, ...patch }`: a top-level shallow merge, a patch key replaces
+ * the whole stored value. A key whose patch value is `undefined` used to be
+ * written back as undefined, which JSON storage drops — i.e. it DELETED the
+ * stored key; `||` alone would keep the old value, so those keys are removed
+ * explicitly (`data - 'key'`) before the merge to stay equivalent.
+ */
 export async function setSettings(
   patch: Record<string, unknown>
 ): Promise<void> {
   const db = await getDb();
-  const current = await getSettingsPatch();
-  const next = { ...current, ...patch };
-  const rows = await db
-    .select({ id: appSettings.id })
-    .from(appSettings)
-    .where(eq(appSettings.id, "main"))
-    .limit(1);
-  if (rows.length) {
-    await db
-      .update(appSettings)
-      .set({ data: next, updatedAt: Date.now() })
-      .where(eq(appSettings.id, "main"));
-  } else {
-    await db
-      .insert(appSettings)
-      .values({ id: "main", data: next, updatedAt: Date.now() });
+  const dropped: string[] = [];
+  const kept: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) dropped.push(k);
+    else kept[k] = v;
   }
+  let base = sql`${appSettings.data}`;
+  for (const k of dropped) base = sql`(${base} - ${k}::text)`;
+  const now = Date.now();
+  await db
+    .insert(appSettings)
+    .values({ id: "main", data: kept, updatedAt: now })
+    .onConflictDoUpdate({
+      target: appSettings.id,
+      set: {
+        data: sql`${base} || ${JSON.stringify(kept)}::jsonb`,
+        updatedAt: now,
+      },
+    });
+}
+
+/** Keys mergeSettingsObject may nest-merge. A fixed list, never caller text:
+ *  the key is bound as a parameter AND must be on this list. */
+const MERGEABLE_OBJECT_KEYS = ["assistFeatures"] as const;
+export type MergeableSettingsObjectKey = (typeof MERGEABLE_OBJECT_KEYS)[number];
+
+/**
+ * Atomically shallow-merge `partial` INTO the object stored under settings key
+ * `key` (#342) — `data = jsonb_set(data, {key}, coalesce(data->key, {}) ||
+ * partial)` in one upsert, so concurrent writers of different nested keys
+ * (seven Assist feature switches clicked in a row) all persist. Keys absent
+ * from `partial` keep their stored value. A non-object stored value is
+ * replaced by `partial`. Values bind as parameters; `key` must be allow-listed.
+ */
+export async function mergeSettingsObject(
+  key: MergeableSettingsObjectKey,
+  partial: Record<string, unknown>
+): Promise<void> {
+  if (!(MERGEABLE_OBJECT_KEYS as readonly string[]).includes(key)) {
+    throw new Error(`mergeSettingsObject: "${key}" is not a mergeable settings key`);
+  }
+  const db = await getDb();
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(partial)) if (v !== undefined) clean[k] = v;
+  const json = JSON.stringify(clean);
+  const now = Date.now();
+  const cur = sql`CASE WHEN jsonb_typeof(${appSettings.data} -> ${key}::text) = 'object' THEN ${appSettings.data} -> ${key}::text ELSE '{}'::jsonb END`;
+  await db
+    .insert(appSettings)
+    .values({ id: "main", data: { [key]: clean }, updatedAt: now })
+    .onConflictDoUpdate({
+      target: appSettings.id,
+      set: {
+        data: sql`jsonb_set(${appSettings.data}, ARRAY[${key}::text], ${cur} || ${json}::jsonb, true)`,
+        updatedAt: now,
+      },
+    });
 }
 
 /** #133 — set (or with `at: null`, clear) one manufacturer's price-list
