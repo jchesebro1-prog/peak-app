@@ -200,8 +200,9 @@ removed per `docs/superpowers/specs/2026-07-19-ai-removal-design.md` and stay
 removed — the app is fully deterministic with no key set. Recover via version history.
 
 **Turning Assist on (D869–D880).** A small opt-in layer — Suggest tasks and Draft
-reply on an email thread in the Inbox, and Suggest estimate (§6e; it replaced
-Draft estimate, #338) — is the one place the app calls a model:
+reply on an email thread in the Inbox, Suggest estimate (§6e; it replaced
+Draft estimate, #338) and Ask AI in ⌘K search (§6f, #339) — is the one place the
+app calls a model:
 
 1. Create an API key at console.anthropic.com with billing, and set a Console
    spend limit that matches the monthly cap (default $200).
@@ -445,6 +446,83 @@ creates or prices a quote. It replaced #334's Draft estimate.
   deleted), still pending
   (not saved yet), and **No suggestion** (nothing came of the run, or it was replaced
   by Suggest again before anyone saved it).
+
+## 6f. Ask AI (#339, D943–D960)
+
+Ask AI answers questions about Peak's own records from the ⌘K search box. It looks
+things up the way you would — companies, venues, quotes, leads, projects, your own
+email threads and meetings, the catalog, your tasks — and answers with links to what
+it read. It can also propose a task, a note, an email or a suggested estimate as a
+card, but it never changes anything itself: nothing happens until you press the
+card's button.
+
+**Turn it on**
+
+- Settings → Beta → Assist pilot. The Claude key must be set (section 6) — without a
+  key the Ask row never appears, even for pilot users — and the person must be ticked
+  in the pilot list.
+- Turn on **Ask AI** on that card (it starts off). The hint under the switches shows
+  which models answer (Haiku, and Sonnet for Try harder).
+
+**Ask a question**
+
+1. Click the search box in the top bar (or press ⌘K) and type your question, e.g.
+   "what's open with Lincoln High?" or "compare the last 3 quotes for Acme Church".
+2. The first row reads **✦ Ask AI: <your question>**. Click it, or press **⌘↵**
+   (Ctrl+↵ on Windows). The Ask panel opens under the search box.
+3. The answer streams in. While it works you see what it is looking up ("Looking up
+   quotes…"); **Stop** ends it. Record names in the answer are links: a click opens
+   the record and closes the panel; Shift-click opens a thread, estimate or company in
+   a pop-out window. **Looked at N records** lists what it read.
+4. Ask follow-ups in the box at the bottom (Enter sends, Shift+Enter starts a new
+   line). The panel remembers the conversation until you close it.
+5. Not happy with an answer? **Try harder** (under the latest answer) asks the same
+   question again with the stronger model and replaces that answer. It costs more, so
+   use it when the first answer missed something.
+6. **Esc** or **✕** closes the panel and forgets the conversation. Nothing is saved.
+
+**"This screen"**
+
+- Open Ask from a company, venue, quote (any builder), email thread, meeting, lead,
+  project or venue assessment and the panel shows **Looking at: <name>**. Questions
+  like "summarize this" or "what's still open here?" are about that record. Press ✕
+  on the chip to ask without it.
+
+**Search the web**
+
+- Turn on **Search the web** under the input for a question that needs outside
+  information (a manufacturer's spec, a venue's address). It is off by default and
+  applies to that question only. The answer lists its **Sources**; they open in a new
+  tab. Web search costs a little extra per search.
+
+**Cards**
+
+- **Task** — edit the title, due date, assignee and notes, then **Create task**. It is
+  linked to the records the card shows.
+- **Note** — **Add note** adds it to the company, venue, lead or project named on the
+  card.
+- **Email** — **Open in composer** opens the Inbox composer with the recipients,
+  subject and body filled in. Nothing is sent: read it, change it, and send it yourself. Recipients come only
+  from addresses on Peak's records or ones you typed.
+- **Suggest estimate** — starts a suggestion from the email, lead, site visit or
+  meeting (section 6e) and opens the Estimator.
+- Cards can only point at records Ask actually looked up in this conversation, and
+  every button re-checks your access.
+
+**What it can and can't see**
+
+- Only what you can already open: your own mailbox (never a teammate's), meetings you
+  can see (never transcripts), and the shared company, quote, lead and project
+  records. Prices come only from records; quotes read the way the customer sees them,
+  and service quotes show their total but not their lines.
+- It isn't available on narrow screens or phones yet — the search box, and so Ask, is
+  hidden on windows 860 px wide or less.
+
+**Watch the cost and use**
+
+- Assist pilot card → report → **Ask AI**: questions per person, Haiku vs Sonnet, how
+  often Try harder is used, cards proposed and confirmed by kind, web searches and
+  cost. Each person can ask 60 questions an hour, and the monthly cap applies.
 
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 

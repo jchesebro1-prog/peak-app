@@ -162,7 +162,8 @@ See `.env.example`.
    the app is fully deterministic, no `ANTHROPIC_API_KEY` anywhere; renewal
    drafts and scope assembly are rules-based (D75/D86).** D89 stays — its
    deletions are not coming back — but Assist (#334, D869–D880, phase 53)
-   reintroduces opt-in model calls behind a gate.
+   reintroduces opt-in model calls behind a gate, and Ask AI (#339, D943,
+   phase 58) is a fresh, read-and-propose assistant built on it.
 9. ✅ Data migration + go-live (tooling) — the Import/Export hub (per-type
    templates, dedupe, paste + AI extraction, preview→confirm), a
    `Clear demo data (go-live)` reset (Settings → Beta) that wipes demo records
@@ -1240,8 +1241,47 @@ See `.env.example`.
     the key, pilot users and the Suggest estimate toggle; try it from an email, a
     lead, a site visit and a meeting; check the Opus cost per run in the report.
     Follow-ups: site-only meetings get no hint; an offline-queued survey edit
-    isn't on the server yet when Suggest reads it. Next: AI sidebar. Punch item
-    #338.
+    isn't on the server yet when Suggest reads it. Next: AI sidebar (now shipped
+    as Ask AI, phase 58). Punch item #338.
+
+58. ✅ **Ask AI** (#339, D943–D960) — roadmap piece 4, the last: a researcher
+    over Peak's own data inside ⌘K search, for Assist pilot users with the new
+    opt-in **Ask AI** switch **and** a Claude key (`askGateFor`; Claude-only, no
+    migration; `ASSIST_MODEL_ASK` / `ASSIST_MODEL_ASK_HARD` optional). It
+    deliberately reverses D89's assistant removal and the #334 brief's non-goal
+    (D943) as a fresh build; the model only reads and proposes. The nav search
+    gains a first row "✦ Ask AI: <query>" (⌘↵; hidden at 860 px and below with
+    the search box — open question) that opens `AskPanel`
+    (`src/components/ask/`): a context chip from `GET /api/assist/ask/context`
+    (`{ref, title}` only), streamed answers, "Looked at N records", Sources,
+    cards, **Try harder** (re-asks on Sonnet; the earlier run is discarded only
+    when the retry succeeds), a Search the web toggle (off) and Stop; Esc, ✕ or
+    navigating forgets the conversation. `POST /api/assist/ask`
+    (`maxDuration = 120`, NDJSON) runs `runAsk` (`src/lib/assist/ask-runner.ts`):
+    earlier turns packed into the first user message (no replay), ≤ 6 rounds /
+    12 tool calls / 6,000-character results / 60 s Haiku · 90 s Sonnet, the final
+    round keeping its tools with `tool_choice: none` (not yet verified live), web
+    search `max_uses` 3 per round with the version per model, one `assist_runs`
+    row per question billed from stream events. Eleven read tools
+    (`ask-tools-server.ts`) use the asker's own access — threads through
+    `loadThreadFor`, meetings through `canSeeMeeting` (no transcript), search via
+    the extracted ⌘K core (`src/lib/search/global-search.ts`) scoped to the
+    asker's mailbox, a SQL catalog pre-filter, customer-row quote lines with the
+    bonus hidden; forbidden reads like missing. Four proposal tools write
+    nothing: cards (pure `features/ask-cards.ts`) keep only ids this question
+    exposed (≤ 20 earlier `[[kind:id]]` tokens re-checked) and recipients from
+    structured fields or the user's own typing, and confirm through the app's
+    own paths — `createAskTaskAction`, company / venue / lead / project note
+    actions, `/inbox?compose=ask` (sessionStorage, never sends) and
+    `startSuggestion` — then `recordAskCardAction` marks the run accepted.
+    Answers render as text; a ref links only when the server sent it. The
+    Assist report gains an Ask AI table. Remaining is Jeff-gated: turn Ask AI on
+    for the pilot, try company / quote-comparison / this-screen / web questions,
+    each card and Try harder, check the forced final round and Haiku web search
+    live, read the report after a week, decide on narrow screens. Follow-ups:
+    ⌘K still lists other mailboxes' thread subjects, `list_quotes` without a
+    company scans headers, lead/project notes post no LiveSync entity. This
+    completes the AI roadmap. Punch item #339.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

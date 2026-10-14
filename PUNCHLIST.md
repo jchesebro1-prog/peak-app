@@ -12106,4 +12106,34 @@ link/archive paths a person would.
 - A lead suggestion loads the caller's whole mailbox to find the threads linked to the lead (no `link` column on comms); fine today, heavy for a large mailbox.
 - Renaming the report row to "Suggest estimate (…)" also relabels past months' Draft estimate runs.
 
-**Next roadmap piece:** AI sidebar.
+**Next roadmap piece:** AI sidebar. (Built as #339, Ask AI.)
+
+## 339. Ask AI — a researcher over Peak's own data in ⌘K search, with proposal cards — BUILT 2026-10-13 on `worktree-assist-layer` (D943–D960)
+
+**Asked (Jeff, 2026-10-13):** roadmap piece 4, the last ("AI sidebar"). An AI research assistant inside ⌘K: answers questions about company data, knows the screen it was opened from, proposes actions (task, note, email, Suggest estimate) that the user confirms, and searches the web only when asked. Haiku answers; **Try harder** re-asks with Sonnet. Assist pilot users only, behind a new **Ask AI** switch. Spec `docs/superpowers/specs/2026-10-13-ask-ai-design.md`. Reverses D89's assistant removal and the #334 brief's non-goal, deliberately (D943). Builds on Assist (#334), pop-outs (#336) and Suggest estimate (#338). No migration; new optional env vars `ASSIST_MODEL_ASK` / `ASSIST_MODEL_ASK_HARD`.
+
+**Done:**
+- **Entry:** "✦ Ask AI: <query>" as the first row of the nav search dropdown (⌘↵ / Ctrl+↵), shown only when `askGateFor` passes — pilot user, Ask AI switch on, `ASSIST_DISABLED` off, **and a Claude key** (D944, D946). Hidden at 860 px and below with the search box.
+- **Panel** (`src/components/ask/AskPanel.tsx`): context chip ("Looking at: …", ✕ to drop), streamed answers with status lines, "Looked at N records", Sources, cards under the answer that proposed them, **Try harder** on the latest answer (replaces it only on a successful retry), Search the web toggle (off), follow-up input, Stop. Esc / ✕ / navigating closes it and forgets the conversation. Plain-text rendering; a `[[kind:id]]` links only when the server sent that ref (D945, D957).
+- **Route** `POST /api/assist/ask` (`maxDuration = 120`, 415 / `requireUser` / 400, NDJSON `no-store`) → `runAsk` (`src/lib/assist/ask-runner.ts`): no replay — earlier turns packed into the first user message; ≤ 6 rounds, ≤ 12 tool calls, 6,000-character results, 60 s / 90 s; final round keeps tools with `tool_choice: none`; refusal / cut-off / pause_turn / timeout / abort handled; one `assist_runs` row per question billed from stream events (D947, D948, D958).
+- **Read tools** (`ask-tools-server.ts`, 11): search (⌘K core extracted to `src/lib/search/global-search.ts`, byte-identical for ⌘K; Ask's is scoped to the asker's own mailbox), company, venue, quote (customer rows, bonus hidden; service quotes print no lines), list quotes, lead, project, thread (own mailbox, newest messages kept), meeting (`canSeeMeeting`, no transcript), catalog (SQL pre-filter ≤ 400), my tasks. Forbidden reads like missing (D950–D952).
+- **Web search** server tool only with the toggle: `max_uses` 3 per round (≤ 18 per question), `web_search_20260209` on Sonnet / `20250305` on Haiku, carries on without web on a 400 (D949).
+- **Cards** (`features/ask-cards.ts`): ids only from this question's whitelist (≤ 20 earlier tokens re-checked newest first), recipients only from structured fields or typed by the user; confirm through `createAskTaskAction` (new), `addCustomerNoteAction` / `addVenueNoteAction` (new) / `logActivityAction` / `addProjectNoteAction` (new), `?compose=ask` (sessionStorage hand-off, never sends) and `startSuggestion` (no navigation once the panel is closed); `recordAskCardAction` marks the run accepted (D953–D955).
+- **Page context** for companies, venues, every quote builder, threads, meetings (`?m=`), leads, projects and venue assessments; the chip route returns only `{ref, title}` (D956).
+- **Settings + report:** Ask AI switch and model hint on the Assist pilot card; an Ask AI report table — questions per person, Haiku / Sonnet, Try harder rate, cards proposed / confirmed by kind, web searches, cost (D959).
+- **Tests:** `npm run test:ask` (chained into test:specs).
+
+**Remaining (Jeff-gated):**
+- (1) Settings → Beta → Assist pilot: the Claude key must be set (D881), the person ticked, and the **Ask AI** switch on (it starts off). Without a key the ⌘K row never shows.
+- (2) Try it: a company question ("what's going on with <company>?"), "compare the last 3 quotes for <company>", a "this screen" question from a company page, a quote and an email thread, each card kind (task, note on a company / venue / lead / project, email → composer, Suggest estimate), **Try harder**, and a question with **Search the web** on.
+- (3) The live check the build couldn't do (no key on the build machine): a long question that reaches the forced final round (tools kept, `tool_choice: none`) must answer rather than 400, and web search must work on Haiku 5.5 (`web_search_20250305`). Watch the Vercel logs for `[ask] run failed`.
+- (4) After a week, read the Ask AI table in the Assist report (questions, Try harder rate, cards confirmed, web searches, cost) and keep or kill it.
+- (5) Decide whether Ask should be reachable on narrow screens and phones: today the nav search box, and so Ask, is hidden at 860 px and below, and the native shell has no entry (D944).
+
+**Known follow-ups:**
+- ⌘K itself still lists other mailboxes' email-thread subjects (pre-existing; Ask's own search is scoped) (D960).
+- `list_quotes` with no company scans every quote row's header projection; fine today, revisit past ~10k quotes.
+- Lead and project note cards post nothing on the pop-out LiveSync channel (#336 has no lead or project entity); other windows catch up on focus.
+- `max_uses` is per round, so a web question can make up to 18 searches; tighten if the report shows heavy use (D949).
+
+**This completes the AI roadmap** (Inbox organization #335 → pop-outs #336 → AI brief #337 → estimate suggestion #338 → Ask AI #339).
