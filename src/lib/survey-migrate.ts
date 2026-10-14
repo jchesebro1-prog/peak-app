@@ -184,7 +184,8 @@ export function stepMeasureLinks(s: MigratableSurvey): void {
     const rv = strOf(rig?.[from]);
     if (!rv) continue;
     const mv = s.measurements?.[to];
-    if (blankStr(mv)) (s.measurements ||= {})[to] = rv;
+    /* Only a never-answered value takes the Rigging one; "" means the user cleared it (it stays cleared, the old value stays visible as a note). */
+    if (mv === undefined) (s.measurements ||= {})[to] = rv;
     else if (strOf(mv) !== rv) addLegacyNote(s, { section: "dRigging", label: `${label} (Rigging, before #344)`, text: rv });
   }
   const counts: Array<[string, string]> = [["linesetCount", "Lineset count"], ["battenCount", "Batten count"]];

@@ -572,8 +572,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(sysB4.includes("group.scopeLabel") && sysB4.includes('"scopeOther"') && !sysB4.includes("toggleScope") && !ctlB4.includes("toggleScope="),
     "#344 B4: scope chips write scope + scopeOther (the old toggleScope prop is gone)");
   ok(sysB4.includes("splitGoalLines") && /Array\.isArray\(raw\)/.test(sysB4), "#344 B4: goals read a list as-is (blank rows survive editing) and split an old string");
-  ok(sysB4.includes('field.type === "month"') && sysB4.includes('type="month"') && /\^\\d\{4\}-\\d\{2\}\$/.test(sysB4),
-    "#344 B4: month fields use <input type=month>, a non-YYYY-MM value shows empty");
+  ok(sysB4.includes('field.type === "month"') && sysB4.includes('type="month"') && sysB4.includes('placeholder="YYYY-MM"') && !/value=\{\/\^\\d\{4\}/.test(sysB4),
+    "#344 B4: month fields use <input type=month> and pass the stored text through (the text fallback stays typeable)");
   ok(sysB4.includes('field.type === "condition"') && sysB4.includes("<ConditionSlider") && sysB4.includes('field.type === "textarea"') && sysB4.includes("taStyle"),
     "#344 B4: condition fields render the slider and textarea fields a full-width textarea");
   ok(sysB4.includes("field.bind") && sysB4.includes("props.setMeasure(") && sysB4.includes("Same value as Measurements") && ctlB4.includes("measureValue={mv}") && ctlB4.includes("setMeasure={setMeasure}"),
@@ -592,6 +592,22 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#344 B4: fixture rows get a Position select and derived totals under the inventory");
   ok([curt, lpos].every((f) => f.startsWith('"use client"') && !/^import (?!type)[^\n]*stores\//m.test(f) && !/"server-only"|@\/db/.test(f)),
     "#344 B4: the new row components are client-safe (no runtime store imports)");
+  {
+    /* a cleared bound field stays cleared; the old Rigging value stays visible as an Older note */
+    const cleared = mm({ measurements: { gridH: "" }, disciplines: { rigging: { gridHeight: "28" } } } as MigratableSurvey);
+    ok(cleared.measurements?.gridH === "" && hasNote(cleared, "dRigging", "Grid height (Rigging, before #344)", "28"),
+      "#344 B4: a cleared Grid height stays cleared and the old Rigging value shows as an Older note");
+    const again = mm(cleared);
+    ok(again.measurements?.gridH === "" && notes(again).filter((n) => n.label === "Grid height (Rigging, before #344)").length === 1,
+      "#344 B4: the cleared-field migration is idempotent");
+    const gal = mm({ measurements: { loadingGallery: "" }, disciplines: { rigging: { loadingGalleryNotes: "stage left" } } } as MigratableSurvey);
+    ok(gal.measurements?.loadingGallery === "" && hasNote(gal, "dRigging", "Loading gallery notes (Rigging, before #344)", "stage left"),
+      "#344 B4: a cleared Loading gallery stays cleared and its old value shows as an Older note");
+    const never = mm({ disciplines: { rigging: { gridHeight: "28" } } } as MigratableSurvey);
+    ok(never.measurements?.gridH === "28" && !hasNote(never, "dRigging", "Grid height (Rigging, before #344)"), "#344 B4: a never-answered Grid height still takes the Rigging value");
+  }
+  ok(pageB4.includes("disciplinesActive") && /needsFabric \?[^\n]*fabricPartsByCategory/.test(pageB4) && /needsFabric/.test(pageB4),
+    "#344 B4: the fabric list is read only when curtains are in play");
   ok(pageB4.includes("fabricPartsByCategory") && pageB4.includes("fabricOptions") && ctlB4.includes("fabricOptions={meta.fabricOptions}"),
     "#344 B4: the fabric datalist comes from the catalog's fabric parts via meta");
   ok(rd(`${b3dir}/goals-list.tsx`).includes("e.keyCode === 229"), "#344 B4: goals Enter also ignores Safari's IME keyCode 229");

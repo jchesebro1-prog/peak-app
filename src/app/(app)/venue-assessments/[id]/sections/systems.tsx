@@ -159,12 +159,13 @@ function Field({
     );
   }
   if (field.type === "month") {
-    /* Stored YYYY-MM; anything else (old free text lives on in Older notes) shows empty. */
+    /* The stored text passes straight through: browsers with a month picker blank an invalid value themselves,
+     * and the text fallback (desktop Safari) stays typeable. */
     const month = textOf(raw);
     return (
       <div>
         {label}
-        <input id={id} type="month" value={/^\d{4}-\d{2}$/.test(month) ? month : ""} onChange={(event) => write(event.target.value)} style={inpStyle} />
+        <input id={id} type="month" value={month} placeholder="YYYY-MM" onChange={(event) => write(event.target.value)} style={inpStyle} />
       </div>
     );
   }

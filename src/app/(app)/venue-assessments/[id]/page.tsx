@@ -46,6 +46,9 @@ export default async function SurveyEditorPage({
   // Recordings (spec §4.4/§6): header strip + "From recording" prefill
   // panels. Both are client-rendered inside the editor, so the server half
   // (store reads + record gate) is computed here and passed down.
+  // Curtains are in play when the discipline is active or in scope, or the scope is still unanswered (shows every discipline).
+  const needsFabric =
+    (rec.disciplinesActive || []).includes("curtain") || !(rec.scope && rec.scope.length) || rec.scope.includes("curtain");
   const [autoCerts, recordings, fromRecording, visitIds, canSuggest, fabricRows] = await Promise.all([
     resolveCerts(rec.customerId, rec.locationId),
     loadRecordingsStrip("survey", rec.id),
@@ -53,7 +56,7 @@ export default async function SurveyEditorPage({
     visitIdsForSurvey(rec.id),
     estimateSuggestEnabled(user.id),
     // #344 B4 — the curtain rows' Fabric type suggestions; a failed read just means no datalist.
-    fabricPartsByCategory().catch(() => []),
+    needsFabric ? fabricPartsByCategory().catch(() => []) : Promise.resolve([] as Awaited<ReturnType<typeof fabricPartsByCategory>>),
   ]);
   const fabricOptions = [...new Set(fabricRows.map((p) => (p.desc || "").trim()).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b))
