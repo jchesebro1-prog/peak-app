@@ -2,13 +2,13 @@
    printed id (MPSD-LIN-RIG-003) is a field the SERVER allocates under an advisory lock per (company, venue,
    category), max + 1, never reused — voided findings keep their number. Status changes only through
    transitionFinding / linkQuote; findings are voided, never deleted. Server-only. */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { ASSESSMENT_LOCK_NAMESPACE, getDb, inTransaction, withAdvisoryLock } from "@/db";
 import { listDocs, listDocsByField } from "@/db/doc-store";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { suggestCompanyCode, suggestSiteCode, withCollisionSuffix } from "@/lib/assessments/codes";
 import type { Category, Rating } from "@/lib/assessments/defs/types";
-import { STATUSES, formatPrintedId, immediateProblems, mergePlan, splitPlan, transitionProblems, voidReasonProblem, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
+import { STATUSES, formatPrintedId, immediateProblems, printedPrefix, mergePlan, splitPlan, transitionProblems, voidReasonProblem, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
 import { allCompanies, getCompany, setCompanyShortCode } from "@/lib/identity/companies";
 import { getSite, setSiteShortCode, sitesForCompany } from "@/lib/identity/sites";
 import { can } from "@/lib/team";
@@ -316,18 +316,26 @@ async function ensureCodes(customerId: string, siteId: string): Promise<{ compan
   return { company: companyCode, site: siteCode };
 }
 
-/** Highest seq ever issued for this venue + category — voided and deleted findings included, so no number is
- *  ever reused. Must run inside the allocation lock. */
-async function maxSeq(customerId: string, siteId: string, category: Category): Promise<number> {
+/** Highest seq ever issued for this venue + category, or under this printed prefix (`MPSD-LIN-RIG`) — voided and
+ *  deleted findings included, so no number is ever reused, and no printed id repeats after a code change hands an old
+ *  code to another venue (#340 final review M1). Must run inside the allocation locks. */
+async function maxSeq(customerId: string, siteId: string, category: Category, prefix: string): Promise<number> {
   const db = await getDb();
   const t = DOC_TABLES.findings;
+  // Codes are A–Z / 0–9 only (CODE_RE), so the prefix has no LIKE wildcards; escape anyway.
+  const like = prefix.replace(/[\\%_]/g, (c) => `\\${c}`) + "-%";
   const rows = await db
     .select({ m: sql<string | number | null>`max((${t.doc}->>'seq')::numeric)` })
     .from(t)
     .where(and(
-      eq(sql`${t.doc}->>'customerId'`, customerId),
-      eq(sql`${t.doc}->>'siteId'`, siteId),
-      eq(sql`${t.doc}->>'category'`, category),
+      or(
+        and(
+          eq(sql`${t.doc}->>'customerId'`, customerId),
+          eq(sql`${t.doc}->>'siteId'`, siteId),
+          eq(sql`${t.doc}->>'category'`, category),
+        ),
+        sql`${t.doc}->>'printedId' like ${like}`,
+      ),
       sql`jsonb_typeof(${t.doc}->'seq') = 'number'`,
     ));
   const m = Number(rows[0]?.m ?? 0);
@@ -346,7 +354,11 @@ export async function allocatePrintedId(f: Finding): Promise<Finding> {
   if (f.printedId) return f;
   if (inTransaction()) throw new Error("allocatePrintedId must run outside a transaction");
   const codes = await ensureCodes(f.customerId, f.siteId);
-  return withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `${f.customerId}:${f.siteId}:${f.category}`, () =>
+  // Lock order is always prefix → venue → finding: two venues sharing a printed prefix (a code handed on after a
+  // change) serialize on the prefix, and one venue's allocations still serialize on the venue.
+  const prefix = printedPrefix(codes.company, codes.site, f.category);
+  return withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `printed:${prefix}`, () =>
+    withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `${f.customerId}:${f.siteId}:${f.category}`, () =>
     withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `finding:${f.key}`, async () => {
       const row = await readRow("findings", f.key);
       if (row?.deleted) throw new Error("Finding not found");
@@ -354,7 +366,7 @@ export async function allocatePrintedId(f: Finding): Promise<Finding> {
       if (cur.printedId) return cur;
       // Changed under us since the caller read it: leave it for the next save to number under the right lock.
       if (cur.customerId !== f.customerId || cur.siteId !== f.siteId || cur.category !== f.category) return cur;
-      const seq = (await maxSeq(f.customerId, f.siteId, f.category)) + 1;
+      const seq = (await maxSeq(f.customerId, f.siteId, f.category, prefix)) + 1;
       const next: Finding = {
         ...cur, companyCode: codes.company, siteCode: codes.site, seq,
         printedId: formatPrintedId(codes.company, codes.site, f.category, seq),
@@ -362,7 +374,7 @@ export async function allocatePrintedId(f: Finding): Promise<Finding> {
       };
       await writeRow("findings", f.key, next as unknown as Record<string, unknown> & { rev: number }, !row);
       return next;
-    }));
+    })));
 }
 
 /**

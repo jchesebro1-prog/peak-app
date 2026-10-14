@@ -44,7 +44,12 @@ export interface Finding {
 
 /** MPSD-LIN-RIG-003 (three digits minimum; four or more when the sequence grows). */
 export function formatPrintedId(companyCode: string, siteCode: string, cat: Category, seq: number): string {
-  return `${companyCode}-${siteCode}-${cat}-${String(seq).padStart(3, "0")}`;
+  return `${printedPrefix(companyCode, siteCode, cat)}-${String(seq).padStart(3, "0")}`;
+}
+
+/** The printed id without its number ("MPSD-LIN-RIG"): numbers are unique per prefix, across code changes. */
+export function printedPrefix(companyCode: string, siteCode: string, cat: Category): string {
+  return `${companyCode}-${siteCode}-${cat}`;
 }
 
 /** What a finding shows until the server allocates its number: "MPSD-LIN-RIG-…". A missing code shows as an em dash. */

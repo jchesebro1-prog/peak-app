@@ -17,14 +17,14 @@ import { photoBytes } from "../src/lib/assessments/photo-bytes";
 import coverage from "../docs/assessments/manitowoc-coverage.json";
 import { like, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "../src/db";
-import { companies, sites } from "../src/db/schema";
+import { companies, sites, users as usersTable } from "../src/db/schema";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS, blobs } from "../src/db/doc-tables";
 import { CONFIG_COLLECTIONS, DEMO_COLLECTIONS } from "../src/db/seed-data";
 import { FIELD_COLLECTIONS, pushOutcome } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
 import { saveSite, getSite, setSiteShortCode, docLocId } from "../src/lib/identity/sites";
 import { registerFixture } from "./test-fixtures";
-import { createAssessment, saveAssessment, applyFinalizedPhoto, removePendingPhoto, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, clearSyncRejects, type Assessment } from "../src/lib/stores/assessments";
+import { createAssessment, saveAssessment, applyFinalizedPhoto, removePendingPhoto, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, clearSyncRejects, checkAssessmentLinks, type Assessment } from "../src/lib/stores/assessments";
 import {
   answeredWith, buildFullDoc, buildPatch, changedAnswers, clearMarker, contactValue, createEditorStore, dateInputToMs, editorReducer,
   formatValue, hiddenAnswered, initEditorState, msToDateInput, notApplicable, optionsFor, parseFtinInput, parseNumberInput,
@@ -39,7 +39,7 @@ import { normalizeFinding, saveFinding, getFinding, getFindings, listFindings, c
 import { getVenueProfile, profileValues, writeProfileFacts } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, slugValue, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
 import { buildQuote, create as createQuote, get as getQuote, getMany as getQuotes, update as updateQuote } from "../src/lib/stores/quotes";
-import { softDeleteDoc } from "../src/db/doc-store";
+import { softDeleteDoc, upsertDoc } from "../src/db/doc-store";
 import { CATEGORIES as REPAIR_CATEGORIES, PRIORITIES as REPAIR_PRIORITIES } from "../src/lib/stores/repair-jobs";
 import type { SpecSection } from "../src/app/(app)/estimator/types";
 import {
@@ -738,6 +738,7 @@ export async function assessmentDbChecks(ok: Ok) {
   await task9DbChecks(ok);
   await task11DbChecks(ok);
   await finalReviewPushDbChecks(ok);
+  await finalReviewMinorDbChecks(ok);
 }
 
 /** Final review I1: a push that throws replies `retry` (the device keeps the entry pending). */
@@ -760,6 +761,92 @@ async function finalReviewPushDbChecks(ok: Ok) {
     ok(/"ok" \| "conflict" \| "error" \| "retry"/.test(route), "final I1: the push route's reply type carries retry");
   } finally {
     if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    await dropAssessIdentityFixtures();
+  }
+}
+
+/** Final review minors: printed-id prefix (M1), unknown-answer caps (M3), create links (M4). */
+async function finalReviewMinorDbChecks(ok: Ok) {
+  const db = await getDb();
+  const created: string[] = [];
+  const fk = (n: number) => `fd_frv${String(n).padStart(13, "0")}`;
+  const U1 = { id: "u1" };
+  const PU = { id: "u1", roles: ["Estimator"] };
+  const USER_ON = "TESTassess:u-on", USER_OFF = "TESTassess:u-off";
+  const LINKS = { lead1: "TESTassess:lead1", lead2: "TESTassess:lead2", leadNone: "TESTassess:lead3", proj1: "TESTassess:proj1", proj2: "TESTassess:proj2", visit1: "TESTassess:visit1", visit2: "TESTassess:visit2" };
+  try {
+    await assessIdentityFixtures();
+    const { co1, co2, site1, site2 } = ASSESS_FIX;
+    const mkA = async (siteId: string) => {
+      const a = await createAssessment({ visitType: "condition", customerId: co1, siteId, visitDate: Date.now(), assessorId: "u1" }, "u1");
+      created.push(a.id); registerFixture("assessments", a.id);
+      return a;
+    };
+    const a = await mkA(site1);
+
+    // M3: at most 100 unknown answer keys and 200 KB of unknown answers per assessment
+    const now = Date.now();
+    const unk = (n: number, from = 0, size = 10) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`future.m3k${from + i}`, { v: "x".repeat(size), state: "answered", at: now }])) as unknown as Answers;
+    const tooMany = await saveAssessment(a.id, { answers: unk(101) }, U1);
+    ok(!tooMany.ok && /100/.test((tooMany as { error: string }).error), "final M3: action mode refuses a save past 100 unknown answer keys");
+    ok(Object.keys((await getAssessment(a.id))!.answers).filter((k) => k.startsWith("future.m3k")).length === 0, "final M3: a refused save stores none of them");
+    ok((await saveAssessment(a.id, { answers: unk(100) }, U1)).ok, "final M3: exactly 100 unknown keys is fine");
+    ok((await saveAssessment(a.id, { answers: unk(5, 0, 12) }, U1)).ok, "final M3: re-answering a stored unknown key doesn't count as a new one");
+    const p101 = await pushAssessment({ id: a.id, rev: 99, doc: { answers: unk(3, 100) } }, PU);
+    const afterPush = (await getAssessment(a.id))!;
+    ok(p101.status === "ok" && Object.keys(afterPush.answers).filter((k) => k.startsWith("future.m3k")).length === 100 && afterPush.syncRejects?.filter((r) => r.key.startsWith("future.m3k10")).length === 3, "final M3: push mode keeps the cap and records each extra key in syncRejects");
+    const b = await mkA(site1);
+    const big = (n: number) => unk(n, 500, 19_000);
+    const tooBig = await saveAssessment(b.id, { answers: big(11) }, U1);
+    ok(!tooBig.ok && /200 KB/.test((tooBig as { error: string }).error), "final M3: action mode refuses past 200 KB of unknown answers");
+    ok((await saveAssessment(b.id, { answers: big(10) }, U1)).ok, "final M3: under 200 KB saves");
+    const pBig = await pushAssessment({ id: b.id, rev: 99, doc: { answers: unk(1, 600, 19_000) } }, PU);
+    const bAfter = (await getAssessment(b.id))!;
+    ok(pBig.status === "ok" && !("future.m3k600" in bAfter.answers) && bAfter.syncRejects?.some((r) => r.key === "future.m3k600" && /200 KB/.test(r.error)) === true, "final M3: push mode records an answer past 200 KB instead of storing it");
+    ok((await saveAssessment(b.id, { answers: { "core.seats": { v: 300, state: "answered", at: now, by: "u1" } } }, U1)).ok, "final M3: known questions are never capped");
+
+    // M1: the printed number is unique per printed prefix, across a venue code change
+    ok((await setCompanyShortCode(co1, "FRV")).ok && (await setSiteShortCode(site1, "LIN")).ok, "final M1: fixtures — company FRV, venue LIN");
+    const mk = (n: number, at: Assessment) => saveFinding({ key: fk(n), customerId: at.customerId, siteId: at.siteId, assessmentId: at.id, category: "RIG", rating: "needs", description: `M1 finding ${n}` }, U1);
+    const n1 = await mk(1, a), n2 = await mk(2, a), n3 = await mk(3, a);
+    ok(n1.ok && n2.ok && n3.ok && n3.doc.printedId === "FRV-LIN-RIG-003", "final M1: three LIN findings numbered 001–003");
+    await voidFinding(fk(2), "dup", U1);
+    await softDeleteDoc("findings", fk(3));
+    ok((await setSiteShortCode(site1, "LN2")).ok && (await setSiteShortCode(site2, "LIN")).ok, "final M1: venue one's code changes LIN → LN2; venue two takes LIN");
+    const a2 = await mkA(site2);
+    const n4 = await mk(4, a2);
+    ok(n4.ok && n4.doc.printedId === "FRV-LIN-RIG-004", "final M1: the new LIN venue's first finding is numbered after the old LIN findings (voided and deleted included)");
+    const n5 = await mk(5, a);
+    ok(n5.ok && n5.doc.printedId === "FRV-LN2-RIG-004", "final M1: the renamed venue keeps counting its own findings under its new prefix");
+    const fsrc = readFileSync(join(ROOT, "src/lib/stores/findings.ts"), "utf8");
+    ok(/withAdvisoryLock\(ASSESSMENT_LOCK_NAMESPACE, `printed:\$\{prefix\}`[\s\S]{0,200}withAdvisoryLock\(ASSESSMENT_LOCK_NAMESPACE, `\$\{f\.customerId\}:\$\{f\.siteId\}:\$\{f\.category\}`/.test(fsrc), "final M1: allocation takes the prefix lock, then the venue lock");
+
+    // M4: createAssessmentAction's links
+    await db.insert(usersTable).values([
+      { id: USER_ON, name: "Assess On", email: "assess-on@example.test", roles: ["Estimator"], color: "#333333", initials: "AO", status: "active", createdAt: now },
+      { id: USER_OFF, name: "Assess Off", email: "assess-off@example.test", roles: ["Estimator"], color: "#333333", initials: "AF", status: "archived", createdAt: now },
+    ]).onConflictDoNothing();
+    await upsertDoc("leads", { id: LINKS.lead1, customerId: co1 });
+    await upsertDoc("leads", { id: LINKS.lead2, customerId: co2 });
+    await upsertDoc("leads", { id: LINKS.leadNone, customerId: null });
+    await upsertDoc("projects", { id: LINKS.proj1, customerId: co1 });
+    await upsertDoc("projects", { id: LINKS.proj2, customerId: co2 });
+    await upsertDoc("site_visits", { id: LINKS.visit1, customerId: co1 });
+    await upsertDoc("site_visits", { id: LINKS.visit2, customerId: co2 });
+    const L = (o: Partial<{ assessorId: string; leadId: string; visitId: string; projectId: string }>) => checkAssessmentLinks({ customerId: co1, assessorId: USER_ON, ...o });
+    ok((await L({})) === null && (await L({ leadId: LINKS.lead1, visitId: LINKS.visit1, projectId: LINKS.proj1 })) === null, "final M4: an active assessor and the customer's own lead / visit / project pass");
+    ok((await L({ assessorId: USER_OFF })) === "Choose an active assessor" && (await L({ assessorId: "TESTassess:nobody" })) === "Choose an active assessor", "final M4: an archived or unknown assessor is refused");
+    ok((await L({ leadId: "TESTassess:nolead" })) === "That lead wasn't found" && (await L({ leadId: LINKS.lead2 })) === "That lead belongs to a different customer", "final M4: a missing lead, or another customer's, is refused");
+    ok((await L({ visitId: "TESTassess:novisit" })) === "That site visit wasn't found" && (await L({ visitId: LINKS.visit2 })) === "That site visit belongs to a different customer", "final M4: a missing site visit, or another customer's, is refused");
+    ok((await L({ projectId: "TESTassess:noproj" })) === "That project wasn't found" && (await L({ projectId: LINKS.proj2 })) === "That project belongs to a different customer", "final M4: a missing project, or another customer's, is refused");
+    ok((await L({ leadId: LINKS.leadNone })) === null, "final M4: a lead with no customer yet may be linked (it can't belong to another one)");
+    const act = readFileSync(join(ROOT, "src/app/(app)/assessments/new/actions.ts"), "utf8");
+    ok(/await checkAssessmentLinks\(/.test(act) && act.indexOf("checkAssessmentLinks(") < act.indexOf("createAssessment("), "final M4: createAssessmentAction checks the links before creating");
+  } finally {
+    await db.delete(DOC_TABLES.findings).where(like(DOC_TABLES.findings.id, "fd_frv%"));
+    if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    for (const c of ["leads", "projects", "site_visits"] as const) await db.delete(DOC_TABLES[c]).where(like(DOC_TABLES[c].id, "TESTassess:%"));
+    await db.delete(usersTable).where(like(usersTable.id, "TESTassess:%"));
     await dropAssessIdentityFixtures();
   }
 }

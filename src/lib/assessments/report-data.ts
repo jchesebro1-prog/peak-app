@@ -78,7 +78,7 @@ export async function loadAssessmentReport(id: string, now = Date.now()): Promis
   return { assessment, def, customer, venue, profile, extras, findings, model, letterhead: lh };
 }
 
-/** The print route's photos as data URIs (≤ 4 reads at a time, ≤ 40 MB in all; pending / unreadable → null). */
+/** The print route's photos as data URIs (≤ 4 reads at a time, ≤ 20 MB in all (INLINE_TOTAL_BYTES); pending / unreadable → null). */
 export function inlineReportPhotos(assessment: Assessment): ReturnType<typeof inlinePhotoSources> {
   return inlinePhotoSources(assessment.photos, (pid) => photoBytes(assessment, pid));
 }

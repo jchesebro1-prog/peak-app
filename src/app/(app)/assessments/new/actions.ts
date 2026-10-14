@@ -7,7 +7,7 @@ import { ASSESSMENT_DEF } from "@/lib/assessments/defs";
 import type { Depth, ScopeCode } from "@/lib/assessments/defs/types";
 import type { ScopeSel } from "@/lib/assessments/evaluate";
 import { dateInputToMs } from "@/lib/assessments/editor-model";
-import { createAssessment } from "@/lib/stores/assessments";
+import { checkAssessmentLinks, createAssessment } from "@/lib/stores/assessments";
 import type { CreateState } from "../types";
 
 const str = (fd: FormData, k: string): string => {
@@ -29,19 +29,25 @@ export async function createAssessmentAction(_prev: CreateState, fd: FormData): 
     const d = str(fd, `depth_${s.code}`) as Depth;
     return { code: s.code as ScopeCode, on, depth: d === "screen" && depths.includes(d) ? d : "screen" };
   });
+  const links = {
+    customerId: str(fd, "customerId"),
+    leadId: str(fd, "leadId") || undefined,
+    visitId: str(fd, "visitId") || undefined,
+    projectId: str(fd, "projectId") || undefined,
+    assessorId: str(fd, "assessorId") || user.id,
+  };
   let id: string;
   try {
+    // An active assessor, and a lead / site visit / project that exist and are this customer's (#340 final review M4).
+    const linkProblem = await checkAssessmentLinks(links);
+    if (linkProblem) return { error: linkProblem };
     const a = await createAssessment(
       {
+        ...links,
         visitType: str(fd, "visitType") || "condition",
-        customerId: str(fd, "customerId"),
         siteId: str(fd, "siteId"),
         spaceLabel: str(fd, "spaceLabel") || undefined,
-        leadId: str(fd, "leadId") || undefined,
-        visitId: str(fd, "visitId") || undefined,
-        projectId: str(fd, "projectId") || undefined,
         visitDate,
-        assessorId: str(fd, "assessorId") || user.id,
         scopes,
       },
       user.id,

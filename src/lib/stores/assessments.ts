@@ -2,7 +2,7 @@
    1001. Answers merge per key (newest `at` wins), so two people walking different scopes of one visit never
    overwrite each other; every save is a read-merge-write under the assessment's advisory lock. Server-only. */
 import { ASSESSMENT_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";
-import { insertWithPrefixedId, listDocs, listDocsByField } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, listDocsByField } from "@/db/doc-store";
 import { ASSESSMENT_DEF, VISIT_TYPES, allModules, allQuestions, getDef } from "@/lib/assessments/defs";
 import type { ScopeCode } from "@/lib/assessments/defs/types";
 import { mergeAnswers, validateAnswer, type Answer, type Answers } from "@/lib/assessments/answers";
@@ -13,6 +13,7 @@ import { blobEnabled } from "@/lib/blob";
 import { getCompany } from "@/lib/identity/companies";
 import { getSite } from "@/lib/identity/sites";
 import { can } from "@/lib/team";
+import { getUser } from "@/lib/users";
 import { extrasForValidation, getPicklistExtras } from "./assessment-picklists";
 import { nextRev, readRow, writeRow } from "./assessment-rows";
 import { getVenueProfile, profileValues, writeProfileFacts } from "./venue-profiles";
@@ -242,6 +243,29 @@ async function prepareCreate(p: CreateInput, by: string, now: number): Promise<{
   };
 }
 
+/**
+ * The links New assessment sends (#340 final review M4), checked before anything is created: the assessor must be an
+ * active user, and a lead, site visit or project, when given, must exist and belong to the chosen customer. A linked
+ * record that names no customer yet (a fresh lead) can't belong to another one, so it passes. Returns the refusal, or
+ * null when every link is fine.
+ */
+export async function checkAssessmentLinks(p: { customerId: string; assessorId: string; leadId?: string; visitId?: string; projectId?: string }): Promise<string | null> {
+  const user = typeof p.assessorId === "string" && p.assessorId ? await getUser(p.assessorId) : null;
+  if (!user || user.status !== "active") return "Choose an active assessor";
+  const links: { id: string | undefined; label: string; load: (id: string) => Promise<{ customerId?: string | null } | null> }[] = [
+    { id: p.leadId, label: "lead", load: (id) => getDoc<{ id: string; customerId?: string | null }>("leads", id) },
+    { id: p.visitId, label: "site visit", load: (id) => getDoc<{ id: string; customerId?: string | null }>("site_visits", id) },
+    { id: p.projectId, label: "project", load: (id) => getDoc<{ id: string; customerId?: string | null }>("projects", id) },
+  ];
+  for (const l of links) {
+    if (!l.id) continue;
+    const rec = await l.load(l.id);
+    if (!rec) return `That ${l.label} wasn't found`;
+    if (rec.customerId && rec.customerId !== p.customerId) return `That ${l.label} belongs to a different customer`;
+  }
+  return null;
+}
+
 /** Throws on invalid input (unknown visit type, a venue that isn't the customer's, …). */
 export async function createAssessment(p: CreateInput, by: string): Promise<Assessment> {
   const prep = await prepareCreate(p, by, Date.now());
@@ -284,6 +308,42 @@ function prepareAnswers(raw: unknown, defVersion: number, extras: Record<string,
     if (r.ok) { out[k] = r.answer; continue; }
     if (!rej) return fail(`${r.label}: ${r.error}`);
     rej.add(k.slice(0, KEY_MAX), r.error, a);
+  }
+  return { ok: true, answers: out };
+}
+
+/** Answers to keys the assessment's definition doesn't know (a newer client's questions) are kept, but bounded per
+ *  assessment so a client can't grow a document without limit (#340 final review M3). */
+const UNKNOWN_KEYS_MAX = 100;
+const UNKNOWN_BYTES_MAX = 200 * 1024;
+const UNKNOWN_KEYS_ERROR = `An assessment can hold at most ${UNKNOWN_KEYS_MAX} answers to questions this version doesn't know`;
+const UNKNOWN_BYTES_ERROR = "Answers to questions this version doesn't know can total at most 200 KB on one assessment";
+
+/** Applies the unknown-answer caps to the prepared incoming answers, counting what is already stored (a stored key
+ *  re-answered replaces its old size, not adds a key). Action mode (`rej` null) refuses the whole save at the first
+ *  answer over a cap; push mode skips that answer into `rej` and keeps the rest. Known questions are never capped. */
+function capUnknownAnswers(stored: Answers, incoming: Answers, defVersion: number, rej: Sink | null): { ok: true; answers: Answers } | Err {
+  const known = allQuestions(getDef(defVersion));
+  const size = (a: unknown): number => JSON.stringify(a)?.length ?? 0;
+  const sizes = new Map<string, number>();
+  for (const [k, a] of Object.entries(stored)) if (!known.has(k)) sizes.set(k, size(a));
+  let total = 0;
+  for (const n of sizes.values()) total += n;
+  const out: Answers = {};
+  for (const [k, a] of Object.entries(incoming)) {
+    if (known.has(k)) { out[k] = a; continue; }
+    const prev = sizes.get(k);
+    // Merge keeps the stored answer when it is newer, so only a winning incoming answer changes the footprint.
+    const wins = prev === undefined || !(stored[k] && stored[k].at >= a.at);
+    const nextTotal = wins ? total - (prev ?? 0) + size(a) : total;
+    const problem = prev === undefined && sizes.size >= UNKNOWN_KEYS_MAX ? UNKNOWN_KEYS_ERROR : nextTotal > UNKNOWN_BYTES_MAX ? UNKNOWN_BYTES_ERROR : null;
+    if (problem) {
+      if (!rej) return fail(`${k}: ${problem}`);
+      rej.add(k.slice(0, KEY_MAX), problem, a);
+      continue;
+    }
+    out[k] = a;
+    if (wins) { sizes.set(k, size(a)); total = nextTotal; }
   }
   return { ok: true, answers: out };
 }
@@ -481,7 +541,9 @@ export async function saveAssessment(
       return { ok: true as const, doc: rej.list.length ? await write({ ...cur }) : cur };
     }
 
-    const ans = prepareAnswers(inc.answers, cur.defVersion, extras, user.id, now, rej);
+    const prepared = prepareAnswers(inc.answers, cur.defVersion, extras, user.id, now, rej);
+    if (!prepared.ok) return prepared;
+    const ans = capUnknownAnswers(cur.answers, prepared.answers, cur.defVersion, rej);
     if (!ans.ok) return ans;
     const photos = mergePhotos(cur.photos, inc.photos, id, user.id, now, rej);
     if (!photos.ok) return photos;
