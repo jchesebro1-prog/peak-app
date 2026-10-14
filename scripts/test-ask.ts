@@ -774,6 +774,10 @@ type FakeRound = {
   throws?: unknown;
   /** Wait for the request's abort signal, then reject. */
   hang?: boolean;
+  /** After message_start and every content event (text already streamed): throw this. */
+  midThrow?: unknown;
+  /** After message_start and every content event: wait for the abort signal, then reject. */
+  hangMid?: boolean;
   before?: () => void;
 };
 type FakeCall = { params: Record<string, unknown> & { messages: { role: string; content: unknown }[]; tools: Record<string, unknown>[] }; opts: { timeout: number; maxRetries: number } };
@@ -799,7 +803,7 @@ async function fakeAskClient(rounds: FakeRound[], calls: FakeCall[]) {
         stop_sequence: null,
         usage: { input_tokens: r.usage?.input ?? 1000, output_tokens: r.usage?.output ?? 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, server_tool_use: r.usage?.web ? { web_search_requests: r.usage.web, web_fetch_requests: 0 } : null },
       };
-      const events: unknown[] = [];
+      const events: unknown[] = [{ type: "message_start", message: { ...msg, content: [], stop_reason: null, usage: { ...msg.usage, output_tokens: 1, server_tool_use: null } } }];
       content.forEach((b, index) => {
         events.push({ type: "content_block_start", index, content_block: b.type === "text" ? { ...b, text: "" } : b });
         if (b.type === "text") events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: b.text } });
@@ -815,6 +819,10 @@ async function fakeAskClient(rounds: FakeRound[], calls: FakeCall[]) {
           if (r.throws) throw r.throws;
           if (r.hang) await waitAbort();
           for (const e of events) yield e as never;
+          if (r.midThrow) throw r.midThrow;
+          if (r.hangMid) await waitAbort();
+          yield { type: "message_delta", delta: { stop_reason: msg.stop_reason, stop_sequence: null }, usage: { output_tokens: msg.usage.output_tokens, input_tokens: null, cache_read_input_tokens: null, cache_creation_input_tokens: null, server_tool_use: msg.usage.server_tool_use } } as never;
+          yield { type: "message_stop" } as never;
         },
         async finalMessage() {
           if (r.throws) throw r.throws;
@@ -888,14 +896,17 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
   const team = [{ id: ME.id }, { id: OTHER.id }];
   const CID = fixtureId("ask3", "co");
   const runIds: string[] = [];
-  const ask = async (messages: { role: "user" | "assistant"; text: string }[], rounds: FakeRound[], o: { page?: string | null; web?: boolean; hard?: boolean; retryOf?: string | null; me?: typeof ME; clock?: () => number; signal?: AbortSignal; settings?: typeof settings; env?: Record<string, string> } = {}) => {
+  const ask = async (messages: { role: "user" | "assistant"; text: string }[], rounds: FakeRound[], o: { page?: string | null; web?: boolean; hard?: boolean; retryOf?: string | null; me?: typeof ME; clock?: () => number; signal?: AbortSignal; settings?: typeof settings; env?: Record<string, string>; onEvent?: (e: AskEvent) => void } = {}) => {
     const events: AskEvent[] = [];
     const calls: FakeCall[] = [];
     const client = await fakeAskClient(rounds, calls);
     const res = await runAsk(
       { messages, page: o.page ?? null, web: o.web ?? false, hard: o.hard ?? false, retryOf: o.retryOf ?? null },
       o.me ?? ME,
-      (e) => events.push(e),
+      (e) => {
+        events.push(e);
+        o.onEvent?.(e);
+      },
       { client, settings: o.settings ?? settings, env: o.env ?? env, now: NOW, team, clock: o.clock, signal: o.signal }
     );
     if (res.runId) runIds.push(res.runId);
@@ -995,6 +1006,67 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
       ok(a.calls.length === 2 && !!a.run && a.run.ok === false && a.run.error === "aborted" && a.run.stopReason === "aborted" && (a.run.outcomeDetail as { rounds: number }).rounds === 1 && !a.events.some((e) => e.t === "error"), "runAsk: an abort stops the stream and the run is still logged (aborted)");
     }
 
+    // Fix 1 — I-1: a tool-input JSON error after text was streamed is a cut-off, never a re-issue (no duplicate text).
+    {
+      const jsonErr = new Error("Unable to parse tool parameter JSON from model. Please retry your request");
+      const a = await ask(q("cut"), [{ content: [{ type: "text", text: "Partial answer", citations: null }, toolUse("j1", "my_tasks", {})], stop: "tool_use", usage: { input: 1500 }, midThrow: jsonErr }, {}]);
+      ok(
+        a.calls.length === 1 && a.text === "Partial answer" + ASK_CUT_OFF_NOTE && (a.text.match(/Partial answer/g) || []).length === 1 && a.run?.ok === true && a.run.stopReason === "max_tokens" && a.run.inputTokens === 1500 && a.run.outputTokens === 1 && (a.run.outcomeDetail as { rounds: number }).rounds === 1,
+        "runAsk: a tool-input JSON error after streamed text → …(cut off), no re-issue, no duplicated text; the round's streamed usage is logged"
+      );
+      const b = await ask(q("cut2"), [{ content: [toolUse("j2", "my_tasks", {})], stop: "tool_use", usage: { input: 700 }, midThrow: jsonErr }, { content: [{ type: "text", text: "Answer.", citations: null }] }]);
+      ok(b.calls.length === 2 && b.text === "Answer." && (b.run?.outcomeDetail as { rounds: number }).rounds === 2 && b.run?.inputTokens === 700 + 1000, "runAsk: with no text shown yet the round is re-issued once, and the failed attempt's usage is still logged");
+    }
+
+    // Fix 1 — M-7 + M-1: an abort after text deltas arrived keeps the text once, logs the partial round's usage.
+    {
+      const ac = new AbortController();
+      const a = await ask(q("stop me"), [{ content: [{ type: "text", text: "Half an ans", citations: null }], usage: { input: 1234 }, hangMid: true }], {
+        signal: ac.signal,
+        onEvent: (e) => {
+          if (e.t === "text") ac.abort();
+        },
+      });
+      ok(
+        a.calls.length === 1 && a.text === "Half an ans" && !a.events.some((e) => e.t === "error") && a.events[a.events.length - 1].t === "done" && a.run?.error === "aborted" && a.run.inputTokens === 1234 && a.run.outputTokens === 1 && (a.run.outcomeDetail as { rounds: number }).rounds === 1,
+        "runAsk: an abort after text arrives — the text stays once, no error event, the run logs the partial round's usage"
+      );
+    }
+
+    // Fix 1 — M-4: once stopped or out of time, the remaining tool calls don't run.
+    {
+      let t = 5_000_000;
+      const calls3 = [toolUse("p1", "propose_task", { title: "First" }), toolUse("p2", "propose_task", { title: "Second" }), toolUse("p3", "my_tasks", {})];
+      const late = await ask(q("slow tools"), [{ content: calls3, stop: "tool_use" }, {}], {
+        clock: () => t,
+        onEvent: (e) => {
+          if (e.t === "card") t += 58_000;
+        },
+      });
+      ok(
+        late.calls.length === 1 && late.events.filter((e) => e.t === "card").length === 1 && (late.run?.outcomeDetail as { toolCalls: number }).toolCalls === 1 && late.run?.stopReason === "timeout" && late.text.endsWith(ASK_TIMEOUT_NOTE),
+        "runAsk: past the deadline mid-round, the remaining tool calls are answered \"Not run — stopped.\" and the question stops"
+      );
+      const ac = new AbortController();
+      const ab = await ask(q("abort tools"), [{ content: calls3, stop: "tool_use" }, {}], {
+        signal: ac.signal,
+        onEvent: (e) => {
+          if (e.t === "card") ac.abort();
+        },
+      });
+      ok(ab.calls.length === 1 && ab.events.filter((e) => e.t === "card").length === 1 && (ab.run?.outcomeDetail as { toolCalls: number }).toolCalls === 1 && ab.run?.error === "aborted", "runAsk: an abort mid-round stops the remaining tool calls");
+    }
+
+    // Fix 1 — M-2: earlier tokens are re-checked newest first.
+    {
+      const { priorRefTokens } = R;
+      const p = priorRefTokens([{ text: "[[company:A]] [[company:B]]" }, { text: "[[quote:Q1]] [[company:A]]" }, { text: "[[lead:L1]]" }], 3);
+      ok(p.map((r) => `${r.kind}:${r.id}`).join(",") === "lead:L1,company:A,quote:Q1", "priorRefTokens: newest turn first, latest token first, distinct, capped");
+      const old = Array.from({ length: 25 }, (_, n) => `[[company:${fixtureId("ask3", `ghost-${n}`)}]]`).join(" ");
+      const a = await ask([{ role: "assistant", text: old }, { role: "assistant", text: `See [[company:${CID}]].` }, { role: "user", text: "And?" }], [{}]);
+      ok(a.events.some((e) => e.t === "ref" && e.id === CID), "runAsk: with > 20 older tokens, the latest answer's record is still re-checked and whitelisted");
+    }
+
     // Web: only when toggled; sources mapped; cost sums the rounds + searches; a tool 400 retries without web.
     {
       const off = await ask(q("web?"), [{}]);
@@ -1081,6 +1153,11 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
       runIds.push(replyRun.id);
       await ask(q("x"), [{}], { retryOf: replyRun.id });
       ok((await getRun(replyRun.id))?.outcome === null, "runAsk: retryOf only discards an Ask run");
+      const keep = await ask(q("keep"), [{}]);
+      const ac2 = new AbortController();
+      const abortedRetry = await ask(q("keep"), [{ hang: true, before: () => ac2.abort() }], { hard: true, retryOf: keep.res.runId, signal: ac2.signal });
+      const failedRetry = await ask(q("keep"), [{ throws: Object.assign(new Error("500 overloaded"), { status: 500 }) }], { hard: true, retryOf: keep.res.runId });
+      ok(abortedRetry.run?.error === "aborted" && failedRetry.run?.ok === false && (await getRun(keep.res.runId!))?.outcome === null, "runAsk: an aborted or failed Try harder leaves the earlier answer undecided");
 
       // recordAskConfirm — the card-confirm outcome
       const c = await ask(q("c"), [{}]);

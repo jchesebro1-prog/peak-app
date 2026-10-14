@@ -1,6 +1,6 @@
 import { unstable_rethrow } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import { runAsk } from "@/lib/assist/ask-runner";
+import { ASK_FAILED_TEXT, runAsk } from "@/lib/assist/ask-runner";
 import { parseAskBody } from "@/lib/assist/features/ask-body";
 import { encodeEvent, type AskEvent } from "@/lib/assist/features/ask-events";
 
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
           await runAsk(body, { id: me.id, name: me.name }, emit, { signal: ctl.signal });
         } catch (err) {
           console.error("[ask] stream failed:", err);
-          emit({ t: "error", message: "Ask AI couldn’t answer — please try again." });
+          emit({ t: "error", message: ASK_FAILED_TEXT });
         } finally {
           open = false;
           request.signal.removeEventListener("abort", onAbort);
@@ -76,6 +76,6 @@ export async function POST(request: Request) {
     // A signed-out request's redirect passes through.
     unstable_rethrow(err);
     console.error("[ask] request failed:", err);
-    return bad("Ask AI couldn’t answer — please try again.", 500);
+    return bad(ASK_FAILED_TEXT, 500);
   }
 }

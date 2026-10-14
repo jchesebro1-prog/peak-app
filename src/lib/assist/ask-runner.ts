@@ -38,7 +38,7 @@ import { pageContext } from "./ask-context-server";
 import type { AssistEffort, AssistSettings, Env } from "./types";
 import type { AskBody } from "./features/ask-body";
 import type { AskEvent } from "./features/ask-events";
-import { refKey, refTokensIn } from "./features/ask-refs";
+import { refKey, refTokensIn, type AskRef } from "./features/ask-refs";
 import { ASK_PROPOSAL_TOOLS, cleanEmail, proposalToolKind, sanitizeCard, type CardContext } from "./features/ask-cards";
 import { ASK_SYSTEM, packFirstUserMessage, type AskScreen } from "./features/ask-prompt";
 import {
@@ -175,7 +175,8 @@ export const ASK_EMPTY_TEXT = "I couldn't find that.";
 export const ASK_FAILED_TEXT = "Ask AI couldn't answer — please try again.";
 export const ASK_CAP_TEXT = "Assist paused for the month (spend cap reached).";
 export const ASK_RATE_TEXT = "Too many Ask AI questions — try again in a bit.";
-const TOOL_LIMIT_TEXT = "Not run: the lookup limit for this question is used up. Answer from what you already have.";
+const TOOL_STOPPED_TEXT = "Not run — stopped.";
+const TOOL_LIMIT_TEXT ="Not run: the lookup limit for this question is used up. Answer from what you already have.";
 const CARD_SHOWN_TEXT = "Shown to the user as a card for confirmation. Nothing has been done — the user decides.";
 const CARD_DROPPED_TEXT = "No card was shown: it named records this conversation hasn't looked up, or it was empty. Look the record up first, then propose again.";
 const SOURCE_TITLE_MAX = 200;
@@ -214,6 +215,26 @@ export function typedEmails(turns: readonly { role: string; text: string }[]): s
     }
   }
   return [...out];
+}
+
+/**
+ * The conversation's `[[kind:id]]` tokens to re-check, newest first (the
+ * newest turn first, the latest token in it first), distinct, at most
+ * ASK_PRIOR_REFS_MAX — so the latest answer's records stay linkable.
+ */
+export function priorRefTokens(turns: readonly { text: string }[], max: number = ASK_PRIOR_REFS_MAX): AskRef[] {
+  const seen = new Set<string>();
+  const out: AskRef[] = [];
+  for (let i = turns.length - 1; i >= 0 && out.length < max; i--) {
+    for (const r of refTokensIn(turns[i].text, Number.MAX_SAFE_INTEGER).reverse()) {
+      const k = refKey(r.kind, r.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(r);
+      if (out.length >= max) break;
+    }
+  }
+  return out;
 }
 
 /* ---------------- the runner ---------------- */
@@ -315,7 +336,7 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
     } catch (err) {
       console.error("[ask] page context failed:", err);
     }
-    const prior = refTokensIn(input.messages.map((m) => m.text).join("\n"), ASK_PRIOR_REFS_MAX);
+    const prior = priorRefTokens(input.messages);
     const rechecked = await Promise.all(prior.map((r) => resolveAskRef(r.kind, r.id, me).catch(() => null)));
     for (const r of rechecked) if (r) exposeRef(r);
 
@@ -361,11 +382,36 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
         ctl.abort();
       }, Math.max(1, msLeft));
       roundHasText = false;
+      // Usage as it streams (message_start, then cumulative message_delta), so a round
+      // that times out, aborts or errors part-way is still billed in the run log.
+      const live = { started: false, model, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, web: 0 };
+      const livePartial = (): AskRoundUsage => ({
+        answered: live.model,
+        requested: model,
+        usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, cacheReadTokens: live.cacheReadTokens, cacheWriteTokens: live.cacheWriteTokens },
+      });
       let msg: BetaMessage;
       try {
         const stream = client.stream(params, { timeout: Math.max(1, msLeft), maxRetries: 0, signal: ctl.signal });
         for await (const ev of stream) {
-          if (ev.type === "content_block_start") {
+          if (ev.type === "message_start") {
+            const u = ev.message.usage;
+            live.started = true;
+            live.model = ev.message.model || model;
+            live.inputTokens = u?.input_tokens ?? 0;
+            live.outputTokens = u?.output_tokens ?? 0;
+            live.cacheReadTokens = u?.cache_read_input_tokens ?? 0;
+            live.cacheWriteTokens = u?.cache_creation_input_tokens ?? 0;
+            live.web = u?.server_tool_use?.web_search_requests ?? 0;
+          } else if (ev.type === "message_delta") {
+            const u = ev.usage;
+            live.started = true;
+            if (typeof u?.output_tokens === "number") live.outputTokens = u.output_tokens;
+            if (typeof u?.input_tokens === "number") live.inputTokens = u.input_tokens;
+            if (typeof u?.cache_read_input_tokens === "number") live.cacheReadTokens = u.cache_read_input_tokens;
+            if (typeof u?.cache_creation_input_tokens === "number") live.cacheWriteTokens = u.cache_creation_input_tokens;
+            if (typeof u?.server_tool_use?.web_search_requests === "number") live.web = u.server_tool_use.web_search_requests;
+          } else if (ev.type === "content_block_start") {
             const b = ev.content_block;
             if (b.type === "tool_use" || b.type === "server_tool_use") emit({ t: "status", text: toolStatus(b.name) });
           } else if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
@@ -378,6 +424,11 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
         }
         msg = await stream.finalMessage();
       } catch (err) {
+        // A round that got under way is billed even though it failed.
+        if (live.started) {
+          rounds.push(livePartial());
+          webSearches += live.web;
+        }
         if (deps.signal?.aborted) {
           stop = "aborted";
           break;
@@ -392,11 +443,21 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
           sayBlock(ASK_WEB_UNAVAILABLE_NOTE);
           continue;
         }
-        if (!jsonRetried && isToolInputJsonError(err)) {
-          // An unreadable streamed tool input: re-issue the round once (it counts as a round).
-          jsonRetried = true;
-          rounds.push({ answered: model, requested: model, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } });
-          continue;
+        if (isToolInputJsonError(err)) {
+          // An unreadable streamed tool input (raised at content_block_stop). Text already
+          // shown can't be re-streamed without duplicating it: treat the round as cut off.
+          if (roundHasText) {
+            say(ASK_CUT_OFF_NOTE);
+            lastStopReason = "max_tokens";
+            stop = "max_tokens";
+            break;
+          }
+          if (!jsonRetried) {
+            // Nothing shown yet: re-issue the round once (it counts as a round).
+            jsonRetried = true;
+            if (!live.started) rounds.push(livePartial());
+            continue;
+          }
         }
         throw err;
       } finally {
@@ -462,10 +523,18 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
       messages.push({ role: "assistant", content: msg.content });
       const allowed = toolCallsAllowed(toolCalls, uses.length);
       const results: BetaToolResultBlockParam[] = [];
+      let halted = false;
       for (let i = 0; i < uses.length; i++) {
         const u = uses[i];
         if (i >= allowed) {
           results.push({ type: "tool_result", tool_use_id: u.id, content: TOOL_LIMIT_TEXT, is_error: true });
+          continue;
+        }
+        // A slow tool can't run the question past its budget: once stopped or out of time,
+        // the remaining calls are answered "Not run — stopped." (no following round can start).
+        if (halted || deps.signal?.aborted || deadline - clock() <= ASK_MIN_ROUND_MS) {
+          halted = true;
+          results.push({ type: "tool_result", tool_use_id: u.id, content: TOOL_STOPPED_TEXT, is_error: true });
           continue;
         }
         toolCalls++;
@@ -539,7 +608,8 @@ export async function runAsk(input: AskBody, me: AskUser, emit: (e: AskEvent) =>
   } catch (err) {
     console.error("[ask] run log failed:", err);
   }
-  if (input.retryOf) {
+  // An aborted or failed retry hasn't replaced anything: the earlier answer stays undecided.
+  if (input.retryOf && run.ok && runId) {
     try {
       // Try harder replaces that answer: discard it — the asker's own Ask run only, first decision wins.
       const prev = await getRun(input.retryOf);
