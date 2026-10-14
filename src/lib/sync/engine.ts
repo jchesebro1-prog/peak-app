@@ -54,6 +54,16 @@ export type PushStatus = "ok" | "conflict" | "error" | "retry";
 export function pushOutcome(status: unknown): "ok" | "conflict" | "retry" | "error" {
   return status === "ok" || status === "conflict" || status === "retry" ? status : "error";
 }
+
+/** Consecutive `retry` replies an outbox entry may take before it is parked as `error` (a deterministic server
+ *  throw would otherwise retry every 30 s forever). */
+export const MAX_RETRIES = 10;
+export const RETRY_PARKED_MESSAGE = "The server kept failing to save this — it will retry when you edit again";
+
+/** What the outbox does with an entry that has just taken its `retries`-th consecutive `retry` reply (1-based). */
+export function retryOutcome(retries: number): "retry" | "park" {
+  return retries >= MAX_RETRIES ? "park" : "retry";
+}
 const LAST_KEY = "rss_sync_last_v1";
 const CURSORS_META = "cursors";
 
@@ -374,12 +384,21 @@ class SyncEngine {
           const key = outboxKey(coll, r.id);
           const outcome = pushOutcome(r.status);
           if (outcome === "retry") {
-            // A transient server failure (lock timeout, database error): stays pending for the next flush.
-            retry = true;
+            // A transient server failure (lock timeout, database error): stays pending for the next flush,
+            // counted per entry; the 10th consecutive retry parks it as an error.
+            const entry = await idb.get<OutboxEntry>("outbox", key);
+            if (!entry) continue;
+            const retries = (entry.retries ?? 0) + 1;
+            if (retryOutcome(retries) === "park") {
+              await idb.put("outbox", { ...entry, retries, state: "error", error: RETRY_PARKED_MESSAGE });
+            } else {
+              await idb.put("outbox", { ...entry, retries });
+              retry = true;
+            }
             continue;
           }
           if (outcome === "ok") {
-            await idb.delete("outbox", key);
+            await idb.delete("outbox", key); // the entry (and its retries count) goes with it
             await this.writeMirror(
               coll,
               r.id,

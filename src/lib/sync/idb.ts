@@ -31,6 +31,8 @@ export type OutboxEntry = {
   queuedAt: number;
   state: "pending" | "error";
   error?: string;
+  /** Consecutive `retry` push replies; absent = 0. A re-enqueue writes a fresh entry, which resets it. */
+  retries?: number;
 };
 
 export type MirrorEntry = {

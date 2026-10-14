@@ -20,7 +20,7 @@ import { getDb } from "../src/db";
 import { companies, sites, users as usersTable } from "../src/db/schema";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS, blobs } from "../src/db/doc-tables";
 import { CONFIG_COLLECTIONS, DEMO_COLLECTIONS } from "../src/db/seed-data";
-import { FIELD_COLLECTIONS, pushOutcome } from "../src/lib/sync/engine";
+import { FIELD_COLLECTIONS, MAX_RETRIES, pushOutcome, retryOutcome } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
 import { saveSite, getSite, setSiteShortCode, docLocId } from "../src/lib/identity/sites";
 import { registerFixture } from "./test-fixtures";
@@ -560,6 +560,7 @@ function finalReviewChecks(ok: Ok) {
   const A = (v: unknown, at: number, by = "u1"): Answer => ({ v, state: "answered", at, by });
   // I1: a push reply's per-record outcome — retry stays pending, only a real refusal parks the entry
   ok(pushOutcome("retry") === "retry" && pushOutcome("ok") === "ok" && pushOutcome("conflict") === "conflict" && pushOutcome("error") === "error" && pushOutcome("weird") === "error" && pushOutcome(undefined) === "error", "final I1: push outcome — retry kept pending, unknown statuses park as error");
+  ok(MAX_RETRIES === 10 && retryOutcome(1) === "retry" && retryOutcome(9) === "retry" && retryOutcome(10) === "park" && retryOutcome(11) === "park", "retry cap: 9 consecutive retries stay pending, the 10th parks as error");
   // I1: an errored / pending outbox entry is folded in as dirty work, original `at` kept
   const server = initEditorState(editorDoc({ answers: { "core.seats": A(200, 10) }, dismissedPrompts: [{ id: "rule:R1", by: "u1", at: 1 }], spaceLabel: "Aud" }));
   const entry = {

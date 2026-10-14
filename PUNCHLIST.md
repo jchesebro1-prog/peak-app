@@ -12161,11 +12161,14 @@ link/archive paths a person would.
 - (3) Confirm the five flagged-answer prompts added beyond the brief — **assumed default** (D972): exits blocked → GEN / Immediate; trap door or pit unguarded → GEN / Immediate; no e-stop → RIG / Needs attention; no hold-to-run → RIG / Needs attention; panel clearance under 36" → ELC / Needs attention.
 - (4) **Production** check after the merge deploy applies migration 0040, with a throwaway customer: one Blob photo upload (capture, queue, upload, report), two parallel finding pushes to the same venue and category (proves the advisory lock on Neon), and the PDF render. Void or delete the records afterwards. **Don't open a preview deploy of this branch:** previews skip migrations (`scripts/migrate.mjs`), so their company and venue reads would fail without `short_code` — and previews share the production DB anyway.
 - (5) Confirm `QUOTE_PDF_ORIGIN` and Chrome rendering of the assessment PDF in production: open a report with photos, check the PDF (page count, photos, letterhead), the findings-only PDF, and Email report to a draft.
+- (6) On the first production Email report, confirm the stored PDF's Blob path passes `isAssessmentPdfPath` (the random-suffix shape); the attach-by-reference check fails closed if it doesn't.
 
 **Known limitations:**
 - Two devices editing the same finding offline: the server copy wins and the second device sees a conflict.
 - An outbox entry the push refused for good (`error`) is not pushed again by the SyncEngine; opening the assessment's editor folds it in and its next save carries it (D998). A transient failure replies `retry` and stays pending.
 - Photo uploads from several browser tabs aren't Web-Locked; a duplicate blob is cleaned up.
+- An offline save in one tab replaces another tab's later outbox entry for the same assessment (pre-existing two-tab behaviour).
+- A folded unknown-key answer over the D1001 caps can block online saves until the editor is reopened (unlikely given the caps).
 - The Blob photo upload, the upload token route, the stored report PDF and the advisory-lock exclusion across connections are untested against real Blob and Neon (see Remaining 4).
 - The go-live wipe clears assessments and findings but leaves their photos (`assessments/<AS-id>/`) and emailed report PDFs (`assessment-pdfs/<AS-id>/`) in Blob.
 - The doc queries that filter assessments and findings by JSON field (customer, venue, lead, project, assessment, printed prefix) have no expression indexes yet; add them when the register grows.
