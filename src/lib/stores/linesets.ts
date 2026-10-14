@@ -53,8 +53,8 @@ export interface LinesetRow {
   trimHigh: string;
   cond: LinesetCond;
   notes: string;
-  /** #344 B2 — Bad → New level (0–4); old `cond` codes map on read (G 3, F 2, P 1, X 0) */
-  condition?: ConditionLevel;
+  /** #344 B2 — Bad → New level (0–4); old `cond` codes seed it once when absent (G 3, F 2, P 1, X 0). `null` = cleared, stays cleared. */
+  condition?: ConditionLevel | null;
 }
 
 export function linesetTypeLabel(t: LinesetType): string {

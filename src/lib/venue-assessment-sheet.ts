@@ -3,6 +3,7 @@ import type { SurveyRecord } from "@/lib/stores/surveys";
 import { VENUE_CLASSES, classMeasureFields } from "@/lib/stores/venue-classes";
 import {
   DISCIPLINE_GROUPS,
+  PIPES_LABEL,
   visibleFields,
   type DisciplineData,
   type SystemField,
@@ -60,7 +61,8 @@ function compactRows(rows: ReturnType<typeof row>[]) {
 /** One discipline field as printed: a bound field shows its measurement, a condition its label, a month "Mar 2024",
  *  the console location Other's text; a stored object (never a def's value) prints nothing. */
 function fieldText(field: SystemField, data: DisciplineData, measurements: Record<string, string> | undefined): string {
-  const raw: unknown = field.bind ? (text(measurements?.[field.bind]) || data[field.key]) : data[field.key];
+  /* A bound field is the measurement only: a cleared measurement stays cleared (the old discipline value never comes back). */
+  const raw: unknown = field.bind ? measurements?.[field.bind] : data[field.key];
   if (field.type === "condition") return conditionLabel(raw);
   if (field.type === "month") return monthText(raw);
   if (field.key === "consoleLocation") return consoleLocationText(data);
@@ -84,7 +86,10 @@ function disciplineSection(record: SheetRecord, index: number): FieldSheetSectio
   const rows = [
     row("Client goals", goals.join("; ")),
     row("Present", data.present),
-    ...visibleFields(group, record.venueClass).map((field) => row(field.label, fieldText(field, data, record.measurements))),
+    ...visibleFields(group, record.venueClass)
+      /* the pipes qty belongs to its Present chip (as in the editor) */
+      .filter((field) => field.key !== "fixedPipeQty" || (Array.isArray(data.present) && data.present.includes(PIPES_LABEL)))
+      .map((field) => row(field.label, fieldText(field, data, record.measurements))),
     ...extra,
     row(group.scopeLabel, scopeText(data)),
     row("Notes", data.notes),
@@ -160,7 +165,7 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
           line.battenLength && `batten ${line.battenLength}`,
           line.goods, line.finishedWH,
           (line.trimLow || line.trimHigh) && `trim ${line.trimLow || "—"}/${line.trimHigh || "—"}`,
-          isConditionLevel(line.condition) ? conditionLabel(line.condition) : linesetCondLabel(line.cond), line.notes,
+          isConditionLevel(line.condition) ? conditionLabel(line.condition) : line.condition === undefined ? linesetCondLabel(line.cond) : "", line.notes,
         ].filter(Boolean).join(" · ")
       )),
     }));

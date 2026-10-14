@@ -11,6 +11,13 @@ export function disciplineFieldType(key: string): string | undefined {
   return FIELD_TYPE.get(key);
 }
 
+const FIELD_BOUND = new Set<string>(DISCIPLINE_GROUPS.flatMap((g) => g.fields.filter((f) => f.bind).map((f) => f.key)));
+
+/** True when a discipline field shares its value with a measurement (`bind`): the measurement is the answer. */
+export function disciplineFieldBound(key: string): boolean {
+  return FIELD_BOUND.has(key);
+}
+
 /** A stored scalar as one trimmed line (numbers allowed); anything else is "". */
 export function oneLine(v: unknown): string {
   if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";

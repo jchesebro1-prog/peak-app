@@ -16,7 +16,7 @@ import {
 } from "./stores/survey-intake";
 import type { VenueClass } from "./stores/venue-classes";
 import type { LinesetRow } from "./stores/linesets";
-import { CONSOLE_LOCATIONS, conditionFromText, consoleLocationFrom, isConditionLevel, parseMonthYear, type ConditionLevel } from "./field-lists";
+import { CONSOLE_LOCATIONS, conditionFromText, consoleLocationFrom, parseMonthYear, type ConditionLevel } from "./field-lists";
 import { splitGoalLines } from "./survey-flow";
 
 /** An old answer the new form has no field for — shown under "Older notes" in its section. */
@@ -343,7 +343,7 @@ export function stepAvCondition(s: MigratableSurvey): void {
   if (!av || !text) return;
   const level = conditionFromText(text);
   if (level === null) addLegacyNote(s, { section: "dAv", label: "Condition" + BEFORE, text });
-  else if (!isConditionLevel(av.conditionLevel)) av.conditionLevel = level;
+  else if (av.conditionLevel === undefined) av.conditionLevel = level;
 }
 
 const COND_LEVEL: Record<string, ConditionLevel> = { G: 3, F: 2, P: 1, X: 0 };

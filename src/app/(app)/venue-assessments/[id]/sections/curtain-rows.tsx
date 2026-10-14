@@ -31,7 +31,6 @@ export function CurtainRows({
 
   const patch = (label: string, next: Partial<CurtainItem>) => {
     const row: CurtainItem = { ...(items[label] || {}), ...next };
-    if (row.condition === undefined) delete row.condition;
     onChange({ ...items, [label]: row });
   };
 
@@ -67,7 +66,7 @@ function CurtainRow({
   row: CurtainItem;
   listId?: string;
   onText: (key: TextKey, value: string) => void;
-  onCondition: (level: ConditionLevel | undefined) => void;
+  onCondition: (level: ConditionLevel | null) => void;
 }) {
   const id = useId();
   const known = !row.trackSeries || TRACK_SERIES.includes(row.trackSeries);

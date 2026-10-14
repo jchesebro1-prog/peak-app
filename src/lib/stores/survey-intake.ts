@@ -118,7 +118,7 @@ export type DisciplineKey = "rigging" | "curtain" | "lighting" | "av";
 
 /** One stored discipline value. #344 B2 widened it: numbers (condition levels) and plain objects keyed by a
  *  label (curtain rows at `items`, lighting position rows at `positionRows`). */
-export type DisciplineValue = string | boolean | number | string[] | Record<string, Record<string, unknown>>;
+export type DisciplineValue = string | boolean | number | null | string[] | Record<string, Record<string, unknown>>;
 
 /** One discipline's captured data: field values + a scope-of-interest list. */
 export type DisciplineData = Record<string, DisciplineValue>;
@@ -143,7 +143,8 @@ export type CurtainItem = {
   trackSeries?: string;
   w?: string;
   h?: string;
-  condition?: ConditionLevel;
+  /** `null` = the rep cleared it (kept, so a migration never re-seeds it); absent = never rated */
+  condition?: ConditionLevel | null;
 };
 
 /** #344 B2 — one row per chosen lighting position, at `disciplines.lighting.positionRows[<position>]`;

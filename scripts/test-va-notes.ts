@@ -540,8 +540,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   const css = rd("src/app/globals.css");
   ok(/type="range"/.test(slider) && /min=\{0\}/.test(slider) && /max=\{4\}/.test(slider) && /step=\{1\}/.test(slider) && slider.includes("var(--cond-") && slider.includes("aria-valuetext"),
     "#344 B3: condition slider is a 0–4 native range, coloured from --cond-N, with aria-valuetext");
-  ok(slider.includes("CONDITION_STEPS") && slider.includes("onChange(undefined)") && slider.includes("Not rated"),
-    "#344 B3: condition slider shows step labels, 'Not rated' until touched, and Clear resets to undefined");
+  ok(slider.includes("CONDITION_STEPS") && slider.includes("onChange(null)") && slider.includes("Not rated"),
+    "#344 B3: condition slider shows step labels, 'Not rated' until touched, and Clear stores null (a kept key, so it stays cleared)");
   ok(goals.includes("maxLength={300}") && /MAX_GOALS\s*=\s*20/.test(goals) && goals.includes("+ Add goal") && goals.includes("disabled={value.length >= MAX_GOALS}"),
     "#344 B3: goals editor caps typing at 300 chars a line and 20 goals");
   ok(goals.includes("Enter") && goals.includes("focus()") && goals.includes("↑") && goals.includes("↓") && goals.includes("×"),
@@ -883,6 +883,35 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     for (let i = 0; i < 30; i++) { many[`f${i}`] = `v${i}`; (many.items as Record<string, unknown>)[`Type ${i}`] = { qty: String(i + 1) }; }
     const stMany = surveyText({ id: "FS-B7", disciplines: { curtain: many } } as never);
     ok(stMany.split("\n").filter((l) => l.startsWith("  - ")).length === 40, "#344 B7: Assist's discipline lines stay within their 40-line budget");
+
+    /* Fix 1: a cleared field stays cleared in print, Assist and the condition sliders; the pipes row follows its chip */
+    const clearedBound = { ...(b7 as object), measurements: { gridH: "" }, disciplines: { rigging: { gridHeight: "OLD" } } } as never;
+    const cbRows = buildAssessmentSheet(clearedBound).fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Rigging intake")!.rows;
+    ok(cbRows.find((r) => r.label === "Grid height")?.value === "" && !JSON.stringify(cbRows).includes("OLD"),
+      "#344 B7 fix: a cleared bound field (measurement blank) never prints its old discipline value on the sheet");
+    const stBound = surveyText(b7);
+    ok(!stBound.includes("OLD-GRID") && !stBound.includes("gridHeight"),
+      "#344 B7 fix: Assist skips a bound discipline key (the measurement is already in the findings)");
+    const pipesRow = (present: string[], qty: string) => {
+      const d = { ...(b7 as object), disciplines: { curtain: { present, fixedPipeQty: qty } } } as never;
+      return buildAssessmentSheet(d).fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Curtain intake")!.rows
+        .filter((r) => r.value === qty && qty);
+    };
+    ok(pipesRow(["Legs"], "7").length === 0 && pipesRow(["Legs", PIPES_LABEL], "7").length === 1,
+      "#344 B7 fix: the pipes qty row prints only when the pipes chip is ticked");
+
+    /* cleared condition: null stays null through migrate and prints nothing */
+    const clr = migrateSurvey(migrateSurvey({
+      linesets: [{ id: "a", cond: "G", condition: null }, { id: "b", cond: "G" }],
+      disciplines: { av: { condition: "Good", conditionLevel: null } },
+    } as unknown as MigratableSurvey));
+    const clrRows = clr.linesets as unknown as { condition?: number | null }[];
+    ok(clrRows[0].condition === null && clrRows[1].condition === 3 && (clr.disciplines?.av as Record<string, unknown>).conditionLevel === null,
+      "#344 B7 fix: a cleared (null) condition stays null through migrate, twice; an absent key still seeds");
+    const clrSheet = buildAssessmentSheet({ ...(b7 as object), linesets: [{ ...blankLinesetRow(1), setName: "Border 1", cond: "G", condition: null }, { ...blankLinesetRow(2), setName: "Legs 1", cond: "G" }] } as never);
+    const clrLs = clrSheet.fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Linesets")!.rows;
+    ok(!clrLs[0].value.includes(linesetCondLabel("G")) && clrLs[1].value.includes(linesetCondLabel("G")),
+      "#344 B7 fix: a cleared line set condition prints no condition (the old code only shows when the key is absent)");
   }
 }
 

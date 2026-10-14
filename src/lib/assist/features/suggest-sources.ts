@@ -12,7 +12,7 @@ import { DISCIPLINE_LABEL, DISCIPLINES } from "@/lib/estimate-output/fields";
 import { goalsFromSurvey } from "@/lib/estimate-output/goals";
 import { conditionLabel } from "@/lib/field-lists";
 import {
-  curtainItemLine, curtainItemText, curtainItemsOf, disciplineFieldType, monthText, positionRowLine, positionRowText, positionRowsOf,
+  curtainItemLine, curtainItemText, curtainItemsOf, disciplineFieldBound, disciplineFieldType, monthText, positionRowLine, positionRowText, positionRowsOf,
 } from "@/lib/survey-format";
 import { cleanPromptAttr, cleanPromptField, defangWrappers, promptMessages, threadBlock, type PromptMessage } from "./thread-text";
 
@@ -132,6 +132,8 @@ function disciplineFieldLines(d: unknown): string[] {
       }
       continue;
     }
+    // A bound field's answer is the measurement (already in the findings text); a stale discipline value never prints.
+    if (disciplineFieldBound(k)) continue;
     const type = disciplineFieldType(k);
     const val =
       type === "condition" || k === "conditionLevel" ? conditionLabel(v)

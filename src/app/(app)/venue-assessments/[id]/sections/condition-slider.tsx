@@ -17,15 +17,16 @@ const linkBtn: CSSProperties = {
   textDecoration: "underline",
 };
 
-/** Bad → New, stored as 0–4. Unset (undefined) shows a ghost "Not rated" track until touched. */
+/** Bad → New, stored as 0–4. Unset (undefined / null) shows a ghost "Not rated" track until touched. Clear reports
+ *  `null` (a kept key, so the migration never re-seeds an answer the rep cleared). */
 export function ConditionSlider({
   value,
   onChange,
   label,
   compact,
 }: {
-  value: ConditionLevel | undefined;
-  onChange: (v: ConditionLevel | undefined) => void;
+  value: ConditionLevel | null | undefined;
+  onChange: (v: ConditionLevel | null) => void;
   label: string;
   compact?: boolean;
 }) {
@@ -73,7 +74,7 @@ export function ConditionSlider({
           {step}
         </span>
         {rated ? (
-          <button type="button" style={linkBtn} aria-label={`Clear ${label}`} onClick={() => onChange(undefined)}>
+          <button type="button" style={linkBtn} aria-label={`Clear ${label}`} onClick={() => onChange(null)}>
             Clear
           </button>
         ) : (
