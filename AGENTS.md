@@ -162,7 +162,8 @@ See `.env.example`.
    the app is fully deterministic, no `ANTHROPIC_API_KEY` anywhere; renewal
    drafts and scope assembly are rules-based (D75/D86).** D89 stays — its
    deletions are not coming back — but Assist (#334, D869–D880, phase 53)
-   reintroduces opt-in model calls behind a gate.
+   reintroduces opt-in model calls behind a gate, and Ask AI (#339, D943,
+   phase 58) is a fresh, read-and-propose assistant built on it.
 9. ✅ Data migration + go-live (tooling) — the Import/Export hub (per-type
    templates, dedupe, paste + AI extraction, preview→confirm), a
    `Clear demo data (go-live)` reset (Settings → Beta) that wipes demo records
@@ -863,7 +864,7 @@ See `.env.example`.
     codes, then Renumber → Apply current type codes on designs already
     opened; try it on a real design in production. Punch item #320.
 
-44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning) and `/api/triage/build` (midday, 17:00 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
+44. ✅ **Morning triage** (#324, D707–D711) — a "Start here" card at the top of Home: each person's top 10 of one ranked list (See more → `/triage`; admins switch person, read-only) built from seven feeds under `src/lib/triage/feeds/` (email waiting ≥ 1 business day ranks higher, Recordings call to-dos behind a `CallTodoSource` with the matched transcript line linking to `/recordings/<id>?tab=transcript&seg=N`, tasks + assignments, lead SLA, today's visits, quotes awaiting you, renewals). Pure points table + reason (`rank.ts`), duplicate collapse, Chicago business-day clock. Per-user snapshots (`triage_snapshots`, `<userId>:<day>:<slot>`) built by the Gmail cron (morning, 11:45 UTC; the brief moved the slots to 6:45 and 13:45 Chicago, D914) and `/api/triage/build` (midday, 18:45 UTC) and lazily on first view, frozen between except done sources; Done / Snooze / Not mine marks (`triage_marks`). Specs 1–3 plug in through `TRIAGE_HOOKS`; Krisp #323 through a second `CallTodoSource`.
 
 45. ✅ **Address verification + drive time** (#325, D712–D724) — every address
     is `verified` / `needs_check` / `unresolved` (only verified gets drive
@@ -1066,6 +1067,8 @@ See `.env.example`.
     model — prices come only from `catalogAddPrice`, systems round to $25, line ids
     are unique across the quote, unknown parts become $0 custom lines, and a banner
     carries the notes, per-line reasons and a Dismiss that doesn't bump `updatedAt`.
+    **Draft estimate was replaced by Estimate suggestion (#338, phase 57):**
+    nothing creates a quote any more; drafts made before keep their banner.
     The gate (`src/lib/assist/config.ts`): no `ANTHROPIC_API_KEY` (or local URL) =
     no UI and no call; `ASSIST_DISABLED=true` kills it; `settings.assistUsers`
     must include the user (**an empty list means nobody**); per-feature toggles.
@@ -1160,8 +1163,125 @@ See `.env.example`.
     PortalPanel Approve rely on the focus refresh. Remaining is Jeff-gated: try it
     in Chrome and Safari, an estimate beside the dashboard, the remembered size, and
     Open in main window. Follow-ups: ⧉ on other screens, the form-action posters, a
-    duplicate window from a second main tab. Next: AI brief → estimate suggestion →
+    duplicate window from a second main tab. Next: AI brief (now shipped, #337) → estimate suggestion →
     AI sidebar. Punch item #336.
+
+56. ✅ **AI daily brief** (#337, D914–D929) — roadmap piece 2, for Assist pilot
+    users with the new opt-in **Daily brief** switch (Settings → Beta → Assist
+    pilot; no migration; `ASSIST_MODEL_BRIEF` optional). A BriefCard above Start
+    here at 6:45 and 13:45 Chicago (`slotAt` is minute-precise; crons `45 11` and
+    `45 18` UTC, lazy build covers winter drift; before 6:45 yesterday's afternoon
+    brief shows): a Haiku summary limited to the triage snapshot's rows, with a
+    rule-built fallback, plus Do these first, Organize counts, new promise-tasks,
+    Today, approvals, quiet quotes and an afternoon "since this morning" line.
+    One blob per user and slot (`brief:<u>:<day>:<slot>`, insert-if-absent;
+    Rebuild replaces it, 3/h, 90 s, and is the only path that runs the Organize AI
+    pass). Pure core in `src/lib/brief/` (`slots`, `types`, `sanitize`, `prompt`,
+    `quiet`, `nudge`, `speech`, `card-vm`, `reminders`), server in `build.ts` and
+    `drafts.ts`. **Pre-made drafts:** `runDraftQueue` drafts a Sonnet reply and Haiku
+    task suggestions for every thread on my court (`CommThread.preDraft`) and a
+    Haiku follow-up note + email for each quiet quote — sent, the owner's (else
+    Prepared by), ≥ 5 business days old, no inbound reply, at most 8
+    (`Quote.assistNudge`); only for pilot users with Daily brief on; `countRate:
+    false`, bounded by the monthly cap and paused at 60 % of it (D927);
+    per-thread / per-quote leases, basis- and owner-checked key-level writes
+    (`ownerId`, D929), 6 h error retry; run from Home and Inbox `after()` and the
+    two cron riders (Gmail cron: meetings, then briefs + drafts by 35 s, then
+    photos; midday cron ends by 50 s). A lazy brief that ran out of time is not
+    stored, and the cron replaces a stored lazy brief with an error (D928). The reply and task
+    calls are reusable server functions (`reply-server`, `tasks-server`) with
+    per-call limits that can only shorten. In the reader, **Use it** opens a fresh
+    stored draft with no model call; **Send nudge** opens `/inbox?nudge=<quoteId>`
+    pre-filled (recipient resolved server-side, nothing sends). On a phone: a
+    big-text view, **Listen** (`speechSynthesis`) and two repeating local
+    notifications (ids 64501 / 64502, 6:45 / 13:45; `@capacitor/local-notifications`
+    8.3.1; Account → Brief reminders on this phone, on by default). The Assist
+    report gains a Daily brief table (nudge "opened" stands in for "sent"). The
+    card never breaks Home. Remaining is Jeff-gated: turn Daily brief on for the
+    pilot, `npx cap sync` and rebuild both apps, check the first morning's cost,
+    try Listen in the car. Follow-ups: whole-doc writers that can clobber
+    leases, per-process Rebuild limit, every user's build scanning all threads
+    and quotes. Next: AI sidebar. Punch item #337.
+
+57. ✅ **Estimate suggestion** (#338, D930–D942) — roadmap piece 3, replacing
+    #334's Draft estimate, for Assist pilot users with the **Suggest estimate**
+    feature on (no migration, no new env var). **Suggest estimate** on an email
+    thread (Inbox reader), a lead (drawer footer, converted leads too), a site
+    visit (venue assessment header, disabled while unsaved or saving) or a linked
+    Krisp meeting (meeting reader header), and on the brief's lead row ("Ready to
+    quote?"), POSTs to `/api/assist/suggest-estimate` (`maxDuration = 300`,
+    `requireUser` + the `estimate` gate, zod body, always-200 JSON, 415 for a
+    non-JSON body). `suggestEstimate(source, me, deps)`
+    (`src/lib/assist/estimate-suggest-server.ts`) checks access per kind (an
+    unlinked meeting is refused even for its owner; a lead's linked threads come
+    from the caller's own mailbox only), builds untrusted source text
+    (`features/suggest-sources.ts`, `survey-findings.ts`), extracts (Haiku),
+    gathers candidates, drafts (Opus) and `sanitizeSuggestion`s it — candidate
+    SKUs only, no prices, 12 systems / 60 lines — into an `EstimateSuggestion`
+    stored as blobs (`estsugg:<id>`, `estsugg-src:<kind>:<id>` → latest,
+    `estsugg-quote:<quoteId>`; `src/lib/stores/estimate-suggestions.ts`). Nothing
+    creates a quote: the reply is an `/estimator?suggestion=…` link that opens a
+    new, unsaved estimate with only the header filled (customer, then venue,
+    contact and lead only when the suggestion is about that customer; the name)
+    and a **Suggested BOM** panel on Build (`suggested-bom-panel.tsx`, pure
+    `suggestion-panel.ts`): per system **+ Add system** (`systemFromSuggestion`,
+    priced like a manual add through `catalogAddPrice`) and **+** per line into a
+    chosen system, ✓ added derived from the sections, unknown parts as unpriced
+    custom lines "Suggested: needs a part and price". The save stamps `leadId` on
+    create only and links the suggestion on the first save (first quote kept;
+    `unlinkedRetryAllowed` retries a missed link, never on a page load); the panel
+    starts hidden on a saved quote, open/closed remembered per suggestion only
+    when toggled. One client helper (`suggest-client.ts`, `suggest-estimate.tsx`)
+    runs every entry point: busy until the Estimator opens (recovers after 15 s),
+    errors inline, "Suggestion ready → Open" + "Suggest again" when the source has
+    one. The Assist report scores a run off its suggestion's first quote
+    (`estimateKeep`): pending until saved, discarded if that quote is deleted, and
+    a No suggestion bucket for runs that saved nothing or were superseded by
+    Suggest again. Old #334 drafts keep their banner. Remaining is Jeff-gated:
+    the key, pilot users and the Suggest estimate toggle; try it from an email, a
+    lead, a site visit and a meeting; check the Opus cost per run in the report.
+    Follow-ups: site-only meetings get no hint; an offline-queued survey edit
+    isn't on the server yet when Suggest reads it. Next: AI sidebar (now shipped
+    as Ask AI, phase 58). Punch item #338.
+
+58. ✅ **Ask AI** (#339, D943–D960) — roadmap piece 4, the last: a researcher
+    over Peak's own data inside ⌘K search, for Assist pilot users with the new
+    opt-in **Ask AI** switch **and** a Claude key (`askGateFor`; Claude-only, no
+    migration; `ASSIST_MODEL_ASK` / `ASSIST_MODEL_ASK_HARD` optional). It
+    deliberately reverses D89's assistant removal and the #334 brief's non-goal
+    (D943) as a fresh build; the model only reads and proposes. The nav search
+    gains a first row "✦ Ask AI: <query>" (⌘↵; hidden at 860 px and below with
+    the search box — open question) that opens `AskPanel`
+    (`src/components/ask/`): a context chip from `GET /api/assist/ask/context`
+    (`{ref, title}` only), streamed answers, "Looked at N records", Sources,
+    cards, **Try harder** (re-asks on Sonnet; the earlier run is discarded only
+    when the retry succeeds), a Search the web toggle (off) and Stop; Esc, ✕ or
+    navigating forgets the conversation. `POST /api/assist/ask`
+    (`maxDuration = 120`, NDJSON) runs `runAsk` (`src/lib/assist/ask-runner.ts`):
+    earlier turns packed into the first user message (no replay), ≤ 6 rounds /
+    12 tool calls / 6,000-character results / 60 s Haiku · 90 s Sonnet, the final
+    round keeping its tools with `tool_choice: none` (not yet verified live), web
+    search `max_uses` 3 per round with the version per model, one `assist_runs`
+    row per question billed from stream events. Eleven read tools
+    (`ask-tools-server.ts`) use the asker's own access — threads through
+    `loadThreadFor`, meetings through `canSeeMeeting` (no transcript), search via
+    the extracted ⌘K core (`src/lib/search/global-search.ts`) scoped to the
+    asker's mailbox, a SQL catalog pre-filter, customer-row quote lines with the
+    bonus hidden; forbidden reads like missing. Four proposal tools write
+    nothing: cards (pure `features/ask-cards.ts`) keep only ids this question
+    exposed (≤ 20 earlier `[[kind:id]]` tokens re-checked) and recipients from
+    structured fields or the user's own typing, and confirm through the app's
+    own paths — `createAskTaskAction`, company / venue / lead / project note
+    actions, `/inbox?compose=ask` (sessionStorage, never sends) and
+    `startSuggestion` — then `recordAskCardAction` marks the run accepted.
+    Answers render as text; a ref links only when the server sent it. The
+    Assist report gains an Ask AI table. Remaining is Jeff-gated: turn Ask AI on
+    for the pilot, try company / quote-comparison / this-screen / web questions,
+    each card and Try harder, check the forced final round and Haiku web search
+    live, read the report after a week, decide on narrow screens. Follow-ups:
+    ⌘K still lists other mailboxes' thread subjects, `list_quotes` without a
+    company scans headers, lead/project notes post no LiveSync entity. This
+    completes the AI roadmap. Punch item #339.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

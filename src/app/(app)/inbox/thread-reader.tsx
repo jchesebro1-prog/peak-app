@@ -18,7 +18,8 @@ import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import TaskDialog from "./task-dialog";
 import AssistTasksDialog from "./assist-tasks-dialog";
-import { draftEstimateAction, draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
+import SuggestEstimate from "@/components/assist/suggest-estimate";
+import { draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
 import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { shortTaskTitle } from "./organize/format";
@@ -36,7 +37,8 @@ type Mode = "reply" | "replyAll" | "forward";
 
 type SuggestTasksResult = Awaited<ReturnType<typeof suggestTasksAction>>;
 const NO_ASSIST: AssistFlags = { tasks: false, reply: false, estimate: false };
-type AssistDraft = { runId: string; draft: string };
+/** `stored`: an AI-brief pre-draft opened with Use it (its runId outlives one composer). */
+type AssistDraft = { runId: string; draft: string; stored?: boolean };
 
 /** Log a pending Assist draft's outcome once and clear it (the store is
  *  first-write-wins too). Fire and forget. */
@@ -543,17 +545,20 @@ export default function ThreadReader({
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistTasks, setAssistTasks] = useState<Extract<SuggestTasksResult, { ok: true }> | null>(null);
-  // #334 Assist — Draft estimate: busy while two model calls run, then the new draft quote opens.
-  const [estimateBusy, setEstimateBusy] = useState(false);
   // #334 Assist — Draft reply: the draft in the composer, pending until it is
   // sent (accepted / edited by edit ratio) or thrown away (discarded). The
   // ref is the source of truth so send / close / unmount settle it once.
   const [draftBusy, setDraftBusy] = useState(false);
   const [assistDraft, setAssistDraft] = useState<AssistDraft | null>(null);
   const assistDraftRef = useRef<AssistDraft | null>(null);
+  // AI daily brief — a stored pre-draft whose composer was closed unsent is
+  // PARKED, not settled: Use it again re-attaches it, so the run's one
+  // (first-write-wins) outcome is the real one. It settles as discarded only
+  // when the reader goes away. A stored runId already sent is never re-attached.
+  const parkedDraftRef = useRef<AssistDraft | null>(null);
+  const sentStoredRef = useRef<Set<string>>(new Set());
   // In-flight guards: a double click lands before the busy state re-renders.
   const tasksInFlight = useRef(false);
-  const estimateInFlight = useRef(false);
   const replyInFlight = useRef(false);
   const mountedRef = useRef(false);
   const sendingRef = useRef(false);
@@ -570,6 +575,7 @@ export default function ThreadReader({
       unmountTimer.current = null;
     }
     const pending = assistDraftRef;
+    const parked = parkedDraftRef;
     const mounted = mountedRef;
     const sendingFlag = sendingRef;
     const timer = unmountTimer;
@@ -577,6 +583,7 @@ export default function ThreadReader({
       mounted.current = false;
       timer.current = setTimeout(() => {
         timer.current = null;
+        settleDraftRef(parked, "discarded", {});
         if (sendingFlag.current) return;
         settleDraftRef(pending, "discarded", {});
       }, 0);
@@ -704,10 +711,43 @@ export default function ThreadReader({
     }
   };
 
+  // AI daily brief §4 — the stored pre-draft. The server sends it only for a
+  // fresh, court-me thread of mine (readerPreDraft); the reply line needs a
+  // non-empty body too. Shown only while Draft reply itself would show.
+  const pre = vm.preDraft ?? null;
+  const storedReply = assist.reply && pre?.reply && pre.reply.body.trim() ? pre.reply : null;
+  const storedTasks = assist.tasks && pre?.tasks ? pre.tasks : null;
+
+  // "Use it" — the Draft reply path with the stored body and runId: no model
+  // call. Outcomes are recorded exactly as for Draft reply (edit ratio on
+  // send, discarded on cancel / leaving the thread).
+  const useStoredDraft = () => {
+    if (!storedReply || draftBusy || replyInFlight.current) return;
+    openMode("reply");
+    setCBody(withSignature(storedReply.body, signature, "add"));
+    const runId = storedReply.runId;
+    // Already sent from this reader: its outcome is recorded — open the text only.
+    if (!runId || sentStoredRef.current.has(runId)) return;
+    const parked = parkedDraftRef.current;
+    parkedDraftRef.current = null;
+    // A parked pre-draft from an OLDER run (the queue redrafted meanwhile) is
+    // replaced here: settle it as discarded rather than leave it pending.
+    if (parked && parked.runId !== runId) settleDraftRef({ current: parked }, "discarded", {});
+    const d: AssistDraft = parked && parked.runId === runId ? parked : { runId, draft: storedReply.body, stored: true };
+    assistDraftRef.current = d;
+    setAssistDraft(d);
+  };
+
   const closeComposer = () => {
     // Cancel / ✕ / Discard with a draft still pending. After a send the
     // draft is already settled, so this is a no-op then.
-    if (assistDraftRef.current) settleDraft("discarded", {});
+    const pendingDraft = assistDraftRef.current;
+    if (pendingDraft?.stored) {
+      // a stored pre-draft is parked (see parkedDraftRef), not discarded yet
+      parkedDraftRef.current = pendingDraft;
+      assistDraftRef.current = null;
+      setAssistDraft(null);
+    } else if (pendingDraft) settleDraft("discarded", {});
     setMode(null);
     setCBody("");
     setCTo("");
@@ -731,6 +771,7 @@ export default function ThreadReader({
       if (res.ok && assistDraftRef.current) {
         // #334 — judged against what was actually sent, signature left out.
         const o = replyOutcome(assistDraftRef.current.draft, stripSignature(b, signature || ""));
+        if (assistDraftRef.current.stored) sentStoredRef.current.add(assistDraftRef.current.runId);
         settleDraft(o.outcome, { editRatio: o.editRatio });
       }
       // #335 §7 — the person ticked "Mark '…' done?": complete the
@@ -1132,6 +1173,19 @@ export default function ThreadReader({
                 title="Assist — drafts suggestions for you to review"
                 onClick={async () => {
                   if (assistBusy || tasksInFlight.current) return;
+                  // AI daily brief — fresh stored suggestions open the same
+                  // dialog with their own runId: no model call.
+                  if (storedTasks) {
+                    setAssistError(null);
+                    setAssistTasks({
+                      ok: true,
+                      runId: storedTasks.runId,
+                      suggestions: storedTasks.suggestions,
+                      team: vm.taskTeam,
+                      links: vm.taskLinks.map((l) => ({ key: l.key, label: l.label })),
+                    });
+                    return;
+                  }
                   tasksInFlight.current = true;
                   setAssistBusy(true);
                   setAssistError(null);
@@ -1151,31 +1205,7 @@ export default function ThreadReader({
               </ActionBtn>
             )}
             {assist.estimate && vm.isEmail && (
-              <ActionBtn
-                colors={["#5b616e", "#fff", "#e4e7ec"]}
-                disabled={estimateBusy}
-                title="Assist — builds a draft estimate from this email for you to check line by line"
-                onClick={async () => {
-                  if (estimateBusy || estimateInFlight.current) return;
-                  estimateInFlight.current = true;
-                  setEstimateBusy(true);
-                  setAssistError(null);
-                  try {
-                    const r = await draftEstimateAction(vm.id);
-                    if (r.ok) {
-                      router.push(r.href);
-                      return; // stay busy (and guarded) while the Estimator opens
-                    }
-                    setAssistError(r.error);
-                  } catch {
-                    setAssistError("Assist couldn’t respond — please try again.");
-                  }
-                  estimateInFlight.current = false;
-                  setEstimateBusy(false);
-                }}
-              >
-                {estimateBusy ? "Drafting… (can take a few minutes)" : "Draft estimate"}
-              </ActionBtn>
+              <SuggestEstimate source={{ kind: "thread", id: vm.id }} readyHref={vm.suggestionHref ?? null} />
             )}
             <ActionBtn
               colors={["#8c919c", "#fff", "#e4e7ec"]}
@@ -1233,6 +1263,46 @@ export default function ThreadReader({
             <p role="alert" style={{ margin: "-4px 0 10px", fontSize: 12, color: "#b4543a" }}>
               {promiseNote}
             </p>
+          )}
+
+          {/* AI daily brief §4 — a pre-made reply, ready to use */}
+          {vm.isEmail && !composerOpen && storedReply && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                margin: "0 0 10px",
+                padding: "7px 11px",
+                borderRadius: 9,
+                background: ACCENT_SOFT,
+                fontSize: 12.5,
+                color: ACCENT_INK,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>Draft reply ready</span>
+              {pre?.preparedLabel && <span>· prepared {pre.preparedLabel}</span>}
+              <span aria-hidden>·</span>
+              <button
+                type="button"
+                onClick={useStoredDraft}
+                disabled={draftBusy}
+                title="Opens the reply with the prepared draft — review it before sending"
+                style={{
+                  border: "none",
+                  background: "none",
+                  padding: 0,
+                  font: "inherit",
+                  fontWeight: 700,
+                  color: "var(--accent)",
+                  cursor: draftBusy ? "default" : "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Use it
+              </button>
+            </div>
           )}
 
           {/* EMAIL: reply / reply-all / forward */}

@@ -28,6 +28,7 @@ import {
 } from "@/lib/stores/survey-intake";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
+import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
@@ -220,6 +221,8 @@ export default function SurveyEditor({
   canShowRecord = false,
   fromRecording = [],
   meetingsSlot = null,
+  canSuggest = false,
+  suggestionHref = null,
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
@@ -233,6 +236,10 @@ export default function SurveyEditor({
   fromRecording?: FromRecordingPanelData[];
   /** #323 — the server-rendered Meetings card (this survey + its site visits); null when none. */
   meetingsSlot?: ReactNode;
+  /** Estimate suggestion (spec 2026-10-13 §3) — pilot + `estimate`, computed on the server. */
+  canSuggest?: boolean;
+  /** This assessment's latest suggestion ("Suggestion ready → Open"); null when none. */
+  suggestionHref?: string | null;
 }) {
   const initial = useMemo<Draft>(() => toDraft(record), [record]);
   const [draft, setDraft] = useState<Draft>(initial);
@@ -930,6 +937,16 @@ export default function SurveyEditor({
             </div>
           </div>
           <RecordingsStrip parentKind="survey" parentId={record.id} recordings={recordings} canRecord={canShowRecord} />
+          {canSuggest && (
+            <SuggestEstimate
+              source={{ kind: "survey", id: record.id }}
+              readyHref={suggestionHref}
+              disabled={dirty || saving}
+              disabledTitle={saving ? "Saving…" : "Save your changes first — Assist reads the saved assessment"}
+              compact
+              buttonStyle={{ fontSize: 13, color: "#5b616e", borderRadius: 9, padding: "10px 14px", minHeight: 42 }}
+            />
+          )}
           <button onClick={onPrintSheet} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
             Print sheet
           </button>

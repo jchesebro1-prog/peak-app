@@ -292,6 +292,27 @@ export async function addNoteAction(formData: FormData): Promise<void> {
   revalidatePath("/", "layout");
 }
 
+/** Ask AI (spec 2026-10-13 §4) — the same project note write as addNoteAction
+ *  (`addNote`), returning {ok, error} instead of redirecting: the note card
+ *  confirms from a panel over any page and records only a real ok. */
+export async function addProjectNoteAction(projectId: string, text: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const id = typeof projectId === "string" ? projectId.trim() : "";
+  const t = typeof text === "string" ? text.trim() : "";
+  if (!id || !t) return { ok: false, error: "Write a note first." };
+  if (t.length > PROJECT_NOTE_MAX) return { ok: false, error: `Keep the note under ${PROJECT_NOTE_MAX.toLocaleString("en-US")} characters.` };
+  try {
+    if (!(await addNote(id, user.name || undefined, t))) return { ok: false, error: "That project no longer exists." };
+  } catch (error) {
+    console.error("addProjectNoteAction failed", error);
+    return { ok: false, error: "Couldn’t save that note — please try again." };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+const PROJECT_NOTE_MAX = 4000;
+
 export async function addTimeAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = str(formData, "id");

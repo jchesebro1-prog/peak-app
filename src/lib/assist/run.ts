@@ -10,8 +10,9 @@ import { pickProvider } from "./provider";
 import { getAssistEnv } from "./key-store";
 import { ZERO_USAGE, type AssistFeature, type AssistProvider, type AssistSettings, type AssistStep, type Env, type ProviderRequest } from "./types";
 
-/** Per user per hour. `file` / `promise` run in background sync passes (#335). */
-export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20, file: 600, promise: 600 };
+/** Per user per hour. `file` / `promise` run in background sync passes (#335);
+ *  `brief` covers the brief summary and quiet-quote nudges (Rebuild has its own 3/h). */
+export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20, file: 600, promise: 600, brief: 60, ask: 60 };
 
 /** zod → JSON Schema for output_config.format; `$schema` dropped. */
 export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -29,11 +30,28 @@ export type RunArgs<T> = {
   userText: string;
   schema?: z.ZodType<T>;
   contextRef: string;
-  /** false = don't count this call against the per-hour limit (the estimate's 2nd call). */
+  /** false = don't count this call against the per-hour limit (the estimate's 2nd call; background pre-drafting). */
   countRate?: boolean;
+  /** Background callers (the brief's draft queue): cap this call below the slot's own timeout / retries. */
+  limits?: CallLimits;
 };
+/** Caps only ever shorten a slot's SLOT_SETTINGS values, never lengthen them. */
+export type CallLimits = { timeoutMs?: number; maxRetries?: number };
 export type RunDeps = { provider?: AssistProvider; fallback?: AssistProvider | null; now?: number; settings?: AssistSettings; env?: Env };
+/** A background caller's hard stop: the call is capped to the time left after
+ *  the function's own loads (call-budget.ts `limitsBefore`), and refused
+ *  (kind "deadline") when less than `minCallMs` would be left. */
+export type CallDeadline = { at: number; hasFallback: boolean; minCallMs: number; clock?: () => number };
+/** A reusable server function's options: runAssist's deps plus the call's own rate/limit choices. */
+export type AssistCallDeps = RunDeps & { countRate?: boolean; limits?: CallLimits; deadline?: CallDeadline };
 export type RunResult<T> = { ok: true; runId: string; value: T } | { ok: false; runId: string | null; error: string };
+
+/** A cap only ever shortens: min(slot, cap), clamped to `floor` — a 0 / negative
+ *  timeout must never read as "unset" (the provider's longer default). */
+export function capAt(slotValue: number, cap: number | undefined, floor: number): number {
+  if (typeof cap !== "number" || !Number.isFinite(cap)) return slotValue;
+  return Math.min(slotValue, Math.max(floor, Math.floor(cap)));
+}
 
 export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}): Promise<RunResult<T>> {
   // D881: the effective key (Settings ?? env var) unless the caller passed its own env.
@@ -61,8 +79,8 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     effort: s.effort,
     maxTokens: s.maxTokens,
     fallbacks: picked.primary.name !== "local" && wantsFallbacks(requestedModel),
-    timeoutMs: s.timeoutMs,
-    maxRetries: s.maxRetries,
+    timeoutMs: capAt(s.timeoutMs, args.limits?.timeoutMs, 1),
+    maxRetries: capAt(s.maxRetries, args.limits?.maxRetries, 0),
     stream: s.stream,
   };
 

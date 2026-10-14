@@ -666,7 +666,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const ctx = buildOrgContext({ users });
-  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true }, capUsd: 200 };
+  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true }, capUsd: 200 };
   const pilot = buildOrgContext({ users, assist: pilotAssist, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
 
   /* context + pilot gate (pure) */
@@ -1102,7 +1102,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
-  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true };
   const pilot = buildOrgContext({ users, assist: { users: [ARI_ID], features: allOn, capUsd: 200 }, env });
   const offCtx = buildOrgContext({ users, assist: { users: [], features: allOn, capUsd: 200 }, env });
   const T0 = Date.UTC(2026, 9, 12, 15, 0); // Mon 12 Oct 2026, 10:00 Chicago
@@ -1747,7 +1747,7 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
       ok(kr.ok && kr.archived === false && kr.skipped === "disabled" && (await read(killT)).archived === false, "kill switch: archiveAfterReply (Mark replied / Close / reply) archives nothing");
       await runPostReply(killT);
       ok((await read(killT)).archived === false, "kill switch: the post-reply step archives nothing");
-      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
+      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
       const kp = await runAiPass({ ownerIds: [ANN_ID] }, { ctx: killCtx });
       ok(kp.looked === 0 && kp.calls === 0 && kp.cleared === 0, "kill switch: the AI pass does nothing");
     } finally {
@@ -2246,7 +2246,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     { id: NOP_ID, name: NOP, email: "nopa.t335@peaksystemsgroup.com", googleEmail: null },
   ];
   const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
-  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true };
   const pilot = buildOrgContext({ users, assist: { users: [CLEO_ID], features: allOn, capUsd: 200 }, env });
   const NOW = Date.UTC(2026, 9, 13, 15, 0); // Tue 13 Oct 2026, 10:00 Chicago
   const DAY = 86_400_000;

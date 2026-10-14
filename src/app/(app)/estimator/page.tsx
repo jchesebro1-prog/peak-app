@@ -46,6 +46,9 @@ import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
+import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
+import { suggestionViewOf, unlinkedRetryAllowed, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
+import type { EstimateSuggestion } from "@/lib/assist/features/suggestion";
 import type {
   AiSource,
   CustomerLite,
@@ -163,6 +166,7 @@ async function initialFrom(
       clientResponses: null,
       bonusRecord: null,
       estimatorBonusSplit: null,
+      leadId: null,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -249,6 +253,8 @@ async function initialFrom(
     clientResponses: q.clientResponses ?? null,
     bonusRecord: q.bonusRecord ?? null,
     estimatorBonusSplit: q.estimatorBonusSplit ?? null,
+    // Estimate suggestion: the stored lead, display-only — a save never changes it.
+    leadId: q.leadId || null,
     portal:
       q.source === "portal-catalog"
         ? {
@@ -268,6 +274,49 @@ async function initialFrom(
           }
         : null,
   };
+}
+
+/**
+ * Estimate suggestion (spec 2026-10-13 §2): the suggestion this estimate shows
+ * in its Suggested BOM panel — `?suggestion=` on a new estimate, else the one a
+ * saved quote was built from — and the live part behind each of its skus,
+ * keyed by the suggestion's OWN sku (getManyBySku follows renames). Fail-soft:
+ * a blob or catalog read error just means no panel.
+ */
+async function loadSuggestion(
+  suggestionId: string,
+  quote: { id: string; createdAt?: number | null; customerId?: string | null } | null
+): Promise<{ record: EstimateSuggestion | null; view: EstimateSuggestionView | null; parts: SuggestionParts }> {
+  try {
+    let record: EstimateSuggestion | null = null;
+    let linked = false;
+    if (quote) {
+      record = await suggestionForQuote(quote.id);
+      linked = !!record;
+      // The first save's link didn't land but the URL still names the
+      // suggestion (stepSearch keeps ?suggestion= after the first save): show
+      // it unlinked, so the next save retries the link — never a write here.
+      // unlinkedRetryAllowed keeps a crafted URL off older / other-customer quotes.
+      if (!record && suggestionId) {
+        const s = await getSuggestion(suggestionId);
+        if (s && unlinkedRetryAllowed(s, quote)) record = s;
+      }
+    } else if (suggestionId) {
+      record = await getSuggestion(suggestionId);
+    }
+    if (!record) return { record: null, view: null, parts: {} };
+    const skus = [...new Set(record.systems.flatMap((sys) => sys.lines.filter((l) => !l.custom && l.sku).map((l) => l.sku)))];
+    const found = skus.length ? await getManyBySku(skus) : new Map();
+    const parts: SuggestionParts = {};
+    for (const sku of skus) {
+      const p = found.get(sku);
+      if (p) parts[sku] = { sku: p.sku, desc: p.desc || p.sku, unit: p.unit || "ea", cost: Number(p.cost) || 0, list: Number(p.list) || 0 };
+    }
+    return { record, view: suggestionViewOf(record, linked), parts };
+  } catch (e) {
+    console.warn("[estimator] suggestion unavailable — no Suggested BOM panel", e);
+    return { record: null, view: null, parts: {} };
+  }
 }
 
 /** Estimator Phase 6 — the admin-set categories with each item's live catalog part (live sku, desc, unit, cost, list). */
@@ -341,9 +390,13 @@ export default async function EstimatorPage({
   // inspection, consulting, rental) opens its own builder, not the
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
+  // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
+  // saved quote's linked one (else, unlinked, the one its URL still names).
+  // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
 
-  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [suggestion, fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
+      loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),
@@ -426,22 +479,31 @@ export default async function EstimatorPage({
   // (a retired SKU follows its rename; a part that left the catalog is `part: null`). Read-only.
   const initial = await initialFrom(q, customers, user.name, systemCategories);
 
+  // Estimate suggestion: the suggestion's header fills only what the URL left
+  // blank (customer, venue, contact, lead, name) — a new estimate only.
+  const sugg = !q && handoff?.suggestionId ? suggestion.record : null;
+  const seedCustomer = preCustomer || sugg?.customerId || undefined;
+  // Venue, contact and lead come from the suggestion only when it is about the customer being seeded.
+  const suggSameCustomer = !!sugg && (sugg.customerId || undefined) === seedCustomer;
+  const seedVenue = handoff?.venueId || (suggSameCustomer ? sugg?.venueId || "" : "");
+  const seedContact = handoff?.contactName || (suggSameCustomer ? sugg?.contactName || "" : "");
   // Seed the customer/venue/contact picked in the guided intake (quotes/new).
   // A venue/contact not on the customer falls back to its primary (#160).
-  if (preCustomer) {
-    const cust = customers.find((c) => c.id === preCustomer);
+  if (seedCustomer) {
+    const cust = customers.find((c) => c.id === seedCustomer);
     if (cust) {
       initial.customerId = cust.id;
       initial.custName = cust.name;
-      initial.locationId = pickVenueId(cust, handoff?.venueId || "") || null;
-      initial.contactName = pickContactName(cust, handoff?.contactName || "");
+      initial.locationId = pickVenueId(cust, seedVenue) || null;
+      initial.contactName = pickContactName(cust, seedContact);
     }
   }
+  if (!q) initial.leadId = handoff?.leadId || (suggSameCustomer ? sugg?.leadId : null) || null;
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
   if (handoff) {
     // #160: the intake's optional name, else "<Customer> — System" (or
     // "— <category>") instead of the old static "New estimate".
-    initial.projectName = handoff.name || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);
+    initial.projectName = handoff.name || sugg?.quoteName || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);
     initial.replaces = handoff.replaces;
   }
 
@@ -535,6 +597,9 @@ export default async function EstimatorPage({
       narrativeIntros={narrativeIntros}
       // #301: Reset to default in the preview's Cover & package block.
       notIncludedDefault={estimateOutputDefaults.notIncluded}
+      // Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM panel + its live parts.
+      suggestion={suggestion.view}
+      suggestionParts={suggestion.parts}
     />
     </>
   );

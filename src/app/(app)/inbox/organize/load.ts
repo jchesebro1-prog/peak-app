@@ -13,7 +13,7 @@
  * `next build` gate catches a client import of this module instead.
  */
 import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
-import { inInbox, isStrongRow, isToFileRow, toFileThreads } from "@/lib/inbox-org/apply";
+import { inInbox, isNoiseRow, isStrongRow, isToFileRow, toFileThreads } from "@/lib/inbox-org/apply";
 import type { ReaderOrgVM } from "../types";
 import {
   courtChipLabel,
@@ -27,6 +27,8 @@ import {
 } from "./format";
 
 export type { OrganizeTab } from "./format";
+/** Moved to lib/inbox-org/apply (the daily brief counts it too); re-exported for existing importers. */
+export { isNoiseRow } from "@/lib/inbox-org/apply";
 
 export type OrganizeRowVM = {
   id: string;
@@ -81,11 +83,6 @@ function whenLabel(ms: number | null | undefined, now: number): string {
   return (Math.abs(now - ms) < 300 * DAY_MS ? DAY : DAY_YEAR).format(ms);
 }
 
-/** The Noise tab's rule (spec §2 "everything flagged as noise"): flagged and
- *  not rescued — moved (archived) or only tagged and still in the inbox. */
-export function isNoiseRow(t: CommThread): boolean {
-  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued;
-}
 
 /** The Filed tab's rule: filed within the last FILED_DAYS. */
 export function isRecentFiledRow(t: CommThread, now: number): boolean {

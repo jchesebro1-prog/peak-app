@@ -24,6 +24,7 @@ import {
   setSpeakerAction,
 } from "./actions";
 import TierSizeChips from "@/components/task-plan/tier-size-chips";
+import SuggestEstimate from "@/components/assist/suggest-estimate";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 import MeetingSidebar, { LinkSearch, useMeetingAction } from "./meeting-sidebar";
 import { SCOPE_META } from "./meetings-box";
@@ -106,6 +107,9 @@ function Reader({ vm, variant }: { vm: MeetingReaderVM; variant: "pane" | "overl
             <button type="button" style={BTN} disabled={pending} onClick={() => run(() => refreshFromKrispAction(vm.id))}>
               {pending ? "Working…" : "Refresh from Krisp"}
             </button>
+            {vm.suggest && (
+              <SuggestEstimate source={{ kind: "meeting", id: vm.id }} readyHref={vm.suggest.readyHref} buttonStyle={BTN} />
+            )}
           </div>
           {error && <div role="alert" style={{ fontSize: 12, color: "#b4543a", marginTop: 8 }}>{error}</div>}
         </div>

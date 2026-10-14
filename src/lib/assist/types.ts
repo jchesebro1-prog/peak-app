@@ -1,7 +1,9 @@
 /** Assist layer (#334, spec 2026-10-12-assist-layer-design.md) — shared types. */
 /** `file` / `promise` (#335 Inbox organization): background Haiku passes —
- *  filing suggestions and the court / promise reading. */
-export type AssistFeature = "tasks" | "reply" | "estimate" | "file" | "promise";
+ *  filing suggestions and the court / promise reading. `brief` (AI daily
+ *  brief): the brief summary and quiet-quote nudges, Haiku. `ask` (Ask AI):
+ *  the ⌘K research assistant, Haiku (Sonnet behind Try harder). */
+export type AssistFeature = "tasks" | "reply" | "estimate" | "file" | "promise" | "brief" | "ask";
 export type AssistStep = "extract" | "draft";
 export type AssistEffort = "low" | "medium" | "high";
 export type AssistOutcome = "accepted" | "edited" | "discarded";

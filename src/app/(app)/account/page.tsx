@@ -1,5 +1,8 @@
 import { requireUser } from "@/lib/session";
-import { CATEGORIES, getPrefs, invitesOn } from "@/lib/stores/notif-prefs";
+import { CATEGORIES, briefRemindersOn, getPrefs, invitesOn } from "@/lib/stores/notif-prefs";
+import { assistSettingsOf } from "@/lib/assist/config";
+import { briefOnFor } from "@/lib/brief/reminders";
+import BriefRemindersToggle from "./brief-reminders-toggle";
 import {
   gmailEnabled,
   hasCalendarScope,
@@ -47,6 +50,8 @@ export default async function AccountPage() {
     getSchedulingSettings(),
     getUserWorkHours(user.id),
   ]);
+  // null hides the toggle: only an Assist pilot user with Daily brief on has a brief to be reminded of
+  const briefReminders = briefOnFor(user.id, assistSettingsOf(settings)) ? await briefRemindersOn(user.name) : null;
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
   const myOfficeId = myRow?.officeId || "";
 
@@ -275,6 +280,9 @@ export default async function AccountPage() {
 
       {/* ---- site-visit calendar invites (D76) ---- */}
       <InviteToggle initialOn={invites} />
+
+      {/* ---- AI daily brief phone reminders (Assist pilot + Daily brief only) ---- */}
+      {briefReminders !== null && <BriefRemindersToggle initialOn={briefReminders} />}
     </div>
   );
 }

@@ -78,6 +78,36 @@ export async function setRunOutcome(
   return rows.length > 0;
 }
 
+/** Confirmed card kinds kept on one Ask AI run. */
+export const ASK_CONFIRMED_MAX = 20;
+
+/**
+ * Ask AI — a card was confirmed (spec 2026-10-13 §4). One atomic UPDATE on the
+ * asker's own `ask` run: the outcome becomes `accepted` only while it is still
+ * null (first decision wins — a Try-harder `discarded` stays), and `kind` is
+ * appended to `outcomeDetail.confirmed` while it holds fewer than 20. False
+ * when the run is missing, someone else's, or not an Ask run.
+ */
+export async function recordAskConfirm(id: string, userId: string, kind: string, now: number = Date.now()): Promise<boolean> {
+  const db = await getDb();
+  const t = DOC_TABLES[COLL];
+  const detail = sql`COALESCE(NULLIF(${t.doc}->'outcomeDetail', 'null'::jsonb), '{}'::jsonb)`;
+  const confirmed = sql`COALESCE(NULLIF(${detail}->'confirmed', 'null'::jsonb), '[]'::jsonb)`;
+  const nextConfirmed = sql`CASE WHEN jsonb_typeof(${confirmed}) = 'array' AND jsonb_array_length(${confirmed}) < ${ASK_CONFIRMED_MAX} THEN ${confirmed} || to_jsonb(${kind}::text) WHEN jsonb_typeof(${confirmed}) = 'array' THEN ${confirmed} ELSE jsonb_build_array(${kind}::text) END`;
+  const undecided = sql`(${t.doc}->>'outcome') IS NULL`;
+  const rows = await db
+    .update(t)
+    .set({
+      doc: sql`jsonb_set(jsonb_set(jsonb_set(${t.doc}, '{outcome}', CASE WHEN ${undecided} THEN to_jsonb('accepted'::text) ELSE ${t.doc}->'outcome' END), '{outcomeAt}', CASE WHEN ${undecided} THEN to_jsonb(${now}::bigint) ELSE COALESCE(${t.doc}->'outcomeAt', 'null'::jsonb) END), '{outcomeDetail}', ${detail} || jsonb_build_object('confirmed', ${nextConfirmed}))`,
+      rev: sql`${t.rev} + 1`,
+      updatedAt: now,
+      receivedAt: now,
+    })
+    .where(and(eq(t.id, id), eq(t.deleted, false), sql`${t.doc}->>'userId' = ${userId}`, sql`${t.doc}->>'feature' = 'ask'`))
+    .returning({ id: t.id });
+  return rows.length > 0;
+}
+
 /** Merge facts into outcomeDetail without setting an outcome (e.g. the estimate's drafted lines). Atomic; false if the run is missing. */
 export async function mergeRunDetail(id: string, patch: Record<string, unknown>): Promise<boolean> {
   const db = await getDb();
@@ -103,4 +133,22 @@ export async function listRunsByMonth(monthKey: string): Promise<AssistRun[]> {
 export async function monthSpend(monthKey: string): Promise<number> {
   const runs = await listRunsByMonth(monthKey);
   return runs.reduce((s, r) => s + (Number(r.costUsd) || 0), 0);
+}
+
+/**
+ * One user's logged spend on one feature in [fromMs, toMs) by `createdAt` —
+ * Ask AI's daily per-user budget. One SQL SUM, no rows loaded; a non-numeric
+ * cost or timestamp counts as nothing.
+ */
+export async function userFeatureSpend(userId: string, feature: AssistFeature, fromMs: number, toMs: number): Promise<number> {
+  const db = await getDb();
+  const t = DOC_TABLES[COLL];
+  const cost = sql`CASE WHEN jsonb_typeof(${t.doc}->'costUsd') = 'number' THEN (${t.doc}->>'costUsd')::numeric ELSE 0 END`;
+  const at = sql`CASE WHEN jsonb_typeof(${t.doc}->'createdAt') = 'number' THEN (${t.doc}->>'createdAt')::numeric ELSE NULL END`;
+  const rows = await db
+    .select({ total: sql<string | number | null>`COALESCE(SUM(${cost}), 0)` })
+    .from(t)
+    .where(and(eq(t.deleted, false), sql`${t.doc}->>'userId' = ${userId}`, sql`${t.doc}->>'feature' = ${feature}`, sql`${at} >= ${fromMs}`, sql`${at} < ${toMs}`));
+  const n = Number(rows[0]?.total ?? 0);
+  return Number.isFinite(n) ? n : 0;
 }

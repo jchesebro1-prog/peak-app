@@ -76,7 +76,9 @@ export async function setNextActionAction(id: string, at: number | null, note: s
 
 export async function logActivityAction(id: string, input: { type: string; note: string }) {
   const me = await requireUser();
-  await logActivity(id, { type: input.type, note: input.note, by: me.name }, me.name);
+  // A missing lead writes nothing — say so (Ask AI's note card records only a real ok).
+  const lead = await logActivity(id, { type: input.type, note: input.note, by: me.name }, me.name);
+  if (!lead) return { ok: false as const, error: "That lead no longer exists." };
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

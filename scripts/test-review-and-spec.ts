@@ -11131,7 +11131,7 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
 {
   const src304 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
   const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src304(rel)) && src304(rel).includes(name), `#304 search ${rel}: reads the shared haystack (${name})`);
-  pinRel("src/app/api/search/route.ts", "partSearchHaystack(");
+  pinRel("src/lib/search/global-search.ts", "partSearchHaystack(");
   pinRel("src/app/(app)/catalog/page.tsx", "partSearchHaystack(");
   // #334: the Estimator's ranking moved to catalog-rank.ts (shared with Assist); searchCatalog calls it.
   pinRel("src/app/(app)/estimator/catalog-rank.ts", "partSearchHaystack(");
@@ -11284,7 +11284,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   ok(src304("src/components/cutsheets/cut-sheet-pages.tsx").includes("{h.model}") && src304("src/lib/curtain-cut-sheets/load.ts").includes("model: partModel(p)"), "#304 cut sheets: the printer + loader read the model");
 
   // Staff rows.
-  ok(src304("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src304("src/app/api/search/route.ts").includes("staffPartLabel(p)") && src304("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#304 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
+  ok(src304("src/app/(app)/catalog/page.tsx").includes("staffPartLabel(p)") && src304("src/lib/search/global-search.ts").includes("staffPartLabel(p)") && src304("src/app/(app)/estimator/catalog-picker.tsx").includes("staffPartLabel("), "#304 staff rows: the catalog list, ⌘K and the Estimator picker use staffPartLabel");
   ok(src304("src/app/(app)/estimator/actions.ts").includes("model: p.manufacturerModelNumber.trim()") && src304("src/app/(app)/estimator/actions.ts").includes("mpn: p.manufacturerPartNumber.trim()"), "#304 staff rows: searchCatalog hits carry the model / order # when present");
   const dr = cr304DocRow({ sku: JUP.sku, quotes: 1, lastQuotedAt: null, grid: 0, bidSpecs: 0 }, { sku: JUP.sku, desc: "DSP", category: "Audio", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: ORDER }, buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] }), () => "");
   ok(dr.model === "Jupiter 4", "#304 datasheets row: the Model # (partModel)");
@@ -11350,6 +11350,9 @@ import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChe
 import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks, inboxOrgUiChecks, inboxOrgCleanupChecks } from "./test-inbox-org";
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
+import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
+import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
+import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11710,6 +11713,26 @@ seeded()
   .then(() => inboxOrgCleanupChecks(ok))
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
+  .then(() => briefPureChecks(ok))
+  .then(() => briefDraftDbChecks(ok))
+  .then(() => briefBuildDbChecks(ok))
+  .then(() => briefCardChecks(ok))
+  .then(() => briefReminderChecks(ok))
+  .then(() => suggestPureChecks(ok))
+  .then(() => suggestStoreDbChecks(ok))
+  .then(() => suggestRoutePins(ok))
+  .then(() => suggestPipelineDbChecks(ok))
+  .then(() => suggestPanelChecks(ok))
+  .then(() => suggestPanelPins(ok))
+  .then(() => suggestSaveDbChecks(ok))
+  .then(() => suggestEntryChecks(ok))
+  .then(() => suggestEntryDbChecks(ok))
+  .then(() => suggestEntryPins(ok))
+  .then(() => askPureChecks(ok))
+  .then(() => askSearchDbChecks(ok))
+  .then(() => askToolsDbChecks(ok))
+  .then(() => askRunnerChecks(ok))
+  .then(() => askUiChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -28320,7 +28343,7 @@ function e223Src(rel: string): string {
   ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
   ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
   ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
-  const search = e223Src("src/app/api/search/route.ts");
+  const search = e223Src("src/lib/search/global-search.ts");
   ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
   // Designs/surveys/inspections keep their own ids; only the Quotes → Designs span is checked.
   const quoteGroups = search.slice(search.indexOf('"Quotes",'), search.indexOf('"Designs",'));
@@ -28485,7 +28508,7 @@ import { linkThreadToNewQuote as e223LinkNewQuote } from "@/lib/gmail/linking";
       engActions.includes('String(quoteId || "").trim().slice(0, 120)'),
     "#223 engagement quote fields (install + consulting) resolve through resolveQuoteInput, scoped to the company, bounded, and report ambiguity / another company"
   );
-  ok(e223Src("src/app/api/search/route.ts").includes("quotesByPartialNumber("), "#223 ⌘K: partial numbers reach the quote candidates");
+  ok(e223Src("src/lib/search/global-search.ts").includes("quotesByPartialNumber("), "#223 ⌘K: partial numbers reach the quote candidates");
   ok(e223Src("src/lib/gmail/linking.ts").includes("leadId"), "#223 inbox + New quote passes the thread's lead");
 }
 
@@ -35212,7 +35235,8 @@ import {
 
   // Fix wave 2 — a new estimate opens at its customer's tier (server-side).
   const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
-  const pgNew = pg.slice(pg.indexOf("if (preCustomer) {"), pg.indexOf("const lite = ("));
+  // Estimate suggestion (#338): the intake seed is `seedCustomer` (the URL's customer, else the suggestion's).
+  const pgNew = pg.slice(pg.indexOf("if (seedCustomer) {"), pg.indexOf("const lite = ("));
   ok(/^import \{ resolveTier \} from "@\/lib\/pricing-tiers";$/m.test(pg)
     && /if \(!q\) \{\s*const t = await resolveTier\(initial\.customerId, initial\.contactName\);\s*initial\.pricingTier = t\.tier;\s*initial\.tierMargin = t\.margin;\s*\}/.test(pgNew)
     && pgNew.indexOf("if (!q) {") > pgNew.indexOf("initial.contactName = pickContactName("),
@@ -35243,7 +35267,7 @@ import {
   const saveA = fn("saveQuoteAction");
   ok(/const tier = await resolveTier\(payload\.customerId \|\| null, payload\.contactName \|\| ""\);/.test(saveA)
     && /pricingTier: tier\.tier,\s*tierMargin: tier\.margin,/.test(saveA)
-    && /create\(\{ \.\.\.patch, owner: user\.name \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
+    && /create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
     "#254 review: saveQuoteAction stamps the tier server-side into the one patch both create and update write");
   const rta = fn("resolveTierAction");
   ok(/await requireUser\(\)/.test(rta) && /resolveTier\(/.test(rta) && /ok: true, pricingTier: r\.tier, tierMargin: r\.margin, label:/.test(rta)
@@ -42689,7 +42713,7 @@ import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-docum
   const meta = acts.slice(acts.indexOf("export async function updateQuoteMetaAction"), acts.indexOf("export type QuotePeopleSync"));
   ok(meta.length > 0 && !/patch\.owner\b/.test(meta) && !/patch\.preparedBy\b/.test(meta), "#287 B: the header autosave's allowlist still excludes owner (and preparedBy)");
   const save = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
-  ok(save.length > 0 && !/patch\.owner\s*=/.test(save) && !/owner:\s*(input|body|data|args)\./.test(save) && save.includes("create({ ...patch, owner: user.name })"),
+  ok(save.length > 0 && !/patch\.owner\s*=/.test(save) && !/owner:\s*(input|body|data|args)\./.test(save) && save.includes("create({ ...patch, owner: user.name, ...(leadId ? { leadId } : {}) })"),
     "#287 B: Save never writes owner from the client — only a new quote's creator");
   const people = acts.slice(acts.indexOf("export async function setQuotePeopleAction"));
   ok(people.includes("await requireUser()") && people.includes("setQuotePeopleAs(id, user,") && people.includes("quoteNextStepFor(q, user)") && people.includes("scheduleQuotePdf(q.id)"),

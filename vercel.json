@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/gmail/sync",
-      "schedule": "0 12 * * *"
+      "schedule": "45 11 * * *"
     },
     {
       "path": "/api/triage/build?slot=midday",
-      "schedule": "0 17 * * *"
+      "schedule": "45 18 * * *"
     },
     {
       "path": "/api/drive/sync",

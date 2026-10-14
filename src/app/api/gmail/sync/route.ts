@@ -10,9 +10,13 @@ import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
 import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
 import { buildSlotForAll } from "@/lib/triage/service";
+import { buildBriefsForAll, runDraftsForAll } from "@/lib/brief/build";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
+
+/** The meetings, morning brief and draft riders end by here, so the photo rider keeps its 10 s minimum before its 45 s cutoff. */
+const BRIEF_CRON_CUTOFF_MS = 35_000;
 
 /**
  * Cron-triggered Gmail sync (D74) — the serverless half of "sync is server
@@ -47,6 +51,8 @@ export const maxDuration = 60;
  * Morning triage adds the morning snapshot build the same way (its midday
  * build is /api/triage/build, the second daily cron).
  * #323 adds the Krisp meeting sync (syncAllMeetings) the same way.
+ * The AI daily brief adds the morning briefs and the pre-made draft queue
+ * after the meeting sync, the same way, capped at 35 s (D920).
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -95,8 +101,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   // Morning triage (spec 2026-10-09-morning-triage-design.md) — today's
-  // morning list for every active user. 12:00 UTC is 7:00 CDT (6:00 CST);
-  // either way it builds today's Chicago "morning" slot. Before the photo
+  // morning list for every active user. 11:45 UTC is 6:45 CDT (5:45 CST) —
+  // the morning brief's time; either way it builds today's Chicago "morning" slot. Before the photo
   // sync so the photo budget below absorbs whatever this used. Own
   // try/catch like the other riders.
   let triage: Awaited<ReturnType<typeof buildSlotForAll>> | { error: string };
@@ -105,6 +111,39 @@ export async function GET(req: Request): Promise<NextResponse> {
     triage = await buildSlotForAll("morning", Date.now(), { deadlineMs: started + 30_000 });
   } catch (err) {
     triage = { error: (err as Error).message };
+  }
+
+  // #323 — Krisp meeting sync for every connected rep (rolling 14-day window). AHEAD of the brief and
+  // draft riders (D920) so it keeps its window: whatever is left before the 35 s rider cutoff, at most
+  // 20 s, every rep skipped when under 5 s is left. A Krisp call already in flight can run its own 20 s
+  // timeout past the cutoff (35 + 20 = 55 s, under the 60 s ceiling); the briefs, drafts and photos
+  // below then find no time and skip — briefs build lazily on Home, photos run tomorrow. Home loads and
+  // the Inbox tick sync meetings too, so a skipped cron run only delays. Own try/catch like the other riders.
+  let meetings: Awaited<ReturnType<typeof syncAllMeetings>> | { error: string };
+  try {
+    meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, BRIEF_CRON_CUTOFF_MS - (Date.now() - started))));
+  } catch (err) {
+    meetings = { error: (err as Error).message };
+  }
+
+  // AI daily brief (spec §1, §2) — the morning brief for every Assist pilot
+  // user with Daily brief on, after their list and the meeting sync, then
+  // the pre-made draft queue for them. Both end by BRIEF_CRON_CUTOFF_MS
+  // (35 s; Assist calls end 5 s before it), so the photo sync below still
+  // gets its 10 s minimum before its 45 s cutoff. A brief starts only with ≥ 12 s left, a
+  // draft queue with ≥ 20 s; whoever doesn't fit builds lazily on Home (and
+  // Home's after() drafts). Each in its own try/catch like the other riders.
+  let briefs: Awaited<ReturnType<typeof buildBriefsForAll>> | { error: string };
+  try {
+    briefs = await buildBriefsForAll("morning", Date.now(), { deadlineMs: started + BRIEF_CRON_CUTOFF_MS });
+  } catch (err) {
+    briefs = { error: (err as Error).message };
+  }
+  let drafts: Awaited<ReturnType<typeof runDraftsForAll>> | { error: string } | null = null;
+  try {
+    if ("userIds" in briefs) drafts = await runDraftsForAll(briefs.userIds, started + BRIEF_CRON_CUTOFF_MS);
+  } catch (err) {
+    drafts = { error: (err as Error).message };
   }
 
   // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
@@ -123,16 +162,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     drivePhotos = { error: (err as Error).message };
   }
 
-  // #323 — Krisp meeting sync for every connected rep (rolling 14-day window), LAST so a slow Krisp call can't
-  // starve the vendor and drive-photo riders: whatever is left of a 40 s cutoff (≤ 20 s) — a Krisp call's own
-  // 20 s timeout still ends under the 60 s ceiling — and every rep skipped when under 5 s is left. Home loads
-  // and the Inbox tick sync too, so a skipped cron run only delays. Own try/catch like the other riders.
-  let meetings: Awaited<ReturnType<typeof syncAllMeetings>> | { error: string };
-  try {
-    meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, 40_000 - (Date.now() - started))));
-  } catch (err) {
-    meetings = { error: (err as Error).message };
-  }
-
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, triage, drivePhotos });
+  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, triage, briefs, drivePhotos, drafts });
 }

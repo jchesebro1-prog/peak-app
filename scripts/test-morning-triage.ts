@@ -67,8 +67,8 @@ export const H = 3_600_000;
 export const D = 86_400_000;
 /** Mon 12 Oct 2026 10:00 CDT (UTC−5). */
 export const MON_10 = Date.UTC(2026, 9, 12, 15, 0);
-/** Mon 12 Oct 2026 12:00 CDT — the midday boundary. */
-export const MON_12 = Date.UTC(2026, 9, 12, 17, 0);
+/** Mon 12 Oct 2026 13:45 CDT — the midday boundary (AI brief; was noon). */
+export const MON_1345 = Date.UTC(2026, 9, 12, 18, 45);
 /** Tue 13 Oct 2026 08:00 CDT. */
 export const TUE_8 = Date.UTC(2026, 9, 13, 13, 0);
 /** Thu 8 Oct 09:00, Fri 9 Oct 09:00 / 15:00, Sat 10 Oct 12:00 — all CDT. */
@@ -127,8 +127,8 @@ export async function triageFoundationChecks(ok: Ok): Promise<void> {
   /* ---- slots ---- */
   const lateMon = Date.UTC(2026, 9, 13, 4, 30);
   ok(
-    slotAt(MON_10).slot === "morning" && slotAt(MON_12).slot === "midday" && slotAt(lateMon).slot === "midday" && slotAt(lateMon).day === "2026-10-12",
-    "slots: before noon Chicago is the morning list, noon on is midday"
+    slotAt(MON_10).slot === "morning" && slotAt(MON_1345 - 60_000).slot === "morning" && slotAt(MON_1345).slot === "midday" && slotAt(lateMon).slot === "midday" && slotAt(lateMon).day === "2026-10-12",
+    "slots: before 13:45 Chicago is the morning list (13:44 included), 13:45 on is midday"
   );
   ok(snapshotId("u3", "2026-10-12", "midday") === "u3:2026-10-12:midday", "slots: snapshot key is <userId>:<YYYY-MM-DD>:<slot>");
   ok(
@@ -607,7 +607,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   await setMark({ userId: U.id, key: L("l3"), kind: "done", at: MON_10, snapshotId: ids.mon, until: null });
   const am = keysOf(await loadTriageView(U, MON_10 + H, { feeds: [] }));
   ok(!am.includes(L("l1")) && !am.includes(L("l2")) && !am.includes(L("l3")), "marks: snoozed, dismissed and done-for-today rows hide in this snapshot");
-  const noon = keysOf(await loadTriageView(U, MON_12, { feeds }));
+  const noon = keysOf(await loadTriageView(U, MON_1345, { feeds }));
   ok(!noon.includes(L("l1")) && !noon.includes(L("l2")) && noon.includes(L("l3")), "marks: at midday the snooze and dismiss hold; done-for-today returns in the new snapshot");
   const tue = keysOf(await loadTriageView(U, TUE_8, { feeds }));
   ok(tue.includes(L("l1")) && !tue.includes(L("l2")), "marks: a snooze returns the next morning; a dismiss is permanent");
@@ -658,7 +658,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   const U3 = { id: fixtureId("TRIAGE", "u3"), name: "Triage Three", canApprove: false };
   const s3 = snapshotId(U3.id, "2026-10-12", "midday");
   registerFixture("triage_snapshots", s3);
-  const res = await buildSlotForAll("midday", MON_12, { users: [U3], feeds });
+  const res = await buildSlotForAll("midday", MON_1345, { users: [U3], feeds });
   const got = await getSnapshot(s3);
   ok(res.built === 1 && res.failed.length === 0 && got?.builtBy === "cron" && got.slot === "midday", "cron: buildSlotForAll writes each user's slot snapshot");
 
@@ -681,7 +681,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
     flameRenewals: counting("flameRenewals", []),
     inspectionRenewals: counting("inspectionRenewals", []),
   };
-  const early = await buildSlotForAll("midday", MON_12, { users: BU, deadlineMs: Date.now() - 1, data: createFeedData(sources) });
+  const early = await buildSlotForAll("midday", MON_1345, { users: BU, deadlineMs: Date.now() - 1, data: createFeedData(sources) });
   ok(
     early.built === 0 && early.skipped.join() === BU.map((u) => u.id).join() && Object.keys(loads).length === 0 && !(await getSnapshot(snapshotId(BU[0].id, "2026-10-12", "midday"))),
     "cron: a deadline already passed → every user is skipped, nothing is built or read"
@@ -703,7 +703,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
         store: { add: async () => {}, remove: async () => {} },
       }),
   };
-  const batch = await buildSlotForAll("midday", MON_12, { users: BU, deadlineMs: Date.now() + 600_000, data: createFeedData(sources), hooks: plannerHooks });
+  const batch = await buildSlotForAll("midday", MON_1345, { users: BU, deadlineMs: Date.now() + 600_000, data: createFeedData(sources), hooks: plannerHooks });
   const names = Object.keys(sources);
   ok(
     batch.built === 3 && batch.failed.length === 0 && batch.skipped.length === 0 && names.every((n) => loads[n] === 1),
@@ -721,12 +721,12 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   const U7 = { id: fixtureId("TRIAGE", "u7"), name: "Triage Seven", canApprove: false };
   const s7 = snapshotId(U7.id, "2026-10-12", "midday");
   registerFixture("triage_snapshots", s7);
-  const lazy7 = await computeSnapshot(U7, { day: "2026-10-12", slot: "midday" }, MON_12 - 60_000, "lazy", { feeds, users: [] });
+  const lazy7 = await computeSnapshot(U7, { day: "2026-10-12", slot: "midday" }, MON_1345 - 60_000, "lazy", { feeds, users: [] });
   await insertSnapshotIfAbsent(lazy7);
-  const frozen = await buildSlotForAll("midday", MON_12, { users: [U7], feeds });
+  const frozen = await buildSlotForAll("midday", MON_1345, { users: [U7], feeds });
   const after7 = await getSnapshot(s7);
   ok(
-    frozen.built === 0 && frozen.kept === 1 && after7?.builtBy === "lazy" && after7.builtAt === MON_12 - 60_000 && after7.rows.length === lazy7.rows.length,
+    frozen.built === 0 && frozen.kept === 1 && after7?.builtBy === "lazy" && after7.builtAt === MON_1345 - 60_000 && after7.rows.length === lazy7.rows.length,
     "cron: a slot someone's lazy view already built is kept as is — an opened list never reorders under them"
   );
 
@@ -740,7 +740,7 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   const mk = (id: string, slot: "morning" | "midday", rows: SnapshotRow[]) => ({ id, userId: U8.id, userName: U8.name, day: "2026-10-12", slot, builtAt: MON_10, builtBy: "cron" as const, rows, errors: [] });
   await saveSnapshot(mk(s8m, "morning", [rowOf("lead:g1"), rowOf("task:g2")]));
   await saveSnapshot(mk(s8n, "midday", [rowOf("email:g3")]));
-  ok((await listedRow(U8.id, "lead:g1", MON_10))?.key === "lead:g1" && (await listedRow(U8.id, "email:g3", MON_12))?.key === "email:g3", "guard: a key on today's morning or midday snapshot is on my list");
+  ok((await listedRow(U8.id, "lead:g1", MON_10))?.key === "lead:g1" && (await listedRow(U8.id, "email:g3", MON_1345))?.key === "email:g3", "guard: a key on today's morning or midday snapshot is on my list");
   ok(
     (await listedRow(U8.id, "lead:not-listed", MON_10)) === null &&
       (await listedRow(U8.id, "lead:g1", TUE_8)) === null &&
@@ -791,8 +791,8 @@ export async function triageCronChecks(ok: Ok): Promise<void> {
   ok(/cronAuthFailure\(/.test(route) && /buildSlotForAll\(slot, /.test(route) && /\?\? "midday"/.test(route) && /maxDuration = 60/.test(route), "cron: /api/triage/build authenticates, defaults to the midday slot, builds every user");
   const vercel = JSON.parse(readFileSync("vercel.json", "utf8")) as { crons: { path: string; schedule: string }[] };
   ok(
-    vercel.crons.some((c) => c.path === "/api/triage/build?slot=midday" && c.schedule === "0 17 * * *") && vercel.crons.some((c) => c.path === "/api/gmail/sync" && c.schedule === "0 12 * * *") && vercel.crons.length === 3,
-    "cron: three once-a-day entries (Hobby-safe) — Gmail sync at 12:00 UTC, triage midday at 17:00 UTC (+ the drive-time cron)"
+    vercel.crons.some((c) => c.path === "/api/triage/build?slot=midday" && c.schedule === "45 18 * * *") && vercel.crons.some((c) => c.path === "/api/gmail/sync" && c.schedule === "45 11 * * *") && vercel.crons.length === 3,
+    "cron: three once-a-day entries (Hobby-safe) — Gmail sync at 11:45 UTC (6:45 CDT), triage midday at 18:45 UTC (13:45 CDT) (+ the drive-time cron)"
   );
   const gmail = readFileSync("src/app/api/gmail/sync/route.ts", "utf8");
   ok(/buildSlotForAll\("morning", Date\.now\(\), \{ deadlineMs: started \+ 30_000 \}\)/.test(gmail), "cron: the Gmail rider stops starting users 30 s in so the photo sync keeps its window");

@@ -17,6 +17,7 @@ import {
   setStageAction,
 } from "./actions";
 import { ConfirmButton } from "@/components/confirm-button";
+import SuggestEstimate from "@/components/assist/suggest-estimate";
 import type { DrawerDetailVM, LeadCustomerLiteVM, LeadThreadVM, SourceOptionVM } from "./types";
 
 /**
@@ -290,6 +291,8 @@ export default function LeadDrawer({
   visitReasons,
   customers,
   canDelete = false,
+  canSuggest = false,
+  suggestionHref = null,
   meetingsSlot = null,
 }: {
   mode: "new" | "detail";
@@ -302,6 +305,10 @@ export default function LeadDrawer({
   visitReasons: string[];
   customers: LeadCustomerLiteVM[];
   canDelete?: boolean;
+  /** Estimate suggestion (spec 2026-10-13 §3) — pilot + `estimate`, computed on the server. */
+  canSuggest?: boolean;
+  /** This lead's latest suggestion ("Suggestion ready → Open"); null when none. */
+  suggestionHref?: string | null;
   /** #323 — the server-rendered Meetings card for this lead (detail mode); null when none. */
   meetingsSlot?: ReactNode;
 }) {
@@ -1162,6 +1169,8 @@ export default function LeadDrawer({
                   )}
 
                   {/* footer actions */}
+                  {/* Suggest estimate gets its own line above the Convert / Lost /
+                      Delete row, which keeps its own layout. */}
                   <div
                     style={{
                       marginTop: "auto",
@@ -1169,6 +1178,19 @@ export default function LeadDrawer({
                       bottom: 0,
                       background: "#fff",
                       borderTop: "1px solid #f0f1f4",
+                    }}
+                  >
+                  {canSuggest && (
+                    <div data-testid="lead-suggest-row" style={{ padding: "11px 22px 0" }}>
+                      <SuggestEstimate
+                        source={{ kind: "lead", id: vm.id }}
+                        readyHref={suggestionHref}
+                        buttonStyle={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 9 }}
+                      />
+                    </div>
+                  )}
+                  <div
+                    style={{
                       padding: "13px 22px",
                       display: "flex",
                       alignItems: "center",
@@ -1237,6 +1259,7 @@ export default function LeadDrawer({
                         }
                       />
                     )}
+                  </div>
                   </div>
                 </>
               )}

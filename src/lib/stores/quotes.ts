@@ -4,10 +4,13 @@ import {
   getDocRows,
   insertWithPrefixedId,
   listDocs,
+  casDocKey,
   patchDoc,
+  patchDocKey,
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import type { AssistNudge } from "@/lib/brief/types";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
 import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
@@ -398,6 +401,16 @@ export type Quote = {
   /** #334: set when Assist drafted this estimate from an email (D877). Never
    *  content, never snapshotted, never copied by buildQuote; staff-only. */
   assistDraft?: AssistDraftInfo;
+  /** AI daily brief (spec §2) — a follow-up note + nudge email for a quiet
+   *  sent quote. Written only by setAssistNudge (a key-level write — never
+   *  under the row lock's read-modify-write, never bumps updatedAt, never
+   *  touches estNo); update() drops it. Never content, never snapshotted;
+   *  staff-only. Fresh while the quote is still sent and `basis` is its send
+   *  time (`nudgeFresh`). */
+  assistNudge?: AssistNudge | null;
+  /** AI daily brief — the draft queue's per-quote lease (epoch-ms), taken and
+   *  released by compare-and-set (`casAssistNudgeKey`); update() drops it. */
+  assistNudgeLeaseUntil?: number | null;
 };
 
 /** #334 (D877) — where an Assist-drafted estimate came from. `reasons` is
@@ -905,9 +918,34 @@ export async function update(
     delete clean.emailSending;
     // #337: the finding keys are set at creation only — a patch never rewrites them.
     delete clean.findingKeys;
+    // AI daily brief: the nudge is setAssistNudge's alone.
+    delete clean.assistNudge;
+    delete clean.assistNudgeLeaseUntil;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
+}
+
+/** AI daily brief (spec §2) — the ONLY writer of `Quote.assistNudge`: set
+ *  (or, with null, remove) it as one key-level write (`doc || {assistNudge}`
+ *  in SQL). The UPDATE takes the row lock itself, so it lands before or after
+ *  a patchQuote, never inside one; estNo/estSuffix and updatedAt are left as
+ *  stored. False = missing / deleted quote. */
+export async function setAssistNudge(quoteId: string, nudge: AssistNudge | null): Promise<boolean> {
+  const res = await patchDocKey("quotes", [quoteId], "assistNudge", nudge === null ? undefined : nudge);
+  return res.ids.length > 0;
+}
+
+/** AI daily brief — compare-and-set the nudge or its lease (the draft queue's
+ *  writes): `next` lands only if the stored value still equals `expected`
+ *  (undefined = absent). One key, in SQL — estNo and updatedAt untouched. */
+export async function casAssistNudgeKey<K extends "assistNudge" | "assistNudgeLeaseUntil">(
+  quoteId: string,
+  key: K,
+  expected: Quote[K] | undefined,
+  next: Quote[K] | undefined
+): Promise<boolean> {
+  return casDocKey("quotes", quoteId, key, expected, next);
 }
 
 /** #334 (D877) — hide an Assist-drafted estimate's banner. Under the row

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { notifPrefs } from "@/db/schema";
 import type { DashboardOverride } from "@/lib/dashboard-layout";
+import { BRIEF_REMINDERS_PREF_KEY } from "@/lib/brief/reminders";
 
 /* ============================================================
    NotifPrefs — server port of app/notifprefs.js (localStorage
@@ -156,6 +157,20 @@ export async function invitesOn(user: string): Promise<boolean> {
 export async function setInvitesOn(on: boolean, user: string): Promise<void> {
   const mine = { ...(await readRow(user)) };
   mine[INVITE_PREF_KEY] = !!on;
+  await writeRow(user, mine);
+}
+
+/** AI daily brief (spec §5): "Brief reminders on this phone" — whether the
+ *  native app schedules the two daily 6:45 / 1:45 notifications. Default ON
+ *  (a missing key reads as on), same sparse row, NOT a bell category. */
+export async function briefRemindersOn(user: string): Promise<boolean> {
+  const stored = await readRow(user);
+  return stored[BRIEF_REMINDERS_PREF_KEY] !== false;
+}
+
+export async function setBriefRemindersOn(on: boolean, user: string): Promise<void> {
+  const mine = { ...(await readRow(user)) };
+  mine[BRIEF_REMINDERS_PREF_KEY] = !!on;
   await writeRow(user, mine);
 }
 

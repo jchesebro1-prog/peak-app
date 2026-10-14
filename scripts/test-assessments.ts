@@ -2025,8 +2025,8 @@ function task11Checks(ok: Ok) {
   ok(/persist\(formData, note\)/.test(approve) && /&approved=1"[\s\S]*\(note\.findingNote \? "&findingnote=" \+ encodeURIComponent\(note\.findingNote\)/.test(approve), "carry-over: approveRepairQuote passes a notice sink to persist and appends &findingnote= to its approved redirect");
   ok(/quoteCoversVenue\(q, docLocId\(site\)\)/.test(read("src/app/(app)/assessments/findings/actions.ts")), "carry-over: Link existing quote checks the quote's venues (repair.venues included)");
   ok(/assessments: immediateFindingCount/.test(read("src/lib/nav-counts.ts")) && /countOpenImmediateFindings\(\)/.test(read("src/lib/nav-counts.ts")) && !/listFindings/.test(read("src/lib/nav-counts.ts")), "nav badge: key assessments = one countOpenImmediateFindings() SQL count, no findings read");
-  const search = read("src/app/api/search/route.ts");
-  ok(/searchDocs\("assessments", q, CANDIDATES\)/.test(search) && /searchDocs\("findings", q, CANDIDATES\)/.test(search) && /"Assessments"/.test(search) && /"Findings"/.test(search), "search route: assessments and findings join the ⌘K Promise.all and add their groups");
+  const search = read("src/lib/search/global-search.ts"); // ⌘K moved here on main (shared with Ask AI)
+  ok(/searchDocs\("assessments", q, CANDIDATES\)/.test(search) && /searchDocs\("findings", q, CANDIDATES\)/.test(search) && /"Assessments"/.test(search) && /"Findings"/.test(search), "global search: assessments and findings join the ⌘K Promise.all and add their groups");
   const venuePage = read("src/app/(app)/venues/[id]/page.tsx");
   ok(venuePage.indexOf("<DocumentsCard") < venuePage.indexOf("<VenueProfileCard") && venuePage.indexOf("<VenueProfileCard") < venuePage.indexOf("<AssessmentsCard") && venuePage.indexOf("<AssessmentsCard") < venuePage.indexOf("<FindingsCard"), "venue page: Venue profile, Assessments and Findings follow the Documents card, in that order");
   const companyPage = read("src/app/(app)/companies/[id]/page.tsx");

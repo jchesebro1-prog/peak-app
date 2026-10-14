@@ -8,6 +8,8 @@ import { money } from "@/lib/format";
 import { makeDashboardData } from "@/lib/dashboard/data";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor } from "@/lib/dashboard/home-metrics";
 import StartHereCard from "@/components/triage/start-here-card";
+import BriefCard from "@/components/brief/brief-card";
+import { assistSettingsOf } from "@/lib/assist/config";
 import HomeTabs from "./home-tabs";
 import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
@@ -83,10 +85,23 @@ export default async function HomePage({
     await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
   });
   const now = Date.now();
+  // AI daily brief (spec §2) — pre-made replies / task suggestions / quote
+  // nudges, after the response, within this page's 120 s; returns at once
+  // unless the user is in the Assist pilot with reply, tasks or brief on.
+  after(async () => {
+    const { runDraftQueue, HOME_DRAFT_DEADLINE_MS } = await import("@/lib/brief/drafts");
+    await runDraftQueue({ ownerId: user.id, deadlineMs: now + HOME_DRAFT_DEADLINE_MS }).catch((err) => console.error("[brief] draft queue failed:", err));
+  });
   const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
     getUser(user.id), getSettings(), data.quotes(), data.designs(),
     meetingsReadOr(toFileCount(user.id), 0, "home count"), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
   ]);
+
+  // AI daily brief (spec §4) — mounted only for an Assist pilot user with
+  // Daily brief on (a settings read, no I/O); the card runs the full Assist
+  // gate (the stored key) itself, behind its Suspense.
+  const assistSettings = assistSettingsOf(appSettings);
+  const briefOn = assistSettings.users.includes(user.id) && !!assistSettings.features.brief;
 
   const pipe = resolvePipe(first(sp.pipe));
   const sheetHref = sheetHrefFor(pipe);
@@ -121,6 +136,11 @@ export default async function HomePage({
     <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
       <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} meetingsToFile={meetingsToFile} />
+      {briefOn && (
+        <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Preparing your brief…</div>}>
+          <BriefCard user={user} settings={assistSettings} />
+        </Suspense>
+      )}
       <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Building your Start here list…</div>}>
         <StartHereCard user={user} />
       </Suspense>

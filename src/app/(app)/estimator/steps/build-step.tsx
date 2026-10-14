@@ -23,7 +23,9 @@ import TrackModal from "../track-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
 import { PortalPanel } from "../portal-panel";
 import { AssistDraftBanner } from "../assist-draft-banner";
+import { SuggestedBomPanel } from "../suggested-bom-panel";
 import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
+import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 
 /**
  * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
@@ -31,6 +33,7 @@ import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
 const NO_COMMENTS: NumberedComment[] = [];
+const NO_PARTS: SuggestionParts = {};
 
 export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresentation }: {
   s: EstimatorState;
@@ -618,6 +621,20 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           )}
         </div>
 
+        {/* Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM column, beside the system cards. */}
+        {s.suggestion && (
+          <SuggestedBomPanel
+            view={s.suggestion}
+            parts={s.suggestionParts ?? NO_PARTS}
+            added={s.suggestionAdded}
+            sections={sections}
+            open={s.suggestOpen}
+            onToggle={s.toggleSuggestOpen}
+            targetFor={s.suggestionTargetFor}
+            onAddSystem={s.addSuggestedSystem}
+            onAddLine={s.addSuggestedLine}
+          />
+        )}
       </div>
 
       {/* configurator modals */}

@@ -199,9 +199,10 @@ The model-backed features (summaries, import extraction, assistant Q&A) were
 removed per `docs/superpowers/specs/2026-07-19-ai-removal-design.md` and stay
 removed — the app is fully deterministic with no key set. Recover via version history.
 
-**Turning Assist on (D869–D880).** A small opt-in layer — Suggest tasks, Draft
-reply and Draft estimate, on an email thread in the Inbox — is the one place
-the app calls a model:
+**Turning Assist on (D869–D880).** A small opt-in layer — Suggest tasks and Draft
+reply on an email thread in the Inbox, Suggest estimate (§6e; it replaced
+Draft estimate, #338) and Ask AI in ⌘K search (§6f, #339) — is the one place the
+app calls a model:
 
 1. Create an API key at console.anthropic.com with billing, and set a Console
    spend limit that matches the monthly cap (default $200).
@@ -216,8 +217,9 @@ the app calls a model:
 3. In Settings → Beta → Assist pilot, tick the pilot users. An empty list means
    nobody. The same card has the three feature toggles, the cap and the report.
 4. Try each button on a real thread. Assist only drafts: tasks need a tick,
-   replies land in the composer unsent, and an estimate is a draft Estimator
-   quote to check line by line.
+   replies land in the composer unsent, and Suggest estimate opens a new,
+   unsaved estimate with a Suggested BOM beside it — nothing is created until
+   you add lines and save (§6e).
 5. After about 30 days read the report (estimated cost, outcome per feature)
    and decide whether to keep it.
 
@@ -316,6 +318,214 @@ in the browser, so there is no setting, no env var and no kill switch.
   two different main tabs and you can get two windows of it. Close the extra one.
 - After a Google sign-in redirect the link to old pop-outs can break; close them and
   open again.
+
+## 6d. AI daily brief (#337, D914–D929)
+
+A short written brief at the top of Home twice a day, with the drafts already made.
+It is part of the Assist pilot, so nothing changes for anyone you have not switched on.
+
+**Turn it on**
+
+- Settings → Beta → Assist pilot. The Claude key must be set (see section 6) and the
+  person must be ticked in the pilot list.
+- Turn on **Daily brief** on that card. It starts off, like Inbox organization. Reply
+  and Task suggestions need to be on too if you want the pre-made drafts; the brief
+  itself works without them. Nobody gets pre-made drafts without Daily brief, even
+  with Reply and Task suggestions on.
+- Optional: `ASSIST_MODEL_BRIEF` in the environment changes the model (default Haiku).
+  The kill switch is `ASSIST_DISABLED`.
+
+**Read it**
+
+- The card sits above **Start here**. It is built at **6:45 am** and **1:45 pm**
+  Central. Before 6:45 you see yesterday afternoon's brief, marked as such.
+- It lists the few things to do first (each links to its row), what is waiting in
+  Organize, promises that became tasks, today's visits and drive time, approvals
+  waiting on you, and quotes that have gone quiet. The afternoon brief adds what
+  changed since the morning.
+- **Rebuild** remakes the brief now (3 per hour, up to about a minute). If the model
+  is unavailable you get a plainer brief built from the counts, with a note. If the
+  first view of the day simply ran out of time, that plainer brief is not kept: the
+  next view, or the next scheduled job, makes the real one.
+- The card collapses, and it never stops Home from loading.
+
+**Use the drafts**
+
+- A row with **Draft ready** or **Tasks ready** has a reply or task list already made.
+  Open the email: "Draft reply ready · prepared 6:52 · **Use it**" puts the reply in
+  the composer. You edit and press Send; nothing sends by itself. The draft is shown
+  only while it is still current: new mail, a reply from you, or a thread that is no
+  longer yours makes it disappear. A thread or quote handed to someone else never
+  shows them the previous person's draft; a new one is made for them.
+- A quote that has been **sent**, is yours (the Lead estimator, else Prepared by) and
+  has had no reply for 5 business days shows under quiet quotes. **Send nudge** opens
+  the composer with a short follow-up already written. Check the recipient (it picks
+  the quote's contact by name, or leaves To blank), edit it and send. A lead row shows
+  **Ready to quote? → Open lead**.
+- Drafts are made in the background when you open Home or the Inbox and by the
+  morning and afternoon jobs, within the monthly cost cap in Settings. Background
+  drafting pauses once the month's Assist spend reaches **60 % of the cap**, so the
+  rest stays free for Draft reply, Suggest tasks and the brief itself. Raise the cap
+  on the pilot card if drafts stop appearing late in the month.
+
+**On the phone**
+
+- Under 900 px wide the card shows a big-text version: the summary, what to do first
+  and the counts.
+- **Listen** reads the brief aloud with the phone's own voice (no cost). Press Stop to
+  end it. It does not appear on a browser that cannot speak.
+- **Reminders:** the app schedules two quiet notifications, "Your morning brief is
+  ready" at 6:45 and "Your afternoon brief is ready" at 1:45, on the phone's clock;
+  tapping one opens the brief. They are on by default; turn them off at Account →
+  **Brief reminders on this phone**. They only exist after the apps are rebuilt:
+  run `npx cap sync`, then rebuild and reinstall the iOS and Android apps. Until then
+  everything else works and there are simply no notifications.
+
+**Watch the cost and use**
+
+- Assist pilot card → report: briefs built, pre-drafts made / used / discarded / not
+  used, and nudges made / opened. "Opened" means the composer was opened from the
+  card; the app cannot tell whether the nudge was then sent.
+- Check the first morning's cost in the Anthropic Console too. The first run drafts
+  every thread on each person's court; later runs only redo drafts that went stale.
+
+## 6e. Suggest estimate (#338, D930–D942)
+
+Assist reads an email, a lead, a site visit or a meeting and suggests the systems and
+parts for an estimate. You build the estimate from the suggestion; Assist never
+creates or prices a quote. It replaced #334's Draft estimate.
+
+**Turn it on**
+
+- Settings → Beta → Assist pilot. The Claude key must be set (section 6) and the
+  person ticked in the pilot list.
+- Turn on **Suggest estimate** on that card. The draft step runs on Opus, so it is the
+  most expensive Assist call; watch its row in the report.
+
+**Where the button is**
+
+- **Inbox:** in an email thread's reader.
+- **Leads:** in the lead drawer, on its own line above Convert / Lost / Delete. It is
+  there on converted leads too, and the suggestion goes to the customer the lead
+  became.
+- **Venue assessments:** in the header. It is greyed out while you have unsaved edits
+  or a save is running, because Assist reads the saved assessment. Save first.
+- **Meetings** (Inbox → Meetings): in the reader's header, only when the meeting is
+  linked to a company or a job. A private or unlinked meeting never goes into a
+  suggestion.
+- **Home → the brief:** a lead under "Do these first" shows "Ready to quote?" with the
+  button.
+
+**Use it**
+
+1. Press **Suggest estimate**. It shows "Suggesting…" and can take a minute or two.
+   If it can't run you get a short message beside the button.
+2. The Estimator opens on a **new, unsaved** estimate. The header is filled in where
+   Assist knows it: the company, and the venue, contact and lead when they belong to
+   that company, plus a name. There are no lines yet.
+3. The **Suggested BOM** panel sits beside the systems on Build. Each suggested system
+   lists its parts with a quantity and a short reason. Press **+ Add system** to add
+   the whole system, or **+** on a line to add just that part to the system chosen in
+   "Lines go to". Parts are priced at the customer's tier, exactly as if you had added
+   them yourself. A line marked **needs a part** is something Assist couldn't match in
+   the catalog: it is added as a custom line with no price and the note "Suggested:
+   needs a part and price", so pick the real part or price it. **✓ added** shows what
+   is already in the estimate.
+4. Check every line, then **Save**. The first save links the estimate to the
+   suggestion. Reopen it later and the panel is there behind its "Suggested BOM" tab,
+   hidden until you open it.
+5. Back on the source, the button now reads **Suggestion ready → Open** (opens the
+   same suggestion again on a new estimate) and **Suggest again** (asks Assist for a fresh one, which
+   replaces it for that source).
+
+**Watch the cost and use**
+
+- Assist pilot card → report → **Suggest estimate (draft)**: runs, cost, and how the
+  saved estimates compare with the suggestion — accepted (90 % or more of the
+  suggested parts kept), edited, discarded (almost none kept, or its estimate was
+  deleted), still pending
+  (not saved yet), and **No suggestion** (nothing came of the run, or it was replaced
+  by Suggest again before anyone saved it).
+
+## 6f. Ask AI (#339, D943–D960)
+
+Ask AI answers questions about Peak's own records from the ⌘K search box. It looks
+things up the way you would — companies, venues, quotes, leads, projects, your own
+email threads and meetings, the catalog, your tasks — and answers with links to what
+it read. It can also propose a task, a note, an email or a suggested estimate as a
+card, but it never changes anything itself: nothing happens until you press the
+card's button.
+
+**Turn it on**
+
+- Settings → Beta → Assist pilot. The Claude key must be set (section 6) — without a
+  key the Ask row never appears, even for pilot users — and the person must be ticked
+  in the pilot list.
+- Turn on **Ask AI** on that card (it starts off). The hint under the switches shows
+  which models answer (Haiku, and Sonnet for Try harder).
+
+**Ask a question**
+
+1. Click the search box in the top bar (or press ⌘K) and type your question, e.g.
+   "what's open with Lincoln High?" or "compare the last 3 quotes for Acme Church".
+2. The first row reads **✦ Ask AI: <your question>**. Click it, or press **⌘↵**
+   (Ctrl+↵ on Windows). The Ask panel opens under the search box.
+3. The answer streams in. While it works you see what it is looking up ("Looking up
+   quotes…"); **Stop** ends it. Record names in the answer are links: a click opens
+   the record and closes the panel; Shift-click opens a thread, estimate or company in
+   a pop-out window. **Looked at N records** lists what it read.
+4. Ask follow-ups in the box at the bottom (Enter sends, Shift+Enter starts a new
+   line). The panel remembers the conversation until you close it.
+5. Not happy with an answer? **Try harder** (under the latest answer) asks the same
+   question again with the stronger model and replaces that answer. It costs more, so
+   use it when the first answer missed something.
+6. **Esc** or **✕** closes the panel and forgets the conversation. Nothing is saved.
+
+**"This screen"**
+
+- Open Ask from a company, venue, quote (any builder), email thread, meeting, lead,
+  project or venue assessment and the panel shows **Looking at: <name>**. Questions
+  like "summarize this" or "what's still open here?" are about that record. Press ✕
+  on the chip to ask without it.
+
+**Search the web**
+
+- Turn on **Search the web** under the input for a question that needs outside
+  information (a manufacturer's spec, a venue's address). It is off by default and
+  applies to that question only. The answer lists its **Sources**; they open in a new
+  tab. Web search costs a little extra per search.
+
+**Cards**
+
+- **Task** — edit the title, due date, assignee and notes, then **Create task**. It is
+  linked to the records the card shows.
+- **Note** — **Add note** adds it to the company, venue, lead or project named on the
+  card.
+- **Email** — **Open in composer** opens the Inbox composer with the recipients,
+  subject and body filled in. Nothing is sent: read it, change it, and send it yourself. Recipients come only
+  from addresses on Peak's records or ones you typed.
+- **Suggest estimate** — starts a suggestion from the email, lead, site visit or
+  meeting (section 6e) and opens the Estimator.
+- Cards can only point at records Ask actually looked up in this conversation, and
+  every button re-checks your access.
+
+**What it can and can't see**
+
+- Only what you can already open: your own mailbox (never a teammate's), meetings you
+  can see (never transcripts), and the shared company, quote, lead and project
+  records. Prices come only from records; quotes read the way the customer sees them,
+  and service quotes show their total but not their lines.
+- It isn't available on narrow screens or phones yet — the search box, and so Ask, is
+  hidden on windows 860 px wide or less.
+
+**Watch the cost and use**
+
+- Assist pilot card → report → **Ask AI**: questions per person, Haiku vs Sonnet, how
+  often Try harder is used, cards proposed and confirmed by kind, web searches and
+  cost. Each person can ask 60 questions an hour (Try harder: 15 an hour) and spend
+  up to $5 a day on Ask AI ("Ask AI daily limit reached — try again tomorrow."), and
+  the monthly cap applies. If the Claude key is wrong, Ask says "The Claude API key
+  was rejected — check Settings → Beta → Assist pilot."
 
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 

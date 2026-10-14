@@ -7,10 +7,16 @@ import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
+import { withSignature } from "@/lib/inbox-signature";
+import { ASK_COMPOSE_PARAM } from "@/lib/assist/ask-compose";
+import { nudgePrefill, prefillRecipient } from "@/lib/inbox-compose-prefill";
+import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
+import { after } from "next/server";
+import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { get as getQuote, getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
@@ -97,11 +103,13 @@ import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/li
 import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
+import { suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
 // #97 — the Gmail import/poll can take longer than the platform default
-// #334 — Draft estimate makes two model calls (Haiku extract + Opus draft) inside one server-action budget.
+// and the Inbox's Assist actions (draft reply, suggest tasks, the AI pass) run model calls inside one server-action budget.
+// (Suggest estimate is its own POST route, /api/assist/suggest-estimate, with its own 300 s.)
 export const maxDuration = 300;
 
 // One mailbox: the signed-in user's own connected Gmail account. The shared
@@ -935,6 +943,27 @@ export default async function InboxPage({
       isAdmin: can("manage_users", user.roles),
     });
 
+    // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
+    // stored suggestions keep only this dialog's link keys and team ids.
+    const storedDraft = readerPreDraft(sel, { id: user.id, name: me });
+    const linkKeySet = new Set(taskLinks.map((l) => l.key));
+    const teamIds = new Set(roster.map((u) => u.id));
+    const preDraft: ReaderVM["preDraft"] = storedDraft
+      ? {
+          ...storedDraft,
+          tasks: storedDraft.tasks
+            ? {
+                runId: storedDraft.tasks.runId,
+                suggestions: storedDraft.tasks.suggestions.map((s) => ({
+                  ...s,
+                  linkKeys: s.linkKeys.filter((k) => linkKeySet.has(k)),
+                  assigneeUserId: teamIds.has(s.assigneeUserId) ? s.assigneeUserId : "",
+                })),
+              }
+            : null,
+        }
+      : null;
+
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
       author: m.author,
@@ -1034,6 +1063,9 @@ export default async function InboxPage({
       meId: user.id,
       threadTasks,
       org,
+      // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
+      suggestionHref: assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
+      preDraft,
     };
   }
 
@@ -1079,7 +1111,25 @@ export default async function InboxPage({
   // #122: ?customer=<companyId> is the same pre-filled composer (vendor pages
   // link here), and ?customer=<companyId>&log=1 opens the Log call / meeting
   // modal with that company preset instead.
+  // AI daily brief §4 — ?nudge=<quoteId> (the Home card's Send nudge) opens
+  // the composer with that quote's stored nudge email: read here, on the
+  // server, only when fresh and the viewer's quote (nudgePrefill); capped;
+  // To = the quote's contact by name, else blank. Nothing sends by itself.
   let initialCompose: ComposeInit | null = null;
+  // Ask AI (spec 2026-10-13 §4) — ?compose=ask: the email card's To/Subject/
+  // Body wait in the tab's sessionStorage; the shell opens the composer from
+  // them on the client, and only when nothing above claimed the composer.
+  const askCompose = str(params.compose) === ASK_COMPOSE_PARAM;
+  const nudgeId = str(params.nudge).slice(0, 100);
+  const nudgeQuote = nudgeId ? await getQuote(nudgeId).catch(() => null) : null;
+  const nudge = nudgePrefill(nudgeQuote, { id: user.id, name: me });
+  // the report's "nudges opened": the composer opening is the hook. A write,
+  // so it runs after the response (not in the render); first write wins.
+  if (nudge) {
+    const nudgeRunId = nudgeQuote?.assistNudge?.runId;
+    const nudgeUserId = user.id;
+    after(() => recordNudgeOpened(nudgeRunId, nudgeUserId));
+  }
   const customerParam = str(params.customer);
   const logCust = str(params.log) === "1" ? customerParam : "";
   const newCust = logCust ? "" : str(params.new) || customerParam;
@@ -1101,6 +1151,20 @@ export default async function InboxPage({
         size: a.size,
       })),
     };
+  } else if (nudge) {
+    const c = nudge.customerId ? customerVMs.find((x) => x.id === nudge.customerId) : undefined;
+    const who = prefillRecipient(c, nudge.contact);
+    initialCompose = {
+      id: null,
+      mailbox: "personal",
+      to: who.to,
+      cc: "",
+      showCc: false,
+      subject: nudge.subject,
+      body: withSignature(nudge.body, signature, "add"),
+      customerId: c ? c.id : "",
+      contactName: who.contactName,
+    };
   } else if (newCust) {
     const c = customerVMs.find((x) => x.id === newCust);
     initialCompose = {
@@ -1114,7 +1178,7 @@ export default async function InboxPage({
       customerId: c ? c.id : "",
       contactName: c?.primaryName || "",
     };
-  } else if (str(params.compose)) {
+  } else if (str(params.compose) && !askCompose) {
     initialCompose = {
       id: null,
       mailbox: box !== "personal" && !isView ? box : "personal",
@@ -1141,7 +1205,7 @@ export default async function InboxPage({
     const selectedId = str(params.m) || null;
     const [boxVM, readerVM] = await Promise.all([
       loadMeetingsBox(user, tab),
-      selectedId ? loadMeetingReader(user, selectedId) : Promise.resolve(null),
+      selectedId ? loadMeetingReader(user, selectedId, { suggestEstimate: assistFlags.estimate }) : Promise.resolve(null),
     ]);
     meetingsSlot = {
       // keyed: these server-made elements are rendered inside InboxShell's child lists (React key warning)
@@ -1235,6 +1299,7 @@ export default async function InboxPage({
             organize={organizeSlot}
             organizeTab={organizeTab}
             assist={assistFlags}
+            askCompose={askCompose && !initialCompose ? str(params.n).slice(0, 24) || "1" : null}
           />
         </div>
       </div>

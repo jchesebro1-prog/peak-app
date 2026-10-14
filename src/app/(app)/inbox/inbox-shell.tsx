@@ -55,6 +55,8 @@ import { organizeHref, ORGANIZE_BASE_HREF, type OrganizeTab } from "./organize/f
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
 import PopoutButton from "@/components/popout/popout-button";
+import { ASK_COMPOSE_KEY, parseAskCompose } from "@/lib/assist/ask-compose";
+import { withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -114,6 +116,7 @@ export default function InboxShell({
   organize = null,
   organizeTab = "to-file",
   assist = NO_ASSIST,
+  askCompose = null,
 }: {
   box: string;
   folder: string;
@@ -147,6 +150,11 @@ export default function InboxShell({
   organizeTab?: OrganizeTab;
   /** #334 — which Assist buttons this user sees (all off unless gated in). */
   assist?: AssistFlags;
+  /** Ask AI — /inbox?compose=ask&n=<nonce>: open the composer pre-filled from
+   *  the email card's sessionStorage hand-off (ask-compose.ts); the server
+   *  opens nothing. The nonce re-runs the hand-off when the Inbox is already
+   *  mounted (a card confirmed from the Inbox itself). null = not asked. */
+  askCompose?: string | null;
 }) {
   const router = useRouter();
   // #126 — both remembered per browser (localStorage), hydration-safe: the
@@ -283,6 +291,30 @@ export default function InboxShell({
   };
 
   const [compose, setCompose] = useState<ComposeInit | null>(initialCompose);
+  // Ask AI email card (spec 2026-10-13 §4): read the hand-off after mount
+  // (sessionStorage isn't there on the server render), remove it, and
+  // open the composer — pre-filled when the hand-off is fresh, blank when
+  // not. queueMicrotask: the repo's set-state-in-effect pattern (see above).
+  useEffect(() => {
+    if (!askCompose) return;
+    queueMicrotask(() => {
+      let raw: string | null = null;
+      try {
+        raw = window.sessionStorage.getItem(ASK_COMPOSE_KEY);
+        window.sessionStorage.removeItem(ASK_COMPOSE_KEY);
+      } catch {
+        /* storage blocked — a blank composer */
+      }
+      const pre = parseAskCompose(raw, Date.now());
+      setCompose(
+        pre
+          ? { ...blankCompose("personal"), to: pre.to, subject: pre.subject, body: pre.body ? withSignature(pre.body, signature, "add") : "" }
+          : blankCompose("personal")
+      );
+    });
+    // once per hand-off nonce, not on every signature change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askCompose]);
   const [logging, setLogging] = useState(!!initialLog);
   // optimistic unread clearing while markRead lands server-side
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());

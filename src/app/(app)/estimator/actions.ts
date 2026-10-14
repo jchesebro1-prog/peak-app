@@ -35,7 +35,8 @@ import { rankCatalogParts } from "./catalog-rank";
 import { withSanitizedKeyProducts } from "./narrative";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import type { DraftedLine } from "./ai-scope-modal";
-import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
+import { get as getSurvey } from "@/lib/stores/surveys";
+import { kv, recordLines, surveyFindings } from "@/lib/survey-findings";
 import {
   get as getInspection,
   type InspectionRecord,
@@ -72,6 +73,7 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
+import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -192,6 +194,12 @@ export type SavePayload = {
      built before a newer tick but processed after it can't revert the tick. */
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
+  /** Estimate suggestion (spec 2026-10-13 §2) — the lead a NEW quote is for
+   *  (create only; checked against the leads; an update never touches it). */
+  leadId?: string;
+  /** The `ES-…` suggestion the estimate was opened from: every successful
+   *  save links the saved quote to it (idempotent; unknown ids ignored). */
+  suggestionId?: string;
 };
 
 export type SaveResult = {
@@ -227,6 +235,9 @@ export type SaveResult = {
   /** #282 phase 2 — the Rewards credit actually stored (after the server's
    *  clamp), so the builder can match its credit line to it. */
   rewardCredit?: number;
+  /** Estimate suggestion — true when this save linked the quote to the
+   *  posted `suggestionId` (the builder stops sending it). */
+  suggestionLinked?: boolean;
 };
 
 export type ReviewSync = {
@@ -604,8 +615,10 @@ export async function saveQuoteAction(
     // it must come back as a typed message, not a raw 500. The sibling
     // setStatus call below already does this; create() was the one gap.
     let created: Quote;
+    // Estimate suggestion: the lead rides the create only (an existing lead, else none).
+    const leadId = await leadIdForCreate(payload.leadId);
     try {
-      created = await create({ ...patch, owner: user.name });
+      created = await create({ ...patch, owner: user.name, ...(leadId ? { leadId } : {}) });
     } catch (e) {
       return {
         ok: false,
@@ -662,6 +675,10 @@ export async function saveQuoteAction(
     // D205: the replaced draft goes only once its replacement exists.
     await retireReplacedDraftSafely(payload.replaces, created.id, "estimator");
   }
+  // Estimate suggestion: link the saved quote to the suggestion it came from
+  // (first save indexes it; later saves are no-ops). Never fails the save.
+  // An update links only when the page's unlinkedRetryAllowed rule holds (server-side guard).
+  const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q, !loadedId) : false;
   refresh();
   return {
     ok: !!q && !statusError,
@@ -682,6 +699,7 @@ export async function saveQuoteAction(
     rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
+    ...(suggestionLinked ? { suggestionLinked: true } : {}),
   };
 }
 
@@ -1396,46 +1414,6 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
 export type DraftScopeResult =
   | { ok: true; scope: string; lines: DraftedLine[] }
   | { ok: false; error: string };
-
-/** Plain-text "key: value" line, dropped when the value is empty. */
-function kv(label: string, value: unknown): string {
-  const v = (value == null ? "" : String(value)).trim();
-  return v ? `${label}: ${v}` : "";
-}
-
-/** Non-empty measurements/facts as indented "  - key: value" lines. */
-function recordLines(rec: Record<string, string> | undefined): string {
-  if (!rec) return "";
-  return Object.entries(rec)
-    .filter(([, v]) => (v == null ? "" : String(v)).trim())
-    .map(([k, v]) => `  - ${k}: ${String(v).trim()}`)
-    .join("\n");
-}
-
-/** Flatten a field survey's brief + field capture into plain-text findings. */
-function surveyFindings(s: SurveyRecord): string {
-  const parts: string[] = [
-    kv("Venue type", s.venueType),
-    kv("Reason for visit", s.reason),
-    kv("Scope of work (field)", s.scopeOfWork),
-    kv("Field notes", s.notes),
-    s.conditions?.length ? kv("Site conditions", s.conditions.join(", ")) : "",
-    kv("Install timeframe", s.installTimeframe),
-  ];
-  const access = [
-    kv("loading dock", s.loadingDock),
-    kv("elevator", s.elevatorSize),
-    kv("floor", s.floorType),
-    kv("access door", s.accessDoorSize),
-    s.liftNeeded
-      ? `lift: ${s.liftNeeded}${s.liftSupplier ? ` (${s.liftSupplier})` : ""}`
-      : "",
-  ].filter(Boolean);
-  if (access.length) parts.push("Access/logistics: " + access.join("; "));
-  const meas = recordLines(s.measurements);
-  if (meas) parts.push("Measurements:\n" + meas);
-  return parts.filter(Boolean).join("\n");
-}
 
 /** Flatten an inspection report (findings/logs + measurements) into plain text. */
 function inspectionFindings(ins: InspectionRecord): string {

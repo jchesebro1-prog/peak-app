@@ -1,13 +1,16 @@
 import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo } from "@/lib/assist/config";
 import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
-import { estimateOutcomeFor, type DraftLine } from "@/lib/assist/outcome";
-import { assistReport, filingReport, recentMonthKeys, type FilingReport } from "@/lib/assist/report";
+import { estimateRunOutcome, estimateRunQuoteId, suggestionCatalogLines, suggestionSuperseded, type DraftLine, type EstimateRunOutcome } from "@/lib/assist/outcome";
+import { getSuggestion, suggestionForSource } from "@/lib/stores/estimate-suggestions";
+import { askReport, assistReport, briefReport, filingReport, recentMonthKeys, type BriefBuildRow, type FilingReport } from "@/lib/assist/report";
+import { modelFor } from "@/lib/assist/models";
+import { briefIdsInMonth } from "@/lib/brief/slots";
+import { getBlob, listBlobIds } from "@/db/doc-store";
 import { cleanupRuleSuggestions } from "@/lib/inbox-org/cleanup";
 import { loadOrgContext } from "@/lib/inbox-org/pipeline";
 import { loadSenderRuleRows } from "@/lib/inbox-org/rule-list-server";
 import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
 import { getFilingLog, getOwnDomainOverride, promiseTaskRows } from "@/lib/stores/inbox-org";
-import type { AssistOutcome } from "@/lib/assist/types";
 import { listRunsByMonth, type AssistRun } from "@/lib/stores/assist-runs";
 import { get as getQuote } from "@/lib/stores/quotes";
 import type { AppSettingsData } from "@/lib/settings";
@@ -16,9 +19,12 @@ import type { AssistVM } from "./groups/types";
 /**
  * #334 — the Settings → Beta Assist pilot card's data: the settings, the
  * status line and one month's usage report. An estimate "draft" run stores no
- * outcome, so it is read off the quote as it stands now (estimateOutcomeFor):
- * a quote that no longer exists, or an explicit `quoteId: null` (nothing was
- * created), counts as discarded; no quoteId key at all stays pending.
+ * outcome, so it is read off the quote as it stands now (estimateRunOutcome):
+ * an Estimate suggestion run is scored off its suggestion's first saved quote
+ * — pending until there is one, discarded once that quote is gone, and its
+ * own "no suggestion" bucket when the run saved nothing or Suggest again
+ * replaced it before any quote was saved (superseded); a legacy #334 draft
+ * keeps estimateOutcomeFor (an explicit `quoteId: null` = discarded).
  *
  * Never throws: a preview deploy can reach the shared production DB before
  * migration 0039 (assist_runs) has run, and the Data group must not 500 —
@@ -29,18 +35,25 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
   const raw = monthParam || "";
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(raw) ? raw : monthKeyChicago(now);
   let runs: AssistRun[] = [];
-  const estOutcomes = new Map<string, AssistOutcome>();
+  const estOutcomes = new Map<string, EstimateRunOutcome>();
   try {
     runs = await listRunsByMonth(month);
     const drafts = runs.filter((r) => r.feature === "estimate" && r.step === "draft" && r.ok && !r.outcome);
     const outcomes = await Promise.all(
       drafts.map(async (r) => {
-        const d = (r.outcomeDetail ?? {}) as { quoteId?: string | null; lines?: DraftLine[] };
-        const quote = d.quoteId ? await getQuote(d.quoteId) : null;
-        return [r.id, estimateOutcomeFor(d, (quote ?? null) as Parameters<typeof estimateOutcomeFor>[1])] as const;
+        const d = (r.outcomeDetail ?? {}) as { suggestionId?: string | null; quoteId?: string | null; lines?: DraftLine[] };
+        // Estimate suggestion runs are scored off the suggestion's first quote (spec 2026-10-13 §4).
+        // Every read fails soft (null), so one bad record can't blank the month's report.
+        const s = typeof d.suggestionId === "string" && d.suggestionId ? await getSuggestion(d.suggestionId).catch(() => null) : null;
+        // No quote yet: still its source's latest, or did Suggest again replace it? (undefined = read failed → not superseded)
+        const latest = s && !s.quoteId ? await suggestionForSource(s.source.kind, s.source.id).then((x) => x?.id ?? null).catch(() => undefined) : undefined;
+        const sugg = s ? { quoteId: s.quoteId, lines: suggestionCatalogLines(s), superseded: suggestionSuperseded(s, latest) } : null;
+        const quoteId = estimateRunQuoteId(d, sugg);
+        const quote = quoteId ? await getQuote(quoteId).catch(() => null) : null;
+        return [r.id, estimateRunOutcome(d, sugg, (quote ?? null) as Parameters<typeof estimateRunOutcome>[2])] as const;
       })
     );
-    for (const [id, o] of outcomes) if (o) estOutcomes.set(id, o);
+    for (const [id, o] of outcomes) estOutcomes.set(id, o);
   } catch (e) {
     console.error("[assist] loading the Assist pilot report failed — showing an empty report", e);
     runs = [];
@@ -61,8 +74,35 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     months: Array.from(new Set([...recentMonthKeys(now, 3, monthKeyChicago), month])),
     spendUsd: runs.reduce((sum, r) => sum + (r.costUsd || 0), 0),
     report: assistReport(runs, estOutcomes),
+    brief: briefReport(runs, await loadBriefBuilds(month)),
+    ask: askReport(runs),
+    askModels: { ask: modelFor("ask", env), askHard: modelFor("askHard", env) },
     org,
   };
+}
+
+/** Most stored briefs read for one month's report (≈ 2 a day × a team's pilot users — far under it). */
+export const BRIEF_REPORT_MAX = 1500;
+
+/**
+ * The month's stored briefs → their `builtBy`. The blob ids carry the day
+ * (`brief:<userId>:<day>:<slot>`), so the month is filtered before anything
+ * is read, and at most BRIEF_REPORT_MAX are. Never throws: a failure reads
+ * as no briefs (the rest of the report still shows).
+ */
+async function loadBriefBuilds(month: string): Promise<BriefBuildRow[]> {
+  try {
+    const ids = briefIdsInMonth(await listBlobIds("brief:"), month).slice(0, BRIEF_REPORT_MAX);
+    const out: BriefBuildRow[] = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const rows = await Promise.all(ids.slice(i, i + 50).map((id) => getBlob<Record<string, unknown>>(id, {})));
+      for (const b of rows) if (typeof b.builtBy === "string") out.push({ builtBy: b.builtBy });
+    }
+    return out;
+  } catch (e) {
+    console.error("[brief] loading the brief report failed", e instanceof Error ? e.name : "error");
+    return [];
+  }
 }
 
 /** #335 — the Inbox-organization half of the card: the month's filing report

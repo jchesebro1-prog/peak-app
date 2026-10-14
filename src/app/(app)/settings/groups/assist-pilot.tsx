@@ -12,7 +12,8 @@ import { AssistOrgSettings, FilingReportTable } from "./assist-org";
  * #334 — Settings → Data & Tools → Beta → Assist pilot: who has Assist
  * (an empty list = nobody), the feature switches (#335 adds Inbox
  * organization `file` and Promise tasks `promise`, both off until turned
- * on — D897), the monthly spend cap,
+ * on — D897; the AI daily brief adds `brief`, also off until turned on),
+ * the monthly spend cap,
  * and the month's usage report. Costs are estimates (D879). The Claude API key
  * block (D881) is write-only: the card sees the key's source and last four
  * characters, never the key; the input is never prefilled.
@@ -21,9 +22,11 @@ import { AssistOrgSettings, FilingReportTable } from "./assist-org";
 const FEATURES = [
   { key: "tasks", label: "Suggest tasks" },
   { key: "reply", label: "Draft reply" },
-  { key: "estimate", label: "Draft estimate" },
+  { key: "estimate", label: "Suggest estimate" },
   { key: "file", label: "Inbox organization" },
   { key: "promise", label: "Promise tasks" },
+  { key: "brief", label: "Daily brief" },
+  { key: "ask", label: "Ask AI" },
 ] as const;
 
 const money = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
@@ -45,13 +48,14 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
             <th style={th}>Edited</th>
             <th style={th}>Discarded</th>
             <th style={th}>No outcome</th>
+            <th style={th} title="Estimate suggestion runs that saved no suggestion, or whose suggestion Suggest again replaced before any quote was saved from it">No suggestion</th>
             <th style={th}>Cost</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={8} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
+              <td colSpan={9} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
                 No runs this month.
               </td>
             </tr>
@@ -65,11 +69,94 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
               <td style={td}>{r.edited}</td>
               <td style={td}>{r.discarded}</td>
               <td style={td}>{r.pending}</td>
+              <td style={td}>{r.noSuggestion}</td>
               <td style={td}>{money(r.costUsd)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** AI daily brief (spec §6) — briefs built, pre-drafts made / used, nudges. Only what is measured. */
+function BriefReportTable({ brief }: { brief: AssistVM["brief"] }) {
+  const { built, preDrafts: p, nudges } = brief;
+  const rows: Array<[string, string | number, string]> = [
+    ["Briefs built", built.total, `${built.cron} cron · ${built.lazy} on first view · ${built.rebuild} rebuilt`],
+    ["Pre-drafts made", p.made, "reply drafts the queue wrote ahead of time"],
+    ["Pre-drafts used", p.used, "sent as drafted or after editing"],
+    ["Pre-drafts discarded", p.discarded, "thrown away or replaced"],
+    ["Pre-drafts not used", p.unused, "no outcome yet (never opened, or made stale by newer mail)"],
+    ["Nudges made", nudges.made, "follow-ups drafted for quiet quotes"],
+    ["Nudges opened", nudges.opened, "opened in the composer via Send nudge — a send is not tracked back"],
+  ];
+  return (
+    <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Daily brief</div>
+      <table style={{ borderCollapse: "collapse", minWidth: 460, width: "100%" }}>
+        <tbody>
+          {rows.map(([label, n, note]) => (
+            <tr key={label} style={{ borderTop: "1px solid #f3f4f7" }}>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}>{label}</td>
+              <td style={td}>{n}</td>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit", color: "#9aa0ab", fontSize: 11.5 }}>{note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Ask AI (spec 2026-10-13 §6) — questions per person, Haiku vs Sonnet, Try harder rate, cards proposed / confirmed by kind, web searches, cost. */
+function AskReportTable({ ask }: { ask: AssistVM["ask"] }) {
+  const rows = ask.total.questions ? [...ask.byPerson, ask.total] : [];
+  const byKind = (k: { task: number; note: number; email: number; estimate: number }) => `${k.task} · ${k.note} · ${k.email} · ${k.estimate}`;
+  return (
+    <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Ask AI</div>
+      <table style={{ borderCollapse: "collapse", minWidth: 560, width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>Person</th>
+            <th style={th}>Questions</th>
+            <th style={th}>Haiku</th>
+            <th style={th}>Sonnet</th>
+            <th style={th} title="Questions re-asked with Try harder, and their share of all questions">Try harder</th>
+            <th style={th} title="Cards shown: task · note · email · estimate">Cards proposed</th>
+            <th style={th} title="Cards confirmed: task · note · email · estimate">Confirmed</th>
+            <th style={th}>Web searches</th>
+            <th style={th}>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={9} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
+                No questions this month.
+              </td>
+            </tr>
+          )}
+          {rows.map((r) => (
+            <tr key={r.key} style={{ borderTop: "1px solid #f3f4f7", fontWeight: r === ask.total ? 600 : undefined }}>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}>{r.key}</td>
+              <td style={td}>{r.questions}</td>
+              <td style={td}>{r.haiku}</td>
+              <td style={td}>{r.sonnet}</td>
+              <td style={td}>
+                {r.tryHarder}
+                {r.tryHarderPct !== null ? ` (${r.tryHarderPct}%)` : ""}
+              </td>
+              <td style={td} title={`${r.cardsShown} shown`}>{byKind(r.proposed)}</td>
+              <td style={td}>{byKind(r.confirmed)}</td>
+              <td style={td}>{r.webSearches}</td>
+              <td style={td}>{money(r.costUsd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>Cards read task · note · email · estimate.</div>
     </div>
   );
 }
@@ -253,7 +340,10 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
         ))}
       </div>
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>
-        Inbox organization and Promise tasks start off — turn them on for the pilot users above.
+        Inbox organization, Promise tasks, Daily brief and Ask AI start off — turn them on for the pilot users above.
+      </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
+        Ask AI (in ⌘K search) answers with {assist.askModels.ask}; Try harder re-asks with {assist.askModels.askHard}. It needs a Claude API key, reads only what each person can open, and changes nothing until they confirm a card.
       </div>
 
       {/* Monthly cap */}
@@ -280,6 +370,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
           Save
         </button>
       </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>Background drafts pause at 60% of the cap.</div>
 
       <AssistOrgSettings org={assist.org} run={run} />
 
@@ -305,6 +396,8 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <ReportTable title="By feature" rows={report.byFeature} />
       <ReportTable title="By person" rows={report.byUser} />
       <ReportTable title="By model" rows={report.byModel} />
+      <BriefReportTable brief={assist.brief} />
+      <AskReportTable ask={assist.ask} />
       <FilingReportTable report={assist.org.filing} cleanupSuggested={assist.org.cleanupSuggested} />
       <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
         Costs are estimates from token counts × list prices; check the Claude Console for the bill.

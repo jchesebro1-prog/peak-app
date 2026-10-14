@@ -6,6 +6,7 @@ import {
   KEYS,
   setAll,
   setInvitesOn,
+  setBriefRemindersOn,
   setPref,
   type NotifCategoryKey,
 } from "@/lib/stores/notif-prefs";
@@ -47,6 +48,14 @@ export async function setAllNotifAction(on: boolean) {
 export async function setInvitePrefAction(on: boolean) {
   const me = await requireUser();
   await setInvitesOn(on, me.name);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** AI daily brief §5: "Brief reminders on this phone" (default on). */
+export async function setBriefRemindersPrefAction(on: boolean) {
+  const me = await requireUser();
+  await setBriefRemindersOn(on === true, me.name);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
