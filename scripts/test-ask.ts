@@ -372,9 +372,47 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
   ok(!lq.input.safeParse({ limit: 21 }).success && lq.input.safeParse({ limit: 20, status: "won", type: "system", sinceDays: 30 }).success, "ask tools: list_quotes caps limit at 20");
   const route = readFileSync("src/app/api/assist/ask/context/route.ts", "utf8");
   ok(
-    /const me = await requireUser\(\);\s*try \{/.test(route) && /gateFor\("ask", me\.id\)/.test(route) && /"private, no-store"/.test(route) && /ctx \? \{ ref: ctx\.ref, title: ctx\.title \} : null/.test(route) && !/ctx\.text/.test(route),
-    "ask context route: requireUser outside the try, the ask gate, no-store, returns {ref, title} | null and never the text"
+    /const me = await requireUser\(\);\s*try \{/.test(route) &&
+      /if \(await askGateFor\(me\.id\)\) return Response\.json\(null/.test(route) &&
+      /"private, no-store"/.test(route) &&
+      /const at = parsePage\(page\);/.test(route) &&
+      /resolveAskRef\(at\.kind, at\.id, \{ id: me\.id, name: me\.name \}\)/.test(route) &&
+      /ref \? \{ ref, title: ref\.title \} : null/.test(route) &&
+      !/pageContext|loadRecordSummary/.test(route),
+    "ask context route: requireUser outside the try, the key-aware ask gate, no-store, parsePage + resolveAskRef → {ref, title} | null (no summary load)"
   );
+
+  /* askGateFor — gateFor("ask") AND a Claude key in the effective env */
+  {
+    const { askGateFor } = await import("@/lib/assist/gate-server");
+    const { ASK_NO_KEY_TEXT } = await import("@/lib/assist/features/ask-limits");
+    const on = assistSettingsOf({ assistUsers: ["u1"], assistFeatures: { ask: true } });
+    const off = assistSettingsOf({ assistUsers: ["u1"] });
+    const local = { ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://localhost:11434", ANTHROPIC_API_KEY: "" };
+    ok(
+      (await askGateFor("u1", { settings: on, env: { ANTHROPIC_API_KEY: "sk-test" } })) === null &&
+        typeof (await askGateFor("u1", { settings: off, env: { ANTHROPIC_API_KEY: "sk-test" } })) === "string" &&
+        typeof (await askGateFor("u2", { settings: on, env: { ANTHROPIC_API_KEY: "sk-test" } })) === "string" &&
+        (await askGateFor("u1", { settings: on, env: { ANTHROPIC_API_KEY: "  " } })) !== null,
+      "askGateFor: on for a pilot user with Ask AI and a key; refused when the switch is off, for a non-pilot, or with a blank key"
+    );
+    const viaLocal = await askGateFor("u1", { settings: on, env: local });
+    ok(assistGate("ask", "u1", on, local).ok && viaLocal === ASK_NO_KEY_TEXT, "askGateFor: a local provider passes the plain gate but not Ask's — no Claude key → \"Ask AI needs the Claude API key.\"");
+    const gs = readFileSync("src/lib/assist/gate-server.ts", "utf8");
+    ok(/export async function askGateFor\(userId: string, deps: Pick<RunDeps, "settings" \| "env"> = \{\}\): Promise<string \| null> \{\s*const env = deps\.env \?\? \(await getAssistEnv\(\)\);/.test(gs) && /\(env\.ANTHROPIC_API_KEY \|\| ""\)\.trim\(\) \? null : ASK_NO_KEY_TEXT/.test(gs), "askGateFor: reads the effective env (getAssistEnv, D881) and requires a non-empty ANTHROPIC_API_KEY");
+  }
+
+  /* budgetMessages (pure) — the newest messages survive the cut */
+  {
+    const { budgetMessages } = await import("@/lib/assist/ask-tools-server");
+    const blocks = Array.from({ length: 8 }, (_, i) => ({ head: `--- RECEIVED · P · M${i}`, body: `BODY${i} ` + "x".repeat(1400) }));
+    const r = budgetMessages(blocks, 5000);
+    ok(r.text.includes("BODY7") && r.text.includes("BODY5") && !r.text.includes("BODY0") && r.dropped === 8 - (r.text.match(/^--- RECEIVED/gm) || []).length && r.text.length <= 5000 && r.text.indexOf("BODY5") < r.text.indexOf("BODY7"), "budgetMessages: drops the oldest whole messages, keeps the newest, prints oldest → newest within budget");
+    const huge = budgetMessages([{ head: "--- A", body: "OLD" }, { head: "--- B", body: "NEWEST " + "y".repeat(9000) }], 2000);
+    ok(huge.text.startsWith("--- B\nNEWEST") && huge.text.endsWith("…[trimmed]") && huge.text.length <= 2000 && huge.dropped === 1 && !huge.text.includes("OLD"), "budgetMessages: an over-long newest message is trimmed, never dropped");
+    const fits = budgetMessages([{ head: "--- A", body: "one" }, { head: "--- B", body: "two" }], 2000);
+    ok(fits.dropped === 0 && fits.text === "--- A\none\n--- B\ntwo", "budgetMessages: everything that fits is kept in order");
+  }
 
   const ME = { id: "u-ask2-me", name: "Ask2 Me" };
   const OTHER = { id: "u-ask2-other", name: "Ask2 Other" };
@@ -396,6 +434,13 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
   const TK_OTHER = fixtureId("ask2", "task-other");
   const AS_MINE = fixtureId("ask2", "assign-mine");
   const SKU = fixtureId("ask2", "part");
+  const OLD_SKU = fixtureId("ask2", "part-old");
+  const T_LONG = fixtureId("ask2", "thread-long");
+  const OTHER_THREADS = [1, 2, 3, 4, 5, 6].map((n) => fixtureId("ask2", `thread-a${n}`));
+  const Q_FLAME = fixtureId("ask2", "quote-flame");
+  const Q_GRID = fixtureId("ask2", "quote-grid");
+  const { softDeleteDoc } = await import("@/db/doc-store");
+  const { globalSearch } = await import("@/lib/search/global-search");
   const item = (id: number, sku: string, desc: string, qty: number, price: number, extra: Record<string, unknown> = {}) => ({ id, sku, desc, qty, unit: "ea", cost: price / 2, price, ...extra });
   try {
     await upsertCustomer({
@@ -506,8 +551,17 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
     await createFixture("assignments", { id: AS_MINE, title: "Call Pat at Glimmerquay", assignee: ME.name, createdBy: OTHER.name, createdAt: NOW, dueDate: 0, link: { kind: "company", id: CID, label: "Glimmerquay Arts" }, done: false, doneAt: null, doneVia: null, source: "" } as never);
     await upsertPart({ id: SKU, sku: SKU, desc: "Glimmerquay velour 32oz", category: "Fabric", unit: "yd", list: 40, cost: 20, mfr: "Glimmer Mills" } as never);
     registerFixture("catalog_parts", SKU);
+    // Fix 1: a retired SKU renamed to SKU (#304), a long thread of mine, six other-mailbox threads that sort first,
+    // a service quote (no lines) and a Grid quote (flat spec.lines) — neither linked to the company (counts unchanged).
+    await createFixture("catalog_parts", { id: OLD_SKU, sku: OLD_SKU, desc: "Old order number", category: "Fabric", unit: "yd", list: 1, cost: 1, renamedTo: SKU } as never);
+    await softDeleteDoc("catalog_parts", OLD_SKU);
+    const longMsgs = Array.from({ length: 8 }, (_, i) => ({ id: `lm${i}`, at: NOW - (8 - i) * 60_000, direction: i % 2 ? "out" : "in", channel: "email", author: i % 2 ? ME.name : "Pat Lee", fromEmail: i % 2 ? "me@peaksystemsgroup.com" : "pat@glimmerquay.test", body: `LONGMSG${i} ` + "words ".repeat(240) }));
+    await createFixture("comms", { ...(thread(T_LONG, ME.name, "Glimmerquay long back-and-forth") as object), messages: longMsgs } as never);
+    for (const x of OTHER_THREADS) await createFixture("comms", thread(x, OTHER.name, "Glimmerquay CROWDER"));
+    await createFixture("quotes", { id: Q_FLAME, name: "Zephyrine flame test", customer: "", customerId: null, estNo: 987810, quoteType: "flame_test", status: "sent", value: 900, createdAt: NOW, updatedAt: NOW - 5000, flameTest: { venues: [] } } as never);
+    await createFixture("quotes", { id: Q_GRID, name: "Zephyrine grid design", customer: "", customerId: null, estNo: 987811, quoteType: "system", source: "grid", status: "draft", value: 450, createdAt: NOW, updatedAt: NOW - 6000, spec: { lines: [{ sku: "GRID-PART-Z", desc: "Grid fixture zeta", qty: 3, price: 150, ext: 450 }] } } as never);
 
-    const run = (name: string, input: unknown, me = ME) => runReadTool(name, input, me);
+    const run =(name: string, input: unknown, me = ME) => runReadTool(name, input, me);
     const refKeys = (r: { refs: { kind: string; id: string }[] }) => new Set(r.refs.map((x) => `${x.kind}:${x.id}`));
     const wrappedOk = (r: { text: string }, kind: string) => r.text.startsWith(`<record kind="${kind}"`) && r.text.trimEnd().endsWith("</record>") && r.text.length <= 6000;
 
@@ -615,6 +669,33 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
     ok(wrappedOk(se, "search") && seKeys.has(`company:${CID}`) && seKeys.has(`quote:${Q}`) && seKeys.has(`thread:${T_MINE}`) && seKeys.has(`meeting:${M_MINE}`) && seKeys.has(`part:${SKU}`), "search: ⌘K groups map to refs (company, quote, thread, meeting, part)");
     ok(!seKeys.has(`thread:${T_OTHER}`) && !se.text.includes("SECRETSUBJECT") && !seKeys.has(`meeting:${M_THEIRS}`), "search: another user's thread and private meeting are left out");
     ok(se.refs.find((r) => r.kind === "quote" && r.id === Q)?.href === `/estimator?id=${encodeURIComponent(Q)}` && se.text.includes(`[[quote:${Q}]]`), "search: quote refs link to the builder; rows print their [[kind:id]] token");
+
+    /* Fix 1 — search scoping: other mailboxes can't crowd my threads out of the 5 */
+    const plain = (await globalSearch("glimmerquay", ME)).find((g) => g.label === "Email threads")?.items ?? [];
+    const scoped = (await globalSearch("glimmerquay", ME, { threadsOf: ME.name })).find((g) => g.label === "Email threads")?.items ?? [];
+    ok(plain.length === 5 && plain.every((i) => OTHER_THREADS.includes(i.id) || i.id === T_OTHER) && !plain.some((i) => i.id === T_MINE), "global search (⌘K, no option): unchanged — the first 5 email-thread rows by id, other mailboxes included");
+    ok(scoped.length === 2 && scoped.some((i) => i.id === T_MINE) && scoped.some((i) => i.id === T_LONG), "global search threadsOf: only my mailbox's threads reach the group, before the cut");
+    ok(JSON.stringify((await globalSearch("glimmerquay", ME, {})).map((g) => g.label)) === JSON.stringify((await globalSearch("glimmerquay", ME)).map((g) => g.label)), "global search: an empty options object is the ⌘K search");
+    ok(seKeys.has(`thread:${T_LONG}`) && !se.text.includes("CROWDER") && !OTHER_THREADS.some((x) => seKeys.has(`thread:${x}`)), "search tool: my threads are found even when six other-mailbox threads sort first");
+
+    /* Fix 1 — a long thread keeps its newest messages */
+    const lt = await run("get_thread", { id: T_LONG });
+    ok(lt.text.length <= 6000 && lt.text.includes("LONGMSG7") && lt.text.includes("LONGMSG6") && !lt.text.includes("LONGMSG0") && /earlier messages? not shown/.test(lt.text) && !lt.text.includes("[truncated") && lt.text.indexOf("LONGMSG6") < lt.text.indexOf("LONGMSG7"), "get_thread: a long thread drops its oldest messages and keeps the newest (oldest → newest), within 6,000 characters");
+
+    /* Fix 1 — catalog pre-filter, list_quotes headers, quote types without sections, renamed part refs */
+    const catWords = await run("search_catalog", { query: "velour glimmerquay" });
+    const catSku = await run("search_catalog", { query: SKU });
+    const catOld = await run("search_catalog", { query: OLD_SKU });
+    ok(refKeys(catWords).has(`part:${SKU}`) && refKeys(catSku).has(`part:${SKU}`) && catSku.refs[0]?.id === SKU && refKeys(catOld).has(`part:${SKU}`) && !refKeys(catOld).has(`part:${OLD_SKU}`), "search_catalog: every word in any order, an exact SKU first, a renamed SKU finds its live part");
+    const tools = readFileSync("src/lib/assist/ask-tools-server.ts", "utf8");
+    ok(!/catalogList|list as catalogList|stores\/catalog";[^\n]*\blist\b/.test(tools) && /listDocsFiltered<CatalogPart>\("catalog_parts", \{ textFields: CATALOG_TEXT_FIELDS, allText: tokens, limit: ASK_CATALOG_CANDIDATES, fields: CATALOG_FIELDS \}\)/.test(tools), "search_catalog: never reads the whole catalog — a SQL pre-filter (every word, capped, projected) before ranking");
+    const lstAll = await run("list_quotes", { sinceDays: 1, limit: 20 });
+    ok(refKeys(lstAll).has(`quote:${Q}`) && refKeys(lstAll).has(`quote:${Q_FLAME}`) && lstAll.refs.find((r) => r.id === Q_FLAME)?.href === `/flame-tests/quote?id=${encodeURIComponent(Q_FLAME)}` && /listDocsFiltered<Quote>\("quotes", \{ fields: QUOTE_HEADER_FIELDS \}\)/.test(tools), "list_quotes without a company: a header projection, filtered and linked (a flame quote → its builder)");
+    const qFlame = await run("get_quote", { id: "FLM-987810" });
+    const qGrid = await run("get_quote", { id: Q_GRID });
+    ok(qFlame.text.includes("Lines are not available for this quote type.") && qGrid.text.includes("GRID-PART-Z · Grid fixture zeta · qty 3 · $450.00"), "get_quote: a service quote says its lines aren't available; a Grid quote prints its flat lines");
+    const oldRef = await resolveAskRef("part", OLD_SKU, ME);
+    ok(oldRef?.id === OLD_SKU && oldRef.title === "Glimmerquay velour 32oz" && oldRef.href === `/catalog?q=${encodeURIComponent(OLD_SKU)}`, "resolveAskRef(part): a renamed SKU keeps the requested id (the earlier token still matches), titled by the live part");
 
     /* errors */
     const bad =await run("get_company", {});

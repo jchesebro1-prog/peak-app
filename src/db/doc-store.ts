@@ -79,11 +79,18 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  * (the catalog is ~10.7k rows) — the caller applies its precise per-field
  * match to the small candidate set. Matches anywhere in the document text;
  * that's a superset of any field-specific match, so nothing real is missed.
+ *
+ * `fieldEquals` (Ask AI) further keeps only rows whose top-level doc fields
+ * equal these strings — applied in SQL before the LIMIT, so a scoped search
+ * (one user's mailbox) is never crowded out by rows it would discard. Field
+ * names are code constants, passed as bound parameters. Omitted = the
+ * unscoped query exactly as before.
  */
 export async function searchDocs<T extends Doc = Doc>(
   coll: CollectionName,
   query: string,
-  limit: number
+  limit: number,
+  opts: { fieldEquals?: Readonly<Record<string, string>> } = {}
 ): Promise<T[]> {
   const q = query.trim();
   if (!q) return [];
@@ -91,10 +98,11 @@ export async function searchDocs<T extends Doc = Doc>(
   const t = table(coll);
   // Escape LIKE metacharacters so a user typing % or _ isn't a wildcard.
   const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const eqs = Object.entries(opts.fieldEquals ?? {}).map(([f, v]) => sql`${t.doc}->>${f} = ${v}`);
   const rows = await db
     .select()
     .from(t)
-    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`))
+    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`, ...eqs))
     .orderBy(asc(t.id))
     .limit(limit);
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));

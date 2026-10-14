@@ -19,21 +19,23 @@
  * checks can drive it directly.
  */
 import { z } from "zod";
-import { listDocsByField } from "@/db/doc-store";
-import { get as getCustomer, type CustomerDoc } from "@/lib/stores/customers";
-import { getAll as getAllQuotes, get as getQuote, type Quote } from "@/lib/stores/quotes";
+import { listDocsByField, listDocsFiltered, searchDocs } from "@/db/doc-store";
+import { get as getCustomer } from "@/lib/stores/customers";
+import { getCompany } from "@/lib/identity/companies";
+import { get as getQuote, type Quote } from "@/lib/stores/quotes";
 import { get as getLead, sla, type LeadRecord } from "@/lib/stores/leads";
 import { getProject, projectsForCustomer } from "@/lib/stores/projects";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
 import { allTasks, getTask, tasksForProject, type TaskRecord } from "@/lib/stores/tasks";
 import { allAssignments, getAssignment, type Assignment } from "@/lib/stores/assignments";
-import { get as getPart, list as catalogList } from "@/lib/stores/catalog";
+import { get as getPart, type CatalogPart } from "@/lib/stores/catalog";
 import { getMeeting } from "@/lib/stores/meetings";
 import { resolveQuoteInput } from "@/lib/stores/estimate-numbers";
 import { visibleTo, type CommThread } from "@/lib/stores/comms";
 import type { NoteRecord } from "@/lib/stores/notes";
 import { getSite, sitesForCompany } from "@/lib/identity/sites";
-import { allContacts, displayName } from "@/lib/identity/contacts";
+import { displayName, getContact } from "@/lib/identity/contacts";
+import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { grantsFor } from "@/lib/portal";
 import { loadVenueHistory } from "@/lib/venue-history-server";
 import { activeUsers } from "@/lib/users";
@@ -51,7 +53,7 @@ import { chicagoToday } from "./config";
 import { hrefFor, type RefHrefHint, type RefKind } from "./features/ask-refs";
 import { ASK_TOOL_RESULT_MAX, capText, wrapRecord } from "./features/ask-prompt";
 import { cleanEmail, oneLine } from "./features/ask-cards";
-import { cleanPromptField, promptMessages } from "./features/thread-text";
+import { cleanPromptField, defangWrappers, promptMessages } from "./features/thread-text";
 import { surveyText } from "./features/suggest-sources";
 
 /* ---------------- shapes ---------------- */
@@ -94,6 +96,14 @@ export const ASK_CATALOG_MAX = 10;
 export const ASK_MY_TASKS_MAX = 25;
 export const ASK_SYSTEM_LINES_MAX = 40;
 export const ASK_SINCE_DAYS_MAX = 3650;
+/** Long lists (venues, people, crew, meeting items) print this many, then "…N more". */
+export const ASK_LIST_CAP = 25;
+/** Catalog rows read per search_catalog call (SQL pre-filter, every query token ANDed), before ranking. */
+export const ASK_CATALOG_CANDIDATES = 400;
+/** The body budget before wrapping: the wrapped result stays ≤ ASK_TOOL_RESULT_MAX. */
+export const ASK_TOOL_BODY_MAX = ASK_TOOL_RESULT_MAX - 400;
+/** Contacts read to name a meeting's attendees and speakers. */
+export const ASK_MEETING_CONTACTS_MAX = 60;
 const TITLE_MAX = 120;
 const QUERY_MAX = 200;
 const ID_MAX = 160;
@@ -179,14 +189,19 @@ function mkRef(kind: RefKind, id: string, title: string, hint?: RefHrefHint): As
 
 const quoteTitle = (q: Pick<Quote, "id" | "name"> & Parameters<typeof displayQuoteNumber>[0]) => `${displayQuoteNumber(q)} ${q.name || ""}`.trim();
 const quoteRef = (q: Quote) => mkRef("quote", q.id, quoteTitle(q), { quoteType: q.quoteType ?? null });
-const companyRef = (c: Pick<CustomerDoc, "id" | "name">) => mkRef("company", c.id, c.name || c.id);
+const companyRef = (c: { id: string; name?: string | null }) => mkRef("company", c.id, c.name || c.id);
+
+/** A long list: the first ASK_LIST_CAP rows, then "…N more". */
+function capList(rows: string[], cap = ASK_LIST_CAP): string[] {
+  return rows.length > cap ? [...rows.slice(0, cap), `- …${rows.length - cap} more`] : rows;
+}
 const leadTitle = (l: LeadRecord) => `${displayLeadNumber(l)} ${l.org || l.contact || ""}`.trim();
 const surveyTitle = (s: Pick<SurveyRecord, "id" | "customer" | "venue">) => [s.customer, s.venue].map((x) => (x || "").trim()).filter(Boolean).join(" — ") || s.id;
 
 /** The company a record points at, as a ref + a printed label; null when it no longer exists. */
 async function companyLink(id: string | null | undefined): Promise<{ ref: AskToolRef; label: string } | null> {
   if (!id) return null;
-  const c = await getCustomer(id);
+  const c = await getCompany(id); // the companies row only — no venues / contacts composed
   return c ? { ref: companyRef(c), label: `${f(c.name)} ${tok("company", c.id)}` } : null;
 }
 
@@ -206,11 +221,13 @@ export function notFoundText(kind: string, id: string): string {
 
 /** Cap, then wrap; re-cap if defanging pushed the wrapped text past the tool-result limit. */
 function finish(kind: string, id: string, body: string): string {
-  let max = ASK_TOOL_RESULT_MAX - 400;
-  let out = wrapRecord(kind, id, capText(body, max));
+  // Defanged first (idempotent — wrapRecord's own pass then changes nothing), so the cap measures the final text.
+  const clean = defangWrappers(body);
+  let max = ASK_TOOL_BODY_MAX;
+  let out = wrapRecord(kind, id, capText(clean, max));
   while (out.length > ASK_TOOL_RESULT_MAX && max > 500) {
     max -= out.length - ASK_TOOL_RESULT_MAX + 100;
-    out = wrapRecord(kind, id, capText(body, max));
+    out = wrapRecord(kind, id, capText(clean, max));
   }
   return out;
 }
@@ -251,15 +268,18 @@ async function loadCompany(id: string): Promise<Loaded | null> {
 
   const refs: AskToolRef[] = [];
   const emails = new Set<string>();
-  const venueLines = sites.map((s) => {
+  const venueLines = sites.slice(0, ASK_LIST_CAP).map((s) => {
     refs.push(mkRef("venue", s.id, s.name || s.id));
     const where = [s.address, [s.city, s.state].filter(Boolean).join(", "), s.zip].filter(Boolean).join(" ");
     return `- ${tok("venue", s.id)} ${f(s.name) || "(unnamed venue)"}${s.isPrimary ? " (primary)" : ""}${where ? ` — ${f(where, 200)}` : ""}`;
   });
-  const peopleLines = (c.contacts || []).map((p) => {
+  if (sites.length > ASK_LIST_CAP) venueLines.push(`- …${sites.length - ASK_LIST_CAP} more`);
+  const contacts = c.contacts || [];
+  const peopleLines = contacts.slice(0, ASK_LIST_CAP).map((p) => {
     pushEmail(emails, p.email);
     return `- ${f(p.name)}${p.role ? `, ${f(p.role)}` : ""}${p.email ? ` · ${f(p.email)}` : ""}${p.phone ? ` · ${f(p.phone, 40)}` : ""}${p.mobile ? ` · mobile ${f(p.mobile, 40)}` : ""}${p.primary ? " (primary)" : ""}`;
   });
+  if (contacts.length > ASK_LIST_CAP) peopleLines.push(`- …${contacts.length - ASK_LIST_CAP} more`);
   const quoteLines = quotes.slice(0, ASK_COMPANY_LATEST).map((q) => {
     refs.push(quoteRef(q));
     return `- ${tok("quote", q.id)} ${f(displayQuoteNumber(q))} ${f(q.name)} — ${q.status} — ${money(q.value)} — updated ${day(q.updatedAt)}`;
@@ -301,7 +321,7 @@ async function loadVenue(id: string): Promise<Loaded | null> {
   const site = await getSite(id);
   if (!site) return null;
   const [company, history, quoteDocs] = await Promise.all([
-    getCustomer(site.companyId),
+    getCompany(site.companyId),
     loadVenueHistory(site),
     listDocsByField<Quote>("quotes", "customerId", [site.companyId]),
   ]);
@@ -361,6 +381,34 @@ function systemLines(q: Quote): string[] {
   return out;
 }
 
+type FlatLine = { sku?: unknown; desc?: unknown; qty?: unknown; price?: unknown; ext?: unknown };
+const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? n : 0);
+
+/**
+ * A quote's printable lines: an Estimator quote's systems (`spec.sections`,
+ * customer rows), a Grid quote's flat `spec.lines` (sku · desc · qty · ext,
+ * D111/D316), else a note — the service / consulting / rental engines keep
+ * their own subdocs, which aren't line lists.
+ */
+function quoteLinesText(q: Quote): string {
+  const spec = (q.spec && typeof q.spec === "object" ? q.spec : {}) as { sections?: unknown; lines?: unknown };
+  if (Array.isArray(spec.sections)) {
+    const sys = systemLines(q);
+    return sys.length ? `Systems and lines (sell):\n${sys.join("\n")}` : "Lines: none";
+  }
+  if (Array.isArray(spec.lines)) {
+    const rows = (spec.lines as FlatLine[])
+      .filter((l) => l && typeof l === "object")
+      .map((l) => {
+        const qty = num(l.qty);
+        const ext = typeof l.ext === "number" && Number.isFinite(l.ext) ? l.ext : qty * num(l.price);
+        return `- ${f(l.sku, 80) || "—"} · ${f(l.desc, 160)} · qty ${qty} · ${money(ext)}`;
+      });
+    return rows.length ? `Lines (sell):\n${capList(rows, ASK_SYSTEM_LINES_MAX).join("\n")}` : "Lines: none";
+  }
+  return "Lines are not available for this quote type.";
+}
+
 async function loadQuote(input: string): Promise<Loaded | { ambiguous: string[] } | null> {
   const r = await resolveQuoteInput(input);
   if (!r.ok) return r.reason === "ambiguous" ? { ambiguous: r.numbers } : null;
@@ -370,7 +418,6 @@ async function loadQuote(input: string): Promise<Loaded | { ambiguous: string[] 
   const self = quoteRef(q);
   const cust = await companyLink(q.customerId);
   if (cust) refs.push(cust.ref);
-  const sys = systemLines(q);
   const body = join([
     `Quote ${tok("quote", q.id)} ${f(displayQuoteNumber(q))} — ${f(q.name)}`,
     `Type: ${q.quoteType || "system"}${q.category ? ` (${f(q.category, 60)})` : ""}`,
@@ -382,7 +429,7 @@ async function loadQuote(input: string): Promise<Loaded | { ambiguous: string[] 
     `Created: ${day(q.createdAt)} · Updated: ${day(q.updatedAt)}`,
     `Total (sell): ${money(q.value)}`,
     line("Install timeframe", f(q.installTimeframe, 120)),
-    sys.length ? `Systems and lines (sell):\n${sys.join("\n")}` : "",
+    quoteLinesText(q),
   ]);
   return { self, body, refs: [self, ...refs], emails: [] };
 }
@@ -396,7 +443,8 @@ async function loadLead(id: string, me: AskUser): Promise<Loaded | null> {
     companyLink(l.customerId),
     l.convertedCustomerId && l.convertedCustomerId !== l.customerId ? companyLink(l.convertedCustomerId) : Promise.resolve(null),
     l.convertedQuoteId ? getQuote(l.convertedQuoteId) : Promise.resolve(null),
-    listDocsByField<CommThread>("comms", "mailboxUser", [me.name]),
+    // my own mailbox's threads that mention the lead id (in SQL); the exact link is checked below
+    searchDocs<CommThread>("comms", l.id, 200, { fieldEquals: { mailbox: "personal", mailboxUser: me.name, channel: "email" } }),
   ]);
   for (const x of [cust, converted]) if (x) refs.push(x.ref);
   if (quote) refs.push(quoteRef(quote));
@@ -459,7 +507,7 @@ async function loadProject(id: string): Promise<Loaded | null> {
     proc.length
       ? `Procurement: ${proc.length} lines — ${byStatus("pending")} pending, ${byStatus("ordered")} ordered, ${byStatus("shipped")} shipped, ${byStatus("received")} received`
       : "Procurement: none",
-    crew.length ? `Crew:\n${crew.join("\n")}` : "Crew: none assigned",
+    crew.length ? `Crew:\n${capList(crew).join("\n")}` : "Crew: none assigned",
     open.length
       ? `Open tasks:\n${open
           .slice(0, 25)
@@ -489,26 +537,69 @@ async function loadThread(id: string, me: AskUser): Promise<Loaded | null> {
     pushEmail(emails, m.cc);
     if (m.author) people.add(`${f(m.author, 80)}${m.fromEmail ? ` <${f(m.fromEmail)}>` : ""}`);
   }
-  const msgs = promptMessages(th)
+  const participants = [...people].join("; ");
+  const header = defangWrappers(
+    join([
+      `Email thread ${tok("thread", th.id)} — ${f(th.subject, 200)}`,
+      `Status: ${th.status}${th.archived ? " (archived)" : ""} · Updated: ${day(th.updatedAt)}`,
+      cust ? `Company: ${cust.label}` : line("Customer", f(th.customer)),
+      th.link ? `Linked to: ${f(th.link.type, 20)} ${f(th.link.id, 80)}${th.link.label ? ` (${f(th.link.label)})` : ""}` : "",
+      people.size ? `Participants: ${participants.length > ASK_PARTICIPANTS_CHARS ? participants.slice(0, ASK_PARTICIPANTS_CHARS) + " …" : participants}` : "",
+    ])
+  );
+  const blocks = promptMessages(th)
     .sort((a, b) => a.at - b.at)
     .slice(-ASK_THREAD_MESSAGES)
-    .map((m) => `--- ${m.direction === "in" ? "RECEIVED" : "SENT BY PEAK"} · ${f(m.author, 80) || "unknown"} · ${day(m.at)}\n${messageBody(m.body)}`);
+    .map((m) => ({ head: defangWrappers(`--- ${m.direction === "in" ? "RECEIVED" : "SENT BY PEAK"} · ${f(m.author, 80) || "unknown"} · ${day(m.at)}`), body: defangWrappers(messageBody(m.body)) }));
+  const msgs = budgetMessages(blocks, ASK_TOOL_BODY_MAX - header.length - THREAD_BUDGET_RESERVE);
   const body = join([
-    `Email thread ${tok("thread", th.id)} — ${f(th.subject, 200)}`,
-    `Status: ${th.status}${th.archived ? " (archived)" : ""} · Updated: ${day(th.updatedAt)}`,
-    cust ? `Company: ${cust.label}` : line("Customer", f(th.customer)),
-    th.link ? `Linked to: ${f(th.link.type, 20)} ${f(th.link.id, 80)}${th.link.label ? ` (${f(th.link.label)})` : ""}` : "",
-    people.size ? `Participants: ${[...people].slice(0, 20).join("; ")}` : "",
-    msgs.length ? `Latest messages (up to ${ASK_THREAD_MESSAGES}, oldest first):\n${msgs.join("\n")}` : "Messages: none",
+    header,
+    msgs.text
+      ? `Latest messages (oldest first${msgs.dropped ? `; ${msgs.dropped} earlier message${msgs.dropped === 1 ? "" : "s"} not shown` : ""}):\n${msgs.text}`
+      : "Messages: none",
   ]);
   return { self, body, refs: [self, ...refs], emails: [...emails] };
+}
+
+/** Room kept beside the header for the messages' heading line. */
+const THREAD_BUDGET_RESERVE = 120;
+export const ASK_PARTICIPANTS_CHARS = 800;
+
+/**
+ * Fit thread messages (oldest → newest, already defanged) into `budget`
+ * characters, keeping the NEWEST: whole messages are taken newest-first
+ * while they fit and the oldest are dropped; when even the newest alone is
+ * too long, its body keeps its start, trimmed to fit. Printed oldest → newest.
+ * Pure — exported for the checks.
+ */
+export function budgetMessages(blocks: readonly { head: string; body: string }[], budget: number): { text: string; dropped: number } {
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const s = `${blocks[i].head}\n${blocks[i].body}`;
+    const cost = s.length + (kept.length ? 1 : 0);
+    if (used + cost <= budget) {
+      kept.unshift(s);
+      used += cost;
+      continue;
+    }
+    if (kept.length) return { text: kept.join("\n"), dropped: i + 1 }; // messages 0..i left out
+    // even the newest alone is too long: keep its start, trimmed to fit; everything older is left out
+    const room = Math.max(0, budget - blocks[i].head.length - 1 - " …[trimmed]".length);
+    return { text: `${blocks[i].head}\n${blocks[i].body.slice(0, room).trimEnd()} …[trimmed]`, dropped: i };
+  }
+  return { text: kept.join("\n"), dropped: 0 };
 }
 
 async function loadMeeting(id: string, me: AskUser): Promise<Loaded | null> {
   const m = await getMeeting(id).catch(() => null);
   if (!m || !canSeeMeeting(m, me.id)) return null;
-  const [contacts, users] = await Promise.all([allContacts(), activeUsers()]);
-  const contactName = new Map(contacts.map((c) => [c.id, displayName(c)]));
+  // Only the people this meeting names (attendees, mapped speakers) — never the whole contact book.
+  const contactIds = [
+    ...new Set([...m.attendees.map((a) => a.contactId), ...Object.values(m.speakerMap).map((s) => s.contactId)].filter((x): x is string => !!x)),
+  ].slice(0, ASK_MEETING_CONTACTS_MAX);
+  const [contacts, users] = await Promise.all([Promise.all(contactIds.map((cid) => getContact(cid))), activeUsers()]);
+  const contactName = new Map(contacts.filter((c): c is NonNullable<typeof c> => !!c).map((c) => [c.id, displayName(c)]));
   const userName = new Map(users.map((u) => [u.id, u.name]));
   const r = renderMeeting(m, { contact: (cid) => contactName.get(cid) ?? null, user: (uid) => userName.get(uid) ?? null });
   const refs: AskToolRef[] = [];
@@ -529,14 +620,13 @@ async function loadMeeting(id: string, me: AskUser): Promise<Loaded | null> {
     cust ? `Company: ${cust.label}` : "",
     site ? `Venue: ${f(site.name)} ${tok("venue", site.id)}` : "",
     w ? `Linked work: ${w.type} ${f(w.id, 80)}${w.label ? ` (${f(w.label)})` : ""}` : "",
-    attendees.length ? `Attendees: ${attendees.slice(0, 25).join("; ")}` : "",
-    r.summary.length ? `Summary:\n${r.summary.map((s) => `- ${f(s.title, 200)}${s.description ? `: ${f(s.description, 1200)}` : ""}`).join("\n")}` : "Summary: none",
-    r.keyPoints.length ? `Key points:\n${r.keyPoints.slice(0, 20).map((k) => `- ${f(k, 300)}`).join("\n")}` : "",
+    attendees.length ? `Attendees:\n${capList(attendees.map((a) => `- ${a}`)).join("\n")}` : "",
+    r.summary.length ? `Summary:\n${capList(r.summary.map((s) => `- ${f(s.title, 200)}${s.description ? `: ${f(s.description, 1200)}` : ""}`)).join("\n")}` : "Summary: none",
+    r.keyPoints.length ? `Key points:\n${capList(r.keyPoints.map((k) => `- ${f(k, 300)}`)).join("\n")}` : "",
     r.todos.length
-      ? `To-dos:\n${r.todos
-          .slice(0, 30)
-          .map((x) => `- ${f(x.title, 200)}${x.assigneeDisplay ? ` — ${f(x.assigneeDisplay, 60)}` : ""}${x.dueDate ? ` — due ${f(x.dueDate, 20)}` : ""}${x.decision ? ` — decided: ${x.decision.kind}` : ""}`)
-          .join("\n")}`
+      ? `To-dos:\n${capList(
+          r.todos.map((x) => `- ${f(x.title, 200)}${x.assigneeDisplay ? ` — ${f(x.assigneeDisplay, 60)}` : ""}${x.dueDate ? ` — due ${f(x.dueDate, 20)}` : ""}${x.decision ? ` — decided: ${x.decision.kind}` : ""}`)
+        ).join("\n")}`
       : "",
     "(The transcript is not available to Ask AI.)",
   ]);
@@ -572,7 +662,8 @@ const SEARCH_GROUP_KIND: Readonly<Record<string, RefKind>> = {
 };
 
 async function runSearch(query: string, me: AskUser): Promise<Loaded> {
-  const groups: Group[] = await globalSearch(query, me);
+  // threadsOf: only the user's own mailbox reaches the email-thread group, before its cut to 5.
+  const groups: Group[] = await globalSearch(query, me, { threadsOf: me.name });
   const refs: AskToolRef[] = [];
   const blocks: string[] = [];
   for (const g of groups) {
@@ -602,9 +693,14 @@ async function runSearch(query: string, me: AskUser): Promise<Loaded> {
   return { self: null, body, refs, emails: [] };
 }
 
+/** The quote fields list_quotes reads — a header projection, never whole quote documents. */
+const QUOTE_HEADER_FIELDS = ["name", "customer", "customerId", "status", "quoteType", "value", "updatedAt", "estNo", "estSuffix"] as const;
+
 async function runListQuotes(input: z.infer<typeof ListQuotesInput>): Promise<Loaded> {
   const limit = input.limit ?? 10;
-  const all = input.customerId ? await listDocsByField<Quote>("quotes", "customerId", [input.customerId]) : await getAllQuotes();
+  const all = input.customerId
+    ? await listDocsByField<Quote>("quotes", "customerId", [input.customerId])
+    : await listDocsFiltered<Quote>("quotes", { fields: QUOTE_HEADER_FIELDS });
   const since = input.sinceDays ? Date.now() - input.sinceDays * DAY_MS : 0;
   const rows = all
     .filter((q) => (!input.status || q.status === input.status) && (!input.type || (q.quoteType || "system") === input.type) && (!since || (q.updatedAt || 0) >= since))
@@ -624,14 +720,38 @@ async function runListQuotes(input: z.infer<typeof ListQuotesInput>): Promise<Lo
   return { self: null, body, refs, emails: [] };
 }
 
+/** The catalog fields search_catalog's SQL pre-filter searches (a superset of rankCatalogParts' fields). */
+const CATALOG_TEXT_FIELDS = ["sku", "desc", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus", "category"] as const;
+/** The catalog fields read back — a projection, never whole part documents. */
+const CATALOG_FIELDS = ["sku", "desc", "category", "unit", "list", "cost", "mfr", "manufacturerPartNumber", "manufacturerModelNumber", "formerSkus"] as const;
+const CATALOG_TOKENS_MAX = 8;
+
+/**
+ * Catalog search without reading the book: SQL keeps live parts whose fields
+ * hold EVERY query word (ASK_CATALOG_CANDIDATES at most), then the
+ * Estimator's ranking (`rankCatalogParts`, the whole phrase) orders them and
+ * the other every-word matches follow; an exact SKU (renames followed) leads.
+ */
 async function runSearchCatalog(input: z.infer<typeof CatalogInput>): Promise<Loaded> {
   const limit = input.limit ?? ASK_CATALOG_MAX;
-  const hits = rankCatalogParts(await catalogList(), input.query).slice(0, limit);
-  const refs = hits.map(({ p }) => mkRef("part", p.sku, p.desc || p.sku));
+  const q = input.query.trim().toLowerCase();
+  const tokens = [...new Set(q.split(/\s+/).filter(Boolean))].slice(0, CATALOG_TOKENS_MAX);
+  const [cands, exact] = await Promise.all([
+    listDocsFiltered<CatalogPart>("catalog_parts", { textFields: CATALOG_TEXT_FIELDS, allText: tokens, limit: ASK_CATALOG_CANDIDATES, fields: CATALOG_FIELDS }),
+    getPart(input.query.trim()),
+  ]);
+  const ranked = rankCatalogParts(cands, q).map((x) => x.p);
+  const inRanked = new Set(ranked.map((p) => p.sku));
+  const rest = cands
+    .filter((p) => !inRanked.has(p.sku) && tokens.every((tk) => partSearchHaystack(p).includes(tk) || (p.category || "").toLowerCase().includes(tk)))
+    .sort((a, b) => (a.desc || "").localeCompare(b.desc || ""));
+  const seen = new Set<string>();
+  const hits = [...(exact ? [exact] : []), ...ranked, ...rest].filter((p) => (seen.has(p.sku) ? false : (seen.add(p.sku), true))).slice(0, limit);
+  const refs = hits.map((p) => mkRef("part", p.sku, p.desc || p.sku));
   const body = hits.length
     ? join([
-        `Catalog parts for "${f(input.query, QUERY_MAX)}":`,
-        ...hits.map(({ p }) => {
+        `Catalog parts for "${f(input.query, QUERY_MAX)}"${cands.length >= ASK_CATALOG_CANDIDATES ? " (many matches — add words to narrow it)" : ""}:`,
+        ...hits.map((p) => {
           const model = (p.manufacturerModelNumber || "").trim();
           const mpn = (p.manufacturerPartNumber || "").trim();
           return `- ${tok("part", p.sku)} ${f(p.desc, 200)} — ${f(p.mfr, 60) || "no manufacturer"}${model ? ` · model ${f(model, 80)}` : ""}${mpn ? ` · P/N ${f(mpn, 80)}` : ""} · ${f(p.category, 40)} · unit ${f(p.unit || "ea", 20)} · cost ${money(p.cost)} · list ${money(p.list)}`;
@@ -785,7 +905,7 @@ export async function resolveAskRef(kind: RefKind, id: string, me: AskUser): Pro
   if (!id) return null;
   switch (kind) {
     case "company": {
-      const c = await getCustomer(id);
+      const c = await getCompany(id);
       return c ? companyRef(c) : null;
     }
     case "venue": {
@@ -817,8 +937,10 @@ export async function resolveAskRef(kind: RefKind, id: string, me: AskUser): Pro
       return s ? mkRef("survey", s.id, surveyTitle(s)) : null;
     }
     case "part": {
+      // A renamed SKU resolves to its live part, but the ref keeps the REQUESTED id so the
+      // earlier [[part:<old sku>]] token still matches the whitelist (the catalog link searches former SKUs).
       const p = await getPart(id);
-      return p ? mkRef("part", p.sku, p.desc || p.sku) : null;
+      return p ? mkRef("part", id, p.desc || p.sku) : null;
     }
     case "task": {
       const x = await getTask(id);

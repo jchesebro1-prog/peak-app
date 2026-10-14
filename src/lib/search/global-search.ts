@@ -71,8 +71,16 @@ function staffLabelText(p: SearchPartLike): string {
  * The ⌘K search's groups for `rawQ` as `me` may see them (meetings through
  * canSeeMeeting). The query is trimmed and lower-cased; under 2 characters
  * there are no groups. Only `me.id` is read.
+ *
+ * `opts.threadsOf` (Ask AI) scopes the email-thread candidates to one user's
+ * own mailbox (personal, mailboxUser = that name; live email threads only)
+ * in SQL, before the per-group cut — so other mailboxes' rows can't crowd the
+ * user's own out of the 5. ⌘K never passes it: its output is unchanged.
  */
-export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">): Promise<Group[]> {
+export type GlobalSearchOpts = { threadsOf?: string };
+
+export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">, opts: GlobalSearchOpts = {}): Promise<Group[]> {
+  const threadsOf = opts.threadsOf;
   const q = (rawQ || "")
     .trim()
     .toLowerCase();
@@ -89,7 +97,9 @@ export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">): P
       searchDocs("designs", q, CANDIDATES),
       searchDocs("surveys", q, CANDIDATES),
       searchDocs("inspections", q, CANDIDATES),
-      searchDocs("comms", q, CANDIDATES),
+      threadsOf !== undefined
+        ? searchDocs("comms", q, CANDIDATES, { fieldEquals: { mailbox: "personal", mailboxUser: threadsOf, channel: "email" } })
+        : searchDocs("comms", q, CANDIDATES),
       allCompanies(),
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
@@ -199,6 +209,8 @@ export async function globalSearch(rawQ: string, me: Pick<SessionUser, "id">): P
   add(
     "Email threads",
     comms
+      // Ask AI's scoped search also leaves out threads in Deleted (loadThreadFor's rule).
+      .filter((d) => threadsOf === undefined || d.deleted !== true)
       .filter((d) => matches(q, d.subject, d.customer, d.contactName, d.contactEmail))
       .map((d) => ({
         id: d.id,
