@@ -1011,6 +1011,13 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(q.draftReady && !q.tasksReady && q.href === "/estimator?id=Q-1", "brief card: a quote item with a ready nudge shows Draft ready");
   ok(l.leadHref === "/leads?lead=L1" && !l.draftReady && l.source === "Lead" && !("pricingRequest" in l), "brief card: a lead item offers 'Ready to quote? → Open lead' on its own page — never labelled a pricing request");
   ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} }).doFirst[0].leadHref === null, "brief card: a lead with no snapshot row gets no lead link");
+  // Estimate suggestion (spec 2026-10-13 §3): with Suggest estimate on (a `leads` map), the lead cue becomes Suggest estimate / Suggestion ready.
+  ok(l.leadSuggest === null && e.leadSuggest === null, "brief card: without Suggest estimate (no leads map) the lead keeps 'Open lead' and no suggest action");
+  const sugVM = (leads: Record<string, { readyHref: string | null }>) => briefCardVM({ brief: doFirstBrief, stale: null, transient: false, rows, threads: {}, quotes: {}, leads }).doFirst;
+  const [se, , sl] = sugVM({ L1: { readyHref: null } });
+  ok(sl.leadSuggest?.leadId === "L1" && sl.leadSuggest.readyHref === null && sl.leadHref === "/leads?lead=L1" && se.leadSuggest === null, "brief card: with Suggest estimate on, a lead row offers Suggest estimate for that lead (non-lead rows never do)");
+  ok(sugVM({ L1: { readyHref: "/estimator?suggestion=ES-abc&lead=L1" } })[2].leadSuggest?.readyHref === "/estimator?suggestion=ES-abc&lead=L1", "brief card: a lead with a suggestion offers 'Suggestion ready → Open'");
+  ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: {}, threads: {}, quotes: {}, leads: { L9: { readyHref: null } } }).doFirst[0].leadSuggest === null, "brief card: a lead with no snapshot row gets no suggest action either");
   ok(gone.href === null && gone.title === "An item on your list" && gone.why === "", "brief card: a key missing from the snapshot shows no link and never the raw key");
   ok(vm.organize?.label === "5 to file (2 strong) · 3 noise" && vm.organize.href === ORGANIZE_HREF && ORGANIZE_HREF === "/inbox?view=organize", `brief card: Inbox organization line → Review (${vm.organize?.label})`);
   ok(briefCardVM({ brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} }).organize === null, "brief card: Inbox organization hidden when every count is zero");
@@ -1119,7 +1126,11 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(view.includes("rebuildBriefAction()") && view.includes('postChanged("inbox")') && view.includes("router.refresh()"), "brief pins: Rebuild refreshes the page and tells other windows (postChanged)");
   ok(view.includes("@media (max-width:899px)") && view.includes(".pkb-big{display:block}") && view.includes("new SpeechSynthesisUtterance(vm.speech)") && /const listenBtn = canSpeak \?/.test(view) && view.includes('useSearchParams().get("brief")') && view.includes('briefParam === "1"') && view.includes("[vm.id, briefParam]") && view.includes("scrollIntoView"), "brief pins: big-text under 900 px, Listen only when speech is supported, ?brief=1 scrolls to the card");
   ok(/localStorage\.getItem\(COLLAPSE_KEY\(vm\.id\)\)/.test(view) && view.includes("try {"), "brief pins: collapse remembered per brief id, storage in try/catch");
+  const cueAt = view.indexOf("{d.leadSuggest ? (");
+  const leadCue = view.slice(cueAt, cueAt + 1200);
+  ok(cueAt > 0 && /<SuggestEstimate\s+source=\{\{ kind: "lead", id: d\.leadSuggest\.leadId \}\}\s+readyHref=\{d\.leadSuggest\.readyHref\}/.test(leadCue) && leadCue.indexOf("d.leadHref && (") > leadCue.indexOf("<SuggestEstimate"), "brief pins: the lead cue is Suggest estimate (startSuggestion via SuggestEstimate) when on, else the old Open lead link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
+  ok(/flags\.estimate && leadIds\.size \? suggestionReadyHrefs\("lead", \[\.\.\.leadIds\]\)/.test(card) && /quotes: quoteInfo, leads \}\)/.test(card), "brief pins: the server card looks up each Do-these-first lead's suggestion only with Suggest estimate on (pilot + estimate)");
   ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { id: user.id, name: user.name })") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
   const cardFn = card.slice(card.indexOf("export default async function BriefCard"), card.indexOf("async function loadCardVM"));
   ok(/try \{\s*vm = await loadCardVM\(user, settings\);\s*\} catch/.test(cardFn) && cardFn.includes("Your brief couldn’t load"), "brief pins: everything after the gate (load, store reads, VM) is inside one try — the card never breaks Home");

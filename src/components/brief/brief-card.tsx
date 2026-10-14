@@ -3,7 +3,8 @@ import type { AssistSettings } from "@/lib/assist/types";
 import { assistUiFlags } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
 import { loadBriefView } from "@/lib/brief/build";
-import { briefCardVM, type BriefCardVM, type CardQuoteInfo, type CardRow, type CardThreadReady } from "@/lib/brief/card-vm";
+import { briefCardVM, type BriefCardVM, type CardLeadSuggest, type CardQuoteInfo, type CardRow, type CardThreadReady } from "@/lib/brief/card-vm";
+import { suggestionReadyHrefs } from "@/lib/assist/suggest-entry-server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { nudgePrefill } from "@/lib/inbox-compose-prefill";
 import { quoteBuilderHref } from "@/lib/quote-links";
@@ -52,17 +53,26 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
 
   const threadIds = new Set<string>();
   const quoteIds = new Set<string>(b.quiet.map((q) => q.quoteId));
+  const leadIds = new Set<string>();
   for (const d of b.doFirst) {
     const k = parseTriageKey(d.key);
     if (k?.source === "email") threadIds.add(k.id);
     if (k?.source === "quote") quoteIds.add(k.id);
+    if (k?.source === "lead") leadIds.add(k.id);
   }
 
-  const [snap, threads, quotes] = await Promise.all([
+  // Estimate suggestion (spec 2026-10-13 §3): with Suggest estimate on, each
+  // lead row's cue becomes Suggest estimate / Suggestion ready (bounded by
+  // the Do-these-first list, and by SUGGEST_LOOKUP_MAX).
+  const [snap, threads, quotes, leadReady] = await Promise.all([
     getSnapshot(snapshotId(b.userId, b.day, b.slot)).catch(() => null),
     Promise.all([...threadIds].map((id) => getThread(id).catch(() => null))),
     Promise.all([...quoteIds].map((id) => getQuote(id).catch(() => null))),
+    flags.estimate && leadIds.size ? suggestionReadyHrefs("lead", [...leadIds]) : Promise.resolve(null),
   ]);
+  const leads: Record<string, CardLeadSuggest> | undefined = leadReady
+    ? Object.fromEntries(Object.entries(leadReady).map(([id, readyHref]) => [id, { readyHref }]))
+    : undefined;
 
   const rows: Record<string, CardRow> = {};
   const want = new Set(b.doFirst.map((d) => d.key));
@@ -85,5 +95,5 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
     quoteInfo[q.id] = { href: quoteBuilderHref(q), nudge: usable ? { note: String(q.assistNudge?.note || "") } : null };
   }
 
-  return briefCardVM({ brief: b, stale: view.stale, transient: view.transient, rows, threads: threadReady, quotes: quoteInfo });
+  return briefCardVM({ brief: b, stale: view.stale, transient: view.transient, rows, threads: threadReady, quotes: quoteInfo, leads });
 }

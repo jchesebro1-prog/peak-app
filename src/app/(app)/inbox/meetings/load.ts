@@ -21,6 +21,7 @@ import { krispMeetingUrl } from "@/lib/krisp/client";
 import { allContacts, displayName } from "@/lib/identity/contacts";
 import { getCompany } from "@/lib/identity/companies";
 import { getSite } from "@/lib/identity/sites";
+import { suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 import { activeUsers } from "@/lib/users";
 import { can } from "@/lib/team";
 import { getTask } from "@/lib/stores/tasks";
@@ -122,6 +123,10 @@ export type MeetingReaderVM = {
   team: { id: string; name: string }[];
   /** "+ New contact" defaults to the linked company, else the top company suggestion */
   defaultCompany: { id: string; name: string } | null;
+  /** Estimate suggestion (spec 2026-10-13 §3): null unless Suggest estimate is
+   *  on for this viewer AND the meeting is linked to a company or a job (the
+   *  route refuses others); readyHref = its latest suggestion, else null. */
+  suggest: { readyHref: string | null } | null;
 };
 
 /* ---------- formatting (Chicago, server-side) ---------- */
@@ -282,6 +287,7 @@ async function decisionOf(m: MeetingRecord, d: NonNullable<MeetingRecord["todos"
 /** null when the meeting is gone or the viewer can't see it — the reader shows its empty state, never the title. */
 export async function loadMeetingReader(
   me: { id: string; roles: string[] }, id: string,
+  opts: { suggestEstimate?: boolean } = {},
 ): Promise<MeetingReaderVM | null> {
   if (!id) return null;
   const m = await MS.getMeeting(id).catch(() => null);
@@ -403,5 +409,7 @@ export async function loadMeetingReader(
     workOptions: await workOptionsFor(company ? L.customerId : null),
     team: users.map((u) => ({ id: u.id, name: u.name })),
     defaultCompany,
+    // the route's own rule (estimate-suggest-server: a customer link or a work link)
+    suggest: opts.suggestEstimate && (L.customerId || L.work) ? { readyHref: await suggestionReadyHref("meeting", m.id) } : null,
   };
 }

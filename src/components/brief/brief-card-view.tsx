@@ -12,6 +12,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { rebuildBriefAction } from "@/app/(app)/brief-actions";
 import { postChanged } from "@/lib/popout/channel";
 import type { BriefCardVM } from "@/lib/brief/card-vm";
+import SuggestEstimate from "@/components/assist/suggest-estimate";
 
 const COLLAPSE_KEY = (id: string) => `peak-brief-collapsed:${id}`;
 
@@ -206,13 +207,24 @@ function FullVariant({ vm }: { vm: BriefCardVM }) {
                   {d.tasksReady && <span className="pkb-chip">Tasks ready</span>}
                 </span>
                 {d.why && <div style={{ fontSize: 12.5, color: "#5b616e" }}>{d.why}</div>}
-                {d.leadHref && (
-                  <div style={{ fontSize: 12, color: "#5b616e" }}>
-                    Ready to quote? →{" "}
-                    <Link href={d.leadHref} className="pkb-link">
-                      Open lead
-                    </Link>
+                {d.leadSuggest ? (
+                  <div style={{ fontSize: 12, color: "#5b616e", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                    Ready to quote?
+                    <SuggestEstimate
+                      source={{ kind: "lead", id: d.leadSuggest.leadId }}
+                      readyHref={d.leadSuggest.readyHref}
+                      buttonStyle={{ fontSize: 12, padding: "3px 10px", borderRadius: 7, color: "#3a3f4a" }}
+                    />
                   </div>
+                ) : (
+                  d.leadHref && (
+                    <div style={{ fontSize: 12, color: "#5b616e" }}>
+                      Ready to quote? →{" "}
+                      <Link href={d.leadHref} className="pkb-link">
+                        Open lead
+                      </Link>
+                    </div>
+                  )
                 )}
               </li>
             ))}

@@ -562,7 +562,7 @@ export async function assistReportChecks(ok: Ok): Promise<void> {
   ok(Math.abs(rep.totalUsd - 0.213) < 1e-9 && rep.runs === 5, "assist report: total spend + runs");
   ok(f("tasks").runs === 2 && f("tasks").okRuns === 1 && f("tasks").accepted === 1 && f("tasks").pending === 0, "assist report: failed runs don't count as pending outcomes");
   ok(f("reply").pending === 1, "assist report: no outcome yet = pending");
-  ok(f("estimate (extract)").pending === 0 && f("estimate (draft)").edited === 1, "assist report: extract carries no outcome; draft outcome from estimateKeep map");
+  ok(f("Suggest estimate (extract)").pending === 0 && f("Suggest estimate (draft)").edited === 1, "assist report: extract carries no outcome; draft outcome from estimateKeep map");
   ok(rep.byUser.find((r) => r.key === "B")!.costUsd === 0.202, "assist report: per-person cost");
   ok(recentMonthKeys(Date.UTC(2026, 0, 15), 3, (ms) => new Date(ms).toISOString().slice(0, 7)).join() === "2026-01,2025-12,2025-11", "assist report: month picker rolls the year");
   // A draft run whose quote was deleted counts as discarded (estimateKeep with a null quote).
@@ -571,7 +571,7 @@ export async function assistReportChecks(ok: Ok): Promise<void> {
   ok(estimateOutcomeFor({ quoteId: null, lines: [{ sku: "A", qty: 1 }] }, null) === "discarded" && estimateOutcomeFor({ lines: [] }, null) === null && estimateOutcomeFor(null, null) === null, "assist report: explicit quoteId null = discarded; no quoteId key = pending");
   ok(estimateOutcomeFor({ quoteId: "Q-1", lines: [{ sku: "A", qty: 2 }] }, { spec: { sections: [{ kind: "materials", items: [{ sku: "A", qty: 2 }] }] } }) === "accepted", "assist report: a live quote is judged by estimateKeep");
   const vmSrc = readFileSync("src/app/(app)/settings/assist-data.ts", "utf8");
-  ok(vmSrc.includes("Promise.all(") && vmSrc.includes("estimateOutcomeFor(") && /try \{[\s\S]*listRunsByMonth[\s\S]*\} catch/.test(vmSrc), "assist report: loadAssistVM fetches quotes in parallel and never throws (empty report on DB error)");
+  ok(vmSrc.includes("Promise.all(") && vmSrc.includes("estimateRunOutcome(") && /try \{[\s\S]*listRunsByMonth[\s\S]*\} catch/.test(vmSrc), "assist report: loadAssistVM fetches quotes in parallel and never throws (empty report on DB error)");
 }
 
 /** D881 — admin-entered Claude key: pure precedence + the encrypted blob on scratch PGlite. */

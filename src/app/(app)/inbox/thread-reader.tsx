@@ -18,6 +18,7 @@ import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import TaskDialog from "./task-dialog";
 import AssistTasksDialog from "./assist-tasks-dialog";
+import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
 import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
@@ -1202,6 +1203,9 @@ export default function ThreadReader({
               >
                 {assistBusy ? "Thinking…" : "Suggest tasks"}
               </ActionBtn>
+            )}
+            {assist.estimate && vm.isEmail && (
+              <SuggestEstimate source={{ kind: "thread", id: vm.id }} readyHref={vm.suggestionHref ?? null} />
             )}
             <ActionBtn
               colors={["#8c919c", "#fff", "#e4e7ec"]}

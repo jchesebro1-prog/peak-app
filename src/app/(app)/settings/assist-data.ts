@@ -1,6 +1,7 @@
 import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo } from "@/lib/assist/config";
 import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
-import { estimateOutcomeFor, type DraftLine } from "@/lib/assist/outcome";
+import { estimateRunOutcome, estimateRunQuoteId, suggestionCatalogLines, type DraftLine, type EstimateRunOutcome } from "@/lib/assist/outcome";
+import { getSuggestion } from "@/lib/stores/estimate-suggestions";
 import { assistReport, briefReport, filingReport, recentMonthKeys, type BriefBuildRow, type FilingReport } from "@/lib/assist/report";
 import { briefIdsInMonth } from "@/lib/brief/slots";
 import { getBlob, listBlobIds } from "@/db/doc-store";
@@ -9,7 +10,6 @@ import { loadOrgContext } from "@/lib/inbox-org/pipeline";
 import { loadSenderRuleRows } from "@/lib/inbox-org/rule-list-server";
 import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
 import { getFilingLog, getOwnDomainOverride, promiseTaskRows } from "@/lib/stores/inbox-org";
-import type { AssistOutcome } from "@/lib/assist/types";
 import { listRunsByMonth, type AssistRun } from "@/lib/stores/assist-runs";
 import { get as getQuote } from "@/lib/stores/quotes";
 import type { AppSettingsData } from "@/lib/settings";
@@ -18,9 +18,11 @@ import type { AssistVM } from "./groups/types";
 /**
  * #334 — the Settings → Beta Assist pilot card's data: the settings, the
  * status line and one month's usage report. An estimate "draft" run stores no
- * outcome, so it is read off the quote as it stands now (estimateOutcomeFor):
- * a quote that no longer exists, or an explicit `quoteId: null` (nothing was
- * created), counts as discarded; no quoteId key at all stays pending.
+ * outcome, so it is read off the quote as it stands now (estimateRunOutcome):
+ * an Estimate suggestion run is scored off its suggestion's first saved quote
+ * — pending until there is one, discarded once that quote is gone, and its
+ * own "no suggestion" bucket when the run saved nothing; a legacy #334 draft
+ * keeps estimateOutcomeFor (an explicit `quoteId: null` = discarded).
  *
  * Never throws: a preview deploy can reach the shared production DB before
  * migration 0039 (assist_runs) has run, and the Data group must not 500 —
@@ -31,18 +33,22 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
   const raw = monthParam || "";
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(raw) ? raw : monthKeyChicago(now);
   let runs: AssistRun[] = [];
-  const estOutcomes = new Map<string, AssistOutcome>();
+  const estOutcomes = new Map<string, EstimateRunOutcome>();
   try {
     runs = await listRunsByMonth(month);
     const drafts = runs.filter((r) => r.feature === "estimate" && r.step === "draft" && r.ok && !r.outcome);
     const outcomes = await Promise.all(
       drafts.map(async (r) => {
-        const d = (r.outcomeDetail ?? {}) as { quoteId?: string | null; lines?: DraftLine[] };
-        const quote = d.quoteId ? await getQuote(d.quoteId) : null;
-        return [r.id, estimateOutcomeFor(d, (quote ?? null) as Parameters<typeof estimateOutcomeFor>[1])] as const;
+        const d = (r.outcomeDetail ?? {}) as { suggestionId?: string | null; quoteId?: string | null; lines?: DraftLine[] };
+        // Estimate suggestion runs are scored off the suggestion's first quote (spec 2026-10-13 §4).
+        const s = typeof d.suggestionId === "string" && d.suggestionId ? await getSuggestion(d.suggestionId) : null;
+        const sugg = s ? { quoteId: s.quoteId, lines: suggestionCatalogLines(s) } : null;
+        const quoteId = estimateRunQuoteId(d, sugg);
+        const quote = quoteId ? await getQuote(quoteId) : null;
+        return [r.id, estimateRunOutcome(d, sugg, (quote ?? null) as Parameters<typeof estimateRunOutcome>[2])] as const;
       })
     );
-    for (const [id, o] of outcomes) if (o) estOutcomes.set(id, o);
+    for (const [id, o] of outcomes) estOutcomes.set(id, o);
   } catch (e) {
     console.error("[assist] loading the Assist pilot report failed — showing an empty report", e);
     runs = [];

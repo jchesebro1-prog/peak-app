@@ -22,7 +22,7 @@ import { AssistOrgSettings, FilingReportTable } from "./assist-org";
 const FEATURES = [
   { key: "tasks", label: "Suggest tasks" },
   { key: "reply", label: "Draft reply" },
-  { key: "estimate", label: "Draft estimate" },
+  { key: "estimate", label: "Suggest estimate" },
   { key: "file", label: "Inbox organization" },
   { key: "promise", label: "Promise tasks" },
   { key: "brief", label: "Daily brief" },
@@ -47,13 +47,14 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
             <th style={th}>Edited</th>
             <th style={th}>Discarded</th>
             <th style={th}>No outcome</th>
+            <th style={th} title="Estimate suggestion runs that saved no suggestion">No suggestion</th>
             <th style={th}>Cost</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={8} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
+              <td colSpan={9} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
                 No runs this month.
               </td>
             </tr>
@@ -67,6 +68,7 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
               <td style={td}>{r.edited}</td>
               <td style={td}>{r.discarded}</td>
               <td style={td}>{r.pending}</td>
+              <td style={td}>{r.noSuggestion}</td>
               <td style={td}>{money(r.costUsd)}</td>
             </tr>
           ))}

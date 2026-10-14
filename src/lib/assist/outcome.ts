@@ -67,3 +67,57 @@ export function estimateOutcomeFor(detail: { quoteId?: string | null; lines?: Dr
   if (detail.quoteId === null || detail.quoteId === "") return "discarded";
   return estimateKeep(detail.lines ?? [], quote).outcome;
 }
+
+/**
+ * The report's bucket for one estimate draft run (D879 + spec 2026-10-13 §4):
+ * an AssistOutcome, "pending" (no quote yet) or "none" (the run saved no
+ * suggestion — its own bucket, never discarded).
+ */
+export type EstimateRunOutcome = AssistOutcome | "pending" | "none";
+
+/** A stored suggestion as the report reads it: the quote it was first saved as, and its catalog lines. */
+export type SuggestionForReport = { quoteId: string | null; lines: DraftLine[] };
+
+/** A suggestion's catalog lines (custom lines carry no SKU and are not scored). Pure. */
+export function suggestionCatalogLines(s: { systems?: Array<{ lines?: Array<{ sku?: string; qty?: number; custom?: boolean }> }> } | null | undefined): DraftLine[] {
+  return (s?.systems ?? []).flatMap((sys) =>
+    (sys?.lines ?? []).filter((l) => l && !l.custom && typeof l.sku === "string" && l.sku).map((l) => ({ sku: l.sku as string, qty: Number(l.qty) || 0 }))
+  );
+}
+
+/**
+ * Which quote the report loads for a draft run: the suggestion's first quote
+ * (Estimate suggestion runs — the `suggestionId` key is present), else the
+ * legacy #334 draft's own `quoteId`. Null = nothing to load.
+ */
+export function estimateRunQuoteId(
+  detail: { suggestionId?: string | null; quoteId?: string | null } | null | undefined,
+  suggestion: SuggestionForReport | null
+): string | null {
+  if (!detail) return null;
+  if ("suggestionId" in detail) return detail.suggestionId ? suggestion?.quoteId || null : null;
+  return detail.quoteId || null;
+}
+
+/**
+ * One draft run's outcome. Estimate suggestion runs (`suggestionId` key):
+ *  - `suggestionId: null` (nothing saved — no systems, or the save failed) → "none";
+ *  - the suggestion can't be read, or has no quote yet → "pending";
+ *  - its quote is gone → "discarded";
+ *  - else estimateKeep(the suggestion's catalog lines, the quote as it stands now).
+ * Legacy #334 runs (no `suggestionId` key) keep estimateOutcomeFor; a run
+ * with no detail at all is "pending".
+ */
+export function estimateRunOutcome(
+  detail: { suggestionId?: string | null; quoteId?: string | null; lines?: DraftLine[] } | null | undefined,
+  suggestion: SuggestionForReport | null,
+  quote: QuoteLike | null
+): EstimateRunOutcome {
+  if (!detail) return "pending";
+  if ("suggestionId" in detail) {
+    if (!detail.suggestionId) return "none";
+    if (!suggestion || !suggestion.quoteId) return "pending";
+    return estimateKeep(suggestion.lines, quote).outcome;
+  }
+  return estimateOutcomeFor(detail, quote) ?? "pending";
+}

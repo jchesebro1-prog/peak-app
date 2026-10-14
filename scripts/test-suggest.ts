@@ -663,6 +663,149 @@ export async function suggestSaveDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** Task 4 — the client helper (pure reply reading + startSuggestion with a fake fetch) and the report buckets. */
+export async function suggestEntryChecks(ok: Ok): Promise<void> {
+  const C = await import("@/lib/assist/suggest-client");
+  const O = await import("@/lib/assist/outcome");
+  const { assistReport } = await import("@/lib/assist/report");
+  type Res = Parameters<typeof C.readSuggestResponse>[0];
+  const res = (status: number, type: string, body: unknown, bad = false): Res => ({
+    ok: status >= 200 && status < 300,
+    headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? type : null) },
+    json: async () => {
+      if (bad) throw new SyntaxError("Unexpected token <");
+      return body;
+    },
+  });
+  const GOOD = { ok: true, suggestionId: "ES-abc123", href: "/estimator?suggestion=ES-abc123&lead=L-1" };
+  const G = C.SUGGEST_START_ERROR;
+  ok(G === "Couldn't start the suggestion — try again." && C.SUGGEST_BUSY_LABEL === "Suggesting… (can take a minute or two)" && C.SUGGEST_ROUTE === "/api/assist/suggest-estimate", "suggest client: the generic error, busy label and route");
+  const ok1 = await C.readSuggestResponse(res(200, "application/json; charset=utf-8", GOOD));
+  ok(ok1.ok && ok1.href === GOOD.href && ok1.suggestionId === "ES-abc123", "suggest client: an ok JSON reply → its href (content-type parameters allowed)");
+  const err = await C.readSuggestResponse(res(200, "application/json", { ok: false, error: "Assist isn't enabled for you." }));
+  ok(!err.ok && err.error === "Assist isn't enabled for you.", "suggest client: the route's own error is shown inline");
+  const html = await C.readSuggestResponse(res(200, "text/html; charset=utf-8", "<html>Sign in</html>"));
+  const s500 = await C.readSuggestResponse(res(500, "application/json", { ok: false, error: "boom" }));
+  const s504 = await C.readSuggestResponse(res(504, "text/plain", "An error occurred with your deployment"));
+  const unparsable = await C.readSuggestResponse(res(200, "application/json", null, true));
+  const noType = await C.readSuggestResponse(res(200, "", GOOD));
+  ok([html, s500, s504, unparsable, noType].every((r) => !r.ok && r.error === G), "suggest client: a signed-out HTML redirect, a 5xx, a non-JSON body, an unparsable body or no content-type → the generic error, never a parse crash");
+  const shapes = await Promise.all([
+    res(200, "application/json", { ok: true, suggestionId: "ES-1", href: "https://evil.example/estimator?x" }),
+    res(200, "application/json", { ok: true, suggestionId: "ES-1", href: "//evil.example/estimator?x" }),
+    res(200, "application/json", { ok: true, suggestionId: "ES-1", href: "/inbox" }),
+    res(200, "application/json", { ok: true, href: GOOD.href }),
+    res(200, "application/json", { ok: false, error: "  " }),
+    res(200, "application/json", [1, 2]),
+    res(200, "application/json", "ok"),
+  ].map((r) => C.readSuggestResponse(r)));
+  ok(shapes.every((r) => !r.ok && r.error === G), "suggest client: only a same-origin /estimator? link is followed; a malformed reply → the generic error");
+  const long = await C.readSuggestResponse(res(200, "application/json", { ok: false, error: "x".repeat(900) }));
+  ok(!long.ok && long.error.length === 300, "suggest client: a long error is capped");
+
+  // startSuggestion with a fake fetch + router
+  const pushed: string[] = [];
+  const router = { push: (h: string) => void pushed.push(h) };
+  let seen: { url: string; init: RequestInit } | null = null;
+  const r1 = await C.startSuggestion({ kind: "lead", id: "L-1" }, router, async (url, init) => {
+    seen = { url, init };
+    return res(200, "application/json", GOOD);
+  });
+  const sent = seen as { url: string; init: RequestInit } | null;
+  ok(r1.ok && pushed.join() === GOOD.href && sent?.url === "/api/assist/suggest-estimate" && sent.init.method === "POST" && (sent.init.headers as Record<string, string>)["content-type"] === "application/json" && sent.init.body === JSON.stringify({ kind: "lead", id: "L-1" }), "suggest client: POSTs JSON {kind, id} with content-type application/json, then router.push(href)");
+  pushed.length = 0;
+  const r2 = await C.startSuggestion({ kind: "survey", id: "S-1" }, router, async () => res(200, "text/html", ""));
+  const r3 = await C.startSuggestion({ kind: "meeting", id: "M-1" }, router, async () => {
+    throw new TypeError("Failed to fetch");
+  });
+  const r4 = await C.startSuggestion({ kind: "thread", id: "T-1" }, router, async () => res(200, "application/json", { ok: false, error: "Link this meeting first." }));
+  ok(!r2.ok && r2.error === G && !r3.ok && r3.error === G && !r4.ok && r4.error === "Link this meeting first." && pushed.length === 0, "suggest client: a non-JSON reply, a network failure or a refusal → an inline error and no navigation");
+
+  // Report buckets (spec 2026-10-13 §4)
+  const quoteWith = (items: Array<{ sku: string; qty: number }>) => ({ spec: { sections: [{ kind: "materials", items }] } });
+  const sugg = { quoteId: "Q-1", lines: [{ sku: "A", qty: 2 }, { sku: "B", qty: 1 }] };
+  ok(O.estimateRunOutcome({ suggestionId: null, quoteId: null, lines: [] }, null, null) === "none", "suggest report: a run that saved no suggestion → its own 'none' bucket, not discarded");
+  ok(O.estimateRunOutcome({ suggestionId: "ES-1", lines: [] }, { quoteId: null, lines: sugg.lines }, null) === "pending" && O.estimateRunOutcome({ suggestionId: "ES-1" }, null, null) === "pending", "suggest report: no quote saved from the suggestion yet (or an unreadable suggestion) → pending");
+  ok(O.estimateRunOutcome({ suggestionId: "ES-1" }, sugg, null) === "discarded", "suggest report: the suggestion's quote was deleted → discarded");
+  ok(O.estimateRunOutcome({ suggestionId: "ES-1" }, sugg, quoteWith([{ sku: "A", qty: 2 }, { sku: "B", qty: 1 }])) === "accepted" && O.estimateRunOutcome({ suggestionId: "ES-1" }, sugg, quoteWith([{ sku: "A", qty: 5 }])) === "edited" && O.estimateRunOutcome({ suggestionId: "ES-1" }, sugg, quoteWith([{ sku: "Z", qty: 1 }])) === "discarded", "suggest report: a linked quote is scored by estimateKeep over the suggestion's catalog lines (accepted / edited / discarded)");
+  ok(O.estimateRunOutcome({ quoteId: null, lines: [{ sku: "A", qty: 1 }] }, null, null) === "discarded" && O.estimateRunOutcome({ quoteId: "Q-9", lines: [{ sku: "A", qty: 1 }] }, null, quoteWith([{ sku: "A", qty: 1 }])) === "accepted" && O.estimateRunOutcome({ lines: [] }, null, null) === "pending" && O.estimateRunOutcome(null, null, null) === "pending", "suggest report: legacy #334 draft runs (no suggestionId key) keep their old rule");
+  ok(O.estimateRunQuoteId({ suggestionId: "ES-1", quoteId: "Q-old" }, sugg) === "Q-1" && O.estimateRunQuoteId({ suggestionId: "ES-1" }, null) === null && O.estimateRunQuoteId({ suggestionId: null, quoteId: null }, null) === null && O.estimateRunQuoteId({ quoteId: "Q-9" }, null) === "Q-9" && O.estimateRunQuoteId(undefined, null) === null, "suggest report: the quote to load is the suggestion's first quote (legacy: the run's own)");
+  const lines = O.suggestionCatalogLines({ systems: [{ lines: [{ sku: "A", qty: 2, custom: false }, { sku: "", qty: 1, custom: true }, { sku: "X", qty: 1, custom: true }] }, { lines: [{ sku: "B", qty: 3, custom: false }] }] });
+  ok(stable(lines) === stable([{ sku: "A", qty: 2 }, { sku: "B", qty: 3 }]) && O.suggestionCatalogLines(null).length === 0, "suggest report: only the suggestion's catalog lines are scored (custom lines skipped)");
+  const run = (id: string) => ({ id, feature: "estimate" as const, step: "draft" as const, ok: true, outcome: null, costUsd: 0, userId: "u1", userName: "A", model: "m" }) as unknown as Parameters<typeof assistReport>[0][number];
+  const rep = assistReport([run("a"), run("b"), run("c"), run("d"), run("e")], new Map<string, import("@/lib/assist/outcome").EstimateRunOutcome>([["a", "none"], ["b", "pending"], ["c", "discarded"], ["d", "accepted"]]));
+  const row = rep.byFeature.find((r) => r.key === "Suggest estimate (draft)");
+  ok(!!row && row.noSuggestion === 1 && row.pending === 2 && row.discarded === 1 && row.accepted === 1 && row.runs === 5, "suggest report: 'none' counts as No suggestion (not discarded), 'pending' and unknown runs as pending; the row is labelled Suggest estimate");
+}
+
+/** Task 4 — the server lookups the entry points use (pilot + estimate gate; the source's latest suggestion). */
+export async function suggestEntryDbChecks(ok: Ok): Promise<void> {
+  const E = await import("@/lib/assist/suggest-entry-server");
+  const S = await import("@/lib/stores/estimate-suggestions");
+  const { getDb } = await import("@/db");
+  const { blobs } = await import("@/db/schema");
+  const { inArray } = await import("drizzle-orm");
+  const made: string[] = [];
+  const LEAD = "TEST-lead-entry-1";
+  try {
+    const env = { ANTHROPIC_API_KEY: "sk-test" };
+    const on = { users: ["u-pilot"], features: { tasks: true, reply: true, estimate: true, file: false, promise: false, brief: false }, capUsd: 200 };
+    ok((await E.estimateSuggestEnabled("u-pilot", { settings: on, env })) === true, "suggest entry: on for a pilot user with the estimate feature on");
+    ok((await E.estimateSuggestEnabled("u-other", { settings: on, env })) === false && (await E.estimateSuggestEnabled("u-pilot", { settings: { ...on, features: { ...on.features, estimate: false } }, env })) === false && (await E.estimateSuggestEnabled("u-pilot", { settings: on, env: {} })) === false, "suggest entry: off outside the pilot, with the estimate feature off, or with Assist not set up");
+    ok((await E.suggestionReadyHref("lead", LEAD)) === null, "suggest entry: no suggestion yet → no ready link");
+    const s: EstimateSuggestion = {
+      id: newSuggestionId(Date.UTC(2035, 4, 1)), source: { kind: "lead", id: LEAD, label: "Entry HS" }, createdBy: { id: "u1", name: "Jeff" }, createdAt: Date.UTC(2035, 4, 1),
+      customerId: "C-1", contactName: "Pat", venueId: null, leadId: LEAD, quoteName: "Entry", systems: [], notes: "", truncated: 0, runIds: { extract: null, draft: null }, quoteId: null,
+    };
+    made.push(S.suggestionBlobId(s.id), S.sourceIndexBlobId("lead", LEAD));
+    await S.saveSuggestion(s);
+    ok((await E.suggestionReadyHref("lead", LEAD)) === suggestionHref(s) && (await E.suggestionReadyHref("survey", LEAD)) === null, "suggest entry: the source's latest suggestion → its Estimator link (per kind)");
+    const many = await E.suggestionReadyHrefs("lead", [LEAD, LEAD, "TEST-lead-none", ...Array.from({ length: 30 }, (_, i) => `TEST-lead-x${i}`)]);
+    ok(many[LEAD] === suggestionHref(s) && many["TEST-lead-none"] === null && Object.keys(many).length === E.SUGGEST_LOOKUP_MAX, "suggest entry: the brief's batch lookup dedupes and is bounded");
+    ok((await E.suggestionReadyHref("lead", "bad\nid")) === null, "suggest entry: an unusable id → no link (never throws)");
+  } finally {
+    const db = await getDb();
+    await db.delete(blobs).where(inArray(blobs.id, made));
+  }
+}
+
+/** Task 4 — entry-point wiring pins: each is gated (pilot + estimate, server-computed) and shows the ready link. */
+export async function suggestEntryPins(ok: Ok): Promise<void> {
+  const read = (f: string) => readFileSync(f, "utf8");
+  const ctl = read("src/components/assist/suggest-estimate.tsx");
+  ok(/^"use client";/.test(ctl) && /await startSuggestion\(source, router\)/.test(ctl) && /if \(inFlight\.current\) return;\s*inFlight\.current = true;/.test(ctl) && /if \(r\.ok\) return; \/\/ stay busy/.test(ctl) && /\{busy \? SUGGEST_BUSY_LABEL : readyHref \? "Suggest again" : "Suggest estimate"\}/.test(ctl) && /Suggestion ready → Open/.test(ctl) && /role="alert"/.test(ctl), "suggest entry control: one shared control — ref double-click guard, busy label, Suggestion ready → Open + Suggest again, inline error");
+  for (const f of ["src/components/assist/suggest-estimate.tsx", "src/lib/assist/suggest-client.ts", "src/app/(app)/inbox/thread-reader.tsx", "src/app/(app)/leads/lead-drawer.tsx", "src/app/(app)/venue-assessments/[id]/controls.tsx", "src/app/(app)/inbox/meetings/meeting-reader.tsx", "src/components/brief/brief-card-view.tsx"]) {
+    const bad = [...read(f).matchAll(/^import (?!type )[^;]*from "([^"]+)";/gm)].map((m) => m[1]).filter((p) => /stores\/estimate-suggestions|@\/db|-server$|\/session$|suggest-entry|meetings\/load$|@\/lib\/settings$|key-store/.test(p));
+    ok(bad.length === 0, `suggest entry purity: ${f} imports no suggestion store / db / server module${bad.length ? ` (${bad.join(", ")})` : ""}`);
+  }
+  const clientImports = ["src/components/assist/suggest-estimate.tsx", "src/lib/assist/suggest-client.ts"].flatMap((f) => [...read(f).matchAll(/^import (?!type )[^;]*from "([^"]+)";/gm)].map((m) => m[1]));
+  ok(clientImports.every((p) => ["react", "next/link", "next/navigation", "@/lib/assist/suggest-client"].includes(p)), `suggest entry purity: the control and the client helper import only React/Next and the client helper (${clientImports.join(", ")})`);
+  const srv = read("src/lib/assist/suggest-entry-server.ts");
+  ok(/gateFor\("estimate", userId, deps\)\) === null/.test(srv) && /suggestionForSource\(kind, id\)/.test(srv) && /suggestionHref\(s\)/.test(srv), "suggest entry server: the button's gate is the route's (pilot + estimate); the ready link is the source index's suggestion");
+
+  const reader = read("src/app/(app)/inbox/thread-reader.tsx");
+  ok(/\{assist\.estimate && vm\.isEmail && \(\s*<SuggestEstimate source=\{\{ kind: "thread", id: vm\.id \}\} readyHref=\{vm\.suggestionHref \?\? null\} \/>/.test(reader) && !/Draft estimate|draftEstimate/.test(reader), "suggest entry: the Inbox reader's Suggest estimate replaces Draft estimate (assist.estimate + email only)");
+  const inbox = read("src/app/(app)/inbox/page.tsx");
+  ok(/suggestionHref: assistFlags\.estimate && sel\.channel === "email" \? await suggestionReadyHref\("thread", sel\.id\) : null,/.test(inbox) && /const assistAll = assistUiFlags\(user\.id, assistSettingsOf\(settings\), await getAssistEnv\(\)\);/.test(inbox), "suggest entry: the Inbox page looks up the thread's suggestion only when the button shows");
+  ok(/loadMeetingReader\(user, selectedId, \{ suggestEstimate: assistFlags\.estimate \}\)/.test(inbox), "suggest entry: the meeting reader gets the estimate gate from the Inbox page");
+  const load = read("src/app/(app)/inbox/meetings/load.ts");
+  ok(/suggest: opts\.suggestEstimate && \(L\.customerId \|\| L\.work\) \? \{ readyHref: await suggestionReadyHref\("meeting", m\.id\) \} : null,/.test(load), "suggest entry: a meeting offers Suggest estimate only when linked to a company or a job (the route's rule)");
+  const mr = read("src/app/(app)/inbox/meetings/meeting-reader.tsx");
+  ok(/\{vm\.suggest && \(\s*<SuggestEstimate source=\{\{ kind: "meeting", id: vm\.id \}\} readyHref=\{vm\.suggest\.readyHref\}/.test(mr), "suggest entry: the meeting reader header shows it from the VM");
+  const leads = read("src/app/(app)/leads/page.tsx");
+  ok(/const suggestEnabled = drawerMode === "detail" && leadRec \? await estimateSuggestEnabled\(me\.id\) : false;/.test(leads) && /const suggestReady = suggestEnabled && leadRec \? await suggestionReadyHref\("lead", leadRec\.id\) : null;/.test(leads) && /canSuggest=\{suggestEnabled\}\s*suggestionHref=\{suggestReady\}/.test(leads), "suggest entry: the leads page computes the drawer's gate + ready link on the server");
+  const drawer = read("src/app/(app)/leads/lead-drawer.tsx");
+  ok(/\{canSuggest && \(\s*<SuggestEstimate\s+source=\{\{ kind: "lead", id: vm\.id \}\}\s+readyHref=\{suggestionHref\}/.test(drawer) && drawer.indexOf("<SuggestEstimate") < drawer.indexOf("Convert to customer + quote"), "suggest entry: the lead drawer footer shows it beside Convert to customer + quote");
+  const vaPage = read("src/app/(app)/venue-assessments/[id]/page.tsx");
+  ok(/estimateSuggestEnabled\(user\.id\),/.test(vaPage) && /const suggestionHref = canSuggest \? await suggestionReadyHref\("survey", rec\.id\) : null;/.test(vaPage) && /canSuggest=\{canSuggest\}\s*suggestionHref=\{suggestionHref\}/.test(vaPage), "suggest entry: the venue assessment page computes the editor's gate + ready link on the server");
+  const va = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+  ok(/\{canSuggest && \(\s*<SuggestEstimate\s+source=\{\{ kind: "survey", id: record\.id \}\}\s+readyHref=\{suggestionHref\}\s+disabled=\{dirty \|\| saving\}/.test(va), "suggest entry: the venue assessment header shows it, disabled while there are unsaved edits (the route reads the saved record)");
+  const pilot = read("src/app/(app)/settings/groups/assist-pilot.tsx");
+  ok(/\{ key: "estimate", label: "Suggest estimate" \}/.test(pilot) && !/Draft estimate/.test(pilot) && /<td style=\{td\}>\{r\.noSuggestion\}<\/td>/.test(pilot) && /colSpan=\{9\}/.test(pilot), "suggest settings: the pilot card says Suggest estimate; the report table has a No suggestion column");
+  const data = read("src/app/(app)/settings/assist-data.ts");
+  ok(/await getSuggestion\(d\.suggestionId\)/.test(data) && /estimateRunQuoteId\(d, sugg\)/.test(data) && /estimateRunOutcome\(d, sugg,/.test(data) && /suggestionCatalogLines\(s\)/.test(data), "suggest report: loadAssistVM scores a suggestion run off the suggestion's first quote");
+}
+
 if (process.argv[1] && /test-suggest\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -681,6 +824,9 @@ if (process.argv[1] && /test-suggest\.ts$/.test(process.argv[1])) {
     await suggestPanelChecks(ok);
     await suggestPanelPins(ok);
     await suggestSaveDbChecks(ok);
+    await suggestEntryChecks(ok);
+    await suggestEntryDbChecks(ok);
+    await suggestEntryPins(ok);
     // later tasks append: await suggestXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall suggest checks passed");
     process.exit(fail ? 1 : 0);

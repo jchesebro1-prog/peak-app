@@ -1,22 +1,24 @@
 /** Assist report (D879) — pure aggregation. Extract steps cost money but carry no outcome. */
 import type { AssistRun } from "@/lib/stores/assist-runs";
-import type { AssistOutcome } from "./types";
+import type { EstimateRunOutcome } from "./outcome";
 import type { FilingLogEntry } from "@/lib/stores/inbox-org";
 import type { FilingSource } from "@/lib/inbox-org/types";
 import { NUDGE_OPENED_KEY, PREDRAFT_RUN_KEY } from "@/lib/brief/report-keys";
 
-export type ReportRow = { key: string; runs: number; okRuns: number; accepted: number; edited: number; discarded: number; pending: number; costUsd: number };
+/** `noSuggestion` — estimate draft runs that saved no suggestion (spec 2026-10-13 §4): counted apart, never as discarded. */
+export type ReportRow = { key: string; runs: number; okRuns: number; accepted: number; edited: number; discarded: number; pending: number; noSuggestion: number; costUsd: number };
 
-const blank = (key: string): ReportRow => ({ key, runs: 0, okRuns: 0, accepted: 0, edited: 0, discarded: 0, pending: 0, costUsd: 0 });
+const blank = (key: string): ReportRow => ({ key, runs: 0, okRuns: 0, accepted: 0, edited: 0, discarded: 0, pending: 0, noSuggestion: 0, costUsd: 0 });
 
 /** #335 — the Inbox-organization passes read as what they do. */
 const FEATURE_LABEL: Partial<Record<AssistRun["feature"], string>> = { file: "file (filing)", promise: "promise (court + promises)", brief: "Daily brief" };
 
 export function featureKey(r: Pick<AssistRun, "feature" | "step">): string {
-  return r.feature === "estimate" ? `estimate (${r.step ?? "draft"})` : FEATURE_LABEL[r.feature] ?? r.feature;
+  return r.feature === "estimate" ? `Suggest estimate (${r.step ?? "draft"})` : FEATURE_LABEL[r.feature] ?? r.feature;
 }
 
-export function assistReport(runs: AssistRun[], estimateOutcomes: Map<string, AssistOutcome>) {
+/** `estimateOutcomes`: run id → the draft run's bucket (outcome.ts `estimateRunOutcome`); absent = pending. */
+export function assistReport(runs: AssistRun[], estimateOutcomes: Map<string, EstimateRunOutcome>) {
   const groups = { byFeature: new Map<string, ReportRow>(), byUser: new Map<string, ReportRow>(), byModel: new Map<string, ReportRow>() };
   let totalUsd = 0;
   for (const r of runs) {
@@ -32,6 +34,7 @@ export function assistReport(runs: AssistRun[], estimateOutcomes: Map<string, As
         if (outcome === "accepted") row.accepted++;
         else if (outcome === "edited") row.edited++;
         else if (outcome === "discarded") row.discarded++;
+        else if (outcome === "none") row.noSuggestion++;
         else row.pending++;
       }
       map.set(key, row);

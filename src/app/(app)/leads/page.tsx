@@ -35,6 +35,7 @@ import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { OwnerDot } from "./avatar";
 import { setStageAction } from "./actions";
 import { getSettings } from "@/lib/settings";
+import { estimateSuggestEnabled, suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 import { activeVisitForLead, mergedVisitReasons } from "@/lib/stores/site-visits";
 import { stageMeta as surveyStageMeta, surveysForLead } from "@/lib/stores/surveys";
 import { VISIT_STAGE_META, type VisitStage } from "@/lib/lead-thread";
@@ -319,6 +320,10 @@ export default async function LeadsPage({
       : "detail"
     : null;
   const sourceOptions = SOURCES.map((s) => ({ value: s as string, label: SOURCE_META[s].label }));
+  // Estimate suggestion (spec 2026-10-13 §3) — the drawer's Suggest estimate
+  // (pilot + `estimate`), and the lead's latest suggestion when it has one.
+  const suggestEnabled = drawerMode === "detail" && leadRec ? await estimateSuggestEnabled(me.id) : false;
+  const suggestReady = suggestEnabled && leadRec ? await suggestionReadyHref("lead", leadRec.id) : null;
 
   // #12 — the New Lead form's "pick an existing customer" prefill. Only
   // fetched when the new-lead form is actually open, same as the thread
@@ -849,6 +854,8 @@ export default async function LeadsPage({
           visitReasons={mergedVisitReasons(settings.visitReasons)}
           customers={leadCustomers}
           canDelete={canDelete}
+          canSuggest={suggestEnabled}
+          suggestionHref={suggestReady}
           meetingsSlot={
             drawerMode === "detail" && leadRec ? (
               <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />

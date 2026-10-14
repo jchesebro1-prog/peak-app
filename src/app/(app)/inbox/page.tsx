@@ -102,6 +102,7 @@ import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/li
 import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
+import { suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
@@ -1061,6 +1062,8 @@ export default async function InboxPage({
       meId: user.id,
       threadTasks,
       org,
+      // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
+      suggestionHref: assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
       preDraft,
     };
   }
@@ -1197,7 +1200,7 @@ export default async function InboxPage({
     const selectedId = str(params.m) || null;
     const [boxVM, readerVM] = await Promise.all([
       loadMeetingsBox(user, tab),
-      selectedId ? loadMeetingReader(user, selectedId) : Promise.resolve(null),
+      selectedId ? loadMeetingReader(user, selectedId, { suggestEstimate: assistFlags.estimate }) : Promise.resolve(null),
     ]);
     meetingsSlot = {
       // keyed: these server-made elements are rendered inside InboxShell's child lists (React key warning)

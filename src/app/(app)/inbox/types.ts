@@ -276,6 +276,10 @@ export type ReaderVM = {
   /** AI daily brief §4 — the stored pre-draft, only for a fresh, court-me
    *  thread of mine (`readerPreDraft`); null → the live Assist paths. */
   preDraft?: ReaderPreDraftVM | null;
+  /** Estimate suggestion (spec 2026-10-13 §3) — this thread's latest
+   *  suggestion as an Estimator link ("Suggestion ready → Open"); null when
+   *  none, or when Suggest estimate is off for this user. */
+  suggestionHref?: string | null;
 };
 
 /** #335 — the reader's organization strip (spec §2, §3, §7). Built on the

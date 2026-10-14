@@ -22,6 +22,7 @@ import { loadPrefillPanels, loadRecordingsStrip } from "../../recordings/data";
 import ActionError from "@/components/action-error";
 import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { visitIdsForSurvey } from "@/lib/stores/site-visits";
+import { estimateSuggestEnabled, suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
@@ -45,12 +46,16 @@ export default async function SurveyEditorPage({
   // Recordings (spec §4.4/§6): header strip + "From recording" prefill
   // panels. Both are client-rendered inside the editor, so the server half
   // (store reads + record gate) is computed here and passed down.
-  const [autoCerts, recordings, fromRecording, visitIds] = await Promise.all([
+  const [autoCerts, recordings, fromRecording, visitIds, canSuggest] = await Promise.all([
     resolveCerts(rec.customerId, rec.locationId),
     loadRecordingsStrip("survey", rec.id),
     loadPrefillPanels("survey", rec.id),
     visitIdsForSurvey(rec.id),
+    estimateSuggestEnabled(user.id),
   ]);
+  // Estimate suggestion (spec 2026-10-13 §3) — the header's Suggest estimate
+  // (pilot + `estimate`) and this assessment's latest suggestion.
+  const suggestionHref = canSuggest ? await suggestionReadyHref("survey", rec.id) : null;
 
   const editorCustomers: EditorCustomer[] = customers.map((cst) => {
     const contacts = cst.contacts || [];
@@ -101,6 +106,8 @@ export default async function SurveyEditorPage({
         recordings={recordings.recordings}
         canShowRecord={recordings.canRecord}
         fromRecording={fromRecording}
+        canSuggest={canSuggest}
+        suggestionHref={suggestionHref}
         // #323 — Krisp meetings linked to this survey or one of its site visits (site visits have no page of
         // their own; their meetings show here, like their recordings do).
         meetingsSlot={<MeetingsCard kind="work" id={[rec.id, ...visitIds]} viewerId={user.id} />}

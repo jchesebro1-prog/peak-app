@@ -22,6 +22,8 @@ export type CardQuoteInfo = {
   href: string;
   nudge: { note: string } | null;
 };
+/** A lead row's estimate suggestion (spec 2026-10-13 §3): its latest suggestion's Estimator link, else null. */
+export type CardLeadSuggest = { readyHref: string | null };
 
 export type BriefCardInput = {
   brief: Brief;
@@ -30,6 +32,9 @@ export type BriefCardInput = {
   rows: Readonly<Record<string, CardRow>>;
   threads: Readonly<Record<string, CardThreadReady>>;
   quotes: Readonly<Record<string, CardQuoteInfo>>;
+  /** Lead id → its suggestion state — present only when Suggest estimate is
+   *  on for this user (pilot + `estimate`); absent = the old "Open lead" cue. */
+  leads?: Readonly<Record<string, CardLeadSuggest>>;
 };
 
 export type BriefCardDoFirst = {
@@ -42,6 +47,10 @@ export type BriefCardDoFirst = {
   tasksReady: boolean;
   /** A lead row: "Ready to quote? → Open lead" (the lead's own page, where it converts); null otherwise. */
   leadHref: string | null;
+  /** A lead row with Suggest estimate on: the cue becomes "Suggest estimate"
+   *  (or "Suggestion ready → Open" + "Suggest again"); null otherwise — the
+   *  view then falls back to `leadHref`. */
+  leadSuggest: { leadId: string; readyHref: string | null } | null;
 };
 
 export type BriefCardQuiet = {
@@ -99,6 +108,7 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
     const parsed = parseTriageKey(d.key);
     const thread = parsed?.source === "email" ? input.threads[parsed.id] : undefined;
     const quote = parsed?.source === "quote" ? input.quotes[parsed.id] : undefined;
+    const lead = parsed?.source === "lead" ? input.leads?.[parsed.id] : undefined;
     if (row?.title) titles[d.key] = row.title;
     return {
       key: d.key,
@@ -109,6 +119,7 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
       draftReady: !!thread?.draft || !!quote?.nudge,
       tasksReady: !!thread?.tasks,
       leadHref: parsed?.source === "lead" && row?.href ? row.href : null,
+      leadSuggest: parsed?.source === "lead" && lead && row ? { leadId: parsed.id, readyHref: lead.readyHref } : null,
     };
   });
 
