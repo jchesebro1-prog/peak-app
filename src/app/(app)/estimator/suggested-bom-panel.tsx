@@ -76,7 +76,7 @@ export function SuggestedBomPanel({
       </div>
       <div style={{ fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.4 }}>
         {view.sourceHref ? (
-          <a href={view.sourceHref} style={{ color: ACCENT_INK, textDecoration: "underline" }}>
+          <a href={view.sourceHref} target="_blank" rel="noopener" style={{ color: ACCENT_INK, textDecoration: "underline" }}>
             {view.sourceLine}
           </a>
         ) : (

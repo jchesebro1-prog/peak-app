@@ -57,7 +57,7 @@ import { countCutSheetTypes } from "@/lib/curtain-cut-sheets/estimator-curtains"
 import { vendorDraftTotal, vendorDraftTotalSource, vendorKeptLines, vendorLinesTotal } from "./vendor-quote-modal";
 import { systemFromCategory } from "@/lib/system-categories";
 import { addedState, itemFromSuggestionLine, systemFromSuggestion } from "@/lib/assist/features/suggestion";
-import { defaultSuggestionTarget, suggestPanelKey, suggestPanelOpen, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
+import { defaultSuggestionTarget, sendSuggestionId, suggestPanelFirstRead, suggestPanelKey, suggestPanelOpen, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
@@ -1347,7 +1347,7 @@ export function useEstimatorState(props: EstimatorProps) {
           // quote keeps its own); the suggestion id rides every save while the
           // panel shows one — linking is idempotent server-side.
           ...(!loadedId && initial.leadId ? { leadId: initial.leadId } : {}),
-          ...(suggestion ? { suggestionId: suggestion.id } : {}),
+          ...(suggestion && sendSuggestionId(suggestion, suggestionLinkedRef.current) ? { suggestionId: suggestion.id } : {}),
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
@@ -1389,6 +1389,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // the gate's message), so the banner stops asking to Save.
           setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
           setLoadedId(res.id);
+          // Estimate suggestion: linked — later saves stop sending the id.
+          if (res.suggestionLinked) suggestionLinkedRef.current = true;
           postChanged("quote", res.id);
           // #333 review (A, E): the first save writes an edited selection; any
           // later Save retries one that failed. Untouched → nothing written.
@@ -1971,22 +1973,35 @@ export function useEstimatorState(props: EstimatorProps) {
     else pushItems(targetSecId, [itemFromSuggestionLine(line, suggestionLookup, { nextId, tierMargin, price: catalogAddPrice })]);
     setSuggestionTargets((m) => ({ ...m, [systemKey]: targetSecId }));
   };
-  const suggestionTargetFor = (systemKey: string) => defaultSuggestionTarget(systemKey, suggestionTargets, sections.map((s) => s.id));
+  const suggestionTargetFor = (systemKey: string) => defaultSuggestionTarget(systemKey, suggestionTargets, sections.map((s) => s.id), activeId);
   /** ✓ added — derived from the estimate as it stands (nothing stored). */
   const suggestionAdded = useMemo(
     () => (suggestion ? addedState(suggestion, sections, suggestionLookup) : {}),
     [suggestion, sections, suggestionLookup]
   );
-  /** Open on a new estimate, collapsed on a saved quote; this browser's choice wins (read after mount). */
+  /** Open on a new estimate, collapsed on a saved quote; this browser's choice
+   *  wins. Read ONCE per suggestion id after mount (hydration-safe), judged by
+   *  whether the quote was saved AT MOUNT — a save giving it an id (and the
+   *  refresh after it) never re-reads, so the panel can't collapse mid-session.
+   *  The first read writes the default back. */
   const [suggestOpen, setSuggestOpen] = useState(() => suggestPanelOpen(null, !!initial.loadedId));
+  const suggestSavedAtMount = useRef(!!initial.loadedId);
+  const suggestReadFor = useRef<string | null>(null);
+  const suggestionKeyId = suggestion?.id ?? null;
   useEffect(() => {
-    if (!suggestion) return;
+    if (!suggestionKeyId || suggestReadFor.current === suggestionKeyId) return;
+    suggestReadFor.current = suggestionKeyId;
     try {
-      setSuggestOpen(suggestPanelOpen(window.localStorage.getItem(suggestPanelKey(suggestion.id)), !!initial.loadedId));
+      const key = suggestPanelKey(suggestionKeyId);
+      const first = suggestPanelFirstRead(window.localStorage.getItem(key), suggestSavedAtMount.current);
+      setSuggestOpen(first.open);
+      if (first.store) window.localStorage.setItem(key, first.store);
     } catch {
       /* storage unavailable — keep the default */
     }
-  }, [suggestion, initial.loadedId]);
+  }, [suggestionKeyId]);
+  /** Linked by a save in this session (the page's `suggestion.linked` covers earlier ones). */
+  const suggestionLinkedRef = useRef(false);
   const toggleSuggestOpen = () => {
     const next = !suggestOpen;
     setSuggestOpen(next);

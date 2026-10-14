@@ -235,6 +235,9 @@ export type SaveResult = {
   /** #282 phase 2 — the Rewards credit actually stored (after the server's
    *  clamp), so the builder can match its credit line to it. */
   rewardCredit?: number;
+  /** Estimate suggestion — true when this save linked the quote to the
+   *  posted `suggestionId` (the builder stops sending it). */
+  suggestionLinked?: boolean;
 };
 
 export type ReviewSync = {
@@ -674,7 +677,7 @@ export async function saveQuoteAction(
   }
   // Estimate suggestion: link the saved quote to the suggestion it came from
   // (first save indexes it; later saves are no-ops). Never fails the save.
-  if (q?.id && payload.suggestionId) await linkSavedQuoteToSuggestion(payload.suggestionId, q.id);
+  const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q.id) : false;
   refresh();
   return {
     ok: !!q && !statusError,
@@ -695,6 +698,7 @@ export async function saveQuoteAction(
     rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
+    ...(suggestionLinked ? { suggestionLinked: true } : {}),
   };
 }
 

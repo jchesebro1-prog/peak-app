@@ -17,6 +17,10 @@ export type EstimateSuggestionView = {
   notes: string;
   systems: SuggestionSystem[];
   truncated: number;
+  /** True when this saved quote is already linked to the suggestion (the
+   *  estsugg-quote index points at it). False on a new estimate, and on a
+   *  saved quote whose first-save link didn't land — the next save retries. */
+  linked: boolean;
 };
 
 /** Parts keyed by the suggestion line's own sku (getManyBySku follows renames, so `sku` may differ). */
@@ -50,7 +54,7 @@ export function suggestionSourceHref(source: SuggestionSource): string {
   return "";
 }
 
-export function suggestionViewOf(s: EstimateSuggestion): EstimateSuggestionView {
+export function suggestionViewOf(s: EstimateSuggestion, linked = false): EstimateSuggestionView {
   return {
     id: s.id,
     sourceLine: suggestionSourceLine(s.source),
@@ -58,6 +62,7 @@ export function suggestionViewOf(s: EstimateSuggestion): EstimateSuggestionView 
     notes: s.notes || "",
     systems: s.systems,
     truncated: s.truncated > 0 ? Math.floor(s.truncated) : 0,
+    linked,
   };
 }
 
@@ -112,10 +117,17 @@ export function suggestionPanelVM(
 }
 
 /** The line "+"'s default target: the system last added from this suggestion
- *  system while it still exists, else the first system ("" when none). */
-export function defaultSuggestionTarget(systemKey: string, lastBySystem: Readonly<Record<string, string>>, sectionIds: readonly string[]): string {
+ *  system while it still exists, else the active system, else the first
+ *  system ("" when none). */
+export function defaultSuggestionTarget(
+  systemKey: string,
+  lastBySystem: Readonly<Record<string, string>>,
+  sectionIds: readonly string[],
+  activeId?: string | null
+): string {
   const last = lastBySystem[systemKey];
   if (last && sectionIds.includes(last)) return last;
+  if (activeId && sectionIds.includes(activeId)) return activeId;
   return sectionIds[0] || "";
 }
 
@@ -127,4 +139,23 @@ export function suggestPanelOpen(stored: string | null | undefined, savedQuote: 
   if (stored === "1") return true;
   if (stored === "0") return false;
   return !savedQuote;
+}
+
+/**
+ * The ONE read of a suggestion's remembered open state (per suggestion id, on
+ * first sight): `savedAtMount` is whether the estimate was a saved quote when
+ * the Estimator mounted — never re-judged after a save gives it an id, so a
+ * save can't collapse the panel mid-session. With nothing remembered yet, the
+ * default is written back (`store`) so later loads keep it.
+ */
+export function suggestPanelFirstRead(stored: string | null | undefined, savedAtMount: boolean): { open: boolean; store: "1" | "0" | null } {
+  if (stored === "1" || stored === "0") return { open: stored === "1", store: null };
+  const open = suggestPanelOpen(null, savedAtMount);
+  return { open, store: open ? "1" : "0" };
+}
+
+/** Send the suggestion id with this save? Only until the quote is linked to
+ *  it (the first save, or a retry when that link didn't land). */
+export function sendSuggestionId(view: Pick<EstimateSuggestionView, "linked"> | null | undefined, linkedThisSession: boolean): boolean {
+  return !!view && !view.linked && !linkedThisSession;
 }

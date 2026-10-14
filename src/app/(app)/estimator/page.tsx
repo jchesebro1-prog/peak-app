@@ -284,7 +284,22 @@ async function initialFrom(
  */
 async function loadSuggestion(suggestionId: string, quoteId: string | null): Promise<{ record: EstimateSuggestion | null; view: EstimateSuggestionView | null; parts: SuggestionParts }> {
   try {
-    const record = suggestionId ? await getSuggestion(suggestionId) : quoteId ? await suggestionForQuote(quoteId) : null;
+    let record: EstimateSuggestion | null = null;
+    let linked = false;
+    if (quoteId) {
+      record = await suggestionForQuote(quoteId);
+      linked = !!record;
+      // The first save's link didn't land but the URL still names the
+      // suggestion (stepSearch keeps ?suggestion= after the first save): show
+      // it unlinked, so the next save retries the link — never a write here.
+      // Only a suggestion with no first quote yet (or this one) qualifies.
+      if (!record && suggestionId) {
+        const s = await getSuggestion(suggestionId);
+        if (s && (!s.quoteId || s.quoteId === quoteId)) record = s;
+      }
+    } else if (suggestionId) {
+      record = await getSuggestion(suggestionId);
+    }
     if (!record) return { record: null, view: null, parts: {} };
     const skus = [...new Set(record.systems.flatMap((sys) => sys.lines.filter((l) => !l.custom && l.sku).map((l) => l.sku)))];
     const found = skus.length ? await getManyBySku(skus) : new Map();
@@ -293,7 +308,7 @@ async function loadSuggestion(suggestionId: string, quoteId: string | null): Pro
       const p = found.get(sku);
       if (p) parts[sku] = { sku: p.sku, desc: p.desc || p.sku, unit: p.unit || "ea", cost: Number(p.cost) || 0, list: Number(p.list) || 0 };
     }
-    return { record, view: suggestionViewOf(record), parts };
+    return { record, view: suggestionViewOf(record, linked), parts };
   } catch (e) {
     console.warn("[estimator] suggestion unavailable — no Suggested BOM panel", e);
     return { record: null, view: null, parts: {} };
@@ -371,8 +386,9 @@ export default async function EstimatorPage({
   // inspection, consulting, rental) opens its own builder, not the
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
-  // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the saved quote's linked one.
-  const suggestion = await loadSuggestion(handoff?.suggestionId || "", q ? q.id : null);
+  // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
+  // saved quote's linked one (else, unlinked, the one its URL still names).
+  const suggestion = await loadSuggestion(readHandoff(sp).suggestionId, q ? q.id : null);
 
   const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
@@ -462,8 +478,10 @@ export default async function EstimatorPage({
   // blank (customer, venue, contact, lead, name) — a new estimate only.
   const sugg = !q && handoff?.suggestionId ? suggestion.record : null;
   const seedCustomer = preCustomer || sugg?.customerId || undefined;
-  const seedVenue = handoff?.venueId || (sugg && seedCustomer === sugg.customerId ? sugg.venueId || "" : "");
-  const seedContact = handoff?.contactName || (sugg && seedCustomer === sugg.customerId ? sugg.contactName || "" : "");
+  // Venue, contact and lead come from the suggestion only when it is about the customer being seeded.
+  const suggSameCustomer = !!sugg && (sugg.customerId || undefined) === seedCustomer;
+  const seedVenue = handoff?.venueId || (suggSameCustomer ? sugg?.venueId || "" : "");
+  const seedContact = handoff?.contactName || (suggSameCustomer ? sugg?.contactName || "" : "");
   // Seed the customer/venue/contact picked in the guided intake (quotes/new).
   // A venue/contact not on the customer falls back to its primary (#160).
   if (seedCustomer) {
@@ -475,7 +493,7 @@ export default async function EstimatorPage({
       initial.contactName = pickContactName(cust, seedContact);
     }
   }
-  if (!q) initial.leadId = handoff?.leadId || sugg?.leadId || null;
+  if (!q) initial.leadId = handoff?.leadId || (suggSameCustomer ? sugg?.leadId : null) || null;
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
   if (handoff) {
     // #160: the intake's optional name, else "<Customer> — System" (or
