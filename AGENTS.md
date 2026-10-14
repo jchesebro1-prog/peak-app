@@ -1279,7 +1279,7 @@ See `.env.example`.
     for the pilot, try company / quote-comparison / this-screen / web questions,
     each card and Try harder, check the forced final round and Haiku web search
     live, read the report after a week, decide on narrow screens. Follow-ups:
-    ⌘K still lists other mailboxes' thread subjects, `list_quotes` without a
+    ⌘K listing other mailboxes' thread subjects (closed by #341), `list_quotes` without a
     company scans headers, lead/project notes post no LiveSync entity. This
     completes the AI roadmap. Punch item #339.
 
@@ -1334,6 +1334,24 @@ See `.env.example`.
     parallel finding pushes and the PDF render (`QUOTE_PDF_ORIGIN` / Chrome).
     Not on a preview: previews skip migrations, so their company and venue
     reads fail without `short_code`. Punch item #340.
+
+60. ✅ **Email thread visibility** (#341, D1004–D1011) — Jeff, Oct 14: you see
+    only your own information or what is linked to an entity. One pure rule,
+    `canSeeThread` (`src/lib/stores/comms-visibility.ts`, re-exported from
+    `comms.ts`): not in Deleted, and my mailbox, or (not someone else's draft)
+    assigned to me, or linked by `customerId` / `siteId` / a work `link` /
+    `linkedContactIds` — never `resolvedContactId` alone. The Inbox reader opens
+    only `canOpenThread` and shows a teammate's thread **read-only** (banner, no
+    write control, no mark-read); every Inbox server action that takes a thread
+    id checks the owner first (`src/lib/inbox-thread-guard.ts`). The company
+    page and activity feed list every linked thread minus Deleted / drafts; ⌘K
+    cuts thread candidates in SQL with `canSeeThreadCond` through a new
+    additive `searchDocs` `where: DocCond` (`docCondSql`); Ask AI reads through
+    `loadThreadReadable`, while replies, task / estimate drafting and task
+    thread links stay own-only (`loadThreadFor`). Tests:
+    `npm run test:thread-visibility` (in test:specs). No migration. Remaining
+    is Jeff-gated: tell the team, try two accounts on production. Punch item
+    #341.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

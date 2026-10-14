@@ -12132,8 +12132,8 @@ link/archive paths a person would.
 - (5) Decide whether Ask should be reachable on narrow screens and phones: today the nav search box, and so Ask, is hidden at 860 px and below, and the native shell has no entry (D944).
 
 **Known follow-ups:**
-- ⌘K itself still lists other mailboxes' email-thread subjects (pre-existing; Ask's own search is scoped) (D960).
-- **Privacy gap, its own item:** ⌘K search itself (`globalSearch` without `{threadsOf}`) lists the subjects of email threads in *other people's* mailboxes to any signed-in user. This predates Ask AI and isn't fixed by #339 (Ask's own search is scoped to the asker's mailbox, D950); it needs its own punch item to scope the ⌘K thread group the same way.
+- ~~⌘K itself still lists other mailboxes' email-thread subjects (pre-existing; Ask's own search is scoped) (D960).~~ **Closed by #341** (2026-10-14, D1010).
+- ~~**Privacy gap, its own item:** ⌘K search itself (`globalSearch` without `{threadsOf}`) lists the subjects of email threads in *other people's* mailboxes to any signed-in user.~~ **Closed by #341** (2026-10-14): ⌘K and Ask now share one rule — own, assigned or linked threads only, cut in SQL before the per-group limit (D1004, D1010, D1011).
 - `list_quotes` with no company scans every quote row's header projection; fine today, revisit past ~10k quotes.
 - Lead and project note cards post nothing on the pop-out LiveSync channel (#336 has no lead or project entity); other windows catch up on focus.
 - `max_uses` is per round, so a web question can make up to 18 searches; tighten if the report shows heavy use (D949).
@@ -12184,3 +12184,26 @@ link/archive paths a person would.
 - **Slice 4 — Flame test, service checks, re-inspection:** per-curtain inventory → flame-test results, fire-curtain and emergency-lighting checks, re-inspection of open findings, status driven by repair jobs (D965).
 - **Slice 5 — Portal and reminders:** customer register, acknowledgment, immediate-hazard alerts, next-due reminders (fire curtain 90 days, emergency lighting, flame cert, E1.47 rigging) (D966).
 - **Open questions:** (a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).
+
+## 341. Email thread visibility — own, assigned or linked only — DONE 2026-10-14 on `worktree-assist-layer` (D1004–D1011)
+
+**Asked (Jeff, 2026-10-14):** "you can only see information that was either linked to entities or your own information." Before this, `/inbox?thread=<id>` rendered any thread in any mailbox with no check, the company page and ⌘K listed other people's mail, and most Inbox server actions wrote to whatever thread id they were given. No migration, no env var.
+
+**Done:**
+- **The rule** (`src/lib/stores/comms-visibility.ts`, pure, re-exported from `comms.ts`): `canSeeThread(t, me)` — not in Deleted, and my own mailbox, or (not another person's draft) assigned to me, or linked by `customerId` / `siteId` / a work `link` with type + id / `linkedContactIds`. `resolvedContactId` alone (the automatic sender match) never shares a thread. Plus `isOwnThread`, `canOpenThread`, `isSharedThread`, `readOnlyBanner`, and `canSeeThreadCond` — the same rule for SQL (D1004, D1005).
+- **Inbox reader:** `?thread=` opens only `canOpenThread`, never switches the box to someone else's mailbox; `?draft=` only my own draft. Off-mailbox threads are **read-only**: a banner, the messages, and no reply / status / archive / Owner / Site visit / Assist / pre-draft / link sidebar / per-message Link… · Task… · link picker / court strip, and no mark-read (D1006).
+- **Server actions:** one owner check, `src/lib/inbox-thread-guard.ts` (`ownThread`, `ownThreadIds`), added to every thread-id action in `inbox/actions.ts`, to link / dismiss-suggestion / quick-add-customer and to the site-visit customer adopt; the rest already checked. Audit table in `.superpowers/sdd/visibility-report.md` (D1007).
+- **Company page + activity feed** (vendor page and company summary too): every linked thread from any mailbox, minus Deleted and other people's drafts (`visibleByCustomer`, `isSharedThread`) (D1009).
+- **⌘K:** `searchDocs` gains `where: DocCond` (`docCondSql` in `src/db/doc-store.ts`); thread candidates are cut to `canSeeThreadCond(me)` before the per-group limit and re-checked per row; output shape unchanged (D1010).
+- **Ask AI:** `loadThreadReadable` for `get_thread`, `search`, `resolveAskRef` and `get_lead`'s threads (every thread linked to the lead). Reply / task / estimate drafting stay on `loadThreadFor` (own). A task card never links another mailbox's thread (D1008, D1011).
+- **Unchanged on purpose:** triage's email feed and the bell (assigned threads open under the new rule), triage's Done / Reassign, background sweeps, meetings (`canSeeMeeting`).
+- **Tests:** `npm run test:thread-visibility` (pure, DB — the SQL rule equals the JS rule on every fixture — and the action-audit pins), chained into test:specs; test:ask's fixtures now separate a teammate's unlinked thread (hidden) from a linked one (readable).
+
+**Remaining (Jeff-gated):**
+- (1) Tell the team: they will now see teammates' threads that are linked to a company, venue, person or record (read-only, from the company page, ⌘K and Ask), and no longer see anything else of anyone's.
+- (2) Try it on production with two accounts: open a teammate's linked thread from a company page (banner, no reply), and a teammate's unlinked thread link (`/inbox?thread=…`) should show nothing.
+
+**Known follow-ups:**
+- A task created from an **unlinked** email and assigned to a teammate links that thread, but the teammate can't open it (it isn't theirs, assigned or linked). Assign the thread too, or link it first — or decide whether a task link should count as sharing.
+- Inbox search (`searchThreads`) stays own-mailbox only; linked teammates' threads are found through ⌘K, not the Inbox search box.
+- `byCustomer` / `visibleByCustomer` and the feed still read the whole comms table (pre-existing).
