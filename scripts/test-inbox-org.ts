@@ -35,7 +35,7 @@ import {
 } from "@/lib/stores/inbox-org";
 import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
-import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
+import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildFilingUserText, candidateLine, customerRecordCandidates, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
 import { buildOrganizeVM, buildReaderOrg, dueLabel, isNoiseRow } from "@/app/(app)/inbox/organize/load";
 import { cleanupProgressText, cleanupSummaryText, courtChipLabel, filedByLabel, ORGANIZE_BASE_HREF, organizeHref, organizeTabOf, suggestionLabel } from "@/app/(app)/inbox/organize/format";
@@ -2007,7 +2007,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
     ok(existsSync(`${DIR}/${f}`), `ui: organize/${f} exists`);
   const page = read("src/app/(app)/inbox/page.tsx");
   ok(page.includes('const isOrganize = viewParam === "organize";') && page.includes("<OrganizeBox") && page.includes("loadOrganize(user, organizeTab"), "ui: /inbox?view=organize renders the Organize box from loadOrganize");
-  ok(page.includes('key: "organize"') && page.includes("count: organizeToFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
+  ok(page.includes('key: "organize"') && page.includes("count: organizeCounts.toFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
   ok(page.includes("view === \"unmatched\" || isMeetings || isOrganize") && page.includes("const isView = !!view || isMeetings || isOrganize;"), "ui: Organize is a view and skips the thread-list query");
   ok(page.includes("explicitThread && visibleTo(explicitThread, me)"), "ui: Organize opens only my own thread in the reader");
   ok(page.includes("org,") && page.includes("buildReaderOrg(sel,"), "ui: the reader VM carries the organization strip");
@@ -2055,7 +2055,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(tr.includes("const [markPromiseDone, setMarkPromiseDone] = useState(false);") && tr.includes("Mark ‘{shortTaskTitle(openPromise.title)}’ done?"), "ui: the composer shows an unticked “Mark ‘…’ done?” while a promise-task is open");
   ok(tr.includes("if (res.ok && markPromiseDone && openPromise)") && tr.includes("await completeThreadTaskAction(openPromise.taskId);"), "ui: a ticked box completes the task via completeThreadTaskAction after a successful send");
   ok(tr.includes("const done = await completeThreadTaskAction(openPromise.taskId);") && tr.includes("if (!done.ok) setPromiseNote("), "polish: a failed “Mark done” shows a note (the reply still went out)");
-  ok(page.includes("<OrganizeBox key={`organize-list-${vm.tab}`}"), "polish: the Organize box is keyed by tab (no confirm / offer / note carry-over)");
+  ok(page.includes("<OrganizeBox\n          key={`organize-list-${vm.tab}`}"), "polish: the Organize box is keyed by tab (no confirm / offer / note carry-over)");
   ok(tr.includes("{vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}"), "ui: the reader shows the organization strip");
   const ro = read(`${DIR}/reader-org.tsx`);
   ok(ro.includes('overrideCourtAction(threadId, "nobody")') && ro.includes('overrideCourtAction(threadId, "me")') && ro.includes("Not on me") && ro.includes("On me"), "ui: Not on me / On me override the court");
@@ -2064,7 +2064,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(ro.includes('"Looks like noise"') && ro.includes("notNoiseAction(threadId)"), "ui: the Looks like noise tag offers Not noise");
   ok(ro.includes('filing.state === "suggested"') && ro.includes("approveFilingAction(threadId)"), "ui: a suggested filing line has Approve");
   const ob = read(`${DIR}/organize-box.tsx`);
-  ok(ob.includes("<CleanupButton cleanup={cleanup.state} />") && ob.includes("cleanup?: { state: CleanupVM | null } | null;"), "ui: the Organize my inbox button renders only when the page passes it (pilot users, Task 7)");
+  ok(ob.includes("<CleanupButton cleanup={cleanup.state} prompt={cleanupPrompt} />") && ob.includes("cleanup?: { state: CleanupVM | null } | null;"), "ui: the Organize my inbox button renders only when the page passes it (pilot users, Task 7)");
   ok(ob.includes("approveAllStrongAction(vm.strongIds)") && ob.includes("Approve {vm.strongIds.length} strong suggestion"), "ui: Approve all strong asks for a confirm that shows the count");
   const cf = read(`${DIR}/change-filing.tsx`);
   ok(cf.includes("searchLinkTargetsAction(query)") && cf.includes("filingRecordsAction(threadId, pickedCustomer || null)") && cf.includes("changeFilingAction(threadId, target)"), "ui: Change… reuses the link search plus the customer's quotes/projects/leads");
@@ -2417,7 +2417,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     const page = read("src/app/(app)/inbox/page.tsx");
     ok(page.includes("const cleanup = assistAll.file ?") && page.includes("cleanup={cleanup}"), "cleanup: the button is passed only for Assist pilot users (feature file)");
     const box = read("src/app/(app)/inbox/organize/organize-box.tsx");
-    ok(box.includes("<CleanupButton cleanup={cleanup.state} />"), "cleanup: Organize my inbox sits in the Organize header");
+    ok(box.includes("<CleanupButton cleanup={cleanup.state} prompt={cleanupPrompt} />"), "cleanup: Organize my inbox sits in the Organize header");
     const btn = read("src/app/(app)/inbox/organize/cleanup-button.tsx");
     ok(btn.includes("await organizeInboxAction()") && btn.includes("if (r.done)") && btn.includes("r.checked === lastChecked") && btn.includes("cleanupProgressText("), "cleanup: the button loops the batch until done (stops when a batch makes no progress)");
   } finally {
@@ -2494,6 +2494,196 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
   ok(valueImports(read("src/lib/inbox-org/rule-list.ts")).length === 0, "client: inbox-org/rule-list.ts is pure (no value imports)");
 }
 
+/* ---------- #345: Organize entry points + placeholder companies ---------- */
+
+/** #345 — the Inbox's Organize entry points (tab row, banner) and the brief link: pure VM + pins. */
+export async function inboxOrgEntryChecks(ok: Ok): Promise<void> {
+  const E = await import("@/app/(app)/inbox/organize/entry");
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  /* the VM: shown under the gate, hidden without it */
+  const inbox = E.organizeEntryVM({ available: true, ai: true, toFile: 3, noise: 7, where: { kind: "inbox" } });
+  ok(
+    !!inbox &&
+      inbox.tabs.map((t) => `${t.label}:${t.count ?? "-"}:${t.active ? "on" : "off"}`).join(" ") === "Inbox:-:on Organize:3:off Noise:7:off",
+    `entry #345: the tab row reads Inbox · Organize (3) · Noise (7), Inbox active (${inbox?.tabs.map((t) => t.label).join(" · ")})`
+  );
+  ok(
+    !!inbox && inbox.tabs[0].href === "/inbox" && inbox.tabs[1].href === "/inbox?view=organize&tab=to-file" && inbox.tabs[2].href === "/inbox?view=organize&tab=noise",
+    "entry #345: Inbox → /inbox, Organize → ?view=organize (To file), Noise → ?view=organize&tab=noise (the real tab param)"
+  );
+  ok(inbox?.banner?.text === "AI has filing suggestions for 3 emails" && inbox.banner.href === "/inbox?view=organize&tab=to-file" && inbox.banner.count === 3, `entry #345: the banner on the plain inbox (${inbox?.banner?.text})`);
+  ok(E.organizeEntryVM({ available: false, ai: true, toFile: 3, noise: 7, where: { kind: "inbox" } }) === null, "entry #345: without the gate (Organize unavailable) neither the tab row nor the banner renders");
+  ok(E.organizeEntryVM({ available: true, ai: true, toFile: 3, noise: 7, where: { kind: "other" } }) === null, "entry #345: no tab row on Sent / Drafts / other views");
+  const inOrg = E.organizeEntryVM({ available: true, ai: true, toFile: 3, noise: 7, where: { kind: "organize", tab: "to-file" } });
+  ok(!!inOrg && inOrg.banner === null && inOrg.tabs[1].active && !inOrg.tabs[0].active, "entry #345: inside Organize the tab row shows (Organize active) and the banner doesn't");
+  const inNoise = E.organizeEntryVM({ available: true, ai: false, toFile: 3, noise: 7, where: { kind: "organize", tab: "noise" } });
+  ok(!!inNoise && inNoise.tabs[2].active && !inNoise.tabs[1].active, "entry #345: on the Noise tab, Noise is active");
+  ok(E.organizeEntryVM({ available: true, ai: false, toFile: 3, noise: 0, where: { kind: "organize", tab: "filed" } })?.tabs[1].active === true, "entry #345: Filed counts as Organize");
+  ok(E.organizeEntryVM({ available: true, ai: true, toFile: 0, noise: 2, where: { kind: "inbox" } })?.banner === null, "entry #345: no banner with nothing to file (the tab row still shows)");
+  ok(E.bannerText(1, false) === "1 email has filing suggestions" && E.bannerText(4, false) === "4 emails have filing suggestions" && E.bannerText(1, true) === "AI has filing suggestions for 1 email", "entry #345: the banner says AI only for pilot users with Inbox organization on");
+  ok(E.bannerShows(3, null) && !E.bannerShows(3, 3) && E.bannerShows(4, 3) && !E.bannerShows(2, 3) && !E.bannerShows(0, null), "entry #345: dismissed for the session — back only when the count grows");
+  ok(E.parseDismissed("5") === 5 && E.parseDismissed(null) === null && E.parseDismissed("x") === null && E.parseDismissed("-1") === null && E.parseDismissed("") === null, "entry #345: an unreadable dismissal counts as never dismissed");
+
+  /* wiring pins */
+  const page = read("src/app/(app)/inbox/page.tsx");
+  ok(
+    page.includes("const organizeEntry = organizeEntryVM({") &&
+      page.includes("available: !inboxOrgDisabled(),") &&
+      page.includes("ai: !!assistAll.file,") &&
+      page.includes('!isView && box === "personal" && folder === "inbox"') &&
+      page.includes("organizeEntry={organizeEntry}"),
+    "entry #345: the Inbox page builds the entry VM (gate = the view's: everyone unless INBOX_ORG_DISABLED; AI wording = pilot + file) and hands it to the shell"
+  );
+  ok(page.includes("organizeEntryCounts(user)") && page.includes("count: organizeCounts.toFile"), "entry #345: one comms scan gives the To file + Noise counts; the sidebar row keeps its To file count");
+  ok(page.includes('cleanupPrompt={str(params.cleanup) === "1" && vm.tab === "to-file"}'), "entry #345: ?cleanup=1 (the brief's link) calls out Organize my inbox");
+  const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
+  ok(
+    shell.includes("top={organizeEntry ? <OrganizeEntryBar vm={organizeEntry} /> : null}") && shell.includes("{organize && organizeEntry ? <OrganizeEntryBar vm={organizeEntry} /> : null}"),
+    "entry #345: the shell renders the bar at the top of the list column — over the thread list and over the Organize box"
+  );
+  ok(shell.includes('{ value: "organize", label: "Organize" }'), "entry #345: the narrow picker keeps its Organize option");
+  ok(read("src/app/(app)/inbox/thread-list.tsx").includes("      {top}\n      {/* command bar"), "entry #345: the thread list puts the bar above the command bar");
+  const bar = read("src/app/(app)/inbox/organize/entry-bar.tsx");
+  ok(bar.startsWith('"use client";') && valueImports(bar).every((p) => p === "react" || p === "next/link" || p === "./entry"), "entry #345: entry-bar.tsx is a client component importing only react, next/link and the pure entry module");
+  ok(/try \{\s*raw = window\.sessionStorage\.getItem\(BANNER_DISMISS_KEY\);\s*\} catch/.test(bar) && /try \{\s*window\.sessionStorage\.setItem\(BANNER_DISMISS_KEY/.test(bar), "entry #345: sessionStorage reads and writes are wrapped in try/catch");
+  ok(bar.includes("dismissedAt !== undefined && bannerShows(") && bar.includes("data-organize-banner") && bar.includes("data-entry-tab"), "entry #345: the banner waits for the stored dismissal (no flash) and is marked for the browser check");
+  const entrySrc = read("src/app/(app)/inbox/organize/entry.ts");
+  const noComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const colors = noComments(bar + entrySrc).match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+  ok(entrySrc.includes("var(--accent)") && bar.includes("var(--accent)") && colors.every((c) => ["#5b616e", "#fff", "#e8eaee", "#000"].includes(c.toLowerCase())), `entry #345: the accent comes from --accent; only neutral greys are literal (${[...new Set(colors)].join(" ")})`);
+  ok(valueImports(entrySrc).every((p) => p === "./format"), "entry #345: entry.ts is pure (imports only format.ts)");
+  const cb = read("src/app/(app)/inbox/organize/cleanup-button.tsx");
+  ok(cb.includes("const callOut = prompt && !pending && !line && !(cleanup?.done);") && !/useEffect\([^)]*go\(/.test(cb) && !cb.includes("autoFocus"), "entry #345: the called-out button never starts the 90-day run by itself");
+}
+
+/** #345 — placeholder companies ("UNKNOWN" …) are never filing targets. */
+export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
+  const { isPlaceholderCompany, withoutPlaceholderCustomer, PLACEHOLDER_COMPANY_RE } = await import("@/lib/inbox-org/placeholder");
+  const { rankLinkTargets } = await import("@/lib/inbox-link-targets");
+  const { isPlaceholderCustomerLabel } = await import("@/lib/gmail/peak-labels");
+  const { buildFilingCandidates } = await import("@/lib/inbox-org/ai-filing");
+
+  /* the helper */
+  const yes = ["UNKNOWN", "unknown", " Unknown ", "UKN", "TBD", "tbd", "N/A", "n/a", "NA", "na", "None", "TEST", "test"];
+  const no = ["", "Unknown Labs", "Test Kitchen HS", "NAU", "TBD Productions", "none of the above", "Lincoln HS", "N//A", "U.N.K."];
+  ok(yes.every(isPlaceholderCompany), `placeholder #345: ${yes.join(" / ")} are placeholders`);
+  ok(no.every((n) => !isPlaceholderCompany(n)) && !isPlaceholderCompany(null) && !isPlaceholderCompany(undefined), `placeholder #345: real names (and blanks) are not (${no.filter(isPlaceholderCompany).join(", ")})`);
+  ok(PLACEHOLDER_COMPANY_RE.source === "^(unknown|ukn|tbd|n\\/?a|none|test)$" && PLACEHOLDER_COMPANY_RE.flags === "i", "placeholder #345: the one rule is /^(unknown|ukn|tbd|n\\/?a|none|test)$/i on the trimmed name");
+  const ph = (id: string) => id === "UNK";
+  const base = { customerId: "UNK", work: null, siteId: "loc1", noise: false, strength: "strong" as "strong" | "weak", reason: "pat is a known contact at UNKNOWN" };
+  const cleared = withoutPlaceholderCustomer(base, ph);
+  ok(cleared.customerId === null && cleared.siteId === undefined && cleared.strength === "weak" && cleared.reason === "No match yet — choose a customer", "placeholder #345: a suggestion under a placeholder reads as 'No match yet' (venue dropped)");
+  const withWork = withoutPlaceholderCustomer({ ...base, work: { type: "quote", id: "Q1" } }, ph);
+  ok(withWork.customerId === null && !!withWork.work && withWork.strength === "strong", "placeholder #345: a work record on a placeholder customer stays (it is real)");
+  const real = { ...base, customerId: "C1" };
+  ok(withoutPlaceholderCustomer(real, ph) === real, "placeholder #345: a real customer's filing is returned untouched");
+
+  /* the Link popup / Change… search (shared with the AI candidates) */
+  const hits = rankLinkTargets("unknown", {
+    companies: [
+      { id: "c-unk", name: "UNKNOWN" },
+      { id: "c-labs", name: "Unknown Labs" },
+    ],
+    sites: [],
+    people: [{ id: "p1", name: "Unknown Person", companyId: "c-unk", emails: [] }],
+  });
+  ok(hits.companies.map((c) => c.id).join(",") === "c-labs" && hits.people.length === 1 && hits.people[0].companyName === "UNKNOWN", "placeholder #345: the company search never offers a placeholder company (a person parked under one is still findable)");
+
+  /* Gmail labels */
+  ok(isPlaceholderCustomerLabel("Peak/Customers/UNKNOWN") && isPlaceholderCustomerLabel("Peak/Customers/TBD") && !isPlaceholderCustomerLabel("Peak/Customers/Lincoln HS") && !isPlaceholderCustomerLabel("Peak/Status/Waiting"), "placeholder #345: Peak/Customers/UNKNOWN is a placeholder label");
+  const sync = readFileSync("src/lib/gmail/label-sync.ts", "utf8");
+  ok(/const add = rawAdd\.filter\(\(n\) => \{\s*\/\/ #345[^\n]*\n\s*if \(isPlaceholderCustomerLabel\(n\)\) return false;/.test(sync), "placeholder #345: the label writer never creates or applies Peak/Customers/<placeholder> (an existing one is left alone — `remove` unchanged)");
+  const interp = readFileSync("src/lib/gmail/label-interpret.ts", "utf8");
+  ok(interp.includes('if (isPlaceholderCustomerLabel("Peak/Customers/" + cmd.name)) continue;'), "placeholder #345: a Peak/Customers/UNKNOWN label applied in Gmail links nothing");
+
+  /* the pipeline, apply and the Organize read (DB) */
+  const db = await getDb();
+  const MO = "TEST345 Mo";
+  const MO_ID = "TEST345-u-mo";
+  const me = { id: MO_ID, name: MO };
+  const ctx = buildOrgContext({ users: [{ id: MO_ID, name: MO, email: "mo.t345@peaksystemsgroup.com", googleEmail: null }] });
+  const UNK = fixtureId(345, "co-unknown");
+  const REAL = fixtureId(345, "co-real");
+  const QUOTE = fixtureId(345, "quote-unk");
+  const T0 = 1_760_100_000_000;
+  let n = 0;
+  const msg = (o: Partial<CommMessage>): CommMessage =>
+    ({ id: `ph${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@ph345.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread>): Promise<string> => {
+    const id = fixtureId(345, "ph-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: MO, unread: true, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@ph345.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg({})], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  try {
+    await saveCompany({ id: UNK, name: "UNKNOWN", type: "other" });
+    await saveCompany({ id: REAL, name: "TEST345 Real School", type: "school" });
+    await createFixture("quotes", { id: QUOTE, name: "Stage drape", customer: "UNKNOWN", customerId: UNK, estNo: 987800, quoteType: "system", status: "sent" });
+
+    const linked = await mk("linked", { customerId: UNK, customer: "UNKNOWN", resolution: "linked" });
+    await organizeThread(linked, { ctx });
+    const tl = await read(linked);
+    ok(tl.filing?.customerId === null && tl.filing.state === "suggested" && tl.filing.reason === "No match yet — choose a customer", `placeholder #345 pipeline: a thread auto-linked to UNKNOWN gets no suggestion under it (${tl.filing?.customerId} · ${tl.filing?.reason})`);
+    ok(tl.customerId === UNK, "placeholder #345 pipeline: the thread's own link and the company record are left alone");
+
+    const guessed = await mk("guessed", { resolution: "suggested", suggestedCustomerId: UNK });
+    await organizeThread(guessed, { ctx });
+    ok((await read(guessed)).filing?.customerId === null, "placeholder #345 pipeline: a domain guess of UNKNOWN is skipped");
+
+    const numbered = await mk("number", { subject: "Re: EST-987800 drape" });
+    await organizeThread(numbered, { ctx });
+    const tn = await read(numbered);
+    ok(tn.filing?.work?.id === QUOTE && tn.filing.customerId === null && tn.filing.source === "number", "placeholder #345 pipeline: a record number keeps its quote but drops the placeholder customer");
+
+    const ruled = buildOrgContext({
+      users: [{ id: MO_ID, name: MO, email: "mo.t345@peaksystemsgroup.com", googleEmail: null }],
+      senderRules: [{ id: "SR-345", scope: "user", userId: MO_ID, match: { email: "pat@ph345.test" }, action: { type: "file", customerId: UNK }, createdBy: MO_ID, createdAt: 1 }],
+    });
+    const ruleT = await mk("rule", {});
+    await organizeThread(ruleT, { ctx: ruled });
+    ok((await read(ruleT)).filing?.source !== "rule" && (await read(ruleT)).filing?.customerId === null, "placeholder #345 pipeline: a sender rule filing under UNKNOWN is read as no rule");
+
+    /* AI candidates */
+    const cand = await buildFilingCandidates(await read(linked), { email: "pat@ph345.test", name: "Pat", body: "Thanks\n\nPat Smith\nUNKNOWN\n555-0100" });
+    ok(!cand.candidates.some((c) => c.id === UNK || c.customerId === UNK) && cand.matchedCustomerId === null, `placeholder #345 ai: the candidate list never offers UNKNOWN (${cand.candidates.map((c) => c.id).join(",") || "none"})`);
+    const cand2 = await buildFilingCandidates({ ...(await read(linked)), customer: "TEST345 Real School" }, null);
+    ok(cand2.candidates.some((c) => c.id === REAL) && !cand2.candidates.some((c) => c.id === UNK), "placeholder #345 ai: a real company named in the mail is still a candidate");
+
+    /* an OLD suggestion under UNKNOWN (stored before #345) stops showing */
+    const old = await mk("old", {});
+    await setOrg(old, {
+      filing: { customerId: UNK, work: null, noise: false, source: "identity", reason: "pat is a known contact at UNKNOWN", strength: "strong", needsReply: false, state: "suggested", at: T0 } as Filing,
+    });
+    const oldT = await read(old);
+    const names = (id: string) => (id === UNK ? "UNKNOWN" : id === REAL ? "TEST345 Real School" : null);
+    const vm = buildOrganizeVM([oldT], { tab: "to-file", now: T0 + 1000, customerName: names });
+    const row = vm.rows[0];
+    ok(vm.counts.toFile === 1 && !!row && row.suggestion === null && !row.canApprove && !row.strong && vm.strongIds.length === 0, `placeholder #345 read: a stored UNKNOWN suggestion shows as nothing suggested — no Approve, not in Approve all strong (${row?.suggestion})`);
+    const rOrg = buildReaderOrg(oldT, { customerName: names, teammateName: () => null, task: null, isAdmin: false });
+    ok(rOrg?.filing?.suggestion === null && rOrg.filing.canApprove === false, "placeholder #345 read: the reader strip doesn't offer it either");
+    const refused = await approveFiling(old, me);
+    ok(!refused.ok && (await read(old)).filing?.state === "suggested" && (await read(old)).customerId === null, "placeholder #345 apply: Approve refuses to file under UNKNOWN");
+    const ch = await changeFiling(old, { customerId: UNK }, me);
+    ok(!ch.ok && (await read(old)).customerId === null, "placeholder #345 apply: Change… to UNKNOWN is refused");
+    await approveAllStrong("all-visible", me);
+    const mine = await Promise.all([guessed, numbered, ruleT, old].map(read));
+    ok((await read(old)).filing?.state === "suggested" && mine.every((t) => t.customerId !== UNK && !(t.filing?.state === "filed" && t.filing.customerId === UNK)), "placeholder #345 apply: Approve all strong never files under UNKNOWN (the old stored suggestion stays suggested, untouched)");
+    const viaWork = await changeFiling(old, { work: { type: "quote", id: QUOTE } }, me);
+    const vw = await read(old);
+    ok(viaWork.ok && vw.link?.id === QUOTE && vw.customerId === null && vw.filing?.customerId === null, "placeholder #345 apply: filing under the quote alone links the quote, never its UNKNOWN customer");
+  } finally {
+    await dropFixtures(345);
+    await db.delete(companies).where(eq(companies.id, UNK));
+    await db.delete(companies).where(eq(companies.id, REAL));
+    invalidateOrgContext();
+  }
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -2524,6 +2714,8 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgApplyChecks(ok);
     await inboxOrgUiChecks(ok);
     await inboxOrgCleanupChecks(ok);
+    await inboxOrgEntryChecks(ok);
+    await inboxOrgPlaceholderChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

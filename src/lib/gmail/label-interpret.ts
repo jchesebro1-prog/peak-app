@@ -21,7 +21,7 @@ import { getConnectionInfo, listCachedLabels } from "./connections";
 import { GMAIL_MODIFY_SCOPE, type MailboxKey, userIdOfKey } from "./config";
 import { linkThread, rememberAddress } from "./linking";
 import { resolveAddressFor } from "@/lib/inbox-identity";
-import { desiredPeakLabels, parsePeakLabel, type PeakCommand } from "./peak-labels";
+import { desiredPeakLabels, isPlaceholderCustomerLabel, parsePeakLabel, type PeakCommand } from "./peak-labels";
 import { ensureLabelId } from "./label-sync";
 
 /** No echo-window constant lives in label-sync.ts (the writer stamps
@@ -172,6 +172,8 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           console.warn("[gmail] ambiguous/unknown assignee, skipping:", cmd.firstName, t.id);
         }
       } else if (cmd.kind === "customer") {
+        // #345 — Peak/Customers/UNKNOWN (a placeholder company) links nothing
+        if (isPlaceholderCustomerLabel("Peak/Customers/" + cmd.name)) continue;
         const c = await findCustomerBySanitizedName(cmd.name);
         if (c) {
           // #341 — a person labelling the thread in their own Gmail is a

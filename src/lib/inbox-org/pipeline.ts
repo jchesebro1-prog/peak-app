@@ -71,6 +71,7 @@ import { noiseByRules } from "./noise";
 import { findEstimateNumbers, findRecordIds, type FoundEstimateNumber } from "./numbers";
 import { matchSenderRule } from "./sender-rules";
 import { isSignOff } from "./signoff";
+import { isPlaceholderCompany } from "./placeholder";
 import type { Court, CourtOwner, Filing, NoiseFlag, SenderRule } from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
@@ -367,6 +368,20 @@ async function nameOf(customerId: string): Promise<string> {
   return (await customerNameFor(customerId).catch(() => "")) || "this customer";
 }
 
+/** #345 — a placeholder company ("UNKNOWN", "TBD" …) is never a filing
+ *  target: every step below skips one (`isPlaceholderCompany`). */
+async function isPlaceholderId(customerId: string | null | undefined): Promise<boolean> {
+  if (!customerId) return false;
+  return isPlaceholderCompany(await customerNameFor(customerId).catch(() => ""));
+}
+
+/** A record-number hit whose customer is a placeholder keeps its record and
+ *  loses the customer (#345). */
+async function withoutPlaceholderHit(hit: NumberHit | null): Promise<NumberHit | null> {
+  if (hit && (await isPlaceholderId(hit.customerId))) return { ...hit, customerId: null };
+  return hit;
+}
+
 type FilingParty = {
   inbound: CommMessage | null;
   /** an internal sender (or the owner) passed along an outside email */
@@ -421,7 +436,7 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   const unresolved: RuleFiling = { customerId: null, work: null, noise: false, source: "identity", strength: "weak", reason: "" };
 
   if (internal) {
-    const hit = await findByNumbers(texts);
+    const hit = await withoutPlaceholderHit(await findByNumbers(texts));
     if (hit) return { filing: { ...hit, noise: false, source: "number", strength: "strong" }, quiet: false, weakOrNone: false };
     return { filing: { ...unresolved, reason: "Internal thread — no customer or record number mentioned" }, quiet: true, weakOrNone: true };
   }
@@ -429,7 +444,8 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   // 1. sender rule
   const rule = senderEmail ? matchSenderRule(ctx.senderRules, { email: senderEmail, userId: owner?.id ?? "" }) : null;
   const ruleWhat = rule ? `${rule.scope === "user" ? "Your" : "Company"} sender rule for ${rule.match.email || "@" + rule.match.domain}` : "";
-  if (rule?.action.type === "file") {
+  // a rule that files under a placeholder company (#345) is read as no rule
+  if (rule?.action.type === "file" && !(await isPlaceholderId(rule.action.customerId))) {
     return {
       filing: { customerId: rule.action.customerId, work: rule.action.work ?? null, noise: false, source: "rule", strength: "strong", reason: ruleWhat },
       quiet: false,
@@ -447,21 +463,24 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   let knownContact: boolean | null = null;
   if (externalForward) {
     const r: Resolution = await resolveForThread(senderEmail).catch(() => ({ kind: "unknown" }) as const);
-    if (r.kind === "linked" && r.via === "contact") {
+    if (r.kind === "linked" && (await isPlaceholderId(r.customerId))) {
+      // #345 — a contact parked under a placeholder company is still a known contact, never a filing target
+      if (r.via === "contact") knownContact = true;
+    } else if (r.kind === "linked" && r.via === "contact") {
       knownContact = true;
       strong = { customerId: r.customerId, reason: `Forwarded from ${senderEmail}, a known contact at ${await nameOf(r.customerId)}` };
     } else if (r.kind === "linked") {
       weak = { customerId: r.customerId, reason: `Forwarded from ${senderEmail} — same domain as ${await nameOf(r.customerId)}` };
     }
-  } else if (t.customerId) {
+  } else if (t.customerId && !(await isPlaceholderId(t.customerId))) {
     const who = t.customer || (await nameOf(t.customerId));
     strong = { customerId: t.customerId, reason: t.resolvedContactId ? `${senderEmail || "The sender"} is a known contact at ${who}` : `Linked to ${who}` };
-  } else if (t.resolution === "suggested" && t.suggestedCustomerId && !t.suggestionDismissed) {
+  } else if (t.resolution === "suggested" && t.suggestedCustomerId && !t.suggestionDismissed && !(await isPlaceholderId(t.suggestedCustomerId))) {
     weak = { customerId: t.suggestedCustomerId, reason: `${senderEmail || "The sender"} — same domain as ${await nameOf(t.suggestedCustomerId)}` };
   }
 
   // 3. numbers (a strong identity takes a number only for its own customer)
-  const hit = await findByNumbers(texts);
+  const hit = await withoutPlaceholderHit(await findByNumbers(texts));
   if (strong) {
     if (hit && hit.customerId === strong.customerId) return { filing: { ...hit, noise: false, source: "number", strength: "strong" }, quiet: false, weakOrNone: false };
     const link = !externalForward && t.link && WORK_TYPES.has(t.link.type) ? (t.link as WorkRef) : null;

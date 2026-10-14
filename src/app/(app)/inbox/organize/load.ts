@@ -14,6 +14,7 @@
  */
 import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
 import { inInbox, isNoiseRow, isStrongRow, isToFileRow, toFileThreads } from "@/lib/inbox-org/apply";
+import { isPlaceholderCompany, withoutPlaceholderCustomer } from "@/lib/inbox-org/placeholder";
 import type { ReaderOrgVM } from "../types";
 import {
   courtChipLabel,
@@ -106,6 +107,10 @@ export function buildOrganizeVM(
 ): OrganizeVM {
   const { tab, now } = opts;
   const baseHref = opts.baseHref ?? ORGANIZE_BASE_HREF;
+  // #345 — an old suggestion under a placeholder company ("UNKNOWN" …) reads
+  // as nothing suggested yet (a work record on it stays)
+  const isPlaceholderId = (id: string) => isPlaceholderCompany(opts.customerName(id));
+  const effective = (t: CommThread): Pick<CommThread, "filing"> => ({ filing: t.filing ? withoutPlaceholderCustomer(t.filing, isPlaceholderId) : t.filing });
   const byUpdated = (a: CommThread, b: CommThread) => (b.updatedAt || 0) - (a.updatedAt || 0);
   const toFile = threads.filter(isToFileRow).sort(byUpdated);
   const noise = threads.filter(isNoiseRow).sort(byUpdated);
@@ -114,7 +119,7 @@ export function buildOrganizeVM(
     .sort((a, b) => (b.filing?.filedAt || 0) - (a.filing?.filedAt || 0));
 
   const rowOf = (t: CommThread): OrganizeRowVM => {
-    const f = t.filing;
+    const f = effective(t).filing;
     const cname = f?.customerId ? opts.customerName(f.customerId) : null;
     const isFiled = f?.state === "filed";
     return {
@@ -128,7 +133,7 @@ export function buildOrganizeVM(
       reason: tab === "noise" ? t.noise?.reason || f?.reason || "" : f?.reason || "",
       strength: f?.strength === "strong" ? "strong" : "weak",
       needsReply: !!f?.needsReply,
-      strong: isStrongRow(t),
+      strong: isStrongRow(effective(t)),
       canApprove: !!f && (f.noise || !!f.customerId || !!f.work),
       archived: !!f?.archivedOnReply && !inInbox(t),
       inInbox: inInbox(t),
@@ -143,7 +148,7 @@ export function buildOrganizeVM(
     tab,
     rows,
     counts: { toFile: toFile.length, noise: noise.length, filed: filed.length },
-    strongIds: tab === "to-file" ? toFile.filter(isStrongRow).map((t) => t.id) : [],
+    strongIds: tab === "to-file" ? toFile.filter((t) => isStrongRow(effective(t))).map((t) => t.id) : [],
     noiseInInboxIds: tab === "noise" ? rows.filter((r) => r.inInbox).map((r) => r.id) : [],
     isAdmin: !!opts.isAdmin,
     baseHref,
@@ -175,7 +180,8 @@ export function buildReaderOrg(
   }
 ): ReaderOrgVM | null {
   const c = t.court;
-  const f = t.filing;
+  // #345 — a suggestion under a placeholder company reads as none
+  const f = t.filing ? withoutPlaceholderCustomer(t.filing, (id) => isPlaceholderCompany(opts.customerName(id))) : t.filing;
   const n = t.noise?.flagged ? t.noise : null;
   const promiseTaskId = c?.promise?.taskId;
   const task = promiseTaskId && opts.task && opts.task.id === promiseTaskId ? opts.task : null;
@@ -228,4 +234,17 @@ export async function loadOrganize(
 /** The sidebar row's count on every Inbox view: my To file rows. */
 export async function organizeToFileCount(me: { name: string }): Promise<number> {
   return (await toFileThreads(me)).length;
+}
+
+/** #345 — the Inbox's Organize entry points (tab row, banner): my To file and
+ *  Noise counts, one comms scan (the same rules as the Organize tabs). */
+export async function organizeEntryCounts(me: { name: string }): Promise<{ toFile: number; noise: number }> {
+  let toFile = 0;
+  let noise = 0;
+  for (const t of await allThreads()) {
+    if (!visibleTo(t, me.name)) continue;
+    if (isToFileRow(t)) toFile++;
+    if (isNoiseRow(t)) noise++;
+  }
+  return { toFile, noise };
 }

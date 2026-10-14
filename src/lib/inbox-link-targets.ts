@@ -5,6 +5,7 @@
  * rankLinkTargets; test:specs covers the ranking.
  */
 import { typeaheadMatches } from "@/lib/search/typeahead-rank";
+import { isPlaceholderCompany } from "@/lib/inbox-org/placeholder";
 
 export type LinkTargetKind = "company" | "venue" | "person";
 
@@ -95,7 +96,8 @@ export function rankLinkTargets(
   if (!only || only === "company") {
     out.companies = typeaheadMatches(
       query,
-      data.companies,
+      // #345 — a placeholder company ("UNKNOWN", "TBD" …) is never offered
+      data.companies.filter((c) => !isPlaceholderCompany(c.name)),
       (qq, c) => allIn(qq, `${c.name} ${c.city || ""}`),
       (qq, c) => nameRank(qq, c.name),
       LINK_TARGET_MAX

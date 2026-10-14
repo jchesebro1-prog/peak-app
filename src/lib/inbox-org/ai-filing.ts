@@ -23,6 +23,7 @@ import type { CommThread } from "@/lib/stores/comms";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { OPEN_STAGES } from "@/lib/stores/leads";
 import { projectsForCustomer } from "@/lib/stores/projects";
+import { isPlaceholderCompany } from "./placeholder";
 import type { Filing, NoiseFlag } from "./types";
 
 /* ---- candidates ------------------------------------------------------------ */
@@ -189,17 +190,23 @@ function domainOf(email: string): string {
   return at > 0 ? e.slice(at + 1) : "";
 }
 
+/** #345 — a placeholder company ("UNKNOWN" …) is never a candidate. */
+async function isPlaceholderId(id: string | null | undefined): Promise<boolean> {
+  return !!id && isPlaceholderCompany(await customerNameFor(id).catch(() => ""));
+}
+
 /** The customer the filing step is anchored on: the thread's linked
  *  customer, else the rules' (weak) guess, else the identity suggestion,
- *  else the one customer claiming the sender's domain. */
+ *  else the one customer claiming the sender's domain — skipping a
+ *  placeholder company at every step (#345). */
 async function likelyCustomer(t: CommThread, senderEmail: string): Promise<string | null> {
-  if (t.customerId) return t.customerId;
-  if (t.filing?.customerId) return t.filing.customerId;
-  if (t.suggestedCustomerId && !t.suggestionDismissed) return t.suggestedCustomerId;
+  if (t.customerId && !(await isPlaceholderId(t.customerId))) return t.customerId;
+  if (t.filing?.customerId && !(await isPlaceholderId(t.filing.customerId))) return t.filing.customerId;
+  if (t.suggestedCustomerId && !t.suggestionDismissed && !(await isPlaceholderId(t.suggestedCustomerId))) return t.suggestedCustomerId;
   const d = domainOf(senderEmail);
   if (!d) return null;
   const owners = [...new Set((await customersForDomain(d).catch(() => [])).map((r) => r.customerId))];
-  return owners.length === 1 ? owners[0] : null;
+  return owners.length === 1 && !(await isPlaceholderId(owners[0])) ? owners[0] : null;
 }
 
 /** Organisation names in the mail: the newest inbound message's signature
@@ -211,7 +218,7 @@ function orgNames(t: CommThread, sender: { email: string; name: string; body: st
     if (sig?.company) out.push(sig.company);
   }
   if (t.customer) out.push(t.customer);
-  return [...new Set(out.map((s) => s.trim()).filter((s) => s.length >= 2))].slice(0, 3);
+  return [...new Set(out.map((s) => s.trim()).filter((s) => s.length >= 2 && !isPlaceholderCompany(s)))].slice(0, 3);
 }
 
 /** The customer a thread's filing is anchored on (see `likelyCustomer`) —
@@ -295,7 +302,10 @@ export async function buildFilingCandidates(
   }
   const names = orgNames(t, sender);
   if (names.length) {
-    cache.companies ??= allCompanies().then((rows) => rows.map((c) => ({ id: c.id, name: c.name, city: c.city, state: c.state })));
+    // #345 — placeholder companies never enter the list (rankLinkTargets drops them too)
+    cache.companies ??= allCompanies().then((rows) =>
+      rows.filter((c) => !isPlaceholderCompany(c.name)).map((c) => ({ id: c.id, name: c.name, city: c.city, state: c.state }))
+    );
     const companies = await cache.companies.catch(() => [] as CompanyCandidate[]);
     let n = 0;
     for (const name of names) {

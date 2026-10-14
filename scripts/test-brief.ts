@@ -973,6 +973,35 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
 }
 
 /** Task 4 — the Home card VM, the reader's stored pre-draft, the compose prefill, and source pins. Pure (no DB writes). */
+/** #345 — the brief's Organize line is one clear action, and "Organize my inbox" is offered
+ *  while the 90-day cleanup was never run or isn't finished (pilot + Inbox organization). */
+async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
+  const { briefCardVM, ORGANIZE_CLEANUP_HREF } = await import("@/lib/brief/card-vm");
+  const base = { brief: BRIEF, stale: null, transient: false, rows: {}, threads: {}, quotes: {} } as const;
+  const one = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 1, strong: 0, noise: 0 } } });
+  ok(one.organize?.label === "1 email to file" && one.organize.href === "/inbox?view=organize", `brief #345: one email reads "1 email to file", no noise part (${one.organize?.label})`);
+  const noiseOnly = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 4 } } });
+  ok(noiseOnly.organize?.label === "4 noise", `brief #345: noise only (${noiseOnly.organize?.label})`);
+  ok(briefCardVM(base).organizeCleanup === null, "brief #345: no Organize my inbox offer without the cleanup state (not pilot + Inbox organization)");
+  const never = briefCardVM({ ...base, organizeEntry: { available: true, cleanup: "never" } });
+  ok(
+    never.organizeCleanup?.label === "Organize my inbox" && never.organizeCleanup.href === ORGANIZE_CLEANUP_HREF && ORGANIZE_CLEANUP_HREF === "/inbox?view=organize&tab=to-file&cleanup=1",
+    `brief #345: never run → "Organize my inbox" links to Organize's To file with the button called out (${never.organizeCleanup?.href})`
+  );
+  ok(briefCardVM({ ...base, organizeEntry: { available: true, cleanup: "unfinished" } }).organizeCleanup?.label === "Finish organizing my inbox", "brief #345: an unfinished run offers to finish it");
+  ok(briefCardVM({ ...base, organizeEntry: { available: true, cleanup: "done" } }).organizeCleanup === null, "brief #345: a finished run offers nothing");
+  const off = briefCardVM({ ...base, organizeEntry: { available: false, cleanup: "never" } });
+  ok(off.organize === null && off.organizeCleanup === null, "brief #345: with Organize unavailable (INBOX_ORG_DISABLED) neither the line nor the offer shows");
+  const nothing = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, organizeEntry: { available: true, cleanup: "never" } });
+  ok(nothing.organize === null && nothing.organizeCleanup !== null, "brief #345: the cleanup offer shows even when nothing is waiting to be filed");
+  const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
+  ok(view.includes("data-brief-organize ") && view.includes("{vm.organize.label} —") && view.includes("Review") && view.includes("data-brief-organize-cleanup") && view.includes("vm.organizeCleanup.href"), "brief #345: the card prints 'N emails to file · M noise — Review' and the Organize my inbox link");
+  const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
+  ok(card.includes("organizeAvailable && flags.file ? getCleanupState(user.id)") && card.includes("organizeEntry: { available: organizeAvailable, cleanup }") && card.includes("!inboxOrgDisabled()"), "brief #345: the card reads the cleanup state only for pilot + Inbox organization, and Organize's availability from the kill switch");
+  const entry = readFileSync("src/app/(app)/inbox/organize/entry.ts", "utf8");
+  ok(entry.includes('export const ORGANIZE_CLEANUP_HREF = `${ORGANIZE_TO_FILE_HREF}&cleanup=1`;'), "brief #345: the Inbox side builds the same cleanup link");
+}
+
 export async function briefCardChecks(ok: Ok): Promise<void> {
   const { briefCardVM, nudgeComposeHref, ORGANIZE_HREF } = await import("@/lib/brief/card-vm");
   const { nudgePrefill, prefillRecipient, COMPOSE_BODY_MAX, COMPOSE_CONTACT_MAX, COMPOSE_SUBJECT_MAX } = await import("@/lib/inbox-compose-prefill");
@@ -1019,7 +1048,8 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(sugVM({ L1: { readyHref: "/estimator?suggestion=ES-abc&lead=L1" } })[2].leadSuggest?.readyHref === "/estimator?suggestion=ES-abc&lead=L1", "brief card: a lead with a suggestion offers 'Suggestion ready → Open'");
   ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: {}, threads: {}, quotes: {}, leads: { L9: { readyHref: null } } }).doFirst[0].leadSuggest === null, "brief card: a lead with no snapshot row gets no suggest action either");
   ok(gone.href === null && gone.title === "An item on your list" && gone.why === "", "brief card: a key missing from the snapshot shows no link and never the raw key");
-  ok(vm.organize?.label === "5 to file (2 strong) · 3 noise" && vm.organize.href === ORGANIZE_HREF && ORGANIZE_HREF === "/inbox?view=organize", `brief card: Inbox organization line → Review (${vm.organize?.label})`);
+  ok(vm.organize?.label === "5 emails to file · 3 noise" && vm.organize.href === ORGANIZE_HREF && ORGANIZE_HREF === "/inbox?view=organize", `brief card: Inbox organization line reads "N emails to file · M noise" → Review /inbox?view=organize (#345) (${vm.organize?.label})`);
+  await briefOrganizeEntryChecks(ok);
   ok(briefCardVM({ brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} }).organize === null, "brief card: Inbox organization hidden when every count is zero");
   ok(vm.today === "2 visits (first at 9:30 AM) · 1 h 10 min driving · 3 tasks on today’s plan" && vm.approvals === "1 quote waiting on your approval", `brief card: Today line (${vm.today})`);
   ok(vm.promises.length === 1 && vm.promises[0].title === "Send drawings" && vm.promises[0].dueLabel === null, "brief card: new tasks from promises (title · due)");
@@ -1028,7 +1058,7 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(qq.nudgeHref === "/inbox?nudge=Q-1" && nudgeComposeHref("Q 1/x") === "/inbox?nudge=Q%201%2Fx", `brief card: Send nudge links to /inbox?nudge=<quoteId> — only the id travels (${qq.nudgeHref})`);
   const bare = briefCardVM({ brief: BRIEF, stale: null, transient: false, rows: {}, threads: {}, quotes: {} });
   ok(bare.quiet[0].nudgeHref === null && bare.quiet[0].note === null && bare.quiet[0].openHref === "/estimator?id=Q-1", "brief card: no ready nudge → no Send nudge; Open estimate still links");
-  ok(vm.since === null && vm.counts.includes("Inbox: 5 to file (2 strong) · 3 noise") && vm.counts.some((c) => c.startsWith("Today: 2 visits")) && vm.counts.includes("1 sent quote has gone quiet") && vm.counts.includes("1 new task from a promise"), `brief card: big-text counts (${vm.counts.join(" | ")})`);
+  ok(vm.since === null && vm.counts.includes("Inbox: 5 emails to file · 3 noise") && vm.counts.some((c) => c.startsWith("Today: 2 visits")) && vm.counts.includes("1 sent quote has gone quiet") && vm.counts.includes("1 new task from a promise"), `brief card: big-text counts (${vm.counts.join(" | ")})`);
   ok(vm.speech.includes("First, Reply to Pat at North HS. Pat has waited 2 days.") && !vm.speech.includes("task:gone") && !vm.speech.includes("email:T1"), "brief card: Listen reads the row titles, never a raw key");
   const pm = briefCardVM({ brief: { ...BRIEF, slot: "midday", since: { done: 3, open: 2, new: 1 }, builtBy: "rebuild", error: "Assist failed — the brief was built from the counts." }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} });
   ok(pm.title === "Afternoon brief · 1:45" && pm.since === "Since this morning: 3 done · 2 still open · 1 new" && pm.builtLabel.startsWith("rebuilt ") && pm.notes.includes("Assist failed — the brief was built from the counts."), "brief card: afternoon adds the since line; a rebuilt brief and its error show");
@@ -1131,7 +1161,7 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   const leadCue = view.slice(cueAt, cueAt + 1200);
   ok(cueAt > 0 && /<SuggestEstimate\s+source=\{\{ kind: "lead", id: d\.leadSuggest\.leadId \}\}\s+readyHref=\{d\.leadSuggest\.readyHref\}/.test(leadCue) && leadCue.indexOf("d.leadHref && (") > leadCue.indexOf("<SuggestEstimate"), "brief pins: the lead cue is Suggest estimate (startSuggestion via SuggestEstimate) when on, else the old Open lead link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
-  ok(/flags\.estimate && leadIds\.size \? suggestionReadyHrefs\("lead", \[\.\.\.leadIds\]\)/.test(card) && /quotes: quoteInfo, leads \}\)/.test(card), "brief pins: the server card looks up each Do-these-first lead's suggestion only with Suggest estimate on (pilot + estimate)");
+  ok(/flags\.estimate && leadIds\.size \? suggestionReadyHrefs\("lead", \[\.\.\.leadIds\]\)/.test(card) && /quotes: quoteInfo,\s*leads,/.test(card), "brief pins: the server card looks up each Do-these-first lead's suggestion only with Suggest estimate on (pilot + estimate)");
   ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { id: user.id, name: user.name })") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
   const cardFn = card.slice(card.indexOf("export default async function BriefCard"), card.indexOf("async function loadCardVM"));
   ok(/try \{\s*vm = await loadCardVM\(user, settings\);\s*\} catch/.test(cardFn) && cardFn.includes("Your brief couldn’t load"), "brief pins: everything after the gate (load, store reads, VM) is inside one try — the card never breaks Home");

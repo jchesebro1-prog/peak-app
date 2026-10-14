@@ -9,7 +9,7 @@ import type { CommThread } from "@/lib/stores/comms";
 import { GMAIL_MODIFY_SCOPE, gmailEnabled } from "./config";
 import { createLabel, listLabels, modifyThread } from "./api";
 import { getConnectionInfo, listCachedLabels, replaceLabels } from "./connections";
-import { currentPeakLabelNames, desiredPeakLabels, diffLabels, PEAK_PREFIX } from "./peak-labels";
+import { currentPeakLabelNames, desiredPeakLabels, diffLabels, isPlaceholderCustomerLabel, PEAK_PREFIX } from "./peak-labels";
 
 /** Gmail rejects a label name longer than this — skip (and log) rather than
  *  fail the whole sync over one oversized name (e.g. a very long customer
@@ -59,6 +59,8 @@ export async function syncPeakLabels(threadId: string): Promise<void> {
     const currentNames = currentPeakLabelNames(t.messages || [], idToName);
     const { add: rawAdd, remove } = diffLabels(desiredPeakLabels(t), currentNames);
     const add = rawAdd.filter((n) => {
+      // #345 — never create or apply Peak/Customers/UNKNOWN (a placeholder company)
+      if (isPlaceholderCustomerLabel(n)) return false;
       if (n.length <= MAX_LABEL_NAME_LENGTH) return true;
       console.error("[gmail] label name exceeds Gmail's limit, skipping:", n);
       return false;

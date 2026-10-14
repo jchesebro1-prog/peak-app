@@ -3,6 +3,7 @@
  * Everything under Peak/ is ours; nothing else is ever read or written.
  */
 import type { CommThread } from "@/lib/stores/comms";
+import { isPlaceholderCompany } from "@/lib/inbox-org/placeholder";
 
 export const PEAK_PREFIX = "Peak/";
 const STATUS_LABEL: Record<string, string> = {
@@ -39,6 +40,14 @@ export function parsePeakLabel(name: string): PeakCommand | null {
   if (folder === "Assign") return { kind: "assign", firstName: leaf };
   if (WORK_FOLDER[folder]) return { kind: "work", type: WORK_FOLDER[folder], id: leaf };
   return null;
+}
+
+/** #345 — `Peak/Customers/<placeholder>` ("UNKNOWN", "TBD" …): the label
+ *  writer never creates or applies one, and a person applying one in Gmail
+ *  links nothing. An existing one is left where it is. */
+export function isPlaceholderCustomerLabel(name: string): boolean {
+  const c = parsePeakLabel(name);
+  return c?.kind === "customer" && isPlaceholderCompany(c.name);
 }
 
 export function labelForStatus(status: string): string | null {
