@@ -24,7 +24,8 @@ import {
   CONDITION_STEPS, conditionLabel, conditionFromText, parseMonthYear, consoleLocationFrom, travelTimeText, distanceText, listSlug,
 } from "../src/lib/field-lists";
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
-import { sanitizeSurveyDisciplineGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
+import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
+import { cleanPlainText } from "../src/lib/estimate-output/fields";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -476,9 +477,45 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   {
     const san = sanitizeSurveyDisciplineGoals({ rigging: { goals: [" Safer rail ", "", "x".repeat(400), ...Array(30).fill("g")] }, av: { goals: ["  "] } }) as Record<string, Record<string, unknown>>;
     const list = san.rigging.goals as string[];
-    ok(Array.isArray(list) && list.length === 20 && list[0] === "Safer rail" && list[1].length === 300 && !("goals" in san.av),
-      "#344 B2: the save sanitizer keeps a goals list (≤ 20 × 300, blanks dropped)");
+    ok(Array.isArray(list) && list[0] === "Safer rail" && list[1].length === 400 && list.join("\n").length <= 1000 && !("goals" in san.av),
+      "#344 B2: the save sanitizer keeps a goals list (blanks dropped; joined text within 1,000)");
     ok(goalsFromSurvey(gl).rigging === "Safer rail\nFaster changeovers", "#344 B2: a migrated goals list still reads as text for the Estimator");
+
+    /* Fix 1: R1 — a save never shortens anything an old goals string (≤ 1,000 chars) could hold */
+    const savedGoals = (goals: string) => {
+      const first = mm({ disciplines: { rigging: { goals } } });
+      const before = goalsFromSurvey(first).rigging;
+      const saved = withSanitizedSurveyGoals({ disciplines: JSON.parse(JSON.stringify(first.disciplines)) });
+      const again = mm({ disciplines: saved.disciplines } as MigratableSurvey);
+      return { before, after: goalsFromSurvey(again).rigging };
+    };
+    const one = "w".repeat(651);
+    const r651 = savedGoals(one);
+    ok(r651.before === one && r651.after === one, "#344 B2 fix: a 651-char one-line goal survives migrate → save sanitize → migrate unchanged");
+    const thirty = Array.from({ length: 30 }, (_, i) => `Goal ${i + 1}`).join("\n");
+    const r30 = savedGoals(thirty);
+    ok(r30.after === thirty && r30.after?.split("\n").length === 30, "#344 B2 fix: a 30-line goal keeps all 30 lines through a save");
+    const big = "y".repeat(1500);
+    ok(savedGoals(big).after === cleanPlainText(big, 1000), "#344 B2 fix: a 1,500-char goal is cut exactly as before (the old 1,000 cap)");
+  }
+
+  /* Fix 1b: an unmappable track operation / flame-test date survives the rep picking a new value (write-once …Old keys) */
+  {
+    const fx = mm({ disciplines: { curtain: { trackOperation: "Both sides", lastFlameTest: "a while ago" } } });
+    const c = fx.disciplines?.curtain as Record<string, unknown>;
+    ok(c.trackOperationOld === "Both sides" && hasNote(fx, "dCurtain", "Track operation (before #344)", "Both sides"),
+      "#344 B2 fix: an unmappable track operation moves to trackOperationOld and notes");
+    ok(c.lastFlameTestOld === "a while ago" && hasNote(fx, "dCurtain", "Last flame test (before #344)", "a while ago"),
+      "#344 B2 fix: an unparseable flame-test date moves to lastFlameTestOld and notes");
+    const picked = JSON.parse(JSON.stringify(fx)) as MigratableSurvey;
+    (picked.disciplines!.curtain as Record<string, unknown>).trackOperation = "SL";
+    (picked.disciplines!.curtain as Record<string, unknown>).lastFlameTest = "2024-03";
+    const again = mm(picked);
+    const c2x = again.disciplines?.curtain as Record<string, unknown>;
+    ok(c2x.trackOperation === "SL" && c2x.lastFlameTest === "2024-03" && c2x.trackOperationOld === "Both sides" && c2x.lastFlameTestOld === "a while ago" &&
+       hasNote(again, "dCurtain", "Track operation (before #344)", "Both sides") && hasNote(again, "dCurtain", "Last flame test (before #344)", "a while ago"),
+      "#344 B2 fix: after picking SL / a month the old text and its notes are still there");
+    ok(JSON.stringify(mm(again)) === JSON.stringify(again) && JSON.stringify(mm(fx)) === JSON.stringify(fx), "#344 B2 fix: the …Old migration is idempotent");
   }
 
   /* idempotency over everything above */

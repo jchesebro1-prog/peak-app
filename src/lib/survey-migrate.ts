@@ -286,11 +286,15 @@ export function stepCurtain(s: MigratableSurvey): void {
     } else note(label, v);
   }
 
+  /* Unmappable text moves once to `…Old` (write-once) so the note survives the rep picking a new value. */
   const op = strOf(c.trackOperation);
   if (op) {
     if (SL_SR.test(op)) c.trackOperation = op.toUpperCase();
-    else note("Track operation", op);
+    else {
+      if (blankStr(c.trackOperationOld)) c.trackOperationOld = op;
+    }
   }
+  if (!blankStr(c.trackOperationOld)) note("Track operation", c.trackOperationOld);
   const audOp = strOf(c.operation);
   if (audOp) {
     if (SL_SR.test(audOp) && !strOf(c.trackOperation)) c.trackOperation = audOp.toUpperCase();
@@ -300,8 +304,11 @@ export function stepCurtain(s: MigratableSurvey): void {
   if (flame && !/^\d{4}-\d{2}$/.test(flame)) {
     const parsed = parseMonthYear(flame);
     if (parsed) c.lastFlameTest = parsed;
-    else note("Last flame test", flame);
+    else {
+      if (blankStr(c.lastFlameTestOld)) c.lastFlameTestOld = flame;
+    }
   }
+  if (!blankStr(c.lastFlameTestOld)) note("Last flame test", c.lastFlameTestOld);
 }
 
 /** B4 lighting: removed fields → Older notes; a free-text console location → Booth / Stage / Other. Extra words are

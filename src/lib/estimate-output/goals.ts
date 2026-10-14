@@ -8,11 +8,21 @@ import { CLIENT_GOALS_MAX, DISCIPLINES, DISCIPLINE_LABEL, cleanPlainText, effect
 
 export type DisciplineGoals = Partial<Record<ScopeDiscipline, string>>;
 
-/** #344: a survey goal list — at most 20 goals of ≤ 300 characters, blanks dropped. */
-const GOAL_LINE_MAX = 300;
-const GOAL_LINES_MAX = 20;
+/** #344: a survey goal list. R1 — saving must never shorten anything an old goals string (≤ CLIENT_GOALS_MAX) could
+ *  hold: each line is cleaned to CLIENT_GOALS_MAX, blanks dropped, and lines are kept while the joined text
+ *  (lines joined with "\n") stays within CLIENT_GOALS_MAX. The editor's own per-goal / count limits are input limits. */
 function cleanGoalList(v: unknown[]): string[] {
-  return v.map((x) => cleanPlainText(x, GOAL_LINE_MAX)).filter(Boolean).slice(0, GOAL_LINES_MAX);
+  const out: string[] = [];
+  let len = 0;
+  for (const x of v) {
+    const line = cleanPlainText(x, CLIENT_GOALS_MAX);
+    if (!line) continue;
+    const next = len + (out.length ? 1 : 0) + line.length;
+    if (next > CLIENT_GOALS_MAX) break;
+    out.push(line);
+    len = next;
+  }
+  return out;
 }
 
 /** R4: each discipline's `goals` cleaned (trimmed, ≤ 1,000); a blank or
@@ -57,7 +67,7 @@ export function goalsFromSurvey(s: { disciplines?: unknown } | null | undefined)
   for (const k of DISCIPLINES) {
     const branch = d[k];
     const raw = branch && typeof branch === "object" ? (branch as Record<string, unknown>).goals : undefined;
-    const text = Array.isArray(raw) ? raw.map((x) => cleanPlainText(x, CLIENT_GOALS_MAX)).filter(Boolean).join("\n") : raw;
+    const text = Array.isArray(raw) ? cleanGoalList(raw).join("\n") : raw;
     const g = cleanPlainText(text, CLIENT_GOALS_MAX);
     if (g) out[k] = g;
   }
