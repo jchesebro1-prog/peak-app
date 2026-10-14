@@ -100,6 +100,9 @@ export type AppSettingsData = {
    *  resolveDocumentCategories in lib/document-categories returns the seed
    *  when absent. Edited in Settings → Admin → Document categories. */
   documentCategories?: import("@/lib/document-categories").DocumentCategory[];
+  /** #342 — Venue Assessments Final thoughts: internal tags. FULL REPLACEMENT on save; resolveSurveyTags in
+   *  lib/survey-tags returns the starter list when absent. Edited in Settings → Field. */
+  surveyInternalTags?: import("@/lib/survey-tags").SurveyTag[];
   /** #216 — Settings → Venue types. FULL REPLACEMENT list; resolved by
    *  venueTypesFrom (lib/venue-types) — absent = the seed (5 built-ins +
    *  Gym Stage). sites.venue_kind stores a type key. */

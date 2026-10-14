@@ -8,6 +8,7 @@ import {
 import { migrateSurvey, addLegacyNote, type MigratableSurvey } from "../src/lib/survey-migrate";
 import { tier1Items, tier1Complete, DISCIPLINE_GROUPS, presentOptionsFor } from "../src/lib/stores/survey-intake";
 import { BEAM_FIELDS } from "../src/lib/stores/surveys";
+import { STARTER_SURVEY_TAGS, resolveSurveyTags, mergeSurveyTags, activeSurveyTags, surveyTagLabel } from "../src/lib/survey-tags";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -106,6 +107,28 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(tier1Complete({ ...base, scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } }), "#342 A2: answering the rigging system completes Tier 1");
   ok(tier1Items(base).find((i) => i.key === "stageWidth")?.section === "tier1" && tier1Items(base).find((i) => i.key === "contact")?.section === "cust",
     "#342 A2: stage W/D are answered on the card; contact jumps to Customer & venue");
+
+  /* ---- Task 3: internal tags ---- */
+  ok(STARTER_SURVEY_TAGS.map((t) => t.label).join("|") ===
+    "Tight timeline|Price-sensitive|Strong champion|Competitor involved|Budget not confirmed|Decision-maker not met|Active venue (work around events)|Volunteer install crew available|Historic / preservation constraints",
+    "#342 A5: the nine starter tags (Jeff, Q6)");
+  ok(STARTER_SURVEY_TAGS.every((t) => /^tg_[a-z0-9_]+$/.test(t.id)) && new Set(STARTER_SURVEY_TAGS.map((t) => t.id)).size === 9, "#342 A5: starter ids are tg_ slugs, unique");
+  ok(resolveSurveyTags(undefined).length === 9 && resolveSurveyTags([]).length === 9, "#342 A5: absent / empty reads as the starter list");
+  ok(resolveSurveyTags([{ id: "tg_a", label: " A " }, { id: "bad id", label: "B" }, { id: "tg_a", label: "dup" }, { id: "tg_c", label: "" }]).map((t) => t.id + ":" + t.label).join() === "tg_a:A",
+    "#342 A5: resolve drops bad ids, duplicates and blank labels");
+  const st = resolveSurveyTags(undefined);
+  const r1 = mergeSurveyTags(st, [{ id: "tg_tight_timeline", label: "Very tight timeline" }, { label: "Board approval needed" }]);
+  ok(r1.ok && r1.tags[0].label === "Very tight timeline" && r1.tags[1].id === "tg_board_approval_needed" && !r1.tags[1].retired,
+    "#342 A5: rename keeps the id; a new row mints a tg_ id");
+  ok(r1.ok && r1.tags.filter((t) => t.retired).length === 8, "#342 A5: rows dropped from the editor are kept, retired (stored surveys keep their label)");
+  ok(r1.ok && activeSurveyTags(r1.tags).length === 2 && surveyTagLabel(r1.tags, "tg_price_sensitive") === "Price-sensitive" && surveyTagLabel(r1.tags, "tg_gone") === "tg_gone",
+    "#342 A5: active filter and labels (unknown id shows raw)");
+  const r2 = mergeSurveyTags(st, [{ label: "X" }, { label: "x" }]);
+  ok(!r2.ok && /Two tags/.test(r2.error), "#342 A5: duplicate active labels are refused");
+  const r3 = mergeSurveyTags(st, [{ id: "tg_nope", label: "Y" }]);
+  ok(!r3.ok && /Unknown tag/.test(r3.error), "#342 A5: an unknown id is refused");
+  const r4 = mergeSurveyTags(st, [{ label: "" }]);
+  ok(!r4.ok, "#342 A5: a blank label is refused");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

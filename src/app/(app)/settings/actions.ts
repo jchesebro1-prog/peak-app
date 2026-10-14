@@ -40,6 +40,7 @@ import {
   resolveDocumentCategories,
   type DocumentCategoryInput,
 } from "@/lib/document-categories";
+import { mergeSurveyTags, resolveSurveyTags, type SurveyTagInput } from "@/lib/survey-tags";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
 import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
@@ -910,6 +911,22 @@ export async function saveDocumentCategoriesAction(
   const merged = mergeDocumentCategories(stored, input);
   if (!merged.ok) return merged;
   await setSettings({ documentCategories: merged.categories });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/* ---- Venue Assessments internal tags (#342) ---- */
+
+/** Whole-list save of Settings → Field → Final thoughts tags. Strict read: a failed read must never merge onto the
+ *  starter list and silently drop custom tags. */
+export async function saveSurveyTagsAction(
+  input: SurveyTagInput[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const stored = resolveSurveyTags((await getSettingsStrict()).surveyInternalTags);
+  const merged = mergeSurveyTags(stored, input);
+  if (!merged.ok) return merged;
+  await setSettings({ surveyInternalTags: merged.tags });
   revalidatePath("/", "layout");
   return { ok: true };
 }
