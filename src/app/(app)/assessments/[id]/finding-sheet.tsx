@@ -6,11 +6,11 @@
    notification, the lockout state and a photo — the same immediateProblems rules the server enforces are shown live
    and keep Save disabled. Saving goes through the editor (saveThroughOutbox), so it works offline: an offline finding
    shows its pending printed id ("MPSD-LIN-RIG-…") until the server numbers it. */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import type { AssessmentDef, Category, Rating } from "@/lib/assessments/defs/types";
 import { CATEGORY_ROUTING, pendingPrintedLabel, type Finding } from "@/lib/assessments/findings-model";
-import { findingSheetProblems, routingHref, stampNow, type FindingVM } from "@/lib/assessments/editor-model";
+import { findingSheetProblems, parseMoney, routingHref, stampNow, type FindingVM } from "@/lib/assessments/editor-model";
 import type { PhotoRef } from "@/lib/assessments/photos";
 import { PhotoButton, PhotoThumbs } from "./photo-button";
 
@@ -106,13 +106,30 @@ export interface FindingSheetProps {
   onSave: (f: FindingVM) => Promise<string | null>;
   /** takes a photo into the assessment, linked to this finding; resolves to its id (null when refused) */
   onTakePhoto: (f: File, findingKey: string) => Promise<string | null>;
+  /** a NEW finding's sheet was closed without saving: release the photos taken in it (they stay on the assessment) */
+  onAbandonNew?: (findingKey: string) => void;
   onClose: () => void;
 }
 
-export default function FindingSheet({ initial, isNew, def, photos, assessmentId, localUrls, codes, venueLocId, disabled, onSave, onTakePhoto, onClose }: FindingSheetProps) {
+export default function FindingSheet({ initial, isNew, def, photos, assessmentId, localUrls, codes, venueLocId, disabled, onSave, onTakePhoto, onAbandonNew, onClose: closeSheet }: FindingSheetProps) {
   const [f, setF] = useState<FindingVM>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The audit estimate keeps exactly what is typed (so "12." and "1,2" aren't mangled); it is parsed on blur and on save.
+  const [estText, setEstText] = useState(initial.auditRef?.estimate === undefined ? "" : String(initial.auditRef.estimate));
+  const [estTouched, setEstTouched] = useState(false);
+  const estBad = !parseMoney(estText).ok;
+  const saved = useRef(false);
+  const onClose = () => {
+    if (isNew && !saved.current) onAbandonNew?.(initial.key);
+    closeSheet();
+  };
+  const withEstimate = (x: FindingVM, raw: string): FindingVM => {
+    const m = parseMoney(raw);
+    if (!m.ok) return x;
+    if (m.value === undefined && !x.auditRef) return x;
+    return { ...x, auditRef: { item: x.auditRef?.item ?? "", ...(m.value !== undefined ? { estimate: m.value } : {}) } };
+  };
   const set = (patch: Partial<FindingVM>) => setF((x) => ({ ...x, ...patch }));
   const setImm = (patch: Partial<NonNullable<FindingVM["immediate"]>>) => setF((x) => ({ ...x, immediate: { ...(x.immediate ?? {}), ...patch } }));
   const problems = findingSheetProblems(f);
@@ -125,12 +142,13 @@ export default function FindingSheet({ initial, isNew, def, photos, assessmentId
 
   const save = async () => {
     if (problems.length || busy) return;
+    if (estBad) { setEstTouched(true); return; }
     setBusy(true);
     setError(null);
-    const err = await onSave(f);
+    const err = await onSave(withEstimate(f, estText));
     setBusy(false);
     if (err) setError(err);
-    else onClose();
+    else { saved.current = true; closeSheet(); }
   };
 
   return (
@@ -265,13 +283,16 @@ export default function FindingSheet({ initial, isNew, def, photos, assessmentId
             <input
               className="pk-input"
               inputMode="decimal"
-              value={f.auditRef?.estimate ?? ""}
+              value={estText}
               disabled={disabled}
-              onChange={(e) => {
-                const n = e.target.value.trim() === "" ? undefined : Number(e.target.value);
-                set({ auditRef: { item: f.auditRef?.item ?? "", ...(n !== undefined && Number.isFinite(n) ? { estimate: n } : {}) } });
+              aria-invalid={estTouched && estBad}
+              onChange={(e) => setEstText(e.target.value)}
+              onBlur={() => {
+                setEstTouched(true);
+                if (!estBad) setF((x) => withEstimate(x, estText));
               }}
             />
+            {estTouched && estBad && <div className="as-mono-sm" style={{ color: "#8c3b26", marginTop: 3 }} role="alert">Enter a dollar amount, like 4500 or 1,250.50.</div>}
           </label>
         </div>
 
@@ -284,7 +305,7 @@ export default function FindingSheet({ initial, isNew, def, photos, assessmentId
 
         {!disabled && (
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-            <button type="button" className="pk-btn-accent" disabled={problems.length > 0 || busy} onClick={() => void save()}>{busy ? "Saving…" : isNew ? "Create finding" : "Save"}</button>
+            <button type="button" className="pk-btn-accent" disabled={problems.length > 0 || estBad || busy} onClick={() => void save()}>{busy ? "Saving…" : isNew ? "Create finding" : "Save"}</button>
             <button type="button" className="pk-btn-outline" onClick={onClose}>Cancel</button>
           </div>
         )}

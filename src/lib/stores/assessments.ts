@@ -324,6 +324,8 @@ function mergePhotos(stored: PhotoRef[], raw: unknown, assessmentId: string, use
     const next: PhotoRef = cur
       ? { ...cur, ...meta }
       : { id, takenAt: isEpoch(x.takenAt) ? Math.min(x.takenAt, now + CLOCK_SKEW_MS) : now, by: userId, ...meta };
+    // A cancelled new finding releases its photos: findingKey null clears the link (they stay on the assessment).
+    if (cur && x.findingKey === null) delete next.findingKey;
     if (blobPath) { inlineTotal -= next.inline?.length ?? 0; next.blobPath = blobPath; delete next.inline; delete next.pending; }
     else if (inline && !next.blobPath) {
       const after = inlineTotal - (next.inline?.length ?? 0) + inline.length;
@@ -628,11 +630,15 @@ export async function clearSyncRejects(id: string, keys: string[], user: { id: s
 /** Prompt ids (evaluate's `rule:<id>` / `flag:<key>`) already turned into a live finding on this assessment. */
 async function resolvedPrompts(assessmentId: string): Promise<string[]> {
   // The one rule the editor uses too (findings-model): merged-away findings still count through their target.
-  return resolvedPromptIds((await listDocsByField("findings", "assessmentId", [assessmentId])).map((f) => ({
-    ruleId: typeof f.ruleId === "string" ? f.ruleId : undefined,
-    questionKeys: Array.isArray(f.questionKeys) ? f.questionKeys.filter((k): k is string => typeof k === "string") : [],
-    voided: f.voided && typeof f.voided === "object" ? { reason: typeof (f.voided as { reason?: unknown }).reason === "string" ? (f.voided as { reason: string }).reason : undefined } : !!f.voided,
-  })));
+  return resolvedPromptIds((await listDocsByField("findings", "assessmentId", [assessmentId])).map((f) => {
+    const mergedInto = f.voided && typeof f.voided === "object" ? (f.voided as { mergedInto?: unknown }).mergedInto : undefined;
+    return {
+      key: f.id,
+      ruleId: typeof f.ruleId === "string" ? f.ruleId : undefined,
+      questionKeys: Array.isArray(f.questionKeys) ? f.questionKeys.filter((k): k is string => typeof k === "string") : [],
+      voided: f.voided && typeof f.voided === "object" ? { mergedInto: typeof mergedInto === "string" ? mergedInto : undefined } : !!f.voided,
+    };
+  }));
 }
 
 /**

@@ -30,7 +30,8 @@ export interface Finding {
   nextDue?: number;
   status: FindingStatus;
   history: { status: FindingStatus; by: string; at: number; note?: string }[];
-  voided?: { by: string; at: number; reason: string };
+  /** `mergedInto` is set ONLY by a merge: the key of the finding this one was merged into */
+  voided?: { by: string; at: number; reason: string; mergedInto?: string };
   createdAt: number; createdBy: string; updatedAt: number;
   /** the per-(company code, venue code, category) sequence number behind printedId; null while pending */
   seq: number | null;
@@ -133,24 +134,76 @@ export function mergeReason(printedId: string): string {
 }
 
 /** The minimum a prompt-resolution check reads from a finding (the stored record or the editor's view of it). */
-export interface PromptSource { ruleId?: string; questionKeys: string[]; voided?: boolean | { reason?: string } | null; voidReason?: string }
+export interface PromptSource {
+  key?: string; ruleId?: string; questionKeys: string[];
+  voided?: boolean | { mergedInto?: string } | null;
+  /** the editor's flat view of `voided.mergedInto` */
+  mergedInto?: string;
+}
+
+/** Why a typed void reason is refused (null when fine): it is required, and "Merged into …" is reserved for merges. */
+export function voidReasonProblem(reason: unknown): string | null {
+  const r = typeof reason === "string" ? reason.trim() : "";
+  if (!r) return "Say why the finding is being voided.";
+  if (r.toLowerCase().startsWith(MERGE_REASON_PREFIX.toLowerCase())) return "That reason is reserved for merges. Use Merge to combine findings.";
+  return null;
+}
 
 /**
  * Prompt ids (`rule:<id>` / `flag:<key>`) that findings have already turned into a finding — the ONE rule the editor
  * and Mark complete share. A rule prompt is resolved by a finding with that `ruleId`; a flagged-answer prompt (X5) by
  * a finding raised from it (`ruleId` "X5") or one with no rule that links the question. A voided finding resolves
- * nothing — unless it was merged away ("Merged into …"), since its content lives on in the finding that kept it.
+ * nothing — unless a merge voided it: it then carries `mergedInto` (the keeper's key, set only by mergeFindings) and
+ * counts only while following the `mergedInto` chain ends at a LIVE finding in the list (a keeper that was later
+ * voided, is missing, or a cycle reopens the prompt). The void reason text is never read.
  */
 export function resolvedPromptIds(findings: PromptSource[]): string[] {
+  const byKey = new Map<string, PromptSource>();
+  for (const f of findings) if (typeof f.key === "string") byKey.set(f.key, f);
+  const target = (f: PromptSource): string | undefined => {
+    const t = typeof f.voided === "object" && f.voided ? f.voided.mergedInto : undefined;
+    return typeof t === "string" && t ? t : typeof f.mergedInto === "string" && f.mergedInto ? f.mergedInto : undefined;
+  };
+  const endsLive = (f: PromptSource): boolean => {
+    const seen = new Set<string>(typeof f.key === "string" ? [f.key] : []);
+    let cur = f;
+    while (cur.voided) {
+      const next = target(cur);
+      if (!next || seen.has(next)) return false;
+      seen.add(next);
+      const t = byKey.get(next);
+      if (!t) return false;
+      cur = t;
+    }
+    return true;
+  };
   const out = new Set<string>();
   for (const f of findings) {
-    const reason = typeof f.voided === "object" && f.voided ? f.voided.reason : f.voidReason;
-    if (f.voided && !(typeof reason === "string" && reason.startsWith(MERGE_REASON_PREFIX))) continue;
+    if (f.voided && !endsLive(f)) continue;
     const keys = Array.isArray(f.questionKeys) ? f.questionKeys.filter((k): k is string => typeof k === "string") : [];
     if (typeof f.ruleId === "string" && f.ruleId && f.ruleId !== "X5") out.add(`rule:${f.ruleId}`);
     else for (const k of keys) out.add(`flag:${k}`);
   }
   return [...out];
+}
+
+/**
+ * Whether changing a short code needs `approve`: true when a live finding of that company (kind "company") or that
+ * venue (kind "site") already prints it. `ids` scopes the findings to the record being changed, so another
+ * company's findings can't unlock it (or lock it).
+ */
+export function codeChangeNeedsApprove(
+  findings: Pick<Finding, "voided" | "companyCode" | "siteCode" | "customerId" | "siteId">[],
+  kind: "company" | "site", code: string | null | undefined, ids: { customerId: string; siteId?: string },
+): boolean {
+  const scoped = findings.filter((f) => f.customerId === ids.customerId && (kind === "company" || f.siteId === ids.siteId));
+  return codeInUse(scoped, code, kind);
+}
+
+/** True when a request names a company other than the venue's own. The venue's lock is its own company's, so a
+ *  mismatched pair would read the wrong company's findings and could unlock a locked code. */
+export function codeScopeMismatch(companyId: string | undefined, site: { companyId: string } | null): boolean {
+  return companyId !== undefined && site !== null && site.companyId !== companyId;
 }
 
 /** The most ids a finding's photo / question list holds (the store's cap). */
@@ -165,7 +218,7 @@ type Mergeable = Pick<Finding, "key" | "printedId" | "description" | "photoIds" 
  * number yet, or a union past the list cap.
  */
 export function mergePlan(list: Mergeable[]):
-  | { ok: true; keep: string; patch: { description: string; photoIds: string[]; questionKeys: string[] }; voids: { key: string; reason: string }[] }
+  | { ok: true; keep: string; patch: { description: string; photoIds: string[]; questionKeys: string[] }; voids: { key: string; reason: string; mergedInto: string }[] }
   | { ok: false; error: string } {
   if (!Array.isArray(list) || list.length < 2) return { ok: false, error: "Choose at least two findings to merge." };
   if (new Set(list.map((f) => f.key)).size !== list.length) return { ok: false, error: "A finding was chosen twice." };
@@ -173,11 +226,10 @@ export function mergePlan(list: Mergeable[]):
   if (new Set(list.map((f) => f.assessmentId)).size !== 1) return { ok: false, error: "Only findings from the same assessment can be merged." };
   const [keep, ...rest] = list;
   if (!keep.printedId) return { ok: false, error: "The finding kept by a merge needs its number first. Try again once it has synced." };
-  const descs: string[] = [(keep.description ?? "").trim()];
-  for (const f of rest) {
-    const d = (f.description ?? "").trim();
-    if (d && !descs.includes(d)) descs.push(d);
-  }
+  // Deduped by paragraph, so retrying a half-finished merge never appends the same text twice.
+  const paras = (d: string | undefined) => (d ?? "").split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+  const descs: string[] = paras(keep.description);
+  for (const f of rest) for (const d of paras(f.description)) if (!descs.includes(d)) descs.push(d);
   const union = (k: "photoIds" | "questionKeys") => [...new Set(list.flatMap((f) => f[k] ?? []))];
   const photoIds = union("photoIds");
   const questionKeys = union("questionKeys");
@@ -187,8 +239,8 @@ export function mergePlan(list: Mergeable[]):
   return {
     ok: true,
     keep: keep.key,
-    patch: { description: descs.filter(Boolean).join("\n\n").slice(0, 5000), photoIds, questionKeys },
-    voids: rest.map((f) => ({ key: f.key, reason: mergeReason(keep.printedId!) })),
+    patch: { description: descs.join("\n\n").slice(0, 5000), photoIds, questionKeys },
+    voids: rest.map((f) => ({ key: f.key, reason: mergeReason(keep.printedId!), mergedInto: keep.key })),
   };
 }
 

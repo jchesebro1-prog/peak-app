@@ -7,7 +7,7 @@ import { clearSyncRejects, completeAssessment, getAssessment, reopenAssessment, 
 import { getFinding, listFindings, mergeFindings, saveFinding, splitFinding, transitionFinding, voidFinding } from "@/lib/stores/findings";
 import { getCompany, setCompanyShortCode } from "@/lib/identity/companies";
 import { getSite, setSiteShortCode } from "@/lib/identity/sites";
-import { codeInUse, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
+import { codeChangeNeedsApprove, codeScopeMismatch, voidReasonProblem, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
 import { toFindingVM, type FindingVM, type SavePatch, type SyncRejectVM } from "@/lib/assessments/editor-model";
 
 /**
@@ -129,6 +129,10 @@ export async function voidFindingAction(key: string, reason: string): Promise<Fi
   const user = await getOptionalUser();
   if (!user) return { ok: false, error: "Sign in again to void the finding." };
   if (!can("approve", user.roles)) return { ok: false, error: "Voiding a finding needs approval rights." };
+  // A reason is required; "Merged into …" is reserved for merges (a merge records its target structurally, so a
+  // typed reason can never make a voided finding count as resolved).
+  const problem = voidReasonProblem(reason);
+  if (problem) return { ok: false, error: problem };
   try {
     await voidFinding(key, reason, user);
   } catch (e) {
@@ -170,7 +174,8 @@ export async function splitFindingAction(key: string, move: { photoIds: string[]
 
 /**
  * Set the company and/or venue short code (printed finding ids). `create` while no live finding carries the code
- * being replaced; once one does (codeInUse over listFindings({ customerId })), changing it needs `approve`. Issued
+ * being replaced; once one does (codeChangeNeedsApprove over that company's — or that venue's own — findings), changing it needs
+ * `approve`. A company id that isn't the venue's company is refused. Issued
  * printed ids keep their text either way.
  */
 export async function setShortCodesAction(p: { companyId?: string; companyCode?: string; siteId?: string; siteCode?: string }): Promise<CodesReply> {
@@ -183,12 +188,14 @@ export async function setShortCodesAction(p: { companyId?: string; companyCode?:
   const site = typeof p.siteId === "string" ? await getSite(p.siteId) : null;
   if (p.companyId !== undefined && !company) return { ok: false, error: "Company not found" };
   if (p.siteId !== undefined && !site) return { ok: false, error: "Venue not found" };
-  const customerId = company?.id ?? site?.companyId;
-  const live = customerId ? await listFindings({ customerId }) : [];
+  // A venue's code lock is its own company's findings: a company id that isn't the venue's company is refused, so
+  // a create-only user can't pair an empty company with a locked venue to dodge the lock.
+  if (codeScopeMismatch(company?.id, site)) return { ok: false, error: "That venue doesn't belong to that company." };
   if (company && typeof p.companyCode === "string") {
     const next = p.companyCode.trim().toUpperCase();
     if (next !== (company.shortCode ?? "")) {
-      if (codeInUse(live, company.shortCode, "company") && !approve) return { ok: false, error: `${company.shortCode} is already printed on findings. Changing it needs approval rights.` };
+      const live = await listFindings({ customerId: company.id });
+      if (codeChangeNeedsApprove(live, "company", company.shortCode, { customerId: company.id }) && !approve) return { ok: false, error: `${company.shortCode} is already printed on findings. Changing it needs approval rights.` };
       const r = await setCompanyShortCode(company.id, next);
       if (!r.ok) return r;
     }
@@ -196,7 +203,8 @@ export async function setShortCodesAction(p: { companyId?: string; companyCode?:
   if (site && typeof p.siteCode === "string") {
     const next = p.siteCode.trim().toUpperCase();
     if (next !== (site.shortCode ?? "")) {
-      if (codeInUse(live.filter((f) => f.siteId === site.id), site.shortCode, "site") && !approve) return { ok: false, error: `${site.shortCode} is already printed on findings. Changing it needs approval rights.` };
+      const live = await listFindings({ customerId: site.companyId, siteId: site.id });
+      if (codeChangeNeedsApprove(live, "site", site.shortCode, { customerId: site.companyId, siteId: site.id }) && !approve) return { ok: false, error: `${site.shortCode} is already printed on findings. Changing it needs approval rights.` };
       const r = await setSiteShortCode(site.id, next);
       if (!r.ok) return r;
     }

@@ -12,7 +12,8 @@ export interface PhotoRef {
   questionKey?: string;
   moduleId?: string;
   reqId?: string;
-  findingKey?: string;
+  /** `null` only travels client → server, meaning "clear it" (the stored ref never holds null) */
+  findingKey?: string | null;
   caption?: string;
   by: string;
 }

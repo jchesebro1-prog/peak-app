@@ -17,6 +17,9 @@ export interface CompleteDialogProps {
   stuck: PhotoRef[];
   /** where a photo was taken ("Rigging — The access point"), for the stuck list */
   describe: (p: PhotoRef) => string;
+  /** the signed-in user, and a user id → display name lookup, for "Taken by …" on a stuck photo */
+  meId: string;
+  nameOf: (userId: string) => string;
   /** removePendingPhotoAction + adopt its rev; resolves to an error message or null */
   onRemovePhoto: (photoId: string) => Promise<string | null>;
   onDone: () => void;
@@ -25,7 +28,9 @@ export interface CompleteDialogProps {
 
 type Result = Extract<CompleteReply, { ok: false }>;
 
-export default function CompleteDialog({ run, stuck, describe, onRemovePhoto, onDone, onClose }: CompleteDialogProps) {
+const takenAtLabel = (ms: number) => new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+export default function CompleteDialog({ run, stuck, describe, meId, nameOf, onRemovePhoto, onDone, onClose }: CompleteDialogProps) {
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(true);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -100,6 +105,8 @@ export default function CompleteDialog({ run, stuck, describe, onRemovePhoto, on
                   <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 0", borderTop: "1px solid #f1dcb6" }}>
                     <span style={{ flex: "1 1 220px" }}>
                       {describe(p)}: This photo never finished uploading from any device — remove it to continue
+                      <span className="as-mono-sm" style={{ display: "block", marginTop: 2 }}>Taken by {nameOf(p.by)} at {takenAtLabel(p.takenAt)}</span>
+                      {p.by !== meId && <span style={{ display: "block", marginTop: 2, fontWeight: 600 }}>Someone else took this photo — it may still be uploading from their device.</span>}
                     </span>
                     <button type="button" className="pk-btn-outline" disabled={!!removing || busy} onClick={() => void remove(p.id)}>
                       {removing === p.id ? "Removing…" : "Remove photo"}

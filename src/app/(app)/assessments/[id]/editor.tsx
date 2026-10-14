@@ -489,7 +489,7 @@ export default function AssessmentEditor(props: EditorProps) {
   const merge = async (keys: string[]): Promise<string | null> => {
     try {
       const r = await mergeFindingsAction(keys);
-      if (!r.ok) return r.error;
+      if (!r.ok) { router.refresh(); return r.error; } // the server may have moved on (a retry, another device)
       setLocalFindings((m) => {
         const next = { ...m, [r.kept.key]: r.kept };
         for (const v of r.voided) next[v.key] = v;
@@ -504,7 +504,7 @@ export default function AssessmentEditor(props: EditorProps) {
   const split = async (f: FindingVM, move: { photoIds: string[]; questionKeys: string[] }): Promise<string | null> => {
     try {
       const r = await splitFindingAction(f.key, move, newFindingKey());
-      if (!r.ok) return r.error;
+      if (!r.ok) { router.refresh(); return r.error; }
       setLocalFindings((m) => ({ ...m, [r.kept.key]: r.kept, [r.created.key]: r.created }));
       router.refresh();
       return null;
@@ -624,6 +624,8 @@ export default function AssessmentEditor(props: EditorProps) {
           run={runComplete}
           stuck={stuckPendingPhotos(doc.photos, queued.map((q) => q.photoId))}
           describe={(p) => describePhoto(p, p.id)}
+          meId={me.id}
+          nameOf={(uid) => props.userNames[uid] ?? uid}
           onRemovePhoto={removeStuckPhoto}
           onDone={() => { setCompleteOpen(false); router.refresh(); }}
           onClose={() => setCompleteOpen(false)}
@@ -644,6 +646,7 @@ export default function AssessmentEditor(props: EditorProps) {
           disabled={disabled}
           onSave={saveFinding}
           onTakePhoto={(file, findingKey) => capturePhoto(file, { findingKey })}
+          onAbandonNew={(findingKey) => { store.dispatch({ type: "unlinkFindingPhotos", findingKey }); schedule(); }}
           onClose={() => setSheet(null)}
         />
       )}

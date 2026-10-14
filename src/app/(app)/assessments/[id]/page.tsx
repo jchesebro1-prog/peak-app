@@ -22,10 +22,11 @@ export default async function AssessmentPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const [user, a] = await Promise.all([requireUser(), getAssessment(id)]);
   if (!a) notFound();
-  const [profile, extras, findings, company, site, users] = await Promise.all([
+  const [profile, extras, customerAll, company, site, users] = await Promise.all([
     getVenueProfile(a.siteId),
     getPicklistExtras(),
-    listFindings({ assessmentId: a.id, includeVoided: true }),
+    // One scan of the customer's findings (voided included): this assessment's list and the code locks both derive from it.
+    listFindings({ customerId: a.customerId, includeVoided: true }),
     getCompany(a.customerId),
     getSite(a.siteId),
     allUsers(),
@@ -33,9 +34,9 @@ export default async function AssessmentPage({ params }: { params: Promise<{ id:
 
   // A JSON round trip guarantees a plain, serializable object (no undefined-vs-missing surprises for the client).
   const doc = JSON.parse(JSON.stringify(a)) as EditorDoc;
-  const findingVMs: FindingVM[] = JSON.parse(JSON.stringify(findings.map(toFindingVM)));
-  // Codes lock once a live finding of this customer carries them (changing one then needs `approve`).
-  const customerFindings = await listFindings({ customerId: a.customerId });
+  const findingVMs: FindingVM[] = JSON.parse(JSON.stringify(customerAll.filter((f) => f.assessmentId === a.id).map(toFindingVM)));
+  // Codes lock once a live finding of this customer carries them (changing one then needs `approve`); codeInUse skips voided ones.
+  const customerFindings = customerAll;
   const companyCode = company?.shortCode ?? null;
   const siteCode = site?.shortCode ?? null;
 

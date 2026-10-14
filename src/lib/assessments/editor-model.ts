@@ -89,7 +89,10 @@ export type EditorAction =
   | { type: "photoDone"; photoId: string; ref: { blobPath?: string; inline?: string }; rev: number }
   /** a pending photo's ref was removed on the server (discard / the stuck-photo escape hatch); adopt its rev */
   | { type: "removePhoto"; photoId: string; rev: number }
-  | { type: "dismissPrompt"; entry: { id: string; by: string; at: number } };
+  | { type: "dismissPrompt"; entry: { id: string; by: string; at: number } }
+  /** a NEW finding's sheet was cancelled: its photos stay on the assessment but stop pointing at the finding.
+   *  The photo carries `findingKey: null`, which the server reads as "clear it". */
+  | { type: "unlinkFindingPhotos"; findingKey: string };
 
 export function initEditorState(doc: EditorDoc): EditorState {
   return { doc, ack: { ...doc.answers }, dirty: [], dirtyPhotos: [], dirtyPrompts: [], dropped: [] };
@@ -252,6 +255,16 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
         doc: { ...s.doc, rev, answers, photos: s.doc.photos.filter((p) => p.id !== a.photoId) },
         ack,
         dirtyPhotos: s.dirtyPhotos.filter((id) => id !== a.photoId),
+      };
+    }
+    case "unlinkFindingPhotos": {
+      const mine = s.doc.photos.filter((p) => p.findingKey === a.findingKey);
+      if (!mine.length) return s;
+      const ids = new Set(mine.map((p) => p.id));
+      return {
+        ...s,
+        doc: { ...s.doc, photos: s.doc.photos.map((p) => (ids.has(p.id) ? { ...p, findingKey: null } : p)) },
+        dirtyPhotos: [...new Set([...s.dirtyPhotos, ...ids])],
       };
     }
     case "dismissPrompt":
@@ -476,6 +489,8 @@ export interface FindingVM {
   voided: boolean;
   /** the void reason ("Merged into MPSD-LIN-RIG-003" for a merge) */
   voidReason?: string;
+  /** set only by a merge: the key of the finding this one was merged into */
+  mergedInto?: string;
   photoIds: string[];
   /** the stored rev the editor's copy is based on (0 = not on the server yet) */
   rev?: number;
@@ -505,6 +520,7 @@ export function toFindingVM(f: Finding): FindingVM {
   };
   if (f.ruleId) vm.ruleId = f.ruleId;
   if (f.voided?.reason) vm.voidReason = f.voided.reason;
+  if (f.voided?.mergedInto) vm.mergedInto = f.voided.mergedInto;
   for (const k of ["spaceLabel", "location", "actionTag", "recommendedAction", "qualification", "priority", "budgetTier", "owner", "auditRef", "immediate"] as const) {
     if (f[k] !== undefined) (vm as unknown as Record<string, unknown>)[k] = JSON.parse(JSON.stringify(f[k]));
   }
@@ -513,7 +529,7 @@ export function toFindingVM(f: Finding): FindingVM {
 
 /** Prompt ids already turned into a finding — the same rule the server's Mark complete uses (findings-model). */
 export function resolvedPromptIds(findings: FindingVM[]): string[] {
-  return resolvedFromFindings(findings.map((f) => ({ ruleId: f.ruleId, questionKeys: f.questionKeys, voided: f.voided, voidReason: f.voidReason })));
+  return resolvedFromFindings(findings.map((f) => ({ key: f.key, ruleId: f.ruleId, questionKeys: f.questionKeys, voided: f.voided, mergedInto: f.mergedInto })));
 }
 
 /** The server's copies and this device's own, one per key. A local copy's `rev` is the stored rev it was built on
@@ -759,6 +775,16 @@ export function findingSheetProblems(f: FindingVM): string[] {
     out.push(...immediateProblemsOf(asFinding));
   }
   return out;
+}
+
+/** The audit-estimate field's text → a dollar amount. Blank clears it (`value` undefined); digits with at most one
+ *  decimal point, an optional `$` and thousands commas are accepted; anything else is an error to show inline. */
+export function parseMoney(raw: string): { ok: true; value?: number } | { ok: false } {
+  const t = raw.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (t === "") return { ok: true };
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(t)) return { ok: false };
+  const n = Number(t);
+  return Number.isFinite(n) ? { ok: true, value: n } : { ok: false };
 }
 
 /**

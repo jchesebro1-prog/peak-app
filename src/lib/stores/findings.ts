@@ -8,7 +8,7 @@ import { listDocs } from "@/db/doc-store";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { suggestCompanyCode, suggestSiteCode, withCollisionSuffix } from "@/lib/assessments/codes";
 import type { Category, Rating } from "@/lib/assessments/defs/types";
-import { STATUSES, formatPrintedId, immediateProblems, mergePlan, splitPlan, transitionProblems, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
+import { STATUSES, formatPrintedId, immediateProblems, mergePlan, splitPlan, transitionProblems, voidReasonProblem, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
 import { allCompanies, getCompany, setCompanyShortCode } from "@/lib/identity/companies";
 import { getSite, setSiteShortCode, sitesForCompany } from "@/lib/identity/sites";
 import { can } from "@/lib/team";
@@ -376,82 +376,122 @@ export async function linkQuote(keys: string[], quoteId: string, user: { id: str
   }
 }
 
-/** Voids a finding (the caller checks `approve`). Its number is kept and never reused. Throws on a missing
- *  finding or a blank reason; already voided → no-op. */
-export async function voidFinding(key: string, reason: string, user: { id: string }): Promise<void> {
-  const why = text(reason, 500);
-  if (!why) throw new Error("Say why the finding is being voided");
-  await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `finding:${key}`, async () => {
+/** Thrown inside a merge / split lock to roll the whole unit back (the lock is one transaction); caught by the caller. */
+class UnitAbort extends Error {}
+
+/** Voids one finding under its own lock; `mergedInto` is set by mergeFindings alone. Returns the stored finding.
+ *  Throws on a missing finding; already voided → no-op. */
+async function voidOne(key: string, reason: string, user: { id: string }, mergedInto?: string): Promise<Finding> {
+  return withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `finding:${key}`, async () => {
     const row = await readRow("findings", key);
     if (!row || row.deleted) throw new Error("Finding not found");
     const curRev = nextRev(row) - 1;
     const cur = normalizeFinding({ ...row.doc, rev: curRev }, key);
-    if (cur.voided) return;
+    if (cur.voided) return cur;
     const now = Date.now();
-    const next: Finding = { ...cur, voided: { by: user.id, at: now, reason: why }, rev: curRev + 1, updatedAt: now };
+    const next: Finding = { ...cur, voided: { by: user.id, at: now, reason, ...(mergedInto ? { mergedInto } : {}) }, rev: curRev + 1, updatedAt: now };
     await writeRow("findings", key, next as unknown as Record<string, unknown> & { rev: number }, false);
+    return next;
   });
+}
+
+/** Voids a finding (the caller checks `approve`). Its number is kept and never reused. Throws on a missing
+ *  finding, a blank reason, or one starting "Merged into" (reserved for merges — a merge records its target
+ *  structurally as `voided.mergedInto`, which this never accepts); already voided → no-op. */
+export async function voidFinding(key: string, reason: string, user: { id: string }): Promise<void> {
+  const problem = voidReasonProblem(reason);
+  if (problem) throw new Error(problem);
+  await voidOne(key, reason.trim().slice(0, 500), user);
 }
 
 /**
  * Merge (spec §3 "Creating"): `keys[0]` is kept and takes the others' descriptions, photos and questions
- * (mergePlan); each other one is voided with "Merged into <printedId>" — its number stays issued and is never
- * reused. Online only (the kept finding needs its number; an unnumbered one is numbered first), all on one
- * assessment that isn't completed. The kept finding is saved first (through saveFinding: rev bump, immediate
- * rules), then the others are voided one by one; a failure part-way leaves the rest live and is reported. The
- * caller checks `create`.
+ * (mergePlan); each other one is voided with "Merged into <printedId>" and `voided.mergedInto` = the kept key — its
+ * number stays issued and is never reused. Online only (the kept finding needs its number; an unnumbered one is
+ * numbered first, outside the lock), all on one assessment that isn't completed. The whole merge runs under one
+ * advisory lock `merge:<assessmentId>` (a single transaction: a failure part-way rolls it all back). Inside it every
+ * finding is re-read; ones already voided with `mergedInto` = the keeper are skipped, so retrying a merge is
+ * idempotent (descriptions are deduped by paragraph too). The kept finding is saved first (through saveFinding: rev
+ * bump, immediate rules). The caller checks `create`.
  */
 export async function mergeFindings(keys: string[], user: { id: string }): Promise<{ ok: true; kept: Finding; voided: Finding[] } | Err> {
   if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) return fail("Choose the findings to merge");
-  const list: Finding[] = [];
-  for (const k of keys) {
-    const f = await getFinding(k);
-    if (!f) return fail("Finding not found");
-    list.push(f);
+  if (new Set(keys).size !== keys.length) return fail("A finding was chosen twice.");
+  const first = keys.length ? await getFinding(keys[0]) : null;
+  if (!first) return fail(keys.length ? "Finding not found" : "Choose at least two findings to merge.");
+  // Numbering runs outside any transaction, so the kept finding gets its number before the lock is taken.
+  if (!first.printedId && !first.voided) await allocateOrKeep(first);
+  try {
+    return await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `merge:${first.assessmentId}`, async (): Promise<{ ok: true; kept: Finding; voided: Finding[] } | Err> => {
+      const list: Finding[] = [];
+      for (const k of keys) {
+        const f = await getFinding(k);
+        if (!f) return fail("Finding not found");
+        list.push(f);
+      }
+      const keeper = list[0];
+      if (keeper.assessmentId !== first.assessmentId) return fail("Finding not found");
+      const done = list.slice(1).filter((f) => f.voided?.mergedInto === keeper.key);
+      const todo = [keeper, ...list.slice(1).filter((f) => f.voided?.mergedInto !== keeper.key)];
+      if (todo.length === 1 && done.length) return { ok: true, kept: keeper, voided: done }; // a retry of a finished merge
+      if (todo.length >= 2 && new Set(todo.map((f) => f.assessmentId)).size === 1) {
+        const as = await getAssessment(keeper.assessmentId);
+        if (!as) return fail("Assessment not found");
+        if (as.status === "completed") return fail("Findings can be merged only until the assessment is completed.");
+      }
+      const plan = mergePlan(todo);
+      if (!plan.ok) return plan;
+      const saved = await saveFinding({ key: plan.keep, rev: keeper.rev, ...plan.patch }, user);
+      if (!saved.ok) return saved;
+      const voided: Finding[] = [...done];
+      for (const v of plan.voids) {
+        try {
+          voided.push(await voidOne(v.key, v.reason, user, v.mergedInto));
+        } catch (e) {
+          throw new UnitAbort(`The merge couldn't be completed (${v.key}: ${(e as Error)?.message ?? e}). Nothing was changed.`);
+        }
+      }
+      return { ok: true, kept: (await getFinding(plan.keep)) ?? saved.doc, voided };
+    });
+  } catch (e) {
+    if (e instanceof UnitAbort) return fail(e.message);
+    throw e;
   }
-  if (list.length >= 2 && new Set(list.map((f) => f.assessmentId)).size === 1) {
-    const as = await getAssessment(list[0].assessmentId);
-    if (!as) return fail("Assessment not found");
-    if (as.status === "completed") return fail("Findings can be merged only until the assessment is completed.");
-  }
-  if (list[0] && !list[0].printedId && !list[0].voided) list[0] = await allocateOrKeep(list[0]);
-  const plan = mergePlan(list);
-  if (!plan.ok) return plan;
-  const saved = await saveFinding({ key: plan.keep, rev: list[0].rev, ...plan.patch }, user);
-  if (!saved.ok) return saved;
-  const voided: Finding[] = [];
-  for (const v of plan.voids) {
-    try {
-      await voidFinding(v.key, v.reason, user);
-    } catch (e) {
-      return fail(`Merged into ${saved.doc.printedId ?? plan.keep}, but ${v.key} couldn't be voided: ${(e as Error)?.message ?? e}`);
-    }
-    const f = await getFinding(v.key);
-    if (f) voided.push(f);
-  }
-  return { ok: true, kept: (await getFinding(plan.keep)) ?? saved.doc, voided };
 }
 
 /**
  * Split: a new finding (`newKey`, client- or server-minted) duplicating `key` takes the chosen photos and questions,
- * which leave the original (splitPlan). The new one is created first (it gets its own number), then the original is
- * saved without them. Until the assessment is completed; the caller checks `create`.
+ * which leave the original (splitPlan). Until the assessment is completed; the caller checks `create`. The whole
+ * split runs under the same advisory lock as a merge (`merge:<assessmentId>`, one transaction: if the original can't
+ * be updated, the new finding is rolled back too). The new finding is numbered right after the lock is released
+ * (numbering can't run inside a transaction) and, if that fails, keeps its pending number until its next save.
  */
 export async function splitFinding(key: string, move: { photoIds: string[]; questionKeys: string[] }, newKey: string, user: { id: string }): Promise<{ ok: true; kept: Finding; created: Finding } | Err> {
   if (typeof newKey !== "string" || !KEY_RE.test(newKey)) return fail("A finding key is fd_ followed by 16 letters or digits");
-  const f = await getFinding(key);
-  if (!f) return fail("Finding not found");
-  if (await readRow("findings", newKey)) return fail("That new finding key is already used");
-  const as = await getAssessment(f.assessmentId);
-  if (!as) return fail("Assessment not found");
-  if (as.status === "completed") return fail("Findings can be split only until the assessment is completed.");
-  const plan = splitPlan(f, move, newKey);
-  if (!plan.ok) return plan;
-  const created = await saveFinding(plan.created, user);
-  if (!created.ok) return created;
-  const kept = await saveFinding({ key, rev: f.rev, ...plan.kept }, user);
-  if (!kept.ok) return fail(`The new finding ${created.doc.printedId ?? newKey} was created, but this one couldn't be updated: ${kept.error}`);
-  return { ok: true, kept: kept.doc, created: created.doc };
+  const f0 = await getFinding(key);
+  if (!f0) return fail("Finding not found");
+  try {
+    const r = await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `merge:${f0.assessmentId}`, async (): Promise<{ ok: true; kept: Finding; created: Finding } | Err> => {
+      const f = await getFinding(key);
+      if (!f || f.assessmentId !== f0.assessmentId) return fail("Finding not found");
+      if (await readRow("findings", newKey)) return fail("That new finding key is already used");
+      const as = await getAssessment(f.assessmentId);
+      if (!as) return fail("Assessment not found");
+      if (as.status === "completed") return fail("Findings can be split only until the assessment is completed.");
+      const plan = splitPlan(f, move, newKey);
+      if (!plan.ok) return plan;
+      const created = await saveFinding(plan.created, user);
+      if (!created.ok) return created;
+      const kept = await saveFinding({ key, rev: f.rev, ...plan.kept }, user);
+      if (!kept.ok) throw new UnitAbort(`The finding couldn't be split: ${kept.error === "conflict" ? "it was changed on another device" : kept.error}. Nothing was changed.`);
+      return { ok: true, kept: kept.doc, created: created.doc };
+    });
+    if (!r.ok) return r;
+    return { ok: true, kept: r.kept, created: await allocateOrKeep(r.created) };
+  } catch (e) {
+    if (e instanceof UnitAbort) return fail(e.message);
+    throw e;
+  }
 }
 
 /**
@@ -460,6 +500,12 @@ export async function splitFinding(key: string, move: { photoIds: string[]; ques
  * one it is applied through transitionFinding afterwards (a backward move's note is read from the pushed
  * history's last entry for that status). A refusal is a `conflict` carrying the server copy when one exists;
  * a refused NEW finding has no server copy, so it is an `error` and stays in the client's outbox.
+ *
+ * Deliberate asymmetry: saveFindingAction refuses a NEW finding on an assessment that is already completed (online,
+ * the user can reopen it), but this push does NOT. A finding created offline before completion — or on a device
+ * that hadn't synced yet — must never be lost in the field, so it is accepted whenever it arrives, even after the
+ * assessment was completed. The report (Task 10) must therefore tolerate a late finding that resolves a prompt
+ * already listed in the assessment's `overriddenGaps`.
  */
 export async function pushFinding(rec: PushRec, user: PushUser): Promise<PushResult> {
   const id = rec.id;

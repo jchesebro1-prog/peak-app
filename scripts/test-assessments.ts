@@ -11,7 +11,7 @@ import { validateAnswer, mergeAnswers } from "../src/lib/assessments/answers";
 import { CODE_RE, suggestCompanyCode, suggestSiteCode, withCollisionSuffix } from "../src/lib/assessments/codes";
 import { STATUSES, CATEGORY_ROUTING, formatPrintedId, pendingPrintedLabel, immediateProblems, transitionProblems, legacyRating, codeInUse, type Finding } from "../src/lib/assessments/findings-model";
 import { csvCell, toCsv } from "../src/lib/assessments/csv";
-import { PHOTO_PREFIX, PHOTO_CAPS, photoBlobPath, photoPathInScope, photoPathMatches, PHOTO_ID_RE, newPhotoId, photoTooOld, PHOTO_MAX_AGE_MS, INLINE_TOTAL_MAX, INLINE_BLOB_MAX, inlinePhotoProblem, photoBackoffMs } from "../src/lib/assessments/photos";
+import { type PhotoRef, PHOTO_PREFIX, PHOTO_CAPS, photoBlobPath, photoPathInScope, photoPathMatches, PHOTO_ID_RE, newPhotoId, photoTooOld, PHOTO_MAX_AGE_MS, INLINE_TOTAL_MAX, INLINE_BLOB_MAX, inlinePhotoProblem, photoBackoffMs } from "../src/lib/assessments/photos";
 import { scaledSize, photoFileProblem, HEIC_MESSAGE } from "../src/lib/assessments/photo-resize";
 import { photoBytes } from "../src/lib/assessments/photo-bytes";
 import coverage from "../docs/assessments/manitowoc-coverage.json";
@@ -31,9 +31,9 @@ import {
   profileOnFile, reenterAnswer, refusalParts, rejectLabel, resolvedPromptIds, scopeSummaries, setScopeOn, showCounter, textAnswer,
   toggleMany, unableWith, flagsForScope, placePrompts, offScopesWithAnswers, formatRejectPayload, type EditorDoc, type FindingVM,
   placementScope, promptScope, PHOTO_LIMIT_MESSAGE, canAddPhoto, stuckPendingPhotos, findingFromPrompt, photosForQuestions,
-  findingSheetProblems, findingSaveDoc, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
+  findingSheetProblems, findingSaveDoc, parseMoney, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
 } from "../src/lib/assessments/editor-model";
-import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings } from "../src/lib/assessments/findings-model";
+import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch } from "../src/lib/assessments/findings-model";
 import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
@@ -1328,6 +1328,16 @@ function task8Checks(ok: Ok) {
   ok(canAddPhoto({ photos: Array.from({ length: 199 }, () => ph) }) && !canAddPhoto({ photos: Array.from({ length: 200 }, () => ph) }) && /200 photos/.test(PHOTO_LIMIT_MESSAGE), "photos: the 200th photo is the last one");
   ok(stuckPendingPhotos([ph, { ...ph, id: "p_cccccccccccc" }, { ...ph, id: "p_dddddddddddd", pending: undefined, blobPath: "x" }], ["p_cccccccccccc"]).map((p) => p.id).join() === ph.id, "photos: a pending photo with no bytes on this device is the stuck one (Remove photo)");
 
+  // a cancelled new finding releases the photos taken in its sheet (they stay on the assessment)
+  const fph: PhotoRef = { ...ph, id: "p_ffffffffffff", findingKey: "fd_0123456789abcdef", questionKey: "rigging.overhead" };
+  const base0 = initEditorState(editorDoc({ photos: [fph, { ...ph, id: "p_gggggggggggg", findingKey: "fd_other" }] }));
+  const unl = editorReducer(base0, { type: "unlinkFindingPhotos", findingKey: "fd_0123456789abcdef" });
+  const unlPatch = buildPatch(unl);
+  ok(unl.doc.photos.length === 2 && unl.doc.photos[0].findingKey === null && unl.doc.photos[0].questionKey === "rigging.overhead" && unl.doc.photos[1].findingKey === "fd_other" && unlPatch!.photos!.length === 1 && unlPatch!.photos![0].id === "p_ffffffffffff" && unlPatch!.photos![0].findingKey === null && editorReducer(unl, { type: "unlinkFindingPhotos", findingKey: "fd_0123456789abcdef" }) === unl && editorReducer(base0, { type: "unlinkFindingPhotos", findingKey: "fd_none" }) === base0, "sheet: cancelling a new finding clears findingKey (null on the wire) from its photos only, keeps their question, and resends once");
+
+  // the audit-estimate field keeps what is typed and parses it on blur
+  ok(parseMoney("").ok && parseMoney("  ").ok && (parseMoney("") as { value?: number }).value === undefined && (parseMoney("12.50") as { value: number }).value === 12.5 && (parseMoney("$4,000") as { value: number }).value === 4000 && (parseMoney("12.") as { value: number }).value === 12 && !parseMoney("abc").ok && !parseMoney("-5").ok && !parseMoney("1e3x").ok && !parseMoney("1.2.3").ok, "sheet: the audit estimate parses decimals, $ and commas, empty clears, junk is an error");
+
   // dismiss: appended once, sent with the next save
   const dis = editorReducer(initEditorState(editorDoc()), { type: "dismissPrompt", entry: { id: "rule:G4", by: "u1", at: 5 } });
   ok(buildPatch(dis)!.dismissedPrompts!.map((d) => d.id).join() === "rule:G4" && editorReducer(dis, { type: "dismissPrompt", entry: { id: "rule:G4", by: "u1", at: 6 } }) === dis, "prompts: Dismiss appends { id, by, at } once and sends it");
@@ -1335,18 +1345,31 @@ function task8Checks(ok: Ok) {
   // resolution: rule by ruleId; flag by X5 or a rule-less finding linking the question; voided no, merged-away yes
   ok(resolvedFromFindings([{ ruleId: "R10", questionKeys: ["rigging.overhead"] }]).join() === "rule:R10", "prompts: a rule prompt is resolved by its ruleId (R10)");
   ok(resolvedFromFindings([{ ruleId: "X5", questionKeys: ["a.b"] }, { questionKeys: ["c.d"] }]).sort().join() === "flag:a.b,flag:c.d", "prompts: a flag prompt is resolved by an X5 finding, or a finding with no rule that links the question");
-  ok(resolvedFromFindings([{ ruleId: "R9", questionKeys: [], voided: { reason: "dup" } }]).length === 0 && resolvedFromFindings([{ ruleId: "R9", questionKeys: [], voided: { reason: "Merged into ACO-ASS-RIG-001" } }]).join() === "rule:R9" && resolvedFromFindings([{ ruleId: "R9", questionKeys: [], voided: true, voidReason: "Merged into X" }]).join() === "rule:R9", "prompts: a voided finding resolves nothing, unless it was merged away");
+  ok(resolvedFromFindings([{ key: "a", ruleId: "R9", questionKeys: [], voided: true }]).length === 0 && resolvedFromFindings([{ key: "a", ruleId: "R9", questionKeys: [], voided: { mergedInto: "k" } }, { key: "k", ruleId: "R1", questionKeys: [] }]).sort().join() === "rule:R1,rule:R9" && resolvedFromFindings([{ key: "a", ruleId: "R9", questionKeys: [], voided: true, mergedInto: "k" }, { key: "k", questionKeys: ["q.x"] }]).sort().join() === "flag:q.x,rule:R9", "prompts: a voided finding resolves nothing, unless it was merged into a live finding (structural mergedInto)");
+  // the merge exception can't hide a gap: the keeper voided, a missing keeper, a cycle, a typed reason, a long chain
+  const vmo = (key: string, mergedInto?: string): { key: string; questionKeys: string[]; voided: boolean; mergedInto?: string } => ({ key, questionKeys: [], voided: true, ...(mergedInto ? { mergedInto } : {}) });
+  ok(resolvedFromFindings([{ ...vmo("a", "k"), ruleId: "R10" }, { ...vmo("k"), ruleId: "R2" }]).length === 0, "prompts: voiding the keeper reopens the merged-away finding's prompt (R10)");
+  ok(resolvedFromFindings([{ ...vmo("a", "gone"), ruleId: "R10" }]).length === 0, "prompts: a merge target that isn't in the list resolves nothing");
+  ok(resolvedFromFindings([{ ...vmo("a", "b"), ruleId: "R10" }, vmo("b", "a")]).length === 0 && resolvedFromFindings([{ ...vmo("a", "a"), ruleId: "R10" }]).length === 0, "prompts: a merge cycle resolves nothing (and terminates)");
+  ok(resolvedFromFindings([{ key: "a", ruleId: "R10", questionKeys: [], voided: { reason: "Merged into X" } as never }, { key: "k", ruleId: "R1", questionKeys: [] }]).join() === "rule:R1", "prompts: a typed \"Merged into …\" reason resolves nothing — only mergedInto counts");
+  ok(resolvedFromFindings([{ ...vmo("a", "k1"), ruleId: "R10" }, vmo("k1", "k2"), { key: "k2", ruleId: "R1", questionKeys: [] }]).sort().join() === "rule:R1,rule:R10", "prompts: a chain A→K1→K2 (live) still resolves");
+  ok(voidReasonProblem("") !== null && voidReasonProblem("   ") !== null && voidReasonProblem(undefined) !== null && voidReasonProblem("Merged into ACO-ASS-RIG-001") !== null && voidReasonProblem("  merged into x") !== null && voidReasonProblem("Duplicate of RIG-002") === null, "void: a reason is required and can't start \"Merged into\"");
 
   // merge / split plans
   const fm = (key: string, o: Partial<Finding> = {}): Finding => ({ key, printedId: `ACO-ASS-RIG-00${key.slice(-1)}`, customerId: "c", siteId: "s", category: "RIG", description: `d${key.slice(-1)}`, assessmentId: "AS-1", questionKeys: [], photoIds: [], rating: "needs", quoteRefs: [], status: "open", history: [], createdAt: 1, createdBy: "u1", updatedAt: 1, seq: 1, companyCode: "ACO", siteCode: "ASS", ...o });
   const mp = mergePlan([fm("f1", { photoIds: ["p1"], questionKeys: ["q1"] }), fm("f2", { photoIds: ["p2", "p1"], questionKeys: ["q2"] }), fm("f3", { description: "d1" })]);
-  ok(mp.ok && mp.keep === "f1" && mp.patch.description === "d1\n\nd2" && mp.patch.photoIds.join() === "p1,p2" && mp.patch.questionKeys.join() === "q1,q2" && mp.voids.map((v) => `${v.key}:${v.reason}`).join() === "f2:Merged into ACO-ASS-RIG-001,f3:Merged into ACO-ASS-RIG-001", "merge: the first is kept with the others' descriptions/photos/questions; the rest are voided \"Merged into <printedId>\"");
+  ok(mp.ok && mp.keep === "f1" && mp.patch.description === "d1\n\nd2" && mp.patch.photoIds.join() === "p1,p2" && mp.patch.questionKeys.join() === "q1,q2" && mp.voids.map((v) => `${v.key}:${v.reason}:${v.mergedInto}`).join() === "f2:Merged into ACO-ASS-RIG-001:f1,f3:Merged into ACO-ASS-RIG-001:f1", "merge: the first is kept with the others' descriptions/photos/questions; the rest are voided \"Merged into <printedId>\"");
+  const mpd = mergePlan([fm("f1", { description: "d1\n\nd2" }), fm("f2", { description: "d2" }), fm("f3", { description: "d2\n\nd3" })]);
+  ok(mpd.ok && mpd.patch.description === "d1\n\nd2\n\nd3", "merge: descriptions are deduped by paragraph, so a retry never appends d2/d3 twice");
   ok(!mergePlan([fm("f1")]).ok && !mergePlan([fm("f1", { printedId: null }), fm("f2")]).ok && !mergePlan([fm("f1"), fm("f2", { voided: { by: "u", at: 1, reason: "x" } })]).ok && !mergePlan([fm("f1"), fm("f2", { assessmentId: "AS-2" })]).ok && !mergePlan([fm("f1"), fm("f1")]).ok, "merge: refused for one finding, an unnumbered keeper, a voided one, another assessment, or a repeat");
   const sp = splitPlan(fm("f1", { photoIds: ["p1", "p2"], questionKeys: ["q1", "q2"], ruleId: "R10", location: "LS 4" }), { photoIds: ["p2"], questionKeys: ["q2"] }, "fd_new");
   ok(sp.ok && sp.kept.photoIds.join() === "p1" && sp.kept.questionKeys.join() === "q1" && sp.created.key === "fd_new" && sp.created.photoIds!.join() === "p2" && sp.created.location === "LS 4" && sp.created.ruleId === undefined && sp.created.printedId === undefined, "split: the chosen photos/questions move to a duplicate with no number or rule of its own");
   const immF = fm("f1", { rating: "immediate", photoIds: ["p1"], recommendedAction: "Close it", immediate: { hazardContactNotified: false, lockout: "none" } });
   ok(!splitPlan(immF, { photoIds: [], questionKeys: [] }, "fd_n").ok && !splitPlan(immF, { photoIds: ["p9"], questionKeys: [] }, "fd_n").ok && !splitPlan(immF, { photoIds: ["p1"], questionKeys: [] }, "fd_n").ok, "split: nothing chosen, a foreign photo, or an Immediate finding left without a photo is refused");
   ok(/^fd_[0-9a-f]{16}$/.test(newFindingKey()) && newFindingKey() !== newFindingKey(), "findings: client keys are fd_ + 16 hex");
+  const cf = (customerId: string, siteId: string): Finding => fm("f1", { customerId, siteId });
+  ok(codeChangeNeedsApprove([cf("cA", "sA")], "company", "ACO", { customerId: "cA" }) && !codeChangeNeedsApprove([cf("cA", "sA")], "company", "ACO", { customerId: "cB" }) && codeChangeNeedsApprove([cf("cA", "sA")], "site", "ASS", { customerId: "cA", siteId: "sA" }) && !codeChangeNeedsApprove([cf("cA", "sA")], "site", "ASS", { customerId: "cA", siteId: "sB" }) && !codeChangeNeedsApprove([], "site", "ASS", { customerId: "cA", siteId: "sA" }), "codes: whether a change needs approve is decided from that company's / venue's own findings");
+  ok(codeScopeMismatch("cB", { companyId: "cA" }) && !codeScopeMismatch("cA", { companyId: "cA" }) && !codeScopeMismatch(undefined, { companyId: "cA" }) && !codeScopeMismatch("cA", null), "codes: a company id that isn't the venue's company is a mismatch (the create-only bypass)");
   ok(!codeInUse([fm("f1")], null, "company") && codeInUse([fm("f1")], "ACO", "company"), "codes: a missing code is never in use");
 
   // the finding sheet's model
@@ -1409,12 +1432,41 @@ async function task8DbChecks(ok: Ok) {
     const f4 = await mk(4);
     ok(f4.ok && f4.doc.seq === maxBefore + 1 && f4.doc.printedId !== f2.doc.printedId && f4.doc.printedId !== f3.doc.printedId, "merge db: the next finding takes max + 1 — merged numbers are never reused");
     const g = await completeAssessment(a.id, U1, false);
-    ok(!g.ok && !g.gaps.some((x) => /Rigging inspection due/.test(x)), "merge db: a merged-away finding's prompt stays resolved through the kept finding (Mark complete)");
-    ok(!(await mergeFindings([k8(1), k8(2)], U1)).ok, "merge db: a voided finding can't be merged again");
+    ok(!g.ok && !g.gaps.some((x) => /Rigging inspection due/.test(x)), "merge db: Mark complete still refuses for other gaps, but no longer lists the Rigging-inspection-due (R10) prompt — it resolves through the kept finding");
+    // retry = idempotent: already merged into this keeper → skipped, nothing rewritten
+    const again = await mergeFindings([k8(1), k8(2), k8(3)], U1);
+    ok(again.ok && again.kept.rev === m.kept.rev && again.kept.description === m.kept.description && again.voided.length === 2, "merge db: repeating a finished merge is an idempotent no-op (same rev and description)");
+    // a half-finished merge picked up again appends only the new finding's text, once
+    const [f10, f11, f12] = [await mk(10), await mk(11), await mk(12)];
+    const part = await mergeFindings([k8(10), k8(11)], U1);
+    const rest = await mergeFindings([k8(10), k8(11), k8(12)], U1);
+    ok(f10.ok && f11.ok && f12.ok && part.ok && rest.ok && rest.kept.description === "Finding 10\n\nFinding 11\n\nFinding 12" && rest.voided.length === 2, "merge db: re-running a merge with one more finding skips the merged one and appends the new description once");
+    // two merges of the same findings at once serialize under the merge lock
+    await mk(13); await mk(14);
+    const [c1, c2] = await Promise.all([mergeFindings([k8(13), k8(14)], U1), mergeFindings([k8(13), k8(14)], U1)]);
+    ok(c1.ok && c2.ok && c1.kept.description === "Finding 13\n\nFinding 14" && c2.kept.description === "Finding 13\n\nFinding 14" && (await getFinding(k8(14)))?.voided?.mergedInto === k8(13), "merge db: concurrent merges of the same findings serialize (each description once, mergedInto recorded)");
+    ok(m.voided.every((v) => v.voided?.mergedInto === k8(1)), "merge db: a merged-away finding records the keeper's key as voided.mergedInto");
+    // a voided finding that wasn't merged away can't be merged, and a typed "Merged into" reason can't forge a merge
+    const f15 = await mk(15);
+    await voidFinding(k8(15), "Duplicate entry", U1);
+    ok(f15.ok && (await getFinding(k8(15)))?.voided?.mergedInto === undefined && !(await mergeFindings([k8(1), k8(15)], U1)).ok, "merge db: a plainly voided finding has no mergedInto and can't be merged");
+    const forged = await voidFinding(k8(4), "Merged into " + f1.doc.printedId, U1).then(() => true, () => false);
+    const blankVoid = await voidFinding(k8(4), "  ", U1).then(() => true, () => false);
+    ok(!forged && !blankVoid && !(await getFinding(k8(4)))?.voided, "void db: a blank reason and a typed \"Merged into …\" reason are refused");
+    // photos: findingKey null clears the link (a cancelled new-finding sheet), keeping the photo on the assessment
+    await saveAssessment(a.id, { photos: [{ id: "p_t8cccccccc", findingKey: k8(30) } as PhotoRef] }, U1);
+    const withKey = (await getAssessment(a.id))!.photos.find((p) => p.id === "p_t8cccccccc");
+    await saveAssessment(a.id, { photos: [{ id: "p_t8cccccccc", findingKey: null } as PhotoRef] }, U1);
+    const cleared = (await getAssessment(a.id))!.photos.find((p) => p.id === "p_t8cccccccc");
+    ok(withKey?.findingKey === k8(30) && !!cleared && cleared.findingKey === undefined, "photos db: findingKey null clears the link and the photo stays");
     // split
     const s = await splitFinding(k8(1), { photoIds: ["p_t8bbbbbbbb"], questionKeys: ["rigging.fall_hazard"] }, k8(5), U1);
-    ok(s.ok && s.created.key === k8(5) && s.created.photoIds.join() === "p_t8bbbbbbbb" && s.kept.photoIds.join() === "p_t8aaaaaaaa" && s.kept.questionKeys.join() === "rigging.overhead" && !!s.created.printedId && s.created.printedId !== s.kept.printedId && s.created.seq === maxBefore + 2, "split db: the chosen photo + question move to a new, newly numbered finding");
+    ok(s.ok && s.created.key === k8(5) && s.created.photoIds.join() === "p_t8bbbbbbbb" && s.kept.photoIds.join() === "p_t8aaaaaaaa" && s.kept.questionKeys.join() === "rigging.overhead" && !!s.created.printedId && s.created.printedId !== s.kept.printedId && f4.ok && s.created.seq! > f4.doc.seq!, "split db: the chosen photo + question move to a new, newly numbered finding");
     ok(!(await splitFinding(k8(1), { photoIds: [], questionKeys: [] }, k8(6), U1)).ok, "split db: nothing chosen is refused");
+    // voiding the keeper takes the merged-away finding's prompt with it: R10 is a gap again
+    await voidFinding(k8(1), "Entered in error", U1);
+    const gv = await completeAssessment(a.id, U1, false);
+    ok(!gv.ok && gv.gaps.some((x) => /^Prompt: Rigging inspection due/.test(x)), "merge db: voiding the keeper reopens the merged-away finding's R10 prompt (Mark complete lists it again)");
     // completed assessments refuse merge / split
     const f7 = await mk(7, { questionKeys: ["rigging.overhead"] });
     const f8 = await mk(8);
