@@ -73,6 +73,7 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
+import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -193,6 +194,12 @@ export type SavePayload = {
      built before a newer tick but processed after it can't revert the tick. */
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
+  /** Estimate suggestion (spec 2026-10-13 §2) — the lead a NEW quote is for
+   *  (create only; checked against the leads; an update never touches it). */
+  leadId?: string;
+  /** The `ES-…` suggestion the estimate was opened from: every successful
+   *  save links the saved quote to it (idempotent; unknown ids ignored). */
+  suggestionId?: string;
 };
 
 export type SaveResult = {
@@ -605,8 +612,10 @@ export async function saveQuoteAction(
     // it must come back as a typed message, not a raw 500. The sibling
     // setStatus call below already does this; create() was the one gap.
     let created: Quote;
+    // Estimate suggestion: the lead rides the create only (an existing lead, else none).
+    const leadId = await leadIdForCreate(payload.leadId);
     try {
-      created = await create({ ...patch, owner: user.name });
+      created = await create({ ...patch, owner: user.name, ...(leadId ? { leadId } : {}) });
     } catch (e) {
       return {
         ok: false,
@@ -663,6 +672,9 @@ export async function saveQuoteAction(
     // D205: the replaced draft goes only once its replacement exists.
     await retireReplacedDraftSafely(payload.replaces, created.id, "estimator");
   }
+  // Estimate suggestion: link the saved quote to the suggestion it came from
+  // (first save indexes it; later saves are no-ops). Never fails the save.
+  if (q?.id && payload.suggestionId) await linkSavedQuoteToSuggestion(payload.suggestionId, q.id);
   refresh();
   return {
     ok: !!q && !statusError,

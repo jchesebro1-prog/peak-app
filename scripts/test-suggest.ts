@@ -1,5 +1,5 @@
 /** Estimate suggestion checks (spec 2026-10-13-estimate-suggestion-design.md). Standalone: `npm run test:suggest`; also chained into test:specs. */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   LEAD_THREAD_MESSAGES,
   LEAD_THREADS_MAX,
@@ -470,6 +470,177 @@ export async function suggestPipelineDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** Task 3 — the Suggested BOM panel's view model (pure) and the client-bundle rule. */
+export async function suggestPanelChecks(ok: Ok): Promise<void> {
+  const P = await import("@/lib/assist/features/suggestion-panel");
+  const src = (kind: "thread" | "lead" | "survey" | "meeting", id: string, label: string) => ({ kind, id, label });
+  ok(
+    P.suggestionSourceLine(src("thread", "T-1", "Curtain quote")) === "From email: Curtain quote" &&
+      P.suggestionSourceLine(src("lead", "L-1050", "Lincoln HS")) === "From lead: Lincoln HS" &&
+      P.suggestionSourceLine(src("survey", "FS-1", "Lincoln HS — Auditorium")) === "From site visit: Lincoln HS — Auditorium" &&
+      P.suggestionSourceLine(src("meeting", "MTG-1", "Kickoff")) === "From meeting: Kickoff" &&
+      P.suggestionSourceLine(src("lead", "L-9", " ")) === "From lead: L-9",
+    "suggest panel: the source line names the kind (email / lead / site visit / meeting); a blank label shows the id"
+  );
+  ok(
+    P.suggestionSourceHref(src("thread", "T 1/2", "")) === "/inbox?thread=T%201%2F2" &&
+      P.suggestionSourceHref(src("lead", "L-1050", "")) === "/leads?lead=L-1050" &&
+      P.suggestionSourceHref(src("survey", "FS-1053", "")) === "/venue-assessments/FS-1053" &&
+      P.suggestionSourceHref(src("meeting", "MTG-1", "")) === "/inbox?view=meetings&m=MTG-1",
+    "suggest panel: the link back — Inbox thread, Leads drawer, the site visit's page, the Meetings reader (ids encoded)"
+  );
+  // The link shapes are the ones those pages actually read.
+  const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
+  const leads = readFileSync("src/app/(app)/leads/page.tsx", "utf8");
+  ok(/str\(params\.thread\)/.test(inbox) && /str\(params\.m\)/.test(inbox) && /one\(sp\.lead\)/.test(leads) && existsSync("src/app/(app)/venue-assessments/[id]/page.tsx"), "suggest panel: /inbox?thread=, /inbox?view=meetings&m=, /leads?lead= and /venue-assessments/<id> are real deep links");
+
+  const full: EstimateSuggestion = {
+    id: "ES-panel00001",
+    source: { kind: "lead", id: "L-1050", label: "Lincoln HS" },
+    createdBy: { id: "u1", name: "Jeff" },
+    createdAt: 1,
+    customerId: "lincoln",
+    contactName: "Pat",
+    venueId: "v1",
+    leadId: "L-1050",
+    quoteName: "Lincoln HS — curtains",
+    systems: [
+      { key: "s1", name: "Main curtain", categoryId: "", lines: [
+        { key: "s1-l1", sku: "VEL-1", desc: "old desc", qty: 4, reason: "main drape", custom: false },
+        { key: "s1-l2", sku: "TRK-1", desc: "Track", qty: 40, reason: "", custom: false },
+        { key: "s1-l3", sku: "GONE-1", desc: "Retired part", qty: 2, reason: "", custom: false },
+        { key: "s1-l4", sku: "", desc: "Install labor", qty: 1, reason: "crew", custom: true },
+      ] },
+      { key: "s2", name: "", categoryId: "", lines: [{ key: "s2-l1", sku: "VEL-1", desc: "x", qty: 1, reason: "", custom: false }] },
+    ],
+    notes: "Confirm the width.",
+    truncated: 7,
+    runIds: { extract: "AR-1", draft: "AR-2" },
+    quoteId: null,
+  };
+  const view = P.suggestionViewOf(full);
+  ok(
+    view.id === full.id && view.sourceLine === "From lead: Lincoln HS" && view.sourceHref === "/leads?lead=L-1050" && view.notes === "Confirm the width." && view.truncated === 7 && view.systems === full.systems &&
+      Object.keys(view).sort().join(",") === "id,notes,sourceHref,sourceLine,systems,truncated",
+    "suggest panel: the view carries source line + link, notes, systems and truncated — no createdBy, run ids or header ids"
+  );
+  const parts: Record<string, PricePart> = Object.fromEntries(PARTS);
+  const none = P.suggestionPanelVM(view, addedState(view, [], PARTS), parts);
+  const l = none[0].lines;
+  ok(
+    l[0].desc === "IFR velour 25oz" && l[0].qty === 4 && l[0].reason === "main drape" && !l[0].needsPart && !l[0].added &&
+      l[1].desc === "Curtain track (renamed)" && !l[1].needsPart &&
+      l[2].needsPart && l[2].desc === "Retired part" &&
+      l[3].needsPart && l[3].desc === "Install labor",
+    "suggest panel: a live part shows its catalog description; a gone part or a custom line 'needs a part'"
+  );
+  ok(none[0].added === 0 && none[0].total === 4 && !none[0].all && none[1].name === "System", "suggest panel: nothing added in an empty estimate; a blank system name reads 'System'");
+  const secs = [
+    { id: "sys101", items: [{ id: 1, sku: "VEL-1", desc: "IFR velour 25oz", qty: 4, unit: "yd", cost: 60, price: 100 }, { id: 2, sku: "Brand:TRK", desc: "t", qty: 40, unit: "ft", cost: 0, price: 18 }] },
+    { id: "sys102", items: [{ id: 3, sku: "", desc: "install LABOR", qty: 1, unit: "ea", cost: 0, price: 0, custom: true }] },
+  ];
+  const vm = P.suggestionPanelVM(view, addedState(view, secs, PARTS), parts);
+  ok(vm[0].lines[0].added && vm[0].lines[1].added && !vm[0].lines[2].added && vm[0].lines[3].added && vm[0].added === 3 && !vm[0].all && vm[1].all && vm[1].lines[0].added, "suggest panel: ✓ added follows addedState over the current sections (renamed sku, custom by description, any system)");
+
+  ok(
+    P.defaultSuggestionTarget("s1", { s1: "sys102" }, ["sys101", "sys102"]) === "sys102" &&
+      P.defaultSuggestionTarget("s1", { s1: "sys999" }, ["sys101", "sys102"]) === "sys101" &&
+      P.defaultSuggestionTarget("s2", { s1: "sys102" }, ["sys101", "sys102"]) === "sys101" &&
+      P.defaultSuggestionTarget("s1", {}, []) === "",
+    "suggest panel: a line's default target is the system last added from that suggestion system while it exists, else the first system ('' with none)"
+  );
+  ok(
+    P.suggestPanelOpen(null, false) && !P.suggestPanelOpen(null, true) && P.suggestPanelOpen("1", true) && !P.suggestPanelOpen("0", false) && P.suggestPanelOpen("junk", false) &&
+      P.suggestPanelKey("ES-abc123") === "quartzite.estimator.suggestOpen:ES-abc123",
+    "suggest panel: open on a new estimate, collapsed on a saved quote; a remembered choice (per suggestion) wins"
+  );
+
+  // Client bundle: no store / db value imports in anything the panel ships with.
+  const valueImport = /^import (?!type )[^\n]*from "@\/(lib\/stores|db)/m;
+  const clientFiles = [
+    "src/app/(app)/estimator/suggested-bom-panel.tsx",
+    "src/app/(app)/estimator/steps/build-step.tsx",
+    "src/app/(app)/estimator/use-estimator-state.ts",
+    "src/lib/assist/features/suggestion-panel.ts",
+  ];
+  ok(clientFiles.every((f) => !valueImport.test(readFileSync(f, "utf8"))), "suggest panel: the panel, Build step, Estimator hook and panel VM import no store or db values");
+  ok(/^"use client";/.test(readFileSync(clientFiles[0], "utf8")) && !/from "\.\/actions"|from "@\/lib\/assist\/suggestion-save"/.test(readFileSync(clientFiles[0], "utf8")), "suggest panel: SuggestedBomPanel is a client component that takes data as props (no actions, no server helpers)");
+}
+
+/** Task 3 — wiring pins: the page loads the suggestion, the Build step shows the panel, the save carries leadId/suggestionId. */
+export async function suggestPanelPins(ok: Ok): Promise<void> {
+  const page = readFileSync("src/app/(app)/estimator/page.tsx", "utf8");
+  ok(/const suggestion = await loadSuggestion\(handoff\?\.suggestionId \|\| "", q \? q\.id : null\);/.test(page) && /getSuggestion\(suggestionId\)/.test(page) && /suggestionForQuote\(quoteId\)/.test(page), "suggest estimator page: loads ?suggestion= on a new estimate, else the saved quote's linked suggestion");
+  ok(/await getManyBySku\(skus\)/.test(page) && /parts\[sku\] = \{ sku: p\.sku/.test(page) && /suggestion=\{suggestion\.view\}/.test(page) && /suggestionParts=\{suggestion\.parts\}/.test(page), "suggest estimator page: live parts via getManyBySku, keyed by the suggestion's own sku, passed as props");
+  ok(/const sugg = !q && handoff\?\.suggestionId \? suggestion\.record : null;/.test(page) && /pickVenueId\(cust, seedVenue\)/.test(page) && /if \(!q\) initial\.leadId = handoff\?\.leadId \|\| sugg\?\.leadId \|\| null;/.test(page) && /leadId: q\.leadId \|\| null,/.test(page), "suggest estimator page: the suggestion's header fills only what the URL left blank (venue through pickVenueId); a saved quote shows its own lead");
+  const build = readFileSync("src/app/(app)/estimator/steps/build-step.tsx", "utf8");
+  ok(/import \{ SuggestedBomPanel \} from "\.\.\/suggested-bom-panel";/.test(build) && /\{s\.suggestion && \(\s*<SuggestedBomPanel/.test(build) && /onAddSystem=\{s\.addSuggestedSystem\}/.test(build) && /onAddLine=\{s\.addSuggestedLine\}/.test(build) && /added=\{s\.suggestionAdded\}/.test(build), "suggest Build step: the Suggested BOM panel sits beside the system cards, wired to the hook");
+  const hook = readFileSync("src/app/(app)/estimator/use-estimator-state.ts", "utf8");
+  ok(/const sec = systemFromSuggestion\(sys, suggestionLookup, \{\s*nextId,\s*tierMargin,\s*price: catalogAddPrice,/.test(hook) && /if \(part\) addPart\(targetSecId, /.test(hook) && /else pushItems\(targetSecId, \[itemFromSuggestionLine\(line, suggestionLookup, \{ nextId, tierMargin, price: catalogAddPrice \}\)\]\);/.test(hook), "suggest Estimator hook: + Add system / + line price only through catalogAddPrice at the tier (addPart for a live part)");
+  ok(/\.\.\.\(!loadedId && initial\.leadId \? \{ leadId: initial\.leadId \} : \{\}\),/.test(hook) && /\.\.\.\(suggestion \? \{ suggestionId: suggestion\.id \} : \{\}\),/.test(hook), "suggest Estimator hook: leadId rides the create save only; suggestionId rides every save while a suggestion shows");
+  const act = readFileSync("src/app/(app)/estimator/actions.ts", "utf8");
+  const fn = act.slice(act.indexOf("export async function saveQuoteAction"), act.indexOf("async function settleRewardCredit"));
+  const patchBody = fn.slice(fn.indexOf("const patch: QuotePatch = {"), fn.indexOf("patch.spec = await quoteSpecFollowingRenames"));
+  ok(patchBody.length > 0 && !/leadId/.test(patchBody) && /const leadId = await leadIdForCreate\(payload\.leadId\);\s*try \{\s*created = await create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\);/.test(fn), "suggest save: leadId is stamped on create only (checked against the leads) — the shared update patch never carries it");
+  ok(/if \(q\?\.id && payload\.suggestionId\) await linkSavedQuoteToSuggestion\(payload\.suggestionId, q\.id\);\s*refresh\(\);/.test(fn), "suggest save: every successful save (create or update) links the quote to its suggestion before returning");
+}
+
+/** Task 3 — the save's suggestion side, end to end on the DB (the helpers saveQuoteAction calls). */
+export async function suggestSaveDbChecks(ok: Ok): Promise<void> {
+  const S = await import("@/lib/stores/estimate-suggestions");
+  const { leadIdForCreate, linkSavedQuoteToSuggestion } = await import("@/lib/assist/suggestion-save");
+  const { create, get, update } = await import("@/lib/stores/quotes");
+  const { getBlob } = await import("@/db/doc-store");
+  const { getDb } = await import("@/db");
+  const { blobs } = await import("@/db/schema");
+  const { inArray } = await import("drizzle-orm");
+  const { createFixture, fixtureId, registerFixture } = await import("./test-fixtures");
+  const LEAD = fixtureId(338, "save-lead");
+  const LEAD_OLD = fixtureId(338, "save-lead-old");
+  const made: string[] = [];
+  const NOW = Date.UTC(2034, 3, 11, 15, 0);
+  try {
+    for (const id of [LEAD, LEAD_OLD]) await createFixture("leads", { id, org: "Savewell HS", contact: "Sue", stage: "new", activities: [], createdAt: NOW, updatedAt: NOW } as never);
+    const sugg: EstimateSuggestion = {
+      id: newSuggestionId(NOW), source: { kind: "lead", id: LEAD, label: "Savewell HS" }, createdBy: { id: "u1", name: "Jeff" }, createdAt: NOW,
+      customerId: null, contactName: null, venueId: null, leadId: LEAD, quoteName: "Savewell", systems: [], notes: "", truncated: 0, runIds: { extract: null, draft: null }, quoteId: null,
+    };
+    made.push(S.suggestionBlobId(sugg.id), S.sourceIndexBlobId("lead", LEAD));
+    await S.saveSuggestion(sugg);
+
+    ok((await leadIdForCreate(LEAD)) === LEAD && (await leadIdForCreate(` ${LEAD} `)) === LEAD, "suggest save: a known lead id is kept for the create (trimmed)");
+    ok((await leadIdForCreate(fixtureId(338, "no-such-lead"))) === null && (await leadIdForCreate("L-1<x>")) === null && (await leadIdForCreate(42)) === null && (await leadIdForCreate("")) === null, "suggest save: an unknown, malformed or non-string lead id stamps nothing");
+
+    // The create branch: create({...patch, owner, leadId}) then link.
+    const leadId = await leadIdForCreate(LEAD);
+    const created = await create({ name: "Savewell — System", source: "estimator", owner: "Jeff", ...(leadId ? { leadId } : {}) });
+    registerFixture("quotes", created.id);
+    made.push(S.quoteIndexBlobId(created.id));
+    ok((await linkSavedQuoteToSuggestion(sugg.id, created.id)) === true, "suggest save: the first save links the new quote");
+    ok((await get(created.id))?.leadId === LEAD, "suggest save: the created quote carries the lead");
+    const idx = await getBlob<{ id?: string }>(S.quoteIndexBlobId(created.id), {});
+    ok(idx.id === sugg.id && (await S.suggestionForQuote(created.id))?.id === sugg.id && (await S.getSuggestion(sugg.id))?.quoteId === created.id, "suggest save: both indexes — estsugg-quote:<quoteId> → the suggestion, and the suggestion's quoteId → the quote");
+
+    // A later save (the update branch: the shared patch, no leadId) keeps the lead; re-linking is a no-op.
+    await update(created.id, { name: "Savewell — renamed", customerId: null });
+    ok((await linkSavedQuoteToSuggestion(sugg.id, created.id)) === true && (await S.getSuggestion(sugg.id))?.quoteId === created.id && (await get(created.id))?.leadId === LEAD, "suggest save: a later save keeps the lead and the link (idempotent)");
+
+    // A saved quote that already has a lead keeps it, whatever the hand-off says.
+    const older = await create({ name: "Older", source: "estimator", owner: "Jeff", leadId: LEAD_OLD });
+    registerFixture("quotes", older.id);
+    made.push(S.quoteIndexBlobId(older.id));
+    await update(older.id, { name: "Older — saved again", customerId: null, contactName: "" });
+    ok((await get(older.id))?.leadId === LEAD_OLD, "suggest save: a saved quote keeps its existing leadId");
+    ok((await linkSavedQuoteToSuggestion(sugg.id, older.id)) === true && (await S.getSuggestion(sugg.id))?.quoteId === created.id && (await S.suggestionForQuote(older.id))?.id === sugg.id, "suggest save: a second quote from the same suggestion is indexed; the suggestion keeps its first quote");
+
+    ok((await linkSavedQuoteToSuggestion("ES-nosuchsugg1", older.id)) === false && (await linkSavedQuoteToSuggestion("../x", older.id)) === false && (await linkSavedQuoteToSuggestion(undefined, older.id)) === false && (await linkSavedQuoteToSuggestion(sugg.id, null)) === false, "suggest save: an unknown / malformed suggestion id or a missing quote id is ignored");
+    ok((await S.suggestionForQuote(older.id))?.id === sugg.id, "suggest save: an ignored link writes nothing over the existing index");
+  } finally {
+    const db = await getDb();
+    await db.delete(blobs).where(inArray(blobs.id, made));
+  }
+}
+
 if (process.argv[1] && /test-suggest\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -485,6 +656,9 @@ if (process.argv[1] && /test-suggest\.ts$/.test(process.argv[1])) {
     await suggestStoreDbChecks(ok);
     await suggestRoutePins(ok);
     await suggestPipelineDbChecks(ok);
+    await suggestPanelChecks(ok);
+    await suggestPanelPins(ok);
+    await suggestSaveDbChecks(ok);
     // later tasks append: await suggestXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall suggest checks passed");
     process.exit(fail ? 1 : 0);

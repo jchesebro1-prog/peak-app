@@ -11350,7 +11350,7 @@ import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChe
 import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks, inboxOrgUiChecks, inboxOrgCleanupChecks } from "./test-inbox-org";
 import { popoutPureChecks } from "./test-popout";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
-import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks } from "./test-suggest";
+import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks } from "./test-suggest";
 import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
@@ -11719,6 +11719,9 @@ seeded()
   .then(() => suggestStoreDbChecks(ok))
   .then(() => suggestRoutePins(ok))
   .then(() => suggestPipelineDbChecks(ok))
+  .then(() => suggestPanelChecks(ok))
+  .then(() => suggestPanelPins(ok))
+  .then(() => suggestSaveDbChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");

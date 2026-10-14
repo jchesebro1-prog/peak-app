@@ -18,6 +18,7 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 import type { SystemIntro } from "@/lib/narrative/intros";
+import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -607,6 +608,10 @@ export type InitialQuote = {
   clientResponses: ClientResponse[] | null;
   bonusRecord: BonusRecord | null;
   estimatorBonusSplit: BonusSplit | null;
+  /** Estimate suggestion (spec 2026-10-13 §2) — the lead this estimate is for:
+   *  the stored one on a saved quote (never changed by a save), else the
+   *  hand-off's / suggestion's; sent with the CREATE save only. */
+  leadId: string | null;
 };
 
 /**
@@ -708,4 +713,12 @@ export type EstimatorProps = {
   narrativeIntros: SystemIntro[];
   /** #301 — Settings → Estimate output: the default Not included list (Reset to default). */
   notIncludedDefault: string;
+  /** Estimate suggestion (spec 2026-10-13 §2) — the Suggested BOM panel's view:
+   *  from `?suggestion=` on a new estimate, or the suggestion a saved quote was
+   *  built from; null/absent = no panel. */
+  suggestion?: EstimateSuggestionView | null;
+  /** The live catalog part behind each suggestion sku, keyed by the
+   *  suggestion's own sku (a rename resolves to the new part); a sku missing
+   *  here lands as an unpriced custom line. */
+  suggestionParts?: SuggestionParts;
 };

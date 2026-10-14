@@ -56,6 +56,8 @@ import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/
 import { countCutSheetTypes } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import { vendorDraftTotal, vendorDraftTotalSource, vendorKeptLines, vendorLinesTotal } from "./vendor-quote-modal";
 import { systemFromCategory } from "@/lib/system-categories";
+import { addedState, itemFromSuggestionLine, systemFromSuggestion } from "@/lib/assist/features/suggestion";
+import { defaultSuggestionTarget, suggestPanelKey, suggestPanelOpen, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
@@ -216,6 +218,7 @@ export function useEstimatorState(props: EstimatorProps) {
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault,
+    suggestion = null, suggestionParts,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -1340,6 +1343,11 @@ export function useEstimatorState(props: EstimatorProps) {
           name: projectName,
           // D205: only the create save retires the replaced draft.
           replaces: loadedId ? "" : initial.replaces,
+          // Estimate suggestion: the lead rides the CREATE save only (a saved
+          // quote keeps its own); the suggestion id rides every save while the
+          // panel shows one — linking is idempotent server-side.
+          ...(!loadedId && initial.leadId ? { leadId: initial.leadId } : {}),
+          ...(suggestion ? { suggestionId: suggestion.id } : {}),
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
@@ -1929,6 +1937,67 @@ export function useEstimatorState(props: EstimatorProps) {
     if (sec.items.length === 0) openInputMethod("catalog", sec.id);
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(sec.id)));
   };
+  /* ---------------- Estimate suggestion: the Suggested BOM panel (spec 2026-10-13 §2) ---------------- */
+  const suggestionLookup = useMemo(() => new Map(Object.entries(suggestionParts ?? ({} as SuggestionParts))), [suggestionParts]);
+  /** The system each suggestion system's lines last went to (the line "+"'s default target). */
+  const [suggestionTargets, setSuggestionTargets] = useState<Record<string, string>>({});
+  /** "+ Add system" on a suggestion system: built like Add a system → category
+   *  (live parts at catalogAddPrice and the tier, the active group; a missing
+   *  part lands as an unpriced "Suggested: needs a part and price" line). */
+  const addSuggestedSystem = (systemKey: string) => {
+    const sys = suggestion?.systems.find((x) => x.key === systemKey);
+    if (!sys) return;
+    const groupId = sections.find((s) => s.id === activeId)?.groupId;
+    const sec = systemFromSuggestion(sys, suggestionLookup, {
+      nextId,
+      tierMargin,
+      price: catalogAddPrice,
+      groupId,
+      freightPct: freightDefault.pct,
+      priceRound: SYSTEM_PRICE_STEP,
+    });
+    setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
+    setSuggestionTargets((m) => ({ ...m, [systemKey]: sec.id }));
+    setActiveId(sec.id);
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(sec.id)));
+  };
+  /** "+" on one suggestion line: a live part goes through addPart (same price
+   *  as the catalog picker); a custom / gone part lands as an unpriced custom line. */
+  const addSuggestedLine = (systemKey: string, lineKey: string, targetSecId: string) => {
+    const line = suggestion?.systems.find((x) => x.key === systemKey)?.lines.find((l) => l.key === lineKey);
+    if (!line || !sections.some((s) => s.id === targetSecId)) return;
+    const part = !line.custom && line.sku ? suggestionLookup.get(line.sku) : undefined;
+    if (part) addPart(targetSecId, { sku: part.sku, desc: part.desc, cost: part.cost, price: part.list, unit: part.unit || "ea" }, line.qty);
+    else pushItems(targetSecId, [itemFromSuggestionLine(line, suggestionLookup, { nextId, tierMargin, price: catalogAddPrice })]);
+    setSuggestionTargets((m) => ({ ...m, [systemKey]: targetSecId }));
+  };
+  const suggestionTargetFor = (systemKey: string) => defaultSuggestionTarget(systemKey, suggestionTargets, sections.map((s) => s.id));
+  /** ✓ added — derived from the estimate as it stands (nothing stored). */
+  const suggestionAdded = useMemo(
+    () => (suggestion ? addedState(suggestion, sections, suggestionLookup) : {}),
+    [suggestion, sections, suggestionLookup]
+  );
+  /** Open on a new estimate, collapsed on a saved quote; this browser's choice wins (read after mount). */
+  const [suggestOpen, setSuggestOpen] = useState(() => suggestPanelOpen(null, !!initial.loadedId));
+  useEffect(() => {
+    if (!suggestion) return;
+    try {
+      setSuggestOpen(suggestPanelOpen(window.localStorage.getItem(suggestPanelKey(suggestion.id)), !!initial.loadedId));
+    } catch {
+      /* storage unavailable — keep the default */
+    }
+  }, [suggestion, initial.loadedId]);
+  const toggleSuggestOpen = () => {
+    const next = !suggestOpen;
+    setSuggestOpen(next);
+    if (!suggestion) return;
+    try {
+      window.localStorage.setItem(suggestPanelKey(suggestion.id), next ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
+
   /* ---------------- Phase 2a: groups, moves, built ---------------- */
   /** Every reorder writes through here: the Rewards credit re-pins to the new
    *  last system, exactly like deleteSystem. A no-op (same reference) writes nothing. */
@@ -3014,6 +3083,14 @@ export function useEstimatorState(props: EstimatorProps) {
     addPart,
     addSystem,
     addSystemFromCategory,
+    suggestion,
+    suggestionParts: suggestionParts ?? null,
+    addSuggestedSystem,
+    addSuggestedLine,
+    suggestionAdded,
+    suggestionTargetFor,
+    suggestOpen,
+    toggleSuggestOpen,
     addSystemOpen,
     setAddSystemOpen,
     addTrack,

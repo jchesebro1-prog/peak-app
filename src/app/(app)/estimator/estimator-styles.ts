@@ -25,6 +25,7 @@ export const CSS = `
 .est-delsys:hover { color: #d6584a !important; }
 .est-sug:hover { background: #fff !important; }
 .est-close:hover { background: #e7e9ee !important; }
+.est-suggest-add:hover { filter: brightness(.96); }
 .est-addsys:hover { border-color: var(--accent) !important; color: var(--accent) !important; }
 .est-preset:hover { filter: brightness(.97); }
 @media (max-width: 860px) {
@@ -33,6 +34,8 @@ export const CSS = `
   .est-topright { width: 100% !important; flex-wrap: wrap !important; gap: 10px !important; justify-content: flex-start !important; }
   .est-body { flex-direction: column !important; }
   .est-side { width: 100% !important; border-right: none !important; border-bottom: 1px solid #ececf0 !important; }
+  .est-suggest { width: 100% !important; border-left: none !important; border-top: 1px solid #ececf0 !important; overflow: visible !important; }
+  .est-suggest-collapsed .est-side-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
   .est-qd-grid { grid-template-columns: minmax(0, 1fr) !important; }
   .est-qd-col + .est-qd-col { border-left: none !important; border-top: 1px solid #2b2e35 !important; }
   .est-side-collapsed .est-side-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
