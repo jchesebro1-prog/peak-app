@@ -199,9 +199,9 @@ The model-backed features (summaries, import extraction, assistant Q&A) were
 removed per `docs/superpowers/specs/2026-07-19-ai-removal-design.md` and stay
 removed — the app is fully deterministic with no key set. Recover via version history.
 
-**Turning Assist on (D869–D880).** A small opt-in layer — Suggest tasks, Draft
-reply and Draft estimate, on an email thread in the Inbox — is the one place
-the app calls a model:
+**Turning Assist on (D869–D880).** A small opt-in layer — Suggest tasks and Draft
+reply on an email thread in the Inbox, and Suggest estimate (§6e; it replaced
+Draft estimate, #338) — is the one place the app calls a model:
 
 1. Create an API key at console.anthropic.com with billing, and set a Console
    spend limit that matches the monthly cap (default $200).
@@ -216,8 +216,9 @@ the app calls a model:
 3. In Settings → Beta → Assist pilot, tick the pilot users. An empty list means
    nobody. The same card has the three feature toggles, the cap and the report.
 4. Try each button on a real thread. Assist only drafts: tasks need a tick,
-   replies land in the composer unsent, and an estimate is a draft Estimator
-   quote to check line by line.
+   replies land in the composer unsent, and Suggest estimate opens a new,
+   unsaved estimate with a Suggested BOM beside it — nothing is created until
+   you add lines and save (§6e).
 5. After about 30 days read the report (estimated cost, outcome per feature)
    and decide whether to keep it.
 
@@ -386,6 +387,64 @@ It is part of the Assist pilot, so nothing changes for anyone you have not switc
   card; the app cannot tell whether the nudge was then sent.
 - Check the first morning's cost in the Anthropic Console too. The first run drafts
   every thread on each person's court; later runs only redo drafts that went stale.
+
+## 6e. Suggest estimate (#338, D930–D942)
+
+Assist reads an email, a lead, a site visit or a meeting and suggests the systems and
+parts for an estimate. You build the estimate from the suggestion; Assist never
+creates or prices a quote. It replaced #334's Draft estimate.
+
+**Turn it on**
+
+- Settings → Beta → Assist pilot. The Claude key must be set (section 6) and the
+  person ticked in the pilot list.
+- Turn on **Suggest estimate** on that card. The draft step runs on Opus, so it is the
+  most expensive Assist call; watch its row in the report.
+
+**Where the button is**
+
+- **Inbox:** in an email thread's reader.
+- **Leads:** in the lead drawer, on its own line above Convert / Lost / Delete. It is
+  there on converted leads too, and the suggestion goes to the customer the lead
+  became.
+- **Venue assessments:** in the header. It is greyed out while you have unsaved edits
+  or a save is running, because Assist reads the saved assessment. Save first.
+- **Meetings** (Inbox → Meetings): in the reader's header, only when the meeting is
+  linked to a company or a job. A private or unlinked meeting never goes into a
+  suggestion.
+- **Home → the brief:** a lead under "Do these first" shows "Ready to quote?" with the
+  button.
+
+**Use it**
+
+1. Press **Suggest estimate**. It shows "Suggesting…" and can take a minute or two.
+   If it can't run you get a short message beside the button.
+2. The Estimator opens on a **new, unsaved** estimate. The header is filled in where
+   Assist knows it: the company, and the venue, contact and lead when they belong to
+   that company, plus a name. There are no lines yet.
+3. The **Suggested BOM** panel sits beside the systems on Build. Each suggested system
+   lists its parts with a quantity and a short reason. Press **+ Add system** to add
+   the whole system, or **+** on a line to add just that part to the system chosen in
+   "Lines go to". Parts are priced at the customer's tier, exactly as if you had added
+   them yourself. A line marked **needs a part** is something Assist couldn't match in
+   the catalog: it is added as a custom line with no price and the note "Suggested:
+   needs a part and price", so pick the real part or price it. **✓ added** shows what
+   is already in the estimate.
+4. Check every line, then **Save**. The first save links the estimate to the
+   suggestion. Reopen it later and the panel is there behind its "Suggested BOM" tab,
+   hidden until you open it.
+5. Back on the source, the button now reads **Suggestion ready → Open** (opens the
+   same suggestion again on a new estimate) and **Suggest again** (asks Assist for a fresh one, which
+   replaces it for that source).
+
+**Watch the cost and use**
+
+- Assist pilot card → report → **Suggest estimate (draft)**: runs, cost, and how the
+  saved estimates compare with the suggestion — accepted (90 % or more of the
+  suggested parts kept), edited, discarded (almost none kept, or its estimate was
+  deleted), still pending
+  (not saved yet), and **No suggestion** (nothing came of the run, or it was replaced
+  by Suggest again before anyone saved it).
 
 ## 7. Real data migration & go-live ✅ *(Phase 9 — tooling built)*
 

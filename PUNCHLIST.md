@@ -12078,4 +12078,31 @@ link/archive paths a person would.
 - With `INBOX_ORG_DISABLED` the Inbox schedules no queue; Home still drafts.
 - Task suggestions are not counted in the report; pre-drafts made before this change have no marker.
 
-**Next roadmap pieces:** estimate suggestion → AI sidebar.
+**Next roadmap pieces:** estimate suggestion → AI sidebar. (Estimate suggestion built as #338.)
+
+## 338. Estimate suggestion — a Suggested BOM beside a new estimate, from an email, lead, site visit or meeting — BUILT 2026-10-13 on `worktree-assist-layer` (D930–D942)
+
+**Asked (Jeff, 2026-10-13):** roadmap piece 3. Replace #334's Draft estimate, which created a priced draft quote, with a suggestion: a new, unsaved Estimator with the header filled in and a Suggested BOM panel the rep builds from. Sources: email thread, lead, site visit / venue assessment, Krisp meeting. Opus drafts (Haiku extract stays). Header only, no lines. Spec `docs/superpowers/specs/2026-10-13-estimate-suggestion-design.md`. Builds on Assist (#334), the AI daily brief (#337) and the four-step Estimator (#305). No migration, no new env var.
+
+**Done:**
+- **Pipeline** `suggestEstimate(source, me, deps)` (`src/lib/assist/estimate-suggest-server.ts`): per-kind access (an unlinked meeting is refused even for its owner; a lead's linked threads come from the caller's own mailbox only), untrusted source text per kind (`features/suggest-sources.ts`; `surveyFindings` moved to `src/lib/survey-findings.ts`), Haiku extract → candidates → Opus draft → `sanitizeSuggestion` (candidate SKUs only, no prices, 12 systems / 60 lines) (D932, D937).
+- **Storage:** blobs only — `estsugg:<id>`, `estsugg-src:<kind>:<id>` (latest; Suggest again replaces it), `estsugg-quote:<quoteId>` (D930).
+- **Route** `POST /api/assist/suggest-estimate`, `maxDuration = 300`, `requireUser` + the `estimate` gate, zod body, always-200 JSON (415 for a non-JSON body). Nothing creates a quote (D931).
+- **Estimator:** `?suggestion=` opens a new, unsaved estimate with the header filled where the URL left it blank (venue, contact and lead only when the customers match; the name) and a **Suggested BOM** panel on Build: **+ Add system**, **+** per line into a chosen system, ✓ added, "needs a part", source link and notes. Unknown parts become unpriced custom lines "Suggested: needs a part and price". `leadId` is stamped on create only; the first save links the suggestion (first quote kept, a missed link retried only through a save). The panel starts hidden on a saved quote and remembers Hide/Show per suggestion (D933–D937).
+- **Entry points** (pilot + the Suggest estimate feature): Inbox reader (replaces Draft estimate), lead drawer footer (own line; converted leads too), venue assessment header (disabled while unsaved or saving), meeting reader header (linked meetings only), and the brief card's lead row ("Ready to quote?"). One helper: busy until the Estimator opens (recovers after 15 s), errors inline, "Suggestion ready → Open" + "Suggest again" (D938, D941, D942).
+- **Report:** a run is scored off its suggestion's first quote — pending, accepted / edited / discarded (discarded when that quote is deleted), and a **No suggestion** column for runs that saved nothing or were superseded by Suggest again. The pilot card says "Suggest estimate" (D939).
+- **Removed:** `draftEstimateFromThread`, `draftEstimateAction`, the reader's Draft estimate button, `buildDraftSections`. Old #334 drafts keep their banner and Dismiss (D940).
+
+**Remaining (Jeff-gated):**
+- (1) The Claude key must be set (D881), the person ticked in Settings → Beta → Assist pilot, and the **Suggest estimate** feature on.
+- (2) Try it from an email, a lead, a site visit and a meeting (a meeting linked to a company or a job). Check that the header is right, the panel's parts make sense, **+ Add system** prices like a manual add, and the first save links the suggestion (reopen the quote: the panel's tab is there, hidden).
+- (3) Check the Opus cost per run in the Assist report (Suggest estimate (draft) row) and the Anthropic Console against the monthly cap.
+- (4) Not browser-verified in this build: the panel, the lead drawer footer and the venue assessment header were checked by code and pins only.
+
+**Known follow-ups:**
+- A meeting linked only to a venue (no company, no job) gets no button and no hint why; the server refuses it the same way.
+- Venue assessment: an edit saved offline and still queued in the outbox isn't on the server yet, so Suggest reads the older saved record (the button is disabled only for unsaved edits and while saving).
+- A lead suggestion loads the caller's whole mailbox to find the threads linked to the lead (no `link` column on comms); fine today, heavy for a large mailbox.
+- Renaming the report row to "Suggest estimate (…)" also relabels past months' Draft estimate runs.
+
+**Next roadmap piece:** AI sidebar.

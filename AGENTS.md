@@ -1066,6 +1066,8 @@ See `.env.example`.
     model — prices come only from `catalogAddPrice`, systems round to $25, line ids
     are unique across the quote, unknown parts become $0 custom lines, and a banner
     carries the notes, per-line reasons and a Dismiss that doesn't bump `updatedAt`.
+    **Draft estimate was replaced by Estimate suggestion (#338, phase 57):**
+    nothing creates a quote any more; drafts made before keep their banner.
     The gate (`src/lib/assist/config.ts`): no `ANTHROPIC_API_KEY` (or local URL) =
     no UI and no call; `ASSIST_DISABLED=true` kills it; `settings.assistUsers`
     must include the user (**an empty list means nobody**); per-feature toggles.
@@ -1196,10 +1198,50 @@ See `.env.example`.
     report gains a Daily brief table (nudge "opened" stands in for "sent"). The
     card never breaks Home. Remaining is Jeff-gated: turn Daily brief on for the
     pilot, `npx cap sync` and rebuild both apps, check the first morning's cost,
-    try Listen in the car. Follow-ups: estimate suggestion (next), whole-doc
-    writers that can clobber leases, per-process Rebuild limit, every user's
-    build scanning all threads and quotes. Next: estimate suggestion → AI
-    sidebar. Punch item #337.
+    try Listen in the car. Follow-ups: whole-doc writers that can clobber
+    leases, per-process Rebuild limit, every user's build scanning all threads
+    and quotes. Next: AI sidebar. Punch item #337.
+
+57. ✅ **Estimate suggestion** (#338, D930–D942) — roadmap piece 3, replacing
+    #334's Draft estimate, for Assist pilot users with the **Suggest estimate**
+    feature on (no migration, no new env var). **Suggest estimate** on an email
+    thread (Inbox reader), a lead (drawer footer, converted leads too), a site
+    visit (venue assessment header, disabled while unsaved or saving) or a linked
+    Krisp meeting (meeting reader header), and on the brief's lead row ("Ready to
+    quote?"), POSTs to `/api/assist/suggest-estimate` (`maxDuration = 300`,
+    `requireUser` + the `estimate` gate, zod body, always-200 JSON, 415 for a
+    non-JSON body). `suggestEstimate(source, me, deps)`
+    (`src/lib/assist/estimate-suggest-server.ts`) checks access per kind (an
+    unlinked meeting is refused even for its owner; a lead's linked threads come
+    from the caller's own mailbox only), builds untrusted source text
+    (`features/suggest-sources.ts`, `survey-findings.ts`), extracts (Haiku),
+    gathers candidates, drafts (Opus) and `sanitizeSuggestion`s it — candidate
+    SKUs only, no prices, 12 systems / 60 lines — into an `EstimateSuggestion`
+    stored as blobs (`estsugg:<id>`, `estsugg-src:<kind>:<id>` → latest,
+    `estsugg-quote:<quoteId>`; `src/lib/stores/estimate-suggestions.ts`). Nothing
+    creates a quote: the reply is an `/estimator?suggestion=…` link that opens a
+    new, unsaved estimate with only the header filled (customer, then venue,
+    contact and lead only when the suggestion is about that customer; the name)
+    and a **Suggested BOM** panel on Build (`suggested-bom-panel.tsx`, pure
+    `suggestion-panel.ts`): per system **+ Add system** (`systemFromSuggestion`,
+    priced like a manual add through `catalogAddPrice`) and **+** per line into a
+    chosen system, ✓ added derived from the sections, unknown parts as unpriced
+    custom lines "Suggested: needs a part and price". The save stamps `leadId` on
+    create only and links the suggestion on the first save (first quote kept;
+    `unlinkedRetryAllowed` retries a missed link, never on a page load); the panel
+    starts hidden on a saved quote, open/closed remembered per suggestion only
+    when toggled. One client helper (`suggest-client.ts`, `suggest-estimate.tsx`)
+    runs every entry point: busy until the Estimator opens (recovers after 15 s),
+    errors inline, "Suggestion ready → Open" + "Suggest again" when the source has
+    one. The Assist report scores a run off its suggestion's first quote
+    (`estimateKeep`): pending until saved, discarded if that quote is deleted, and
+    a No suggestion bucket for runs that saved nothing or were superseded by
+    Suggest again. Old #334 drafts keep their banner. Remaining is Jeff-gated:
+    the key, pilot users and the Suggest estimate toggle; try it from an email, a
+    lead, a site visit and a meeting; check the Opus cost per run in the report.
+    Follow-ups: site-only meetings get no hint; an offline-queued survey edit
+    isn't on the server yet when Suggest reads it. Next: AI sidebar. Punch item
+    #338.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
