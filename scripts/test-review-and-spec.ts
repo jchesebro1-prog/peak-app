@@ -21823,8 +21823,9 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     "#214 UI fix 2: Typeahead preventDefault()s its own Escape so an outer dialog can tell it was already handled"
   );
   // 8. The old inline picker was gated to email threads; "Link…" follows.
+  // #341: the same gate also hides it on a read-only (another mailbox's) thread.
   ok(
-    reader214.includes("isEmail={vm.isEmail}") && reader214.includes("{isEmail && ("),
+    reader214.includes("isEmail={vm.isEmail}") && reader214.includes("{isEmail && !readOnly && ("),
     "#214 UI fix 8: the per-message Link… button is hidden on a non-email thread (!vm.isEmail)"
   );
   // 9. The ✕ close button had an accessible name; #214 sidebar replaced it

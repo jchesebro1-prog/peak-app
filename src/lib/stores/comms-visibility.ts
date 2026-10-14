@@ -9,7 +9,7 @@
  *     explicit hand-off; compared like quote-approval-rules' sameName), or
  *   - it is LINKED to an entity: a stored customerId, a siteId, a work link
  *     (`link` with a type and an id), or deliberately linked people
- *     (`linkedContactIds`, the Link popup).
+ *     (`linkedContactIds`, the reader sidebar's link panel).
  * `resolvedContactId` alone does NOT count: it is the automatic sender match
  * stamped at import, not a decision anyone made to share the mail.
  * Another person's DRAFT is never visible — unsent mail is not yet a record.

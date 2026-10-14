@@ -12597,7 +12597,7 @@ Jeff, 2026-10-14: "you can only see information that was either linked to entiti
 
 ## D1005. Which fields count as "linked", and why the automatic sender match doesn't (#341, 2026-10-14)
 
-Linked = a non-empty `customerId`, a non-empty `siteId`, a work `link` with both a type and an id (quote, lead, survey, inspection, project, flame job), or a non-empty `linkedContactIds` (people chosen in the Link popup, #214). `resolvedContactId` alone does **not** count: it is stamped automatically at import when the sender's address matches a contact, so it says who wrote, not that anyone decided the mail is a business record. A domain claim that adopts the customer writes `customerId`, which does count — that is a deliberate filing step. "Assigned to me" compares like `sameName` (trimmed, case-insensitive), the same test Morning triage's email feed uses, so every thread triage or the bell lists still opens.
+Linked = a non-empty `customerId`, a non-empty `siteId`, a work `link` with both a type and an id (quote, lead, survey, inspection, project, flame job), or a non-empty `linkedContactIds` (people chosen in the reader sidebar's link panel, #214). `resolvedContactId` alone does **not** count: it is stamped automatically at import when the sender's address matches a contact, so it says who wrote, not that anyone decided the mail is a business record. A domain claim that adopts the customer writes `customerId`, which does count — that is a deliberate filing step. "Assigned to me" compares like `sameName` (trimmed, case-insensitive), the same test Morning triage's email feed uses, so every thread triage or the bell lists still opens.
 
 ## D1006. Off-mailbox threads open read-only; every Inbox write stays with the owner (#341, 2026-10-14)
 
