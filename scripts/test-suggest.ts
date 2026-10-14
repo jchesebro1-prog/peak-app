@@ -595,7 +595,7 @@ export async function suggestPanelChecks(ok: Ok): Promise<void> {
 /** Task 3 — wiring pins: the page loads the suggestion, the Build step shows the panel, the save carries leadId/suggestionId. */
 export async function suggestPanelPins(ok: Ok): Promise<void> {
   const page = readFileSync("src/app/(app)/estimator/page.tsx", "utf8");
-  ok(/const suggestion = await loadSuggestion\(readHandoff\(sp\)\.suggestionId, q\);/.test(page) && /record = await getSuggestion\(suggestionId\);/.test(page) && /record = await suggestionForQuote\(quote\.id\);\s*linked = !!record;/.test(page), "suggest estimator page: loads ?suggestion= on a new estimate, else the saved quote's linked suggestion");
+  ok(/\[suggestion, fabricRows,[^\]]*\]\s*=\s*await Promise\.all\(\[\s*loadSuggestion\(readHandoff\(sp\)\.suggestionId, q\),/.test(page) && /record = await getSuggestion\(suggestionId\);/.test(page) && /record = await suggestionForQuote\(quote\.id\);\s*linked = !!record;/.test(page), "suggest estimator page: loads ?suggestion= on a new estimate, else the saved quote's linked suggestion");
   ok(/if \(!record && suggestionId\) \{\s*const s = await getSuggestion\(suggestionId\);\s*if \(s && unlinkedRetryAllowed\(s, quote\)\) record = s;/.test(page) && /view: suggestionViewOf\(record, linked\)/.test(page) && !/linkSavedQuoteToSuggestion|linkSuggestionToQuote/.test(page), "suggest estimator page: a saved quote whose link didn't land shows the URL's suggestion UNLINKED (no write on a page load) so the next save retries");
   ok(/await getManyBySku\(skus\)/.test(page) && /parts\[sku\] = \{ sku: p\.sku/.test(page) && /suggestion=\{suggestion\.view\}/.test(page) && /suggestionParts=\{suggestion\.parts\}/.test(page), "suggest estimator page: live parts via getManyBySku, keyed by the suggestion's own sku, passed as props");
   ok(/const sugg = !q && handoff\?\.suggestionId \? suggestion\.record : null;/.test(page) && /pickVenueId\(cust, seedVenue\)/.test(page) && /const suggSameCustomer = !!sugg && \(sugg\.customerId \|\| undefined\) === seedCustomer;/.test(page) && /handoff\?\.venueId \|\| \(suggSameCustomer \?/.test(page) && /handoff\?\.contactName \|\| \(suggSameCustomer \?/.test(page) && /if \(!q\) initial\.leadId = handoff\?\.leadId \|\| \(suggSameCustomer \? sugg\?\.leadId : null\) \|\| null;/.test(page) && /leadId: q\.leadId \|\| null,/.test(page), "suggest estimator page: the suggestion's header fills only what the URL left blank; its venue, contact and lead only for the customer being seeded (venue through pickVenueId); a saved quote shows its own lead");
@@ -612,7 +612,7 @@ export async function suggestPanelPins(ok: Ok): Promise<void> {
   const fn = act.slice(act.indexOf("export async function saveQuoteAction"), act.indexOf("async function settleRewardCredit"));
   const patchBody = fn.slice(fn.indexOf("const patch: QuotePatch = {"), fn.indexOf("patch.spec = await quoteSpecFollowingRenames"));
   ok(patchBody.length > 0 && !/leadId/.test(patchBody) && /const leadId = await leadIdForCreate\(payload\.leadId\);\s*try \{\s*created = await create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\);/.test(fn), "suggest save: leadId is stamped on create only (checked against the leads) — the shared update patch never carries it");
-  ok(/const suggestionLinked = q\?\.id && payload\.suggestionId \? await linkSavedQuoteToSuggestion\(payload\.suggestionId, q\.id\) : false;\s*refresh\(\);/.test(fn) && /\.\.\.\(suggestionLinked \? \{ suggestionLinked: true \} : \{\}\),/.test(fn), "suggest save: a save carrying a suggestion id (create or update) links the quote and reports suggestionLinked");
+  ok(/const suggestionLinked = q\?\.id && payload\.suggestionId \? await linkSavedQuoteToSuggestion\(payload\.suggestionId, q, !loadedId\) : false;\s*refresh\(\);/.test(fn) && /\.\.\.\(suggestionLinked \? \{ suggestionLinked: true \} : \{\}\),/.test(fn), "suggest save: a save carrying a suggestion id links the quote (an update only through the unlinkedRetryAllowed guard) and reports suggestionLinked");
 }
 
 /** Task 3 — the save's suggestion side, end to end on the DB (the helpers saveQuoteAction calls). */
@@ -646,14 +646,14 @@ export async function suggestSaveDbChecks(ok: Ok): Promise<void> {
     const created = await create({ name: "Savewell — System", source: "estimator", owner: "Jeff", ...(leadId ? { leadId } : {}) });
     registerFixture("quotes", created.id);
     made.push(S.quoteIndexBlobId(created.id));
-    ok((await linkSavedQuoteToSuggestion(sugg.id, created.id)) === true, "suggest save: the first save links the new quote");
+    ok((await linkSavedQuoteToSuggestion(sugg.id, created, true)) === true, "suggest save: the first save links the new quote");
     ok((await get(created.id))?.leadId === LEAD, "suggest save: the created quote carries the lead");
     const idx = await getBlob<{ id?: string }>(S.quoteIndexBlobId(created.id), {});
     ok(idx.id === sugg.id && (await S.suggestionForQuote(created.id))?.id === sugg.id && (await S.getSuggestion(sugg.id))?.quoteId === created.id, "suggest save: both indexes — estsugg-quote:<quoteId> → the suggestion, and the suggestion's quoteId → the quote");
 
     // A later save (the update branch: the shared patch, no leadId) keeps the lead; re-linking is a no-op.
     await update(created.id, { name: "Savewell — renamed", customerId: null });
-    ok((await linkSavedQuoteToSuggestion(sugg.id, created.id)) === true && (await S.getSuggestion(sugg.id))?.quoteId === created.id && (await get(created.id))?.leadId === LEAD, "suggest save: a later save keeps the lead and the link (idempotent)");
+    ok((await linkSavedQuoteToSuggestion(sugg.id, (await get(created.id))!, false)) === true && (await S.getSuggestion(sugg.id))?.quoteId === created.id && (await get(created.id))?.leadId === LEAD, "suggest save: a later save keeps the lead and the link (idempotent)");
 
     // A saved quote that already has a lead keeps it, whatever the hand-off says.
     const older = await create({ name: "Older", source: "estimator", owner: "Jeff", leadId: LEAD_OLD });
@@ -661,10 +661,29 @@ export async function suggestSaveDbChecks(ok: Ok): Promise<void> {
     made.push(S.quoteIndexBlobId(older.id));
     await update(older.id, { name: "Older — saved again", customerId: null, contactName: "" });
     ok((await get(older.id))?.leadId === LEAD_OLD, "suggest save: a saved quote keeps its existing leadId");
-    ok((await linkSavedQuoteToSuggestion(sugg.id, older.id)) === true && (await S.getSuggestion(sugg.id))?.quoteId === created.id && (await S.suggestionForQuote(older.id))?.id === sugg.id, "suggest save: a second quote from the same suggestion is indexed; the suggestion keeps its first quote");
+    ok((await linkSavedQuoteToSuggestion(sugg.id, older, true)) === true && (await S.getSuggestion(sugg.id))?.quoteId === created.id && (await S.suggestionForQuote(older.id))?.id === sugg.id, "suggest save: a second NEW quote from the same suggestion is indexed; the suggestion keeps its first quote");
 
-    ok((await linkSavedQuoteToSuggestion("ES-nosuchsugg1", older.id)) === false && (await linkSavedQuoteToSuggestion("../x", older.id)) === false && (await linkSavedQuoteToSuggestion(undefined, older.id)) === false && (await linkSavedQuoteToSuggestion(sugg.id, null)) === false, "suggest save: an unknown / malformed suggestion id or a missing quote id is ignored");
+    ok((await linkSavedQuoteToSuggestion("ES-nosuchsugg1", older, true)) === false && (await linkSavedQuoteToSuggestion("../x", older, true)) === false && (await linkSavedQuoteToSuggestion(undefined, older, true)) === false && (await linkSavedQuoteToSuggestion(sugg.id, null, true)) === false && (await linkSavedQuoteToSuggestion("ES-nosuchsugg1", older, false)) === false, "suggest save: an unknown / malformed suggestion id or a missing quote id is ignored");
     ok((await S.suggestionForQuote(older.id))?.id === sugg.id, "suggest save: an ignored link writes nothing over the existing index");
+
+    // The update-branch guard: a crafted save can't attach a suggestion it has no claim to.
+    const FRESH_AT = NOW + 60_000;
+    const sugg2: EstimateSuggestion = { ...sugg, id: newSuggestionId(NOW + 1), source: { kind: "lead", id: LEAD_OLD, label: "Old HS" }, createdAt: FRESH_AT, customerId: null, leadId: LEAD_OLD, quoteId: null };
+    made.push(S.suggestionBlobId(sugg2.id), S.sourceIndexBlobId("lead", LEAD_OLD));
+    await S.saveSuggestion(sugg2);
+    const olderNow = (await get(older.id))!;
+    ok(olderNow.createdAt < FRESH_AT, "suggest save: (setup) the saved quote predates the new suggestion");
+    ok((await linkSavedQuoteToSuggestion(sugg2.id, olderNow, false)) === false && (await S.suggestionForQuote(older.id))?.id === sugg.id && (await S.getSuggestion(sugg2.id))?.quoteId === null, "suggest save: an UPDATE can't link a suggestion newer than the quote, and writes nothing");
+    ok((await linkSavedQuoteToSuggestion(sugg.id, { id: "TEST-Q-sugg-claimed", createdAt: NOW + 5, customerId: null }, false)) === false && (await S.suggestionForQuote("TEST-Q-sugg-claimed")) === null, "suggest save: an UPDATE can't link a suggestion already claimed by a different quote");
+    const SC = fixtureId(338, "save-cust");
+    const sugg3: EstimateSuggestion = { ...sugg, id: newSuggestionId(NOW + 2), source: { kind: "lead", id: fixtureId(338, "save-lead-3"), label: "Cust HS" }, customerId: SC, leadId: null, quoteId: null };
+    made.push(S.suggestionBlobId(sugg3.id), S.sourceIndexBlobId("lead", sugg3.source.id), S.quoteIndexBlobId("TEST-Q-sugg-ok"), S.quoteIndexBlobId("TEST-Q-sugg-other"));
+    await S.saveSuggestion(sugg3);
+    ok((await linkSavedQuoteToSuggestion(sugg3.id, { id: "TEST-Q-sugg-other", createdAt: NOW + 5, customerId: "someone-else" }, false)) === false && (await S.suggestionForQuote("TEST-Q-sugg-other")) === null, "suggest save: an UPDATE can't link a suggestion naming a different customer");
+    ok((await linkSavedQuoteToSuggestion(sugg3.id, { id: "TEST-Q-sugg-ok", createdAt: NOW + 5, customerId: SC }, false)) === true && (await S.suggestionForQuote("TEST-Q-sugg-ok"))?.id === sugg3.id && (await S.getSuggestion(sugg3.id))?.quoteId === "TEST-Q-sugg-ok", "suggest save: an UPDATE of a newer quote for the suggestion's customer retries the link");
+    ok((await linkSavedQuoteToSuggestion(sugg3.id, { id: "TEST-Q-sugg-ok", createdAt: 1, customerId: "x" }, false)) === true, "suggest save: an UPDATE of the quote the suggestion already belongs to stays linked (idempotent)");
+    // The store never repoints a quote index at a different suggestion.
+    ok((await S.linkSuggestionToQuote(sugg2.id, "TEST-Q-sugg-ok")) === false && (await S.suggestionForQuote("TEST-Q-sugg-ok"))?.id === sugg3.id && (await S.getSuggestion(sugg2.id))?.quoteId === null, "suggest store: a quote already indexed to another suggestion is not repointed (and the other suggestion gains no quote)");
   } finally {
     const db = await getDb();
     await db.delete(blobs).where(inArray(blobs.id, made));

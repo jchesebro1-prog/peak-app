@@ -391,10 +391,11 @@ export default async function EstimatorPage({
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
   // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
   // saved quote's linked one (else, unlinked, the one its URL still names).
-  const suggestion = await loadSuggestion(readHandoff(sp).suggestionId, q);
+  // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
 
-  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [suggestion, fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
+      loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),

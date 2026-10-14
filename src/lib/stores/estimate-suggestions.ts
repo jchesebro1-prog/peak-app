@@ -91,12 +91,16 @@ export async function suggestionForSource(kind: SuggestSourceKind, sourceId: str
  * Link a saved quote to the suggestion it was built from (first save). The
  * quote index is always written; the suggestion's own `quoteId` keeps the
  * FIRST quote (the report scores that one). False when the suggestion or
- * quote id is unusable — nothing is written then.
+ * quote id is unusable, or the quote is already indexed to a different
+ * suggestion — nothing is written then.
  */
 export async function linkSuggestionToQuote(id: string, quoteId: string): Promise<boolean> {
   if (!isRefId(quoteId)) return false;
   const s = await getSuggestion(id);
   if (!s) return false;
+  // A quote already indexed to a DIFFERENT suggestion keeps it (nothing written).
+  const had = await getBlob<{ id?: unknown }>(quoteIndexBlobId(quoteId), {});
+  if (isSuggestionId(had.id) && had.id !== id) return false;
   if (!s.quoteId) await setBlob(suggestionBlobId(id), { quoteId });
   await setBlob(quoteIndexBlobId(quoteId), { id });
   return true;

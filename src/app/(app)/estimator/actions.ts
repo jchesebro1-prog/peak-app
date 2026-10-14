@@ -677,7 +677,8 @@ export async function saveQuoteAction(
   }
   // Estimate suggestion: link the saved quote to the suggestion it came from
   // (first save indexes it; later saves are no-ops). Never fails the save.
-  const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q.id) : false;
+  // An update links only when the page's unlinkedRetryAllowed rule holds (server-side guard).
+  const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q, !loadedId) : false;
   refresh();
   return {
     ok: !!q && !statusError,

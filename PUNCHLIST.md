@@ -12098,6 +12098,7 @@ link/archive paths a person would.
 - (2) Try it from an email, a lead, a site visit and a meeting (a meeting linked to a company or a job). Check that the header is right, the panel's parts make sense, **+ Add system** prices like a manual add, and the first save links the suggestion (reopen the quote: the panel's tab is there, hidden).
 - (3) Check the Opus cost per run in the Assist report (Suggest estimate (draft) row) and the Anthropic Console against the monthly cap.
 - (4) Not browser-verified in this build: the panel, the lead drawer footer and the venue assessment header were checked by code and pins only.
+- (5) Visibility: a suggestion's source label, notes and per-line reasons are staff-visible, so an email-based suggestion paraphrases that mailbox's thread to the team, as #334 did. A quote saved from a suggestion shows its Suggested BOM panel to any staff viewer, even non-pilot users and with `ASSIST_DISABLED`, but no model call happens. Jeff can ask to hide either.
 
 **Known follow-ups:**
 - A meeting linked only to a venue (no company, no job) gets no button and no hint why; the server refuses it the same way.
