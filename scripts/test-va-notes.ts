@@ -1,5 +1,7 @@
 /* Venue Assessment notes (#342) — harness checks. `vaNotesChecks` is pure; `vaNotesDbChecks` needs the test DB.
    Run alone with `npx tsx scripts/test-va-notes.ts` (pure checks only). */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import {
   SECTION_ORDER, STEP_BY_ID, STEP_LABELS, GROUP_BY_ID, GROUP_META, RIG_SYSTEMS, isQuoteVisit, scopeSet, inScope,
@@ -129,10 +131,30 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(!r3.ok && /Unknown tag/.test(r3.error), "#342 A5: an unknown id is refused");
   const r4 = mergeSurveyTags(st, [{ label: "" }]);
   ok(!r4.ok, "#342 A5: a blank label is refused");
+
+  /* ---- Task 4: assignment defaults (source pin) ---- */
+  const vaActs = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/actions.ts"), "utf8");
+  ok(/create\(\{ owner: user\.name, requestedBy: user\.name, stage: "requested", assignedTo: user\.name, scheduledDate: chicagoDayKey\(Date\.now\(\)\) \}, user\.name\)/.test(vaActs),
+    "#342 A4: New request defaults Assigned to = me and Scheduled date = today (Chicago); stage stays requested");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
-  void ok;
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const { requestVisitForLead } = await import("../src/lib/stores/site-visits");
+  const S = await import("../src/lib/stores/surveys");
+  const { chicagoDayKey } = await import("../src/lib/drive-plan/day");
+  const lead = (n: string) => ({ id: fixtureId(342, n), org: "VA fixture", contact: "Pat", email: "p@x.org", phone: "", address: "", city: "", state: "", customerId: null });
+
+  const r1 = await requestVisitForLead(lead("lead-a"), { reason: "walk", timing: "", assignee: "Sam Surveyor" }, "Office Person");
+  if (r1.ok) { registerFixture("site_visits", r1.visitId); registerFixture("surveys", r1.surveyId); }
+  const s1 = r1.ok ? await S.get(r1.surveyId) : null;
+  ok(!!s1 && s1.assignedTo === "Sam Surveyor" && s1.scheduledDate === chicagoDayKey(Date.now()) && s1.stage === "requested",
+    "#342 A4: a lead's visit request pre-fills the survey with the visit's assignee and today; stage stays requested");
+
+  const r2 = await requestVisitForLead(lead("lead-b"), { reason: "walk", timing: "", assignee: "  " }, "Office Person");
+  if (r2.ok) { registerFixture("site_visits", r2.visitId); registerFixture("surveys", r2.surveyId); }
+  const s2 = r2.ok ? await S.get(r2.surveyId) : null;
+  ok(!!s2 && s2.assignedTo === "Office Person", "#342 A4: with no assignee the survey defaults to whoever requested it");
 }
 
 if (process.argv[1] && /test-va-notes\.ts$/.test(process.argv[1])) {

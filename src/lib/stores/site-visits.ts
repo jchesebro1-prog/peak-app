@@ -2,6 +2,7 @@ import { getDoc, insertWithPrefixedId, listDocs, listDocsByField, patchDoc, soft
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
 import { normalizeInvites, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
 import { readAttendees } from "@/lib/visit-plan/people";
+import { chicagoDayKey } from "../drive-plan/day";
 
 /**
  * Site visits (D76, Jeff 2026-07-19 — PUNCHLIST #2 phase 1). A visit links a
@@ -361,6 +362,9 @@ export async function requestVisitForLead(
       stage: "requested",
       leadId: lead.id,
       visitId: rec.id,
+      // #342 — pre-filled, editable: the visit's assignee (else whoever asked) and today
+      assignedTo: opts.assignee.trim() || me,
+      scheduledDate: chicagoDayKey(Date.now()),
     },
     me
   );
