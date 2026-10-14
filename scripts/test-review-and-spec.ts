@@ -51638,8 +51638,10 @@ import type { SpecSection as E301gSec } from "@/app/(app)/estimator/types";
   ok(saveBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);") && advBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);"),
     "#301 goals: saveSurvey and advanceSurveyStage clean the goals before writing (R4)");
   const box = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/sections/systems.tsx"), "utf8");
-  ok(box.includes(">Client goals</label>") && box.includes('placeholder="What is the client trying to solve?"') && box.includes('props.setValue(group.key, "goals", event.target.value)') &&
-     box.indexOf(">Client goals</label>") < box.indexOf(">Present</label>"), "#301 goals: the box sits at the top of each discipline section (inside its lock)");
+  // #344 B4: goals became a list editor, after Scope of interest and before Present.
+  ok(box.includes(">Client goals</span>") && box.includes("<GoalsListEditor") && box.includes('props.setValue(disc, "goals", next)') &&
+     box.indexOf("<GoalsListEditor") < box.indexOf(">Present</label>") && box.indexOf("<GoalsListEditor") < box.indexOf(">Rigging system</label>"),
+    "#301 goals: the goals list sits above Present in each discipline section (inside its lock)");
   const oa = readFileSync(join(process.cwd(), "src/app/(app)/estimator/output-actions.ts"), "utf8");
   ok(/^"use server";/.test(oa) && (oa.match(/await requireUser\(\);/g) || []).length === 2 && oa.includes("export async function surveyGoalsAction(") && oa.includes("export async function siteVisitGoalsAction("),
     "#301 goals: the two actions are signed-in only");

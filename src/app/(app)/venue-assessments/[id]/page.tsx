@@ -11,6 +11,7 @@ import {
   MEASURE_GROUPS,
 } from "@/lib/stores/surveys";
 import { mergedCatalog } from "@/lib/stores/survey-intake";
+import { fabricPartsByCategory } from "@/lib/stores/catalog";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
@@ -45,13 +46,18 @@ export default async function SurveyEditorPage({
   // Recordings (spec §4.4/§6): header strip + "From recording" prefill
   // panels. Both are client-rendered inside the editor, so the server half
   // (store reads + record gate) is computed here and passed down.
-  const [autoCerts, recordings, fromRecording, visitIds, canSuggest] = await Promise.all([
+  const [autoCerts, recordings, fromRecording, visitIds, canSuggest, fabricRows] = await Promise.all([
     resolveCerts(rec.customerId, rec.locationId),
     loadRecordingsStrip("survey", rec.id),
     loadPrefillPanels("survey", rec.id),
     visitIdsForSurvey(rec.id),
     estimateSuggestEnabled(user.id),
+    // #344 B4 — the curtain rows' Fabric type suggestions; a failed read just means no datalist.
+    fabricPartsByCategory().catch(() => []),
   ]);
+  const fabricOptions = [...new Set(fabricRows.map((p) => (p.desc || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, 500);
   // Estimate suggestion (spec 2026-10-13 §3) — the header's Suggest estimate
   // (pilot + `estimate`) and this assessment's latest suggestion.
   const suggestionHref = canSuggest ? await suggestionReadyHref("survey", rec.id) : null;
@@ -89,6 +95,7 @@ export default async function SurveyEditorPage({
     intakeCatalog: mergedCatalog(settings.intakeCatalog),
     autoCerts,
     internalTags: resolveSurveyTags(settings.surveyInternalTags),
+    fabricOptions,
   };
 
   const roster = users.map((u) => u.name);

@@ -14,7 +14,7 @@
  */
 
 import type { VenueClass } from "./venue-classes";
-import { CONSOLE_LOCATIONS, PLUG_TYPES, TRACK_OPERATIONS, type ConditionLevel } from "../field-lists";
+import { CONSOLE_LOCATIONS, FIXTURE_POSITIONS, PLUG_TYPES, TRACK_OPERATIONS, type ConditionLevel } from "../field-lists";
 
 /* ---- Tier 1: the kill questions ----
  * Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#344 — contact phone is no longer a kill question).
@@ -323,6 +323,33 @@ export interface InventoryRow {
   notes: string;
   /** #344 B2 — lighting fixture position (FIXTURE_POSITIONS) */
   position?: string;
+}
+
+/** #344 B4 — a fixture row's quantity when it is a plain number ("12", " 3 ", "2.5"); "~20" / "" are not. */
+function countableQty(q: string): number | null {
+  const t = String(q ?? "").trim();
+  return /^\d+(?:\.\d+)?$/.test(t) ? Number(t) : null;
+}
+
+/** #344 B4 — fixture totals per position (pass the `lighting.fixture` rows): numeric quantities summed, listed
+ *  positions in FIXTURE_POSITIONS order, then any other stored position in first-seen order. Rows without a
+ *  position or a numeric qty are left out (see fixtureTotalsExcluded). */
+export function fixtureTotals(rows: InventoryRow[]): Array<{ position: string; qty: number }> {
+  const sums = new Map<string, number>();
+  for (const row of rows) {
+    const pos = String(row.position ?? "").trim();
+    const qty = countableQty(row.quantity);
+    if (!pos || qty == null) continue;
+    sums.set(pos, (sums.get(pos) ?? 0) + qty);
+  }
+  const listed = FIXTURE_POSITIONS.filter((p) => sums.has(p));
+  const other = [...sums.keys()].filter((p) => !FIXTURE_POSITIONS.includes(p));
+  return [...listed, ...other].map((position) => ({ position, qty: sums.get(position) as number }));
+}
+
+/** #344 B4 — rows with a quantity that fixtureTotals could not count (no position, or not a plain number). */
+export function fixtureTotalsExcluded(rows: InventoryRow[]): number {
+  return rows.filter((row) => String(row.quantity ?? "").trim() !== "" && (!String(row.position ?? "").trim() || countableQty(row.quantity) == null)).length;
 }
 
 /** Default type catalog (spec's Fixture Type Catalog). Editable in Settings —

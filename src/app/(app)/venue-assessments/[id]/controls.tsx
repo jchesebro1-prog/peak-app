@@ -23,6 +23,7 @@ import {
   newInventoryId,
   tier1Items,
   tier1Complete,
+  type DisciplineData,
   type DisciplineKey,
   type DisciplineValue,
   type InventoryRow,
@@ -318,20 +319,17 @@ export default function SurveyEditor({
     const d = draft.disciplines[disc];
     return d && d[key] != null ? d[key] : "";
   };
-  const setDisc = (disc: DisciplineKey, key: string, val: DisciplineValue) =>
+  /** `undefined` removes the key (#344 B4: an unset condition level is an absent key). */
+  const setDisc = (disc: DisciplineKey, key: string, val: DisciplineValue | undefined) => {
+    const next: DisciplineData = { ...(draft.disciplines[disc] || {}) };
+    if (val === undefined) delete next[key];
+    else next[key] = val;
     patchDraft({
-      disciplines: { ...draft.disciplines, [disc]: { ...(draft.disciplines[disc] || {}), [key]: val } },
+      disciplines: { ...draft.disciplines, [disc]: next },
       disciplinesActive: draft.disciplinesActive.includes(disc)
         ? draft.disciplinesActive
         : draft.disciplinesActive.concat(disc),
     });
-  const toggleDiscScope = (disc: DisciplineKey, opt: string) => {
-    const cur = dv(disc, "scope");
-    const set = Array.isArray(cur) ? cur.slice() : [];
-    const i = set.indexOf(opt);
-    if (i >= 0) set.splice(i, 1);
-    else set.push(opt);
-    setDisc(disc, "scope", set);
   };
   const invRows = (disc: DisciplineKey, category: string) =>
     draft.inventory.filter((r) => r.discipline === disc && r.category === category);
@@ -979,10 +977,11 @@ export default function SurveyEditor({
         .sv-rail::-webkit-scrollbar { display:none; }
         .sv-rail { -ms-overflow-style:none; scrollbar-width:none; }
         .sv-inv-row { display:grid; grid-template-columns:minmax(130px,1.3fr) 68px 44px minmax(110px,1fr) 40px; gap:7px; align-items:stretch; }
+        .sv-inv-row.sv-inv-pos { grid-template-columns:minmax(120px,1.2fr) minmax(104px,.9fr) 64px 44px minmax(100px,1fr) 40px; }
         .va-layout { display:grid; grid-template-columns: 230px minmax(0,1fr); gap: 18px; align-items: start; max-width: 1160px; margin: 0 auto; }
         @media (max-width:759px){ .va-layout{ display:block; } }
         ${SECTION_RAIL_CSS}
-        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } .va-condition-row,.va-cert-row{ grid-template-columns:1fr !important; } }
+        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .sv-inv-row.sv-inv-pos{ grid-template-columns:minmax(0,1fr) minmax(0,1fr) 54px 42px 38px; } .sv-inv-pos .sv-inv-notes{ grid-column:1 / -1; order:1; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } .va-condition-row,.va-cert-row{ grid-template-columns:1fr !important; } }
       `}</style>
 
       {/* sticky header */}
@@ -1224,9 +1223,11 @@ export default function SurveyEditor({
                                 group={g}
                                 venueClass={draft.venueClass}
                                 intakeCatalog={meta.intakeCatalog}
+                                fabricOptions={meta.fabricOptions}
                                 value={dv}
                                 setValue={setDisc}
-                                toggleScope={toggleDiscScope}
+                                measureValue={mv}
+                                setMeasure={setMeasure}
                                 inventoryRows={invRows}
                                 addInventoryRow={addInvRow}
                                 patchInventoryRow={patchInvRow}

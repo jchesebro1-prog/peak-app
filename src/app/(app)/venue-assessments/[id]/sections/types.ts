@@ -45,6 +45,8 @@ export type EditorMeta = {
   autoCerts: Record<string, InspectionRef>;
   /** #344 — Final thoughts tags (settings, starter list when absent) */
   internalTags: SurveyTag[];
+  /** #344 B4 — fabric names for the curtain rows' Fabric type datalist (catalog fabric parts) */
+  fabricOptions: string[];
 };
 
 /** Local draft — the editable slice of the record plus updatedAt for display. */

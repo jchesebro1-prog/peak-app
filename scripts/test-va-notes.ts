@@ -10,6 +10,7 @@ import {
 import { migrateSurvey, addLegacyNote, type MigratableSurvey } from "../src/lib/survey-migrate";
 import {
   tier1Items, tier1Complete, intakeStatus, DISCIPLINE_GROUPS, presentOptionsFor, disciplineHasData, PIPES_LABEL, SCOPE_OTHER, REPLACE_VS_REUSE_OPTIONS,
+  fixtureTotals, fixtureTotalsExcluded, type InventoryRow,
 } from "../src/lib/stores/survey-intake";
 import { BEAM_FIELDS, blank as blankSurvey } from "../src/lib/stores/surveys";
 import { railSheetLabel, SECTION_RAIL_CSS } from "../src/components/section-rail/section-rail";
@@ -550,6 +551,69 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok([0, 1, 2, 3, 4].every((i) => new RegExp(`--cond-${i}:\\s*#[0-9a-f]{6}`, "i").test(css)), "#344 B3: globals.css defines --cond-0 … --cond-4");
   ok(![slider, goals, chips].some((f) => /from "@\/db|stores\/|"server-only"/.test(f)) && [slider, goals, chips].every((f) => f.startsWith('"use client"')),
     "#344 B3: the three components are client-safe (use client, no store imports)");
+
+  /* B4: discipline sections */
+  const inv = (position: string | undefined, quantity: string): InventoryRow =>
+    ({ id: "x", discipline: "lighting", category: "lighting.fixture", type: "PAR", quantity, flag: false, notes: "", position });
+  const fxRows = [inv("Side", "8"), inv("Front", "12"), inv("Front", " 3 "), inv(undefined, "4"), inv("Back", "~20"), inv("Down", ""), inv("Cyc", "0")];
+  ok(JSON.stringify(fixtureTotals(fxRows)) === JSON.stringify([{ position: "Front", qty: 15 }, { position: "Side", qty: 8 }, { position: "Cyc", qty: 0 }]),
+    "#344 B4: fixtureTotals sums numeric qty per position in FIXTURE_POSITIONS order");
+  ok(fixtureTotalsExcluded(fxRows) === 2 && fixtureTotals([]).length === 0 && fixtureTotalsExcluded([inv("Front", "")]) === 0,
+    "#344 B4: rows with a qty but no position or a non-number qty are counted as excluded; blank rows are not");
+  ok(JSON.stringify(fixtureTotals([inv("Balcony rail", "2"), inv("Front", "1")])) === JSON.stringify([{ position: "Front", qty: 1 }, { position: "Balcony rail", qty: 2 }]),
+    "#344 B4: an unlisted stored position still totals, after the listed ones");
+  const sysB4 = rd(`${b3dir}/systems.tsx`);
+  const curt = rd(`${b3dir}/curtain-rows.tsx`);
+  const lpos = rd(`${b3dir}/lighting-positions.tsx`);
+  const ctlB4 = rd("src/app/(app)/venue-assessments/[id]/controls.tsx");
+  const pageB4 = rd("src/app/(app)/venue-assessments/[id]/page.tsx");
+  const iScope = sysB4.indexOf("<ScopeChips"), iGoals = sysB4.indexOf("<GoalsListEditor"), iPresent = sysB4.indexOf(">Present</label>"), iRig = sysB4.indexOf(">Rigging system</label>");
+  ok(iScope > 0 && iScope < iGoals && iGoals < iPresent && iGoals < iRig, "#344 B4: each discipline shows Scope of interest, then Client goals, then Present");
+  ok(sysB4.includes("group.scopeLabel") && sysB4.includes('"scopeOther"') && !sysB4.includes("toggleScope") && !ctlB4.includes("toggleScope="),
+    "#344 B4: scope chips write scope + scopeOther (the old toggleScope prop is gone)");
+  ok(sysB4.includes("splitGoalLines") && /Array\.isArray\(raw\)/.test(sysB4), "#344 B4: goals read a list as-is (blank rows survive editing) and split an old string");
+  ok(sysB4.includes('field.type === "month"') && sysB4.includes('type="month"') && /\^\\d\{4\}-\\d\{2\}\$/.test(sysB4),
+    "#344 B4: month fields use <input type=month>, a non-YYYY-MM value shows empty");
+  ok(sysB4.includes('field.type === "condition"') && sysB4.includes("<ConditionSlider") && sysB4.includes('field.type === "textarea"') && sysB4.includes("taStyle"),
+    "#344 B4: condition fields render the slider and textarea fields a full-width textarea");
+  ok(sysB4.includes("field.bind") && sysB4.includes("props.setMeasure(") && sysB4.includes("Same value as Measurements") && ctlB4.includes("measureValue={mv}") && ctlB4.includes("setMeasure={setMeasure}"),
+    "#344 B4: a bound field reads and writes measurements[bind] and says so");
+  ok(sysB4.includes("PIPES_LABEL") && /fixedPipeQty/.test(sysB4), "#344 B4: the pipes qty field shows only when the pipes chip is ticked");
+  ok(curt.includes("TRACK_SERIES") && curt.includes("<datalist") && curt.includes("<ConditionSlider") && curt.includes("compact") &&
+     ["QTY", "Fabric type", "oz", "Track series", "W", "H"].every((l) => curt.includes(`>${l}</label>`)),
+    "#344 B4: curtain rows carry QTY, Fabric type (datalist), oz, Track series, W, H and a compact condition slider");
+  ok(/label\.toLowerCase\(\) !== "none" && label !== PIPES_LABEL/.test(sysB4) && sysB4.includes('"items"'),
+    "#344 B4: one curtain row per ticked type except None and the pipes chip, written to items");
+  ok(lpos.includes("LIGHTING_POSITIONS") && lpos.includes("Lighting positions") && ["Circuits", "Length", "Trim / height", "Notes"].every((l) => lpos.includes(`>${l}</label>`)) &&
+     sysB4.includes('"positionList"') && sysB4.includes('"positionRows"'),
+    "#344 B4: lighting position chips write positionList; each ticked position gets a Circuits / Length / Trim / Notes row");
+  ok(lpos.includes("Other — where?") && sysB4.includes('"consoleLocationOther"') && /=== "Other"/.test(sysB4), "#344 B4: console location Other asks where");
+  ok(sysB4.includes("FIXTURE_POSITIONS") && sysB4.includes("fixtureTotals(") && sysB4.includes('"lighting.fixture"') && ctlB4.includes(".sv-inv-pos"),
+    "#344 B4: fixture rows get a Position select and derived totals under the inventory");
+  ok([curt, lpos].every((f) => f.startsWith('"use client"') && !/^import (?!type)[^\n]*stores\//m.test(f) && !/"server-only"|@\/db/.test(f)),
+    "#344 B4: the new row components are client-safe (no runtime store imports)");
+  ok(pageB4.includes("fabricPartsByCategory") && pageB4.includes("fabricOptions") && ctlB4.includes("fabricOptions={meta.fabricOptions}"),
+    "#344 B4: the fabric datalist comes from the catalog's fabric parts via meta");
+  ok(rd(`${b3dir}/goals-list.tsx`).includes("e.keyCode === 229"), "#344 B4: goals Enter also ignores Safari's IME keyCode 229");
+  ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctlB4), "#344 B4: the meetings slot still sits right before the sections");
+  /* progress: bound fields read measurements; curtain rows and lighting positions count */
+  const dp = (disc: Record<string, Record<string, unknown>>, meas: Record<string, string | boolean> = {}, venueClass = "theatre") =>
+    ({ ...(d0 as object), venueClass, measurements: meas, disciplines: disc }) as never;
+  const rigSec = { id: "dRigging", kind: "discipline", disc: "rigging" } as never;
+  const curSec = { id: "dCurtain", kind: "discipline", disc: "curtain" } as never;
+  const litSec = { id: "dLighting", kind: "discipline", disc: "lighting" } as never;
+  const rigA = sectionProgress(rigSec, dp({ rigging: { present: ["Dead-hung"] } }), { tier1Done: true });
+  const rigB = sectionProgress(rigSec, dp({ rigging: { present: ["Dead-hung"] } }, { gridH: "40" }), { tier1Done: true });
+  ok(rigB.done === rigA.done + 1 && rigB.total === rigA.total, "#344 B4: progress reads a bound field (Grid height) from measurements");
+  const cA = sectionProgress(curSec, dp({ curtain: { present: ["Divider curtain"] } }), { tier1Done: true });
+  const cB = sectionProgress(curSec, dp({ curtain: { present: ["Divider curtain"], items: { "Divider curtain": { qty: "2" } } } }), { tier1Done: true });
+  const cP = sectionProgress(curSec, dp({ curtain: { present: ["Divider curtain", PIPES_LABEL] } }), { tier1Done: true });
+  ok(cB.done === cA.done + 1 && cB.total === cA.total && cP.total === cA.total + 1, "#344 B4: progress counts curtain rows, and the pipes qty only when its chip is ticked");
+  const lA = sectionProgress(litSec, dp({ lighting: { present: ["House lighting"] } }), { tier1Done: true });
+  const lB = sectionProgress(litSec, dp({ lighting: { present: ["House lighting"], positionList: ["FOH 1"], positionRows: { "FOH 1": { circuits: "6" } } } }), { tier1Done: true });
+  ok(lB.done === lA.done + 2 && lB.total === lA.total + 1, "#344 B4: progress counts the lighting positions and, once picked, their rows");
+  const nA = sectionProgress(curSec, dp({ curtain: { present: ["None"], scope: ["Flame test"] } }), { tier1Done: true });
+  ok(nA.total === 3 && nA.done === 2, "#344 B4: with Present = None only, progress counts just scope, goals and Present");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
