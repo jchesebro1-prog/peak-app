@@ -33,7 +33,7 @@ Where this spec says "as in the brief", the brief text is authoritative for word
    - **To Immediate:** RI Poor/urgent.
    - **To Needs attention:** RI Fair/necessary, FS Replace.
    - **To Good:** RI Good/basic, plus FS Monitor (which also gets the **Monitor** action tag).
-4. **Finding ID = `CUSTOMER-VENUE-CAT-###`**, e.g. `MPSD-LHS-RIG-003`. Each company and venue gets a short
+4. **Finding ID = `CUSTOMER-VENUE-CAT-###`**, e.g. `MPSD-LIN-RIG-003`. Each company and venue gets a short
    code, suggested from its name, editable until a finding uses it, then locked. Every finding also has a
    stable internal key.
 5. **Fourth tier = per-curtain flame test + service checks** (slice 4): per-curtain pass / fail / retreated
@@ -287,7 +287,7 @@ On completion, the `profile` answers are written to the venue profile (§4).
 ```ts
 interface Finding {
   key: string;               // fd_…  (doc id, never changes)
-  printedId: string | null;  // "MPSD-LHS-RIG-003"; null while pending server allocation
+  printedId: string | null;  // "MPSD-LIN-RIG-003"; null while pending server allocation
   customerId: string; siteId: string; spaceLabel?: string;
   category: "RIG" | "ELC" | "STR" | "HAZ" | "GEN";
   description: string; location?: string;         // line set number, voltage/phase if known
@@ -328,12 +328,18 @@ interface Finding {
 
 - **Codes:** new nullable columns `companies.short_code` and `sites.short_code` (migration `0040`).
   - The company code is unique among live companies. The venue code is unique within its company.
-  - A code is suggested from the name: initials, uppercased, 2–6 characters, with a digit suffix on a
-    collision. It's editable until any non-voided finding uses it, then locked; changing it after that needs
-    `approve`.
+  - **Company code suggestion:** initials of the company name, uppercased, 2–6 characters
+    (Manitowoc Public School District → `MPSD`).
+  - **Venue code suggestion (Jeff, 2026-10-13):** the first three letters of the first meaningful word of the
+    venue's location name, uppercased. Filler words are skipped: the, of, st, st., saint. Examples: Lincoln
+    High School → `LIN`, Wilson Middle School → `WIL`, Washington Middle School → `WAS`, St. Norbert College
+    → `NOR`. Initials are not used, because school names would collapse into `?MS` / `?HS`.
+  - **Collisions:** a collision within the same scope gets a digit suffix (`LIN2`).
+  - **Locking:** a code is editable until any non-voided finding uses it, then locked; changing it after that
+    needs `approve`.
 - **Allocation:** the **server** allocates `NNN` per `(company code, venue code, category)` under a
   row lock, as max+1, zero-padded to 3 digits.
-  - A finding created offline carries `printedId: null` and shows `MPSD-LHS-RIG-…` until it syncs.
+  - A finding created offline carries `printedId: null` and shows `MPSD-LIN-RIG-…` until it syncs.
   - Allocation also happens on sync, so two offline findings can't both become `-003`.
   - Voided findings keep their number, and a number is never reused.
 - **After a code changes:** issued printed IDs keep their text. New findings use the new code, continuing the
@@ -510,7 +516,7 @@ Findings are voided, never deleted.
 - **`test:smoke`:** the new GET routes.
 - **Browser pass:** a mock Lincoln HS condition assessment end to end, including offline and an offline
   photo. Checks:
-  - The catwalk gap → Immediate RIG finding gets `MPSD-LHS-RIG-001`.
+  - The catwalk gap → Immediate RIG finding gets `MPSD-LIN-RIG-001`.
   - The smoke vent → STR finding.
   - Quote these findings → a repair quote whose lines carry the IDs.
   - The report PDF prints the register.
@@ -520,10 +526,8 @@ Findings are voided, never deleted.
 
 ## Open questions (do not block slice 1)
 
-1. Manitowoc codes: the brief uses `MPSD` and `LHS`. Wilson MS and Washington MS both suggest `WMS`, so the
-   second one gets `WMS2` unless set by hand (for example `WIL` / `WAS`) before the first finding.
-2. Brief open question: S2 screen vs full intake as one scope with a depth toggle (this spec) or two scopes.
+1. Brief open question: S2 screen vs full intake as one scope with a depth toggle (this spec) or two scopes.
    The toggle is assumed; revisit in slice 3.
-3. Reminder lead times and recipients (slice 5).
-4. Do outside specialists ever use the app directly, or only receive the findings PDF and send results back?
+2. Reminder lead times and recipients (slice 5).
+3. Do outside specialists ever use the app directly, or only receive the findings PDF and send results back?
    Slice 1 assumes the latter; Peak staff enter the specialist rating.
