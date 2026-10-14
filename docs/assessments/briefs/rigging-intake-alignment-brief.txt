@@ -1,0 +1,415 @@
+Assessment and Rigging Intake Alignment Brief
+Oct 13, 2026 · @Jeff Chesebro
+Bottom line
+Tomorrow's checklist covers the general theatre survey well but captures too little rigging data to hand off cleanly. Add short rigging triage and power and control blocks, use one ID per finding, and carry the same rating words through every stage. That lets each finding be followed from your site visit to a rigging inspection, a quote, repair and re-inspection.
+This brief draws on your eight sample reports (Warsaw, Florida Southern, St. Norbert, Iowa, Zion-Benton, Woodstock Opera House, Rochester Civic and UWSP) and the CESA 10 Manitowoc audit. It assumes your assessment screens and flags rigging, and an ETCP-certified rigger performs the actual inspection. Correct that if you plan to inspect rigging yourself.
+Field crosswalk
+The sample reports share one intake spine. Most of it is missing or thin in tomorrow's checklist, so capture it for each venue.
+Rigging report field
+Seen in
+In tomorrow's checklist?
+Add
+Facility, address, inspection date, inspector with ETCP cert number
+All reports
+Partly (venue and date only)
+Inspector, cert number, who prepared and who reviewed
+On-site contact and secondary contact
+Florida Southern, Rochester
+No
+Name, title, phone, email
+Owner concerns
+Rochester
+Questions section only
+Free-text field at the top of each venue
+Last inspection date and by whom
+Warsaw, Rochester
+Partly (who inspects)
+Date, firm, report on file yes/no
+Current use and seating capacity
+Warsaw, Florida Southern
+Seat count only
+Add use (school, community, rentals)
+Facility type (proscenium, thrust, black box)
+Florida Southern
+No
+Pick one
+Stage width, depth, proscenium height and width
+Warsaw, Florida Southern
+Yes
+Add height to grid, steel and head block
+Rigging system type: counterweight, motorized, dead hung
+All reports
+Mentioned only
+Type, number of line sets, manufacturer, single or double purchase
+Fire safety curtain: type, manufacturer, hoist
+Warsaw, Florida Southern
+Smoke vent only
+Add curtain presence, release test log, 90-day test history
+Orchestra pit lift or filler
+Warsaw
+No
+Presence, manufacturer, voltage
+Loading gallery, grid, catwalks
+Warsaw, Flyhouse, Florida Southern
+Lincoln catwalk only
+Presence, access, handrails, fall protection at every venue
+Operating signage, manuals, maintenance log
+Florida Southern, Rochester, Warsaw
+No
+Yes/no for each; log copy photographed
+Soft goods and curtain flame test
+Warsaw, Florida Southern
+Soft goods only
+Add flame-test tag or date
+Component conditions by line set, with photo and line set number
+MainStage, ACD
+No
+Capture only red flags here; leave full component grading to the rigging inspection
+Line set schedule
+Zion-Benton
+No
+Sets by number, what hangs on each, and spare sets
+Rating scales
+The rigging reports use at least four different scales, and the CESA 10 audit uses a fifth, point-based one. Use one three-level rating on every finding from site visit to close-out, and record the audit's scores beside it, so findings sort the same way in every document.
+Use in our intake
+MainStage and ACD
+Gopher (Rochester)
+Flyhouse (St. Norbert)
+CESA 10 audit score
+Immediate attention: unsafe, fix now
+Immediate Attention
+Poor: life safety concern
+Urgent repair
+EHS concern 10 (High); useful life under 2 years
+Needs attention: fix within 9 to 12 months
+Needs Attention
+Fair
+Necessary repair
+EHS concern 5 (Medium); useful life 3 to 5 years
+Good: meets current standard
+Good
+Good
+No log entry
+EHS concern 0 (Low)
+Not applicable or not inspected
+NA, or note "unable to inspect"
+Unchecked
+Not applicable
+Not applicable
+Three notes keep the scales honest. First, ACD's High, Medium, Low and the Florida Southern budget tiers ($, $$, $$$) measure priority and cost, not condition, so track them in separate columns, not in the rating. Second, treat any fall hazard, fire curtain or smoke vent failure, or unrated overhead hardware as Immediate Attention regardless of cost; the Lincoln catwalk gaps are one example. Third, the audit's cost tier (under 10,000 dollars, under 100,000 dollars, over 100,000 dollars) can carry over unchanged as the budget column.
+Tracking chain
+Give every finding one ID at the site visit and keep it unchanged through every later stage. Use the pattern district, building, system, sequence; for example MPSD-LHS-RIG-003 for the third rigging finding at Lincoln High School. Where a finding matches an item in the CESA 10 audit, record that audit item beside it, such as the Lincoln catwalk gap item, so the two records stay linked.
+	•	Intake: the site visit records the finding, its rating, photo numbers and location, using the fields above.
+	•	Triage: each finding is tagged theatrical-general, rigging or electrical and control; rigging items go to an ETCP-certified rigger and electrical items to a qualified electrician.
+	•	Rigging inspection: the inspector adds component-level conditions, line set numbers and standards cited, and may reclassify the rating. Both ratings stay on record.
+	•	Recommendation: each item gets an action, a priority, a budget tier and an owner, either staff or rigging contractor, as in the Warsaw summary table.
+	•	Quote or work order: the contractor's quote references the finding ID.
+	•	Repair: record the date, who did the work, and the parts or hardware used, with before and after photos.
+	•	Verification: a re-inspection or sign-off confirms the fix and closes the ID.
+	•	Ongoing logs: closed items feed the maintenance and inspection log and the fire curtain test log, with a next-due date. The Warsaw report recommends fire curtain tests every 90 days and treats the ANSI E1.47 chart as the guide for inspection frequency.
+Findings register
+One row per finding, with these columns, is enough to follow every item through the eight stages. I can build it as a spreadsheet for you to fill in tomorrow.
+Column
+What it holds
+Filled at stage
+Finding ID
+Pattern district, building, system, sequence
+1 Intake
+Building and space
+For example Lincoln, auditorium room 132
+1 Intake
+Category
+Theatrical general, rigging, or electrical and control
+2 Triage
+Description
+What was seen, with line set number, or voltage and phase, if known
+1 Intake
+Photo numbers
+File names or numbers
+1 Intake
+Rating at site visit
+Immediate, Needs attention or Good
+1 Intake
+Audit reference
+Matching CESA 10 item and its estimate, if any
+1 Intake
+Inspector rating
+Rating from the rigging or electrical inspection, with standard or code cited (ANSI, NFPA 70)
+3 Rigging inspection
+Recommended action
+What to do
+4 Recommendation
+Priority
+High, Medium or Low
+4 Recommendation
+Budget tier
+Under 10,000, under 100,000 or over 100,000 dollars
+4 Recommendation
+Owner
+Staff or rigging contractor, with name
+4 Recommendation
+Quote reference
+Quote or work order number
+5 Quote
+Repair date and work done
+Who, what, parts used
+6 Repair
+Verified by and date
+Re-inspection or sign-off
+7 Verification
+Next due
+Next test or inspection date
+8 Ongoing logs
+Status
+Open, quoted, scheduled, repaired or closed
+All stages
+Comparison with the Black River Falls site visit sheet
+The Black River Falls sheet is a quote-driven survey: it measures and counts what is there so someone can price work. Our checklist is a condition assessment: it judges what is there and tracks fixes. The two fit together, with the survey as the inventory layer and our checklist as the condition layer under one finding ID. The sheet says a full pass takes about an hour per venue, so plan for that on top of the walk-through.
+Area
+Black River Falls sheet
+Our checklist
+Recommendation
+Visit purpose
+Type of visit, scope of visit
+Implied
+Add both fields to the intake
+Quote context
+Quote needed by, budgetary or firm, project completion, install timeframe, how the quote should look
+None
+Add budget-or-firm and timeframe, so findings can become quotes
+Existing customer material
+Bill of materials, drawings, photos
+Documents-to-request list
+Keep ours; add bill of materials and prior photos
+Logistics
+Loading dock, access door size, elevator size, lift needed and who supplies it, floor type
+None
+Add; Wilson and Washington access constraints matter here
+Measurements
+Lettered diagrams for stage, stage section, house, house section, apron and three FOH positions
+Stage and proscenium dimensions only
+Adopt their measurement set
+Photo checklist
+Named camera positions for stage, house, FOH, overhead, plus stage access, flame test certificate, storage, rig wall, control booth
+Photos of each item
+Adopt their named positions and add the findings photos
+Rigging data
+Rigging points, beam type, spacing and direction, H&H sheet, brick drawing, draw side, rig type, loading bridge, midrail
+Triage list
+Add beam and rigging point data; keep our red flags and fall protection checks
+Curtains
+Type (IFR or not), track type, heights to track
+Soft goods and flame test
+Add IFR and track type
+Line set schedule
+Rough counts, then a table (distance from plaster line, hang, fabric, quantity, size, notes)
+Line set schedule line only
+Adopt their table and add a condition column
+Lighting inventory
+Age and type of system, console, power control, emergency lighting, fixtures by model and quantity, pipes, circuits, data outs, connector type
+Power and control block
+Adopt the counts; keep our power path, grounding and spare capacity checks
+House and work lights
+Quantities, button stations, plug-ins, circuits
+House lighting controls
+Adopt the counts
+Condition and safety
+None
+Ratings, catwalk fall hazards, smoke vents, fire curtain tests, mold, asbestos, ADA, egress
+Ours only; this is the added value
+Sound and video
+None
+Sound and video items
+Ours only
+Tracking
+None
+Finding ID through close-out
+Ours only
+The sheet has no audio or video section, and it records no condition ratings. Our checklist has no quote fields, no logistics, and no structured measurements. Merging the two sets closes both gaps. I can fold the Black River Falls fields into the checklist's intake section, or build one combined sheet.
+Comparison with the Site Evaluation Sheet (2013 revision)
+This sheet is an audio, video and control survey written for a sales engagement, with worship spaces in mind. It covers the sound, video and room-construction data that the Black River Falls sheet leaves out, and it adds project decision questions. Its checkboxes are quick to fill in on site.
+Area
+Site Evaluation Sheet
+Our checklist
+Recommendation
+Client and room
+Client, room, contacts with positions, address, website
+Contacts in the intake
+Add position and room name
+History and use
+Worship style, with a not applicable option
+Current use
+Replace worship style with a use list: school, community, rentals, assemblies
+Audio problems
+Dead spots, voice clarity, wireless issues, lack of inputs, monitors, hearing assist, poor recordings, aesthetics
+Sound system works or not
+Adopt the checkbox list; Wilson's non-working sound system is the first test
+Future audio needs
+Speech, program, wired and wireless mics, choir, hearing assist, recording, room combine, portable
+None
+Adopt as the owner's wish list
+Video problems and needs
+Quality, brightness, location, new signal type; projection, flat panel, cameras, recording; screen size and lens throw
+Video items
+Adopt, including screen size and throw distance
+Control interface
+Crestron opportunity, user interface (wired, wireless, wall, table, podium)
+None
+Add a control interface line: what operates the room today
+Room construction
+Seating type, ceiling, wall and floor types, floor pockets, access (basement, attic, open ceiling)
+Seating and flooring condition
+Add construction types and access routes; they decide cable routing and acoustics
+Stage, balcony and positions
+Stage and balcony dimensions, head end location, FOH location
+Stage dimensions
+Adopt head end and FOH locations
+Lift and access
+Lift provided, lift access into the building
+None
+Adopt (also in the Black River Falls sheet)
+Drawings and status
+Drawings received; existing, renovation or new construction
+Documents list
+Add project status: existing, renovation or new
+Equipment inventory
+Quantity and description table
+Inventory fields
+Keep ours; add a quantity column
+Project decision
+Completion deadline, budget, project type (design and build, bid, consulting), part of a larger building project, final decision maker, competing firms
+Questions for staff
+Adopt deadline, budget, project type and decision maker, so findings can become scoped projects
+Condition and safety
+None
+Ratings, fall hazards, smoke vents, fire curtain, mold, asbestos, ADA, egress
+Ours only
+Rigging and lighting
+None
+Rigging triage, power and control
+Black River Falls covers these in more detail
+Across all three sheets, the survey data is consistent: contacts, dimensions, existing equipment, drawings, access, and the budget and timeline. Only our checklist rates condition, assigns IDs and tracks a fix through close-out. For Manitowoc, the district's decision maker and budget path matter most, because the April 2024 audit already prices the big items.
+Comparison with the generic theatrical site visit checklist
+This is a short vendor-style list you pasted, citing an AV integrator's checklist. I compared the text you pasted and did not open the link. It is useful because it asks about production readiness, such as power, comms and sightlines, which the other sheets skip.
+Item in the generic list
+In our checklist?
+Recommendation
+Dedicated sound power, isolated ground, distance to mix position
+No
+Add to power and control
+FOH mix position: sightlines, space, snake routing
+No
+Add; the 2013 sheet asks for FOH location too
+House PA, flown arrays, acoustic reflections, delay speakers
+Sound items only
+Add
+Projector mount points, screen type, throw, cabling types, ambient light control
+Partly
+Add cabling and light control
+Intercom, backstage-to-booth feeds
+No
+Add
+Internet and Wi-Fi bandwidth
+No
+Add; the audit notes Wi-Fi dead spots in several schools
+Circuit counts per electric, DMX or Ethernet drop locations
+Partly
+Add counts
+Lamp and gel availability
+No
+Add
+Electric pipe availability, trim heights, side arms, ladder positions, beam paths
+No
+Add
+Weight capacity and point loads for the grid
+No
+Add; ask for engineer documentation
+Rigging hardware: span sets, shackles, cable, motor controllers
+Red flags only
+Add an inventory line
+Load-in bay dimensions, lifts, ladders, fall-arrest anchor points
+Partly
+Add anchors and bay dimensions
+Soft goods: scrims, traveler draw type (center-split or single), track
+Soft goods only
+Add
+Flame-retardant certification tags
+Flame test tag or date
+Keep; see the note below
+On flame certification: NFPA 701 is the standard behind the manufacturer's certification tag on new fabric, and NFPA 705 is the field flame test the Warsaw report cites. Record both the tag and the date of the last field test.
+Reference documents: ANSI E1.47 and the manufacturer guides
+I read ANSI E1.47 (the rigging inspection standard), the Wenger rigging guide and the J.R. Clancy design guide through a web summary, not page by page. Check the figures against the source documents before quoting any of them. The E1.47 summary labeled itself the 2017 edition although the link name says 2014, and it flagged its own motorized frequency row as ambiguous. E1.47 excludes building structure and building electrical, so our assessment should flag those for an engineer or electrician and not rate them.
+What the document adds
+Where it lands in our intake
+Three deficiency categories: immediate hazard to persons; potential hazard from abnormal wear or misuse; normal wear not yet causing failure
+Matches our three ratings. Keep our labels and note the E1.47 wording beside them
+Immediate hazards: owner tags or locks out the equipment, and the inspector notifies the designated person at once
+Add a designated hazard contact to the intake, and a lockout step to any Immediate Attention finding
+Each deficiency needs location, nature, recommended remedy and who is qualified to fix it (engineer, rigging contractor, venue staff)
+Add a qualification-required column to the findings register
+Inspection frequency: manual systems Level One annually and Level Two at least every 5 years; motorized systems Level Two annually; also after installation, alteration or repair, or when the last date is unknown
+Record last inspection date and level; compute the next-due date for the register
+Pre-inspection records: as-built drawings, manuals, modifications, incident reports, maintenance logs, prior reports, training records, authorized user list
+Add authorized user list, incident reports and modification history to the intake
+Inspection arrangements: written scope, report recipient, access to arbor pits and electrical rooms, keys, no rehearsals during the inspection, access plan for Level Two
+Add an access and logistics block for the rigging inspector's visit
+Report contents: standards and editions used, exclusions, deficiencies prioritized, suggested timing of next inspection, plus installer, install dates and renovation history
+Add install year, installer and standards edition to the register header
+Inspector qualifications: experience, manufacturer training and third-party certification
+Record cert type and number, as the sample reports do
+Operating and safety practices: hold-to-run controls, emergency stop, unobstructed sight line, two supervisors, fall protection on the loading bridge, rail calls, fire curtain closed when not in use
+Add as observation items in the rigging triage block
+Design clearances and loads from the manufacturer guides: for example fleet angle, handline clearance, batten load, loft block load
+Record measured values at the venue as screening data only; the guides describe new design, not pass or fail limits for existing systems
+The two manufacturer guides do not agree on every number, for example the height of the top of the lockrail above the floor, so treat their figures as typical values to compare against and never as pass or fail tests. The Clancy guide is dated 2010 and recommends confirming current standards.
+Comparison with the Stagecraft questionnaire and the OXMaint school stage checklist
+The Stagecraft Industries questionnaire is the closest match to our rigging intake: it is the form a rigging inspector uses to scope and quote a visit. The OXMaint page is a school-stage safety checklist published by a maintenance software vendor, so it cites no sources and describes its own product's features; treat it as a prompt list and check anything you rely on against NFPA 101, ANSI E1.4 and the local authority. Both were read through a web summary.
+Topic
+What the source adds
+Where it lands
+Stagecraft: system counts
+Counterweight sets, rope (sandbag) sets, total rigged sets, motorized sets with number, manufacturer and model, dead-hung sets
+Add rope sets and motor count, manufacturer and model to the rigging triage
+Stagecraft: history
+Year built or rigged, year of rigging renovation, architect or consultant, rigging contractor, manufacturer, original drawings
+Mostly in our intake; add renovation year and consultant
+Stagecraft: stage dimensions
+Plaster line to rear wall, dead-hung ceiling height
+Add to measurements
+Stagecraft: access
+Walking grid, loading bridge, personnel lift available during the inspection, helper available
+Add to the rigging inspector's access block
+Stagecraft: operation
+Who operates, training documented, rail log kept, inspection and maintenance log kept
+Already covered; add rail log
+Stagecraft: other
+Other spaces to inspect (studio, black box); drapery flame-treatment date; known hazards
+Add other spaces to the intake
+OXMaint: quick checks before each event
+Safety cable on every hung fixture, tightened clamps, working lamps, microphone batteries, hearing loop, clear stage
+Capture whether the district runs pre-event checks, and who does them
+OXMaint: recurring schedule
+Monthly emergency light test; quarterly lighting, curtains, electrical, seating, egress; annual rigger inspection, sound, emergency light battery test, fire safety
+Use as the draft schedule for the ongoing log, stage 8 of the tracking chain
+OXMaint: seating and egress
+Seat anchorage, aisle width (36 inches typical minimum), aisle step lights, wheelchair space, exit doors and panic hardware
+Add to each venue's house checks
+OXMaint: electrical
+Panel schedule posted, dimmer supply breakers under 80 percent load, separate work-light circuit, GFCI where the public can reach
+Add to power and control
+OXMaint: fire safety
+Extinguishers, alarm panel status, sprinklers and detectors in the stage area, fire curtain drop test, approval for open flame
+Add to the venue checks
+OXMaint: sound
+Flown speakers on independent safety cables, amplifier ventilation, patch bay
+Add to sound items
+OXMaint: deficiency actions
+Close, escalate to a specialist, replace, or log and repair
+Add a required-action column: out of service, specialist needed, replace, repair
+The OXMaint page says it does not cover catwalks, trap doors, orchestra pits or ADA access beyond wheelchair spaces. Our checklist already covers catwalks and ADA, and should add trap doors and the orchestra pit as items to confirm at each venue.
+Open questions
+	•	Will you inspect rigging yourself, or flag items for an ETCP-certified inspector? This brief assumes the second.
+	•	Do you want the three-level rating from this brief, or does your rigging intake already use another scale?
+	•	Is there an existing ID scheme for your rigging jobs that the finding IDs should follow?
+	•	Where should the register live: a spreadsheet, or the system you already use for rigging jobs?
+	•	Which fields in the checklist's site visit intake should be required at every venue, and which optional?

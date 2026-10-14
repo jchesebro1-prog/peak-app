@@ -1,0 +1,544 @@
+Site Visit App Brief: Scopes and Conditional Logic
+Oct 13, 2026 · @Jeff Chesebro
+Goal and design rules
+The app runs a site visit as a short chain of scopes. The assessor picks a visit type, the app switches on the matching scopes, and each answer decides which follow-up questions appear. A question is shown only when an earlier answer makes it relevant, so a venue with no fly system never sees counterweight questions. Every problem found becomes a finding with one ID that carries through quote, repair and verification.
+This brief is the product specification for that questionnaire. It draws on the site visit sheets, rigging reports, ANSI E1.47 and manufacturer guides reviewed in the alignment brief and the field checklist.
+Design rules
+	•	Ask only what applies. Every module opens from a gate question; nothing below a gate shows until the gate is answered.
+	•	Three answer states on every question: answered, not applicable, and unable to inspect (with a reason). Reports use the same states, and it keeps skipped items from reading as missed items.
+	•	Observe, do not judge outside scope. Rigging components, electrical systems and structure are screened and flagged; the app routes them to a qualified person and does not rate them in detail.
+	•	One rating scale everywhere: Immediate attention, Needs attention, Good. Any flagged answer can start a finding.
+	•	Photos are tied to questions. A module can require specific photos before it is marked complete.
+	•	Earlier answers are reused. Ask a fact once per space; later visits show the stored answer and ask only whether it changed.
+The if-then rules below are written so a developer can implement them as conditions on question keys, without needing the full product context.
+Visit types and scopes
+The first screen asks for the visit type. Each type pre-selects scopes, and the assessor can switch any scope on or off before starting. Every scope is a self-contained module with its own gate question.
+Code
+Scope
+Covers
+S0
+Core
+Visit, contacts, space profile, documents; always on
+S1
+Facility and house
+Seating, egress, ADA, finishes, water, hazardous materials
+S2
+Rigging
+Overhead rigging systems and access structures; two depths, screen or full intake
+S3
+Soft goods
+Curtains, masking, track, flame certification
+S4
+Fire and life safety
+Fire curtain, smoke vents, emergency lighting, alarm, extinguishers
+S5
+Lighting and power
+Stage and house lighting, dimming, control, power distribution
+S6
+Audio, video and comms
+Sound, projection, intercom, network, hearing assist
+S7
+Access and logistics
+Load-in, lifts, ladders, fall protection, working conditions for later crews
+S8
+Project and quote
+Budget, deadline, decision maker, quote format
+
+Visit type
+Scopes on by default
+Notes
+Condition assessment (the Manitowoc case)
+S0, S1, S2 at screen depth, S3, S4, S5, S6, S7
+Observe and flag; route rigging and electrical items to specialists
+Rigging inspection intake
+S0, S2 at full intake depth, S3, S4, S7
+Matches the intake in the sample rigging reports and the Stagecraft questionnaire
+Lighting and power survey
+S0, S5, S7
+Adds S4 emergency lighting questions automatically
+Audio and video survey
+S0, S6, S7
+S1 seating and room construction pulled in only for room acoustics
+Quote or project survey
+S0, S8, plus any scopes the assessor adds
+Adds budget and decision questions to every selected scope
+Re-inspection or verification
+S0 short form, then open findings only
+No new modules unless the assessor adds one; see Tracking
+Core questions (S0)
+These appear on every visit. Stored answers carry forward, so a return visit shows them pre-filled and asks only whether anything changed.
+Key
+Question
+Answer type
+Shown when
+core.visit_type
+Visit type
+Pick one from the list above
+Always
+core.scopes
+Scopes for this visit
+Multi-select, pre-filled from visit type
+Always
+core.building
+Building and space
+Pick from the saved list, or add
+Always
+core.date_assessor
+Visit date, assessor, anyone accompanying
+Date, text
+Always
+core.contact_primary
+Primary on-site contact: name, title, phone, email
+Text
+Always
+core.contact_hazard
+Designated contact if an immediate hazard is found
+Pick from contacts, or add
+Always
+core.owner_concerns
+Owner concerns, in their words
+Long text
+Always
+core.use
+Current use of the space
+Multi-select: school, community, rentals, assemblies, other
+Always
+core.space_type
+Space type
+Pick one: proscenium, thrust, black box, cafetorium, gym, other
+Always
+core.seats
+Seat count
+Number
+Always
+core.year_built
+Year built
+Number
+First visit to this building only
+core.year_renovated
+Year of last renovation affecting the space
+Number
+Shown when core.year_built is answered
+core.stage_dims
+Stage width, depth, proscenium height and width
+Numbers in feet and inches
+Shown when core.space_type is not "gym" or the space has a stage
+core.docs_available
+Existing documents available
+Multi-select: drawings, manuals, lighting plot, maintenance logs, prior inspection reports, none
+Always
+core.docs_detail
+For each document: electronic or hard copy, received or to follow
+Pick
+Shown for each document selected above
+core.last_inspection
+Last rigging inspection: date, firm, level, report on file
+Date, text, pick
+Shown when S2 is on
+core.audit_ref
+Related audit item or earlier report reference
+Text
+Shown when the building has a prior audit on file
+core.not_accessible
+Areas not accessible during the visit, and why
+Long text
+Always
+The space's own record also stores installer, installation year and original manufacturer when known, because E1.47 recommends them in a report.
+Gate questions and branching rules
+Each rule reads: if this answer, then show these questions and skip these. A "prompt" means the app offers to create a finding with the fields pre-filled; the assessor confirms or dismisses it. Ratings named in a rule are suggestions the assessor can change.
+Rigging (S2)
+ID
+If
+Then show
+Skip or effect
+R1
+rigging.overhead is none
+Only: any hanging positions for fixtures, yes or no
+Skip every other rigging question
+R2
+rigging.overhead is dead hung only
+Number of points, style, spacing, beam type, spacing and direction, ceiling height, batten span
+Skip arbors, rope locks, head and loft blocks, loading bridge, hoists
+R3
+rigging.overhead is counterweight or mixed
+Counterweight module: number of sets, single or double purchase, arbor type, guide type, lock rail, wire rope type and age, terminations, signage, rail log
+Rope set and hoist questions stay hidden unless R4 or R5 applies
+R4
+rigging.overhead is motorized or mixed
+Motorized module: number of motors, manufacturer, model, hoist type, controller, emergency stop, hold-to-run, limit switches, power service, control position
+
+R5
+rigging.rope_sets is yes
+Number of rope (sandbag) sets and visible condition
+
+R6
+rigging.depth is screen
+Presence, counts, red flags, documents, who operates
+Skip dimensions, line set schedule and hardware inventory
+R7
+rigging.depth is full intake
+Add stage dimensions, plaster line to rear wall, line set schedule, hardware inventory, install history
+
+R8
+rigging.access includes grid, loading bridge or catwalk
+Access module: handrails, gaps, lighting, fall protection, who has access, locked or caged
+Any fall hazard reported creates a prompt rated Immediate attention and requires a photo
+R9
+install year is more than 30 years ago, or unknown
+Wire rope type and age
+Flag: capacity cannot be assumed
+R10
+last inspection is unknown, or over 12 months old for a manual system, or any alteration or repair since
+Prompt: rigging inspection due, rated Needs attention
+Shows the E1.47 frequency for the system type
+R11
+rigging.operators includes students or volunteers
+Training records, authorized user list, supervision practice
+
+R12
+rigging.pit_lift is yes
+Manufacturer, voltage, condition, last service
+
+Fire and life safety (S4)
+ID
+If
+Then show
+Skip or effect
+F1
+fire_curtain.present is yes
+Type (manual counterweight or motorized), release stations, release link as labeled, smoke seals and pockets, alarm interface, last drop test, test log on site
+Last test over 90 days ago, or no log, creates a prompt rated Needs attention
+F2
+fire_curtain.present is no and the stage has a proscenium
+Prompt: confirm with the authority having jurisdiction whether one is required
+No further curtain questions
+F3
+smoke_vents.present is yes
+Vent condition, roof penthouse condition, last test date, tested with the curtain
+No test record creates a prompt
+F4
+emergency_lighting.present is yes
+Last monthly test, last battery discharge test, backstage coverage
+
+F5
+emergency_lighting.present is no
+Prompt rated Needs attention
+
+Soft goods (S3)
+ID
+If
+Then show
+Skip or effect
+G1
+soft_goods.present is no
+Nothing further
+Skip the module
+G2
+soft_goods.present is yes
+Inventory: main curtain, legs, borders, cyclorama, scrims; condition
+
+G3
+soft_goods.track is yes
+Track type, draw direction (center-split or single), operation
+
+G4
+flame certification is unknown or no
+Request the tag or certificate; flame test date
+Creates a prompt rated Needs attention
+Lighting and power (S5)
+ID
+If
+Then show
+Skip or effect
+L1
+stage_lighting.present is no
+House and work lighting only: type, controls, button stations
+Skip dimmers, console, fixtures, data
+L2
+stage_lighting.present is yes
+Age and type of system, console, power control, emergency arrangement
+
+L3
+dimmer_racks.present is yes
+Make, model, age, fans and ventilation, manufacturer support status
+Parts unavailable creates an electrical prompt rated Needs attention
+L4
+console.present is yes
+Type, working or not, backup scenes saved
+
+L5
+control.protocol includes network
+Network isolated from school network, addressing documented
+
+L6
+fixtures.overhead is yes
+Counts by type (profile, par, cyc, other), pipes, circuits, data outs, connector type; safety cable on every fixture
+Any fixture without a safety cable creates a prompt rated Immediate attention
+L7
+stage_panel.present is yes
+Labeled, panel schedule posted, clearance in front of the panel, spare capacity as reported
+Observe only; never open or test
+L8
+building year is before 1970, or fused disconnects are visible
+Photo of nameplates and panel labels
+Prompt: electrician follow-up
+L9
+cable damage, improvised adapters or bare-end feeders are seen
+Location, photo
+Prompt rated Immediate attention
+Audio, video and comms (S6)
+ID
+If
+Then show
+Skip or effect
+A1
+sound_system.present is no
+Owner's future audio needs
+Skip every other audio question
+A2
+sound_system.present is yes and working is no or partial
+Problem checklist: dead spots, voice clarity, wireless issues, lack of inputs, monitors, poor recordings; cause if known
+Prompt rated Needs attention
+A3
+sound_system.working is yes
+Type (analog or digital), console, speakers, microphones, patch bay
+
+A4
+speakers.flown is yes
+Independent safety cables, mounting
+Missing cables create a prompt rated Immediate attention
+A5
+hearing_assist.present is no
+Prompt: confirm requirement with the authority having jurisdiction
+
+A6
+hearing_assist.present is yes
+Working or not
+
+A7
+video.projector_or_screen is yes
+Mount points, screen size and type, throw distance, cabling types, ambient light control
+
+A8
+owner wants streaming or show control
+Wi-Fi coverage and bandwidth at the stage and booth
+
+A9
+intercom.present is yes
+Type, backstage-to-booth feeds, working or not
+
+House, egress and finishes (S1)
+ID
+If
+Then show
+Skip or effect
+H1
+core.seats is greater than zero
+Seat anchorage and condition, aisle width, step lights, wheelchair spaces, exit doors and panic hardware
+
+H2
+balcony.present is yes
+Balcony dimensions, exits, rail condition
+
+H3
+lift.to_house_or_stage is yes
+Working or not
+Not working creates an ADA prompt rated Needs attention
+H4
+the house or stage is above grade and there is no lift or ramp
+Prompt: no accessible route
+
+H5
+water_damage is yes
+Location, active leak, smell of mold, photo
+
+H6
+suspected mold, or finishes that may contain asbestos (sound panels, vintage floor tile)
+Do-not-disturb flag, testing status, photo
+Routes to an environmental specialist
+H7
+trap_doors or orchestra_pit is yes
+Guarded, condition, access control
+
+Access, project and every scope
+ID
+If
+Then show
+Skip or effect
+X1
+visit type is quote or project, or S8 is on
+Load-in dock or door, size and route, elevator size, floor type
+Hidden on a condition-only visit
+X2
+a lift is needed for the work
+Who supplies it, whether it can enter the building
+
+X3
+S8 is on
+Completion deadline, budget, budgetary or firm, project type, final decision maker, other firms involved
+
+X4
+any answer is unable to inspect
+Reason, and add to the follow-up list
+
+X5
+any answer is flagged
+Offer to create a finding, pre-filled with ID, space, category and a suggested rating
+
+Question modules
+The rules above decide when a module opens. This table lists what each module asks, the answer type to build, and the photos it requires before it can be marked complete. Pick lists reuse the same options across modules so reports can sort them.
+Module
+Fields
+Answer types
+Required photos
+Counterweight (R3)
+Number of sets; single or double purchase; arbor type (front-loading, side-loading rod, wire guided); guide type (T-bar, J-bar, T-strut); lock rail present; loading gallery or bridge; wire rope type and age; termination type; signage; rail log kept
+Numbers, pick lists, yes or no
+Lock rail; guide wall; a head block; a lift line termination; operating signage
+Motorized (R4)
+Number of motors; manufacturer; model; hoist type (drum, line shaft, other); controller type; emergency stop; hold-to-run; limit switches; power service; control position and sight line
+Numbers, text, pick lists, yes or no
+Nameplates; control station; any hoist
+Dead hung (R2)
+Rigging points: number, style, spacing; beam type, spacing and direction; ceiling height; batten span; end caps
+Numbers, pick lists
+Overhead from two corners
+Access and fall (R8)
+Grid, loading bridge, catwalk present; handrails; gaps; lighting; fall protection; who has access; locked or caged
+Yes or no, text
+Every gap or missing rail; the access point
+Line set schedule (R7)
+Per set: number, distance from plaster line, what hangs, fabric, quantity, size, condition, notes
+Table rows
+Photo of the schedule if posted
+Hardware inventory (R7)
+Span sets, shackles, cable, tie lines, controllers, batten clips, end caps, cable cradles
+Yes or no, counts
+Any unrated or improvised hardware
+Fire curtain (F1)
+As in the rule; plus manufacturer and installation year
+Pick lists, dates
+Release station; curtain face if visible; test log
+Soft goods (G2, G3)
+Inventory with condition; track and draw type; flame tag and date
+Pick lists, dates
+Flame tag; track
+Lighting (L2 to L6)
+Age; type; console; power control; fixtures by type and count; pipes; circuits; data outs; connector type; trim heights
+Numbers, pick lists
+Dimmer rack nameplate; console; pipes
+Power (L7 to L9)
+Panel labeled, schedule posted, clearance; damaged cable or adapters
+Yes or no, text
+Panel exterior and labels, never opened
+Audio (A2 to A6)
+Working state; problem checklist; type; speakers; flown and cabled; hearing assist
+Pick lists, yes or no
+Console; speaker positions
+Video and network (A7, A8)
+Mount points; screen; throw; cabling; ambient light; Wi-Fi coverage
+Numbers, pick lists
+Projector and screen positions
+House and egress (H1 to H4)
+Seating; aisles; step lights; wheelchair spaces; exits; lift; balcony
+Yes or no, numbers
+Exits; any broken seats; lift
+Finishes and hazards (H5 to H7)
+Water; mold; suspect materials; trap doors; orchestra pit
+Yes or no, text
+Each affected area
+Project (X3)
+Deadline; budget; budgetary or firm; project type; decision maker; other firms
+Date, number, pick lists, text
+None
+Every photo is stored against its question, the space and the finding ID if one exists. A named photo set (stage, house, front-of-house and overhead from the standard corners) is offered once per space when S0 is first completed.
+Findings, ratings and routing
+A finding starts from a flagged answer or is added by hand. It gets its ID at creation, in the form district, building, category, sequence, for example MPSD-LHS-RIG-003.
+Rating
+Meaning
+Required when this rating is chosen
+Immediate attention
+Unsafe now; do not use the equipment
+Photo; hazard contact notified, yes or no, with time; lockout and tag status; recommended action
+Needs attention
+Not meeting current standards; fix within 9 to 12 months
+Photo; recommended action
+Good
+Meets the current standard
+Nothing further
+The rating is an assessor's observation. A specialist's rating from a later inspection is stored beside it and never overwrites it.
+Routing. The category set at creation decides who the finding is assigned to.
+If category is
+Then route to
+App behavior
+Rigging
+ETCP-certified rigger
+Sends with the rigging intake, line set numbers and photos
+Electrical and control
+Qualified electrician
+Never marked as inspected by the assessor; observation only
+Structural or building
+Engineer or building owner
+Flags only; no rating of the structure
+Hazardous materials
+Environmental specialist
+Do-not-disturb flag; no sampling by the assessor
+Theatrical general
+Assessor or venue staff
+Stays with the assessor
+Fields carried on every finding: ID, building and space, category, description, photos, rating at visit, related audit item and estimate, specialist rating and standard cited, recommended action, qualification required to fix it, priority (high, medium, low), budget tier (under 10,000, under 100,000, over 100,000 dollars), owner, quote reference, repair date and work done, verified by and date, next due, status.
+Action tags sit beside the rating, because rating describes condition and action describes response: out of service, specialist needed, replace, repair, monitor.
+Tracking and re-inspection
+A finding moves through these statuses, and each change records who made it and when.
+	•	Open: created at a site visit.
+	•	Triaged: category set and routed to a specialist.
+	•	Inspected: a specialist's rating and standard cited are added.
+	•	Quoted: a quote or work order references the finding ID.
+	•	Scheduled: repair date set.
+	•	Repaired: work done, by whom, with before and after photos.
+	•	Verified: re-inspection or sign-off confirms the fix.
+	•	Closed: feeds the ongoing logs.
+Re-inspection rules
+If
+Then
+visit type is re-inspection
+Load only open findings for the space; for each ask: still present, repair date, who repaired, verified by; skip every other module
+a finding is marked still present
+Keep it open and add the new visit's photo
+a new problem is seen during a re-inspection
+Offer to add a module from the scope list, then create findings normally
+a finding is verified
+Close it, and set the next-due date on the related log
+Ongoing logs and reminders
+Log
+Next due is set by
+Rigging inspection
+E1.47 frequency for the system type: manual annually with a deeper inspection at least every 5 years; motorized annually; sooner after alteration or repair
+Fire curtain test
+90 days from the last test
+Smoke vent test
+Same date as the fire curtain test
+Emergency lighting
+Monthly test and annual battery test
+Flame certification
+Date set by the assessor, from the fabric tag or the last field test
+The app sends a reminder to the owner contact a set number of days before each due date. A finding with the rating Immediate attention sends an alert to the hazard contact at creation, and again if it is still open after a set period.
+Data, build requirements and open questions
+Data to store. A district has buildings; a building has spaces; a space has visits; a visit has scopes, answers and photos; findings belong to a space and link back to the answers and photos that raised them. The space record holds the facts that rarely change (stage dimensions, system type, install year, manufacturers) so later visits start pre-filled.
+Build requirements (assumptions to confirm)
+	•	Works without a connection. Schools in the audit report Wi-Fi dead spots, and stages are often in basements or interior rooms. Sync when a connection returns.
+	•	Conditions run on stable question keys, as in the rules above, so the form can change without breaking stored answers.
+	•	Dimensions are entered in feet and inches by default.
+	•	Photos attach to questions, work with the device camera, and keep the capture time.
+	•	Every question supports answered, not applicable, and unable to inspect with a reason.
+	•	Reports export per visit and per finding list, in the same field order as the sample rigging reports, so a rigger receives familiar data.
+	•	Roles: assessor can create and edit findings; a specialist can add an inspection rating; the owner contact can view and acknowledge; only an assessor or specialist can verify and close.
+	•	Reminder timing and alert rules are configurable per district.
+Open questions
+	•	Should S2 screen depth and full intake depth be one scope with a toggle, or two scopes?
+	•	Which pick-list values should be fixed, and which can an assessor add on site?
+	•	What lead time should reminders use for each log, and who receives them?
+	•	Do the specialists use the app directly, or receive an export and send results back?
+	•	Should findings from the April 2024 audit be imported as starting findings for Manitowoc, with the audit's estimates attached?
+	•	Is there a rigging job number or ID scheme that finding IDs should follow?
+	•	Which scopes, if any, should be required on every condition assessment, and which optional?
