@@ -7,7 +7,7 @@ const FILLER = new Set(["the", "of", "st", "saint"]);
 
 /** Alphanumeric words of a name; apostrophes join ("Mary's" → "Marys"), everything else separates. */
 function words(name: string): string[] {
-  return name.replace(/['’]/g, "").split(/[^A-Za-z0-9]+/).filter(Boolean);
+  return name.normalize("NFD").replace(/\p{M}/gu, "").replace(/['’]/g, "").split(/[^A-Za-z0-9]+/).filter(Boolean);
 }
 
 /** Pads a too-short base with X so the result always satisfies CODE_RE. */

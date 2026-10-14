@@ -359,7 +359,7 @@ export async function assessmentChecks(ok: Ok) {
   ok(codeInUse([fc("a", {})], "MPSD", "company") && codeInUse([fc("a", {})], "LIN", "site") && !codeInUse([fc("a", {})], "LIN", "company") && !codeInUse([fc("a", { voided: { by: "u", at: 1, reason: "x" } })], "MPSD", "company") && !codeInUse([], "MPSD", "company"), "findings: codeInUse ignores voided findings and the other kind");
   ok(csvCell("=SUM(A1)") === "'=SUM(A1)" && csvCell("-3") === "'-3" && csvCell("+1") === "'+1" && csvCell("@x") === "'@x" && csvCell('a,"b"') === '"a,""b"""' && csvCell(null) === "" && csvCell(5) === "5" && csvCell("line\nbreak") === '"line\nbreak"', "csv: formula guard + quoting");
   ok(csvCell("=a,b") === "\"'=a,b\"" && csvCell("\tx") === "'\tx" && csvCell("\rx") === "\"'\rx\"", "csv: guarded and quoted together");
-  ok(toCsv(["a"], [["x"]]).startsWith("﻿") && toCsv(["a"], [["x"]]).includes("\r\n") && toCsv(["a", "b"], [["x", "=1"]]) === "﻿a,b\r\nx,'=1\r\n", "csv: BOM + CRLF");
+  ok(toCsv(["a"], [["x"]]).startsWith("\uFEFF") && toCsv(["a"], [["x"]]).includes("\r\n") && toCsv(["a", "b"], [["x", "=1"]]) === "\uFEFFa,b\r\nx,'=1\r\n", "csv: BOM + CRLF");
   ok(photoPathInScope("assessments/AS-1001/p_abc-Xy12.jpg", "AS-1001") && !photoPathInScope("assessments/AS-1002/p.jpg", "AS-1001") && !photoPathInScope("assessments/AS-1001/../x.jpg", "AS-1001") && !photoPathInScope("assessments/AS-1001/a/b.jpg", "AS-1001") && !photoPathInScope("other/AS-1001/p.jpg", "AS-1001") && !photoPathInScope("assessments/AS-1001/", "AS-1001") && !photoPathInScope("assessments/AS-1001/p q.jpg", "AS-1001"), "photos: path scope");
   ok(photoBlobPath("AS-1001", "p_abc") === "assessments/AS-1001/p_abc.jpg" && photoPathInScope(photoBlobPath("AS-1001", "p_abc"), "AS-1001") && PHOTO_PREFIX === "assessments/" && PHOTO_CAPS.perAssessment === 200 && PHOTO_CAPS.originalBytes === 25 * 1024 * 1024 && PHOTO_CAPS.longEdge === 1600 && PHOTO_CAPS.quality === 0.8, "photos: blob path + caps");
   // answers
@@ -419,6 +419,57 @@ export async function assessmentChecks(ok: Ok) {
   const inA: Answers = { a: { v: 1, state: "answered", at: 1, by: "s" } };
   mergeAnswers(inA, { a: { v: 2, state: "answered", at: 9, by: "c" } });
   ok(tie.a.v === "s" && inA.a.v === 1, "answers: ties keep server; inputs aren't mutated");
+  // ---- fix round 1 ----
+  // 1. clear marker
+  const typeQ = (t: string) => [...aq.values()].map((x) => x.q).find((q) => q.type === t)!;
+  const clearTypes = ["yesno", "one", "many", "number", "ftin", "date", "text", "longtext", "contact", "table"];
+  const clearOk = clearTypes.every((t) => { const r = mk(typeQ(t), An(null)); return r.ok && r.answer.v === null && r.answer.state === "answered" && "v" in r.answer; });
+  ok(clearOk, "answers: the clear marker (answered, v: null) is accepted for every answer type");
+  ok(!mk(ynQ, { state: "answered", at: 1, by: "u" }).ok && !V("core.seats", { state: "answered", at: 1, by: "u" }).ok, "answers: a missing v is still refused (only an explicit null clears)");
+  ok(!V("core.docs_available", An([])).ok && !mk(tq, An([])).ok && !mk(tq, An("")).ok && !V("core.owner_concerns", An("  ")).ok, "answers: [] many, [] table and blank text are refused (the editor sends the clear marker)");
+  const mc = mergeAnswers({ a: { v: "old", state: "answered", at: 10, by: "s" }, b: { v: "keep", state: "answered", at: 10, by: "s" } }, { a: { v: null, state: "answered", at: 20, by: "c" }, b: { v: null, state: "answered", at: 5, by: "c" } });
+  ok(mc.a.v === null && mc.a.at === 20 && mc.b.v === "keep", "answers: a newer clear marker overrides an older value; an older one does not");
+  // 2. diacritics
+  ok(suggestSiteCode("École Lincoln") === "ECO" && suggestSiteCode("Zoë") === "ZOE" && suggestCompanyCode("École Lincoln") === "EL" && suggestCompanyCode("Zoë") === "ZOE" && suggestSiteCode("Café Müller") === "CAF", "codes: diacritics are folded");
+  // 3. caps
+  ok(V("core.seats", An(4, { by: "u".repeat(100) })).ok && !V("core.seats", An(4, { by: "u".repeat(101) })).ok && !V("core.seats", An(4, { by: "" })).ok, "answers: by is 1–100 chars");
+  ok(V("core.seats", An(4, { photoIds: ["p".repeat(100)] })).ok && !V("core.seats", An(4, { photoIds: ["p".repeat(101)] })).ok, "answers: a photo id is ≤ 100 chars");
+  ok(V("core.seats", An(4, { photoIds: Array.from({ length: 50 }, (_, i) => "p" + i) })).ok && !V("core.seats", An(4, { photoIds: Array.from({ length: 51 }, (_, i) => "p" + i) })).ok, "answers: at most 50 photo ids");
+  ok(V("core.seats", An(4, { at: 0 })).ok && V("core.seats", An(4, { at: 8.64e15 })).ok && !V("core.seats", An(4, { at: 8.64e15 + 2 })).ok && !V("core.seats", An(4, { at: -1 })).ok, "answers: at is 0 ≤ x ≤ 8.64e15");
+  ok(mk(dQ, An(0)).ok && mk(dQ, An(8.64e15)).ok && !mk(dQ, An(8.64e15 + 2)).ok && !mk(dQ, An(-1)).ok, "answers: date is 0 ≤ x ≤ 8.64e15");
+  ok(mk(ftQ, An({ ft: 10000, in: 0 })).ok && !mk(ftQ, An({ ft: 10001, in: 0 })).ok && !validateAnswer(ftCol, An([{ [fk]: { ft: 10001, in: 0 } }]), ASSESSMENT_DEF, {}).ok, "answers: ftin.ft ≤ 10000 (questions and table cells)");
+  ok(V("core.seats", An(1e9)).ok && V("core.seats", An(-1e9)).ok && !V("core.seats", An(1e9 + 1)).ok && !V("core.seats", An(-1e9 - 1)).ok && !validateAnswer(numCol, An([{ [nk]: 1e9 + 1 }]), ASSESSMENT_DEF, {}).ok && validateAnswer(numCol, An([{ [nk]: 1e9 }]), ASSESSMENT_DEF, {}).ok, "answers: |number| ≤ 1e9 (questions and table cells)");
+  // 4. robustness
+  const wq: QuestionDef = { key: "t.w", label: "t", type: "weird" as unknown as QuestionDef["type"] };
+  let threw = false; let wr: ReturnType<typeof mk> | undefined;
+  try { wr = mk(wq, An("x")); } catch { threw = true; }
+  ok(!threw && wr !== undefined && !wr.ok && (wr as { error: string }).error === "unknown answer type", "answers: an unknown question type → ok:false, never a throw");
+  threw = false; const evil: boolean[] = [];
+  try {
+    for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      evil.push(mk({ key: "t.o", label: "t", type: "one", options: id }, An("x")).ok);
+      evil.push(mk({ key: "t.m", label: "t", type: "many", options: id }, An(["x"])).ok);
+    }
+  } catch { threw = true; }
+  ok(!threw && evil.length === 8 && evil.every((x) => !x), "answers: pick-list ids like 'constructor' / '__proto__' → ok:false, not a throw");
+  const tcq: QuestionDef = { key: "t.tc", label: "t", type: "table", columns: [{ key: "c", label: "c", type: "one", options: "constructor" }] };
+  let tcOk = true; try { tcOk = mk(tcq, An([{ c: "x" }])).ok; } catch { threw = true; }
+  ok(!threw && !tcOk, "answers: a table column pick-list id of 'constructor' → ok:false, not a throw");
+  // 5. merge keys
+  const evilIn = JSON.parse('{"__proto__":{"v":1,"state":"answered","at":99,"by":"c"},"constructor":{"v":1,"state":"answered","at":99,"by":"c"},"prototype":{"v":1,"state":"answered","at":99,"by":"c"},"ok":{"v":2,"state":"answered","at":1,"by":"c"}}') as Answers;
+  const evilSrv = JSON.parse('{"__proto__":{"v":0,"state":"answered","at":1,"by":"s"},"keep":{"v":3,"state":"answered","at":1,"by":"s"}}') as Answers;
+  const me = mergeAnswers(evilSrv, evilIn);
+  ok(Object.keys(me).sort().join() === "keep,ok" && Object.getPrototypeOf(me) === Object.prototype && ({} as Record<string, unknown>).v === undefined, "answers: merge skips __proto__ / constructor / prototype keys and never pollutes");
+  const inh = JSON.parse('{"toString":{"v":1,"state":"answered","at":1,"by":"c"},"hasOwnProperty":{"v":2,"state":"answered","at":1,"by":"c"}}') as Answers;
+  const mi = mergeAnswers({}, inh);
+  ok((mi.toString as unknown as Answer).v === 1 && (mi.hasOwnProperty as unknown as Answer).v === 2, "answers: merge treats inherited names (toString…) as ordinary new keys");
+  // 6. photo path
+  ok(!photoPathInScope("assessments/AS-1001/p.png", "AS-1001") && !photoPathInScope("assessments/AS-1001/p", "AS-1001") && !photoPathInScope("assessments/AS-1001/p.jpg.exe", "AS-1001") && photoPathInScope("assessments/AS-1001/p_abc-Xy12.jpg", "AS-1001"), "photos: path must end in .jpg");
+  ok(!photoPathInScope("assessments/AS-1001/.", "AS-1001") && !photoPathInScope("assessments/AS-1001/...", "AS-1001") && !photoPathInScope("assessments/AS-1001/.jpg", "AS-1001") && !photoPathInScope("assessments/AS-1001/..jpg", "AS-1001"), "photos: dots-only / dot-led remainders refused");
+  ok(!photoPathInScope("assessments/../x.jpg", "..") && !photoPathInScope("assessments/./x.jpg", ".") && !photoPathInScope("assessments/AS-x/p.jpg", "AS-x") && !photoPathInScope("assessments/AS-/p.jpg", "AS-") && !photoPathInScope("assessments/AS-1001x/p.jpg", "AS-1001x") && photoPathInScope("assessments/AS-7/p.jpg", "AS-7"), "photos: assessment id must be AS-<digits>");
+  // 7. csv
+  ok(csvCell(-3) === "-3" && csvCell("-3") === "'-3" && csvCell(-0.5) === "-0.5" && csvCell(true) === "true" && csvCell(0) === "0", "csv: numbers are never guarded, strings are");
+  ok(toCsv(["a"], [[-3]]) === "﻿a\r\n-3\r\n" && toCsv(["a"], [["-3"]]) === "﻿a\r\n'-3\r\n" && toCsv(["a"], [["x"]]).charCodeAt(0) === 0xfeff, "csv: BOM is U+FEFF; a numeric -3 stays -3");
   // carry-over: blank profile values never satisfy a numeric profile condition
   ok(!holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: "  " } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: [] } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: NaN } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 1931 } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 0 } }), "holds: blank / [] / NaN profile value never satisfies lt");
 }

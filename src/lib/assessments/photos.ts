@@ -25,11 +25,12 @@ export function photoBlobPath(assessmentId: string, photoId: string): string {
   return `${PHOTO_PREFIX}${assessmentId}/${photoId}.jpg`;
 }
 
-/** A client-supplied path is trusted only inside its own assessment folder: one safe segment, no "..". Blob's random suffix is allowed. */
+/** A client-supplied path is trusted only inside its own assessment folder: one safe .jpg segment, no "..". Blob's random suffix is allowed. */
 export function photoPathInScope(path: string, assessmentId: string): boolean {
-  if (typeof path !== "string" || !/^[A-Za-z0-9._-]+$/.test(assessmentId)) return false;
+  if (typeof path !== "string" || typeof assessmentId !== "string" || !/^AS-\d+$/.test(assessmentId)) return false;
   const prefix = `${PHOTO_PREFIX}${assessmentId}/`;
   if (!path.startsWith(prefix)) return false;
   const rest = path.slice(prefix.length);
-  return /^[A-Za-z0-9._-]+$/.test(rest) && !rest.includes("..");
+  // One safe segment: never dots only, no "..", must end in ".jpg" (Blob's random suffix sits before it).
+  return !/^\.+$/.test(rest) && !rest.includes("..") && /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.jpg$/.test(rest);
 }
