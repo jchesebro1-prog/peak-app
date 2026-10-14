@@ -7,12 +7,18 @@
  * busy label stays up and the click stays guarded until the Estimator opens.
  * Imports only pure modules and types.
  */
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SUGGEST_BUSY_LABEL, SUGGEST_START_ERROR, startSuggestion, type SuggestStartSource } from "@/lib/assist/suggest-client";
 
 export const SUGGEST_TITLE = "Assist — suggests systems and parts from this record; you build the estimate";
+
+/** After a successful start, how long the busy state waits for the Estimator to open before the button recovers. */
+export const SUGGEST_NAV_RECOVER_MS = 15_000;
+
+/** The compact busy label (the full one rides along as its title). */
+export const SUGGEST_BUSY_SHORT = "Suggesting…";
 
 /** Busy state + a ref double-click guard around `startSuggestion`. */
 export function useSuggestEstimate(source: SuggestStartSource) {
@@ -20,6 +26,13 @@ export function useSuggestEstimate(source: SuggestStartSource) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
+  const recoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (recoverTimer.current) clearTimeout(recoverTimer.current);
+    },
+    []
+  );
   const start = async () => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -27,7 +40,17 @@ export function useSuggestEstimate(source: SuggestStartSource) {
     setError(null);
     try {
       const r = await startSuggestion(source, router);
-      if (r.ok) return; // stay busy (and guarded) while the Estimator opens
+      if (r.ok) {
+        // stay busy (and guarded) while the Estimator opens — but if the
+        // navigation never lands, recover after SUGGEST_NAV_RECOVER_MS.
+        if (recoverTimer.current) clearTimeout(recoverTimer.current);
+        recoverTimer.current = setTimeout(() => {
+          recoverTimer.current = null;
+          inFlight.current = false;
+          setBusy(false);
+        }, SUGGEST_NAV_RECOVER_MS);
+        return;
+      }
       setError(r.error);
     } catch {
       setError(SUGGEST_START_ERROR);
@@ -61,8 +84,11 @@ export default function SuggestEstimate({
   buttonStyle,
   linkStyle,
   style,
+  compact = false,
 }: {
   source: SuggestStartSource;
+  /** A crowded header: the busy label reads "Suggesting…" (the full label is its title). */
+  compact?: boolean;
   /** The source's latest suggestion (server: `suggestEntryFor`); null when none. */
   readyHref: string | null;
   /** e.g. unsaved edits — the route reads the saved record. */
@@ -84,11 +110,11 @@ export default function SuggestEstimate({
       <button
         type="button"
         disabled={off}
-        title={disabled && disabledTitle ? disabledTitle : SUGGEST_TITLE}
+        title={busy ? SUGGEST_BUSY_LABEL : disabled && disabledTitle ? disabledTitle : SUGGEST_TITLE}
         onClick={() => void start()}
         style={{ ...BTN, ...buttonStyle, opacity: off ? 0.6 : 1, cursor: off ? "default" : "pointer" }}
       >
-        {busy ? SUGGEST_BUSY_LABEL : readyHref ? "Suggest again" : "Suggest estimate"}
+        {busy ? (compact ? SUGGEST_BUSY_SHORT : SUGGEST_BUSY_LABEL) : readyHref ? "Suggest again" : "Suggest estimate"}
       </button>
       {error && (
         <span role="alert" style={{ fontSize: 12, color: "#b4543a" }}>

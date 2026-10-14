@@ -1,7 +1,7 @@
 import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo } from "@/lib/assist/config";
 import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
-import { estimateRunOutcome, estimateRunQuoteId, suggestionCatalogLines, type DraftLine, type EstimateRunOutcome } from "@/lib/assist/outcome";
-import { getSuggestion } from "@/lib/stores/estimate-suggestions";
+import { estimateRunOutcome, estimateRunQuoteId, suggestionCatalogLines, suggestionSuperseded, type DraftLine, type EstimateRunOutcome } from "@/lib/assist/outcome";
+import { getSuggestion, suggestionForSource } from "@/lib/stores/estimate-suggestions";
 import { assistReport, briefReport, filingReport, recentMonthKeys, type BriefBuildRow, type FilingReport } from "@/lib/assist/report";
 import { briefIdsInMonth } from "@/lib/brief/slots";
 import { getBlob, listBlobIds } from "@/db/doc-store";
@@ -21,7 +21,8 @@ import type { AssistVM } from "./groups/types";
  * outcome, so it is read off the quote as it stands now (estimateRunOutcome):
  * an Estimate suggestion run is scored off its suggestion's first saved quote
  * — pending until there is one, discarded once that quote is gone, and its
- * own "no suggestion" bucket when the run saved nothing; a legacy #334 draft
+ * own "no suggestion" bucket when the run saved nothing or Suggest again
+ * replaced it before any quote was saved (superseded); a legacy #334 draft
  * keeps estimateOutcomeFor (an explicit `quoteId: null` = discarded).
  *
  * Never throws: a preview deploy can reach the shared production DB before
@@ -41,10 +42,13 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
       drafts.map(async (r) => {
         const d = (r.outcomeDetail ?? {}) as { suggestionId?: string | null; quoteId?: string | null; lines?: DraftLine[] };
         // Estimate suggestion runs are scored off the suggestion's first quote (spec 2026-10-13 §4).
-        const s = typeof d.suggestionId === "string" && d.suggestionId ? await getSuggestion(d.suggestionId) : null;
-        const sugg = s ? { quoteId: s.quoteId, lines: suggestionCatalogLines(s) } : null;
+        // Every read fails soft (null), so one bad record can't blank the month's report.
+        const s = typeof d.suggestionId === "string" && d.suggestionId ? await getSuggestion(d.suggestionId).catch(() => null) : null;
+        // No quote yet: still its source's latest, or did Suggest again replace it? (undefined = read failed → not superseded)
+        const latest = s && !s.quoteId ? await suggestionForSource(s.source.kind, s.source.id).then((x) => x?.id ?? null).catch(() => undefined) : undefined;
+        const sugg = s ? { quoteId: s.quoteId, lines: suggestionCatalogLines(s), superseded: suggestionSuperseded(s, latest) } : null;
         const quoteId = estimateRunQuoteId(d, sugg);
-        const quote = quoteId ? await getQuote(quoteId) : null;
+        const quote = quoteId ? await getQuote(quoteId).catch(() => null) : null;
         return [r.id, estimateRunOutcome(d, sugg, (quote ?? null) as Parameters<typeof estimateRunOutcome>[2])] as const;
       })
     );

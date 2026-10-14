@@ -1168,7 +1168,8 @@ export default function LeadDrawer({
                     </div>
                   )}
 
-                  {/* footer actions */}
+                  {/* footer actions — Suggest estimate gets its own line above the
+                      Convert / Lost / Delete row, which keeps its own layout */}
                   <div
                     style={{
                       marginTop: "auto",
@@ -1176,21 +1177,25 @@ export default function LeadDrawer({
                       bottom: 0,
                       background: "#fff",
                       borderTop: "1px solid #f0f1f4",
-                      padding: "13px 22px",
-                      display: "flex",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 10,
                     }}
                   >
-                    {canSuggest && (
+                  {canSuggest && (
+                    <div data-testid="lead-suggest-row" style={{ padding: "11px 22px 0" }}>
                       <SuggestEstimate
                         source={{ kind: "lead", id: vm.id }}
                         readyHref={suggestionHref}
-                        style={{ flexBasis: "100%" }}
                         buttonStyle={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 9 }}
                       />
-                    )}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      padding: "13px 22px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
                     {vm.converted ? (
                       <Link
                         href={`/quotes?id=${encodeURIComponent(vm.quoteId)}`}
@@ -1253,6 +1258,7 @@ export default function LeadDrawer({
                         }
                       />
                     )}
+                  </div>
                   </div>
                 </>
               )}

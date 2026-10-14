@@ -75,8 +75,24 @@ export function estimateOutcomeFor(detail: { quoteId?: string | null; lines?: Dr
  */
 export type EstimateRunOutcome = AssistOutcome | "pending" | "none";
 
-/** A stored suggestion as the report reads it: the quote it was first saved as, and its catalog lines. */
-export type SuggestionForReport = { quoteId: string | null; lines: DraftLine[] };
+/**
+ * A stored suggestion as the report reads it: the quote it was first saved
+ * as, its catalog lines, and whether Suggest again replaced it before any
+ * quote was saved from it (`superseded`, see suggestionSuperseded).
+ */
+export type SuggestionForReport = { quoteId: string | null; lines: DraftLine[]; superseded?: boolean };
+
+/**
+ * A suggestion is superseded when no quote was saved from it AND its source's
+ * index now names a different suggestion (Suggest again replaced it). Pure.
+ * `latestId` is the id the source index names: a string, or null/undefined
+ * when there is none or the read failed — neither counts as superseded, so a
+ * failed read leaves the run pending rather than guessing.
+ */
+export function suggestionSuperseded(s: { id: string; quoteId: string | null } | null | undefined, latestId: string | null | undefined): boolean {
+  if (!s || s.quoteId) return false;
+  return typeof latestId === "string" && latestId !== "" && latestId !== s.id;
+}
 
 /** A suggestion's catalog lines (custom lines carry no SKU and are not scored). Pure. */
 export function suggestionCatalogLines(s: { systems?: Array<{ lines?: Array<{ sku?: string; qty?: number; custom?: boolean }> }> } | null | undefined): DraftLine[] {
@@ -102,6 +118,8 @@ export function estimateRunQuoteId(
 /**
  * One draft run's outcome. Estimate suggestion runs (`suggestionId` key):
  *  - `suggestionId: null` (nothing saved — no systems, or the save failed) → "none";
+ *  - no quote yet and superseded (Suggest again replaced it) → "none" too —
+ *    nothing will ever be saved from it, so it must not sit in pending forever;
  *  - the suggestion can't be read, or has no quote yet → "pending";
  *  - its quote is gone → "discarded";
  *  - else estimateKeep(the suggestion's catalog lines, the quote as it stands now).
@@ -116,7 +134,7 @@ export function estimateRunOutcome(
   if (!detail) return "pending";
   if ("suggestionId" in detail) {
     if (!detail.suggestionId) return "none";
-    if (!suggestion || !suggestion.quoteId) return "pending";
+    if (!suggestion || !suggestion.quoteId) return suggestion?.superseded ? "none" : "pending";
     return estimateKeep(suggestion.lines, quote).outcome;
   }
   return estimateOutcomeFor(detail, quote) ?? "pending";

@@ -249,7 +249,7 @@ export async function suggestEstimate(
   const lines: DraftLine[] = san.systems.flatMap((s) => s.lines.map((l) => ({ sku: l.custom ? "" : l.sku, qty: l.qty })));
   const detail = { lines, dropped: san.dropped, unresolved: san.unresolved, truncated: san.truncated, extractRunId: a.runId };
   if (!san.systems.length) {
-    // quoteId null: nothing came of this run (the report reads it as discarded).
+    // suggestionId null: nothing came of this run (the report reads it as no suggestion).
     await mergeRunDetail(b.runId, { ...detail, suggestionId: null, quoteId: null }).catch(() => false);
     return { ok: false, error: `Assist couldn't suggest any systems from this ${noun} — nothing was saved.` };
   }

@@ -942,7 +942,8 @@ export default function SurveyEditor({
               source={{ kind: "survey", id: record.id }}
               readyHref={suggestionHref}
               disabled={dirty || saving}
-              disabledTitle="Save your changes first — Assist reads the saved assessment"
+              disabledTitle={saving ? "Saving…" : "Save your changes first — Assist reads the saved assessment"}
+              compact
               buttonStyle={{ fontSize: 13, color: "#5b616e", borderRadius: 9, padding: "10px 14px", minHeight: 42 }}
             />
           )}

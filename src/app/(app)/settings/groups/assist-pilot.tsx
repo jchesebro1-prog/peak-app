@@ -47,7 +47,7 @@ function ReportTable({ title, rows }: { title: string; rows: ReportRow[] }) {
             <th style={th}>Edited</th>
             <th style={th}>Discarded</th>
             <th style={th}>No outcome</th>
-            <th style={th} title="Estimate suggestion runs that saved no suggestion">No suggestion</th>
+            <th style={th} title="Estimate suggestion runs that saved no suggestion, or whose suggestion Suggest again replaced before any quote was saved from it">No suggestion</th>
             <th style={th}>Cost</th>
           </tr>
         </thead>
