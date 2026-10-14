@@ -51,7 +51,6 @@ export async function emailAssessmentReportAction(id: string): Promise<EmailRepo
     to: contact.email ?? "",
     subject: copy.subject,
     body: copy.body,
-    link: { type: "customer", id: a.customerId, label: venue },
     attachments: [attachment],
     me: user.name,
   });

@@ -7,7 +7,8 @@ import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/ren
 import { signPrintToken } from "@/lib/quote-pdf/token";
 import { getAssessment } from "@/lib/stores/assessments";
 import { getSite } from "@/lib/identity/sites";
-import { loadFindingsReport, siteDisplayName } from "./report-data";
+import { getCompany } from "@/lib/identity/companies";
+import { siteDisplayName } from "./report-data";
 import { REPORT_WAIT_FOR, assessmentPdfName, findingsPdfName } from "./report-model";
 import { parseFindingsScope } from "./register";
 
@@ -63,11 +64,20 @@ export async function renderFindingsPdf(scope: string, host: string | null, prot
   try {
     const parsed = parseFindingsScope(scope);
     if (!parsed) return { ok: false, status: 404, error: "Not found" };
-    const data = await loadFindingsReport(parsed.scope);
-    if (!data) return { ok: false, status: 404, error: "Not found" };
+    // A light name lookup for the file name (the print route does the real load); unknown venue / company is a 404.
+    let subject: string;
+    if (parsed.kind === "site") {
+      const site = await getSite(parsed.id);
+      if (!site) return { ok: false, status: 404, error: "Not found" };
+      subject = siteDisplayName(site, site.id);
+    } else {
+      const company = await getCompany(parsed.id);
+      if (!company) return { ok: false, status: 404, error: "Not found" };
+      subject = company.name;
+    }
     const r = await render(`/print/assessment-findings/${encodeURIComponent(parsed.scope)}`, "assessment-findings", parsed.scope, host, proto);
     if (!r.ok) return r;
-    return { ok: true, pdf: r.pdf, fileName: findingsPdfName(data.subject, Date.now()) };
+    return { ok: true, pdf: r.pdf, fileName: findingsPdfName(subject, Date.now()) };
   } catch (e) {
     return failure(e, "findings report");
   }

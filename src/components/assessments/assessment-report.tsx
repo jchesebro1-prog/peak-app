@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { ReportLetterhead } from "@/lib/assessments/report-data";
+import ScreenPhoto from "./report-photo";
 import { PHOTOS_OVER_CAP_NOTE, PHOTO_UNAVAILABLE, REPORT_SECTIONS, type AssessmentReportModel, type ReportFinding, type ReportPhoto } from "@/lib/assessments/report-model";
 
 /**
@@ -80,8 +81,10 @@ export interface AssessmentReportProps {
 function PhotoImg({ id, photos, defer, alt }: { id: string; photos: Record<string, string | null>; defer?: boolean; alt: string }) {
   const src = Object.hasOwn(photos, id) ? photos[id] : null;
   if (!src) return <div className="asr-ph" role="img" aria-label={PHOTO_UNAVAILABLE}>{PHOTO_UNAVAILABLE}</div>;
+  // Print: the ReportReady island sets the src. On screen: a photo that fails to load swaps to the placeholder.
+  if (!defer) return <ScreenPhoto id={id} src={src} alt={alt} unavailable={PHOTO_UNAVAILABLE} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img data-photo-id={id} src={defer ? undefined : src} alt={alt} loading={defer ? undefined : "lazy"} />;
+  return <img data-photo-id={id} alt={alt} />;
 }
 
 function Thumbs({ ids, p, byId }: { ids: string[]; p: AssessmentReportProps; byId: Map<string, ReportPhoto> }) {

@@ -1,6 +1,7 @@
 import { attachmentDisposition } from "@/lib/document-files";
 import { renderFindingsPdf } from "@/lib/assessments/report-pdf-server";
 import { requireUser } from "@/lib/session";
+import { zipStream } from "@/lib/zip";
 
 /** One headless-Chrome render (no photos, no wait step). */
 export const maxDuration = 120;
@@ -22,7 +23,8 @@ export async function GET(request: Request) {
   const r = await renderFindingsPdf(scope, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   if (!r.ok) return text(r.error, r.status);
   const disposition = attachmentDisposition(r.fileName);
-  return new Response(new Uint8Array(r.pdf), {
+  // Streamed (the rack submittal's shared chunker): a buffered function response is capped around 4.5 MB on Vercel.
+  return new Response(zipStream(r.pdf), {
     headers: {
       "content-type": "application/pdf",
       "content-disposition": sp.get("download") === "1" ? disposition : "inline" + disposition.slice("attachment".length),

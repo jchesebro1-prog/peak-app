@@ -8,7 +8,7 @@ import type { AssessmentDef, Category, QuestionDef, Rating, ScopeCode } from "./
 import { allModules, allQuestions } from "./defs";
 import { evaluate, type EvalResult, type ScopeSel } from "./evaluate";
 import { answerHasContent, flagsForScope, formatValue, optionsFor, photosForQuestions, type PicklistExtrasVM } from "./editor-model";
-import { CATEGORY_ROUTING, resolvedPromptIds, type Finding } from "./findings-model";
+import { CATEGORY_ROUTING, liveMergeTarget, resolvedPromptIds, type Finding } from "./findings-model";
 import { CATEGORIES, PRIORITY_LABEL, RATINGS, RATING_LABEL, STATUS_LABEL, buildingAndSpace, compareRegister, dayLabel, findingLabel } from "./register";
 export { findingsPdfHref, parseFindingsScope, type FindingsScope } from "./register";
 import type { PhotoRef } from "./photos";
@@ -163,17 +163,7 @@ export function reportDate(ms: number | undefined | null): string {
 /** Follows a merged-away finding to the live keeper it now lives in; the finding itself when live; null when the
  *  chain ends at a voided finding, a missing one, or a cycle. */
 export function liveKeeper(f: Finding, byKey: Map<string, Finding>): Finding | null {
-  const seen = new Set<string>([f.key]);
-  let cur: Finding = f;
-  while (cur.voided) {
-    const next = cur.voided.mergedInto;
-    if (!next || seen.has(next)) return null;
-    seen.add(next);
-    const t = byKey.get(next);
-    if (!t) return null;
-    cur = t;
-  }
-  return cur;
+  return liveMergeTarget(byKey, f);
 }
 
 /** The register's rows: live findings only (voided never; merged ones only through their keeper), Immediate → Needs →
@@ -427,7 +417,7 @@ export function findingsPdfName(subject: string, now: number): string {
 /* ---------- photo inlining (print route) ---------- */
 
 export const INLINE_CONCURRENCY = 4;
-export const INLINE_TOTAL_BYTES = 40 * 1024 * 1024;
+export const INLINE_TOTAL_BYTES = 20 * 1024 * 1024;
 /** Email attachments ride inside the thread doc; past this the PDF is a download only. */
 export const EMAIL_PDF_MAX_BYTES = 10 * 1024 * 1024;
 export const EMAIL_TOO_LARGE = "Report is too large to email — download it instead";

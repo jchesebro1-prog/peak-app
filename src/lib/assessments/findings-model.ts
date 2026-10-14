@@ -149,6 +149,31 @@ export function voidReasonProblem(reason: unknown): string | null {
   return null;
 }
 
+/** A finding's merge target key: `voided.mergedInto`, else the editor's flat `mergedInto`. */
+function mergeTargetKey(f: PromptSource): string | undefined {
+  const t = typeof f.voided === "object" && f.voided ? f.voided.mergedInto : undefined;
+  return typeof t === "string" && t ? t : typeof f.mergedInto === "string" && f.mergedInto ? f.mergedInto : undefined;
+}
+
+/**
+ * The ONE merge-chain walker (resolvedPromptIds and the report share it): a live finding is its own target; a merged-away
+ * one follows `mergedInto` to the live keeper it now lives in. null when the chain ends at a voided finding that was
+ * not merged, a missing one, or a cycle.
+ */
+export function liveMergeTarget<T extends PromptSource>(findingsByKey: Map<string, T>, f: T): T | null {
+  const seen = new Set<string>(typeof f.key === "string" ? [f.key] : []);
+  let cur = f;
+  while (cur.voided) {
+    const next = mergeTargetKey(cur);
+    if (!next || seen.has(next)) return null;
+    seen.add(next);
+    const t = findingsByKey.get(next);
+    if (!t) return null;
+    cur = t;
+  }
+  return cur;
+}
+
 /**
  * Prompt ids (`rule:<id>` / `flag:<key>`) that findings have already turned into a finding — the ONE rule the editor
  * and Mark complete share. A rule prompt is resolved by a finding with that `ruleId`; a flagged-answer prompt (X5) by
@@ -160,26 +185,9 @@ export function voidReasonProblem(reason: unknown): string | null {
 export function resolvedPromptIds(findings: PromptSource[]): string[] {
   const byKey = new Map<string, PromptSource>();
   for (const f of findings) if (typeof f.key === "string") byKey.set(f.key, f);
-  const target = (f: PromptSource): string | undefined => {
-    const t = typeof f.voided === "object" && f.voided ? f.voided.mergedInto : undefined;
-    return typeof t === "string" && t ? t : typeof f.mergedInto === "string" && f.mergedInto ? f.mergedInto : undefined;
-  };
-  const endsLive = (f: PromptSource): boolean => {
-    const seen = new Set<string>(typeof f.key === "string" ? [f.key] : []);
-    let cur = f;
-    while (cur.voided) {
-      const next = target(cur);
-      if (!next || seen.has(next)) return false;
-      seen.add(next);
-      const t = byKey.get(next);
-      if (!t) return false;
-      cur = t;
-    }
-    return true;
-  };
   const out = new Set<string>();
   for (const f of findings) {
-    if (f.voided && !endsLive(f)) continue;
+    if (f.voided && !liveMergeTarget(byKey, f)) continue;
     const keys = Array.isArray(f.questionKeys) ? f.questionKeys.filter((k): k is string => typeof k === "string") : [];
     if (typeof f.ruleId === "string" && f.ruleId && f.ruleId !== "X5") out.add(`rule:${f.ruleId}`);
     else for (const k of keys) out.add(`flag:${k}`);

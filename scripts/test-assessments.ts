@@ -33,7 +33,7 @@ import {
   placementScope, promptScope, PHOTO_LIMIT_MESSAGE, canAddPhoto, stuckPendingPhotos, findingFromPrompt, photosForQuestions,
   findingSheetProblems, findingSaveDoc, parseMoney, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
 } from "../src/lib/assessments/editor-model";
-import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch } from "../src/lib/assessments/findings-model";
+import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch, liveMergeTarget } from "../src/lib/assessments/findings-model";
 import { saveFinding, getFinding, getFindings, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
@@ -1802,6 +1802,16 @@ async function task10Checks(ok: Ok) {
   ok(liveKeeper(findings[5], byKey)?.key === fk(3) && liveKeeper(findings[4], byKey) === null && liveKeeper(findings[0], byKey)?.key === fk(1), "report: a merged finding resolves to its live keeper; a plain void resolves to nothing");
   const cyc = [t10Finding({ key: fk(8), voided: { by: "u", at: 1, reason: "m", mergedInto: fk(9) } }), t10Finding({ key: fk(9), voided: { by: "u", at: 1, reason: "m", mergedInto: fk(8) } })];
   ok(liveKeeper(cyc[0], new Map(cyc.map((f) => [f.key, f]))) === null, "report: a merge cycle resolves to nothing");
+  ok(liveMergeTarget(byKey, findings[5])?.key === fk(3) && liveMergeTarget(byKey, findings[4]) === null && liveMergeTarget(byKey, findings[0])?.key === fk(1), "merge walker: one walker — report liveKeeper and resolvedPromptIds agree on keeper / plain void / live");
+  ok(resolvedFromFindings([{ key: fk(1), ruleId: "RA", questionKeys: [], voided: { mergedInto: fk(1) } }, { key: fk(2), ruleId: "RB", questionKeys: [], voided: { mergedInto: fk(3) } }, { key: fk(3), ruleId: "RC", questionKeys: [] }]).join() === "rule:RB,rule:RC", "merge walker: resolvedPromptIds drops a self-merge cycle and counts a merge into a live keeper");
+  const { zipStream } = await import("../src/lib/zip");
+  const six = Buffer.alloc(6 * 1024 * 1024, 7);
+  const six2 = Buffer.from(await new Response(zipStream(six)).arrayBuffer());
+  ok(six2.length === six.length && six2.equals(six), "report PDF routes: a 6 MB buffer streams back byte-identically (shared chunker)");
+  const routeSrc = ["src/app/api/assessments/[id]/report-pdf/route.ts", "src/app/api/assessments/findings-pdf/route.ts"].map((f) => readFileSync(join(ROOT, f), "utf8"));
+  ok(routeSrc.every((s) => s.includes("zipStream(r.pdf)") && !s.includes("new Uint8Array(r.pdf)")), "report PDF routes: both stream the PDF instead of buffering it");
+  const actSrc = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/report/actions.ts"), "utf8");
+  ok(!/link:\s*\{/.test(actSrc), "email report: the draft carries no invented link type (the customer rides customerId)");
 
   const gaps = ["Question: Seat count", `Prompt: ${ruleP.prompt!.text}`, `Prompt: ${flagQ.flag!.text}`, "Prompt: Nothing like this exists"];
   const fg = followUpGaps(gaps, def, findings);
@@ -1894,7 +1904,7 @@ async function task10Checks(ok: Ok) {
   ok(res.sources.p_bad === null && res.sources.p_none === null && !!res.sources.p_ok0?.startsWith("data:image/jpeg;base64,") && !res.overCap && res.inlinedBytes === 90, "photo inlining: a failed or empty read is skipped; the rest are data URIs");
   const capped = await inlinePhotoSources([{ id: "p_a" }, { id: "p_big" }, { id: "p_c" }], read, { maxBytes: 50 });
   ok(capped.overCap && capped.sources.p_a !== null && capped.sources.p_big === null && capped.sources.p_c === null && capped.inlinedBytes === 10, "photo inlining: past the byte budget that photo and every later one are left out (overCap)");
-  ok(INLINE_TOTAL_BYTES === 40 * 1024 * 1024 && PHOTO_UNAVAILABLE === "Photo unavailable", "photo inlining: 40 MB total; placeholder wording");
+  ok(INLINE_TOTAL_BYTES === 20 * 1024 * 1024 && PHOTO_UNAVAILABLE === "Photo unavailable", "photo inlining: 20 MB total; placeholder wording");
 }
 
 if (process.argv[1] && /test-assessments\.ts$/.test(process.argv[1])) {
