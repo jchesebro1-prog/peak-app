@@ -2566,11 +2566,11 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
   const { buildFilingCandidates } = await import("@/lib/inbox-org/ai-filing");
 
   /* the helper */
-  const yes = ["UNKNOWN", "unknown", " Unknown ", "UKN", "TBD", "tbd", "N/A", "n/a", "NA", "na", "None", "TEST", "test"];
-  const no = ["", "Unknown Labs", "Test Kitchen HS", "NAU", "TBD Productions", "none of the above", "Lincoln HS", "N//A", "U.N.K."];
+  const yes = ["UNKNOWN", "unknown", " Unknown ", "UKN", "TBD", "tbd", "N/A", "n/a"];
+  const no = ["", "Unknown Labs", "Test Kitchen HS", "NAU", "TBD Productions", "none of the above", "Lincoln HS", "N//A", "U.N.K.", "NA", "na", "None", "TEST", "Test"];
   ok(yes.every(isPlaceholderCompany), `placeholder #345: ${yes.join(" / ")} are placeholders`);
   ok(no.every((n) => !isPlaceholderCompany(n)) && !isPlaceholderCompany(null) && !isPlaceholderCompany(undefined), `placeholder #345: real names (and blanks) are not (${no.filter(isPlaceholderCompany).join(", ")})`);
-  ok(PLACEHOLDER_COMPANY_RE.source === "^(unknown|ukn|tbd|n\\/?a|none|test)$" && PLACEHOLDER_COMPANY_RE.flags === "i", "placeholder #345: the one rule is /^(unknown|ukn|tbd|n\\/?a|none|test)$/i on the trimmed name");
+  ok(PLACEHOLDER_COMPANY_RE.source === "^(unknown|ukn|tbd|n\\/a)$" && PLACEHOLDER_COMPANY_RE.flags === "i", "placeholder #345: the one rule is /^(unknown|ukn|tbd|n\\/a)$/i on the trimmed name — 'N/A' needs its slash; NA / None / Test are real-sounding and left out (review)");
   const ph = (id: string) => id === "UNK";
   const base = { customerId: "UNK", work: null, siteId: "loc1", noise: false, strength: "strong" as "strong" | "weak", reason: "pat is a known contact at UNKNOWN" };
   const cleared = withoutPlaceholderCustomer(base, ph);
@@ -2586,10 +2586,21 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
       { id: "c-unk", name: "UNKNOWN" },
       { id: "c-labs", name: "Unknown Labs" },
     ],
-    sites: [],
-    people: [{ id: "p1", name: "Unknown Person", companyId: "c-unk", emails: [] }],
+    sites: [
+      { id: "loc-unk", companyId: "c-unk", name: "Unknown Hall" },
+      { id: "loc-labs", companyId: "c-labs", name: "Unknown Labs Theater" },
+    ],
+    people: [
+      { id: "p1", name: "Unknown Person", companyId: "c-unk", emails: [] },
+      { id: "p2", name: "Unknown Labs Person", companyId: "c-labs", emails: [] },
+      { id: "p3", name: "Unknown Freelancer", companyId: null, emails: [] },
+    ],
   });
-  ok(hits.companies.map((c) => c.id).join(",") === "c-labs" && hits.people.length === 1 && hits.people[0].companyName === "UNKNOWN", "placeholder #345: the company search never offers a placeholder company (a person parked under one is still findable)");
+  ok(hits.companies.map((c) => c.id).join(",") === "c-labs", "placeholder #345: the Link popup's company search never offers a placeholder company");
+  ok(hits.venues.map((v) => v.id).join(",") === "loc-labs", `placeholder #345 review 1: …nor a venue under one (${hits.venues.map((v) => v.id).join(",")})`);
+  ok(hits.people.map((p) => p.id).sort().join(",") === "p2,p3" && !hits.people.some((p) => p.companyName === "UNKNOWN"), `placeholder #345 review 1: …nor a person parked under one (a person with no company still shows) (${hits.people.map((p) => p.id).join(",")})`);
+  const lts = readFileSync("src/lib/inbox-link-targets.ts", "utf8");
+  ok(lts.includes("const nameOf = new Map(real.map((c) => [c.id, c.name]));"), "placeholder #345 review 1: nameOf (the venue/person filter) is built from the real companies only");
 
   /* Gmail labels */
   ok(isPlaceholderCustomerLabel("Peak/Customers/UNKNOWN") && isPlaceholderCustomerLabel("Peak/Customers/TBD") && !isPlaceholderCustomerLabel("Peak/Customers/Lincoln HS") && !isPlaceholderCustomerLabel("Peak/Status/Waiting"), "placeholder #345: Peak/Customers/UNKNOWN is a placeholder label");
@@ -2683,8 +2694,8 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
     const { resolveForThread, applyResolution, resweepThreads } = await import("@/lib/gmail/linking");
     const { resolveCustomerId } = await import("@/lib/stores/comms");
     const { withoutPlaceholderLink } = await import("@/lib/inbox-org/placeholder");
-    const phSet = async (ids: string[]) => new Set(ids.filter((i) => i === "UNK"));
-    const lk = (hit: { contactId: string; customerId: string } | { ambiguous: string[] } | null, owners: string[] = []) => ({
+    const phSet = async (ids: string[]) => new Set(ids.filter((i) => i.startsWith("UNK")));
+    const lk = (hit: { contactId: string; customerId: string } | { ambiguous: string[]; contacts?: Array<{ contactId: string; customerId: string }> } | null, owners: string[] = []) => ({
       contactByEmail: async () => hit,
       customersByDomain: async () => owners,
       placeholderIds: phSet,
@@ -2725,6 +2736,86 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
     ok(withoutPlaceholderLink(realT, (id) => id === UNK) === realT, "matcher #345: a real link is returned untouched");
     const pageSrc = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
     ok(pageSrc.includes("const sel = selRaw ? withoutPlaceholderLink(selRaw, (id) => isPlaceholderCompany(placeholderNames.get(id))) : null;"), "matcher #345: the Inbox reader reads the thread through withoutPlaceholderLink");
+
+    /* review of #345 — items 1–5, 8, 9 */
+    const { rememberAddress } = await import("@/lib/gmail/linking");
+    const { claimDomain, customersForDomain } = await import("@/lib/gmail/domains");
+    const { isPlaceholderCompanyId, placeholderCompanyIds, invalidatePlaceholderCompanies } = await import("@/lib/identity/companies");
+    const { PLACEHOLDER_PICK_ERROR } = await import("@/lib/inbox-org/placeholder");
+    const { contactByEmail } = await import("@/lib/identity/lookup");
+    // 1 — the remember / claim writes refuse a placeholder (the actions answer PLACEHOLDER_PICK_ERROR)
+    const remembered = await rememberAddress(UNK, "new.t345@ph345-claim.test", "New Person", null, { id: MO_ID, name: MO });
+    ok(remembered === "" && (await contactByEmail("new.t345@ph345-claim.test")) === null, "placeholder #345 review 1: rememberAddress never saves an address on UNKNOWN");
+    await claimDomain("ph345-claim.test", UNK, "manual", MO);
+    await claimDomain("ph345-claim.test", UNK, "learned", MO);
+    ok((await customersForDomain("ph345-claim.test")).length === 0, "placeholder #345 review 1: claimDomain (manual or learned) never claims a domain for UNKNOWN");
+    const la = readFileSync("src/app/(app)/inbox/link-actions.ts", "utf8");
+    const fnSrc = (name: string) => {
+      const i = la.indexOf(`export async function ${name}(`);
+      const j = la.indexOf("\nexport async function ", i + 1);
+      return la.slice(i, j < 0 ? undefined : j);
+    };
+    ok(
+      fnSrc("linkThreadToCustomerAction").includes("if (await isPlaceholderCompanyId(customerId)) return { ok: false, error: PLACEHOLDER_PICK_ERROR };") &&
+        fnSrc("linkThreadToCustomerAction").indexOf("isPlaceholderCompanyId(customerId)") < fnSrc("linkThreadToCustomerAction").indexOf("rememberAddress("),
+      "placeholder #345 review 1: linkThreadToCustomerAction refuses a placeholder before any link / remember / claim write"
+    );
+    ok(fnSrc("claimDomainAction").includes("return { ok: false, error: PLACEHOLDER_PICK_ERROR };"), "placeholder #345 review 1: claimDomainAction refuses a placeholder");
+    ok(PLACEHOLDER_PICK_ERROR === "That's a placeholder company — pick the real one.", "placeholder #345 review 1: the refusal reads \"That's a placeholder company — pick the real one.\"");
+    // 2 — a manual person link never auto-links a placeholder home company
+    const lpa = readFileSync("src/app/(app)/inbox/link-popup-actions.ts", "utf8");
+    ok(lpa.includes("if (on && c?.homeCompanyId && !(await isPlaceholderCompanyId(c.homeCompanyId)) && !(await resolveCustomerId(t))) {"), "placeholder #345 review 2: linking a person whose home company is UNKNOWN never auto-links UNKNOWN (and a stored UNKNOWN doesn't count as a company)");
+    // 3 — setThreadSiteAction reads the customer placeholder-aware
+    const site = fnSrc("setThreadSiteAction");
+    ok(site.includes("const customerId = await resolveCustomerId(t);") && !site.includes("t.customerId || (await resolveCustomerId(t))") && site.includes("if (t.customerId !== customerId) await linkThread("), "placeholder #345 review 3: the venue action uses resolveCustomerId (a stored UNKNOWN neither blocks the real company nor offers UNKNOWN's venues)");
+    const stampedAuto = await mk("site-auto", { customerId: UNK, customer: "UNKNOWN", resolution: "linked", contactEmail: "nobody.t345@ph345-none.test" });
+    ok((await resolveCustomerId(await read(stampedAuto))) === null, "placeholder #345 review 3: resolveCustomerId — an automatic UNKNOWN link reads as no customer");
+    const deliberate = await mk("site-deliberate", { customerId: UNK, customer: "UNKNOWN", resolution: "linked", linkedBy: "user" } as Partial<CommThread>);
+    ok((await resolveCustomerId(await read(deliberate))) === UNK, "placeholder #345 review 5: a deliberate (linkedBy) UNKNOWN link is history and stands");
+    ok(withoutPlaceholderLink(await read(deliberate), (id) => id === UNK).customerId === UNK, "placeholder #345 review 5: the reader keeps a deliberate UNKNOWN link (only automatic stamps are hidden)");
+    // 4 — the new-contact prefill never offers a placeholder
+    ok(
+      lpa.includes("const owners = claimed.filter((id) => !phOwners.has(id));") &&
+        lpa.includes("(await allCompanies()).filter((c) => !isPlaceholderCompany(c.name))") &&
+        lpa.includes("companyId: homeOf(c),") &&
+        lpa.includes("const companies = await getCompanies(homeIds.filter((id) => !placeholders.has(id)));"),
+      "placeholder #345 review 4: the link panel's participants and new-contact prefill drop a placeholder domain owner, signature company and home company"
+    );
+    // 5 — a FILED row keeps its true history in Filed and the reader
+    const filedT = await mk("filed", {});
+    await setOrg(filedT, {
+      filing: { customerId: UNK, work: null, noise: false, source: "identity", reason: "pat is a known contact at UNKNOWN", strength: "strong", needsReply: false, state: "filed", filedBy: "approved", filedAt: Date.now(), at: T0 } as Filing,
+    });
+    const fT = await read(filedT);
+    const nm = (id: string) => (id === UNK ? "UNKNOWN" : null);
+    const fvm = buildOrganizeVM([fT], { tab: "filed", now: Date.now(), customerName: nm });
+    ok(fvm.rows[0]?.suggestion === "UNKNOWN", `placeholder #345 review 5: a row already filed under UNKNOWN shows it in the Filed tab (${fvm.rows[0]?.suggestion})`);
+    ok(buildReaderOrg(fT, { customerName: nm, teammateName: () => null, task: null, isAdmin: false })?.filing?.suggestion === "UNKNOWN", "placeholder #345 review 5: …and in the reader strip");
+    ok(withoutPlaceholderCustomer({ ...base, state: "filed" as const }, ph).customerId === "UNK" && withoutPlaceholderCustomer({ ...base, state: "suggested" as const }, ph).customerId === null, "placeholder #345 review 5: only a waiting (suggested) filing is transformed");
+    // 8 — an ambiguous hit where every customer is a placeholder keeps the contact
+    const TBD = fixtureId(345, "co-tbd");
+    await saveCompany({ id: TBD, name: "TBD", type: "other" });
+    const CT2 = fixtureId(345, "ct-tbd");
+    await saveContact({ id: CT2, firstName: "Twice", lastName: "Parked", homeCompanyId: TBD, title: "" });
+    await setEmails(CT2, [{ value: "parked.t345@ph345-school.test", label: "work", isPrimary: true }]);
+    const both = await contactByEmail("parked.t345@ph345-school.test");
+    ok(!!both && "ambiguous" in both && (both.contacts || []).length === 2, "placeholder #345 review 8: (setup) the address sits on contacts under UNKNOWN and TBD — ambiguous, with its contacts");
+    const amb = await resolveForThread("parked.t345@ph345-school.test");
+    ok(amb.kind === "unknown" && amb.contactId === CT2, `placeholder #345 review 8: every customer a placeholder → the contact is kept (newest), no customer (${JSON.stringify(amb)})`);
+    const ambPure = await resolveSender("x@y.test", lk({ ambiguous: ["UNK", "UNK2"], contacts: [{ contactId: "c9", customerId: "UNK2" }, { contactId: "c8", customerId: "UNK" }] }));
+    ok(ambPure.kind === "unknown" && ambPure.contactId === "c9", "placeholder #345 review 8: pure — the newest contact is kept when the lookup can't pick a real customer");
+    const ambOne = await resolveSender("x@y.test", lk({ ambiguous: ["UNK", "C1"], contacts: [{ contactId: "c7", customerId: "C1" }, { contactId: "c8", customerId: "UNK" }] }));
+    ok(ambOne.kind === "linked" && ambOne.customerId === "C1" && ambOne.contactId === "c7", "placeholder #345 review 8: one real customer left → linked to it, with its own contact");
+    // 9 — the placeholder lookup is cached and invalidated by saveCompany
+    ok((await isPlaceholderCompanyId(UNK)) && (await isPlaceholderCompanyId(TBD)) && !(await isPlaceholderCompanyId(REAL)), "placeholder #345 review 9: isPlaceholderCompanyId");
+    await saveCompany({ id: TBD, name: "TEST345 Renamed Real", type: "other" });
+    ok(!(await isPlaceholderCompanyId(TBD)) && (await placeholderCompanyIds([UNK, TBD, REAL, null])).size === 1, "placeholder #345 review 9: renaming through saveCompany drops the cached answer at once");
+    invalidatePlaceholderCompanies();
+    const comp = readFileSync("src/lib/identity/companies.ts", "utf8");
+    ok(comp.includes("export const PLACEHOLDER_CACHE_MS = 60_000;") && /onConflictDoUpdate[\s\S]*?invalidatePlaceholderCompanies\(\);\s*\}/.test(comp), "placeholder #345 review 9: a 60 s per-process memo, invalidated on company save");
+    await db.delete(contactEmails).where(eq(contactEmails.contactId, CT2));
+    await db.delete(contacts).where(eq(contacts.id, CT2));
+    await db.delete(companies).where(eq(companies.id, TBD));
     await db.delete(contactEmails).where(eq(contactEmails.contactId, CT));
     await db.delete(contacts).where(eq(contacts.id, CT));
   } finally {

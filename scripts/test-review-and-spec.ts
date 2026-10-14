@@ -21499,7 +21499,8 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
     "#214 actions: link/unlink writes through the pure rules on the fresh doc"
   );
   ok(
-    set214.includes("!(t.customerId || (await resolveCustomerId(t)))") && set214.includes("linkThread(threadId, c.homeCompanyId"),
+    // #345 — resolveCustomerId is placeholder-aware (it returns a real stored customerId first)
+    set214.includes("!(await resolveCustomerId(t))") && set214.includes("linkThread(threadId, c.homeCompanyId"),
     "#214 actions: linking a person on a thread with no company links their home company"
   );
   const fill214 = fn214("fillContactBlanksAction");

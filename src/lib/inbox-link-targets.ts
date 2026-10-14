@@ -90,14 +90,17 @@ export function rankLinkTargets(
 ): LinkTargetGroups {
   const query = (q || "").trim();
   if (query.length < LINK_TARGET_MIN_QUERY) return emptyLinkTargets();
-  const nameOf = new Map(data.companies.map((c) => [c.id, c.name]));
+  // #345 — a placeholder company ("UNKNOWN", "TBD" …) is never offered, and
+  // neither are its venues or the people parked under it: they are left out
+  // of `nameOf`, which the venue and person groups already require
+  const real = data.companies.filter((c) => !isPlaceholderCompany(c.name));
+  const nameOf = new Map(real.map((c) => [c.id, c.name]));
   const out = emptyLinkTargets();
 
   if (!only || only === "company") {
     out.companies = typeaheadMatches(
       query,
-      // #345 — a placeholder company ("UNKNOWN", "TBD" …) is never offered
-      data.companies.filter((c) => !isPlaceholderCompany(c.name)),
+      real,
       (qq, c) => allIn(qq, `${c.name} ${c.city || ""}`),
       (qq, c) => nameRank(qq, c.name),
       LINK_TARGET_MAX

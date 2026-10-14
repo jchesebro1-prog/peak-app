@@ -12291,7 +12291,13 @@ Jeff (Oct 14): on a computer he couldn't find Organize or "Organize my inbox"; t
 - **Banner** on the plain inbox: "N emails to file · S ready to approve — Review" (the second part only when some carry a strong suggestion), dismissed per session, back when the count grows (D1034).
 - **Daily brief:** "N emails to file · M noise — Review", plus "Organize my inbox" / "Finish organizing my inbox" while the 90-day cleanup was never run or is unfinished. It lands on To file with the button called out, and never starts the run by itself (D1035).
 - All three show whenever Organize is available, which is the view's own rule: everyone, unless `INBOX_ORG_DISABLED`. The sidebar row and the select option stay.
-- **Placeholder companies** (`isPlaceholderCompany`: UNKNOWN / UKN / TBD / N/A / NA / None / Test, whole name) are skipped by the sender-rule, identity and number steps, the AI candidate list, the Link / Change… company search and every filing write. Suggestions already stored under one read as "No match yet". The app no longer creates or applies `Peak/Customers/<placeholder>` Gmail labels (it did before); a label like that applied in Gmail links nothing. Company records are untouched (D1036).
+- **Placeholder companies** (`isPlaceholderCompany`: UNKNOWN / UKN / TBD / N/A, whole name; NA / None / Test were dropped after review as real-sounding) are skipped by:
+  - the sender-rule, identity and number steps and the AI candidate list;
+  - the Link popup (companies, venues and people under one) and every filing write;
+  - the link / remember / domain-claim actions, which answer "That's a placeholder company — pick the real one.";
+  - the person-link auto-company step, the new-contact prefill and the venue action.
+
+  Waiting suggestions already stored under one read as "No match yet"; rows already filed under one keep their history. The app no longer creates or applies `Peak/Customers/<placeholder>` Gmail labels (it did before); a label like that applied in Gmail links nothing. Company records are untouched (D1036).
 - **Gmail contact matcher:** a sender filed under a placeholder resolves to the contact only, with no `customerId` (import, create, resweep). Threads already stamped with UNKNOWN keep their stored data, but the reader shows no customer link for them (D1037).
 - **Tests:** `scripts/test-inbox-org.ts` (`inboxOrgEntryChecks`, `inboxOrgPlaceholderChecks`, both chained into test:specs) and `scripts/test-brief.ts` (`briefOrganizeEntryChecks`). No migration, no env var.
 

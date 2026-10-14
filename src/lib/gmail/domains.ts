@@ -8,6 +8,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { customerDomains } from "@/db/schema";
 import { isPublicDomain } from "./config";
+import { isPlaceholderCompanyId } from "@/lib/identity/companies";
 
 export async function customersForDomain(
   domain: string
@@ -54,6 +55,8 @@ export async function claimDomain(
 ): Promise<void> {
   const d = (domain || "").toLowerCase();
   if (!d || isPublicDomain(d) || !customerId) return;
+  // #345 — a placeholder company ("UNKNOWN" …) never claims a domain
+  if (await isPlaceholderCompanyId(customerId)) return;
   const db = await getDb();
   if (source === "manual") {
     await db.delete(customerDomains).where(eq(customerDomains.domain, d));

@@ -15,7 +15,8 @@ export type Resolution =
  *  than one customer (never auto-pick between them), or nobody. */
 export type ContactHit =
   | { contactId: string; customerId: string }
-  | { ambiguous: string[] }
+  /** `contacts`: the live rows, newest first, when the lookup has them */
+  | { ambiguous: string[]; contacts?: Array<{ contactId: string; customerId: string }> }
   | null;
 
 export type ResolveLookups = {
@@ -42,7 +43,12 @@ export async function resolveSender(email: string, lookups: ResolveLookups): Pro
   if (hit && "ambiguous" in hit) {
     const ids = await real(hit.ambiguous);
     if (ids.length > 1) return { kind: "ambiguous", candidates: ids.map((customerId) => ({ customerId })) };
-    if (ids.length === 1) return { kind: "linked", customerId: ids[0], via: "contact" };
+    if (ids.length === 1) {
+      const contactId = hit.contacts?.find((c) => c.customerId === ids[0])?.contactId;
+      return { kind: "linked", customerId: ids[0], ...(contactId ? { contactId } : {}), via: "contact" };
+    }
+    // every customer was a placeholder: keep the (newest) contact, as below
+    contactOnly = hit.contacts?.[0]?.contactId;
   } else if (hit) {
     if ((await real([hit.customerId])).length) return { kind: "linked", customerId: hit.customerId, contactId: hit.contactId, via: "contact" };
     contactOnly = hit.contactId;

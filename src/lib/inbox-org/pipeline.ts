@@ -71,7 +71,7 @@ import { noiseByRules } from "./noise";
 import { findEstimateNumbers, findRecordIds, type FoundEstimateNumber } from "./numbers";
 import { matchSenderRule } from "./sender-rules";
 import { isSignOff } from "./signoff";
-import { isPlaceholderCompany } from "./placeholder";
+import { isPlaceholderCompanyId } from "@/lib/identity/companies";
 import type { Court, CourtOwner, Filing, NoiseFlag, SenderRule } from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
@@ -371,8 +371,8 @@ async function nameOf(customerId: string): Promise<string> {
 /** #345 — a placeholder company ("UNKNOWN", "TBD" …) is never a filing
  *  target: every step below skips one (`isPlaceholderCompany`). */
 async function isPlaceholderId(customerId: string | null | undefined): Promise<boolean> {
-  if (!customerId) return false;
-  return isPlaceholderCompany(await customerNameFor(customerId).catch(() => ""));
+  // cached per process (identity/companies) — the import checks many senders
+  return isPlaceholderCompanyId(customerId).catch(() => false);
 }
 
 /** A record-number hit whose customer is a placeholder keeps its record and

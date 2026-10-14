@@ -11,12 +11,17 @@
  * Pure, no imports — safe in the client bundle.
  */
 
-/** The whole name, trimmed, is one of these (any case). */
-export const PLACEHOLDER_COMPANY_RE = /^(unknown|ukn|tbd|n\/?a|none|test)$/i;
+/** The whole name, trimmed, is one of these (any case). Deliberately narrow:
+ *  "N/A" needs its slash, and "NA" / "None" / "Test" are left out — each
+ *  could be a real name (review of #345). */
+export const PLACEHOLDER_COMPANY_RE = /^(unknown|ukn|tbd|n\/a)$/i;
 
 export function isPlaceholderCompany(name: string | null | undefined): boolean {
   return PLACEHOLDER_COMPANY_RE.test(String(name ?? "").trim());
 }
+
+/** What a link / remember / domain-claim action answers for a placeholder company. */
+export const PLACEHOLDER_PICK_ERROR = "That's a placeholder company — pick the real one.";
 
 /** The reason an emptied suggestion shows (the pipeline's own "nothing yet" line). */
 export const NO_MATCH_REASON = "No match yet — choose a customer";
@@ -28,6 +33,7 @@ type FilingLike = {
   noise: boolean;
   strength: "strong" | "weak";
   reason: string;
+  state?: "suggested" | "filed" | "skipped" | "dismissed";
 };
 
 /**
@@ -38,6 +44,9 @@ type FilingLike = {
  * object when there is nothing to drop.
  */
 export function withoutPlaceholderCustomer<F extends FilingLike>(f: F, isPlaceholderId: (id: string) => boolean): F {
+  // only a waiting suggestion: a thread already filed (or dismissed) keeps
+  // its true history in the Filed tab and the reader
+  if (f.state !== undefined && f.state !== "suggested") return f;
   if (!f.customerId || !isPlaceholderId(f.customerId)) return f;
   const out: F = { ...f, customerId: null };
   delete out.siteId;
@@ -55,17 +64,19 @@ type LinkLike = {
   resolution?: "linked" | "suggested" | "ambiguous" | "unknown" | null;
   suggestedCustomerId?: string | null;
   candidates?: Array<{ customerId: string; name: string }>;
+  linkedBy?: "user" | "filing" | null;
 };
 
 /**
  * A thread as the Inbox reader should show it: a stored link to a
- * placeholder company (stamped by the contact matcher before #345) reads as
- * no customer — its venue with it — and a placeholder domain guess or
- * candidate is dropped. Read-only: the stored thread is never rewritten.
- * Returns the same object when there is nothing to drop.
+ * placeholder company that the contact matcher stamped AUTOMATICALLY before
+ * #345 reads as no customer — its venue with it — and a placeholder domain
+ * guess or candidate is dropped. A DELIBERATE link (`linkedBy`: a person or
+ * a filing) is true history and stays. Read-only: the stored thread is never
+ * rewritten. Returns the same object when there is nothing to drop.
  */
 export function withoutPlaceholderLink<T extends LinkLike>(t: T, isPlaceholderId: (id: string) => boolean): T {
-  const linked = !!t.customerId && isPlaceholderId(t.customerId);
+  const linked = !!t.customerId && !t.linkedBy && isPlaceholderId(t.customerId);
   const suggested = !!t.suggestedCustomerId && isPlaceholderId(t.suggestedCustomerId);
   const cands = (t.candidates || []).filter((c) => !isPlaceholderId(c.customerId));
   if (!linked && !suggested && cands.length === (t.candidates || []).length) return t;

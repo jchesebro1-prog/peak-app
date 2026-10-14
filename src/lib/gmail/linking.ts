@@ -14,7 +14,7 @@ import {
   setEmails,
 } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
-import { placeholderCompanyIds } from "@/lib/identity/companies";
+import { isPlaceholderCompanyId, placeholderCompanyIds } from "@/lib/identity/companies";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommLink, CommThread, LinkedBy } from "@/lib/stores/comms";
 import { domainOf, isPublicDomain } from "./config";
@@ -226,6 +226,8 @@ export async function rememberAddress(
 ): Promise<string> {
   const e = (email || "").trim().toLowerCase();
   if (!e) return "";
+  // #345 — an address is never remembered on a placeholder company ("UNKNOWN" …)
+  if (await isPlaceholderCompanyId(customerId)) return "";
   let cid = contactId || "";
   if (cid) {
     const ct = await getContact(cid);

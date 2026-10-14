@@ -13,7 +13,7 @@
  * `next build` gate catches a client import of this module instead.
  */
 import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
-import { inInbox, isNoiseRow, isStrongRow, isToFileRow, toFileThreads } from "@/lib/inbox-org/apply";
+import { inInbox, isNoiseRow, isStrongRow, isToFileRow } from "@/lib/inbox-org/apply";
 import { isPlaceholderCompany, withoutPlaceholderCustomer } from "@/lib/inbox-org/placeholder";
 import { placeholderCompanyIds } from "@/lib/identity/companies";
 import type { ReaderOrgVM } from "../types";
@@ -232,10 +232,6 @@ export async function loadOrganize(
   });
 }
 
-/** The sidebar row's count on every Inbox view: my To file rows. */
-export async function organizeToFileCount(me: { name: string }): Promise<number> {
-  return (await toFileThreads(me)).length;
-}
 
 /** #345 — the Inbox's Organize entry points (tab row, banner): my To file,
  *  strong (Approve all strong's rows) and Noise counts — one comms scan, the

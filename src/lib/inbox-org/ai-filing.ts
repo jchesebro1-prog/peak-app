@@ -15,7 +15,7 @@ import { listDocsByField } from "@/db/doc-store";
 import { cleanPromptField, UNTRUSTED_NOTE } from "@/lib/assist/features/thread-text";
 import { displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { customersForDomain } from "@/lib/gmail/domains";
-import { allCompanies } from "@/lib/identity/companies";
+import { allCompanies, isPlaceholderCompanyId } from "@/lib/identity/companies";
 import { rankLinkTargets, type CompanyCandidate } from "@/lib/inbox-link-targets";
 import { extractSignature } from "@/lib/inbox-signature-parse";
 import { isDone } from "@/lib/pipelines";
@@ -192,7 +192,7 @@ function domainOf(email: string): string {
 
 /** #345 — a placeholder company ("UNKNOWN" …) is never a candidate. */
 async function isPlaceholderId(id: string | null | undefined): Promise<boolean> {
-  return !!id && isPlaceholderCompany(await customerNameFor(id).catch(() => ""));
+  return isPlaceholderCompanyId(id).catch(() => false);
 }
 
 /** The customer the filing step is anchored on: the thread's linked

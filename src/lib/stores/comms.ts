@@ -2079,8 +2079,9 @@ export async function resolveCustomerId(
 ): Promise<string | null> {
   if (!t) return null;
   const { placeholderCompanyIds } = await import("@/lib/identity/companies");
-  // #345 — a stored link to a placeholder company ("UNKNOWN" …) reads as none
-  if (t.customerId && !(await placeholderCompanyIds([t.customerId])).has(t.customerId)) return t.customerId;
+  // #345 — an AUTOMATIC stored link to a placeholder company ("UNKNOWN" …)
+  // reads as none; a deliberate one (`linkedBy`) is history and stands
+  if (t.customerId && (t.linkedBy || !(await placeholderCompanyIds([t.customerId])).has(t.customerId))) return t.customerId;
   // #125 — the picked identity message's address, else the counterpart.
   // I follow-up review — no selfEmail here: this store-level helper has no
   // "current user"/mailbox in hand (it's called from many contexts, some

@@ -28,6 +28,8 @@ import {
   setThreadSite,
 } from "@/lib/gmail/linking";
 import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { isPlaceholderCompanyId } from "@/lib/identity/companies";
+import { PLACEHOLDER_PICK_ERROR } from "@/lib/inbox-org/placeholder";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -53,6 +55,8 @@ export async function linkThreadToCustomerAction(
   // #341 — only my own mailbox's threads are linked from here
   if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
+  // #345 — never link (or remember an address / claim a domain) to a placeholder company
+  if (await isPlaceholderCompanyId(customerId)) return { ok: false, error: PLACEHOLDER_PICK_ERROR };
 
   // #125 — the picked identity message's address, else the thread contact.
   // I follow-up review — selfEmail = the signed-in user's own connected
@@ -88,6 +92,7 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
   const d = (domain || "").trim().toLowerCase();
   if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
+  if (await isPlaceholderCompanyId(customerId)) return { ok: false, error: PLACEHOLDER_PICK_ERROR };
   await claimDomain(d, customerId, "manual", me.name);
   await resweepThreads({ domain: d }, { mailboxUser: me.name });
   revalidate();
@@ -242,7 +247,9 @@ export async function setThreadSiteAction(threadId: string, siteId: string | nul
   const me = await requireUser();
   const t = await getThread(threadId);
   if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
-  const customerId = t.customerId || (await resolveCustomerId(t));
+  // #345 — placeholder-aware: a stored UNKNOWN reads as no customer, so it
+  // neither blocks the real company nor offers UNKNOWN's venues
+  const customerId = await resolveCustomerId(t);
   if (!customerId) return { ok: false, error: "Link a customer first." };
   const clean = (siteId || "").trim() || null;
   if (clean) {
@@ -250,7 +257,7 @@ export async function setThreadSiteAction(threadId: string, siteId: string | nul
     if (!(c?.locations || []).some((l) => l.id === clean))
       return { ok: false, error: "That venue isn't on this customer." };
   }
-  if (!t.customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
+  if (t.customerId !== customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
   await setThreadSite(threadId, clean);
   revalidate();
   return { ok: true };

@@ -6,7 +6,9 @@ import { companies, contactEmails, contacts } from "@/db/schema";
  *  more than one live customer (never auto-pick between them), or to nobody. */
 export type ContactLookup =
   | { contactId: string; customerId: string }
-  | { ambiguous: string[] }
+  /** `contacts`: the live rows, newest first (#345 — the resolver keeps the
+   *  contact when every customer turns out to be a placeholder) */
+  | { ambiguous: string[]; contacts?: Array<{ contactId: string; customerId: string }> }
   | null;
 
 /** #96 — exact-address → contact + home company, via the indexed
@@ -80,7 +82,7 @@ export function pickContactHit(
   const live = rows.filter((r): r is { contactId: string; customerId: string } => !!r.customerId);
   if (!live.length) return null;
   const customerIds = Array.from(new Set(live.map((r) => r.customerId)));
-  if (customerIds.length > 1) return { ambiguous: customerIds };
+  if (customerIds.length > 1) return { ambiguous: customerIds, contacts: live.map((r) => ({ contactId: r.contactId, customerId: r.customerId })) };
   return { contactId: live[0].contactId, customerId: live[0].customerId };
 }
 
