@@ -58,7 +58,6 @@ import {
   SECTION_ORDER, STEP_LABELS, STEP_BY_ID, GROUP_BY_ID, GROUP_META, isQuoteVisit, sectionVisible, hasCounterweight,
 } from "@/lib/survey-flow";
 import { KillQuestions } from "./sections/kill-questions";
-import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
 import { SectionRail, SECTION_RAIL_CSS, type RailItem } from "@/components/section-rail/section-rail";
 import { sectionProgress } from "./sections/progress";
 import { useCollapsed, isCollapsed } from "./sections/collapse";
@@ -174,6 +173,7 @@ function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
     intakeReady: !!r.intakeReady,
     linesetsEnabled: !!r.linesetsEnabled,
     linesets: [...(r.linesets || [])],
+    linesetQty: typeof r.linesetQty === "number" ? r.linesetQty : undefined,
     assessmentEnabled: !!r.assessmentEnabled,
     assessment: r.assessment,
     templateRev: r.templateRev,
@@ -363,10 +363,11 @@ export default function SurveyEditor({
     patchDraft({ inventory: draft.inventory.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
   const removeInvRow = (id: string) =>
     patchDraft({ inventory: draft.inventory.filter((r) => r.id !== id) });
-  const addLineset = () =>
-    patchDraft({ linesets: draft.linesets.concat(blankLinesetRow(nextLinesetPosition(draft.linesets))) });
   const patchLineset = (id: string, patch: Partial<(typeof draft.linesets)[number]>) =>
     patchDraft({ linesets: draft.linesets.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+  // always a number once touched (0 = none) — an unset quantity would be reseeded on the next read
+  const applyLinesets = (rows: typeof draft.linesets, qty?: number) =>
+    patchDraft(qty == null ? { linesets: rows } : { linesets: rows, linesetQty: qty });
   const removeLineset = (id: string) =>
     patchDraft({ linesets: draft.linesets.filter((row) => row.id !== id) });
 
@@ -741,6 +742,8 @@ export default function SurveyEditor({
       intakeReady: draft.intakeReady,
       linesetsEnabled: draft.linesetsEnabled,
       linesets: draft.linesets,
+      // only ever a number — an unset quantity is reseeded from the rows on the next read
+      ...(typeof draft.linesetQty === "number" ? { linesetQty: draft.linesetQty } : {}),
       assessmentEnabled: draft.assessmentEnabled,
       assessment: draft.assessment,
       templateRev: draft.templateRev,
@@ -1298,10 +1301,9 @@ export default function SurveyEditor({
                           })()}
                           {sec.kind === "linesets" && (
                             <LinesetsSection
-                              enabled={draft.linesetsEnabled}
+                              qty={draft.linesetQty}
                               rows={draft.linesets}
-                              onEnabled={(enabled) => setField("linesetsEnabled", enabled)}
-                              onAdd={addLineset}
+                              onApply={applyLinesets}
                               onRemove={removeLineset}
                               onChange={patchLineset}
                             />

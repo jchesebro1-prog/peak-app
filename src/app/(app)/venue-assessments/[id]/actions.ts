@@ -101,6 +101,7 @@ export type SurveyPatch = Partial<
     | "lifeSafety"
     | "linesetsEnabled"
     | "linesets"
+    | "linesetQty"
     | "assessmentEnabled"
     | "assessment"
     | "templateRev"

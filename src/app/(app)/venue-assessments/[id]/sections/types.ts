@@ -123,6 +123,7 @@ export type Draft = {
   intakeReady: boolean;
   linesetsEnabled: boolean;
   linesets: LinesetRow[];
+  linesetQty?: number;
   assessmentEnabled: boolean;
   assessment: AssessmentData;
   templateRev: string;

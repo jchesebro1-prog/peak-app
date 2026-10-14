@@ -28,6 +28,7 @@ import {
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
 import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
 import { cleanPlainText } from "../src/lib/estimate-output/fields";
+import { blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -700,6 +701,55 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 B5: a cleared Track operation stays cleared and the auditorium Operation shows as an Older note");
     const tn = mm({ disciplines: { curtain: { operation: "SR" } } } as MigratableSurvey);
     ok(tn.disciplines?.curtain?.trackOperation === "SR" && !hasNote(tn, "dCurtain", "Operation (before #344)"), "#344 B5: a never-answered Track operation still takes the auditorium SL / SR");
+  }
+
+  /* ---- B6: quantity-first line set schedule ---- */
+  {
+    const mk = (pos: string, over: Partial<LinesetRow> = {}): LinesetRow => ({ ...blankLinesetRow(1), pos, ...over });
+    const emptyRow = mk("2");
+    ok(rowIsEmpty(emptyRow) && !rowIsEmpty(mk("2", { setName: "Main" })) && !rowIsEmpty(mk("2", { condition: 0 })) && !rowIsEmpty(mk("2", { type: "O" })),
+      "#344 B6: rowIsEmpty — blank except the set number is empty; any value, type or condition (even 0) is not");
+    const grown = linesetQuantityPlan([], 4);
+    ok(grown.rows.map((r) => r.pos).join(",") === "1,2,3,4" && grown.dropped.length === 0 && new Set(grown.rows.map((r) => r.id)).size === 4,
+      "#344 B6: quantity 4 on an empty schedule makes sets 1–4 with distinct ids");
+    const base = [mk("1", { setName: "Main" }), mk("2"), mk("3", { notes: "bent" })];
+    const bigger = linesetQuantityPlan(base, 5);
+    ok(bigger.rows.length === 5 && bigger.rows[0].id === base[0].id && bigger.rows[2].id === base[2].id && bigger.rows[4].pos === "5",
+      "#344 B6: growing keeps existing rows (same ids) and appends blanks");
+    const shrinkEmpty = linesetQuantityPlan(base, 1);
+    ok(shrinkEmpty.rows.length === 1 && shrinkEmpty.dropped.length === 1 && shrinkEmpty.dropped[0].pos === "3",
+      "#344 B6: shrinking returns only the rows with data in dropped (the empty set 2 goes silently)");
+    const shrinkSilent = linesetQuantityPlan(base.slice(0, 2).concat(mk("3")), 2);
+    ok(shrinkSilent.rows.length === 2 && shrinkSilent.dropped.length === 0, "#344 B6: shrinking past only empty sets drops them silently");
+    const again = linesetQuantityPlan(bigger.rows, 5);
+    ok(again.rows.every((r, i) => r.id === bigger.rows[i].id) && again.rows.length === 5, "#344 B6: re-running the same quantity is stable (ids unchanged)");
+    const zero = linesetQuantityPlan(base, 0);
+    ok(zero.rows.length === 0 && zero.dropped.length === 2, "#344 B6: quantity 0 clears the table and lists the sets with data");
+    const odd = [mk("2", { setName: "B" }), mk("1", { setName: "A" }), mk("Ext", { setName: "X" })];
+    const oddPlan = linesetQuantityPlan(odd, 3);
+    ok(oddPlan.rows.map((r) => r.pos).join(",") === "1,2,3,Ext" && oddPlan.rows[0].setName === "A" && oddPlan.rows[1].id === odd[0].id && oddPlan.rows[3].id === odd[2].id,
+      "#344 B6: rows sort by set number, a non-numeric set stays (shown last) and is never dropped");
+    ok(linesetQuantityPlan(odd, 0).rows.map((r) => r.pos).join(",") === "Ext" && clampLinesetQty(999) === 200 && clampLinesetQty(-3) === 0 && clampLinesetQty(Number.NaN) === 0 && clampLinesetQty(3.9) === 3,
+      "#344 B6: a quantity of 0 still keeps a non-numeric set; the quantity clamps to 0–200");
+
+    const fd = [mk("1", { type: "L", condition: 3 }), mk("2", { type: "B" }), mk("3")];
+    const filled = fillDown(fd, fd[0].id, "type");
+    ok(filled[0].type === "L" && filled[1].type === "L" && filled[2].type === "L" && filled[1].id === fd[1].id && fd[1].type === "B",
+      "#344 B6: Fill down copies the column below the focused row without touching the input");
+    const filledCond = fillDown(fd, fd[0].id, "condition");
+    ok(filledCond[2].condition === 3 && filledCond[0].condition === 3, "#344 B6: Fill down also copies the Condition level");
+    const cleared = fillDown([mk("1"), mk("2", { condition: 2 })], fd[0].id + "x", "condition");
+    ok(cleared[1].condition === 2, "#344 B6: Fill down from an unknown row changes nothing");
+
+    ok(formatSetRanges(["14", "12", "13", "20", "Ext"]) === "12–14, 20, Ext" && formatSetRanges(["5"]) === "5" && formatSetRanges([]) === "",
+      "#344 B6: the removal prompt lists set numbers as ranges");
+    const sp = [mk("1"), mk("2", { type: "D" }), mk("3"), mk("4"), mk("Ext")];
+    const marked = markSpare(sp, 1, 4);
+    ok(marked.rows[0].type === "O" && marked.rows[1].type === "D" && marked.rows[2].type === "O" && marked.rows[3].type === "O" && marked.rows[4].type === "" && marked.skipped.join(",") === "2",
+      "#344 B6: Mark range spare sets Open / spare on untyped sets and reports the typed ones it skipped");
+    const swapped = markSpare(sp, 4, 3);
+    ok(swapped.rows[2].type === "O" && swapped.rows[3].type === "O" && swapped.rows[0].type === "" && swapped.skipped.length === 0,
+      "#344 B6: Mark range spare accepts the range in either order");
   }
 }
 

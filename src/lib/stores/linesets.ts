@@ -85,3 +85,114 @@ export function nextLinesetPosition(rows: LinesetRow[]): number {
     return Number.isFinite(position) ? Math.max(max, position) : max;
   }, 0) + 1;
 }
+
+/* ---------- #344 B6: quantity-first schedule ---------- */
+
+/** A set number: a whole number ≥ 1 and nothing else. Anything else is kept but sorts last. */
+function setNumber(row: LinesetRow): number | null {
+  const text = (row.pos ?? "").trim();
+  if (!/^\d+$/.test(text)) return null;
+  const n = Number.parseInt(text, 10);
+  return n >= 1 ? n : null;
+}
+
+/** Highest quantity the schedule offers. */
+export const LINESET_QTY_MAX = 200;
+
+/** Whole number in 0…200; anything else (NaN, negative, fractional) falls back to 0 / floors. */
+export function clampLinesetQty(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(LINESET_QTY_MAX, Math.max(0, Math.floor(n)));
+}
+
+/** Numbered rows in set-number order, then rows without a usable number in their stored order. */
+export function sortLinesetRows(rows: LinesetRow[]): LinesetRow[] {
+  const numbered = rows.map((row, i) => ({ row, n: setNumber(row), i })).filter((x) => x.n != null);
+  const unnumbered = rows.filter((row) => setNumber(row) == null);
+  numbered.sort((a, b) => (a.n as number) - (b.n as number) || a.i - b.i);
+  return numbered.map((x) => x.row).concat(unnumbered);
+}
+
+/** Nothing recorded on the row besides its set number: every field blank, no condition. */
+export function rowIsEmpty(row: LinesetRow): boolean {
+  const blank = (v: unknown) => v == null || String(v).trim() === "";
+  return (
+    blank(row.distFromPL) && blank(row.setName) && blank(row.type) && blank(row.battenLength) &&
+    blank(row.liftLines) && blank(row.goods) && blank(row.finishedWH) && blank(row.arborLoad) &&
+    blank(row.trimLow) && blank(row.trimHigh) && blank(row.cond) && blank(row.notes) && row.condition == null
+  );
+}
+
+/**
+ * Make the schedule have set numbers 1…n. Existing rows keep their ids (matched by numeric `pos`);
+ * missing numbers get a blank row. Rows numbered above n leave `rows`: empty ones silently, rows
+ * with data are also returned in `dropped` so the caller can confirm before applying the plan.
+ * A row with no usable set number is kept, after the numbered ones.
+ */
+export function linesetQuantityPlan(rows: LinesetRow[], n: number): { rows: LinesetRow[]; dropped: LinesetRow[] } {
+  const qty = clampLinesetQty(n);
+  const sorted = sortLinesetRows(rows);
+  const kept: LinesetRow[] = [];
+  const dropped: LinesetRow[] = [];
+  const have = new Set<number>();
+  for (const row of sorted) {
+    const num = setNumber(row);
+    if (num == null) continue;
+    if (num > qty) {
+      if (!rowIsEmpty(row)) dropped.push(row);
+      continue;
+    }
+    have.add(num);
+    kept.push(row);
+  }
+  for (let i = 1; i <= qty; i++) if (!have.has(i)) kept.push(blankLinesetRow(i));
+  const result = sortLinesetRows(kept).concat(sorted.filter((row) => setNumber(row) == null));
+  return { rows: result, dropped };
+}
+
+export type LinesetFillKey = Exclude<keyof LinesetRow, "id" | "pos">;
+
+/** Copy one cell's value into the same column of every row after it (in the order given). */
+export function fillDown(rows: LinesetRow[], fromId: string, key: LinesetFillKey): LinesetRow[] {
+  const at = rows.findIndex((row) => row.id === fromId);
+  if (at < 0) return rows;
+  const source = rows[at][key];
+  return rows.map((row, i) => {
+    if (i <= at) return row;
+    const next: Record<string, unknown> = { ...row };
+    if (source === undefined) delete next[key];
+    else next[key] = source;
+    return next as unknown as LinesetRow;
+  });
+}
+
+/** Mark sets fromPos…toPos as Open / spare where no type is set yet; typed sets are left and listed. */
+export function markSpare(rows: LinesetRow[], fromPos: number, toPos: number): { rows: LinesetRow[]; skipped: string[] } {
+  const lo = Math.min(fromPos, toPos);
+  const hi = Math.max(fromPos, toPos);
+  const skipped: string[] = [];
+  const next = rows.map((row) => {
+    const num = setNumber(row);
+    if (num == null || num < lo || num > hi) return row;
+    if (row.type) {
+      skipped.push(row.pos.trim());
+      return row;
+    }
+    return { ...row, type: "O" as const };
+  });
+  return { rows: next, skipped };
+}
+
+/** "12, 13, 14, 20" → "12–14, 20" (numbers sort; anything non-numeric is listed as written, after). */
+export function formatSetRanges(positions: string[]): string {
+  const nums = positions.map((p) => p.trim()).filter((p) => /^\d+$/.test(p)).map(Number).sort((a, b) => a - b);
+  const words = positions.map((p) => p.trim()).filter((p) => p && !/^\d+$/.test(p));
+  const out: string[] = [];
+  for (let i = 0; i < nums.length; ) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+    out.push(j > i ? `${nums[i]}–${nums[j]}` : String(nums[i]));
+    i = j + 1;
+  }
+  return out.concat(words).join(", ");
+}
