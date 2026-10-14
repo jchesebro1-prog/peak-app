@@ -3,7 +3,8 @@
 /* One question of the assessment editor (#337, Task 7): its label, the answer control for its type, the ⋯ menu
    (N/A, Unable…, Clear), the venue-profile "On file" line and any photos already attached. Every change goes up as a
    whole Answer through `onAnswer`; the editor stamps nothing itself, the control does (at = now, by = me). */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { PhotoThumbs } from "./photo-button";
 import type { Answer } from "@/lib/assessments/answers";
 import { ANSWER_CAPS } from "@/lib/assessments/answers";
 import type { AssessmentDef, ColumnDef, QuestionDef } from "@/lib/assessments/defs/types";
@@ -45,6 +46,14 @@ export interface QuestionProps {
   assessmentId: string;
   /** the question a refusal or a Re-enter points at */
   highlight?: boolean;
+  /** device copies of photos still uploading (photo id → object URL) */
+  localUrls?: Record<string, string>;
+  /** the camera button, beside the ⋯ menu */
+  camera?: ReactNode;
+  /** under the question: its prompt chips */
+  below?: ReactNode;
+  /** ⋯ → New finding… */
+  onNewFinding?: () => void;
 }
 
 /** Keeps a control's draft text in step with its answer: a change that came from somewhere else (a server copy, Still
@@ -288,7 +297,7 @@ function TableControl({ q, def, extras, answer, commit, disabled }: Ctl) {
 
 /* ---------- the question ---------- */
 
-export default function Question({ q, def, extras, answer, onAnswer, me, disabled, required, onFile, photos, assessmentId, highlight }: QuestionProps) {
+export default function Question({ q, def, extras, answer, onAnswer, me, disabled, required, onFile, photos, assessmentId, highlight, localUrls, camera, below, onNewFinding }: QuestionProps) {
   const [menu, setMenu] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -353,7 +362,8 @@ export default function Question({ q, def, extras, answer, onAnswer, me, disable
           {required && <span className="as-req" title="Required"> *</span>}
         </label>
         {!disabled && (
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 6 }}>
+            {camera}
             <button type="button" className="as-more" aria-label="More options" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>⋯</button>
             {menu && <div aria-hidden="true" onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 19 }} />}
             {menu && (
@@ -361,6 +371,7 @@ export default function Question({ q, def, extras, answer, onAnswer, me, disable
                 <button type="button" role="menuitem" className="pk-dropdown-item" onClick={() => { onAnswer(notApplicable(me, Date.now())); setMenu(false); }}>N/A</button>
                 <button type="button" role="menuitem" className="pk-dropdown-item" onClick={() => { setReason(answer?.state === "unable" ? answer.reason ?? "" : ""); setMenu(false); }}>Unable…</button>
                 <button type="button" role="menuitem" className="pk-dropdown-item" onClick={() => { commit(null); setMenu(false); }}>Clear</button>
+                {onNewFinding && <button type="button" role="menuitem" className="pk-dropdown-item" onClick={() => { onNewFinding(); setMenu(false); }}>New finding…</button>}
               </div>
             )}
           </div>
@@ -402,24 +413,8 @@ export default function Question({ q, def, extras, answer, onAnswer, me, disable
 
       {!collapsed && <div className="as-control">{control}</div>}
 
-      {qPhotos.length > 0 && <Thumbs photos={qPhotos} assessmentId={assessmentId} />}
-    </div>
-  );
-}
-
-export function Thumbs({ photos, assessmentId }: { photos: PhotoRef[]; assessmentId: string }) {
-  return (
-    <div className="as-thumbs">
-      {photos.map((p) =>
-        p.blobPath || p.inline ? (
-          <a key={p.id} href={`/api/assessments/${encodeURIComponent(assessmentId)}/photos/${encodeURIComponent(p.id)}`} target="_blank" rel="noreferrer" title={p.caption ?? p.id}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- a private, session-gated photo route; next/image can't proxy it */}
-            <img src={`/api/assessments/${encodeURIComponent(assessmentId)}/photos/${encodeURIComponent(p.id)}`} alt={p.caption ?? "Assessment photo"} loading="lazy" />
-          </a>
-        ) : (
-          <span key={p.id} className="as-thumb-pending" title="Still uploading">Uploading</span>
-        ),
-      )}
+      <PhotoThumbs photos={qPhotos} assessmentId={assessmentId} localUrls={localUrls ?? {}} />
+      {below}
     </div>
   );
 }

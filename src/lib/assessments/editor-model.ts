@@ -5,6 +5,7 @@
 import { ANSWER_CAPS, mergeAnswers, type Answer, type Answers } from "./answers";
 import type { AssessmentDef, Category, Cond, PickOption, QuestionDef, Rating, ScopeCode } from "./defs/types";
 import type { EvalResult, PendingPrompt, ScopeSel } from "./evaluate";
+import { immediateProblems as immediateProblemsOf, resolvedPromptIds as resolvedFromFindings, type Finding } from "./findings-model";
 import type { PhotoRef } from "./photos";
 
 /* ---------- the record as the editor holds it ---------- */
@@ -44,7 +45,7 @@ export interface EditorDoc {
 }
 
 /** The scalars the editor may change. A save sends one only when it was changed here. */
-export const EDITOR_FIELDS = ["scopes", "spaceLabel", "accompanying"] as const;
+export const EDITOR_FIELDS = ["scopes", "spaceLabel", "accompanying", "visitDate", "photoSetOffered"] as const;
 export type EditorField = (typeof EDITOR_FIELDS)[number];
 
 /** What saveAssessmentAction receives: the changed answers, the changed scalars, and the rev the copy is based on. */
@@ -54,6 +55,8 @@ export interface SavePatch {
   scopes?: ScopeSel[];
   spaceLabel?: string;
   accompanying?: string;
+  visitDate?: number;
+  photoSetOffered?: boolean;
   photos?: PhotoRef[];
   dismissedPrompts?: { id: string; by: string; at: number }[];
 }
@@ -79,7 +82,14 @@ export type EditorAction =
   | { type: "saved"; patch: SavePatch; rev: number; dropped?: string[] }
   | { type: "rev"; rev: number }
   | { type: "rejects"; syncRejects: SyncRejectVM[]; rev: number }
-  | { type: "dismissDropped" };
+  | { type: "dismissDropped" }
+  /** a photo taken here: added to the record (pending) and sent with the next save */
+  | { type: "addPhoto"; photo: PhotoRef }
+  /** the photo queue finished a photo: its file is on the server; `rev` is the stored rev after the finalize */
+  | { type: "photoDone"; photoId: string; ref: { blobPath?: string; inline?: string }; rev: number }
+  /** a pending photo's ref was removed on the server (discard / the stuck-photo escape hatch); adopt its rev */
+  | { type: "removePhoto"; photoId: string; rev: number }
+  | { type: "dismissPrompt"; entry: { id: string; by: string; at: number } };
 
 export function initEditorState(doc: EditorDoc): EditorState {
   return { doc, ack: { ...doc.answers }, dirty: [], dirtyPhotos: [], dirtyPrompts: [], dropped: [] };
@@ -112,6 +122,8 @@ export function buildPatch(s: EditorState): SavePatch | null {
   for (const f of s.dirty) {
     any = true;
     if (f === "scopes") p.scopes = s.doc.scopes;
+    else if (f === "visitDate") p.visitDate = s.doc.visitDate;
+    else if (f === "photoSetOffered") p.photoSetOffered = s.doc.photoSetOffered === true;
     // "" clears on the server (JSON would drop undefined)
     else p[f] = s.doc[f] ?? "";
   }
@@ -129,10 +141,9 @@ export function buildFullDoc(s: EditorState, now: number): Record<string, unknow
   // Scalars: only the dirty ones travel (a missing field means "keep" on the server); a cleared one goes as "".
   for (const f of EDITOR_FIELDS) {
     if (!s.dirty.includes(f)) delete d[f];
+    else if (f === "photoSetOffered") d[f] = s.doc.photoSetOffered === true;
     else if (s.doc[f] === undefined) d[f] = "";
   }
-  delete d.visitDate; // not editable here
-  delete d.photoSetOffered;
   return d;
 }
 
@@ -207,6 +218,45 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
     }
     case "dismissDropped":
       return { ...s, dropped: [] };
+    case "addPhoto":
+      if (s.doc.photos.some((p) => p.id === a.photo.id)) return s;
+      return { ...s, doc: { ...s.doc, photos: [...s.doc.photos, a.photo] }, dirtyPhotos: [...s.dirtyPhotos, a.photo.id] };
+    case "photoDone": {
+      // A finalize only succeeds for a ref the server already holds, so the photo is acknowledged too.
+      const photos = s.doc.photos.map((p) => {
+        if (p.id !== a.photoId) return p;
+        const next: PhotoRef = { ...p };
+        delete next.pending;
+        if (a.ref.blobPath) { next.blobPath = a.ref.blobPath; delete next.inline; }
+        else if (a.ref.inline) next.inline = a.ref.inline;
+        return next;
+      });
+      const rev = Number.isFinite(a.rev) ? Math.max(s.doc.rev, a.rev) : s.doc.rev;
+      return { ...s, doc: { ...s.doc, photos, rev }, dirtyPhotos: s.dirtyPhotos.filter((id) => id !== a.photoId) };
+    }
+    case "removePhoto": {
+      const rev = Number.isFinite(a.rev) ? Math.max(s.doc.rev, a.rev) : s.doc.rev;
+      // The server also dropped the id from answers' photoIds; mirror it (in the acknowledged copy too) so no save
+      // resends the old mention.
+      const strip = (x: Answer): Answer => {
+        if (!x.photoIds?.includes(a.photoId)) return x;
+        const left = x.photoIds.filter((id) => id !== a.photoId);
+        const copy: Answer = { ...x };
+        if (left.length) copy.photoIds = left; else delete copy.photoIds;
+        return copy;
+      };
+      const answers = Object.fromEntries(Object.entries(s.doc.answers).map(([k, x]) => [k, strip(x)])) as Answers;
+      const ack = Object.fromEntries(Object.entries(s.ack).map(([k, x]) => [k, strip(x)])) as Answers;
+      return {
+        ...s,
+        doc: { ...s.doc, rev, answers, photos: s.doc.photos.filter((p) => p.id !== a.photoId) },
+        ack,
+        dirtyPhotos: s.dirtyPhotos.filter((id) => id !== a.photoId),
+      };
+    }
+    case "dismissPrompt":
+      if (s.doc.dismissedPrompts.some((d) => d.id === a.entry.id)) return s;
+      return { ...s, doc: { ...s.doc, dismissedPrompts: [...s.doc.dismissedPrompts, a.entry] }, dirtyPrompts: [...s.dirtyPrompts, a.entry.id] };
   }
 }
 
@@ -413,6 +463,7 @@ export function profileOnFile(q: QuestionDef, facts: Record<string, ProfileFactV
 
 /* ---------- evaluator plumbing ---------- */
 
+/** A finding as the editor holds it: plain and serializable. The optional fields are what the finding sheet edits. */
 export interface FindingVM {
   key: string;
   printedId: string | null;
@@ -423,18 +474,60 @@ export interface FindingVM {
   ruleId?: string;
   status: string;
   voided: boolean;
+  /** the void reason ("Merged into MPSD-LIN-RIG-003" for a merge) */
+  voidReason?: string;
   photoIds: string[];
+  /** the stored rev the editor's copy is based on (0 = not on the server yet) */
+  rev?: number;
+  customerId?: string;
+  siteId?: string;
+  assessmentId?: string;
+  spaceLabel?: string;
+  location?: string;
+  actionTag?: Finding["actionTag"];
+  recommendedAction?: string;
+  qualification?: Finding["qualification"];
+  priority?: Finding["priority"];
+  budgetTier?: Finding["budgetTier"];
+  owner?: Finding["owner"];
+  auditRef?: Finding["auditRef"];
+  immediate?: Partial<NonNullable<Finding["immediate"]>>;
+  companyCode?: string | null;
+  siteCode?: string | null;
 }
 
-/** Prompt ids already turned into a live finding (mirrors the server's resolvedPrompts). */
-export function resolvedPromptIds(findings: FindingVM[]): string[] {
-  const out: string[] = [];
-  for (const f of findings) {
-    if (f.voided || typeof f.ruleId !== "string") continue;
-    if (f.ruleId === "X5") for (const k of f.questionKeys) out.push(`flag:${k}`);
-    else out.push(`rule:${f.ruleId}`);
+/** A stored finding → the editor's plain view of it. */
+export function toFindingVM(f: Finding): FindingVM {
+  const vm: FindingVM = {
+    key: f.key, printedId: f.printedId, category: f.category, rating: f.rating, description: f.description ?? "",
+    questionKeys: [...f.questionKeys], status: f.status, voided: !!f.voided, photoIds: [...f.photoIds], rev: f.rev ?? 1,
+    customerId: f.customerId, siteId: f.siteId, assessmentId: f.assessmentId, companyCode: f.companyCode, siteCode: f.siteCode,
+  };
+  if (f.ruleId) vm.ruleId = f.ruleId;
+  if (f.voided?.reason) vm.voidReason = f.voided.reason;
+  for (const k of ["spaceLabel", "location", "actionTag", "recommendedAction", "qualification", "priority", "budgetTier", "owner", "auditRef", "immediate"] as const) {
+    if (f[k] !== undefined) (vm as unknown as Record<string, unknown>)[k] = JSON.parse(JSON.stringify(f[k]));
   }
-  return out;
+  return vm;
+}
+
+/** Prompt ids already turned into a finding — the same rule the server's Mark complete uses (findings-model). */
+export function resolvedPromptIds(findings: FindingVM[]): string[] {
+  return resolvedFromFindings(findings.map((f) => ({ ruleId: f.ruleId, questionKeys: f.questionKeys, voided: f.voided, voidReason: f.voidReason })));
+}
+
+/** The server's copies and this device's own, one per key. A local copy's `rev` is the stored rev it was built on
+ *  (a save reply's rev, or the base of an edit still in the outbox; 0 for a finding the server hasn't seen), so it
+ *  shows until the server has moved past it — then the server's copy (with its printed id) wins. Ordered by
+ *  printed id (unnumbered last), then key. */
+export function mergeFindingLists(server: FindingVM[], local: Record<string, FindingVM>): FindingVM[] {
+  const map = new Map(server.map((f) => [f.key, f]));
+  for (const [k, f] of Object.entries(local)) {
+    const s = map.get(k);
+    if (!s || (f.rev ?? 0) >= (s.rev ?? 0)) map.set(k, f);
+  }
+  return [...map.values()].sort((a, b) =>
+    (a.printedId === null ? 1 : 0) - (b.printedId === null ? 1 : 0) || (a.printedId ?? "").localeCompare(b.printedId ?? "", undefined, { numeric: true }) || a.key.localeCompare(b.key));
 }
 
 /** question key → scope code, and module id → scope code. */
@@ -456,27 +549,47 @@ function firstKey(c: Cond, keys: Map<string, ScopeCode>): string | undefined {
   return undefined;
 }
 
-/** Where each rule prompt shows, once: module id → its prompts. A prompt goes under the first VISIBLE question it
- *  references (display order); when none of its questions is visible, at the top of the first visible module of the
- *  scope that holds its questions. A prompt that references no question of the definition is not placed. */
-export function placePrompts(def: AssessmentDef, res: Pick<EvalResult, "visible" | "visibleModules" | "prompts">): Map<string, PendingPrompt[]> {
-  const out = new Map<string, PendingPrompt[]>();
-  const put = (moduleId: string, p: PendingPrompt) => out.set(moduleId, [...(out.get(moduleId) ?? []), p]);
+/** The scope a prompt belongs to — the one `evaluate` attributes it to: the scope of its first referenced question
+ *  (a rule's scope is that of the first key it reads; a flag prompt references only its own question). */
+export function promptScope(def: AssessmentDef, p: Pick<PendingPrompt, "questionKeys">, idx = scopeIndex(def)): ScopeCode | undefined {
+  return p.questionKeys.length ? idx.byKey.get(p.questionKeys[0]) : undefined;
+}
+
+/** A placement key: `q:<question key>` (the chip shows under that question) or `m:<module id>` (top of the module). */
+export type PromptPlace = `q:${string}` | `m:${string}`;
+
+/** The scope a placement sits in. */
+export function placementScope(def: AssessmentDef, place: string, idx = scopeIndex(def)): ScopeCode | undefined {
+  return place.startsWith("q:") ? idx.byKey.get(place.slice(2)) : place.startsWith("m:") ? idx.byModule.get(place.slice(2)) : undefined;
+}
+
+/**
+ * Where each prompt shows, ONCE, always inside its own scope (so the chip and the rail badge agree): under the first
+ * VISIBLE question it references that belongs to that scope (definition order) — R10 reads `rigging.overhead` first,
+ * so it sits under it in Rigging, not under the Core inspection-date question it also reads. When none of its
+ * own-scope questions is visible, at the top of the first visible module of that scope. A prompt with no scope, or
+ * whose scope shows no module, isn't placed (and isn't counted on the rail).
+ */
+export function placePrompts(def: AssessmentDef, res: Pick<EvalResult, "visible" | "visibleModules" | "prompts">): Map<PromptPlace, PendingPrompt[]> {
+  const idx = scopeIndex(def);
+  const out = new Map<PromptPlace, PendingPrompt[]>();
+  const put = (place: PromptPlace, p: PendingPrompt) => out.set(place, [...(out.get(place) ?? []), p]);
   for (const p of res.prompts) {
+    const code = promptScope(def, p, idx);
+    const scope = code ? def.scopes.find((s) => s.code === code) : undefined;
+    if (!scope) continue;
     const refs = new Set(p.questionKeys);
-    let target: string | undefined;
-    for (const sc of def.scopes) {
-      for (const m of sc.modules) {
-        const shown = res.visibleModules.has(m.id);
-        if (shown && m.questions.some((q) => refs.has(q.key) && res.visible.has(q.key))) { target = m.id; break; }
-      }
-      if (target) break;
+    let place: PromptPlace | undefined;
+    for (const m of scope.modules) {
+      if (!res.visibleModules.has(m.id)) continue;
+      const q = m.questions.find((x) => refs.has(x.key) && res.visible.has(x.key) && idx.byKey.get(x.key) === code);
+      if (q) { place = `q:${q.key}`; break; }
     }
-    if (!target) {
-      const sc = def.scopes.find((x) => x.modules.some((m) => m.questions.some((q) => refs.has(q.key))));
-      target = sc?.modules.find((m) => res.visibleModules.has(m.id))?.id;
+    if (!place) {
+      const m = scope.modules.find((x) => res.visibleModules.has(x.id));
+      if (m) place = `m:${m.id}`;
     }
-    if (target) put(target, p);
+    if (place) put(place, p);
   }
   return out;
 }
@@ -485,7 +598,14 @@ export interface ScopeSummary { code: ScopeCode; key: string; title: string; don
 
 /** One row per scope that is on, for the rail: progress, open prompts and missing photos. */
 export function scopeSummaries(def: AssessmentDef, scopes: ScopeSel[], res: EvalResult): ScopeSummary[] {
-  const { byKey, byModule } = scopeIndex(def);
+  const idx = scopeIndex(def);
+  const { byModule } = idx;
+  // Badges count what is placed, by where it is placed — the chip and the badge can never disagree.
+  const placedIn = new Map<ScopeCode, number>();
+  for (const [place, ps] of placePrompts(def, res)) {
+    const code = placementScope(def, place, idx);
+    if (code) placedIn.set(code, (placedIn.get(code) ?? 0) + ps.length);
+  }
   const out: ScopeSummary[] = [];
   for (const s of def.scopes) {
     const on = s.code === "S0" || !!scopes.find((x) => x.code === s.code)?.on;
@@ -493,7 +613,7 @@ export function scopeSummaries(def: AssessmentDef, scopes: ScopeSel[], res: Eval
     const prog = res.progress[s.key] ?? { done: 0, total: 0 };
     out.push({
       code: s.code, key: s.key, title: s.title, done: prog.done, total: prog.total,
-      prompts: res.prompts.filter((p) => p.questionKeys.length && byKey.get(p.questionKeys[0]) === s.code).length,
+      prompts: placedIn.get(s.code) ?? 0,
       missingPhotos: res.missingPhotos.filter((m) => byModule.get(m.moduleId) === s.code).length,
     });
   }
@@ -601,4 +721,107 @@ export function reenterAnswer(payload: unknown, by: string, at: number): Answer 
   if (p.state === "unable") return typeof p.reason === "string" ? unableWith(p.reason, by, at) : null;
   if (p.state === "answered" && p.v !== undefined) return answeredWith(p.v, by, at);
   return null;
+}
+
+/* ---------- Task 8: findings from the editor ---------- */
+
+/** Photos attached to these questions: taken on the question, or listed on its answer. */
+export function photosForQuestions(doc: Pick<EditorDoc, "photos" | "answers">, keys: string[]): string[] {
+  const out: string[] = [];
+  for (const p of doc.photos) if (p.questionKey && keys.includes(p.questionKey) && !out.includes(p.id)) out.push(p.id);
+  for (const k of keys) for (const id of doc.answers[k]?.photoIds ?? []) if (!out.includes(id) && doc.photos.some((p) => p.id === id)) out.push(id);
+  return out;
+}
+
+/** A new, unsaved finding on this assessment (rev 0 = the server hasn't seen it). */
+export function blankFinding(doc: Pick<EditorDoc, "id" | "customerId" | "siteId" | "spaceLabel">, key: string, over: Partial<FindingVM> = {}): FindingVM {
+  return {
+    key, printedId: null, category: "GEN", rating: "needs", description: "", questionKeys: [], photoIds: [], status: "open", voided: false, rev: 0,
+    customerId: doc.customerId, siteId: doc.siteId, assessmentId: doc.id, ...(doc.spaceLabel ? { spaceLabel: doc.spaceLabel } : {}), ...over,
+  };
+}
+
+/** Create from a prompt chip: category, suggested rating, the prompt's text, its questions, its rule and the photos
+ *  already attached to those questions. */
+export function findingFromPrompt(p: PendingPrompt, doc: Pick<EditorDoc, "id" | "customerId" | "siteId" | "spaceLabel" | "photos" | "answers">, key: string): FindingVM {
+  return blankFinding(doc, key, {
+    category: p.category, rating: p.rating, description: p.text, questionKeys: [...p.questionKeys], ruleId: p.ruleId,
+    photoIds: photosForQuestions(doc, p.questionKeys),
+  });
+}
+
+/** Why the finding sheet can't save yet: a description, then the Immediate-attention rules (findings-model). */
+export function findingSheetProblems(f: FindingVM): string[] {
+  const out: string[] = [];
+  if (!f.description.trim()) out.push("Describe the finding.");
+  if (f.rating === "immediate") {
+    const asFinding = { ...f, immediate: f.immediate } as unknown as Finding;
+    out.push(...immediateProblemsOf(asFinding));
+  }
+  return out;
+}
+
+/**
+ * The finding as saveFindingAction and the outbox take it: the whole record (the push branch hands it to the same
+ * saveFinding). An optional field left empty goes as `null`, which clears it on the server (JSON would drop
+ * `undefined`); `immediate` is sent only for an Immediate-attention rating. `rev` is the stored rev the copy is based
+ * on — saveFinding refuses an older one as a conflict. printedId / status / history are read-only on the server.
+ */
+export function findingSaveDoc(f: FindingVM, now: number): Record<string, unknown> & { key: string; rev: number } {
+  const t = (s: string | undefined) => (s && s.trim() ? s.trim() : null);
+  const d: Record<string, unknown> & { key: string; rev: number } = {
+    key: f.key, rev: f.rev ?? 0, printedId: f.printedId, status: f.status,
+    customerId: f.customerId, siteId: f.siteId, assessmentId: f.assessmentId,
+    category: f.category, rating: f.rating, description: f.description.trim(),
+    questionKeys: [...f.questionKeys], photoIds: [...f.photoIds],
+    spaceLabel: t(f.spaceLabel), location: t(f.location), recommendedAction: t(f.recommendedAction),
+    actionTag: f.actionTag ?? null, qualification: f.qualification ?? null, priority: f.priority ?? null, budgetTier: f.budgetTier ?? null,
+    owner: f.owner && f.owner.name.trim() ? { kind: f.owner.kind, name: f.owner.name.trim() } : null,
+    auditRef: f.auditRef && f.auditRef.item.trim() ? { item: f.auditRef.item.trim(), ...(typeof f.auditRef.estimate === "number" && Number.isFinite(f.auditRef.estimate) ? { estimate: f.auditRef.estimate } : {}) } : null,
+    immediate: f.rating === "immediate" && f.immediate ? { ...f.immediate } : null,
+    updatedAt: now,
+  };
+  if (f.ruleId) d.ruleId = f.ruleId;
+  return d;
+}
+
+/** "Quote a rigging inspection →" for a RIG finding: the inspection quote builder for this customer and venue (it
+ *  reads `customer` and `venue`, the venue's location id). Other categories route outside Peak: no link. */
+export function routingHref(category: Category, customerId: string, venueLocId: string | null): string | null {
+  if (category !== "RIG") return null;
+  const qs = new URLSearchParams({ customer: customerId });
+  if (venueLocId) qs.set("venue", venueLocId);
+  return `/inspections/quote?${qs.toString()}`;
+}
+
+/** The named photo set banner shows once: Core's required questions are all answered and it hasn't been offered. */
+export function photoSetOfferDue(def: AssessmentDef, res: Pick<EvalResult, "missingRequired" | "required">, doc: Pick<EditorDoc, "photoSetOffered">): boolean {
+  if (doc.photoSetOffered) return false;
+  const { byKey } = scopeIndex(def);
+  const coreRequired = [...res.required].filter((k) => byKey.get(k) === "S0");
+  return coreRequired.length > 0 && !res.missingRequired.some((k) => byKey.get(k) === "S0");
+}
+
+export const PHOTO_LIMIT_MESSAGE = "An assessment can have at most 200 photos. Remove one before adding another.";
+/** True while another photo fits under the 200-per-assessment cap. */
+export function canAddPhoto(doc: Pick<EditorDoc, "photos">, cap = 200): boolean {
+  return doc.photos.length < cap;
+}
+
+/** Pending photos with no bytes queued on this device: nothing here can ever finish them (Mark complete's escape hatch). */
+export function stuckPendingPhotos(photos: PhotoRef[], queuedHere: Iterable<string>): PhotoRef[] {
+  const here = new Set(queuedHere);
+  return photos.filter((p) => p.pending && !here.has(p.id));
+}
+
+/** Mark complete's gap lines ("Question: …", "Photo: …", "Prompt: …") grouped for the dialog. */
+export function gapGroups(gaps: string[]): { questions: string[]; photos: string[]; prompts: string[]; other: string[] } {
+  const out = { questions: [] as string[], photos: [] as string[], prompts: [] as string[], other: [] as string[] };
+  for (const g of gaps) {
+    if (g.startsWith("Question: ")) out.questions.push(g.slice(10));
+    else if (g.startsWith("Photo: ")) out.photos.push(g.slice(7));
+    else if (g.startsWith("Prompt: ")) out.prompts.push(g.slice(8));
+    else out.other.push(g);
+  }
+  return out;
 }

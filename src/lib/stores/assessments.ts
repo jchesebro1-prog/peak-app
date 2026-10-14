@@ -7,6 +7,7 @@ import { ASSESSMENT_DEF, VISIT_TYPES, allModules, allQuestions, getDef } from "@
 import type { ScopeCode } from "@/lib/assessments/defs/types";
 import { mergeAnswers, validateAnswer, type Answer, type Answers } from "@/lib/assessments/answers";
 import { evaluate, type ScopeSel } from "@/lib/assessments/evaluate";
+import { resolvedPromptIds } from "@/lib/assessments/findings-model";
 import { PHOTO_CAPS, PHOTO_ID_RE, INLINE_TOTAL_MAX, inlinePhotoProblem, photoPathInScope, photoPathMatches, type PhotoRef } from "@/lib/assessments/photos";
 import { blobEnabled } from "@/lib/blob";
 import { getCompany } from "@/lib/identity/companies";
@@ -626,13 +627,12 @@ export async function clearSyncRejects(id: string, keys: string[], user: { id: s
 
 /** Prompt ids (evaluate's `rule:<id>` / `flag:<key>`) already turned into a live finding on this assessment. */
 async function resolvedPrompts(assessmentId: string): Promise<string[]> {
-  const out: string[] = [];
-  for (const f of await listDocsByField("findings", "assessmentId", [assessmentId])) {
-    if (f.voided || typeof f.ruleId !== "string") continue;
-    if (f.ruleId === "X5") { for (const k of Array.isArray(f.questionKeys) ? f.questionKeys : []) if (typeof k === "string") out.push(`flag:${k}`); }
-    else out.push(`rule:${f.ruleId}`);
-  }
-  return out;
+  // The one rule the editor uses too (findings-model): merged-away findings still count through their target.
+  return resolvedPromptIds((await listDocsByField("findings", "assessmentId", [assessmentId])).map((f) => ({
+    ruleId: typeof f.ruleId === "string" ? f.ruleId : undefined,
+    questionKeys: Array.isArray(f.questionKeys) ? f.questionKeys.filter((k): k is string => typeof k === "string") : [],
+    voided: f.voided && typeof f.voided === "object" ? { reason: typeof (f.voided as { reason?: unknown }).reason === "string" ? (f.voided as { reason: string }).reason : undefined } : !!f.voided,
+  })));
 }
 
 /**

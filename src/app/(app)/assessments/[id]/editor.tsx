@@ -11,14 +11,25 @@ import type { Answer } from "@/lib/assessments/answers";
 import { getDef } from "@/lib/assessments/defs";
 import type { ScopeCode } from "@/lib/assessments/defs/types";
 import { evaluate } from "@/lib/assessments/evaluate";
+import type { PendingPrompt } from "@/lib/assessments/evaluate";
 import {
+  PHOTO_LIMIT_MESSAGE,
+  blankFinding,
   buildFullDoc,
   buildPatch,
+  canAddPhoto,
   createEditorStore,
+  dateInputToMs,
+  findingFromPrompt,
+  findingSaveDoc,
   flagsForScope,
   formatAnswer,
   hiddenAnswered,
+  mergeFindingLists,
+  msToDateInput,
   offScopesWithAnswers,
+  photoSetOfferDue,
+  photosForQuestions,
   profileOnFile,
   reenterAnswer,
   refusalParts,
@@ -26,24 +37,53 @@ import {
   resolvedPromptIds,
   scopeSummaries,
   setScopeOn,
+  stampNow,
+  stuckPendingPhotos,
   type EditorField,
+  type FindingVM,
   type SyncRejectVM,
 } from "@/lib/assessments/editor-model";
+import { newFindingKey } from "@/lib/assessments/findings-model";
+import { newPhotoId, type PhotoRef } from "@/lib/assessments/photos";
+import { resizePhoto } from "@/lib/assessments/photo-resize";
+import {
+  configurePhotoQueue,
+  discardPhoto,
+  enqueuePhoto,
+  queuedPhotoBlob,
+  queuedPhotos,
+  retryPhoto,
+  subscribePhotoQueue,
+  type QueuedPhotoInfo,
+} from "@/lib/assessments/photo-queue";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { DATA_PULLED_EVENT, getEngine } from "@/lib/sync/engine";
 import type { EditorProps } from "../types";
+import { removePendingPhotoAction } from "../photo-actions";
 import {
   clearSyncRejectsAction,
   completeAssessmentAction,
+  mergeFindingsAction,
   reopenAssessmentAction,
   saveAssessmentAction,
+  saveFindingAction,
+  splitFindingAction,
+  type CompleteReply,
+  type FindingReply,
   type SaveReply,
 } from "./actions";
-import Question, { Thumbs } from "./question";
+import CodesChip from "./codes-chip";
+import CompleteDialog from "./complete-dialog";
+import FindingSheet, { SHEET_CSS } from "./finding-sheet";
+import FindingsPanel, { FINDINGS_CSS, PromptChip } from "./findings-panel";
+import { FailedPhotos, PHOTO_CSS, PhotoButton, PhotoSlots, PhotoThumbs } from "./photo-button";
+import Question from "./question";
 import ScopeRail from "./scope-rail";
 import SyncBanners, { type OutboxError, type Refusal } from "./sync-banners";
 
 const SAVE_DEBOUNCE_MS = 600;
+/** The Core module that holds the named photo set's four shots (stage, house, front of house, overhead). */
+const PHOTO_SET_MODULE = "core.photo_set";
 
 const CSS = `
   .as-layout { display: grid; grid-template-columns: 250px minmax(0,1fr); gap: 18px; align-items: start; }
@@ -132,7 +172,11 @@ export default function AssessmentEditor(props: EditorProps) {
   useEffect(() => { store.adoptServer(props.doc); }, [store, props.doc]);
 
   const profileVals = useMemo(() => Object.fromEntries(Object.entries(profile).map(([k, f]) => [k, f.v])), [profile]);
-  const resolved = useMemo(() => resolvedPromptIds(findings), [findings]);
+  // Findings: the server's copies plus this device's own (a save reply, or an edit still in the outbox).
+  const [localFindings, setLocalFindings] = useState<Record<string, FindingVM>>({});
+  const allFindings = useMemo(() => mergeFindingLists(findings, localFindings), [findings, localFindings]);
+  const serverKeys = useMemo(() => new Set(findings.map((f) => f.key)), [findings]);
+  const resolved = useMemo(() => resolvedPromptIds(allFindings), [allFindings]);
   const res = useMemo(
     () => evaluate({
       def, visitType: doc.visitType, scopes: doc.scopes, answers: doc.answers, profile: profileVals,
@@ -285,31 +329,210 @@ export default function AssessmentEditor(props: EditorProps) {
     setField(f, r.payload);
   };
 
-  /* ---------- complete / reopen ---------- */
-  const [gaps, setGaps] = useState<{ gaps: string[]; uploading: number } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const complete = async (override: boolean) => {
-    setBusy(true);
+  /** Save whatever is pending now and wait for it (a photo's ref must reach the server before its upload finalizes). */
+  const saveNow = useCallback(async () => {
+    await flushRef.current();
+    while (inFlight.current) await inFlight.current;
+  }, []);
+
+  /* ---------- photos ---------- */
+  // Device copies of photos still uploading (object URLs), so a thumbnail shows before the upload finishes.
+  const urlsRef = useRef<Record<string, string>>({});
+  const [localUrls, setLocalUrls] = useState<Record<string, string>>({});
+  const addLocalUrl = useCallback((photoId: string, blob: Blob) => {
+    if (urlsRef.current[photoId]) return;
+    urlsRef.current = { ...urlsRef.current, [photoId]: URL.createObjectURL(blob) };
+    setLocalUrls(urlsRef.current);
+  }, []);
+  useEffect(() => () => { for (const u of Object.values(urlsRef.current)) URL.revokeObjectURL(u); }, []);
+
+  // The device photo queue: every finished upload's ref and the assessment's new rev are adopted (the rev contract).
+  // configurePhotoQueue drains now and again on `online` / visible / when a backed-off photo comes due.
+  useEffect(() => configurePhotoQueue({
+    blobEnabled: props.blobEnabled,
+    onDone: async (assessmentId, photoId, ref, rev) => {
+      if (assessmentId === id) store.dispatch({ type: "photoDone", photoId, ref, rev });
+    },
+  }), [id, store, props.blobEnabled]);
+
+  // What this device still holds for this assessment (failed ones included), refreshed on every queue change.
+  const [queued, setQueued] = useState<QueuedPhotoInfo[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void queuedPhotos(id).then(async (list) => {
+        if (!alive) return;
+        setQueued(list);
+        for (const q of list) {
+          if (urlsRef.current[q.photoId]) continue;
+          const blob = await queuedPhotoBlob(id, q.photoId);
+          if (blob && alive) addLocalUrl(q.photoId, blob);
+        }
+      }).catch(() => {});
+    };
+    const off = subscribePhotoQueue(() => load());
+    return () => { alive = false; off(); };
+  }, [id, addLocalUrl]);
+
+  const [photoMsg, setPhotoMsg] = useState<string | null>(null);
+  /** Take a photo into the record: resize on the device → a pending ref saved with the record → the bytes queued for
+   *  upload. Resolves to the new photo's id, or null when refused (shown in photoMsg). */
+  const capturePhoto = useCallback(async (file: File, target: { questionKey?: string; moduleId?: string; reqId?: string; findingKey?: string }): Promise<string | null> => {
+    setPhotoMsg(null);
+    if (!canAddPhoto(store.getState().doc)) { setPhotoMsg(PHOTO_LIMIT_MESSAGE); return null; }
+    let shot: { blob: Blob; takenAt: number };
     try {
-      await flushRef.current();
-      while (inFlight.current) await inFlight.current;
-      if (buildPatch(store.getState())) {
-        setRefusal({
-          error: getEngine().connected()
-            ? "Some changes haven't been saved yet. Fix the one named above, then mark complete."
-            : "Mark complete needs a connection. Your answers are saved on this device.",
-        });
-        return;
-      }
-      const r = await completeAssessmentAction(id, override);
-      if (r.ok) { setGaps(null); router.refresh(); }
-      else if (r.error) setRefusal({ error: r.error });
-      else setGaps({ gaps: r.gaps, uploading: r.uploading });
-    } catch {
-      setRefusal({ error: "Mark complete needs a connection. Try again when you're online." });
-    } finally {
-      setBusy(false);
+      shot = await resizePhoto(file);
+    } catch (e) {
+      setPhotoMsg(e instanceof Error && e.message ? e.message : "That photo couldn't be used.");
+      return null;
     }
+    if (!canAddPhoto(store.getState().doc)) { setPhotoMsg(PHOTO_LIMIT_MESSAGE); return null; }
+    const photo: PhotoRef = { id: newPhotoId(), pending: true, takenAt: shot.takenAt, by: me.id };
+    for (const k of ["questionKey", "moduleId", "reqId", "findingKey"] as const) if (target[k]) photo[k] = target[k];
+    addLocalUrl(photo.id, shot.blob);
+    store.dispatch({ type: "addPhoto", photo });
+    await saveNow();
+    try {
+      await enqueuePhoto(id, photo.id, shot.blob);
+    } catch (e) {
+      setPhotoMsg(`The photo couldn't be kept on this device: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return photo.id;
+  }, [store, me.id, id, addLocalUrl, saveNow]);
+
+  /** Where a photo was taken, for the failed list and Mark complete. */
+  const describePhoto = useCallback((p: PhotoRef | undefined, photoId: string): string => {
+    if (!p) return `Photo ${photoId}`;
+    for (const s of def.scopes) for (const m of s.modules) {
+      if (p.questionKey) { const q = m.questions.find((x) => x.key === p.questionKey); if (q) return `${m.title} — ${q.label}`; }
+      if (p.reqId) { const r = m.photos?.find((x) => x.id === p.reqId); if (r) return `${m.title} — ${r.label}`; }
+    }
+    return p.findingKey ? "Finding photo" : "Photo";
+  }, [def]);
+
+  // Discard: the device copy goes at once; the pending ref is removed on the server — now, or on the next `online`.
+  const pendingRemovals = useRef<Set<string>>(new Set());
+  const [discardNote, setDiscardNote] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState<string | null>(null);
+  const onDiscard = async (photoId: string) => {
+    setPhotoBusy(photoId);
+    try {
+      const r = await discardPhoto(id, photoId);
+      if (r.refRemoved) {
+        store.dispatch({ type: "removePhoto", photoId, rev: r.rev ?? 0 });
+        router.refresh(); // its id was dropped from findings on the server too
+      } else if (!navigator.onLine) {
+        pendingRemovals.current.add(photoId);
+        setDiscardNote("Discard will finish when you're online");
+      } else setPhotoMsg(r.error ?? "The photo couldn't be removed.");
+    } finally {
+      setPhotoBusy(null);
+    }
+  };
+  useEffect(() => {
+    const onOnline = async () => {
+      for (const photoId of [...pendingRemovals.current]) {
+        try {
+          const r = await removePendingPhotoAction(id, photoId);
+          if (r.ok) { store.dispatch({ type: "removePhoto", photoId, rev: r.rev }); pendingRemovals.current.delete(photoId); }
+          else if (r.terminal) pendingRemovals.current.delete(photoId);
+        } catch {
+          /* still offline: the next `online` tries again */
+        }
+      }
+      if (!pendingRemovals.current.size) { setDiscardNote(null); router.refresh(); }
+    };
+    const handler = () => void onOnline();
+    window.addEventListener("online", handler);
+    return () => window.removeEventListener("online", handler);
+  }, [id, store, router]);
+
+  /** Mark complete's escape hatch: drop a pending ref that no device can finish. Adopts the returned rev. */
+  const removeStuckPhoto = async (photoId: string): Promise<string | null> => {
+    try {
+      const r = await removePendingPhotoAction(id, photoId);
+      if (!r.ok) return r.error;
+      store.dispatch({ type: "removePhoto", photoId, rev: r.rev });
+      router.refresh();
+      return null;
+    } catch {
+      return "Removing a photo needs a connection.";
+    }
+  };
+
+  /* ---------- findings ---------- */
+  const [sheet, setSheet] = useState<{ f: FindingVM; isNew: boolean } | null>(null);
+  /** Save a finding through the outbox: online, saveFindingAction (the reply's doc + rev are adopted); offline, the
+   *  whole finding is queued and shown from this device (pending printed id) until the server has it. */
+  const saveFinding = async (f: FindingVM): Promise<string | null> => {
+    const fdoc = findingSaveDoc(f, Date.now());
+    let reply: FindingReply | null = null;
+    try {
+      const r = await saveThroughOutbox({
+        collection: "findings",
+        id: f.key,
+        doc: fdoc,
+        action: async () => {
+          reply = await saveFindingAction(fdoc);
+          return reply.ok ? { ok: true as const } : reply;
+        },
+      });
+      const rep = reply as FindingReply | null;
+      if (!r.queued && rep?.ok) setLocalFindings((m) => ({ ...m, [f.key]: rep.doc }));
+      else setLocalFindings((m) => ({ ...m, [f.key]: { ...f, rev: f.rev ?? 0 } }));
+      return null;
+    } catch (e) {
+      return e instanceof Error && e.message ? e.message : "The finding couldn't be saved.";
+    }
+  };
+  const merge = async (keys: string[]): Promise<string | null> => {
+    try {
+      const r = await mergeFindingsAction(keys);
+      if (!r.ok) return r.error;
+      setLocalFindings((m) => {
+        const next = { ...m, [r.kept.key]: r.kept };
+        for (const v of r.voided) next[v.key] = v;
+        return next;
+      });
+      router.refresh();
+      return null;
+    } catch {
+      return "Merging needs a connection.";
+    }
+  };
+  const split = async (f: FindingVM, move: { photoIds: string[]; questionKeys: string[] }): Promise<string | null> => {
+    try {
+      const r = await splitFindingAction(f.key, move, newFindingKey());
+      if (!r.ok) return r.error;
+      setLocalFindings((m) => ({ ...m, [r.kept.key]: r.kept, [r.created.key]: r.created }));
+      router.refresh();
+      return null;
+    } catch {
+      return "Splitting needs a connection.";
+    }
+  };
+  const createFromPrompt = (p: PendingPrompt) => setSheet({ f: findingFromPrompt(p, store.getState().doc, newFindingKey()), isNew: true });
+  const dismissPrompt = (p: PendingPrompt) => {
+    store.dispatch({ type: "dismissPrompt", entry: { id: p.id, by: me.id, at: stampNow() } });
+    schedule();
+  };
+
+  /* ---------- complete / reopen ---------- */
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  /** Save what's pending, then ask the server (it lists the gaps; `override` completes anyway). */
+  const runComplete = async (override: boolean): Promise<CompleteReply> => {
+    await saveNow();
+    if (buildPatch(store.getState())) {
+      return {
+        ok: false, gaps: [], uploading: 0,
+        error: getEngine().connected()
+          ? "Some changes haven't been saved yet. Fix the one named on the page, then mark complete."
+          : "Mark complete needs a connection. Your answers are saved on this device.",
+      };
+    }
+    return completeAssessmentAction(id, override);
   };
   const reopen = async () => {
     setBusy(true);
@@ -329,6 +552,7 @@ export default function AssessmentEditor(props: EditorProps) {
   const modules = scope.modules.filter((m) => res.visibleModules.has(m.id));
   const flags = flagsForScope(def, res, active);
   const hidden = hiddenAnswered(def, active, res, doc.answers);
+  const photoSetReqs = def.scopes.flatMap((s) => s.modules).find((m) => m.id === PHOTO_SET_MODULE)?.photos ?? [];
   const offWithAnswers = offScopesWithAnswers(def, doc.scopes, doc.answers);
   const chip = STATUS_CHIP[doc.status] ?? STATUS_CHIP.draft;
   const saveText =
@@ -340,7 +564,7 @@ export default function AssessmentEditor(props: EditorProps) {
 
   return (
     <div className="pk-content" style={{ maxWidth: 1180 }}>
-      <style>{CSS}</style>
+      <style>{CSS + PHOTO_CSS + SHEET_CSS + FINDINGS_CSS}</style>
       <div style={{ marginBottom: 14 }}>
         <Link href="/assessments" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>← Assessments</Link>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
@@ -354,8 +578,9 @@ export default function AssessmentEditor(props: EditorProps) {
           <span className="as-mono-sm">rev {doc.rev}</span>
           {saveText && <span style={{ color: saveState === "error" ? "#8c3b26" : "#8c919c" }}>{saveText}</span>}
           <span style={{ flex: 1 }} />
+          <CodesChip codes={props.codes} canEdit={props.canEdit} canApprove={props.canReopen} />
           {doc.status !== "completed" && props.canEdit && (
-            <button type="button" className="pk-btn-accent" style={{ padding: "8px 14px" }} disabled={busy} onClick={() => void complete(false)}>Mark complete</button>
+            <button type="button" className="pk-btn-accent" style={{ padding: "8px 14px" }} disabled={busy || completeOpen} onClick={() => setCompleteOpen(true)}>Mark complete</button>
           )}
           {doc.status === "completed" && props.canReopen && (
             <button type="button" className="pk-btn-outline" disabled={busy} onClick={() => void reopen()}>Reopen</button>
@@ -373,6 +598,16 @@ export default function AssessmentEditor(props: EditorProps) {
                 <div className="pk-field-label">Accompanying</div>
                 <input key={`acc:${doc.accompanying ?? ""}`} className="pk-input" maxLength={500} defaultValue={doc.accompanying ?? ""} onBlur={(e) => { if (e.target.value.trim() !== (doc.accompanying ?? "")) setField("accompanying", e.target.value.trim()); }} />
               </label>
+              <label>
+                <div className="pk-field-label">Visit date</div>
+                <input
+                  key={`vd:${doc.visitDate}`}
+                  type="date"
+                  className="pk-input"
+                  defaultValue={msToDateInput(doc.visitDate)}
+                  onBlur={(e) => { const ms = dateInputToMs(e.target.value); if (ms !== null && ms !== doc.visitDate) setField("visitDate", ms); }}
+                />
+              </label>
             </div>
           </details>
         )}
@@ -384,21 +619,61 @@ export default function AssessmentEditor(props: EditorProps) {
         </div>
       )}
 
-      {gaps && (
-        <div className="as-note" style={{ background: "#fdf3e3", border: "1px solid #f1dcb6", color: "#7a4a0c" }}>
-          {gaps.uploading > 0 && <div style={{ fontWeight: 600 }}>{gaps.uploading} photo{gaps.uploading === 1 ? " is" : "s are"} still uploading. The assessment can&apos;t be completed until {gaps.uploading === 1 ? "it finishes" : "they finish"}.</div>}
-          {gaps.gaps.length > 0 && (
-            <>
-              <div style={{ fontWeight: 600, marginTop: gaps.uploading ? 6 : 0 }}>Still open:</div>
-              <ul style={{ margin: "4px 0 0 18px", padding: 0 }}>{gaps.gaps.map((g, i) => <li key={i}>{g}</li>)}</ul>
-            </>
-          )}
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            {gaps.uploading === 0 && gaps.gaps.length > 0 && (
-              <button type="button" className="pk-btn-outline" disabled={busy} onClick={() => void complete(true)}>Complete anyway</button>
-            )}
-            <button type="button" className="pk-btn-outline" onClick={() => setGaps(null)}>Keep working</button>
-          </div>
+      {completeOpen && (
+        <CompleteDialog
+          run={runComplete}
+          stuck={stuckPendingPhotos(doc.photos, queued.map((q) => q.photoId))}
+          describe={(p) => describePhoto(p, p.id)}
+          onRemovePhoto={removeStuckPhoto}
+          onDone={() => { setCompleteOpen(false); router.refresh(); }}
+          onClose={() => setCompleteOpen(false)}
+        />
+      )}
+
+      {sheet && (
+        <FindingSheet
+          key={sheet.f.key}
+          initial={sheet.f}
+          isNew={sheet.isNew}
+          def={def}
+          photos={doc.photos}
+          assessmentId={id}
+          localUrls={localUrls}
+          codes={{ company: props.codes.company, site: props.codes.site }}
+          venueLocId={props.venueLocId}
+          disabled={disabled}
+          onSave={saveFinding}
+          onTakePhoto={(file, findingKey) => capturePhoto(file, { findingKey })}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      <FailedPhotos
+        rows={queued.filter((q) => q.failed).map((q) => ({ photoId: q.photoId, lastError: q.lastError ?? "Upload failed", label: describePhoto(doc.photos.find((p) => p.id === q.photoId), q.photoId) }))}
+        busy={photoBusy}
+        note={discardNote}
+        onRetry={(pid) => void retryPhoto(id, pid)}
+        onDiscard={(pid) => void onDiscard(pid)}
+      />
+      {photoMsg && (
+        <div className="as-note" style={{ background: "#fbeeea", border: "1px solid #f0d6cd", color: "#8c3b26" }} role="alert">
+          {photoMsg} <button type="button" className="as-linkbtn" style={{ fontWeight: 400 }} onClick={() => setPhotoMsg(null)}>Dismiss</button>
+        </div>
+      )}
+      {!disabled && photoSetOfferDue(def, res, doc) && (
+        <div className="as-note" style={{ background: "#eaf2fb", border: "1px solid #cfe0f3", color: "#1f5f9a" }}>
+          <div style={{ fontWeight: 600 }}>Core is complete — take the named photo set?</div>
+          <div>Stage, house, front of house and overhead, from the standard corners. Once per space.</div>
+          <PhotoSlots
+            reqs={photoSetReqs}
+            photos={doc.photos}
+            missing={[]}
+            assessmentId={id}
+            localUrls={localUrls}
+            disabled={disabled}
+            onFile={(r, f) => capturePhoto(f, { reqId: r.id, moduleId: PHOTO_SET_MODULE })}
+          />
+          <button type="button" className="pk-btn-outline" style={{ marginTop: 8 }} onClick={() => setField("photoSetOffered", true)}>Dismiss</button>
         </div>
       )}
 
@@ -437,12 +712,14 @@ export default function AssessmentEditor(props: EditorProps) {
           ))}
           {modules.length === 0 && <div className="pk-card as-module" style={{ color: "#8c919c", fontSize: 13 }}>Nothing to ask in this scope yet.</div>}
           {modules.map((m) => {
-            const prompts = placedPrompts.get(m.id) ?? [];
-            const missing = res.missingPhotos.filter((x) => x.moduleId === m.id);
-            const modulePhotos = doc.photos.filter((p) => p.moduleId === m.id && !p.questionKey);
+            const chips = (list: PendingPrompt[] | undefined) =>
+              (list ?? []).map((p) => <PromptChip key={p.id} prompt={p} disabled={disabled} onCreate={() => createFromPrompt(p)} onDismiss={() => dismissPrompt(p)} />);
+            const missing = res.missingPhotos.filter((x) => x.moduleId === m.id).map((x) => x.req.id);
+            const modulePhotos = doc.photos.filter((p) => p.moduleId === m.id && !p.questionKey && !p.reqId);
             return (
               <section key={m.id} className="pk-card as-module" aria-label={m.title}>
                 <div className="as-module-title">{m.title}</div>
+                {chips(placedPrompts.get(`m:${m.id}`))}
                 {m.questions.filter((q) => res.visible.has(q.key)).map((q) => (
                   <Question
                     key={q.key}
@@ -458,17 +735,22 @@ export default function AssessmentEditor(props: EditorProps) {
                     photos={doc.photos}
                     assessmentId={id}
                     highlight={highlight === q.key || refusal?.key === q.key}
+                    localUrls={localUrls}
+                    camera={<PhotoButton onFile={(f) => capturePhoto(f, { questionKey: q.key, moduleId: m.id })} />}
+                    below={chips(placedPrompts.get(`q:${q.key}`))}
+                    onNewFinding={() => setSheet({ f: blankFinding(store.getState().doc, newFindingKey(), { questionKeys: [q.key], photoIds: photosForQuestions(store.getState().doc, [q.key]) }), isNew: true })}
                   />
                 ))}
-                {prompts.map((p) => (
-                  <div key={p.id} className="as-note" style={{ background: p.rating === "immediate" ? "#fbeeea" : "#fdf3e3", border: `1px solid ${p.rating === "immediate" ? "#f0d6cd" : "#f1dcb6"}`, color: p.rating === "immediate" ? "#8c3b26" : "#7a4a0c", marginTop: 8 }}>
-                    Suggested finding ({p.category}, {p.rating === "immediate" ? "Immediate attention" : p.rating === "needs" ? "Needs attention" : "Good"}): {p.text}
-                  </div>
-                ))}
-                {missing.length > 0 && (
-                  <div className="as-mono-sm" style={{ marginTop: 8 }}>Photos needed: {missing.map((x) => x.req.label).join(" · ")}</div>
-                )}
-                {modulePhotos.length > 0 && <Thumbs photos={modulePhotos} assessmentId={id} />}
+                <PhotoSlots
+                  reqs={m.photos ?? []}
+                  photos={doc.photos}
+                  missing={missing}
+                  assessmentId={id}
+                  localUrls={localUrls}
+                  disabled={disabled}
+                  onFile={(r, f) => capturePhoto(f, { reqId: r.id, moduleId: m.id })}
+                />
+                <PhotoThumbs photos={modulePhotos} assessmentId={id} localUrls={localUrls} />
               </section>
             );
           })}
@@ -483,6 +765,17 @@ export default function AssessmentEditor(props: EditorProps) {
               ))}
             </details>
           )}
+          <FindingsPanel
+            findings={allFindings}
+            serverKeys={serverKeys}
+            def={def}
+            codes={{ company: props.codes.company, site: props.codes.site }}
+            disabled={disabled}
+            onNew={() => setSheet({ f: blankFinding(store.getState().doc, newFindingKey()), isNew: true })}
+            onEdit={(f) => setSheet({ f, isNew: false })}
+            onMerge={merge}
+            onSplit={split}
+          />
         </div>
       </div>
     </div>

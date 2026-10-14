@@ -30,8 +30,11 @@ import {
   formatValue, hiddenAnswered, initEditorState, msToDateInput, notApplicable, optionsFor, parseFtinInput, parseNumberInput,
   profileOnFile, reenterAnswer, refusalParts, rejectLabel, resolvedPromptIds, scopeSummaries, setScopeOn, showCounter, textAnswer,
   toggleMany, unableWith, flagsForScope, placePrompts, offScopesWithAnswers, formatRejectPayload, type EditorDoc, type FindingVM,
+  placementScope, promptScope, PHOTO_LIMIT_MESSAGE, canAddPhoto, stuckPendingPhotos, findingFromPrompt, photosForQuestions,
+  findingSheetProblems, findingSaveDoc, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
 } from "../src/lib/assessments/editor-model";
-import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding } from "../src/lib/stores/findings";
+import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings } from "../src/lib/assessments/findings-model";
+import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
 
@@ -516,6 +519,7 @@ export async function assessmentChecks(ok: Ok) {
   // carry-over: blank profile values never satisfy a numeric profile condition
   ok(!holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: "  " } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: [] } }) && !holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: NaN } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 1931 } }) && holds({ profile: "yr", lt: 1970 }, { ...hctx, profile: { yr: 0 } }), "holds: blank / [] / NaN profile value never satisfies lt");
   editorModelChecks(ok);
+  task8Checks(ok);
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
@@ -596,6 +600,7 @@ export async function assessmentDbChecks(ok: Ok) {
   await assessmentStoreChecks(ok);
   await assessmentPhotoDbChecks(ok);
   await assessmentEditorDbChecks(ok);
+  await task8DbChecks(ok);
 }
 
 /** Task 5 — the stores, printed-id allocation under the advisory lock, and the push-handler branches. */
@@ -1127,17 +1132,19 @@ function editorModelChecks(ok: Ok) {
   ok(!r2.visibleModules.has("rigging.counterweight") && hid.some((h) => h.q.key === "rigging.cw_sets" && h.moduleTitle === "Counterweight"), "editor: overhead = none hides it; its answer is listed under Hidden by earlier answers");
   ok(hiddenAnswered(def, "S2", r2, { ...none, "rigging.cw_purchase": clearMarker("u1", 4) }).every((h) => h.q.key !== "rigging.cw_purchase"), "editor: a cleared hidden answer isn't listed");
 
-  // placePrompts: each prompt once, under the first visible question it references
+  // placePrompts: each prompt once, inside its own scope, under its first visible own-scope question (Task 8 fix)
   const placed = placePrompts(def, r1);
   const placedIds = [...placed.values()].flat().map((x) => x.id);
   const r10 = r1.prompts.find((x) => x.ruleId === "R10");
   const r10Home = [...placed].find(([, ps]) => ps.some((x) => x.id === r10?.id))?.[0];
-  const firstVisibleHome = def.scopes.flatMap((x) => x.modules).find((m) => r1.visibleModules.has(m.id) && m.questions.some((qq) => r10?.questionKeys.includes(qq.key) && r1.visible.has(qq.key)))?.id;
+  const modOfKey = (k: string) => def.scopes.flatMap((x) => x.modules).find((m) => m.questions.some((qq) => qq.key === k))?.id;
+  const r10VisibleMods = new Set((r10?.questionKeys ?? []).filter((k) => r1.visible.has(k)).map(modOfKey));
+  ok(!!r10 && r10VisibleMods.size > 1, "editor: fixture — R10's visible referenced questions span more than one module (the duplicate-chip scenario)");
   ok(!!r10 && placedIds.length === new Set(placedIds).size && placedIds.length === r1.prompts.filter((x) => x.questionKeys.length > 0).length, "editor: no rule prompt id is placed twice (and none is lost)");
-  ok(!!r10 && r10.questionKeys.length > 1 && r10Home === firstVisibleHome, "editor: a prompt that references several modules (R10) shows once, under the first one with a visible question");
-  const hiddenQs = placePrompts(def, { prompts: [{ ...r10!, questionKeys: ["rigging.alteration_since"] }], visible: new Set<string>(), visibleModules: new Set(["rigging.system", "rigging.screen"]) });
+  ok(!!r10 && r10.questionKeys.length > 1 && r10Home === "q:rigging.overhead" && promptScope(def, r10) === "S2", "editor: R10 (scope S2 by its first key) shows once, under rigging.overhead in Rigging — not under the Core question it also reads");
+  const hiddenQs = placePrompts(def, { prompts: [{ ...r10!, questionKeys: ["rigging.alteration_since"] }], visible: new Set<string>(), visibleModules: new Set(["core.space", "rigging.system", "rigging.screen"]) });
   const rigScope = def.scopes.find((x) => x.code === "S2")!;
-  ok([...hiddenQs.keys()].join() === rigScope.modules.find((m) => ["rigging.system", "rigging.screen"].includes(m.id))!.id, "editor: with none of its questions visible a prompt lands on the first visible module of its scope");
+  ok([...hiddenQs.keys()].join() === `m:${rigScope.modules.find((m) => ["rigging.system", "rigging.screen"].includes(m.id))!.id}`, "editor: with none of its own-scope questions visible a prompt lands at the top of the first visible module of its scope");
 
   // rail summaries: scopes that are on; S8 off is absent; counts line up with evaluate
   const sums = scopeSummaries(def, editorDoc().scopes, r1);
@@ -1232,6 +1239,194 @@ async function assessmentEditorDbChecks(ok: Ok) {
     const cleared = await clearSyncRejects(a.id, ["core.space_type"], U1);
     ok(cleared.ok && cleared.doc.rev === withRej.rev + 1 && !cleared.doc.syncRejects?.some((r) => r.key === "core.space_type"), "editor db: clearing a sync reject returns the new rev to adopt");
   } finally {
+    if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
+    await dropAssessIdentityFixtures();
+  }
+}
+
+/* ---------- Task 8: prompts → findings, photos, merge/split, codes, mark complete (pure) ---------- */
+
+function task8Checks(ok: Ok) {
+  const def = ASSESSMENT_DEF;
+  const A = (v: unknown, at = 1): Answer => ({ v, state: "answered", at, by: "u1" });
+  const allOn = def.scopes.map((s) => (s.depths?.length ? { code: s.code, on: true, depth: s.depths[s.depths.length - 1] } : { code: s.code, on: true }));
+  const evalBase = { def, visitType: "condition", scopes: allOn, photos: [], dismissed: [], resolved: [], profile: {}, now: Date.UTC(2026, 9, 13) };
+
+  // Placement ↔ rail badge: every placed prompt sits in the scope evaluate attributes it to, once; badges = placed.
+  const qs = [...allQuestions(def).values()].map((x) => x.q);
+  const optionOf = (q: QuestionDef, pick: "first" | "last") => { const o = q.options ? def.pickLists[q.options] ?? [] : []; return o.length ? (pick === "first" ? o[0] : o[o.length - 1]).value : undefined; };
+  const fixture = (mode: "yes" | "no" | "flag"): Answers => {
+    const out: Answers = {};
+    for (const q of qs) {
+      if (mode === "flag" && q.flag) { out[q.key] = A(q.type === "many" ? [q.flag.values[0]] : q.flag.values[0]); continue; }
+      if (q.type === "yesno") out[q.key] = A(mode === "no" ? "no" : "yes");
+      else if (q.type === "one") { const v = optionOf(q, mode === "no" ? "last" : "first"); if (v) out[q.key] = A(v); }
+      else if (q.type === "many") { const v = optionOf(q, mode === "no" ? "last" : "first"); if (v) out[q.key] = A([v]); }
+      else if (q.type === "number") out[q.key] = A(mode === "no" ? 2025 : 1950);
+      else if (q.type === "date") out[q.key] = A(mode === "no" ? Date.UTC(2026, 8, 1) : Date.UTC(2010, 0, 1));
+    }
+    return out;
+  };
+  // One more fixture per prompt rule: the yes-ish answers plus answers that satisfy that rule's own condition.
+  const satisfy = (c: Cond, out: Answers): void => {
+    if ("all" in c) { c.all.forEach((x) => satisfy(x, out)); return; }
+    if ("any" in c) { if (c.any.length) satisfy(c.any[0], out); return; }
+    if ("not" in c || !("key" in c)) return;
+    if ("in" in c) { const q = allQuestions(def).get(c.key)?.q; out[c.key] = A(q?.type === "many" ? [c.in[0]] : c.in[0]); return; }
+    if ("olderThanDays" in c) { out[c.key] = A(Date.UTC(2000, 0, 1)); return; }
+    if ("olderThanYears" in c) { out[c.key] = A(1900); return; }
+    if ("state" in c) { if (c.state === "unanswered") delete out[c.key]; else out[c.key] = c.state === "na" ? { state: "na", at: 1, by: "u1" } : { state: "unable", reason: "x", at: 1, by: "u1" }; return; }
+    out[c.key] = A(c.gt !== undefined ? c.gt + 1 : c.lt !== undefined ? c.lt - 1 : 1);
+  };
+  const perRule: [string, Answers][] = def.rules.filter((r) => r.prompt).map((r) => { const out = fixture("yes"); satisfy(r.when, out); return [r.id, out]; });
+  const fixtures: [string, Answers][] = [["counterweight", { "rigging.overhead": A("counterweight"), "rigging.cw_sets": A(12) }], ["yes-ish", fixture("yes")], ["no-ish", fixture("no")], ["every flag", fixture("flag")], ...perRule];
+  const exercised = new Set<string>();
+  let agree = true, once = true, badges = true;
+  for (const [, answers] of fixtures) {
+    const r = evaluate({ ...evalBase, answers });
+    const placedMap = placePrompts(def, r);
+    const ids: string[] = [];
+    for (const [place, ps] of placedMap) for (const p of ps) {
+      ids.push(p.id);
+      exercised.add(p.id);
+      if (placementScope(def, place) !== promptScope(def, p)) agree = false;
+    }
+    if (ids.length !== new Set(ids).size) once = false;
+    const sums = scopeSummaries(def, allOn, r);
+    if (sums.reduce((n, s) => n + s.prompts, 0) !== ids.length) badges = false;
+    for (const s of sums) if (s.prompts !== ids.filter((pid) => { const p = r.prompts.find((x) => x.id === pid)!; return promptScope(def, p) === s.code; }).length) badges = false;
+  }
+  const ruleIds = new Set([...exercised].filter((x) => x.startsWith("rule:")));
+  const promptRules = def.rules.filter((r) => r.prompt).length;
+  ok(agree && ruleIds.size === promptRules && [...exercised].some((x) => x.startsWith("flag:")), `prompts: every placed prompt sits in the scope its rail badge counts it in (${ruleIds.size} of ${promptRules} rule prompts + ${exercised.size - ruleIds.size} flag prompts over ${fixtures.length} fixtures)`);
+  ok(once && badges, "prompts: each prompt is placed once and the rail badges add up to exactly what is placed, per scope");
+  const fall = evaluate({ ...evalBase, answers: { "rigging.overhead": A("counterweight"), "rigging.access": A(["catwalk"]), "rigging.fall_hazard": A("yes") } });
+  const fallPrompt = fall.prompts.find((p) => p.id === "flag:rigging.fall_hazard");
+  ok(!!fallPrompt && [...placePrompts(def, fall)].some(([pl, ps]) => pl === "q:rigging.fall_hazard" && ps.includes(fallPrompt)), "prompts: rigging.access = catwalk + fall hazard = yes → the chip shows under the fall-hazard question");
+
+  // buildFullDoc / buildPatch: a DIRTY photoSetOffered / visitDate is sent, a non-dirty one is dropped
+  const base = initEditorState(editorDoc({ photoSetOffered: false, visitDate: 5 }));
+  const fdClean = buildFullDoc(base, 1);
+  ok(!("photoSetOffered" in fdClean) && !("visitDate" in fdClean), "editor: a non-dirty photoSetOffered / visitDate is left out of the outbox doc");
+  const offered = editorReducer(base, { type: "scalar", field: "photoSetOffered", value: true });
+  ok(buildFullDoc(offered, 1).photoSetOffered === true && buildPatch(offered)!.photoSetOffered === true && !("visitDate" in buildFullDoc(offered, 1)), "editor: a dirty photoSetOffered is sent (patch + outbox doc), visitDate still left out");
+  const dated = editorReducer(base, { type: "scalar", field: "visitDate", value: Date.UTC(2026, 9, 14) });
+  ok(buildFullDoc(dated, 1).visitDate === Date.UTC(2026, 9, 14) && buildPatch(dated)!.visitDate === Date.UTC(2026, 9, 14) && !("photoSetOffered" in buildFullDoc(dated, 1)), "editor: a dirty visitDate is sent, photoSetOffered left out");
+  const offeredSaved = editorReducer(offered, { type: "saved", patch: buildPatch(offered)!, rev: 4 });
+  ok(!offeredSaved.dirty.includes("photoSetOffered") && buildPatch(offeredSaved) === null, "editor: an acknowledged photoSetOffered stops being sent");
+
+  // photos: add → sent with the next save; finalize → file + rev adopted; remove → gone, rev adopted, answers cleaned
+  const ph = { id: "p_aaaaaaaaaaaa", pending: true as const, takenAt: 1, by: "u1", questionKey: "rigging.overhead", moduleId: "rigging.system" };
+  let ps = editorReducer(initEditorState(editorDoc()), { type: "addPhoto", photo: ph });
+  ok(ps.dirtyPhotos.join() === ph.id && buildPatch(ps)!.photos!.map((p) => p.id).join() === ph.id && editorReducer(ps, { type: "addPhoto", photo: ph }) === ps, "photos: a taken photo is pending in the record and sent with the next save (once)");
+  ps = editorReducer(ps, { type: "photoDone", photoId: ph.id, ref: { blobPath: "assessments/AS-1001/p_aaaaaaaaaaaa.jpg" }, rev: 9 });
+  ok(ps.doc.rev === 9 && ps.doc.photos[0].blobPath !== undefined && ps.doc.photos[0].pending === undefined && ps.dirtyPhotos.length === 0, "photos: a finished upload adopts its file and the finalize's rev (the rev contract)");
+  ok(editorReducer(ps, { type: "photoDone", photoId: ph.id, ref: { inline: "x" }, rev: 3 }).doc.rev === 9, "photos: an older finalize rev never moves the rev back");
+  const withAns = { ...initEditorState(editorDoc({ photos: [ph], answers: { "rigging.overhead": { ...A("counterweight"), photoIds: [ph.id, "p_bbbbbbbbbbbb"] } } })) };
+  const removed = editorReducer(withAns, { type: "removePhoto", photoId: ph.id, rev: 12 });
+  ok(removed.doc.rev === 12 && removed.doc.photos.length === 0 && removed.doc.answers["rigging.overhead"].photoIds!.join() === "p_bbbbbbbbbbbb" && buildPatch(removed) === null, "photos: a removed pending ref adopts the reply rev, drops the photo and its answer mention, and leaves nothing to resend");
+  ok(canAddPhoto({ photos: Array.from({ length: 199 }, () => ph) }) && !canAddPhoto({ photos: Array.from({ length: 200 }, () => ph) }) && /200 photos/.test(PHOTO_LIMIT_MESSAGE), "photos: the 200th photo is the last one");
+  ok(stuckPendingPhotos([ph, { ...ph, id: "p_cccccccccccc" }, { ...ph, id: "p_dddddddddddd", pending: undefined, blobPath: "x" }], ["p_cccccccccccc"]).map((p) => p.id).join() === ph.id, "photos: a pending photo with no bytes on this device is the stuck one (Remove photo)");
+
+  // dismiss: appended once, sent with the next save
+  const dis = editorReducer(initEditorState(editorDoc()), { type: "dismissPrompt", entry: { id: "rule:G4", by: "u1", at: 5 } });
+  ok(buildPatch(dis)!.dismissedPrompts!.map((d) => d.id).join() === "rule:G4" && editorReducer(dis, { type: "dismissPrompt", entry: { id: "rule:G4", by: "u1", at: 6 } }) === dis, "prompts: Dismiss appends { id, by, at } once and sends it");
+
+  // resolution: rule by ruleId; flag by X5 or a rule-less finding linking the question; voided no, merged-away yes
+  ok(resolvedFromFindings([{ ruleId: "R10", questionKeys: ["rigging.overhead"] }]).join() === "rule:R10", "prompts: a rule prompt is resolved by its ruleId (R10)");
+  ok(resolvedFromFindings([{ ruleId: "X5", questionKeys: ["a.b"] }, { questionKeys: ["c.d"] }]).sort().join() === "flag:a.b,flag:c.d", "prompts: a flag prompt is resolved by an X5 finding, or a finding with no rule that links the question");
+  ok(resolvedFromFindings([{ ruleId: "R9", questionKeys: [], voided: { reason: "dup" } }]).length === 0 && resolvedFromFindings([{ ruleId: "R9", questionKeys: [], voided: { reason: "Merged into ACO-ASS-RIG-001" } }]).join() === "rule:R9" && resolvedFromFindings([{ ruleId: "R9", questionKeys: [], voided: true, voidReason: "Merged into X" }]).join() === "rule:R9", "prompts: a voided finding resolves nothing, unless it was merged away");
+
+  // merge / split plans
+  const fm = (key: string, o: Partial<Finding> = {}): Finding => ({ key, printedId: `ACO-ASS-RIG-00${key.slice(-1)}`, customerId: "c", siteId: "s", category: "RIG", description: `d${key.slice(-1)}`, assessmentId: "AS-1", questionKeys: [], photoIds: [], rating: "needs", quoteRefs: [], status: "open", history: [], createdAt: 1, createdBy: "u1", updatedAt: 1, seq: 1, companyCode: "ACO", siteCode: "ASS", ...o });
+  const mp = mergePlan([fm("f1", { photoIds: ["p1"], questionKeys: ["q1"] }), fm("f2", { photoIds: ["p2", "p1"], questionKeys: ["q2"] }), fm("f3", { description: "d1" })]);
+  ok(mp.ok && mp.keep === "f1" && mp.patch.description === "d1\n\nd2" && mp.patch.photoIds.join() === "p1,p2" && mp.patch.questionKeys.join() === "q1,q2" && mp.voids.map((v) => `${v.key}:${v.reason}`).join() === "f2:Merged into ACO-ASS-RIG-001,f3:Merged into ACO-ASS-RIG-001", "merge: the first is kept with the others' descriptions/photos/questions; the rest are voided \"Merged into <printedId>\"");
+  ok(!mergePlan([fm("f1")]).ok && !mergePlan([fm("f1", { printedId: null }), fm("f2")]).ok && !mergePlan([fm("f1"), fm("f2", { voided: { by: "u", at: 1, reason: "x" } })]).ok && !mergePlan([fm("f1"), fm("f2", { assessmentId: "AS-2" })]).ok && !mergePlan([fm("f1"), fm("f1")]).ok, "merge: refused for one finding, an unnumbered keeper, a voided one, another assessment, or a repeat");
+  const sp = splitPlan(fm("f1", { photoIds: ["p1", "p2"], questionKeys: ["q1", "q2"], ruleId: "R10", location: "LS 4" }), { photoIds: ["p2"], questionKeys: ["q2"] }, "fd_new");
+  ok(sp.ok && sp.kept.photoIds.join() === "p1" && sp.kept.questionKeys.join() === "q1" && sp.created.key === "fd_new" && sp.created.photoIds!.join() === "p2" && sp.created.location === "LS 4" && sp.created.ruleId === undefined && sp.created.printedId === undefined, "split: the chosen photos/questions move to a duplicate with no number or rule of its own");
+  const immF = fm("f1", { rating: "immediate", photoIds: ["p1"], recommendedAction: "Close it", immediate: { hazardContactNotified: false, lockout: "none" } });
+  ok(!splitPlan(immF, { photoIds: [], questionKeys: [] }, "fd_n").ok && !splitPlan(immF, { photoIds: ["p9"], questionKeys: [] }, "fd_n").ok && !splitPlan(immF, { photoIds: ["p1"], questionKeys: [] }, "fd_n").ok, "split: nothing chosen, a foreign photo, or an Immediate finding left without a photo is refused");
+  ok(/^fd_[0-9a-f]{16}$/.test(newFindingKey()) && newFindingKey() !== newFindingKey(), "findings: client keys are fd_ + 16 hex");
+  ok(!codeInUse([fm("f1")], null, "company") && codeInUse([fm("f1")], "ACO", "company"), "codes: a missing code is never in use");
+
+  // the finding sheet's model
+  const fdoc = editorDoc({ photos: [ph, { ...ph, id: "p_eeeeeeeeeeee", questionKey: "rigging.fall_hazard" }], answers: { "rigging.access": { ...A(["catwalk"]), photoIds: [ph.id] } } });
+  const pre = findingFromPrompt(fallPrompt!, fdoc, "fd_0123456789abcdef");
+  ok(pre.category === "RIG" && pre.rating === "immediate" && pre.description === fallPrompt!.text && pre.ruleId === "X5" && pre.questionKeys.join() === "rigging.fall_hazard" && pre.photoIds.join() === "p_eeeeeeeeeeee" && pre.rev === 0 && pre.assessmentId === "AS-1001", "sheet: Create from a chip pre-fills category, rating, text, question, rule and that question's photos");
+  ok(photosForQuestions(fdoc, ["rigging.access"]).join() === ph.id, "sheet: photos listed on an answer count as attached to that question");
+  const probs = findingSheetProblems(pre);
+  ok(probs.length === 3 && !probs.some((p) => /photo/i.test(p)) && findingSheetProblems({ ...pre, photoIds: [] }).some((p) => /photo/i.test(p)) && findingSheetProblems({ ...pre, photoIds: ["p1"], recommendedAction: "Close the catwalk", immediate: { hazardContactNotified: true, notifiedAt: 5, lockout: "locked" } }).length === 0, "sheet: Save stays disabled until the Immediate rules (notify + time, lockout, action) are met");
+  ok(findingSheetProblems({ ...pre, rating: "needs", description: "  " }).join() === "Describe the finding.", "sheet: a description is required");
+  const sd = findingSaveDoc({ ...pre, rating: "needs", location: " ", owner: { kind: "staff", name: "" }, auditRef: { item: "A-12", estimate: 4000 } }, 7);
+  ok(sd.location === null && sd.owner === null && sd.immediate === null && JSON.stringify(sd.auditRef) === '{"item":"A-12","estimate":4000}' && sd.ruleId === "X5" && sd.rev === 0 && sd.status === "open" && sd.key === pre.key, "sheet: the saved doc clears empty optional fields with null, drops immediate unless Immediate, keeps the base rev");
+  ok(routingHref("RIG", "c 1", "loc1") === "/inspections/quote?customer=c+1&venue=loc1" && routingHref("ELC", "c1", null) === null, "sheet: RIG routes to the inspection quote builder for this customer + venue; others have no link");
+  const vm = (key: string, rev: number, printedId: string | null): FindingVM => ({ key, printedId, category: "RIG", rating: "needs", description: "", questionKeys: [], status: "open", voided: false, photoIds: [], rev });
+  const ml = mergeFindingLists([vm("a", 3, "X-001"), vm("b", 2, "X-002")], { a: { ...vm("a", 3, "X-001"), description: "local" }, b: { ...vm("b", 1, "X-002"), description: "stale" }, c: vm("c", 0, null) });
+  ok(ml.map((f) => `${f.key}:${f.description || "-"}`).join() === "a:local,b:-,c:-", "sheet: a local copy shows until the server moves past its base rev; an unsynced one lists last");
+
+  // photo set banner + Mark complete gap groups
+  const coreReq = [...allQuestions(def).values()].filter((x) => x.q.required && def.scopes[0].modules.some((m) => m.questions.includes(x.q))).map((x) => x.q.key);
+  const coreDone: Answers = Object.fromEntries(coreReq.map((k) => [k, { state: "na" as const, at: 1, by: "u1" }]));
+  const rDone = evaluate({ ...evalBase, scopes: [{ code: "S0", on: true }], answers: coreDone });
+  ok(coreReq.length > 0 && photoSetOfferDue(def, rDone, {}) && !photoSetOfferDue(def, rDone, { photoSetOffered: true }) && !photoSetOfferDue(def, evaluate({ ...evalBase, answers: {} }), {}), "photo set: offered once Core's required questions are done, never again after Dismiss");
+  const gg = gapGroups(["Question: Seat count", "Photo: Access — The access point", "Prompt: Rigging inspection due", "Assessment not found"]);
+  ok(gg.questions.join() === "Seat count" && gg.photos.join() === "Access — The access point" && gg.prompts.join() === "Rigging inspection due" && gg.other.length === 1, "complete: gaps group into questions, photos and prompts");
+}
+
+/** Task 8 — merge / split against the real store (voided "Merged into <printedId>", numbers never reused) and the
+ *  short-code in-use rule over listFindings. */
+async function task8DbChecks(ok: Ok) {
+  const db = await getDb();
+  const created: string[] = [];
+  const k8 = (n: number) => `fd_t8${String(n).padStart(14, "0")}`;
+  try {
+    await assessIdentityFixtures();
+    const { co1, site1 } = ASSESS_FIX;
+    const U1 = { id: "u1" };
+    const a = await createAssessment({ visitType: "condition", customerId: co1, siteId: site1, visitDate: Date.UTC(2026, 9, 13), assessorId: "u1" }, "u1");
+    created.push(a.id);
+    registerFixture("assessments", a.id);
+    const mk = (n: number, o: Partial<Finding> = {}) => saveFinding({ key: k8(n), customerId: co1, siteId: site1, assessmentId: a.id, category: "RIG", rating: "needs", description: `Finding ${n}`, ...o }, U1);
+    ok(!codeInUse(await listFindings({ customerId: co1 }), (await getCompany(co1))?.shortCode, "company"), "codes db: before any finding the company code is not in use (editable with create)");
+    await saveAssessment(a.id, { answers: { "rigging.overhead": answeredWith("counterweight", "u1", Date.now()) } }, U1);
+    const g0 = await completeAssessment(a.id, U1, false);
+    ok(!g0.ok && g0.gaps.some((x) => /^Prompt: Rigging inspection due/.test(x)), "merge db: precondition — R10 is an open prompt on this assessment");
+    // f2 carries R10; after the merge it is voided, and the prompt must stay resolved through the kept f1.
+    const f1 = await mk(1, { photoIds: ["p_t8aaaaaaaa"], questionKeys: ["rigging.overhead"] });
+    const f2 = await mk(2, { photoIds: ["p_t8bbbbbbbb"], questionKeys: ["rigging.fall_hazard"], ruleId: "R10" });
+    const f3 = await mk(3);
+    ok(f1.ok && f2.ok && f3.ok, "merge db: three findings created");
+    if (!f1.ok || !f2.ok || !f3.ok) return;
+    const company = (await getCompany(co1))!.shortCode;
+    const live = await listFindings({ customerId: co1 });
+    ok(!!company && codeInUse(live, company, "company") && codeInUse(live.filter((f) => f.siteId === site1), (await getSite(site1))!.shortCode, "site"), "codes db: once a live finding carries the codes they are in use (changing them needs approve)");
+    const maxBefore = Math.max(f1.doc.seq!, f2.doc.seq!, f3.doc.seq!);
+    const m = await mergeFindings([k8(1), k8(2), k8(3)], U1);
+    ok(m.ok && m.kept.key === k8(1) && m.voided.length === 2 && m.voided.every((v) => v.voided?.reason === `Merged into ${f1.doc.printedId}`), "merge db: the others are voided with \"Merged into <printedId>\"");
+    if (!m.ok) return;
+    ok(m.kept.photoIds.join() === "p_t8aaaaaaaa,p_t8bbbbbbbb" && m.kept.questionKeys.join() === "rigging.overhead,rigging.fall_hazard" && m.kept.description === "Finding 1\n\nFinding 2\n\nFinding 3" && m.kept.rev! > f1.doc.rev!, "merge db: the kept finding has every description, photo and question (and a new rev)");
+    ok(m.voided.map((v) => v.printedId).join() === [f2.doc.printedId, f3.doc.printedId].join(), "merge db: merged-away findings keep their printed ids");
+    const f4 = await mk(4);
+    ok(f4.ok && f4.doc.seq === maxBefore + 1 && f4.doc.printedId !== f2.doc.printedId && f4.doc.printedId !== f3.doc.printedId, "merge db: the next finding takes max + 1 — merged numbers are never reused");
+    const g = await completeAssessment(a.id, U1, false);
+    ok(!g.ok && !g.gaps.some((x) => /Rigging inspection due/.test(x)), "merge db: a merged-away finding's prompt stays resolved through the kept finding (Mark complete)");
+    ok(!(await mergeFindings([k8(1), k8(2)], U1)).ok, "merge db: a voided finding can't be merged again");
+    // split
+    const s = await splitFinding(k8(1), { photoIds: ["p_t8bbbbbbbb"], questionKeys: ["rigging.fall_hazard"] }, k8(5), U1);
+    ok(s.ok && s.created.key === k8(5) && s.created.photoIds.join() === "p_t8bbbbbbbb" && s.kept.photoIds.join() === "p_t8aaaaaaaa" && s.kept.questionKeys.join() === "rigging.overhead" && !!s.created.printedId && s.created.printedId !== s.kept.printedId && s.created.seq === maxBefore + 2, "split db: the chosen photo + question move to a new, newly numbered finding");
+    ok(!(await splitFinding(k8(1), { photoIds: [], questionKeys: [] }, k8(6), U1)).ok, "split db: nothing chosen is refused");
+    // completed assessments refuse merge / split
+    const f7 = await mk(7, { questionKeys: ["rigging.overhead"] });
+    const f8 = await mk(8);
+    await db.update(DOC_TABLES.assessments).set({ doc: sql`jsonb_set(doc, '{status}', '"completed"')` }).where(eq(DOC_TABLES.assessments.id, a.id));
+    const mDone = await mergeFindings([k8(7), k8(8)], U1);
+    const sDone = await splitFinding(k8(7), { photoIds: [], questionKeys: ["rigging.overhead"] }, k8(9), U1);
+    ok(f7.ok && f8.ok && !mDone.ok && /completed/.test(mDone.error) && !sDone.ok && /completed/.test(sDone.error), "merge/split db: refused once the assessment is completed");
+    // codes free again once every finding of the customer is voided
+    for (const f of await listFindings({ customerId: co1 })) await voidFinding(f.key, "test", U1);
+    ok(!codeInUse(await listFindings({ customerId: co1, includeVoided: true }), company, "company"), "codes db: voided findings don't lock a code");
+  } finally {
+    await db.delete(DOC_TABLES.findings).where(like(DOC_TABLES.findings.id, "fd_t8%"));
     if (created.length) await db.delete(DOC_TABLES.assessments).where(inArray(DOC_TABLES.assessments.id, created));
     await dropAssessIdentityFixtures();
   }

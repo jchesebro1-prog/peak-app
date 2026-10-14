@@ -114,6 +114,107 @@ export const CATEGORY_ROUTING: Record<Category, { label: string; routedTo: strin
 };
 
 /** True when any non-voided finding carries this company / venue code — the code is then locked (changing it needs `approve`). */
-export function codeInUse(findings: Finding[], code: string, kind: "company" | "site"): boolean {
+export function codeInUse(findings: Pick<Finding, "voided" | "companyCode" | "siteCode">[], code: string | null | undefined, kind: "company" | "site"): boolean {
+  if (!code) return false;
   return findings.some((f) => !f.voided && (kind === "company" ? f.companyCode : f.siteCode) === code);
+}
+
+/* ---------- Task 8: keys, prompt resolution, merge and split (pure) ---------- */
+
+/** A fresh finding key: `fd_` + 16 lowercase hex characters (safe in the browser and on the server). */
+export function newFindingKey(): string {
+  return "fd_" + globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+}
+
+export const MERGE_REASON_PREFIX = "Merged into ";
+/** The void reason a merged-away finding carries. */
+export function mergeReason(printedId: string): string {
+  return `${MERGE_REASON_PREFIX}${printedId}`;
+}
+
+/** The minimum a prompt-resolution check reads from a finding (the stored record or the editor's view of it). */
+export interface PromptSource { ruleId?: string; questionKeys: string[]; voided?: boolean | { reason?: string } | null; voidReason?: string }
+
+/**
+ * Prompt ids (`rule:<id>` / `flag:<key>`) that findings have already turned into a finding — the ONE rule the editor
+ * and Mark complete share. A rule prompt is resolved by a finding with that `ruleId`; a flagged-answer prompt (X5) by
+ * a finding raised from it (`ruleId` "X5") or one with no rule that links the question. A voided finding resolves
+ * nothing — unless it was merged away ("Merged into …"), since its content lives on in the finding that kept it.
+ */
+export function resolvedPromptIds(findings: PromptSource[]): string[] {
+  const out = new Set<string>();
+  for (const f of findings) {
+    const reason = typeof f.voided === "object" && f.voided ? f.voided.reason : f.voidReason;
+    if (f.voided && !(typeof reason === "string" && reason.startsWith(MERGE_REASON_PREFIX))) continue;
+    const keys = Array.isArray(f.questionKeys) ? f.questionKeys.filter((k): k is string => typeof k === "string") : [];
+    if (typeof f.ruleId === "string" && f.ruleId && f.ruleId !== "X5") out.add(`rule:${f.ruleId}`);
+    else for (const k of keys) out.add(`flag:${k}`);
+  }
+  return [...out];
+}
+
+/** The most ids a finding's photo / question list holds (the store's cap). */
+export const FINDING_LIST_MAX = 50;
+
+type Mergeable = Pick<Finding, "key" | "printedId" | "description" | "photoIds" | "questionKeys" | "assessmentId"> & { voided?: unknown };
+
+/**
+ * Merge: the FIRST finding is kept and takes the others' descriptions (appended, each once), photos and questions
+ * (unioned, first-seen order); every other one is voided with "Merged into <printedId>", so no number is reused.
+ * Refused for fewer than two, a repeat, a voided one, findings from different assessments, a kept finding with no
+ * number yet, or a union past the list cap.
+ */
+export function mergePlan(list: Mergeable[]):
+  | { ok: true; keep: string; patch: { description: string; photoIds: string[]; questionKeys: string[] }; voids: { key: string; reason: string }[] }
+  | { ok: false; error: string } {
+  if (!Array.isArray(list) || list.length < 2) return { ok: false, error: "Choose at least two findings to merge." };
+  if (new Set(list.map((f) => f.key)).size !== list.length) return { ok: false, error: "A finding was chosen twice." };
+  if (list.some((f) => f.voided)) return { ok: false, error: "A voided finding can't be merged." };
+  if (new Set(list.map((f) => f.assessmentId)).size !== 1) return { ok: false, error: "Only findings from the same assessment can be merged." };
+  const [keep, ...rest] = list;
+  if (!keep.printedId) return { ok: false, error: "The finding kept by a merge needs its number first. Try again once it has synced." };
+  const descs: string[] = [(keep.description ?? "").trim()];
+  for (const f of rest) {
+    const d = (f.description ?? "").trim();
+    if (d && !descs.includes(d)) descs.push(d);
+  }
+  const union = (k: "photoIds" | "questionKeys") => [...new Set(list.flatMap((f) => f[k] ?? []))];
+  const photoIds = union("photoIds");
+  const questionKeys = union("questionKeys");
+  if (photoIds.length > FINDING_LIST_MAX || questionKeys.length > FINDING_LIST_MAX) {
+    return { ok: false, error: `A finding can hold at most ${FINDING_LIST_MAX} photos and ${FINDING_LIST_MAX} questions.` };
+  }
+  return {
+    ok: true,
+    keep: keep.key,
+    patch: { description: descs.filter(Boolean).join("\n\n").slice(0, 5000), photoIds, questionKeys },
+    voids: rest.map((f) => ({ key: f.key, reason: mergeReason(keep.printedId!) })),
+  };
+}
+
+/** The fields a split copies onto the new finding (everything descriptive; never its number, status or history). */
+const SPLIT_COPY = ["customerId", "siteId", "spaceLabel", "assessmentId", "category", "rating", "description", "location", "actionTag", "recommendedAction", "qualification", "priority", "budgetTier", "owner", "auditRef", "immediate"] as const;
+
+/**
+ * Split: a new finding duplicating `f` takes the chosen photos and questions, which leave `f`. At least one photo or
+ * question must move, and only ones `f` has. The new finding carries no rule (the original keeps it). Both halves
+ * must still meet the Immediate-attention rules — refused with those messages otherwise.
+ */
+export function splitPlan(f: Finding, move: { photoIds: string[]; questionKeys: string[] }, newKey: string):
+  | { ok: true; kept: { photoIds: string[]; questionKeys: string[] }; created: Partial<Finding> & { key: string } }
+  | { ok: false; error: string } {
+  if (f.voided) return { ok: false, error: "A voided finding can't be split." };
+  const mp = [...new Set(Array.isArray(move?.photoIds) ? move.photoIds : [])];
+  const mq = [...new Set(Array.isArray(move?.questionKeys) ? move.questionKeys : [])];
+  if (!mp.length && !mq.length) return { ok: false, error: "Choose the photos or questions that move to the new finding." };
+  if (mp.some((p) => !f.photoIds.includes(p)) || mq.some((q) => !f.questionKeys.includes(q))) return { ok: false, error: "Only this finding's own photos and questions can move." };
+  const kept = { photoIds: f.photoIds.filter((p) => !mp.includes(p)), questionKeys: f.questionKeys.filter((q) => !mq.includes(q)) };
+  const created: Partial<Finding> & { key: string } = { key: newKey, photoIds: mp, questionKeys: mq };
+  for (const k of SPLIT_COPY) if (f[k] !== undefined) (created as Record<string, unknown>)[k] = f[k];
+  const problems = [
+    ...immediateProblems({ ...f, ...kept }).map((p) => `This finding: ${p}`),
+    ...immediateProblems({ ...f, ...created } as Finding).map((p) => `The new finding: ${p}`),
+  ];
+  if (problems.length) return { ok: false, error: problems.join(" ") };
+  return { ok: true, kept, created };
 }

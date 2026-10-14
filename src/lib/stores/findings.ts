@@ -8,7 +8,7 @@ import { listDocs } from "@/db/doc-store";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { suggestCompanyCode, suggestSiteCode, withCollisionSuffix } from "@/lib/assessments/codes";
 import type { Category, Rating } from "@/lib/assessments/defs/types";
-import { STATUSES, formatPrintedId, immediateProblems, transitionProblems, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
+import { STATUSES, formatPrintedId, immediateProblems, mergePlan, splitPlan, transitionProblems, type Finding, type FindingStatus } from "@/lib/assessments/findings-model";
 import { allCompanies, getCompany, setCompanyShortCode } from "@/lib/identity/companies";
 import { getSite, setSiteShortCode, sitesForCompany } from "@/lib/identity/sites";
 import { can } from "@/lib/team";
@@ -391,6 +391,67 @@ export async function voidFinding(key: string, reason: string, user: { id: strin
     const next: Finding = { ...cur, voided: { by: user.id, at: now, reason: why }, rev: curRev + 1, updatedAt: now };
     await writeRow("findings", key, next as unknown as Record<string, unknown> & { rev: number }, false);
   });
+}
+
+/**
+ * Merge (spec §3 "Creating"): `keys[0]` is kept and takes the others' descriptions, photos and questions
+ * (mergePlan); each other one is voided with "Merged into <printedId>" — its number stays issued and is never
+ * reused. Online only (the kept finding needs its number; an unnumbered one is numbered first), all on one
+ * assessment that isn't completed. The kept finding is saved first (through saveFinding: rev bump, immediate
+ * rules), then the others are voided one by one; a failure part-way leaves the rest live and is reported. The
+ * caller checks `create`.
+ */
+export async function mergeFindings(keys: string[], user: { id: string }): Promise<{ ok: true; kept: Finding; voided: Finding[] } | Err> {
+  if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) return fail("Choose the findings to merge");
+  const list: Finding[] = [];
+  for (const k of keys) {
+    const f = await getFinding(k);
+    if (!f) return fail("Finding not found");
+    list.push(f);
+  }
+  if (list.length >= 2 && new Set(list.map((f) => f.assessmentId)).size === 1) {
+    const as = await getAssessment(list[0].assessmentId);
+    if (!as) return fail("Assessment not found");
+    if (as.status === "completed") return fail("Findings can be merged only until the assessment is completed.");
+  }
+  if (list[0] && !list[0].printedId && !list[0].voided) list[0] = await allocateOrKeep(list[0]);
+  const plan = mergePlan(list);
+  if (!plan.ok) return plan;
+  const saved = await saveFinding({ key: plan.keep, rev: list[0].rev, ...plan.patch }, user);
+  if (!saved.ok) return saved;
+  const voided: Finding[] = [];
+  for (const v of plan.voids) {
+    try {
+      await voidFinding(v.key, v.reason, user);
+    } catch (e) {
+      return fail(`Merged into ${saved.doc.printedId ?? plan.keep}, but ${v.key} couldn't be voided: ${(e as Error)?.message ?? e}`);
+    }
+    const f = await getFinding(v.key);
+    if (f) voided.push(f);
+  }
+  return { ok: true, kept: (await getFinding(plan.keep)) ?? saved.doc, voided };
+}
+
+/**
+ * Split: a new finding (`newKey`, client- or server-minted) duplicating `key` takes the chosen photos and questions,
+ * which leave the original (splitPlan). The new one is created first (it gets its own number), then the original is
+ * saved without them. Until the assessment is completed; the caller checks `create`.
+ */
+export async function splitFinding(key: string, move: { photoIds: string[]; questionKeys: string[] }, newKey: string, user: { id: string }): Promise<{ ok: true; kept: Finding; created: Finding } | Err> {
+  if (typeof newKey !== "string" || !KEY_RE.test(newKey)) return fail("A finding key is fd_ followed by 16 letters or digits");
+  const f = await getFinding(key);
+  if (!f) return fail("Finding not found");
+  if (await readRow("findings", newKey)) return fail("That new finding key is already used");
+  const as = await getAssessment(f.assessmentId);
+  if (!as) return fail("Assessment not found");
+  if (as.status === "completed") return fail("Findings can be split only until the assessment is completed.");
+  const plan = splitPlan(f, move, newKey);
+  if (!plan.ok) return plan;
+  const created = await saveFinding(plan.created, user);
+  if (!created.ok) return created;
+  const kept = await saveFinding({ key, rev: f.rev, ...plan.kept }, user);
+  if (!kept.ok) return fail(`The new finding ${created.doc.printedId ?? newKey} was created, but this one couldn't be updated: ${kept.error}`);
+  return { ok: true, kept: kept.doc, created: created.doc };
 }
 
 /**

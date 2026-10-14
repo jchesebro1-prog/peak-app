@@ -18,7 +18,12 @@ export interface EditorProps {
   /** user id → name, for "by" lines */
   userNames: Record<string, string>;
   canEdit: boolean;
+  /** holds `approve` (reopen, change a locked code) */
   canReopen: boolean;
+  /** the short codes behind printed finding ids; `…Locked` once a live finding carries the code */
+  codes: { companyId: string; siteId: string; company: string | null; site: string | null; companyLocked: boolean; siteLocked: boolean };
+  /** the venue's location id, as the quote builders read it (`?venue=`) */
+  venueLocId: string | null;
 }
 
 /** One row of /assessments. */

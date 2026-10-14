@@ -7,8 +7,10 @@ import { getVenueProfile } from "@/lib/stores/venue-profiles";
 import { getPicklistExtras } from "@/lib/stores/assessment-picklists";
 import { listFindings } from "@/lib/stores/findings";
 import { getCompany } from "@/lib/identity/companies";
-import { getSite } from "@/lib/identity/sites";
+import { docLocId, getSite } from "@/lib/identity/sites";
 import { allUsers } from "@/lib/users";
+import { codeInUse } from "@/lib/assessments/findings-model";
+import { toFindingVM } from "@/lib/assessments/editor-model";
 import type { EditorDoc, EditorProps, FindingVM } from "../types";
 import AssessmentEditor from "./editor";
 
@@ -31,18 +33,11 @@ export default async function AssessmentPage({ params }: { params: Promise<{ id:
 
   // A JSON round trip guarantees a plain, serializable object (no undefined-vs-missing surprises for the client).
   const doc = JSON.parse(JSON.stringify(a)) as EditorDoc;
-  const findingVMs: FindingVM[] = findings.map((f) => ({
-    key: f.key,
-    printedId: f.printedId,
-    category: f.category,
-    rating: f.rating,
-    description: f.description ?? "",
-    questionKeys: f.questionKeys,
-    ...(f.ruleId ? { ruleId: f.ruleId } : {}),
-    status: f.status,
-    voided: !!f.voided,
-    photoIds: f.photoIds,
-  }));
+  const findingVMs: FindingVM[] = JSON.parse(JSON.stringify(findings.map(toFindingVM)));
+  // Codes lock once a live finding of this customer carries them (changing one then needs `approve`).
+  const customerFindings = await listFindings({ customerId: a.customerId });
+  const companyCode = company?.shortCode ?? null;
+  const siteCode = site?.shortCode ?? null;
 
   const props: EditorProps = {
     doc,
@@ -56,6 +51,15 @@ export default async function AssessmentPage({ params }: { params: Promise<{ id:
     userNames: Object.fromEntries(users.map((u) => [u.id, u.name])),
     canEdit: can("create", user.roles),
     canReopen: can("approve", user.roles),
+    codes: {
+      companyId: a.customerId,
+      siteId: a.siteId,
+      company: companyCode,
+      site: siteCode,
+      companyLocked: codeInUse(customerFindings, companyCode, "company"),
+      siteLocked: codeInUse(customerFindings.filter((f) => f.siteId === a.siteId), siteCode, "site"),
+    },
+    venueLocId: site ? docLocId(site) : null,
   };
 
   return <AssessmentEditor {...props} />;
