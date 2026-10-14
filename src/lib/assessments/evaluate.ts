@@ -13,7 +13,9 @@ export interface EvalInput {
   visitType: string;
   scopes: ScopeSel[];
   answers: Answers;
-  /** venue profile facts (key → value) */
+  /** venue profile facts (key → value). Feeds only `{ profile }` conditions. Venue-profile pre-fill is the editor's and
+      server's job: an untouched "Still true" profile question is written into `answers` as an ordinary answered entry,
+      so required/gate logic sees it. */
   profile: Record<string, unknown>;
   /** taken photos, matched to a PhotoReq by reqId */
   photos: { moduleId?: string; reqId?: string }[];
@@ -53,9 +55,11 @@ export interface CondCtx { answers: Answers; profile: Record<string, unknown>; s
 const DAY_MS = 86_400_000;
 const FIXPOINT_CAP = 10;
 
-/** True when the value is usable. 0 and false count; "", null, undefined and [] don't. */
+/** True when the value is usable. 0 and false count; "" / whitespace-only strings, null, undefined, NaN and [] don't. */
 function hasValue(v: unknown): boolean {
-  return !(v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0));
+  if (typeof v === "string") return v.trim() !== "";
+  if (typeof v === "number") return !Number.isNaN(v);
+  return !(v === undefined || v === null || (Array.isArray(v) && v.length === 0));
 }
 
 /** The value of an answer that counts for gates: state "answered" with a value. */
