@@ -11,6 +11,7 @@ import {
   formatSetRanges,
   linesetQuantityPlan,
   markSpare,
+  rowIsEmpty,
   sortLinesetRows,
   type LinesetFillKey,
   type LinesetRow,
@@ -90,7 +91,8 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
   const [spareFrom, setSpareFrom] = useState("");
   const [spareTo, setSpareTo] = useState("");
   const [notice, setNotice] = useState("");
-  const [pendingFill, setPendingFill] = useState<{ id: string; key: LinesetFillKey; count: number } | null>(null);
+  const [pendingFill, setPendingFill] = useState<{ id: string; key: LinesetFillKey } | null>(null);
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
 
   const qtyText = typed ?? (qty == null ? "" : String(qty));
 
@@ -101,6 +103,27 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
   const have = new Set(sorted.map((row) => isNumbered(row)));
   let missing = 0;
   for (let i = 1; known != null && i <= known; i++) if (!have.has(i)) missing++;
+
+  // Derived from the current rows so a stale id/count never shows: a vanished row clears the banner.
+  const pendingFillRow = pendingFill ? sorted.find((row) => row.id === pendingFill.id) || null : null;
+  const pendingFillCount = pendingFill && pendingFillRow ? fillDownImpact(sorted, pendingFill.id, pendingFill.key) : 0;
+  const pendingRemoveRow = pendingRemoveId ? sorted.find((row) => row.id === pendingRemoveId) || null : null;
+
+  function requestRemove(row: LinesetRow) {
+    if (rowIsEmpty(row)) {
+      setPendingRemoveId(null);
+      onRemove(row.id);
+      return;
+    }
+    setPendingRemoveId(row.id);
+  }
+
+  function confirmRemove() {
+    if (!pendingRemoveRow) return;
+    const id = pendingRemoveRow.id;
+    setPendingRemoveId(null);
+    onRemove(id);
+  }
 
   const pendingPlan = pendingQty != null ? linesetQuantityPlan(sorted, pendingQty) : null;
 
@@ -157,7 +180,8 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
     const count = fillDownImpact(sorted, focusedRow.id, fillKey);
     if (count > 0) {
       setNotice("");
-      setPendingFill({ id: focusedRow.id, key: fillKey, count });
+      setPendingRemoveId(null);
+      setPendingFill({ id: focusedRow.id, key: fillKey });
       return;
     }
     applyFillDown(focusedRow.id, fillKey);
@@ -224,13 +248,23 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
         </div>
       )}
 
-      {pendingFill && (() => {
-        const fromRow = sorted.find((row) => row.id === pendingFill.id);
+      {pendingRemoveRow && (
+        <div role="alert" style={{ marginTop: 12, border: "1px solid #f0d6cd", background: "#f9ece8", borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 220px", fontSize: 13, color: "#8a3d29" }}>
+            Remove set {pendingRemoveRow.pos.trim() || "unnumbered"} and its data?
+          </span>
+          <button type="button" onClick={confirmRemove} style={{ ...barBtn, background: "#b4543a", borderColor: "#b4543a", color: "#fff" }}>Confirm</button>
+          <button type="button" onClick={() => setPendingRemoveId(null)} style={quietBtn}>Cancel</button>
+        </div>
+      )}
+
+      {pendingFill && pendingFillRow && pendingFillCount > 0 && (() => {
+        const fromRow = pendingFillRow;
         const label = FILL_COLUMNS.find((c) => c.key === pendingFill.key)?.label || "column";
         return (
           <div role="alert" style={{ marginTop: 12, border: "1px solid #f0d6cd", background: "#f9ece8", borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ flex: "1 1 220px", fontSize: 13, color: "#8a3d29" }}>
-              Replace {pendingFill.count} {pendingFill.count === 1 ? "value" : "values"} in {label} below set {fromRow?.pos || "?"}?
+              Replace {pendingFillCount} {pendingFillCount === 1 ? "value" : "values"} in {label} below set {fromRow?.pos || "?"}?
             </span>
             <button type="button" onClick={() => applyFillDown(pendingFill.id, pendingFill.key)} style={{ ...barBtn, background: "#b4543a", borderColor: "#b4543a", color: "#fff" }}>Confirm</button>
             <button type="button" onClick={() => setPendingFill(null)} style={quietBtn}>Cancel</button>
@@ -303,7 +337,7 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
                     <td><div style={{ display: "flex", gap: 5 }}><input aria-label={`Trim low, set ${row.pos}`} value={row.trimLow} onChange={(event) => onChange(row.id, { trimLow: event.target.value })} style={{ ...inpStyle, width: 72, padding: "9px 8px" }} /><input aria-label={`Trim high, set ${row.pos}`} value={row.trimHigh} onChange={(event) => onChange(row.id, { trimHigh: event.target.value })} style={{ ...inpStyle, width: 72, padding: "9px 8px" }} /></div></td>
                     <td style={{ minWidth: 250 }}><ConditionSlider compact label={`Condition, set ${row.pos}`} value={row.condition} onChange={(condition) => onChange(row.id, { condition })} /></td>
                     <td><input aria-label={`Notes, set ${row.pos}`} value={row.notes} onChange={(event) => onChange(row.id, { notes: event.target.value })} style={{ ...inpStyle, width: 170, padding: "9px 8px" }} /></td>
-                    <td>{rowRemovable(row) && <button type="button" onClick={() => onRemove(row.id)} aria-label={`Remove lineset ${row.pos || "row"}`} style={{ minHeight: 40, minWidth: 40, border: "1px solid #e4e7ec", borderRadius: 9, background: "#fff", color: "#a64b3c", cursor: "pointer" }}>×</button>}</td>
+                    <td>{rowRemovable(row) && <button type="button" onClick={() => requestRemove(row)} aria-label={`Remove lineset ${row.pos || "row"}`} style={{ minHeight: 40, minWidth: 40, border: "1px solid #e4e7ec", borderRadius: 9, background: "#fff", color: "#a64b3c", cursor: "pointer" }}>×</button>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -327,7 +361,7 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
                   <div style={{ gridColumn: "1 / -1" }}><ConditionSlider label={`Set ${row.pos} condition`} value={row.condition} onChange={(condition) => onChange(row.id, { condition })} /></div>
                 </div>
                 {rowRemovable(row) && (
-                  <button type="button" onClick={() => onRemove(row.id)} style={{ marginTop: 10, minHeight: 38, border: "1px solid #ead4cf", borderRadius: 9, background: "#fff", color: "#a64b3c", cursor: "pointer", padding: "8px 12px" }}>Remove lineset</button>
+                  <button type="button" onClick={() => requestRemove(row)} style={{ marginTop: 10, minHeight: 38, border: "1px solid #ead4cf", borderRadius: 9, background: "#fff", color: "#a64b3c", cursor: "pointer", padding: "8px 12px" }}>Remove lineset</button>
                 )}
               </div>
             ))}

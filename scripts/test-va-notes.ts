@@ -771,6 +771,9 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(swapped.rows[2].type === "O" && swapped.rows[3].type === "O" && swapped.rows[0].type === "" && swapped.skipped.length === 0,
       "#344 B6: Mark range spare accepts the range in either order");
   }
+  const lsTsx = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/sections/linesets.tsx"), "utf8");
+  ok(lsTsx.includes("rowIsEmpty(") && lsTsx.includes("requestRemove(row)") && !lsTsx.includes("onClick={() => onRemove(row.id)}"),
+    "#344 B6: removing a line set row that holds data asks first (rowIsEmpty gates the immediate remove)");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
