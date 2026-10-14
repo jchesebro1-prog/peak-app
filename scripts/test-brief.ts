@@ -998,6 +998,13 @@ async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
   ok(view.includes("data-brief-organize ") && view.includes("{vm.organize.label} —") && view.includes("Review") && view.includes("data-brief-organize-cleanup") && view.includes("vm.organizeCleanup.href"), "brief #345: the card prints 'N emails to file · M noise — Review' and the Organize my inbox link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
   ok(card.includes("organizeAvailable && flags.file ? getCleanupState(user.id)") && card.includes("organizeEntry: { available: organizeAvailable, cleanup }") && card.includes("!inboxOrgDisabled()"), "brief #345: the card reads the cleanup state only for pilot + Inbox organization, and Organize's availability from the kill switch");
+  const { organizeCounts } = await import("@/lib/brief/build");
+  const fil = (customerId: string) => ({ customerId, work: null, noise: false, source: "identity", reason: "x", strength: "strong", needsReply: false, state: "suggested", at: 1 });
+  const th = (id: string, customerId: string) => ({ id, mailbox: "personal", mailboxUser: "Me", archived: false, deleted: false, status: "waiting_us", filing: fil(customerId) }) as unknown as import("@/lib/stores/comms").CommThread;
+  const counts = organizeCounts([th("a", "UNK"), th("b", "C1")], { name: "Me" }, (id) => id === "UNK");
+  ok(counts.toFile === 2 && counts.strong === 1, `brief #345: a suggestion under a placeholder company is still To file but never counted strong (${JSON.stringify(counts)})`);
+  const build = readFileSync("src/lib/brief/build.ts", "utf8");
+  ok(build.includes("const organize = organizeCounts(threads, me, (id) => placeholderIds.has(id));") && build.includes("isPlaceholderCompany(c.name)"), "brief #345: the build passes the placeholder companies to the Organize counts");
   const entry = readFileSync("src/app/(app)/inbox/organize/entry.ts", "utf8");
   ok(entry.includes('export const ORGANIZE_CLEANUP_HREF = `${ORGANIZE_TO_FILE_HREF}&cleanup=1`;'), "brief #345: the Inbox side builds the same cleanup link");
 }
