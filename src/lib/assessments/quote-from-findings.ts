@@ -5,7 +5,7 @@
    - Estimator quote: a draft Estimator quote with one zero-priced line per finding is created and linked, and the
      caller is sent to it. */
 import { create as createQuote, type Quote } from "@/lib/stores/quotes";
-import { getFinding, linkQuote, type Finding } from "@/lib/stores/findings";
+import { getFindings, linkQuote, type Finding } from "@/lib/stores/findings";
 import { getCompany } from "@/lib/identity/companies";
 import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -15,7 +15,12 @@ import { totals } from "@/app/(app)/estimator/pricing";
 import { findingsEstimatorSection, parseFindingKeys, quoteSelectionProblem } from "./findings-quote";
 
 export type QuoteKind = "repair" | "estimator";
-export type QuoteFromFindingsResult = { ok: true; href: string; quote?: Quote } | { ok: false; error: string };
+export type QuoteFromFindingsResult = { ok: true; href: string; quote?: Quote; /** the assessments the quoted findings belong to (their pages need revalidating) */ assessmentIds?: string[]; /** set when the quote exists but linking the findings failed */ linkNotice?: string } | { ok: false; error: string };
+
+export const LINK_FAILED_NOTICE = "The quote was created, but its findings couldn't be linked to it. Link them from the findings register (Link existing quote…).";
+export const OTHER_VENUE_NOTICE = "Findings weren't linked: they belong to another venue.";
+/** Test-only: makes the link step throw, so the "link failed after create" path can be exercised. */
+export interface LinkTestOpts { __failLinkForTest?: boolean }
 
 const byPrinted = (a: Finding, b: Finding) =>
   (a.printedId === null ? 1 : 0) - (b.printedId === null ? 1 : 0) ||
@@ -27,12 +32,13 @@ const byPrinted = (a: Finding, b: Finding) =>
 export async function loadQuotableFindings(rawKeys: unknown): Promise<{ ok: true; list: Finding[] } | { ok: false; error: string }> {
   const keys = parseFindingKeys(rawKeys);
   if (!keys.length) return { ok: false, error: "Choose the findings to quote." };
-  const list = await Promise.all(keys.map((k) => getFinding(k)));
-  if (list.some((f) => !f)) return { ok: false, error: "A chosen finding no longer exists. Reload and try again." };
-  const found = list as Finding[];
-  const problem = quoteSelectionProblem(found);
+  const byKey = await getFindings(keys);
+  const found = keys.map((k) => byKey.get(k));
+  if (found.some((f) => !f)) return { ok: false, error: "A chosen finding no longer exists. Reload and try again." };
+  const list = found as Finding[];
+  const problem = quoteSelectionProblem(list);
   if (problem) return { ok: false, error: problem };
-  return { ok: true, list: found.sort(byPrinted) };
+  return { ok: true, list: list.sort(byPrinted) };
 }
 
 /** The venue's display name ("" when the site is gone). */
@@ -41,7 +47,7 @@ export function venueNameOf(site: { name?: string | null; locationName?: string 
 }
 
 /** Quote these findings. `user` must already hold `create` (the action checks). */
-export async function quoteFromFindings(rawKeys: unknown, kind: QuoteKind, user: { id: string; name: string }, now = Date.now()): Promise<QuoteFromFindingsResult> {
+export async function quoteFromFindings(rawKeys: unknown, kind: QuoteKind, user: { id: string; name: string }, now = Date.now(), test: LinkTestOpts = {}): Promise<QuoteFromFindingsResult> {
   const r = await loadQuotableFindings(rawKeys);
   if (!r.ok) return r;
   const list = r.list;
@@ -78,25 +84,56 @@ export async function quoteFromFindings(rawKeys: unknown, kind: QuoteKind, user:
     tierMargin: tier.margin,
     findingKeys: keys,
   });
-  await linkQuote(keys, quote.id, user);
-  return { ok: true, href: `/estimator?id=${encodeURIComponent(quote.id)}`, quote };
+  // The quote now exists: a link failure must never read as "nothing was created" (a retry would duplicate it).
+  // The quote carries its findingKeys either way, so the findings can be linked later from the register.
+  let linkNotice: string | undefined;
+  try {
+    if (test.__failLinkForTest) throw new Error("test: link failed");
+    await linkQuote(keys, quote.id, user);
+  } catch (error) {
+    console.error("quoteFromFindings: linking findings to the created quote failed", error);
+    linkNotice = LINK_FAILED_NOTICE;
+  }
+  return { ok: true, href: `/estimator?id=${encodeURIComponent(quote.id)}`, quote, assessmentIds: [...new Set(list.map((f) => f.assessmentId))], ...(linkNotice ? { linkNotice } : {}) };
 }
 
 /**
  * The repair builder's save (persist): the finding keys its hidden `findingKeys` field carries, kept only on a
- * CREATE (an edit never re-links) and only for live findings of the quote's own customer. [] when absent — the
- * builder then behaves exactly as before.
+ * CREATE (an edit never re-links), only for live findings of the quote's own customer, and only when they are one
+ * venue's findings (quoteSelectionProblem) AND that venue is one of the venues the quote was saved with (`venueIds`
+ * are the posted venue loc ids). Anything else links nothing and returns a non-blocking notice; the quote still
+ * saves. No field -> { keys: [], notice: null } with no DB call, so the builder behaves exactly as before.
  */
-export async function findingKeysForSave(raw: unknown, customerId: string, editing: boolean): Promise<string[]> {
-  if (editing || raw === null || raw === undefined || raw === "") return [];
+export async function findingKeysForSave(raw: unknown, customerId: string, editing: boolean, venueIds: readonly string[] = []): Promise<{ keys: string[]; notice: string | null }> {
+  const none = { keys: [] as string[], notice: null };
+  if (editing || raw === null || raw === undefined || raw === "") return none;
   const keys = parseFindingKeys(typeof raw === "string" ? raw : "");
-  if (!keys.length || !customerId) return [];
-  const list = await Promise.all(keys.map((k) => getFinding(k)));
-  return list.filter((f): f is Finding => !!f && !f.voided && f.customerId === customerId).map((f) => f.key);
+  if (!keys.length || !customerId) return none;
+  const byKey = await getFindings(keys);
+  const live = keys.map((k) => byKey.get(k)).filter((f): f is Finding => !!f && !f.voided && f.customerId === customerId);
+  if (!live.length) return none;
+  const refuse = { keys: [] as string[], notice: OTHER_VENUE_NOTICE };
+  if (quoteSelectionProblem(live) !== null) return refuse;
+  const site = await getSite(live[0].siteId);
+  if (!site || !venueIds.includes(docLocId(site))) return refuse;
+  return { keys: live.map((f) => f.key), notice: null };
 }
 
 /** After the builder created `quoteId` from findings: they get the quote in quoteRefs and move to quoted. */
-export async function linkOnCreate(keys: string[], quoteId: string | null | undefined, user: { id: string }, editing: boolean): Promise<void> {
+export async function linkOnCreate(keys: string[], quoteId: string | null | undefined, user: { id: string }, editing: boolean, test: LinkTestOpts = {}): Promise<void> {
   if (editing || !quoteId || !keys.length) return;
+  if (test.__failLinkForTest) throw new Error("test: link failed");
   await linkQuote(keys, quoteId, user);
+}
+
+/** linkOnCreate for a save that has already created the quote: a failure is logged and returned as a notice, never
+ *  thrown (a throw would read as "nothing was saved" and a re-save would duplicate the quote). null = linked/no-op. */
+export async function linkOnCreateSafe(keys: string[], quoteId: string | null | undefined, user: { id: string }, editing: boolean, test: LinkTestOpts = {}): Promise<string | null> {
+  try {
+    await linkOnCreate(keys, quoteId, user, editing, test);
+    return null;
+  } catch (error) {
+    console.error("repairs quote: linking findings to the created quote failed", error);
+    return LINK_FAILED_NOTICE;
+  }
 }

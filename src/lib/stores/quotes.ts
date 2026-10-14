@@ -1,6 +1,7 @@
 import { checkSelectionPatch, DEFAULT_PACKAGE_SELECTION, mergePackageSelection, normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import {
   getDoc,
+  getDocRows,
   insertWithPrefixedId,
   listDocs,
   patchDoc,
@@ -762,6 +763,18 @@ export async function get(id: string): Promise<Quote | null> {
   return q ? normalizeQuotePipeline(q, await loadPipelines()) : null;
 }
 
+/** The live quotes among `ids`, as `get` returns them — one batched read (not one per id) and the pipelines loaded
+ *  once. Missing and soft-deleted ids are simply absent; the result is keyed by id. (#337 Task 9 review: the
+ *  findings register used to fan out one `get` per linked quote.) */
+export async function getMany(ids: readonly string[]): Promise<Map<string, Quote>> {
+  const out = new Map<string, Quote>();
+  const rows = (await getDocRows<Quote>("quotes", ids)).filter((r) => !r.deleted);
+  if (!rows.length) return out;
+  const pipes = await loadPipelines();
+  for (const r of rows) out.set(r.id, normalizeQuotePipeline(r.doc, pipes));
+  return out;
+}
+
 /** The live (not lost) renewal quote already minted for a completed job /
  *  record this cycle, if any (IDEAS #36 idempotence). */
 export async function byRenewalOf(recordId: string): Promise<Quote | null> {
@@ -890,6 +903,8 @@ export async function update(
     // Phase 4: the review comments are the add/resolve/delete writers' alone.
     delete clean.reviewComments;
     delete clean.emailSending;
+    // #337: the finding keys are set at creation only — a patch never rewrites them.
+    delete clean.findingKeys;
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });

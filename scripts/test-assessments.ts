@@ -22,7 +22,7 @@ import { DOC_TABLES, SYNCABLE_COLLECTIONS, blobs } from "../src/db/doc-tables";
 import { CONFIG_COLLECTIONS } from "../src/db/seed-data";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { saveCompany, getCompany, setCompanyShortCode } from "../src/lib/identity/companies";
-import { saveSite, getSite, setSiteShortCode } from "../src/lib/identity/sites";
+import { saveSite, getSite, setSiteShortCode, docLocId } from "../src/lib/identity/sites";
 import { registerFixture } from "./test-fixtures";
 import { createAssessment, saveAssessment, applyFinalizedPhoto, removePendingPhoto, getAssessment, listAssessments, completeAssessment, reopenAssessment, pushAssessment, clearSyncRejects, type Assessment } from "../src/lib/stores/assessments";
 import {
@@ -34,10 +34,11 @@ import {
   findingSheetProblems, findingSaveDoc, parseMoney, routingHref, mergeFindingLists, photoSetOfferDue, gapGroups,
 } from "../src/lib/assessments/editor-model";
 import { mergePlan, splitPlan, newFindingKey, resolvedPromptIds as resolvedFromFindings, voidReasonProblem, codeChangeNeedsApprove, codeScopeMismatch } from "../src/lib/assessments/findings-model";
-import { saveFinding, getFinding, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
+import { saveFinding, getFinding, getFindings, listFindings, transitionFinding, linkQuote, voidFinding, allocatePrintedId, pushFinding, mergeFindings, splitFinding } from "../src/lib/stores/findings";
 import { getVenueProfile, profileValues } from "../src/lib/stores/venue-profiles";
 import { ASSESSMENT_PICKLISTS_BLOB, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
-import { buildQuote, create as createQuote, get as getQuote } from "../src/lib/stores/quotes";
+import { buildQuote, create as createQuote, get as getQuote, getMany as getQuotes, update as updateQuote } from "../src/lib/stores/quotes";
+import { softDeleteDoc } from "../src/db/doc-store";
 import { CATEGORIES as REPAIR_CATEGORIES, PRIORITIES as REPAIR_PRIORITIES } from "../src/lib/stores/repair-jobs";
 import type { SpecSection } from "../src/app/(app)/estimator/types";
 import {
@@ -45,7 +46,7 @@ import {
   quoteSelectionProblem, repairCategoryFor, repairPrefillFromFindings,
 } from "../src/lib/assessments/findings-quote";
 import { REGISTER_COLUMNS, parseRegisterFilters, registerCells, registerCsvName, registerList, registerQuery } from "../src/lib/assessments/register";
-import { findingKeysForSave, linkOnCreate, quoteFromFindings } from "../src/lib/assessments/quote-from-findings";
+import { LINK_FAILED_NOTICE, OTHER_VENUE_NOTICE, findingKeysForSave, linkOnCreate, linkOnCreateSafe, quoteFromFindings } from "../src/lib/assessments/quote-from-findings";
 
 const ROOT = process.cwd();
 
@@ -1602,12 +1603,15 @@ function task9Checks(ok: Ok) {
 
   // source pins: the repair builder's findings intake leaves every other path alone
   const ra = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/actions.ts"), "utf8");
-  ok(ra.includes("await createQuote({ ...payload, owner: user.name, ...(findingKeys.length ? { findingKeys } : {}) })") && ra.includes("await findingKeysForSave(formData.get(\"findingKeys\"), customerId, !!editingId)") && ra.includes("await linkOnCreate(findingKeys, q?.id, user, !!editingId)"), "repair builder: persist carries findingKeys on create only and links them once created");
+  ok(ra.includes("await createQuote({ ...payload, owner: user.name, ...(findingKeys.length ? { findingKeys } : {}) })") && ra.includes("await findingKeysForSave(formData.get(\"findingKeys\"), customerId, !!editingId, venues.map((v) => v.id))") && ra.includes("await linkOnCreateSafe(findingKeys, q?.id, user, !!editingId)") && !/\bawait linkOnCreate\(/.test(ra), "repair builder: persist carries findingKeys on create only and links them once created");
   const rc = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/controls.tsx"), "utf8");
   ok(rc.includes('if (initial.findingKeys?.length) fd.set("findingKeys", initial.findingKeys.join(","));') && rc.includes("Quoting {initial.findingKeys.length} assessment finding"), "repair builder: the findingKeys field is posted only for a findings intake, with its banner");
   const rp = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/page.tsx"), "utf8");
   ok(rp.includes('const findingsParam = !editId && !inspId && preCustomer ? one(sp.findings) : "";') && rp.includes("repairPrefillFromFindings(findingsIntake.list, findingsIntake.venueName)"), "repair builder: ?findings= is read only for a new quote for that customer");
   const fc = readFileSync(join(ROOT, "src/app/(app)/assessments/findings/controls.tsx"), "utf8");
+  ok(fc.includes("const selectable = shown.filter((r) => !r.finding.voided);") && fc.indexOf("const shown = ") < fc.indexOf("const selectable = ") && fc.includes("document.getElementById(`frc-${focus}`)"), "register: select-all follows the shown rows; the focus scroll finds the phone card too");
+  const fsrc = readFileSync(join(ROOT, "src/app/(app)/assessments/findings/actions.ts"), "utf8");
+  ok(fsrc.includes("if (!q.customerId)") && fsrc.includes('q.status === "lost"') && fsrc.includes("q.locationId !== docLocId(site)") && fsrc.includes("refresh(r.assessmentIds ?? [])") && fsrc.includes('"&err=" + encodeURIComponent(r.linkNotice)'), "register actions: Link existing refuses no-customer, lost and other-venue quotes; Estimator quote revalidates assessment pages and surfaces a link failure");
   ok(/from "\.\.\/\[id\]\/finding-sheet"/.test(fc) && !/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(fc) && !/register-server/.test(fc), "register: reuses the editor's finding sheet and imports no store");
   const smoke = readFileSync(join(ROOT, "scripts/smoke-routes.ts"), "utf8");
   ok(smoke.includes('"/assessments/findings"'), "register: /assessments/findings is a smoke route");
@@ -1670,12 +1674,22 @@ async function task9DbChecks(ok: Ok) {
       ok(g1.status === "quoted" && g2.status === "quoted" && g1.quoteRefs.includes(q.id) && g2.quoteRefs.includes(q.id) && g1.history.at(-1)?.status === "quoted", "quote db: the findings get the quote in quoteRefs and move to quoted (with history)");
     }
 
-    // the repair builder's save: keys kept only for live findings of the quote's customer, only on create
+    // the repair builder's save: keys kept only for live findings of the quote's customer AND the quote's venue, only on create
     await voidFinding(k9(5), "Entered in error", U);
+    const loc2 = docLocId((await getSite(site2))!), loc1 = docLocId((await getSite(site1))!);
     const raw = [k9(3), k9(4), k9(5), "fd_t9nothere0000000", "junk", k9(3)].join(",");
-    ok((await findingKeysForSave(raw, co1, false)).join() === k9(3), "repair save: only live findings of the quote's own customer are kept (other customer, voided, missing, junk dropped)");
-    ok((await findingKeysForSave(raw, co1, true)).length === 0 && (await findingKeysForSave(null, co1, false)).length === 0 && (await findingKeysForSave("", co1, false)).length === 0, "repair save: an edit, or no field, carries no keys");
-    const keys = await findingKeysForSave(k9(3), co1, false);
+    const sv = await findingKeysForSave(raw, co1, false, [loc2]);
+    ok(sv.keys.join() === k9(3) && sv.notice === null, "repair save: only live findings of the quote's own customer are kept (other customer, voided, missing, junk dropped)");
+    const noField = [await findingKeysForSave(raw, co1, true, [loc2]), await findingKeysForSave(null, co1, false, [loc2]), await findingKeysForSave("", co1, false, [loc2])];
+    ok(noField.every((r) => r.keys.length === 0 && r.notice === null), "repair save: an edit, or no field, carries no keys and no notice");
+    const otherVenue = await findingKeysForSave(k9(3), co1, false, [loc1]);
+    ok(otherVenue.keys.length === 0 && otherVenue.notice === OTHER_VENUE_NOTICE, "repair save: findings of another venue of the same customer are not linked (non-blocking notice)");
+    const mixedVenue = await findingKeysForSave([k9(1), k9(3)].join(","), co1, false, [loc1, loc2]);
+    ok(mixedVenue.keys.length === 0 && mixedVenue.notice === OTHER_VENUE_NOTICE, "repair save: a mixed-venue list is not linked even when both venues are posted");
+    const noVenue = await findingKeysForSave(k9(3), co1, false, []);
+    ok(noVenue.keys.length === 0 && noVenue.notice === OTHER_VENUE_NOTICE, "repair save: no posted venue links nothing");
+    const keys = (await findingKeysForSave(k9(3), co1, false, [loc1, loc2])).keys;
+    ok(keys.join() === k9(3), "repair save: the matching venue (among several posted) links");
     const rq = await createQuote({ name: "T9 repair", customer: "Assess Co One", customerId: co1, quoteType: "repair", source: "repair", owner: U.name, ...(keys.length ? { findingKeys: keys } : {}) });
     quoteIds.push(rq.id);
     await linkOnCreate(keys, rq.id, U, true);
@@ -1685,6 +1699,36 @@ async function task9DbChecks(ok: Ok) {
     ok(rq.findingKeys?.join() === k9(3) && g3.status === "quoted" && g3.quoteRefs.join() === rq.id, "repair save: a created repair quote carries its finding keys and links them (quoted)");
     await linkOnCreate(keys, rq.id, U, false);
     ok((await getFinding(k9(3)))!.history.filter((h) => h.status === "quoted").length === 1, "repair save: linking twice is a no-op");
+
+    // a link failure after the quote exists is a notice, never a throw (repair path)
+    const rq2 = await createQuote({ name: "T9 repair 2", customer: "Assess Co One", customerId: co1, quoteType: "repair", source: "repair", owner: U.name });
+    quoteIds.push(rq2.id);
+    const safe = await linkOnCreateSafe([k9(1)], rq2.id, U, false, { __failLinkForTest: true });
+    ok(safe === LINK_FAILED_NOTICE && !(await getFinding(k9(1)))!.quoteRefs.includes(rq2.id), "repair save: a link failure is caught and returned as a notice (nothing thrown, nothing linked)");
+    ok((await linkOnCreateSafe([k9(1)], rq2.id, U, false)) === null && (await getFinding(k9(1)))!.quoteRefs.includes(rq2.id), "repair save: the safe wrapper links normally otherwise");
+
+    // estimator path: a link failure still returns the created quote (exactly one created) with a notice
+    const countQuotes = async () => (await db.select({ id: DOC_TABLES.quotes.id }).from(DOC_TABLES.quotes).where(like(DOC_TABLES.quotes.id, "Q-%"))).length;
+    const before = await countQuotes();
+    const failed = await quoteFromFindings([k9(3)], "estimator", U, Date.now(), { __failLinkForTest: true });
+    if (failed.ok && failed.quote) quoteIds.push(failed.quote.id);
+    const after = await countQuotes();
+    ok(failed.ok && !!failed.quote && failed.linkNotice === LINK_FAILED_NOTICE && after === before + 1 && !!(await getQuote(failed.quote.id)), "quote db: a link failure after create still returns the created quote (exactly one) with a notice");
+    ok(failed.ok && !!failed.quote && failed.quote.findingKeys?.join() === k9(3) && failed.assessmentIds?.join() === a2.id, "quote db: the failed-link quote still carries its finding keys; assessment ids are returned for revalidation");
+    ok(est.ok && est.assessmentIds?.join() === a1.id && !est.linkNotice, "quote db: a clean Estimator quote returns its assessment ids and no notice");
+
+    // store: getMany / getFindings / findingKeys is creation-only
+    const many = await getQuotes([rq.id, rq2.id, "Q-nope-0000", rq.id]);
+    ok(many.size === 2 && JSON.stringify(many.get(rq.id)) === JSON.stringify(await getQuote(rq.id)), "quotes.getMany: returns the same docs as get and skips missing ids");
+    const gone = await createQuote({ name: "T9 gone", customerId: co1, quoteType: "repair", source: "repair", owner: U.name });
+    quoteIds.push(gone.id);
+    await softDeleteDoc("quotes", gone.id);
+    ok((await getQuotes([gone.id])).size === 0 && (await getQuote(gone.id)) === null, "quotes.getMany: ignores a soft-deleted quote exactly as get does");
+    await updateQuote(rq.id, { findingKeys: ["fd_other"], name: "T9 repair renamed" });
+    const rq3 = (await getQuote(rq.id))!;
+    ok(rq3.name === "T9 repair renamed" && rq3.findingKeys?.join() === k9(3), "quotes.update: findingKeys is stripped from patches (set at creation only)");
+    const fm = await getFindings([k9(1), k9(5), "fd_t9nothere0000000", k9(1)]);
+    ok(fm.size === 2 && JSON.stringify(fm.get(k9(1))) === JSON.stringify(await getFinding(k9(1))) && !!fm.get(k9(5))?.voided, "findings.getFindings: same docs as getFinding (voided included), missing skipped");
     const plain = await createQuote({ name: "T9 plain", customerId: co1, quoteType: "repair", source: "repair", owner: U.name });
     quoteIds.push(plain.id);
     ok(!("findingKeys" in plain), "repair save: a quote without findings has no findingKeys");

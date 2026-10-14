@@ -389,6 +389,7 @@ export default async function RepairQuotePage({
     <>
       <ActionError message={one(sp.err) || intakeError} />
       <RewardCreditNotice message={one(sp.credit)} />
+      <ActionError message={one(sp.findingnote)} />
       <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
         customers={customers}

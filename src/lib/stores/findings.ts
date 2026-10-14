@@ -2,7 +2,7 @@
    printed id (MPSD-LIN-RIG-003) is a field the SERVER allocates under an advisory lock per (company, venue,
    category), max + 1, never reused — voided findings keep their number. Status changes only through
    transitionFinding / linkQuote; findings are voided, never deleted. Server-only. */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { ASSESSMENT_LOCK_NAMESPACE, getDb, inTransaction, withAdvisoryLock } from "@/db";
 import { listDocs } from "@/db/doc-store";
 import { DOC_TABLES } from "@/db/doc-tables";
@@ -153,6 +153,25 @@ export async function getFinding(key: string): Promise<Finding | null> {
   const row = await readRow("findings", key);
   if (!row || row.deleted) return null;
   return normalizeFinding({ ...row.doc, rev: nextRev(row) - 1 }, key);
+}
+
+/** The live (not deleted) findings among `keys`, as `getFinding` returns them — one batched read per 500 keys, not
+ *  one per key. Missing and deleted keys are absent; voided findings ARE returned (callers decide). */
+export async function getFindings(keys: readonly string[]): Promise<Map<string, Finding>> {
+  const unique = [...new Set(keys)].filter((k) => typeof k === "string" && k);
+  const out = new Map<string, Finding>();
+  if (!unique.length) return out;
+  const db = await getDb();
+  const t = DOC_TABLES.findings;
+  for (let i = 0; i < unique.length; i += 500) {
+    const rows = await db.select({ id: t.id, doc: t.doc, rev: t.rev, deleted: t.deleted }).from(t).where(inArray(t.id, unique.slice(i, i + 500)));
+    for (const r of rows) {
+      if (r.deleted) continue;
+      const row = { doc: { ...(r.doc as Record<string, unknown>), id: r.id }, rev: r.rev, deleted: false };
+      out.set(r.id, normalizeFinding({ ...row.doc, rev: nextRev(row) - 1 }, r.id));
+    }
+  }
+  return out;
 }
 
 /** Voided findings are left out unless `includeVoided`. Sorted by printed id (unnumbered last), then key. */

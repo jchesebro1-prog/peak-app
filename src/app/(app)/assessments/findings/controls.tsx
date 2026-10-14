@@ -226,6 +226,9 @@ function StatusMenu({ f, canEdit, onPick }: { f: Finding; canEdit: boolean; onPi
   );
 }
 
+/** Read at click time, outside render (keeps the purity lint quiet). */
+const clockNow = () => Date.now();
+
 type SheetCtx = { key: string; photos: PhotoRef[]; defVersion: number; venueLocId: string | null; assessmentId: string };
 
 export default function FindingsRegister({ rows, customers, venues, total, filters, focus, canEdit, me }: FindingsRegisterProps) {
@@ -241,7 +244,10 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
   const byKey = useMemo(() => new Map(rows.map((r) => [r.finding.key, r])), [rows]);
   // Drop selections that are no longer on the page (filters changed or a refresh removed them).
   const sel = selected.filter((k) => byKey.has(k));
-  const selectable = rows.filter((r) => !r.finding.voided);
+  // The ?focus= finding is loaded even when the filters leave it out; it's listed only when it matches them
+  // (otherwise only its sheet opens).
+  const shown = rows.filter((r) => r.finding.key !== focus || matchesFilters(r.finding, filters));
+  const selectable = shown.filter((r) => !r.finding.voided);
   const allOn = selectable.length > 0 && selectable.every((r) => sel.includes(r.finding.key));
 
   const go = (next: Partial<RegisterFilters>) => {
@@ -261,7 +267,7 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
   // ?focus=<key>: scroll to that finding and open its sheet, once per focus key.
   useEffect(() => {
     if (!focus) return;
-    document.getElementById(`fr-${focus}`)?.scrollIntoView({ block: "center" });
+    (document.getElementById(`fr-${focus}`) ?? document.getElementById(`frc-${focus}`))?.scrollIntoView({ block: "center" });
     let live = true;
     void findingSheetContextAction(focus).then((r) => {
       if (!live) return;
@@ -297,7 +303,7 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = registerCsvName(Date.now());
+    a.download = registerCsvName(clockNow());
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -318,9 +324,6 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
   const moveRow = move ? byKey.get(move.key) : undefined;
   const venueChoices = filters.customer ? venues.filter((v) => v.customerId === filters.customer) : venues;
   const csvHref = `/api/assessments/findings-csv${registerQuery(filters) ? "?" + registerQuery(filters) : ""}`;
-  // The ?focus= finding is loaded even when the filters leave it out; it's listed only when it matches them
-  // (otherwise only its sheet opens).
-  const shown = rows.filter((r) => r.finding.key !== focus || matchesFilters(r.finding, filters));
 
   return (
     <div className="pk-content" style={{ maxWidth: 1400, margin: "0 auto" }}>

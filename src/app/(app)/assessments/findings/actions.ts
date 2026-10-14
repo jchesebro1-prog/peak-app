@@ -58,7 +58,9 @@ export async function createQuoteFromFindingsAction(keys: string[], kind: QuoteK
     href = r.href;
     if (r.quote) {
       revalidatePath("/quotes");
-      refresh([]);
+      refresh(r.assessmentIds ?? []);
+      // The quote exists even when linking failed: go to it, and say so (a retry would make a second quote).
+      if (r.linkNotice) href += "&err=" + encodeURIComponent(r.linkNotice);
     }
   } catch {
     return { ok: false, error: "The quote couldn't be started. Try again." };
@@ -80,7 +82,13 @@ export async function linkExistingQuoteAction(key: string, quoteId: string): Pro
   if (f.voided) return { ok: false, error: "A voided finding can't be linked to a quote." };
   const q = await getQuote(id);
   if (!q) return { ok: false, error: `No quote ${id} was found.` };
-  if (q.customerId && q.customerId !== f.customerId) return { ok: false, error: `${id} is for a different customer.` };
+  if (!q.customerId) return { ok: false, error: `${id} isn't linked to a customer, so it can't be linked to a finding.` };
+  if (q.customerId !== f.customerId) return { ok: false, error: `${id} is for a different customer.` };
+  if (q.status === "lost") return { ok: false, error: `${id} is lost; link an open quote.` };
+  if (q.locationId) {
+    const site = await getSite(f.siteId);
+    if (site && q.locationId !== docLocId(site)) return { ok: false, error: `${id} is for a different venue.` };
+  }
   await linkQuote([f.key], q.id, user);
   const after = await getFinding(f.key);
   refresh([f.assessmentId]);

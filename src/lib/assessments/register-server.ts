@@ -1,7 +1,7 @@
 /* Assessments engine (#337, Task 9) — the findings register's loader, shared by the page and the CSV route.
    Server-only (stores). The rules (filters, sort, cells) are the pure ones in register.ts. */
 import { listFindings, type Finding } from "@/lib/stores/findings";
-import { get as getQuote } from "@/lib/stores/quotes";
+import { getMany as getQuotes } from "@/lib/stores/quotes";
 import { getCompanies } from "@/lib/identity/companies";
 import { docLocId, sitesForCompanies } from "@/lib/identity/sites";
 import { displayQuoteNumber } from "@/lib/estimate-number";
@@ -21,9 +21,9 @@ export interface RegisterData {
 /** Quote id → label + builder link, for every id given (a quote that's gone keeps its id, linking nowhere useful). */
 async function quoteLinksFor(ids: string[]): Promise<Map<string, { id: string; label: string; href: string }>> {
   const uniq = [...new Set(ids)];
-  const qs = await Promise.all(uniq.map((id) => getQuote(id).catch(() => null)));
-  return new Map(uniq.map((id, i) => {
-    const q = qs[i];
+  const qs = await getQuotes(uniq).catch(() => new Map<string, Awaited<ReturnType<typeof getQuotes>> extends Map<string, infer Q> ? Q : never>());
+  return new Map(uniq.map((id) => {
+    const q = qs.get(id);
     return [id, { id, label: q ? displayQuoteNumber(q) : id, href: quoteBuilderHref({ id, quoteType: q?.quoteType ?? null }) }];
   }));
 }
