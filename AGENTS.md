@@ -1364,5 +1364,35 @@ See `.env.example`.
     re-link old hand-made customer links that should be shared, try two
     accounts on production. Punch item #341.
 
+61. 🚧 **Venue Assessment notes** (#344, D1019–D1032) — Jeff's Oct 14 notes on
+    the Venue Assessments (`FS-####`) editor, three slices on one branch
+    (spec `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md`).
+    ✅ **Slice A (form structure & flow):** a new section order with **Kill
+    questions** as the Brief's third section — Scope (rigging / curtain /
+    lighting / av), one **Rigging system** answer at
+    `disciplines.rigging.present` (asked once, read-only in the Rigging intake)
+    and stage width / depth; the quote half of Existing materials & quote only
+    for Purpose "New system design" (`isQuoteVisit`); Sign-off removed from the
+    editor; new assessments assigned to the creator and scheduled today;
+    collapsible sections remembered per viewer; Final thoughts internal tags
+    (settings key `surveyInternalTags`, Settings → Field & Venues, staff-only,
+    never printed); a customer recap in Wrap-up, "What we heard" on the field
+    sheet and in the findings text. Rules are pure: `src/lib/survey-flow.ts`
+    (order, `sectionVisible`, quote rule, recap), `survey-migrate.ts`
+    (read-time steps that never delete a key; unmappable answers become
+    derived, never-stored `legacyNotes`, shown as Older notes),
+    `survey-tags.ts`; the sticky progress rail is the shared
+    `src/components/section-rail/section-rail.tsx` (extracted from the
+    Assessments engine, output unchanged; jumps scroll `main.pk-main`). An
+    older survey with no derivable scope reads "Intake: draft" until Scope is
+    answered. The field sheet is not scope-filtered. Tests:
+    `scripts/test-va-notes.ts` (in test:specs). No migration, no env var.
+    Remaining: slice B (field-level changes: access, measurement links, curtain
+    fabric oz, fixture inventory, numbered line sets) and slice C (ink pad,
+    photos and sketches; needs a real iPad + Apple Pencil test), plus
+    Jeff-gated: review the internal tag list, tell the reps older surveys ask
+    for Scope first, send the CW Elevation and line set schedule sheets. Punch
+    item #344.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

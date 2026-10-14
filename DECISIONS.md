@@ -12660,3 +12660,59 @@ Every server-side settings / settings-blob writer, classified:
 New Locations get a random id suffix (`of<ms><4 base-36>`; nothing parses the id), so two added in one millisecond stay apart.
 
 PGlite is one connection, so the race tests (`scripts/test-settings-race.ts`) prove the merge and serialization semantics; under the old pattern the same harness kept 1 of 8 concurrent price-list dates. The multi-connection path (postgres-js in production: a second transaction blocking on the first's row lock until it commits, then reading the committed row) is reasoned through, not executed. What is executed is a pin that both helpers select `FOR UPDATE` inside `withTransaction`, re-select after `ON CONFLICT DO NOTHING`, and that drizzle renders that builder chain as `… for update`.
+
+## D1019. A quote visit is Purpose "New system design" only (#344, 2026-10-14 — Jeff's ruling)
+
+The quote / budget half of Existing materials & quote shows only when the visit's Purpose is "New system design". Every other Purpose hides it; stored answers stay and are never cleared. `isQuoteVisit(survey)` in `src/lib/survey-flow.ts`, read by the editor, the progress counts and the rail.
+
+## D1020. Kill questions move into the Brief and gain Scope and Rigging system (#344, 2026-10-14)
+
+The Tier 1 "kill questions" become the third section of the Brief. They gain **Scope** (rigging / curtain / lighting / av, multi), **Rigging system** (asked only when Rigging is in scope) and stage width / depth inputs bound to the venue class's own `TIER1` key. Contact phone is no longer a kill question (note 13). `tier1Items` in `src/lib/stores/survey-intake.ts`; order and wizard steps in `src/lib/survey-flow.ts`.
+
+## D1021. One rigging-system answer, asked once (#344, 2026-10-14)
+
+The rigging system is one answer at `disciplines.rigging.present`: Counterweight, Dead-hung, Motorized, Hemp, Fixed points, None (None is exclusive). It is asked once, in Kill questions, and shown read-only in the Rigging intake. Beams' "Existing rig type" and the Rigging "Counterweight system" check are gone from the UI. When Present is absent or empty it is copied up on read from `measurements.rigType`, then the old counterweight check, then the old condition chips; old labels relabel (Counterweight system → Counterweight, Dead-hung battens → Dead-hung, Motorized rigging → Motorized) — notes 10 and 14. `src/lib/survey-migrate.ts`; helpers `rigSystems` / `hasCounterweight` / `hasLinesets` in `survey-flow.ts`.
+
+## D1022. Scope: unset filters nothing, and is seeded from data (#344, 2026-10-14)
+
+`survey.scope` unset filters nothing (today's behaviour). On read it is seeded from the disciplines that already hold data — a None-only Present answer doesn't count. Clearing every scope chip saves it unset, so it can reseed from data later. Beams, Rigging and Line sets need Rigging in scope; FOH positions needs Lighting. One pure rule, `sectionVisible(survey, sectionId)`, serves the editor, rail, progress, recap and the findings text. Hidden sections keep their stored answers.
+
+## D1023. Older surveys with no derivable scope read "Intake: draft" until asked (#344, 2026-10-14 — accepted by Jeff)
+
+A survey with no derivable scope, or with rigging data but no rigging system, reads **Intake: draft** and locks its intakes until the missing kill question is answered. Jeff accepted this. The rigging-system answer itself doesn't count as intake data, so answering it doesn't flip an empty intake to "started" (`intakeStatus`, `src/lib/stores/survey-intake.ts`).
+
+## D1024. Read-time migration never deletes a key; unmappable answers become Older notes (#344, 2026-10-14)
+
+`normalize()` in `src/lib/stores/surveys.ts` runs the ordered, idempotent steps in `survey-migrate.ts`; no step deletes a key, so a rollback still reads the old shape. An old answer that can't map cleanly becomes a `legacyNotes` entry `{ section, label, text }`, de-duplicated and **derived on every read, never stored** (stripped before the offline outbox write). The editor shows them as **Older notes** at the foot of their section; the field sheet prints them on the Project notes page. Deviation from the spec, which put them under each section on the sheet.
+
+## D1025. Sign-off is removed from the editor (#344, 2026-10-14 — note 23)
+
+The Sign-off section no longer renders. `signoff` stays stored; the field sheet prints a Close-out block only when an old survey carries a sign-off value. Nothing gated completion on sign-off.
+
+## D1026. Final thoughts internal tags (#344, 2026-10-14 — note 6)
+
+Staff-only judgment tags on a survey's Final thoughts. The list is the settings key `surveyInternalTags` (deviation: the spec said a separate blob — the settings row matches Document categories), saved through `saveSurveyTagsLocked` under the settings row lock (the #343 pattern, D1018). Ids are `tg_<slug>`, minted once; a dropped row is kept as retired so old surveys still show its label. Nine starter judgment tags (`STARTER_SURVEY_TAGS`). Tags are never printed on the field sheet or any customer document. The venue-assessments list filters by active tags. Editor: Settings → Field & Venues card. `src/lib/survey-tags.ts`. Follow-up: the 40-tag cap counts retired tags.
+
+## D1027. New assessments open assigned to the creator and scheduled today (#344, 2026-10-14 — note 3)
+
+A new Venue Assessment is assigned to its creator (from a lead's visit request: the visit's assignee, else the requester) and scheduled for today (Chicago). Stage stays `requested`. Side effect accepted: a survey with a `scheduledDate` is a day candidate for the Krisp meeting matcher (`src/lib/meetings/index-build.ts`).
+
+## D1028. Collapsible sections, remembered per viewer; Accordion mode retired (#344, 2026-10-14 — note 7)
+
+Each section collapses, and the choice is remembered per viewer per survey in `localStorage` (`va:collapsed:<id>`, read through `useSyncExternalStore`). The Accordion ("Sections") layout mode is retired — it was never persisted. Section headers are keyboard-operable (locked ones `aria-disabled`).
+
+## D1029. A shared SectionRail; jumps scroll the app's main pane (#344, 2026-10-14)
+
+`SectionRail` (`src/components/section-rail/section-rail.tsx`) is extracted from the Assessments engine's scope rail — engine output unchanged. On Venue Assessments it is a sticky progress rail that scrolls in its own column (optional `maxHeight`), with a sticky select on phones. Jumps use `scrollIntoView` because the app scrolls `main.pk-main`, not the window; this also fixes the old jump pills, which never scrolled.
+
+## D1030. Customer recap in Wrap-up, "What we heard" on the sheet and in the findings text (#344, 2026-10-14 — notes 16.13, 17)
+
+Per in-scope discipline: the scopes of interest and the client goals, the latter sanitized through `goalsFromSurvey`. Shown as the Wrap-up customer recap, as "What we heard" on the field sheet, and in the plain-text findings that the Estimator's Draft scope and Assist read (`recapFor` in `survey-flow.ts`, `src/lib/survey-findings.ts`, `src/lib/venue-assessment-sheet.ts`).
+
+## D1031. The field sheet is not filtered by scope (#344, 2026-10-14)
+
+Deviation from spec R2: the printed field sheet still prints every section regardless of `scope` — printing everything is the safer default for a paper form taken on site. Only the editor, rail, progress and recap follow scope.
+
+## D1032. Venue-class guidance panel removed from the intake only (#344, 2026-10-14 — note 17)
+
+The panel no longer renders in the intake. The venue-class guidance data, its settings and its code stay, so it can come back.

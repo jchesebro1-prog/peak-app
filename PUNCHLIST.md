@@ -12240,3 +12240,38 @@ Follow-up to #342. A writer that computed a key's new value from its current one
 - **Tests:** `npm run test:settings-race` (`scripts/test-settings-race.ts`, also chained into test:specs) — N concurrent calls on different entries for every converted writer, other keys unchanged, null patch writes nothing, first insert on an empty table. PGlite is one connection: these prove the lock-and-merge semantics and serialization, not multi-connection Postgres concurrency (reasoned, not executed; a pin checks both helpers select FOR UPDATE).
 
 **Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.
+
+## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slice A DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032)
+
+Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`) editor, designed in `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md` and built as three slices on one branch. Slice A plan: `docs/superpowers/plans/2026-10-14-va-notes-slice-a.md`.
+
+**Slice A ✅ — form structure & flow** (commits `16944778` … `b6da723c`, branch `feat/344-va-notes`):
+- New section order; **Kill questions** now the Brief's third section with Scope (rigging / curtain / lighting / av), one Rigging system answer and stage width / depth; contact phone dropped (`src/lib/survey-flow.ts`, `survey-intake.ts`).
+- Read-time migration (`src/lib/survey-migrate.ts`): rigging system copied up from the old rig type / counterweight check / condition chips, scope seeded from data, unmappable answers shown as **Older notes** (derived, never stored).
+- The quote half of Existing materials & quote shows for Purpose "New system design" only; Sign-off removed from the editor; the Venue-class guidance panel removed from the intake.
+- New assessments open assigned to the creator and scheduled today; Final thoughts internal tags (`src/lib/survey-tags.ts`, settings key `surveyInternalTags`, Settings → Field & Venues card, list filter, never printed).
+- Collapsible sections remembered per viewer; a shared `SectionRail` (also used by the Assessments engine) with a sticky progress rail / phone select; jumps scroll `main.pk-main`.
+- Customer recap in Wrap-up, "What we heard" on the field sheet and in the findings text; the sheet prints Older notes and a Close-out only when an old survey has a sign-off.
+- **Tests:** `scripts/test-va-notes.ts` (inside test:specs). No migration, no env var.
+
+**Slice B — pending (field-level changes, spec B1–B9):** travel auto-fill, access (lifts, loading doors), measurement links, beams & rigging, per-discipline fields, curtain (fabric oz per row), the condition slider, lighting and AV (fixture inventory by position), line set schedule (numbered 1…N).
+
+**Slice C — pending (drawing & photo capture, spec C1–C8):** ink model and pad, generated pad backgrounds, a shared photo / sketch pipeline, sketch pads, per-section photos with caption and markup, field-sheet output, 3D presets. Needs a real iPad + Apple Pencil test (pressure, palm rejection, offline capture and later sync) before merge.
+
+**Jeff-gated:**
+- Review the internal tag list in Settings → Field & Venues (nine starter tags).
+- Older in-progress surveys ask for **Scope** (and **Rigging system**) before their intakes unlock (D1023) — tell the reps.
+- Send the real CW Elevation Sheet and the line set schedule sheet (slice C; placeholders are generated until then).
+
+**Follow-ups (from the review ledger):**
+- The 40-tag cap counts retired tags.
+- No server-side clamp of `scope` / `internalTags` yet.
+- The width / depth kill chip uses any class key.
+- The phone select doesn't track scroll.
+- The gate badge shows "! 1".
+- An Older note in a scope-hidden section shows only on the field sheet.
+- The editor header is very tall on phones (pre-existing); the engine editor's phone select may not stick (pre-existing).
+- The systemsState fold seeds "Counterweight" from `installed: yes` — matters for slice B's counterweight gate.
+- The `src/lib/settings-lists.ts` header comment still says "the two Settings list editors".
+
+**Remaining:** slices B and C, plus the Jeff-gated items above.
