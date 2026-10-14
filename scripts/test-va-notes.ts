@@ -28,7 +28,7 @@ import {
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
 import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey } from "../src/lib/estimate-output/goals";
 import { cleanPlainText } from "../src/lib/estimate-output/fields";
-import { blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
+import { blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, fillDownImpact, addMissingSets, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -265,6 +265,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(!pages.some((p) => p.sections.some((s) => s.heading === "Sign-off")), "#344 A6: no Close-out page when nobody signed (new surveys)");
   ok(pages.some((p) => p.sections.some((s) => s.heading === "Older notes" && s.rows.some((r) => r.value === "Hemp"))), "#344 R1: Older notes print");
   ok(!JSON.stringify(sh).includes("Price-sensitive") && !JSON.stringify(sh).includes("tg_price_sensitive"), "#344 A5: internal tags never print");
+  const withLs = buildAssessmentSheet({ ...(sheetBase as object), linesets: [{ ...blankLinesetRow(1), setName: "Main curtain" }], linesetsEnabled: false } as never);
+  ok(withLs.fieldSheet!.pages.some((p) => p.sections.some((s) => s.heading === "Linesets" && s.rows.length === 1)) &&
+     !pages.some((p) => p.sections.some((s) => s.heading === "Linesets")),
+    "#344 B6 fix: the field sheet prints entered line sets even with the old toggle off, and nothing when there are none");
   const signed = buildAssessmentSheet({ ...(sheetBase as object), signoff: { repName: "Rep", repSignedAt: "2026-09-20", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" } } as never);
   ok(signed.fieldSheet!.pages.at(-1)!.sections.at(-1)!.heading === "Sign-off", "#344 A6: an old signed survey still prints its Close-out page");
 
@@ -740,6 +744,22 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(filledCond[2].condition === 3 && filledCond[0].condition === 3, "#344 B6: Fill down also copies the Condition level");
     const cleared = fillDown([mk("1"), mk("2", { condition: 2 })], fd[0].id + "x", "condition");
     ok(cleared[1].condition === 2, "#344 B6: Fill down from an unknown row changes nothing");
+
+    const gapped = [mk("1", { setName: "A" }), mk("2", { setName: "B" }), mk("3", { setName: "C" }), mk("12", { setName: "Twelve", notes: "keep me" })];
+    const added = addMissingSets(gapped, 4);
+    ok(added.length === 5 && added.map((r) => r.pos).join(",") === "1,2,3,4,12" && gapped.every((g) => added.some((r) => r.id === g.id && r.setName === g.setName)) &&
+       added.find((r) => r.pos === "12")?.notes === "keep me" && rowIsEmpty(added.find((r) => r.pos === "4") as LinesetRow),
+      "#344 B6 fix: Add the missing sets adds blanks only — row 12 with data stays, existing ids unchanged");
+    ok(addMissingSets(added, 4).length === 5 && addMissingSets([], 0).length === 0 && addMissingSets([mk("Ext", { setName: "X" })], 2).map((r) => r.pos).join(",") === "1,2,Ext",
+      "#344 B6 fix: Add the missing sets is stable when nothing is missing and keeps non-numeric sets");
+
+    const fi = [mk("1", { type: "L" }), mk("2", { type: "B" }), mk("3", { type: "L" }), mk("4")];
+    ok(fillDownImpact(fi, fi[0].id, "type") === 1 && fillDownImpact(fi, fi[1].id, "type") === 1 && fillDownImpact(fi, fi[3].id, "type") === 0 && fillDownImpact(fi, "nope", "type") === 0,
+      "#344 B6 fix: fillDownImpact counts filled cells that differ from the source (blank cells and equal values are free)");
+    const blankSrc = [mk("1"), mk("2", { type: "B" }), mk("3", { type: "D" }), mk("4")];
+    ok(fillDownImpact(blankSrc, blankSrc[0].id, "type") === 2, "#344 B6 fix: a blank source counts the filled cells it would blank");
+    const cs = [mk("1", { condition: 3 }), mk("2", { condition: 3 }), mk("3", { condition: 1 }), mk("4")];
+    ok(fillDownImpact(cs, cs[0].id, "condition") === 1 && fillDownImpact(cs, cs[2].id, "condition") === 0, "#344 B6 fix: fillDownImpact reads Condition levels (0 counts as filled)");
 
     ok(formatSetRanges(["14", "12", "13", "20", "Ext"]) === "12–14, 20, Ext" && formatSetRanges(["5"]) === "5" && formatSetRanges([]) === "",
       "#344 B6: the removal prompt lists set numbers as ranges");

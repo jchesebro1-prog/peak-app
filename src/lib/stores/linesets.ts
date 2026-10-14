@@ -150,7 +150,37 @@ export function linesetQuantityPlan(rows: LinesetRow[], n: number): { rows: Line
   return { rows: result, dropped };
 }
 
+/** Add a blank row for every set number 1…n that has none. Never removes, reorders ids or touches data:
+ *  rows numbered above n and rows without a usable number are all kept. */
+export function addMissingSets(rows: LinesetRow[], n: number): LinesetRow[] {
+  const qty = clampLinesetQty(n);
+  const have = new Set<number>();
+  for (const row of rows) {
+    const num = setNumber(row);
+    if (num != null) have.add(num);
+  }
+  const added: LinesetRow[] = [];
+  for (let i = 1; i <= qty; i++) if (!have.has(i)) added.push(blankLinesetRow(i));
+  return added.length ? sortLinesetRows(rows.concat(added)) : rows;
+}
+
 export type LinesetFillKey = Exclude<keyof LinesetRow, "id" | "pos">;
+
+const cellBlank = (v: unknown) => v == null || String(v).trim() === "";
+
+/** How many non-empty cells below the source row Fill down would change (differing values; a blank source counts every filled cell). */
+export function fillDownImpact(rows: LinesetRow[], fromId: string, key: LinesetFillKey): number {
+  const at = rows.findIndex((row) => row.id === fromId);
+  if (at < 0) return 0;
+  const source = rows[at][key];
+  let n = 0;
+  for (let i = at + 1; i < rows.length; i++) {
+    const cell = rows[i][key];
+    if (cellBlank(cell)) continue;
+    if (cellBlank(source) || String(cell) !== String(source)) n++;
+  }
+  return n;
+}
 
 /** Copy one cell's value into the same column of every row after it (in the order given). */
 export function fillDown(rows: LinesetRow[], fromId: string, key: LinesetFillKey): LinesetRow[] {

@@ -117,7 +117,7 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
     page(`${title} — Systems`, disciplineSection(record, 2), disciplineSection(record, 3)),
   ];
 
-  if (record.linesetsEnabled) {
+  if (record.linesetsEnabled || (record.linesets?.length ?? 0) > 0) {
     pages.push(page(`${title} — Lineset schedule`, {
       heading: "Linesets",
       rows: (record.linesets || []).map((line) => row(

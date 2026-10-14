@@ -5,7 +5,9 @@ import {
   LINESET_QTY_MAX,
   LINESET_TYPES,
   clampLinesetQty,
+  addMissingSets,
   fillDown,
+  fillDownImpact,
   formatSetRanges,
   linesetQuantityPlan,
   markSpare,
@@ -88,6 +90,7 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
   const [spareFrom, setSpareFrom] = useState("");
   const [spareTo, setSpareTo] = useState("");
   const [notice, setNotice] = useState("");
+  const [pendingFill, setPendingFill] = useState<{ id: string; key: LinesetFillKey; count: number } | null>(null);
 
   const qtyText = typed ?? (qty == null ? "" : String(qty));
 
@@ -130,16 +133,34 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
     applyQty(n);
   }
 
+  function addMissing() {
+    if (known == null) return;
+    setNotice("");
+    onApply(addMissingSets(sorted, known));
+  }
+
   function cancelQty() {
     setPendingQty(null);
     setTyped(null);
   }
 
+  function applyFillDown(id: string, key: LinesetFillKey) {
+    const from = sorted.find((row) => row.id === id);
+    onApply(fillDown(sorted, id, key));
+    const label = FILL_COLUMNS.find((c) => c.key === key)?.label || "column";
+    setPendingFill(null);
+    setNotice(`Copied ${label} from set ${from?.pos || "?"} down to the sets below.`);
+  }
+
   function runFillDown() {
     if (!focusedRow) return;
-    onApply(fillDown(sorted, focusedRow.id, fillKey));
-    const label = FILL_COLUMNS.find((c) => c.key === fillKey)?.label || "column";
-    setNotice(`Copied ${label} from set ${focusedRow.pos || "?"} down to the sets below.`);
+    const count = fillDownImpact(sorted, focusedRow.id, fillKey);
+    if (count > 0) {
+      setNotice("");
+      setPendingFill({ id: focusedRow.id, key: fillKey, count });
+      return;
+    }
+    applyFillDown(focusedRow.id, fillKey);
   }
 
   function runMarkSpare() {
@@ -186,6 +207,7 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
                 if (typed != null) commitQty();
               }
             }}
+            disabled={pendingQty != null}
             style={{ ...inpStyle, marginTop: 5, width: 120 }}
           />
         </label>
@@ -202,10 +224,24 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
         </div>
       )}
 
+      {pendingFill && (() => {
+        const fromRow = sorted.find((row) => row.id === pendingFill.id);
+        const label = FILL_COLUMNS.find((c) => c.key === pendingFill.key)?.label || "column";
+        return (
+          <div role="alert" style={{ marginTop: 12, border: "1px solid #f0d6cd", background: "#f9ece8", borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ flex: "1 1 220px", fontSize: 13, color: "#8a3d29" }}>
+              Replace {pendingFill.count} {pendingFill.count === 1 ? "value" : "values"} in {label} below set {fromRow?.pos || "?"}?
+            </span>
+            <button type="button" onClick={() => applyFillDown(pendingFill.id, pendingFill.key)} style={{ ...barBtn, background: "#b4543a", borderColor: "#b4543a", color: "#fff" }}>Confirm</button>
+            <button type="button" onClick={() => setPendingFill(null)} style={quietBtn}>Cancel</button>
+          </div>
+        );
+      })()}
+
       {missing > 0 && known != null && pendingQty == null && (
         <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={noteStyle}>{known} line {known === 1 ? "set is" : "sets are"} recorded but {missing} {missing === 1 ? "has" : "have"} no row yet.</span>
-          <button type="button" onClick={() => applyQty(known)} style={barBtn}>Create the missing {missing === 1 ? "set" : "sets"}</button>
+          <button type="button" onClick={addMissing} style={barBtn}>Add the missing {missing === 1 ? "set" : "sets"}</button>
         </div>
       )}
 
