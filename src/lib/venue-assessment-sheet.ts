@@ -16,6 +16,8 @@ import {
   STAFF_TIERS,
 } from "@/lib/stores/assessment";
 import { goalsFromSurvey } from "@/lib/estimate-output/goals";
+import { recapFor, recapScopeText } from "@/lib/survey-flow";
+import type { LegacyNote } from "@/lib/survey-migrate";
 import { linesetCondLabel, linesetTypeLabel } from "@/lib/stores/linesets";
 
 type SheetRecord = Pick<
@@ -29,6 +31,7 @@ type SheetRecord = Pick<
   | "firstImpressions" | "budget" | "fiscalYearSpendBy" | "whoDecides"
   | "targetInstallWindow" | "scopeOfWork" | "quoteLook" | "notes"
   | "assessmentEnabled" | "assessment" | "templateRev" | "signoff"
+  | "scope" | "legacyNotes"
 >;
 
 const text = (value: unknown): string => {
@@ -84,6 +87,12 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
           row("Purpose", record.visitPurpose), row("Reason", record.reason),
           row("Assigned to", record.assignedTo), row("Requested by", record.requestedBy),
         ],
+      },
+      {
+        heading: "What we heard",
+        rows: compactRows(
+          recapFor(record).flatMap((e) => [row(e.label, recapScopeText(e)), row(`${e.label} goals`, e.goals.join("; "))])
+        ),
       }
     ),
     page(
@@ -134,14 +143,17 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
     `${title} — Project notes`,
     ...(lifeSafety.length ? [{ heading: "Life safety", rows: lifeSafety }] : []),
     {
-      heading: "Quote questions",
-      rows: [
+      heading: "Quote & notes",
+      rows: compactRows([
         row("Budget", record.budget), row("Fiscal-year spend-by", record.fiscalYearSpendBy),
         row("Decision maker", record.whoDecides), row("Target install window", record.targetInstallWindow),
         row("Scope of work", record.scopeOfWork), row("Quote should look like", record.quoteLook),
         row("Notes", record.notes),
-      ],
-    }
+      ]),
+    },
+    ...(record.legacyNotes?.length
+      ? [{ heading: "Older notes", rows: (record.legacyNotes as LegacyNote[]).map((n) => row(n.label, n.text)) }]
+      : [])
   ));
 
   if (record.assessmentEnabled) {
@@ -201,7 +213,8 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
       [record.signoff.reviewerName, record.signoff.reviewerRole, record.signoff.reviewerSignedAt].filter(Boolean).join(" — ")
     ));
   }
-  pages.push(page(`${title} — Close-out`, { heading: "Sign-off", rows: signoffRows }));
+  const signed = Object.values(record.signoff || {}).some((v) => String(v ?? "").trim() !== "");
+  if (signed) pages.push(page(`${title} — Close-out`, { heading: "Sign-off", rows: signoffRows }));
 
   const date = record.scheduledDate || record.assessment?.date ||
     (record.createdAt ? new Date(record.createdAt).toISOString().slice(0, 10) : "");

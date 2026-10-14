@@ -1,4 +1,5 @@
 import type { SurveyRecord } from "@/lib/stores/surveys";
+import { recapFor, recapScopeText } from "./survey-flow";
 
 /**
  * A field survey flattened into plain-text findings. Pure and shared: the
@@ -38,6 +39,8 @@ export type SurveyFindingsInput = Partial<
     | "liftNeeded"
     | "liftSupplier"
     | "measurements"
+    | "disciplines"
+    | "scope"
   >
 >;
 
@@ -63,5 +66,16 @@ export function surveyFindings(s: SurveyFindingsInput): string {
   if (access.length) parts.push("Access/logistics: " + access.join("; "));
   const meas = recordLines(s.measurements);
   if (meas) parts.push("Measurements:\n" + meas);
+  const heard = recapFor(s).filter((e) => e.scopes.length || e.other || e.goals.length);
+  if (heard.length) {
+    parts.push(
+      "What we heard:\n" +
+        heard
+          .map((e) =>
+            [`  - ${e.label}: ${recapScopeText(e) || "(no scopes)"}`, ...e.goals.map((g) => `    Goal: ${g}`)].join("\n")
+          )
+          .join("\n")
+    );
+  }
   return parts.filter(Boolean).join("\n");
 }

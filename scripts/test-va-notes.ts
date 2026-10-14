@@ -13,6 +13,9 @@ import { BEAM_FIELDS } from "../src/lib/stores/surveys";
 import { railSheetLabel, SECTION_RAIL_CSS } from "../src/components/section-rail/section-rail";
 import { STARTER_SURVEY_TAGS, resolveSurveyTags, mergeSurveyTags, activeSurveyTags, surveyTagLabel } from "../src/lib/survey-tags";
 import { sectionProgress } from "../src/app/(app)/venue-assessments/[id]/sections/progress";
+import { buildAssessmentSheet } from "../src/lib/venue-assessment-sheet";
+import { surveyFindings } from "../src/lib/survey-findings";
+import { blankAssessment } from "../src/lib/stores/assessment";
 import { parseCollapsed, isCollapsed, collapseStorageKey } from "../src/app/(app)/venue-assessments/[id]/sections/collapse";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
@@ -218,6 +221,33 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(ft.includes("activeSurveyTags") && ft.includes("Older site conditions") && ft.includes("Internal only"), "#342 A5: Final thoughts shows active tags, retired-but-carried tags and the old chips read-only");
   ok(rcp.includes("recapFor(") && rcp.includes("What we heard"), "#342 A7: the recap reads recapFor");
   ok(/<OlderNotes notes=\{draft\.legacyNotes\.filter\(\(n\) => n\.section === sec\.id\)\}/.test(ctl8), "#342 R1: every section shows its Older notes");
+
+  /* ---- Task 9: sheet + findings + list ---- */
+  const sheetBase = {
+    id: "FS-9", venueClass: "theatre", venue: "Hall", customer: "Acme", measurements: {}, linesets: [], linesetsEnabled: false,
+    lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" }, assessmentEnabled: false, assessment: blankAssessment(), templateRev: "5.1",
+    signoff: { repName: "", repSignedAt: "", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" },
+    scope: ["rigging"], disciplines: { rigging: { scope: ["New grid"], goals: "Safer rail\nQuieter" } },
+    legacyNotes: [{ section: "mBeams", label: "Existing rig type (before #342)", text: "Hemp" }],
+    internalTags: ["tg_price_sensitive"],
+  } as never;
+  const sh = buildAssessmentSheet(sheetBase);
+  const pages = sh.fieldSheet!.pages;
+  const heard = pages[0].sections.find((s) => s.heading === "What we heard");
+  ok(!!heard && heard.rows.some((r) => r.label === "Rigging" && r.value === "New grid") && heard.rows.some((r) => r.label === "Rigging goals" && r.value === "Safer rail; Quieter"),
+    "#342 A7: the field sheet prints the recap on page 1");
+  ok(!pages.some((p) => p.sections.some((s) => s.heading === "Sign-off")), "#342 A6: no Close-out page when nobody signed (new surveys)");
+  ok(pages.some((p) => p.sections.some((s) => s.heading === "Older notes" && s.rows.some((r) => r.value === "Hemp"))), "#342 R1: Older notes print");
+  ok(!JSON.stringify(sh).includes("Price-sensitive") && !JSON.stringify(sh).includes("tg_price_sensitive"), "#342 A5: internal tags never print");
+  const signed = buildAssessmentSheet({ ...(sheetBase as object), signoff: { repName: "Rep", repSignedAt: "2026-09-20", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" } } as never);
+  ok(signed.fieldSheet!.pages.at(-1)!.sections.at(-1)!.heading === "Sign-off", "#342 A6: an old signed survey still prints its Close-out page");
+
+  const fx = surveyFindings({ reason: "walk", scope: ["rigging"], disciplines: { rigging: { scope: ["New grid"], goals: "Safer rail" } } } as never);
+  ok(fx.includes("What we heard:\n  - Rigging: New grid\n    Goal: Safer rail"), "#342 A7: the plain-text findings carry the recap");
+  ok(surveyFindings({ reason: "walk" }) === "Reason for visit: walk", "#342 A7: no recap block when there's nothing to read back");
+
+  const listSrc = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/page.tsx"), "utf8");
+  ok(/sp\.tag/.test(listSrc) && listSrc.includes("internalTags") && listSrc.includes("resolveSurveyTags"), "#342 A5: the list filters by internal tag");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
