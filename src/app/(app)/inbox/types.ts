@@ -172,6 +172,9 @@ export type ReaderVM = {
   readOnly: boolean;
   /** "Jeff Chesebro’s mailbox — read only" (or "Shared mailbox — read only"); "" when not readOnly. */
   readOnlyLabel: string;
+  /** #341 — the customer a read-only thread is deliberately linked to ("" =
+   *  none, or only an automatic sender match, which is never shown). */
+  readOnlyLinkedTo: string;
   /** Thread is out of the inbox (locally archived OR archived on the Gmail
    *  side) — drives the Archive/Unarchive toggle. Unarchive clears the local
    *  flag and, with two-way archive (D74), pushes INBOX back onto the Gmail

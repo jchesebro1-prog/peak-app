@@ -59,6 +59,9 @@ export type FilingApplied = {
     suggestedCustomerId: string | null;
     candidates: Array<{ customerId: string; name: string }>;
     siteId: string | null;
+    /** #341 — the thread's deliberate-link flag before filing (Undo restores
+     *  it; absent on filings made before #341 = none) */
+    linkedBy?: "user" | "filing" | null;
   };
   /** the work link (setLink) — the link it replaced */
   link?: { prev: { type: string; id: string; label?: string } | null };

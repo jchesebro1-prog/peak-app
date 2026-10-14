@@ -1596,7 +1596,7 @@ export async function askUiChecks(ok: Ok): Promise<void> {
     ok(r3.ok && r3.task.threadId === T_MINE && r3.task.customerId === CID && r3.task.section === "Email" && r4.ok && !r4.task.threadId && r4.task.section === "", "createAskTask: a thread link is written only for my own thread (loadThreadFor), filed under Email like the Inbox's; another user's thread is dropped");
     // #341 — Ask may READ a teammate's company-linked thread, but a task's thread link stays own-only (the Inbox's rule)
     const T_SHARED4 = fixtureId("ask4", "thread-shared");
-    await createFixture("comms", { id: T_SHARED4, mailboxUser: "Someone Else Ask4", ...base, customerId: CID } as never);
+    await createFixture("comms", { id: T_SHARED4, mailboxUser: "Someone Else Ask4", ...base, customerId: CID, linkedBy: "user" } as never);
     const r4b = await createAskTask({ title: "Linked, not mine", notes: "", assigneeUserId: "", dueDate: "", links: { threadId: T_SHARED4, customerId: CID } }, me);
     if (r4b.ok) made.push(r4b.task.id);
     ok(r4b.ok && !r4b.task.threadId && r4b.task.customerId === CID && r4b.task.section === "", "createAskTask (#341): a teammate's linked (readable) thread is still never a task's thread link — own-only, like the Inbox");

@@ -333,7 +333,7 @@ export async function setLinkAction(
   // picking a record on an unlinked thread also adopts the resolved customer
   // (port of Comm Thread onLinkRec)
   if (adopt && adopt.customerId) {
-    await update(id, { customerId: adopt.customerId, customer: adopt.customer });
+    await update(id, { customerId: adopt.customerId, customer: adopt.customer, linkedBy: "user" }); // #341 — a person picked it
   }
   await setLink(id, link);
   revalidate();

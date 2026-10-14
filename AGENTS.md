@@ -1335,23 +1335,34 @@ See `.env.example`.
     Not on a preview: previews skip migrations, so their company and venue
     reads fail without `short_code`. Punch item #340.
 
-60. ✅ **Email thread visibility** (#341, D1004–D1011) — Jeff, Oct 14: you see
-    only your own information or what is linked to an entity. One pure rule,
-    `canSeeThread` (`src/lib/stores/comms-visibility.ts`, re-exported from
-    `comms.ts`): not in Deleted, and my mailbox, or (not someone else's draft)
-    assigned to me, or linked by `customerId` / `siteId` / a work `link` /
-    `linkedContactIds` — never `resolvedContactId` alone. The Inbox reader opens
-    only `canOpenThread` and shows a teammate's thread **read-only** (banner, no
-    write control, no mark-read); every Inbox server action that takes a thread
-    id checks the owner first (`src/lib/inbox-thread-guard.ts`). The company
-    page and activity feed list every linked thread minus Deleted / drafts; ⌘K
-    cuts thread candidates in SQL with `canSeeThreadCond` through a new
-    additive `searchDocs` `where: DocCond` (`docCondSql`); Ask AI reads through
-    `loadThreadReadable`, while replies, task / estimate drafting and task
-    thread links stay own-only (`loadThreadFor`). Tests:
-    `npm run test:thread-visibility` (in test:specs). No migration. Remaining
-    is Jeff-gated: tell the team, try two accounts on production. Punch item
-    #341.
+60. ✅ **Email thread visibility** (#341, D1004–D1016) — Jeff, Oct 14: you see
+    only your own information or what is deliberately linked to an entity. One
+    pure rule, `canSeeThread` (`src/lib/stores/comms-visibility.ts`,
+    re-exported from `comms.ts`): not in Deleted, and my mailbox, or (not
+    someone else's draft) assigned to me, or linked by `customerId` / `siteId`
+    / a work `link` / `linkedContactIds` **deliberately** (`hasDeliberateLink`:
+    `CommThread.linkedBy` "user" | "filing", a filed #335 filing, or a legacy
+    proof — never the automatic sender match or `resolvedContactId`).
+    `linkThread` / app-created threads / adopts / a person's Gmail label set
+    the flag, #335 filing sets "filing" and Undo restores it; a resweep a
+    person triggers touches only their own mailbox. The Inbox reader opens
+    only `canOpenThread` and shows a teammate's thread **read-only** (banner,
+    no write control, no link / task payload, no mark-read); every Inbox
+    server action that takes a thread id checks the owner first
+    (`src/lib/inbox-thread-guard.ts`; the harness builds the audit list from
+    the source). Start here: an assignee's Done / Reassign re-check the thread
+    at action time, and an admin viewing a teammate's list sees "Private
+    email" rows (redacted on the server). The company page and activity feed
+    list deliberately linked threads plus my own; ⌘K cuts thread candidates in
+    SQL with `canSeeThreadCond` through a new additive `searchDocs`
+    `where: DocCond` (`docCondSql`); Ask AI reads through `loadThreadReadable`,
+    while replies, task / estimate drafting and task thread links stay
+    own-only (`loadThreadFor`). Tests: `npm run test:thread-visibility` (in
+    test:specs). No migration. Tell the team: an email becomes visible to
+    teammates once it's filed/linked; assigned emails are read-only +
+    Done/Reassign from Start here. Remaining is Jeff-gated: tell the team,
+    re-link old hand-made customer links that should be shared, try two
+    accounts on production. Punch item #341.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

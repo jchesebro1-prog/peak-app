@@ -995,8 +995,11 @@ function pdfAttachment(name: string, bytes: Buffer): CommAttachment {
 
 type Copy = { subject: string; body: string };
 
-/** Land (or refresh) the renewal draft and return its thread id. */
-async function upsertRenewalDraft(opts: {
+/** Land (or refresh) the renewal draft and return its thread id. #341 — only
+ *  the acting person's own live draft is reused (never a teammate's, never
+ *  one in Deleted); otherwise a new draft lands in their mailbox. Exported for
+ *  the harness. */
+export async function upsertRenewalDraft(opts: {
   linkType: "flame_job" | "inspection";
   linkId: string;
   linkLabel: string;
@@ -1008,7 +1011,7 @@ async function upsertRenewalDraft(opts: {
   attachment: CommAttachment;
   me: string;
 }): Promise<string> {
-  const existing = await findDraftByLink(opts.linkType, opts.linkId);
+  const existing = opts.me ? await findDraftByLink(opts.linkType, opts.linkId, { mailboxUser: opts.me }) : null;
   if (existing) {
     // one renewal, one draft: refresh the quote PDF but never touch the
     // subject/body — template copy is written only on first creation, so

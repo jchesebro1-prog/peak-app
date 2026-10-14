@@ -65,6 +65,7 @@ export async function createSiteVisitAction(
     await updateThread(input.adoptThreadId, {
       customerId: input.customerId,
       customer: input.customer,
+      linkedBy: "user", // #341 — a person scheduled from it: a deliberate link
     });
   }
 

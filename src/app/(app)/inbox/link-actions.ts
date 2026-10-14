@@ -74,7 +74,7 @@ export async function linkThreadToCustomerAction(
     const d = domainOf(senderEmail);
     if (d && !isPublicDomain(d)) {
       await claimDomain(d, customerId, "manual", me.name);
-      await resweepThreads({ domain: d });
+      await resweepThreads({ domain: d }, { mailboxUser: me.name });
     }
   }
   await linkThread(threadId, customerId, contactId);
@@ -89,7 +89,7 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
   if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
   await claimDomain(d, customerId, "manual", me.name);
-  await resweepThreads({ domain: d });
+  await resweepThreads({ domain: d }, { mailboxUser: me.name });
   revalidate();
   return { ok: true };
 }
@@ -99,12 +99,12 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
  *  that were only suggested by it fall back to unknown. Threads already
  *  linked stay linked (re-sweep never downgrades). */
 export async function releaseDomainAction(domain: string, customerId: string): Promise<R> {
-  await requireUser();
+  const me = await requireUser();
   const d = (domain || "").trim().toLowerCase();
   if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
   if (!customerId) return { ok: false, error: "Customer not found." };
   await releaseDomain(d, customerId);
-  await resweepThreads({ domain: d });
+  await resweepThreads({ domain: d }, { mailboxUser: me.name });
   revalidate();
   return { ok: true };
 }
@@ -162,7 +162,7 @@ export async function quickAddContactAction(input: {
   email: string;
   phone: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  await requireUser();
+  const me = await requireUser();
   const nm = (input.name || "").trim();
   if (!nm) return { ok: false, error: "Enter a name." };
   const sp = nm.lastIndexOf(" ");
@@ -181,7 +181,8 @@ export async function quickAddContactAction(input: {
   };
   const res = await savePersonAction(person);
   if (!res.ok) return res;
-  if (email) await resweepThreads({ email });
+  // #341 — only my own mailbox is re-swept: a contact I add never links (or exposes) anyone else's mail
+  if (email) await resweepThreads({ email }, { mailboxUser: me.name });
   revalidate();
   return res;
 }

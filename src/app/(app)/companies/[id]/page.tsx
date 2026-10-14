@@ -146,7 +146,7 @@ export default async function CustomerDetailPage({
     visibleByCustomer(id, me.name),
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id),
+    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me.name),
     getSettings(),
     getRewardsProgram(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.

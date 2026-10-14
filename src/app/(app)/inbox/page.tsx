@@ -58,6 +58,7 @@ import {
   resolveCustomerId,
   snippet,
   statusMeta,
+  isThreadLinked,
   readOnlyBanner,
   threadsIn,
   timeAgo,
@@ -1081,8 +1082,35 @@ export default async function InboxPage({
       org: readOnly ? null : org,
       // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
       suggestionHref: !readOnly && assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
+      readOnlyLinkedTo: "",
       preDraft,
     };
+    // #341 — a read-only thread carries none of the link / task data the
+    // hidden sidebar and pickers would use, and names its customer only when
+    // the thread is deliberately linked (isThreadLinked) — never the
+    // automatic sender match (resolveCustomerId).
+    if (readOnly) {
+      reader = {
+        ...reader,
+        readOnlyLinkedTo:
+          isThreadLinked(sel) && sel.customerId ? customers.find((c) => c.id === sel.customerId)?.name || sel.customer || "" : "",
+        resolvedCustomerId: null,
+        resolvedCustomerName: "",
+        needsAdopt: false,
+        linkOptions: { quote: [], lead: [], survey: [], inspection: [], project: [] },
+        taskLinks: [],
+        threadTasks: [],
+        customerCard: null,
+        suggested: null,
+        candidates: [],
+        linkedPeople: [],
+        siteId: null,
+        siteOptions: [],
+        contactOptions: [],
+        customerOptions: [],
+        customerOptionGroups: [],
+      };
+    }
   }
 
   /* ---- compose / log modal data ---- */

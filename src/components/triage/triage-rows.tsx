@@ -91,7 +91,7 @@ export default function TriageRows({ rows, readOnly, teammates }: { rows: Snapsh
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                 <span style={CHIP}>{SOURCE_LABEL[r.source]}</span>
-                <Link href={r.href} style={TITLE}>{r.title}</Link>
+                {r.href ? <Link href={r.href} style={TITLE}>{r.title}</Link> : <span style={TITLE}>{r.title}</span>}
               </div>
               {r.sub && <div style={SUB}>{r.sub}</div>}
               {r.reason && <div style={REASON}>{r.reason}</div>}

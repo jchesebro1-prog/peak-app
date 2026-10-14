@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { setTaskStatus } from "@/lib/stores/tasks";
 import { getAssignment, setAssignmentDone } from "@/lib/stores/assignments";
-import { assign as assignThread, setStatus as setThreadStatus } from "@/lib/stores/comms";
+import { assign as assignThread, get as getThread, setStatus as setThreadStatus } from "@/lib/stores/comms";
+import { triageMayActOnThread } from "@/lib/triage/thread-access";
 import { getRecording } from "@/lib/stores/recordings";
 import { dismissActionItem } from "@/lib/krisp/write-back";
 import { activeUsers } from "@/lib/users";
@@ -26,6 +27,7 @@ type Result = { ok: true; open?: string } | { ok: false; error: string };
 
 const GONE = "That item no longer exists.";
 const NOT_LISTED = "That item isn't on your list.";
+const NOT_YOURS = "That email is no longer yours or assigned to you.";
 
 /** Every action works only on a row of the signed-in user's own snapshot for today (morning or midday). */
 async function listed(userId: string, key: string, now: number) {
@@ -66,6 +68,10 @@ export async function triageDoneAction(key: string): Promise<Result> {
       if (!(await getAssignment(plan.id))) return { ok: false, error: GONE };
       await setAssignmentDone(plan.id, true, "app");
     } else if (plan.kind === "thread") {
+      // #341 — re-read at action time: still my own thread, or still assigned to me
+      const t = await getThread(plan.id);
+      if (!t) return { ok: false, error: GONE };
+      if (!triageMayActOnThread(t, user.name)) return { ok: false, error: NOT_YOURS };
       if (!(await setThreadStatus(plan.id, "closed"))) return { ok: false, error: GONE };
     }
     // Lead/quote/visit/renewal "Done for today" intentionally records a mark even for a deleted record (it is hidden anyway).
@@ -133,6 +139,10 @@ export async function triageReassignAction(key: string, assignee: string): Promi
   const row = await listed(user.id, k, cur.now);
   if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
   if (!row) return { ok: false, error: NOT_LISTED };
+  // #341 — re-read at action time: still my own thread, or still assigned to me
+  const thread = await getThread(parsed.id).catch(() => null);
+  if (!thread) return { ok: false, error: GONE };
+  if (!triageMayActOnThread(thread, user.name)) return { ok: false, error: NOT_YOURS };
   try {
     await assignThread(parsed.id, target.name);
     await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });

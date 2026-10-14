@@ -1064,9 +1064,7 @@ export default function ThreadReader({
                   }}
                 >
                   {vm.readOnlyLabel}
-                  {vm.resolvedCustomerId && vm.resolvedCustomerName ? (
-                    <span style={{ fontWeight: 400 }}> · linked to {vm.resolvedCustomerName}</span>
-                  ) : null}
+                  {vm.readOnlyLinkedTo ? <span style={{ fontWeight: 400 }}> · linked to {vm.readOnlyLinkedTo}</span> : null}
                 </div>
               )}
               {vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}

@@ -162,6 +162,7 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       (t) =>
         t.status === "waiting_us" &&
         t.assignedTo === me &&
+        !t.deleted && // #341 — never a thread in Deleted
         !t.archived &&
         t.gmailInboxed !== false
     )
@@ -193,7 +194,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       id: t.id,
       title: t.customer || t.contactName || t.contactEmail || t.subject,
       sub: `${t.subject} · waiting ${Math.round(waitHours(t))}h`,
-      href: "/inbox",
+      // #341 — open the thread itself (read-only when it isn't in my mailbox)
+      href: `/inbox?thread=${encodeURIComponent(t.id)}`,
       letter: "@",
       color: "#b4543a",
     }))

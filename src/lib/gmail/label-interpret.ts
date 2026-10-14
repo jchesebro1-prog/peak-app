@@ -174,7 +174,12 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
       } else if (cmd.kind === "customer") {
         const c = await findCustomerBySanitizedName(cmd.name);
         if (c) {
-          await linkThread(t.id, c.id);
+          // #341 — a person labelling the thread in their own Gmail is a
+          // deliberate link; a label that only echoes the customer the app
+          // already holds (the label writer's own, after the echo window)
+          // keeps the thread's flag as it was, so an automatic match never
+          // becomes shared through its own label.
+          await linkThread(t.id, c.id, null, t.customerId === c.id ? null : "user");
           // I review — the picked identity message's address (#125) when
           // one is set, else the thread contact; a Peak/Customers label
           // applied on a multi-party or forwarded thread must remember the
@@ -186,10 +191,15 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           // customer's own contact address.
           const identityEmail = resolveAddressFor(t, conn?.address);
           if (identityEmail) {
-            await rememberAddress(c.id, identityEmail, t.contactName, null, {
-              id: userIdOfKey(key) || "u1",
-              name: "Gmail label",
-            });
+            await rememberAddress(
+              c.id,
+              identityEmail,
+              t.contactName,
+              null,
+              { id: userIdOfKey(key) || "u1", name: "Gmail label" },
+              // #341 — the backlog resweep stays in this mailbox
+              { accountKey: key }
+            );
           }
           applied++;
         } else {
@@ -247,6 +257,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           d.customer = "";
           d.resolution = "unknown";
           d.siteId = null; // #124 — no customer, no venue
+          delete d.linkedBy; // #341 — unlinked, so no longer shared
         });
         applied++;
       }

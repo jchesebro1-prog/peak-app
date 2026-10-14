@@ -246,8 +246,10 @@ async function fileThread(t: CommThread, base: Filing, target: ResolvedTarget, o
       suggestedCustomerId: t.suggestedCustomerId ?? null,
       candidates: t.candidates ?? [],
       siteId: t.siteId ?? null,
+      linkedBy: t.linkedBy ?? null,
     };
-    await linkThread(t.id, target.customerId, t.resolvedContactId ?? null);
+    // #341 — filing for the owner is a deliberate link (shared with the team); Undo restores the flag
+    await linkThread(t.id, target.customerId, t.resolvedContactId ?? null, "filing");
   }
   const w = target.work;
   if (w && !(t.link && t.link.type === w.type && t.link.id === w.id)) {

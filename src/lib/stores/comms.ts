@@ -294,6 +294,9 @@ export type CommDraft = {
 
 export type SyncState = "pending" | "syncing" | "synced" | "error";
 
+/** #341 — see CommThread.linkedBy. */
+export type LinkedBy = "user" | "filing";
+
 export type CommThread = {
   id: string; // 'C-####', sequence base 1032
   mailbox: MailboxId;
@@ -348,6 +351,14 @@ export type CommThread = {
    *  capped at 25). Absent on older threads: they read as just
    *  resolvedContactId (linkedContactIdsOf). */
   linkedContactIds?: string[];
+  /** #341 — who linked the thread's customer DELIBERATELY: "user" (the link
+   *  sidebar / panel, + New quote, a Peak/Customers Gmail label, a thread
+   *  created in the app with a picked customer or record) or "filing" (#335
+   *  Inbox organization filing it for the owner). Absent = the customer, if
+   *  any, came from the automatic sender match and the thread stays private
+   *  (comms-visibility.ts hasDeliberateLink). Undo of a filing restores the
+   *  previous value. */
+  linkedBy?: LinkedBy | null;
   /** "Not them" on a suggestion — stop offering it for this thread. */
   suggestionDismissed?: boolean;
   /** #96 §3 — last time the Peak → Gmail label writer applied a real change
@@ -462,7 +473,7 @@ export function forwardAddress(domain = DEFAULT_DOMAIN): string {
 
 // is a thread part of the mailbox `boxId` as seen by `me`?
 function inBox(t: CommThread, boxId: string, me: string): boolean {
-  return boxId === "personal" && t.mailbox === "personal" && t.mailboxUser === me;
+  return !!me && boxId === "personal" && t.mailbox === "personal" && t.mailboxUser === me;
 }
 
 // The threads in the current user's own mailbox. Legacy shared-mailbox
@@ -479,6 +490,7 @@ export {
   isAssignedTo,
   isOwnThread,
   isSharedThread,
+  hasDeliberateLink,
   isThreadLinked,
   readOnlyBanner,
 } from "./comms-visibility";
@@ -819,7 +831,9 @@ export async function threadsIn(
     labelId?: string | null;
   } = {}
 ): Promise<CommThread[]> {
-  const user = me || DEFAULT_USER;
+  // #341 — no viewer, no mailbox: never someone else's by default
+  const user = me || "";
+  if (!user) return [];
   const all = await listDocs<CommThread>("comms");
   let base: CommThread[];
   if (boxId === "needs")
@@ -939,7 +953,9 @@ export async function searchThreads(
   me?: string,
   labelId?: string | null
 ): Promise<CommThread[]> {
-  const user = me || DEFAULT_USER;
+  // #341 — no viewer, no mailbox: never someone else's by default
+  const user = me || "";
+  if (!user) return [];
   const q = (query || "").trim().toLowerCase();
   if (q.length < 2 && !labelId) return [];
   if (!q.length && labelId) {
@@ -951,7 +967,9 @@ export async function searchThreads(
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }
   const CANDIDATES = 200;
-  const candidates = await searchDocs<CommThread>("comms", q, CANDIDATES);
+  // #341 — every scope is my own mailbox: cut to it in SQL, before the
+  // 200-row cap, so other mailboxes' matches can't crowd mine out
+  const candidates = await searchDocs<CommThread>("comms", q, CANDIDATES, { fieldEquals: { mailbox: "personal", mailboxUser: user } });
   const hit = (t: CommThread): boolean => {
     const fields = [t.customer, t.subject, t.contactName, t.contactEmail];
     if (fields.some((s) => (s || "").toLowerCase().includes(q))) return true;
@@ -985,7 +1003,7 @@ export async function folderCounts(
   boxId: MailboxId,
   me?: string
 ): Promise<FolderCounts> {
-  const user = me || DEFAULT_USER;
+  const user = me || ""; // #341 — blank: nobody's mailbox (visibleTo / inBox need a name)
   const inBoxAll = (await listDocs<CommThread>("comms")).filter((t) =>
     inBox(t, boxId, user)
   );
@@ -1012,7 +1030,7 @@ export async function folderCounts(
 
 /** Flagged threads visible to the user (Flagged smart view badge). */
 export async function flaggedCount(me?: string): Promise<number> {
-  const user = me || DEFAULT_USER;
+  const user = me || "";
   const list = await listDocs<CommThread>("comms");
   return list.filter(
     (t) => visibleTo(t, user) && !!t.flagged && !t.deleted
@@ -1022,7 +1040,7 @@ export async function flaggedCount(me?: string): Promise<number> {
 /** Unread count from an already-loaded thread list — lets callers that have
  *  the comms array in hand (e.g. navData) avoid a second full-table scan. */
 export function unreadCountFrom(list: CommThread[], me?: string): number {
-  const user = me || DEFAULT_USER;
+  const user = me || "";
   return list.filter(
     (t) =>
       t.unread &&
@@ -1038,7 +1056,7 @@ export async function unreadCount(me?: string): Promise<number> {
 }
 
 export async function needsReplyCount(me?: string): Promise<number> {
-  const user = me || DEFAULT_USER;
+  const user = me || "";
   const list = await listDocs<CommThread>("comms");
   return list.filter(
     (t) =>
@@ -1051,7 +1069,7 @@ export async function needsReplyCount(me?: string): Promise<number> {
 }
 
 export async function callsCount(me?: string): Promise<number> {
-  const user = me || DEFAULT_USER;
+  const user = me || "";
   const list = await listDocs<CommThread>("comms");
   return list.filter(
     (t) =>
@@ -1318,6 +1336,11 @@ export async function create(
     status: partial.status || statusFromDirection(dir),
     assignedTo: partial.assignedTo != null ? partial.assignedTo : me,
     link: partial.link || null,
+    // #341 — a customer or record handed in here was picked by a person
+    // (Compose, Log call / meeting, renewal outreach, an estimate or report
+    // email): a deliberate link. A customer only resolved from the address
+    // (stampResolutionOnCreate) leaves it unset — private.
+    ...(partial.customerId || partial.link ? { linkedBy: "user" as const } : {}),
     messages: [msg],
     createdAt: t,
     updatedAt: t,
