@@ -5,8 +5,8 @@ import { buildBriefsForAll, runDraftsForAll } from "@/lib/brief/build";
 
 export const maxDuration = 60;
 
-/** Briefs + drafts end by here (5 s under maxDuration). */
-const BRIEF_DEADLINE_MS = 55_000;
+/** Briefs + drafts end by here (10 s under maxDuration: a call is capped 5 s before it, then the writes and the response). */
+const BRIEF_DEADLINE_MS = 50_000;
 
 /**
  * Morning triage — the midday list (spec "Snapshots and refresh"). Vercel
@@ -23,7 +23,7 @@ const BRIEF_DEADLINE_MS = 55_000;
  * Assist pilot user with Daily brief on (a stored brief is kept; whoever
  * doesn't fit builds on first view), then the pre-made draft queue for those
  * users in whatever time is left. Each in its own try; everything ends by
- * 55 s (Assist calls are capped 5 s before that), under the 60 s ceiling.
+ * 50 s (Assist calls are capped 5 s before that), under the 60 s ceiling.
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const fail = cronAuthFailure(req.headers.get("authorization"), process.env.CRON_SECRET);

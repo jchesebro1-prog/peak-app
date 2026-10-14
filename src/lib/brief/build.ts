@@ -75,6 +75,8 @@ export const BRIEF_CRON_MIN_START_MS = 12_000;
 export const BRIEF_DRIVE_TIMEOUT_MS = 3_000;
 /** Rebuild: per user per hour. */
 export const BRIEF_REBUILD_LIMIT = 3;
+/** The error a brief carries when no Assist call could start before its deadline (D928): a lazy one is never stored. */
+export const BRIEF_NO_TIME_ERROR = "No time left for Assist — the brief was built from the counts.";
 /** A promise-task counts as new when created after the previous brief — or, with none, in the last day. */
 const PROMISE_FALLBACK_WINDOW_MS = 24 * 3_600_000;
 const PROMISE_TASKS_MAX = 20;
@@ -307,7 +309,7 @@ export async function buildBrief(me: TriageUser, slot: BriefSlot, now: number, o
   const gate = assistGate("brief", me.id, settings, env);
   const limits = limitsBefore({ at: deadline, hasFallback, minCallMs: BRIEF_MIN_CALL_MS, clock }, "brief");
   if (!gate.ok) error = gate.reason;
-  else if (!limits) error = "No time left for Assist — the brief was built from the counts.";
+  else if (!limits) error = BRIEF_NO_TIME_ERROR;
   else {
     // A throw here (the spend read, the run log, a provider bug) must not
     // lose the gathered facts: the rule-built brief is kept and stored.
@@ -374,18 +376,31 @@ export type BriefView = {
   brief: Brief;
   /** "yesterday-afternoon": before 6:45 the card shows yesterday's afternoon brief. */
   stale: "yesterday-afternoon" | null;
-  /** Not stored (the build threw) — shown once, the next view tries again. */
+  /** Not stored (the build threw, or ran out of time before its Assist call) — shown once, the next view tries again. */
   transient: boolean;
 };
 
+/** A lazy build that only ran out of time — kept out of storage so the slot isn't locked to counts (D928). */
+export function lazyBriefIsTransient(b: Brief): boolean {
+  return b.builtBy === "lazy" && b.error === BRIEF_NO_TIME_ERROR;
+}
+
+/** A stored brief the cron may replace: a lazy build that fell back to the counts (D928). */
+export function briefReplaceableByCron(b: Brief): boolean {
+  return b.builtBy === "lazy" && !!b.error;
+}
+
 /** One lazy build per brief id per process: concurrent first views share it. */
-const inflight = new Map<string, Promise<Brief>>();
+const inflight = new Map<string, Promise<{ brief: Brief; transient: boolean }>>();
 
 /**
  * The current slot's brief for `me`, or null when they aren't pilot + brief
  * (or, before 6:45, when there is no afternoon brief from yesterday). A
  * missing brief builds inline (20 s, builtBy "lazy") and is stored
- * insert-if-absent; a build that throws shows an unstored rule-built brief.
+ * insert-if-absent — unless its only failure was running out of time before
+ * the Assist call, which is shown unstored (`transient`) so the next view or
+ * the cron can still make a real one; a build that throws shows an unstored
+ * rule-built brief.
  */
 export async function loadBriefView(
   user: { id: string; name: string; roles: string[] },
@@ -408,12 +423,15 @@ export async function loadBriefView(
   let p = inflight.get(id);
   if (!p) {
     const deadlineMs = opts.deadlineMs ?? (deps.clock ?? Date.now)() + BRIEF_LAZY_DEADLINE_MS;
-    p = buildBrief(me, slot, now, { builtBy: "lazy", deadlineMs, deps }).then((b) => writeBrief(b, "insert"));
+    p = buildBrief(me, slot, now, { builtBy: "lazy", deadlineMs, deps }).then(async (b) =>
+      lazyBriefIsTransient(b) ? { brief: b, transient: true } : { brief: await writeBrief(b, "insert"), transient: false }
+    );
     inflight.set(id, p);
     void p.finally(() => inflight.delete(id)).catch(() => {});
   }
   try {
-    return { brief: await p, stale: null, transient: false };
+    const r = await p;
+    return { brief: r.brief, stale: null, transient: r.transient };
   } catch (err) {
     console.error("[brief] lazy build failed:", err);
     return { brief: emptyRuleBrief(user, day, slot, now, "lazy", "Couldn't build today's brief — showing the counts only."), stale: null, transient: true };
@@ -459,6 +477,8 @@ export type BriefsForAllResult = {
   built: number;
   /** a brief was already stored for the slot (a lazy view got there first) */
   kept: number;
+  /** a stored lazy brief that fell back to the counts, replaced by a good cron build (D928) */
+  replaced: number;
   /** pilot + brief users left for their first view (out of time) */
   skipped: string[];
   failed: string[];
@@ -468,7 +488,9 @@ export type BriefsForAllResult = {
 
 /**
  * Cron: build `slot` for today (Chicago) for every active pilot + brief user —
- * nobody else. A stored brief is kept. A user is started only with
+ * nobody else. A stored brief is kept — except a lazy one that fell back to
+ * the counts (`briefReplaceableByCron`), which a cron build without an error
+ * replaces (D928). A user is started only with
  * BRIEF_CRON_MIN_START_MS left before `deadlineMs`; the rest build lazily.
  * One user failing never stops the rest.
  */
@@ -484,18 +506,29 @@ export async function buildBriefsForAll(
   const day = dayKey(now);
   const all = opts.users ?? (await activeUsers()).map((u) => ({ id: u.id, name: u.name, canApprove: userCan(u, "approve") }));
   const users = all.filter((u) => briefEnabledFor(u.id, settings));
-  const res: BriefsForAllResult = { built: 0, kept: 0, skipped: [], failed: [], userIds: users.map((u) => u.id) };
+  const res: BriefsForAllResult = { built: 0, kept: 0, replaced: 0, skipped: [], failed: [], userIds: users.map((u) => u.id) };
   for (const u of users) {
     if (opts.deadlineMs - clock() < BRIEF_CRON_MIN_START_MS) {
       res.skipped.push(u.id);
       continue;
     }
     try {
-      if (await readBrief(u.id, day, slot)) {
+      const existing = await readBrief(u.id, day, slot);
+      if (existing && !briefReplaceableByCron(existing)) {
         res.kept++;
         continue;
       }
       const b = await buildBrief(u, slot, now, { builtBy: "cron", deadlineMs: opts.deadlineMs, deps: { ...deps, settings, env } });
+      if (existing) {
+        // Replace the lazy counts-only brief only with a real one, and only if
+        // it is still the one stored (a Rebuild may have landed meanwhile).
+        const cur = await readBrief(u.id, day, slot);
+        if (!b.error && (!cur || briefReplaceableByCron(cur))) {
+          await writeBrief(b, "replace");
+          res.replaced++;
+        } else res.kept++;
+        continue;
+      }
       const stored = await writeBrief(b, "insert");
       if (stored.builtAt === b.builtAt && stored.builtBy === "cron") res.built++;
       else res.kept++;
