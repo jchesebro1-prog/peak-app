@@ -1,5 +1,5 @@
 /**
- * #340 — who may see an email thread. Jeff, 2026-10-14: "you can only see
+ * #341 — who may see an email thread. Jeff, 2026-10-14: "you can only see
  * information that was either linked to entities or your own information."
  *
  * A thread is visible to `me` (a user's NAME — mailboxUser and assignedTo

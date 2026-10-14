@@ -290,7 +290,7 @@ export default async function InboxPage({
     : "inbox";
 
   const threadParam = str(params.thread);
-  // #340 — ?thread= opens a thread only when the viewer may see it: their
+  // #341 — ?thread= opens a thread only when the viewer may see it: their
   // own (Deleted included), assigned to them, or linked to an entity
   // (canOpenThread). Anything else reads as no thread at all. A thread that
   // isn't in their own mailbox opens read-only (reader.readOnly below).
@@ -307,7 +307,7 @@ export default async function InboxPage({
   // composer (the ✉ renewal outreach redirects here after landing its draft)
   const draftParam = str(params.draft);
   const draftThread = draftParam ? await getThread(draftParam) : null;
-  // #340 — only my own draft opens in the composer
+  // #341 — only my own draft opens in the composer
   const openDraftThread =
     draftThread && draftThread.status === "draft" && visibleTo(draftThread, me) ? draftThread : null;
 
@@ -695,7 +695,7 @@ export default async function InboxPage({
 
   let reader: ReaderVM | null = null;
   if (sel) {
-    // #340 — a thread outside my own mailbox (linked or assigned to me) is
+    // #341 — a thread outside my own mailbox (linked or assigned to me) is
     // read-only: no reply, status, filing, links, tasks or Assist — every
     // write action refuses it server-side too (lib/inbox-thread-guard.ts).
     const readOnly = !visibleTo(sel, me);
@@ -1006,7 +1006,7 @@ export default async function InboxPage({
 
     reader = {
       id: sel.id,
-      // #340 — another person's read state is never mine to show or clear
+      // #341 — another person's read state is never mine to show or clear
       unread: readOnly ? false : !!sel.unread,
       readOnly,
       readOnlyLabel: readOnly ? readOnlyBanner(sel) : "",

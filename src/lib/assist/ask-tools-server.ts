@@ -2,7 +2,7 @@
  * Ask AI read tools (spec 2026-10-13-ask-ai-design.md §3) — the eleven
  * read-only lookups the model may call, each run as the asking user under
  * that user's access rule:
- *  - thread: `loadThreadReadable` (#340 — a live email thread the user may
+ *  - thread: `loadThreadReadable` (#341 — a live email thread the user may
  *    see: their own, assigned to them, or linked to an entity; canSeeThread);
  *  - meeting: `canSeeMeeting` (the reader's rule) — never the transcript;
  *  - my_tasks / task: the user's own tasks and assignments;
@@ -68,7 +68,7 @@ export type AskToolRef = {
   id: string;
   title: string;
   href: string;
-  /** #340 — a thread outside the asker's own mailbox (readable because it is
+  /** #341 — a thread outside the asker's own mailbox (readable because it is
    *  linked or assigned): Ask may show and quote it, but a task card never
    *  links it (the Inbox's own-only task rule). Server-side only — never
    *  emitted to the panel. */
@@ -201,7 +201,7 @@ function mkRef(kind: RefKind, id: string, title: string, hint?: RefHrefHint): As
 const quoteTitle = (q: Pick<Quote, "id" | "name"> & Parameters<typeof displayQuoteNumber>[0]) => `${displayQuoteNumber(q)} ${q.name || ""}`.trim();
 const quoteRef = (q: Quote) => mkRef("quote", q.id, quoteTitle(q), { quoteType: q.quoteType ?? null });
 const companyRef = (c: { id: string; name?: string | null }) => mkRef("company", c.id, c.name || c.id);
-/** #340 — a thread ref, flagged readOnly when it isn't in my own mailbox. */
+/** #341 — a thread ref, flagged readOnly when it isn't in my own mailbox. */
 const threadRef = (th: Pick<CommThread, "id" | "subject" | "mailbox" | "mailboxUser">, me: AskUser, title?: string): AskToolRef => {
   const r = mkRef("thread", th.id, title ?? (th.subject || th.id));
   return visibleTo(th, me.name) ? r : { ...r, readOnly: true };
@@ -459,12 +459,12 @@ async function loadLead(id: string, me: AskUser): Promise<Loaded | null> {
     companyLink(l.customerId),
     l.convertedCustomerId && l.convertedCustomerId !== l.customerId ? companyLink(l.convertedCustomerId) : Promise.resolve(null),
     l.convertedQuoteId ? getQuote(l.convertedQuoteId) : Promise.resolve(null),
-    // #340 — email threads I may see that mention the lead id (in SQL); the exact link is checked below
+    // #341 — email threads I may see that mention the lead id (in SQL); the exact link is checked below
     searchDocs<CommThread>("comms", l.id, 200, { fieldEquals: { channel: "email" }, where: canSeeThreadCond(me.name) }),
   ]);
   for (const x of [cust, converted]) if (x) refs.push(x.ref);
   if (quote) refs.push(quoteRef(quote));
-  // #340 — every live email thread linked to this lead (a link makes it shared; canSeeThread re-checks)
+  // #341 — every live email thread linked to this lead (a link makes it shared; canSeeThread re-checks)
   const threads = leadThreads
     .filter((th) => th.channel === "email" && canSeeThread(th, me.name) && th.link?.type === "lead" && th.link.id === l.id)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
@@ -678,7 +678,7 @@ const SEARCH_GROUP_KIND: Readonly<Record<string, RefKind>> = {
 };
 
 async function runSearch(query: string, me: AskUser): Promise<Loaded> {
-  // #340 — globalSearch keeps only the email threads I may see (canSeeThreadCond), before its cut to 5.
+  // #341 — globalSearch keeps only the email threads I may see (canSeeThreadCond), before its cut to 5.
   const groups: Group[] = await globalSearch(query, me, { emailOnly: true });
   const refs: AskToolRef[] = [];
   const blocks: string[] = [];

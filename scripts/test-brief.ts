@@ -1118,7 +1118,7 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   const tasksClick = reader.slice(reader.indexOf("if (storedTasks) {"), reader.indexOf("tasksInFlight.current = true;", reader.indexOf("if (storedTasks) {")));
   ok(tasksClick.includes("runId: storedTasks.runId") && tasksClick.includes("return;") && !tasksClick.includes("suggestTasksAction"), "brief pins: Suggest tasks opens the dialog on fresh stored suggestions with their runId — no model call");
   const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
-  // #340: never on a read-only (another mailbox's) thread
+  // #341: never on a read-only (another mailbox's) thread
   ok(/const storedDraft = readOnly \? null : readerPreDraft\(sel, \{ id: user\.id, name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
   ok(/const nudgeQuote = nudgeId \? await getQuote\(nudgeId\)\.catch\(\(\) => null\) : null;\s+const nudge = nudgePrefill\(nudgeQuote, \{ id: user\.id, name: me \}\);/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
   const rp = readFileSync("src/lib/brief/reader-predraft.ts", "utf8");

@@ -74,7 +74,7 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
 }
 
 /**
- * #340 — a small predicate language over a doc's JSON, compiled to SQL by
+ * #341 — a small predicate language over a doc's JSON, compiled to SQL by
  * `docCondSql` (searchDocs' `where`). `path` is a field path from the doc
  * root (["customerId"], ["link", "type"]); every segment and value is a bound
  * parameter. Leaves:
@@ -140,7 +140,7 @@ export function docCondSql(doc: SQLWrapper, c: DocCond): SQL {
  * names are code constants, passed as bound parameters. Omitted = the
  * unscoped query exactly as before.
  *
- * `where` (#340) is one more predicate over the doc, built from `DocCond`
+ * `where` (#341) is one more predicate over the doc, built from `DocCond`
  * (and / or / equals / not-equals / folded-equals / filled), also applied in
  * SQL before the LIMIT — how ⌘K keeps only the email threads the viewer may
  * see (comms-visibility.ts canSeeThreadCond) without other mailboxes'

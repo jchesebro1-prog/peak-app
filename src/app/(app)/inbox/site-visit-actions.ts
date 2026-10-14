@@ -60,7 +60,7 @@ export async function createSiteVisitAction(
   // D76-G: scheduling from an unlinked thread adopts the resolved customer
   // onto the thread first, same as the record pickers do.
   if (input.adoptThreadId) {
-    // #340 — only my own thread adopts the customer (refused before anything is created)
+    // #341 — only my own thread adopts the customer (refused before anything is created)
     if (!(await ownThread(input.adoptThreadId, me.name))) return { ok: false, error: "Thread not found." };
     await updateThread(input.adoptThreadId, {
       customerId: input.customerId,

@@ -50,7 +50,7 @@ export async function linkThreadToCustomerAction(
 ): Promise<R> {
   const me = await requireUser();
   const t = await getThread(threadId);
-  // #340 — only my own mailbox's threads are linked from here
+  // #341 — only my own mailbox's threads are linked from here
   if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
 

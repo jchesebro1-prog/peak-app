@@ -21446,7 +21446,7 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
       fn214("setThreadContactsAction").includes("visibleTo(t, me.name)"),
     "#214 actions: thread actions only reach threads in the user's own mailbox"
   );
-  // #340 — thread visibility: the reader opens only what canOpenThread allows,
+  // #341 — thread visibility: the reader opens only what canOpenThread allows,
   // read-only off-mailbox; ⌘K's thread candidates follow canSeeThread in SQL.
   const inbox340 = read("src/app/(app)/inbox/page.tsx");
   const reader340 = read("src/app/(app)/inbox/thread-reader.tsx");
@@ -21455,7 +21455,7 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
     /const explicitThread = threadHit && canOpenThread\(threadHit, me\) \? threadHit : null;/.test(inbox340) &&
       /if \(explicitThread && visibleTo\(explicitThread, me\) && !params\.box/.test(inbox340) &&
       /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, me\)/.test(inbox340),
-    "#340 reader: ?thread= opens only a thread the viewer may see (canOpenThread), never switches to another person's box, and ?draft= opens only my own draft"
+    "#341 reader: ?thread= opens only a thread the viewer may see (canOpenThread), never switches to another person's box, and ?draft= opens only my own draft"
   );
   ok(
     /const readOnly = !visibleTo\(sel, me\);/.test(inbox340) &&
@@ -21469,13 +21469,13 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
       /\{isEmail && !readOnly && \(/.test(reader340) &&
       /data-testid="reader-read-only"/.test(reader340) &&
       /!reader\.readOnly && reader\.unread/.test(read("src/app/(app)/inbox/inbox-shell.tsx")),
-    "#340 reader: a read-only thread shows the banner and no write control — no actions/composer footer (reply, status, archive, Assist, pre-draft), no link sidebar, no per-message Link… / Task… / link picker, no court strip, and no mark-read"
+    "#341 reader: a read-only thread shows the banner and no write control — no actions/composer footer (reply, status, archive, Assist, pre-draft), no link sidebar, no per-message Link… / Task… / link picker, no court strip, and no mark-read"
   );
   ok(
     /where: canSeeThreadCond\(meName\),/.test(search340) &&
       /\.filter\(\(d\) => canSeeThread\(d, meName\)\)/.test(search340) &&
       !/threadsOf/.test(search340),
-    "#340 ⌘K: email-thread candidates are cut to canSeeThread in SQL before the per-group limit, and re-checked per row"
+    "#341 ⌘K: email-thread candidates are cut to canSeeThread in SQL before the per-group limit, and re-checked per row"
   );
   const cc214 = fn214("fetchMessageCcAction");
   ok(

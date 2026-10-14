@@ -140,7 +140,7 @@ export default async function CustomerDetailPage({
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
-    // #340 — threads on this company are linked (customerId), so every
+    // #341 — threads on this company are linked (customerId), so every
     // teammate sees them, read-only when not their own; one in Deleted (or
     // another person's draft) is not listed (canSeeThread).
     visibleByCustomer(id, me.name),

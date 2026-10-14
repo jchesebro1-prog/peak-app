@@ -114,9 +114,9 @@ function cardChecks(ok: Ok): void {
   );
   const t2 = sanitizeCard("task", { title: "x".repeat(500), assigneeId: "u-gone", due: "2026-02-30" }, ctx);
   ok(!!t2 && t2.kind === "task" && t2.title.length === CARD_TITLE_MAX && t2.title.endsWith("…") && t2.assigneeId === "u1" && t2.dueYmd === null && JSON.stringify(t2.links) === "{}", "ask cards: title capped at 200; an unknown assignee falls back to the user; an impossible date is dropped");
-  // #340 — a thread read from another mailbox (readOnly ref) is shown, never task-linked
+  // #341 — a thread read from another mailbox (readOnly ref) is shown, never task-linked
   const t3 = sanitizeCard("task", { title: "Follow up", links: { customerId: "C-1", threadId: "T-1" } }, { ...ctx, readOnlyThreads: new Set(["T-1"]) });
-  ok(!!t3 && t3.kind === "task" && JSON.stringify(t3.links) === JSON.stringify({ customerId: "C-1" }), "ask cards (#340): a task never links a read-only (another mailbox's) thread, so the card shows only what createAskTask writes");
+  ok(!!t3 && t3.kind === "task" && JSON.stringify(t3.links) === JSON.stringify({ customerId: "C-1" }), "ask cards (#341): a task never links a read-only (another mailbox's) thread, so the card shows only what createAskTask writes");
   ok(sanitizeCard("task", { title: "  " }, ctx) === null && sanitizeCard("task", { notes: "no title" }, ctx) === null && sanitizeCard("task", "nope", ctx) === null, "ask cards: a task without a title, or a malformed input, is no card");
   ok(parseDueYmd("2026-10-13", "2026-10-13") === "2026-10-13" && parseDueYmd("2026-10-12", "2026-10-13") === null && parseDueYmd("2028-10-13", "2026-10-13") === "2028-10-13" && parseDueYmd("2028-10-14", "2026-10-13") === null && parseDueYmd("next week", "2026-10-13") === null, "ask cards: due dates from today to two years out");
   ok(parseDueYmd("2026-10-21T03:00:00Z", "2026-10-13") === "2026-10-20" && parseDueYmd("2026-10-21T12:00:00Z", "2026-10-13") === "2026-10-21" && parseDueYmd("2026-10-21T01:00:00-05:00", "2026-10-13") === "2026-10-21" && parseDueYmd("2026-10-21T03:00:00+02:00", "2026-10-13") === "2026-10-20", "ask cards: a zoned timestamp due date is read as its America/Chicago day");
@@ -333,7 +333,7 @@ export async function askSearchDbChecks(ok: Ok): Promise<void> {
     "global search: the route keeps its 401 and returns { groups: globalSearch(q, user) } — no search logic left in it"
   );
 
-  // #340 — ⌘K threads follow the viewer's NAME (mailboxUser): T sits in "Me"'s mailbox, unlinked
+  // #341 — ⌘K threads follow the viewer's NAME (mailboxUser): T sits in "Me"'s mailbox, unlinked
   const ME = { id: "u-ask-me", name: "Me" };
   const OTHER = { id: "u-ask-other", name: "Other" };
   const NOW = Date.UTC(2034, 3, 10, 15, 0);
@@ -356,7 +356,7 @@ export async function askSearchDbChecks(ok: Ok): Promise<void> {
     const quote = byLabel("Quotes").find((i) => i.id === Q);
     ok(!!quote && quote.title === "Quasarflux main curtain" && quote.href === `/quotes?id=${encodeURIComponent(Q)}` && quote.letter === "Q" && quote.color === "var(--accent)", "global search: a quote hit, shaped as the route always shaped it");
     ok(byLabel("Email threads").some((i) => i.id === T && i.href === `/inbox?thread=${encodeURIComponent(T)}`) && byLabel("Catalog").some((i) => i.id === SKU && i.href === "/catalog"), "global search: thread and catalog hits");
-    ok(!((await globalSearch("quasarflux", OTHER)).find((x) => x.label === "Email threads")?.items ?? []).some((i) => i.id === T), "global search (#340): another user's unlinked thread is not in their ⌘K");
+    ok(!((await globalSearch("quasarflux", OTHER)).find((x) => x.label === "Email threads")?.items ?? []).some((i) => i.id === T), "global search (#341): another user's unlinked thread is not in their ⌘K");
     const mtgs = byLabel("Meetings");
     ok(mtgs.some((i) => i.id === M_MINE) && !mtgs.some((i) => i.id === M_THEIRS), "global search: my meeting is found; another user's unlinked meeting is not");
     const theirs = (await globalSearch("quasarflux", OTHER)).find((x) => x.label === "Meetings")?.items ?? [];
@@ -446,7 +446,7 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
   const P = fixtureId("ask2", "project");
   const S = fixtureId("ask2", "survey");
   const T_MINE = fixtureId("ask2", "thread-mine");
-  // #340 — T_OTHER is another user's UNLINKED thread (private); T_SHARED is
+  // #341 — T_OTHER is another user's UNLINKED thread (private); T_SHARED is
   // another user's thread linked to the company + lead (readable, read-only)
   const T_OTHER = fixtureId("ask2", "thread-other");
   const T_SHARED = fixtureId("ask2", "thread-shared");
@@ -654,10 +654,10 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
     const ld = await run("get_lead", { id: L });
     ok(
       wrappedOk(ld, "lead") && ld.text.includes("Glimmerquay Arts") && /Stage: new/.test(ld.text) && /First-response SLA: pending/.test(ld.text) && ld.text.includes("Glimmerquay curtain question") && ld.text.includes("Glimmerquay shared question") && !ld.text.includes("SECRETSUBJECT"),
-      "get_lead (#340): fields, the SLA, and the subjects of every thread linked to the lead (mine and a teammate's) — never an unlinked one"
+      "get_lead (#341): fields, the SLA, and the subjects of every thread linked to the lead (mine and a teammate's) — never an unlinked one"
     );
-    ok(refKeys(ld).has(`thread:${T_MINE}`) && refKeys(ld).has(`thread:${T_SHARED}`) && !refKeys(ld).has(`thread:${T_OTHER}`) && !refKeys(ld).has(`thread:${T_CALL}`) && refKeys(ld).has(`company:${CID}`) && ld.emails.includes("pat@glimmerquay.test"), "get_lead (#340): refs to the lead-linked email threads and the company; never another user's unlinked thread, never a call log");
-    ok(ld.refs.find((r) => r.id === T_SHARED)?.readOnly === true && ld.refs.find((r) => r.id === T_MINE)?.readOnly === undefined, "get_lead (#340): a teammate's thread ref is flagged readOnly (never task-linked); mine is not");
+    ok(refKeys(ld).has(`thread:${T_MINE}`) && refKeys(ld).has(`thread:${T_SHARED}`) && !refKeys(ld).has(`thread:${T_OTHER}`) && !refKeys(ld).has(`thread:${T_CALL}`) && refKeys(ld).has(`company:${CID}`) && ld.emails.includes("pat@glimmerquay.test"), "get_lead (#341): refs to the lead-linked email threads and the company; never another user's unlinked thread, never a call log");
+    ok(ld.refs.find((r) => r.id === T_SHARED)?.readOnly === true && ld.refs.find((r) => r.id === T_MINE)?.readOnly === undefined, "get_lead (#341): a teammate's thread ref is flagged readOnly (never task-linked); mine is not");
 
     /* get_project */
     const pj = await run("get_project", { id: P });
@@ -671,7 +671,7 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
     const thMissing = await run("get_thread", { id: fixtureId("ask2", "no-such-thread") });
     ok(thOther.refs.length === 0 && !thOther.text.includes("SECRETSUBJECT") && thOther.text.includes(notFoundText("thread", T_OTHER)) && thMissing.text.includes("Not found: no thread"), "get_thread: another user's unlinked thread reads exactly like a missing one");
     const thShared = await run("get_thread", { id: T_SHARED });
-    ok(wrappedOk(thShared, "thread") && thShared.text.includes("Glimmerquay shared question") && thShared.text.includes("Can you quote the glimmer curtain?") && thShared.refs[0]?.id === T_SHARED && thShared.refs[0]?.readOnly === true && thShared.emails.includes("pat@glimmerquay.test"), "get_thread (#340): another user's thread linked to a company is readable — its ref read-only, its participants on the email card's whitelist");
+    ok(wrappedOk(thShared, "thread") && thShared.text.includes("Glimmerquay shared question") && thShared.text.includes("Can you quote the glimmer curtain?") && thShared.refs[0]?.id === T_SHARED && thShared.refs[0]?.readOnly === true && thShared.emails.includes("pat@glimmerquay.test"), "get_thread (#341): another user's thread linked to a company is readable — its ref read-only, its participants on the email card's whitelist");
     ok((await run("get_thread", { id: T_CALL })).text.includes(notFoundText("thread", T_CALL)), "get_thread: a logged call (not email) is not an email thread");
 
     /* get_meeting */
@@ -698,19 +698,19 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
     const seKeys = refKeys(se);
     ok(wrappedOk(se, "search") && seKeys.has(`company:${CID}`) && seKeys.has(`quote:${Q}`) && seKeys.has(`thread:${T_MINE}`) && seKeys.has(`meeting:${M_MINE}`) && seKeys.has(`part:${SKU}`), "search: ⌘K groups map to refs (company, quote, thread, meeting, part)");
     ok(!seKeys.has(`thread:${T_OTHER}`) && !se.text.includes("SECRETSUBJECT") && !seKeys.has(`meeting:${M_THEIRS}`), "search: another user's unlinked thread and private meeting are left out");
-    ok(seKeys.has(`thread:${T_SHARED}`) && !seKeys.has(`thread:${T_CALL}`), "search (#340): a teammate's linked thread is found; Ask's search keeps email threads only");
+    ok(seKeys.has(`thread:${T_SHARED}`) && !seKeys.has(`thread:${T_CALL}`), "search (#341): a teammate's linked thread is found; Ask's search keeps email threads only");
     ok(se.refs.find((r) => r.kind === "quote" && r.id === Q)?.href === `/estimator?id=${encodeURIComponent(Q)}` && se.text.includes(`[[quote:${Q}]]`), "search: quote refs link to the builder; rows print their [[kind:id]] token");
 
     /* Fix 1 — search scoping: other mailboxes can't crowd my threads out of the 5 */
     const plain = (await globalSearch("glimmerquay", ME)).find((g) => g.label === "Email threads")?.items ?? [];
     const scoped = (await globalSearch("glimmerquay", ME, { emailOnly: true })).find((g) => g.label === "Email threads")?.items ?? [];
     const visibleIds = [T_MINE, T_LONG, T_SHARED, T_CALL];
-    ok(plain.length === 4 && visibleIds.every((x) => plain.some((i) => i.id === x)) && !plain.some((i) => OTHER_THREADS.includes(i.id) || i.id === T_OTHER), "global search (⌘K, #340): only threads I may see — mine and a teammate's linked one — reach the group, before the cut; six other-mailbox unlinked threads that sort first never crowd them out");
+    ok(plain.length === 4 && visibleIds.every((x) => plain.some((i) => i.id === x)) && !plain.some((i) => OTHER_THREADS.includes(i.id) || i.id === T_OTHER), "global search (⌘K, #341): only threads I may see — mine and a teammate's linked one — reach the group, before the cut; six other-mailbox unlinked threads that sort first never crowd them out");
     ok(scoped.length === 3 && !scoped.some((i) => i.id === T_CALL) && [T_MINE, T_LONG, T_SHARED].every((x) => scoped.some((i) => i.id === x)), "global search emailOnly (Ask): the same rule, email threads only");
     const threadsFor = async (q: string, who: { id: string; name: string }) => ((await globalSearch(q, who)).find((g) => g.label === "Email threads")?.items ?? []).map((i) => i.id);
     ok(
       (await threadsFor("secretsubject", OTHER)).includes(T_OTHER) && !(await threadsFor("secretsubject", ME)).includes(T_OTHER) && (await threadsFor("curtain question", OTHER)).includes(T_MINE),
-      "global search (#340): the rule follows the viewer — the owner finds their own unlinked thread, nobody else does; my company-linked thread is theirs to find too"
+      "global search (#341): the rule follows the viewer — the owner finds their own unlinked thread, nobody else does; my company-linked thread is theirs to find too"
     );
     ok(JSON.stringify((await globalSearch("glimmerquay", ME, {})).map((g) => g.label)) === JSON.stringify((await globalSearch("glimmerquay", ME)).map((g) => g.label)), "global search: an empty options object is the ⌘K search");
     ok(seKeys.has(`thread:${T_LONG}`) && !se.text.includes("CROWDER") && !OTHER_THREADS.some((x) => seKeys.has(`thread:${x}`)), "search tool: my threads are found even when six other-mailbox threads sort first");
@@ -754,7 +754,7 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
         (await resolveAskRef("part", SKU, ME))?.href === `/catalog?q=${encodeURIComponent(SKU)}` &&
         (await resolveAskRef("survey", S, ME))?.id === S &&
         (await resolveAskRef("company", fixtureId("ask2", "nope"), ME)) === null,
-      "resolveAskRef: same access rules as the tools (readable thread — own or linked, #340 / visible meeting / own task); missing → null"
+      "resolveAskRef: same access rules as the tools (readable thread — own or linked, #341 / visible meeting / own task); missing → null"
     );
 
     /* pageContext */
@@ -795,7 +795,7 @@ export async function askToolsDbChecks(ok: Ok): Promise<void> {
     );
     ok(!!cTh && cTh.refs[0].id === T_MINE && cTh.emails.includes("pat@glimmerquay.test"), "pageContext: refs (the record first) and exposed emails ride along for the runner");
     const cShared = await pc(`/inbox?thread=${enc(T_SHARED)}`);
-    ok(cShared?.ref.kind === "thread" && cShared.ref.id === T_SHARED && cShared.text.includes("Glimmerquay shared question"), "pageContext (#340): a teammate's linked thread open read-only in the Inbox gives Ask its context");
+    ok(cShared?.ref.kind === "thread" && cShared.ref.id === T_SHARED && cShared.text.includes("Glimmerquay shared question"), "pageContext (#341): a teammate's linked thread open read-only in the Inbox gives Ask its context");
   } finally {
     await dropFixtures("ask2");
     await softDeleteSite(SITE).catch(() => {});
@@ -1594,12 +1594,12 @@ export async function askUiChecks(ok: Ok): Promise<void> {
     const r4 = await createAskTask({ title: "Not mine", notes: "", assigneeUserId: "", dueDate: "", links: { threadId: T_THEIRS } }, me);
     if (r4.ok) made.push(r4.task.id);
     ok(r3.ok && r3.task.threadId === T_MINE && r3.task.customerId === CID && r3.task.section === "Email" && r4.ok && !r4.task.threadId && r4.task.section === "", "createAskTask: a thread link is written only for my own thread (loadThreadFor), filed under Email like the Inbox's; another user's thread is dropped");
-    // #340 — Ask may READ a teammate's company-linked thread, but a task's thread link stays own-only (the Inbox's rule)
+    // #341 — Ask may READ a teammate's company-linked thread, but a task's thread link stays own-only (the Inbox's rule)
     const T_SHARED4 = fixtureId("ask4", "thread-shared");
     await createFixture("comms", { id: T_SHARED4, mailboxUser: "Someone Else Ask4", ...base, customerId: CID } as never);
     const r4b = await createAskTask({ title: "Linked, not mine", notes: "", assigneeUserId: "", dueDate: "", links: { threadId: T_SHARED4, customerId: CID } }, me);
     if (r4b.ok) made.push(r4b.task.id);
-    ok(r4b.ok && !r4b.task.threadId && r4b.task.customerId === CID && r4b.task.section === "", "createAskTask (#340): a teammate's linked (readable) thread is still never a task's thread link — own-only, like the Inbox");
+    ok(r4b.ok && !r4b.task.threadId && r4b.task.customerId === CID && r4b.task.section === "", "createAskTask (#341): a teammate's linked (readable) thread is still never a task's thread link — own-only, like the Inbox");
     // A venue rides only with its own company.
     await upsertCustomer({ id: CID2, name: "Ask4 Other Co", type: "Education", locations: [], contacts: [] } as never);
     await saveSite({ id: SITE_MINE, companyId: CID, name: "Ask4 Main Stage", isPrimary: true, venueKind: "proscenium" });

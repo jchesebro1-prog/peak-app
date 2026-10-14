@@ -72,7 +72,7 @@ export async function loadCustomerFeed(cust: { id: string; name: string }, viewe
   for (const q of quotes.filter((qt) => (qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name)))
     rows.push(...quoteFeedRows(q));
 
-  // #340 — the feed is shared by every viewer (and the vendor page and the
+  // #341 — the feed is shared by every viewer (and the vendor page and the
   // company summary have none): only shared threads — linked, live, not a
   // draft (isSharedThread; every thread on a customer is linked). The rows
   // open the Inbox reader, read-only for anyone but the mailbox owner.

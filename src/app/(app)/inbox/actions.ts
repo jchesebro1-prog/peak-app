@@ -76,7 +76,7 @@ import { ownThread, ownThreadIds } from "@/lib/inbox-thread-guard";
  * nav unread badge and the bell stay in step, like the prototype's rss-comm
  * event fan-out.
  *
- * #340 — every action that takes a thread id runs `ownThread` first (the
+ * #341 — every action that takes a thread id runs `ownThread` first (the
  * bulk ones `ownThreadIds`): a thread in someone else's mailbox — even one
  * the viewer may READ because it is linked or assigned — is never written
  * here, and a refused id answers like a missing thread.
@@ -168,7 +168,7 @@ export async function restoreAction(id: string) {
  * small (a selection is a handful of threads), so a simple sequential loop is
  * fine and keeps the store's per-write invariants intact. */
 
-/** The selection, cut to the signed-in user's own threads (#340). */
+/** The selection, cut to the signed-in user's own threads (#341). */
 async function ids(list: string[]): Promise<string[]> {
   const user = await requireUser();
   return ownThreadIds(list, user.name);

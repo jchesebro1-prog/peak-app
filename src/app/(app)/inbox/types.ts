@@ -166,7 +166,7 @@ export type LinkVM = {
 export type ReaderVM = {
   id: string;
   unread: boolean;
-  /** #340 — the thread is not in the viewer's own mailbox (they see it
+  /** #341 — the thread is not in the viewer's own mailbox (they see it
    *  because it is linked to an entity or assigned to them): the reader shows
    *  a banner and no control that writes; the server actions refuse it too. */
   readOnly: boolean;

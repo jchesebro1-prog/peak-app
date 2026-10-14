@@ -821,7 +821,7 @@ export async function suggestEntryPins(ok: Ok): Promise<void> {
   const reader = read("src/app/(app)/inbox/thread-reader.tsx");
   ok(/\{assist\.estimate && vm\.isEmail && \(\s*<SuggestEstimate source=\{\{ kind: "thread", id: vm\.id \}\} readyHref=\{vm\.suggestionHref \?\? null\} \/>/.test(reader) && !/Draft estimate|draftEstimate/.test(reader), "suggest entry: the Inbox reader's Suggest estimate replaces Draft estimate (assist.estimate + email only)");
   const inbox = read("src/app/(app)/inbox/page.tsx");
-  // #340: the button never shows on a read-only (another mailbox's) thread, so neither does the lookup
+  // #341: the button never shows on a read-only (another mailbox's) thread, so neither does the lookup
   ok(/suggestionHref: !readOnly && assistFlags\.estimate && sel\.channel === "email" \? await suggestionReadyHref\("thread", sel\.id\) : null,/.test(inbox) && /const assistAll = assistUiFlags\(user\.id, assistSettingsOf\(settings\), await getAssistEnv\(\)\);/.test(inbox), "suggest entry: the Inbox page looks up the thread's suggestion only when the button shows");
   ok(/loadMeetingReader\(user, selectedId, \{ suggestEstimate: assistFlags\.estimate \}\)/.test(inbox), "suggest entry: the meeting reader gets the estimate gate from the Inbox page");
   const load = read("src/app/(app)/inbox/meetings/load.ts");

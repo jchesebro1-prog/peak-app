@@ -142,7 +142,7 @@ export type CardContext = {
   meId: string;
   /** Today in America/Chicago, YYYY-MM-DD. */
   todayYmd: string;
-  /** #340 — exposed thread ids outside the asker's own mailbox (readable
+  /** #341 — exposed thread ids outside the asker's own mailbox (readable
    *  because linked or assigned): a task card never links one, so the card
    *  shows only what createAskTask will write (its thread link is own-only). */
   readOnlyThreads?: ReadonlySet<string>;

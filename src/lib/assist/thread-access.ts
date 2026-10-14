@@ -10,7 +10,7 @@ export async function loadThreadFor(threadId: string, meName: string): Promise<C
   return t;
 }
 
-/** #340 — Ask AI's READ rule: a live email thread the user may see (their
+/** #341 — Ask AI's READ rule: a live email thread the user may see (their
  *  own, assigned to them, or linked to an entity — canSeeThread), else null.
  *  Reading only; nothing that writes or drafts takes a thread through here. */
 export async function loadThreadReadable(threadId: string, meName: string): Promise<CommThread | null> {

@@ -77,7 +77,7 @@ function staffLabelText(p: SearchPartLike): string {
  * and lower-cased; under 2 characters there are no groups. `me.id` scopes
  * meetings, `me.name` email threads (mailboxUser / assignedTo hold names).
  *
- * #340 — email-thread candidates are cut to the threads `me` may see — my
+ * #341 — email-thread candidates are cut to the threads `me` may see — my
  * own mailbox's, ones assigned to me, and ones linked to an entity; never one
  * in Deleted or another person's draft — in SQL (canSeeThreadCond), before
  * the per-group cut, so other people's private mail can't crowd the visible
@@ -225,7 +225,7 @@ export async function globalSearch(
   add(
     "Email threads",
     comms
-      // #340 — the SQL cut above, re-checked row by row (one rule, comms-visibility.ts)
+      // #341 — the SQL cut above, re-checked row by row (one rule, comms-visibility.ts)
       .filter((d) => canSeeThread(d, meName))
       .filter((d) => matches(q, d.subject, d.customer, d.contactName, d.contactEmail))
       .map((d) => ({

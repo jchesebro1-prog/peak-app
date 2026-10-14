@@ -1,5 +1,5 @@
 /**
- * #340 thread visibility checks — "a user may see an email thread only if it
+ * #341 thread visibility checks — "a user may see an email thread only if it
  * is their own, assigned to them, or linked to an entity" (Jeff, 2026-10-14).
  * Standalone: `npm run test:thread-visibility`; also chained into test:specs.
  *
@@ -166,34 +166,34 @@ export async function threadVisibilityDbChecks(ok: Ok): Promise<void> {
 
     /* ⌘K */
     const k = async (q: string, who = ME) => ((await globalSearch(q, who)).find((g) => g.label === "Email threads")?.items ?? []).map((i) => i.id);
-    ok((await k("vizzlequark privword")).length === 0 && (await k("privword")).length === 0 && (await k("privword", OTHER)).includes(ids.priv), "⌘K (#340): another user's unlinked thread is not in my results — it is in theirs");
-    ok((await k("coword")).includes(ids.co) && (await k("assignedword")).includes(ids.assigned) && (await k("mineword")).includes(ids.mine), "⌘K (#340): a teammate's customer-linked thread, one assigned to me, and my own are found");
-    ok((await k("deletedword")).length === 0 && (await k("minedeletedword")).length === 0 && (await k("draftword")).length === 0 && (await k("resolvedword")).length === 0, "⌘K (#340): Deleted threads (mine too), another person's draft and a resolvedContactId-only thread are never listed");
+    ok((await k("vizzlequark privword")).length === 0 && (await k("privword")).length === 0 && (await k("privword", OTHER)).includes(ids.priv), "⌘K (#341): another user's unlinked thread is not in my results — it is in theirs");
+    ok((await k("coword")).includes(ids.co) && (await k("assignedword")).includes(ids.assigned) && (await k("mineword")).includes(ids.mine), "⌘K (#341): a teammate's customer-linked thread, one assigned to me, and my own are found");
+    ok((await k("deletedword")).length === 0 && (await k("minedeletedword")).length === 0 && (await k("draftword")).length === 0 && (await k("resolvedword")).length === 0, "⌘K (#341): Deleted threads (mine too), another person's draft and a resolvedContactId-only thread are never listed");
     const groups = await globalSearch("coword", ME);
-    ok(groups.every((g) => Object.keys(g).join(",") === "label,items" && g.items.every((i) => Object.keys(i).join(",") === "id,title,sub,href,letter,color")) && groups.find((g) => g.label === "Email threads")?.items[0]?.href === `/inbox?thread=${encodeURIComponent(ids.co)}`, "⌘K (#340): output shape unchanged; a hit still opens /inbox?thread=");
-    ok((await globalSearch("vizzlequark", { id: ME.id })).find((g) => g.label === "Email threads")?.items.every((i) => i.id !== ids.mine) ?? true, "⌘K (#340): with no viewer name, nobody's own mailbox matches");
+    ok(groups.every((g) => Object.keys(g).join(",") === "label,items" && g.items.every((i) => Object.keys(i).join(",") === "id,title,sub,href,letter,color")) && groups.find((g) => g.label === "Email threads")?.items[0]?.href === `/inbox?thread=${encodeURIComponent(ids.co)}`, "⌘K (#341): output shape unchanged; a hit still opens /inbox?thread=");
+    ok((await globalSearch("vizzlequark", { id: ME.id })).find((g) => g.label === "Email threads")?.items.every((i) => i.id !== ids.mine) ?? true, "⌘K (#341): with no viewer name, nobody's own mailbox matches");
 
     /* company page loader + feed */
     const page = (await visibleByCustomer(CID, ME.name)).map((t) => t.id);
-    ok(page.includes(ids.co) && page.includes(ids.sharedBox) && !page.includes(ids.deleted) && !page.includes(ids.draft) && !page.includes(ids.mineDeleted), "company page (#340): every linked thread from any mailbox is listed; Deleted (mine too) and another person's draft are dropped");
+    ok(page.includes(ids.co) && page.includes(ids.sharedBox) && !page.includes(ids.deleted) && !page.includes(ids.draft) && !page.includes(ids.mineDeleted), "company page (#341): every linked thread from any mailbox is listed; Deleted (mine too) and another person's draft are dropped");
     const feed = await loadCustomerFeed({ id: CID, name: "Vizzlequark Arts" }, ME.id);
     const feedThreads = new Set(feed.flatMap((r) => (r.href?.startsWith("/inbox?thread=") ? [decodeURIComponent(r.href.slice("/inbox?thread=".length))] : [])));
-    ok(feedThreads.has(ids.co) && feedThreads.has(ids.sharedBox) && !feedThreads.has(ids.deleted) && !feedThreads.has(ids.draft) && !feedThreads.has(ids.mineDeleted), "activity feed (#340): linked threads stay (any mailbox); deleted and draft threads are dropped");
+    ok(feedThreads.has(ids.co) && feedThreads.has(ids.sharedBox) && !feedThreads.has(ids.deleted) && !feedThreads.has(ids.draft) && !feedThreads.has(ids.mineDeleted), "activity feed (#341): linked threads stay (any mailbox); deleted and draft threads are dropped");
     const feedNoViewer = await loadCustomerFeed({ id: CID, name: "Vizzlequark Arts" });
-    ok(feedNoViewer.filter((r) => r.href?.startsWith("/inbox?thread=")).length === feed.filter((r) => r.href?.startsWith("/inbox?thread=")).length, "activity feed (#340): the vendor page / company summary (no viewer) list the same shared threads");
+    ok(feedNoViewer.filter((r) => r.href?.startsWith("/inbox?thread=")).length === feed.filter((r) => r.href?.startsWith("/inbox?thread=")).length, "activity feed (#341): the vendor page / company summary (no viewer) list the same shared threads");
 
     /* Ask */
     const gt = async (tid: string) => runReadTool("get_thread", { id: tid }, { id: ME.id, name: ME.name });
     const co = await gt(ids.co);
     const priv = await gt(ids.priv);
     const res = await gt(ids.resolved);
-    ok(co.text.includes("Vizzlequark coword") && co.refs[0]?.id === ids.co && co.refs[0]?.readOnly === true, "Ask get_thread (#340): a teammate's customer-linked thread is readable (ref flagged read-only)");
-    ok(!priv.text.includes("privword") && priv.refs.length === 0 && !res.text.includes("resolvedword") && res.refs.length === 0, "Ask get_thread (#340): a teammate's unlinked (or resolvedContactId-only) thread reads like a missing one");
-    ok(!!(await loadThreadReadable(ids.assigned, ME.name)) && !(await loadThreadReadable(ids.deleted, ME.name)) && !(await loadThreadReadable(ids.mineDeleted, ME.name)), "loadThreadReadable (#340): assigned → readable; Deleted (even mine) → null");
+    ok(co.text.includes("Vizzlequark coword") && co.refs[0]?.id === ids.co && co.refs[0]?.readOnly === true, "Ask get_thread (#341): a teammate's customer-linked thread is readable (ref flagged read-only)");
+    ok(!priv.text.includes("privword") && priv.refs.length === 0 && !res.text.includes("resolvedword") && res.refs.length === 0, "Ask get_thread (#341): a teammate's unlinked (or resolvedContactId-only) thread reads like a missing one");
+    ok(!!(await loadThreadReadable(ids.assigned, ME.name)) && !(await loadThreadReadable(ids.deleted, ME.name)) && !(await loadThreadReadable(ids.mineDeleted, ME.name)), "loadThreadReadable (#341): assigned → readable; Deleted (even mine) → null");
 
     /* the owner guard + every lib-level write refuses a non-own thread */
-    ok(!!(await ownThread(ids.mine, ME.name)) && !!(await ownThread(ids.mineDeleted, ME.name)) && !(await ownThread(ids.co, ME.name)) && !(await ownThread(ids.assigned, ME.name)) && !(await ownThread(ids.sharedBox, ME.name)) && !(await ownThread("", ME.name)) && !(await ownThread(ids.mine, "")), "inbox guard (#340): ownThread — my mailbox (Deleted included) only; linked, assigned and shared-box threads are refused");
-    ok(JSON.stringify(await ownThreadIds([ids.mine, ids.co, ids.mine, ids.assigned, 5, ids.mineDeleted], ME.name)) === JSON.stringify([ids.mine, ids.mineDeleted]), "inbox guard (#340): ownThreadIds keeps (deduped, in order) only my own ids — the bulk actions' cut");
+    ok(!!(await ownThread(ids.mine, ME.name)) && !!(await ownThread(ids.mineDeleted, ME.name)) && !(await ownThread(ids.co, ME.name)) && !(await ownThread(ids.assigned, ME.name)) && !(await ownThread(ids.sharedBox, ME.name)) && !(await ownThread("", ME.name)) && !(await ownThread(ids.mine, "")), "inbox guard (#341): ownThread — my mailbox (Deleted included) only; linked, assigned and shared-box threads are refused");
+    ok(JSON.stringify(await ownThreadIds([ids.mine, ids.co, ids.mine, ids.assigned, 5, ids.mineDeleted], ME.name)) === JSON.stringify([ids.mine, ids.mineDeleted]), "inbox guard (#341): ownThreadIds keeps (deduped, in order) only my own ids — the bulk actions' cut");
     const actor = { id: ME.id, name: ME.name, roles: ME.roles };
     const refusals = await Promise.all([
       apply.approveFiling(ids.co, actor),
@@ -205,9 +205,9 @@ export async function threadVisibilityDbChecks(ok: Ok): Promise<void> {
       apply.overrideCourt(ids.co, "me", actor),
       apply.archiveAfterReply(ids.co, "reply", actor, { manual: true }),
     ]);
-    ok(refusals.every((r) => !!r && typeof r === "object" && "ok" in r && r.ok === false), "inbox organize (#340): approve / noise / not-noise / skip / undo / change / court / archive-on-Mark-replied all refuse another mailbox's linked thread");
+    ok(refusals.every((r) => !!r && typeof r === "object" && "ok" in r && r.ok === false), "inbox organize (#341): approve / noise / not-noise / skip / undo / change / court / archive-on-Mark-replied all refuse another mailbox's linked thread");
     const task = await createTaskFromThread({ threadId: ids.co, title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, ME);
-    ok(!task.ok, "inbox task (#340): Create task refuses a linked thread in another mailbox");
+    ok(!task.ok, "inbox task (#341): Create task refuses a linked thread in another mailbox");
 
     /* reply / task drafting stay own-only */
     const settings = assistSettingsOf({ assistUsers: [ME.id] });
@@ -215,8 +215,8 @@ export async function threadVisibilityDbChecks(ok: Ok): Promise<void> {
     const calls: unknown[] = [];
     const reply = await draftReplyForThread(ids.co, ME, { provider: fakeProvider("draft", { calls: calls as never }), settings, env, now: NOW });
     const tasks = await suggestTasksForThread(ids.assigned, ME, { provider: fakeProvider("{}", { calls: calls as never }), settings, env, now: NOW });
-    ok(!reply.ok && reply.kind === "thread" && !tasks.ok && calls.length === 0, "Assist (#340): Draft reply refuses a linked non-own thread and Suggest tasks an assigned one — before any model call");
-    ok(!(await loadThreadFor(ids.co, ME.name)) && !!(await loadThreadFor(ids.mine, ME.name)), "loadThreadFor (#340): the action rule stays own mailbox only");
+    ok(!reply.ok && reply.kind === "thread" && !tasks.ok && calls.length === 0, "Assist (#341): Draft reply refuses a linked non-own thread and Suggest tasks an assigned one — before any model call");
+    ok(!(await loadThreadFor(ids.co, ME.name)) && !!(await loadThreadFor(ids.mine, ME.name)), "loadThreadFor (#341): the action rule stays own mailbox only");
   } finally {
     await dropFixtures(340);
   }
@@ -258,12 +258,12 @@ export function threadVisibilityPins(ok: Ok): void {
   for (const [file, names, re] of audit) {
     const src = read(file);
     const missing = names.filter((n) => !re.test(fnBody(src, n)));
-    ok(missing.length === 0, `inbox action audit (#340): ${file.split("/").pop()} — ${names.length} action(s) check the owner first` + (missing.length ? ` — missing: ${missing.join(", ")}` : ""));
+    ok(missing.length === 0, `inbox action audit (#341): ${file.split("/").pop()} — ${names.length} action(s) check the owner first` + (missing.length ? ` — missing: ${missing.join(", ")}` : ""));
   }
   const guard = read("src/lib/inbox-thread-guard.ts");
-  ok(/return t && visibleTo\(t, me\) \? t : null;/.test(guard), "inbox guard (#340): ownThread is the mailbox owner check");
+  ok(/return t && visibleTo\(t, me\) \? t : null;/.test(guard), "inbox guard (#341): ownThread is the mailbox owner check");
   const apply = read("src/lib/inbox-org/apply.ts");
-  ok(/if \(!t \|\| t\.deleted \|\| t\.status === "draft" \|\| !visibleTo\(t, me\.name\)\) return null;/.test(apply), "inbox organize (#340): apply.ts myThread stays the owner check behind every Organize action");
+  ok(/if \(!t \|\| t\.deleted \|\| t\.status === "draft" \|\| !visibleTo\(t, me\.name\)\) return null;/.test(apply), "inbox organize (#341): apply.ts myThread stays the owner check behind every Organize action");
 }
 
 if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {

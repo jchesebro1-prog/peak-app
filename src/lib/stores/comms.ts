@@ -468,7 +468,7 @@ function inBox(t: CommThread, boxId: string, me: string): boolean {
 // The threads in the current user's own mailbox. Legacy shared-mailbox
 // threads stay stored for history but are no longer part of the active Inbox.
 // Exported so the Unmatched view (#96 §5) applies the same rule as the other
-// views. #340: `visibleTo` and the cross-user rule (`canSeeThread` — own,
+// views. #341: `visibleTo` and the cross-user rule (`canSeeThread` — own,
 // assigned or linked; `isOwnThread` for every write) live in the pure
 // comms-visibility.ts and are re-exported here.
 export {
@@ -722,7 +722,7 @@ export async function byCustomer(customerId: string): Promise<CommThread[]> {
   return (await getAll()).filter((t) => t.customerId === customerId);
 }
 
-/** #340 — a company's threads as `me` may see them (canSeeThread): every
+/** #341 — a company's threads as `me` may see them (canSeeThread): every
  *  live, non-draft thread linked to it (from anyone's mailbox), plus my own
  *  drafts; nothing in Deleted. The company page's Communications list. */
 export async function visibleByCustomer(customerId: string, me: string): Promise<CommThread[]> {

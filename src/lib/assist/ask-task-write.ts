@@ -9,7 +9,7 @@
  * linked to an email thread is filed under the "Email" section like the
  * Inbox's. Every link is re-checked with the read tools' own rule
  * (`resolveAskRef`), except a thread: it must be the user's own
- * (`loadThreadFor`) — #340: Ask may READ a linked thread from another
+ * (`loadThreadFor`) — #341: Ask may READ a linked thread from another
  * mailbox, but a task's thread link stays own-only, the Inbox's own rule
  * (createTaskFromThread requires visibleTo); a
  * venue must belong to the linked company; a link that no longer resolves is

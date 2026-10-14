@@ -186,7 +186,7 @@ function ExpandedMessage({
   /** #214 fix wave 1 — the old picker was gated to email threads only;
    *  "Link…" is hidden on a call/meeting thread for the same reason. */
   isEmail: boolean;
-  /** #340 — a read-only thread: the per-message write controls are hidden */
+  /** #341 — a read-only thread: the per-message write controls are hidden */
   readOnly?: boolean;
 }) {
   return (
@@ -395,7 +395,7 @@ function Conversation({
   onTask: (messageId: string) => void;
   /** #214 fix wave 1 — hide "Link…" on a non-email thread */
   isEmail: boolean;
-  /** #340 — a read-only thread: no Link… / Task… / Link message… */
+  /** #341 — a read-only thread: no Link… / Task… / Link message… */
   readOnly?: boolean;
 }) {
   // id -> explicit user choice; anything absent falls back to "newest is open"
@@ -1111,7 +1111,7 @@ export default function ThreadReader({
           />
         </div>
 
-        {/* actions + composer — #340: none on a read-only thread */}
+        {/* actions + composer — #341: none on a read-only thread */}
         {!vm.readOnly && (
         <div
           style={{

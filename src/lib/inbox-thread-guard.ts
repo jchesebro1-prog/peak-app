@@ -1,5 +1,5 @@
 /**
- * #340 — the one owner check every Inbox write runs before it touches a
+ * #341 — the one owner check every Inbox write runs before it touches a
  * thread. Seeing a thread (comms-visibility canSeeThread: own, assigned or
  * linked) never grants a write: a reply sends from the mailbox owner's Gmail,
  * and read state, status, flags, filing and links are theirs. The owner may
