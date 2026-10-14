@@ -17,7 +17,7 @@ import type { MeasureField } from "./surveys";
 import type { VenueClass } from "./venue-classes";
 
 /* ---- Tier 1: the kill questions ----
- * Venue name, contact name/email/phone, stage width, stage depth.
+ * Venue name, contact name/email, stage width/depth, scope, and the rigging system when Rigging is in scope (#342 — contact phone is no longer a kill question).
  * Width/depth live in `measurements` under venue-type-specific keys (the
  * quick set), so completeness accepts any of the equivalent keys. */
 
@@ -40,27 +40,38 @@ export interface Tier1Slice {
   contactEmail?: string;
   contactPhone?: string;
   measurements?: Record<string, string | boolean>;
+  /** #342 — the scope kill question (DisciplineKey[]); unset / empty = unanswered */
+  scope?: unknown;
+  disciplines?: Record<string, DisciplineData>;
 }
 
 export interface Tier1Item {
   key: string;
   label: string;
   done: boolean;
-  /** editor section to jump to when missing */
-  section: "cust" | "mQuick";
+  /** where it is answered: jump to Customer & venue / Measurements, or inline on the Kill questions card */
+  section: "cust" | "mQuick" | "tier1";
 }
+
+const SCOPE_DISCIPLINES = ["rigging", "curtain", "lighting", "av"];
 
 export function tier1Items(s: Tier1Slice): Tier1Item[] {
   const m = s.measurements || {};
   const has = (keys: string[]) => keys.some((k) => String(m[k] ?? "").trim() !== "");
-  return [
+  const scope = Array.isArray(s.scope) ? (s.scope as unknown[]).filter((k): k is string => typeof k === "string" && SCOPE_DISCIPLINES.includes(k)) : [];
+  const rigPresent = s.disciplines?.rigging?.present;
+  const items: Tier1Item[] = [
     { key: "venue", label: "Venue name", done: !!(s.venue || "").trim() || !!(s.customer || "").trim(), section: "cust" },
     { key: "contact", label: "Contact name", done: !!(s.contact || "").trim(), section: "cust" },
     { key: "contactEmail", label: "Contact email", done: !!(s.contactEmail || "").trim(), section: "cust" },
-    { key: "contactPhone", label: "Contact phone", done: !!(s.contactPhone || "").trim(), section: "cust" },
-    { key: "stageWidth", label: "Stage width", done: has(TIER1_WIDTH_KEYS), section: "mQuick" },
-    { key: "stageDepth", label: "Stage depth", done: has(TIER1_DEPTH_KEYS), section: "mQuick" },
+    { key: "stageWidth", label: "Stage width", done: has(TIER1_WIDTH_KEYS), section: "tier1" },
+    { key: "stageDepth", label: "Stage depth", done: has(TIER1_DEPTH_KEYS), section: "tier1" },
+    { key: "scope", label: "Scope", done: scope.length > 0, section: "tier1" },
   ];
+  if (scope.includes("rigging")) {
+    items.push({ key: "rigSystem", label: "Rigging system", done: Array.isArray(rigPresent) && rigPresent.length > 0, section: "tier1" });
+  }
+  return items;
 }
 
 export function tier1Complete(s: Tier1Slice): boolean {
@@ -130,14 +141,13 @@ export const DISCIPLINE_GROUPS: DisciplineGroup[] = [
     key: "rigging",
     title: "Rigging intake",
     subtitle: "Load calculations, grid analysis, hoist evaluation",
-    presentOptions: ["Counterweight system", "Dead-hung battens", "Motorized rigging", "Fixed points", "None"],
+    presentOptions: [...RIG_SYSTEMS],
     presentOptionsByClass: {},
     fields: [
       { key: "gridPresent", label: "Existing grid", type: "check" },
       { key: "gridType", label: "Grid construction & spacing" },
       { key: "gridHeight", label: "Grid height" },
       { key: "loadPoints", label: "Load-bearing points (SR / SL / center)" },
-      { key: "counterweight", label: "Counterweight system", type: "check" },
       { key: "counterweightNotes", label: "Rail condition, capacity, age" },
       { key: "chainHoists", label: "Chain hoists (brand, capacity, age)" },
       { key: "deckLoad", label: "Deck load capacity (lbs/sqft)" },

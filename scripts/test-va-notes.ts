@@ -5,6 +5,9 @@ import {
   SECTION_ORDER, STEP_BY_ID, STEP_LABELS, GROUP_BY_ID, GROUP_META, RIG_SYSTEMS, isQuoteVisit, scopeSet, inScope,
   rigSystems, hasCounterweight, hasLinesets, sectionVisible, splitGoalLines, recapFor, recapScopeText,
 } from "../src/lib/survey-flow";
+import { migrateSurvey, addLegacyNote, type MigratableSurvey } from "../src/lib/survey-migrate";
+import { tier1Items, tier1Complete, DISCIPLINE_GROUPS, presentOptionsFor } from "../src/lib/stores/survey-intake";
+import { BEAM_FIELDS } from "../src/lib/stores/surveys";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
@@ -61,6 +64,48 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(recapFor({ disciplines: { curtain: { scope: ["Flame test"] }, av: {} } }).map((e) => e.disc).join() === "curtain",
     "#342 A7: with scope unset the recap lists disciplines that have scopes or goals");
   ok(recapScopeText(rc[1]) === "Other: LED retrofit study" && recapScopeText(rc[0]) === "New grid", "#342 A7: recap scope text");
+
+  /* ---- Task 2: migration + Tier 1 ---- */
+  const m = (s: MigratableSurvey) => migrateSurvey(JSON.parse(JSON.stringify(s)) as MigratableSurvey);
+  const a1 = m({ measurements: { rigType: "Hemp" } });
+  ok(JSON.stringify(a1.disciplines?.rigging?.present) === '["Hemp"]' && (a1.legacyNotes || []).length === 0,
+    "#342 R3: an unanswered rigging system copies up from Beams' Existing rig type");
+  const a2 = m({ measurements: { rigType: "None existing" }, disciplines: { rigging: { counterweight: true } } });
+  ok(JSON.stringify(a2.disciplines?.rigging?.present) === '["Counterweight"]', "#342 R3: None drops out when another source names a system");
+  const a3 = m({ conditions: ["Existing rigging — hemp", "Motorized hoists present", "Low grid clearance"] });
+  ok(JSON.stringify(a3.disciplines?.rigging?.present) === '["Hemp","Motorized"]', "#342 R3: the old condition chips copy up");
+  const a4 = m({ measurements: { rigType: "Hemp" }, disciplines: { rigging: { present: ["Counterweight system", "Dead-hung battens"], counterweight: true } } });
+  ok(JSON.stringify(a4.disciplines?.rigging?.present) === '["Counterweight","Dead-hung"]', "#342 R3: old Present labels relabel on read");
+  ok((a4.legacyNotes || []).some((n) => n.section === "mBeams" && n.text === "Hemp") && !(a4.legacyNotes || []).some((n) => n.section === "dRigging"),
+    "#342 R1: an answered system keeps a disagreeing rig type as an Older note");
+  ok(a4.measurements?.rigType === "Hemp" && a4.disciplines?.rigging?.counterweight === true, "#342 R1: migration never deletes the old keys");
+  const a5 = m({ systemsState: { rigging: { installed: "yes", desc: "" } } });
+  ok(JSON.stringify(a5.disciplines?.rigging?.present) === JSON.stringify([presentOptionsFor("rigging", "theatre")[0]]) && (a5.disciplines?.rigging?.present as string[] | undefined)?.[0] === "Counterweight",
+    "#342: the systemsState fold still seeds Present (now the new first option)");
+  const a6 = m({ disciplines: { lighting: { goals: "Brighter wash" }, curtain: { present: ["None"] } } });
+  ok(JSON.stringify(a6.scope) === '["lighting"]', "#342 R2: scope seeds from disciplines with data (None-only doesn't count)");
+  ok(m({}).scope === undefined && JSON.stringify(m({ scope: [] }).scope) === "[]", "#342 R2: nothing to seed → scope stays unset; an answered scope is kept");
+  const twice = m(m({ measurements: { rigType: "Bogus" }, disciplines: { rigging: { present: ["Hemp"] } } }) as MigratableSurvey);
+  ok((twice.legacyNotes || []).filter((n) => n.text === "Bogus").length === 1, "#342 R1: migration is idempotent (notes de-duplicate)");
+  const stored = m({ legacyNotes: [{ section: "x", label: "y", text: "stale" }] });
+  ok((stored.legacyNotes || []).length === 0, "#342 R1: legacyNotes are re-derived on every read, never trusted from storage");
+  const ln: MigratableSurvey = {};
+  addLegacyNote(ln, { section: "s", label: "l", text: "   " });
+  ok(!(ln.legacyNotes || []).length, "#342 R1: a blank note is dropped");
+
+  ok(!BEAM_FIELDS.some((f) => f.key === "rigType"), "#342 R3: Beams & rigging no longer asks Existing rig type");
+  const rigGroup = DISCIPLINE_GROUPS.find((g) => g.key === "rigging")!;
+  ok(rigGroup.presentOptions.join("|") === "Counterweight|Dead-hung|Motorized|Hemp|Fixed points|None" && !rigGroup.fields.some((f) => f.key === "counterweight"),
+    "#342 R3: Rigging Present uses the rig-system list; its Counterweight check is gone");
+
+  const base = { venue: "Hall", contact: "Pat", contactEmail: "p@x.org", measurements: { proW: "40", stageDepth: "30" } };
+  ok(tier1Items(base).map((i) => i.key).join() === "venue,contact,contactEmail,stageWidth,stageDepth,scope", "#342 A2: Tier 1 items (no phone; scope added)");
+  ok(!tier1Complete(base) && tier1Complete({ ...base, scope: ["curtain"] }), "#342 A2: Tier 1 needs a scope; contact phone isn't required");
+  ok(tier1Items({ ...base, scope: ["rigging"] }).some((i) => i.key === "rigSystem" && !i.done) && !tier1Complete({ ...base, scope: ["rigging"] }),
+    "#342 A2: Rigging in scope adds an unanswered Rigging system item");
+  ok(tier1Complete({ ...base, scope: ["rigging"], disciplines: { rigging: { present: ["Hemp"] } } }), "#342 A2: answering the rigging system completes Tier 1");
+  ok(tier1Items(base).find((i) => i.key === "stageWidth")?.section === "tier1" && tier1Items(base).find((i) => i.key === "contact")?.section === "cust",
+    "#342 A2: stage W/D are answered on the card; contact jumps to Customer & venue");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

@@ -7358,7 +7358,7 @@ ok(TIER1_DEPTH_KEYS.includes("sanctuaryLength"), "Tier-1 depth accepts the churc
 ok(
   tier1Complete({
     venue: "Lincoln HS Gym", contact: "Pat Lee",
-    contactEmail: "p@x.org", contactPhone: "555-0100",
+    contactEmail: "p@x.org", contactPhone: "555-0100", scope: ["curtain"],
     measurements: { courtWidth: "50", courtLength: "84" },
   }),
   "a gym record completes Tier 1 on court dimensions alone"
@@ -7366,7 +7366,7 @@ ok(
 ok(
   !tier1Complete({
     venue: "Lincoln HS Gym", contact: "Pat Lee",
-    contactEmail: "p@x.org", contactPhone: "555-0100",
+    contactEmail: "p@x.org", contactPhone: "555-0100", scope: ["curtain"],
     measurements: { courtWidth: "50" },
   }),
   "a gym record missing court length does NOT complete Tier 1"

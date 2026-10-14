@@ -8,10 +8,7 @@ import {
 } from "@/db/doc-store";
 import {
   blankSystemsState,
-  presentOptionsFor,
-  SYSTEM_KEYS,
   type DisciplineData,
-  type DisciplineKey,
   type InventoryRow,
   type SystemState,
 } from "./survey-intake";
@@ -27,6 +24,7 @@ import {
 } from "./venue-classes";
 import { blankAssessment, type AssessmentData } from "./assessment";
 import type { LinesetRow } from "./linesets";
+import { migrateSurvey, type LegacyNote } from "../survey-migrate";
 
 // Site Intake extension model (tiers, disciplines, inventory catalog) — pure
 // module shared with the client editor; re-exported for server callers.
@@ -231,7 +229,6 @@ export const BEAM_FIELDS: MeasureField[] = [
   { key: "beamDirection", label: "Beam direction", type: "select", options: BEAM_DIRECTIONS },
   { key: "beamType", label: "Beam type", type: "select", options: BEAM_TYPES },
   { key: "drawSide", label: "Draw side", type: "select", options: DRAW_SIDES },
-  { key: "rigType", label: "Existing rig type", type: "select", options: RIG_TYPES },
   { key: "loadingBridge", label: "Loading bridge present", type: "check" },
   { key: "midrail", label: "Midrail height" },
   { key: "hhSheet", label: "H&H sheet attached", type: "check" },
@@ -391,6 +388,13 @@ export interface SurveyDraft {
   // ---- Lead thread (#34): the visit request that spawned this survey ----
   leadId: string | null;
   visitId: string | null;
+  // ---- #342 Venue Assessment notes ----
+  /** the scope kill question — DisciplineKey[]; absent/empty = unanswered (filters nothing) */
+  scope?: string[];
+  /** Final thoughts — internal tag ids (settings.surveyInternalTags); never printed for the customer */
+  internalTags?: string[];
+  /** derived on every read by migrateSurvey — never stored */
+  legacyNotes?: LegacyNote[];
 }
 
 export interface SurveyRecord extends SurveyDraft {
@@ -504,6 +508,9 @@ const DEFAULT_ME = "Jeff Chesebro";
  * forward into the class model and defaults every new sub-object. Idempotent
  * by construction: nothing here overwrites a value that is already present,
  * and no result is ever written back to the doc-store.
+ *
+ * #342: the rig-system copy-up, the systemsState fold and the scope seed run in
+ * src/lib/survey-migrate.ts (migrateSurvey).
  */
 function normalize(s: SurveyRecord): SurveyRecord {
   if (!s.stage) s.stage = s.syncState === "synced" ? "completed" : "onsite";
@@ -530,20 +537,7 @@ function normalize(s: SurveyRecord): SurveyRecord {
   }
   if (typeof s.assessmentEnabled !== "boolean") s.assessmentEnabled = false;
   if (!s.assessment || !s.assessment.conditions) s.assessment = blankAssessment();
-  // Tier-3 systemsState folds forward into the new per-system PRESENT gates:
-  // a system marked installed:"yes" seeds that discipline's present array so
-  // the answer is not lost. Runs once — guarded by the array already existing.
-  SYSTEM_KEYS.forEach(({ key }) => {
-    const st = s.systemsState?.[key];
-    if (!st || st.installed !== "yes") return;
-    const d = (s.disciplines ||= {});
-    const branch = (d[key] ||= {});
-    if (!Array.isArray(branch.present)) {
-      branch.present = [
-        presentOptionsFor(key as DisciplineKey, s.venueClass)[0],
-      ].filter(Boolean);
-    }
-  });
+  migrateSurvey(s);
   return s;
 }
 
