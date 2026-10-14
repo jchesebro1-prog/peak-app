@@ -145,12 +145,21 @@ export default function AskPanel({
     turnsRef.current = turns;
   }, [turns]);
 
+  // True while the panel is mounted and not closed. A confirm that finishes
+  // after ✕ / Esc / a route change (Suggest estimate can take minutes) must
+  // not navigate: onNavigate is a no-op once this is false.
+  const openRef = useRef(false);
+  const close = useCallback(() => {
+    openRef.current = false;
+    onClose();
+  }, [onClose]);
   const onNavigate = useCallback(
     (href: string) => {
-      onClose();
+      if (!openRef.current) return;
+      close();
       router.push(href);
     },
-    [onClose, router]
+    [close, router]
   );
 
   /** Ask one question (or re-ask the latest with Sonnet: `retry`). One stream at a time. */
@@ -224,24 +233,29 @@ export default function AskPanel({
     else queueMicrotask(() => inputRef.current?.focus());
   }, [ask, initialQuestion, pagePath]);
 
-  // Esc closes; closing (or unmounting on a route change) stops the stream.
+  // Esc closes — but not an Esc a form control handled (defaultPrevented), an
+  // IME composition, or one aimed at a card's select / date picker (it closes
+  // that control). Closing (or unmounting on a route change) stops the stream.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      const t = e.target;
+      if (t instanceof HTMLSelectElement) return;
+      if (t instanceof HTMLInputElement && /^(date|datetime-local|month|week|time)$/.test(t.type)) return;
+      close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [close]);
   // A real unmount aborts the stream; React's dev-only remount (Strict Mode)
   // re-mounts before the timer fires, so it doesn't stop the first question.
-  const mountedRef = useRef(false);
   useEffect(() => {
-    mountedRef.current = true;
+    openRef.current = true;
     return () => {
-      mountedRef.current = false;
+      openRef.current = false;
       const ctl = ctlRef.current;
       setTimeout(() => {
-        if (!mountedRef.current) ctl?.abort();
+        if (!openRef.current) ctl?.abort();
       }, 0);
     };
   }, []);
@@ -267,7 +281,7 @@ export default function AskPanel({
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #f0f1f4" }}>
         <span style={{ fontSize: 14, fontWeight: 700 }}>✦ Ask AI</span>
         <span style={{ ...muted, flex: 1 }}>Looks things up; changes nothing until you confirm a card.</span>
-        <button type="button" aria-label="Close Ask AI" title="Close (Esc)" onClick={onClose} style={iconBtn}>
+        <button type="button" aria-label="Close Ask AI" title="Close (Esc)" onClick={close} style={iconBtn}>
           ✕
         </button>
       </div>

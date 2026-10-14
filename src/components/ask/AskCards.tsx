@@ -5,12 +5,12 @@
  * changes nothing until the person confirms it, and every confirm goes
  * through the app's existing paths, which re-check permissions themselves:
  *
- *   task     — a card naming an email thread: the Inbox's
- *              createTaskFromThreadAction (#215); otherwise
- *              createAskTaskAction (links re-checked). Title, due and
- *              assignee are edited inline; the #327 due default applies.
+ *   task     — createAskTaskAction: the card's own links, each re-checked
+ *              (a thread through loadThreadFor; an email task filed under
+ *              "Email" like the Inbox's). Title, due, assignee and notes are
+ *              edited inline; the #327 due default applies.
  *   note     — addCustomerNoteAction / addVenueNoteAction /
- *              logActivityAction (a lead "note") / the project addNoteAction.
+ *              logActivityAction (a lead "note") / addProjectNoteAction.
  *   email    — never sends: To/Subject/Body go to this tab's sessionStorage
  *              and /inbox?compose=ask opens the composer pre-filled.
  *   estimate — startSuggestion (#338), then the Estimator.
@@ -26,10 +26,9 @@ import type { AskWhitelist } from "@/lib/assist/features/ask-render";
 import { createAskTaskAction, recordAskCardAction } from "@/lib/assist/ask-actions";
 import { ASK_COMPOSE_HREF, ASK_COMPOSE_KEY, askComposePayload } from "@/lib/assist/ask-compose";
 import { SUGGEST_BUSY_LABEL, SUGGEST_START_ERROR, startSuggestion } from "@/lib/assist/suggest-client";
-import { createTaskFromThreadAction } from "@/app/(app)/inbox/task-actions";
 import { addCustomerNoteAction, addVenueNoteAction } from "@/app/(app)/companies/actions";
 import { logActivityAction } from "@/app/(app)/leads/actions";
-import { addNoteAction as addProjectNoteAction } from "@/app/(app)/projects/actions";
+import { addProjectNoteAction } from "@/app/(app)/projects/actions";
 import { postChanged } from "@/lib/popout/channel";
 
 export type AskTeamMember = { id: string; name: string };
@@ -41,6 +40,9 @@ type CardProps = {
   whitelist: AskWhitelist;
   team: AskTeamMember[];
   meId: string;
+  /** navigates and closes the panel. The panel's version does nothing once
+   *  it is closed or unmounted — a slow confirm (Suggest estimate takes a
+   *  minute or two) must not yank the person to another page later. */
   onNavigate: (href: string) => void;
 };
 
@@ -124,9 +126,8 @@ function TaskCardView({ card, runId, streaming, whitelist, team, meId }: CardPro
   const links = (Object.keys(TASK_LINK_KINDS) as (keyof AskTaskLinks)[]).filter((f) => !!card.links[f]);
   const confirm = () =>
     c.run(async () => {
-      const r = threadId
-        ? await createTaskFromThreadAction({ threadId, title, notes, assigneeUserId: assignee, dueDate: due, linkKeys: ["customer", "site", "work"] })
-        : await createAskTaskAction({ title, notes, assigneeUserId: assignee, dueDate: due, links: card.links });
+      // Every task card writes the links it shows (re-checked server-side).
+      const r = await createAskTaskAction({ title, notes, assigneeUserId: assignee, dueDate: due, links: card.links });
       if (!r.ok) return r;
       postChanged("task");
       if (threadId) postChanged("thread", threadId);
@@ -181,6 +182,10 @@ function NoteCardView({ card, runId, streaming, whitelist }: CardProps & { card:
   const { kind, id } = card.target;
   const confirm = () =>
     c.run(async () => {
+      // Record only a real ok. postChanged: a venue's note shows on its company
+      // ("customer" + the company id the action returns); there is no lead or
+      // project entity on the #336 channel, so those post nothing — another
+      // window picks them up on its focus refresh.
       if (kind === "company") {
         const r = await addCustomerNoteAction(id, card.text);
         if (!r.ok) return r;
@@ -188,13 +193,13 @@ function NoteCardView({ card, runId, streaming, whitelist }: CardProps & { card:
       } else if (kind === "venue") {
         const r = await addVenueNoteAction(id, card.text);
         if (!r.ok) return r;
+        if (r.customerId) postChanged("customer", r.customerId);
       } else if (kind === "lead") {
-        await logActivityAction(id, { type: "note", note: card.text });
+        const r = await logActivityAction(id, { type: "note", note: card.text });
+        if (!r.ok) return r;
       } else {
-        const fd = new FormData();
-        fd.set("id", id);
-        fd.set("text", card.text);
-        await addProjectNoteAction(fd);
+        const r = await addProjectNoteAction(id, card.text);
+        if (!r.ok) return r;
       }
       await recordConfirm(runId, "note");
     });
@@ -245,7 +250,9 @@ function EstimateCardView({ card, runId, streaming, whitelist, onNavigate }: Car
   const { kind, id } = card.source;
   const confirm = () =>
     c.run(async () => {
-      // startSuggestion pushes on success; the panel navigates itself (and closes) after recording.
+      // startSuggestion would push on success; the panel navigates itself after
+      // recording — and only while it is still open (onNavigate is a no-op once
+      // closed: the suggestion stays reachable from its source's "Suggestion ready").
       const r = await startSuggestion({ kind, id }, { push: () => {} });
       if (!r.ok) return { ok: false, error: r.error || SUGGEST_START_ERROR };
       await recordConfirm(runId, "estimate");

@@ -91,6 +91,8 @@ export default function Nav({
   >([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The query typed last: a reply for an older query is dropped, never shown.
+  const latestQ = useRef("");
   // Ask AI: the open panel (its first question + the page it was opened on).
   // `n` remounts the panel for a fresh conversation each time it's opened.
   const [ask, setAsk] = useState<{ question: string; page: string; n: number } | null>(null);
@@ -100,6 +102,7 @@ export default function Nav({
 
   const runSearch = (q: string) => {
     setSearchQ(q);
+    latestQ.current = q;
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (q.trim().length < 2) {
       setSearchGroups([]);
@@ -111,14 +114,15 @@ export default function Nav({
     searchTimer.current = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-        if (!res.ok) return;
+        if (!res.ok || latestQ.current !== q) return;
         const data = (await res.json()) as { groups: typeof searchGroups };
+        if (latestQ.current !== q) return;
         setSearchGroups(data.groups || []);
         setSearchOpen(true);
       } catch {
         /* offline — search silently unavailable */
       } finally {
-        setSearchedQ(q);
+        if (latestQ.current === q) setSearchedQ(q);
       }
     }, 180);
   };
@@ -128,6 +132,7 @@ export default function Nav({
     const question = q.trim();
     if (!askEnabled || question.length < 2) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
+    latestQ.current = "";
     setSearchOpen(false);
     setSearchQ("");
     setSearchGroups([]);
@@ -411,7 +416,7 @@ export default function Nav({
                     )}
                     {searchGroups.length === 0 ? (
                       <div style={{ padding: "18px 12px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
-                        {searchedQ !== searchQ ? "Searching…" : <>No matches for “{searchQ}”</>}
+                        {askEnabled && searchedQ !== searchQ ? "Searching…" : <>No matches for “{searchQ}”</>}
                       </div>
                     ) : (
                       searchGroups.map((g) => (

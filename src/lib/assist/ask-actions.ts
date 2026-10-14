@@ -25,10 +25,9 @@ export async function recordAskCardAction(runId: string, kind: AskCardKind): Pro
 }
 
 /**
- * Ask AI — a task card with no email thread (a card naming a thread goes
- * through the Inbox's createTaskFromThreadAction). requireUser +
- * `createAskTask`, which re-checks every link and leaves the due default to
- * createTask (#327).
+ * Ask AI — a task card. requireUser + `createAskTask`, which re-checks every
+ * link the card shows (a thread through loadThreadFor), files an email task
+ * under "Email" like the Inbox, and leaves the due default to createTask (#327).
  */
 export async function createAskTaskAction(req: AskTaskRequest): Promise<{ ok: true } | { ok: false; error: string }> {
   const me = await requireUser();

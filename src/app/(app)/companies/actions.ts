@@ -253,15 +253,19 @@ export async function addCustomerNoteAction(customerId: string, text: string) {
   return { ok: true as const };
 }
 
+const VENUE_NOTE_MAX = 4000;
+
 /** Ask AI (spec 2026-10-13 §4) — a note on a venue, the same NoteRecord the
  *  Krisp to-do "note" decision writes (parentKind "site", the venue's company
  *  denormalized). There was no venue note composer before; this is its one
  *  writer outside the meeting path. */
 export async function addVenueNoteAction(siteId: string, text: string) {
   const me = await requireUser();
-  const t = (text || "").trim();
-  if (!siteId || !t) return { ok: false as const, error: "Write a note first." };
-  const site = await getSite(siteId);
+  const id = typeof siteId === "string" ? siteId.trim() : "";
+  const t = typeof text === "string" ? text.trim() : "";
+  if (!id || !t) return { ok: false as const, error: "Write a note first." };
+  if (t.length > VENUE_NOTE_MAX) return { ok: false as const, error: `Keep the note under ${VENUE_NOTE_MAX.toLocaleString("en-US")} characters.` };
+  const site = await getSite(id);
   if (!site) return { ok: false as const, error: "That venue no longer exists." };
   try {
     await addNoteRecord({ parentKind: "site", parentId: site.id, customerId: site.companyId || null, text: t }, me.name);
@@ -270,7 +274,8 @@ export async function addVenueNoteAction(siteId: string, text: string) {
     return { ok: false as const, error: "Couldn’t save that note — please try again." };
   }
   revalidatePath("/", "layout");
-  return { ok: true as const };
+  // the venue's company — the caller's cross-window postChanged("customer", …)
+  return { ok: true as const, customerId: site.companyId || null };
 }
 
 /** Delete a user-authored note from the Activity feed (soft delete). The UI

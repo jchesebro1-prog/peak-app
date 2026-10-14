@@ -102,6 +102,10 @@ export type AskTurnState = {
   status: string | null;
   /** the records this answer's lookups returned ("Looked at N records") */
   looked: AskLinkRef[];
+  /** a lookup has started: the runner emits the page context's refs and the
+   *  re-checked earlier tokens BEFORE the first round, and a tool's refs only
+   *  after its `status` — so refs count as "looked at" only from here on */
+  lookedUp: boolean;
   cards: AskCard[];
   sources: { url: string; title: string }[];
   runId: string | null;
@@ -117,16 +121,17 @@ export type AskTurnState = {
 export const ASK_THINKING = "Thinking…";
 
 export function newAskTurn(key: number, question: string, opts: { hard: boolean; web: boolean }): AskTurnState {
-  return { key, question, answer: "", status: ASK_THINKING, looked: [], cards: [], sources: [], runId: null, error: null, done: false, streaming: true, stopped: false, hard: opts.hard, web: opts.web };
+  return { key, question, answer: "", status: ASK_THINKING, looked: [], lookedUp: false, cards: [], sources: [], runId: null, error: null, done: false, streaming: true, stopped: false, hard: opts.hard, web: opts.web };
 }
 
 /** Pure: one stream event applied to the answer it belongs to. */
 export function applyAskEvent(t: AskTurnState, e: AskEvent): AskTurnState {
   switch (e.t) {
     case "status":
-      return { ...t, status: e.text.slice(0, 120) };
+      return { ...t, status: e.text.slice(0, 120), lookedUp: true };
     case "ref": {
-      if (!isSitePath(e.href)) return t;
+      // the page context and earlier answers' records arrive before any lookup — whitelisted, not "looked at"
+      if (!t.lookedUp || !isSitePath(e.href)) return t;
       const k = refKey(e.kind, e.id);
       if (t.looked.length >= ASK_LOOKED_MAX || t.looked.some((r) => refKey(r.kind, r.id) === k)) return t;
       return { ...t, looked: [...t.looked, { kind: e.kind, id: e.id, title: e.title, href: e.href }] };

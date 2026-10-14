@@ -20,9 +20,9 @@ export const ASK_LINK_TITLE_MAX = 80;
 const BULLET = /^\s*[-*•]\s+/;
 const HEADING = /^\s*#{1,6}\s+/;
 
-/** A site-relative path only (`/x`, never `//x` or `/\x`). */
+/** A site-relative path only (`/x`, never `//x` or `/\x`), with no whitespace or control characters. */
 export function isSitePath(href: unknown): href is string {
-  return typeof href === "string" && href.startsWith("/") && !/^\/[\\/]/.test(href);
+  return typeof href === "string" && href.startsWith("/") && !/^\/[\\/]/.test(href) && !/[\s\u0000-\u001f\u007f-\u009f]/.test(href);
 }
 
 /** A web source's URL when it is http(s), else null. */

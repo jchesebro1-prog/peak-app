@@ -1236,7 +1236,7 @@ export async function askUiChecks(ok: Ok): Promise<void> {
     safeSourceUrl("https://a.test/x") === "https://a.test/x" && safeSourceUrl("http://b.test") === "http://b.test" && safeSourceUrl("javascript:alert(1)") === null && safeSourceUrl("data:text/html,x") === null && safeSourceUrl("//a.test") === null && safeSourceUrl(42) === null,
     "ask render: sources are http(s) only"
   );
-  ok(sourceLabel("https://www.a.test/p", "") === "www.a.test" && sourceLabel("https://a.test", "  A  page ") === "A page" && isSitePath("/x") && !isSitePath("//x") && !isSitePath("/\\x") && !isSitePath("https://x"), "ask render: source labels fall back to the host; site paths only");
+  ok(sourceLabel("https://www.a.test/p", "") === "www.a.test" && sourceLabel("https://a.test", "  A  page ") === "A page" && isSitePath("/x") && !isSitePath("//x") && !isSitePath("/\\x") && !isSitePath("https://x") && !isSitePath("/a b") && !isSitePath("/a\tb") && !isSitePath("/a\nb") && !isSitePath("/a\u0000b") && !isSitePath("/a\u007fb") && !isSitePath("/a\u0085b") && isSitePath("/catalog?q=Symetrix%3AJupiter%204"), "ask render: source labels fall back to the host; site paths only, no whitespace or control characters");
 
   /* ---- NDJSON reader + reply check ---- */
   const enc = new TextEncoder();
@@ -1284,6 +1284,16 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   ] as AskEvent[])
     t = C.applyAskEvent(t, e);
   ok(t.looked.length === 1 && t.answer === "Hello [[company:C-1]]" && t.status === null && t.sources.length === 1 && t.cards.length === 1 && t.streaming && !C.canTryHarder(t, true), "ask client: refs, sources de-duplicated; text clears the status; no Try harder mid-stream");
+  let pre0 = C.newAskTurn(9, "q", { hard: false, web: false });
+  for (const e of [
+    { t: "ref", kind: "company", id: "C-page", title: "Page", href: "/companies/C-page" },
+    { t: "ref", kind: "quote", id: "Q-prior", title: "Prior", href: "/estimator?id=Q-prior" },
+    { t: "text", d: "Let me look. " },
+    { t: "status", text: "Looking up quotes…" },
+    { t: "ref", kind: "quote", id: "Q-new", title: "New", href: "/estimator?id=Q-new" },
+  ] as AskEvent[])
+    pre0 = C.applyAskEvent(pre0, e);
+  ok(pre0.looked.map((r) => r.id).join(",") === "Q-new", "ask client: Looked at counts only refs after the first lookup — not the page context or earlier answers' records");
   const fin = C.finishAskTurn(C.applyAskEvent(t, { t: "done", runId: "AR-1" }), { aborted: false });
   ok(fin.runId === "AR-1" && !fin.streaming && C.canTryHarder(fin, true) && !C.canTryHarder(fin, false) && !C.canTryHarder({ ...fin, hard: true }, true), "ask client: Try harder on the latest finished Haiku answer only");
   const refused = C.finishAskTurn(C.applyAskEvent(C.newAskTurn(2, "q", { hard: false, web: false }), { t: "error", message: "Assist isn't enabled for you." }), { aborted: false });
@@ -1352,25 +1362,28 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   ok(askFiles.every((f) => !read(f).includes("dangerouslySetInnerHTML")) && !read("src/lib/assist/features/ask-render.ts").includes("dangerouslySetInnerHTML"), "ask ui: no dangerouslySetInnerHTML in src/components/ask/");
   const panel = read(`${dir}/AskPanel.tsx`);
   ok(/target="_blank" rel="noopener noreferrer"/.test(panel) && /renderAnswerBlocks\(text, whitelist\)/.test(panel) && /handlePopoutClick\(e, pop, link\.id, link\.href\)/.test(panel) && /readAskStream\(res\.body,/.test(panel) && /askResponseProblem\(res\)/.test(panel) && /ctlRef\.current\?\.abort\(\)/.test(panel), "ask ui: the panel streams through readAskStream after the reply check, renders through the whitelist, pops out on Shift-click, Stop aborts, sources open in a new tab");
-  ok(/@media \(max-width: 700px\)/.test(panel) && /e\.key === "Escape"\) onClose\(\)/.test(panel) && /fetch\(`\$\{ASK_CONTEXT_ROUTE\}\?page=\$\{encodeURIComponent\(pagePath\)\}`/.test(panel), "ask ui: full screen under 700 px, Esc closes, the context chip comes from the context route");
+  ok(/@media \(max-width: 700px\)/.test(panel) && /if \(e\.key !== "Escape" \|\| e\.defaultPrevented \|\| e\.isComposing\) return;/.test(panel) && /if \(t instanceof HTMLSelectElement\) return;/.test(panel) && /date\|datetime-local/.test(panel) && /fetch\(`\$\{ASK_CONTEXT_ROUTE\}\?page=\$\{encodeURIComponent\(pagePath\)\}`/.test(panel), "ask ui: full screen under 700 px, Esc closes (not from a card's select / date input or a handled Esc), the context chip comes from the context route");
+  ok(/const onNavigate = useCallback\(\s*\(href: string\) => \{\s*if \(!openRef\.current\) return;\s*close\(\);\s*router\.push\(href\);/.test(panel) && /const close = useCallback\(\(\) => \{\s*openRef\.current = false;\s*onClose\(\);/.test(panel) && /return \(\) => \{\s*openRef\.current = false;/.test(panel), "ask ui: once the panel is closed or unmounted, a late confirm (Suggest estimate) doesn't navigate");
   const nav = read("src/components/nav/Nav.tsx");
   ok(
     /\{askEnabled && \(\s*<button[\s\S]{0,300}onClick=\{\(\) => openAsk\(searchQ\)\}[\s\S]{0,1600}Ask AI:<\/span>/.test(nav) &&
       /if \(askEnabled && e\.key === "Enter" && \(e\.metaKey \|\| e\.ctrlKey\)/.test(nav) &&
       /if \(!askEnabled \|\| question\.length < 2\) return;/.test(nav) &&
       /\{askEnabled && ask && \(\s*<AskPanel /.test(nav) &&
-      /setSearchOpen\(false\);\s*setAsk\(null\);\s*\}/.test(nav),
-    "ask ui: the ⌘K Ask AI row, ⌘↵ and the panel are all gated on askEnabled; a route change closes the panel"
+      /setSearchOpen\(false\);\s*setAsk\(null\);\s*\}/.test(nav) &&
+      nav.includes("{askEnabled && searchedQ !== searchQ ? \"Searching…\" : <>No matches for “{searchQ}”</>}") &&
+      /if \(!res\.ok \|\| latestQ\.current !== q\) return;/.test(nav) && /if \(latestQ\.current !== q\) return;\s*setSearchGroups/.test(nav),
+    "ask ui: the ⌘K Ask AI row, ⌘↵, \"Searching…\" and the panel are all gated on askEnabled; a route change closes the panel; a stale search reply is dropped"
   );
   const layout = read("src/app/(app)/layout.tsx");
   ok(/const askEnabled = \(await askGateFor\(user\.id, \{ settings: assistSettingsOf\(settings\) \}\)\.catch\(\(\) => "error"\)\) === null;/.test(layout) && /askEnabled=\{askEnabled\}/.test(layout), "ask ui: the (app) layout computes askEnabled with askGateFor (=== null) and passes it to Nav");
   const cards = read(`${dir}/AskCards.tsx`);
   ok(
-    /createTaskFromThreadAction\(\{ threadId,/.test(cards) && /createAskTaskAction\(\{ title,/.test(cards) && /addCustomerNoteAction\(id, card\.text\)/.test(cards) && /addVenueNoteAction\(id, card\.text\)/.test(cards) &&
-      /logActivityAction\(id, \{ type: "note", note: card\.text \}\)/.test(cards) && /addProjectNoteAction\(fd\)/.test(cards) && /startSuggestion\(\{ kind, id \}/.test(cards) &&
+    !cards.includes("createTaskFromThreadAction") && /createAskTaskAction\(\{ title, notes, assigneeUserId: assignee, dueDate: due, links: card\.links \}\)/.test(cards) && /addCustomerNoteAction\(id, card\.text\)/.test(cards) && /addVenueNoteAction\(id, card\.text\);\s*if \(!r\.ok\) return r;\s*if \(r\.customerId\) postChanged\("customer", r\.customerId\);/.test(cards) &&
+      /const r = await logActivityAction\(id, \{ type: "note", note: card\.text \}\);\s*if \(!r\.ok\) return r;/.test(cards) && /const r = await addProjectNoteAction\(id, card\.text\);\s*if \(!r\.ok\) return r;/.test(cards) && /startSuggestion\(\{ kind, id \}/.test(cards) &&
       /sessionStorage\.setItem\(ASK_COMPOSE_KEY, askComposePayload\(card, Date\.now\(\)\)\)/.test(cards) && !/encodeURIComponent\(card\.body/.test(cards) &&
       (cards.match(/await recordConfirm\(runId, "(task|note|email|estimate)"\)/g) || []).length === 4 && /postChanged\("task"\)/.test(cards) && /postChanged\("customer", id\)/.test(cards),
-    "ask ui: each card confirms through its existing action, then records the confirm (and posts postChanged)"
+    "ask ui: every task card goes through createAskTaskAction; each note confirms through its record's action and records only a real ok; postChanged where an entity exists"
   );
   const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
   ok(/window\.sessionStorage\.getItem\(ASK_COMPOSE_KEY\);\s*window\.sessionStorage\.removeItem\(ASK_COMPOSE_KEY\);/.test(shell) && /parseAskCompose\(raw, Date\.now\(\)\)/.test(shell), "ask ui: the Inbox reads the hand-off once (and removes it) before opening the composer");
@@ -1380,6 +1393,11 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   const pilot = read("src/app/(app)/settings/groups/assist-pilot.tsx");
   ok(pilot.includes("<AskReportTable ask={assist.ask} />") && pilot.includes("{assist.askModels.ask}") && pilot.includes("{assist.askModels.askHard}") && read("src/app/(app)/settings/assist-data.ts").includes("ask: askReport(runs),"), "settings: the pilot card shows the Ask AI model hint and table");
   const companyActions = read("src/app/(app)/companies/actions.ts");
+  const projectActions = read("src/app/(app)/projects/actions.ts");
+  const projNote = projectActions.slice(projectActions.indexOf("export async function addProjectNoteAction"), projectActions.indexOf("export async function addTimeAction"));
+  ok(/const user = await requireUser\(\);/.test(projNote) && /typeof projectId === "string"/.test(projNote) && /PROJECT_NOTE_MAX/.test(projNote) && /await addNote\(id, user\.name \|\| undefined, t\)/.test(projNote) && !/redirect|projectErrorPath/.test(projNote) && /return \{ ok: false, error: "That project no longer exists\." \}/.test(projNote), "ask ui: addProjectNoteAction reuses addNote and returns {ok, error} — never redirects");
+  ok(/const lead = await logActivity\(id,[^\n]*\);\s*if \(!lead\) return \{ ok: false as const, error: "That lead no longer exists\." \};/.test(read("src/app/(app)/leads/actions.ts")), "ask ui: logActivityAction reports a missing lead as an error");
+  ok(/typeof siteId === "string"/.test(companyActions) && /typeof text === "string"/.test(companyActions) && /if \(t\.length > VENUE_NOTE_MAX\)/.test(companyActions) && /const VENUE_NOTE_MAX = 4000;/.test(companyActions) && /return \{ ok: true as const, customerId: site\.companyId \|\| null \};/.test(companyActions), "ask ui: addVenueNoteAction checks types, caps the note at 4,000 and returns the venue's company");
   ok(/export async function addVenueNoteAction\(siteId: string, text: string\) \{\s*const me = await requireUser\(\);/.test(companyActions) && /parentKind: "site", parentId: site\.id, customerId: site\.companyId \|\| null/.test(companyActions), "ask ui: the venue note action requires a user and writes a site note");
   const actions = read("src/lib/assist/ask-actions.ts");
   ok(/export async function createAskTaskAction[\s\S]*?const me = await requireUser\(\);[\s\S]*?createAskTask\(req, \{ id: me\.id, name: me\.name \}\)/.test(actions), "ask ui: createAskTaskAction requires a user");
@@ -1395,6 +1413,11 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   const users = await activeUsers();
   const me = { id: users[0].id, name: users[0].name };
   const CID = fixtureId("ask4", "co");
+  const CID2 = fixtureId("ask4", "co2");
+  const SITE_MINE = fixtureId("ask4", "site-mine");
+  const SITE_OTHER = fixtureId("ask4", "site-other");
+  const { createFixture, dropFixtures } = await import("./test-fixtures");
+  const { saveSite, softDeleteSite } = await import("@/lib/identity/sites");
   const made: string[] = [];
   try {
     await upsertCustomer({ id: CID, name: "Ask4 Co", type: "Education", locations: [], contacts: [] } as never);
@@ -1408,6 +1431,28 @@ export async function askUiChecks(ok: Ok): Promise<void> {
     const r2 = await createAskTask({ title: "Dated", notes: "", assigneeUserId: users[users.length - 1].id, dueDate: "2034-02-03", links: {} }, me);
     if (r2.ok) made.push(r2.task.id);
     ok(r2.ok && r2.task.assigneeUserId === users[users.length - 1].id && r2.task.dueAt === new Date("2034-02-03T12:00:00").getTime(), "createAskTask: a picked assignee and date are kept (noon, like the Inbox dialog)");
+    // Email threads: my own thread is linked and filed under "Email" (the Inbox's section); another user's is dropped.
+    const T_MINE = fixtureId("ask4", "thread-mine");
+    const T_THEIRS = fixtureId("ask4", "thread-theirs");
+    const base = { mailbox: "personal", unread: false, customer: "Ask4 Co", contactName: "Pat", contactEmail: "pat@ask4.test", subject: "Ask4 bid", channel: "email", status: "waiting_us", createdAt: NOW, updatedAt: NOW, messages: [] };
+    await createFixture("comms", { id: T_MINE, mailboxUser: me.name, ...base } as never);
+    await createFixture("comms", { id: T_THEIRS, mailboxUser: "Someone Else Ask4", ...base } as never);
+    const r3 = await createAskTask({ title: "Reply to Pat", notes: "", assigneeUserId: "", dueDate: "", links: { threadId: T_MINE, customerId: CID } }, me);
+    if (r3.ok) made.push(r3.task.id);
+    const r4 = await createAskTask({ title: "Not mine", notes: "", assigneeUserId: "", dueDate: "", links: { threadId: T_THEIRS } }, me);
+    if (r4.ok) made.push(r4.task.id);
+    ok(r3.ok && r3.task.threadId === T_MINE && r3.task.customerId === CID && r3.task.section === "Email" && r4.ok && !r4.task.threadId && r4.task.section === "", "createAskTask: a thread link is written only for my own thread (loadThreadFor), filed under Email like the Inbox's; another user's thread is dropped");
+    // A venue rides only with its own company.
+    await upsertCustomer({ id: CID2, name: "Ask4 Other Co", type: "Education", locations: [], contacts: [] } as never);
+    await saveSite({ id: SITE_MINE, companyId: CID, name: "Ask4 Main Stage", isPrimary: true, venueKind: "proscenium" });
+    await saveSite({ id: SITE_OTHER, companyId: CID2, name: "Ask4 Other Stage", isPrimary: true, venueKind: "proscenium" });
+    const r5 = await createAskTask({ title: "Own venue", notes: "", assigneeUserId: "", dueDate: "", links: { customerId: CID, siteId: SITE_MINE } }, me);
+    if (r5.ok) made.push(r5.task.id);
+    const r6 = await createAskTask({ title: "Other venue", notes: "", assigneeUserId: "", dueDate: "", links: { customerId: CID, siteId: SITE_OTHER } }, me);
+    if (r6.ok) made.push(r6.task.id);
+    const r7 = await createAskTask({ title: "Venue only", notes: "", assigneeUserId: "", dueDate: "", links: { siteId: SITE_OTHER } }, me);
+    if (r7.ok) made.push(r7.task.id);
+    ok(r5.ok && r5.task.siteId === SITE_MINE && r6.ok && r6.task.customerId === CID && !r6.task.siteId && r7.ok && r7.task.siteId === SITE_OTHER, "createAskTask: a venue is kept with its own company, dropped when the company differs, kept when no company is linked");
     const bads = await Promise.all([
       createAskTask({ title: "  ", notes: "", assigneeUserId: "", dueDate: "", links: {} }, me),
       createAskTask({ title: "x", notes: "", assigneeUserId: "u-nobody", dueDate: "", links: {} }, me),
@@ -1417,7 +1462,11 @@ export async function askUiChecks(ok: Ok): Promise<void> {
     ok(bads.every((b) => !b.ok), "createAskTask: refuses a blank title, a stranger assignee, an impossible date and an over-long title");
   } finally {
     for (const id of made) await removeTask(id).catch(() => {});
+    await softDeleteSite(SITE_MINE).catch(() => {});
+    await softDeleteSite(SITE_OTHER).catch(() => {});
+    await dropFixtures("ask4").catch(() => 0);
     await removeCustomer(CID).catch(() => {});
+    await removeCustomer(CID2).catch(() => {});
   }
 }
 
