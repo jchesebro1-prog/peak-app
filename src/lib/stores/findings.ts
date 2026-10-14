@@ -178,6 +178,12 @@ export async function listFindings(f: { customerId?: string; siteId?: string; as
  * - printedId / seq / companyCode / siteCode / status / history / voided / quoteRefs never come from `incoming`.
  * - Optimistic: `incoming.rev` older than the stored rev → { ok: false, error: "conflict" }.
  * - A voided finding refuses edits. A still-unnumbered finding (allocation failed earlier) is numbered here.
+ *
+ * Callers must adopt the returned `doc.rev`. A save based on an older rev still merges answers per key, but
+ * scalar fields from the stale copy are dropped (recorded in `syncRejects` on push, `dropped` on the action).
+ * (That sentence is the shared assessment/finding contract; a finding has no answers, so for a finding a stale
+ * rev refuses the whole edit as "conflict".) The returned doc is always the stored one at its post-write rev,
+ * including after the printed id is allocated.
  */
 export async function saveFinding(incoming: Partial<Finding> & { key: string }, user: { id: string }): Promise<Saved> {
   if (!isObj(incoming) || typeof incoming.key !== "string" || !KEY_RE.test(incoming.key)) return fail("A finding key is fd_ followed by 16 letters or digits");
@@ -317,7 +323,8 @@ export async function allocatePrintedId(f: Finding): Promise<Finding> {
  * Moves a finding to `to` (spec §3 Status): `extra.patch` (editable fields only) is applied first so a
  * precondition can be met in the same step (a specialist rating for inspected, the repair for repaired…);
  * transitionProblems refuses missing preconditions, a backward move without a note, and any change to a voided
- * finding. Appends { status, by, at, note? } to history. Same status → ok, unchanged.
+ * finding. Appends { status, by, at, note? } to history. Same status → ok, unchanged. The returned doc is the
+ * stored one at its post-write rev; callers adopt `doc.rev`.
  */
 export async function transitionFinding(key: string, to: FindingStatus, user: { id: string }, extra?: { note?: string; patch?: Partial<Finding> }): Promise<Saved> {
   if (!oneOf(STATUSES, to)) return fail("Unknown status");

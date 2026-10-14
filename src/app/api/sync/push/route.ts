@@ -53,6 +53,7 @@ export async function POST(req: Request) {
       status: "ok" | "conflict" | "error";
       rev?: number;
       server?: Record<string, unknown>;
+      error?: string;
     }>
   > = {};
 
@@ -81,8 +82,10 @@ export async function POST(req: Request) {
       }
       // Assessments engine (#337): never a whole-document replace. Each needs
       // `create`; answers merge per key and findings get their printed id
-      // from the server (see the stores). Same reply shape: ok + the stored
-      // rev, or conflict + the server copy, or error (left in the outbox).
+      // from the server (see the stores). Assessments are never created here
+      // and never reply conflict: ok + the stored rev (anything skipped is in
+      // the doc's server-written syncRejects), or error + a message (left in
+      // the outbox). Findings: ok, conflict + the server copy, or error.
       if (coll === "assessments" || coll === "findings") {
         const user = { id: String(session.user.id ?? ""), roles: session.user.roles };
         const one = { id: rec.id, rev: rec.rev, doc: rec.doc };
