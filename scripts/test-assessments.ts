@@ -47,6 +47,14 @@ import {
 } from "../src/lib/assessments/findings-quote";
 import { REGISTER_COLUMNS, parseRegisterFilters, registerCells, registerCsvName, registerList, registerQuery } from "../src/lib/assessments/register";
 import { LINK_FAILED_NOTICE, OTHER_VENUE_NOTICE, findingKeysForSave, linkOnCreate, linkOnCreateSafe, quoteFromFindings } from "../src/lib/assessments/quote-from-findings";
+import {
+  EMAIL_PDF_MAX_BYTES, EMAIL_TOO_LARGE, INLINE_TOTAL_BYTES, PHOTO_UNAVAILABLE, REPORT_SECTIONS, REPORT_WAIT_FOR, STANDING_LINE, assessmentPdfName,
+  buildAssessmentReport, buildFindingsReport, contactText, documentsToRequest, fileNamePart, findingsPdfName, followUpGaps, inlinePhotoSources,
+  liveKeeper, openFindings, reportAnswerText, reportEmailCopy, reportRegisterFindings, reportTable,
+} from "../src/lib/assessments/report-model";
+import { findingsPdfHref, parseFindingsScope } from "../src/lib/assessments/register";
+import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
+import { VISIT_TYPES } from "../src/lib/assessments/defs";
 
 const ROOT = process.cwd();
 
@@ -531,6 +539,7 @@ export async function assessmentChecks(ok: Ok) {
   editorModelChecks(ok);
   task8Checks(ok);
   task9Checks(ok);
+  await task10Checks(ok);
 }
 
 /** Identity fixtures for the assessment DB checks (ids prefixed `TESTassess:`). Task 5+ reuse these. */
@@ -1738,6 +1747,154 @@ async function task9DbChecks(ok: Ok) {
     if (quoteIds.length) await db.delete(DOC_TABLES.quotes).where(inArray(DOC_TABLES.quotes.id, quoteIds));
     await dropAssessIdentityFixtures();
   }
+}
+
+/* ---------- Task 10: reports, print tokens, PDFs, Email report (pure) ---------- */
+
+const t10Finding = (o: Partial<Finding> = {}): Finding => ({ ...t9Finding(), assessmentId: "AS-1010", ...o });
+
+async function task10Checks(ok: Ok) {
+  // print tokens: the two new kinds sign and verify; a token never crosses kinds or ids
+  const S = "t10-secret", t0 = 1_700_000_000_000;
+  const at = signPrintToken(S, "assessment", "AS-1010", t0);
+  ok(verifyPrintToken(S, at, "assessment", "AS-1010", t0 + 1000), "print token: an \"assessment\" token verifies for its id");
+  ok(!verifyPrintToken(S, at, "assessment-findings", "AS-1010", t0) && !verifyPrintToken(S, at, "cover", "AS-1010", t0) && !verifyPrintToken(S, at, "assessment", "AS-1011", t0), "print token: an \"assessment\" token fails for another kind or another id");
+  const ft = signPrintToken(S, "assessment-findings", "site:st-c1-1", t0);
+  ok(verifyPrintToken(S, ft, "assessment-findings", "site:st-c1-1", t0) && !verifyPrintToken(S, ft, "assessment-findings", "company:st-c1-1", t0) && !verifyPrintToken(S, ft, "assessment", "site:st-c1-1", t0), "print token: an \"assessment-findings\" token is bound to its scope and kind");
+  ok(!verifyPrintToken(S, at, "assessment", "AS-1010", t0 + 121_000), "print token: an assessment token expires after 120 s");
+
+  // sections and the standing line
+  ok(REPORT_SECTIONS.map((x) => x.id).join() === "intake,scope,summary,scopes,register,followup,photos", "report: seven sections in the spec's order");
+  ok(STANDING_LINE === "Structure and building electrical are flagged for an engineer or electrician and are not rated (ANSI E1.47 excludes them).", "report: section 2's standing line is verbatim");
+  ok(REPORT_WAIT_FOR === "[data-assessment-report]:not([data-report-ready])", "report: the render waits until the report root is marked ready (waitFor waits for no match)");
+
+  // answers as text
+  const def = ASSESSMENT_DEF;
+  const qs = allQuestions(def);
+  const q = (k: string) => qs.get(k)!.q;
+  const A = (v: unknown, at = 1): Answer => ({ v, state: "answered", at, by: "u1" });
+  const extras = { use: [{ value: "weddings", label: "Weddings" }, { value: "old", label: "Old use", retired: true }] };
+  ok(reportAnswerText(q("core.seats"), { state: "na", at: 1, by: "u" }, def, {}) === "N/A", "report answer: n/a prints \"N/A\"");
+  ok(reportAnswerText(q("core.seats"), { state: "unable", reason: "Locked", at: 1, by: "u" }, def, {}) === "Unable to inspect — Locked", "report answer: unable prints \"Unable to inspect — <reason>\"");
+  ok(reportAnswerText(q("core.seats"), A(null), def, {}) === null && reportAnswerText(q("core.seats"), undefined, def, {}) === null && reportAnswerText(q("core.owner_concerns"), A("  "), def, {}) === null, "report answer: cleared (v null), missing and blank answers print nothing");
+  ok(reportAnswerText(q("core.contact_primary"), A({ name: "Pat Lee", title: "Director", phone: "555-0100", email: "pat@x.org" }), def, {}) === "Pat Lee, Director · 555-0100 · pat@x.org", "report answer: a contact prints \"Name, Title · phone · email\"");
+  ok(contactText({ name: "Sam", email: "s@x.org" }) === "Sam · s@x.org" && contactText({ name: "Sam", title: "Custodian" }) === "Sam, Custodian", "report answer: missing contact parts are dropped");
+  ok(reportAnswerText(q("core.use"), A(["school", "weddings", "old"]), def, extras) === "School, Weddings, Old use" && reportAnswerText(q("core.space_type"), A("black_box"), def, {}) === "Black box", "report answer: pick values print their labels, admin extras (retired ones too) included");
+  const tbl = reportTable(q("core.docs_detail"), [{ doc: "drawings", format: "hard_copy", status: "received" }, { doc: "manuals" }], def, {});
+  ok(tbl.columns.join("|") === "Document|Format|Status" && tbl.rows[0].join("|") === "Drawings|Hard copy|Received" && tbl.rows[1].join("|") === "Manuals||", "report answer: a table prints its column labels and labelled cells (blank cells stay blank)");
+
+  // the whole report
+  const ruleP = def.rules.find((r) => r.prompt)!;
+  const flagQ = [...qs.values()].find((x) => x.q.flag)!.q;
+  const fk = (n: number) => "fd_t10pure00000" + String(n).padStart(3, "0");
+  const findings: Finding[] = [
+    t10Finding({ key: fk(1), printedId: "TSTA-HAL-RIG-002", rating: "immediate", priority: "low", recommendedAction: "Take it out of service", photoIds: ["p_t10aaaaaaaa"], immediate: { hazardContactNotified: true, notifiedAt: t0, lockout: "tagged" } }),
+    t10Finding({ key: fk(2), printedId: "TSTA-HAL-ELC-001", category: "ELC", rating: "needs", priority: "high" }),
+    t10Finding({ key: fk(3), printedId: "TSTA-HAL-RIG-003", rating: "needs", priority: "low", photoIds: ["p_t10bbbbbbbb"] }),
+    t10Finding({ key: fk(4), printedId: "TSTA-HAL-GEN-001", category: "GEN", rating: "good" }),
+    t10Finding({ key: fk(5), printedId: "TSTA-HAL-RIG-004", rating: "immediate", voided: { by: "u", at: 2, reason: "Duplicate" } }),
+    t10Finding({ key: fk(6), printedId: "TSTA-HAL-RIG-005", ruleId: ruleP.id, rating: "needs", voided: { by: "u", at: 2, reason: "Merged into TSTA-HAL-RIG-003", mergedInto: fk(3) } }),
+    t10Finding({ key: fk(7), printedId: "TSTA-HAL-GEN-002", category: "GEN", ruleId: "X5", questionKeys: [flagQ.key], rating: "good", priority: "medium" }),
+  ];
+  const reg = reportRegisterFindings(findings).map((f) => f.key);
+  ok(reg.join() === [fk(1), fk(2), fk(3), fk(7), fk(4)].join(), "report register: Immediate → Needs → Good, then priority; voided and merged-away findings left out");
+  const byKey = new Map(findings.map((f) => [f.key, f]));
+  ok(liveKeeper(findings[5], byKey)?.key === fk(3) && liveKeeper(findings[4], byKey) === null && liveKeeper(findings[0], byKey)?.key === fk(1), "report: a merged finding resolves to its live keeper; a plain void resolves to nothing");
+  const cyc = [t10Finding({ key: fk(8), voided: { by: "u", at: 1, reason: "m", mergedInto: fk(9) } }), t10Finding({ key: fk(9), voided: { by: "u", at: 1, reason: "m", mergedInto: fk(8) } })];
+  ok(liveKeeper(cyc[0], new Map(cyc.map((f) => [f.key, f]))) === null, "report: a merge cycle resolves to nothing");
+
+  const gaps = ["Question: Seat count", `Prompt: ${ruleP.prompt!.text}`, `Prompt: ${flagQ.flag!.text}`, "Prompt: Nothing like this exists"];
+  const fg = followUpGaps(gaps, def, findings);
+  ok(fg[0].text === gaps[0] && !fg[0].addressedBy && fg[3].addressedBy === undefined, "follow-up gaps: a question gap and an unmatched prompt stay open");
+  ok(fg[1].addressedBy === "TSTA-HAL-RIG-003", "follow-up gaps: a prompt resolved by a late finding that was later merged reads \"since addressed by\" the keeper's id");
+  ok(fg[2].addressedBy === "TSTA-HAL-GEN-002", "follow-up gaps: a flagged-answer prompt resolved by a late X5 finding reads \"since addressed by\" its id");
+  const keeperVoided = findings.map((f) => (f.key === fk(3) ? { ...f, voided: { by: "u", at: 3, reason: "Wrong" } } : f));
+  ok(!followUpGaps(gaps, def, keeperVoided)[1].addressedBy, "follow-up gaps: a merge whose keeper was later voided leaves the gap open");
+
+  const answers: Answers = {
+    "core.contact_primary": A({ name: "Pat Lee", title: "Director", phone: "555-0100", email: "pat@x.org" }),
+    "core.contact_hazard": A({ name: "Sam Ortiz", phone: "555-0199" }),
+    "core.owner_concerns": { state: "unable", reason: "Owner not present", at: 1, by: "u" },
+    "core.use": A(["school", "weddings"]),
+    "core.incidents": A(null),
+    "core.space_type": A("proscenium"),
+    "core.has_stage": A("yes"),
+    "core.seats": { state: "na", at: 1, by: "u" },
+    "core.docs_available": A(["drawings", "manuals", "lighting_plot"]),
+    "core.docs_detail": A([{ doc: "drawings", format: "hard_copy", status: "received" }, { doc: "manuals", format: "electronic", status: "to_follow" }]),
+    "core.not_accessible": A("Grid — no key on site"),
+  };
+  ok(documentsToRequest(answers, def, {}).join("|") === "Manuals (electronic, to follow)|Lighting plot", "follow-up documents: listed-but-not-received documents, with format and status");
+  ok(documentsToRequest({ "core.docs_available": A(["none"]) }, def, {}).length === 0, "follow-up documents: \"None\" requests nothing");
+  const m = buildAssessmentReport({
+    assessment: {
+      id: "AS-1010", defVersion: 1, visitType: "condition", scopes: VISIT_TYPES[0].scopes, answers,
+      photos: [
+        { id: "p_t10aaaaaaaa", takenAt: 1, by: "u", questionKey: "core.contact_hazard" },
+        { id: "p_t10bbbbbbbb", takenAt: 2, by: "u", findingKey: fk(6) },
+        { id: "p_t10cccccccc", takenAt: 3, by: "u", pending: true },
+        { id: "p_t10dddddddd", takenAt: 4, by: "u", questionKey: "core.has_stage" },
+      ],
+      dismissedPrompts: [], overriddenGaps: gaps, visitDate: Date.UTC(2026, 9, 1), spaceLabel: "Main stage", accompanying: "Chris",
+    },
+    def, extras, profile: {}, findings, names: { customer: "Test District", venue: "Hall HS", address: "1 Main St, Town, WI 54220", assessor: "Jeff" }, now: t0,
+  });
+  const intake = Object.fromEntries(m.intake.map((r) => [r.label, r.value]));
+  ok(intake["Facility"] === "Test District" && intake["Building and space"] === "Hall HS · Main stage" && intake["Visit date"] === "Oct 1, 2026" && intake["Accompanied by"] === "Chris", "report intake: facility, building and space, date, accompanying");
+  ok(intake["Primary contact"] === "Pat Lee, Director · 555-0100 · pat@x.org" && intake["Hazard contact"] === "Sam Ortiz · 555-0199" && intake["Owner concerns"] === "Unable to inspect — Owner not present" && intake["Seats"] === "N/A" && intake["Use"] === "School, Weddings", "report intake: contacts, concerns, use and seats as printed text");
+  ok(m.standingLine === STANDING_LINE && m.notAccessible === "Grid — no key on site" && m.scopesRun[0].title === "Core" && m.scopesRun.some((s) => s.title === "Rigging" && s.depth === "Screening") && !m.scopesRun.some((s) => s.title === "Project and quote"), "report scope: the scopes run (with depth), the standing line, areas not accessible");
+  const ratingRow = (r: string) => m.summary.rows.find((x) => x.rating === r)!;
+  ok(ratingRow("immediate").total === 1 && ratingRow("needs").counts.join() === "1,1,0,0,0" && ratingRow("good").counts.join() === "0,0,0,0,2" && m.summary.total === 5, "report summary: counts by rating × category over live findings only");
+  ok(m.summary.immediate.length === 1 && m.summary.immediate[0].label === "TSTA-HAL-RIG-002" && m.summary.immediate[0].immediate?.lockout === "Tagged" && m.summary.immediate[0].immediate.notified.startsWith("Yes"), "report summary: Immediate items in full (hazard contact, lockout)");
+  const core = m.scopes.find((s) => s.code === "S0")!;
+  const coreKeys = core.modules.flatMap((x) => x.rows.map((r) => r.key));
+  ok(coreKeys.join() === "core.contact_primary,core.contact_hazard,core.owner_concerns,core.use,core.space_type,core.seats,core.docs_available,core.docs_detail,core.not_accessible", `report scopes: visible answers in definition order; cleared and hidden answers left out (${coreKeys.join()})`);
+  const docsRow = core.modules.flatMap((x) => x.rows).find((r) => r.key === "core.docs_detail")!;
+  ok(docsRow.kind === "table" && docsRow.table!.rows.length === 2, "report scopes: a table answer prints as a table");
+  const coreRows = core.modules.flatMap((x) => x.rows);
+  ok(coreRows.find((r) => r.key === "core.contact_hazard")!.photoIds.join() === "p_t10aaaaaaaa" && !coreRows.some((r) => r.photoIds.includes("p_t10dddddddd")), "report scopes: a photo taken on a question prints inline on its row; a hidden question's photo doesn't");
+  ok(m.scopes.map((s) => s.code).join() === "S0,S1,S2,S3,S4,S5,S6,S7", "report scopes: one section per scope that was run, in definition order");
+  ok(m.register.map((f) => f.key).join() === reg.join(), "report register: the same rows as reportRegisterFindings");
+  ok(m.followUp.unable.length === 1 && m.followUp.unable[0].label === q("core.owner_concerns").label && m.followUp.unable[0].reason === "Owner not present", "report follow-up: unable answers with their reason");
+  ok(m.followUp.gaps[1].addressedBy === "TSTA-HAL-RIG-003" && m.followUp.documents.length === 2, "report follow-up: overridden gaps (with late resolutions) and documents to request");
+  ok(m.photos.length === 4 && m.photos[0].caption === `TSTA-HAL-RIG-002 · ${q("core.contact_hazard").label}` && m.photos[1].caption === "TSTA-HAL-RIG-003" && m.photos[2].pending, `report photos: captioned with finding ids (merged ones through the keeper) and the question (${m.photos.map((p) => p.caption).join(" | ")})`);
+
+  // findings-only report
+  const open = openFindings([...findings, t10Finding({ key: fk(10), status: "closed" })]);
+  ok(open.map((f) => f.key).join() === reg.join(), "findings report: open findings only (closed and voided left out), register sort");
+  const fr = buildFindingsReport({ findings, subject: "Hall HS", siteNames: { s1: "Hall HS" }, now: t0 });
+  ok(fr.rows.length === 5 && fr.rows[0].where === "Hall HS" && fr.rows[0].assessmentId === "AS-1010" && fr.counts.map((c) => c.n).join() === "1,2,2", "findings report: rows carry the venue and the assessment; counts by rating");
+  ok(JSON.stringify(parseFindingsScope("site:st-c1-1")) === JSON.stringify({ kind: "site", id: "st-c1-1", scope: "site:st-c1-1" }) && parseFindingsScope("company:TESTassess:co1")?.id === "TESTassess:co1" && parseFindingsScope("venue:x") === null && parseFindingsScope("site:") === null && parseFindingsScope("site:a\nb") === null && parseFindingsScope(7) === null, "findings scope: site:<id> / company:<id> only");
+  ok(findingsPdfHref("site:st-c1-1") === "/api/assessments/findings-pdf?scope=site%3Ast-c1-1" && findingsPdfHref("company:c1", true).endsWith("&download=1"), "findings scope: the PDF link carries the scope encoded");
+
+  // file names and the email copy
+  ok(assessmentPdfName("AS-1001", "Lincoln HS") === "Assessment AS-1001 — Lincoln HS.pdf" && assessmentPdfName("AS-1001", "A/B: \"C\"") === "Assessment AS-1001 — A B C.pdf", "file names: Assessment AS-#### — <venue>.pdf, unsafe characters dropped");
+  ok(findingsPdfName("Hall HS", Date.UTC(2026, 9, 13, 18)) === "Findings — Hall HS — 2026-10-13.pdf" && fileNamePart("x".repeat(200)).length === 80, "file names: Findings — <venue or company> — <date>.pdf (Chicago day)");
+  const copy = reportEmailCopy({ id: "AS-1010", venue: "Hall HS", customer: "Test District", visitDate: Date.UTC(2026, 9, 1), contactName: "Pat Lee", senderName: "Jeff" });
+  ok(copy.subject === "Venue assessment report — Hall HS (AS-1010)" && copy.body.startsWith("Hello Pat,") && copy.body.includes("from our visit on Oct 1, 2026") && copy.body.endsWith("Jeff"), "email report: subject names the venue and id; body greets the contact and names the visit date");
+  ok(EMAIL_PDF_MAX_BYTES === 10 * 1024 * 1024 && EMAIL_TOO_LARGE === "Report is too large to email — download it instead", "email report: 10 MB cap and the refusal wording");
+
+  // photo inlining: bounded concurrency, pending / failed skipped, total cap
+  let inFlight = 0, maxInFlight = 0;
+  const reads: string[] = [];
+  const read = async (id: string) => {
+    reads.push(id);
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((r) => setTimeout(r, 2));
+    inFlight--;
+    if (id === "p_bad") throw new Error("blob down");
+    if (id === "p_none") return null;
+    return { bytes: new Uint8Array(id === "p_big" ? 60 : 10), contentType: "image/jpeg" };
+  };
+  const photos10: { id: string; pending?: true }[] = [...Array.from({ length: 9 }, (_, i) => ({ id: `p_ok${i}` })), { id: "p_pending", pending: true }, { id: "p_bad" }, { id: "p_none" }];
+  const res = await inlinePhotoSources(photos10, read);
+  ok(maxInFlight <= 4 && maxInFlight >= 2, `photo inlining: at most 4 reads at a time (saw ${maxInFlight})`);
+  ok(!reads.includes("p_pending") && res.sources.p_pending === null, "photo inlining: a pending photo is never read and prints as unavailable");
+  ok(res.sources.p_bad === null && res.sources.p_none === null && !!res.sources.p_ok0?.startsWith("data:image/jpeg;base64,") && !res.overCap && res.inlinedBytes === 90, "photo inlining: a failed or empty read is skipped; the rest are data URIs");
+  const capped = await inlinePhotoSources([{ id: "p_a" }, { id: "p_big" }, { id: "p_c" }], read, { maxBytes: 50 });
+  ok(capped.overCap && capped.sources.p_a !== null && capped.sources.p_big === null && capped.sources.p_c === null && capped.inlinedBytes === 10, "photo inlining: past the byte budget that photo and every later one are left out (overCap)");
+  ok(INLINE_TOTAL_BYTES === 40 * 1024 * 1024 && PHOTO_UNAVAILABLE === "Photo unavailable", "photo inlining: 40 MB total; placeholder wording");
 }
 
 if (process.argv[1] && /test-assessments\.ts$/.test(process.argv[1])) {

@@ -15,7 +15,7 @@ import type { PhotoRef } from "@/lib/assessments/photos";
 import type { Rating } from "@/lib/assessments/defs/types";
 import {
   BUDGET_LABEL, BUDGET_TIERS, CATEGORIES, PRIORITIES, PRIORITY_LABEL, RATINGS, RATING_LABEL, REGISTER_COLUMNS, STATUS_LABEL,
-  buildingAndSpace, dayLabel, findingLabel, matchesFilters, registerCsvName, registerQuery, type RegisterFilters, type RegisterRow,
+  buildingAndSpace, dayLabel, findingLabel, findingsPdfHref, matchesFilters, registerCsvName, registerQuery, type FindingsScope, type RegisterFilters, type RegisterRow,
 } from "@/lib/assessments/register";
 import FindingSheet, { SHEET_CSS } from "../[id]/finding-sheet";
 import { PHOTO_CSS } from "../[id]/photo-button";
@@ -323,6 +323,8 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
   const sheetRow = sheet ? byKey.get(sheet.key) : undefined;
   const moveRow = move ? byKey.get(move.key) : undefined;
   const venueChoices = filters.customer ? venues.filter((v) => v.customerId === filters.customer) : venues;
+  // The findings-only PDF (open findings across visits) — offered once the register is narrowed to one venue or company.
+  const pdfScope: FindingsScope | null = filters.venue ? `site:${filters.venue}` : filters.customer ? `company:${filters.customer}` : null;
   const csvHref = `/api/assessments/findings-csv${registerQuery(filters) ? "?" + registerQuery(filters) : ""}`;
 
   return (
@@ -334,7 +336,10 @@ export default function FindingsRegister({ rows, customers, venues, total, filte
           <span style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>Findings</span>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "#9aa0ab" }}>{shown.length}{shown.length !== total ? ` of ${total}` : ""}</span>
         </div>
-        <a href={csvHref} className="pk-btn-outline" style={{ textDecoration: "none" }}>Export CSV</a>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {pdfScope && <a href={findingsPdfHref(pdfScope)} target="_blank" rel="noopener" className="pk-btn-outline" style={{ textDecoration: "none" }}>Findings PDF</a>}
+          <a href={csvHref} className="pk-btn-outline" style={{ textDecoration: "none" }}>Export CSV</a>
+        </div>
       </div>
 
       <div className="fr-bar">

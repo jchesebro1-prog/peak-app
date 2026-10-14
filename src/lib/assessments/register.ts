@@ -181,3 +181,20 @@ export interface RegisterRow {
 export function registerCsvName(now: number): string {
   return `findings-${dayLabel(now)}.csv`;
 }
+
+/* ---------- Task 10: the findings-only PDF link (register toolbar + venue / company cards) ---------- */
+
+export type FindingsScope = `site:${string}` | `company:${string}`;
+
+/** `site:<id>` / `company:<id>` (ids up to 120 chars, no control characters), else null. */
+export function parseFindingsScope(raw: unknown): { kind: "site" | "company"; id: string; scope: FindingsScope } | null {
+  if (typeof raw !== "string") return null;
+  const m = /^(site|company):([^\u0000-\u001f]{1,120})$/.exec(raw);
+  if (!m) return null;
+  return { kind: m[1] as "site" | "company", id: m[2], scope: raw as FindingsScope };
+}
+
+/** The staff findings-PDF link for a venue or company. */
+export function findingsPdfHref(scope: FindingsScope, download = false): string {
+  return `/api/assessments/findings-pdf?scope=${encodeURIComponent(scope)}${download ? "&download=1" : ""}`;
+}

@@ -578,6 +578,7 @@ export default function AssessmentEditor(props: EditorProps) {
           <span className="as-mono-sm">rev {doc.rev}</span>
           {saveText && <span style={{ color: saveState === "error" ? "#8c3b26" : "#8c919c" }}>{saveText}</span>}
           <span style={{ flex: 1 }} />
+          <Link href={`/assessments/${encodeURIComponent(doc.id)}/report`} className="pk-btn-outline" style={{ textDecoration: "none", padding: "7px 12px" }}>Report</Link>
           <CodesChip codes={props.codes} canEdit={props.canEdit} canApprove={props.canReopen} />
           {doc.status !== "completed" && props.canEdit && (
             <button type="button" className="pk-btn-accent" style={{ padding: "8px 14px" }} disabled={busy || completeOpen} onClick={() => setCompleteOpen(true)}>Mark complete</button>
