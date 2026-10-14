@@ -176,8 +176,9 @@ function realYmd(y: number, m: number, d: number): boolean {
 }
 
 /**
- * A due date, read in America/Chicago: `YYYY-MM-DD` as written, or a full ISO
- * timestamp converted to its Chicago day. Null when it isn't a real date, is
+ * A due date, read in America/Chicago: `YYYY-MM-DD` as written, a timestamp
+ * with no zone as its own date (Chicago wall time), or a zoned ISO timestamp
+ * (Z / ±hh:mm) converted to its Chicago day. Null when it isn't a real date, is
  * before today, or is more than CARD_DUE_MAX_YEARS out.
  */
 export function parseDueYmd(raw: unknown, todayYmd: string): string | null {
@@ -188,8 +189,15 @@ export function parseDueYmd(raw: unknown, todayYmd: string): string | null {
   if (m) {
     ymd = realYmd(+m[1], +m[2], +m[3]) ? t : null;
   } else if (/^\d{4}-\d{2}-\d{2}T/.test(t)) {
-    const ms = Date.parse(t);
-    ymd = Number.isFinite(ms) ? CHICAGO_DAY.format(new Date(ms)) : null;
+    if (/(Z|[+-]\d{2}(:?\d{2})?)$/i.test(t)) {
+      // a zoned timestamp: its America/Chicago day
+      const ms = Date.parse(t);
+      ymd = Number.isFinite(ms) ? CHICAGO_DAY.format(new Date(ms)) : null;
+    } else {
+      // a bare local timestamp is already Chicago wall time — its own date
+      const d = YMD_RE.exec(t.slice(0, 10));
+      ymd = d && realYmd(+d[1], +d[2], +d[3]) ? t.slice(0, 10) : null;
+    }
   }
   if (!ymd || !YMD_RE.test(todayYmd)) return null;
   const limit = `${String(+todayYmd.slice(0, 4) + CARD_DUE_MAX_YEARS).padStart(4, "0")}${todayYmd.slice(4)}`;

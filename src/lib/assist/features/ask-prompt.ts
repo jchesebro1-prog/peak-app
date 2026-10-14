@@ -35,8 +35,11 @@ export const ASK_SYSTEM = [
 export function capText(text: string, max: number = ASK_TOOL_RESULT_MAX): string {
   const s = typeof text === "string" ? text : "";
   if (s.length <= max) return s;
-  const note = `\n…[truncated — ${s.length - max} more characters]`;
-  return s.slice(0, Math.max(0, max)).trimEnd() + note;
+  // The note counts toward max: the result is never longer than max.
+  const noteFor = (dropped: number) => `\n…[truncated — ${dropped} more characters]`;
+  // noteFor(s.length) is the longest the note can be (dropped ≤ s.length).
+  const head = s.slice(0, Math.max(0, max - noteFor(s.length).length)).trimEnd();
+  return (head + noteFor(s.length - head.length)).slice(0, Math.max(0, max));
 }
 
 /** An attribute value: one line, no quotes or angle brackets, capped. */

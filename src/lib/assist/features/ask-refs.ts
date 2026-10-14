@@ -48,7 +48,12 @@ export function cleanRefId(id: unknown): string | null {
  * `[[kind:id]]`. The id runs to the first `]`; it may hold spaces and colons
  * (`[[part:Symetrix:Jupiter 4]]`) but no line break or bracket.
  */
-export const REF_TOKEN_RE = /\[\[([a-z]+):([^\]\[\r\n]{1,160})\]\]/g;
+const REF_TOKEN = /\[\[([a-z]+):([^\]\[\r\n]{1,160})\]\]/;
+
+/** A fresh global token regex per call — a shared /g regex would carry `lastIndex` between callers. */
+export function refTokenRe(): RegExp {
+  return new RegExp(REF_TOKEN.source, "g");
+}
 
 export type RefSegment = { text: string } | { ref: AskRef };
 
@@ -67,7 +72,7 @@ export function parseRefTokens(text: string): RefSegment[] {
     else out.push({ text: t });
   };
   let at = 0;
-  for (const m of s.matchAll(REF_TOKEN_RE)) {
+  for (const m of s.matchAll(refTokenRe())) {
     const start = m.index ?? 0;
     pushText(s.slice(at, start));
     const id = cleanRefId(m[2]);

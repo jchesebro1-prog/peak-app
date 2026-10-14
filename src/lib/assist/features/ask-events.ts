@@ -31,7 +31,7 @@ export function toAskEvent(v: unknown): AskEvent | null {
     case "status":
       return str(o.text) ? { t: "status", text: o.text } : null;
     case "ref":
-      return isRefKind(o.kind) && str(o.id) && str(o.title) && str(o.href) && o.href.startsWith("/") && !o.href.startsWith("//")
+      return isRefKind(o.kind) && str(o.id) && str(o.title) && str(o.href) && o.href.startsWith("/") && !/^\/[\\/]/.test(o.href)
         ? { t: "ref", kind: o.kind, id: o.id, title: o.title, href: o.href }
         : null;
     case "text":

@@ -8,7 +8,7 @@
  * reads `?lead=`; the Estimator and the service / consulting / rental
  * builders read `?id=` (quoteBuilderHref's routes).
  */
-import { REF_ID_MAX, type AskRef } from "./ask-refs";
+import { cleanRefId, type AskRef } from "./ask-refs";
 
 export const ASK_PAGE_MAX = 500;
 
@@ -30,12 +30,7 @@ const SEGMENT_PAGES: Record<string, AskRef["kind"]> = {
   "venue-assessments": "survey",
 };
 
-function cleanId(raw: string | null | undefined): string | null {
-  if (typeof raw !== "string") return null;
-  const t = raw.trim();
-  if (!t || t.length > REF_ID_MAX || /[\r\n\]\[]/.test(t)) return null;
-  return t;
-}
+const cleanId = cleanRefId;
 
 export function parsePage(path: string | null | undefined): AskRef | null {
   if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || path.length > ASK_PAGE_MAX) return null;
