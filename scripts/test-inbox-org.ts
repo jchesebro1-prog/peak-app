@@ -2502,7 +2502,7 @@ export async function inboxOrgEntryChecks(ok: Ok): Promise<void> {
   const read = (p: string) => readFileSync(p, "utf8");
 
   /* the VM: shown under the gate, hidden without it */
-  const inbox = E.organizeEntryVM({ available: true, ai: true, toFile: 3, noise: 7, where: { kind: "inbox" } });
+  const inbox = E.organizeEntryVM({ available: true, toFile: 3, strong: 1, noise: 7, where: { kind: "inbox" } });
   ok(
     !!inbox &&
       inbox.tabs.map((t) => `${t.label}:${t.count ?? "-"}:${t.active ? "on" : "off"}`).join(" ") === "Inbox:-:on Organize:3:off Noise:7:off",
@@ -2512,16 +2512,17 @@ export async function inboxOrgEntryChecks(ok: Ok): Promise<void> {
     !!inbox && inbox.tabs[0].href === "/inbox" && inbox.tabs[1].href === "/inbox?view=organize&tab=to-file" && inbox.tabs[2].href === "/inbox?view=organize&tab=noise",
     "entry #345: Inbox → /inbox, Organize → ?view=organize (To file), Noise → ?view=organize&tab=noise (the real tab param)"
   );
-  ok(inbox?.banner?.text === "AI has filing suggestions for 3 emails" && inbox.banner.href === "/inbox?view=organize&tab=to-file" && inbox.banner.count === 3, `entry #345: the banner on the plain inbox (${inbox?.banner?.text})`);
-  ok(E.organizeEntryVM({ available: false, ai: true, toFile: 3, noise: 7, where: { kind: "inbox" } }) === null, "entry #345: without the gate (Organize unavailable) neither the tab row nor the banner renders");
-  ok(E.organizeEntryVM({ available: true, ai: true, toFile: 3, noise: 7, where: { kind: "other" } }) === null, "entry #345: no tab row on Sent / Drafts / other views");
-  const inOrg = E.organizeEntryVM({ available: true, ai: true, toFile: 3, noise: 7, where: { kind: "organize", tab: "to-file" } });
+  ok(inbox?.banner?.text === "3 emails to file · 1 ready to approve" && inbox.banner.href === "/inbox?view=organize&tab=to-file" && inbox.banner.count === 3, `entry #345: the banner on the plain inbox counts what is to file, and how many are ready to approve (${inbox?.banner?.text})`);
+  ok(E.organizeEntryVM({ available: false, toFile: 3, strong: 0, noise: 7, where: { kind: "inbox" } }) === null, "entry #345: without the gate (Organize unavailable) neither the tab row nor the banner renders");
+  ok(E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 7, where: { kind: "other" } }) === null, "entry #345: no tab row on Sent / Drafts / other views");
+  const inOrg = E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 7, where: { kind: "organize", tab: "to-file" } });
   ok(!!inOrg && inOrg.banner === null && inOrg.tabs[1].active && !inOrg.tabs[0].active, "entry #345: inside Organize the tab row shows (Organize active) and the banner doesn't");
-  const inNoise = E.organizeEntryVM({ available: true, ai: false, toFile: 3, noise: 7, where: { kind: "organize", tab: "noise" } });
+  const inNoise = E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 7, where: { kind: "organize", tab: "noise" } });
   ok(!!inNoise && inNoise.tabs[2].active && !inNoise.tabs[1].active, "entry #345: on the Noise tab, Noise is active");
-  ok(E.organizeEntryVM({ available: true, ai: false, toFile: 3, noise: 0, where: { kind: "organize", tab: "filed" } })?.tabs[1].active === true, "entry #345: Filed counts as Organize");
-  ok(E.organizeEntryVM({ available: true, ai: true, toFile: 0, noise: 2, where: { kind: "inbox" } })?.banner === null, "entry #345: no banner with nothing to file (the tab row still shows)");
-  ok(E.bannerText(1, false) === "1 email has filing suggestions" && E.bannerText(4, false) === "4 emails have filing suggestions" && E.bannerText(1, true) === "AI has filing suggestions for 1 email", "entry #345: the banner says AI only for pilot users with Inbox organization on");
+  ok(E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 0, where: { kind: "organize", tab: "filed" } })?.tabs[1].active === true, "entry #345: Filed counts as Organize");
+  ok(E.organizeEntryVM({ available: true, toFile: 0, strong: 0, noise: 2, where: { kind: "inbox" } })?.banner === null, "entry #345: no banner with nothing to file (the tab row still shows)");
+  ok(E.bannerText(1, 0) === "1 email to file" && E.bannerText(4, 0) === "4 emails to file" && E.bannerText(4, 2) === "4 emails to file · 2 ready to approve" && E.bannerText(2, 5) === "2 emails to file · 2 ready to approve", "entry #345: the banner says 'N emails to file' (it counts No match yet rows too, so it never claims they all have a suggestion) and adds '· S ready to approve' only for strong suggestions");
+  ok(!/AI has filing suggestions|have filing suggestions/.test(read("src/app/(app)/inbox/organize/entry.ts").replace(/^\s*(\*|\/\/).*$/gm, "")), "entry #345: the old 'filing suggestions' wording is gone");
   ok(E.bannerShows(3, null) && !E.bannerShows(3, 3) && E.bannerShows(4, 3) && !E.bannerShows(2, 3) && !E.bannerShows(0, null), "entry #345: dismissed for the session — back only when the count grows");
   ok(E.parseDismissed("5") === 5 && E.parseDismissed(null) === null && E.parseDismissed("x") === null && E.parseDismissed("-1") === null && E.parseDismissed("") === null, "entry #345: an unreadable dismissal counts as never dismissed");
 
@@ -2530,12 +2531,12 @@ export async function inboxOrgEntryChecks(ok: Ok): Promise<void> {
   ok(
     page.includes("const organizeEntry = organizeEntryVM({") &&
       page.includes("available: !inboxOrgDisabled(),") &&
-      page.includes("ai: !!assistAll.file,") &&
+      page.includes("strong: organizeCounts.strong,") &&
       page.includes('!isView && box === "personal" && folder === "inbox"') &&
       page.includes("organizeEntry={organizeEntry}"),
-    "entry #345: the Inbox page builds the entry VM (gate = the view's: everyone unless INBOX_ORG_DISABLED; AI wording = pilot + file) and hands it to the shell"
+    "entry #345: the Inbox page builds the entry VM (gate = the view's: everyone unless INBOX_ORG_DISABLED; banner counts To file + strong) and hands it to the shell"
   );
-  ok(page.includes("organizeEntryCounts(user)") && page.includes("count: organizeCounts.toFile"), "entry #345: one comms scan gives the To file + Noise counts; the sidebar row keeps its To file count");
+  ok(page.includes("organizeEntryCounts(user)") && page.includes("count: organizeCounts.toFile") && page.includes("return { toFile: 0, strong: 0, noise: 0 };"), "entry #345: one comms scan gives the To file, strong and Noise counts; the sidebar row keeps its To file count");
   ok(page.includes('cleanupPrompt={str(params.cleanup) === "1" && vm.tab === "to-file"}'), "entry #345: ?cleanup=1 (the brief's link) calls out Organize my inbox");
   const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
   ok(
@@ -2676,6 +2677,56 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
     const viaWork = await changeFiling(old, { work: { type: "quote", id: QUOTE } }, me);
     const vw = await read(old);
     ok(viaWork.ok && vw.link?.id === QUOTE && vw.customerId === null && vw.filing?.customerId === null, "placeholder #345 apply: filing under the quote alone links the quote, never its UNKNOWN customer");
+
+    /* the Gmail contact matcher: a placeholder company is no company (#345 follow-up) */
+    const { resolveSender } = await import("@/lib/gmail/resolve");
+    const { resolveForThread, applyResolution, resweepThreads } = await import("@/lib/gmail/linking");
+    const { resolveCustomerId } = await import("@/lib/stores/comms");
+    const { withoutPlaceholderLink } = await import("@/lib/inbox-org/placeholder");
+    const phSet = async (ids: string[]) => new Set(ids.filter((i) => i === "UNK"));
+    const lk = (hit: { contactId: string; customerId: string } | { ambiguous: string[] } | null, owners: string[] = []) => ({
+      contactByEmail: async () => hit,
+      customersByDomain: async () => owners,
+      placeholderIds: phSet,
+    });
+    const p1 = await resolveSender("pat@school.test", lk({ contactId: "ct1", customerId: "UNK" }));
+    ok(p1.kind === "unknown" && p1.contactId === "ct1", `matcher #345: a contact parked under UNKNOWN resolves to the contact only, no customer (${JSON.stringify(p1)})`);
+    const p2 = await resolveSender("pat@school.test", lk({ contactId: "ct1", customerId: "UNK" }, ["C1"]));
+    ok(p2.kind === "linked" && p2.customerId === "C1" && p2.via === "domain", "matcher #345: …and the domain step may still find the real customer");
+    const p3 = await resolveSender("pat@school.test", lk({ ambiguous: ["UNK", "C1"] }));
+    ok(p3.kind === "linked" && p3.customerId === "C1" && p3.via === "contact", "matcher #345: an address on UNKNOWN and one real customer is that customer, not ambiguous");
+    const p4 = await resolveSender("pat@school.test", lk(null, ["UNK"]));
+    ok(p4.kind === "unknown" && !("contactId" in p4 && p4.contactId), "matcher #345: a domain claimed by UNKNOWN is no claim");
+    const p5 = await resolveSender("pat@school.test", { contactByEmail: async () => ({ contactId: "ct1", customerId: "UNK" }), customersByDomain: async () => [] });
+    ok(p5.kind === "linked" && p5.customerId === "UNK", "matcher #345: without a placeholder lookup the resolver is unchanged (pure default)");
+
+    const CT = fixtureId(345, "ct-unknown");
+    await saveContact({ id: CT, firstName: "Parked", lastName: "Person", homeCompanyId: UNK, title: "" });
+    await setEmails(CT, [{ value: "parked.t345@ph345-school.test", label: "work", isPrimary: true }]);
+    const live = await resolveForThread("parked.t345@ph345-school.test");
+    ok(live.kind === "unknown" && live.contactId === CT, `matcher #345: resolveForThread — the real lookups skip UNKNOWN (${JSON.stringify(live)})`);
+    const probe = { customerId: null, customer: "", resolution: "unknown", resolvedContactId: null, suggestedCustomerId: null, candidates: [] } as unknown as CommThread;
+    await applyResolution(probe, live);
+    ok(probe.customerId === null && probe.resolvedContactId === CT && probe.resolution === "unknown", "matcher #345: applyResolution stamps the contact, no customerId (new mail / stampResolutionOnCreate)");
+    const sweepT = await mk("sweep", { contactName: "Parked Person", contactEmail: "parked.t345@ph345-school.test", messages: [msg({ fromEmail: "parked.t345@ph345-school.test" })] });
+    await resweepThreads({ email: "parked.t345@ph345-school.test" }, { mailboxUser: MO });
+    const swept = await read(sweepT);
+    ok(swept.customerId === null && swept.resolvedContactId === CT && swept.resolution === "unknown", `matcher #345: resweepThreads links the contact, never UNKNOWN (${swept.customerId} · ${swept.resolvedContactId})`);
+    ok((await resolveCustomerId(swept)) === null, "matcher #345: resolveCustomerId — the contact's UNKNOWN home company is no customer");
+    const stamped = await mk("stamped", { customerId: UNK, customer: "UNKNOWN", resolution: "linked", resolvedContactId: CT, contactEmail: "parked.t345@ph345-school.test" });
+    const st = await read(stamped);
+    ok((await resolveCustomerId(st)) === null, "matcher #345: a thread already stamped with UNKNOWN resolves to no customer at read");
+    ok(st.customerId === UNK, "matcher #345: the stored stamp is not rewritten");
+    const view = withoutPlaceholderLink(st, (id) => id === UNK);
+    ok(view.customerId === null && view.customer === "" && view.siteId === null && view.resolution === "unknown" && view !== st && st.customerId === UNK, "matcher #345: the reader's view of a stamped thread shows no customer link (a copy — stored data untouched)");
+    const sugg = withoutPlaceholderLink({ customerId: null, resolution: "suggested" as "suggested" | "unknown", suggestedCustomerId: UNK, candidates: [{ customerId: UNK, name: "UNKNOWN" }, { customerId: REAL, name: "Real" }] }, (id) => id === UNK);
+    ok(sugg.suggestedCustomerId === null && sugg.resolution === "unknown" && sugg.candidates?.length === 1, "matcher #345: a placeholder domain guess or candidate is dropped too");
+    const realT = { customerId: REAL, customer: "Real", resolution: "linked" as const };
+    ok(withoutPlaceholderLink(realT, (id) => id === UNK) === realT, "matcher #345: a real link is returned untouched");
+    const pageSrc = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
+    ok(pageSrc.includes("const sel = selRaw ? withoutPlaceholderLink(selRaw, (id) => isPlaceholderCompany(placeholderNames.get(id))) : null;"), "matcher #345: the Inbox reader reads the thread through withoutPlaceholderLink");
+    await db.delete(contactEmails).where(eq(contactEmails.contactId, CT));
+    await db.delete(contacts).where(eq(contacts.id, CT));
   } finally {
     await dropFixtures(345);
     await db.delete(companies).where(eq(companies.id, UNK));

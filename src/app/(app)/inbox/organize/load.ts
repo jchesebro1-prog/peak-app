@@ -15,6 +15,7 @@
 import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
 import { inInbox, isNoiseRow, isStrongRow, isToFileRow, toFileThreads } from "@/lib/inbox-org/apply";
 import { isPlaceholderCompany, withoutPlaceholderCustomer } from "@/lib/inbox-org/placeholder";
+import { placeholderCompanyIds } from "@/lib/identity/companies";
 import type { ReaderOrgVM } from "../types";
 import {
   courtChipLabel,
@@ -236,15 +237,23 @@ export async function organizeToFileCount(me: { name: string }): Promise<number>
   return (await toFileThreads(me)).length;
 }
 
-/** #345 — the Inbox's Organize entry points (tab row, banner): my To file and
- *  Noise counts, one comms scan (the same rules as the Organize tabs). */
-export async function organizeEntryCounts(me: { name: string }): Promise<{ toFile: number; noise: number }> {
+/** #345 — the Inbox's Organize entry points (tab row, banner): my To file,
+ *  strong (Approve all strong's rows) and Noise counts — one comms scan, the
+ *  same rules as the Organize tabs; a strong suggestion under a placeholder
+ *  company ("UNKNOWN" …) isn't strong, as in the Organize view. */
+export async function organizeEntryCounts(me: { name: string }): Promise<{ toFile: number; strong: number; noise: number }> {
   let toFile = 0;
   let noise = 0;
+  const strongRows: CommThread[] = [];
   for (const t of await allThreads()) {
     if (!visibleTo(t, me.name)) continue;
-    if (isToFileRow(t)) toFile++;
+    if (isToFileRow(t)) {
+      toFile++;
+      if (isStrongRow(t)) strongRows.push(t);
+    }
     if (isNoiseRow(t)) noise++;
   }
-  return { toFile, noise };
+  const placeholders = await placeholderCompanyIds(strongRows.map((t) => t.filing?.customerId));
+  const strong = strongRows.filter((t) => isStrongRow({ filing: t.filing ? withoutPlaceholderCustomer(t.filing, (id) => placeholders.has(id)) : t.filing })).length;
+  return { toFile, strong, noise };
 }

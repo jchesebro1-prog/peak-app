@@ -12276,7 +12276,7 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 
 **Remaining:** slices B and C, plus the Jeff-gated items above.
 
-## 345. Inbox Organize is hard to find, and it suggests junk companies ("UNKNOWN") — DONE 2026-10-14 on `worktree-assist-layer` (D1033–D1036)
+## 345. Inbox Organize is hard to find, and it suggests junk companies ("UNKNOWN") — DONE 2026-10-14 on `worktree-assist-layer` (D1033–D1037)
 
 Jeff (Oct 14): on a computer he couldn't find Organize or "Organize my inbox"; two of his three suggestions pointed at a company named "UNKNOWN".
 
@@ -12288,13 +12288,14 @@ Jeff (Oct 14): on a computer he couldn't find Organize or "Organize my inbox"; t
 
 **Built:**
 - **Tab row** at the top of the Inbox list, desktop and phone: Inbox · Organize (N) · Noise (N) (D1033).
-- **Banner** on the plain inbox: "AI has filing suggestions for N emails — Review", dismissed per session, back when the count grows (D1034).
+- **Banner** on the plain inbox: "N emails to file · S ready to approve — Review" (the second part only when some carry a strong suggestion), dismissed per session, back when the count grows (D1034).
 - **Daily brief:** "N emails to file · M noise — Review", plus "Organize my inbox" / "Finish organizing my inbox" while the 90-day cleanup was never run or is unfinished. It lands on To file with the button called out, and never starts the run by itself (D1035).
 - All three show whenever Organize is available, which is the view's own rule: everyone, unless `INBOX_ORG_DISABLED`. The sidebar row and the select option stay.
 - **Placeholder companies** (`isPlaceholderCompany`: UNKNOWN / UKN / TBD / N/A / NA / None / Test, whole name) are skipped by the sender-rule, identity and number steps, the AI candidate list, the Link / Change… company search and every filing write. Suggestions already stored under one read as "No match yet". The app no longer creates or applies `Peak/Customers/<placeholder>` Gmail labels (it did before); a label like that applied in Gmail links nothing. Company records are untouched (D1036).
+- **Gmail contact matcher:** a sender filed under a placeholder resolves to the contact only, with no `customerId` (import, create, resweep). Threads already stamped with UNKNOWN keep their stored data, but the reader shows no customer link for them (D1037).
 - **Tests:** `scripts/test-inbox-org.ts` (`inboxOrgEntryChecks`, `inboxOrgPlaceholderChecks`, both chained into test:specs) and `scripts/test-brief.ts` (`briefOrganizeEntryChecks`). No migration, no env var.
 
 **Follow-ups / Jeff-gated:**
 - The existing `Peak/Customers/UNKNOWN` label in Gmail stays on the threads that carry it. Remove or delete it in Gmail if you want it gone.
-- The Gmail identity resolver still auto-links a contact parked under UNKNOWN to UNKNOWN (`thread.customerId`). Filing ignores that link, but the reader still shows the thread as linked to UNKNOWN. The real fix is re-homing those Daylite contacts, or teaching `resolveForThread` to skip placeholders.
+- Re-homing the Daylite contacts parked under UNKNOWN onto their real companies is still worth doing: until then their mail links to the contact only, with no customer.
 - The new tab row and banner show for the whole team, not only the pilot, because the view was never pilot-only. Say if you want them pilot-only.

@@ -4,10 +4,11 @@
  *
  *  - the tab row above the list — Inbox · Organize (N) · Noise (N) — on the
  *    plain inbox and inside Organize;
- *  - the banner on the plain inbox — "AI has filing suggestions for N emails
- *    — Review" (pilot users with Inbox organization on; everyone else reads
- *    "N emails have filing suggestions") — dismissed for the browser session
- *    and back when the To file count grows past the dismissed count.
+ *  - the banner on the plain inbox — "N emails to file · S ready to approve
+ *    — Review" (the second part only when some carry a strong suggestion; the
+ *    count includes "No match yet" rows, so it never claims they all have a
+ *    suggestion) — dismissed for the browser session and back when the To
+ *    file count grows past the dismissed count.
  *
  * Both are shown only when Organize is available — the same rule as the view
  * itself: every signed-in user has it (rule filing runs for everyone, D884–
@@ -50,16 +51,18 @@ export function emailsLabel(n: number): string {
   return `${n} email${n === 1 ? "" : "s"}`;
 }
 
-export function bannerText(count: number, ai: boolean): string {
-  return ai ? `AI has filing suggestions for ${emailsLabel(count)}` : `${emailsLabel(count)} ${count === 1 ? "has" : "have"} filing suggestions`;
+/** "3 emails to file", plus " · 1 ready to approve" when some carry a strong suggestion. */
+export function bannerText(count: number, strong: number): string {
+  const s = Math.min(Math.max(0, Math.floor(strong || 0)), count);
+  return `${emailsLabel(count)} to file${s > 0 ? ` · ${s} ready to approve` : ""}`;
 }
 
 export function organizeEntryVM(input: {
   /** Organize is available to this user (see the header) */
   available: boolean;
-  /** Assist pilot with Inbox organization (`file`) on — the banner says "AI" */
-  ai: boolean;
   toFile: number;
+  /** To file rows with a strong suggestion (Approve all strong takes them) */
+  strong: number;
   noise: number;
   where: EntryWhere;
 }): OrganizeEntryVM | null {
@@ -72,7 +75,7 @@ export function organizeEntryVM(input: {
     { key: "organize", label: "Organize", count: toFile, href: ORGANIZE_TO_FILE_HREF, active: w.kind === "organize" && w.tab !== "noise" },
     { key: "noise", label: "Noise", count: noise, href: ORGANIZE_NOISE_HREF, active: w.kind === "organize" && w.tab === "noise" },
   ];
-  const banner = w.kind === "inbox" && toFile > 0 ? { count: toFile, text: bannerText(toFile, input.ai), href: ORGANIZE_TO_FILE_HREF } : null;
+  const banner = w.kind === "inbox" && toFile > 0 ? { count: toFile, text: bannerText(toFile, input.strong), href: ORGANIZE_TO_FILE_HREF } : null;
   return { tabs, banner };
 }
 

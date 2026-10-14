@@ -14,6 +14,7 @@ import {
   setEmails,
 } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
+import { placeholderCompanyIds } from "@/lib/identity/companies";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommLink, CommThread, LinkedBy } from "@/lib/stores/comms";
 import { domainOf, isPublicDomain } from "./config";
@@ -27,6 +28,8 @@ export async function resolveForThread(email: string): Promise<Resolution> {
   return resolveSender(email, {
     contactByEmail,
     customersByDomain: async (d) => (await customersForDomain(d)).map((r) => r.customerId),
+    // #345 — a placeholder company ("UNKNOWN" …) is no company
+    placeholderIds: placeholderCompanyIds,
   });
 }
 
@@ -59,6 +62,8 @@ export async function applyResolution(t: CommThread, r: Resolution): Promise<voi
     t.resolution = "unknown";
     t.suggestedCustomerId = null;
     t.candidates = [];
+    // #345 — a contact whose only company is a placeholder: the contact, no customer
+    if (r.kind === "unknown" && r.contactId) t.resolvedContactId = r.contactId;
   }
 }
 
@@ -139,17 +144,27 @@ export async function resweepThreads(
     contactsByEmails(addresses),
     customersForDomains(addresses.map(domainOf)),
   ]);
+  // #345 — placeholder companies among every candidate customer, one query
+  const placeholders = await placeholderCompanyIds([
+    ...[...contactHits.values()].flatMap((h) => (!h ? [] : "ambiguous" in h ? h.ambiguous : [h.customerId])),
+    ...[...domainOwners.values()].flat(),
+  ]);
   const lookups = {
     contactByEmail: async (e: string) => contactHits.get(e) ?? null,
     customersByDomain: async (d: string) => domainOwners.get(d) ?? [],
+    placeholderIds: async (ids: string[]) => {
+      const out = new Set<string>();
+      for (const id of ids) if (placeholders.has(id)) out.add(id);
+      return out;
+    },
   };
   let changed = 0;
   for (const t of candidates) {
     const r = await resolveSender(resolveAddressFor(t), lookups);
-    const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates]);
+    const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates, t.resolvedContactId ?? null]);
     const next = { ...t };
     await applyResolution(next, r);
-    const after = JSON.stringify([next.customerId, next.resolution, next.suggestedCustomerId, next.candidates]);
+    const after = JSON.stringify([next.customerId, next.resolution, next.suggestedCustomerId, next.candidates, next.resolvedContactId ?? null]);
     if (before === after) continue;
     let didPatch = false;
     await patchDoc<CommThread>("comms", t.id, (d) => {

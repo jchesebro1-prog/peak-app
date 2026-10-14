@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { CODE_RE } from "@/lib/assessments/codes";
+import { isPlaceholderCompany } from "@/lib/inbox-org/placeholder";
 import { getDb } from "@/db";
 import {
   companies,
@@ -23,6 +24,17 @@ export async function allCompanies(opts?: {
     ? await db.select().from(companies)
     : await db.select().from(companies).where(eq(companies.deleted, false));
   return rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
+/** #345 — which of `ids` are placeholder companies ("UNKNOWN", "TBD" …,
+ *  `isPlaceholderCompany`), one query. Deleted rows count by name too: a
+ *  placeholder is never a link target either way. */
+export async function placeholderCompanyIds(ids: readonly (string | null | undefined)[]): Promise<Set<string>> {
+  const want = Array.from(new Set(ids.filter((x): x is string => !!x)));
+  if (!want.length) return new Set();
+  const db = await getDb();
+  const rows = await db.select({ id: companies.id, name: companies.name }).from(companies).where(inArray(companies.id, want));
+  return new Set(rows.filter((r) => isPlaceholderCompany(r.name)).map((r) => r.id));
 }
 
 export async function getCompany(

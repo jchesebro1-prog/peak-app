@@ -47,3 +47,39 @@ export function withoutPlaceholderCustomer<F extends FilingLike>(f: F, isPlaceho
   }
   return out;
 }
+
+type LinkLike = {
+  customerId?: string | null;
+  customer?: string;
+  siteId?: string | null;
+  resolution?: "linked" | "suggested" | "ambiguous" | "unknown" | null;
+  suggestedCustomerId?: string | null;
+  candidates?: Array<{ customerId: string; name: string }>;
+};
+
+/**
+ * A thread as the Inbox reader should show it: a stored link to a
+ * placeholder company (stamped by the contact matcher before #345) reads as
+ * no customer — its venue with it — and a placeholder domain guess or
+ * candidate is dropped. Read-only: the stored thread is never rewritten.
+ * Returns the same object when there is nothing to drop.
+ */
+export function withoutPlaceholderLink<T extends LinkLike>(t: T, isPlaceholderId: (id: string) => boolean): T {
+  const linked = !!t.customerId && isPlaceholderId(t.customerId);
+  const suggested = !!t.suggestedCustomerId && isPlaceholderId(t.suggestedCustomerId);
+  const cands = (t.candidates || []).filter((c) => !isPlaceholderId(c.customerId));
+  if (!linked && !suggested && cands.length === (t.candidates || []).length) return t;
+  const out: T = { ...t };
+  if (linked) {
+    out.customerId = null;
+    out.customer = "";
+    out.siteId = null;
+    if (out.resolution === "linked") out.resolution = "unknown";
+  }
+  if (suggested) {
+    out.suggestedCustomerId = null;
+    if (out.resolution === "suggested") out.resolution = "unknown";
+  }
+  if (t.candidates) out.candidates = cands;
+  return out;
+}

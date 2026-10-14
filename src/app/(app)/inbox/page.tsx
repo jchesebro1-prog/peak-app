@@ -99,6 +99,7 @@ import OrganizeBox from "./organize/organize-box";
 import { buildReaderOrg, loadOrganize, organizeEntryCounts } from "./organize/load";
 import { organizeEntryVM } from "./organize/entry";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { isPlaceholderCompany, withoutPlaceholderLink } from "@/lib/inbox-org/placeholder";
 import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
 import { ORGANIZE_BASE_HREF, organizeTabOf } from "./organize/format";
 import { getTask } from "@/lib/stores/tasks";
@@ -362,7 +363,7 @@ export default async function InboxPage({
     meetingsReadOr(toFileCount(user.id), 0, "inbox count"),
     organizeEntryCounts(user).catch((err) => {
       console.error("[inbox-org] To file count failed", err);
-      return { toFile: 0, noise: 0 };
+      return { toFile: 0, strong: 0, noise: 0 };
     }),
   ]);
 
@@ -690,11 +691,16 @@ export default async function InboxPage({
     ? threads.find((t) => t.status !== "draft") || null
     : null;
   // Organize opens only the thread a row points at — and only one of mine
-  const sel = isMeetings
+  const selRaw = isMeetings
     ? null
     : isOrganize
       ? explicitThread && visibleTo(explicitThread, me) && !explicitThread.deleted ? explicitThread : null
       : explicitThread ?? autoThread;
+  // #345 — a link the contact matcher stamped to a placeholder company
+  // ("UNKNOWN" …) before it learned to skip them reads as no customer here;
+  // the stored thread is left as it is
+  const placeholderNames = new Map(customers.map((c) => [c.id, c.name]));
+  const sel = selRaw ? withoutPlaceholderLink(selRaw, (id) => isPlaceholderCompany(placeholderNames.get(id))) : null;
 
   let reader: ReaderVM | null = null;
   if (sel) {
@@ -1292,11 +1298,11 @@ export default async function InboxPage({
 
   // #345 — Organize's entry points above the list (tab row + banner): on the
   // plain inbox and inside Organize, whenever Organize is available (everyone,
-  // unless INBOX_ORG_DISABLED); "AI" in the banner only with Inbox organization on.
+  // unless INBOX_ORG_DISABLED). The banner says "N emails to file · S ready to approve".
   const organizeEntry = organizeEntryVM({
     available: !inboxOrgDisabled(),
-    ai: !!assistAll.file,
     toFile: organizeCounts.toFile,
+    strong: organizeCounts.strong,
     noise: organizeCounts.noise,
     where: isOrganize
       ? { kind: "organize", tab: organizeTab }
