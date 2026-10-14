@@ -4,7 +4,7 @@
    (one row per section) — #342, extracted from assessments/[id]/scope-rail.tsx. A row is a progress ring, a label,
    done/total and badges. Below 760 px wide the rail hides and a sticky <select> takes its place. Include
    SECTION_RAIL_CSS once in the page's <style>. */
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 export type RailBadge = { tone: "prompt" | "photo"; n: number; title: string; text: string };
 export type RailItem = { key: string; label: string; done: number; total: number; badges?: RailBadge[]; muted?: boolean };
@@ -62,7 +62,7 @@ export function railSheetLabel(item: RailItem, showEmpty = false): string {
 }
 
 export function SectionRail({
-  items, active, onPick, ariaLabel, sheetLabel, footer, top, showEmpty = false,
+  items, active, onPick, ariaLabel, sheetLabel, footer, top, maxHeight, showEmpty = false,
 }: {
   items: RailItem[];
   active: string;
@@ -72,10 +72,25 @@ export function SectionRail({
   footer?: ReactNode;
   /** sticky offset (px) under a sticky page header */
   top?: number;
+  /** cap the desktop rail's height (px); a taller list scrolls inside the rail instead of running past the pane */
+  maxHeight?: number;
   /** show the ring and 0/0 for items without fields (the engine's scopes) */
   showEmpty?: boolean;
 }) {
   const stick = top != null ? { top } : undefined;
+  const navRef = useRef<HTMLElement | null>(null);
+  // keep the active row inside the rail's own scroll area (sets the nav's scrollTop only — never scrolls the page)
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav || maxHeight == null) return;
+    const row = nav.querySelector<HTMLElement>(".sr-rail-row.on");
+    if (!row || nav.clientHeight === 0) return;
+    const rowTop = row.offsetTop - nav.offsetTop;
+    const rowBottom = rowTop + row.offsetHeight;
+    if (rowTop < nav.scrollTop) nav.scrollTop = rowTop - 6;
+    else if (rowBottom > nav.scrollTop + nav.clientHeight) nav.scrollTop = rowBottom - nav.clientHeight + 6;
+  }, [active, maxHeight]);
+  const navStyle = maxHeight != null ? { ...stick, maxHeight, overflowY: "auto" as const } : stick;
   return (
     <>
       <div className="sr-rail-sheet" style={stick}>
@@ -83,7 +98,7 @@ export function SectionRail({
           {items.map((it) => <option key={it.key} value={it.key}>{railSheetLabel(it, showEmpty)}</option>)}
         </select>
       </div>
-      <nav className="sr-rail pk-card" aria-label={ariaLabel} style={stick}>
+      <nav ref={navRef} className="sr-rail pk-card" aria-label={ariaLabel} style={navStyle}>
         {items.map((it) => {
           const counted = it.total > 0 || showEmpty;
           return (

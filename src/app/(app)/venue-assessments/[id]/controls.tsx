@@ -271,12 +271,24 @@ export default function SurveyEditor({
   const headRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [headH, setHeadH] = useState(128);
+  const [railMax, setRailMax] = useState(600);
   useEffect(() => {
     const el = headRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setHeadH(Math.round(el.getBoundingClientRect().height)));
+    if (!el) return;
+    const main = el.closest("main");
+    // the rail may be at most the scroll pane's height minus the sticky header and its gaps (#342 A8)
+    const measure = () => {
+      setHeadH(Math.round(el.getBoundingClientRect().height));
+      const paneH = main ? main.clientHeight : window.innerHeight;
+      setRailMax(Math.max(200, paneH - Math.round(el.getBoundingClientRect().height) - 24));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    if (typeof ResizeObserver === "undefined") return () => window.removeEventListener("resize", measure);
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    if (main) ro.observe(main);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1052,7 +1064,7 @@ export default function SurveyEditor({
       <div className="sv-pad" style={{ padding: "20px 24px 90px" }}>
         <div className={layoutMode === "long" ? "va-layout" : undefined} style={layoutMode === "long" ? undefined : { maxWidth: 900, margin: "0 auto" }}>
           {layoutMode === "long" && (
-            <SectionRail items={railItems} active={shownActive} onPick={pickFromRail} ariaLabel="Sections" sheetLabel="Jump to section" top={headH + 12} />
+            <SectionRail items={railItems} active={shownActive} onPick={pickFromRail} ariaLabel="Sections" sheetLabel="Jump to section" top={headH + 12} maxHeight={railMax} />
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

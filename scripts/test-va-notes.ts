@@ -262,6 +262,11 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
 
   const listSrc = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/page.tsx"), "utf8");
   ok(/sp\.tag/.test(listSrc) && listSrc.includes("internalTags") && listSrc.includes("resolveSurveyTags"), "#342 A5: the list filters by internal tag");
+
+  const railSrc = readFileSync(join(process.cwd(), "src/components/section-rail/section-rail.tsx"), "utf8");
+  const ctlRail = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
+  ok(/maxHeight\?: number/.test(railSrc) && railSrc.includes("overflowY") && ctlRail.includes("maxHeight={railMax}"),
+    "#342 A8: the rail scrolls inside its own column when taller than the pane");
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
