@@ -26,7 +26,8 @@ export async function documentAddressee(
   const company = await getCompany(party.companyId);
   if (!company) return null;
   const contact = (await getContact(party.contactId)) ?? (await contactsForCompany(party.companyId))[0] ?? null;
-  const ownerName = (q.customer || "").trim() || (await getCompany(q.customerId))?.name || "";
+  // Live company name first, the denormalized q.customer as fallback — quoteDocumentDataFor's `cust?.name || q.customer` order.
+  const ownerName = ((await getCompany(q.customerId))?.name || q.customer || "").trim();
   return {
     companyName: company.name,
     contactName: contact ? displayName(contact) : "",

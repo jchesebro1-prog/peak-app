@@ -492,7 +492,17 @@ export const QUOTE_CONTENT_FIELDS = [
 /** A comparable key of what the customer document shows. Pure. */
 export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
   const rec = (q || {}) as Record<string, unknown>;
-  return JSON.stringify(QUOTE_CONTENT_FIELDS.map((k) => rec[k] ?? null));
+  return JSON.stringify(
+    QUOTE_CONTENT_FIELDS.map((k) => {
+      // #348 2b-i: `bid` prints only once awarded (Prepared for + the bid line need an addressee), so only an
+      // awarded bid counts as content — pre-award bid edits never stale the PDF; award / undo / post-award edits do.
+      if (k === "bid") {
+        const bid = rec.bid as { awardedPartyId?: string | null } | null | undefined;
+        return bid?.awardedPartyId ? bid : null;
+      }
+      return rec[k] ?? null;
+    })
+  );
 }
 
 /** #293 slice 3 (spec §1.5) — the non-payload fields the customer document

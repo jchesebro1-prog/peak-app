@@ -85,8 +85,9 @@ export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
 async function mutate(
   quoteRef: unknown | (() => Promise<unknown>),
   run: (userId: string) => Promise<{ ok: boolean; error?: string; note?: string }>,
-  /** #348 2b-i: the write changes what the customer document prints (bid is content) → re-render the PDF. */
-  rerender = false
+  /** #348 2b-i: the write can change what the customer document prints → re-render the PDF. `true` = always;
+   *  `"if-awarded"` = only when the quote currently has an award (due date / addenda print only with an addressee). */
+  rerender: boolean | "if-awarded" = false
 ): Promise<BidPanelResult> {
   const user = await requireUser();
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
@@ -95,7 +96,7 @@ async function mutate(
   const r = await run(user.id);
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
   revalidatePath("/", "layout");
-  if (rerender) await scheduleQuotePdf(quoteId);
+  if (rerender === true || (rerender === "if-awarded" && !!(await getQuote(quoteId))?.bid?.awardedPartyId)) await scheduleQuotePdf(quoteId);
   const panel = await loadPanel(quoteId, true);
   return panel.ok && r.note ? { ...panel, note: r.note } : panel;
 }
@@ -108,7 +109,7 @@ async function quoteOfBidder(partyId: unknown): Promise<string | null> {
 }
 
 export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidPanelResult> {
-  return mutate(quoteId, () => setBidDetails(quoteId, raw), true);
+  return mutate(quoteId, () => setBidDetails(quoteId, raw), "if-awarded");
 }
 
 export async function addBidderAction(

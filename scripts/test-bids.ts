@@ -253,7 +253,7 @@ export async function bidDbChecks(ok: Ok) {
     const q2 = await getQuote(q);
     ok(keepAdd.ok && q2?.bid?.dueAt === T + 3600_000 && q2.bid.addenda.length === 1, "bids db: a missing addenda key keeps the stored addenda");
     ok(q2?.updatedAt === q1?.updatedAt && q2?.updatedAt === q0?.updatedAt, "bids db: a bid edit doesn't bump updatedAt (no version bump)");
-    ok(typeof q1?.contentChangedAt === "number" && (q2?.contentChangedAt ?? 0) >= q1.contentChangedAt && q0?.contentChangedAt == null, "bids db: bid is content — a bid edit stamps contentChangedAt (the PDF re-renders)");
+    ok(q0?.contentChangedAt == null && q1?.contentChangedAt === q0?.contentChangedAt && q2?.contentChangedAt === q0?.contentChangedAt, "bids db: a pre-award bid edit leaves contentChangedAt unchanged (nothing prints, no stale PDF)");
     await setBidDetails(q, { addenda: q2?.bid?.addenda ?? [] });
     ok((await getQuote(q))?.bid?.dueAt === T + 3600_000, "bids db: a missing dueAt key keeps the stored due date");
     await setBidDetails(q, { dueAt: T });
@@ -310,7 +310,8 @@ export async function bidDbChecks(ok: Ok) {
     const ad2 = await documentAddressee(qa, g2);
     ok(!!ad2 && ad2.companyName === "Bid GC Two" && ad2.contactName === "", "addressee db: a bidder with no contact and none at the company → no contact");
     const adOther = await documentAddressee(qa, wpId);
-    ok((await documentAddressee(qa, "pty_nope")) === null && (await documentAddressee(qa, (await listFor("quote", q)).find((p) => p.role === "owner")?.id)) === null && adOther === null, "addressee db: a non-bidder, the owner row, another quote's party or an unknown id → null");
+    const ownerRow = (await listFor("quote", q)).find((p) => p.role === "owner");
+    ok(!!ownerRow && (await documentAddressee(qa, "pty_nope")) === null && (await documentAddressee(qa, ownerRow.id)) === null && adOther === null, "addressee db: a non-bidder, the owner row, another quote's party or an unknown id → null");
     const dN = quoteDocumentDataFor(qa as never, null, settings), dNull = quoteDocumentDataFor(qa as never, null, settings, null), dA = quoteDocumentDataFor(qa as never, null, settings, ad1);
     ok(JSON.stringify(dN) === JSON.stringify(dNull) && dN.ownerLine === "" && dN.bidLine === "", "addressee db: a null addressee is byte-identical to the 3-arg call");
     ok(dA.custName === "Bid GC One" && dA.ownerLine === "Owner: Bid Owner" && dA.venueLabel === dN.venueLabel && dA.hasAttn && dA.attnLine === "Gee Ceeone" && dA.bidLine === ad1?.bidLine, "addressee db: the document is addressed to the bidder; the venue still resolves from the owner");
@@ -325,10 +326,15 @@ export async function bidDbChecks(ok: Ok) {
     const after = await getQuote(q);
     const bidders = await listBidders(q);
     ok(aw.ok && after?.bid?.awardedPartyId === g1, "bids db: award stamps the quote");
+    ok(typeof after?.contentChangedAt === "number" && after.contentChangedAt !== before?.contentChangedAt && after.updatedAt === before?.updatedAt, "bids db: award advances contentChangedAt and leaves updatedAt unchanged");
     const awAd = await documentAddressee(after as never);
     ok(awAd?.companyName === "Bid GC One" && (await documentAddressee(after as never, "pty_nope"))?.companyName === "Bid GC One" && (await documentAddressee(after as never, g2))?.companyName === "Bid GC Two", "addressee db: the awarded bidder is the default; an invalid id falls back to it; an explicit bidder wins");
     ok(bidders.find((b) => b.id === g1)?.bid.result === "awarded" && bidders.find((b) => b.id === g2)?.bid.result === "lost" && bidders.find((b) => b.id === g2)?.bid.lostByAward === true, "bids db: winner awarded, the rest lost by award");
     ok(after?.customerId === before?.customerId && after?.pricingTier === before?.pricingTier && after?.tierMargin === before?.tierMargin && after?.customer === before?.customer, "bids db: award never changes the customer or tier");
+    const postAwardAt = after?.contentChangedAt ?? 0;
+    await new Promise((r) => setTimeout(r, 5));
+    ok((await setBidDetails(q, { dueAt: T + 7200_000 })).ok && ((await getQuote(q))?.contentChangedAt ?? 0) > postAwardAt, "bids db: a post-award bid edit advances contentChangedAt");
+    await setBidDetails(q, { dueAt: T });
     const again = await awardBid(q, g1);
     ok(!again.ok && /already awarded/.test(again.error), "bids db: a second award is refused");
     const wd = await updateBidder(g1, { result: "withdrew" });
