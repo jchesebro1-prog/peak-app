@@ -19,6 +19,11 @@ import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getDocument } from "@/lib/stores/documents";
+import { acceptanceLine, chicagoDayEnd, cleanPoNumber, RESPONSE_NAME_MAX, RESPONSE_TITLE_MAX, responseAssignees, type RosterUser } from "@/lib/estimate-output/responses";
+import { cleanText } from "@/lib/document-files";
+import { displayQuoteNumber } from "@/lib/estimate-number";
+import { createTask } from "@/lib/stores/tasks";
+import { allUsers } from "@/lib/users";
 import type { CartLine } from "@/lib/portal-cart-types";
 import { addLine, clearCart, getCart, type PortalCart } from "@/lib/stores/portal-carts";
 import {
@@ -207,6 +212,10 @@ export const ACCEPT_METHOD_COPY = "Pick how you'll purchase.";
 export const ACCEPT_CARD_COPY = "Don't enter card numbers — we'll call you to take payment.";
 export const ACCEPT_NOTES_LENGTH_COPY = "Keep purchasing notes under 1,000 characters.";
 export const ACCEPT_PO_FILE_COPY = "That purchase order file couldn't be attached — try uploading it again.";
+/** Jeff 2026-10-15 #15 — accepting online is signed: the signer's typed name and title, an optional PO number. */
+export const ACCEPT_SIGNER_NAME_COPY = "Type your name to accept.";
+export const ACCEPT_SIGNER_TITLE_COPY = "Type your title to accept.";
+export const ACCEPT_PO_NUMBER_COPY = "Check the PO number — 60 characters at most, and never a card number.";
 const ACCEPT_RATE_COPY = "You've tried to accept several times — try again later, or call us.";
 const ACCEPT_FAIL_COPY = "Couldn't accept this quote — try again.";
 export const ACCEPT_LIMIT = 10;
@@ -219,8 +228,9 @@ const ACCEPT_WINDOW_MS = 3_600_000;
  *  can't accept at all doesn't need the card warning). */
 export async function acceptPortal(
   session: PortalSession | null,
-  input: { quoteId: string; purchaseMethod: string; notes: string; poDocumentId: string | null },
-  now: number = Date.now()
+  input: { quoteId: string; purchaseMethod: string; notes: string; poDocumentId: string | null; signerName?: string; signerTitle?: string; poNumber?: string },
+  now: number = Date.now(),
+  deps: { notify?: (q: Quote, acceptance: { signerName: string; signerTitle: string; poNumber: string }, now: number) => Promise<void> } = {}
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
   const q = await getQuote(input.quoteId);
@@ -255,6 +265,14 @@ export async function acceptPortal(
     poDocumentId = doc.id;
   }
 
+  // Jeff 2026-10-15 #15: the signer's typed name and title are required; the PO number is optional (never a card).
+  const signerName = cleanText(input.signerName, RESPONSE_NAME_MAX);
+  if (!signerName) return { ok: false, error: ACCEPT_SIGNER_NAME_COPY };
+  const signerTitle = cleanText(input.signerTitle, RESPONSE_TITLE_MAX);
+  if (!signerTitle) return { ok: false, error: ACCEPT_SIGNER_TITLE_COPY };
+  const poNumber = cleanPoNumber(input.poNumber);
+  if (poNumber === null) return { ok: false, error: ACCEPT_PO_NUMBER_COPY };
+
   if (!rateLimit("portal-accept:" + session.grantId, ACCEPT_LIMIT, ACCEPT_WINDOW_MS).ok) {
     return { ok: false, error: ACCEPT_RATE_COPY };
   }
@@ -267,13 +285,64 @@ export async function acceptPortal(
         purchaseMethod: input.purchaseMethod as (typeof PURCHASE_METHODS)[number],
         notes,
         poDocumentId,
+        signerName,
+        signerTitle,
+        ...(poNumber ? { poNumber } : {}),
       },
       portalDecline: null,
     });
-    return { ok: true };
   } catch (e) {
     console.error("acceptPortal failed", q.id, e);
     return { ok: false, error: ACCEPT_FAIL_COPY };
+  }
+  // The Lead estimator hears about it (a bell to-do — see notifyPortalAcceptance). Never fails the accept.
+  try {
+    await (deps.notify ?? notifyPortalAcceptance)(q, { signerName, signerTitle, poNumber }, now);
+  } catch (e) {
+    console.error("[portal-accept] notify failed", q.id, e instanceof Error ? e.message : e);
+  }
+  return { ok: true };
+}
+
+/**
+ * Jeff 2026-10-15 #15 — tell the Lead estimator a customer accepted online:
+ * "Accepted by <name>, <title> — PO <po>". The app has no system / sender
+ * mailbox to email from (every outbound email is a person's own Gmail), so
+ * the notice is a to-do for the Lead estimator — their bell and Home queue —
+ * falling back to every active approver when the lead isn't on the roster
+ * (the client-link rule, responseAssignees). Emailing it needs a sender
+ * mailbox first (PUNCHLIST). Each assignee on its own: one failing never
+ * stops the rest.
+ */
+export async function notifyPortalAcceptance(
+  q: Quote,
+  a: { signerName: string; signerTitle: string; poNumber: string },
+  now: number,
+  deps: { users?: () => Promise<RosterUser[]>; createTask?: typeof createTask } = {}
+): Promise<void> {
+  const users = await (deps.users ?? allUsers)();
+  const make = deps.createTask ?? createTask;
+  const line = acceptanceLine({ name: a.signerName, title: a.signerTitle, po: a.poNumber });
+  const number = displayQuoteNumber(q);
+  for (const u of responseAssignees(q.owner, q.preparedBy, users)) {
+    try {
+      await make(
+        {
+          title: `${number} accepted online — ${line}`.slice(0, 300),
+          section: "Review",
+          quoteId: q.id,
+          assigneeUserId: u.id,
+          assigneeName: u.name,
+          dueAt: chicagoDayEnd(now),
+          notes: `${line}.\n${q.name || number} was accepted in the customer portal. Confirm it, then mark the quote Won.`,
+          ...(q.customerId ? { customerId: q.customerId } : {}),
+          ...(q.leadId ? { leadId: q.leadId } : {}),
+        },
+        { id: "system", name: "Customer portal" }
+      );
+    } catch (e) {
+      console.error("[portal-accept] task failed", q.id, e instanceof Error ? e.message : e);
+    }
   }
 }
 

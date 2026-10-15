@@ -267,6 +267,10 @@ export type Quote = {
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
+    /** Jeff 2026-10-15 #15 — who signed it online (typed; required on every new acceptance) and an optional PO #. */
+    signerName?: string;
+    signerTitle?: string;
+    poNumber?: string;
   } | null;
   /** #245 (spec §4.2) — a FIRM portal-catalog generation: every line priced by
    *  rule (portal-pricing.ts), sent at once, good until `validUntil`. Absent /

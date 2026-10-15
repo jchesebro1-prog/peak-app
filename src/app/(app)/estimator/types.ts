@@ -534,6 +534,10 @@ export type PortalPanelData = {
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
+    /** Jeff 2026-10-15 #15 — the signer and PO # typed at Accept. */
+    signerName?: string;
+    signerTitle?: string;
+    poNumber?: string;
   } | null;
   portalDecline: { at: number; by: string; note: string } | null;
   porItems: Array<{ desc: string; qty: number }>;

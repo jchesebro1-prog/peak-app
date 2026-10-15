@@ -30623,7 +30623,7 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Pat Buyer",
     });
     registerFixture("documents", ownDoc.id);
-    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id }, NOW);
+    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} }); // #15: signed
     ok(okR.ok, "#245 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
     const q1 = await d245GetQuote(genA.quoteId);
     ok(
@@ -30650,7 +30650,7 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
     );
     const badNoteR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
     ok(!badNoteR.ok, "#245 decline: an empty/whitespace-only note is refused");
-    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null }, NOW);
+    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} });
     ok(reAcceptR.ok, "#245 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
     ok((await d245GetQuote(genA.quoteId))?.portalDecline === null, "#245 accept: a fresh acceptance clears the prior portalDecline");
 
@@ -32637,7 +32637,7 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
     // Accept (unchanged — canAcceptPortal doesn't filter by source) then
     // staff decline, widened here to cover portal-service (#248 controller
     // decision: decline accepts either portal source).
-    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
+    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, EXPIRED_NOW, { notify: async () => {} });
     ok(acc.ok, "#248 accept: an accepted portal-service quote accepts exactly like portal-catalog (canAcceptPortal untouched)");
     const declineR = await d245DeclinePortalAcceptance(gen.quoteId, "Staff", "Need a PO");
     ok(declineR.ok, "#248 decline: staff decline, widened to portal-service, declines a real acceptance");
@@ -52604,7 +52604,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(long.ok && long.value.name.length === 120 && long.value.message.length === 4000 && long.value.sectionIds.length === 0 && long.value.total === 0 && !("title" in long.value),
     "#301 responses: caps (name 120, message 4,000); a question carries no scopes, total or title");
   const e2 = e301crSan("accept", { name: "P", email: "e".repeat(300) + "@x.io", sectionIds: ["s1"] }, scopes);
-  const nl = e301crSan("accept", { name: "A\nB", sectionIds: ["s1"] }, scopes);
+  const nl = e301crSan("accept", { name: "A\nB", title: "Director", sectionIds: ["s1"] }, scopes); // #15: an accept is signed (title)
   ok(!e2.ok && e2.error === e301crCopy.badEmail && nl.ok && !/[\n\r]/.test(nl.value.name),
     "#301 responses: an email over 200 characters is refused (never truncated into another address); a name never carries a line break");
   const secs = [
@@ -52626,7 +52626,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(e301crTitle(a, "EST-1042", 2) === "Client accepted EST-1042 Rev 2 — Lighting, Rigging ($48,250.00)" &&
      e301crTitle({ ...a, kind: "question" }, "EST-1042", 2) === "Client question — EST-1042",
     "#301 responses: the task titles (D-m)");
-  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." &&
+  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nAccepted by Pat Doe, Facilities\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." && // #15: the signer line
      e301crNote({ ...a, kind: "question", title: undefined, email: "", message: "Is rigging inspected?" }, "EST-1042", 2) === "Client question on EST-1042 Rev 2 (client link).\nFrom: Pat Doe\nMessage: Is rigging inspected?",
     "#301 responses: the note / activity text names the scopes, the pre-credit total, who, and the message");
   // ---- R16 assignees ----
@@ -52762,7 +52762,7 @@ async function e301cStoreAsyncChecks(): Promise<void> {
   ok(e301crClean([rr(1, { at: null }), rr(2, { rev: null }), rr(3, { rev: "" }), rr(4, { at: "" }), rr(5, { total: "5" }), rr(6, { total: null }), rr(7)]).map((x) => x.at).join() === "7",
     "#301 responses: a record whose at / rev / total isn't a real number is dropped, never coerced to 0");
   ok(!e301crSan("hack" as never, { name: "P", sectionIds: ["s1"] }, sc).ok && !e301crSan(undefined as never, { name: "P", message: "x", sectionIds: ["s1"] }, sc).ok &&
-     e301crSan("accept", { name: "P", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
+     e301crSan("accept", { name: "P", title: "Director", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
     "#301 responses: any kind other than exactly accept | question is refused at runtime");
   const stamp = e301crRows([rr(9, { at: Date.UTC(2026, 9, 5, 19, 14) })], (v) => v)[0].when;
   ok(stamp === "Oct 5, 2:14 PM" && !/[\u202f\u00a0]/.test(stamp), "#301 responses: the staff time stamp uses a plain space whatever the ICU build");
@@ -53226,7 +53226,7 @@ async function e301cActionsAsyncChecks(): Promise<void> {
   const notify = async (_q: unknown, r: { kind: string; total: number }) => { calls.push(`${r.kind}:${r.total}`); };
   const salt = String(Date.now() % 100_000);
   const deps = { secret: S, users: async () => users, notify };
-  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", title: "Facilities", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
   const q1 = (await Q.get(QID))!;
   ok(acc.ok && acc.confirmation === "Thanks — Lead 301C has been notified." && q1.status === "sent" && q1.clientResponses?.length === 1 &&
      q1.clientResponses[0].total === 48250 && q1.clientResponses[0].sectionNames.join() === "Lighting,Rigging" && calls.join() === "accept:48250",
@@ -55490,7 +55490,7 @@ import { renderToStaticMarkup as p2boRender } from "react-dom/server";
   const inSum = p2boSelTotal(rs.filter((s) => !s.alternate));
   ok(p2boSelTotal(rs.filter((s) => p2boDefault(rs).includes(s.id))) === inSum && p2boSelTotal(rs.filter((s) => [...p2boDefault(rs), "a3"].includes(s.id))) === inSum + 400,
     "#P2b outputs: the running total starts at the In-total scopes and adds a ticked alternate");
-  const acc = p2boSan("accept", { name: "Pat", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
+  const acc = p2boSan("accept", { name: "Pat", title: "Director", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
   ok(acc.ok && acc.value.sectionIds.join() === "s1,a3" && acc.value.sectionNames.join("|") === "Rigging|Alternate — Rigging alternates: Motorized battens" &&
      acc.value.total === p2boSell(props.sections[0]) + 400,
     "#P2b outputs: the server accepts a submitted alternate id (named by its label, priced into the total) and drops an unknown id");
@@ -55551,7 +55551,7 @@ async function p2bOutputsAsyncChecks(): Promise<void> {
   const calls: string[] = [];
   const deps = { secret: S, users: async () => users, notify: async (_q: unknown, r: { total: number; sectionNames: string[] }) => { calls.push(`${r.total}:${r.sectionNames.join("|")}`); } };
   const salt = String(Date.now() % 100_000);
-  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", title: "Director", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
   const got = (await Q.get(QID))!;
   ok(acc.ok && got.clientResponses?.length === 1 && got.clientResponses[0].sectionIds.join() === "s1,s2" && got.clientResponses[0].total === 1500 &&
      calls.join() === "1500:Lighting|Alternate — Upgrades: LED Upgrade" && got.status === "sent",

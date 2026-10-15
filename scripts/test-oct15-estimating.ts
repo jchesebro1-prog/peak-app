@@ -40,6 +40,8 @@ import { productImageFor } from "../src/lib/package-doc/seed";
 import { sanitizePackageDoc } from "../src/lib/package-doc/sanitize";
 import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
 import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
+import { acceptanceLine, cleanPoNumber, sanitizeClientResponse, responseNoteText, responseRows, cleanClientResponses, CLIENT_ACTION_COPY } from "../src/lib/estimate-output/responses";
+import { notifyPortalAcceptance, ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -51,6 +53,35 @@ export async function oct15PureChecks(ok: Ok) {
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
   oct15BonusRateChecks(ok);
+  /* ---- #15 — online Accept: signer name + title required, optional PO #, the Lead estimator is told ---- */
+  {
+    ok(cleanPoNumber("  PO-4481 ") === "PO-4481" && cleanPoNumber("") === "" && cleanPoNumber(undefined) === "" && cleanPoNumber("x".repeat(61)) === null && cleanPoNumber("4111 1111 1111 1111") === null && cleanPoNumber("4111-1111-1111-1111") === null,
+      "oct15 #15: a PO number is one line, ≤ 60 characters, and never a card number");
+    ok(acceptanceLine({ name: "Pat Doe", title: "Director", po: "4481" }) === "Accepted by Pat Doe, Director — PO 4481" && acceptanceLine({ name: "Pat Doe", title: "Director" }) === "Accepted by Pat Doe, Director",
+      "oct15 #15: the notice reads \"Accepted by <name>, <title> — PO <po>\"");
+    const scopes = [{ id: "s1", name: "Lighting", price: 100, priceLabel: "$100.00" }];
+    const noTitle = sanitizeClientResponse("accept", { name: "Pat", sectionIds: ["s1"] }, scopes);
+    const card = sanitizeClientResponse("accept", { name: "Pat", title: "Director", po: "4111111111111111", sectionIds: ["s1"] }, scopes);
+    const good = sanitizeClientResponse("accept", { name: "Pat", title: "Director", po: " 4481 ", sectionIds: ["s1"] }, scopes);
+    const q = sanitizeClientResponse("question", { name: "Pat", message: "Hi", po: "9" }, scopes);
+    ok(!noTitle.ok && noTitle.error === CLIENT_ACTION_COPY.needTitle && !card.ok && card.error === CLIENT_ACTION_COPY.badPo && good.ok && good.value.po === "4481" && good.value.title === "Director" && q.ok && !("po" in q.value),
+      "oct15 #15: the share page's accept needs a title, takes an optional PO (a card number refused); a question carries none");
+    if (good.ok) {
+      ok(responseNoteText(good.value, "EST-1", 2).split("\n")[1] === "Accepted by Pat, Director — PO 4481", "oct15 #15: the note / task for the Lead estimator names the signer and PO");
+      const stored = cleanClientResponses([{ ...good.value, id: "CR-0123456789ab", rev: 1, at: 5 }]);
+      ok(stored[0]?.po === "4481" && responseRows(stored, (v) => v)[0].who.endsWith("PO 4481"), "oct15 #15: the PO is stored with the response and shown on Client link");
+    }
+    const sel = rd("src/app/share/quote/[id]/[token]/scope-selection.tsx");
+    ok(/aria-label=\{CLIENT_ACTION_COPY\.title\}[^>]* required /.test(sel) && sel.includes("aria-label={CLIENT_ACTION_COPY.poNumber}") && sel.includes("{ name, title, po, email"),
+      "oct15 #15: the share page's Choose your scopes form requires the title and offers a PO #");
+    const dlg = rd("src/app/portal/accept-dialog.tsx");
+    ok(dlg.includes('id="pk-accept-name"') && dlg.includes('id="pk-accept-title"') && dlg.includes('id="pk-accept-po"') && dlg.includes("signerName, signerTitle, poNumber })"),
+      "oct15 #15: the portal Accept dialog asks for name, title and PO #");
+    const pq = rd("src/lib/portal-quotes.ts");
+    const acc = pq.slice(pq.indexOf("export async function acceptPortal("), pq.indexOf("export async function notifyPortalAcceptance("));
+    ok(acc.indexOf("ACCEPT_SIGNER_NAME_COPY") > 0 && acc.indexOf("ACCEPT_SIGNER_NAME_COPY") < acc.indexOf("rateLimit(") && acc.indexOf("rateLimit(") < acc.indexOf("updateQuote(") && acc.indexOf("updateQuote(") < acc.indexOf("notifyPortalAcceptance)("),
+      "oct15 #15: acceptPortal validates the signer before the rate limit and the write, then tells the Lead estimator");
+  }
   /* ---- #22 — the online estimate shows cut sheets when the PDF includes them ---- */
   {
     ok(onlineShowsCutSheets({ pdfCutSheets: true }, null, 100) && onlineShowsCutSheets({ pdfCutSheets: true }, 100, 100), "oct15 #22: the sent revision's Cut sheets toggle on → the online pages show them");
@@ -371,6 +402,23 @@ export async function oct15DbChecks(ok: Ok) {
     await oct15RevDbChecks(ok);
     await oct15ZipSpecDbChecks(ok);
     await oct15PeopleDbChecks(ok);
+    {
+      // #15: the Lead estimator's to-do for a portal acceptance (no system mailbox to email from).
+      const made: Array<{ title: string; assigneeName?: string; notes?: string; quoteId?: string }> = [];
+      const users = [{ id: "u-lead", name: "Lead O15", status: "active", roles: ["Estimator"] }, { id: "u-appr", name: "Appr O15", status: "active", roles: ["Admin"] }];
+      const q = { id: "Q-O15", estNo: 1015, name: "Stage", owner: "Lead O15", preparedBy: "", customerId: "C-1", quoteType: "system" } as never;
+      await notifyPortalAcceptance(q, { signerName: "Pat Doe", signerTitle: "Director", poNumber: "4481" }, Date.UTC(2026, 9, 15, 15), {
+        users: async () => users, createTask: (async (input: { title: string; assigneeName?: string; notes?: string; quoteId?: string }) => { made.push(input); return input; }) as never,
+      });
+      ok(made.length === 1 && made[0].assigneeName === "Lead O15" && made[0].title === "EST-1015 accepted online — Accepted by Pat Doe, Director — PO 4481" && made[0].quoteId === "Q-O15" && !!made[0].notes?.startsWith("Accepted by Pat Doe, Director — PO 4481."),
+        "oct15 #15 db: the Lead estimator gets one to-do: \"Accepted by <name>, <title> — PO <po>\": " + JSON.stringify(made[0]?.title));
+      const none: typeof made = [];
+      await notifyPortalAcceptance({ ...(q as object), owner: "Nobody Here" } as never, { signerName: "Pat", signerTitle: "Dir", poNumber: "" }, Date.now(), {
+        users: async () => users, createTask: (async (input: { title: string }) => { none.push(input); return input; }) as never,
+      });
+      ok(none.length === 1 && none[0].assigneeName === "Appr O15" && none[0].title.endsWith("Accepted by Pat, Dir"), "oct15 #15 db: no Lead estimator on the roster → the approvers");
+      ok(ACCEPT_SIGNER_NAME_COPY.length > 0 && ACCEPT_SIGNER_TITLE_COPY.length > 0 && ACCEPT_PO_NUMBER_COPY.length > 0, "oct15 #15: refusal copy exists");
+    }
     {
       const before = await loadBonusRates();
       await setValue("bonus.packagePct", 99);

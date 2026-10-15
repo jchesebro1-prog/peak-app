@@ -29,6 +29,8 @@ export type ClientResponse = {
   total: number;
   /** #348 2b-ii — the bidder (pty_ + 16 hex) whose v3 link sent this; absent on the owner's link. */
   partyId?: string;
+  /** Jeff 2026-10-15 #15 — an accept's optional purchase order number (one line, ≤ 60). */
+  po?: string;
 };
 export type CleanResponse = Omit<ClientResponse, "id" | "rev" | "at">;
 export type ClientActionResult = { ok: true; confirmation: string } | { ok: false; error: string };
@@ -42,6 +44,8 @@ export const RESPONSE_NAME_MAX = 120;
 export const RESPONSE_TITLE_MAX = 120;
 export const RESPONSE_EMAIL_MAX = 200;
 export const RESPONSE_MESSAGE_MAX = 4_000;
+/** Jeff 2026-10-15 #15 — a typed PO number. */
+export const RESPONSE_PO_MAX = 60;
 export const RESPONSE_IP_LIMIT = 5;
 export const RESPONSE_IP_WINDOW_MS = 10 * 60_000;
 export const RESPONSE_QUOTE_LIMIT = 30;
@@ -65,6 +69,10 @@ export const CLIENT_ACTION_COPY = {
   note: "Note",
   message: "Message",
   needName: "Enter your name.",
+  // Jeff 2026-10-15 #15: accepting online takes the signer's name and title, and an optional PO number.
+  needTitle: "Enter your title.",
+  poNumber: "PO # (optional)",
+  badPo: "Check the PO number — a card number can't go here.",
   needScope: "Check at least one scope.",
   needMessage: "Enter a message.",
   badEmail: "Check the email address.",
@@ -129,23 +137,49 @@ export function sanitizeClientResponse(
     if (!message) return { ok: false, error: CLIENT_ACTION_COPY.needMessage };
     return { ok: true, value: { kind, name, email, message, sectionIds: [], sectionNames: [], total: 0 } };
   }
-  const title = cleanText(o.title, RESPONSE_TITLE_MAX);
   const want = new Set(Array.isArray(o.sectionIds) ? o.sectionIds.slice(0, 200).filter((x): x is string => typeof x === "string") : []);
   const picked = scopes.filter((s) => want.has(s.id));
   if (!picked.length) return { ok: false, error: CLIENT_ACTION_COPY.needScope };
+  // Jeff 2026-10-15 #15: an accept is signed — name AND title required; a PO number is optional.
+  const title = cleanText(o.title, RESPONSE_TITLE_MAX);
+  if (!title) return { ok: false, error: CLIENT_ACTION_COPY.needTitle };
+  const po = cleanPoNumber(o.po);
+  if (po === null) return { ok: false, error: CLIENT_ACTION_COPY.badPo };
   return {
     ok: true,
     value: {
       kind,
       name,
       email,
-      ...(title ? { title } : {}),
+      title,
       message,
       sectionIds: picked.map((s) => s.id),
       sectionNames: picked.map((s) => s.name),
       total: selectedTotal(picked),
+      ...(po ? { po } : {}),
     },
   };
+}
+
+/**
+ * Jeff 2026-10-15 #15 — a typed PO number: one line, trimmed, ≤ 60 characters
+ * ("" = none). null when it is too long or looks like a payment card number
+ * (13–19 digits, ignoring spaces / dashes) — refused, never stored. Pure.
+ */
+export function cleanPoNumber(raw: unknown): string | null {
+  const v = (typeof raw === "string" ? raw : "").replace(/\s+/g, " ").trim();
+  if (!v) return "";
+  if (v.length > RESPONSE_PO_MAX) return null;
+  const digits = v.replace(/[\s-]/g, "");
+  if (/^\d{13,19}$/.test(digits)) return null;
+  return v;
+}
+
+/** Jeff 2026-10-15 #15 — "Accepted by <name>, <title> — PO <po>" (the PO part only when given). Pure. */
+export function acceptanceLine(a: { name?: string | null; title?: string | null; po?: string | null }): string {
+  const who = [(a.name || "").trim(), (a.title || "").trim()].filter(Boolean).join(", ");
+  const po = (a.po || "").trim();
+  return `Accepted by ${who || "the customer"}${po ? ` — PO ${po}` : ""}`;
 }
 
 export function newResponseId(): string {
@@ -168,6 +202,7 @@ function responseOf(v: unknown): ClientResponse | null {
   if (!Number.isSafeInteger(rev) || rev < 1 || !Number.isFinite(at) || !Number.isFinite(total) || total < 0) return null;
   const title = cleanText(o.title, RESPONSE_TITLE_MAX);
   const partyId = typeof o.partyId === "string" && PARTY_ID_RE.test(o.partyId) ? o.partyId : "";
+  const po = cleanText(o.po, RESPONSE_PO_MAX);
   return {
     id: o.id,
     kind: o.kind,
@@ -181,6 +216,7 @@ function responseOf(v: unknown): ClientResponse | null {
     sectionNames: strList(o.sectionNames),
     total,
     ...(partyId ? { partyId } : {}),
+    ...(po ? { po } : {}),
   };
 }
 
@@ -198,8 +234,8 @@ export function cleanClientResponses(raw: unknown): ClientResponse[] {
   return out;
 }
 
-/** The list with `r` appended, or null at the 200 cap. */
-/** Jeff 2026-10-15 #2 — the stored cap counts per sender: the owner's link (no partyId) and each bidder's v3 link
+/** The list with `r` appended, or null at the 200 cap.
+ *  Jeff 2026-10-15 #2 — the stored cap counts per sender: the owner's link (no partyId) and each bidder's v3 link
  *  (its partyId) have their own MAX_CLIENT_RESPONSES, so one bidder filling its budget never closes the others'. */
 export function appendResponseTo(list: unknown, r: ClientResponse): ClientResponse[] | null {
   const cur = cleanClientResponses(list);
@@ -238,7 +274,9 @@ export function responseNoteText(r: CleanResponse, number: string, revNo: number
     : r.kind === "accept"
       ? `Client selected scopes on ${number} Rev ${revNo} (client link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
       : `Client question on ${number} Rev ${revNo} (client link).`;
-  return [head, `From: ${who}`, r.message ? `Message: ${r.message}` : ""].filter(Boolean).join("\n");
+  // Jeff 2026-10-15 #15: an accept names its signer and any PO number.
+  const signed = r.kind === "accept" && r.title ? acceptanceLine(r) : "";
+  return [head, signed, `From: ${who}`, r.message ? `Message: ${r.message}` : ""].filter(Boolean).join("\n");
 }
 
 export type RosterUser = { id: string; name: string; status?: string | null; roles?: string[] | null };
@@ -312,7 +350,7 @@ export function responseRows(raw: unknown, revNoOf: (rev: number) => number, bid
       id: r.id,
       kindLabel: r.kind === "accept" ? "Selected scopes" : "Question",
       revLabel: `Rev ${revNoOf(r.rev)}`,
-      who: [bidderLabel(r, bidderNameOf), r.name, r.title, r.email].filter(Boolean).join(" · "),
+      who: [bidderLabel(r, bidderNameOf), r.name, r.title, r.email, r.po ? `PO ${r.po}` : ""].filter(Boolean).join(" · "),
       scopes: r.sectionNames.join(", "),
       total: r.kind === "accept" ? fmt(r.total) : "",
       message: r.message,
