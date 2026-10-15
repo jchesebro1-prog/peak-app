@@ -1364,7 +1364,7 @@ See `.env.example`.
     re-link old hand-made customer links that should be shared, try two
     accounts on production. Punch item #341.
 
-61. 🚧 **Venue Assessment notes** (#344, D1019–D1032) — Jeff's Oct 14 notes on
+61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051) — Jeff's Oct 14 notes on
     the Venue Assessments (`FS-####`) editor, three slices on one branch
     (spec `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md`).
     ✅ **Slice A (form structure & flow):** a new section order with **Kill
@@ -1387,12 +1387,32 @@ See `.env.example`.
     older survey with no derivable scope reads "Intake: draft" until Scope is
     answered. The field sheet is not scope-filtered. Tests:
     `scripts/test-va-notes.ts` (in test:specs). No migration, no env var.
-    Remaining: slice B (field-level changes: access, measurement links, curtain
-    fabric oz, fixture inventory, numbered line sets) and slice C (ink pad,
-    photos and sketches; needs a real iPad + Apple Pencil test), plus
-    Jeff-gated: review the internal tag list, tell the reps older surveys ask
-    for Scope first, send the CW Elevation and line set schedule sheets. Punch
-    item #344.
+    ✅ **Slice B (field-level changes, D1038–D1051):** fixed pick lists in
+    `src/lib/field-lists.ts` (lifts, loading doors, track series / operation,
+    plug, lighting and fixture positions, console location — the Assessments
+    engine gains the same lists additively, version still 1); access reshaped
+    (loading door, Lift needed → type / height / who supplies); travel
+    auto-fill for a verified venue (`survey-travel-server.ts`, once, into empty
+    fields only); measurement links (Grid height, Loading gallery, line set
+    count); beams drawing checks; per-discipline scope-first chips with Other
+    (`sections/scope-chips.tsx`), goals stored as lists (`goals-list.tsx`;
+    `goalsFromSurvey` still returns text), curtain rows (`curtain-rows.tsx`),
+    lighting positions + a Position column on the fixtures inventory
+    (`lighting-positions.tsx`), the Bad→New 0–4 condition slider
+    (`condition-slider.tsx`, `--cond-0…4`) and a quantity-first line set
+    schedule with Fill down; a wrap-up Final questions section. Rules: the
+    read-time steps in `survey-migrate.ts` fill only never-answered keys, so a
+    cleared field stays cleared (write-once `…Old` keys keep unmappable text for
+    Older notes); plain-text readers (sheet, findings, Assist, Ask AI, recap)
+    share `survey-format.ts` and `survey-measure-fields.ts` and show only what
+    the editor shows. No migration, no env var. **No instant rollback past the
+    slice B merge** — a slice A build reads list goals as empty and deletes them
+    on the next save; roll forward.
+    Remaining: slice C (ink pad, photos and sketches; needs a real iPad +
+    Apple Pencil test before merge), plus Jeff-gated: review the internal tag
+    list and the pick lists in `field-lists.ts`, tell the reps older surveys
+    ask for Scope first, send the CW Elevation and line set schedule sheets,
+    try a real assessment end to end. Punch item #344.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

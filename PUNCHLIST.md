@@ -12241,7 +12241,7 @@ Follow-up to #342. A writer that computed a key's new value from its current one
 
 **Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.
 
-## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slice A DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032)
+## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051), slice C pending
 
 Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`) editor, designed in `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md` and built as three slices on one branch. Slice A plan: `docs/superpowers/plans/2026-10-14-va-notes-slice-a.md`.
 
@@ -12254,14 +12254,20 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - Customer recap in Wrap-up, "What we heard" on the field sheet and in the findings text; the sheet prints Older notes and a Close-out only when an old survey has a sign-off.
 - **Tests:** `scripts/test-va-notes.ts` (inside test:specs). No migration, no env var.
 
-**Slice B — pending (field-level changes, spec B1–B9):** travel auto-fill, access (lifts, loading doors), measurement links, beams & rigging, per-discipline fields, curtain (fabric oz per row), the condition slider, lighting and AV (fixture inventory by position), line set schedule (numbered 1…N).
+**Slice B ✅ — field-level changes** (commits `0e34f20d..cd50a98b`, branch `feat/344-va-notes`; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-b.md`; D1038–D1051):
+- Fixed pick lists in `src/lib/field-lists.ts` (lifts, loading doors, track series / operation, plug, lighting and fixture positions, console location); the Assessments engine gains the same lists additively (version still 1).
+- Read-time migration steps for renamed / removed fields (`survey-migrate.ts`), measurement links (Grid height, Loading gallery, line set count), travel auto-fill from a verified venue (`survey-travel-server.ts`), loading door + lift fields, beams drawing checks, a wrap-up Final questions section.
+- Per-discipline scope-first chips with Other, goals as lists, curtain rows (fabric, oz, track series, size, condition), lighting positions with a Position column on the fixtures inventory, the Bad→New condition slider, and a quantity-first line set schedule (Fill down, Mark spare).
+- Field sheet, findings text, Assist, Ask AI and the recap print only what the editor shows (`survey-format.ts`, `survey-measure-fields.ts`). Tests in `scripts/test-va-notes.ts`. No migration, no env var. **No instant rollback past this merge** (D1043).
 
-**Slice C — pending (drawing & photo capture, spec C1–C8):** ink model and pad, generated pad backgrounds, a shared photo / sketch pipeline, sketch pads, per-section photos with caption and markup, field-sheet output, 3D presets. Needs a real iPad + Apple Pencil test (pressure, palm rejection, offline capture and later sync) before merge.
+**Slice C — pending (drawing & photo capture, spec C1–C8; Jeff to send the CW Elevation sheet and the line set schedule sheet):** ink model and pad, generated pad backgrounds, a shared photo / sketch pipeline, sketch pads, per-section photos with caption and markup, field-sheet output, 3D presets. Needs a real iPad + Apple Pencil test (pressure, palm rejection, offline capture and later sync) before merge.
 
 **Jeff-gated:**
 - Review the internal tag list in Settings → Field & Venues (nine starter tags).
 - Older in-progress surveys ask for **Scope** (and **Rigging system**) before their intakes unlock (D1023) — tell the reps.
 - Send the real CW Elevation Sheet and the line set schedule sheet (slice C; placeholders are generated until then).
+- Review the pick lists in `src/lib/field-lists.ts` (lift, loading door, track series, positions, console).
+- Try a real assessment end to end (travel fill, curtain rows, lighting positions, line sets, the printed sheet).
 
 **Follow-ups (from the review ledger):**
 - The 40-tag cap counts retired tags.
@@ -12274,4 +12280,16 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - The systemsState fold seeds "Counterweight" from `installed: yes` — matters for slice B's counterweight gate.
 - The `src/lib/settings-lists.ts` header comment still says "the two Settings list editors".
 
-**Remaining:** slices B and C, plus the Jeff-gated items above.
+**Slice B follow-ups (from the review ledger):**
+- No `evaluate()` test over the new engine questions, and no pin test of the codes `listSlug` generates (the lists are add-only, D1038).
+- The fabric suggestion list is empty if the curtain scope is ticked in the same session (suggestions only); it also cuts off at 500 fabrics, alphabetical.
+- The line set Set number input remounts after the first digit on old rows with a non-numeric or duplicate number; Fill down compares untrimmed text.
+- The Fair label colour (`#c9a227`) is about 2.3:1 on white; hint text contrast also low.
+- Findings text and Assist can repeat a goal (once from the list, once from legacy text); Assist prints the general purpose pipe quantity even when its chip is unticked.
+- `survey-travel-server.ts` reads the customer list redundantly (could use `allCustomers`); a manual mileage without minutes uses the formula minutes; the hint can show on a coincidental match.
+- The "Other" lighting position has no "where?" box, and a stored unlisted position has no chip.
+- Legacy lift supplier is hidden when Lift needed is blank-but-present; the findings text falls back to the old access keys when the new ones are blank.
+- A null measurement counts as answered; Safari IME Enter guard on goal entry; a button-name polish on goal move / remove.
+- No dark-mode tokens for `--cond-0…4` (the app has no dark theme).
+
+**Remaining:** slice C (needs a real iPad + Apple Pencil test before merge), plus the Jeff-gated items above.
