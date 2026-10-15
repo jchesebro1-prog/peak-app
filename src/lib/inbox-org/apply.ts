@@ -76,7 +76,9 @@ export type ApplyError =
   | "nothing-to-file"
   | "bad-target"
   | "forbidden"
-  | "bad-rule";
+  | "bad-rule"
+  /** #346 — a compare-and-set kept losing to other writes */
+  | "conflict";
 
 export type ApplyFail = { ok: false; error: ApplyError; message: string };
 
@@ -513,7 +515,8 @@ export async function archiveFromOrganize(
   threadId: string,
   tab: OrganizeArchiveTab,
   me: OrgActor,
-  now: number = Date.now()
+  now: number = Date.now(),
+  deps: { cas?: FilingCas } = {}
 ): Promise<{ ok: true; undo: OrganizeArchiveUndo } | ApplyFail> {
   const t = await myThread(threadId, me);
   if (!t) return NOT_FOUND();
@@ -522,8 +525,10 @@ export async function archiveFromOrganize(
   if (tab !== "filed") {
     // compare-and-set: a filing the pipeline / AI pass rewrote meanwhile is
     // re-read, never overwritten
-    const sk = await casFiling(t.id, me, (f) => (f && f.state === "suggested" ? { ...settled(f), state: "skipped" } : null));
-    if (sk) {
+    const sk = await casFiling(t.id, me, (f) => (f && f.state === "suggested" ? { ...settled(f), state: "skipped" } : null), deps.cas);
+    // the skip kept losing to other writes: say so — and archive nothing
+    if (sk === "conflict") return fail("conflict", "Couldn't update — try again.");
+    if (sk !== "none") {
       await logAction(sk.thread, sk.prev, "skipped", { userId: me.id, outcome: "discarded", state: "skipped", now });
       unskip = true;
     }
@@ -538,23 +543,28 @@ export async function archiveFromOrganize(
 
 const CAS_TRIES = 3;
 
+/** The filing compare-and-set (comms.casOrg); a test passes its own. */
+export type FilingCas = (threadId: string, key: "filing", expected: Filing | undefined, next: Filing | undefined) => Promise<boolean>;
+
 /** Compare-and-set `filing` from the thread as read now: `next(current)`
  *  (null = nothing to write). A conflicting write re-reads and retries. The
  *  thread is re-checked as `me`'s own on every read. Returns the thread and
- *  filing it replaced, or null when nothing was written. */
+ *  filing it replaced, "none" when there was nothing to write, or
+ *  "conflict" when every try lost to another write. */
 async function casFiling(
   threadId: string,
   me: OrgActor,
-  next: (f: Filing | undefined) => Filing | null
-): Promise<{ thread: CommThread; prev: Filing } | null> {
+  next: (f: Filing | undefined) => Filing | null,
+  cas: FilingCas = casOrg
+): Promise<{ thread: CommThread; prev: Filing } | "none" | "conflict"> {
   for (let i = 0; i < CAS_TRIES; i++) {
     const t = await myThread(threadId, me);
-    if (!t) return null;
+    if (!t) return "none";
     const want = next(t.filing);
-    if (!want || !t.filing) return null;
-    if (await casOrg(t.id, "filing", t.filing, want)) return { thread: t, prev: t.filing };
+    if (!want || !t.filing) return "none";
+    if (await cas(t.id, "filing", t.filing, want)) return { thread: t, prev: t.filing };
   }
-  return null;
+  return "conflict";
 }
 
 /** Compare-and-set `noise` the same way (a key-level CAS; re-read on conflict). */
@@ -582,7 +592,8 @@ export async function undoArchiveFromOrganize(
   if (!t) return NOT_FOUND();
   if (u.unskip) {
     const us = await casFiling(t.id, me, (f) => (f && f.state === "skipped" ? { ...f, state: "suggested", at: now } : null));
-    if (us) await logAction(us.thread, us.prev, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
+    if (us === "conflict") return fail("conflict", "Couldn't update — try again.");
+    if (us !== "none") await logAction(us.thread, us.prev, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
   }
   if (u.unclear)
     await casNoise(t.id, (n) => {

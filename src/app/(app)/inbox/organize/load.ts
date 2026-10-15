@@ -13,6 +13,7 @@
  * `next build` gate catches a client import of this module instead.
  */
 import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { listDocsByField } from "@/db/doc-store";
 import { inInbox, isNoiseRow, isStrongRow, isToFileRow } from "@/lib/inbox-org/apply";
 import { isPlaceholderCompany, withoutPlaceholderCustomer } from "@/lib/inbox-org/placeholder";
 import { placeholderCompanyIds } from "@/lib/identity/companies";
@@ -241,7 +242,9 @@ export async function organizeEntryCounts(me: { name: string }): Promise<{ toFil
   let toFile = 0;
   let noise = 0;
   const strongRows: CommThread[] = [];
-  for (const t of await allThreads()) {
+  // #347 review — my own mailbox only, cut in SQL (doc->>'mailboxUser'); the
+  // Home brief card reads this on every load, so never the whole collection
+  for (const t of await listDocsByField<CommThread>("comms", "mailboxUser", [me.name])) {
     if (!visibleTo(t, me.name)) continue;
     if (isToFileRow(t)) {
       toFile++;

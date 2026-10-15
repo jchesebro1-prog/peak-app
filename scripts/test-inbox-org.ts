@@ -2974,8 +2974,14 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
     const r6 = await archiveFromOrganize(cs, "to-file", me);
     const a6 = await read(cs);
     ok(r6.ok && a6.filing?.state === "skipped" && a6.filing.customerId === "TEST346-other" && a6.filing.reason === "New mail", "archive #346 review: skip writes over the filing as read now (compare-and-set), keeping what a concurrent write put there");
+    const lose = await mk("cas-lose");
+    await setOrg(lose, { filing: sugg() });
+    let tries = 0;
+    const rl = await archiveFromOrganize(lose, "to-file", me, Date.now(), { cas: async () => (tries++, false) });
+    const al = await read(lose);
+    ok(!rl.ok && rl.error === "conflict" && /Couldn.t update — try again/.test(rl.message) && tries === 3 && al.archived === false && al.filing?.state === "suggested", "archive #346 review 2: when the skip keeps losing (3 tries) Archive answers 'Couldn't update — try again' and archives nothing");
     const apSrc = readFileSync("src/lib/inbox-org/apply.ts", "utf8");
-    ok(/if \(await casOrg\(t\.id, "filing", t\.filing, want\)\) return/.test(apSrc) && !/await setOrg\(t\.id, \{ filing: \{ \.\.\.settled\(f\), state: "skipped" \} \}\)/.test(apSrc.slice(apSrc.indexOf("export async function archiveFromOrganize("))), "archive #346 review: archive / undo write the filing only through casFiling (casOrg, re-read on conflict)");
+    ok(/if \(await cas\(t\.id, "filing", t\.filing, want\)\) return/.test(apSrc) && /cas: FilingCas = casOrg/.test(apSrc) && !/await setOrg\(t\.id, \{ filing: \{ \.\.\.settled\(f\), state: "skipped" \} \}\)/.test(apSrc.slice(apSrc.indexOf("export async function archiveFromOrganize("))), "archive #346 review: archive / undo write the filing only through casFiling (casOrg, re-read on conflict)");
 
     /* label: the Inbox's category action leaves the filing alone */
     const lb = await mk("label");
@@ -3071,7 +3077,9 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
   const bad = ["", "  ", "x".repeat(226), "/Clients", "Clients/", "Clients//Lincoln", "Peak/Foo", "peak", "Inbox", "STARRED"];
   ok(bad.every((n) => !R.validateLabelName(n).ok), "labels #347: names refused — empty, over 225, a leading / trailing slash, an empty nested part, under Peak/, a Gmail system name");
   const good = R.validateLabelName("  Clients /  Lincoln HS ");
-  ok(good.ok && good.name === "Clients / Lincoln HS" && R.validateLabelName("x".repeat(225)).ok && R.validateLabelName("Peakwood").ok, "labels #347: a nested or 225-char name is fine (whitespace tidied); 'Peakwood' isn't under Peak/");
+  ok(R.isPeakLabelName("Peak /X") && R.isPeakLabelName(" peak/X") && R.isPeakLabelName("PEAK") && !R.isPeakLabelName("Peakwood/X") && !R.validateLabelName("Peak /X").ok && !R.validateLabelName(" peak/X").ok, "labels #347 review: 'Peak /X' and ' peak/X' are under Peak/ (the first segment, trimmed) — refused");
+  ok(R.pickerLabels([{ labelId: "L9", name: "Peak /Odd", type: "user" }, { labelId: "L8", name: " peak/x", type: "user" }]).length === 0, "labels #347 review: …and never offered in the picker");
+  ok(good.ok && good.name === "Clients/Lincoln HS" && R.validateLabelName("x".repeat(225)).ok && R.validateLabelName("Peakwood").ok, "labels #347: a nested or 225-char name is fine (whitespace tidied); 'Peakwood' isn't under Peak/");
   ok(isCardLabel("Label_1", cache[5]) && !isCardLabel("Label_3", cache[7]) && isCardLabel("STARRED", cache[3]) && !isCardLabel("UNREAD", cache[1]) && isCardLabel("Label_99", undefined) && !isCardLabel("CATEGORY_X", undefined), "labels #347: the history import records my labels and Starred / Important (a not-yet-cached Label_ id too) — not Peak/*, UNREAD or categories");
 
   /* a fake Gmail */
@@ -3162,7 +3170,7 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     const a = await U.setThreadLabel(t1, "Label_1", true, me, f1.client, NOW);
     const ta = await read(t1);
     ok(a.ok && f1.st.modifies.length === 1 && f1.st.modifies[0].thread === "gt-apply" && f1.st.modifies[0].key === KEY && f1.st.modifies[0].change.addLabelIds?.[0] === "Label_1", "labels #347: apply calls Gmail threads.modify (addLabelIds) on the thread's Gmail thread");
-    ok(ids(ta) === "INBOX+Label_3+Label_1|Label_1|" && (ta.userLabelsAppliedAt || 0) >= NOW && JSON.stringify(ta.filing) === filingBefore, `labels #347: the stored gmailLabelIds follow at once on every Gmail message (a note untouched), the echo stamp is set, the filing untouched (${ids(ta)})`);
+    ok(ids(ta) === "INBOX+Label_3+Label_1|Label_1|" && ta.userLabelOps?.Label_1?.on === true && ta.userLabelOps.Label_1.at === NOW && JSON.stringify(ta.filing) === filingBefore, `labels #347: the stored gmailLabelIds follow at once on every Gmail message (a note untouched), the card's operation is stamped per label, the filing untouched (${ids(ta)})`);
     const rm = await U.setThreadLabel(t1, "Label_1", false, me, f1.client, NOW);
     ok(rm.ok && f1.st.modifies[1].change.removeLabelIds?.[0] === "Label_1" && ids(await read(t1)) === "INBOX+Label_3||", "labels #347: ✕ removes it in Gmail (removeLabelIds) and in the stored labels");
     const st = await U.setThreadLabel(t1, "STARRED", true, me, f1.client, NOW);
@@ -3187,7 +3195,15 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     const q = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
     f2.st.modifyError = new Error("Gmail API /threads/x/modify → 404 Not Found");
     const nf = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
-    ok(!q.ok && q.error === "quota" && !nf.ok && nf.error === "label-missing" && !ids(await read(t1)).includes("Label_1"), "labels #347: Gmail's quota and not-found errors show inline; nothing is stored when Gmail refuses");
+    ok(!q.ok && q.error === "quota" && !nf.ok && nf.error === "thread-missing" && /no longer in Gmail/.test(nf.message) && !ids(await read(t1)).includes("Label_1"), "labels #347 review: Gmail's quota error and a 404 on the thread ('That email is no longer in Gmail') show inline; nothing is stored when Gmail refuses");
+    ok(U.gmailError(new Error("Gmail API /labels/Label_9 → 404 Not Found")) === "label-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 404 Not Found")) === "thread-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 400 Invalid label: Label_9")) === "label-missing" && U.gmailError(new Error("Gmail API /messages → 404")) === "failed", "labels #347 review: a 404 is 'label missing' only on a labels endpoint; on a thread it is 'no longer in Gmail'");
+
+    /* review: the thread must be bridged through MY Gmail connection */
+    const foreignKey = await mk("foreign-key", { gmailAccountKey: "personal:TEST347-u-ben" });
+    const unstamped = await mk("unstamped", { gmailAccountKey: undefined });
+    const fk = await U.setThreadLabel(foreignKey, "Label_1", true, me, f1.client, NOW);
+    const us = await U.labelPicker(unstamped, me, f1.client, NOW);
+    ok(!fk.ok && fk.error === "no-gmail" && !us.ok && us.error === "no-gmail" && f1.st.modifies.length === 3, "labels #347 review: a thread in my mailbox bridged through another Gmail account (or unstamped) is refused — the token and label cache are personalKey(me.id)'s");
 
     /* create */
     const f3 = fake();
@@ -3206,11 +3222,33 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     ok(ids(await read(t2)) === "INBOX+Label_3+Label_2||", `labels #347: a label added in Gmail is recorded from the history import (UNREAD is not) (${ids(await read(t2))})`);
     await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: [], removed: ["Label_2"] }]);
     ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347: …and one removed in Gmail is dropped");
-    await patchDoc<CommThread>("comms", t2, (d) => {
-      d.userLabelsAppliedAt = Date.now();
-    });
+    // review 3: an event carrying a Peak/* label AND one of mine keeps mine
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_3", "Label_2"], removed: [] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3+Label_2||", `labels #347 review: a mixed event (Peak/* + my label) still records my label (${ids(await read(t2))})`);
+    // history order: an add then a remove in one sync nets to removed
+    await interpretLabelEvents(KEY, [
+      { messageId: "g1-import", threadId: "gt-import", added: ["Label_1"], removed: [] },
+      { messageId: "g1-import", threadId: "gt-import", added: [], removed: ["Label_1", "Label_2"] },
+    ]);
+    ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347 review: within one sync, the last event for a label wins (added then removed → removed)");
+
+    // review 4: per-label echo guard — card add at t0, card remove at t1, then
+    // Gmail's stale add echo arrives: it must not re-add the label
+    const fe = fake();
+    await U.setThreadLabel(t2, "Label_1", true, me, fe.client, Date.now());
+    await U.setThreadLabel(t2, "Label_1", false, me, fe.client, Date.now() + 1);
+    ok(ids(await read(t2)) === "INBOX+Label_3||" && (await read(t2)).userLabelOps?.Label_1?.on === false, "labels #347 review: (setup) the card added then removed Label_1");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_1"], removed: [] }]);
+    ok(!ids(await read(t2)).includes("Label_1"), "labels #347 review: a stale add echo after the card's remove never re-adds the label");
     await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_2"], removed: [] }]);
-    ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347: the echo of the card's own change (inside the echo window) is skipped — no loop");
+    ok(ids(await read(t2)).includes("Label_2"), "labels #347 review: the guard is per label — a Gmail change to another label in the window still lands");
+    const I = await import("@/lib/gmail/label-interpret");
+    const msgs = [{ id: "a", gmailId: "g1", gmailLabelIds: ["X"] }, { id: "b" }] as unknown as CommMessage[];
+    const per = new Map([["g1", new Map([["Y", true], ["X", false]])]]);
+    const applied = I.applyUserLabelChanges(msgs, per, { X: { on: true, at: 1000 } }, 1000 + 60_000);
+    const later = I.applyUserLabelChanges(msgs, per, { X: { on: true, at: 1000 } }, 1000 + 10 * 60_000);
+    ok(JSON.stringify(applied?.[0].gmailLabelIds) === '["X","Y"]' && JSON.stringify(later?.[0].gmailLabelIds) === '["Y"]' && I.applyUserLabelChanges(msgs, new Map(), undefined, 0) === null, `labels #347 review: applyUserLabelChanges holds a label the card changed in the window, releases it after (${JSON.stringify(applied?.[0].gmailLabelIds)} / ${JSON.stringify(later?.[0].gmailLabelIds)})`);
+    ok(U.withLabel(msgs, "Z", true)?.[0].gmailLabelIds?.join() === "X,Z" && U.withLabel(msgs, "X", true) === null && (U.withLabel(msgs, "Z", true)?.[1] as { gmailLabelIds?: string[] }).gmailLabelIds === undefined, "labels #347 review: withLabel touches Gmail messages only, null when nothing changes");
   } finally {
     await dropFixtures(347);
     await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, KEY));
@@ -3225,6 +3263,16 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
   ok(lc.includes("Create “{q.trim()}”") && lc.includes("validateLabelName(q)") && lc.includes('placeholder="Search or create a label…"') && lc.includes("data-peak-label") && lc.includes('role="alert"'), "labels #347: a searchable picker with Create '<typed>' at the bottom; Peak/* chips read-only; errors inline");
   ok(lc.indexOf("data-gmail-label-add") < lc.indexOf("data-colour-row"), "labels #347: Gmail labels lead; Colour is a small row under them");
   ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)|^@\/lib\/gmail\/(?!user-label-rules)/.test(p)), "labels #347: the card imports only the pure label rules from lib/gmail (no store, db or Gmail client)");
+  const ul = src("src/lib/gmail/user-labels.ts");
+  ok(/casDocKey\("comms", threadId, "messages", t\.messages, next\)/.test(ul) && /casDocKey\("comms", threadId, "userLabelOps", prev, ops\)/.test(ul) && !/patchDoc/.test(ul), "labels #347 review: the label write is a compare-and-set on the messages key (re-read on conflict) — never a whole-doc rewrite that could drop a message appended meanwhile");
+  ok(/const t = await ownThread\(threadId, me\.name\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
+  ok(/async function writeCache[\s\S]*?try \{\s*await replaceLabels\(key, labels\);\s*\} catch/.test(ul) && /if \(created\) \{\s*try \{/.test(ul), "labels #347 review: a cache write failing after Gmail created the label is logged, and Create still applies the label and reports success");
+  const conn = src("src/lib/gmail/connections.ts");
+  ok(/export async function replaceLabels[\s\S]*?await withTransaction\(async \(\) => \{\s*const db = await getDb\(\);\s*await db\.delete\(gmailLabels\)/.test(conn), "labels #347 review: replaceLabels deletes and inserts in one transaction");
+  const li = src("src/lib/gmail/label-interpret.ts");
+  ok(/for \(const \[gThread, perMessage\] of userLabelChanges\(events, isCard\)\)/.test(li) && /casDocKey\("comms", t\.id, "messages", t\.messages, next\)/.test(li) && /const evAdded = ev\.added\.filter\(notCard\);/.test(li), "labels #347 review: my labels are recorded from every event (Peak/* or not) by an ordered CAS pass; the Peak/* branch leaves them to it");
+  const ld = src("src/app/(app)/inbox/organize/load.ts");
+  ok(/export async function organizeEntryCounts[\s\S]*?listDocsByField<CommThread>\("comms", "mailboxUser", \[me\.name\]\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (SQL doc->>'mailboxUser'), never the whole collection");
   const rules = src("src/lib/gmail/user-label-rules.ts");
   ok(valueImports(rules).length === 0, "labels #347: user-label-rules.ts has no imports (client-safe)");
   const cfg = src("src/lib/gmail/config.ts");

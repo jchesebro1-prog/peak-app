@@ -10,6 +10,10 @@
  * label ("UNKNOWN" …, #345) is never shown at all.
  */
 
+/** How long the history import ignores Gmail's events for a label after the
+ *  card changed it (the same 2 minutes as the Peak/* label echo window). */
+export const USER_LABEL_ECHO_MS = 2 * 60_000;
+
 /** Gmail rejects a label name longer than this (same limit as label-sync). */
 export const LABEL_NAME_MAX = 225;
 
@@ -19,7 +23,7 @@ export const SETTABLE_SYSTEM_LABELS: Readonly<Record<string, string>> = { STARRE
 /** Gmail's reserved system label names — a user label can't take one. */
 const RESERVED = new Set(["inbox", "sent", "draft", "drafts", "trash", "spam", "starred", "important", "unread", "chat", "all mail", "scheduled", "snoozed"]);
 
-const PLACEHOLDER_CUSTOMER = /^peak\/customers\/\s*(unknown|ukn|tbd|n\/a)\s*$/i;
+const PLACEHOLDER_CUSTOMER = /^\s*peak\s*\/\s*customers\s*\/\s*(unknown|ukn|tbd|n\/a)\s*$/i;
 
 export type LabelLike = { labelId: string; name: string; type: "system" | "user"; textColor?: string | null; backgroundColor?: string | null };
 
@@ -31,10 +35,11 @@ export type CardGmailChip = PickerLabel & {
   editable: boolean;
 };
 
-/** Under the app's own `Peak/` namespace (or the bare `Peak` parent). */
+/** Under the app's own `Peak/` namespace (or the bare `Peak` parent): the
+ *  first "/" segment, trimmed, is "peak" — so "Peak /X" and " peak/X" are
+ *  too (#347 review). */
 export function isPeakLabelName(name: string): boolean {
-  const n = (name || "").trim().toLowerCase();
-  return n === "peak" || n.startsWith("peak/");
+  return (name || "").split("/")[0].trim().toLowerCase() === "peak";
 }
 
 export function isPlaceholderPeakLabel(name: string): boolean {
@@ -92,14 +97,20 @@ function pickerOrder(cache: ReadonlyArray<LabelLike>): LabelLike[] {
   });
 }
 
-/** A new label's name, trimmed — or why it can't be one. Nesting on "/" is
- *  allowed ("Clients/Lincoln"), an empty part is not. */
+/** A new label's name, tidied — or why it can't be one. Nesting on "/" is
+ *  allowed ("Clients/Lincoln"), an empty part is not. Runs of whitespace
+ *  become one space and each nested part is trimmed ("Clients / Lincoln" →
+ *  "Clients/Lincoln"), so a stray space never makes a separate parent. */
 export function validateLabelName(raw: string): { ok: true; name: string } | { ok: false; message: string } {
-  const name = (raw || "").replace(/\s+/g, " ").trim();
-  if (!name) return { ok: false, message: "Type a name for the label." };
+  const flat = (raw || "").replace(/\s+/g, " ").trim();
+  if (!flat) return { ok: false, message: "Type a name for the label." };
+  if (flat.startsWith("/") || flat.endsWith("/")) return { ok: false, message: "A label name can't start or end with “/”." };
+  const name = flat
+    .split("/")
+    .map((p) => p.trim())
+    .join("/");
   if (name.length > LABEL_NAME_MAX) return { ok: false, message: `Label names can be at most ${LABEL_NAME_MAX} characters.` };
-  if (name.startsWith("/") || name.endsWith("/")) return { ok: false, message: "A label name can't start or end with “/”." };
-  if (name.split("/").some((p) => !p.trim())) return { ok: false, message: "Each part of a nested label needs a name." };
+  if (name.split("/").some((p) => !p)) return { ok: false, message: "Each part of a nested label needs a name." };
   if (isPeakLabelName(name)) return { ok: false, message: "Labels under “Peak/” are set by the app — pick another name." };
   if (RESERVED.has(name.toLowerCase())) return { ok: false, message: "That name belongs to a Gmail system label." };
   return { ok: true, name };

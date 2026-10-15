@@ -12368,4 +12368,15 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
 **Follow-ups / Jeff-gated:**
 - Try it on production with your own mailbox: add a label, create one, remove one, and check each in Gmail. Then change a label in Gmail and check that it shows in Peak after the next sync.
 - A mailbox connected before gmail.modify was added (pre-July 19) shows "reconnect" until it is reconnected.
-- A Gmail-side change to the same thread's labels within 2 minutes of a change made in Peak waits for that thread's next label event (D1057).
+- A Gmail-side change to the same label within 2 minutes of the card changing it waits for that label's next event (D1057).
+- **Review fixes (same day):**
+  - The thread must be bridged through your own Gmail connection.
+  - "Peak /X" counts as `Peak/`.
+  - Labels in a mixed event are kept.
+  - Echoes are suppressed per label.
+  - Label writes are compare-and-set.
+  - The cache write is one transaction and can't fail a create.
+  - Archive answers "Couldn't update — try again" when the skip keeps conflicting.
+  - A thread 404 reads "no longer in Gmail".
+  - The brief's live counts read only your mailbox.
+- User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
