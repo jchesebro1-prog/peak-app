@@ -33,6 +33,7 @@ import { bonusRatesFrom, lineBonusPct, DEFAULT_BONUS_RATES } from "../src/lib/es
 import { bonusRatesFor, withBonusLines, idCounterFrom } from "../src/lib/estimate-bonus/rules";
 import { canonicalBonusSections } from "../src/lib/estimate-bonus/canonical";
 import { GROUPS, setValue, loadBonusRates } from "../src/lib/stores/pricing";
+import { flagOldVendorLine, OLD_VENDOR_PRICE_NOTE } from "../src/lib/narrative/system-library";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -44,6 +45,18 @@ export async function oct15PureChecks(ok: Ok) {
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
   oct15BonusRateChecks(ok);
+  /* ---- #21 — Load system brings vendor-quoted lines, flagged "Old vendor price — re-quote" ---- */
+  {
+    const orig = { id: 4, sku: "VQ-1", desc: "Vendor rig", qty: 2, unit: "ea", cost: 500, price: 700, extSellOverride: 1500, vendorQuoteId: "vq1", noFreight: true, internalNote: "from Acme" } as never;
+    const copied = { id: 4, sku: "VQ-1", desc: "Vendor rig", qty: 2, unit: "ea", cost: 500, price: 655, vendorQuoteId: "vq1", noFreight: true, internalNote: "from Acme" } as never;
+    const f = flagOldVendorLine(copied, orig) as unknown as Record<string, unknown>;
+    ok(f.cost === 500 && f.price === 700 && f.extSellOverride === 1500 && !("vendorQuoteId" in f) && f.noFreight === true && f.internalNote === "Old vendor price — re-quote · from Acme",
+      "oct15 #21: a loaded vendor line keeps its last price (cost, sell, typed ext), drops the source's vendor-quote link, and is flagged");
+    const g = flagOldVendorLine(f as never, f as never) as unknown as Record<string, unknown>;
+    ok(OLD_VENDOR_PRICE_NOTE === "Old vendor price — re-quote" && g.internalNote === "Old vendor price — re-quote · from Acme", "oct15 #21: loading it again doesn't stack the flag");
+    ok(rd("src/lib/narrative/load-system.ts").includes("flagOldVendorLine(it, originals.get(it.id)!)") && !rd("src/lib/narrative/system-library.ts").includes("items.filter((it) => !it.vendorQuoteId)"),
+      "oct15 #21: Load keeps vendor lines and flags each after re-pricing");
+  }
   /* ---- #18 — Lead estimator / Prepared by lock at send; approvers can still change them ---- */
   {
     ok(!quoteSentOnce({ status: "draft", revisions: [{ reason: "manual" }], history: [] }) && quoteSentOnce({ status: "draft", revisions: [{ reason: "sent" }] })

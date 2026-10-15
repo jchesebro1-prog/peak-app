@@ -84,7 +84,8 @@ export type LoadedLibrarySystem = {
   estNumber: string;
   costsUpdated: number;
   tierRepriced: number;
-  vendorLinesDropped: number;
+  /** Jeff 2026-10-15 #21 — vendor-quoted lines brought in at their last price, flagged OLD_VENDOR_PRICE_NOTE. */
+  vendorLinesFlagged: number;
 };
 export type LoadLibrarySystemResult = LoadedLibrarySystem | { ok: false; error: string };
 
@@ -226,14 +227,15 @@ export function parseLibraryKey(key: string): { quoteId: string; rev: number | n
 export function librarySectionForLoad(
   q: Quote,
   sectionId: string
-): { section: SpecSection; source: LibrarySource; vendorLinesDropped: number } | null {
+): { section: SpecSection; source: LibrarySource; vendorLines: number } | null {
   const source = librarySourceOf(q);
   if (!source) return null;
   const sec = sectionsOf(source.spec).find((s) => s.id === sectionId);
   if (!sec || sec.kind === "labor") return null;
   const items = linesOf(sec);
   if (!items.length) return null;
-  const kept = items.filter((it) => !it.vendorQuoteId);
+  // Jeff 2026-10-15 #21: vendor-quoted lines come along (Load re-flags them "Old vendor price — re-quote").
+  const kept = items;
   const keptIds = new Set(kept.map((it) => String(it.id)));
   const base: SpecSection = { ...sec, items: kept };
   delete base.room;
@@ -249,7 +251,7 @@ export function librarySectionForLoad(
   }
   const kps = sanitizeKeyProducts(sec.keyProducts).filter((k) => keptIds.has(k.lineKey));
   // Phase 2a: the source estimate's group and built mark mean nothing here.
-  return { section: withKeyProducts(withoutGroupMeta(base), kps), source, vendorLinesDropped: items.length - kept.length };
+  return { section: withKeyProducts(withoutGroupMeta(base), kps), source, vendorLines: items.filter((it) => !!it.vendorQuoteId).length };
 }
 
 /** Client placement of a loaded system: a fresh section id, every line
@@ -268,12 +270,33 @@ export function placeLoadedSection(section: SpecSection, opts: { id: string; nex
 
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-export function loadNotice(r: Pick<LoadedLibrarySystem, "systemName" | "estNumber" | "costsUpdated" | "tierRepriced" | "vendorLinesDropped">): string {
+export function loadNotice(r: Pick<LoadedLibrarySystem, "systemName" | "estNumber" | "costsUpdated" | "tierRepriced" | "vendorLinesFlagged">): string {
   const parts = [`Loaded ${r.systemName || "Untitled system"} from ${r.estNumber}`];
   if (r.costsUpdated > 0) parts.push(`${plural(r.costsUpdated, "part")} updated to today's cost`);
   if (r.tierRepriced > 0) parts.push(`${plural(r.tierRepriced, "line")} re-priced to this estimate's tier`);
-  if (r.vendorLinesDropped > 0) parts.push(`${plural(r.vendorLinesDropped, "vendor-quote line")} left out`);
+  if (r.vendorLinesFlagged > 0) parts.push(`${plural(r.vendorLinesFlagged, "vendor-quote line")} at the old vendor price — re-quote`);
   return parts.join(" · ");
+}
+
+/** Jeff 2026-10-15 #21 — the internal note a loaded vendor-quoted line carries. */
+export const OLD_VENDOR_PRICE_NOTE = "Old vendor price — re-quote";
+
+/**
+ * Jeff 2026-10-15 #21 — a vendor-quoted line as Load brings it in: its LAST
+ * price (cost, sell and any typed extended sell as `original` had them — the
+ * copy step never re-prices it), its link to the source estimate's vendor
+ * quote dropped (that record stays with the source), and the internal note
+ * OLD_VENDOR_PRICE_NOTE in front of any it had. Never shown to the customer
+ * (internalNote). Pure.
+ */
+export function flagOldVendorLine(copied: SpecItem, original: SpecItem): SpecItem {
+  const out: SpecItem = { ...copied, cost: original.cost, price: original.price };
+  if (original.extSellOverride !== undefined) out.extSellOverride = original.extSellOverride;
+  else delete out.extSellOverride;
+  delete out.vendorQuoteId;
+  const prev = (original.internalNote || "").trim();
+  out.internalNote = prev && !prev.startsWith(OLD_VENDOR_PRICE_NOTE) ? `${OLD_VENDOR_PRICE_NOTE} · ${prev}` : prev || OLD_VENDOR_PRICE_NOTE;
+  return out;
 }
 
 export function libraryRowMeta(h: Pick<SystemLibraryHit, "customer" | "estNumber" | "status" | "at">): string {

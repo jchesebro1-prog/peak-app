@@ -48338,10 +48338,10 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
 
   // ---- the Load pick ----
   const pick = n293sForLoad(QS, "sysA")!;
-  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2]) && pick.vendorLinesDropped === 1 && pick.source.tierMargin === 0.3,
-    "#293s load: vendor-quote lines and the Rewards credit are left out (counted); the snapshot's tier is the source tier");
-  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
-    "#293s load: blocks on dropped or missing lines go, room (job-specific) goes, the narrative carries");
+  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2, 5]) && pick.vendorLines === 1 && pick.source.tierMargin === 0.3,
+    "#293s load: the Rewards credit is left out; vendor-quote lines come along (counted — Jeff 2026-10-15 #21); the snapshot's tier is the source tier");
+  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "5", sku: "VQ-1", text: "Vendor para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
+    "#293s load: blocks on missing lines go, room (job-specific) goes, the narrative carries");
   ok(n293sForLoad(QS, "sysL") === null && n293sForLoad(QS, "nope") === null && n293sForLoad(QD, "d") === null && n293sForLoad(QS, "sysLive") === null,
     "#293s load: labor, unknown, draft and live-only-after-send systems are refused");
   ok(n293sGone === "That estimate is no longer available", "#293s load: the gone message is the spec's copy");
@@ -48349,16 +48349,16 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   // ---- placement on the client ----
   let n = 500;
   const placed = n293sPlace({ ...pick.section, freightAuto: true, freightPct: 9 }, { id: "sys777", nextId: () => ++n, autoFreightPct: 4 });
-  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }]),
+  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502, 503]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "503", sku: "VQ-1", text: "Vendor para", photo: true }]),
     "#293s place: fresh section id, items re-id'd through nextId, blocks follow their lines");
   ok(placed.freightPct === 4 && n293sPlace({ ...pick.section, freightPct: 9 }, { id: "s", nextId: () => ++n, autoFreightPct: 4 }).freightPct === 9,
     "#293s place: an auto-freight system takes this estimate's default; a hand-set freight is kept");
   ok(!("keyProducts" in n293sPlace(sec("z", "Z", [it(1, "Z")]), { id: "s", nextId: () => ++n, autoFreightPct: 0 })), "#293s place: no blocks → no key (back-compat shape)");
 
   // ---- notices and row text ----
-  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesDropped: 1 }) ===
-    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line left out", "#293s notice: Load reports cost moves and left-out vendor lines");
-  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesDropped: 0 }) ===
+  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesFlagged: 1 }) ===
+    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line at the old vendor price — re-quote", "#293s notice: Load reports cost moves and flagged vendor lines (Jeff 2026-10-15 #21)");
+  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesFlagged: 0 }) ===
     "Loaded A from Q-1 · 1 part updated to today's cost · 2 lines re-priced to this estimate's tier", "#293s notice: singular/plural and the tier move");
   const rowHit = { ...sHit, status: "won" as const, at: Date.UTC(2026, 8, 15, 18) };
   ok(n293sRowMeta(rowHit) === "Lakefront HS · EST-1005 · Won · Sep 15, 2026" && n293sRowCounts(sHit) === "3 lines · 2 key products",
@@ -48494,11 +48494,14 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
 
   // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
   const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
-  ok(r.ok && r.section.items.length === 1 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesDropped === 1,
-    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line left out");
+  const vq = r.ok ? r.section.items.find((x) => x.sku === "VQ-293") : undefined;
+  ok(r.ok && r.section.items.length === 2 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesFlagged === 1,
+    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line flagged (Jeff 2026-10-15 #21)");
+  ok(!!vq && vq.cost === 50 && vq.price === 80 && !("vendorQuoteId" in vq) && vq.internalNote === "Old vendor price — re-quote",
+    "#293s load (DB): the vendor line comes in at its last price, unlinked from the source's vendor quote, flagged \"Old vendor price — re-quote\" (Jeff 2026-10-15 #21)");
   ok(r.ok && r.section.name === "Test293 Library Lighting" && r.section.narrative === "Library intro 293." && r.section.presentation === "narrative" &&
-     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
-    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry; the vendor line's block and the room don't");
+     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
+    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry (the vendor line's too, #21); the room doesn't");
   ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
   const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
   ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
