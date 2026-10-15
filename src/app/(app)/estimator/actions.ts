@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
 import { withSavepoint } from "@/db";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
+import { loadBonusRates } from "@/lib/stores/pricing";
 import { stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
@@ -473,7 +474,7 @@ export async function saveQuoteAction(
   // persists; status = the prior status (status changes only travel through
   // setStatus, never this write), "draft" for a brand-new quote.
   const sellSanitized = Array.isArray(sellNormalized)
-    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalized)
+    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalized, await loadBonusRates())
     : sellNormalized;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
@@ -924,7 +925,7 @@ async function placeSystemInEstimate(
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
     // Before the credit re-pin below, so value/margin include the bonus.
-    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw);
+    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw, await loadBonusRates());
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
@@ -954,7 +955,7 @@ async function placeSystemInEstimate(
   }
 
   // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
-  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]));
+  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), await loadBonusRates());
   const t = totals(newSections, 0);
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.

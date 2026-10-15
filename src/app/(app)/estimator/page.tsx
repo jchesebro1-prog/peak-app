@@ -20,7 +20,7 @@ import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
-import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
+import { getFixtureRates, loadBonusRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
@@ -591,6 +591,8 @@ export default async function EstimatorPage({
       viewerCanApprove={can("approve", user.roles)}
       // Jeff 2026-10-15 #18: the people lock at the first send (approvers can still change them).
       peopleSentOnce={quoteSentOnce(q)}
+      // Jeff 2026-10-15 #19: a draft's bonus lines follow Estimating Rules (the server re-derives them on save).
+      bonusRates={await loadBonusRates()}
       // Phase 4: the review-comment permissions (add / resolve / delete).
       viewerRoles={user.roles}
       // #293: Save to library / intros — the Spec panel's audience (#205).

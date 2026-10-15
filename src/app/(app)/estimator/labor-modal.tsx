@@ -825,7 +825,7 @@ export default function LaborModal({
         </div>
       </div>
       <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#f7f8fa", color: "#5b616e", fontSize: 11.5 }}>
-        Package bonus (5% of system cost) is added to the system automatically.
+        A package bonus (a % of system cost, set in Estimating Rules) is added to the system automatically.
       </div>
       </div>
     </ConfigModal>

@@ -54695,7 +54695,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
   ok(/\.\.\.withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -68063,7 +68063,7 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
 
 {
   const bnHook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
-  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId)");
+  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId, bonusRatesFor(status, cur, bonusRates))"); // Jeff 2026-10-15 #19: the draft's rates
   const bnFxStart = bnHook.lastIndexOf("useEffect(", bnFx);
   const bnFxBody = bnHook.slice(bnFxStart, bnHook.indexOf("}, [sections, status]);", bnFx) + 30);
   ok(bnFx > 0 && /bonusRulesApply\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType, status \}, cur\)/.test(bnFxBody), "#bonus client pin: the effect gates on bonusRulesApply with the hook's own status, judged on the current sections");
@@ -68199,7 +68199,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   const save = hook.slice(hook.indexOf("const saveNow = async"), hook.indexOf("const doSave ="));
   ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
   const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
-  ok(sum.includes("5% package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
+  ok(sum.includes("Package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
   const pr = bnfRead("src/app/(app)/estimator/pricing.ts");
   const prDoc = pr.slice(pr.lastIndexOf("/**", pr.indexOf("function customerLinesRaw(")), pr.indexOf("function customerLinesRaw("));
   ok(/bonus: "package"/.test(prDoc) && /bonus: "estimator"/.test(prDoc) && /absorbSellAdjustment/.test(prDoc), "#bonus M11: customerLinesRaw's doc comment covers the 5% fold and the 2% spread");

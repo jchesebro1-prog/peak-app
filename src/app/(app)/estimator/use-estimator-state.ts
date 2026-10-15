@@ -17,7 +17,7 @@ import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewar
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter } from "next/navigation";
-import { bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
+import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
@@ -217,7 +217,7 @@ export function useEstimatorState(props: EstimatorProps) {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
-    viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false,
+    viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
     suggestion = null, suggestionParts,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
@@ -339,7 +339,7 @@ export function useEstimatorState(props: EstimatorProps) {
     // Functional update: judged against the CURRENT sections, so an edit that
     // lands between this render and the update is never overwritten.
     setSectionsState((cur) =>
-      bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, cur) ? withBonusLines(cur, nextId) : cur
+      bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, cur) ? withBonusLines(cur, nextId, bonusRatesFor(status, cur, bonusRates)) : cur
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, status]);

@@ -29,6 +29,10 @@ import { buildRevisionPackageZip } from "../src/lib/estimate-output/package-zip-
 import { createSpecDocument, patchSpecDocument } from "../src/lib/stores/spec-documents";
 import { canChangeQuotePeople, quoteSentOnce, PEOPLE_LOCKED_AFTER_SEND } from "../src/lib/quote-people-lock";
 import { setQuotePeopleAs } from "../src/lib/quote-people";
+import { bonusRatesFrom, lineBonusPct, DEFAULT_BONUS_RATES } from "../src/lib/estimate-bonus/flags";
+import { bonusRatesFor, withBonusLines, idCounterFrom } from "../src/lib/estimate-bonus/rules";
+import { canonicalBonusSections } from "../src/lib/estimate-bonus/canonical";
+import { GROUPS, setValue, loadBonusRates } from "../src/lib/stores/pricing";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -39,6 +43,7 @@ export async function oct15PureChecks(ok: Ok) {
   oct15ReviewAmountChecks(ok);
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
+  oct15BonusRateChecks(ok);
   /* ---- #18 — Lead estimator / Prepared by lock at send; approvers can still change them ---- */
   {
     ok(!quoteSentOnce({ status: "draft", revisions: [{ reason: "manual" }], history: [] }) && quoteSentOnce({ status: "draft", revisions: [{ reason: "sent" }] })
@@ -176,6 +181,38 @@ async function oct15LetterheadChecks(ok: Ok) {
     "oct15 #12: every cut-sheet page passes the baked letterhead");
 }
 
+/* ---- #19 — the 5 % / 2 % bonus rates live in Estimating Rules; drafts only ---- */
+function oct15BonusRateChecks(ok: Ok) {
+  ok(JSON.stringify(bonusRatesFrom(undefined, null)) === JSON.stringify(DEFAULT_BONUS_RATES) && bonusRatesFrom(6, 2.5).packagePct === 0.06 && bonusRatesFrom(6, 2.5).estimatorPct === 0.025,
+    "oct15 #19: stored percent numbers → fractions; missing → 5 % / 2 %");
+  ok(bonusRatesFrom(21, -1).packagePct === 0.05 && bonusRatesFrom(21, -1).estimatorPct === 0.02 && bonusRatesFrom(20, 0).packagePct === 0.2 && bonusRatesFrom(20, 0).estimatorPct === 0,
+    "oct15 #19: outside 0–20 % falls back to the default (the editor also clamps)");
+  const grp = GROUPS.find((g) => g.key === "bonuses");
+  const items = (grp?.items || []) as Array<{ id: string; min?: number; max?: number; def?: number }>;
+  ok(!!grp && items.some((i) => i.id === "bonus.packagePct" && i.min === 0 && i.max === 20 && i.def === 5) && items.some((i) => i.id === "bonus.estimatorPct" && i.min === 0 && i.max === 20 && i.def === 2),
+    "oct15 #19: Estimating Rules → Estimator bonuses edits both, 0–20 %, defaults 5 / 2");
+  const s = [{ id: "s1", name: "R", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "P", desc: "P", qty: 1, unit: "ea", cost: 100, price: 150 }, { id: 2, sku: "L", desc: "L", qty: 1, unit: "hr", cost: 100, price: 150, labor: true }] }] as never;
+  const def = withBonusLines(s, idCounterFrom(s));
+  const est = (secs: never) => (secs as { items: Array<{ bonus?: string; price: number; bonusPct?: number; desc: string }> }[])[0].items.find((i) => i.bonus === "estimator")!;
+  const pkg = (secs: never) => (secs as { items: Array<{ bonus?: string; cost: number; bonusPct?: number; desc: string }> }[])[0].items.find((i) => i.bonus === "package")!;
+  ok(!("bonusPct" in est(def as never)) && pkg(def as never).desc === "Package bonus — 5% of system cost" && est(def as never).desc === "Estimator bonus — 2% of system price",
+    "oct15 #19: default-rate lines are byte-identical to before (no bonusPct key, same text)");
+  const r = { packagePct: 0.06, estimatorPct: 0.03 };
+  const custom = withBonusLines(s, idCounterFrom(s), r);
+  ok(pkg(custom as never).cost === 12 && pkg(custom as never).bonusPct === 0.06 && est(custom as never).bonusPct === 0.03 && pkg(custom as never).desc === "Package bonus — 6% of system cost",
+    "oct15 #19: a draft figures its lines at the Estimating Rules rates and records them on the line");
+  ok(JSON.stringify(bonusRatesFor("draft", custom as never, DEFAULT_BONUS_RATES)) === JSON.stringify(DEFAULT_BONUS_RATES) && JSON.stringify(bonusRatesFor(undefined, def as never, r)) === JSON.stringify(r),
+    "oct15 #19: a draft (or new estimate) takes the current rates");
+  ok(JSON.stringify(bonusRatesFor("sent", custom as never, DEFAULT_BONUS_RATES)) === JSON.stringify(r) && JSON.stringify(bonusRatesFor("sent", def as never, r)) === JSON.stringify(DEFAULT_BONUS_RATES),
+    "oct15 #19: a sent quote keeps the rates its lines were figured at, whatever Settings says now");
+  const sentRe = canonicalBonusSections({ source: "estimator", status: "sent" }, def as never, r);
+  ok(sentRe === def, "oct15 #19: re-saving a sent quote at new rates leaves its bonus lines (and price) untouched");
+  ok(canonicalBonusSections({ source: "estimator", status: "won" }, def as never, r) === def && lineBonusPct({ bonus: "estimator" }) === 0.02, "oct15 #19: won / lost never re-derive; a line without bonusPct reads its default");
+  const acts = rd("src/app/(app)/estimator/actions.ts");
+  ok((acts.match(/canonicalBonusSections\([^\n]*await loadBonusRates\(\)\)/g) || []).length === 3 && rd("src/lib/assessments/quote-from-findings.ts").includes("[section], await loadBonusRates())"),
+    "oct15 #19: every server write of an Estimator quote's sections passes the current rates");
+}
+
 /* ---- #13 — every send gets the next Rev; numbers never repeat ---- */
 export function oct15RevChecks(ok: Ok) {
   const R = (rev: number, reason: string, revNo?: number) => ({ rev, reason, at: rev, ...(revNo ? { docFields: { revNo } } : {}) });
@@ -276,6 +313,13 @@ export async function oct15DbChecks(ok: Ok) {
     await oct15RevDbChecks(ok);
     await oct15ZipSpecDbChecks(ok);
     await oct15PeopleDbChecks(ok);
+    {
+      const before = await loadBonusRates();
+      await setValue("bonus.packagePct", 99);
+      const clamped = await loadBonusRates();
+      await setValue("bonus.packagePct", before.packagePct * 100);
+      ok(clamped.packagePct === 0.2, "oct15 #19 db: the Estimating Rules store clamps a typed rate to 20 %");
+    }
   } finally {
     await dropFixtures(FIX);
     await dropCompanies();
