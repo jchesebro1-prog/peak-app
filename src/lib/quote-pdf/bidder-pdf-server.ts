@@ -1,0 +1,46 @@
+import { COVER_RENDER_DEADLINE_MS, COVER_RENDER_TIMEOUT_MS } from "@/lib/estimate-output/cover-pdf-server";
+import { getCompany } from "@/lib/identity/companies";
+import { bidderPdfFileName } from "@/lib/parties/addressee";
+import { bidderPartyFor } from "@/lib/parties/addressee-server";
+import { currentRev } from "@/lib/parties/bids";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
+import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
+import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
+import { signPrintToken } from "@/lib/quote-pdf/token";
+import { get as getQuote } from "@/lib/stores/quotes";
+
+/**
+ * #348 slice 2b-i — one headless-Chrome render of a system estimate addressed to ONE bidder, on demand, through
+ * the signed /print/quote/[id]?bidder=… variant (the token's id is `${quoteId}~${partyId}`, so a plain-id token
+ * can't unlock it). Server-only. Every 404 path returns before any secret / origin check or render.
+ */
+export const BIDDER_PDF_FAILED = "The bidder PDF couldn’t be rendered — try again.";
+export const BIDDER_PDF_NO_SECRET = "Bidder PDFs aren’t set up on this server (AUTH_SECRET is missing).";
+
+export type BidderRender = { ok: true; pdf: Buffer; fileName: string } | { ok: false; status: 404 | 500 | 503; error: string };
+
+export async function renderBidderPdf(quoteId: string, partyId: string, host: string | null, proto: string | null): Promise<BidderRender> {
+  try {
+    if (!quoteId || quoteId.length > 64 || !partyId || partyId.length > 64) return { ok: false, status: 404, error: "Not found" };
+    const q = await getQuote(quoteId);
+    if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, status: 404, error: "Not found" };
+    const party = await bidderPartyFor(q.id, partyId);
+    if (!party) return { ok: false, status: 404, error: "Not found" };
+    const company = await getCompany(party.companyId);
+    if (!company) return { ok: false, status: 404, error: "Not found" };
+    const secret = process.env.AUTH_SECRET || "";
+    if (!secret) return { ok: false, status: 503, error: BIDDER_PDF_NO_SECRET };
+    const where = printOriginFor(process.env, host, proto);
+    if ("error" in where) return { ok: false, status: 503, error: where.error };
+    const t = signPrintToken(secret, "quote", `${q.id}~${party.id}`, Date.now());
+    const pdf = await renderPrintRouteToPdf(
+      `${where.origin}/print/quote/${encodeURIComponent(q.id)}?bidder=${encodeURIComponent(party.id)}&t=${encodeURIComponent(t)}`,
+      { timeoutMs: COVER_RENDER_TIMEOUT_MS, signal: AbortSignal.timeout(COVER_RENDER_DEADLINE_MS) }
+    );
+    return { ok: true, pdf, fileName: bidderPdfFileName(q.name, company.name, currentRev(q)) };
+  } catch (e) {
+    if (e instanceof PdfRenderUnavailable) return { ok: false, status: 503, error: e.message };
+    console.error("[bidder-pdf] render failed", e);
+    return { ok: false, status: 500, error: BIDDER_PDF_FAILED };
+  }
+}

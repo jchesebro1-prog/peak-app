@@ -16,6 +16,8 @@ export type BidderVM = {
   confirmation: string;
   statusText: string;
   needsRev: boolean;
+  /** `/api/quotes/<id>/bidder-pdf/<partyId>?download=1` — the bidder-addressed PDF, rendered on demand. */
+  pdfHref: string;
 };
 
 export type BidCandidateVM = { companyId: string; companyName: string; contactId: string | null; role: "gc" | "ec" };

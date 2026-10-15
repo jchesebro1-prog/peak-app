@@ -45,6 +45,10 @@ export function BidderRow({
         <span style={{ ...CHIP, background: "#eef0f4", color: "#3a3f4a" }}>{b.role === "gc" ? "GC" : "EC"}</span>
         <span style={resultChip(b)}>{b.resultLabel}</span>
         <span style={{ fontSize: 11.5, color: b.needsRev ? "#9a6a00" : "#5b616e", fontWeight: b.needsRev ? 600 : 400 }}>{b.statusText}</span>
+        {/* #348 2b-i — the estimate addressed to this bidder, rendered on demand; any bidder (pending, awarded, lost) can need a copy. */}
+        <a href={b.pdfHref} download aria-label={`Download PDF — ${b.companyName}`} style={{ fontSize: 11.5, fontWeight: 600, marginLeft: "auto" }}>
+          Download PDF
+        </a>
       </div>
       {(b.contactName || b.contactEmail) && (
         <div style={{ fontSize: 11.5, color: "#5b616e" }}>

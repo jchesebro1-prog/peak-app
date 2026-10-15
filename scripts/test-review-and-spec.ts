@@ -54910,7 +54910,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
   ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown; document?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
-  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, await documentAddressee(src))") && printPage.includes("quoteDocumentDataFor(q, cust, settings, await documentAddressee(q))"),
+  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, await documentAddressee(src))") && printPage.includes("quoteDocumentDataFor(q, cust, settings, await (bidder ? documentAddressee(q, bidder) : documentAddressee(q)))"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");

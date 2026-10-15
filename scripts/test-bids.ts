@@ -24,6 +24,8 @@ import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { addParty, listFor, setPartyBid } from "../src/lib/stores/parties";
 import { documentAddressee } from "../src/lib/parties/addressee-server";
+import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
+import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
 import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 
@@ -316,6 +318,12 @@ export async function bidDbChecks(ok: Ok) {
     ok(JSON.stringify(dN) === JSON.stringify(dNull) && dN.ownerLine === "" && dN.bidLine === "", "addressee db: a null addressee is byte-identical to the 3-arg call");
     ok(dA.custName === "Bid GC One" && dA.ownerLine === "Owner: Bid Owner" && dA.venueLabel === dN.venueLabel && dA.hasAttn && dA.attnLine === "Gee Ceeone" && dA.bidLine === ad1?.bidLine, "addressee db: the document is addressed to the bidder; the venue still resolves from the owner");
 
+    // per-bidder PDF (2b-i task 3): every 404 path returns before any render / secret check
+    const rb = async (qid: string, pid: string) => renderBidderPdf(qid, pid, "localhost:3000", "http");
+    const rNoParty = await rb(q, "pty_0000000000000000"), rOther = await rb(q, wpId), rOwner = ownerRow ? await rb(q, ownerRow.id) : null, rNoQuote = await rb(fixtureId(348, "bmissing"), g1), rTooLong = await rb(q, "x".repeat(65));
+    ok([rNoParty, rOther, rOwner, rNoQuote, rTooLong].every((r) => !!r && !r.ok && r.status === 404 && r.error === "Not found"), "bidder pdf db: unknown party, another quote's bidder, the owner row, an unknown quote and an over-long id all 404 before any render");
+    const tPlain = signPrintToken("s3cret", "quote", q, 1_000_000), tBidder = signPrintToken("s3cret", "quote", `${q}~${g1}`, 1_000_000);
+    ok(!verifyPrintToken("s3cret", tPlain, "quote", `${q}~${g1}`, 1_000_000) && !verifyPrintToken("s3cret", tBidder, "quote", q, 1_000_000) && verifyPrintToken("s3cret", tBidder, "quote", `${q}~${g1}`, 1_000_000) && !verifyPrintToken("s3cret", tBidder, "quote", `${q}~${g2}`, 1_000_000), "bidder pdf db: a plain-id token can't unlock a bidder variant, nor the reverse, nor another bidder's");
 
     const noAward = await undoAward(q);
     ok(!noAward.ok && noAward.error === "Nothing is awarded.", "bids db: undo with nothing awarded refused");

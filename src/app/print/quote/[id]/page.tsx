@@ -40,7 +40,10 @@ export default async function PrintQuotePage({
 }) {
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const t = Array.isArray(sp.t) ? sp.t[0] : sp.t;
-  if (!tokenOk(t, "quote", id)) notFound();
+  // #348 2b-i: a per-bidder variant (`?bidder=pty_…`) needs a token signed for `${id}~${bidder}`; a plain-id token never unlocks it.
+  const rawBidder = Array.isArray(sp.bidder) ? sp.bidder[0] : sp.bidder;
+  const bidder = typeof rawBidder === "string" && rawBidder.length <= 64 && /^pty_[0-9a-f]{16}$/.test(rawBidder) ? rawBidder : null;
+  if (!tokenOk(t, "quote", bidder ? `${id}~${bidder}` : id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
   const [cust, settings, perks, cutSheets] = await Promise.all([
@@ -51,7 +54,7 @@ export default async function PrintQuotePage({
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
     normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
   ]);
-  const doc = quoteDocumentDataFor(q, cust, settings, await documentAddressee(q));
+  const doc = quoteDocumentDataFor(q, cust, settings, await (bidder ? documentAddressee(q, bidder) : documentAddressee(q)));
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.
   // Phase 5: plus the package document's photo-on product blocks.

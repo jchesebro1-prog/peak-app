@@ -12,16 +12,18 @@ import type { Party } from "./rules";
  * (`q.bid.awardedPartyId`) → null (today's output, byte-identical). An explicit id that isn't a valid bidder here
  * falls back to the awarded default, never to a wrong company. The owner stays the quote's customer.
  */
+/** The party when it is a live GC/EC bidder row on THIS quote, else null. */
+export async function bidderPartyFor(quoteId: string, id: string | null | undefined): Promise<Party | null> {
+  if (!id) return null;
+  const p = await getDoc<Party>("record_parties", id);
+  return p && p.recordType === "quote" && p.recordId === quoteId && !!p.bid && (p.role === "gc" || p.role === "ec") ? p : null;
+}
+
 export async function documentAddressee(
   q: Pick<Quote, "id" | "customer" | "customerId" | "bid">,
   partyId?: string | null
 ): Promise<DocAddressee | null> {
-  const bidderParty = async (id: string | null | undefined): Promise<Party | null> => {
-    if (!id) return null;
-    const p = await getDoc<Party>("record_parties", id);
-    return p && p.recordType === "quote" && p.recordId === q.id && !!p.bid && (p.role === "gc" || p.role === "ec") ? p : null;
-  };
-  const party = (await bidderParty(partyId)) ?? (await bidderParty(q.bid?.awardedPartyId ?? null));
+  const party = (await bidderPartyFor(q.id, partyId)) ?? (await bidderPartyFor(q.id, q.bid?.awardedPartyId ?? null));
   if (!party) return null;
   const company = await getCompany(party.companyId);
   if (!company) return null;

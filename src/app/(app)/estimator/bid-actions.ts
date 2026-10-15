@@ -42,6 +42,7 @@ async function loadPanel(quoteId: string, canEdit: boolean): Promise<BidPanelRes
     confirmation: p.bid.confirmation ?? "",
     statusText: bidderStatusText(p.bid, rev),
     needsRev: needsRev(p.bid, rev),
+    pdfHref: `/api/quotes/${encodeURIComponent(quoteId)}/bidder-pdf/${encodeURIComponent(p.id)}?download=1`,
   }));
   // Candidates: the lead's GC / EC parties that aren't already bidders here.
   let candidates: BidCandidateVM[] = [];
