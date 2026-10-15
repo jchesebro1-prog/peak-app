@@ -147,6 +147,36 @@ export async function categoryAction(id: string, key: string | null) {
   revalidate();
 }
 
+/* ---- #347 the person's own Gmail labels (the reader's Labels card) ----
+ * Owner-checked here and again in lib/gmail/user-labels (ownThread, #341).
+ * Gmail is the source of truth: threads.modify / labels.create, then the
+ * stored gmailLabelIds follow. */
+
+export async function gmailLabelPickerAction(threadId: string) {
+  const user = await requireUser();
+  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  const { labelPicker } = await import("@/lib/gmail/user-labels");
+  return labelPicker(threadId, { id: user.id, name: user.name });
+}
+
+export async function setGmailLabelAction(threadId: string, labelId: string, on: boolean) {
+  const user = await requireUser();
+  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  const { setThreadLabel } = await import("@/lib/gmail/user-labels");
+  const r = await setThreadLabel(threadId, typeof labelId === "string" ? labelId.slice(0, 200) : "", on === true, { id: user.id, name: user.name });
+  revalidate();
+  return r.ok ? { ok: true as const } : r;
+}
+
+export async function createGmailLabelAction(threadId: string, name: string) {
+  const user = await requireUser();
+  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  const { createThreadLabel } = await import("@/lib/gmail/user-labels");
+  const r = await createThreadLabel(threadId, typeof name === "string" ? name.slice(0, 400) : "", { id: user.id, name: user.name });
+  revalidate();
+  return r;
+}
+
 /* ---- delete / restore (recoverable — the Deleted folder) ---- */
 
 export async function deleteAction(id: string) {

@@ -23,6 +23,16 @@ import { linkThread, rememberAddress } from "./linking";
 import { resolveAddressFor } from "@/lib/inbox-identity";
 import { desiredPeakLabels, isPlaceholderCustomerLabel, parsePeakLabel, type PeakCommand } from "./peak-labels";
 import { ensureLabelId } from "./label-sync";
+import { isPickableLabel } from "./user-label-rules";
+
+/** #347 — a label id the Labels card shows as editable: a known user label
+ *  (not Peak/*) or Starred / Important. An id the cache doesn't know (a
+ *  label made in Gmail since the last label sync) counts when it looks like
+ *  a user label id (`Label_…`), so a new label still shows. */
+export function isCardLabel(id: string, row: { labelId: string; name: string; type: "system" | "user" } | undefined): boolean {
+  if (row) return isPickableLabel(row);
+  return /^Label_/.test(id);
+}
 
 /** No echo-window constant lives in label-sync.ts (the writer stamps
  *  peakLabelsAppliedAt but doesn't need its own window) — 2 minutes here. */
@@ -127,6 +137,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
   const canModify = !!conn && (conn.scope || "").includes(GMAIL_MODIFY_SCOPE);
   const cache = await listCachedLabels(key);
   const idToName = new Map(cache.map((l) => [l.labelId, l.name]));
+  const cacheById = new Map(cache.map((l) => [l.labelId, l]));
   const all = await listDocs<CommThread>("comms");
   const byGmailThread = new Map(
     all.filter((t) => t.gmailAccountKey === key && t.gmailThreadId).map((t) => [t.gmailThreadId!, t])
@@ -138,7 +149,27 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
     if (!t) continue;
     const addedNames = ev.added.map((id) => idToName.get(id) || "").filter((n) => n.startsWith("Peak/"));
     const removedNames = ev.removed.map((id) => idToName.get(id) || "").filter((n) => n.startsWith("Peak/"));
-    if (!addedNames.length && !removedNames.length) continue;
+    if (!addedNames.length && !removedNames.length) {
+      // #347 — the person's own labels (and Starred / Important) changed in
+      // Gmail: no command, just record them so the Labels card shows them.
+      // Other system labels (UNREAD, INBOX, CATEGORY_*) are not recorded
+      // here. The echo of the card's own change (userLabelsAppliedAt within
+      // the window) is skipped — the card already stored that state.
+      const userIds = (ids: string[]) => ids.filter((id) => isCardLabel(id, cacheById.get(id)));
+      const add = userIds(ev.added);
+      const remove = userIds(ev.removed);
+      if (!add.length && !remove.length) continue;
+      if ((t.userLabelsAppliedAt || 0) > Date.now() - ECHO_WINDOW_MS) continue;
+      const touched = new Set(ev.messageIds);
+      await patchDoc<CommThread>("comms", t.id, (d) => {
+        d.messages = (d.messages || []).map((m) =>
+          m.gmailId && touched.has(m.gmailId)
+            ? { ...m, gmailLabelIds: Array.from(new Set([...(m.gmailLabelIds || []).filter((id) => !remove.includes(id)), ...add])) }
+            : m
+        );
+      });
+      continue;
+    }
 
     // Our own echo: the writer just wrote exactly this add/remove set for
     // this thread within the last two minutes — this event is Gmail

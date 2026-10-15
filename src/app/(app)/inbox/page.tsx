@@ -103,6 +103,7 @@ import { isPlaceholderCompany, withoutPlaceholderLink } from "@/lib/inbox-org/pl
 import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
 import { ORGANIZE_BASE_HREF, organizeArchiveTarget, organizeTabOf } from "./organize/format";
 import { threadGmailLabels } from "./row-labels";
+import { cardGmailChips } from "@/lib/gmail/user-label-rules";
 import { getTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import HomeTabs from "../home-tabs";
@@ -1090,7 +1091,12 @@ export default async function InboxPage({
         : {
             current: categoryMeta(sel.category),
             options: CATEGORIES,
-            gmail: threadGmailLabels(sel.messages || [], labelOptions, { max: 12, skipPlaceholders: true }),
+            // #347 — the person's own Gmail labels (editable), Peak/* read-only
+            gmail: cardGmailChips(
+              sel.messages || [],
+              labelOptions.map((l) => ({ labelId: l.id, name: l.name, type: l.type, textColor: l.textColor, backgroundColor: l.backgroundColor }))
+            ),
+            gmailEditable: sel.mailbox === "personal" && !!sel.gmailThreadId,
           },
       // #346 — set below when the thread is opened from the Organize view
       organize: null,

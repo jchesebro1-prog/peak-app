@@ -10,6 +10,7 @@ import type { ThreadTaskLinkKind, ThreadTaskRow } from "@/lib/inbox-task";
 import type { VenueType } from "@/lib/venue-types";
 import type { ReaderPreDraftVM } from "@/lib/brief/types";
 import type { OrganizeArchiveTarget } from "./organize/format";
+import type { CardGmailChip } from "@/lib/gmail/user-label-rules";
 
 export type Opt = { value: string; label: string };
 
@@ -283,11 +284,12 @@ export type ReaderVM = {
   /** #335 inbox organization — court chip, noise tag, filing line and
    *  promise-task (null on a thread the pipeline never touched) */
   org?: ReaderOrgVM | null;
-  /** #346 — the sidebar's Labels card: the thread's label (the Inbox's
-   *  category, one per thread — Categorize ▾), the options to pick from, and
-   *  the Gmail labels it carries (read-only chips). null on a read-only
-   *  thread. */
-  labels?: { current: CategoryOpt | null; options: CategoryOpt[]; gmail: LabelOpt[] } | null;
+  /** #346 / #347 — the sidebar's Labels card: the Gmail labels the thread
+   *  carries (the person's own and Starred / Important editable, the app's
+   *  Peak/* read-only), whether they can be changed here (a Gmail thread in
+   *  my own mailbox), and the Colour row (the Inbox's category, one per
+   *  thread — Categorize ▾). null on a read-only thread. */
+  labels?: { current: CategoryOpt | null; options: CategoryOpt[]; gmail: CardGmailChip[]; gmailEditable: boolean } | null;
   /** #346 — set when the thread was opened from the Organize view: the
    *  reader's Archive takes the row off To file / Noise and moves on. */
   organize?: OrganizeArchiveTarget | null;
