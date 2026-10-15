@@ -33,7 +33,9 @@ import { FIXED_PICK_LISTS } from "../src/lib/assessments/defs/picklists";
 import { evaluate, riggingDepth, type EvalInput } from "../src/lib/assessments/evaluate";
 import type { Answer, Answers } from "../src/lib/assessments/answers";
 import { addPicklistValue } from "../src/lib/stores/assessment-picklists";
-import { planReminders, reminderTaskId, inReminderWindow, REMINDER_LEAD_DAYS, type ReminderFinding } from "../src/lib/assessments/reminders";
+import { planReminders, reminderTaskId, inReminderWindow, REMINDER_LEAD_DAYS, staleReminderIds, parseReminderTaskId, type ReminderFinding } from "../src/lib/assessments/reminders";
+import { closeRemindersIfDateChanged } from "../src/lib/assessments/reminder-close";
+import { saveFinding } from "../src/lib/stores/findings";
 import { runAssessmentReminders } from "../src/lib/assessments/reminders-server";
 import { parseNextAssessmentInput, nextAssessmentInputValue, MIN_NEXT_ASSESSMENT_MS } from "../src/lib/assessments/next-assessment-input";
 import { setNextAssessmentAt, getVenueProfile } from "../src/lib/stores/venue-profiles";
@@ -445,6 +447,19 @@ function reminderChecks(ok: Ok) {
   ok(p1.id === reminderTaskId("finding", "fd1", now + 20 * DAY) && p1.id === planReminders(base).find((x) => x.ref === "fd1")!.id && /^T-asr-f-fd1-\d{8}$/.test(p1.id) && /^T-asr-v-st1-\d{8}$/.test(v1.id),
     "b3 #10: deterministic task ids (record + due day) — the sweep is idempotent");
   ok(reminderTaskId("finding", "fd1", now + 21 * DAY) !== p1.id, "b3 #10: a moved due date gets its own reminder");
+  // #353 review M3 / M8
+  const d1 = reminderTaskId("finding", "fd1", now + 20 * DAY), d2 = reminderTaskId("finding", "fd1", now + 40 * DAY), other = reminderTaskId("finding", "fd1-x", now + 20 * DAY), ven = reminderTaskId("venue", "fd1", now + 20 * DAY);
+  ok(JSON.stringify(parseReminderTaskId(d1)) === JSON.stringify({ kind: "finding", ref: "fd1", day: d1.slice(-8) }) && parseReminderTaskId("T-123") === null, "M3: a reminder id parses back to kind, record and day");
+  ok(staleReminderIds([d1, d2, other, ven], "finding", "fd1", now + 40 * DAY).join() === d1 && staleReminderIds([d1, d2, other, ven], "finding", "fd1", null).join() === [d1, d2].join() && staleReminderIds([d1], "finding", "fd1", now + 20 * DAY).length === 0,
+    "M3: a moved date makes only the old day's reminder stale; a cleared date makes all of that record's stale; never another record's");
+  ok(planReminders({ ...base, liveSiteIds: new Set(["st3"]) }).map((x) => x.ref).join() === "st3", "M8: a finding or venue whose venue was deleted gets no reminder");
+  const fs = src("src/lib/stores/findings.ts");
+  ok(/prevDue = cur\.nextDue;[\s\S]*await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /if \(r\.ok\) await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /closeFindingReminders\(key, f\.nextDue, undefined\)/.test(fs),
+    "M3 pin: saveFinding, transitionFinding and voidFinding close the old date's reminders");
+  ok(/closeRemindersIfDateChanged\("venue", site\.id, before, at\)/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "M3 pin: the venue date action closes the old date's reminder");
+  const rs = src("src/lib/assessments/reminders-server.ts");
+  ok(/listDocsFiltered<[^>]*>\("assessments", \{ fields: \["siteId", "createdBy", "visitDate"\] \}\)/.test(rs) && /getDocRows\("tasks", plans\.map\(\(p\) => p\.id\)\)/.test(rs) && /await beforeDeadline\(\s*Promise\.all\(/.test(rs) && !/listAssessments/.test(rs),
+    "M5 pin: the sweep reads three assessment fields, checks existing ids in one batched read, and its reads run under the deadline");
   const route = src("src/app/api/drive/sync/route.ts");
   ok(/runAssessmentReminders\(\{ deadlineMs: started \+ 10_000 \}\)/.test(route) && route.indexOf("runAssessmentReminders(") < route.indexOf("syncAllDrivers("), "b3 #10 pin: the daily drive cron runs the reminders first, inside a 10 s deadline");
   ok(/after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")), "b3 #10 pin: the Assessments page runs them lazily (throttled)");
@@ -467,39 +482,74 @@ async function reminderDbChecks(ok: Ok) {
   const db = await getDb();
   const PFX = "TESTb3r:";
   const now = Date.now();
-  const F1 = PFX + "fd1", F2 = PFX + "fd2", SITE = PFX + "st1", CO = PFX + "co1", AS = PFX + "AS1";
-  const ids = [reminderTaskId("finding", F1, now + 12 * DAY), reminderTaskId("venue", SITE, now + 20 * DAY)];
+  const F1 = "fd_b3r0000000000001", F2 = "fd_b3r0000000000002", SITE = PFX + "st1", SITE2 = PFX + "st2", CO = PFX + "co1", AS = PFX + "AS1";
+  const F3 = "fd_b3r0000000000003"; // at a deleted venue (M8)
+  const due1 = now + 12 * DAY, due1b = now + 15 * DAY, dueV = now + 20 * DAY, dueV2 = now + 22 * DAY;
+  const fid = (k: string, d: number) => reminderTaskId("finding", k, d);
+  const vid = (d: number) => reminderTaskId("venue", SITE, d);
+  const allIds = [fid(F1, due1), fid(F1, due1b), fid(F2, now + 90 * DAY), fid(F3, due1), vid(dueV), vid(dueV2)];
   const cleanup = async () => {
-    await db.delete(DOC_TABLES.tasks).where(inArray(DOC_TABLES.tasks.id, ids));
-    for (const [coll, id] of [["findings", F1], ["findings", F2], ["assessments", AS], ["venue_profiles", SITE]] as const)
+    await db.delete(DOC_TABLES.tasks).where(inArray(DOC_TABLES.tasks.id, allIds));
+    for (const [coll, id] of [["findings", F1], ["findings", F2], ["findings", F3], ["findings", "fd_b3r0000000000009"], ["assessments", AS], ["venue_profiles", SITE]] as const)
       await db.delete(DOC_TABLES[coll]).where(inArray(DOC_TABLES[coll].id, [id]));
     await db.delete(sites).where(like(sites.id, PFX + "%"));
     await db.delete(companies).where(like(companies.id, PFX + "%"));
   };
+  const task = async (id: string) => (await getDocRows<{ id: string; status: string; assigneeUserId: string | null; dueAt: number; customerId: string; siteId: string }>("tasks", [id]))[0];
   try {
     await cleanup();
     await saveCompany({ id: CO, name: "B3 Reminder Co", type: "customer", lifecycle: "active", deleted: false, ownerUserId: "u1" });
     await saveSite({ id: SITE, companyId: CO, name: "B3 Reminder Hall", locationName: "B3 Reminder Hall", venueKind: "proscenium" });
+    await saveSite({ id: SITE2, companyId: CO, name: "B3 Gone Hall", locationName: "B3 Gone Hall", venueKind: "proscenium" });
     const ins = async (coll: "findings" | "assessments", id: string, doc: Record<string, unknown>) =>
       db.insert(DOC_TABLES[coll]).values({ id, doc: { ...doc, id }, rev: 1, updatedAt: now, receivedAt: now, review: { state: "new" }, deleted: false });
     await ins("assessments", AS, { customerId: CO, siteId: SITE, status: "completed", visitDate: now - 300 * DAY, assessorId: "u1", createdBy: "u1", answers: {}, scopes: [], photos: [], dismissedPrompts: [], visitType: "condition", createdAt: now, updatedAt: now });
-    await ins("findings", F1, { key: F1, customerId: CO, siteId: SITE, assessmentId: AS, category: "RIG", rating: "needs", description: "Fire curtain drop test", status: "closed", nextDue: now + 12 * DAY, createdAt: now, updatedAt: now, createdBy: "u1" });
-    await ins("findings", F2, { key: F2, customerId: CO, siteId: SITE, assessmentId: AS, category: "RIG", rating: "needs", description: "Later", status: "closed", nextDue: now + 90 * DAY, createdAt: now, updatedAt: now, createdBy: "u1" });
-    await setNextAssessmentAt(SITE, CO, now + 20 * DAY);
-    ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(now + 20 * DAY), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
+    const fdoc = (key: string, siteId: string, nextDue: number, description: string) => ({ key, customerId: CO, siteId, assessmentId: AS, category: "RIG", rating: "needs", description, status: "closed", nextDue, createdAt: now, updatedAt: now, createdBy: "u1", questionKeys: [], photoIds: [], quoteRefs: [], history: [] });
+    await ins("findings", F1, fdoc(F1, SITE, due1, "Fire curtain drop test"));
+    await ins("findings", F2, fdoc(F2, SITE, now + 90 * DAY, "Later"));
+    await ins("findings", F3, fdoc(F3, SITE2, due1, "At a venue that was deleted"));
+    await db.update(sites).set({ deleted: true }).where(inArray(sites.id, [SITE2]));
+    await setNextAssessmentAt(SITE, CO, dueV);
+    ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(dueV), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
+
+    const stoppedRun = await runAssessmentReminders({ now, deadlineMs: Date.now() - 1 });
+    ok(stoppedRun.stopped && stoppedRun.created === 0 && !(await task(fid(F1, due1))), "M5 db: a deadline already passed stops before the reads and writes nothing");
+
     const r1 = await runAssessmentReminders({ now });
-    const rows = await getDocRows<{ id: string; assigneeUserId: string | null; dueAt: number; customerId: string; siteId: string; title: string }>("tasks", ids);
-    ok(rows.length === 2 && rows.every((r) => !r.deleted && r.doc.assigneeUserId === "u1" && r.doc.customerId === CO) && r1.created >= 2,
+    const t1 = await task(fid(F1, due1)), tv = await task(vid(dueV));
+    ok(!!t1 && !!tv && !t1.deleted && t1.doc.assigneeUserId === "u1" && tv.doc.assigneeUserId === "u1" && t1.doc.customerId === CO && r1.created >= 2,
       "b3 #10 db: the sweep creates the finding and venue reminders, assigned to the account rep: " + JSON.stringify(r1));
-    ok(rows.find((r) => r.id === ids[0])!.doc.dueAt === now + 12 * DAY && rows.find((r) => r.id === ids[0])!.doc.siteId === SITE, "b3 #10 db: due on the finding's date, linked to the venue");
+    ok(t1.doc.dueAt === due1 && t1.doc.siteId === SITE, "b3 #10 db: due on the finding's date, linked to the venue");
+    ok(!(await task(fid(F3, due1))), "M8 db: no reminder for a finding whose venue was deleted");
     const r2 = await runAssessmentReminders({ now });
-    ok(r2.created === 0 && (await getDocRows("tasks", ids)).length === 2, "b3 #10 db: a second run creates nothing (idempotent)");
-    await softDeleteDoc("tasks", ids[0]);
+    ok(r2.created === 0 && r2.closed === 0, "b3 #10 db: a second run creates and closes nothing (idempotent)");
+
+    // M3 — a moved finding date (through the store) closes the old day's reminder at once; the sweep adds the new one.
+    const moved = await saveFinding({ key: F1, nextDue: due1b } as never, { id: "u1" });
+    ok(moved.ok && (await task(fid(F1, due1)))?.doc.status === "done", "M3 db: moving a finding's next-due date closes the old date's open reminder");
+    await runAssessmentReminders({ now });
+    ok((await task(fid(F1, due1b)))?.doc.status === "open" && (await task(fid(F1, due1)))?.doc.status === "done", "M3 db: the sweep then creates the new date's reminder, leaving the old one done");
+    // M3 — clearing it closes that one too.
+    await saveFinding({ key: F1, nextDue: null } as never, { id: "u1" });
+    ok((await task(fid(F1, due1b)))?.doc.status === "done", "M3 db: clearing a finding's next-due date closes its open reminder");
+    // M3 — a venue date moved by a path without the hook: the sweep's catch-all closes the old one.
+    await setNextAssessmentAt(SITE, CO, dueV2);
     const r3 = await runAssessmentReminders({ now });
-    const after3 = await getDocRows("tasks", [ids[0]]);
-    ok(r3.created === 0 && after3.length === 1 && after3[0].deleted, "b3 #10 db: a reminder someone deleted is never re-created");
+    ok((await task(vid(dueV)))?.doc.status === "done" && (await task(vid(dueV2)))?.doc.status === "open" && r3.closed >= 1,
+      "M3 db: the sweep closes a venue reminder whose date moved and creates the new one: " + JSON.stringify(r3));
+    // M3 — the action's hook: clearing the venue date closes its reminder right away.
     await setNextAssessmentAt(SITE, CO, null);
-    ok((await getVenueProfile(SITE))?.nextAssessmentAt === undefined, "b3 #10 db: clearing the date removes it");
+    await closeRemindersIfDateChanged("venue", SITE, dueV2, null);
+    ok((await task(vid(dueV2)))?.doc.status === "done" && (await getVenueProfile(SITE))?.nextAssessmentAt === undefined, "M3 db: clearing a venue's date closes its open reminder");
+
+    // a deleted reminder is never re-created
+    await ins("findings", "fd_b3r0000000000009", fdoc("fd_b3r0000000000009", SITE, due1, "Delete me"));
+    allIds.push(fid("fd_b3r0000000000009", due1));
+    await runAssessmentReminders({ now });
+    await softDeleteDoc("tasks", fid("fd_b3r0000000000009", due1));
+    const r4 = await runAssessmentReminders({ now });
+    const del = await getDocRows("tasks", [fid("fd_b3r0000000000009", due1)]);
+    ok(r4.created === 0 && del.length === 1 && del[0].deleted, "b3 #10 db: a reminder someone deleted is never re-created");
   } finally {
     await cleanup();
   }

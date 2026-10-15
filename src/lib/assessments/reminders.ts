@@ -38,7 +38,7 @@ export interface ReminderPlan {
 }
 
 /** `20261114` — the due day (UTC) in a reminder id. */
-function dayStamp(ms: number): string {
+export function dayStamp(ms: number): string {
   const d = new Date(ms);
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
 }
@@ -47,7 +47,26 @@ function dayStamp(ms: number): string {
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 120);
 
 export function reminderTaskId(kind: "finding" | "venue", ref: string, dueAt: number): string {
-  return `T-asr-${kind === "finding" ? "f" : "v"}-${safe(ref)}-${dayStamp(dueAt)}`;
+  return `${reminderTaskPrefix(kind, ref)}${dayStamp(dueAt)}`;
+}
+
+/** Every reminder id for one record starts with this (the due day follows). */
+export function reminderTaskPrefix(kind: "finding" | "venue", ref: string): string {
+  return `T-asr-${kind === "finding" ? "f" : "v"}-${safe(ref)}-`;
+}
+
+/** `T-asr-f-<ref>-<yyyymmdd>` → its parts (ref as sanitised in the id), else null. */
+export function parseReminderTaskId(id: string): { kind: "finding" | "venue"; ref: string; day: string } | null {
+  const m = /^T-asr-([fv])-(.+)-(\d{8})$/.exec(id);
+  return m ? { kind: m[1] === "f" ? "finding" : "venue", ref: m[2], day: m[3] } : null;
+}
+
+/** #353 review M3 — the open reminders (ids) for one record that no longer match its date: a changed date leaves the
+ *  old day's reminder stale; a cleared date (null) leaves every one stale. */
+export function staleReminderIds(openIds: readonly string[], kind: "finding" | "venue", ref: string, currentDue: number | null | undefined): string[] {
+  const prefix = reminderTaskPrefix(kind, ref);
+  const keep = typeof currentDue === "number" && Number.isFinite(currentDue) && currentDue > 0 ? dayStamp(currentDue) : null;
+  return openIds.filter((id) => id.startsWith(prefix) && /^\d{8}$/.test(id.slice(prefix.length)) && id.slice(prefix.length) !== keep);
 }
 
 /** Due in the next 30 days (inclusive), and not yet past. A date already past gets no reminder. */
@@ -64,6 +83,8 @@ export interface PlanInput {
   /** active user ids — a creator who has left gets no reminder (the task goes unassigned) */
   activeUserIds: ReadonlySet<string>;
   siteNames: ReadonlyMap<string, string>;
+  /** #353 review M8 — live venues; a finding or venue whose site was deleted gets no reminder. Absent = no check. */
+  liveSiteIds?: ReadonlySet<string>;
   dayLabel: (ms: number) => string;
   now: number;
 }
@@ -78,9 +99,10 @@ export function planReminders(p: PlanInput): ReminderPlan[] {
   const active = (u: string | null | undefined) => (u && p.activeUserIds.has(u) ? u : null);
   const rep = (customerId: string, fallback: string | null | undefined) => active(p.owners.get(customerId)) ?? active(fallback);
   const venueName = (siteId: string) => p.siteNames.get(siteId) || "the venue";
+  const siteLive = (siteId: string) => !p.liveSiteIds || p.liveSiteIds.has(siteId);
   const out: ReminderPlan[] = [];
   for (const f of p.findings) {
-    if (f.voided || !inReminderWindow(f.nextDue, p.now)) continue;
+    if (f.voided || !siteLive(f.siteId) || !inReminderWindow(f.nextDue, p.now)) continue;
     const label = f.printedId || f.key;
     out.push({
       id: reminderTaskId("finding", f.key, f.nextDue),
@@ -95,7 +117,7 @@ export function planReminders(p: PlanInput): ReminderPlan[] {
     });
   }
   for (const v of p.venues) {
-    if (!inReminderWindow(v.nextAssessmentAt, p.now)) continue;
+    if (!siteLive(v.siteId) || !inReminderWindow(v.nextAssessmentAt, p.now)) continue;
     out.push({
       id: reminderTaskId("venue", v.siteId, v.nextAssessmentAt),
       kind: "venue",

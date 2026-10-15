@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { getSite } from "@/lib/identity/sites";
-import { setNextAssessmentAt } from "@/lib/stores/venue-profiles";
+import { getVenueProfile, setNextAssessmentAt } from "@/lib/stores/venue-profiles";
+import { closeRemindersIfDateChanged } from "@/lib/assessments/reminder-close";
 import { MIN_NEXT_ASSESSMENT_MS } from "@/lib/assessments/next-assessment-input";
 
 /**
@@ -17,7 +18,10 @@ export async function setNextAssessmentAction(siteId: string, at: number | null)
   if (at !== null && !(typeof at === "number" && Number.isFinite(at) && at >= MIN_NEXT_ASSESSMENT_MS && at < 8_640_000_000_000)) return { ok: false, error: "Pick a date (year 1900 or later)." };
   const site = await getSite(siteId);
   if (!site) return { ok: false, error: "That venue could not be found." };
+  const before = (await getVenueProfile(site.id))?.nextAssessmentAt ?? null;
   await setNextAssessmentAt(site.id, site.companyId, at);
+  // #353 review M3 — a moved or cleared date closes the old date's open reminder.
+  await closeRemindersIfDateChanged("venue", site.id, before, at);
   revalidatePath(`/venues/${encodeURIComponent(site.id)}`);
   return { ok: true };
 }
