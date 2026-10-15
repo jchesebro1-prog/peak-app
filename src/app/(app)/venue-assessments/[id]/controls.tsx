@@ -276,11 +276,23 @@ export default function SurveyEditor({
   // clean draft (the panel disables Insert while dirty).
   const [seenInitial, setSeenInitial] = useState(initial);
   const [adoptNextRecord, setAdoptNextRecord] = useState(false);
+  // #344 C5 fix: the last draft the server holds (a photo save sends this + the current photo refs, never the user's
+  // unsaved edits) and the current photo refs (every save sends them). Both reset when a refreshed record is adopted.
+  const [adoptedBase, setAdoptedBase] = useState(initial);
+  const lastSaved = useRef<Draft>(initial);
+  const refsNow = useRef<SurveyPhotoRef[]>(initial.photoRefs);
+  useEffect(() => {
+    lastSaved.current = adoptedBase;
+    refsNow.current = adoptedBase.photoRefs;
+  }, [adoptedBase]);
   if (initial !== seenInitial) {
     setSeenInitial(initial);
     if (adoptNextRecord) {
       setAdoptNextRecord(false);
-      if (!dirty) setDraft(initial);
+      if (!dirty) {
+        setDraft(initial);
+        setAdoptedBase(initial);
+      }
     }
   }
   const [saving, setSaving] = useState(false);
@@ -625,7 +637,8 @@ export default function SurveyEditor({
     setSaveError("");
     return true;
   }
-  function buildPatch(over?: Partial<SurveyPatch>): SurveyPatch {
+  function buildPatch(over?: Partial<SurveyPatch>, d: Draft = draft): SurveyPatch {
+    const draft = d;
     return {
       customer: draft.customer,
       customerId: draft.customerId,
@@ -690,7 +703,8 @@ export default function SurveyEditor({
       conditions: draft.conditions,
       photos: draft.photos,
       // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
-      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) ? { photoRefs: draft.photoRefs } : {}),
+      // once photos were touched in this session they are always sent (deleting the only one must reach the server)
+      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current ? { photoRefs: draft.photoRefs } : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -718,13 +732,13 @@ export default function SurveyEditor({
    * the editor patch and stamp it the way the store's update() would when a
    * write reaches the cloud (synced, rev bumped).
    */
-  function buildFullDoc(over?: Partial<SurveyPatch>): Record<string, unknown> {
+  function buildFullDoc(over?: Partial<SurveyPatch>, d: Draft = draft): Record<string, unknown> {
     // legacyNotes is derived on every read (src/lib/survey-migrate.ts) — never write it back
     const { legacyNotes: _legacy, ...rec } = record as unknown as Record<string, unknown>;
     void _legacy;
     return {
       ...rec,
-      ...(buildPatch(over) as Record<string, unknown>),
+      ...(buildPatch(over, d) as Record<string, unknown>),
       updatedAt: Date.now(),
       rev: Math.max(record.rev || 1, revSeen.current) + 1,
       syncState: "synced",
@@ -733,13 +747,20 @@ export default function SurveyEditor({
   async function onSave() {
     if (!validate() || saving) return;
     setSaving(true);
+    const edits = draft; // the user's draft as of this click; the photo refs are read when the save runs
     try {
-      const patch = buildPatch();
-      const { queued } = await saveThroughOutbox({
-        collection: "surveys",
-        id: record.id,
-        doc: buildFullDoc(),
-        action: () => saveSurvey(record.id, patch),
+      const { queued } = await serialSave(async () => {
+        const sent: Draft = { ...edits, photoRefs: refsNow.current };
+        const patch = buildPatch(undefined, sent);
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc(undefined, sent),
+          action: () => saveSurvey(record.id, patch),
+        });
+        lastSaved.current = sent;
+        setPhotoUnsaved(false);
+        return res;
       });
       setDirty(false);
       setDraft((d) => ({ ...d, updatedAt: Date.now() }));
@@ -757,13 +778,20 @@ export default function SurveyEditor({
   async function advanceStage(target: SurveyStage) {
     if (!validate() || saving) return;
     setSaving(true);
+    const edits = draft;
     try {
-      const patch = buildPatch({ stage: target });
-      const { queued } = await saveThroughOutbox({
-        collection: "surveys",
-        id: record.id,
-        doc: buildFullDoc({ stage: target }),
-        action: () => advanceSurveyStage(record.id, patch, target),
+      const { queued } = await serialSave(async () => {
+        const sent: Draft = { ...edits, photoRefs: refsNow.current };
+        const patch = buildPatch({ stage: target }, sent);
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc({ stage: target }, sent),
+          action: () => advanceSurveyStage(record.id, patch, target),
+        });
+        lastSaved.current = { ...sent, stage: target };
+        setPhotoUnsaved(false);
+        return res;
       });
       setDraft((d) => ({ ...d, stage: target, updatedAt: Date.now() }));
       setDirty(false);
@@ -782,7 +810,8 @@ export default function SurveyEditor({
     if (!validate() || saving) return;
     setSaving(true);
     try {
-      await createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }));
+      const edits = draft;
+      await serialSave(() => createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }, { ...edits, photoRefs: refsNow.current })));
       // redirect happens server-side
     } catch {
       setSaveError("Could not create the quote — please try again.");
@@ -805,12 +834,12 @@ export default function SurveyEditor({
     const preview = window.open("", "_blank");
     setSaving(true);
     try {
-      const result = await printSurveySheet(record.id, buildPatch());
+      const result = await printSurveySheet(record.id, buildPatch(undefined, { ...draft, photoRefs: refsNow.current }));
       if (!result.ok) throw new Error(result.error);
       const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
       if (preview) preview.location.href = url;
-      else window.location.href = url;
+      else window.location.assign(url);
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
       if (preview) preview.close();
@@ -823,22 +852,48 @@ export default function SurveyEditor({
   /* ---------- per-section photos (#344 C5) ---------- */
   // The survey's stored rev a finalize reported (a finalize never bumps it) — the next outbox save builds on it.
   const revSeen = useRef(0);
-  /** A photo change saves through the same path as Save changes, carrying exactly these refs. */
-  async function savePhotoRefs(photoRefs: SurveyPhotoRef[]) {
-    const over: Partial<SurveyPatch> = { photoRefs };
-    await saveThroughOutbox({
-      collection: "surveys",
-      id: record.id,
-      doc: buildFullDoc(over),
-      action: () => saveSurvey(record.id, buildPatch(over)),
-    });
+  /** Once photos change in this session, every save carries photoRefs (even an empty list). */
+  const photosTouched = useRef(false);
+  /** A photo save failed and nothing has saved since — the pill says so instead of "Saved". */
+  const [photoUnsaved, setPhotoUnsaved] = useState(false);
+  /** Save changes, stage moves and photo saves run one at a time (each reads the newest refs when it runs). */
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  function serialSave<T>(fn: () => Promise<T>): Promise<T> {
+    const run = saveChain.current.then(fn, fn);
+    saveChain.current = run.catch(() => undefined);
+    return run;
+  }
+  /** A photo change saves the LAST-SAVED draft + the current refs: the user's unsaved edits stay unsaved (and dirty),
+   *  and are never saved half-typed or past validate(). */
+  async function savePhotoRefs() {
+    try {
+      await serialSave(async () => {
+        const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current };
+        const patch = buildPatch(undefined, sent);
+        await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc(undefined, sent),
+          action: () => saveSurvey(record.id, patch),
+        });
+        lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs };
+        setPhotoUnsaved(false);
+      });
+    } catch (e) {
+      setPhotoUnsaved(true);
+      throw e;
+    }
   }
   const sectionPhotos = useSectionPhotos({
     recordId: record.id,
     me,
     blobEnabled,
     refs: draft.photoRefs,
-    onRefs: (next) => setDraft((d) => ({ ...d, photoRefs: next })),
+    onRefs: (next) => {
+      refsNow.current = next;
+      photosTouched.current = true;
+      setDraft((d) => ({ ...d, photoRefs: next }));
+    },
     save: savePhotoRefs,
     onRev: (rev) => {
       if (rev > revSeen.current) revSeen.current = rev;
@@ -858,6 +913,10 @@ export default function SurveyEditor({
   let savePillInk: string;
   if (dirty) {
     savePillLabel = "Unsaved changes";
+    savePillBg = "#fbf3dd";
+    savePillInk = "#9a6a1f";
+  } else if (photoUnsaved) {
+    savePillLabel = "Photo not saved yet";
     savePillBg = "#fbf3dd";
     savePillInk = "#9a6a1f";
   } else {

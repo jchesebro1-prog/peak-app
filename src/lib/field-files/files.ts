@@ -235,6 +235,8 @@ function sanitizeSlot(slot: unknown, surveyId: string, fileId: string, blob: boo
 
 const idWith = (id: unknown, letter: string): string => (typeof id === "string" && id.startsWith(`${letter}_`) && FILE_ID_RE.test(id) ? id : "");
 const strokesOf = (id: string): string => (id ? `k_${id.slice(2)}` : "");
+/** A plain string field as stored: a string as is, a number / boolean as text, anything else "". */
+const asText = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "");
 
 /**
  * Before any client copy (an editor save, a sync push) is merged: every finished slot it carries is downgraded to
@@ -242,15 +244,27 @@ const strokesOf = (id: string): string => (id ? `k_${id.slice(2)}` : "");
  * inline file of the right kind when `blobEnabled` is false. Owning ids: a photo's `file` → its `p_` id; its markup's
  * `image` → `markup.id` (`m_`), `strokes` → `k_` + the markup's hex; a sketch's `image` → its `s_` id, `strokes` →
  * `k_` + its hex. A bad or wrong-letter owning id downgrades its slots. Only the finalize creates finished slots.
- * Pure: the input is not mutated; everything but the slots is returned as sent.
+ * Photo refs are also shaped (#344 C5): a ref without a valid `p_` id is dropped, the list keeps the oldest
+ * SURVEY_PHOTO_CAP, `section` / `by` are strings, `takenAt` a finite number, and a caption goes through `cleanCaption`.
+ * Pure: the input is not mutated; everything else is returned as sent.
  */
 export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(doc: T, surveyId: string, opts: { blobEnabled: boolean }): T {
   const blob = opts.blobEnabled;
   const out: Record<string, unknown> = { ...doc };
   if (Array.isArray(doc.photoRefs)) {
-    out.photoRefs = doc.photoRefs.map((r: unknown) => {
-      if (!isObj(r)) return r;
-      const next: Record<string, unknown> = { ...r, file: sanitizeSlot(r.file, surveyId, idWith(r.id, "p"), blob) };
+    // #344 C5: a ref without a valid p_ id is dropped; the list is capped at SURVEY_PHOTO_CAP, keeping the oldest (new
+    // refs append at the end); section / by are strings, takenAt a finite number, a caption is cleanCaption'd
+    out.photoRefs = doc.photoRefs.filter((r: unknown) => isObj(r) && !!idWith(r.id, "p")).slice(0, SURVEY_PHOTO_CAP).map((r: Record<string, unknown>) => {
+      const next: Record<string, unknown> = {
+        ...r,
+        section: asText(r.section),
+        by: asText(r.by),
+        takenAt: Number.isFinite(Number(r.takenAt)) && r.takenAt !== null && r.takenAt !== "" ? Number(r.takenAt) : 0,
+        file: sanitizeSlot(r.file, surveyId, idWith(r.id, "p"), blob),
+      };
+      const caption = cleanCaption(r.caption);
+      if (caption) next.caption = caption;
+      else delete next.caption;
       if (isObj(r.markup)) {
         const m = idWith(r.markup.id, "m");
         next.markup = { ...r.markup, image: sanitizeSlot(r.markup.image, surveyId, m, blob), strokes: sanitizeSlot(r.markup.strokes, surveyId, strokesOf(m), blob) };

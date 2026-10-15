@@ -1633,6 +1633,27 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const marked: Ref = { ...plain, markup: { id: "m_111111111111", image: pend, strokes: pend, updatedAt: 2 } };
     const remarked: Ref = { ...plain, markup: { id: "m_222222222222", image: pend, strokes: pend, updatedAt: 3 } };
 
+    /* fix 1 — the server enforces the cap and the caption rule on every incoming copy (update() and pushSurvey) */
+    {
+      const many = Array.from({ length: 205 }, (_, i) => ({ ...plain, id: `p_${String(i).padStart(12, "0")}`, file: pend }));
+      const capped = FF.sanitizeIncomingFileSlots({ photoRefs: many }, "FS-1", { blobEnabled: true }).photoRefs as Ref[];
+      ok(capped.length === FF.SURVEY_PHOTO_CAP && capped[0].id === many[0].id && capped[199].id === many[199].id,
+        "#344 C5 fix: sanitize truncates photoRefs to 200, keeping the oldest (new refs append at the end)");
+      const caps = FF.sanitizeIncomingFileSlots({ photoRefs: [
+        { ...plain, caption: "  Rusty  " }, { ...plain, id: "p_bbbbbbbbbbbb", caption: "x".repeat(900) }, { ...plain, id: "p_cccccccccccc", caption: "   " },
+        { ...plain, id: "p_dddddddddddd", caption: 42 as never },
+      ] }, "FS-1", { blobEnabled: true }).photoRefs as Ref[];
+      ok(caps[0].caption === "Rusty" && caps[1].caption!.length === FF.CAPTION_MAX && !("caption" in caps[2]) && !("caption" in caps[3]),
+        "#344 C5 fix: sanitize maps captions through cleanCaption (trimmed, ≤ 500, a blank or non-string one drops the key)");
+      const odd = FF.sanitizeIncomingFileSlots({ photoRefs: [
+        { id: "p_eeeeeeeeeeee", section: 7, by: null, takenAt: "12", file: pend },
+        { id: "p_ffffffffffff", section: "a", by: "u", takenAt: Infinity, file: pend },
+        { id: "nope", section: "a", by: "u", takenAt: 1, file: pend }, "junk", null, { section: "a", file: pend },
+      ] } as Record<string, unknown>, "FS-1", { blobEnabled: true }).photoRefs as Ref[];
+      ok(odd.length === 2 && odd[0].section === "7" && odd[0].by === "" && odd[0].takenAt === 12 && odd[1].takenAt === 0 && typeof odd[1].section === "string",
+        "#344 C5 fix: sanitize coerces section / by to strings and takenAt to a finite number; a ref without a valid p_ id is dropped");
+    }
+
     ok(FF.SURVEY_PHOTO_CAP === 200 && FF.photoRoom(0) === 200 && FF.photoRoom(199) === 1 && FF.photoRoom(200) === 0 && FF.photoRoom(250) === 0 &&
       FF.photoRoom(NaN) === 0 && FF.photoRoom(-3) === 200 && FF.SURVEY_PHOTO_CAP_MESSAGE.includes("200"),
       "#344 C5: a survey holds at most 200 photo refs (photoRoom, with a clear message at the cap)");
@@ -1702,6 +1723,16 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       ctl.includes("photos={draft.photos}") && /tone: "photo"/.test(ctl) && ctl.includes("useSectionPhotos(") && ctl.includes("photoRefs: draft.photoRefs"),
       "#344 C5: the editor drops the 8-photo inline path, shows Earlier photos only when there are any, keeps findings on draft.photos, badges photo counts, saves photoRefs");
     ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctl), "#344 C5: the meetings slot still sits right before the sections");
+    const psv = ctl.slice(ctl.indexOf("async function savePhotoRefs"), ctl.indexOf("const sectionPhotos = useSectionPhotos"));
+    const osv = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
+    ok(psv.includes("serialSave(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current }") && !psv.includes("validate(") && !psv.includes("...draft") && psv.includes("buildPatch(undefined, sent)") &&
+      psv.includes("setPhotoUnsaved(true)") && osv.includes("serialSave(") && osv.includes("photoRefs: refsNow.current") && osv.includes("lastSaved.current = sent") &&
+      ctl.includes('"Photo not saved yet"') && ctl.includes("photosTouched.current ? { photoRefs: draft.photoRefs }") && ctl.includes("setAdoptedBase(initial)") &&
+      /function buildPatch\(over\?: Partial<SurveyPatch>, d: Draft = draft\)/.test(ctl) && /function buildFullDoc\(over\?: Partial<SurveyPatch>, d: Draft = draft\)/.test(ctl),
+      "#344 C5 fix: a photo save sends the last-saved draft + the current refs (never unsaved edits), serialised with Save changes, which always sends the current refs; a failed photo save shows Photo not saved yet");
+    ok(!sp.includes('display: "none"') && (sp.match(/className="sp-file"/g) || []).length === 2 && sp.includes(":focus-within") &&
+      sp.includes("This deletes the photo") && sp.includes("onDiscard={askDiscard}") && sp.includes("SURVEY_PHOTO_CAP_MESSAGE, sectionId") && sp.includes("msg.section === sectionId"),
+      "#344 C5 fix: Add photo / Library are keyboard-reachable; messages show beside their section; Discard on a failed original asks first");
     ok(/import \{ blobEnabled \} from "@\/lib\/blob"/.test(pg) && /blobEnabled=\{blobEnabled\(\)\}/.test(pg) && /\| "photoRefs"/.test(act),
       "#344 C5: the page passes blobEnabled() to the editor; a save patch may carry photoRefs");
   }

@@ -42,8 +42,8 @@ export type SectionPhotosOptions = {
   refs: SurveyPhotoRef[];
   /** mirror a new list into the draft — a photo change is saved on its own, so it never dirties the draft */
   onRefs: (next: SurveyPhotoRef[]) => void;
-  /** the editor's save path, carrying exactly these refs */
-  save: (refs: SurveyPhotoRef[]) => Promise<void>;
+  /** the editor's photo save: the last-saved survey + the current refs (never the user's unsaved edits) */
+  save: () => Promise<void>;
   /** the survey's stored rev after a finalize (adopted for the next outbox save) */
   onRev: (rev: number) => void;
   sectionTitle: (sectionId: string) => string;
@@ -59,6 +59,8 @@ export type SectionPhotos = {
 };
 
 type Viewer = { id: string; original: boolean; confirmDelete: boolean; caption: string };
+/** A message shown beside the section it is about (null section = the photo list as a whole). */
+type Msg = { text: string; section: string | null };
 type Ink = { photoId: string; originalUrl: string; w: number; h: number; initial?: InkDoc };
 
 const nowMs = () => Date.now();
@@ -76,6 +78,9 @@ async function imageSize(url: string): Promise<{ w: number; h: number }> {
 
 const SP_CSS = `
   .sp-add { display: inline-flex; align-items: center; gap: 6px; }
+  .sp-add label.sp-btn { position: relative; }
+  .sp-add label.sp-btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sp-file { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; opacity: 0; }
   .sp-btn { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; font-weight: 600; color: ${ACCENT_INK}; background: ${ACCENT_SOFT}; border: 1px solid ${ACCENT_BORDER_LT}; border-radius: 8px; padding: 5px 10px; cursor: pointer; min-height: 32px; white-space: nowrap; }
   .sp-btn.quiet { color: #5b616e; background: #fff; border-color: #e4e7ec; }
   .sp-btn[aria-disabled="true"] { opacity: .55; cursor: default; }
@@ -85,6 +90,7 @@ const SP_CSS = `
   .sp-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 10.5px; color: #8c919c; }
   .sp-tag { position: absolute; left: 3px; bottom: 3px; font-size: 9.5px; font-weight: 600; background: rgba(22,24,27,.72); color: #fff; border-radius: 4px; padding: 1px 4px; }
   .sp-tag.mk { left: auto; right: 3px; background: rgba(192,57,43,.85); }
+  .sp-strip-msg { padding: 0 18px 12px; }
   .sp-msg { border: 1px solid #f0d6cd; background: #fbeeea; color: #8c3b26; border-radius: 9px; padding: 9px 12px; font-size: 12.5px; display: flex; gap: 10px; align-items: flex-start; }
   .sp-sheet-bg { position: fixed; inset: 0; z-index: 80; background: rgba(16,18,22,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
   .sp-sheet { background: #fff; border-radius: 14px; width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
@@ -108,7 +114,9 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     optsRef.current = o;
   });
 
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsgState] = useState<Msg | null>(null);
+  const setMsg = (text: string | null, section: string | null = null) => setMsgState(text ? { text, section } : null);
+  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
   const [busySec, setBusySec] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [ink, setInk] = useState<Ink | null>(null);
@@ -124,13 +132,13 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   }
   // Saves run one at a time, each carrying the newest refs.
   const chain = useRef<Promise<unknown>>(Promise.resolve());
-  function persist(): Promise<boolean> {
+  function persist(section: string | null): Promise<boolean> {
     const run = chain.current.then(async () => {
       try {
-        await optsRef.current.save(refsRef.current);
+        await optsRef.current.save();
         return true;
       } catch {
-        setMsg("Couldn't save the survey — the photo is kept on this device. Press Save changes to try again.");
+        setMsg("Couldn't save the photo to the survey — it is kept on this device. Press Save changes to try again.", section);
         return false;
       }
     });
@@ -240,7 +248,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     setMsg(null);
     if (!files.length) return;
     if (photoRoom(refsRef.current.length) <= 0) {
-      setMsg(SURVEY_PHOTO_CAP_MESSAGE);
+      setMsg(SURVEY_PHOTO_CAP_MESSAGE, sectionId);
       return;
     }
     setBusySec(sectionId);
@@ -268,7 +276,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       }));
       for (const a of added) addLocalUrl(a.ref.id, a.blob);
       commit([...refsRef.current, ...added.map((a) => a.ref)]);
-      await persist(); // the server must own the ids before a finalize can land (a failed save still queues: retryable)
+      await persist(sectionId); // the server must own the ids before a finalize can land (a failed save still queues: retryable)
       for (const a of added) {
         try {
           await enqueuePhoto(recordId, a.ref.id, a.blob);
@@ -278,7 +286,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       }
     } finally {
       setBusySec(null);
-      if (problems.length) setMsg([...new Set(problems)].join(" "));
+      if (problems.length) setMsg([...new Set(problems)].join(" "), sectionId);
     }
   }
 
@@ -292,7 +300,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     const cur = findRef(photoId);
     if (!cur || cleanCaption(text) === cur.caption) return;
     replaceRef(withCaption(cur, text));
-    void persist();
+    void persist(cur.section);
   }
 
   async function removeMarkup(photoId: string) {
@@ -304,7 +312,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     await dropQueued(stale);
     // Uploaded files of a removed markup stay in Blob as orphans (harmless; nothing refers to them).
     console.info("[venue-assessments] markup removed; any uploaded files stay as orphans", recordId, stale.join(", "));
-    await persist();
+    await persist(cur.section);
   }
 
   async function deletePhoto(photoId: string) {
@@ -313,7 +321,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     commit(refsRef.current.filter((r) => r.id !== photoId));
     setViewer((v) => (v?.id === photoId ? null : v));
     await dropQueued(filesToDiscard(cur));
-    await persist();
+    await persist(cur.section);
   }
 
   /** The saved strokes of a markup: this device's queued copy while pending, else the stored file. */
@@ -341,7 +349,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     if (!cur || opening) return;
     const originalUrl = srcOf(cur.id, cur.file);
     if (!originalUrl) {
-      setMsg("The original photo isn't on this device — mark it up once it has uploaded.");
+      setMsg("The original photo isn't on this device — mark it up once it has uploaded.", cur.section);
       return;
     }
     setOpening(true);
@@ -351,7 +359,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       inkFileRef.current = cur.id;
       setInk({ photoId, originalUrl, w, h, initial });
     } catch {
-      setMsg("That photo couldn't be opened for markup.");
+      setMsg("That photo couldn't be opened for markup.", cur.section);
     } finally {
       setOpening(false);
     }
@@ -376,12 +384,12 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     const stale = filesToDiscard(cur, next);
     addLocalUrl(m, result.jpeg);
     replaceRef(next);
-    await persist();
+    await persist(cur.section);
     try {
       await enqueuePhoto(recordId, m, result.jpeg);
       await enqueuePhoto(recordId, k, new Blob([serializeInk(result.doc)], { type: "application/json" }));
     } catch (e) {
-      setMsg(`The markup couldn't be kept on this device: ${errText(e, "storage refused it")}`);
+      setMsg(`The markup couldn't be kept on this device: ${errText(e, "storage refused it")}`, cur.section);
     }
     await dropQueued(stale);
     setViewer((v) => (v && v.id === photoId ? { ...v, original: false } : v));
@@ -411,7 +419,13 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       setFailBusy(null);
     }
   }
+  /** Discard on a failed ORIGINAL deletes the photo, so it asks first; anything else discards at once. */
+  function askDiscard(fileId: string) {
+    if (refsRef.current.some((r) => r.id === fileId)) setConfirmDiscard(fileId);
+    else void onDiscard(fileId);
+  }
   async function onDiscard(fileId: string) {
+    setConfirmDiscard(null);
     setFailBusy(fileId);
     try {
       const hex = fileId.slice(2);
@@ -469,22 +483,35 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     };
     return (
       <span className="sp-add" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        {/* visually hidden (not display:none) so Tab reaches the input; the label shows its focus ring */}
         <label className="sp-btn" aria-disabled={busy || !!busySec} title="Take a photo">
           {busy ? "Adding…" : "Add photo"}
-          <input type="file" accept="image/*" capture="environment" disabled={!!busySec} style={{ display: "none" }} onChange={pick} />
+          <input type="file" accept="image/*" capture="environment" className="sp-file" disabled={!!busySec} onChange={pick} />
         </label>
         <label className="sp-btn quiet" aria-disabled={!!busySec} title="Choose photos from the library">
           Library
-          <input type="file" accept="image/*" multiple disabled={!!busySec} style={{ display: "none" }} onChange={pick} />
+          <input type="file" accept="image/*" multiple className="sp-file" disabled={!!busySec} onChange={pick} />
         </label>
       </span>
     );
   }
 
+  function msgBox(m: Msg): ReactNode {
+    return (
+      <div className="sp-msg" role="status">
+        <span style={{ flex: 1 }}>{m.text}</span>
+        <button type="button" className="sp-btn quiet" onClick={() => setMsg(null)}>Dismiss</button>
+      </div>
+    );
+  }
+
   function strip(sectionId: string): ReactNode {
     const mine = o.refs.filter((r) => r.section === sectionId);
-    if (!mine.length) return null;
+    const here = msg && msg.section === sectionId ? <div className="sp-strip-msg">{msgBox(msg)}</div> : null;
+    if (!mine.length) return here;
     return (
+      <>
+      {here}
       <div className="sp-strip">
         {mine.map((r) => {
           const s = shown(r);
@@ -508,6 +535,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
           );
         })}
       </div>
+      </>
     );
   }
 
@@ -519,13 +547,15 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   const overlay = (
     <>
       <style>{PHOTO_CSS + SP_CSS}</style>
-      {msg && (
-        <div className="sp-msg" role="status">
-          <span style={{ flex: 1 }}>{msg}</span>
-          <button type="button" className="sp-btn quiet" onClick={() => setMsg(null)}>Dismiss</button>
+      {msg && msg.section === null && msgBox(msg)}
+      <FailedPhotos rows={failedRows} busy={failBusy} note={null} onRetry={(id) => void onRetry(id)} onDiscard={askDiscard} />
+      {confirmDiscard && failed.some((f) => f.photoId === confirmDiscard) && (
+        <div className="sp-msg" role="alertdialog" aria-label="Discard photo">
+          <span style={{ flex: 1 }}>This deletes the photo ({describe(confirmDiscard)}) from the survey. It never finished uploading.</span>
+          <button type="button" className="sp-btn sp-danger" disabled={failBusy === confirmDiscard} onClick={() => void onDiscard(confirmDiscard)}>Delete photo</button>
+          <button type="button" className="sp-btn quiet" onClick={() => setConfirmDiscard(null)}>Cancel</button>
         </div>
       )}
-      <FailedPhotos rows={failedRows} busy={failBusy} note={null} onRetry={(id) => void onRetry(id)} onDiscard={(id) => void onDiscard(id)} />
       {viewer && vRef && !ink && (
         <div className="sp-sheet-bg" onClick={closeViewer}>
           <div className="sp-sheet" role="dialog" aria-modal="true" aria-label="Photo" onClick={(e) => e.stopPropagation()}>
@@ -546,6 +576,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
                 </span>
                 <button type="button" className="sp-btn quiet" onClick={closeViewer}>Close</button>
               </div>
+              {msg && msg.section === vRef.section && msgBox(msg)}
               <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 600, color: "#5b616e" }}>
                 Caption
                 <textarea
