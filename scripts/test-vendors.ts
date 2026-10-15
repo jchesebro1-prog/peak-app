@@ -14,6 +14,15 @@ import { addParty, listFor, removeParty } from "../src/lib/stores/parties";
 import { displayQuoteNumber } from "../src/lib/estimate-number";
 import { prepareVendorQuotesForSave, addVendorPartiesForSave, vendorPartyRemovalRefusalFor, quotesReceivedFor } from "../src/lib/stores/vendor-quotes";
 import type { VendorQuoteLike } from "../src/lib/vendor-quotes/rules";
+import { toJsonSchema } from "../src/lib/assist/run";
+import {
+  VendorPdfWire, VendorPdfExtractionSchema, cleanExtraction, isEmptyExtraction, canonicalJson, modelLabel, VENDOR_PDF_SYSTEM, VENDOR_PDF_LINES_MAX,
+  VENDOR_PDF_MAX_FILE_BYTES, VENDOR_PDF_MAX_REQUEST_BYTES,
+} from "../src/lib/vendor-pdf/extraction";
+import type { VendorPdfExtraction, VendorPdfWireOut } from "../src/lib/vendor-pdf/extraction";
+import {
+  lineMath, filledLine, sumCheck, catalogMatch, normalizeCompanyName, vendorCompanyMatch, includesFreightRule, vendorPdfChecks, mathFlagCount, checkNotes,
+} from "../src/lib/vendor-pdf/checks";
 import { readFileSync } from "node:fs";
 import { fileThreadTo, vendorThreadsFor, loadVendorsPanel } from "../src/lib/vendor-quotes/threads-server";
 import { canSeeThread, get as getThread } from "../src/lib/stores/comms";
@@ -322,7 +331,185 @@ export async function vendorDbChecks(ok: Ok) {
   }
 }
 
+/** #348 slice 5 — Read the PDF: schema, cleaning, prompt and every deterministic check (pure). */
+export async function vendorPdfPureChecks(ok: Ok) {
+  // Schema → JSON Schema (structured outputs reject length / range keywords).
+  const js = toJsonSchema(VendorPdfWire) as any;
+  const wireKeys = ["vendor", "quoteNumber", "quoteDate", "validUntil", "leadTime", "shipFrom", "lines", "freight", "tax", "total", "paymentTerms", "notes"];
+  const lineKeys = ["description", "mfrPartNumber", "qty", "unit", "unitPrice", "amount"];
+  ok(js.additionalProperties === false && js.items === undefined, "vendor-pdf: wire root is closed");
+  ok(js.properties?.lines?.items?.additionalProperties === false, "vendor-pdf: wire line items are closed");
+  ok(wireKeys.every((k) => js.required?.includes(k)) && js.required.length === 12, "vendor-pdf: wire requires all 12 keys");
+  ok(lineKeys.every((k) => js.properties.lines.items.required?.includes(k)) && js.properties.lines.items.required.length === 6, "vendor-pdf: wire line requires all 6 keys");
+  const jsText = JSON.stringify(js);
+  ok(!/maxLength|minLength|"minimum"|"maximum"|maxItems/.test(jsText), "vendor-pdf: wire schema has no length / range keywords");
+  ok(js.properties.vendor.anyOf?.some((a: any) => a.type === "null") && js.properties.total.anyOf?.some((a: any) => a.type === "null"), "vendor-pdf: nullable fields emit anyOf with null");
+
+  // cleanExtraction.
+  const wire = (o: Partial<VendorPdfWireOut> = {}): VendorPdfWireOut => ({
+    vendor: null, quoteNumber: null, quoteDate: null, validUntil: null, leadTime: null, shipFrom: null, lines: [],
+    freight: null, tax: null, total: null, paymentTerms: null, notes: null, ...o,
+  });
+  const wl = (o: Partial<VendorPdfWireOut["lines"][number]> = {}) => ({ description: null, mfrPartNumber: null, qty: null, unit: null, unitPrice: null, amount: null, ...o });
+  const c1 = cleanExtraction(wire({
+    vendor: "  Rose   Brand\n Inc. ", total: 99.5, tax: Number.NaN, freight: null, notes: "FOB origin\n\n\n\nNo returns   ok",
+    lines: [wl({ description: "x".repeat(300), qty: 2, unitPrice: Number.NaN }), wl(), wl({ mfrPartNumber: "AB-1", amount: 5 })],
+  }));
+  ok(c1.vendor === "Rose Brand Inc." && c1.total === 99.5, "vendor-pdf: clean collapses whitespace, keeps numbers");
+  ok(!("tax" in c1) && !("freight" in c1) && !("quoteNumber" in c1), "vendor-pdf: clean drops nulls and NaN");
+  ok(c1.notes === "FOB origin\n\nNo returns ok", "vendor-pdf: notes keep newlines (collapsed to one blank line)");
+  ok(c1.lines?.length === 2 && c1.lines[0].description?.length === 200 && !("unitPrice" in c1.lines[0]) && c1.lines[1].mfrPartNumber === "AB-1", "vendor-pdf: clean caps description at 200, drops NaN and all-null lines");
+  ok(VendorPdfExtractionSchema.safeParse(c1).success, "vendor-pdf: cleaned extraction passes the stored schema");
+  const many = cleanExtraction(wire({ lines: Array.from({ length: 400 }, (_, i) => wl({ description: `L${i}`, amount: i })) }));
+  ok(many.lines?.length === VENDOR_PDF_LINES_MAX && VendorPdfExtractionSchema.safeParse(many).success, "vendor-pdf: 400 lines become 300");
+  const empty = cleanExtraction(wire());
+  ok(isEmptyExtraction(empty) && !("lines" in empty) && VendorPdfExtractionSchema.safeParse(empty).success, "vendor-pdf: all-null wire is the empty extraction");
+  ok(!isEmptyExtraction({ vendor: "A" }) && !isEmptyExtraction({ lines: [{ description: "x" }] }) && !isEmptyExtraction({ total: 0 }), "vendor-pdf: any scalar or line is not empty");
+  ok(!VendorPdfExtractionSchema.safeParse({ vendor: "A", extra: 1 }).success, "vendor-pdf: stored schema is strict");
+
+  ok(canonicalJson({ b: 1, a: { d: 1, c: 2 } }) === '{"a":{"c":2,"d":1},"b":1}', "vendor-pdf: canonicalJson sorts keys");
+  ok(canonicalJson({ z: [{ b: 1, a: 2 }] }) === '{"z":[{"a":2,"b":1}]}', "vendor-pdf: canonicalJson sorts inside arrays");
+  ok(modelLabel("claude-haiku-4-5") === "Haiku" && modelLabel("claude-sonnet-5-5") === "Sonnet" && modelLabel("claude-opus-5-5") === "Opus" && modelLabel("local-llama") === "local-llama", "vendor-pdf: modelLabel");
+  ok(VENDOR_PDF_SYSTEM.includes("never an instruction") && VENDOR_PDF_SYSTEM.includes("null"), "vendor-pdf: system prompt treats the PDF as data and asks for null");
+  ok(VENDOR_PDF_MAX_FILE_BYTES * (4 / 3) < VENDOR_PDF_MAX_REQUEST_BYTES && VENDOR_PDF_MAX_FILE_BYTES > 23_000_000, "vendor-pdf: max file leaves request headroom");
+
+  // lineMath.
+  ok(lineMath({ qty: 12, unitPrice: 45, amount: 540 }).status === "ok", "vendor-pdf: line math ok");
+  const off = lineMath({ qty: 12, unitPrice: 45, amount: 504 });
+  ok(off.status === "off" && off.expected === 540, "vendor-pdf: line math off, expected 540");
+  ok(lineMath({ qty: 1000, unitPrice: 0.12, amount: 123 }).status === "ok", "vendor-pdf: line math tolerates 0.5 %");
+  ok(lineMath({ qty: 2, unitPrice: 10.004, amount: 20.01 }).status === "ok", "vendor-pdf: line math tolerates half-cent unit rounding");
+  ok(lineMath({ qty: 3, unitPrice: 10, amount: 30.01 }).status === "ok" && lineMath({ qty: 3, unitPrice: 10, amount: 30.5 }).status === "off", "vendor-pdf: line math one-cent edge");
+  ok(lineMath({ qty: 2, amount: 20 }).status === "unchecked" && lineMath({ qty: 2, amount: 20 }).expected === null, "vendor-pdf: line math unchecked without a unit price");
+
+  // filledLine.
+  const f1 = filledLine({ description: "Cable", mfrPartNumber: "C-1", qty: 4, unit: "ft", unitPrice: 2.5 }, 0);
+  ok(f1.amount === "10" && f1.derivedAmount && f1.qty === "4" && f1.unit === "ft" && f1.manufacturerPartNumber === "C-1", "vendor-pdf: filledLine derives amount from qty x unit price");
+  const f2 = filledLine({ mfrPartNumber: "MX-9", amount: 12.345 }, 1);
+  ok(f2.description === "MX-9" && f2.amount === "12.35" && !f2.derivedAmount && f2.qty === "1" && f2.unit === "ea", "vendor-pdf: filledLine falls back to part number, defaults qty / unit");
+  const f3 = filledLine({}, 2);
+  ok(f3.description === "Line 3" && f3.amount === "" && !f3.derivedAmount && f3.manufacturerPartNumber === "", "vendor-pdf: filledLine falls back to Line N, empty money");
+  ok(filledLine({ qty: 3, amount: 9 }, 0).amount === "9", "vendor-pdf: filledLine prefers the printed amount");
+
+  // sumCheck.
+  const sc = (o: Partial<VendorPdfExtraction>) => sumCheck({ lines: [{ amount: 100 }, { amount: 50 }], ...o });
+  ok(sc({ freight: 25, tax: 10, total: 185 }).status === "ok", "vendor-pdf: sum ok with freight + tax");
+  ok(sc({ freight: 25, total: 150 }).status === "excludes-extras", "vendor-pdf: total leaves out freight");
+  const so = sc({ freight: 25, tax: 10, total: 200 });
+  ok(so.status === "off" && so.diff === 15 && so.expected === 185 && so.lines === 150, "vendor-pdf: sum off, diff 15");
+  ok(sc({}).status === "no-total", "vendor-pdf: no total");
+  ok(sumCheck({ total: 5 }).status === "no-lines" && sumCheck({ lines: [], total: 5 }).status === "no-lines", "vendor-pdf: no lines");
+  const forty = Array.from({ length: 40 }, () => ({ amount: 10 }));
+  ok(sumCheck({ lines: forty, total: 400.3 }).status === "ok" && sumCheck({ lines: forty, total: 400.5 }).status === "off", "vendor-pdf: sum tolerance grows with line count");
+  ok(sumCheck({ lines: [{ amount: 100 }], total: 100.02 }).status === "off" && sumCheck({ lines: [{ amount: 100 }], total: 100.01 }).status === "ok", "vendor-pdf: sum tolerance floor is one cent");
+  ok(sumCheck({ lines: [{ qty: 2, unitPrice: 5 }], total: 10 }).status === "ok", "vendor-pdf: sum uses derived amounts");
+
+  // catalogMatch.
+  const P = (sku: string, o: Record<string, unknown> = {}) => ({ sku, ...o });
+  const parts = [
+    P("Symetrix:80-0043", { mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" }),
+    P("ETC:ABC", { mfr: "ETC", manufacturerPartNumber: "Jupiter 4" }),
+    P("Lex:OLD", { mfr: "Lex", manufacturerModelNumber: "Dimmer 12", formerSkus: ["Lex:77-1234"] }),
+    P("MSC-100", { mfr: "Misc", manufacturerPartNumber: "WID-77" }),
+  ];
+  const m1 = catalogMatch("Jupiter 4", parts);
+  ok(m1?.kind === "match" && m1.sku === "Symetrix:80-0043" && m1.by === "model" && m1.model === "Jupiter 4" && m1.mfr === "Symetrix", "vendor-pdf: model # beats a P/N match on another part");
+  const m2 = catalogMatch("WID-77", parts);
+  ok(m2?.kind === "match" && m2.sku === "MSC-100" && m2.by === "partNumber", "vendor-pdf: P/N match");
+  const m3 = catalogMatch("80-0043", [P("Symetrix:80-0043", { mfr: "Symetrix" })]);
+  ok(m3?.kind === "match" && m3.by === "sku", "vendor-pdf: order number of a Brand:Model SKU matches by sku");
+  const m3b = catalogMatch("msc-100", parts);
+  ok(m3b?.kind === "match" && m3b.by === "sku" && m3b.sku === "MSC-100", "vendor-pdf: whole SKU matches by sku, case-folded");
+  const m4 = catalogMatch("77-1234", parts);
+  ok(m4?.kind === "match" && m4.by === "formerSku" && m4.sku === "Lex:OLD", "vendor-pdf: former SKU order number matches by formerSku");
+  const m4b = catalogMatch("lex:77-1234", parts);
+  ok(m4b?.kind === "match" && m4b.by === "formerSku", "vendor-pdf: former SKU matches whole");
+  ok(catalogMatch("jupiter  4", parts)?.kind === "match", "vendor-pdf: exact key collapses whitespace and case");
+  const m5 = catalogMatch("JUPITER-4", parts);
+  ok(m5?.kind === "match" && m5.by === "model" && m5.sku === "Symetrix:80-0043", "vendor-pdf: loose key matches in pass 2");
+  ok(catalogMatch("EA", parts) === null && catalogMatch("12", [P("12", { mfr: "X" })]) === null && catalogMatch(undefined, parts) === null && catalogMatch("  ", parts) === null, "vendor-pdf: short / blank part numbers never match");
+  ok(catalogMatch("A-1", [P("A1X"), P("A-1")])?.kind === "match", "vendor-pdf: exact beats loose");
+  ok(catalogMatch("A-1", [P("A1")]) === null, "vendor-pdf: loose key under 4 chars is not used");
+  const dup = [P("A:X1", { mfr: "Alpha", manufacturerModelNumber: "FX-100" }), P("B:X1", { mfr: "Beta Inc.", manufacturerModelNumber: "FX-100" })];
+  const amb = catalogMatch("FX-100", dup);
+  ok(amb?.kind === "ambiguous" && amb.count === 2 && amb.by === "model", "vendor-pdf: same model on two mfrs is ambiguous");
+  const hint = catalogMatch("FX-100", dup, "The Beta, Inc.");
+  ok(hint?.kind === "match" && hint.sku === "B:X1", "vendor-pdf: vendor hint narrows to one mfr");
+  ok(catalogMatch("FX-100", dup, "Gamma")?.kind === "ambiguous", "vendor-pdf: a hint that narrows to none stays ambiguous");
+
+  // Vendor companies.
+  ok(normalizeCompanyName("The Rose Brand, Inc.") === "rose brand", "vendor-pdf: normalize strips the, punctuation, Inc.");
+  ok(normalizeCompanyName("Smith & Sons L.L.C.") === "smith and sons" && normalizeCompanyName("ACME Co., Ltd.") === "acme", "vendor-pdf: normalize strips repeated suffixes and & -> and");
+  ok(normalizeCompanyName(undefined) === "" && normalizeCompanyName("The") === "the", "vendor-pdf: normalize edge cases");
+  const cos = [{ id: "c1", name: "Rose Brand", type: "vendor/manufacturer" }, { id: "c2", name: "Rose Brand", type: "customer" }, { id: "c3", name: "Other", type: "Vendor" }];
+  const vm1 = vendorCompanyMatch("ROSE BRAND LLC", cos);
+  ok(vm1.status === "one" && vm1.companyId === "c1" && vm1.name === "Rose Brand", "vendor-pdf: vendor match ignores suffix and non-vendor types");
+  ok(vendorCompanyMatch("Rose Brandt", cos).status === "none" && vendorCompanyMatch(undefined, cos).status === "none" && vendorCompanyMatch("", cos).status === "none", "vendor-pdf: no fuzzy vendor match");
+  const vm2 = vendorCompanyMatch("rose brand inc", [...cos, { id: "c4", name: "Rose Brand, Inc.", type: "manufacturer" }]);
+  ok(vm2.status === "many" && vm2.count === 2, "vendor-pdf: two vendor companies with one name is many");
+  ok(vendorCompanyMatch("Rose Brand", [{ id: "c9", name: "Rose Brand" }]).status === "none", "vendor-pdf: a company with no type is not a vendor");
+
+  // Freight rule.
+  const fr = (o: Partial<VendorPdfExtraction>) => includesFreightRule({ lines: [{ amount: 100 }], ...o });
+  const f4 = fr({ freight: 250, total: 350 });
+  ok(f4.tick && f4.why === "freight-in-total", "vendor-pdf: freight carried by an ok total ticks");
+  ok(fr({ freight: 250 }).why === "freight-in-total", "vendor-pdf: freight with no total ticks");
+  ok(fr({ freight: 250, total: 100 }).tick === false && fr({ freight: 250, total: 100 }).why === "none", "vendor-pdf: freight left out of the total does not tick");
+  const f5 = fr({ freight: 250, total: 350, notes: "FOB origin, freight prepaid and added" });
+  ok(!f5.tick && f5.why === "excluded-words", "vendor-pdf: excluded words win over freight in total");
+  const f6 = fr({ notes: "Freight prepaid and allowed" });
+  ok(f6.tick && f6.why === "included-words", "vendor-pdf: prepaid and allowed ticks");
+  ok(fr({ paymentTerms: "Net 30", shipFrom: "Free shipping on orders" }).tick, "vendor-pdf: free shipping ticks (text spans fields)");
+  ok(!fr({ notes: "Freight not included" }).tick && !fr({ leadTime: "Plus freight" }).tick && !fr({ notes: "PPD & add" }).tick, "vendor-pdf: more excluded wordings");
+  ok(!fr({}).tick && fr({}).why === "none", "vendor-pdf: nothing printed is none");
+  ok(fr({ notes: "FOB Destination" }).why === "included-words", "vendor-pdf: FOB destination ticks");
+
+  // Aggregate + notes.
+  const x: VendorPdfExtraction = {
+    vendor: "Rose Brand Inc.", total: 905, freight: 25, tax: 0,
+    lines: [
+      { description: "A", mfrPartNumber: "Jupiter 4", qty: 2, unitPrice: 100, amount: 200 },
+      { description: "B", qty: 5, unitPrice: 10 },
+      { description: "C", mfrPartNumber: "NOPE-1", qty: 12, unitPrice: 45, amount: 504 },
+      { description: "D", mfrPartNumber: "WID-77", qty: 1, unitPrice: 40, amount: 40 },
+      { description: "E", qty: 3, unitPrice: 7 },
+    ],
+  };
+  ok(mathFlagCount(x) === 2, "vendor-pdf: mathFlagCount = off line (1) + off sum (1)");
+  ok(mathFlagCount({ lines: [{ qty: 1, unitPrice: 5, amount: 5 }], total: 5 }) === 0 && mathFlagCount({}) === 0, "vendor-pdf: mathFlagCount zero when clean");
+  const checks = vendorPdfChecks(x, { parts, companies: cos });
+  ok(checks.lines.length === 5 && checks.lines[2].math.status === "off" && checks.lines[1].derivedAmount && checks.lines[0].catalog?.kind === "match" && checks.lines[2].catalog === null && checks.lines[3].catalog?.kind === "match", "vendor-pdf: per-line checks");
+  ok(checks.sum.status === "off" && checks.vendor.status === "one" && checks.mathFlags === 2 && checks.freight.tick === false, "vendor-pdf: aggregate checks");
+  const notes = checkNotes(checks, x, { vendor: "", vendorCompanyId: null });
+  const texts = notes.map((n) => n.text);
+  ok(texts.includes("Line 3: 12 × $45.00 = $540.00 — the PDF says $504.00."), "vendor-pdf: checkNotes line-3 text");
+  ok(texts.some((t) => t.startsWith("Lines + freight + tax = $") && t.includes("the PDF's total is $905.00") && t.endsWith("The form uses the PDF's total.")), "vendor-pdf: checkNotes sum text");
+  ok(texts.includes("The PDF reads “Rose Brand Inc.” — linked to Rose Brand."), "vendor-pdf: checkNotes vendor linked");
+  ok(texts.includes("2 of 5 lines match catalog parts."), "vendor-pdf: checkNotes catalog count");
+  ok(texts.includes("Amounts computed from qty × unit price on lines 2, 5."), "vendor-pdf: checkNotes derived lines");
+  const firstInfo = notes.findIndex((n) => n.tone === "info");
+  ok(firstInfo > 0 && notes.slice(0, firstInfo).every((n) => n.tone === "warn") && notes.slice(firstInfo).every((n) => n.tone === "info") || notes.every((n) => n.tone === "warn"), "vendor-pdf: warnings come first");
+  const nDiff = checkNotes(checks, x, { vendor: "Other Co", vendorCompanyId: "c3" }).map((n) => n.text);
+  ok(nDiff.includes("The PDF reads “Rose Brand Inc.” — the form has “Other Co”."), "vendor-pdf: checkNotes form vendor differs");
+  const manyChecks = vendorPdfChecks({ vendor: "Rose Brand" }, { parts: [], companies: [...cos, { id: "c4", name: "Rose Brand Inc", type: "vendor" }] });
+  ok(checkNotes(manyChecks, { vendor: "Rose Brand" }, { vendor: "", vendorCompanyId: null }).some((n) => n.tone === "warn" && n.text === "The PDF reads “Rose Brand” — matches 2 vendor companies — pick one."), "vendor-pdf: checkNotes many vendors");
+  const exChecks = vendorPdfChecks({ lines: [{ amount: 100 }], freight: 25, total: 100 }, { parts: [], companies: [] });
+  ok(checkNotes(exChecks, { lines: [{ amount: 100 }], freight: 25, total: 100 }, { vendor: "", vendorCompanyId: null }).some((n) => n.tone === "warn" && n.text === "The PDF total leaves out freight / tax."), "vendor-pdf: checkNotes excludes-extras");
+  const fx: VendorPdfExtraction = { lines: [{ amount: 100 }], freight: 50, total: 150 };
+  const fn = checkNotes(vendorPdfChecks(fx, { parts: [], companies: [] }), fx, { vendor: "", vendorCompanyId: null });
+  ok(fn.some((n) => n.tone === "info" && n.text.startsWith("Quote includes freight ticked — ")), "vendor-pdf: checkNotes freight tick");
+  ok(checkNotes(vendorPdfChecks({}, { parts: [], companies: [] }), {}, { vendor: "", vendorCompanyId: null }).length === 0, "vendor-pdf: an empty extraction has no notes");
+
+  // Boundary: pure, browser-safe.
+  const { readFileSync: rf } = await import("node:fs");
+  for (const f of ["extraction.ts", "checks.ts"]) {
+    const src = rf(new URL(`../src/lib/vendor-pdf/${f}`, import.meta.url), "utf8");
+    ok(!/from\s+["'](node:|@\/db|@\/lib\/stores)|-server["']/.test(src), `vendor-pdf: ${f} imports nothing server-side`);
+  }
+}
+
 if (process.argv[1]?.endsWith("test-vendors.ts")) {
   let pass = 0, fail = 0;
-  vendorChecks((c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  const ok: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
+  vendorChecks(ok).then(() => vendorPdfPureChecks(ok)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }
