@@ -14,7 +14,7 @@ export const maxDuration = 30;
  * (`/api/assessments/[id]/photos/upload`). Only `blob.generate-client-token` is handled (no onUploadCompleted, so no
  * callback and no middleware exemption). The grant is for ONE path — `surveys/<FS-id>/<fileId>.jpg|.json` of a survey
  * that exists — by content type from the id: a JPEG of at most 5 MB (photos, markups, sketches) or a JSON strokes
- * document of at most 2 MB (`k_`). The finalize action (`finalizeSurveyFile`) re-reads the real bytes before the file
+ * document of at most 4 MB (`k_`). The finalize action (`finalizeSurveyFile`) re-reads the real bytes before the file
  * is recorded, so a lying content type buys nothing.
  */
 
