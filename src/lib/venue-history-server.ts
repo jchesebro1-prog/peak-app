@@ -29,6 +29,8 @@ import {
   type VenueHistoryRow,
 } from "./venue-match";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { listDocsFiltered } from "@/db/doc-store";
+import type { CollectionName } from "@/db/doc-tables";
 
 export type VenueDirRow = {
   site: SiteRow;
@@ -42,18 +44,26 @@ export type VenueDirRow = {
  * Loads each store once and buckets activity by `${customerId}|${locationId}`,
  * so the directory is a single pass over the data.
  */
+/** Jeff 2026-10-15 #11 — the directory reads only these fields of each record (a SQL projection), never whole
+ *  quotes / projects / jobs; the same eight stores the history below reads in full. */
+type ActivityRow = { id: string; customerId?: string | null; locationId?: string | null; companyId?: string | null; siteIds?: string[]; updatedAt?: number; startAt?: number | null };
+function activityRows(coll: CollectionName, fields: readonly string[]): Promise<ActivityRow[]> {
+  return listDocsFiltered<ActivityRow>(coll, { fields });
+}
+const AT = ["customerId", "locationId", "updatedAt"] as const;
+
 export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
   const [sites, quotes, projects, engagements, flame, inspections, repairs, surveys, visits] =
     await Promise.all([
       getAllSites(),
-      getAllQuotes(),
-      getAllProjects(),
-      allEngagements(),
-      getAllFlame(),
-      getAllInspections(),
-      getAllRepairs(),
-      getAllSurveys(),
-      allVisits(),
+      activityRows("quotes", AT),
+      activityRows("projects", AT),
+      activityRows("consulting_engagements", ["companyId", "siteIds", "updatedAt"]),
+      activityRows("flame_jobs", AT),
+      activityRows("inspections", AT),
+      activityRows("repair_jobs", AT),
+      activityRows("surveys", AT),
+      activityRows("site_visits", ["customerId", "locationId", "startAt"]),
     ]);
 
   // Bucket the latest activity ts per `${customerId}|${locationId}`.
@@ -65,12 +75,8 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
     const cur = latest.get(k) ?? 0;
     if (ts > cur) latest.set(k, ts);
   };
-  for (const q of quotes) bump(q.customerId, q.locationId, q.updatedAt);
-  for (const p of projects) bump(p.customerId, p.locationId, p.updatedAt);
-  for (const j of flame) bump(j.customerId, j.locationId, j.updatedAt);
-  for (const r of inspections) bump(r.customerId, r.locationId, r.updatedAt);
-  for (const r of repairs) bump(r.customerId, r.locationId, r.updatedAt);
-  for (const s of surveys) bump(s.customerId, s.locationId, s.updatedAt);
+  for (const list of [quotes, projects, flame, inspections, repairs, surveys])
+    for (const r of list) bump(r.customerId, r.locationId, Number(r.updatedAt) || 0);
   // Site visits can be scheduled in the future; clamp to now so a scheduled
   // visit doesn't sort the venue to the top of "most recently active" (and
   // so timeAgo doesn't render a future ts as "just now").
@@ -82,7 +88,7 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
   // Engagements use companyId + siteIds (docLocId values), not customerId/locationId.
   for (const e of engagements) {
     if (!e.companyId) continue;
-    for (const sid of e.siteIds ?? []) bump(e.companyId, sid, e.updatedAt);
+    for (const sid of Array.isArray(e.siteIds) ? e.siteIds : []) bump(e.companyId, sid, Number(e.updatedAt) || 0);
   }
 
   /* Company names in ONE query (punch #91). This used to await getCompany()

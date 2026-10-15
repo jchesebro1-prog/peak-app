@@ -5,6 +5,7 @@ import {
   getDocRows,
   insertWithPrefixedId,
   listDocs,
+  listDocsFiltered,
   casDocKey,
   patchDoc,
   patchDocKey,
@@ -797,6 +798,35 @@ export async function getAll(): Promise<Quote[]> {
   const [list, pipes] = await Promise.all([listDocs<Quote>("quotes"), loadPipelines()]);
   for (const q of list) normalizeQuotePipeline(q, pipes);
   return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/** Jeff 2026-10-15 #11 — the top-level quote fields the Quotes hub filters, counts and searches over, and the
+ *  Companies directory rolls up. A SQL projection (`listDocsFiltered` `fields`), so a list read never ships a
+ *  quote's spec, revisions or history. */
+export const QUOTE_LIST_FIELDS = [
+  "name", "customer", "customerId", "locationId", "owner", "status", "quoteType", "value", "estNo", "estSuffix", "updatedAt", "bid",
+] as const;
+export type QuoteListRow = Pick<Quote, "id" | "name" | "customer" | "customerId" | "owner" | "status" | "value" | "updatedAt"> & {
+  locationId?: string | null;
+  quoteType?: string;
+  estNo?: number;
+  estSuffix?: number;
+  bid?: QuoteBid | null;
+};
+
+/** Every live quote as a `QuoteListRow`, newest first — getAll()'s order, without the documents. */
+export async function listQuoteRows(): Promise<QuoteListRow[]> {
+  const rows = await listDocsFiltered<QuoteListRow & { id: string }>("quotes", { fields: QUOTE_LIST_FIELDS });
+  for (const r of rows) {
+    r.name = r.name || "";
+    r.customer = r.customer || "";
+    r.customerId = r.customerId || null;
+    r.owner = r.owner || "";
+    r.status = (r.status || "draft") as QuoteStatus;
+    r.value = Number(r.value) || 0;
+    r.updatedAt = Number(r.updatedAt) || 0;
+  }
+  return rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 export async function get(id: string): Promise<Quote | null> {

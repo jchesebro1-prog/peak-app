@@ -11355,6 +11355,7 @@ import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, bidSend
 import { vendorChecks, vendorDbChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
+import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
@@ -11731,6 +11732,7 @@ seeded()
   .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok))
   .then(() => oct15PureChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
+  .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
   .then(() => briefPureChecks(ok))
   .then(() => briefDraftDbChecks(ok))
   .then(() => briefBuildDbChecks(ok))
@@ -22710,13 +22712,12 @@ import { visibleRows as slVisibleRows, filterRows as slFilterRows, visibleGroupF
   ok(companyPage224.includes("ShortList"), "#224: the company record renders cards through ShortList");
 
   const directory224 = read224("src/app/(app)/companies/page.tsx");
-  ok(/sp\.n\b/.test(directory224) && directory224.includes('params.set("n"'), "#224: the Companies directory reads and writes the `?n=` page-size param");
-  ok(/showMoreHref|Show more/.test(directory224), "#224: the Companies directory has a Show-more control");
+  // Jeff 2026-10-15 #11 replaced #224's `?n=` "Show more" with 50-a-page Prev / Next (`?page=`, src/lib/list-paging.ts).
+  ok(/parsePageParam\(one\(sp\.page\)\)/.test(directory224) && directory224.includes("<ListPager"), "#224 → #11: the Companies directory pages with ?page= and the shared pager");
 
   const venues224 = read224("src/app/(app)/venues/page.tsx");
-  ok(/sp\.n\b/.test(venues224) && venues224.includes('p.set("n"'), "#224: the Venues directory reads and writes the `?n=` page-size param");
+  ok(/parsePageParam\(one\(sp\.page\)\)/.test(venues224) && venues224.includes("<ListPager"), "#224 → #11: the Venues directory pages with ?page= and the shared pager");
   ok(!/const PAGE = 200/.test(venues224), "#224: the old hard 200-row cap is gone from Venues");
-  ok(/Show more/.test(venues224), "#224: the Venues directory has a Show-more control");
 
   const shortListComp224 = read224("src/components/short-list.tsx");
   ok(shortListComp224.startsWith('"use client"'), "#224: ShortList is a client component");
@@ -23517,7 +23518,7 @@ import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
     ["companies/page.tsx", companiesSrc224],
     ["venues/page.tsx", venuesSrc224],
   ] as const) {
-    ok(src.includes('from "@/lib/short-list"'), `#224: ${name} imports the shared short-list module`);
+    ok(src.includes('from "@/lib/list-paging"'), `#224 → #11: ${name} imports the shared list-paging module`);
     ok(!/function parsePageSize\(/.test(src), `#224: ${name} no longer defines its own local parsePageSize`);
   }
   const shortListLibSrc224 = read("src/lib/short-list.ts");
@@ -28405,9 +28406,10 @@ function e223Src(rel: string): string {
 {
   const hub = e223Src("src/app/(app)/quotes/page.tsx");
   ok(!hub.includes("{q.id} · {owner}") && hub.includes("{displayQuoteNumber(q)} · {owner}"), "#223 quotes hub: rows show the estimate number, not the internal id");
-  ok(hub.includes("quoteMatchesSearch(x.hay, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
+  // Jeff 2026-10-15 #11: the search moved into the pure quotesHubView (over every quote, before the page is cut).
+  ok(hub.includes("quotesHubView(") && /q: searchTerm/.test(hub) && hub.includes('name="q"') && e223Src("src/lib/quotes-hub-view.ts").includes("bidders: bidderNames(q.id)"), "#223 quotes hub: a search box filters by number, old id, name and customer");
   ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
-  ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
+  ok(e223Src("src/lib/quotes-hub-view.ts").includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
   ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
   const search = e223Src("src/lib/search/global-search.ts");
   ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
