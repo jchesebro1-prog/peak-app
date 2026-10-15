@@ -40,14 +40,16 @@
  * logged call / meeting (channel other than email) with a customer.
  * Another person's DRAFT is never visible — unsent mail is not yet a record.
  *
- * Jeff 2026-10-15 #26 — a thread a live task links (`TaskRecord.threadId`)
- * is visible, read-only, to that task's assignee (`assigneeUserId` when
- * stamped, else the `assigneeName` only while it is unique — #349's rule),
- * whatever the task's status, until the task is deleted. Assigning a task
- * from an unlinked email shares exactly that one email. The ids are
- * precomputed once per viewer (`MailboxViewer.taskThreadIds`, loaded by
- * `mailboxViewer()` through `taskShareCond`), so no rule reads tasks per
- * thread.
+ * Jeff 2026-10-15 #26 (#351 review) — sharing an email through a task is
+ * the THREAD OWNER's act: the owner's assign-from-email paths stamp the task
+ * with a server-written `threadShare` ({ threadId, by, to, at }) after their
+ * own-thread check. A live (not deleted) task whose stamp names `me` (`to`)
+ * AND is still assigned to me (`assigneeUserId`) lets me read that one
+ * thread, read-only, whatever the task's status. The live `threadId` /
+ * assignee fields grant nothing by themselves, so a pushed or re-assigned
+ * task can't share. The ids are precomputed once per viewer
+ * (`MailboxViewer.taskThreadIds`, a Set loaded by `mailboxViewer()` through
+ * `taskShareCond`), so no rule reads tasks per thread.
  *
  * Writes and actions stay with the owner (`isOwnThread`): a reply sends from
  * the owner's Gmail account, and filing / status / read state are theirs.
@@ -73,9 +75,10 @@ type VisibilityFields = MailboxFields & LinkFields & AssignFields & Partial<Pick
  *  ownership check keys on), their display name, and whether that name is
  *  held by them alone among all users, archived included (the only case a legacy
  *  name-stamped thread or assignment can be theirs). `taskThreadIds` (Jeff
- *  2026-10-15 #26): the threads live tasks assigned to them link — absent =
- *  none (a viewer built without the task read, e.g. `viewerFrom`). */
-export type MailboxViewer = { id: string; name: string; nameUnique: boolean; taskThreadIds?: readonly string[] };
+ *  2026-10-15 #26): the threads an owner shared with them through a live task
+ *  (`taskShareCond`) — absent = none (a viewer built without the task read,
+ *  e.g. `viewerFrom`). */
+export type MailboxViewer = { id: string; name: string; nameUnique: boolean; taskThreadIds?: ReadonlySet<string> };
 
 /** A roster entry for `viewerFrom` / `resolveMailboxOwnerId` — every user, any status (mailbox-viewer.ts mailboxRoster). */
 export type RosterEntry = { id: string; name: string };
@@ -171,29 +174,36 @@ export function isAssignedTo(t: AssignFields, me: MailboxViewer): boolean {
   return me.nameUnique && m !== "" && fold(t.assignedTo) === m;
 }
 
-/** Jeff 2026-10-15 #26 — a live task assigned to `me` links this thread. */
+/** Jeff 2026-10-15 #26 — an owner shared this thread with `me` through a live task. */
 export function isTaskSharedTo(t: Partial<Pick<CommThread, "id">>, me: MailboxViewer): boolean {
-  return filled(t.id) && Array.isArray(me?.taskThreadIds) && me.taskThreadIds.includes(t.id);
+  return filled(t.id) && !!me?.taskThreadIds && me.taskThreadIds.has(t.id);
 }
 
-/** A task (its assignee fields) is assigned to `me` — #349's rule on the task
- *  store's fields: `assigneeUserId` when stamped, else the `assigneeName`
- *  (trimmed, case-insensitive) only while `me`'s name is unique. */
-export function taskAssignedTo(task: { assigneeUserId?: string | null; assigneeName?: string | null }, me: MailboxViewer): boolean {
-  if (!me || !isRealId(me.id)) return false;
-  if (filled(task.assigneeUserId)) return task.assigneeUserId === me.id;
-  const m = fold(me.name);
-  return me.nameUnique && m !== "" && fold(task.assigneeName) === m;
+/** #351 review — the thread a task shares with `me`, else null: ONLY the
+ *  server-written stamp, naming `me` and still matching the task's assignee
+ *  (a re-assign leaves a stale stamp inert). Live `threadId` / assignee
+ *  fields alone grant nothing. */
+export function taskSharesThread(
+  task: { assigneeUserId?: string | null; threadShare?: { threadId?: unknown; to?: unknown } | null },
+  me: MailboxViewer
+): string | null {
+  const s = task?.threadShare;
+  if (!me || !isRealId(me.id) || !s || typeof s !== "object") return null;
+  return filled(s.threadId) && s.to === me.id && task.assigneeUserId === me.id ? s.threadId : null;
 }
 
-/** `taskAssignedTo` plus a thread link, as a DocCond over the tasks
- *  collection — the one read that fills `MailboxViewer.taskThreadIds`. */
+/** `taskSharesThread` as a DocCond over the tasks collection — the one read
+ *  that fills `MailboxViewer.taskThreadIds` (deleted rows are excluded by the
+ *  store's live-row filter). */
 export function taskShareCond(me: MailboxViewer): DocCond {
   if (!me || !isRealId(me.id)) return NEVER;
-  const branches: DocCond[] = [{ path: ["assigneeUserId"], is: me.id }];
-  const m = fold(me.name);
-  if (me.nameUnique && m) branches.push({ all: [{ path: ["assigneeUserId"], empty: "text" }, { path: ["assigneeName"], isFolded: m }] });
-  return { all: [{ path: ["threadId"], filled: "text" }, { any: branches }] };
+  return {
+    all: [
+      { path: ["threadShare", "threadId"], filled: "text" },
+      { path: ["threadShare", "to"], is: me.id },
+      { path: ["assigneeUserId"], is: me.id },
+    ],
+  };
 }
 
 /** My own live thread — what every write / action / Assist draft requires. */
@@ -273,7 +283,7 @@ export function canSeeThreadCond(me: MailboxViewer): DocCond {
       { any: [{ path: ["customerId"], filled: "text" }, { path: ["siteId"], filled: "text" }, workLink, { path: ["linkedContactIds"], filled: "array" }] },
     ],
   };
-  const taskShared: DocCond = { path: ["id"], in: Array.isArray(me?.taskThreadIds) ? me.taskThreadIds : [] };
+  const taskShared: DocCond = { idIn: me?.taskThreadIds ? [...me.taskThreadIds] : [] };
   const shared: DocCond = {
     all: [{ path: ["status"], isNot: "draft" }, { any: [assignedToCond(me), linked, taskShared] }],
   };

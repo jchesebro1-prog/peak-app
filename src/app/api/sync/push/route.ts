@@ -12,6 +12,7 @@ import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
 import type { Pipelines } from "@/lib/pipelines";
 import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
+import { sanitizePushedDoc } from "@/lib/sync/server-owned";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -100,7 +101,8 @@ export async function POST(req: Request) {
           .where(eq(t.id, rec.id))
           .limit(1);
         const now = Date.now();
-        let doc: Record<string, unknown> = { ...rec.doc, id: rec.id };
+        // #351 review — server-owned fields (a task's share stamp and thread link) never come from a push
+        let doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...rec.doc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
         if (coll === "projects") {
           pipes ||= await loadPipelines();
           doc = normalizeProject(doc as unknown as ProjectRecord, pipes) as unknown as Record<string, unknown>;

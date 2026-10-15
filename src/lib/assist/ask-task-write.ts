@@ -73,5 +73,8 @@ export async function createAskTask(
   }
   // The Inbox files an email task under "Email" (buildThreadTaskInput).
   if (input.threadId) input.section = "Email";
-  return { ok: true, task: await createTask(input, me) };
+  // #351 review — the thread link is the user's own (loadThreadFor), so assigning it to a teammate is the owner's share
+  const { ownerShareFor } = await import("@/lib/task-thread-share");
+  const threadShare = ownerShareFor(input.threadId, me, input.assigneeUserId, Date.now());
+  return { ok: true, task: await createTask(input, me, { threadShare }) };
 }

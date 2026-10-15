@@ -8,30 +8,36 @@
  * few dozen rows), so a rename or a new teammate takes effect on the next
  * request.
  *
- * Jeff 2026-10-15 #26 — the viewer also carries the thread ids their live
- * tasks link (`taskThreadIds`): ONE SQL read of the tasks collection per
- * viewer build (`taskShareCond`), so every canSeeThread / canSeeThreadCond
- * after it is a set lookup — never a task read per thread. A failed read is
- * no task shares (fail closed).
+ * Jeff 2026-10-15 #26 — the viewer also carries the threads an owner shared
+ * with them through a live task (`taskThreadIds`, from the server-written
+ * `threadShare` stamp — #351 review): ONE SQL read of the tasks collection
+ * per viewer build (`taskShareCond`), so every canSeeThread /
+ * canSeeThreadCond after it is a set lookup — never a task read per thread.
+ * A failed read is no task shares (fail closed).
  */
 import { listDocsWhere } from "@/db/doc-store";
 import { activeUsers, allUsers } from "@/lib/users";
-import { taskShareCond, viewerFrom, type MailboxViewer, type RosterEntry } from "@/lib/stores/comms-visibility";
+import { taskShareCond, taskSharesThread, viewerFrom, type MailboxViewer, type RosterEntry } from "@/lib/stores/comms-visibility";
 
 /** The most task-linked threads one viewer carries (newest-id order is not
  *  promised; a person with more open email tasks than this is not real). */
 export const TASK_SHARE_CAP = 2000;
 
-/** Jeff 2026-10-15 #26 — the thread ids live tasks assigned to `v` link. */
-export async function taskThreadIdsFor(v: MailboxViewer): Promise<string[]> {
-  if (!v?.id) return [];
+/** Jeff 2026-10-15 #26 — the threads owners shared with `v` through live
+ *  tasks (the stamp, re-checked in JS by `taskSharesThread`). */
+export async function taskThreadIdsFor(v: MailboxViewer): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!v?.id) return out;
   try {
-    const rows = await listDocsWhere<{ id: string; threadId?: string | null }>("tasks", taskShareCond(v), { limit: TASK_SHARE_CAP });
-    return [...new Set(rows.map((r) => (typeof r.threadId === "string" ? r.threadId : "")).filter(Boolean))];
+    const rows = await listDocsWhere<{ id: string; assigneeUserId?: string | null; threadShare?: { threadId?: unknown; to?: unknown } | null }>("tasks", taskShareCond(v), { limit: TASK_SHARE_CAP });
+    for (const r of rows) {
+      const tid = taskSharesThread(r, v);
+      if (tid) out.add(tid);
+    }
   } catch (e) {
     console.error("[mailbox-viewer] task share read failed", e);
-    return [];
   }
+  return out;
 }
 
 /** Every user (any status) as id + name — the roster name uniqueness is

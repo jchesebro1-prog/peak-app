@@ -40,8 +40,8 @@ import {
   ownsMailbox,
   readOnlyBanner,
   resolveMailboxOwnerId,
-  taskAssignedTo,
   taskShareCond,
+  taskSharesThread,
   viewerFrom,
   visibleTo,
 } from "@/lib/stores/comms-visibility";
@@ -53,6 +53,7 @@ import type { CommThread } from "@/lib/stores/comms";
 import type { MailboxViewer } from "@/lib/stores/comms-visibility";
 import type { SnapshotRow } from "@/lib/triage/types";
 import type { Ok } from "./test-inbox-org";
+import { sanitizePushedDoc, SERVER_OWNED_FIELDS } from "@/lib/sync/server-owned";
 
 type T = Parameters<typeof canSeeThread>[0];
 const base = (over: Partial<CommThread> = {}): T =>
@@ -838,89 +839,170 @@ export function threadVisibilityPins(ok: Ok): void {
   ok(/const t = await applyOwnerStamps\(tombs\);/.test(script) && /const apply = args\.includes\("--apply"\);/.test(script) && /resolveExplicitDbTarget\(/.test(script) && /if \(apply\) requireHostedConfirmation\(target\.hosted, args\);/.test(script) && /"comms:stamp-owners": "tsx scripts\/comms-stamp-owners\.ts"/.test(read("package.json")), "comms:stamp-owners (#349): a dry run by default; --apply writes; a hosted DB also needs --yes; an explicit target only");
 }
 
-/** Jeff 2026-10-15 #26 — a task assigned from an email shares that one email
- *  with the assignee, read-only. Pure rule + SQL parity + the real loaders. */
+/** Jeff 2026-10-15 #26 (#351 review) — sharing an email through a task is the
+ *  THREAD OWNER's act, stamped by the server (`threadShare`). Live task
+ *  fields, a pushed document, a non-owner's re-assign and a promise-task share
+ *  nothing. Pure rule + SQL parity + the real write paths. */
 export function taskSharePureChecks(ok: Ok): void {
-  const ME: MailboxViewer = { id: "u-me", name: "Me Person", nameUnique: true, taskThreadIds: ["C-T1"] };
+  const ME: MailboxViewer = { id: "u-me", name: "Me Person", nameUnique: true, taskThreadIds: new Set(["C-T1"]) };
   const t = base({ id: "C-T1" } as Partial<CommThread>);
-  ok(canSeeThread(t, ME) && canOpenThread(t, ME) && !isOwnThread(t, ME) && !visibleTo(t, ME), "task share (#26): a task-linked thread is visible and opens, but is not mine (read-only)");
-  ok(!canSeeThread(base({ id: "C-T2" } as Partial<CommThread>), ME), "task share (#26): a thread no task of mine links stays hidden");
+  ok(canSeeThread(t, ME) && canOpenThread(t, ME) && !isOwnThread(t, ME) && !visibleTo(t, ME), "task share (#26): a shared thread is visible and opens, but is not mine (read-only)");
+  ok(!canSeeThread(base({ id: "C-T2" } as Partial<CommThread>), ME), "task share (#26): a thread nobody shared with me stays hidden");
   ok(!canSeeThread({ ...t, deleted: true }, ME) && !canSeeThread({ ...t, status: "draft" }, ME), "task share (#26): never a deleted thread or another person's draft");
   ok(!canSeeThread(t, { ...ME, taskThreadIds: undefined }), "task share (#26): a viewer built without the task read (viewerFrom) shares nothing");
-  ok(isTaskSharedTo(t, ME) && !isTaskSharedTo(base(), ME) && !isTaskSharedTo(t, { id: "u-me", name: "Me Person", nameUnique: true }), "task share (#26): isTaskSharedTo — the thread id is in the viewer's task set");
+  ok(isTaskSharedTo(t, ME) && !isTaskSharedTo(base(), ME), "task share (#26): isTaskSharedTo — a Set lookup on the thread id");
+  const stamp = (to: string) => ({ threadId: "C-T1", by: "u-owner", to, at: 1 });
   ok(
-    taskAssignedTo({ assigneeUserId: "u-me", assigneeName: "Someone Else" }, ME) &&
-      !taskAssignedTo({ assigneeUserId: "u-other", assigneeName: "Me Person" }, ME) &&
-      taskAssignedTo({ assigneeUserId: null, assigneeName: " me person " }, ME) &&
-      !taskAssignedTo({ assigneeUserId: null, assigneeName: "Me Person" }, { ...ME, nameUnique: false }) &&
-      !taskAssignedTo({ assigneeUserId: "", assigneeName: "" }, { id: "", name: "", nameUnique: false }),
-    "task share (#26): taskAssignedTo — the id when stamped (wins over the name), else a unique name only (#349)"
+    taskSharesThread({ assigneeUserId: "u-me", threadShare: stamp("u-me") }, ME) === "C-T1" &&
+      taskSharesThread({ assigneeUserId: "u-third", threadShare: stamp("u-me") }, ME) === null &&
+      taskSharesThread({ assigneeUserId: "u-me", threadShare: stamp("u-third") }, ME) === null &&
+      taskSharesThread({ assigneeUserId: "u-me", threadShare: null }, ME) === null &&
+      taskSharesThread({ assigneeUserId: "u-me" } as never, ME) === null &&
+      taskSharesThread({ assigneeUserId: "u-me", threadShare: stamp("u-me") }, { id: "", name: "", nameUnique: false }) === null,
+    "task share (#351): only the server stamp naming me AND still matching the assignee shares; a re-assigned (stale) stamp, no stamp or a live threadId alone grant nothing"
   );
   const row = (key: string, title: string): SnapshotRow => ({ key, source: "email", title, sub: "Re: pricing", href: "/x", score: 1, reason: "r", callLine: null, also: [] });
   const red = redactEmailRows([row("email:C-T1", "Task Co"), row("email:C-T2", "Other Co")], new Map<string, T>([["C-T1", t], ["C-T2", base({ id: "C-T2" } as Partial<CommThread>)]]) as never, ME);
-  ok(red[0].title === "Task Co" && red[1].title === PRIVATE_EMAIL_TITLE, "task share (#26): an admin's Start here view shows a task-shared email, redacts the rest");
+  ok(red[0].title === "Task Co" && red[1].title === PRIVATE_EMAIL_TITLE, "task share (#26): an admin's Start here view shows a shared email, redacts the rest");
   const cond = JSON.stringify(canSeeThreadCond(ME));
-  ok(cond.includes('{"path":["id"],"in":["C-T1"]}') && JSON.stringify(canSeeThreadCond({ ...ME, taskThreadIds: undefined })).includes('{"path":["id"],"in":[]}'), "task share (#26): canSeeThreadCond carries the viewer's task thread ids (none → matches nothing)");
+  ok(cond.includes('{"idIn":["C-T1"]}') && JSON.stringify(canSeeThreadCond({ ...ME, taskThreadIds: undefined })).includes('{"idIn":[]}'), "task share (#26): canSeeThreadCond filters the shared ids on the row id (idIn; none → matches nothing)");
   const sc = JSON.stringify(taskShareCond(ME));
-  ok(sc.includes('"threadId"') && sc.includes('"assigneeUserId"],"is":"u-me"') && sc.includes('"isFolded":"me person"') && !JSON.stringify(taskShareCond({ ...ME, nameUnique: false })).includes("isFolded") && JSON.stringify(taskShareCond({ id: "", name: "", nameUnique: false })) === '{"any":[]}',
-    "task share (#26): taskShareCond — linked tasks by assignee id, or the unique name with no id; a blank viewer matches nothing");
+  ok(sc.includes('"path":["threadShare","threadId"],"filled":"text"') && sc.includes('"path":["threadShare","to"],"is":"u-me"') && sc.includes('"path":["assigneeUserId"],"is":"u-me"') && !sc.includes('["threadId"]') && !sc.includes("assigneeName") && JSON.stringify(taskShareCond({ id: "", name: "", nameUnique: false })) === '{"any":[]}',
+    "task share (#351): taskShareCond reads only the stamp (+ the matching assignee) — never the live threadId or a name");
+  /* push sanitiser */
+  const forged = { id: "T-x", title: "x", assigneeUserId: "u-me", threadId: "C-T1", threadShare: stamp("u-me") };
+  const ins = sanitizePushedDoc("tasks", forged, null);
+  ok(!("threadShare" in ins) && !("threadId" in ins) && ins.title === "x", "sync push (#351): an inserted task loses threadShare and threadId");
+  const storedDoc = { id: "T-x", title: "old", assigneeUserId: "u-other", threadId: "C-REAL", threadShare: { threadId: "C-REAL", by: "u-owner", to: "u-other", at: 1 } };
+  const upd = sanitizePushedDoc("tasks", { ...forged, title: "new" }, { doc: storedDoc, deleted: false });
+  ok(upd.title === "new" && upd.threadId === "C-REAL" && JSON.stringify(upd.threadShare) === JSON.stringify(storedDoc.threadShare), "sync push (#351): an updated task keeps the stored threadId and threadShare, whatever the push sends");
+  const rev = sanitizePushedDoc("tasks", { ...forged }, { doc: storedDoc, deleted: true });
+  ok(rev.threadId === "C-REAL" && !("threadShare" in rev), "sync push (#351): a push that revives a deleted task brings no share stamp back");
+  ok(sanitizePushedDoc("surveys", { id: "s", threadShare: 1 }, null).threadShare === 1 && SERVER_OWNED_FIELDS.tasks.join() === "threadShare,threadId", "sync push (#351): only the listed server-owned fields are touched");
 }
 
 export async function taskShareDbChecks(ok: Ok): Promise<void> {
-  const { searchDocs, softDeleteDoc } = await import("@/db/doc-store");
-  const { createFixture, dropFixtures, fixtureId } = await import("./test-fixtures");
+  const { searchDocs, softDeleteDoc, getDoc } = await import("@/db/doc-store");
+  const { createFixture, dropFixtures, fixtureId, registerFixture } = await import("./test-fixtures");
   const { mailboxViewer, taskThreadIdsFor } = await import("@/lib/mailbox-viewer");
   const { globalSearch } = await import("@/lib/search/global-search");
   const { loadThreadFor, loadThreadReadable } = await import("@/lib/assist/thread-access");
   const { ownThread } = await import("@/lib/inbox-thread-guard");
-  const { seeded } = await import("@/db");
+  const { createTaskFromThread } = await import("@/lib/inbox-task-write");
+  const { createAskTask } = await import("@/lib/assist/ask-task-write");
+  const { handOff } = await import("@/lib/task-plan/write");
+  const { reshareTaskThread } = await import("@/lib/task-thread-share");
+  const T = await import("@/lib/stores/tasks");
+  const { getDb, seeded } = await import("@/db");
+  const { users } = await import("@/db/schema");
+  const { inArray } = await import("drizzle-orm");
   await seeded();
-  const ME = { id: "u-tv26-me", name: "TV26 Me" };
-  const OWNER = { id: "u-tv26-owner", name: "TV26 Owner" };
   const NOW = Date.UTC(2034, 6, 1, 15, 0);
+  const OWNER = { id: "u-tv26-owner", name: "TV26 Owner" };
+  const ME = { id: "u-tv26-me", name: "TV26 Me" };
+  const THIRD = { id: "u-tv26-third", name: "TV26 Third" };
+  const db = await getDb();
+  await db.insert(users).values([OWNER, ME, THIRD].map((u, i) => ({ id: u.id, name: u.name, email: `tv26-${i}@peak.test`, roles: ["Estimator"], color: "#5b616e", initials: "TV", status: "active" as const, createdAt: NOW })));
   const id = (s: string) => fixtureId("tv26", s);
-  const ids = { byId: id("t-byid"), byName: id("t-byname"), done: id("t-done"), wrong: id("t-wrong"), gone: id("t-gone"), draft: id("t-draft"), none: id("t-none") };
+  const ids = { a: id("t-a"), ask: id("t-ask"), self: id("t-self"), legacy: id("t-legacy"), pushed: id("t-pushed"), promise: id("t-promise"), gone: id("t-gone"), hand: id("t-hand"), draft: id("t-draft") };
   const th = (tid: string, word: string, over: Record<string, unknown> = {}) => ({
     id: tid, mailbox: "personal", mailboxUser: OWNER.name, mailboxOwnerId: OWNER.id, unread: true, customerId: null, customer: "Quuxlefrond Hall",
     contactName: "Pat Q", contactEmail: "pat@quuxlefrond.test", subject: `Quuxlefrond ${word}`, channel: "email", status: "waiting_us", assignedTo: "", link: null,
     createdAt: NOW, updatedAt: NOW, messages: [{ id: "m1", at: NOW, direction: "in", channel: "email", author: "Pat Q", fromEmail: "pat@quuxlefrond.test", body: `Body ${word}` }], ...over,
   });
-  const task = (tid: string, threadId: string, over: Record<string, unknown> = {}) => ({
-    id: tid, title: "Follow up", section: "Email", projectId: null, quoteId: null, designId: null, engagementId: null, coverageKey: null,
-    assigneeUserId: ME.id, assigneeName: ME.name, dueAt: null, startAt: null, schedule: null, handScheduled: false, status: "open", notes: "",
-    createdBy: OWNER.name, createdAt: NOW, updatedAt: NOW, doneAt: null, threadId, ...over,
-  });
-  const threads = [th(ids.byId, "byid"), th(ids.byName, "byname"), th(ids.done, "done"), th(ids.wrong, "wrong"), th(ids.gone, "gone"), th(ids.draft, "draft", { status: "draft" }), th(ids.none, "none")];
+  const threads = Object.entries(ids).map(([k, v]) => th(v, k, k === "draft" ? { status: "draft" } : {}));
+  const req = (threadId: string, assigneeUserId: string) => ({ threadId, title: "Follow up", notes: "", assigneeUserId, dueDate: "", linkKeys: [] });
+  const made: string[] = [];
+  const track = <X extends { id: string }>(t: X | null | undefined): X | null | undefined => {
+    if (t) {
+      registerFixture("tasks", t.id);
+      made.push(t.id);
+    }
+    return t;
+  };
+  const sees = async (who: { id: string; name: string }, tid: string) => canSeeThread((await getDoc("comms", tid)) as never, await mailboxViewer(who));
   try {
     for (const t of threads) await createFixture("comms", t as never);
-    await createFixture("tasks", task(id("k-byid"), ids.byId) as never);
-    await createFixture("tasks", task(id("k-byname"), ids.byName, { assigneeUserId: null }) as never);
-    await createFixture("tasks", task(id("k-done"), ids.done, { status: "done", doneAt: NOW }) as never);
-    await createFixture("tasks", task(id("k-wrong"), ids.wrong, { assigneeUserId: OWNER.id, assigneeName: OWNER.name }) as never);
-    await createFixture("tasks", task(id("k-gone"), ids.gone) as never);
-    await softDeleteDoc("tasks", id("k-gone"));
-    await createFixture("tasks", task(id("k-draft"), ids.draft) as never);
-    await createFixture("tasks", task(id("k-nothread"), "", { threadId: null }) as never);
 
-    const v = await mailboxViewer(ME);
-    const shared = new Set(v.taskThreadIds ?? []);
-    ok(shared.has(ids.byId) && shared.has(ids.byName) && shared.has(ids.done) && !shared.has(ids.wrong) && !shared.has(ids.gone),
-      "task share db (#26): mailboxViewer loads the threads of my live tasks — by id, by unique name, done included; never another assignee's or a deleted task's");
-    ok((await taskThreadIdsFor({ id: "", name: "", nameUnique: false })).length === 0, "task share db (#26): a blank viewer reads no tasks");
-    const seen = threads.filter((t) => canSeeThread(t as never, v)).map((t) => t.id).sort();
-    ok(JSON.stringify(seen) === JSON.stringify([ids.byId, ids.byName, ids.done].sort()), "task share db (#26): canSeeThread — the three task-shared threads; never the wrong assignee's, the deleted task's, a draft or an untasked thread");
-    for (const who of [ME, OWNER]) {
+    /* the owner's own act shares */
+    const a = await createTaskFromThread(req(ids.a, ME.id), OWNER);
+    const at = a.ok ? track(a.task) : null;
+    ok(a.ok && at?.threadShare?.to === ME.id && at.threadShare.by === OWNER.id && at.threadShare.threadId === ids.a && (await sees(ME, ids.a)) && !(await sees(THIRD, ids.a)),
+      "task share db (#351): the owner's assign-from-email stamps the share — the assignee reads it, nobody else");
+    const sk = await createAskTask({ title: "Ask task", notes: "", assigneeUserId: ME.id, dueDate: "", links: { threadId: ids.ask } as never }, OWNER);
+    if (sk.ok) track(sk.task);
+    ok(sk.ok && sk.task.threadShare?.to === ME.id && (await sees(ME, ids.ask)), "task share db (#351): Ask's task card, confirmed by the owner, shares too");
+    const self = await createTaskFromThread(req(ids.self, ""), OWNER);
+    if (self.ok) track(self.task);
+    ok(self.ok && !self.task.threadShare && !(await sees(ME, ids.self)), "task share db (#351): an owner's task for themself shares nothing");
+    const notMine = await createTaskFromThread(req(ids.a, THIRD.id), ME);
+    ok(!notMine.ok, "task share db (#351): a non-owner can't create a task from the thread at all");
+
+    /* live fields alone share nothing */
+    await createFixture("tasks", T.normalizeTask({ id: id("k-legacy"), title: "Legacy", assigneeUserId: ME.id, assigneeName: ME.name, status: "open", threadId: ids.legacy, createdAt: NOW }) as never);
+    ok(!(await sees(ME, ids.legacy)), "task share db (#351): a task that merely links the thread and is assigned to me (no stamp) shares nothing");
+
+    /* a pushed task can't share (the route's sanitiser over a forged doc) */
+    const forged = { id: id("k-pushed"), title: "Pushed", assigneeUserId: ME.id, assigneeName: ME.name, status: "open", threadId: ids.pushed, threadShare: { threadId: ids.pushed, by: OWNER.id, to: ME.id, at: NOW }, createdAt: NOW };
+    await createFixture("tasks", sanitizePushedDoc("tasks", forged, null) as never);
+    ok(!(await sees(ME, ids.pushed)) && !(await getDoc<{ id: string; threadId?: string }>("tasks", forged.id))?.threadId, "task share db (#351): a pushed task (insert) carrying a forged stamp and threadId shares nothing; both are dropped");
+    const stored = await getDoc("tasks", at!.id);
+    const pushedOver = sanitizePushedDoc("tasks", { ...(stored as object), id: at!.id, threadId: ids.pushed, threadShare: { threadId: ids.pushed, by: OWNER.id, to: ME.id, at: NOW } }, { doc: stored, deleted: false });
+    await createFixture("tasks", pushedOver as never);
+    ok((await sees(ME, ids.a)) && !(await sees(ME, ids.pushed)) && (await getDoc<{ id: string; threadId?: string }>("tasks", at!.id))?.threadId === ids.a, "task share db (#351): a pushed update keeps the stored threadId and stamp — it can't re-point the share");
+    const route = readFileSync("src/app/api/sync/push/route.ts", "utf8");
+    ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.rec\.doc, id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
+
+    /* a promise-task never shares */
+    const p = await T.createTaskOnce({ id: id("k-promise"), title: "Promise", assigneeUserId: ME.id, assigneeName: ME.name, threadId: ids.promise, threadShare: { threadId: ids.promise, by: OWNER.id, to: ME.id, at: NOW } }, { id: "system", name: "System" });
+    track(p);
+    ok(!p.threadShare && !(await sees(ME, ids.promise)), "task share db (#351): a promise-task (createTaskOnce) never carries a share, even when one is passed");
+    ok(!readFileSync("src/lib/inbox-org/ai-court.ts", "utf8").includes("threadShare"), "task share db (#351): applyPromises never sets threadShare");
+
+    /* re-assigning: a non-owner's hand-off moves nothing; the owner's re-stamps */
+    const h = await createTaskFromThread(req(ids.hand, ME.id), OWNER);
+    const ht = h.ok ? track(h.task)! : null;
+    ok(!!ht && (await sees(ME, ids.hand)), "task share db (#351): (setup) shared with me");
+    const r1 = await handOff({ kind: "task", id: ht!.id, userId: THIRD.id }, ME);
+    ok(r1.ok && !(await T.getTask(ht!.id))?.threadShare && !(await sees(THIRD, ids.hand)) && !(await sees(ME, ids.hand)), "task share db (#351): my (non-owner) hand-off to a third person shares nothing — with them or still with me");
+    await T.updateTask(ht!.id, { assigneeUserId: ME.id, assigneeName: ME.name });
+    await reshareTaskThread(ht!.id, ME);
+    ok(!(await sees(ME, ids.hand)), "task share db (#351): updateTask back to me by a non-owner (updateTaskAction's path) shares nothing");
+    const r2 = await handOff({ kind: "task", id: ht!.id, userId: THIRD.id }, OWNER);
+    ok(r2.ok && (await T.getTask(ht!.id))?.threadShare?.to === THIRD.id && (await sees(THIRD, ids.hand)) && !(await sees(ME, ids.hand)), "task share db (#351): the owner's hand-off re-stamps the share for the new assignee");
+    await T.patchTask(ht!.id, (t) => {
+      t.assigneeUserId = ME.id;
+      t.assigneeName = ME.name;
+    });
+    ok(!(await sees(ME, ids.hand)) && !(await sees(THIRD, ids.hand)), "task share db (#351): any other re-assign leaves the stamp inert (to ≠ assignee)");
+    await T.updateTask(ht!.id, { threadShare: { threadId: ids.hand, by: OWNER.id, to: ME.id, at: NOW } } as never);
+    ok(!(await sees(ME, ids.hand)), "task share db (#351): updateTask never takes a stamp from a patch");
+
+    /* deleted task, draft thread */
+    const g = await createTaskFromThread(req(ids.gone, ME.id), OWNER);
+    if (g.ok) {
+      track(g.task);
+      await softDeleteDoc("tasks", g.task.id);
+    }
+    ok(g.ok && !(await sees(ME, ids.gone)), "task share db (#351): a deleted task shares nothing");
+
+    /* parity, read-only, loaders */
+    for (const who of [OWNER, ME, THIRD]) {
       const w = await mailboxViewer(who);
       const sqlIds = new Set((await searchDocs("comms", "quuxlefrond", 200, { where: canSeeThreadCond(w) })).map((d) => d.id));
       const mismatch = threads.filter((t) => sqlIds.has(t.id) !== canSeeThread(t as never, w)).map((t) => t.id);
       ok(mismatch.length === 0, `task share db (#26): canSeeThreadCond (SQL) === canSeeThread (JS), as ${who.name}` + (mismatch.length ? ` — differs on ${mismatch.join(", ")}` : ""));
     }
-    const k = ((await globalSearch("quuxlefrond", ME)).find((g) => g.label === "Email threads")?.items ?? []).map((i) => i.id);
-    ok(k.includes(ids.byId) && !k.includes(ids.wrong) && !k.includes(ids.none), "task share db (#26): ⌘K finds the task-shared email for its assignee only");
-    ok(!!(await loadThreadReadable(ids.byId, v)) && !(await loadThreadFor(ids.byId, v)) && !(await loadThreadReadable(ids.wrong, v)), "task share db (#26): Ask reads it (loadThreadReadable); reply / task drafting stays own-only (loadThreadFor)");
-    ok(!(await ownThread(ids.byId, v)) && !(await ownThread(ids.byId, ME)) && !!(await ownThread(ids.byId, OWNER)), "task share db (#26): every Inbox write guard (ownThread) still refuses the assignee — read-only");
+    const v = await mailboxViewer(ME);
+    ok(v.taskThreadIds instanceof Set && v.taskThreadIds.has(ids.a) && (await taskThreadIdsFor({ id: "", name: "", nameUnique: false })).size === 0, "task share db (#26): the viewer carries a Set of shared thread ids; a blank viewer reads none");
+    const k = ((await globalSearch("quuxlefrond", ME)).find((x) => x.label === "Email threads")?.items ?? []).map((i) => i.id);
+    ok(k.includes(ids.a) && !k.includes(ids.legacy) && !k.includes(ids.pushed), "task share db (#26): ⌘K finds only the emails shared with me");
+    ok(!!(await loadThreadReadable(ids.a, v)) && !(await loadThreadFor(ids.a, v)), "task share db (#26): Ask reads it; reply / task drafting stays own-only");
+    ok(!(await ownThread(ids.a, v)) && !(await ownThread(ids.a, ME)) && !!(await ownThread(ids.a, OWNER)), "task share db (#26): every Inbox write guard still refuses the assignee — read-only");
   } finally {
     await dropFixtures("tv26");
+    // the T-#### tasks are registered fixtures: the harness teardown (or the throwaway TEST_DB) removes them
+    await db.delete(users).where(inArray(users.id, [OWNER.id, ME.id, THIRD.id]));
   }
 }
 

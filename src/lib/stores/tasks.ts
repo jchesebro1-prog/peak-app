@@ -83,7 +83,25 @@ export type TaskRecord = {
   /** #323 — set on a "Waiting on customer" item: the customer owes this.
    *  assigneeUserId is the Peak rep who owns the nudge; dueAt is the nudge date. */
   waitingOn?: { contactId: string | null; name: string } | null;
+  /** #351 — server-written share stamp (TaskThreadShare); absent = shares nothing. */
+  threadShare?: TaskThreadShare | null;
 };
+
+/** Jeff 2026-10-15 #26 (#351 review) — the thread owner's act of sharing one
+ *  email with a task's assignee. Written ONLY by the server, in owner-driven
+ *  paths (createTaskFromThread, createAskTask, the owner's re-assign through
+ *  task-thread-share.ts), never from a client document: create / update /
+ *  push strip it. It grants a read only while `to` is still the task's
+ *  assignee (`taskSharesThread`). */
+export type TaskThreadShare = { threadId: string; by: string; to: string; at: number };
+
+export function cleanThreadShare(v: unknown): TaskThreadShare | null {
+  const s = v as Partial<TaskThreadShare> | null;
+  if (!s || typeof s !== "object") return null;
+  const ok = (x: unknown): x is string => typeof x === "string" && x.trim() !== "" && x.length <= 200;
+  if (!ok(s.threadId) || !ok(s.by) || !ok(s.to) || typeof s.at !== "number" || !Number.isFinite(s.at)) return null;
+  return { threadId: s.threadId, by: s.by, to: s.to, at: s.at };
+}
 
 export type TaskTemplateItem = { key: string; title: string; section?: string };
 
@@ -342,7 +360,18 @@ export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRe
   if (w && typeof w === "object" && typeof w.name === "string") {
     out.waitingOn = { contactId: taskLinkId(w.contactId), name: w.name };
   }
+  // #351 — carried only when well-formed (it is written by the server alone)
+  const share = cleanThreadShare(raw.threadShare);
+  if (share) out.threadShare = share;
   return out;
+}
+
+/** #351 — a caller-built task input never carries a share stamp. */
+function withoutShare<T extends Partial<TaskRecord>>(input: T): T {
+  if (!input || !("threadShare" in input)) return input;
+  const { threadShare: _drop, ...rest } = input;
+  void _drop;
+  return rest as T;
 }
 
 export async function allTasks(): Promise<TaskRecord[]> {
@@ -423,17 +452,23 @@ function withAutoDue<T extends Partial<TaskRecord>>(input: T, at: number): T {
 }
 
 export async function createTask(
-  input: Partial<TaskRecord> & { title: string },
+  rawInput: Partial<TaskRecord> & { title: string },
   me: { id: string; name: string },
+  /** #351 — only an owner-driven path passes this (after its own-thread
+   *  check); it is kept only for this task's own thread and assignee. */
+  opts: { threadShare?: TaskThreadShare | null } = {},
 ): Promise<TaskRecord> {
   const at = now();
+  const input = withoutShare(rawInput);
+  const share = cleanThreadShare(opts.threadShare);
+  const stamp = share && share.threadId === input.threadId && share.to === input.assigneeUserId && share.to !== share.by ? { threadShare: share } : {};
   if (input.id) {
-    const t = normalizeTask({ ...withAutoDue(input, at), id: input.id, createdBy: me.name, createdAt: at, updatedAt: at });
+    const t = normalizeTask({ ...withAutoDue(input, at), ...stamp, id: input.id, createdBy: me.name, createdAt: at, updatedAt: at });
     await upsertDoc<TaskRecord>("tasks", t);
     return t;
   }
   return insertWithPrefixedId<TaskRecord>("tasks", "T", 6000, (id) =>
-    normalizeTask({ ...withAutoDue(input, at), id, createdBy: me.name, createdAt: at, updatedAt: at })
+    normalizeTask({ ...withAutoDue(input, at), ...stamp, id, createdBy: me.name, createdAt: at, updatedAt: at })
   );
 }
 
@@ -445,7 +480,7 @@ export async function createTaskOnce(
   me: { id: string; name: string },
 ): Promise<TaskRecord> {
   const at = now();
-  const t = normalizeTask({ ...withAutoDue(input, at), createdBy: me.name, createdAt: at, updatedAt: at });
+  const t = normalizeTask({ ...withAutoDue(withoutShare(input), at), createdBy: me.name, createdAt: at, updatedAt: at });
   if (await insertDocIfAbsent<TaskRecord>("tasks", t)) return t;
   return (await getTask(input.id)) ?? t;
 }
@@ -464,7 +499,7 @@ export async function createAutoTask(
   if (existing) return null;
   const at = now();
   const id = autoTaskId(input.coverageKey);
-  const t = normalizeTask({ ...withAutoDue(input, at), id, createdBy: input.createdBy || "System", createdAt: at, updatedAt: at });
+  const t = normalizeTask({ ...withAutoDue(withoutShare(input), at), id, createdBy: input.createdBy || "System", createdAt: at, updatedAt: at });
   const inserted = await insertDocIfAbsent<TaskRecord>("tasks", t);
   return inserted ? t : null;
 }
@@ -486,11 +521,16 @@ export async function updateTask(
   patch: Partial<Pick<TaskRecord, "title" | "section" | "assigneeUserId" | "assigneeName" | "dueAt" | "notes" | "priority" | "size">>,
 ): Promise<TaskRecord | null> {
   const { priority, size, ...rest } = patch;
+  // #351 — never from a patch: the share stamp and the thread link are server-owned
+  delete (rest as Record<string, unknown>).threadShare;
+  delete (rest as Record<string, unknown>).threadId;
   const prev = { assignee: null as string | null };
   const t = await patchDoc<TaskRecord>("tasks", id, (t) => {
     prev.assignee = t.assigneeUserId ?? null;
     const prevName = t.assigneeName || "";
     Object.assign(t, rest, tierSizeOf({ priority, size })); // tier/size: only a valid value is written
+    // #351 — a re-assign never carries the share: only the owner re-stamps it (task-thread-share.ts)
+    if ((t.assigneeUserId ?? null) !== prev.assignee && t.threadShare) delete t.threadShare;
     // Handed to someone new and still undated → the +7 default, the same rule as create (D787, withAutoDue).
     const handed = ("assigneeUserId" in rest || "assigneeName" in rest) &&
       ((t.assigneeUserId ?? null) !== prev.assignee || (t.assigneeName || "").trim().toLowerCase() !== prevName.trim().toLowerCase());
@@ -503,6 +543,18 @@ export async function updateTask(
     await clearPlanPinsFor("task", id, prev.assignee);
   }
   return t;
+}
+
+/** #351 — write (or clear, `null`) a task's share stamp. Server-only, for the
+ *  owner-driven paths in task-thread-share.ts: re-checked under the write —
+ *  a stamp is kept only for the task's own thread and current assignee. */
+export async function setTaskThreadShare(id: string, share: TaskThreadShare | null): Promise<TaskRecord | null> {
+  const clean = share ? cleanThreadShare(share) : null;
+  return patchDoc<TaskRecord>("tasks", id, (t) => {
+    if (clean && clean.threadId === t.threadId && clean.to === t.assigneeUserId && clean.to !== clean.by) t.threadShare = clean;
+    else delete t.threadShare;
+    return t;
+  });
 }
 
 export async function removeTask(id: string): Promise<void> {

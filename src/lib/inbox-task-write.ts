@@ -105,5 +105,8 @@ export async function createTaskFromThread(
     me,
   });
   if (!built.ok) return built;
-  return { ok: true, task: await createTask(built.input, me) };
+  // #351 review — the owner (visibleTo above) shares this one email with a teammate assignee
+  const { ownerShareFor } = await import("@/lib/task-thread-share");
+  const threadShare = ownerShareFor(thread.id, me, built.input.assigneeUserId, Date.now());
+  return { ok: true, task: await createTask(built.input, me, { threadShare }) };
 }
