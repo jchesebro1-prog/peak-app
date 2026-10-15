@@ -102,15 +102,17 @@ export function documentAppendixSystemIds(
 }
 
 /** #293 slice 3 (spec §2.3) — the online BOM view: every system itemized,
- *  quantities and descriptions on, the appendix off. Prices keep the quote's
- *  own choice (an estimator who hid prices still hides them). Pure. */
+ *  descriptions on, the appendix off. Prices keep the quote's own choice (an
+ *  estimator who hid prices still hides them), and so do quantities (Jeff
+ *  2026-10-15 #14: one switch — the PDF's Qty — for the PDF and every online
+ *  BOM). Pure. */
 export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
   return {
     ...p,
     // Phase 5: the BOM view is the itemized bands — never the package document.
     document: null,
     detail: "itemized",
-    pdfQty: true,
+    pdfQty: p.pdfQty,
     pdfNotes: true,
     pdfItemizedAppendix: false,
     sections: p.sections.map((s) => ({ ...s, presentation: "itemized" as const })),

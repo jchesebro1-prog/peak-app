@@ -21,6 +21,7 @@ import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { documentRevStamp, maxSentRevNo, nextSendRevNo, sentRevNo } from "../src/lib/quote-pdf/state";
 import { quoteAsOfRevision, sentDocumentStamp } from "../src/lib/quote-share/view";
 import { addQuoteRevision } from "../src/lib/stores/quotes";
+import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -30,6 +31,15 @@ const PTY2 = "pty_fedcba9876543210";
 export async function oct15PureChecks(ok: Ok) {
   oct15ReviewAmountChecks(ok);
   oct15RevChecks(ok);
+  /* ---- #14 — the online / package-page BOM follows the PDF's Qty switch ---- */
+  {
+    const props = (pdfQty: boolean) => ({ pdfQty, pdfNotes: false, pdfPrices: true, detail: "sectioned", sections: [], document: null, pdfItemizedAppendix: true }) as never;
+    ok(bomViewProps(props(false)).pdfQty === false && bomViewProps(props(true)).pdfQty === true, "oct15 #14: the online BOM view keeps the PDF's Qty choice");
+    const pm = rd("src/lib/estimate-output/package-model.ts");
+    const pv = rd("src/components/estimate-output/package-view.tsx");
+    ok(pm.includes("showQty: d.pdfQty !== false,") && pm.includes('d.pdfQty === false ? { ...r, qty: null, unit: "" } : r') && pv.includes("showQty || i > 0") && pv.includes("{showQty && <td className=\"pkg-qty\">"),
+      "oct15 #14: the package page's BOM drops its Qty column (and quantities) when the PDF hides them");
+  }
   /* ---- #3 / #4 (pure + pins) ---- */
   {
     ok(JSON.stringify(addendaAdded([{ no: 1 }], [{ no: 1 }, { no: 3 }, { no: 2 }])) === "[2,3]" && addendaAdded(null, []).length === 0 && addendaAdded([{ no: 1 }, { no: 2 }], [{ no: 1 }]).length === 0,

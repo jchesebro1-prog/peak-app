@@ -69,6 +69,8 @@ export type PackageViewProps = {
   banner: PackageBanner | null;
   summary: string;
   view: "narrative" | "bom";
+  /** Jeff 2026-10-15 #14 — the BOM's Qty column follows the estimate PDF's Qty switch (the revision's pdfOptions). */
+  showQty: boolean;
   narrativeHref: string;
   bomHref: string;
   scopes: PackageScopeView[];
@@ -121,6 +123,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     banner: packageBanner(i.state, i.currentHref, i.bidClosed === true),
     summary: coverSummaryText(i.frozen.coverSummary, scopes.map((s) => s.name)),
     view: i.view,
+    showQty: d.pdfQty !== false,
     narrativeHref: i.base,
     bomHref: i.base + "?view=bom",
     scopes: scopes.map((s) => {
@@ -141,7 +144,8 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
         intro: s.introBlocks,
         keyProducts,
         fallback: hasText ? null : s.cover.source === "missing" ? PACKAGE_COPY.seeBom : s.cover.text,
-        bom: sec ? packageBomRows(sec, i.catalog, d.vendorQuotes || []) : [],
+        // #14: with the PDF's Qty off, the online BOM carries no quantities either.
+        bom: sec ? packageBomRows(sec, i.catalog, d.vendorQuotes || []).map((r) => (d.pdfQty === false ? { ...r, qty: null, unit: "" } : r)) : [],
       };
     }),
     totals: {

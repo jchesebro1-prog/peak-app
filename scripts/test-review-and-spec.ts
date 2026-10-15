@@ -26226,7 +26226,7 @@ import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from
   };
   const d = quoteDocumentDataFor(q as never, cust as never, { companyName: "Peak", logoDark: null });
   ok(d.custName === "Civic Center" && d.venueLabel === "Theater — Denver" && d.hasAttn && d.attnLine === "Pat Lee · TD", "#222 quoteDocumentDataFor: customer, venue and attn exactly as the Estimator preview shows them");
-  ok(d.revNum === 2 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision, date, saved pdfOptions, terms");
+  ok(d.revNum === 1 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision (never sent → Rev 1, Jeff 2026-10-15 #13), date, saved pdfOptions, terms");
   ok(d.t.grand === 0 && d.sections.length === 0 && d.ownerName === "Jeff Chesebro" && d.preparedByName === "Jeff Chesebro" && d.companyName === "Peak", "#222 quoteDocumentDataFor: totals from saved sections, owner, company");
   const bare = quoteDocumentDataFor({ id: "Q-10", name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 } as never, null, { companyName: "", logoDark: null });
   ok(
@@ -48822,9 +48822,9 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   // ---- BOM view ----
   const narr = p293Props({ pdfOptions: { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: false, pdfItemizedAppendix: true } });
   const bom = n293tBom(narr);
-  ok(bom.detail === "itemized" && bom.pdfQty && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
+  ok(bom.detail === "itemized" && bom.pdfQty === false && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
      bom.sections.every((s) => s.presentation === "itemized"),
-    "#293t BOM view: every system itemized, quantities and descriptions on, prices kept as chosen, appendix off");
+    "#293t BOM view: every system itemized, descriptions on, prices and quantities kept as chosen (Jeff 2026-10-15 #14), appendix off");
   ok(narr.sections.some((s) => s.presentation === "narrative") && narr.detail === "sectioned", "#293t BOM view: the input props are not mutated");
   const narrHtml = p293Render(p293Props());
   const bomHtml = p293Render(n293tBom(p293Props()));

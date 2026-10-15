@@ -106,7 +106,7 @@ function Blocks({ blocks }: { blocks: NarrativeBlock[] }) {
   );
 }
 
-function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Record<string, ReactNode> }) {
+function Scope({ s, bom, extra, showQty = true }: { s: PackageScopeView; bom: boolean; extra: Record<string, ReactNode>; showQty?: boolean }) {
   return (
     <section className="pkg-card pkg-scope" data-scope={s.id}>
       <div className="pkg-scope-head">
@@ -147,7 +147,8 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
             <table className="pkg-bom">
               <thead>
                 <tr>
-                  {PACKAGE_COPY.bomHead.map((h) => (
+                  {/* Jeff 2026-10-15 #14: no Qty column when the estimate PDF hides quantities. */}
+                  {PACKAGE_COPY.bomHead.filter((h, i) => showQty || i > 0).map((h) => (
                     <th key={h} scope="col">{h}</th>
                   ))}
                 </tr>
@@ -155,7 +156,7 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
               <tbody>
                 {s.bom.map((r) => (
                   <tr key={r.key}>
-                    <td className="pkg-qty">{r.qty == null ? "" : `${r.qty}${r.unit ? " " + r.unit : ""}`}</td>
+                    {showQty && <td className="pkg-qty">{r.qty == null ? "" : `${r.qty}${r.unit ? " " + r.unit : ""}`}</td>}
                     <td>{r.manufacturer}</td>
                     <td>{r.part}</td>
                     <td>{r.description}</td>
@@ -223,7 +224,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           <ResolvedPackageDocView resolved={m.document} productExtra={extra} />
         </section>
       ) : (
-        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} />)
+        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} showQty={m.showQty !== false} />)
       )}
       <section className="pkg-card">
         {m.totals.creditLabel && m.totals.creditAmount && (
